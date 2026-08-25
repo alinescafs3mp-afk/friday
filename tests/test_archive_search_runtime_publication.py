@@ -11,6 +11,7 @@ import unicodedata
 from collections.abc import Callable
 from dataclasses import replace
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any, cast
 
 import httpx
@@ -52,12 +53,15 @@ from friday.interaction_control_plane.legacy_trace import CapabilityStatus
 from friday.interaction_control_plane.work_item_contract import WorkState, WorkTransition
 from friday.interaction_control_plane.work_item_store import WorkItemConflictError
 from friday.knowledge_graph import KnowledgeGraph
+from friday.model_profiles import ModelProfileLease, ModelRequirements
 from friday.orchestration.archive_recall_outcome import (
     ARCHIVE_EVIDENCE_REPLAY_UNAVAILABLE,
     ArchiveRecallLane,
     ArchiveRecallStatus,
     load_accepted_archive_recall_outcome_receipt,
 )
+from friday.orchestration.router import OrchestrationRouter
+from friday.pending_durable_turn import PendingDurableTurnAdmission
 from friday.permissions import ActorContext, AuthorizationService
 from friday.retrieval.archive_search_authority import (
     ArchiveSearchAuthorityError,
@@ -169,6 +173,18 @@ class _ArchiveModel:
             "tool_calls": None,
             "finish_reason": "stop",
         }
+
+
+class _NeverPlanner:
+    def __init__(self) -> None:
+        self.calls = 0
+
+    async def plan(self, *_args: Any, **_kwargs: Any) -> Any:
+        self.calls += 1
+        raise AssertionError("durable archive continuation reached the planner")
+
+    async def plan_attested(self, *_args: Any, **_kwargs: Any) -> Any:
+        return await self.plan(*_args, **_kwargs)
 
 
 class _SpyKernel(ExecutionKernel):
@@ -297,6 +313,106 @@ class _DirectAnswerModel:
             "tool_calls": None,
             "finish_reason": "stop",
         }
+
+
+class _SelectedArchiveExplanationModel:
+    """Exact fake for the attested two-pass selected-evidence continuation."""
+
+    def __init__(
+        self,
+        *,
+        answer: str = "В выбранном фрагменте указано контрольное значение [A1.1].",
+        verifier_supported: bool = True,
+        after_verifier: Callable[[], None] | None = None,
+        lease_valid_checks: int | None = None,
+        final_lease_error: str | None = None,
+    ) -> None:
+        self.answer = answer
+        self.verifier_supported = verifier_supported
+        self.after_verifier = after_verifier
+        self.lease_valid_checks = lease_valid_checks
+        self.final_lease_error = final_lease_error
+        self.lease_checks = 0
+        self.calls: list[list[dict[str, Any]]] = []
+        self.lease: ModelProfileLease | None = None
+        self.citation_labels: tuple[str, ...] = ()
+        self.evidence_fragments: tuple[dict[str, str], ...] = ()
+
+    async def acquire_lease(
+        self,
+        requirements: ModelRequirements,
+        *,
+        absolute_deadline: float,
+    ) -> ModelProfileLease | None:
+        assert absolute_deadline > 0
+        self.lease = ModelProfileLease(
+            profile_id="selected-archive-explanation-test:dispatcher",
+            attestation_sha256="a" * 64,
+            requirements_sha256=requirements.canonical_sha256(),
+            capabilities=requirements.capabilities,
+            required_context_tokens=requirements.required_context_tokens,
+            prepared_evidence_items=requirements.prepared_evidence_items,
+            max_tool_steps=requirements.max_tool_steps,
+            effect=requirements.effect,
+            verifier_required=requirements.verifier_required,
+            process_epoch_sha256="b" * 64,
+            _gate_authority=self,
+            _gate_generation=1,
+        )
+        return self.lease
+
+    async def lease_is_current(
+        self,
+        lease: object,
+        requirements: ModelRequirements,
+        *,
+        absolute_deadline: float,
+    ) -> bool:
+        self.lease_checks += 1
+        if self.lease_checks == 2 and self.final_lease_error == "timeout":
+            raise TimeoutError("test final lease timeout")
+        if self.lease_checks == 2 and self.final_lease_error == "provider":
+            raise RuntimeError("test final lease provider failure")
+        return bool(
+            absolute_deadline > 0
+            and lease is self.lease
+            and self.lease is not None
+            and self.lease.requirements_sha256 == requirements.canonical_sha256()
+            and (self.lease_valid_checks is None or self.lease_checks <= self.lease_valid_checks)
+        )
+
+    async def complete(
+        self,
+        lease: object,
+        requirements: ModelRequirements,
+        messages: list[dict[str, Any]],
+        **_kwargs: Any,
+    ) -> dict[str, Any]:
+        assert lease is self.lease
+        assert self.lease is not None
+        assert self.lease.requirements_sha256 == requirements.canonical_sha256()
+        self.calls.append(messages)
+        if len(self.calls) == 1:
+            synthesis = json.loads(str(messages[-1]["content"]))
+            fragments = synthesis["evidence"]["fragments"]
+            assert isinstance(fragments, list)
+            self.evidence_fragments = tuple(dict(item) for item in fragments)
+            self.citation_labels = tuple(str(item["label"]) for item in fragments)
+            assert self.citation_labels == tuple(f"A1.{index}" for index in range(1, len(fragments) + 1))
+            content = self.answer
+        else:
+            assert self.citation_labels
+            content = json.dumps(
+                {
+                    "schema": "friday.v12-file-verifier.v1",
+                    "supported": self.verifier_supported,
+                    "citation_labels": list(self.citation_labels),
+                    "unsupported_claims": 0 if self.verifier_supported else 1,
+                }
+            )
+            if self.after_verifier is not None:
+                self.after_verifier()
+        return {"content": content, "tool_calls": None, "finish_reason": "stop"}
 
 
 class _WebThenArchiveModel:
@@ -2704,6 +2820,731 @@ async def test_selected_canonical_archive_evidence_replays_exactly_after_runtime
     assert advanced.transition is WorkTransition.EVIDENCE_REPLAYED
     assert advanced.revision == created.revision + 1
     assert advanced.anchor_assistant_message_id == replay["message_id"]
+
+
+@pytest.mark.asyncio
+async def test_selected_archive_explain_uses_attested_two_pass_model_and_atomic_receipt(
+    settings: Any,
+    storage: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _raw_id, initial, created = await _create_durable_selected_archive_work(
+        settings,
+        storage,
+        monkeypatch,
+        suffix="-v12-explain",
+    )
+    explanation_model = _SelectedArchiveExplanationModel()
+    ordinary_model = _DirectAnswerModel()
+    runtime, kernel, actor, _model, web, _contexts = await _runtime(
+        settings,
+        storage,
+        monkeypatch,
+        model_override=ordinary_model,
+    )
+    runtime.settings = replace(
+        runtime.settings,
+        router_mode="v12",
+        router_canary_routes=("archive_read",),
+    )
+    runtime._selected_archive_model = explanation_model
+    admission = runtime.pending_durable_turn_admission(
+        _OWNER,
+        "Что в нём сказано?",
+        actor=actor,
+        conversation_id=str(initial["conversation_id"]),
+    )
+    assert isinstance(admission, PendingDurableTurnAdmission)
+    assert admission.work_item_id == created.id
+    assert admission.revision == created.revision
+    planner = _NeverPlanner()
+    orchestrated = OrchestrationRouter(
+        runtime,
+        planner,
+        mode="v12",
+        allowed_routes=("archive_read",),
+    )
+    try:
+        response = await orchestrated.chat(
+            _OWNER,
+            "Что в нём сказано?",
+            actor=actor,
+            conversation_id=str(initial["conversation_id"]),
+            enable_tools=True,
+            answer_with_voice=False,
+        )
+    finally:
+        await web.close()
+
+    assert response["message"].endswith(explanation_model.answer)
+    assert "Охват исходного поиска был частичным" in response["message"]
+    assert response["citations"] == [{"label": "A1.1"}]
+    assert response["context"]["selected_archive_evidence_explanation"] in {
+        "complete",
+        "partial",
+    }
+    assert len(explanation_model.calls) == 2
+    assert _QUERY in json.dumps(explanation_model.calls[0], ensure_ascii=False)
+    assert ordinary_model.calls == 0
+    assert planner.calls == 0
+    assert orchestrated.observations[-1].status == "durable_turn_owned"
+    assert kernel.calls == []
+
+    stored = storage.get_message(str(response["message_id"]), _OWNER)
+    assert stored is not None
+    receipt = load_accepted_archive_recall_outcome_receipt(stored["metadata_json"])
+    assert receipt.outcome.lane is ArchiveRecallLane.SELECTED_EVIDENCE_EXPLANATION
+    assert receipt.outcome.semantic_verified is True
+    assert receipt.outcome.used_citation_labels == ("A1.1",)
+    metadata = json.loads(str(stored["metadata_json"]))
+    assert metadata["interaction_trace"]["budget"]["model_calls"] == 2
+    assert metadata["structural"]["model_spoke"] is True
+    with storage.transaction() as conn:
+        advanced = get_recall_selected_archive_evidence_work_item_in_transaction(
+            conn,
+            work_item_id=created.id,
+            user_id=_OWNER,
+            conversation_id=created.conversation_id,
+        )
+    assert advanced is not None
+    assert advanced.revision == created.revision + 1
+    assert advanced.accepted_outcome_sha256 == receipt.outcome_sha256
+
+
+@pytest.mark.asyncio
+async def test_selected_archive_explain_preserves_two_passage_identities_and_nested_citations(
+    settings: Any,
+    storage: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    first_text = f"Первый выбранный фрагмент {_QUERY}: MULTI-FIRST-7421."
+    second_text = f"Второй выбранный фрагмент {_QUERY}: MULTI-SECOND-7421."
+    source_conversation_id, _selected_text = _seed_message_archive(
+        storage,
+        suffix="-v12-explain-multiple-passages",
+        compact=True,
+        selected_text=first_text,
+    )
+    storage.store_message(
+        source_conversation_id,
+        _OWNER,
+        "assistant",
+        second_text,
+    )
+    search_model = _ArchiveModel(
+        first_arguments={"query": _QUERY, "corpora": ["messages"], "limit": 5},
+        final_answer=("Первый выбранный факт подтверждён [A1.1]. Второй выбранный факт подтверждён [A1.2]."),
+    )
+    initial_runtime, initial_kernel, actor, _model, initial_web, _contexts = await _runtime(
+        settings,
+        storage,
+        monkeypatch,
+        model_override=search_model,
+    )
+    try:
+        initial = await _chat(
+            initial_runtime,
+            actor,
+            answer_with_voice=False,
+            message="Найди оба контрольных сообщения в моём личном архиве.",
+        )
+    finally:
+        await initial_web.close()
+
+    assert [name for name, _arguments in initial_kernel.calls] == ["archive_search"]
+    assert initial_kernel.calls[0][1]["corpora"] == ["messages"]
+    row = storage.execute(
+        """SELECT id FROM work_items
+             WHERE user_id=? AND conversation_id=?
+               AND kind='recall_selected_archive_evidence'""",
+        (_OWNER, str(initial["conversation_id"])),
+    ).fetchone()
+    assert row is not None
+    with storage.transaction() as conn:
+        created = get_recall_selected_archive_evidence_work_item_in_transaction(
+            conn,
+            work_item_id=str(row["id"]),
+            user_id=_OWNER,
+            conversation_id=str(initial["conversation_id"]),
+        )
+    assert created is not None
+    assert created.selected_evidence.corpus.value == "messages"
+    assert created.selected_evidence.source_ref.canonical_object_id == source_conversation_id
+    selected_identities = tuple(
+        passage.to_private_json() for passage in created.selected_evidence.passage_refs
+    )
+    assert len(selected_identities) == 2
+    assert selected_identities == tuple(sorted(set(selected_identities)))
+
+    explanation_model = _SelectedArchiveExplanationModel(
+        answer=(
+            "Первый выбранный фрагмент содержит MULTI-FIRST-7421 [A1.1]. "
+            "Второй содержит MULTI-SECOND-7421 [A1.2]."
+        )
+    )
+    ordinary_model = _DirectAnswerModel()
+    runtime, kernel, continuation_actor, _model, web, _contexts = await _runtime(
+        settings,
+        storage,
+        monkeypatch,
+        model_override=ordinary_model,
+    )
+    runtime.settings = replace(
+        runtime.settings,
+        router_mode="v12",
+        router_canary_routes=("archive_read",),
+    )
+    runtime._selected_archive_model = explanation_model
+    try:
+        response = await runtime.chat(
+            _OWNER,
+            "Что в нём сказано?",
+            actor=continuation_actor,
+            conversation_id=str(initial["conversation_id"]),
+            enable_tools=True,
+            answer_with_voice=False,
+        )
+    finally:
+        await web.close()
+
+    assert response["citations"] == [{"label": "A1.1"}, {"label": "A1.2"}]
+    assert response["message"].endswith(explanation_model.answer)
+    assert explanation_model.citation_labels == ("A1.1", "A1.2")
+    assert tuple(item["label"] for item in explanation_model.evidence_fragments) == (
+        "A1.1",
+        "A1.2",
+    )
+    projected_text = "\n".join(item["text"] for item in explanation_model.evidence_fragments)
+    assert "MULTI-FIRST-7421" in projected_text
+    assert "MULTI-SECOND-7421" in projected_text
+    assert len(explanation_model.calls) == 2
+    assert ordinary_model.calls == 0
+    assert kernel.calls == []
+
+    stored = storage.get_message(str(response["message_id"]), _OWNER)
+    assert stored is not None
+    receipt = load_accepted_archive_recall_outcome_receipt(stored["metadata_json"])
+    assert receipt.outcome.lane is ArchiveRecallLane.SELECTED_EVIDENCE_EXPLANATION
+    assert receipt.outcome.used_citation_labels == ("A1.1", "A1.2")
+    accepted_selection = receipt.outcome.selected_evidence
+    assert accepted_selection is not None
+    assert accepted_selection.corpus.value == created.selected_evidence.corpus.value
+    assert accepted_selection.source_ref == created.selected_evidence.source_ref
+    assert accepted_selection.resolved_snapshot_sha256 == created.selected_evidence.source_snapshot_sha256
+    assert (
+        tuple(passage.to_private_json() for passage in accepted_selection.passage_refs) == selected_identities
+    )
+    with storage.transaction() as conn:
+        advanced = get_recall_selected_archive_evidence_work_item_in_transaction(
+            conn,
+            work_item_id=created.id,
+            user_id=_OWNER,
+            conversation_id=created.conversation_id,
+        )
+    assert advanced is not None
+    assert advanced.selected_evidence == created.selected_evidence
+    assert advanced.accepted_outcome_sha256 == receipt.outcome_sha256
+
+
+@pytest.mark.asyncio
+async def test_selected_archive_explain_verifier_failure_falls_back_to_exact_replay(
+    settings: Any,
+    storage: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    raw_id, initial, created = await _create_durable_selected_archive_work(
+        settings,
+        storage,
+        monkeypatch,
+        suffix="-v12-explain-fallback",
+    )
+    explanation_model = _SelectedArchiveExplanationModel(verifier_supported=False)
+    ordinary_model = _DirectAnswerModel()
+    runtime, kernel, actor, _model, web, _contexts = await _runtime(
+        settings,
+        storage,
+        monkeypatch,
+        model_override=ordinary_model,
+    )
+    runtime.settings = replace(
+        runtime.settings,
+        router_mode="v12",
+        router_canary_routes=("archive_read",),
+    )
+    runtime._selected_archive_model = explanation_model
+    try:
+        response = await runtime.chat(
+            _OWNER,
+            "Что в нём сказано?",
+            actor=actor,
+            conversation_id=str(initial["conversation_id"]),
+            enable_tools=True,
+            answer_with_voice=False,
+        )
+    finally:
+        await web.close()
+
+    body_row = storage.execute(
+        "SELECT raw_content FROM raw_objects WHERE id=? AND user_id=?",
+        (raw_id, _OWNER),
+    ).fetchone()
+    assert body_row is not None
+    locator = created.selected_evidence.passage_refs[0].locator
+    expected_passage = str(body_row["raw_content"])[locator.start_char : locator.end_char]  # type: ignore[union-attr]
+    assert response["message"].startswith("Не удалось сформировать проверенное объяснение")
+    assert expected_passage in response["message"]
+    assert response["context"]["selected_archive_evidence_explanation"] == "fallback_exact_replay"
+    assert response["context"]["llm_failed"] is True
+    assert len(explanation_model.calls) == 2
+    assert ordinary_model.calls == 0
+    assert kernel.calls == []
+    stored = storage.get_message(str(response["message_id"]), _OWNER)
+    assert stored is not None
+    receipt = load_accepted_archive_recall_outcome_receipt(stored["metadata_json"])
+    assert receipt.outcome.lane is ArchiveRecallLane.SELECTED_EVIDENCE_REPLAY
+    metadata = json.loads(str(stored["metadata_json"]))
+    trace = metadata["interaction_trace"]
+    assert trace["failure_stage"] == "completion"
+    assert trace["failure_reason"] == "verification_rejected"
+    assert trace["budget"]["model_calls"] == 2
+    assert trace["completion"] == "partial"
+    assert trace["partial_coverage"] is True
+    assert {step["capability"]: step["outcome"] for step in trace["steps"]} == {
+        "document_retrieval": "partial",
+        "model_synthesis": "succeeded",
+        "verification": "failed",
+    }
+
+
+@pytest.mark.asyncio
+async def test_selected_archive_explain_lease_drift_falls_back_before_publication(
+    settings: Any,
+    storage: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _raw_id, initial, _created = await _create_durable_selected_archive_work(
+        settings,
+        storage,
+        monkeypatch,
+        suffix="-v12-explain-lease-drift",
+    )
+    explanation_model = _SelectedArchiveExplanationModel(lease_valid_checks=1)
+    ordinary_model = _DirectAnswerModel()
+    runtime, kernel, actor, _model, web, _contexts = await _runtime(
+        settings,
+        storage,
+        monkeypatch,
+        model_override=ordinary_model,
+    )
+    runtime.settings = replace(
+        runtime.settings,
+        router_mode="v12",
+        router_canary_routes=("archive_read",),
+    )
+    runtime._selected_archive_model = explanation_model
+    try:
+        response = await runtime.chat(
+            _OWNER,
+            "Что в нём сказано?",
+            actor=actor,
+            conversation_id=str(initial["conversation_id"]),
+            enable_tools=True,
+            answer_with_voice=False,
+        )
+    finally:
+        await web.close()
+
+    assert len(explanation_model.calls) == 2
+    assert explanation_model.lease_checks == 2
+    assert response["message"].startswith("Не удалось сформировать проверенное объяснение")
+    assert response["context"]["selected_archive_evidence_explanation"] == "fallback_exact_replay"
+    assert ordinary_model.calls == 0
+    assert kernel.calls == []
+    stored = storage.get_message(str(response["message_id"]), _OWNER)
+    assert stored is not None
+    receipt = load_accepted_archive_recall_outcome_receipt(stored["metadata_json"])
+    assert receipt.outcome.lane is ArchiveRecallLane.SELECTED_EVIDENCE_REPLAY
+    metadata = json.loads(str(stored["metadata_json"]))
+    trace = metadata["interaction_trace"]
+    assert trace["failure_stage"] == "state_loss"
+    assert trace["failure_reason"] == "stale_state"
+    assert trace["budget"]["model_calls"] == 2
+    assert trace["completion"] == "partial"
+    assert trace["partial_coverage"] is True
+    assert {step["capability"]: step["outcome"] for step in trace["steps"]} == {
+        "document_retrieval": "partial",
+        "model_synthesis": "succeeded",
+        "verification": "succeeded",
+    }
+
+
+@pytest.mark.asyncio
+async def test_selected_archive_explain_without_attested_model_falls_back_honestly(
+    settings: Any,
+    storage: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _raw_id, initial, _created = await _create_durable_selected_archive_work(
+        settings,
+        storage,
+        monkeypatch,
+        suffix="-v12-explain-no-model",
+    )
+    ordinary_model = _DirectAnswerModel()
+    runtime, kernel, actor, _model, web, _contexts = await _runtime(
+        settings,
+        storage,
+        monkeypatch,
+        model_override=ordinary_model,
+    )
+    runtime.settings = replace(
+        runtime.settings,
+        router_mode="v12",
+        router_canary_routes=("archive_read",),
+    )
+    assert runtime._selected_archive_model is None
+    try:
+        response = await runtime.chat(
+            _OWNER,
+            "Что в нём сказано?",
+            actor=actor,
+            conversation_id=str(initial["conversation_id"]),
+            enable_tools=True,
+            answer_with_voice=False,
+        )
+    finally:
+        await web.close()
+
+    assert response["message"].startswith("Не удалось сформировать проверенное объяснение")
+    assert response["context"]["selected_archive_evidence_explanation"] == "fallback_exact_replay"
+    assert response["context"]["llm_failed"] is True
+    assert ordinary_model.calls == 0
+    assert kernel.calls == []
+    stored = storage.get_message(str(response["message_id"]), _OWNER)
+    assert stored is not None
+    metadata = json.loads(str(stored["metadata_json"]))
+    trace = metadata["interaction_trace"]
+    assert trace["failure_stage"] == "synthesis_contradiction"
+    assert trace["failure_reason"] == "provider_failure"
+    assert trace["budget"]["model_calls"] == 0
+    assert trace["completion"] == "partial"
+    assert trace["partial_coverage"] is True
+    assert {step["capability"]: step["outcome"] for step in trace["steps"]} == {
+        "document_retrieval": "partial",
+        "model_synthesis": "unavailable",
+        "verification": "not_started",
+    }
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("final_lease_error", "expected_reason"),
+    [("timeout", "timeout"), ("provider", "provider_failure")],
+)
+async def test_selected_archive_explain_final_lease_failure_is_not_reported_as_drift(
+    settings: Any,
+    storage: Any,
+    monkeypatch: pytest.MonkeyPatch,
+    final_lease_error: str,
+    expected_reason: str,
+) -> None:
+    _raw_id, initial, _created = await _create_durable_selected_archive_work(
+        settings,
+        storage,
+        monkeypatch,
+        suffix=f"-v12-explain-final-lease-{final_lease_error}",
+    )
+    explanation_model = _SelectedArchiveExplanationModel(final_lease_error=final_lease_error)
+    runtime, kernel, actor, ordinary_model, web, _contexts = await _runtime(
+        settings,
+        storage,
+        monkeypatch,
+        model_override=_DirectAnswerModel(),
+    )
+    runtime.settings = replace(
+        runtime.settings,
+        router_mode="v12",
+        router_canary_routes=("archive_read",),
+    )
+    runtime._selected_archive_model = explanation_model
+    try:
+        response = await runtime.chat(
+            _OWNER,
+            "Что в нём сказано?",
+            actor=actor,
+            conversation_id=str(initial["conversation_id"]),
+            enable_tools=True,
+            answer_with_voice=False,
+        )
+    finally:
+        await web.close()
+
+    assert len(explanation_model.calls) == 2
+    assert explanation_model.lease_checks == 2
+    assert response["context"]["selected_archive_evidence_explanation"] == "fallback_exact_replay"
+    assert ordinary_model.calls == 0
+    assert kernel.calls == []
+    stored = storage.get_message(str(response["message_id"]), _OWNER)
+    assert stored is not None
+    metadata = json.loads(str(stored["metadata_json"]))
+    trace = metadata["interaction_trace"]
+    assert trace["failure_stage"] == "state_loss"
+    assert trace["failure_reason"] == expected_reason
+    assert trace["budget"]["model_calls"] == 2
+    assert {step["capability"]: step["outcome"] for step in trace["steps"]} == {
+        "document_retrieval": "partial",
+        "model_synthesis": "succeeded",
+        "verification": "succeeded",
+    }
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("lane", ["replay", "explanation"])
+async def test_selected_archive_deadline_immediately_before_commit_rolls_back_publication(
+    settings: Any,
+    storage: Any,
+    monkeypatch: pytest.MonkeyPatch,
+    lane: str,
+) -> None:
+    _raw_id, initial, created = await _create_durable_selected_archive_work(
+        settings,
+        storage,
+        monkeypatch,
+        suffix=f"-deadline-before-{lane}-commit",
+    )
+    explanation_model = _SelectedArchiveExplanationModel()
+    ordinary_model = _DirectAnswerModel()
+    runtime, kernel, actor, _model, web, _contexts = await _runtime(
+        settings,
+        storage,
+        monkeypatch,
+        model_override=ordinary_model,
+    )
+    runtime.settings = replace(
+        runtime.settings,
+        router_mode="v12",
+        router_canary_routes=("archive_read",),
+    )
+    runtime._selected_archive_model = explanation_model
+    conversation_id = str(initial["conversation_id"])
+    boundary_message_id = ""
+    if lane == "replay":
+        boundary = storage.store_message(
+            conversation_id,
+            _OWNER,
+            "user",
+            "Покажи фрагмент.",
+            metadata={"private_context_lineage": True},
+        )
+        boundary_message_id = str(boundary["id"])
+
+    def assistant_ids() -> tuple[str, ...]:
+        return tuple(
+            str(item["id"])
+            for item in storage.get_conversation_messages(conversation_id, user_id=_OWNER)
+            if item["role"] == "assistant"
+        )
+
+    assistants_before = assistant_ids()
+    base = agent_runtime_module.time.monotonic()
+    deadline = base + 30.0
+    clock = {"now": base}
+    original_store = agent_runtime_module.store_message_in_transaction
+
+    def expire_after_assistant_store(
+        conn: Any,
+        stored_conversation_id: str,
+        user_id: str,
+        role: str,
+        content: str,
+        metadata: dict[str, Any] | None = None,
+        reply_to: str | None = None,
+    ) -> dict[str, Any]:
+        stored = original_store(
+            conn,
+            stored_conversation_id,
+            user_id,
+            role,
+            content,
+            metadata=metadata,
+            reply_to=reply_to,
+        )
+        if role == "assistant":
+            clock["now"] = deadline
+        return stored
+
+    monkeypatch.setattr(
+        agent_runtime_module,
+        "time",
+        SimpleNamespace(monotonic=lambda: clock["now"]),
+    )
+    monkeypatch.setattr(
+        agent_runtime_module,
+        "store_message_in_transaction",
+        expire_after_assistant_store,
+    )
+    try:
+        with pytest.raises(TimeoutError, match=rf"archive {lane} deadline expired before commit"):
+            if lane == "explanation":
+                await runtime.chat(
+                    _OWNER,
+                    "Что в нём сказано?",
+                    actor=actor,
+                    conversation_id=conversation_id,
+                    enable_tools=True,
+                    answer_with_voice=False,
+                    turn_deadline=deadline,
+                )
+            else:
+                runtime._selected_archive_evidence_replay_response(  # noqa: SLF001
+                    actor=actor,
+                    conversation_id=conversation_id,
+                    person_id=_OWNER,
+                    request="Покажи фрагмент.",
+                    boundary_message_id=boundary_message_id,
+                    admitted_work_item=created,
+                    turn_started=base,
+                    publication_deadline=deadline,
+                )
+    finally:
+        await web.close()
+
+    assert assistant_ids() == assistants_before
+    assert len(explanation_model.calls) == (2 if lane == "explanation" else 0)
+    assert ordinary_model.calls == 0
+    assert kernel.calls == []
+    with storage.transaction() as conn:
+        unchanged = get_recall_selected_archive_evidence_work_item_in_transaction(
+            conn,
+            work_item_id=created.id,
+            user_id=_OWNER,
+            conversation_id=created.conversation_id,
+        )
+    assert unchanged is not None
+    assert unchanged.revision == created.revision
+    assert unchanged.anchor_user_message_id == created.anchor_user_message_id
+    assert unchanged.anchor_assistant_message_id == created.anchor_assistant_message_id
+    assert unchanged.accepted_plan_sha256 == created.accepted_plan_sha256
+    assert unchanged.accepted_outcome_sha256 == created.accepted_outcome_sha256
+    assert unchanged.selected_evidence == created.selected_evidence
+
+
+@pytest.mark.asyncio
+async def test_selected_archive_show_passages_never_invokes_explanation_model(
+    settings: Any,
+    storage: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _raw_id, initial, _created = await _create_durable_selected_archive_work(
+        settings,
+        storage,
+        monkeypatch,
+        suffix="-show-passages-no-model",
+    )
+    explanation_model = _SelectedArchiveExplanationModel()
+    ordinary_model = _DirectAnswerModel()
+    runtime, kernel, actor, _model, web, _contexts = await _runtime(
+        settings,
+        storage,
+        monkeypatch,
+        model_override=ordinary_model,
+    )
+    runtime.settings = replace(
+        runtime.settings,
+        router_mode="v12",
+        router_canary_routes=("archive_read",),
+    )
+    runtime._selected_archive_model = explanation_model
+    try:
+        response = await runtime.chat(
+            _OWNER,
+            "Покажи фрагмент.",
+            actor=actor,
+            conversation_id=str(initial["conversation_id"]),
+            enable_tools=True,
+            answer_with_voice=False,
+        )
+    finally:
+        await web.close()
+
+    assert explanation_model.calls == []
+    assert ordinary_model.calls == 0
+    assert kernel.calls == []
+    assert response["context"]["selected_archive_evidence_explanation"] == "not_requested"
+    stored = storage.get_message(str(response["message_id"]), _OWNER)
+    assert stored is not None
+    receipt = load_accepted_archive_recall_outcome_receipt(stored["metadata_json"])
+    assert receipt.outcome.lane is ArchiveRecallLane.SELECTED_EVIDENCE_REPLAY
+
+
+@pytest.mark.asyncio
+async def test_selected_archive_explain_rechecks_source_after_model_before_publication(
+    settings: Any,
+    storage: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    raw_id, initial, created = await _create_durable_selected_archive_work(
+        settings,
+        storage,
+        monkeypatch,
+        suffix="-v12-explain-late-drift",
+    )
+
+    def mutate_after_verifier() -> None:
+        storage.execute(
+            "UPDATE raw_objects SET raw_content=? WHERE id=? AND user_id=?",
+            ("Поздно изменённое содержимое.", raw_id, _OWNER),
+        )
+        storage.conn.commit()
+
+    explanation_model = _SelectedArchiveExplanationModel(after_verifier=mutate_after_verifier)
+    ordinary_model = _DirectAnswerModel()
+    runtime, kernel, actor, _model, web, _contexts = await _runtime(
+        settings,
+        storage,
+        monkeypatch,
+        model_override=ordinary_model,
+    )
+    runtime.settings = replace(
+        runtime.settings,
+        router_mode="v12",
+        router_canary_routes=("archive_read",),
+    )
+    runtime._selected_archive_model = explanation_model
+    try:
+        response = await runtime.chat(
+            _OWNER,
+            "Что в нём сказано?",
+            actor=actor,
+            conversation_id=str(initial["conversation_id"]),
+            enable_tools=True,
+            answer_with_voice=False,
+        )
+    finally:
+        await web.close()
+
+    assert len(explanation_model.calls) == 2
+    assert ordinary_model.calls == 0
+    assert kernel.calls == []
+    assert response["context"]["selected_archive_evidence_replay"] == "drifted"
+    assert response["context"]["selected_archive_evidence_explanation"] == "not_published"
+    serialized = json.dumps(response, ensure_ascii=False)
+    assert _QUERY not in serialized
+    assert "Поздно изменённое" not in serialized
+    stored = storage.get_message(str(response["message_id"]), _OWNER)
+    assert stored is not None
+    receipt = load_accepted_archive_recall_outcome_receipt(stored["metadata_json"])
+    assert receipt.outcome.lane is ArchiveRecallLane.SELECTED_EVIDENCE_REPLAY
+    assert receipt.outcome.status is ArchiveRecallStatus.DRIFTED
+    with storage.transaction() as conn:
+        suspended = get_recall_selected_archive_evidence_work_item_in_transaction(
+            conn,
+            work_item_id=created.id,
+            user_id=_OWNER,
+            conversation_id=created.conversation_id,
+        )
+    assert suspended is not None
+    assert suspended.state is WorkState.SUSPENDED
 
 
 @pytest.mark.asyncio

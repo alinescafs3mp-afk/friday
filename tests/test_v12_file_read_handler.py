@@ -42,7 +42,12 @@ from friday.orchestration.capability_outcome import (
     attach_accepted_capability_outcome_receipt,
     load_accepted_capability_outcome_receipt,
 )
-from friday.orchestration.file_read import V12FileReadError, V12FileReadHandler
+from friday.orchestration.file_read import (
+    V12FileReadError,
+    V12FileReadHandler,
+    _call_model_once,
+    _file_requirements,
+)
 from friday.permissions import ActorContext, AuthorizationService
 from friday.source_identity import raw_source_identity_sha256
 from friday.storage.models import RawObject, new_id
@@ -302,6 +307,82 @@ def _handler(storage: Any, settings: Any, model: _Model) -> V12FileReadHandler:
         settings=settings,
         model=model,
     )
+
+
+async def _leased_model_call(model: _Model) -> tuple[ModelRequirements, ModelProfileLease]:
+    requirements = _file_requirements(1)
+    lease = await model.acquire_lease(
+        requirements,
+        absolute_deadline=time.monotonic() + 10,
+    )
+    assert type(lease) is ModelProfileLease
+    return requirements, lease
+
+
+@pytest.mark.asyncio
+async def test_call_model_once_does_not_signal_dispatch_for_pre_dispatch_rejection() -> None:
+    model = _Model("unused")
+    requirements, lease = await _leased_model_call(model)
+    dispatches: list[str] = []
+
+    with pytest.raises(V12FileReadError, match="context tier"):
+        await _call_model_once(
+            model,
+            lease,
+            requirements,
+            [{"role": "user", "content": "x" * 6_000}],
+            max_tokens=16,
+            deadline=time.monotonic() + 10,
+            priority="foreground",
+            on_dispatch=lambda: dispatches.append("dispatch"),
+        )
+
+    assert dispatches == []
+    assert model.calls == []
+
+
+@pytest.mark.asyncio
+async def test_call_model_once_does_not_signal_dispatch_without_model_budget() -> None:
+    model = _Model("unused")
+    requirements, lease = await _leased_model_call(model)
+    dispatches: list[str] = []
+
+    with pytest.raises(TimeoutError, match="no model budget"):
+        await _call_model_once(
+            model,
+            lease,
+            requirements,
+            [{"role": "user", "content": "safe"}],
+            max_tokens=16,
+            deadline=time.monotonic(),
+            priority="foreground",
+            on_dispatch=lambda: dispatches.append("dispatch"),
+        )
+
+    assert dispatches == []
+    assert model.calls == []
+
+
+@pytest.mark.asyncio
+async def test_call_model_once_signals_dispatch_exactly_once() -> None:
+    model = _Model("accepted")
+    requirements, lease = await _leased_model_call(model)
+    dispatches: list[str] = []
+
+    response = await _call_model_once(
+        model,
+        lease,
+        requirements,
+        [{"role": "user", "content": "safe"}],
+        max_tokens=16,
+        deadline=time.monotonic() + 10,
+        priority="foreground",
+        on_dispatch=lambda: dispatches.append("dispatch"),
+    )
+
+    assert response["content"] == "accepted"
+    assert dispatches == ["dispatch"]
+    assert len(model.calls) == 1
 
 
 @pytest.mark.asyncio

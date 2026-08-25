@@ -8,6 +8,7 @@ import logging
 import math
 import re
 import time
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any, Literal, Protocol
 
@@ -185,6 +186,7 @@ async def _call_model_once(
     max_tokens: int,
     deadline: float,
     priority: Literal["foreground", "background"],
+    on_dispatch: Callable[[], None] | None = None,
 ) -> dict[str, Any]:
     if not model_messages_are_secret_free(messages):
         raise V12FileReadError("model payload requires a secret projection")
@@ -193,8 +195,11 @@ async def _call_model_once(
     remaining = deadline - time.monotonic()
     if remaining <= _PUBLICATION_RESERVE_SEC:
         raise TimeoutError("V12 file route has no model budget")
-    response = await asyncio.wait_for(
-        model.complete(
+
+    async def dispatch() -> dict[str, Any]:
+        if on_dispatch is not None:
+            on_dispatch()
+        return await model.complete(
             lease,
             requirements,
             messages,
@@ -202,7 +207,10 @@ async def _call_model_once(
             priority=priority,
             absolute_deadline=deadline - _PUBLICATION_RESERVE_SEC,
             temperature=0.0,
-        ),
+        )
+
+    response = await asyncio.wait_for(
+        dispatch(),
         timeout=max(0.001, remaining - _PUBLICATION_RESERVE_SEC),
     )
     if not isinstance(response, dict):

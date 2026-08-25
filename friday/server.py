@@ -1883,6 +1883,7 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
                 llm,
                 kernel,
                 secondary_brain=secondary_brain,
+                selected_archive_model=attested_v12_runtime,
             )
             available_route_handlers = (
                 {

@@ -48,6 +48,10 @@ def _write_collection(path: Path, nodeids: Sequence[str]) -> None:
     )
 
 
+def _with_release_battery(*nodeids: str) -> tuple[str, ...]:
+    return (*quality_gate.RELEASE_BLOCKING_BATTERY_NODEIDS, *nodeids)
+
+
 def _testcase(nodeid: str, *, outcome: str = "") -> str:
     terminal = f"<{outcome}/>" if outcome else ""
     return (
@@ -202,13 +206,17 @@ def test_pytest_phases_share_one_private_non_live_environment(
             assert source not in environment
             assert environment[alias] == test_assets[source]
         if command.name == "all-tests collection":
-            _write_collection(_collection_argument(command), (non_ui_nodeid, ui_nodeid))
+            _write_collection(
+                _collection_argument(command),
+                _with_release_battery(non_ui_nodeid, ui_nodeid),
+            )
         elif command.name == "non-UI tests":
-            _write_collection(_collection_argument(command), (non_ui_nodeid,))
+            selected = _with_release_battery(non_ui_nodeid)
+            _write_collection(_collection_argument(command), selected)
             report_argument = next(
                 argument for argument in command.argv if argument.startswith("--junitxml=")
             )
-            _write_junit(Path(report_argument.partition("=")[2]), (non_ui_nodeid,))
+            _write_junit(Path(report_argument.partition("=")[2]), selected)
         elif command.name == "UI tests":
             _write_collection(_collection_argument(command), (ui_nodeid,))
             report_argument = next(
@@ -427,7 +435,10 @@ def test_ui_phase_fails_when_junit_reports_a_skip(capsys) -> None:
         if command.name == "quality toolchain":
             return 0
         if command.name == "all-tests collection":
-            _write_collection(_collection_argument(command), (non_ui_nodeid, ui_nodeid))
+            _write_collection(
+                _collection_argument(command),
+                _with_release_battery(non_ui_nodeid, ui_nodeid),
+            )
             return 0
         _write_collection(_collection_argument(command), (ui_nodeid,))
         report_argument = next(argument for argument in command.argv if argument.startswith("--junitxml="))
@@ -453,12 +464,16 @@ def test_non_ui_phase_fails_when_junit_reports_a_skip(capsys) -> None:
         if command.name == "quality toolchain":
             return 0
         if command.name == "all-tests collection":
-            _write_collection(_collection_argument(command), (non_ui_nodeid, ui_nodeid))
+            _write_collection(
+                _collection_argument(command),
+                _with_release_battery(non_ui_nodeid, ui_nodeid),
+            )
             return 0
-        _write_collection(_collection_argument(command), (non_ui_nodeid,))
+        selected = _with_release_battery(non_ui_nodeid)
+        _write_collection(_collection_argument(command), selected)
         report_argument = next(argument for argument in command.argv if argument.startswith("--junitxml="))
         report = Path(report_argument.partition("=")[2])
-        _write_junit(report, (non_ui_nodeid,), skipped=1)
+        _write_junit(report, selected, skipped=1)
         return 0
 
     result = quality_gate.execute(
@@ -809,6 +824,43 @@ def test_all_collection_partitions_disjointly_and_completely() -> None:
     assert quality_gate.partition_collection((non_ui, ui)) == ((non_ui,), (ui,))
 
 
+def test_release_blocking_battery_requires_every_closed_nodeid_exactly_once() -> None:
+    required = quality_gate.RELEASE_BLOCKING_BATTERY_NODEIDS
+
+    assert required
+    assert len(required) == len(set(required))
+    assert all(nodeid.startswith("tests/") and nodeid.count("::") == 1 for nodeid in required)
+    quality_gate.require_release_blocking_battery(required)
+
+    with pytest.raises(ValueError, match="collection is incomplete: missing="):
+        quality_gate.require_release_blocking_battery(required[1:])
+    with pytest.raises(ValueError, match="duplicates="):
+        quality_gate.require_release_blocking_battery((*required, required[0]))
+
+
+def test_missing_release_blocking_battery_node_stops_after_collection(capsys) -> None:
+    missing = quality_gate.RELEASE_BLOCKING_BATTERY_NODEIDS[0]
+    collected = (
+        *quality_gate.RELEASE_BLOCKING_BATTERY_NODEIDS[1:],
+        "tests/test_probe.py::test_probe",
+        "tests/test_admin_ui_activity.py::test_ui_probe",
+    )
+    observed: list[str] = []
+
+    def runner(command: quality_gate.GateCommand) -> int:
+        observed.append(command.name)
+        if command.name == "quality toolchain":
+            return 0
+        if command.name == "all-tests collection":
+            _write_collection(_collection_argument(command), collected)
+            return 0
+        raise AssertionError("tests ran after a mandatory battery node disappeared")
+
+    assert quality_gate.execute(_args(phase=["tests"]), command_runner=runner) == 1
+    assert observed == ["quality toolchain", "all-tests collection"]
+    assert missing in capsys.readouterr().err
+
+
 @pytest.mark.parametrize("workers", [1, 12])
 def test_phase_rejects_a_coherent_substituted_collection(
     workers: int,
@@ -822,11 +874,12 @@ def test_phase_rejects_a_coherent_substituted_collection(
         if command.name == "quality toolchain":
             return 0
         if command.name == "all-tests collection":
-            _write_collection(_collection_argument(command), (expected, ui))
+            _write_collection(_collection_argument(command), _with_release_battery(expected, ui))
             return 0
-        _write_collection(_collection_argument(command), (substituted,))
+        selected = _with_release_battery(substituted)
+        _write_collection(_collection_argument(command), selected)
         report_argument = next(argument for argument in command.argv if argument.startswith("--junitxml="))
-        _write_junit(Path(report_argument.partition("=")[2]), (substituted,))
+        _write_junit(Path(report_argument.partition("=")[2]), selected)
         return 0
 
     assert (
@@ -852,11 +905,15 @@ def test_phase_rejects_junit_substitution_after_exact_collection(
         if command.name == "quality toolchain":
             return 0
         if command.name == "all-tests collection":
-            _write_collection(_collection_argument(command), (expected, ui))
+            _write_collection(_collection_argument(command), _with_release_battery(expected, ui))
             return 0
-        _write_collection(_collection_argument(command), (expected,))
+        selected = _with_release_battery(expected)
+        _write_collection(_collection_argument(command), selected)
         report_argument = next(argument for argument in command.argv if argument.startswith("--junitxml="))
-        _write_junit(Path(report_argument.partition("=")[2]), (substituted,))
+        _write_junit(
+            Path(report_argument.partition("=")[2]),
+            _with_release_battery(substituted),
+        )
         return 0
 
     assert (

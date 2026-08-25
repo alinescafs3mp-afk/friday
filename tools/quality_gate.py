@@ -45,6 +45,40 @@ UI_TEST_MODULES = (
     "tests/test_the_graph_tab_can_be_navigated.py",
 )
 
+# These exact product journeys are a release contract, not merely examples
+# which happen to be collected today.  The canonical gate still runs the whole
+# suite once; this inventory only makes deleting or renaming a required journey
+# terminal after the authoritative collection has completed.
+RELEASE_BLOCKING_BATTERY_NODEIDS = (
+    "tests/test_agent_obsidian_production_composition.py::"
+    "test_note_create_append_and_daily_exact_messages_mutate_the_real_vault",
+    "tests/test_archive_search_runtime_publication.py::"
+    "test_mixed_obsidian_and_archive_request_runs_neither_route",
+    "tests/test_archive_search_runtime_publication.py::"
+    "test_real_router_preserves_two_exact_archive_pages_through_final_answer",
+    "tests/test_archive_search_runtime_publication.py::"
+    "test_selected_archive_explain_lease_drift_falls_back_before_publication",
+    "tests/test_archive_search_runtime_publication.py::"
+    "test_selected_archive_explain_preserves_two_passage_identities_and_nested_citations",
+    "tests/test_archive_search_runtime_publication.py::"
+    "test_selected_archive_explain_rechecks_source_after_model_before_publication",
+    "tests/test_archive_search_runtime_publication.py::"
+    "test_selected_archive_explain_uses_attested_two_pass_model_and_atomic_receipt",
+    "tests/test_archive_search_runtime_publication.py::"
+    "test_selected_archive_explain_verifier_failure_falls_back_to_exact_replay",
+    "tests/test_archive_search_runtime_publication.py::"
+    "test_selected_archive_explain_without_attested_model_falls_back_honestly",
+    "tests/test_archive_search_runtime_publication.py::"
+    "test_selected_archive_show_passages_never_invokes_explanation_model",
+    "tests/test_owner_web_and_file_live_regressions.py::"
+    "test_qnap_product_spec_uses_isolated_web_after_private_history",
+    "tests/test_owner_web_and_file_live_regressions.py::"
+    "test_three_complete_bare_docx_summaries_then_isolated_news_excludes_history",
+    "tests/test_small_talk_costs_nothing.py::test_a_radio_check_is_persisted_without_model_search_or_tools",
+    "tests/test_v12_archive_read_handler.py::"
+    "test_real_router_dispatches_immediate_source_search_ordinal_to_archive_read",
+)
+
 # A shell used to operate Friday commonly exports absolute runtime paths.  A
 # pytest process must not inherit any of them: collection imports happen before
 # per-test fixtures can replace ``FRIDAY_HOME``, and one eager settings import
@@ -968,6 +1002,23 @@ def partition_collection(nodeids: Sequence[str]) -> tuple[tuple[str, ...], tuple
     return non_ui, ui
 
 
+def require_release_blocking_battery(nodeids: Sequence[str]) -> None:
+    """Require every closed product-journey nodeid exactly once."""
+
+    required_counts = Counter(RELEASE_BLOCKING_BATTERY_NODEIDS)
+    duplicate_requirements = sorted(nodeid for nodeid, count in required_counts.items() if count != 1)
+    if duplicate_requirements:
+        raise ValueError(f"release-blocking battery inventory contains duplicates: {duplicate_requirements}")
+
+    observed = Counter(nodeids)
+    missing = sorted(nodeid for nodeid in required_counts if observed[nodeid] == 0)
+    duplicates = sorted(nodeid for nodeid in required_counts if observed[nodeid] > 1)
+    if missing or duplicates:
+        raise ValueError(
+            f"release-blocking battery collection is incomplete: missing={missing}, duplicates={duplicates}"
+        )
+
+
 def selected_phases(requested: Sequence[str] | None) -> tuple[str, ...]:
     if not requested or "all" in requested:
         return PHASES
@@ -1083,6 +1134,7 @@ def execute(
                 try:
                     all_nodeids = collection_nodeids(all_collection_path)
                     expected_non_ui, expected_ui = partition_collection(all_nodeids)
+                    require_release_blocking_battery(expected_non_ui)
                 except ValueError as exc:
                     print(f"FAILED: {exc}", file=sys.stderr)
                     return 1
