@@ -1,11 +1,11 @@
 # Interaction Control Plane implementation status
 
-Status: **SCHEMA-40 DURABLE CANDIDATE RUNTIME DEPLOYED**
+Status: **SCHEMA-41 DOCUMENT CATALOG FOUNDATION DEPLOYED**
 Date: 2026-08-25
 Branch: `main`
-Source/live: Friday `0.207.15` / `8f260ce05bc9ad7384df9780e2383c727b9ab35d`,
-schema 40; previous/schema-capable fallback
-`cce33d5daef12fa4ae239e4b3d891a0a4d907c93`
+Source/live: Friday `0.207.16` / `9a49da4f2c0771d2ddfd1529dd06394a3e6cee19`,
+schema 41; code-identical schema-capable fallback
+`551b27aeb93b9e93f9806d047e922d0b1989cd01`
 
 ## Release checkpoint
 
@@ -21,10 +21,11 @@ schema 40; previous/schema-capable fallback
 - `0.207.8` adds the authorized read-only federated `archive_search` foundation:
   stable source/passage identity, explicit per-corpus coverage, process-private
   carriers and same-transaction reauthorization/publication.
-- The live anchor resolves to `8f260ce`, with schema-40 `cce33d5` as rollback
-  fallback. Backend and bridge are active,
+- The live anchor resolves to `9a49da4`, with code-identical schema-41
+  `551b27a` as rollback fallback. Backend and bridge are active,
   trusted-CA health is `ok`, and
-  schema 40, SQLite integrity, foreign keys and FTS are clean.
+  schema 41, SQLite integrity, foreign keys, FTS and exact body-free catalog
+  coverage are clean.
 - The `912dc1a` schema-39 vertical is now deployed in `0.207.9`: one durable,
   body-free selected archive evidence continuation. Exact restart replay
   performs fresh authority and revision checks without search or model use;
@@ -35,6 +36,10 @@ schema 40; previous/schema-capable fallback
   `0.207.15` activates its audited runtime: exact ordinal replay, restart,
   expiry, cancellation, stop/mode precedence, late denial, source drift,
   replacement and CAS races are closed without a second search or model call.
+- `0.207.16` deploys the exact body-free DocumentCatalog schema and bounded
+  keyset storage APIs. Production migration seeds every live file explicitly
+  `backfill_pending`; worker-driven enrichment and archive consumption are the
+  next package rather than hidden startup/request-path corpus work.
 
 ## P0A implemented
 
@@ -95,11 +100,11 @@ schema 40; previous/schema-capable fallback
 
 ## Current cumulative gate
 
-- The exact live source passed 18,209 non-UI and 31 UI tests; the pinned real
+- The exact live source passed 18,280 non-UI and 31 UI tests; the pinned real
   Syncthing 2.1.3 smoke executed rather than remaining environment-skipped.
 - Schema-38 migration, lifecycle/privacy, revision-CAS, restart, temporal
   continuation, receipt/plan binding and named-inventory compatibility checks
   passed.
-- Ruff, mypy, compile and release diff checks passed. The `0.207.15` wheel
+- Ruff, mypy, compile and release diff checks passed. The `0.207.16` wheel
   reproduced byte-for-byte and immutable activation completed `clear`; Docker and
   companion-plugin work remained outside the primary release checkpoint.

@@ -4,12 +4,13 @@
 - Architecture order:
   `outer_sol/OPTIONAL_SECONDARY_BRAIN_SGLANG_GPT_OSS_20B_ARCHITECT_BRIEF.md`
 - Phase: **provisional public shadow live; physical/profile acceptance pending**
-- Live production: Friday `0.207.15` /
-  `8f260ce05bc9ad7384df9780e2383c727b9ab35d`, tree
-  `b538ac0f07a72ee89a1837b62f318db236f56203f7f7aa91f420b38be1fd4ec0`, wheel
-  `5031ec389c95607555188a85f043641ccae85ecb32fef85e992c33891454c09b`,
-  schema 40; schema-capable fallback `cce33d5daef12fa4ae239e4b3d891a0a4d907c93`
-  / tree `d8b2d67dfe2099c900546e2157d451163fcace1e6befa3195966fb576b8cc5f2`
+- Live production: Friday `0.207.16` /
+  `9a49da4f2c0771d2ddfd1529dd06394a3e6cee19`, tree
+  `9cb3d4e28f4e172cfd08be00ffc73de0c4c06c94ef93009a1c850d7ce2a19e46`, wheel
+  `14b355c7c11c3037b6659f096be7379fd695890a2d41d254f379dfba8b75b1e2`,
+  schema 41; code-identical schema-capable fallback
+  `551b27aeb93b9e93f9806d047e922d0b1989cd01` / tree
+  `8bf0cbf3038a65829c2b5efd923a07b1ce3afc246ad19b8700bbe9bef61003b1`
 - Rollout policy: the primary model remains required and final. The secondary
   is enabled only for non-private discarded `shadow/extract`; it has no tool,
   effect, publication or V12 authority. The accepted registry is empty and

@@ -6,21 +6,26 @@ the current production identity, completed packages, active work and next order.
 
 - Updated: 2026-08-25
 - Branch: `main`
-- Secondary acceptance base: Friday `0.207.15` is live in provisional public
+- Secondary acceptance base: Friday `0.207.16` is live in provisional public
   shadow. The accepted-profile registry remains empty pending physical
   acceptance; private text and `assist` remain closed.
-- Deployed implementation head: `8f260ce05bc9ad7384df9780e2383c727b9ab35d`
-- Live: Friday `0.207.15` / `8f260ce05bc9ad7384df9780e2383c727b9ab35d`;
-  tree `b538ac0f07a72ee89a1837b62f318db236f56203f7f7aa91f420b38be1fd4ec0`;
-  wheel `5031ec389c95607555188a85f043641ccae85ecb32fef85e992c33891454c09b`
-- Immediate predecessor and schema-capable fallback: Friday `0.207.14` /
-  `cce33d5daef12fa4ae239e4b3d891a0a4d907c93`, tree
-  `d8b2d67dfe2099c900546e2157d451163fcace1e6befa3195966fb576b8cc5f2`
-- Database schema: 40
+- Deployed implementation head: `9a49da4f2c0771d2ddfd1529dd06394a3e6cee19`
+- Live: Friday `0.207.16` / `9a49da4f2c0771d2ddfd1529dd06394a3e6cee19`;
+  tree `9cb3d4e28f4e172cfd08be00ffc73de0c4c06c94ef93009a1c850d7ce2a19e46`;
+  wheel `14b355c7c11c3037b6659f096be7379fd695890a2d41d254f379dfba8b75b1e2`
+- Immediate predecessor: Friday `0.207.15` /
+  `8f260ce05bc9ad7384df9780e2383c727b9ab35d`, tree
+  `b538ac0f07a72ee89a1837b62f318db236f56203f7f7aa91f420b38be1fd4ec0`.
+- Schema-capable fallback: code-identical Friday `0.207.16` /
+  `551b27aeb93b9e93f9806d047e922d0b1989cd01`, tree
+  `8bf0cbf3038a65829c2b5efd923a07b1ce3afc246ad19b8700bbe9bef61003b1`.
+- Database schema: 41
 - Production state: immutable activation `clear`; backend and Telegram bridge
   active; trusted-CA HTTPS health `200`; SQLite integrity and FK checks clean;
   exact provisional profile is configured in public `shadow/extract`, while
-  primary remains final and no private material is eligible
+  primary remains final and no private material is eligible. Schema-41
+  DocumentCatalog is exact and body-free; its bounded runtime enrichment is the
+  active package.
 - Delivery constraints: no Docker for primary Friday release certification;
   companion plugin untouched; small commits and immutable wheel-only production
   releases. The optional laptop inference node is a separate Docker contour.
@@ -32,9 +37,10 @@ acceptance, private shadow and bounded assist, preserving exact primary-only
 behavior whenever the laptop is absent. The provisional public-shadow cutover
 is complete. Its causal request witness is deployed and the exact deterministic
 and controlled-live evidence was rebuilt from that release. Work requiring a
-physical laptop power cut waits for the owner. The schema-40 ICP candidate
-runtime is live. Durable DocumentCatalog/enrichment is the active autonomous
-package; the common effect envelope and V12 refinement follow it.
+physical laptop power cut waits for the owner. The schema-41 DocumentCatalog
+foundation and schema-40 ICP candidate runtime are live. Bounded catalog
+enrichment/consumption is the active autonomous package; the common effect
+envelope and V12 refinement follow it.
 
 The measured provisional finalist is exact profile
 `gptoss20b-2335df123cac7fc0e13e347cde1e1ffa8562daafcaf0fc76ade1a851d2b0ff1f`
@@ -133,13 +139,32 @@ course, with these repository-specific constraints:
 
 ## In progress
 
-1. Implement the narrow durable DocumentCatalog/enrichment projection without
-   persisting source bodies or model prose.
+1. Complete the bounded durable DocumentCatalog enrichment/reconciliation
+   worker and archive-consumption runtime without persisting source bodies or
+   model prose.
 2. When the owner is present, perform the real causal laptop cut/on and accept
    only the exact bound finalist; then promote distinct private-shadow/assist
    candidates with product-linked fallback evidence.
 
 ## Completed and deployed (current package)
+
+### Body-free DocumentCatalog foundation (`0.207.16`)
+
+- Schema 41 installs an exact rebuildable sidecar bound to Raw Object revision
+  and content hash. It stores only hashes, a navigation-only explicit heading,
+  status/reason and timestamp; no body, excerpt, arbitrary metadata or model
+  prose is persisted.
+- Trigger and storage contracts fail closed on stale, altered, cross-tenant or
+  invalid source bindings. Bounded indexed keyset rebuild/backfill/reconcile
+  APIs preserve opaque Raw IDs and admit bodies one at a time under item/byte
+  budgets.
+- Production migration completed `clear`: all 1,985 live file Raw rows have an
+  exact `incomplete` catalog row, schema/FTS markers are 41, integrity/FK checks
+  are clean, and the catalog fingerprint is
+  `c14efeb3addb684d1d65fa03358267f24bc0abb7a411e07524e04ecf04b14b90`.
+- The exact source passed 18,280 non-UI and 31 UI tests with pinned Syncthing
+  2.1.3 and zero skips. Two clean wheels reproduced byte-for-byte; a distinct
+  code-identical schema-41 fallback was sealed before activation.
 
 ### Durable archive candidate runtime (`0.207.15`)
 
@@ -385,17 +410,20 @@ claims at this checkpoint.
 
 ## Current cumulative gate
 
-- The exact `0.207.15` canonical gate passed 18,209 non-UI tests plus 31 UI
+- The exact `0.207.16` canonical gate passed 18,280 non-UI tests plus 31 UI
   tests, including the pinned Syncthing 2.1.3 smoke; static checks and focused
-  causal-secondary gates are green.
-- Friday `0.207.15` public shadow is live at the exact source/tree/wheel identity
-  above, schema 40, with `cce33d5` (`0.207.14`) as its schema-capable fallback.
-  Immutable activation completed `clear`.
+  schema-41 migration/catalog gates are green with zero skips.
+- Friday `0.207.16` public shadow is live at the exact source/tree/wheel identity
+  above, schema 41, with code-identical `551b27a` as its schema-capable fallback.
+  Immutable activation completed `clear`; all 15 active file tenants passed the
+  private offline catalog/raw-FTS audit and the disabled tenant remains counted
+  by the exact global coverage check.
 
 ## Next order
 
-1. Build the durable body-free DocumentCatalog/enrichment sidecar and expose
-   honest current/backfill-pending archive coverage.
+1. Activate the bounded durable DocumentCatalog enrichment/reconciliation
+   worker and archive consumer, converging the honest `backfill_pending` rows
+   without startup or request-path corpus scans.
 2. Complete the owner-observed causal cut/on when the owner is present; only then
    accept/register and promote distinct private-shadow/assist candidates.
 3. Add one uncertainty-aware common effect envelope and prove one idempotent,
