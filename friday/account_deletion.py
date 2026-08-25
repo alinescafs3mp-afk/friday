@@ -146,6 +146,14 @@ _DELETE_SCOPES: tuple[_Scope, ...] = (
     _Scope("user_permission_overrides", "user_permission_overrides", "user_id=?"),
 )
 
+_CANDIDATE_CASCADE_DELETE_KEYS = frozenset(
+    {
+        "work_item_archive_candidate_questions",
+        "work_item_archive_candidate_set_items",
+        "work_item_archive_candidate_sets",
+    }
+)
+
 _BLOCKING_GRAPH_SCOPES: tuple[_Scope, ...] = (
     _Scope("relations", "relations", "user_id=?"),
     _Scope("relation_revisions", "relation_revisions", "user_id=?"),
@@ -1421,12 +1429,35 @@ def delete_account(
         if ambiguous_runtime_hashes:
             raise AccountDeletionConflict("Появился runtime-ключ неизвестного формата")
 
+        # Candidate sidecars are deletion-immutable while their parent exists.
+        # Snapshot global counts so the parent Work Item cascade remains exactly
+        # accounted without opening a direct sidecar-delete bypass.
+        candidate_cascade_scopes = tuple(
+            scope for scope in _DELETE_SCOPES if scope.key in _CANDIDATE_CASCADE_DELETE_KEYS
+        )
+        candidate_cascade_counts = {
+            scope.key: _count(conn, scope, user_id) for scope in candidate_cascade_scopes
+        }
+        candidate_global_counts = {
+            scope.key: int(conn.execute(f'SELECT COUNT(*) FROM "{scope.table}"').fetchone()[0])
+            for scope in candidate_cascade_scopes
+        }
+
         # Remove every dependent row before its parent.  The scope list is also the
         # preflight count authority, so the result can prove exact accounting.
         for scope in _DELETE_SCOPES:
+            if scope.key in _CANDIDATE_CASCADE_DELETE_KEYS:
+                continue
             count = _delete_scope(conn, scope, user_id)
             if count:
                 deleted[scope.key] = count
+        for scope in candidate_cascade_scopes:
+            expected = candidate_cascade_counts[scope.key]
+            remaining = int(conn.execute(f'SELECT COUNT(*) FROM "{scope.table}"').fetchone()[0])
+            if candidate_global_counts[scope.key] - remaining != expected:
+                raise AccountDeletionConflict("Work Item candidate cascade changed during deletion")
+            if expected:
+                deleted[scope.key] = expected
 
         if runtime_keys:
             placeholders = ",".join("?" for _ in runtime_keys)

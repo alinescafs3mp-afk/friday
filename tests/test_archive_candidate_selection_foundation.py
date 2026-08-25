@@ -34,10 +34,7 @@ from friday.interaction_control_plane.archive_candidate_selection_store import (
     reask_archive_candidate_selection_in_transaction,
     suspend_after_replay_failure_in_transaction,
 )
-from friday.interaction_control_plane.selected_archive_evidence import (
-    SelectedArchiveCorpus,
-    SelectedArchiveCoverageGrade,
-)
+from friday.interaction_control_plane.selected_archive_evidence import SelectedArchiveCorpus
 from friday.interaction_control_plane.work_item_contract import (
     RECALL_SELECTED_ARCHIVE_EVIDENCE_ACTIVE_FRAME_JSON,
     WorkState,
@@ -256,8 +253,14 @@ def _create_work(storage: Any, owner: str) -> Any:
         )
 
 
-def _publish_replay(storage: Any, item: Any, *, ordinal: int) -> tuple[Any, Any, Any, str]:
-    request = "Второй" if ordinal == 2 else "Первый"
+def _publish_replay(
+    storage: Any,
+    item: Any,
+    *,
+    ordinal: int,
+    request: str | None = None,
+) -> tuple[Any, Any, Any, str]:
+    request = request or ("Второй" if ordinal == 2 else "Первый")
     boundary = storage.store_message(
         item.conversation_id,
         item.user_id,
@@ -299,8 +302,9 @@ def _publish_replay_failure(
     *,
     ordinal: int,
     status: ArchiveRecallStatus = ArchiveRecallStatus.DENIED,
+    request: str | None = None,
 ) -> tuple[Any, Any, Any, str]:
-    request = "Второй" if ordinal == 2 else "Первый"
+    request = request or ("Второй" if ordinal == 2 else "Первый")
     boundary = storage.store_message(
         item.conversation_id,
         item.user_id,
@@ -338,15 +342,27 @@ def _publish_replay_failure(
 def test_candidate_set_contract_is_closed_ordered_and_body_free() -> None:
     first = _candidate(owner="contract-owner", ordinal=1)
     second = _candidate(owner="contract-owner", ordinal=2)
-    candidate_set = ArchiveCandidateSet(
+    projection = _new_accepted_candidate_projection(
+        candidates=tuple(
+            ArchiveSearchCandidateProjectionEntry(
+                ordinal=item.ordinal,
+                public_citation_label=item.public_citation_label,
+                corpus=ArchiveSearchCorpus(item.corpus.value),
+                source_ref=item.source_ref,
+                passage_refs=item.passage_refs,
+                resolved_snapshot_sha256=item.source_snapshot_sha256,
+            )
+            for item in (first, second)
+        ),
+        coverage_grade=ArchiveSearchCoverageGrade.PARTIAL,
+        coverage_sha256="c" * 64,
+        evidence_sha256="e" * 64,
+    )
+    candidate_set = ArchiveCandidateSet.from_accepted_projection(
         id="cset_0123456789abcdef",
         work_item_id="work_0123456789abcdef",
-        evidence_sha256="e" * 64,
-        coverage_sha256="c" * 64,
-        coverage_grade=SelectedArchiveCoverageGrade.PARTIAL,
-        authority_projection_sha256="a" * 64,
         origin_boundary_user_message_id="msg_0123456789abcdef",
-        candidates=(first, second),
+        projection=projection,
     )
 
     encoded = candidate_set.to_json()
@@ -576,6 +592,63 @@ def test_source_free_reask_moves_prompt_cas_and_next_valid_ordinal_completes(sto
     assert completed.question.selected_ordinal == 2
 
 
+def test_valid_in_range_ordinal_cannot_be_reasked_by_store_or_ddl(storage: Any) -> None:
+    item = _create_work(storage, "candidate-reask-valid-owner")
+    valid = storage.store_message(
+        item.conversation_id,
+        item.user_id,
+        "user",
+        "  ВТОРОЙ! ",
+        reply_to=item.question.prompt_assistant_message_id,
+    )
+    assistant = storage.store_message(
+        item.conversation_id,
+        item.user_id,
+        "assistant",
+        archive_candidate_reask_prompt(item.question.maximum_ordinal),
+        metadata={
+            "structural": {
+                "answer_present": True,
+                "model_spoke": False,
+                "verdict_kind": ARCHIVE_CANDIDATE_REASK_VERDICT_KIND,
+            }
+        },
+        reply_to=valid["id"],
+    )
+    with storage.transaction() as conn, pytest.raises(WorkItemAnchorError, match="cannot be re-asked"):
+        reask_archive_candidate_selection_in_transaction(
+            conn,
+            work_item_id=item.id,
+            user_id=item.user_id,
+            conversation_id=item.conversation_id,
+            expected_revision=item.revision,
+            invalid_boundary_user_message_id=valid["id"],
+            new_question_assistant_message_id=assistant["id"],
+            now="2026-08-25T05:01:00+00:00",
+        )
+    with (
+        storage.transaction() as conn,
+        pytest.raises(
+            sqlite3.IntegrityError,
+            match="question update",
+        ),
+    ):
+        conn.execute(
+            """UPDATE work_item_archive_candidate_questions
+                  SET prompt_boundary_user_message_id=?,prompt_assistant_message_id=?,
+                      prompt_updated_at=?,prompt_revision=prompt_revision+1
+                WHERE work_item_id=?""",
+            (valid["id"], assistant["id"], "2026-08-25T05:01:00+00:00", item.id),
+        )
+    assert tuple(
+        storage.execute(
+            """SELECT state,prompt_revision,prompt_assistant_message_id
+                 FROM work_item_archive_candidate_questions WHERE work_item_id=?""",
+            (item.id,),
+        ).fetchone()
+    ) == ("waiting", 1, item.question.prompt_assistant_message_id)
+
+
 def test_reask_wrong_body_race_expiry_and_foreign_owner_are_non_mutating(storage: Any) -> None:
     item = _create_work(storage, "candidate-reask-negative-owner")
     invalid = storage.store_message(
@@ -755,6 +828,183 @@ def test_exact_ordinal_replay_completes_once_and_invalid_ordinal_is_non_mutating
         )
 
 
+def test_replay_success_and_failure_bind_selected_ordinal_to_boundary_syntax(storage: Any) -> None:
+    success_item = _create_work(storage, "candidate-boundary-success-owner")
+    boundary, assistant, outcome, outcome_sha256 = _publish_replay(
+        storage,
+        success_item,
+        ordinal=2,
+        request="Первый",
+    )
+    with (
+        storage.transaction() as conn,
+        pytest.raises(
+            sqlite3.IntegrityError,
+            match="question update",
+        ),
+    ):
+        conn.execute(
+            """UPDATE work_item_archive_candidate_questions
+                  SET state='answered',selected_ordinal=2,answered_at=?,
+                      replay_boundary_user_message_id=?,replay_assistant_message_id=?,
+                      accepted_replay_plan_sha256=?,accepted_replay_outcome_sha256=?
+                WHERE work_item_id=?""",
+            (
+                "2026-08-25T05:01:00+00:00",
+                boundary["id"],
+                assistant["id"],
+                outcome.plan_sha256,
+                outcome_sha256,
+                success_item.id,
+            ),
+        )
+    with storage.transaction() as conn, pytest.raises(WorkItemAnchorError, match="ordinal"):
+        accept_archive_candidate_selection_in_transaction(
+            conn,
+            work_item_id=success_item.id,
+            user_id=success_item.user_id,
+            conversation_id=success_item.conversation_id,
+            expected_revision=success_item.revision,
+            selected_ordinal=2,
+            new_boundary_user_message_id=boundary["id"],
+            new_assistant_message_id=assistant["id"],
+            new_accepted_plan_sha256=outcome.plan_sha256,
+            new_accepted_outcome_sha256=outcome_sha256,
+            now="2026-08-25T05:01:00+00:00",
+        )
+
+    failure_item = _create_work(storage, "candidate-boundary-failure-owner")
+    boundary, assistant, outcome, outcome_sha256 = _publish_replay_failure(
+        storage,
+        failure_item,
+        ordinal=2,
+        request="Первый",
+    )
+    with (
+        storage.transaction() as conn,
+        pytest.raises(
+            sqlite3.IntegrityError,
+            match="question update",
+        ),
+    ):
+        conn.execute(
+            """UPDATE work_item_archive_candidate_questions
+                  SET failed_ordinal=2,failure_boundary_user_message_id=?,
+                      failure_assistant_message_id=?,failure_recorded_at=?,
+                      accepted_failure_plan_sha256=?,accepted_failure_outcome_sha256=?
+                WHERE work_item_id=?""",
+            (
+                boundary["id"],
+                assistant["id"],
+                "2026-08-25T05:01:00+00:00",
+                outcome.plan_sha256,
+                outcome_sha256,
+                failure_item.id,
+            ),
+        )
+    with storage.transaction() as conn, pytest.raises(WorkItemAnchorError, match="ordinal"):
+        suspend_after_replay_failure_in_transaction(
+            conn,
+            work_item_id=failure_item.id,
+            user_id=failure_item.user_id,
+            conversation_id=failure_item.conversation_id,
+            expected_revision=failure_item.revision,
+            selected_ordinal=2,
+            new_boundary_user_message_id=boundary["id"],
+            new_assistant_message_id=assistant["id"],
+            new_accepted_plan_sha256=outcome.plan_sha256,
+            new_accepted_outcome_sha256=outcome_sha256,
+            now="2026-08-25T05:01:00+00:00",
+        )
+
+
+@pytest.mark.parametrize("mode", ["reask", "success", "failure"])
+def test_schema_startup_rechecks_candidate_boundary_syntax(storage: Any, mode: str) -> None:
+    item = _create_work(storage, f"candidate-boundary-startup-{mode}")
+    if mode == "reask":
+        boundary = storage.store_message(
+            item.conversation_id,
+            item.user_id,
+            "user",
+            "двадцатый",
+            reply_to=item.question.prompt_assistant_message_id,
+        )
+        assistant = storage.store_message(
+            item.conversation_id,
+            item.user_id,
+            "assistant",
+            archive_candidate_reask_prompt(item.question.maximum_ordinal),
+            metadata={
+                "structural": {
+                    "answer_present": True,
+                    "model_spoke": False,
+                    "verdict_kind": ARCHIVE_CANDIDATE_REASK_VERDICT_KIND,
+                }
+            },
+            reply_to=boundary["id"],
+        )
+        with storage.transaction() as conn:
+            reask_archive_candidate_selection_in_transaction(
+                conn,
+                work_item_id=item.id,
+                user_id=item.user_id,
+                conversation_id=item.conversation_id,
+                expected_revision=item.revision,
+                invalid_boundary_user_message_id=boundary["id"],
+                new_question_assistant_message_id=assistant["id"],
+                now="2026-08-25T05:01:00+00:00",
+            )
+    elif mode == "success":
+        boundary, assistant, outcome, outcome_sha256 = _publish_replay(storage, item, ordinal=2)
+        with storage.transaction() as conn:
+            accept_archive_candidate_selection_in_transaction(
+                conn,
+                work_item_id=item.id,
+                user_id=item.user_id,
+                conversation_id=item.conversation_id,
+                expected_revision=item.revision,
+                selected_ordinal=2,
+                new_boundary_user_message_id=boundary["id"],
+                new_assistant_message_id=assistant["id"],
+                new_accepted_plan_sha256=outcome.plan_sha256,
+                new_accepted_outcome_sha256=outcome_sha256,
+                now="2026-08-25T05:01:00+00:00",
+            )
+    else:
+        boundary, assistant, outcome, outcome_sha256 = _publish_replay_failure(
+            storage,
+            item,
+            ordinal=2,
+        )
+        with storage.transaction() as conn:
+            suspend_after_replay_failure_in_transaction(
+                conn,
+                work_item_id=item.id,
+                user_id=item.user_id,
+                conversation_id=item.conversation_id,
+                expected_revision=item.revision,
+                selected_ordinal=2,
+                new_boundary_user_message_id=boundary["id"],
+                new_assistant_message_id=assistant["id"],
+                new_accepted_plan_sha256=outcome.plan_sha256,
+                new_accepted_outcome_sha256=outcome_sha256,
+                now="2026-08-25T05:01:00+00:00",
+            )
+    with storage.transaction() as conn:
+        conn.execute("DROP TRIGGER messages_are_never_rewritten")
+        conn.execute("UPDATE messages SET content='Первый' WHERE id=?", (boundary["id"],))
+        conn.execute(
+            """CREATE TRIGGER messages_are_never_rewritten
+               BEFORE UPDATE OF content, role ON messages
+               BEGIN
+                   SELECT RAISE(ABORT,
+                       'текст сообщения чата неизменяем: правка — то же стирание');
+               END"""
+        )
+    with pytest.raises(sqlite3.DatabaseError, match="publication receipts"):
+        validate_work_item_schema(storage.conn)
+
+
 def test_accept_rolls_back_question_cas_when_work_completion_fails(storage: Any) -> None:
     item = _create_work(storage, "candidate-savepoint-owner")
     boundary, assistant, outcome, outcome_sha256 = _publish_replay(storage, item, ordinal=1)
@@ -888,7 +1138,7 @@ def test_replay_failure_candidate_binding_and_savepoint_are_fail_closed(storage:
         item,
         ordinal=1,
     )
-    with storage.transaction() as conn, pytest.raises(WorkItemAnchorError, match="plan"):
+    with storage.transaction() as conn, pytest.raises(WorkItemAnchorError, match="ordinal"):
         suspend_after_replay_failure_in_transaction(
             conn,
             work_item_id=item.id,
@@ -955,6 +1205,59 @@ def test_replay_failure_candidate_binding_and_savepoint_are_fail_closed(storage:
         ) == ("waiting_for_input", 1, "question_asked")
 
 
+@pytest.mark.parametrize("failure_receipt", [False, True])
+def test_schema_validator_cryptographically_rechecks_replay_receipts(
+    storage: Any,
+    failure_receipt: bool,
+) -> None:
+    item = _create_work(storage, f"candidate-receipt-tamper-{failure_receipt}")
+    if failure_receipt:
+        boundary, assistant, outcome, outcome_sha256 = _publish_replay_failure(
+            storage,
+            item,
+            ordinal=2,
+        )
+        with storage.transaction() as conn:
+            suspend_after_replay_failure_in_transaction(
+                conn,
+                work_item_id=item.id,
+                user_id=item.user_id,
+                conversation_id=item.conversation_id,
+                expected_revision=item.revision,
+                selected_ordinal=2,
+                new_boundary_user_message_id=boundary["id"],
+                new_assistant_message_id=assistant["id"],
+                new_accepted_plan_sha256=outcome.plan_sha256,
+                new_accepted_outcome_sha256=outcome_sha256,
+                now="2026-08-25T05:01:00+00:00",
+            )
+    else:
+        boundary, assistant, outcome, outcome_sha256 = _publish_replay(storage, item, ordinal=2)
+        with storage.transaction() as conn:
+            accept_archive_candidate_selection_in_transaction(
+                conn,
+                work_item_id=item.id,
+                user_id=item.user_id,
+                conversation_id=item.conversation_id,
+                expected_revision=item.revision,
+                selected_ordinal=2,
+                new_boundary_user_message_id=boundary["id"],
+                new_assistant_message_id=assistant["id"],
+                new_accepted_plan_sha256=outcome.plan_sha256,
+                new_accepted_outcome_sha256=outcome_sha256,
+                now="2026-08-25T05:01:00+00:00",
+            )
+
+    forged_metadata, _forged_sha256 = _metadata(replace(outcome, plan_sha256="0" * 64))
+    with storage.transaction() as conn:
+        conn.execute(
+            "UPDATE messages SET metadata_json=? WHERE id=?",
+            (json.dumps(forged_metadata, ensure_ascii=False, sort_keys=True), assistant["id"]),
+        )
+    with pytest.raises(sqlite3.DatabaseError, match="publication receipts"):
+        validate_work_item_schema(storage.conn)
+
+
 def test_candidate_lifecycle_conversation_export_account_delete_and_backup(storage: Any) -> None:
     from friday.diagnostics.runtime_lease import ProcessLease
 
@@ -1009,6 +1312,55 @@ def test_candidate_lifecycle_conversation_export_account_delete_and_backup(stora
     assert plan["counts"]["work_item_archive_candidate_set_items"] == 2
     assert plan["counts"]["work_item_archive_candidate_questions"] == 1
     assert plan["unknown_scopes"] == []
+
+
+def test_restore_refuses_manifest_valid_backup_with_forged_candidate_receipt(storage: Any) -> None:
+    from friday.diagnostics.runtime_lease import ProcessLease
+
+    item = _create_work(storage, "candidate-restore-receipt-owner")
+    boundary, assistant, outcome, outcome_sha256 = _publish_replay(storage, item, ordinal=2)
+    with storage.transaction() as conn:
+        accept_archive_candidate_selection_in_transaction(
+            conn,
+            work_item_id=item.id,
+            user_id=item.user_id,
+            conversation_id=item.conversation_id,
+            expected_revision=item.revision,
+            selected_ordinal=2,
+            new_boundary_user_message_id=boundary["id"],
+            new_assistant_message_id=assistant["id"],
+            new_accepted_plan_sha256=outcome.plan_sha256,
+            new_accepted_outcome_sha256=outcome_sha256,
+            now="2026-08-25T05:01:00+00:00",
+        )
+    backup = storage.create_backup(label="candidate-receipt-tamper")
+    backup_path = Path(backup["path"])
+    forged_metadata, _forged_sha256 = _metadata(replace(outcome, plan_sha256="0" * 64))
+    with sqlite3.connect(backup_path) as copy:
+        copy.execute(
+            "UPDATE messages SET metadata_json=? WHERE id=?",
+            (json.dumps(forged_metadata, ensure_ascii=False, sort_keys=True), assistant["id"]),
+        )
+    manifest_path = Path(backup["manifest_path"])
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["size_bytes"] = backup_path.stat().st_size
+    manifest["sha256"] = hashlib.sha256(backup_path.read_bytes()).hexdigest()
+    manifest_path.write_text(
+        json.dumps(manifest, ensure_ascii=False, sort_keys=True),
+        encoding="utf-8",
+    )
+
+    verification = storage.verify_backup(backup["database"])
+    assert verification["ok"] is False
+    assert "candidate publication receipts" in str(verification["database_error"])
+    with (
+        ProcessLease(storage.settings.state_dir / "backend.lock", protocol="friday.backend.v1"),
+        pytest.raises(RuntimeError, match="unverified backup"),
+    ):
+        storage.restore_backup(
+            backup["database"],
+            safety_label="candidate-forged-receipt-pre-restore",
+        )
 
 
 def test_expired_candidate_rejects_selection_and_exact_schema39_upgrades(storage: Any) -> None:
@@ -1094,15 +1446,11 @@ def test_exact_schema39_upgrade_preserves_selected_evidence_sidecar() -> None:
                 "2026-08-25T17:00:00+00:00",
             ),
         )
-        candidate_set = ArchiveCandidateSet(
+        candidate_set = ArchiveCandidateSet.from_accepted_projection(
             id="cset_0123456789abcdef",
             work_item_id=work_item_id,
-            evidence_sha256="e" * 64,
-            coverage_sha256="c" * 64,
-            coverage_grade=SelectedArchiveCoverageGrade.COMPLETE,
-            authority_projection_sha256="a" * 64,
             origin_boundary_user_message_id=boundary,
-            candidates=(_candidate(owner=owner, ordinal=1), _candidate(owner=owner, ordinal=2)),
+            projection=_projection(owner),
         )
         evidence = candidate_set.selected_evidence(1)
         conn.execute(
@@ -1137,6 +1485,95 @@ def test_schema_validator_rejects_digest_preserving_ddl_but_tampered_candidate_r
         )
         _execute_schema(conn, WORK_ITEM_SCHEMA)
 
+    with pytest.raises(sqlite3.DatabaseError, match="candidate Work Item data"):
+        validate_work_item_schema(storage.conn)
+
+
+def test_candidate_sidecars_reject_direct_delete_but_allow_parent_cascade(storage: Any) -> None:
+    item = _create_work(storage, "candidate-delete-immutable-owner")
+    for table in (
+        "work_item_archive_candidate_questions",
+        "work_item_archive_candidate_set_items",
+        "work_item_archive_candidate_sets",
+    ):
+        with storage.transaction() as conn, pytest.raises(sqlite3.IntegrityError, match="deletion"):
+            conn.execute(f'DELETE FROM "{table}" WHERE work_item_id=?', (item.id,))
+
+    with storage.transaction() as conn:
+        assert conn.execute("DELETE FROM work_items WHERE id=?", (item.id,)).rowcount == 1
+    for table in (
+        "work_item_archive_candidate_questions",
+        "work_item_archive_candidate_set_items",
+        "work_item_archive_candidate_sets",
+    ):
+        assert (
+            storage.execute(f'SELECT COUNT(*) FROM "{table}" WHERE work_item_id=?', (item.id,)).fetchone()[0]
+            == 0
+        )
+
+
+def test_rebuilt_candidate_order_cannot_preserve_accepted_projection_binding(storage: Any) -> None:
+    item = _create_work(storage, "candidate-rebuild-owner")
+    original_rows = item.candidate_set.item_storage_payloads()
+    rebuilt_rows: list[dict[str, object]] = []
+    rebuilt_candidates: list[dict[str, object]] = []
+    for ordinal, candidate in enumerate(reversed(item.candidate_set.candidates), start=1):
+        row = dict(original_rows[candidate.ordinal - 1])
+        row["ordinal"] = ordinal
+        row["public_citation_label"] = f"A{ordinal}"
+        rebuilt_rows.append(row)
+        payload = candidate.to_payload()
+        payload["ordinal"] = ordinal
+        payload["public_citation_label"] = f"A{ordinal}"
+        rebuilt_candidates.append(payload)
+    set_payload = item.candidate_set.to_payload()
+    set_payload["candidates"] = rebuilt_candidates
+    rebuilt_set_sha256 = hashlib.sha256(
+        json.dumps(
+            set_payload,
+            ensure_ascii=True,
+            sort_keys=True,
+            separators=(",", ":"),
+            allow_nan=False,
+        ).encode("ascii")
+    ).hexdigest()
+
+    with storage.transaction() as conn:
+        conn.execute("DROP TRIGGER trg_work_item_archive_candidate_items_delete_immutable")
+        conn.execute("DROP TRIGGER trg_work_item_archive_candidate_items_scope_insert")
+        conn.execute("DROP TRIGGER trg_work_item_archive_candidate_sets_immutable")
+        conn.execute(
+            "DELETE FROM work_item_archive_candidate_set_items WHERE work_item_id=?",
+            (item.id,),
+        )
+        for row in rebuilt_rows:
+            conn.execute(
+                """INSERT INTO work_item_archive_candidate_set_items(
+                       candidate_set_id,work_item_id,ordinal,public_citation_label,
+                       corpus,source_ref_json,passage_refs_json,source_snapshot_sha256
+                   ) VALUES(:candidate_set_id,:work_item_id,:ordinal,:public_citation_label,
+                            :corpus,:source_ref_json,:passage_refs_json,:source_snapshot_sha256)""",
+                row,
+            )
+        conn.execute(
+            "UPDATE work_item_archive_candidate_sets SET candidate_set_sha256=? WHERE work_item_id=?",
+            (rebuilt_set_sha256, item.id),
+        )
+        _execute_schema(conn, WORK_ITEM_SCHEMA)
+
+    with (
+        storage.transaction() as conn,
+        pytest.raises(
+            ArchiveCandidateSelectionError,
+            match="authority projection digest",
+        ),
+    ):
+        get_archive_candidate_selection_work_item_in_transaction(
+            conn,
+            work_item_id=item.id,
+            user_id=item.user_id,
+            conversation_id=item.conversation_id,
+        )
     with pytest.raises(sqlite3.DatabaseError, match="candidate Work Item data"):
         validate_work_item_schema(storage.conn)
 

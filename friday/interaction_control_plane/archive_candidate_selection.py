@@ -10,6 +10,7 @@ replayed through the existing selected-evidence authority boundary.
 from __future__ import annotations
 
 import hashlib
+import hmac
 import json
 import re
 from collections.abc import Iterable, Mapping, Sequence
@@ -41,6 +42,8 @@ from friday.interaction_control_plane.work_item_contract import (
     canonical_work_item_instant,
 )
 from friday.retrieval.archive_search_authority import (
+    ARCHIVE_SEARCH_ACCEPTED_CANDIDATE_PROJECTION_SCHEMA,
+    ARCHIVE_SEARCH_CANDIDATE_PROJECTION_ENTRY_SCHEMA,
     ArchiveSearchAcceptedCandidateProjection,
     ArchiveSearchAuthorityError,
 )
@@ -321,6 +324,37 @@ class ArchiveCandidateItem:
         }
 
 
+def _authority_projection_sha256(
+    *,
+    candidates: tuple[ArchiveCandidateItem, ...],
+    coverage_grade: SelectedArchiveCoverageGrade,
+    coverage_sha256: str,
+    evidence_sha256: str,
+) -> str:
+    """Rebuild the exact public phase-2 projection digest from durable identities."""
+
+    payload = {
+        "candidate_count": len(candidates),
+        "candidates": [
+            {
+                "corpus": candidate.corpus.value,
+                "ordinal": candidate.ordinal,
+                "passage_refs": [item.to_private_payload() for item in candidate.passage_refs],
+                "public_citation_label": candidate.public_citation_label,
+                "resolved_snapshot_sha256": candidate.source_snapshot_sha256,
+                "schema": ARCHIVE_SEARCH_CANDIDATE_PROJECTION_ENTRY_SCHEMA,
+                "source_ref": candidate.source_ref.to_private_payload(),
+            }
+            for candidate in candidates
+        ],
+        "coverage_grade": coverage_grade.value,
+        "coverage_sha256": coverage_sha256,
+        "evidence_sha256": evidence_sha256,
+        "schema": ARCHIVE_SEARCH_ACCEPTED_CANDIDATE_PROJECTION_SCHEMA,
+    }
+    return hashlib.sha256(_canonical_json(payload).encode("ascii")).hexdigest()
+
+
 @dataclass(frozen=True, slots=True, repr=False)
 class ArchiveCandidateSet:
     """One immutable, ordered candidate set bound to an accepted archive turn."""
@@ -363,6 +397,16 @@ class ArchiveCandidateSet:
         citation_labels = tuple(item.public_citation_label for item in self.candidates)
         if len(citation_labels) != len(set(citation_labels)):
             raise ArchiveCandidateSelectionError("candidate public citation labels must be unique")
+        if not hmac.compare_digest(
+            self.authority_projection_sha256,
+            _authority_projection_sha256(
+                candidates=self.candidates,
+                coverage_grade=self.coverage_grade,
+                coverage_sha256=self.coverage_sha256,
+                evidence_sha256=self.evidence_sha256,
+            ),
+        ):
+            raise ArchiveCandidateSelectionError("candidate authority projection digest changed")
         for item in self.candidates:
             item._selected_evidence(
                 work_item_id=work_item_id,

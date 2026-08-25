@@ -750,6 +750,13 @@ BEGIN
     SELECT RAISE(ABORT, 'archive candidate set is immutable');
 END;
 
+CREATE TRIGGER IF NOT EXISTS trg_work_item_archive_candidate_sets_delete_immutable
+BEFORE DELETE ON work_item_archive_candidate_sets
+WHEN EXISTS (SELECT 1 FROM work_items work WHERE work.id=OLD.work_item_id)
+BEGIN
+    SELECT RAISE(ABORT, 'archive candidate set deletion is immutable');
+END;
+
 CREATE TRIGGER IF NOT EXISTS trg_work_item_archive_candidate_items_scope_insert
 BEFORE INSERT ON work_item_archive_candidate_set_items
 WHEN NOT EXISTS (
@@ -779,6 +786,17 @@ CREATE TRIGGER IF NOT EXISTS trg_work_item_archive_candidate_items_immutable
 BEFORE UPDATE ON work_item_archive_candidate_set_items
 BEGIN
     SELECT RAISE(ABORT, 'archive candidate item is immutable');
+END;
+
+CREATE TRIGGER IF NOT EXISTS trg_work_item_archive_candidate_items_delete_immutable
+BEFORE DELETE ON work_item_archive_candidate_set_items
+WHEN EXISTS (
+    SELECT 1 FROM work_item_archive_candidate_sets candidate_set
+     WHERE candidate_set.id=OLD.candidate_set_id
+       AND candidate_set.work_item_id=OLD.work_item_id
+)
+BEGIN
+    SELECT RAISE(ABORT, 'archive candidate item deletion is immutable');
 END;
 
 CREATE TRIGGER IF NOT EXISTS trg_work_item_archive_candidate_questions_scope_insert
@@ -833,6 +851,17 @@ BEGIN
     SELECT RAISE(ABORT, 'archive candidate question scope is invalid');
 END;
 
+CREATE TRIGGER IF NOT EXISTS trg_work_item_archive_candidate_questions_delete_immutable
+BEFORE DELETE ON work_item_archive_candidate_questions
+WHEN EXISTS (
+    SELECT 1 FROM work_item_archive_candidate_sets candidate_set
+     WHERE candidate_set.id=OLD.candidate_set_id
+       AND candidate_set.work_item_id=OLD.work_item_id
+)
+BEGIN
+    SELECT RAISE(ABORT, 'archive candidate question deletion is immutable');
+END;
+
 CREATE TRIGGER IF NOT EXISTS trg_work_item_archive_candidate_questions_update
 BEFORE UPDATE ON work_item_archive_candidate_questions
 WHEN OLD.state<>'waiting'
@@ -882,6 +911,9 @@ WHEN OLD.state<>'waiting'
                  AND boundary.user_id=work.user_id
                  AND boundary.conversation_id=work.conversation_id
                  AND boundary.role='user'
+                 AND (friday_archive_candidate_ordinal(boundary.content) IS NULL
+                      OR friday_archive_candidate_ordinal(boundary.content)
+                         > NEW.maximum_ordinal)
                  AND previous.rowid<boundary.rowid
                  AND NOT EXISTS (
                      SELECT 1 FROM messages intervening
@@ -973,6 +1005,8 @@ WHEN OLD.state<>'waiting'
                  AND boundary.user_id=work.user_id
                  AND boundary.conversation_id=work.conversation_id
                  AND boundary.role='user'
+                 AND friday_archive_candidate_ordinal(boundary.content)
+                     =NEW.selected_ordinal
                  AND previous.rowid<boundary.rowid
                  AND NOT EXISTS (
                      SELECT 1 FROM messages intervening
@@ -1043,6 +1077,8 @@ WHEN OLD.state<>'waiting'
                  AND boundary.user_id=work.user_id
                  AND boundary.conversation_id=work.conversation_id
                  AND boundary.role='user'
+                 AND friday_archive_candidate_ordinal(boundary.content)
+                     =NEW.failed_ordinal
                  AND previous.rowid<boundary.rowid
                  AND NOT EXISTS (
                      SELECT 1 FROM messages intervening
@@ -1274,6 +1310,21 @@ def _related_schema_objects(conn: sqlite3.Connection) -> dict[tuple[str, str], s
     }
 
 
+def _register_candidate_ordinal_function(conn: sqlite3.Connection) -> None:
+    """Install the deterministic parser used by exact schema-40 mutation triggers."""
+
+    from friday.interaction_control_plane.archive_candidate_selection import (
+        parse_archive_candidate_ordinal,
+    )
+
+    conn.create_function(
+        "friday_archive_candidate_ordinal",
+        1,
+        parse_archive_candidate_ordinal,
+        deterministic=True,
+    )
+
+
 def _validate_current_data(conn: sqlite3.Connection) -> None:
     # Retrieval contracts import storage-backed package exports. Delay that
     # dependency until schema bootstrap has completed module initialization.
@@ -1284,6 +1335,9 @@ def _validate_current_data(conn: sqlite3.Connection) -> None:
         ArchiveCandidateSelectionWorkItem,
         ArchiveCandidateSet,
         archive_candidate_reask_prompt,
+    )
+    from friday.interaction_control_plane.archive_candidate_selection_store import (
+        _validate_stored_anchor,
     )
     from friday.interaction_control_plane.archive_evidence_work_item import (
         RecallSelectedArchiveEvidenceWorkItem,
@@ -1463,6 +1517,15 @@ def _validate_current_data(conn: sqlite3.Connection) -> None:
             )
         except (ArchiveCandidateSelectionError, WorkItemContractError) as exc:
             raise sqlite3.DatabaseError("Schema 40 candidate Work Item data is invalid") from exc
+        try:
+            _validate_stored_anchor(
+                conn,
+                item,
+                require_latest_message=False,
+                allow_disabled_owner=True,
+            )
+        except Exception as exc:
+            raise sqlite3.DatabaseError("Schema 40 candidate publication receipts are invalid") from exc
         if any(candidate.source_ref.principal_id != item.user_id for candidate in candidate_set.candidates):
             raise sqlite3.DatabaseError("Schema 40 candidate owner is invalid")
         boundary = conn.execute(
@@ -1615,6 +1678,7 @@ def validate_work_item_schema(conn: sqlite3.Connection, *, required: bool = True
         if _related_schema_objects(conn):
             raise sqlite3.DatabaseError("Schema 40 work item DDL is incomplete or altered")
         return
+    _register_candidate_ordinal_function(conn)
     if _schema_objects(conn, current=True) != _canonical_work_item_schema_objects():
         raise sqlite3.DatabaseError("Schema 40 work item DDL is incomplete or altered")
 

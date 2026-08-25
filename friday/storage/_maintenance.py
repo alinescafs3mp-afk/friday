@@ -437,6 +437,11 @@ class MaintenanceMixin(StorageShared):
             "SELECT value FROM schema_meta WHERE key='schema_version'"
         ).fetchone()
         backup_schema_version = int(schema_row[0]) if schema_row else -1
+        from friday.interaction_control_plane.work_item_schema import (
+            validate_work_item_schema,
+        )
+
+        validate_work_item_schema(backup_conn)
         if _contains_secondary_product_witness(backup_conn):
             raise RuntimeError("Backup snapshot contains a transient secondary product witness")
         return integrity, foreign_key_violations, backup_schema_version
@@ -687,6 +692,12 @@ class MaintenanceMixin(StorageShared):
                 try:
                     database_schema_version = int(schema_row[0])
                     database_schema_supported = 0 <= database_schema_version <= SCHEMA_VERSION
+                    if database_schema_version == SCHEMA_VERSION:
+                        from friday.interaction_control_plane.work_item_schema import (
+                            validate_work_item_schema,
+                        )
+
+                        validate_work_item_schema(conn)
                 except (TypeError, ValueError):
                     database_error = "Database schema_version marker is invalid"
         except sqlite3.DatabaseError as exc:

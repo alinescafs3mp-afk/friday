@@ -26,6 +26,7 @@ from friday.interaction_control_plane.archive_candidate_selection import (
     ArchiveCandidateSet,
     archive_candidate_reask_prompt,
     archive_candidate_selection_offer_suffix,
+    parse_archive_candidate_ordinal,
 )
 from friday.interaction_control_plane.archive_evidence_work_item_store import (
     _validate_archive_anchor,
@@ -160,6 +161,38 @@ def _candidate_offer_is_exact(content: object, candidate_set: ArchiveCandidateSe
         return False
     model_answer = content[: -len(delimiter)]
     return bool(model_answer.strip() and not model_answer.endswith(("\r", "\n")))
+
+
+def _validate_boundary_ordinal(
+    conn: sqlite3.Connection,
+    *,
+    user_id: str,
+    conversation_id: str,
+    boundary_user_message_id: str,
+    expected_ordinal: int | None = None,
+    reask_maximum_ordinal: int | None = None,
+) -> None:
+    """Bind one owned user boundary to either selection or the re-ask domain."""
+
+    if (expected_ordinal is None) == (reask_maximum_ordinal is None):
+        raise WorkItemAnchorError("candidate boundary ordinal validation mode is invalid")
+    cursor = conn.execute(
+        """SELECT content FROM messages
+            WHERE id=? AND user_id=? AND conversation_id=? AND role='user'""",
+        (boundary_user_message_id, user_id, conversation_id),
+    )
+    raw = cursor.fetchone()
+    if raw is None:
+        raise WorkItemAnchorError("candidate ordinal boundary is not owned")
+    parsed = parse_archive_candidate_ordinal(_row_mapping(cursor, raw)["content"])
+    if expected_ordinal is not None:
+        if parsed != expected_ordinal:
+            raise WorkItemAnchorError("candidate boundary ordinal does not match selection")
+        return
+    if reask_maximum_ordinal is None:  # pragma: no cover - mode check above proves this
+        raise WorkItemAnchorError("candidate boundary ordinal validation mode is invalid")
+    if parsed is not None and parsed <= reask_maximum_ordinal:
+        raise WorkItemAnchorError("valid candidate ordinal cannot be re-asked")
 
 
 def _fetch_candidate_work_item(
@@ -317,6 +350,13 @@ def _validate_source_free_question_publication(
         label="question_assistant_message_id",
     )
     expected_content = archive_candidate_reask_prompt(maximum_ordinal)
+    _validate_boundary_ordinal(
+        conn,
+        user_id=user,
+        conversation_id=conversation,
+        boundary_user_message_id=boundary,
+        reask_maximum_ordinal=maximum_ordinal,
+    )
     if previous_assistant_message_id is not None:
         _validate_immediate_followup(
             conn,
@@ -489,6 +529,13 @@ def _validate_stored_anchor(
             previous_assistant_message_id=question.prompt_assistant_message_id,
             boundary_user_message_id=question.replay_boundary_user_message_id,
         )
+        _validate_boundary_ordinal(
+            conn,
+            user_id=item.user_id,
+            conversation_id=item.conversation_id,
+            boundary_user_message_id=question.replay_boundary_user_message_id,
+            expected_ordinal=question.selected_ordinal,
+        )
         _validate_archive_anchor(
             conn,
             user_id=item.user_id,
@@ -518,6 +565,13 @@ def _validate_stored_anchor(
             conversation_id=item.conversation_id,
             previous_assistant_message_id=question.prompt_assistant_message_id,
             boundary_user_message_id=question.failure_boundary_user_message_id,
+        )
+        _validate_boundary_ordinal(
+            conn,
+            user_id=item.user_id,
+            conversation_id=item.conversation_id,
+            boundary_user_message_id=question.failure_boundary_user_message_id,
+            expected_ordinal=question.failed_ordinal,
         )
         _validate_source_free_replay_failure_publication(
             conn,
@@ -1099,6 +1153,13 @@ def accept_archive_candidate_selection_in_transaction(
         previous_assistant_message_id=current.question.prompt_assistant_message_id,
         boundary_user_message_id=new_boundary_user_message_id,
     )
+    _validate_boundary_ordinal(
+        conn,
+        user_id=user,
+        conversation_id=conversation,
+        boundary_user_message_id=new_boundary_user_message_id,
+        expected_ordinal=selected_ordinal,
+    )
     plan_digest = _digest(new_accepted_plan_sha256, label="new_accepted_plan_sha256")
     outcome_digest = _digest(
         new_accepted_outcome_sha256,
@@ -1227,6 +1288,13 @@ def suspend_after_replay_failure_in_transaction(
         conversation_id=conversation,
         previous_assistant_message_id=current.question.prompt_assistant_message_id,
         boundary_user_message_id=new_boundary_user_message_id,
+    )
+    _validate_boundary_ordinal(
+        conn,
+        user_id=user,
+        conversation_id=conversation,
+        boundary_user_message_id=new_boundary_user_message_id,
+        expected_ordinal=selected_ordinal,
     )
     plan_digest = _digest(new_accepted_plan_sha256, label="new_accepted_plan_sha256")
     outcome_digest = _digest(
