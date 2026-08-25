@@ -70,7 +70,7 @@ journal, без ручного запуска systemd или восстанов�
 ### Optional GPT-OSS secondary brain
 
 Релизы 0.207.11–0.207.22 ввели default-off поддержку и provisional public
-`shadow/extract`. В live 0.207.23 complete physical/profile chain принят: code-owned
+`shadow/extract`. В 0.207.23 complete physical/profile chain принят: code-owned
 accepted-реестр содержит ровно exact finalist с accepted-manifest SHA-256
 `93ea5698b8b6a9bf8a7dc697ffe37d7353055aa16555188991747bba73d059e3`,
 а provisional-реестр пуст. Первый accepted release сохраняет public
@@ -78,14 +78,19 @@ accepted-реестр содержит ровно exact finalist с accepted-man
 effects и publication остаются за primary. Регистрация профиля сама по себе не
 открывает private shadow или `assist`.
 
-Source 0.207.24 готовит только отдельный private-shadow candidate:
-`ALLOW_PRIVATE_TEXT=0→1` при неизменных `mode=shadow` и
-`workload=extract`. Он ещё не развёрнут, а его обязательный свежий
-public product receipt ещё не принят. Даже после этого cutover typed
-secondary output будет валидироваться и выбрасываться; ответ, tools,
-effects и publication останутся только у primary.
+В live 0.207.24 развёрнут отдельный private shadow:
+`ALLOW_PRIVATE_TEXT=1` при `mode=shadow` и `workload=extract`.
+Typed secondary output валидируется и выбрасывается; ответ, tools,
+effects и publication остаются только у primary.
 
-На ноутбуке установлен и в source 0.207.24 включён fail-closed at-logon
+Source 0.207.25 готовит distinct assist-candidate: единственная
+конфигурационная разница — `mode=shadow→assist`. До cutover нужен
+свежий `product-stage --stage private-shadow` receipt. В assist только
+валидированная typed Inbox extraction может заменить primary
+extraction; knowledge write всё равно требует review, а tools, effects и
+publication недоступны. Любая ошибка ведёт в exact primary fallback.
+
+На ноутбуке установлен и с 0.207.24 включён fail-closed at-logon
 gateway publication recovery. После готовности LAN, Docker и exact healthy
 `friday-secondary-gateway` он требует два последовательных совпавших
 доказательства отсутствия exact `192.168.1.35:8443` publication и TCP
@@ -683,7 +688,7 @@ orchestration.model_gate.verified_context_tokens = 8192
 ```
 
 Во время probe `/api/health` ещё недоступен. Ждите до 420 секунд и дополнительно
-требуйте `status=ok` и `version=0.207.24`.
+требуйте `status=ok` и `version=0.207.25`.
 
 HTTP `status=ok` при `installed_mode=legacy` означает безопасную деградацию, но
 не успешный canary. В `canary`/`v12` Sentinel не реже раза в минуту

@@ -1,3 +1,20 @@
+## 0.207.25 — 2026-08-25
+
+### Bounded assist GPT-OSS
+
+- Этот distinct source candidate готовит только переход
+  из принятого private discarded shadow: `mode=shadow→assist` при
+  неизменных private admission, workload и exact accepted profile.
+  Activation требует свежий owner-private
+  `product-stage --stage private-shadow` receipt.
+- Assist использует только валидированную typed extraction для
+  bounded Inbox advice. Secondary не получает tools, effects,
+  publication или права на запись знания; любой admission,
+  transport, deadline, protocol или validation failure возвращает
+  exact primary-only path.
+- Код функционально не меняется: release разделяет и аттестует
+  уже реализованную assist-ступень без расширения её полномочий.
+
 ## 0.207.24 — 2026-08-25
 
 ### Отдельный private discarded shadow GPT-OSS
