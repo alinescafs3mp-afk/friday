@@ -4950,11 +4950,11 @@ def test_actual_installed_source_smoke_ignores_a_poisoned_live_database(
         commit="a" * 40,
         version=version,
         tree_manifest_sha256="b" * 64,
-        max_schema=40,
+        max_schema=41,
         memory_vault_mode_contract=operator.MEMORY_VAULT_MODE_CONTRACT,
         obsidian_cutover_contract=operator.OBSIDIAN_CUTOVER_CONTRACT,
     )
-    receipt = b'{"memory_vault_mode_contract":"v1","schema":40,"status":"clear"}\n'
+    receipt = b'{"memory_vault_mode_contract":"v1","schema":41,"status":"clear"}\n'
     assert operator.installed_surface_smoke(release) == hashlib.sha256(receipt).hexdigest()
     assert current_database.read_bytes() == b"live-current"
     assert legacy_database.read_bytes() == b"live-legacy"

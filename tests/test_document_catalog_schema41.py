@@ -162,7 +162,12 @@ def test_exact_schema_40_file_migrates_to_backfill_pending_then_current(
         )
         pending = migrated.get_document_catalog_entry("fixture-owner", "raw-catalog-schema40-migration")
         assert pending is not None and pending["incomplete_reason"] == "backfill_pending"
-        assert migrated.backfill_document_catalog("fixture-owner", limit=10)["processed"] == 1
+        assert (
+            migrated.backfill_document_catalog("fixture-owner", after_raw_object_id=None, limit=10)[
+                "processed"
+            ]
+            == 1
+        )
         current = migrated.get_document_catalog_entry("fixture-owner", "raw-catalog-schema40-migration")
         assert current is not None and current["enrichment_status"] == "current"
     finally:
@@ -437,7 +442,7 @@ def test_duplicate_extraction_receipt_keys_fail_explicitly(storage: FridayStorag
         "UPDATE raw_objects SET metadata_json=? WHERE id=?",
         ('{"text_extraction_success":true,"text_extraction_success":false}', raw.id),
     )
-    result = storage.backfill_document_catalog("alice", limit=10)
+    result = storage.backfill_document_catalog("alice", after_raw_object_id=None, limit=10)
     assert result["processed"] == 1
     row = storage.get_document_catalog_entry("alice", raw.id)
     assert row is not None
@@ -496,10 +501,32 @@ def test_raw_revision_and_metadata_mutation_clear_stale_title_without_json_parsi
     storage.execute("UPDATE raw_objects SET metadata_json='malformed{' WHERE id=?", (raw.id,))
     row = storage.execute("SELECT * FROM document_catalog WHERE raw_object_id=?", (raw.id,)).fetchone()
     assert row["incomplete_reason"] == "source_changed"
-    result = storage.backfill_document_catalog("alice", limit=10)
+    result = storage.backfill_document_catalog("alice", after_raw_object_id=None, limit=10)
     assert result["processed"] == 1
     row = storage.get_document_catalog_entry("alice", raw.id)
     assert row is not None and row["incomplete_reason"] == "extraction_failed"
+
+
+def test_same_write_source_and_metadata_replacement_rebinds_without_blocking_raw(
+    storage: FridayStorage,
+) -> None:
+    raw = _file(storage, 151)
+    replacement = "# Replacement\nThe registered source changed."
+    replacement_hash = hashlib.sha256(b"replacement file bytes").hexdigest()
+
+    storage.execute(
+        """UPDATE raw_objects
+              SET raw_content=?,content_hash=?,metadata_json=?
+            WHERE id=?""",
+        (replacement, replacement_hash, "malformed{", raw.id),
+    )
+
+    row = storage.get_document_catalog_entry("alice", raw.id)
+    assert row is not None
+    assert row["source_version"] == raw.version
+    assert row["source_content_sha256"] == replacement_hash
+    assert row["enrichment_status"] == "incomplete"
+    assert row["incomplete_reason"] == "source_changed"
 
 
 def test_invalid_legacy_revision_is_explicit_incomplete_not_a_raw_write_failure(
@@ -517,12 +544,13 @@ def test_invalid_legacy_revision_is_explicit_incomplete_not_a_raw_write_failure(
     after_metadata_update = storage.get_document_catalog_entry("alice", raw.id)
     assert after_metadata_update is not None
     assert after_metadata_update["incomplete_reason"] == "source_unavailable"
-    assert storage.reconcile_document_catalog("alice") == {
-        "examined": 0,
+    assert storage.reconcile_document_catalog("alice", after_raw_object_id=None) == {
+        "examined": 1,
         "inserted": 0,
         "reset": 0,
         "removed": 0,
         "has_more": False,
+        "next_after_raw_object_id": None,
     }
 
 
@@ -554,18 +582,30 @@ def test_backfill_converges_across_pages_and_restart_without_cursor_starvation(
                     WHERE raw_object_id=?""",
                 ((raw_id,) for raw_id in raw_ids),
             )
-        one = first.backfill_document_catalog("alice", limit=2)
+        one = first.backfill_document_catalog("alice", after_raw_object_id=None, limit=2)
         assert one["processed"] == 2 and one["has_more"] is True
+        first.kv_set("test:document-catalog-cursor", str(one["next_after_raw_object_id"]))
     finally:
         first.close(final=True)
 
     reopened = FridayStorage(settings)
     try:
-        assert reopened.backfill_document_catalog("alice", limit=2)["has_more"] is True
-        assert reopened.backfill_document_catalog("alice", limit=2)["has_more"] is True
-        final = reopened.backfill_document_catalog("alice", limit=2)
+        cursor = str(reopened.kv_get("test:document-catalog-cursor") or "")
+        second = reopened.backfill_document_catalog("alice", after_raw_object_id=cursor, limit=2)
+        assert second["processed"] == 2 and second["has_more"] is True
+        third = reopened.backfill_document_catalog(
+            "alice",
+            after_raw_object_id=str(second["next_after_raw_object_id"]),
+            limit=2,
+        )
+        assert third["processed"] == 2 and third["has_more"] is True
+        final = reopened.backfill_document_catalog(
+            "alice",
+            after_raw_object_id=str(third["next_after_raw_object_id"]),
+            limit=2,
+        )
         assert final["processed"] == 1 and final["has_more"] is False
-        empty = reopened.backfill_document_catalog("alice", limit=2)
+        empty = reopened.backfill_document_catalog("alice", after_raw_object_id=raw_ids[-1], limit=2)
         assert empty["processed"] == 0 and empty["has_more"] is False
         coverage = reopened.document_catalog_coverage("alice")
         assert coverage["coverage_complete"] is True
@@ -573,6 +613,75 @@ def test_backfill_converges_across_pages_and_restart_without_cursor_starvation(
         assert coverage["incomplete_reasons"]["extraction_incomplete"] == 7
     finally:
         reopened.close(final=True)
+
+
+def test_keyset_checkpoint_round_trips_every_schema_valid_raw_text_id(
+    storage: FridayStorage,
+) -> None:
+    storage.ensure_user("alice")
+    raw_ids = ["", " a", " b", "a", "a" * 201, "z"]
+    for index, raw_id in enumerate(raw_ids):
+        body = f"# Opaque cursor {index}\nBody"
+        storage.store_raw_object(
+            RawObject(
+                id=raw_id,
+                user_id="alice",
+                source="upload",
+                source_ref=f"opaque-cursor:{index}",
+                raw_content=body,
+                content_type="file",
+                metadata_json=_receipt(body),
+                content_hash=hashlib.sha256(f"opaque-{index}".encode()).hexdigest(),
+            )
+        )
+    with storage.transaction() as conn:
+        conn.executemany(
+            """UPDATE document_catalog
+                  SET enrichment_status='incomplete',incomplete_reason='backfill_pending',
+                      extracted_text_sha256=NULL,semantic_title=NULL
+                WHERE raw_object_id=?""",
+            ((raw_id,) for raw_id in raw_ids),
+        )
+
+    cursor: str | None = None
+    for index, raw_id in enumerate(raw_ids):
+        report = storage.backfill_document_catalog(
+            "alice",
+            after_raw_object_id=cursor,
+            limit=1,
+        )
+        assert report["examined"] == report["processed"] == 1
+        if index < len(raw_ids) - 1:
+            assert report["has_more"] is True
+            assert report["next_after_raw_object_id"] == raw_id
+            cursor = raw_id
+        else:
+            assert report["has_more"] is False
+            assert report["next_after_raw_object_id"] is None
+    for raw_id in raw_ids:
+        entry = storage.get_document_catalog_entry("alice", raw_id)
+        assert entry is not None and entry["raw_object_id"] == raw_id
+
+    storage.execute(
+        """UPDATE document_catalog
+              SET enrichment_status='incomplete',incomplete_reason='backfill_pending',
+                  extracted_text_sha256=NULL,semantic_title=NULL
+            WHERE raw_object_id=' a'"""
+    )
+    source = storage.execute("SELECT version,content_hash FROM raw_objects WHERE id=' a'").fetchone()
+    assert source is not None
+    updated = storage.upsert_document_catalog_entry(
+        "alice",
+        " a",
+        expected_source_version=int(source["version"]),
+        expected_source_content_sha256=str(source["content_hash"]),
+    )
+    assert updated is not None and updated["raw_object_id"] == " a"
+    assert storage.get_document_catalog_entry("alice", "a") is not None
+    with pytest.raises(ValueError, match="exact TEXT or None"):
+        storage.backfill_document_catalog("alice", after_raw_object_id=1, limit=1)  # type: ignore[arg-type]
+    with pytest.raises(ValueError, match="exact TEXT"):
+        storage.get_document_catalog_entry("alice", None)  # type: ignore[arg-type]
 
 
 def test_backfill_streams_bodies_under_a_strict_byte_budget_with_oversized_progress(
@@ -594,16 +703,72 @@ def test_backfill_streams_bodies_under_a_strict_byte_budget_with_oversized_progr
         "DOCUMENT_CATALOG_RAW_TEXT_WORK_BUDGET_BYTES",
         16,
     )
+    original_source = document_catalog_storage._raw_projection_source  # noqa: SLF001
+    body_reads: list[str] = []
 
-    first = storage.backfill_document_catalog("alice", limit=10)
+    def observed_source(
+        conn: sqlite3.Connection,
+        *,
+        owner: str,
+        raw_object_id: str,
+    ) -> sqlite3.Row | None:
+        body_reads.append(raw_object_id)
+        return original_source(conn, owner=owner, raw_object_id=raw_object_id)
+
+    monkeypatch.setattr(document_catalog_storage, "_raw_projection_source", observed_source)
+
+    first = storage.backfill_document_catalog("alice", after_raw_object_id=None, limit=10)
     assert first["processed"] == 1
     assert first["has_more"] is True
     assert first["byte_budget_reached"] is True
     assert first["raw_text_bytes_examined"] == len(body.encode()) > 16
-    second = storage.backfill_document_catalog("alice", limit=10)
+    assert body_reads == [raw_ids[0]]
+    second = storage.backfill_document_catalog(
+        "alice",
+        after_raw_object_id=str(first["next_after_raw_object_id"]),
+        limit=10,
+    )
     assert second["processed"] == 1 and second["has_more"] is True
-    final = storage.backfill_document_catalog("alice", limit=10)
+    assert body_reads == raw_ids[:2]
+    final = storage.backfill_document_catalog(
+        "alice",
+        after_raw_object_id=str(second["next_after_raw_object_id"]),
+        limit=10,
+    )
     assert final["processed"] == 1 and final["has_more"] is False
+    assert body_reads == raw_ids
+
+
+def test_backfill_reads_a_body_only_after_the_indexed_page_marks_it_retryable(
+    storage: FridayStorage,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    raw_ids = [_file(storage, 320 + index).id for index in range(4)]
+    storage.execute(
+        """UPDATE document_catalog
+              SET enrichment_status='incomplete',incomplete_reason='backfill_pending',
+                  extracted_text_sha256=NULL,semantic_title=NULL
+            WHERE raw_object_id=?""",
+        (raw_ids[-1],),
+    )
+    original = document_catalog_storage._raw_projection_source  # noqa: SLF001
+    body_reads: list[str] = []
+
+    def observed_source(
+        conn: sqlite3.Connection,
+        *,
+        owner: str,
+        raw_object_id: str,
+    ) -> sqlite3.Row | None:
+        body_reads.append(raw_object_id)
+        return original(conn, owner=owner, raw_object_id=raw_object_id)
+
+    monkeypatch.setattr(document_catalog_storage, "_raw_projection_source", observed_source)
+    report = storage.backfill_document_catalog("alice", after_raw_object_id=None, limit=4)
+
+    assert report["examined"] == 4
+    assert report["processed"] == 1
+    assert body_reads == [raw_ids[-1]]
 
 
 def test_rebuild_byte_budget_cursor_and_reconcile_has_more_are_bounded(
@@ -617,11 +782,25 @@ def test_rebuild_byte_budget_cursor_and_reconcile_has_more_are_bounded(
         "DOCUMENT_CATALOG_RAW_TEXT_WORK_BUDGET_BYTES",
         16,
     )
+    original_source = document_catalog_storage._raw_projection_source  # noqa: SLF001
+    body_reads: list[str] = []
+
+    def observed_source(
+        conn: sqlite3.Connection,
+        *,
+        owner: str,
+        raw_object_id: str,
+    ) -> sqlite3.Row | None:
+        body_reads.append(raw_object_id)
+        return original_source(conn, owner=owner, raw_object_id=raw_object_id)
+
+    monkeypatch.setattr(document_catalog_storage, "_raw_projection_source", observed_source)
     first = storage.rebuild_document_catalog("alice", limit=10)
     assert first["processed"] == 1
     assert first["has_more"] is True
     assert first["byte_budget_reached"] is True
     assert first["next_after_raw_object_id"] == raw_ids[0]
+    assert body_reads == [raw_ids[0]]
     second = storage.rebuild_document_catalog(
         "alice",
         after_raw_object_id=str(first["next_after_raw_object_id"]),
@@ -629,23 +808,59 @@ def test_rebuild_byte_budget_cursor_and_reconcile_has_more_are_bounded(
     )
     assert second["processed"] == 1
     assert second["next_after_raw_object_id"] == raw_ids[1]
+    assert body_reads == raw_ids[:2]
 
     with storage.transaction() as conn:
         conn.executemany(
             "DELETE FROM document_catalog WHERE raw_object_id=?",
             ((raw_id,) for raw_id in raw_ids),
         )
-    reconciled = storage.reconcile_document_catalog("alice", limit=1)
+    reconciled = storage.reconcile_document_catalog("alice", after_raw_object_id=None, limit=1)
     assert reconciled == {
         "examined": 1,
         "inserted": 1,
         "reset": 0,
         "removed": 0,
         "has_more": True,
+        "next_after_raw_object_id": raw_ids[0],
     }
-    assert storage.reconcile_document_catalog("alice", limit=256)["has_more"] is False
+    assert (
+        storage.reconcile_document_catalog(
+            "alice",
+            after_raw_object_id=str(reconciled["next_after_raw_object_id"]),
+            limit=256,
+        )["has_more"]
+        is False
+    )
     with pytest.raises(ValueError, match="between 1 and 256"):
-        storage.backfill_document_catalog("alice", limit=257)
+        storage.backfill_document_catalog("alice", after_raw_object_id=None, limit=257)
+
+
+def test_convergence_pages_use_the_owner_keyset_without_a_temp_sort(
+    storage: FridayStorage,
+) -> None:
+    _file(storage, 305)
+    statements: list[str] = []
+    storage.conn.set_trace_callback(statements.append)
+    try:
+        storage.rebuild_document_catalog("alice", after_raw_object_id="", limit=1)
+        storage.backfill_document_catalog("alice", after_raw_object_id="", limit=1)
+        storage.reconcile_document_catalog("alice", after_raw_object_id="", limit=1)
+    finally:
+        storage.conn.set_trace_callback(None)
+
+    page_queries = [
+        statement
+        for statement in statements
+        if "INDEXED BY idx_document_catalog_source_owner_id" in statement
+    ]
+    assert len(page_queries) == 3
+    for query in page_queries:
+        plan = storage.execute("EXPLAIN QUERY PLAN " + query).fetchall()
+        details = "\n".join(str(row[3]) for row in plan)
+        assert "idx_document_catalog_source_owner_id" in details
+        assert "TEMP B-TREE" not in details
+        assert "source.id>" in query.replace(" ", "")
 
 
 def test_exact_schema_validator_rejects_missing_and_extra_objects(storage: FridayStorage) -> None:
@@ -662,6 +877,34 @@ def test_exact_schema_validator_rejects_missing_and_extra_objects(storage: Frida
     storage.execute("DROP TRIGGER unrelated_sidecar_reader")
     storage.execute("DROP TRIGGER document_catalog_raw_au_extraction_state")
     with pytest.raises(sqlite3.DatabaseError, match="DDL"):
+        validate_document_catalog_schema(storage.conn)
+
+
+@pytest.mark.parametrize(
+    ("version", "content_hash", "counterfeit_assignment"),
+    (
+        (1, "invalid", "source_version=NULL"),
+        (0, "a" * 64, "source_content_sha256=NULL"),
+    ),
+)
+def test_schema_validator_rejects_null_mixed_source_binding_corruption(
+    storage: FridayStorage,
+    version: int,
+    content_hash: str,
+    counterfeit_assignment: str,
+) -> None:
+    raw = _file(storage, 310 + version, version=version, content_hash=content_hash)
+    trigger_sql = storage.execute(
+        "SELECT sql FROM sqlite_master WHERE type='trigger' AND name='document_catalog_bu_validate'"
+    ).fetchone()[0]
+    storage.execute("DROP TRIGGER document_catalog_bu_validate")
+    storage.execute(
+        f"UPDATE document_catalog SET {counterfeit_assignment} WHERE raw_object_id=?",  # nosec B608
+        (raw.id,),
+    )
+    storage.execute(str(trigger_sql))
+
+    with pytest.raises(sqlite3.DatabaseError, match="source binding"):
         validate_document_catalog_schema(storage.conn)
 
 

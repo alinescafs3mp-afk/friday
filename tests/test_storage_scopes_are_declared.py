@@ -208,7 +208,9 @@ APPROVAL_TENANT_WITH_A_SEPARATE_PERSON = {
 # 298 → 300: purge_secondary_product_witness and
 # consume_secondary_product_rollout_attestation operate on the shared archive
 # tenant; uploader/person identity is bound separately by the witness proof.
-EXPECTED_USER_ID_METHODS = 300
+# 300 → 306: the body-free DocumentCatalog read/upsert/rebuild/backfill/
+# reconcile/coverage surface is partitioned by the Raw Object tenant.
+EXPECTED_USER_ID_METHODS = 306
 
 
 def _methods_taking_user_id() -> set[str]:

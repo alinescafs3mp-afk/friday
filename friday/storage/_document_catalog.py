@@ -94,12 +94,24 @@ def _bounded_limit(value: int) -> int:
     return value
 
 
+def _bounded_cursor(value: str | None) -> str | None:
+    if value is not None and type(value) is not str:
+        raise ValueError("after_raw_object_id must be exact TEXT or None")
+    return value
+
+
+def _exact_raw_object_id(value: str) -> str:
+    if type(value) is not str:
+        raise ValueError("raw_object_id must be exact TEXT")
+    return value
+
+
 def _raw_text_descriptors(
     conn: sqlite3.Connection,
     query: str,
     params: tuple[object, ...],
 ) -> list[sqlite3.Row]:
-    """Fetch only bounded identities and byte sizes before sidecar mutations."""
+    """Fetch one bounded body-free identity/state page before sidecar mutations."""
 
     return conn.execute(query, params).fetchall()
 
@@ -116,6 +128,21 @@ def _raw_projection_source(
             WHERE id=? AND user_id=? AND content_type='file' AND deleted_at IS NULL""",
         (raw_object_id, owner),
     ).fetchone()
+
+
+def _raw_projection_size(
+    conn: sqlite3.Connection,
+    *,
+    owner: str,
+    raw_object_id: str,
+) -> int | None:
+    row = conn.execute(
+        """SELECT COALESCE(length(CAST(raw_content AS BLOB)),0) AS raw_text_bytes
+             FROM raw_objects
+            WHERE id=? AND user_id=? AND content_type='file' AND deleted_at IS NULL""",
+        (raw_object_id, owner),
+    ).fetchone()
+    return None if row is None else max(0, int(row["raw_text_bytes"] or 0))
 
 
 def _fits_raw_text_budget(*, processed: int, consumed: int, next_size: int) -> bool:
@@ -189,7 +216,7 @@ def _write_projection(
               OR document_catalog.enrichment_status<>excluded.enrichment_status
               OR document_catalog.incomplete_reason IS NOT excluded.incomplete_reason""",
         (
-            str(raw["id"]),
+            _exact_raw_object_id(raw["id"]),
             source_version,
             source_hash,
             extracted_hash,
@@ -239,9 +266,7 @@ class DocumentCatalogMixin(StorageShared):
         """Read one live exact projection through its authoritative owner."""
 
         owner = validate_user_id(user_id)
-        raw_id = str(raw_object_id or "").strip()
-        if not raw_id:
-            return None
+        raw_id = _exact_raw_object_id(raw_object_id)
         source_binding = document_catalog_source_binding_sql()
         row = self.execute(
             f"""SELECT catalog.*
@@ -268,9 +293,7 @@ class DocumentCatalogMixin(StorageShared):
         """CAS one source-derived catalog entry without accepting prose input."""
 
         owner = validate_user_id(user_id)
-        raw_id = str(raw_object_id or "").strip()
-        if not raw_id:
-            raise ValueError("raw_object_id is required")
+        raw_id = _exact_raw_object_id(raw_object_id)
         if type(expected_source_version) is not int or expected_source_version < 1:
             raise ValueError("expected_source_version must be a positive integer")
         if _valid_sha256(expected_source_content_sha256) is None:
@@ -321,16 +344,16 @@ class DocumentCatalogMixin(StorageShared):
         self,
         user_id: str,
         *,
-        after_raw_object_id: str = "",
+        after_raw_object_id: str | None = None,
         limit: int = DOCUMENT_CATALOG_DEFAULT_WORK_ITEMS,
     ) -> dict[str, Any]:
         """Deterministically enrich one bounded owner page from authoritative Raw."""
 
         owner = validate_user_id(user_id)
         bounded = _bounded_limit(limit)
-        cursor = str(after_raw_object_id or "").strip()
-        if len(cursor) > 200 or any(ord(character) < 32 for character in cursor):
-            raise ValueError("after_raw_object_id is invalid")
+        cursor = _bounded_cursor(after_raw_object_id)
+        cursor_predicate = "" if cursor is None else "AND source.id>?"
+        cursor_params: tuple[object, ...] = () if cursor is None else (cursor,)
         now = _canonical_timestamp(None)
         reason_counts: Counter[str] = Counter()
         current = 0
@@ -341,15 +364,19 @@ class DocumentCatalogMixin(StorageShared):
         with self.transaction() as conn:
             descriptors = _raw_text_descriptors(
                 conn,
-                """SELECT id,COALESCE(length(CAST(raw_content AS BLOB)),0) AS raw_text_bytes
-                     FROM raw_objects
-                    WHERE user_id=? AND content_type='file' AND deleted_at IS NULL
-                      AND id>?
-                    ORDER BY id ASC LIMIT ?""",
-                (owner, cursor, bounded + 1),
+                f"""SELECT source.id
+                     FROM raw_objects AS source
+                          INDEXED BY idx_document_catalog_source_owner_id
+                    WHERE source.user_id=? AND source.content_type='file'
+                      AND source.deleted_at IS NULL {cursor_predicate}
+                    ORDER BY source.id ASC LIMIT ?""",  # nosec B608 - fixed cursor predicate
+                (owner, *cursor_params, bounded + 1),
             )
             for descriptor in descriptors[:bounded]:
-                raw_text_bytes = max(0, int(descriptor["raw_text_bytes"] or 0))
+                raw_id = _exact_raw_object_id(descriptor["id"])
+                raw_text_bytes = _raw_projection_size(conn, owner=owner, raw_object_id=raw_id)
+                if raw_text_bytes is None:
+                    continue
                 if not _fits_raw_text_budget(
                     processed=len(processed_ids),
                     consumed=consumed_bytes,
@@ -357,7 +384,6 @@ class DocumentCatalogMixin(StorageShared):
                 ):
                     stopped_for_budget = True
                     break
-                raw_id = str(descriptor["id"])
                 raw = _raw_projection_source(conn, owner=owner, raw_object_id=raw_id)
                 if raw is None:
                     continue
@@ -379,6 +405,7 @@ class DocumentCatalogMixin(StorageShared):
                     reason_counts[reason.value] += 1
                 processed_ids.append(raw_id)
                 consumed_bytes += raw_text_bytes
+                del extracted_text, raw
             has_more = len(descriptors) > len(processed_ids)
         return {
             "processed": len(processed_ids),
@@ -399,12 +426,16 @@ class DocumentCatalogMixin(StorageShared):
         self,
         user_id: str,
         *,
+        after_raw_object_id: str | None,
         limit: int = DOCUMENT_CATALOG_DEFAULT_WORK_ITEMS,
     ) -> dict[str, Any]:
-        """Converge one bounded retryable page without a process-local cursor."""
+        """Converge retryable rows in one bounded, caller-checkpointed Raw page."""
 
         owner = validate_user_id(user_id)
         bounded = _bounded_limit(limit)
+        cursor = _bounded_cursor(after_raw_object_id)
+        cursor_predicate = "" if cursor is None else "AND source.id>?"
+        cursor_params: tuple[object, ...] = () if cursor is None else (cursor,)
         now = _canonical_timestamp(None)
         source_binding = document_catalog_source_binding_sql()
         reason_counts: Counter[str] = Counter()
@@ -412,29 +443,36 @@ class DocumentCatalogMixin(StorageShared):
         current = 0
         consumed_bytes = 0
         processed_ids: list[str] = []
+        examined_ids: list[str] = []
         stopped_for_budget = False
         with self.transaction() as conn:
             descriptors = _raw_text_descriptors(
                 conn,
                 f"""SELECT source.id,
-                           COALESCE(length(CAST(source.raw_content AS BLOB)),0) AS raw_text_bytes
-                      FROM raw_objects source
+                           CASE WHEN catalog.raw_object_id IS NULL
+                                  OR NOT ({source_binding})
+                                  OR (catalog.enrichment_status='incomplete'
+                                      AND catalog.incomplete_reason IN (
+                                          'backfill_pending','source_changed'
+                                      ))
+                                THEN 1 ELSE 0 END AS retryable
+                      FROM raw_objects AS source
+                           INDEXED BY idx_document_catalog_source_owner_id
                       LEFT JOIN document_catalog catalog ON catalog.raw_object_id=source.id
                      WHERE source.user_id=? AND source.content_type='file'
-                       AND source.deleted_at IS NULL
-                       AND (
-                            catalog.raw_object_id IS NULL
-                            OR NOT ({source_binding})
-                            OR (catalog.enrichment_status='incomplete'
-                                AND catalog.incomplete_reason IN (
-                                    'backfill_pending','source_changed'
-                                ))
-                       )
+                       AND source.deleted_at IS NULL {cursor_predicate}
                      ORDER BY source.id LIMIT ?""",  # nosec B608 - canonical fixed predicate
-                (owner, bounded + 1),
+                (owner, *cursor_params, bounded + 1),
             )
             for descriptor in descriptors[:bounded]:
-                raw_text_bytes = max(0, int(descriptor["raw_text_bytes"] or 0))
+                raw_id = _exact_raw_object_id(descriptor["id"])
+                if not bool(descriptor["retryable"]):
+                    examined_ids.append(raw_id)
+                    continue
+                raw_text_bytes = _raw_projection_size(conn, owner=owner, raw_object_id=raw_id)
+                if raw_text_bytes is None:
+                    examined_ids.append(raw_id)
+                    continue
                 if not _fits_raw_text_budget(
                     processed=len(processed_ids),
                     consumed=consumed_bytes,
@@ -442,9 +480,9 @@ class DocumentCatalogMixin(StorageShared):
                 ):
                     stopped_for_budget = True
                     break
-                raw_id = str(descriptor["id"])
                 raw = _raw_projection_source(conn, owner=owner, raw_object_id=raw_id)
                 if raw is None:
+                    examined_ids.append(raw_id)
                     continue
                 raw_status, raw_reason, extracted_text = _deterministic_projection(raw)
                 status = DocumentCatalogStatus(raw_status)
@@ -463,9 +501,12 @@ class DocumentCatalogMixin(StorageShared):
                     assert reason is not None
                     reason_counts[reason.value] += 1
                 processed_ids.append(raw_id)
+                examined_ids.append(raw_id)
                 consumed_bytes += raw_text_bytes
-            has_more = len(descriptors) > len(processed_ids)
+                del extracted_text, raw
+            has_more = len(descriptors) > len(examined_ids)
         return {
+            "examined": len(examined_ids),
             "processed": len(processed_ids),
             "changed": changed,
             "current": current,
@@ -474,6 +515,7 @@ class DocumentCatalogMixin(StorageShared):
                 reason: int(reason_counts.get(reason, 0)) for reason in DOCUMENT_CATALOG_INCOMPLETE_REASONS
             },
             "has_more": has_more,
+            "next_after_raw_object_id": examined_ids[-1] if has_more and examined_ids else None,
             "raw_text_bytes_examined": consumed_bytes,
             "raw_text_byte_budget": DOCUMENT_CATALOG_RAW_TEXT_WORK_BUDGET_BYTES,
             "byte_budget_reached": stopped_for_budget,
@@ -483,63 +525,52 @@ class DocumentCatalogMixin(StorageShared):
         self,
         user_id: str,
         *,
+        after_raw_object_id: str | None,
         limit: int = DOCUMENT_CATALOG_DEFAULT_WORK_ITEMS,
-    ) -> dict[str, int | bool]:
-        """Boundedly repair missing/stale derivative rows; never source authority."""
+    ) -> dict[str, Any]:
+        """Inspect one indexed Raw page and repair missing/stale derivative rows."""
 
         owner = validate_user_id(user_id)
         bounded = _bounded_limit(limit)
+        cursor = _bounded_cursor(after_raw_object_id)
+        cursor_predicate = "" if cursor is None else "AND source.id>?"
+        cursor_params: tuple[object, ...] = () if cursor is None else (cursor,)
         now = _canonical_timestamp(None)
-        removed = 0
         reset = 0
         inserted = 0
-        examined = 0
-        has_more = False
         source_binding = document_catalog_source_binding_sql()
         with self.transaction() as conn:
-            stale = conn.execute(
-                f"""SELECT catalog.raw_object_id,source.id AS source_id,
-                          source.version,source.content_hash,
-                          source.content_type,source.deleted_at
-                     FROM document_catalog catalog
-                     JOIN raw_objects source ON source.id=catalog.raw_object_id
-                    WHERE source.user_id=? AND (
-                          source.content_type<>'file'
-                          OR source.deleted_at IS NOT NULL
-                          OR NOT ({source_binding})
-                    )
-                    ORDER BY catalog.raw_object_id LIMIT ?""",  # nosec B608
-                (owner, bounded + 1),
+            descriptors = conn.execute(
+                f"""SELECT source.id,source.version,source.content_hash,
+                           CASE WHEN catalog.raw_object_id IS NULL THEN 1 ELSE 0 END AS missing,
+                           CASE WHEN catalog.raw_object_id IS NOT NULL
+                                      AND NOT ({source_binding})
+                                THEN 1 ELSE 0 END AS stale
+                      FROM raw_objects AS source
+                           INDEXED BY idx_document_catalog_source_owner_id
+                      LEFT JOIN document_catalog catalog ON catalog.raw_object_id=source.id
+                     WHERE source.user_id=? AND source.content_type='file'
+                       AND source.deleted_at IS NULL {cursor_predicate}
+                     ORDER BY source.id LIMIT ?""",  # nosec B608 - canonical fixed predicate
+                (owner, *cursor_params, bounded + 1),
             ).fetchall()
-            stale_page = stale[:bounded]
-            for row in stale_page:
-                examined += 1
-                if row["content_type"] != "file" or row["deleted_at"] is not None:
-                    removed += max(
-                        0,
-                        int(
-                            conn.execute(
-                                "DELETE FROM document_catalog WHERE raw_object_id=?",
-                                (row["raw_object_id"],),
-                            ).rowcount
-                        ),
-                    )
-                    continue
-                source = conn.execute(
-                    """SELECT id,version,content_hash
-                         FROM raw_objects WHERE id=? AND user_id=?
-                           AND content_type='file' AND deleted_at IS NULL""",
-                    (row["raw_object_id"], owner),
-                ).fetchone()
-                if source is None:
+            page = descriptors[:bounded]
+            for source in page:
+                missing = bool(source["missing"])
+                stale = bool(source["stale"])
+                if not missing and not stale:
                     continue
                 reason = (
-                    DocumentCatalogIncompleteReason.SOURCE_CHANGED
+                    DocumentCatalogIncompleteReason.BACKFILL_PENDING
+                    if missing
+                    and _valid_source_version(source["version"]) is not None
+                    and _valid_sha256(source["content_hash"]) is not None
+                    else DocumentCatalogIncompleteReason.SOURCE_CHANGED
                     if _valid_source_version(source["version"]) is not None
                     and _valid_sha256(source["content_hash"]) is not None
                     else DocumentCatalogIncompleteReason.SOURCE_UNAVAILABLE
                 )
-                reset += _write_projection(
+                changed = _write_projection(
                     conn,
                     source,
                     status=DocumentCatalogStatus.INCOMPLETE,
@@ -547,43 +578,20 @@ class DocumentCatalogMixin(StorageShared):
                     extracted_text=None,
                     enriched_at=now,
                 )
-
-            has_more = len(stale) > len(stale_page)
-            remaining = max(0, bounded - len(stale_page))
-            if not has_more:
-                missing = conn.execute(
-                    """SELECT source.id,source.version,source.content_hash
-                         FROM raw_objects source
-                         LEFT JOIN document_catalog catalog ON catalog.raw_object_id=source.id
-                        WHERE source.user_id=? AND source.content_type='file'
-                          AND source.deleted_at IS NULL AND catalog.raw_object_id IS NULL
-                        ORDER BY source.id LIMIT ?""",
-                    (owner, max(1, remaining + 1)),
-                ).fetchall()
-                missing_page = missing[:remaining]
-                for source in missing_page:
-                    examined += 1
-                    reason = (
-                        DocumentCatalogIncompleteReason.BACKFILL_PENDING
-                        if _valid_source_version(source["version"]) is not None
-                        and _valid_sha256(source["content_hash"]) is not None
-                        else DocumentCatalogIncompleteReason.SOURCE_UNAVAILABLE
-                    )
-                    inserted += _write_projection(
-                        conn,
-                        source,
-                        status=DocumentCatalogStatus.INCOMPLETE,
-                        reason=reason,
-                        extracted_text=None,
-                        enriched_at=now,
-                    )
-                has_more = has_more or len(missing) > len(missing_page)
+                if missing:
+                    inserted += changed
+                else:
+                    reset += changed
+            has_more = len(descriptors) > len(page)
         return {
-            "examined": examined,
+            "examined": len(page),
             "inserted": inserted,
             "reset": reset,
-            "removed": removed,
+            # Exact Raw triggers prune non-live catalog rows in the same write;
+            # this bounded owner scan never performs an unindexed global sweep.
+            "removed": 0,
             "has_more": has_more,
+            "next_after_raw_object_id": (_exact_raw_object_id(page[-1]["id"]) if has_more and page else None),
         }
 
     def document_catalog_coverage(self, user_id: str) -> dict[str, Any]:

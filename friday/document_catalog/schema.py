@@ -137,6 +137,9 @@ CREATE INDEX IF NOT EXISTS idx_document_catalog_reason
 CREATE INDEX IF NOT EXISTS idx_document_catalog_text
     ON document_catalog(extracted_text_sha256, raw_object_id)
     WHERE enrichment_status='current';
+CREATE INDEX IF NOT EXISTS idx_document_catalog_source_owner_id
+    ON raw_objects(user_id, id)
+    WHERE content_type='file' AND deleted_at IS NULL;
 
 CREATE TRIGGER IF NOT EXISTS document_catalog_bi_validate
 BEFORE INSERT ON document_catalog
@@ -356,7 +359,17 @@ WHEN NEW.content_type='file' AND NEW.deleted_at IS NULL
  AND OLD.metadata_json IS NOT NEW.metadata_json
 BEGIN
     UPDATE document_catalog
-       SET extracted_text_sha256=NULL,
+       SET source_version=CASE
+               WHEN typeof(NEW.version)='integer' AND NEW.version>=1
+               THEN NEW.version ELSE NULL
+           END,
+           source_content_sha256=CASE
+               WHEN typeof(NEW.content_hash)='text'
+                 AND length(NEW.content_hash)=64
+                 AND NEW.content_hash NOT GLOB '*[^0-9a-f]*'
+               THEN NEW.content_hash ELSE NULL
+           END,
+           extracted_text_sha256=NULL,
            semantic_title=NULL,
            enrichment_revision={DOCUMENT_CATALOG_ENRICHMENT_REVISION},
            enrichment_status='incomplete',
@@ -593,6 +606,7 @@ _OBJECT_NAMES = frozenset(
         "document_catalog",
         "idx_document_catalog_status",
         "idx_document_catalog_reason",
+        "idx_document_catalog_source_owner_id",
         "idx_document_catalog_text",
         "document_catalog_bi_validate",
         "document_catalog_bu_validate",
@@ -637,7 +651,10 @@ def document_catalog_source_binding_sql(
     source = source_alias
     return f"""(
         (
-            {catalog}.source_version={source}.version
+            (
+                typeof({source}.version)='integer' AND {source}.version>=1
+                AND {catalog}.source_version IS {source}.version
+            )
             OR (
                 {catalog}.enrichment_status='incomplete'
                 AND {catalog}.incomplete_reason='source_unavailable'
@@ -647,7 +664,12 @@ def document_catalog_source_binding_sql(
         )
         AND
         (
-            {catalog}.source_content_sha256={source}.content_hash
+            (
+                typeof({source}.content_hash)='text'
+                AND length({source}.content_hash)=64
+                AND {source}.content_hash NOT GLOB '*[^0-9a-f]*'
+                AND {catalog}.source_content_sha256 IS {source}.content_hash
+            )
             OR (
                 {catalog}.enrichment_status='incomplete'
                 AND {catalog}.incomplete_reason='source_unavailable'
@@ -797,6 +819,7 @@ def validate_document_catalog_schema(
     expected_indexes = {
         "idx_document_catalog_status": ("enrichment_status", "raw_object_id"),
         "idx_document_catalog_reason": ("incomplete_reason", "raw_object_id"),
+        "idx_document_catalog_source_owner_id": ("user_id", "id"),
         "idx_document_catalog_text": ("extracted_text_sha256", "raw_object_id"),
     }
     observed_indexes = {
