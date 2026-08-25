@@ -1,8 +1,9 @@
 """Closed follow-up surface for replaying one selected archive source.
 
-The parser intentionally recognizes only a few self-contained references.  It
-does not infer a source, search again, or accept free-form instructions; those
-belong to the ordinary router or a future durable candidate-set controller.
+The parser recognizes the exact replay commands and bounded content questions
+which explicitly refer to the already selected source.  It does not infer a
+source, search again, compare corpora or admit effects; those belong to the
+ordinary router or a future durable candidate-set controller.
 """
 
 from __future__ import annotations
@@ -32,6 +33,7 @@ from friday.interaction_control_plane.work_item_contract import (
 )
 
 _MAX_SURFACE_LENGTH = 96
+_MAX_SURFACE_UTF8_BYTES = 512
 RECALL_SELECTED_ARCHIVE_EVIDENCE_WORK_ITEM_SCHEMA = "friday.recall-selected-archive-evidence-work-item.v1"
 _WORK_ITEM_ID_RE = re.compile(r"work_[0-9a-f]{16}\Z")
 _CONVERSATION_ID_RE = re.compile(r"conv_[0-9a-f]{16}\Z")
@@ -50,6 +52,400 @@ _FOLLOWUP_RE = re.compile(
     r")"
     r")[?!.]?$",
     re.IGNORECASE,
+)
+_NATURAL_QUESTION_START_RE = re.compile(
+    r"^(?:а[, ]+)?(?:"
+    r"что|кто|чем|какой|какая|какое|какие|каков|какова|каковы|чей|чья|чьё|"
+    r"когда|где|куда|откуда|почему|зачем|сколько|как|"
+    r"(?:есть|был(?:а|о|и)?|указан(?:а|о|ы)?|упомянут(?:а|о|ы)?|"
+    r"описан(?:а|о|ы)?|содержится?|говорится|следует|верно|правда) ли|"
+    r"what|who|which|when|where|why|how|whose|"
+    r"does|do|did|is|are|was|were|has|have|had|can|could|would|should"
+    r")\b",
+    re.IGNORECASE,
+)
+_STRONG_SELECTED_SOURCE_REFERENCE_RE = re.compile(
+    r"(?:"
+    r"\b(?:в|о|об) н[ёе]м\b|\b(?:в|о|об) ней\b|"
+    r"\bиз него\b|\bиз не[ёе]\b|\bпо нему\b|\bпо ней\b|"
+    r"\b(?:в|из|по|о|об) (?:этом|этого|этому|выбранном|выбранного|выбранному|"
+    r"ранее выбранном|ранее выбранного) "
+    r"(?:документе|документа|документу|файле|файла|файлу|"
+    r"сообщении|сообщения|сообщению|источнике|источника|источнику|"
+    r"фрагменте|фрагмента|фрагменту)\b|"
+    r"\b(?:этот|выбранный|ранее выбранный) "
+    r"(?:документ|файл|источник|фрагмент)\b|"
+    r"\b(?:это|выбранное|ранее выбранное) сообщение\b|"
+    r"\b(?:in|from|about) it\b|"
+    r"\b(?:in|from|about) (?:this|that selected|the selected|the previously selected) "
+    r"(?:document|file|message|source|passage)\b|"
+    r"\b(?:this|that selected|the selected|the previously selected) "
+    r"(?:document|file|message|source|passage)\b|"
+    r"\b(?:does|did|can) it (?:say|state|mention|contain|describe|show|indicate|specify)\b|"
+    r"\b(?:is|was) it (?:stated|mentioned|described|shown|specified)\b"
+    r")",
+    re.IGNORECASE,
+)
+_WEAK_SELECTED_SOURCE_REFERENCE_RE = re.compile(r"\b(?:там|there)\b", re.IGNORECASE)
+_WEAK_SOURCE_CONTENT_RE = re.compile(
+    r"\b(?:"
+    r"сказан\w*|написан\w*|указан\w*|упомянут\w*|описан\w*|содерж\w*|"
+    r"говор\w*|предлож\w*|срок\w*|дат\w*|вывод\w*|услов\w*|пункт\w*|"
+    r"автор\w*|имя|имени|имена|именем|имён|именами|решени\w*|причин\w*|"
+    r"сумм\w*|номер\w*|значени\w*|"
+    r"требован\w*|обязан\w*|перенос\w*|дедлайн\w*|"
+    r"said|written|stated|mentioned|described|contains?|contained|says|proposed|"
+    r"deadline|date|conclusion|term|clause|author|name|decision|reason|amount|"
+    r"number|value|requirement|obligation|delay"
+    r")\b",
+    re.IGNORECASE,
+)
+_REFERENCE_FIRST_QUESTION_RE = re.compile(
+    r"(?:"
+    r"^(?:а[, ]+)?(?:в н[ёе]м|в ней|из него|из не[ёе]|по нему|по ней|"
+    r"(?:о|об) н[ёе]м|(?:о|об) ней|там|"
+    r"(?:в|из|по|о|об) (?:этом|выбранном|ранее выбранном) "
+    r"(?:документе|файле|сообщении|источнике|фрагменте))[, ]+"
+    r"(?:что|кто|какой|какая|какое|какие|когда|где|почему|зачем|сколько|как)\b|"
+    r"^(?:(?:in|from|about) it|there|"
+    r"(?:in|from|about) (?:this|that selected|the selected|the previously selected) "
+    r"(?:document|file|message|source|passage))[, ]+"
+    r"(?:what|who|which|when|where|why|how|whose|"
+    r"does|do|did|is|are|was|were|has|have|had|can|could|would|should)\b"
+    r")",
+    re.IGNORECASE,
+)
+_CONTROL_META_RE = re.compile(
+    r"\b(?:ignore (?:all|any|the|these|those|prior|previous) instructions?|"
+    r"system prompt|developer message|chain of thought|"
+    r"hidden instructions?|(?:system|developer|internal) instructions?|"
+    r"системн\w* промпт\w*|скрыт\w* инструкц\w*|"
+    r"служебн\w* инструкц\w*|цепочк\w* мысл\w*|игнорир\w*|забудь|"
+    r"(?:служебн|системн|внутренн)\w* метаданн\w*|"
+    r"internal metadata|metadata (?:of|from) (?:the )?(?:work item|receipt|trace|runtime|system))\b",
+    re.IGNORECASE,
+)
+_RU_MIXED_ACTION_SUFFIX_RE = re.compile(
+    r"(?:,|\b(?:и|а затем|а потом|а заодно|затем|потом|заодно|после этого)\b|[-—])\s*"
+    r"(?:пожалуйста\s+)?(?:найди|найдите|поищи|поищите|ищи|ищите|отыщи|"
+    r"отыщите|разыщи|разыщите|"
+    r"проверь|проверьте|посмотри|посмотрите|прочитай|прочитайте|покажи|покажите|"
+    r"открой|откройте|закрой|закройте|перейди|перейдите|сравни|сравните|"
+    r"сопоставь|сопоставьте|создай|создайте|добавь|добавьте|допиши|допишите|"
+    r"запиши|запишите|измени|измените|удали|удалите|перемести|переместите|"
+    r"переименуй|переименуйте|сохрани|сохраните|отправь|отправьте|"
+    r"опубликуй|опубликуйте|экспортируй|экспортируйте|загрузи|загрузите|"
+    r"скачай|скачайте|напомни|напомните|запланируй|запланируйте|выполни|"
+    r"выполните|запусти|запустите|позвони|позвоните|поставь|поставьте|внеси|"
+    r"внесите|замени|замените|исправь|исправьте|перепиши|перепишите|скопируй|"
+    r"скопируйте|сделай|сделайте|напиши|напишите|пришли|пришлите|перешли|"
+    r"перешлите|скажи|скажите|дай|дайте|ответь|ответьте|верни|верните|"
+    r"выведи|выведите|обнови|обновите|установи|установите|подключи|подключите|"
+    r"прикрепи|прикрепите|распечатай|распечатайте|заполни|заполните|"
+    r"оформи|оформите|представь|представьте|переведи|переведите|перескажи|"
+    r"перескажите|суммируй|суммируйте|расскажи|расскажите|объясни|объясните|"
+    r"проанализируй|проанализируйте|перефразируй|перефразируйте|погугли|"
+    r"погуглите|загугли|загуглите|синхронизируй|синхронизируйте|"
+    r"найти|поискать|проверить|посмотреть|прочитать|показать|открыть|закрыть|"
+    r"перейти|сравнить|сопоставить|создать|добавить|дописать|записать|изменить|"
+    r"удалить|переместить|переименовать|сохранить|отправить|опубликовать|"
+    r"экспортировать|загрузить|скачать|напомнить|запланировать|выполнить|"
+    r"запустить|позвонить|написать|прислать|переслать|обновить|установить|"
+    r"подключить|прикрепить|распечатать|заполнить|перевести|пересказать|"
+    r"суммировать|ответить|синхронизировать)\b",
+    re.IGNORECASE,
+)
+_SOURCE_OBLIGATION_PROPOSITION_RE = re.compile(
+    r"^(?:а[, ]+)?(?:"
+    r"кто(?:\s+[^\W_]+){0,5}\s+(?:должен|обязан|может|будет|должна|обязана)|"
+    r"(?:какой|какая|какое) (?:сотрудник|пользователь|сервис|процесс|задача|роль) "
+    r"(?:должен|должна|должно|обязан|обязана|может)|"
+    r"who(?:\s+[^\W_]+){0,5}\s+(?:should|must|can|is supposed to|has to)|"
+    r"(?:which|what) (?:person|user|service|process|job|task|role) "
+    r"(?:should|must|can|is supposed to|has to)"
+    r")\b",
+    re.IGNORECASE,
+)
+_SOURCE_ACTION_PROPOSITION_RE = re.compile(
+    r"(?:"
+    r"\b(?:предлагается|рекомендуется|требуется|указан\w*|описан\w*|перечислен\w*|"
+    r"сказан\w*|написан\w*|упомянут\w*)\b"
+    r".{0,56}\b(?:создать|удалить|запустить|отправить|открыть|закрыть|"
+    r"сохранить|переместить|переименовать|обновить|синхронизировать|"
+    r"create|delete|remove|run|send|open|close|save|move|rename|update|sync|search)\b|"
+    r"\b(?:say|says|said|state|states|stated|mention|mentions|mentioned|describe|"
+    r"describes|described|list|lists|listed|recommend|recommends|recommended)\b"
+    r".{0,56}\b(?:create|delete|remove|run|send|open|close|save|move|rename|update|"
+    r"sync|search)\b|"
+    r"\b(?:create|delete|remove|run|send|open|close|save|move|rename|update|sync)"
+    r"(?:\s+(?:and|or|/|,)?\s*(?:create|delete|remove|run|send|open|close|save|"
+    r"move|rename|update|sync))*\s+(?:operations?|commands?|steps?|actions?)\b"
+    r".{0,40}\b(?:described|listed|stated|required|recommended|описан\w*|"
+    r"перечислен\w*|указан\w*)\b"
+    r")",
+    re.IGNORECASE,
+)
+_SOURCE_COMPOUND_ACTION_PROPOSITION_RE = re.compile(
+    r"(?:"
+    r"\b(?:предлагается|рекомендуется|требуется)\b.{0,56}\b"
+    r"(?:создать|удалить|запустить|отправить|открыть|сохранить)\b.{0,24}"
+    r"\b(?:и|или)\s+(?:создать|удалить|запустить|отправить|открыть|сохранить)\b|"
+    r"\b(?:create|delete|remove|run|send|open|save)"
+    r"(?:\s+(?:and|or|/|,)?\s*(?:create|delete|remove|run|send|open|save))+"
+    r"\s+(?:operations?|commands?|steps?|actions?)\b.{0,40}"
+    r"\b(?:described|listed|stated|required|recommended|описан\w*|перечислен\w*)\b"
+    r")",
+    re.IGNORECASE,
+)
+_EN_MIXED_ACTION_SUFFIX_RE = re.compile(
+    r"(?:,|\band(?: then)?\b|\bthen\b|[-—])\s*(?:please\s+)?"
+    r"(?:check|verify|open|visit|search|find|browse|compare|contrast|create|add|"
+    r"append|write|edit|change|delete|remove|move|rename|save|send|publish|"
+    r"export|upload|download|remind|schedule|execute|run|call|translate|summarize|"
+    r"answer|return|render|format|tell|show|read|give|explain|analyze|paraphrase|"
+    r"sync|synchronize|update|install|connect|close|print|attach|fill)\b",
+    re.IGNORECASE,
+)
+_DIRECT_ACTION_REQUEST_RE = re.compile(
+    r"(?:"
+    r"^(?:how|what) to\s+(?:check|verify|open|visit|search|find|browse|compare|"
+    r"create|add|append|write|edit|change|delete|remove|move|rename|save|send|"
+    r"publish|export|upload|download|remind|schedule|execute|run|call|translate|"
+    r"summarize|sync|synchronize|update|install|connect|close|print|attach|fill)\b|"
+    r"^(?:can|could|would|will) you\b.{0,48}\b"
+    r"(?:check|verify|open|visit|search|find|browse|compare|create|add|append|write|"
+    r"edit|change|delete|remove|move|rename|save|send|publish|export|upload|download|"
+    r"remind|schedule|execute|run|call|translate|summarize|answer|return|render|format|"
+    r"tell|show|read|give|sync|synchronize|update|install|connect|close|print|attach|fill)\b|"
+    r"^(?:should|can|could|would) (?:i|we)\b.{0,48}\b"
+    r"(?:check|verify|open|visit|search|find|browse|compare|create|add|append|write|"
+    r"edit|change|delete|remove|move|rename|save|send|publish|export|upload|download|"
+    r"remind|schedule|execute|run|call|translate|summarize|answer|return|render|format|"
+    r"tell|show|read|give|sync|synchronize|update|install|connect|close|print|attach|fill)\b|"
+    r"^(?:what|which|how|where|when)(?: [^\W_]+){0,4} "
+    r"(?:do|can|could|should|would) (?:i|we|you)\b.{0,48}\b"
+    r"(?:check|verify|open|visit|search|find|browse|compare|create|add|append|write|"
+    r"edit|change|delete|remove|move|rename|save|send|publish|export|upload|download|"
+    r"remind|schedule|execute|run|call|translate|summarize|answer|return|render|format|"
+    r"tell|show|read|give|sync|synchronize|update|install|connect|close|print|attach|fill)\b|"
+    r"^(?:а[, ]+)?(?:как|что|какой|какая|какое)(?: [^\W_]+){0,4} "
+    r"(?:мне|нам|тебе|вам)\b.{0,48}\b"
+    r"(?:найти|поискать|проверить|открыть|перейти|сравнить|сопоставить|создать|"
+    r"добавить|дописать|записать|изменить|удалить|переместить|переименовать|"
+    r"сохранить|отправить|опубликовать|экспортировать|загрузить|скачать|напомнить|"
+    r"запланировать|выполнить|запустить|позвонить|перевести|пересказать|"
+    r"суммировать|ответить|вернуть|вывести|оформить)\b"
+    r"|^(?:а[, ]+)?(?:что|как|какой|какая|какое)\s+"
+    r"(?:мне\s+|нам\s+|тебе\s+|вам\s+)?(?:нужно|надо|следует|можно)\s+"
+    r"(?:найти|поискать|проверить|открыть|перейти|сравнить|сопоставить|создать|"
+    r"добавить|дописать|записать|изменить|удалить|переместить|переименовать|"
+    r"сохранить|отправить|опубликовать|экспортировать|загрузить|скачать|напомнить|"
+    r"запланировать|выполнить|запустить|позвонить|перевести|пересказать|"
+    r"суммировать|ответить|вернуть|вывести|оформить)\b"
+    r"|^(?:а[, ]+)?(?:как|что|какой|какая|какое)\s+"
+    r"(?:найти|поискать|проверить|посмотреть|прочитать|показать|открыть|закрыть|"
+    r"перейти|сравнить|сопоставить|создать|добавить|дописать|записать|изменить|"
+    r"удалить|переместить|переименовать|сохранить|отправить|опубликовать|"
+    r"экспортировать|загрузить|скачать|напомнить|запланировать|выполнить|"
+    r"запустить|позвонить|написать|прислать|переслать|обновить|установить|"
+    r"подключить|прикрепить|распечатать|заполнить|перевести|пересказать|"
+    r"суммировать|ответить|синхронизировать)\b"
+    r")",
+    re.IGNORECASE,
+)
+_DIRECT_MUTATION_QUESTION_RE = re.compile(
+    r"(?:"
+    r"^(?:а[, ]+)?(?:что|кто|какой|какая|какое|какие|когда|где|куда|откуда|как)"
+    r"(?:\s+[^\W_]+){0,7}\s+(?:найти|поискать|проверить|открыть|закрыть|"
+    r"перейти|сравнить|создать|добавить|дописать|записать|изменить|удалить|"
+    r"переместить|переименовать|сохранить|отправить|опубликовать|экспортировать|"
+    r"загрузить|скачать|напомнить|запланировать|выполнить|запустить|позвонить|"
+    r"обновить|установить|подключить|прикрепить|распечатать|заполнить|"
+    r"синхронизировать)\b|"
+    r"^(?:what|who|which|when|where|why|how|whose)"
+    r"(?:\s+[^\W_]+){0,7}\s+(?:to\s+)?(?:check|verify|open|close|visit|search|"
+    r"find|browse|compare|create|add|append|write|edit|change|delete|remove|move|"
+    r"rename|save|send|publish|export|upload|download|remind|schedule|execute|run|"
+    r"call|sync|synchronize|update|install|connect|print|attach|fill)\b"
+    r")",
+    re.IGNORECASE,
+)
+_UNAMBIGUOUS_MIXED_ACTION_RE = re.compile(
+    r"(?:"
+    r"(?:,|\b(?:а затем|а потом|а заодно|затем|потом|заодно|после этого)\b|[-—])\s*"
+    r"(?:пожалуйста\s+)?(?:можешь(?: ли)?\s+|можно\s+|надо\s+|нужно\s+|"
+    r"следует\s+|давай\s+)?(?:найди|найдите|поищи|поищите|проверь|проверьте|"
+    r"посмотри|посмотрите|прочитай|прочитайте|покажи|покажите|открой|откройте|"
+    r"сравни|сравните|создай|создайте|добавь|добавьте|измени|измените|удали|"
+    r"удалите|перемести|переместите|сохрани|сохраните|отправь|отправьте|"
+    r"опубликуй|опубликуйте|запусти|запустите|напиши|напишите|пришли|пришлите|"
+    r"обнови|обновите|переведи|переведите|суммируй|суммируйте|"
+    r"синхронизируй|синхронизируйте|найти|поискать|проверить|посмотреть|"
+    r"прочитать|показать|открыть|сравнить|создать|добавить|изменить|удалить|"
+    r"переместить|сохранить|отправить|опубликовать|запустить|написать|обновить|"
+    r"перевести|суммировать|синхронизировать)\b|"
+    r"(?:,\s*(?:and\s+)?|\band then\b|\bthen\b|[-—]\s*)\s*(?:please\s+)?"
+    r"(?:(?:can|could|would|will|should) you\s+)?(?:check|verify|open|visit|search|"
+    r"find|browse|compare|create|add|append|write|edit|change|delete|remove|move|"
+    r"rename|save|send|publish|export|upload|download|remind|schedule|execute|run|"
+    r"call|translate|summarize|sync|synchronize|update|install|connect|close|"
+    r"print|attach|fill)\b"
+    r")",
+    re.IGNORECASE,
+)
+_DIRECT_COMPARISON_REQUEST_RE = re.compile(
+    r"(?:"
+    r"^(?:а[, ]+)?(?:как|чем)\b.{0,72}\b(?:сравн\w*|отлич\w*|сопостав\w*)\b|"
+    r"^how\b.{0,72}\b(?:compare|compares|differ|differs|contrast|contrasts)\b"
+    r")",
+    re.IGNORECASE,
+)
+_OUTPUT_TRANSFORM_SUFFIX_RE = re.compile(
+    r"(?:"
+    r"(?:,|[-—])\s*(?:таблицей|списком|кратко|"
+    r"в (?:формате )?(?:json|yaml|xml|csv))|"
+    r"(?:,|[-—])\s*(?:as (?:a )?table|as (?:a )?list|briefly|"
+    r"in (?:json|yaml|xml|csv)(?: format)?)|"
+    r"\b(?:таблицей|списком|кратко|в виде (?:таблицы|списка)|"
+    r"(?:только )?(?:краткий|подробный) ответ|ответ в (?:markdown|json|yaml|xml|csv)|"
+    r"(?:(?:в )?(?:одном|двух|тр[ёе]х) (?:предложени(?:и|ях)|абзац(?:е|ах))|"
+    r"одним абзацем|двумя предложениями)|"
+    r"(?:json|yaml|xml|csv)(?: only)?)\b|"
+    r"\b(?:as (?:a )?table|as (?:a )?list|briefly|"
+    r"(?:short|detailed) answer|answer in (?:markdown|json|yaml|xml|csv)|"
+    r"in (?:one|two|three) (?:sentences?|paragraphs?)|"
+    r"(?:json|yaml|xml|csv)(?: only)?)\b"
+    r")\s*[?!.]?$",
+    re.IGNORECASE,
+)
+_SOURCE_FORMAT_PROPOSITION_RE = re.compile(
+    r"(?:"
+    r"\b(?:представлен\w*|записан\w*|хранится|дан\w*)\s+"
+    r"(?:таблицей|списком|в (?:формате )?(?:json|yaml|xml|csv))\b|"
+    r"\b(?:presented|stored|written|encoded|shown)\s+"
+    r"(?:as (?:a )?table|as (?:a )?list|in (?:json|yaml|xml|csv)(?: format)?)\b|"
+    r"\b(?:про|о) (?:режим(?:е)?\s+)?(?:json|yaml|xml|csv)(?: only)?\b|"
+    r"\babout (?:the )?(?:json|yaml|xml|csv)(?: only)? (?:mode|format)\b"
+    r")",
+    re.IGNORECASE,
+)
+_UNSUPPORTED_ANSWER_MODE_RE = re.compile(
+    r"(?:"
+    r"\b(?:без (?:цитат|ссылок|доказательств)|по памяти|на английском)\b|"
+    r"\b(?:without (?:citations|sources|evidence)|from memory|in english)\b"
+    r")\s*[?!.]?$",
+    re.IGNORECASE,
+)
+_SOURCE_LANGUAGE_PROPOSITION_RE = re.compile(
+    r"(?:"
+    r"\b(?:про|о) (?:документаци\w*|текст\w*|раздел\w*|описани\w*) "
+    r"на английском\b|"
+    r"\babout (?:the )?(?:documentation|text|section|description) in english\b"
+    r")",
+    re.IGNORECASE,
+)
+_ADDITIONAL_SOURCE_CLAUSE_RE = re.compile(
+    r"(?:,|\b(?:и|а|and|but)\b)\s+(?:[^.!?]{0,48}\s+)?(?:"
+    r"(?:подтверждает ли это|подтверждает это|что об этом (?:говорит|пишет)) сайт|"
+    r"на сайте|в интернете|в вебе|в архиве|в базе|в (?:другом|других) "
+    r"(?:документе|документах|файле|файлах|сообщении|сообщениях)|"
+    r"по другим (?:документам|файлам|сообщениям)|в (?:моей|нашей) переписке|"
+    r"(?:does (?:the )?(?:site|website) confirm it)|"
+    r"on (?:the )?(?:site|website|web)|on the internet|in (?:the )?archive|"
+    r"in (?:another|other) (?:document|documents|file|files|message|messages)|"
+    r"from (?:another|other) (?:document|documents|file|files|message|messages)|"
+    r"in (?:my|our) (?:conversation|messages))\b",
+    re.IGNORECASE,
+)
+_CONTENT_TOKEN_RE = re.compile(r"[^\W_]+(?:[-'][^\W_]+)*", re.UNICODE)
+_NON_CONTENT_TOKENS = frozenset(
+    {
+        "а",
+        "в",
+        "из",
+        "по",
+        "об",
+        "про",
+        "и",
+        "ли",
+        "что",
+        "кто",
+        "как",
+        "какой",
+        "какая",
+        "какое",
+        "какие",
+        "когда",
+        "где",
+        "почему",
+        "зачем",
+        "сколько",
+        "есть",
+        "там",
+        "нем",
+        "нём",
+        "ней",
+        "этом",
+        "этого",
+        "этот",
+        "это",
+        "выбранном",
+        "выбранного",
+        "выбранный",
+        "выбранное",
+        "ранее",
+        "документ",
+        "документе",
+        "документа",
+        "файл",
+        "файле",
+        "файла",
+        "сообщение",
+        "сообщении",
+        "сообщения",
+        "источник",
+        "источнике",
+        "фрагмент",
+        "фрагменте",
+        "what",
+        "who",
+        "which",
+        "when",
+        "where",
+        "why",
+        "how",
+        "does",
+        "do",
+        "did",
+        "is",
+        "are",
+        "was",
+        "were",
+        "has",
+        "have",
+        "had",
+        "can",
+        "could",
+        "would",
+        "should",
+        "the",
+        "a",
+        "an",
+        "in",
+        "from",
+        "about",
+        "it",
+        "there",
+        "this",
+        "that",
+        "selected",
+        "previously",
+        "document",
+        "file",
+        "message",
+        "source",
+        "passage",
+    }
 )
 
 
@@ -289,23 +685,84 @@ class RecallSelectedArchiveEvidenceWorkItem:
 
 
 def parse_archive_evidence_followup(message: object) -> ArchiveEvidenceFollowupKind | None:
-    """Return the one closed replay intent encoded by ``message``."""
+    """Return one closed replay intent encoded by ``message``.
+
+    Natural questions are admitted only when they name the retained source by
+    an explicit deictic reference and contain useful question content. Search,
+    comparison, effects and control-plane/meta requests remain ordinary turns.
+    """
 
     if not isinstance(message, str) or not message or len(message) > _MAX_SURFACE_LENGTH:
         return None
     if any(unicodedata.category(character).startswith("C") for character in message):
         return None
+    try:
+        if len(message.encode("utf-8", errors="strict")) > _MAX_SURFACE_UTF8_BYTES:
+            return None
+    except UnicodeEncodeError:
+        return None
     surface = " ".join(unicodedata.normalize("NFKC", message).split()).casefold()
-    if not surface or len(surface) > _MAX_SURFACE_LENGTH:
+    if (
+        not surface
+        or len(surface) > _MAX_SURFACE_LENGTH
+        or len(surface.encode("utf-8")) > _MAX_SURFACE_UTF8_BYTES
+    ):
         return None
     match = _FOLLOWUP_RE.fullmatch(surface)
-    if match is None:
-        return None
-    return (
-        ArchiveEvidenceFollowupKind.EXPLAIN
-        if match.group("explain") is not None
-        else ArchiveEvidenceFollowupKind.SHOW_PASSAGES
+    if match is not None:
+        return (
+            ArchiveEvidenceFollowupKind.EXPLAIN
+            if match.group("explain") is not None
+            else ArchiveEvidenceFollowupKind.SHOW_PASSAGES
+        )
+    question_shaped = bool(
+        _NATURAL_QUESTION_START_RE.search(surface) or _REFERENCE_FIRST_QUESTION_RE.search(surface)
     )
+    source_bound = bool(
+        _STRONG_SELECTED_SOURCE_REFERENCE_RE.search(surface)
+        or (_WEAK_SELECTED_SOURCE_REFERENCE_RE.search(surface) and _WEAK_SOURCE_CONTENT_RE.search(surface))
+    )
+    obligation_proposition = _SOURCE_OBLIGATION_PROPOSITION_RE.search(surface) is not None
+    source_action_proposition = bool(obligation_proposition or _SOURCE_ACTION_PROPOSITION_RE.search(surface))
+    source_compound_action_proposition = bool(
+        obligation_proposition or _SOURCE_COMPOUND_ACTION_PROPOSITION_RE.search(surface)
+    )
+    mixed_action = bool(
+        _UNAMBIGUOUS_MIXED_ACTION_RE.search(surface)
+        or (
+            (_RU_MIXED_ACTION_SUFFIX_RE.search(surface) or _EN_MIXED_ACTION_SUFFIX_RE.search(surface))
+            and not source_compound_action_proposition
+        )
+    )
+    output_transform = bool(
+        _OUTPUT_TRANSFORM_SUFFIX_RE.search(surface) and _SOURCE_FORMAT_PROPOSITION_RE.search(surface) is None
+    )
+    unsupported_answer_mode = bool(
+        _UNSUPPORTED_ANSWER_MODE_RE.search(surface)
+        and _SOURCE_LANGUAGE_PROPOSITION_RE.search(surface) is None
+    )
+    requests_capability = bool(
+        _CONTROL_META_RE.search(surface)
+        or _DIRECT_ACTION_REQUEST_RE.search(surface)
+        or (_DIRECT_MUTATION_QUESTION_RE.search(surface) and not source_action_proposition)
+        or _DIRECT_COMPARISON_REQUEST_RE.search(surface)
+        or mixed_action
+        or output_transform
+        or unsupported_answer_mode
+        or _ADDITIONAL_SOURCE_CLAUSE_RE.search(surface)
+    )
+    natural_body = surface[:-1] if surface[-1:] in {".", "?", "!"} else surface
+    has_unsafe_punctuation = bool(
+        any(character in natural_body for character in ".?!;:`'\"")
+        or "…" in natural_body
+        or any(unicodedata.category(character) in {"Ps", "Pe", "Pi", "Pf"} for character in natural_body)
+    )
+    if not question_shaped or not source_bound or requests_capability or has_unsafe_punctuation:
+        return None
+    content_tokens = {
+        token for token in _CONTENT_TOKEN_RE.findall(surface) if token not in _NON_CONTENT_TOKENS
+    }
+    return ArchiveEvidenceFollowupKind.EXPLAIN if content_tokens else None
 
 
 def is_archive_evidence_followup_syntax(message: object) -> bool:

@@ -40724,6 +40724,21 @@ class AgentRuntime:
         clean_message = (message or "").strip()
         archive_evidence_followup_kind = parse_archive_evidence_followup(clean_message)
         archive_candidate_surface_has_attachments = bool(attachments)
+        archive_evidence_plain_routing_surface = bool(
+            archive_evidence_followup_kind is not None
+            and not archive_candidate_surface_has_attachments
+            and enable_tools is True
+            and ingestion_result is None
+            and not synthetic_document_notice
+            and not replay_source_message_id
+            and not answer_with_voice
+            and not reply_to
+            and not quoted_attachment_reference
+            and not reply_assistant_reference
+            and not reply_assistant_message_id
+            and turn_policy is None
+            and mode is None
+        )
         archive_structural_supplied_attachment_count = sum(
             1 for item in (attachments or []) if isinstance(item, dict)
         )
@@ -40764,7 +40779,7 @@ class AgentRuntime:
         # and is settled by the message-search control plane below.
         routing_message = (
             ""
-            if archive_evidence_followup_kind is not None
+            if archive_evidence_plain_routing_surface
             else locate_decomposition.locate_clause
             if message_locate_route and locate_decomposition.remainder_known
             else ""

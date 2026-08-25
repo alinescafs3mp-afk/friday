@@ -65,6 +65,14 @@ RELEASE_BLOCKING_BATTERY_NODEIDS = (
     "tests/test_archive_search_runtime_publication.py::"
     "test_selected_archive_explain_uses_attested_two_pass_model_and_atomic_receipt",
     "tests/test_archive_search_runtime_publication.py::"
+    "test_natural_selected_document_question_uses_bound_preingestion_v12_without_ordinary_paths",
+    "tests/test_archive_search_runtime_publication.py::"
+    "test_natural_selected_reference_with_current_attachment_stays_on_current_file_surface",
+    "tests/test_archive_search_runtime_publication.py::"
+    "test_natural_selected_reference_reply_keeps_reply_file_priority_and_work_item_unchanged",
+    "tests/test_archive_search_runtime_publication.py::"
+    "test_mixed_deictic_capability_phrases_never_claim_selected_archive_work",
+    "tests/test_archive_search_runtime_publication.py::"
     "test_selected_archive_explain_verifier_failure_falls_back_to_exact_replay",
     "tests/test_archive_search_runtime_publication.py::"
     "test_selected_archive_explain_without_attested_model_falls_back_honestly",

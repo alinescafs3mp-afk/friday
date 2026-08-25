@@ -2823,6 +2823,299 @@ async def test_selected_canonical_archive_evidence_replays_exactly_after_runtime
 
 
 @pytest.mark.asyncio
+async def test_natural_selected_document_question_uses_bound_preingestion_v12_without_ordinary_paths(
+    settings: Any,
+    storage: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _raw_id, initial, created = await _create_durable_selected_archive_work(
+        settings,
+        storage,
+        monkeypatch,
+        suffix="-natural-bound-v12-explain",
+    )
+    question = "Какое контрольное значение указано в выбранном документе?"
+    explanation_model = _SelectedArchiveExplanationModel()
+    ordinary_model = _DirectAnswerModel()
+    runtime, kernel, actor, _model, web, _contexts = await _runtime(
+        settings,
+        storage,
+        monkeypatch,
+        model_override=ordinary_model,
+    )
+    runtime.settings = replace(
+        runtime.settings,
+        router_mode="v12",
+        router_canary_routes=("archive_read",),
+    )
+    runtime._selected_archive_model = explanation_model
+    planner = _NeverPlanner()
+    orchestrated = OrchestrationRouter(
+        runtime,
+        planner,
+        mode="v12",
+        allowed_routes=("archive_read",),
+    )
+    messages_before_admission = tuple(
+        item["id"]
+        for item in storage.get_conversation_messages(
+            str(initial["conversation_id"]),
+            user_id=_OWNER,
+        )
+    )
+    admission = orchestrated.pending_durable_turn_admission(
+        _OWNER,
+        question,
+        actor=actor,
+        conversation_id=str(initial["conversation_id"]),
+    )
+    assert isinstance(admission, PendingDurableTurnAdmission)
+    assert admission.is_bound
+    assert admission.work_item_id == created.id
+    assert admission.revision == created.revision
+    assert (
+        tuple(
+            item["id"]
+            for item in storage.get_conversation_messages(
+                str(initial["conversation_id"]),
+                user_id=_OWNER,
+            )
+        )
+        == messages_before_admission
+    )
+
+    try:
+        response = await orchestrated.chat(
+            _OWNER,
+            question,
+            actor=actor,
+            conversation_id=str(initial["conversation_id"]),
+            enable_tools=True,
+            answer_with_voice=False,
+            _pending_durable_admission=admission,
+        )
+    finally:
+        await web.close()
+
+    assert response["message"].endswith(explanation_model.answer)
+    assert response["citations"] == [{"label": "A1.1"}]
+    assert response["tools_used"] == []
+    assert response["context"]["selected_archive_evidence_explanation"] in {
+        "complete",
+        "partial",
+    }
+    assert len(explanation_model.calls) == 2
+    assert "не делай вывод" in str(explanation_model.calls[0][0]["content"])
+    assert "во всём источнике" in str(explanation_model.calls[0][0]["content"])
+    assert question in str(explanation_model.calls[0][1]["content"])
+    assert ordinary_model.calls == 0
+    assert planner.calls == 0
+    assert kernel.calls == []
+    assert orchestrated.observations[-1].status == "durable_turn_owned"
+
+    stored = storage.get_message(str(response["message_id"]), _OWNER)
+    assert stored is not None
+    receipt = load_accepted_archive_recall_outcome_receipt(stored["metadata_json"])
+    assert receipt.outcome.lane is ArchiveRecallLane.SELECTED_EVIDENCE_EXPLANATION
+    assert receipt.outcome.semantic_verified is True
+    assert receipt.outcome.used_citation_labels == ("A1.1",)
+    accepted = receipt.outcome.selected_evidence
+    assert accepted is not None
+    assert accepted.source_ref == created.selected_evidence.source_ref
+    assert accepted.passage_refs == created.selected_evidence.passage_refs
+    assert accepted.resolved_snapshot_sha256 == created.selected_evidence.source_snapshot_sha256
+    metadata = json.loads(str(stored["metadata_json"]))
+    assert metadata["interaction_trace"]["budget"]["model_calls"] == 2
+    with storage.transaction() as conn:
+        advanced = get_recall_selected_archive_evidence_work_item_in_transaction(
+            conn,
+            work_item_id=created.id,
+            user_id=_OWNER,
+            conversation_id=created.conversation_id,
+        )
+    assert advanced is not None
+    assert advanced.revision == created.revision + 1
+    assert advanced.selected_evidence == created.selected_evidence
+    assert advanced.accepted_outcome_sha256 == receipt.outcome_sha256
+
+
+@pytest.mark.asyncio
+async def test_natural_selected_reference_with_current_attachment_stays_on_current_file_surface(
+    settings: Any,
+    storage: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _raw_id, initial, created = await _create_durable_selected_archive_work(
+        settings,
+        storage,
+        monkeypatch,
+        suffix="-natural-current-attachment",
+    )
+    current_marker = "CURRENT-FILE-CANARY-9184"
+    current_text = f"Закрытый документ-natural-current-source. Контрольное значение: {current_marker}."
+    current_ingestion = await IngestionPipeline(
+        settings,
+        storage,
+        KnowledgeGraph(storage),
+    ).ingest_file(
+        _OWNER,
+        None,
+        current_text.encode(),
+        filename="current-deictic.txt",
+        mime_type="text/plain",
+        metadata={"uploaded_by": _OWNER},
+        source_ref="telegram-file:natural-current-source",
+    )
+    current_raw_id = str(current_ingestion["raw_object_id"])
+    question = "Какой срок указан в нём?"
+    explanation_model = _SelectedArchiveExplanationModel()
+
+    class _CurrentFileAnswerModel(_DirectAnswerModel):
+        async def chat(self, messages: list[dict[str, Any]], **kwargs: Any) -> dict[str, Any]:
+            self.calls += 1
+            self.call_kwargs.append(dict(kwargs))
+            assert current_marker in json.dumps(messages, ensure_ascii=False, sort_keys=True)
+            return {
+                "content": f"В текущем файле указано {current_marker}.",
+                "tool_calls": None,
+                "finish_reason": "stop",
+            }
+
+    ordinary_model = _CurrentFileAnswerModel()
+    runtime, _kernel, actor, _model, web, _contexts = await _runtime(
+        settings,
+        storage,
+        monkeypatch,
+        model_override=ordinary_model,
+    )
+    runtime._selected_archive_model = explanation_model
+    routed_messages: list[str] = []
+    original_file_turn_authority = agent_runtime_module.file_turn_authority
+
+    def observe_file_turn_authority(message: str) -> Any:
+        routed_messages.append(message)
+        return original_file_turn_authority(message)
+
+    monkeypatch.setattr(agent_runtime_module, "file_turn_authority", observe_file_turn_authority)
+    try:
+        response = await runtime.chat(
+            _OWNER,
+            question,
+            actor=actor,
+            conversation_id=str(initial["conversation_id"]),
+            enable_tools=True,
+            attachments=[
+                {
+                    "raw_object_id": current_raw_id,
+                    "filename": "current-deictic.txt",
+                }
+            ],
+        )
+    finally:
+        await web.close()
+
+    assert question in routed_messages
+    assert current_marker in response["message"]
+    assert response["context"].get("selected_archive_evidence_explanation") is None
+    assert explanation_model.calls == []
+    with storage.transaction() as conn:
+        unchanged = get_recall_selected_archive_evidence_work_item_in_transaction(
+            conn,
+            work_item_id=created.id,
+            user_id=_OWNER,
+            conversation_id=created.conversation_id,
+        )
+    assert unchanged == created
+
+
+@pytest.mark.asyncio
+async def test_natural_selected_reference_reply_keeps_reply_file_priority_and_work_item_unchanged(
+    settings: Any,
+    storage: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _raw_id, initial, created = await _create_durable_selected_archive_work(
+        settings,
+        storage,
+        monkeypatch,
+        suffix="-natural-reply-file",
+    )
+    current_marker = "REPLIED-FILE-CANARY-6157"
+    current_text = f"Текущий файл содержит {current_marker}."
+    current_ingestion = await IngestionPipeline(
+        settings,
+        storage,
+        KnowledgeGraph(storage),
+    ).ingest_file(
+        _OWNER,
+        None,
+        current_text.encode(),
+        filename="reply-current.txt",
+        mime_type="text/plain",
+        metadata={"uploaded_by": _OWNER},
+        source_ref="telegram-file:natural-reply-current",
+    )
+
+    class _ReplyFileAnswerModel(_DirectAnswerModel):
+        async def chat(self, messages: list[dict[str, Any]], **kwargs: Any) -> dict[str, Any]:
+            self.calls += 1
+            self.call_kwargs.append(dict(kwargs))
+            assert current_marker in json.dumps(messages, ensure_ascii=False, sort_keys=True)
+            return {
+                "content": f"Ответ из файла: {current_marker}.",
+                "tool_calls": None,
+                "finish_reason": "stop",
+            }
+
+    ordinary_model = _ReplyFileAnswerModel()
+    explanation_model = _SelectedArchiveExplanationModel()
+    runtime, _kernel, actor, _model, web, _contexts = await _runtime(
+        settings,
+        storage,
+        monkeypatch,
+        model_override=ordinary_model,
+    )
+    runtime._selected_archive_model = explanation_model
+    try:
+        upload = await runtime.chat(
+            _OWNER,
+            "Загружен документ: reply-current.txt",
+            actor=actor,
+            conversation_id=str(initial["conversation_id"]),
+            enable_tools=True,
+            attachments=[{"raw_object_id": str(current_ingestion["raw_object_id"])}],
+            synthetic_document_notice=True,
+        )
+        reply = await runtime.chat(
+            _OWNER,
+            "Какой код указан в нём?",
+            actor=actor,
+            conversation_id=str(initial["conversation_id"]),
+            enable_tools=True,
+            attachments=[{"raw_object_id": str(current_ingestion["raw_object_id"])}],
+            reply_to=str(upload["message_id"]),
+            quoted_attachment_reference=True,
+            reply_assistant_reference=True,
+            reply_assistant_message_id=str(upload["message_id"]),
+        )
+    finally:
+        await web.close()
+
+    assert current_marker in upload["message"]
+    assert current_marker in reply["message"]
+    assert reply["context"].get("selected_archive_evidence_explanation") is None
+    assert explanation_model.calls == []
+    with storage.transaction() as conn:
+        unchanged = get_recall_selected_archive_evidence_work_item_in_transaction(
+            conn,
+            work_item_id=created.id,
+            user_id=_OWNER,
+            conversation_id=created.conversation_id,
+        )
+    assert unchanged == created
+
+
+@pytest.mark.asyncio
 async def test_selected_archive_explain_uses_attested_two_pass_model_and_atomic_receipt(
     settings: Any,
     storage: Any,
@@ -3548,12 +3841,93 @@ async def test_selected_archive_explain_rechecks_source_after_model_before_publi
 
 
 @pytest.mark.asyncio
+async def test_mixed_deictic_capability_phrases_never_claim_selected_archive_work(
+    settings: Any,
+    storage: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _raw_id, initial, created = await _create_durable_selected_archive_work(
+        settings,
+        storage,
+        monkeypatch,
+        suffix="-mixed-deictic-capabilities",
+    )
+    ordinary_model = _DirectAnswerModel()
+    runtime, kernel, actor, _model, web, _contexts = await _runtime(
+        settings,
+        storage,
+        monkeypatch,
+        model_override=ordinary_model,
+    )
+    planner = _NeverPlanner()
+    orchestrated = OrchestrationRouter(
+        runtime,
+        planner,
+        mode="v12",
+        allowed_routes=("archive_read",),
+    )
+    mixed_requests = {
+        "web": "Найди это в интернете и скажи, что там сказано.",
+        "search": "Поищи это в моём архиве и объясни, что в нём сказано.",
+        "obsidian": "Создай в Obsidian заметку об этом и укажи, что там сказано.",
+        "effect": "Отправь это Артемьеву и объясни, что в нём сказано.",
+        "question_then_web": "Какой срок указан в нём, и найди подтверждение в интернете?",
+        "question_then_obsidian": "Что там написано про QNAP, и создай об этом заметку в Obsidian?",
+        "question_then_effect": "Кто там упомянут, и отправь ему это сообщение?",
+    }
+    try:
+        for capability, message in mixed_requests.items():
+            assert (
+                runtime.pending_durable_turn_admission(
+                    _OWNER,
+                    message,
+                    actor=actor,
+                    conversation_id=str(initial["conversation_id"]),
+                )
+                is False
+            ), capability
+            assert (
+                orchestrated.pending_durable_turn_admission(
+                    _OWNER,
+                    message,
+                    actor=actor,
+                    conversation_id=str(initial["conversation_id"]),
+                )
+                is False
+            ), capability
+    finally:
+        await web.close()
+
+    assert ordinary_model.calls == 0
+    assert planner.calls == 0
+    assert kernel.calls == []
+    with storage.transaction() as conn:
+        unchanged = get_recall_selected_archive_evidence_work_item_in_transaction(
+            conn,
+            work_item_id=created.id,
+            user_id=_OWNER,
+            conversation_id=created.conversation_id,
+        )
+    assert unchanged == created
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("revoked_permission", "expected_replay_status"),
     [
         pytest.param("search.use", "denied", id="search-denied"),
         pytest.param("conversations.read", "denied", id="corpus-denied"),
         pytest.param(None, "drifted", id="source-drifted"),
+    ],
+)
+@pytest.mark.parametrize(
+    "natural_question",
+    [
+        pytest.param("Что в нём сказано?", id="exact-document-reference"),
+        pytest.param(
+            "Какое контрольное значение указано в выбранном сообщении?",
+            id="natural-content-reference",
+        ),
     ],
 )
 async def test_selected_message_archive_evidence_replays_after_restart_then_fails_closed(
@@ -3563,6 +3937,7 @@ async def test_selected_message_archive_evidence_replays_after_restart_then_fail
     request: pytest.FixtureRequest,
     revoked_permission: str | None,
     expected_replay_status: str,
+    natural_question: str,
 ) -> None:
     source_conversation_id, selected_text = _seed_message_archive(
         storage,
@@ -3652,7 +4027,7 @@ async def test_selected_message_archive_evidence_replays_after_restart_then_fail
         try:
             replay = await restarted.chat(
                 _OWNER,
-                "Что в нём сказано?",
+                natural_question,
                 actor=replay_actor,
                 conversation_id=str(initial["conversation_id"]),
                 enable_tools=True,
@@ -3688,6 +4063,16 @@ async def test_selected_message_archive_evidence_replays_after_restart_then_fail
     assert advanced.transition is WorkTransition.EVIDENCE_REPLAYED
     assert advanced.revision == created.revision + 1
     assert advanced.anchor_assistant_message_id == replay["message_id"]
+    assert advanced.selected_evidence == created.selected_evidence
+    replay_stored = storage.get_message(str(replay["message_id"]), _OWNER)
+    assert replay_stored is not None
+    replay_receipt = load_accepted_archive_recall_outcome_receipt(replay_stored["metadata_json"])
+    assert replay_receipt.outcome.lane is ArchiveRecallLane.SELECTED_EVIDENCE_REPLAY
+    replay_selection = replay_receipt.outcome.selected_evidence
+    assert replay_selection is not None
+    assert replay_selection.source_ref == created.selected_evidence.source_ref
+    assert replay_selection.passage_refs == created.selected_evidence.passage_refs
+    assert replay_selection.resolved_snapshot_sha256 == created.selected_evidence.source_snapshot_sha256
 
     drift_model = _DirectAnswerModel()
     failure_storage = _reopen_storage(settings, storage)
