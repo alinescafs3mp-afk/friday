@@ -6,17 +6,17 @@ the current production identity, completed packages, active work and next order.
 
 - Updated: 2026-08-25
 - Branch: `main`
-- Secondary acceptance base: live `0.207.26` admits exactly one accepted
+- Secondary acceptance base: live `0.207.27` admits exactly one accepted
   profile in bounded `assist`; the provisional registry is empty and the
   primary remains the only publication, tool and effect authority.
-- Deployed implementation head: `9ab75a82393919e477890b601d243ae7baedad5a`
-- Live: Friday `0.207.26` / `9ab75a82393919e477890b601d243ae7baedad5a`;
-  tree `87f05bedd19fe76ccb5928e21b47106caac1660c0bcf4e8994f8c20967d9d2e5`;
-  wheel `c59c920e1936cd1cb3a386f062a1aec47a367cc4cce2767f9b148ec214ae43e1`
-- Immediate predecessor and schema-capable fallback: Friday `0.207.24` /
-  `9142765647b75d12cea22798df6782a09bc5c4b8`, tree
-  `ce654409f09b93cc651543968e81bb7254dd5af48d8698ae7cd06c0084d28f30`.
-- Database schema: 41
+- Deployed implementation head: `b7378686a70465fbdc9a7b27aef1e0bbae5edd52`
+- Live: Friday `0.207.27` / `b7378686a70465fbdc9a7b27aef1e0bbae5edd52`;
+  tree `7ce723b56aafcf80cdde21c86717d3973e79884c605d175df87c7cf4b0c0f076`;
+  wheel `60b05e50a08107dc185e8a6cbd52f3bf2e18d5dd53a08b805a1a9f0390b128ae`
+- Immediate predecessor and schema-capable fallback: Friday `0.207.26` /
+  `4f33a6922389ccb70eb92b2fd8d0e4f2aced20a5`, tree
+  `36ebf876af7cc41fcd47c8e23d546b505e5d6952fda52f4ea1f1eb7cff531d7c`.
+- Database schema: 42
 - Production state: immutable activation `clear`; backend and Telegram bridge
   active; trusted-CA HTTPS health `200`; SQLite integrity and FK checks clean;
   exact accepted profile is healthy in bounded `assist` and is probed on
@@ -66,7 +66,7 @@ accepted profile manifest hashes to
 `93ea5698b8b6a9bf8a7dc697ffe37d7353055aa16555188991747bba73d059e3` and
 its accepted physical-failure evidence hashes to
 `9dc72f80caed3320bd154cf1219a8bd6b1339142b690b00dd1cbe1fb05964006`.
-Live `0.207.26` admits exactly that profile, with no provisional entries, in
+Live `0.207.27` admits exactly that profile, with no provisional entries, in
 bounded `assist`. It grants no tools, effects, publication or knowledge-write
 authority; failure preserves the exact primary-only path.
 
@@ -143,19 +143,34 @@ course, with these repository-specific constraints:
 
 ## In progress
 
-1. Complete the durable `CompareConversationWithDocument` journey: preserve
+1. Release `0.207.28` with the bounded GPT-OSS document-map lane in private,
+   discarded `shadow`; primary MAP/REDUCE and final synthesis remain
+   authoritative and laptop absence preserves the existing primary path.
+2. Bind fresh, identity- and policy-specific shadow evidence before any
+   separately released `document_map=assist` promotion; counters alone cannot
+   authorize promotion.
+3. Complete the durable `CompareConversationWithDocument` journey: preserve
    exact selected message evidence, wait durably for the document, survive
    restart, recheck both authorities/revisions and publish one verified answer.
-2. Release that journey reader-first, then activate its writer/runtime in a
+4. Release that journey reader-first, then activate its writer/runtime in a
    separate safe package with schema-capable fallback.
-3. Extend machine-reconcilable release evidence without promoting
+5. Extend machine-reconcilable release evidence without promoting
    component-only gates, then start the next V12 refinement package.
-4. The bounded GPT-OSS document-map shadow package is implementation-ready but
-   not deployed. Assist remains fail-closed until a separate shadow checkpoint
-   is bound to a new product policy and operator evidence gate. The accepted
-   laptop runtime and gateway manifest remain unchanged.
+6. Continue with the next ICP/V12 refinement package after the complete golden
+   journey. The accepted laptop runtime and gateway manifest remain unchanged.
 
 ## Completed and deployed packages
+
+### Systemic document-contour reliability (`0.207.27`)
+
+- Read-only document review no longer falls through to the supported-deed
+  completion guard, shifted ordinal spreadsheet requests preserve their row
+  selection, and secondary Inbox extraction uses a strict JSON schema.
+- LibreOffice conversion always receives an isolated trusted `/tmp` sandbox,
+  independent of an ambient test or service `TMPDIR`.
+- The exact source passed 18,903 non-UI and 31 UI tests with zero skips.
+  Immutable activation completed `clear`; both services, schema-42 integrity
+  and foreign-key checks are clean.
 
 ### Bounded optional GPT-OSS assist (`0.207.26`)
 
