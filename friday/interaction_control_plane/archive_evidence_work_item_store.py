@@ -288,9 +288,7 @@ def _validate_archive_anchor(
         raise WorkItemAnchorError("archive assistant has no accepted outcome") from exc
     outcome = receipt.outcome
     lane_matches = expected_lane is None or (
-        outcome.lane in expected_lane
-        if isinstance(expected_lane, tuple)
-        else outcome.lane is expected_lane
+        outcome.lane in expected_lane if isinstance(expected_lane, tuple) else outcome.lane is expected_lane
     )
     if (
         outcome.plan_sha256 != plan_digest
@@ -341,9 +339,7 @@ def _validate_archive_anchor(
             outcome.plan_sha256,
             expected_explanation_plan,
         ):
-            raise WorkItemAnchorError(
-                "archive explanation plan does not match its selected evidence"
-            )
+            raise WorkItemAnchorError("archive explanation plan does not match its selected evidence")
     else:  # pragma: no cover - the closed outcome parser rejects future lanes
         raise WorkItemAnchorError("archive assistant outcome lane is unsupported")
 

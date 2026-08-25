@@ -225,10 +225,10 @@ class ArchiveRecallOutcome:
                 raise ArchiveRecallOutcomeError("federated archive recall cannot claim semantic verification")
         elif self.candidate_projection_sha256 is not None:
             raise ArchiveRecallOutcomeError("archive replay cannot carry a candidate projection")
-        elif (
-            self.lane is ArchiveRecallLane.SELECTED_EVIDENCE_EXPLANATION
-            and self.status not in {ArchiveRecallStatus.COMPLETE, ArchiveRecallStatus.PARTIAL}
-        ):
+        elif self.lane is ArchiveRecallLane.SELECTED_EVIDENCE_EXPLANATION and self.status not in {
+            ArchiveRecallStatus.COMPLETE,
+            ArchiveRecallStatus.PARTIAL,
+        }:
             raise ArchiveRecallOutcomeError("archive explanation cannot claim a source-free result")
         elif self.status in {ArchiveRecallStatus.COMPLETE, ArchiveRecallStatus.PARTIAL}:
             if (
@@ -240,8 +240,7 @@ class ArchiveRecallOutcome:
             ):
                 raise ArchiveRecallOutcomeError("archive replay success is internally inconsistent")
             expected_labels = tuple(
-                f"A1.{index}"
-                for index in range(1, len(self.selected_evidence.passage_refs) + 1)
+                f"A1.{index}" for index in range(1, len(self.selected_evidence.passage_refs) + 1)
             )
             if labels != expected_labels:
                 raise ArchiveRecallOutcomeError("archive replay citations are internally inconsistent")

@@ -431,9 +431,7 @@ def test_reader_accepts_and_reloads_selected_evidence_explanation_anchor(storage
         reply_to=item.anchor_assistant_message_id,
     )
     labels = tuple(f"A1.{index}" for index in range(1, len(selected.passage_refs) + 1))
-    answer = "Проверенное пояснение выбранного источника " + " ".join(
-        f"[{label}]." for label in labels
-    )
+    answer = "Проверенное пояснение выбранного источника " + " ".join(f"[{label}]." for label in labels)
     outcome = _explanation_outcome(
         request=request,
         answer=answer,
