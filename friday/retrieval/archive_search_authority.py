@@ -62,8 +62,15 @@ _MAX_ACTOR_ID_BYTES = 200
 _MAX_MODEL_BYTES = 7_900
 _RUN_SCHEMA = "friday.archive-search-run-binding.private.v2"
 _BATCH_SCHEMA = "friday.archive-search-model-batch.private.v2"
-_ATTESTATION_SCHEMA = "friday.archive-search-publication-attestation.private.v3"
+_ATTESTATION_SCHEMA = "friday.archive-search-publication-attestation.private.v4"
 ARCHIVE_SEARCH_SELECTED_EVIDENCE_SCHEMA = "friday.archive-search-selected-evidence.private.v1"
+ARCHIVE_SEARCH_CANDIDATE_PROJECTION_ENTRY_SCHEMA = (
+    "friday.archive-search-candidate-projection-entry.private.v1"
+)
+ARCHIVE_SEARCH_ACCEPTED_CANDIDATE_PROJECTION_SCHEMA = (
+    "friday.archive-search-accepted-candidate-projection.private.v1"
+)
+_NAVIGATION_CANDIDATE_SNAPSHOT_SCHEMA = "friday.archive-search-navigation-candidate-snapshot.private.v1"
 _REDEMPTION_SCHEMA = "friday.archive-search-continuation-redemption.private.v3"
 _SELECTED_CONTINUATION_SCHEMA = "friday.archive-search-continuation-selection.private.v1"
 _LEDGER_SCHEMA = "friday.archive-search-model-batch-ledger.private.v2"
@@ -3457,12 +3464,313 @@ class ArchiveSearchSelectedEvidence:
         return cls(corpus, source_ref, passage_refs, snapshot)
 
 
+@dataclass(frozen=True, slots=True, repr=False)
+class ArchiveSearchCandidateProjectionEntry:
+    """One ordered, body-free identity from an accepted phase-2 page."""
+
+    ordinal: int
+    corpus: ArchiveSearchCorpus
+    source_ref: SourceRef
+    passage_refs: tuple[PassageRef, ...]
+    resolved_snapshot_sha256: str
+
+    def __post_init__(self) -> None:
+        if type(self.ordinal) is not int or not (
+            1 <= self.ordinal <= ARCHIVE_AUTHORITY_MAX_MODEL_BATCHES * ARCHIVE_AUTHORITY_MAX_CANDIDATES
+        ):
+            raise ArchiveSearchAuthorityError("archive candidate projection ordinal is invalid")
+        if type(self.corpus) is not ArchiveSearchCorpus:
+            raise ArchiveSearchAuthorityError("archive candidate projection corpus is invalid")
+        if type(self.source_ref) is not SourceRef:
+            raise ArchiveSearchAuthorityError("archive candidate projection source is invalid")
+        if (
+            type(self.passage_refs) is not tuple
+            or len(self.passage_refs) > 8
+            or any(type(item) is not PassageRef for item in self.passage_refs)
+            or any(item.source_ref != self.source_ref for item in self.passage_refs)
+        ):
+            raise ArchiveSearchAuthorityError("archive candidate projection passages are invalid")
+        identities = tuple(item.to_private_json() for item in self.passage_refs)
+        if identities != tuple(sorted(identities)) or len(identities) != len(set(identities)):
+            raise ArchiveSearchAuthorityError("archive candidate projection passages are not canonical")
+        if (
+            type(self.resolved_snapshot_sha256) is not str
+            or _DIGEST.fullmatch(self.resolved_snapshot_sha256) is None
+        ):
+            raise ArchiveSearchAuthorityError("archive candidate projection snapshot is invalid")
+
+    def __repr__(self) -> str:
+        return (
+            "<ArchiveSearchCandidateProjectionEntry body-free "
+            f"ordinal={self.ordinal} corpus={self.corpus.value!r}>"
+        )
+
+    def to_private_payload(self) -> dict[str, object]:
+        return {
+            "corpus": self.corpus.value,
+            "ordinal": self.ordinal,
+            "passage_refs": [item.to_private_payload() for item in self.passage_refs],
+            "resolved_snapshot_sha256": self.resolved_snapshot_sha256,
+            "schema": ARCHIVE_SEARCH_CANDIDATE_PROJECTION_ENTRY_SCHEMA,
+            "source_ref": self.source_ref.to_private_payload(),
+        }
+
+
+def _candidate_projection_entry_is_valid(value: object) -> bool:
+    if type(value) is not ArchiveSearchCandidateProjectionEntry:
+        return False
+    entry = cast(ArchiveSearchCandidateProjectionEntry, value)
+    try:
+        canonical_source = SourceRef.parse_private(entry.source_ref.to_private_json())
+        canonical_passages = tuple(
+            PassageRef.parse_private(item.to_private_json()) for item in entry.passage_refs
+        )
+        return bool(
+            type(entry.ordinal) is int
+            and 1 <= entry.ordinal <= ARCHIVE_AUTHORITY_MAX_MODEL_BATCHES * ARCHIVE_AUTHORITY_MAX_CANDIDATES
+            and type(entry.corpus) is ArchiveSearchCorpus
+            and type(entry.source_ref) is SourceRef
+            and canonical_source == entry.source_ref
+            and type(entry.passage_refs) is tuple
+            and len(entry.passage_refs) <= 8
+            and canonical_passages == entry.passage_refs
+            and all(
+                type(item) is PassageRef and item.source_ref == entry.source_ref
+                for item in entry.passage_refs
+            )
+            and tuple(item.to_private_json() for item in entry.passage_refs)
+            == tuple(sorted(item.to_private_json() for item in entry.passage_refs))
+            and len({item.to_private_json() for item in entry.passage_refs}) == len(entry.passage_refs)
+            and type(entry.resolved_snapshot_sha256) is str
+            and _DIGEST.fullmatch(entry.resolved_snapshot_sha256) is not None
+        )
+    except Exception:
+        return False
+
+
+def _candidate_projection_snapshot_sha256(candidate: ArchiveSearchCandidate) -> str:
+    """Bind exact source state and passage bytes while retaining no body."""
+
+    if type(candidate) is not ArchiveSearchCandidate:
+        raise ArchiveSearchAuthorityError("archive candidate projection source is invalid")
+    try:
+        if candidate.passages:
+            return archive_selected_evidence_snapshot_sha256(
+                candidate.resolved_source,
+                tuple(item.passage_ref for item in candidate.passages),
+                tuple(item.excerpt for item in candidate.passages),
+            )
+        return _sha256(
+            _canonical_json(
+                {
+                    "resolved_source": candidate.resolved_source.to_private_payload(),
+                    "schema": _NAVIGATION_CANDIDATE_SNAPSHOT_SCHEMA,
+                }
+            )
+        )
+    except Exception:
+        raise ArchiveSearchAuthorityError("archive candidate projection snapshot is invalid") from None
+
+
+def _new_candidate_projection_entry(
+    ordinal: int,
+    candidate: ArchiveSearchCandidate,
+) -> ArchiveSearchCandidateProjectionEntry:
+    try:
+        source_ref = SourceRef.parse_private(candidate.resolved_source.source_ref.to_private_json())
+        passage_refs = tuple(
+            PassageRef.parse_private(item.passage_ref.to_private_json()) for item in candidate.passages
+        )
+        return ArchiveSearchCandidateProjectionEntry(
+            ordinal=ordinal,
+            corpus=candidate.corpus,
+            source_ref=source_ref,
+            passage_refs=passage_refs,
+            resolved_snapshot_sha256=_candidate_projection_snapshot_sha256(candidate),
+        )
+    except Exception:
+        raise ArchiveSearchAuthorityError("archive candidate projection entry is invalid") from None
+
+
+class ArchiveSearchAcceptedCandidateProjection(_ProcessPrivate):
+    """Sealed body-free order emitted by phase 2; identity, never authority."""
+
+    __slots__ = (
+        "_candidates",
+        "_canonical_sha256",
+        "_coverage_grade",
+        "_coverage_sha256",
+        "_evidence_sha256",
+        "_nonce",
+        "_seal",
+    )
+
+    _candidates: tuple[ArchiveSearchCandidateProjectionEntry, ...]
+    _canonical_sha256: str
+    _coverage_grade: ArchiveSearchCoverageGrade
+    _coverage_sha256: str
+    _evidence_sha256: str
+    _nonce: bytes
+    _seal: str
+
+    def __init__(self, *_args: object, **_kwargs: object) -> None:
+        raise ArchiveSearchAuthorityError("accepted candidate projections require phase-2 authorization")
+
+    def __setattr__(self, _name: str, _value: object) -> NoReturn:
+        raise TypeError("accepted archive candidate projection is immutable")
+
+    def __repr__(self) -> str:
+        count = len(self._candidates) if type(self._candidates) is tuple else 0
+        return f"<ArchiveSearchAcceptedCandidateProjection body-free candidate_count={count}>"
+
+    @property
+    def candidates(self) -> tuple[ArchiveSearchCandidateProjectionEntry, ...]:
+        self._require_valid()
+        return self._candidates
+
+    @property
+    def candidate_count(self) -> int:
+        self._require_valid()
+        return len(self._candidates)
+
+    @property
+    def coverage_grade(self) -> ArchiveSearchCoverageGrade:
+        self._require_valid()
+        return self._coverage_grade
+
+    @property
+    def coverage_sha256(self) -> str:
+        self._require_valid()
+        return self._coverage_sha256
+
+    @property
+    def evidence_sha256(self) -> str:
+        self._require_valid()
+        return self._evidence_sha256
+
+    @property
+    def canonical_sha256(self) -> str:
+        self._require_valid()
+        return self._canonical_sha256
+
+    def to_private_payload(self) -> dict[str, object]:
+        self._require_valid()
+        return _candidate_projection_payload(self)
+
+    def to_private_json(self) -> str:
+        return _canonical_json(self.to_private_payload()).decode("ascii")
+
+    def _is_valid(self) -> bool:
+        try:
+            payload = _candidate_projection_payload(self)
+            return bool(
+                type(self) is ArchiveSearchAcceptedCandidateProjection
+                and type(self._candidates) is tuple
+                and len(self._candidates)
+                <= ARCHIVE_AUTHORITY_MAX_MODEL_BATCHES * ARCHIVE_AUTHORITY_MAX_CANDIDATES
+                and all(_candidate_projection_entry_is_valid(item) for item in self._candidates)
+                and tuple(item.ordinal for item in self._candidates)
+                == tuple(range(1, len(self._candidates) + 1))
+                and type(self._coverage_grade) is ArchiveSearchCoverageGrade
+                and all(
+                    type(value) is str and _DIGEST.fullmatch(value) is not None
+                    for value in (
+                        self._canonical_sha256,
+                        self._coverage_sha256,
+                        self._evidence_sha256,
+                        self._seal,
+                    )
+                )
+                and type(self._nonce) is bytes
+                and len(self._nonce) == _NONCE_BYTES
+                and hmac.compare_digest(
+                    self._canonical_sha256,
+                    _sha256(_canonical_json(payload)),
+                )
+                and hmac.compare_digest(
+                    self._seal,
+                    _mac(
+                        b"friday/archive-search-accepted-candidate-projection/v1",
+                        _candidate_projection_material(self),
+                    ),
+                )
+            )
+        except Exception:
+            return False
+
+    def _require_valid(self) -> None:
+        if not self._is_valid():
+            raise ArchiveSearchAuthorityError("accepted archive candidate projection is unavailable")
+
+
+def _candidate_projection_payload(
+    projection: ArchiveSearchAcceptedCandidateProjection,
+) -> dict[str, object]:
+    return {
+        "candidate_count": len(projection._candidates),
+        "candidates": [item.to_private_payload() for item in projection._candidates],
+        "coverage_grade": projection._coverage_grade.value,
+        "coverage_sha256": projection._coverage_sha256,
+        "evidence_sha256": projection._evidence_sha256,
+        "schema": ARCHIVE_SEARCH_ACCEPTED_CANDIDATE_PROJECTION_SCHEMA,
+    }
+
+
+def _candidate_projection_material(projection: ArchiveSearchAcceptedCandidateProjection) -> bytes:
+    return _canonical_json(
+        {
+            "nonce": projection._nonce.hex(),
+            "projection": _candidate_projection_payload(projection),
+        }
+    )
+
+
+def _new_accepted_candidate_projection(
+    *,
+    candidates: tuple[ArchiveSearchCandidateProjectionEntry, ...],
+    coverage_grade: ArchiveSearchCoverageGrade,
+    coverage_sha256: str,
+    evidence_sha256: str,
+) -> ArchiveSearchAcceptedCandidateProjection:
+    projection = cast(
+        ArchiveSearchAcceptedCandidateProjection,
+        object.__new__(ArchiveSearchAcceptedCandidateProjection),
+    )
+    for name, value in (
+        ("_candidates", candidates),
+        ("_canonical_sha256", "0" * 64),
+        ("_coverage_grade", coverage_grade),
+        ("_coverage_sha256", coverage_sha256),
+        ("_evidence_sha256", evidence_sha256),
+        ("_nonce", secrets.token_bytes(_NONCE_BYTES)),
+        ("_seal", "0" * 64),
+    ):
+        object.__setattr__(projection, name, value)
+    object.__setattr__(
+        projection,
+        "_canonical_sha256",
+        _sha256(_canonical_json(_candidate_projection_payload(projection))),
+    )
+    object.__setattr__(
+        projection,
+        "_seal",
+        _mac(
+            b"friday/archive-search-accepted-candidate-projection/v1",
+            _candidate_projection_material(projection),
+        ),
+    )
+    if not projection._is_valid():
+        raise ArchiveSearchAuthorityError("accepted archive candidate projection is invalid")
+    return projection
+
+
 class ArchiveSearchPublicationAttestation(_ProcessPrivate):
     """Accepted phase-2 proof bound to the exact carriers and answer digest."""
 
     __slots__ = (
         "_answer_sha256",
         "_candidate_count",
+        "_candidate_projection",
         "_carrier_ledger",
         "_coverage_grade",
         "_coverage_sha256",
@@ -3478,6 +3786,7 @@ class ArchiveSearchPublicationAttestation(_ProcessPrivate):
 
     _answer_sha256: str
     _candidate_count: int
+    _candidate_projection: ArchiveSearchAcceptedCandidateProjection
     _carrier_ledger: str
     _coverage_grade: ArchiveSearchCoverageGrade
     _coverage_sha256: str
@@ -3530,6 +3839,11 @@ class ArchiveSearchPublicationAttestation(_ProcessPrivate):
         return self._candidate_count
 
     @property
+    def candidate_projection(self) -> ArchiveSearchAcceptedCandidateProjection:
+        self._require_valid()
+        return self._candidate_projection
+
+    @property
     def used_citation_labels(self) -> tuple[str, ...]:
         self._require_valid()
         return self._used_citation_labels
@@ -3565,6 +3879,18 @@ class ArchiveSearchPublicationAttestation(_ProcessPrivate):
                 and 0
                 <= self._candidate_count
                 <= ARCHIVE_AUTHORITY_MAX_MODEL_BATCHES * ARCHIVE_AUTHORITY_MAX_CANDIDATES
+                and type(self._candidate_projection) is ArchiveSearchAcceptedCandidateProjection
+                and self._candidate_projection._is_valid()
+                and len(self._candidate_projection._candidates) == self._candidate_count
+                and self._candidate_projection._coverage_grade is self._coverage_grade
+                and hmac.compare_digest(
+                    self._candidate_projection._coverage_sha256,
+                    self._coverage_sha256,
+                )
+                and hmac.compare_digest(
+                    self._candidate_projection._evidence_sha256,
+                    self._evidence_sha256,
+                )
                 and type(self._coverage_grade) is ArchiveSearchCoverageGrade
                 and type(self._used_citation_labels) is tuple
                 and len(self._used_citation_labels) == len(set(self._used_citation_labels))
@@ -3578,7 +3904,7 @@ class ArchiveSearchPublicationAttestation(_ProcessPrivate):
                 and hmac.compare_digest(
                     self._seal,
                     _mac(
-                        b"friday/archive-search-publication-attestation/v3",
+                        b"friday/archive-search-publication-attestation/v4",
                         _attestation_material(self),
                     ),
                 )
@@ -3615,6 +3941,7 @@ def _attestation_material(attestation: ArchiveSearchPublicationAttestation) -> b
         {
             "answer_sha256": attestation._answer_sha256,
             "candidate_count": attestation._candidate_count,
+            "candidate_projection_sha256": attestation._candidate_projection._canonical_sha256,
             "carrier_ledger": attestation._carrier_ledger,
             "coverage_grade": attestation._coverage_grade.value,
             "coverage_sha256": attestation._coverage_sha256,
@@ -3645,6 +3972,7 @@ def _publication_projection(
     int,
     tuple[str, ...],
     ArchiveSearchSelectedEvidence | None,
+    ArchiveSearchAcceptedCandidateProjection,
 ]:
     """Derive the body-free accepted outcome projection from consumed exact pages."""
 
@@ -3659,6 +3987,7 @@ def _publication_projection(
             tuple[PassageRef, ...] | None,
         ],
     ] = {}
+    candidate_projection_entries: list[ArchiveSearchCandidateProjectionEntry] = []
     candidate_count = 0
     for entry_index, (run, batch, _visible) in enumerate(entries, 1):
         request_identity_sha256 = _sha256(run._request.identity_digest_material())
@@ -3685,6 +4014,7 @@ def _publication_projection(
                 }
             )
             candidate_count += 1
+            candidate_projection_entries.append(_new_candidate_projection_entry(candidate_count, candidate))
         evidence_records.append(
             {
                 "candidates": page_candidates,
@@ -3796,14 +4126,24 @@ def _publication_projection(
         if (same_plan and chained_pages and warnings_allow_complete and entries[-1][1]._page.exhaustive)
         else ArchiveSearchCoverageGrade.PARTIAL
     )
+    plan_sha256 = _sha256(_canonical_json(request_identities))
+    evidence_sha256 = _sha256(_canonical_json(evidence_records))
+    coverage_sha256 = _sha256(_canonical_json(coverage_records))
+    candidate_projection = _new_accepted_candidate_projection(
+        candidates=tuple(candidate_projection_entries),
+        coverage_grade=coverage_grade,
+        coverage_sha256=coverage_sha256,
+        evidence_sha256=evidence_sha256,
+    )
     return (
-        _sha256(_canonical_json(request_identities)),
-        _sha256(_canonical_json(evidence_records)),
-        _sha256(_canonical_json(coverage_records)),
+        plan_sha256,
+        evidence_sha256,
+        coverage_sha256,
         coverage_grade,
         candidate_count,
         used_citation_labels,
         selected,
+        candidate_projection,
     )
 
 
@@ -3820,6 +4160,7 @@ def _new_attestation(
         candidate_count,
         used_citation_labels,
         selected_evidence,
+        candidate_projection,
     ) = _publication_projection(entries, answer)
     carrier_ledger = _mac(
         b"friday/archive-search-publication-ledger/v2",
@@ -3845,6 +4186,7 @@ def _new_attestation(
     for name, value in (
         ("_answer_sha256", _answer_digest(answer)),
         ("_candidate_count", candidate_count),
+        ("_candidate_projection", candidate_projection),
         ("_carrier_ledger", carrier_ledger),
         ("_coverage_grade", coverage_grade),
         ("_coverage_sha256", coverage_sha256),
@@ -3862,7 +4204,7 @@ def _new_attestation(
         attestation,
         "_seal",
         _mac(
-            b"friday/archive-search-publication-attestation/v3",
+            b"friday/archive-search-publication-attestation/v4",
             _attestation_material(attestation),
         ),
     )
@@ -4014,6 +4356,8 @@ def attest_archive_search_before_publication(
 
 
 __all__ = [
+    "ARCHIVE_SEARCH_ACCEPTED_CANDIDATE_PROJECTION_SCHEMA",
+    "ARCHIVE_SEARCH_CANDIDATE_PROJECTION_ENTRY_SCHEMA",
     "ARCHIVE_SEARCH_SELECTED_EVIDENCE_SCHEMA",
     "ARCHIVE_AUTHORITY_MAX_ANSWER_BYTES",
     "ARCHIVE_AUTHORITY_MAX_CANDIDATES",
@@ -4024,6 +4368,8 @@ __all__ = [
     "ArchiveModelBatchLedger",
     "ArchiveSearchAuthorityError",
     "ArchiveSearchAuthorityPhase",
+    "ArchiveSearchAcceptedCandidateProjection",
+    "ArchiveSearchCandidateProjectionEntry",
     "ArchiveSearchCoverageGrade",
     "ArchiveSearchCandidateReauthorization",
     "ArchiveSearchCandidateReauthorizer",

@@ -23,7 +23,10 @@ from friday.retrieval.archive_evidence_snapshot import (
 from friday.retrieval.archive_search_authority import (
     ARCHIVE_AUTHORITY_MAX_MODEL_BATCHES,
     ARCHIVE_AUTHORITY_MAX_MODEL_BYTES,
+    ARCHIVE_SEARCH_ACCEPTED_CANDIDATE_PROJECTION_SCHEMA,
+    ARCHIVE_SEARCH_CANDIDATE_PROJECTION_ENTRY_SCHEMA,
     ArchiveModelBatchLedger,
+    ArchiveSearchAcceptedCandidateProjection,
     ArchiveSearchAuthorityError,
     ArchiveSearchAuthorityPhase,
     ArchiveSearchCandidateReauthorization,
@@ -1761,6 +1764,11 @@ def test_turn_ledger_assigns_disjoint_monotonic_public_labels_to_three_runs() ->
         authority_context=CONTEXT,
     )
     assert attestation.attests_answer("Page one [A1.1], page two [A21.1], page three [A41.1].")
+    projection = attestation.candidate_projection
+    assert tuple(item.ordinal for item in projection.candidates) == (1, 2, 3)
+    assert tuple(item.source_ref.canonical_object_id for item in projection.candidates) == tuple(
+        f"raw_{index:016d}" for index in range(3, 6)
+    )
 
 
 def test_failed_run_ordinal_is_never_reused_by_a_later_page() -> None:
@@ -2026,6 +2034,173 @@ def test_phase_two_attestation_seals_body_free_single_selected_evidence() -> Non
     assert outcome.selected_evidence == selected
     assert outcome.publication_attested is True
     assert outcome.semantic_verified is False
+
+
+def test_phase_two_attestation_emits_body_free_ordered_candidate_projection() -> None:
+    candidates = _candidates()
+    run = _run(run=f"candidate-projection-{next(_TURN_SEQUENCE)}")
+    answer = "The first exact fact is supported here [A1.1]."
+    attestation = _attest(run, _batch(run, candidates=candidates), answer=answer)
+
+    projection = attestation.candidate_projection
+    assert type(projection) is ArchiveSearchAcceptedCandidateProjection
+    assert projection.candidate_count == attestation.candidate_count == 2
+    assert projection.coverage_grade is attestation.coverage_grade
+    assert projection.coverage_sha256 == attestation.coverage_sha256
+    assert projection.evidence_sha256 == attestation.evidence_sha256
+    assert (
+        projection.canonical_sha256
+        == hashlib.sha256(projection.to_private_json().encode("ascii")).hexdigest()
+    )
+    assert tuple(item.ordinal for item in projection.candidates) == (1, 2)
+    assert tuple(item.source_ref for item in projection.candidates) == tuple(
+        item.resolved_source.source_ref for item in candidates
+    )
+    assert tuple(item.passage_refs for item in projection.candidates) == tuple(
+        tuple(passage.passage_ref for passage in item.passages) for item in candidates
+    )
+    assert tuple(item.resolved_snapshot_sha256 for item in projection.candidates) == tuple(
+        archive_selected_evidence_snapshot_sha256(
+            item.resolved_source,
+            tuple(passage.passage_ref for passage in item.passages),
+            tuple(passage.excerpt for passage in item.passages),
+        )
+        for item in candidates
+    )
+
+    payload = projection.to_private_payload()
+    assert frozenset(payload) == frozenset(
+        {
+            "candidate_count",
+            "candidates",
+            "coverage_grade",
+            "coverage_sha256",
+            "evidence_sha256",
+            "schema",
+        }
+    )
+    assert payload["schema"] == ARCHIVE_SEARCH_ACCEPTED_CANDIDATE_PROJECTION_SCHEMA
+    raw_candidates = cast(list[dict[str, object]], payload["candidates"])
+    assert all(
+        frozenset(item)
+        == frozenset(
+            {
+                "corpus",
+                "ordinal",
+                "passage_refs",
+                "resolved_snapshot_sha256",
+                "schema",
+                "source_ref",
+            }
+        )
+        and item["schema"] == ARCHIVE_SEARCH_CANDIDATE_PROJECTION_ENTRY_SCHEMA
+        for item in raw_candidates
+    )
+    rendered = (
+        projection.to_private_json()
+        + repr(projection)
+        + "".join(repr(item) for item in projection.candidates)
+    )
+    for forbidden in (
+        QUERY,
+        "Model-visible excerpt",
+        "Bound final answer",
+        answer,
+        '"title"',
+        '"filename"',
+        '"excerpt"',
+        "candidate_handle",
+        "continuation",
+        "model_visible",
+    ):
+        assert forbidden not in rendered
+
+    payload["coverage_grade"] = "tampered"
+    raw_candidates[0]["ordinal"] = 99
+    assert projection.coverage_grade is ArchiveSearchCoverageGrade.COMPLETE
+    assert projection.candidates[0].ordinal == 1
+
+
+def test_candidate_projection_snapshot_changes_with_unstored_body_bytes() -> None:
+    original = _candidates()[0]
+    changed = replace(
+        original,
+        passages=(replace(original.passages[0], excerpt="Different private exact body"),),
+    )
+    projections: list[ArchiveSearchAcceptedCandidateProjection] = []
+    for index, candidate in enumerate((original, changed), 1):
+        run = _run(run=f"candidate-snapshot-{index}-{next(_TURN_SEQUENCE)}")
+        projections.append(
+            _attest(
+                run,
+                _batch(run, candidates=(candidate,)),
+                answer="One accepted source [A1.1].",
+            ).candidate_projection
+        )
+
+    first, second = (item.candidates[0] for item in projections)
+    assert first.source_ref == second.source_ref
+    assert first.passage_refs == second.passage_refs
+    assert first.resolved_snapshot_sha256 != second.resolved_snapshot_sha256
+    rendered = "".join(item.to_private_json() for item in projections)
+    assert original.passages[0].excerpt not in rendered
+    assert changed.passages[0].excerpt not in rendered
+
+    navigation = replace(
+        original,
+        evidence_authority=ArchiveEvidenceAuthority.NAVIGATION_ONLY,
+        passages=(),
+    )
+    navigation_run = _run(run=f"candidate-navigation-{next(_TURN_SEQUENCE)}")
+    navigation_entry = _attest(
+        navigation_run,
+        _batch(navigation_run, candidates=(navigation,)),
+        answer="One navigation result [A1].",
+    ).candidate_projection.candidates[0]
+    assert navigation_entry.source_ref == navigation.resolved_source.source_ref
+    assert navigation_entry.passage_refs == ()
+    assert re.fullmatch(r"[0-9a-f]{64}", navigation_entry.resolved_snapshot_sha256)
+
+
+def test_candidate_projection_is_phase_two_only_and_tamper_evident() -> None:
+    with pytest.raises(ArchiveSearchAuthorityError, match="phase-2"):
+        ArchiveSearchAcceptedCandidateProjection()
+
+    run = _run(run=f"candidate-projection-carrier-{next(_TURN_SEQUENCE)}")
+    batch = _batch(run)
+    assert not hasattr(batch, "candidate_projection")
+    attestation = _attest(run, batch, answer="Accepted answer [A1.1].")
+    projection = attestation.candidate_projection
+    for operation in (copy.copy, copy.deepcopy, pickle.dumps):
+        with pytest.raises(TypeError, match="process-private"):
+            operation(projection)
+
+    for index, mutation in enumerate(("order", "coverage", "source", "snapshot"), 1):
+        current_run = _run(run=f"candidate-projection-tamper-{index}-{next(_TURN_SEQUENCE)}")
+        current_answer = "Accepted answer [A1.1]."
+        current_attestation = _attest(
+            current_run,
+            _batch(current_run),
+            answer=current_answer,
+        )
+        current_projection = current_attestation.candidate_projection
+        if mutation == "order":
+            object.__setattr__(
+                current_projection,
+                "_candidates",
+                tuple(reversed(current_projection.candidates)),
+            )
+        elif mutation == "coverage":
+            object.__setattr__(current_projection, "_coverage_sha256", "f" * 64)
+        elif mutation == "source":
+            entry = current_projection.candidates[0]
+            object.__setattr__(entry, "source_ref", _candidates()[1].resolved_source.source_ref)
+        else:
+            entry = current_projection.candidates[0]
+            object.__setattr__(entry, "resolved_snapshot_sha256", "f" * 64)
+        assert current_attestation.attests_answer(current_answer) is False
+        with pytest.raises(ArchiveSearchAuthorityError, match="projection is unavailable"):
+            _ = current_projection.candidates
 
 
 def test_phase_two_selection_requires_all_citations_to_name_one_candidate() -> None:
