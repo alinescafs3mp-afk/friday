@@ -139,7 +139,7 @@ failed/error/skipped-тест в любой фазе делает гейт кр�
 - post-context load допускает bounded convergence не более 2 секунд с шагом
   50 мс только для valid same-epoch busy; invalid/epoch/deadline fail-closed, а
   initial idle и post-cancellation quiet остаются строгими;
-- final startup health имеет `status=ok`, `version=0.207.20`, configured/installed
+- final startup health имеет `status=ok`, `version=0.207.21`, configured/installed
   `canary`, routes `[archive_read, file_read]`, точный `profile_id`,
   `verified_context_tokens=8192` и непустой public `attestation_sha256`;
 - синтетические 1- и 2-файловые UTF-8 smokes дают одну публикацию с точными
@@ -167,6 +167,10 @@ failed/error/skipped-тест в любой фазе делает гейт кр�
 Проверить:
 
 - schema version = 41;
+- предыдущий release 0.207.20 уже имеет schema 41 и reader нового receipt;
+  переход 0.207.20 → 0.207.21 не меняет schema и активирует rollback-safe writer
+  проверенного объяснения только для заново подтверждённого выбранного
+  архивного evidence;
 - предыдущий release 0.207.19 уже имеет schema 41; переход 0.207.19 → 0.207.20
   не меняет schema и заранее устанавливает rollback-safe reader для durable
   receipt проверенного объяснения выбранного архивного источника; runtime-writer

@@ -1,3 +1,18 @@
+## 0.207.21 — 2026-08-25
+
+### Attested explanation of selected archive evidence
+
+- A closed follow-up to an exact, durably selected archive source can now use
+  the attested V12 model for bounded synthesis and an independent verification
+  pass. Every published claim retains exact nested passage citations.
+- Selection, authorization, source revision, evidence identity and model lease
+  are rechecked before one atomic assistant-message/receipt/Work-Item commit.
+  Any model, verifier, lease or source failure falls back to the exact structural
+  replay without sending the request through the ordinary model.
+- Interaction traces distinguish synthesis, verification, provider timeout and
+  stale-lease outcomes with exact model-call accounting. The canonical release
+  gate now requires the cross-feature Obsidian/archive/web/file/V12 battery.
+
 ## 0.207.20 — 2026-08-25
 
 ### Reader-first archive explanation compatibility
