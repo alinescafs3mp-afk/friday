@@ -55,6 +55,46 @@ _EXPECTED_KEYS = frozenset(
     }
 )
 
+# The admitted endpoint has a 512-token output envelope. ``json_object`` only
+# guarantees parseable JSON and allowed one complex Inbox page to spend that
+# envelope on an oversized object, forcing an otherwise healthy endpoint into
+# cooldown. Keep the wire grammar useful but deliberately smaller than the
+# downstream validator; the primary fallback retains the wider legacy shape.
+_SECONDARY_INBOX_ADVICE_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "title": {"type": "string", "maxLength": 120},
+        "summary": {"type": "string", "maxLength": 400},
+        "knowledge_kind": {"type": "string", "enum": sorted(_ALLOWED_KINDS)},
+        "importance": {"type": "number", "minimum": 0.0, "maximum": 1.0},
+        "tags": {
+            "type": "array",
+            "items": {"type": "string", "minLength": 1, "maxLength": 32},
+            "maxItems": 5,
+        },
+        "entities": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string", "minLength": 1, "maxLength": 80},
+                    "entity_type": {"type": "string", "enum": sorted(_ALLOWED_ENTITY_TYPES)},
+                    "confidence": {"type": "number", "minimum": 0.0, "maximum": 1.0},
+                    "evidence": {"type": "string", "maxLength": 120},
+                },
+                "required": ["name", "entity_type", "confidence", "evidence"],
+                "additionalProperties": False,
+            },
+            "maxItems": 3,
+        },
+        "recommended_action": {"type": "string", "enum": sorted(_ALLOWED_ACTIONS)},
+        "confidence": {"type": "number", "minimum": 0.0, "maximum": 1.0},
+        "rationale": {"type": "string", "maxLength": 180},
+    },
+    "required": sorted(_EXPECTED_KEYS),
+    "additionalProperties": False,
+}
+
 
 @dataclass(frozen=True, slots=True)
 class RoutedInboxAdvice:
@@ -250,6 +290,7 @@ async def route_inbox_advice(
             effect_class=EffectClass.NONE,
             modality=ModelModality.IMAGE if image_bearing else ModelModality.TEXT,
             require_structured_output=True,
+            structured_output_schema=_SECONDARY_INBOX_ADVICE_SCHEMA,
             require_independent_model=True,
             # Inbox input is always tenant-private. Keep this classification
             # code-owned so neither assist nor shadow can accidentally relabel it.

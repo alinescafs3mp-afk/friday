@@ -292,6 +292,12 @@ async def test_assist_uses_validated_secondary_extraction_without_primary(
         )
         assert input_bytes + body["max_tokens"] + 256 <= 4096
         assert "tools" not in body
+        response_format = body["response_format"]
+        assert response_format["type"] == "json_schema"
+        json_schema = response_format["json_schema"]
+        assert json_schema["strict"] is True
+        assert json_schema["schema"]["additionalProperties"] is False
+        assert json_schema["schema"]["properties"]["entities"]["maxItems"] == 3
         return _completion(_advice("Secondary Redis advice"))
 
     scheduler = build_secondary_brain(

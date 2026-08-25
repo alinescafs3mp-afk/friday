@@ -1629,6 +1629,52 @@ async def test_structured_result_is_typed_and_tool_output_is_rejected(settings: 
 
 
 @pytest.mark.asyncio
+async def test_code_owned_structured_schema_reaches_the_endpoint(settings: Any) -> None:
+    observed_payloads: list[dict[str, Any]] = []
+    schema = {
+        "type": "object",
+        "properties": {"label": {"type": "string", "enum": ["ok"]}},
+        "required": ["label"],
+        "additionalProperties": False,
+    }
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        observed_payloads.append(json.loads(request.content))
+        return _response(content='{"label":"ok"}')
+
+    scheduler = build_secondary_brain(
+        _configured_settings(settings),
+        transport=_after_admission(handler),
+    )
+    try:
+        request = replace(
+            _request(structured=True),
+            structured_output_schema=schema,
+        )
+        attempt = await scheduler.attempt(request)
+        assert attempt.result is not None
+        assert attempt.result.structured_output == {"label": "ok"}
+        assert observed_payloads[0]["response_format"] == {
+            "type": "json_schema",
+            "json_schema": {
+                "name": "friday_secondary_result",
+                "strict": True,
+                "schema": schema,
+            },
+        }
+    finally:
+        await scheduler.aclose()
+
+
+def test_response_schema_requires_structured_output() -> None:
+    with pytest.raises(ValueError, match="requires structured output"):
+        replace(
+            _request(),
+            structured_output_schema={"type": "object"},
+        )
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     "unsafe_response",
     [

@@ -130,6 +130,11 @@ class ModelRequest:
     effect_class: EffectClass = EffectClass.NONE
     modality: ModelModality = ModelModality.TEXT
     require_structured_output: bool = False
+    structured_output_schema: Mapping[str, Any] | None = field(
+        default=None,
+        repr=False,
+        compare=False,
+    )
     require_independent_model: bool = False
     contains_private_text: bool = False
 
@@ -140,6 +145,8 @@ class ModelRequest:
             raise ValueError("secondary request max_output_tokens must be positive")
         if not math.isfinite(self.absolute_deadline_monotonic):
             raise ValueError("secondary request deadline must be finite")
+        if self.structured_output_schema is not None and not self.require_structured_output:
+            raise ValueError("secondary response schema requires structured output")
 
 
 @dataclass(frozen=True, slots=True)

@@ -22,6 +22,7 @@ from .contracts import (
 )
 
 _MAX_RESPONSE_BYTES = 1_048_576
+_MAX_RESPONSE_SCHEMA_BYTES = 32_768
 _HARMONY_MARKERS = (
     "<|analysis|>",
     "<|call|>",
@@ -175,7 +176,33 @@ class GptOssProtocolAdapter:
             "stream": False,
         }
         if request.require_structured_output:
-            payload["response_format"] = {"type": "json_object"}
+            schema = request.structured_output_schema
+            if schema is None:
+                payload["response_format"] = {"type": "json_object"}
+            else:
+                copied = _immutable_json(dict(schema))
+                if not isinstance(copied, dict) or copied.get("type") != "object":
+                    raise ProtocolRejection(SecondaryFailure.MALFORMED_RESPONSE)
+                try:
+                    encoded_schema = json.dumps(
+                        copied,
+                        ensure_ascii=False,
+                        sort_keys=True,
+                        separators=(",", ":"),
+                        allow_nan=False,
+                    ).encode("utf-8", errors="strict")
+                except (TypeError, ValueError, UnicodeError):
+                    raise ProtocolRejection(SecondaryFailure.MALFORMED_RESPONSE) from None
+                if len(encoded_schema) > _MAX_RESPONSE_SCHEMA_BYTES:
+                    raise ProtocolRejection(SecondaryFailure.MALFORMED_RESPONSE)
+                payload["response_format"] = {
+                    "type": "json_schema",
+                    "json_schema": {
+                        "name": "friday_secondary_result",
+                        "strict": True,
+                        "schema": copied,
+                    },
+                }
         return payload
 
     def parse_response(
