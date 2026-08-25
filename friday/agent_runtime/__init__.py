@@ -40724,8 +40724,30 @@ class AgentRuntime:
         clean_message = (message or "").strip()
         archive_evidence_followup_kind = parse_archive_evidence_followup(clean_message)
         archive_candidate_surface_has_attachments = bool(attachments)
+        archive_evidence_bound_for_routing = bool(
+            isinstance(_pending_durable_admission, PendingDurableTurnAdmission)
+            and _pending_durable_admission.is_bound
+        )
+        if (
+            archive_evidence_followup_kind is not None
+            and not archive_evidence_bound_for_routing
+            and conversation_id
+        ):
+            routing_person_id = actor.own_id if actor.shared_tenant else user_id
+            try:
+                with read_only_storage_snapshot(self.storage) as routing_evidence_conn:
+                    archive_evidence_bound_for_routing = bool(
+                        get_current_recall_selected_archive_evidence_work_item_in_transaction(
+                            routing_evidence_conn,
+                            user_id=routing_person_id,
+                            conversation_id=str(conversation_id),
+                        )
+                    )
+            except Exception:  # noqa: BLE001 - absent/stale routing evidence stays ordinary
+                archive_evidence_bound_for_routing = False
         archive_evidence_plain_routing_surface = bool(
             archive_evidence_followup_kind is not None
+            and archive_evidence_bound_for_routing
             and not archive_candidate_surface_has_attachments
             and enable_tools is True
             and ingestion_result is None

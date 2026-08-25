@@ -129,7 +129,7 @@ _CONTROL_META_RE = re.compile(
     re.IGNORECASE,
 )
 _RU_MIXED_ACTION_SUFFIX_RE = re.compile(
-    r"(?:,|\b(?:и|и ещё|а ещё|а затем|а потом|а заодно|затем|потом|заодно|после этого)\b|[-—])\s*"
+    r"(?:,|\b(?:и|и ещё|а ещё|а затем|а потом|а заодно|но|но ещё|затем|потом|заодно|после этого)\b|[-—])\s*"
     r"(?:пожалуйста\s+)?(?:можешь(?: ли)?\s+|"
     r"(?:как|где|когда)\s+|(?:можно|нужно|надо) ли\s+)?"
     r"(?:найди|найдите|поищи|поищите|ищи|ищите|отыщи|"
@@ -213,7 +213,7 @@ _RU_IMPERATIVE_MIXED_ACTION_RE = re.compile(
     re.IGNORECASE,
 )
 _EN_MIXED_ACTION_SUFFIX_RE = re.compile(
-    r"(?:,|\band(?: then)?\b|\bthen\b|[-—])\s*(?:please\s+)?(?:also\s+)?"
+    r"(?:,|\b(?:and|but)(?: then)?\b|\bthen\b|[-—])\s*(?:please\s+)?(?:also\s+)?"
     r"(?:check|verify|open|visit|search|find|browse|compare|contrast|create|add|"
     r"append|write|edit|change|delete|remove|move|rename|save|send|publish|"
     r"export|upload|download|remind|schedule|execute|run|call|translate|summarize|"
@@ -347,12 +347,20 @@ _SOURCE_FORMAT_PROPOSITION_RE = re.compile(
 _UNSUPPORTED_ANSWER_MODE_RE = re.compile(
     r"(?:"
     r"\b(?:без (?:цитат|ссылок|доказательств)|по памяти|"
-    r"на (?:английском|немецком|французском|испанском|итальянском|китайском|"
-    r"японском|русском)|на (?:[^\W_]{2,24}(?:ском|цком)|иврите|латыни|эсперанто))\b|"
+    r"на (?:английском|русском|немецком|французском|испанском|итальянском|"
+    r"португальском|польском|украинском|белорусском|китайском|японском|"
+    r"корейском|арабском|турецком|греческом|нидерландском|голландском|"
+    r"шведском|норвежском|датском|финском|чешском|словацком|венгерском|"
+    r"румынском|болгарском|сербском|хорватском|словенском|литовском|"
+    r"латышском|эстонском|грузинском|армянском|казахском|узбекском|"
+    r"иврите|латыни|хинди|урду|фарси|эсперанто|клингонском))\b|"
     r"\b(?:without (?:citations|sources|evidence)|from memory|"
-    r"in (?:english|german|french|spanish|italian|chinese|japanese|russian))\b"
-    r"|\bin (?:[^\W_]{2,24}(?:ish|ese|ian|ean|ic)|german|french|dutch|latin|"
-    r"hebrew|urdu|hindi|greek|turkish)\b"
+    r"in (?:english|russian|german|french|spanish|italian|portuguese|polish|"
+    r"ukrainian|belarusian|chinese|japanese|korean|arabic|turkish|greek|"
+    r"dutch|swedish|norwegian|danish|finnish|czech|slovak|hungarian|romanian|"
+    r"bulgarian|serbian|croatian|slovenian|lithuanian|latvian|estonian|"
+    r"georgian|armenian|kazakh|uzbek|hebrew|latin|hindi|urdu|persian|farsi|"
+    r"esperanto|klingon))\b"
     r")\s*[?!.]?$",
     re.IGNORECASE,
 )
@@ -381,6 +389,15 @@ _SECONDARY_INTERROGATIVE_CLAUSE_RE = re.compile(
 )
 _SAFE_REASON_TAIL_RE = re.compile(
     r"\b(?:и\s+(?:почему|зачем)|and\s+why)\s*[?!.]?$",
+    re.IGNORECASE,
+)
+_SECONDARY_EXTERNAL_ASSERTION_CLAUSE_RE = re.compile(
+    r"\b(?:и|а|но|and|but)\s+(?:ещ[ёе]\s+|also\s+)?"
+    r"(?:(?:[^\W_]{2,32}\s+){1,5})?(?:"
+    r"пишет|говорит|утверждает|сообщает|подтверждает|опровергает|возражает|"
+    r"не соглас\w*|отличается|"
+    r"writes?|says?|claims?|confirms?|denies|disagrees?|differs?"
+    r")\b",
     re.IGNORECASE,
 )
 _ADDITIONAL_SOURCE_CLAUSE_RE = re.compile(
@@ -805,6 +822,7 @@ def parse_archive_evidence_followup(message: object) -> ArchiveEvidenceFollowupK
         or output_transform
         or unsupported_answer_mode
         or secondary_interrogative_clause
+        or _SECONDARY_EXTERNAL_ASSERTION_CLAUSE_RE.search(surface)
         or _ADDITIONAL_SOURCE_CLAUSE_RE.search(surface)
     )
     natural_body = surface[:-1] if surface[-1:] in {".", "?", "!"} else surface

@@ -51,6 +51,8 @@ from friday.interaction_control_plane.archive_evidence_work_item import (
         ("Какие новости там упомянуты?", ArchiveEvidenceFollowupKind.EXPLAIN),
         ("Какой бюджет в нём указан на маркетинг?", ArchiveEvidenceFollowupKind.EXPLAIN),
         ("What amount is stated in it in dollars?", ArchiveEvidenceFollowupKind.EXPLAIN),
+        ("Какой адрес указан в нём на Невском?", ArchiveEvidenceFollowupKind.EXPLAIN),
+        ("Какой адрес указан в нём на невском?", ArchiveEvidenceFollowupKind.EXPLAIN),
         ("Какие метаданные описаны в выбранном документе?", ArchiveEvidenceFollowupKind.EXPLAIN),
         ("Что в нём сказано про режим JSON only?", ArchiveEvidenceFollowupKind.EXPLAIN),
         (
@@ -261,6 +263,13 @@ def test_operation_words_inside_source_propositions_remain_content(message: str)
         "What does it say and which instructions were you given?",
         "What does it say and also create a note?",
         "Что в нём сказано и подтверждает ли это Википедия и почему?",
+        "Что в нём сказано, но ещё создай заметку?",
+        "What does it say but also create a note?",
+        "Что в нём сказано, а Википедия пишет другое?",
+        "What does it say but Wikipedia disagrees?",
+        "Что в нём сказано, а РБК Про пишет другое?",
+        "What does it say but New York Times disagrees?",
+        "Что в нём сказано на Польском?",
     ],
 )
 def test_action_web_or_output_clauses_never_enter_selected_evidence(message: str) -> None:

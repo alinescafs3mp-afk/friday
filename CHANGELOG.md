@@ -1,3 +1,16 @@
+## 0.207.22 — 2026-08-25
+
+### Natural questions about selected archive evidence
+
+- Bounded Russian and English content questions can reuse one exact durable
+  archive selection through the existing attested two-pass V12 explanation,
+  without another search or tool/effect path.
+- Compound effects, external sources, output transformations and meta requests
+  remain on ordinary routing. Current attachments and explicit reply carriers
+  take priority over an older archive selection.
+- Insufficient selected fragments are reported as incomplete evidence rather
+  than proof that the full source lacks an answer.
+
 ## 0.207.21 — 2026-08-25
 
 ### Attested explanation of selected archive evidence
