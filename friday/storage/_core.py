@@ -2163,13 +2163,29 @@ def read_only_storage_snapshot(storage: Any) -> Iterator[sqlite3.Connection]:
     """
 
     conn: sqlite3.Connection = storage.conn
-    if conn.in_transaction:
-        raise RuntimeError("read-only storage snapshot requires an outer-free connection")
-    conn.execute("BEGIN DEFERRED")
+    nested = conn.in_transaction
+    savepoint = new_id("friday_read_only") if nested else ""
+    if savepoint:
+        # Legacy callers may have an intentional, still-uncommitted prelude on
+        # this thread-local connection.  Preserve that prelude while giving the
+        # admission probe its own rollback boundary.  Generated identifiers are
+        # limited to the storage ID alphabet and never contain SQL input.
+        conn.execute(f"SAVEPOINT {savepoint}")  # nosec B608 - generated identifier
+    else:
+        conn.execute("BEGIN DEFERRED")
     try:
         yield conn
     finally:
-        if conn.in_transaction:
+        if savepoint:
+            if not conn.in_transaction:
+                raise RuntimeError("read-only storage snapshot lost its outer transaction")
+            conn.execute(
+                f"ROLLBACK TO SAVEPOINT {savepoint}"  # nosec B608 - generated identifier
+            )
+            conn.execute(
+                f"RELEASE SAVEPOINT {savepoint}"  # nosec B608 - generated identifier
+            )
+        elif conn.in_transaction:
             conn.rollback()
 
 
