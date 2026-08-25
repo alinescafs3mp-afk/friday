@@ -324,9 +324,7 @@ async def test_shared_archive_admission_uses_exact_person_scope() -> None:
     )
 
     assert result["message"] == "legacy"
-    assert runtime.admission_calls == [
-        ("person-a", _MESSAGE, actor, "person-a-conversation")
-    ]
+    assert runtime.admission_calls == [("person-a", _MESSAGE, actor, "person-a-conversation")]
     assert planner.calls == []
 
 
@@ -348,7 +346,5 @@ async def test_foreign_conversation_cannot_claim_pending_ownership() -> None:
     )
 
     assert result["message"] == "legacy"
-    assert runtime.admission_calls == [
-        ("owner", _MESSAGE, _ACTOR, "foreign-conversation")
-    ]
+    assert runtime.admission_calls == [("owner", _MESSAGE, _ACTOR, "foreign-conversation")]
     assert len(planner.calls) == 1
