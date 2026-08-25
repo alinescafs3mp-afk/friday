@@ -89,6 +89,19 @@ class ChatRuntime(Protocol):
     ) -> dict[str, Any]: ...
 
 
+class PendingDurableTurnOwner(Protocol):
+    """Optional synchronous admission surface implemented by the legacy owner."""
+
+    def owns_pending_durable_turn(
+        self,
+        user_id: str,
+        message: str,
+        *,
+        actor: ActorContext,
+        conversation_id: str | None,
+    ) -> bool: ...
+
+
 class TurnPlanner(Protocol):
     async def plan(self, turn: TurnInput, *, turn_deadline: float | None = None) -> TurnPlan: ...
 
@@ -480,6 +493,37 @@ class OrchestrationRouter:
             or (actor.is_owner and "owner" in self._canary_user_ids)
         )
 
+    def _legacy_owns_pending_durable_turn(
+        self,
+        user_id: str,
+        message: str,
+        *,
+        actor: ActorContext,
+        conversation_id: str | None,
+    ) -> bool:
+        """Ask only the proven owner, without exposing effect-bearing turn carriers."""
+
+        try:
+            owner_check = getattr(self._legacy, "owns_pending_durable_turn", None)
+            if not callable(owner_check):
+                return False
+            return (
+                owner_check(
+                    user_id,
+                    message,
+                    actor=actor,
+                    conversation_id=conversation_id,
+                )
+                is True
+            )
+        except Exception as exc:  # noqa: BLE001 - optional admission must fail to ordinary routing
+            # Exception bodies and request values may contain private state.
+            LOGGER.warning(
+                "pending durable turn admission rejected; retaining ordinary routing (%s)",
+                type(exc).__name__,
+            )
+            return False
+
     async def _complete_shadow_plan(
         self,
         turn: TurnInput,
@@ -601,6 +645,37 @@ class OrchestrationRouter:
             return await self._legacy.chat(user_id, message, **legacy_kwargs)
 
         started = time.monotonic()
+        # A durable code-owned question remains legacy-owned even while V12 is
+        # sampled.  Admission is deliberately synchronous and scalar-only: no
+        # file carrier, reply/replay context, voice request or policy decision
+        # crosses this optional compatibility boundary.
+        plain_durable_surface = bool(
+            not attachments
+            and ingestion_result is None
+            and synthetic_document_notice is False
+            and replay_source_message_id is None
+            and answer_with_voice is False
+            and reply_to is None
+            and quoted_attachment_reference is False
+            and reply_assistant_reference is False
+            and reply_assistant_message_id is None
+            and turn_policy is None
+        )
+        if plain_durable_surface and self._legacy_owns_pending_durable_turn(
+            user_id,
+            message,
+            actor=actor,
+            conversation_id=conversation_id,
+        ):
+            self._observe(
+                started=started,
+                status="durable_turn_owned",
+                plan=None,
+                selected_runtime="legacy",
+            )
+            _observe_legacy_capability_owner()
+            return await self._legacy.chat(user_id, message, **legacy_kwargs)
+
         if self.mode is RouterMode.CANARY and not self._actor_canary_eligible(actor):
             self._observe(
                 started=started,
