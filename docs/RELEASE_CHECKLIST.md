@@ -139,7 +139,7 @@ failed/error/skipped-тест в любой фазе делает гейт кр�
 - post-context load допускает bounded convergence не более 2 секунд с шагом
   50 мс только для valid same-epoch busy; invalid/epoch/deadline fail-closed, а
   initial idle и post-cancellation quiet остаются строгими;
-- final startup health имеет `status=ok`, `version=0.207.17`, configured/installed
+- final startup health имеет `status=ok`, `version=0.207.18`, configured/installed
   `canary`, routes `[archive_read, file_read]`, точный `profile_id`,
   `verified_context_tokens=8192` и непустой public `attestation_sha256`;
 - синтетические 1- и 2-файловые UTF-8 smokes дают одну публикацию с точными
@@ -167,8 +167,11 @@ failed/error/skipped-тест в любой фазе делает гейт кр�
 Проверить:
 
 - schema version = 41;
-- предыдущий release 0.207.16 уже имеет schema 41; переход 0.207.16 → 0.207.17
-  не меняет schema и активирует только bounded worker/archive consumer;
+- предыдущий release 0.207.17 уже имеет schema 41; переход 0.207.17 → 0.207.18
+  не меняет schema и перераспределяет только фактически неиспользованный
+  bounded budget DocumentCatalog worker;
+- исторический переход 0.207.16 → 0.207.17 активирует bounded
+  worker/archive consumer без изменения schema;
 - исторический переход 0.207.15 → 0.207.16
   атомарно добавляет exact body-free DocumentCatalog и явный bounded backfill;
 - предыдущий release 0.207.13 имеет schema 39; переход 0.207.13 → 0.207.14

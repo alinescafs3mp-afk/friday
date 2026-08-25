@@ -1,3 +1,15 @@
+## 0.207.18 — 2026-08-25
+
+### Skew-safe DocumentCatalog convergence
+
+- The worker now reclaims only the measured unused portion of fair tenant
+  reservations and gives it first to successful backfill tails. A large archive
+  therefore consumes the global 128-item tick budget instead of advancing one
+  row per minute behind already-finished small tenants.
+- Failed or malformed phase reports conservatively retain their full reservation;
+  the global bound, sticky health, cancellation replay and single atomic
+  checkpoint remain unchanged.
+
 ## 0.207.17 — 2026-08-25
 
 ### Bounded DocumentCatalog convergence and archive navigation
