@@ -1007,6 +1007,94 @@ async def test_reconcile_incrementally_indexes_an_android_originated_note(
 
 
 @pytest.mark.asyncio
+async def test_reconcile_settles_oldest_prepared_create_from_historical_sidecar_without_rewrite(
+    settings, storage, tmp_path
+) -> None:
+    storage.ensure_user("alice")
+    runtime, _client = _runtime(settings, storage, tmp_path)
+    await runtime.start("alice")
+    await runtime.check("alice")
+    assert (await runtime.confirm_open("alice"))["state"] == "ready"
+    vault = storage.get_obsidian_vault("alice")
+    assert vault is not None
+    notes = runtime._note_service("alice")
+    operation_id = "prepared-create-historical-receipt"
+    path = "Recovery/Historical.md"
+    content = "Первоначальная версия Friday."
+    target_revision = hashlib.sha256(
+        notes.render_create_content(content).encode("utf-8")
+    ).hexdigest()
+    storage.prepare_obsidian_operation(
+        "alice",
+        operation_id=operation_id,
+        vault_id=str(vault["id"]),
+        method="create",
+        arguments_digest=hashlib.sha256(b"historical-create").hexdigest(),
+        prepared_result={
+            "schema": "friday.obsidian-note-operation.v1",
+            "path": path,
+            "target_revision": target_revision,
+        },
+    )
+    committed = notes.create_note(path, content, operation_id=operation_id)
+    assert committed.revision == target_revision
+    user_edit = notes.store.write_text(
+        path,
+        "Изменённая человеком версия.",
+        expected_revision=target_revision,
+    )
+
+    report = await runtime.reconcile()
+
+    assert report["operations_refreshed"] == 1
+    row = storage.get_obsidian_operation("alice", operation_id)
+    assert row is not None
+    assert row["status"] == "scan_pending"
+    result = json.loads(str(row["result_json"]))
+    assert result["schema"] == "friday.obsidian-note-operation.v2"
+    assert result["reconciliation_proof"] == "sidecar_committed"
+    assert result["revision"] == target_revision
+    assert notes.store.read_text(path).revision == user_edit.revision
+    assert notes.store.read_text(path).text() == "Изменённая человеком версия."
+
+
+@pytest.mark.asyncio
+async def test_reconcile_keeps_unproved_prepared_create_uncertain_without_vault_write(
+    settings, storage, tmp_path
+) -> None:
+    storage.ensure_user("alice")
+    runtime, _client = _runtime(settings, storage, tmp_path)
+    await runtime.start("alice")
+    await runtime.check("alice")
+    assert (await runtime.confirm_open("alice"))["state"] == "ready"
+    vault = storage.get_obsidian_vault("alice")
+    assert vault is not None
+    notes = runtime._note_service("alice")
+    operation_id = "prepared-create-without-proof"
+    path = "Recovery/Unproved.md"
+    target_revision = hashlib.sha256(b"expected but never written").hexdigest()
+    storage.prepare_obsidian_operation(
+        "alice",
+        operation_id=operation_id,
+        vault_id=str(vault["id"]),
+        method="create",
+        arguments_digest=hashlib.sha256(b"unproved-create").hexdigest(),
+        prepared_result={
+            "schema": "friday.obsidian-note-operation.v1",
+            "path": path,
+            "target_revision": target_revision,
+        },
+    )
+
+    report = await runtime.reconcile()
+
+    assert report["operations_refreshed"] == 0
+    row = storage.get_obsidian_operation("alice", operation_id)
+    assert row is not None and row["status"] == "uncertain"
+    assert not notes.store.exists(path)
+
+
+@pytest.mark.asyncio
 async def test_search_reports_partial_revision_pinned_index_coverage(settings, storage, tmp_path) -> None:
     storage.ensure_user("alice")
     runtime, _client = _runtime(settings, storage, tmp_path)

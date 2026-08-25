@@ -2362,6 +2362,16 @@ class ObsidianRuntime:
                 synchronize=True,
                 readiness_timeout=readiness_timeout,
             )
+            row = self.storage.get_obsidian_operation(owner_id, operation_id)
+            if (
+                row is not None
+                and str(row.get("status") or "") in {"prepared", "uncertain"}
+                and str(row.get("method") or "") in {"create", "append"}
+            ):
+                # The promoted effect vertical is reconciled only by observing
+                # its private sidecar/exact frozen target.  It never replays the
+                # vault mutation after an uncertain commit boundary.
+                await asyncio.to_thread(service.reconcile_local_effect, operation_id)
             try:
                 result = await asyncio.to_thread(service.refresh_delivery, operation_id)
             except SyncthingError:
@@ -2569,9 +2579,14 @@ class ObsidianRuntime:
             limit=max(1, self.settings.obsidian_max_profiles * 4)
         ):
             owner_id = str(operation["user_id"])
+            status = str(operation["status"])
+            method = str(operation["method"])
             if (
                 owner_id in selected_owners
-                and str(operation["status"]) != "uncertain"
+                and (
+                    status not in {"prepared", "uncertain"}
+                    or method in {"create", "append"}
+                )
                 and owner_id not in oldest_by_owner
             ):
                 oldest_by_owner[owner_id] = operation
