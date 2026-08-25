@@ -3,9 +3,10 @@
 Status: **P1A + P1B + P1C + SELECTED-EVIDENCE EXPLANATION DEPLOYED**
 Date: 2026-08-25
 Branch: `main`
-Source/live: `main` / `27b9fc5545e88a38e111170f79d0f548edfbc646`
-Live: Friday `0.207.21`, schema 41; V12 canary remains scoped to `FILE_READ`
-and `ARCHIVE_READ`; reader-first fallback `05b7a8177e8456a243cda5a7211ec9893b47ad47`
+Source/live: `main` / `9ab75a82393919e477890b601d243ae7baedad5a`
+Live: Friday `0.207.26`, schema 41; V12 canary remains scoped to `FILE_READ`
+and `ARCHIVE_READ`; current schema-capable fallback
+`9142765647b75d12cea22798df6782a09bc5c4b8`
 
 The current authority remains:
 
@@ -86,3 +87,9 @@ plugin dependency.
 - Select the next incomplete golden journey from the canonical registry and
   widen only the typed outcome/Work Item semantics required by that journey.
 - Generic Active Frames and WorkGraphs remain behind proven bounded journeys.
+
+The selected next journey is `CompareConversationWithDocument`. It keeps
+`TurnPlan v1` frozen: code owns the two-source plan, durable continuation and
+completion; one tools-disabled attested V12 synthesis plus an independent
+verifier may only express the exact freshly reauthorized message/document
+evidence. Reader-compatible schema capacity lands before the runtime writer.
