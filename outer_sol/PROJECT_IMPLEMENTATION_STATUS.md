@@ -6,11 +6,15 @@ the current production identity, completed packages, active work and next order.
 
 - Updated: 2026-08-25
 - Branch: `main`
-- Secondary acceptance base: released Friday `0.207.11` (sealed product
-  evidence and rollout-consume boundary); physical/profile acceptance will bind
-  the next immutable release after the current web hotfix
-- Deployed implementation head: `0c985cf41ee01e6beb2187134f42ff8dd8088deb`
-- Live: Friday `0.207.11` / `0c985cf41ee01e6beb2187134f42ff8dd8088deb`;
+- Secondary acceptance base: released Friday `0.207.12`; sealed product
+  evidence and rollout-consume boundary are present, while the accepted-profile
+  registry remains empty pending physical acceptance
+- Deployed implementation head: `7913c633954d3da2df042b598cd08b4fb4e94a91`
+- Live: Friday `0.207.12` / `7913c633954d3da2df042b598cd08b4fb4e94a91`;
+  tree `ae7dfe4d659b8dbc43246d7f38d823ae86d8c562e36c3be1713965060f66ff40`;
+  wheel `aa99b7d8af34e783bdbed61e0bf51549b39f97f587092952f18254e318bb04b6`
+- Immediate predecessor: Friday `0.207.11` /
+  `0c985cf41ee01e6beb2187134f42ff8dd8088deb`;
   tree `3fd9b4730bcd55d61f426d9eb0d77bb24d0c62ba41e745923d62e44c4671aff4`;
   wheel `a2d785d980b8b6b0208af7007c7fa39bd2230a1551221e63b35d6b710b1b9736`
 - Schema-capable fallback: Friday `0.207.10` /
@@ -26,12 +30,11 @@ the current production identity, completed packages, active work and next order.
 
 ## Active objective
 
-First restore the general `web_read` contour and release it with a cross-feature
-regression gate. Then finish the optional detachable GPT-OSS-20B/SGLang node
-through physical acceptance, public shadow, private shadow and bounded assist,
-preserving exact primary-only behavior whenever the laptop is absent. After the
-final incoming ICP checkpoint is independently accepted, resume the broader
-Interaction Control Plane and V12 work.
+Finish the optional detachable GPT-OSS-20B/SGLang node through physical
+acceptance, public shadow, private shadow and bounded assist, preserving exact
+primary-only behavior whenever the laptop is absent. After the final incoming
+ICP checkpoint is independently accepted, resume the broader Interaction
+Control Plane and V12 work.
 
 The measured provisional finalist is exact profile
 `gptoss20b-2335df123cac7fc0e13e347cde1e1ffa8562daafcaf0fc76ade1a851d2b0ff1f`
@@ -125,19 +128,28 @@ course, with these repository-specific constraints:
 
 ## In progress
 
-1. Release the general `web_read` hotfix as `0.207.12` after its complete
-   cross-feature gate and immutable production verification.
-2. Complete deterministic, controlled-live and physical laptop-loss evidence
+1. Complete deterministic, controlled-live and physical laptop-loss evidence
    from the exact immutable release; accept and register only the bound
    finalist in a separate default-off release.
-3. Promote distinct candidates through public shadow, private shadow and
+2. Promote distinct candidates through public shadow, private shadow and
    bounded assist, proving exact primary fallback and repeating the physical
    cycle with product-linked counters.
-4. Independently accept the incoming durable-recall checkpoint, then resume
+3. Independently accept the incoming durable-recall checkpoint, then resume
    `INTERACTION_CONTROL_PLANE_AND_OPERATIONAL_MEMORY.md` through the deployed
    source/passage, coverage and late-reauthorization contracts.
 
 ## Completed and deployed (current package)
+
+### General public-web execution hotfix (`0.207.12`)
+
+- Natural Russian and English public-news/search requests now enter one typed
+  current-message-only `WEB_READ`, preserve exact calendar and freshness
+  semantics and cannot inherit stale private file history.
+- File, note, CRM, person, secret, quoted and compound-effect carriers remain
+  fail-closed; Unicode/confusable and cross-feature regression matrices passed.
+- The exact immutable source passed 18,067 non-UI and 31 UI tests, reproduced
+  its wheel byte-for-byte and is live with schema 39, clean SQLite integrity/FK
+  checks and both services active.
 
 ### Retrieval identity and coverage foundation (`0.207.5`)
 
@@ -319,36 +331,35 @@ claims at this checkpoint.
 
 ## Current cumulative gate
 
-- The `0.207.11` canonical gate passed 18,040 non-UI tests plus 31 UI tests;
-  static and focused secondary gates are green.
-- Friday `0.207.11` is live at the exact source/tree/wheel identity above,
-  schema 39, with `0.207.10` as the schema-capable fallback.
+- The exact `0.207.12` canonical gate passed 18,067 non-UI tests plus 31 UI
+  tests; static checks and focused adversarial web matrices are green.
+- Friday `0.207.12` is live at the exact source/tree/wheel identity above,
+  schema 39, with `0.207.11` as immediate predecessor and `0.207.10` as the
+  explicit schema-capable fallback.
 
 ## Next order
 
-1. Release the general `web_read` hotfix after the exact live regression, a
-   varied intent/privacy matrix and the complete canonical gate pass.
-2. Complete deterministic, controlled-live and physical laptop-loss evidence;
+1. Complete deterministic, controlled-live and physical laptop-loss evidence;
    accept and register only the exact finalist in a separate default-off
    release.
-3. Promote distinct immutable candidates through public shadow, private shadow
+2. Promote distinct immutable candidates through public shadow, private shadow
    and bounded assist; repeat laptop-off/disconnect-mid-turn with product-linked
    counters and prove primary fallback exactly once.
-4. Independently accept the final incoming ICP checkpoint, then resume broader
+3. Independently accept the final incoming ICP checkpoint, then resume broader
    ICP work from the deployed schema-39 archive-evidence vertical.
-5. Build durable DocumentCatalog/enrichment and add durable candidate
+4. Build durable DocumentCatalog/enrichment and add durable candidate
    selection/pending-question state only when it preserves exact archive
    coverage and survives restart without persisting model prose.
-6. Add one uncertainty-aware common effect envelope and prove one idempotent,
+5. Add one uncertainty-aware common effect envelope and prove one idempotent,
    receipt-backed Obsidian mutation/reconciliation vertical.
-7. Extend existing immutable-release evidence into machine-reconcilable
+6. Extend existing immutable-release evidence into machine-reconcilable
    source/wheel/schema/activation/fallback manifests, then register exact-release
    journey evidence without promoting generic component gates.
-8. Run actual Android/Syncthing, backup/clean-restore and bounded recovery/fault
+7. Run actual Android/Syncthing, backup/clean-restore and bounded recovery/fault
    certification; simulations remain labelled separately.
-9. Begin V12 refinement with `ExplainSelectedArchiveEvidence`, and make the
+8. Begin V12 refinement with `ExplainSelectedArchiveEvidence`, and make the
    cross-feature search/file/Obsidian/dialogue battery mandatory for releases.
-10. Evaluate generic WorkGraph, broader effects or connectors only from the
+9. Evaluate generic WorkGraph, broader effects or connectors only from the
    golden journeys still failing after the preceding packages. Companion work
    remains out of scope.
 
