@@ -248,6 +248,143 @@ def test_operation_ledger_replays_only_identical_arguments(storage: FridayStorag
         storage.transition_obsidian_operation("alice", "op-client-1", "delivered")
 
 
+def test_prepared_operation_is_pending_and_can_reconcile_directly(storage: FridayStorage) -> None:
+    aggregate = _bundle(storage, "alice")
+    prepared, _created = storage.prepare_obsidian_operation(
+        "alice",
+        operation_id="op-prepared-reconcile",
+        vault_id=aggregate["vault"]["id"],
+        method="create",
+        arguments_digest=hashlib.sha256(b"prepared-reconcile").hexdigest(),
+        prepared_result={"reconciliation_state": "required"},
+    )
+
+    assert prepared["status"] == "prepared"
+    assert {row["id"] for row in storage.list_pending_obsidian_operations()} == {"op-prepared-reconcile"}
+
+    reconciled = storage.transition_obsidian_operation(
+        "alice",
+        "op-prepared-reconcile",
+        "reconciled",
+        result={"reconciliation_state": "settled"},
+    )
+    assert reconciled["status"] == "reconciled"
+    assert json.loads(reconciled["result_json"]) == {"reconciliation_state": "settled"}
+
+
+@pytest.mark.parametrize(
+    ("accepted_state", "transitions"),
+    [
+        ("committed", ("committed",)),
+        ("scan_pending", ("committed", "scan_pending")),
+        ("scan_complete", ("committed", "scan_complete")),
+        ("delivery_pending", ("committed", "scan_pending", "delivery_pending")),
+        ("delivered", ("committed", "scan_complete", "delivered")),
+        ("reconciled", ("reconciled",)),
+    ],
+)
+def test_accepted_operation_result_is_immutable(
+    storage: FridayStorage,
+    accepted_state: str,
+    transitions: tuple[str, ...],
+) -> None:
+    aggregate = _bundle(storage, "alice")
+    operation_id = f"op-immutable-{accepted_state}"
+    storage.prepare_obsidian_operation(
+        "alice",
+        operation_id=operation_id,
+        vault_id=aggregate["vault"]["id"],
+        method="create",
+        arguments_digest=hashlib.sha256(operation_id.encode()).hexdigest(),
+    )
+    accepted_result = {"path": "Notes/A.md", "revision": "1" * 64}
+    for state in transitions:
+        storage.transition_obsidian_operation(
+            "alice",
+            operation_id,
+            state,
+            result=accepted_result if state == transitions[0] else None,
+        )
+
+    identical = storage.transition_obsidian_operation(
+        "alice",
+        operation_id,
+        accepted_state,
+        result={"revision": "1" * 64, "path": "Notes/A.md"},
+    )
+    assert json.loads(identical["result_json"]) == accepted_result
+
+    with pytest.raises(ValueError, match="result is immutable"):
+        storage.transition_obsidian_operation(
+            "alice",
+            operation_id,
+            accepted_state,
+            result={"path": "Notes/A.md", "revision": "2" * 64},
+        )
+    unchanged = storage.get_obsidian_operation("alice", operation_id)
+    assert unchanged is not None
+    assert unchanged["status"] == accepted_state
+    assert json.loads(unchanged["result_json"]) == accepted_result
+
+
+def test_accepted_result_survives_delivery_update_and_transition(storage: FridayStorage) -> None:
+    aggregate = _bundle(storage, "alice")
+    operation_id = "op-delivery-only"
+    storage.prepare_obsidian_operation(
+        "alice",
+        operation_id=operation_id,
+        vault_id=aggregate["vault"]["id"],
+        method="create",
+        arguments_digest=hashlib.sha256(operation_id.encode()).hexdigest(),
+    )
+    accepted_result = {"revision": "1" * 64}
+    storage.transition_obsidian_operation("alice", operation_id, "committed", result=accepted_result)
+    updated = storage.transition_obsidian_operation(
+        "alice", operation_id, "committed", delivery={"server_scan_complete": False}
+    )
+    assert json.loads(updated["result_json"]) == accepted_result
+    advanced = storage.transition_obsidian_operation(
+        "alice", operation_id, "scan_pending", result={"revision": "1" * 64}
+    )
+    assert json.loads(advanced["result_json"]) == accepted_result
+
+    with pytest.raises(ValueError, match="result is immutable"):
+        storage.transition_obsidian_operation(
+            "alice", operation_id, "scan_complete", result={"revision": "2" * 64}
+        )
+    unchanged = storage.get_obsidian_operation("alice", operation_id)
+    assert unchanged is not None
+    assert unchanged["status"] == "scan_pending"
+
+
+def test_uncertain_operation_can_replace_result_when_reconciled(storage: FridayStorage) -> None:
+    aggregate = _bundle(storage, "alice")
+    operation_id = "op-uncertain-reconciled"
+    storage.prepare_obsidian_operation(
+        "alice",
+        operation_id=operation_id,
+        vault_id=aggregate["vault"]["id"],
+        method="append",
+        arguments_digest=hashlib.sha256(operation_id.encode()).hexdigest(),
+        prepared_result={"reconciliation_state": "required"},
+    )
+    storage.transition_obsidian_operation(
+        "alice", operation_id, "uncertain", result={"error": "commit outcome unknown"}
+    )
+
+    reconciled = storage.transition_obsidian_operation(
+        "alice",
+        operation_id,
+        "reconciled",
+        result={"reconciliation_state": "settled", "revision": "1" * 64},
+    )
+    assert reconciled["status"] == "reconciled"
+    assert json.loads(reconciled["result_json"]) == {
+        "reconciliation_state": "settled",
+        "revision": "1" * 64,
+    }
+
+
 def test_conflicts_are_preserved_and_upserted_per_vault(storage: FridayStorage) -> None:
     aggregate = _bundle(storage, "alice")
     first = storage.record_obsidian_conflict(

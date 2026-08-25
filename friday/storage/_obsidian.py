@@ -645,7 +645,7 @@ _ONBOARDING_TRANSITIONS: dict[str, frozenset[str]] = {
 }
 
 _OPERATION_TRANSITIONS: dict[str, frozenset[str]] = {
-    "prepared": frozenset({"committed", "conflict", "failed", "uncertain", "cancelled"}),
+    "prepared": frozenset({"committed", "reconciled", "conflict", "failed", "uncertain", "cancelled"}),
     "committed": frozenset({"scan_pending", "scan_complete", "uncertain", "failed"}),
     "scan_pending": frozenset({"scan_complete", "delivery_pending", "uncertain", "failed"}),
     "scan_complete": frozenset({"delivery_pending", "delivered", "uncertain", "failed"}),
@@ -657,6 +657,10 @@ _OPERATION_TRANSITIONS: dict[str, frozenset[str]] = {
     "failed": frozenset({"reconciled", "cancelled"}),
     "cancelled": frozenset(),
 }
+
+_OPERATION_RESULT_IMMUTABLE_STATES = frozenset(
+    {"committed", "scan_pending", "scan_complete", "delivery_pending", "delivered", "reconciled"}
+)
 
 _NOTE_OWNERSHIP_MODES = frozenset({"user_owned", "linked", "friday_managed", "projection", "inbox"})
 _NOTE_ORIGINS = frozenset({"user", "android", "friday", "syncthing", "projection", "imported", "unknown"})
@@ -1718,6 +1722,12 @@ class ObsidianMixin(StorageShared):
             if state != old_state and state not in _OPERATION_TRANSITIONS.get(old_state, frozenset()):
                 raise ValueError(f"invalid Obsidian operation transition: {old_state} -> {state}")
             result_json = str(current["result_json"]) if result is None else _canonical_json(result)
+            if (
+                result is not None
+                and old_state in _OPERATION_RESULT_IMMUTABLE_STATES
+                and result_json != str(current["result_json"])
+            ):
+                raise ValueError("accepted Obsidian operation result is immutable")
             delivery_json = str(current["delivery_json"]) if delivery is None else _canonical_json(delivery)
             conn.execute(
                 """UPDATE obsidian_operations
@@ -1764,7 +1774,7 @@ class ObsidianMixin(StorageShared):
         rows = self.execute(
             """SELECT * FROM obsidian_operations
                WHERE status IN (
-                   'committed', 'scan_pending', 'scan_complete',
+                   'prepared', 'committed', 'scan_pending', 'scan_complete',
                    'delivery_pending', 'uncertain'
                )
                ORDER BY updated_at, id LIMIT ?""",
