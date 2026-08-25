@@ -1,11 +1,11 @@
 #!/usr/bin/env python
 """Secret-free, read-only audit of document discoverability in an offline DB copy.
 
-The current Friday schema has an authorized Raw lexical index, but it does not
-yet have the DocumentCatalog projections described by Proposal 86.  This v1
-auditor therefore measures what can be proved today and reports every absent
-future projection as ``not_available`` with a zero count and an explicit
-incomplete reason.  It never treats absence of a table as complete coverage.
+The auditor recognizes only Friday's exact, body-free ``document_catalog``
+sidecar.  A missing or look-alike table remains ``not_available``/``unsupported``;
+it is never guessed into coverage.  Current, explicitly incomplete, missing and
+stale source-bound rows are counted separately, while later passage, embedding
+and typed-date projections continue to report honest gaps.
 
 Only an explicitly named, private, quiescent SQLite copy is accepted.  There is
 no settings-derived/default database path and no mutation/fix mode.  Output is
@@ -45,7 +45,7 @@ from friday.storage._privacy import (  # noqa: E402
     _not_private_raw_dependency,
 )
 
-REPORT_SCHEMA = "friday.document-catalog-audit.v1"
+REPORT_SCHEMA = "friday.document-catalog-audit.v2"
 DEFAULT_MAX_ROWS = 100_000
 HARD_MAX_ROWS = 1_000_000
 HEX64 = re.compile(r"^[0-9a-f]{64}$")
@@ -62,6 +62,7 @@ COUNT_KEYS = (
     "files_with_typed_dates",
     "pending_files_with_semantic_index",
     "files_with_stale_enrichment_revision",
+    "files_with_incomplete_catalog",
     "files_with_index_incomplete_reason",
     "files_excluded_by_policy",
     "files_without_extracted_text",
@@ -75,9 +76,13 @@ EXCLUSION_KEYS = (
 )
 INCOMPLETE_KEYS = (
     "catalog_projection_not_available",
+    "catalog_row_missing",
+    "catalog_row_stale",
+    "catalog_row_incomplete",
     "lexical_projection_not_available",
     "lexical_row_missing",
     "semantic_title_projection_not_available",
+    "semantic_title_missing",
     "passage_projection_not_available",
     "embedding_projection_not_available",
     "typed_date_projection_not_available",
@@ -106,6 +111,20 @@ FUTURE_TABLES = {
     "enrichment_revision": ("document_catalog",),
 }
 
+DOCUMENT_CATALOG_COLUMNS = (
+    "raw_object_id",
+    "source_version",
+    "source_content_sha256",
+    "extracted_text_sha256",
+    "semantic_title",
+    "title_authority",
+    "enrichment_revision",
+    "enrichment_status",
+    "incomplete_reason",
+    "enriched_at",
+)
+CURRENT_ENRICHMENT_REVISION = 1
+
 
 class ContractError(RuntimeError):
     """The operator, input snapshot, or output contract is not safe to use."""
@@ -113,6 +132,8 @@ class ContractError(RuntimeError):
 
 class _OfflineConnection(sqlite3.Connection):
     """Connection type issued only after the offline-copy checks pass."""
+
+    _friday_offline_copy_verified: bool
 
 
 def _canonical_json(value: Any) -> bytes:
@@ -197,6 +218,37 @@ def _schema_hash(conn: sqlite3.Connection, names: tuple[str, ...]) -> str | None
     return _sha256(_canonical_json(definitions)) if definitions else None
 
 
+def _exact_document_catalog_available(conn: sqlite3.Connection) -> bool:
+    """Accept the shipped body-free shape, never a same-named approximation."""
+
+    sql = _table_sql(conn, "document_catalog")
+    if sql is None:
+        return False
+    rows = conn.execute("PRAGMA table_xinfo('document_catalog')").fetchall()
+    if tuple(str(row[1]) for row in rows) != DOCUMENT_CATALOG_COLUMNS:
+        return False
+    by_name = {str(row[1]): row for row in rows}
+    if int(by_name["raw_object_id"][5]) != 1:
+        return False
+    nullable = {"extracted_text_sha256", "semantic_title", "incomplete_reason"}
+    if any(int(by_name[name][3]) != int(name not in nullable) for name in DOCUMENT_CATALOG_COLUMNS):
+        return False
+    normalized = " ".join(sql.casefold().split())
+    required_fragments = (
+        "title_authority",
+        "navigation_only",
+        "enrichment_status",
+        "current",
+        "incomplete",
+        "incomplete_reason",
+        "raw_objects",
+    )
+    has_raw_reference = "references raw_objects" in normalized or (
+        "foreign key" in normalized and "raw_objects" in normalized
+    )
+    return has_raw_reference and all(fragment in normalized for fragment in required_fragments)
+
+
 def _required_schema(conn: sqlite3.Connection) -> int:
     required = {
         "schema_meta",
@@ -239,13 +291,29 @@ def _projection_report(conn: sqlite3.Connection) -> dict[str, dict[str, Any]]:
             ),
         },
     }
-    # V1 intentionally does not guess the shape or semantics of future tables.
-    # Seeing a same-named table is reported as unsupported, never as coverage.
+    catalog_exact = _exact_document_catalog_available(conn)
     for name, tables in FUTURE_TABLES.items():
         present = any(_table_sql(conn, table) is not None for table in tables)
+        implemented = catalog_exact and name in {
+            "document_catalog",
+            "semantic_title",
+            "enrichment_revision",
+        }
+        catalog_only_pending_gap = (
+            name == "pending_semantic_index"
+            and catalog_exact
+            and _table_sql(conn, "document_embeddings") is None
+        )
+        status = (
+            "available"
+            if implemented
+            else "not_available"
+            if catalog_only_pending_gap or not present
+            else "unsupported"
+        )
         projections[name] = {
-            "status": "unsupported" if present else "not_available",
-            "revision_sha256": _schema_hash(conn, tables) if present else None,
+            "status": status,
+            "revision_sha256": _schema_hash(conn, tables) if status != "not_available" else None,
         }
     return {key: projections[key] for key in PROJECTION_KEYS}
 
@@ -292,6 +360,41 @@ def audit_document_catalog(
         if lexical_available
         else "0"
     )
+    catalog_available = projections["document_catalog"]["status"] == "available"
+    catalog_projection = (
+        """
+               c.raw_object_id IS NOT NULL AS has_catalog_row,
+               (c.source_version=r.version
+                AND c.source_content_sha256=r.content_hash) AS catalog_source_current,
+               (c.enrichment_revision=1) AS catalog_revision_current,
+               (c.enrichment_status='current'
+                AND c.incomplete_reason IS NULL
+                AND typeof(c.extracted_text_sha256)='text'
+                AND length(c.extracted_text_sha256)=64
+                AND lower(c.extracted_text_sha256) NOT GLOB '*[^0-9a-f]*') AS catalog_current,
+               (c.enrichment_status='incomplete'
+                AND c.incomplete_reason IS NOT NULL
+                AND c.extracted_text_sha256 IS NULL
+                AND c.semantic_title IS NULL) AS catalog_incomplete,
+               (c.enrichment_status='current'
+                AND typeof(c.semantic_title)='text'
+                AND length(trim(c.semantic_title))>0) AS has_semantic_title
+        """
+        if catalog_available
+        else """
+               0 AS has_catalog_row,
+               0 AS catalog_source_current,
+               0 AS catalog_revision_current,
+               0 AS catalog_current,
+               0 AS catalog_incomplete,
+               0 AS has_semantic_title
+        """
+    )
+    catalog_join = (
+        "LEFT JOIN document_catalog c ON c.raw_object_id=r.id"
+        if catalog_available
+        else ""
+    )
     uploader_expression = _exact_uploader_raw_dependency("r") if exact_uploader else "1"
     query = f"""
         SELECT r.id AS opaque_id,
@@ -313,8 +416,10 @@ def audit_document_catalog(
                       AND pending_inbox.user_id=r.user_id
                       AND pending_inbox.status='pending'
                ) AS is_pending,
-               ({lexical_expression}) AS has_lexical_row
+               ({lexical_expression}) AS has_lexical_row,
+               {catalog_projection}
           FROM raw_objects r
+          {catalog_join}
          WHERE r.user_id=? AND r.content_type='file'
          ORDER BY r.rowid
     """  # nosec B608 - every interpolated fragment is a code-owned SQL predicate
@@ -325,6 +430,11 @@ def audit_document_catalog(
     pending = 0
     lexical = 0
     without_text = 0
+    catalogued = 0
+    catalog_missing = 0
+    catalog_stale = 0
+    catalog_incomplete = 0
+    semantic_titles = 0
     fingerprint = hashlib.sha256()
     # A hard VM-step fuse complements the row cap for malformed/adversarial copies.
     conn.set_progress_handler(lambda: 1, max(250_000, (row_count + 1) * 25_000))
@@ -358,11 +468,39 @@ def audit_document_catalog(
                 registered += 1
                 pending += int(bool(row["is_pending"]))
                 lexical += int(bool(row["has_lexical_row"]))
+                if not catalog_available:
+                    catalog_state = "not_available"
+                elif not bool(row["has_catalog_row"]):
+                    catalog_state = "missing"
+                    catalog_missing += 1
+                elif not (
+                    bool(row["catalog_source_current"])
+                    and bool(row["catalog_revision_current"])
+                ):
+                    catalog_state = "stale"
+                    catalog_stale += 1
+                elif bool(row["catalog_current"]):
+                    catalog_state = "current"
+                    catalogued += 1
+                    semantic_titles += int(bool(row["has_semantic_title"]))
+                elif bool(row["catalog_incomplete"]):
+                    catalog_state = "incomplete"
+                    catalogued += 1
+                    catalog_incomplete += 1
+                else:
+                    catalog_state = "stale"
+                    catalog_stale += 1
             # IDs never leave the hash state. Include the classification so policy
             # or lifecycle mutations change the snapshot fingerprint.
             fingerprint.update(
                 _canonical_json(
-                    [raw_id, int(row["source_version"] or 0), state, int(bool(row["has_lexical_row"]))]
+                    [
+                        raw_id,
+                        int(row["source_version"] or 0),
+                        state,
+                        int(bool(row["has_lexical_row"])),
+                        catalog_state if state == "registered" else "excluded",
+                    ]
                 )
             )
         if seen != row_count:
@@ -375,18 +513,22 @@ def audit_document_catalog(
         conn.set_progress_handler(None, 0)
 
     future_missing = {
-        "catalog_projection_not_available": registered,
-        "semantic_title_projection_not_available": registered,
+        "catalog_projection_not_available": 0 if catalog_available else registered,
+        "semantic_title_projection_not_available": 0 if catalog_available else registered,
         "passage_projection_not_available": registered,
         "embedding_projection_not_available": registered,
         "typed_date_projection_not_available": registered,
         "pending_semantic_projection_not_available": pending,
-        "enrichment_revision_projection_not_available": registered,
+        "enrichment_revision_projection_not_available": 0 if catalog_available else registered,
     }
     incomplete = {
         **future_missing,
+        "catalog_row_missing": catalog_missing,
+        "catalog_row_stale": catalog_stale,
+        "catalog_row_incomplete": catalog_incomplete,
         "lexical_projection_not_available": 0 if lexical_available else registered,
         "lexical_row_missing": registered - lexical if lexical_available else 0,
+        "semantic_title_missing": registered - semantic_titles if catalog_available else 0,
         "extracted_text_unavailable": without_text,
     }
     incomplete = {key: int(incomplete[key]) for key in INCOMPLETE_KEYS}
@@ -395,14 +537,15 @@ def audit_document_catalog(
         "tenant_file_rows_examined": row_count,
         "registered_authorized_live_text_bearing_files": registered,
         "pending_registered_files": pending,
-        "catalogued_files": 0,
+        "catalogued_files": catalogued,
         "lexically_searchable_files": lexical,
-        "files_with_semantic_title": 0,
+        "files_with_semantic_title": semantic_titles,
         "files_with_passages": 0,
         "files_with_current_embeddings": 0,
         "files_with_typed_dates": 0,
         "pending_files_with_semantic_index": 0,
-        "files_with_stale_enrichment_revision": 0,
+        "files_with_stale_enrichment_revision": catalog_stale,
+        "files_with_incomplete_catalog": catalog_incomplete,
         "files_with_index_incomplete_reason": registered + without_text,
         "files_excluded_by_policy": policy_total,
         "files_without_extracted_text": without_text,
@@ -430,6 +573,7 @@ def audit_document_catalog(
                     "knowledge_objects",
                     "raw_fts",
                     "raw_fts_docsize",
+                    "document_catalog",
                     "private_entity_material_cache_state",
                     "private_entity_material_derivative_state",
                     "private_entity_material_derivative_cache",
@@ -444,9 +588,9 @@ def audit_document_catalog(
             "status": "incomplete",
             "uncapped": True,
             "scope_accounted": True,
-            "catalog_complete": False,
+            "catalog_complete": bool(catalog_available and catalogued == registered),
             "lexical_complete": bool(lexical_available and lexical == registered),
-            "semantic_complete": False,
+            "semantic_complete": bool(catalog_available and semantic_titles == registered),
             "typed_dates_complete": False,
         },
         "scope_fingerprint_sha256": fingerprint.hexdigest(),
@@ -470,7 +614,7 @@ def _counts(value: Any, expected: tuple[str, ...], *, label: str) -> dict[str, i
 
 
 def validate_report(report: dict[str, Any]) -> None:
-    """Validate exact v1 shape and reject internally coherent-looking lies."""
+    """Validate exact v2 shape and reject internally coherent-looking lies."""
 
     top = _exact_keys(
         report,
@@ -528,16 +672,18 @@ def validate_report(report: dict[str, Any]) -> None:
             raise ContractError("unsupported projection lacks a schema digest")
     if projections["raw_registry"]["status"] != "available":
         raise ContractError("raw registry must be available")
-    # V1 has no implemented reader for these future shapes. A similarly named
-    # table is unsupported and its coverage must still remain exactly zero.
+    catalog_available = projections["document_catalog"]["status"] == "available"
+    if catalog_available != (
+        projections["semantic_title"]["status"] == "available"
+        and projections["enrichment_revision"]["status"] == "available"
+    ):
+        raise ContractError("catalog projection availability is inconsistent")
+    # Later projection shapes remain intentionally unsupported by this release.
     metric_for_projection = {
-        "document_catalog": "catalogued_files",
-        "semantic_title": "files_with_semantic_title",
         "document_passages": "files_with_passages",
         "document_embeddings": "files_with_current_embeddings",
         "typed_dates": "files_with_typed_dates",
         "pending_semantic_index": "pending_files_with_semantic_index",
-        "enrichment_revision": "files_with_stale_enrichment_revision",
     }
 
     counts = _counts(top["counts"], COUNT_KEYS, label="report")
@@ -545,7 +691,14 @@ def validate_report(report: dict[str, Any]) -> None:
     excluded = _counts(top["excluded_by_policy"], EXCLUSION_KEYS, label="policy exclusion")
     registered = counts["registered_authorized_live_text_bearing_files"]
     pending = counts["pending_registered_files"]
-    if pending > registered or counts["lexically_searchable_files"] > registered:
+    bounded_metrics = (
+        "catalogued_files",
+        "lexically_searchable_files",
+        "files_with_semantic_title",
+        "files_with_stale_enrichment_revision",
+        "files_with_incomplete_catalog",
+    )
+    if pending > registered or any(counts[key] > registered for key in bounded_metrics):
         raise ContractError("coverage exceeds the registered scope")
     if counts["files_excluded_by_policy"] != sum(excluded.values()):
         raise ContractError("policy exclusion partition is inconsistent")
@@ -553,19 +706,44 @@ def validate_report(report: dict[str, Any]) -> None:
         registered + counts["files_excluded_by_policy"] + counts["files_without_extracted_text"]
     ):
         raise ContractError("scoped row partition is inconsistent")
-    for projection, metric in metric_for_projection.items():
-        if projections[projection]["status"] == "available":
-            raise ContractError("v1 cannot claim an implemented future projection")
+    for projection_name, metric in metric_for_projection.items():
+        if projections[projection_name]["status"] == "available":
+            raise ContractError("v2 cannot claim an unimplemented later projection")
         if counts[metric] != 0:
             raise ContractError("unavailable projection has nonzero coverage")
+    if not catalog_available and (
+        counts["catalogued_files"]
+        or counts["files_with_semantic_title"]
+        or counts["files_with_stale_enrichment_revision"]
+        or counts["files_with_incomplete_catalog"]
+    ):
+        raise ContractError("unavailable catalog projection has nonzero coverage")
+    if counts["files_with_semantic_title"] > counts["catalogued_files"]:
+        raise ContractError("semantic title coverage exceeds catalog coverage")
     expected_reasons = {
-        "catalog_projection_not_available": registered,
-        "semantic_title_projection_not_available": registered,
+        "catalog_projection_not_available": 0 if catalog_available else registered,
+        "catalog_row_missing": (
+            registered
+            - counts["catalogued_files"]
+            - counts["files_with_stale_enrichment_revision"]
+            if catalog_available
+            else 0
+        ),
+        "catalog_row_stale": (
+            counts["files_with_stale_enrichment_revision"] if catalog_available else 0
+        ),
+        "catalog_row_incomplete": (
+            counts["files_with_incomplete_catalog"] if catalog_available else 0
+        ),
+        "semantic_title_projection_not_available": 0 if catalog_available else registered,
+        "semantic_title_missing": (
+            registered - counts["files_with_semantic_title"] if catalog_available else 0
+        ),
         "passage_projection_not_available": registered,
         "embedding_projection_not_available": registered,
         "typed_date_projection_not_available": registered,
         "pending_semantic_projection_not_available": pending,
-        "enrichment_revision_projection_not_available": registered,
+        "enrichment_revision_projection_not_available": 0 if catalog_available else registered,
         "lexical_projection_not_available": (
             registered if projections["lexical_source_index"]["status"] != "available" else 0
         ),
@@ -576,6 +754,8 @@ def validate_report(report: dict[str, Any]) -> None:
         ),
         "extracted_text_unavailable": counts["files_without_extracted_text"],
     }
+    if counts["files_with_incomplete_catalog"] > counts["catalogued_files"]:
+        raise ContractError("incomplete catalog rows exceed catalog coverage")
     if reasons != {key: expected_reasons[key] for key in INCOMPLETE_KEYS}:
         raise ContractError("incomplete reason accounting is inconsistent")
     if counts["files_with_index_incomplete_reason"] != (registered + counts["files_without_extracted_text"]):
@@ -598,13 +778,19 @@ def validate_report(report: dict[str, Any]) -> None:
         projections["lexical_source_index"]["status"] == "available"
         and counts["lexically_searchable_files"] == registered
     )
+    expected_catalog_complete = bool(
+        catalog_available and counts["catalogued_files"] == registered
+    )
+    expected_semantic_complete = bool(
+        catalog_available and counts["files_with_semantic_title"] == registered
+    )
     if completeness != {
         "status": "incomplete",
         "uncapped": True,
         "scope_accounted": True,
-        "catalog_complete": False,
+        "catalog_complete": expected_catalog_complete,
         "lexical_complete": expected_lexical_complete,
-        "semantic_complete": False,
+        "semantic_complete": expected_semantic_complete,
         "typed_dates_complete": False,
     }:
         raise ContractError("false or inconsistent completeness claim")

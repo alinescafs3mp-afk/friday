@@ -162,6 +162,58 @@ def _seed_scope(conn: sqlite3.Connection, *, lexical: bool = True) -> None:
     conn.commit()
 
 
+def _add_exact_catalog(conn: sqlite3.Connection) -> None:
+    conn.executescript(
+        """
+        CREATE TABLE document_catalog(
+            raw_object_id TEXT PRIMARY KEY NOT NULL
+                REFERENCES raw_objects(id) ON DELETE CASCADE,
+            source_version INTEGER NOT NULL,
+            source_content_sha256 TEXT NOT NULL,
+            extracted_text_sha256 TEXT,
+            semantic_title TEXT,
+            title_authority TEXT NOT NULL CHECK(title_authority='navigation_only'),
+            enrichment_revision INTEGER NOT NULL,
+            enrichment_status TEXT NOT NULL CHECK(enrichment_status IN ('current','incomplete')),
+            incomplete_reason TEXT,
+            enriched_at TEXT NOT NULL,
+            CHECK(
+                (enrichment_status='current' AND extracted_text_sha256 IS NOT NULL
+                 AND incomplete_reason IS NULL)
+                OR
+                (enrichment_status='incomplete' AND extracted_text_sha256 IS NULL
+                 AND semantic_title IS NULL AND incomplete_reason IS NOT NULL)
+            )
+        );
+        """
+    )
+    eligible = conn.execute(
+        "SELECT version,content_hash,raw_content FROM raw_objects WHERE id='eligible'"
+    ).fetchone()
+    pending = conn.execute(
+        "SELECT version,content_hash FROM raw_objects WHERE id='pending'"
+    ).fetchone()
+    conn.execute(
+        """INSERT INTO document_catalog VALUES(
+               'eligible',?,?,?,'Договор','navigation_only',1,
+               'current',NULL,'2026-08-20T00:00:00+00:00'
+           )""",
+        (
+            eligible["version"],
+            eligible["content_hash"],
+            hashlib.sha256(str(eligible["raw_content"]).encode()).hexdigest(),
+        ),
+    )
+    conn.execute(
+        """INSERT INTO document_catalog VALUES(
+               'pending',?,?,NULL,NULL,'navigation_only',1,
+               'incomplete','backfill_pending','2026-08-20T00:00:00+00:00'
+           )""",
+        (pending["version"], pending["content_hash"]),
+    )
+    conn.commit()
+
+
 def _resign(report: dict[str, object]) -> dict[str, object]:
     mutated = copy.deepcopy(report)
     mutated.pop("report_sha256", None)
@@ -208,6 +260,7 @@ def test_counts_authority_lifecycle_lexical_and_future_gaps_without_secrets(tmp_
         "files_with_typed_dates": 0,
         "pending_files_with_semantic_index": 0,
         "files_with_stale_enrichment_revision": 0,
+        "files_with_incomplete_catalog": 0,
         "files_with_index_incomplete_reason": 3,
         "files_excluded_by_policy": 5,
         "files_without_extracted_text": 1,
@@ -279,6 +332,48 @@ def test_same_named_future_table_is_unsupported_not_guessed_as_coverage(tmp_path
     assert report["completeness"]["catalog_complete"] is False
 
 
+def test_exact_catalog_separates_current_explicit_incomplete_and_semantic_coverage(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "synthetic.sqlite3"
+    conn = _make_database(path)
+    _seed_scope(conn)
+    _add_exact_catalog(conn)
+    conn.close()
+
+    report = _audit_path(path)
+    assert report["projections"]["document_catalog"]["status"] == "available"
+    assert report["projections"]["semantic_title"]["status"] == "available"
+    assert report["counts"]["catalogued_files"] == 2
+    assert report["counts"]["files_with_semantic_title"] == 1
+    assert report["counts"]["files_with_incomplete_catalog"] == 1
+    assert report["incomplete_reasons"]["catalog_row_missing"] == 0
+    assert report["incomplete_reasons"]["catalog_row_stale"] == 0
+    assert report["incomplete_reasons"]["catalog_row_incomplete"] == 1
+    assert report["incomplete_reasons"]["semantic_title_missing"] == 1
+    assert report["completeness"]["catalog_complete"] is True
+    assert report["completeness"]["semantic_complete"] is False
+    validate_report(report)
+
+
+def test_catalog_source_drift_is_stale_not_current_or_missing(tmp_path: Path) -> None:
+    path = tmp_path / "synthetic.sqlite3"
+    conn = _make_database(path)
+    _seed_scope(conn)
+    _add_exact_catalog(conn)
+    conn.execute("UPDATE document_catalog SET source_version=99 WHERE raw_object_id='pending'")
+    conn.commit()
+    conn.close()
+
+    report = _audit_path(path)
+    assert report["counts"]["catalogued_files"] == 1
+    assert report["counts"]["files_with_stale_enrichment_revision"] == 1
+    assert report["counts"]["files_with_incomplete_catalog"] == 0
+    assert report["incomplete_reasons"]["catalog_row_missing"] == 0
+    assert report["incomplete_reasons"]["catalog_row_stale"] == 1
+    assert report["completeness"]["catalog_complete"] is False
+
+
 def test_foreign_tenant_mutation_cannot_change_scoped_report(tmp_path: Path) -> None:
     path = tmp_path / "synthetic.sqlite3"
     conn = _make_database(path)
@@ -308,6 +403,8 @@ def test_foreign_tenant_mutation_cannot_change_scoped_report(tmp_path: Path) -> 
         lambda r: r["counts"].__setitem__("files_with_current_embeddings", 1),
         lambda r: r["counts"].__setitem__("files_with_typed_dates", 1),
         lambda r: r["counts"].__setitem__("files_with_stale_enrichment_revision", 1),
+        lambda r: r["counts"].__setitem__("files_with_incomplete_catalog", 1),
+        lambda r: r["incomplete_reasons"].__setitem__("catalog_row_missing", 1),
         lambda r: r["incomplete_reasons"].__setitem__("passage_projection_not_available", 0),
         lambda r: r["completeness"].__setitem__("status", "complete"),
         lambda r: r["completeness"].__setitem__("uncapped", False),
