@@ -8660,12 +8660,12 @@ def _actual_supported_ready_file_claims(answer: str) -> tuple[str, ...]:
             reference_match.start(),
             reference_match.end(),
         )
-        match = _SUPPORTED_READY_FILE_BARE_COMPLETION_RE.fullmatch(context)
-        if match is not None and _supported_ready_claim_is_actual(
+        bare_match = _SUPPORTED_READY_FILE_BARE_COMPLETION_RE.fullmatch(context)
+        if bare_match is not None and _supported_ready_claim_is_actual(
             context,
             literals_valid=literals_valid,
         ):
-            reference = match.group("reference")
+            reference = bare_match.group("reference")
             claims.append(
                 _supported_ready_reference_evidence_scope(
                     normalized,
