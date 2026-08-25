@@ -1,14 +1,14 @@
 # Interaction Control Plane implementation status
 
-Status: **SCHEMA-41 EFFECT + SELECTED-EVIDENCE V12 VERTICALS DEPLOYED**
+Status: **SCHEMA-41 VERTICALS DEPLOYED; NEXT DURABLE COMPARISON JOURNEY ACTIVE**
 Date: 2026-08-25
 Branch: `main`
-Source/live: Friday `0.207.21` / `27b9fc5545e88a38e111170f79d0f548edfbc646`,
-tree `74ca567845d1f5de0656f8be8df2e4302d7d04ccb5de356335dec59514ee5a70`,
-wheel `afd630185ad4dd5a6f76c690c71aba84cda7891b82488e102d0f4f069d03f421`,
-schema 41; immediate predecessor and schema-capable fallback Friday `0.207.20` /
-`05b7a8177e8456a243cda5a7211ec9893b47ad47`, tree
-`3fb11b5f5d7defd4059fd4389786932d37cd06c0be4c7ebb6f178d9ce3a193ad`
+Source/live: Friday `0.207.26` / `9ab75a82393919e477890b601d243ae7baedad5a`,
+tree `87f05bedd19fe76ccb5928e21b47106caac1660c0bcf4e8994f8c20967d9d2e5`,
+wheel `c59c920e1936cd1cb3a386f062a1aec47a367cc4cce2767f9b148ec214ae43e1`,
+schema 41; immediate predecessor and schema-capable fallback Friday `0.207.24` /
+`9142765647b75d12cea22798df6782a09bc5c4b8`, tree
+`ce654409f09b93cc651543968e81bb7254dd5af48d8698ae7cd06c0084d28f30`
 
 ## Release checkpoint
 
@@ -24,8 +24,8 @@ schema 41; immediate predecessor and schema-capable fallback Friday `0.207.20` /
 - `0.207.8` adds the authorized read-only federated `archive_search` foundation:
   stable source/passage identity, explicit per-corpus coverage, process-private
   carriers and same-transaction reauthorization/publication.
-- The live anchor resolves to `27b9fc5`, with reader-first schema-41 `05b7a81`
-  as both immediate predecessor and rollback fallback. Backend and bridge are
+- The live anchor resolves to `9ab75a8`, with schema-41 `9142765` as both
+  immediate predecessor and rollback fallback. Backend and bridge are
   active, trusted-CA health is `ok`, and
   schema 41, SQLite integrity, foreign keys, FTS and body-free catalog bindings
   are clean; semantic enrichment coverage remains honestly partial.
@@ -118,15 +118,22 @@ schema 41; immediate predecessor and schema-capable fallback Friday `0.207.20` /
    not create a synthetic live test corpus.
 4. Keep generic autonomous WorkGraphs behind complete user journeys.
 
+The selected next journey is `CompareConversationWithDocument`: preserve exact
+selected message evidence, wait durably for a document reference, survive
+restart, resolve attachment/name/ordinal under fresh authority and revisions,
+then publish one independently verified two-source comparison and one atomic
+receipt. Its schema-capacity reader lands before the writer/runtime package;
+`TurnPlan v1` remains unchanged.
+
 ## Current cumulative gate
 
-- The exact live source passed 18,454 non-UI and 31 UI tests; the pinned real
+- The exact `0.207.24` base passed 18,666 non-UI and 31 UI tests; the pinned real
   Syncthing 2.1.3 smoke executed rather than remaining environment-skipped.
 - Schema-38 migration, lifecycle/privacy, revision-CAS, restart, temporal
   continuation, receipt/plan binding and named-inventory compatibility checks
   passed.
 - Ruff, mypy, compile and release diff checks passed with zero skips. The
-  `0.207.21` wheel reproduced byte-for-byte and immutable activation completed
-  `clear`; Docker and companion-plugin work remained outside the primary
-  release checkpoint. Gate scratch is now owned and removed by the canonical
-  runner, preventing repeated full runs from exhausting `/tmp`.
+  bounded `0.207.26` release then passed its focused secondary/release gate,
+  reproduced its wheel byte-for-byte and activated `clear`; Docker and
+  companion-plugin work remained outside primary Friday certification. Gate
+  scratch is owned and removed by the canonical runner.

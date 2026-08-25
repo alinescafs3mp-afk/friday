@@ -6,21 +6,21 @@ the current production identity, completed packages, active work and next order.
 
 - Updated: 2026-08-25
 - Branch: `main`
-- Secondary acceptance base: live `0.207.24` admits exactly one accepted
-  profile and has an empty provisional registry in private discarded shadow.
-  Source `0.207.26` prepares only the distinct bounded-assist transition.
-- Deployed implementation head: `9142765647b75d12cea22798df6782a09bc5c4b8`
-- Live: Friday `0.207.24` / `9142765647b75d12cea22798df6782a09bc5c4b8`;
-  tree `ce654409f09b93cc651543968e81bb7254dd5af48d8698ae7cd06c0084d28f30`;
-  wheel `f7710d76e581bdea813c3f56e86b8cf3c53727b5ea180ee2554d03347b6f9cc6`
-- Immediate predecessor and schema-capable fallback: Friday `0.207.23` /
-  `ed9e48e2222ebe8031c2e57d161f56de3489586d`, tree
-  `d2a55f924c2bf2c3c6f67220221d8788d32f73807e02b86d721844d9d24f3231`.
+- Secondary acceptance base: live `0.207.26` admits exactly one accepted
+  profile in bounded `assist`; the provisional registry is empty and the
+  primary remains the only publication, tool and effect authority.
+- Deployed implementation head: `9ab75a82393919e477890b601d243ae7baedad5a`
+- Live: Friday `0.207.26` / `9ab75a82393919e477890b601d243ae7baedad5a`;
+  tree `87f05bedd19fe76ccb5928e21b47106caac1660c0bcf4e8994f8c20967d9d2e5`;
+  wheel `c59c920e1936cd1cb3a386f062a1aec47a367cc4cce2767f9b148ec214ae43e1`
+- Immediate predecessor and schema-capable fallback: Friday `0.207.24` /
+  `9142765647b75d12cea22798df6782a09bc5c4b8`, tree
+  `ce654409f09b93cc651543968e81bb7254dd5af48d8698ae7cd06c0084d28f30`.
 - Database schema: 41
 - Production state: immutable activation `clear`; backend and Telegram bridge
   active; trusted-CA HTTPS health `200`; SQLite integrity and FK checks clean;
-  exact accepted profile is healthy/available in private discarded
-  `shadow/extract`; primary remains final and secondary output is discarded. The primary V12
+  exact accepted profile is healthy in bounded `assist` and is probed on
+  demand; laptop absence preserves the primary-only path. The primary V12
   canary is installed for `archive_read` and `file_read` with a live exact
   attestation. The exact,
   body-free schema-41 DocumentCatalog now has its bounded durable worker and
@@ -34,12 +34,10 @@ the current production identity, completed packages, active work and next order.
 
 ## Active objective
 
-Finish the optional detachable GPT-OSS-20B/SGLang node through accepted public
-shadow, private shadow and bounded assist, preserving exact primary-only
-behavior whenever the laptop is absent. Physical failure and profile acceptance
-are complete and accepted private discarded shadow is live. Source `0.207.26`
-prepares only `MODE=shadow→assist` with a fresh private-shadow product receipt;
-private admission, workload and exact profile remain unchanged. The schema-41 DocumentCatalog,
+Complete the next bounded ICP/V12 golden journey while preserving the deployed
+optional GPT-OSS-20B/SGLang assist and exact primary-only behavior whenever the
+laptop is absent. Public shadow, private shadow, bounded assist, exact physical
+loss and automatic recovery are complete. The schema-41 DocumentCatalog,
 archive candidate runtime, receipt-backed Obsidian effect vertical and
 selected-evidence V12 explanation are live. The next autonomous package is the
 next incomplete ICP/V12 golden journey and its release evidence.
@@ -68,10 +66,9 @@ accepted profile manifest hashes to
 `93ea5698b8b6a9bf8a7dc697ffe37d7353055aa16555188991747bba73d059e3` and
 its accepted physical-failure evidence hashes to
 `9dc72f80caed3320bd154cf1219a8bd6b1339142b690b00dd1cbe1fb05964006`.
-Live `0.207.24` admits exactly that profile, with no provisional entries, in
-private discarded `shadow/extract`. Source `0.207.26` prepares bounded assist
-without granting tools, effects, publication or knowledge-write authority;
-failure preserves the exact primary-only path.
+Live `0.207.26` admits exactly that profile, with no provisional entries, in
+bounded `assist`. It grants no tools, effects, publication or knowledge-write
+authority; failure preserves the exact primary-only path.
 
 Detailed active tracker:
 `outer_sol/OPTIONAL_SECONDARY_BRAIN_IMPLEMENTATION_STATUS.md`.
@@ -146,13 +143,31 @@ course, with these repository-specific constraints:
 
 ## In progress
 
-1. Obtain a fresh exact private-shadow product receipt, then deploy source
-   `0.207.26` as the distinct bounded-assist candidate.
-2. Prove assist and close its product-linked physical loss/recovery evidence.
-3. Resume the next bounded ICP/V12 golden journey and machine-reconcilable
-   release evidence without promoting component-only gates.
+1. Complete the durable `CompareConversationWithDocument` journey: preserve
+   exact selected message evidence, wait durably for the document, survive
+   restart, recheck both authorities/revisions and publish one verified answer.
+2. Release that journey reader-first, then activate its writer/runtime in a
+   separate safe package with schema-capable fallback.
+3. Extend machine-reconcilable release evidence without promoting
+   component-only gates, then start the next V12 refinement package.
 
 ## Completed and deployed packages
+
+### Bounded optional GPT-OSS assist (`0.207.26`)
+
+- The exact accepted profile is eligible only for bounded advisory extraction;
+  the primary remains final and owns every answer, tool, effect and write.
+- Immutable `secondary_shadow_to_assist` activation completed `clear` with
+  terminal receipt
+  `1b07dac7750d744d0ab8c9998418e58985751966a71b85e65e771ad460d4bf86`.
+  The fresh assist product receipt hashes to
+  `7b4fa2b40f70047020e29e00a74498ee5bef13a2153a0a5e51ce9f9647f79a80`.
+- A full authenticated request was interrupted by physical laptop power loss;
+  Friday's primary PID and release remained unchanged, the endpoint failed
+  closed, and the exact candidate recovered automatically. The causal and final
+  receipts hash to
+  `194096eca5718c5071af1fea2414f3539a4ddeefa8ccf7e39ca302fb1f44974b`
+  and `4b037955f83335bc9065e652a6cdb2014607a06ce71e9c9afc5bb98b6de45c49`.
 
 ### Private discarded GPT-OSS shadow (`0.207.24`)
 
@@ -446,12 +461,17 @@ blob or migration is a release candidate:
   false `pending` locks, three obsolete gate caches and stale missing-worktree
   registrations were removed. Current `main`, live immutable releases,
   rollback/evidence roots and companion code were untouched;
-- `archive/de37c64-wip-20260822` and `g45-pdf-scan-live-repair` are proven
-  code-superseded and may be removed after a retained forensic bundle is
-  verified;
-- `refs/archive/document-file-contour-wip-20260822` remains held until its 824
-  unique evidence blobs are bundled or explicitly discarded. Product code in
-  that ref is superseded, but the evidence is not otherwise retained.
+- a second exact cleanup removed 14 additional clean, unlocked, detached
+  ancestor worktrees only through `git worktree remove`, releasing about
+  784 MiB; their tracked history remains in Git and only regenerable caches and
+  build output were discarded;
+- the three superseded WIP refs were preserved with complete history in the
+  verified forensic bundle
+  `/home/jericho/.jericho/forensics/document-file-contour-wip-20260822/document-file-contour-wip-20260822.bundle`,
+  SHA-256
+  `bc1b201a925880cd7c3e75a23524fa563274b9ea55973c6406dcb934b1e54eef`,
+  then deleted by exact old-OID guards. No object pruning or garbage collection
+  was run; the 824 unique evidence blobs remain recoverable from the bundle.
 
 ## Canonical golden-journey/evidence registry
 
@@ -495,31 +515,27 @@ claims at this checkpoint.
 
 ## Current cumulative gate
 
-- The exact live `0.207.24` canonical gate passed 18,666 non-UI tests plus 31 UI
-  tests, including the pinned Syncthing 2.1.3 smoke; static checks and focused
-  schema-41/secondary gates are green with zero skips. Two
-  clean wheels reproduced byte-for-byte, and `/tmp` returned to 2% after the
-  gate-owned scratch tree was removed.
-- Friday `0.207.24` private discarded shadow and primary V12 canary are live at
-  the exact source/tree/wheel identity above, schema 41, with `0.207.23` as
-  immediate predecessor and schema-capable fallback. Immutable activation is
-  `clear`; backend and bridge are active, health is `ok`, and SQLite integrity
-  and FK checks are clean. Physical profile acceptance and private-shadow
-  activation are closed; assist evidence is not.
-- Live `0.207.24` includes the fail-closed at-logon recovery already installed
-  on the laptop for a missing exact gateway publication. It requires two
-  consecutive matching publication/listener failures, permits at most one
-  restart of only the gateway, and never restarts the model runtime. The source
-  Source `0.207.26` is the distinct assist candidate; its required
-  fresh private-shadow product receipt is not yet claimed as passed.
+- The last full canonical base gate, exact `0.207.24`, passed 18,666 non-UI
+  tests plus 31 UI tests, including pinned Syncthing 2.1.3, with zero skips and
+  byte-identical wheels. The bounded `0.207.26` assist hotfix then passed its
+  focused release/secondary gate and reproduced its wheel byte-for-byte.
+- Friday `0.207.26` bounded assist and the primary V12 canary are live at the
+  exact source/tree/wheel identity above, schema 41, with `0.207.24` as both
+  predecessor and schema-capable fallback. Immutable activation is `clear`;
+  backend and bridge are active, health is `ok`, and SQLite integrity/FK checks
+  are clean.
+- At-logon recovery, a causal physical mid-request power cut and exact
+  candidate recovery passed without restarting Friday. The optional node
+  remains demand-probed and removable; its absence does not widen retries or
+  change primary publication semantics.
 
 ## Next order
 
-1. Capture fresh private-shadow evidence and release `0.207.26` through only
-   `secondary_shadow_to_assist`.
-2. Prove assist and close the assist-linked physical loss/recovery chain.
-3. Select the next incomplete bounded ICP/V12 golden journey and extend the
-   immutable release evidence into machine-reconcilable journey manifests.
+1. Complete and release the durable `CompareConversationWithDocument` journey
+   through reader-first schema capacity and a separate runtime writer package.
+2. Extend immutable release evidence into machine-reconcilable journey
+   manifests without turning component tests into readiness claims.
+3. Begin the next V12 refinement selected by the remaining golden-journey gap.
 4. Run actual Android/Syncthing, backup/clean-restore and bounded recovery/fault
    certification; simulations remain labelled separately.
 5. Evaluate generic WorkGraph, broader effects or connectors only from the
@@ -530,9 +546,10 @@ claims at this checkpoint.
 
 `DOCUMENT_FILE_CONTOUR_WIP_AUDIT_2026-08-22.md` was recovered at
 `/home/jericho/DOCUMENT_FILE_CONTOUR_WIP_AUDIT_2026-08-22.md`, outside the
-repository location named by the operator. Its recommendations are now
-reconciled above; the external source and compact forensic refs remain retained
-until an explicit evidence-retention decision.
+repository location named by the operator. Its recommendations are reconciled
+above. The source remains retained; the three former refs are now represented
+by the verified bundle and privacy-safe manifest rather than live repository
+refs.
 
 ## Update rule
 

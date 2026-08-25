@@ -83,12 +83,13 @@ effects и publication остаются за primary. Регистрация п�
 Typed secondary output валидируется и выбрасывается; ответ, tools,
 effects и publication остаются только у primary.
 
-Source 0.207.26 готовит distinct assist-candidate: единственная
-конфигурационная разница — `mode=shadow→assist`. До cutover нужен
-свежий `product-stage --stage private-shadow` receipt. В assist только
-валидированная typed Inbox extraction может заменить primary
-extraction; knowledge write всё равно требует review, а tools, effects и
-publication недоступны. Любая ошибка ведёт в exact primary fallback.
+Live 0.207.26 завершил distinct `mode=shadow→assist` cutover
+через свежий `product-stage --stage private-shadow` receipt и
+`secondary_shadow_to_assist`. В assist только валидированная
+typed Inbox extraction может заменить primary extraction; knowledge
+write всё равно требует review, а tools, effects и publication
+недоступны. Любая ошибка ведёт в exact primary fallback; отсутствие
+ноутбука не меняе ответственность primary.
 
 На ноутбуке установлен и с 0.207.24 включён fail-closed at-logon
 gateway publication recovery. После готовности LAN, Docker и exact healthy
