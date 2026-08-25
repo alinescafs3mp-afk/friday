@@ -181,8 +181,16 @@ def test_no_method_is_defined_twice_across_the_class_hierarchy() -> None:
 # 405 → 408: owner-scoped operation status plus explicit conflict lookup/resolution.
 # 408 → 409: bounded owner-scoped legacy-marker migration candidates.
 # 410 → 411: one-shot server-origin secondary rollout attestation consumption.
-EXPECTED_MEMBER_COUNT = 411
+# 411 -> 417: schema 41 adds the owner-derived DocumentCatalog get/CAS,
+# deterministic rebuild/backfill, bounded reconciliation and coverage surface.
+EXPECTED_MEMBER_COUNT = 417
 EXPECTED_SIGNATURES: dict[str, str] = {
+    "backfill_document_catalog": "(self, user_id: 'str', *, limit: 'int' = 500) -> 'dict[str, Any]'",
+    "document_catalog_coverage": "(self, user_id: 'str') -> 'dict[str, Any]'",
+    "get_document_catalog_entry": "(self, user_id: 'str', raw_object_id: 'str') -> 'dict[str, Any] | None'",
+    "rebuild_document_catalog": "(self, user_id: 'str', *, after_raw_object_id: 'str' = '', limit: 'int' = 500) -> 'dict[str, Any]'",
+    "reconcile_document_catalog": "(self, user_id: 'str', *, limit: 'int' = 500) -> 'dict[str, int]'",
+    "upsert_document_catalog_entry": "(self, user_id: 'str', raw_object_id: 'str', *, expected_source_version: 'int', expected_source_content_sha256: 'str', enrichment_status: 'str' = 'current', incomplete_reason: 'str | None' = None, enriched_at: 'str | None' = None) -> 'dict[str, Any] | None'",
     "bind_owned_file_source_ref_alias": "(self, user_id: 'str', uploaded_by: 'str', source_ref: 'str', raw_object_id: 'str', supplied_filename: 'str' = '') -> 'bool'",
     "find_owned_files_by_filename": "(self, user_id: 'str', uploaded_by: 'str', filename: 'str') -> 'list[dict[str, Any]]'",
     "get_raw_object_descriptors": "(self, raw_ids: 'list[str]', user_id: 'str', *, limit: 'int' = 1000) -> 'list[dict[str, Any]]'",

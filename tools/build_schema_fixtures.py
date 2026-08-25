@@ -93,6 +93,7 @@ def _run(args: list[str], cwd: Path | None = None) -> str:
 
 def _seed_script(home: Path) -> str:
     return f"""
+import hashlib
 import sys
 sys.path.insert(0, ".")
 from friday.config import ensure_runtime_dirs, load_settings
@@ -106,14 +107,43 @@ storage = init_storage(settings)
 storage.ensure_user({SEED_USER!r}, source="upload")
 now = datetime.now(UTC).isoformat()
 for index in range(3):
+    body = f"Фикстурная запись номер {{index}} для проверки миграций."
+    normalized = " ".join(body.split())
+    receipt = (
+        {{
+            "extraction_receipt_version": 1,
+            "extraction_success": True,
+            "extraction_error": "",
+            "text_extraction_success": True,
+            "text_sha256": hashlib.sha256(normalized.encode()).hexdigest(),
+            "extraction_chars": len(body),
+            "text_truncated": False,
+            "archive_truncated": False,
+            "source_truncated_for_parse": False,
+            "parse_deadline_reached": False,
+            "parse_pages_read": 0,
+            "parse_pages_truncated": False,
+            "parse_total_pages": 0,
+            "vision_pages_total": 0,
+            "vision_pages_read": 0,
+            "archive_files": 0,
+            "archive_files_read": 0,
+            "vision_used": False,
+            "vision_review_required": False,
+            "unsupported_format": False,
+        }}
+        if SCHEMA_VERSION >= 41 and index == 0
+        else {{}}
+    )
     storage.store_raw_object(
         RawObject(
             id=f"raw-fixture-{{index}}",
             user_id={SEED_USER!r},
             source="upload",
             source_ref=f"sha256:fixture{{index:058d}}",
-            raw_content=f"Фикстурная запись номер {{index}} для проверки миграций.",
-            content_type="text/plain",
+            raw_content=body,
+            content_type="file" if SCHEMA_VERSION >= 41 and index == 0 else "text/plain",
+            metadata_json=receipt,
             content_hash=f"{{index:064d}}",
             received_at=now,
         )

@@ -4,10 +4,11 @@
 
 Текущая версия: **0.207.15**. Авторизованный read-only `archive_search`
 объединяет личные документы, знания, сообщения и Obsidian с точными
-источниками, покрытием и финальной повторной проверкой прав. Schema 40
-добавляет immutable body-free набор archive-кандидатов и durable ordinal
-question: выбор номера точно возобновляет нужный источник после restart без
-повторного поиска или вызова модели. Добавлен выключенный по умолчанию контур
+источниками, покрытием и финальной повторной проверкой прав. Schema 41
+добавляет rebuildable body-free DocumentCatalog, точно привязанный к версии
+авторитетного Raw Object и состоянию извлечения; schema 40 добавила immutable
+body-free набор archive-кандидатов и durable ordinal question. Добавлен
+выключенный по умолчанию контур
 опционального GPT-OSS secondary brain: отдельный private-CA endpoint,
 строго привязанный MXFP4 profile, bounded дедлайны и fail-soft fallback.
 Первичная модель остаётся финальной; secondary не имеет доступа к
@@ -267,7 +268,7 @@ VRAM обнаружился при старте, а не на первом по�
 2. Создайте новый sibling release только из wheel; установленный venv не правьте пофайлово.
 3. Дайте оператору остановить backend и Telegram bridge и сохранить проверенный согласованный снимок SQLite, WAL, Telegram inbox и exact Obsidian root.
 4. Выполните offline migration, переключите общий release anchor атомарно, примите backend и только затем запускайте bridge. При ошибке используйте exact rollback, а не повреждённый прежний каталог.
-5. Схема SQLite — **40**. Schema 31 один раз фиксирует `relation_history_complete_from`; schema 32 добавляет monotonic observed boundary и REPLACE/context guards; schema 33 — неизменяемые transport-id повторной загрузки; schema 34 — проверяемое имя, данное пользователем в конкретном сообщении; schema 35 — изолированные профили, vault, onboarding, журнал операций и конфликты Obsidian; schema 36 — стабильные note bindings, revision-aware index/link graph и expiring candidate/Active Frame state; schema 37 — ограниченное person-owned хранилище структурных ошибок до фиксации assistant-сообщения; schema 38 — короткоживущие owner-scoped `RecallConversation` Work Item и закрытый Active Frame, привязанные к точному принятому результату окна переписки; schema 39 — закрытые labels `RecallSelectedArchiveEvidence` и один body-free sidecar выбранного источника; schema 40 — immutable body-free набор archive-кандидатов и durable ordinal question. Миграция schema 35→36 сначала побайтно проверяет выпущенную Obsidian-схему и только затем атомарно расширяет operation contract; schema 37–40 отдельно проверяют свои точные DDL-проекции. Остальные авторитетные знания, Inbox и разговоры не переписываются; более новая неизвестная схема отклоняется без изменений.
+5. Схема SQLite — **41**. Schema 31 один раз фиксирует `relation_history_complete_from`; schema 32 добавляет monotonic observed boundary и REPLACE/context guards; schema 33 — неизменяемые transport-id повторной загрузки; schema 34 — проверяемое имя, данное пользователем в конкретном сообщении; schema 35 — изолированные профили, vault, onboarding, журнал операций и конфликты Obsidian; schema 36 — стабильные note bindings, revision-aware index/link graph и expiring candidate/Active Frame state; schema 37 — ограниченное person-owned хранилище структурных ошибок до фиксации assistant-сообщения; schema 38 — короткоживущие owner-scoped `RecallConversation` Work Item и закрытый Active Frame, привязанные к точному принятому результату окна переписки; schema 39 — закрытые labels `RecallSelectedArchiveEvidence` и один body-free sidecar выбранного источника; schema 40 — immutable body-free набор archive-кандидатов и durable ordinal question; schema 41 — rebuildable body-free `document_catalog` с exact Raw revision/extraction binding и закрытыми explicit-incomplete состояниями. Миграция schema 35→36 сначала побайтно проверяет выпущенную Obsidian-схему и только затем атомарно расширяет operation contract; schema 37–41 отдельно проверяют свои точные DDL-проекции. Остальные авторитетные знания, Inbox и разговоры не переписываются; более новая неизвестная схема отклоняется без изменений.
 
 Перед обновлением можно дополнительно выполнить
 `jericho backup --label before-upgrade` и `jericho verify-backup`. Это SQLite-only

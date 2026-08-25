@@ -153,7 +153,9 @@ LOGGER = logging.getLogger("friday.storage")
 # authenticated and rebuilt without changing any existing RecallConversation row.
 # 40 — closed body-free archive candidate sets and typed ordinal questions. Exact
 # schema-38/39 projections are authenticated before their Work Item tables rebuild.
-SCHEMA_VERSION = 40
+# 41 — durable body-free DocumentCatalog projection. Raw Object remains authority;
+# exact revision guards and explicit incomplete states make bounded backfill honest.
+SCHEMA_VERSION = 41
 
 #: Определение таблицы внешних источников отдельной константой: миграция схемы 29
 #: пересоздаёт её, чтобы ключом стала ПАРА `(user_id, name)`, и должна брать ровно

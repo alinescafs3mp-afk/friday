@@ -49,6 +49,10 @@ def _make_schema_32(settings: Any, tmp_path: Path, name: str) -> Path:
     made.execute("SELECT 1")
     made.close(final=True)
     with sqlite3.connect(database) as predecessor:
+        predecessor.execute("DROP TRIGGER document_catalog_raw_ai_seed")
+        predecessor.execute("DROP TRIGGER document_catalog_raw_au_reconcile")
+        predecessor.execute("DROP TRIGGER document_catalog_raw_au_extraction_state")
+        predecessor.execute("DROP TABLE document_catalog")
         predecessor.execute("DROP TABLE file_source_aliases")
         predecessor.execute("UPDATE schema_meta SET value='32' WHERE key IN ('schema_version','fts_build')")
     return database
@@ -229,7 +233,7 @@ def test_schema_31_to_32_preserves_evidence_and_installs_the_exact_current_contr
         assert migrated.execute("SELECT value FROM schema_meta WHERE key='schema_version'").fetchone()[
             0
         ] == str(SCHEMA_VERSION)
-        assert SCHEMA_VERSION == 40
+        assert SCHEMA_VERSION == 41
         assert tuple(
             migrated.execute(
                 """SELECT singleton, batch_id, recorded_at, observed_at

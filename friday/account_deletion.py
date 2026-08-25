@@ -140,6 +140,14 @@ _DELETE_SCOPES: tuple[_Scope, ...] = (
         "file_source_aliases",
         "user_id=? OR uploaded_by=?",
     ),
+    # DocumentCatalog deliberately carries no duplicate owner.  Its ownership is
+    # derived through the authoritative Raw Object and it must be counted/deleted
+    # before that Raw disappears.
+    _Scope(
+        "document_catalog",
+        "document_catalog",
+        "raw_object_id IN (SELECT id FROM raw_objects WHERE user_id=?)",
+    ),
     _Scope("raw_objects", "raw_objects", "user_id=?"),
     _Scope("entities", "entities", "user_id=?"),
     _Scope("user_identities", "user_identities", "user_id=?"),

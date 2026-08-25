@@ -166,7 +166,7 @@ failed/error/skipped-тест в любой фазе делает гейт кр�
 
 Проверить:
 
-- schema version = 40;
+- schema version = 41;
 - предыдущий release 0.207.13 имеет schema 39; переход 0.207.13 → 0.207.14
   атомарно добавляет schema-40 durable archive candidate projection;
 - исторический переход 38 → 39 атомарно перестраивает/copy-переносит

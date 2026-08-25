@@ -11,6 +11,10 @@ import unicodedata
 import zlib
 
 from friday.diagnostics.runtime_lease import ProcessLease, RuntimeLeaseError
+from friday.document_catalog.schema import (
+    register_document_catalog_connection_functions,
+    validate_document_catalog_schema,
+)
 from friday.private_fs import (
     ensure_private_directory,
     prepare_private_sqlite,
@@ -406,6 +410,7 @@ class MaintenanceMixin(StorageShared):
                             "raw_object_id=? AND user_id=?",
                             (raw_object_id, owner),
                         )
+                        _del("document_catalog", "raw_object_id=?", (raw_object_id,))
                         conn.execute(
                             "DELETE FROM raw_objects WHERE id=? AND user_id=?",
                             (raw_object_id, owner),
@@ -431,6 +436,7 @@ class MaintenanceMixin(StorageShared):
         live per-thread connections, so a backup never freezes concurrent
         requests during the full-DB scan.
         """
+        register_document_catalog_connection_functions(backup_conn)
         integrity = backup_conn.execute("PRAGMA integrity_check").fetchone()[0]
         foreign_key_violations = backup_conn.execute("PRAGMA foreign_key_check").fetchall()
         schema_row = backup_conn.execute(
@@ -442,6 +448,7 @@ class MaintenanceMixin(StorageShared):
         )
 
         validate_work_item_schema(backup_conn)
+        validate_document_catalog_schema(backup_conn)
         if _contains_secondary_product_witness(backup_conn):
             raise RuntimeError("Backup snapshot contains a transient secondary product witness")
         return integrity, foreign_key_violations, backup_schema_version
@@ -682,6 +689,7 @@ class MaintenanceMixin(StorageShared):
         foreign_key_violations: int | None = None
         conn = sqlite3.connect(str(path))
         try:
+            register_document_catalog_connection_functions(conn)
             conn.execute("PRAGMA query_only=ON")
             integrity = conn.execute("PRAGMA integrity_check").fetchone()[0]
             foreign_key_violations = len(conn.execute("PRAGMA foreign_key_check").fetchall())
@@ -698,6 +706,7 @@ class MaintenanceMixin(StorageShared):
                         )
 
                         validate_work_item_schema(conn)
+                        validate_document_catalog_schema(conn)
                 except (TypeError, ValueError):
                     database_error = "Database schema_version marker is invalid"
         except sqlite3.DatabaseError as exc:

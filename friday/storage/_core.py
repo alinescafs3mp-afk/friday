@@ -29,6 +29,12 @@ from friday.audit_privacy import (
     sanitize_audit_request_id,
     sanitize_audit_target,
 )
+from friday.document_catalog.schema import (
+    DOCUMENT_CATALOG_SCHEMA_VERSION,
+    install_document_catalog_schema,
+    register_document_catalog_connection_functions,
+    validate_document_catalog_schema,
+)
 from friday.interaction_control_plane.failure_schema import (
     INTERACTION_FAILURE_SCHEMA,
     INTERACTION_FAILURE_SCHEMA_VERSION,
@@ -2349,6 +2355,7 @@ class CoreMixin(StorageShared):
                 deterministic=True,
             )
             register_work_item_connection_functions(conn)
+            register_document_catalog_connection_functions(conn)
             # Даты из документов извлечены и лежат в метаданных СЫРЫМИ строками — так,
             # как они написаны в бумаге. Замерено на архиве владельца: 3180 значений у
             # 630 объектов, из них 2537 в форме дд.мм.гггг, 345 в ISO, 223 — вообще
@@ -2545,6 +2552,12 @@ class CoreMixin(StorageShared):
                     conn,
                     required=parsed_version is not None and parsed_version >= 38,
                 )
+            if parsed_version is not None and parsed_version >= DOCUMENT_CATALOG_SCHEMA_VERSION:
+                validate_document_catalog_schema(conn)
+            else:
+                # Authenticate an exact interrupted schema-41 attempt, while an
+                # ordinary schema <=40 database legitimately has no sidecar yet.
+                validate_document_catalog_schema(conn, required=False, validate_data=False)
             self._execute_statements(conn, CORE_TABLE_SCHEMA)
             self._execute_statements(conn, OBSIDIAN_SCHEMA)
             self._execute_statements(conn, INTERACTION_FAILURE_SCHEMA)
@@ -2552,6 +2565,7 @@ class CoreMixin(StorageShared):
             if not already_current:
                 self._migrate_legacy_schema(conn)
                 self._retire_outdated_indexes(conn)
+            install_document_catalog_schema(conn)
             _validate_private_material_cache_pre_schema(conn)
             # Current-schema databases can still contain a pre-owner reminder
             # imported by an older build.  Its tenant move updates entity history
@@ -2572,6 +2586,7 @@ class CoreMixin(StorageShared):
             validate_obsidian_schema(conn)
             validate_interaction_failure_schema(conn)
             validate_work_item_schema(conn)
+            validate_document_catalog_schema(conn)
             _validate_private_material_cache(
                 conn,
                 fresh_entity_rebuild_from_live=True,

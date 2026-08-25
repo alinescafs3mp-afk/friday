@@ -35,6 +35,7 @@ from friday.storage._base import (
 from friday.storage._compacts import CompactsMixin
 from friday.storage._conversations import ConversationsMixin
 from friday.storage._core import CoreMixin, iso_date
+from friday.storage._document_catalog import DocumentCatalogMixin
 from friday.storage._feedback import FeedbackMixin
 from friday.storage._graph import GraphMixin
 from friday.storage._intake import IntakeMixin
@@ -75,6 +76,7 @@ class FridayStorage(
     CompactsMixin,
     ConversationsMixin,
     CoreMixin,
+    DocumentCatalogMixin,
     FeedbackMixin,
     GraphMixin,
     IntakeMixin,

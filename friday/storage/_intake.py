@@ -52,6 +52,7 @@ from friday.storage._base import (
     utc_now,
     validate_user_id,
 )
+from friday.storage._document_catalog import project_document_catalog_raw_in_transaction
 from friday.storage._knowledge import _fts_terms
 from friday.storage._privacy import (
     _exact_uploader_raw_dependency,
@@ -1331,6 +1332,7 @@ class IntakeMixin(StorageShared):
                 ).fetchone()
                 if visible is None:
                     raise PrivateMaterialQuarantineError("Raw object fields reference private graph material")
+                project_document_catalog_raw_in_transaction(conn, obj.id)
             return obj
         except sqlite3.IntegrityError:
             existing = self.find_raw_by_source_ref(obj.user_id, obj.source, obj.source_ref)
@@ -2688,6 +2690,16 @@ class IntakeMixin(StorageShared):
                 "DELETE FROM inbox WHERE id=? AND user_id=? AND raw_object_id=?",
                 (inbox_id, user_id, raw["id"]),
             )
+            catalog_before = int(
+                conn.execute(
+                    "SELECT COUNT(*) FROM document_catalog WHERE raw_object_id=?",
+                    (raw["id"],),
+                ).fetchone()[0]
+            )
+            catalog_deleted = conn.execute(
+                "DELETE FROM document_catalog WHERE raw_object_id=?",
+                (raw["id"],),
+            )
             raw_deleted = conn.execute(
                 "DELETE FROM raw_objects WHERE id=? AND user_id=?",
                 (raw["id"], user_id),
@@ -2700,6 +2712,8 @@ class IntakeMixin(StorageShared):
                          WHERE raw_object_id=? AND user_id=?) AS knowledge_count,
                        (SELECT COUNT(*) FROM file_source_aliases
                          WHERE raw_object_id=? AND user_id=?) AS alias_count,
+                       (SELECT COUNT(*) FROM document_catalog
+                         WHERE raw_object_id=?) AS catalog_count,
                        (SELECT COUNT(*) FROM feedback
                          WHERE user_id=? AND target_id IN (?, ?)) AS feedback_count,
                        (SELECT COUNT(*) FROM feedback_state
@@ -2716,6 +2730,7 @@ class IntakeMixin(StorageShared):
                     user_id,
                     raw["id"],
                     user_id,
+                    raw["id"],
                     user_id,
                     raw["id"],
                     inbox_id,
@@ -2728,6 +2743,7 @@ class IntakeMixin(StorageShared):
             ).fetchone()
             if (
                 inbox_deleted.rowcount != 1
+                or catalog_deleted.rowcount != catalog_before
                 or raw_deleted.rowcount != 1
                 or remnants is None
                 or any(int(remnants[key]) != 0 for key in remnants)
