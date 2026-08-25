@@ -6,21 +6,24 @@ the current production identity, completed packages, active work and next order.
 
 - Updated: 2026-08-25
 - Branch: `main`
-- Secondary acceptance base: live `0.207.27` admits exactly one accepted
-  profile in bounded `assist`; the provisional registry is empty and the
-  primary remains the only publication, tool and effect authority.
-- Deployed implementation head: `b7378686a70465fbdc9a7b27aef1e0bbae5edd52`
-- Live: Friday `0.207.27` / `b7378686a70465fbdc9a7b27aef1e0bbae5edd52`;
-  tree `7ce723b56aafcf80cdde21c86717d3973e79884c605d175df87c7cf4b0c0f076`;
-  wheel `60b05e50a08107dc185e8a6cbd52f3bf2e18d5dd53a08b805a1a9f0390b128ae`
-- Immediate predecessor and schema-capable fallback: Friday `0.207.26` /
-  `4f33a6922389ccb70eb92b2fd8d0e4f2aced20a5`, tree
-  `36ebf876af7cc41fcd47c8e23d546b505e5d6952fda52f4ea1f1eb7cff531d7c`.
+- Secondary acceptance base: live `0.207.28` admits exactly one accepted
+  profile with extraction in bounded `assist` and document mapping in
+  discarded `shadow`; the provisional registry is empty and the primary
+  remains the only publication, tool and effect authority.
+- Deployed implementation head: `6007c9f05fdb63b1ab8c2ccc0e086efd849c77c8`
+- Live: Friday `0.207.28` / `6007c9f05fdb63b1ab8c2ccc0e086efd849c77c8`;
+  tree `5fe37a037bc99f845ef6695dd53bfcc90eac3cb6ff7808920cc4b191e5f7cc4c`;
+  wheel `159896429c4c796dcb47dcfecf681ac2df1e674ed1b40b105c671a60532893ca`
+- Immediate predecessor and schema-capable fallback: Friday `0.207.27` /
+  `b7378686a70465fbdc9a7b27aef1e0bbae5edd52`, tree
+  `7ce723b56aafcf80cdde21c86717d3973e79884c605d175df87c7cf4b0c0f076`.
 - Database schema: 42
 - Production state: immutable activation `clear`; backend and Telegram bridge
   active; trusted-CA HTTPS health `200`; SQLite integrity and FK checks clean;
-  exact accepted profile is healthy in bounded `assist` and is probed on
-  demand; laptop absence preserves the primary-only path. The primary V12
+  exact accepted profile is configured in bounded `assist` and is probed on
+  demand; its exact post-cutover canary passed, while laptop absence preserves
+  the primary-only path. Document MAP/REDUCE shadow is enabled but cannot
+  influence a user answer. The primary V12
   canary is installed for `archive_read` and `file_read` with a live exact
   attestation. The exact,
   body-free schema-41 DocumentCatalog now has its bounded durable worker and
@@ -66,9 +69,10 @@ accepted profile manifest hashes to
 `93ea5698b8b6a9bf8a7dc697ffe37d7353055aa16555188991747bba73d059e3` and
 its accepted physical-failure evidence hashes to
 `9dc72f80caed3320bd154cf1219a8bd6b1339142b690b00dd1cbe1fb05964006`.
-Live `0.207.27` admits exactly that profile, with no provisional entries, in
-bounded `assist`. It grants no tools, effects, publication or knowledge-write
-authority; failure preserves the exact primary-only path.
+Live `0.207.28` admits exactly that profile, with no provisional entries:
+extraction is in bounded `assist`, document mapping remains discarded
+`shadow`. It grants no tools, effects, publication or knowledge-write authority;
+failure preserves the exact primary-only path.
 
 Detailed active tracker:
 `outer_sol/OPTIONAL_SECONDARY_BRAIN_IMPLEMENTATION_STATUS.md`.
@@ -143,23 +147,32 @@ course, with these repository-specific constraints:
 
 ## In progress
 
-1. Release `0.207.28` with the bounded GPT-OSS document-map lane in private,
-   discarded `shadow`; primary MAP/REDUCE and final synthesis remain
-   authoritative and laptop absence preserves the existing primary path.
-2. Bind fresh, identity- and policy-specific shadow evidence before any
+1. Bind fresh, identity- and policy-specific live shadow evidence before any
    separately released `document_map=assist` promotion; counters alone cannot
    authorize promotion.
-3. Complete the durable `CompareConversationWithDocument` journey: preserve
+2. Complete the durable `CompareConversationWithDocument` journey: preserve
    exact selected message evidence, wait durably for the document, survive
    restart, recheck both authorities/revisions and publish one verified answer.
-4. Release that journey reader-first, then activate its writer/runtime in a
+3. Release that journey reader-first, then activate its writer/runtime in a
    separate safe package with schema-capable fallback.
-5. Extend machine-reconcilable release evidence without promoting
+4. Extend machine-reconcilable release evidence without promoting
    component-only gates, then start the next V12 refinement package.
-6. Continue with the next ICP/V12 refinement package after the complete golden
+5. Continue with the next ICP/V12 refinement package after the complete golden
    journey. The accepted laptop runtime and gateway manifest remain unchanged.
 
 ## Completed and deployed packages
+
+### Bounded GPT-OSS document-map shadow (`0.207.28`)
+
+- Large-document MAP/REDUCE leaves may be copied to the accepted laptop as
+  private, text-only, read-only discarded shadow work. Primary MAP and final
+  synthesis remain unchanged and authoritative.
+- The exact source passed 18,918 non-UI and 31 UI tests with zero skips. The
+  deterministic wheel reproduced byte-for-byte; immutable activation completed
+  `clear` with receipt
+  `601134e2830b5e55e6821ea56c3a630bd4a4a39e93d8637276766ab74a5b45f7`.
+- The post-cutover endpoint canary returned the exact accepted model/result;
+  document-map assist remains closed pending separately bound live evidence.
 
 ### Systemic document-contour reliability (`0.207.27`)
 

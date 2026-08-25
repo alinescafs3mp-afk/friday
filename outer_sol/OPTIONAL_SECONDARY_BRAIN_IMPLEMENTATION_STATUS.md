@@ -3,20 +3,21 @@
 - Updated: 2026-08-25
 - Architecture order:
   `outer_sol/OPTIONAL_SECONDARY_BRAIN_SGLANG_GPT_OSS_20B_ARCHITECT_BRIEF.md`
-- Phase: **bounded optional assist live; physical loss/recovery closed**
-- Live production: Friday `0.207.26` /
-  `9ab75a82393919e477890b601d243ae7baedad5a`, tree
-  `87f05bedd19fe76ccb5928e21b47106caac1660c0bcf4e8994f8c20967d9d2e5`, wheel
-  `c59c920e1936cd1cb3a386f062a1aec47a367cc4cce2767f9b148ec214ae43e1`,
-  schema 41; immediate predecessor and schema-capable fallback Friday
-  `0.207.24` / `9142765647b75d12cea22798df6782a09bc5c4b8`, tree
-  `ce654409f09b93cc651543968e81bb7254dd5af48d8698ae7cd06c0084d28f30`,
-  wheel `f7710d76e581bdea813c3f56e86b8cf3c53727b5ea180ee2554d03347b6f9cc6`
+- Phase: **bounded extraction assist plus discarded document-map shadow live**
+- Live production: Friday `0.207.28` /
+  `6007c9f05fdb63b1ab8c2ccc0e086efd849c77c8`, tree
+  `5fe37a037bc99f845ef6695dd53bfcc90eac3cb6ff7808920cc4b191e5f7cc4c`, wheel
+  `159896429c4c796dcb47dcfecf681ac2df1e674ed1b40b105c671a60532893ca`,
+  schema 42; immediate predecessor and schema-capable fallback Friday
+  `0.207.27` / `b7378686a70465fbdc9a7b27aef1e0bbae5edd52`, tree
+  `7ce723b56aafcf80cdde21c86717d3973e79884c605d175df87c7cf4b0c0f076`,
+  wheel `60b05e50a08107dc185e8a6cbd52f3bf2e18d5dd53a08b805a1a9f0390b128ae`
 - Rollout policy: the primary model remains required and final. The secondary
   is live only as bounded optional advice; it has no tool, effect, publication,
-  knowledge-write or V12 authority. Live `0.207.26` binds exactly one accepted
-  profile and an empty provisional registry. Unavailability skips/falls back to
-  the unchanged primary path.
+  knowledge-write or V12 authority. Live `0.207.28` binds exactly one accepted
+  profile and an empty provisional registry. Extraction is bounded assist;
+  document mapping is discarded shadow. Unavailability skips/falls back to the
+  unchanged primary path.
 
 ## Durable access and measured host
 
@@ -128,8 +129,9 @@
 ## Friday checkpoint
 
 - The accepted-profile path contains typed private Inbox extraction and bounded
-  private document map/reduce seams. Live `0.207.26` runs structured, text-only,
-  effect-free bounded assist. Every required result has
+  private document map/reduce seams. Live `0.207.28` runs structured, text-only,
+  effect-free extraction assist plus discarded document-map shadow. Every
+  required assist result has
   exactly one primary fallback; optional advice is skipped; secondary output
   cannot execute tools or publish a final answer.
 - Product/runtime admission is profile-v2 and binds the exact source manifest,
@@ -137,11 +139,12 @@
   choice. Quality now includes deterministic near-limit recall derived from the
   profile context; endpoint/capacity evidence is bound to exact HTTPS, private
   CA, profile epoch, context and memory without retaining raw prompts.
-- The exact `0.207.24` base passed 18,666 non-UI and 31 UI tests. The bounded
-  `0.207.26` hotfix passed its focused release/secondary gate; its wheel also
-  reproduced byte-for-byte.
+- The exact `0.207.28` source passed 18,918 non-UI and 31 UI tests with zero
+  skips; its wheel reproduced byte-for-byte. Immutable activation completed
+  `clear` with receipt
+  `601134e2830b5e55e6821ea56c3a630bd4a4a39e93d8637276766ab74a5b45f7`.
 
-## Document-map expansion implementation checkpoint (not deployed)
+## Document-map expansion production checkpoint
 
 - The existing bounded attachment MAP/REDUCE seam is now wired to a separate
   code-owned product policy `gptoss20b-document-map-v1`, manifest SHA-256
@@ -160,9 +163,9 @@
   assist: `secondary_assist_enable_document_map_shadow` adds discarded
   document-map shadow. V1 deliberately has no assist transition: a later
   release must bind the separate shadow checkpoint to a new policy and operator
-  evidence gate before secondary output may influence document mapping. This
-  source/operator shadow path is ready, not evidence that it has run in
-  production.
+  evidence gate before secondary output may influence document mapping. The
+  source/operator shadow path is now live; promotion-grade product evidence is
+  the next separate checkpoint.
 
 ## Parallel parent checkpoint
 
@@ -173,8 +176,8 @@
 
 ## Active order
 
-1. Release the document-map policy dormant, activate its discarded shadow
-   transition, and build an evidence-bound assist gate from that checkpoint.
+1. Produce identity-, policy- and process-bound live document-map shadow
+   evidence, then release a distinct fail-closed assist gate.
 2. Retain a separate product-counter outage/recovery drill as operational
    evidence; it is not a prerequisite for ordinary optional operation.
 3. Continue the next durable ICP journey and V12 refinement with the secondary
