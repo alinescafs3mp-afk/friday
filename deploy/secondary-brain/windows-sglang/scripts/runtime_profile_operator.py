@@ -36,8 +36,8 @@ CAPACITY_SCHEMA = "friday.secondary-capacity-evidence.v2"
 CAPACITY_TRIAL_SCHEMA = "friday.secondary-context-capacity-trial.v2"
 CAPACITY_TRANSPORT = "openai_chat_completions_non_streaming"
 DETERMINISTIC_FAILURE_SCHEMA = "friday.secondary-failure-battery.v1"
-PHYSICAL_FAILURE_SCHEMA = "friday.secondary-physical-failure-observation.v1"
-FAILURE_SCHEMA = "friday.secondary-failure-acceptance.v1"
+PHYSICAL_FAILURE_SCHEMA = "friday.secondary-physical-failure-observation.v2"
+FAILURE_SCHEMA = "friday.secondary-failure-acceptance.v2"
 RUNTIME_IMAGE = "lmsysorg/sglang@sha256:297f0bfea5e9f92680f8dd49ae18d048c9634f953be50b37f9bfe9509e947405"
 RUNTIME_IMAGE_LOCAL_ID = "sha256:297f0bfea5e9f92680f8dd49ae18d048c9634f953be50b37f9bfe9509e947405"
 RUNTIME_IMAGE_CONFIG_DIGEST = "sha256:f7adc6c05df9ff711b82ad291cf1db6eaf30590c4d929833d632abfef3895efc"
@@ -152,6 +152,7 @@ PHYSICAL_FAILURE_KEYS = frozenset(
         "observation_scope",
         "observation_method",
         "observation_state_sha256",
+        "physical_causal_request_sha256",
         "observer_source_head",
         "observer_runner_sha256",
         "laptop_boot_epoch_before_sha256",
@@ -177,6 +178,7 @@ FAILURE_ACCEPTANCE_KEYS = frozenset(
         "deterministic_failure_sha256",
         "controlled_live_failure_sha256",
         "physical_failure_begin_sha256",
+        "physical_causal_request_sha256",
         "physical_failure_state_sha256",
         "physical_failure_observation_sha256",
         "journey_contract_sha256",
@@ -1242,11 +1244,67 @@ def _validate_physical_begin(value: dict[str, Any], raw: bytes) -> str:
     return source_head
 
 
+def _validate_physical_causal_request(
+    value: dict[str, Any],
+    raw: bytes,
+    begin: dict[str, Any],
+    begin_raw: bytes,
+) -> str:
+    source_head = value.get("observer_source_head")
+    runner_raw = _read_regular(
+        _BUNDLE_ROOT / "scripts" / "live_failure_battery.py",
+        maximum_bytes=1 << 20,
+        label="physical causal request runner",
+    )
+    request_sha256 = value.get("request_payload_sha256")
+    primary_before = value.get("primary_process_epoch_before_sha256")
+    primary_after = value.get("primary_process_epoch_after_sha256")
+    primary_ca = value.get("primary_ca_certificate_sha256")
+    if (
+        set(value) != live_failure.PHYSICAL_CAUSAL_KEYS
+        or raw != canonical_json(value)
+        or value.get("schema") != live_failure.PHYSICAL_CAUSAL_SCHEMA
+        or value.get("status") != "observed"
+        or value.get("physical_begin_state_sha256") != _sha256(begin_raw)
+        or value.get("endpoint_base_url") != live_failure.ENDPOINT
+        or value.get("request_transport") != "authenticated_tls_http11_body_fully_written"
+        or not isinstance(request_sha256, str)
+        or _SHA256.fullmatch(request_sha256) is None
+        or type(value.get("request_payload_bytes")) is not int
+        or not 1 <= value["request_payload_bytes"] <= 8 * 1024 * 1024
+        or value.get("request_submitted_before_tls_loss_observed") is not True
+        or value.get("endpoint_response_completed_before_tls_loss") is not False
+        or value.get("endpoint_transport_failure_after_tls_loss_observed") is not True
+        or not isinstance(source_head, str)
+        or _REVISION.fullmatch(source_head) is None
+        or value.get("observer_runner_sha256") != _sha256(runner_raw)
+        or value.get("primary_pid") != begin.get("primary_pid")
+        or not isinstance(primary_before, str)
+        or _SHA256.fullmatch(primary_before) is None
+        or primary_before != begin.get("primary_process_epoch_before_sha256")
+        or primary_after != primary_before
+        or value.get("primary_version") != begin.get("primary_version")
+        or not isinstance(primary_ca, str)
+        or _SHA256.fullmatch(primary_ca) is None
+        or value.get("primary_continuity_probe_call_count") != 1
+        or value.get("friday_primary_process_continuity_observed") is not True
+        or value.get("tool_request_sent") is not False
+        or value.get("effect_request_sent") is not False
+        or value.get("raw_content_retained") is not False
+        or value.get("response_content_retained") is not False
+        or value.get("credentials_retained") is not False
+    ):
+        raise ProfileOperatorError("physical causal request evidence is incomplete")
+    return source_head
+
+
 def _validate_physical_state(
     value: dict[str, Any],
     raw: bytes,
     begin: dict[str, Any],
     begin_raw: bytes,
+    causal: dict[str, Any],
+    causal_raw: bytes,
 ) -> str:
     source_head = value.get("observer_source_head")
     runner_raw = _read_regular(
@@ -1263,6 +1321,7 @@ def _validate_physical_state(
         or value.get("schema") != live_failure.PHYSICAL_STATE_SCHEMA
         or value.get("status") != "physical_power_loss_observed_awaiting_recovery"
         or value.get("physical_begin_state_sha256") != _sha256(begin_raw)
+        or value.get("physical_causal_request_sha256") != _sha256(causal_raw)
         or any(value.get(key) != begin.get(key) for key in live_failure.PHYSICAL_BEGIN_KEYS - {"status"})
         or not isinstance(source_head, str)
         or _REVISION.fullmatch(source_head) is None
@@ -1277,9 +1336,13 @@ def _validate_physical_state(
         or not isinstance(laptop_before, str)
         or _SHA256.fullmatch(laptop_before) is None
         or value.get("physical_tls_endpoint_unavailable_observed") is not True
+        or value.get("physical_tls_loss_after_request_submission_observed") is not True
         or value.get("physical_laptop_power_loss_operator_observed") is not True
         or value.get("ordinary_primary_fallback_exactly_once_operator_observed") is not True
         or value.get("mid_turn_primary_fallback_exactly_once_operator_observed") is not True
+        or causal.get("physical_begin_state_sha256") != value.get("physical_begin_state_sha256")
+        or causal.get("primary_pid") != value.get("primary_pid")
+        or causal.get("primary_process_epoch_after_sha256") != primary_off
         or value.get("effect_replay_operator_observed") is not False
         or value.get("v12_readiness_changed_operator_observed") is not False
         or value.get("raw_content_retained") is not False
@@ -1298,6 +1361,7 @@ def _validate_physical_failure(
     source_head = value.get("observer_source_head")
     observer_runner = value.get("observer_runner_sha256")
     observation_state = value.get("observation_state_sha256")
+    causal_request = value.get("physical_causal_request_sha256")
     laptop_before = value.get("laptop_boot_epoch_before_sha256")
     laptop_after = value.get("laptop_boot_epoch_after_sha256")
     primary_before = value.get("friday_primary_process_epoch_before_sha256")
@@ -1305,6 +1369,7 @@ def _validate_physical_failure(
     hashes = (
         observer_runner,
         observation_state,
+        causal_request,
         laptop_before,
         laptop_after,
         primary_before,
@@ -1321,8 +1386,9 @@ def _validate_physical_failure(
         or value.get("schema") != PHYSICAL_FAILURE_SCHEMA
         or value.get("status") != "observed"
         or value.get("observation_scope") != "physical_power_loss_with_existing_primary_process"
-        or value.get("observation_method") != "code_owned_manual_state_machine"
+        or value.get("observation_method") != "code_owned_causal_request_state_machine"
         or value.get("observation_state_sha256") != _sha256(state_raw)
+        or causal_request != state.get("physical_causal_request_sha256")
         or not isinstance(source_head, str)
         or _REVISION.fullmatch(source_head) is None
         or any(not isinstance(item, str) or _SHA256.fullmatch(item) is None for item in hashes)
@@ -1352,6 +1418,7 @@ def _validate_failure_acceptance(value: dict[str, Any], raw: bytes) -> None:
         "deterministic_failure_sha256",
         "controlled_live_failure_sha256",
         "physical_failure_begin_sha256",
+        "physical_causal_request_sha256",
         "physical_failure_state_sha256",
         "physical_failure_observation_sha256",
         "journey_contract_sha256",
@@ -1389,6 +1456,7 @@ def _validated_failure_component_hashes(
     deterministic_path: Path,
     live_path: Path,
     physical_begin_path: Path,
+    physical_causal_request_path: Path,
     physical_state_path: Path,
     physical_observation_path: Path,
 ) -> dict[str, str]:
@@ -1407,6 +1475,11 @@ def _validated_failure_component_hashes(
         label="physical failure begin state",
         maximum_bytes=8 << 20,
     )
+    physical_causal, physical_causal_raw = _strict_json(
+        physical_causal_request_path,
+        label="physical causal request evidence",
+        maximum_bytes=8 << 20,
+    )
     physical_state, physical_state_raw = _strict_json(
         physical_state_path,
         label="physical failure state",
@@ -1421,6 +1494,7 @@ def _validated_failure_component_hashes(
         ("deterministic", deterministic),
         ("controlled live", live),
         ("physical begin", physical_begin),
+        ("physical causal request", physical_causal),
         ("physical state", physical_state),
         ("physical", physical),
     ):
@@ -1429,11 +1503,19 @@ def _validated_failure_component_hashes(
     deterministic_head = _validate_deterministic_failure(deterministic, deterministic_raw)
     live_head = _validate_controlled_live_failure(live, live_raw)
     physical_begin_head = _validate_physical_begin(physical_begin, physical_begin_raw)
+    physical_causal_head = _validate_physical_causal_request(
+        physical_causal,
+        physical_causal_raw,
+        physical_begin,
+        physical_begin_raw,
+    )
     physical_state_head = _validate_physical_state(
         physical_state,
         physical_state_raw,
         physical_begin,
         physical_begin_raw,
+        physical_causal,
+        physical_causal_raw,
     )
     physical_head = _validate_physical_failure(
         physical,
@@ -1445,6 +1527,7 @@ def _validated_failure_component_hashes(
         deterministic_head,
         live_head,
         physical_begin_head,
+        physical_causal_head,
         physical_state_head,
         physical_head,
     }
@@ -1454,6 +1537,7 @@ def _validated_failure_component_hashes(
         "deterministic_failure_sha256": _sha256(deterministic_raw),
         "controlled_live_failure_sha256": _sha256(live_raw),
         "physical_failure_begin_sha256": _sha256(physical_begin_raw),
+        "physical_causal_request_sha256": _sha256(physical_causal_raw),
         "physical_failure_state_sha256": _sha256(physical_state_raw),
         "physical_failure_observation_sha256": _sha256(physical_raw),
     }
@@ -1469,6 +1553,7 @@ def accept_failure(args: argparse.Namespace) -> dict[str, Any]:
         deterministic_path=args.deterministic,
         live_path=args.live,
         physical_begin_path=args.physical_begin,
+        physical_causal_request_path=args.physical_causal_request,
         physical_state_path=args.physical_state,
         physical_observation_path=args.physical_observation,
     )
@@ -1577,6 +1662,7 @@ def accept_profile(args: argparse.Namespace) -> dict[str, Any]:
                 deterministic_path=args.failure_deterministic,
                 live_path=args.failure_live,
                 physical_begin_path=args.failure_physical_begin,
+                physical_causal_request_path=args.failure_physical_causal_request,
                 physical_state_path=args.failure_physical_state,
                 physical_observation_path=args.failure_physical_observation,
             )
@@ -1662,6 +1748,7 @@ def _parser() -> argparse.ArgumentParser:
     failure.add_argument("--deterministic", required=True, type=Path)
     failure.add_argument("--live", required=True, type=Path)
     failure.add_argument("--physical-begin", required=True, type=Path)
+    failure.add_argument("--physical-causal-request", required=True, type=Path)
     failure.add_argument("--physical-state", required=True, type=Path)
     failure.add_argument("--physical-observation", required=True, type=Path)
     failure.add_argument("--output", required=True, type=Path)
@@ -1679,6 +1766,7 @@ def _parser() -> argparse.ArgumentParser:
     accept.add_argument("--failure-deterministic", required=True, type=Path)
     accept.add_argument("--failure-live", required=True, type=Path)
     accept.add_argument("--failure-physical-begin", required=True, type=Path)
+    accept.add_argument("--failure-physical-causal-request", required=True, type=Path)
     accept.add_argument("--failure-physical-state", required=True, type=Path)
     accept.add_argument("--failure-physical-observation", required=True, type=Path)
     accept.add_argument("--output", required=True, type=Path)

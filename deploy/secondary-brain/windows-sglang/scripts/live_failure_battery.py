@@ -7,6 +7,7 @@ import argparse
 import base64
 import contextlib
 import hashlib
+import http.client
 import json
 import os
 import re
@@ -16,6 +17,7 @@ import socket
 import ssl
 import stat
 import subprocess
+import threading
 import time
 import urllib.error
 import urllib.request
@@ -37,8 +39,9 @@ from endpoint_common import (
 from failure_battery import SUITE_FILES
 
 SCHEMA = "friday.secondary-live-failure-battery.v1"
-PHYSICAL_STATE_SCHEMA = "friday.secondary-physical-failure-state.v1"
-PHYSICAL_OBSERVATION_SCHEMA = "friday.secondary-physical-failure-observation.v1"
+PHYSICAL_STATE_SCHEMA = "friday.secondary-physical-failure-state.v2"
+PHYSICAL_CAUSAL_SCHEMA = "friday.secondary-physical-causal-request.v1"
+PHYSICAL_OBSERVATION_SCHEMA = "friday.secondary-physical-failure-observation.v2"
 PRODUCT_BEGIN_SCHEMA = "friday.secondary-product-failure-begin.v1"
 PRODUCT_OFF_SCHEMA = "friday.secondary-product-failure-off.v1"
 PRODUCT_OBSERVATION_SCHEMA = "friday.secondary-product-failure-observation.v1"
@@ -2674,6 +2677,110 @@ def run_battery(
     }
 
 
+def _causal_request_payload(nonce: str) -> dict[str, Any]:
+    if re.fullmatch(r"[0-9a-f]{32}", nonce) is None:
+        raise LiveFailureBatteryError("causal request nonce is invalid")
+    return {
+        "model": evidence_identity()["served_model_alias"],
+        "messages": [
+            {
+                "role": "system",
+                "content": (
+                    "This is an effect-free transport witness. Produce plain text only; "
+                    "never call tools or claim that an action was performed."
+                ),
+            },
+            {
+                "role": "user",
+                "content": (
+                    "Write a long, non-sensitive transport-test response. Keep generating "
+                    f"until the output limit. Witness nonce: {nonce}."
+                ),
+            },
+        ],
+        "max_tokens": 512,
+        "temperature": 0.0,
+        "reasoning_effort": "high",
+        "stream": False,
+        "tools": [],
+        "tool_choice": "none",
+    }
+
+
+def _causal_endpoint_worker(
+    *,
+    api_key: str,
+    ca_file: Path,
+    request_body: bytes,
+    timeout_sec: float,
+    submitted: threading.Event,
+    finished: threading.Event,
+    outcome: dict[str, str],
+    connection_holder: dict[str, http.client.HTTPSConnection],
+) -> None:
+    """Submit every request byte before signalling; retain no response or exception."""
+
+    connection: http.client.HTTPSConnection | None = None
+    try:
+        normalized = normalize_base_url(ENDPOINT)
+        parsed = urlsplit(normalized)
+        context = build_tls_context(normalized, ca_file)
+        if parsed.scheme != "https" or parsed.hostname is None or context is None:
+            outcome["status"] = "internal_error"
+            return
+        connection = http.client.HTTPSConnection(
+            parsed.hostname,
+            parsed.port or 443,
+            timeout=timeout_sec,
+            context=context,
+        )
+        connection_holder["connection"] = connection
+        connection.request(
+            "POST",
+            f"{parsed.path.rstrip('/')}/chat/completions",
+            body=request_body,
+            headers={
+                "Accept": "application/json",
+                "Authorization": f"Bearer {api_key}",
+                "Content-Type": "application/json",
+                "User-Agent": "friday-secondary-physical-causal-witness/1",
+            },
+        )
+        # http.client.request returns only after endheaders() has written the
+        # complete body.  The operator signal therefore cannot precede request
+        # submission on the authenticated TLS connection.
+        submitted.set()
+        response = connection.getresponse()
+        response.read(1)
+        outcome["status"] = "response_completed"
+    except (OSError, TimeoutError, ssl.SSLError, http.client.HTTPException):
+        outcome["status"] = "transport_failed"
+    except Exception:
+        outcome["status"] = "internal_error"
+    finally:
+        connection_holder.pop("connection", None)
+        if connection is not None:
+            with contextlib.suppress(OSError):
+                connection.close()
+        finished.set()
+
+
+def _wait_for_causal_tls_loss(
+    *,
+    ca_file: Path,
+    finished: threading.Event,
+    timeout_sec: float,
+) -> None:
+    deadline = time.monotonic() + timeout_sec
+    while time.monotonic() < deadline:
+        if finished.is_set():
+            raise LiveFailureBatteryError("causal endpoint request completed before physical TLS loss")
+        if not _tls_handshake_available(ca_file, min(1.0, timeout_sec)):
+            return
+        time.sleep(0.05)
+    raise LiveFailureBatteryError("physical TLS loss was not observed after request submission")
+
+
 PHYSICAL_BEGIN_KEYS = frozenset(
     {
         "schema",
@@ -2692,10 +2799,44 @@ PHYSICAL_BEGIN_KEYS = frozenset(
         "credentials_retained",
     }
 )
+PHYSICAL_CAUSAL_KEYS = frozenset(
+    {
+        "schema",
+        "status",
+        "candidate_profile_id",
+        "candidate_profile_sha256",
+        "served_model_alias",
+        "gateway_ca_certificate_sha256",
+        "observer_source_head",
+        "observer_runner_sha256",
+        "physical_begin_state_sha256",
+        "endpoint_base_url",
+        "request_transport",
+        "request_payload_sha256",
+        "request_payload_bytes",
+        "request_submitted_before_tls_loss_observed",
+        "endpoint_response_completed_before_tls_loss",
+        "endpoint_transport_failure_after_tls_loss_observed",
+        "primary_pid",
+        "primary_process_epoch_before_sha256",
+        "primary_process_epoch_after_sha256",
+        "primary_version",
+        "primary_ca_certificate_sha256",
+        "primary_continuity_probe_call_count",
+        "friday_primary_process_continuity_observed",
+        "tool_request_sent",
+        "effect_request_sent",
+        "raw_content_retained",
+        "response_content_retained",
+        "credentials_retained",
+    }
+)
 PHYSICAL_OFF_KEYS = PHYSICAL_BEGIN_KEYS | frozenset(
     {
         "physical_begin_state_sha256",
+        "physical_causal_request_sha256",
         "physical_tls_endpoint_unavailable_observed",
+        "physical_tls_loss_after_request_submission_observed",
         "primary_process_epoch_while_off_sha256",
         "physical_laptop_power_loss_operator_observed",
         "ordinary_primary_fallback_exactly_once_operator_observed",
@@ -2845,7 +2986,7 @@ def begin_physical_observation(
         output_sha256 = _write_new(output, state)
         return {
             "status": "awaiting_physical_power_loss",
-            "next_step": "physically_power_off_laptop_then_record_off_state",
+            "next_step": "run_physical_causal_request_and_power_off_on_submission_signal",
             "output_sha256": output_sha256,
         }
     assert secondary_snapshot is not None and product_output is not None
@@ -2886,6 +3027,168 @@ def begin_physical_observation(
     }
 
 
+def run_physical_causal_request(
+    *,
+    candidate: Path,
+    api_key_file: Path,
+    ca_file: Path,
+    primary_ca_file: Path,
+    state_path: Path,
+    output: Path,
+    timeout_sec: float = 60.0,
+    submission_timeout_sec: float = 15.0,
+    physical_loss_timeout_sec: float = 180.0,
+) -> dict[str, Any]:
+    """Prove the endpoint vanished only after a fully submitted request."""
+
+    if (
+        not 5.0 <= timeout_sec <= 120.0
+        or not 1.0 <= submission_timeout_sec <= 60.0
+        or not 5.0 <= physical_loss_timeout_sec <= 600.0
+    ):
+        raise LiveFailureBatteryError("causal physical request timeout is outside the closed range")
+    _preflight_new_output_path(output)
+    try:
+        configure_expected_model(candidate, ca_file)
+        api_key = load_api_key(api_key_file)
+        _ready_epoch(api_key, ca_file, min(timeout_sec, 60.0))
+    except EndpointError as exc:
+        raise LiveFailureBatteryError("exact candidate is not ready for causal request") from exc
+    state, state_raw = _read_state(state_path)
+    source_head, runner_sha256 = _source_identity()
+    if (
+        set(state) != PHYSICAL_BEGIN_KEYS
+        or state.get("schema") != PHYSICAL_STATE_SCHEMA
+        or state.get("status") != "awaiting_physical_power_loss"
+        or any(state.get(key) != value for key, value in evidence_identity().items())
+        or state.get("observer_source_head") != source_head
+        or state.get("observer_runner_sha256") != runner_sha256
+        or state.get("raw_content_retained") is not False
+        or state.get("credentials_retained") is not False
+    ):
+        raise LiveFailureBatteryError("physical observation begin state is invalid")
+    primary_pid = state.get("primary_pid")
+    if type(primary_pid) is not int or primary_pid != _friday_backend_main_pid():
+        raise LiveFailureBatteryError("Friday backend service changed before causal request")
+    primary_before = _primary_process_epoch_sha256(primary_pid)
+    if primary_before != state.get("primary_process_epoch_before_sha256"):
+        raise LiveFailureBatteryError("Friday primary process changed before causal request")
+
+    nonce = secrets.token_hex(16)
+    payload = _causal_request_payload(nonce)
+    request_body = _canonical(payload)
+    submitted = threading.Event()
+    finished = threading.Event()
+    outcome: dict[str, str] = {}
+    connection_holder: dict[str, http.client.HTTPSConnection] = {}
+    worker = threading.Thread(
+        target=_causal_endpoint_worker,
+        kwargs={
+            "api_key": api_key,
+            "ca_file": ca_file,
+            "request_body": request_body,
+            "timeout_sec": timeout_sec,
+            "submitted": submitted,
+            "finished": finished,
+            "outcome": outcome,
+            "connection_holder": connection_holder,
+        },
+        name="friday-secondary-physical-causal-request",
+        daemon=True,
+    )
+    worker.start()
+    if not submitted.wait(submission_timeout_sec):
+        connection = connection_holder.get("connection")
+        if connection is not None:
+            with contextlib.suppress(OSError):
+                connection.close()
+        worker.join(timeout=1.0)
+        raise LiveFailureBatteryError("causal endpoint request was not fully submitted")
+    if finished.is_set():
+        worker.join(timeout=1.0)
+        raise LiveFailureBatteryError("causal endpoint request completed before operator signal")
+    print(
+        json.dumps(
+            {
+                "status": "request_submitted_power_off_laptop_now",
+                "request_payload_sha256": _sha256(request_body),
+            },
+            sort_keys=True,
+        ),
+        flush=True,
+    )
+    _wait_for_causal_tls_loss(
+        ca_file=ca_file,
+        finished=finished,
+        timeout_sec=physical_loss_timeout_sec,
+    )
+    worker.join(timeout=min(timeout_sec + 2.0, 122.0))
+    if worker.is_alive():
+        connection = connection_holder.get("connection")
+        if connection is not None:
+            with contextlib.suppress(OSError):
+                connection.close()
+        worker.join(timeout=2.0)
+    if worker.is_alive() or outcome.get("status") != "transport_failed":
+        raise LiveFailureBatteryError(
+            "causal endpoint request did not fail after the observed physical TLS loss"
+        )
+
+    continuity_probe_call_count = 0
+
+    def primary_continuity_probe() -> tuple[str, str]:
+        nonlocal continuity_probe_call_count
+        continuity_probe_call_count += 1
+        if continuity_probe_call_count != 1:
+            raise LiveFailureBatteryError("causal primary continuity probe ran more than once")
+        return _primary_health(min(timeout_sec, 60.0), primary_ca_file)
+
+    primary_version, primary_ca_sha256 = primary_continuity_probe()
+    primary_after = _primary_process_epoch_sha256(primary_pid)
+    if (
+        continuity_probe_call_count != 1
+        or primary_pid != _friday_backend_main_pid()
+        or primary_after != primary_before
+        or primary_version != state.get("primary_version")
+    ):
+        raise LiveFailureBatteryError("Friday primary process continuity probe failed")
+    evidence = {
+        "schema": PHYSICAL_CAUSAL_SCHEMA,
+        "status": "observed",
+        **evidence_identity(),
+        "observer_source_head": source_head,
+        "observer_runner_sha256": runner_sha256,
+        "physical_begin_state_sha256": _sha256(state_raw),
+        "endpoint_base_url": ENDPOINT,
+        "request_transport": "authenticated_tls_http11_body_fully_written",
+        "request_payload_sha256": _sha256(request_body),
+        "request_payload_bytes": len(request_body),
+        "request_submitted_before_tls_loss_observed": True,
+        "endpoint_response_completed_before_tls_loss": False,
+        "endpoint_transport_failure_after_tls_loss_observed": True,
+        "primary_pid": primary_pid,
+        "primary_process_epoch_before_sha256": primary_before,
+        "primary_process_epoch_after_sha256": primary_after,
+        "primary_version": primary_version,
+        "primary_ca_certificate_sha256": primary_ca_sha256,
+        "primary_continuity_probe_call_count": continuity_probe_call_count,
+        "friday_primary_process_continuity_observed": True,
+        "tool_request_sent": False,
+        "effect_request_sent": False,
+        "raw_content_retained": False,
+        "response_content_retained": False,
+        "credentials_retained": False,
+    }
+    if set(evidence) != PHYSICAL_CAUSAL_KEYS:
+        raise LiveFailureBatteryError("physical causal request evidence is incomplete")
+    output_sha256 = _write_new(output, evidence)
+    return {
+        "status": "causal_request_failure_observed",
+        "next_step": "record_physical_off_state",
+        "output_sha256": output_sha256,
+    }
+
+
 def record_physical_power_loss(
     *,
     candidate: Path,
@@ -2898,6 +3201,7 @@ def record_physical_power_loss(
     mid_turn_fallback_observed: bool,
     no_effect_replay_observed: bool,
     v12_readiness_unchanged_observed: bool,
+    causal_state_path: Path | None = None,
     primary_api_key_file: Path | None = None,
     product_state_path: Path | None = None,
     product_output: Path | None = None,
@@ -2913,8 +3217,11 @@ def record_physical_power_loss(
         raise LiveFailureBatteryError("physical product witness inputs must be complete")
     if product_output is not None and output.absolute() == product_output.absolute():
         raise LiveFailureBatteryError("physical and product outputs must be distinct")
+    if causal_state_path is None:
+        raise LiveFailureBatteryError("code-owned causal request witness is required")
     configure_expected_model(candidate, ca_file)
     state, state_raw = _read_state(state_path)
+    causal, causal_raw = _read_state(causal_state_path)
     product_begin: dict[str, Any] | None = None
     product_begin_raw = b""
     if product_witness:
@@ -2932,6 +3239,40 @@ def record_physical_power_loss(
         or state.get("credentials_retained") is not False
     ):
         raise LiveFailureBatteryError("physical observation begin state is invalid")
+    if (
+        set(causal) != PHYSICAL_CAUSAL_KEYS
+        or causal.get("schema") != PHYSICAL_CAUSAL_SCHEMA
+        or causal.get("status") != "observed"
+        or any(causal.get(key) != value for key, value in evidence_identity().items())
+        or causal.get("observer_source_head") != source_head
+        or causal.get("observer_runner_sha256") != runner_sha256
+        or causal.get("physical_begin_state_sha256") != _sha256(state_raw)
+        or causal.get("endpoint_base_url") != ENDPOINT
+        or causal.get("request_transport") != "authenticated_tls_http11_body_fully_written"
+        or not isinstance(causal.get("request_payload_sha256"), str)
+        or _SHA256.fullmatch(causal["request_payload_sha256"]) is None
+        or type(causal.get("request_payload_bytes")) is not int
+        or not 1 <= causal["request_payload_bytes"] <= 8 * 1024 * 1024
+        or causal.get("request_submitted_before_tls_loss_observed") is not True
+        or causal.get("endpoint_response_completed_before_tls_loss") is not False
+        or causal.get("endpoint_transport_failure_after_tls_loss_observed") is not True
+        or causal.get("primary_pid") != state.get("primary_pid")
+        or causal.get("primary_process_epoch_before_sha256")
+        != state.get("primary_process_epoch_before_sha256")
+        or causal.get("primary_process_epoch_after_sha256")
+        != state.get("primary_process_epoch_before_sha256")
+        or causal.get("primary_version") != state.get("primary_version")
+        or not isinstance(causal.get("primary_ca_certificate_sha256"), str)
+        or _SHA256.fullmatch(causal["primary_ca_certificate_sha256"]) is None
+        or causal.get("primary_continuity_probe_call_count") != 1
+        or causal.get("friday_primary_process_continuity_observed") is not True
+        or causal.get("tool_request_sent") is not False
+        or causal.get("effect_request_sent") is not False
+        or causal.get("raw_content_retained") is not False
+        or causal.get("response_content_retained") is not False
+        or causal.get("credentials_retained") is not False
+    ):
+        raise LiveFailureBatteryError("physical causal request state is invalid")
     begin_snapshot: dict[str, Any] | None = None
     if product_witness:
         assert product_begin is not None
@@ -2999,7 +3340,9 @@ def record_physical_power_loss(
         **state,
         "status": "physical_power_loss_observed_awaiting_recovery",
         "physical_begin_state_sha256": _sha256(state_raw),
+        "physical_causal_request_sha256": _sha256(causal_raw),
         "physical_tls_endpoint_unavailable_observed": True,
+        "physical_tls_loss_after_request_submission_observed": True,
         "primary_process_epoch_while_off_sha256": primary_epoch,
         "physical_laptop_power_loss_operator_observed": True,
         "ordinary_primary_fallback_exactly_once_operator_observed": True,
@@ -3106,6 +3449,19 @@ def finish_physical_observation(
         or any(state.get(key) != value for key, value in evidence_identity().items())
         or state.get("observer_source_head") != source_head
         or state.get("observer_runner_sha256") != runner_sha256
+        or not isinstance(state.get("physical_begin_state_sha256"), str)
+        or _SHA256.fullmatch(state["physical_begin_state_sha256"]) is None
+        or not isinstance(state.get("physical_causal_request_sha256"), str)
+        or _SHA256.fullmatch(state["physical_causal_request_sha256"]) is None
+        or state.get("physical_tls_endpoint_unavailable_observed") is not True
+        or state.get("physical_tls_loss_after_request_submission_observed") is not True
+        or state.get("physical_laptop_power_loss_operator_observed") is not True
+        or state.get("ordinary_primary_fallback_exactly_once_operator_observed") is not True
+        or state.get("mid_turn_primary_fallback_exactly_once_operator_observed") is not True
+        or state.get("effect_replay_operator_observed") is not False
+        or state.get("v12_readiness_changed_operator_observed") is not False
+        or state.get("raw_content_retained") is not False
+        or state.get("credentials_retained") is not False
         or readmitted_without_primary_restart_observed is not True
     ):
         raise LiveFailureBatteryError("physical observation recovery state is invalid or unconfirmed")
@@ -3188,8 +3544,9 @@ def finish_physical_observation(
         "status": "observed",
         **evidence_identity(),
         "observation_scope": "physical_power_loss_with_existing_primary_process",
-        "observation_method": "code_owned_manual_state_machine",
+        "observation_method": "code_owned_causal_request_state_machine",
         "observation_state_sha256": _sha256(state_raw),
+        "physical_causal_request_sha256": state["physical_causal_request_sha256"],
         "observer_source_head": source_head,
         "observer_runner_sha256": runner_sha256,
         "laptop_boot_epoch_before_sha256": state["laptop_boot_epoch_before_sha256"],
@@ -3288,12 +3645,24 @@ def _parser() -> argparse.ArgumentParser:
     begin.add_argument("--output", required=True, type=Path)
     begin.add_argument("--product-output", type=Path)
 
+    causal = commands.add_parser("physical-causal-request")
+    causal.add_argument("--candidate", required=True, type=Path)
+    causal.add_argument("--api-key-file", required=True, type=Path)
+    causal.add_argument("--ca-file", required=True, type=Path)
+    causal.add_argument("--primary-ca-file", required=True, type=Path)
+    causal.add_argument("--state", required=True, type=Path)
+    causal.add_argument("--timeout-sec", default=60.0, type=float)
+    causal.add_argument("--submission-timeout-sec", default=15.0, type=float)
+    causal.add_argument("--physical-loss-timeout-sec", default=180.0, type=float)
+    causal.add_argument("--output", required=True, type=Path)
+
     off = commands.add_parser("physical-off")
     off.add_argument("--candidate", required=True, type=Path)
     off.add_argument("--ca-file", required=True, type=Path)
     off.add_argument("--primary-api-key-file", type=Path)
     off.add_argument("--primary-ca-file", required=True, type=Path)
     off.add_argument("--state", required=True, type=Path)
+    off.add_argument("--causal-state", required=True, type=Path)
     off.add_argument("--product-state", type=Path)
     off.add_argument("--timeout-sec", default=15.0, type=float)
     off.add_argument("--physical-power-loss-observed", required=True, action="store_true")
@@ -3367,6 +3736,18 @@ def main(argv: list[str] | None = None) -> int:
                 product_output=args.product_output,
                 timeout_sec=args.timeout_sec,
             )
+        elif args.command == "physical-causal-request":
+            result = run_physical_causal_request(
+                candidate=args.candidate,
+                api_key_file=args.api_key_file,
+                ca_file=args.ca_file,
+                primary_ca_file=args.primary_ca_file,
+                state_path=args.state,
+                output=args.output,
+                timeout_sec=args.timeout_sec,
+                submission_timeout_sec=args.submission_timeout_sec,
+                physical_loss_timeout_sec=args.physical_loss_timeout_sec,
+            )
         elif args.command == "physical-off":
             result = record_physical_power_loss(
                 candidate=args.candidate,
@@ -3374,6 +3755,7 @@ def main(argv: list[str] | None = None) -> int:
                 primary_api_key_file=args.primary_api_key_file,
                 primary_ca_file=args.primary_ca_file,
                 state_path=args.state,
+                causal_state_path=args.causal_state,
                 product_state_path=args.product_state,
                 output=args.output,
                 product_output=args.product_output,

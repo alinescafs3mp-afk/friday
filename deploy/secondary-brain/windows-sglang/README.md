@@ -366,12 +366,15 @@ python scripts/live_failure_battery.py controlled \
   --output evidence/failure.controlled-live.json
 ```
 
-Physical laptop loss is a separate three-stage witness. Start it against the
-currently running Friday backend, physically power the laptop off, exercise one
-ordinary and one mid-turn Friday request and verify exactly one primary result
-with no effect replay, then record the off-state. Power the same laptop back on
-and finish only after the exact candidate is healthy and Friday has readmitted
-it without restarting the primary process:
+Physical laptop loss is a separate causal witness. Start it against the currently
+running Friday backend, then run the code-owned request stage. Only when it prints
+`request_submitted_power_off_laptop_now` physically power the laptop off. The
+runner rejects a response that completed before the cut, proves transport loss
+after the full authenticated request body was written, and invokes its bounded
+primary health/continuity probe once. That probe is not represented as a Friday
+scheduler fallback. Separately verify exactly one primary result for the mid-turn
+and ordinary Friday requests, then record the off-state. Power the same laptop
+back on and finish only after the exact candidate is healthy without restarting Friday:
 
 ```bash
 primary_pid="$(systemctl --user show -p MainPID --value friday-backend.service)"
@@ -384,11 +387,20 @@ python scripts/live_failure_battery.py physical-begin \
   --primary-pid "$primary_pid" \
   --output evidence/failure.physical-begin.json
 
+python scripts/live_failure_battery.py physical-causal-request \
+  --candidate evidence/profile.candidate.json \
+  --api-key-file /secure/friday-secondary-gateway-key \
+  --ca-file /secure/friday-secondary-ca.crt \
+  --primary-ca-file /secure/friday-primary-ca.crt \
+  --state evidence/failure.physical-begin.json \
+  --output evidence/failure.physical-causal.json
+
 python scripts/live_failure_battery.py physical-off \
   --candidate evidence/profile.candidate.json \
   --ca-file /secure/friday-secondary-ca.crt \
   --primary-ca-file /secure/friday-primary-ca.crt \
   --state evidence/failure.physical-begin.json \
+  --causal-state evidence/failure.physical-causal.json \
   --physical-power-loss-observed \
   --ordinary-primary-fallback-exactly-once-operator-observed \
   --mid-turn-primary-fallback-exactly-once-operator-observed \
@@ -409,7 +421,12 @@ python scripts/live_failure_battery.py physical-finish \
 `friday-primary-ca.crt` is the public CA or server certificate that validates
 the fixed `https://127.0.0.1:8000` authority, including that IP in SAN. The
 witness never uses `-k`, follows no redirect and does not accept the ambient
-trust store.
+trust store. The causal receipt contains only request/body hashes, bounded byte
+counts, process/CA identities and booleans. It retains neither prompt, response,
+bearer nor exception text and sends neither tools nor effects. The manual
+mid-turn fallback assertion remains a separate claim but cannot pass acceptance
+without the causal transport receipt. Exact Friday scheduler deltas are proved
+later by the product-linked assist-stage outage battery.
 
 The physical witness above proves the node boundary only. Product evidence is a
 separate automatic stage runner; manual requests plus counter-only sidecars are
@@ -472,7 +489,7 @@ the body-free replay/consume tombstone remains bounded to one row per stage and 
 
 The witness checks TLS loss, laptop boot-epoch change, unchanged Friday process
 epoch and exact candidate recovery. It never turns a service stop or mocked test
-into a physical-loss claim. Combine all four bound receipts, then create capacity
+into a physical-loss claim. Combine the complete bound receipt chain, then create capacity
 evidence and promote the same candidate while rechecking source, runtime,
 hardware and CA:
 
@@ -489,6 +506,7 @@ python .\scripts\runtime_profile_operator.py accept-failure `
   --deterministic .\evidence\failure.deterministic.json `
   --live .\evidence\failure.controlled-live.json `
   --physical-begin .\evidence\failure.physical-begin.json `
+  --physical-causal-request .\evidence\failure.physical-causal.json `
   --physical-state .\evidence\failure.physical-off.json `
   --physical-observation .\evidence\failure.physical-observed.json `
   --output .\evidence\failure.accepted.json
@@ -506,6 +524,7 @@ python .\scripts\runtime_profile_operator.py accept-profile `
   --failure-deterministic .\evidence\failure.deterministic.json `
   --failure-live .\evidence\failure.controlled-live.json `
   --failure-physical-begin .\evidence\failure.physical-begin.json `
+  --failure-physical-causal-request .\evidence\failure.physical-causal.json `
   --failure-physical-state .\evidence\failure.physical-off.json `
   --failure-physical-observation .\evidence\failure.physical-observed.json `
   --output .\evidence\profile.accepted.json

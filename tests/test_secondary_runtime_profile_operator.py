@@ -199,7 +199,7 @@ def _controlled_live_failure(operator: Any, identity: dict[str, Any]) -> dict[st
 
 def _physical_failure_begin(identity: dict[str, Any], *, source_head: str = "a" * 40) -> dict[str, Any]:
     return {
-        "schema": "friday.secondary-physical-failure-state.v1",
+        "schema": "friday.secondary-physical-failure-state.v2",
         "status": "awaiting_physical_power_loss",
         **identity,
         "observer_source_head": source_head,
@@ -215,17 +215,57 @@ def _physical_failure_begin(identity: dict[str, Any], *, source_head: str = "a" 
     }
 
 
-def _physical_failure_state(
+def _physical_causal_request(
     identity: dict[str, Any],
     *,
     begin_sha256: str,
     source_head: str = "a" * 40,
 ) -> dict[str, Any]:
     return {
+        "schema": "friday.secondary-physical-causal-request.v1",
+        "status": "observed",
+        **identity,
+        "observer_source_head": source_head,
+        "observer_runner_sha256": hashlib.sha256(
+            (SCRIPTS / "live_failure_battery.py").read_bytes()
+        ).hexdigest(),
+        "physical_begin_state_sha256": begin_sha256,
+        "endpoint_base_url": "https://192.168.1.35:8443/v1",
+        "request_transport": "authenticated_tls_http11_body_fully_written",
+        "request_payload_sha256": "3" * 64,
+        "request_payload_bytes": 512,
+        "request_submitted_before_tls_loss_observed": True,
+        "endpoint_response_completed_before_tls_loss": False,
+        "endpoint_transport_failure_after_tls_loss_observed": True,
+        "primary_pid": 2613,
+        "primary_process_epoch_before_sha256": "6" * 64,
+        "primary_process_epoch_after_sha256": "6" * 64,
+        "primary_version": "0.207.8",
+        "primary_ca_certificate_sha256": "8" * 64,
+        "primary_continuity_probe_call_count": 1,
+        "friday_primary_process_continuity_observed": True,
+        "tool_request_sent": False,
+        "effect_request_sent": False,
+        "raw_content_retained": False,
+        "response_content_retained": False,
+        "credentials_retained": False,
+    }
+
+
+def _physical_failure_state(
+    identity: dict[str, Any],
+    *,
+    begin_sha256: str,
+    causal_sha256: str,
+    source_head: str = "a" * 40,
+) -> dict[str, Any]:
+    return {
         **_physical_failure_begin(identity, source_head=source_head),
         "status": "physical_power_loss_observed_awaiting_recovery",
         "physical_begin_state_sha256": begin_sha256,
+        "physical_causal_request_sha256": causal_sha256,
         "physical_tls_endpoint_unavailable_observed": True,
+        "physical_tls_loss_after_request_submission_observed": True,
         "primary_process_epoch_while_off_sha256": "6" * 64,
         "physical_laptop_power_loss_operator_observed": True,
         "ordinary_primary_fallback_exactly_once_operator_observed": True,
@@ -241,14 +281,16 @@ def _physical_failure_observation(
     *,
     source_head: str = "a" * 40,
     state_sha256: str = "7" * 64,
+    causal_sha256: str = "3" * 64,
 ) -> dict[str, Any]:
     return {
         "schema": operator.PHYSICAL_FAILURE_SCHEMA,
         "status": "observed",
         **identity,
         "observation_scope": "physical_power_loss_with_existing_primary_process",
-        "observation_method": "code_owned_manual_state_machine",
+        "observation_method": "code_owned_causal_request_state_machine",
         "observation_state_sha256": state_sha256,
+        "physical_causal_request_sha256": causal_sha256,
         "observer_source_head": source_head,
         "observer_runner_sha256": hashlib.sha256(
             (SCRIPTS / "live_failure_battery.py").read_bytes()
@@ -673,6 +715,7 @@ def test_profile_promotion_rechecks_the_source_runtime_chain(tmp_path: Path) -> 
                 failure_deterministic=placeholder,
                 failure_live=placeholder,
                 failure_physical_begin=placeholder,
+                failure_physical_causal_request=placeholder,
                 failure_physical_state=placeholder,
                 failure_physical_observation=placeholder,
                 output=tmp_path / "accepted.json",
@@ -879,11 +922,19 @@ def test_capacity_and_profile_promotion_are_candidate_epoch_bound(
         tmp_path / "failure.physical-begin.json",
         _physical_failure_begin(identity),
     )
+    physical_causal = _write(
+        tmp_path / "failure.physical-causal.json",
+        _physical_causal_request(
+            identity,
+            begin_sha256=hashlib.sha256(physical_begin.read_bytes()).hexdigest(),
+        ),
+    )
     physical_state = _write(
         tmp_path / "failure.physical-state.json",
         _physical_failure_state(
             identity,
             begin_sha256=hashlib.sha256(physical_begin.read_bytes()).hexdigest(),
+            causal_sha256=hashlib.sha256(physical_causal.read_bytes()).hexdigest(),
         ),
     )
     physical = _write(
@@ -892,18 +943,57 @@ def test_capacity_and_profile_promotion_are_candidate_epoch_bound(
             operator,
             identity,
             state_sha256=hashlib.sha256(physical_state.read_bytes()).hexdigest(),
+            causal_sha256=hashlib.sha256(physical_causal.read_bytes()).hexdigest(),
         ),
     )
+    forged_causal_value = json.loads(physical_causal.read_text(encoding="utf-8"))
+    forged_causal_value["primary_continuity_probe_call_count"] = 2
+    forged_causal = _write(tmp_path / "failure.physical-causal-forged.json", forged_causal_value)
+    with pytest.raises(operator.ProfileOperatorError, match="physical causal request evidence"):
+        operator.accept_failure(
+            argparse.Namespace(
+                candidate=candidate_args.output,
+                deterministic=deterministic,
+                live=controlled_live,
+                physical_begin=physical_begin,
+                physical_causal_request=forged_causal,
+                physical_state=physical_state,
+                physical_observation=physical,
+                output=tmp_path / "failure.forged-causal.json",
+            )
+        )
+    false_fallback_value = json.loads(physical_causal.read_text(encoding="utf-8"))
+    false_fallback_value.pop("primary_continuity_probe_call_count")
+    false_fallback_value["code_owned_primary_fallback_call_count"] = 1
+    false_fallback_value["primary_fallback_exactly_once_code_observed"] = True
+    false_fallback = _write(
+        tmp_path / "failure.physical-causal-false-fallback.json",
+        false_fallback_value,
+    )
+    with pytest.raises(operator.ProfileOperatorError, match="physical causal request evidence"):
+        operator.accept_failure(
+            argparse.Namespace(
+                candidate=candidate_args.output,
+                deterministic=deterministic,
+                live=controlled_live,
+                physical_begin=physical_begin,
+                physical_causal_request=false_fallback,
+                physical_state=physical_state,
+                physical_observation=physical,
+                output=tmp_path / "failure.false-health-fallback.json",
+            )
+        )
     mixed_begin_value = _physical_failure_begin(identity)
     mixed_begin_value["laptop_boot_epoch_before_sha256"] = "9" * 64
     mixed_begin = _write(tmp_path / "failure.physical-begin-mixed.json", mixed_begin_value)
-    with pytest.raises(operator.ProfileOperatorError, match="physical failure state"):
+    with pytest.raises(operator.ProfileOperatorError, match="physical causal request"):
         operator.accept_failure(
             argparse.Namespace(
                 candidate=candidate_args.output,
                 deterministic=deterministic,
                 live=controlled_live,
                 physical_begin=mixed_begin,
+                physical_causal_request=physical_causal,
                 physical_state=physical_state,
                 physical_observation=physical,
                 output=tmp_path / "failure.mixed-chain.json",
@@ -919,6 +1009,7 @@ def test_capacity_and_profile_promotion_are_candidate_epoch_bound(
                 deterministic=deterministic,
                 live=stale_live,
                 physical_begin=physical_begin,
+                physical_causal_request=physical_causal,
                 physical_state=physical_state,
                 physical_observation=physical,
                 output=tmp_path / "failure.stale-source.json",
@@ -931,6 +1022,7 @@ def test_capacity_and_profile_promotion_are_candidate_epoch_bound(
             deterministic=deterministic,
             live=controlled_live,
             physical_begin=physical_begin,
+            physical_causal_request=physical_causal,
             physical_state=physical_state,
             physical_observation=physical,
             output=failure,
@@ -954,6 +1046,7 @@ def test_capacity_and_profile_promotion_are_candidate_epoch_bound(
                 failure_deterministic=deterministic,
                 failure_live=controlled_live,
                 failure_physical_begin=physical_begin,
+                failure_physical_causal_request=physical_causal,
                 failure_physical_state=physical_state,
                 failure_physical_observation=physical,
                 output=tmp_path / "profile.mock-only.json",
@@ -977,6 +1070,7 @@ def test_capacity_and_profile_promotion_are_candidate_epoch_bound(
                 failure_deterministic=deterministic,
                 failure_live=controlled_live,
                 failure_physical_begin=physical_begin,
+                failure_physical_causal_request=physical_causal,
                 failure_physical_state=physical_state,
                 failure_physical_observation=physical,
                 output=tmp_path / "profile.forged-composite.json",
@@ -997,6 +1091,7 @@ def test_capacity_and_profile_promotion_are_candidate_epoch_bound(
             failure_deterministic=deterministic,
             failure_live=controlled_live,
             failure_physical_begin=physical_begin,
+            failure_physical_causal_request=physical_causal,
             failure_physical_state=physical_state,
             failure_physical_observation=physical,
             output=accepted_output,
@@ -1041,6 +1136,7 @@ def test_profile_promotion_rejects_evidence_from_another_candidate(tmp_path: Pat
                 failure_deterministic=evidence,
                 failure_live=evidence,
                 failure_physical_begin=evidence,
+                failure_physical_causal_request=evidence,
                 failure_physical_state=evidence,
                 failure_physical_observation=evidence,
                 output=tmp_path / "accepted.json",
@@ -1464,6 +1560,175 @@ def test_primary_diagnostics_bearer_requires_owned_private_stable_regular_file(
             live._load_primary_api_key(key_file)
 
 
+def test_causal_worker_signals_only_after_the_complete_request_body_is_written(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    live = importlib.import_module("live_failure_battery")
+    allow_write = live.threading.Event()
+    request_entered = live.threading.Event()
+    submitted = live.threading.Event()
+    finished = live.threading.Event()
+    outcome: dict[str, str] = {}
+    holder: dict[str, Any] = {}
+
+    class Connection:
+        def __init__(self, *_args: Any, **_kwargs: Any) -> None:
+            pass
+
+        def request(self, *_args: Any, **_kwargs: Any) -> None:
+            request_entered.set()
+            assert allow_write.wait(1.0)
+
+        def getresponse(self) -> Any:
+            raise OSError("simulated physical loss")
+
+        def close(self) -> None:
+            pass
+
+    monkeypatch.setattr(live.http.client, "HTTPSConnection", Connection)
+    monkeypatch.setattr(live, "build_tls_context", lambda *_args: object())
+    worker = live.threading.Thread(
+        target=live._causal_endpoint_worker,
+        kwargs={
+            "api_key": "s" * 64,
+            "ca_file": Path("/not-read"),
+            "request_body": b"bounded-body",
+            "timeout_sec": 30.0,
+            "submitted": submitted,
+            "finished": finished,
+            "outcome": outcome,
+            "connection_holder": holder,
+        },
+    )
+    worker.start()
+
+    assert request_entered.wait(1.0)
+    assert not submitted.is_set()
+    allow_write.set()
+    assert submitted.wait(1.0)
+    worker.join(timeout=1.0)
+    assert not worker.is_alive()
+    assert finished.is_set()
+    assert outcome == {"status": "transport_failed"}
+
+
+def test_physical_causal_request_is_body_free_effect_free_and_not_a_fallback_claim(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    operator = importlib.import_module("runtime_profile_operator")
+    live = importlib.import_module("live_failure_battery")
+    args = _candidate_args(tmp_path)
+    operator.build_candidate(args)
+    live.configure_expected_model(args.output, args.ca_certificate)
+    candidate_raw = args.output.read_bytes()
+    identity = _identity(json.loads(candidate_raw), candidate_raw)
+    runner_sha = hashlib.sha256((SCRIPTS / "live_failure_battery.py").read_bytes()).hexdigest()
+    begin = _write(tmp_path / "begin.json", _physical_failure_begin(identity))
+    begin.chmod(0o600)
+    key = tmp_path / "gateway.key"
+    key.write_text("s" * 64, encoding="ascii")
+    loss = live.threading.Event()
+    primary_calls: list[int] = []
+
+    def endpoint_worker(**kwargs: Any) -> None:
+        kwargs["submitted"].set()
+        assert loss.wait(1.0)
+        kwargs["outcome"]["status"] = "transport_failed"
+        kwargs["finished"].set()
+
+    def tls_available(*_args: Any, **_kwargs: Any) -> bool:
+        loss.set()
+        return False
+
+    def primary_health(*_args: Any, **_kwargs: Any) -> tuple[str, str]:
+        primary_calls.append(1)
+        return "0.207.8", "8" * 64
+
+    monkeypatch.setattr(live, "_source_identity", lambda: ("a" * 40, runner_sha))
+    monkeypatch.setattr(live, "_friday_backend_main_pid", lambda: 2613)
+    monkeypatch.setattr(live, "_primary_process_epoch_sha256", lambda _pid: "6" * 64)
+    monkeypatch.setattr(live, "_ready_epoch", lambda *_args, **_kwargs: "1700000000")
+    monkeypatch.setattr(live, "_causal_endpoint_worker", endpoint_worker)
+    monkeypatch.setattr(live, "_tls_handshake_available", tls_available)
+    monkeypatch.setattr(live, "_primary_health", primary_health)
+    monkeypatch.setattr(live.secrets, "token_hex", lambda _size: "d" * 32)
+    output = tmp_path / "causal.json"
+
+    result = live.run_physical_causal_request(
+        candidate=args.output,
+        api_key_file=key,
+        ca_file=args.ca_certificate,
+        primary_ca_file=args.ca_certificate,
+        state_path=begin,
+        output=output,
+        timeout_sec=5.0,
+        submission_timeout_sec=1.0,
+        physical_loss_timeout_sec=5.0,
+    )
+
+    evidence = json.loads(output.read_text(encoding="utf-8"))
+    serialized = json.dumps(evidence, ensure_ascii=False)
+    assert result["status"] == "causal_request_failure_observed"
+    assert primary_calls == [1]
+    assert evidence["request_submitted_before_tls_loss_observed"] is True
+    assert evidence["primary_continuity_probe_call_count"] == 1
+    assert evidence["friday_primary_process_continuity_observed"] is True
+    assert not any("fallback" in key for key in evidence)
+    assert evidence["tool_request_sent"] is False
+    assert evidence["effect_request_sent"] is False
+    assert "s" * 64 not in serialized
+    assert "d" * 32 not in serialized
+    assert "Witness nonce" not in serialized
+    assert capsys.readouterr().out.startswith('{"request_payload_sha256":')
+
+
+def test_physical_causal_request_rejects_completion_before_loss(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    operator = importlib.import_module("runtime_profile_operator")
+    live = importlib.import_module("live_failure_battery")
+    args = _candidate_args(tmp_path)
+    operator.build_candidate(args)
+    live.configure_expected_model(args.output, args.ca_certificate)
+    candidate_raw = args.output.read_bytes()
+    begin = _write(
+        tmp_path / "begin.json",
+        _physical_failure_begin(_identity(json.loads(candidate_raw), candidate_raw)),
+    )
+    begin.chmod(0o600)
+    key = tmp_path / "gateway.key"
+    key.write_text("s" * 64, encoding="ascii")
+
+    def endpoint_worker(**kwargs: Any) -> None:
+        kwargs["submitted"].set()
+        kwargs["outcome"]["status"] = "response_completed"
+        kwargs["finished"].set()
+
+    runner_sha = hashlib.sha256((SCRIPTS / "live_failure_battery.py").read_bytes()).hexdigest()
+    monkeypatch.setattr(live, "_source_identity", lambda: ("a" * 40, runner_sha))
+    monkeypatch.setattr(live, "_friday_backend_main_pid", lambda: 2613)
+    monkeypatch.setattr(live, "_primary_process_epoch_sha256", lambda _pid: "6" * 64)
+    monkeypatch.setattr(live, "_ready_epoch", lambda *_args, **_kwargs: "1700000000")
+    monkeypatch.setattr(live, "_causal_endpoint_worker", endpoint_worker)
+
+    with pytest.raises(live.LiveFailureBatteryError, match="completed before"):
+        live.run_physical_causal_request(
+            candidate=args.output,
+            api_key_file=key,
+            ca_file=args.ca_certificate,
+            primary_ca_file=args.ca_certificate,
+            state_path=begin,
+            output=tmp_path / "must-not-exist.json",
+            timeout_sec=5.0,
+            submission_timeout_sec=1.0,
+            physical_loss_timeout_sec=5.0,
+        )
+    assert not (tmp_path / "must-not-exist.json").exists()
+
+
 def test_manual_counter_only_product_sidecars_are_rejected(tmp_path: Path) -> None:
     live = importlib.import_module("live_failure_battery")
     common = {
@@ -1502,6 +1767,23 @@ def test_manual_counter_only_product_sidecars_are_rejected(tmp_path: Path) -> No
         )
 
 
+def test_manual_mid_turn_claim_cannot_replace_the_causal_receipt(tmp_path: Path) -> None:
+    live = importlib.import_module("live_failure_battery")
+    with pytest.raises(live.LiveFailureBatteryError, match="causal request witness is required"):
+        live.record_physical_power_loss(
+            candidate=tmp_path / "candidate.json",
+            ca_file=tmp_path / "secondary-ca.crt",
+            primary_ca_file=tmp_path / "primary-ca.crt",
+            state_path=tmp_path / "begin.json",
+            output=tmp_path / "off.json",
+            physical_power_loss_observed=True,
+            ordinary_fallback_observed=True,
+            mid_turn_fallback_observed=True,
+            no_effect_replay_observed=True,
+            v12_readiness_unchanged_observed=True,
+        )
+
+
 def test_physical_node_witness_keeps_product_counter_gate_default_off(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -1536,12 +1818,22 @@ def test_physical_node_witness_keeps_product_counter_gate_default_off(
         primary_pid=2613,
         output=begin,
     )
+    candidate_raw = args.output.read_bytes()
+    causal = _write(
+        tmp_path / "node.causal.json",
+        _physical_causal_request(
+            _identity(json.loads(candidate_raw), candidate_raw),
+            begin_sha256=hashlib.sha256(begin.read_bytes()).hexdigest(),
+        ),
+    )
+    causal.chmod(0o600)
     off = tmp_path / "node.off.json"
     off_result = live.record_physical_power_loss(
         candidate=args.output,
         ca_file=args.ca_certificate,
         primary_ca_file=args.ca_certificate,
         state_path=begin,
+        causal_state_path=causal,
         output=off,
         physical_power_loss_observed=True,
         ordinary_fallback_observed=True,
@@ -1578,17 +1870,26 @@ def test_composite_failure_rejects_a_forged_physical_observer_runner(tmp_path: P
     )
     controlled = _write(tmp_path / "live.json", _controlled_live_failure(operator, identity))
     physical_begin = _write(tmp_path / "physical-begin.json", _physical_failure_begin(identity))
+    physical_causal = _write(
+        tmp_path / "physical-causal.json",
+        _physical_causal_request(
+            identity,
+            begin_sha256=hashlib.sha256(physical_begin.read_bytes()).hexdigest(),
+        ),
+    )
     physical_state = _write(
         tmp_path / "physical-state.json",
         _physical_failure_state(
             identity,
             begin_sha256=hashlib.sha256(physical_begin.read_bytes()).hexdigest(),
+            causal_sha256=hashlib.sha256(physical_causal.read_bytes()).hexdigest(),
         ),
     )
     physical_value = _physical_failure_observation(
         operator,
         identity,
         state_sha256=hashlib.sha256(physical_state.read_bytes()).hexdigest(),
+        causal_sha256=hashlib.sha256(physical_causal.read_bytes()).hexdigest(),
     )
     physical_value["observer_runner_sha256"] = "f" * 64
     physical = _write(tmp_path / "physical.json", physical_value)
@@ -1600,6 +1901,7 @@ def test_composite_failure_rejects_a_forged_physical_observer_runner(tmp_path: P
                 deterministic=deterministic,
                 live=controlled,
                 physical_begin=physical_begin,
+                physical_causal_request=physical_causal,
                 physical_state=physical_state,
                 physical_observation=physical,
                 output=tmp_path / "failure.accepted.json",

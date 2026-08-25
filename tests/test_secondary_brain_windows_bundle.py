@@ -85,12 +85,16 @@ def test_readme_pins_primary_tls_and_uses_automatic_product_stage_witness() -> N
     readme = (BUNDLE / "README.md").read_text(encoding="utf-8")
     normalized = " ".join(readme.split())
 
-    assert readme.count("--primary-ca-file /secure/friday-primary-ca.crt") == 4
+    assert readme.count("--primary-ca-file /secure/friday-primary-ca.crt") == 5
     assert "https://127.0.0.1:8000" in readme
     assert "including that IP in SAN" in readme
     assert "never uses `-k`" in readme
     assert "does not accept the ambient trust store" in normalized
     assert "manual requests plus counter-only sidecars are rejected" in normalized
+    assert "physical-causal-request" in readme
+    assert "--causal-state evidence/failure.physical-causal.json" in readme
+    assert "cannot pass acceptance without the causal transport receipt" in normalized
+    assert "not represented as a Friday scheduler fallback" in normalized
     assert readme.count("--primary-api-key-file /secure/friday-primary-api-key") == 1
     assert "--stage public-shadow" in readme
     assert "--stage private-shadow" in readme
