@@ -1,3 +1,16 @@
+## 0.207.14 — 2026-08-25
+
+### Schema-capable foundation for durable archive source selection
+
+- Schema 40 adds an immutable, body-free candidate set and ordinal-question
+  Work Item bound to the exact accepted archive projection and receipts.
+- Candidate order, user ordinal, source revision, authorization and replay
+  receipts are revalidated across restart, backup, restore and account deletion;
+  malformed or reordered state fails closed.
+- Every thread-local SQLite connection now installs the deterministic trigger
+  parser. This release intentionally does not yet expose the selection prompt:
+  it establishes a schema-40-capable production fallback for the runtime package.
+
 ## 0.207.13 — 2026-08-25
 
 ### Физический отказ второго мозга связан с реальным запросом
