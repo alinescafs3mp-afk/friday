@@ -11,7 +11,8 @@ from pathlib import Path
 
 import pytest
 
-from friday.storage import SCHEMA_VERSION
+from friday.storage import SCHEMA_VERSION, FridayStorage
+from friday.storage.models import RawObject
 from tools.audit_document_catalog import (
     ContractError,
     _canonical_json,
@@ -226,6 +227,74 @@ def _audit_path(
         )
     finally:
         conn.close()
+
+
+def _exact_receipt(body: str, *, truncated: bool = False) -> dict[str, object]:
+    normalized = " ".join(body.split())
+    return {
+        "extraction_receipt_version": 1,
+        "extraction_success": True,
+        "extraction_error": "",
+        "text_extraction_success": True,
+        "text_sha256": hashlib.sha256(normalized.encode()).hexdigest(),
+        "extraction_chars": len(body),
+        "text_truncated": truncated,
+        "archive_truncated": False,
+        "source_truncated_for_parse": False,
+        "parse_deadline_reached": False,
+        "parse_pages_read": 0,
+        "parse_pages_truncated": False,
+        "parse_total_pages": 0,
+        "vision_pages_total": 0,
+        "vision_pages_read": 0,
+        "archive_files": 0,
+        "archive_files_read": 0,
+        "vision_used": False,
+        "vision_review_required": False,
+        "unsupported_format": False,
+    }
+
+
+def test_real_schema_41_backup_reports_current_and_explicit_incomplete_rows(
+    storage: FridayStorage,
+) -> None:
+    storage.ensure_user("alice")
+    current_body = "# Exact audit title\nComplete extracted body"
+    partial_body = "Partial extracted body"
+    for raw_id, body, truncated in (
+        ("audit-catalog-current", current_body, False),
+        ("audit-catalog-incomplete", partial_body, True),
+    ):
+        storage.store_raw_object(
+            RawObject(
+                id=raw_id,
+                user_id="alice",
+                source="upload",
+                source_ref=f"audit:{raw_id}",
+                raw_content=body,
+                content_type="file",
+                metadata_json={
+                    **_exact_receipt(body, truncated=truncated),
+                    "filename": f"{raw_id}.pdf",
+                    "mime_type": "application/pdf",
+                    "media_kind": "document",
+                    "uploaded_by": "alice",
+                },
+                content_hash=hashlib.sha256(f"source:{raw_id}".encode()).hexdigest(),
+            )
+        )
+
+    backup = storage.create_backup(label="catalog-audit-exact-schema")
+    report = _audit_path(Path(str(backup["path"])), tenant="alice", uploader=None)
+
+    assert report["projections"]["document_catalog"]["status"] == "available"
+    assert report["counts"]["registered_authorized_live_text_bearing_files"] == 2
+    assert report["counts"]["catalogued_files"] == 2
+    assert report["counts"]["files_with_semantic_title"] == 1
+    assert report["counts"]["files_with_incomplete_catalog"] == 1
+    assert report["incomplete_reasons"]["catalog_row_incomplete"] == 1
+    assert report["completeness"]["catalog_complete"] is False
+    validate_report(report)
 
 
 def test_counts_authority_lifecycle_lexical_and_future_gaps_without_secrets(tmp_path: Path) -> None:
