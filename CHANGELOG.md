@@ -1,3 +1,19 @@
+## 0.207.42 — 2026-08-26
+
+### Exact Engineer network report export
+
+- A direct same-turn request can scan the exact authorized private target and
+  receive a deterministic Markdown or JSON attachment built only from the
+  validated nmap outcome. The model cannot invent, rewrite or deny report data.
+- The report is bound to the exact request and evidence digest, rechecks owner
+  and Engineer authority inside the final transaction, and publishes its
+  assistant reply, Raw file, blob and content-free receipts atomically.
+- A later report-only request never reconstructs addresses from a digest-only
+  receipt and never silently repeats network probes. Quoted, reported,
+  conditional, negated and generic file requests remain inert.
+- Database schema remains 43; public-network and exploit authority remain
+  disabled.
+
 ## 0.207.41 — 2026-08-26
 
 ### Engineer file, archive and web continuity
