@@ -942,9 +942,7 @@ def test_canonical_golden_journey_registry_is_closed_current_and_privacy_safe(
     )
     for evidence_class in ("integration path", "restart and recovery evidence"):
         assert restart_proof in tuple(ref.label for ref in document.evidence[evidence_class].refs)
-        assert restart_proof in _PROOF_REFS_BY_JOURNEY_CLASS[
-            ("document_recall_answer", evidence_class)
-        ]
+        assert restart_proof in _PROOF_REFS_BY_JOURNEY_CLASS[("document_recall_answer", evidence_class)]
 
     detailed = (ROOT / "outer_sol" / "INTERACTION_CONTROL_PLANE_IMPLEMENTATION_STATUS.md").read_text(
         encoding="utf-8"
