@@ -8,6 +8,11 @@ from typing import Any
 
 import pytest
 
+from friday.orchestration.capability_binding import (
+    CapabilityBindingSnapshot,
+    manifest_binding_snapshot_sha256,
+    operational_capability_snapshot,
+)
 from friday.orchestration.capability_manifest import bounded_capability_manifest
 from friday.orchestration.contracts import TurnInput
 from friday.orchestration.execution_plan import ValidatedExecutionPlan
@@ -33,6 +38,7 @@ from friday.orchestration.supervisor_contracts import (
     PRIMARY_SYNTHESIS_ID,
     SUPERVISOR_PROPOSAL_SCHEMA,
     WEB_SEARCH_CURRENT_ID,
+    CapabilityAvailability,
     SupervisorContractError,
     SupervisorMode,
     SupervisorProposal,
@@ -40,6 +46,10 @@ from friday.orchestration.supervisor_contracts import (
     canonical_sha256,
 )
 from friday.orchestration.supervisor_observation import SupervisorSkipReason
+from friday.orchestration.transient_web_comparison import (
+    TRANSIENT_WEB_ADAPTER_ID,
+    TRANSIENT_WEB_SECURITY_ID,
+)
 from friday.secondary_brain.gpt_oss import GptOssProtocolAdapter
 
 
@@ -162,6 +172,56 @@ def test_capability_manifest_is_bounded_and_digest_stable() -> None:
     assert WEB_SEARCH_CURRENT_ID in ids
     assert HOST_SCAN_LOCAL_ID not in ids
     assert all(item.effect_class.value == "read" for item in manifest.capabilities)
+
+
+def test_manifest_binds_real_permission_and_adapter_registry_without_exposing_it() -> None:
+    turn = _compare_turn()
+    snapshot = operational_capability_snapshot()
+    manifest = bounded_capability_manifest(turn, binding_snapshot=snapshot)
+    file_binding = snapshot.binding_for(FILE_CURRENT_READ_ID)
+    archive_binding = snapshot.binding_for(ARCHIVE_SEARCH_ID)
+    web_binding = snapshot.binding_for(WEB_SEARCH_CURRENT_ID)
+
+    assert file_binding is not None and file_binding.available is True
+    assert file_binding.security_id == "files.read"
+    assert file_binding.tool_id == "file_read"
+    assert file_binding.adapter_id == "friday.orchestration.file_read.V12FileReadHandler"
+    assert archive_binding is not None and archive_binding.available is True
+    assert archive_binding.security_id == "search.use"
+    assert archive_binding.tool_id == "archive_search"
+    assert archive_binding.adapter_id == "friday.execution_kernel.ExecutionKernel._archive_search"
+    assert web_binding is not None and web_binding.available is True
+    assert web_binding.security_id == TRANSIENT_WEB_SECURITY_ID
+    assert web_binding.adapter_id == TRANSIENT_WEB_ADAPTER_ID
+    assert manifest_binding_snapshot_sha256(manifest) == snapshot.digest_hex()
+
+    public = json.dumps(manifest.payload(), sort_keys=True)
+    assert "files.read" not in public
+    assert TRANSIENT_WEB_SECURITY_ID not in public
+    assert TRANSIENT_WEB_ADAPTER_ID not in public
+
+
+def test_manifest_availability_requires_registered_permission_and_adapter() -> None:
+    turn = _compare_turn()
+    snapshot = operational_capability_snapshot()
+    web_binding = snapshot.binding_for(WEB_SEARCH_CURRENT_ID)
+    assert web_binding is not None
+    assert turn.enable_tools is True
+    for registration_field in ("permission_registered", "adapter_registered"):
+        unavailable = replace(
+            snapshot,
+            bindings=tuple(
+                replace(item, **{registration_field: False})
+                if item.supervisor_capability_id == WEB_SEARCH_CURRENT_ID
+                else item
+                for item in snapshot.bindings
+            ),
+        )
+
+        manifest = bounded_capability_manifest(turn, binding_snapshot=unavailable)
+        web = manifest.capability_by_id()[WEB_SEARCH_CURRENT_ID]
+
+        assert web.availability is CapabilityAvailability.UNAVAILABLE
 
 
 def test_supervisor_input_is_secret_free_and_closed() -> None:
@@ -298,6 +358,7 @@ def test_proposal_cannot_construct_validated_execution_plan() -> None:
         ValidatedExecutionPlan(
             proposal_digest=proposal.canonical_sha256(),
             manifest_digest=supervisor_input.manifest.digest_hex(),
+            binding_snapshot_sha256="f" * 64,
             policy_version="x",
             actor_binding_sha256="a" * 64,
             conversation_binding_sha256="b" * 64,
@@ -324,6 +385,14 @@ def test_policy_kernel_admits_compare_and_rejects_stale_unknown_and_effects() ->
     assert admitted.plan.publication_owner == "primary"
     assert admitted.plan.fallback_owner == "primary_only"
     assert all(effect.value == "read" for effect in admitted.plan.effect_classes)
+    assert admitted.plan.binding_snapshot_sha256 == context.capability_bindings.digest_hex()
+    admitted_steps = {step.step_id: step for step in admitted.plan.steps}
+    assert admitted_steps["s1"].resolved_security_id == "files.read"
+    assert admitted_steps["s1"].resolved_adapter_id == ("friday.orchestration.file_read.V12FileReadHandler")
+    assert admitted_steps["s2"].resolved_security_id == TRANSIENT_WEB_SECURITY_ID
+    assert admitted_steps["s2"].resolved_adapter_id == TRANSIENT_WEB_ADAPTER_ID
+    assert admitted_steps["s3"].resolved_security_id is None
+    assert admitted_steps["s3"].resolved_adapter_id is None
 
     stale = admit_supervisor_proposal(
         SupervisorProposal.parse(_proposal_payload(supervisor_input, manifest_id="sha256:" + "c" * 64)),
@@ -350,6 +419,53 @@ def test_policy_kernel_admits_compare_and_rejects_stale_unknown_and_effects() ->
         context,
     )
     assert rejected.reason is PolicyReason.SELF_APPROVAL
+
+
+def test_policy_kernel_rejects_private_binding_registry_drift() -> None:
+    supervisor_input = build_supervisor_input(_compare_turn(), _settings())
+    snapshot = operational_capability_snapshot()
+    drifted = CapabilityBindingSnapshot(
+        bindings=tuple(
+            replace(
+                item,
+                adapter_id="transient_web_comparison.v2",
+                adapter_identity_sha256="d" * 64,
+            )
+            if item.supervisor_capability_id == WEB_SEARCH_CURRENT_ID
+            else item
+            for item in snapshot.bindings
+        )
+    )
+    decision = admit_supervisor_proposal(
+        SupervisorProposal.parse(_proposal_payload(supervisor_input)),
+        supervisor_input,
+        PolicyAdmissionContext(
+            actor_binding_sha256="a" * 64,
+            conversation_binding_sha256="b" * 64,
+            capability_bindings=drifted,
+        ),
+    )
+
+    assert decision.admitted is False
+    assert decision.reason is PolicyReason.REGISTRY_DRIFT
+    assert decision.plan is None
+
+
+def test_policy_kernel_rejects_manifest_reparsed_without_private_binding_witness() -> None:
+    supervisor_input = build_supervisor_input(_compare_turn(), _settings())
+    reparsed = type(supervisor_input).parse(supervisor_input.payload())
+    proposal = SupervisorProposal.parse(_proposal_payload(reparsed))
+
+    decision = admit_supervisor_proposal(
+        proposal,
+        reparsed,
+        PolicyAdmissionContext(
+            actor_binding_sha256="a" * 64,
+            conversation_binding_sha256="b" * 64,
+        ),
+    )
+
+    assert decision.reason is PolicyReason.REGISTRY_DRIFT
 
 
 @pytest.mark.parametrize(

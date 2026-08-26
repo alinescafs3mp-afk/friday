@@ -32,16 +32,34 @@ class ValidatedStep:
     step_id: str
     capability_id: str
     effect_class: CapabilityEffectClass
+    resolved_security_id: str | None
+    resolved_tool_id: str | None
+    resolved_adapter_id: str | None
     depends_on: tuple[str, ...]
     parallel_group: str | None
     input: Mapping[str, Any]
     idempotency_key: str
+
+    def __post_init__(self) -> None:
+        identities = (
+            self.resolved_security_id,
+            self.resolved_tool_id,
+            self.resolved_adapter_id,
+        )
+        if any(item is None for item in identities) and not all(item is None for item in identities):
+            raise ExecutionPlanError("resolved capability identities must be complete or absent")
+        for item in identities:
+            if item is not None and (not item or len(item) > 256 or item != item.strip()):
+                raise ExecutionPlanError("resolved capability identity is invalid")
 
     def payload(self) -> dict[str, Any]:
         return {
             "step_id": self.step_id,
             "capability_id": self.capability_id,
             "effect_class": self.effect_class.value,
+            "resolved_security_id": self.resolved_security_id,
+            "resolved_tool_id": self.resolved_tool_id,
+            "resolved_adapter_id": self.resolved_adapter_id,
             "depends_on": list(self.depends_on),
             "parallel_group": self.parallel_group,
             "input": dict(self.input),
@@ -53,6 +71,7 @@ class ValidatedStep:
 class ValidatedExecutionPlan:
     proposal_digest: str
     manifest_digest: str
+    binding_snapshot_sha256: str
     policy_version: str
     actor_binding_sha256: str
     conversation_binding_sha256: str
@@ -67,6 +86,10 @@ class ValidatedExecutionPlan:
     def __post_init__(self) -> None:
         if not isinstance(self._seal, _AdmissionSeal) or self._seal.token != "policy-kernel-v1":
             raise ExecutionPlanError("validated execution plan cannot be constructed from model output")
+        if len(self.binding_snapshot_sha256) != 64 or any(
+            ch not in "0123456789abcdef" for ch in self.binding_snapshot_sha256
+        ):
+            raise ExecutionPlanError("validated execution plan binding snapshot is invalid")
         if not self.steps:
             raise ExecutionPlanError("validated execution plan needs at least one admitted step")
         if any(effect is not CapabilityEffectClass.READ for effect in self.effect_classes):
@@ -81,6 +104,7 @@ class ValidatedExecutionPlan:
             "schema": VALIDATED_EXECUTION_PLAN_SCHEMA,
             "proposal_digest": self.proposal_digest,
             "manifest_digest": self.manifest_digest,
+            "binding_snapshot_sha256": self.binding_snapshot_sha256,
             "policy_version": self.policy_version,
             "actor_binding_sha256": self.actor_binding_sha256,
             "conversation_binding_sha256": self.conversation_binding_sha256,
@@ -111,6 +135,7 @@ def plan_from_admitted_proposal(
     proposal: SupervisorProposal,
     *,
     manifest_digest: str,
+    binding_snapshot_sha256: str,
     policy_version: str,
     actor_binding_sha256: str,
     conversation_binding_sha256: str,
@@ -121,6 +146,7 @@ def plan_from_admitted_proposal(
     return ValidatedExecutionPlan(
         proposal_digest=proposal.canonical_sha256(),
         manifest_digest=manifest_digest,
+        binding_snapshot_sha256=binding_snapshot_sha256,
         policy_version=policy_version,
         actor_binding_sha256=actor_binding_sha256,
         conversation_binding_sha256=conversation_binding_sha256,

@@ -3,10 +3,15 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Any
 
+from friday.orchestration.capability_binding import (
+    CapabilityBindingSnapshot,
+    manifest_matches_snapshot,
+    operational_capability_snapshot,
+)
 from friday.orchestration.execution_plan import (
     ExecutionPlanError,
     ValidatedExecutionPlan,
@@ -44,6 +49,7 @@ from friday.orchestration.supervisor_contracts import (
 class PolicyReason(StrEnum):
     ADMITTED = "admitted"
     STALE_MANIFEST = "stale_manifest"
+    REGISTRY_DRIFT = "registry_drift"
     UNKNOWN_CAPABILITY = "unknown_capability"
     UNAVAILABLE_CAPABILITY = "unavailable_capability"
     EFFECT_NOT_ADMITTED = "effect_not_admitted"
@@ -100,6 +106,11 @@ class PolicyAdmissionContext:
     actor_binding_sha256: str
     conversation_binding_sha256: str
     confirmation_present: bool = False
+    capability_bindings: CapabilityBindingSnapshot = field(
+        default_factory=operational_capability_snapshot,
+        repr=False,
+        compare=False,
+    )
 
     def __post_init__(self) -> None:
         for label, value in (
@@ -112,6 +123,8 @@ class PolicyAdmissionContext:
                 or any(ch not in "0123456789abcdef" for ch in value)
             ):
                 raise ExecutionPlanError(f"{label} must be a lowercase SHA-256 digest")
+        if not isinstance(self.capability_bindings, CapabilityBindingSnapshot):
+            raise ExecutionPlanError("capability bindings must be a code-owned snapshot")
 
 
 @dataclass(frozen=True, slots=True)
@@ -273,6 +286,12 @@ def admit_supervisor_proposal(
 
     if proposal.manifest_id != supervisor_input.manifest.manifest_id:
         return _reject(PolicyReason.STALE_MANIFEST)
+    current_bindings = operational_capability_snapshot()
+    if (
+        current_bindings.digest_hex() != context.capability_bindings.digest_hex()
+        or not manifest_matches_snapshot(supervisor_input.manifest, context.capability_bindings)
+    ):
+        return _reject(PolicyReason.REGISTRY_DRIFT)
     if not _control_text_is_admitted(proposal):
         return _reject(PolicyReason.CONTROL_TEXT_NOT_ADMITTED)
     if proposal.task_class is not _code_owned_task_class(supervisor_input):
@@ -290,34 +309,50 @@ def admit_supervisor_proposal(
     if shape_reason is not None:
         return _reject(shape_reason)
 
-    manifest_capabilities = supervisor_input.manifest.capability_by_id()
-    admitted_steps = tuple(
-        ValidatedStep(
-            step_id=step.step_id,
-            capability_id=step.target_id,
-            effect_class=(
-                manifest_capabilities[step.target_id].effect_class
-                if step.kind is StepKind.CAPABILITY
-                else CapabilityEffectClass.READ
-            ),
-            depends_on=step.depends_on,
-            parallel_group=step.parallel_group,
-            input=step.input,
-            idempotency_key=canonical_sha256(
-                {
-                    "step_id": step.step_id,
-                    "target_id": step.target_id,
-                    "input": dict(step.input),
-                    "manifest_id": supervisor_input.manifest.digest_hex(),
-                    "actor_binding_sha256": context.actor_binding_sha256,
-                }
-            ),
+    admitted_step_items: list[ValidatedStep] = []
+    for step in proposal.steps:
+        binding = (
+            context.capability_bindings.binding_for(step.target_id)
+            if step.kind is StepKind.CAPABILITY
+            else None
         )
-        for step in proposal.steps
-    )
+        if step.kind is StepKind.CAPABILITY and (binding is None or not binding.available):
+            return _reject(PolicyReason.REGISTRY_DRIFT)
+        security_id = binding.security_id if binding is not None else None
+        tool_id = binding.tool_id if binding is not None else None
+        adapter_id = binding.adapter_id if binding is not None else None
+        effect_class = binding.effect_class if binding is not None else CapabilityEffectClass.READ
+        admitted_step_items.append(
+            ValidatedStep(
+                step_id=step.step_id,
+                capability_id=step.target_id,
+                effect_class=effect_class,
+                resolved_security_id=security_id,
+                resolved_tool_id=tool_id,
+                resolved_adapter_id=adapter_id,
+                depends_on=step.depends_on,
+                parallel_group=step.parallel_group,
+                input=step.input,
+                idempotency_key=canonical_sha256(
+                    {
+                        "step_id": step.step_id,
+                        "target_id": step.target_id,
+                        "input": dict(step.input),
+                        "manifest_id": supervisor_input.manifest.digest_hex(),
+                        "binding_snapshot_sha256": context.capability_bindings.digest_hex(),
+                        "security_id": security_id,
+                        "tool_id": tool_id,
+                        "adapter_id": adapter_id,
+                        "actor_binding_sha256": context.actor_binding_sha256,
+                    }
+                ),
+            )
+        )
+    admitted_steps = tuple(admitted_step_items)
     plan = plan_from_admitted_proposal(
         proposal,
         manifest_digest=supervisor_input.manifest.digest_hex(),
+        binding_snapshot_sha256=context.capability_bindings.digest_hex(),
         policy_version=SUPERVISOR_PRODUCT_POLICY_ID,
         actor_binding_sha256=context.actor_binding_sha256,
         conversation_binding_sha256=context.conversation_binding_sha256,

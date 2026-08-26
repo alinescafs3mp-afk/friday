@@ -2,6 +2,11 @@
 
 from __future__ import annotations
 
+from friday.orchestration.capability_binding import (
+    CapabilityBindingSnapshot,
+    bind_manifest_to_snapshot,
+    operational_capability_snapshot,
+)
 from friday.orchestration.contracts import TurnInput
 from friday.orchestration.supervisor_contracts import (
     ARCHIVE_SEARCH_ID,
@@ -130,25 +135,83 @@ def _with_availability(
     )
 
 
-def bounded_capability_manifest(turn: TurnInput) -> CapabilityManifest:
+def _bound_availability(
+    capability_id: str,
+    local_availability: CapabilityAvailability,
+    snapshot: CapabilityBindingSnapshot,
+) -> CapabilityAvailability:
+    binding = snapshot.binding_for(capability_id)
+    if binding is None or not binding.available:
+        return CapabilityAvailability.UNAVAILABLE
+    return local_availability
+
+
+def bounded_capability_manifest(
+    turn: TurnInput,
+    *,
+    binding_snapshot: CapabilityBindingSnapshot | None = None,
+) -> CapabilityManifest:
     """Project only the read capabilities the current turn can honestly use."""
 
+    snapshot = binding_snapshot or operational_capability_snapshot()
     selected: list[CapabilityDescriptor] = []
     if turn.attachments:
-        availability = (
+        local_availability = (
             CapabilityAvailability.AVAILABLE
             if any(item.extracted_text_available for item in turn.attachments)
             else CapabilityAvailability.PARTIAL
         )
-        selected.append(_with_availability(_FILE_CURRENT_READ, availability))
+        selected.append(
+            _with_availability(
+                _FILE_CURRENT_READ,
+                _bound_availability(FILE_CURRENT_READ_ID, local_availability, snapshot),
+            )
+        )
     if turn.conversation_present:
-        selected.append(_CONVERSATION_WINDOW)
-        selected.append(_ARCHIVE_SEARCH)
+        selected.append(
+            _with_availability(
+                _CONVERSATION_WINDOW,
+                _bound_availability(
+                    CONVERSATION_WINDOW_READ_ID,
+                    CapabilityAvailability.AVAILABLE,
+                    snapshot,
+                ),
+            )
+        )
+        selected.append(
+            _with_availability(
+                _ARCHIVE_SEARCH,
+                _bound_availability(
+                    ARCHIVE_SEARCH_ID,
+                    CapabilityAvailability.AVAILABLE,
+                    snapshot,
+                ),
+            )
+        )
     if turn.enable_tools:
-        selected.append(_WEB_SEARCH_CURRENT)
+        selected.append(
+            _with_availability(
+                _WEB_SEARCH_CURRENT,
+                _bound_availability(
+                    WEB_SEARCH_CURRENT_ID,
+                    CapabilityAvailability.AVAILABLE,
+                    snapshot,
+                ),
+            )
+        )
     if not selected:
-        selected.append(_CONVERSATION_WINDOW)
-    return CapabilityManifest.from_parts(selected, CODE_OWNED_MODEL_ROLES)
+        selected.append(
+            _with_availability(
+                _CONVERSATION_WINDOW,
+                _bound_availability(
+                    CONVERSATION_WINDOW_READ_ID,
+                    CapabilityAvailability.AVAILABLE,
+                    snapshot,
+                ),
+            )
+        )
+    public_manifest = CapabilityManifest.from_parts(selected, CODE_OWNED_MODEL_ROLES)
+    return bind_manifest_to_snapshot(public_manifest, snapshot)
 
 
 def catalog_capability(capability_id: str) -> CapabilityDescriptor | None:
