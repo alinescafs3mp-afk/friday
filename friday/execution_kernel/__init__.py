@@ -1417,6 +1417,7 @@ class RequestEffects:
 
     before_effect: Callable[[], bool]
     before_effect_in_transaction: Callable[[Any], bool] | None = None
+    request_binding_sha256: str | None = None
     possible: bool = False
     staged: bool = False
 
@@ -1432,12 +1433,20 @@ def track_request_effects(
     before_effect: Callable[[], bool],
     *,
     before_effect_in_transaction: Callable[[Any], bool] | None = None,
+    request_binding_sha256: str | None = None,
 ) -> Iterator[RequestEffects]:
     """Track persistent writes for one surrounding keyed request."""
+
+    if request_binding_sha256 is not None and (
+        type(request_binding_sha256) is not str
+        or re.fullmatch(r"[0-9a-f]{64}", request_binding_sha256) is None
+    ):
+        raise ValueError("request effect binding must be a lowercase SHA-256 digest")
 
     effects = RequestEffects(
         before_effect=before_effect,
         before_effect_in_transaction=before_effect_in_transaction,
+        request_binding_sha256=request_binding_sha256,
     )
     token = _REQUEST_EFFECTS.set(effects)
     try:
@@ -1471,7 +1480,11 @@ def mark_request_effect_possible() -> bool:
     return _mark_request_effect_possible()
 
 
-def stage_request_effect_possible_in_transaction(conn: Any) -> bool:
+def stage_request_effect_possible_in_transaction(
+    conn: Any,
+    *,
+    expected_request_binding_sha256: str | None = None,
+) -> bool:
     """Stage a keyed-request fence on the caller-owned atomic commit boundary.
 
     V12 read routes publish their request row, assistant row and idempotency
@@ -1482,7 +1495,18 @@ def stage_request_effect_possible_in_transaction(conn: Any) -> bool:
     the legacy no-fence behavior.
     """
 
+    if expected_request_binding_sha256 is not None and (
+        type(expected_request_binding_sha256) is not str
+        or re.fullmatch(r"[0-9a-f]{64}", expected_request_binding_sha256) is None
+    ):
+        return False
     effects = _REQUEST_EFFECTS.get()
+    if expected_request_binding_sha256 is not None and (
+        effects is None
+        or effects.request_binding_sha256 is None
+        or effects.request_binding_sha256 != expected_request_binding_sha256
+    ):
+        return False
     if effects is None or effects.possible or effects.staged:
         return True
     callback = effects.before_effect_in_transaction
