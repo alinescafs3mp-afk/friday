@@ -708,9 +708,16 @@ def _require_file_read(
         ).fetchone()
         if source is None or str(source["status"] or "") != "active":
             raise FileEvidenceUnavailable("source_principal_not_active")
-    if not authorization.authorize(fresh, "files.read").allowed:
+    if not authorization.authorize_in_transaction(conn, fresh, "files.read").allowed:
         raise FileEvidenceUnavailable("files_read_denied")
-    if source_person_id != fresh.own_id and not authorization.authorize(fresh, "admin.all_data.read").allowed:
+    if (
+        source_person_id != fresh.own_id
+        and not authorization.authorize_in_transaction(
+            conn,
+            fresh,
+            "admin.all_data.read",
+        ).allowed
+    ):
         raise FileEvidenceUnavailable("foreign_file_read_denied")
     return fresh
 

@@ -41,6 +41,52 @@ def test_default_deny_presets_and_persistent_overrides(storage):
     assert auth.authorize(custom_actor, "knowledge.create").allowed is True  # explicit allow wins
 
 
+def test_transactional_authorization_uses_one_fresh_account_snapshot(storage):
+    storage.ensure_user("snapshot-user", preset_key="user")
+    auth = AuthorizationService(storage)
+    stale = auth.actor_for_user("snapshot-user", source="test")
+    assert auth.authorize(stale, "knowledge.create").allowed is True
+
+    with storage.transaction() as conn:
+        conn.execute(
+            "UPDATE users SET preset_key='guest' WHERE id='snapshot-user'",
+        )
+        decision = auth.authorize_in_transaction(conn, stale, "knowledge.create")
+        assert decision.allowed is False
+        assert decision.preset_key == "guest"
+        conn.execute(
+            """INSERT INTO user_permission_overrides(user_id,security_id,effect,updated_at)
+               VALUES('snapshot-user','knowledge.create','allow','2026-08-26T00:00:00+00:00')"""
+        )
+        assert auth.require_in_transaction(conn, stale, "knowledge.create").allowed is True
+        conn.execute(
+            """UPDATE user_permission_overrides SET effect='deny'
+                 WHERE user_id='snapshot-user' AND security_id='knowledge.create'"""
+        )
+        denied = auth.authorize_in_transaction(conn, stale, "knowledge.create")
+        assert denied.allowed is False
+        assert denied.reason_code == "explicit_deny"
+
+
+def test_transactional_authorization_honours_custom_preset_and_active_status(storage):
+    storage.ensure_user("custom-user", preset_key="guest")
+    auth = AuthorizationService(storage)
+    auth.create_custom_preset(
+        "web_reader",
+        "Web reader",
+        {"web.compare.transient"},
+        created_by="custom-user",
+    )
+    auth.set_user_preset("custom-user", "web_reader")
+    actor = auth.actor_for_user("custom-user", source="test")
+    with storage.transaction() as conn:
+        assert auth.authorize_in_transaction(conn, actor, "web.compare.transient").allowed is True
+        conn.execute("UPDATE users SET status='disabled' WHERE id='custom-user'")
+        inactive = auth.authorize_in_transaction(conn, actor, "web.compare.transient")
+        assert inactive.allowed is False
+        assert inactive.reason_code == "principal_not_active"
+
+
 @pytest.mark.asyncio
 async def test_kernel_enforces_actor_and_never_captures_one_owner(settings, storage):
     storage.ensure_user("alice", preset_key="user")
