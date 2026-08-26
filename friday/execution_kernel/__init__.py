@@ -3072,7 +3072,12 @@ _ENGINEER_NETWORK_AUDIT_TOOLS = frozenset(
     }
 )
 _ENGINEER_ARTIFACT_AUDIT_TOOLS = frozenset(
-    {"engineer_analyze_artifact", "engineer_decompile_artifact", "engineer_patch_artifact"}
+    {
+        "engineer_analyze_artifact",
+        "engineer_compile_java",
+        "engineer_decompile_artifact",
+        "engineer_patch_artifact",
+    }
 )
 _ENGINEER_TOOLS = frozenset(
     {
@@ -3811,6 +3816,7 @@ class ExecutionKernel:
         except TypeError:
             await self._audit(actor, name, False, "invalid_arguments", details=details)
             return ToolResult(name, False, error="Invalid tool arguments: TypeError")
+        deferred_engineer_start = bool(changes_data and name == "engineer_compile_java")
         if changes_data:
             # The surrounding request's durable terminal fence must be committed
             # before the first persistent boundary, including the durable
@@ -3823,7 +3829,8 @@ class ExecutionKernel:
                     False,
                     error="Mutating tool refused: request idempotency fence could not be committed",
                 )
-            await self._audit(actor, name, True, "started", details=details)
+            if not deferred_engineer_start:
+                await self._audit(actor, name, True, "started", details=details)
         try:
             async with asyncio.timeout(timeout):
                 data: Any = await tool.handler(actor=actor, **(arguments or {}))
@@ -3850,6 +3857,12 @@ class ExecutionKernel:
                 attachment = data.pop("_attachment", None)
                 raw_work_started = data.pop("_work_started", None)
                 work_started = raw_work_started if type(raw_work_started) is bool else None
+            if deferred_engineer_start and work_started is True:
+                # Compiler preflight and heavy-lock contention are expected
+                # outcomes before the subprocess boundary. Its handler is the
+                # sole authority for whether fixed-argv bwrap was actually
+                # spawned, so the durable started row follows that attestation.
+                await self._audit(actor, name, True, "started", details=details)
             if (
                 name in _ENGINEER_NETWORK_AUDIT_TOOLS | _ENGINEER_ARTIFACT_AUDIT_TOOLS
                 and isinstance(data, Mapping)
@@ -3858,16 +3871,31 @@ class ExecutionKernel:
                 # Engineer handlers use a bounded data envelope for expected
                 # target/file/sandbox refusals.  A normal coroutine return must
                 # not turn that envelope into a successful kernel result/audit.
-                reason = "failed_after_start" if changes_data else "failed"
+                reason = (
+                    "failed_after_start"
+                    if changes_data and (not deferred_engineer_start or work_started is True)
+                    else "failed"
+                )
                 await self._audit(actor, name, False, reason, details=details)
                 if changes_data:
+                    if deferred_engineer_start:
+                        error_code = str(data.get("error") or "")
+                        if not re.fullmatch(r"[a-z][a-z0-9_]{0,79}", error_code):
+                            error_code = "engineer_tool_refused"
+                        error = (
+                            f"Engineer tool failed: {error_code}"
+                            if work_started is True
+                            else f"Engineer tool refused: {error_code}"
+                        )
+                    else:
+                        error = (
+                            "Инженерный инструмент завершился после начала операции. "
+                            "Проверьте результат, прежде чем повторять."
+                        )
                     return ToolResult(
                         name,
                         False,
-                        error=(
-                            "Инженерный инструмент завершился после начала операции. "
-                            "Проверьте результат, прежде чем повторять."
-                        ),
+                        error=error,
                         handler_entered=True,
                         work_started=work_started,
                     )
@@ -3916,6 +3944,15 @@ class ExecutionKernel:
                     ),
                     handler_entered=True,
                 )
+            if deferred_engineer_start and work_started is not True:
+                await self._audit(actor, name, False, "failed", details=details)
+                return ToolResult(
+                    name,
+                    False,
+                    error="Engineer tool refused: invalid_start_attestation",
+                    handler_entered=True,
+                    work_started=work_started,
+                )
             await self._audit(actor, name, True, "ok", details=details)
             return ToolResult(
                 name,
@@ -3934,6 +3971,11 @@ class ExecutionKernel:
             # after a mutate handler has changed state.  The immutable start row
             # protects mutations; this terminal row makes cancelled observations
             # equally visible instead of looking as if the tool never ran.
+            if deferred_engineer_start:
+                # Cancellation erased the handler's private boundary envelope.
+                # Conservatively fall back to handler entry rather than claim
+                # that a compiler subprocess definitely did not start.
+                await self._audit(actor, name, True, "started", details=details)
             await self._audit(actor, name, False, "uncertain", details=details)
             raise
         except TimeoutError:
@@ -3948,6 +3990,8 @@ class ExecutionKernel:
             # Наблюдающему инструменту таймаут ничем не грозит: читать нечего
             # дважды, и там остаётся прежний честный отказ.
             if changes_data:
+                if deferred_engineer_start:
+                    await self._audit(actor, name, True, "started", details=details)
                 await self._audit(actor, name, False, "uncertain", details=details)
                 return ToolResult(
                     name,
@@ -3985,6 +4029,8 @@ class ExecutionKernel:
                 # class names are useful in the bounded runtime log above, but
                 # they are not part of the content-free audit schema (and a
                 # custom exception may have a caller-controlled class name).
+                if deferred_engineer_start:
+                    await self._audit(actor, name, True, "started", details=details)
                 await self._audit(actor, name, False, "failed_after_start", details=details)
                 return ToolResult(
                     name,

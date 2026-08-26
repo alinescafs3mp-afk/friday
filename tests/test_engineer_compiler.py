@@ -49,9 +49,7 @@ def test_compiler_profile_and_owner_local_jdk_are_exact() -> None:
     assert compiler.JDK_VERSION == "21.0.12.1+1"
     assert pathlib.Path("/home/jericho/.jericho/tools/jdk-21.0.12.1+1") == compiler.JDK_ROOT
     assert compiler.JDK_TREE_SHA256 == decompiler.JDK_TREE_SHA256
-    assert compiler.JAVAC_SHA256 == (
-        "55859b80e7a9c4c4736be19ad3addeb35112ca6d17a30c4e0e116afc0a499bdb"
-    )
+    assert compiler.JAVAC_SHA256 == ("55859b80e7a9c4c4736be19ad3addeb35112ca6d17a30c4e0e116afc0a499bdb")
     assert compiler.MAX_SOURCE_BYTES == 1024 * 1024
     assert compiler.MAX_CLASS_FILES == 256
     assert compiler.MAX_CLASS_BYTES == 8 * 1024 * 1024
@@ -83,6 +81,38 @@ def test_compiler_jdk_identity_rejects_symlink_escape(tmp_path: pathlib.Path, mo
     (jdk / "escape").symlink_to(outside)
 
     assert compiler.verify_toolchain(jdk) == {"ok": False, "reason": "toolchain_untrusted"}
+
+
+def test_shared_tool_tree_identity_has_profile_specific_entry_and_byte_caps(
+    tmp_path: pathlib.Path,
+    monkeypatch,
+) -> None:
+    jdk = _fake_jdk(tmp_path, monkeypatch)
+
+    assert (
+        decompiler._tree_identity(  # noqa: SLF001
+            jdk,
+            maximum_bytes=compiler.MAX_JDK_TREE_BYTES,
+            maximum_entries=1,
+        )
+        is None
+    )
+    assert (
+        decompiler._tree_identity(  # noqa: SLF001
+            jdk,
+            maximum_bytes=1,
+            maximum_entries=8,
+        )
+        is None
+    )
+    assert (
+        decompiler._tree_identity(  # noqa: SLF001
+            jdk,
+            maximum_bytes=compiler.MAX_JDK_TREE_BYTES,
+            maximum_entries=8,
+        )
+        is not None
+    )
 
 
 def test_javac_argv_is_fixed_and_disables_processors_and_implicit_sources() -> None:
@@ -249,6 +279,19 @@ def test_compile_rejects_wrong_class_version_without_leaking_content(
     assert str(source) not in serialized
 
 
+def test_canonical_jar_revalidation_rejects_trailing_or_changed_bytes() -> None:
+    jar = compiler._deterministic_jar(  # noqa: SLF001
+        [("Main.class", _class_bytes(b"main"))]
+    )
+    assert jar is not None
+    assert compiler.validate_jar(jar) == {
+        "class_files": 1,
+        "class_bytes": len(_class_bytes(b"main")),
+    }
+    assert compiler.validate_jar(jar + b"trailing") is None
+    assert compiler.validate_jar(jar[:-1] + bytes([jar[-1] ^ 1])) is None
+
+
 def test_compile_worker_reads_only_source_cap_and_writes_bounded_output(
     monkeypatch,
     tmp_path: pathlib.Path,
@@ -288,6 +331,12 @@ def test_compiler_bwrap_mounts_only_jdk_read_only_and_has_finite_limits() -> Non
     assert str(decompiler.GHIDRA_ROOT) not in argv
     assert argv[argv.index(str(compiler.JDK_ROOT)) - 1] == "--ro-bind"
     assert argv[argv.index(str(compiler.JDK_ROOT)) + 1] == str(compiler.SANDBOX_JDK_ROOT)
+    assert argv[argv.index("--tmpfs") - 2 : argv.index("--tmpfs") + 2] == [
+        "--size",
+        str(sandbox.COMPILE_WORKSPACE_TMPFS_BYTES),
+        "--tmpfs",
+        "/tmp",
+    ]
     assert "/home" not in argv
     assert limited[:7] == [
         "/usr/bin/prlimit",
@@ -299,6 +348,29 @@ def test_compiler_bwrap_mounts_only_jdk_read_only_and_has_finite_limits() -> Non
         "--",
     ]
     assert compiler.JAVAC_TIMEOUT_SECONDS < sandbox.COMPILE_MAX_WALL_SECONDS
+
+
+def test_compiler_requires_finite_aggregate_pid_and_memory_cgroups(monkeypatch) -> None:
+    monkeypatch.setattr(sandbox, "_current_cgroup_pids_limit", lambda: 512)
+    monkeypatch.setattr(sandbox, "_current_cgroup_memory_limit", lambda: 12 * 1024**3)
+    assert sandbox._compile_resource_preflight() == {  # noqa: SLF001
+        "ok": True,
+        "pids_limit": 512,
+        "memory_limit_bytes": 12 * 1024**3,
+    }
+
+    monkeypatch.setattr(sandbox, "_current_cgroup_pids_limit", lambda: 513)
+    assert sandbox._compile_resource_preflight() == {  # noqa: SLF001
+        "ok": False,
+        "reason": "compiler_pid_cgroup_unbounded",
+    }
+
+    monkeypatch.setattr(sandbox, "_current_cgroup_pids_limit", lambda: 512)
+    monkeypatch.setattr(sandbox, "_current_cgroup_memory_limit", lambda: None)
+    assert sandbox._compile_resource_preflight() == {  # noqa: SLF001
+        "ok": False,
+        "reason": "compiler_memory_cgroup_unbounded",
+    }
 
 
 def test_decompiler_and_compiler_share_one_physical_heavy_slot(monkeypatch) -> None:
@@ -348,20 +420,19 @@ def test_decompiler_and_compiler_share_one_physical_heavy_slot(monkeypatch) -> N
 
 
 @pytest.mark.parametrize(
-    ("error", "work_started"),
+    "error",
     (
-        ("toolchain_untrusted", False),
-        ("invalid_filename", False),
-        ("compiler_launch_failed", False),
-        ("compiler_failed", True),
-        ("compiler_timeout", True),
-        ("compiler_output_invalid", True),
+        "toolchain_untrusted",
+        "invalid_filename",
+        "compiler_launch_failed",
+        "compiler_failed",
+        "compiler_timeout",
+        "compiler_output_invalid",
     ),
 )
-def test_compiler_failure_preserves_javac_entry_state(
+def test_returned_worker_failure_attests_physical_sandbox_entry(
     monkeypatch,
     error: str,
-    work_started: bool,
 ) -> None:
     monkeypatch.setattr(
         sandbox,
@@ -373,4 +444,4 @@ def test_compiler_failure_preserves_javac_entry_state(
         sandbox.compile_java_artifact(b"class Main {}", "Main.java")
 
     assert captured.value.code == error
-    assert captured.value.work_started is work_started
+    assert captured.value.work_started is True

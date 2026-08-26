@@ -4,6 +4,7 @@ services:
     # policies admit namespace construction; they never grant a host capability.
     read_only: true
     pids_limit: 512
+    mem_limit: 12g
     security_opt:
       - no-new-privileges:true
       - seccomp=/etc/friday-engineer/seccomp.json

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import base64
 import hashlib
+import hmac
 import re
 import time
 import unicodedata
@@ -17,7 +18,18 @@ from friday.organs import ServiceContext
 from friday.permissions import ActorContext
 from friday.workers._blocking import run_blocking
 
-from . import advice, artifacts, authority, decompiler, environment, hosts, hunt, local_binaries, sandbox
+from . import (
+    advice,
+    artifacts,
+    authority,
+    compiler,
+    decompiler,
+    environment,
+    hosts,
+    hunt,
+    local_binaries,
+    sandbox,
+)
 from .targets import PinnedTarget
 
 _RAW_ID = re.compile(r"^raw_[0-9a-f]{16}$")
@@ -28,6 +40,36 @@ _DECOMPILE_TIMEOUT_SEC = 245.0
 _DECOMPILE_MARKDOWN_MAX_BYTES = 1024 * 1024
 _DECOMPILE_FUNCTION_STATUSES = frozenset({"completed", "failed", "timeout"})
 _DECOMPILE_WARNING_CODES = frozenset({"analysis_timeout", "function_index_truncated", "pseudocode_truncated"})
+_COMPILE_TIMEOUT_SEC = 70.0
+_COMPILE_FAILURE_STATUSES = {
+    "compiler_busy": "unavailable",
+    "compiler_memory_cgroup_unbounded": "unavailable",
+    "compiler_pid_cgroup_unbounded": "unavailable",
+    "compiler_resource_boundary_unavailable": "unavailable",
+    "deadline_expired": "unavailable",
+    "file_access_denied": "unavailable",
+    "file_unavailable": "unavailable",
+    "sandbox_unavailable": "unavailable",
+    "toolchain_incomplete": "unavailable",
+    "toolchain_missing": "unavailable",
+    "toolchain_untrusted": "unavailable",
+    "compiler_failed": "failed",
+    "compiler_launch_failed": "failed",
+    "compiler_output_exceeds_cap": "failed",
+    "compiler_output_invalid": "failed",
+    "compiler_report_invalid": "failed",
+    "compiler_timeout": "failed",
+    "input_encoding_invalid": "failed",
+    "input_size_invalid": "failed",
+    "invalid_artifact_handle": "failed",
+    "invalid_filename": "failed",
+    "worker_failed": "failed",
+    "worker_output_empty": "failed",
+    "worker_output_exceeds_cap": "failed",
+    "worker_result_invalid": "failed",
+    "worker_timeout": "failed",
+    "workspace_not_clean": "failed",
+}
 _DECOMPILE_FAILURE_STATUSES = {
     "decompiler_busy": "unavailable",
     "unsupported_format": "unsupported",
@@ -176,6 +218,113 @@ def _decompile_failure(error: str, *, work_started: bool) -> dict[str, Any]:
         "error": code,
         "_work_started": work_started,
     }
+
+
+def _compile_failure(error: str, *, work_started: bool) -> dict[str, Any]:
+    code = error if error in _COMPILE_FAILURE_STATUSES else "compiler_report_invalid"
+    return {
+        "ok": False,
+        "status": _COMPILE_FAILURE_STATUSES[code],
+        "error": code,
+        "_work_started": work_started,
+    }
+
+
+def _project_compile_success(
+    raw: Mapping[str, Any],
+    *,
+    source: bytes,
+    jar: bytes,
+) -> tuple[dict[str, Any], dict[str, Any]] | None:
+    inventory = compiler.validate_jar(jar)
+    raw_sandbox = raw.get("sandbox")
+    admission = raw_sandbox if isinstance(raw_sandbox, Mapping) else {}
+    source_sha256 = str(raw.get("source_sha256") or "")
+    jar_sha256 = str(raw.get("jar_sha256") or "")
+
+    def bounded_int(name: str, minimum: int, maximum: int) -> int | None:
+        value = raw.get(name)
+        if isinstance(value, bool) or not isinstance(value, int) or not minimum <= value <= maximum:
+            return None
+        return value
+
+    source_size = bounded_int("source_size_bytes", 1, compiler.MAX_SOURCE_BYTES)
+    class_files = bounded_int("class_files", 1, compiler.MAX_CLASS_FILES)
+    class_bytes = bounded_int("class_bytes", 8, compiler.MAX_CLASS_BYTES)
+    jar_size = bounded_int("jar_size_bytes", 1, compiler.MAX_JAR_BYTES)
+    pids_limit = admission.get("compile_pids_limit")
+    memory_limit = admission.get("compile_memory_limit_bytes")
+    if (
+        raw.get("ok") is not True
+        or raw.get("status") != "completed"
+        or raw.get("schema") != compiler.SCHEMA
+        or raw.get("profile") != compiler.PROFILE
+        or raw.get("tool_name") != compiler.TOOL_NAME
+        or raw.get("tool_version") != compiler.JDK_VERSION
+        or raw.get("jdk_version") != compiler.JDK_VERSION
+        or raw.get("java_release") != compiler.JAVA_RELEASE
+        or raw.get("class_major_version") != compiler.CLASS_MAJOR_VERSION
+        or raw.get("archive") != "jar"
+        or raw.get("compression") != "stored"
+        or raw.get("signed") is not False
+        or raw.get("manifest") is not False
+        or raw.get("runtime_validation") != "not_performed"
+        or raw.get("sample_executed") is not False
+        or raw.get("network") != "none"
+        or re.fullmatch(r"[0-9a-f]{64}", source_sha256) is None
+        or re.fullmatch(r"[0-9a-f]{64}", jar_sha256) is None
+        or not hmac.compare_digest(source_sha256, hashlib.sha256(source).hexdigest())
+        or not hmac.compare_digest(jar_sha256, hashlib.sha256(jar).hexdigest())
+        or source_size != len(source)
+        or jar_size != len(jar)
+        or inventory is None
+        or class_files != inventory.get("class_files")
+        or class_bytes != inventory.get("class_bytes")
+        or admission.get("ok") is not True
+        or admission.get("boundary") != "bubblewrap"
+        or admission.get("network") != "none"
+        or isinstance(pids_limit, bool)
+        or not isinstance(pids_limit, int)
+        or not 1 <= pids_limit <= sandbox.COMPILE_MAX_CGROUP_PIDS
+        or isinstance(memory_limit, bool)
+        or not isinstance(memory_limit, int)
+        or not sandbox.COMPILE_MIN_CGROUP_MEMORY_BYTES
+        <= memory_limit
+        <= sandbox.COMPILE_MAX_CGROUP_MEMORY_BYTES
+    ):
+        return None
+    report = {
+        "schema": compiler.SCHEMA,
+        "status": "completed",
+        "profile": compiler.PROFILE,
+        "tool_name": compiler.TOOL_NAME,
+        "tool_version": compiler.JDK_VERSION,
+        "jdk_version": compiler.JDK_VERSION,
+        "source_sha256": source_sha256,
+        "jar_sha256": jar_sha256,
+        "source_size_bytes": source_size,
+        "class_files": class_files,
+        "class_bytes": class_bytes,
+        "jar_size_bytes": jar_size,
+        "java_release": compiler.JAVA_RELEASE,
+        "class_major_version": compiler.CLASS_MAJOR_VERSION,
+        "archive": "jar",
+        "compression": "stored",
+        "signed": False,
+        "manifest": False,
+        "runtime_validation": "not_performed",
+        "sample_executed": False,
+        "network": "none",
+        "jar_prepared": True,
+    }
+    sandbox_projection = {
+        "ok": True,
+        "boundary": "bubblewrap",
+        "network": "none",
+        "compile_pids_limit": pids_limit,
+        "compile_memory_limit_bytes": memory_limit,
+    }
+    return report, sandbox_projection
 
 
 def _bounded_report_text(value: object, maximum: int, *, raw_id: str) -> tuple[str, bool]:
@@ -521,6 +670,53 @@ def build_engineer_tools(ctx: ServiceContext) -> tuple[ToolSpec, ...]:
             },
         }
 
+    async def compile_owned_java(*, actor: ActorContext, raw_id: str) -> dict[str, Any]:
+        try:
+            stored = await run_blocking(_read_owned, ctx, actor, raw_id)
+        except FileRecordUnavailable:
+            return _compile_failure("file_unavailable", work_started=False)
+        except AuthorizedFileReadError:
+            return _compile_failure("file_access_denied", work_started=False)
+        except ValueError:
+            return _compile_failure("invalid_artifact_handle", work_started=False)
+        try:
+            jar, raw_report = await run_blocking(
+                sandbox.compile_java_artifact,
+                stored.content,
+                stored.filename,
+                deadline=time.monotonic() + _COMPILE_TIMEOUT_SEC,
+                workspace_root=Path(ctx.settings.state_dir) / "engineer-tmp",
+            )
+        except sandbox.EngineerSandboxError as exc:
+            error = "compiler_timeout" if exc.code == "worker_timeout" else exc.code
+            return _compile_failure(error, work_started=exc.work_started)
+        if not isinstance(raw_report, Mapping):
+            return _compile_failure("compiler_report_invalid", work_started=True)
+        projected = _project_compile_success(raw_report, source=stored.content, jar=jar)
+        if projected is None:
+            return _compile_failure("compiler_report_invalid", work_started=True)
+        report, sandbox_projection = projected
+        configured_file_cap = max(0, int(getattr(ctx.settings, "max_upload_bytes", 0)))
+        if not configured_file_cap or len(jar) > min(configured_file_cap, compiler.MAX_JAR_BYTES):
+            return _compile_failure("compiler_output_exceeds_cap", work_started=True)
+        source_stem = Path(str(stored.filename or "Main.java")).stem or "Main"
+        source_stem = re.sub(re.escape(raw_id), "artifact", source_stem, flags=re.IGNORECASE)
+        output_name = _safe_filename(source_stem + ".compiled", ".jar")
+        return {
+            "ok": True,
+            "_work_started": True,
+            "status": "completed",
+            "summary": "Java 21 compilation completed; the bounded JAR is prepared.",
+            "report": report,
+            "sandbox": sandbox_projection,
+            "_attachment": {
+                "kind": "document",
+                "filename": output_name,
+                "mime_type": "application/java-archive",
+                "content_base64": base64.b64encode(jar).decode("ascii"),
+            },
+        }
+
     async def patch_artifact(
         *,
         actor: ActorContext,
@@ -784,6 +980,19 @@ def build_engineer_tools(ctx: ServiceContext) -> tuple[ToolSpec, ...]:
             timeout_sec=250.0,
             model_visible=False,
             handler=decompile_owned_artifact,
+        ),
+        ToolSpec(
+            name="engineer_compile_java",
+            description="Internal fixed-profile Java 21 compilation of one code-authorized source.",
+            parameters=_parameters(
+                {"raw_id": {"type": "string", "minLength": 20, "maxLength": 24}},
+                required=("raw_id",),
+            ),
+            security_id="engineer.artifact.build",
+            risk="mutate",
+            timeout_sec=75.0,
+            model_visible=False,
+            handler=compile_owned_java,
         ),
         ToolSpec(
             name="engineer_patch_artifact",

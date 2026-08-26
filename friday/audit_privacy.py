@@ -357,6 +357,7 @@ _SAFE_TOOL_TARGETS = frozenset(
         "engineer_analyze_artifact",
         "engineer_audit_host",
         "engineer_assess_host_vulnerabilities",
+        "engineer_compile_java",
         "engineer_decompile_artifact",
         "engineer_dns",
         "engineer_hunt",

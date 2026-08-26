@@ -1,0 +1,467 @@
+"""Code-owned Engineer Java compilation tool and current-intent boundary."""
+
+from __future__ import annotations
+
+import base64
+import hashlib
+import json
+import time
+from dataclasses import replace
+from pathlib import Path
+from types import SimpleNamespace
+
+import pytest
+
+from friday.execution_kernel import ExecutionKernel
+from friday.organs import ServiceContext
+from friday.organs.engineer import ENGINEER_BUILD, compiler
+from friday.organs.engineer import tools as engineer_tools
+from friday.organs.engineer.targets import (
+    artifact_compile_request_is_atomic,
+    requests_artifact_compile,
+)
+from friday.permissions import LEGACY_OWNER_USER_ID, ActorContext, AuthorizationService
+
+
+def _class_bytes() -> bytes:
+    return b"\xca\xfe\xba\xbe\x00\x00\x00\x41bounded-main"
+
+
+def _jar() -> bytes:
+    payload = compiler._deterministic_jar([("Main.class", _class_bytes())])  # noqa: SLF001
+    assert payload is not None
+    return payload
+
+
+def _worker_report(source: bytes, jar: bytes) -> dict[str, object]:
+    return {
+        "ok": True,
+        "status": "completed",
+        "schema": compiler.SCHEMA,
+        "profile": compiler.PROFILE,
+        "tool_name": compiler.TOOL_NAME,
+        "tool_version": compiler.JDK_VERSION,
+        "jdk_version": compiler.JDK_VERSION,
+        "source_sha256": hashlib.sha256(source).hexdigest(),
+        "jar_sha256": hashlib.sha256(jar).hexdigest(),
+        "source_size_bytes": len(source),
+        "class_files": 1,
+        "class_bytes": len(_class_bytes()),
+        "jar_size_bytes": len(jar),
+        "java_release": 21,
+        "class_major_version": 65,
+        "archive": "jar",
+        "compression": "stored",
+        "signed": False,
+        "manifest": False,
+        "runtime_validation": "not_performed",
+        "sample_executed": False,
+        "network": "none",
+        "sandbox": {
+            "ok": True,
+            "boundary": "bubblewrap",
+            "network": "none",
+            "compile_pids_limit": 512,
+            "compile_memory_limit_bytes": 12 * 1024**3,
+        },
+    }
+
+
+@pytest.mark.parametrize(
+    "speech",
+    (
+        "Скомпилируй этот Java-файл",
+        "Пожалуйста, собери Main.java в JAR",
+        "Теперь скомпилируй приложенный исходник Java в JAR",
+        "Compile this Java source into a JAR",
+        "Please build the attached Main.java as a JAR",
+        "Build Main.java",
+        "Compile Main.java",
+        "Сборка Main.java",
+        "Компиляция Main.java",
+        "Нужно скомпилировать Main.java",
+        "Не могла бы ты скомпилировать Main.java?",
+        "Выполни сборку Main.java в JAR",
+        "Build profile java21_single_source_library_jar_v1",
+        "Compile with profile java21_single_source_library_jar_v1",
+        "Сборка по профилю java21_single_source_library_jar_v1",
+        "Компиляция профилем java21_single_source_library_jar_v1",
+    ),
+)
+def test_direct_current_java_compile_requests_are_admitted(speech: str) -> None:
+    assert requests_artifact_compile(speech) is True
+
+
+@pytest.mark.parametrize(
+    "speech",
+    (
+        "«Скомпилируй Main.java в JAR»",
+        "`compile Main.java into a JAR`",
+        "> Build the attached Main.java as a JAR",
+        "Он сказал, скомпилируй Main.java в JAR",
+        "Это пример команды: compile Main.java into a JAR",
+        "Если тесты зелёные, собери Main.java в JAR",
+        "Не компилируй этот Java-файл",
+        "Compile Main.java into a JAR, but don't do it",
+        "Ты умеешь компилировать Java?",
+        "Did you compile Main.java?",
+        "Собери проект",
+        "Compile this file",
+        "«Сборка Main.java»",
+        "`Compile profile java21_single_source_library_jar_v1`",
+        "> Компиляция Main.java",
+        "Он сказал. Сборка Main.java",
+        "The report says, build Main.java",
+        "Если тесты зелёные, сборка Main.java",
+        "If tests pass.\nBuild Main.java",
+        "Compile Main.java if tests pass",
+        "Не нужна сборка Main.java",
+        "Сборка Main.java не нужна",
+        "Build Main.java is not requested",
+        "Сборка Main.java завершена",
+        "Build Main.java failed yesterday",
+        "Ты умеешь делать сборку Main.java?",
+        "Есть ли возможность компиляции по профилю java21_single_source_library_jar_v1?",
+        "Do you support builds with profile java21_single_source_library_jar_v1?",
+        "Are you able to compile Main.java?",
+        "Сборка проекта",
+    ),
+)
+def test_inert_or_ambiguous_compile_language_is_rejected(speech: str) -> None:
+    assert requests_artifact_compile(speech) is False
+
+
+def test_compile_atomicity_closes_only_the_single_compile_clause() -> None:
+    assert artifact_compile_request_is_atomic("Скомпилируй Main.java в JAR.") is True
+    assert artifact_compile_request_is_atomic("Compile this Java source into a JAR?") is True
+    assert artifact_compile_request_is_atomic("Сборка Main.java в JAR.") is True
+    assert (
+        artifact_compile_request_is_atomic("Compile with profile java21_single_source_library_jar_v1?")
+        is True
+    )
+    assert artifact_compile_request_is_atomic("Скомпилируй Main.java и объясни код") is False
+    assert artifact_compile_request_is_atomic("Компиляция Main.java и объясни код") is False
+
+
+@pytest.mark.asyncio
+async def test_compile_tool_is_hidden_and_separates_private_jar_attachment(
+    settings,
+    storage,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    raw_id = "raw_0123456789abcdef"
+    source = b"public class Main {}\n"
+    jar = _jar()
+    observed: dict[str, object] = {}
+
+    def fake_read_owned(ctx, actor, selected_raw_id):  # noqa: ANN001
+        observed["read"] = (ctx, actor, selected_raw_id)
+        return SimpleNamespace(content=source, filename="Main.java")
+
+    def fake_compile(
+        content: bytes,
+        filename: str,
+        *,
+        deadline: float,
+        workspace_root: Path,
+    ) -> tuple[bytes, dict[str, object]]:
+        observed["sandbox"] = (content, filename, deadline, workspace_root)
+        return jar, _worker_report(source, jar)
+
+    monkeypatch.setattr(engineer_tools, "_read_owned", fake_read_owned)
+    monkeypatch.setattr(engineer_tools.sandbox, "compile_java_artifact", fake_compile)
+    ctx = ServiceContext(
+        settings=settings,
+        storage=storage,
+        kg=None,
+        ingestion=SimpleNamespace(secondary_brain=None),
+        llm=None,
+    )
+    spec = {tool.name: tool for tool in engineer_tools.build_engineer_tools(ctx)}["engineer_compile_java"]
+    assert spec.security_id == "engineer.artifact.build"
+    assert spec.risk == "mutate"
+    assert spec.model_visible is False
+
+    storage.ensure_user(LEGACY_OWNER_USER_ID, preset_key="owner")
+    authorization = AuthorizationService(storage)
+    authorization.register_capability(ENGINEER_BUILD)
+    kernel = ExecutionKernel(authorization, settings)
+    kernel.bind_services(storage, object(), object(), object())  # type: ignore[arg-type]
+    kernel.register(spec)
+    actor = ActorContext(LEGACY_OWNER_USER_ID, "owner", "test")
+    assert "engineer_compile_java" not in kernel.get_tool_names(actor)
+
+    result = await kernel.execute("engineer_compile_java", {"raw_id": raw_id}, actor=actor)
+
+    assert result.success is True
+    assert observed["read"][2] == raw_id  # type: ignore[index]
+    sandbox_call = observed["sandbox"]
+    assert sandbox_call[0:2] == (source, "Main.java")  # type: ignore[index]
+    assert sandbox_call[2] > time.monotonic()  # type: ignore[index]
+    assert sandbox_call[3] == settings.state_dir / "engineer-tmp"  # type: ignore[index]
+    assert result.data is not None
+    assert result.data["summary"] == "Java 21 compilation completed; the bounded JAR is prepared."
+    report = result.data["report"]
+    assert report["jar_sha256"] == hashlib.sha256(jar).hexdigest()
+    assert report["source_sha256"] == hashlib.sha256(source).hexdigest()
+    assert report["jar_prepared"] is True
+    assert report["sample_executed"] is False
+    assert report["network"] == "none"
+    encoded_public = json.dumps(result.data, sort_keys=True)
+    assert raw_id not in encoded_public
+    assert "public class Main" not in encoded_public
+
+    assert result.attachment is not None
+    assert result.attachment["filename"] == "Main.compiled.jar"
+    assert result.attachment["mime_type"] == "application/java-archive"
+    assert base64.b64decode(result.attachment["content_base64"], validate=True) == jar
+    audit_reasons = [
+        json.loads(str(row["after_json"] or "{}"))["reason"]
+        for row in reversed(storage.list_audit_log(LEGACY_OWNER_USER_ID, limit=20))
+        if row["target_id"] == "engineer_compile_java"
+    ]
+    assert sorted(audit_reasons) == ["ok", "started"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("work_started", "expected_error", "expected_reasons"),
+    (
+        (False, "Engineer tool refused: compiler_busy", ["failed"]),
+        (
+            True,
+            "Engineer tool failed: compiler_timeout",
+            ["started", "failed_after_start"],
+        ),
+    ),
+)
+async def test_compile_kernel_started_audit_follows_physical_worker_attestation(
+    settings,
+    storage,
+    work_started: bool,
+    expected_error: str,
+    expected_reasons: list[str],
+) -> None:
+    ctx = ServiceContext(
+        settings=settings,
+        storage=storage,
+        kg=None,
+        ingestion=SimpleNamespace(secondary_brain=None),
+        llm=None,
+    )
+    spec = {tool.name: tool for tool in engineer_tools.build_engineer_tools(ctx)}["engineer_compile_java"]
+
+    async def failed_handler(*, actor, raw_id: str):  # noqa: ANN001
+        del actor, raw_id
+        return {
+            "ok": False,
+            "status": "failed" if work_started else "unavailable",
+            "error": "compiler_timeout" if work_started else "compiler_busy",
+            "_work_started": work_started,
+        }
+
+    spec.handler = failed_handler
+    storage.ensure_user(LEGACY_OWNER_USER_ID, preset_key="owner")
+    authorization = AuthorizationService(storage)
+    authorization.register_capability(ENGINEER_BUILD)
+    kernel = ExecutionKernel(authorization, settings)
+    kernel.bind_services(storage, object(), object(), object())  # type: ignore[arg-type]
+    kernel.register(spec)
+
+    result = await kernel.execute(
+        "engineer_compile_java",
+        {"raw_id": "raw_0123456789abcdef"},
+        actor=ActorContext(LEGACY_OWNER_USER_ID, "owner", "test"),
+    )
+
+    assert result.success is False
+    assert result.error == expected_error
+    assert result.handler_entered is True
+    assert result.work_started is work_started
+    audit_reasons = [
+        json.loads(str(row["after_json"] or "{}"))["reason"]
+        for row in reversed(storage.list_audit_log(LEGACY_OWNER_USER_ID, limit=20))
+        if row["target_id"] == "engineer_compile_java"
+    ]
+    assert sorted(audit_reasons) == sorted(expected_reasons)
+
+
+@pytest.mark.asyncio
+async def test_compile_kernel_exception_uses_conservative_handler_entry_fallback(
+    settings,
+    storage,
+) -> None:
+    ctx = ServiceContext(
+        settings=settings,
+        storage=storage,
+        kg=None,
+        ingestion=SimpleNamespace(secondary_brain=None),
+        llm=None,
+    )
+    spec = {tool.name: tool for tool in engineer_tools.build_engineer_tools(ctx)}["engineer_compile_java"]
+
+    async def broken_handler(*, actor, raw_id: str):  # noqa: ANN001
+        del actor, raw_id
+        raise RuntimeError("private compiler failure")
+
+    spec.handler = broken_handler
+    storage.ensure_user(LEGACY_OWNER_USER_ID, preset_key="owner")
+    authorization = AuthorizationService(storage)
+    authorization.register_capability(ENGINEER_BUILD)
+    kernel = ExecutionKernel(authorization, settings)
+    kernel.bind_services(storage, object(), object(), object())  # type: ignore[arg-type]
+    kernel.register(spec)
+
+    result = await kernel.execute(
+        "engineer_compile_java",
+        {"raw_id": "raw_0123456789abcdef"},
+        actor=ActorContext(LEGACY_OWNER_USER_ID, "owner", "test"),
+    )
+
+    assert result.success is False
+    assert result.handler_entered is True
+    assert result.work_started is None
+    assert "НАЧАВ" in str(result.error)
+    audit_reasons = [
+        json.loads(str(row["after_json"] or "{}"))["reason"]
+        for row in storage.list_audit_log(LEGACY_OWNER_USER_ID, limit=20)
+        if row["target_id"] == "engineer_compile_java"
+    ]
+    assert sorted(audit_reasons) == ["failed_after_start", "started"]
+
+
+@pytest.mark.asyncio
+async def test_compile_tool_rejects_forged_report_or_changed_jar(
+    settings,
+    storage,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source = b"class Main {}"
+    jar = _jar()
+    report = _worker_report(source, jar)
+    report["jar_sha256"] = "0" * 64
+    monkeypatch.setattr(
+        engineer_tools,
+        "_read_owned",
+        lambda *_args: SimpleNamespace(content=source, filename="Main.java"),
+    )
+    monkeypatch.setattr(
+        engineer_tools.sandbox,
+        "compile_java_artifact",
+        lambda *_args, **_kwargs: (jar + b"changed", report),
+    )
+    ctx = ServiceContext(
+        settings=settings,
+        storage=storage,
+        kg=None,
+        ingestion=SimpleNamespace(secondary_brain=None),
+        llm=None,
+    )
+    spec = {tool.name: tool for tool in engineer_tools.build_engineer_tools(ctx)}["engineer_compile_java"]
+    assert spec.handler is not None
+
+    result = await spec.handler(
+        actor=ActorContext(LEGACY_OWNER_USER_ID, "owner", "test"),
+        raw_id="raw_0123456789abcdef",
+    )
+
+    assert result == {
+        "ok": False,
+        "status": "failed",
+        "error": "compiler_report_invalid",
+        "_work_started": True,
+    }
+    assert "changed" not in json.dumps(result)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("error", "work_started", "status"),
+    (
+        ("compiler_busy", False, "unavailable"),
+        ("compiler_pid_cgroup_unbounded", False, "unavailable"),
+        ("compiler_memory_cgroup_unbounded", False, "unavailable"),
+        ("compiler_launch_failed", False, "failed"),
+        ("compiler_timeout", True, "failed"),
+    ),
+)
+async def test_compile_failures_preserve_entry_truth(
+    settings,
+    storage,
+    monkeypatch: pytest.MonkeyPatch,
+    error: str,
+    work_started: bool,
+    status: str,
+) -> None:
+    monkeypatch.setattr(
+        engineer_tools,
+        "_read_owned",
+        lambda *_args: SimpleNamespace(content=b"class Main {}", filename="Main.java"),
+    )
+
+    def failed(*_args, **_kwargs):
+        raise engineer_tools.sandbox.EngineerSandboxError(error, work_started=work_started)
+
+    monkeypatch.setattr(engineer_tools.sandbox, "compile_java_artifact", failed)
+    ctx = ServiceContext(
+        settings=settings,
+        storage=storage,
+        kg=None,
+        ingestion=SimpleNamespace(secondary_brain=None),
+        llm=None,
+    )
+    spec = {tool.name: tool for tool in engineer_tools.build_engineer_tools(ctx)}["engineer_compile_java"]
+    assert spec.handler is not None
+
+    result = await spec.handler(
+        actor=ActorContext(LEGACY_OWNER_USER_ID, "owner", "test"),
+        raw_id="raw_0123456789abcdef",
+    )
+
+    assert result == {
+        "ok": False,
+        "status": status,
+        "error": error,
+        "_work_started": work_started,
+    }
+
+
+@pytest.mark.asyncio
+async def test_compile_respects_configured_generated_file_cap(
+    settings,
+    storage,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source = b"class Main {}"
+    jar = _jar()
+    monkeypatch.setattr(
+        engineer_tools,
+        "_read_owned",
+        lambda *_args: SimpleNamespace(content=source, filename="Main.java"),
+    )
+    monkeypatch.setattr(
+        engineer_tools.sandbox,
+        "compile_java_artifact",
+        lambda *_args, **_kwargs: (jar, _worker_report(source, jar)),
+    )
+    ctx = ServiceContext(
+        settings=replace(settings, max_upload_bytes=len(jar) - 1),
+        storage=storage,
+        kg=None,
+        ingestion=SimpleNamespace(secondary_brain=None),
+        llm=None,
+    )
+    spec = {tool.name: tool for tool in engineer_tools.build_engineer_tools(ctx)}["engineer_compile_java"]
+    assert spec.handler is not None
+
+    result = await spec.handler(
+        actor=ActorContext(LEGACY_OWNER_USER_ID, "owner", "test"),
+        raw_id="raw_0123456789abcdef",
+    )
+
+    assert result == {
+        "ok": False,
+        "status": "failed",
+        "error": "compiler_output_exceeds_cap",
+        "_work_started": True,
+    }

@@ -101,6 +101,46 @@ async def test_decompile_turn_gets_two_elapsed_time_notices_without_fake_phase_o
 
 
 @pytest.mark.asyncio
+async def test_compile_turn_progress_does_not_claim_javac_started_or_invent_percent(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    bridge = _bridge(tmp_path)
+    sent: list[str] = []
+
+    async def immediate_progress_delay(_delay: float) -> None:
+        return None
+
+    async def backend_json(*_args: Any, **_kwargs: Any) -> dict[str, Any]:
+        await asyncio.sleep(0)
+        return {"message": "Терминальный итог", "message_format": "plain"}
+
+    async def send(_client: object, _chat_id: int, text: str, **_kwargs: Any) -> None:
+        sent.append(text)
+
+    monkeypatch.setattr(commands, "_progress_sleep", immediate_progress_delay)
+    monkeypatch.setattr(bridge, "_backend_json", backend_json)
+    monkeypatch.setattr(bridge, "_typing_loop", _never_typing)
+    monkeypatch.setattr(bridge, "_send_message", send)
+    try:
+        await bridge._process_update(  # noqa: SLF001
+            _client_stub(),
+            _client_stub(),
+            _update("Сборка Main.java в JAR", update_id=8805),
+            cached_response=None,
+        )
+    finally:
+        bridge._inbox.close()  # noqa: SLF001
+
+    assert sent[-1] == "Терминальный итог"
+    progress = sent[:-1]
+    assert len(progress) == 2
+    assert "факт запуска javac подтвердит итоговый отчёт" in progress[0]
+    assert "всё ещё обрабатывается" in progress[1]
+    assert all("%" not in text and "готов" not in text.casefold() for text in progress)
+
+
+@pytest.mark.asyncio
 async def test_opaque_chat_turn_gets_one_generic_notice_without_invented_percent(
     tmp_path,
     monkeypatch,

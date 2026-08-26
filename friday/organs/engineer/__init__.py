@@ -30,6 +30,14 @@ ENGINEER_ANALYZE = CapabilityDefinition(
     (),
     source="organ",
 )
+ENGINEER_BUILD = CapabilityDefinition(
+    "engineer.artifact.build",
+    "Compile one owned source with a fixed bounded profile",
+    "engineer",
+    3,
+    (),
+    source="organ",
+)
 ENGINEER_PATCH = CapabilityDefinition(
     "engineer.artifact.patch",
     "Emit a patched copy of an owned artifact",
@@ -53,7 +61,7 @@ class EngineerOrgan(Organ):
     version = "1.0"
 
     def capabilities(self) -> Sequence[CapabilityDefinition]:
-        return (ENGINEER_USE, ENGINEER_ANALYZE, ENGINEER_PATCH, ENGINEER_AUDIT)
+        return (ENGINEER_USE, ENGINEER_ANALYZE, ENGINEER_BUILD, ENGINEER_PATCH, ENGINEER_AUDIT)
 
     def tools(self, ctx: ServiceContext) -> Sequence[ToolSpec]:
         from .tools import build_engineer_tools
@@ -64,6 +72,7 @@ class EngineerOrgan(Organ):
 __all__ = [
     "ENGINEER_ANALYZE",
     "ENGINEER_AUDIT",
+    "ENGINEER_BUILD",
     "ENGINEER_PATCH",
     "ENGINEER_USE",
     "EngineerOrgan",

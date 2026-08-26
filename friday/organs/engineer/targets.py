@@ -408,6 +408,84 @@ _ARTIFACT_DECOMPILE_REPORTED = re.compile(
     r"\b(?:сообщ\w*|ответ\w*|пересказ\w*|states?|reports?|reported|replied)\b",
     re.IGNORECASE,
 )
+_ARTIFACT_COMPILE_FILENAME = r"(?<![\w./\\-])[A-Za-z_][A-Za-z0-9_]{0,119}\.java(?![\w./\\-])"
+_ARTIFACT_COMPILE_PROFILE = r"(?<![\w-])java21_single_source_library_jar_v1(?![\w-])"
+_ARTIFACT_COMPILE_EN_SOURCE = (
+    r"(?:(?:this|that|the|an?|attached|current)\s+){0,2}"
+    r"(?:java(?:[- ]21)?\s+(?:source|source\s+file|file)|source\s+file\s+in\s+java)"
+)
+_ARTIFACT_COMPILE_RU_SOURCE = (
+    r"(?:(?:этот|эту|данн\w*|приложенн\w*|текущ\w*)\s+){0,2}"
+    r"(?:java(?:[- ]21)?[- ]файл\w*|java(?:[- ]21)?\s+исходник\w*|"
+    r"исходник\w*\s+java(?:[- ]21)?)"
+)
+_ARTIFACT_COMPILE_EN_NAMED = (
+    rf"(?:(?:(?:this|that|the|an?|attached|current)\s+){{0,2}}"
+    rf"(?:file\s+)?{_ARTIFACT_COMPILE_FILENAME}|"
+    rf"(?:(?:(?:using|with)\s+)?(?:the\s+)?profile\s+)?{_ARTIFACT_COMPILE_PROFILE})"
+)
+_ARTIFACT_COMPILE_RU_NAMED = (
+    rf"(?:(?:(?:этот|эту|данн\w*|приложенн\w*|текущ\w*)\s+){{0,2}}"
+    rf"(?:файл\w*\s+)?{_ARTIFACT_COMPILE_FILENAME}|"
+    rf"(?:(?:(?:по|с)\s+)?профил\w*\s+)?{_ARTIFACT_COMPILE_PROFILE})"
+)
+_ARTIFACT_COMPILE_REQUEST = re.compile(
+    r"\A\s*(?:(?:hi|hello|hey|привет|здравствуй(?:те)?)[!,.;:\s]+)?"
+    r"(?:(?:and|so|then|now|а|и|ну|тогда|теперь|сейчас)\s+){0,2}"
+    r"(?:(?:please|pls|kindly|can\s+you|could\s+you|would\s+you|"
+    r"i\s+(?:want|need|ask|authorize)\s+you\s+to|"
+    r"пожалуйста|прошу|можешь|можете|сможешь|сможете|"
+    r"(?:не\s+)?мог(?:ла|ли)?\s+бы(?:\s+(?:ты|вы))?|"
+    r"нужно|надо|хочу|разрешаю)\s*[,;:]?\s+)?"
+    r"(?:"
+    r"(?:compile|build)\s+(?:"
+    rf"{_ARTIFACT_COMPILE_EN_SOURCE}|{_ARTIFACT_COMPILE_EN_NAMED}"
+    r")"
+    r"(?:\s+(?:into|as)\s+(?:an?\s+)?jar)?|"
+    r"(?:скомпилируй(?:те)?|компилируй(?:те)?|собери(?:те)?|"
+    r"скомпилировать|компилировать|собрать)\s+(?:"
+    rf"{_ARTIFACT_COMPILE_RU_SOURCE}|{_ARTIFACT_COMPILE_RU_NAMED}"
+    r")"
+    r"(?:\s+в\s+jar)?|"
+    r"(?:сборка|компиляция)\s+(?:"
+    rf"{_ARTIFACT_COMPILE_RU_SOURCE}|{_ARTIFACT_COMPILE_RU_NAMED}"
+    r")(?:\s+в\s+jar)?|"
+    r"(?:выполни(?:те)?|сделай(?:те)?|запусти(?:те)?|проведи(?:те)?)\s+"
+    r"(?:сборку|компиляцию)\s+(?:"
+    rf"{_ARTIFACT_COMPILE_RU_SOURCE}|{_ARTIFACT_COMPILE_RU_NAMED}"
+    r")(?:\s+в\s+jar)?"
+    r")",
+    re.IGNORECASE,
+)
+_ARTIFACT_COMPILE_NEGATION = re.compile(
+    r"(?:\b(?:do\s+not|don't|dont|never|without)\b[^.!?\n]{0,48}\b"
+    r"(?:compil|build)\w*\b|"
+    r"\b(?:не|никогда|без)\b[^.!?\n]{0,48}\b"
+    r"(?:компилир|скомпилир|собир|собер|сборк|компиляц)\w*\b)",
+    re.IGNORECASE,
+)
+_ARTIFACT_COMPILE_TRAILING_DENIAL = re.compile(
+    r"\A\s*(?:(?:is\s+not|isn't)\s+(?:needed|required|requested)|"
+    r"не\s+(?:нужн|требу|заказан|запрошен)\w*)\b",
+    re.IGNORECASE,
+)
+_ARTIFACT_COMPILE_TRAILING_REPORT = re.compile(
+    r"\A\s*(?:(?:(?:is|was|has\s+been)\s+)?"
+    r"(?:completed|finished|failed|successful)|"
+    r"(?:заверш|выполн|готов|успеш|провал|не\s+удал)\w*)\b",
+    re.IGNORECASE,
+)
+_ARTIFACT_COMPILE_CAPABILITY = re.compile(
+    r"(?:\A|[.!?]\s*)(?:"
+    r"(?:ты\s+)?(?:умеешь|способна|можешь\s+ли|можете\s+ли)\b[^.!?\n]{0,64}\b"
+    r"(?:компилир\w*|сборк\w*|собир\w*)[^.!?\n]{0,80}\?\s*$|"
+    r"(?:есть|имеется)\s+ли\b[^.!?\n]{0,64}\b(?:возможност|поддержк)\w*"
+    r"[^.!?\n]{0,80}\b(?:компиляц|сборк|компилир)\w*[^.!?\n]*\?\s*$|"
+    r"(?:are\s+you\s+able\s+to|do\s+you\s+know\s+how\s+to|do\s+you\s+support)\s+"
+    r"(?:compil\w*|build\w*)[^.!?\n]{0,100}\?\s*$"
+    r")",
+    re.IGNORECASE,
+)
 _METADATA_V4 = ipaddress.ip_address("169.254.169.254")
 _METADATA_V6 = ipaddress.ip_address("fd00:ec2::254")
 _OTHER_METADATA_V4 = frozenset(
@@ -917,6 +995,62 @@ def artifact_decompile_request_is_atomic(speech: str) -> bool:
     return False
 
 
+def requests_artifact_compile(speech: str) -> bool:
+    """Admit one direct current-human request for the fixed Java profile."""
+
+    text, masked = _request_projection(speech)
+    negation_surface = _POLITE_NEGATIVE_MODAL.sub(
+        lambda match: " " * len(match.group(0)),
+        masked,
+    )
+    if (
+        not masked.strip()
+        or _ARTIFACT_COMPILE_NEGATION.search(negation_surface)
+        or _ARTIFACT_COMPILE_CAPABILITY.search(masked)
+    ):
+        return False
+    for request in _direct_request_matches(text, _ARTIFACT_COMPILE_REQUEST):
+        trailing = masked[request.end : request.unit_end]
+        if _ARTIFACT_COMPILE_TRAILING_DENIAL.match(trailing) or _ARTIFACT_COMPILE_TRAILING_REPORT.match(
+            trailing
+        ):
+            continue
+        prefix = masked[request.unit_start : request.start]
+        if _META_REQUEST_CUE.search(prefix) or _REPORTED_REQUEST_CUE.search(prefix):
+            continue
+        prior_units = tuple(_request_units(masked[: request.unit_start]))
+        if prior_units and not _EXPLICIT_REQUEST_CONTEXT_RESET.match(masked[request.unit_start :]):
+            prior_start, prior_end = prior_units[-1]
+            prior = masked[prior_start:prior_end]
+            if (
+                _REPORTED_REQUEST_CUE.search(prior)
+                or _META_REQUEST_CUE.search(prior)
+                or _CONDITIONAL_REQUEST_CUE.search(prior)
+            ):
+                continue
+        return True
+    return False
+
+
+def artifact_compile_request_is_atomic(speech: str) -> bool:
+    """Whether fixed-profile Java compilation is the sole current clause."""
+
+    if not requests_artifact_compile(speech):
+        return False
+    text, masked = _request_projection(speech)
+    for request in _direct_request_matches(text, _ARTIFACT_COMPILE_REQUEST):
+        trailing = masked[request.end : request.unit_end]
+        if _ARTIFACT_COMPILE_TRAILING_DENIAL.match(trailing) or _ARTIFACT_COMPILE_TRAILING_REPORT.match(
+            trailing
+        ):
+            continue
+        if request.unit_start != 0:
+            continue
+        if re.fullmatch(r"[\s.!?…]*", masked[request.end :]):
+            return True
+    return False
+
+
 def requests_configured_network_assessment(speech: str) -> bool:
     """Admit the sole configured private network only from current speech.
 
@@ -1134,6 +1268,7 @@ def target_source_sha256(speech: str, token: str) -> str:
 
 
 __all__ = [
+    "artifact_compile_request_is_atomic",
     "artifact_decompile_request_is_atomic",
     "PinnedTarget",
     "bind_pinned_target",
@@ -1145,6 +1280,7 @@ __all__ = [
     "normalize_ip_address",
     "parse_host_token",
     "requests_active_assessment",
+    "requests_artifact_compile",
     "requests_artifact_decompile",
     "requests_artifact_patch",
     "requests_configured_network_assessment",

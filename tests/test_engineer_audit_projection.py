@@ -82,7 +82,7 @@ def test_engineer_http_scalar_port_is_only_a_count_and_range() -> None:
 
 @pytest.mark.parametrize(
     "tool_name",
-    ["engineer_analyze_artifact", "engineer_decompile_artifact"],
+    ["engineer_analyze_artifact", "engineer_compile_java", "engineer_decompile_artifact"],
 )
 def test_valid_raw_handle_stays_structural_and_invalid_handle_is_fingerprinted(
     tool_name: str,
@@ -299,7 +299,7 @@ async def test_cancelled_engineer_observation_gets_an_uncertain_terminal_audit(
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     "tool_name",
-    ["engineer_analyze_artifact", "engineer_decompile_artifact"],
+    ["engineer_analyze_artifact", "engineer_compile_java", "engineer_decompile_artifact"],
 )
 async def test_engineer_false_envelope_is_a_failed_kernel_result_and_audit(
     settings,

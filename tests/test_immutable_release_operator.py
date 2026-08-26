@@ -362,11 +362,13 @@ def test_unit_security_dropins_disable_implicit_userns_and_isolate_tmpdir(
         security = dropins[port.config.unit_dir / f"{unit}.d/security.conf"]
         runtime_name = operator._unit_runtime_directory_name(unit)  # noqa: SLF001
         tmp_directory = Path("/run/user") / str(os.geteuid()) / runtime_name
+        aggregate_limits = "TasksMax=512\nMemoryMax=12G\n" if unit == port.config.backend_unit else ""
         assert (
             security
             == (
                 "[Service]\n"
                 "LimitCORE=0\n"
+                f"{aggregate_limits}"
                 "PrivateTmp=false\n"
                 "PrivateUsers=false\n"
                 f"RuntimeDirectory={runtime_name}\n"
@@ -379,6 +381,29 @@ def test_unit_security_dropins_disable_implicit_userns_and_isolate_tmpdir(
         observed[unit] = security
 
     assert observed[port.config.backend_unit] != observed[port.config.bridge_unit]
+
+
+def test_backend_startup_requires_effective_aggregate_compiler_limits(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    port = _systemd_test_port(tmp_path)
+    values = {
+        "--property=TasksMax": b"512\n",
+        "--property=MemoryMax": b"12884901888\n",
+    }
+
+    def systemctl(*arguments: str, check: bool = True) -> subprocess.CompletedProcess[bytes]:
+        del check
+        selected = next((values[item] for item in arguments if item in values), b"")
+        return subprocess.CompletedProcess(arguments, 0, selected, b"")
+
+    monkeypatch.setattr(port, "_systemctl", systemctl)
+    port._verify_backend_resource_limits()  # noqa: SLF001
+
+    values["--property=MemoryMax"] = b"infinity\n"
+    with pytest.raises(operator.ReleaseFailure, match="backend_resource_boundary_unavailable"):
+        port._verify_backend_resource_limits()  # noqa: SLF001
 
 
 @pytest.mark.parametrize("predecessor", ["private-tmp", "recovery", "current"])

@@ -118,8 +118,16 @@ text, paths and parser-controlled stderr never cross the worker boundary.
 Java compilation shares one non-blocking physical heavy-work lock with Ghidra,
 has fixed CPU, memory, file, descriptor and wall-time ceilings, and is limited
 to one entered compilation per turn after its complete deadline has been
-reserved. A busy or preflight refusal records that work did not start; timeout
-or failure after `javac` entry records that it did. The source Raw object remains
+reserved. Its enclosing backend cgroup must additionally prove at most 512
+tasks and a finite 10--16 GiB aggregate memory ceiling; the canonical native
+backend unit and Docker Engineer profile set 512 tasks and 12 GiB. Per-file
+limits, a private 32 MiB compiler tmpfs, and the validated 256-file/8 MiB class
+inventory plus 16 MiB JAR cap bound both scratch space and the output that may
+cross the worker. A busy or preflight refusal records that work did not start;
+timeout or failure after the fixed-argv sandbox worker is spawned records that
+it did. Container verification and native service startup both reject an
+effective cgroup which differs from the declared aggregate limits. The source
+Raw object remains
 byte-for-byte unchanged. A successful JAR, its bounded accepted-outcome receipt
 and the assistant message are committed through the existing person-owned
 generated-file path in one transaction, after final source identity and

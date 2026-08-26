@@ -6858,6 +6858,8 @@ _UNIT_INSTALL_PHASES = (
 )
 
 _RUNTIME_UNIT_NAMES = ("friday-backend.service", "friday-bridge.service")
+_BACKEND_TASKS_MAX = 512
+_BACKEND_MEMORY_MAX_BYTES = 12 * 1024**3
 _UNIT_DROPIN_NAMES: Mapping[str, tuple[str, ...]] = {
     "friday-backend.service": ("database.conf", "security.conf"),
     "friday-bridge.service": ("database.conf", "dependency.conf", "security.conf"),
@@ -6892,9 +6894,13 @@ def _unit_runtime_tmp_directory(unit: str) -> Path:
 
 def _unit_security_dropin(unit: str) -> bytes:
     runtime_name = _unit_runtime_directory_name(unit)
+    aggregate_limits = (
+        f"TasksMax={_BACKEND_TASKS_MAX}\nMemoryMax=12G\n" if unit == "friday-backend.service" else ""
+    )
     return (
         "[Service]\n"
         "LimitCORE=0\n"
+        f"{aggregate_limits}"
         "PrivateTmp=false\n"
         "PrivateUsers=false\n"
         f"RuntimeDirectory={runtime_name}\n"
@@ -9142,6 +9148,25 @@ print(json.dumps({'schema':SCHEMA_VERSION,'status':'clear'},sort_keys=True,separ
         self._systemctl("start", unit)
         self._wait_process(unit, release, role)
 
+    def _verify_backend_resource_limits(self) -> None:
+        """Require the manager's effective finite aggregate compiler bounds."""
+
+        expected = {
+            "TasksMax": _BACKEND_TASKS_MAX,
+            "MemoryMax": _BACKEND_MEMORY_MAX_BYTES,
+        }
+        for property_name, expected_value in expected.items():
+            result = self._systemctl(
+                "show",
+                self.config.backend_unit,
+                f"--property={property_name}",
+                "--value",
+                check=False,
+            )
+            raw = result.stdout.strip()
+            if result.returncode != 0 or not raw.isdigit() or int(raw) != expected_value:
+                raise ReleaseFailure("backend_resource_boundary_unavailable")
+
     def _process_matches(
         self,
         pid: int,
@@ -9178,6 +9203,7 @@ print(json.dumps({'schema':SCHEMA_VERSION,'status':'clear'},sort_keys=True,separ
     def start_backend(self, release: ReleaseIdentity) -> None:
         self._verify_environment_file()
         self._start(self.config.backend_unit, release, "backend")
+        self._verify_backend_resource_limits()
 
     def accept_backend(self, release: ReleaseIdentity) -> None:
         ca = _private_regular_file(

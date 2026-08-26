@@ -47,6 +47,10 @@ COMPILE_MAX_WALL_SECONDS = 60.0
 COMPILE_MAX_CPU_SECONDS = 45
 COMPILE_MAX_ADDRESS_SPACE_BYTES = 2 * 1024 * 1024 * 1024
 COMPILE_MAX_FILE_BYTES = compiler.MAX_JAR_BYTES
+COMPILE_WORKSPACE_TMPFS_BYTES = 32 * 1024 * 1024
+COMPILE_MAX_CGROUP_PIDS = 512
+COMPILE_MIN_CGROUP_MEMORY_BYTES = 10 * 1024 * 1024 * 1024
+COMPILE_MAX_CGROUP_MEMORY_BYTES = 16 * 1024 * 1024 * 1024
 MAX_ADMITTED_CGROUP_PIDS = 65_536
 _SMOKE_SUCCESS_KEY: tuple[object, ...] | None = None
 _SMOKE_SUCCESS_RESULT: dict[str, Any] | None = None
@@ -211,6 +215,81 @@ def _current_cgroup_pids_limit() -> int | None:
     return None
 
 
+def _current_cgroup_memory_limit() -> int | None:
+    """Return the finite aggregate memory ceiling for the current cgroup."""
+
+    try:
+        lines = SELF_CGROUP.read_text(encoding="ascii").splitlines()
+    except (OSError, UnicodeError):
+        return None
+
+    candidates: list[Path] = []
+    for line in lines:
+        fields = line.split(":", 2)
+        if len(fields) != 3:
+            continue
+        hierarchy, controllers, raw_path = fields
+        relative = _cgroup_path(raw_path)
+        if relative is None:
+            continue
+        if hierarchy == "0" and not controllers:
+            candidates.append(CGROUP_ROOT / relative / "memory.max")
+        elif "memory" in controllers.split(","):
+            candidates.append(CGROUP_ROOT / "memory" / relative / "memory.limit_in_bytes")
+    candidates.extend(
+        (
+            CGROUP_ROOT / "memory.max",
+            CGROUP_ROOT / "memory" / "memory.limit_in_bytes",
+        )
+    )
+    seen: set[Path] = set()
+    for path in candidates:
+        if path in seen:
+            continue
+        seen.add(path)
+        flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0)
+        try:
+            descriptor = os.open(path, flags)
+        except OSError:
+            continue
+        try:
+            details = os.fstat(descriptor)
+            payload = os.read(descriptor, 64)
+            overflow = os.read(descriptor, 1)
+        except OSError:
+            continue
+        finally:
+            os.close(descriptor)
+        if not stat.S_ISREG(details.st_mode) or overflow:
+            return None
+        value = payload.strip()
+        if not value or value == b"max" or not value.isdigit():
+            return None
+        limit = int(value)
+        return limit if limit > 0 else None
+    return None
+
+
+def _compile_resource_preflight() -> dict[str, Any]:
+    """Require aggregate PID and memory boundaries around the compiler tree."""
+
+    pids_limit = _current_cgroup_pids_limit()
+    if pids_limit is None or pids_limit > COMPILE_MAX_CGROUP_PIDS:
+        return {"ok": False, "reason": "compiler_pid_cgroup_unbounded"}
+    memory_limit = _current_cgroup_memory_limit()
+    if (
+        memory_limit is None
+        or memory_limit < COMPILE_MIN_CGROUP_MEMORY_BYTES
+        or memory_limit > COMPILE_MAX_CGROUP_MEMORY_BYTES
+    ):
+        return {"ok": False, "reason": "compiler_memory_cgroup_unbounded"}
+    return {
+        "ok": True,
+        "pids_limit": pids_limit,
+        "memory_limit_bytes": memory_limit,
+    }
+
+
 def _remaining_timeout(deadline: float | None, maximum: float = MAX_WALL_SECONDS) -> float:
     if deadline is None:
         return maximum
@@ -258,6 +337,7 @@ def _sandbox_argv(
         "/proc",
         "--dev",
         "/dev",
+        *(["--size", str(COMPILE_WORKSPACE_TMPFS_BYTES)] if mount_jdk and not mount_decompiler else []),
         "--tmpfs",
         "/tmp",
         "--dir",
@@ -389,6 +469,17 @@ def _run_worker(
     admission = preflight()
     if not admission.get("ok"):
         raise EngineerSandboxError(str(admission.get("reason") or "sandbox_unavailable"))
+    if action == "compile_java":
+        resource_admission = _compile_resource_preflight()
+        if resource_admission.get("ok") is not True:
+            raise EngineerSandboxError(
+                str(resource_admission.get("reason") or "compiler_resource_boundary_unavailable")
+            )
+        admission = {
+            **admission,
+            "compile_pids_limit": resource_admission.get("pids_limit"),
+            "compile_memory_limit_bytes": resource_admission.get("memory_limit_bytes"),
+        }
     if action not in {"analyze", "compile_java", "decompile", "patch", "preflight"}:
         raise EngineerSandboxError("unknown_action")
     input_cap = compiler.MAX_SOURCE_BYTES if action == "compile_java" else MAX_INPUT_BYTES
@@ -590,7 +681,10 @@ def compile_java_artifact(
         _HEAVY_ARTIFACT_LOCK.release()
     if result.get("ok") is not True or output is None:
         error = str(result.get("error") or "compiler_failed")
-        raise EngineerSandboxError(error, work_started=compiler.compiler_work_started(error))
+        # Every returned worker report follows successful fixed-argv bwrap
+        # spawn. Host admission, source validation and heavy-lock refusals have
+        # already raised above with the default pre-start marker.
+        raise EngineerSandboxError(error, work_started=True)
     return output, result
 
 

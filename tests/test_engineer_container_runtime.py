@@ -41,6 +41,7 @@ def test_engineer_compose_override_preserves_the_outer_boundary() -> None:
     assert backend == {
         "read_only": True,
         "pids_limit": 512,
+        "mem_limit": "12g",
         "security_opt": [
             "no-new-privileges:true",
             "seccomp=/etc/friday-engineer/seccomp.json",
@@ -280,6 +281,8 @@ def test_image_and_operator_scripts_ship_the_complete_runtime_contract() -> None
     assert "{{.HostConfig.ReadonlyRootfs}}" in smoke
     assert "{{.HostConfig.Privileged}}" in smoke
     assert "{{.HostConfig.PidsLimit}}" in smoke
+    assert "{{.HostConfig.Memory}}" in smoke
+    assert "12884901888" in smoke
     assert "{{json .HostConfig.CapDrop}}" in smoke
     assert "{{json .HostConfig.CapAdd}}" in smoke
     assert "/usr/bin/id -u" in smoke
@@ -292,6 +295,9 @@ def test_image_and_operator_scripts_ship_the_complete_runtime_contract() -> None
     assert "NoNewPrivs:" in smoke
     assert "Seccomp:" in smoke
     assert "smoke_preflight" in smoke
+    assert "_compile_resource_preflight" in smoke
+    assert 'c.get("pids_limit") == 512' in smoke
+    assert 'c.get("memory_limit_bytes") == 12884901888' in smoke
     assert 'r.get("network_namespace") == "isolated"' in smoke
     assert 'r.get("external_routes") == 0' in smoke
     assert 'r.get("ipv4_connectivity") == "blocked"' in smoke
