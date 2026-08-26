@@ -98,6 +98,7 @@ from friday.orchestration.supervisor_review_policy import (
 )
 from friday.orchestration.supervisor_review_transport import AdmittedSupervisorReview
 from friday.orchestration.transient_web_comparison import (
+    SealedPublicWebQuery,
     TransientWebComparisonEvidence,
     TransientWebEvidenceStatus,
 )
@@ -182,7 +183,7 @@ class AssistWebEvidenceReader(Protocol):
     async def research(
         self,
         *,
-        plan: object,
+        plan: SealedPublicWebQuery,
         actor: ActorContext,
         conversation_id: str | None,
         current_user_message: str,
