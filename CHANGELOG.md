@@ -1,3 +1,18 @@
+## 0.207.45 — 2026-08-26
+
+### Abliterated primary profile and provisional secondary successor
+
+- The code-owned Qwen3.8 V12 profile now binds the live
+  `Vtuber-plan/Huihui-Qwen3.8-27B-abliterated-NVFP4` deployment as profile
+  `v12.15`, including its exact model revision, launch graph, images and
+  same-origin proxy witness. Unknown or drifting deployments still leave the
+  narrow V12 routes in legacy mode.
+- The abliterated GPT-OSS-20B laptop candidate is registered only as an exact
+  provisional `shadow/extract` profile. It cannot enter `assist`, use tools,
+  own effects or publish until a fresh acceptance chain is completed.
+- This release includes the already gated Java 21 compilation/JAR delivery
+  package from `0.207.44`; database schema remains 43.
+
 ## 0.207.44 — 2026-08-26
 
 ### Bounded Java 21 compilation and JAR delivery

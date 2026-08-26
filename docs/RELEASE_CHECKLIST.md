@@ -165,13 +165,15 @@ failed/error/skipped-тест в любой фазе делает гейт кр�
 Для optional GPT-OSS secondary brain начиная с 0.207.11 дополнительно:
 
 - release принимается и первый раз запускается без `FRIDAY_SECONDARY_LLM_*`:
-  health имеет `status=ok`, `version=0.207.44`, `secondary.mode=disabled`,
+  health имеет `status=ok`, `version=0.207.45`, `secondary.mode=disabled`,
   `secondary.state=disabled` и `secondary.available=false`;
 - `ACCEPTED_SECONDARY_RUNTIME_PROFILES` содержит ровно finalist
   `gptoss20b-2335df123cac7fc0e13e347cde1e1ffa8562daafcaf0fc76ade1a851d2b0ff1f`
   с accepted-manifest SHA-256
   `93ea5698b8b6a9bf8a7dc697ffe37d7353055aa16555188991747bba73d059e3`;
-  code-owned provisional-реестр пуст;
+  code-owned provisional-реестр содержит ровно abliterated successor
+  `gptoss20b-d4c2207151c7507f9d71a1d3d5d387d6ae98bb89b04f3171ba667098c2ad2d25`
+  и допускает его только в discarded `shadow/extract`, никогда не в `assist`;
 - finalist связан с `https://192.168.1.35:8443/v1`, context/total `4096`,
   output `512`, concurrency `1`, chunked prefill `256`, native MXFP4, BF16 KV,
   `mem_fraction_static=0.96` и full decode CUDA graph только для batch 1;
@@ -253,10 +255,10 @@ failed/error/skipped-тест в любой фазе делает гейт кр�
 - без явных переменных configured/installed mode остаются `legacy`, routes пусты;
 - canary стартует только с `model_gate.status=canary_ready`, reason
   `live_attestation_clear`, профилем
-  `qwen38-27b-nvfp4-sglang:dispatcher:v12.14` и явно разрешёнными routes
+  `qwen38-27b-nvfp4-sglang:dispatcher:v12.15` и явно разрешёнными routes
   `file_read`, `archive_read`;
 - SGLang startup сверяет exact model revision
-  `bfd9b31207712e0850eec9da32261e8c5ee16af7`, pinned runtime image/source,
+  `43aa7ff5eef05ab50a3bfa6aca581085312c7a04`, pinned runtime image/source,
   served alias `dispatcher`, bounded `/metrics`, `/server_info` и secret-free
   per-process deployment witness; build-time witness hashes берутся только
   из code-owned profile, не подставляются вручную;
@@ -267,7 +269,7 @@ failed/error/skipped-тест в любой фазе делает гейт кр�
 - post-context load допускает bounded convergence не более 2 секунд с шагом
   50 мс только для valid same-epoch busy; invalid/epoch/deadline fail-closed, а
   initial idle и post-cancellation quiet остаются строгими;
-- final startup health имеет `status=ok`, `version=0.207.44`, configured/installed
+- final startup health имеет `status=ok`, `version=0.207.45`, configured/installed
   `canary`, routes `[archive_read, file_read]`, точный `profile_id`,
   `verified_context_tokens=8192` и непустой public `attestation_sha256`;
 - синтетические 1- и 2-файловые UTF-8 smokes дают одну публикацию с точными
