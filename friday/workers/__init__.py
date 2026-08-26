@@ -30,6 +30,9 @@ from friday.document_catalog.worker_state import (
     encode_document_catalog_worker_state,
     load_document_catalog_worker_namespace_key,
 )
+from friday.interaction_control_plane.compare_current_file_web_work_graph_store import (
+    expire_due_compare_current_file_web_work_graphs_in_transaction,
+)
 from friday.retrieval import (
     chunk_scheme,
     knowledge_chunk_units,
@@ -725,6 +728,16 @@ class WorkersManager:
             60.0,
             run_immediately=True,
             timeout_sec=120,
+        )
+        # Durable assist ownership outlives both a model endpoint and the rollout
+        # flag that admitted it.  Keep retirement in the unconditional core worker
+        # set so rollback cannot strand an active graph indefinitely.
+        self.supervisor.register(
+            "semantic_supervisor_graph_expiry",
+            self._semantic_supervisor_graph_expiry,
+            60.0,
+            run_immediately=True,
+            timeout_sec=30,
         )
         self.supervisor.register(
             "knowledge_dedup",
@@ -2127,6 +2140,23 @@ class WorkersManager:
                 unknown,
                 settled,
             )
+
+    def _expire_semantic_supervisor_graph_batch(self) -> int:
+        """Retire one bounded page under the storage writer transaction."""
+
+        with self.storage.transaction() as conn:
+            retired = expire_due_compare_current_file_web_work_graphs_in_transaction(
+                conn,
+                limit=100,
+            )
+        return len(retired)
+
+    async def _semantic_supervisor_graph_expiry(self) -> None:
+        """Close expired durable ownership without invoking or replaying capabilities."""
+
+        retired = await run_blocking(self._expire_semantic_supervisor_graph_batch)
+        if retired:
+            LOGGER.info("Semantic supervisor graph expiry: %d retired", retired)
 
     def _reconcile_uncertain_approvals(self) -> int:
         """Выяснить наблюдением, случилось ли то, чей исход остался неизвестным.
