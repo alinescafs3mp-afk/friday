@@ -28,6 +28,7 @@ from friday.admin_api import (
     _lifecycle,
     _maintenance,
     _overview,
+    _semantic_supervisor,
     _users,
 )
 
@@ -47,3 +48,4 @@ router.include_router(_files.router)
 router.include_router(_evaluation.router)
 router.include_router(_maintenance.router)
 router.include_router(_data_sources.router)
+router.include_router(_semantic_supervisor.router)

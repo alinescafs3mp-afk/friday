@@ -75,17 +75,23 @@ from friday.server import create_app
 # product witness; it cannot delete an ordinary Inbox item.
 # 195 → 197: owner-only same-process document-map shadow observation and
 # atomic rollout-attestation consume; both are body-free control-plane routes.
-EXPECTED_OPERATIONS = 197
+# 197 → 199: owner-only issue/consume for the independently signed, one-use
+# semantic-supervisor representative-window witness.
+EXPECTED_OPERATIONS = 199
 # Areas that are mounted through include_router, i.e. exactly the ones app.routes
 # cannot see. Pinning their sizes catches a router that quietly stops being included.
 EXPECTED_BY_PREFIX = {
-    "/api/admin": 102,
+    "/api/admin": 104,
     "/api/kg": 24,
     "/api/missions": 4,
 }
 DOCUMENT_MAP_WITNESS_OPERATIONS = {
     "POST /api/admin/secondary-document-map-witness/consume-rollout-attestation",
     "POST /api/admin/secondary-document-map-witness/observe-shadow",
+}
+SEMANTIC_SUPERVISOR_WITNESS_OPERATIONS = {
+    "POST /api/admin/semantic-supervisor-witness/consume-representative-window-attestation",
+    "POST /api/admin/semantic-supervisor-witness/issue-representative-window-attestation",
 }
 
 
@@ -103,6 +109,7 @@ def test_http_contract_size_is_pinned(settings):
         "Update EXPECTED_OPERATIONS only when an endpoint was added or removed on purpose."
     )
     assert surface >= DOCUMENT_MAP_WITNESS_OPERATIONS
+    assert surface >= SEMANTIC_SUPERVISOR_WITNESS_OPERATIONS
 
 
 def test_router_mounted_areas_are_all_present(settings):

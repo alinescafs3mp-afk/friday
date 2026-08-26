@@ -242,6 +242,8 @@ _SAFE_AUDIT_ACTIONS = frozenset(
         "admin.relation_candidate.rejected",
         "admin.relations.read",
         "admin.resolutions.read",
+        "admin.semantic_supervisor.consume_representative_window_attestation",
+        "admin.semantic_supervisor.issue_representative_window_attestation",
         "admin.source.search",
         "admin.token.create",
         "admin.token.revoke",
