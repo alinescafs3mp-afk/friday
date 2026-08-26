@@ -418,11 +418,13 @@ class _DocumentMapSecondary:
         mode: SecondaryMode = SecondaryMode.ASSIST,
         outcome: str = "success",
         failure: SecondaryFailure | None = None,
+        fail_at: int = 1,
         raw_marker: str = "",
     ) -> None:
         self.mode = mode
         self.outcome = outcome
         self.failure = failure
+        self.fail_at = fail_at
         self.raw_marker = raw_marker
         self.requests: list[ModelRequest] = []
         self.fallback_total = 0
@@ -469,7 +471,7 @@ class _DocumentMapSecondary:
         self.entered.set()
         if self.outcome == "cancel":
             await asyncio.Future()
-        if self.failure is not None:
+        if self.failure is not None and len(self.requests) == self.fail_at:
             self.fallback_total += 1
             return await primary_fallback()
         candidate = self._candidate(request)
@@ -558,6 +560,15 @@ def _chunk_payloads(llm: _HierarchyLLM) -> list[dict[str, Any]]:
         _payload(str(item.get("content") or ""), CHUNK_PREFIX)
         for call in llm.calls
         for item in call["messages"]
+        if str(item.get("content") or "").startswith(CHUNK_PREFIX)
+    ]
+
+
+def _secondary_chunk_payloads(secondary: _DocumentMapSecondary) -> list[dict[str, Any]]:
+    return [
+        _payload(str(item.get("content") or ""), CHUNK_PREFIX)
+        for request in secondary.requests
+        for item in request.messages
         if str(item.get("content") or "").startswith(CHUNK_PREFIX)
     ]
 
@@ -923,6 +934,121 @@ async def test_complete_current_small_office_document_uses_the_same_advisory_con
     assert payload["text"] == attachment["transient_text"]
 
 
+@pytest.mark.asyncio
+async def test_2778_char_russian_current_docx_is_mapped_in_byte_safe_calls_then_one_primary(
+    settings: Any,
+    storage: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source = (("Образец рапортов. Русский факт. " * 100) + "КОНЕЦ")[:2_778]
+    assert len(source) == 2_778
+    secondary = _DocumentMapSecondary()
+    llm = _HierarchyLLM("Primary reviewed the complete report.")
+
+    result = await _run(
+        settings,
+        storage,
+        monkeypatch,
+        question="Проведи ревью всего текущего документа.",
+        attachments=[_owned("Образец рапортов.docx", source)],
+        llm=llm,
+        secondary_brain=secondary,
+    )
+
+    assert result["message"].endswith("Primary reviewed the complete report.")
+    assert 1 < len(secondary.requests) <= agent_runtime_module._CURRENT_DOCUMENT_SECONDARY_MAX_BATCHES
+    assert (
+        len(secondary.requests) * secondary.requests[0].max_output_tokens / 100.0
+        < agent_runtime_module._CURRENT_DOCUMENT_SECONDARY_DEADLINE_SEC
+    )
+    assert all(
+        "96 characters" in str(request.messages[0].get("content") or "")
+        and "600" not in str(request.messages[0].get("content") or "")
+        for request in secondary.requests
+    )
+    _assert_exact_coverage(
+        _secondary_chunk_payloads(secondary),
+        [("Образец рапортов.docx", source)],
+    )
+    assert secondary.success_total == len(secondary.requests)
+    assert secondary.fallback_total == 0
+    assert len({request.absolute_deadline_monotonic for request in secondary.requests}) == 1
+    for request in secondary.requests:
+        input_bytes = sum(
+            len(str(item.get("content") or "").encode("utf-8", errors="surrogatepass"))
+            for item in request.messages
+        )
+        assert input_bytes <= 4_096 - request.max_output_tokens - 256
+    assert _chunk_payloads(llm) == []
+    assert (
+        len(
+            [
+                call
+                for call in llm.calls
+                if agent_runtime_module._CURRENT_DOCUMENT_SECONDARY_HINT_PREFIX in _blob(call["messages"])
+            ]
+        )
+        == 1
+    )
+
+
+@pytest.mark.asyncio
+async def test_near_24k_current_pdf_skips_unsafe_serial_fanout_for_exact_primary(
+    settings: Any,
+    storage: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(AgentRuntime, "_today_line", lambda _self: "\n- FIXED-TODAY")
+    source = (("Строка полного отчёта с проверяемым фактом. " * 700) + "КОНЕЦ")[
+        : agent_runtime_module._ATTACHMENT_CONTEXT_CHARS - 1
+    ]
+    assert len(source) == agent_runtime_module._ATTACHMENT_CONTEXT_CHARS - 1
+    attachment = _owned("near-ordinary-limit.pdf", source)
+    secondary = _DocumentMapSecondary()
+    baseline_llm = _HierarchyLLM("one primary final")
+    assisted_llm = _HierarchyLLM("one primary final")
+    baseline_runtime = AgentRuntime(settings, storage, llm=baseline_llm)
+    runtime = AgentRuntime(settings, storage, llm=assisted_llm, secondary_brain=secondary)
+    baseline_context = AgentContext(
+        conversation_id="current-document-near-24k-baseline",
+        user_id="owner",
+        person_id="owner",
+        current_attachment_present=True,
+        focused_attachment_turn=True,
+    )
+    request = runtime._current_document_secondary_map_request(  # noqa: SLF001
+        "Проанализируй весь текущий документ.",
+        [attachment],
+        task_kind="analysis",
+    )
+    assert request is None
+
+    baseline = await baseline_runtime._generate_response(  # noqa: SLF001
+        baseline_context,
+        "Проанализируй весь текущий документ.",
+        [attachment],
+    )
+    assisted_context = AgentContext(
+        conversation_id="current-document-near-24k-assisted",
+        user_id="owner",
+        person_id="owner",
+        current_attachment_present=True,
+        focused_attachment_turn=True,
+    )
+    assisted = await runtime._generate_response(  # noqa: SLF001
+        assisted_context,
+        "Проанализируй весь текущий документ.",
+        [attachment],
+    )
+
+    assert assisted == baseline
+    assert assisted_llm.calls == baseline_llm.calls
+    assert len(assisted_llm.calls) == 1
+    assert secondary.requests == []
+    assert agent_runtime_module._CURRENT_DOCUMENT_SECONDARY_HINT_PREFIX not in repr(assisted_llm.calls)
+    assert assisted_context.current_document_secondary_hint == ""
+
+
 @pytest.mark.parametrize(
     "failure",
     [
@@ -940,7 +1066,8 @@ async def test_current_document_secondary_failure_preserves_exact_primary_prompt
     failure: SecondaryFailure,
 ) -> None:
     monkeypatch.setattr(AgentRuntime, "_today_line", lambda _self: "\n- FIXED-TODAY")
-    source = _owned("small-fallback.txt", "Complete current source.")
+    fallback_text = "я" * 2_800
+    source = _owned("multi-fallback.txt", fallback_text)
     baseline_llm = _HierarchyLLM("exact primary")
     fallback_llm = _HierarchyLLM("exact primary")
     baseline_runtime = AgentRuntime(settings, storage, llm=baseline_llm)
@@ -972,6 +1099,7 @@ async def test_current_document_secondary_failure_preserves_exact_primary_prompt
         task_kind="summary",
     )
     assert request is not None
+    assert len(request.message_batches) > 1
 
     baseline = await baseline_runtime._generate_response(  # noqa: SLF001
         baseline_context,
@@ -991,6 +1119,66 @@ async def test_current_document_secondary_failure_preserves_exact_primary_prompt
     assert len(secondary.requests) == 1
     assert secondary.success_total == 0
     assert secondary.fallback_total == 1
+    assert fallback_context.current_document_secondary_hint == ""
+
+
+@pytest.mark.asyncio
+async def test_later_secondary_chunk_failure_runs_one_byte_identical_primary_without_hint(
+    settings: Any,
+    storage: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(AgentRuntime, "_today_line", lambda _self: "\n- FIXED-TODAY")
+    question = "Проведи анализ всего документа."
+    source = _owned("later-map-failure.docx", "я" * 2_800)
+    baseline_llm = _HierarchyLLM("exact primary")
+    fallback_llm = _HierarchyLLM("exact primary")
+    baseline_runtime = AgentRuntime(settings, storage, llm=baseline_llm)
+    secondary = _DocumentMapSecondary(
+        failure=SecondaryFailure.CONNECT_FAILED,
+        fail_at=2,
+    )
+    runtime = AgentRuntime(settings, storage, llm=fallback_llm, secondary_brain=secondary)
+    baseline_context = AgentContext(
+        conversation_id="later-map-baseline",
+        user_id="owner",
+        person_id="owner",
+        current_attachment_present=True,
+        focused_attachment_turn=True,
+    )
+    fallback_context = AgentContext(
+        conversation_id="later-map-fallback",
+        user_id="owner",
+        person_id="owner",
+        current_attachment_present=True,
+        focused_attachment_turn=True,
+    )
+    request = runtime._current_document_secondary_map_request(  # noqa: SLF001
+        question,
+        [source],
+        task_kind="analysis",
+    )
+    assert request is not None and len(request.message_batches) >= 2
+
+    baseline = await baseline_runtime._generate_response(  # noqa: SLF001
+        baseline_context,
+        question,
+        [source],
+    )
+    fallback = await runtime._current_document_secondary_assisted_response(  # noqa: SLF001
+        fallback_context,
+        question,
+        [source],
+        request=request,
+    )
+
+    assert fallback == baseline
+    assert fallback_llm.calls == baseline_llm.calls
+    assert len(fallback_llm.calls) == 1
+    assert len(secondary.requests) == 2
+    assert secondary.success_total == 1
+    assert secondary.fallback_total == 1
+    assert agent_runtime_module._CURRENT_DOCUMENT_SECONDARY_HINT_PREFIX not in repr(fallback_llm.calls)
     assert fallback_context.current_document_secondary_hint == ""
 
 
@@ -1351,7 +1539,8 @@ def test_current_document_secondary_accepts_complete_supported_office_and_html_c
     )
 
     assert request is not None
-    messages, _max_output_tokens, _max_output_chars = request
+    assert len(request.message_batches) == 1
+    messages = request.message_batches[0]
     payload = next(
         _payload(str(item["content"]), CHUNK_PREFIX)
         for item in messages
@@ -1440,7 +1629,7 @@ async def test_current_document_secondary_never_consumes_reply_or_replay_lineage
     [
         _owned("incomplete.txt", "partial", extraction_truncated=True),
         _owned("wrong-carrier.png", "text returned by an image parser"),
-        _owned("too-large.txt", "я" * 4_000),
+        _owned("too-large.txt", "я" * (agent_runtime_module._ATTACHMENT_CONTEXT_CHARS + 1)),
     ],
 )
 def test_current_document_secondary_rejects_incomplete_wrong_carrier_or_oversized_source(

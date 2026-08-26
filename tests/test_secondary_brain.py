@@ -1365,6 +1365,92 @@ async def test_current_document_assist_reports_selected_success_and_exact_fallba
 
 
 @pytest.mark.asyncio
+async def test_multichunk_current_document_later_failure_has_one_fallback_diagnostic(
+    settings: Any,
+    storage: Any,
+) -> None:
+    map_calls = 0
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal map_calls
+        if request.url.path.endswith("/friday-profile"):
+            return _profile_response()
+        if request.url.path.endswith("/models"):
+            return _models_response()
+        payload = json.loads(request.content)
+        messages = payload.get("messages") or []
+        if messages and messages[-1].get("content") == "Reply with exactly: ready":
+            return _response(content="ready")
+        map_calls += 1
+        if map_calls == 2:
+            return httpx.Response(503)
+        return _response(content=json.dumps({"summary": f"valid map {map_calls}"}))
+
+    configured = replace(
+        _configured_settings(settings, private=True),
+        secondary_llm_workloads=("document_map",),
+        secondary_llm_document_map_mode="assist",
+    )
+    scheduler = build_secondary_brain(configured, transport=httpx.MockTransport(handler))
+
+    class Primary:
+        enabled = True
+
+        def __init__(self) -> None:
+            self.calls: list[list[dict[str, Any]]] = []
+
+        async def chat(self, messages: list[dict[str, Any]], **_kwargs: Any) -> dict[str, Any]:
+            self.calls.append([dict(item) for item in messages])
+            return {"content": "exact baseline primary", "finish_reason": "stop"}
+
+    primary = Primary()
+    runtime = AgentRuntime(configured, storage, llm=primary, secondary_brain=scheduler)
+    source = _OwnedAttachment(
+        {
+            "filename": "multi-current.docx",
+            "transient_text": "я" * 2_800,
+            "extraction_success": True,
+            "verification_eligible": True,
+        }
+    )
+    context = AgentContext(
+        conversation_id="current-document-later-diagnostic",
+        user_id="owner",
+        person_id="owner",
+        current_attachment_present=True,
+        focused_attachment_turn=True,
+    )
+
+    try:
+        plan = runtime._current_document_secondary_map_request(  # noqa: SLF001
+            "Проанализируй документ.",
+            [source],
+            task_kind="analysis",
+        )
+        assert plan is not None and len(plan.message_batches) >= 2
+        result = await runtime._current_document_secondary_assisted_response(  # noqa: SLF001
+            context,
+            "Проанализируй документ.",
+            [source],
+            request=plan,
+        )
+
+        assert result["content"] == "exact baseline primary"
+        assert len(primary.calls) == 1
+        assert agent_runtime_module._CURRENT_DOCUMENT_SECONDARY_HINT_PREFIX not in "\n".join(
+            str(item.get("content") or "") for item in primary.calls[0]
+        )
+        diagnostics = scheduler.diagnostics_status()
+        workload = diagnostics["workloads"]["document_map"]
+        assert workload["selected_total"] == 2
+        assert workload["success_total"] == 1
+        assert workload["fallback_reasons"] == {"http_transient": 1}
+        assert diagnostics["primary_fallback_total"] == 1
+    finally:
+        await scheduler.aclose()
+
+
+@pytest.mark.asyncio
 async def test_document_map_over_secondary_chunk_cap_reuses_complete_primary_plan_without_admission(
     settings: Any,
     storage: Any,
