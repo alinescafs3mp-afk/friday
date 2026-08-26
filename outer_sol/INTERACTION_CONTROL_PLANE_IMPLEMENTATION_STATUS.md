@@ -1,14 +1,17 @@
 # Interaction Control Plane implementation status
 
-Status: **SCHEMA-41 VERTICALS DEPLOYED; NEXT DURABLE COMPARISON JOURNEY ACTIVE**
-Date: 2026-08-25
+Status: **LOCATE/SELECT/EXPLAIN DEPLOYED; PASSAGE READER PACKAGE NEXT**
+Date: 2026-08-27
 Branch: `main`
-Source/live: Friday `0.207.26` / `9ab75a82393919e477890b601d243ae7baedad5a`,
-tree `87f05bedd19fe76ccb5928e21b47106caac1660c0bcf4e8994f8c20967d9d2e5`,
-wheel `c59c920e1936cd1cb3a386f062a1aec47a367cc4cce2767f9b148ec214ae43e1`,
-schema 41; immediate predecessor and schema-capable fallback Friday `0.207.24` /
-`9142765647b75d12cea22798df6782a09bc5c4b8`, tree
-`ce654409f09b93cc651543968e81bb7254dd5af48d8698ae7cd06c0084d28f30`
+Source/live: Friday `0.207.51` / `4b9b48adf1462cfc9af4f81c7158078ec3aab20a`,
+tree `6a534f83cf030bb0beab856a4748abefcacca1b77f975c69ee2b0504451c8dd0`,
+wheel `6f0a08312ac8dd5d815004027e442e19ba96d648477990d2e54557701dceb529`,
+schema 43; immediate predecessor and schema-capable fallback Friday `0.207.50` /
+`49cca50906dddebbefbd0d5842e193e741e06957`, tree
+`c6673eea90974defc14b4f106a1011bb7182435e3a775cba70f513c7c33e2d25`,
+wheel `febea38bdb586c2cd3162f7ecc66978d55579ae481d17cde2b4bef901e94aac0`.
+Immutable activation is `clear`; terminal receipt
+`c508dc468a83d662fa57e23142d344d95128cd849416a1806fbf14148adfe507`.
 
 ## Release checkpoint
 
@@ -24,11 +27,10 @@ schema 41; immediate predecessor and schema-capable fallback Friday `0.207.24` /
 - `0.207.8` adds the authorized read-only federated `archive_search` foundation:
   stable source/passage identity, explicit per-corpus coverage, process-private
   carriers and same-transaction reauthorization/publication.
-- The live anchor resolves to `9ab75a8`, with schema-41 `9142765` as both
-  immediate predecessor and rollback fallback. Backend and bridge are
-  active, trusted-CA health is `ok`, and
-  schema 41, SQLite integrity, foreign keys, FTS and body-free catalog bindings
-  are clean; semantic enrichment coverage remains honestly partial.
+- The live anchor resolves to `4b9b48a`, with schema-43 `49cca50` as both
+  immediate predecessor and schema-capable fallback. Backend and bridge are
+  active, trusted-CA health is `ok`, and schema 43, SQLite integrity and foreign
+  keys are clean; semantic enrichment coverage remains honestly partial.
 - The `912dc1a` schema-39 vertical is now deployed in `0.207.9`: one durable,
   body-free selected archive evidence continuation. Exact restart replay
   performs fresh authority and revision checks without search or model use;
@@ -57,6 +59,17 @@ schema 41; immediate predecessor and schema-capable fallback Friday `0.207.24` /
   calls, exact nested passage citations, independent verification, final
   authority/source/lease rechecks and one atomic receipt/Work-Item CAS. Any
   optional-lane failure publishes the exact structural replay instead.
+- `CompareConversationWithDocument` was completed separately in `0.207.29`; it
+  is not the current implementation task.
+- `0.207.49` deployed the dormant reader for promotion of an accepted archive
+  candidate into selected evidence. `0.207.50` atomically completes the ordinal
+  candidate question, promotes the exact source/passages/coverage/receipt and
+  supports a later natural explanation after a second runtime restart without
+  another search or ordinary-model fallback. The reader-first rollback was
+  proven against the writer's rows.
+- `0.207.51` deploys only the body-free document-passage projection contract.
+  Exact authoritative source revalidation was made mandatory before release;
+  there is no schema, persistence writer, backfill or runtime-route change.
 
 ## P0A implemented
 
@@ -101,8 +114,9 @@ schema 41; immediate predecessor and schema-capable fallback Friday `0.207.24` /
 - The durable Work Items currently released are the narrow
   `RecallConversation` exact-window canary and the body-free
   `RecallSelectedArchiveEvidence` continuation plus the bounded body-free
-  archive candidate selection. They must not be generalized into a claim that
-  generic document recall, Active Frames or WorkGraphs are complete.
+  archive candidate selection and atomic selected-evidence promotion. They must
+  not be generalized into a claim that cross-lane document recall, Active
+  Frames or WorkGraphs are complete.
 - The common effect contract is proven only for the released Obsidian
   create/append vertical. It is not evidence that every reminder, connector or
   future side effect has adopted the envelope.
@@ -110,30 +124,23 @@ schema 41; immediate predecessor and schema-capable fallback Friday `0.207.24` /
 ## Next implementation order
 
 1. Use the canonical golden-journey/evidence registry in
-   `outer_sol/PROJECT_IMPLEMENTATION_STATUS.md`; its machine validator owns the
-   strict readiness and evidence rules.
-2. Select the next incomplete bounded ICP/V12 golden journey and close its
-   deterministic, integration, artifact and recovery evidence.
-3. Register product-linked candidate evidence from natural production use; do
-   not create a synthetic live test corpus.
-4. Keep generic autonomous WorkGraphs behind complete user journeys.
+   `outer_sol/PROJECT_IMPLEMENTATION_STATUS.md`; `document_recall_answer` remains
+   `DEGRADED` with `cross_lane_coverage_missing`.
+2. Deploy reader-first document-passage manifest/table capacity with a
+   schema-capable fallback and no writer.
+3. Activate the bounded writer and resumable backfill separately, then add
+   typed dates and embeddings without widening the frozen V12 routes.
+4. Keep generic autonomous WorkGraphs and the separately owned Semantic
+   Supervisor on `HOLD`. Docker and companion work are out of scope.
 
-The selected next journey is `CompareConversationWithDocument`: preserve exact
-selected message evidence, wait durably for a document reference, survive
-restart, resolve attachment/name/ordinal under fresh authority and revisions,
-then publish one independently verified two-source comparison and one atomic
-receipt. Its schema-capacity reader lands before the writer/runtime package;
-`TurnPlan v1` remains unchanged.
+## Current focused gate
 
-## Current cumulative gate
-
-- The exact `0.207.24` base passed 18,666 non-UI and 31 UI tests; the pinned real
-  Syncthing 2.1.3 smoke executed rather than remaining environment-skipped.
-- Schema-38 migration, lifecycle/privacy, revision-CAS, restart, temporal
-  continuation, receipt/plan binding and named-inventory compatibility checks
-  passed.
-- Ruff, mypy, compile and release diff checks passed with zero skips. The
-  bounded `0.207.26` release then passed its focused secondary/release gate,
-  reproduced its wheel byte-for-byte and activated `clear`; Docker and
-  companion-plugin work remained outside primary Friday certification. Gate
-  scratch is owned and removed by the canonical runner.
+- The `0.207.50` writer package passed 75 focused foundation/schema tests and 7
+  focused runtime tests, including both runtime restarts and compatibility with
+  the deployed `0.207.49` reader. Both release wheels reproduced byte-for-byte
+  and both activations completed `clear`.
+- The `0.207.51` contract passed 59 focused passage-projection tests after the
+  exact-source revalidation fix. Its wheel reproduced byte-for-byte and
+  activation completed `clear`.
+- Only these focused package gates are asserted here. No Docker or
+  companion-plugin work entered certification.
