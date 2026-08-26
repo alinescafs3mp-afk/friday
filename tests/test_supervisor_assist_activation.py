@@ -198,6 +198,12 @@ def _evidence(
             semantic_supervisor_policy.SUPERVISOR_RUNTIME_PROFILE_MANIFEST_SHA256
         ),
         "registry_binding_sha256": registry_sha256,
+        "baseline_file_sha256": "9" * 64,
+        "baseline_report_sha256": "a" * 64,
+        "operator_attestation_sha256": "b" * 64,
+        "precursor_assist_promotion_evidence_sha256": (
+            "c" * 64 if observed_mode is SupervisorMode.ASSIST else None
+        ),
         "max_steps": SUPERVISOR_ASSIST_PROMOTION_MAX_STEPS,
         "max_review_rounds": SUPERVISOR_ASSIST_PROMOTION_MAX_REVIEW_ROUNDS,
         "observation_count": 20,
@@ -500,7 +506,7 @@ def test_evidence_parser_rejects_extra_missing_nonfinite_and_malformed_fields(
     assert captured.value.reason is AssistPromotionActivationReason.EVIDENCE_INVALID
 
 
-def test_old_v1_v2_v3_evidence_and_old_product_grammar_are_explicitly_rejected(
+def test_old_v1_through_v4_evidence_and_old_product_grammar_are_explicitly_rejected(
     tmp_path: Path,
 ) -> None:
     _root, source = _release_root(tmp_path)
@@ -524,15 +530,50 @@ def test_old_v1_v2_v3_evidence_and_old_product_grammar_are_explicitly_rejected(
     old_v3_product["schema"] = "friday.supervisor-assist-readiness-evidence.v1"
     old_v3_product.pop("latency_budget_target_mode")
     old_v3_product.pop("latency_budget_source_revision_sha256")
+    old_v4 = evidence.payload()
+    old_v4["schema"] = "friday.supervisor-assist-promotion.v4"
+    old_v4.pop("baseline_file_sha256")
+    old_v4.pop("baseline_report_sha256")
+    old_v4.pop("operator_attestation_sha256")
+    old_v4.pop("precursor_assist_promotion_evidence_sha256")
     old_product = evidence.payload()
     product = old_product["product_evidence"]
     assert isinstance(product, dict)
     product["schema"] = "friday.supervisor-assist-product-evidence.v1"
 
-    for payload in (old_top, old_v2, old_v3, old_product):
+    for payload in (old_top, old_v2, old_v3, old_v4, old_product):
         with pytest.raises(AssistPromotionActivationError) as captured:
             _parse_payload(payload)
         assert captured.value.reason is AssistPromotionActivationReason.EVIDENCE_INVALID
+
+
+@pytest.mark.parametrize(
+    ("observed_mode", "field", "value"),
+    (
+        (SupervisorMode.SHADOW, "baseline_file_sha256", "F" * 64),
+        (SupervisorMode.SHADOW, "baseline_report_sha256", None),
+        (SupervisorMode.SHADOW, "operator_attestation_sha256", "short"),
+        (SupervisorMode.SHADOW, "precursor_assist_promotion_evidence_sha256", "c" * 64),
+        (SupervisorMode.ASSIST, "precursor_assist_promotion_evidence_sha256", None),
+    ),
+)
+def test_v5_parser_closes_provenance_fields_by_observed_mode(
+    tmp_path: Path,
+    observed_mode: SupervisorMode,
+    field: str,
+    value: object,
+) -> None:
+    _root, source = _release_root(tmp_path)
+    payload = _evidence(
+        source_sha256=source,
+        registry_sha256=operational_capability_snapshot().digest_hex(),
+        observed_mode=observed_mode,
+    ).payload()
+    payload[field] = value
+
+    with pytest.raises(AssistPromotionActivationError) as captured:
+        _parse_payload(payload)
+    assert captured.value.reason is AssistPromotionActivationReason.EVIDENCE_INVALID
 
 
 @pytest.mark.parametrize("mutation", ["extra", "missing", "wrong_schema"])
@@ -961,7 +1002,11 @@ def test_source_registry_scheduler_evidence_hash_and_identity_drift_close_typed(
         evidence_path,
         str(raw.evidence_sha256),
     )
-    wrong_stage = replace(loaded.evidence, observed_mode=SupervisorMode.ASSIST)
+    wrong_stage = replace(
+        loaded.evidence,
+        observed_mode=SupervisorMode.ASSIST,
+        precursor_assist_promotion_evidence_sha256="c" * 64,
+    )
     wrong_path, wrong_sha = _evidence_file(tmp_path, wrong_stage)
     identity_drift = load_assist_promotion_activation(
         replace(raw, evidence_file=str(wrong_path), evidence_sha256=wrong_sha),

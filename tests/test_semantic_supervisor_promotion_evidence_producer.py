@@ -298,6 +298,10 @@ def test_assist_producer_uses_real_identities_and_is_activation_parseable() -> N
     assert evidence.target_policy_sha256 == (
         semantic_supervisor_policy.SUPERVISOR_ASSIST_PRODUCT_POLICY_SHA256
     )
+    assert evidence.baseline_file_sha256 == baseline.file_sha256
+    assert evidence.baseline_report_sha256 == baseline.report_sha256
+    assert evidence.operator_attestation_sha256 == attestation.canonical_sha256()
+    assert evidence.precursor_assist_promotion_evidence_sha256 is None
     assert isinstance(evidence.product_evidence, AssistPromotionReadinessEvidence)
     assert evidence.product_evidence.baseline_failure_class_count == 5
     assert evidence.product_evidence.latency_budget_sha256 == hashlib.sha256(budget_raw).hexdigest()
@@ -325,6 +329,10 @@ def test_canary_producer_requires_precursor_and_explicit_quality_basis() -> None
     )
 
     assert evidence.observed_mode is SupervisorMode.ASSIST
+    assert evidence.baseline_file_sha256 == baseline.file_sha256
+    assert evidence.baseline_report_sha256 == baseline.report_sha256
+    assert evidence.operator_attestation_sha256 == attestation.canonical_sha256()
+    assert evidence.precursor_assist_promotion_evidence_sha256 == PRECURSOR
     assert isinstance(evidence.product_evidence, AssistPromotionOutcomeEvidence)
     assert evidence.product_evidence.promoted_complete_count == 12
     assert evidence.product_evidence.quality_basis is (
@@ -673,6 +681,10 @@ def test_cli_builds_precursor_bound_canary_outcome(tmp_path: Path, capsys: pytes
     payload = json.loads(output.read_text(encoding="utf-8"))
     assert receipt["precursor_assist_promotion_evidence_sha256"] == PRECURSOR
     assert payload["observed_mode"] == "assist"
+    assert payload["baseline_file_sha256"] == receipt["baseline_file_sha256"]
+    assert payload["baseline_report_sha256"] == receipt["baseline_report_sha256"]
+    assert payload["operator_attestation_sha256"] == receipt["operator_attestation_sha256"]
+    assert payload["precursor_assist_promotion_evidence_sha256"] == PRECURSOR
     assert payload["product_evidence"]["quality_basis"] == "completion_rate_improvement"
 
 
@@ -719,6 +731,91 @@ def test_immutable_operator_accepts_exact_producer_output(tmp_path: Path) -> Non
         mode="assist",
         invalid_code="producer_integration_invalid",
     )
+
+
+def test_producer_canary_output_binds_exact_predecessor_for_operator(tmp_path: Path) -> None:
+    assist_baseline = _accepted_baseline()
+    _assist_budget_raw, assist_budget = _accepted_budget(SupervisorMode.ASSIST)
+    assist_evidence = build_supervisor_assist_promotion_evidence(
+        evidence_id="chain_assist_window",
+        baseline=assist_baseline,
+        budget=assist_budget,
+        attestation=_attestation(
+            SupervisorMode.ASSIST,
+            baseline=assist_baseline,
+            budget=assist_budget,
+        ),
+        documented_failure_class_id=FAILURE_CLASS,
+        documented_failure_class_sha256=FAILURE_DIGEST,
+    )
+    precursor_sha256 = assist_evidence.canonical_sha256()
+
+    canary_report = _report()
+    canary_report["product_windows"]["promoted_execution"]["assist"][
+        "promotion_evidence_sha256"
+    ] = precursor_sha256
+    canary_baseline_raw = _resign(canary_report)
+    canary_baseline = load_accepted_supervisor_production_baseline(
+        canary_baseline_raw,
+        expected_file_sha256=hashlib.sha256(canary_baseline_raw).hexdigest(),
+    )
+    canary_budget_raw, canary_budget = _accepted_budget(SupervisorMode.CANARY)
+    canary_attestation = _attestation(
+        SupervisorMode.CANARY,
+        baseline=canary_baseline,
+        budget=canary_budget,
+        basis=AssistPromotionQualityBasis.COMPLETION_RATE_IMPROVEMENT,
+        precursor=precursor_sha256,
+    )
+    canary_evidence = build_supervisor_canary_promotion_evidence(
+        evidence_id="chain_canary_window",
+        baseline=canary_baseline,
+        budget=canary_budget,
+        attestation=canary_attestation,
+    )
+    canary_raw = canonical_json_file_bytes(canary_evidence.payload())
+    canary_path = tmp_path / "canary-evidence.json"
+    budget_path = tmp_path / "canary-budget.json"
+    canary_path.write_bytes(canary_raw)
+    budget_path.write_bytes(canary_budget_raw)
+    canary_path.chmod(0o600)
+    budget_path.chmod(0o600)
+    values = {
+        "FRIDAY_SEMANTIC_SUPERVISOR_MAX_REVIEW_ROUNDS": "1",
+        "FRIDAY_SEMANTIC_SUPERVISOR_MAX_STEPS": "6",
+        "FRIDAY_SEMANTIC_SUPERVISOR_MODE": "canary",
+        "FRIDAY_SEMANTIC_SUPERVISOR_PROMOTION_CANARY_ACTOR_BINDINGS": "d" * 64,
+        "FRIDAY_SEMANTIC_SUPERVISOR_PROMOTION_ENABLED": "1",
+        "FRIDAY_SEMANTIC_SUPERVISOR_PROMOTION_EVIDENCE_FILE": str(canary_path),
+        "FRIDAY_SEMANTIC_SUPERVISOR_PROMOTION_EVIDENCE_SHA256": hashlib.sha256(
+            canary_raw
+        ).hexdigest(),
+        "FRIDAY_SEMANTIC_SUPERVISOR_PROMOTION_LATENCY_BUDGET_FILE": str(budget_path),
+        "FRIDAY_SEMANTIC_SUPERVISOR_PROMOTION_LATENCY_BUDGET_SHA256": hashlib.sha256(
+            canary_budget_raw
+        ).hexdigest(),
+        "FRIDAY_SEMANTIC_SUPERVISOR_PROMOTION_REGISTRY_BINDING_SHA256": REGISTRY,
+        "FRIDAY_SEMANTIC_SUPERVISOR_PROMOTION_SOURCE_REVISION_SHA256": SOURCE,
+        "FRIDAY_SEMANTIC_SUPERVISOR_TASKS": "compare_current_file_with_current_web",
+        "FRIDAY_SEMANTIC_SUPERVISOR_TIMEOUT_SEC": "12",
+    }
+
+    assert (
+        operator._validate_semantic_supervisor_promoted_values(  # noqa: SLF001
+            values,
+            mode="canary",
+            invalid_code="producer_chain_invalid",
+            expected_precursor_assist_evidence_sha256=precursor_sha256,
+        )
+        == canary_evidence.canonical_sha256()
+    )
+    with pytest.raises(operator.ReleaseFailure):
+        operator._validate_semantic_supervisor_promoted_values(  # noqa: SLF001
+            values,
+            mode="canary",
+            invalid_code="producer_chain_invalid",
+            expected_precursor_assist_evidence_sha256="f" * 64,
+        )
 
 
 def test_budget_mode_and_source_are_not_inferred_from_evidence_target() -> None:

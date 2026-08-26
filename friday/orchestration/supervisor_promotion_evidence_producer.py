@@ -923,6 +923,12 @@ def _live_evidence_common(
             semantic_supervisor_policy.SUPERVISOR_RUNTIME_PROFILE_MANIFEST_SHA256
         ),
         registry_binding_sha256=attestation.registry_binding_sha256,
+        baseline_file_sha256=attestation.baseline_file_sha256,
+        baseline_report_sha256=attestation.baseline_report_sha256,
+        operator_attestation_sha256=attestation.canonical_sha256(),
+        precursor_assist_promotion_evidence_sha256=(
+            attestation.precursor_assist_promotion_evidence_sha256
+        ),
         max_steps=SUPERVISOR_ASSIST_PROMOTION_MAX_STEPS,
         max_review_rounds=SUPERVISOR_ASSIST_PROMOTION_MAX_REVIEW_ROUNDS,
         observation_count=observation_count,

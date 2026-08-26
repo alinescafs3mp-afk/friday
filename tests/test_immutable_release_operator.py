@@ -2516,6 +2516,7 @@ def _semantic_supervisor_promoted_values(
     source_sha256: str = "b" * 64,
     registry_sha256: str = "c" * 64,
     actors: tuple[str, ...] = (),
+    precursor_assist_evidence_sha256: str | None = None,
 ) -> dict[str, str]:
     assert mode in {"assist", "canary"}
     budget_file = evidence_file.with_name(f"{evidence_file.stem}-latency-budget.json")
@@ -2588,14 +2589,14 @@ def _semantic_supervisor_promoted_values(
             "user_visible_regression_count": 0,
         }
     evidence_payload = {
-        "schema": "friday.supervisor-assist-promotion.v4",
+        "schema": "friday.supervisor-assist-promotion.v5",
         "evidence_id": f"operator_{mode}_fixture",
         "authority": "production_joined",
         "observed_mode": "shadow" if mode == "assist" else "assist",
         "task_class": "compare_current_file_with_current_web",
         "source_revision_sha256": source_sha256,
         "promotion_policy_sha256": (
-            "0897ff227eb0148a5bf670d71fb9133f8fa217747f33673c2b989c1c29e05cce"
+            "5138c1d09d4c34aae70999711c5887b721ae1385994fc26a61d37edd6ccf2e68"
         ),
         "observed_policy_id": (
             "gptoss20b-semantic-supervisor-v1"
@@ -2616,6 +2617,12 @@ def _semantic_supervisor_promoted_values(
             "93ea5698b8b6a9bf8a7dc697ffe37d7353055aa16555188991747bba73d059e3"
         ),
         "registry_binding_sha256": registry_sha256,
+        "baseline_file_sha256": "a" * 64,
+        "baseline_report_sha256": "b" * 64,
+        "operator_attestation_sha256": "c" * 64,
+        "precursor_assist_promotion_evidence_sha256": (
+            (precursor_assist_evidence_sha256 or "d" * 64) if mode == "canary" else None
+        ),
         "max_steps": 6,
         "max_review_rounds": 1,
         "observation_count": 20,
@@ -2718,15 +2725,26 @@ def _semantic_supervisor_promoted_environment(
     secondary_values, nonsecondary, secondary = operator._secondary_environment_parts(  # noqa: SLF001
         current
     )
-    _current_values, unrelated, _current = operator._semantic_supervisor_environment_parts(  # noqa: SLF001
+    current_values, unrelated, _current = operator._semantic_supervisor_environment_parts(  # noqa: SLF001
         nonsecondary
     )
+    precursor: str | None = None
+    if mode == "canary" and current_values.get("FRIDAY_SEMANTIC_SUPERVISOR_MODE") == "assist":
+        predecessor_path = Path(
+            current_values["FRIDAY_SEMANTIC_SUPERVISOR_PROMOTION_EVIDENCE_FILE"]
+        )
+        predecessor_payload = json.loads(predecessor_path.read_text(encoding="ascii"))
+        assert isinstance(predecessor_payload, dict)
+        precursor = hashlib.sha256(
+            operator._canonical_json(predecessor_payload)  # noqa: SLF001
+        ).hexdigest()
     values = _semantic_supervisor_promoted_values(
         mode=mode,
         evidence_file=evidence_file,
         source_sha256=source_sha256,
         registry_sha256=registry_sha256,
         actors=actors,
+        precursor_assist_evidence_sha256=precursor,
     )
     semantic = b"".join(f"{key}={value}\n".encode("ascii") for key, value in sorted(values.items()))
     assert secondary == b"".join(
@@ -3280,6 +3298,91 @@ def test_systemd_port_round_trips_exact_semantic_supervisor_assist_and_canary(
     assert shadow_port._expected_semantic_health_mode() == "shadow"  # noqa: SLF001
 
 
+def test_assist_to_canary_binds_canonical_predecessor_evidence_digest(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _base, shadow = _semantic_supervisor_shadow_port(tmp_path, monkeypatch)
+    assist_evidence = tmp_path / "assist-provenance.json"
+    assist_evidence.write_bytes(b"placeholder")
+    assist_evidence.chmod(0o600)
+    assist = _semantic_supervisor_promoted_environment(
+        shadow,
+        mode="assist",
+        evidence_file=assist_evidence,
+    )
+    _secondary_values, nonsecondary, _secondary = operator._secondary_environment_parts(  # noqa: SLF001
+        assist
+    )
+    assist_values, _unrelated, _semantic = operator._semantic_supervisor_environment_parts(  # noqa: SLF001
+        nonsecondary
+    )
+    old_assist_file_sha256 = assist_values[
+        "FRIDAY_SEMANTIC_SUPERVISOR_PROMOTION_EVIDENCE_SHA256"
+    ]
+    assist_raw = assist_evidence.read_bytes() + b"\n"
+    assist_evidence.write_bytes(assist_raw)
+    new_assist_file_sha256 = hashlib.sha256(assist_raw).hexdigest()
+    assist = assist.replace(
+        f"FRIDAY_SEMANTIC_SUPERVISOR_PROMOTION_EVIDENCE_SHA256={old_assist_file_sha256}\n".encode(),
+        f"FRIDAY_SEMANTIC_SUPERVISOR_PROMOTION_EVIDENCE_SHA256={new_assist_file_sha256}\n".encode(),
+        1,
+    )
+    predecessor_payload = json.loads(assist_raw)
+    assert isinstance(predecessor_payload, dict)
+    predecessor_canonical_sha256 = hashlib.sha256(
+        operator._canonical_json(predecessor_payload)  # noqa: SLF001
+    ).hexdigest()
+    assert predecessor_canonical_sha256 != new_assist_file_sha256
+
+    canary_evidence = tmp_path / "canary-provenance.json"
+    canary_evidence.write_bytes(b"placeholder")
+    canary_evidence.chmod(0o600)
+    canary = _semantic_supervisor_promoted_environment(
+        assist,
+        mode="canary",
+        evidence_file=canary_evidence,
+        actors=("d" * 64,),
+    )
+    canary_payload = json.loads(canary_evidence.read_text(encoding="ascii"))
+    assert canary_payload["precursor_assist_promotion_evidence_sha256"] == (
+        predecessor_canonical_sha256
+    )
+    operator._validate_staged_environment_transition(  # noqa: SLF001
+        "semantic_supervisor_assist_to_canary",
+        assist,
+        canary,
+    )
+    with pytest.raises(operator.ReleaseFailure):
+        operator._validate_staged_environment_transition(  # noqa: SLF001
+            "semantic_supervisor_assist_to_canary",
+            None,
+            canary,
+        )
+
+    old_canary_file_sha256 = hashlib.sha256(canary_evidence.read_bytes()).hexdigest()
+    canary_payload["precursor_assist_promotion_evidence_sha256"] = "f" * 64
+    corrupted_raw = json.dumps(
+        canary_payload,
+        ensure_ascii=True,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("ascii")
+    canary_evidence.write_bytes(corrupted_raw)
+    corrupted_file_sha256 = hashlib.sha256(corrupted_raw).hexdigest()
+    corrupted = canary.replace(
+        f"FRIDAY_SEMANTIC_SUPERVISOR_PROMOTION_EVIDENCE_SHA256={old_canary_file_sha256}\n".encode(),
+        f"FRIDAY_SEMANTIC_SUPERVISOR_PROMOTION_EVIDENCE_SHA256={corrupted_file_sha256}\n".encode(),
+        1,
+    )
+    with pytest.raises(operator.ReleaseFailure):
+        operator._validate_staged_environment_transition(  # noqa: SLF001
+            "semantic_supervisor_assist_to_canary",
+            assist,
+            corrupted,
+        )
+
+
 @pytest.mark.parametrize(
     "mutation",
     [
@@ -3427,7 +3530,7 @@ def test_semantic_supervisor_operator_binds_exact_budget_document_to_evidence(
     elif mutation == "evidence_budget_digest":
         evidence_payload["product_evidence"]["latency_budget_sha256"] = "f" * 64
     else:
-        evidence_payload["schema"] = "friday.supervisor-assist-promotion.v3"
+        evidence_payload["schema"] = "friday.supervisor-assist-promotion.v4"
 
     if mutation.startswith("budget_"):
         budget_raw = json.dumps(
@@ -3482,6 +3585,11 @@ def test_semantic_supervisor_operator_binds_exact_budget_document_to_evidence(
         ("canary", ("observed_mode",), "shadow"),
         ("assist", ("source_revision_sha256",), "f" * 64),
         ("assist", ("registry_binding_sha256",), "f" * 64),
+        ("assist", ("baseline_file_sha256",), "F" * 64),
+        ("assist", ("baseline_report_sha256",), None),
+        ("assist", ("operator_attestation_sha256",), "short"),
+        ("assist", ("precursor_assist_promotion_evidence_sha256",), "d" * 64),
+        ("canary", ("precursor_assist_promotion_evidence_sha256",), None),
         ("assist", ("promotion_policy_sha256",), "f" * 64),
         ("assist", ("observed_policy_id",), "gptoss20b-semantic-supervisor-v2"),
         ("canary", ("observed_policy_id",), "gptoss20b-semantic-supervisor-v1"),

@@ -31,7 +31,7 @@ from friday.orchestration.supervisor_contracts import (
     canonical_sha256,
 )
 
-SUPERVISOR_ASSIST_PROMOTION_SCHEMA = "friday.supervisor-assist-promotion.v4"
+SUPERVISOR_ASSIST_PROMOTION_SCHEMA = "friday.supervisor-assist-promotion.v5"
 SUPERVISOR_ASSIST_READINESS_EVIDENCE_SCHEMA = "friday.supervisor-assist-readiness-evidence.v2"
 SUPERVISOR_ASSIST_OUTCOME_EVIDENCE_SCHEMA = "friday.supervisor-assist-outcome-evidence.v2"
 SUPERVISOR_ASSIST_PROMOTION_GATE_ID = "semantic-supervisor-current-file-web-promotion-v2"
@@ -521,7 +521,11 @@ class AssistPromotionCandidate:
 
 @dataclass(frozen=True, slots=True)
 class AssistPromotionLiveEvidence:
-    """Body-free live facts; this object cannot accept itself."""
+    """Body-free live facts; this object cannot accept itself.
+
+    The optional precursor is the predecessor assist evidence's canonical
+    payload digest, not its formatting-sensitive file digest.
+    """
 
     evidence_id: str
     authority: AssistPromotionEvidenceAuthority
@@ -536,6 +540,10 @@ class AssistPromotionLiveEvidence:
     runtime_profile_id: str
     runtime_profile_manifest_sha256: str
     registry_binding_sha256: str
+    baseline_file_sha256: str
+    baseline_report_sha256: str
+    operator_attestation_sha256: str
+    precursor_assist_promotion_evidence_sha256: str | None
     max_steps: int
     max_review_rounds: int
     observation_count: int
@@ -567,8 +575,21 @@ class AssistPromotionLiveEvidence:
             ("target_policy_sha256", self.target_policy_sha256),
             ("runtime_profile_manifest_sha256", self.runtime_profile_manifest_sha256),
             ("registry_binding_sha256", self.registry_binding_sha256),
+            ("baseline_file_sha256", self.baseline_file_sha256),
+            ("baseline_report_sha256", self.baseline_report_sha256),
+            ("operator_attestation_sha256", self.operator_attestation_sha256),
         ):
             _require_digest(value, label=label)
+        if self.observed_mode is SupervisorMode.SHADOW:
+            if self.precursor_assist_promotion_evidence_sha256 is not None:
+                raise ValueError("shadow readiness evidence cannot carry an assist precursor")
+        elif self.observed_mode is SupervisorMode.ASSIST:
+            _require_digest(
+                self.precursor_assist_promotion_evidence_sha256,
+                label="precursor_assist_promotion_evidence_sha256",
+            )
+        else:
+            raise ValueError("evidence observed_mode must be shadow or assist")
         _require_safe_id(self.observed_policy_id, label="observed_policy_id")
         _require_safe_id(self.target_policy_id, label="target_policy_id")
         _require_safe_id(self.runtime_profile_id, label="runtime_profile_id")
@@ -616,6 +637,12 @@ class AssistPromotionLiveEvidence:
             "runtime_profile_id": self.runtime_profile_id,
             "runtime_profile_manifest_sha256": self.runtime_profile_manifest_sha256,
             "registry_binding_sha256": self.registry_binding_sha256,
+            "baseline_file_sha256": self.baseline_file_sha256,
+            "baseline_report_sha256": self.baseline_report_sha256,
+            "operator_attestation_sha256": self.operator_attestation_sha256,
+            "precursor_assist_promotion_evidence_sha256": (
+                self.precursor_assist_promotion_evidence_sha256
+            ),
             "max_steps": self.max_steps,
             "max_review_rounds": self.max_review_rounds,
             "observation_count": self.observation_count,

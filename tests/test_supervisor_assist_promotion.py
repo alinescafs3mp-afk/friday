@@ -168,6 +168,12 @@ def _evidence(
             semantic_supervisor_policy.SUPERVISOR_RUNTIME_PROFILE_MANIFEST_SHA256
         ),
         "registry_binding_sha256": candidate.expected_registry_binding_sha256,
+        "baseline_file_sha256": "9" * 64,
+        "baseline_report_sha256": "a" * 64,
+        "operator_attestation_sha256": "b" * 64,
+        "precursor_assist_promotion_evidence_sha256": (
+            "c" * 64 if candidate.requested_mode is SupervisorMode.CANARY else None
+        ),
         "max_steps": candidate.max_steps,
         "max_review_rounds": candidate.max_review_rounds,
         "observation_count": 20,
@@ -318,7 +324,11 @@ def test_assist_and_canary_require_distinct_predecessor_evidence() -> None:
     assist = _candidate()
     assist_evidence = _evidence(assist)
     canary = _candidate(mode=SupervisorMode.CANARY)
-    wrong_canary_evidence = _evidence(canary, observed_mode=SupervisorMode.SHADOW)
+    wrong_canary_evidence = _evidence(
+        canary,
+        observed_mode=SupervisorMode.SHADOW,
+        precursor_assist_promotion_evidence_sha256=None,
+    )
 
     assist_decision = admit_supervisor_assist_promotion(
         assist,
@@ -819,6 +829,10 @@ def test_live_evidence_payload_is_closed_body_free_and_digest_sensitive() -> Non
         "runtime_profile_id",
         "runtime_profile_manifest_sha256",
         "registry_binding_sha256",
+        "baseline_file_sha256",
+        "baseline_report_sha256",
+        "operator_attestation_sha256",
+        "precursor_assist_promotion_evidence_sha256",
         "max_steps",
         "max_review_rounds",
         "observation_count",
@@ -836,6 +850,10 @@ def test_live_evidence_payload_is_closed_body_free_and_digest_sensitive() -> Non
         "product_evidence",
     }
     assert payload["product_evidence"] == _readiness_product().payload()
+    assert payload["baseline_file_sha256"] == "9" * 64
+    assert payload["baseline_report_sha256"] == "a" * 64
+    assert payload["operator_attestation_sha256"] == "b" * 64
+    assert payload["precursor_assist_promotion_evidence_sha256"] is None
     assert not {
         "body",
         "prompt",
@@ -856,6 +874,22 @@ def test_live_evidence_payload_is_closed_body_free_and_digest_sensitive() -> Non
             joined_trace_count=evidence.joined_trace_count + 1,
         ).canonical_sha256()
     )
+
+
+def test_v5_provenance_is_mode_bound_before_promotion_evaluation() -> None:
+    assist = _candidate()
+    canary = _candidate(mode=SupervisorMode.CANARY)
+
+    with pytest.raises(ValueError, match="cannot carry"):
+        _evidence(
+            assist,
+            precursor_assist_promotion_evidence_sha256="c" * 64,
+        )
+    with pytest.raises(ValueError, match="precursor"):
+        _evidence(
+            canary,
+            precursor_assist_promotion_evidence_sha256=None,
+        )
 
 
 def test_structural_malformed_contract_values_raise_before_evaluation() -> None:

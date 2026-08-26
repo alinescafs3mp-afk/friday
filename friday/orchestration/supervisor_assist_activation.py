@@ -107,6 +107,10 @@ _EVIDENCE_KEYS = frozenset(
         "runtime_profile_id",
         "runtime_profile_manifest_sha256",
         "registry_binding_sha256",
+        "baseline_file_sha256",
+        "baseline_report_sha256",
+        "operator_attestation_sha256",
+        "precursor_assist_promotion_evidence_sha256",
         "max_steps",
         "max_review_rounds",
         "observation_count",
@@ -657,6 +661,12 @@ def parse_assist_promotion_live_evidence(
             runtime_profile_id=decoded["runtime_profile_id"],
             runtime_profile_manifest_sha256=decoded["runtime_profile_manifest_sha256"],
             registry_binding_sha256=decoded["registry_binding_sha256"],
+            baseline_file_sha256=decoded["baseline_file_sha256"],
+            baseline_report_sha256=decoded["baseline_report_sha256"],
+            operator_attestation_sha256=decoded["operator_attestation_sha256"],
+            precursor_assist_promotion_evidence_sha256=decoded[
+                "precursor_assist_promotion_evidence_sha256"
+            ],
             max_steps=decoded["max_steps"],
             max_review_rounds=decoded["max_review_rounds"],
             observation_count=decoded["observation_count"],

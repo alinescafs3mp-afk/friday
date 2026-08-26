@@ -810,11 +810,11 @@ _SEMANTIC_SUPERVISOR_ASSIST_CONTROLLER_SCHEDULER_KEYS = frozenset(
 )
 _SEMANTIC_SUPERVISOR_MAX_PROMOTION_EVIDENCE_BYTES = 32 << 10
 _SEMANTIC_SUPERVISOR_MAX_LATENCY_BUDGET_BYTES = 4_096
-_SEMANTIC_SUPERVISOR_PROMOTION_SCHEMA = "friday.supervisor-assist-promotion.v4"
+_SEMANTIC_SUPERVISOR_PROMOTION_SCHEMA = "friday.supervisor-assist-promotion.v5"
 _SEMANTIC_SUPERVISOR_READINESS_EVIDENCE_SCHEMA = "friday.supervisor-assist-readiness-evidence.v2"
 _SEMANTIC_SUPERVISOR_OUTCOME_EVIDENCE_SCHEMA = "friday.supervisor-assist-outcome-evidence.v2"
 _SEMANTIC_SUPERVISOR_PROMOTION_POLICY_SHA256 = (
-    "0897ff227eb0148a5bf670d71fb9133f8fa217747f33673c2b989c1c29e05cce"
+    "5138c1d09d4c34aae70999711c5887b721ae1385994fc26a61d37edd6ccf2e68"
 )
 _SEMANTIC_SUPERVISOR_RUNTIME_PROFILE_ID = (
     "gptoss20b-2335df123cac7fc0e13e347cde1e1ffa8562daafcaf0fc76ade1a851d2b0ff1f"
@@ -857,6 +857,10 @@ _SEMANTIC_SUPERVISOR_PROMOTION_EVIDENCE_KEYS = frozenset(
         "runtime_profile_id",
         "runtime_profile_manifest_sha256",
         "registry_binding_sha256",
+        "baseline_file_sha256",
+        "baseline_report_sha256",
+        "operator_attestation_sha256",
+        "precursor_assist_promotion_evidence_sha256",
         "max_steps",
         "max_review_rounds",
         "observation_count",
@@ -2119,8 +2123,9 @@ def _validate_semantic_supervisor_evidence_budget_binding(
     latency_budget_sha256: str,
     latency_budget_ms: int,
     invalid_code: str,
-) -> None:
-    """Require one exact live-ready evidence object bound to the product budget."""
+    expected_precursor_assist_evidence_sha256: str | None = None,
+) -> str:
+    """Validate evidence and return its canonical payload digest for chaining."""
 
     evidence = _semantic_supervisor_closed_json(raw, invalid_code=invalid_code)
     product = evidence.get("product_evidence")
@@ -2161,6 +2166,9 @@ def _validate_semantic_supervisor_evidence_budget_binding(
         "target_policy_sha256",
         "runtime_profile_manifest_sha256",
         "registry_binding_sha256",
+        "baseline_file_sha256",
+        "baseline_report_sha256",
+        "operator_attestation_sha256",
     )
     proof_keys = (
         "representative_window_attested",
@@ -2177,6 +2185,19 @@ def _validate_semantic_supervisor_evidence_budget_binding(
         "false_completion_regression_count",
     )
     evidence_id = evidence.get("evidence_id")
+    precursor = evidence.get("precursor_assist_promotion_evidence_sha256")
+    provenance_is_valid = (
+        precursor is None and expected_precursor_assist_evidence_sha256 is None
+        if mode == "assist"
+        else (
+            type(precursor) is str
+            and _HEX64.fullmatch(precursor) is not None
+            and (
+                expected_precursor_assist_evidence_sha256 is None
+                or precursor == expected_precursor_assist_evidence_sha256
+            )
+        )
+    )
     if (
         set(evidence) != _SEMANTIC_SUPERVISOR_PROMOTION_EVIDENCE_KEYS
         or evidence.get("schema") != _SEMANTIC_SUPERVISOR_PROMOTION_SCHEMA
@@ -2197,6 +2218,7 @@ def _validate_semantic_supervisor_evidence_budget_binding(
         != _SEMANTIC_SUPERVISOR_RUNTIME_PROFILE_MANIFEST_SHA256
         or evidence.get("registry_binding_sha256") != registry_sha256
         or not _semantic_supervisor_exact_digests(evidence, digest_keys)
+        or not provenance_is_valid
         or type(evidence.get("max_steps")) is not int
         or evidence.get("max_steps") != 6
         or type(evidence.get("max_review_rounds")) is not int
@@ -2234,6 +2256,7 @@ def _validate_semantic_supervisor_evidence_budget_binding(
     )
     if not product_is_live:
         raise ReleaseFailure(invalid_code)
+    return _sha256_bytes(_canonical_json(evidence))
 
 
 def _validate_semantic_supervisor_promoted_values(
@@ -2241,7 +2264,8 @@ def _validate_semantic_supervisor_promoted_values(
     *,
     mode: str,
     invalid_code: str,
-) -> None:
+    expected_precursor_assist_evidence_sha256: str | None = None,
+) -> str:
     """Validate the dynamic evidence-bound part of assist/canary exactly."""
 
     if mode not in {"assist", "canary"}:  # pragma: no cover - code-owned callers
@@ -2301,7 +2325,7 @@ def _validate_semantic_supervisor_promoted_values(
         expected_source_sha256=source_sha256,
         invalid_code=invalid_code,
     )
-    _validate_semantic_supervisor_evidence_budget_binding(
+    evidence_canonical_sha256 = _validate_semantic_supervisor_evidence_budget_binding(
         evidence,
         mode=mode,
         source_sha256=source_sha256,
@@ -2309,13 +2333,16 @@ def _validate_semantic_supervisor_promoted_values(
         latency_budget_sha256=latency_budget_sha256,
         latency_budget_ms=latency_budget_ms,
         invalid_code=invalid_code,
+        expected_precursor_assist_evidence_sha256=(
+            expected_precursor_assist_evidence_sha256
+        ),
     )
 
     actor_raw = values["FRIDAY_SEMANTIC_SUPERVISOR_PROMOTION_CANARY_ACTOR_BINDINGS"]
     if mode == "assist":
         if actor_raw:
             raise ReleaseFailure(invalid_code)
-        return
+        return evidence_canonical_sha256
     actors = tuple(actor_raw.split(",")) if actor_raw else ()
     if (
         not 1 <= len(actors) <= 32
@@ -2323,6 +2350,7 @@ def _validate_semantic_supervisor_promoted_values(
         or actors != tuple(sorted(set(actors)))
     ):
         raise ReleaseFailure(invalid_code)
+    return evidence_canonical_sha256
 
 
 def _validate_semantic_supervisor_promoted_environment(
@@ -2473,6 +2501,36 @@ def _validate_semantic_supervisor_mode_transition(
     predecessor_invalid_code: str,
 ) -> None:
     """Validate one reversible exact promoted-mode transition."""
+
+    if predecessor_mode == "assist" and target_mode == "canary":
+        if predecessor is None:
+            raise ReleaseFailure(predecessor_invalid_code)
+        predecessor_values, predecessor_unrelated, predecessor_secondary = (
+            _canonical_semantic_supervisor_environment_parts(
+                predecessor,
+                invalid_code=predecessor_invalid_code,
+            )
+        )
+        precursor_sha256 = _validate_semantic_supervisor_promoted_values(
+            predecessor_values,
+            mode="assist",
+            invalid_code=predecessor_invalid_code,
+        )
+        target_values, target_unrelated, target_secondary = (
+            _canonical_semantic_supervisor_environment_parts(
+                target,
+                invalid_code=invalid_code,
+            )
+        )
+        _validate_semantic_supervisor_promoted_values(
+            target_values,
+            mode="canary",
+            invalid_code=invalid_code,
+            expected_precursor_assist_evidence_sha256=precursor_sha256,
+        )
+        if predecessor_unrelated != target_unrelated or predecessor_secondary != target_secondary:
+            raise ReleaseFailure("semantic_supervisor_unrelated_environment_changed")
+        return
 
     target_unrelated, target_secondary = _semantic_supervisor_validated_environment(
         target,
