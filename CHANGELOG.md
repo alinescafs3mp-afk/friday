@@ -1,3 +1,13 @@
+## 0.207.46 — 2026-08-26
+
+### Safe predecessor convergence for Java resource limits
+
+- The immutable unit installer now recognizes the exact security drop-ins
+  emitted by the previous live release before adding the backend's bounded
+  compiler cgroup limits, then converges them to the new code-owned form.
+- Unknown drop-ins still fail closed. Release `0.207.45` was superseded before
+  activation; database schema remains 43.
+
 ## 0.207.45 — 2026-08-26
 
 ### Abliterated primary profile and provisional secondary successor

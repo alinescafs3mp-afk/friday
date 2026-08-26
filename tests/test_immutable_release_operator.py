@@ -451,7 +451,7 @@ def test_backend_cgroup_swap_reader_rejects_traversal_and_symlink(
     )
 
 
-@pytest.mark.parametrize("predecessor", ["private-tmp", "recovery", "current"])
+@pytest.mark.parametrize("predecessor", ["private-tmp", "recovery", "pre-aggregate", "current"])
 def test_unit_surface_admits_only_known_security_predecessors(
     tmp_path: Path,
     predecessor: str,
@@ -476,6 +476,7 @@ def test_unit_surface_admits_only_known_security_predecessors(
         security = {
             "private-tmp": operator._LEGACY_PRIVATE_TMP_SECURITY,  # noqa: SLF001
             "recovery": operator._RECOVERY_PRIVATE_TMP_SECURITY,  # noqa: SLF001
+            "pre-aggregate": operator._pre_aggregate_unit_security_dropin(unit),  # noqa: SLF001
             "current": operator._unit_security_dropin(unit),  # noqa: SLF001
         }[predecessor]
         (dropin_directory / "security.conf").write_bytes(security)

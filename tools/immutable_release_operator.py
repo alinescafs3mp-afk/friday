@@ -6914,6 +6914,22 @@ def _unit_security_dropin(unit: str) -> bytes:
     ).encode()
 
 
+def _pre_aggregate_unit_security_dropin(unit: str) -> bytes:
+    """Return the exact security drop-in emitted before compiler cgroup limits."""
+
+    runtime_name = _unit_runtime_directory_name(unit)
+    return (
+        "[Service]\n"
+        "LimitCORE=0\n"
+        "PrivateTmp=false\n"
+        "PrivateUsers=false\n"
+        f"RuntimeDirectory={runtime_name}\n"
+        "RuntimeDirectoryMode=0700\n"
+        "RuntimeDirectoryPreserve=no\n"
+        f"Environment=TMPDIR={_unit_runtime_tmp_directory(unit)}\n"
+    ).encode()
+
+
 def _unit_surface_path(unit_dir: Path, key: str) -> Path:
     if key not in _UNIT_SURFACE_KEYS:
         raise ReleaseFailure("unit_surface_key_invalid")
@@ -7223,6 +7239,7 @@ def _candidate_unit_surface(
         if security not in {
             _LEGACY_PRIVATE_TMP_SECURITY,
             _RECOVERY_PRIVATE_TMP_SECURITY,
+            _pre_aggregate_unit_security_dropin(unit),
             _unit_security_dropin(unit),
         }:
             raise ReleaseFailure("installed_security_dropin_invalid")
