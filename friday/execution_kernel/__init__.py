@@ -3130,6 +3130,9 @@ _ENGINEER_TOOLS = frozenset(
         *_ENGINEER_NETWORK_AUDIT_TOOLS,
         *_ENGINEER_ARTIFACT_AUDIT_TOOLS,
         "engineer_local_tools",
+        "engineer_command_run",
+        "engineer_command_status",
+        "engineer_command_cancel",
     }
 )
 _ENGINEER_PATCH_OPERATION_KINDS = frozenset({"write_at", "replace_bytes", "zip_replace"})
@@ -3146,6 +3149,9 @@ _HOST_CONTROL_TOOLS = frozenset(
         "software_install",
         "software_remove",
         "host_program_run_once",
+        "engineer_command_run",
+        "engineer_command_status",
+        "engineer_command_cancel",
         "host_action_execute",
         "software_install_execute",
         "software_remove_execute",
@@ -4343,9 +4349,43 @@ class ExecutionKernel:
                 except (TypeError, ValueError) as exc:
                     raise ValueError("exact host-action approval summary is unavailable") from exc
             raise ValueError("exact host-action approval summary is unavailable")
+        if name == "engineer_command_run":
+            import shlex
+
+            argv = arguments.get("argv")
+            timeout_sec = arguments.get("timeout_sec")
+            if (
+                not isinstance(argv, list)
+                or not 1 <= len(argv) <= 64
+                or any(
+                    not isinstance(item, str)
+                    or not item
+                    or len(item) > 512
+                    or "\x00" in item
+                    for item in argv
+                )
+                or isinstance(timeout_sec, bool)
+                or not isinstance(timeout_sec, int)
+                or not 1 <= timeout_sec <= 3600
+            ):
+                raise ValueError("exact Engineer argv approval summary is unavailable")
+            exact_argv = shlex.join(argv)
+            if len(exact_argv) > 2_800:
+                raise ValueError("exact Engineer argv is too long for confirmation")
+            return (
+                "Запустить в изолированном Engineer workspace (без host-файлов, сети и секретов), "
+                f"таймаут {timeout_sec} с:\n{exact_argv}"
+            )
         return f"Выполнить {name}"
 
-    async def execute_approved(self, approval_id: str, *, actor: ActorContext | None = None) -> ToolResult:
+    async def execute_approved(
+        self,
+        approval_id: str,
+        *,
+        actor: ActorContext | None = None,
+        confirmation_update_id: str = "",
+        confirmation_body_hash: str = "",
+    ) -> ToolResult:
         """Исполнить действие, которое человек подтвердил. Ровно один раз.
 
         Заявление (`claim_action_approval`) само по себе является повторной
@@ -4412,6 +4452,23 @@ class ExecutionKernel:
                     "просрочено или аргументы изменились"
                 ),
             )
+
+        if name == "engineer_command_run":
+            if (
+                not re.fullmatch(r"[0-9]{1,20}", str(confirmation_update_id or ""))
+                or not re.fullmatch(r"[0-9a-f]{64}", str(confirmation_body_hash or ""))
+            ):
+                await run_blocking(
+                    storage.finish_action_approval,
+                    approval_id,
+                    actor.user_id,
+                    success=False,
+                    error="authenticated Telegram confirmation is unavailable",
+                )
+                return ToolResult(name, False, error="Authenticated Telegram confirmation is unavailable")
+            arguments["_approval_id"] = approval_id
+            arguments["_confirmation_update_id"] = str(confirmation_update_id)
+            arguments["_confirmation_body_hash"] = str(confirmation_body_hash)
 
         details = self._audit_details(name, arguments)
         timeout = tool.timeout_sec or 30

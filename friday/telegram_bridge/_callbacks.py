@@ -399,6 +399,8 @@ class CallbacksMixin(BridgeShared):
         telegram: httpx.AsyncClient,
         backend: httpx.AsyncClient,
         callback: dict[str, Any],
+        *,
+        update_id: int = -1,
     ) -> None:
         callback_id = str(callback.get("id") or "")
         raw_user = callback.get("from")
@@ -844,6 +846,7 @@ class CallbacksMixin(BridgeShared):
                     {
                         "telegram_user": user,
                         "decision": "approve" if action == "yes" else "reject",
+                        **({"telegram_update_id": update_id} if update_id >= 0 else {}),
                     },
                     external_user_id,
                     str(chat_id),

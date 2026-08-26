@@ -54,6 +54,23 @@ ENGINEER_AUDIT = CapabilityDefinition(
     (),
     source="organ",
 )
+ENGINEER_COMMAND_RUN = CapabilityDefinition(
+    "engineer.command.run",
+    "Run one exact owner-confirmed argv in the isolated Engineer workspace",
+    "engineer",
+    3,
+    (),
+    default_requires_hitl=True,
+    source="organ",
+)
+ENGINEER_COMMAND_MANAGE = CapabilityDefinition(
+    "engineer.command.manage",
+    "Inspect or cancel an owned Engineer command job",
+    "engineer",
+    2,
+    (),
+    source="organ",
+)
 
 
 class EngineerOrgan(Organ):
@@ -61,18 +78,22 @@ class EngineerOrgan(Organ):
     version = "1.0"
 
     def capabilities(self) -> Sequence[CapabilityDefinition]:
-        return (ENGINEER_USE, ENGINEER_ANALYZE, ENGINEER_BUILD, ENGINEER_PATCH, ENGINEER_AUDIT)
+        capabilities = [ENGINEER_USE, ENGINEER_ANALYZE, ENGINEER_BUILD, ENGINEER_PATCH, ENGINEER_AUDIT]
+        return (*capabilities, ENGINEER_COMMAND_RUN, ENGINEER_COMMAND_MANAGE)
 
     def tools(self, ctx: ServiceContext) -> Sequence[ToolSpec]:
+        from .command_tools import build_engineer_command_tools
         from .tools import build_engineer_tools
 
-        return build_engineer_tools(ctx)
+        return (*build_engineer_tools(ctx), *build_engineer_command_tools(ctx))
 
 
 __all__ = [
     "ENGINEER_ANALYZE",
     "ENGINEER_AUDIT",
     "ENGINEER_BUILD",
+    "ENGINEER_COMMAND_MANAGE",
+    "ENGINEER_COMMAND_RUN",
     "ENGINEER_PATCH",
     "ENGINEER_USE",
     "EngineerOrgan",

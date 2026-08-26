@@ -607,6 +607,11 @@ class FridaySettings:
     # Owner-only engineering workbench. Keep the organ absent until the operator
     # deliberately admits its parser and outbound-diagnostics surface.
     engineer_mode_enabled: bool
+    # Optional exact-argv runner inside the Engineer workbench.  It owns a
+    # separate private ledger/key and never enables a host shell implicitly.
+    engineer_command_enabled: bool
+    engineer_command_store_dir: Path
+    engineer_command_key_file: Path
 
     # Optional native Ubuntu capability plane. The backend talks only to the
     # unprivileged user agent over an authenticated Unix socket; package
@@ -1087,7 +1092,10 @@ class FridaySettings:
         return {
             "home": str(self.home),
             "profile": profile_public_dict(self.profile),
-            "engineer_mode": {"enabled": self.engineer_mode_enabled},
+            "engineer_mode": {
+                "enabled": self.engineer_mode_enabled,
+                "command_runner_enabled": self.engineer_command_enabled,
+            },
             "host_control": {
                 "enabled": self.host_control_enabled,
                 "agent_id": self.host_agent_id if self.host_control_enabled else "",
@@ -1310,6 +1318,13 @@ def load_settings(profile_name: str | None = None) -> FridaySettings:
         # Restore replaces the SQLite image which currently owns the tombstones.
         account_hard_delete_enabled=False,
         engineer_mode_enabled=_bool_env("FRIDAY_ENGINEER_MODE_ENABLED", False),
+        engineer_command_enabled=_bool_env("FRIDAY_ENGINEER_COMMAND_ENABLED", False),
+        engineer_command_store_dir=_absolute_lexical_path(
+            env("FRIDAY_ENGINEER_COMMAND_STORE_DIR", data_dir / "engineer-command")
+        ),
+        engineer_command_key_file=_absolute_lexical_path(
+            env("FRIDAY_ENGINEER_COMMAND_KEY_FILE", data_dir / "engineer-command.key")
+        ),
         host_control_enabled=_bool_env("FRIDAY_HOST_CONTROL_ENABLED", False),
         host_agent_socket=Path(
             env("FRIDAY_HOST_AGENT_SOCKET", "/run/friday-host-agent/agent.sock")
@@ -1929,6 +1944,37 @@ def validate_settings(settings: FridaySettings, *, production: bool = False) -> 
             or not os.access(bubblewrap, os.X_OK)
         ):
             errors.append("FRIDAY_ENGINEER_MODE_ENABLED requires trusted executable /usr/bin/bwrap")
+    if settings.engineer_command_enabled:
+        if not settings.engineer_mode_enabled:
+            errors.append("FRIDAY_ENGINEER_COMMAND_ENABLED requires FRIDAY_ENGINEER_MODE_ENABLED=1")
+        for label, path, expect_directory in (
+            ("engineer command store", settings.engineer_command_store_dir, True),
+            ("engineer command key", settings.engineer_command_key_file, False),
+        ):
+            try:
+                lexical = Path(path)
+                canonical = lexical.resolve(strict=True)
+                path_stat = lexical.lstat()
+            except (OSError, RuntimeError):
+                errors.append(f"{label} must be pre-created")
+                continue
+            expected_kind = stat.S_ISDIR(path_stat.st_mode) if expect_directory else stat.S_ISREG(
+                path_stat.st_mode
+            )
+            if (
+                not lexical.is_absolute()
+                or canonical != lexical
+                or _path_has_symlink_component(lexical)
+                or not expected_kind
+                or path_stat.st_uid != os.geteuid()
+                or path_stat.st_mode & (stat.S_IRWXG | stat.S_IRWXO)
+            ):
+                errors.append(f"{label} must be canonical, private and owned by the backend user")
+        try:
+            if settings.engineer_command_key_file.stat().st_size != 32:
+                errors.append("engineer command key must contain exactly 32 bytes")
+        except OSError:
+            pass
     host_subfeatures = (
         settings.host_package_install_enabled
         or settings.host_desktop_control_enabled

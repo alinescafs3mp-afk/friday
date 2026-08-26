@@ -446,7 +446,12 @@ class CommandsMixin(BridgeShared):
     ) -> None:
         callback = update.get("callback_query")
         if isinstance(callback, dict):
-            await self._process_callback_query(telegram, backend, callback)
+            await self._process_callback_query(
+                telegram,
+                backend,
+                callback,
+                update_id=int(update.get("update_id") or -1),
+            )
             return
 
         edited = update.get("edited_message")

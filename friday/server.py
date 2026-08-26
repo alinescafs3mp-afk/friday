@@ -193,7 +193,10 @@ from friday.workers import IntervalTask, WorkersManager
 from friday.workers._blocking import current_activity, run_blocking, wait_until_idle
 
 _HOST_CONTROL_APPROVAL_TOOLS = frozenset({"host_action_execute", "software_install_execute"})
+_ENGINEER_COMMAND_APPROVAL_TOOLS = frozenset({"engineer_command_run"})
+_APPROVAL_RESULT_TOOLS = _HOST_CONTROL_APPROVAL_TOOLS | _ENGINEER_COMMAND_APPROVAL_TOOLS
 _HOST_JOB_ID = re.compile(r"hjob_[0-9a-f]{32}")
+_ENGINEER_COMMAND_JOB_ID = re.compile(r"[0-9a-f]{32}")
 
 
 def _host_result_text(value: object, maximum: int = 120) -> str:
@@ -402,6 +405,57 @@ def _persist_host_approval_final_response(
         "assistant",
         content,
         metadata=metadata,
+        reply_to=source_message_id,
+    )
+    return content, str(stored.get("id") or "")
+
+
+def _persist_engineer_command_approval_final_response(
+    storage: Any,
+    *,
+    actor: ActorContext,
+    approval_id: str,
+    data: Mapping[str, Any],
+    success: bool,
+    error: str,
+) -> tuple[str, str]:
+    """Persist the exact admitted command job without another model round."""
+
+    job_id = str(data.get("job_id") or "")
+    if _ENGINEER_COMMAND_JOB_ID.fullmatch(job_id) is None:
+        return "", ""
+    approval = storage.get_action_approval(approval_id, actor.user_id, person_id=actor.own_id)
+    payload = approval.get("payload") if isinstance(approval, Mapping) else None
+    if not isinstance(payload, Mapping):
+        return "", ""
+    conversation_id = str(payload.get("_conversation_id") or "")
+    source_message_id = str(payload.get("_source_message_id") or "")
+    source = storage.get_message(source_message_id, actor.own_id)
+    if (
+        not conversation_id
+        or not isinstance(source, Mapping)
+        or str(source.get("conversation_id") or "") != conversation_id
+        or str(source.get("role") or "") != "user"
+    ):
+        return "", ""
+    status = _host_result_text(data.get("status"), 32) or "unknown"
+    content = (
+        f"Команда принята в изолированное выполнение. Задание: {job_id}. Статус: {status}. "
+        "Можно спросить «проверь статус задания» или попросить отменить его."
+        if success
+        else "Команда не запущена: " + (_host_result_text(error, 240) or "причина неизвестна") + "."
+    )
+    stored = storage.store_message(
+        conversation_id,
+        actor.own_id,
+        "assistant",
+        content,
+        metadata={
+            "engineer_command_approval_id": approval_id,
+            "engineer_command_job_id": job_id,
+            "engineer_command_status": status,
+            "tools_used": ["engineer_command_run"],
+        },
         reply_to=source_message_id,
     )
     return content, str(stored.get("id") or "")
@@ -3409,6 +3463,45 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
         decision = str(body.get("decision") or "").strip().casefold()
         if decision not in {"approve", "reject"}:
             raise HTTPException(status_code=400, detail="Решение должно быть approve или reject")
+        pending_approval = await run_blocking(
+            request.app.state.storage.get_action_approval,
+            str(approval_id or ""),
+            actor.user_id,
+            person_id=actor.own_id,
+        )
+        command_confirmation_update_id = ""
+        command_confirmation_body_hash = ""
+        if (
+            decision == "approve"
+            and isinstance(pending_approval, Mapping)
+            and str(pending_approval.get("tool") or "") in _ENGINEER_COMMAND_APPROVAL_TOOLS
+        ):
+            raw_update_id = body.get("telegram_update_id")
+            if (
+                actor.source != "telegram-bridge"
+                or isinstance(raw_update_id, bool)
+                or not isinstance(raw_update_id, int)
+                or raw_update_id < 0
+                or raw_update_id > 9_999_999_999_999_999_999
+            ):
+                raise HTTPException(
+                    status_code=400,
+                    detail="Engineer command approval requires an authenticated Telegram update",
+                )
+            command_confirmation_update_id = str(raw_update_id)
+            command_confirmation_body_hash = hashlib.sha256(
+                json.dumps(
+                    {
+                        "actor_id": actor.own_id,
+                        "approval_id": str(approval_id),
+                        "decision": "approve",
+                        "telegram_update_id": raw_update_id,
+                    },
+                    ensure_ascii=True,
+                    sort_keys=True,
+                    separators=(",", ":"),
+                ).encode("ascii")
+            ).hexdigest()
         decided = await run_blocking(
             request.app.state.storage.decide_action_approval,
             str(approval_id or ""),
@@ -3444,7 +3537,12 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
                 response["host_job_closed"] = bool(closed_job_id)
                 response["host_job_id"] = closed_job_id
             return response
-        result = await request.app.state.kernel.execute_approved(str(approval_id), actor=actor)
+        result = await request.app.state.kernel.execute_approved(
+            str(approval_id),
+            actor=actor,
+            confirmation_update_id=command_confirmation_update_id,
+            confirmation_body_hash=command_confirmation_body_hash,
+        )
         response = {
             "approval": await run_blocking(
                 request.app.state.storage.get_action_approval,
@@ -3455,22 +3553,33 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
             "executed": bool(result.success),
             "error": result.error,
         }
-        if result.tool_name in _HOST_CONTROL_APPROVAL_TOOLS and isinstance(result.data, Mapping):
+        if result.tool_name in _APPROVAL_RESULT_TOOLS and isinstance(result.data, Mapping):
             # The approved host vertical resumes outside the ordinary model turn.
             # Keep its bounded structured result and one deterministic assistant
             # receipt instead of reducing a completed scan to the word “done”.
             response["result"] = dict(result.data)
             try:
-                final_response, final_message_id = await run_blocking(
-                    _persist_host_approval_final_response,
-                    request.app.state.storage,
-                    actor=actor,
-                    approval_id=str(approval_id),
-                    tool_name=result.tool_name,
-                    data=result.data,
-                    success=bool(result.success),
-                    error=str(result.error or ""),
-                )
+                if result.tool_name in _ENGINEER_COMMAND_APPROVAL_TOOLS:
+                    final_response, final_message_id = await run_blocking(
+                        _persist_engineer_command_approval_final_response,
+                        request.app.state.storage,
+                        actor=actor,
+                        approval_id=str(approval_id),
+                        data=result.data,
+                        success=bool(result.success),
+                        error=str(result.error or ""),
+                    )
+                else:
+                    final_response, final_message_id = await run_blocking(
+                        _persist_host_approval_final_response,
+                        request.app.state.storage,
+                        actor=actor,
+                        approval_id=str(approval_id),
+                        tool_name=result.tool_name,
+                        data=result.data,
+                        success=bool(result.success),
+                        error=str(result.error or ""),
+                    )
             except Exception as exc:  # noqa: BLE001 - an effect must not be reported as unexecuted
                 LOGGER.warning("Host-control final response persistence failed (%s)", type(exc).__name__)
                 final_response, final_message_id = "", ""
@@ -3717,6 +3826,11 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
             source_ref = (
                 f"telegram:{getattr(request.state, 'bridge_chat_id', '')}:{message_id}" if message_id else ""
             )
+        trusted_telegram_update_id: str | None = None
+        if actor.source == "telegram-bridge":
+            update_match = re.fullmatch(r"telegram-update:([0-9]{1,20})", source_ref)
+            if update_match is not None:
+                trusted_telegram_update_id = update_match.group(1)
         if not message and not incoming_documents and not staged_document_message_ids:
             raise HTTPException(status_code=400, detail="message or document is required")
         if len(message) > settings.max_extracted_text_chars:
@@ -5022,6 +5136,7 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
                     # never a citation map grant.
                     reply_assistant_message_id=reply_source_message_id or None,
                     turn_policy=turn_policy if turn_policy.handled else None,
+                    telegram_update_id=trusted_telegram_update_id,
                     turn_deadline=_turn_deadline,
                     _pending_durable_admission=(
                         pending_durable_intake_admission

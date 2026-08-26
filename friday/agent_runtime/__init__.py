@@ -1999,6 +1999,9 @@ _PRIVATE_SOURCE_LOCAL_TOOL_NAMES = frozenset(
         "engineer_decompile_artifact",
         "engineer_local_tools",
         "engineer_patch_artifact",
+        "engineer_command_run",
+        "engineer_command_status",
+        "engineer_command_cancel",
         "host_action_run",
         "host_capability_describe",
         "host_capability_search",
@@ -2103,6 +2106,9 @@ _ENGINEER_NATIVE_MODEL_TOOL_NAMES = frozenset(
         "engineer_dns",
         "engineer_local_tools",
         "engineer_adversary_rehearsal",
+        "engineer_command_run",
+        "engineer_command_status",
+        "engineer_command_cancel",
     }
 )
 _ENGINEER_ORDINARY_MODEL_TOOL_NAMES = frozenset({"make_file", "collect_files", *_WEB_TOOL_NAMES})
@@ -2147,10 +2153,17 @@ _ENGINEER_TOOL_CAPABILITIES = {
     "engineer_local_tools": "engineer.use",
     "engineer_adversary_rehearsal": "engineer.host.audit",
     "engineer_scan_configured_network": "engineer.host.audit",
+    "engineer_command_run": "engineer.command.run",
+    "engineer_command_status": "engineer.command.manage",
+    "engineer_command_cancel": "engineer.command.manage",
 }
 _ENGINEER_CAPABILITIES = frozenset({"engineer.use", *_ENGINEER_TOOL_CAPABILITIES.values()})
 _HOST_CONTROL_CONTEXT_TOOL_NAMES = frozenset({"host_action_run", "host_json_extract", "software_install"})
 _HOST_CONTROL_PRIVATE_ARGUMENTS = frozenset({"_conversation_id", "_raw_id", "_source_message_id", "raw_id"})
+_ENGINEER_COMMAND_CONTEXT_TOOL_NAMES = frozenset({"engineer_command_run"})
+_ENGINEER_COMMAND_PRIVATE_ARGUMENTS = frozenset(
+    {"_conversation_id", "_source_message_id", "_telegram_update_id"}
+)
 _ENGINEER_RECEIPT_BASE_TOOL_VERSIONS = {
     "engineer_organ": "builtin-v1",
     "host_probe": "bounded-connect-v1",
@@ -7489,6 +7502,9 @@ _PRIVATE_SOURCE_RESULT_TOOL_NAMES = frozenset(
         "host_job_cancel",
         "host_job_status",
         "host_json_extract",
+        "engineer_command_run",
+        "engineer_command_status",
+        "engineer_command_cancel",
         "software_install",
         "software_remove",
         "software_search",
@@ -36144,7 +36160,12 @@ MODE_GUIDANCE = {
         "с конкретным offset/section/service/response. Не объявляй CVE или подтверждённую "
         "уязвимость только по строке версии. При изменении файла сохраняй исходник и указывай "
         "точные операции и хэши. Активное подтверждение через эксплуатацию в этом профиле не "
-        "выполняется; допустим только основанный на найденных фактах план проверки защит."
+        "выполняется; допустим только основанный на найденных фактах план проверки защит. "
+        "Если владелец просит запустить установленную консольную программу и тебе предложен "
+        "engineer_command_run, сформируй точный argv и вызови его: не заявляй, что запуск "
+        "произвольной установленной программы недоступен. Этот инструмент сам покажет точную "
+        "команду владельцу и начнёт её только после отдельного подтверждения. Не подменяй argv "
+        "shell-строкой и не обещай доступ к сети или host-файлам, которого нет в описании инструмента."
     ),
 }
 
@@ -36339,6 +36360,9 @@ class AgentContext:
     #: regenerate inherits the original row, so the same Obsidian operation is
     #: reconciled instead of being emitted under a fresh caller-controlled key.
     effect_root_user_message_id: str = ""
+    #: Authenticated Telegram update which carried the current owner command.
+    #: It is transport provenance, never a model argument or generic API claim.
+    engineer_command_telegram_update_id: str = ""
     #: Local calendar day frozen on the immutable root turn. Dynamic words such
     #: as "today" must resolve to the same arguments on a regenerate after
     #: midnight, otherwise one idempotency key would name two effects.
@@ -48013,6 +48037,7 @@ class AgentRuntime:
         reply_assistant_reference: bool = False,
         reply_assistant_message_id: str | None = None,
         turn_policy: TurnPolicyDecision | None = None,
+        telegram_update_id: str | None = None,
         turn_deadline: float | None = None,
         _pending_durable_admission: PendingDurableTurnAdmission | None = None,
     ) -> dict[str, Any]:
@@ -48031,6 +48056,12 @@ class AgentRuntime:
             if isinstance(configured_budget, (int, float)) and configured_budget > 0:
                 turn_deadline = turn_started + float(configured_budget)
         clean_message = (message or "").strip()
+        trusted_telegram_update_id = str(telegram_update_id or "").strip()
+        if trusted_telegram_update_id and (
+            actor.source != "telegram-bridge"
+            or re.fullmatch(r"[0-9]{1,20}", trusted_telegram_update_id) is None
+        ):
+            raise ValueError("telegram_update_id must come from the authenticated Telegram bridge")
         archive_evidence_followup_kind = parse_archive_evidence_followup(clean_message)
         archive_candidate_surface_has_attachments = bool(attachments)
         archive_evidence_bound_for_routing = bool(
@@ -50082,6 +50113,11 @@ class AgentRuntime:
             **(user_metadata or {}),
             "tools_enabled": enable_tools is True,
             "interaction_mode": interaction_mode,
+            **(
+                {"telegram_update_id": trusted_telegram_update_id}
+                if trusted_telegram_update_id
+                else {}
+            ),
         }
         if not mark_request_effect_possible():
             raise RuntimeError("Request idempotency fence could not be committed before message storage")
@@ -52091,6 +52127,7 @@ class AgentRuntime:
             workspace_exact_direct_authorized = False
         context.source_search_lineage_user_message_id = source_search_lineage_user_message_id
         context.effect_root_user_message_id = effect_root_user_message_id
+        context.engineer_command_telegram_update_id = trusted_telegram_update_id
         context.effect_local_date = obsidian_effect_local_date
         obsidian_result_request = obsidian_result_request_candidate if isolated_obsidian_result_turn else None
         context.obsidian_result_note_turn = obsidian_result_request is not None
@@ -61904,6 +61941,18 @@ class AgentRuntime:
             # Repeat the closed allowlist for direct adapters/tests which enter
             # this seam without the outer chat projection.
             tools[:] = _project_engineer_tool_schemas(tools, authority=turn_auth)
+            if re.fullmatch(
+                r"[0-9]{1,20}",
+                context.engineer_command_telegram_update_id,
+            ) is None:
+                # Starting a command requires independently authenticated
+                # Telegram provenance.  Do not advertise a capability which
+                # this turn cannot carry across the execution boundary.
+                tools[:] = [
+                    tool
+                    for tool in tools
+                    if _engineer_tool_name(tool) != "engineer_command_run"
+                ]
         else:
             # Direct callers do not get to bypass the mode-owned schema fence.
             tools[:] = [
@@ -63399,6 +63448,30 @@ class AgentRuntime:
                             )
                     else:
                         carrier_allowed = False
+                elif call.name in _ENGINEER_COMMAND_CONTEXT_TOOL_NAMES:
+                    model_arguments = call.arguments if isinstance(call.arguments, Mapping) else {}
+                    if (
+                        not isinstance(call.arguments, Mapping)
+                        or _ENGINEER_COMMAND_PRIVATE_ARGUMENTS.intersection(
+                            str(key) for key in model_arguments
+                        )
+                        or context.interaction_mode != "engineer"
+                        or not context.conversation_id
+                        or not context.effect_root_user_message_id
+                        or re.fullmatch(
+                            r"[0-9]{1,20}",
+                            context.engineer_command_telegram_update_id,
+                        )
+                        is None
+                    ):
+                        carrier_allowed = False
+                    else:
+                        call_arguments = dict(model_arguments)
+                        call_arguments["_conversation_id"] = context.conversation_id
+                        call_arguments["_source_message_id"] = context.effect_root_user_message_id
+                        call_arguments["_telegram_update_id"] = (
+                            context.engineer_command_telegram_update_id
+                        )
                 elif call.name in _HOST_CONTROL_CONTEXT_TOOL_NAMES:
                     model_arguments = call.arguments if isinstance(call.arguments, Mapping) else {}
                     if (
