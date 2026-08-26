@@ -45,7 +45,7 @@ from friday.semantic_supervisor_policy import (
     supervisor_product_policy_identity_for_mode,
 )
 
-COMPARE_CURRENT_FILE_WEB_WORK_GRAPH_SCHEMA = "friday.compare-current-file-with-current-web-work-graph.v2"
+COMPARE_CURRENT_FILE_WEB_WORK_GRAPH_SCHEMA = "friday.compare-current-file-with-current-web-work-graph.v3"
 COMPARE_CURRENT_FILE_WEB_STEP_OUTCOME_SCHEMA = "friday.compare-current-file-with-current-web-step-outcome.v1"
 COMPARE_CURRENT_FILE_WEB_PUBLICATION_RECEIPT_SCHEMA = (
     "friday.accepted-compare-current-file-with-current-web-work-graph-receipt.v1"
@@ -840,6 +840,14 @@ class CompareCurrentFileWebWorkGraph:
     publication_receipt_sha256: str | None
     steps: tuple[CompareCurrentFileWebGraphStep, ...]
     anchor_request_binding_sha256: str = COMPARE_CURRENT_FILE_WEB_UNBOUND_SCHEMA44_REQUEST_SHA256
+    restart_count: int = 0
+    restart_rebound_at: str | None = None
+    restart_file_input_identity_sha256: str | None = None
+    restart_file_idempotency_key_sha256: str | None = None
+    restart_web_input_identity_sha256: str | None = None
+    restart_web_idempotency_key_sha256: str | None = None
+    restart_synthesis_input_identity_sha256: str | None = None
+    restart_synthesis_idempotency_key_sha256: str | None = None
 
     def __post_init__(self) -> None:
         _identifier(self.id, _GRAPH_ID_RE, label="graph id")
@@ -853,6 +861,8 @@ class CompareCurrentFileWebWorkGraph:
             raise CompareCurrentFileWebGraphError("graph revision is outside the Work Item bound")
         if not isinstance(self.transition, CompareCurrentFileWebGraphTransition):
             raise CompareCurrentFileWebGraphError("graph transition must be closed")
+        if type(self.restart_count) is not int or self.restart_count not in {0, 1}:
+            raise CompareCurrentFileWebGraphError("graph restart count must be zero or one")
         if self.outcome_status is not None and not isinstance(
             self.outcome_status, CompareCurrentFileWebGraphOutcomeStatus
         ):
@@ -891,15 +901,42 @@ class CompareCurrentFileWebWorkGraph:
             label="publication_receipt_sha256",
             optional=True,
         )
+        restart_step_bindings = (
+            self.restart_file_input_identity_sha256,
+            self.restart_file_idempotency_key_sha256,
+            self.restart_web_input_identity_sha256,
+            self.restart_web_idempotency_key_sha256,
+            self.restart_synthesis_input_identity_sha256,
+            self.restart_synthesis_idempotency_key_sha256,
+        )
+        for restart_label, restart_value in zip(
+            (
+                "restart_file_input_identity_sha256",
+                "restart_file_idempotency_key_sha256",
+                "restart_web_input_identity_sha256",
+                "restart_web_idempotency_key_sha256",
+                "restart_synthesis_input_identity_sha256",
+                "restart_synthesis_idempotency_key_sha256",
+            ),
+            restart_step_bindings,
+            strict=True,
+        ):
+            _digest(restart_value, label=restart_label, optional=True)
         created = _instant(self.created_at, label="created_at")
         updated = _instant(self.updated_at, label="updated_at")
         expires = _instant(self.expires_at, label="expires_at")
         closed = _instant(self.closed_at, label="closed_at", optional=True)
-        if (created, updated, expires, closed) != (
+        rebound = _instant(
+            self.restart_rebound_at,
+            label="restart_rebound_at",
+            optional=True,
+        )
+        if (created, updated, expires, closed, rebound) != (
             self.created_at,
             self.updated_at,
             self.expires_at,
             self.closed_at,
+            self.restart_rebound_at,
         ):
             raise CompareCurrentFileWebGraphError("graph timestamps must already be canonical")
         created_dt = datetime.fromisoformat(self.created_at)
@@ -915,6 +952,41 @@ class CompareCurrentFileWebWorkGraph:
             raise CompareCurrentFileWebGraphError("step belongs to a different WorkGraph")
         if len({step.step_id for step in self.steps}) != len(self.steps):
             raise CompareCurrentFileWebGraphError("WorkGraph step IDs must be unique")
+        if self.restart_count == 0:
+            if self.restart_rebound_at is not None or any(
+                value is not None for value in restart_step_bindings
+            ):
+                raise CompareCurrentFileWebGraphError(
+                    "never-rebound WorkGraph cannot carry restart target state"
+                )
+        else:
+            if self.restart_rebound_at is None or any(
+                value is None for value in restart_step_bindings
+            ):
+                raise CompareCurrentFileWebGraphError(
+                    "rebound WorkGraph requires one complete restart target state"
+                )
+            rebound_dt = datetime.fromisoformat(self.restart_rebound_at)
+            if not created_dt <= rebound_dt <= updated_dt:
+                raise CompareCurrentFileWebGraphError(
+                    "restart rebind timestamp is outside the graph temporal frame"
+                )
+            expected_restart_step_bindings = tuple(
+                value
+                for step in self.steps
+                for value in (step.input_identity_sha256, step.idempotency_key_sha256)
+            )
+            if restart_step_bindings != expected_restart_step_bindings:
+                raise CompareCurrentFileWebGraphError(
+                    "restart target identities do not match the current fixed steps"
+                )
+        if (
+            self.transition is CompareCurrentFileWebGraphTransition.RESTART_REBIND
+            and self.restart_count != 1
+        ):
+            raise CompareCurrentFileWebGraphError(
+                "restart rebind transition requires the one-shot restart binding"
+            )
         self._validate_lifecycle()
         if len(_canonical_json(self.payload()).encode("ascii")) > _MAX_SERIALIZED_BYTES:
             raise CompareCurrentFileWebGraphError("WorkGraph exceeds the serialized byte budget")
@@ -1113,6 +1185,14 @@ class CompareCurrentFileWebWorkGraph:
             publication_receipt_sha256=None,
             steps=steps,
             anchor_request_binding_sha256=anchor_request_binding_sha256,
+            restart_count=0,
+            restart_rebound_at=None,
+            restart_file_input_identity_sha256=None,
+            restart_file_idempotency_key_sha256=None,
+            restart_web_input_identity_sha256=None,
+            restart_web_idempotency_key_sha256=None,
+            restart_synthesis_input_identity_sha256=None,
+            restart_synthesis_idempotency_key_sha256=None,
         )
 
     @property
@@ -1343,6 +1423,18 @@ class CompareCurrentFileWebWorkGraph:
             "fallback_owner": COMPARE_CURRENT_FILE_WEB_FALLBACK_OWNER,
             "publication_owner": COMPARE_CURRENT_FILE_WEB_PUBLICATION_OWNER,
             "max_attempts": COMPARE_CURRENT_FILE_WEB_MAX_ATTEMPTS,
+            "restart_count": self.restart_count,
+            "restart_rebound_at": self.restart_rebound_at,
+            "restart_file_input_identity_sha256": self.restart_file_input_identity_sha256,
+            "restart_file_idempotency_key_sha256": self.restart_file_idempotency_key_sha256,
+            "restart_web_input_identity_sha256": self.restart_web_input_identity_sha256,
+            "restart_web_idempotency_key_sha256": self.restart_web_idempotency_key_sha256,
+            "restart_synthesis_input_identity_sha256": (
+                self.restart_synthesis_input_identity_sha256
+            ),
+            "restart_synthesis_idempotency_key_sha256": (
+                self.restart_synthesis_idempotency_key_sha256
+            ),
             "created_at": self.created_at,
             "updated_at": self.updated_at,
             "expires_at": self.expires_at,
@@ -1426,6 +1518,42 @@ class CompareCurrentFileWebWorkGraph:
                 conversation_binding_sha256=str(graph["conversation_binding_sha256"]),
                 current_file_source_identity_sha256=str(graph["current_file_source_identity_sha256"]),
                 current_file_content_sha256=str(graph["current_file_content_sha256"]),
+                restart_count=int(graph["restart_count"]),
+                restart_rebound_at=(
+                    None
+                    if graph["restart_rebound_at"] is None
+                    else str(graph["restart_rebound_at"])
+                ),
+                restart_file_input_identity_sha256=(
+                    None
+                    if graph["restart_file_input_identity_sha256"] is None
+                    else str(graph["restart_file_input_identity_sha256"])
+                ),
+                restart_file_idempotency_key_sha256=(
+                    None
+                    if graph["restart_file_idempotency_key_sha256"] is None
+                    else str(graph["restart_file_idempotency_key_sha256"])
+                ),
+                restart_web_input_identity_sha256=(
+                    None
+                    if graph["restart_web_input_identity_sha256"] is None
+                    else str(graph["restart_web_input_identity_sha256"])
+                ),
+                restart_web_idempotency_key_sha256=(
+                    None
+                    if graph["restart_web_idempotency_key_sha256"] is None
+                    else str(graph["restart_web_idempotency_key_sha256"])
+                ),
+                restart_synthesis_input_identity_sha256=(
+                    None
+                    if graph["restart_synthesis_input_identity_sha256"] is None
+                    else str(graph["restart_synthesis_input_identity_sha256"])
+                ),
+                restart_synthesis_idempotency_key_sha256=(
+                    None
+                    if graph["restart_synthesis_idempotency_key_sha256"] is None
+                    else str(graph["restart_synthesis_idempotency_key_sha256"])
+                ),
                 created_at=str(graph["created_at"]),
                 updated_at=str(graph["updated_at"]),
                 expires_at=str(graph["expires_at"]),
