@@ -1485,6 +1485,57 @@ class _NeverModel:
         raise AssertionError("compound route escaped its patched agentic seam")
 
 
+class _LongQueryNewsRuntime(AgentRuntime):
+    @staticmethod
+    def web_query_from(message: str) -> str:
+        del message
+        return "future-query-source-" + ("q" * 250)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("early_stop", ("expired", "source_effect_denied"))
+async def test_simple_news_early_stopped_prefetch_keeps_one_bounded_query_identity(
+    settings,
+    storage,
+    early_stop: str,
+) -> None:
+    """A future longer query source cannot split plan and fallback identity."""
+
+    storage.ensure_user(OWNER, preset_key="owner")
+    kernel = _SyntheticNewsKernel()
+    runtime = _LongQueryNewsRuntime(
+        replace(settings, verify_answers=True, verify_min_answer_chars=1),
+        storage,
+        llm=_NeverModel(),
+        kernel=kernel,
+    )
+    prompt = "Расскажи последние новости про квантовые технологии"
+    context = AgentContext(
+        conversation_id="bounded-query-identity",
+        user_id=OWNER,
+        person_id=OWNER,
+        conversation_history=[],
+        search_query=prompt,
+        outward_verdict=("интернет", None),
+        isolated_outbound_turn=True,
+        turn_deadline=0.0 if early_stop == "expired" else None,
+        source_effect_reauth_required=early_stop == "source_effect_denied",
+    )
+
+    result = await runtime._agentic_loop(  # noqa: SLF001
+        context,
+        prompt,
+        _actor(),
+        [_tool("web_research")],
+        None,
+    )
+
+    assert kernel.calls == []
+    assert result["_simple_public_news_fallback_owned"] is True
+    assert context.simple_public_news_evidence is not None
+    assert context.simple_public_news_evidence.status.value == "unavailable"
+
+
 @pytest.mark.asyncio
 async def test_news_plus_reminder_keeps_outbound_web_out_of_the_compound_route(
     settings,

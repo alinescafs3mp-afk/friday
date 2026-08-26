@@ -28019,6 +28019,12 @@ def _public_news_search_query(speech: str, query: str, source_class: str) -> str
     return query
 
 
+def _bounded_public_news_search_query(speech: str, query: str, source_class: str) -> str:
+    """Return the one canonical provider query used by every news seam."""
+
+    return normalize_outbound_web_query(_public_news_search_query(speech, query, source_class))
+
+
 def _web_action_on_speech(speech: str) -> bool:
     """Web request proved on an already-unquoted surface."""
 
@@ -36772,7 +36778,7 @@ class AgentRuntime:
             raise ValueError("simple public-news plan requires an exact freshness window")
         source_class = _web_source_class_on_speech(speech)
         topic_class = _web_research_collision_topic_class(speech) if source_class == "foreign" else ""
-        query = _public_news_search_query(speech, outbound_query, source_class)
+        query = _bounded_public_news_search_query(speech, outbound_query, source_class)
         return LegacySimplePublicNewsPlan.from_request(
             speech,
             query,
@@ -57293,7 +57299,7 @@ class AgentRuntime:
                 context.simple_public_news_evidence = SimplePublicNewsEvidence.from_projection(
                     plan,
                     status=SimplePublicNewsEvidenceStatus.UNAVAILABLE,
-                    executed_query=_public_news_search_query(
+                    executed_query=_bounded_public_news_search_query(
                         turn_auth.speech,
                         self.web_query_from(turn_auth.speech),
                         _web_source_class_on_speech(turn_auth.speech),
@@ -64432,8 +64438,9 @@ class AgentRuntime:
         if context is not None and context.isolated_outbound_turn:
             if source_class == "foreign":
                 topic_class = _web_research_collision_topic_class(turn_auth.speech)
-            query = _public_news_search_query(turn_auth.speech, query, source_class)
-        query = normalize_outbound_web_query(query)
+            query = _bounded_public_news_search_query(turn_auth.speech, query, source_class)
+        else:
+            query = normalize_outbound_web_query(query)
         web_arguments: dict[str, Any] = {"query": query, "max_sources": 3}
         if simple_public_news_request:
             # The lane is admitted only when its exact closed provider window is
