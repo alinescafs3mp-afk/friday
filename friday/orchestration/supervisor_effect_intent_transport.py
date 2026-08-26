@@ -110,6 +110,8 @@ class _RuntimeLease:
     served_model_alias: str
     runtime_mode: str
     supervisor_requested_mode: str
+    supervisor_policy_id: str
+    supervisor_policy_sha256: str
     process_epoch_probe_serial: int
     inventory_probe_serial: int
 
@@ -121,6 +123,8 @@ class _RuntimeLease:
             "profile_manifest_sha256": self.profile_manifest_sha256,
             "runtime_mode": self.runtime_mode,
             "served_model_alias": self.served_model_alias,
+            "supervisor_policy_id": self.supervisor_policy_id,
+            "supervisor_policy_sha256": self.supervisor_policy_sha256,
             "supervisor_requested_mode": self.supervisor_requested_mode,
         }
         return hashlib.sha256(_canonical_json(payload).encode("ascii")).hexdigest()
@@ -315,8 +319,7 @@ def _runtime_lease(runtime: _EffectIntentScheduler) -> _RuntimeLease:
     profile = get_secondary_runtime_profile(semantic_supervisor_policy.SUPERVISOR_RUNTIME_PROFILE_ID)
     if (
         profile is None
-        or profile.manifest_sha256
-        != semantic_supervisor_policy.SUPERVISOR_RUNTIME_PROFILE_MANIFEST_SHA256
+        or profile.manifest_sha256 != semantic_supervisor_policy.SUPERVISOR_RUNTIME_PROFILE_MANIFEST_SHA256
     ):
         _fail(SupervisorEffectIntentTransportFailure.RUNTIME_UNAVAILABLE)
     try:
@@ -335,13 +338,18 @@ def _runtime_lease(runtime: _EffectIntentScheduler) -> _RuntimeLease:
     runtime_mode = identity.get("candidate_profile_mode")
     requested_mode = supervisor.get("requested_mode")
     if (
+        type(requested_mode) is not str
+        or requested_mode not in semantic_supervisor_policy.SUPERVISOR_REQUESTED_MODES
+    ):
+        _fail(SupervisorEffectIntentTransportFailure.RUNTIME_UNAVAILABLE)
+    policy_identity = semantic_supervisor_policy.supervisor_product_policy_identity_for_mode(requested_mode)
+    if (
         alias != profile.served_model_alias
         or identity.get("candidate_profile_id") != profile.profile_id
         or identity.get("candidate_profile_manifest_sha256") != profile.manifest_sha256
         or identity.get("candidate_profile_admission") != _ACCEPTED_PROFILE_ADMISSION
         or identity.get("served_model_alias") != profile.served_model_alias
-        or identity.get("gateway_ca_certificate_sha256")
-        != profile.gateway_ca_certificate_sha256
+        or identity.get("gateway_ca_certificate_sha256") != profile.gateway_ca_certificate_sha256
         or identity.get("candidate_profile_context_tokens") != profile.max_context_tokens
         or identity.get("candidate_profile_allow_private_text") is not True
         or type(runtime_mode) is not str
@@ -355,12 +363,8 @@ def _runtime_lease(runtime: _EffectIntentScheduler) -> _RuntimeLease:
         or diagnostics.get("profile_manifest_match") is not True
         or supervisor.get("workload") != ModelWorkload.PLAN_CANDIDATE.value
         or supervisor.get("effective_mode") != "shadow"
-        or supervisor.get("policy_id")
-        != semantic_supervisor_policy.SUPERVISOR_PRODUCT_POLICY_ID
-        or supervisor.get("policy_sha256")
-        != semantic_supervisor_policy.SUPERVISOR_PRODUCT_POLICY_SHA256
-        or type(requested_mode) is not str
-        or requested_mode not in semantic_supervisor_policy.SUPERVISOR_REQUESTED_MODES
+        or supervisor.get("policy_id") != policy_identity.policy_id
+        or supervisor.get("policy_sha256") != policy_identity.policy_sha256
         or supervisor.get("workload_available") is not True
         or supervisor.get("runtime_available") is not True
         or supervisor.get("closed_reason") != "admitted"
@@ -377,6 +381,8 @@ def _runtime_lease(runtime: _EffectIntentScheduler) -> _RuntimeLease:
         served_model_alias=profile.served_model_alias,
         runtime_mode=runtime_mode,
         supervisor_requested_mode=requested_mode,
+        supervisor_policy_id=policy_identity.policy_id,
+        supervisor_policy_sha256=policy_identity.policy_sha256,
         process_epoch_probe_serial=process_epoch_probe_serial,
         inventory_probe_serial=inventory_probe_serial,
     )

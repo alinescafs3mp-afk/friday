@@ -45,6 +45,8 @@ def _digest(label: str) -> str:
 _MANIFEST = _digest("manifest")
 _PROPOSAL = _digest("proposal")
 _OTHER = _digest("other")
+
+
 def _accepted_profile() -> SecondaryRuntimeProfile:
     profile = get_secondary_runtime_profile(semantic_supervisor_policy.SUPERVISOR_RUNTIME_PROFILE_ID)
     if profile is None:
@@ -98,7 +100,8 @@ def _identity() -> dict[str, object]:
     }
 
 
-def _diagnostics() -> dict[str, object]:
+def _diagnostics(*, requested_mode: str = "shadow") -> dict[str, object]:
+    policy = semantic_supervisor_policy.supervisor_product_policy_identity_for_mode(requested_mode)
     return {
         "enabled": True,
         "configured": True,
@@ -113,10 +116,10 @@ def _diagnostics() -> dict[str, object]:
         "model_inventory_probe_success_total": 9,
         "semantic_supervisor": {
             "workload": ModelWorkload.PLAN_CANDIDATE.value,
-            "requested_mode": "shadow",
+            "requested_mode": requested_mode,
             "effective_mode": "shadow",
-            "policy_id": semantic_supervisor_policy.SUPERVISOR_PRODUCT_POLICY_ID,
-            "policy_sha256": semantic_supervisor_policy.SUPERVISOR_PRODUCT_POLICY_SHA256,
+            "policy_id": policy.policy_id,
+            "policy_sha256": policy.policy_sha256,
             "workload_available": True,
             "runtime_available": True,
             "closed_reason": "admitted",
@@ -125,10 +128,15 @@ def _diagnostics() -> dict[str, object]:
 
 
 class _Scheduler:
-    def __init__(self, result: SecondaryResult | None = None) -> None:
+    def __init__(
+        self,
+        result: SecondaryResult | None = None,
+        *,
+        requested_mode: str = "shadow",
+    ) -> None:
         self.alias = _PROFILE.served_model_alias
         self.identity = _identity()
-        self.diagnostics = _diagnostics()
+        self.diagnostics = _diagnostics(requested_mode=requested_mode)
         self.result = result or _result()
         self.evaluate_calls = 0
         self.dispatches = 0
@@ -287,6 +295,85 @@ async def test_one_current_scheduler_call_returns_exact_untrusted_intent(
     assert response_schema["properties"]["action"]["enum"] == [action.value]
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("requested_mode", "expected_policy_id", "expected_policy_sha256"),
+    [
+        (
+            "shadow",
+            semantic_supervisor_policy.SUPERVISOR_PRODUCT_POLICY_ID,
+            semantic_supervisor_policy.SUPERVISOR_PRODUCT_POLICY_SHA256,
+        ),
+        (
+            "assist",
+            semantic_supervisor_policy.SUPERVISOR_ASSIST_PRODUCT_POLICY_ID,
+            semantic_supervisor_policy.SUPERVISOR_ASSIST_PRODUCT_POLICY_SHA256,
+        ),
+        (
+            "canary",
+            semantic_supervisor_policy.SUPERVISOR_ASSIST_PRODUCT_POLICY_ID,
+            semantic_supervisor_policy.SUPERVISOR_ASSIST_PRODUCT_POLICY_SHA256,
+        ),
+    ],
+)
+async def test_transport_requires_the_mode_owned_non_authorizing_policy_identity(
+    requested_mode: str,
+    expected_policy_id: str,
+    expected_policy_sha256: str,
+) -> None:
+    scheduler = _Scheduler(requested_mode=requested_mode)
+
+    intent = await _describe(scheduler)
+
+    assert intent == _intent()
+    supervisor = scheduler.diagnostics["semantic_supervisor"]
+    assert isinstance(supervisor, dict)
+    assert supervisor["policy_id"] == expected_policy_id
+    assert supervisor["policy_sha256"] == expected_policy_sha256
+    assert supervisor["effective_mode"] == "shadow"
+    assert scheduler.evaluate_calls == scheduler.dispatches == 1
+    assert scheduler.requests[0].effect_class is EffectClass.NONE
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("requested_mode", "foreign_policy_id", "foreign_policy_sha256"),
+    [
+        (
+            "shadow",
+            semantic_supervisor_policy.SUPERVISOR_ASSIST_PRODUCT_POLICY_ID,
+            semantic_supervisor_policy.SUPERVISOR_ASSIST_PRODUCT_POLICY_SHA256,
+        ),
+        (
+            "assist",
+            semantic_supervisor_policy.SUPERVISOR_PRODUCT_POLICY_ID,
+            semantic_supervisor_policy.SUPERVISOR_PRODUCT_POLICY_SHA256,
+        ),
+        (
+            "canary",
+            semantic_supervisor_policy.SUPERVISOR_PRODUCT_POLICY_ID,
+            semantic_supervisor_policy.SUPERVISOR_PRODUCT_POLICY_SHA256,
+        ),
+    ],
+)
+async def test_cross_mode_policy_identity_fails_before_model_call(
+    requested_mode: str,
+    foreign_policy_id: str,
+    foreign_policy_sha256: str,
+) -> None:
+    scheduler = _Scheduler(requested_mode=requested_mode)
+    supervisor = scheduler.diagnostics["semantic_supervisor"]
+    assert isinstance(supervisor, dict)
+    supervisor["policy_id"] = foreign_policy_id
+    supervisor["policy_sha256"] = foreign_policy_sha256
+
+    with pytest.raises(SupervisorEffectIntentTransportError) as raised:
+        await _describe(scheduler)
+
+    assert raised.value.failure is SupervisorEffectIntentTransportFailure.RUNTIME_UNAVAILABLE
+    assert scheduler.evaluate_calls == scheduler.dispatches == 0
+
+
 def test_raw_structured_parity_is_exact() -> None:
     changed = _intent().to_payload()
     changed["reason"] = EffectIntentReason.DECLARED_PLAN_EFFECT.value
@@ -367,18 +454,12 @@ def test_request_rejects_untyped_symbols_digests_and_deadlines() -> None:
     "mutation",
     [
         lambda runtime: runtime.identity.__setitem__("candidate_profile_id", "wrong-profile"),
-        lambda runtime: runtime.identity.__setitem__(
-            "candidate_profile_manifest_sha256", _OTHER
-        ),
+        lambda runtime: runtime.identity.__setitem__("candidate_profile_manifest_sha256", _OTHER),
         lambda runtime: runtime.diagnostics.__setitem__("served_model_match", False),
         lambda runtime: runtime.diagnostics.__setitem__("profile_manifest_match", False),
         lambda runtime: runtime.diagnostics.__setitem__("probe_success_total", 0),
-        lambda runtime: runtime.diagnostics.__setitem__(
-            "model_inventory_probe_success_total", 0
-        ),
-        lambda runtime: runtime.diagnostics["semantic_supervisor"].__setitem__(
-            "runtime_available", False
-        ),
+        lambda runtime: runtime.diagnostics.__setitem__("model_inventory_probe_success_total", 0),
+        lambda runtime: runtime.diagnostics["semantic_supervisor"].__setitem__("runtime_available", False),
     ],
 )
 async def test_unaccepted_profile_alias_or_epoch_fails_before_call(
@@ -410,14 +491,32 @@ async def test_lease_drift_immediately_before_dispatch_fails_without_model_call(
 
 
 @pytest.mark.asyncio
+async def test_policy_identity_drift_before_dispatch_fails_without_model_call() -> None:
+    scheduler = _Scheduler(requested_mode="assist")
+
+    def drift_policy(runtime: _Scheduler) -> None:
+        supervisor = runtime.diagnostics["semantic_supervisor"]
+        assert isinstance(supervisor, dict)
+        supervisor["policy_id"] = semantic_supervisor_policy.SUPERVISOR_PRODUCT_POLICY_ID
+        supervisor["policy_sha256"] = semantic_supervisor_policy.SUPERVISOR_PRODUCT_POLICY_SHA256
+
+    scheduler.mutate_before_dispatch = drift_policy
+
+    with pytest.raises(SupervisorEffectIntentTransportError) as raised:
+        await _describe(scheduler)
+
+    assert raised.value.failure is SupervisorEffectIntentTransportFailure.RUNTIME_STALE
+    assert scheduler.evaluate_calls == 1
+    assert scheduler.dispatches == 0
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     "mutation",
     [
         lambda runtime: runtime.diagnostics.__setitem__("probe_success_total", 8),
         lambda runtime: setattr(runtime, "alias", "different-model"),
-        lambda runtime: runtime.diagnostics["semantic_supervisor"].__setitem__(
-            "runtime_available", False
-        ),
+        lambda runtime: runtime.diagnostics["semantic_supervisor"].__setitem__("runtime_available", False),
     ],
 )
 async def test_epoch_alias_or_admission_drift_after_response_discards_intent(
@@ -425,6 +524,25 @@ async def test_epoch_alias_or_admission_drift_after_response_discards_intent(
 ) -> None:
     scheduler = _Scheduler()
     scheduler.mutate_after_result = mutation
+
+    with pytest.raises(SupervisorEffectIntentTransportError) as raised:
+        await _describe(scheduler)
+
+    assert raised.value.failure is SupervisorEffectIntentTransportFailure.RUNTIME_STALE
+    assert scheduler.evaluate_calls == 1
+    assert scheduler.dispatches == 1
+
+
+@pytest.mark.asyncio
+async def test_policy_identity_drift_after_response_discards_intent() -> None:
+    scheduler = _Scheduler(requested_mode="canary")
+
+    def drift_policy(runtime: _Scheduler) -> None:
+        supervisor = runtime.diagnostics["semantic_supervisor"]
+        assert isinstance(supervisor, dict)
+        supervisor["policy_sha256"] = _OTHER
+
+    scheduler.mutate_after_result = drift_policy
 
     with pytest.raises(SupervisorEffectIntentTransportError) as raised:
         await _describe(scheduler)
