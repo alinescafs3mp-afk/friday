@@ -85,6 +85,48 @@ reserves its full declared deadline before entry, and persistence rejects a
 generated-file batch whose cumulative decoded bytes exceed the configured
 upload limit.
 
+### Bounded Java 21 compilation
+
+The only source compilation admitted by this contract is one exact, owned,
+UTF-8 Java source file into one deterministic library JAR. The authenticated
+current human message must directly request compilation and identify exactly
+one current Raw file whose safe ASCII basename ends in `.java`. Source text,
+upload metadata, conversation history and model output cannot create that
+authority. Runtime rechecks the owner's `engineer.artifact.build` and
+`files.read` capabilities immediately before the hidden compiler tool enters.
+
+Compilation uses only the fixed owner-local Temurin JDK `21.0.12.1+1` tree at
+`/home/jericho/.jericho/tools/jdk-21.0.12.1+1`. The complete tree identity,
+owner, modes, links and launch-chain files are verified before the read-only
+bind and again inside the sandbox. PATH discovery, a system JDK, caller-supplied
+executables, flags, class paths, module paths, annotation processors, compiler
+plugins, dependency resolution and build scripts are not accepted. The worker
+invokes a code-owned `javac --release 21` argument vector with annotation
+processing and implicit source discovery disabled. It never invokes `java`,
+loads a compiled class or executes the submitted source or generated JAR.
+
+The compile profile accepts at most 1 MiB of source and emits at most 256 class
+files, 8 MiB of class bytes and a 16 MiB JAR. Class paths, names, magic and Java
+21 versions are checked before packaging. Packaging is code-owned and
+deterministic: entries are sorted, timestamps and modes are fixed, compression
+is not environment-dependent, and no manifest or `Main-Class` is added. The
+result explicitly records `sample_executed=false`, `network=none`, the source
+and output SHA-256 digests, the pinned toolchain identity, structural checks,
+and that runtime validation was not performed. Compiler diagnostics, source
+text, paths and parser-controlled stderr never cross the worker boundary.
+
+Java compilation shares one non-blocking physical heavy-work lock with Ghidra,
+has fixed CPU, memory, file, descriptor and wall-time ceilings, and is limited
+to one entered compilation per turn after its complete deadline has been
+reserved. A busy or preflight refusal records that work did not start; timeout
+or failure after `javac` entry records that it did. The source Raw object remains
+byte-for-byte unchanged. A successful JAR, its bounded accepted-outcome receipt
+and the assistant message are committed through the existing person-owned
+generated-file path in one transaction, after final source identity and
+`files.read` reauthorization. Failure or revocation publishes neither JAR nor a
+success receipt. Friday never calls the artifact tested merely because it
+compiled; running and runtime testing remain with the operator elsewhere.
+
 The optional secondary brain may refine a secret-stripped structured finding
 list only when its ordinary admission policy allows that extraction. It receives
 no tools, target ticket or effect authority.
@@ -123,7 +165,10 @@ of the following without skips or local substitutions:
 2. the engineer production, security, organ and audit contract tests in
    `tests/test_engineer_mode_production.py`,
    `tests/test_engineer_security_contracts.py`, `tests/test_organs_engineer.py`
-   and `tests/test_engineer_audit_projection.py`;
+   and `tests/test_engineer_audit_projection.py`; a candidate which includes
+   Java compilation additionally passes `tests/test_engineer_compiler.py`,
+   `tests/test_engineer_compile_tool.py` and
+   `tests/test_engineer_compile_outcome.py`;
 3. the canonical full release gate: `python tools/quality_gate.py`.
 
 Keep `FRIDAY_ENGINEER_MODE_ENABLED=0` during rollout preparation. Enable it only
@@ -133,8 +178,11 @@ and a benign owner-controlled fixture completes with an accurate receipt.
 
 ## Explicit non-goals for v1
 
-The shipped mode has no generic code execution, autonomous target discovery,
-multi-host assessment, exploit validation worker, persistence on a target,
-credential use, or background scanning. Those ideas require a separate design,
-threat review and acceptance contract; their presence in a historical brief is
-not implementation or authorization.
+The shipped mode has no generic code execution. The fixed Java compilation
+profile above is not a shell or program runner and cannot be widened into one.
+The mode also has no autonomous target discovery, multi-host assessment,
+exploit validation worker, persistence on a target, credential use, background
+scanning, arbitrary dependency builds, native compilation, Android rebuilds or
+artifact signing. Those ideas require a separate design, threat review and
+acceptance contract; their presence in a historical brief is not implementation
+or authorization.
