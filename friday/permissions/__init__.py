@@ -245,6 +245,13 @@ CORE_CAPABILITIES: tuple[CapabilityDefinition, ...] = (
     CapabilityDefinition("web.search", "Search the public web", "web", 1, ("admin", "moderator", "user")),
     CapabilityDefinition("web.fetch", "Fetch a public web page", "web", 1, ("admin", "moderator", "user")),
     CapabilityDefinition("web.research", "Run multi-source web research", "web", 2, ("admin", "moderator")),
+    CapabilityDefinition(
+        "web.compare.transient",
+        "Run a bounded transient public-web comparison read",
+        "web",
+        2,
+        (),
+    ),
     CapabilityDefinition("code.run", "Run code in the restricted subprocess executor", "execution", 4, ()),
     CapabilityDefinition(
         "missions.read", "Inspect owned missions", "executive", 0, ("admin", "moderator", "user")
