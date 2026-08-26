@@ -4,6 +4,7 @@ import hashlib
 import inspect
 import json
 import os
+from collections.abc import Mapping
 from dataclasses import replace
 from pathlib import Path
 from typing import Any
@@ -11,6 +12,7 @@ from typing import Any
 import pytest
 
 from friday import semantic_supervisor_policy
+from friday.orchestration import supervisor_representative_window_attestation as window_module
 from friday.orchestration.capability_binding import (
     CapabilityBindingSnapshot,
     operational_capability_snapshot,
@@ -22,10 +24,12 @@ from friday.orchestration.supervisor_assist_activation import (
     LoadedAssistPromotionEvidence,
     RawAssistPromotionActivationSettings,
     derive_installed_release_tree_sha256,
-    load_assist_promotion_activation,
     load_assist_promotion_live_evidence,
     parse_assist_promotion_live_evidence,
     scheduler_admission_snapshot_from_status,
+)
+from friday.orchestration.supervisor_assist_activation import (
+    load_assist_promotion_activation as _load_assist_promotion_activation,
 )
 from friday.orchestration.supervisor_assist_promotion import (
     SUPERVISOR_ASSIST_PROMOTION_MAX_REVIEW_ROUNDS,
@@ -37,14 +41,89 @@ from friday.orchestration.supervisor_assist_promotion import (
     AssistPromotionQualityBasis,
     AssistPromotionReadinessEvidence,
 )
-from friday.orchestration.supervisor_contracts import SupervisorMode, TaskClass
+from friday.orchestration.supervisor_contracts import (
+    SupervisorMode,
+    TaskClass,
+    canonical_sha256,
+)
+from friday.orchestration.supervisor_production_baseline import (
+    SUPERVISOR_PRODUCT_WINDOW_SCHEMA,
+    SUPERVISOR_PRODUCTION_BASELINE_KIND,
+    SUPERVISOR_PRODUCTION_BASELINE_SCHEMA,
+)
 from friday.orchestration.supervisor_promoted_product_event import (
     SupervisorLatencyBudgetDocument,
+)
+from friday.orchestration.supervisor_promotion_evidence_producer import (
+    SupervisorPromotionOperatorAttestation,
+    build_supervisor_assist_promotion_evidence,
+    build_supervisor_canary_promotion_evidence,
+    build_supervisor_promotion_bundle_payload,
+    canonical_json_file_bytes,
+    load_accepted_supervisor_production_baseline,
+    load_canonical_supervisor_latency_budget,
+)
+from friday.orchestration.supervisor_representative_window_attestation import (
+    REPRESENTATIVE_WINDOW_ATTESTATION_SCHEMA,
+    REPRESENTATIVE_WINDOW_AUTHORITY,
+    REPRESENTATIVE_WINDOW_ISSUE_RESPONSE_SCHEMA,
+    AcceptedRepresentativeWindowAttestation,
+    representative_window_sha256,
 )
 
 ACTOR = "1" * 64
 OTHER = "f" * 64
 _ZERO = "0" * 64
+
+
+def load_assist_promotion_activation(*args: Any, **kwargs: Any) -> Any:
+    """Inject a process-sealed witness into legacy activation unit cases."""
+
+    kwargs.setdefault(
+        "representative_window_verifier",
+        _accepted_representative_window,
+    )
+    return _load_assist_promotion_activation(*args, **kwargs)
+
+
+def _accepted_representative_window(
+    issue: Mapping[str, object],
+) -> AcceptedRepresentativeWindowAttestation:
+    server = issue["server_attestation"]
+    assert isinstance(server, dict)
+    fields: dict[str, Any] = {
+        "attestation_id": server["attestation_id"],
+        "target_mode": SupervisorMode(server["target_mode"]),
+        "observed_mode": SupervisorMode(server["observed_mode"]),
+        "baseline_file_sha256": server["baseline_file_sha256"],
+        "baseline_report_sha256": server["baseline_report_sha256"],
+        "latency_budget_file_sha256": server["latency_budget_file_sha256"],
+        "latency_budget_document_sha256": server["latency_budget_document_sha256"],
+        "latency_budget_maximum_ms": server["maximum_user_visible_latency_ms"],
+        "source_revision_sha256": server["source_revision_sha256"],
+        "registry_binding_sha256": server["registry_binding_sha256"],
+        "observer_runner_sha256": server["observer_runner_sha256"],
+        "representative_window_sha256": server["representative_window_sha256"],
+        "precursor_assist_promotion_evidence_sha256": server[
+            "precursor_assist_promotion_evidence_sha256"
+        ],
+        "server_attestation_sha256": issue["server_attestation_sha256"],
+        "consume_binding_sha256": "a" * 64,
+        "consumed_response_sha256": "b" * 64,
+        "consumed_at": 1_001,
+    }
+    seal_payload = {
+        **fields,
+        "target_mode": fields["target_mode"].value,
+        "observed_mode": fields["observed_mode"].value,
+    }
+    return AcceptedRepresentativeWindowAttestation(
+        **fields,
+        _process_authority=window_module._PROCESS_ACCEPTANCE_AUTHORITY,  # noqa: SLF001
+        _process_seal_sha256=window_module._process_acceptance_seal(  # noqa: SLF001
+            seal_payload
+        ),
+    )
 
 
 def _readiness_product(**changes: object) -> AssistPromotionReadinessEvidence:
@@ -267,12 +346,7 @@ def _latency_budget_file(
         source_revision_sha256=source_sha256,
         maximum_user_visible_latency_ms=maximum_ms,
     )
-    raw = json.dumps(
-        document.payload(),
-        ensure_ascii=True,
-        sort_keys=True,
-        separators=(",", ":"),
-    ).encode("ascii")
+    raw = canonical_json_file_bytes(document.payload())
     suffix = f"-{label}" if label else ""
     path = tmp_path / f"private-{mode.value}-latency-budget{suffix}.json"
     path.write_bytes(raw)
@@ -307,12 +381,319 @@ def _raw_settings(
     return RawAssistPromotionActivationSettings(**values)
 
 
+def _baseline_metric(
+    *,
+    stage: str,
+    complete: int,
+    failure_counts: dict[str, int],
+    latency_total: int,
+    latency_max: int,
+    window: str,
+) -> dict[str, object]:
+    observations = 20
+    return {
+        "schema": SUPERVISOR_PRODUCT_WINDOW_SCHEMA,
+        "stage": stage,
+        "observation_count": observations,
+        "completion_counts": {"complete": complete, "failed": observations - complete},
+        "complete_count": complete,
+        "failure_class_counts": failure_counts,
+        "latency_observation_count": observations,
+        "latency_total_ms": latency_total,
+        "latency_max_ms": latency_max,
+        "window_sha256": window * 64,
+    }
+
+
+def _promotion_baseline_raw() -> bytes:
+    shadow = _baseline_metric(
+        stage="shadow",
+        complete=8,
+        failure_counts={"capability:source_unavailable": 5, "none:none": 15},
+        latency_total=20_000,
+        latency_max=1_500,
+        window="4",
+    )
+    assist = _baseline_metric(
+        stage="assist",
+        complete=12,
+        failure_counts={"none:none": 20},
+        latency_total=20_000,
+        latency_max=1_500,
+        window="8",
+    )
+    empty_canary = {
+        **_baseline_metric(
+            stage="canary",
+            complete=0,
+            failure_counts={},
+            latency_total=0,
+            latency_max=0,
+            window="9",
+        ),
+        "observation_count": 0,
+        "completion_counts": {},
+        "latency_observation_count": 0,
+    }
+    report: dict[str, Any] = {
+        "schema": SUPERVISOR_PRODUCTION_BASELINE_SCHEMA,
+        "evidence": {
+            "kind": SUPERVISOR_PRODUCTION_BASELINE_KIND,
+            "body_free": True,
+            "production_acceptance": False,
+            "acceptance_authority": "operator_review_required",
+            "representative_window_attested": False,
+            "promotion_authority": False,
+        },
+        "sample": {
+            "limit": 100,
+            "turn_traces": 40,
+            "joined_supervisor_events": 20,
+            "promoted_product_events": 20,
+            "malformed_turn_traces": 0,
+            "malformed_joined_events": 0,
+            "malformed_promoted_product_events": 0,
+            "duplicate_turn_trace_digests": 0,
+            "duplicate_shadow_product_events": 0,
+            "duplicate_promoted_product_events": 0,
+            "unmatched_shadow_product_events": 0,
+            "unmatched_promoted_product_events": 0,
+        },
+        "primary_baseline": {
+            "intent_counts": {"dialogue": 40},
+            "playbook_counts": {"dialogue": 40},
+            "completion_counts": {"complete": 20, "failed": 20},
+            "publication_counts": {"assistant_committed": 40},
+            "failure_counts": {"none:none": 40},
+            "authority_rechecked_count": 40,
+            "partial_coverage_count": 0,
+            "state_restored_count": 0,
+        },
+        "supervisor_join": {
+            "task_counts": {"compare_current_file_with_current_web": 20},
+            "skip_counts": {"none": 20},
+            "parse_counts": {"parsed": 20},
+            "policy_reason_counts": {"admitted": 20},
+            "planner_latency_bucket_counts": {"250_999ms": 20},
+            "actual_completion_counts": {"complete": 20},
+            "actual_publication_counts": {"assistant_committed": 20},
+            "actual_capability_outcome_counts": {},
+            "invoked_count": 20,
+            "admitted_count": 20,
+            "final_authority_rechecked_count": 20,
+            "state_restored_count": 0,
+            "retry_occurred_count": 0,
+        },
+        "product_windows": {
+            "shadow_readiness": {
+                "schema": SUPERVISOR_PRODUCT_WINDOW_SCHEMA,
+                "mode": "shadow",
+                "production_joined": True,
+                "actual_promoted_execution": False,
+                "quality_claim": "documented_baseline_failure_only",
+                "observation_count": 20,
+                "joined_trace_count": 20,
+                "baseline": shadow,
+                "readiness_observation_count": 20,
+                "call_rate_observation_count": 20,
+                "supervisor_invocation_count": 20,
+                "unnecessary_supervisor_invocation_count": 0,
+                "user_visible_observation_count": 20,
+                "user_visible_regression_count": 0,
+                "readiness_witness_sha256": "6" * 64,
+            },
+            "promoted_execution": {
+                "assist": {
+                    "schema": SUPERVISOR_PRODUCT_WINDOW_SCHEMA,
+                    "mode": "assist",
+                    "production_joined": True,
+                    "actual_promoted_execution": True,
+                    "observation_count": 20,
+                    "joined_trace_count": 20,
+                    "promotion_evidence_count": 1,
+                    "promotion_evidence_sha256": "c" * 64,
+                    "promoted": assist,
+                    "call_rate_observation_count": 20,
+                    "supervisor_invocation_count": 20,
+                    "unnecessary_supervisor_invocation_count": 0,
+                    "user_visible_observation_count": 20,
+                    "user_visible_regression_count": 0,
+                    "product_window_sha256": "d" * 64,
+                },
+                "canary": {
+                    "schema": SUPERVISOR_PRODUCT_WINDOW_SCHEMA,
+                    "mode": "canary",
+                    "production_joined": True,
+                    "actual_promoted_execution": True,
+                    "observation_count": 0,
+                    "joined_trace_count": 0,
+                    "promotion_evidence_count": 0,
+                    "promotion_evidence_sha256": None,
+                    "promoted": empty_canary,
+                    "call_rate_observation_count": 0,
+                    "supervisor_invocation_count": 0,
+                    "unnecessary_supervisor_invocation_count": 0,
+                    "user_visible_observation_count": 0,
+                    "user_visible_regression_count": 0,
+                    "product_window_sha256": "e" * 64,
+                },
+            },
+        },
+    }
+    unsigned = dict(report)
+    report["report_sha256"] = canonical_sha256(unsigned)
+    return canonical_json_file_bytes(report)
+
+
+def _promotion_bundle_file(
+    tmp_path: Path,
+    *,
+    mode: SupervisorMode,
+    source_sha256: str,
+    registry_sha256: str,
+    budget_path: Path,
+    budget_sha256: str,
+) -> tuple[Path, str]:
+    baseline_raw = _promotion_baseline_raw()
+    baseline = load_accepted_supervisor_production_baseline(
+        baseline_raw,
+        expected_file_sha256=hashlib.sha256(baseline_raw).hexdigest(),
+    )
+    budget_raw = budget_path.read_bytes()
+    budget = load_canonical_supervisor_latency_budget(
+        budget_raw,
+        expected_file_sha256=budget_sha256,
+    )
+    attestation = SupervisorPromotionOperatorAttestation(
+        target_mode=mode,
+        baseline_file_sha256=baseline.file_sha256,
+        baseline_report_sha256=baseline.report_sha256,
+        latency_budget_file_sha256=budget.document_sha256,
+        source_revision_sha256=source_sha256,
+        registry_binding_sha256=registry_sha256,
+        representative_window_attested=True,
+        primary_fallback_proven=True,
+        laptop_unavailable_fallback_proven=True,
+        final_authority_recheck_proven=True,
+        primary_publication_owner_proven=True,
+        zero_hidden_owners_attested=True,
+        zero_duplicate_capabilities_attested=True,
+        zero_duplicate_effects_attested=True,
+        zero_duplicate_publications_attested=True,
+        zero_false_completion_regressions_attested=True,
+        precursor_assist_promotion_evidence_sha256=(
+            "c" * 64 if mode is SupervisorMode.CANARY else None
+        ),
+        quality_basis=(
+            AssistPromotionQualityBasis.COMPLETION_RATE_IMPROVEMENT
+            if mode is SupervisorMode.CANARY
+            else None
+        ),
+    )
+    evidence = (
+        build_supervisor_assist_promotion_evidence(
+            evidence_id="activation_assist_window",
+            baseline=baseline,
+            budget=budget,
+            attestation=attestation,
+            documented_failure_class_id="capability:source_unavailable",
+            documented_failure_class_sha256="5" * 64,
+        )
+        if mode is SupervisorMode.ASSIST
+        else build_supervisor_canary_promotion_evidence(
+            evidence_id="activation_canary_window",
+            baseline=baseline,
+            budget=budget,
+            attestation=attestation,
+        )
+    )
+    lookup_token = "7" * 64
+    observed_mode = (
+        SupervisorMode.SHADOW if mode is SupervisorMode.ASSIST else SupervisorMode.ASSIST
+    )
+    server_attestation: dict[str, object] = {
+        "schema": REPRESENTATIVE_WINDOW_ATTESTATION_SCHEMA,
+        "attestation_id": "sswindow_" + "6" * 32,
+        "authority": REPRESENTATIVE_WINDOW_AUTHORITY,
+        "target_mode": mode.value,
+        "observed_mode": observed_mode.value,
+        "baseline_file_sha256": baseline.file_sha256,
+        "baseline_report_sha256": baseline.report_sha256,
+        "latency_budget_file_sha256": budget.document_sha256,
+        "latency_budget_document_sha256": budget.document_sha256,
+        "latency_budget_target_mode": mode.value,
+        "latency_budget_source_revision_sha256": source_sha256,
+        "maximum_user_visible_latency_ms": 2_500,
+        "precursor_assist_promotion_evidence_sha256": (
+            "c" * 64 if mode is SupervisorMode.CANARY else None
+        ),
+        "source_revision_sha256": source_sha256,
+        "registry_binding_sha256": registry_sha256,
+        "primary_pid": 100,
+        "primary_process_epoch_sha256": "5" * 64,
+        "primary_backend_version": "test",
+        "requested_mode": SupervisorMode.ASSIST.value,
+        "observed_release_commit": "4" * 40,
+        "observed_release_metadata_sha256": "3" * 64,
+        "observed_release_tree_sha256": "2" * 64,
+        "observed_registry_binding_sha256": registry_sha256,
+        "supervisor_policy_id": semantic_supervisor_policy.SUPERVISOR_ASSIST_PRODUCT_POLICY_ID,
+        "supervisor_policy_sha256": (
+            semantic_supervisor_policy.SUPERVISOR_ASSIST_PRODUCT_POLICY_SHA256
+        ),
+        "runtime_profile_id": semantic_supervisor_policy.SUPERVISOR_RUNTIME_PROFILE_ID,
+        "runtime_profile_manifest_sha256": (
+            semantic_supervisor_policy.SUPERVISOR_RUNTIME_PROFILE_MANIFEST_SHA256
+        ),
+        "observer_runner_sha256": "1" * 64,
+        "sample_limit": 100,
+        "turn_trace_count": 40,
+        "joined_trace_count": 20,
+        "representative_window_sha256": (
+            baseline.shadow_readiness.readiness_witness_sha256
+            if mode is SupervisorMode.ASSIST
+            else baseline.assist_execution.product_window_sha256
+        ),
+        "server_recomputed": True,
+        "representative_window_attested": True,
+        "synthetic_authority": False,
+        "lookup_token_sha256": hashlib.sha256(lookup_token.encode("ascii")).hexdigest(),
+        "state_version": 1,
+        "issued_at": 1_000,
+        "expires_at": 1_500,
+        "signature": "9" * 64,
+    }
+    representative_window_issue: dict[str, object] = {
+        "schema": REPRESENTATIVE_WINDOW_ISSUE_RESPONSE_SCHEMA,
+        "status": "unused",
+        "server_attestation": server_attestation,
+        "server_attestation_sha256": representative_window_sha256(
+            server_attestation
+        ),
+        "attestation_lookup_token": lookup_token,
+        "lookup_token_sha256": server_attestation["lookup_token_sha256"],
+        "state_version": 1,
+    }
+    raw = canonical_json_file_bytes(
+        build_supervisor_promotion_bundle_payload(
+            baseline_raw=baseline_raw,
+            budget=budget,
+            attestation=attestation,
+            representative_window_issue=representative_window_issue,
+            evidence=evidence,
+        )
+    )
+    path = tmp_path / f"private-{mode.value}-promotion-bundle.json"
+    path.write_bytes(raw)
+    path.chmod(0o600)
+    return path, hashlib.sha256(raw).hexdigest()
+
+
 def _activation_fixture(
     tmp_path: Path,
     *,
     mode: str = "assist",
     runtime_available: bool = False,
-    authority: AssistPromotionEvidenceAuthority = AssistPromotionEvidenceAuthority.PRODUCTION_JOINED,
 ) -> tuple[
     RawAssistPromotionActivationSettings,
     Path,
@@ -322,20 +703,19 @@ def _activation_fixture(
 ]:
     root, source = _release_root(tmp_path)
     binding = operational_capability_snapshot()
-    observed = SupervisorMode.ASSIST if mode == "canary" else SupervisorMode.SHADOW
     budget_path, budget_sha256 = _latency_budget_file(
         tmp_path,
         mode=SupervisorMode(mode),
         source_sha256=source,
     )
-    evidence = _evidence(
+    evidence_path, evidence_sha = _promotion_bundle_file(
+        tmp_path,
+        mode=SupervisorMode(mode),
         source_sha256=source,
         registry_sha256=binding.digest_hex(),
-        observed_mode=observed,
-        authority=authority,
-        latency_budget_sha256=budget_sha256,
+        budget_path=budget_path,
+        budget_sha256=budget_sha256,
     )
-    evidence_path, evidence_sha = _evidence_file(tmp_path, evidence)
     raw = _raw_settings(
         evidence_path=evidence_path,
         evidence_sha256=evidence_sha,
@@ -866,7 +1246,7 @@ def test_activation_identity_rejects_actual_outcome_evidence_for_first_assist(
     )
 
     assert material.configured is False
-    assert material.reason is AssistPromotionActivationReason.EVIDENCE_IDENTITY_MISMATCH
+    assert material.reason is AssistPromotionActivationReason.EVIDENCE_INVALID
 
 
 def test_valid_static_material_is_loaded_but_never_described_as_accepted(
@@ -908,6 +1288,7 @@ def test_valid_static_material_is_loaded_but_never_described_as_accepted(
         "evidence_loaded": True,
         "evidence_authority": "production_joined",
         "operator_gate_enabled": True,
+        "representative_window_verified": True,
         "canary_actor_binding_count": 0,
         "promotion_admitted": False,
         "evidence_accepted": False,
@@ -926,6 +1307,58 @@ def test_valid_static_material_is_loaded_but_never_described_as_accepted(
         "prompt",
         "response",
     } & set(status)
+
+
+def test_consumed_representative_window_is_required_before_gate_enablement(
+    tmp_path: Path,
+) -> None:
+    raw, root, public, diagnostics, binding = _activation_fixture(tmp_path)
+
+    material = _load_assist_promotion_activation(
+        raw,
+        installed_release_root=root,
+        scheduler_public_status=public,
+        scheduler_diagnostics_status=diagnostics,
+        binding_snapshot=binding,
+    )
+
+    assert material.configured is False
+    assert material.reason is AssistPromotionActivationReason.REPRESENTATIVE_WINDOW_UNAVAILABLE
+    assert material.operator_gate.enabled is False
+    assert material.public_status()["representative_window_verified"] is False
+
+
+@pytest.mark.parametrize("artifact", ("evidence", "budget"))
+@pytest.mark.parametrize("mode", (0o500, 0o700))
+def test_activation_uses_the_same_exact_promotion_artifact_modes_as_operator(
+    tmp_path: Path,
+    artifact: str,
+    mode: int,
+) -> None:
+    raw, root, public, diagnostics, binding = _activation_fixture(tmp_path)
+    target = Path(
+        str(raw.evidence_file if artifact == "evidence" else raw.latency_budget_file)
+    )
+    target.chmod(mode)
+
+    material = load_assist_promotion_activation(
+        raw,
+        installed_release_root=root,
+        scheduler_public_status=public,
+        scheduler_diagnostics_status=diagnostics,
+        binding_snapshot=binding,
+    )
+
+    expected = (
+        AssistPromotionActivationReason.EVIDENCE_FILE_UNAVAILABLE
+        if artifact == "evidence"
+        else AssistPromotionActivationReason.LATENCY_BUDGET_FILE_UNAVAILABLE
+    )
+    assert material.reason is expected
+    assert material.loaded_evidence is None
+    assert material.accepted_latency_budget is None
+    assert material.operator_gate.enabled is False
+    assert material.public_status()["promotion_admitted"] is False
 
 
 def test_source_hash_from_raw_settings_cannot_replace_installed_manifest(
@@ -997,17 +1430,13 @@ def test_source_registry_scheduler_evidence_hash_and_identity_drift_close_typed(
         assert material.configured is False
         assert material.reason is reason
 
-    evidence_path = Path(str(raw.evidence_file))
-    loaded = load_assist_promotion_live_evidence(
-        evidence_path,
-        str(raw.evidence_sha256),
-    )
-    wrong_stage = replace(
-        loaded.evidence,
-        observed_mode=SupervisorMode.ASSIST,
-        precursor_assist_promotion_evidence_sha256="c" * 64,
-    )
-    wrong_path, wrong_sha = _evidence_file(tmp_path, wrong_stage)
+    bundle = json.loads(Path(str(raw.evidence_file)).read_bytes())
+    bundle["promotion_evidence"]["observed_mode"] = "assist"
+    wrong_bytes = canonical_json_file_bytes(bundle)
+    wrong_path = tmp_path / "wrong-stage-bundle.json"
+    wrong_path.write_bytes(wrong_bytes)
+    wrong_path.chmod(0o600)
+    wrong_sha = hashlib.sha256(wrong_bytes).hexdigest()
     identity_drift = load_assist_promotion_activation(
         replace(raw, evidence_file=str(wrong_path), evidence_sha256=wrong_sha),
         installed_release_root=root,
@@ -1015,7 +1444,7 @@ def test_source_registry_scheduler_evidence_hash_and_identity_drift_close_typed(
         scheduler_diagnostics_status=diagnostics,
         binding_snapshot=binding,
     )
-    assert identity_drift.reason is AssistPromotionActivationReason.EVIDENCE_IDENTITY_MISMATCH
+    assert identity_drift.reason is AssistPromotionActivationReason.EVIDENCE_INVALID
 
 
 def test_latency_budget_file_and_digest_fail_closed_before_evidence_admission(
@@ -1127,7 +1556,7 @@ def test_latency_budget_mode_source_value_and_evidence_binding_are_exact(
                 latency_budget_file=str(different_value_path),
                 latency_budget_sha256=different_value_sha,
             ),
-            AssistPromotionActivationReason.EVIDENCE_IDENTITY_MISMATCH,
+            AssistPromotionActivationReason.EVIDENCE_INVALID,
         ),
     )
     for configured, reason in cases:
@@ -1141,16 +1570,15 @@ def test_latency_budget_mode_source_value_and_evidence_binding_are_exact(
         assert material.configured is False
         assert material.reason is reason
 
-    loaded = load_assist_promotion_live_evidence(
-        Path(str(raw.evidence_file)),
-        str(raw.evidence_sha256),
-    )
-    drifted_product = replace(
-        loaded.evidence.product_evidence,
-        latency_budget_source_revision_sha256=OTHER,
-    )
-    drifted_evidence = replace(loaded.evidence, product_evidence=drifted_product)
-    evidence_path, evidence_sha = _evidence_file(tmp_path, drifted_evidence)
+    bundle = json.loads(Path(str(raw.evidence_file)).read_bytes())
+    bundle["promotion_evidence"]["product_evidence"][
+        "latency_budget_source_revision_sha256"
+    ] = OTHER
+    drifted_raw = canonical_json_file_bytes(bundle)
+    evidence_path = tmp_path / "budget-drift-bundle.json"
+    evidence_path.write_bytes(drifted_raw)
+    evidence_path.chmod(0o600)
+    evidence_sha = hashlib.sha256(drifted_raw).hexdigest()
     evidence_drift = load_assist_promotion_activation(
         replace(raw, evidence_file=str(evidence_path), evidence_sha256=evidence_sha),
         installed_release_root=root,
@@ -1158,7 +1586,7 @@ def test_latency_budget_mode_source_value_and_evidence_binding_are_exact(
         scheduler_diagnostics_status=diagnostics,
         binding_snapshot=binding,
     )
-    assert evidence_drift.reason is AssistPromotionActivationReason.EVIDENCE_IDENTITY_MISMATCH
+    assert evidence_drift.reason is AssistPromotionActivationReason.EVIDENCE_INVALID
 
 
 def test_prestart_material_rebuilds_a_fresh_candidate_after_laptop_health_changes(
@@ -1239,12 +1667,13 @@ def test_programmer_type_errors_raise_but_external_faults_are_typed_closed(
 
 
 def test_activation_loader_api_has_no_executor_publisher_or_storage_dependency() -> None:
-    assert set(inspect.signature(load_assist_promotion_activation).parameters) == {
+    assert set(inspect.signature(_load_assist_promotion_activation).parameters) == {
         "raw",
         "installed_release_root",
         "scheduler_public_status",
         "scheduler_diagnostics_status",
         "binding_snapshot",
+        "representative_window_verifier",
     }
     assert set(inspect.signature(scheduler_admission_snapshot_from_status).parameters) == {
         "public_status",

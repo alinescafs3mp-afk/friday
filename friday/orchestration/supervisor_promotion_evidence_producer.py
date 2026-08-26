@@ -48,6 +48,14 @@ from friday.orchestration.supervisor_promoted_product_event import (
     SupervisorLatencyBudgetDocument,
     load_accepted_supervisor_latency_budget,
 )
+from friday.orchestration.supervisor_representative_window_attestation import (
+    REPRESENTATIVE_WINDOW_ATTESTATION_KEYS,
+    REPRESENTATIVE_WINDOW_ATTESTATION_SCHEMA,
+    REPRESENTATIVE_WINDOW_AUTHORITY,
+    REPRESENTATIVE_WINDOW_ISSUE_RESPONSE_SCHEMA,
+    representative_window_canonical,
+    representative_window_sha256,
+)
 
 SUPERVISOR_PROMOTION_OPERATOR_ATTESTATION_SCHEMA = (
     "friday.semantic-supervisor-promotion-operator-attestation.v1"
@@ -55,8 +63,13 @@ SUPERVISOR_PROMOTION_OPERATOR_ATTESTATION_SCHEMA = (
 SUPERVISOR_PROMOTION_ARTIFACT_RECEIPT_SCHEMA = (
     "friday.semantic-supervisor-promotion-artifact-receipt.v1"
 )
+SUPERVISOR_PROMOTION_BUNDLE_SCHEMA = "friday.semantic-supervisor-promotion-bundle.v1"
+SUPERVISOR_PROMOTION_BUNDLE_RECEIPT_SCHEMA = (
+    "friday.semantic-supervisor-promotion-bundle-receipt.v1"
+)
 
 _MAX_BASELINE_BYTES = 1_048_576
+_MAX_BUNDLE_BYTES = 2_097_152
 _MAX_COUNT_MAP_ITEMS = 256
 _MAX_SAMPLE_ROWS = 100_000
 _DIGEST_RE = re.compile(r"[0-9a-f]{64}\Z")
@@ -192,6 +205,52 @@ _PROMOTED_KEYS = frozenset(
         "user_visible_observation_count",
         "user_visible_regression_count",
         "product_window_sha256",
+    }
+)
+_ATTESTATION_KEYS = frozenset(
+    {
+        "schema",
+        "target_mode",
+        "baseline_file_sha256",
+        "baseline_report_sha256",
+        "latency_budget_file_sha256",
+        "source_revision_sha256",
+        "registry_binding_sha256",
+        "representative_window_attested",
+        "primary_fallback_proven",
+        "laptop_unavailable_fallback_proven",
+        "final_authority_recheck_proven",
+        "primary_publication_owner_proven",
+        "zero_hidden_owners_attested",
+        "zero_duplicate_capabilities_attested",
+        "zero_duplicate_effects_attested",
+        "zero_duplicate_publications_attested",
+        "zero_false_completion_regressions_attested",
+        "precursor_assist_promotion_evidence_sha256",
+        "quality_basis",
+    }
+)
+_BUNDLE_KEYS = frozenset(
+    {
+        "schema",
+        "body_free",
+        "baseline",
+        "operator_attestation",
+        "promotion_evidence",
+        "representative_window_issue",
+        "producer_receipt",
+        "producer_receipt_sha256",
+    }
+)
+_REPRESENTATIVE_WINDOW_ISSUE_KEYS = frozenset(
+    {
+        "schema",
+        "status",
+        "server_attestation",
+        "server_attestation_sha256",
+        "attestation_lookup_token",
+        "lookup_token_sha256",
+        "state_version",
     }
 )
 
@@ -352,6 +411,83 @@ class AcceptedCanonicalSupervisorLatencyBudget:
         ):
             raise SupervisorPromotionEvidenceProducerError("budget was not accepted by this process")
         _digest(self.document_sha256, label="canonical budget file digest")
+
+
+@dataclass(frozen=True, slots=True)
+class _AcceptedRepresentativeWindowIssue:
+    """Structurally closed server issue envelope retained for one-shot consume."""
+
+    target_mode: SupervisorMode
+    observed_mode: SupervisorMode
+    server_attestation_sha256: str
+    lookup_token_sha256: str
+    observer_runner_sha256: str
+    representative_window_sha256: str
+    precursor_assist_promotion_evidence_sha256: str | None
+    canonical_raw: bytes = field(repr=False, compare=False)
+    _process_authority: object = field(repr=False, compare=False)
+    _process_seal_sha256: str = field(repr=False, compare=False)
+
+    def __post_init__(self) -> None:
+        if self.target_mode not in {SupervisorMode.ASSIST, SupervisorMode.CANARY}:
+            raise SupervisorPromotionEvidenceProducerError(
+                "representative-window issue mode is invalid"
+            )
+        expected_observed = (
+            SupervisorMode.SHADOW
+            if self.target_mode is SupervisorMode.ASSIST
+            else SupervisorMode.ASSIST
+        )
+        if self.observed_mode is not expected_observed:
+            raise SupervisorPromotionEvidenceProducerError(
+                "representative-window observed mode does not match"
+            )
+        for label, value in (
+            ("server_attestation_sha256", self.server_attestation_sha256),
+            ("lookup_token_sha256", self.lookup_token_sha256),
+            ("observer_runner_sha256", self.observer_runner_sha256),
+            ("representative_window_sha256", self.representative_window_sha256),
+        ):
+            _digest(value, label=label)
+        if self.target_mode is SupervisorMode.ASSIST:
+            if self.precursor_assist_promotion_evidence_sha256 is not None:
+                raise SupervisorPromotionEvidenceProducerError(
+                    "assist representative-window issue carries a precursor"
+                )
+        else:
+            _digest(
+                self.precursor_assist_promotion_evidence_sha256,
+                label="representative-window precursor",
+            )
+        expected = _process_acceptance_seal(
+            kind="representative-window-issue",
+            fields=(
+                self.target_mode,
+                self.observed_mode,
+                self.server_attestation_sha256,
+                self.lookup_token_sha256,
+                self.observer_runner_sha256,
+                self.representative_window_sha256,
+                self.precursor_assist_promotion_evidence_sha256,
+                self.canonical_raw,
+            ),
+        )
+        if (
+            type(self.canonical_raw) is not bytes
+            or self._process_authority is not _PROCESS_ACCEPTANCE_AUTHORITY
+            or type(self._process_seal_sha256) is not str
+            or not hmac.compare_digest(self._process_seal_sha256, expected)
+        ):
+            raise SupervisorPromotionEvidenceProducerError(
+                "representative-window issue was not accepted by this process"
+            )
+
+    def payload(self) -> dict[str, Any]:
+        return _exact_dict(
+            _decode_closed_json(self.canonical_raw),
+            _REPRESENTATIVE_WINDOW_ISSUE_KEYS,
+            label="representative-window issue",
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -537,6 +673,159 @@ class SupervisorPromotionArtifactReceipt:
             "promotion_authority_granted": False,
             "activation_performed": False,
         }
+
+
+@dataclass(frozen=True, slots=True)
+class SupervisorPromotionBundleReceipt:
+    """Canonical component identities embedded in one atomic bundle."""
+
+    target_mode: SupervisorMode
+    source_revision_sha256: str
+    registry_binding_sha256: str
+    baseline_file_sha256: str
+    baseline_report_sha256: str
+    latency_budget_file_sha256: str
+    operator_attestation_sha256: str
+    representative_window_server_attestation_sha256: str
+    representative_window_lookup_token_sha256: str
+    representative_window_sha256: str
+    representative_window_observer_runner_sha256: str
+    promotion_evidence_file_sha256: str
+    promotion_evidence_canonical_sha256: str
+    precursor_assist_promotion_evidence_sha256: str | None
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.target_mode, SupervisorMode) or self.target_mode not in {
+            SupervisorMode.ASSIST,
+            SupervisorMode.CANARY,
+        }:
+            raise SupervisorPromotionEvidenceProducerError("bundle receipt mode is not promoted")
+        for label, value in (
+            ("source_revision_sha256", self.source_revision_sha256),
+            ("registry_binding_sha256", self.registry_binding_sha256),
+            ("baseline_file_sha256", self.baseline_file_sha256),
+            ("baseline_report_sha256", self.baseline_report_sha256),
+            ("latency_budget_file_sha256", self.latency_budget_file_sha256),
+            ("operator_attestation_sha256", self.operator_attestation_sha256),
+            (
+                "representative_window_server_attestation_sha256",
+                self.representative_window_server_attestation_sha256,
+            ),
+            (
+                "representative_window_lookup_token_sha256",
+                self.representative_window_lookup_token_sha256,
+            ),
+            ("representative_window_sha256", self.representative_window_sha256),
+            (
+                "representative_window_observer_runner_sha256",
+                self.representative_window_observer_runner_sha256,
+            ),
+            ("promotion_evidence_file_sha256", self.promotion_evidence_file_sha256),
+            (
+                "promotion_evidence_canonical_sha256",
+                self.promotion_evidence_canonical_sha256,
+            ),
+        ):
+            _digest(value, label=label)
+        if self.target_mode is SupervisorMode.ASSIST:
+            if self.precursor_assist_promotion_evidence_sha256 is not None:
+                raise SupervisorPromotionEvidenceProducerError(
+                    "assist bundle receipt carries a precursor"
+                )
+        else:
+            _digest(
+                self.precursor_assist_promotion_evidence_sha256,
+                label="precursor_assist_promotion_evidence_sha256",
+            )
+
+    def payload(self) -> dict[str, object]:
+        return {
+            "schema": SUPERVISOR_PROMOTION_BUNDLE_RECEIPT_SCHEMA,
+            "target_mode": self.target_mode.value,
+            "source_revision_sha256": self.source_revision_sha256,
+            "registry_binding_sha256": self.registry_binding_sha256,
+            "baseline_file_sha256": self.baseline_file_sha256,
+            "baseline_report_sha256": self.baseline_report_sha256,
+            "latency_budget_file_sha256": self.latency_budget_file_sha256,
+            "operator_attestation_sha256": self.operator_attestation_sha256,
+            "representative_window_server_attestation_sha256": (
+                self.representative_window_server_attestation_sha256
+            ),
+            "representative_window_lookup_token_sha256": (
+                self.representative_window_lookup_token_sha256
+            ),
+            "representative_window_sha256": self.representative_window_sha256,
+            "representative_window_observer_runner_sha256": (
+                self.representative_window_observer_runner_sha256
+            ),
+            "promotion_evidence_file_sha256": self.promotion_evidence_file_sha256,
+            "promotion_evidence_canonical_sha256": (
+                self.promotion_evidence_canonical_sha256
+            ),
+            "precursor_assist_promotion_evidence_sha256": (
+                self.precursor_assist_promotion_evidence_sha256
+            ),
+            "body_free": True,
+            "promotion_authority_granted": False,
+            "activation_performed": False,
+        }
+
+    def canonical_sha256(self) -> str:
+        return canonical_sha256(self.payload())
+
+
+@dataclass(frozen=True, slots=True)
+class AcceptedSupervisorPromotionBundle:
+    """A bundle independently rebuilt from its baseline and attestation."""
+
+    evidence: AssistPromotionLiveEvidence
+    bundle_file_sha256: str
+    baseline_file_sha256: str
+    baseline_report_sha256: str
+    operator_attestation_sha256: str
+    producer_receipt_sha256: str
+    representative_window_issue_raw: bytes = field(repr=False, compare=False)
+    _process_authority: object = field(repr=False, compare=False)
+    _process_seal_sha256: str = field(repr=False, compare=False)
+
+    def __post_init__(self) -> None:
+        for label, value in (
+            ("bundle_file_sha256", self.bundle_file_sha256),
+            ("baseline_file_sha256", self.baseline_file_sha256),
+            ("baseline_report_sha256", self.baseline_report_sha256),
+            ("operator_attestation_sha256", self.operator_attestation_sha256),
+            ("producer_receipt_sha256", self.producer_receipt_sha256),
+        ):
+            _digest(value, label=label)
+        expected = _process_acceptance_seal(
+            kind="promotion-bundle",
+            fields=(
+                self.evidence,
+                self.bundle_file_sha256,
+                self.baseline_file_sha256,
+                self.baseline_report_sha256,
+                self.operator_attestation_sha256,
+                self.producer_receipt_sha256,
+                self.representative_window_issue_raw,
+            ),
+        )
+        if (
+            self._process_authority is not _PROCESS_ACCEPTANCE_AUTHORITY
+            or type(self._process_seal_sha256) is not str
+            or not hmac.compare_digest(self._process_seal_sha256, expected)
+        ):
+            raise SupervisorPromotionEvidenceProducerError(
+                "promotion bundle was not accepted by this process"
+            )
+
+    def representative_window_issue_payload(self) -> dict[str, Any]:
+        """Return a fresh closed mapping for trusted one-shot consume/verification."""
+
+        return _exact_dict(
+            _decode_closed_json(self.representative_window_issue_raw),
+            _REPRESENTATIVE_WINDOW_ISSUE_KEYS,
+            label="representative-window issue",
+        )
 
 
 def _parse_metric_window(value: object, *, expected_stage: SupervisorMode) -> SupervisorProductMetricWindow:
@@ -1138,19 +1427,453 @@ def build_supervisor_canary_promotion_evidence(
     )
 
 
+def _operator_attestation_from_payload(value: object) -> SupervisorPromotionOperatorAttestation:
+    item = _exact_dict(value, _ATTESTATION_KEYS, label="operator attestation")
+    if item["schema"] != SUPERVISOR_PROMOTION_OPERATOR_ATTESTATION_SCHEMA:
+        raise SupervisorPromotionEvidenceProducerError("operator attestation schema is invalid")
+    try:
+        mode = SupervisorMode(item["target_mode"])
+        quality_raw = item["quality_basis"]
+        quality = None if quality_raw is None else AssistPromotionQualityBasis(quality_raw)
+        return SupervisorPromotionOperatorAttestation(
+            target_mode=mode,
+            baseline_file_sha256=item["baseline_file_sha256"],
+            baseline_report_sha256=item["baseline_report_sha256"],
+            latency_budget_file_sha256=item["latency_budget_file_sha256"],
+            source_revision_sha256=item["source_revision_sha256"],
+            registry_binding_sha256=item["registry_binding_sha256"],
+            representative_window_attested=item["representative_window_attested"],
+            primary_fallback_proven=item["primary_fallback_proven"],
+            laptop_unavailable_fallback_proven=item["laptop_unavailable_fallback_proven"],
+            final_authority_recheck_proven=item["final_authority_recheck_proven"],
+            primary_publication_owner_proven=item["primary_publication_owner_proven"],
+            zero_hidden_owners_attested=item["zero_hidden_owners_attested"],
+            zero_duplicate_capabilities_attested=item["zero_duplicate_capabilities_attested"],
+            zero_duplicate_effects_attested=item["zero_duplicate_effects_attested"],
+            zero_duplicate_publications_attested=item["zero_duplicate_publications_attested"],
+            zero_false_completion_regressions_attested=(
+                item["zero_false_completion_regressions_attested"]
+            ),
+            precursor_assist_promotion_evidence_sha256=(
+                item["precursor_assist_promotion_evidence_sha256"]
+            ),
+            quality_basis=quality,
+        )
+    except (TypeError, ValueError) as exc:
+        raise SupervisorPromotionEvidenceProducerError(
+            "operator attestation payload is invalid"
+        ) from exc
+
+
+def _accepted_representative_window_issue(
+    value: object,
+    *,
+    baseline: AcceptedSupervisorProductionBaseline,
+    budget: AcceptedCanonicalSupervisorLatencyBudget,
+    attestation: SupervisorPromotionOperatorAttestation,
+) -> _AcceptedRepresentativeWindowIssue:
+    item = _exact_dict(
+        value,
+        _REPRESENTATIVE_WINDOW_ISSUE_KEYS,
+        label="representative-window issue",
+    )
+    server = _exact_dict(
+        item["server_attestation"],
+        REPRESENTATIVE_WINDOW_ATTESTATION_KEYS,
+        label="representative-window server attestation",
+    )
+    try:
+        target_mode = SupervisorMode(server["target_mode"])
+        observed_mode = SupervisorMode(server["observed_mode"])
+    except (TypeError, ValueError) as exc:
+        raise SupervisorPromotionEvidenceProducerError(
+            "representative-window modes are invalid"
+        ) from exc
+    expected_observed = (
+        SupervisorMode.SHADOW
+        if attestation.target_mode is SupervisorMode.ASSIST
+        else SupervisorMode.ASSIST
+    )
+    expected_window = (
+        baseline.shadow_readiness.readiness_witness_sha256
+        if attestation.target_mode is SupervisorMode.ASSIST
+        else baseline.assist_execution.product_window_sha256
+    )
+    expected_joined = (
+        baseline.shadow_readiness.joined_trace_count
+        if attestation.target_mode is SupervisorMode.ASSIST
+        else baseline.assist_execution.joined_trace_count
+    )
+    token = item["attestation_lookup_token"]
+    token_sha256 = item["lookup_token_sha256"]
+    server_sha256 = item["server_attestation_sha256"]
+    digest_names = (
+        "baseline_file_sha256",
+        "baseline_report_sha256",
+        "latency_budget_file_sha256",
+        "latency_budget_document_sha256",
+        "latency_budget_source_revision_sha256",
+        "source_revision_sha256",
+        "registry_binding_sha256",
+        "primary_process_epoch_sha256",
+        "observed_release_metadata_sha256",
+        "observed_release_tree_sha256",
+        "observed_registry_binding_sha256",
+        "supervisor_policy_sha256",
+        "runtime_profile_manifest_sha256",
+        "observer_runner_sha256",
+        "representative_window_sha256",
+        "lookup_token_sha256",
+        "signature",
+    )
+    precursor = server["precursor_assist_promotion_evidence_sha256"]
+    if (
+        item["schema"] != REPRESENTATIVE_WINDOW_ISSUE_RESPONSE_SCHEMA
+        or item["status"] != "unused"
+        or item["state_version"] != 1
+        or server["schema"] != REPRESENTATIVE_WINDOW_ATTESTATION_SCHEMA
+        or server["authority"] != REPRESENTATIVE_WINDOW_AUTHORITY
+        or server["state_version"] != 1
+        or target_mode is not attestation.target_mode
+        or observed_mode is not expected_observed
+        or server["requested_mode"] != SupervisorMode.ASSIST.value
+        or server["baseline_file_sha256"] != baseline.file_sha256
+        or server["baseline_report_sha256"] != baseline.report_sha256
+        or server["latency_budget_file_sha256"] != budget.document_sha256
+        or server["latency_budget_document_sha256"] != budget.document_sha256
+        or server["latency_budget_target_mode"] != budget.document.target_mode.value
+        or server["latency_budget_source_revision_sha256"]
+        != budget.document.source_revision_sha256
+        or server["maximum_user_visible_latency_ms"]
+        != budget.document.maximum_user_visible_latency_ms
+        or server["source_revision_sha256"] != attestation.source_revision_sha256
+        or server["registry_binding_sha256"] != attestation.registry_binding_sha256
+        or server["observed_registry_binding_sha256"]
+        != attestation.registry_binding_sha256
+        or server["supervisor_policy_id"]
+        != semantic_supervisor_policy.SUPERVISOR_ASSIST_PRODUCT_POLICY_ID
+        or server["supervisor_policy_sha256"]
+        != semantic_supervisor_policy.SUPERVISOR_ASSIST_PRODUCT_POLICY_SHA256
+        or server["runtime_profile_id"]
+        != semantic_supervisor_policy.SUPERVISOR_RUNTIME_PROFILE_ID
+        or server["runtime_profile_manifest_sha256"]
+        != semantic_supervisor_policy.SUPERVISOR_RUNTIME_PROFILE_MANIFEST_SHA256
+        or server["representative_window_sha256"] != expected_window
+        or server["joined_trace_count"] != expected_joined
+        or server["server_recomputed"] is not True
+        or server["representative_window_attested"] is not True
+        or server["synthetic_authority"] is not False
+        or (precursor is None)
+        != (attestation.precursor_assist_promotion_evidence_sha256 is None)
+        or precursor != attestation.precursor_assist_promotion_evidence_sha256
+        or type(token) is not str
+        or _DIGEST_RE.fullmatch(token) is None
+        or set(token) == {"0"}
+        or not _digest(token_sha256, label="representative-window lookup token digest")
+        or not hmac.compare_digest(hashlib.sha256(token.encode("ascii")).hexdigest(), token_sha256)
+        or server["lookup_token_sha256"] != token_sha256
+        or not _digest(
+            server_sha256,
+            label="representative-window server attestation digest",
+        )
+        or not hmac.compare_digest(representative_window_sha256(server), server_sha256)
+        or any(not _digest(server[name], label=name) for name in digest_names)
+        or type(server["primary_pid"]) is not int
+        or server["primary_pid"] <= 0
+        or re.fullmatch(r"[0-9a-f]{40}", str(server["observed_release_commit"])) is None
+        or type(server["primary_backend_version"]) is not str
+        or not server["primary_backend_version"]
+        or type(server["sample_limit"]) is not int
+        or type(server["turn_trace_count"]) is not int
+        or type(server["joined_trace_count"]) is not int
+        or not 0 < server["joined_trace_count"] <= server["turn_trace_count"] < server["sample_limit"]
+        or type(server["issued_at"]) is not int
+        or type(server["expires_at"]) is not int
+        or not server["issued_at"] < server["expires_at"]
+    ):
+        raise SupervisorPromotionEvidenceProducerError(
+            "representative-window issue does not bind the promotion inputs"
+        )
+    canonical_raw = representative_window_canonical(item)
+    fields = (
+        target_mode,
+        observed_mode,
+        server_sha256,
+        token_sha256,
+        server["observer_runner_sha256"],
+        server["representative_window_sha256"],
+        precursor,
+        canonical_raw,
+    )
+    return _AcceptedRepresentativeWindowIssue(
+        target_mode=target_mode,
+        observed_mode=observed_mode,
+        server_attestation_sha256=server_sha256,
+        lookup_token_sha256=token_sha256,
+        observer_runner_sha256=server["observer_runner_sha256"],
+        representative_window_sha256=server["representative_window_sha256"],
+        precursor_assist_promotion_evidence_sha256=precursor,
+        canonical_raw=canonical_raw,
+        _process_authority=_PROCESS_ACCEPTANCE_AUTHORITY,
+        _process_seal_sha256=_process_acceptance_seal(
+            kind="representative-window-issue",
+            fields=fields,
+        ),
+    )
+
+
+def _rebuild_bundle_evidence(
+    *,
+    evidence_payload: object,
+    baseline: AcceptedSupervisorProductionBaseline,
+    budget: AcceptedCanonicalSupervisorLatencyBudget,
+    attestation: SupervisorPromotionOperatorAttestation,
+) -> AssistPromotionLiveEvidence:
+    if type(evidence_payload) is not dict:
+        raise SupervisorPromotionEvidenceProducerError("bundle evidence is not an object")
+    item = cast(dict[str, Any], evidence_payload)
+    evidence_id = item.get("evidence_id")
+    product = item.get("product_evidence")
+    if type(evidence_id) is not str or type(product) is not dict:
+        raise SupervisorPromotionEvidenceProducerError("bundle evidence identity is invalid")
+    product_item = cast(dict[str, Any], product)
+    if attestation.target_mode is SupervisorMode.ASSIST:
+        failure_id = product_item.get("documented_failure_class_id")
+        failure_sha256 = product_item.get("documented_failure_class_sha256")
+        if type(failure_id) is not str or type(failure_sha256) is not str:
+            raise SupervisorPromotionEvidenceProducerError(
+                "assist bundle has no documented failure identity"
+            )
+        expected = build_supervisor_assist_promotion_evidence(
+            evidence_id=evidence_id,
+            baseline=baseline,
+            budget=budget,
+            attestation=attestation,
+            documented_failure_class_id=failure_id,
+            documented_failure_class_sha256=failure_sha256,
+        )
+    else:
+        failure_id_raw = product_item.get("documented_failure_class_id")
+        failure_sha256_raw = product_item.get("documented_failure_class_sha256")
+        failure_id = (
+            failure_id_raw
+            if type(failure_id_raw) is str and failure_id_raw != "none"
+            else None
+        )
+        failure_sha256 = failure_sha256_raw if type(failure_sha256_raw) is str else None
+        expected = build_supervisor_canary_promotion_evidence(
+            evidence_id=evidence_id,
+            baseline=baseline,
+            budget=budget,
+            attestation=attestation,
+            documented_failure_class_id=failure_id,
+            documented_failure_class_sha256=failure_sha256,
+        )
+    if item != expected.payload():
+        raise SupervisorPromotionEvidenceProducerError(
+            "bundle evidence was not derived from the accepted inputs"
+        )
+    return expected
+
+
+def _bundle_receipt(
+    *,
+    baseline: AcceptedSupervisorProductionBaseline,
+    budget: AcceptedCanonicalSupervisorLatencyBudget,
+    attestation: SupervisorPromotionOperatorAttestation,
+    representative_window_issue: _AcceptedRepresentativeWindowIssue,
+    evidence: AssistPromotionLiveEvidence,
+) -> SupervisorPromotionBundleReceipt:
+    evidence_file = canonical_json_file_bytes(evidence.payload())
+    return SupervisorPromotionBundleReceipt(
+        target_mode=attestation.target_mode,
+        source_revision_sha256=attestation.source_revision_sha256,
+        registry_binding_sha256=attestation.registry_binding_sha256,
+        baseline_file_sha256=baseline.file_sha256,
+        baseline_report_sha256=baseline.report_sha256,
+        latency_budget_file_sha256=budget.document_sha256,
+        operator_attestation_sha256=attestation.canonical_sha256(),
+        representative_window_server_attestation_sha256=(
+            representative_window_issue.server_attestation_sha256
+        ),
+        representative_window_lookup_token_sha256=(
+            representative_window_issue.lookup_token_sha256
+        ),
+        representative_window_sha256=(
+            representative_window_issue.representative_window_sha256
+        ),
+        representative_window_observer_runner_sha256=(
+            representative_window_issue.observer_runner_sha256
+        ),
+        promotion_evidence_file_sha256=hashlib.sha256(evidence_file).hexdigest(),
+        promotion_evidence_canonical_sha256=evidence.canonical_sha256(),
+        precursor_assist_promotion_evidence_sha256=(
+            attestation.precursor_assist_promotion_evidence_sha256
+        ),
+    )
+
+
+def build_supervisor_promotion_bundle_payload(
+    *,
+    baseline_raw: bytes,
+    budget: AcceptedCanonicalSupervisorLatencyBudget,
+    attestation: SupervisorPromotionOperatorAttestation,
+    representative_window_issue: Mapping[str, object],
+    evidence: AssistPromotionLiveEvidence,
+) -> dict[str, object]:
+    """Build one canonical, body-free bundle from independently accepted inputs."""
+
+    if type(baseline_raw) is not bytes:
+        raise TypeError("bundle baseline must be bytes")
+    baseline_sha256 = hashlib.sha256(baseline_raw).hexdigest()
+    baseline = load_accepted_supervisor_production_baseline(
+        baseline_raw,
+        expected_file_sha256=baseline_sha256,
+    )
+    _assert_attested_inputs(baseline, budget, attestation)
+    accepted_issue = _accepted_representative_window_issue(
+        dict(representative_window_issue),
+        baseline=baseline,
+        budget=budget,
+        attestation=attestation,
+    )
+    rebuilt = _rebuild_bundle_evidence(
+        evidence_payload=evidence.payload(),
+        baseline=baseline,
+        budget=budget,
+        attestation=attestation,
+    )
+    receipt = _bundle_receipt(
+        baseline=baseline,
+        budget=budget,
+        attestation=attestation,
+        representative_window_issue=accepted_issue,
+        evidence=rebuilt,
+    )
+    baseline_payload = _decode_closed_json(baseline_raw)
+    payload: dict[str, object] = {
+        "schema": SUPERVISOR_PROMOTION_BUNDLE_SCHEMA,
+        "body_free": True,
+        "baseline": baseline_payload,
+        "operator_attestation": attestation.payload(),
+        "promotion_evidence": rebuilt.payload(),
+        "representative_window_issue": accepted_issue.payload(),
+        "producer_receipt": receipt.payload(),
+        "producer_receipt_sha256": receipt.canonical_sha256(),
+    }
+    if len(canonical_json_file_bytes(payload)) > _MAX_BUNDLE_BYTES:
+        raise SupervisorPromotionEvidenceProducerError("promotion bundle exceeds its byte bound")
+    return payload
+
+
+def load_accepted_supervisor_promotion_bundle(
+    raw: bytes,
+    *,
+    expected_file_sha256: str,
+    budget_raw: bytes,
+    expected_budget_file_sha256: str,
+) -> AcceptedSupervisorPromotionBundle:
+    """Rebuild every bundle claim from its full baseline, budget and attestation."""
+
+    if type(raw) is not bytes or type(budget_raw) is not bytes:
+        raise TypeError("promotion bundle loader requires bytes")
+    bundle_sha256 = _digest(expected_file_sha256, label="expected bundle file digest")
+    if (
+        not 0 < len(raw) <= _MAX_BUNDLE_BYTES
+        or not hmac.compare_digest(hashlib.sha256(raw).hexdigest(), bundle_sha256)
+    ):
+        raise SupervisorPromotionEvidenceProducerError("promotion bundle digest does not match")
+    item = _exact_dict(_decode_closed_json(raw), _BUNDLE_KEYS, label="promotion bundle")
+    if (
+        item["schema"] != SUPERVISOR_PROMOTION_BUNDLE_SCHEMA
+        or item["body_free"] is not True
+        or raw != canonical_json_file_bytes(item)
+    ):
+        raise SupervisorPromotionEvidenceProducerError("promotion bundle is not canonical")
+    baseline_payload = _exact_dict(
+        item["baseline"],
+        _TOP_LEVEL_KEYS,
+        label="bundle production baseline",
+    )
+    baseline_raw = canonical_json_file_bytes(baseline_payload)
+    baseline = load_accepted_supervisor_production_baseline(
+        baseline_raw,
+        expected_file_sha256=hashlib.sha256(baseline_raw).hexdigest(),
+    )
+    budget = load_canonical_supervisor_latency_budget(
+        budget_raw,
+        expected_file_sha256=expected_budget_file_sha256,
+    )
+    attestation = _operator_attestation_from_payload(item["operator_attestation"])
+    _assert_attested_inputs(baseline, budget, attestation)
+    accepted_issue = _accepted_representative_window_issue(
+        item["representative_window_issue"],
+        baseline=baseline,
+        budget=budget,
+        attestation=attestation,
+    )
+    evidence = _rebuild_bundle_evidence(
+        evidence_payload=item["promotion_evidence"],
+        baseline=baseline,
+        budget=budget,
+        attestation=attestation,
+    )
+    receipt = _bundle_receipt(
+        baseline=baseline,
+        budget=budget,
+        attestation=attestation,
+        representative_window_issue=accepted_issue,
+        evidence=evidence,
+    )
+    if (
+        item["producer_receipt"] != receipt.payload()
+        or item["producer_receipt_sha256"] != receipt.canonical_sha256()
+    ):
+        raise SupervisorPromotionEvidenceProducerError("promotion bundle receipt does not match")
+    fields = (
+        evidence,
+        bundle_sha256,
+        baseline.file_sha256,
+        baseline.report_sha256,
+        attestation.canonical_sha256(),
+        receipt.canonical_sha256(),
+        accepted_issue.canonical_raw,
+    )
+    return AcceptedSupervisorPromotionBundle(
+        evidence=evidence,
+        bundle_file_sha256=bundle_sha256,
+        baseline_file_sha256=baseline.file_sha256,
+        baseline_report_sha256=baseline.report_sha256,
+        operator_attestation_sha256=attestation.canonical_sha256(),
+        producer_receipt_sha256=receipt.canonical_sha256(),
+        representative_window_issue_raw=accepted_issue.canonical_raw,
+        _process_authority=_PROCESS_ACCEPTANCE_AUTHORITY,
+        _process_seal_sha256=_process_acceptance_seal(
+            kind="promotion-bundle",
+            fields=fields,
+        ),
+    )
+
+
 __all__ = [
+    "AcceptedSupervisorPromotionBundle",
     "AcceptedCanonicalSupervisorLatencyBudget",
     "AcceptedSupervisorProductionBaseline",
     "SUPERVISOR_PROMOTION_ARTIFACT_RECEIPT_SCHEMA",
+    "SUPERVISOR_PROMOTION_BUNDLE_RECEIPT_SCHEMA",
+    "SUPERVISOR_PROMOTION_BUNDLE_SCHEMA",
     "SUPERVISOR_PROMOTION_OPERATOR_ATTESTATION_SCHEMA",
     "SupervisorPromotionArtifactKind",
     "SupervisorPromotionArtifactReceipt",
+    "SupervisorPromotionBundleReceipt",
     "SupervisorPromotionEvidenceProducerError",
     "SupervisorPromotionOperatorAttestation",
     "build_supervisor_assist_promotion_evidence",
     "build_supervisor_canary_promotion_evidence",
     "build_supervisor_latency_budget_document",
+    "build_supervisor_promotion_bundle_payload",
     "canonical_json_file_bytes",
     "load_accepted_supervisor_production_baseline",
     "load_canonical_supervisor_latency_budget",
+    "load_accepted_supervisor_promotion_bundle",
 ]

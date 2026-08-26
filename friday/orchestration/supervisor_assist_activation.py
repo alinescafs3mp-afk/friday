@@ -19,7 +19,7 @@ import json
 import os
 import re
 import stat
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path, PurePosixPath
@@ -50,10 +50,19 @@ from friday.orchestration.supervisor_promoted_product_event import (
     PromotedProductEventError,
     load_accepted_supervisor_latency_budget,
 )
+from friday.orchestration.supervisor_promotion_evidence_producer import (
+    SupervisorPromotionEvidenceProducerError,
+    load_accepted_supervisor_promotion_bundle,
+)
+from friday.orchestration.supervisor_representative_window_attestation import (
+    AcceptedRepresentativeWindowAttestation,
+    is_accepted_representative_window_attestation,
+)
 
 SUPERVISOR_ASSIST_ACTIVATION_STATUS_SCHEMA = "friday.supervisor-assist-activation-status.v1"
 
 _MAX_EVIDENCE_BYTES = 32 << 10
+_MAX_PROMOTION_BUNDLE_BYTES = 2_097_152
 _MAX_LATENCY_BUDGET_BYTES = 4_096
 _MAX_RELEASE_TREE_BYTES = 64 << 20
 _MAX_PATH_CHARS = 4_096
@@ -213,6 +222,8 @@ class AssistPromotionActivationReason(StrEnum):
     EVIDENCE_DIGEST_MISMATCH = "evidence_digest_mismatch"
     EVIDENCE_INVALID = "evidence_invalid"
     EVIDENCE_IDENTITY_MISMATCH = "evidence_identity_mismatch"
+    REPRESENTATIVE_WINDOW_UNAVAILABLE = "representative_window_unavailable"
+    REPRESENTATIVE_WINDOW_IDENTITY_MISMATCH = "representative_window_identity_mismatch"
     LATENCY_BUDGET_FILE_UNAVAILABLE = "latency_budget_file_unavailable"
     LATENCY_BUDGET_DIGEST_MISMATCH = "latency_budget_digest_mismatch"
     LATENCY_BUDGET_INVALID = "latency_budget_invalid"
@@ -269,6 +280,7 @@ class AssistPromotionActivationMaterial:
     loaded_evidence: LoadedAssistPromotionEvidence | None
     accepted_latency_budget: AcceptedSupervisorLatencyBudget | None
     operator_gate: AssistPromotionOperatorGate
+    accepted_representative_window: AcceptedRepresentativeWindowAttestation | None = None
 
     def __post_init__(self) -> None:
         if type(self.configured) is not bool:
@@ -285,6 +297,7 @@ class AssistPromotionActivationMaterial:
             or self.scheduler_snapshot is None
             or self.loaded_evidence is None
             or self.accepted_latency_budget is None
+            or self.accepted_representative_window is None
             or not self.operator_gate.enabled
         ):
             raise ValueError("configured activation material is incomplete")
@@ -305,6 +318,12 @@ class AssistPromotionActivationMaterial:
                 )
             ):
                 raise ValueError("accepted latency budget identity does not match material")
+        if self.accepted_representative_window is not None and not (
+            is_accepted_representative_window_attestation(
+                self.accepted_representative_window
+            )
+        ):
+            raise TypeError("representative-window witness must be process accepted")
 
     def public_status(self) -> dict[str, object]:
         """Return a body-free status; loading is explicitly not acceptance."""
@@ -323,6 +342,9 @@ class AssistPromotionActivationMaterial:
             "evidence_loaded": evidence is not None,
             "evidence_authority": (evidence.evidence.authority.value if evidence is not None else "none"),
             "operator_gate_enabled": self.operator_gate.enabled,
+            "representative_window_verified": (
+                self.accepted_representative_window is not None
+            ),
             "canary_actor_binding_count": len(self.operator_gate.canary_actor_bindings),
             "promotion_admitted": False,
             "evidence_accepted": False,
@@ -822,6 +844,7 @@ def _closed_material(
     scheduler_snapshot: SupervisorSchedulerAdmissionSnapshot | None = None,
     loaded_evidence: LoadedAssistPromotionEvidence | None = None,
     accepted_latency_budget: AcceptedSupervisorLatencyBudget | None = None,
+    accepted_representative_window: AcceptedRepresentativeWindowAttestation | None = None,
 ) -> AssistPromotionActivationMaterial:
     return AssistPromotionActivationMaterial(
         configured=False,
@@ -832,6 +855,7 @@ def _closed_material(
         scheduler_snapshot=scheduler_snapshot,
         loaded_evidence=loaded_evidence,
         accepted_latency_budget=accepted_latency_budget,
+        accepted_representative_window=accepted_representative_window,
         operator_gate=AssistPromotionOperatorGate(),
     )
 
@@ -964,6 +988,63 @@ def _evidence_identity_matches(
     )
 
 
+def _representative_window_identity_matches(
+    witness: AcceptedRepresentativeWindowAttestation,
+    *,
+    issue: Mapping[str, object],
+    evidence: AssistPromotionLiveEvidence,
+    requested_mode: SupervisorMode,
+    source_revision_sha256: str,
+    registry_binding_sha256: str,
+    accepted_latency_budget: AcceptedSupervisorLatencyBudget,
+) -> bool:
+    if not is_accepted_representative_window_attestation(witness):
+        return False
+    server = issue.get("server_attestation")
+    if type(server) is not dict:
+        return False
+    expected_observed = (
+        SupervisorMode.SHADOW
+        if requested_mode is SupervisorMode.ASSIST
+        else SupervisorMode.ASSIST
+    )
+    return bool(
+        witness.target_mode is requested_mode
+        and witness.observed_mode is expected_observed
+        and hmac.compare_digest(
+            witness.baseline_file_sha256,
+            evidence.baseline_file_sha256,
+        )
+        and hmac.compare_digest(
+            witness.baseline_report_sha256,
+            evidence.baseline_report_sha256,
+        )
+        and hmac.compare_digest(
+            witness.latency_budget_file_sha256,
+            accepted_latency_budget.document_sha256,
+        )
+        and hmac.compare_digest(
+            witness.latency_budget_document_sha256,
+            accepted_latency_budget.document_sha256,
+        )
+        and witness.latency_budget_maximum_ms
+        == accepted_latency_budget.document.maximum_user_visible_latency_ms
+        and hmac.compare_digest(
+            witness.source_revision_sha256,
+            source_revision_sha256,
+        )
+        and hmac.compare_digest(
+            witness.registry_binding_sha256,
+            registry_binding_sha256,
+        )
+        and witness.precursor_assist_promotion_evidence_sha256
+        == evidence.precursor_assist_promotion_evidence_sha256
+        and issue.get("server_attestation_sha256")
+        == witness.server_attestation_sha256
+        and server.get("observer_runner_sha256") == witness.observer_runner_sha256
+        and server.get("representative_window_sha256")
+        == witness.representative_window_sha256
+    )
 def load_assist_promotion_activation(
     raw: RawAssistPromotionActivationSettings,
     *,
@@ -971,6 +1052,13 @@ def load_assist_promotion_activation(
     scheduler_public_status: Mapping[str, object],
     scheduler_diagnostics_status: Mapping[str, object],
     binding_snapshot: CapabilityBindingSnapshot,
+    representative_window_verifier: (
+        Callable[
+            [Mapping[str, object]],
+            AcceptedRepresentativeWindowAttestation,
+        ]
+        | None
+    ) = None,
 ) -> AssistPromotionActivationMaterial:
     """Load static material without making a promotion or acceptance decision."""
 
@@ -985,6 +1073,10 @@ def load_assist_promotion_activation(
         raise TypeError("scheduler status projections must be mappings")
     if not isinstance(binding_snapshot, CapabilityBindingSnapshot):
         raise TypeError("binding_snapshot must be typed")
+    if representative_window_verifier is not None and not callable(
+        representative_window_verifier
+    ):
+        raise TypeError("representative-window verifier must be callable")
 
     if raw.enabled is False:
         return _closed_material(AssistPromotionActivationReason.DEFAULT_OFF)
@@ -1089,9 +1181,28 @@ def load_assist_promotion_activation(
             scheduler_snapshot=scheduler_snapshot,
         )
     try:
-        loaded_evidence = load_assist_promotion_live_evidence(
+        bundle_raw = _stable_regular_file_bytes(
             evidence_path,
+            maximum_bytes=_MAX_PROMOTION_BUNDLE_BYTES,
+            allowed_modes=frozenset({0o400, 0o600}),
+            reason=AssistPromotionActivationReason.EVIDENCE_FILE_UNAVAILABLE,
+        )
+        if not hmac.compare_digest(
+            hashlib.sha256(bundle_raw).hexdigest(),
             expected_evidence_sha256,
+        ):
+            raise AssistPromotionActivationError(
+                AssistPromotionActivationReason.EVIDENCE_DIGEST_MISMATCH
+            )
+        accepted_bundle = load_accepted_supervisor_promotion_bundle(
+            bundle_raw,
+            expected_file_sha256=expected_evidence_sha256,
+            budget_raw=latency_budget_raw,
+            expected_budget_file_sha256=expected_latency_budget_sha256,
+        )
+        loaded_evidence = LoadedAssistPromotionEvidence(
+            evidence=accepted_bundle.evidence,
+            file_sha256=accepted_bundle.bundle_file_sha256,
         )
     except AssistPromotionActivationError as exc:
         return _closed_material(
@@ -1100,6 +1211,15 @@ def load_assist_promotion_activation(
             source_revision_sha256=source_sha256,
             registry_binding_sha256=current_registry_sha256,
             scheduler_snapshot=scheduler_snapshot,
+        )
+    except (SupervisorPromotionEvidenceProducerError, TypeError, ValueError):
+        return _closed_material(
+            AssistPromotionActivationReason.EVIDENCE_INVALID,
+            requested_mode=mode,
+            source_revision_sha256=source_sha256,
+            registry_binding_sha256=current_registry_sha256,
+            scheduler_snapshot=scheduler_snapshot,
+            accepted_latency_budget=accepted_latency_budget,
         )
     if not _evidence_identity_matches(
         loaded_evidence.evidence,
@@ -1110,6 +1230,47 @@ def load_assist_promotion_activation(
     ):
         return _closed_material(
             AssistPromotionActivationReason.EVIDENCE_IDENTITY_MISMATCH,
+            requested_mode=mode,
+            source_revision_sha256=source_sha256,
+            registry_binding_sha256=current_registry_sha256,
+            scheduler_snapshot=scheduler_snapshot,
+            loaded_evidence=loaded_evidence,
+            accepted_latency_budget=accepted_latency_budget,
+        )
+    issue = accepted_bundle.representative_window_issue_payload()
+    if representative_window_verifier is None:
+        return _closed_material(
+            AssistPromotionActivationReason.REPRESENTATIVE_WINDOW_UNAVAILABLE,
+            requested_mode=mode,
+            source_revision_sha256=source_sha256,
+            registry_binding_sha256=current_registry_sha256,
+            scheduler_snapshot=scheduler_snapshot,
+            loaded_evidence=loaded_evidence,
+            accepted_latency_budget=accepted_latency_budget,
+        )
+    try:
+        accepted_representative_window = representative_window_verifier(issue)
+    except Exception:
+        return _closed_material(
+            AssistPromotionActivationReason.REPRESENTATIVE_WINDOW_UNAVAILABLE,
+            requested_mode=mode,
+            source_revision_sha256=source_sha256,
+            registry_binding_sha256=current_registry_sha256,
+            scheduler_snapshot=scheduler_snapshot,
+            loaded_evidence=loaded_evidence,
+            accepted_latency_budget=accepted_latency_budget,
+        )
+    if not _representative_window_identity_matches(
+        accepted_representative_window,
+        issue=issue,
+        evidence=loaded_evidence.evidence,
+        requested_mode=mode,
+        source_revision_sha256=source_sha256,
+        registry_binding_sha256=current_registry_sha256,
+        accepted_latency_budget=accepted_latency_budget,
+    ):
+        return _closed_material(
+            AssistPromotionActivationReason.REPRESENTATIVE_WINDOW_IDENTITY_MISMATCH,
             requested_mode=mode,
             source_revision_sha256=source_sha256,
             registry_binding_sha256=current_registry_sha256,
@@ -1148,6 +1309,7 @@ def load_assist_promotion_activation(
         scheduler_snapshot=scheduler_snapshot,
         loaded_evidence=loaded_evidence,
         accepted_latency_budget=accepted_latency_budget,
+        accepted_representative_window=accepted_representative_window,
         operator_gate=gate,
     )
 

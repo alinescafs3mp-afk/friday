@@ -35,9 +35,17 @@ from friday.orchestration.supervisor_promotion_evidence_producer import (
     build_supervisor_assist_promotion_evidence,
     build_supervisor_canary_promotion_evidence,
     build_supervisor_latency_budget_document,
+    build_supervisor_promotion_bundle_payload,
     canonical_json_file_bytes,
     load_accepted_supervisor_production_baseline,
+    load_accepted_supervisor_promotion_bundle,
     load_canonical_supervisor_latency_budget,
+)
+from friday.orchestration.supervisor_representative_window_attestation import (
+    REPRESENTATIVE_WINDOW_ATTESTATION_SCHEMA,
+    REPRESENTATIVE_WINDOW_AUTHORITY,
+    REPRESENTATIVE_WINDOW_ISSUE_RESPONSE_SCHEMA,
+    representative_window_sha256,
 )
 from tools import build_semantic_supervisor_promotion_evidence as cli
 from tools import immutable_release_operator as operator
@@ -277,6 +285,136 @@ def _attestation(
     return SupervisorPromotionOperatorAttestation(**values)  # type: ignore[arg-type]
 
 
+def _representative_window_issue(
+    mode: SupervisorMode,
+    *,
+    baseline: Any,
+    budget: Any,
+    precursor: str | None = None,
+) -> dict[str, Any]:
+    lookup_token = "7" * 64
+    observed_mode = SupervisorMode.SHADOW if mode is SupervisorMode.ASSIST else SupervisorMode.ASSIST
+    representative_window = (
+        baseline.shadow_readiness.readiness_witness_sha256
+        if mode is SupervisorMode.ASSIST
+        else baseline.assist_execution.product_window_sha256
+    )
+    joined = (
+        baseline.shadow_readiness.joined_trace_count
+        if mode is SupervisorMode.ASSIST
+        else baseline.assist_execution.joined_trace_count
+    )
+    server: dict[str, Any] = {
+        "schema": REPRESENTATIVE_WINDOW_ATTESTATION_SCHEMA,
+        "attestation_id": "sswindow_" + "6" * 32,
+        "authority": REPRESENTATIVE_WINDOW_AUTHORITY,
+        "target_mode": mode.value,
+        "observed_mode": observed_mode.value,
+        "baseline_file_sha256": baseline.file_sha256,
+        "baseline_report_sha256": baseline.report_sha256,
+        "latency_budget_file_sha256": budget.document_sha256,
+        "latency_budget_document_sha256": budget.document_sha256,
+        "latency_budget_target_mode": mode.value,
+        "latency_budget_source_revision_sha256": SOURCE,
+        "maximum_user_visible_latency_ms": 2_500,
+        "precursor_assist_promotion_evidence_sha256": precursor,
+        "source_revision_sha256": SOURCE,
+        "registry_binding_sha256": REGISTRY,
+        "primary_pid": 100,
+        "primary_process_epoch_sha256": "5" * 64,
+        "primary_backend_version": "test",
+        "observed_release_commit": "4" * 40,
+        "observed_release_metadata_sha256": "3" * 64,
+        "observed_release_tree_sha256": "2" * 64,
+        "observed_registry_binding_sha256": REGISTRY,
+        "requested_mode": SupervisorMode.ASSIST.value,
+        "supervisor_policy_id": semantic_supervisor_policy.SUPERVISOR_ASSIST_PRODUCT_POLICY_ID,
+        "supervisor_policy_sha256": (
+            semantic_supervisor_policy.SUPERVISOR_ASSIST_PRODUCT_POLICY_SHA256
+        ),
+        "runtime_profile_id": semantic_supervisor_policy.SUPERVISOR_RUNTIME_PROFILE_ID,
+        "runtime_profile_manifest_sha256": (
+            semantic_supervisor_policy.SUPERVISOR_RUNTIME_PROFILE_MANIFEST_SHA256
+        ),
+        "observer_runner_sha256": "1" * 64,
+        "sample_limit": 100,
+        "turn_trace_count": 40,
+        "joined_trace_count": joined,
+        "representative_window_sha256": representative_window,
+        "server_recomputed": True,
+        "representative_window_attested": True,
+        "synthetic_authority": False,
+        "lookup_token_sha256": hashlib.sha256(lookup_token.encode("ascii")).hexdigest(),
+        "state_version": 1,
+        "issued_at": 1_000,
+        "expires_at": 1_500,
+        "signature": "9" * 64,
+    }
+    return {
+        "schema": REPRESENTATIVE_WINDOW_ISSUE_RESPONSE_SCHEMA,
+        "status": "unused",
+        "server_attestation": server,
+        "server_attestation_sha256": representative_window_sha256(server),
+        "attestation_lookup_token": lookup_token,
+        "lookup_token_sha256": server["lookup_token_sha256"],
+        "state_version": 1,
+    }
+
+
+def _write_representative_window_issue(
+    path: Path,
+    mode: SupervisorMode,
+    *,
+    baseline: Any,
+    budget: Any,
+    precursor: str | None = None,
+) -> None:
+    path.write_bytes(
+        canonical_json_file_bytes(
+            _representative_window_issue(
+                mode,
+                baseline=baseline,
+                budget=budget,
+                precursor=precursor,
+            )
+        )
+    )
+    path.chmod(0o600)
+
+
+def _assist_bundle() -> tuple[bytes, bytes, Any]:
+    baseline_raw = _baseline_raw()
+    baseline = _accepted_baseline()
+    budget_raw, budget = _accepted_budget(SupervisorMode.ASSIST)
+    attestation = _attestation(
+        SupervisorMode.ASSIST,
+        baseline=baseline,
+        budget=budget,
+    )
+    evidence = build_supervisor_assist_promotion_evidence(
+        evidence_id="producer_bundle_assist_window",
+        baseline=baseline,
+        budget=budget,
+        attestation=attestation,
+        documented_failure_class_id=FAILURE_CLASS,
+        documented_failure_class_sha256=FAILURE_DIGEST,
+    )
+    bundle_raw = canonical_json_file_bytes(
+        build_supervisor_promotion_bundle_payload(
+            baseline_raw=baseline_raw,
+            budget=budget,
+            attestation=attestation,
+            representative_window_issue=_representative_window_issue(
+                SupervisorMode.ASSIST,
+                baseline=baseline,
+                budget=budget,
+            ),
+            evidence=evidence,
+        )
+    )
+    return bundle_raw, budget_raw, evidence
+
+
 def test_assist_producer_uses_real_identities_and_is_activation_parseable() -> None:
     baseline = _accepted_baseline()
     budget_raw, budget = _accepted_budget(SupervisorMode.ASSIST)
@@ -509,7 +647,6 @@ def test_canary_completion_basis_requires_measured_rate_improvement() -> None:
 
 def _attestation_flags() -> list[str]:
     return [
-        "--attest-representative-window",
         "--attest-primary-fallback",
         "--attest-laptop-unavailable-fallback",
         "--attest-final-authority-recheck",
@@ -523,7 +660,13 @@ def _attestation_flags() -> list[str]:
 
 
 def _evidence_cli_args(
-    *, baseline: Path, baseline_sha: str, budget: Path, budget_sha: str, output: Path
+    *,
+    baseline: Path,
+    baseline_sha: str,
+    budget: Path,
+    budget_sha: str,
+    representative_window_issue: Path,
+    output: Path,
 ) -> list[str]:
     return [
         "promotion-evidence",
@@ -537,6 +680,8 @@ def _evidence_cli_args(
         str(budget),
         "--latency-budget-sha256",
         budget_sha,
+        "--representative-window-issue-response",
+        str(representative_window_issue),
         "--attested-source-revision-sha256",
         SOURCE,
         "--attested-registry-binding-sha256",
@@ -581,11 +726,21 @@ def test_cli_writes_private_nonreplaceable_artifacts_and_body_free_receipts(
     assert budget_receipt["activation_performed"] is False
 
     evidence_path = tmp_path / "evidence.json"
+    baseline = _accepted_baseline()
+    _budget_raw, accepted_budget = _accepted_budget(SupervisorMode.ASSIST)
+    issue_path = tmp_path / "representative-window-issue.json"
+    _write_representative_window_issue(
+        issue_path,
+        SupervisorMode.ASSIST,
+        baseline=baseline,
+        budget=accepted_budget,
+    )
     arguments = _evidence_cli_args(
         baseline=baseline_path,
         baseline_sha=hashlib.sha256(baseline_raw).hexdigest(),
         budget=budget_path,
         budget_sha=hashlib.sha256(budget_raw).hexdigest(),
+        representative_window_issue=issue_path,
         output=evidence_path,
     )
     assert cli.main([*arguments, *_attestation_flags()]) == 0
@@ -633,6 +788,7 @@ def test_cli_requires_each_operator_attestation_before_reading_or_writing(tmp_pa
         baseline_sha="1" * 64,
         budget=tmp_path / "missing-budget",
         budget_sha="2" * 64,
+        representative_window_issue=tmp_path / "missing-window-issue",
         output=output,
     )
     with pytest.raises(SystemExit) as caught:
@@ -645,9 +801,17 @@ def test_cli_builds_precursor_bound_canary_outcome(tmp_path: Path, capsys: pytes
     baseline_raw = _baseline_raw()
     baseline_path = tmp_path / "baseline.json"
     baseline_path.write_bytes(baseline_raw)
-    budget_raw, _budget = _accepted_budget(SupervisorMode.CANARY)
+    budget_raw, budget = _accepted_budget(SupervisorMode.CANARY)
     budget_path = tmp_path / "canary-budget.json"
     budget_path.write_bytes(budget_raw)
+    issue_path = tmp_path / "canary-representative-window-issue.json"
+    _write_representative_window_issue(
+        issue_path,
+        SupervisorMode.CANARY,
+        baseline=_accepted_baseline(),
+        budget=budget,
+        precursor=PRECURSOR,
+    )
     output = tmp_path / "canary-evidence.json"
     arguments = [
         "promotion-evidence",
@@ -661,6 +825,8 @@ def test_cli_builds_precursor_bound_canary_outcome(tmp_path: Path, capsys: pytes
         str(budget_path),
         "--latency-budget-sha256",
         hashlib.sha256(budget_raw).hexdigest(),
+        "--representative-window-issue-response",
+        str(issue_path),
         "--attested-source-revision-sha256",
         SOURCE,
         "--attested-registry-binding-sha256",
@@ -679,27 +845,43 @@ def test_cli_builds_precursor_bound_canary_outcome(tmp_path: Path, capsys: pytes
     assert cli.main(arguments) == 0
     receipt = json.loads(capsys.readouterr().out)
     payload = json.loads(output.read_text(encoding="utf-8"))
+    evidence = payload["promotion_evidence"]
     assert receipt["precursor_assist_promotion_evidence_sha256"] == PRECURSOR
-    assert payload["observed_mode"] == "assist"
-    assert payload["baseline_file_sha256"] == receipt["baseline_file_sha256"]
-    assert payload["baseline_report_sha256"] == receipt["baseline_report_sha256"]
-    assert payload["operator_attestation_sha256"] == receipt["operator_attestation_sha256"]
-    assert payload["precursor_assist_promotion_evidence_sha256"] == PRECURSOR
-    assert payload["product_evidence"]["quality_basis"] == "completion_rate_improvement"
+    assert payload["schema"] == "friday.semantic-supervisor-promotion-bundle.v1"
+    assert evidence["observed_mode"] == "assist"
+    assert evidence["baseline_file_sha256"] == receipt["baseline_file_sha256"]
+    assert evidence["baseline_report_sha256"] == receipt["baseline_report_sha256"]
+    assert evidence["operator_attestation_sha256"] == receipt["operator_attestation_sha256"]
+    assert evidence["precursor_assist_promotion_evidence_sha256"] == PRECURSOR
+    assert evidence["product_evidence"]["quality_basis"] == "completion_rate_improvement"
 
 
 def test_immutable_operator_accepts_exact_producer_output(tmp_path: Path) -> None:
+    baseline_raw = _baseline_raw()
     baseline = _accepted_baseline()
     budget_raw, budget = _accepted_budget(SupervisorMode.ASSIST)
+    attestation = _attestation(SupervisorMode.ASSIST, baseline=baseline, budget=budget)
     evidence = build_supervisor_assist_promotion_evidence(
         evidence_id="operator_integration_assist_window",
         baseline=baseline,
         budget=budget,
-        attestation=_attestation(SupervisorMode.ASSIST, baseline=baseline, budget=budget),
+        attestation=attestation,
         documented_failure_class_id=FAILURE_CLASS,
         documented_failure_class_sha256=FAILURE_DIGEST,
     )
-    evidence_raw = canonical_json_file_bytes(evidence.payload())
+    evidence_raw = canonical_json_file_bytes(
+        build_supervisor_promotion_bundle_payload(
+            baseline_raw=baseline_raw,
+            budget=budget,
+            attestation=attestation,
+            representative_window_issue=_representative_window_issue(
+                SupervisorMode.ASSIST,
+                baseline=baseline,
+                budget=budget,
+            ),
+            evidence=evidence,
+        )
+    )
     budget_path = tmp_path / "budget.json"
     evidence_path = tmp_path / "evidence.json"
     budget_path.write_bytes(budget_raw)
@@ -731,6 +913,62 @@ def test_immutable_operator_accepts_exact_producer_output(tmp_path: Path) -> Non
         mode="assist",
         invalid_code="producer_integration_invalid",
     )
+
+
+def test_bundle_loader_rebuilds_every_claim_and_rejects_standalone_or_tampered_members() -> None:
+    bundle_raw, budget_raw, evidence = _assist_bundle()
+    accepted = load_accepted_supervisor_promotion_bundle(
+        bundle_raw,
+        expected_file_sha256=hashlib.sha256(bundle_raw).hexdigest(),
+        budget_raw=budget_raw,
+        expected_budget_file_sha256=hashlib.sha256(budget_raw).hexdigest(),
+    )
+    assert accepted.evidence == evidence
+
+    standalone = canonical_json_file_bytes(evidence.payload())
+    with pytest.raises(SupervisorPromotionEvidenceProducerError):
+        load_accepted_supervisor_promotion_bundle(
+            standalone,
+            expected_file_sha256=hashlib.sha256(standalone).hexdigest(),
+            budget_raw=budget_raw,
+            expected_budget_file_sha256=hashlib.sha256(budget_raw).hexdigest(),
+        )
+
+    original = json.loads(bundle_raw)
+    variants: list[dict[str, Any]] = []
+    missing_receipt = json.loads(json.dumps(original))
+    missing_receipt.pop("producer_receipt")
+    variants.append(missing_receipt)
+    invented_metric = json.loads(json.dumps(original))
+    invented_metric["promotion_evidence"]["product_evidence"]["latency_total_ms"] += 1
+    variants.append(invented_metric)
+    swapped_baseline = json.loads(json.dumps(original))
+    swapped_baseline["baseline"]["product_windows"]["shadow_readiness"]["baseline"][
+        "latency_total_ms"
+    ] += 1
+    variants.append(swapped_baseline)
+    forged_receipt = json.loads(json.dumps(original))
+    forged_receipt["producer_receipt"]["promotion_evidence_file_sha256"] = "f" * 64
+    variants.append(forged_receipt)
+
+    for variant in variants:
+        tampered = canonical_json_file_bytes(variant)
+        with pytest.raises(SupervisorPromotionEvidenceProducerError):
+            load_accepted_supervisor_promotion_bundle(
+                tampered,
+                expected_file_sha256=hashlib.sha256(tampered).hexdigest(),
+                budget_raw=budget_raw,
+                expected_budget_file_sha256=hashlib.sha256(budget_raw).hexdigest(),
+            )
+
+    canary_budget_raw, _canary_budget = _accepted_budget(SupervisorMode.CANARY)
+    with pytest.raises(SupervisorPromotionEvidenceProducerError):
+        load_accepted_supervisor_promotion_bundle(
+            bundle_raw,
+            expected_file_sha256=hashlib.sha256(bundle_raw).hexdigest(),
+            budget_raw=canary_budget_raw,
+            expected_budget_file_sha256=hashlib.sha256(canary_budget_raw).hexdigest(),
+        )
 
 
 def test_producer_canary_output_binds_exact_predecessor_for_operator(tmp_path: Path) -> None:
@@ -773,7 +1011,20 @@ def test_producer_canary_output_binds_exact_predecessor_for_operator(tmp_path: P
         budget=canary_budget,
         attestation=canary_attestation,
     )
-    canary_raw = canonical_json_file_bytes(canary_evidence.payload())
+    canary_raw = canonical_json_file_bytes(
+        build_supervisor_promotion_bundle_payload(
+            baseline_raw=canary_baseline_raw,
+            budget=canary_budget,
+            attestation=canary_attestation,
+            representative_window_issue=_representative_window_issue(
+                SupervisorMode.CANARY,
+                baseline=canary_baseline,
+                budget=canary_budget,
+                precursor=precursor_sha256,
+            ),
+            evidence=canary_evidence,
+        )
+    )
     canary_path = tmp_path / "canary-evidence.json"
     budget_path = tmp_path / "canary-budget.json"
     canary_path.write_bytes(canary_raw)

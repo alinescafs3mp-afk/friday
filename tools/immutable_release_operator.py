@@ -103,11 +103,14 @@ _SEMANTIC_SUPERVISOR_SHADOW_DISABLE_TRANSITION = "semantic_supervisor_shadow_dis
 _SEMANTIC_SUPERVISOR_SHADOW_TO_ASSIST_TRANSITION = "semantic_supervisor_shadow_to_assist"
 _SEMANTIC_SUPERVISOR_ASSIST_TO_SHADOW_TRANSITION = "semantic_supervisor_assist_to_shadow"
 _SEMANTIC_SUPERVISOR_ASSIST_TO_CANARY_TRANSITION = "semantic_supervisor_assist_to_canary"
+_STAGED_TRANSITION_VALIDATION_SCHEMA = (
+    "friday.immutable-release-staged-transition-validation.v1"
+)
 _SEMANTIC_SUPERVISOR_CANARY_TO_ASSIST_TRANSITION = "semantic_supervisor_canary_to_assist"
 _SEMANTIC_SUPERVISOR_SHADOW_POLICY_ID = "gptoss20b-semantic-supervisor-v1"
-_SEMANTIC_SUPERVISOR_SHADOW_POLICY_SHA256 = "9f0c1e8132200a3a4416448cd2de03a4736da5e4968536d8c9e518fd5e88051a"
+_SEMANTIC_SUPERVISOR_SHADOW_POLICY_SHA256 = "edea7fce6ae8d9bfcbe461a3f90d98bd9aab897ebe7712cdb23a2d77e8de780c"
 _SEMANTIC_SUPERVISOR_ASSIST_POLICY_ID = "gptoss20b-semantic-supervisor-v2"
-_SEMANTIC_SUPERVISOR_ASSIST_POLICY_SHA256 = "534905cdaac794f485b43e25895761f1a3588ff8eabcc20527530d7f3bd4f96e"
+_SEMANTIC_SUPERVISOR_ASSIST_POLICY_SHA256 = "95dc4ae7e246e7104b1e1cd036ea9706fdb014de6889d69789fca66cec9fd98b"
 # P1 compatibility aliases remain source-stable for shadow rollout tests.
 _SEMANTIC_SUPERVISOR_POLICY_ID = _SEMANTIC_SUPERVISOR_SHADOW_POLICY_ID
 _SEMANTIC_SUPERVISOR_POLICY_SHA256 = _SEMANTIC_SUPERVISOR_SHADOW_POLICY_SHA256
@@ -125,6 +128,10 @@ _SECONDARY_PRODUCT_CONSUME_URL = (
 )
 _SECONDARY_DOCUMENT_MAP_CONSUME_URL = (
     "https://127.0.0.1:8000/api/admin/secondary-document-map-witness/consume-rollout-attestation"
+)
+_SEMANTIC_SUPERVISOR_REPRESENTATIVE_WINDOW_CONSUME_URL = (
+    "https://127.0.0.1:8000/api/admin/semantic-supervisor-witness/"
+    "consume-representative-window-attestation"
 )
 _SECONDARY_DOCUMENT_MAP_SHADOW_POLICY_ID = "gptoss20b-document-map-v1"
 _SECONDARY_DOCUMENT_MAP_SHADOW_POLICY_SHA256 = (
@@ -808,13 +815,46 @@ _SEMANTIC_SUPERVISOR_ASSIST_CONTROLLER_SCHEDULER_KEYS = frozenset(
         "circuit_retry_after_sec",
     }
 )
-_SEMANTIC_SUPERVISOR_MAX_PROMOTION_EVIDENCE_BYTES = 32 << 10
+_SEMANTIC_SUPERVISOR_MAX_PROMOTION_EVIDENCE_BYTES = 2_097_152
 _SEMANTIC_SUPERVISOR_MAX_LATENCY_BUDGET_BYTES = 4_096
 _SEMANTIC_SUPERVISOR_PROMOTION_SCHEMA = "friday.supervisor-assist-promotion.v5"
+_SEMANTIC_SUPERVISOR_PROMOTION_BUNDLE_SCHEMA = (
+    "friday.semantic-supervisor-promotion-bundle.v1"
+)
+_SEMANTIC_SUPERVISOR_PROMOTION_BUNDLE_RECEIPT_SCHEMA = (
+    "friday.semantic-supervisor-promotion-bundle-receipt.v1"
+)
+_SEMANTIC_SUPERVISOR_PROMOTION_ATTESTATION_SCHEMA = (
+    "friday.semantic-supervisor-promotion-operator-attestation.v1"
+)
+_SEMANTIC_SUPERVISOR_REPRESENTATIVE_WINDOW_ATTESTATION_SCHEMA = (
+    "friday.semantic-supervisor-representative-window-attestation.v1"
+)
+_SEMANTIC_SUPERVISOR_REPRESENTATIVE_WINDOW_ISSUE_RESPONSE_SCHEMA = (
+    "friday.semantic-supervisor-representative-window-issue-response.v1"
+)
+_SEMANTIC_SUPERVISOR_REPRESENTATIVE_WINDOW_CONSUME_REQUEST_SCHEMA = (
+    "friday.semantic-supervisor-representative-window-consume-request.v1"
+)
+_SEMANTIC_SUPERVISOR_REPRESENTATIVE_WINDOW_CONSUME_RESPONSE_SCHEMA = (
+    "friday.semantic-supervisor-representative-window-consume-response.v1"
+)
+_SEMANTIC_SUPERVISOR_REPRESENTATIVE_WINDOW_AUTHORITY = (
+    "server_recomputed_live_production"
+)
+_SEMANTIC_SUPERVISOR_PRODUCTION_BASELINE_SCHEMA = (
+    "friday.semantic-supervisor-production-baseline.v2"
+)
+_SEMANTIC_SUPERVISOR_PRODUCTION_BASELINE_KIND = (
+    "joined_body_free_production_candidate"
+)
+_SEMANTIC_SUPERVISOR_PRODUCT_WINDOW_SCHEMA = (
+    "friday.semantic-supervisor-product-window.v1"
+)
 _SEMANTIC_SUPERVISOR_READINESS_EVIDENCE_SCHEMA = "friday.supervisor-assist-readiness-evidence.v2"
 _SEMANTIC_SUPERVISOR_OUTCOME_EVIDENCE_SCHEMA = "friday.supervisor-assist-outcome-evidence.v2"
 _SEMANTIC_SUPERVISOR_PROMOTION_POLICY_SHA256 = (
-    "5138c1d09d4c34aae70999711c5887b721ae1385994fc26a61d37edd6ccf2e68"
+    "496b65744334196de8e53499b6edbe2bc8c75333411a8871ddba5384ec20f8c1"
 )
 _SEMANTIC_SUPERVISOR_RUNTIME_PROFILE_ID = (
     "gptoss20b-2335df123cac7fc0e13e347cde1e1ffa8562daafcaf0fc76ade1a851d2b0ff1f"
@@ -928,6 +968,281 @@ _SEMANTIC_SUPERVISOR_OUTCOME_EVIDENCE_KEYS = frozenset(
         "unnecessary_supervisor_invocation_count",
         "user_visible_observation_count",
         "user_visible_regression_count",
+    }
+)
+_SEMANTIC_SUPERVISOR_BUNDLE_KEYS = frozenset(
+    {
+        "schema",
+        "body_free",
+        "baseline",
+        "operator_attestation",
+        "promotion_evidence",
+        "representative_window_issue",
+        "producer_receipt",
+        "producer_receipt_sha256",
+    }
+)
+_SEMANTIC_SUPERVISOR_REPRESENTATIVE_WINDOW_ISSUE_KEYS = frozenset(
+    {
+        "schema",
+        "status",
+        "server_attestation",
+        "server_attestation_sha256",
+        "attestation_lookup_token",
+        "lookup_token_sha256",
+        "state_version",
+    }
+)
+_SEMANTIC_SUPERVISOR_REPRESENTATIVE_WINDOW_ATTESTATION_KEYS = frozenset(
+    {
+        "schema",
+        "attestation_id",
+        "authority",
+        "target_mode",
+        "observed_mode",
+        "baseline_file_sha256",
+        "baseline_report_sha256",
+        "latency_budget_file_sha256",
+        "latency_budget_document_sha256",
+        "latency_budget_target_mode",
+        "latency_budget_source_revision_sha256",
+        "maximum_user_visible_latency_ms",
+        "precursor_assist_promotion_evidence_sha256",
+        "source_revision_sha256",
+        "registry_binding_sha256",
+        "primary_pid",
+        "primary_process_epoch_sha256",
+        "primary_backend_version",
+        "requested_mode",
+        "observed_release_commit",
+        "observed_release_metadata_sha256",
+        "observed_release_tree_sha256",
+        "observed_registry_binding_sha256",
+        "supervisor_policy_id",
+        "supervisor_policy_sha256",
+        "runtime_profile_id",
+        "runtime_profile_manifest_sha256",
+        "observer_runner_sha256",
+        "sample_limit",
+        "turn_trace_count",
+        "joined_trace_count",
+        "representative_window_sha256",
+        "server_recomputed",
+        "representative_window_attested",
+        "synthetic_authority",
+        "lookup_token_sha256",
+        "state_version",
+        "issued_at",
+        "expires_at",
+        "signature",
+    }
+)
+_SEMANTIC_SUPERVISOR_REPRESENTATIVE_WINDOW_CONSUME_REQUEST_KEYS = frozenset(
+    {
+        "schema",
+        "attestation_lookup_token",
+        "server_attestation_sha256",
+        "target_mode",
+        "baseline_file_sha256",
+        "baseline_report_sha256",
+        "latency_budget_file_sha256",
+        "latency_budget_document_sha256",
+        "source_revision_sha256",
+        "registry_binding_sha256",
+        "observer_runner_sha256",
+        "precursor_assist_promotion_evidence_sha256",
+    }
+)
+_SEMANTIC_SUPERVISOR_REPRESENTATIVE_WINDOW_CONSUME_RESPONSE_KEYS = frozenset(
+    {
+        "schema",
+        "status",
+        "attestation_id",
+        "target_mode",
+        "observed_mode",
+        "server_attestation_sha256",
+        "baseline_file_sha256",
+        "baseline_report_sha256",
+        "latency_budget_file_sha256",
+        "latency_budget_document_sha256",
+        "source_revision_sha256",
+        "registry_binding_sha256",
+        "observer_runner_sha256",
+        "representative_window_sha256",
+        "precursor_assist_promotion_evidence_sha256",
+        "lookup_token_sha256",
+        "consume_request_sha256",
+        "consumed_at",
+        "state_version",
+        "consume_binding_sha256",
+        "server_attestation",
+    }
+)
+_SEMANTIC_SUPERVISOR_ATTESTATION_KEYS = frozenset(
+    {
+        "schema",
+        "target_mode",
+        "baseline_file_sha256",
+        "baseline_report_sha256",
+        "latency_budget_file_sha256",
+        "source_revision_sha256",
+        "registry_binding_sha256",
+        "representative_window_attested",
+        "primary_fallback_proven",
+        "laptop_unavailable_fallback_proven",
+        "final_authority_recheck_proven",
+        "primary_publication_owner_proven",
+        "zero_hidden_owners_attested",
+        "zero_duplicate_capabilities_attested",
+        "zero_duplicate_effects_attested",
+        "zero_duplicate_publications_attested",
+        "zero_false_completion_regressions_attested",
+        "precursor_assist_promotion_evidence_sha256",
+        "quality_basis",
+    }
+)
+_SEMANTIC_SUPERVISOR_BUNDLE_RECEIPT_KEYS = frozenset(
+    {
+        "schema",
+        "target_mode",
+        "source_revision_sha256",
+        "registry_binding_sha256",
+        "baseline_file_sha256",
+        "baseline_report_sha256",
+        "latency_budget_file_sha256",
+        "operator_attestation_sha256",
+        "representative_window_server_attestation_sha256",
+        "representative_window_lookup_token_sha256",
+        "representative_window_sha256",
+        "representative_window_observer_runner_sha256",
+        "promotion_evidence_file_sha256",
+        "promotion_evidence_canonical_sha256",
+        "precursor_assist_promotion_evidence_sha256",
+        "body_free",
+        "promotion_authority_granted",
+        "activation_performed",
+    }
+)
+_SEMANTIC_SUPERVISOR_BASELINE_KEYS = frozenset(
+    {
+        "schema",
+        "evidence",
+        "sample",
+        "primary_baseline",
+        "supervisor_join",
+        "product_windows",
+        "report_sha256",
+    }
+)
+_SEMANTIC_SUPERVISOR_BASELINE_EVIDENCE_KEYS = frozenset(
+    {
+        "kind",
+        "body_free",
+        "production_acceptance",
+        "acceptance_authority",
+        "representative_window_attested",
+        "promotion_authority",
+    }
+)
+_SEMANTIC_SUPERVISOR_BASELINE_SAMPLE_KEYS = frozenset(
+    {
+        "limit",
+        "turn_traces",
+        "joined_supervisor_events",
+        "promoted_product_events",
+        "malformed_turn_traces",
+        "malformed_joined_events",
+        "malformed_promoted_product_events",
+        "duplicate_turn_trace_digests",
+        "duplicate_shadow_product_events",
+        "duplicate_promoted_product_events",
+        "unmatched_shadow_product_events",
+        "unmatched_promoted_product_events",
+    }
+)
+_SEMANTIC_SUPERVISOR_BASELINE_ANOMALY_KEYS = frozenset(
+    _SEMANTIC_SUPERVISOR_BASELINE_SAMPLE_KEYS
+    - {"limit", "turn_traces", "joined_supervisor_events", "promoted_product_events"}
+)
+_SEMANTIC_SUPERVISOR_BASELINE_PRIMARY_KEYS = frozenset(
+    {
+        "intent_counts",
+        "playbook_counts",
+        "completion_counts",
+        "publication_counts",
+        "failure_counts",
+        "authority_rechecked_count",
+        "partial_coverage_count",
+        "state_restored_count",
+    }
+)
+_SEMANTIC_SUPERVISOR_BASELINE_JOIN_KEYS = frozenset(
+    {
+        "task_counts",
+        "skip_counts",
+        "parse_counts",
+        "policy_reason_counts",
+        "planner_latency_bucket_counts",
+        "actual_completion_counts",
+        "actual_publication_counts",
+        "actual_capability_outcome_counts",
+        "invoked_count",
+        "admitted_count",
+        "final_authority_rechecked_count",
+        "state_restored_count",
+        "retry_occurred_count",
+    }
+)
+_SEMANTIC_SUPERVISOR_METRIC_WINDOW_KEYS = frozenset(
+    {
+        "schema",
+        "stage",
+        "observation_count",
+        "completion_counts",
+        "complete_count",
+        "failure_class_counts",
+        "latency_observation_count",
+        "latency_total_ms",
+        "latency_max_ms",
+        "window_sha256",
+    }
+)
+_SEMANTIC_SUPERVISOR_SHADOW_WINDOW_KEYS = frozenset(
+    {
+        "schema",
+        "mode",
+        "production_joined",
+        "actual_promoted_execution",
+        "quality_claim",
+        "observation_count",
+        "joined_trace_count",
+        "baseline",
+        "readiness_observation_count",
+        "call_rate_observation_count",
+        "supervisor_invocation_count",
+        "unnecessary_supervisor_invocation_count",
+        "user_visible_observation_count",
+        "user_visible_regression_count",
+        "readiness_witness_sha256",
+    }
+)
+_SEMANTIC_SUPERVISOR_PROMOTED_WINDOW_KEYS = frozenset(
+    {
+        "schema",
+        "mode",
+        "production_joined",
+        "actual_promoted_execution",
+        "observation_count",
+        "joined_trace_count",
+        "promotion_evidence_count",
+        "promotion_evidence_sha256",
+        "promoted",
+        "call_rate_observation_count",
+        "supervisor_invocation_count",
+        "unnecessary_supervisor_invocation_count",
+        "user_visible_observation_count",
+        "user_visible_regression_count",
+        "product_window_sha256",
     }
 )
 BOOTSTRAP_WHEELS = (("pip", "26.1.2", "pip-26.1.2-py3-none-any.whl"),)
@@ -1374,7 +1689,13 @@ def _private_regular_file_allow_empty(path: Path, *, maximum_bytes: int, code: s
     return resolved
 
 
-def _read_private_regular_file(path: Path, *, maximum_bytes: int, code: str) -> bytes:
+def _read_private_regular_file(
+    path: Path,
+    *,
+    maximum_bytes: int,
+    code: str,
+    allowed_modes: frozenset[int] | None = None,
+) -> bytes:
     """Read one private file through a stable no-follow descriptor."""
 
     lexical = Path(os.path.abspath(path))
@@ -1393,6 +1714,10 @@ def _read_private_regular_file(path: Path, *, maximum_bytes: int, code: str) -> 
             or before.st_nlink != 1
             or before.st_uid != os.geteuid()
             or stat.S_IMODE(before.st_mode) & 0o077
+            or (
+                allowed_modes is not None
+                and stat.S_IMODE(before.st_mode) not in allowed_modes
+            )
             or not 0 < before.st_size <= maximum_bytes
         ):
             raise ReleaseFailure(code)
@@ -1772,6 +2097,45 @@ def _validate_staged_environment_transition(
         raise ReleaseFailure("nonsecondary_transition_changed_secondary_environment")
 
 
+def _staged_transition_validation_sha256(
+    transition: str,
+    predecessor_env_sha256: str,
+    next_env_file: Path,
+    next_env_file_sha256: str,
+) -> str:
+    """Bind a durable replay receipt to one already-validated ENV pair."""
+
+    if transition not in _STAGED_CONFIG_TRANSITIONS:
+        raise ReleaseFailure("staged_config_transition_invalid")
+    predecessor = _closed_hash(
+        predecessor_env_sha256,
+        "staged_predecessor_env_digest_invalid",
+    )
+    target = _closed_hash(
+        next_env_file_sha256,
+        "staged_next_env_digest_invalid",
+    )
+    lexical = Path(os.path.abspath(next_env_file))
+    if (
+        not next_env_file.is_absolute()
+        or lexical != next_env_file
+        or any(character in str(lexical) for character in "\x00\r\n")
+        or predecessor == target
+    ):
+        raise ReleaseFailure("staged_environment_identity_invalid")
+    return _sha256_bytes(
+        _canonical_json(
+            {
+                "schema": _STAGED_TRANSITION_VALIDATION_SCHEMA,
+                "transition": transition,
+                "predecessor_env_sha256": predecessor,
+                "next_env_file": str(lexical),
+                "next_env_file_sha256": target,
+            }
+        )
+    )
+
+
 def _canonical_secondary_environment(unrelated: bytes, values: Mapping[str, str]) -> bytes:
     return unrelated + b"".join(f"{key}={value}\n".encode() for key, value in sorted(values.items()))
 
@@ -1925,6 +2289,412 @@ def _semantic_supervisor_exact_digests(
     keys: tuple[str, ...],
 ) -> bool:
     return all(_semantic_supervisor_is_digest(payload.get(key)) for key in keys)
+
+
+def _semantic_supervisor_exact_object(
+    value: object,
+    keys: frozenset[str],
+    *,
+    invalid_code: str,
+) -> dict[str, Any]:
+    if type(value) is not dict or set(value) != keys:
+        raise ReleaseFailure(invalid_code)
+    return value
+
+
+def _semantic_supervisor_bounded_count(value: object, *, invalid_code: str) -> int:
+    if type(value) is not int or not 0 <= value <= 100_000:
+        raise ReleaseFailure(invalid_code)
+    return value
+
+
+def _semantic_supervisor_count_map(
+    value: object,
+    *,
+    invalid_code: str,
+) -> dict[str, int]:
+    if type(value) is not dict or len(value) > 256:
+        raise ReleaseFailure(invalid_code)
+    result: dict[str, int] = {}
+    for key, count in value.items():
+        if (
+            type(key) is not str
+            or re.fullmatch(r"[a-z0-9][a-z0-9_.:-]{0,127}", key) is None
+        ):
+            raise ReleaseFailure(invalid_code)
+        result[key] = _semantic_supervisor_bounded_count(
+            count,
+            invalid_code=invalid_code,
+        )
+    return result
+
+
+def _semantic_supervisor_metric_window(
+    value: object,
+    *,
+    stage: str,
+    invalid_code: str,
+) -> dict[str, Any]:
+    item = _semantic_supervisor_exact_object(
+        value,
+        _SEMANTIC_SUPERVISOR_METRIC_WINDOW_KEYS,
+        invalid_code=invalid_code,
+    )
+    observations = _semantic_supervisor_bounded_count(
+        item.get("observation_count"),
+        invalid_code=invalid_code,
+    )
+    complete = _semantic_supervisor_bounded_count(
+        item.get("complete_count"),
+        invalid_code=invalid_code,
+    )
+    latency_observations = _semantic_supervisor_bounded_count(
+        item.get("latency_observation_count"),
+        invalid_code=invalid_code,
+    )
+    latency_total = item.get("latency_total_ms")
+    latency_max = item.get("latency_max_ms")
+    completions = _semantic_supervisor_count_map(
+        item.get("completion_counts"),
+        invalid_code=invalid_code,
+    )
+    failures = _semantic_supervisor_count_map(
+        item.get("failure_class_counts"),
+        invalid_code=invalid_code,
+    )
+    if (
+        item.get("schema") != _SEMANTIC_SUPERVISOR_PRODUCT_WINDOW_SCHEMA
+        or item.get("stage") != stage
+        or not _semantic_supervisor_is_digest(item.get("window_sha256"))
+        or sum(completions.values()) != observations
+        or sum(failures.values()) != observations
+        or completions.get("complete", 0) != complete
+        or latency_observations != observations
+        or type(latency_total) is not int
+        or type(latency_max) is not int
+        or not 0 <= latency_max <= _SEMANTIC_SUPERVISOR_MAX_LATENCY_MS
+        or not 0 <= latency_total <= _SEMANTIC_SUPERVISOR_MAX_LATENCY_MS * max(1, observations)
+        or (observations == 0 and (latency_total != 0 or latency_max != 0))
+        or (
+            observations > 0
+            and not latency_max <= latency_total <= latency_max * observations
+        )
+    ):
+        raise ReleaseFailure(invalid_code)
+    return item
+
+
+def _semantic_supervisor_shadow_window(
+    value: object,
+    *,
+    invalid_code: str,
+) -> dict[str, Any]:
+    item = _semantic_supervisor_exact_object(
+        value,
+        _SEMANTIC_SUPERVISOR_SHADOW_WINDOW_KEYS,
+        invalid_code=invalid_code,
+    )
+    observations = _semantic_supervisor_bounded_count(
+        item.get("observation_count"),
+        invalid_code=invalid_code,
+    )
+    joined = _semantic_supervisor_bounded_count(
+        item.get("joined_trace_count"),
+        invalid_code=invalid_code,
+    )
+    readiness = _semantic_supervisor_bounded_count(
+        item.get("readiness_observation_count"),
+        invalid_code=invalid_code,
+    )
+    calls = _semantic_supervisor_bounded_count(
+        item.get("call_rate_observation_count"),
+        invalid_code=invalid_code,
+    )
+    invoked = _semantic_supervisor_bounded_count(
+        item.get("supervisor_invocation_count"),
+        invalid_code=invalid_code,
+    )
+    unnecessary = _semantic_supervisor_bounded_count(
+        item.get("unnecessary_supervisor_invocation_count"),
+        invalid_code=invalid_code,
+    )
+    visible = _semantic_supervisor_bounded_count(
+        item.get("user_visible_observation_count"),
+        invalid_code=invalid_code,
+    )
+    regressions = _semantic_supervisor_bounded_count(
+        item.get("user_visible_regression_count"),
+        invalid_code=invalid_code,
+    )
+    baseline = _semantic_supervisor_metric_window(
+        item.get("baseline"),
+        stage="shadow",
+        invalid_code=invalid_code,
+    )
+    if (
+        item.get("schema") != _SEMANTIC_SUPERVISOR_PRODUCT_WINDOW_SCHEMA
+        or item.get("mode") != "shadow"
+        or item.get("production_joined") is not True
+        or item.get("actual_promoted_execution") is not False
+        or item.get("quality_claim") != "documented_baseline_failure_only"
+        or not _semantic_supervisor_is_digest(item.get("readiness_witness_sha256"))
+        or joined != observations
+        or calls != observations
+        or readiness != baseline["observation_count"]
+        or visible != readiness
+        or readiness > observations
+        or invoked > calls
+        or unnecessary > invoked
+        or regressions > visible
+    ):
+        raise ReleaseFailure(invalid_code)
+    return item
+
+
+def _semantic_supervisor_promoted_window(
+    value: object,
+    *,
+    mode: str,
+    invalid_code: str,
+) -> dict[str, Any]:
+    item = _semantic_supervisor_exact_object(
+        value,
+        _SEMANTIC_SUPERVISOR_PROMOTED_WINDOW_KEYS,
+        invalid_code=invalid_code,
+    )
+    observations = _semantic_supervisor_bounded_count(
+        item.get("observation_count"),
+        invalid_code=invalid_code,
+    )
+    joined = _semantic_supervisor_bounded_count(
+        item.get("joined_trace_count"),
+        invalid_code=invalid_code,
+    )
+    evidence_count = _semantic_supervisor_bounded_count(
+        item.get("promotion_evidence_count"),
+        invalid_code=invalid_code,
+    )
+    calls = _semantic_supervisor_bounded_count(
+        item.get("call_rate_observation_count"),
+        invalid_code=invalid_code,
+    )
+    invoked = _semantic_supervisor_bounded_count(
+        item.get("supervisor_invocation_count"),
+        invalid_code=invalid_code,
+    )
+    unnecessary = _semantic_supervisor_bounded_count(
+        item.get("unnecessary_supervisor_invocation_count"),
+        invalid_code=invalid_code,
+    )
+    visible = _semantic_supervisor_bounded_count(
+        item.get("user_visible_observation_count"),
+        invalid_code=invalid_code,
+    )
+    regressions = _semantic_supervisor_bounded_count(
+        item.get("user_visible_regression_count"),
+        invalid_code=invalid_code,
+    )
+    promoted = _semantic_supervisor_metric_window(
+        item.get("promoted"),
+        stage=mode,
+        invalid_code=invalid_code,
+    )
+    evidence_sha256 = item.get("promotion_evidence_sha256")
+    if (
+        item.get("schema") != _SEMANTIC_SUPERVISOR_PRODUCT_WINDOW_SCHEMA
+        or item.get("mode") != mode
+        or item.get("production_joined") is not True
+        or item.get("actual_promoted_execution") is not True
+        or not _semantic_supervisor_is_digest(item.get("product_window_sha256"))
+        or (
+            evidence_count == 1
+            and not _semantic_supervisor_is_digest(evidence_sha256)
+        )
+        or (evidence_count != 1 and evidence_sha256 is not None)
+        or joined != observations
+        or calls != observations
+        or promoted["observation_count"] > observations
+        or invoked > calls
+        or unnecessary > invoked
+        or visible > promoted["observation_count"]
+        or regressions > visible
+    ):
+        raise ReleaseFailure(invalid_code)
+    return item
+
+
+def _semantic_supervisor_baseline_identity(
+    value: object,
+    *,
+    invalid_code: str,
+) -> tuple[str, str, dict[str, Any], dict[str, Any], dict[str, Any]]:
+    report = _semantic_supervisor_exact_object(
+        value,
+        _SEMANTIC_SUPERVISOR_BASELINE_KEYS,
+        invalid_code=invalid_code,
+    )
+    raw = _canonical_json(report) + b"\n"
+    if report.get("schema") != _SEMANTIC_SUPERVISOR_PRODUCTION_BASELINE_SCHEMA:
+        raise ReleaseFailure(invalid_code)
+    report_sha256 = report.get("report_sha256")
+    unsigned = dict(report)
+    unsigned.pop("report_sha256")
+    if (
+        not _semantic_supervisor_is_digest(report_sha256)
+        or _sha256_bytes(_canonical_json(unsigned)) != report_sha256
+    ):
+        raise ReleaseFailure(invalid_code)
+    evidence = _semantic_supervisor_exact_object(
+        report.get("evidence"),
+        _SEMANTIC_SUPERVISOR_BASELINE_EVIDENCE_KEYS,
+        invalid_code=invalid_code,
+    )
+    if evidence != {
+        "kind": _SEMANTIC_SUPERVISOR_PRODUCTION_BASELINE_KIND,
+        "body_free": True,
+        "production_acceptance": False,
+        "acceptance_authority": "operator_review_required",
+        "representative_window_attested": False,
+        "promotion_authority": False,
+    }:
+        raise ReleaseFailure(invalid_code)
+    sample = _semantic_supervisor_exact_object(
+        report.get("sample"),
+        _SEMANTIC_SUPERVISOR_BASELINE_SAMPLE_KEYS,
+        invalid_code=invalid_code,
+    )
+    limit = _semantic_supervisor_bounded_count(
+        sample.get("limit"),
+        invalid_code=invalid_code,
+    )
+    traces = _semantic_supervisor_bounded_count(
+        sample.get("turn_traces"),
+        invalid_code=invalid_code,
+    )
+    joins = _semantic_supervisor_bounded_count(
+        sample.get("joined_supervisor_events"),
+        invalid_code=invalid_code,
+    )
+    promoted_rows = _semantic_supervisor_bounded_count(
+        sample.get("promoted_product_events"),
+        invalid_code=invalid_code,
+    )
+    if (
+        limit < 1
+        or max(traces, joins, promoted_rows) > limit
+        or any(
+            _semantic_supervisor_bounded_count(
+                sample.get(key),
+                invalid_code=invalid_code,
+            )
+            != 0
+            for key in _SEMANTIC_SUPERVISOR_BASELINE_ANOMALY_KEYS
+        )
+    ):
+        raise ReleaseFailure(invalid_code)
+    primary = _semantic_supervisor_exact_object(
+        report.get("primary_baseline"),
+        _SEMANTIC_SUPERVISOR_BASELINE_PRIMARY_KEYS,
+        invalid_code=invalid_code,
+    )
+    for key in (
+        "intent_counts",
+        "playbook_counts",
+        "completion_counts",
+        "publication_counts",
+        "failure_counts",
+    ):
+        if sum(
+            _semantic_supervisor_count_map(
+                primary.get(key),
+                invalid_code=invalid_code,
+            ).values()
+        ) != traces:
+            raise ReleaseFailure(invalid_code)
+    for key in (
+        "authority_rechecked_count",
+        "partial_coverage_count",
+        "state_restored_count",
+    ):
+        if (
+            _semantic_supervisor_bounded_count(
+                primary.get(key),
+                invalid_code=invalid_code,
+            )
+            > traces
+        ):
+            raise ReleaseFailure(invalid_code)
+    joined = _semantic_supervisor_exact_object(
+        report.get("supervisor_join"),
+        _SEMANTIC_SUPERVISOR_BASELINE_JOIN_KEYS,
+        invalid_code=invalid_code,
+    )
+    for key in (
+        "task_counts",
+        "skip_counts",
+        "parse_counts",
+        "policy_reason_counts",
+        "planner_latency_bucket_counts",
+        "actual_completion_counts",
+        "actual_publication_counts",
+    ):
+        if sum(
+            _semantic_supervisor_count_map(
+                joined.get(key),
+                invalid_code=invalid_code,
+            ).values()
+        ) != joins:
+            raise ReleaseFailure(invalid_code)
+    _semantic_supervisor_count_map(
+        joined.get("actual_capability_outcome_counts"),
+        invalid_code=invalid_code,
+    )
+    for key in (
+        "invoked_count",
+        "admitted_count",
+        "final_authority_rechecked_count",
+        "state_restored_count",
+        "retry_occurred_count",
+    ):
+        if (
+            _semantic_supervisor_bounded_count(
+                joined.get(key),
+                invalid_code=invalid_code,
+            )
+            > joins
+        ):
+            raise ReleaseFailure(invalid_code)
+    product_windows = _semantic_supervisor_exact_object(
+        report.get("product_windows"),
+        frozenset({"shadow_readiness", "promoted_execution"}),
+        invalid_code=invalid_code,
+    )
+    shadow = _semantic_supervisor_shadow_window(
+        product_windows.get("shadow_readiness"),
+        invalid_code=invalid_code,
+    )
+    promoted = _semantic_supervisor_exact_object(
+        product_windows.get("promoted_execution"),
+        frozenset({"assist", "canary"}),
+        invalid_code=invalid_code,
+    )
+    assist = _semantic_supervisor_promoted_window(
+        promoted.get("assist"),
+        mode="assist",
+        invalid_code=invalid_code,
+    )
+    canary = _semantic_supervisor_promoted_window(
+        promoted.get("canary"),
+        mode="canary",
+        invalid_code=invalid_code,
+    )
+    if (
+        shadow["observation_count"] != joins
+        or assist["observation_count"] + canary["observation_count"]
+        != promoted_rows
+    ):
+        raise ReleaseFailure(invalid_code)
+    return _sha256_bytes(raw), report_sha256, shadow, assist, canary
 
 
 def _semantic_supervisor_readiness_evidence_is_live(
@@ -2259,6 +3029,596 @@ def _validate_semantic_supervisor_evidence_budget_binding(
     return _sha256_bytes(_canonical_json(evidence))
 
 
+def _semantic_supervisor_expected_bundle_evidence(
+    *,
+    evidence: dict[str, Any],
+    attestation: dict[str, Any],
+    baseline_file_sha256: str,
+    baseline_report_sha256: str,
+    shadow: dict[str, Any],
+    assist: dict[str, Any],
+    mode: str,
+    source_sha256: str,
+    registry_sha256: str,
+    latency_budget_sha256: str,
+    latency_budget_ms: int,
+    invalid_code: str,
+) -> dict[str, Any]:
+    product = evidence.get("product_evidence")
+    if type(product) is not dict:
+        raise ReleaseFailure(invalid_code)
+    shadow_baseline = shadow["baseline"]
+    if type(shadow_baseline) is not dict:
+        raise ReleaseFailure(invalid_code)
+    if mode == "assist":
+        failure_id = product.get("documented_failure_class_id")
+        failure_sha256 = product.get("documented_failure_class_sha256")
+        failure_counts = shadow_baseline["failure_class_counts"]
+        if (
+            type(failure_counts) is not dict
+            or type(failure_id) is not str
+            or not _semantic_supervisor_is_digest(failure_sha256)
+            or type(failure_counts.get(failure_id)) is not int
+            or failure_counts[failure_id] < 1
+        ):
+            raise ReleaseFailure(invalid_code)
+        expected_product: dict[str, Any] = {
+            "schema": _SEMANTIC_SUPERVISOR_READINESS_EVIDENCE_SCHEMA,
+            "baseline_window_sha256": shadow_baseline["window_sha256"],
+            "baseline_observation_count": shadow_baseline["observation_count"],
+            "baseline_complete_count": shadow_baseline["complete_count"],
+            "documented_failure_class_id": failure_id,
+            "documented_failure_class_sha256": failure_sha256,
+            "baseline_failure_class_count": failure_counts[failure_id],
+            "readiness_witness_sha256": shadow["readiness_witness_sha256"],
+            "readiness_observation_count": shadow["readiness_observation_count"],
+            "latency_budget_target_mode": mode,
+            "latency_budget_source_revision_sha256": source_sha256,
+            "latency_budget_ms": latency_budget_ms,
+            "latency_budget_sha256": latency_budget_sha256,
+            "latency_total_ms": shadow_baseline["latency_total_ms"],
+            "latency_max_ms": shadow_baseline["latency_max_ms"],
+            "call_rate_observation_count": shadow["call_rate_observation_count"],
+            "supervisor_invocation_count": shadow["supervisor_invocation_count"],
+            "unnecessary_supervisor_invocation_count": shadow[
+                "unnecessary_supervisor_invocation_count"
+            ],
+            "user_visible_observation_count": shadow["user_visible_observation_count"],
+            "user_visible_regression_count": shadow["user_visible_regression_count"],
+        }
+        observation_count = shadow["observation_count"]
+        joined_trace_count = shadow["joined_trace_count"]
+        observed_mode = "shadow"
+        observed_policy_id = _SEMANTIC_SUPERVISOR_SHADOW_POLICY_ID
+        observed_policy_sha256 = _SEMANTIC_SUPERVISOR_SHADOW_POLICY_SHA256
+    else:
+        assist_promoted = assist["promoted"]
+        if type(assist_promoted) is not dict:
+            raise ReleaseFailure(invalid_code)
+        quality_basis = attestation.get("quality_basis")
+        failure_id = product.get("documented_failure_class_id")
+        failure_sha256 = product.get("documented_failure_class_sha256")
+        baseline_failures = shadow_baseline["failure_class_counts"]
+        promoted_failures = assist_promoted["failure_class_counts"]
+        if type(baseline_failures) is not dict or type(promoted_failures) is not dict:
+            raise ReleaseFailure(invalid_code)
+        if quality_basis == "completion_rate_improvement":
+            if failure_id != "none" or failure_sha256 is not None:
+                raise ReleaseFailure(invalid_code)
+            baseline_failure_count = 0
+            promoted_failure_count = 0
+        elif quality_basis == "documented_failure_class_removal":
+            if (
+                type(failure_id) is not str
+                or not _semantic_supervisor_is_digest(failure_sha256)
+                or type(baseline_failures.get(failure_id)) is not int
+                or baseline_failures[failure_id] < 1
+                or promoted_failures.get(failure_id, 0) != 0
+            ):
+                raise ReleaseFailure(invalid_code)
+            baseline_failure_count = baseline_failures[failure_id]
+            promoted_failure_count = 0
+        else:
+            raise ReleaseFailure(invalid_code)
+        expected_product = {
+            "schema": _SEMANTIC_SUPERVISOR_OUTCOME_EVIDENCE_SCHEMA,
+            "quality_basis": quality_basis,
+            "baseline_window_sha256": shadow_baseline["window_sha256"],
+            "promoted_window_sha256": assist_promoted["window_sha256"],
+            "baseline_observation_count": shadow_baseline["observation_count"],
+            "baseline_complete_count": shadow_baseline["complete_count"],
+            "promoted_observation_count": assist_promoted["observation_count"],
+            "promoted_complete_count": assist_promoted["complete_count"],
+            "documented_failure_class_id": failure_id,
+            "documented_failure_class_sha256": failure_sha256,
+            "baseline_failure_class_count": baseline_failure_count,
+            "promoted_failure_class_count": promoted_failure_count,
+            "latency_budget_target_mode": mode,
+            "latency_budget_source_revision_sha256": source_sha256,
+            "latency_budget_ms": latency_budget_ms,
+            "latency_budget_sha256": latency_budget_sha256,
+            "latency_observation_count": assist_promoted["latency_observation_count"],
+            "latency_total_ms": assist_promoted["latency_total_ms"],
+            "latency_max_ms": assist_promoted["latency_max_ms"],
+            "call_rate_observation_count": assist["call_rate_observation_count"],
+            "supervisor_invocation_count": assist["supervisor_invocation_count"],
+            "unnecessary_supervisor_invocation_count": assist[
+                "unnecessary_supervisor_invocation_count"
+            ],
+            "user_visible_observation_count": assist["user_visible_observation_count"],
+            "user_visible_regression_count": assist["user_visible_regression_count"],
+        }
+        observation_count = assist["observation_count"]
+        joined_trace_count = assist["joined_trace_count"]
+        observed_mode = "assist"
+        observed_policy_id = _SEMANTIC_SUPERVISOR_ASSIST_POLICY_ID
+        observed_policy_sha256 = _SEMANTIC_SUPERVISOR_ASSIST_POLICY_SHA256
+    expected = {
+        "schema": _SEMANTIC_SUPERVISOR_PROMOTION_SCHEMA,
+        "evidence_id": evidence.get("evidence_id"),
+        "authority": "production_joined",
+        "observed_mode": observed_mode,
+        "task_class": _SEMANTIC_SUPERVISOR_PROMOTED_TASK,
+        "source_revision_sha256": source_sha256,
+        "promotion_policy_sha256": _SEMANTIC_SUPERVISOR_PROMOTION_POLICY_SHA256,
+        "observed_policy_id": observed_policy_id,
+        "observed_policy_sha256": observed_policy_sha256,
+        "target_policy_id": _SEMANTIC_SUPERVISOR_ASSIST_POLICY_ID,
+        "target_policy_sha256": _SEMANTIC_SUPERVISOR_ASSIST_POLICY_SHA256,
+        "runtime_profile_id": _SEMANTIC_SUPERVISOR_RUNTIME_PROFILE_ID,
+        "runtime_profile_manifest_sha256": (
+            _SEMANTIC_SUPERVISOR_RUNTIME_PROFILE_MANIFEST_SHA256
+        ),
+        "registry_binding_sha256": registry_sha256,
+        "baseline_file_sha256": baseline_file_sha256,
+        "baseline_report_sha256": baseline_report_sha256,
+        "operator_attestation_sha256": _sha256_bytes(_canonical_json(attestation)),
+        "precursor_assist_promotion_evidence_sha256": attestation.get(
+            "precursor_assist_promotion_evidence_sha256"
+        ),
+        "max_steps": 6,
+        "max_review_rounds": 1,
+        "observation_count": observation_count,
+        "joined_trace_count": joined_trace_count,
+        "representative_window_attested": True,
+        "primary_fallback_proven": True,
+        "laptop_unavailable_fallback_proven": True,
+        "final_authority_recheck_proven": True,
+        "primary_publication_owner_proven": True,
+        "hidden_owner_count": 0,
+        "duplicate_capability_count": 0,
+        "duplicate_effect_count": 0,
+        "duplicate_publication_count": 0,
+        "false_completion_regression_count": 0,
+        "product_evidence": expected_product,
+    }
+    if evidence != expected:
+        raise ReleaseFailure(invalid_code)
+    return evidence
+
+
+def _semantic_supervisor_representative_window_sha256(value: Mapping[str, Any]) -> str:
+    """Match the server witness canonical domain without importing candidate code."""
+
+    return _sha256_bytes(_canonical_json(value) + b"\n")
+
+
+def _validate_semantic_supervisor_representative_window_issue(
+    value: object,
+    *,
+    baseline: Mapping[str, Any],
+    baseline_file_sha256: str,
+    baseline_report_sha256: str,
+    shadow: Mapping[str, Any],
+    assist: Mapping[str, Any],
+    mode: str,
+    source_sha256: str,
+    registry_sha256: str,
+    latency_budget_sha256: str,
+    latency_budget_ms: int,
+    precursor_assist_evidence_sha256: object,
+    invalid_code: str,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Validate the body-free issue envelope; the live server verifies its HMAC."""
+
+    issue = _semantic_supervisor_exact_object(
+        value,
+        _SEMANTIC_SUPERVISOR_REPRESENTATIVE_WINDOW_ISSUE_KEYS,
+        invalid_code=invalid_code,
+    )
+    attestation = _semantic_supervisor_exact_object(
+        issue.get("server_attestation"),
+        _SEMANTIC_SUPERVISOR_REPRESENTATIVE_WINDOW_ATTESTATION_KEYS,
+        invalid_code=invalid_code,
+    )
+    expected_observed_mode = "shadow" if mode == "assist" else "assist"
+    expected_window_sha256 = (
+        shadow.get("readiness_witness_sha256")
+        if mode == "assist"
+        else assist.get("product_window_sha256")
+    )
+    expected_joined_trace_count = (
+        shadow.get("joined_trace_count")
+        if mode == "assist"
+        else assist.get("joined_trace_count")
+    )
+    sample = _semantic_supervisor_exact_object(
+        baseline.get("sample"),
+        _SEMANTIC_SUPERVISOR_BASELINE_SAMPLE_KEYS,
+        invalid_code=invalid_code,
+    )
+    lookup_token = issue.get("attestation_lookup_token")
+    lookup_token_sha256 = issue.get("lookup_token_sha256")
+    server_attestation_sha256 = issue.get("server_attestation_sha256")
+    digest_fields = (
+        "baseline_file_sha256",
+        "baseline_report_sha256",
+        "latency_budget_file_sha256",
+        "latency_budget_document_sha256",
+        "latency_budget_source_revision_sha256",
+        "source_revision_sha256",
+        "registry_binding_sha256",
+        "primary_process_epoch_sha256",
+        "observed_release_metadata_sha256",
+        "observed_release_tree_sha256",
+        "observed_registry_binding_sha256",
+        "supervisor_policy_sha256",
+        "runtime_profile_manifest_sha256",
+        "observer_runner_sha256",
+        "representative_window_sha256",
+        "lookup_token_sha256",
+        "signature",
+    )
+    if (
+        issue.get("schema")
+        != _SEMANTIC_SUPERVISOR_REPRESENTATIVE_WINDOW_ISSUE_RESPONSE_SCHEMA
+        or issue.get("status") != "unused"
+        or issue.get("state_version") != 1
+        or attestation.get("schema")
+        != _SEMANTIC_SUPERVISOR_REPRESENTATIVE_WINDOW_ATTESTATION_SCHEMA
+        or re.fullmatch(r"sswindow_[0-9a-f]{32}", str(attestation.get("attestation_id")))
+        is None
+        or attestation.get("authority")
+        != _SEMANTIC_SUPERVISOR_REPRESENTATIVE_WINDOW_AUTHORITY
+        or attestation.get("target_mode") != mode
+        or attestation.get("observed_mode") != expected_observed_mode
+        or attestation.get("requested_mode") != "assist"
+        or attestation.get("baseline_file_sha256") != baseline_file_sha256
+        or attestation.get("baseline_report_sha256") != baseline_report_sha256
+        or attestation.get("latency_budget_file_sha256") != latency_budget_sha256
+        or attestation.get("latency_budget_document_sha256") != latency_budget_sha256
+        or attestation.get("latency_budget_target_mode") != mode
+        or attestation.get("latency_budget_source_revision_sha256") != source_sha256
+        or attestation.get("maximum_user_visible_latency_ms") != latency_budget_ms
+        or attestation.get("source_revision_sha256") != source_sha256
+        or attestation.get("registry_binding_sha256") != registry_sha256
+        or attestation.get("observed_registry_binding_sha256") != registry_sha256
+        or attestation.get("supervisor_policy_id")
+        != _SEMANTIC_SUPERVISOR_ASSIST_POLICY_ID
+        or attestation.get("supervisor_policy_sha256")
+        != _SEMANTIC_SUPERVISOR_ASSIST_POLICY_SHA256
+        or attestation.get("runtime_profile_id") != _SEMANTIC_SUPERVISOR_RUNTIME_PROFILE_ID
+        or attestation.get("runtime_profile_manifest_sha256")
+        != _SEMANTIC_SUPERVISOR_RUNTIME_PROFILE_MANIFEST_SHA256
+        or attestation.get("representative_window_sha256") != expected_window_sha256
+        or attestation.get("joined_trace_count") != expected_joined_trace_count
+        or attestation.get("turn_trace_count") != sample.get("turn_traces")
+        or attestation.get("sample_limit") != sample.get("limit")
+        or attestation.get("server_recomputed") is not True
+        or attestation.get("representative_window_attested") is not True
+        or attestation.get("synthetic_authority") is not False
+        or attestation.get("precursor_assist_promotion_evidence_sha256")
+        != precursor_assist_evidence_sha256
+        or type(lookup_token) is not str
+        or _HEX64.fullmatch(lookup_token) is None
+        or set(lookup_token) == {"0"}
+        or not _semantic_supervisor_is_digest(lookup_token_sha256)
+        or _sha256_bytes(lookup_token.encode("ascii")) != lookup_token_sha256
+        or attestation.get("lookup_token_sha256") != lookup_token_sha256
+        or not _semantic_supervisor_is_digest(server_attestation_sha256)
+        or _semantic_supervisor_representative_window_sha256(attestation)
+        != server_attestation_sha256
+        or not _semantic_supervisor_exact_digests(attestation, digest_fields)
+        or type(attestation.get("primary_pid")) is not int
+        or attestation["primary_pid"] <= 0
+        or _HEX40.fullmatch(str(attestation.get("observed_release_commit"))) is None
+        or type(attestation.get("primary_backend_version")) is not str
+        or not attestation["primary_backend_version"]
+        or type(attestation.get("sample_limit")) is not int
+        or type(attestation.get("turn_trace_count")) is not int
+        or type(attestation.get("joined_trace_count")) is not int
+        or not 0
+        < attestation["joined_trace_count"]
+        <= attestation["turn_trace_count"]
+        < attestation["sample_limit"]
+        or type(attestation.get("issued_at")) is not int
+        or type(attestation.get("expires_at")) is not int
+        or not attestation["issued_at"] < attestation["expires_at"]
+        or attestation.get("state_version") != 1
+    ):
+        raise ReleaseFailure(invalid_code)
+    return issue, attestation
+
+
+def _semantic_supervisor_representative_window_consume_request(
+    issue: Mapping[str, Any],
+) -> dict[str, Any]:
+    attestation = issue.get("server_attestation")
+    if (
+        type(attestation) is not dict
+        or set(issue) != _SEMANTIC_SUPERVISOR_REPRESENTATIVE_WINDOW_ISSUE_KEYS
+        or set(attestation)
+        != _SEMANTIC_SUPERVISOR_REPRESENTATIVE_WINDOW_ATTESTATION_KEYS
+    ):
+        raise ReleaseFailure("semantic_supervisor_representative_window_issue_invalid")
+    return {
+        "schema": _SEMANTIC_SUPERVISOR_REPRESENTATIVE_WINDOW_CONSUME_REQUEST_SCHEMA,
+        "attestation_lookup_token": issue["attestation_lookup_token"],
+        "server_attestation_sha256": issue["server_attestation_sha256"],
+        "target_mode": attestation["target_mode"],
+        "baseline_file_sha256": attestation["baseline_file_sha256"],
+        "baseline_report_sha256": attestation["baseline_report_sha256"],
+        "latency_budget_file_sha256": attestation["latency_budget_file_sha256"],
+        "latency_budget_document_sha256": attestation[
+            "latency_budget_document_sha256"
+        ],
+        "source_revision_sha256": attestation["source_revision_sha256"],
+        "registry_binding_sha256": attestation["registry_binding_sha256"],
+        "observer_runner_sha256": attestation["observer_runner_sha256"],
+        "precursor_assist_promotion_evidence_sha256": attestation[
+            "precursor_assist_promotion_evidence_sha256"
+        ],
+    }
+
+
+def _validate_semantic_supervisor_representative_window_consume_response(
+    value: object,
+    *,
+    request: Mapping[str, Any],
+    attestation: Mapping[str, Any],
+) -> None:
+    response = _semantic_supervisor_exact_object(
+        value,
+        _SEMANTIC_SUPERVISOR_REPRESENTATIVE_WINDOW_CONSUME_RESPONSE_KEYS,
+        invalid_code="semantic_supervisor_representative_window_consume_response_invalid",
+    )
+    digest_fields = (
+        "server_attestation_sha256",
+        "baseline_file_sha256",
+        "baseline_report_sha256",
+        "latency_budget_file_sha256",
+        "latency_budget_document_sha256",
+        "source_revision_sha256",
+        "registry_binding_sha256",
+        "observer_runner_sha256",
+        "representative_window_sha256",
+        "lookup_token_sha256",
+        "consume_request_sha256",
+        "consume_binding_sha256",
+    )
+    request_bindings = (
+        "server_attestation_sha256",
+        "target_mode",
+        "baseline_file_sha256",
+        "baseline_report_sha256",
+        "latency_budget_file_sha256",
+        "latency_budget_document_sha256",
+        "source_revision_sha256",
+        "registry_binding_sha256",
+        "observer_runner_sha256",
+        "precursor_assist_promotion_evidence_sha256",
+    )
+    attestation_bindings = (
+        "attestation_id",
+        "target_mode",
+        "observed_mode",
+        "baseline_file_sha256",
+        "baseline_report_sha256",
+        "latency_budget_file_sha256",
+        "latency_budget_document_sha256",
+        "source_revision_sha256",
+        "registry_binding_sha256",
+        "observer_runner_sha256",
+        "representative_window_sha256",
+        "precursor_assist_promotion_evidence_sha256",
+    )
+    lookup_token = request.get("attestation_lookup_token")
+    consumed_at = response.get("consumed_at")
+    if (
+        response.get("schema")
+        != _SEMANTIC_SUPERVISOR_REPRESENTATIVE_WINDOW_CONSUME_RESPONSE_SCHEMA
+        or response.get("status") != "consumed"
+        or response.get("state_version") != 2
+        or response.get("server_attestation") != attestation
+        or any(response.get(name) != request.get(name) for name in request_bindings)
+        or any(response.get(name) != attestation.get(name) for name in attestation_bindings)
+        or type(lookup_token) is not str
+        or response.get("lookup_token_sha256")
+        != _sha256_bytes(lookup_token.encode("ascii"))
+        or response.get("consume_request_sha256")
+        != _semantic_supervisor_representative_window_sha256(request)
+        or not _semantic_supervisor_exact_digests(response, digest_fields)
+        or type(consumed_at) is not int
+        or consumed_at < attestation.get("issued_at", 0)
+        or consumed_at > attestation.get("expires_at", -1)
+    ):
+        raise ReleaseFailure(
+            "semantic_supervisor_representative_window_consume_response_invalid"
+        )
+
+
+def _validate_semantic_supervisor_promotion_bundle(
+    raw: bytes,
+    *,
+    mode: str,
+    source_sha256: str,
+    registry_sha256: str,
+    latency_budget_sha256: str,
+    latency_budget_ms: int,
+    invalid_code: str,
+    expected_precursor_assist_evidence_sha256: str | None = None,
+) -> str:
+    bundle = _semantic_supervisor_closed_json(raw, invalid_code=invalid_code)
+    if (
+        set(bundle) != _SEMANTIC_SUPERVISOR_BUNDLE_KEYS
+        or bundle.get("schema") != _SEMANTIC_SUPERVISOR_PROMOTION_BUNDLE_SCHEMA
+        or bundle.get("body_free") is not True
+        or raw != _canonical_json(bundle) + b"\n"
+    ):
+        raise ReleaseFailure(invalid_code)
+    (
+        baseline_file_sha256,
+        baseline_report_sha256,
+        shadow,
+        assist,
+        _canary,
+    ) = _semantic_supervisor_baseline_identity(
+        bundle.get("baseline"),
+        invalid_code=invalid_code,
+    )
+    attestation = _semantic_supervisor_exact_object(
+        bundle.get("operator_attestation"),
+        _SEMANTIC_SUPERVISOR_ATTESTATION_KEYS,
+        invalid_code=invalid_code,
+    )
+    invariant_keys = (
+        "representative_window_attested",
+        "primary_fallback_proven",
+        "laptop_unavailable_fallback_proven",
+        "final_authority_recheck_proven",
+        "primary_publication_owner_proven",
+        "zero_hidden_owners_attested",
+        "zero_duplicate_capabilities_attested",
+        "zero_duplicate_effects_attested",
+        "zero_duplicate_publications_attested",
+        "zero_false_completion_regressions_attested",
+    )
+    precursor = attestation.get("precursor_assist_promotion_evidence_sha256")
+    quality_basis = attestation.get("quality_basis")
+    if (
+        attestation.get("schema")
+        != _SEMANTIC_SUPERVISOR_PROMOTION_ATTESTATION_SCHEMA
+        or attestation.get("target_mode") != mode
+        or attestation.get("baseline_file_sha256") != baseline_file_sha256
+        or attestation.get("baseline_report_sha256") != baseline_report_sha256
+        or attestation.get("latency_budget_file_sha256") != latency_budget_sha256
+        or attestation.get("source_revision_sha256") != source_sha256
+        or attestation.get("registry_binding_sha256") != registry_sha256
+        or any(attestation.get(key) is not True for key in invariant_keys)
+        or (
+            mode == "assist"
+            and (precursor is not None or quality_basis is not None)
+        )
+        or (
+            mode == "canary"
+            and (
+                not _semantic_supervisor_is_digest(precursor)
+                or quality_basis
+                not in {
+                    "completion_rate_improvement",
+                    "documented_failure_class_removal",
+                }
+                or assist.get("promotion_evidence_count") != 1
+                or assist.get("promotion_evidence_sha256") != precursor
+            )
+        )
+    ):
+        raise ReleaseFailure(invalid_code)
+    representative_window_issue, representative_window_attestation = (
+        _validate_semantic_supervisor_representative_window_issue(
+            bundle.get("representative_window_issue"),
+            baseline=_semantic_supervisor_exact_object(
+                bundle.get("baseline"),
+                _SEMANTIC_SUPERVISOR_BASELINE_KEYS,
+                invalid_code=invalid_code,
+            ),
+            baseline_file_sha256=baseline_file_sha256,
+            baseline_report_sha256=baseline_report_sha256,
+            shadow=shadow,
+            assist=assist,
+            mode=mode,
+            source_sha256=source_sha256,
+            registry_sha256=registry_sha256,
+            latency_budget_sha256=latency_budget_sha256,
+            latency_budget_ms=latency_budget_ms,
+            precursor_assist_evidence_sha256=precursor,
+            invalid_code=invalid_code,
+        )
+    )
+    evidence = _semantic_supervisor_exact_object(
+        bundle.get("promotion_evidence"),
+        _SEMANTIC_SUPERVISOR_PROMOTION_EVIDENCE_KEYS,
+        invalid_code=invalid_code,
+    )
+    evidence = _semantic_supervisor_expected_bundle_evidence(
+        evidence=evidence,
+        attestation=attestation,
+        baseline_file_sha256=baseline_file_sha256,
+        baseline_report_sha256=baseline_report_sha256,
+        shadow=shadow,
+        assist=assist,
+        mode=mode,
+        source_sha256=source_sha256,
+        registry_sha256=registry_sha256,
+        latency_budget_sha256=latency_budget_sha256,
+        latency_budget_ms=latency_budget_ms,
+        invalid_code=invalid_code,
+    )
+    evidence_raw = _canonical_json(evidence) + b"\n"
+    evidence_canonical_sha256 = _validate_semantic_supervisor_evidence_budget_binding(
+        evidence_raw,
+        mode=mode,
+        source_sha256=source_sha256,
+        registry_sha256=registry_sha256,
+        latency_budget_sha256=latency_budget_sha256,
+        latency_budget_ms=latency_budget_ms,
+        invalid_code=invalid_code,
+        expected_precursor_assist_evidence_sha256=(
+            expected_precursor_assist_evidence_sha256
+        ),
+    )
+    receipt = _semantic_supervisor_exact_object(
+        bundle.get("producer_receipt"),
+        _SEMANTIC_SUPERVISOR_BUNDLE_RECEIPT_KEYS,
+        invalid_code=invalid_code,
+    )
+    expected_receipt: dict[str, Any] = {
+        "schema": _SEMANTIC_SUPERVISOR_PROMOTION_BUNDLE_RECEIPT_SCHEMA,
+        "target_mode": mode,
+        "source_revision_sha256": source_sha256,
+        "registry_binding_sha256": registry_sha256,
+        "baseline_file_sha256": baseline_file_sha256,
+        "baseline_report_sha256": baseline_report_sha256,
+        "latency_budget_file_sha256": latency_budget_sha256,
+        "operator_attestation_sha256": _sha256_bytes(_canonical_json(attestation)),
+        "representative_window_server_attestation_sha256": (
+            representative_window_issue["server_attestation_sha256"]
+        ),
+        "representative_window_lookup_token_sha256": (
+            representative_window_issue["lookup_token_sha256"]
+        ),
+        "representative_window_sha256": representative_window_attestation[
+            "representative_window_sha256"
+        ],
+        "representative_window_observer_runner_sha256": (
+            representative_window_attestation["observer_runner_sha256"]
+        ),
+        "promotion_evidence_file_sha256": _sha256_bytes(evidence_raw),
+        "promotion_evidence_canonical_sha256": evidence_canonical_sha256,
+        "precursor_assist_promotion_evidence_sha256": precursor,
+        "body_free": True,
+        "promotion_authority_granted": False,
+        "activation_performed": False,
+    }
+    receipt_sha256 = _sha256_bytes(_canonical_json(expected_receipt))
+    if (
+        receipt != expected_receipt
+        or bundle.get("producer_receipt_sha256") != receipt_sha256
+    ):
+        raise ReleaseFailure(invalid_code)
+    return evidence_canonical_sha256
+
+
 def _validate_semantic_supervisor_promoted_values(
     values: Mapping[str, str],
     *,
@@ -2310,6 +3670,7 @@ def _validate_semantic_supervisor_promoted_values(
         evidence_path,
         maximum_bytes=_SEMANTIC_SUPERVISOR_MAX_PROMOTION_EVIDENCE_BYTES,
         code=invalid_code,
+        allowed_modes=frozenset({0o400, 0o600}),
     )
     if _sha256_bytes(evidence) != evidence_sha256:
         raise ReleaseFailure(invalid_code)
@@ -2317,6 +3678,7 @@ def _validate_semantic_supervisor_promoted_values(
         latency_budget_path,
         maximum_bytes=_SEMANTIC_SUPERVISOR_MAX_LATENCY_BUDGET_BYTES,
         code=invalid_code,
+        allowed_modes=frozenset({0o400, 0o600}),
     )
     _budget_source, latency_budget_ms = _semantic_supervisor_latency_budget_identity(
         latency_budget,
@@ -2325,7 +3687,7 @@ def _validate_semantic_supervisor_promoted_values(
         expected_source_sha256=source_sha256,
         invalid_code=invalid_code,
     )
-    evidence_canonical_sha256 = _validate_semantic_supervisor_evidence_budget_binding(
+    evidence_canonical_sha256 = _validate_semantic_supervisor_promotion_bundle(
         evidence,
         mode=mode,
         source_sha256=source_sha256,
@@ -2528,6 +3890,12 @@ def _validate_semantic_supervisor_mode_transition(
             invalid_code=invalid_code,
             expected_precursor_assist_evidence_sha256=precursor_sha256,
         )
+        for key in (
+            "FRIDAY_SEMANTIC_SUPERVISOR_PROMOTION_SOURCE_REVISION_SHA256",
+            "FRIDAY_SEMANTIC_SUPERVISOR_PROMOTION_REGISTRY_BINDING_SHA256",
+        ):
+            if predecessor_values.get(key) != target_values.get(key):
+                raise ReleaseFailure("semantic_supervisor_promotion_identity_drift")
         if predecessor_unrelated != target_unrelated or predecessor_secondary != target_secondary:
             raise ReleaseFailure("semantic_supervisor_unrelated_environment_changed")
         return
@@ -3946,6 +5314,7 @@ class ActivationJournalPort(Protocol):
         network_writer_uncertain: bool = False,
         writer_target: str = "",
         terminal_receipt_sha256: str = "",
+        staged_transition_validation_sha256: str = "",
     ) -> None: ...
 
     def load(self) -> Mapping[str, Any]: ...
@@ -5369,10 +6738,20 @@ def activate_release(
         fallback=schema_capable_fallback,
     )
     staged_transition = _staged_config_transition(journal.load())
+    staged_transition_validation_sha256 = ""
     if staged_transition is not None:
         port.validate_staged_config_transition(*staged_transition)
+        if staged_transition[0] == _SEMANTIC_SUPERVISOR_ASSIST_TO_CANARY_TRANSITION:
+            staged_transition_validation_sha256 = (
+                _staged_transition_validation_sha256(*staged_transition)
+            )
     try:
-        journal.record("bridge_stop_attempted")
+        journal.record(
+            "bridge_stop_attempted",
+            staged_transition_validation_sha256=(
+                staged_transition_validation_sha256
+            ),
+        )
         port.stop_bridge()
         state.bridge_stopped = True
         journal.record("backend_stop_attempted")
@@ -5797,6 +7176,7 @@ class SystemdConfig:
     next_env_file: Path | None = None
     next_env_file_sha256: str = ""
     staged_config_transition: str = ""
+    staged_transition_validation_sha256: str = ""
     secondary_rollout_receipt: Path | None = None
     secondary_rollout_receipt_sha256: str = ""
     health_url: str = "https://127.0.0.1:8000/api/health"
@@ -5874,6 +7254,7 @@ def _activation_target_config(config: SystemdConfig) -> SystemdConfig:
         next_env_file=None,
         next_env_file_sha256="",
         staged_config_transition="",
+        staged_transition_validation_sha256="",
         secondary_rollout_receipt=None,
         secondary_rollout_receipt_sha256="",
     )
@@ -5889,6 +7270,7 @@ def _activation_predecessor_config(config: SystemdConfig) -> SystemdConfig:
         "next_env_file": None,
         "next_env_file_sha256": "",
         "staged_config_transition": "",
+        "staged_transition_validation_sha256": "",
         "secondary_rollout_receipt": None,
         "secondary_rollout_receipt_sha256": "",
     }
@@ -6356,7 +7738,15 @@ class DurableActivationJournal:
             "next_env_file",
             "next_env_file_sha256",
         }
-        v3_expected = (v3_legacy_expected, v3_predecessor_expected, current_expected)
+        validation_expected = current_expected | {
+            "staged_transition_validation_sha256"
+        }
+        current_transition_expected = (current_expected, validation_expected)
+        v3_expected = (
+            v3_legacy_expected,
+            v3_predecessor_expected,
+            *current_transition_expected,
+        )
         payload_keys = set(payload)
         if payload_keys not in (
             legacy_expected,
@@ -6409,7 +7799,7 @@ class DurableActivationJournal:
                 )
             )
             or (
-                payload_keys == current_expected
+                payload_keys in current_transition_expected
                 and (
                     payload.get("prebackup_config_transition") not in {"", *_STAGED_CONFIG_TRANSITIONS}
                     or (
@@ -6445,9 +7835,30 @@ class DurableActivationJournal:
                 )
             )
             or (
+                payload_keys == validation_expected
+                and (
+                    payload.get("prebackup_config_transition")
+                    != _SEMANTIC_SUPERVISOR_ASSIST_TO_CANARY_TRANSITION
+                    or payload.get("phase") == "prepared"
+                    or payload.get("staged_transition_validation_sha256")
+                    != _staged_transition_validation_sha256(
+                        str(payload.get("prebackup_config_transition") or ""),
+                        str(payload.get("predecessor_env_sha256") or ""),
+                        Path(str(payload.get("next_env_file") or "")),
+                        str(payload.get("next_env_file_sha256") or ""),
+                    )
+                )
+            )
+            or (
+                payload_keys == current_expected
+                and payload.get("prebackup_config_transition")
+                == _SEMANTIC_SUPERVISOR_ASSIST_TO_CANARY_TRANSITION
+                and payload.get("phase") != "prepared"
+            )
+            or (
                 payload.get("phase") in {"environment_swap_attempted", "environment_active"}
                 and (
-                    payload_keys != current_expected
+                    payload_keys not in current_transition_expected
                     or payload.get("prebackup_config_transition") not in _STAGED_CONFIG_TRANSITIONS
                     or payload.get("backup") is None
                 )
@@ -6796,6 +8207,7 @@ class DurableActivationJournal:
         network_writer_uncertain: bool = False,
         writer_target: str = "",
         terminal_receipt_sha256: str = "",
+        staged_transition_validation_sha256: str = "",
     ) -> None:
         if phase not in _JOURNAL_PHASES:
             raise ReleaseFailure("activation_journal_phase_invalid")
@@ -6806,6 +8218,24 @@ class DurableActivationJournal:
         if not _journal_transition_allowed(current_phase, phase):
             raise ReleaseFailure("activation_journal_transition_invalid")
         staged_transition = _staged_config_transition(state)
+        special_transition = bool(
+            staged_transition is not None
+            and staged_transition[0]
+            == _SEMANTIC_SUPERVISOR_ASSIST_TO_CANARY_TRANSITION
+        )
+        if (
+            bool(staged_transition_validation_sha256)
+            != (special_transition and current_phase == "prepared" and phase == "bridge_stop_attempted")
+            or (
+                staged_transition_validation_sha256
+                and (
+                    staged_transition is None
+                    or staged_transition_validation_sha256
+                    != _staged_transition_validation_sha256(*staged_transition)
+                )
+            )
+        ):
+            raise ReleaseFailure("activation_staged_transition_validation_invalid")
         if current_phase == "backup_complete" and (
             (staged_transition is None and phase == "environment_swap_attempted")
             or (staged_transition is not None and phase == "migration_attempted")
@@ -6834,6 +8264,10 @@ class DurableActivationJournal:
             state["terminal_receipt_sha256"] = _closed_hash(
                 terminal_receipt_sha256,
                 "activation_journal_terminal_digest_invalid",
+            )
+        if staged_transition_validation_sha256:
+            state["staged_transition_validation_sha256"] = (
+                staged_transition_validation_sha256
             )
         self._write(state)
 
@@ -8923,6 +10357,9 @@ class SystemdActivationPort:
         staged_descriptor: tuple[str, str, Path, str] | None = None
         staged_target: SystemdConfig | None = None
         staged_predecessor: SystemdConfig | None = None
+        staged_transition_validation_sha256 = ""
+        if config.staged_transition_validation_sha256 and config.next_env_file is None:
+            raise ReleaseFailure("staged_transition_validation_not_permitted")
         if config.next_env_file is not None:
             state_dir = _private_directory(config.state_dir)
             next_env_file = Path(os.path.abspath(config.next_env_file))
@@ -8959,6 +10396,18 @@ class SystemdActivationPort:
                 maximum_bytes=1 << 20,
                 code="environment_file_invalid",
             )
+            expected_transition_validation = _staged_transition_validation_sha256(
+                requested_transition,
+                predecessor_env_sha256,
+                next_env_file,
+                next_env_sha256,
+            )
+            if (
+                config.staged_transition_validation_sha256
+                and requested_transition
+                != _SEMANTIC_SUPERVISOR_ASSIST_TO_CANARY_TRANSITION
+            ):
+                raise ReleaseFailure("staged_transition_validation_not_permitted")
             if canonical_env_sha256 == predecessor_env_sha256:
                 if staged_bytes is None:  # pragma: no cover - read condition above proves it
                     raise ReleaseFailure("next_environment_file_invalid")
@@ -8967,12 +10416,46 @@ class SystemdActivationPort:
                     canonical_bytes,
                     staged_bytes,
                 )
+                if (
+                    config.staged_transition_validation_sha256
+                    and config.staged_transition_validation_sha256
+                    != expected_transition_validation
+                ):
+                    raise ReleaseFailure("staged_transition_validation_changed")
+                if (
+                    requested_transition
+                    == _SEMANTIC_SUPERVISOR_ASSIST_TO_CANARY_TRANSITION
+                ):
+                    staged_transition_validation_sha256 = (
+                        expected_transition_validation
+                    )
             else:
-                _validate_staged_environment_transition(
-                    requested_transition,
-                    None,
-                    canonical_bytes,
-                )
+                if (
+                    requested_transition
+                    == _SEMANTIC_SUPERVISOR_ASSIST_TO_CANARY_TRANSITION
+                ):
+                    if config.staged_transition_validation_sha256 != (
+                        expected_transition_validation
+                    ):
+                        raise ReleaseFailure("staged_transition_validation_required")
+                    _semantic_supervisor_validated_environment(
+                        canonical_bytes,
+                        mode="canary",
+                        invalid_code="semantic_supervisor_canary_environment_invalid",
+                    )
+                    staged_transition_validation_sha256 = (
+                        expected_transition_validation
+                    )
+                else:
+                    if config.staged_transition_validation_sha256:
+                        raise ReleaseFailure(
+                            "staged_transition_validation_not_permitted"
+                        )
+                    _validate_staged_environment_transition(
+                        requested_transition,
+                        None,
+                        canonical_bytes,
+                    )
             staged_descriptor = (
                 requested_transition,
                 predecessor_env_sha256,
@@ -9062,6 +10545,9 @@ class SystemdActivationPort:
         self._staged_descriptor = staged_descriptor
         self._staged_target_config = staged_target
         self._staged_predecessor_config = staged_predecessor
+        self._staged_transition_validation_sha256 = (
+            staged_transition_validation_sha256
+        )
         self._semantic_health_transition = (
             staged_descriptor[0]
             if staged_descriptor is not None
@@ -9157,6 +10643,15 @@ class SystemdActivationPort:
             raise ReleaseFailure("staged_predecessor_environment_changed")
         staged = self._staged_environment_bytes(staged_path, next_digest)
         _validate_staged_environment_transition(selected_transition, canonical, staged)
+        if selected_transition == _SEMANTIC_SUPERVISOR_ASSIST_TO_CANARY_TRANSITION:
+            self._staged_transition_validation_sha256 = (
+                _staged_transition_validation_sha256(
+                    selected_transition,
+                    predecessor,
+                    staged_path,
+                    next_digest,
+                )
+            )
 
     def activate_staged_config_transition(
         self,
@@ -9186,16 +10681,35 @@ class SystemdActivationPort:
             )
             _replace_private_durable(self.config.env_file, staged)
         elif current == next_digest:
-            if staged_path.exists() or staged_path.is_symlink():
-                staged = self._staged_environment_bytes(staged_path, next_digest)
-                _validate_staged_environment_transition(selected_transition, None, staged)
-            else:
-                target = _read_private_regular_file(
+            target = (
+                self._staged_environment_bytes(staged_path, next_digest)
+                if staged_path.exists() or staged_path.is_symlink()
+                else _read_private_regular_file(
                     self.config.env_file,
                     maximum_bytes=1 << 20,
                     code="environment_file_invalid",
                 )
-                _validate_staged_environment_transition(selected_transition, None, target)
+            )
+            if selected_transition == _SEMANTIC_SUPERVISOR_ASSIST_TO_CANARY_TRANSITION:
+                expected_validation = _staged_transition_validation_sha256(
+                    selected_transition,
+                    predecessor,
+                    staged_path,
+                    next_digest,
+                )
+                if self._staged_transition_validation_sha256 != expected_validation:
+                    raise ReleaseFailure("staged_transition_validation_required")
+                _semantic_supervisor_validated_environment(
+                    target,
+                    mode="canary",
+                    invalid_code="semantic_supervisor_canary_environment_invalid",
+                )
+            else:
+                _validate_staged_environment_transition(
+                    selected_transition,
+                    None,
+                    target,
+                )
         else:
             raise ReleaseFailure("staged_canonical_environment_changed")
         if self._canonical_environment_digest() != next_digest:
@@ -9842,6 +11356,79 @@ print(json.dumps({
             attestation=attestation,
         )
 
+    def _consume_semantic_supervisor_representative_window_attestation(
+        self,
+        request_payload: Mapping[str, Any],
+        *,
+        attestation: Mapping[str, Any],
+        api_token: str,
+        primary_ca: bytes,
+    ) -> None:
+        if (
+            set(request_payload)
+            != _SEMANTIC_SUPERVISOR_REPRESENTATIVE_WINDOW_CONSUME_REQUEST_KEYS
+        ):
+            raise ReleaseFailure(
+                "semantic_supervisor_representative_window_consume_request_invalid"
+            )
+        try:
+            context = ssl.create_default_context(
+                cadata=primary_ca.decode("ascii", errors="strict")
+            )
+            context.check_hostname = True
+            context.verify_mode = ssl.CERT_REQUIRED
+            opener = urllib.request.build_opener(
+                urllib.request.ProxyHandler({}),
+                urllib.request.HTTPSHandler(context=context),
+                _NoRedirect(),
+            )
+            request = urllib.request.Request(
+                _SEMANTIC_SUPERVISOR_REPRESENTATIVE_WINDOW_CONSUME_URL,
+                data=_canonical_json(request_payload) + b"\n",
+                headers={
+                    "Accept": "application/json",
+                    "Authorization": f"Bearer {api_token}",
+                    "Content-Type": "application/json",
+                },
+                method="POST",
+            )
+            with opener.open(  # noqa: S310 - exact pinned loopback TLS endpoint
+                request,
+                timeout=10.0,
+            ) as response:
+                status = response.status
+                response_url = response.geturl()
+                raw = response.read(65_537)
+        except (OSError, UnicodeError, ValueError, ssl.SSLError, urllib.error.URLError):
+            raise ReleaseFailure(
+                "semantic_supervisor_representative_window_consume_failed"
+            ) from None
+        if (
+            status != 200
+            or response_url
+            != _SEMANTIC_SUPERVISOR_REPRESENTATIVE_WINDOW_CONSUME_URL
+            or len(raw) > 65_536
+        ):
+            raise ReleaseFailure(
+                "semantic_supervisor_representative_window_consume_failed"
+            )
+        try:
+            payload = _semantic_supervisor_closed_json(
+                raw,
+                invalid_code=(
+                    "semantic_supervisor_representative_window_consume_response_invalid"
+                ),
+            )
+        except ReleaseFailure:
+            raise ReleaseFailure(
+                "semantic_supervisor_representative_window_consume_response_invalid"
+            ) from None
+        _validate_semantic_supervisor_representative_window_consume_response(
+            payload,
+            request=request_payload,
+            attestation=attestation,
+        )
+
     def _validate_secondary_document_map_rollout_gate(
         self,
         previous: ReleaseIdentity,
@@ -10183,6 +11770,174 @@ print(json.dumps({
         )
         recheck_identity()
 
+    def _validate_semantic_supervisor_representative_window_gate(
+        self,
+        candidate: ReleaseIdentity,
+    ) -> None:
+        transition = _requested_staged_config_transition(self.config)
+        if transition not in {
+            _SEMANTIC_SUPERVISOR_SHADOW_TO_ASSIST_TRANSITION,
+            _SEMANTIC_SUPERVISOR_ASSIST_TO_CANARY_TRANSITION,
+        }:
+            return
+        target_mode = (
+            "assist"
+            if transition == _SEMANTIC_SUPERVISOR_SHADOW_TO_ASSIST_TRANSITION
+            else "canary"
+        )
+        predecessor = _read_private_regular_file(
+            self.config.env_file,
+            maximum_bytes=1 << 20,
+            code="semantic_supervisor_predecessor_environment_invalid",
+        )
+        if _sha256_bytes(predecessor) != self.config.env_file_sha256:
+            raise ReleaseFailure("semantic_supervisor_predecessor_environment_invalid")
+        next_env_file = self.config.next_env_file
+        if next_env_file is None:
+            raise ReleaseFailure("semantic_supervisor_next_environment_invalid")
+        target = _read_private_regular_file(
+            next_env_file,
+            maximum_bytes=1 << 20,
+            code="semantic_supervisor_next_environment_invalid",
+        )
+        next_env_sha256 = _closed_hash(
+            self.config.next_env_file_sha256,
+            "semantic_supervisor_next_environment_invalid",
+        )
+        if _sha256_bytes(target) != next_env_sha256:
+            raise ReleaseFailure("semantic_supervisor_next_environment_invalid")
+        _validate_staged_environment_transition(transition, predecessor, target)
+        target_values, _unrelated, _secondary = (
+            _canonical_semantic_supervisor_environment_parts(
+                target,
+                invalid_code=f"semantic_supervisor_{target_mode}_environment_invalid",
+            )
+        )
+        expected_precursor = None
+        if target_mode == "canary":
+            predecessor_values, _predecessor_unrelated, _predecessor_secondary = (
+                _canonical_semantic_supervisor_environment_parts(
+                    predecessor,
+                    invalid_code="semantic_supervisor_assist_environment_invalid",
+                )
+            )
+            expected_precursor = _validate_semantic_supervisor_promoted_values(
+                predecessor_values,
+                mode="assist",
+                invalid_code="semantic_supervisor_assist_environment_invalid",
+            )
+        _validate_semantic_supervisor_promoted_values(
+            target_values,
+            mode=target_mode,
+            invalid_code=f"semantic_supervisor_{target_mode}_environment_invalid",
+            expected_precursor_assist_evidence_sha256=expected_precursor,
+        )
+        if target_values.get(
+            "FRIDAY_SEMANTIC_SUPERVISOR_PROMOTION_SOURCE_REVISION_SHA256"
+        ) != candidate.tree_manifest_sha256:
+            raise ReleaseFailure("semantic_supervisor_candidate_source_identity_mismatch")
+
+        evidence_path = Path(
+            target_values["FRIDAY_SEMANTIC_SUPERVISOR_PROMOTION_EVIDENCE_FILE"]
+        )
+        budget_path = Path(
+            target_values[
+                "FRIDAY_SEMANTIC_SUPERVISOR_PROMOTION_LATENCY_BUDGET_FILE"
+            ]
+        )
+        evidence = _read_private_regular_file(
+            evidence_path,
+            maximum_bytes=_SEMANTIC_SUPERVISOR_MAX_PROMOTION_EVIDENCE_BYTES,
+            code="semantic_supervisor_representative_window_issue_invalid",
+            allowed_modes=frozenset({0o400, 0o600}),
+        )
+        budget = _read_private_regular_file(
+            budget_path,
+            maximum_bytes=_SEMANTIC_SUPERVISOR_MAX_LATENCY_BUDGET_BYTES,
+            code="semantic_supervisor_representative_window_issue_invalid",
+            allowed_modes=frozenset({0o400, 0o600}),
+        )
+        bundle = _semantic_supervisor_closed_json(
+            evidence,
+            invalid_code="semantic_supervisor_representative_window_issue_invalid",
+        )
+        issue = _semantic_supervisor_exact_object(
+            bundle.get("representative_window_issue"),
+            _SEMANTIC_SUPERVISOR_REPRESENTATIVE_WINDOW_ISSUE_KEYS,
+            invalid_code="semantic_supervisor_representative_window_issue_invalid",
+        )
+        attestation = _semantic_supervisor_exact_object(
+            issue.get("server_attestation"),
+            _SEMANTIC_SUPERVISOR_REPRESENTATIVE_WINDOW_ATTESTATION_KEYS,
+            invalid_code="semantic_supervisor_representative_window_issue_invalid",
+        )
+        request_payload = _semantic_supervisor_representative_window_consume_request(
+            issue
+        )
+        api_token = _secondary_rollout_api_token(predecessor)
+        primary_ca = _read_private_regular_file(
+            self.config.health_ca,
+            maximum_bytes=1 << 20,
+            code="health_ca_invalid",
+        )
+        if _sha256_bytes(primary_ca) != self.config.health_ca_sha256:
+            raise ReleaseFailure("health_ca_digest_mismatch")
+
+        def recheck_identity() -> None:
+            if (
+                _read_private_regular_file(
+                    self.config.env_file,
+                    maximum_bytes=1 << 20,
+                    code="semantic_supervisor_predecessor_environment_invalid",
+                )
+                != predecessor
+                or _read_private_regular_file(
+                    next_env_file,
+                    maximum_bytes=1 << 20,
+                    code="semantic_supervisor_next_environment_invalid",
+                )
+                != target
+                or _read_private_regular_file(
+                    evidence_path,
+                    maximum_bytes=_SEMANTIC_SUPERVISOR_MAX_PROMOTION_EVIDENCE_BYTES,
+                    code="semantic_supervisor_representative_window_issue_invalid",
+                    allowed_modes=frozenset({0o400, 0o600}),
+                )
+                != evidence
+                or _read_private_regular_file(
+                    budget_path,
+                    maximum_bytes=_SEMANTIC_SUPERVISOR_MAX_LATENCY_BUDGET_BYTES,
+                    code="semantic_supervisor_representative_window_issue_invalid",
+                    allowed_modes=frozenset({0o400, 0o600}),
+                )
+                != budget
+                or _read_private_regular_file(
+                    self.config.health_ca,
+                    maximum_bytes=1 << 20,
+                    code="health_ca_invalid",
+                )
+                != primary_ca
+            ):
+                raise ReleaseFailure(
+                    "semantic_supervisor_representative_window_identity_changed"
+                )
+            _validate_staged_environment_transition(transition, predecessor, target)
+            _validate_semantic_supervisor_promoted_values(
+                target_values,
+                mode=target_mode,
+                invalid_code=f"semantic_supervisor_{target_mode}_environment_invalid",
+                expected_precursor_assist_evidence_sha256=expected_precursor,
+            )
+
+        recheck_identity()
+        self._consume_semantic_supervisor_representative_window_attestation(
+            request_payload,
+            attestation=attestation,
+            api_token=api_token,
+            primary_ca=primary_ca,
+        )
+        recheck_identity()
+
     def verify_active_anchor(
         self,
         previous: ReleaseIdentity,
@@ -10193,6 +11948,7 @@ print(json.dumps({
         ) != previous.root.resolve(strict=True):
             raise ReleaseFailure("active_anchor_not_exact_previous")
         self._validate_secondary_rollout_gate(previous, candidate)
+        self._validate_semantic_supervisor_representative_window_gate(candidate)
 
     def stop_bridge(self) -> None:
         self._systemctl("stop", self.config.bridge_unit)
@@ -11375,6 +13131,8 @@ def _activation_recovery_systemd_config(
     config: SystemdConfig,
     state: Mapping[str, Any],
 ) -> SystemdConfig:
+    if config.staged_transition_validation_sha256:
+        raise ReleaseFailure("recovery_staged_transition_validation_not_permitted")
     transition = _staged_config_transition(state)
     if transition is None:
         return config
@@ -11394,6 +13152,18 @@ def _activation_recovery_systemd_config(
         code="environment_file_invalid",
     )
     current_sha256 = _sha256_bytes(current)
+    validation_sha256 = str(
+        state.get("staged_transition_validation_sha256") or ""
+    )
+    expected_validation_sha256 = _staged_transition_validation_sha256(
+        transition_name,
+        predecessor_env_sha256,
+        next_env_file,
+        next_env_file_sha256,
+    )
+    special_transition = (
+        transition_name == _SEMANTIC_SUPERVISOR_ASSIST_TO_CANARY_TRANSITION
+    )
     if (
         current_sha256 != config.env_file_sha256
         or current_sha256 not in {predecessor_env_sha256, next_env_file_sha256}
@@ -11406,6 +13176,16 @@ def _activation_recovery_systemd_config(
             or phase in _TERMINAL_JOURNAL_PHASES
             and (phase not in {"rolled_back", "recovered"} or state.get("writer_target") != "previous")
         )
+        or (
+            special_transition
+            and (state.get("backup") is not None or current_sha256 == next_env_file_sha256)
+            and validation_sha256 != expected_validation_sha256
+        )
+        or (not special_transition and bool(validation_sha256))
+        or (
+            validation_sha256
+            and validation_sha256 != expected_validation_sha256
+        )
     ):
         raise ReleaseFailure("environment_file_changed")
     return replace(
@@ -11414,6 +13194,7 @@ def _activation_recovery_systemd_config(
         next_env_file=next_env_file,
         next_env_file_sha256=next_env_file_sha256,
         staged_config_transition=transition_name,
+        staged_transition_validation_sha256=validation_sha256,
     )
 
 

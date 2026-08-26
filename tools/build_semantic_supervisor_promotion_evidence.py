@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import contextlib
 import hashlib
+import json
 import os
 import secrets
 import stat
@@ -31,6 +32,7 @@ from friday.orchestration.supervisor_promotion_evidence_producer import (  # noq
     build_supervisor_assist_promotion_evidence,
     build_supervisor_canary_promotion_evidence,
     build_supervisor_latency_budget_document,
+    build_supervisor_promotion_bundle_payload,
     canonical_json_file_bytes,
     load_accepted_supervisor_production_baseline,
     load_canonical_supervisor_latency_budget,
@@ -38,6 +40,7 @@ from friday.orchestration.supervisor_promotion_evidence_producer import (  # noq
 
 _MAX_BASELINE_BYTES = 1_048_576
 _MAX_BUDGET_BYTES = 4_096
+_MAX_REPRESENTATIVE_WINDOW_ISSUE_BYTES = 65_536
 
 
 def _read_regular_file(path: Path, *, maximum_bytes: int) -> bytes:
@@ -162,7 +165,6 @@ def _mode(value: str) -> SupervisorMode:
 
 
 def _add_attestation_flags(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument("--attest-representative-window", action="store_true", required=True)
     parser.add_argument("--attest-primary-fallback", action="store_true", required=True)
     parser.add_argument("--attest-laptop-unavailable-fallback", action="store_true", required=True)
     parser.add_argument("--attest-final-authority-recheck", action="store_true", required=True)
@@ -197,6 +199,11 @@ def _parser() -> argparse.ArgumentParser:
     evidence.add_argument("--baseline-sha256", required=True)
     evidence.add_argument("--latency-budget", required=True, type=Path)
     evidence.add_argument("--latency-budget-sha256", required=True)
+    evidence.add_argument(
+        "--representative-window-issue-response",
+        required=True,
+        type=Path,
+    )
     evidence.add_argument("--attested-source-revision-sha256", required=True)
     evidence.add_argument("--attested-registry-binding-sha256", required=True)
     evidence.add_argument("--evidence-id", required=True)
@@ -241,6 +248,22 @@ def _build_evidence(args: argparse.Namespace) -> None:
     mode: SupervisorMode = args.target_mode
     baseline_raw = _read_regular_file(args.baseline, maximum_bytes=_MAX_BASELINE_BYTES)
     budget_raw = _read_regular_file(args.latency_budget, maximum_bytes=_MAX_BUDGET_BYTES)
+    representative_window_issue_raw = _read_regular_file(
+        args.representative_window_issue_response,
+        maximum_bytes=_MAX_REPRESENTATIVE_WINDOW_ISSUE_BYTES,
+    )
+    try:
+        representative_window_issue = json.loads(
+            representative_window_issue_raw.decode("utf-8", errors="strict")
+        )
+    except (UnicodeError, ValueError, json.JSONDecodeError) as exc:
+        raise SupervisorPromotionEvidenceProducerError(
+            "representative-window issue response is malformed"
+        ) from exc
+    if type(representative_window_issue) is not dict:
+        raise SupervisorPromotionEvidenceProducerError(
+            "representative-window issue response is not an object"
+        )
     baseline = load_accepted_supervisor_production_baseline(
         baseline_raw,
         expected_file_sha256=args.baseline_sha256,
@@ -257,7 +280,7 @@ def _build_evidence(args: argparse.Namespace) -> None:
         latency_budget_file_sha256=budget.document_sha256,
         source_revision_sha256=args.attested_source_revision_sha256,
         registry_binding_sha256=args.attested_registry_binding_sha256,
-        representative_window_attested=args.attest_representative_window,
+        representative_window_attested=True,
         primary_fallback_proven=args.attest_primary_fallback,
         laptop_unavailable_fallback_proven=args.attest_laptop_unavailable_fallback,
         final_authority_recheck_proven=args.attest_final_authority_recheck,
@@ -296,14 +319,21 @@ def _build_evidence(args: argparse.Namespace) -> None:
             documented_failure_class_id=args.documented_failure_class_id,
             documented_failure_class_sha256=args.documented_failure_class_sha256,
         )
-    raw = canonical_json_file_bytes(evidence.payload())
+    bundle = build_supervisor_promotion_bundle_payload(
+        baseline_raw=baseline_raw,
+        budget=budget,
+        attestation=attestation,
+        representative_window_issue=representative_window_issue,
+        evidence=evidence,
+    )
+    raw = canonical_json_file_bytes(bundle)
     _write_private_no_replace(args.output, raw)
     _emit_receipt(
         SupervisorPromotionArtifactReceipt(
             artifact_kind=SupervisorPromotionArtifactKind.PROMOTION_EVIDENCE,
             target_mode=mode,
             output_file_sha256=hashlib.sha256(raw).hexdigest(),
-            canonical_payload_sha256=evidence.canonical_sha256(),
+            canonical_payload_sha256=canonical_sha256(bundle),
             source_revision_sha256=attestation.source_revision_sha256,
             baseline_file_sha256=baseline.file_sha256,
             baseline_report_sha256=baseline.report_sha256,
