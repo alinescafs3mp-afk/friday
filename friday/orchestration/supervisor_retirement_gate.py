@@ -148,18 +148,18 @@ class HeuristicRetirementEvidence:
             ("tested_rollback_source_sha256", self.tested_rollback_source_sha256),
         ):
             _digest(value, label=label)
-        for label, value in (
+        for bool_label, bool_value in (
             ("shadow_accepted", self.shadow_accepted),
             ("canary_accepted", self.canary_accepted),
             ("production_promotion_accepted", self.production_promotion_accepted),
             ("primary_fallback_proven", self.primary_fallback_proven),
             ("rollback_proven", self.rollback_proven),
         ):
-            if not isinstance(value, bool):
-                raise ValueError(f"{label} must be boolean")
+            if not isinstance(bool_value, bool):
+                raise ValueError(f"{bool_label} must be boolean")
         _count(self.observation_count, label="observation_count", positive=True)
         _count(self.joined_trace_count, label="joined_trace_count")
-        for label, value in (
+        for count_label, count_value in (
             ("hidden_owner_count", self.hidden_owner_count),
             ("duplicate_capability_count", self.duplicate_capability_count),
             ("duplicate_effect_count", self.duplicate_effect_count),
@@ -167,7 +167,7 @@ class HeuristicRetirementEvidence:
             ("false_completion_regression_count", self.false_completion_regression_count),
             ("user_visible_regression_count", self.user_visible_regression_count),
         ):
-            _count(value, label=label)
+            _count(count_value, label=count_label)
         if self.joined_trace_count > self.observation_count:
             raise ValueError("joined_trace_count exceeds the evidence window")
 
