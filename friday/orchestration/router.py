@@ -376,7 +376,7 @@ def _plan_applicable(
     return True
 
 
-def _current_attachment_references(
+def current_attachment_references(
     turn: TurnInput,
     snapshots: tuple[Mapping[str, Any], ...],
     tokens: tuple[CurrentTurnFileReferenceToken | None, ...],
@@ -876,7 +876,7 @@ class OrchestrationRouter:
             quoted_attachment_reference=quoted_attachment_reference,
             reply_assistant_reference=reply_assistant_reference,
         )
-        attachment_references = _current_attachment_references(
+        attachment_references = current_attachment_references(
             turn,
             attachment_snapshots,
             attachment_tokens,
