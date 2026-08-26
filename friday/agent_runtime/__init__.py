@@ -2093,7 +2093,7 @@ _MODE_TOOL_BUDGETS = {
 # so only the narrower target-bearing schemas may be offered to the model.  The
 # execution seam below additionally binds their ``host`` argument to the exact
 # current-message targets captured by the code-owned autohunt.
-_ENGINEER_MODEL_TOOL_NAMES = frozenset(
+_ENGINEER_NATIVE_MODEL_TOOL_NAMES = frozenset(
     {
         "engineer_analyze_artifact",
         "engineer_patch_artifact",
@@ -2104,12 +2104,14 @@ _ENGINEER_MODEL_TOOL_NAMES = frozenset(
         "engineer_adversary_rehearsal",
     }
 )
+_ENGINEER_ORDINARY_MODEL_TOOL_NAMES = frozenset({"make_file", "collect_files", *_WEB_TOOL_NAMES})
+_ENGINEER_MODEL_TOOL_NAMES = _ENGINEER_NATIVE_MODEL_TOOL_NAMES | _ENGINEER_ORDINARY_MODEL_TOOL_NAMES
 _ENGINEER_REGISTERED_TOOL_NAMES = frozenset(
     {
         "engineer_hunt",
         "engineer_scan_configured_network",
         "engineer_decompile_artifact",
-        *_ENGINEER_MODEL_TOOL_NAMES,
+        *_ENGINEER_NATIVE_MODEL_TOOL_NAMES,
     }
 )
 _ENGINEER_HOST_TOOL_NAMES = frozenset(
@@ -2974,13 +2976,31 @@ def _engineer_tool_name(schema: Mapping[str, Any]) -> str:
     return str((schema.get("function") or {}).get("name") or schema.get("name") or "")
 
 
-def _project_engineer_tool_schemas(tools: Sequence[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Closed model allowlist with private tickets and Raw identities removed."""
+def _project_engineer_tool_schemas(
+    tools: Sequence[dict[str, Any]],
+    *,
+    authority: FileTurnAuthority | None = None,
+) -> list[dict[str, Any]]:
+    """Closed Engineer allowlist with current-speech gates for ordinary tools."""
+
+    turn_authority = authority or file_turn_authority("")
+    archive_collection = bool(_ATTACHMENT_ARCHIVE_COLLECTION_ACTION.search(turn_authority.speech))
+    ordinary_allowed: set[str] = set()
+    if turn_authority.proved("web"):
+        ordinary_allowed.update(_WEB_TOOL_NAMES)
+    if archive_collection:
+        ordinary_allowed.add("collect_files")
+    elif turn_authority.proved("file_create"):
+        ordinary_allowed.add("make_file")
 
     projected: list[dict[str, Any]] = []
     for tool in tools:
         name = _engineer_tool_name(tool)
         if name not in _ENGINEER_MODEL_TOOL_NAMES:
+            continue
+        if name in _ENGINEER_ORDINARY_MODEL_TOOL_NAMES:
+            if name in ordinary_allowed:
+                projected.append(tool)
             continue
         if name not in _ENGINEER_HOST_TOOL_NAMES and name not in _ENGINEER_ARTIFACT_TOOL_NAMES:
             projected.append(tool)
@@ -50124,7 +50144,7 @@ class AgentRuntime:
             # An engineer conversation is a closed workbench. Owner-wide tools
             # remain available in ordinary dialogue/research, but they are not
             # silently inherited by this mode.
-            visible_tools = _project_engineer_tool_schemas(visible_tools)
+            visible_tools = _project_engineer_tool_schemas(visible_tools, authority=file_turn)
             if context.engineer_decompile_outcome is not None:
                 # A decompile report consumes this turn's sole generated-file
                 # carrier. A patch can be requested in the immediately
@@ -59059,7 +59079,7 @@ class AgentRuntime:
         if context.interaction_mode == "engineer":
             # Repeat the closed allowlist for direct adapters/tests which enter
             # this seam without the outer chat projection.
-            tools[:] = _project_engineer_tool_schemas(tools)
+            tools[:] = _project_engineer_tool_schemas(tools, authority=turn_auth)
         else:
             # Direct callers do not get to bypass the mode-owned schema fence.
             tools[:] = [

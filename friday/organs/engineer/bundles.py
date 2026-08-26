@@ -488,7 +488,7 @@ def build_engineer_artifact_delivery(
     operation: str,
     max_bundle_bytes: int = MAX_BUNDLE_BYTES,
 ) -> EngineerArtifactDelivery:
-    """Build direct output carriers plus their deterministic source bundle."""
+    """Build direct outputs plus their bundle under one cumulative byte cap."""
 
     normalized_operation = str(operation or "").strip().casefold()
     if normalized_operation not in _OPERATIONS:
@@ -552,7 +552,8 @@ def build_engineer_artifact_delivery(
     except (OSError, ValueError, zipfile.BadZipFile) as exc:
         raise EngineerArtifactBundleError("bundle_write_failed") from exc
     bundle_payload = output.getvalue()
-    if not bundle_payload or len(bundle_payload) > limit:
+    delivery_bytes = sum(len(item.content) for item in ordered_artifacts) + len(bundle_payload)
+    if not bundle_payload or len(bundle_payload) > limit or delivery_bytes > limit:
         raise EngineerArtifactBundleError("bundle_size_limit")
     bundle = EngineerArtifactBundle(
         filename=_safe_bundle_filename(bundle_name),
