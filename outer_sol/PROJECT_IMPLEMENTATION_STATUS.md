@@ -11,12 +11,12 @@ the current production identity, completed packages, active work and next order.
   the provisional registry is empty, and the primary remains the sole
   final-publication, tool and effect authority. Every secondary miss preserves
   the exact primary-only path.
-- Deployed implementation head: `85f97e0708e2f0d0493a99877b652b33894b6a6f`
-- Live: Friday `0.207.41` / `85f97e0708e2f0d0493a99877b652b33894b6a6f`;
-  tree `e8e86c54a97b4cd006b68ce8469f50ff1469be611f8a76f10fe859e788c90a9e`;
-  wheel `865a703d15e712902ca0aa12c4813036c43dcd7e4c1ea1ada90c54d41949e684`.
-- Immediate predecessor: Friday `0.207.40` /
-  `a99f14ce429e7a5472a05ef54c6c639bf4f7edf4`; schema-capable fallback:
+- Deployed implementation head: `b9890bb5cfed262c9be86ef5c1925b85ba8fd44d`
+- Live: Friday `0.207.42` / `b9890bb5cfed262c9be86ef5c1925b85ba8fd44d`;
+  tree `3afe3c656d788db6c05643b7179532378a498873d7e55340bfa4b991ab1003bc`;
+  wheel `abb2be7ccf6126c83df5124032d001f475ee6f844824eab6edee8d1a5b767e4e`.
+- Immediate predecessor: Friday `0.207.41` /
+  `85f97e0708e2f0d0493a99877b652b33894b6a6f`; schema-capable fallback:
   Friday `0.207.39` / `83ae001f7323b9868ba077f5989825de44f8847e`.
 - Database schema: 43
 - Production state: immutable activation `clear`; backend and Telegram bridge
@@ -41,8 +41,12 @@ the current production identity, completed packages, active work and next order.
   file-creation and archive tools while private-source outbound isolation stays
   intact. The deterministic non-executing source/output bundle and exact
   multi-file publication seams are deployed for the compiler/rebuilder paths.
+  A same-turn LAN scan can now emit an exact deterministic JSON or Markdown
+  report as a durable Telegram file. The report is bound to the current scan
+  evidence; a follow-up cannot reconstruct it from prose or silently rerun
+  packets.
   The activation terminal receipt is
-  `d666d3941066f0ddc427ad527a44193ead83a9e640af972d5e3af6fded74ff56`.
+  `70a1ff97e0bbd419596928011bda664f4d3e9954ebfab89f298f44c47ca280fb`.
   The exact accepted secondary profile remains configured in bounded `assist`
   and is probed on
   demand; its exact post-cutover canary passed, while laptop absence preserves
@@ -92,7 +96,7 @@ accepted profile manifest hashes to
 `93ea5698b8b6a9bf8a7dc697ffe37d7353055aa16555188991747bba73d059e3` and
 its accepted physical-failure evidence hashes to
 `9dc72f80caed3320bd154cf1219a8bd6b1339142b690b00dd1cbe1fb05964006`.
-Live `0.207.41` admits exactly that profile, with no provisional entries:
+Live `0.207.42` admits exactly that profile, with no provisional entries:
 extraction, evidence-bound document mapping and complete current text/Office
 document reviews are in bounded `assist`. It grants no tools, effects,
 publication or knowledge-write authority; failure preserves the exact
@@ -174,16 +178,28 @@ course, with these repository-specific constraints:
 1. Close the Engineer artifact loop: bounded compilation for explicitly
    supported toolchains, immutable source lineage, deterministic source/binary
    bundles and exact Telegram delivery without executing produced artifacts.
-2. Add bounded file export for Engineer network audit results while preserving
-   ordinary Friday file creation and archive delivery.
-3. Select and finish the next complete ICP golden journey from the remaining
+2. Select and finish the next complete ICP golden journey from the remaining
    readiness gaps.
-4. Continue the ordered V12 refinement package without pre-baking the future
+3. Continue the ordered V12 refinement package without pre-baking the future
    Semantic Supervisor.
-5. Keep physical Android/Syncthing acceptance explicitly `UNVERIFIED`; the
+4. Keep physical Android/Syncthing acceptance explicitly `UNVERIFIED`; the
    companion plugin remains out of scope.
 
 ## Completed and deployed packages
+
+### Deterministic Engineer network-report delivery (`0.207.42`)
+
+- A direct current-turn private-LAN scan/audit request can ask for JSON,
+  Markdown or a file carrier and receive a deterministic report projected only
+  from the validated scan outcome. The report, accepted outcome, durable Raw
+  object and assistant reply share one final owner/capability transaction.
+- Report-only follow-ups never rebuild facts from a digest-only receipt and
+  never launch a hidden replacement scan. Quoted, reported, conditional,
+  negated, meta and unrelated file requests remain inert.
+- The canonical static gate and 20,426 non-UI plus 31 UI tests passed without
+  skips; two source-archive wheel builds were byte-identical. Immutable
+  activation completed `clear` with terminal receipt
+  `70a1ff97e0bbd419596928011bda664f4d3e9954ebfab89f298f44c47ca280fb`.
 
 ### Engineer file/archive/web continuity (`0.207.41`)
 
