@@ -696,6 +696,7 @@ def _controller(
     observer: Any = lambda _observation: None,
     max_review_rounds: int = 1,
     synthesizer: Any = None,
+    binding_snapshot_factory: Any = operational_capability_snapshot,
 ) -> SupervisorAssistController:
     kwargs: dict[str, Any] = {}
     if synthesizer is not None:
@@ -714,7 +715,7 @@ def _controller(
         effect_check=lambda _boundary: True,
         post_commit_observer=observer,
         max_review_rounds=max_review_rounds,
-        binding_snapshot_factory=operational_capability_snapshot,
+        binding_snapshot_factory=binding_snapshot_factory,
         **kwargs,
     )
 
@@ -1281,6 +1282,62 @@ async def test_retained_owner_is_retired_before_an_overlapping_legacy_turn(stora
         is None
     )
     assert controller.semantic_supervisor_status()["retained_active_graphs"] == 0
+
+
+@pytest.mark.asyncio
+async def test_health_rechecks_current_promotion_and_registry_without_authorizing(storage: Any) -> None:
+    surface, projection = _stored_surface(storage, "health-fresh")
+    adapter = _CountingAdapter(storage)
+    promotion = _Promotion()
+
+    class SnapshotFactory:
+        def __init__(self) -> None:
+            self.available = True
+
+        def __call__(self) -> CapabilityBindingSnapshot:
+            if not self.available:
+                raise RuntimeError("registry unavailable")
+            return operational_capability_snapshot()
+
+    snapshots = SnapshotFactory()
+    controller = _controller(
+        promotion=promotion,
+        graph_adapter=adapter,
+        file_reader=_FileReader(_prepared_file(surface, projection)),
+        web_reader=_WebReader(_web_evidence(surface)),
+        binding_snapshot_factory=snapshots,
+    )
+
+    async def forbidden_legacy() -> dict[str, object]:
+        raise AssertionError("legacy cannot run after ownership")
+
+    result = await controller.execute(
+        surface,
+        legacy_primary=forbidden_legacy,
+        absolute_deadline=time.monotonic() + 4,
+    )
+    evaluation_count = controller.semantic_supervisor_status()["promotion_evaluation_total"]
+    admitted = controller.semantic_supervisor_status()
+
+    assert result.outcome is SupervisorAssistOutcome.PUBLISHED
+    assert admitted["promotion_admitted"] is True
+    assert admitted["effective_mode"] == SupervisorMode.ASSIST.value
+    assert admitted["promotion_evaluation_total"] == evaluation_count
+
+    # The production evaluator derives this denial from fresh local scheduler
+    # and immutable activation facts; the controller must not trust its last turn.
+    promotion.admitted = False
+    scheduler_closed = controller.semantic_supervisor_status()
+    assert scheduler_closed["promotion_admitted"] is False
+    assert scheduler_closed["effective_mode"] == SupervisorMode.OFF.value
+    assert scheduler_closed["promotion_evaluation_total"] == evaluation_count
+
+    promotion.admitted = True
+    snapshots.available = False
+    registry_unavailable = controller.semantic_supervisor_status()
+    assert registry_unavailable["promotion_admitted"] is False
+    assert registry_unavailable["effective_mode"] == SupervisorMode.OFF.value
+    assert registry_unavailable["promotion_evaluation_total"] == evaluation_count
 
 
 @pytest.mark.asyncio

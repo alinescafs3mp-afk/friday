@@ -662,9 +662,23 @@ class SupervisorAssistController:
         self._event_success_total = 0
         self._event_failure_total = 0
         self._ownership_uncertain_total = 0
-        self._last_promotion_admitted = False
-        self._last_effective_mode = SupervisorMode.OFF
+        self._last_admitted_actor_binding_sha256: str | None = None
         self._closed = False
+
+    def _current_promotion(self) -> AssistPromotionDecision | None:
+        """Re-evaluate the last admitted actor against fresh local runtime facts."""
+
+        actor_binding = self._last_admitted_actor_binding_sha256
+        if self._closed or actor_binding is None:
+            return None
+        snapshot = self._fresh_snapshot()
+        if snapshot is None:
+            return None
+        return self._decide_promotion(
+            snapshot,
+            canary_actor_binding=actor_binding,
+            count_evaluation=False,
+        )
 
     def semantic_supervisor_status(self) -> dict[str, object]:
         """Return bounded aggregates without user, graph, query or body data."""
@@ -672,13 +686,16 @@ class SupervisorAssistController:
         requested = SupervisorMode.fail_closed(
             getattr(self._settings, "semantic_supervisor_mode", SupervisorMode.OFF.value)
         )
+        current = self._current_promotion()
         return {
             "schema": SUPERVISOR_ASSIST_CONTROLLER_STATUS_SCHEMA,
             "installed": True,
             "role": "durable_read_only_assist",
             "requested_mode": requested.value,
-            "effective_mode": (SupervisorMode.OFF.value if self._closed else self._last_effective_mode.value),
-            "promotion_admitted": self._last_promotion_admitted and not self._closed,
+            "effective_mode": (
+                current.admitted_mode.value if current is not None else SupervisorMode.OFF.value
+            ),
+            "promotion_admitted": current is not None,
             "max_review_rounds": self._max_review_rounds,
             "promotion_attempt_total": self._promotion_attempt_total,
             "promotion_evaluation_total": self._promotion_evaluation_total,
@@ -793,8 +810,7 @@ class SupervisorAssistController:
             canary_actor_binding=canary_binding,
         )
         if decision is None:
-            self._last_promotion_admitted = False
-            self._last_effective_mode = SupervisorMode.OFF
+            self._last_admitted_actor_binding_sha256 = None
             return None
         try:
             supervisor_input = build_supervisor_input(surface.turn, self._settings)
@@ -861,8 +877,7 @@ class SupervisorAssistController:
         if final_decision is None:
             return None
         assert fresh is not None
-        self._last_promotion_admitted = True
-        self._last_effective_mode = final_decision.admitted_mode
+        self._last_admitted_actor_binding_sha256 = canary_binding
         return _ProspectiveAdmission(
             surface=surface,
             plan=plan,
