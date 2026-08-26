@@ -1,3 +1,22 @@
+## 0.207.38 — 2026-08-26
+
+### Engineer LAN awareness and real nmap execution
+
+- Прямая команда вроде «Привет! Просканируй мою подсеть» теперь кодом
+  привязывается к единственной разрешённой LAN-подсети и запускает
+  закрытый unprivileged `nmap discover` без model-authored целей и флагов.
+- Owner-only Engineer получает ограниченный паспорт среды: runtime OS,
+  kernel, architecture, virtualization, интерфейсы ВМ, отдельную операторскую
+  host/LAN authority и фактическую доступность диагностических инструментов.
+  «Моя подсеть» явно означает LAN хоста, а не внутреннюю подсеть ВМ.
+- Реальный XML `nmap -oX -` с каноническим `<!DOCTYPE nmaprun>` больше не
+  отбрасывается; внешние DTD, entities и повторные declarations остаются
+  fail-closed. Пассивные вопросы, смешанные/неверные CIDR и широкие или публичные
+  сети не создают трафик; append-only audit хранит только opaque CIDR reference,
+  длину и закрытый профиль.
+- Database schema остаётся 43. Host Control, package installation, desktop,
+  one-shot и public-network execution остаются выключенными.
+
 ## 0.207.37 — 2026-08-26
 
 ### Native Engineer sandbox activation
