@@ -52,7 +52,9 @@ from friday.interaction_control_plane.work_item_schema import (
     _WORK_ITEM_TABLES,
     WORK_ITEM_SCHEMA,
     _execute_schema,
+    _selected_evidence_promotion_reader_from_42,
     upgrade_work_item_schema_to_42,
+    upgrade_work_item_schema_to_45,
     validate_work_item_schema,
 )
 from friday.interaction_control_plane.work_item_store import (
@@ -1672,6 +1674,47 @@ def test_released_schema42_reader_is_accepted_without_trigger_rewrite(storage: A
 
     assert before == after
     validate_work_item_schema(storage.conn)
+
+
+def test_promoted_schema42_reader_upgrades_to_schema45_without_trigger_rewrite() -> None:
+    conn = sqlite3.connect(":memory:")
+    try:
+        conn.execute("PRAGMA foreign_keys=ON")
+        conn.execute("CREATE TABLE users(id TEXT PRIMARY KEY)")
+        conn.execute("CREATE TABLE conversations(id TEXT PRIMARY KEY,user_id TEXT)")
+        conn.execute(
+            """CREATE TABLE messages(
+                   id TEXT PRIMARY KEY,user_id TEXT,conversation_id TEXT,role TEXT)"""
+        )
+        conn.execute("CREATE TABLE raw_objects(id TEXT PRIMARY KEY)")
+        _execute_schema(conn, _selected_evidence_promotion_reader_from_42())
+        trigger = "trg_work_item_selected_evidence_scope_insert"
+        before = conn.execute(
+            "SELECT sql FROM sqlite_master WHERE type='trigger' AND name=?",
+            (trigger,),
+        ).fetchone()[0]
+        conn.commit()
+
+        conn.execute("BEGIN")
+        upgrade_work_item_schema_to_45(conn, required=True)
+        conn.commit()
+
+        after = conn.execute(
+            "SELECT sql FROM sqlite_master WHERE type='trigger' AND name=?",
+            (trigger,),
+        ).fetchone()[0]
+        assert before == after
+        validate_work_item_schema(conn)
+        assert (
+            conn.execute(
+                """SELECT COUNT(*) FROM sqlite_master
+                   WHERE type='table'
+                     AND name='work_item_compare_current_file_web_graphs'"""
+            ).fetchone()[0]
+            == 1
+        )
+    finally:
+        conn.close()
 
 
 def test_expired_candidate_rejects_selection_and_exact_schema39_upgrades(storage: Any) -> None:

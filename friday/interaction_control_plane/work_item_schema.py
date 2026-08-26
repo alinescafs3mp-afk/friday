@@ -3417,6 +3417,18 @@ def _canonical_schema_42_objects() -> dict[tuple[str, str], str]:
 
 
 @lru_cache(maxsize=1)
+def _canonical_promoted_schema_42_objects() -> dict[tuple[str, str], str]:
+    """Return latest-main schema 42 with its dormant promoted reader."""
+
+    conn = sqlite3.connect(":memory:")
+    try:
+        _execute_schema(conn, _selected_evidence_promotion_reader_from_42())
+        return _schema_objects_for_tables(conn, _SCHEMA_42_TABLES)
+    finally:
+        conn.close()
+
+
+@lru_cache(maxsize=1)
 def _canonical_schema_38_objects() -> dict[tuple[str, str], str]:
     conn = sqlite3.connect(":memory:")
     try:
@@ -4611,10 +4623,15 @@ def upgrade_work_item_schema_to_45(
         return
 
     installed_42 = _schema_objects_for_tables(conn, _SCHEMA_42_TABLES)
-    if installed_42 == _canonical_schema_42_objects() and related == installed_42:
-        # Schema 43's Work Item sub-projection is exactly schema 42.  Add only
-        # the schema-45 graph tables/triggers; no released Work Item row
-        # is rebuilt or rewritten.
+    accepted_schema_42_predecessors = (
+        _canonical_schema_42_objects(),
+        _canonical_promoted_schema_42_objects(),
+    )
+    if installed_42 in accepted_schema_42_predecessors and related == installed_42:
+        # Schema 43's Work Item sub-projection is one of two exact schema-42
+        # identities: the released reader or latest-main's dormant promoted
+        # reader.  Add only the schema-45 graph tables/triggers; no Work Item
+        # row or accepted predecessor trigger is rebuilt or rewritten.
         _execute_schema(conn, _WORK_ITEM_SCHEMA_45_EXTENSION)
         validate_work_item_schema(conn)
         return
