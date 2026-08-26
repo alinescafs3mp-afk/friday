@@ -51,10 +51,7 @@ def _actor() -> ActorContext:
 
 
 def _message(query: str = "актуальные публичные правила 2026") -> str:
-    return (
-        "Сравни текущий файл с текущими данными в интернете.\n"
-        f"Публичный веб-запрос: «{query}»"
-    )
+    return f"Сравни текущий файл с текущими данными в интернете.\nПубличный веб-запрос: «{query}»"
 
 
 def _attachment() -> _Carrier:
@@ -308,9 +305,7 @@ def test_surface_keeps_tenant_and_conversation_owner_exact() -> None:
             **_surface_kwargs(
                 user_id=archive_owner.user_id,
                 actor=archive_owner,
-                conversation_is_dialogue=lambda person_id, _conversation_id: (
-                    person_id == "local:tenant"
-                ),
+                conversation_is_dialogue=lambda person_id, _conversation_id: person_id == "local:tenant",
             ),
         ),
         CurrentFileWebAssistSurface,

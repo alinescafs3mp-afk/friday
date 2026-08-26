@@ -2056,9 +2056,7 @@ class MaintenanceMixin(StorageShared):
                     exported_graphs.append(graph.payload())
             rows_by_table["work_item_compare_current_file_web_graphs"] = exported_graphs
             exported_graph_ids = {
-                str(row.get("id") or "")
-                for row in exported_graphs
-                if isinstance(row, dict)
+                str(row.get("id") or "") for row in exported_graphs if isinstance(row, dict)
             }
             for history_table in (
                 "work_item_compare_current_file_web_restart_rebinds",

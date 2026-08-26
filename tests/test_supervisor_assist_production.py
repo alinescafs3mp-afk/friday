@@ -99,10 +99,7 @@ def test_production_authority_is_fresh_exact_and_default_deny(storage) -> None:
         expected_reason=CompareCurrentFileWebGraphOutcomeReason.AUTHORITY_DENIED,
     )
     assert gate(actor, terminal_boundary) is True
-    assert (
-        gate(actor, replace(terminal_boundary, action=AssistPublicationAction.COMPARISON))
-        is False
-    )
+    assert gate(actor, replace(terminal_boundary, action=AssistPublicationAction.COMPARISON)) is False
     authorization.grant_permission("alice", "files.read")
     storage.update_user("alice", status="disabled")
     assert gate(actor, file_boundary) is False
@@ -132,9 +129,7 @@ def test_production_effect_gate_has_only_the_fixed_read_surface(storage) -> None
 
     assert supervisor_assist_read_only_effect_gate(boundary) is True
     assert (
-        supervisor_assist_read_only_effect_gate(
-            replace(boundary, security_id="web.compare.transient")
-        )
+        supervisor_assist_read_only_effect_gate(replace(boundary, security_id="web.compare.transient"))
         is True
     )
     assert supervisor_assist_read_only_effect_gate(replace(boundary, security_id=None)) is True

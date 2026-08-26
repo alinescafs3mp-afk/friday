@@ -144,10 +144,7 @@ def _validate_security_ids(values: tuple[str, ...]) -> None:
         or tuple(sorted(values)) != values
         or len(set(values)) != len(values)
         or any(
-            not isinstance(value, str)
-            or not value
-            or len(value) > 256
-            or value != value.strip()
+            not isinstance(value, str) or not value or len(value) > 256 or value != value.strip()
             for value in values
         )
     ):
@@ -229,10 +226,7 @@ class PlanAuthorityBoundary:
         ):
             _digest(value, label=label)
         _validate_security_ids(self.required_security_ids)
-        if (
-            type(self.turn_deadline_monotonic_ns) is not int
-            or self.turn_deadline_monotonic_ns <= 0
-        ):
+        if type(self.turn_deadline_monotonic_ns) is not int or self.turn_deadline_monotonic_ns <= 0:
             raise ValueError("turn deadline must be a positive monotonic instant")
 
     def payload(self) -> dict[str, Any]:

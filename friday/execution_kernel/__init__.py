@@ -4382,10 +4382,7 @@ class ExecutionKernel:
                 not isinstance(argv, list)
                 or not 1 <= len(argv) <= 64
                 or any(
-                    not isinstance(item, str)
-                    or not item
-                    or len(item) > 512
-                    or "\x00" in item
+                    not isinstance(item, str) or not item or len(item) > 512 or "\x00" in item
                     for item in argv
                 )
                 or isinstance(timeout_sec, bool)
@@ -4478,9 +4475,8 @@ class ExecutionKernel:
             )
 
         if name == "engineer_command_run":
-            if (
-                not re.fullmatch(r"[0-9]{1,20}", str(confirmation_update_id or ""))
-                or not re.fullmatch(r"[0-9a-f]{64}", str(confirmation_body_hash or ""))
+            if not re.fullmatch(r"[0-9]{1,20}", str(confirmation_update_id or "")) or not re.fullmatch(
+                r"[0-9a-f]{64}", str(confirmation_body_hash or "")
             ):
                 await run_blocking(
                     storage.finish_action_approval,

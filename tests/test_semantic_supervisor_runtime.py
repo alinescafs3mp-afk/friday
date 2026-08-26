@@ -250,9 +250,7 @@ def test_assist_requested_shadow_runtime_reports_v2_without_claiming_authority()
     assert status["requested_mode"] == "assist"
     assert status["effective_mode"] == "shadow"
     assert status["policy_id"] == semantic_supervisor_policy.SUPERVISOR_ASSIST_PRODUCT_POLICY_ID
-    assert status["policy_sha256"] == (
-        semantic_supervisor_policy.SUPERVISOR_ASSIST_PRODUCT_POLICY_SHA256
-    )
+    assert status["policy_sha256"] == (semantic_supervisor_policy.SUPERVISOR_ASSIST_PRODUCT_POLICY_SHA256)
     assert status["promotion_admitted"] is False
     assert status["execution_allowed"] is False
     assert status["tools_allowed"] is False

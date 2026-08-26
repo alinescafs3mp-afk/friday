@@ -60,13 +60,9 @@ from friday.orchestration.supervisor_representative_window_attestation import (
 SUPERVISOR_PROMOTION_OPERATOR_ATTESTATION_SCHEMA = (
     "friday.semantic-supervisor-promotion-operator-attestation.v1"
 )
-SUPERVISOR_PROMOTION_ARTIFACT_RECEIPT_SCHEMA = (
-    "friday.semantic-supervisor-promotion-artifact-receipt.v1"
-)
+SUPERVISOR_PROMOTION_ARTIFACT_RECEIPT_SCHEMA = "friday.semantic-supervisor-promotion-artifact-receipt.v1"
 SUPERVISOR_PROMOTION_BUNDLE_SCHEMA = "friday.semantic-supervisor-promotion-bundle.v1"
-SUPERVISOR_PROMOTION_BUNDLE_RECEIPT_SCHEMA = (
-    "friday.semantic-supervisor-promotion-bundle-receipt.v1"
-)
+SUPERVISOR_PROMOTION_BUNDLE_RECEIPT_SCHEMA = "friday.semantic-supervisor-promotion-bundle-receipt.v1"
 
 _MAX_BASELINE_BYTES = 1_048_576
 _MAX_BUNDLE_BYTES = 2_097_152
@@ -430,13 +426,9 @@ class _AcceptedRepresentativeWindowIssue:
 
     def __post_init__(self) -> None:
         if self.target_mode not in {SupervisorMode.ASSIST, SupervisorMode.CANARY}:
-            raise SupervisorPromotionEvidenceProducerError(
-                "representative-window issue mode is invalid"
-            )
+            raise SupervisorPromotionEvidenceProducerError("representative-window issue mode is invalid")
         expected_observed = (
-            SupervisorMode.SHADOW
-            if self.target_mode is SupervisorMode.ASSIST
-            else SupervisorMode.ASSIST
+            SupervisorMode.SHADOW if self.target_mode is SupervisorMode.ASSIST else SupervisorMode.ASSIST
         )
         if self.observed_mode is not expected_observed:
             raise SupervisorPromotionEvidenceProducerError(
@@ -588,12 +580,8 @@ class SupervisorPromotionOperatorAttestation:
             "zero_duplicate_capabilities_attested": self.zero_duplicate_capabilities_attested,
             "zero_duplicate_effects_attested": self.zero_duplicate_effects_attested,
             "zero_duplicate_publications_attested": self.zero_duplicate_publications_attested,
-            "zero_false_completion_regressions_attested": (
-                self.zero_false_completion_regressions_attested
-            ),
-            "precursor_assist_promotion_evidence_sha256": (
-                self.precursor_assist_promotion_evidence_sha256
-            ),
+            "zero_false_completion_regressions_attested": (self.zero_false_completion_regressions_attested),
+            "precursor_assist_promotion_evidence_sha256": (self.precursor_assist_promotion_evidence_sha256),
             "quality_basis": self.quality_basis.value if self.quality_basis is not None else None,
         }
 
@@ -666,9 +654,7 @@ class SupervisorPromotionArtifactReceipt:
             "baseline_report_sha256": self.baseline_report_sha256,
             "latency_budget_file_sha256": self.latency_budget_file_sha256,
             "operator_attestation_sha256": self.operator_attestation_sha256,
-            "precursor_assist_promotion_evidence_sha256": (
-                self.precursor_assist_promotion_evidence_sha256
-            ),
+            "precursor_assist_promotion_evidence_sha256": (self.precursor_assist_promotion_evidence_sha256),
             "body_free": True,
             "promotion_authority_granted": False,
             "activation_performed": False,
@@ -729,9 +715,7 @@ class SupervisorPromotionBundleReceipt:
             _digest(value, label=label)
         if self.target_mode is SupervisorMode.ASSIST:
             if self.precursor_assist_promotion_evidence_sha256 is not None:
-                raise SupervisorPromotionEvidenceProducerError(
-                    "assist bundle receipt carries a precursor"
-                )
+                raise SupervisorPromotionEvidenceProducerError("assist bundle receipt carries a precursor")
         else:
             _digest(
                 self.precursor_assist_promotion_evidence_sha256,
@@ -751,20 +735,14 @@ class SupervisorPromotionBundleReceipt:
             "representative_window_server_attestation_sha256": (
                 self.representative_window_server_attestation_sha256
             ),
-            "representative_window_lookup_token_sha256": (
-                self.representative_window_lookup_token_sha256
-            ),
+            "representative_window_lookup_token_sha256": (self.representative_window_lookup_token_sha256),
             "representative_window_sha256": self.representative_window_sha256,
             "representative_window_observer_runner_sha256": (
                 self.representative_window_observer_runner_sha256
             ),
             "promotion_evidence_file_sha256": self.promotion_evidence_file_sha256,
-            "promotion_evidence_canonical_sha256": (
-                self.promotion_evidence_canonical_sha256
-            ),
-            "precursor_assist_promotion_evidence_sha256": (
-                self.precursor_assist_promotion_evidence_sha256
-            ),
+            "promotion_evidence_canonical_sha256": (self.promotion_evidence_canonical_sha256),
+            "precursor_assist_promotion_evidence_sha256": (self.precursor_assist_promotion_evidence_sha256),
             "body_free": True,
             "promotion_authority_granted": False,
             "activation_performed": False,
@@ -837,7 +815,9 @@ def _parse_metric_window(value: object, *, expected_stage: SupervisorMode) -> Su
     failure_counts = _count_map(item["failure_class_counts"], label="failure counts")
     complete = _count(item["complete_count"], label="complete count")
     latency_observations = _count(item["latency_observation_count"], label="latency observations")
-    latency_total = _count(item["latency_total_ms"], label="latency total", maximum=86_400_000 * max(1, observations))
+    latency_total = _count(
+        item["latency_total_ms"], label="latency total", maximum=86_400_000 * max(1, observations)
+    )
     latency_max = _count(item["latency_max_ms"], label="latency maximum", maximum=86_400_000)
     if (
         _sum_counts(completion_counts) != observations
@@ -845,10 +825,7 @@ def _parse_metric_window(value: object, *, expected_stage: SupervisorMode) -> Su
         or dict(completion_counts).get("complete", 0) != complete
         or latency_observations != observations
         or (observations == 0 and (latency_total != 0 or latency_max != 0))
-        or (
-            observations > 0
-            and not latency_max <= latency_total <= latency_max * observations
-        )
+        or (observations > 0 and not latency_max <= latency_total <= latency_max * observations)
     ):
         raise SupervisorPromotionEvidenceProducerError("metric aggregates are inconsistent")
     return SupervisorProductMetricWindow(
@@ -903,13 +880,13 @@ def _parse_shadow_window(value: object) -> SupervisorShadowReadinessWindow:
         unnecessary_supervisor_invocation_count=unnecessary,
         user_visible_observation_count=visible,
         user_visible_regression_count=regressions,
-        readiness_witness_sha256=_digest(
-            item["readiness_witness_sha256"], label="readiness witness digest"
-        ),
+        readiness_witness_sha256=_digest(item["readiness_witness_sha256"], label="readiness witness digest"),
     )
 
 
-def _parse_promoted_window(value: object, *, expected_mode: SupervisorMode) -> SupervisorPromotedExecutionWindow:
+def _parse_promoted_window(
+    value: object, *, expected_mode: SupervisorMode
+) -> SupervisorPromotedExecutionWindow:
     item = _exact_dict(value, _PROMOTED_KEYS, label=f"{expected_mode.value} promoted window")
     if (
         expected_mode not in {SupervisorMode.ASSIST, SupervisorMode.CANARY}
@@ -1087,9 +1064,16 @@ def load_accepted_supervisor_production_baseline(
         frozenset({SupervisorMode.ASSIST.value, SupervisorMode.CANARY.value}),
         label="promoted execution windows",
     )
-    assist = _parse_promoted_window(promoted[SupervisorMode.ASSIST.value], expected_mode=SupervisorMode.ASSIST)
-    canary = _parse_promoted_window(promoted[SupervisorMode.CANARY.value], expected_mode=SupervisorMode.CANARY)
-    if shadow.observation_count != joins or assist.observation_count + canary.observation_count != promoted_rows:
+    assist = _parse_promoted_window(
+        promoted[SupervisorMode.ASSIST.value], expected_mode=SupervisorMode.ASSIST
+    )
+    canary = _parse_promoted_window(
+        promoted[SupervisorMode.CANARY.value], expected_mode=SupervisorMode.CANARY
+    )
+    if (
+        shadow.observation_count != joins
+        or assist.observation_count + canary.observation_count != promoted_rows
+    ):
         raise SupervisorPromotionEvidenceProducerError("product windows do not cover the exact sample")
     seal_fields = (expected, report_digest, shadow, assist, canary)
     return AcceptedSupervisorProductionBaseline(
@@ -1215,9 +1199,7 @@ def _live_evidence_common(
         baseline_file_sha256=attestation.baseline_file_sha256,
         baseline_report_sha256=attestation.baseline_report_sha256,
         operator_attestation_sha256=attestation.canonical_sha256(),
-        precursor_assist_promotion_evidence_sha256=(
-            attestation.precursor_assist_promotion_evidence_sha256
-        ),
+        precursor_assist_promotion_evidence_sha256=(attestation.precursor_assist_promotion_evidence_sha256),
         max_steps=SUPERVISOR_ASSIST_PROMOTION_MAX_STEPS,
         max_review_rounds=SUPERVISOR_ASSIST_PROMOTION_MAX_REVIEW_ROUNDS,
         observation_count=observation_count,
@@ -1358,7 +1340,9 @@ def build_supervisor_canary_promotion_evidence(
     basis = attestation.quality_basis
     if basis is AssistPromotionQualityBasis.COMPLETION_RATE_IMPROVEMENT:
         if documented_failure_class_id is not None or documented_failure_class_sha256 is not None:
-            raise SupervisorPromotionEvidenceProducerError("completion improvement cannot claim a failure class")
+            raise SupervisorPromotionEvidenceProducerError(
+                "completion improvement cannot claim a failure class"
+            )
         failure_id = "none"
         failure_sha = None
         baseline_failure_count = 0
@@ -1451,18 +1435,12 @@ def _operator_attestation_from_payload(value: object) -> SupervisorPromotionOper
             zero_duplicate_capabilities_attested=item["zero_duplicate_capabilities_attested"],
             zero_duplicate_effects_attested=item["zero_duplicate_effects_attested"],
             zero_duplicate_publications_attested=item["zero_duplicate_publications_attested"],
-            zero_false_completion_regressions_attested=(
-                item["zero_false_completion_regressions_attested"]
-            ),
-            precursor_assist_promotion_evidence_sha256=(
-                item["precursor_assist_promotion_evidence_sha256"]
-            ),
+            zero_false_completion_regressions_attested=(item["zero_false_completion_regressions_attested"]),
+            precursor_assist_promotion_evidence_sha256=(item["precursor_assist_promotion_evidence_sha256"]),
             quality_basis=quality,
         )
     except (TypeError, ValueError) as exc:
-        raise SupervisorPromotionEvidenceProducerError(
-            "operator attestation payload is invalid"
-        ) from exc
+        raise SupervisorPromotionEvidenceProducerError("operator attestation payload is invalid") from exc
 
 
 def _accepted_representative_window_issue(
@@ -1486,13 +1464,9 @@ def _accepted_representative_window_issue(
         target_mode = SupervisorMode(server["target_mode"])
         observed_mode = SupervisorMode(server["observed_mode"])
     except (TypeError, ValueError) as exc:
-        raise SupervisorPromotionEvidenceProducerError(
-            "representative-window modes are invalid"
-        ) from exc
+        raise SupervisorPromotionEvidenceProducerError("representative-window modes are invalid") from exc
     expected_observed = (
-        SupervisorMode.SHADOW
-        if attestation.target_mode is SupervisorMode.ASSIST
-        else SupervisorMode.ASSIST
+        SupervisorMode.SHADOW if attestation.target_mode is SupervisorMode.ASSIST else SupervisorMode.ASSIST
     )
     expected_window = (
         baseline.shadow_readiness.readiness_witness_sha256
@@ -1542,20 +1516,15 @@ def _accepted_representative_window_issue(
         or server["latency_budget_file_sha256"] != budget.document_sha256
         or server["latency_budget_document_sha256"] != budget.document_sha256
         or server["latency_budget_target_mode"] != budget.document.target_mode.value
-        or server["latency_budget_source_revision_sha256"]
-        != budget.document.source_revision_sha256
-        or server["maximum_user_visible_latency_ms"]
-        != budget.document.maximum_user_visible_latency_ms
+        or server["latency_budget_source_revision_sha256"] != budget.document.source_revision_sha256
+        or server["maximum_user_visible_latency_ms"] != budget.document.maximum_user_visible_latency_ms
         or server["source_revision_sha256"] != attestation.source_revision_sha256
         or server["registry_binding_sha256"] != attestation.registry_binding_sha256
-        or server["observed_registry_binding_sha256"]
-        != attestation.registry_binding_sha256
-        or server["supervisor_policy_id"]
-        != semantic_supervisor_policy.SUPERVISOR_ASSIST_PRODUCT_POLICY_ID
+        or server["observed_registry_binding_sha256"] != attestation.registry_binding_sha256
+        or server["supervisor_policy_id"] != semantic_supervisor_policy.SUPERVISOR_ASSIST_PRODUCT_POLICY_ID
         or server["supervisor_policy_sha256"]
         != semantic_supervisor_policy.SUPERVISOR_ASSIST_PRODUCT_POLICY_SHA256
-        or server["runtime_profile_id"]
-        != semantic_supervisor_policy.SUPERVISOR_RUNTIME_PROFILE_ID
+        or server["runtime_profile_id"] != semantic_supervisor_policy.SUPERVISOR_RUNTIME_PROFILE_ID
         or server["runtime_profile_manifest_sha256"]
         != semantic_supervisor_policy.SUPERVISOR_RUNTIME_PROFILE_MANIFEST_SHA256
         or server["representative_window_sha256"] != expected_window
@@ -1563,8 +1532,7 @@ def _accepted_representative_window_issue(
         or server["server_recomputed"] is not True
         or server["representative_window_attested"] is not True
         or server["synthetic_authority"] is not False
-        or (precursor is None)
-        != (attestation.precursor_assist_promotion_evidence_sha256 is None)
+        or (precursor is None) != (attestation.precursor_assist_promotion_evidence_sha256 is None)
         or precursor != attestation.precursor_assist_promotion_evidence_sha256
         or type(token) is not str
         or _DIGEST_RE.fullmatch(token) is None
@@ -1641,9 +1609,7 @@ def _rebuild_bundle_evidence(
         failure_id = product_item.get("documented_failure_class_id")
         failure_sha256 = product_item.get("documented_failure_class_sha256")
         if type(failure_id) is not str or type(failure_sha256) is not str:
-            raise SupervisorPromotionEvidenceProducerError(
-                "assist bundle has no documented failure identity"
-            )
+            raise SupervisorPromotionEvidenceProducerError("assist bundle has no documented failure identity")
         expected = build_supervisor_assist_promotion_evidence(
             evidence_id=evidence_id,
             baseline=baseline,
@@ -1655,11 +1621,7 @@ def _rebuild_bundle_evidence(
     else:
         failure_id_raw = product_item.get("documented_failure_class_id")
         failure_sha256_raw = product_item.get("documented_failure_class_sha256")
-        failure_id = (
-            failure_id_raw
-            if type(failure_id_raw) is str and failure_id_raw != "none"
-            else None
-        )
+        failure_id = failure_id_raw if type(failure_id_raw) is str and failure_id_raw != "none" else None
         failure_sha256 = failure_sha256_raw if type(failure_sha256_raw) is str else None
         expected = build_supervisor_canary_promotion_evidence(
             evidence_id=evidence_id,
@@ -1696,20 +1658,12 @@ def _bundle_receipt(
         representative_window_server_attestation_sha256=(
             representative_window_issue.server_attestation_sha256
         ),
-        representative_window_lookup_token_sha256=(
-            representative_window_issue.lookup_token_sha256
-        ),
-        representative_window_sha256=(
-            representative_window_issue.representative_window_sha256
-        ),
-        representative_window_observer_runner_sha256=(
-            representative_window_issue.observer_runner_sha256
-        ),
+        representative_window_lookup_token_sha256=(representative_window_issue.lookup_token_sha256),
+        representative_window_sha256=(representative_window_issue.representative_window_sha256),
+        representative_window_observer_runner_sha256=(representative_window_issue.observer_runner_sha256),
         promotion_evidence_file_sha256=hashlib.sha256(evidence_file).hexdigest(),
         promotion_evidence_canonical_sha256=evidence.canonical_sha256(),
-        precursor_assist_promotion_evidence_sha256=(
-            attestation.precursor_assist_promotion_evidence_sha256
-        ),
+        precursor_assist_promotion_evidence_sha256=(attestation.precursor_assist_promotion_evidence_sha256),
     )
 
 
@@ -1778,9 +1732,8 @@ def load_accepted_supervisor_promotion_bundle(
     if type(raw) is not bytes or type(budget_raw) is not bytes:
         raise TypeError("promotion bundle loader requires bytes")
     bundle_sha256 = _digest(expected_file_sha256, label="expected bundle file digest")
-    if (
-        not 0 < len(raw) <= _MAX_BUNDLE_BYTES
-        or not hmac.compare_digest(hashlib.sha256(raw).hexdigest(), bundle_sha256)
+    if not 0 < len(raw) <= _MAX_BUNDLE_BYTES or not hmac.compare_digest(
+        hashlib.sha256(raw).hexdigest(), bundle_sha256
     ):
         raise SupervisorPromotionEvidenceProducerError("promotion bundle digest does not match")
     item = _exact_dict(_decode_closed_json(raw), _BUNDLE_KEYS, label="promotion bundle")

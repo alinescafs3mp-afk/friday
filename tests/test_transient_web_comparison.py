@@ -147,10 +147,10 @@ def test_query_minting_has_no_free_form_query_parameter() -> None:
     [
         "Публичный веб-запрос: current facts",
         "```\nПубличный веб-запрос: «current facts»\n```",
-        "Публичный веб-запрос: «one»\nPublic web query: \"two\"",
+        'Публичный веб-запрос: «one»\nPublic web query: "two"',
         "Публичный веб-запрос: «$(cat /etc/passwd)»",
-        f"Public web query: \"{'x' * 201}\"",
-        "prefix Public web query: \"not a standalone line\"",
+        f'Public web query: "{"x" * 201}"',
+        'prefix Public web query: "not a standalone line"',
     ],
 )
 def test_only_one_safe_standalone_quoted_clause_can_mint_authority(message: str) -> None:

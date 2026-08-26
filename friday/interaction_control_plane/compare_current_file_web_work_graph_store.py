@@ -328,7 +328,7 @@ def _insert_graph(conn: sqlite3.Connection, graph: CompareCurrentFileWebWorkGrap
                outcome_status,outcome_reason,publication_assistant_message_id,accepted_graph_outcome_sha256,
                accepted_steps_sha256,terminal_publication_receipt_sha256,
                publication_receipt_sha256
-           ) VALUES({','.join('?' for _item in range(42))})""",  # nosec B608
+           ) VALUES({",".join("?" for _item in range(42))})""",  # nosec B608
         (
             graph.id,
             graph.user_id,
@@ -943,9 +943,7 @@ def rebind_compare_current_file_web_work_graph_after_restart_in_transaction(
     )
     _require_active_revision_available(graph)
     if not graph.has_exact_request_binding:
-        raise CompareCurrentFileWebGraphAnchorError(
-            "restart rebind requires an exact durable request root"
-        )
+        raise CompareCurrentFileWebGraphAnchorError("restart rebind requires an exact durable request root")
     if (
         rebind.actor_binding_sha256 == graph.actor_binding_sha256
         or rebind.conversation_binding_sha256 == graph.conversation_binding_sha256
@@ -954,9 +952,7 @@ def rebind_compare_current_file_web_work_graph_after_restart_in_transaction(
             "restart rebind requires fresh process-owned authority bindings"
         )
     if any(step.attempt >= COMPARE_CURRENT_FILE_WEB_MAX_ATTEMPTS for step in graph.steps):
-        raise CompareCurrentFileWebGraphConflictError(
-            "restart rebind replay budget is exhausted"
-        )
+        raise CompareCurrentFileWebGraphConflictError("restart rebind replay budget is exhausted")
     timestamp = _logical_now(now, graph=graph)
     next_revision = graph.revision + 1
     file_kind = CompareCurrentFileWebStepKind.FILE_READ

@@ -709,10 +709,8 @@ def shadow_policy_admission_context(
         turn_sha256=canonical_sha256(supervisor_input.turn.payload()),
     )
     source_sha256 = source_bindings_sha256((source,))
-    policy_identity = (
-        semantic_supervisor_policy.supervisor_product_policy_identity_for_review_rounds(
-            supervisor_input.budgets.max_review_rounds
-        )
+    policy_identity = semantic_supervisor_policy.supervisor_product_policy_identity_for_review_rounds(
+        supervisor_input.budgets.max_review_rounds
     )
     if policy_identity is None:
         raise SupervisorContractError("shadow authority has no product policy")

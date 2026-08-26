@@ -247,11 +247,7 @@ class _Planner:
     ) -> ParsedSupervisorProposal | None:
         self.calls += 1
         assert absolute_deadline > time.monotonic()
-        if (
-            not self.admit
-            or pre_dispatch_validator is None
-            or pre_dispatch_validator() is not True
-        ):
+        if not self.admit or pre_dispatch_validator is None or pre_dispatch_validator() is not True:
             return None
         query = "актуальные публичные правила 2026"
         review_modes = (
@@ -415,14 +411,16 @@ def _surface(*, actor: ActorContext | None = None) -> CurrentFileWebAssistSurfac
         "Публичный веб-запрос: «актуальные публичные правила 2026»"
     )
     raw_id = "raw_1234567890abcdef"
-    carrier = _Carrier({
-        "raw_object_id": raw_id,
-        "persisted": True,
-        "current_turn_only": True,
-        "mime_type": "text/plain",
-        "transient_text": "private body",
-        "extraction_success": True,
-    })
+    carrier = _Carrier(
+        {
+            "raw_object_id": raw_id,
+            "persisted": True,
+            "current_turn_only": True,
+            "mime_type": "text/plain",
+            "transient_text": "private body",
+            "extraction_success": True,
+        }
+    )
     stamp_current_turn_file_reference(
         carrier,
         {
@@ -1139,10 +1137,13 @@ async def test_admission_ack_loss_recovers_owner_and_never_calls_legacy(storage:
     assert legacy_calls == 0
     assert adapter.admit_calls == 1
     assert adapter.publish_calls == 1
-    assert storage.execute(
-        "SELECT COUNT(*) FROM work_item_compare_current_file_web_graphs WHERE conversation_id=?",
-        (surface.conversation_id,),
-    ).fetchone()[0] == 1
+    assert (
+        storage.execute(
+            "SELECT COUNT(*) FROM work_item_compare_current_file_web_graphs WHERE conversation_id=?",
+            (surface.conversation_id,),
+        ).fetchone()[0]
+        == 1
+    )
 
 
 @pytest.mark.asyncio
@@ -1247,9 +1248,7 @@ async def test_postownership_synthesis_failure_terminalizes_without_legacy(stora
     assert legacy_calls == 0
     assert adapter.publish_calls == 0
     assert adapter.terminal_calls == 1
-    current = adapter.load_current(
-        AssistConversationScope(surface.actor.user_id, surface.conversation_id)
-    )
+    current = adapter.load_current(AssistConversationScope(surface.actor.user_id, surface.conversation_id))
     assert current is None
 
 
@@ -1325,9 +1324,7 @@ async def test_review_and_web_recovery_are_strictly_bounded(
     adapter = _CountingAdapter(storage)
     reviewer = _Reviewer()
     empty = _web_evidence(surface, TransientWebEvidenceStatus.EMPTY)
-    web_reader = _WebReader(
-        (empty, _web_evidence(surface)) if max_review_rounds else empty
-    )
+    web_reader = _WebReader((empty, _web_evidence(surface)) if max_review_rounds else empty)
     controller = _controller(
         graph_adapter=adapter,
         file_reader=_FileReader(_prepared_file(surface, projection)),
@@ -1482,9 +1479,7 @@ async def test_pending_revision_tracks_settlements_before_cancellation(storage: 
         )
     )
     await asyncio.wait_for(reviewer.started.wait(), timeout=2)
-    graph = adapter.load_current(
-        AssistConversationScope(surface.actor.user_id, surface.conversation_id)
-    )
+    graph = adapter.load_current(AssistConversationScope(surface.actor.user_id, surface.conversation_id))
     pending = controller.pending_durable_turn_admission(
         surface.actor.user_id,
         "cancel",
@@ -1706,10 +1701,7 @@ async def test_retained_owner_is_retired_before_an_overlapping_legacy_turn(stora
     assert adapter.restart_calls == 1
     assert len(observed) == 1
     assert (
-        adapter.load_current(
-            AssistConversationScope(surface.actor.user_id, surface.conversation_id)
-        )
-        is None
+        adapter.load_current(AssistConversationScope(surface.actor.user_id, surface.conversation_id)) is None
     )
     assert controller.semantic_supervisor_status()["retained_active_graphs"] == 0
 
@@ -1838,9 +1830,7 @@ async def test_close_drains_process_tasks_but_leaves_graph_for_startup_retiremen
     )
     await asyncio.wait_for(controller.close(), timeout=2)
     result = await asyncio.wait_for(task, timeout=2)
-    graph = adapter.load_current(
-        AssistConversationScope(surface.actor.user_id, surface.conversation_id)
-    )
+    graph = adapter.load_current(AssistConversationScope(surface.actor.user_id, surface.conversation_id))
     status = controller.semantic_supervisor_status()
 
     assert result.outcome is SupervisorAssistOutcome.INTERRUPTED

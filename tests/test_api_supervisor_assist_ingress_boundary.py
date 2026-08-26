@@ -216,9 +216,7 @@ def test_non_new_assist_relation_suppresses_ingestion(
     assert len(agent_calls) == 1
     assert agent_calls[0]["ingestion_result"] is None
     assert agent_calls[0]["_semantic_supervisor_pending_decision"] is decisions[0]
-    assert type(agent_calls[0]["_semantic_supervisor_ingress_binding"]) is (
-        SupervisorAssistIngressBindingV1
-    )
+    assert type(agent_calls[0]["_semantic_supervisor_ingress_binding"]) is (SupervisorAssistIngressBindingV1)
 
 
 @pytest.mark.parametrize(

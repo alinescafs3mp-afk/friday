@@ -640,9 +640,7 @@ class AssistPromotionLiveEvidence:
             "baseline_file_sha256": self.baseline_file_sha256,
             "baseline_report_sha256": self.baseline_report_sha256,
             "operator_attestation_sha256": self.operator_attestation_sha256,
-            "precursor_assist_promotion_evidence_sha256": (
-                self.precursor_assist_promotion_evidence_sha256
-            ),
+            "precursor_assist_promotion_evidence_sha256": (self.precursor_assist_promotion_evidence_sha256),
             "max_steps": self.max_steps,
             "max_review_rounds": self.max_review_rounds,
             "observation_count": self.observation_count,

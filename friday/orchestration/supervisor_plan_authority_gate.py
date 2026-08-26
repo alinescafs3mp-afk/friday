@@ -92,15 +92,13 @@ class SupervisorAssistPlanAuthorityGate:
                     )
                 except (TypeError, ValueError):
                     return PlanAuthorityDecision.rejected(PlanAuthorityReason.SOURCE_DRIFT)
-                if (
-                    boundary.source_bindings_sha256
-                    != source_bindings_sha256((expected,))
-                    or not current_raw_source_matches(
-                        expected,
-                        raw_object_id=surface.attachment.raw_object_id,
-                        source_identity_sha256=surface.attachment.source_identity_sha256,
-                        content_sha256=surface.attachment_content_sha256,
-                    )
+                if boundary.source_bindings_sha256 != source_bindings_sha256(
+                    (expected,)
+                ) or not current_raw_source_matches(
+                    expected,
+                    raw_object_id=surface.attachment.raw_object_id,
+                    source_identity_sha256=surface.attachment.source_identity_sha256,
+                    content_sha256=surface.attachment_content_sha256,
                 ):
                     return PlanAuthorityDecision.rejected(PlanAuthorityReason.SOURCE_DRIFT)
                 decisions = tuple(

@@ -920,13 +920,7 @@ def test_canonical_golden_journey_registry_is_closed_current_and_privacy_safe(
     assert {row.journey_id: (row.journey, row.readiness, row.limitations) for row in rows} == CURRENT_JOURNEYS
     assert sum(row.readiness == "READY" for row in rows) == 0
     assert sum(len(row.evidence) for row in rows) == 54
-    assert (
-        sum(
-            row.evidence["physical device evidence"].state == "NOT_APPLICABLE"
-            for row in rows
-        )
-        == 5
-    )
+    assert sum(row.evidence["physical device evidence"].state == "NOT_APPLICABLE" for row in rows) == 5
     for row in rows:
         assert tuple(row.evidence) == EVIDENCE_CLASSES
         _validate_applicability(row)

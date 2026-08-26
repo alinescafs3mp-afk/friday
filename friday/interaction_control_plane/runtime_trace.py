@@ -82,13 +82,10 @@ def build_direct_trace(
     )
     if capability_attempts is None:
         attempts = tuple(
-            0 if outcome is OutcomeStatus.NOT_STARTED else 1
-            for _, outcome in capability_outcomes
+            0 if outcome is OutcomeStatus.NOT_STARTED else 1 for _, outcome in capability_outcomes
         )
     else:
-        if type(capability_attempts) is not tuple or len(capability_attempts) != len(
-            capability_outcomes
-        ):
+        if type(capability_attempts) is not tuple or len(capability_attempts) != len(capability_outcomes):
             raise ValueError("capability attempts must align exactly with capability outcomes")
         attempts = capability_attempts
         for (_, outcome), attempt in zip(capability_outcomes, attempts, strict=True):

@@ -175,7 +175,10 @@ def prepare_current_file_web_assist_surface(
     if len(references) != 1:
         return None
     eligibility = supervisor_eligibility(turn, settings)
-    if not eligibility.eligible or eligibility.task_class is not TaskClass.COMPARE_CURRENT_FILE_WITH_CURRENT_WEB:
+    if (
+        not eligibility.eligible
+        or eligibility.task_class is not TaskClass.COMPARE_CURRENT_FILE_WITH_CURRENT_WEB
+    ):
         return None
     try:
         web_plan = seal_explicit_public_web_query(

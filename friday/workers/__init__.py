@@ -2150,6 +2150,7 @@ class WorkersManager:
         from friday.orchestration.supervisor_assist_production import (
             supervisor_assist_read_only_effect_gate,
         )
+
         batch = SupervisorAssistGraphAdapter(self.storage).expire_due(
             lifecycle_check=supervisor_assist_read_only_effect_gate,
             limit=100,

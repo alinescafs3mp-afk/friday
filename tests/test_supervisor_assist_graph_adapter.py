@@ -259,11 +259,7 @@ def _plan(surface: CurrentFileWebAssistSurface) -> ValidatedExecutionPlan:
     source_digest = source_bindings_sha256((source,))
     budget_digest = budgets.canonical_sha256()
     required_security_ids = tuple(
-        sorted(
-            step.resolved_security_id
-            for step in steps
-            if step.resolved_security_id is not None
-        )
+        sorted(step.resolved_security_id for step in steps if step.resolved_security_id is not None)
     )
     return ValidatedExecutionPlan(
         proposal_digest=proposal_digest,
@@ -337,9 +333,10 @@ def _settle(adapter, graph, kind, state, evidence=None):
             state=state,
             outcome_sha256=_sha256(f"outcome:{graph.id}:{kind.value}:{state.value}"),
             evidence_identity_sha256=evidence if accepted else None,
-            authority_rechecked=(kind is not CompareCurrentFileWebStepKind.PRIMARY_SYNTHESIS and (
-                accepted or state is CompareCurrentFileWebStepState.DENIED
-            )),
+            authority_rechecked=(
+                kind is not CompareCurrentFileWebStepKind.PRIMARY_SYNTHESIS
+                and (accepted or state is CompareCurrentFileWebStepState.DENIED)
+            ),
             verified=accepted,
         ),
     )
@@ -391,12 +388,13 @@ def test_admission_is_one_existing_dialogue_transaction_and_never_upgrades_file_
             authority_check=lambda _boundary: False,
             effect_check=lambda _boundary: True,
         )
-    assert storage.execute(
-        "SELECT COUNT(*) FROM messages WHERE conversation_id=?", (other.conversation_id,)
-    ).fetchone()[0] == 0
-    source = Path("friday/orchestration/supervisor_assist_graph_adapter.py").read_text(
-        encoding="utf-8"
+    assert (
+        storage.execute(
+            "SELECT COUNT(*) FROM messages WHERE conversation_id=?", (other.conversation_id,)
+        ).fetchone()[0]
+        == 0
     )
+    source = Path("friday/orchestration/supervisor_assist_graph_adapter.py").read_text(encoding="utf-8")
     assert "prepare_current_turn_file_evidence" not in source
 
 
@@ -431,10 +429,7 @@ def test_graph_lookup_is_effect_free_and_never_opens_a_writer(storage) -> None:
         before_effect_in_transaction=before_effect_in_transaction,
     ) as effects:
         assert reader.load(AssistGraphCursor.from_graph(graph)) == graph
-        assert (
-            reader.load_current(AssistConversationScope(graph.user_id, graph.conversation_id))
-            == graph
-        )
+        assert reader.load_current(AssistConversationScope(graph.user_id, graph.conversation_id)) == graph
         assert request_effect_possible() is False
         assert effects.staged is False
 
@@ -459,7 +454,6 @@ def test_claim_denial_is_atomic_and_review_recovery_is_typed(storage) -> None:
         )
     current = adapter.load_current(AssistConversationScope(graph.user_id, graph.conversation_id))
     assert current == graph
-
 
     assert current.steps[1].state is CompareCurrentFileWebStepState.PENDING
 
@@ -491,10 +485,7 @@ def test_claim_denial_is_atomic_and_review_recovery_is_typed(storage) -> None:
         limit=1,
     )
     assert len(restarted.results) == 1
-    assert (
-        restarted.results[0].disposition
-        is AssistRestartDisposition.RETIRED_EVIDENCE_NOT_REPLAYABLE
-    )
+    assert restarted.results[0].disposition is AssistRestartDisposition.RETIRED_EVIDENCE_NOT_REPLAYABLE
     assert (
         restarted.results[0].publication.graph.outcome_reason
         is CompareCurrentFileWebGraphOutcomeReason.EVIDENCE_NOT_REPLAYABLE
@@ -595,10 +586,13 @@ def test_mixed_authority_denial_terminalizes_atomically_without_model(
             authority_check=lambda _boundary: True,
             effect_check=lambda _boundary: True,
         )
-    assert storage.execute(
-        "SELECT COUNT(*) FROM messages WHERE conversation_id=? AND role='assistant'",
-        (surface.conversation_id,),
-    ).fetchone()[0] == 1
+    assert (
+        storage.execute(
+            "SELECT COUNT(*) FROM messages WHERE conversation_id=? AND role='assistant'",
+            (surface.conversation_id,),
+        ).fetchone()[0]
+        == 1
+    )
 
 
 def test_mixed_authority_terminal_fails_closed_on_restart_drift_and_forgery(storage: Any) -> None:
@@ -816,11 +810,14 @@ def test_cancel_rejects_wrong_request_effect_fence_atomically(storage) -> None:
     graph = _admit(adapter, surface)
     expected_binding = _sha256("cancel-fence:expected")
 
-    with track_request_effects(
-        lambda: True,
-        before_effect_in_transaction=lambda _conn: True,
-        request_binding_sha256=_sha256("cancel-fence:actual"),
-    ), pytest.raises(SupervisorAssistGraphAdapterError, match="request effect fence"):
+    with (
+        track_request_effects(
+            lambda: True,
+            before_effect_in_transaction=lambda _conn: True,
+            request_binding_sha256=_sha256("cancel-fence:actual"),
+        ),
+        pytest.raises(SupervisorAssistGraphAdapterError, match="request effect fence"),
+    ):
         adapter.cancel(
             AssistGraphCursor.from_graph(graph),
             AssistCancellation(
@@ -832,17 +829,13 @@ def test_cancel_rejects_wrong_request_effect_fence_atomically(storage) -> None:
             effect_check=lambda _boundary: True,
         )
 
-    current = adapter.load_current(
-        AssistConversationScope(surface.actor.user_id, surface.conversation_id)
-    )
+    current = adapter.load_current(AssistConversationScope(surface.actor.user_id, surface.conversation_id))
     rows = storage.execute(
         "SELECT role,content FROM messages WHERE conversation_id=? ORDER BY rowid",
         (surface.conversation_id,),
     ).fetchall()
     assert current is not None and current.state is CompareCurrentFileWebGraphState.ACTIVE
-    assert [(row["role"], row["content"]) for row in rows] == [
-        ("user", surface.turn.message)
-    ]
+    assert [(row["role"], row["content"]) for row in rows] == [("user", surface.turn.message)]
 
 
 def test_terminal_cancel_and_startup_reconcile_publish_closed_receipts(storage) -> None:
@@ -909,26 +902,22 @@ def test_terminal_cancel_and_startup_reconcile_publish_closed_receipts(storage) 
     flattened = tuple(item for batch in restarted for item in batch.results)
     assert len(flattened) == 2
     assert all(
-        item.disposition is AssistRestartDisposition.RETIRED_EVIDENCE_NOT_REPLAYABLE
-        for item in flattened
+        item.disposition is AssistRestartDisposition.RETIRED_EVIDENCE_NOT_REPLAYABLE for item in flattened
     )
     first_retired = adapter.load(AssistGraphCursor.from_graph(first_graph))
     second_retired = adapter.load(AssistGraphCursor.from_graph(second_graph))
     assert first_retired is not None
     assert second_retired is not None
-    assert (
-        first_retired.outcome_reason
-        is CompareCurrentFileWebGraphOutcomeReason.EVIDENCE_NOT_REPLAYABLE
-    )
-    assert (
-        second_retired.outcome_reason
-        is CompareCurrentFileWebGraphOutcomeReason.EVIDENCE_NOT_REPLAYABLE
-    )
+    assert first_retired.outcome_reason is CompareCurrentFileWebGraphOutcomeReason.EVIDENCE_NOT_REPLAYABLE
+    assert second_retired.outcome_reason is CompareCurrentFileWebGraphOutcomeReason.EVIDENCE_NOT_REPLAYABLE
     for restart_surface in (first, second):
-        assert storage.execute(
-            "SELECT COUNT(*) FROM messages WHERE conversation_id=? AND role='user'",
-            (restart_surface.conversation_id,),
-        ).fetchone()[0] == 1
+        assert (
+            storage.execute(
+                "SELECT COUNT(*) FROM messages WHERE conversation_id=? AND role='user'",
+                (restart_surface.conversation_id,),
+            ).fetchone()[0]
+            == 1
+        )
 
 
 def test_startup_recovery_rechecks_production_boundaries_and_does_not_mask_faults(
@@ -946,9 +935,7 @@ def test_startup_recovery_rechecks_production_boundaries_and_does_not_mask_fault
     authorization = AuthorizationService(storage)
     for surface in surfaces.values():
         authorization.grant_permission(surface.actor.user_id, "web.compare.transient")
-    recovered = SupervisorAssistRecoverySurfaceLoader(storage, authorization)(
-        graphs["current"]
-    )
+    recovered = SupervisorAssistRecoverySurfaceLoader(storage, authorization)(graphs["current"])
     assert recovered is not None
     assert recovered.graph == graphs["current"]
     assert recovered.surface.turn.message == surfaces["current"].turn.message
@@ -985,9 +972,7 @@ def test_startup_recovery_rechecks_production_boundaries_and_does_not_mask_fault
     batches = SupervisorAssistGraphAdapter(storage).reconcile_all_active_after_restart(
         actor_resolver=SupervisorAssistRestartActorResolver(authorization),
         authority_check=authority,
-        effect_check=lambda _actor, boundary: supervisor_assist_read_only_effect_gate(
-            boundary
-        ),
+        effect_check=lambda _actor, boundary: supervisor_assist_read_only_effect_gate(boundary),
         batch_limit=2,
     )
     results = tuple(item for batch in batches for item in batch.results)
@@ -1047,10 +1032,13 @@ def test_expiry_is_bounded_source_free_and_does_not_mask_lifecycle_faults(storag
     assert denied.retired == ()
     assert tuple(item.graph_id for item in denied.retained) == (graph.id,)
     assert adapter.load(AssistGraphCursor.from_graph(graph)) == graph
-    assert storage.execute(
-        "SELECT COUNT(*) FROM messages WHERE conversation_id=? AND role='assistant'",
-        (surface.conversation_id,),
-    ).fetchone()[0] == 0
+    assert (
+        storage.execute(
+            "SELECT COUNT(*) FROM messages WHERE conversation_id=? AND role='assistant'",
+            (surface.conversation_id,),
+        ).fetchone()[0]
+        == 0
+    )
 
     def fail_lifecycle(_boundary: Any) -> bool:
         raise RuntimeError("injected expiry lifecycle fault")
@@ -1075,8 +1063,6 @@ def test_expiry_is_bounded_source_free_and_does_not_mask_lifecycle_faults(storag
         (surface.conversation_id,),
     ).fetchone()
     assert assistant is not None and assistant["content"] == COMPARE_CURRENT_FILE_WEB_EXPIRED_RESPONSE
-    receipt = load_compare_current_file_web_terminal_publication_receipt(
-        str(assistant["metadata_json"])
-    )
+    receipt = load_compare_current_file_web_terminal_publication_receipt(str(assistant["metadata_json"]))
     assert receipt.model_spoke is receipt.evidence_cited is False
     assert receipt.final_authority_rechecked is receipt.completion_claimed is False

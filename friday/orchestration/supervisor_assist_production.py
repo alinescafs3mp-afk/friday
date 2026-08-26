@@ -174,11 +174,7 @@ class SupervisorAssistAuthorityGate:
             | AssistRestartRebindBoundary,
             boundary,
         )
-        if (
-            actor.user_id != actor.own_id
-            or carried.actor is not actor
-            or carried.user_id != actor.user_id
-        ):
+        if actor.user_id != actor.own_id or carried.actor is not actor or carried.user_id != actor.user_id:
             return None
         if type(boundary) in {AssistAdmissionBoundary, AssistRestartRebindBoundary}:
             return (_FILE_SECURITY_ID, TRANSIENT_WEB_SECURITY_ID)
@@ -192,10 +188,7 @@ class SupervisorAssistAuthorityGate:
             if action is AssistPublicationAction.COMPARISON:
                 return (_FILE_SECURITY_ID, TRANSIENT_WEB_SECURITY_ID)
             if action is AssistPublicationAction.TERMINAL:
-                if (
-                    cast(AssistPublicationBoundary, boundary).expected_reason.value
-                    == "authority_denied"
-                ):
+                if cast(AssistPublicationBoundary, boundary).expected_reason.value == "authority_denied":
                     return (_CHAT_SECURITY_ID,)
                 return (_FILE_SECURITY_ID, TRANSIENT_WEB_SECURITY_ID)
             if action is AssistPublicationAction.CANCEL:
@@ -286,9 +279,7 @@ class SupervisorPromotedProductObserver:
         storage: Any,
         promotion_evaluator: AssistPromotionEvaluator,
         actor_binding: Callable[[ActorContext], str],
-        binding_snapshot_factory: Callable[[], CapabilityBindingSnapshot] = (
-            operational_capability_snapshot
-        ),
+        binding_snapshot_factory: Callable[[], CapabilityBindingSnapshot] = (operational_capability_snapshot),
     ) -> None:
         if not hasattr(storage, "conn"):
             raise TypeError("promoted observer requires storage")

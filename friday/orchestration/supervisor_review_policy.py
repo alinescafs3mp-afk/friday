@@ -208,12 +208,9 @@ def admit_supervisor_review(
 
     if not isinstance(review, SupervisorReview) or not isinstance(context, SupervisorReviewContext):
         raise TypeError("review admission requires typed contracts")
-    if (
-        context.product_policy_id != SUPERVISOR_ASSIST_PRODUCT_POLICY_ID
-        or not hmac.compare_digest(
-            context.product_policy_sha256,
-            SUPERVISOR_ASSIST_PRODUCT_POLICY_SHA256,
-        )
+    if context.product_policy_id != SUPERVISOR_ASSIST_PRODUCT_POLICY_ID or not hmac.compare_digest(
+        context.product_policy_sha256,
+        SUPERVISOR_ASSIST_PRODUCT_POLICY_SHA256,
     ):
         return _reject(ReviewPolicyReason.PRODUCT_POLICY_MISMATCH)
     if not hmac.compare_digest(review.plan_digest, context.plan_digest) or not hmac.compare_digest(

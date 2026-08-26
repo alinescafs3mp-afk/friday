@@ -3137,10 +3137,7 @@ BEGIN
 END;
 """
 
-    scope_trigger = (
-        "CREATE TRIGGER IF NOT EXISTS "
-        "trg_work_item_compare_current_file_web_graphs_scope_insert"
-    )
+    scope_trigger = "CREATE TRIGGER IF NOT EXISTS trg_work_item_compare_current_file_web_graphs_scope_insert"
     if schema.count(scope_trigger) != 1:
         raise RuntimeError("released graph scope trigger anchor is ambiguous")
     schema = schema.replace(scope_trigger, history_sql + "\n" + scope_trigger)
@@ -3190,10 +3187,7 @@ WHEN NEW.transition='restart_rebind'
 BEGIN SELECT RAISE(ABORT,'current-file/web WorkGraph restart rebind is not one-shot'); END;
 
 """
-    lifecycle_trigger = (
-        "CREATE TRIGGER IF NOT EXISTS "
-        "trg_work_item_compare_current_file_web_graphs_lifecycle"
-    )
+    lifecycle_trigger = "CREATE TRIGGER IF NOT EXISTS trg_work_item_compare_current_file_web_graphs_lifecycle"
     if schema.count(lifecycle_trigger) != 1:
         raise RuntimeError("released graph lifecycle trigger anchor is ambiguous")
     schema = schema.replace(lifecycle_trigger, control_trigger + lifecycle_trigger)
@@ -4207,9 +4201,7 @@ def validate_work_item_schema(conn: sqlite3.Connection, *, required: bool = True
 
     restart_columns = {
         str(item[1]): (str(item[2]).upper(), int(item[3]), int(item[5]))
-        for item in conn.execute(
-            "PRAGMA table_info(work_item_compare_current_file_web_restart_rebinds)"
-        )
+        for item in conn.execute("PRAGMA table_info(work_item_compare_current_file_web_restart_rebinds)")
     }
     if restart_columns != {
         "graph_id": ("TEXT", 0, 1),
@@ -4239,9 +4231,7 @@ def validate_work_item_schema(conn: sqlite3.Connection, *, required: bool = True
 
     restart_step_columns = {
         str(item[1]): (str(item[2]).upper(), int(item[3]), int(item[5]))
-        for item in conn.execute(
-            "PRAGMA table_info(work_item_compare_current_file_web_restart_rebind_steps)"
-        )
+        for item in conn.execute("PRAGMA table_info(work_item_compare_current_file_web_restart_rebind_steps)")
     }
     if restart_step_columns != {
         "graph_id": ("TEXT", 1, 1),
@@ -4430,9 +4420,7 @@ def _upgrade_exact_schema_44_graph_to_45(conn: sqlite3.Connection) -> None:
 
     old_objects = _canonical_schema_44_objects()
     schema_42_objects = _canonical_schema_42_objects()
-    old_extension_objects = {
-        key: value for key, value in old_objects.items() if key not in schema_42_objects
-    }
+    old_extension_objects = {key: value for key, value in old_objects.items() if key not in schema_42_objects}
     _drop_legacy_schema_objects(conn, old_extension_objects)
     conn.execute(
         "ALTER TABLE work_item_compare_current_file_web_steps "

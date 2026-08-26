@@ -76,12 +76,14 @@ def test_transaction_effect_fence_requires_the_exact_optional_request_binding() 
         )
         is False
     )
-    with pytest.raises(ValueError, match="request effect binding"):
-        with track_request_effects(
+    with (
+        pytest.raises(ValueError, match="request effect binding"),
+        track_request_effects(
             lambda: True,
             request_binding_sha256="not-a-digest",
-        ):
-            pass
+        ),
+    ):
+        pass
 
     with track_request_effects(
         lambda: True,

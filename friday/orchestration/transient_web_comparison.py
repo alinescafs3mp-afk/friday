@@ -158,9 +158,7 @@ def _extract_explicit_public_query(current_user_message: object) -> tuple[str, s
     markers = tuple(_PUBLIC_MARKER_RE.finditer(current_user_message))
     matches = tuple(_PUBLIC_CLAUSE_RE.finditer(current_user_message))
     if len(markers) != 1 or len(matches) != 1:
-        raise TransientWebComparisonError(
-            "exactly one standalone quoted public-web clause is required"
-        )
+        raise TransientWebComparisonError("exactly one standalone quoted public-web clause is required")
     match = matches[0]
     if not (match.start() <= markers[0].start() < match.end()) or _inside_code_fence(
         current_user_message, match.start()
@@ -170,7 +168,9 @@ def _extract_explicit_public_query(current_user_message: object) -> tuple[str, s
     try:
         query = parse_query_intent(raw_query, label="explicit public web query")
     except SupervisorContractError as exc:
-        raise TransientWebComparisonError("the explicit public-web query is not safe natural language") from exc
+        raise TransientWebComparisonError(
+            "the explicit public-web query is not safe natural language"
+        ) from exc
     return query, _sha256_bytes(encoded)
 
 
@@ -549,7 +549,8 @@ def _project_report(
         completed != len(raw_sources)
         or failed + timed_out > requested
         or requested > completed + failed + timed_out
-        or (search_timed_out or search_failed or report_error) and raw_sources
+        or (search_timed_out or search_failed or report_error)
+        and raw_sources
     ):
         raise TransientWebComparisonError("web report counters or failure flags are contradictory")
 
@@ -743,9 +744,7 @@ class TransientWebComparisonAdapter:
         # This is intentionally the final gate before the outbound call.  A
         # grant used to mint the plan does not survive a later revoke/deny.
         self._authorization.require(actor, TRANSIENT_WEB_SECURITY_ID)
-        timeout_seconds = (
-            None if deadline is None else deadline - asyncio.get_running_loop().time()
-        )
+        timeout_seconds = None if deadline is None else deadline - asyncio.get_running_loop().time()
         if timeout_seconds is not None and timeout_seconds <= 0:
             raise TimeoutError("transient web comparison deadline expired before outbound")
         try:

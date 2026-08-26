@@ -102,9 +102,7 @@ class SupervisorAssistIngressBindingV1:
             raise ValueError("stored assist ingress binding schema is invalid")
         return cls(
             source_ref_sha256=str(item.get("source_ref_sha256") or ""),
-            request_fingerprint_sha256=str(
-                item.get("request_fingerprint_sha256") or ""
-            ),
+            request_fingerprint_sha256=str(item.get("request_fingerprint_sha256") or ""),
         )
 
 
@@ -126,9 +124,7 @@ def load_supervisor_assist_ingress_binding(
 ) -> SupervisorAssistIngressBindingV1:
     if not isinstance(metadata, Mapping):
         raise TypeError("assist ingress metadata must be a mapping")
-    return SupervisorAssistIngressBindingV1.parse(
-        metadata.get(SUPERVISOR_ASSIST_INGRESS_METADATA_KEY)
-    )
+    return SupervisorAssistIngressBindingV1.parse(metadata.get(SUPERVISOR_ASSIST_INGRESS_METADATA_KEY))
 
 
 @dataclass(frozen=True, slots=True)
@@ -218,9 +214,7 @@ class SupervisorAssistPendingDecision:
             relation=SupervisorAssistPendingRelation.UNCERTAIN,
             person_id=person_id,
             conversation_id=conversation_id,
-            current_request_binding_sha256=(
-                None if current is None else current.canonical_sha256()
-            ),
+            current_request_binding_sha256=(None if current is None else current.canonical_sha256()),
         )
 
     @property
@@ -239,9 +233,7 @@ class SupervisorAssistPendingDecision:
         if self.relation is SupervisorAssistPendingRelation.UNCERTAIN:
             return True
         explicit_cancel = message.strip().casefold() in {"отмена", "cancel"}
-        return explicit_cancel is (
-            self.relation is SupervisorAssistPendingRelation.EXPLICIT_CANCEL
-        )
+        return explicit_cancel is (self.relation is SupervisorAssistPendingRelation.EXPLICIT_CANCEL)
 
 
 __all__ = [

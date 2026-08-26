@@ -161,28 +161,27 @@ class ValidatedExecutionPlan:
             raise ExecutionPlanError("P1 validated plans may admit read steps only")
         if self.effect_classes != tuple(step.effect_class for step in self.steps):
             raise ExecutionPlanError("validated execution plan effect binding is stale")
-        capability_steps = tuple(
-            step for step in self.steps if step.resolved_security_id is not None
-        )
+        capability_steps = tuple(step for step in self.steps if step.resolved_security_id is not None)
         model_steps = tuple(step for step in self.steps if step.resolved_security_id is None)
-        if tuple(
-            sorted(
-                {
-                    step.resolved_security_id
-                    for step in capability_steps
-                    if step.resolved_security_id is not None
-                }
+        if (
+            tuple(
+                sorted(
+                    {
+                        step.resolved_security_id
+                        for step in capability_steps
+                        if step.resolved_security_id is not None
+                    }
+                )
             )
-        ) != self.required_security_ids:
+            != self.required_security_ids
+        ):
             raise ExecutionPlanError("validated execution plan security binding is stale")
         if (
             len(self.steps) > self.budgets.max_steps
-            or sum(step.max_calls for step in capability_steps)
-            != self.budgets.max_capability_calls
+            or sum(step.max_calls for step in capability_steps) != self.budgets.max_capability_calls
             or sum(step.max_calls for step in model_steps)
             > self.budgets.max_model_calls - self.budgets.max_supervisor_calls
-            or sum(step.max_output_tokens for step in model_steps)
-            > self.budgets.max_output_tokens
+            or sum(step.max_output_tokens for step in model_steps) > self.budgets.max_output_tokens
         ):
             raise ExecutionPlanError("validated execution plan resource binding is stale")
         parallel_counts: dict[str, int] = {}

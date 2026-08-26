@@ -351,10 +351,8 @@ def admit_supervisor_proposal(
 ) -> PolicyDecision:
     """Validate one untrusted proposal against the current projection and policy."""
 
-    policy_identity = (
-        semantic_supervisor_policy.supervisor_product_policy_identity_for_review_rounds(
-            supervisor_input.budgets.max_review_rounds
-        )
+    policy_identity = semantic_supervisor_policy.supervisor_product_policy_identity_for_review_rounds(
+        supervisor_input.budgets.max_review_rounds
     )
     if policy_identity is None:
         return _reject(PolicyReason.REVIEW_NOT_ADMITTED)
@@ -365,8 +363,7 @@ def admit_supervisor_proposal(
     now_ns = time.monotonic_ns()
     if (
         context.turn_deadline_monotonic_ns <= now_ns
-        or context.turn_deadline_monotonic_ns - now_ns
-        > supervisor_input.budgets.turn_deadline_ms * 1_000_000
+        or context.turn_deadline_monotonic_ns - now_ns > supervisor_input.budgets.turn_deadline_ms * 1_000_000
     ):
         return _reject(PolicyReason.DEADLINE_EXPIRED)
     if not _source_scope_is_admitted(
@@ -493,9 +490,7 @@ def admit_supervisor_proposal(
                     else 1
                 ),
                 max_output_tokens=(
-                    semantic_supervisor_policy.SUPERVISOR_PRIMARY_OUTPUT_TOKENS
-                    if binding is None
-                    else 0
+                    semantic_supervisor_policy.SUPERVISOR_PRIMARY_OUTPUT_TOKENS if binding is None else 0
                 ),
             )
         )

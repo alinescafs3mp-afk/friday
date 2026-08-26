@@ -100,7 +100,8 @@ def _copy_matching_columns(
     source: str,
 ) -> None:
     columns = tuple(
-        str(row[1]) for row in conn.execute(f'PRAGMA table_info("{destination}")')  # nosec B608
+        str(row[1])
+        for row in conn.execute(f'PRAGMA table_info("{destination}")')  # nosec B608
     )
     projected = ",".join(f'"{column}"' for column in columns)
     conn.execute(
@@ -118,9 +119,7 @@ def _downgrade_graph_projection_to_released_schema44(database: Path) -> None:
         conn.execute("BEGIN IMMEDIATE")
         schema42 = _canonical_schema_42_objects()
         current_extension = {
-            key: value
-            for key, value in _canonical_work_item_schema_objects().items()
-            if key not in schema42
+            key: value for key, value in _canonical_work_item_schema_objects().items() if key not in schema42
         }
         _drop_legacy_schema_objects(conn, current_extension)
         conn.execute("DROP TABLE work_item_compare_current_file_web_restart_rebind_steps")
@@ -171,8 +170,7 @@ def test_schema45_exact_binding_is_durable_immutable_and_revision_cas(storage) -
         storage.transaction() as conn,
     ):
         conn.execute(
-            "UPDATE work_item_compare_current_file_web_graphs "
-            "SET anchor_request_binding_sha256=? WHERE id=?",
+            "UPDATE work_item_compare_current_file_web_graphs SET anchor_request_binding_sha256=? WHERE id=?",
             (_sha256("different-request"), graph.id),
         )
 
@@ -269,8 +267,9 @@ def test_schema45_restart_rebind_is_one_shot_atomic_and_predecessor_audited(stor
     assert file_history["predecessor_state"] == "running"
     assert file_history["predecessor_attempt"] == 1
     assert file_history["predecessor_started_at"] == predecessor_file.started_at
-    assert file_history["successor_input_identity_sha256"] == (
-        rebind.step_input_identities[CompareCurrentFileWebStepKind.FILE_READ]
+    assert (
+        file_history["successor_input_identity_sha256"]
+        == (rebind.step_input_identities[CompareCurrentFileWebStepKind.FILE_READ])
     )
     validate_work_item_schema(storage.conn)
     exported = storage.export_user(graph.user_id)
@@ -324,8 +323,7 @@ def test_released_schema44_graph_migrates_to_explicit_unbound_sentinel_and_reads
     migrated = FridayStorage(replace(configured, database_must_exist=True))
     try:
         assert (
-            migrated.execute("SELECT value FROM schema_meta WHERE key='schema_version'").fetchone()[0]
-            == "45"
+            migrated.execute("SELECT value FROM schema_meta WHERE key='schema_version'").fetchone()[0] == "45"
         )
         with migrated.transaction() as conn:
             graph = get_compare_current_file_web_work_graph_in_transaction(
@@ -339,9 +337,7 @@ def test_released_schema44_graph_migrates_to_explicit_unbound_sentinel_and_reads
             COMPARE_CURRENT_FILE_WEB_UNBOUND_SCHEMA44_REQUEST_SHA256
         )
         assert graph.has_exact_request_binding is False
-        assert tuple(step.step_id for step in graph.steps) == tuple(
-            step.step_id for step in original.steps
-        )
+        assert tuple(step.step_id for step in graph.steps) == tuple(step.step_id for step in original.steps)
 
         with migrated.transaction() as conn:
             claimed = claim_compare_current_file_web_step_in_transaction(

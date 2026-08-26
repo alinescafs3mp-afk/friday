@@ -25,9 +25,7 @@ SUPERVISOR_PRODUCT_POLICY_SHA256 = _supervisor_policy.SUPERVISOR_PRODUCT_POLICY_
 SUPERVISOR_ASSIST_POLICY_SCHEMA = _supervisor_policy.SUPERVISOR_ASSIST_POLICY_SCHEMA
 SUPERVISOR_ASSIST_PRODUCT_POLICY = _supervisor_policy.SUPERVISOR_ASSIST_PRODUCT_POLICY
 SUPERVISOR_ASSIST_PRODUCT_POLICY_ID = _supervisor_policy.SUPERVISOR_ASSIST_PRODUCT_POLICY_ID
-SUPERVISOR_ASSIST_PRODUCT_POLICY_SHA256 = (
-    _supervisor_policy.SUPERVISOR_ASSIST_PRODUCT_POLICY_SHA256
-)
+SUPERVISOR_ASSIST_PRODUCT_POLICY_SHA256 = _supervisor_policy.SUPERVISOR_ASSIST_PRODUCT_POLICY_SHA256
 
 CAPABILITY_MANIFEST_SCHEMA = "friday.capability-manifest.v1"
 SUPERVISOR_INPUT_SCHEMA = "friday.supervisor-input.v1"
@@ -790,9 +788,7 @@ class SupervisorBudgets:
             max_model_calls=_bounded_int(
                 item["max_model_calls"], label="max_model_calls", minimum=1, maximum=4
             ),
-            max_tool_calls=_bounded_int(
-                item["max_tool_calls"], label="max_tool_calls", minimum=0, maximum=2
-            ),
+            max_tool_calls=_bounded_int(item["max_tool_calls"], label="max_tool_calls", minimum=0, maximum=2),
             max_capability_calls=_bounded_int(
                 item["max_capability_calls"], label="max_capability_calls", minimum=0, maximum=3
             ),

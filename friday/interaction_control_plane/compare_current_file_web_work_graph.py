@@ -960,9 +960,7 @@ class CompareCurrentFileWebWorkGraph:
                     "never-rebound WorkGraph cannot carry restart target state"
                 )
         else:
-            if self.restart_rebound_at is None or any(
-                value is None for value in restart_step_bindings
-            ):
+            if self.restart_rebound_at is None or any(value is None for value in restart_step_bindings):
                 raise CompareCurrentFileWebGraphError(
                     "rebound WorkGraph requires one complete restart target state"
                 )
@@ -980,10 +978,7 @@ class CompareCurrentFileWebWorkGraph:
                 raise CompareCurrentFileWebGraphError(
                     "restart target identities do not match the current fixed steps"
                 )
-        if (
-            self.transition is CompareCurrentFileWebGraphTransition.RESTART_REBIND
-            and self.restart_count != 1
-        ):
+        if self.transition is CompareCurrentFileWebGraphTransition.RESTART_REBIND and self.restart_count != 1:
             raise CompareCurrentFileWebGraphError(
                 "restart rebind transition requires the one-shot restart binding"
             )
@@ -1123,9 +1118,7 @@ class CompareCurrentFileWebWorkGraph:
         current_file_content_sha256: str,
         step_input_identities: Mapping[CompareCurrentFileWebStepKind, str],
         step_idempotency_keys: Mapping[CompareCurrentFileWebStepKind, str],
-        anchor_request_binding_sha256: str = (
-            COMPARE_CURRENT_FILE_WEB_UNBOUND_SCHEMA44_REQUEST_SHA256
-        ),
+        anchor_request_binding_sha256: str = (COMPARE_CURRENT_FILE_WEB_UNBOUND_SCHEMA44_REQUEST_SHA256),
         graph_id: str | None = None,
         now: str | None = None,
         expires_at: str | None = None,
@@ -1429,12 +1422,8 @@ class CompareCurrentFileWebWorkGraph:
             "restart_file_idempotency_key_sha256": self.restart_file_idempotency_key_sha256,
             "restart_web_input_identity_sha256": self.restart_web_input_identity_sha256,
             "restart_web_idempotency_key_sha256": self.restart_web_idempotency_key_sha256,
-            "restart_synthesis_input_identity_sha256": (
-                self.restart_synthesis_input_identity_sha256
-            ),
-            "restart_synthesis_idempotency_key_sha256": (
-                self.restart_synthesis_idempotency_key_sha256
-            ),
+            "restart_synthesis_input_identity_sha256": (self.restart_synthesis_input_identity_sha256),
+            "restart_synthesis_idempotency_key_sha256": (self.restart_synthesis_idempotency_key_sha256),
             "created_at": self.created_at,
             "updated_at": self.updated_at,
             "expires_at": self.expires_at,
@@ -1520,9 +1509,7 @@ class CompareCurrentFileWebWorkGraph:
                 current_file_content_sha256=str(graph["current_file_content_sha256"]),
                 restart_count=int(graph["restart_count"]),
                 restart_rebound_at=(
-                    None
-                    if graph["restart_rebound_at"] is None
-                    else str(graph["restart_rebound_at"])
+                    None if graph["restart_rebound_at"] is None else str(graph["restart_rebound_at"])
                 ),
                 restart_file_input_identity_sha256=(
                     None

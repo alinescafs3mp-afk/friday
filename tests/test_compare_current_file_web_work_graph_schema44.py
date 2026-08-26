@@ -796,9 +796,10 @@ def test_restart_rebind_never_treats_digests_as_replayable_bodies(settings, tmp_
             (graph.id,),
         ).fetchall()
         assert len(history) == 3
-        assert next(row for row in history if row["step_id"] == WEB_READ_STEP_ID)[
-            "predecessor_outcome_sha256"
-        ] == old_web_outcome
+        assert (
+            next(row for row in history if row["step_id"] == WEB_READ_STEP_ID)["predecessor_outcome_sha256"]
+            == old_web_outcome
+        )
     finally:
         reopened.close()
 
@@ -847,10 +848,7 @@ def test_restart_after_admission_rebinds_only_to_explicit_fresh_inputs(storage) 
 
     assert graph.state is CompareCurrentFileWebGraphState.ACTIVE
     assert all(step.attempt == 0 for step in graph.steps)
-    assert all(
-        step.input_identity_sha256 == rebind.step_input_identities[step.kind]
-        for step in graph.steps
-    )
+    assert all(step.input_identity_sha256 == rebind.step_input_identities[step.kind] for step in graph.steps)
     assert storage.count_messages(graph.conversation_id, user_id=graph.user_id) == 1
 
 

@@ -146,9 +146,7 @@ def skipped_observation(
     supervisor_input_digest: str = "",
 ) -> SupervisorObservation:
     mode = SupervisorMode.fail_closed(requested_mode)
-    identity = semantic_supervisor_policy.supervisor_product_policy_identity_for_mode(
-        requested_mode
-    )
+    identity = semantic_supervisor_policy.supervisor_product_policy_identity_for_mode(requested_mode)
     return SupervisorObservation(
         supervisor_mode=mode,
         requested_mode=requested_mode,
@@ -205,9 +203,7 @@ def parsed_observation(
     planner_latency_bucket: str = "unavailable",
 ) -> SupervisorObservation:
     mode = SupervisorMode.fail_closed(requested_mode)
-    identity = semantic_supervisor_policy.supervisor_product_policy_identity_for_mode(
-        requested_mode
-    )
+    identity = semantic_supervisor_policy.supervisor_product_policy_identity_for_mode(requested_mode)
     return SupervisorObservation(
         supervisor_mode=mode,
         requested_mode=requested_mode,

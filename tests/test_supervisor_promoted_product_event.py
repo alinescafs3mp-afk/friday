@@ -656,9 +656,12 @@ def test_other_turn_adds_a_body_free_false_invocation_denominator(storage) -> No
             user_id="wrong-owner",
             conversation_id=str(conversation["id"]),
         )
-    with storage.transaction() as conn, pytest.raises(
-        PromotedProductEventError,
-        match="post-commit",
+    with (
+        storage.transaction() as conn,
+        pytest.raises(
+            PromotedProductEventError,
+            match="post-commit",
+        ),
     ):
         build_promoted_other_turn_emission_request(
             conn,
