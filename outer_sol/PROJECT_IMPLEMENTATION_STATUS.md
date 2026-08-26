@@ -13,7 +13,7 @@ the current production identity, completed packages, active work and next order.
   the exact primary-only path.
 - Deployed implementation head: `c7feb84229c70d302d600582db575a76eeb0f536`
 - Live: Friday `0.207.37` / `c7feb84229c70d302d600582db575a76eeb0f536`;
-  sealed tree `53752feb152872e6265b97c5c88473654957cc72c3b1ec748b7ee5b7b1001f30`;
+  tree `53752feb152872e6265b97c5c88473654957cc72c3b1ec748b7ee5b7b1001f30`;
   wheel `5c948bf5b9427e45bdd84041916db8648c5bd261f952ffeb67f21c1e03280fe9`.
 - Immediate predecessor and schema-capable fallback: Friday `0.207.35` /
   `edbad561867fa5019035d1b7182c058b3c113bb8`.
