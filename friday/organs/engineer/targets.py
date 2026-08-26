@@ -452,20 +452,25 @@ _ARTIFACT_COMPILE_RU_OUTPUT = (
     r"(?:jar[- ]файл\w*|jar\b|бинарник\w*|бинарн\w*\s+артефакт\w*)"
     r"(?:\s*/\s*(?:jar[- ]файл\w*|jar\b|бинарник\w*|бинарн\w*\s+артефакт\w*))?"
 )
-_ARTIFACT_COMPILE_EN_DELIVERY = rf"(?:send|attach|upload|deliver)\s+(?:me\s+)?{_ARTIFACT_COMPILE_EN_OUTPUT}"
+_ARTIFACT_COMPILE_EN_DELIVERY = (
+    rf"(?:send|attach|upload|deliver)\s+(?:me\s+)?{_ARTIFACT_COMPILE_EN_OUTPUT}"
+    rf"(?:\s+to\s+me)?"
+)
 _ARTIFACT_COMPILE_RU_DELIVERY = (
     rf"(?:пришли(?:те)?|отправь(?:те)?|приложи(?:те)?|выгрузи(?:те)?)\s+"
     rf"(?:мне\s+)?{_ARTIFACT_COMPILE_RU_OUTPUT}"
 )
 _ARTIFACT_COMPILE_DELIVERY_SUFFIX = (
-    rf"(?:\s*,?\s+(?:and|then)\s+{_ARTIFACT_COMPILE_EN_DELIVERY}|"
-    rf"\s*,?\s+(?:и|а\s+затем)\s+{_ARTIFACT_COMPILE_RU_DELIVERY})"
+    rf"(?:\s*,?\s+(?:and|then)\s+(?:please\s+)?{_ARTIFACT_COMPILE_EN_DELIVERY}|"
+    rf"\s*,?\s+(?:и|а\s+затем)\s*,?\s*(?:пожалуйста\s*,?\s*)?"
+    rf"{_ARTIFACT_COMPILE_RU_DELIVERY})"
 )
 _ARTIFACT_COMPILE_REQUEST = re.compile(
-    r"\A\s*(?:(?:hi|hello|hey|привет|здравствуй(?:те)?)[!,.;:\s]+)?"
+    r"\A\s*(?:(?:hi|hello|hey|friday|привет|пятница|здравствуй(?:те)?)[!,.;:\s]+)?"
     r"(?:(?:and|so|then|now|finally|okay|ok|alright|а|и|ну|так|тогда|"
     r"теперь|сейчас|наконец|ладно|хорошо)\s*[,;:]?\s+){0,2}"
-    r"(?:(?:please|pls|kindly|can\s+you|could\s+you|would\s+you|"
+    r"(?:(?:please|pls|kindly|(?:can|could|would)\s+you"
+    r"(?:\s*[,;:]?\s+please)?|"
     r"i\s+(?:want|need|ask|authorize)\s+you\s+to|"
     r"пожалуйста|прошу|можешь|можете|сможешь|сможете|"
     r"(?:не\s+)?мог(?:ла|ли)?\s+бы(?:\s+(?:ты|вы))?|"
@@ -678,19 +683,21 @@ _ARTIFACT_COMPILE_SAFE_COMPANION_REMAINDER = re.compile(
     r"а\s+потом)\s+){0,3}(?:"
     r"explain(?:\s+to\s+me)?\s+(?:"
     r"what\s+(?:(?:this|the)\s+(?:code|source|class|method|compiler\s+error)|it)\s+"
-    r"(?:means?|does)|"
+    r"(?:means?|does|is\s+doing)|"
     r"how\s+(?:it|(?:the|this)\s+(?:code|source|class|method))\s+works?|"
     r"(?:(?:the|this|any)\s+)?(?:code|source|class|method|"
     r"compiler(?:\s+(?:error|diagnostics?))?|"
-    r"diagnostics?|build\s+result|jar|output|generated\s+artifact))|"
+    r"diagnostics?|build\s+result|jar|output|generated\s+artifact)"
+    r"(?:\s+to\s+me)?)|"
     r"(?:review|summari[sz]e|describe|analy[sz]e|inspect|check)\s+"
     r"(?:(?:the|this|any)\s+)?(?:code|source|class|method|"
     r"compiler(?:\s+(?:error|diagnostics?))?|"
     r"diagnostics?|build\s+result|jar|output|generated\s+artifact)"
     r"(?:\s+for\s+(?:(?:security|correctness|quality)\s+)?"
-    r"(?:issues?|bugs?|vulnerabilit(?:y|ies)|problems?))?|"
-    r"(?:объясни(?:те)?|поясни(?:те)?)\s+(?:мне\s+)?(?:"
-    r"как\s+(?:код|исходник|класс|метод)\s+работа\w*|"
+    r"(?:issues?|bugs?|defects?|vulnerabilit(?:y|ies)|problems?))?|"
+    r"(?:объясни(?:те)?|поясни(?:те)?)\s*[,;:]?\s+(?:мне\s*[,;:]?\s+)?(?:"
+    r"как\s+(?:(?:код|исходник|класс|метод)\s+работа\w*|"
+    r"работа\w*\s+(?:(?:этот|данный)\s+)?(?:код|исходник|класс|метод))|"
     r"что\s+(?:означа\w*|дела\w*)\s+(?:код|исходник|класс|метод)|"
     r"(?:этот|данный)?\s*(?:код|исходник|класс|метод|компилятор|"
     r"диагностик\w*|ошибк\w*\s+компил\w*|результат\w*\s+сборк\w*|"
@@ -700,12 +707,33 @@ _ARTIFACT_COMPILE_SAFE_COMPANION_REMAINDER = re.compile(
     r"(?:этот|данный)?\s*(?:код|исходник|класс|метод|компилятор|"
     r"диагностик\w*|ошибк\w*\s+компил\w*|результат\w*\s+сборк\w*|"
     r"jar|выход\w*|артефакт\w*)"
+    r"(?:\s+на\s+(?:уязвимост\w*|ошибк\w*|безопасност\w*))?"
     r")\s*[.!?…]*\s*\Z",
     re.IGNORECASE,
 )
 _ARTIFACT_COMPILE_CONTEXT_RESET = re.compile(
-    r"\A\s*(?:(?:and|so|а|и)\s+)?(?:now|then|finally|okay|ok|alright|"
+    r"\A\s*(?:(?:and|so|а|и)\s+)?(?:now|finally|okay|ok|alright|"
     r"теперь|сейчас|наконец|ладно|хорошо|так)\b",
+    re.IGNORECASE,
+)
+_ARTIFACT_COMPILE_SAFE_PRIOR_CONTEXT = re.compile(
+    rf"\A\s*(?:"
+    rf"i\s+(?:have\s+)?(?:attached|uploaded|provided)\s+(?:the\s+)?"
+    rf"(?:(?:java\s+)?(?:source|file)|{_ARTIFACT_COMPILE_FILENAME})|"
+    rf"(?:the\s+)?(?:(?:java\s+)?(?:source|file)|{_ARTIFACT_COMPILE_FILENAME})\s+"
+    rf"(?:is\s+)?(?:attached|uploaded|provided|ready)|"
+    rf"(?:я\s+)?(?:приложил(?:а)?|загрузил(?:а)?|отправил(?:а)?)\s+"
+    rf"(?:(?:java[- ]?)?(?:файл|исходник)\w*|{_ARTIFACT_COMPILE_FILENAME})|"
+    rf"(?:(?:java[- ]?)?(?:файл|исходник)\w*|{_ARTIFACT_COMPILE_FILENAME})\s+"
+    rf"(?:приложен|загружен|отправлен|готов)\w*"
+    r")\s*[.!?…]*\s*\Z",
+    re.IGNORECASE,
+)
+_ARTIFACT_COMPILE_PRIOR_DEFERRED = re.compile(
+    r"\b(?:wait(?:ing)?\s+for|hold\s+(?:off\s+)?until|only\s+after)\b"
+    r"[^.!?\n]{0,80}\b(?:approval|confirmation|permission)\b|"
+    r"\b(?:жди(?:те)?|дождись|дождитесь|только\s+после)\b"
+    r"[^.!?\n]{0,80}\b(?:одобрени|подтверждени|разрешени)\w*\b",
     re.IGNORECASE,
 )
 _METADATA_V4 = ipaddress.ip_address("169.254.169.254")
@@ -1292,10 +1320,23 @@ def _accepted_artifact_compile_requests(
         # turns reported or meta text into an effect and is therefore inert.
         if request.start != request.unit_start:
             continue
-        if request.unit_start != 0 and not _ARTIFACT_COMPILE_CONTEXT_RESET.match(
-            masked[request.unit_start :]
-        ):
-            continue
+        prior_units = tuple(_request_units(masked[: request.unit_start]))
+        if request.unit_start != 0:
+            reset = _ARTIFACT_COMPILE_CONTEXT_RESET.match(masked[request.unit_start :])
+            prior_surface = masked[: request.unit_start]
+            if reset is not None:
+                if (
+                    _CONDITIONAL_REQUEST_CUE.search(prior_surface)
+                    or _ARTIFACT_COMPILE_DEFERRED_PREFIX.search(prior_surface)
+                    or _ARTIFACT_COMPILE_PRIOR_DEFERRED.search(prior_surface)
+                ):
+                    continue
+            elif len(prior_units) != 1:
+                continue
+            else:
+                prior_start, prior_end = prior_units[0]
+                if not _ARTIFACT_COMPILE_SAFE_PRIOR_CONTEXT.fullmatch(masked[prior_start:prior_end]):
+                    continue
         unit = masked[request.unit_start : request.unit_end]
         named_sources = {
             match.group(0) for match in re.finditer(_ARTIFACT_COMPILE_FILENAME, unit, re.IGNORECASE)
@@ -1329,17 +1370,6 @@ def _accepted_artifact_compile_requests(
             or _ARTIFACT_COMPILE_DEFERRED_PREFIX.search(prefix)
         ):
             continue
-        prior_units = tuple(_request_units(masked[: request.unit_start]))
-        if prior_units and not _EXPLICIT_REQUEST_CONTEXT_RESET.match(masked[request.unit_start :]):
-            prior_start, prior_end = prior_units[-1]
-            prior = masked[prior_start:prior_end]
-            if (
-                _REPORTED_REQUEST_CUE.search(prior)
-                or _ARTIFACT_COMPILE_REPORTED_PREFIX.search(prior)
-                or _META_REQUEST_CUE.search(prior)
-                or _CONDITIONAL_REQUEST_CUE.search(prior)
-            ):
-                continue
         accepted.append(request)
     return text, masked, tuple(accepted)
 
