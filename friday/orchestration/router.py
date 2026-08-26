@@ -98,6 +98,7 @@ class ChatRuntime(Protocol):
         reply_assistant_reference: bool = False,
         reply_assistant_message_id: str | None = None,
         turn_policy: TurnPolicyDecision | None = None,
+        telegram_update_id: str | None = None,
         turn_deadline: float | None = None,
         _pending_durable_admission: PendingDurableTurnAdmission | None = None,
     ) -> dict[str, Any]: ...
@@ -728,6 +729,7 @@ class OrchestrationRouter:
         reply_assistant_reference: bool = False,
         reply_assistant_message_id: str | None = None,
         turn_policy: TurnPolicyDecision | None = None,
+        telegram_update_id: str | None = None,
         turn_deadline: float | None = None,
         _pending_durable_admission: PendingDurableTurnAdmission | None = None,
     ) -> dict[str, Any]:
@@ -749,6 +751,8 @@ class OrchestrationRouter:
             "reply_assistant_message_id": reply_assistant_message_id,
             "turn_deadline": turn_deadline,
         }
+        if telegram_update_id is not None:
+            legacy_kwargs["telegram_update_id"] = telegram_update_id
         carried_durable_admission: PendingDurableTurnAdmission | None = None
         if _pending_durable_admission is not None:
             person_id = actor.own_id if actor.shared_tenant else user_id

@@ -720,6 +720,18 @@ async def test_shadow_plans_once_but_legacy_alone_owns_the_answer() -> None:
 
 
 @pytest.mark.asyncio
+async def test_trusted_telegram_update_identity_crosses_the_legacy_router() -> None:
+    legacy = _Runtime()
+    router = OrchestrationRouter(legacy, _Planner(), mode="legacy")
+    kwargs = _chat_kwargs()
+    kwargs["actor"] = ActorContext("owner", "owner", "telegram-bridge")
+
+    await router.chat("owner", "запусти команду", telegram_update_id="123456", **kwargs)
+
+    assert legacy.calls[0][2]["telegram_update_id"] == "123456"
+
+
+@pytest.mark.asyncio
 async def test_shadow_diagnostics_never_copy_model_reason_or_source_names() -> None:
     payload = _plan_payload()
     payload["reason_code"] = "secret_scan_filename"
