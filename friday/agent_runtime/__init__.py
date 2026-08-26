@@ -19969,9 +19969,20 @@ def _attachment_whole_document_task(message: str, *, file_count: int = 0) -> str
 _CURRENT_DOCUMENT_SECONDARY_PARTIAL_SCOPE = re.compile(
     r"(?:"
     r"\b(?:глав(?:а|ы|е|у|ой|ою|ами|ах)|раздел|заключени|введени|предислови|"
-    r"аннотаци|страниц|лист|абзац|фрагмент|отрывок|част(?:ь|и|ью|ей|ям|ями|ях))\w*\b|"
+    r"аннотаци|страниц|лист|абзац|фрагмент|отрывок|"
+    r"част(?:ь|и|ью|ей|ям|ями|ях))\w*\b|"
     r"\b(?:chapter|section|conclusion|introduction|abstract|page|sheet|paragraph|excerpt|"
-    r"part|portion)s?\b"
+    r"part|portion)s?\b|"
+    r"\b(?:перв\w*|втор\w*|последн\w*)\s+половин\w*\b|"
+    r"\b(?:начал|конц|середин)\w*\s+"
+    r"(?:(?:эт|данн|текущ)\w*\s+)?(?:файл|документ|вложени|текст)\w*\b|"
+    r"\b(?:first|second|last)\s+half\b|"
+    r"\b(?:first|last)\s+(?:\d{1,6}\s+)?"
+    r"(?:words?|lines?|rows?|records?|items?|slides?)\b|"
+    r"\b(?:перв|последн)\w*\s+(?:\d{1,6}\s+)?"
+    r"(?:слов|строк|запис|пункт|элемент|слайд)\w*\b|"
+    r"\b(?:half|beginning|start|end|middle)\s+of\s+"
+    r"(?:(?:this|the|current|attached)\s+)?(?:file|document|attachment|text)\b"
     r")",
     re.IGNORECASE,
 )
@@ -19982,22 +19993,122 @@ _CURRENT_DOCUMENT_SECONDARY_SELECTIVE_SCOPE = re.compile(
     r"данн\w*\s+(?:файл|документ|вложени|текст)|"
     r"текущ\w*\s+(?:файл|документ|вложени|текст))|"
     r"\b(?:regarding|concerning)\b|"
+    r"\b(?:только|лишь)\s+(?!(?:(?:эт|данн|текущ)\w*\s+"
+    r"(?:файл|документ|вложени|текст)\w*|вс[её]\s+(?:содержим|текст)\w*|"
+    r"весь\w*\s+(?:файл|документ|вложени|текст)\w*|содержим\w*|"
+    r"(?:обзор|сводк|резюме|анализ)\w*)\b)|"
+    r"\bonly\s+(?!(?:(?:this\s+|the\s+(?:(?:entire|whole|current|attached)\s+)?)"
+    r"(?:file|document|attachment|text)|its\s+contents?|"
+    r"summary|overview|review|analysis)\b)|"
     r"\babout\s+(?!this\s+(?:file|document|attachment|text)\b|"
     r"the\s+(?:current|attached)\s+(?:file|document|attachment|text)\b)"
     r")",
     re.IGNORECASE,
 )
-_CURRENT_DOCUMENT_SECONDARY_EXACT_OR_METADATA = re.compile(
+_CURRENT_DOCUMENT_SECONDARY_COUNT_REQUEST = re.compile(
     r"(?:"
-    r"\b(?:сколько|посчита(?:й|йте)|подсчита(?:й|йте)|количеств|число|точн|дословн|"
-    r"процитир|строк|запис|метаданн|mime|хеш|hash|sha-?256|укаж|назов|выпиш|покаж|"
-    r"извлек|верн|реквизит|номер|код|значени|поле|автор|дат|сумм|адрес)\w*\b|"
-    r"\b(?:имя|названи|размер)\s+файл\w*\b|"
-    r"\b(?:count|exact|verbatim|quote|rows?|records?|metadata|filename|file\s+name|"
-    r"file\s+size|mime\s*type|state|show|extract|return|author|date|number|code|"
-    r"value|field|identifier|address)\b|"
-    r"\btell\s+me\s+(?!about\b)"
+    r"\bсколько\b|\b(?:посчита(?:й|йте|ть)|подсчита(?:й|йте|ть)|сосчита(?:й|йте|ть)|"
+    r"счита(?:й|йте|ть))\b|"
+    r"\b(?:количеств|число)\w*\s+(?:строк|запис|пункт|элемент|слов|страниц|люд|"
+    r"сотрудник|объект)\w*\b|"
+    r"\b(?:строк|запис|пункт|элемент|слов|страниц)\w*\s+(?:всего|итого)\b|"
+    r"\b(?:how\s+many|count)\b|"
+    r"\b(?:rows?|records?|items?|words?|pages?|people|employees?)\s+count\b|"
+    r"\bnumber\s+of\s+(?:rows?|records?|items?|words?|pages?|people|employees?)\b"
     r")",
+    re.IGNORECASE,
+)
+_CURRENT_DOCUMENT_SECONDARY_METADATA_REQUEST = re.compile(
+    r"(?:"
+    r"\b(?:метаданн|mime|хеш|hash|sha-?256)\w*\b|"
+    r"\b(?:имя|названи|размер)\s+файл\w*\b|"
+    r"\b(?:filename|file\s+name|file\s+size|mime\s*type|metadata)\b"
+    r")",
+    re.IGNORECASE,
+)
+_CURRENT_DOCUMENT_SECONDARY_EXACT_MODIFIER_TARGET = re.compile(
+    r"(?:"
+    r"\b(?:точн|дословн)\w*\s+(?:число|значени|поле|строк|запис|цитат|дат|номер|код|"
+    r"адрес|реквизит|сумм)\w*\b|"
+    r"\b(?:exact|verbatim)\s+(?:count|value|field|line|row|record|quote|date|number|"
+    r"code|address|identifier|sum|total)\b"
+    r")",
+    re.IGNORECASE,
+)
+_CURRENT_DOCUMENT_SECONDARY_EXACT_FIELD_ACTION = re.compile(
+    r"(?:"
+    r"\b(?:укажи(?:те)?|указать|указывай(?:те)?|назови(?:те)?|назвать|"
+    r"выпиши(?:те)?|выписать|покажи(?:те)?|показать|извлеки(?:те)?|извлечь|"
+    r"верни(?:те)?|вернуть|скажи(?:те)?|сказать|сообщи(?:те)?|сообщить|"
+    r"напиши(?:те)?|написать|да(?:й|йте|ть))\b[^.!?\n]{0,80}\b"
+    r"(?:дат(?:а|ы|у|е|ой|ою|ам|ами|ах)|номер|код|значени|поле|автор|адрес|реквизит|"
+    r"сумм(?:а|ы|у|е|ой|ою|ам|ами|ах))\w*\b|"
+    r"\b(?:state|show|extract|return|tell\s+me|give|provide|list)\b[^.!?\n]{0,80}\b"
+    r"(?:signing\s+date|(?<!up-to-)date|author|number|code|value|field|identifier|"
+    r"address|amount|sum|total)\b"
+    r")",
+    re.IGNORECASE,
+)
+_CURRENT_DOCUMENT_SECONDARY_EXACT_COMPOSITE_TARGET = re.compile(
+    r"(?:"
+    r"\b(?:и|а\s+также|плюс|включая|вместе\s+с)\b[^.!?\n]{0,40}\b"
+    r"(?:дат(?:а|ы|у|е|ой|ою|ам|ами|ах)|номер(?:а|у|ом|е|ы|ов|ам|ами|ах)?|"
+    r"код(?:а|у|ом|е|ы|ов|ам|ами|ах)?|значени(?:е|я|ю|ем|и|й|ям|ями|ях)|"
+    r"поле|поля|полю|полем|полей|автор(?:а|у|ом|е|ы|ов|ам|ами|ах)?|"
+    r"адрес(?:а|у|ом|е|ы|ов|ам|ами|ах)?|реквизит\w*|"
+    r"сумм(?:а|ы|у|е|ой|ою|ам|ами|ах))\b|"
+    r"\b(?:and|plus|along\s+with|including|as\s+well\s+as)\b[^.!?\n]{0,40}\b"
+    r"(?:signing\s+date|(?<!up-to-)date|author|number|code|value|field|identifier|"
+    r"address|amount|sum|total)\b"
+    r")",
+    re.IGNORECASE,
+)
+_CURRENT_DOCUMENT_SECONDARY_EXACT_QUOTE_REQUEST = re.compile(
+    r"\b(?:процитиру(?:й|йте)|процитировать|quote)\b|"
+    r"\b(?:и|а\s+также|плюс|включая|and|plus|including)\b[^.!?\n]{0,32}\b"
+    r"(?:цитат\w*|quotes?)\b",
+    re.IGNORECASE,
+)
+_CURRENT_DOCUMENT_SECONDARY_EXTRACTION_ACTION = re.compile(
+    r"\b(?:укажи(?:те)?|указать|указывай(?:те)?|назови(?:те)?|назвать|"
+    r"выпиши(?:те)?|выписать|покажи(?:те)?|показать|извлеки(?:те)?|извлечь|"
+    r"верни(?:те)?|вернуть|скажи(?:те)?|сказать|сообщи(?:те)?|сообщить|"
+    r"напиши(?:те)?|написать|найди(?:те)?|найти|да(?:й|йте|ть)|"
+    r"state|show|extract|return|tell(?:\s+me)?|give|provide|list|find|locate)\b",
+    re.IGNORECASE,
+)
+_CURRENT_DOCUMENT_SECONDARY_OPEN_EXTRACTION_TARGET = re.compile(
+    r"(?:"
+    r"\b(?:обзор|ревью|анализ|разбор|критик|сводк|резюме|содержани|итог|вывод|"
+    r"тезис|мысл|тем|проблем|риск|ошиб|противореч|оценк|мнени|суть)\w*\b|"
+    r"\b(?:что\s+(?:важн|главн|дума|внутри)|о\s+ч[её]м|про\s+что)\w*\b|"
+    r"\b(?:об|про)\s+(?:(?:эт|данн|текущ)\w*\s+)?(?:файл|документ|вложени|текст)\w*\b|"
+    r"\b(?:summary|overview|review|analysis|critique|assessment|opinion|thoughts?|themes?|"
+    r"risks?|weakness(?:es)?|issues?|(?:key|main)\s+(?:points?|takeaways?|ideas?)|"
+    r"what\s+(?:you\s+think|.+\s+(?:about|says?))|about\s+"
+    r"(?:(?:this|the\s+current|the\s+attached)\s+)?(?:file|document|attachment|text))\b"
+    r")",
+    re.IGNORECASE,
+)
+_CURRENT_DOCUMENT_SECONDARY_EXTRACTION_CLAUSE_BOUNDARY = re.compile(
+    r"(?:[.!?;\n]|,\s*(?:и|а|но|and|but)\b|"
+    r"\b(?:и\s+затем|а\s+также|вместе\s+с|and\s+then|as\s+well\s+as)\b)",
+    re.IGNORECASE,
+)
+_CURRENT_DOCUMENT_SECONDARY_EXACT_LOOKUP_ACTION = re.compile(
+    r"\b(?:найди(?:те)?|покажи(?:те)?|укажи(?:те)?|find|locate|look\s+up|show)\b",
+    re.IGNORECASE,
+)
+_CURRENT_DOCUMENT_SECONDARY_EXACT_MACHINE_TARGET = re.compile(
+    r"(?:[«\"'][^«»\"'\r\n]{1,80}[»\"']|"
+    r"\b(?=[A-Za-zА-ЯЁа-яё0-9_-]{3,80}\b)(?=[A-Za-zА-ЯЁа-яё0-9_-]*"
+    r"(?:\d|[-_]))[A-Za-zА-ЯЁа-яё0-9_-]+\b)",
+)
+_CURRENT_DOCUMENT_SECONDARY_NEGATIVE_CONSTRAINT = re.compile(
+    r"(?:[,;]\s*)?(?:(?:но|but)\s+)?\b(?:"
+    r"не(?!\s+(?:мог(?:ла|ли)?\s+бы|забуд(?:ь|ьте)))|без|"
+    r"исключая|не\s+упоминая|do\s+not|don't|without|omit(?:ting)?|exclud(?:e|ing))"
+    r"\b[^.!?;\n]*",
     re.IGNORECASE,
 )
 _CURRENT_DOCUMENT_SECONDARY_EFFECT = re.compile(
@@ -20005,19 +20116,47 @@ _CURRENT_DOCUMENT_SECONDARY_EFFECT = re.compile(
     r"\b(?:созда(?:й|йте|ть)|сохрани(?:ть|те)?|запиши(?:те|сь|ть)?|добав(?:ь|ьте|ить)|"
     r"удали(?:те|ть)?|измени(?:те|ть)?|отправ(?:ь|ьте|ить)|перешли(?:те|ть)?|"
     r"опублику(?:й|йте|овать)|напомни(?:те|ть)?|озвуч(?:ь|ьте|ить)|экспортир\w*)\b|"
-    r"\b(?:create|save|store|delete|update|send|forward|publish|remind|export)\b|"
+    r"\b(?:редактир|переимен|перемест|конвертир|преобраз|сгенерир)\w*\b|"
+    r"\b(?:create|save|store|delete|update|send|forward|publish|remind|export|add|"
+    r"edit|modify|rename|move|convert|generate|upload)\b|"
     r"\bwrite\b[^.!?\n]{0,40}\b(?:file|document)\b|"
     r"\b(?:интернет|web)\b[^.!?\n]{0,40}\b(?:найд|поиск|search|look\s+up)\w*\b|"
-    r"\b(?:найд|поищ|поиск|search|look\s+up)\w*\b[^.!?\n]{0,40}\b(?:интернет|web)\b"
+    r"\b(?:найд|поищ|поиск|провер|search|look\s+up|browse|verify)\w*\b"
+    r"[^.!?\n]{0,40}\b(?:интернет|сеть|web|online)\b|"
+    r"\b(?:интернет|сеть|web|online)\b[^.!?\n]{0,40}"
+    r"\b(?:найд|поищ|поиск|провер|search|look\s+up|browse|verify)\w*\b"
     r")",
     re.IGNORECASE,
 )
-_CURRENT_DOCUMENT_SECONDARY_NEGATED_OR_REPORTED = re.compile(
+_CURRENT_DOCUMENT_SECONDARY_NEGATED_REQUEST = re.compile(
     r"(?:"
-    r"\bне\b(?!\s+мог(?:ла|ли)?\s+бы\b)|\bникогда\b|"
-    r"\b(?:do\s+not|don't|never|not)\b|"
-    r"\b(?:вчера|раньше|ранее|до\s+этого|уже|попросил|просил|сказал|говорил|"
-    r"написал|предлагал|yesterday|earlier|previously|already|asked|said|told)\w*\b|"
+    r"^\s*(?:(?:ну|пожалуйста|please)\s*[,—:-]?\s*)?"
+    r"(?:не|никогда\s+не|do\s+not|don't|never)\s+"
+    r"(?:дела|сдела|дава|провод|анализ|проанализ|разбира|оценива|проверя|обобща|"
+    r"резюмир|пересказыва|суммаризир|сравнива|review|summari[sz]|analy[sz]|critique|"
+    r"compare|assess|evaluate)\w*\b|"
+    r"^\s*(?:(?:я\s+(?:прошу|хочу)|i\s+(?:ask|want))\s+)?(?:не|not)\s+"
+    r"(?:делать|сделать|проводить|проанализировать|анализировать|"
+    r"разбирать|оценивать|проверять|обобщать|резюмировать|пересказывать|"
+    r"суммаризировать|сравнивать|review|summari[sz]e|analy[sz]e|critique|compare)\b"
+    r")",
+    re.IGNORECASE,
+)
+_CURRENT_DOCUMENT_SECONDARY_REPORTED_OR_STATUS = re.compile(
+    r"(?:"
+    r"^\s*(?:вчера|раньше|ранее|до\s+этого|yesterday|earlier|previously)\b|"
+    r"^\s*(?:я|ты|вы|он|она|они|мы)\s+(?:уже\s+)?"
+    r"(?:попросил|просил|сказал|говорил|написал|предлагал|сделал|подготовил|"
+    r"проанализировал|анализировал|резюмировал|обобщил|сравнил)\w*\b|"
+    r"^\s*(?:i|you|he|she|we|they)\s+(?:already\s+)?"
+    r"(?:asked|said|told|requested|reviewed|summari[sz]ed|analy[sz]ed|compared)\b|"
+    r"^\s*(?:можешь|можете|can|could|would)\b[^.!?\n]{0,80}\b"
+    r"(?:готов\w*\s+ли|сделан\w*\s+ли|заверш[её]н\w*\s+ли|whether|if)\b|"
+    r"\b(?:статус|ход\s+работ|current\s+status|progress)\b[^.!?\n]{0,80}\b"
+    r"(?:обзор|ревью|анализ|summary|review|analysis)\w*\b|"
+    r"\b(?:ты|вы|you)\s+(?:уже\s+|already\s+)?"
+    r"(?:сделал|подготовил|проанализировал|резюмировал|обобщил|сравнил|"
+    r"reviewed|summari[sz]ed|analy[sz]ed|compared)\w*\b|"
     r"^\s*(?:почему|когда|зачем|why|when|did|was|were)\b|"
     r"\b(?:это|this\s+is)\s+(?:пример|фраз|цитат|команд|текст|an?\s+example|"
     r"a\s+phrase|a\s+quote|a\s+command)\w*\b"
@@ -20032,11 +20171,13 @@ _CURRENT_DOCUMENT_SECONDARY_CURRENT_REFERENCE = re.compile(
     re.IGNORECASE,
 )
 _CURRENT_DOCUMENT_SECONDARY_RU_IMPERATIVE = re.compile(
-    r"^\s*(?:(?:пятница|пожалуйста|будь\s+добр(?:а|ы)?)\s*[,—:-]?\s*)?"
+    r"^\s*(?:(?:ну|так|ладно|хорошо|тогда)\s*[,—:-]?\s*)?"
+    r"(?:(?:пятница|пожалуйста|будь\s+добр(?:а|ы)?)\s*[,—:-]?\s*)?"
     r"(?:(?:кратко|подробно|внимательно|полностью|критически)\s+){0,2}"
     r"(?:сдела(?:й|йте)|да(?:й|йте)|подготов(?:ь|ьте)|состав(?:ь|ьте)|напиши(?:те)?|"
     r"провед(?:и|ите)|проанализиру(?:й|йте)|разбер(?:и|ите)|оцени(?:те)?|"
-    r"проверь(?:те)?|обобщи(?:те)?|резюмиру(?:й|йте)|перескажи(?:те)?|"
+    r"проверь(?:те)?|покажи(?:те)?|укажи(?:те)?|привед(?:и|ите)|посмотр(?:и|ите)|"
+    r"обобщи(?:те)?|резюмиру(?:й|йте)|перескажи(?:те)?|"
     r"суммаризиру(?:й|йте)|сравни(?:те)?|сопостав(?:ь|ьте)|свер(?:ь|ьте)|"
     r"выдели(?:те)?|найди(?:те)?|расскажи(?:те)?|структуриру(?:й|йте))\b",
     re.IGNORECASE,
@@ -20045,22 +20186,44 @@ _CURRENT_DOCUMENT_SECONDARY_RU_POLITE = re.compile(
     r"^\s*(?:(?:пятница|пожалуйста)\s*[,—:-]?\s*)?"
     r"(?:можешь(?:\s+ли)?|сможешь|не\s+мог(?:ла|ли)?\s+бы)\s+(?:ты\s+)?"
     r"(?:сделать|дать|подготовить|провести|проанализировать|разобрать|оценить|"
-    r"проверить|обобщить|резюмировать|пересказать|сравнить|сопоставить|выделить|"
-    r"найти|рассказать|структурировать)\b",
+    r"проверить|посмотреть|взглянуть|обобщить|резюмировать|пересказать|сравнить|"
+    r"сопоставить|выделить|найти|рассказать|структурировать)\b",
+    re.IGNORECASE,
+)
+_CURRENT_DOCUMENT_SECONDARY_RU_NOUN_REQUEST = re.compile(
+    r"^\s*(?:(?:мне|нам)\s+)?(?:(?:нуж(?:ен|на|но|ны)|хочу|давай(?:те)?)\s+)?"
+    r"(?:(?:кратк|подробн|полн|критическ)\w*\s+)?"
+    r"(?:обзор\w*|ревью|анализ\w*|сводк\w*|резюме|содержани\w*|"
+    r"(?:(?:основн|главн|ключев)\w*\s+)+(?:вывод|тезис|мысл|тем)\w*)\s+"
+    r"(?:"
+    r"(?:по\s+)?(?:(?:эт|данн|текущ|прикрепл[её]нн|загруженн)\w*\s+)?"
+    r"(?:файл|документ|вложени|текст)\w*"
+    r")\s*(?:,\s*пожалуйста)?[.!?]*\s*$",
+    re.IGNORECASE,
+)
+_CURRENT_DOCUMENT_SECONDARY_EN_NOUN_REQUEST = re.compile(
+    r"^\s*(?:(?:i\s+(?:need|want|would\s+like)|i'd\s+like)\s+)?"
+    r"(?:an?\s+)?(?:(?:brief|detailed|complete|critical)\s+)?"
+    r"(?:summary|overview|review|analysis|assessment)\s+(?:of\s+)?"
+    r"(?:(?:this|the\s+current|the\s+attached|attached)\s+)?"
+    r"(?:file|document|attachment|text)\s*(?:,\s*please)?[.!?]*\s*$",
     re.IGNORECASE,
 )
 _CURRENT_DOCUMENT_SECONDARY_EN_REQUEST = re.compile(
-    r"^\s*(?:(?:please|friday)\s*[,—:-]?\s*)?"
+    r"^\s*(?:(?:go\s+ahead\s+and)\s+)?(?:(?:please|friday)\s*[,—:-]?\s*)?"
     r"(?:(?:briefly|carefully|critically|fully|in\s+detail)\s+){0,2}"
     r"(?:summari[sz]e|analy[sz]e|review|critique|compare|contrast|assess|evaluate|"
-    r"inspect|identify|outline|tell|give|provide|prepare)\b",
+    r"inspect|identify|outline|show|tell|give|provide|prepare|"
+    r"walk\s+me\s+through|look\s+over|take\s+a\s+look\s+at|"
+    r"read\b[^.!?\n]{0,80}\b(?:and\s+)?summari[sz]e)\b",
     re.IGNORECASE,
 )
 _CURRENT_DOCUMENT_SECONDARY_EN_POLITE = re.compile(
     r"^\s*(?:(?:please|friday)\s*[,—:-]?\s*)?"
     r"(?:can|could|would)\s+you\s+(?:please\s+)?"
     r"(?:summari[sz]e|analy[sz]e|review|critique|compare|contrast|assess|evaluate|"
-    r"inspect|identify|outline|tell|give|provide|prepare)\b",
+    r"inspect|identify|outline|tell|give|provide|prepare|"
+    r"look\s+over|take\s+a\s+look\s+at|walk\s+me\s+through)\b",
     re.IGNORECASE,
 )
 _CURRENT_DOCUMENT_SECONDARY_OPEN_QUESTION = re.compile(
@@ -20068,21 +20231,84 @@ _CURRENT_DOCUMENT_SECONDARY_OPEN_QUESTION = re.compile(
     r"что\s+(?:ты\s+)?дума\w*\s+(?:об|про)|"
     r"что\s+(?:ты\s+)?(?:можешь\s+)?сказа\w*\s+(?:об|про)|"
     r"о\s+ч[её]м|про\s+что|в\s+ч[её]м\s+(?:основн\w*\s+)?(?:смысл|суть)\w*|"
-    r"what\s+is\s+.+\s+about|what\s+do\s+you\s+think\s+(?:about|of)"
+    r"что\s+(?:внутри|в|содержит)\s+|"
+    r"what\s+is\s+.+\s+about|what\s+(?:are\s+(?:the\s+)?(?:key|main)\s+points?\s+of|"
+    r"does\s+.+\s+say)|what\s+do\s+you\s+(?:think\s+(?:about|of)|make\s+of)"
     r")\b",
+    re.IGNORECASE,
+)
+_CURRENT_DOCUMENT_SECONDARY_COMPARISON_QUESTION = re.compile(
+    r"^\s*(?:чем\s+)?(?:отлича|различа)\w*\s+"
+    r"(?:(?:эт|данн|текущ|прикрепл[её]нн)\w*\s+)?"
+    r"(?:файл|документ|вложени|текст)\w*\s*[?!.]*\s*$|"
+    r"^\s*how\s+(?:do|does)\s+(?:these|the|this)\s+"
+    r"(?:files?|documents?|attachments?|texts?)\s+differ\s*[?!.]*\s*$|"
+    r"^\s*what\s+(?:are|is)\s+(?:the\s+)?(?:differences?|similarities)\s+"
+    r"between\s+(?:these|the)\s+(?:files?|documents?|attachments?|texts?)\s*[?!.]*\s*$",
     re.IGNORECASE,
 )
 _CURRENT_DOCUMENT_SECONDARY_SUMMARY_CUE = re.compile(
     r"\b(?:сводк|резюме|обзор|ревью|пересказ|содержани|итог|вывод|тезис|"
-    r"обобщ|резюм|суммариз|summary|overview|summari[sz]e|outline|key\s+points?)\w*\b",
+    r"обобщ|резюм|суммариз|summary|overview|summari[sz]e|outline|"
+    r"(?:key|main)\s+points?|what\s+(?:does\s+.+\s+say|is\s+.+\s+about)|"
+    r"tell\s+me\s+what\s+.+\s+is\s+about)\w*\b",
     re.IGNORECASE,
 )
 _CURRENT_DOCUMENT_SECONDARY_ANALYSIS_CUE = re.compile(
     r"\b(?:анализ|проанализ|разбор|оцени|оценк|проверь|ошиб|противореч|риск|"
-    r"слабы\w*\s+мест|дума|смысл|суть|analy[sz]|review|critique|assess|evaluate|"
-    r"inspect|risks?|weakness(?:es)?|what\s+is)\w*\b",
+    r"слабы\w*\s+мест|дума|смысл|суть|посмотр|взглян|analy[sz]|review|critique|"
+    r"assess|evaluate|inspect|look\s+over|take\s+a\s+look|walk\s+me\s+through|"
+    r"risks?|weakness(?:es)?|what\s+is|think\s+(?:about|of)|make\s+of)\w*\b",
     re.IGNORECASE,
 )
+
+
+def _current_document_secondary_affirmative_surface(command: str) -> str:
+    """Remove bounded negative constraints, not positive polite requests."""
+
+    return " ".join(_CURRENT_DOCUMENT_SECONDARY_NEGATIVE_CONSTRAINT.sub(" ", command).split())
+
+
+def _current_document_secondary_has_closed_extraction(affirmative: str) -> bool:
+    """Reject an exact extraction clause while admitting open synthesis outputs."""
+
+    for action in _CURRENT_DOCUMENT_SECONDARY_EXTRACTION_ACTION.finditer(affirmative):
+        complement = affirmative[action.end() :]
+        boundary = _CURRENT_DOCUMENT_SECONDARY_EXTRACTION_CLAUSE_BOUNDARY.search(complement)
+        if boundary is not None:
+            complement = complement[: boundary.start()]
+        if not _CURRENT_DOCUMENT_SECONDARY_OPEN_EXTRACTION_TARGET.search(complement):
+            return True
+    return False
+
+
+def _current_document_secondary_exact_or_metadata_request(message: str, command: str) -> bool:
+    """Recognise an exact sibling request without blacklisting useful roots.
+
+    Summary verbs such as ``суммаризируй``, open-output verbs such as
+    ``покажи ... тезисы`` and the infinitive ``дать`` share prefixes with
+    ``сумма``, ``покажи поле`` and ``дата``. Exact exclusion therefore requires
+    either an unambiguous count/metadata form or an extraction action bound to
+    an exact target in the same clause.
+    """
+
+    affirmative = _current_document_secondary_affirmative_surface(command)
+    if _is_document_metadata_request(message) and not _NEGATED_DOCUMENT_METADATA_ACTION.search(command):
+        return True
+    if (
+        _CURRENT_DOCUMENT_SECONDARY_COUNT_REQUEST.search(affirmative)
+        or _CURRENT_DOCUMENT_SECONDARY_METADATA_REQUEST.search(affirmative)
+        or _CURRENT_DOCUMENT_SECONDARY_EXACT_MODIFIER_TARGET.search(affirmative)
+        or _CURRENT_DOCUMENT_SECONDARY_EXACT_FIELD_ACTION.search(affirmative)
+        or _CURRENT_DOCUMENT_SECONDARY_EXACT_COMPOSITE_TARGET.search(affirmative)
+        or _CURRENT_DOCUMENT_SECONDARY_EXACT_QUOTE_REQUEST.search(affirmative)
+        or _current_document_secondary_has_closed_extraction(affirmative)
+    ):
+        return True
+    return bool(
+        _CURRENT_DOCUMENT_SECONDARY_EXACT_LOOKUP_ACTION.search(affirmative)
+        and _CURRENT_DOCUMENT_SECONDARY_EXACT_MACHINE_TARGET.search(affirmative)
+    )
 
 
 def _current_document_secondary_task_kind(message: str, *, file_count: int) -> str:
@@ -20097,15 +20323,16 @@ def _current_document_secondary_task_kind(message: str, *, file_count: int) -> s
     if file_count < 1:
         return ""
     command = " ".join(_record_source_command_text(message).split())
+    affirmative = _current_document_secondary_affirmative_surface(command)
     if (
         not command
         or _attachment_explicitly_partial_scope(message)
         or _CURRENT_DOCUMENT_SECONDARY_PARTIAL_SCOPE.search(command)
         or _CURRENT_DOCUMENT_SECONDARY_SELECTIVE_SCOPE.search(command)
-        or _CURRENT_DOCUMENT_SECONDARY_EXACT_OR_METADATA.search(command)
-        or _is_document_metadata_request(message)
-        or _CURRENT_DOCUMENT_SECONDARY_EFFECT.search(command)
-        or _CURRENT_DOCUMENT_SECONDARY_NEGATED_OR_REPORTED.search(command)
+        or _current_document_secondary_exact_or_metadata_request(message, command)
+        or _CURRENT_DOCUMENT_SECONDARY_EFFECT.search(affirmative)
+        or _CURRENT_DOCUMENT_SECONDARY_NEGATED_REQUEST.search(command)
+        or _CURRENT_DOCUMENT_SECONDARY_REPORTED_OR_STATUS.search(command)
         or _document_authored_file_command_is_data(message)
     ):
         return ""
@@ -20113,6 +20340,9 @@ def _current_document_secondary_task_kind(message: str, *, file_count: int) -> s
     present_request = bool(
         _CURRENT_DOCUMENT_SECONDARY_RU_IMPERATIVE.search(command)
         or _CURRENT_DOCUMENT_SECONDARY_EN_REQUEST.search(command)
+        or _CURRENT_DOCUMENT_SECONDARY_RU_NOUN_REQUEST.fullmatch(command)
+        or _CURRENT_DOCUMENT_SECONDARY_EN_NOUN_REQUEST.fullmatch(command)
+        or _CURRENT_DOCUMENT_SECONDARY_COMPARISON_QUESTION.fullmatch(command)
         or _noun_first_attachment_review_request(message)
         or (
             _CURRENT_DOCUMENT_SECONDARY_OPEN_QUESTION.search(command)
@@ -20132,7 +20362,10 @@ def _current_document_secondary_task_kind(message: str, *, file_count: int) -> s
     classified = _attachment_whole_document_task(message, file_count=file_count)
     if classified in {"summary", "analysis", "comparison"}:
         return classified
-    if file_count >= 2 and _ATTACHMENT_COMPARISON_REQUEST.search(command):
+    if file_count >= 2 and (
+        _ATTACHMENT_COMPARISON_REQUEST.search(command)
+        or _CURRENT_DOCUMENT_SECONDARY_COMPARISON_QUESTION.fullmatch(command)
+    ):
         return "comparison"
     if _CURRENT_DOCUMENT_SECONDARY_ANALYSIS_CUE.search(command):
         return "analysis"
@@ -45941,10 +46174,14 @@ class AgentRuntime:
         )
         current_document_secondary_task = (
             ""
-            if synthetic_document_notice or document_metadata_owned or quoted_file_command_is_data
-            else _current_document_secondary_task_kind(
-                attachment_task_message,
-                file_count=len(active_attachment_set),
+            if document_metadata_owned or quoted_file_command_is_data
+            else (
+                "summary"
+                if synthetic_document_notice and active_attachment_set
+                else _current_document_secondary_task_kind(
+                    attachment_task_message,
+                    file_count=len(active_attachment_set),
+                )
             )
         )
         whole_document_source_chars = sum(
@@ -48370,7 +48607,7 @@ class AgentRuntime:
         current_document_secondary_request: _CurrentDocumentSecondaryMapPlan | None = None
         if (
             current_document_secondary_task in {"summary", "analysis", "comparison"}
-            and pure_file_read_turn
+            and (synthetic_document_notice or pure_file_read_turn)
             and supplied_attachment_count > 0
             and supplied_attachment_count == attachment_expected_count
             and attachment_expected_count == len(active_attachment_set)

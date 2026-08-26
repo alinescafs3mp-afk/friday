@@ -749,18 +749,60 @@ async def _secondary_prepass(
     ("question", "file_count", "expected"),
     [
         ("Сделай сводку по документу.", 1, "summary"),
+        ("Суммаризируй весь документ.", 1, "summary"),
+        ("Покажи главные тезисы этого документа.", 1, "summary"),
+        ("Можешь дать обзор этого документа?", 1, "summary"),
+        ("Ну сделай уже наконец обзор этого документа.", 1, "summary"),
+        ("Сделай обзор документа, но не добавляй ничего от себя.", 1, "summary"),
+        ("Подготовь краткое резюме всего документа.", 1, "summary"),
+        ("Обобщи содержание этого файла.", 1, "summary"),
+        ("Обзор этого документа, пожалуйста.", 1, "summary"),
+        ("Краткое содержание файла.", 1, "summary"),
+        ("Нужна сводка по этому документу.", 1, "summary"),
+        ("Что в этом документе?", 1, "summary"),
+        ("Посмотри документ и скажи, что думаешь.", 1, "analysis"),
+        ("Ревью документа.", 1, "summary"),
+        ("Анализ документа.", 1, "analysis"),
+        ("Укажи основные выводы документа.", 1, "summary"),
+        ("Приведи краткую сводку документа.", 1, "summary"),
+        ("Можешь посмотреть этот файл?", 1, "analysis"),
         ("Критически оцени весь документ.", 1, "analysis"),
         ("Сравни эти два документа.", 2, "comparison"),
+        ("Чем отличаются эти документы?", 2, "comparison"),
+        ("Please summarize the entire document.", 1, "summary"),
+        ("Show me the main points of this document.", 1, "summary"),
+        ("Could you give me an overview of this document?", 1, "summary"),
+        ("Go ahead and review this whole document.", 1, "analysis"),
+        ("Review the document, but do not add anything not grounded in it.", 1, "analysis"),
+        ("Assess the document as a whole.", 1, "analysis"),
+        ("Could you take a look at this document?", 1, "analysis"),
+        ("What do you make of this document?", 1, "analysis"),
+        ("Walk me through this document.", 1, "analysis"),
+        ("Read this document and summarize it.", 1, "summary"),
+        ("Look over this document.", 1, "analysis"),
         ("Can you review this document?", 1, "analysis"),
         ("Не могла бы ты проанализировать этот документ?", 1, "analysis"),
+        ("Сделай обзор, но не считай строки.", 1, "summary"),
+        ("Review this document, but do not state the signing date.", 1, "analysis"),
+        ("Review this document using only its contents.", 1, "analysis"),
         ("Review the conclusion of this document.", 1, ""),
+        ("Summarize the first half of this document.", 1, ""),
+        ("Summarize the first 200 words of this document.", 1, ""),
+        ("Review the beginning of this file.", 1, ""),
+        ("Review only the risks in this document.", 1, ""),
+        ("Суммаризируй только финансовые данные документа.", 1, ""),
         ("Summarize the document and give the exact row count.", 1, ""),
         ("Сделай обзор документа и укажи дату подписания.", 1, ""),
+        ("Сделай обзор и укажи ФИО директора.", 1, ""),
+        ("Summarize the document and list the CEO name.", 1, ""),
         ("Summarize the document regarding Nextcloud.", 1, ""),
         ("Я попросил тебя сделать обзор документа вчера.", 1, ""),
         ("Do not summarize this document.", 1, ""),
         ("Can you review documents?", 1, ""),
         ("Сделай обзор документа и создай файл.", 1, ""),
+        ("Review the document and add comments.", 1, ""),
+        ("Review and edit this document.", 1, ""),
+        ("Summarize and browse the web for context.", 1, ""),
     ],
 )
 def test_current_document_secondary_task_requires_a_present_whole_read_only_request(
@@ -829,6 +871,71 @@ def test_current_document_secondary_task_requires_a_present_whole_read_only_requ
             [("small-polite-ru.txt", "Complete Russian polite review source.")],
             "analysis",
         ),
+        (
+            "Суммаризируй весь документ.",
+            [("small-summary-holdout-ru.txt", "Complete Russian natural summary source.")],
+            "summary",
+        ),
+        (
+            "Покажи главные тезисы этого документа.",
+            [("small-points-holdout-ru.txt", "Complete Russian natural points source.")],
+            "summary",
+        ),
+        (
+            "Можешь дать обзор этого документа?",
+            [("small-overview-holdout-ru.txt", "Complete Russian natural overview source.")],
+            "summary",
+        ),
+        (
+            "Ну сделай уже наконец обзор этого документа.",
+            [("small-discourse-holdout-ru.txt", "Complete Russian discourse source.")],
+            "summary",
+        ),
+        (
+            "Сделай обзор документа, но не добавляй ничего от себя.",
+            [("small-grounded-holdout-ru.txt", "Complete Russian grounded source.")],
+            "summary",
+        ),
+        (
+            "Show me the main points of this document.",
+            [("small-points-holdout-en.txt", "Complete English natural points source.")],
+            "summary",
+        ),
+        (
+            "Review the document, but do not add anything not grounded in it.",
+            [("small-grounded-holdout-en.txt", "Complete English grounded source.")],
+            "analysis",
+        ),
+        (
+            "Обзор этого документа, пожалуйста.",
+            [("small-noun-holdout-ru.txt", "Complete Russian noun request source.")],
+            "summary",
+        ),
+        (
+            "Что в этом документе?",
+            [("small-topic-holdout-ru.txt", "Complete Russian topic source.")],
+            "summary",
+        ),
+        (
+            "Посмотри документ и скажи, что думаешь.",
+            [("small-look-holdout-ru.txt", "Complete Russian look-over source.")],
+            "analysis",
+        ),
+        (
+            "Could you take a look at this document?",
+            [("small-look-holdout-en.txt", "Complete English look-over source.")],
+            "analysis",
+        ),
+        (
+            "Read this document and summarize it.",
+            [("small-read-holdout-en.txt", "Complete English read-and-summary source.")],
+            "summary",
+        ),
+        (
+            "Чем отличаются эти документы?",
+            [("small-compare-a-ru.txt", "Version A"), ("small-compare-b-ru.txt", "Version B")],
+            "comparison",
+        ),
     ],
 )
 @pytest.mark.asyncio
@@ -886,6 +993,76 @@ async def test_complete_current_small_document_uses_one_secondary_map_advisory_b
     )
     assert agent_runtime_module._CURRENT_DOCUMENT_SECONDARY_HINT_PREFIX not in repr(result)
     _assert_no_action_surface(llm)
+
+
+@pytest.mark.asyncio
+async def test_code_owned_synthetic_upload_notice_uses_one_secondary_summary_advisory(
+    settings: Any,
+    storage: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    secondary = _DocumentMapSecondary()
+    llm = _HierarchyLLM("Primary owns the automatic upload review.")
+
+    result = await _run(
+        settings,
+        storage,
+        monkeypatch,
+        question="Загружен документ: synthetic-current.txt",
+        attachments=[_owned("synthetic-current.txt", "SINGLE_HEAD\nLive upload.\nSINGLE_TAIL")],
+        llm=llm,
+        secondary_brain=secondary,
+        chat_kwargs={"synthetic_document_notice": True},
+    )
+
+    assert result["message"] == "Primary owns the automatic upload review."
+    assert len(secondary.requests) == 1
+    assert secondary.success_total == 1
+    payload = next(
+        _payload(str(item["content"]), CHUNK_PREFIX)
+        for item in secondary.requests[0].messages
+        if str(item.get("content") or "").startswith(CHUNK_PREFIX)
+    )
+    assert payload["task_kind"] == "summary"
+    assert (
+        sum(
+            agent_runtime_module._CURRENT_DOCUMENT_SECONDARY_HINT_PREFIX in _blob(call["messages"])
+            for call in llm.calls
+        )
+        == 1
+    )
+
+
+@pytest.mark.parametrize(
+    "lineage",
+    [
+        {"reply_to": "Earlier assistant answer.", "reply_assistant_reference": True},
+        {"quoted_attachment_reference": True},
+        {"replay_source_message_id": "00000000-0000-0000-0000-000000000001"},
+    ],
+)
+@pytest.mark.asyncio
+async def test_synthetic_upload_notice_still_rejects_reply_and_replay_lineage(
+    settings: Any,
+    storage: Any,
+    monkeypatch: pytest.MonkeyPatch,
+    lineage: dict[str, Any],
+) -> None:
+    secondary = _DocumentMapSecondary()
+
+    result = await _run(
+        settings,
+        storage,
+        monkeypatch,
+        question="Загружен документ: synthetic-lineage.txt",
+        attachments=[_owned("synthetic-lineage.txt", "Complete current source.")],
+        llm=_HierarchyLLM("ordinary primary result"),
+        secondary_brain=secondary,
+        chat_kwargs={"synthetic_document_notice": True, **lineage},
+    )
+
+    assert result["message"]
+    assert secondary.requests == []
 
 
 @pytest.mark.asyncio
@@ -1446,6 +1623,11 @@ async def test_cancelling_current_document_secondary_never_starts_primary(
         ("Сколько записей в этом документе?", 1),
         ("Покажи технические метаданные этого документа.", 1),
         ("Review only the conclusion of this document.", 1),
+        ("Summarize the first half of this document.", 1),
+        ("Summarize the first 200 words of this document.", 1),
+        ("Review the beginning of this file.", 1),
+        ("Review only the risks in this document.", 1),
+        ("Суммаризируй только финансовые данные документа.", 1),
         ("Сделай обзор документа и создай из него новый файл.", 1),
         ("Сделай обзор главы про риски в этом документе.", 1),
         ("Review the conclusion of this document.", 1),
@@ -1457,6 +1639,8 @@ async def test_cancelling_current_document_secondary_never_starts_primary(
         ("Review this document and tell me its filename.", 1),
         ("Сделай обзор документа и укажи дату подписания.", 1),
         ("Summarize and tell me the contract number.", 1),
+        ("Сделай обзор и укажи ФИО директора.", 1),
+        ("Summarize the document and list the CEO name.", 1),
         ("Сделай обзор документа про QNAP.", 1),
         ("Summarize the document regarding Nextcloud.", 1),
         ("Я попросил тебя сделать обзор документа вчера.", 1),
@@ -1468,6 +1652,9 @@ async def test_cancelling_current_document_secondary_never_starts_primary(
         ("Can you review documents?", 1),
         ("Можешь ли ты анализировать документы?", 1),
         ("Summarize the document and search the web for updates.", 1),
+        ("Review the document and add comments.", 1),
+        ("Review and edit this document.", 1),
+        ("Summarize and browse the web for context.", 1),
     ],
 )
 @pytest.mark.asyncio
