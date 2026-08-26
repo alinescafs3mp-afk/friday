@@ -1,131 +1,162 @@
-"""Evidence gate for retiring one journey-specific semantic heuristic.
+"""Fail-closed P6 review over repository-bound retirement artifacts.
 
-P6 is intentionally a release-time decision, not a runtime routing feature.
-This module cannot edit code or configuration.  It only evaluates a body-free
-receipt against the exact conditions that must be true before a reviewer may
-remove one semantic guess.  Deterministic, authority, lifecycle and publication
-guards are structurally ineligible.
+Source inspection can accept exact Git objects, but source code cannot prove a
+joined production window or that a release rollback was exercised.  Therefore
+the factories in this module issue source-only evidence and rollback witnesses;
+the gate records what is still missing and never grants deletion authority.
 """
 
 from __future__ import annotations
 
+import hashlib
+import hmac
+import json
 import re
-from dataclasses import dataclass
+import secrets
+from dataclasses import dataclass, field
 from enum import StrEnum
+from pathlib import Path
+from typing import Any
 
-from friday.orchestration.supervisor_contracts import TaskClass, canonical_sha256
+from friday.orchestration.supervisor_contracts import (
+    TaskClass,
+    canonical_dumps,
+    canonical_sha256,
+)
+from friday.orchestration.supervisor_retirement_repository import (
+    AcceptedRepositoryRetirementCandidate,
+    AcceptedRepositoryRetirementSurface,
+    ExactRepositoryFile,
+    RetirementSurfaceClass,
+    accepted_repository_candidate_is_current,
+    accepted_repository_file_is_current,
+    accepted_repository_surface_is_current,
+    inspect_repository_retirement_surface,
+    read_exact_repository_file,
+    repository_commit_is_ancestor,
+)
 
-SUPERVISOR_RETIREMENT_EVIDENCE_SCHEMA = "friday.supervisor-retirement-evidence.v1"
-SUPERVISOR_RETIREMENT_GATE_VERSION = "semantic-supervisor-retirement-gate-v1"
+SUPERVISOR_RETIREMENT_EVIDENCE_SCHEMA = "friday.supervisor-retirement-source-evidence.v2"
+SUPERVISOR_RETIREMENT_ROLLBACK_SCHEMA = "friday.supervisor-retirement-source-rollback.v2"
+SUPERVISOR_RETIREMENT_GATE_VERSION = "semantic-supervisor-retirement-gate-v2"
 
 _DIGEST_RE = re.compile(r"[0-9a-f]{64}\Z")
 _SAFE_ID_RE = re.compile(r"[a-z][a-z0-9_.-]{0,95}\Z")
+_MAX_EVIDENCE_BYTES = 32 * 1024
+_EVIDENCE_PATH_PREFIX = "outer_sol/"
+
+_PROCESS_AUTHORITY = object()
+_PROCESS_SEAL_KEY = secrets.token_bytes(32)
 
 
-class RetirementSurfaceClass(StrEnum):
-    SEMANTIC_HEURISTIC = "semantic_heuristic"
-    DETERMINISTIC_INVARIANT = "deterministic_invariant"
-    AUTHORITY_GUARD = "authority_guard"
-    LIFECYCLE_OR_STATE = "lifecycle_or_state"
-    PUBLICATION_GUARD = "publication_guard"
-    LEGACY_MIXED = "legacy_mixed"
+class RetirementGateError(ValueError):
+    """An artifact is malformed, unbound, or not accepted by this process."""
 
 
 class RetirementEvidenceAuthority(StrEnum):
+    SOURCE_BOUND_ONLY = "source_bound_only"
     PRODUCTION_JOINED = "production_joined"
-    ISOLATED_ENDPOINT = "isolated_endpoint"
-    SYNTHETIC_OFFLINE = "synthetic_offline"
+
+
+class RetirementRollbackAuthority(StrEnum):
+    SOURCE_PREIMAGE_ONLY = "source_preimage_only"
+    SEALED_RELEASE_REHEARSAL = "sealed_release_rehearsal"
 
 
 class RetirementGateReason(StrEnum):
     ADMITTED = "admitted"
-    SURFACE_IS_NOT_SEMANTIC = "surface_is_not_semantic"
-    JOURNEY_IS_NOT_PROMOTABLE = "journey_is_not_promotable"
-    JOURNEY_MISMATCH = "journey_mismatch"
-    REPLACEMENT_IDENTITY_MISMATCH = "replacement_identity_mismatch"
+    CANDIDATE_IDENTITY_MISMATCH = "candidate_identity_mismatch"
     PRODUCTION_EVIDENCE_REQUIRED = "production_evidence_required"
-    SHADOW_NOT_ACCEPTED = "shadow_not_accepted"
-    CANARY_NOT_ACCEPTED = "canary_not_accepted"
-    PRODUCTION_PROMOTION_NOT_ACCEPTED = "production_promotion_not_accepted"
-    FALLBACK_NOT_PROVEN = "fallback_not_proven"
+    SEALED_RELEASE_ROLLBACK_REQUIRED = "sealed_release_rollback_required"
     TRACE_COVERAGE_INCOMPLETE = "trace_coverage_incomplete"
     HIDDEN_OWNER_OBSERVED = "hidden_owner_observed"
     DUPLICATE_OPERATION_OBSERVED = "duplicate_operation_observed"
     FALSE_COMPLETION_REGRESSION = "false_completion_regression"
     USER_VISIBLE_REGRESSION = "user_visible_regression"
-    ROLLBACK_NOT_PROVEN = "rollback_not_proven"
-    DOCUMENTATION_NOT_UPDATED = "documentation_not_updated"
-    STATUS_REGISTRY_NOT_UPDATED = "status_registry_not_updated"
 
 
 def _digest(value: object, *, label: str) -> str:
     if not isinstance(value, str) or _DIGEST_RE.fullmatch(value) is None:
-        raise ValueError(f"{label} must be a lowercase SHA-256 digest")
+        raise RetirementGateError(f"{label} must be a lowercase SHA-256 digest")
     return value
 
 
 def _safe_id(value: object, *, label: str) -> str:
     if not isinstance(value, str) or _SAFE_ID_RE.fullmatch(value) is None:
-        raise ValueError(f"{label} is invalid")
+        raise RetirementGateError(f"{label} is invalid")
     return value
 
 
 def _count(value: object, *, label: str, positive: bool = False) -> int:
     minimum = 1 if positive else 0
     if not isinstance(value, int) or isinstance(value, bool) or value < minimum:
-        raise ValueError(f"{label} must be an integer >= {minimum}")
+        raise RetirementGateError(f"{label} must be an integer >= {minimum}")
     return value
 
 
+def _seal(kind: str, payload: dict[str, object]) -> str:
+    envelope = canonical_dumps({"kind": kind, "payload": payload}).encode("utf-8")
+    return hmac.new(_PROCESS_SEAL_KEY, envelope, hashlib.sha256).hexdigest()
+
+
+def _closed_json(raw: bytes) -> dict[str, Any]:
+    if not 0 < len(raw) <= _MAX_EVIDENCE_BYTES:
+        raise RetirementGateError("retirement evidence exceeds its byte budget")
+
+    def _pairs(items: list[tuple[str, Any]]) -> dict[str, Any]:
+        result: dict[str, Any] = {}
+        for key, value in items:
+            if key in result:
+                raise RetirementGateError("retirement evidence contains a duplicate key")
+            result[key] = value
+        return result
+
+    try:
+        value = json.loads(raw.decode("utf-8", errors="strict"), object_pairs_hook=_pairs)
+    except (json.JSONDecodeError, UnicodeError) as exc:
+        raise RetirementGateError("retirement evidence must be canonical UTF-8 JSON") from exc
+    if type(value) is not dict:
+        raise RetirementGateError("retirement evidence must be a JSON object")
+    if raw != canonical_dumps(value).encode("utf-8"):
+        raise RetirementGateError("retirement evidence must use canonical JSON bytes")
+    return value
+
+
+_EVIDENCE_KEYS = {
+    "schema",
+    "evidence_id",
+    "candidate_sha256",
+    "journey",
+    "deletion_commit",
+    "shadow_bundle_sha256",
+    "canary_bundle_sha256",
+    "promoted_journey_sha256",
+    "primary_fallback_sha256",
+    "production_trace_set_sha256",
+    "observation_count",
+    "joined_trace_count",
+    "hidden_owner_count",
+    "duplicate_capability_count",
+    "duplicate_effect_count",
+    "duplicate_publication_count",
+    "false_completion_regression_count",
+    "user_visible_regression_count",
+}
+
+
 @dataclass(frozen=True, slots=True)
-class HeuristicRetirementCandidate:
-    """Repository-owned description of exactly one removable semantic branch."""
-
-    candidate_id: str
-    journey: TaskClass
-    surface_class: RetirementSurfaceClass
-    replacement_policy_sha256: str
-    replacement_manifest_sha256: str
-    replacement_adapter_registry_sha256: str
-    rollback_source_sha256: str
-    documentation_updated: bool
-    status_registry_updated: bool
-
-    def __post_init__(self) -> None:
-        _safe_id(self.candidate_id, label="candidate_id")
-        if not isinstance(self.journey, TaskClass):
-            raise ValueError("journey must be a typed task class")
-        if not isinstance(self.surface_class, RetirementSurfaceClass):
-            raise ValueError("surface_class is invalid")
-        for label, value in (
-            ("replacement_policy_sha256", self.replacement_policy_sha256),
-            ("replacement_manifest_sha256", self.replacement_manifest_sha256),
-            ("replacement_adapter_registry_sha256", self.replacement_adapter_registry_sha256),
-            ("rollback_source_sha256", self.rollback_source_sha256),
-        ):
-            _digest(value, label=label)
-        if not isinstance(self.documentation_updated, bool) or not isinstance(
-            self.status_registry_updated, bool
-        ):
-            raise ValueError("candidate release-state fields must be boolean")
-
-
-@dataclass(frozen=True, slots=True)
-class HeuristicRetirementEvidence:
-    """Body-free, accepted release evidence for one exact replacement journey."""
+class AcceptedSourceRetirementEvidence:
+    """Canonical Git artifact; explicitly not a production attestation."""
 
     evidence_id: str
-    authority: RetirementEvidenceAuthority
+    candidate_sha256: str
     journey: TaskClass
-    replacement_policy_sha256: str
-    replacement_manifest_sha256: str
-    replacement_adapter_registry_sha256: str
-    tested_rollback_source_sha256: str
-    shadow_accepted: bool
-    canary_accepted: bool
-    production_promotion_accepted: bool
-    primary_fallback_proven: bool
-    rollback_proven: bool
+    deletion_commit: str
+    shadow_bundle_sha256: str
+    canary_bundle_sha256: str
+    promoted_journey_sha256: str
+    primary_fallback_sha256: str
+    production_trace_set_sha256: str
     observation_count: int
     joined_trace_count: int
     hidden_owner_count: int
@@ -134,58 +165,64 @@ class HeuristicRetirementEvidence:
     duplicate_publication_count: int
     false_completion_regression_count: int
     user_visible_regression_count: int
+    repository_artifact: ExactRepositoryFile
+    authority: RetirementEvidenceAuthority = field(init=False)
+    _process_authority: object = field(repr=False, compare=False)
+    _process_seal_sha256: str = field(repr=False, compare=False)
 
     def __post_init__(self) -> None:
+        object.__setattr__(self, "authority", RetirementEvidenceAuthority.SOURCE_BOUND_ONLY)
+        payload = self.payload()
+        if (
+            not accepted_repository_file_is_current(self.repository_artifact)
+            or not self.repository_artifact.source_path.startswith(_EVIDENCE_PATH_PREFIX)
+            or not self.repository_artifact.source_path.endswith(".json")
+            or self._process_authority is not _PROCESS_AUTHORITY
+            or type(self._process_seal_sha256) is not str
+            or not hmac.compare_digest(
+                self._process_seal_sha256,
+                _seal("source-evidence", payload),
+            )
+        ):
+            raise RetirementGateError("retirement evidence was not accepted by this process")
         _safe_id(self.evidence_id, label="evidence_id")
-        if not isinstance(self.authority, RetirementEvidenceAuthority):
-            raise ValueError("evidence authority is invalid")
-        if not isinstance(self.journey, TaskClass):
-            raise ValueError("evidence journey must be a typed task class")
-        for label, value in (
-            ("replacement_policy_sha256", self.replacement_policy_sha256),
-            ("replacement_manifest_sha256", self.replacement_manifest_sha256),
-            ("replacement_adapter_registry_sha256", self.replacement_adapter_registry_sha256),
-            ("tested_rollback_source_sha256", self.tested_rollback_source_sha256),
+        if self.journey is not TaskClass.COMPARE_CURRENT_FILE_WITH_CURRENT_WEB:
+            raise RetirementGateError("retirement evidence journey is not promotable")
+        for label in (
+            "candidate_sha256",
+            "shadow_bundle_sha256",
+            "canary_bundle_sha256",
+            "promoted_journey_sha256",
+            "primary_fallback_sha256",
+            "production_trace_set_sha256",
         ):
-            _digest(value, label=label)
-        for bool_label, bool_value in (
-            ("shadow_accepted", self.shadow_accepted),
-            ("canary_accepted", self.canary_accepted),
-            ("production_promotion_accepted", self.production_promotion_accepted),
-            ("primary_fallback_proven", self.primary_fallback_proven),
-            ("rollback_proven", self.rollback_proven),
-        ):
-            if not isinstance(bool_value, bool):
-                raise ValueError(f"{bool_label} must be boolean")
+            _digest(getattr(self, label), label=label)
         _count(self.observation_count, label="observation_count", positive=True)
         _count(self.joined_trace_count, label="joined_trace_count")
-        for count_label, count_value in (
-            ("hidden_owner_count", self.hidden_owner_count),
-            ("duplicate_capability_count", self.duplicate_capability_count),
-            ("duplicate_effect_count", self.duplicate_effect_count),
-            ("duplicate_publication_count", self.duplicate_publication_count),
-            ("false_completion_regression_count", self.false_completion_regression_count),
-            ("user_visible_regression_count", self.user_visible_regression_count),
+        for label in (
+            "hidden_owner_count",
+            "duplicate_capability_count",
+            "duplicate_effect_count",
+            "duplicate_publication_count",
+            "false_completion_regression_count",
+            "user_visible_regression_count",
         ):
-            _count(count_value, label=count_label)
+            _count(getattr(self, label), label=label)
         if self.joined_trace_count > self.observation_count:
-            raise ValueError("joined_trace_count exceeds the evidence window")
+            raise RetirementGateError("joined_trace_count exceeds observation_count")
 
     def payload(self) -> dict[str, object]:
         return {
             "schema": SUPERVISOR_RETIREMENT_EVIDENCE_SCHEMA,
             "evidence_id": self.evidence_id,
-            "authority": self.authority.value,
+            "candidate_sha256": self.candidate_sha256,
             "journey": self.journey.value,
-            "replacement_policy_sha256": self.replacement_policy_sha256,
-            "replacement_manifest_sha256": self.replacement_manifest_sha256,
-            "replacement_adapter_registry_sha256": self.replacement_adapter_registry_sha256,
-            "tested_rollback_source_sha256": self.tested_rollback_source_sha256,
-            "shadow_accepted": self.shadow_accepted,
-            "canary_accepted": self.canary_accepted,
-            "production_promotion_accepted": self.production_promotion_accepted,
-            "primary_fallback_proven": self.primary_fallback_proven,
-            "rollback_proven": self.rollback_proven,
+            "deletion_commit": self.deletion_commit,
+            "shadow_bundle_sha256": self.shadow_bundle_sha256,
+            "canary_bundle_sha256": self.canary_bundle_sha256,
+            "promoted_journey_sha256": self.promoted_journey_sha256,
+            "primary_fallback_sha256": self.primary_fallback_sha256,
+            "production_trace_set_sha256": self.production_trace_set_sha256,
             "observation_count": self.observation_count,
             "joined_trace_count": self.joined_trace_count,
             "hidden_owner_count": self.hidden_owner_count,
@@ -194,10 +231,237 @@ class HeuristicRetirementEvidence:
             "duplicate_publication_count": self.duplicate_publication_count,
             "false_completion_regression_count": self.false_completion_regression_count,
             "user_visible_regression_count": self.user_visible_regression_count,
+            "repository_artifact": self.repository_artifact.payload(),
+            "authority": self.authority.value,
         }
 
     def canonical_sha256(self) -> str:
         return canonical_sha256(self.payload())
+
+
+def accepted_source_evidence_is_current(value: object) -> bool:
+    if (
+        type(value) is not AcceptedSourceRetirementEvidence
+        or value._process_authority is not _PROCESS_AUTHORITY
+        or value.authority is not RetirementEvidenceAuthority.SOURCE_BOUND_ONLY
+        or not accepted_repository_file_is_current(value.repository_artifact)
+    ):
+        return False
+    expected = _seal("source-evidence", value.payload())
+    return type(value._process_seal_sha256) is str and hmac.compare_digest(
+        value._process_seal_sha256,
+        expected,
+    )
+
+
+def accept_source_retirement_evidence(
+    repository_root: str | Path,
+    *,
+    candidate: AcceptedRepositoryRetirementCandidate,
+    evidence_commit: str,
+    evidence_path: str,
+    expected_file_sha256: str,
+) -> AcceptedSourceRetirementEvidence:
+    """Structurally accept a canonical evidence artifact from one Git commit.
+
+    The returned authority remains ``SOURCE_BOUND_ONLY``.  A future release
+    component must join and attest production records; this loader cannot.
+    """
+
+    if not accepted_repository_candidate_is_current(candidate):
+        raise TypeError("candidate must be accepted by this process")
+    _digest(expected_file_sha256, label="expected_file_sha256")
+    if not evidence_path.startswith(_EVIDENCE_PATH_PREFIX) or not evidence_path.endswith(".json"):
+        raise RetirementGateError("evidence_path must be a repository evidence JSON path")
+    if not repository_commit_is_ancestor(
+        repository_root,
+        ancestor_commit=candidate.deletion_commit,
+        descendant_commit=evidence_commit,
+    ):
+        raise RetirementGateError("evidence_commit must descend from the deletion commit")
+    artifact = read_exact_repository_file(
+        repository_root,
+        source_commit=evidence_commit,
+        source_path=evidence_path,
+    )
+    if not hmac.compare_digest(artifact.file_sha256, expected_file_sha256):
+        raise RetirementGateError("retirement evidence file digest mismatch")
+    raw = _closed_json(artifact.raw_bytes())
+    if set(raw) != _EVIDENCE_KEYS:
+        raise RetirementGateError("retirement evidence keys are not closed")
+    if raw.get("schema") != SUPERVISOR_RETIREMENT_EVIDENCE_SCHEMA:
+        raise RetirementGateError("retirement evidence schema is invalid")
+    candidate_sha256 = candidate.canonical_sha256()
+    if raw.get("candidate_sha256") != candidate_sha256:
+        raise RetirementGateError("retirement evidence candidate identity mismatch")
+    if raw.get("journey") != candidate.journey.value:
+        raise RetirementGateError("retirement evidence journey mismatch")
+    if raw.get("deletion_commit") != candidate.deletion_commit:
+        raise RetirementGateError("retirement evidence deletion commit mismatch")
+
+    evidence_id = _safe_id(raw.get("evidence_id"), label="evidence_id")
+    digests = {
+        label: _digest(raw.get(label), label=label)
+        for label in (
+            "shadow_bundle_sha256",
+            "canary_bundle_sha256",
+            "promoted_journey_sha256",
+            "primary_fallback_sha256",
+            "production_trace_set_sha256",
+        )
+    }
+    counts = {
+        "observation_count": _count(
+            raw.get("observation_count"),
+            label="observation_count",
+            positive=True,
+        ),
+        "joined_trace_count": _count(raw.get("joined_trace_count"), label="joined_trace_count"),
+        **{
+            label: _count(raw.get(label), label=label)
+            for label in (
+                "hidden_owner_count",
+                "duplicate_capability_count",
+                "duplicate_effect_count",
+                "duplicate_publication_count",
+                "false_completion_regression_count",
+                "user_visible_regression_count",
+            )
+        },
+    }
+    if counts["joined_trace_count"] > counts["observation_count"]:
+        raise RetirementGateError("joined_trace_count exceeds observation_count")
+    fields: dict[str, object] = {
+        "schema": SUPERVISOR_RETIREMENT_EVIDENCE_SCHEMA,
+        "evidence_id": evidence_id,
+        "candidate_sha256": candidate_sha256,
+        "journey": candidate.journey.value,
+        "deletion_commit": candidate.deletion_commit,
+        **digests,
+        **counts,
+        "repository_artifact": artifact.payload(),
+        "authority": RetirementEvidenceAuthority.SOURCE_BOUND_ONLY.value,
+    }
+    return AcceptedSourceRetirementEvidence(
+        evidence_id=evidence_id,
+        candidate_sha256=candidate_sha256,
+        journey=candidate.journey,
+        deletion_commit=candidate.deletion_commit,
+        shadow_bundle_sha256=digests["shadow_bundle_sha256"],
+        canary_bundle_sha256=digests["canary_bundle_sha256"],
+        promoted_journey_sha256=digests["promoted_journey_sha256"],
+        primary_fallback_sha256=digests["primary_fallback_sha256"],
+        production_trace_set_sha256=digests["production_trace_set_sha256"],
+        observation_count=counts["observation_count"],
+        joined_trace_count=counts["joined_trace_count"],
+        hidden_owner_count=counts["hidden_owner_count"],
+        duplicate_capability_count=counts["duplicate_capability_count"],
+        duplicate_effect_count=counts["duplicate_effect_count"],
+        duplicate_publication_count=counts["duplicate_publication_count"],
+        false_completion_regression_count=counts["false_completion_regression_count"],
+        user_visible_regression_count=counts["user_visible_regression_count"],
+        repository_artifact=artifact,
+        _process_authority=_PROCESS_AUTHORITY,
+        _process_seal_sha256=_seal("source-evidence", fields),
+    )
+
+
+@dataclass(frozen=True, slots=True)
+class AcceptedSourceRollbackWitness:
+    """Exact restored AST preimage; explicitly not a live release rehearsal."""
+
+    candidate_sha256: str
+    rollback_surface: AcceptedRepositoryRetirementSurface
+    deletion_commit: str
+    authority: RetirementRollbackAuthority = field(init=False)
+    _process_authority: object = field(repr=False, compare=False)
+    _process_seal_sha256: str = field(repr=False, compare=False)
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "authority", RetirementRollbackAuthority.SOURCE_PREIMAGE_ONLY)
+        payload = self.payload()
+        if (
+            not accepted_repository_surface_is_current(self.rollback_surface)
+            or self._process_authority is not _PROCESS_AUTHORITY
+            or type(self._process_seal_sha256) is not str
+            or not hmac.compare_digest(
+                self._process_seal_sha256,
+                _seal("source-rollback", payload),
+            )
+        ):
+            raise RetirementGateError("rollback witness was not accepted by this process")
+        _digest(self.candidate_sha256, label="candidate_sha256")
+
+    def payload(self) -> dict[str, object]:
+        return {
+            "schema": SUPERVISOR_RETIREMENT_ROLLBACK_SCHEMA,
+            "candidate_sha256": self.candidate_sha256,
+            "deletion_commit": self.deletion_commit,
+            "rollback_surface": self.rollback_surface.payload(),
+            "authority": self.authority.value,
+        }
+
+    def canonical_sha256(self) -> str:
+        return canonical_sha256(self.payload())
+
+
+def accepted_source_rollback_is_current(value: object) -> bool:
+    if (
+        type(value) is not AcceptedSourceRollbackWitness
+        or value._process_authority is not _PROCESS_AUTHORITY
+        or value.authority is not RetirementRollbackAuthority.SOURCE_PREIMAGE_ONLY
+        or not accepted_repository_surface_is_current(value.rollback_surface)
+    ):
+        return False
+    expected = _seal("source-rollback", value.payload())
+    return type(value._process_seal_sha256) is str and hmac.compare_digest(
+        value._process_seal_sha256,
+        expected,
+    )
+
+
+def accept_source_rollback_witness(
+    repository_root: str | Path,
+    *,
+    candidate: AcceptedRepositoryRetirementCandidate,
+    rollback_commit: str,
+) -> AcceptedSourceRollbackWitness:
+    """Accept an exact post-deletion commit restoring the original AST node."""
+
+    if not accepted_repository_candidate_is_current(candidate):
+        raise TypeError("candidate must be accepted by this process")
+    if not repository_commit_is_ancestor(
+        repository_root,
+        ancestor_commit=candidate.deletion_commit,
+        descendant_commit=rollback_commit,
+    ):
+        raise RetirementGateError("rollback_commit must descend from the deletion commit")
+    restored = inspect_repository_retirement_surface(
+        repository_root,
+        source_commit=rollback_commit,
+        candidate_id=candidate.candidate_id,
+    )
+    predecessor = candidate.predecessor_surface
+    if (
+        restored.descriptor != predecessor.descriptor
+        or restored.source_node_kind != predecessor.source_node_kind
+        or not hmac.compare_digest(restored.source_node_sha256, predecessor.source_node_sha256)
+    ):
+        raise RetirementGateError("rollback commit did not restore the exact AST preimage")
+    fields: dict[str, object] = {
+        "schema": SUPERVISOR_RETIREMENT_ROLLBACK_SCHEMA,
+        "candidate_sha256": candidate.canonical_sha256(),
+        "deletion_commit": candidate.deletion_commit,
+        "rollback_surface": restored.payload(),
+        "authority": RetirementRollbackAuthority.SOURCE_PREIMAGE_ONLY.value,
+    }
+    return AcceptedSourceRollbackWitness(
+        candidate_sha256=candidate.canonical_sha256(),
+        rollback_surface=restored,
+        deletion_commit=candidate.deletion_commit,
+        _process_authority=_PROCESS_AUTHORITY,
+        _process_seal_sha256=_seal("source-rollback", fields),
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -205,53 +469,54 @@ class HeuristicRetirementDecision:
     admitted: bool
     reason: RetirementGateReason
     candidate_id: str
+    candidate_sha256: str
     evidence_sha256: str | None = None
+    rollback_sha256: str | None = None
 
 
 def _reject(
-    candidate: HeuristicRetirementCandidate,
+    candidate: AcceptedRepositoryRetirementCandidate,
     reason: RetirementGateReason,
 ) -> HeuristicRetirementDecision:
     return HeuristicRetirementDecision(
         admitted=False,
         reason=reason,
         candidate_id=candidate.candidate_id,
+        candidate_sha256=candidate.canonical_sha256(),
     )
 
 
 def evaluate_heuristic_retirement(
-    candidate: HeuristicRetirementCandidate,
-    evidence: HeuristicRetirementEvidence,
+    candidate: AcceptedRepositoryRetirementCandidate,
+    evidence: AcceptedSourceRetirementEvidence,
+    rollback: AcceptedSourceRollbackWitness,
 ) -> HeuristicRetirementDecision:
-    """Admit a reviewer-visible P6 candidate; never mutate or delete a surface."""
+    """Evaluate source-complete P6 inputs without granting release authority."""
 
-    if not isinstance(candidate, HeuristicRetirementCandidate) or not isinstance(
-        evidence, HeuristicRetirementEvidence
-    ):
-        raise TypeError("retirement gate requires typed candidate and evidence")
-    if candidate.surface_class is not RetirementSurfaceClass.SEMANTIC_HEURISTIC:
-        return _reject(candidate, RetirementGateReason.SURFACE_IS_NOT_SEMANTIC)
-    if candidate.journey is not TaskClass.COMPARE_CURRENT_FILE_WITH_CURRENT_WEB:
-        return _reject(candidate, RetirementGateReason.JOURNEY_IS_NOT_PROMOTABLE)
-    if evidence.journey is not candidate.journey:
-        return _reject(candidate, RetirementGateReason.JOURNEY_MISMATCH)
+    if not accepted_repository_candidate_is_current(candidate):
+        raise TypeError("candidate must be accepted by this process")
+    if not accepted_source_evidence_is_current(evidence):
+        raise TypeError("evidence must be accepted by this process")
+    if not accepted_source_rollback_is_current(rollback):
+        raise TypeError("rollback must be accepted by this process")
+    candidate_sha256 = candidate.canonical_sha256()
     if (
-        evidence.replacement_policy_sha256 != candidate.replacement_policy_sha256
-        or evidence.replacement_manifest_sha256 != candidate.replacement_manifest_sha256
-        or evidence.replacement_adapter_registry_sha256 != candidate.replacement_adapter_registry_sha256
-        or evidence.tested_rollback_source_sha256 != candidate.rollback_source_sha256
+        not hmac.compare_digest(evidence.candidate_sha256, candidate_sha256)
+        or not hmac.compare_digest(rollback.candidate_sha256, candidate_sha256)
+        or evidence.deletion_commit != candidate.deletion_commit
+        or rollback.deletion_commit != candidate.deletion_commit
     ):
-        return _reject(candidate, RetirementGateReason.REPLACEMENT_IDENTITY_MISMATCH)
+        return _reject(candidate, RetirementGateReason.CANDIDATE_IDENTITY_MISMATCH)
+
+    # Source files cannot attest joined production observations.  There is no
+    # source factory for PRODUCTION_JOINED and no constructor path that can
+    # upgrade this accepted object's authority.
     if evidence.authority is not RetirementEvidenceAuthority.PRODUCTION_JOINED:
         return _reject(candidate, RetirementGateReason.PRODUCTION_EVIDENCE_REQUIRED)
+    if rollback.authority is not RetirementRollbackAuthority.SEALED_RELEASE_REHEARSAL:
+        return _reject(candidate, RetirementGateReason.SEALED_RELEASE_ROLLBACK_REQUIRED)
+
     checks = (
-        (evidence.shadow_accepted, RetirementGateReason.SHADOW_NOT_ACCEPTED),
-        (evidence.canary_accepted, RetirementGateReason.CANARY_NOT_ACCEPTED),
-        (
-            evidence.production_promotion_accepted,
-            RetirementGateReason.PRODUCTION_PROMOTION_NOT_ACCEPTED,
-        ),
-        (evidence.primary_fallback_proven, RetirementGateReason.FALLBACK_NOT_PROVEN),
         (
             evidence.joined_trace_count == evidence.observation_count,
             RetirementGateReason.TRACE_COVERAGE_INCOMPLETE,
@@ -271,9 +536,6 @@ def evaluate_heuristic_retirement(
             evidence.user_visible_regression_count == 0,
             RetirementGateReason.USER_VISIBLE_REGRESSION,
         ),
-        (evidence.rollback_proven, RetirementGateReason.ROLLBACK_NOT_PROVEN),
-        (candidate.documentation_updated, RetirementGateReason.DOCUMENTATION_NOT_UPDATED),
-        (candidate.status_registry_updated, RetirementGateReason.STATUS_REGISTRY_NOT_UPDATED),
     )
     for accepted, reason in checks:
         if not accepted:
@@ -282,18 +544,27 @@ def evaluate_heuristic_retirement(
         admitted=True,
         reason=RetirementGateReason.ADMITTED,
         candidate_id=candidate.candidate_id,
+        candidate_sha256=candidate_sha256,
         evidence_sha256=evidence.canonical_sha256(),
+        rollback_sha256=rollback.canonical_sha256(),
     )
 
 
 __all__ = [
-    "HeuristicRetirementCandidate",
+    "AcceptedSourceRetirementEvidence",
+    "AcceptedSourceRollbackWitness",
     "HeuristicRetirementDecision",
-    "HeuristicRetirementEvidence",
     "RetirementEvidenceAuthority",
+    "RetirementGateError",
     "RetirementGateReason",
+    "RetirementRollbackAuthority",
     "RetirementSurfaceClass",
     "SUPERVISOR_RETIREMENT_EVIDENCE_SCHEMA",
     "SUPERVISOR_RETIREMENT_GATE_VERSION",
+    "SUPERVISOR_RETIREMENT_ROLLBACK_SCHEMA",
+    "accept_source_retirement_evidence",
+    "accept_source_rollback_witness",
+    "accepted_source_evidence_is_current",
+    "accepted_source_rollback_is_current",
     "evaluate_heuristic_retirement",
 ]
