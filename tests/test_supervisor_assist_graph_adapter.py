@@ -3,11 +3,13 @@ from __future__ import annotations
 import hashlib
 import json
 from pathlib import Path
+from typing import Any, NoReturn
 
 import pytest
 
 import friday.orchestration.current_file_web_comparison as comparison_module
 import friday.orchestration.transient_web_comparison as web_module
+from friday.execution_kernel import request_effect_possible, track_request_effects
 from friday.interaction_control_plane.compare_current_file_web_work_graph import (
     COMPARE_CURRENT_FILE_WEB_CANCELLED_RESPONSE,
     CompareCurrentFileWebGraphOutcomeReason,
@@ -267,6 +269,51 @@ def test_admission_is_one_existing_dialogue_transaction_and_never_upgrades_file_
         encoding="utf-8"
     )
     assert "prepare_current_turn_file_evidence" not in source
+
+
+def test_graph_lookup_is_effect_free_and_never_opens_a_writer(storage) -> None:
+    writer = SupervisorAssistGraphAdapter(storage)
+    surface, _ = _seed_surface(storage, "lookup")
+    graph = _admit(writer, surface)
+    observed_before = storage.execute(
+        "SELECT observed_at FROM relation_revision_context WHERE singleton=1"
+    ).fetchone()[0]
+
+    class ReadOnlyStorageProbe:
+        def __init__(self, delegate: Any) -> None:
+            self.conn = delegate.conn
+
+        def transaction(self) -> NoReturn:
+            raise AssertionError("graph lookup must not enter the storage writer path")
+
+    fence_calls: list[str] = []
+
+    def before_effect() -> bool:
+        fence_calls.append("zero-argument")
+        return True
+
+    def before_effect_in_transaction(_conn: object) -> bool:
+        fence_calls.append("transaction")
+        return True
+
+    reader = SupervisorAssistGraphAdapter(ReadOnlyStorageProbe(storage))
+    with track_request_effects(
+        before_effect,
+        before_effect_in_transaction=before_effect_in_transaction,
+    ) as effects:
+        assert reader.load(AssistGraphCursor.from_graph(graph)) == graph
+        assert (
+            reader.load_current(AssistConversationScope(graph.user_id, graph.conversation_id))
+            == graph
+        )
+        assert request_effect_possible() is False
+        assert effects.staged is False
+
+    observed_after = storage.execute(
+        "SELECT observed_at FROM relation_revision_context WHERE singleton=1"
+    ).fetchone()[0]
+    assert observed_after == observed_before
+    assert fence_calls == []
 
 
 def test_claim_denial_is_atomic_and_review_recovery_is_typed(storage) -> None:

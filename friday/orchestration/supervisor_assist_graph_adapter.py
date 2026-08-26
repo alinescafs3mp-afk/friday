@@ -92,6 +92,7 @@ from friday.source_identity import (
 )
 from friday.storage._base import normalize_conversation_mode
 from friday.storage._conversations import store_message_in_transaction
+from friday.storage._core import read_only_storage_snapshot
 
 _DIGEST_RE = re.compile(r"[0-9a-f]{64}\Z")
 _GRAPH_ID_RE = re.compile(r"graph_[0-9a-f]{16}\Z")
@@ -664,7 +665,7 @@ class SupervisorAssistGraphAdapter:
     def load(self, cursor: AssistGraphCursor) -> CompareCurrentFileWebWorkGraph | None:
         if type(cursor) is not AssistGraphCursor:
             raise TypeError("assist load requires a cursor")
-        with self._storage.transaction() as conn:
+        with read_only_storage_snapshot(self._storage) as conn:
             return get_compare_current_file_web_work_graph_in_transaction(
                 conn,
                 graph_id=cursor.graph_id,
@@ -675,7 +676,7 @@ class SupervisorAssistGraphAdapter:
     def load_current(self, scope: AssistConversationScope) -> CompareCurrentFileWebWorkGraph | None:
         if type(scope) is not AssistConversationScope:
             raise TypeError("assist current lookup requires a scope")
-        with self._storage.transaction() as conn:
+        with read_only_storage_snapshot(self._storage) as conn:
             return get_current_compare_current_file_web_work_graph_in_transaction(
                 conn, user_id=scope.user_id, conversation_id=scope.conversation_id
             )
