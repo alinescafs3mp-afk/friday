@@ -391,7 +391,7 @@ class _ProspectiveAdmission:
     plan: ValidatedExecutionPlan = field(repr=False)
     decision: AssistPromotionDecision = field(repr=False)
     binding_snapshot: CapabilityBindingSnapshot = field(repr=False)
-    canary_actor_binding_sha256: str
+    canary_actor_binding_sha256: str | None
 
 
 @dataclass(slots=True)
@@ -399,7 +399,7 @@ class _OwnedRun:
     surface: CurrentFileWebAssistSurface = field(repr=False)
     decision: AssistPromotionDecision = field(repr=False)
     plan: ValidatedExecutionPlan = field(repr=False)
-    canary_actor_binding_sha256: str
+    canary_actor_binding_sha256: str | None
     pending: PendingDurableTurnAdmission = field(repr=False)
     graph: CompareCurrentFileWebWorkGraph = field(repr=False)
     task: asyncio.Task[Any] = field(repr=False)
@@ -662,15 +662,21 @@ class SupervisorAssistController:
         self._event_success_total = 0
         self._event_failure_total = 0
         self._ownership_uncertain_total = 0
+        self._last_admitted_mode = SupervisorMode.OFF
         self._last_admitted_actor_binding_sha256: str | None = None
         self._closed = False
 
     def _current_promotion(self) -> AssistPromotionDecision | None:
         """Re-evaluate the last admitted actor against fresh local runtime facts."""
 
-        actor_binding = self._last_admitted_actor_binding_sha256
-        if self._closed or actor_binding is None:
+        admitted_mode = self._last_admitted_mode
+        if self._closed or admitted_mode not in {SupervisorMode.ASSIST, SupervisorMode.CANARY}:
             return None
+        actor_binding = self._last_admitted_actor_binding_sha256
+        if admitted_mode is SupervisorMode.CANARY and actor_binding is None:
+            return None
+        if admitted_mode is SupervisorMode.ASSIST:
+            actor_binding = None
         snapshot = self._fresh_snapshot()
         if snapshot is None:
             return None
@@ -753,7 +759,7 @@ class SupervisorAssistController:
         self,
         snapshot: CapabilityBindingSnapshot,
         *,
-        canary_actor_binding: str,
+        canary_actor_binding: str | None,
         count_evaluation: bool = True,
     ) -> AssistPromotionDecision | None:
         if count_evaluation:
@@ -795,12 +801,19 @@ class SupervisorAssistController:
             or self._closed
         ):
             return None
-        try:
-            canary_binding = self._canary_actor_binding(surface.actor)
-        except Exception:
+        requested_mode = SupervisorMode.fail_closed(
+            getattr(self._settings, "semantic_supervisor_mode", SupervisorMode.OFF.value)
+        )
+        if requested_mode not in {SupervisorMode.ASSIST, SupervisorMode.CANARY}:
             return None
-        if type(canary_binding) is not str or _DIGEST_RE.fullmatch(canary_binding) is None:
-            return None
+        canary_binding: str | None = None
+        if requested_mode is SupervisorMode.CANARY:
+            try:
+                canary_binding = self._canary_actor_binding(surface.actor)
+            except Exception:
+                return None
+            if type(canary_binding) is not str or _DIGEST_RE.fullmatch(canary_binding) is None:
+                return None
         snapshot = self._fresh_snapshot()
         if snapshot is None:
             return None
@@ -810,6 +823,7 @@ class SupervisorAssistController:
             canary_actor_binding=canary_binding,
         )
         if decision is None:
+            self._last_admitted_mode = SupervisorMode.OFF
             self._last_admitted_actor_binding_sha256 = None
             return None
         try:
@@ -877,7 +891,10 @@ class SupervisorAssistController:
         if final_decision is None:
             return None
         assert fresh is not None
-        self._last_admitted_actor_binding_sha256 = canary_binding
+        self._last_admitted_mode = final_decision.admitted_mode
+        self._last_admitted_actor_binding_sha256 = (
+            canary_binding if final_decision.admitted_mode is SupervisorMode.CANARY else None
+        )
         return _ProspectiveAdmission(
             surface=surface,
             plan=plan,

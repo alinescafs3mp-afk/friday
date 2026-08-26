@@ -95,9 +95,9 @@ class _Carrier(dict[str, Any]):
     pass
 
 
-def _settings() -> SimpleNamespace:
+def _settings(mode: SupervisorMode = SupervisorMode.ASSIST) -> SimpleNamespace:
     return SimpleNamespace(
-        semantic_supervisor_mode="assist",
+        semantic_supervisor_mode=mode.value,
         semantic_supervisor_tasks=("compare_current_file_with_current_web",),
         semantic_supervisor_max_steps=6,
         semantic_supervisor_max_review_rounds=0,
@@ -106,13 +106,13 @@ def _settings() -> SimpleNamespace:
     )
 
 
-def _promotion() -> AssistPromotionDecision:
+def _promotion(mode: SupervisorMode = SupervisorMode.ASSIST) -> AssistPromotionDecision:
     return AssistPromotionDecision(
         promotion_admitted=True,
         readiness=AssistPromotionReadiness.LIVE_EVIDENCE_READY,
         reason=AssistPromotionReason.ADMITTED,
-        requested_mode=SupervisorMode.ASSIST,
-        admitted_mode=SupervisorMode.ASSIST,
+        requested_mode=mode,
+        admitted_mode=mode,
         source_ready=True,
         live_evidence_ready=True,
         operator_gate_bound=True,
@@ -121,9 +121,16 @@ def _promotion() -> AssistPromotionDecision:
 
 
 class _Promotion:
-    def __init__(self, *, admitted: bool = True) -> None:
+    def __init__(
+        self,
+        *,
+        admitted: bool = True,
+        mode: SupervisorMode = SupervisorMode.ASSIST,
+    ) -> None:
         self.admitted = admitted
+        self.mode = mode
         self.calls = 0
+        self.actor_bindings: list[str | None] = []
         self.scheduler = SimpleNamespace()
 
     def decide(
@@ -133,9 +140,9 @@ class _Promotion:
         actor_binding_sha256: str | None = None,
     ) -> AssistPromotionDecision | None:
         assert type(binding_snapshot) is CapabilityBindingSnapshot
-        assert actor_binding_sha256 is not None
         self.calls += 1
-        return _promotion() if self.admitted else None
+        self.actor_bindings.append(actor_binding_sha256)
+        return _promotion(self.mode) if self.admitted else None
 
 
 class _Planner:
@@ -697,12 +704,13 @@ def _controller(
     max_review_rounds: int = 1,
     synthesizer: Any = None,
     binding_snapshot_factory: Any = operational_capability_snapshot,
+    settings: Any = None,
 ) -> SupervisorAssistController:
     kwargs: dict[str, Any] = {}
     if synthesizer is not None:
         kwargs["synthesizer"] = synthesizer
     return SupervisorAssistController(
-        settings=_settings(),
+        settings=settings or _settings(),
         promotion_evaluator=promotion or _Promotion(),
         planner=planner or _Planner(),
         reviewer=reviewer,
@@ -1323,6 +1331,7 @@ async def test_health_rechecks_current_promotion_and_registry_without_authorizin
     assert admitted["promotion_admitted"] is True
     assert admitted["effective_mode"] == SupervisorMode.ASSIST.value
     assert admitted["promotion_evaluation_total"] == evaluation_count
+    assert promotion.actor_bindings[-1] is None
 
     # The production evaluator derives this denial from fresh local scheduler
     # and immutable activation facts; the controller must not trust its last turn.
@@ -1331,6 +1340,7 @@ async def test_health_rechecks_current_promotion_and_registry_without_authorizin
     assert scheduler_closed["promotion_admitted"] is False
     assert scheduler_closed["effective_mode"] == SupervisorMode.OFF.value
     assert scheduler_closed["promotion_evaluation_total"] == evaluation_count
+    assert promotion.actor_bindings[-1] is None
 
     promotion.admitted = True
     snapshots.available = False
@@ -1338,6 +1348,41 @@ async def test_health_rechecks_current_promotion_and_registry_without_authorizin
     assert registry_unavailable["promotion_admitted"] is False
     assert registry_unavailable["effective_mode"] == SupervisorMode.OFF.value
     assert registry_unavailable["promotion_evaluation_total"] == evaluation_count
+
+
+@pytest.mark.asyncio
+async def test_canary_health_rechecks_exact_last_admitted_actor(storage: Any) -> None:
+    surface, projection = _stored_surface(storage, "health-canary")
+    adapter = _CountingAdapter(storage)
+    promotion = _Promotion(mode=SupervisorMode.CANARY)
+    controller = _controller(
+        settings=_settings(SupervisorMode.CANARY),
+        promotion=promotion,
+        graph_adapter=adapter,
+        file_reader=_FileReader(_prepared_file(surface, projection)),
+        web_reader=_WebReader(_web_evidence(surface)),
+    )
+
+    async def forbidden_legacy() -> dict[str, object]:
+        raise AssertionError("legacy cannot run after ownership")
+
+    result = await controller.execute(
+        surface,
+        legacy_primary=forbidden_legacy,
+        absolute_deadline=time.monotonic() + 4,
+    )
+    admitted = controller.semantic_supervisor_status()
+
+    assert result.outcome is SupervisorAssistOutcome.PUBLISHED
+    assert admitted["promotion_admitted"] is True
+    assert admitted["effective_mode"] == SupervisorMode.CANARY.value
+    assert promotion.actor_bindings[-1] == "c" * 64
+
+    promotion.admitted = False
+    scheduler_closed = controller.semantic_supervisor_status()
+    assert scheduler_closed["promotion_admitted"] is False
+    assert scheduler_closed["effective_mode"] == SupervisorMode.OFF.value
+    assert promotion.actor_bindings[-1] == "c" * 64
 
 
 @pytest.mark.asyncio
