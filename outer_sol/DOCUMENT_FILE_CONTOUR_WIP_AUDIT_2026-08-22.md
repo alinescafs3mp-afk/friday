@@ -7,6 +7,16 @@
 рабочих деревьях. Git-выводы относятся к локальному `origin/main` на момент
 проверки: `9cc53d759ab1dde5d6d716b70f7a73862082d8f3` (Friday 0.207.4).
 
+> **Закрыто 2026-08-26.** Инвентаризация повторно сверена с `main` на
+> `fd1ec5a` / live Friday `0.207.48`. Все четыре salvage-кандидата ниже либо
+> уже реализованы более сильными authority-scoped контрактами и тестами, либо
+> доказанно слабее текущего контура; перенос старых blobs и миграций отклонён.
+> Точная диспозиция записана в
+> [`PROJECT_IMPLEMENTATION_STATUS.md`](PROJECT_IMPLEMENTATION_STATUS.md#document-contour-wip-audit-disposition).
+> Три удалённых superseded ref сохранены полным проверенным bundle с SHA-256
+> `bc1b201a925880cd7c3e75a23524fa563274b9ea55973c6406dcb934b1e54eef`;
+> object pruning/GC не выполнялись.
+
 ## Короткий вывод
 
 Основной выпущенный document/file contour не висит незавершённым. Старые
