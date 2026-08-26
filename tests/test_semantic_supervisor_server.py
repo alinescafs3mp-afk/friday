@@ -75,6 +75,24 @@ def test_health_exposes_closed_semantic_supervisor_default(settings: Any) -> Non
             "tools_allowed": False,
             "effects_allowed": False,
             "execution_allowed": False,
+            "activation": {
+                "schema": "friday.supervisor-assist-activation-status.v1",
+                "configured": False,
+                "reason": "default_off",
+                "requested_mode": "off",
+                "source_revision_loaded": False,
+                "registry_binding_loaded": False,
+                "scheduler_projection_loaded": False,
+                "scheduler_runtime_available": False,
+                "evidence_loaded": False,
+                "evidence_authority": "none",
+                "operator_gate_enabled": False,
+                "canary_actor_binding_count": 0,
+                "promotion_admitted": False,
+                "evidence_accepted": False,
+                "acceptance_authority": "none",
+                "body_free": True,
+            },
         }
 
 
@@ -116,6 +134,70 @@ def test_server_installs_and_closes_non_owning_shadow_without_hiding_router_mode
 
     assert scheduler.closed == 1
     assert app.state.agent.semantic_supervisor_status()["effective_mode"] == "off"
+
+
+def test_promotion_settings_without_loaded_material_remain_discarded_shadow(
+    settings: Any,
+    monkeypatch: Any,
+) -> None:
+    import friday.server as server
+
+    scheduler = _AdmittedShadowScheduler()
+    activation_loads = 0
+
+    def unavailable_activation(_settings: Any, _scheduler: Any) -> tuple[None, None]:
+        nonlocal activation_loads
+        activation_loads += 1
+        return None, None
+
+    monkeypatch.setattr(server, "build_secondary_brain", lambda _settings: scheduler)
+    monkeypatch.setattr(
+        server,
+        "_load_semantic_supervisor_activation_material",
+        unavailable_activation,
+    )
+    configured = replace(
+        settings,
+        semantic_supervisor_mode="assist",
+        semantic_supervisor_tasks=("compare_current_file_with_current_web",),
+        semantic_supervisor_max_steps=6,
+        semantic_supervisor_max_review_rounds=0,
+        semantic_supervisor_timeout_sec=12.0,
+        semantic_supervisor_promotion_enabled=True,
+        semantic_supervisor_promotion_evidence_file="/private/evidence.json",
+        semantic_supervisor_promotion_evidence_sha256="a" * 64,
+        semantic_supervisor_promotion_source_revision_sha256="b" * 64,
+        semantic_supervisor_promotion_registry_binding_sha256="c" * 64,
+        semantic_supervisor_promotion_canary_actor_bindings=(),
+        secondary_llm_profile=semantic_supervisor_policy.SUPERVISOR_RUNTIME_PROFILE_ID,
+    )
+
+    app = server.create_app(configured)
+    with TestClient(app) as client:
+        payload = client.get("/api/health").json()["semantic_supervisor"]
+        assert isinstance(app.state.agent, SemanticSupervisorShadowRuntime)
+        assert payload["effective_mode"] == "shadow"
+        assert payload["promotion_admitted"] is False
+        assert payload["execution_allowed"] is False
+        assert payload["activation"] == {
+            "schema": "friday.supervisor-assist-activation-status.v1",
+            "configured": False,
+            "reason": "activation_material_unavailable",
+            "requested_mode": "assist",
+            "source_revision_loaded": False,
+            "registry_binding_loaded": False,
+            "scheduler_projection_loaded": False,
+            "scheduler_runtime_available": False,
+            "evidence_loaded": False,
+            "evidence_authority": "none",
+            "operator_gate_enabled": False,
+            "canary_actor_binding_count": 0,
+            "promotion_admitted": False,
+            "evidence_accepted": False,
+            "acceptance_authority": "none",
+            "body_free": True,
+        }
+    assert activation_loads == 1
 
 
 def test_server_distinguishes_restored_telegram_mode_from_body_explicit_mode(

@@ -124,10 +124,20 @@ from friday.orchestration import (
     build_orchestrated_agent,
 )
 from friday.orchestration.archive_read import V12ArchiveReadHandler
+from friday.orchestration.capability_binding import (
+    CapabilityBindingSnapshot,
+    operational_capability_snapshot,
+)
 from friday.orchestration.file_read import V12FileReadHandler
 from friday.orchestration.semantic_supervisor_runtime import (
     SemanticSupervisorShadowRuntime,
     build_semantic_supervisor_runtime,
+)
+from friday.orchestration.supervisor_assist_activation import (
+    SUPERVISOR_ASSIST_ACTIVATION_STATUS_SCHEMA,
+    AssistPromotionActivationMaterial,
+    RawAssistPromotionActivationSettings,
+    load_assist_promotion_activation,
 )
 from friday.organs import ServiceContext, build_registry, local_now, resolve_chat_id
 from friday.organs.obsidian.conversation import (
@@ -198,6 +208,120 @@ from friday.workers._blocking import current_activity, run_blocking, wait_until_
 
 _HOST_CONTROL_APPROVAL_TOOLS = frozenset({"host_action_execute", "software_install_execute"})
 _HOST_JOB_ID = re.compile(r"hjob_[0-9a-f]{32}")
+
+
+def _closed_semantic_supervisor_activation_status(
+    *,
+    requested_mode: object = "off",
+    reason: str = "activation_material_unavailable",
+) -> dict[str, object]:
+    """Return the exact body-free fallback when optional material cannot load."""
+
+    mode = requested_mode if requested_mode in {"assist", "canary"} else "off"
+    return {
+        "schema": SUPERVISOR_ASSIST_ACTIVATION_STATUS_SCHEMA,
+        "configured": False,
+        "reason": reason,
+        "requested_mode": mode,
+        "source_revision_loaded": False,
+        "registry_binding_loaded": False,
+        "scheduler_projection_loaded": False,
+        "scheduler_runtime_available": False,
+        "evidence_loaded": False,
+        "evidence_authority": "none",
+        "operator_gate_enabled": False,
+        "canary_actor_binding_count": 0,
+        "promotion_admitted": False,
+        "evidence_accepted": False,
+        "acceptance_authority": "none",
+        "body_free": True,
+    }
+
+
+def _secondary_status_projection(runtime: object, method_name: str) -> Mapping[str, object]:
+    method = getattr(runtime, method_name, None)
+    if not callable(method):
+        return {}
+    try:
+        value = method()
+    except Exception:
+        return {}
+    return value if isinstance(value, Mapping) else {}
+
+
+def _load_semantic_supervisor_activation_material(
+    settings: FridaySettings,
+    secondary_brain: object,
+) -> tuple[AssistPromotionActivationMaterial | None, CapabilityBindingSnapshot | None]:
+    """Load optional immutable activation inputs without accepting promotion."""
+
+    raw_factory = getattr(settings, "semantic_supervisor_promotion_activation_settings", None)
+    try:
+        raw = raw_factory() if callable(raw_factory) else RawAssistPromotionActivationSettings()
+        if not isinstance(raw, RawAssistPromotionActivationSettings):
+            return None, None
+        bindings = operational_capability_snapshot()
+        material = load_assist_promotion_activation(
+            raw,
+            installed_release_root=Path(__file__).resolve(strict=True).parents[1],
+            scheduler_public_status=_secondary_status_projection(
+                secondary_brain,
+                "public_status",
+            ),
+            scheduler_diagnostics_status=_secondary_status_projection(
+                secondary_brain,
+                "diagnostics_status",
+            ),
+            binding_snapshot=bindings,
+        )
+    except Exception as exc:
+        LOGGER.warning(
+            "Semantic supervisor activation material unavailable (%s)",
+            type(exc).__name__,
+        )
+        return None, None
+    return material, bindings
+
+
+def _semantic_supervisor_health_status(
+    runtime: object,
+    settings: FridaySettings,
+    activation_material: AssistPromotionActivationMaterial | None,
+) -> dict[str, object]:
+    """Join the installed runtime and non-authorizing activation projection."""
+
+    status_method = getattr(runtime, "semantic_supervisor_status", None)
+    if callable(status_method):
+        try:
+            raw_status = status_method()
+        except Exception:
+            raw_status = None
+        status = dict(raw_status) if isinstance(raw_status, Mapping) else {}
+    else:
+        status = {}
+    if not status:
+        status = {
+            "schema": "friday.semantic-supervisor-shadow-runtime.v1",
+            "installed": False,
+            "role": "discarded_advisory_shadow",
+            "requested_mode": settings.semantic_supervisor_mode,
+            "effective_mode": "off",
+            "promotion_admitted": False,
+            "runtime_owner": "unchanged",
+            "publication_owner": "primary",
+            "tools_allowed": False,
+            "effects_allowed": False,
+            "execution_allowed": False,
+        }
+    activation = (
+        activation_material.public_status()
+        if isinstance(activation_material, AssistPromotionActivationMaterial)
+        else _closed_semantic_supervisor_activation_status(
+            requested_mode=settings.semantic_supervisor_mode,
+        )
+    )
+    status["activation"] = activation
+    return status
 
 
 def _host_result_text(value: object, maximum: int = 120) -> str:
@@ -2226,6 +2350,13 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
             )
             llm = LLMRouter(settings)
             secondary_brain = build_secondary_brain(settings)
+            (
+                semantic_supervisor_activation,
+                semantic_supervisor_binding_snapshot,
+            ) = _load_semantic_supervisor_activation_material(
+                settings,
+                secondary_brain,
+            )
             configured_router_mode = RouterMode.fail_closed(settings.router_mode)
             attempted_v12_runtime: AttestedV12ModelRuntime | None = None
             attested_v12_runtime: AttestedV12ModelRuntime | None = None
@@ -2432,6 +2563,10 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
             application.state.agent = agent
             application.state.orchestration_agent = orchestrated_agent
             application.state.semantic_supervisor_runtime = semantic_supervisor_runtime
+            application.state.semantic_supervisor_activation = semantic_supervisor_activation
+            application.state.semantic_supervisor_binding_snapshot = (
+                semantic_supervisor_binding_snapshot
+            )
             application.state.v12_model_runtime = attempted_v12_runtime
             application.state.v12_startup_reason = v12_startup_reason
             application.state.v12_registered_routes = tuple(sorted(route.value for route in route_handlers))
@@ -2789,6 +2924,11 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
             "semantic_supervisor_runtime",
             None,
         )
+        semantic_supervisor_activation = getattr(
+            request.app.state,
+            "semantic_supervisor_activation",
+            None,
+        )
         runtime = getattr(request.app.state, "v12_model_runtime", None)
         secondary_brain = getattr(request.app.state, "secondary_brain", None)
         gate_status = (
@@ -2821,22 +2961,17 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
                     "available": False,
                 }
             ),
-            "semantic_supervisor": (
-                semantic_supervisor_runtime.semantic_supervisor_status()
-                if isinstance(semantic_supervisor_runtime, SemanticSupervisorShadowRuntime)
-                else {
-                    "schema": "friday.semantic-supervisor-shadow-runtime.v1",
-                    "installed": False,
-                    "role": "discarded_advisory_shadow",
-                    "requested_mode": settings.semantic_supervisor_mode,
-                    "effective_mode": "off",
-                    "promotion_admitted": False,
-                    "runtime_owner": "unchanged",
-                    "publication_owner": "primary",
-                    "tools_allowed": False,
-                    "effects_allowed": False,
-                    "execution_allowed": False,
-                }
+            "semantic_supervisor": _semantic_supervisor_health_status(
+                semantic_supervisor_runtime,
+                settings,
+                (
+                    semantic_supervisor_activation
+                    if isinstance(
+                        semantic_supervisor_activation,
+                        AssistPromotionActivationMaterial,
+                    )
+                    else None
+                ),
             ),
             "profile": settings.profile.name,
             "memory_vault": {
