@@ -25,6 +25,7 @@ from friday.interaction_control_plane.compare_current_file_web_work_graph import
     COMPARE_CURRENT_FILE_WEB_MAX_ACTIVE_REVISION,
     COMPARE_CURRENT_FILE_WEB_MAX_ATTEMPTS,
     COMPARE_CURRENT_FILE_WEB_PUBLICATION_OWNER,
+    COMPARE_CURRENT_FILE_WEB_RESTART_UNAVAILABLE_RESPONSE,
     CompareCurrentFileWebGraphError,
     CompareCurrentFileWebGraphState,
     CompareCurrentFileWebGraphStep,
@@ -829,12 +830,14 @@ def prepare_compare_current_file_web_restart_rebind_in_transaction(
     expected_revision: int,
     now: str | None = None,
 ) -> CompareCurrentFileWebWorkGraph:
-    """Invalidate process-private payload digests before restart synthesis.
+    """Retire a crashed graph without replaying its settled external read.
 
-    The durable digests prove identity only; they are never treated as replayable
-    evidence bodies. Accepted reads (and an uncommitted accepted synthesis) move
-    back to pending with their prior outcome identity retained. A later claim
-    consumes the second attempt and must settle reads with fresh authority proof.
+    P3 stores only body-free identities and cannot reconstruct the admitted
+    query or process-owned evidence after a restart.  This is true even when a
+    crash happens immediately after admission; once an external read is
+    claimed, durable state also cannot distinguish pre-dispatch from
+    post-request failure.  Restart therefore publishes one honest, code-owned
+    non-completion terminal in the same transaction and never requeues a step.
     """
 
     _require_transaction(conn)
@@ -846,91 +849,17 @@ def prepare_compare_current_file_web_restart_rebind_in_transaction(
         expected_revision=expected_revision,
     )
     _require_active_revision_available(graph)
-    reads = graph.steps[:2]
-    synthesis = graph.steps[2]
-    if not all(step.settled for step in reads):
-        raise CompareCurrentFileWebGraphConflictError(
-            "restart rebind requires both read attempts to have settled"
-        )
-    accepted_states = {
-        CompareCurrentFileWebStepState.COMPLETE,
-        CompareCurrentFileWebStepState.PARTIAL,
-        CompareCurrentFileWebStepState.EMPTY,
-    }
-    accepted = tuple(step for step in graph.steps if step.state in accepted_states)
-    if not accepted:
-        raise CompareCurrentFileWebGraphConflictError(
-            "restart rebind has no process-private accepted payload"
-        )
-    if any(step.attempt >= COMPARE_CURRENT_FILE_WEB_MAX_ATTEMPTS for step in accepted) or (
-        synthesis.state is CompareCurrentFileWebStepState.RUNNING
-        and synthesis.attempt >= COMPARE_CURRENT_FILE_WEB_MAX_ATTEMPTS
-    ):
-        raise CompareCurrentFileWebGraphConflictError(
-            "process-private evidence exhausted its bounded restart rebind"
-        )
-    if synthesis.state not in {
-        CompareCurrentFileWebStepState.PENDING,
-        CompareCurrentFileWebStepState.RUNNING,
-        CompareCurrentFileWebStepState.COMPLETE,
-        CompareCurrentFileWebStepState.PARTIAL,
-    }:
-        raise CompareCurrentFileWebGraphConflictError(
-            "settled failed synthesis must close honestly instead of replaying"
-        )
     timestamp = _logical_now(now, graph=graph)
-    _begin_savepoint(conn)
-    try:
-        graph_cursor = conn.execute(
-            f"""UPDATE {_GRAPH_TABLE}
-                   SET revision=revision+1,transition='restart_rebind',updated_at=?
-                 WHERE id=? AND user_id=? AND conversation_id=?
-                   AND state='active' AND revision=? AND expires_at>?""",  # nosec B608
-            (timestamp, graph.id, graph.user_id, graph.conversation_id, graph.revision, timestamp),
-        )
-        changed = 0
-        for step in accepted:
-            cursor = conn.execute(
-                f"""UPDATE {_STEP_TABLE}
-                       SET state='pending',prior_outcome_sha256=outcome_sha256,
-                           outcome_sha256=NULL,evidence_identity_sha256=NULL,
-                           authority_rechecked=0,verified=0,started_at=NULL,settled_at=NULL
-                     WHERE graph_id=? AND step_id=? AND state=? AND attempt=?
-                       AND outcome_sha256=?""",  # nosec B608
-                (
-                    graph.id,
-                    step.step_id,
-                    step.state.value,
-                    step.attempt,
-                    step.outcome_sha256,
-                ),
-            )
-            changed += cursor.rowcount
-        if synthesis.state is CompareCurrentFileWebStepState.RUNNING:
-            cursor = conn.execute(
-                f"""UPDATE {_STEP_TABLE}
-                       SET state='pending',started_at=NULL
-                     WHERE graph_id=? AND step_id=? AND state='running' AND attempt=?""",  # nosec B608
-                (graph.id, synthesis.step_id, synthesis.attempt),
-            )
-            changed += cursor.rowcount
-        expected_changes = len(accepted) + int(synthesis.state is CompareCurrentFileWebStepState.RUNNING)
-        if graph_cursor.rowcount != 1 or changed != expected_changes:
-            raise CompareCurrentFileWebGraphConflictError("WorkGraph restart rebind lost its CAS race")
-        updated = _fetch(
-            conn,
-            graph_id=graph.id,
-            user_id=graph.user_id,
-            conversation_id=graph.conversation_id,
-        )
-        if updated is None:  # pragma: no cover
-            raise CompareCurrentFileWebGraphConflictError("rebound WorkGraph disappeared")
-        _validate_stored_graph(conn, updated)
-    except BaseException:
-        _rollback_savepoint(conn)
-        raise
-    _release_savepoint(conn)
-    return updated
+    return _publish_deterministic_retirement(
+        conn,
+        graph=graph,
+        content=COMPARE_CURRENT_FILE_WEB_RESTART_UNAVAILABLE_RESPONSE,
+        evidence_not_replayable=True,
+        conversation_archived=False,
+        cancelled=False,
+        expired=False,
+        now=timestamp,
+    )
 
 
 def close_compare_current_file_web_work_graph_terminal_in_transaction(
@@ -1017,6 +946,8 @@ def close_compare_current_file_web_work_graph_terminal_in_transaction(
         if cancelled
         else COMPARE_CURRENT_FILE_WEB_EXPIRED_RESPONSE
         if expired
+        else COMPARE_CURRENT_FILE_WEB_RESTART_UNAVAILABLE_RESPONSE
+        if evidence_not_replayable
         else None
     )
     if expected_content is not None and assistant_content != expected_content:
@@ -1079,6 +1010,7 @@ def _publish_deterministic_retirement(
     *,
     graph: CompareCurrentFileWebWorkGraph,
     content: str,
+    evidence_not_replayable: bool = False,
     conversation_archived: bool,
     cancelled: bool,
     expired: bool,
@@ -1087,6 +1019,7 @@ def _publish_deterministic_retirement(
     from friday.storage._conversations import store_message_in_transaction
 
     receipt = graph.terminal_publication_receipt(
+        evidence_not_replayable=evidence_not_replayable,
         conversation_archived=conversation_archived,
         cancelled=cancelled,
         expired=expired,
@@ -1113,6 +1046,7 @@ def _publish_deterministic_retirement(
             expected_revision=graph.revision,
             publication_assistant_message_id=str(assistant["id"]),
             receipt=receipt,
+            evidence_not_replayable=evidence_not_replayable,
             conversation_archived=conversation_archived,
             cancelled=cancelled,
             expired=expired,

@@ -28,6 +28,13 @@ from friday.interaction_control_plane.work_item_contract import (
     WORK_ITEM_TTL_HOURS,
     canonical_work_item_instant,
 )
+from friday.orchestration.execution_plan import ValidatedExecutionPlan, ValidatedStep
+from friday.orchestration.supervisor_contracts import (
+    FILE_CURRENT_READ_ID,
+    PRIMARY_SYNTHESIS_ID,
+    WEB_SEARCH_CURRENT_ID,
+    CapabilityEffectClass,
+)
 
 COMPARE_CURRENT_FILE_WEB_WORK_GRAPH_SCHEMA = "friday.compare-current-file-with-current-web-work-graph.v1"
 COMPARE_CURRENT_FILE_WEB_STEP_OUTCOME_SCHEMA = "friday.compare-current-file-with-current-web-step-outcome.v1"
@@ -54,6 +61,9 @@ COMPARE_CURRENT_FILE_WEB_ARCHIVED_RESPONSE = (
 COMPARE_CURRENT_FILE_WEB_CANCELLED_RESPONSE = "Сравнение текущего файла с вебом отменено по вашему запросу."
 COMPARE_CURRENT_FILE_WEB_EXPIRED_RESPONSE = (
     "Сравнение текущего файла с вебом остановлено: срок выполнения истёк."
+)
+COMPARE_CURRENT_FILE_WEB_RESTART_UNAVAILABLE_RESPONSE = (
+    "Сравнение нельзя безопасно продолжить после перезапуска: веб-источники не повторяются."
 )
 
 FILE_READ_STEP_ID = "read_current_file"
@@ -177,6 +187,15 @@ _FIXED_STEP_ORDER = (
     CompareCurrentFileWebStepKind.WEB_READ,
     CompareCurrentFileWebStepKind.PRIMARY_SYNTHESIS,
 )
+_PLAN_CAPABILITY_ID_BY_KIND = {
+    CompareCurrentFileWebStepKind.FILE_READ: FILE_CURRENT_READ_ID,
+    CompareCurrentFileWebStepKind.WEB_READ: WEB_SEARCH_CURRENT_ID,
+    # P2 intentionally calls the model role ``primary.synthesis`` while the
+    # durable P3 graph calls its structural node ``model.primary.synthesis``.
+    # Keep that translation explicit instead of accepting either spelling in
+    # either contract.
+    CompareCurrentFileWebStepKind.PRIMARY_SYNTHESIS: PRIMARY_SYNTHESIS_ID,
+}
 _SETTLED_STATES = frozenset(
     {
         CompareCurrentFileWebStepState.COMPLETE,
@@ -486,6 +505,71 @@ class CompareCurrentFileWebGraphStep:
             "started_at": self.started_at,
             "settled_at": self.settled_at,
         }
+
+
+@dataclass(frozen=True, slots=True)
+class CompareCurrentFileWebPlanStepBinding:
+    """Exact P2 step bound to its distinct fixed P3 graph node."""
+
+    graph_kind: CompareCurrentFileWebStepKind
+    graph_step_id: str
+    graph_capability_id: str
+    plan_step: ValidatedStep
+
+    def __post_init__(self) -> None:
+        if (
+            not isinstance(self.graph_kind, CompareCurrentFileWebStepKind)
+            or self.graph_step_id != _STEP_ID_BY_KIND[self.graph_kind]
+            or self.graph_capability_id != _CAPABILITY_BY_KIND[self.graph_kind]
+            or type(self.plan_step) is not ValidatedStep
+            or self.plan_step.capability_id != _PLAN_CAPABILITY_ID_BY_KIND[self.graph_kind]
+            or self.plan_step.effect_class is not CapabilityEffectClass.READ
+        ):
+            raise CompareCurrentFileWebGraphError("P2/P3 step binding is invalid")
+
+
+def bind_validated_plan_to_compare_current_file_web_graph(
+    plan: ValidatedExecutionPlan,
+) -> tuple[CompareCurrentFileWebPlanStepBinding, ...]:
+    """Require the exact admitted P2 journey and map it to fixed P3 nodes.
+
+    The mapping is deliberately capability-based because P2 step identifiers
+    are proposal-local (``s1``/``s2``/``s3``), while P3 identifiers are durable
+    controller identifiers.  No alias is accepted in the opposite namespace.
+    """
+
+    if type(plan) is not ValidatedExecutionPlan or len(plan.steps) != len(_FIXED_STEP_ORDER):
+        raise CompareCurrentFileWebGraphError("P3 graph requires one exact admitted P2 plan")
+    by_capability: dict[str, ValidatedStep] = {}
+    for step in plan.steps:
+        if step.capability_id in by_capability:
+            raise CompareCurrentFileWebGraphError("P2 plan capability mapping is not unique")
+        by_capability[step.capability_id] = step
+    if set(by_capability) != set(_PLAN_CAPABILITY_ID_BY_KIND.values()):
+        raise CompareCurrentFileWebGraphError("P2 plan does not match the fixed P3 journey")
+
+    file_step = by_capability[FILE_CURRENT_READ_ID]
+    web_step = by_capability[WEB_SEARCH_CURRENT_ID]
+    synthesis = by_capability[PRIMARY_SYNTHESIS_ID]
+    if (
+        file_step.depends_on
+        or web_step.depends_on
+        or set(synthesis.depends_on) != {file_step.step_id, web_step.step_id}
+        or len(synthesis.depends_on) != 2
+        or file_step.parallel_group is None
+        or file_step.parallel_group != web_step.parallel_group
+        or synthesis.parallel_group is not None
+    ):
+        raise CompareCurrentFileWebGraphError("P2 plan dependency shape does not match P3")
+    return tuple(
+        CompareCurrentFileWebPlanStepBinding(
+            graph_kind=kind,
+            graph_step_id=_STEP_ID_BY_KIND[kind],
+            graph_capability_id=_CAPABILITY_BY_KIND[kind],
+            plan_step=by_capability[_PLAN_CAPABILITY_ID_BY_KIND[kind]],
+        )
+        for kind in _FIXED_STEP_ORDER
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -1035,32 +1119,6 @@ class CompareCurrentFileWebWorkGraph:
         reads = self.steps[:2]
         synthesis = self.steps[2]
         if evidence_not_replayable:
-            accepted = tuple(
-                step
-                for step in self.steps
-                if step.state
-                in {
-                    CompareCurrentFileWebStepState.COMPLETE,
-                    CompareCurrentFileWebStepState.PARTIAL,
-                    CompareCurrentFileWebStepState.EMPTY,
-                }
-            )
-            synthesis = self.steps[2]
-            synthesis_exhausted = bool(
-                synthesis.attempt >= COMPARE_CURRENT_FILE_WEB_MAX_ATTEMPTS
-                and synthesis.state
-                in {
-                    CompareCurrentFileWebStepState.PENDING,
-                    CompareCurrentFileWebStepState.RUNNING,
-                }
-            )
-            if not accepted or not (
-                any(step.attempt >= COMPARE_CURRENT_FILE_WEB_MAX_ATTEMPTS for step in accepted)
-                or synthesis_exhausted
-            ):
-                raise CompareCurrentFileWebGraphError(
-                    "process-private evidence still admits one bounded restart rebind"
-                )
             return (
                 CompareCurrentFileWebGraphOutcomeStatus.UNAVAILABLE,
                 CompareCurrentFileWebGraphOutcomeReason.EVIDENCE_NOT_REPLAYABLE,
@@ -1451,6 +1509,7 @@ __all__ = [
     "COMPARE_CURRENT_FILE_WEB_ARCHIVED_RESPONSE",
     "COMPARE_CURRENT_FILE_WEB_CANCELLED_RESPONSE",
     "COMPARE_CURRENT_FILE_WEB_EXPIRED_RESPONSE",
+    "COMPARE_CURRENT_FILE_WEB_RESTART_UNAVAILABLE_RESPONSE",
     "COMPARE_CURRENT_FILE_WEB_FALLBACK_OWNER",
     "COMPARE_CURRENT_FILE_WEB_MAX_ACTIVE_REVISION",
     "COMPARE_CURRENT_FILE_WEB_MAX_ATTEMPTS",
@@ -1477,12 +1536,14 @@ __all__ = [
     "CompareCurrentFileWebGraphStep",
     "CompareCurrentFileWebGraphTransition",
     "CompareCurrentFileWebPublicationReceipt",
+    "CompareCurrentFileWebPlanStepBinding",
     "CompareCurrentFileWebTerminalPublicationReceipt",
     "CompareCurrentFileWebStepKind",
     "CompareCurrentFileWebStepState",
     "CompareCurrentFileWebWorkGraph",
     "attach_compare_current_file_web_publication_receipt",
     "attach_compare_current_file_web_terminal_publication_receipt",
+    "bind_validated_plan_to_compare_current_file_web_graph",
     "load_compare_current_file_web_publication_receipt",
     "load_compare_current_file_web_terminal_publication_receipt",
 ]

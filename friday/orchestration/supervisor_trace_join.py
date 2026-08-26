@@ -34,6 +34,7 @@ class PrimaryTraceProjection:
     trace_digest: str
     turn_digest: str
     conversation_digest: str
+    work_item_digest: str | None
     capability_outcomes: tuple[str, ...]
     completion: str
     publication: str
@@ -47,6 +48,7 @@ class PrimaryTraceProjection:
             trace_digest=canonical_sha256(trace.to_payload()),
             turn_digest=trace.turn_digest,
             conversation_digest=trace.conversation_digest,
+            work_item_digest=trace.work_item_digest,
             capability_outcomes=tuple(
                 f"{step.capability.value}:{step.outcome.value}" for step in trace.steps
             ),
@@ -62,6 +64,7 @@ class PrimaryTraceProjection:
             "trace_digest": self.trace_digest,
             "turn_digest": self.turn_digest,
             "conversation_digest": self.conversation_digest,
+            "work_item_digest": self.work_item_digest,
             "capability_outcomes": list(self.capability_outcomes),
             "completion": self.completion,
             "publication": self.publication,
@@ -136,8 +139,11 @@ def load_primary_trace_projection(
     metadata = _bounded_metadata(raw_metadata)
     if metadata is None:
         return None
+    trace_payload = metadata.get(INTERACTION_TRACE_METADATA_KEY)
+    if not isinstance(trace_payload, (str, dict)):
+        return None
     try:
-        trace = TurnTrace.parse(metadata.get(INTERACTION_TRACE_METADATA_KEY))
+        trace = TurnTrace.parse(trace_payload)
     except Exception:
         return None
     return PrimaryTraceProjection.from_trace(trace)

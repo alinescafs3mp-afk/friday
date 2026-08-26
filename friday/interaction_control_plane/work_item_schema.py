@@ -17,6 +17,7 @@ from friday.interaction_control_plane.compare_current_file_web_work_graph import
     COMPARE_CURRENT_FILE_WEB_PUBLICATION_METADATA_KEY,
     COMPARE_CURRENT_FILE_WEB_PUBLICATION_OWNER,
     COMPARE_CURRENT_FILE_WEB_PUBLICATION_RECEIPT_SCHEMA,
+    COMPARE_CURRENT_FILE_WEB_RESTART_UNAVAILABLE_RESPONSE,
     COMPARE_CURRENT_FILE_WEB_STEP_OUTCOME_SCHEMA,
     COMPARE_CURRENT_FILE_WEB_TERMINAL_PUBLICATION_METADATA_KEY,
     COMPARE_CURRENT_FILE_WEB_TERMINAL_PUBLICATION_RECEIPT_SCHEMA,
@@ -2478,14 +2479,7 @@ WHEN NEW.state='terminal' AND NOT (
                    AND synthesis.state='failed'
             ))
         OR (NEW.outcome_reason='evidence_not_replayable'
-            AND NEW.outcome_status='unavailable'
-            AND EXISTS (
-                SELECT 1 FROM work_item_compare_current_file_web_steps exhausted
-                 WHERE exhausted.graph_id=OLD.id AND exhausted.attempt={COMPARE_CURRENT_FILE_WEB_MAX_ATTEMPTS}
-                   AND (exhausted.state IN ('complete','partial','empty')
-                        OR (exhausted.step_id='primary_synthesis'
-                            AND exhausted.state IN ('pending','running')))
-            ))
+            AND NEW.outcome_status='unavailable')
         OR (NEW.outcome_status='unavailable'
             AND NEW.outcome_reason='conversation_archived'
             AND EXISTS (
@@ -2594,6 +2588,8 @@ WHEN NEW.state='terminal' AND NOT (
                 OR assistant.content='{COMPARE_CURRENT_FILE_WEB_CANCELLED_RESPONSE}')
            AND (NEW.outcome_reason<>'expired'
                 OR assistant.content='{COMPARE_CURRENT_FILE_WEB_EXPIRED_RESPONSE}')
+           AND (NEW.outcome_reason<>'evidence_not_replayable'
+                OR assistant.content='{COMPARE_CURRENT_FILE_WEB_RESTART_UNAVAILABLE_RESPONSE}')
            AND (
                (NEW.outcome_status='partial'
                 AND json_extract(assistant.metadata_json,

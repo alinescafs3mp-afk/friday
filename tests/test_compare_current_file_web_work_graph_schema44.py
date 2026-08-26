@@ -21,6 +21,7 @@ from friday.interaction_control_plane.compare_current_file_web_work_graph import
     COMPARE_CURRENT_FILE_WEB_ARCHIVED_RESPONSE,
     COMPARE_CURRENT_FILE_WEB_CANCELLED_RESPONSE,
     COMPARE_CURRENT_FILE_WEB_EXPIRED_RESPONSE,
+    COMPARE_CURRENT_FILE_WEB_RESTART_UNAVAILABLE_RESPONSE,
     FILE_READ_STEP_ID,
     PRIMARY_SYNTHESIS_STEP_ID,
     WEB_READ_STEP_ID,
@@ -687,9 +688,7 @@ def test_restart_rebind_never_treats_digests_as_replayable_bodies(settings, tmp_
     graph = _seed_graph(first, "restart-during-synthesis")
     graph = _claim_and_settle(first, graph, FILE_READ_STEP_ID, CompareCurrentFileWebStepState.COMPLETE)
     graph = _claim_and_settle(first, graph, WEB_READ_STEP_ID, CompareCurrentFileWebStepState.COMPLETE)
-    old_inputs = {step.step_id: step.input_identity_sha256 for step in graph.steps}
-    old_keys = {step.step_id: step.idempotency_key_sha256 for step in graph.steps}
-    old_outcomes = {step.step_id: step.outcome_sha256 for step in graph.steps[:2]}
+    old_web_outcome = graph.step(WEB_READ_STEP_ID).outcome_sha256
     graph = _claim(first, graph, PRIMARY_SYNTHESIS_STEP_ID)
     first.close()  # crash boundary: read/synthesis payloads were process-private
 
@@ -704,39 +703,76 @@ def test_restart_rebind_never_treats_digests_as_replayable_bodies(settings, tmp_
                 expected_revision=graph.revision,
                 now=_next_instant(graph),
             )
-        for step in graph.steps[:2]:
-            assert step.state is CompareCurrentFileWebStepState.PENDING
-            assert step.attempt == 1
-            assert step.outcome_sha256 is step.evidence_identity_sha256 is None
-            assert step.prior_outcome_sha256 == old_outcomes[step.step_id]
-            assert step.input_identity_sha256 == old_inputs[step.step_id]
-            assert step.idempotency_key_sha256 == old_keys[step.step_id]
+        assert graph.state is CompareCurrentFileWebGraphState.TERMINAL
+        assert graph.outcome_status is CompareCurrentFileWebGraphOutcomeStatus.UNAVAILABLE
+        assert graph.outcome_reason is CompareCurrentFileWebGraphOutcomeReason.EVIDENCE_NOT_REPLAYABLE
+        web = graph.step(WEB_READ_STEP_ID)
+        assert web.state is CompareCurrentFileWebStepState.COMPLETE
+        assert web.attempt == 1
+        assert web.outcome_sha256 == old_web_outcome
+        assert web.prior_outcome_sha256 is None
         synthesis = graph.step(PRIMARY_SYNTHESIS_STEP_ID)
-        assert synthesis.state is CompareCurrentFileWebStepState.PENDING
+        assert synthesis.state is CompareCurrentFileWebStepState.RUNNING
         assert synthesis.attempt == 1
         assert synthesis.outcome_sha256 is None
-
-        for step_id in (FILE_READ_STEP_ID, WEB_READ_STEP_ID):
-            graph = _claim(reopened, graph, step_id)
-            assert graph.step(step_id).attempt == 2
-            graph = _settle(
-                reopened,
-                graph,
-                step_id,
-                CompareCurrentFileWebStepState.COMPLETE,
-            )
-            assert graph.step(step_id).authority_rechecked is True
-        graph = _claim(reopened, graph, PRIMARY_SYNTHESIS_STEP_ID)
-        assert graph.step(PRIMARY_SYNTHESIS_STEP_ID).attempt == 2
-        graph = _settle(
-            reopened,
-            graph,
-            PRIMARY_SYNTHESIS_STEP_ID,
-            CompareCurrentFileWebStepState.COMPLETE,
+        assistant = reopened.get_message(
+            str(graph.publication_assistant_message_id),
+            graph.user_id,
         )
-        assert graph.publication_receipt(final_authority_rechecked=True)
+        assert assistant is not None
+        assert assistant["content"] == COMPARE_CURRENT_FILE_WEB_RESTART_UNAVAILABLE_RESPONSE
+        receipt = load_compare_current_file_web_terminal_publication_receipt(
+            str(assistant["metadata_json"])
+        )
+        assert receipt.reason is CompareCurrentFileWebGraphOutcomeReason.EVIDENCE_NOT_REPLAYABLE
+        assert receipt.completion_claimed is receipt.model_spoke is receipt.evidence_cited is False
+        assert reopened.count_messages(graph.conversation_id, user_id=graph.user_id) == 2
     finally:
         reopened.close()
+
+
+def test_restart_retires_claimed_web_when_parallel_file_never_settled(storage) -> None:
+    graph = _seed_graph(storage, "restart-after-web-dispatch")
+    graph = _claim(storage, graph, WEB_READ_STEP_ID)
+    assert graph.step(FILE_READ_STEP_ID).state is CompareCurrentFileWebStepState.PENDING
+    assert graph.step(WEB_READ_STEP_ID).state is CompareCurrentFileWebStepState.RUNNING
+
+    with storage.transaction() as conn:
+        graph = prepare_compare_current_file_web_restart_rebind_in_transaction(
+            conn,
+            graph_id=graph.id,
+            user_id=graph.user_id,
+            conversation_id=graph.conversation_id,
+            expected_revision=graph.revision,
+            now=_next_instant(graph),
+        )
+
+    assert graph.state is CompareCurrentFileWebGraphState.TERMINAL
+    assert graph.outcome_reason is CompareCurrentFileWebGraphOutcomeReason.EVIDENCE_NOT_REPLAYABLE
+    assert graph.step(WEB_READ_STEP_ID).state is CompareCurrentFileWebStepState.RUNNING
+    assert graph.step(WEB_READ_STEP_ID).attempt == 1
+    assert storage.count_messages(graph.conversation_id, user_id=graph.user_id) == 2
+
+
+def test_restart_after_admission_retires_instead_of_inventing_missing_inputs(storage) -> None:
+    graph = _seed_graph(storage, "restart-before-first-claim")
+    assert all(step.attempt == 0 for step in graph.steps)
+
+    with storage.transaction() as conn:
+        graph = prepare_compare_current_file_web_restart_rebind_in_transaction(
+            conn,
+            graph_id=graph.id,
+            user_id=graph.user_id,
+            conversation_id=graph.conversation_id,
+            expected_revision=graph.revision,
+            now=_next_instant(graph),
+        )
+
+    assert graph.state is CompareCurrentFileWebGraphState.TERMINAL
+    assert graph.outcome_status is CompareCurrentFileWebGraphOutcomeStatus.UNAVAILABLE
+    assert graph.outcome_reason is CompareCurrentFileWebGraphOutcomeReason.EVIDENCE_NOT_REPLAYABLE
+    assert all(step.attempt == 0 for step in graph.steps)
+    assert storage.count_messages(graph.conversation_id, user_id=graph.user_id) == 2
 
 
 def test_exhausted_restart_closes_with_atomic_noncompletion_publication(storage) -> None:
@@ -752,12 +788,9 @@ def test_exhausted_restart_closes_with_atomic_noncompletion_publication(storage)
             expected_revision=graph.revision,
             now=_next_instant(graph),
         )
-    graph = _claim_and_settle(storage, graph, FILE_READ_STEP_ID, CompareCurrentFileWebStepState.COMPLETE)
-    graph = _claim_and_settle(storage, graph, WEB_READ_STEP_ID, CompareCurrentFileWebStepState.UNAVAILABLE)
-    with (
-        pytest.raises(CompareCurrentFileWebGraphConflictError, match="exhausted"),
-        storage.transaction() as conn,
-    ):
+    assert graph.state is CompareCurrentFileWebGraphState.TERMINAL
+    assert graph.outcome_reason is CompareCurrentFileWebGraphOutcomeReason.EVIDENCE_NOT_REPLAYABLE
+    with pytest.raises(CompareCurrentFileWebGraphConflictError), storage.transaction() as conn:
         prepare_compare_current_file_web_restart_rebind_in_transaction(
             conn,
             graph_id=graph.id,
@@ -767,46 +800,7 @@ def test_exhausted_restart_closes_with_atomic_noncompletion_publication(storage)
             now=_next_instant(graph),
         )
 
-    receipt = graph.terminal_publication_receipt(
-        evidence_not_replayable=True,
-        final_authority_rechecked=False,
-    )
-    assert receipt.status is CompareCurrentFileWebGraphOutcomeStatus.UNAVAILABLE
-    assert receipt.reason is CompareCurrentFileWebGraphOutcomeReason.EVIDENCE_NOT_REPLAYABLE
-    assert receipt.model_spoke is receipt.evidence_cited is False
-    assert receipt.completion_claimed is False
-    metadata = attach_compare_current_file_web_terminal_publication_receipt({}, receipt)
-    with storage.transaction() as conn:
-        assistant = store_message_in_transaction(
-            conn,
-            graph.conversation_id,
-            graph.user_id,
-            "assistant",
-            "Сравнение нельзя безопасно продолжить после перезапуска.",
-            metadata,
-            graph.anchor_user_message_id,
-        )
-        graph = close_compare_current_file_web_work_graph_terminal_in_transaction(
-            conn,
-            graph_id=graph.id,
-            user_id=graph.user_id,
-            conversation_id=graph.conversation_id,
-            expected_revision=graph.revision,
-            publication_assistant_message_id=str(assistant["id"]),
-            receipt=receipt,
-            evidence_not_replayable=True,
-            now=_next_instant(graph),
-        )
-    assert graph.state is CompareCurrentFileWebGraphState.TERMINAL
-    assert graph.publication_receipt_sha256 is None
-    assert graph.terminal_publication_receipt_sha256 == receipt.canonical_sha256()
-    stored_receipt = load_compare_current_file_web_terminal_publication_receipt(
-        storage.execute(
-            "SELECT metadata_json FROM messages WHERE id=?",
-            (graph.publication_assistant_message_id,),
-        ).fetchone()[0]
-    )
-    assert stored_receipt == receipt
+    assert storage.count_messages(graph.conversation_id, user_id=graph.user_id) == 2
 
 
 def test_terminal_publication_is_atomic_exactly_once_and_partial_rechecked(storage) -> None:
