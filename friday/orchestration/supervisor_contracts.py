@@ -63,8 +63,26 @@ _STEP_ID = re.compile(r"s[1-9][0-9]?\Z")
 _SAFE_ID = re.compile(r"[a-z][a-z0-9_.-]{0,63}\Z")
 _SAFE_QUERY = re.compile(r"[\w \t.,:;?!()\-«»\"']+\Z", re.UNICODE)
 _SHELL_SMUGGLE = re.compile(
-    r"(\$\(|`|/bin/|cmd\.exe|powershell|invoke-expression|/etc/|[a-z]:\\)",
+    r"(\$\(|`|&&|\|\||/bin/|cmd\.exe|powershell|invoke-expression|/etc/|[a-z]:\\)",
     re.IGNORECASE,
+)
+_PRIVATE_PATH_SMUGGLE = re.compile(
+    r"(?:"
+    r"(?<![A-Za-z0-9:/])/(?!/)(?:[^/\\\s]+(?:[/\\][^/\\\s]+)*)"
+    r"|(?<![A-Za-z0-9])~[/\\][^\s]+"
+    r"|(?<![A-Za-z0-9])\.\.?[/\\][^\s]+"
+    r"|(?<![A-Za-z0-9])[A-Za-z]:[\\/][^\s]+"
+    r"|(?<!\\)\\\\[^\\\s]+\\[^\\\s]+"
+    r"|\bfile:///"
+    r")",
+    re.IGNORECASE,
+)
+_ENVIRONMENT_SMUGGLE = re.compile(
+    r"(?:"
+    r"\$(?:\{[A-Za-z_][A-Za-z0-9_]*\}|[A-Za-z_][A-Za-z0-9_]*)"
+    r"|%[A-Za-z_][A-Za-z0-9_]*%"
+    r"|(?<![A-Za-z0-9_])[A-Za-z_][A-Za-z0-9_]{1,63}\s*="
+    r")"
 )
 
 
@@ -342,6 +360,32 @@ def parse_query_intent(value: object, *, label: str = "query_intent") -> str:
     if _SHELL_SMUGGLE.search(text) is not None or _SAFE_QUERY.fullmatch(text) is None:
         raise SupervisorContractError(f"{label} is not a closed natural-language intent")
     return text
+
+
+def _parse_advisory_control_text(
+    value: object,
+    *,
+    label: str,
+    maximum: int,
+) -> str:
+    """Reject executable or private carriers from non-executable plan prose."""
+
+    text = _bounded_text(value, label=label, maximum=maximum)
+    if (
+        _SHELL_SMUGGLE.search(text) is not None
+        or _PRIVATE_PATH_SMUGGLE.search(text) is not None
+        or _ENVIRONMENT_SMUGGLE.search(text) is not None
+    ):
+        raise SupervisorContractError(f"{label} is not closed advisory text")
+    return text
+
+
+def parse_supervisor_goal(value: object) -> str:
+    return _parse_advisory_control_text(value, label="goal", maximum=_MAX_GOAL_CHARS)
+
+
+def parse_supervisor_purpose(value: object) -> str:
+    return _parse_advisory_control_text(value, label="purpose", maximum=_MAX_PURPOSE_CHARS)
 
 
 def parse_capability_input(capability_id: str, value: object) -> Mapping[str, Any]:
@@ -823,7 +867,7 @@ class SupervisorStep:
             step_id=step_id,
             kind=kind,
             target_id=target,
-            purpose=_bounded_text(item["purpose"], label="purpose", maximum=_MAX_PURPOSE_CHARS),
+            purpose=parse_supervisor_purpose(item["purpose"]),
             depends_on=depends,
             parallel_group=parallel,
             input=parse_capability_input(target, item["input"]),
@@ -935,7 +979,7 @@ class SupervisorProposal:
         return cls(
             manifest_id=format_manifest_id(_manifest_digest_hex(item["manifest_id"])),
             task_class=TaskClass(_enum(TaskClass, item["task_class"], label="task_class")),
-            goal=_bounded_text(item["goal"], label="goal", maximum=_MAX_GOAL_CHARS),
+            goal=parse_supervisor_goal(item["goal"]),
             continuation_decision=ContinuationDecision(
                 _enum(ContinuationDecision, item["continuation_decision"], label="continuation_decision")
             ),

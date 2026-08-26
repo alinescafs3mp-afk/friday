@@ -216,6 +216,79 @@ def test_proposal_rejects_cycles_unknown_ids_and_shell_smuggling() -> None:
         SupervisorProposal.parse(_proposal_payload(supervisor_input, steps=path_command))
 
 
+@pytest.mark.parametrize(
+    ("field", "carrier"),
+    (
+        ("goal", "$(cat /etc/passwd)"),
+        ("goal", "Read /home/alice/private.docx before comparing."),
+        ("goal", "Use $HOME/private.docx as the source."),
+        ("purpose", "run `rm -rf /tmp/private`"),
+        ("purpose", r"Read C:\Users\alice\private.docx"),
+        ("purpose", "Set FRIDAY_TOKEN=private before reading."),
+    ),
+)
+def test_proposal_rejects_shell_path_and_environment_carriers_in_control_text(
+    field: str,
+    carrier: str,
+) -> None:
+    supervisor_input = build_supervisor_input(_compare_turn(), _settings())
+    payload = _proposal_payload(supervisor_input)
+    if field == "goal":
+        payload["goal"] = carrier
+    else:
+        payload["steps"][0]["purpose"] = carrier
+
+    with pytest.raises(SupervisorContractError, match="closed advisory text"):
+        SupervisorProposal.parse(payload)
+
+
+def test_proposal_control_text_allows_public_urls_and_natural_slashes() -> None:
+    supervisor_input = build_supervisor_input(_compare_turn(), _settings())
+    payload = _proposal_payload(
+        supervisor_input,
+        goal="Compare law/regulation guidance at https://example.com/public/rules.",
+    )
+    payload["steps"][1]["purpose"] = "Compare A/B public guidance."
+
+    proposal = SupervisorProposal.parse(payload)
+
+    assert proposal.goal.endswith("/public/rules.")
+    assert proposal.steps[1].purpose == "Compare A/B public guidance."
+
+
+@pytest.mark.parametrize(
+    ("field", "carrier"),
+    (
+        ("goal", "Read /home/alice/private.docx."),
+        ("purpose", "run `rm -rf /tmp/private`"),
+    ),
+)
+def test_policy_kernel_rechecks_control_text_on_parser_bypassed_typed_objects(
+    field: str,
+    carrier: str,
+) -> None:
+    supervisor_input = build_supervisor_input(_compare_turn(), _settings())
+    proposal = SupervisorProposal.parse(_proposal_payload(supervisor_input))
+    if field == "goal":
+        bypassed = replace(proposal, goal=carrier)
+    else:
+        bypassed_step = replace(proposal.steps[0], purpose=carrier)
+        bypassed = replace(proposal, steps=(bypassed_step, *proposal.steps[1:]))
+
+    decision = admit_supervisor_proposal(
+        bypassed,
+        supervisor_input,
+        PolicyAdmissionContext(
+            actor_binding_sha256="a" * 64,
+            conversation_binding_sha256="b" * 64,
+        ),
+    )
+
+    assert decision.admitted is False
+    assert decision.reason is PolicyReason.CONTROL_TEXT_NOT_ADMITTED
+    assert decision.plan is None
+
+
 def test_proposal_cannot_construct_validated_execution_plan() -> None:
     supervisor_input = build_supervisor_input(_compare_turn(), _settings())
     proposal = SupervisorProposal.parse(_proposal_payload(supervisor_input))

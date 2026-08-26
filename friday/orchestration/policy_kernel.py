@@ -30,11 +30,14 @@ from friday.orchestration.supervisor_contracts import (
     ExpectedOutcome,
     ReviewMode,
     StepKind,
+    SupervisorContractError,
     SupervisorInput,
     SupervisorProposal,
     SupervisorStep,
     TaskClass,
     canonical_sha256,
+    parse_supervisor_goal,
+    parse_supervisor_purpose,
 )
 
 
@@ -58,6 +61,7 @@ class PolicyReason(StrEnum):
     DEPENDENCY_SHAPE_MISMATCH = "dependency_shape_mismatch"
     COMPLETION_CRITERIA_MISMATCH = "completion_criteria_mismatch"
     REVIEW_NOT_ADMITTED = "review_not_admitted"
+    CONTROL_TEXT_NOT_ADMITTED = "control_text_not_admitted"
 
 
 _EXPECTED_OUTCOME_BY_TARGET = {
@@ -123,6 +127,18 @@ class PolicyDecision:
 
 def _reject(reason: PolicyReason) -> PolicyDecision:
     return PolicyDecision(admitted=False, reason=reason)
+
+
+def _control_text_is_admitted(proposal: SupervisorProposal) -> bool:
+    """Recheck typed objects so callers cannot bypass the closed JSON parser."""
+
+    try:
+        parse_supervisor_goal(proposal.goal)
+        for step in proposal.steps:
+            parse_supervisor_purpose(step.purpose)
+    except (AttributeError, SupervisorContractError, TypeError):
+        return False
+    return True
 
 
 def _attachment_ordinals(supervisor_input: SupervisorInput) -> set[int]:
@@ -257,6 +273,8 @@ def admit_supervisor_proposal(
 
     if proposal.manifest_id != supervisor_input.manifest.manifest_id:
         return _reject(PolicyReason.STALE_MANIFEST)
+    if not _control_text_is_admitted(proposal):
+        return _reject(PolicyReason.CONTROL_TEXT_NOT_ADMITTED)
     if proposal.task_class is not _code_owned_task_class(supervisor_input):
         return _reject(PolicyReason.TASK_CLASS_MISMATCH)
     if len(proposal.steps) > supervisor_input.budgets.max_steps:
