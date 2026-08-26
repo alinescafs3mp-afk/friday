@@ -43,10 +43,7 @@ def _open_cgroup_dir(cgroup: Path) -> int:
     try:
         return os.open(
             str(cgroup),
-            os.O_RDONLY
-            | os.O_DIRECTORY
-            | getattr(os, "O_CLOEXEC", 0)
-            | getattr(os, "O_NOFOLLOW", 0),
+            os.O_RDONLY | os.O_DIRECTORY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0),
         )
     except OSError as exc:
         raise CommandError("resource_boundary_unproven") from exc

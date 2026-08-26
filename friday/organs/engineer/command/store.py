@@ -197,9 +197,7 @@ class CommandJobStore:
         if "cleanup_pending" not in columns:
             self._conn.execute("BEGIN IMMEDIATE")
             try:
-                self._conn.execute(
-                    "ALTER TABLE jobs ADD COLUMN cleanup_pending INTEGER NOT NULL DEFAULT 0"
-                )
+                self._conn.execute("ALTER TABLE jobs ADD COLUMN cleanup_pending INTEGER NOT NULL DEFAULT 0")
                 # Any pre-marker row with a durable unit identity may have an
                 # interrupted cleanup, including FAILED/COMPLETED rows written
                 # by older builds.  DDL and backfill commit atomically, so a

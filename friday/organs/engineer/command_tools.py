@@ -156,9 +156,7 @@ class EngineerCommandService:
             or _source_update_id(source_row) != str(_telegram_update_id)
         ):
             return _refusal("owner_source_unavailable")
-        approval = self.storage.get_action_approval(
-            str(_approval_id), actor.user_id, person_id=actor.own_id
-        )
+        approval = self.storage.get_action_approval(str(_approval_id), actor.user_id, person_id=actor.own_id)
         if (
             not isinstance(approval, Mapping)
             or str(approval.get("tool") or "") != "engineer_command_run"

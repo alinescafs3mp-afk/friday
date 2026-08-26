@@ -50113,11 +50113,7 @@ class AgentRuntime:
             **(user_metadata or {}),
             "tools_enabled": enable_tools is True,
             "interaction_mode": interaction_mode,
-            **(
-                {"telegram_update_id": trusted_telegram_update_id}
-                if trusted_telegram_update_id
-                else {}
-            ),
+            **({"telegram_update_id": trusted_telegram_update_id} if trusted_telegram_update_id else {}),
         }
         if not mark_request_effect_possible():
             raise RuntimeError("Request idempotency fence could not be committed before message storage")
@@ -61941,18 +61937,17 @@ class AgentRuntime:
             # Repeat the closed allowlist for direct adapters/tests which enter
             # this seam without the outer chat projection.
             tools[:] = _project_engineer_tool_schemas(tools, authority=turn_auth)
-            if re.fullmatch(
-                r"[0-9]{1,20}",
-                context.engineer_command_telegram_update_id,
-            ) is None:
+            if (
+                re.fullmatch(
+                    r"[0-9]{1,20}",
+                    context.engineer_command_telegram_update_id,
+                )
+                is None
+            ):
                 # Starting a command requires independently authenticated
                 # Telegram provenance.  Do not advertise a capability which
                 # this turn cannot carry across the execution boundary.
-                tools[:] = [
-                    tool
-                    for tool in tools
-                    if _engineer_tool_name(tool) != "engineer_command_run"
-                ]
+                tools[:] = [tool for tool in tools if _engineer_tool_name(tool) != "engineer_command_run"]
         else:
             # Direct callers do not get to bypass the mode-owned schema fence.
             tools[:] = [
@@ -63469,9 +63464,7 @@ class AgentRuntime:
                         call_arguments = dict(model_arguments)
                         call_arguments["_conversation_id"] = context.conversation_id
                         call_arguments["_source_message_id"] = context.effect_root_user_message_id
-                        call_arguments["_telegram_update_id"] = (
-                            context.engineer_command_telegram_update_id
-                        )
+                        call_arguments["_telegram_update_id"] = context.engineer_command_telegram_update_id
                 elif call.name in _HOST_CONTROL_CONTEXT_TOOL_NAMES:
                     model_arguments = call.arguments if isinstance(call.arguments, Mapping) else {}
                     if (

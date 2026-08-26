@@ -204,7 +204,10 @@ class JobWorkspace:
                     _mkdirat(sealed_fd, name)
                     nested = os.open(
                         name,
-                        os.O_RDONLY | os.O_DIRECTORY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0),
+                        os.O_RDONLY
+                        | os.O_DIRECTORY
+                        | getattr(os, "O_CLOEXEC", 0)
+                        | getattr(os, "O_NOFOLLOW", 0),
                         dir_fd=sealed_fd,
                     )
                     try:
@@ -246,7 +249,9 @@ class JobWorkspace:
                 os.close(child_fd)
         return files, dir_count, total_bytes
 
-    def _seal_file(self, source_fd: int, sealed_dir_fd: int, name: str, *, before: os.stat_result) -> tuple[str, int]:
+    def _seal_file(
+        self, source_fd: int, sealed_dir_fd: int, name: str, *, before: os.stat_result
+    ) -> tuple[str, int]:
         dest_fd = os.open(
             name,
             os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0),

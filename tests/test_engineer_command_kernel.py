@@ -129,7 +129,9 @@ def _wait(kernel: CommandKernel, job_id: str):
     return kernel.wait(job_id, actor_id=ACTOR)
 
 
-def test_argv_echo_completes_without_inheriting_caller_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_argv_echo_completes_without_inheriting_caller_env(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     monkeypatch.setenv("FRIDAY_SHOULD_NOT_LEAK", "secret-value")
     kernel = _kernel(tmp_path)
     request = _argv("/usr/bin/env", key=_key("env"))
@@ -393,7 +395,9 @@ def test_sudo_and_destructive_shell_need_confirmation(tmp_path: Path) -> None:
     sudo_path = Path("/usr/bin/sudo")
     if sudo_path.exists():
         request = _argv("/usr/bin/sudo", "-n", "true", key=_key("sudo"))
-        with pytest.raises(CommandError, match="setid_refused|destructive_confirmation_required|symlink_refused"):
+        with pytest.raises(
+            CommandError, match="setid_refused|destructive_confirmation_required|symlink_refused"
+        ):
             _submit(kernel, request, destructive=False)
     shell = _shell("sudo -n true", key=_key("sudo-shell"))
     with pytest.raises(CommandError, match="destructive_confirmation_required"):
@@ -968,10 +972,7 @@ def test_tmpfs_and_output_quota_kill(tmp_path: Path) -> None:
     many = _argv(
         "/usr/bin/python3",
         "-c",
-        "from pathlib import Path\n"
-        "p=Path('output')\n"
-        "for i in range(200):\n"
-        " (p/f'f{i}').write_text('n')\n",
+        "from pathlib import Path\np=Path('output')\nfor i in range(200):\n (p/f'f{i}').write_text('n')\n",
         key=_key("many-files"),
         timeout_sec=10,
     )

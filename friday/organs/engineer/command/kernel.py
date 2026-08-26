@@ -140,7 +140,9 @@ class CommandKernel:
         self._receipts: dict[str, CommandReceipt] = {}
         self._broker = SpawnBroker()
         self._finalizer = weakref.finalize(self, self._broker.close)
-        self._path_finalizer = weakref.finalize(self, _close_fds, tuple(root.dir_fd for root in self.path_roots))
+        self._path_finalizer = weakref.finalize(
+            self, _close_fds, tuple(root.dir_fd for root in self.path_roots)
+        )
         self._reconcile_stale()
 
     def close(self) -> None:
@@ -433,7 +435,9 @@ class CommandKernel:
             )
         job = self.store.read_job(job_id)
         status = CommandStatus(str(job.get("status") or CommandStatus.UNKNOWN.value))
-        isolation = IsolationProfile(str(job.get("isolation_profile") or IsolationProfile.ISOLATED_WORKSPACE.value))
+        isolation = IsolationProfile(
+            str(job.get("isolation_profile") or IsolationProfile.ISOLATED_WORKSPACE.value)
+        )
         if status in {CommandStatus.RUNNING, CommandStatus.ADMITTED}:
             if _pid_alive_matching(job.get("pid"), job.get("pid_starttime")):
                 status = CommandStatus.UNKNOWN
@@ -501,7 +505,9 @@ class CommandKernel:
         if str(job.get("actor_id") or "") != actor_id:
             raise CommandError("actor_mismatch")
 
-    def _reap(self, job_id: str, request: CommandRequest, grant, held, bwrap, spawned: SpawnedCommand) -> None:
+    def _reap(
+        self, job_id: str, request: CommandRequest, grant, held, bwrap, spawned: SpawnedCommand
+    ) -> None:
         error_code = ""
         status = CommandStatus.FAILED
         generated: tuple[GeneratedFile, ...] = ()
@@ -571,6 +577,7 @@ class CommandKernel:
             sort_keys=True,
             separators=(",", ":"),
         )
+
         def _fields(value: CommandReceipt) -> dict[str, object]:
             return {
                 "cancelled": 1 if value.cancelled else 0,
@@ -732,7 +739,9 @@ class CommandKernel:
                     {"status": status.value, "error_code": "corrupt_evidence"},
                 )
             job = self.store.read_job(job_id)
-        isolation = IsolationProfile(str(job.get("isolation_profile") or IsolationProfile.ISOLATED_WORKSPACE.value))
+        isolation = IsolationProfile(
+            str(job.get("isolation_profile") or IsolationProfile.ISOLATED_WORKSPACE.value)
+        )
         receipt = CommandReceipt(
             job_id=job_id,
             status=status,

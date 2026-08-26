@@ -317,7 +317,9 @@ class SpawnedCommand:
             )
             self.effect_boundary_crossed = True
             self.pid = int(started.pid)
-            self.pid_starttime = started.starttime if started.starttime is not None else _pid_starttime(self.pid)
+            self.pid_starttime = (
+                started.starttime if started.starttime is not None else _pid_starttime(self.pid)
+            )
             self.process = _SpawnedProcess(started.pid, started.pidfd, started.ctrl_fd)
             self.pidfd = self.process.pidfd
             os.set_blocking(started.ctrl_fd, False)
@@ -387,6 +389,7 @@ class SpawnedCommand:
         timed_out = False
         cancelled = False
         reader_failed = False
+
         def _consume_event(key: selectors.SelectorKey, mask: int) -> None:
             nonlocal stdout_captured, stderr_captured, stdout_trunc, stderr_trunc, reader_failed
             kind = key.data
