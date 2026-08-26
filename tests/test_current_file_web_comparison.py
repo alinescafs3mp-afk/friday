@@ -585,23 +585,33 @@ async def test_upstream_partial_evidence_has_exact_disclosure(
     "status",
     (TransientWebEvidenceStatus.EMPTY, TransientWebEvidenceStatus.UNAVAILABLE),
 )
-async def test_empty_and_unavailable_are_controller_terminals_without_model_speech(
+async def test_empty_and_unavailable_produce_honest_file_only_partial_synthesis(
     status: TransientWebEvidenceStatus,
 ) -> None:
-    model = _ComparisonModel()
-    with pytest.raises(CurrentFileWebComparisonError) as captured:
-        await compare_current_file_with_web(
-            model,
-            request=_REQUEST,
-            accepted_plan_sha256=_PLAN_SHA256,
-            prepared_file=_prepared_file(),
-            web_evidence=_terminal_web_evidence(status),
-            absolute_deadline=time.monotonic() + 10,
-        )
-    assert captured.value.input_status is status
-    assert captured.value.model_calls == 0
-    assert model.acquire_calls == 0
-    assert model.calls == []
+    model = _ComparisonModel(answer="По доступному файлу видно исходное состояние [F1].")
+    result = await compare_current_file_with_web(
+        model,
+        request=_REQUEST,
+        accepted_plan_sha256=_PLAN_SHA256,
+        prepared_file=_prepared_file(),
+        web_evidence=_terminal_web_evidence(status),
+        absolute_deadline=time.monotonic() + 10,
+    )
+
+    expected_reason = (
+        CurrentFileWebPartialReason.WEB_EMPTY
+        if status is TransientWebEvidenceStatus.EMPTY
+        else CurrentFileWebPartialReason.WEB_UNAVAILABLE
+    )
+    assert result.status is CurrentFileWebComparisonStatus.PARTIAL
+    assert result.partial_reasons == (expected_reason,)
+    assert result.citation_labels == ("F1",)
+    assert result.model_calls == len(model.calls) == 2
+    assert model.acquire_calls == 1
+    synthesis = json.loads(str(model.calls[0][-1]["content"]))
+    assert synthesis["untrusted_evidence"]["web"]["status"] == status.value
+    assert synthesis["untrusted_evidence"]["web"]["sources"] == []
+    assert "[W" not in result.answer
 
 
 @pytest.mark.asyncio
