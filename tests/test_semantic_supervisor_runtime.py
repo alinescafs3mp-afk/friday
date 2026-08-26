@@ -770,7 +770,20 @@ async def test_primary_delegation_omits_absent_internal_extension_kwargs() -> No
     )
     await wrapper.drain_shadow()
     assert "turn_policy" not in primary.last_kwargs
+    assert "telegram_update_id" not in primary.last_kwargs
     assert "_pending_durable_admission" not in primary.last_kwargs
+
+
+@pytest.mark.asyncio
+async def test_primary_delegation_preserves_trusted_telegram_update_identity() -> None:
+    wrapper, primary, _ = _wrapper()
+    await wrapper.chat(
+        "person_private_7f",
+        "Сравни этот договор с текущими публичными правилами в интернете.",
+        **_chat_kwargs(telegram_update_id="update-0123456789"),
+    )
+    await wrapper.drain_shadow()
+    assert primary.last_kwargs["telegram_update_id"] == "update-0123456789"
 
 
 @pytest.mark.asyncio

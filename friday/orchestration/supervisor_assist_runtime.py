@@ -413,6 +413,7 @@ class SemanticSupervisorAssistRuntime:
         reply_assistant_reference: bool = False,
         reply_assistant_message_id: str | None = None,
         turn_policy: TurnPolicyDecision | None = None,
+        telegram_update_id: str | None = None,
         turn_deadline: float | None = None,
         _pending_durable_admission: PendingDurableTurnAdmission | None = None,
         _semantic_supervisor_ingress_binding: SupervisorAssistIngressBindingV1 | None = None,
@@ -441,6 +442,8 @@ class SemanticSupervisorAssistRuntime:
             "turn_deadline": turn_deadline,
             "_pending_durable_admission": _pending_durable_admission,
         }
+        if telegram_update_id is not None:
+            legacy_kwargs["telegram_update_id"] = telegram_update_id
         legacy_calls = 0
 
         async def legacy_primary() -> dict[str, Any]:

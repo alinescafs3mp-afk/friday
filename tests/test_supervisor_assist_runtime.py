@@ -194,12 +194,15 @@ async def test_ordinary_turn_calls_primary_once_and_observes_only_after_commit(
         "обычный вопрос",
         actor=_actor(),
         conversation_id=_CONVERSATION,
+        telegram_update_id="update-0123456789",
     )
 
     assert actual is response
     assert primary.calls == 1
     assert controller.execute_calls == 1
     assert controller.surface is None
+    assert primary.kwargs is not None
+    assert primary.kwargs["telegram_update_id"] == "update-0123456789"
     assert observed == [(response, _actor())]
     assert runtime.semantic_supervisor_status()["ordinary_event_success_total"] == 1
 

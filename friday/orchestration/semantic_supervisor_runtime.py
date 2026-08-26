@@ -932,6 +932,7 @@ class SemanticSupervisorShadowRuntime:
         reply_assistant_reference: bool = False,
         reply_assistant_message_id: str | None = None,
         turn_policy: TurnPolicyDecision | None = None,
+        telegram_update_id: str | None = None,
         turn_deadline: float | None = None,
         _pending_durable_admission: PendingDurableTurnAdmission | None = None,
         _semantic_supervisor_explicit_mode_requested: bool | None = None,
@@ -991,6 +992,8 @@ class SemanticSupervisorShadowRuntime:
         }
         if turn_policy is not None:
             primary_kwargs["turn_policy"] = turn_policy
+        if telegram_update_id is not None:
+            primary_kwargs["telegram_update_id"] = telegram_update_id
         if _pending_durable_admission is not None:
             primary_kwargs["_pending_durable_admission"] = _pending_durable_admission
         primary_result = await self._primary.chat(user_id, message, **primary_kwargs)
