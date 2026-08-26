@@ -39035,13 +39035,35 @@ class AgentRuntime:
     def _prepare_engineer_compile_source(
         self,
         actor: ActorContext,
-        raw_ids: Sequence[str],
+        sources: Sequence[Any],
         *,
         requested_filename: str | None,
     ) -> tuple[_EngineerCompileSourceBinding | None, str]:
-        """Select and pin one exact authorized Java Raw before kernel entry."""
+        """Select and pin one exact authorized Java Raw/name before kernel entry.
 
-        exact_ids = tuple(dict.fromkeys(str(value or "").strip() for value in raw_ids))
+        A current Telegram upload can content-deduplicate onto an older Raw whose
+        immutable metadata contains another filename.  The current supplied
+        filename is carried only by a process-private, storage-proved attachment
+        authority, so keep the carrier until selection is complete instead of
+        reducing the request to Raw ids.  Plain Raw-id callers retain the
+        canonical-name path; caller-authored mapping fields never become name
+        authority.
+        """
+
+        candidates: list[tuple[str, _ExplicitFilenameDirectReadAuthority | None]] = []
+        seen_candidates: set[tuple[str, str]] = set()
+        for value in sources:
+            raw_id = (
+                str(value.get("raw_object_id") or value.get("raw_id") or "").strip()
+                if isinstance(value, Mapping)
+                else str(value or "").strip()
+            )
+            direct_authority = _explicit_filename_direct_read_authority_of(value)
+            key = (raw_id, direct_authority.filename if direct_authority is not None else "")
+            if key not in seen_candidates:
+                seen_candidates.add(key)
+                candidates.append((raw_id, direct_authority))
+        exact_ids = tuple(dict.fromkeys(raw_id for raw_id, _authority in candidates))
         if not exact_ids or any(re.fullmatch(r"raw_[0-9a-f]{16}", value) is None for value in exact_ids):
             return None, "exact_artifact_required"
         if requested_filename is None and len(exact_ids) != 1:
@@ -39061,7 +39083,7 @@ class AgentRuntime:
 
         matches: list[_EngineerCompileSourceBinding] = []
         single_read_error = ""
-        for raw_id in exact_ids:
+        for raw_id, direct_authority in candidates:
             try:
                 stored = read_authorized_file(
                     self.storage,
@@ -39084,11 +39106,6 @@ class AgentRuntime:
             content_sha256 = hashlib.sha256(stored.content).hexdigest()
             if (
                 stored.raw_id != raw_id
-                or re.fullmatch(
-                    r"[A-Za-z_][A-Za-z0-9_]{0,119}\.java",
-                    stored.filename,
-                )
-                is None
                 or snapshot is None
                 or not authorized_file_snapshot_token_is_process_owned(snapshot)
                 or snapshot.source.raw_id != raw_id
@@ -39096,12 +39113,48 @@ class AgentRuntime:
             ):
                 single_read_error = "source_identity_changed"
                 continue
-            if requested_filename is not None and stored.filename != requested_filename:
+            effective_filename = stored.filename
+            if direct_authority is not None:
+                if (
+                    direct_authority.raw_object_id != raw_id
+                    or direct_authority.tenant_id != fresh_actor.user_id
+                    or direct_authority.uploaded_by != fresh_actor.own_id
+                ):
+                    single_read_error = "source_identity_changed"
+                    continue
+                exact_name_rows = resolve_owned_file_exact_raw_filename_direct_read(
+                    self.storage,
+                    fresh_actor.user_id,
+                    fresh_actor.own_id,
+                    raw_id,
+                    direct_authority.filename,
+                )
+                if (
+                    len(exact_name_rows) != 1
+                    or str(exact_name_rows[0].get("id") or "") != raw_id
+                    or not hmac.compare_digest(
+                        str(exact_name_rows[0].get("content_hash") or "").casefold(),
+                        content_sha256,
+                    )
+                ):
+                    single_read_error = "source_identity_changed"
+                    continue
+                effective_filename = direct_authority.filename
+            if (
+                re.fullmatch(
+                    r"[A-Za-z_][A-Za-z0-9_]{0,119}\.java",
+                    effective_filename,
+                )
+                is None
+            ):
+                single_read_error = "source_identity_changed"
+                continue
+            if requested_filename is not None and effective_filename != requested_filename:
                 continue
             matches.append(
                 _EngineerCompileSourceBinding(
                     raw_id=raw_id,
-                    filename=stored.filename,
+                    filename=effective_filename,
                     source_sha256=content_sha256,
                     source_identity_sha256=snapshot.source.identity_sha256,
                 )
@@ -40834,6 +40887,7 @@ class AgentRuntime:
             source_matches[0][0], source_matches[0][1]
         ):
             return False
+        source_item = source_matches[0][0]
         try:
             stored = read_authorized_file_in_transaction(
                 conn,
@@ -40847,9 +40901,36 @@ class AgentRuntime:
             return False
         snapshot = stored.snapshot_token
         source_sha256 = hashlib.sha256(stored.content).hexdigest()
+        direct_authority = _explicit_filename_direct_read_authority_of(source_item)
+        effective_filename = stored.filename
+        if direct_authority is not None:
+            if (
+                direct_authority.raw_object_id != outcome.source_raw_id
+                or direct_authority.tenant_id != tenant_id
+                or direct_authority.uploaded_by != principal
+                or direct_authority.filename != outcome.source_filename
+            ):
+                return False
+            exact_name_rows = resolve_owned_file_exact_raw_filename_direct_read(
+                conn,
+                tenant_id,
+                principal,
+                outcome.source_raw_id,
+                direct_authority.filename,
+            )
+            if (
+                len(exact_name_rows) != 1
+                or str(exact_name_rows[0].get("id") or "") != outcome.source_raw_id
+                or not hmac.compare_digest(
+                    str(exact_name_rows[0].get("content_hash") or "").casefold(),
+                    source_sha256,
+                )
+            ):
+                return False
+            effective_filename = direct_authority.filename
         if (
             stored.raw_id != outcome.source_raw_id
-            or stored.filename != outcome.source_filename
+            or effective_filename != outcome.source_filename
             or len(stored.content) != outcome.source_size_bytes
             or not hmac.compare_digest(source_sha256, outcome.source_sha256)
             or snapshot is None
@@ -59150,7 +59231,7 @@ class AgentRuntime:
         if artifact_compile_requested and not conflicting_artifact_action:
             compile_binding, compile_binding_reason = self._prepare_engineer_compile_source(
                 actor,
-                raw_ids,
+                attachments,
                 requested_filename=artifact_compile_filename,
             )
             if compile_binding is None:

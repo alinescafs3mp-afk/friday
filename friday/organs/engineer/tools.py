@@ -13,10 +13,16 @@ from pathlib import Path
 from typing import Any
 
 from friday.execution_kernel import ToolSpec, mark_tool_physical_start
-from friday.file_delivery import AuthorizedFileReadError, FileRecordUnavailable, read_authorized_file
+from friday.file_delivery import (
+    AuthorizedFileReadError,
+    FileRecordUnavailable,
+    read_authorized_file,
+    read_authorized_file_in_transaction,
+)
 from friday.organs import ServiceContext
 from friday.permissions import ActorContext
 from friday.source_identity import authorized_file_snapshot_token_is_process_owned
+from friday.storage._intake import resolve_owned_file_exact_raw_filename_direct_read
 from friday.workers._blocking import run_blocking
 
 from . import (
@@ -134,6 +140,73 @@ def _read_owned(ctx: ServiceContext, actor: ActorContext, raw_id: str) -> Any:
             artifacts.MAX_ANALYZE_BYTES,
         ),
     )
+
+
+def _reauthorize_owned_compile_alias(
+    ctx: ServiceContext,
+    actor: ActorContext,
+    raw_id: str,
+    expected_filename: str,
+    admitted: Any,
+) -> Any | None:
+    """Re-read one exact Raw/alias binding at the compiler boundary.
+
+    Raw metadata is immutable across content deduplication, so its canonical
+    filename can differ from the authenticated name supplied by this upload.
+    The hidden compile tool accepts that alternate name only when the live
+    alias row, uploader-owned Raw, registered bytes, and the snapshot admitted
+    by Runtime all still describe the same source.
+    """
+
+    admitted_snapshot = getattr(admitted, "snapshot_token", None)
+    if (
+        not _RAW_ID.fullmatch(str(raw_id or ""))
+        or not isinstance(expected_filename, str)
+        or admitted_snapshot is None
+        or not authorized_file_snapshot_token_is_process_owned(admitted_snapshot)
+    ):
+        return None
+    settings = ctx.settings
+    with ctx.storage.transaction() as conn:
+        rows = resolve_owned_file_exact_raw_filename_direct_read(
+            conn,
+            actor.user_id,
+            actor.own_id,
+            raw_id,
+            expected_filename,
+        )
+        if len(rows) != 1 or str(rows[0].get("id") or "") != raw_id:
+            return None
+        current = read_authorized_file_in_transaction(
+            conn,
+            Path(settings.files_dir),
+            raw_id,
+            actor.user_id,
+            person_id=actor.own_id,
+            max_bytes=min(
+                int(getattr(settings, "max_upload_bytes", artifacts.MAX_ANALYZE_BYTES)),
+                artifacts.MAX_ANALYZE_BYTES,
+            ),
+        )
+    current_snapshot = getattr(current, "snapshot_token", None)
+    digest = hashlib.sha256(current.content).hexdigest()
+    if (
+        current.raw_id != raw_id
+        or current_snapshot is None
+        or not authorized_file_snapshot_token_is_process_owned(current_snapshot)
+        or current_snapshot.source.raw_id != raw_id
+        or not hmac.compare_digest(current_snapshot.content_sha256, digest)
+        or not hmac.compare_digest(
+            current_snapshot.source.identity_sha256,
+            admitted_snapshot.source.identity_sha256,
+        )
+        or not hmac.compare_digest(
+            str(rows[0].get("content_hash") or "").casefold(),
+            digest,
+        )
+    ):
+        return None
+    return current
 
 
 def _verified_target(
@@ -689,16 +762,32 @@ def build_engineer_tools(ctx: ServiceContext) -> tuple[ToolSpec, ...]:
             return _compile_failure("file_access_denied", work_started=False)
         except ValueError:
             return _compile_failure("invalid_artifact_handle", work_started=False)
+        if stored.filename != expected_filename:
+            try:
+                stored = await run_blocking(
+                    _reauthorize_owned_compile_alias,
+                    ctx,
+                    actor,
+                    raw_id,
+                    expected_filename,
+                    stored,
+                )
+            except FileRecordUnavailable:
+                return _compile_failure("file_unavailable", work_started=False)
+            except AuthorizedFileReadError:
+                return _compile_failure("file_access_denied", work_started=False)
+            except (OSError, TypeError, ValueError):
+                return _compile_failure("source_identity_changed", work_started=False)
+            if stored is None:
+                return _compile_failure("source_identity_changed", work_started=False)
         snapshot = getattr(stored, "snapshot_token", None)
         source_digest = hashlib.sha256(stored.content).hexdigest()
         if (
             not _RAW_ID.fullmatch(str(raw_id or ""))
-            or compiler.validate_source_payload(stored.content, stored.filename) is not None
             or not isinstance(expected_filename, str)
             or compiler.validate_source_payload(stored.content, expected_filename) is not None
             or not re.fullmatch(r"[0-9a-f]{64}", str(expected_sha256 or ""))
             or stored.raw_id != raw_id
-            or stored.filename != expected_filename
             or not hmac.compare_digest(source_digest, expected_sha256)
             or snapshot is None
             or not authorized_file_snapshot_token_is_process_owned(snapshot)
@@ -710,7 +799,7 @@ def build_engineer_tools(ctx: ServiceContext) -> tuple[ToolSpec, ...]:
             jar, raw_report = await run_blocking(
                 sandbox.compile_java_artifact,
                 stored.content,
-                stored.filename,
+                expected_filename,
                 deadline=time.monotonic() + _COMPILE_TIMEOUT_SEC,
                 workspace_root=Path(ctx.settings.state_dir) / "engineer-tmp",
                 on_started=mark_tool_physical_start,
@@ -727,7 +816,7 @@ def build_engineer_tools(ctx: ServiceContext) -> tuple[ToolSpec, ...]:
         configured_file_cap = max(0, int(getattr(ctx.settings, "max_upload_bytes", 0)))
         if not configured_file_cap or len(jar) > min(configured_file_cap, compiler.MAX_JAR_BYTES):
             return _compile_failure("compiler_output_exceeds_cap", work_started=True)
-        source_stem = Path(str(stored.filename or "Main.java")).stem or "Main"
+        source_stem = Path(str(expected_filename or "Main.java")).stem or "Main"
         source_stem = re.sub(re.escape(raw_id), "artifact", source_stem, flags=re.IGNORECASE)
         output_name = _safe_filename(source_stem + ".compiled", ".jar")
         return {
