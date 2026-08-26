@@ -2,13 +2,15 @@
 
 from __future__ import annotations
 
+import json
 import os
 import shutil
 import signal
 import socket
+import sys
 import threading
 import time
-from contextlib import contextmanager
+from contextlib import contextmanager, suppress
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -16,6 +18,7 @@ from typing import Any
 import pytest
 
 from friday.organs.engineer.command import boundary as boundary_module
+from friday.organs.engineer.command import spawn_helper as spawn_helper_module
 from friday.organs.engineer.command.boundary import ProvenScope, SystemdCgroupBoundary
 from friday.organs.engineer.command.confirm import OwnerConfirmationAuthority
 from friday.organs.engineer.command.contracts import (
@@ -40,8 +43,21 @@ from friday.organs.engineer.command.resolve import (
     require_destructive_grant,
     resolve_held,
 )
-from friday.organs.engineer.command.runner import _output_usage, _terminate_process
+from friday.organs.engineer.command.runner import (
+    SpawnedCommand,
+    _output_usage,
+    _SpawnedProcess,
+    _terminate_process,
+)
 from friday.organs.engineer.command.spawn_helper import (
+    _ACTION_SOURCE_FD_MIN,
+    _HELD_LAUNCHER_PATH,
+    BWRAP_BLOCK_FD,
+    BWRAP_LAUNCHER_FD,
+    HELPER_LAUNCHER,
+    _bwrap_file_actions,
+    _job_main,
+    _make_collision_free_block_pipe,
     _pidfd_identity,
     _recv_fds_message,
     _recv_socket_line,
@@ -130,6 +146,18 @@ def test_confirmation_ingress_row_and_update_are_each_one_shot_across_restart(tm
         restarted.close()
 
 
+def test_store_root_has_a_process_lifetime_single_kernel_lease(tmp_path: Path) -> None:
+    root = tmp_path / "store"
+    first = CommandJobStore(root)
+    try:
+        with pytest.raises(CommandError, match="command_kernel_already_active"):
+            CommandJobStore(root)
+    finally:
+        first.close()
+    reopened = CommandJobStore(root)
+    reopened.close()
+
+
 @pytest.mark.parametrize(
     ("argv", "path"),
     [
@@ -138,20 +166,28 @@ def test_confirmation_ingress_row_and_update_are_each_one_shot_across_restart(tm
         (("/usr/bin/python3", "-c", "print(1)"), "/usr/bin/python3"),
         (("/usr/bin/xargs", "echo"), "/usr/bin/xargs"),
         (("/usr/bin/find", ".", "-exec", "sh", "{}", ";"), "/usr/bin/find"),
+        (("/usr/bin/ld-linux-x86-64.so.2", "/usr/bin/true"), "/usr/bin/ld-linux-x86-64.so.2"),
+        (("/usr/bin/setpriv", "/usr/bin/true"), "/usr/bin/setpriv"),
+        (("/usr/bin/flock", "/tmp/lock", "/usr/bin/true"), "/usr/bin/flock"),
+        (("/usr/bin/tar", "-cf", "/tmp/a.tar", "."), "/usr/bin/tar"),
     ],
 )
-def test_argv_dispatchers_require_distinct_confirmation(argv: tuple[str, ...], path: str) -> None:
+def test_every_argv_requires_distinct_confirmation(argv: tuple[str, ...], path: str) -> None:
     request = _request(*argv)
     with pytest.raises(CommandError, match="destructive_confirmation_required"):
         require_destructive_grant(request, _grant(request), _resolved(path))
     require_destructive_grant(request, _grant(request, confirmed=True), _resolved(path))
 
 
-def test_plain_env_and_non_dispatching_find_remain_non_destructive() -> None:
+def test_plain_env_and_non_dispatching_find_still_require_confirmation() -> None:
     env = _request("/usr/bin/env")
-    require_destructive_grant(env, _grant(env), _resolved("/usr/bin/env"))
+    with pytest.raises(CommandError, match="destructive_confirmation_required"):
+        require_destructive_grant(env, _grant(env), _resolved("/usr/bin/env"))
+    require_destructive_grant(env, _grant(env, confirmed=True), _resolved("/usr/bin/env"))
     find = _request("/usr/bin/find", ".", "-maxdepth", "0")
-    require_destructive_grant(find, _grant(find), _resolved("/usr/bin/find"))
+    with pytest.raises(CommandError, match="destructive_confirmation_required"):
+        require_destructive_grant(find, _grant(find), _resolved("/usr/bin/find"))
+    require_destructive_grant(find, _grant(find, confirmed=True), _resolved("/usr/bin/find"))
 
 
 def test_owner_writable_executable_requires_confirmation() -> None:
@@ -228,6 +264,129 @@ def test_stream_ack_has_a_finite_deadline() -> None:
         receiver.close()
 
 
+def test_low_block_pipe_fd_is_duplicated_before_posix_spawn_actions(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    closed: list[int] = []
+    inheritable: list[tuple[int, bool]] = []
+
+    def _fcntl(fd: int, operation: int, minimum: int) -> int:
+        assert fd == 3
+        assert operation == spawn_helper_module.fcntl.F_DUPFD_CLOEXEC
+        assert minimum == _ACTION_SOURCE_FD_MIN
+        return minimum
+
+    monkeypatch.setattr(os, "pipe", lambda: (3, 4))
+    monkeypatch.setattr(spawn_helper_module.fcntl, "fcntl", _fcntl)
+    monkeypatch.setattr(os, "set_inheritable", lambda fd, value: inheritable.append((fd, value)))
+    monkeypatch.setattr(os, "close", closed.append)
+
+    block_r, block_w = _make_collision_free_block_pipe()
+    actions = _bwrap_file_actions(block_r=block_r, has_script=False, path_root_count=16)
+    gate_index = next(
+        index
+        for index, action in enumerate(actions)
+        if action[0] == os.POSIX_SPAWN_DUP2 and action[2] == BWRAP_BLOCK_FD
+    )
+    gate_action = actions[gate_index]
+    overwritten_before_gate = {
+        action[2] if action[0] == os.POSIX_SPAWN_DUP2 else action[1]
+        for action in actions[:gate_index]
+    }
+
+    assert (block_r, block_w) == (_ACTION_SOURCE_FD_MIN, 4)
+    assert gate_action == (os.POSIX_SPAWN_DUP2, _ACTION_SOURCE_FD_MIN, BWRAP_BLOCK_FD)
+    assert block_r not in overwritten_before_gate
+    assert inheritable == [(_ACTION_SOURCE_FD_MIN, True)]
+    assert closed == [3]
+
+
+def test_job_helper_executes_transferred_bwrap_memfd(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured: dict[str, object] = {}
+    request = {
+        "argv": ["bwrap", "--version"],
+        "cgroup": "/sys/fs/cgroup/mock",
+        "env": {"PATH": "/usr/bin"},
+        "fsize": 1024,
+        "has_script": False,
+        "path_root_count": 0,
+    }
+
+    def _posix_spawn(
+        path: str,
+        argv: list[str],
+        env: dict[str, str],
+        *,
+        file_actions: list[tuple],
+    ) -> int:
+        captured.update(path=path, argv=argv, env=env, actions=file_actions)
+        raise RuntimeError("stop after action inspection")
+
+    monkeypatch.setattr(sys, "argv", ["spawn_helper.py", "--job", json.dumps(request)])
+    monkeypatch.setattr(signal, "signal", lambda *_args: None)
+    monkeypatch.setattr(spawn_helper_module, "_make_collision_free_block_pipe", lambda: (96, 97))
+    monkeypatch.setattr(os, "posix_spawn", _posix_spawn)
+    monkeypatch.setattr(os, "close", lambda _fd: None)
+    monkeypatch.setattr(spawn_helper_module, "_send_ready", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(spawn_helper_module, "_send_json_fd", lambda *_args, **_kwargs: None)
+
+    with pytest.raises(SystemExit):
+        _job_main()
+
+    actions = captured["actions"]
+    assert isinstance(actions, list)
+    assert captured["path"] == _HELD_LAUNCHER_PATH
+    assert f"/proc/self/fd/{BWRAP_LAUNCHER_FD}" == _HELD_LAUNCHER_PATH
+    assert (os.POSIX_SPAWN_DUP2, HELPER_LAUNCHER, BWRAP_LAUNCHER_FD) in actions
+
+
+def test_exit_frame_before_pipe_eof_still_drains_captured_output(tmp_path: Path) -> None:
+    workspace = JobWorkspace(tmp_path / "job")
+    workspace.materialize()
+    stdout_r, stdout_w = os.pipe()
+    stderr_r, stderr_w = os.pipe()
+    ctrl_r, ctrl_w = os.pipe()
+    os.write(stdout_w, b"late-output")
+    os.close(stdout_w)
+    os.close(stderr_w)
+    os.write(ctrl_w, b'{"returncode":0}\n')
+    os.close(ctrl_w)
+
+    class _Scope:
+        @staticmethod
+        def kill() -> bool:
+            return True
+
+    try:
+        proc = _SpawnedProcess(123, None, ctrl_r)
+        spawned = SpawnedCommand(
+            workspace=workspace,
+            timeout_sec=1,
+            max_stdout_bytes=1024,
+            max_stderr_bytes=1024,
+            isolation=IsolationProfile.ISOLATED_WORKSPACE,
+            limits=ResourceLimits.default(),
+            process=proc,
+            scope=_Scope(),  # type: ignore[arg-type]
+        )
+        spawned._stdout_r = stdout_r
+        spawned._stdout_w = -1
+        spawned._stderr_r = stderr_r
+        spawned._stderr_w = -1
+        spawned.started_at = time.time()
+        spawned.wait()
+        assert spawned.stdout == b"late-output"
+        assert workspace.stdout_path.read_bytes() == b"late-output"
+        assert spawned.eof_proven is True
+        assert spawned.exit_code == 0
+    finally:
+        if "proc" in locals():
+            proc.close_ctrl()
+        for fd in (stdout_r, stderr_r, ctrl_r):
+            with suppress(OSError):
+                os.close(fd)
+
+
 def test_termination_signals_pidfd_and_never_numeric_pid(monkeypatch: pytest.MonkeyPatch) -> None:
     calls: list[tuple[int, int]] = []
     state = {"dead": False, "scope_kills": 0}
@@ -254,6 +413,70 @@ def test_termination_signals_pidfd_and_never_numeric_pid(monkeypatch: pytest.Mon
     _terminate_process(_Process(), _Scope())  # type: ignore[arg-type]
     assert calls == [(77, signal.SIGTERM)]
     assert state["scope_kills"] == 1
+
+
+def test_close_pidfd_invalidates_process_alias_before_fd_can_be_reused(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    closed: list[int] = []
+    proc = _SpawnedProcess(123, 77, -1)
+    proc.returncode = 0
+    workspace = JobWorkspace(tmp_path / "job")
+    spawned = SpawnedCommand(
+        workspace=workspace,
+        timeout_sec=1,
+        max_stdout_bytes=1,
+        max_stderr_bytes=1,
+        isolation=IsolationProfile.ISOLATED_WORKSPACE,
+        limits=ResourceLimits.default(),
+        process=proc,
+        pidfd=77,
+    )
+    monkeypatch.setattr(os, "close", closed.append)
+    monkeypatch.setattr(
+        signal,
+        "pidfd_send_signal",
+        lambda *_args: pytest.fail("closed pidfd alias was signaled"),
+    )
+
+    spawned.close_pidfd()
+    _terminate_process(proc, None)
+
+    assert closed == [77]
+    assert spawned.pidfd is None
+    assert proc.pidfd is None
+
+
+def test_output_and_control_fds_are_invalidated_before_first_close(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    closed: list[int] = []
+    proc = _SpawnedProcess(123, None, 43)
+    spawned = SpawnedCommand(
+        workspace=JobWorkspace(tmp_path / "job"),
+        timeout_sec=1,
+        max_stdout_bytes=1,
+        max_stderr_bytes=1,
+        isolation=IsolationProfile.ISOLATED_WORKSPACE,
+        limits=ResourceLimits.default(),
+        process=proc,
+    )
+    spawned._stdout_r = 41
+    spawned._stderr_r = 42
+    monkeypatch.setattr(os, "close", closed.append)
+
+    spawned._close_output_fd("stdout", 41)
+    spawned._close_output_fd("stdout", 41)
+    proc.close_ctrl()
+    proc.close_ctrl()
+    spawned._close_pipes()
+
+    assert closed == [41, 43, 42]
+    assert spawned._stdout_r == -1
+    assert spawned._stderr_r == -1
+    assert proc.ctrl_fd == -1
 
 
 def test_pidfd_identity_is_transferred_without_reopening_a_numeric_pid() -> None:
@@ -400,6 +623,178 @@ def test_restart_never_writes_or_stops_unvalidated_persisted_scope(tmp_path: Pat
     assert _Store.updates[-1]["status"] == CommandStatus.UNKNOWN.value
 
 
+def test_scope_identity_commits_before_spawn_helper_can_release_go(tmp_path: Path) -> None:
+    events: list[str] = []
+    job_id = "a" * 32
+    scope = ProvenScope(
+        job_id=job_id,
+        unit=f"friday-ecmd-{job_id}.service",
+        cgroup=tmp_path / f"friday-ecmd-{job_id}.service",
+        limits=ResourceLimits.default(),
+    )
+
+    class _Store:
+        @staticmethod
+        @contextmanager
+        def transaction():
+            events.append("transaction")
+            yield
+            events.append("commit")
+
+        @staticmethod
+        def update_job(_job_id: str, fields: dict[str, object]) -> None:
+            assert fields == {"cgroup_path": str(scope.cgroup), "systemd_unit": scope.unit}
+            events.append("scope-row")
+
+    class _Workspace:
+        @staticmethod
+        def env(*, path_value: str, isolated: bool) -> dict[str, str]:
+            assert path_value == "/usr/bin"
+            assert isolated is True
+            events.append("env")
+            return {"PATH": path_value}
+
+    class _Spawned:
+        scope = None
+
+        @staticmethod
+        def abort() -> None:
+            events.append("abort")
+
+        def spawn(self, *_args: object, **kwargs: object) -> None:
+            assert self.scope is scope
+            assert kwargs["scope"] is scope
+            assert events.index("commit") < len(events)
+            events.append("go")
+
+    kernel = CommandKernel.__new__(CommandKernel)
+    kernel_any: Any = kernel
+    kernel_any.store = _Store()
+    kernel_any.trusted_path = SimpleNamespace(runtime_path="/usr/bin")
+    kernel_any.path_roots = ()
+    kernel_any._broker = object()
+    spawned: Any = _Spawned()
+    kernel._spawn_in_durable_scope(
+        job_id,
+        _request("/usr/bin/true"),
+        _Workspace(),  # type: ignore[arg-type]
+        spawned,
+        object(),
+        object(),
+        scope,
+    )
+
+    assert events == ["transaction", "scope-row", "commit", "env", "go"]
+
+
+def test_scope_commit_failure_aborts_before_spawn_helper_go(tmp_path: Path) -> None:
+    events: list[str] = []
+    job_id = "c" * 32
+    scope = ProvenScope(
+        job_id=job_id,
+        unit=f"friday-ecmd-{job_id}.service",
+        cgroup=tmp_path / f"friday-ecmd-{job_id}.service",
+        limits=ResourceLimits.default(),
+    )
+
+    class _Store:
+        @staticmethod
+        @contextmanager
+        def transaction():
+            yield
+            raise CommandError("durable_write_failed")
+
+        @staticmethod
+        def update_job(_job_id: str, _fields: dict[str, object]) -> None:
+            events.append("scope-row")
+
+    class _Spawned:
+        scope = None
+
+        @staticmethod
+        def abort() -> None:
+            events.append("abort")
+
+        @staticmethod
+        def spawn(*_args: object, **_kwargs: object) -> None:
+            events.append("go")
+
+    kernel = CommandKernel.__new__(CommandKernel)
+    kernel_any: Any = kernel
+    kernel_any.store = _Store()
+    kernel_any.trusted_path = SimpleNamespace(runtime_path="/usr/bin")
+    kernel_any.path_roots = ()
+    kernel_any._broker = object()
+    spawned: Any = _Spawned()
+
+    with pytest.raises(CommandError, match="durable_write_failed"):
+        kernel._spawn_in_durable_scope(
+            job_id,
+            _request("/usr/bin/true"),
+            SimpleNamespace(env=lambda **_kwargs: {}),  # type: ignore[arg-type]
+            spawned,
+            object(),
+            object(),
+            scope,
+        )
+
+    assert events == ["scope-row", "abort"]
+    assert spawned.scope is scope
+
+
+def test_restart_reconciles_admitted_job_with_persisted_scope(tmp_path: Path) -> None:
+    events: list[str] = []
+    job_id = "b" * 32
+    scope = ProvenScope(
+        job_id=job_id,
+        unit=f"friday-ecmd-{job_id}.service",
+        cgroup=tmp_path / f"friday-ecmd-{job_id}.service",
+        limits=ResourceLimits.default(),
+    )
+
+    class _Store:
+        @staticmethod
+        def list_unreaped() -> list[dict[str, object]]:
+            return [
+                {
+                    "job_id": job_id,
+                    "status": CommandStatus.ADMITTED.value,
+                    "systemd_unit": scope.unit,
+                    "cgroup_path": str(scope.cgroup),
+                    "timeout_sec": 30,
+                }
+            ]
+
+        @staticmethod
+        @contextmanager
+        def transaction():
+            yield
+
+        @staticmethod
+        def update_job(_job_id: str, fields: dict[str, object]) -> None:
+            assert fields["status"] == CommandStatus.UNKNOWN.value
+            events.append("unknown")
+
+    class _Boundary:
+        @staticmethod
+        def recover_scope(*_args: object, **_kwargs: object) -> ProvenScope:
+            events.append("recover")
+            return scope
+
+        @staticmethod
+        def stop(recovered: ProvenScope) -> None:
+            assert recovered is scope
+            events.append("stop")
+
+    kernel = CommandKernel.__new__(CommandKernel)
+    kernel.store = _Store()  # type: ignore[assignment]
+    kernel.boundary = _Boundary()  # type: ignore[assignment]
+    kernel.limits = ResourceLimits.default()
+    kernel._reconcile_stale()
+
+    assert events == ["recover", "stop", "unknown"]
+
+
 def test_transient_scope_requests_collect_and_cleanup_is_bounded(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -438,6 +833,39 @@ def test_transient_scope_requests_collect_and_cleanup_is_bounded(
     scope.cgroup_fd = None
 
 
+def test_scope_retains_attested_cgroup_fd_until_cleanup_retry_is_proven(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    cgroup = tmp_path / f"friday-ecmd-{'f' * 32}.service"
+    cgroup.mkdir()
+    (cgroup / "cgroup.events").write_text("populated 0\n", encoding="ascii")
+    (cgroup / "cgroup.kill").write_text("", encoding="ascii")
+    fd = os.open(cgroup, os.O_RDONLY | os.O_DIRECTORY)
+    outcomes = iter((False, False, True))
+    monkeypatch.setattr(boundary_module, "_stop_and_collect", lambda _unit: next(outcomes))
+    scope = ProvenScope(
+        job_id="f" * 32,
+        unit=f"friday-ecmd-{'f' * 32}.service",
+        cgroup=cgroup,
+        limits=ResourceLimits.default(),
+        cgroup_fd=fd,
+    )
+
+    try:
+        assert scope.kill() is False
+        assert scope.cgroup_fd == fd
+        os.fstat(fd)
+        assert scope.kill() is True
+        assert scope.cgroup_fd is None
+        with pytest.raises(OSError):
+            os.fstat(fd)
+    finally:
+        if scope.cgroup_fd is not None:
+            os.close(scope.cgroup_fd)
+            scope.cgroup_fd = None
+
+
 def test_path_lookup_and_bind_stay_on_held_root_after_rename(tmp_path: Path) -> None:
     trusted = tmp_path / "trusted-bin"
     trusted.mkdir()
@@ -465,3 +893,17 @@ def test_path_lookup_and_bind_stay_on_held_root_after_rename(tmp_path: Path) -> 
             held.close()
         for root in roots:
             os.close(root.dir_fd)
+
+
+@pytest.mark.parametrize("directory", ["/", "/dev", "/proc", "/run", "/run/friday", "/sys", "/var"])
+def test_trusted_path_rejects_sandbox_control_roots_and_ancestors(directory: str) -> None:
+    with pytest.raises(CommandError, match="invalid_trusted_path"):
+        TrustedPathContract(directories=(directory,))
+
+
+def test_trusted_path_attestation_rejects_alias_to_sensitive_root(tmp_path: Path) -> None:
+    alias = tmp_path / "run-alias"
+    alias.symlink_to("/run")
+    contract = TrustedPathContract(directories=(str(alias),))
+    with pytest.raises(CommandError, match="untrusted_path_root"):
+        attest_trusted_path(contract)

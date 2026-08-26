@@ -11,7 +11,7 @@ import time
 import weakref
 from pathlib import Path
 
-from .boundary import ResourceBoundary, SystemdCgroupBoundary
+from .boundary import ProvenScope, ResourceBoundary, SystemdCgroupBoundary
 from .contracts import (
     MAX_STDERR_BYTES,
     MAX_STDOUT_BYTES,
@@ -126,6 +126,7 @@ class CommandKernel:
         boundary: ResourceBoundary | None = None,
     ) -> None:
         self.store = CommandJobStore(Path(store_root))
+        self._store_finalizer = weakref.finalize(self, self.store.close)
         self.authority = authority
         self.authority.bind_store(self.store)
         self.trusted_path = trusted_path or TrustedPathContract.default()
@@ -141,6 +142,14 @@ class CommandKernel:
         self._finalizer = weakref.finalize(self, self._broker.close)
         self._path_finalizer = weakref.finalize(self, _close_fds, tuple(root.dir_fd for root in self.path_roots))
         self._reconcile_stale()
+
+    def close(self) -> None:
+        with self._lock:
+            if self._live or any(worker.is_alive() for worker in self._threads.values()):
+                raise CommandError("job_running")
+        self._finalizer()
+        self._path_finalizer()
+        self._store_finalizer()
 
     def _reconcile_stale(self) -> None:
         for job in self.store.list_unreaped():
@@ -169,6 +178,45 @@ class CommandKernel:
                         "finished_at": time.time(),
                     },
                 )
+
+    def _spawn_in_durable_scope(
+        self,
+        job_id: str,
+        request: CommandRequest,
+        workspace: JobWorkspace,
+        spawned: SpawnedCommand,
+        held,
+        bwrap,
+        scope: ProvenScope,
+    ) -> None:
+        """Persist the recoverable scope identity before the helper can release GO."""
+        spawned.scope = scope
+        try:
+            with self.store.transaction():
+                self.store.update_job(
+                    job_id,
+                    {
+                        "cgroup_path": str(scope.cgroup),
+                        "systemd_unit": scope.unit,
+                    },
+                )
+        except Exception as exc:
+            spawned.abort()
+            if isinstance(exc, CommandError):
+                raise
+            raise CommandError("durable_write_failed") from exc
+        spawned.spawn(
+            held,
+            stdin=request.stdin,
+            env=workspace.env(
+                path_value=self.trusted_path.runtime_path,
+                isolated=True,
+            ),
+            path_roots=self.path_roots,
+            bwrap=bwrap,
+            scope=scope,
+            broker=self._broker,
+        )
 
     def submit(self, request: CommandRequest, grant_token: str, *, actor_id: str) -> str:
         grant = None
@@ -249,17 +297,14 @@ class CommandKernel:
                 self.authority.still_valid(grant)
                 with self._spawn_lock:
                     scope = self.boundary.allocate(job_id, self.limits, timeout_sec=request.timeout_sec)
-                    spawned.spawn(
+                    self._spawn_in_durable_scope(
+                        job_id,
+                        request,
+                        workspace,
+                        spawned,
                         held,
-                        stdin=request.stdin,
-                        env=workspace.env(
-                            path_value=self.trusted_path.runtime_path,
-                            isolated=True,
-                        ),
-                        path_roots=self.path_roots,
-                        bwrap=bwrap,
-                        scope=scope,
-                        broker=self._broker,
+                        bwrap,
+                        scope,
                     )
             except CommandError as exc:
                 spawned.abort()

@@ -92,16 +92,21 @@ class ProvenScope:
                 empty = True
                 break
             time.sleep(0.05)
-        collected = _stop_and_collect(self.unit)
-        if held_fd is not None:
-            with contextlib.suppress(OSError):
-                os.close(held_fd)
-            self.cgroup_fd = None
+        collected = False
+        for _attempt in range(2):
+            collected = _stop_and_collect(self.unit)
+            if collected:
+                break
         if not self.cgroup.is_dir():
             empty = True
         if empty:
             self._tree_empty_proven = True
-        return collected and self._tree_empty_proven
+        proven = collected and self._tree_empty_proven
+        if proven and held_fd is not None:
+            self.cgroup_fd = None
+            with contextlib.suppress(OSError):
+                os.close(held_fd)
+        return proven
 
     def tree_empty(self) -> bool:
         if self.cgroup_fd is None:

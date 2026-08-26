@@ -92,13 +92,14 @@ def _attest(source_auth: OwnerSourceAuthority, request: CommandRequest, **kwargs
 def _confirm(kernel: CommandKernel, source: OwnerSource, request: CommandRequest, **kwargs):
     clock = kernel.authority.confirm_authority._clock
     expires_at = kwargs.get("expires_at", int(clock()) + 60)
+    event_marker = f"{request.idempotency_key}-{time.time_ns()}"
     handle = kernel.authority.confirm_authority.ingest(
         actor_id=source.actor_id,
         tenant_id=source.tenant_id,
         conversation_id=source.conversation_id,
         channel=source.channel,
-        confirmation_row_id=kwargs.get("confirmation_row_id", f"confirm-row-{request.idempotency_key}"),
-        confirmation_update_id=kwargs.get("confirmation_update_id", f"confirm-upd-{request.idempotency_key}"),
+        confirmation_row_id=kwargs.get("confirmation_row_id", f"confirm-row-{event_marker}"),
+        confirmation_update_id=kwargs.get("confirmation_update_id", f"confirm-upd-{event_marker}"),
         command_digest=request.digest,
         body_hash=kwargs.get("body_hash", sha256_bytes(b"confirm-body")),
         expires_at=int(expires_at),
@@ -118,7 +119,7 @@ def _submit(kernel: CommandKernel, request: CommandRequest, **kwargs) -> str:
         actor_id=actor_id,
     )
     confirmation = None
-    if kwargs.pop("destructive", False):
+    if kwargs.pop("destructive", True):
         confirmation = _confirm(kernel, source, request)
     token = kernel.authority.issue(request, source=source, confirmation=confirmation)
     return kernel.submit(request, token, actor_id=actor_id)
@@ -229,7 +230,9 @@ def test_restart_without_live_pid_is_unknown(tmp_path: Path) -> None:
     )
     conn.commit()
     conn.close()
-    restarted = CommandKernel(kernel.store.root, _authority())
+    store_root = kernel.store.root
+    kernel.close()
+    restarted = CommandKernel(store_root, _authority())
     progress = restarted.progress(job_id, actor_id=ACTOR)
     assert progress.status is CommandStatus.UNKNOWN
     receipt = restarted.wait(job_id, actor_id=ACTOR)
@@ -250,7 +253,9 @@ def test_restart_does_not_trust_reused_pid(tmp_path: Path) -> None:
     )
     conn.commit()
     conn.close()
-    restarted = CommandKernel(kernel.store.root, _authority())
+    store_root = kernel.store.root
+    kernel.close()
+    restarted = CommandKernel(store_root, _authority())
     assert restarted.progress(job_id, actor_id=ACTOR).status is CommandStatus.UNKNOWN
     assert os.getpid() > 0
 
@@ -271,7 +276,7 @@ def test_grant_replay_and_digest_mismatch_and_actor_mismatch(tmp_path: Path) -> 
     kernel = _kernel(tmp_path)
     request = _argv("/usr/bin/true", key=_key("replay"))
     source = _attest(kernel.authority.source_authority, request)
-    token = kernel.authority.issue(request, source=source)
+    token = kernel.authority.issue(request, source=source, confirmation=_confirm(kernel, source, request))
     _wait(kernel, kernel.submit(request, token, actor_id=ACTOR))
     same_digest = _argv("/usr/bin/true", key=_key("replay-2"))
     with pytest.raises(CommandError, match="grant_replay|grant_idempotency_mismatch"):
@@ -347,7 +352,7 @@ def test_boolean_cannot_satisfy_destructive_approval(tmp_path: Path) -> None:
     with pytest.raises(TypeError):
         kernel.authority.issue(request, source=source, destructive_confirmed=True)  # type: ignore[call-arg]
     with pytest.raises(CommandError, match="destructive_confirmation_required"):
-        _submit(kernel, request)
+        _submit(kernel, request, destructive=False)
 
 
 def test_symlink_executable_is_refused(tmp_path: Path) -> None:
@@ -389,10 +394,10 @@ def test_sudo_and_destructive_shell_need_confirmation(tmp_path: Path) -> None:
     if sudo_path.exists():
         request = _argv("/usr/bin/sudo", "-n", "true", key=_key("sudo"))
         with pytest.raises(CommandError, match="setid_refused|destructive_confirmation_required|symlink_refused"):
-            _submit(kernel, request)
+            _submit(kernel, request, destructive=False)
     shell = _shell("sudo -n true", key=_key("sudo-shell"))
     with pytest.raises(CommandError, match="destructive_confirmation_required"):
-        _submit(kernel, shell)
+        _submit(kernel, shell, destructive=False)
     confirmed = _shell("printf x > output/ok.txt", key=_key("ok-shell"), timeout_sec=10)
     receipt = _wait(kernel, _submit(kernel, confirmed, destructive=True))
     assert receipt.status is CommandStatus.COMPLETED
@@ -425,9 +430,11 @@ def test_grant_replay_survives_kernel_restart(tmp_path: Path) -> None:
     kernel = _kernel(tmp_path)
     request = _argv("/usr/bin/true", key=_key("persist-replay"))
     source = _attest(kernel.authority.source_authority, request)
-    token = kernel.authority.issue(request, source=source)
+    token = kernel.authority.issue(request, source=source, confirmation=_confirm(kernel, source, request))
     _wait(kernel, kernel.submit(request, token, actor_id=ACTOR))
-    restarted = CommandKernel(kernel.store.root, _authority())
+    store_root = kernel.store.root
+    kernel.close()
+    restarted = CommandKernel(store_root, _authority())
     same_digest = _argv("/usr/bin/true", key=_key("persist-replay-2"))
     with pytest.raises(CommandError, match="grant_replay|grant_idempotency_mismatch"):
         restarted.submit(same_digest, token, actor_id=ACTOR)
@@ -639,7 +646,7 @@ def test_concurrent_same_key_submit_is_single_job(tmp_path: Path) -> None:
     key = _key("concurrent")
     request = _argv("/usr/bin/sleep", "2", key=key, timeout_sec=10)
     source = _attest(kernel.authority.source_authority, request)
-    token = kernel.authority.issue(request, source=source)
+    token = kernel.authority.issue(request, source=source, confirmation=_confirm(kernel, source, request))
     first = kernel.submit(request, token, actor_id=ACTOR)
     second = kernel.submit(request, token, actor_id=ACTOR)
     assert first == second
@@ -1015,31 +1022,36 @@ def test_restart_receipt_rejects_mutated_evidence(tmp_path: Path) -> None:
     assert receipt.status is CommandStatus.COMPLETED
     job_dir = kernel.store.job_dir(receipt.job_id)
     stdout = job_dir / "evidence" / "stdout.bin"
+    store_root = kernel.store.root
+    kernel.close()
 
     os.remove(stdout)
     stdout.symlink_to("/etc/passwd")
-    restarted = CommandKernel(kernel.store.root, _authority())
+    restarted = CommandKernel(store_root, _authority())
     bad = restarted.wait(receipt.job_id, actor_id=ACTOR)
     assert bad.status is CommandStatus.UNKNOWN
     assert bad.error_code == "corrupt_evidence"
+    restarted.close()
 
     os.remove(stdout)
     stdout.write_bytes(b"stable-bytes")
     stdout.write_bytes(b"stable-bytes" + b"!")
-    restarted2 = CommandKernel(kernel.store.root, _authority())
+    restarted2 = CommandKernel(store_root, _authority())
     replaced = restarted2.wait(receipt.job_id, actor_id=ACTOR)
     assert replaced.status is CommandStatus.UNKNOWN
     assert replaced.error_code == "corrupt_evidence"
+    restarted2.close()
 
     stdout.write_bytes(b"stable-bytes")
     with stdout.open("ab") as handle:
         handle.write(b"appended")
-    restarted3 = CommandKernel(kernel.store.root, _authority())
+    restarted3 = CommandKernel(store_root, _authority())
     appended = restarted3.wait(receipt.job_id, actor_id=ACTOR)
     assert appended.status is CommandStatus.UNKNOWN
+    restarted3.close()
 
     stdout.write_bytes(b"x" * (2 * 1024 * 1024 + 10))
-    restarted4 = CommandKernel(kernel.store.root, _authority())
+    restarted4 = CommandKernel(store_root, _authority())
     oversized = restarted4.wait(receipt.job_id, actor_id=ACTOR)
     assert oversized.status is CommandStatus.UNKNOWN
 
@@ -1095,7 +1107,7 @@ def test_shell_bypass_strings_require_confirmation(tmp_path: Path) -> None:
     ):
         request = _shell(command, key=_key(label))
         with pytest.raises(CommandError, match="destructive_confirmation_required"):
-            _submit(kernel, request)
+            _submit(kernel, request, destructive=False)
 
 
 def test_usage_walk_fail_closed_on_depth_and_unreadable(tmp_path: Path) -> None:
@@ -1177,7 +1189,7 @@ def test_submit_from_other_thread_completes(tmp_path: Path) -> None:
     kernel = _kernel(tmp_path)
     request = _argv("/usr/bin/true", key=_key("other-thread"))
     source = _attest(kernel.authority.source_authority, request)
-    token = kernel.authority.issue(request, source=source)
+    token = kernel.authority.issue(request, source=source, confirmation=_confirm(kernel, source, request))
     result: dict[str, object] = {}
 
     def _run() -> None:

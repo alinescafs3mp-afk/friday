@@ -50,6 +50,15 @@ MAX_OUTPUT_DIRS = 64
 MAX_GRANT_CHARS = 16384
 MAX_EXECUTABLE_BYTES = 64 * 1024 * 1024
 DEFAULT_TRUSTED_PATH = ("/usr/bin", "/bin")
+SENSITIVE_SANDBOX_PATH_ROOTS = (
+    "/dev",
+    "/etc",
+    "/job",
+    "/proc",
+    "/run",
+    "/sys",
+    "/var/run",
+)
 SYSTEMD_RUN_EXECUTABLE = "/usr/bin/systemd-run"
 SYSTEMCTL_EXECUTABLE = "/usr/bin/systemctl"
 TRUE_EXECUTABLE = "/usr/bin/true"
@@ -163,6 +172,18 @@ def framed_argv_digest(argv: tuple[str, ...]) -> str:
     return sha256_bytes(framed)
 
 
+def path_root_is_sensitive(path: str) -> bool:
+    normalized = path if path == "/" else path.rstrip("/")
+    if normalized == "/":
+        return True
+    return any(
+        normalized == root
+        or normalized.startswith(root + "/")
+        or root.startswith(normalized + "/")
+        for root in SENSITIVE_SANDBOX_PATH_ROOTS
+    )
+
+
 @dataclass(frozen=True, slots=True)
 class TrustedPathContract:
     """Code-owned PATH used for both resolution and the child environment."""
@@ -180,6 +201,8 @@ class TrustedPathContract:
             if any(part in {".", ".."} for part in Path(item).parts):
                 raise CommandError("invalid_trusted_path")
             normalized = item if item == "/" else item.rstrip("/")
+            if path_root_is_sensitive(normalized):
+                raise CommandError("invalid_trusted_path")
             if normalized in seen:
                 raise CommandError("invalid_trusted_path")
             seen.add(normalized)
@@ -207,6 +230,10 @@ class PathRoot:
     inode: int
     mtime_ns: int
     dir_fd: int
+
+    def __post_init__(self) -> None:
+        if not self.path.startswith("/") or path_root_is_sensitive(self.path):
+            raise CommandError("invalid_trusted_path")
 
 
 @dataclass(frozen=True, slots=True)
@@ -601,6 +628,7 @@ __all__ = [
     "BWRAP_PATH_ROOT_FD_BASE",
     "BWRAP_SCRIPT_FD",
     "SCHEMA",
+    "SENSITIVE_SANDBOX_PATH_ROOTS",
     "SHELL_FLAG_PREFIX",
     "CommandError",
     "CommandLane",
@@ -622,5 +650,6 @@ __all__ = [
     "VerifiedCommandGrant",
     "canonical_json_bytes",
     "framed_argv_digest",
+    "path_root_is_sensitive",
     "sha256_bytes",
 ]

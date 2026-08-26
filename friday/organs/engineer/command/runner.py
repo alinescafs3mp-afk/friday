@@ -131,9 +131,17 @@ class _SpawnedProcess:
 
     def close_ctrl(self) -> None:
         if self.ctrl_fd >= 0:
-            with contextlib.suppress(OSError):
-                os.close(self.ctrl_fd)
+            fd = self.ctrl_fd
             self.ctrl_fd = -1
+            with contextlib.suppress(OSError):
+                os.close(fd)
+
+    def close_pidfd(self) -> None:
+        if self.pidfd is not None:
+            fd = self.pidfd
+            self.pidfd = None
+            with contextlib.suppress(OSError):
+                os.close(fd)
 
 
 def _output_usage(output: Path) -> tuple[int, int]:
@@ -265,7 +273,6 @@ class SpawnedCommand:
             limits=self.limits,
             sync_fd=BWRAP_BLOCK_FD,
         )
-        launcher = bwrap.resolved.canonical_path
         child_env = {"PATH": "/usr/bin", "LANG": "C.UTF-8"}
         export_fd = sealed_payload_memfd(OUTPUT_EXPORT_SCRIPT, label="friday-export")
         export_impl_fd = sealed_payload_memfd(OUTPUT_EXPORT_IMPL, label="friday-export-impl")
@@ -291,7 +298,6 @@ class SpawnedCommand:
         try:
             self.started_at = time.time()
             started = broker.start_job(
-                launcher=launcher,
                 argv=argv,
                 env=child_env,
                 cgroup=str(scope.cgroup),
@@ -300,6 +306,7 @@ class SpawnedCommand:
                 stdout_w=stdout_w,
                 stderr_w=stderr_w,
                 exec_fd=held.executable_fd,
+                launcher_fd=bwrap.executable_fd,
                 export_fd=export_fd,
                 export_impl_fd=export_impl_fd,
                 stdin_payload_fd=stdin_payload_fd,
@@ -309,8 +316,8 @@ class SpawnedCommand:
             self.effect_boundary_crossed = True
             self.pid = int(started.pid)
             self.pid_starttime = started.starttime if started.starttime is not None else _pid_starttime(self.pid)
-            self.pidfd = started.pidfd
             self.process = _SpawnedProcess(started.pid, started.pidfd, started.ctrl_fd)
+            self.pidfd = self.process.pidfd
             os.set_blocking(started.ctrl_fd, False)
             os.close(stdout_w)
             os.close(stderr_w)
@@ -378,6 +385,44 @@ class SpawnedCommand:
         timed_out = False
         cancelled = False
         reader_failed = False
+        def _consume_event(key: selectors.SelectorKey, mask: int) -> None:
+            nonlocal stdout_captured, stderr_captured, stdout_trunc, stderr_trunc, reader_failed
+            kind = key.data
+            try:
+                if kind in {"stdout", "stderr"} and mask & selectors.EVENT_READ:
+                    chunk = os.read(key.fd, 65536)
+                    if not chunk:
+                        selector.unregister(key.fd)
+                        self._close_output_fd(kind, key.fd)
+                        return
+                    self.output_activity = True
+                    if kind == "stdout":
+                        take, stdout_trunc = _cap(chunk, stdout_captured, self.max_stdout_bytes, stdout_trunc)
+                        stdout_chunks.append(take)
+                        stdout_captured += len(take)
+                        stdout_handle.write(take)
+                        stdout_handle.flush()
+                    else:
+                        take, stderr_trunc = _cap(chunk, stderr_captured, self.max_stderr_bytes, stderr_trunc)
+                        stderr_chunks.append(take)
+                        stderr_captured += len(take)
+                        stderr_handle.write(take)
+                        stderr_handle.flush()
+                elif kind == "exit" and mask & selectors.EVENT_READ:
+                    proc._read_ctrl()
+                    if proc.returncode is not None:
+                        with contextlib.suppress(Exception):
+                            selector.unregister(proc.ctrl_fd)
+                        proc.close_ctrl()
+            except OSError:
+                reader_failed = True
+                with contextlib.suppress(Exception):
+                    selector.unregister(key.fd)
+                if kind in {"stdout", "stderr"}:
+                    self._close_output_fd(kind, key.fd)
+                elif kind == "exit":
+                    proc.close_ctrl()
+
         try:
             while proc.poll() is None:
                 if not cancelled and self._cancel.is_set():
@@ -409,40 +454,7 @@ class SpawnedCommand:
                 except InterruptedError:
                     continue
                 for key, mask in events:
-                    kind = key.data
-                    try:
-                        if kind in {"stdout", "stderr"} and mask & selectors.EVENT_READ:
-                            chunk = os.read(key.fd, 65536)
-                            if not chunk:
-                                selector.unregister(key.fd)
-                                os.close(key.fd)
-                                if kind == "stdout":
-                                    self._stdout_r = -1
-                                else:
-                                    self._stderr_r = -1
-                                continue
-                            self.output_activity = True
-                            if kind == "stdout":
-                                take, stdout_trunc = _cap(chunk, stdout_captured, self.max_stdout_bytes, stdout_trunc)
-                                stdout_chunks.append(take)
-                                stdout_captured += len(take)
-                                stdout_handle.write(take)
-                                stdout_handle.flush()
-                            else:
-                                take, stderr_trunc = _cap(chunk, stderr_captured, self.max_stderr_bytes, stderr_trunc)
-                                stderr_chunks.append(take)
-                                stderr_captured += len(take)
-                                stderr_handle.write(take)
-                                stderr_handle.flush()
-                        elif kind == "exit" and mask & selectors.EVENT_READ:
-                            proc._read_ctrl()
-                            if proc.returncode is not None:
-                                with contextlib.suppress(Exception):
-                                    selector.unregister(proc.ctrl_fd)
-                    except OSError:
-                        reader_failed = True
-                        with contextlib.suppress(Exception):
-                            selector.unregister(key.fd)
+                    _consume_event(key, mask)
                 with self._lock:
                     self.stdout_bytes = stdout_captured
                     self.stderr_bytes = stderr_captured
@@ -454,16 +466,8 @@ class SpawnedCommand:
                 cancelled = True
             eof_deadline = time.monotonic() + _EOF_GRACE_SEC
             while selector.get_map() and time.monotonic() < eof_deadline:
-                for key, _mask in selector.select(0.05):
-                    try:
-                        chunk = os.read(key.fd, 65536)
-                    except OSError:
-                        reader_failed = True
-                        chunk = b""
-                    if not chunk:
-                        selector.unregister(key.fd)
-                        with contextlib.suppress(OSError):
-                            os.close(key.fd)
+                for key, mask in selector.select(0.05):
+                    _consume_event(key, mask)
             self.eof_proven = not selector.get_map() and not reader_failed
         finally:
             stdout_handle.close()
@@ -496,28 +500,39 @@ class SpawnedCommand:
                 self.exit_code = int(code)
 
     def close_pidfd(self) -> None:
-        if self.pidfd is not None:
-            with contextlib.suppress(OSError):
-                os.close(self.pidfd)
-            self.pidfd = None
         proc = self.process
         if proc is not None:
+            proc.close_pidfd()
             proc.close_ctrl()
+        elif self.pidfd is not None:
+            with contextlib.suppress(OSError):
+                os.close(self.pidfd)
+        self.pidfd = None
 
     def _close_pipes(self) -> None:
         for attr in ("_stdin_r", "_stdin_w", "_stdout_r", "_stdout_w", "_stderr_r", "_stderr_w"):
             fd = getattr(self, attr, -1)
             if isinstance(fd, int) and fd >= 0:
+                setattr(self, attr, -1)
                 with contextlib.suppress(OSError):
                     os.close(fd)
-                setattr(self, attr, -1)
+
+    def _close_output_fd(self, kind: str, fd: int) -> None:
+        attr = "_stdout_r" if kind == "stdout" else "_stderr_r"
+        if getattr(self, attr, -1) != fd:
+            return
+        setattr(self, attr, -1)
+        with contextlib.suppress(OSError):
+            os.close(fd)
 
     def _close_remaining(self, selector: selectors.DefaultSelector) -> None:
         for key in list(selector.get_map().values()):
             with contextlib.suppress(Exception):
                 selector.unregister(key.fd)
-            with contextlib.suppress(OSError):
-                os.close(key.fd)
+            if key.data in {"stdout", "stderr"}:
+                self._close_output_fd(str(key.data), key.fd)
+            elif key.data == "exit" and self.process is not None:
+                self.process.close_ctrl()
         self._close_pipes()
 
 

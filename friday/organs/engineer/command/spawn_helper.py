@@ -8,6 +8,7 @@ socket. The kernel is not the parent and must not waitpid.
 from __future__ import annotations
 
 import contextlib
+import fcntl
 import json
 import os
 import resource
@@ -35,6 +36,7 @@ HELPER_EXIT = 71
 HELPER_SCRIPT = 72
 HELPER_STDIN_PAYLOAD = 73
 HELPER_EXPORT_IMPL = 74
+HELPER_LAUNCHER = 75
 HELPER_PATH_ROOT_BASE = 80
 BWRAP_EXEC_FD = 3
 BWRAP_SCRIPT_FD = 4
@@ -43,10 +45,13 @@ BWRAP_EXPORT_FD = 6
 BWRAP_PATH_ROOT_BASE = 7
 BWRAP_STDIN_PAYLOAD_FD = 23
 BWRAP_EXPORT_IMPL_FD = 24
+BWRAP_LAUNCHER_FD = 25
 _RECV_MAX = 512 * 1024
 _MAX_FDS = 32
 _MAX_PATH_ROOT_FDS = 16
 _ACK_TIMEOUT_SEC = 8.0
+_ACTION_SOURCE_FD_MIN = HELPER_PATH_ROOT_BASE + _MAX_PATH_ROOT_FDS
+_HELD_LAUNCHER_PATH = f"/proc/self/fd/{BWRAP_LAUNCHER_FD}"
 
 
 def _pid_starttime(pid: int) -> int | None:
@@ -222,12 +227,57 @@ def _move_cgroup(cgroup: str, pid: int) -> None:
     raise RuntimeError(f"cgroup {last!r} != {expected!r}")
 
 
+def _make_collision_free_block_pipe() -> tuple[int, int]:
+    """Keep the block source above every fd touched by child file actions."""
+    raw_r, block_w = os.pipe()
+    block_r = -1
+    try:
+        block_r = int(fcntl.fcntl(raw_r, fcntl.F_DUPFD_CLOEXEC, _ACTION_SOURCE_FD_MIN))
+        if block_r < _ACTION_SOURCE_FD_MIN:
+            raise OSError("invalid duplicated block fd")
+        os.set_inheritable(block_r, True)
+        return block_r, block_w
+    except Exception:
+        if block_r >= 0:
+            with contextlib.suppress(OSError):
+                os.close(block_r)
+        with contextlib.suppress(OSError):
+            os.close(block_w)
+        raise
+    finally:
+        with contextlib.suppress(OSError):
+            os.close(raw_r)
+
+
+def _bwrap_file_actions(*, block_r: int, has_script: bool, path_root_count: int) -> list[tuple]:
+    if block_r < _ACTION_SOURCE_FD_MIN:
+        raise RuntimeError("block fd overlaps posix_spawn destinations")
+    actions: list[tuple] = [
+        (os.POSIX_SPAWN_DUP2, HELPER_STDIN, 0),
+        (os.POSIX_SPAWN_DUP2, HELPER_STDOUT, 1),
+        (os.POSIX_SPAWN_DUP2, HELPER_STDERR, 2),
+        (os.POSIX_SPAWN_DUP2, HELPER_EXEC, BWRAP_EXEC_FD),
+        (os.POSIX_SPAWN_DUP2, HELPER_LAUNCHER, BWRAP_LAUNCHER_FD),
+    ]
+    if has_script:
+        actions.append((os.POSIX_SPAWN_DUP2, HELPER_SCRIPT, BWRAP_SCRIPT_FD))
+    else:
+        actions.append((os.POSIX_SPAWN_CLOSE, BWRAP_SCRIPT_FD))
+    actions.append((os.POSIX_SPAWN_DUP2, block_r, BWRAP_BLOCK_FD))
+    actions.append((os.POSIX_SPAWN_DUP2, HELPER_EXPORT, BWRAP_EXPORT_FD))
+    for index in range(path_root_count):
+        actions.append((os.POSIX_SPAWN_DUP2, HELPER_PATH_ROOT_BASE + index, BWRAP_PATH_ROOT_BASE + index))
+    actions.append((os.POSIX_SPAWN_DUP2, HELPER_STDIN_PAYLOAD, BWRAP_STDIN_PAYLOAD_FD))
+    actions.append((os.POSIX_SPAWN_DUP2, HELPER_EXPORT_IMPL, BWRAP_EXPORT_IMPL_FD))
+    actions.append((os.POSIX_SPAWN_CLOSEFROM, BWRAP_LAUNCHER_FD + 1))
+    return actions
+
+
 def _job_main() -> None:
     signal.signal(signal.SIGCHLD, signal.SIG_DFL)
     raw = sys.argv[2] if len(sys.argv) > 2 else ""
     req = json.loads(raw)
     has_script = bool(req.get("has_script"))
-    launcher = str(req["launcher"])
     argv = [str(item) for item in req["argv"]]
     env = {str(k): str(v) for k, v in dict(req["env"]).items()}
     cgroup = str(req["cgroup"])
@@ -235,31 +285,16 @@ def _job_main() -> None:
     path_root_count = int(req.get("path_root_count") or 0)
     if not 0 <= path_root_count <= _MAX_PATH_ROOT_FDS:
         raise SystemExit(1)
-    block_r, block_w = os.pipe()
-    os.set_inheritable(block_r, True)
+    block_r, block_w = _make_collision_free_block_pipe()
     child_pid = 0
     child_pidfd = -1
     try:
-        actions: list[tuple] = [
-            (os.POSIX_SPAWN_DUP2, HELPER_STDIN, 0),
-            (os.POSIX_SPAWN_DUP2, HELPER_STDOUT, 1),
-            (os.POSIX_SPAWN_DUP2, HELPER_STDERR, 2),
-            (os.POSIX_SPAWN_DUP2, HELPER_EXEC, BWRAP_EXEC_FD),
-        ]
-        if has_script:
-            actions.append((os.POSIX_SPAWN_DUP2, HELPER_SCRIPT, BWRAP_SCRIPT_FD))
-        else:
-            actions.append((os.POSIX_SPAWN_CLOSE, BWRAP_SCRIPT_FD))
-        actions.append((os.POSIX_SPAWN_DUP2, block_r, BWRAP_BLOCK_FD))
-        actions.append((os.POSIX_SPAWN_DUP2, HELPER_EXPORT, BWRAP_EXPORT_FD))
-        for index in range(path_root_count):
-            actions.append(
-                (os.POSIX_SPAWN_DUP2, HELPER_PATH_ROOT_BASE + index, BWRAP_PATH_ROOT_BASE + index)
-            )
-        actions.append((os.POSIX_SPAWN_DUP2, HELPER_STDIN_PAYLOAD, BWRAP_STDIN_PAYLOAD_FD))
-        actions.append((os.POSIX_SPAWN_DUP2, HELPER_EXPORT_IMPL, BWRAP_EXPORT_IMPL_FD))
-        actions.append((os.POSIX_SPAWN_CLOSEFROM, BWRAP_EXPORT_IMPL_FD + 1))
-        child_pid = os.posix_spawn(launcher, argv, env, file_actions=actions)
+        actions = _bwrap_file_actions(
+            block_r=block_r,
+            has_script=has_script,
+            path_root_count=path_root_count,
+        )
+        child_pid = os.posix_spawn(_HELD_LAUNCHER_PATH, argv, env, file_actions=actions)
         os.close(block_r)
         block_r = -1
         try:
@@ -332,8 +367,6 @@ def _job_main() -> None:
 
 
 def _clear_cloexec(fd: int) -> None:
-    import fcntl
-
     flags = int(fcntl.fcntl(fd, fcntl.F_GETFD))
     fcntl.fcntl(fd, fcntl.F_SETFD, flags & ~fcntl.FD_CLOEXEC)
     os.set_inheritable(fd, True)
@@ -344,7 +377,7 @@ def _broker_spawn_helper(req: dict[str, Any], fds: list[int]) -> int:
     path_root_count = int(req.get("path_root_count") or 0)
     if not 0 <= path_root_count <= _MAX_PATH_ROOT_FDS:
         raise RuntimeError("invalid path root fd count")
-    expected = 10 + (1 if has_script else 0) + path_root_count
+    expected = 11 + (1 if has_script else 0) + path_root_count
     if len(fds) != expected:
         raise RuntimeError(f"fd count {len(fds)} != {expected}")
     if any(fd >= HELPER_STDIN for fd in fds):
@@ -354,15 +387,16 @@ def _broker_spawn_helper(req: dict[str, Any], fds: list[int]) -> int:
         stdout_w,
         stderr_w,
         exec_fd,
+        launcher_fd,
         export_fd,
         export_impl_fd,
         stdin_payload_fd,
         ready_w,
         go_r,
         exit_w,
-    ) = fds[:10]
-    script_fd = fds[10] if has_script else -1
-    root_offset = 10 + (1 if has_script else 0)
+    ) = fds[:11]
+    script_fd = fds[11] if has_script else -1
+    root_offset = 11 + (1 if has_script else 0)
     path_root_fds = fds[root_offset:]
     for fd in fds:
         _clear_cloexec(fd)
@@ -374,7 +408,6 @@ def _broker_spawn_helper(req: dict[str, Any], fds: list[int]) -> int:
         "env": req["env"],
         "fsize": req["fsize"],
         "has_script": has_script,
-        "launcher": req["launcher"],
         "path_root_count": path_root_count,
     }
     null_fd = os.open("/dev/null", os.O_RDWR | getattr(os, "O_CLOEXEC", 0))
@@ -387,6 +420,7 @@ def _broker_spawn_helper(req: dict[str, Any], fds: list[int]) -> int:
             (os.POSIX_SPAWN_DUP2, stdout_w, HELPER_STDOUT),
             (os.POSIX_SPAWN_DUP2, stderr_w, HELPER_STDERR),
             (os.POSIX_SPAWN_DUP2, exec_fd, HELPER_EXEC),
+            (os.POSIX_SPAWN_DUP2, launcher_fd, HELPER_LAUNCHER),
             (os.POSIX_SPAWN_DUP2, export_fd, HELPER_EXPORT),
             (os.POSIX_SPAWN_DUP2, export_impl_fd, HELPER_EXPORT_IMPL),
             (os.POSIX_SPAWN_DUP2, stdin_payload_fd, HELPER_STDIN_PAYLOAD),
@@ -525,7 +559,6 @@ class SpawnBroker:
     def start_job(
         self,
         *,
-        launcher: str,
         argv: list[str],
         env: dict[str, str],
         cgroup: str,
@@ -534,6 +567,7 @@ class SpawnBroker:
         stdout_w: int,
         stderr_w: int,
         exec_fd: int,
+        launcher_fd: int,
         export_fd: int,
         export_impl_fd: int,
         stdin_payload_fd: int,
@@ -555,6 +589,7 @@ class SpawnBroker:
             stdout_w,
             stderr_w,
             exec_fd,
+            launcher_fd,
             export_fd,
             export_impl_fd,
             stdin_payload_fd,
@@ -572,7 +607,6 @@ class SpawnBroker:
             "fsize": int(fsize),
             "has_script": script_fd is not None,
             "helper_path": str(Path(__file__).resolve()),
-            "launcher": launcher,
             "path_root_count": len(path_root_fds),
             "python_path": sys.executable,
         }

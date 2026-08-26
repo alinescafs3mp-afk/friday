@@ -12,7 +12,6 @@ from pathlib import Path
 from .contracts import (
     BASH_EXECUTABLE,
     BWRAP_EXECUTABLE,
-    DESTRUCTIVE_BASENAMES,
     FORBIDDEN_EXACT_PATHS,
     FORBIDDEN_PATH_PREFIXES,
     MAX_EXECUTABLE_BYTES,
@@ -25,77 +24,11 @@ from .contracts import (
     ResolvedExecutable,
     TrustedPathContract,
     VerifiedCommandGrant,
+    path_root_is_sensitive,
 )
 
 _MAX_SHEBANG = 4096
 _INTERPRETER_DEPTH = 1
-_ARGV_DISPATCHERS = frozenset(
-    {
-        "awk",
-        "bash",
-        "busybox",
-        "chrt",
-        "cmake",
-        "csh",
-        "dash",
-        "dotnet",
-        "env",
-        "find",
-        "fish",
-        "gawk",
-        "git",
-        "gmake",
-        "guile",
-        "ionice",
-        "java",
-        "ksh",
-        "lua",
-        "luajit",
-        "make",
-        "mawk",
-        "meson",
-        "mksh",
-        "mono",
-        "nawk",
-        "nice",
-        "ninja",
-        "node",
-        "nodejs",
-        "nohup",
-        "parallel",
-        "perl",
-        "php",
-        "prlimit",
-        "ruby",
-        "sed",
-        "setsid",
-        "sh",
-        "stdbuf",
-        "taskset",
-        "tcsh",
-        "tclsh",
-        "timeout",
-        "toybox",
-        "watch",
-        "wish",
-        "xargs",
-        "zsh",
-    }
-)
-
-
-def _argv_can_dispatch(request: CommandRequest, resolved: ResolvedExecutable) -> bool:
-    """Recognize argv entry points that can execute a second, unattested command."""
-    basename = Path(resolved.canonical_path).name.lower()
-    if basename == "env":
-        # Plain ``env`` only reports the fixed child environment. Any operand
-        # can become a command after option/assignment parsing, so fail closed.
-        return bool(request.argv[1:])
-    if basename == "find":
-        return any(item in {"-exec", "-execdir", "-ok", "-okdir"} for item in request.argv[1:])
-    if basename in _ARGV_DISPATCHERS:
-        return True
-    return basename.startswith(("python", "pypy", "ruby", "perl"))
 
 
 def _is_forbidden(path: str) -> bool:
@@ -498,19 +431,11 @@ def require_destructive_grant(
     grant: VerifiedCommandGrant,
     resolved: ResolvedExecutable,
 ) -> None:
-    # Shell has no attested subcommand policy in this slice: every shell-lane
-    # execution needs a distinct confirmation. Substring filters are not an
-    # authority boundary.
-    if request.lane is CommandLane.SHELL:
-        needs = True
-    else:
-        basename = Path(resolved.canonical_path).name
-        needs = (
-            basename in DESTRUCTIVE_BASENAMES
-            or _argv_can_dispatch(request, resolved)
-            or resolved.owner_uid != 0
-        )
-    if needs and not grant.destructive_confirmed:
+    # No finite executable denylist can prove that argv is a safe leaf: tools
+    # such as loaders, wrappers, archivers, and future binaries can dispatch a
+    # second command. Every execution therefore consumes a distinct owner
+    # confirmation bound to this exact request digest.
+    if not grant.destructive_confirmed:
         raise CommandError("destructive_confirmation_required")
 
 
@@ -586,6 +511,8 @@ def attest_trusted_path(contract: TrustedPathContract) -> tuple[PathRoot, ...]:
     flags = os.O_RDONLY | os.O_DIRECTORY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0)
     for directory in contract.directories:
         named = _canonical_path_root(directory)
+        if path_root_is_sensitive(named):
+            raise CommandError("untrusted_path_root")
         try:
             fd = os.open(named, flags)
         except OSError as exc:

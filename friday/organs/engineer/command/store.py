@@ -16,6 +16,7 @@ from typing import Any
 from .contracts import CommandError, canonical_json_bytes
 
 _LOCK_EX = 2
+_LOCK_NB = 4
 _LOCK_UN = 8
 
 
@@ -77,7 +78,8 @@ class CommandJobStore:
         self._jobs.mkdir(parents=True, exist_ok=True)
         os.chmod(self._jobs, 0o700)
         self.db_path = self.root / "kernel.sqlite"
-        if self.db_path.is_symlink() or (self.root / "kernel.lock").is_symlink():
+        lease_path = self.root / "kernel.lease"
+        if self.db_path.is_symlink() or (self.root / "kernel.lock").is_symlink() or lease_path.is_symlink():
             raise CommandError("durable_write_failed")
         lock_path = self.root / "kernel.lock"
         lock_flags = os.O_RDWR | os.O_CREAT | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0)
@@ -86,19 +88,45 @@ class CommandJobStore:
         except OSError as exc:
             raise CommandError("durable_write_failed") from exc
         os.fchmod(self._lock_fd, 0o600)
+        try:
+            self._lease_fd = os.open(str(lease_path), lock_flags, 0o600)
+            os.fchmod(self._lease_fd, 0o600)
+        except OSError as exc:
+            with suppress(OSError):
+                os.close(getattr(self, "_lease_fd", -1))
+            os.close(self._lock_fd)
+            raise CommandError("durable_write_failed") from exc
+        try:
+            _flock(self._lease_fd, _LOCK_EX | _LOCK_NB)
+        except OSError as exc:
+            os.close(self._lease_fd)
+            os.close(self._lock_fd)
+            raise CommandError("command_kernel_already_active") from exc
         self._local = threading.RLock()
+        self._closed = False
         self.fail_next_commit = 0
-        self._conn = sqlite3.connect(str(self.db_path), isolation_level=None, check_same_thread=False)
-        self._conn.row_factory = sqlite3.Row
-        self._conn.execute("PRAGMA journal_mode=WAL")
-        self._conn.execute("PRAGMA synchronous=FULL")
-        self._conn.execute("PRAGMA foreign_keys=ON")
-        self._init_schema()
+        try:
+            self._conn = sqlite3.connect(str(self.db_path), isolation_level=None, check_same_thread=False)
+            self._conn.row_factory = sqlite3.Row
+            self._conn.execute("PRAGMA journal_mode=WAL")
+            self._conn.execute("PRAGMA synchronous=FULL")
+            self._conn.execute("PRAGMA foreign_keys=ON")
+            self._init_schema()
+        except Exception:
+            os.close(self._lease_fd)
+            os.close(self._lock_fd)
+            raise
 
     def close(self) -> None:
         with self._local:
-            self._conn.close()
-            os.close(self._lock_fd)
+            if self._closed:
+                return
+            self._closed = True
+            try:
+                self._conn.close()
+            finally:
+                os.close(self._lease_fd)
+                os.close(self._lock_fd)
 
     def _init_schema(self) -> None:
         self._conn.executescript(
