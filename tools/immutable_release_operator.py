@@ -90,6 +90,7 @@ MAX_OBSIDIAN_BACKUP_ENTRIES = 100_000
 MAX_OBSIDIAN_BACKUP_BYTES = 16 << 30
 _SMOKE_SCRATCH_ROOT = Path("/var/tmp/friday-immutable-smoke")
 _OBSIDIAN_ENABLE_TRANSITION = "obsidian_enable"
+_ENGINEER_MODE_ENABLE_TRANSITION = "engineer_mode_enable"
 _SECONDARY_SHADOW_ENABLE_TRANSITION = "secondary_shadow_enable"
 _SECONDARY_SHADOW_DISABLE_TRANSITION = "secondary_shadow_disable"
 _SECONDARY_SHADOW_TO_PRIVATE_SHADOW_TRANSITION = "secondary_shadow_to_private_shadow"
@@ -149,10 +150,34 @@ _SECONDARY_CONFIG_TRANSITIONS = frozenset(
         _SECONDARY_DOCUMENT_MAP_SHADOW_TO_ASSIST_TRANSITION,
     }
 )
+_EXACT_ENV_CONFIG_TRANSITIONS = frozenset(
+    {
+        _ENGINEER_MODE_ENABLE_TRANSITION,
+        *_SECONDARY_CONFIG_TRANSITIONS,
+    }
+)
 _STAGED_CONFIG_TRANSITIONS = frozenset(
     {
         _OBSIDIAN_ENABLE_TRANSITION,
-        *_SECONDARY_CONFIG_TRANSITIONS,
+        *_EXACT_ENV_CONFIG_TRANSITIONS,
+    }
+)
+_ENGINEER_MODE_ENV_LINES = (
+    (
+        "FRIDAY_ENGINEER_MODE_ENABLED",
+        b"FRIDAY_ENGINEER_MODE_ENABLED=0\n",
+        b"FRIDAY_ENGINEER_MODE_ENABLED=1\n",
+    ),
+    (
+        "FRIDAY_HOST_ALLOWED_CIDRS",
+        b"FRIDAY_HOST_ALLOWED_CIDRS=\n",
+        b"FRIDAY_HOST_ALLOWED_CIDRS=192.168.1.0/24\n",
+    ),
+)
+_ENGINEER_MODE_LEGACY_ENV_KEYS = frozenset(
+    {
+        "JERICHO_ENGINEER_MODE_ENABLED",
+        "JERICHO_HOST_ALLOWED_CIDRS",
     }
 )
 _SECONDARY_LLM_ENV_PREFIX = "FRIDAY_SECONDARY_LLM_"
@@ -1099,13 +1124,92 @@ def _secondary_rollout_api_token(raw: bytes) -> str:
     return matches[0][1]
 
 
+def _engineer_mode_environment_parts(
+    raw: bytes,
+    *,
+    code: str,
+) -> tuple[list[bytes], dict[str, int]]:
+    """Locate exact engineer-policy assignments without normalizing any bytes."""
+
+    try:
+        text = raw.decode("utf-8", errors="strict")
+    except UnicodeError as exc:
+        raise ReleaseFailure(code) from exc
+    raw_lines = text.splitlines(keepends=True)
+    if "".join(raw_lines) != text:  # pragma: no cover - Python owns splitlines
+        raise ReleaseFailure(code)
+    assignments: dict[str, int] = {}
+    engineer_keys = {key for key, _disabled, _enabled in _ENGINEER_MODE_ENV_LINES}
+    encoded_lines: list[bytes] = []
+    for index, raw_line in enumerate(raw_lines):
+        encoded = raw_line.encode("utf-8")
+        encoded_lines.append(encoded)
+        stripped = raw_line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        if stripped.startswith("export "):
+            stripped = stripped[7:].strip()
+        key, separator, _value = stripped.partition("=")
+        key = key.strip()
+        if key in _ENGINEER_MODE_LEGACY_ENV_KEYS:
+            raise ReleaseFailure(code)
+        if key not in engineer_keys:
+            continue
+        if not separator or key in assignments:
+            raise ReleaseFailure(code)
+        assignments[key] = index
+    return encoded_lines, assignments
+
+
+def _validate_engineer_mode_enable_environment(
+    predecessor: bytes | None,
+    target: bytes,
+) -> None:
+    """Enable the exact owner workbench while preserving every unrelated byte."""
+
+    target_lines, target_assignments = _engineer_mode_environment_parts(
+        target,
+        code="engineer_mode_environment_invalid",
+    )
+    for key, _disabled, enabled in _ENGINEER_MODE_ENV_LINES:
+        index = target_assignments.get(key)
+        if index is None or target_lines[index] != enabled:
+            raise ReleaseFailure("engineer_mode_environment_invalid")
+    if predecessor is None:
+        return
+
+    predecessor_lines, predecessor_assignments = _engineer_mode_environment_parts(
+        predecessor,
+        code="engineer_mode_predecessor_not_disabled",
+    )
+    expected = list(predecessor_lines)
+    missing: list[bytes] = []
+    for key, disabled, enabled in _ENGINEER_MODE_ENV_LINES:
+        index = predecessor_assignments.get(key)
+        if index is None:
+            missing.append(enabled)
+            continue
+        if predecessor_lines[index] != disabled:
+            raise ReleaseFailure("engineer_mode_predecessor_not_disabled")
+        expected[index] = enabled
+    if missing:
+        if predecessor and not predecessor.endswith((b"\n", b"\r")):
+            expected.append(b"\n")
+        expected.extend(missing)
+    if b"".join(expected) != target:
+        raise ReleaseFailure("engineer_mode_unrelated_environment_changed")
+
+
 def _validate_staged_environment_transition(
     transition: str,
     predecessor: bytes | None,
     target: bytes,
 ) -> None:
-    """Close secondary policy changes behind the explicit secondary vocabulary."""
+    """Enforce the exact byte contract for the selected staged ENV transition."""
 
+    if transition == _ENGINEER_MODE_ENABLE_TRANSITION:
+        _validate_engineer_mode_enable_environment(predecessor, target)
+        return
     if transition in _SECONDARY_CONFIG_TRANSITIONS:
         _validate_secondary_config_transition(transition, predecessor, target)
         return
@@ -5094,7 +5198,7 @@ class DurableActivationJournal:
             expected_candidate = (
                 _journal_release(transition_candidate) if transition_candidate is not None else None
             )
-            secondary_terminal_release_matches = bool(
+            exact_env_terminal_release_matches = bool(
                 expected_previous is not None
                 and expected_previous == expected_fallback
                 and (
@@ -5162,9 +5266,9 @@ class DurableActivationJournal:
                 and payload.get("candidate") == expected_previous
                 and expected_previous == expected_fallback
             )
-            secondary_config_transition = bool(
+            exact_env_config_transition = bool(
                 allow_terminal_config_transition
-                and self.staged_config_transition in _SECONDARY_CONFIG_TRANSITIONS
+                and self.staged_config_transition in _EXACT_ENV_CONFIG_TRANSITIONS
                 and payload_keys in v3_expected
                 and self.transition_config_identity_sha256
                 and payload.get("config_identity_sha256") == self.transition_config_identity_sha256
@@ -5175,7 +5279,7 @@ class DurableActivationJournal:
                 and payload.get("obsidian_root_sha256") == self.obsidian_root_sha256
                 and int(payload.get("alias_claim_count") or 0) == 0
                 and self.alias_claim_count == 0
-                and secondary_terminal_release_matches
+                and exact_env_terminal_release_matches
             )
             phase_a_retry_after_fallback = bool(
                 allow_terminal_config_transition
@@ -5205,13 +5309,13 @@ class DurableActivationJournal:
                 or v2_to_v3_transition
                 or phase_a_to_b_transition
                 or obsidian_enable_transition
-                or secondary_config_transition
+                or exact_env_config_transition
                 or phase_a_retry_after_fallback
             ):
                 raise ReleaseFailure("activation_config_identity_changed")
             if obsidian_enable_transition:
                 self._accepted_terminal_transition = _OBSIDIAN_ENABLE_TRANSITION
-            elif secondary_config_transition:
+            elif exact_env_config_transition:
                 self._accepted_terminal_transition = self.staged_config_transition
         self._state = payload
         return dict(payload)
@@ -5248,7 +5352,7 @@ class DurableActivationJournal:
             if current["phase"] not in _TERMINAL_JOURNAL_PHASES:
                 raise ReleaseFailure("unfinished_activation_requires_recovery")
             if (
-                self._accepted_terminal_transition in _SECONDARY_CONFIG_TRANSITIONS
+                self._accepted_terminal_transition in _EXACT_ENV_CONFIG_TRANSITIONS
                 and current["phase"] in {"rolled_back", "recovered"}
                 and self.database_backup() is None
             ):
@@ -9771,9 +9875,9 @@ def build_parser() -> argparse.ArgumentParser:
         "--staged-config-transition",
         choices=tuple(sorted(_STAGED_CONFIG_TRANSITIONS)),
         help=(
-            "Explicit immutable ENV0 to ENV1 transition (Obsidian enable or exact secondary "
-            "finalist public-shadow/private-shadow/assist/disable state change); omitted staged "
-            "activations retain the established obsidian_enable contract"
+            "Explicit immutable ENV0 to ENV1 transition (Obsidian, Engineer Mode, or exact "
+            "secondary finalist public-shadow/private-shadow/assist/disable state change); "
+            "omitted staged activations retain the established obsidian_enable contract"
         ),
     )
     activate.add_argument(

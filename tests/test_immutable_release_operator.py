@@ -1704,6 +1704,338 @@ def _systemd_test_port(tmp_path: Path) -> operator.SystemdActivationPort:
     )
 
 
+def _engineer_mode_enabled_environment(predecessor: bytes) -> bytes:
+    replacements = (
+        (b"FRIDAY_ENGINEER_MODE_ENABLED=0\n", b"FRIDAY_ENGINEER_MODE_ENABLED=1\n"),
+        (
+            b"FRIDAY_HOST_ALLOWED_CIDRS=\n",
+            b"FRIDAY_HOST_ALLOWED_CIDRS=192.168.1.0/24\n",
+        ),
+    )
+    target = predecessor
+    missing: list[bytes] = []
+    for disabled, enabled in replacements:
+        if disabled in target:
+            assert target.count(disabled) == 1
+            target = target.replace(disabled, enabled, 1)
+        else:
+            missing.append(enabled)
+    if missing:
+        if target and not target.endswith((b"\n", b"\r")):
+            target += b"\n"
+        target += b"".join(missing)
+    return target
+
+
+@pytest.mark.parametrize(
+    "predecessor",
+    [
+        b"FRIDAY_PROFILE=production\n",
+        b"FRIDAY_PROFILE=production",
+        (
+            b"# exact operator bytes stay here\r\n"
+            b"FRIDAY_ENGINEER_MODE_ENABLED=0\n"
+            b"FRIDAY_SEMANTIC_SUPERVISOR_MODE=off\r\n"
+            b"FRIDAY_SECONDARY_LLM_ENABLED=0\n"
+            b"FRIDAY_HOST_ALLOWED_CIDRS=\n"
+        ),
+    ],
+)
+def test_engineer_mode_enable_accepts_only_the_exact_canonical_additions(
+    predecessor: bytes,
+) -> None:
+    target = _engineer_mode_enabled_environment(predecessor)
+
+    operator._validate_staged_environment_transition(  # noqa: SLF001
+        "engineer_mode_enable",
+        predecessor,
+        target,
+    )
+    operator._validate_staged_environment_transition(  # noqa: SLF001
+        "engineer_mode_enable",
+        None,
+        target,
+    )
+
+    assert target.count(b"FRIDAY_ENGINEER_MODE_ENABLED=1\n") == 1
+    assert target.count(b"FRIDAY_HOST_ALLOWED_CIDRS=192.168.1.0/24\n") == 1
+    assert b"FRIDAY_SEMANTIC_SUPERVISOR_MODE=off\r\n" in target or (
+        b"FRIDAY_SEMANTIC_SUPERVISOR_MODE" not in predecessor
+    )
+    assert b"FRIDAY_SECONDARY_LLM_ENABLED=0\n" in target or (
+        b"FRIDAY_SECONDARY_LLM_ENABLED" not in predecessor
+    )
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        "unrelated",
+        "semantic",
+        "secondary",
+        "wrong_cidr",
+        "public_network",
+        "duplicate",
+        "engineer_crlf",
+    ],
+)
+def test_engineer_mode_enable_rejects_every_extra_byte_change(mutation: str) -> None:
+    predecessor = (
+        b"# retain exactly\r\n"
+        b"FRIDAY_PROFILE=production\n"
+        b"FRIDAY_ENGINEER_MODE_ENABLED=0\n"
+        b"FRIDAY_SEMANTIC_SUPERVISOR_MODE=off\n"
+        b"FRIDAY_SECONDARY_LLM_ENABLED=0\n"
+        b"FRIDAY_HOST_ALLOWED_CIDRS=\n"
+    )
+    target = _engineer_mode_enabled_environment(predecessor)
+    if mutation == "unrelated":
+        target = target.replace(b"FRIDAY_PROFILE=production\n", b"FRIDAY_PROFILE=owner\n")
+    elif mutation == "semantic":
+        target = target.replace(
+            b"FRIDAY_SEMANTIC_SUPERVISOR_MODE=off\n",
+            b"FRIDAY_SEMANTIC_SUPERVISOR_MODE=shadow\n",
+        )
+    elif mutation == "secondary":
+        target = target.replace(
+            b"FRIDAY_SECONDARY_LLM_ENABLED=0\n",
+            b"FRIDAY_SECONDARY_LLM_ENABLED=1\n",
+        )
+    elif mutation == "wrong_cidr":
+        target = target.replace(b"192.168.1.0/24", b"192.168.0.0/16")
+    elif mutation == "public_network":
+        target += b"FRIDAY_HOST_PUBLIC_NETWORK_ENABLED=1\n"
+    elif mutation == "duplicate":
+        target += b"FRIDAY_ENGINEER_MODE_ENABLED=1\n"
+    else:
+        assert mutation == "engineer_crlf"
+        target = target.replace(
+            b"FRIDAY_ENGINEER_MODE_ENABLED=1\n",
+            b"FRIDAY_ENGINEER_MODE_ENABLED=1\r\n",
+        )
+
+    with pytest.raises(operator.ReleaseFailure, match="engineer_mode_"):
+        operator._validate_staged_environment_transition(  # noqa: SLF001
+            "engineer_mode_enable",
+            predecessor,
+            target,
+        )
+
+
+@pytest.mark.parametrize(
+    ("predecessor", "target", "failure"),
+    [
+        (
+            b"FRIDAY_ENGINEER_MODE_ENABLED=1\n",
+            b"FRIDAY_ENGINEER_MODE_ENABLED=1\nFRIDAY_HOST_ALLOWED_CIDRS=192.168.1.0/24\n",
+            "engineer_mode_predecessor_not_disabled",
+        ),
+        (
+            b"FRIDAY_ENGINEER_MODE_ENABLED=0\nFRIDAY_HOST_ALLOWED_CIDRS=10.0.0.0/8\n",
+            b"FRIDAY_ENGINEER_MODE_ENABLED=1\nFRIDAY_HOST_ALLOWED_CIDRS=192.168.1.0/24\n",
+            "engineer_mode_predecessor_not_disabled",
+        ),
+        (
+            b"export FRIDAY_ENGINEER_MODE_ENABLED=0\n",
+            b"FRIDAY_ENGINEER_MODE_ENABLED=1\nFRIDAY_HOST_ALLOWED_CIDRS=192.168.1.0/24\n",
+            "engineer_mode_predecessor_not_disabled",
+        ),
+        (
+            b"JERICHO_ENGINEER_MODE_ENABLED=0\n",
+            (
+                b"JERICHO_ENGINEER_MODE_ENABLED=0\n"
+                b"FRIDAY_ENGINEER_MODE_ENABLED=1\n"
+                b"FRIDAY_HOST_ALLOWED_CIDRS=192.168.1.0/24\n"
+            ),
+            "engineer_mode_environment_invalid",
+        ),
+    ],
+)
+def test_engineer_mode_enable_rejects_noncanonical_or_pre_authorized_predecessor(
+    predecessor: bytes,
+    target: bytes,
+    failure: str,
+) -> None:
+    with pytest.raises(operator.ReleaseFailure, match=failure):
+        operator._validate_staged_environment_transition(  # noqa: SLF001
+            "engineer_mode_enable",
+            predecessor,
+            target,
+        )
+
+
+def test_systemd_engineer_mode_transition_is_idempotent_and_recovery_selects_exact_env(
+    tmp_path: Path,
+) -> None:
+    base = _systemd_test_port(tmp_path)
+    predecessor = (
+        b"# preserve this mixed ending\r\n"
+        b"FRIDAY_PROFILE=production\n"
+        b"FRIDAY_ENGINEER_MODE_ENABLED=0\n"
+        b"FRIDAY_SEMANTIC_SUPERVISOR_MODE=off\n"
+        b"FRIDAY_SECONDARY_LLM_ENABLED=0\n"
+        b"FRIDAY_HOST_ALLOWED_CIDRS=\n"
+    )
+    base.config.env_file.write_bytes(predecessor)
+    base.config.env_file.chmod(0o600)
+    predecessor_sha256 = hashlib.sha256(predecessor).hexdigest()
+    target = _engineer_mode_enabled_environment(predecessor)
+    target_sha256 = hashlib.sha256(target).hexdigest()
+    staged = base.config.state_dir / "engineer-mode.env"
+    staged.write_bytes(target)
+    staged.chmod(0o600)
+    current = replace(base.config, env_file_sha256=predecessor_sha256)
+    configured = replace(
+        current,
+        next_env_file=staged,
+        next_env_file_sha256=target_sha256,
+        staged_config_transition="engineer_mode_enable",
+    )
+    descriptor = ("engineer_mode_enable", predecessor_sha256, staged, target_sha256)
+
+    prebackup_state: dict[str, object] = {
+        "prebackup_config_transition": "engineer_mode_enable",
+        "predecessor_env_sha256": predecessor_sha256,
+        "next_env_file": str(staged),
+        "next_env_file_sha256": target_sha256,
+        "phase": "bridge_stop_attempted",
+        "backup": None,
+        "database_mutation_possible": False,
+        "writer_target": "",
+    }
+    recovered = operator._activation_recovery_systemd_config(current, prebackup_state)  # noqa: SLF001
+    recovery_port = operator.SystemdActivationPort(recovered)
+    recovery_port.select_predecessor_config_transition(*descriptor)
+    assert recovery_port.config.env_file.read_bytes() == predecessor
+    assert recovery_port.config.env_file_sha256 == predecessor_sha256
+    assert staged.read_bytes() == target
+
+    port = operator.SystemdActivationPort(configured)
+    port.validate_staged_config_transition(*descriptor)
+    port.activate_staged_config_transition(*descriptor)
+    port.activate_staged_config_transition(*descriptor)
+    assert port.config.env_file.read_bytes() == target
+    assert port.config.env_file_sha256 == target_sha256
+    assert port.config.staged_config_transition == ""
+    assert not staged.exists()
+
+
+def test_engineer_mode_enable_prebackup_rollback_keeps_predecessor_env(
+    releases: Releases,
+) -> None:
+    journal = MemoryJournal(
+        prebackup_config_transition="engineer_mode_enable",
+        predecessor_env_sha256="1" * 64,
+        next_env_file=Path("/private-state/engineer-mode.env"),
+        next_env_file_sha256="2" * 64,
+    )
+    port = FakePort(
+        fail="backup_db_wal_inbox",
+        staged_config_transition="engineer_mode_enable",
+    )
+
+    with pytest.raises(operator.ReleaseFailure, match="activation_failed_rolled_back"):
+        operator.activate_release(
+            port,
+            journal,
+            candidate=releases.candidate,
+            previous=releases.previous,
+            schema_capable_fallback=releases.fallback,
+        )
+
+    assert "activate_staged_config" not in port.events
+    assert port.canonical_env_sha256 == "1" * 64
+    assert port.events.index("select_predecessor_config") < port.events.index("start_backend:clean-schema33")
+    assert port.active is releases.previous
+
+
+def test_engineer_mode_enable_postbackup_recovery_converges_to_target_env(
+    releases: Releases,
+) -> None:
+    journal = MemoryJournal(
+        prebackup_config_transition="engineer_mode_enable",
+        predecessor_env_sha256="3" * 64,
+        next_env_file=Path("/private-state/engineer-mode.env"),
+        next_env_file_sha256="4" * 64,
+    )
+    journal.begin(
+        candidate=releases.candidate,
+        previous=releases.previous,
+        fallback=releases.fallback,
+    )
+    journal.record("backup_complete", backup=FakePort().backup)
+    port = FakePort(staged_config_transition="engineer_mode_enable")
+    port.predecessor_env_sha256 = "3" * 64
+    port.canonical_env_sha256 = "3" * 64
+
+    receipt = operator.recover_interrupted_activation(port, journal)
+
+    assert receipt["status"] == "recovered"
+    assert port.canonical_env_sha256 == "4" * 64
+    assert port.events.index("activate_staged_config") < port.events.index("start_backend:schema34-fallback")
+    assert port.active is releases.fallback
+
+
+@pytest.mark.parametrize("terminal_phase", ["rolled_back", "recovered"])
+def test_engineer_mode_enable_accepts_exact_postbackup_terminal_current_release(
+    tmp_path: Path,
+    releases: Releases,
+    terminal_phase: str,
+) -> None:
+    base = _systemd_test_port(tmp_path)
+    predecessor = base.config.env_file.read_bytes()
+    target_bytes = _engineer_mode_enabled_environment(predecessor)
+    target_sha256 = hashlib.sha256(target_bytes).hexdigest()
+    staged = base.config.state_dir / "engineer-mode.env"
+    staged.write_bytes(target_bytes)
+    staged.chmod(0o600)
+    staged_config = replace(
+        base.config,
+        next_env_file=staged,
+        next_env_file_sha256=target_sha256,
+        staged_config_transition="engineer_mode_enable",
+    )
+    target = operator._activation_target_config(staged_config)  # noqa: SLF001
+    prior, _backup = _durable_postbackup_terminal(
+        base.config,
+        candidate=releases.previous,
+        current=releases.fallback,
+        terminal_phase=terminal_phase,
+    )
+    next_journal = operator.DurableActivationJournal(
+        prior.path,
+        backup_root=target.backup_dir,
+        config_identity_sha256=operator._systemd_config_identity(target),  # noqa: SLF001
+        transition_config_identity_sha256=(
+            operator._activation_transition_predecessor_identity(  # noqa: SLF001
+                target,
+                base.config.env_file_sha256,
+                "engineer_mode_enable",
+            )
+        ),
+        config_scope_sha256=operator._systemd_config_scope_identity(target),  # noqa: SLF001
+        config_retry_scope_sha256=operator._systemd_config_retry_scope_identity(target),  # noqa: SLF001
+        obsidian_mode=target.obsidian_mode,
+        obsidian_root_sha256=operator._obsidian_root_sha256(target),  # noqa: SLF001
+        predecessor_env_sha256=base.config.env_file_sha256,
+        next_env_file=staged,
+        next_env_file_sha256=target_sha256,
+        staged_config_transition="engineer_mode_enable",
+    )
+
+    next_journal.begin(
+        candidate=releases.candidate,
+        previous=releases.fallback,
+        fallback=releases.fallback,
+    )
+
+    prepared = next_journal.load()
+    assert prepared["phase"] == "prepared"
+    assert prepared["prebackup_config_transition"] == "engineer_mode_enable"
+    assert prepared["predecessor_env_sha256"] == base.config.env_file_sha256
+    assert prepared["next_env_file_sha256"] == target_sha256
+
+
 def _secondary_shadow_environment(
     predecessor: bytes,
     ca_file: Path,
