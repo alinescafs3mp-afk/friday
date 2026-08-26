@@ -580,6 +580,15 @@ def _remaining_attachment_primary_budget(deadline: float | None) -> float | None
     return _remaining_deadline_budget(deadline)
 
 
+def _attachment_primary_stage_budget_sec(llm_timeout_sec: float) -> float:
+    """Return the exact primary generation window that an attachment turn owns."""
+
+    return min(
+        _ATTACHMENT_GENERATION_TIMEOUT_SEC,
+        max(1.0, float(llm_timeout_sec)),
+    )
+
+
 # How many successful tool outputs to carry into answer verification as evidence,
 # so a tool-grounded answer is judged against what it actually used — not only the
 # user's personal notes (which it may not rest on at all).
@@ -53945,9 +53954,8 @@ class AgentRuntime:
         if not context.current_attachment_present:
             return None
         if context.attachment_primary_deadline is None:
-            stage_deadline = time.monotonic() + min(
-                _ATTACHMENT_GENERATION_TIMEOUT_SEC,
-                max(1.0, float(self.settings.llm_timeout_sec)),
+            stage_deadline = time.monotonic() + _attachment_primary_stage_budget_sec(
+                self.settings.llm_timeout_sec
             )
             context.attachment_primary_deadline = (
                 min(stage_deadline, context.turn_deadline)
@@ -54413,11 +54421,20 @@ class AgentRuntime:
         }
         try:
             advisory_deadline = secondary.new_advisory_deadline()
-            absolute_deadline = (
-                min(advisory_deadline, context.turn_deadline)
-                if context.turn_deadline is not None
-                else advisory_deadline
-            )
+            if context.attachment_primary_deadline is not None:
+                # Once the primary clock has started, every optional await eats
+                # directly from it.  Preserve the already-owned baseline window.
+                return await primary_call()
+            if context.turn_deadline is not None:
+                primary_reserve_sec = _attachment_primary_stage_budget_sec(self.settings.llm_timeout_sec)
+                latest_safe_advisory_deadline = context.turn_deadline - primary_reserve_sec
+                # Do not submit a request whose complete scheduler-owned budget
+                # cannot finish before the primary window begins.  Shortening it
+                # merely turns an optional hint into a predictable timeout and
+                # recreates the same starvation at a slightly earlier boundary.
+                if advisory_deadline > latest_safe_advisory_deadline:
+                    return await primary_call()
+            absolute_deadline = advisory_deadline
             model_request = ModelRequest(
                 workload=ModelWorkload.DOCUMENT_MAP,
                 messages=tuple(model_messages),

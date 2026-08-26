@@ -926,6 +926,178 @@ async def test_current_document_secondary_failure_preserves_exact_primary_prompt
 
 
 @pytest.mark.asyncio
+async def test_current_document_secondary_skips_before_it_can_spend_the_primary_window(
+    settings: Any,
+    storage: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A nearly spent turn must retain the baseline primary call, not an advisory timeout."""
+
+    class DeadlineConsumingSecondary(_DocumentMapSecondary):
+        def new_advisory_deadline(self) -> float:
+            return agent_runtime_module.time.monotonic() + 0.06
+
+        async def secondary_preferred_required_result(
+            self,
+            request: ModelRequest,
+            primary_fallback: Any,
+            *,
+            validator: Any = None,
+        ) -> Any:
+            del validator
+            self.requests.append(request)
+            self.entered.set()
+            remaining = max(
+                0.0,
+                request.absolute_deadline_monotonic - agent_runtime_module.time.monotonic(),
+            )
+            await asyncio.sleep(remaining + 0.01)
+            self.fallback_total += 1
+            return await primary_fallback()
+
+    monkeypatch.setattr(AgentRuntime, "_today_line", lambda _self: "\n- FIXED-TODAY")
+    question = "Please summarize this document."
+    source = _owned("small-near-deadline.txt", "Complete current source.")
+    baseline_llm = _HierarchyLLM("PRIMARY_OK")
+    assisted_llm = _HierarchyLLM("PRIMARY_OK")
+    baseline_runtime = AgentRuntime(settings, storage, llm=baseline_llm)
+    secondary = DeadlineConsumingSecondary()
+    assisted_runtime = AgentRuntime(
+        settings,
+        storage,
+        llm=assisted_llm,
+        secondary_brain=secondary,
+    )
+    baseline_context = AgentContext(
+        conversation_id="current-document-near-deadline-baseline",
+        user_id="owner",
+        person_id="owner",
+        current_attachment_present=True,
+        focused_attachment_turn=True,
+        turn_deadline=agent_runtime_module.time.monotonic() + 0.05,
+    )
+    request = assisted_runtime._current_document_secondary_map_request(  # noqa: SLF001
+        question,
+        [source],
+        task_kind="summary",
+    )
+    assert request is not None
+
+    baseline = await baseline_runtime._generate_response(  # noqa: SLF001
+        baseline_context,
+        question,
+        [source],
+    )
+    assisted_context = AgentContext(
+        conversation_id="current-document-near-deadline-assisted",
+        user_id="owner",
+        person_id="owner",
+        current_attachment_present=True,
+        focused_attachment_turn=True,
+        turn_deadline=agent_runtime_module.time.monotonic() + 0.05,
+    )
+    assisted = await assisted_runtime._current_document_secondary_assisted_response(  # noqa: SLF001
+        assisted_context,
+        question,
+        [source],
+        request=request,
+    )
+
+    assert baseline["content"] == assisted["content"] == "PRIMARY_OK"
+    assert len(baseline_llm.calls) == len(assisted_llm.calls) == 1
+    assert assisted_llm.calls == baseline_llm.calls
+    assert secondary.requests == []
+    assert secondary.fallback_total == 0
+    assert assisted_context.current_document_secondary_hint == ""
+
+
+@pytest.mark.asyncio
+async def test_current_document_secondary_runs_only_when_its_full_budget_leaves_primary_time(
+    settings: Any,
+    storage: Any,
+) -> None:
+    configured = replace(settings, llm_timeout_sec=1.0)
+    secondary = _DocumentMapSecondary()
+    llm = _HierarchyLLM("primary after advisory")
+    runtime = AgentRuntime(configured, storage, llm=llm, secondary_brain=secondary)
+    context = AgentContext(
+        conversation_id="current-document-reserved-primary",
+        user_id="owner",
+        person_id="owner",
+        current_attachment_present=True,
+        focused_attachment_turn=True,
+        # The double owns a complete 30-second advisory window.  A further
+        # second is the exact primary stage budget for this configuration.
+        turn_deadline=agent_runtime_module.time.monotonic() + 31.5,
+    )
+    source = _owned("small-reserved-primary.txt", "Complete current source.")
+    request = runtime._current_document_secondary_map_request(  # noqa: SLF001
+        "Review this document.",
+        [source],
+        task_kind="summary",
+    )
+    assert request is not None
+
+    result = await runtime._current_document_secondary_assisted_response(  # noqa: SLF001
+        context,
+        "Review this document.",
+        [source],
+        request=request,
+    )
+
+    assert result["content"] == "primary after advisory"
+    assert len(secondary.requests) == 1
+    assert context.turn_deadline is not None
+    assert context.turn_deadline - secondary.requests[
+        0
+    ].absolute_deadline_monotonic >= agent_runtime_module._attachment_primary_stage_budget_sec(
+        configured.llm_timeout_sec
+    )
+    assert len(llm.calls) == 1
+    assert agent_runtime_module._CURRENT_DOCUMENT_SECONDARY_HINT_PREFIX in _blob(llm.calls[0]["messages"])
+    assert context.current_document_secondary_hint == ""
+
+
+@pytest.mark.asyncio
+async def test_current_document_secondary_never_ages_an_already_started_primary_clock(
+    settings: Any,
+    storage: Any,
+) -> None:
+    secondary = _DocumentMapSecondary()
+    llm = _HierarchyLLM("primary owns its existing clock")
+    runtime = AgentRuntime(settings, storage, llm=llm, secondary_brain=secondary)
+    primary_deadline = agent_runtime_module.time.monotonic() + 1.0
+    context = AgentContext(
+        conversation_id="current-document-started-primary-clock",
+        user_id="owner",
+        person_id="owner",
+        current_attachment_present=True,
+        focused_attachment_turn=True,
+        turn_deadline=agent_runtime_module.time.monotonic() + 300.0,
+        attachment_primary_deadline=primary_deadline,
+    )
+    source = _owned("small-started-primary-clock.txt", "Complete current source.")
+    request = runtime._current_document_secondary_map_request(  # noqa: SLF001
+        "Review this document.",
+        [source],
+        task_kind="summary",
+    )
+    assert request is not None
+
+    result = await runtime._current_document_secondary_assisted_response(  # noqa: SLF001
+        context,
+        "Review this document.",
+        [source],
+        request=request,
+    )
+
+    assert result["content"] == "primary owns its existing clock"
+    assert secondary.requests == []
+    assert len(llm.calls) == 1
+    assert context.attachment_primary_deadline == primary_deadline
+
+
+@pytest.mark.asyncio
 async def test_invalid_current_document_secondary_hint_is_private_and_falls_back_once(
     settings: Any,
     storage: Any,
@@ -984,6 +1156,7 @@ async def test_cancelling_current_document_secondary_never_starts_primary(
         person_id="owner",
         current_attachment_present=True,
         focused_attachment_turn=True,
+        turn_deadline=agent_runtime_module.time.monotonic() + 300.0,
     )
     source = _owned("small-cancel.txt", "Complete source.")
     request = runtime._current_document_secondary_map_request(  # noqa: SLF001
