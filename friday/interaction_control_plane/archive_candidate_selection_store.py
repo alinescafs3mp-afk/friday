@@ -28,9 +28,14 @@ from friday.interaction_control_plane.archive_candidate_selection import (
     archive_candidate_selection_offer_suffix,
     parse_archive_candidate_ordinal,
 )
+from friday.interaction_control_plane.archive_evidence_work_item import (
+    RecallSelectedArchiveEvidenceActiveFrame,
+    RecallSelectedArchiveEvidenceWorkItem,
+)
 from friday.interaction_control_plane.archive_evidence_work_item_store import (
     _validate_archive_anchor,
     _validate_immediate_followup,
+    get_recall_selected_archive_evidence_work_item_in_transaction,
 )
 from friday.interaction_control_plane.selected_archive_evidence import SelectedArchiveEvidence
 from friday.interaction_control_plane.work_item_contract import (
@@ -1253,6 +1258,39 @@ def accept_archive_candidate_selection_in_transaction(
 ) -> ArchiveCandidateSelectionWorkItem:
     """CAS-select one exact ordinal only after its replay publication is accepted."""
 
+    return _accept_archive_candidate_selection(
+        conn,
+        work_item_id=work_item_id,
+        user_id=user_id,
+        conversation_id=conversation_id,
+        expected_revision=expected_revision,
+        selected_ordinal=selected_ordinal,
+        new_boundary_user_message_id=new_boundary_user_message_id,
+        new_assistant_message_id=new_assistant_message_id,
+        new_accepted_plan_sha256=new_accepted_plan_sha256,
+        new_accepted_outcome_sha256=new_accepted_outcome_sha256,
+        now=now,
+        manage_savepoint=True,
+    )
+
+
+def _accept_archive_candidate_selection(
+    conn: sqlite3.Connection,
+    *,
+    work_item_id: str,
+    user_id: str,
+    conversation_id: str,
+    expected_revision: int,
+    selected_ordinal: int,
+    new_boundary_user_message_id: str,
+    new_assistant_message_id: str,
+    new_accepted_plan_sha256: str,
+    new_accepted_outcome_sha256: str,
+    now: str | None,
+    manage_savepoint: bool,
+) -> ArchiveCandidateSelectionWorkItem:
+    """Validate and mutate one selection, optionally owning its savepoint."""
+
     _require_transaction(conn)
     revision = _revision(expected_revision)
     identifier = _scope(work_item_id, _WORK_ITEM_ID_RE, label="work_item_id")
@@ -1306,7 +1344,7 @@ def accept_archive_candidate_selection_in_transaction(
         expected_source_bearing=True,
         require_latest_message=True,
     )
-    savepoint = _begin_work_item_mutation_savepoint(conn)
+    savepoint = _begin_work_item_mutation_savepoint(conn) if manage_savepoint else None
     try:
         question_cursor = conn.execute(
             """UPDATE work_item_archive_candidate_questions
@@ -1361,10 +1399,112 @@ def accept_archive_candidate_selection_in_transaction(
             raise WorkItemConflictError("selected candidate Work Item is not durable")
         _validate_stored_anchor(conn, updated, require_latest_message=True)
     except BaseException:
+        if savepoint is not None:
+            _rollback_work_item_mutation_savepoint(conn, savepoint)
+        raise
+    if savepoint is not None:
+        _release_work_item_mutation_savepoint(conn, savepoint)
+    return updated
+
+
+def promote_archive_candidate_selection_in_transaction(
+    conn: sqlite3.Connection,
+    *,
+    work_item_id: str,
+    selected_evidence_work_item_id: str,
+    user_id: str,
+    conversation_id: str,
+    expected_revision: int,
+    selected_ordinal: int,
+    new_boundary_user_message_id: str,
+    new_assistant_message_id: str,
+    new_accepted_plan_sha256: str,
+    new_accepted_outcome_sha256: str,
+    now: str | None = None,
+) -> tuple[ArchiveCandidateSelectionWorkItem, RecallSelectedArchiveEvidenceWorkItem]:
+    """Complete one exact candidate replay and promote its evidence atomically."""
+
+    _require_transaction(conn)
+    selected_identifier = _scope(
+        selected_evidence_work_item_id,
+        _WORK_ITEM_ID_RE,
+        label="selected_evidence_work_item_id",
+    )
+    savepoint = _begin_work_item_mutation_savepoint(conn)
+    try:
+        completed = _accept_archive_candidate_selection(
+            conn,
+            work_item_id=work_item_id,
+            user_id=user_id,
+            conversation_id=conversation_id,
+            expected_revision=expected_revision,
+            selected_ordinal=selected_ordinal,
+            new_boundary_user_message_id=new_boundary_user_message_id,
+            new_assistant_message_id=new_assistant_message_id,
+            new_accepted_plan_sha256=new_accepted_plan_sha256,
+            new_accepted_outcome_sha256=new_accepted_outcome_sha256,
+            now=now,
+            manage_savepoint=False,
+        )
+        selected = completed.candidate_set.selected_evidence(
+            selected_ordinal,
+            work_item_id=selected_identifier,
+        )
+        frame = RecallSelectedArchiveEvidenceActiveFrame()
+        conn.execute(
+            """INSERT INTO work_items(
+                   id,user_id,conversation_id,kind,goal,state,playbook,
+                   completion_contract,active_frame_json,anchor_user_message_id,
+                   anchor_assistant_message_id,accepted_plan_sha256,
+                   accepted_outcome_sha256,revision,transition,created_at,
+                   updated_at,expires_at,closed_at
+               ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,NULL)""",
+            (
+                selected_identifier,
+                completed.user_id,
+                completed.conversation_id,
+                WorkKind.RECALL_SELECTED_ARCHIVE_EVIDENCE.value,
+                WorkGoal.EXACT_SELECTED_ARCHIVE_EVIDENCE_RECALL.value,
+                WorkState.ACTIVE.value,
+                WorkPlaybook.RECALL_SELECTED_ARCHIVE_EVIDENCE.value,
+                WorkCompletionContract.ACCEPTED_EXACT_SELECTED_ARCHIVE_EVIDENCE.value,
+                frame.to_json(),
+                new_boundary_user_message_id,
+                new_assistant_message_id,
+                completed.question.accepted_replay_plan_sha256,
+                completed.question.accepted_replay_outcome_sha256,
+                2,
+                WorkTransition.EVIDENCE_REPLAYED.value,
+                completed.updated_at,
+                completed.updated_at,
+                _expiry(completed.updated_at),
+            ),
+        )
+        conn.execute(
+            """INSERT INTO work_item_selected_evidence(
+                   work_item_id,corpus,source_ref_json,passage_refs_json,
+                   source_snapshot_sha256,coverage_sha256,coverage_grade,
+                   origin_boundary_user_message_id
+               ) VALUES(:work_item_id,:corpus,:source_ref_json,:passage_refs_json,
+                        :source_snapshot_sha256,:coverage_sha256,:coverage_grade,
+                        :origin_boundary_user_message_id)""",
+            selected.to_storage_payload(),
+        )
+        promoted = get_recall_selected_archive_evidence_work_item_in_transaction(
+            conn,
+            work_item_id=selected_identifier,
+            user_id=completed.user_id,
+            conversation_id=completed.conversation_id,
+        )
+        if promoted is None:  # pragma: no cover - inserted in this savepoint
+            raise WorkItemConflictError("promoted selected-evidence Work Item is not durable")
+    except BaseException as exc:
         _rollback_work_item_mutation_savepoint(conn, savepoint)
+        if isinstance(exc, sqlite3.IntegrityError):
+            raise WorkItemConflictError("candidate promotion lost its state race") from exc
         raise
     _release_work_item_mutation_savepoint(conn, savepoint)
-    return updated
+    return completed, promoted
 
 
 def suspend_after_replay_failure_in_transaction(
@@ -1663,6 +1803,7 @@ __all__ = [
     "new_archive_candidate_question_id",
     "new_archive_candidate_selection_work_item_id",
     "new_archive_candidate_set_id",
+    "promote_archive_candidate_selection_in_transaction",
     "reask_archive_candidate_selection_in_transaction",
     "retire_displaced_archive_candidate_selection_in_transaction",
     "suspend_after_replay_failure_in_transaction",

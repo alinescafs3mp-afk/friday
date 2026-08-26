@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import re
 import sqlite3
+import uuid
 from functools import lru_cache
 
 from friday.interaction_control_plane.compare_current_file_web_work_graph import (
@@ -54,6 +55,7 @@ WORK_ITEM_SCHEMA_VERSION = 45
 WORK_ITEM_SELECTED_SOURCE_REF_MAX_BYTES = 4_096
 WORK_ITEM_SELECTED_PASSAGE_REFS_MAX_BYTES = 65_536
 WORK_ITEM_SELECTED_PASSAGE_MAX_COUNT = 8
+_SELECTED_EVIDENCE_SCOPE_TRIGGER = "trg_work_item_selected_evidence_scope_insert"
 
 _SCHEMA_42_TABLES = (
     "work_item_compare_outcomes",
@@ -3350,6 +3352,25 @@ def _execute_schema(conn: sqlite3.Connection, schema: str) -> None:
         raise sqlite3.DatabaseError("Work Item schema contains an incomplete statement")
 
 
+@lru_cache(maxsize=1)
+def _canonical_selected_evidence_scope_trigger_sql() -> str:
+    """Extract the one canonical trigger statement without replaying other DDL."""
+
+    target = f"CREATETRIGGERIFNOTEXISTS{_SELECTED_EVIDENCE_SCOPE_TRIGGER}"
+    matches: list[str] = []
+    statement = ""
+    for line in WORK_ITEM_SCHEMA.splitlines(keepends=True):
+        statement += line
+        if sqlite3.complete_statement(statement):
+            sql = statement.strip()
+            statement = ""
+            if _normalize_schema_sql(sql).startswith(target):
+                matches.append(sql)
+    if statement.strip() or len(matches) != 1:
+        raise RuntimeError("canonical selected-evidence scope trigger is ambiguous")
+    return matches[0]
+
+
 def _schema_objects_for_tables(
     conn: sqlite3.Connection,
     tables: tuple[str, ...],
@@ -4474,6 +4495,34 @@ def validate_work_item_schema(conn: sqlite3.Connection, *, required: bool = True
     _validate_current_data(conn)
 
 
+def install_selected_evidence_promotion_reader_trigger(conn: sqlite3.Connection) -> None:
+    """Atomically replace only the exact released reader trigger when needed."""
+
+    if not conn.in_transaction:
+        raise RuntimeError("selected-evidence reader installation requires an existing transaction")
+    validate_work_item_schema(conn)
+    installed = _schema_objects(conn, current=True)
+    if installed == _canonical_work_item_schema_objects():
+        validate_work_item_schema(conn)
+        return
+    if installed != _canonical_schema_45_released_reader_objects():  # pragma: no cover - validated above
+        raise sqlite3.DatabaseError("Schema 45 work item DDL is incomplete or altered")
+
+    savepoint = f"work_item_reader_install_{uuid.uuid4().hex}"
+    conn.execute(f'SAVEPOINT "{savepoint}"')  # nosec B608 - generated hexadecimal identifier
+    try:
+        conn.execute(f'DROP TRIGGER "{_SELECTED_EVIDENCE_SCOPE_TRIGGER}"')
+        conn.execute(_canonical_selected_evidence_scope_trigger_sql())
+        if _schema_objects(conn, current=True) != _canonical_work_item_schema_objects():
+            raise sqlite3.DatabaseError("selected-evidence reader trigger installation is incomplete")
+        validate_work_item_schema(conn)
+    except BaseException:
+        conn.execute(f'ROLLBACK TO SAVEPOINT "{savepoint}"')  # nosec B608 - internal identifier
+        conn.execute(f'RELEASE SAVEPOINT "{savepoint}"')  # nosec B608 - internal identifier
+        raise
+    conn.execute(f'RELEASE SAVEPOINT "{savepoint}"')  # nosec B608 - internal identifier
+
+
 def _drop_legacy_schema_objects(
     conn: sqlite3.Connection,
     objects: dict[tuple[str, str], str],
@@ -4724,6 +4773,7 @@ upgrade_work_item_schema_to_42 = upgrade_work_item_schema_to_45
 __all__ = [
     "WORK_ITEM_SCHEMA",
     "WORK_ITEM_SCHEMA_VERSION",
+    "install_selected_evidence_promotion_reader_trigger",
     "register_work_item_connection_functions",
     "upgrade_work_item_schema_to_42",
     "upgrade_work_item_schema_to_44",

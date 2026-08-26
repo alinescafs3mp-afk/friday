@@ -13,6 +13,7 @@ from zoneinfo import ZoneInfo
 import pytest
 
 import friday.file_evidence_reader as file_evidence_reader
+import friday.orchestration.archive_read as archive_read_module
 from friday.api.projections import public_chat_ingestion, public_conversation_message
 from friday.model_profiles import ModelProfileLease, ModelRequirements
 from friday.orchestration import (
@@ -997,14 +998,27 @@ async def test_document_date_selector_is_distinct_from_upload_time(settings, sto
 
 
 @pytest.mark.asyncio
-async def test_more_than_two_date_files_and_duplicate_exact_name_fall_back(settings, storage) -> None:
+async def test_more_than_two_date_files_and_duplicate_exact_name_fall_back(
+    settings,
+    storage,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    settings = replace(settings, local_timezone="UTC")
+    fixed_now = datetime(2026, 8, 26, 12, 0, tzinfo=UTC)
+
+    class FrozenDateTime(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return fixed_now.replace(tzinfo=None) if tz is None else fixed_now.astimezone(tz)
+
+    monkeypatch.setattr(archive_read_module, "datetime", FrozenDateTime)
     for index in range(3):
         _registered_text_file(
             storage,
             settings,
             text=f"TODAY-{index}",
             filename=f"today-{index}.txt",
-            received_at=_recent(index + 1),
+            received_at=fixed_now - timedelta(minutes=index + 1),
         )
     model = _Model("Не должен вызываться. [A1]", labels=("A1",))
     handler, _authorization = _handler(storage, settings, model)

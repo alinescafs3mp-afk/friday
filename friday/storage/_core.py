@@ -48,6 +48,7 @@ from friday.interaction_control_plane.failure_schema import (
 from friday.interaction_control_plane.work_item_schema import (
     WORK_ITEM_SCHEMA,
     WORK_ITEM_SCHEMA_VERSION,
+    install_selected_evidence_promotion_reader_trigger,
     register_work_item_connection_functions,
     upgrade_work_item_schema_to_45,
     validate_work_item_schema,
@@ -2575,6 +2576,7 @@ class CoreMixin(StorageShared):
             self._execute_statements(conn, OBSIDIAN_SCHEMA)
             self._execute_statements(conn, INTERACTION_FAILURE_SCHEMA)
             self._execute_statements(conn, WORK_ITEM_SCHEMA)
+            install_selected_evidence_promotion_reader_trigger(conn)
             self._execute_statements(conn, HOST_CONTROL_JOB_SCHEMA)
             if not already_current:
                 self._migrate_legacy_schema(conn)

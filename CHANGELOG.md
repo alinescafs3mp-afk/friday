@@ -1,3 +1,34 @@
+## 0.207.51 — 2026-08-26
+
+### V12 document-passage projection contract
+
+- A storage-independent private contract now freezes exact Raw version/content
+  identity, extracted-text identity, the code-owned passage-policy revision and
+  at most 64 body-free half-open passage locators with exact slice digests.
+- Long natural text and unbroken blobs retain complete first-to-last character
+  coverage rather than silently dropping the tail. Incomplete sources carry a
+  closed reason and zero passages; pending state is never promoted to evidence
+  authority by this projection.
+- This is the first bounded post-ICP V12 refinement package. It changes no
+  database schema, runtime route, model profile, policy kernel or companion
+  plugin; the next package may add reader-first manifest and passage tables.
+
+## 0.207.50 — 2026-08-26
+
+### Durable locate, choose and explain document journey
+
+- An exact ordinal answer to a multi-source archive result now atomically
+  completes its candidate question and promotes the chosen source into the
+  durable selected-evidence reader. The original search boundary, selected
+  source/passages, coverage and accepted replay receipt remain exact.
+- After either runtime restart the owner can naturally ask what the selected
+  document says. Friday uses the existing attested two-pass explanation path,
+  performs fresh authority and source checks, preserves partial-coverage
+  warnings and does not repeat archive search or fall through to the ordinary
+  model.
+- Schema remains 43. Startup replaces only the authenticated legacy reader
+  trigger; `0.207.49` is the compatible rollback reader for the new rows.
+
 ## 0.207.49 — 2026-08-26
 
 ### Dormant archive-selection continuation reader

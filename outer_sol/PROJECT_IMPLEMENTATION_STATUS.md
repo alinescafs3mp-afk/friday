@@ -4,19 +4,21 @@ This is the canonical short status register for the active Friday work. Detailed
 design and acceptance evidence remains in the linked documents; this file owns
 the current production identity, completed packages, active work and next order.
 
-- Updated: 2026-08-26
+- Updated: 2026-08-27
 - Branch: `main`
 - Secondary acceptance base: the exact v2 document-map policy, extraction and
   complete-current-text/Office-document reviews are live in bounded `assist`;
   the provisional registry is empty, and the primary remains the sole
   final-publication, tool and effect authority. Every secondary miss preserves
   the exact primary-only path.
-- Deployed implementation head: `e8721168de8b8f0a6dddf3cffa4b29cee57488e1`
-- Live: Friday `0.207.48` / `e8721168de8b8f0a6dddf3cffa4b29cee57488e1`;
-  tree `9098e7dd9862b33a1e6348e08563b9c64aa8cbcb275d14367e28b51b779cafb6`;
-  wheel `da0b20ebbb05dcfbfde080e920c78d83103d3149fba02e13e017d9829a9de40c`.
-- Immediate predecessor and schema-capable fallback: Friday `0.207.47` /
-  `7f84db39b387d6101aef941203b6787c364500e4`.
+- Deployed implementation head: `4b9b48adf1462cfc9af4f81c7158078ec3aab20a`
+- Live: Friday `0.207.51` / `4b9b48adf1462cfc9af4f81c7158078ec3aab20a`;
+  tree `6a534f83cf030bb0beab856a4748abefcacca1b77f975c69ee2b0504451c8dd0`;
+  wheel `6f0a08312ac8dd5d815004027e442e19ba96d648477990d2e54557701dceb529`.
+- Immediate predecessor and schema-capable fallback: Friday `0.207.50` /
+  `49cca50906dddebbefbd0d5842e193e741e06957`, tree
+  `c6673eea90974defc14b4f106a1011bb7182435e3a775cba70f513c7c33e2d25`,
+  wheel `febea38bdb586c2cd3162f7ecc66978d55579ae481d17cde2b4bef901e94aac0`.
 - Database schema: 43
 - Production state: immutable activation `clear`; backend and Telegram bridge
   active; trusted-CA HTTPS health `200`; SQLite integrity and FK checks clean.
@@ -53,8 +55,7 @@ the current production identity, completed packages, active work and next order.
   a distinct authenticated Telegram confirmation, persists as a durable job,
   and has truthful status/cancel plus bounded output evidence. The runner has
   no host-file, host-secret, Docker or network authority; network audits keep
-  using their dedicated attested tools. The activation terminal receipt is
-  `ed41fb57530aa6945eb1036afedc7df7715dc28bfec2a46b8c31898c4a1e40a9`.
+  using their dedicated attested tools.
   The exact accepted secondary profile remains configured in bounded `assist`
   and is probed on
   demand; its exact post-cutover canary passed, while laptop absence preserves
@@ -66,24 +67,32 @@ the current production identity, completed packages, active work and next order.
   body-free schema-41 DocumentCatalog now has its bounded durable worker and
   archive consumer in production. Obsidian create/append now publish an atomic
   body-free effect outcome and reconcile uncertainty by observation without
-  replaying a vault mutation. The selected-message to exact-document comparison
-  journey is restart-safe and live. Catalog coverage remains honestly
-  incomplete while the backlog converges.
+  replaying a vault mutation. The conversation-to-document comparison has been
+  restart-safe and live since `0.207.29`. The distinct locate, ordinal-select,
+  restart and natural selected-document explanation journey is live through
+  the reader-first `0.207.49` and atomic `0.207.50` runtime packages. The
+  `0.207.51` body-free document-passage projection contract is deployed without
+  a schema or runtime-route change. Catalog coverage remains honestly incomplete
+  while the backlog converges. The current activation terminal receipt is
+  `c508dc468a83d662fa57e23142d344d95128cd849416a1806fbf14148adfe507`.
 - Delivery constraints: no Docker for primary Friday release certification;
   companion plugin untouched; small commits and immutable wheel-only production
   releases. The optional laptop inference node is a separate Docker contour.
 
 ## Active objective
 
-Close the compiler/artifact loop, then return to the next complete ICP golden
-journey before ordered V12 refinement; the restored document-contour WIP audit
-is already closed. The source candidate also contains the independently
-default-off schema-45 Semantic Supervisor current-file/current-web journey,
-promoted restart rebind/resume and maturity-gated post-commit effect observer.
-It remains a separate release input rather than a dependency of Engineer Mode;
-its P6 inventory finds no semantic-only legacy candidate and authorizes no
-deletion. None of these source additions changes the production identity or
-schema recorded above before immutable release acceptance.
+Continue document-contour convergence from the deployed passage contract: land
+reader-first passage manifest/table capacity, then activate its writer/backfill,
+then add typed dates and embeddings as separately reversible packages. In
+parallel, the source candidate contains the independently default-off schema-45
+Semantic Supervisor current-file/current-web journey, promoted restart
+rebind/resume and maturity-gated post-commit effect observer. It remains a
+separate release input rather than a dependency of Engineer Mode or document
+convergence; its P6 inventory finds no semantic-only legacy candidate and
+authorizes no deletion. None of these source additions changes the production
+identity or schema recorded above before immutable release acceptance. The WIP
+audit is closed with no salvage selected; Docker and companion-plugin work
+remain out of scope.
 
 The measured and accepted finalist is exact profile
 `gptoss20b-2335df123cac7fc0e13e347cde1e1ffa8562daafcaf0fc76ade1a851d2b0ff1f`
@@ -109,7 +118,7 @@ accepted profile manifest hashes to
 `93ea5698b8b6a9bf8a7dc697ffe37d7353055aa16555188991747bba73d059e3` and
 its accepted physical-failure evidence hashes to
 `9dc72f80caed3320bd154cf1219a8bd6b1339142b690b00dd1cbe1fb05964006`.
-Live `0.207.48` admits exactly that profile, with no provisional entries:
+Live `0.207.51` admits exactly that profile, with no provisional entries:
 extraction, evidence-bound document mapping and complete current text/Office
 document reviews are in bounded `assist`. It grants no tools, effects,
 publication or knowledge-write authority; failure preserves the exact
@@ -188,20 +197,49 @@ course, with these repository-specific constraints:
 
 ## In progress
 
-1. Close the Engineer artifact loop: Java 21 first, then C/C++/Zig/Go, with
-   immutable source lineage, deterministic source/binary bundles and exact
-   Telegram delivery without automatically executing produced artifacts.
-2. Integrate the default-off schema-45 Semantic Supervisor source candidate
+1. Integrate the default-off schema-45 Semantic Supervisor source candidate
    through a clean release artifact and prove activation rollback. Assist needs
    new production evidence; its separate effect shadow additionally requires
    mature accepted CANARY evidence. Current P6 is `NO_ELIGIBLE_CANDIDATE`, so no
    mixed or invariant guard may be deleted and the candidate must not be called live.
-3. Select and finish the next complete ICP golden journey from the remaining
-   readiness gaps, then continue the ordered V12 refinement package.
-4. Keep physical Android/Syncthing acceptance explicitly `UNVERIFIED`; the
-   companion plugin remains out of scope.
+2. Land the reader-first document-passage manifest and table package with a
+   schema-capable fallback and no active writer.
+3. Activate the bounded writer and resumable backfill only after that reader is
+   deployed and fallback-proven.
+4. Add typed document dates and embeddings in later bounded packages.
+5. Close the Engineer artifact loop with immutable source lineage and
+   deterministic source/binary bundles. Keep physical Android/Syncthing
+   acceptance explicitly `UNVERIFIED`; use no Docker or companion changes.
 
 ## Completed and deployed packages
+
+### Body-free document-passage projection contract (`0.207.51`)
+
+- The storage-independent V12 contract binds exact Raw version/content
+  identity, extracted-text identity, the code-owned passage-policy revision and
+  at most 64 body-free half-open passage locators with exact slice digests.
+- The pre-release source-revalidation blocker was closed: every `current`
+  carrier must be rederived against the exact authoritative version, digest and
+  extracted text, so forged coordinates, policy or slice digests fail closed.
+- This release adds no schema, table, writer, backfill or runtime route. Its 59
+  focused passage tests passed, the wheel reproduced byte-for-byte and immutable
+  activation completed `clear`.
+
+### Durable locate, choose and explain document journey (`0.207.49`–`0.207.50`)
+
+- `0.207.49` deployed the reader for the exact selected-evidence shape without
+  enabling a writer or route. `0.207.50` then made ordinal selection atomically
+  complete the candidate Work Item and promote the chosen source, passages,
+  coverage and accepted replay receipt into that durable reader.
+- Selection and a later natural explanation survive separate runtime restarts,
+  recheck authority and source identity, preserve partial coverage and reuse the
+  existing attested explanation path without another search or ordinary-model
+  fallback. The `0.207.49` rollback reader was proven against the new rows.
+- This is the locate-and-explain journey, not the already-deployed
+  `CompareConversationWithDocument` journey from `0.207.29`. The `0.207.50`
+  writer package passed 75 focused foundation/schema tests and 7 focused runtime
+  tests; both release wheels reproduced byte-for-byte and both activations
+  completed `clear`.
 
 ### Universal owner-confirmed Engineer command runner (`0.207.48`)
 
@@ -664,33 +702,14 @@ course, with these repository-specific constraints:
 
 ## Document-contour WIP audit disposition
 
-The recovered 0.207.4 inventory was revalidated against current `main`; no old
-blob or migration is a release candidate:
-
-- embedding backlog/freshness observability is already stronger in diagnostics,
-  tenant-scoped search explain and worker indexing than the stale global
-  `embeddings_pending` proposal;
-- filename and alias search is already authority-scoped in owned-file lookup and
-  the archive catalog lane; indexing arbitrary `metadata_json` in `raw_fts` is
-  rejected as a privacy, migration and WAL regression;
-- the useful message-layout recall and synthetic P09 parenthetical/adverse
-  predicates were already absorbed and strengthened by `acda581`; the archived
-  aggregate recall test is weaker than the current focused contracts;
-- five clean merged feature worktrees, 23 clean ancestor worktrees carrying
-  false `pending` locks, three obsolete gate caches and stale missing-worktree
-  registrations were removed. Current `main`, live immutable releases,
-  rollback/evidence roots and companion code were untouched;
-- a second exact cleanup removed 14 additional clean, unlocked, detached
-  ancestor worktrees only through `git worktree remove`, releasing about
-  784 MiB; their tracked history remains in Git and only regenerable caches and
-  build output were discarded;
-- the three superseded WIP refs were preserved with complete history in the
-  verified forensic bundle
-  `/home/jericho/.jericho/forensics/document-file-contour-wip-20260822/document-file-contour-wip-20260822.bundle`,
-  SHA-256
-  `bc1b201a925880cd7c3e75a23524fa563274b9ea55973c6406dcb934b1e54eef`,
-  then deleted by exact old-OID guards. No object pruning or garbage collection
-  was run; the 824 unique evidence blobs remain recoverable from the bundle.
+The recovered 0.207.4 inventory was revalidated against current `main`. The
+audit is closed with no source, blob or migration selected for salvage. Exactly
+five stale missing-worktree registrations were pruned; no current implementation
+task depends on that WIP. The superseded history remains retained in the verified
+forensic bundle
+`/home/jericho/.jericho/forensics/document-file-contour-wip-20260822/document-file-contour-wip-20260822.bundle`,
+SHA-256
+`bc1b201a925880cd7c3e75a23524fa563274b9ea55973c6406dcb934b1e54eef`.
 
 ## Canonical golden-journey/evidence registry
 
@@ -727,57 +746,46 @@ claims at this checkpoint.
 | Journey ID | Journey | Readiness | deterministic contract | integration path | clean artifact path | synthetic live path | production read-only observation | physical device evidence | restart and recovery evidence | rollback evidence | backup and restore evidence | Limitation codes |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|
 | `conversation_recall` | Conversation recall | `DEGRADED` | `AVAILABLE`<br>[friday/interaction_control_plane/work_item_contract.py](../friday/interaction_control_plane/work_item_contract.py)<br>[tests/test_message_window_runtime_integration.py::test_promoted_exact_window_is_deterministic_scoped_and_receipted](../tests/test_message_window_runtime_integration.py) | `AVAILABLE`<br>[friday/orchestration/message_window_outcome.py](../friday/orchestration/message_window_outcome.py)<br>[tests/test_message_window_runtime_integration.py::test_promoted_exact_window_is_deterministic_scoped_and_receipted](../tests/test_message_window_runtime_integration.py)<br>[tests/test_archive_search_runtime_publication.py::test_selected_message_archive_evidence_replays_after_restart_then_fails_closed](../tests/test_archive_search_runtime_publication.py) | `MISSING` | `MISSING` | `MISSING` | `NOT_APPLICABLE` | `AVAILABLE`<br>[tests/test_message_window_work_item_runtime.py::test_restart_temporal_followup_reuses_identity_role_and_zone_with_one_cas_update](../tests/test_message_window_work_item_runtime.py)<br>[tests/test_archive_search_runtime_publication.py::test_selected_message_archive_evidence_replays_after_restart_then_fails_closed](../tests/test_archive_search_runtime_publication.py) | `MISSING` | `MISSING` | `semantic_recall_missing`<br>`cross_lane_coverage_missing` |
-| `document_recall_answer` | Document recall and answer | `DEGRADED` | `AVAILABLE`<br>[friday/file_evidence_reader.py](../friday/file_evidence_reader.py)<br>[tests/test_v12_file_evidence_reader.py::test_current_turn_native_files_form_one_process_owned_bundle](../tests/test_v12_file_evidence_reader.py) | `AVAILABLE`<br>[friday/orchestration/file_read.py](../friday/orchestration/file_read.py)<br>[tests/test_v12_file_evidence_reader.py::test_reader_contract_matches_real_ingestion_projections](../tests/test_v12_file_evidence_reader.py)<br>[tests/test_archive_search_runtime_publication.py::test_selected_canonical_archive_evidence_replays_exactly_after_runtime_restart](../tests/test_archive_search_runtime_publication.py) | `MISSING` | `AVAILABLE`<br>[tools/document_contour_live_battery.py](../tools/document_contour_live_battery.py)<br>[tests/test_document_contour_live_battery.py::test_manifest_is_exactly_ten_unique_document_scenarios](../tests/test_document_contour_live_battery.py) | `MISSING` | `NOT_APPLICABLE` | `AVAILABLE`<br>[tests/test_archive_search_runtime_publication.py::test_selected_canonical_archive_evidence_replays_exactly_after_runtime_restart](../tests/test_archive_search_runtime_publication.py)<br>[tests/test_archive_search_runtime_publication.py::test_selected_archive_replay_failure_is_source_free_and_suspends](../tests/test_archive_search_runtime_publication.py) | `MISSING` | `MISSING` | `cross_lane_coverage_missing` |
+| `document_recall_answer` | Document recall and answer | `DEGRADED` | `AVAILABLE`<br>[friday/file_evidence_reader.py](../friday/file_evidence_reader.py)<br>[tests/test_v12_file_evidence_reader.py::test_current_turn_native_files_form_one_process_owned_bundle](../tests/test_v12_file_evidence_reader.py) | `AVAILABLE`<br>[friday/orchestration/file_read.py](../friday/orchestration/file_read.py)<br>[tests/test_v12_file_evidence_reader.py::test_reader_contract_matches_real_ingestion_projections](../tests/test_v12_file_evidence_reader.py)<br>[tests/test_archive_search_runtime_publication.py::test_selected_canonical_archive_evidence_replays_exactly_after_runtime_restart](../tests/test_archive_search_runtime_publication.py)<br>[tests/test_archive_search_runtime_publication.py::test_locate_select_and_explain_document_survives_both_runtime_restarts](../tests/test_archive_search_runtime_publication.py) | `MISSING` | `AVAILABLE`<br>[tools/document_contour_live_battery.py](../tools/document_contour_live_battery.py)<br>[tests/test_document_contour_live_battery.py::test_manifest_is_exactly_ten_unique_document_scenarios](../tests/test_document_contour_live_battery.py) | `MISSING` | `NOT_APPLICABLE` | `AVAILABLE`<br>[tests/test_archive_search_runtime_publication.py::test_selected_canonical_archive_evidence_replays_exactly_after_runtime_restart](../tests/test_archive_search_runtime_publication.py)<br>[tests/test_archive_search_runtime_publication.py::test_locate_select_and_explain_document_survives_both_runtime_restarts](../tests/test_archive_search_runtime_publication.py)<br>[tests/test_archive_search_runtime_publication.py::test_selected_archive_replay_failure_is_source_free_and_suspends](../tests/test_archive_search_runtime_publication.py) | `MISSING` | `MISSING` | `cross_lane_coverage_missing` |
 | `obsidian_write_sync` | Obsidian write and synchronization | `UNVERIFIED` | `AVAILABLE`<br>[friday/organs/obsidian/contracts.py](../friday/organs/obsidian/contracts.py)<br>[friday/orchestration/effect_outcome.py](../friday/orchestration/effect_outcome.py)<br>[tests/test_effect_outcome.py::test_effect_outcome_is_immutable_canonical_closed_and_round_trips](../tests/test_effect_outcome.py)<br>[tests/test_obsidian_structured_acceptance_core.py::test_conflict_preview_is_non_destructive_and_contains_both_versions](../tests/test_obsidian_structured_acceptance_core.py) | `AVAILABLE`<br>[friday/organs/obsidian/runtime.py](../friday/organs/obsidian/runtime.py)<br>[tests/test_agent_obsidian_acceptance_message_matrix.py::test_every_exact_tier_a_b_message_routes_through_full_chat_once](../tests/test_agent_obsidian_acceptance_message_matrix.py)<br>[tests/test_agent_obsidian_production_composition.py::test_note_create_append_and_daily_exact_messages_mutate_the_real_vault](../tests/test_agent_obsidian_production_composition.py) | `MISSING` | `AVAILABLE`<br>[tests/test_obsidian_syncthing_live.py::test_pinned_syncthing_generates_and_accepts_the_managed_rest_contract](../tests/test_obsidian_syncthing_live.py) | `MISSING` | `MISSING` | `AVAILABLE`<br>[tests/test_obsidian_runtime.py::test_resume_reuses_daily_operation_identity_without_duplicate_text](../tests/test_obsidian_runtime.py)<br>[tests/test_obsidian_operations.py::test_unproved_append_stays_uncertain_and_never_mutates_the_vault](../tests/test_obsidian_operations.py) | `MISSING` | `MISSING` | `physical_android_round_trip_missing`<br>`real_conflict_evidence_missing` |
 | `durable_scheduled_work` | Durable scheduled work | `UNVERIFIED` | `AVAILABLE`<br>[friday/reminder_schedule.py](../friday/reminder_schedule.py)<br>[tests/test_a_reminder_is_set_before_the_model_speaks.py::test_the_tool_is_removed_so_nobody_is_woken_twice](../tests/test_a_reminder_is_set_before_the_model_speaks.py) | `AVAILABLE`<br>[friday/storage/_missions.py](../friday/storage/_missions.py)<br>[tests/test_a_reminder_is_set_before_the_model_speaks.py::test_the_reminder_is_set_without_asking_the_model](../tests/test_a_reminder_is_set_before_the_model_speaks.py) | `MISSING` | `AVAILABLE`<br>[tools/synthetic_live_battery.py](../tools/synthetic_live_battery.py)<br>[tests/test_synthetic_live_battery.py::test_exact_reminder_oracle_owns_the_model_boundary](../tests/test_synthetic_live_battery.py) | `MISSING` | `NOT_APPLICABLE` | `AVAILABLE`<br>[tests/test_mission_budgets_and_recovery.py::test_spent_budget_survives_a_restart](../tests/test_mission_budgets_and_recovery.py)<br>[tests/test_mission_budgets_and_recovery.py::test_an_interrupted_side_effect_is_never_replayed_blindly](../tests/test_mission_budgets_and_recovery.py) | `MISSING` | `MISSING` | `current_code_journey_audit_missing`<br>`at_most_once_delivery_recovery_missing` |
 | `honest_degradation` | Honest degradation | `DEGRADED` | `AVAILABLE`<br>[friday/orchestration/capability_outcome.py](../friday/orchestration/capability_outcome.py)<br>[tests/test_search_provider_refusal_is_not_emptiness.py::test_202_from_duckduckgo_is_a_refusal_not_an_empty_result](../tests/test_search_provider_refusal_is_not_emptiness.py) | `AVAILABLE`<br>[tests/test_search_provider_refusal_is_not_emptiness.py::test_the_chain_moves_on_when_the_first_provider_refuses](../tests/test_search_provider_refusal_is_not_emptiness.py)<br>[tests/test_message_window_runtime_integration.py::test_final_message_snapshot_drift_is_unavailable_source_free_and_not_retried](../tests/test_message_window_runtime_integration.py) | `MISSING` | `AVAILABLE`<br>[tools/synthetic_live_battery.py](../tools/synthetic_live_battery.py)<br>[tests/test_synthetic_live_battery.py::test_full_package_a_oracle_accepts_natural_honest_refusals](../tests/test_synthetic_live_battery.py) | `MISSING` | `NOT_APPLICABLE` | `AVAILABLE`<br>[tests/test_message_window_work_item_runtime.py::test_post_boundary_admission_race_returns_atomic_clarification_without_execution](../tests/test_message_window_work_item_runtime.py) | `MISSING` | `MISSING` | `product_multi_lane_coverage_missing`<br>`candidate_bound_fault_continuation_evidence_missing` |
 | `current_file_web_comparison` | Current file and web comparison | `UNVERIFIED` | `AVAILABLE`<br>[tests/test_compare_current_file_web_work_graph_schema45.py::test_schema45_exact_binding_is_durable_immutable_and_revision_cas](../tests/test_compare_current_file_web_work_graph_schema45.py) | `AVAILABLE`<br>[tests/test_supervisor_assist_controller.py::test_review_and_web_recovery_are_strictly_bounded](../tests/test_supervisor_assist_controller.py) | `MISSING` | `MISSING` | `MISSING` | `NOT_APPLICABLE` | `AVAILABLE`<br>[tests/test_supervisor_assist_graph_adapter.py::test_terminal_cancel_and_startup_reconcile_publish_closed_receipts](../tests/test_supervisor_assist_graph_adapter.py) | `MISSING` | `MISSING` | `assist_promotion_evidence_missing`<br>`clean_release_artifact_missing`<br>`activation_rollback_evidence_missing` |
 
-## Current cumulative gate
+## Current focused gate
 
-- The latest recorded complete repository-wide gate is Friday `0.207.43`: the
-  static gate, 20,546 non-UI tests and 31 UI tests passed without skips, and
-  both source-archive wheel builds were byte-identical.
-- Friday `0.207.48` is live at the exact source/sealed-tree/wheel identity and
-  schema-43 state recorded above. Its Engineer-runner delta passed the focused
-  adversarial, integration, release-transition, secondary-regression and real
-  isolated-command gates; both clean wheel builds were byte-identical.
-  Immutable activation is `clear`, backend and bridge are active, health is
-  `ok`, and SQLite integrity/FK checks are clean.
-- The optional laptop node remains demand-probed and removable; its absence
-  does not widen retries or change primary publication semantics. Semantic
+- `0.207.49` deployed the rollback-compatible reader first; its wheel reproduced
+  byte-for-byte and activation completed `clear`.
+- `0.207.50`: 75 focused foundation/schema tests and 7 focused runtime tests
+  passed, including fallback-compatible promotion/reload; its wheel reproduced
+  byte-for-byte and activation completed `clear`.
+- `0.207.51`: 59 focused passage-projection tests passed after exact-source
+  revalidation was made mandatory; its wheel reproduced byte-for-byte and
+  activation completed `clear` at the exact live identity above.
+- Only these focused deployed-package gates are asserted here. Semantic
   Supervisor work is present only in the default-off schema-45 source
-  candidate. It is not integrated into the unchanged live production identity
-  and schema recorded above.
+  candidate; it is not integrated into the live production identity or schema.
 
 ## Next order
 
-1. Integrate Java 21 compile-to-bundle delivery, then add C/C++/Zig/Go profiles.
-2. Build and verify a clean release artifact containing the default-off
+1. Build and verify a clean release artifact containing the default-off
    Semantic Supervisor source, then prove activation rollback before any live
-   promotion. Collect exact assist evidence only from a new accepted production
+   promotion. Collect assist evidence only from a new accepted production
    window; stage the effect observer only after mature accepted CANARY evidence.
-3. Select the next incomplete ICP golden journey from the canonical readiness
-   matrix and finish it end-to-end.
-4. Extend V12 only through the proven journey boundary; do not duplicate the
-   installed Semantic Supervisor policy role.
-5. Implement document passages, current embeddings, typed dates and an
-   owner-visible pending semantic projection as a new schema-43+ package, not
-   by reviving the obsolete document WIP blobs.
-6. Keep HTTP document search/details/review below the Telegram/ICP and
-   document-index work unless a user-facing blocker changes that order.
-7. Run physical Android/Syncthing and restore/fault certification when owner
-   presence is available. Companion work remains out of scope.
+2. Deploy reader-first document-passage manifest and table capacity with its
+   schema-capable fallback before any writer is enabled.
+3. Activate the bounded passage writer and resumable backfill in a separate
+   package.
+4. Add typed dates, then embeddings, without widening the frozen V12 routes.
+5. Continue the Engineer artifact loop and remaining ICP journeys after their
+   current release inputs are closed. Docker and companion work remain out of
+   scope.
 
 ## WIP source retention
 
-The exact 231-line source is restored at
-`outer_sol/DOCUMENT_FILE_CONTOUR_WIP_AUDIT_2026-08-22.md`, SHA-256
-`fe652f956200630cb3d210c474e09d14bada8106c7d8f231b4bed749b41e4378`.
-Its old code salvage is closed: the only useful overlay change already landed
-through `acda581`; remaining blobs are implemented, superseded or unsafe to
-revive. The three former refs remain represented by the verified forensic
-bundle and privacy-safe manifest rather than live repository refs.
+The WIP audit is closed with no salvage selected. Its superseded history remains
+in the verified forensic bundle named above; it is not a live implementation
+source or a current task.
 
 ## Update rule
 

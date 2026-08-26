@@ -115,12 +115,14 @@ _PROOF_REFS_BY_JOURNEY_CLASS = {
     ("document_recall_answer", "integration path"): (
         "tests/test_v12_file_evidence_reader.py::test_reader_contract_matches_real_ingestion_projections",
         "tests/test_archive_search_runtime_publication.py::test_selected_canonical_archive_evidence_replays_exactly_after_runtime_restart",
+        "tests/test_archive_search_runtime_publication.py::test_locate_select_and_explain_document_survives_both_runtime_restarts",
     ),
     ("document_recall_answer", "synthetic live path"): (
         "tests/test_document_contour_live_battery.py::test_manifest_is_exactly_ten_unique_document_scenarios",
     ),
     ("document_recall_answer", "restart and recovery evidence"): (
         "tests/test_archive_search_runtime_publication.py::test_selected_canonical_archive_evidence_replays_exactly_after_runtime_restart",
+        "tests/test_archive_search_runtime_publication.py::test_locate_select_and_explain_document_survives_both_runtime_restarts",
         "tests/test_archive_search_runtime_publication.py::test_selected_archive_replay_failure_is_source_free_and_suspends",
     ),
     ("obsidian_write_sync", "deterministic contract"): (
@@ -934,6 +936,15 @@ def test_canonical_golden_journey_registry_is_closed_current_and_privacy_safe(
     )
     document = next(row for row in rows if row.journey_id == "document_recall_answer")
     assert document.evidence["restart and recovery evidence"].state == "AVAILABLE"
+    restart_proof = (
+        "tests/test_archive_search_runtime_publication.py::"
+        "test_locate_select_and_explain_document_survives_both_runtime_restarts"
+    )
+    for evidence_class in ("integration path", "restart and recovery evidence"):
+        assert restart_proof in tuple(ref.label for ref in document.evidence[evidence_class].refs)
+        assert restart_proof in _PROOF_REFS_BY_JOURNEY_CLASS[
+            ("document_recall_answer", evidence_class)
+        ]
 
     detailed = (ROOT / "outer_sol" / "INTERACTION_CONTROL_PLANE_IMPLEMENTATION_STATUS.md").read_text(
         encoding="utf-8"
