@@ -38,12 +38,8 @@ EXPECTED_RUNTIME_IMAGE_OCI_MANIFEST_DIGEST = (
 EXPECTED_RUNTIME_SOURCE_REVISION = "29481685462732237d80d86076d6563e1f658102"
 _PROFILE_ID = re.compile(r"[a-z0-9][a-z0-9._-]{2,79}\Z")
 _SHA256 = re.compile(r"[0-9a-f]{64}\Z")
-_CONTEXT_LADDER = frozenset(
-    {4096, 8192, 12288, 16384, 24576, 32768, 40960, 49152, 65536}
-)
-_MEMORY_FRACTIONS = frozenset(
-    {"0.86", "0.88", "0.90", "0.92", "0.94", "0.95", "0.96", "0.97"}
-)
+_CONTEXT_LADDER = frozenset({4096, 8192, 12288, 16384, 24576, 32768, 40960, 49152, 65536})
+_MEMORY_FRACTIONS = frozenset({"0.86", "0.88", "0.90", "0.92", "0.94", "0.95", "0.96", "0.97"})
 _REASONING_EFFORTS = frozenset({"low", "medium", "high"})
 _MODES = frozenset({"shadow", "assist"})
 _WORKLOADS = frozenset(
@@ -690,9 +686,7 @@ def runtime_process_epoch(
         timeout_sec=timeout_sec,
         ca_file=ca_file,
     )
-    if first_body != second_body or re.fullmatch(
-        r"[1-9][0-9]*(?:\.[0-9]+)?", first_body
-    ) is None:
+    if first_body != second_body or re.fullmatch(r"[1-9][0-9]*(?:\.[0-9]+)?", first_body) is None:
         raise EndpointError("runtime process epoch is missing or ambiguous")
     try:
         value = Decimal(first_body)

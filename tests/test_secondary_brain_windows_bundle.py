@@ -395,10 +395,7 @@ def test_examples_have_sealed_source_and_nonaccepted_runtime_placeholders() -> N
     }
     env = (BUNDLE / ".env.example").read_text(encoding="utf-8")
     assert f"FRIDAY_SECONDARY_SGLANG_IMAGE={SGLANG_IMAGE}" in env
-    assert (
-        "FRIDAY_SECONDARY_MODEL_VOLUME=friday-secondary-source-gptoss20b-ablit-79f64a52"
-        in env
-    )
+    assert "FRIDAY_SECONDARY_MODEL_VOLUME=friday-secondary-source-gptoss20b-ablit-79f64a52" in env
     assert "FRIDAY_SECONDARY_CONVERTED_MODEL_MANIFEST_PATH" not in env
     assert "FRIDAY_SECONDARY_GATEWAY_IMAGE" not in env
     assert ("FRIDAY_SECONDARY_HARDWARE_RUNTIME_RECEIPT_PATH=./evidence/hardware-runtime.accepted.json") in env

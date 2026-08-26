@@ -55,12 +55,8 @@ _DOCUMENT_MAP_ASSIST_ACCEPTED_PATH = (
     / "windows-sglang"
     / "workload-policy.document-map.v2.acceptance.json"
 )
-_ABLITERATED_PROFILE_ID = (
-    "gptoss20b-d4c2207151c7507f9d71a1d3d5d387d6ae98bb89b04f3171ba667098c2ad2d25"
-)
-_ABLITERATED_CANDIDATE_SHA256 = (
-    "612ed412143458fc32bcee2b78cfa66afdaec0f947b7c6b78422afa6d9fd5a64"
-)
+_ABLITERATED_PROFILE_ID = "gptoss20b-d4c2207151c7507f9d71a1d3d5d387d6ae98bb89b04f3171ba667098c2ad2d25"
+_ABLITERATED_CANDIDATE_SHA256 = "612ed412143458fc32bcee2b78cfa66afdaec0f947b7c6b78422afa6d9fd5a64"
 _ABLITERATED_CANDIDATE_PATH = (
     Path(__file__).parent / "fixtures" / "secondary_abliterated_profile_candidate.json"
 )
@@ -81,9 +77,7 @@ def test_finalist_is_registered_only_as_the_exact_accepted_profile() -> None:
     assert hashlib.sha256(candidate_raw).hexdigest() == _CANDIDATE_SHA256
     assert set(ACCEPTED_SECONDARY_RUNTIME_PROFILES) == {_PROFILE_ID}
     assert set(PROVISIONAL_SHADOW_SECONDARY_RUNTIME_PROFILES) == {_ABLITERATED_PROFILE_ID}
-    assert set(ACCEPTED_SECONDARY_RUNTIME_PROFILES).isdisjoint(
-        PROVISIONAL_SHADOW_SECONDARY_RUNTIME_PROFILES
-    )
+    assert set(ACCEPTED_SECONDARY_RUNTIME_PROFILES).isdisjoint(PROVISIONAL_SHADOW_SECONDARY_RUNTIME_PROFILES)
 
     profile = ACCEPTED_SECONDARY_RUNTIME_PROFILES[_PROFILE_ID]
     assert profile.is_well_formed is True
@@ -318,9 +312,7 @@ def test_abliterated_candidate_is_exact_provisional_shadow_only() -> None:
     assert value["profile_id"] == _ABLITERATED_PROFILE_ID
     assert value["engine_binding_sha256"] == _ABLITERATED_PROFILE_ID.removeprefix("gptoss20b-")
     assert value["served_model_alias"] == f"friday-secondary-{_ABLITERATED_PROFILE_ID}"
-    assert value["source_model_repository"] == (
-        "huihui-ai/Huihui-gpt-oss-20b-mxfp4-abliterated-v2"
-    )
+    assert value["source_model_repository"] == ("huihui-ai/Huihui-gpt-oss-20b-mxfp4-abliterated-v2")
     assert value["source_model_revision"] == "79f64a520a4a0275f639c1a47d9a5614a8a54477"
     assert value["source_model_manifest_sha256"] == (
         "8dfc3a50d1a9407fbb07dde5f1b494157664c75cdd0e140ecb85f7d55732a296"

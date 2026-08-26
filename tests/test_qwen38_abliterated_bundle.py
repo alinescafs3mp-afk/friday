@@ -69,9 +69,7 @@ def test_abliterated_model_and_launch_manifests_are_exact() -> None:
 
 def test_bundle_binds_new_candidate_and_preserved_stable_separately() -> None:
     common = (_REMOTE / "AttestedBundle.Common.ps1").read_text(encoding="utf-8")
-    switch = (_REMOTE / "Switch-Qwen38AbliteratedV12Attested.ps1").read_text(
-        encoding="utf-8"
-    )
+    switch = (_REMOTE / "Switch-Qwen38AbliteratedV12Attested.ps1").read_text(encoding="utf-8")
     receipt = json.loads((_REMOTE / "build-attestation.v1.json").read_text(encoding="utf-8"))
 
     for exact in (
@@ -134,9 +132,7 @@ def test_source_sha_manifests_and_create_new_transport_are_exact() -> None:
     assert "build-verification.v1.json" not in remote_files
     assert not (_REMOTE / "__pycache__").exists()
 
-    wrapper = (_HANDOFF / "Sync-Qwen38AbliteratedV12AttestedBundle.sh").read_text(
-        encoding="utf-8"
-    )
+    wrapper = (_HANDOFF / "Sync-Qwen38AbliteratedV12AttestedBundle.sh").read_text(encoding="utf-8")
     applier_path = _TRANSPORT / "Apply-Qwen38AbliteratedV12AttestedBundle.ps1"
     applier = applier_path.read_text(encoding="utf-8")
     assert f"expected_manifest_sha256='{_sha256(_TRANSPORT / 'TRANSPORT-FILES.v1')}'" in wrapper

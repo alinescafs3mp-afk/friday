@@ -846,14 +846,8 @@ _PROVISIONAL_ABLITERATED_GPT_OSS_20B = SecondaryRuntimeProfile(
 
 # Accepted and provisional registries remain disjoint. The replacement can run
 # only discarded public shadow/extract until it earns a new evidence chain.
-PROVISIONAL_SHADOW_SECONDARY_RUNTIME_PROFILES: Mapping[str, SecondaryRuntimeProfile] = (
-    MappingProxyType(
-        {
-            _PROVISIONAL_ABLITERATED_GPT_OSS_20B.profile_id: (
-                _PROVISIONAL_ABLITERATED_GPT_OSS_20B
-            )
-        }
-    )
+PROVISIONAL_SHADOW_SECONDARY_RUNTIME_PROFILES: Mapping[str, SecondaryRuntimeProfile] = MappingProxyType(
+    {_PROVISIONAL_ABLITERATED_GPT_OSS_20B.profile_id: (_PROVISIONAL_ABLITERATED_GPT_OSS_20B)}
 )
 
 

@@ -31,12 +31,8 @@ _SHA256_RE = re.compile(r"[0-9a-f]{64}")
 _IMAGE_ID_RE = re.compile(r"sha256:[0-9a-f]{64}")
 _REVISION_RE = re.compile(r"[0-9a-f]{40}")
 _PROFILE_ID_RE = re.compile(r"[a-z0-9][a-z0-9._-]{2,79}")
-_MEMORY_FRACTIONS = frozenset(
-    {"0.86", "0.88", "0.90", "0.92", "0.94", "0.95", "0.96", "0.97"}
-)
-_CONTEXT_LADDER = frozenset(
-    {4096, 8192, 12288, 16384, 24576, 32768, 40960, 49152, 65536}
-)
+_MEMORY_FRACTIONS = frozenset({"0.86", "0.88", "0.90", "0.92", "0.94", "0.95", "0.96", "0.97"})
+_CONTEXT_LADDER = frozenset({4096, 8192, 12288, 16384, 24576, 32768, 40960, 49152, 65536})
 _CHUNKED_PREFILL_GRID = frozenset({256, 512, 1024, 1536, 2048})
 _MODES = frozenset({"shadow", "assist"})
 _WORKLOADS = frozenset(
@@ -475,9 +471,12 @@ def load_launch_profile(
         raise ProfileContractError("profile scheduler selection is invalid")
     if value["hybrid_swa_memory_enabled"] is not True:
         raise ProfileContractError("profile hybrid SWA memory selection is invalid")
-    if not isinstance(value["swa_full_tokens_ratio"], str) or value[
-        "swa_full_tokens_ratio"
-    ] not in {"0.25", "0.50", "0.80", "1.00"}:
+    if not isinstance(value["swa_full_tokens_ratio"], str) or value["swa_full_tokens_ratio"] not in {
+        "0.25",
+        "0.50",
+        "0.80",
+        "1.00",
+    }:
         raise ProfileContractError("profile SWA token ratio is invalid")
     context_tokens = _exact_int(value["context_tokens"], minimum=4096, maximum=65536)
     if context_tokens not in _CONTEXT_LADDER:
@@ -501,9 +500,7 @@ def load_launch_profile(
         "full",
     }:
         raise ProfileContractError("profile CUDA graph selection is invalid")
-    cuda_graph_max_bs_decode = _exact_int(
-        value["cuda_graph_max_bs_decode"], minimum=0, maximum=1
-    )
+    cuda_graph_max_bs_decode = _exact_int(value["cuda_graph_max_bs_decode"], minimum=0, maximum=1)
     cuda_graph_bs_value = value["cuda_graph_bs_decode"]
     if not isinstance(cuda_graph_bs_value, list) or any(
         isinstance(item, bool) or not isinstance(item, int) for item in cuda_graph_bs_value
@@ -511,10 +508,9 @@ def load_launch_profile(
         raise ProfileContractError("profile CUDA graph batch sizes are invalid")
     cuda_graph_bs_decode = tuple(cuda_graph_bs_value)
     expected_graph_shape = (0, ()) if cuda_graph_backend_decode == "disabled" else (1, (1,))
-    if (
-        (cuda_graph_max_bs_decode, cuda_graph_bs_decode) != expected_graph_shape
-        or value["cuda_graph_backend_prefill"] != "disabled"
-    ):
+    if (cuda_graph_max_bs_decode, cuda_graph_bs_decode) != expected_graph_shape or value[
+        "cuda_graph_backend_prefill"
+    ] != "disabled":
         raise ProfileContractError("profile CUDA graph selection is invalid")
     _closed_list(value["allowed_modes"], _MODES)
     _closed_list(value["allowed_workloads"], _WORKLOADS)

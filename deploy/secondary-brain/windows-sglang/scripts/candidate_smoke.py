@@ -59,9 +59,7 @@ def _tool_spec() -> dict[str, Any]:
     }
 
 
-def _verify_tool_call(
-    body: dict[str, Any], expected_model: str
-) -> tuple[str, int, int, str]:
+def _verify_tool_call(body: dict[str, Any], expected_model: str) -> tuple[str, int, int, str]:
     if body.get("model") != expected_model:
         raise EndpointError("tool smoke returned the wrong served-model alias")
     choices = body.get("choices")
@@ -105,9 +103,7 @@ def _verify_tool_call(
         raise EndpointError("tool smoke returned malformed JSON arguments") from exc
     if arguments != {"city": "Moscow"}:
         raise EndpointError("tool smoke arguments did not match the closed schema")
-    canonical_arguments = json.dumps(
-        arguments, ensure_ascii=False, sort_keys=True, separators=(",", ":")
-    )
+    canonical_arguments = json.dumps(arguments, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
     usage_value = body.get("usage")
     usage = usage_value if isinstance(usage_value, dict) else {}
     return (
@@ -156,8 +152,7 @@ def run_smoke(
     except EndpointError as exc:
         raise EndpointError(f"chat phase failed: {exc}") from exc
     if completion.finish_reason != "stop" or not any(
-        "а" <= character.casefold() <= "я" or character.casefold() == "ё"
-        for character in completion.content
+        "а" <= character.casefold() <= "я" or character.casefold() == "ё" for character in completion.content
     ):
         raise EndpointError("bounded Russian chat smoke returned an invalid final response")
 
@@ -190,8 +185,8 @@ def run_smoke(
         )
     except EndpointError as exc:
         raise EndpointError(f"tool phase failed: {exc}") from exc
-    tool_arguments, tool_prompt_tokens, tool_completion_tokens, tool_finish_reason = (
-        _verify_tool_call(tool_body, expected_model)
+    tool_arguments, tool_prompt_tokens, tool_completion_tokens, tool_finish_reason = _verify_tool_call(
+        tool_body, expected_model
     )
     return {
         "schema": "friday.secondary-candidate-smoke.v1",
@@ -208,9 +203,7 @@ def run_smoke(
         "tool_prompt_tokens": tool_prompt_tokens,
         "tool_completion_tokens": tool_completion_tokens,
         "tool_finish_reason": tool_finish_reason,
-        "tool_call_sha256": hashlib.sha256(
-            f"{_TOOL_NAME}\n{tool_arguments}".encode("utf-8")
-        ).hexdigest(),
+        "tool_call_sha256": hashlib.sha256(f"{_TOOL_NAME}\n{tool_arguments}".encode()).hexdigest(),
         "raw_content_retained": False,
         "api_key_retained": False,
     }
