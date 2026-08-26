@@ -207,7 +207,8 @@ and leaves headroom for the normal outbound queue to deliver the alert).
 **`engineer`** (`friday/organs/engineer/`) — disabled-by-default defensive
 workbench for the installation owner. Capabilities `engineer.use` /
 `engineer.artifact.analyze` / `engineer.artifact.patch` /
-`engineer.host.audit` are additionally protected by a hard owner check; an
+`engineer.host.audit` / `engineer.command.run` / `engineer.command.manage` are
+additionally protected by a hard owner check; an
 `owner` preset in a shared tenant is not sufficient. Network tools accept only
 the single target named by the human in the current turn. Runtime pins its
 addresses and supplies an actor-bound, short-lived ticket which the model cannot

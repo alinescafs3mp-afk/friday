@@ -142,6 +142,32 @@ generated-file path in one transaction, after final source identity and
 success receipt. Friday never calls the artifact tested merely because it
 compiled; running and runtime testing remain with the operator elsewhere.
 
+### Owner-confirmed installed-program execution
+
+`FRIDAY_ENGINEER_COMMAND_ENABLED=1` adds three owner-only capabilities to an
+already enabled Engineer installation: submit one exact argv, inspect its
+durable job, and request cancellation. The start tool is advertised only for an
+authenticated Telegram update. It stores no model-supplied authority fields;
+runtime injects the exact conversation/source row, and a distinct Telegram
+callback must approve the exact rendered argv before a process can start.
+
+Resolution uses a code-owned service-account PATH and admits only an executable
+whose owner, mode, inode and bytes can be held and sealed through spawn. Every
+job runs under a bounded transient user-systemd cgroup and fresh bubblewrap
+namespace with finite tasks, memory, CPU, time, stdout/stderr and output-tree
+budgets. It inherits no credentials or ambient environment and receives no
+host data, network, home, Docker socket or writable host path. There is no
+implicit or privileged host shell. If the owner explicitly asks for a shell,
+its executable and arguments are shown in the same approval and it remains
+inside this sandbox.
+
+The process starts in `/job`, may use `/job/workspace` and `/job/tmp`, and may
+place deliverables only below `/job/output`. Terminal status exposes bounded,
+sanitized stdout/stderr and a hashed generated-file inventory. Cancellation,
+timeout, crash reconciliation and leader exit apply to the complete cgroup;
+an unproved tree or receipt becomes `unknown`, never success. This slice does
+not yet publish the output inventory as a Telegram archive.
+
 The optional secondary brain may refine a secret-stripped structured finding
 list only when its ordinary admission policy allows that extraction. It receives
 no tools, target ticket or effect authority.
@@ -183,7 +209,11 @@ of the following without skips or local substitutions:
    and `tests/test_engineer_audit_projection.py`; a candidate which includes
    Java compilation additionally passes `tests/test_engineer_compiler.py`,
    `tests/test_engineer_compile_tool.py` and
-   `tests/test_engineer_compile_outcome.py`;
+   `tests/test_engineer_compile_outcome.py`; a candidate which includes the
+   installed-program runner additionally passes
+   `tests/test_engineer_command_kernel.py`,
+   `tests/test_engineer_command_p0.py` and
+   `tests/test_engineer_command_integration.py`;
 3. the canonical full release gate: `python tools/quality_gate.py`.
 
 Keep `FRIDAY_ENGINEER_MODE_ENABLED=0` during rollout preparation. Enable it only
@@ -193,9 +223,9 @@ and a benign owner-controlled fixture completes with an accurate receipt.
 
 ## Explicit non-goals for v1
 
-The shipped mode has no generic code execution. The fixed Java compilation
-profile above is not a shell or program runner and cannot be widened into one.
-The mode also has no autonomous target discovery, multi-host assessment,
+The installed-program runner is not a host-equivalent console: it cannot read
+host data, inherit credentials, reach the network or Docker, or escape its
+bounded workspace. The mode also has no autonomous target discovery, multi-host assessment,
 exploit validation worker, persistence on a target, credential use, background
 scanning, arbitrary dependency builds, native compilation, Android rebuilds or
 artifact signing. Those ideas require a separate design, threat review and

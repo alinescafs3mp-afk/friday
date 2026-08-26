@@ -1,3 +1,20 @@
+## 0.207.48 — 2026-08-26
+
+### Owner-confirmed installed-program execution
+
+- Engineer Mode can now resolve an exact installed executable and run its
+  bounded argv inside a fresh no-network, no-host-files workspace. Every start
+  requires a distinct authenticated Telegram confirmation; status and cancel
+  remain bound to the owning account and durable job identity.
+- Executable/interpreter identity, process-tree ownership, output export,
+  stdout/stderr capture, restart reconciliation and transient systemd cleanup
+  fail closed across the spawn boundary. There is no implicit or privileged
+  host shell, ambient environment, credentials, Docker socket or writable host
+  path; an explicitly requested shell is still confined to the same workspace.
+- Immutable activation gains an exact `engineer_command_enable` transition: it
+  changes only the default-off runner switch on an already-enabled Engineer
+  installation. Database schema remains 43.
+
 ## 0.207.47 — 2026-08-26
 
 ### Crash-safe predecessor convergence

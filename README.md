@@ -2,7 +2,7 @@
 
 **Friday** (по-русски — **Пятница**; ex codename Jericho) — локальная многопользовательская Knowledge Operating System: она принимает текст и документы, сохраняет первоисточник, строит граф знаний, ищет по личной базе и отвечает через Telegram или HTTP API. Веб-панель предназначена для администрирования, разбора Inbox, работы с сущностями, правами, резервными копиями и диагностикой.
 
-Текущая версия: **0.207.47**. Авторизованный read-only `archive_search`
+Текущая версия: **0.207.48**. Авторизованный read-only `archive_search`
 объединяет личные документы, знания, сообщения и Obsidian с точными
 источниками, покрытием и финальной повторной проверкой прав. Schema 43
 добавляет durable immutable Host Action jobs и append-only lifecycle events для
@@ -129,6 +129,13 @@ no-network bubblewrap-разбором артефактов. Простое уп
 scope без operator flag и отдельного action approval закрыт. Режим
 выключен по умолчанию и требует Linux acceptance из
 [`docs/ENGINEER_MODE.md`](docs/ENGINEER_MODE.md).
+
+Опциональный command runner внутри этого режима запускает установленную
+программу по точному `argv` только после отдельного подтверждения владельца в
+Telegram. Процесс получает новый ограниченный workspace без host data, сети,
+секретов и Docker socket; состояние и отмена доступны по durable job ID.
+Явно запрошенный shell остаётся внутри того же sandbox и не превращается в
+консоль хоста.
 
 Отдельный Host Capability Plane позволяет использовать reviewed Ubuntu CLI как
 функцию, а не просто запускать приложение. Первый вертикальный срез обнаруживает
@@ -348,7 +355,7 @@ fan-out одной задачи. Иерархическое чтение док�
 `/v1/models`, bounded `/metrics`, `/server_info` и per-process deployment
 witness с code-owned identities и launch graph. Любой drift, неполный
 witness или незамкнутый same-origin proxy оставляют routes в `legacy`.
-Успешный canary startup должен показать в `/api/health` версию `0.207.47`,
+Успешный canary startup должен показать в `/api/health` версию `0.207.48`,
 точный profile id, `canary_ready`, `live_attestation_clear` и оба
 зарегистрированных route; простого HTTP `status=ok` недостаточно.
 

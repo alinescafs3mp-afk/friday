@@ -294,7 +294,9 @@ def build_engineer_command_tools(ctx: ServiceContext) -> tuple[ToolSpec, ...]:
             description=(
                 "Prepare one exact installed-program argv for isolated execution. "
                 "The owner sees the exact argv and must confirm it before any process starts. "
-                "No shell, host files, host network, inherited credentials or Docker socket are available. "
+                "There is no implicit or privileged host shell; an explicitly requested shell remains "
+                "an exact confirmed argv inside the same sandbox. Host data, host network, inherited "
+                "credentials and the Docker socket are unavailable. "
                 "The program starts in /job; use /job/workspace for scratch data and write every "
                 "deliverable file below /job/output so Friday can inventory it."
             ),
