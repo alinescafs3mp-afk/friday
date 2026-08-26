@@ -161,6 +161,10 @@ _TRAILING_REQUEST_ATTRIBUTION = re.compile(
     r"(?:as\s+)?(?:said|written)\s+by)\b",
     re.IGNORECASE,
 )
+_EXPLICIT_REQUEST_CONTEXT_RESET = re.compile(
+    r"\A\s*(?:(?:а|и|and|so)\s+)?(?:теперь|сейчас|наконец|now|then|finally)\b",
+    re.IGNORECASE,
+)
 _ARTIFACT_PATCH_REQUEST = re.compile(
     r"\A\s*(?:(?:please|pls|kindly|can\s+you|could\s+you|would\s+you|"
     r"i\s+(?:want|need|ask|authorize)\s+you\s+to|"
@@ -451,6 +455,25 @@ def _request_is_negated(masked: str) -> bool:
     return _ACTIVE_ASSESSMENT_NEGATION.search(negation_surface) is not None
 
 
+def _newline_payload_has_inert_governor(masked: str, unit_start: int) -> bool:
+    """Keep a reported/example paragraph inert after a ``:`` + newline."""
+
+    if _EXPLICIT_REQUEST_CONTEXT_RESET.match(masked[unit_start:]):
+        return False
+    prefix = masked[:unit_start]
+    lines = prefix.split("\n")
+    # The last item is the current (possibly empty) line prefix.  Only a
+    # completed preceding line can introduce the following payload.  A blank
+    # line does not end that authority boundary: pasted/report payloads can
+    # contain arbitrary vertical whitespace.  A short ``Label:`` is also inert
+    # because speaker attribution must never become packet authority.
+    return any(
+        line.rstrip().endswith(":")
+        and (_REPORTED_REQUEST_CUE.search(line) or _META_REQUEST_CUE.search(line) or len(line.strip()) <= 96)
+        for line in lines[:-1]
+    )
+
+
 def _direct_request_matches(speech: str, pattern: re.Pattern[str]) -> tuple[_DirectRequestSpan, ...]:
     """Locate direct action clauses and keep data/reported speech inert.
 
@@ -465,6 +488,8 @@ def _direct_request_matches(speech: str, pattern: re.Pattern[str]) -> tuple[_Dir
         return ()
     found: list[_DirectRequestSpan] = []
     for unit_start, unit_end in _request_units(masked):
+        if _newline_payload_has_inert_governor(masked, unit_start):
+            continue
         unit = masked[unit_start:unit_end]
         if _CONDITIONAL_REQUEST_CUE.search(unit):
             continue
