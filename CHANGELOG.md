@@ -1,3 +1,19 @@
+## 0.207.50 — 2026-08-26
+
+### Durable locate, choose and explain document journey
+
+- An exact ordinal answer to a multi-source archive result now atomically
+  completes its candidate question and promotes the chosen source into the
+  durable selected-evidence reader. The original search boundary, selected
+  source/passages, coverage and accepted replay receipt remain exact.
+- After either runtime restart the owner can naturally ask what the selected
+  document says. Friday uses the existing attested two-pass explanation path,
+  performs fresh authority and source checks, preserves partial-coverage
+  warnings and does not repeat archive search or fall through to the ordinary
+  model.
+- Schema remains 43. Startup replaces only the authenticated legacy reader
+  trigger; `0.207.49` is the compatible rollback reader for the new rows.
+
 ## 0.207.49 — 2026-08-26
 
 ### Dormant archive-selection continuation reader
