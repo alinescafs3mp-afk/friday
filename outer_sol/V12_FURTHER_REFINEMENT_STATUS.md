@@ -3,7 +3,7 @@
 Status: **SELECTED-EVIDENCE RUNTIME + DOCUMENT-PASSAGE CONTRACT DEPLOYED**
 Date: 2026-08-27
 Branch: `main`
-Source/live: `main` / `4b9b48adf1462cfc9af4f81c7158078ec3aab20a`
+Deployed source/live: `4b9b48adf1462cfc9af4f81c7158078ec3aab20a`
 Live: Friday `0.207.51`, tree
 `6a534f83cf030bb0beab856a4748abefcacca1b77f975c69ee2b0504451c8dd0`, wheel
 `6f0a08312ac8dd5d815004027e442e19ba96d648477990d2e54557701dceb529`,
