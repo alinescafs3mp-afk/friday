@@ -11,12 +11,13 @@ the current production identity, completed packages, active work and next order.
   the provisional registry is empty, and the primary remains the sole
   final-publication, tool and effect authority. Every secondary miss preserves
   the exact primary-only path.
-- Deployed implementation head: `27bf8acaa68843c097e5dad512ea789304267cf2`
-- Live: Friday `0.207.38` / `27bf8acaa68843c097e5dad512ea789304267cf2`;
-  tree `61751a8f05d1a9b1a5b0f5ce4ba2b9b265dce9e78b326ffab78d8af73618f313`;
-  wheel `d3be99897ef0452627686665ba417e17b196103ffc99e0ef9d6bbf9a7f2a9a88`.
-- Immediate predecessor and schema-capable fallback: Friday `0.207.37` /
-  `c7feb84229c70d302d600582db575a76eeb0f536`.
+- Deployed implementation head: `83ae001f7323b9868ba077f5989825de44f8847e`
+- Live: Friday `0.207.39` / `83ae001f7323b9868ba077f5989825de44f8847e`;
+  tree `138b8867a43a3aaa7fdb56edc665171c91356fb3d10ac12aad0448450a29afac`;
+  wheel `1923d01e03c4c64089bde5aea47934cededcc6715e3a2524e54326e9dcbbdba9`.
+- Immediate predecessor: Friday `0.207.38` /
+  `27bf8acaa68843c097e5dad512ea789304267cf2`. Schema-capable fallback:
+  Friday `0.207.37` / `c7feb84229c70d302d600582db575a76eeb0f536`.
 - Database schema: 43
 - Production state: immutable activation `clear`; backend and Telegram bridge
   active; trusted-CA HTTPS health `200`; SQLite integrity and FK checks clean.
@@ -24,13 +25,17 @@ the current production identity, completed packages, active work and next order.
   `192.168.1.0/24`. The owner phrase «my subnet» resolves to that physical-host
   LAN authority, never to the VM guest interface; the runtime now contributes a
   body-free environment passport. Fixed-path `/usr/bin/nmap` 7.98 is package
-  attested and the exact 256-address LAN discovery path is live. Its native
-  bubblewrap boundary proves an isolated network namespace. Host Control,
+  attested and the exact 256-address LAN discovery path is live. Configured-LAN
+  actions now return a code-owned structural result which model prose cannot
+  deny or rewrite; quoted, reported, conditional and cancelled commands remain
+  inert. Engineer synthesis reserves its completion budget for visible output
+  instead of transport-private thinking. Its native bubblewrap boundary proves
+  an isolated network namespace. Host Control,
   package installation, desktop, one-shot and public
   network execution remain disabled. The seven-file user-systemd surface is
   crash-resumable and exactly receipted; backend and bridge use separate 0700
   runtime temporary directories. The activation terminal receipt is
-  `34a46086bbe5b7f23c3e79098f1338ff2c5fc840fc3943f05cafeb4821ec84e8`.
+  `e0fa76b1da762a47091677bcdfc7834c05b136a3563788abda1bc0e65d0acebc`.
   The exact accepted secondary profile remains configured in bounded `assist`
   and is probed on
   demand; its exact post-cutover canary passed, while laptop absence preserves
@@ -80,7 +85,7 @@ accepted profile manifest hashes to
 `93ea5698b8b6a9bf8a7dc697ffe37d7353055aa16555188991747bba73d059e3` and
 its accepted physical-failure evidence hashes to
 `9dc72f80caed3320bd154cf1219a8bd6b1339142b690b00dd1cbe1fb05964006`.
-Live `0.207.38` admits exactly that profile, with no provisional entries:
+Live `0.207.39` admits exactly that profile, with no provisional entries:
 extraction, evidence-bound document mapping and complete current text/Office
 document reviews are in bounded `assist`. It grants no tools, effects,
 publication or knowledge-write authority; failure preserves the exact
@@ -159,14 +164,30 @@ course, with these repository-specific constraints:
 
 ## In progress
 
-1. Select and finish the next complete ICP golden journey from the remaining
+1. Finish the bounded uploaded-binary decompilation path and exact deictic
+   artifact continuation without ever executing uploaded code.
+2. Select and finish the next complete ICP golden journey from the remaining
    readiness gaps.
-2. Continue the ordered V12 refinement package without pre-baking the future
+3. Continue the ordered V12 refinement package without pre-baking the future
    Semantic Supervisor.
-3. Keep physical Android/Syncthing acceptance explicitly `UNVERIFIED`; the
+4. Keep physical Android/Syncthing acceptance explicitly `UNVERIFIED`; the
    companion plugin remains out of scope.
 
 ## Completed and deployed packages
+
+### Engineer-owned network outcomes and visible synthesis (`0.207.39`)
+
+- Natural current-turn private-LAN requests now survive conversational prefixes
+  and punctuation while quoted, code, reported, conditional, cancelled and
+  multiline-attributed commands cannot authorize packets or inject a target.
+- The configured-LAN path publishes a bounded typed result and a body-free
+  durable receipt; success, partial coverage, denial, unavailability and entered
+  uncertainty are owned by code rather than editable model prose.
+- Engineer model thinking is disabled so the 8,192-token completion allowance
+  cannot be exhausted without a visible answer. The exact source passed 20,247
+  non-UI and 31 UI tests with zero skips; two wheels reproduced byte-for-byte.
+  Immutable activation completed `clear` with terminal receipt
+  `e0fa76b1da762a47091677bcdfc7834c05b136a3563788abda1bc0e65d0acebc`.
 
 ### Engineer LAN awareness and direct private scan (`0.207.38`)
 
