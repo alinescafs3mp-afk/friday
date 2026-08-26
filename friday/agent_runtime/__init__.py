@@ -9397,6 +9397,37 @@ def _actual_english_supported_deed_clauses(
     )
 
 
+def _repair_file_effect_signature(answer: str) -> bool:
+    """Detect a carrier-shaped file effect newly introduced by model repair."""
+
+    if _explicit_supported_file_claim(answer):
+        return True
+    return any(
+        _SUPPORTED_FILE_COMPLETION.fullmatch(clause.strip().rstrip(".!")) is not None
+        for clause in _supported_deed_claim_clauses(answer)
+        if not clause.rstrip().endswith("?")
+        and _SUPPORTED_DEED_NONACTUAL.search(clause) is None
+        and _SUPPORTED_DEED_NEGATED.search(clause) is None
+        and _SUPPORTED_DEED_ACTIVE_NEGATED.search(clause) is None
+    )
+
+
+def _repair_supported_effects_to_guard(
+    original: str,
+    repaired: str,
+    requested_effects: frozenset[str],
+) -> frozenset[str]:
+    """A repair cannot silently introduce a new supported effect family."""
+
+    introduced = set(
+        (_supported_deed_families(repaired) - _supported_deed_families(original))
+        - {"file"}
+    )
+    if _repair_file_effect_signature(repaired) and not _repair_file_effect_signature(original):
+        introduced.add("file")
+    return requested_effects.union(introduced)
+
+
 def _runtime_unconfirmed_supported_deed(
     answer: str,
     *,
@@ -51321,7 +51352,11 @@ class AgentRuntime:
                     )
                 if repaired_has_model_content and _runtime_unconfirmed_supported_deed(
                     repaired_model_said,
-                    requested_effects=requested_supported_deed_effects,
+                    requested_effects=_repair_supported_effects_to_guard(
+                        model_said,
+                        repaired_model_said,
+                        requested_supported_deed_effects,
+                    ),
                     has_file=bool(file_deed_descriptors),
                     reminder_succeeded=bool(context.successful_reminders),
                     reminder_delivery_scheduled=reminder_delivery_scheduled,
