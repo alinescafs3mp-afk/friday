@@ -9419,10 +9419,7 @@ def _repair_supported_effects_to_guard(
 ) -> frozenset[str]:
     """A repair cannot silently introduce a new supported effect family."""
 
-    introduced = set(
-        (_supported_deed_families(repaired) - _supported_deed_families(original))
-        - {"file"}
-    )
+    introduced = set((_supported_deed_families(repaired) - _supported_deed_families(original)) - {"file"})
     if _repair_file_effect_signature(repaired) and not _repair_file_effect_signature(original):
         introduced.add("file")
     return requested_effects.union(introduced)
