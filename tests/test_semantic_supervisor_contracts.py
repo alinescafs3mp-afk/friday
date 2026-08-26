@@ -256,6 +256,45 @@ def test_proposal_rejects_extra_keys_duplicate_keys_and_surrounding_prose() -> N
         SupervisorProposal.parse(json.dumps(payload).replace('"new_task"', "Infinity"))
 
 
+def test_proposal_rejects_malformed_utf8_oversized_fields_and_too_many_steps() -> None:
+    supervisor_input = build_supervisor_input(_compare_turn(), _settings())
+    payload = _proposal_payload(supervisor_input)
+
+    with pytest.raises(SupervisorContractError, match="valid UTF-8"):
+        SupervisorProposal.parse(json.dumps(payload) + "\ud800")
+    with pytest.raises(SupervisorContractError, match="goal exceeds 240"):
+        SupervisorProposal.parse({**payload, "goal": "g" * 241})
+
+    oversized_purpose = _compare_steps()
+    oversized_purpose[0]["purpose"] = "p" * 161
+    with pytest.raises(SupervisorContractError, match="purpose exceeds 160"):
+        SupervisorProposal.parse(_proposal_payload(supervisor_input, steps=oversized_purpose))
+
+    too_many = _compare_steps()
+    too_many.extend(
+        {
+            **too_many[0],
+            "step_id": f"s{ordinal}",
+        }
+        for ordinal in range(4, 8)
+    )
+    with pytest.raises(SupervisorContractError, match="steps must contain 1 to 6"):
+        SupervisorProposal.parse(_proposal_payload(supervisor_input, steps=too_many))
+
+
+def test_proposal_rejects_duplicate_step_ids_and_unsupported_model_role() -> None:
+    supervisor_input = build_supervisor_input(_compare_turn(), _settings())
+    duplicate = _compare_steps()
+    duplicate[1]["step_id"] = duplicate[0]["step_id"]
+    with pytest.raises(SupervisorContractError, match="step IDs must be unique"):
+        SupervisorProposal.parse(_proposal_payload(supervisor_input, steps=duplicate))
+
+    unsupported = _compare_steps()
+    unsupported[2]["target_id"] = "primary.unsupported"
+    with pytest.raises(SupervisorContractError, match="not in the closed input catalog"):
+        SupervisorProposal.parse(_proposal_payload(supervisor_input, steps=unsupported))
+
+
 def test_proposal_rejects_cycles_unknown_ids_and_shell_smuggling() -> None:
     supervisor_input = build_supervisor_input(_compare_turn(), _settings())
     cyclic = _compare_steps()
@@ -646,6 +685,39 @@ def test_routing_keeps_exact_lanes_and_small_talk_off_the_supervisor() -> None:
         )
         assert closed.eligible is False
         assert closed.skip_reason is SupervisorSkipReason.EVIDENCE_UNAVAILABLE
+
+
+def test_archive_and_current_web_route_mints_exact_two_read_plan_shape() -> None:
+    turn = _turn("Сравни переписку из архива с текущими данными в интернете.")
+    settings = _settings(semantic_supervisor_tasks=("compare_archive_with_current_web",))
+
+    assert classify_supervisor_task(turn) is TaskClass.COMPARE_ARCHIVE_WITH_CURRENT_WEB
+    eligibility = supervisor_eligibility(turn, settings)
+    assert eligibility.eligible is True
+    assert eligibility.task_class is TaskClass.COMPARE_ARCHIVE_WITH_CURRENT_WEB
+
+    supervisor_input = build_supervisor_input(turn, settings)
+    messages = build_supervisor_messages(supervisor_input)
+    proposal = SupervisorProposal.parse(
+        json.loads(messages[-1]["content"])["untrusted_payload"]["response_template"]
+    )
+    decision = admit_supervisor_proposal(
+        proposal,
+        supervisor_input,
+        PolicyAdmissionContext(
+            actor_binding_sha256="a" * 64,
+            conversation_binding_sha256="b" * 64,
+        ),
+    )
+
+    assert decision.admitted is True
+    assert decision.plan is not None
+    reads = decision.plan.steps[:2]
+    assert tuple(step.capability_id for step in reads) == (ARCHIVE_SEARCH_ID, WEB_SEARCH_CURRENT_ID)
+    assert all(step.parallel_group == "evidence" and not step.depends_on for step in reads)
+    synthesis = decision.plan.steps[-1]
+    assert synthesis.capability_id == PRIMARY_SYNTHESIS_ID
+    assert synthesis.depends_on == tuple(step.step_id for step in reads)
 
 
 def test_empty_task_allowlist_never_invokes_supervisor() -> None:

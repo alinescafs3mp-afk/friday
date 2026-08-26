@@ -34,7 +34,7 @@ from friday.agent_runtime import (
 from tests.test_asking_about_a_person_reaches_the_right_tool import PEOPLE, _runtime
 
 
-@pytest.mark.parametrize("message", ["а Пегас?", "а JBL", "а он что?", "Yato?"])
+@pytest.mark.parametrize("message", ["а Пегас?", "а JBL", "а он что?", "Yato?", "And Pegasus?"])
 def test_the_pattern_alone_does_not_see_the_follow_up(message: str) -> None:
     """Половина условия, ради которой добавлена вторая: шаблон тут бессилен.
 
@@ -73,6 +73,25 @@ def test_understanding_carries_the_question_the_pattern_missed() -> None:
     assert runtime.kernel.calls[0][0] == "user_activity"
     assert runtime.kernel.calls[0][1]["person"] == "Пегас"
     assert "Пегас" in str(messages[0]["content"])
+
+
+def test_english_and_pegasus_continues_the_person_activity_question() -> None:
+    runtime = _runtime(
+        [
+            *PEOPLE,
+            {
+                "id": "telegram:telegram:7777777777",
+                "display_name": "Pegasus",
+                "username": "pegasus",
+                "status": "active",
+            },
+        ]
+    )
+
+    messages = _ask(runtime, "And Pegasus?", ("человек", "Pegasus"))
+
+    assert runtime.kernel.calls[0] == ("user_activity", {"person": "Pegasus"})
+    assert "Pegasus" in str(messages[0]["content"])
 
 
 def test_a_name_that_is_not_in_the_words_at_all() -> None:
