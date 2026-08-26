@@ -69,9 +69,12 @@ the current production identity, completed packages, active work and next order.
 
 Complete the next ICP golden journey and its release evidence, then continue
 the ordered V12 refinement work. The source candidate now contains the
-default-off schema-45 Semantic Supervisor current-file/current-web journey;
-that candidate is not the live release. The production identity and schema
-remain exactly the values recorded above until immutable release acceptance.
+default-off schema-45 Semantic Supervisor current-file/current-web journey,
+promoted restart rebind/resume and an independently default-off,
+maturity-gated post-commit effect-comparison contour. Its P6 inventory finds no
+semantic-only legacy candidate and authorizes no deletion. This candidate is
+not the live release. The production identity and schema remain exactly the
+values recorded above until immutable release acceptance.
 
 The measured and accepted finalist is exact profile
 `gptoss20b-2335df123cac7fc0e13e347cde1e1ffa8562daafcaf0fc76ade1a851d2b0ff1f`
@@ -183,7 +186,9 @@ course, with these repository-specific constraints:
    readiness gaps.
 3. Close assist-promotion, clean-release-artifact and activation-rollback
    evidence for the default-off schema-45 Semantic Supervisor source candidate;
-   do not describe that candidate as live.
+   only after mature accepted CANARY evidence may its separate effect shadow be
+   staged. Current P6 result is `NO_ELIGIBLE_CANDIDATE`; do not delete mixed or
+   invariant guards, and do not describe the source candidate as live.
 4. Keep physical Android/Syncthing acceptance explicitly `UNVERIFIED`; the
    companion plugin remains out of scope.
 

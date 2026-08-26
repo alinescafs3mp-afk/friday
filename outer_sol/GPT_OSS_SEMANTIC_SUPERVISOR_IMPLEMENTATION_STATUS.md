@@ -3,8 +3,8 @@
 - Updated: 2026-08-26
 - Architecture order:
   `outer_sol/GPT_OSS_SEMANTIC_SUPERVISOR_AND_POLICY_KERNEL_ARCHITECT_BRIEF.md`
-- Source phase: **P0–P4 implemented for one bounded read-only journey; P5
-  dormant; P6 gate-only**.
+- Source phase: **P0–P5 implemented behind independent default-off gates; P6
+  inventory currently has no eligible semantic heuristic to retire**.
 - Rollout phase: **default-off source candidate; production assist/canary
   evidence is not accepted or committed**.
 - Durable source schema: **45**. This is not a deployed release identity.
@@ -23,10 +23,10 @@ evidence.
 | P0 | Complete | Routing/invariant audit and production baseline are body-free; no ownership change |
 | P1 | Complete | `off|shadow`; proposal is validated and discarded after primary |
 | P2 | Complete for one journey | Only `compare_current_file_with_current_web`; fixed read-only adapters; primary final |
-| P3 | Complete for that journey | schema-45 fixed ICP WorkGraph, request-bound ingress, restart/expiry/cancel receipts |
+| P3 | Complete for that journey | schema-45 fixed ICP WorkGraph, request-bound ingress, promoted restart rebind/resume, expiry/cancel receipts |
 | P4 | Complete for that journey | At most one review and one code-admitted web recovery |
-| P5 | Dormant source only | Symbolic Obsidian create/append intent; no runtime consumer or effect authority |
-| P6 | Gate only | Pure evidence decision; no code/config deletion surface |
+| P5 | Source complete, default off | Mature-read-only-evidence-gated post-commit Obsidian create/append comparison; no effect or publication authority |
+| P6 | Closed inventory result | Four reviewed surfaces are invariant or mixed; `NO_ELIGIBLE_CANDIDATE`, no deletion or production authority |
 
 No source path gives GPT-OSS a tool handle, effect handle, permission,
 idempotency grant, storage writer or publication method.
@@ -140,13 +140,19 @@ Before ingestion, an ACTIVE graph produces one closed relation:
 The carried relation must match current text, person, conversation and request
 binding. A stale/foreign/malformed relation becomes scoped uncertainty.
 
-Process restart invalidates process-private evidence/actor handles, so startup
-terminalizes all remaining ACTIVE graphs before serving traffic. Bounded expiry
-does the same for due graphs. Interrupted same-process records may be
-deterministically retired; committed results are never exposed as pending or
-cancelled twice. Schema44 feature fixtures migrate through an authenticated
-44→45 topology with an explicit `UNBOUND_SCHEMA44` sentinel; the sentinel is
-always uncertain and never fabricates replay authority.
+Process restart invalidates process-private evidence/actor handles. In an
+accepted promoted `assist|canary` composition, startup keeps the durable owner,
+reconstructs the exact personal principal and current source, replans through
+the same closed policy, atomically rebinds the graph to the new process and
+continues without re-ingestion or legacy replay. A lost rebind acknowledgement
+is reconciled from durable state and cannot duplicate publication. If the
+surface, source, authority or optional runtime cannot be freshly proved, the
+ACTIVE graph is retained as owner and overlapping legacy work stays blocked.
+In `off|shadow`, or when promoted composition itself fails, startup uses the
+existing authorized terminalization path before serving traffic. Bounded
+expiry still retires due graphs. Schema44 feature fixtures migrate through an
+authenticated 44→45 topology with an explicit `UNBOUND_SCHEMA44` sentinel; the
+sentinel is always uncertain and never fabricates replay authority.
 
 Terminal, cancelled, expired, restart and successful publications carry typed,
 body-free receipts and exactly one assistant publication. Mixed-authority
@@ -198,25 +204,67 @@ real evidence, exercise every activation/recovery boundary and retain rollback.
 
 ## P5: effect planning without effect authority
 
-`supervisor_effect_intent.py` and
-`supervisor_effect_intent_transport.py` are deliberately dormant. They accept
-only symbolic Obsidian note `create|append` plus manifest/proposal identities.
-Model output cannot carry arguments, paths, risk, permission, confirmation,
-idempotency key, tool/effect handle or publication handle. A process-sealed
-code binding and fresh gate return only a non-authorizing advisory.
+P5 is an independent `off|shadow` contour using the lowest-priority
+`effect_planning` scheduler lane and policy
+`gptoss20b-semantic-supervisor-effect-shadow-v1`. It is not enabled by P1
+`plan_candidate`, shadow, assist or canary settings.
 
-No production module imports or consumes this advisory. Host application,
-installation, network, shell, delete and unknown symbols are rejected. P5 does
-not change an effect owner and is not a hidden activation surface.
+Activation requires a private exact-hash maturity artifact built from the
+accepted production baseline, final CANARY promotion bundle and CANARY latency
+budget for the same source revision. Its read-registry binding must remain the
+current binding embedded in the accepted CANARY evidence, while a separate
+effect-registry binding must match the code-owned Obsidian `create|append`
+identity and, at boot, the actually enabled and registered settings,
+AuthorizationService, ExecutionKernel and ObsidianRuntime contour. The expected
+effect identity is available before activation through the body-free
+`effect-registry-binding` producer command. The loader revalidates both
+identities plus the complete/joined window, latency, fallback, publication owner
+and zero hidden-owner/duplicate/regression invariants, then issues only a
+process-sealed read-only witness. Missing, malformed, stale or incomplete
+evidence leaves the wrapper uninstalled and never blocks Friday startup.
+
+When admitted, the non-owning wrapper calls primary exactly once and returns
+its exact result. Only after the primary has durably published an accepted
+effect-outcome receipt may one bounded background request classify the original
+private request as `none` or symbolic Obsidian note `create|append`. The model
+cannot carry arguments, paths, risk, permission, confirmation, idempotency key,
+tool/effect handle or publication handle. The answer is compared with the
+already completed code-owned outcome, recorded as a body-free keyed observation
+and discarded. It cannot execute, compensate, replay or publish anything.
+Process-lifetime dedupe atomically binds both the accepted effect identity and
+the exact outcome digest before model dispatch. Its fixed non-rotating Bloom
+has no eviction path; a false positive can only skip this optional observer.
+
+Canonical effect ENV adds exactly three keys: evidence file, its raw SHA-256 and
+mode. Immutable transitions are
+`semantic_supervisor_effect_shadow_enable|disable`; they preserve the primary,
+secondary and P1–P4 ENV bytes, validate the maturity artifact before service
+mutation, and bind health to the configured artifact, maturity facts, installed
+source, CANARY read-registry identity and separate live Obsidian effect-registry
+identity. Host application, installation, network, shell, delete and unknown
+symbols remain outside this contour.
 
 ## P6: heuristic retirement remains closed
 
-`supervisor_retirement_gate.py` is pure release-time evaluation. It can admit
-only a reviewer-visible candidate for this exact journey after production
-shadow, canary, promotion, fallback, joined traces, rollback, documentation and
-registry evidence all pass. Deterministic, authority, lifecycle and publication
-guards are structurally ineligible. The gate cannot edit code/config or delete
-a branch, and this package removes no legacy heuristic.
+`supervisor_retirement_repository.py` binds the reviewed inventory to exact Git
+commit/tree/blob/AST identities. The current four surfaces contain two
+deterministic invariants and two mixed legacy branches, so the only honest
+assessment is `NO_ELIGIBLE_CANDIDATE`; all four remain protected.
+
+Repository inspection bounds Git stdout/stderr while it is being read, checks
+each blob size before loading its body and preflights the complete Python-tree
+file/byte budget. Rename/move/copy detection then parses one source module at a
+time without retaining the tree-wide AST. The accepted scan receipt contains
+only aggregate counts and digests; no source path or body is published.
+
+`supervisor_retirement_gate.py` accepts only source-bound evidence and a source
+preimage rollback witness. Those artifact classes deliberately cannot satisfy
+the production-joined and sealed-release-rehearsal authority checks, so current
+source review never grants deletion. A future code-reviewed semantic candidate
+would still require accepted production shadow/canary/promotion/fallback,
+complete joined traces, exercised rollback, documentation and registry updates
+through a separate trusted release boundary. The gate cannot edit code/config
+or delete a branch, and this package removes no legacy heuristic.
 
 ## Source verification and release state
 
@@ -229,7 +277,7 @@ Dedicated source gates cover:
 - one-review/one-recovery bounds and primary-only publication;
 - request replay/new/cancel/uncertain API boundaries;
 - promotion evidence, latency budget and immutable transition recovery;
-- dormant P5 and pure P6 non-authority contracts;
+- maturity-gated P5 post-commit comparison and P6 closed-inventory non-authority contracts;
 - authenticated schema migration fixtures through schema 45.
 
 The source is ready for release integration and representative live testing

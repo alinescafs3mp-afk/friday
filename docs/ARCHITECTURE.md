@@ -132,15 +132,28 @@ deterministic lanes remain ahead of semantic sampling. WorkGraph admission is
 bound to the claimed request, actor, conversation, current Raw source/content,
 registry and fixed adapters. A different overlapping request remains an
 ordinary primary turn; root replay, explicit cancel and uncertainty suppress
-ingestion until their exact durable relation is rechecked. Startup and expiry
-terminalize evidence that cannot safely survive process-private handles.
+ingestion until their exact durable relation is rechecked. In a freshly
+accepted promoted runtime, startup reconstructs the personal principal and
+source, replans and CAS-rebinds the existing ACTIVE graph before continuing it;
+it never re-ingests or falls through to legacy. Unavailable or stale recovery
+material leaves the durable owner retained. Off/shadow or failed promoted
+composition uses the authorized terminal path, and expiry remains bounded.
 
 The laptop remains an optional inference endpoint: it owns neither backend nor
 storage, capability registry, effects or final publication. Missing/stale
 runtime, malformed output, policy drift or absent production evidence closes
-the supervisor without alternate-runtime replay. P5 symbolic effect intent has
-no runtime consumer or authority; P6 is a pure evidence gate and performs no
-heuristic deletion.
+the supervisor without alternate-runtime replay.
+
+P5 is a separate default-off, maturity-gated post-commit observer. After the
+primary has durably completed an accepted Obsidian create/append outcome, its
+independent `effect_planning` lane may choose only `none|create|append`; the
+choice is compared with the completed outcome and discarded. It receives no
+argument, path, handle, authority or publication surface and cannot execute or
+replay the effect. P6 binds a code-reviewed retirement inventory to exact Git
+and AST identities; the current inventory contains no eligible semantic-only
+heuristic, so it authorizes no deletion. Its repository reader bounds Git
+output during capture, preflights blob/tree byte budgets and scans normalized
+AST one module at a time; only an aggregate body-free scan receipt survives.
 
 ### Файл
 

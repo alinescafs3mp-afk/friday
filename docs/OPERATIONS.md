@@ -273,7 +273,8 @@ authority. Текущий source содержит P1 shadow и один P2–P4 
 конфигурация остаётся `off`; production assist/canary нельзя считать принятым
 без нового live production-joined evidence.
 
-Полный закрытый ENV-контур состоит из 13 ключей:
+Закрытый P1–P4 ENV-блок состоит из 13 ключей; независимые три P5-ключа
+перечислены ниже:
 
 ```dotenv
 FRIDAY_SEMANTIC_SUPERVISOR_MAX_REVIEW_ROUNDS=1
@@ -372,9 +373,15 @@ ACTIVE overlap классифицируется до ingestion как `ROOT_REPL
 `EXPLICIT_CANCEL` или `UNCERTAIN`. Только `NEW_TURN` разрешает ordinary
 ingestion/primary; replay, cancel и uncertainty остаются side-effect free до
 fresh exact graph check. Cancellation связывается с новым request-effect fence.
-Startup детерминированно terminalizes process-private ACTIVE graphs, expiry
-делает то же по bounded worker path, а schema44 migration использует explicit
-unbound sentinel и никогда не выдумывает replay identity.
+При accepted promoted composition startup восстанавливает exact personal
+principal/current source, заново строит closed plan и CAS-rebind-ит прежний
+ACTIVE graph к новому процессу; повторной ingestion, legacy fallback и второй
+publication нет. Lost rebind acknowledgement сверяется с durable state.
+Недоступный или stale recovery surface оставляет graph владельцем и блокирует
+overlap. В `off|shadow` либо при failed promoted composition используется
+authorized terminalization до начала traffic. Expiry остаётся bounded worker
+path, а schema44 migration использует explicit unbound sentinel и никогда не
+выдумывает replay identity.
 
 Проверяйте body-free `/api/health.secondary.semantic_supervisor`, top-level
 `/api/health.semantic_supervisor` и owner diagnostics. Для promoted mode
@@ -383,12 +390,57 @@ promotion admission, policy/profile/source/registry/evidence identities,
 durable graph counts и закрытые authority flags. Проекции не содержат body,
 prompt, query, path, actor/conversation ID или endpoint error text.
 
-P5 остаётся source-only dormant: `SupervisorEffectIntentV1` может описать
-только symbolic Obsidian create/append, не принимает arguments/handles и не
-имеет runtime consumer или effect authority. P6 — pure evidence gate для
-reviewer-visible retirement candidate; он ничего не удаляет. До accepted
-production shadow+canary+rollback evidence legacy heuristics и deterministic
-guards не меняются.
+P5 имеет отдельный default-off контур и не включается режимами P1–P4:
+
+```dotenv
+FRIDAY_SEMANTIC_SUPERVISOR_EFFECT_EVIDENCE_FILE=
+FRIDAY_SEMANTIC_SUPERVISOR_EFFECT_EVIDENCE_SHA256=
+FRIDAY_SEMANTIC_SUPERVISOR_EFFECT_MODE=off
+```
+
+`shadow` допускается только при `FRIDAY_SECONDARY_LLM_ALLOW_PRIVATE_TEXT=1`,
+accepted profile/policy, exact private mode-0400|0600 maturity artifact и совпадении
+его source revision + прежнего read-registry binding с установленным релизом,
+а также отдельного effect-registry binding с реально enabled и зарегистрированным
+Obsidian `create|append` контуром.
+Artifact строится подкомандой
+`tools/build_semantic_supervisor_promotion_evidence.py effect-maturity` из exact
+production baseline, финального CANARY promotion bundle и CANARY latency
+budget. Producer ничего не активирует и не перезаписывает существующий файл.
+До сборки `effect-maturity` тот же tool с подкомандой
+`effect-registry-binding` выдаёт body-free code-owned expected SHA; его передают
+как `--effect-registry-binding-sha256`. Backend независимо принимает этот SHA
+только после проверки фактических settings, AuthorizationService, ExecutionKernel,
+ObsidianRuntime и обоих зарегистрированных write tools.
+
+Rollout выполняется только immutable transitions
+`semantic_supervisor_effect_shadow_enable` и
+`semantic_supervisor_effect_shadow_disable`. Enable обязан проверить полный
+artifact до остановки сервиса; unrelated, primary, secondary и P1–P4 ENV bytes
+не меняются. Health gate связывает active runtime с configured evidence SHA,
+maturity facts, installed source revision, read registry binding и отдельным
+live effect registry binding. При rollback к
+legacy predecessor оператор использует его прежний health contract, а не ждёт
+несуществующую P5-проекцию.
+
+После durable accepted Obsidian outcome wrapper возвращает exact primary result
+и может только сравнить уже совершённый `create|append` с symbolic ответом
+`none|create|append` независимой lowest-priority lane. В persisted observation
+нет request text, raw digest, path, IDs или model body; выполнение, replay,
+compensation и publication всегда запрещены. Laptop-off, evidence/runtime
+ошибка или saturation только пропускают observation и не являются boot gate.
+Один accepted effect/outcome dispatch-ится не более раза за process lifetime:
+dedupe атомарно связывает оба digest до model call, а fixed non-rotating Bloom
+может дать только безопасный пропуск optional observation.
+
+P6 current inventory возвращает `NO_ELIGIBLE_CANDIDATE`: две поверхности —
+deterministic invariants, ещё две — mixed legacy. Source-only evidence и
+preimage rollback не могут выдать production deletion authority; никакой код
+или config не удаляется. До появления отдельно reviewed semantic-only candidate
+и trusted production+rollback evidence все четыре поверхности сохраняются.
+Repository scan читает Git output с жёстким лимитом, проверяет blob size до
+body load и последовательно освобождает AST каждого модуля; наружу выходит
+только bounded aggregate receipt без путей и source bodies.
 
 ## 2. Что проверяет doctor
 

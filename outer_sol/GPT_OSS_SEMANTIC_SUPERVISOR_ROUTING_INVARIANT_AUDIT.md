@@ -43,6 +43,24 @@ Every other row is an invariant and remains code-owned.
 | Supervisor trace join | `supervisor_trace_join.py` | observability | A late shadow result joins the already committed ICP trace through a bounded operational event; assistant metadata is never rewritten. |
 | Legacy compatibility branches | `AgentRuntime`, `OrchestrationRouter` | mixed | Remain available until an exact replacement journey has accepted shadow/canary/production evidence and rollback. |
 
+## P6 code-reviewed retirement inventory
+
+The exact inventory is deliberately smaller than the broad audit above. It is
+bound to an exact Git commit/tree/blob, code-owned registry identity and
+normalized AST identity before any candidate can be discussed.
+
+| Candidate ID | Exact symbol | Class | Current disposition |
+|---|---|---|---|
+| `current_file_web.request_preflight` | `friday/orchestration/current_file_web_comparison.py::current_file_web_request_is_admitted` | deterministic invariant | protected |
+| `legacy.absolute_reminder_outward_intent_guard` | `friday/agent_runtime/__init__.py::_requires_outward_intent_arbiter` | deterministic invariant | protected |
+| `legacy.attachment_web_query_arbiter` | `friday/agent_runtime/__init__.py::AgentRuntime._attachment_web_query_by_arbiter` | legacy mixed | protected |
+| `legacy.shared_web_query_arbiter` | `friday/agent_runtime/__init__.py::AgentRuntime._web_query_by_arbiter` | legacy mixed | protected |
+
+There is no `semantic_heuristic` row, so the current assessment is exactly
+`NO_ELIGIBLE_CANDIDATE`. Renaming, moving or copying an old normalized AST does
+not constitute retirement. Source review and a source preimage carry no
+production or deletion authority; the four rows stay installed.
+
 ## Failure classification
 
 The following symptoms are semantic failures and may be improved by GPT-OSS:

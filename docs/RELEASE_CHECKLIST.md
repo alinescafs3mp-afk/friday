@@ -364,6 +364,72 @@ failed/error/skipped-тест в любой фазе делает гейт кр�
   граница и новое representative live evidence, прежде чем proposal сможет
   влиять на web work selection.
 
+Для P5 semantic-supervisor effect shadow дополнительно:
+
+- canonical config содержит contiguous lexical block из
+  `EFFECT_EVIDENCE_FILE=`, `EFFECT_EVIDENCE_SHA256=` и `EFFECT_MODE=off`;
+  unknown/partial/duplicate block закрывается, а invalid raw mode не
+  отображается как валидный `off`;
+- `effect_planning` — самостоятельная lowest-priority scheduler lane с exact
+  policy/profile и 128 output tokens; она не заимствует admission у
+  `plan_candidate`, требует `ALLOW_PRIVATE_TEXT=1`, имеет отдельные counters и
+  корректно диагностируется даже без обычных secondary workloads;
+- maturity artifact создаётся только pure producer-ом `effect-maturity` из
+  exact accepted production baseline, CANARY promotion bundle и CANARY latency
+  budget. Loader повторно требует complete==observed, full trace join,
+  `none:none` для каждого promoted outcome, один promotion evidence, latency в
+  budget, proven primary/laptop fallback, primary publication owner и нули по
+  hidden owner, duplicate и regression counters;
+- evidence — owner-private canonical regular file mode `0400|0600`, no-link,
+  no-overwrite, с exact raw SHA-256, installed source revision, current
+  read-registry binding зрелого CANARY evidence и отдельным current
+  effect-registry binding. Последний заранее выводится body-free командой
+  `effect-registry-binding`, а при boot независимо сверяется с enabled Obsidian,
+  exact AuthorizationService/ExecutionKernel и зарегистрированными
+  `obsidian_create_note|obsidian_append_note`. Любой drift, malformed JSON или stale
+  process-witness оставляет effect wrapper uninstalled;
+- wrapper устанавливается только после закрытия first-party Obsidian organ
+  capability/tool contour и его risk declarations (поздние workspace MCP tools
+  намеренно не входят в effect-registry identity),
+  вызывает primary ровно один раз и возвращает тот же объект. Model request
+  возможен только после reread exact user-scoped durable assistant row и
+  accepted effect receipt; pre-dispatch и post-response admission проверяются
+  повторно;
+- model-visible grammar допускает только `none:none`, Obsidian `create` и
+  Obsidian `append`; arguments, note body/path, IDs, permissions,
+  confirmations, idempotency/effect/tool/publication handles, host application,
+  install, network, shell, delete и unknown symbols отклоняются;
+- persisted observation содержит только keyed/domain-separated identities и
+  closed symbols/counters. Raw projection/selection digests, prompt, response,
+  path, actor/conversation/message IDs и primary body отсутствуют;
+  process-lifetime dedupe не допускает повторный dispatch того же accepted
+  effect/outcome из другого message scope либо изменённого outcome того же effect:
+  atomically проверяются оба accepted `effect_id_sha256` и `outcome_sha256`.
+  Non-rotating 512 KiB Bloom не вытесняет старые identities; false positive
+  может только пропустить optional observation;
+- top-level `semantic_supervisor_effect` exact health связывает active shadow с
+  configured evidence SHA, maturity facts SHA, installed source revision,
+  read registry binding, effect registry binding и exact policy;
+  execution/publication всегда false. Off,
+  loader/binding/composition exception и laptop-off не являются boot gate;
+- immutable `semantic_supervisor_effect_shadow_enable|disable` меняет только
+  exact effect block и сохраняет unrelated, primary, secondary и P1–P4 bytes.
+  Enable валидирует полный maturity artifact до service stop; rollback/recovery
+  к legacy predecessor проверяет прежний capability-aware health contract и не
+  ждёт отсутствующее P5 поле;
+- ASSIST/CANARY activation и representative-window consumers принимают только
+  exact independent `effect_shadow` scheduler projection; добавление поля не
+  ломает существующий promoted rollout, неизвестные nested keys/state закрывают
+  его;
+- P6 release review обязан сначала получить current
+  `NO_ELIGIBLE_CANDIDATE`. Source-only evidence/preimage witness никогда не
+  выдаёт deletion authority; invariant/mixed surfaces, rename/move/copy
+  прежнего normalized AST и registry/commit drift должны отклоняться. Exact Git
+  capture ограничивается во время чтения, blob size проверяется до body load,
+  а полный `friday/**/*.py` scan обязан уложиться в 1 024 файла, 32 MiB и
+  4 194 304 AST nodes, парся по одному модулю без tree-wide AST cache; его
+  receipt остаётся aggregate-only и body-free.
+
 Для V12 file/archive slice дополнительно:
 
 - без явных переменных configured/installed mode остаются `legacy`, routes пусты;
