@@ -23,7 +23,7 @@ from typing import Any
 
 from friday.private_fs import ensure_private_directory, open_private_text_write
 
-from . import decompiler
+from . import compiler, decompiler
 
 BWRAP = Path("/usr/bin/bwrap")
 PYTHON = Path("/usr/bin/python3")
@@ -43,10 +43,14 @@ DECOMPILE_MAX_WALL_SECONDS = 240.0
 DECOMPILE_MAX_CPU_SECONDS = 960
 DECOMPILE_MAX_ADDRESS_SPACE_BYTES = 8 * 1024 * 1024 * 1024
 DECOMPILE_MAX_FILE_BYTES = 128 * 1024 * 1024
+COMPILE_MAX_WALL_SECONDS = 60.0
+COMPILE_MAX_CPU_SECONDS = 45
+COMPILE_MAX_ADDRESS_SPACE_BYTES = 2 * 1024 * 1024 * 1024
+COMPILE_MAX_FILE_BYTES = compiler.MAX_JAR_BYTES
 MAX_ADMITTED_CGROUP_PIDS = 65_536
 _SMOKE_SUCCESS_KEY: tuple[object, ...] | None = None
 _SMOKE_SUCCESS_RESULT: dict[str, Any] | None = None
-_DECOMPILER_LOCK = threading.Lock()
+_HEAVY_ARTIFACT_LOCK = threading.Lock()
 
 
 class EngineerSandboxError(ValueError):
@@ -216,7 +220,12 @@ def _remaining_timeout(deadline: float | None, maximum: float = MAX_WALL_SECONDS
     return min(maximum, remaining)
 
 
-def _sandbox_argv(workspace: Path, *, mount_decompiler: bool = False) -> list[str]:
+def _sandbox_argv(
+    workspace: Path,
+    *,
+    mount_decompiler: bool = False,
+    mount_jdk: bool = False,
+) -> list[str]:
     package_root = Path(__file__).resolve().parents[2]
     if package_root.name != "friday" or not package_root.is_dir() or package_root.is_symlink():
         raise EngineerSandboxError("package_root_untrusted")
@@ -257,19 +266,23 @@ def _sandbox_argv(workspace: Path, *, mount_decompiler: bool = False) -> list[st
         str(package_root),
         "/app/friday",
     ]
-    if mount_decompiler:
-        # Only the two verified, versioned owner-local trees are visible.  The
-        # rest of /home and /home/jericho/.jericho is absent from the namespace.
+    if mount_decompiler or mount_jdk:
+        # Only the required verified, versioned owner-local trees are visible.
+        # The rest of /home and /home/jericho/.jericho is absent.
+        argv.extend(["--dir", "/opt"])
+        if mount_decompiler:
+            argv.extend(
+                [
+                    "--ro-bind",
+                    str(decompiler.GHIDRA_ROOT),
+                    str(decompiler.SANDBOX_GHIDRA_ROOT),
+                ]
+            )
         argv.extend(
             [
-                "--dir",
-                "/opt",
                 "--ro-bind",
-                str(decompiler.GHIDRA_ROOT),
-                str(decompiler.SANDBOX_GHIDRA_ROOT),
-                "--ro-bind",
-                str(decompiler.JDK_ROOT),
-                str(decompiler.SANDBOX_JDK_ROOT),
+                str(compiler.JDK_ROOT),
+                str(compiler.SANDBOX_JDK_ROOT),
             ]
         )
     argv.extend(
@@ -318,6 +331,7 @@ def _limited_sandbox_argv(
     *,
     action: str = "analyze",
     mount_decompiler: bool = False,
+    mount_jdk: bool = False,
 ) -> list[str]:
     """Apply non-PID limits in a trusted executable, never a Python fork hook."""
 
@@ -326,6 +340,11 @@ def _limited_sandbox_argv(
         file_bytes = DECOMPILE_MAX_FILE_BYTES
         address_space_bytes = DECOMPILE_MAX_ADDRESS_SPACE_BYTES
         nofile = 512
+    elif action == "compile_java":
+        cpu_seconds = COMPILE_MAX_CPU_SECONDS
+        file_bytes = COMPILE_MAX_FILE_BYTES
+        address_space_bytes = COMPILE_MAX_ADDRESS_SPACE_BYTES
+        nofile = 128
     else:
         cpu_seconds = MAX_CPU_SECONDS
         file_bytes = MAX_OUTPUT_BYTES
@@ -339,7 +358,11 @@ def _limited_sandbox_argv(
         f"--as={address_space_bytes}:{address_space_bytes}",
         f"--nofile={nofile}:{nofile}",
         "--",
-        *_sandbox_argv(workspace, mount_decompiler=mount_decompiler),
+        *_sandbox_argv(
+            workspace,
+            mount_decompiler=mount_decompiler,
+            mount_jdk=mount_jdk,
+        ),
     ]
 
 
@@ -352,7 +375,13 @@ def _run_worker(
     deadline: float | None = None,
     workspace_root: Path | None = None,
 ) -> tuple[dict[str, Any], bytes | None]:
-    maximum = DECOMPILE_MAX_WALL_SECONDS if action == "decompile" else MAX_WALL_SECONDS
+    maximum = (
+        DECOMPILE_MAX_WALL_SECONDS
+        if action == "decompile"
+        else COMPILE_MAX_WALL_SECONDS
+        if action == "compile_java"
+        else MAX_WALL_SECONDS
+    )
     # A queued ``run_blocking`` call retains its original deadline. Refuse it
     # before any expensive admission work so a drained queue cannot resurrect
     # a request whose enclosing turn has already ended.
@@ -360,9 +389,10 @@ def _run_worker(
     admission = preflight()
     if not admission.get("ok"):
         raise EngineerSandboxError(str(admission.get("reason") or "sandbox_unavailable"))
-    if action not in {"analyze", "decompile", "patch", "preflight"}:
+    if action not in {"analyze", "compile_java", "decompile", "patch", "preflight"}:
         raise EngineerSandboxError("unknown_action")
-    if not isinstance(data, bytes) or not data or len(data) > MAX_INPUT_BYTES:
+    input_cap = compiler.MAX_SOURCE_BYTES if action == "compile_java" else MAX_INPUT_BYTES
+    if not isinstance(data, bytes) or not data or len(data) > input_cap:
         raise EngineerSandboxError("input_size_invalid")
     request = {
         "protocol": PROTOCOL_VERSION,
@@ -371,6 +401,7 @@ def _run_worker(
         "operations": [dict(item) for item in (operations or ())],
     }
     mount_decompiler = False
+    mount_jdk = False
     if action == "decompile":
         toolchain = decompiler.host_toolchain_preflight()
         mount_decompiler = toolchain.get("ok") is True
@@ -386,6 +417,20 @@ def _run_worker(
                 "reason": str(toolchain.get("reason") or "toolchain_untrusted")[:80],
             }
         )
+    elif action == "compile_java":
+        source_error = compiler.validate_source_payload(data, filename)
+        if source_error is not None:
+            raise EngineerSandboxError(source_error)
+        toolchain = compiler.host_toolchain_preflight()
+        if toolchain.get("ok") is not True:
+            reason = str(toolchain.get("reason") or "toolchain_untrusted")[:80]
+            raise EngineerSandboxError(reason)
+        mount_jdk = True
+        request["compiler_toolchain"] = {
+            "ok": True,
+            "tool_version": compiler.JDK_VERSION,
+            "jdk_version": compiler.JDK_VERSION,
+        }
     if action == "preflight":
         try:
             request["parent_netns"] = os.readlink("/proc/self/ns/net")
@@ -424,6 +469,7 @@ def _run_worker(
                         workspace,
                         action=action,
                         mount_decompiler=mount_decompiler,
+                        mount_jdk=mount_jdk,
                     ),
                     stdin=subprocess.DEVNULL,
                     stdout=subprocess.DEVNULL,
@@ -466,9 +512,10 @@ def _run_worker(
             raise EngineerSandboxError("worker_protocol_mismatch", work_started=True)
         parsed["sandbox"] = admission
         output = None
-        if action == "patch" and parsed.get("ok") is True:
+        if action in {"compile_java", "patch"} and parsed.get("ok") is True:
+            output_cap = compiler.MAX_JAR_BYTES if action == "compile_java" else MAX_OUTPUT_BYTES
             try:
-                output = _read_bounded_regular(output_path, MAX_OUTPUT_BYTES)
+                output = _read_bounded_regular(output_path, output_cap)
             except EngineerSandboxError as exc:
                 raise EngineerSandboxError(exc.code, work_started=True) from exc
             if not output:
@@ -502,7 +549,7 @@ def decompile_artifact(
 ) -> dict[str, Any]:
     """Return a bounded Ghidra function index for one PE or ELF artifact."""
 
-    if not _DECOMPILER_LOCK.acquire(blocking=False):
+    if not _HEAVY_ARTIFACT_LOCK.acquire(blocking=False):
         raise EngineerSandboxError("decompiler_busy")
     try:
         result, _output = _run_worker(
@@ -514,7 +561,37 @@ def decompile_artifact(
         )
         return result
     finally:
-        _DECOMPILER_LOCK.release()
+        _HEAVY_ARTIFACT_LOCK.release()
+
+
+def compile_java_artifact(
+    data: bytes,
+    filename: str,
+    *,
+    deadline: float | None = None,
+    workspace_root: Path | None = None,
+) -> tuple[bytes, dict[str, Any]]:
+    """Compile one exact owned Java source without executing the result."""
+
+    source_error = compiler.validate_source_payload(data, filename)
+    if source_error is not None:
+        raise EngineerSandboxError(source_error)
+    if not _HEAVY_ARTIFACT_LOCK.acquire(blocking=False):
+        raise EngineerSandboxError("compiler_busy")
+    try:
+        result, output = _run_worker(
+            "compile_java",
+            data,
+            filename,
+            deadline=deadline,
+            workspace_root=workspace_root,
+        )
+    finally:
+        _HEAVY_ARTIFACT_LOCK.release()
+    if result.get("ok") is not True or output is None:
+        error = str(result.get("error") or "compiler_failed")
+        raise EngineerSandboxError(error, work_started=compiler.compiler_work_started(error))
+    return output, result
 
 
 def patch_artifact(
@@ -623,6 +700,7 @@ def smoke_preflight(
 __all__ = [
     "EngineerSandboxError",
     "analyze_artifact",
+    "compile_java_artifact",
     "decompile_artifact",
     "patch_artifact",
     "preflight",

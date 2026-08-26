@@ -1,0 +1,376 @@
+"""Focused functional and security contracts for bounded Java compilation."""
+
+from __future__ import annotations
+
+import hashlib
+import io
+import json
+import pathlib
+import subprocess
+import threading
+import zipfile
+from concurrent.futures import ThreadPoolExecutor
+from typing import Any
+
+import pytest
+
+from friday.organs.engineer import compiler, decompiler, sandbox, worker
+
+
+def _sha256(payload: bytes) -> str:
+    return hashlib.sha256(payload).hexdigest()
+
+
+def _class_bytes(body: bytes = b"bounded") -> bytes:
+    return b"\xca\xfe\xba\xbe\x00\x00\x00\x41" + body
+
+
+def _fake_jdk(tmp_path: pathlib.Path, monkeypatch) -> pathlib.Path:
+    jdk = tmp_path / "jdk-21.0.12.1+1"
+    javac = jdk / "bin/javac"
+    javac.parent.mkdir(parents=True)
+    javac.write_bytes(b"pinned-temurin-javac")
+    jdk.chmod(0o700)
+    javac.parent.chmod(0o700)
+    javac.chmod(0o700)
+    monkeypatch.setattr(compiler, "_JDK_FILES", {"bin/javac": _sha256(javac.read_bytes())})
+    monkeypatch.setattr(decompiler, "_safe_ancestors", lambda _path: True)
+    monkeypatch.setattr(
+        compiler,
+        "JDK_TREE_SHA256",
+        compiler._tree_identity(jdk, maximum_bytes=compiler.MAX_JDK_TREE_BYTES),  # noqa: SLF001
+    )
+    return jdk
+
+
+def test_compiler_profile_and_owner_local_jdk_are_exact() -> None:
+    assert compiler.PROFILE == "java21_single_source_library_jar_v1"
+    assert compiler.SCHEMA == "friday.engineer.compile.v1"
+    assert compiler.JDK_VERSION == "21.0.12.1+1"
+    assert pathlib.Path("/home/jericho/.jericho/tools/jdk-21.0.12.1+1") == compiler.JDK_ROOT
+    assert compiler.JDK_TREE_SHA256 == decompiler.JDK_TREE_SHA256
+    assert compiler.JAVAC_SHA256 == (
+        "55859b80e7a9c4c4736be19ad3addeb35112ca6d17a30c4e0e116afc0a499bdb"
+    )
+    assert compiler.MAX_SOURCE_BYTES == 1024 * 1024
+    assert compiler.MAX_CLASS_FILES == 256
+    assert compiler.MAX_CLASS_BYTES == 8 * 1024 * 1024
+    assert compiler.MAX_JAR_BYTES == 16 * 1024 * 1024
+
+
+def test_compiler_jdk_identity_requires_exact_tree_file_and_safe_permissions(
+    tmp_path: pathlib.Path,
+    monkeypatch,
+) -> None:
+    jdk = _fake_jdk(tmp_path, monkeypatch)
+
+    assert compiler.verify_toolchain(jdk) == {
+        "ok": True,
+        "identity": "pinned_full_tree",
+        "tool_name": "temurin-javac",
+        "tool_version": "21.0.12.1+1",
+        "jdk_version": "21.0.12.1+1",
+    }
+
+    (jdk / "bin/javac").write_bytes(b"changed")
+    assert compiler.verify_toolchain(jdk) == {"ok": False, "reason": "toolchain_untrusted"}
+
+
+def test_compiler_jdk_identity_rejects_symlink_escape(tmp_path: pathlib.Path, monkeypatch) -> None:
+    jdk = _fake_jdk(tmp_path, monkeypatch)
+    outside = tmp_path / "outside"
+    outside.write_text("outside", encoding="ascii")
+    (jdk / "escape").symlink_to(outside)
+
+    assert compiler.verify_toolchain(jdk) == {"ok": False, "reason": "toolchain_untrusted"}
+
+
+def test_javac_argv_is_fixed_and_disables_processors_and_implicit_sources() -> None:
+    argv = compiler._javac_argv(  # noqa: SLF001
+        pathlib.Path("/work/java-src/Main.java"),
+        pathlib.Path("/work/java-classes"),
+        pathlib.Path("/work/java-empty"),
+    )
+
+    assert argv[0] == "/opt/friday-jdk/bin/javac"
+    assert argv[-1] == "/work/java-src/Main.java"
+    assert argv[argv.index("--release") + 1] == "21"
+    assert "-proc:none" in argv
+    assert "-implicit:none" in argv
+    assert "-g:none" in argv
+    assert "-classpath" in argv
+    assert "-sourcepath" in argv
+    assert not any(value in {"sh", "bash", "-c", "java", "jar"} for value in argv)
+
+
+@pytest.mark.parametrize(
+    ("filename", "payload", "error"),
+    (
+        ("../Main.java", b"class Main {}", "invalid_filename"),
+        ("Main.txt", b"class Main {}", "invalid_filename"),
+        ("Main.java", b"", "input_size_invalid"),
+        ("Main.java", b"\xff", "input_encoding_invalid"),
+        ("Main.java", b"class Main {\x00}", "input_encoding_invalid"),
+    ),
+)
+def test_invalid_source_never_enters_toolchain_or_javac(
+    monkeypatch,
+    tmp_path: pathlib.Path,
+    filename: str,
+    payload: bytes,
+    error: str,
+) -> None:
+    source = tmp_path / "input.bin"
+    source.write_bytes(payload)
+    monkeypatch.setattr(
+        compiler,
+        "sandbox_toolchain_preflight",
+        lambda: pytest.fail("invalid source reached mounted toolchain preflight"),
+    )
+    monkeypatch.setattr(
+        compiler.subprocess,
+        "Popen",
+        lambda *_args, **_kwargs: pytest.fail("invalid source launched javac"),
+    )
+
+    output, report = compiler.compile_artifact(source, filename, {"ok": True})
+
+    assert output is None
+    assert report["ok"] is False
+    assert report["error"] == error
+    assert report["sample_executed"] is False
+    assert report["network"] == "none"
+
+
+def test_compile_emits_reproducible_stored_jar_and_bounded_receipt(
+    monkeypatch,
+    tmp_path: pathlib.Path,
+) -> None:
+    source = tmp_path / "input.bin"
+    source.write_text("public class Main {}\n", encoding="utf-8")
+    captured: dict[str, Any] = {}
+
+    class CompletedJavac:
+        pid = 4242
+        returncode: int | None = None
+
+        def __init__(self, argv, **kwargs) -> None:  # noqa: ANN001
+            captured["argv"] = argv
+            captured["kwargs"] = kwargs
+            classes = pathlib.Path(argv[argv.index("-d") + 1])
+            (classes / "nested").mkdir(parents=True)
+            (classes / "nested/Helper.class").write_bytes(_class_bytes(b"helper"))
+            (classes / "Main.class").write_bytes(_class_bytes(b"main"))
+
+        def wait(self, timeout=None) -> int:  # noqa: ANN001
+            captured["timeout"] = timeout
+            self.returncode = 0
+            return 0
+
+        def poll(self) -> int | None:
+            return self.returncode
+
+    monkeypatch.setattr(compiler, "sandbox_toolchain_preflight", lambda: {"ok": True})
+    monkeypatch.setattr(compiler.subprocess, "Popen", CompletedJavac)
+
+    first, first_report = compiler.compile_artifact(source, "Main.java", {"ok": True})
+    second, second_report = compiler.compile_artifact(source, "Main.java", {"ok": True})
+
+    assert first is not None and first == second
+    assert first_report == second_report
+    assert first_report == {
+        "ok": True,
+        "status": "completed",
+        "schema": compiler.SCHEMA,
+        "profile": compiler.PROFILE,
+        "tool_name": "temurin-javac",
+        "tool_version": "21.0.12.1+1",
+        "jdk_version": "21.0.12.1+1",
+        "source_sha256": _sha256(source.read_bytes()),
+        "jar_sha256": _sha256(first),
+        "source_size_bytes": len(source.read_bytes()),
+        "class_files": 2,
+        "class_bytes": len(_class_bytes(b"helper")) + len(_class_bytes(b"main")),
+        "jar_size_bytes": len(first),
+        "java_release": 21,
+        "class_major_version": 65,
+        "archive": "jar",
+        "compression": "stored",
+        "signed": False,
+        "manifest": False,
+        "runtime_validation": "not_performed",
+        "sample_executed": False,
+        "network": "none",
+    }
+    assert captured["timeout"] == compiler.JAVAC_TIMEOUT_SECONDS
+    assert captured["kwargs"]["shell"] is False
+    assert captured["kwargs"]["stdout"] is subprocess.DEVNULL
+    assert captured["kwargs"]["stderr"] is subprocess.DEVNULL
+    assert set(captured["kwargs"]["env"]).isdisjoint({"PATH", "HOME", "HTTP_PROXY", "CLASSPATH"})
+    with zipfile.ZipFile(io.BytesIO(first)) as archive:
+        assert archive.namelist() == ["Main.class", "nested/Helper.class"]
+        assert all(info.compress_type == zipfile.ZIP_STORED for info in archive.infolist())
+        assert all(info.date_time == (1980, 1, 1, 0, 0, 0) for info in archive.infolist())
+        assert "META-INF/MANIFEST.MF" not in archive.namelist()
+
+
+def test_compile_rejects_wrong_class_version_without_leaking_content(
+    monkeypatch,
+    tmp_path: pathlib.Path,
+) -> None:
+    source = tmp_path / "secret-source"
+    source.write_text("class Main {} // SECRET", encoding="utf-8")
+
+    class WrongVersionJavac:
+        pid = 4242
+        returncode: int | None = None
+
+        def __init__(self, argv, **_kwargs) -> None:  # noqa: ANN001
+            classes = pathlib.Path(argv[argv.index("-d") + 1])
+            classes.mkdir(parents=True, exist_ok=True)
+            (classes / "SECRET.class").write_bytes(b"\xca\xfe\xba\xbe\x00\x00\x00\x3d")
+
+        def wait(self, timeout=None) -> int:  # noqa: ANN001
+            self.returncode = 0
+            return 0
+
+        def poll(self) -> int | None:
+            return self.returncode
+
+    monkeypatch.setattr(compiler, "sandbox_toolchain_preflight", lambda: {"ok": True})
+    monkeypatch.setattr(compiler.subprocess, "Popen", WrongVersionJavac)
+
+    output, report = compiler.compile_artifact(source, "Main.java", {"ok": True})
+
+    assert output is None
+    assert report["error"] == "compiler_output_invalid"
+    serialized = json.dumps(report, sort_keys=True)
+    assert "SECRET" not in serialized
+    assert str(source) not in serialized
+
+
+def test_compile_worker_reads_only_source_cap_and_writes_bounded_output(
+    monkeypatch,
+    tmp_path: pathlib.Path,
+) -> None:
+    request = tmp_path / "request.json"
+    source = tmp_path / "input.bin"
+    result = tmp_path / "result.json"
+    output = tmp_path / "output.bin"
+    request.write_text(
+        json.dumps(
+            {
+                "protocol": worker.PROTOCOL_VERSION,
+                "action": "compile_java",
+                "filename": "Main.java",
+                "compiler_toolchain": {"ok": True},
+            }
+        ),
+        encoding="utf-8",
+    )
+    source.write_text("class Main {}", encoding="utf-8")
+    jar = b"PK\x03\x04bounded"
+    report = {"ok": True, "status": "completed", "jar_size_bytes": len(jar)}
+    monkeypatch.setattr(compiler, "compile_artifact", lambda *_args: (jar, report))
+
+    assert worker.run(request, source, result, output) == 0
+    assert output.read_bytes() == jar
+    assert json.loads(result.read_text(encoding="utf-8"))["status"] == "completed"
+
+
+def test_compiler_bwrap_mounts_only_jdk_read_only_and_has_finite_limits() -> None:
+    argv = sandbox._sandbox_argv(pathlib.Path("/private/work"), mount_jdk=True)  # noqa: SLF001
+    limited = sandbox._limited_sandbox_argv(  # noqa: SLF001
+        pathlib.Path("/private/work"), action="compile_java", mount_jdk=True
+    )
+
+    assert "--unshare-all" in argv
+    assert str(decompiler.GHIDRA_ROOT) not in argv
+    assert argv[argv.index(str(compiler.JDK_ROOT)) - 1] == "--ro-bind"
+    assert argv[argv.index(str(compiler.JDK_ROOT)) + 1] == str(compiler.SANDBOX_JDK_ROOT)
+    assert "/home" not in argv
+    assert limited[:7] == [
+        "/usr/bin/prlimit",
+        "--core=0:0",
+        f"--cpu={sandbox.COMPILE_MAX_CPU_SECONDS}:{sandbox.COMPILE_MAX_CPU_SECONDS + 1}",
+        f"--fsize={sandbox.COMPILE_MAX_FILE_BYTES}:{sandbox.COMPILE_MAX_FILE_BYTES}",
+        f"--as={sandbox.COMPILE_MAX_ADDRESS_SPACE_BYTES}:{sandbox.COMPILE_MAX_ADDRESS_SPACE_BYTES}",
+        "--nofile=128:128",
+        "--",
+    ]
+    assert compiler.JAVAC_TIMEOUT_SECONDS < sandbox.COMPILE_MAX_WALL_SECONDS
+
+
+def test_decompiler_and_compiler_share_one_physical_heavy_slot(monkeypatch) -> None:
+    entered = threading.Event()
+    release = threading.Event()
+    calls: list[str] = []
+
+    def blocking_worker(action, *_args, **_kwargs):  # noqa: ANN001
+        calls.append(action)
+        entered.set()
+        assert release.wait(timeout=5)
+        if action == "compile_java":
+            return {"ok": True, "status": "completed"}, b"jar"
+        return {"ok": True, "status": "completed"}, None
+
+    monkeypatch.setattr(sandbox, "_run_worker", blocking_worker)
+    with ThreadPoolExecutor(max_workers=1) as executor:
+        first = executor.submit(sandbox.decompile_artifact, b"MZ", "sample.exe")
+        assert entered.wait(timeout=2)
+        try:
+            with pytest.raises(sandbox.EngineerSandboxError) as captured:
+                sandbox.compile_java_artifact(b"class Main {}", "Main.java")
+            assert captured.value.code == "compiler_busy"
+            assert captured.value.work_started is False
+            assert calls == ["decompile"]
+        finally:
+            release.set()
+        assert first.result(timeout=2)["ok"] is True
+
+    entered.clear()
+    release.clear()
+    with ThreadPoolExecutor(max_workers=1) as executor:
+        first_compile = executor.submit(
+            sandbox.compile_java_artifact,
+            b"class Main {}",
+            "Main.java",
+        )
+        assert entered.wait(timeout=2)
+        try:
+            with pytest.raises(sandbox.EngineerSandboxError) as captured:
+                sandbox.decompile_artifact(b"MZ", "sample.exe")
+            assert captured.value.code == "decompiler_busy"
+            assert calls == ["decompile", "compile_java"]
+        finally:
+            release.set()
+        assert first_compile.result(timeout=2) == (b"jar", {"ok": True, "status": "completed"})
+
+
+@pytest.mark.parametrize(
+    ("error", "work_started"),
+    (
+        ("toolchain_untrusted", False),
+        ("invalid_filename", False),
+        ("compiler_launch_failed", False),
+        ("compiler_failed", True),
+        ("compiler_timeout", True),
+        ("compiler_output_invalid", True),
+    ),
+)
+def test_compiler_failure_preserves_javac_entry_state(
+    monkeypatch,
+    error: str,
+    work_started: bool,
+) -> None:
+    monkeypatch.setattr(
+        sandbox,
+        "_run_worker",
+        lambda *_args, **_kwargs: ({"ok": False, "error": error}, None),
+    )
+
+    with pytest.raises(sandbox.EngineerSandboxError) as captured:
+        sandbox.compile_java_artifact(b"class Main {}", "Main.java")
+
+    assert captured.value.code == error
+    assert captured.value.work_started is work_started
