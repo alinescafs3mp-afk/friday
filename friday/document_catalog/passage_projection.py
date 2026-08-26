@@ -318,7 +318,22 @@ class DocumentPassageProjection:
         return canonical_json(self.to_private_payload())
 
     @classmethod
-    def from_private_payload(cls, value: object) -> DocumentPassageProjection:
+    def from_private_payload(
+        cls,
+        value: object,
+        *,
+        source_version: int | None = None,
+        source_content_sha256: str | None = None,
+        extracted_text: str | None = None,
+    ) -> DocumentPassageProjection:
+        """Parse one carrier, revalidating every ``current`` projection.
+
+        Natural-boundary coordinates cannot be authenticated from a body-free
+        payload alone.  A caller loading current passages must therefore supply
+        the exact authoritative source binding and extracted text; incomplete
+        rows remain evidence-free and need no body.
+        """
+
         payload = exact_object(
             value,
             frozenset(
@@ -353,7 +368,7 @@ class DocumentPassageProjection:
         if type(raw_passages) is not list or len(raw_passages) > DOCUMENT_PASSAGE_MAX_COUNT:
             raise RetrievalContractError("document passage projection passages must be an array")
         reason = payload["incomplete_reason"]
-        return cls(
+        projection = cls(
             raw_object_id=raw_object_id,
             source_version=_positive_version(payload["source_version"], optional=True),
             source_content_sha256=source_digest,
@@ -380,10 +395,44 @@ class DocumentPassageProjection:
             ),
             passages=tuple(DocumentPassageSpan.from_private_payload(item) for item in raw_passages),
         )
+        revalidation = (source_version, source_content_sha256, extracted_text)
+        if projection.status is DocumentPassageProjectionStatus.CURRENT:
+            if any(item is None for item in revalidation):
+                raise RetrievalContractError(
+                    "current document passage projection requires exact source revalidation"
+                )
+            assert source_version is not None
+            assert source_content_sha256 is not None
+            assert extracted_text is not None
+            if not projection.matches_exact_source_projection(
+                source_version=source_version,
+                source_content_sha256=source_content_sha256,
+                extracted_text=extracted_text,
+            ):
+                raise RetrievalContractError(
+                    "current document passage projection does not match its exact source"
+                )
+        elif any(item is not None for item in revalidation):
+            raise RetrievalContractError(
+                "incomplete document passage projection cannot carry source evidence"
+            )
+        return projection
 
     @classmethod
-    def parse_private(cls, value: object) -> DocumentPassageProjection:
-        parsed = cls.from_private_payload(parse_canonical_object(value, label="document passage projection"))
+    def parse_private(
+        cls,
+        value: object,
+        *,
+        source_version: int | None = None,
+        source_content_sha256: str | None = None,
+        extracted_text: str | None = None,
+    ) -> DocumentPassageProjection:
+        parsed = cls.from_private_payload(
+            parse_canonical_object(value, label="document passage projection"),
+            source_version=source_version,
+            source_content_sha256=source_content_sha256,
+            extracted_text=extracted_text,
+        )
         if parsed.to_private_json() != value:
             raise RetrievalContractError("document passage projection JSON is not canonical")
         return parsed

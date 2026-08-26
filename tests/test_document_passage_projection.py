@@ -44,7 +44,15 @@ def test_current_projection_is_exact_body_free_and_canonical() -> None:
     body = "Секретный текст договора № 9917\nВторая строка."
     projection = _projection(body)
 
-    assert DocumentPassageProjection.parse_private(projection.to_private_json()) == projection
+    assert (
+        DocumentPassageProjection.parse_private(
+            projection.to_private_json(),
+            source_version=7,
+            source_content_sha256=_SOURCE_SHA256,
+            extracted_text=body,
+        )
+        == projection
+    )
     assert projection.status is DocumentPassageProjectionStatus.CURRENT
     assert projection.incomplete_reason is None
     assert projection.extracted_text_sha256 == hashlib.sha256(body.encode()).hexdigest()
@@ -228,6 +236,47 @@ def test_passage_policy_revision_pins_the_exact_current_span_algorithm() -> None
 
     assert len(coordinates) == DOCUMENT_PASSAGE_MAX_COUNT
     assert fingerprint == "e11d972ced5bb01e749ddfd8f19b16446707441f54fc8bf9de6fda8ef2397ba3"
+
+
+def test_current_parser_requires_source_and_rejects_forged_policy_or_slice_digest() -> None:
+    body = "x" * 2_000
+    projection = _projection(body)
+
+    with pytest.raises(RetrievalContractError, match="requires exact source revalidation"):
+        DocumentPassageProjection.parse_private(projection.to_private_json())
+
+    forged_policy = dataclasses.replace(
+        projection,
+        passages=(DocumentPassageSpan(0, 0, len(body), "b" * 64),),
+    )
+    with pytest.raises(RetrievalContractError, match="does not match its exact source"):
+        DocumentPassageProjection.parse_private(
+            forged_policy.to_private_json(),
+            source_version=7,
+            source_content_sha256=_SOURCE_SHA256,
+            extracted_text=body,
+        )
+
+    forged_digest = dataclasses.replace(
+        projection,
+        passages=(dataclasses.replace(projection.passages[0], content_sha256="c" * 64),)
+        + projection.passages[1:],
+    )
+    with pytest.raises(RetrievalContractError, match="does not match its exact source"):
+        DocumentPassageProjection.from_private_payload(
+            forged_digest.to_private_payload(),
+            source_version=7,
+            source_content_sha256=_SOURCE_SHA256,
+            extracted_text=body,
+        )
+
+    with pytest.raises(RetrievalContractError, match="does not match its exact source"):
+        DocumentPassageProjection.parse_private(
+            projection.to_private_json(),
+            source_version=8,
+            source_content_sha256=_SOURCE_SHA256,
+            extracted_text=body,
+        )
 
 
 def test_closed_parser_rejects_extra_duplicate_and_noncanonical_json() -> None:
