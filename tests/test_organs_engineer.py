@@ -17,7 +17,7 @@ from fastapi.testclient import TestClient
 from friday.organs import ServiceContext, build_registry
 from friday.organs.engineer import artifacts, hosts, hunt
 from friday.organs.engineer.advice import advise, unused
-from friday.permissions import LEGACY_OWNER_USER_ID
+from friday.permissions import LEGACY_OWNER_USER_ID, AuthorizationService
 from friday.storage import normalize_conversation_mode
 from friday.storage.models import RawObject, new_id
 
@@ -423,6 +423,7 @@ def test_analyze_tool_reads_an_owned_file(settings, storage):
         kg=None,
         ingestion=SimpleNamespace(secondary_brain=None),
         llm=None,
+        auth=AuthorizationService(storage),
     )
     tools = {tool.name: tool for tool in build_engineer_tools(ctx)}
     actor = ActorContext(owner, "owner", "api-token")

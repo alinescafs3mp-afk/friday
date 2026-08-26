@@ -190,6 +190,72 @@ _ARTIFACT_PATCH_NEGATION = re.compile(
     r"(?:исправ|почин|измен|редактир|перепис|патч|модифицир)\w*\b)",
     re.IGNORECASE,
 )
+_ARTIFACT_DECOMPILE_FILENAME = (
+    r"(?<![\w./\\-])[A-Za-z0-9_@+(),\[\]-]+"
+    r"(?:\.[A-Za-z0-9_@+(),\[\]-]+)*\.[A-Za-z0-9]{1,16}(?![\w./\\-])"
+)
+_ARTIFACT_DECOMPILE_REQUEST = re.compile(
+    r"\A\s*(?:(?:hi|hello|hey|привет|здравствуй(?:те)?)[!,.;:\s]+)?"
+    r"(?:(?:and|so|then|now|а|и|ну|тогда|теперь|сейчас)\s+){0,2}"
+    r"(?:(?:please|pls|kindly|can\s+you|could\s+you|would\s+you|"
+    r"пожалуйста|прошу|можешь|можете|сможешь|сможете)\s*[,;:]?\s+)?"
+    r"(?:"
+    r"(?:decompile|reverse[ -]engineer|"
+    r"декомпилируй(?:те)?|декомпилировать|"
+    r"(?:проведи(?:те)?\s+)?реверс(?:-|\s+)инжиниринг)"
+    r"[^.!?\n]{0,64}?\b(?:(?:this|that)\s+(?:artifact|file|binary|executable)|"
+    r"(?:этот|эту)\s+(?:артефакт\w*|файл\w*|бинарник\w*|исполняем\w*)|"
+    r"it|this|that|artifact|file|binary|executable|"
+    r"его|е[её]|это|этот|эту|артефакт\w*|файл\w*|бинарник\w*|"
+    r"исполняем\w*(?:\s+файл\w*)?|"
+    rf"{_ARTIFACT_DECOMPILE_FILENAME})\b|"
+    r"(?:analy[sz]e|inspect|проанализируй(?:те)?|анализировать|разбери(?:те)?)"
+    r"[^.!?\n]{0,64}?\b(?:binary|executable|binary\s+artifact|"
+    r"бинарник\w*|бинарн\w*(?:\s+(?:файл|артефакт)\w*)?|"
+    r"исполняем\w*(?:\s+файл\w*)?)\b"
+    r")",
+    re.IGNORECASE,
+)
+_ARTIFACT_DECOMPILE_NEGATION = re.compile(
+    r"(?:\b(?:do\s+not|don't|dont|never|without)\b[^.!?\n]{0,48}\b"
+    r"(?:decompil\w*|reverse[ -]engineer\w*|analy[sz]e\w*|inspect\w*)\b|"
+    r"\b(?:не|никогда|без)\b[^.!?\n]{0,48}\b"
+    r"(?:декомпил\w*|реверс\w*|анализир\w*|проанализир\w*|разбер\w*)\b)",
+    re.IGNORECASE,
+)
+_ARTIFACT_DECOMPILE_TARGET_EXCLUSION = re.compile(
+    r"(?:"
+    r"\bне\s+(?:этот|эту|данн\w*|текущ\w*)\s+"
+    r"(?:файл\w*|бинарник\w*|артефакт\w*|исполняем\w*)\b|"
+    r"\b(?:любой|другой)\s+(?:файл\w*|бинарник\w*|артефакт\w*)\b"
+    r"[^.!?\n]{0,48}\b(?:кроме|исключая)\s+(?:этого|этот|его)\b|"
+    r"\bnot\s+(?:this|that|the\s+current)\s+(?:file|binary|artifact|executable)\b|"
+    r"\b(?:any|another|other)\s+(?:file|binary|artifact|executable)\b"
+    r"[^.!?\n]{0,48}\b(?:except|excluding)\s+(?:this|that|it|the\s+current\s+one)\b"
+    r")",
+    re.IGNORECASE,
+)
+_ARTIFACT_DECOMPILE_CAPABILITY = re.compile(
+    r"(?:\A|[.!?]\s*)(?:"
+    r"(?:ты\s+)?(?:умеешь|способна|можешь\s+ли|можете\s+ли)\b[^.!?\n]{0,64}\b"
+    r"(?:декомпил\w*|реверс\w*|анализир\w*)|"
+    r"(?:есть|имеется)\s+ли\b[^.!?\n]{0,64}\b(?:инструмент|возможност)\w*"
+    r"[^.!?\n]{0,48}\b(?:декомпил\w*|реверс\w*|анализ\w*)|"
+    r"(?:can\s+you|are\s+you\s+able\s+to|do\s+you\s+know\s+how\s+to)\s+"
+    r"(?:decompil\w*|reverse[ -]engineer|analy[sz]e)\s+"
+    r"(?:files?|binaries|executables|artifacts)\s*\?\s*$"
+    r")",
+    re.IGNORECASE,
+)
+_ARTIFACT_DECOMPILE_META = re.compile(
+    r"\b(?:что\s+значит|как\s+перевести|объясни\w*\s+(?:фразу|термин)|"
+    r"what\s+does\b[^.!?\n]{0,48}\bmean|how\s+do\s+you\s+say)\b",
+    re.IGNORECASE,
+)
+_ARTIFACT_DECOMPILE_REPORTED = re.compile(
+    r"\b(?:сообщ\w*|ответ\w*|пересказ\w*|states?|reports?|reported|replied)\b",
+    re.IGNORECASE,
+)
 _METADATA_V4 = ipaddress.ip_address("169.254.169.254")
 _METADATA_V6 = ipaddress.ip_address("fd00:ec2::254")
 _OTHER_METADATA_V4 = frozenset(
@@ -578,6 +644,57 @@ def requests_artifact_patch(speech: str) -> bool:
     )
 
 
+def requests_artifact_decompile(speech: str) -> bool:
+    """Admit a direct current-user binary analysis/decompilation request.
+
+    The action must own a concrete deictic artifact or name a binary/executable.
+    The shared authority projection keeps quotes, code and blockquotes inert;
+    the shared clause parser additionally rejects reported, example,
+    conditional and trailing-cancelled commands.  This predicate only classifies
+    current speech and grants neither an artifact identity nor tool authority.
+    """
+
+    text, masked = _request_projection(speech)
+    if (
+        not masked.strip()
+        or _ARTIFACT_DECOMPILE_NEGATION.search(masked)
+        or _ARTIFACT_DECOMPILE_TARGET_EXCLUSION.search(masked)
+        or _ARTIFACT_DECOMPILE_CAPABILITY.search(masked)
+    ):
+        return False
+    for request in _direct_request_matches(text, _ARTIFACT_DECOMPILE_REQUEST):
+        prefix = masked[request.unit_start : request.start]
+        if _ARTIFACT_DECOMPILE_META.search(prefix) or _ARTIFACT_DECOMPILE_REPORTED.search(prefix):
+            continue
+        prior_units = tuple(_request_units(masked[: request.unit_start]))
+        if prior_units and not _EXPLICIT_REQUEST_CONTEXT_RESET.match(masked[request.unit_start :]):
+            prior_start, prior_end = prior_units[-1]
+            prior = masked[prior_start:prior_end]
+            if (
+                _REPORTED_REQUEST_CUE.search(prior)
+                or _META_REQUEST_CUE.search(prior)
+                or _ARTIFACT_DECOMPILE_REPORTED.search(prior)
+            ):
+                continue
+        return True
+    return False
+
+
+def artifact_decompile_request_is_atomic(speech: str) -> bool:
+    """Whether decompilation is the sole clause in the current utterance."""
+
+    if not requests_artifact_decompile(speech):
+        return False
+    text, masked = _request_projection(speech)
+    for request in _direct_request_matches(text, _ARTIFACT_DECOMPILE_REQUEST):
+        if request.unit_start != 0:
+            continue
+        trailing = masked[request.end :]
+        if re.fullmatch(r"[\s.!?…]*", trailing):
+            return True
+    return False
+
+
 def requests_configured_network_assessment(speech: str) -> bool:
     """Admit the sole configured private network only from current speech.
 
@@ -625,6 +742,7 @@ def target_source_sha256(speech: str, token: str) -> str:
 
 
 __all__ = [
+    "artifact_decompile_request_is_atomic",
     "PinnedTarget",
     "bind_pinned_target",
     "current_pinned_target",
@@ -635,6 +753,7 @@ __all__ = [
     "normalize_ip_address",
     "parse_host_token",
     "requests_active_assessment",
+    "requests_artifact_decompile",
     "requests_artifact_patch",
     "requests_configured_network_assessment",
     "requests_network_scan",

@@ -93,7 +93,10 @@ from friday.file_delivery import (
     read_authorized_file,
 )
 from friday.file_evidence import stamp_current_turn_file_reference
-from friday.generated_files import persist_generated_response_files
+from friday.generated_files import (
+    persist_generated_response_files,
+    validate_generated_files_persistence_attestation,
+)
 from friday.http_errors import relation_history_http_detail
 from friday.ingestion import (
     IdempotencyConflictError,
@@ -620,6 +623,30 @@ def _generated_file_persistence_eligible(result: Mapping[str, Any]) -> bool:
         and any(isinstance(item, Mapping) for item in files)
         and re.fullmatch(r"msg_[0-9a-f]{16}", str(result.get("message_id") or "").strip())
     )
+
+
+def _consume_generated_files_persistence_attestation(
+    result: dict[str, Any],
+    *,
+    storage: Any,
+    actor: ActorContext,
+) -> bool:
+    """Consume and revalidate the private marker for an atomic runtime batch."""
+
+    attestation = result.pop("_generated_files_persistence", None)
+    if attestation is None:
+        return False
+    try:
+        return validate_generated_files_persistence_attestation(
+            storage,
+            result,
+            attestation,
+            tenant_id=actor.user_id,
+            person_id=actor.own_id,
+        )
+    except Exception as exc:  # noqa: BLE001 - invalid marker falls back to generic persistence
+        LOGGER.warning("Generated-file persistence attestation rejected (%s)", type(exc).__name__)
+        return False
 
 
 def _regenerate_retry_source_user_message(
@@ -3083,22 +3110,28 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
                     replay_source_message_id=str(last_user.get("id") or ""),
                     turn_deadline=_turn_deadline,
                 )
-            if _generated_file_persistence_eligible(result):
-                if time.monotonic() >= _turn_deadline:
-                    raise TimeoutError("turn budget exhausted before generated-file persistence")
-                if not mark_request_effect_possible():
-                    raise RuntimeError(
-                        "Request idempotency fence could not be committed before generated-file persistence"
-                    )
-            result = await asyncio.to_thread(
-                persist_generated_response_files,
-                state.storage,
-                state.settings.files_dir,
+            generated_files_already_persisted = _consume_generated_files_persistence_attestation(
                 result,
-                tenant_id=actor.user_id,
-                person_id=actor.own_id,
-                max_bytes=state.settings.max_upload_bytes,
+                storage=state.storage,
+                actor=actor,
             )
+            if not generated_files_already_persisted:
+                if _generated_file_persistence_eligible(result):
+                    if time.monotonic() >= _turn_deadline:
+                        raise TimeoutError("turn budget exhausted before generated-file persistence")
+                    if not mark_request_effect_possible():
+                        raise RuntimeError(
+                            "Request idempotency fence could not be committed before generated-file persistence"
+                        )
+                result = await asyncio.to_thread(
+                    persist_generated_response_files,
+                    state.storage,
+                    state.settings.files_dir,
+                    result,
+                    tenant_id=actor.user_id,
+                    person_id=actor.own_id,
+                    max_bytes=state.settings.max_upload_bytes,
+                )
             if had_attachments and not bool(result.get("attachment_context_available")):
                 # Legacy/transient-вложения физически негде взять. Persisted
                 # файл, напротив, AgentRuntime уже восстановил внутри личного
@@ -5015,19 +5048,25 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
             # durable authority is an exact-byte, person-owned artifact.  Freeze
             # it before the HTTP/idempotency response is published so refreshes
             # can recover the link from assistant-message history.
-            if _generated_file_persistence_eligible(result):
-                if time.monotonic() >= _turn_deadline:
-                    raise TimeoutError("turn budget exhausted before generated-file persistence")
-                ensure_effect_fence()
-            result = await asyncio.to_thread(
-                persist_generated_response_files,
-                state.storage,
-                state.settings.files_dir,
+            generated_files_already_persisted = _consume_generated_files_persistence_attestation(
                 result,
-                tenant_id=actor.user_id,
-                person_id=actor.own_id,
-                max_bytes=state.settings.max_upload_bytes,
+                storage=state.storage,
+                actor=actor,
             )
+            if not generated_files_already_persisted:
+                if _generated_file_persistence_eligible(result):
+                    if time.monotonic() >= _turn_deadline:
+                        raise TimeoutError("turn budget exhausted before generated-file persistence")
+                    ensure_effect_fence()
+                result = await asyncio.to_thread(
+                    persist_generated_response_files,
+                    state.storage,
+                    state.settings.files_dir,
+                    result,
+                    tenant_id=actor.user_id,
+                    person_id=actor.own_id,
+                    max_bytes=state.settings.max_upload_bytes,
+                )
             if voice_transcript_truncated:
                 notice = (
                     "⚠️ Длинное голосовое распознано не полностью: в текущий ответ вошло "

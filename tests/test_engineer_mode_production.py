@@ -574,7 +574,7 @@ def test_owner_binary_reaches_engineer_dossier_and_model(settings, monkeypatch) 
     monkeypatch.setattr(local_binaries, "describe_bytes", lambda _data, **_kwargs: {"ok": False})
 
     def target_only_from_human_speech(speech, **_kwargs):  # noqa: ANN001
-        assert speech == "разбери приложенный бинарный файл"
+        assert speech == "покажи статические признаки приложенного артефакта"
         assert "router.example.com" not in speech
         return None
 
@@ -586,7 +586,7 @@ def test_owner_binary_reaches_engineer_dossier_and_model(settings, monkeypatch) 
             "/api/chat",
             headers={"Authorization": f"Bearer {configured.api_token}"},
             json={
-                "message": "разбери приложенный бинарный файл",
+                "message": "покажи статические признаки приложенного артефакта",
                 "mode": "engineer",
                 "enable_tools": True,
                 "source_ref": "api-document:engineer-production-contract",
@@ -1582,6 +1582,52 @@ async def test_ambiguous_artifact_without_a_reference_is_denied(
     )
 
     assert kernel.executed == []
+
+
+@pytest.mark.asyncio
+async def test_artifact_tools_are_hidden_without_current_authorized_refs(
+    settings,
+    storage,
+    monkeypatch,
+) -> None:
+    actor = _owner_actor()
+    storage.ensure_user(actor.own_id, preset_key="owner")
+    model = _EngineerNativeToolModel([("engineer_analyze_artifact", {})])
+    kernel = _EngineerRecordingKernel(
+        risk="observe",
+        timeout_sec=60.0,
+        result=ToolResult("engineer_analyze_artifact", True, data={"ok": True}),
+    )
+    runtime = AgentRuntime(
+        replace(settings, engineer_mode_enabled=True),
+        storage,
+        llm=model,  # type: ignore[arg-type]
+        kernel=kernel,  # type: ignore[arg-type]
+    )
+    monkeypatch.setattr(runtime, "_fresh_engineer_actor", lambda current, _capability: current)
+    context = AgentContext(
+        conversation_id="conv-engineer-no-artifact-ref",
+        user_id=actor.user_id,
+        interaction_mode="engineer",
+        turn_deadline=time.monotonic() + 10.0,
+        engineer_dossier={"targets": [], "hosts": [], "artifacts": []},
+    )
+    schema = _engineer_tool_schema(
+        "engineer_analyze_artifact",
+        {"raw_id": {"type": "string"}},
+        ["raw_id"],
+    )
+
+    await runtime._agentic_loop(  # noqa: SLF001
+        context,
+        "ordinary engineer discussion",
+        actor,
+        tools=[schema],
+        attachments=None,
+    )
+
+    assert kernel.executed == []
+    assert model.schemas and model.schemas[0] == []
 
 
 @pytest.mark.asyncio

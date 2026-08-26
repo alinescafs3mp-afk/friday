@@ -1,6 +1,6 @@
 [project]
 name = "friday"
-version = "0.207.39"
+version = "0.207.40"
 description = "Local-first personal Knowledge Operating System with a provenance-first knowledge graph."
 readme = "README.md"
 license = "MIT"
@@ -109,6 +109,7 @@ include = ["friday*"]
 
 [tool.setuptools.package-data]
 "friday.admin_ui" = ["static/*"]
+"friday.organs.engineer" = ["ghidra_scripts/*.java"]
 
 [tool.pytest.ini_options]
 pythonpath = ["."]

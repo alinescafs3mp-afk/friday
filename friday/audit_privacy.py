@@ -356,6 +356,7 @@ _SAFE_TOOL_TARGETS = frozenset(
         "engineer_adversary_rehearsal",
         "engineer_analyze_artifact",
         "engineer_audit_host",
+        "engineer_decompile_artifact",
         "engineer_dns",
         "engineer_hunt",
         "engineer_http_enum",

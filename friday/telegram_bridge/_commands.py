@@ -12,10 +12,12 @@ import json
 import re
 from datetime import date, timedelta
 
+from friday.organs.engineer.targets import requests_artifact_decompile
 from friday.retrieval._keyboard import switched
 from friday.telegram_bridge._base import (
     BOT_COMMANDS,
     CALLBACK_TARGET_RE,
+    LOGGER,
     Any,
     BridgeShared,
     MediaTooLargeError,
@@ -55,6 +57,115 @@ def _response_text_format(response: dict[str, Any]) -> str:
 
 
 _ALBUM_CACHE_MESSAGE_IDS = "_friday_album_message_ids"
+
+# These are deliberately sparse and finite. Telegram's typing indicator says
+# only that the bridge process is alive; after a minute it gives the person no
+# clue whether a long backend turn is still owned. The bridge observes elapsed
+# request time, not a Ghidra phase event, so it must never invent completion
+# percentages or claim that a particular worker stage has been entered.
+_DECOMPILE_PROGRESS_SCHEDULE: tuple[tuple[float, str], ...] = (
+    (
+        12.0,
+        "⏳ Запрос на статический разбор ещё выполняется. Длительная фаза ограничена "
+        "четырьмя минутами; итог пришлю сразу после завершения.",
+    ),
+    (
+        75.0,
+        "⏳ Запрос на статический разбор всё ещё выполняется. Прошло около минуты; "
+        "продолжаю ждать ограниченный backend-ход.",
+    ),
+)
+_GENERIC_PROGRESS_SCHEDULE: tuple[tuple[float, str], ...] = (
+    (
+        30.0,
+        "⏳ Запрос ещё выполняется. Продолжаю работу; итог пришлю сразу после завершения.",
+    ),
+)
+# A module seam keeps progress timing deterministic in focused async tests while
+# production still uses the normal event-loop clock.
+_progress_sleep = asyncio.sleep
+
+
+class _ChatProgressState:
+    """One finite notification budget shared by every final call in a turn."""
+
+    __slots__ = ("next_notice", "schedule")
+
+    def __init__(self, speech: str) -> None:
+        self.schedule = (
+            _DECOMPILE_PROGRESS_SCHEDULE
+            if requests_artifact_decompile(speech)
+            else _GENERIC_PROGRESS_SCHEDULE
+        )
+        self.next_notice = 0
+
+
+async def _emit_chat_progress(
+    bridge: BridgeShared,
+    telegram: httpx.AsyncClient,
+    chat_id: int,
+    reply_to_message_id: int | None,
+    state: _ChatProgressState,
+) -> None:
+    """Emit only the remaining best-effort checkpoints for one final call."""
+
+    previous_delay = 0.0
+    for index in range(state.next_notice, len(state.schedule)):
+        delay, notice = state.schedule[index]
+        await _progress_sleep(max(0.0, delay - previous_delay))
+        previous_delay = delay
+        # Spend the slot before attempting delivery: a Telegram outage must not
+        # turn a bounded status channel into a retry loop or affect the request.
+        state.next_notice = index + 1
+        try:
+            await bridge._send_message(
+                telegram,
+                chat_id,
+                notice,
+                text_format="plain",
+                reply_to_message_id=reply_to_message_id,
+            )
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            LOGGER.debug("Telegram progress notice failed (%s)", type(exc).__name__)
+
+
+async def _final_chat_request_with_progress(
+    bridge: BridgeShared,
+    telegram: httpx.AsyncClient,
+    backend: httpx.AsyncClient,
+    payload: dict[str, Any],
+    external_user_id: str,
+    chat_id: int,
+    reply_to_message_id: int | None,
+    state: _ChatProgressState,
+) -> dict[str, Any]:
+    """Wrap one final /api/chat call without changing its request semantics."""
+
+    progress_task = asyncio.create_task(
+        _emit_chat_progress(
+            bridge,
+            telegram,
+            chat_id,
+            reply_to_message_id,
+            state,
+        )
+    )
+    try:
+        return await bridge._backend_json(
+            backend,
+            "POST",
+            "/api/chat",
+            payload,
+            external_user_id,
+            str(chat_id),
+        )
+    finally:
+        # The notifier is completely stopped before the response/error leaves
+        # this helper, so a stale status cannot trail the final answer.
+        progress_task.cancel()
+        await asyncio.gather(progress_task, return_exceptions=True)
 
 
 def _telegram_item_receipt(document: dict[str, Any]) -> dict[str, Any] | None:
@@ -1676,6 +1787,7 @@ class CommandsMixin(BridgeShared):
         quoted = self._reply_quote(message)
         if quoted:
             payload["reply_to"] = quoted
+        progress_state = _ChatProgressState(text)
         typing_task = asyncio.create_task(self._typing_loop(telegram, chat_id))
         try:
             album_stage_receipts: list[dict[str, Any]] = []
@@ -1782,13 +1894,15 @@ class CommandsMixin(BridgeShared):
                     "message_format": "plain",
                 }
             else:
-                response = await self._backend_json(
+                response = await _final_chat_request_with_progress(
+                    self,
+                    telegram,
                     backend,
-                    "POST",
-                    "/api/chat",
                     payload,
                     external_user_id,
-                    str(chat_id),
+                    chat_id,
+                    message.get("message_id"),
+                    progress_state,
                 )
             if album_messages:
                 response["file_ingestions"] = album_stage_receipts
@@ -1820,13 +1934,15 @@ class CommandsMixin(BridgeShared):
                 if recovered_document is None:
                     raise PermanentUpdateError("Replied Telegram media is unavailable")
                 payload["reply_document_recovery"] = recovered_document
-                response = await self._backend_json(
+                response = await _final_chat_request_with_progress(
+                    self,
+                    telegram,
                     backend,
-                    "POST",
-                    "/api/chat",
                     payload,
                     external_user_id,
-                    str(chat_id),
+                    chat_id,
+                    message.get("message_id"),
+                    progress_state,
                 )
                 if response.get("reply_media_recovery_required") is True:
                     raise PermanentUpdateError("Backend did not accept reply media recovery")

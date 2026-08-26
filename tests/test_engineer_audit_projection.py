@@ -80,17 +80,23 @@ def test_engineer_http_scalar_port_is_only_a_count_and_range() -> None:
     assert "port" not in details
 
 
-def test_valid_raw_handle_stays_structural_and_invalid_handle_is_fingerprinted() -> None:
+@pytest.mark.parametrize(
+    "tool_name",
+    ["engineer_analyze_artifact", "engineer_decompile_artifact"],
+)
+def test_valid_raw_handle_stays_structural_and_invalid_handle_is_fingerprinted(
+    tool_name: str,
+) -> None:
     valid_raw_id = "raw_0123456789abcdef"
     valid = ExecutionKernel._audit_details(  # noqa: SLF001
-        "engineer_analyze_artifact",
+        tool_name,
         {"raw_id": valid_raw_id},
     )
     assert valid == {"raw_object_id": valid_raw_id}
 
     invalid_raw_id = "raw_private-customer-secret"
     invalid = ExecutionKernel._audit_details(  # noqa: SLF001
-        "engineer_analyze_artifact",
+        tool_name,
         {"raw_id": invalid_raw_id},
     )
     assert invalid == {
@@ -98,6 +104,28 @@ def test_valid_raw_handle_stays_structural_and_invalid_handle_is_fingerprinted()
         "raw_id_chars": len(invalid_raw_id),
     }
     assert invalid_raw_id not in json.dumps(invalid, ensure_ascii=False)
+
+
+def test_decompile_audit_projection_ignores_report_content_and_paths() -> None:
+    raw_id = "raw_0123456789abcdef"
+    private_path = "/home/jericho/private/customer.exe"
+    pseudocode = 'const char *password = "4815";'
+
+    details = ExecutionKernel._audit_details(  # noqa: SLF001
+        "engineer_decompile_artifact",
+        {
+            "raw_id": raw_id,
+            "path": private_path,
+            "pseudocode": pseudocode,
+            "function_name": "private_customer_function",
+        },
+    )
+
+    assert details == {"raw_object_id": raw_id}
+    encoded = json.dumps(details, ensure_ascii=False, sort_keys=True)
+    assert private_path not in encoded
+    assert pseudocode not in encoded
+    assert "private_customer_function" not in encoded
 
 
 def test_patch_operations_have_ordered_canonical_digest_and_closed_kind_summary() -> None:
@@ -269,9 +297,14 @@ async def test_cancelled_engineer_observation_gets_an_uncertain_terminal_audit(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "tool_name",
+    ["engineer_analyze_artifact", "engineer_decompile_artifact"],
+)
 async def test_engineer_false_envelope_is_a_failed_kernel_result_and_audit(
     settings,
     storage,
+    tool_name: str,
 ) -> None:
     kernel, actor = _engineer_test_kernel(settings, storage)
 
@@ -281,7 +314,7 @@ async def test_engineer_false_envelope_is_a_failed_kernel_result_and_audit(
 
     kernel.register(
         ToolSpec(
-            name="engineer_analyze_artifact",
+            name=tool_name,
             description="synthetic refused engineer observation",
             parameters={"type": "object", "properties": {}},
             security_id="knowledge.read",
@@ -290,7 +323,7 @@ async def test_engineer_false_envelope_is_a_failed_kernel_result_and_audit(
         )
     )
     result = await kernel.execute(
-        "engineer_analyze_artifact",
+        tool_name,
         {"raw_id": "raw_0123456789abcdef"},
         actor=actor,
     )
@@ -298,11 +331,7 @@ async def test_engineer_false_envelope_is_a_failed_kernel_result_and_audit(
     assert result.success is False
     assert result.data is None
     assert result.error == "Engineer tool refused: file_unavailable"
-    rows = [
-        row
-        for row in storage.list_audit_log("alice", limit=20)
-        if row["target_id"] == "engineer_analyze_artifact"
-    ]
+    rows = [row for row in storage.list_audit_log("alice", limit=20) if row["target_id"] == tool_name]
     assert len(rows) == 1
     payload = json.loads(str(rows[0]["after_json"] or "{}"))
     assert payload["success"] is False

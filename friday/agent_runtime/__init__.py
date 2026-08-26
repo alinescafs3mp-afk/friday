@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import asyncio
+import base64
+import binascii
 import hashlib
 import hmac
 import inspect
@@ -121,6 +123,12 @@ from friday.file_evidence_reader import (
     prepare_pinned_file_evidence,
     prepare_registered_file_evidence,
     reauthorize_prepared_file_evidence_in_transaction,
+)
+from friday.generated_files import (
+    GeneratedFilesPersistenceRollbackGuard,
+    generated_files_persistence_attestation,
+    generated_files_publication_transaction,
+    persist_generated_response_files,
 )
 from friday.interaction_control_plane.archive_candidate_selection import (
     ARCHIVE_CANDIDATE_CANCELLED,
@@ -1987,6 +1995,7 @@ _PRIVATE_SOURCE_LOCAL_TOOL_NAMES = frozenset(
         "entity_merge_decide",
         "entity_merge_undo",
         "engineer_analyze_artifact",
+        "engineer_decompile_artifact",
         "engineer_local_tools",
         "engineer_patch_artifact",
         "host_action_run",
@@ -2096,7 +2105,12 @@ _ENGINEER_MODEL_TOOL_NAMES = frozenset(
     }
 )
 _ENGINEER_REGISTERED_TOOL_NAMES = frozenset(
-    {"engineer_hunt", "engineer_scan_configured_network", *_ENGINEER_MODEL_TOOL_NAMES}
+    {
+        "engineer_hunt",
+        "engineer_scan_configured_network",
+        "engineer_decompile_artifact",
+        *_ENGINEER_MODEL_TOOL_NAMES,
+    }
 )
 _ENGINEER_HOST_TOOL_NAMES = frozenset(
     {
@@ -2107,9 +2121,12 @@ _ENGINEER_HOST_TOOL_NAMES = frozenset(
         "engineer_scan_configured_network",
     }
 )
-_ENGINEER_ARTIFACT_TOOL_NAMES = frozenset({"engineer_analyze_artifact", "engineer_patch_artifact"})
+_ENGINEER_ARTIFACT_TOOL_NAMES = frozenset(
+    {"engineer_analyze_artifact", "engineer_decompile_artifact", "engineer_patch_artifact"}
+)
 _ENGINEER_TOOL_CAPABILITIES = {
     "engineer_analyze_artifact": "engineer.artifact.analyze",
+    "engineer_decompile_artifact": "engineer.artifact.analyze",
     "engineer_patch_artifact": "engineer.artifact.patch",
     "engineer_audit_host": "engineer.host.audit",
     "engineer_http_enum": "engineer.host.audit",
@@ -2130,6 +2147,48 @@ _ENGINEER_NETWORK_OUTCOME_METADATA_KEY = "accepted_engineer_network_outcome"
 _ENGINEER_NETWORK_OUTCOME_SCHEMA = "friday.engineer-network-outcome.v1"
 _ENGINEER_NETWORK_OUTCOME_RECEIPT_SCHEMA = "friday.accepted-engineer-network-outcome-receipt.v1"
 _ENGINEER_NETWORK_ACTION_TOOL = "engineer_scan_configured_network"
+_ENGINEER_DECOMPILE_ACTION_TOOL = "engineer_decompile_artifact"
+_ENGINEER_DECOMPILE_OUTCOME_METADATA_KEY = "accepted_engineer_decompile_outcome"
+_ENGINEER_DECOMPILE_OUTCOME_SCHEMA = "friday.engineer-decompile-outcome.v1"
+_ENGINEER_DECOMPILE_REPORT_SCHEMA = "friday.engineer.decompile.v1"
+_ENGINEER_DECOMPILE_REPORT_TOOL = "ghidra-headless"
+_ENGINEER_DECOMPILE_REPORT_TOOL_VERSION = "12.1.3"
+_ENGINEER_DECOMPILE_REPORT_JDK_VERSION = "21.0.12.1+1"
+_ENGINEER_DECOMPILE_MIN_REMAINING_SEC = 265.0
+_ENGINEER_PRE_HANDLER_ERROR_PREFIXES = (
+    "Execution kernel has no authorization service",
+    "Unknown tool",
+    "Tool is not initialized",
+    "Tool is unavailable",
+    "Authorization denied",
+    "Invalid tool arguments",
+)
+_ENGINEER_DECOMPILE_OUTCOME_RECEIPT_SCHEMA = "friday.accepted-engineer-decompile-outcome-receipt.v1"
+_ENGINEER_DECOMPILE_FAILURE_REASONS = frozenset(
+    {
+        "ambiguous_artifact",
+        "authorization_unavailable",
+        "deadline_expired",
+        "decompile_unavailable",
+        "decompiler_failed",
+        "decompiler_launch_failed",
+        "decompiler_output_invalid",
+        "decompiler_busy",
+        "decompiler_report_exceeds_cap",
+        "decompiler_timeout",
+        "exact_artifact_required",
+        "input_size_invalid",
+        "input_unavailable",
+        "malformed_result",
+        "sandbox_unavailable",
+        "toolchain_incomplete",
+        "toolchain_missing",
+        "toolchain_untrusted",
+        "unsupported_format",
+        "worker_failed",
+        "worker_timeout",
+    }
+)
 _ENGINEER_NETWORK_FAILURE_REASONS = frozenset(
     {
         "authorization_unavailable",
@@ -2579,6 +2638,338 @@ def _render_engineer_network_outcome(outcome: _EngineerNetworkOutcome) -> str:
     return f"Сканирование не выполнено: {reason}."
 
 
+@dataclass(frozen=True, slots=True)
+class _EngineerDecompileOutcome:
+    """Closed projection of one code-owned Ghidra run."""
+
+    status: CapabilityStatus
+    format: Literal["pe", "elf", "unknown"]
+    function_count_lower_bound: int
+    functions_emitted: int
+    functions_decompiled: int
+    functions_timed_out: int
+    pseudocode_chars: int
+    analysis_timed_out: bool
+    function_index_truncated: bool
+    output_truncated: bool
+    report_prepared: bool
+    report_sha256: str
+    tool_version: str
+    jdk_version: str
+    reason_code: str
+    tool_started: bool
+
+    def __post_init__(self) -> None:
+        if self.status not in {
+            CapabilityStatus.SUCCEEDED,
+            CapabilityStatus.PARTIAL,
+            CapabilityStatus.DENIED,
+            CapabilityStatus.UNAVAILABLE,
+            CapabilityStatus.UNCERTAIN,
+        }:
+            raise ValueError("engineer decompile outcome status is not closed")
+        if self.format not in {"pe", "elf", "unknown"}:
+            raise ValueError("engineer decompile format is invalid")
+        counts = (
+            self.function_count_lower_bound,
+            self.functions_emitted,
+            self.functions_decompiled,
+            self.functions_timed_out,
+        )
+        if any(
+            isinstance(value, bool) or not isinstance(value, int) or not 0 <= value <= 4096
+            for value in counts
+        ):
+            raise ValueError("engineer decompile function accounting is invalid")
+        if self.functions_emitted > self.function_count_lower_bound:
+            raise ValueError("engineer decompile emitted count exceeds discovered functions")
+        if self.functions_decompiled + self.functions_timed_out > self.functions_emitted:
+            raise ValueError("engineer decompile status accounting exceeds emitted functions")
+        if (
+            isinstance(self.pseudocode_chars, bool)
+            or not isinstance(self.pseudocode_chars, int)
+            or not 0 <= self.pseudocode_chars <= 160_000
+        ):
+            raise ValueError("engineer decompile pseudocode accounting is invalid")
+        if self.report_sha256 and re.fullmatch(r"[0-9a-f]{64}", self.report_sha256) is None:
+            raise ValueError("engineer decompile report digest is invalid")
+        for version in (self.tool_version, self.jdk_version):
+            if version and re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9.+_-]{0,39}", version) is None:
+                raise ValueError("engineer decompile tool version is invalid")
+        if self.reason_code not in _ENGINEER_DECOMPILE_FAILURE_REASONS | {"none"}:
+            raise ValueError("engineer decompile reason is not closed")
+        if self.status in {CapabilityStatus.SUCCEEDED, CapabilityStatus.PARTIAL} and not (
+            self.tool_started
+            and self.format in {"pe", "elf"}
+            and self.report_prepared
+            and self.report_sha256
+            and self.reason_code == "none"
+        ):
+            raise ValueError("successful engineer decompile outcome is incomplete")
+        if self.status is CapabilityStatus.DENIED and self.tool_started:
+            raise ValueError("denied engineer decompile outcome claims an entered tool")
+        if self.status is CapabilityStatus.UNCERTAIN and not self.tool_started:
+            raise ValueError("uncertain engineer decompile outcome has no entered boundary")
+
+    def receipt(self) -> dict[str, object]:
+        outcome: dict[str, object] = {
+            "schema": _ENGINEER_DECOMPILE_OUTCOME_SCHEMA,
+            "status": self.status.value,
+            "format": self.format,
+            "function_count_lower_bound": self.function_count_lower_bound,
+            "functions_emitted": self.functions_emitted,
+            "functions_decompiled": self.functions_decompiled,
+            "functions_timed_out": self.functions_timed_out,
+            "pseudocode_chars": self.pseudocode_chars,
+            "analysis_timed_out": self.analysis_timed_out,
+            "function_index_truncated": self.function_index_truncated,
+            "output_truncated": self.output_truncated,
+            "report_prepared": self.report_prepared,
+            "report_sha256": self.report_sha256 or None,
+            "tool_version": self.tool_version or None,
+            "jdk_version": self.jdk_version or None,
+            "reason_code": self.reason_code,
+            "tool_started": self.tool_started,
+        }
+        encoded = json.dumps(
+            outcome,
+            ensure_ascii=True,
+            sort_keys=True,
+            separators=(",", ":"),
+            allow_nan=False,
+        ).encode("ascii")
+        return {
+            "schema": _ENGINEER_DECOMPILE_OUTCOME_RECEIPT_SCHEMA,
+            "outcome": outcome,
+            "outcome_sha256": hashlib.sha256(encoded).hexdigest(),
+        }
+
+
+def _engineer_decompile_failure_reason(value: object) -> str:
+    reason = str(value or "").strip().casefold()
+    for prefix in ("engineer tool refused: ",):
+        if reason.startswith(prefix):
+            reason = reason.removeprefix(prefix)
+    if "deadline" in reason:
+        reason = "deadline_expired"
+    return reason if reason in _ENGINEER_DECOMPILE_FAILURE_REASONS else "decompile_unavailable"
+
+
+def _engineer_decompile_attachment(dossier: Mapping[str, Any]) -> dict[str, Any] | None:
+    value = dossier.get("_artifact_decompile_attachment")
+    if not isinstance(value, Mapping):
+        return None
+    filename = str(value.get("filename") or "")
+    content = value.get("content_base64")
+    raw_result = dossier.get("artifact_decompile")
+    result = raw_result if isinstance(raw_result, Mapping) else {}
+    raw_report = result.get("report")
+    report = raw_report if isinstance(raw_report, Mapping) else {}
+    expected_sha256 = str(report.get("report_sha256") or "")
+    if (
+        value.get("kind") != "document"
+        or not filename.casefold().endswith(".md")
+        or not 1 <= len(filename) <= 180
+        or re.fullmatch(r"[A-Za-z0-9._-]+", filename) is None
+        or value.get("mime_type") != "text/markdown"
+        or not isinstance(content, str)
+        or not content
+        or len(content) > 1_398_104
+        or re.fullmatch(r"[0-9a-f]{64}", expected_sha256) is None
+    ):
+        return None
+    try:
+        decoded = base64.b64decode(content, validate=True)
+        text = decoded.decode("utf-8", errors="strict")
+    except (binascii.Error, UnicodeDecodeError, ValueError):
+        return None
+    if (
+        not 1 <= len(decoded) <= 1024 * 1024
+        or not text.startswith("# Friday Engineer decompilation report\n")
+        or not hmac.compare_digest(hashlib.sha256(decoded).hexdigest(), expected_sha256)
+    ):
+        return None
+    return dict(value)
+
+
+def _engineer_decompile_owned_outcome_unchecked(
+    dossier: Mapping[str, Any],
+) -> _EngineerDecompileOutcome | None:
+    if dossier.get("_artifact_decompile_action_requested") is not True:
+        return None
+    tool_started = dossier.get("_artifact_decompile_tool_started") is True
+    reason = _engineer_decompile_failure_reason(
+        dossier.get("_artifact_decompile_error") or dossier.get("_artifact_decompile_reason")
+    )
+    raw_result = dossier.get("artifact_decompile")
+    result = raw_result if isinstance(raw_result, Mapping) else {}
+    raw_report = result.get("report")
+    report = raw_report if isinstance(raw_report, Mapping) else {}
+    attachment = _engineer_decompile_attachment(dossier)
+    if result.get("ok") is not True:
+        status = (
+            CapabilityStatus.DENIED
+            if not tool_started and reason in {"exact_artifact_required", "ambiguous_artifact"}
+            else CapabilityStatus.UNCERTAIN
+            if tool_started and reason in {"deadline_expired", "decompiler_timeout", "worker_timeout"}
+            else CapabilityStatus.UNAVAILABLE
+        )
+        return _EngineerDecompileOutcome(
+            status=status,
+            format="unknown",
+            function_count_lower_bound=0,
+            functions_emitted=0,
+            functions_decompiled=0,
+            functions_timed_out=0,
+            pseudocode_chars=0,
+            analysis_timed_out=False,
+            function_index_truncated=False,
+            output_truncated=False,
+            report_prepared=False,
+            report_sha256="",
+            tool_version="",
+            jdk_version="",
+            reason_code=reason,
+            tool_started=tool_started,
+        )
+
+    def bounded_int(name: str, maximum: int) -> int:
+        value = report.get(name)
+        if isinstance(value, bool) or not isinstance(value, int) or not 0 <= value <= maximum:
+            raise ValueError(f"invalid decompile report field: {name}")
+        return value
+
+    if (
+        report.get("schema") != _ENGINEER_DECOMPILE_REPORT_SCHEMA
+        or report.get("tool_name") != _ENGINEER_DECOMPILE_REPORT_TOOL
+        or report.get("tool_version") != _ENGINEER_DECOMPILE_REPORT_TOOL_VERSION
+        or report.get("jdk_version") != _ENGINEER_DECOMPILE_REPORT_JDK_VERSION
+        or report.get("observe_only") is not True
+        or report.get("sample_executed") is not False
+        or report.get("network") != "none"
+        or report.get("report_prepared") is not True
+        or type(report.get("analysis_timed_out")) is not bool
+        or type(report.get("function_index_truncated")) is not bool
+        or type(report.get("output_truncated")) is not bool
+    ):
+        raise ValueError("invalid decompile safety attestation")
+
+    raw_format = str(report.get("format") or "").casefold()
+    if raw_format not in {"pe", "elf"}:
+        raise ValueError("invalid decompile report format")
+    status_value = str(result.get("status") or report.get("status") or "")
+    if status_value not in {"completed", "partial"}:
+        raise ValueError("invalid decompile report status")
+    report_sha256 = str(report.get("report_sha256") or "")
+    if re.fullmatch(r"[0-9a-f]{64}", report_sha256) is None:
+        raise ValueError("invalid decompile report digest")
+    outcome = _EngineerDecompileOutcome(
+        status=(CapabilityStatus.SUCCEEDED if status_value == "completed" else CapabilityStatus.PARTIAL),
+        format=cast(Literal["pe", "elf", "unknown"], raw_format),
+        function_count_lower_bound=bounded_int("function_count_lower_bound", 4096),
+        functions_emitted=bounded_int("functions_emitted", 32),
+        functions_decompiled=bounded_int("functions_decompiled", 32),
+        functions_timed_out=bounded_int("functions_timed_out", 32),
+        pseudocode_chars=bounded_int("pseudocode_chars", 160_000),
+        analysis_timed_out=report.get("analysis_timed_out") is True,
+        function_index_truncated=report.get("function_index_truncated") is True,
+        output_truncated=report.get("output_truncated") is True,
+        report_prepared=attachment is not None and report.get("report_prepared") is True,
+        report_sha256=report_sha256,
+        tool_version=str(report.get("tool_version") or ""),
+        jdk_version=str(report.get("jdk_version") or ""),
+        reason_code="none",
+        tool_started=tool_started,
+    )
+    return outcome
+
+
+def _engineer_decompile_owned_outcome(
+    dossier: Mapping[str, Any],
+) -> _EngineerDecompileOutcome | None:
+    try:
+        return _engineer_decompile_owned_outcome_unchecked(dossier)
+    except (TypeError, ValueError):
+        if dossier.get("_artifact_decompile_action_requested") is not True:
+            return None
+        tool_started = dossier.get("_artifact_decompile_tool_started") is True
+        return _EngineerDecompileOutcome(
+            status=CapabilityStatus.UNCERTAIN if tool_started else CapabilityStatus.UNAVAILABLE,
+            format="unknown",
+            function_count_lower_bound=0,
+            functions_emitted=0,
+            functions_decompiled=0,
+            functions_timed_out=0,
+            pseudocode_chars=0,
+            analysis_timed_out=False,
+            function_index_truncated=False,
+            output_truncated=False,
+            report_prepared=False,
+            report_sha256="",
+            tool_version="",
+            jdk_version="",
+            reason_code="malformed_result",
+            tool_started=tool_started,
+        )
+
+
+_ENGINEER_DECOMPILE_REASON_TEXT = {
+    "ambiguous_artifact": "в активном контексте несколько файлов; нужен ровно один",
+    "authorization_unavailable": "для этого хода не удалось подтвердить право Engineer",
+    "deadline_expired": "общий лимит времени хода истёк",
+    "decompile_unavailable": "инструмент не вернул проверяемый результат",
+    "decompiler_failed": "Ghidra завершилась без проверяемого отчёта",
+    "decompiler_launch_failed": "не удалось запустить проверенную Ghidra",
+    "decompiler_output_invalid": "отчёт Ghidra не прошёл проверку целостности",
+    "decompiler_busy": "другой разбор Ghidra уже выполняется",
+    "decompiler_report_exceeds_cap": "отчёт превышает настроенный предел размера файла",
+    "decompiler_timeout": "Ghidra превысила лимит времени",
+    "exact_artifact_required": "не найден единственный явно выбранный файл",
+    "input_size_invalid": "размер бинарника не входит в разрешённый предел",
+    "input_unavailable": "файл стал недоступен до чтения",
+    "malformed_result": "результат декомпилятора не прошёл проверку целостности",
+    "sandbox_unavailable": "изолированная среда недоступна",
+    "toolchain_incomplete": "проверенный комплект Ghidra/JDK неполон",
+    "toolchain_missing": "проверенный комплект Ghidra/JDK не установлен",
+    "toolchain_untrusted": "Ghidra/JDK не прошли проверку целостности",
+    "unsupported_format": "поддерживаются только нативные PE и ELF",
+    "worker_failed": "изолированный обработчик завершился без отчёта",
+    "worker_timeout": "изолированный обработчик превысил лимит времени",
+}
+
+
+def _render_engineer_decompile_outcome(outcome: _EngineerDecompileOutcome) -> str:
+    if outcome.status in {CapabilityStatus.SUCCEEDED, CapabilityStatus.PARTIAL}:
+        qualifier = "завершена" if outcome.status is CapabilityStatus.SUCCEEDED else "завершена частично"
+        lines = [
+            f"Декомпиляция {outcome.format.upper()} {qualifier}: обнаружено не менее "
+            f"{outcome.function_count_lower_bound} функций; в отчёт вошло "
+            f"{outcome.functions_emitted}, C-представление получено для "
+            f"{outcome.functions_decompiled}."
+        ]
+        if outcome.functions_timed_out:
+            lines.append(f"По таймауту отдельных функций: {outcome.functions_timed_out}.")
+        if outcome.analysis_timed_out or outcome.function_index_truncated or outcome.output_truncated:
+            lines.append("Покрытие ограничено установленными лимитами; автоматически повторять не буду.")
+        lines.append(
+            f"Ограниченный отчёт подготовлен для доставки. Ghidra {outcome.tool_version}; "
+            f"JDK {outcome.jdk_version}. "
+            "Бинарник не запускался, сеть в песочнице отсутствовала."
+        )
+        return "\n".join(lines)
+    reason = _ENGINEER_DECOMPILE_REASON_TEXT.get(
+        outcome.reason_code,
+        _ENGINEER_DECOMPILE_REASON_TEXT["decompile_unavailable"],
+    )
+    if outcome.status is CapabilityStatus.DENIED:
+        return f"Декомпиляция не запускалась: {reason}."
+    if outcome.status is CapabilityStatus.UNCERTAIN:
+        return (
+            f"Декомпилятор был запущен, но подтвердить итог не удалось: {reason}. Автоматически не повторяю."
+        )
+    return f"Декомпиляция не выполнена: {reason}."
+
+
 def _engineer_tool_name(schema: Mapping[str, Any]) -> str:
     return str((schema.get("function") or {}).get("name") or schema.get("name") or "")
 
@@ -2719,16 +3110,7 @@ def _record_engineer_action_receipt(
     if tool_name in _ENGINEER_HOST_TOOL_NAMES:
         reported = data.get("active_probes_sent") if data is not None else None
         error = str(result.error or "")
-        rejected_before_handler = error.startswith(
-            (
-                "Execution kernel has no authorization service",
-                "Unknown tool",
-                "Tool is not initialized",
-                "Tool is unavailable",
-                "Authorization denied",
-                "Invalid tool arguments",
-            )
-        )
+        rejected_before_handler = error.startswith(_ENGINEER_PRE_HANDLER_ERROR_PREFIXES)
         rejected_before_probe = error in {
             "Engineer tool refused: configured_network_identity_mismatch",
             "Engineer tool refused: configured_private_network_ambiguous",
@@ -2781,6 +3163,18 @@ def _record_engineer_action_receipt(
                     name = str(raw_name or "").strip().casefold()
                     version = " ".join(str(raw_version or "").split())[:160]
                     if re.fullmatch(r"[a-z0-9][a-z0-9_.+-]{0,39}", name) and version:
+                        versions.setdefault(name, version)
+        if tool_name == _ENGINEER_DECOMPILE_ACTION_TOOL:
+            raw_report = data.get("report")
+            report = raw_report if isinstance(raw_report, Mapping) else {}
+            versions = ledger.setdefault("tool_versions", {})
+            if isinstance(versions, dict):
+                for name, raw_version in (
+                    ("ghidra", report.get("tool_version")),
+                    ("jdk", report.get("jdk_version")),
+                ):
+                    version = " ".join(str(raw_version or "").split())[:160]
+                    if re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9.+_-]{0,39}", version):
                         versions.setdefault(name, version)
 
 
@@ -34758,6 +35152,7 @@ class AgentContext:
     interaction_mode: str = "dialogue"
     engineer_dossier: dict[str, Any] = field(default_factory=dict)
     engineer_network_outcome: _EngineerNetworkOutcome | None = None
+    engineer_decompile_outcome: _EngineerDecompileOutcome | None = None
     pending_relations: int = 0
     pending_conflicts: int = 0
     feedback_summary: dict[str, Any] = field(default_factory=dict)
@@ -37008,6 +37403,11 @@ class AgentRuntime:
                 fresh_actor = replace(actor, preset_key=str(row["preset_key"] or "user"))
                 if not fresh_actor.is_owner or not authorization.authorize(fresh_actor, capability).allowed:
                     return None
+                if (
+                    capability in {"engineer.artifact.analyze", "engineer.artifact.patch"}
+                    and not authorization.authorize(fresh_actor, "files.read").allowed
+                ):
+                    return None
                 return fresh_actor
         except Exception as exc:  # noqa: BLE001 - unavailable proof denies engineer work
             LOGGER.warning("engineer capability recheck failed (%s)", type(exc).__name__)
@@ -39060,6 +39460,8 @@ class AgentRuntime:
         context.ingestion = {}
         context.interaction_mode = "dialogue"
         context.engineer_dossier = {}
+        context.engineer_network_outcome = None
+        context.engineer_decompile_outcome = None
         context.feedback_summary = {}
         context.knowledge_citations = {}
         context.rerank_dropped = 0
@@ -44410,6 +44812,13 @@ class AgentRuntime:
             # therefore an unresolved file, not permission to fall through to
             # an ambient/latest catalog candidate.
             return [], len(raw_ids)
+        from friday.organs.engineer.targets import requests_artifact_decompile
+
+        if requests_artifact_decompile(message):
+            # Decompilation's singular anaphora is bound only to the exact
+            # immediately preceding user-upload/assistant-used lineage.  A
+            # plural set is an ambiguity, never permission to pick the newest.
+            return (hydrated, 1) if len(hydrated) == 1 else ([], len(raw_ids))
         # A direct output transformation with a singular anaphora is a closed
         # continuation of this exact immediately preceding file.  It does not
         # consult latest/catalog/ambient rows, and the effect still passes the
@@ -45244,6 +45653,9 @@ class AgentRuntime:
                 if recovered_expected:
                     return recovered, recovered_expected
             reference_kind = _attachment_reference_kind(message)
+            from friday.organs.engineer.targets import requests_artifact_decompile
+
+            artifact_decompile_request = requests_artifact_decompile(message)
             archived_lookup = bool(_archived_source_search_query(message))
             if not reference_kind and archived_lookup:
                 # A fresh-conversation request to find a fact in a file sent
@@ -45257,7 +45669,8 @@ class AgentRuntime:
                 and not _attachment_navigation_filename_mentions(message)
                 and not _quoted_record_source_command_is_data(message)
                 and (
-                    _unquoted_topic_continuation_cue(message)
+                    artifact_decompile_request
+                    or _unquoted_topic_continuation_cue(message)
                     or bool(_attachment_topic_terms(message))
                     and not file_turn_authority(message).has_effect()
                     or file_turn_authority(message).proved("file_create")
@@ -46300,6 +46713,11 @@ class AgentRuntime:
         may_read_files = bool(
             authorization is not None and authorization.authorize(actor, "files.read").allowed
         )
+        from friday.organs.engineer.targets import requests_artifact_decompile
+
+        artifact_decompile_requested = bool(
+            interaction_mode == "engineer" and requests_artifact_decompile(clean_message)
+        )
         filename_continuation_decomposition = _closed_locate_remainder(clean_message)
         filename_continuation_visible = _classification_text(
             filename_continuation_decomposition.locate_clause
@@ -46348,6 +46766,7 @@ class AgentRuntime:
             workspace_inbox_request is None
             and (
                 supplied_attachment_count
+                or artifact_decompile_requested
                 or quoted_attachment_reference
                 or reply_assistant_lineage_requested
                 or attachment_reference_kind
@@ -48349,7 +48768,8 @@ class AgentRuntime:
             )
         )
         attachment_tool_action_requested = bool(
-            not synthetic_document_notice and (file_effect or host_json_attachment_raw_id)
+            not synthetic_document_notice
+            and (file_effect or host_json_attachment_raw_id or artifact_decompile_requested)
         )
         if (
             file_source_only
@@ -49314,7 +49734,7 @@ class AgentRuntime:
         ):
             context.engineer_dossier = await self._engineer_autohunt(
                 "" if synthetic_document_notice else clean_message,
-                active_attachment_set or attachments or [],
+                list(active_attachment_set),
                 actor=actor,
                 turn_deadline=turn_deadline,
                 enable_tools=enable_tools,
@@ -49334,6 +49754,32 @@ class AgentRuntime:
                     clean_message,
                     "запрос на активное сканирование настроенной LAN",
                 )
+            context.engineer_decompile_outcome = _engineer_decompile_owned_outcome(context.engineer_dossier)
+            if context.engineer_decompile_outcome is not None:
+                rendered_decompile_outcome = _render_engineer_decompile_outcome(
+                    context.engineer_decompile_outcome
+                )
+                from friday.organs.engineer.targets import requests_artifact_patch
+
+                if requests_artifact_patch(clean_message):
+                    rendered_decompile_outcome += (
+                        "\nПроизводный патч в этом же ходе не создавался: отправьте исправление "
+                        "отдельной командой, чтобы каждый файл прошёл собственную проверку доставки."
+                    )
+                context.structural_answer = "\n\n".join(
+                    part for part in (context.structural_answer, rendered_decompile_outcome) if part
+                )
+                from friday.organs.engineer.targets import artifact_decompile_request_is_atomic
+
+                if artifact_decompile_request_is_atomic(clean_message):
+                    context.open_remainder = ""
+                    context.remainder_known = True
+                else:
+                    await self._settle_structural_remainder(
+                        context,
+                        clean_message,
+                        "запрос на декомпиляцию выбранного бинарного файла",
+                    )
         engineer_unreadable_artifacts_covered = bool(
             interaction_mode == "engineer"
             and (unreadable_attachment_answer or partially_unreadable_attachment_answer)
@@ -49679,6 +50125,13 @@ class AgentRuntime:
             # remain available in ordinary dialogue/research, but they are not
             # silently inherited by this mode.
             visible_tools = _project_engineer_tool_schemas(visible_tools)
+            if context.engineer_decompile_outcome is not None:
+                # A decompile report consumes this turn's sole generated-file
+                # carrier. A patch can be requested in the immediately
+                # following turn against the same persisted source lineage.
+                visible_tools = [
+                    tool for tool in visible_tools if _engineer_tool_name(tool) != "engineer_patch_artifact"
+                ]
         else:
             # Registering the optional organ must not enlarge ordinary model
             # surfaces.  Mode is the product boundary; capability checks alone
@@ -50698,6 +51151,32 @@ class AgentRuntime:
                     )
                 )
 
+        engineer_decompile_outcome = context.engineer_decompile_outcome
+        if engineer_decompile_outcome is not None:
+            response["_engineer_decompile_owned"] = True
+            if engineer_decompile_outcome.tool_started:
+                response["tools_used"] = list(
+                    dict.fromkeys(
+                        [
+                            _ENGINEER_DECOMPILE_ACTION_TOOL,
+                            *(str(name) for name in (response.get("tools_used") or []) if str(name)),
+                        ]
+                    )
+                )
+            decompile_attachment = _engineer_decompile_attachment(context.engineer_dossier)
+            if decompile_attachment is not None and engineer_decompile_outcome.report_prepared:
+                existing_files = [
+                    dict(item) for item in (response.get("file_clips") or []) if isinstance(item, Mapping)
+                ]
+                raw_structural_count = response.get("_structural_file_count")
+                existing_structural_count = (
+                    max(0, min(len(existing_files), raw_structural_count))
+                    if isinstance(raw_structural_count, int) and not isinstance(raw_structural_count, bool)
+                    else 0
+                )
+                response["file_clips"] = [decompile_attachment, *existing_files]
+                response["_structural_file_count"] = existing_structural_count + 1
+
         if context.archive_search_isolated_turn:
             # Reassert the isolation fixed point after arbitrary model/adapter
             # callbacks.  Only the admitted archive evidence remains transient;
@@ -51691,7 +52170,11 @@ class AgentRuntime:
                     or file_turn.proved("workspace")
                     or clean_workspace_channel_requested
                     or workspace_authority_message
-                    or bool(attempted_supported_deed_tools.intersection({"make_file", "workspace_create"})),
+                    or bool(
+                        attempted_supported_deed_tools.intersection(
+                            {"make_file", "workspace_create", _ENGINEER_DECOMPILE_ACTION_TOOL}
+                        )
+                    ),
                 ),
                 (
                     "reminder",
@@ -53723,6 +54206,12 @@ class AgentRuntime:
             and isinstance(context.engineer_network_outcome, _EngineerNetworkOutcome)
             else {}
         )
+        engineer_decompile_outcome_receipt = (
+            context.engineer_decompile_outcome.receipt()
+            if interaction_mode == "engineer"
+            and isinstance(context.engineer_decompile_outcome, _EngineerDecompileOutcome)
+            else {}
+        )
         assistant_used_attachment = bool(
             attachment_readable_count > 0
             or response.get("_document_metadata_owned") is True
@@ -53730,6 +54219,8 @@ class AgentRuntime:
             or response.get("_unreadable_attachment_owned") is True
             and active_attachment_set
             or engineer_unreadable_artifacts_covered
+            and active_attachment_set
+            or context.engineer_decompile_outcome is not None
             and active_attachment_set
         )
         assistant_attachment_raw_ids = (
@@ -53918,6 +54409,8 @@ class AgentRuntime:
                 "verdict_kind": (
                     "office_exact"
                     if response.get("_office_exact_owned") is True
+                    else "engineer_artifact_decompile"
+                    if response.get("_engineer_decompile_owned") is True
                     else "engineer_network_scan"
                     if response.get("_engineer_network_owned") is True
                     else "obsidian"
@@ -53929,6 +54422,7 @@ class AgentRuntime:
                 "answer_present": (
                     bool(spoken)
                     or response.get("_office_exact_owned") is True
+                    or response.get("_engineer_decompile_owned") is True
                     or response.get("_obsidian_owned") is True
                     or response.get("_obsidian_result_note_owned") is True
                     or response.get("_small_talk_owned") is True
@@ -54138,6 +54632,10 @@ class AgentRuntime:
             # The raw scope, host list and banners stay transient.  This closed
             # accepted-outcome receipt is committed atomically with the reply.
             assistant_metadata[_ENGINEER_NETWORK_OUTCOME_METADATA_KEY] = engineer_network_outcome_receipt
+        if engineer_decompile_outcome_receipt:
+            # Source bytes, Raw identity, symbols and pseudocode remain outside
+            # durable metadata; only the closed accounting receipt is stored.
+            assistant_metadata[_ENGINEER_DECOMPILE_OUTCOME_METADATA_KEY] = engineer_decompile_outcome_receipt
         # Final audio is another source-derived carrier, not decoration on an
         # already-published message.  Synthesize it before the definitive
         # provider re-read/assistant transaction: the voice helper admits the
@@ -54301,7 +54799,20 @@ class AgentRuntime:
         accepted_archive_candidate_projection: ArchiveSearchAcceptedCandidateProjection | None = None
         selected_archive_work_evidence: SelectedArchiveEvidence | None = None
         archive_attestation = None
-        with self.storage.transaction() as publication_conn:
+        generated_files_attestation = None
+        generated_files_rollback_guard = (
+            GeneratedFilesPersistenceRollbackGuard(self.settings.files_dir)
+            if engineer_decompile_outcome is not None
+            and engineer_decompile_outcome.status in {CapabilityStatus.SUCCEEDED, CapabilityStatus.PARTIAL}
+            else None
+        )
+        publication_transaction: Any = self.storage.transaction()
+        if generated_files_rollback_guard is not None:
+            publication_transaction = generated_files_publication_transaction(
+                self.storage,
+                generated_files_rollback_guard,
+            )
+        with publication_transaction as publication_conn:
             attachment_publication_authorized = bool(
                 not attachment_publication_reauth_required
                 or (
@@ -54623,6 +55134,12 @@ class AgentRuntime:
                     "attachment_query_files_matched",
                 ):
                     assistant_metadata.pop(private_key, None)
+                # A successful decompile receipt is accepted only together
+                # with its exact durable report under the complete publication
+                # decision. Any sibling source-policy denial suppresses both,
+                # even when the attachment's own files.read authority survived.
+                assistant_metadata.pop(_ENGINEER_DECOMPILE_OUTCOME_METADATA_KEY, None)
+                engineer_decompile_outcome_receipt = {}
 
             obsidian_effect_operation_id = str(response.get("_obsidian_effect_operation_id") or "").strip()
             if obsidian_effect_operation_id:
@@ -55167,6 +55684,50 @@ class AgentRuntime:
                     assistant_message.get("metadata_json"),
                     expected_outcome=accepted_obsidian_effect_outcome,
                 )
+            if (
+                publication_authorized
+                and engineer_decompile_outcome is not None
+                and engineer_decompile_outcome.status
+                in {CapabilityStatus.SUCCEEDED, CapabilityStatus.PARTIAL}
+            ):
+                # Ghidra has already finished.  Freeze the exact report only
+                # after the final files.read/source reauthorization, but before
+                # releasing this same BEGIN IMMEDIATE transaction.  The Raw
+                # handle, descriptor, accepted outcome and assistant reply are
+                # therefore one publication unit; a later revoke cannot land in
+                # the former server-side persistence gap.
+                generated_projection = persist_generated_response_files(
+                    self.storage,
+                    self.settings.files_dir,
+                    {
+                        "message_id": str(assistant_message.get("id") or ""),
+                        "files": response.get("file_clips") or [],
+                    },
+                    tenant_id=actor.user_id,
+                    person_id=actor.own_id,
+                    max_bytes=self.settings.max_upload_bytes,
+                    rollback_guard=generated_files_rollback_guard,
+                )
+                persisted_files = generated_projection.get("files")
+                if (
+                    not isinstance(persisted_files, list)
+                    or not persisted_files
+                    or not isinstance(persisted_files[0], Mapping)
+                    or not hmac.compare_digest(
+                        str(persisted_files[0].get("sha256") or ""),
+                        engineer_decompile_outcome.report_sha256,
+                    )
+                ):
+                    raise ValueError("engineer decompile report durability attestation failed")
+                response["file_clips"] = persisted_files
+                generated_files_attestation = generated_files_persistence_attestation(
+                    {
+                        "message_id": str(assistant_message.get("id") or ""),
+                        "files": persisted_files,
+                    }
+                )
+                if generated_files_attestation is None:
+                    raise ValueError("engineer decompile persistence attestation is unavailable")
         publication_authority_changed_before_publication = bool(
             attachment_authority_changed_before_publication
             or source_search_authority_changed_before_publication
@@ -55252,6 +55813,11 @@ class AgentRuntime:
                 else final_voice
             ),
             "files": response.get("file_clips") or [],
+            **(
+                {"_generated_files_persistence": generated_files_attestation}
+                if generated_files_attestation is not None
+                else {}
+            ),
             # Structural only: regenerate can distinguish a recoverable
             # persisted file from a legacy/transient attachment without ever
             # receiving its Raw Object id or excerpt.
@@ -55297,6 +55863,11 @@ class AgentRuntime:
                 **(
                     {_ENGINEER_NETWORK_OUTCOME_METADATA_KEY: (engineer_network_outcome_receipt)}
                     if engineer_network_outcome_receipt
+                    else {}
+                ),
+                **(
+                    {_ENGINEER_DECOMPILE_OUTCOME_METADATA_KEY: engineer_decompile_outcome_receipt}
+                    if engineer_decompile_outcome_receipt
                     else {}
                 ),
             },
@@ -55533,6 +56104,8 @@ class AgentRuntime:
         }
         network_requested = engineer_hosts.active_assessment_requested(message)
         configured_network_requested = engineer_targets.requests_configured_network_assessment(message)
+        artifact_decompile_requested = engineer_targets.requests_artifact_decompile(message)
+        dossier["_artifact_decompile_action_requested"] = artifact_decompile_requested
         explicit_network_cidr = ""
         explicit_network_error = ""
         if network_requested:
@@ -55561,14 +56134,20 @@ class AgentRuntime:
             if _turn_deadline_expired(turn_deadline):
                 if tool_name == _ENGINEER_NETWORK_ACTION_TOOL:
                     dossier["_configured_network_unavailable_reason"] = "turn_deadline_expired"
+                elif tool_name == _ENGINEER_DECOMPILE_ACTION_TOOL:
+                    dossier["_artifact_decompile_error"] = "deadline_expired"
                 return None
             fresh_actor = self._fresh_engineer_actor(actor, capability)
             if fresh_actor is None:
                 if tool_name == _ENGINEER_NETWORK_ACTION_TOOL:
                     dossier["_configured_network_unavailable_reason"] = "authorization_unavailable"
+                elif tool_name == _ENGINEER_DECOMPILE_ACTION_TOOL:
+                    dossier["_artifact_decompile_error"] = "authorization_unavailable"
                 return None
             if tool_name == _ENGINEER_NETWORK_ACTION_TOOL:
                 dossier["_configured_network_tool_started"] = True
+            elif tool_name == _ENGINEER_DECOMPILE_ACTION_TOOL:
+                dossier["_artifact_decompile_tool_started"] = True
             _mark_engineer_action_started(dossier, tool_name)
             try:
                 result = await _await_with_turn_deadline(
@@ -55576,11 +56155,17 @@ class AgentRuntime:
                     turn_deadline,
                     expired=f"turn deadline expired during automatic {tool_name}",
                 )
+                if tool_name == _ENGINEER_DECOMPILE_ACTION_TOOL:
+                    dossier["_artifact_decompile_tool_started"] = bool(
+                        result.handler_entered and result.work_started is not False
+                    )
                 _record_engineer_action_receipt(dossier, tool_name, result)
                 return result
             except TimeoutError:
                 # ExecutionKernel records the cancellation as an uncertain
                 # terminal audit before propagating it through ``wait_for``.
+                if tool_name == _ENGINEER_DECOMPILE_ACTION_TOOL:
+                    dossier["_artifact_decompile_error"] = "deadline_expired"
                 return ToolResult(
                     tool_name,
                     False,
@@ -55801,6 +56386,39 @@ class AgentRuntime:
                         "error": "analysis_unavailable",
                     }
                 )
+
+        if artifact_decompile_requested:
+            if len(raw_ids) != 1:
+                dossier["_artifact_decompile_reason"] = (
+                    "exact_artifact_required" if not raw_ids else "ambiguous_artifact"
+                )
+            elif (
+                turn_deadline is not None
+                and (_remaining_deadline_budget(turn_deadline) or 0.0) < _ENGINEER_DECOMPILE_MIN_REMAINING_SEC
+            ):
+                # The sandbox has its own bounded process-group deadline, but
+                # the thread which supervises it cannot be force-cancelled.
+                # Do not enter unless the enclosing request can outlive that
+                # entire bound; otherwise a timed-out reply could leave Ghidra
+                # consuming resources after the turn has already closed.
+                dossier["_artifact_decompile_error"] = "deadline_expired"
+            elif not _turn_deadline_expired(turn_deadline):
+                result = await execute_audited(
+                    _ENGINEER_DECOMPILE_ACTION_TOOL,
+                    {"raw_id": raw_ids[0]},
+                    "engineer.artifact.analyze",
+                )
+                if result is not None:
+                    if result.success and isinstance(result.data, Mapping):
+                        dossier["artifact_decompile"] = dict(result.data)
+                        if isinstance(result.attachment, Mapping):
+                            dossier["_artifact_decompile_attachment"] = dict(result.attachment)
+                    else:
+                        dossier["_artifact_decompile_error"] = _engineer_decompile_failure_reason(
+                            result.error
+                        )
+            else:
+                dossier["_artifact_decompile_error"] = "deadline_expired"
 
         successful_artifacts = [
             item for item in dossier["artifacts"] if isinstance(item, Mapping) and item.get("ok") is True
@@ -58469,6 +59087,13 @@ class AgentRuntime:
             # (or after policy/HITL refusal).  The execution seam below remains
             # fail-closed as defence in depth for a fabricated native call.
             tools[:] = [tool for tool in tools if _engineer_tool_name(tool) not in _ENGINEER_HOST_TOOL_NAMES]
+        if context.interaction_mode == "engineer" and not engineer_artifact_refs:
+            # No current, owner-reauthorized Raw lineage means no artifact
+            # capability is even advertised. The injection seam below still
+            # rejects a fabricated call as defence in depth.
+            tools[:] = [
+                tool for tool in tools if _engineer_tool_name(tool) not in _ENGINEER_ARTIFACT_TOOL_NAMES
+            ]
 
         archive_search_was_offered = any(
             str((tool.get("function") or {}).get("name") or tool.get("name") or "")
@@ -59978,6 +60603,7 @@ class AgentRuntime:
                         context.interaction_mode != "engineer"
                         or not selected_artifact_raw_id
                         or selected_artifact_raw_id not in engineer_pinned_raw_ids
+                        or call.name == _ENGINEER_DECOMPILE_ACTION_TOOL
                         or (call.name == "engineer_patch_artifact" and not engineer_patch_authorized)
                     ):
                         carrier_allowed = False
@@ -61292,6 +61918,7 @@ class AgentRuntime:
         settles_tags = "список тегов" in folded_settled or "инвентар" in folded_settled
         settles_archive_count = "общий счётчик личного архива" in folded_settled
         settles_engineer_network = "активное сканирование настроенной lan" in folded_settled
+        settles_engineer_decompile = "декомпиляцию выбранного бинарного файла" in folded_settled
         tag_remainder_clauses = (
             _tag_inventory_open_remainder_clauses(
                 message,
@@ -61343,6 +61970,10 @@ class AgentRuntime:
                 # literal clause, but it may never reopen that same effect for
                 # the main model/tool loop.
                 unsafe_rest = unsafe_rest or requests_active_assessment(rest)
+            if settles_engineer_decompile:
+                from friday.organs.engineer.targets import requests_artifact_decompile
+
+                unsafe_rest = unsafe_rest or requests_artifact_decompile(rest)
             if "сч" in folded_settled and "тчик" in folded_settled:
                 source_clauses = (
                     _split_tag_request_clauses(message)

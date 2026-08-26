@@ -14,6 +14,7 @@ import signal
 import stat
 import subprocess
 import tempfile
+import threading
 import time
 from collections.abc import Mapping, Sequence
 from contextlib import suppress
@@ -21,6 +22,8 @@ from pathlib import Path
 from typing import Any
 
 from friday.private_fs import ensure_private_directory, open_private_text_write
+
+from . import decompiler
 
 BWRAP = Path("/usr/bin/bwrap")
 PYTHON = Path("/usr/bin/python3")
@@ -36,16 +39,22 @@ MAX_STDERR_BYTES = 64 * 1024
 MAX_WALL_SECONDS = 45.0
 MAX_CPU_SECONDS = 30
 MAX_ADDRESS_SPACE_BYTES = 768 * 1024 * 1024
+DECOMPILE_MAX_WALL_SECONDS = 240.0
+DECOMPILE_MAX_CPU_SECONDS = 960
+DECOMPILE_MAX_ADDRESS_SPACE_BYTES = 8 * 1024 * 1024 * 1024
+DECOMPILE_MAX_FILE_BYTES = 128 * 1024 * 1024
 MAX_ADMITTED_CGROUP_PIDS = 65_536
 _SMOKE_SUCCESS_KEY: tuple[object, ...] | None = None
 _SMOKE_SUCCESS_RESULT: dict[str, Any] | None = None
+_DECOMPILER_LOCK = threading.Lock()
 
 
 class EngineerSandboxError(ValueError):
     """A closed, content-free artifact worker failure."""
 
-    def __init__(self, code: str) -> None:
+    def __init__(self, code: str, *, work_started: bool = False) -> None:
         self.code = str(code or "sandbox_failed")[:80]
+        self.work_started = bool(work_started)
         super().__init__(self.code)
 
 
@@ -198,16 +207,16 @@ def _current_cgroup_pids_limit() -> int | None:
     return None
 
 
-def _remaining_timeout(deadline: float | None) -> float:
+def _remaining_timeout(deadline: float | None, maximum: float = MAX_WALL_SECONDS) -> float:
     if deadline is None:
-        return MAX_WALL_SECONDS
+        return maximum
     remaining = float(deadline) - time.monotonic()
     if remaining <= 0:
         raise EngineerSandboxError("deadline_expired")
-    return min(MAX_WALL_SECONDS, remaining)
+    return min(maximum, remaining)
 
 
-def _sandbox_argv(workspace: Path) -> list[str]:
+def _sandbox_argv(workspace: Path, *, mount_decompiler: bool = False) -> list[str]:
     package_root = Path(__file__).resolve().parents[2]
     if package_root.name != "friday" or not package_root.is_dir() or package_root.is_symlink():
         raise EngineerSandboxError("package_root_untrusted")
@@ -247,56 +256,90 @@ def _sandbox_argv(workspace: Path) -> list[str]:
         "--ro-bind",
         str(package_root),
         "/app/friday",
-        "--bind",
-        str(workspace),
-        "/work",
-        "--chdir",
-        "/work",
-        "--clearenv",
-        "--setenv",
-        "PATH",
-        "/usr/bin:/bin",
-        "--setenv",
-        "PYTHONPATH",
-        "/app",
-        "--setenv",
-        "PYTHONDONTWRITEBYTECODE",
-        "1",
-        "--setenv",
-        "PYTHONHASHSEED",
-        "0",
-        "--setenv",
-        "LANG",
-        "C.UTF-8",
-        "--setenv",
-        "LC_ALL",
-        "C.UTF-8",
-        "--",
-        str(PYTHON),
-        "-S",
-        "-B",
-        "-m",
-        "friday.organs.engineer.worker",
-        "/work/request.json",
-        "/work/input.bin",
-        "/work/result.json",
-        "/work/output.bin",
     ]
+    if mount_decompiler:
+        # Only the two verified, versioned owner-local trees are visible.  The
+        # rest of /home and /home/jericho/.jericho is absent from the namespace.
+        argv.extend(
+            [
+                "--dir",
+                "/opt",
+                "--ro-bind",
+                str(decompiler.GHIDRA_ROOT),
+                str(decompiler.SANDBOX_GHIDRA_ROOT),
+                "--ro-bind",
+                str(decompiler.JDK_ROOT),
+                str(decompiler.SANDBOX_JDK_ROOT),
+            ]
+        )
+    argv.extend(
+        [
+            "--bind",
+            str(workspace),
+            "/work",
+            "--chdir",
+            "/work",
+            "--clearenv",
+            "--setenv",
+            "PATH",
+            "/usr/bin:/bin",
+            "--setenv",
+            "PYTHONPATH",
+            "/app",
+            "--setenv",
+            "PYTHONDONTWRITEBYTECODE",
+            "1",
+            "--setenv",
+            "PYTHONHASHSEED",
+            "0",
+            "--setenv",
+            "LANG",
+            "C.UTF-8",
+            "--setenv",
+            "LC_ALL",
+            "C.UTF-8",
+            "--",
+            str(PYTHON),
+            "-S",
+            "-B",
+            "-m",
+            "friday.organs.engineer.worker",
+            "/work/request.json",
+            "/work/input.bin",
+            "/work/result.json",
+            "/work/output.bin",
+        ]
+    )
     return argv
 
 
-def _limited_sandbox_argv(workspace: Path) -> list[str]:
+def _limited_sandbox_argv(
+    workspace: Path,
+    *,
+    action: str = "analyze",
+    mount_decompiler: bool = False,
+) -> list[str]:
     """Apply non-PID limits in a trusted executable, never a Python fork hook."""
 
+    if action == "decompile":
+        cpu_seconds = DECOMPILE_MAX_CPU_SECONDS
+        file_bytes = DECOMPILE_MAX_FILE_BYTES
+        address_space_bytes = DECOMPILE_MAX_ADDRESS_SPACE_BYTES
+        nofile = 512
+    else:
+        cpu_seconds = MAX_CPU_SECONDS
+        file_bytes = MAX_OUTPUT_BYTES
+        address_space_bytes = MAX_ADDRESS_SPACE_BYTES
+        nofile = 64
     return [
         str(PRLIMIT),
         "--core=0:0",
-        f"--cpu={MAX_CPU_SECONDS}:{MAX_CPU_SECONDS + 1}",
-        f"--fsize={MAX_OUTPUT_BYTES}:{MAX_OUTPUT_BYTES}",
-        f"--as={MAX_ADDRESS_SPACE_BYTES}:{MAX_ADDRESS_SPACE_BYTES}",
-        "--nofile=64:64",
+        f"--cpu={cpu_seconds}:{cpu_seconds + 1}",
+        f"--fsize={file_bytes}:{file_bytes}",
+        f"--as={address_space_bytes}:{address_space_bytes}",
+        f"--nofile={nofile}:{nofile}",
         "--",
-        *_sandbox_argv(workspace),
+        *_sandbox_argv(workspace, mount_decompiler=mount_decompiler),
     ]
 
 
@@ -309,10 +352,15 @@ def _run_worker(
     deadline: float | None = None,
     workspace_root: Path | None = None,
 ) -> tuple[dict[str, Any], bytes | None]:
+    maximum = DECOMPILE_MAX_WALL_SECONDS if action == "decompile" else MAX_WALL_SECONDS
+    # A queued ``run_blocking`` call retains its original deadline. Refuse it
+    # before any expensive admission work so a drained queue cannot resurrect
+    # a request whose enclosing turn has already ended.
+    _remaining_timeout(deadline, maximum)
     admission = preflight()
     if not admission.get("ok"):
         raise EngineerSandboxError(str(admission.get("reason") or "sandbox_unavailable"))
-    if action not in {"analyze", "patch", "preflight"}:
+    if action not in {"analyze", "decompile", "patch", "preflight"}:
         raise EngineerSandboxError("unknown_action")
     if not isinstance(data, bytes) or not data or len(data) > MAX_INPUT_BYTES:
         raise EngineerSandboxError("input_size_invalid")
@@ -322,6 +370,22 @@ def _run_worker(
         "filename": Path(str(filename or "artifact.bin")).name[:180],
         "operations": [dict(item) for item in (operations or ())],
     }
+    mount_decompiler = False
+    if action == "decompile":
+        toolchain = decompiler.host_toolchain_preflight()
+        mount_decompiler = toolchain.get("ok") is True
+        request["decompiler_toolchain"] = (
+            {
+                "ok": True,
+                "tool_version": decompiler.GHIDRA_VERSION,
+                "jdk_version": decompiler.JDK_VERSION,
+            }
+            if mount_decompiler
+            else {
+                "ok": False,
+                "reason": str(toolchain.get("reason") or "toolchain_untrusted")[:80],
+            }
+        )
     if action == "preflight":
         try:
             request["parent_netns"] = os.readlink("/proc/self/ns/net")
@@ -350,40 +414,65 @@ def _run_worker(
         _write_private_bytes(request_path, encoded_request)
         _write_private_bytes(input_path, data)
         with open_private_text_write(stderr_path) as stderr_handle:
-            process = subprocess.Popen(  # noqa: S603 - fixed trusted prlimit/bwrap argv
-                _limited_sandbox_argv(workspace),
-                stdin=subprocess.DEVNULL,
-                stdout=subprocess.DEVNULL,
-                stderr=stderr_handle,
-                close_fds=True,
-                start_new_session=True,
-            )
+            # Toolchain verification and workspace preparation may consume the
+            # remaining budget. Resolve the exact wait bound immediately before
+            # process creation; an expired request must never launch bwrap.
+            worker_timeout = _remaining_timeout(deadline, maximum)
             try:
-                process.wait(timeout=_remaining_timeout(deadline))
-            except subprocess.TimeoutExpired as exc:
-                with suppress(ProcessLookupError):
-                    os.killpg(process.pid, signal.SIGKILL)
-                process.wait()
-                raise EngineerSandboxError("worker_timeout") from exc
+                process = subprocess.Popen(  # noqa: S603 - fixed trusted prlimit/bwrap argv
+                    _limited_sandbox_argv(
+                        workspace,
+                        action=action,
+                        mount_decompiler=mount_decompiler,
+                    ),
+                    stdin=subprocess.DEVNULL,
+                    stdout=subprocess.DEVNULL,
+                    stderr=stderr_handle,
+                    close_fds=True,
+                    start_new_session=True,
+                )
+            except OSError as exc:
+                raise EngineerSandboxError("worker_launch_failed") from exc
+            try:
+                process.wait(timeout=worker_timeout)
+            except BaseException as exc:
+                # Cancellation, a deadline failure or an unexpected wait error
+                # must not release TemporaryDirectory/the physical slot while a
+                # detached worker group still owns those paths and resources.
+                if process.poll() is None:
+                    with suppress(ProcessLookupError):
+                        os.killpg(process.pid, signal.SIGKILL)
+                    process.wait()
+                if isinstance(exc, subprocess.TimeoutExpired):
+                    raise EngineerSandboxError("worker_timeout", work_started=True) from exc
+                if isinstance(exc, EngineerSandboxError):
+                    raise EngineerSandboxError(exc.code, work_started=True) from exc
+                raise
         if process.returncode != 0:
             # Never carry parser-controlled stderr or filesystem paths into logs,
             # audit rows or a model prompt.
             with suppress(EngineerSandboxError):
                 _read_bounded_regular(stderr_path, MAX_STDERR_BYTES)
-            raise EngineerSandboxError("worker_failed")
-        raw_result = _read_bounded_regular(result_path, MAX_RESULT_BYTES)
+            raise EngineerSandboxError("worker_failed", work_started=True)
+        try:
+            raw_result = _read_bounded_regular(result_path, MAX_RESULT_BYTES)
+        except EngineerSandboxError as exc:
+            raise EngineerSandboxError(exc.code, work_started=True) from exc
         try:
             parsed = json.loads(raw_result.decode("utf-8"))
         except (UnicodeDecodeError, json.JSONDecodeError) as exc:
-            raise EngineerSandboxError("worker_result_invalid") from exc
+            raise EngineerSandboxError("worker_result_invalid", work_started=True) from exc
         if not isinstance(parsed, dict) or parsed.get("protocol") != PROTOCOL_VERSION:
-            raise EngineerSandboxError("worker_protocol_mismatch")
+            raise EngineerSandboxError("worker_protocol_mismatch", work_started=True)
         parsed["sandbox"] = admission
         output = None
         if action == "patch" and parsed.get("ok") is True:
-            output = _read_bounded_regular(output_path, MAX_OUTPUT_BYTES)
+            try:
+                output = _read_bounded_regular(output_path, MAX_OUTPUT_BYTES)
+            except EngineerSandboxError as exc:
+                raise EngineerSandboxError(exc.code, work_started=True) from exc
             if not output:
-                raise EngineerSandboxError("worker_output_empty")
+                raise EngineerSandboxError("worker_output_empty", work_started=True)
         return parsed, output
 
 
@@ -402,6 +491,30 @@ def analyze_artifact(
         workspace_root=workspace_root,
     )
     return result
+
+
+def decompile_artifact(
+    data: bytes,
+    filename: str = "",
+    *,
+    deadline: float | None = None,
+    workspace_root: Path | None = None,
+) -> dict[str, Any]:
+    """Return a bounded Ghidra function index for one PE or ELF artifact."""
+
+    if not _DECOMPILER_LOCK.acquire(blocking=False):
+        raise EngineerSandboxError("decompiler_busy")
+    try:
+        result, _output = _run_worker(
+            "decompile",
+            data,
+            filename,
+            deadline=deadline,
+            workspace_root=workspace_root,
+        )
+        return result
+    finally:
+        _DECOMPILER_LOCK.release()
 
 
 def patch_artifact(
@@ -510,6 +623,7 @@ def smoke_preflight(
 __all__ = [
     "EngineerSandboxError",
     "analyze_artifact",
+    "decompile_artifact",
     "patch_artifact",
     "preflight",
     "smoke_preflight",

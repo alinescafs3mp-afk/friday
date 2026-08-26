@@ -15,7 +15,7 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
-from . import artifacts, local_binaries, toolchain
+from . import artifacts, decompiler, local_binaries, toolchain
 
 PROTOCOL_VERSION = 1
 MAX_REQUEST_BYTES = 512 * 1024
@@ -154,6 +154,18 @@ def run(request_path: Path, input_path: Path, result_path: Path, output_path: Pa
                 **report,
                 "protocol": PROTOCOL_VERSION,
                 "ok": bool(report.get("ok")),
+            }
+        elif action == "decompile":
+            kind = artifacts.classify_kind(data, filename)
+            decompile_report = decompiler.decompile_artifact(
+                input_path,
+                kind,
+                request_payload.get("decompiler_toolchain"),
+            )
+            result = {
+                **decompile_report,
+                "protocol": PROTOCOL_VERSION,
+                "ok": bool(decompile_report.get("ok")),
             }
         elif action == "patch":
             raw_operations = request_payload.get("operations")

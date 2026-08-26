@@ -23,7 +23,9 @@ import os
 import re
 import tempfile
 import unicodedata
-from collections.abc import Mapping
+from collections.abc import Iterator, Mapping
+from contextlib import contextmanager
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -44,6 +46,184 @@ class GeneratedFilePersistenceError(RuntimeError):
     """A response claimed to contain a file which could not be frozen safely."""
 
 
+class GeneratedFilesPersistenceRollbackGuard:
+    """Track new blobs until their enclosing database commit is durable.
+
+    ``persist_generated_response_files`` normally owns its outer transaction.
+    Some publication paths deliberately call it inside a larger transaction so
+    the assistant message, Raw handles and accepted outcome commit together.
+    This process-private guard lets that outer boundary compensate newly-created
+    blobs while it still owns the SQLite writer lock.
+    """
+
+    __slots__ = ("_created_paths", "_files_root", "_inserted_raw_ids")
+
+    def __init__(self, files_root: Path) -> None:
+        self._files_root = Path(files_root).resolve()
+        self._created_paths: set[str] = set()
+        self._inserted_raw_ids: set[str] = set()
+
+    def _sets_for(self, files_root: Path) -> tuple[set[str], set[str]]:
+        if Path(files_root).resolve() != self._files_root:
+            raise GeneratedFilePersistenceError("rollback guard file root mismatch")
+        return self._created_paths, self._inserted_raw_ids
+
+    def after_commit(self) -> None:
+        """Disarm the guard after the Raw handles are durable."""
+
+        self._created_paths.clear()
+        self._inserted_raw_ids.clear()
+
+    def after_rollback(self, conn: Any) -> None:
+        """Remove only blobs which remain unreferenced after the rollback."""
+
+        _discard_unreferenced_paths(
+            conn,
+            self._files_root,
+            self._created_paths,
+            # The rows created by this unit have already rolled back.  Query
+            # every remaining row so a pre-existing shared blob is retained.
+            inserted_raw_ids=set(),
+        )
+        self._created_paths.clear()
+        self._inserted_raw_ids.clear()
+
+
+@contextmanager
+def generated_files_publication_transaction(
+    storage: Any,
+    rollback_guard: GeneratedFilesPersistenceRollbackGuard,
+) -> Iterator[Any]:
+    """Keep the writer lock through outer rollback and blob compensation."""
+
+    if type(rollback_guard) is not GeneratedFilesPersistenceRollbackGuard:
+        raise GeneratedFilePersistenceError("generated-file rollback guard is invalid")
+    connection = None
+    # ``FridayStorage.transaction`` already takes this reentrant lock. Taking
+    # one outer hold preserves its normal nested-savepoint behavior while
+    # preventing another writer from claiming a just-rolled-back blob before
+    # compensation has checked all remaining Raw references.
+    with storage._write_lock:  # noqa: SLF001 - atomic FS/SQLite publication boundary
+        try:
+            with storage.transaction() as connection:
+                yield connection
+        except BaseException:
+            if connection is not None:
+                rollback_guard.after_rollback(connection)
+            raise
+        else:
+            rollback_guard.after_commit()
+
+
+@dataclass(frozen=True, slots=True)
+class GeneratedFilesPersistenceAttestation:
+    """Process-private identity of one already-committed generated-file batch."""
+
+    message_id: str
+    descriptors: tuple[tuple[str, str, str, str, int], ...]
+
+
+def generated_files_persistence_attestation(
+    response: Mapping[str, Any],
+) -> GeneratedFilesPersistenceAttestation | None:
+    """Build a typed attestation from exact persisted response descriptors."""
+
+    message_id = str(response.get("message_id") or "").strip()
+    values = response.get("files")
+    if not _PUBLIC_MESSAGE_ID.fullmatch(message_id) or not isinstance(values, list) or not values:
+        return None
+    descriptors: list[tuple[str, str, str, str, int]] = []
+    for value in values:
+        if not isinstance(value, Mapping):
+            return None
+        raw_id = value.get("id")
+        filename = value.get("filename")
+        mime_type = value.get("mime_type")
+        digest = value.get("sha256")
+        size = value.get("size_bytes")
+        encoded = value.get("content_base64")
+        if (
+            not isinstance(raw_id, str)
+            or re.fullmatch(r"raw_[0-9a-f]{16}", raw_id) is None
+            or not isinstance(filename, str)
+            or filename != _safe_filename(filename)
+            or not isinstance(mime_type, str)
+            or mime_type != _safe_mime_type(mime_type)
+            or not isinstance(digest, str)
+            or _SHA256.fullmatch(digest) is None
+            or isinstance(size, bool)
+            or not isinstance(size, int)
+            or size < 0
+            or not isinstance(encoded, str)
+        ):
+            return None
+        try:
+            payload = base64.b64decode(encoded, validate=True)
+        except (ValueError, TypeError, binascii.Error):
+            return None
+        if len(payload) != size or not hmac.compare_digest(hashlib.sha256(payload).hexdigest(), digest):
+            return None
+        descriptors.append((raw_id, filename, mime_type, digest, size))
+    return GeneratedFilesPersistenceAttestation(message_id, tuple(descriptors))
+
+
+def validate_generated_files_persistence_attestation(
+    storage: Any,
+    response: Mapping[str, Any],
+    attestation: object,
+    *,
+    tenant_id: str,
+    person_id: str,
+) -> bool:
+    """Revalidate a process-private skip marker against Raw and message state."""
+
+    if type(attestation) is not GeneratedFilesPersistenceAttestation:
+        return False
+    expected = generated_files_persistence_attestation(response)
+    if expected is None or expected != attestation:
+        return False
+    with storage.transaction() as conn:
+        row = conn.execute(
+            """SELECT metadata_json FROM messages
+                 WHERE id=? AND user_id IN (?, ?) AND role='assistant'""",
+            (attestation.message_id, str(person_id), str(tenant_id)),
+        ).fetchone()
+        if row is None:
+            return False
+        raw_metadata = row["metadata_json"]
+        if (
+            not isinstance(raw_metadata, str)
+            or len(raw_metadata.encode("utf-8")) > _MESSAGE_METADATA_MAX_BYTES
+        ):
+            return False
+        try:
+            metadata = json.loads(raw_metadata or "{}")
+        except (TypeError, ValueError, RecursionError):
+            return False
+        durable_values = metadata.get("generated_files") if isinstance(metadata, Mapping) else None
+        if not isinstance(durable_values, list) or len(durable_values) != len(attestation.descriptors):
+            return False
+        for durable, identity in zip(durable_values, attestation.descriptors, strict=True):
+            raw_id, filename, mime_type, digest, size = identity
+            descriptor = generated_file_descriptor(
+                storage,
+                raw_id,
+                tenant_id=str(tenant_id),
+                person_id=str(person_id),
+            )
+            if (
+                descriptor is None
+                or not isinstance(durable, Mapping)
+                or descriptor != dict(durable)
+                or descriptor.get("filename") != filename
+                or descriptor.get("mime_type") != mime_type
+                or descriptor.get("sha256") != digest
+                or descriptor.get("size_bytes") != size
+            ):
+                return False
+    return True
+
+
 def persist_generated_response_files(
     storage: Any,
     files_root: Path,
@@ -52,6 +232,7 @@ def persist_generated_response_files(
     tenant_id: str,
     person_id: str,
     max_bytes: int,
+    rollback_guard: GeneratedFilesPersistenceRollbackGuard | None = None,
 ) -> dict[str, Any]:
     """Freeze inline response files and return the backwards-compatible response.
 
@@ -95,8 +276,13 @@ def persist_generated_response_files(
 
     persisted_items: list[dict[str, Any]] = []
     history_descriptors: list[dict[str, Any]] = []
-    created_paths: set[str] = set()
-    inserted_raw_ids: set[str] = set()
+    if rollback_guard is None:
+        created_paths: set[str] = set()
+        inserted_raw_ids: set[str] = set()
+    elif type(rollback_guard) is GeneratedFilesPersistenceRollbackGuard:
+        created_paths, inserted_raw_ids = rollback_guard._sets_for(Path(files_root))
+    else:
+        raise GeneratedFilePersistenceError("generated-file rollback guard is invalid")
     # ``store_raw_object`` and descriptor attachment use nested managed
     # transactions, so this outer unit rolls every Raw row back together.
     with storage.transaction() as conn:
@@ -194,16 +380,20 @@ def _persist_one(
     inserted_raw_ids: set[str],
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     payload, filename, mime_type, digest = _validated_item(item, max_bytes=max_bytes)
-    stored_path, path_created = _store_content_addressed(
+    stored_path = _store_content_addressed(
         files_root,
         person_id=person_id,
         digest=digest,
         content=payload,
+        created_paths=created_paths,
     )
-    if path_created:
-        created_paths.add(stored_path)
     source_ref = f"generated:{person_id}:{message_id}:{index}"
     candidate_id = new_id("raw")
+    # Register the candidate before SQLite is entered.  If cancellation lands
+    # immediately after the INSERT, rollback cleanup must still be able to
+    # ignore that soon-to-be-rolled-back row when deciding whether the new blob
+    # has another durable reference.
+    inserted_raw_ids.add(candidate_id)
     raw = storage.store_raw_object(
         RawObject(
             id=candidate_id,
@@ -226,8 +416,8 @@ def _persist_one(
             },
         )
     )
-    if raw.id == candidate_id:
-        inserted_raw_ids.add(raw.id)
+    if raw.id != candidate_id:
+        inserted_raw_ids.discard(candidate_id)
     metadata = bounded_raw_file_metadata(raw.metadata_json)
     descriptor = _descriptor_from_metadata(raw.id, metadata)
     if (
@@ -340,7 +530,8 @@ def _store_content_addressed(
     person_id: str,
     digest: str,
     content: bytes,
-) -> tuple[str, bool]:
+    created_paths: set[str],
+) -> str:
     root = ensure_private_directory(Path(root))
     person_dir = ensure_private_directory(root / _safe_component(person_id))
     target_dir = ensure_private_directory(person_dir / "generated" / digest[:2])
@@ -351,7 +542,7 @@ def _store_content_addressed(
         if not hmac.compare_digest(_file_sha256(target), digest):
             raise GeneratedFilePersistenceError("generated artifact path contains different bytes")
         restrict_private_file(target)
-        return str(target.relative_to(root)), False
+        return str(target.relative_to(root))
 
     descriptor, temporary_name = tempfile.mkstemp(prefix=f".{digest}.", suffix=".tmp", dir=target_dir)
     temporary = Path(temporary_name)
@@ -366,13 +557,18 @@ def _store_content_addressed(
         installed = True
         restrict_private_file(target)
         _fsync_directory(target_dir)
+        # Keep registration inside the same BaseException-protected block as
+        # installation.  A signal before this line removes the just-installed
+        # target; a signal after it is compensated by the caller's guard.
+        relative = str(target.relative_to(root))
+        created_paths.add(relative)
     except BaseException:
         temporary.unlink(missing_ok=True)
         if installed:
             target.unlink(missing_ok=True)
         _prune_empty_parents(target_dir, stop=root)
         raise
-    return str(target.relative_to(root)), True
+    return relative
 
 
 def _discard_unreferenced_paths(
@@ -477,6 +673,8 @@ def _without_claimed_handle(item: Mapping[str, Any]) -> dict[str, Any]:
 
 __all__ = [
     "GeneratedFilePersistenceError",
+    "GeneratedFilesPersistenceRollbackGuard",
+    "generated_files_publication_transaction",
     "generated_file_descriptor",
     "persist_generated_response_files",
 ]

@@ -1298,6 +1298,14 @@ class ToolResult:
     prepared_archive_search: PreparedArchiveSearch | None = None
     archive_exact_file_reader: BoundArchiveObsidianExactFileReader | None = None
     archive_exact_file_reader_owner_id: str = ""
+    # Process-private phase truth. It is deliberately excluded from model and
+    # public serialization, but lets orchestrators distinguish a kernel refusal
+    # from an exception or timeout after the handler boundary was entered.
+    handler_entered: bool = False
+    # Optional, handler-authenticated phase truth for long-running work whose
+    # coroutine boundary can be entered before the physical worker starts.
+    # Removed from handler data below and never serialized or shown to a model.
+    work_started: bool | None = None
 
     def archive_model_visible_bytes(self) -> bytes:
         """Return the exact sealed archive bytes, or reject a copied envelope."""
@@ -3062,7 +3070,9 @@ _ENGINEER_NETWORK_AUDIT_TOOLS = frozenset(
         "engineer_scan_configured_network",
     }
 )
-_ENGINEER_ARTIFACT_AUDIT_TOOLS = frozenset({"engineer_analyze_artifact", "engineer_patch_artifact"})
+_ENGINEER_ARTIFACT_AUDIT_TOOLS = frozenset(
+    {"engineer_analyze_artifact", "engineer_decompile_artifact", "engineer_patch_artifact"}
+)
 _ENGINEER_TOOLS = frozenset(
     {
         *_ENGINEER_NETWORK_AUDIT_TOOLS,
@@ -3830,12 +3840,15 @@ class ExecutionKernel:
                     errors="strict",
                 )
             attachment = None
+            work_started: bool | None = None
             # A handler that produces a binary side artifact (currently only
             # `speak`) marks it with this key instead of returning it as part of
             # `data`, so it never reaches the model via `to_llm_message()`.
-            if isinstance(data, dict) and "_attachment" in data:
+            if isinstance(data, dict) and ("_attachment" in data or "_work_started" in data):
                 data = dict(data)
-                attachment = data.pop("_attachment")
+                attachment = data.pop("_attachment", None)
+                raw_work_started = data.pop("_work_started", None)
+                work_started = raw_work_started if type(raw_work_started) is bool else None
             if (
                 name in _ENGINEER_NETWORK_AUDIT_TOOLS | _ENGINEER_ARTIFACT_AUDIT_TOOLS
                 and isinstance(data, Mapping)
@@ -3854,11 +3867,19 @@ class ExecutionKernel:
                             "Инженерный инструмент завершился после начала операции. "
                             "Проверьте результат, прежде чем повторять."
                         ),
+                        handler_entered=True,
+                        work_started=work_started,
                     )
                 error_code = str(data.get("error") or "")
                 if not re.fullmatch(r"[a-z][a-z0-9_]{0,79}", error_code):
                     error_code = "engineer_tool_refused"
-                return ToolResult(name, False, error=f"Engineer tool refused: {error_code}")
+                return ToolResult(
+                    name,
+                    False,
+                    error=f"Engineer tool refused: {error_code}",
+                    handler_entered=True,
+                    work_started=work_started,
+                )
             if name in _HOST_CONTROL_TOOLS and isinstance(data, Mapping) and data.get("ok") is False:
                 crossed = data.get("effect_boundary_crossed") is True
                 error_code = str(data.get("error_code") or "host_control_refused")
@@ -3892,6 +3913,7 @@ class ExecutionKernel:
                             else f"Host control refused: {error_code}"
                         )
                     ),
+                    handler_entered=True,
                 )
             await self._audit(actor, name, True, "ok", details=details)
             return ToolResult(
@@ -3902,6 +3924,8 @@ class ExecutionKernel:
                 prepared_archive_search=prepared_archive_search,
                 archive_exact_file_reader=archive_exact_file_reader,
                 archive_exact_file_reader_owner_id=archive_exact_file_reader_owner_id,
+                handler_entered=True,
+                work_started=work_started,
             )
         except asyncio.CancelledError:
             # A request/turn cancellation can arrive after an observe handler
@@ -3931,9 +3955,10 @@ class ExecutionKernel:
                         "Инструмент не ответил вовремя, и НЕИЗВЕСТНО, успел ли он "
                         "выполнить действие. Проверьте результат, прежде чем повторять."
                     ),
+                    handler_entered=True,
                 )
             await self._audit(actor, name, False, "timeout", details=details)
-            return ToolResult(name, False, error="Tool execution timed out")
+            return ToolResult(name, False, error="Tool execution timed out", handler_entered=True)
         except Exception as exc:
             # Тип исключения НЕ доказывает, что эффекта не было.
             #
@@ -3967,6 +3992,7 @@ class ExecutionKernel:
                         f"Инструмент {name} прервался ошибкой ({type(exc).__name__}) уже НАЧАВ "
                         "работу. Проверьте, не выполнено ли действие, прежде чем повторять."
                     ),
+                    handler_entered=True,
                 )
             if isinstance(exc, TypeError | ValueError):
                 await self._audit(actor, name, False, "invalid_arguments", details=details)
@@ -3974,9 +4000,15 @@ class ExecutionKernel:
                     name,
                     False,
                     error=f"Invalid tool arguments: {type(exc).__name__}",
+                    handler_entered=True,
                 )
             await self._audit(actor, name, False, type(exc).__name__, details=details)
-            return ToolResult(name, False, error=f"Tool failed: {type(exc).__name__}")
+            return ToolResult(
+                name,
+                False,
+                error=f"Tool failed: {type(exc).__name__}",
+                handler_entered=True,
+            )
 
     async def _request_approval(
         self,

@@ -1,3 +1,20 @@
+## 0.207.40 — 2026-08-26
+
+### Bounded native decompilation and long-operation progress
+
+- Owner-only Engineer turns can statically decompile one exact current PE or
+  ELF with pinned Ghidra 12.1.3 and JDK 21. The binary is imported only as data
+  inside the existing no-network bubblewrap boundary and is never executed.
+- The bounded Markdown report, Raw handle, assistant reply and content-free
+  outcome receipt now publish atomically after a final `files.read` recheck.
+  Physical Ghidra concurrency is one; deadline, CPU, memory, function and output
+  limits fail closed without guessing whether work started or succeeded.
+- Telegram emits sparse code-owned progress for decompilation and one honest
+  still-running notice for other long final requests. Notifiers stop before the
+  final answer or error, so stale progress cannot trail a completed turn.
+- Database schema remains 43. Host Control, package installation, desktop,
+  one-shot and public-network execution remain disabled.
+
 ## 0.207.39 — 2026-08-26
 
 ### Engineer action outcomes and intent hardening

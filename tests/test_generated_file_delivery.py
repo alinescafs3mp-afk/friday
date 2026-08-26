@@ -12,8 +12,114 @@ import pytest
 from fastapi.testclient import TestClient
 
 from friday.api.projections import public_chat_ingestion
-from friday.generated_files import GeneratedFilePersistenceError, persist_generated_response_files
+from friday.generated_files import (
+    GeneratedFilePersistenceError,
+    GeneratedFilesPersistenceAttestation,
+    generated_files_persistence_attestation,
+    persist_generated_response_files,
+    validate_generated_files_persistence_attestation,
+)
 from friday.permissions import LEGACY_OWNER_USER_ID
+
+
+def _persisted_attestation_response(storage, files_root) -> dict[str, object]:  # noqa: ANN001
+    payload = b"typed generated-file attestation payload"
+    conversation = storage.create_conversation(
+        LEGACY_OWNER_USER_ID,
+        "generated persistence attestation",
+    )
+    assistant = storage.store_message(
+        conversation["id"],
+        LEGACY_OWNER_USER_ID,
+        "assistant",
+        "Отчёт готов.",
+    )
+    return persist_generated_response_files(
+        storage,
+        files_root,
+        {
+            "message_id": assistant["id"],
+            "message": "Отчёт готов.",
+            "files": [
+                {
+                    "filename": "attested.pdf",
+                    "mime_type": "application/pdf",
+                    "content_base64": base64.b64encode(payload).decode("ascii"),
+                }
+            ],
+        },
+        tenant_id=LEGACY_OWNER_USER_ID,
+        person_id=LEGACY_OWNER_USER_ID,
+        max_bytes=len(payload),
+    )
+
+
+def test_typed_generated_file_persistence_attestation_validates(settings, storage) -> None:
+    response = _persisted_attestation_response(storage, settings.files_dir)
+    attestation = generated_files_persistence_attestation(response)
+
+    assert type(attestation) is GeneratedFilesPersistenceAttestation
+    assert validate_generated_files_persistence_attestation(
+        storage,
+        response,
+        attestation,
+        tenant_id=LEGACY_OWNER_USER_ID,
+        person_id=LEGACY_OWNER_USER_ID,
+    )
+
+
+def test_forged_dict_is_not_a_generated_file_persistence_attestation(settings, storage) -> None:
+    response = _persisted_attestation_response(storage, settings.files_dir)
+    attestation = generated_files_persistence_attestation(response)
+    assert isinstance(attestation, GeneratedFilesPersistenceAttestation)
+    forged = {
+        "message_id": attestation.message_id,
+        "descriptors": attestation.descriptors,
+    }
+
+    assert not validate_generated_files_persistence_attestation(
+        storage,
+        response,
+        forged,
+        tenant_id=LEGACY_OWNER_USER_ID,
+        person_id=LEGACY_OWNER_USER_ID,
+    )
+
+
+def test_changed_response_rejects_generated_file_persistence_attestation(settings, storage) -> None:
+    response = _persisted_attestation_response(storage, settings.files_dir)
+    attestation = generated_files_persistence_attestation(response)
+    assert isinstance(attestation, GeneratedFilesPersistenceAttestation)
+    files = response["files"]
+    assert isinstance(files, list) and isinstance(files[0], dict)
+    changed = {
+        **response,
+        "files": [{**files[0], "filename": "changed-after-persistence.pdf"}],
+    }
+
+    assert not validate_generated_files_persistence_attestation(
+        storage,
+        changed,
+        attestation,
+        tenant_id=LEGACY_OWNER_USER_ID,
+        person_id=LEGACY_OWNER_USER_ID,
+    )
+
+
+def test_ownership_mismatch_rejects_generated_file_persistence_attestation(settings, storage) -> None:
+    response = _persisted_attestation_response(storage, settings.files_dir)
+    attestation = generated_files_persistence_attestation(response)
+    assert isinstance(attestation, GeneratedFilesPersistenceAttestation)
+    other_person = "telegram:user:generated-attestation-other"
+    storage.ensure_user(other_person, source="telegram", preset_key="user")
+
+    assert not validate_generated_files_persistence_attestation(
+        storage,
+        response,
+        attestation,
+        tenant_id=LEGACY_OWNER_USER_ID,
+        person_id=other_person,
+    )
 
 
 def test_generated_file_has_exact_durable_download_and_history_handle(settings) -> None:
