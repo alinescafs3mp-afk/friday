@@ -11,17 +11,24 @@ the current production identity, completed packages, active work and next order.
   the provisional registry is empty, and the primary remains the sole
   final-publication, tool and effect authority. Every secondary miss preserves
   the exact primary-only path.
-- Deployed implementation head: `ca3f1af0ce6f9cdcb4b9582fc670e5f6b6bfc72c`
-- Live: Friday `0.207.33` / `ca3f1af0ce6f9cdcb4b9582fc670e5f6b6bfc72c`;
-  tree `fd6c4b3a9574630c1aeb12764977500dbcd6afb1eeb72438c0e09afd065a0a70`;
-  wheel `b2bd43afe8300f51b2885d69dc861d56d62e8a9b9cc51fd49c0af5b419691f4e`;
-  sealed tree `ba328952baaa42a1a44c5b2152f0caa3e2105365642da0e95127ea30e5536862`.
-- Immediate predecessor and schema-capable fallback: Friday `0.207.32` /
-  `da3cb95a9cdd464e292c3435b17f67faf1f05195`.
-- Database schema: 42
+- Deployed implementation head: `c7feb84229c70d302d600582db575a76eeb0f536`
+- Live: Friday `0.207.37` / `c7feb84229c70d302d600582db575a76eeb0f536`;
+  wheel `5c948bf5b9427e45bdd84041916db8648c5bd261f952ffeb67f21c1e03280fe9`;
+  sealed tree `53752feb152872e6265b97c5c88473654957cc72c3b1ec748b7ee5b7b1001f30`.
+- Immediate predecessor and schema-capable fallback: Friday `0.207.35` /
+  `edbad561867fa5019035d1b7182c058b3c113bb8`.
+- Database schema: 43
 - Production state: immutable activation `clear`; backend and Telegram bridge
-  active; trusted-CA HTTPS health `200`; SQLite integrity and FK checks clean;
-  exact accepted profile is configured in bounded `assist` and is probed on
+  active; trusted-CA HTTPS health `200`; SQLite integrity and FK checks clean.
+  Owner-only Engineer Mode is enabled for exact private scope
+  `192.168.1.0/24`; its native bubblewrap boundary proves an isolated network
+  namespace. Host Control, package installation, desktop, one-shot and public
+  network execution remain disabled. The seven-file user-systemd surface is
+  crash-resumable and exactly receipted; backend and bridge use separate 0700
+  runtime temporary directories. The activation terminal receipt is
+  `6ed65c75c10cf2cc92cfda5b4e4d85c67f20447705be83dfd3b349e7b60d41ad`.
+  The exact accepted secondary profile remains configured in bounded `assist`
+  and is probed on
   demand; its exact post-cutover canary passed, while laptop absence preserves
   the primary-only path. Bounded extraction, evidence-bound document MAP and
   complete-current-document advice may influence only the primary model's
@@ -40,10 +47,10 @@ the current production identity, completed packages, active work and next order.
 
 ## Active objective
 
-Finish the bounded partial-result/refill web-search package already isolated
-from `0.207.33`, then land the next release-evidence foundation package and
-continue the planned ICP and V12 refinement packages. Engineer Mode remains
-separately owned.
+Continue the next complete ICP golden journey, then the ordered V12 refinement
+work. The future Semantic Supervisor remains separately owned and is not a
+dependency of current delivery; new policy and semantic seams must stay
+compatible with its later arrival rather than creating a competing kernel.
 
 The measured and accepted finalist is exact profile
 `gptoss20b-2335df123cac7fc0e13e347cde1e1ffa8562daafcaf0fc76ade1a851d2b0ff1f`
@@ -69,7 +76,7 @@ accepted profile manifest hashes to
 `93ea5698b8b6a9bf8a7dc697ffe37d7353055aa16555188991747bba73d059e3` and
 its accepted physical-failure evidence hashes to
 `9dc72f80caed3320bd154cf1219a8bd6b1339142b690b00dd1cbe1fb05964006`.
-Live `0.207.33` admits exactly that profile, with no provisional entries:
+Live `0.207.37` admits exactly that profile, with no provisional entries:
 extraction, evidence-bound document mapping and complete current text/Office
 document reviews are in bounded `assist`. It grants no tools, effects,
 publication or knowledge-write authority; failure preserves the exact
@@ -148,12 +155,28 @@ course, with these repository-specific constraints:
 
 ## In progress
 
-1. Finish the bounded partial-result/refill web-search package already isolated
-   from `0.207.33`.
-2. Land the next release-evidence foundation package, then continue the planned
-   ICP and V12 refinement packages. Engineer Mode remains separately owned.
+1. Select and finish the next complete ICP golden journey from the remaining
+   readiness gaps.
+2. Continue the ordered V12 refinement package without pre-baking the future
+   Semantic Supervisor.
+3. Keep physical Android/Syncthing acceptance explicitly `UNVERIFIED`; the
+   companion plugin remains out of scope.
 
 ## Completed and deployed packages
+
+### Native Engineer Mode and crash-safe unit surface (`0.207.37`)
+
+- Owner-only Engineer Mode is live for the private LAN scope with a real
+  bubblewrap/no-network sandbox. Ordinary dialogue, documents, web, Obsidian
+  and secondary-assist ownership remain unchanged.
+- Native user-systemd no longer nests bubblewrap under the implicit user
+  namespace created by `PrivateTmp`. Separate private runtime directories keep
+  backend and bridge temporary files isolated without blocking the sandbox.
+- Immutable installation now converges and receipts all seven unit/drop-in
+  files and resumes after partial replacement. The release delta passed 390
+  focused tests and the full static quality gate; its wheel reproduced
+  byte-for-byte. Activation completed `clear` with receipt
+  `6ed65c75c10cf2cc92cfda5b4e4d85c67f20447705be83dfd3b349e7b60d41ad`.
 
 ### Complete-current-document secondary assist and fail-open guards (`0.207.33`)
 
@@ -566,41 +589,40 @@ claims at this checkpoint.
 
 ## Current cumulative gate
 
-- The last full canonical base gate, exact `0.207.24`, passed 18,666 non-UI
-  tests plus 31 UI tests, including pinned Syncthing 2.1.3, with zero skips and
-  byte-identical wheels. The bounded `0.207.26` assist hotfix then passed its
-  focused release/secondary gate and reproduced its wheel byte-for-byte.
-- Friday `0.207.26` bounded assist and the primary V12 canary are live at the
-  exact source/tree/wheel identity above, schema 41, with `0.207.24` as both
-  predecessor and schema-capable fallback. Immutable activation is `clear`;
-  backend and bridge are active, health is `ok`, and SQLite integrity/FK checks
-  are clean.
-- At-logon recovery, a causal physical mid-request power cut and exact
-  candidate recovery passed without restarting Friday. The optional node
-  remains demand-probed and removable; its absence does not widen retries or
-  change primary publication semantics.
+- The `0.207.36` product base passed 20,143 non-UI and 31 UI tests. The native
+  unit-surface release delta then passed 390 focused tests and the complete
+  static quality gate; both `0.207.37` wheel builds were byte-identical.
+- Friday `0.207.37` is live at the exact source/sealed-tree/wheel identity
+  above, schema 43, with `0.207.35` as both predecessor and schema-capable
+  fallback. Immutable activation is `clear`; backend and bridge are active,
+  health is `ok`, and SQLite integrity/FK checks are clean.
+- The optional laptop node remains demand-probed and removable; its absence
+  does not widen retries or change primary publication semantics. Semantic
+  Supervisor work is independent and has not been claimed as integrated.
 
 ## Next order
 
-1. Complete and release the durable `CompareConversationWithDocument` journey
-   through reader-first schema capacity and a separate runtime writer package.
-2. Extend immutable release evidence into machine-reconcilable journey
-   manifests without turning component tests into readiness claims.
-3. Begin the next V12 refinement selected by the remaining golden-journey gap.
-4. Run actual Android/Syncthing, backup/clean-restore and bounded recovery/fault
-   certification; simulations remain labelled separately.
-5. Evaluate generic WorkGraph, broader effects or connectors only from the
-   golden journeys still failing after the preceding packages. Companion work
-   remains out of scope.
+1. Select the next incomplete ICP golden journey from the canonical readiness
+   matrix and finish it end-to-end.
+2. Extend V12 only through the proven journey boundary; preserve an explicit
+   seam for the future Semantic Supervisor and do not duplicate its policy role.
+3. Implement document passages, current embeddings, typed dates and an
+   owner-visible pending semantic projection as a new schema-43+ package, not
+   by reviving the obsolete document WIP blobs.
+4. Keep HTTP document search/details/review below the Telegram/ICP and
+   document-index work unless a user-facing blocker changes that order.
+5. Run physical Android/Syncthing and restore/fault certification when owner
+   presence is available. Companion work remains out of scope.
 
 ## WIP source retention
 
-`DOCUMENT_FILE_CONTOUR_WIP_AUDIT_2026-08-22.md` was recovered at
-`/home/jericho/DOCUMENT_FILE_CONTOUR_WIP_AUDIT_2026-08-22.md`, outside the
-repository location named by the operator. Its recommendations are reconciled
-above. The source remains retained; the three former refs are now represented
-by the verified bundle and privacy-safe manifest rather than live repository
-refs.
+The exact 231-line source is restored at
+`outer_sol/DOCUMENT_FILE_CONTOUR_WIP_AUDIT_2026-08-22.md`, SHA-256
+`fe652f956200630cb3d210c474e09d14bada8106c7d8f231b4bed749b41e4378`.
+Its old code salvage is closed: the only useful overlay change already landed
+through `acda581`; remaining blobs are implemented, superseded or unsafe to
+revive. The three former refs remain represented by the verified forensic
+bundle and privacy-safe manifest rather than live repository refs.
 
 ## Update rule
 
