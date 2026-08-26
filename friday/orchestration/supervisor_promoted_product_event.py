@@ -511,13 +511,13 @@ def _verify_trace_linkage(
     trace: TurnTrace,
     *,
     namespace_key: bytes,
-    assistant_message_id: str,
+    turn_message_id: str,
     conversation_id: str,
     graph_id: str | None,
 ) -> None:
     expected_turn = derive_trace_identifier(
         domain=TraceIdentifierDomain.TURN,
-        raw_identifier=assistant_message_id,
+        raw_identifier=turn_message_id,
         namespace_key=namespace_key,
     )
     expected_conversation = derive_trace_identifier(
@@ -623,7 +623,7 @@ def _journey_projection(
     _verify_trace_linkage(
         trace,
         namespace_key=namespace_key,
-        assistant_message_id=assistant_id,
+        turn_message_id=graph.anchor_user_message_id,
         conversation_id=graph.conversation_id,
         graph_id=graph.id,
     )
@@ -681,18 +681,24 @@ def _other_turn_projection(
 ) -> tuple[TurnTrace, PromotedProductOutcomeInput]:
     candidates: list[TurnTrace] = []
     rows = conn.execute(
-        """SELECT id,conversation_id,metadata_json FROM messages
-            WHERE role='assistant'
-            ORDER BY rowid DESC LIMIT ?""",
+        """SELECT assistant.conversation_id,assistant.reply_to,assistant.metadata_json
+             FROM messages assistant
+             JOIN messages turn
+               ON turn.id=assistant.reply_to
+              AND turn.user_id=assistant.user_id
+              AND turn.conversation_id=assistant.conversation_id
+              AND turn.role='user'
+            WHERE assistant.role='assistant'
+            ORDER BY assistant.rowid DESC LIMIT ?""",
         (_MAX_TRACE_SCAN,),
     )
     for row in rows:
         if isinstance(row, sqlite3.Row):
-            assistant_id = str(row["id"])
             conversation_id = str(row["conversation_id"])
+            turn_message_id = str(row["reply_to"])
             metadata = str(row["metadata_json"])
         else:
-            assistant_id, conversation_id, metadata = map(str, row)
+            conversation_id, turn_message_id, metadata = map(str, row)
         try:
             trace = _trace_from_metadata(metadata)
         except PromotedProductEventError:
@@ -705,7 +711,7 @@ def _other_turn_projection(
         _verify_trace_linkage(
             trace,
             namespace_key=namespace_key,
-            assistant_message_id=assistant_id,
+            turn_message_id=turn_message_id,
             conversation_id=conversation_id,
             graph_id=None,
         )

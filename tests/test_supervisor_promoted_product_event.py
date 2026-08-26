@@ -196,7 +196,7 @@ def _work_trace(
     conn,
     *,
     graph: CompareCurrentFileWebWorkGraph,
-    assistant_id: str,
+    turn_message_id: str,
     work_item_identifier: str,
     completion: CompletionDecision,
     failure_stage: FailureStage,
@@ -218,7 +218,7 @@ def _work_trace(
     )
     return build_work_trace(
         namespace_key=load_trace_namespace_key(conn),
-        turn_identifier=assistant_id,
+        turn_identifier=turn_message_id,
         conversation_identifier=graph.conversation_id,
         work_item_identifier=work_item_identifier,
         work_relation=WorkRelation.NEW,
@@ -264,7 +264,7 @@ def _complete_graph(
         trace = _work_trace(
             conn,
             graph=graph,
-            assistant_id=str(assistant["id"]),
+            turn_message_id=graph.anchor_user_message_id,
             work_item_identifier=work_item_identifier or graph.id,
             completion=CompletionDecision.COMPLETE,
             failure_stage=FailureStage.NONE,
@@ -561,6 +561,13 @@ def test_other_turn_adds_a_body_free_false_invocation_denominator(storage) -> No
     storage.ensure_user(_OWNER, source="promoted-product-test")
     conversation = storage.create_conversation(_OWNER, "ordinary")
     with storage.transaction() as conn:
+        turn = store_message_in_transaction(
+            conn,
+            str(conversation["id"]),
+            _OWNER,
+            "user",
+            "PRIVATE ORDINARY REQUEST",
+        )
         assistant = store_message_in_transaction(
             conn,
             str(conversation["id"]),
@@ -568,10 +575,11 @@ def test_other_turn_adds_a_body_free_false_invocation_denominator(storage) -> No
             "assistant",
             "PRIVATE ORDINARY ANSWER",
             {},
+            str(turn["id"]),
         )
         trace = build_committed_direct_trace(
             namespace_key=load_trace_namespace_key(conn),
-            turn_identifier=str(assistant["id"]),
+            turn_identifier=str(turn["id"]),
             conversation_identifier=str(conversation["id"]),
             intent=IntentClass.ORDINARY_DIALOGUE,
             playbook=PlaybookClass.DIRECT,

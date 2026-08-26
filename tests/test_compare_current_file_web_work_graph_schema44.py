@@ -126,7 +126,7 @@ def _stored_retirement_trace(
     namespace_key = load_trace_namespace_key(storage)
     assert trace.turn_digest == derive_trace_identifier(
         domain=TraceIdentifierDomain.TURN,
-        raw_identifier=str(assistant["id"]),
+        raw_identifier=graph.anchor_user_message_id,
         namespace_key=namespace_key,
     )
     assert trace.conversation_digest == derive_trace_identifier(

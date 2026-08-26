@@ -1076,7 +1076,6 @@ def _build_deterministic_retirement_trace(
     conn: sqlite3.Connection,
     *,
     graph: CompareCurrentFileWebWorkGraph,
-    assistant_message_id: str,
     receipt: CompareCurrentFileWebTerminalPublicationReceipt,
     evidence_not_replayable: bool,
     cancelled: bool,
@@ -1097,7 +1096,7 @@ def _build_deterministic_retirement_trace(
     elapsed = datetime.fromisoformat(now) - datetime.fromisoformat(graph.created_at)
     return build_work_trace(
         namespace_key=load_trace_namespace_key(conn),
-        turn_identifier=assistant_message_id,
+        turn_identifier=graph.anchor_user_message_id,
         conversation_identifier=graph.conversation_id,
         work_item_identifier=graph.id,
         work_relation=(WorkRelation.CONTINUED if evidence_not_replayable else WorkRelation.NEW),
@@ -1159,7 +1158,6 @@ def _publish_deterministic_retirement(
         trace = _build_deterministic_retirement_trace(
             conn,
             graph=graph,
-            assistant_message_id=assistant_id,
             receipt=receipt,
             evidence_not_replayable=evidence_not_replayable,
             cancelled=cancelled,
