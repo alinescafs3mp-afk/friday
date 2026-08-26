@@ -1278,6 +1278,21 @@ class SupervisorAssistController:
     def _cursor(record: _OwnedRun) -> AssistGraphCursor:
         return AssistGraphCursor.from_graph(record.graph)
 
+    @staticmethod
+    def _replace_graph(
+        record: _OwnedRun,
+        graph: CompareCurrentFileWebWorkGraph,
+    ) -> None:
+        """Keep the process-owned pending binding on the exact durable revision."""
+
+        record.graph = graph
+        record.pending = PendingDurableTurnAdmission.owned(
+            person_id=graph.user_id,
+            conversation_id=graph.conversation_id,
+            work_graph_id=graph.id,
+            revision=graph.revision,
+        )
+
     def _capability_check(
         self,
         record: _OwnedRun,
@@ -1446,8 +1461,8 @@ class SupervisorAssistController:
             revision=graph.revision,
         )
         if retained is not None:
-            retained.graph = graph
-            retained.pending = pending
+            self._replace_graph(retained, graph)
+            pending = retained.pending
         return pending
 
     async def _claim(
@@ -1495,7 +1510,7 @@ class SupervisorAssistController:
             or graph.step(previous.step_id).attempt != previous.attempt + 1
         ):
             return False
-        record.graph = graph
+        self._replace_graph(record, graph)
         return True
 
     async def _settle(self, record: _OwnedRun, result: _ReadResult) -> bool:
@@ -1521,7 +1536,7 @@ class SupervisorAssistController:
             or graph.revision != previous_revision + 1
         ):
             return False
-        record.graph = graph
+        self._replace_graph(record, graph)
         return True
 
     def _trace(self, record: _OwnedRun) -> AssistTraceInput:
@@ -1586,7 +1601,7 @@ class SupervisorAssistController:
         }
         if citations:
             response["citations"] = citations
-        record.graph = graph
+        self._replace_graph(record, graph)
         self._publication_total += 1
         if graph.state is CompareCurrentFileWebGraphState.TERMINAL:
             self._terminal_publication_total += 1
@@ -1795,7 +1810,7 @@ class SupervisorAssistController:
             or web.recovery_context_sha256 != recovery.context_digest
         ):
             return False
-        record.graph = graph
+        self._replace_graph(record, graph)
         return True
 
     async def _run_owned(
@@ -2018,7 +2033,7 @@ class SupervisorAssistController:
             self._retained_by_scope.pop(scope, None)
             self._known_durable_active_scopes.discard(scope)
             return True
-        record.graph = current
+        self._replace_graph(record, current)
         try:
             restarted = self._graph_adapter.restart_or_retire(
                 self._cursor(record),

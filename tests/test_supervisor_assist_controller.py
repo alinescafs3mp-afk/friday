@@ -26,6 +26,8 @@ from friday.file_evidence_reader import (
 )
 from friday.file_evidence_reader import FileEvidenceUnavailable, PreparedFileEvidence
 from friday.interaction_control_plane.compare_current_file_web_work_graph import (
+    FILE_READ_STEP_ID,
+    WEB_READ_STEP_ID,
     CompareCurrentFileWebGraphState,
     CompareCurrentFileWebStepState,
     CompareCurrentFileWebWorkGraph,
@@ -47,6 +49,7 @@ from friday.orchestration.supervisor_assist_controller import (
 )
 from friday.orchestration.supervisor_assist_graph_adapter import (
     AssistConversationScope,
+    AssistGraphCursor,
     AssistGraphPublication,
     SupervisorAssistGraphAdapter,
 )
@@ -996,6 +999,18 @@ async def test_overlapping_turn_uses_legacy_once_and_exact_cancel_drains_childre
         asyncio.gather(file_reader.started.wait(), web_reader.started.wait()),
         timeout=2,
     )
+    active_graph = adapter.load_current(
+        AssistConversationScope(surface.actor.user_id, surface.conversation_id)
+    )
+    active_pending = controller.pending_durable_turn_admission(
+        surface.actor.user_id,
+        "ещё один вопрос",
+        actor=surface.actor,
+        conversation_id=surface.conversation_id,
+    )
+    assert active_graph is not None
+    assert isinstance(active_pending, PendingDurableTurnAdmission)
+    assert active_pending.revision == active_graph.revision
     overlap = await controller.execute(
         surface,
         legacy_primary=overlap_legacy,
@@ -1017,6 +1032,72 @@ async def test_overlapping_turn_uses_legacy_once_and_exact_cancel_drains_childre
     assert first.response is None
     assert file_reader.cancelled and web_reader.cancelled
     assert adapter.cancel_calls == 1 and len(observed) == 1
+    closed = adapter.load(AssistGraphCursor.from_graph(active_graph))
+    assert closed is not None
+    assert cancelled.pending_admission is not None
+    assert cancelled.pending_admission.revision == closed.revision
+
+
+@pytest.mark.asyncio
+async def test_pending_revision_tracks_settlements_before_cancellation(storage: Any) -> None:
+    surface, projection = _stored_surface(storage, "pending-settled")
+    adapter = _CountingAdapter(storage)
+
+    class BlockingReviewer:
+        def __init__(self) -> None:
+            self.started = asyncio.Event()
+
+        async def review(self, *_args: Any, **_kwargs: Any) -> None:
+            self.started.set()
+            await asyncio.Event().wait()
+
+    reviewer = BlockingReviewer()
+    controller = _controller(
+        graph_adapter=adapter,
+        file_reader=_FileReader(_prepared_file(surface, projection)),
+        web_reader=_WebReader(_web_evidence(surface, TransientWebEvidenceStatus.EMPTY)),
+        reviewer=reviewer,
+        max_review_rounds=1,
+    )
+
+    async def forbidden_legacy() -> dict[str, object]:
+        raise AssertionError("legacy cannot run after ownership")
+
+    task = asyncio.create_task(
+        controller.execute(
+            surface,
+            legacy_primary=forbidden_legacy,
+            absolute_deadline=time.monotonic() + 5,
+        )
+    )
+    await asyncio.wait_for(reviewer.started.wait(), timeout=2)
+    graph = adapter.load_current(
+        AssistConversationScope(surface.actor.user_id, surface.conversation_id)
+    )
+    pending = controller.pending_durable_turn_admission(
+        surface.actor.user_id,
+        "cancel",
+        actor=surface.actor,
+        conversation_id=surface.conversation_id,
+    )
+    assert graph is not None
+    assert graph.step(FILE_READ_STEP_ID).state is CompareCurrentFileWebStepState.COMPLETE
+    assert graph.step(WEB_READ_STEP_ID).state is CompareCurrentFileWebStepState.EMPTY
+    assert isinstance(pending, PendingDurableTurnAdmission)
+    assert pending.revision == graph.revision
+
+    cancelled = await controller.cancel_active(
+        AssistConversationScope(surface.actor.user_id, surface.conversation_id),
+        user_message="cancel",
+        absolute_deadline=time.monotonic() + 3,
+    )
+    original = await asyncio.wait_for(task, timeout=2)
+    closed = adapter.load(AssistGraphCursor.from_graph(graph))
+    assert cancelled is not None and cancelled.pending_admission is not None
+    assert closed is not None
+    assert cancelled.pending_admission.revision == closed.revision
+    assert original.pending_admission is not None
+    assert original.pending_admission.revision == closed.revision
 
 
 @pytest.mark.asyncio
