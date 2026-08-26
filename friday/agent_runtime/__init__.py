@@ -40812,11 +40812,7 @@ class AgentRuntime:
             (principal,),
         ).fetchone()
         authorization = getattr(self.kernel, "authorization", None)
-        if (
-            principal_row is None
-            or str(principal_row["status"] or "") != "active"
-            or authorization is None
-        ):
+        if principal_row is None or str(principal_row["status"] or "") != "active" or authorization is None:
             return False
         fresh_actor = replace(actor, preset_key=str(principal_row["preset_key"] or "user"))
         if not (

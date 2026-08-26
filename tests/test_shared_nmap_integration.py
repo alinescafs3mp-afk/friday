@@ -492,7 +492,9 @@ def test_vulnerability_tcp_discovery_never_sends_application_probes(
         connect_only=True,
     )
 
-    assert connected == [
+    # Port discovery is intentionally concurrent, so assert the exact closed
+    # target set without coupling the contract to thread scheduling order.
+    assert sorted(connected, key=lambda item: item[1]) == [
         ("192.168.1.120", 80),
         ("192.168.1.120", 6379),
         ("192.168.1.120", 11211),
