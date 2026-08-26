@@ -247,6 +247,36 @@ class _MalformedEmptySourceClassNewsKernel(_EmptyNewsKernel):
         return result
 
 
+class _TopicMismatchNewsKernel(_EmptyNewsKernel):
+    transport_success = True
+    source_class_satisfied: Any = True
+
+    async def execute(self, tool, params, actor=None):  # noqa: ANN001, ARG002
+        result = await super().execute(tool, params, actor=actor)
+        result.data.update(
+            {
+                "target_sources": 1,
+                "requested_sources": 1,
+                "failed_sources": 1,
+                "topic_filtered_sources": 1,
+                "search_failed": True,
+                "error": "topic_mismatch",
+                "source_class_satisfied": self.source_class_satisfied,
+                "topic_class": str(params.get("topic_class") or ""),
+                "topic_class_satisfied": False,
+            }
+        )
+        return ToolResult(tool, self.transport_success, result.data)
+
+
+class _MalformedTopicMismatchNewsKernel(_TopicMismatchNewsKernel):
+    source_class_satisfied = 0
+
+
+class _TransportFailedTopicMismatchNewsKernel(_TopicMismatchNewsKernel):
+    transport_success = False
+
+
 class _MalformedTargetNewsKernel(_SyntheticNewsKernel):
     async def execute(self, tool, params, actor=None):  # noqa: ANN001, ARG002
         result = await super().execute(tool, params, actor=actor)
@@ -1073,6 +1103,39 @@ async def test_simple_news_distinguishes_validated_empty_from_unavailable(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("kernel_type", "legacy_status", "outcome_status"),
+    (
+        (_TopicMismatchNewsKernel, "empty", CapabilityOutcomeStatus.EMPTY),
+        (_MalformedTopicMismatchNewsKernel, "failed", CapabilityOutcomeStatus.UNAVAILABLE),
+        (_TransportFailedTopicMismatchNewsKernel, "failed", CapabilityOutcomeStatus.UNAVAILABLE),
+    ),
+)
+async def test_topic_mismatch_empty_cannot_bypass_projector_boundaries(
+    settings,
+    storage,
+    monkeypatch,
+    kernel_type,
+    legacy_status: str,
+    outcome_status: CapabilityOutcomeStatus,
+) -> None:
+    kernel = kernel_type()
+    runtime = _runtime(settings, storage, model=_NeverModel(), kernel=kernel)
+
+    async def forbidden_context(*args: Any, **kwargs: Any) -> AgentContext:
+        del args, kwargs
+        raise AssertionError("simple public-news turn entered ambient context/classifier retrieval")
+
+    monkeypatch.setattr(runtime, "_prepare_context", forbidden_context)
+    reply = await runtime.chat(OWNER, REQUEST, actor=_actor())
+
+    assert len(kernel.calls) == 1
+    assert reply["web_evidence_status"] == legacy_status
+    assert reply["web_sources"] == []
+    assert _stored_news_receipt(storage, reply)[0].outcome.status is outcome_status
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("metadata_variant", ("non_json_object", "huge_nested_json"))
 async def test_simple_news_malformed_source_metadata_fails_without_aborting_turn(
     settings,
@@ -1268,7 +1331,7 @@ async def test_simple_news_provider_overreturn_is_capped_and_partial(
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("kernel_type", (_RefilledTargetNewsKernel, _LegacyDirectOverflowNewsKernel))
+@pytest.mark.parametrize("kernel_type", (_RefilledTargetNewsKernel,))
 async def test_simple_news_complete_reports_cross_projector_and_typed_boundary(
     settings,
     storage,
@@ -1291,6 +1354,28 @@ async def test_simple_news_complete_reports_cross_projector_and_typed_boundary(
     assert reply["web_evidence_status"] == "sourced"
     assert len(reply["web_sources"]) in {2, 3}
     assert _stored_news_receipt(storage, reply)[0].outcome.status is CapabilityOutcomeStatus.COMPLETE
+
+
+@pytest.mark.asyncio
+async def test_fresh_simple_news_rejects_unattested_legacy_direct_overflow(
+    settings,
+    storage,
+    monkeypatch,
+) -> None:
+    kernel = _LegacyDirectOverflowNewsKernel()
+    runtime = _runtime(settings, storage, model=_NeverModel(), kernel=kernel)
+
+    async def forbidden_context(*args: Any, **kwargs: Any) -> AgentContext:
+        del args, kwargs
+        raise AssertionError("simple public-news turn entered ambient context/classifier retrieval")
+
+    monkeypatch.setattr(runtime, "_prepare_context", forbidden_context)
+    reply = await runtime.chat(OWNER, REQUEST, actor=_actor())
+
+    assert len(kernel.calls) == 1
+    assert reply["web_evidence_status"] == "failed"
+    assert reply["web_sources"] == []
+    assert _stored_news_receipt(storage, reply)[0].outcome.status is CapabilityOutcomeStatus.UNAVAILABLE
 
 
 @pytest.mark.asyncio

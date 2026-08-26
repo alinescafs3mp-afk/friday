@@ -25909,6 +25909,7 @@ def _project_web_tool_result(
     limit: int = 5,
     freshness: str = "",
     source_class: str = "",
+    topic_class: str = "",
     expected_query: str = "",
     research_max_sources: int | None = None,
 ) -> tuple[str, list[dict[str, str]], dict[str, Any] | None]:
@@ -25925,6 +25926,9 @@ def _project_web_tool_result(
         source_class = normalize_search_source_class(source_class)
     except ValueError:
         return "failed", [], None
+    if not isinstance(topic_class, str):
+        return "failed", [], None
+    topic_class = topic_class.strip()
     if not transport_success or not isinstance(data, Mapping):
         return "failed", [], None
     if "error" in data and not isinstance(data.get("error"), str):
@@ -25958,6 +25962,45 @@ def _project_web_tool_result(
     outbound_attempted = data.get("outbound_attempted")
     if not isinstance(outbound_attempted, bool):
         return "failed", [], None
+    topic_mismatch_report: dict[str, Any] | None = None
+    if (
+        tool_name == "web_research"
+        and topic_class
+        and simple_public_news_topic_mismatch_is_empty(
+            data,
+            expected_topic_class=topic_class,
+            expected_max_sources=research_max_sources or 3,
+        )
+        and data.get("source_class", "") == source_class
+        and (
+            data.get("source_class_satisfied") is True
+            if source_class
+            else data.get("source_class_satisfied", False) is False
+        )
+    ):
+        topic_mismatch_report = {
+            "query": data.get("query"),
+            "outbound_attempted": True,
+            "freshness": freshness,
+            SEARCH_FILTER_ATTESTATION_KEY: {"freshness": freshness},
+            "sources": [],
+            "target_sources": data.get("target_sources"),
+            "requested_sources": data.get("requested_sources"),
+            "completed_sources": data.get("completed_sources"),
+            "failed_sources": data.get("failed_sources"),
+            "timed_out_sources": data.get("timed_out_sources"),
+            "search_timed_out": False,
+            "search_failed": True,
+            "refused": False,
+            "quota_exhausted": False,
+            "error": "topic_mismatch",
+            "topic_filtered_sources": data.get("topic_filtered_sources"),
+            "topic_class": topic_class,
+            "topic_class_satisfied": False,
+        }
+        if source_class:
+            topic_mismatch_report["source_class"] = source_class
+            topic_mismatch_report["source_class_satisfied"] = True
     failure_values = [data.get(flag) for flag in _WEB_FAILURE_FLAGS if flag in data]
     malformed_failure_flag = any(not isinstance(value, bool) for value in failure_values)
     hard_failed = (
@@ -25973,10 +26016,12 @@ def _project_web_tool_result(
             )
         )
     )
-    if hard_failed:
+    if hard_failed and topic_mismatch_report is None:
         # Contradictory payloads fail closed.  A provider refusal plus a
         # source-looking object is not "partial evidence".
         return "failed", [], None
+    if topic_mismatch_report is not None:
+        return "empty", [], topic_mismatch_report
     raw_items: list[Any]
     usable: list[dict[str, str]] = []
     usable_payload_items: list[dict[str, Any]] = []
@@ -26121,6 +26166,8 @@ def _project_web_tool_result(
                 (bool(raw_items) and requested_sources == 0)
                 or failed_sources + timed_out_sources > requested_sources
                 or requested_sources > completed_sources + failed_sources + timed_out_sources
+                or bool(freshness)
+                and requested_sources != completed_sources + failed_sources + timed_out_sources
             )
         )
         if "target_sources" in data:
@@ -64557,20 +64604,11 @@ class AgentRuntime:
             limit=3 if simple_public_news_request else 5,
             freshness=str(web_arguments.get("freshness") or ""),
             source_class=source_class,
+            topic_class=topic_class,
             expected_query=query,
             research_max_sources=int(web_arguments["max_sources"]),
         )
         simple_projected_report = web_payload
-        simple_topic_mismatch = bool(
-            simple_public_news_request
-            and isinstance(outbound_result_data, Mapping)
-            and outbound_result_data.get("query") == query
-            and simple_public_news_topic_mismatch_is_empty(
-                outbound_result_data,
-                expected_topic_class=topic_class,
-                expected_max_sources=3,
-            )
-        )
         raw_topic_filtered_sources = (
             outbound_result_data.get("topic_filtered_sources")
             if isinstance(outbound_result_data, Mapping)
@@ -64680,7 +64718,7 @@ class AgentRuntime:
                     else SimplePublicNewsEvidenceStatus.PARTIAL
                     if web_status == "partial"
                     else SimplePublicNewsEvidenceStatus.EMPTY
-                    if web_status == "empty" or simple_topic_mismatch
+                    if web_status == "empty"
                     else SimplePublicNewsEvidenceStatus.UNAVAILABLE
                 )
                 source_bearing = typed_status in {

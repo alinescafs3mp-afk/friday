@@ -77,6 +77,7 @@ def target_research_report_is_valid(
         and requested == 0
         or failed + timed_out > requested
         or requested > completed + failed + timed_out
+        or completed + failed + timed_out > requested + MAX_DIRECT_RESEARCH_SOURCES
     ):
         return False
     if not has_target:

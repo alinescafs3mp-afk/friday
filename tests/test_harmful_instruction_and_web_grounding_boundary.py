@@ -2056,6 +2056,45 @@ def test_research_counts_accept_direct_answers_but_reject_missing_source_rows() 
     assert len(sources) == 2
     assert payload is not None
 
+    impossible_rows = [
+        {
+            **direct_and_page[0],
+            "url": f"https://impossible-{index}.synthetic.example.com/fact",
+        }
+        for index in range(4)
+    ]
+    impossible_report = {
+        "outbound_attempted": True,
+        "sources": impossible_rows,
+        "target_sources": 3,
+        "requested_sources": 3,
+        "completed_sources": 4,
+        "failed_sources": 3,
+        "timed_out_sources": 0,
+        "search_timed_out": False,
+    }
+    assert _project_web_tool_result(
+        "web_research",
+        impossible_report,
+        research_max_sources=3,
+    ) == ("failed", [], None)
+
+    fresh_double_count = {
+        **impossible_report,
+        "query": "bounded fresh query",
+        "freshness": "day",
+        "applied_search_filters": {"freshness": "day"},
+        "sources": impossible_rows[:3],
+        "completed_sources": 3,
+    }
+    assert _project_web_tool_result(
+        "web_research",
+        fresh_double_count,
+        freshness="day",
+        expected_query="bounded fresh query",
+        research_max_sources=3,
+    ) == ("failed", [], None)
+
     for impossible_requested in (0, 10):
         failed, failed_sources, failed_payload = _project_web_tool_result(
             "web_research",

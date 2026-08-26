@@ -216,6 +216,9 @@ def _validated_empty_proof_sha256(
         raise SimplePublicNewsOutcomeError("empty news evidence has no filter attestation")
     if not _report_source_class_matches(report, plan.source_class):
         raise SimplePublicNewsOutcomeError("empty news evidence changed source class")
+    for attestation_field in ("source_class_satisfied", "topic_class_satisfied"):
+        if attestation_field in report and not isinstance(report.get(attestation_field), bool):
+            raise SimplePublicNewsOutcomeError("empty news evidence has malformed attestation")
     if simple_public_news_topic_mismatch_is_empty(
         report,
         expected_topic_class=plan.topic_class,
@@ -616,6 +619,14 @@ class SimplePublicNewsEvidence:
         failed_sources = _optional_count(report, "failed_sources")
         timed_out_sources = _optional_count(report, "timed_out_sources")
         search_timed_out = _optional_boolean(report, "search_timed_out")
+        if (
+            requested_sources is not None
+            and completed_sources is not None
+            and failed_sources is not None
+            and timed_out_sources is not None
+            and requested_sources != completed_sources + failed_sources + timed_out_sources
+        ):
+            raise SimplePublicNewsOutcomeError("news attempt counters violate conservation")
         if failed_sources is not None and topic_filtered_sources > failed_sources:
             raise SimplePublicNewsOutcomeError("news topic-filter count exceeds failed sources")
         if (

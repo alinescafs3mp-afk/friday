@@ -117,6 +117,8 @@ def _evidence(status: SimplePublicNewsEvidenceStatus) -> SimplePublicNewsEvidenc
         ("timed_out_sources", False),
         ("topic_filtered_sources", False),
         ("error", False),
+        ("source_class_satisfied", 0),
+        ("topic_class_satisfied", 0),
     ),
 )
 def test_empty_news_factory_rejects_json_scalar_type_confusion(field: str, value: object) -> None:
@@ -133,6 +135,23 @@ def test_empty_news_factory_rejects_json_scalar_type_confusion(field: str, value
             report=report,
             model_envelope="",
             sources=[],
+        )
+
+
+def test_fresh_news_factory_rejects_attempt_counter_double_counting() -> None:
+    report = _report()
+    report["failed_sources"] = 1
+
+    with pytest.raises(SimplePublicNewsOutcomeError, match="conservation"):
+        SimplePublicNewsEvidence.from_projection(
+            _plan(),
+            status=SimplePublicNewsEvidenceStatus.SOURCED,
+            executed_query=QUERY,
+            outbound_attempted=True,
+            research_call_count=1,
+            report=report,
+            model_envelope=BODY,
+            sources=SOURCES,
         )
 
 
@@ -477,7 +496,7 @@ def test_typed_news_ledger_rejects_non_public_source_urls(url: str) -> None:
         simple_public_news_source_ledger_identity([{"url": url, "title": "Unsafe"}])
 
 
-def test_legacy_direct_overflow_is_complete_when_every_retained_row_is_complete() -> None:
+def test_fresh_news_rejects_legacy_direct_overflow_without_window_proof() -> None:
     sources = [
         {"url": "https://direct-one.example.com/news", "title": "Direct one"},
         {"url": "https://direct-two.example.com/news", "title": "Direct two"},
@@ -496,20 +515,17 @@ def test_legacy_direct_overflow_is_complete_when_every_retained_row_is_complete(
     ]
     report["completed_sources"] = 2
 
-    evidence = SimplePublicNewsEvidence.from_projection(
-        _plan(),
-        status=SimplePublicNewsEvidenceStatus.SOURCED,
-        executed_query=QUERY,
-        outbound_attempted=True,
-        research_call_count=1,
-        report=report,
-        model_envelope=BODY,
-        sources=sources,
-    )
-
-    assert evidence.status is SimplePublicNewsEvidenceStatus.SOURCED
-    assert evidence.requested_sources == 1
-    assert evidence.completed_sources == 2
+    with pytest.raises(SimplePublicNewsOutcomeError, match="conservation"):
+        SimplePublicNewsEvidence.from_projection(
+            _plan(),
+            status=SimplePublicNewsEvidenceStatus.SOURCED,
+            executed_query=QUERY,
+            outbound_attempted=True,
+            research_call_count=1,
+            report=report,
+            model_envelope=BODY,
+            sources=sources,
+        )
 
 
 def test_understated_target_cannot_forge_complete_news_evidence() -> None:
