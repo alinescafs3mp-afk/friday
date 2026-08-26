@@ -93,6 +93,8 @@ def test_native_projection_covers_noop_recovery_and_failure_boundaries() -> None
     for case in (
         "exact publication is healthy",
         "empty effective publication is recoverable evidence",
+        "empty effective binding array is recoverable evidence",
+        "empty configured binding array fails closed",
         "listener without publication is inconsistent",
         "wrong container name",
         "wrong compose service ownership",

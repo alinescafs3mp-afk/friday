@@ -87,6 +87,7 @@ function Get-FridayExactPortMapState {
         throw "$Label binding is absent."
     }
     $rows = @($bindingProperty.Value)
+    if ($AllowProvablyMissing -and $rows.Count -eq 0) { return 'missing' }
     if ($rows.Count -ne 1 -or $null -eq $rows[0] -or $rows[0] -is [array]) {
         throw "$Label cardinality is not exact."
     }

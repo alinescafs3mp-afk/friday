@@ -86,6 +86,20 @@ foreach ($missingPorts in @($null, @(), ([pscustomobject]@{}))) {
 }
 
 $fixture = New-FridayGatewayFixture
+$fixture.NetworkSettings.Ports = '{"8443/tcp":[]}' | ConvertFrom-Json -ErrorAction Stop
+$assessment = Get-FridayGatewayRecoveryAssessment `
+    -Container $fixture `
+    -ExpectedBindAddress $script:bindAddress `
+    -TestListener { $false }
+Assert-FridayEqual 'empty effective binding array is recoverable evidence' 'recover' $assessment.state
+
+Assert-FridayThrows 'empty configured binding array fails closed' {
+    $fixture = New-FridayGatewayFixture
+    $fixture.HostConfig.PortBindings = [pscustomobject][ordered]@{ '8443/tcp' = @() }
+    Get-FridayGatewayRecoveryAssessment $fixture $script:bindAddress { $false }
+}
+
+$fixture = New-FridayGatewayFixture
 $fixture.NetworkSettings.Ports = [pscustomobject]@{}
 $assessment = Get-FridayGatewayRecoveryAssessment `
     -Container $fixture `
