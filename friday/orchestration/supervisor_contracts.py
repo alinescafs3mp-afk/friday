@@ -1039,10 +1039,12 @@ class SupervisorReview:
             CompletionCriterion(_enum(CompletionCriterion, entry, label="failed criterion"))
             for entry in failed_raw
         )
+        if len(set(failed)) != len(failed):
+            raise SupervisorContractError("failed_criteria must be unique")
         reason = _bounded_text(item["reason_code"], label="reason_code", maximum=64)
         if _SAFE_ID.fullmatch(reason) is None:
             raise SupervisorContractError("reason_code has an invalid shape")
-        return cls(
+        review = cls(
             plan_digest=_manifest_digest_hex(item["plan_digest"]),
             outcome_digest=_manifest_digest_hex(item["outcome_digest"]),
             verdict=ReviewVerdict(_enum(ReviewVerdict, item["verdict"], label="verdict")),
@@ -1052,6 +1054,24 @@ class SupervisorReview:
             ),
             reason_code=reason,
         )
+        expected_action = {
+            ReviewVerdict.COMPLETE: ReviewRecommendedAction.PUBLISH,
+            ReviewVerdict.INCOMPLETE: ReviewRecommendedAction.USE_PRIMARY_ONLY,
+            ReviewVerdict.RETRY_READ_ONLY_STEP: ReviewRecommendedAction.REQUEST_READ_ONLY_RECOVERY,
+            ReviewVerdict.ASK_USER: ReviewRecommendedAction.ASK_USER,
+            ReviewVerdict.USE_PRIMARY_ONLY: ReviewRecommendedAction.USE_PRIMARY_ONLY,
+            ReviewVerdict.REJECT: ReviewRecommendedAction.REJECT,
+        }[review.verdict]
+        if review.recommended_action is not expected_action:
+            raise SupervisorContractError("review verdict and recommended_action disagree")
+        if review.verdict is ReviewVerdict.COMPLETE:
+            if review.failed_criteria:
+                raise SupervisorContractError("complete review cannot contain failed criteria")
+        elif not review.failed_criteria:
+            raise SupervisorContractError("non-complete review must identify failed criteria")
+        if review.verdict is ReviewVerdict.RETRY_READ_ONLY_STEP and len(review.failed_criteria) != 1:
+            raise SupervisorContractError("read-only recovery must identify exactly one criterion")
+        return review
 
 
 def _required_completion_criteria(task_class: TaskClass) -> tuple[CompletionCriterion, ...]:
