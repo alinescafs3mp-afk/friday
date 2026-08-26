@@ -98,10 +98,14 @@ _SECONDARY_SHADOW_TO_ASSIST_TRANSITION = "secondary_shadow_to_assist"
 _SECONDARY_ASSIST_TO_DISABLED_TRANSITION = "secondary_assist_to_disabled"
 _SECONDARY_ASSIST_ENABLE_DOCUMENT_MAP_SHADOW_TRANSITION = "secondary_assist_enable_document_map_shadow"
 _SECONDARY_DOCUMENT_MAP_SHADOW_TO_ASSIST_TRANSITION = "secondary_document_map_shadow_to_assist"
+_SEMANTIC_SUPERVISOR_SHADOW_ENABLE_TRANSITION = "semantic_supervisor_shadow_enable"
+_SEMANTIC_SUPERVISOR_SHADOW_DISABLE_TRANSITION = "semantic_supervisor_shadow_disable"
+_SEMANTIC_SUPERVISOR_POLICY_ID = "gptoss20b-semantic-supervisor-v1"
+_SEMANTIC_SUPERVISOR_POLICY_SHA256 = "9f0c1e8132200a3a4416448cd2de03a4736da5e4968536d8c9e518fd5e88051a"
 _PRIMARY_PROCESS_EPOCH_DOMAIN = b"friday.primary-process-epoch.v2\0"
-_SECONDARY_PRODUCT_STAGE_SCHEMA = "friday.secondary-product-stage-evidence.v2"
+_SECONDARY_PRODUCT_STAGE_SCHEMA = "friday.secondary-product-stage-evidence.v3"
 _SECONDARY_PRODUCT_OPERATION_SCHEMA = "friday.secondary-product-operation-core.v1"
-_SECONDARY_PRODUCT_DIAGNOSTICS_SCHEMA = "friday.secondary-product-diagnostics.v1"
+_SECONDARY_PRODUCT_DIAGNOSTICS_SCHEMA = "friday.secondary-product-diagnostics.v2"
 _SECONDARY_PRODUCT_CLEANUP_CORE_SCHEMA = "friday.secondary-product-cleanup-core.v1"
 _SECONDARY_PRODUCT_CLEANUP_ZERO_SCHEMA = "friday.secondary-product-cleanup-zero-residue.v1"
 _SECONDARY_PRODUCT_ROLLOUT_ATTESTATION_SCHEMA = "friday.secondary-product-rollout-attestation.v1"
@@ -150,10 +154,17 @@ _SECONDARY_CONFIG_TRANSITIONS = frozenset(
         _SECONDARY_DOCUMENT_MAP_SHADOW_TO_ASSIST_TRANSITION,
     }
 )
+_SEMANTIC_SUPERVISOR_CONFIG_TRANSITIONS = frozenset(
+    {
+        _SEMANTIC_SUPERVISOR_SHADOW_ENABLE_TRANSITION,
+        _SEMANTIC_SUPERVISOR_SHADOW_DISABLE_TRANSITION,
+    }
+)
 _EXACT_ENV_CONFIG_TRANSITIONS = frozenset(
     {
         _ENGINEER_MODE_ENABLE_TRANSITION,
         *_SECONDARY_CONFIG_TRANSITIONS,
+        *_SEMANTIC_SUPERVISOR_CONFIG_TRANSITIONS,
     }
 )
 _STAGED_CONFIG_TRANSITIONS = frozenset(
@@ -201,6 +212,16 @@ _SECONDARY_LLM_ENV_KEYS = frozenset(
         "FRIDAY_SECONDARY_LLM_READ_TIMEOUT_SEC",
         "FRIDAY_SECONDARY_LLM_WORKLOADS",
         "FRIDAY_SECONDARY_LLM_DOCUMENT_MAP_MODE",
+    }
+)
+_SEMANTIC_SUPERVISOR_ENV_PREFIX = "FRIDAY_SEMANTIC_SUPERVISOR_"
+_SEMANTIC_SUPERVISOR_ENV_KEYS = frozenset(
+    {
+        "FRIDAY_SEMANTIC_SUPERVISOR_MAX_REVIEW_ROUNDS",
+        "FRIDAY_SEMANTIC_SUPERVISOR_MAX_STEPS",
+        "FRIDAY_SEMANTIC_SUPERVISOR_MODE",
+        "FRIDAY_SEMANTIC_SUPERVISOR_TASKS",
+        "FRIDAY_SEMANTIC_SUPERVISOR_TIMEOUT_SEC",
     }
 )
 _SECONDARY_FINALIST_PROFILE_ID = "gptoss20b-2335df123cac7fc0e13e347cde1e1ffa8562daafcaf0fc76ade1a851d2b0ff1f"
@@ -643,6 +664,22 @@ _SECONDARY_DOCUMENT_MAP_ASSIST_DISABLED_EXACT_VALUES = {
     **_SECONDARY_DOCUMENT_MAP_ASSIST_EXACT_VALUES,
     "FRIDAY_SECONDARY_LLM_ENABLED": "0",
 }
+_SEMANTIC_SUPERVISOR_OFF_EXACT_VALUES = {
+    "FRIDAY_SEMANTIC_SUPERVISOR_MAX_REVIEW_ROUNDS": "1",
+    "FRIDAY_SEMANTIC_SUPERVISOR_MAX_STEPS": "6",
+    "FRIDAY_SEMANTIC_SUPERVISOR_MODE": "off",
+    "FRIDAY_SEMANTIC_SUPERVISOR_TASKS": "",
+    "FRIDAY_SEMANTIC_SUPERVISOR_TIMEOUT_SEC": "12",
+}
+_SEMANTIC_SUPERVISOR_SHADOW_EXACT_VALUES = {
+    "FRIDAY_SEMANTIC_SUPERVISOR_MAX_REVIEW_ROUNDS": "0",
+    "FRIDAY_SEMANTIC_SUPERVISOR_MAX_STEPS": "6",
+    "FRIDAY_SEMANTIC_SUPERVISOR_MODE": "shadow",
+    "FRIDAY_SEMANTIC_SUPERVISOR_TASKS": (
+        "compare_archive_with_current_web,compare_current_file_with_current_web"
+    ),
+    "FRIDAY_SEMANTIC_SUPERVISOR_TIMEOUT_SEC": "12",
+}
 BOOTSTRAP_WHEELS = (("pip", "26.1.2", "pip-26.1.2-py3-none-any.whl"),)
 _ACTIVATION_SMOKE_RECEIPT = b"friday-activation-smoke:clear:v1\n"
 _OBSIDIAN_SETTINGS_IDENTITY_PROBE = """
@@ -743,6 +780,70 @@ def _obsidian_health_identity_matches(
         return True
     legacy_release = release.max_schema < 35 and not release.obsidian_cutover_contract
     return legacy_release and expected_mode == "disabled" and "obsidian" not in payload
+
+
+def _semantic_supervisor_health_identity_matches(
+    payload: Mapping[str, Any],
+    *,
+    expected_mode: str,
+) -> bool:
+    """Bind a semantic ENV transition to the source-level runtime seam."""
+
+    semantic = payload.get("semantic_supervisor")
+    secondary = payload.get("secondary")
+    if not isinstance(semantic, Mapping) or not isinstance(secondary, Mapping):
+        return False
+    nested = secondary.get("semantic_supervisor")
+    if not isinstance(nested, Mapping):
+        return False
+    common = bool(
+        semantic.get("schema") == "friday.semantic-supervisor-shadow-runtime.v1"
+        and semantic.get("role") == "discarded_advisory_shadow"
+        and semantic.get("promotion_admitted") is False
+        and semantic.get("runtime_owner") == "unchanged"
+        and semantic.get("publication_owner") == "primary"
+        and semantic.get("tools_allowed") is False
+        and semantic.get("effects_allowed") is False
+        and semantic.get("execution_allowed") is False
+        and secondary.get("schema") == "friday.optional-secondary-health.v1"
+        and secondary.get("role") == "optional_advisory"
+        and secondary.get("enabled") is True
+        and secondary.get("configured") is True
+        and secondary.get("mode") == "assist"
+        and type(secondary.get("available")) is bool
+        and nested.get("workload") == "plan_candidate"
+        and nested.get("policy_id") == _SEMANTIC_SUPERVISOR_POLICY_ID
+        and nested.get("policy_sha256") == _SEMANTIC_SUPERVISOR_POLICY_SHA256
+        and type(nested.get("runtime_available")) is bool
+    )
+    if not common:
+        return False
+    if expected_mode == "shadow":
+        return bool(
+            semantic.get("installed") is True
+            and semantic.get("requested_mode") == "shadow"
+            and semantic.get("effective_mode") == "shadow"
+            and semantic.get("policy_id") == _SEMANTIC_SUPERVISOR_POLICY_ID
+            and semantic.get("policy_sha256") == _SEMANTIC_SUPERVISOR_POLICY_SHA256
+            and semantic.get("accepted_profile_id") == _SECONDARY_FINALIST_PROFILE_ID
+            and semantic.get("max_pending") == 4
+            and nested.get("requested_mode") == "shadow"
+            and nested.get("effective_mode") == "shadow"
+            and nested.get("workload_available") is True
+            and nested.get("closed_reason") == "admitted"
+        )
+    if expected_mode == "off":
+        return bool(
+            semantic.get("installed") is False
+            and semantic.get("requested_mode") == "off"
+            and semantic.get("effective_mode") == "off"
+            and nested.get("requested_mode") == "off"
+            and nested.get("effective_mode") == "off"
+            and nested.get("workload_available") is False
+            and nested.get("runtime_available") is False
+            and nested.get("closed_reason") == "mode_off"
+        )
+    return False
 
 
 def _write_all(descriptor: int, value: bytes) -> None:
@@ -1091,6 +1192,72 @@ def _secondary_environment_view(raw: bytes) -> tuple[dict[str, str], bytes]:
     return values, unrelated
 
 
+def _semantic_supervisor_environment_parts(raw: bytes) -> tuple[dict[str, str], bytes, bytes]:
+    """Split the five closed supervisor keys from the non-secondary prefix."""
+
+    values: dict[str, str] = {}
+    unrelated: list[bytes] = []
+    supervisor: list[bytes] = []
+    try:
+        text = raw.decode("utf-8", errors="strict")
+    except UnicodeError as exc:
+        raise ReleaseFailure("semantic_supervisor_environment_invalid") from exc
+    raw_lines = text.splitlines(keepends=True)
+    logical_lines = text.splitlines()
+    if len(raw_lines) != len(logical_lines):  # pragma: no cover - Python owns both operations
+        raise ReleaseFailure("semantic_supervisor_environment_invalid")
+    previous_ending = ""
+    canonical_endings = {"", "\n", "\r", "\r\n"}
+    for raw_line, line in zip(raw_lines, logical_lines, strict=True):
+        ending = raw_line[len(line) :] if raw_line.startswith(line) else "\x00"
+        follows_canonical_line = previous_ending in canonical_endings
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            unrelated.append(raw_line.encode("utf-8"))
+            previous_ending = ending
+            continue
+        if stripped.startswith("export "):
+            stripped = stripped[7:].strip()
+        key, separator, value = stripped.partition("=")
+        key = key.strip()
+        if not separator or not key:
+            unrelated.append(raw_line.encode("utf-8"))
+            previous_ending = ending
+            continue
+        value = value.strip()
+        if len(value) >= 2 and value[0] == value[-1] and value[0] in {"'", '"'}:
+            value = value[1:-1]
+        if not key.startswith(_SEMANTIC_SUPERVISOR_ENV_PREFIX):
+            unrelated.append(raw_line.encode("utf-8"))
+            previous_ending = ending
+            continue
+        if (
+            key not in _SEMANTIC_SUPERVISOR_ENV_KEYS
+            or key in values
+            or line != f"{key}={value}"
+            or ending not in canonical_endings
+            or not follows_canonical_line
+            or any(character in value for character in "\x00\r\n")
+        ):
+            raise ReleaseFailure("semantic_supervisor_environment_invalid")
+        values[key] = value
+        supervisor.append(raw_line.encode("utf-8"))
+        previous_ending = ending
+    return values, b"".join(unrelated), b"".join(supervisor)
+
+
+def _canonical_environment_values(values: Mapping[str, str]) -> bytes:
+    return b"".join(f"{key}={value}\n".encode() for key, value in sorted(values.items()))
+
+
+def _semantic_supervisor_environment_bytes(raw: bytes) -> bytes:
+    """Return the literal supervisor block while ignoring the final secondary block."""
+
+    _secondary_values, nonsecondary, _secondary = _secondary_environment_parts(raw)
+    _values, _unrelated, supervisor = _semantic_supervisor_environment_parts(nonsecondary)
+    return supervisor
+
+
 def _secondary_rollout_api_token(raw: bytes) -> str:
     """Extract the one literal owner API token without exposing it in process arguments."""
 
@@ -1213,6 +1380,14 @@ def _validate_staged_environment_transition(
     if transition in _SECONDARY_CONFIG_TRANSITIONS:
         _validate_secondary_config_transition(transition, predecessor, target)
         return
+    if transition in _SEMANTIC_SUPERVISOR_CONFIG_TRANSITIONS:
+        _validate_semantic_supervisor_config_transition(transition, predecessor, target)
+        return
+    target_supervisor = _semantic_supervisor_environment_bytes(target)
+    if predecessor is not None:
+        predecessor_supervisor = _semantic_supervisor_environment_bytes(predecessor)
+        if predecessor_supervisor != target_supervisor:
+            raise ReleaseFailure("nonsemantic_transition_changed_semantic_supervisor_environment")
     _target_values, _target_unrelated, target_secondary = _secondary_environment_parts(target)
     if predecessor is None:
         return
@@ -1257,6 +1432,133 @@ def _validate_secondary_finalist_values(
     )
     if _sha256_bytes(ca) != _SECONDARY_FINALIST_CA_SHA256:
         raise ReleaseFailure("secondary_shadow_ca_digest_mismatch")
+
+
+def _validate_semantic_supervisor_environment(
+    raw: bytes,
+    *,
+    exact_values: Mapping[str, str],
+    invalid_code: str,
+) -> tuple[bytes, dict[str, str]]:
+    """Require one canonical supervisor block over the live accepted private profile."""
+
+    secondary_values, nonsecondary, secondary = _secondary_environment_parts(raw)
+    _validate_secondary_finalist_values(
+        secondary_values,
+        exact_values=_SECONDARY_DOCUMENT_MAP_ASSIST_EXACT_VALUES,
+        invalid_code="semantic_supervisor_secondary_prerequisite_invalid",
+    )
+    canonical_secondary = _canonical_environment_values(secondary_values)
+    if secondary != canonical_secondary or raw != nonsecondary + canonical_secondary:
+        raise ReleaseFailure("semantic_supervisor_secondary_prerequisite_invalid")
+
+    values, unrelated, supervisor = _semantic_supervisor_environment_parts(nonsecondary)
+    canonical_supervisor = _canonical_environment_values(values)
+    if (
+        values != exact_values
+        or supervisor != canonical_supervisor
+        or nonsecondary != unrelated + canonical_supervisor
+    ):
+        raise ReleaseFailure(invalid_code)
+    return unrelated, secondary_values
+
+
+def _validate_exact_semantic_supervisor_transition(
+    predecessor: bytes | None,
+    target: bytes,
+    *,
+    predecessor_exact_values: Mapping[str, str],
+    target_exact_values: Mapping[str, str],
+    invalid_code: str,
+    predecessor_invalid_code: str,
+) -> None:
+    """Change only the exact five-key block over an unchanged accepted runtime."""
+
+    target_unrelated, target_secondary = _validate_semantic_supervisor_environment(
+        target,
+        exact_values=target_exact_values,
+        invalid_code=invalid_code,
+    )
+    if predecessor is None:
+        return
+    predecessor_unrelated, predecessor_secondary = _validate_semantic_supervisor_environment(
+        predecessor,
+        exact_values=predecessor_exact_values,
+        invalid_code=predecessor_invalid_code,
+    )
+    if predecessor_unrelated != target_unrelated or predecessor_secondary != target_secondary:
+        raise ReleaseFailure("semantic_supervisor_unrelated_environment_changed")
+
+
+def _validate_semantic_supervisor_shadow_enable_environment(
+    predecessor: bytes | None,
+    target: bytes,
+) -> None:
+    """Enable from canonical off or the exact legacy implicit-off generation."""
+
+    target_unrelated, target_secondary = _validate_semantic_supervisor_environment(
+        target,
+        exact_values=_SEMANTIC_SUPERVISOR_SHADOW_EXACT_VALUES,
+        invalid_code="semantic_supervisor_shadow_enable_environment_invalid",
+    )
+    if predecessor is None:
+        return
+
+    secondary_values, nonsecondary, secondary = _secondary_environment_parts(predecessor)
+    _validate_secondary_finalist_values(
+        secondary_values,
+        exact_values=_SECONDARY_DOCUMENT_MAP_ASSIST_EXACT_VALUES,
+        invalid_code="semantic_supervisor_secondary_prerequisite_invalid",
+    )
+    canonical_secondary = _canonical_environment_values(secondary_values)
+    if secondary != canonical_secondary or predecessor != nonsecondary + canonical_secondary:
+        raise ReleaseFailure("semantic_supervisor_secondary_prerequisite_invalid")
+    values, predecessor_unrelated, supervisor = _semantic_supervisor_environment_parts(nonsecondary)
+    canonical_supervisor = _canonical_environment_values(values)
+    if (
+        values not in ({}, _SEMANTIC_SUPERVISOR_OFF_EXACT_VALUES)
+        or supervisor != canonical_supervisor
+        or nonsecondary != predecessor_unrelated + canonical_supervisor
+    ):
+        raise ReleaseFailure("semantic_supervisor_shadow_enable_predecessor_not_off")
+    if predecessor_unrelated != target_unrelated or secondary_values != target_secondary:
+        raise ReleaseFailure("semantic_supervisor_unrelated_environment_changed")
+
+
+def _validate_semantic_supervisor_shadow_disable_environment(
+    predecessor: bytes | None,
+    target: bytes,
+) -> None:
+    """Return only the exact bounded P1 shadow to its canonical default-off state."""
+
+    _validate_exact_semantic_supervisor_transition(
+        predecessor,
+        target,
+        predecessor_exact_values=_SEMANTIC_SUPERVISOR_SHADOW_EXACT_VALUES,
+        target_exact_values=_SEMANTIC_SUPERVISOR_OFF_EXACT_VALUES,
+        invalid_code="semantic_supervisor_shadow_disable_environment_invalid",
+        predecessor_invalid_code="semantic_supervisor_shadow_disable_predecessor_not_shadow",
+    )
+
+
+def _validate_semantic_supervisor_config_transition(
+    transition: str,
+    predecessor: bytes | None,
+    target: bytes,
+) -> None:
+    validators = {
+        _SEMANTIC_SUPERVISOR_SHADOW_ENABLE_TRANSITION: (
+            _validate_semantic_supervisor_shadow_enable_environment
+        ),
+        _SEMANTIC_SUPERVISOR_SHADOW_DISABLE_TRANSITION: (
+            _validate_semantic_supervisor_shadow_disable_environment
+        ),
+    }
+    try:
+        validator = validators[transition]
+    except KeyError as exc:  # pragma: no cover - callers gate the closed vocabulary
+        raise ReleaseFailure("staged_config_transition_invalid") from exc
+    validator(predecessor, target)
 
 
 def _validate_exact_secondary_transition(
@@ -1757,7 +2059,7 @@ def _secondary_product_stage_deltas(
         valid = (
             deltas["selected_total"] == 1
             and deltas["success_total"] == 1
-            and 1 <= endpoint_delta <= 3
+            and endpoint_delta in {1, 3}
             and deltas["endpoint_success_total"] == endpoint_delta
             and deltas["skipped_total"] == 0
             and deltas["primary_fallback_total"] == 0
@@ -7728,6 +8030,12 @@ class SystemdActivationPort:
         self._staged_descriptor = staged_descriptor
         self._staged_target_config = staged_target
         self._staged_predecessor_config = staged_predecessor
+        self._semantic_health_transition = (
+            staged_descriptor[0]
+            if staged_descriptor is not None
+            and staged_descriptor[0] in _SEMANTIC_SUPERVISOR_CONFIG_TRANSITIONS
+            else ""
+        )
         self._leases: list[Any] = []
 
     def activation_policy_receipt(self) -> Mapping[str, str]:
@@ -9179,6 +9487,30 @@ print(json.dumps({'schema':SCHEMA_VERSION,'status':'clear'},sort_keys=True,separ
         self._verify_environment_file()
         self._start(self.config.backend_unit, release, "backend")
 
+    def _expected_semantic_health_mode(self) -> str:
+        """Bind every staged-transition writer to the canonical ENV generation."""
+
+        if not self._semantic_health_transition:
+            return ""
+        descriptor = self._staged_descriptor
+        if descriptor is None:  # pragma: no cover - transition proves it
+            raise ReleaseFailure("staged_environment_identity_changed")
+        _transition, predecessor_digest, _staged_path, target_digest = descriptor
+        current_digest = self._canonical_environment_digest()
+        if current_digest == target_digest:
+            return (
+                "shadow"
+                if self._semantic_health_transition == _SEMANTIC_SUPERVISOR_SHADOW_ENABLE_TRANSITION
+                else "off"
+            )
+        if current_digest == predecessor_digest:
+            return (
+                "off"
+                if self._semantic_health_transition == _SEMANTIC_SUPERVISOR_SHADOW_ENABLE_TRANSITION
+                else "shadow"
+            )
+        raise ReleaseFailure("staged_canonical_environment_changed")
+
     def accept_backend(self, release: ReleaseIdentity) -> None:
         ca = _private_regular_file(
             self.config.health_ca,
@@ -9195,6 +9527,7 @@ print(json.dumps({'schema':SCHEMA_VERSION,'status':'clear'},sort_keys=True,separ
             urllib.request.HTTPSHandler(context=context),
             _NoRedirect(),
         )
+        expected_semantic_mode = self._expected_semantic_health_mode()
         deadline = time.monotonic() + 420.0
         while time.monotonic() < deadline:
             try:
@@ -9222,6 +9555,13 @@ print(json.dumps({'schema':SCHEMA_VERSION,'status':'clear'},sort_keys=True,separ
                         release,
                         self.config.obsidian_mode,
                         _obsidian_root_sha256(self.config),
+                    )
+                    and (
+                        not expected_semantic_mode
+                        or _semantic_supervisor_health_identity_matches(
+                            payload,
+                            expected_mode=expected_semantic_mode,
+                        )
                     )
                 ):
                     self._wait_process(self.config.backend_unit, release, "backend")
@@ -10117,9 +10457,9 @@ def build_parser() -> argparse.ArgumentParser:
         "--staged-config-transition",
         choices=tuple(sorted(_STAGED_CONFIG_TRANSITIONS)),
         help=(
-            "Explicit immutable ENV0 to ENV1 transition (Obsidian, Engineer Mode, or exact "
-            "secondary finalist public-shadow/private-shadow/assist/disable state change); "
-            "omitted staged activations retain the established obsidian_enable contract"
+            "Explicit immutable ENV0 to ENV1 transition (Obsidian, Engineer Mode, exact "
+            "secondary finalist, or semantic-supervisor shadow state change); omitted staged "
+            "activations retain the established obsidian_enable contract"
         ),
     )
     activate.add_argument(

@@ -205,6 +205,12 @@ failed/error/skipped-тест в любой фазе делает гейт кр�
 - assist допускает только валидированную typed Inbox extraction:
   secondary не имеет tools/effects/publication или knowledge-write
   authority, а любой отказ обязан дать exact primary-only fallback;
+- owner diagnostics разделяет `endpoint_admission_total` и физические
+  `endpoint_request_total`/`endpoint_success_total`. Cold recovery обязан дать
+  exact HTTP sequence profile → models → generation canary → product, то есть
+  endpoint delta `4/4` при трёх admission; это связывают только
+  `secondary-product-diagnostics.v2` и `secondary-product-stage-evidence.v3`,
+  legacy v1/v2 evidence не переинтерпретируется и отклоняется fail-closed;
 - в 0.207.27 Inbox advice использует exact code-owned strict JSON
   Schema и downstream validation; malformed/truncated response уходит в
   тот же primary fallback, а document review и web search не допущены;
@@ -247,6 +253,116 @@ failed/error/skipped-тест в любой фазе делает гейт кр�
   bit; из assist используется `secondary_assist_to_disabled`;
   ручная правка live env запрещена, а unfinished activation продолжается
   только через `recover-activation`.
+
+Для P1 GPT-OSS semantic supervisor shadow дополнительно:
+
+- без semantic ENV candidate стартует с
+  `FRIDAY_SEMANTIC_SUPERVISOR_MODE=off`, пустым task allowlist и не оборачивает
+  существующий runtime; неизвестный mode, пустой/невалидный allowlist или
+  невалидные bounds fail closed к unchanged primary path;
+- scheduler допускает `plan_candidate` только поверх exact accepted profile
+  `gptoss20b-2335df123cac7fc0e13e347cde1e1ffa8562daafcaf0fc76ade1a851d2b0ff1f`,
+  accepted manifest SHA-256
+  `93ea5698b8b6a9bf8a7dc697ffe37d7353055aa16555188991747bba73d059e3`
+  и `FRIDAY_SECONDARY_LLM_ALLOW_PRIVATE_TEXT=1`; mismatch, public-text mode,
+  disabled/misconfigured secondary и product-policy drift закрывают workload;
+- code-owned policy `gptoss20b-semantic-supervisor-v1` имеет SHA-256
+  `9f0c1e8132200a3a4416448cd2de03a4736da5e4968536d8c9e518fd5e88051a`,
+  не recertify-ит runtime и допускает ровно task classes
+  `compare_current_file_with_current_web` и
+  `compare_archive_with_current_web`; `plan_candidate` не добавляется в общий
+  `FRIDAY_SECONDARY_LLM_WORKLOADS`;
+- `semantic_supervisor_shadow_enable` меняет только exact semantic block:
+  `MODE=shadow`, обе task classes в canonical order, `MAX_STEPS=6`,
+  `MAX_REVIEW_ROUNDS=0`, `TIMEOUT_SEC=12`; predecessor — exact current
+  accepted private secondary production state (`ENABLED=1`,
+  `ALLOW_PRIVATE_TEXT=1`, `MODE=assist`, `WORKLOADS=document_map,extract`,
+  `DOCUMENT_MAP_MODE=assist`, exact finalist model/profile/timeouts, API-key
+  shape и CA digest), все secondary и остальные ENV bytes неизменны;
+  semantic predecessor при этом либо exact canonical off, либо legacy exact
+  absence всех пяти keys поверх того же prerequisite. Partial/unknown block
+  запрещён; absent predecessor source обязан давать uninstalled/effective-off
+  health, а pre-backup rollback/recovery сохраняет отсутствие побайтно;
+- `semantic_supervisor_shadow_disable` отдельным candidate меняет только эти
+  пять ключей к `MODE=off`, пустому `TASKS`, `MAX_STEPS=6`,
+  `MAX_REVIEW_ROUNDS=1`, `TIMEOUT_SEC=12`; тот же exact secondary state
+  сохраняется побайтно, ручная live ENV правка запрещена;
+- staged file лежит непосредственно в `state_dir`, имеет mode `0600` и exact
+  `--next-env-file-sha256`; accepted layout — unchanged unrelated bytes, пять
+  semantic keys в lexical sort order, затем прежний canonical sorted secondary
+  block. Semantic append после `FRIDAY_SECONDARY_LLM_*` отклоняется;
+- `.env.example` и output `jericho init` заканчиваются contiguous lexical
+  default-off semantic block. Placeholder example не является accepted ENV:
+  initial secondary transition удаляет его placeholder secondary keys и
+  append-ит exact accepted canonical secondary block после semantic EOF;
+- scheduler policy допускает только exact P1 bounds `MAX_STEPS=6` и
+  `MAX_REVIEW_ROUNDS=0`; ручные steps `1`/`2` и review `1` дают
+  `closed_reason=invalid_bounds`, effective off и не устанавливают
+  `plan_candidate`;
+- requested `assist`/`canary` не повышают authority: их effective mode остаётся
+  `shadow`, `promotion_admitted=false`; proposal только парсится/валидируется и
+  никогда не выбирает route, не исполняется, не публикуется, не меняет primary
+  prompt/Work Item и не создаёт tool/effect/knowledge-write operation;
+- sidecar возвращает exact primary result и вызывает primary ровно один раз;
+  secondary attempt стартует только после успешного primary, bounded четырьмя
+  pending tasks и исходным deadline; каждый созданный request до adapter
+  проверен против exact 3 328-byte input budget 4K profile, а ASCII/Cyrillic
+  boundary fixtures доказывают максимальный посимвольный UTF-8 prefix и
+  fail-closed следующий символ; full-source secret/path guard сохраняется до
+  этой проекции. Pending owned/uncertain, cancel/ordinal,
+  reply/replay/body-explicit mode/voice/synthetic и прочие special/exact
+  surfaces не семплируются (session-restored mode при этом только передаётся
+  primary); из ingestion results допускаются только exact closed transient
+  `web_request`, `archive_search_request` и synthetic `system_notice`, все
+  остальные формы fail-closed обходятся;
+- батарея laptop-off/startup, endpoint unavailable, profile drift, private-text
+  rejection, timeout, malformed/duplicate-key proposal, policy rejection и
+  saturation подтверждает fail-closed shadow и unchanged primary path без
+  duplicate tool/effect/publication;
+- concurrent foreground workload вытесняет lowest-priority `plan_candidate`,
+  semantic permit освобождается cancellation-safe и не создаёт чужой
+  `admission_busy`; semantic protocol/product failures не меняют shared circuit
+  или epoch; late pre-dispatch guard закрывает stale same-conversation/pending
+  attempt до HTTP POST, учитывает его как `invoked=false`/`not_called`, отделяет
+  `endpoint_admission_total` от фактического `endpoint_request_total`, а
+  superseded/close cancellation не теряется из body-free observations;
+- health/metrics проекции body-free: response `/api/health` содержит
+  `secondary.semantic_supervisor` и top-level `semantic_supervisor`; второй
+  показывает `installed`, discarded-shadow role, requested/effective mode,
+  `promotion_admitted=false`, unchanged runtime/primary publication ownership,
+  запреты tools/effects/execution и, только когда установлен, policy/profile
+  identity, pending bounds и bounded counters. Owner diagnostics
+  `secondary.workloads.plan_candidate` содержит только closed routing,
+  availability/reason и scheduler counters; raw message/prompt,
+  document/query/proposal/model body, path, actor/conversation ID и endpoint
+  error text отсутствуют;
+- при admitted scheduler top-level `semantic_supervisor.installed=true`, а
+  `orchestration.installed_mode` по-прежнему совпадает с underlying router;
+  shutdown закрывает sidecar, затем underlying `OrchestrationRouter`, без
+  double-close; optional evaluator не может удерживать этот shutdown больше
+  одной секунды. Иное состояние означает incomplete production wiring и красный
+  release gate;
+- immutable enable health gate принимает только installed/effective shadow с
+  exact policy/profile и `workload_available=true` (при этом laptop-off и
+  `runtime_available=false` допустимы); disable принимает только
+  uninstalled/effective off;
+- exact offline command
+  `.venv/bin/python -I -B tools/evaluate_semantic_supervisor_offline.py --fixtures tests/fixtures/semantic_supervisor_offline_v1.json`
+  возвращает deterministic canonical schema
+  `friday.semantic-supervisor-offline-evaluation.v1`: 10/10 fixture
+  conformance, 10/10 runtime invariant conformance и фактически измеренную
+  primary-once/response-identity-and-value parity; instrumented tripwire counters дают
+  zero execution/publication/effect, `network_used=false`,
+  `promotion_evidence=false`,
+  `acceptance_authority=none`;
+- offline report всегда помечен
+  `synthetic_offline_only_not_live_shadow_or_canary_acceptance`: он не заменяет
+  live shadow/canary evidence и не является promotion receipt;
+- P2 web execution не admitted. Две task-class метки в P1 разрешают только
+  discarded semantic proposals; нынешний `web_research` имеет `risk=mutate` и
+  persistence/publication metadata. Нужны отдельная P2 mutation/persistence
+  граница и новое representative live evidence, прежде чем proposal сможет
+  влиять на web work selection.
 
 Для V12 file/archive slice дополнительно:
 

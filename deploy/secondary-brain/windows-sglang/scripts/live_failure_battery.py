@@ -45,9 +45,9 @@ PHYSICAL_OBSERVATION_SCHEMA = "friday.secondary-physical-failure-observation.v2"
 PRODUCT_BEGIN_SCHEMA = "friday.secondary-product-failure-begin.v1"
 PRODUCT_OFF_SCHEMA = "friday.secondary-product-failure-off.v1"
 PRODUCT_OBSERVATION_SCHEMA = "friday.secondary-product-failure-observation.v1"
-PRODUCT_STAGE_SCHEMA = "friday.secondary-product-stage-evidence.v2"
+PRODUCT_STAGE_SCHEMA = "friday.secondary-product-stage-evidence.v3"
 PRODUCT_STORAGE_BINDING_SCHEMA = "friday.secondary-product-storage-binding.v1"
-PRODUCT_DIAGNOSTICS_SCHEMA = "friday.secondary-product-diagnostics.v1"
+PRODUCT_DIAGNOSTICS_SCHEMA = "friday.secondary-product-diagnostics.v2"
 PRODUCT_ADVICE_PROOF_SCHEMA = "friday.secondary-product-advice-proof.v1"
 PRODUCT_OPERATION_CORE_SCHEMA = "friday.secondary-product-operation-core.v1"
 PRODUCT_CLEANUP_CORE_SCHEMA = "friday.secondary-product-cleanup-core.v1"
@@ -97,6 +97,10 @@ _SHA256 = re.compile(r"[0-9a-f]{64}\Z")
 _INBOX_ID = re.compile(r"(?:inb|inbox)_[A-Za-z0-9_.:-]{1,144}\Z")
 _RAW_ID = re.compile(r"raw_[A-Za-z0-9_.:-]{1,148}\Z")
 _MAX_COUNTER = (1 << 63) - 1
+# A cold recovery admits three endpoint operations (inventory, canary and
+# product), but endpoint_request_total counts actual HTTP tasks.  Inventory is
+# two physical reads: the immutable profile manifest and /models.
+_RECOVERY_PHYSICAL_ENDPOINT_REQUESTS = 4
 PRODUCT_STAGES = (
     "public-shadow",
     "private-shadow",
@@ -1437,7 +1441,9 @@ def _product_stage_deltas(
         valid = (
             deltas["selected_total"] == 1
             and deltas["success_total"] == 1
-            and 1 <= endpoint_delta <= 3
+            # One fresh product request, or a stale admitted epoch refreshed by
+            # the physical profile + models reads before the product request.
+            and endpoint_delta in {1, 3}
             and deltas["endpoint_success_total"] == endpoint_delta
             and deltas["skipped_total"] == 0
             and deltas["primary_fallback_total"] == 0
@@ -1497,8 +1503,8 @@ def _product_stage_deltas(
         valid = (
             deltas["selected_total"] == 1
             and deltas["success_total"] == 1
-            and deltas["endpoint_request_total"] == 3
-            and deltas["endpoint_success_total"] == 3
+            and deltas["endpoint_request_total"] == _RECOVERY_PHYSICAL_ENDPOINT_REQUESTS
+            and deltas["endpoint_success_total"] == _RECOVERY_PHYSICAL_ENDPOINT_REQUESTS
             and deltas["skipped_total"] == 0
             and deltas["primary_fallback_total"] == 0
             and zero_reasons

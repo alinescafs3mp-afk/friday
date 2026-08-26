@@ -164,6 +164,15 @@ gateway publication recovery. После готовности LAN, Docker и exa
 listener. Только тогда допустим один restart этого gateway; несогласованные
 наблюдения закрывают recovery, а model container никогда не перезапускается.
 
+В owner diagnostics `endpoint_admission_total` считает занятые client permits,
+а `endpoint_request_total`/`endpoint_success_total` — созданные физические HTTP
+tasks и ответы с допустимым HTTP status. Поэтому cold product recovery имеет
+три admission, но exact endpoint delta `4/4`: profile manifest, `/models`,
+generation canary и product request. Новый контракт выпускает только
+`friday.secondary-product-diagnostics.v2` внутри
+`friday.secondary-product-stage-evidence.v3`; прежние v1/v2 receipts не
+считаются эквивалентными и отклоняются.
+
 После приёмки самого default-off релиза оператор может подготовить
 owner-private ENV1. Это не отдельный env-файл: скопируйте exact ENV0 вместе с
 завершающим newline и добавьте в его конец следующий canonical sorted/unquoted
@@ -253,6 +262,189 @@ activation с `secondary_shadow_disable`; privacy bit должен
 `DOCUMENT_MAP_MODE`, меняя только `ENABLED=1→0`.
 При unfinished activation не запускайте disable: продолжайте только через
 `recover-activation` в identity существующего journal.
+
+### P1 GPT-OSS semantic supervisor: только discarded shadow
+
+Semantic supervisor — отдельная default-off product policy поверх уже принятого
+optional GPT-OSS-20B runtime. Это не новый router owner и не профиль primary
+Qwen 27B. Primary 27B сохраняет единственный пользовательский ответ, tools,
+effects и publication; ноутбук остаётся необязательным.
+
+Пять semantic-переменных по умолчанию имеют закрытое состояние:
+
+```dotenv
+FRIDAY_SEMANTIC_SUPERVISOR_MAX_REVIEW_ROUNDS=1
+FRIDAY_SEMANTIC_SUPERVISOR_MAX_STEPS=6
+FRIDAY_SEMANTIC_SUPERVISOR_MODE=off
+FRIDAY_SEMANTIC_SUPERVISOR_TASKS=
+FRIDAY_SEMANTIC_SUPERVISOR_TIMEOUT_SEC=12
+```
+
+Неизвестный mode сводится к `off`, пустой либо смешанный task allowlist ничего
+не вызывает. Чтобы scheduler вообще допустил overlay `plan_candidate`, должны
+одновременно выполняться все условия:
+
+- secondary включён и не находится в `disabled`;
+- runtime admission имеет точное значение `accepted`;
+- profile ID равен
+  `gptoss20b-2335df123cac7fc0e13e347cde1e1ffa8562daafcaf0fc76ade1a851d2b0ff1f`;
+- accepted profile manifest SHA-256 равен
+  `93ea5698b8b6a9bf8a7dc697ffe37d7353055aa16555188991747bba73d059e3`;
+- `FRIDAY_SECONDARY_LLM_ALLOW_PRIVATE_TEXT=1`, exact TLS/profile
+  configuration допустима, а endpoint не подменяет primary endpoint;
+- code-owned policy `gptoss20b-semantic-supervisor-v1` имеет SHA-256
+  `9f0c1e8132200a3a4416448cd2de03a4736da5e4968536d8c9e518fd5e88051a`;
+- P1 bounds имеют только одну фактически поддерживаемую форму:
+  `MAX_STEPS=6` и `MAX_REVIEW_ROUNDS=0`; ручные значения `1`/`2` для steps
+  или review `1` не уменьшают возможности, а полностью закрывают overlay;
+- allowlist состоит только из одной или обеих разрешённых task classes:
+  `compare_current_file_with_current_web` и
+  `compare_archive_with_current_web`.
+
+`plan_candidate` — code-owned overlay scheduler. Не добавляйте его вручную в
+`FRIDAY_SECONDARY_LLM_WORKLOADS` и не меняйте ради него accepted runtime
+manifest: semantic policy не является повторной сертификацией модели.
+
+Для P1 shadow activation используется exact пятиключевой блок:
+
+```dotenv
+FRIDAY_SEMANTIC_SUPERVISOR_MAX_REVIEW_ROUNDS=0
+FRIDAY_SEMANTIC_SUPERVISOR_MAX_STEPS=6
+FRIDAY_SEMANTIC_SUPERVISOR_MODE=shadow
+FRIDAY_SEMANTIC_SUPERVISOR_TASKS=compare_archive_with_current_web,compare_current_file_with_current_web
+FRIDAY_SEMANTIC_SUPERVISOR_TIMEOUT_SEC=12
+```
+
+Он публикуется только distinct-candidate immutable activation
+`semantic_supervisor_shadow_enable`: вне этих пяти ключей ENV должен остаться
+побайтно прежним. Semantic predecessor допускается только в двух default-off
+формах: exact canonical block выше либо legacy generation, где отсутствуют все
+пять semantic keys. Последняя форма нужна для первого rollout поверх уже
+установленного source release, который при отсутствии ENV сообщает health как
+uninstalled/effective off; partial block и любой unknown semantic key
+отклоняются. Pre-backup rollback/recovery сохраняет legacy absence побайтно, а
+enable target всё равно всегда содержит exact shadow block. Predecessor обязан
+быть exact текущим accepted private
+secondary production state: `ENABLED=1`, `ALLOW_PRIVATE_TEXT=1`, `MODE=assist`,
+`WORKLOADS=document_map,extract`, `DOCUMENT_MAP_MODE=assist`, exact finalist
+profile/model/timeouts, 64-hex API key и CA с уже указанным exact digest.
+Transition не меняет ни одного secondary byte. Передайте его через
+`--staged-config-transition semantic_supervisor_shadow_enable`. Плановое
+выключение выполняет отдельный distinct candidate с
+`--staged-config-transition semantic_supervisor_shadow_disable` к exact
+default-off блоку выше и тому же неизменному secondary state. Ручная правка
+live `.env.local` не является rollout или rollback path.
+
+Staged ENV — owner-private regular file mode `0600` непосредственно в
+`state_dir`; передайте обычные `--next-env-file` и
+`--next-env-file-sha256`. Допустимый byte layout строгий: неизменённые прочие
+ENV bytes, затем пять semantic keys в показанном lexical order, затем
+существующий canonical sorted `FRIDAY_SECONDARY_LLM_*` block. Не append-ите
+semantic keys после secondary block: operator отклонит такой файл.
+Шаблоны `.env.example` и `jericho init` держат lexical default-off semantic
+block в абсолютном EOF; initial secondary transition удаляет placeholder
+secondary keys и заново append-ит accepted canonical secondary block после
+него. Сам `.env.example` с пустыми placeholder profile/API/CA не является
+готовым production activation input.
+
+Не смешивайте два mode: существующий
+`FRIDAY_SECONDARY_LLM_MODE=assist` относится к уже принятым extract/document-map
+workloads, а `FRIDAY_SEMANTIC_SUPERVISOR_MODE=shadow` — только к новому
+discarded advisory overlay.
+
+Значения `assist` и `canary` синтаксически принимаются для будущего rollout,
+но в этом P1 их **effective mode остаётся `shadow`** и
+`promotion_admitted=false`. Они не дают proposal права влиять на route,
+primary prompt, execution, Work Item, tool call, effect, knowledge write или
+publication. Включать их вместо exact P1 `shadow` transition не следует.
+
+Live sidecar сначала готовит bounded secret-checked projection, затем вызывает
+прежний primary ровно один раз. Только после успешного primary response он
+может запустить до четырёх фоновых shadow attempts; secondary proposal
+валидируется и выбрасывается. В exact 4K profile входной adapter-envelope
+ограничен 3 328 UTF-8 bytes (`4096 - 512 - 256`): builder выбирает максимальный
+посимвольный префикс и затем повторно проверяет exact envelope перед созданием
+request. Secret/path/private-ID guard проверяет весь исходный turn до проекции,
+поэтому запрещённый suffix за границей префикса тоже закрывает вызов без
+сохранения самого suffix. Pending owned/uncertain turn, cancel/ordinal,
+reply/replay, explicit mode, voice, synthetic notice, отключённые tools и
+другие exact/special surfaces обходят supervisor. Из ingestion-проекций
+допускаются только закрытые transient-категории `web_request` и
+`archive_search_request`, а также exact synthetic `system_notice`: строго
+`promoted=false`, `queued_for_review=false`, `action=transient`, строковый
+`reason` и без лишних ключей (`system_notice` дополнительно требует
+`synthetic=true`). Любая другая форма ingestion result fail-closed обходится.
+Ошибка binding, policy, profile, deadline, saturation, endpoint или laptop-off
+закрывает только shadow attempt; startup и primary answer не должны меняться.
+`plan_candidate` всегда ниже уже принятых workloads: foreground atomically
+отменяет semantic attempt, дожидается освобождения единственного permit и не
+получает вызванный supervisor-ом `admission_busy`. Semantic malformed,
+reasoning leak, degeneration, truncation и policy rejection учитываются только
+в workload `plan_candidate`, не открывая shared circuit и не сбрасывая epoch.
+После endpoint admission, непосредственно перед HTTP dispatch без await,
+sidecar повторно проверяет pending-owner, deadline и same-conversation epoch.
+Отклонённый late guard остаётся `invoked=false`/`endpoint_health_class=not_called`:
+`endpoint_admission_total` может вырасти, но `endpoint_request_total` считает
+только реально созданные HTTP tasks. Superseded/close cancellation получает
+body-free observation, а shutdown ждёт неисправный optional evaluator не более
+одной секунды перед продолжением primary cleanup.
+
+Проверяйте body-free health/metrics проекции:
+
+- `/api/health` → `secondary.semantic_supervisor`: `requested_mode`,
+  `effective_mode`, policy identity, `workload_available`,
+  `runtime_available`, закрытый `closed_reason`;
+- `/api/health` → top-level `semantic_supervisor`: `installed`, role
+  `discarded_advisory_shadow`, requested/effective mode,
+  `promotion_admitted=false`, unchanged runtime/primary publication ownership и
+  запреты tools/effects/execution; installed sidecar дополнительно показывает
+  policy/profile identity, `max_pending`, `pending`, `retained` и bounded
+  observation/invocation/skip/parse/policy counters;
+- owner-only `/api/admin/diagnostics` →
+  `secondary.workloads.plan_candidate`: routing mode, availability, closed
+  reason и bounded scheduler counters.
+
+В этих проекциях не должно быть message/document body, raw prompt/proposal,
+model output, query, path, actor/conversation ID или endpoint error text. Если
+scheduler admission показывает `shadow`, но top-level runtime projection имеет
+`installed=false`, production wiring не завершён и такой candidate не
+принимается. `orchestration.installed_mode` при этом всегда описывает
+underlying router, а не semantic wrapper.
+
+Immutable transition `semantic_supervisor_shadow_enable` дополнительно требует
+эту exact пару health-проекций: installed/effective shadow без authority,
+admitted workload и точные policy/profile identities. Runtime availability
+может быть false при выключенном ноутбуке; `installed=false` или
+`workload_available=false` не допускаются. Disable transition требует
+uninstalled/effective off. Одной побайтной ENV-подмены недостаточно.
+
+Offline P1 replay из exact candidate checkout запускается так:
+
+```bash
+.venv/bin/python -I -B tools/evaluate_semantic_supervisor_offline.py \
+  --fixtures tests/fixtures/semantic_supervisor_offline_v1.json
+```
+
+Команда прогоняет настоящий `SemanticSupervisorShadowRuntime` с in-memory
+primary и in-memory proposal adapter, но не устанавливает endpoint и не делает
+network/external-model/tool вызовов. Она печатает canonical body-free JSON.
+Fixture не содержит и не заявляет `primary_trace`: primary-once, неизменённые
+identity и value ответа, запуск shadow только после primary и сохранение lifecycle
+ownership измеряет сам harness. Ожидаются schema
+`friday.semantic-supervisor-offline-evaluation.v1`,
+`network_used=false`, все `live_*_evidence=false`,
+`promotion_evidence=false`, `acceptance_authority=none`, десять conforming
+fixtures, primary-fallback parity `10/10`, runtime invariant conformance `10/10`
+и измеренные tripwire-счётчики execution/publication/effect, равные нулю. Это
+deterministic synthetic regression, а не live shadow/canary acceptance, не
+promotion receipt и не основание включать P2.
+
+Имена двух task classes описывают только shadow proposal. P1 не выполняет
+`web.search.current`. Текущий production `web_research` contour объявлен как
+`risk=mutate` и сохраняет accepted outcome/publication metadata; поэтому его
+нельзя молча считать read-only P2 capability. P2 web comparison остаётся
+закрыт до отдельного implementation package, явной mutation/persistence
+границы и нового representative live shadow/canary evidence.
 
 ## 2. Что проверяет doctor
 

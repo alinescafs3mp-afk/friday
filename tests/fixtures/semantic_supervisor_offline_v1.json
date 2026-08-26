@@ -1,0 +1,174 @@
+{
+  "schema": "friday.semantic-supervisor-offline-fixtures.v1",
+  "evidence_kind": "synthetic_offline_fixture_replay",
+  "settings": {
+    "mode": "shadow",
+    "tasks": [
+      "compare_current_file_with_current_web",
+      "compare_archive_with_current_web"
+    ],
+    "max_steps": 6
+  },
+  "fixtures": [
+    {
+      "id": "small_talk_primary",
+      "turn": {
+        "message": "Привет",
+        "conversation_present": true,
+        "enable_tools": true,
+        "attachment": "none"
+      },
+      "pending_bound": false,
+      "proposal_case": "none",
+      "expected": {
+        "lane": "primary_only",
+        "skip_reason": "small_talk",
+        "policy_outcome": "not_evaluated"
+      }
+    },
+    {
+      "id": "ordinary_dialogue_primary",
+      "turn": {
+        "message": "Помоги сформулировать короткое письмо коллеге.",
+        "conversation_present": true,
+        "enable_tools": true,
+        "attachment": "none"
+      },
+      "pending_bound": false,
+      "proposal_case": "none",
+      "expected": {
+        "lane": "primary_only",
+        "skip_reason": "ordinary_dialogue",
+        "policy_outcome": "not_evaluated"
+      }
+    },
+    {
+      "id": "established_file_read_primary",
+      "turn": {
+        "message": "Кратко перескажи этот файл.",
+        "conversation_present": true,
+        "enable_tools": true,
+        "attachment": "text_available"
+      },
+      "pending_bound": false,
+      "proposal_case": "none",
+      "expected": {
+        "lane": "primary_only",
+        "skip_reason": "established_file_read",
+        "policy_outcome": "not_evaluated"
+      }
+    },
+    {
+      "id": "exact_pending_ordinal",
+      "turn": {
+        "message": "2",
+        "conversation_present": true,
+        "enable_tools": true,
+        "attachment": "none"
+      },
+      "pending_bound": true,
+      "proposal_case": "none",
+      "expected": {
+        "lane": "exact_lane",
+        "skip_reason": "exact_lane",
+        "policy_outcome": "not_evaluated"
+      }
+    },
+    {
+      "id": "exact_cancel",
+      "turn": {
+        "message": "отмена",
+        "conversation_present": true,
+        "enable_tools": true,
+        "attachment": "none"
+      },
+      "pending_bound": false,
+      "proposal_case": "none",
+      "expected": {
+        "lane": "exact_lane",
+        "skip_reason": "exact_lane",
+        "policy_outcome": "not_evaluated"
+      }
+    },
+    {
+      "id": "file_web_valid",
+      "turn": {
+        "message": "Сравни этот документ с текущими публичными правилами в интернете.",
+        "conversation_present": true,
+        "enable_tools": true,
+        "attachment": "text_available"
+      },
+      "pending_bound": false,
+      "proposal_case": "valid",
+      "expected": {
+        "lane": "supervisor_candidate",
+        "skip_reason": "none",
+        "policy_outcome": "admitted"
+      }
+    },
+    {
+      "id": "archive_web_valid",
+      "turn": {
+        "message": "Сравни документ из архива с актуальными публичными данными в интернете.",
+        "conversation_present": true,
+        "enable_tools": true,
+        "attachment": "none"
+      },
+      "pending_bound": false,
+      "proposal_case": "valid",
+      "expected": {
+        "lane": "supervisor_candidate",
+        "skip_reason": "none",
+        "policy_outcome": "admitted"
+      }
+    },
+    {
+      "id": "stale_manifest_rejected",
+      "turn": {
+        "message": "Сравни этот документ с актуальными публичными данными в интернете.",
+        "conversation_present": true,
+        "enable_tools": true,
+        "attachment": "text_available"
+      },
+      "pending_bound": false,
+      "proposal_case": "stale_manifest",
+      "expected": {
+        "lane": "supervisor_candidate",
+        "skip_reason": "policy_rejected",
+        "policy_outcome": "stale_manifest"
+      }
+    },
+    {
+      "id": "unknown_capability_rejected",
+      "turn": {
+        "message": "Сравни этот документ с текущими публичными правилами в интернете.",
+        "conversation_present": true,
+        "enable_tools": true,
+        "attachment": "text_available"
+      },
+      "pending_bound": false,
+      "proposal_case": "unknown_capability",
+      "expected": {
+        "lane": "supervisor_candidate",
+        "skip_reason": "policy_rejected",
+        "policy_outcome": "unknown_capability"
+      }
+    },
+    {
+      "id": "malformed_proposal_primary",
+      "turn": {
+        "message": "Сравни этот документ с актуальными публичными данными в интернете.",
+        "conversation_present": true,
+        "enable_tools": true,
+        "attachment": "text_available"
+      },
+      "pending_bound": false,
+      "proposal_case": "malformed",
+      "expected": {
+        "lane": "supervisor_candidate",
+        "skip_reason": "malformed_proposal",
+        "policy_outcome": "malformed"
+      }
+    }
+  ]
+}

@@ -27,7 +27,7 @@ SECONDARY_PRODUCT_WITNESS_STAGES = (
 )
 SECONDARY_PRODUCT_WITNESS_SOURCE_PREFIX = "secondary-product-witness:"
 SECONDARY_PRODUCT_STORAGE_BINDING_SCHEMA = "friday.secondary-product-storage-binding.v1"
-SECONDARY_PRODUCT_DIAGNOSTICS_SCHEMA = "friday.secondary-product-diagnostics.v1"
+SECONDARY_PRODUCT_DIAGNOSTICS_SCHEMA = "friday.secondary-product-diagnostics.v2"
 SECONDARY_PRODUCT_ADVICE_PROOF_SCHEMA = "friday.secondary-product-advice-proof.v1"
 SECONDARY_PRODUCT_OPERATION_CORE_SCHEMA = "friday.secondary-product-operation-core.v1"
 SECONDARY_PRODUCT_CLEANUP_CORE_SCHEMA = "friday.secondary-product-cleanup-core.v1"

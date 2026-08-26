@@ -324,8 +324,8 @@ def _stage_pair(stage: str) -> tuple[dict[str, Any], dict[str, Any]]:
         after.update(state="healthy", available=True, last_failure=None)
         after["selected_total"] += 1
         after["success_total"] += 1
-        after["endpoint_request_total"] += 3
-        after["endpoint_success_total"] += 3
+        after["endpoint_request_total"] += 4
+        after["endpoint_success_total"] += 4
         after["probe_success_total"] += 1
         after["model_inventory_probe_success_total"] += 1
         after["workload"]["selected_total"] += 1
@@ -388,6 +388,23 @@ def test_product_stage_oracles_require_exact_diagnostics(live: Any, stage: str) 
         live._product_stage_deltas(stage, before, mismatched)
 
 
+def test_recovery_oracle_requires_the_four_physical_endpoint_requests(live: Any) -> None:
+    before, after = _stage_pair("recovery")
+
+    deltas = live._product_stage_deltas("recovery", before, after)
+
+    assert deltas["endpoint_request_total"] == 4
+    assert deltas["endpoint_success_total"] == 4
+    assert deltas["selected_total"] == 1
+    assert deltas["probe_success_total"] == 1
+
+    legacy_logical_counts = copy.deepcopy(after)
+    legacy_logical_counts["endpoint_request_total"] -= 1
+    legacy_logical_counts["endpoint_success_total"] -= 1
+    with pytest.raises(live.LiveFailureBatteryError, match="diagnostics do not match"):
+        live._product_stage_deltas("recovery", before, legacy_logical_counts)
+
+
 def test_public_shadow_accepts_stale_healthy_admission_on_both_snapshots(live: Any) -> None:
     before, after = _stage_pair("public-shadow")
     before["available"] = False
@@ -414,6 +431,19 @@ def test_private_product_stage_readmits_one_stale_healthy_process(live: Any, sta
     assert deltas["endpoint_request_total"] == 3
     assert deltas["probe_success_total"] == 1
     assert after["available"] is True
+
+
+@pytest.mark.parametrize("stage", ["private-shadow", "assist"])
+def test_private_product_stage_rejects_impossible_two_request_sequence(
+    live: Any,
+    stage: str,
+) -> None:
+    before, after = _stage_pair(stage)
+    after["endpoint_request_total"] += 1
+    after["endpoint_success_total"] += 1
+
+    with pytest.raises(live.LiveFailureBatteryError, match="diagnostics do not match"):
+        live._product_stage_deltas(stage, before, after)
 
 
 @pytest.mark.parametrize("stage", ["private-shadow", "assist"])
@@ -612,6 +642,8 @@ def test_primary_ca_identity_prefers_backend_trust_ca_and_rejects_leaf(tmp_path:
 
 
 def test_product_stage_parser_rejects_counter_only_and_mismatched_receipts(live: Any) -> None:
+    assert live.PRODUCT_STAGE_SCHEMA == "friday.secondary-product-stage-evidence.v3"
+    assert live.PRODUCT_DIAGNOSTICS_SCHEMA == "friday.secondary-product-diagnostics.v2"
     receipt = _receipt(live)
     live.validate_product_stage_evidence(receipt, expected_stage="assist")
 
@@ -619,6 +651,11 @@ def test_product_stage_parser_rejects_counter_only_and_mismatched_receipts(live:
         live.validate_product_stage_evidence(
             {"schema": live.PRODUCT_STAGE_SCHEMA, "status": "passed", "stage": "assist"}
         )
+
+    legacy_counter_semantics = copy.deepcopy(receipt)
+    legacy_counter_semantics["schema"] = "friday.secondary-product-stage-evidence.v2"
+    with pytest.raises(live.LiveFailureBatteryError, match="incomplete"):
+        live.validate_product_stage_evidence(legacy_counter_semantics)
 
     forged = copy.deepcopy(receipt)
     forged["diagnostics_deltas"]["success_total"] = 0
@@ -1644,6 +1681,7 @@ def test_force_review_admin_advice_and_purge_leave_no_product_material(
         assert advised_item["knowledge_object_id"] is None
         assert advised.json()["model_advice"]["advisory_only"] is True
         advice_diagnostics = advised.json()["secondary_product_diagnostics"]
+        assert advice_diagnostics["schema"] == "friday.secondary-product-diagnostics.v2"
         assert advice_diagnostics["source_ref_sha256"] == _sha256_text(source_ref)
         assert advice_diagnostics["binding_sha256"] == _sha256_text(
             json.dumps(
