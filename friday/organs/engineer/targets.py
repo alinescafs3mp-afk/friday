@@ -1281,6 +1281,25 @@ def _artifact_compile_remainder_is_safe(
     return bool(_ARTIFACT_COMPILE_SAFE_COMPANION_REMAINDER.fullmatch(surface))
 
 
+def _artifact_compile_context_filenames(
+    masked: str,
+    request: _DirectRequestSpan,
+) -> tuple[str, ...]:
+    """Return exact Java names from the admitted clause and safe prior context."""
+
+    spans = [masked[request.start : request.end]]
+    if request.unit_start != 0:
+        prior_units = tuple(_request_units(masked[: request.unit_start]))
+        if len(prior_units) == 1:
+            prior_start, prior_end = prior_units[0]
+            spans.append(masked[prior_start:prior_end])
+    distinct: dict[str, str] = {}
+    for span in spans:
+        for match in re.finditer(_ARTIFACT_COMPILE_FILENAME, span, re.IGNORECASE):
+            distinct.setdefault(match.group(0), match.group(0))
+    return tuple(distinct.values())
+
+
 def _accepted_artifact_compile_requests(
     speech: str,
 ) -> tuple[str, str, tuple[_DirectRequestSpan, ...]]:
@@ -1323,12 +1342,10 @@ def _accepted_artifact_compile_requests(
         }
         if len(named_sources) > 1:
             continue
-        request_surface = masked[request.start : request.end]
-        request_filenames = {
-            match.group(0)
-            for match in re.finditer(_ARTIFACT_COMPILE_FILENAME, request_surface, re.IGNORECASE)
-        }
-        requested_filename = next(iter(request_filenames)) if len(request_filenames) == 1 else None
+        context_filenames = _artifact_compile_context_filenames(masked, request)
+        if len(context_filenames) > 1:
+            continue
+        requested_filename = context_filenames[0] if context_filenames else None
         trailing = masked[request.end : request.unit_end]
         full_trailing = masked[request.end :]
         if (
@@ -1362,7 +1379,7 @@ def requests_artifact_compile(speech: str) -> bool:
 
 
 def requested_artifact_compile_filename(speech: str) -> str | None:
-    """Return the sole explicitly named Java source from an admitted request.
+    """Return the sole explicitly named Java source from admitted request context.
 
     This is target data, not authority: callers must still bind it to one
     current, owner-authorized Raw object.  Deictic/profile-only requests return
@@ -1374,9 +1391,8 @@ def requested_artifact_compile_filename(speech: str) -> str | None:
         return None
     distinct: dict[str, str] = {}
     for request in requests:
-        accepted_span = masked[request.start : request.end]
-        for match in re.finditer(_ARTIFACT_COMPILE_FILENAME, accepted_span, re.IGNORECASE):
-            distinct.setdefault(match.group(0), match.group(0))
+        for filename in _artifact_compile_context_filenames(masked, request):
+            distinct.setdefault(filename, filename)
     return next(iter(distinct.values())) if len(distinct) == 1 else None
 
 

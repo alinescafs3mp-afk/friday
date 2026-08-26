@@ -176,6 +176,15 @@ def test_direct_current_java_compile_requests_are_admitted(speech: str) -> None:
 
 def test_compile_target_filename_is_exact_and_code_owned() -> None:
     assert requested_artifact_compile_filename("Compile Main.java") == "Main.java"
+    assert requested_artifact_compile_filename("I uploaded Main.java. Compile this.") == "Main.java"
+    assert (
+        requested_artifact_compile_filename("Main.java has been uploaded; compile this Java source.")
+        == "Main.java"
+    )
+    assert (
+        requested_artifact_compile_filename("Я загрузил Main.java; скомпилируй этот Java-файл.")
+        == "Main.java"
+    )
     assert requested_artifact_compile_filename("Скомпилируй этот Java-файл") is None
     assert requested_artifact_compile_filename("Compile Main.java and Helper.java") is None
     assert requested_artifact_compile_filename("`Compile Main.java`") is None
@@ -381,6 +390,8 @@ def test_compile_filename_comes_only_from_the_admitted_request_span(
         "Только с моего разрешения. Теперь скомпилируй Main.java.",
         "Пока не разрешу. Наконец скомпилируй Main.java.",
         "I uploaded Main.java. Subject to my approval. Now compile Main.java.",
+        "I uploaded Main.java. Compile Helper.java.",
+        "I uploaded Main.java. Compile main.java.",
         "Compile Main.java. Compile Helper.java.",
         "Compile this. Compile Main.java.",
         "Compile Main.java and main.java",
