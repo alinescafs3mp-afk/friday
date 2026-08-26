@@ -90,10 +90,11 @@ upload limit.
 The only source compilation admitted by this contract is one exact, owned,
 UTF-8 Java source file into one deterministic library JAR. The authenticated
 current human message must directly request compilation and identify exactly
-one current Raw file whose safe ASCII basename ends in `.java`. Source text,
-upload metadata, conversation history and model output cannot create that
-authority. Runtime rechecks the owner's `engineer.artifact.build` and
-`files.read` capabilities immediately before the hidden compiler tool enters.
+one current Raw file whose safe ASCII basename ends in `.java`; an explicitly
+named source may select one exact match among separately authorized siblings.
+Source text, upload metadata, conversation history and model output cannot
+create that authority. Runtime rechecks the owner's `engineer.artifact.build`
+and `files.read` capabilities immediately before the hidden compiler tool enters.
 
 Compilation uses only the fixed owner-local Temurin JDK `21.0.12.1+1` tree at
 `/home/jericho/.jericho/tools/jdk-21.0.12.1+1`. The complete tree identity,
@@ -120,15 +121,16 @@ has fixed CPU, memory, file, descriptor and wall-time ceilings, and is limited
 to one entered compilation per turn after its complete deadline has been
 reserved. Its enclosing backend cgroup must additionally prove at most 512
 tasks and a finite 10--16 GiB aggregate memory ceiling; the canonical native
-backend unit and Docker Engineer profile set 512 tasks and 12 GiB. Per-file
+backend unit sets 512 tasks and 12 GiB. Per-file
 limits, a private 32 MiB compiler tmpfs, and the validated 256-file/8 MiB class
 inventory plus 16 MiB JAR cap bound both scratch space and the output that may
 cross the worker. A busy or preflight refusal records that work did not start;
 timeout or failure after the fixed-argv sandbox worker is spawned records that
-it did. Container verification and native service startup both reject an
-effective cgroup which differs from the declared aggregate limits. The source
-Raw object remains
-byte-for-byte unchanged. A successful JAR, its bounded accepted-outcome receipt
+it did. Native service startup rejects an effective cgroup which differs from
+the declared aggregate limits. This compiler profile is certified only for the
+native production contour: the optional Docker Engineer profile neither ships
+the pinned owner-local JDK nor certifies compiler resource admission. The
+source Raw object remains byte-for-byte unchanged. A successful JAR, its bounded accepted-outcome receipt
 and the assistant message are committed through the existing person-owned
 generated-file path in one transaction, after final source identity and
 `files.read` reauthorization. Failure or revocation publishes neither JAR nor a

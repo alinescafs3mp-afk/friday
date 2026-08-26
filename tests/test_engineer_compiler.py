@@ -373,6 +373,64 @@ def test_compiler_requires_finite_aggregate_pid_and_memory_cgroups(monkeypatch) 
     }
 
 
+def test_compile_start_audit_is_durable_before_worker_spawn(monkeypatch) -> None:
+    order: list[str] = []
+    monkeypatch.setattr(sandbox, "preflight", lambda: {"ok": True})
+    monkeypatch.setattr(
+        sandbox,
+        "_compile_resource_preflight",
+        lambda: {"ok": True, "pids_limit": 512, "memory_limit_bytes": 12 * 1024**3},
+    )
+    monkeypatch.setattr(compiler, "host_toolchain_preflight", lambda: {"ok": True})
+
+    def failed_launch(*_args, **_kwargs):
+        order.append("spawn")
+        raise OSError("closed test launch")
+
+    monkeypatch.setattr(sandbox.subprocess, "Popen", failed_launch)
+    with pytest.raises(sandbox.EngineerSandboxError) as captured:
+        sandbox.compile_java_artifact(
+            b"class Main {}",
+            "Main.java",
+            on_started=lambda: order.append("audit"),
+        )
+
+    assert captured.value.code == "worker_launch_failed"
+    assert captured.value.work_started is True
+    assert order == ["audit", "spawn"]
+
+
+def test_compile_refuses_spawn_when_start_audit_cannot_commit(monkeypatch) -> None:
+    order: list[str] = []
+    monkeypatch.setattr(sandbox, "preflight", lambda: {"ok": True})
+    monkeypatch.setattr(
+        sandbox,
+        "_compile_resource_preflight",
+        lambda: {"ok": True, "pids_limit": 512, "memory_limit_bytes": 12 * 1024**3},
+    )
+    monkeypatch.setattr(compiler, "host_toolchain_preflight", lambda: {"ok": True})
+    monkeypatch.setattr(
+        sandbox.subprocess,
+        "Popen",
+        lambda *_args, **_kwargs: order.append("spawn"),
+    )
+
+    def failed_audit() -> None:
+        order.append("audit")
+        raise RuntimeError("closed test audit")
+
+    with pytest.raises(sandbox.EngineerSandboxError) as captured:
+        sandbox.compile_java_artifact(
+            b"class Main {}",
+            "Main.java",
+            on_started=failed_audit,
+        )
+
+    assert captured.value.code == "audit_start_unavailable"
+    assert captured.value.work_started is False
+    assert order == ["audit"]
+
+
 def test_decompiler_and_compiler_share_one_physical_heavy_slot(monkeypatch) -> None:
     entered = threading.Event()
     release = threading.Event()

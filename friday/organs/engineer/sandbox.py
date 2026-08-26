@@ -16,7 +16,7 @@ import subprocess
 import tempfile
 import threading
 import time
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from contextlib import suppress
 from pathlib import Path
 from typing import Any
@@ -454,6 +454,7 @@ def _run_worker(
     operations: Sequence[Mapping[str, Any]] | None = None,
     deadline: float | None = None,
     workspace_root: Path | None = None,
+    on_started: Callable[[], None] | None = None,
 ) -> tuple[dict[str, Any], bytes | None]:
     maximum = (
         DECOMPILE_MAX_WALL_SECONDS
@@ -554,6 +555,13 @@ def _run_worker(
             # remaining budget. Resolve the exact wait bound immediately before
             # process creation; an expired request must never launch bwrap.
             worker_timeout = _remaining_timeout(deadline, maximum)
+            launch_boundary_entered = False
+            if on_started is not None:
+                try:
+                    on_started()
+                except Exception as exc:  # noqa: BLE001 - launch requires durable audit
+                    raise EngineerSandboxError("audit_start_unavailable") from exc
+                launch_boundary_entered = True
             try:
                 process = subprocess.Popen(  # noqa: S603 - fixed trusted prlimit/bwrap argv
                     _limited_sandbox_argv(
@@ -569,7 +577,10 @@ def _run_worker(
                     start_new_session=True,
                 )
             except OSError as exc:
-                raise EngineerSandboxError("worker_launch_failed") from exc
+                raise EngineerSandboxError(
+                    "worker_launch_failed",
+                    work_started=launch_boundary_entered,
+                ) from exc
             try:
                 process.wait(timeout=worker_timeout)
             except BaseException as exc:
@@ -661,6 +672,7 @@ def compile_java_artifact(
     *,
     deadline: float | None = None,
     workspace_root: Path | None = None,
+    on_started: Callable[[], None] | None = None,
 ) -> tuple[bytes, dict[str, Any]]:
     """Compile one exact owned Java source without executing the result."""
 
@@ -676,6 +688,7 @@ def compile_java_artifact(
             filename,
             deadline=deadline,
             workspace_root=workspace_root,
+            on_started=on_started,
         )
     finally:
         _HEAVY_ARTIFACT_LOCK.release()

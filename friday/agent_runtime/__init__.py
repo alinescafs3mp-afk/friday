@@ -2199,6 +2199,7 @@ _ENGINEER_DECOMPILE_OUTCOME_RECEIPT_SCHEMA = "friday.accepted-engineer-decompile
 _ENGINEER_COMPILE_FAILURE_REASONS = frozenset(
     {
         "ambiguous_artifact",
+        "audit_start_unavailable",
         "authorization_unavailable",
         "conflicting_artifact_action",
         "compiler_busy",
@@ -2222,10 +2223,12 @@ _ENGINEER_COMPILE_FAILURE_REASONS = frozenset(
         "invalid_filename",
         "malformed_result",
         "sandbox_unavailable",
+        "source_identity_changed",
         "toolchain_incomplete",
         "toolchain_missing",
         "toolchain_untrusted",
         "worker_failed",
+        "worker_launch_failed",
         "worker_output_empty",
         "worker_output_exceeds_cap",
         "worker_result_invalid",
@@ -3916,6 +3919,27 @@ def _render_engineer_decompile_outcome(outcome: _EngineerDecompileOutcome) -> st
 
 
 @dataclass(frozen=True, slots=True)
+class _EngineerCompileSourceBinding:
+    """Private identity of the exact Raw bytes admitted for one compilation."""
+
+    raw_id: str
+    filename: str
+    source_sha256: str
+    source_identity_sha256: str
+
+    def __post_init__(self) -> None:
+        if re.fullmatch(r"raw_[0-9a-f]{16}", self.raw_id) is None:
+            raise ValueError("engineer compile source Raw id is invalid")
+        if re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]{0,119}\.java", self.filename) is None:
+            raise ValueError("engineer compile source filename is invalid")
+        if any(
+            re.fullmatch(r"[0-9a-f]{64}", digest) is None
+            for digest in (self.source_sha256, self.source_identity_sha256)
+        ):
+            raise ValueError("engineer compile source identity is invalid")
+
+
+@dataclass(frozen=True, slots=True)
 class _EngineerCompileOutcome:
     """Closed projection of one code-owned fixed-profile Java build."""
 
@@ -3931,6 +3955,10 @@ class _EngineerCompileOutcome:
     jdk_version: str
     reason_code: str
     tool_started: bool
+    source_raw_id: str = ""
+    source_filename: str = ""
+    source_identity_sha256: str = ""
+    jar_filename: str = ""
 
     def __post_init__(self) -> None:
         if self.status not in {
@@ -3955,6 +3983,8 @@ class _EngineerCompileOutcome:
         for digest in (self.source_sha256, self.jar_sha256):
             if digest and re.fullmatch(r"[0-9a-f]{64}", digest) is None:
                 raise ValueError("engineer compile digest is invalid")
+        if self.source_identity_sha256 and re.fullmatch(r"[0-9a-f]{64}", self.source_identity_sha256) is None:
+            raise ValueError("engineer compile source identity digest is invalid")
         for version in (self.tool_version, self.jdk_version):
             if version and re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9.+_-]{0,39}", version) is None:
                 raise ValueError("engineer compile version is invalid")
@@ -3969,6 +3999,10 @@ class _EngineerCompileOutcome:
             and self.source_sha256
             and self.jar_sha256
             and self.jar_prepared
+            and re.fullmatch(r"raw_[0-9a-f]{16}", self.source_raw_id) is not None
+            and re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]{0,119}\.java", self.source_filename) is not None
+            and self.source_identity_sha256
+            and re.fullmatch(r"[A-Za-z0-9._-]{1,180}\.jar", self.jar_filename) is not None
             and self.tool_version == _ENGINEER_COMPILE_REPORT_TOOL_VERSION
             and self.jdk_version == _ENGINEER_COMPILE_REPORT_JDK_VERSION
             and self.reason_code == "none"
@@ -4069,6 +4103,46 @@ def _engineer_compile_attachment(dossier: Mapping[str, Any]) -> dict[str, Any] |
     return dict(value)
 
 
+def _inline_generated_file_batch_identity(
+    values: object,
+    *,
+    max_bytes: int,
+) -> tuple[tuple[str, str, int, str], ...] | None:
+    """Structurally bind every inline output before and after persistence."""
+
+    if not isinstance(values, list) or not 1 <= len(values) <= 16:
+        return None
+    byte_cap = max(0, int(max_bytes))
+    total = 0
+    identities: list[tuple[str, str, int, str]] = []
+    for value in values:
+        if not isinstance(value, Mapping):
+            return None
+        filename = value.get("filename")
+        mime_type = value.get("mime_type")
+        encoded = value.get("content_base64")
+        if (
+            not isinstance(filename, str)
+            or not filename
+            or len(filename) > 180
+            or not isinstance(mime_type, str)
+            or not mime_type
+            or len(mime_type) > 128
+            or not isinstance(encoded, str)
+            or not encoded
+        ):
+            return None
+        try:
+            payload = base64.b64decode(encoded, validate=True)
+        except (binascii.Error, TypeError, ValueError):
+            return None
+        total += len(payload)
+        if len(payload) > byte_cap or total > byte_cap:
+            return None
+        identities.append((filename, mime_type, len(payload), hashlib.sha256(payload).hexdigest()))
+    return tuple(identities)
+
+
 def _engineer_compile_owned_outcome_unchecked(
     dossier: Mapping[str, Any],
 ) -> _EngineerCompileOutcome | None:
@@ -4083,12 +4157,13 @@ def _engineer_compile_owned_outcome_unchecked(
     raw_report = result.get("report")
     report = raw_report if isinstance(raw_report, Mapping) else {}
     attachment = _engineer_compile_attachment(dossier)
+    binding = dossier.get("_artifact_compile_source_binding")
     if result.get("ok") is not True:
         status = (
             CapabilityStatus.DENIED
             if not tool_started and reason in {"exact_artifact_required", "ambiguous_artifact"}
             else CapabilityStatus.UNCERTAIN
-            if tool_started and reason in {"deadline_expired", "compiler_timeout", "worker_timeout"}
+            if tool_started and reason == "deadline_expired"
             else CapabilityStatus.FAILED
             if tool_started
             else CapabilityStatus.UNAVAILABLE
@@ -4119,7 +4194,8 @@ def _engineer_compile_owned_outcome_unchecked(
     pids_limit = sandbox_report.get("compile_pids_limit")
     memory_limit = sandbox_report.get("compile_memory_limit_bytes")
     if (
-        report.get("schema") != _ENGINEER_COMPILE_REPORT_SCHEMA
+        type(binding) is not _EngineerCompileSourceBinding
+        or report.get("schema") != _ENGINEER_COMPILE_REPORT_SCHEMA
         or report.get("status") != "completed"
         or report.get("profile") != _ENGINEER_COMPILE_PROFILE
         or report.get("tool_name") != _ENGINEER_COMPILE_REPORT_TOOL
@@ -4151,6 +4227,8 @@ def _engineer_compile_owned_outcome_unchecked(
     if (
         re.fullmatch(r"[0-9a-f]{64}", source_sha256) is None
         or re.fullmatch(r"[0-9a-f]{64}", jar_sha256) is None
+        or not hmac.compare_digest(source_sha256, binding.source_sha256)
+        or attachment is None
     ):
         raise ValueError("invalid compile report digest")
     return _EngineerCompileOutcome(
@@ -4166,6 +4244,10 @@ def _engineer_compile_owned_outcome_unchecked(
         jdk_version=str(report.get("jdk_version") or ""),
         reason_code="none",
         tool_started=tool_started,
+        source_raw_id=binding.raw_id,
+        source_filename=binding.filename,
+        source_identity_sha256=binding.source_identity_sha256,
+        jar_filename=str(attachment.get("filename") or ""),
     )
 
 
@@ -4196,6 +4278,7 @@ def _engineer_compile_owned_outcome(
 
 _ENGINEER_COMPILE_REASON_TEXT = {
     "ambiguous_artifact": "в активном контексте несколько файлов; нужен ровно один",
+    "audit_start_unavailable": "не удалось сохранить обязательную запись о старте",
     "authorization_unavailable": "для этого хода не удалось подтвердить право Engineer",
     "compiler_busy": "другая тяжёлая операция Engineer уже выполняется",
     "compiler_failed": "javac завершился с ошибкой без публикации JAR",
@@ -4219,10 +4302,12 @@ _ENGINEER_COMPILE_REASON_TEXT = {
     "invalid_filename": "нужен безопасный basename с расширением .java",
     "malformed_result": "результат компилятора не прошёл проверку целостности",
     "sandbox_unavailable": "изолированная среда недоступна",
+    "source_identity_changed": "имя или байты исходного файла изменились до запуска",
     "toolchain_incomplete": "проверенный JDK неполон",
     "toolchain_missing": "проверенный JDK не установлен",
     "toolchain_untrusted": "JDK не прошёл проверку целостности",
     "worker_failed": "изолированный обработчик завершился без отчёта",
+    "worker_launch_failed": "не удалось запустить изолированный обработчик",
     "worker_output_empty": "изолированный обработчик не вернул JAR",
     "worker_output_exceeds_cap": "выход обработчика превышает предел",
     "worker_result_invalid": "ответ обработчика не прошёл проверку",
@@ -12502,6 +12587,10 @@ _ARCHIVE_SEARCH_AUTHORITY_CHANGED_BEFORE_PUBLICATION = (
 _ENGINEER_NETWORK_REPORT_AUTHORITY_CHANGED_BEFORE_PUBLICATION = (
     "Право на Engineer-аудит или точная привязка результата изменились до публикации. "
     "Сетевой результат и отчёт-файл не опубликованы; новый скан автоматически не запускаю."
+)
+_ENGINEER_COMPILE_AUTHORITY_CHANGED_BEFORE_PUBLICATION = (
+    "Право на Engineer-сборку, исходник или точный JAR изменились до публикации. "
+    "Результат и JAR не опубликованы; компиляция автоматически не повторялась."
 )
 _ENGINEER_NETWORK_REPORT_FOLLOWUP_UNAVAILABLE = (
     "В этом сообщении нет точного текущего результата, из которого можно безопасно собрать "
@@ -38943,6 +39032,89 @@ class AgentRuntime:
             LOGGER.warning("engineer capability recheck failed (%s)", type(exc).__name__)
             return None
 
+    def _prepare_engineer_compile_source(
+        self,
+        actor: ActorContext,
+        raw_ids: Sequence[str],
+        *,
+        requested_filename: str | None,
+    ) -> tuple[_EngineerCompileSourceBinding | None, str]:
+        """Select and pin one exact authorized Java Raw before kernel entry."""
+
+        exact_ids = tuple(dict.fromkeys(str(value or "").strip() for value in raw_ids))
+        if not exact_ids or any(re.fullmatch(r"raw_[0-9a-f]{16}", value) is None for value in exact_ids):
+            return None, "exact_artifact_required"
+        if requested_filename is None and len(exact_ids) != 1:
+            return None, "ambiguous_artifact"
+        if (
+            requested_filename is not None
+            and re.fullmatch(
+                r"[A-Za-z_][A-Za-z0-9_]{0,119}\.java",
+                requested_filename,
+            )
+            is None
+        ):
+            return None, "exact_artifact_required"
+        fresh_actor = self._fresh_engineer_actor(actor, "engineer.artifact.build")
+        if fresh_actor is None:
+            return None, "authorization_unavailable"
+
+        matches: list[_EngineerCompileSourceBinding] = []
+        single_read_error = ""
+        for raw_id in exact_ids:
+            try:
+                stored = read_authorized_file(
+                    self.storage,
+                    self.settings.files_dir,
+                    raw_id,
+                    fresh_actor.user_id,
+                    person_id=fresh_actor.own_id,
+                    max_bytes=min(int(self.settings.max_upload_bytes), 1024 * 1024),
+                )
+            except FileRecordUnavailable:
+                single_read_error = "file_unavailable"
+                continue
+            except AuthorizedFileReadError:
+                single_read_error = "file_access_denied"
+                continue
+            except (OSError, TypeError, ValueError):
+                single_read_error = "source_identity_changed"
+                continue
+            snapshot = stored.snapshot_token
+            content_sha256 = hashlib.sha256(stored.content).hexdigest()
+            if (
+                stored.raw_id != raw_id
+                or re.fullmatch(
+                    r"[A-Za-z_][A-Za-z0-9_]{0,119}\.java",
+                    stored.filename,
+                )
+                is None
+                or snapshot is None
+                or not authorized_file_snapshot_token_is_process_owned(snapshot)
+                or snapshot.source.raw_id != raw_id
+                or not hmac.compare_digest(snapshot.content_sha256, content_sha256)
+            ):
+                single_read_error = "source_identity_changed"
+                continue
+            if requested_filename is not None and stored.filename != requested_filename:
+                continue
+            matches.append(
+                _EngineerCompileSourceBinding(
+                    raw_id=raw_id,
+                    filename=stored.filename,
+                    source_sha256=content_sha256,
+                    source_identity_sha256=snapshot.source.identity_sha256,
+                )
+            )
+
+        if len(matches) != 1:
+            if len(matches) > 1:
+                return None, "ambiguous_artifact"
+            if len(exact_ids) == 1 and single_read_error:
+                return None, single_read_error
+            return None, "exact_artifact_required"
+        return matches[0], "none"
+
     def _require_fresh_engineer_mode_actor(self, actor: ActorContext) -> ActorContext:
         """Require the feature switch and a current engineer.use decision."""
 
@@ -40575,6 +40747,162 @@ class AgentRuntime:
             snapshot.target_count == 1
             and classifications
             and classifications.issubset({"operator_approved_private", "approved_ipv6_ula"})
+        )
+
+    def _engineer_compile_publication_authorized(
+        self,
+        conn: Any,
+        *,
+        actor: ActorContext,
+        dossier: Mapping[str, Any],
+        outcome: _EngineerCompileOutcome,
+        items: Sequence[Mapping[str, Any]],
+        evidence_set: FileEvidenceSet | None,
+        expected_count: int,
+        tenant_id: str,
+        fallback_person_id: str,
+        response_files: object,
+    ) -> bool:
+        """Rebind authority, exact source bytes and exact JAR in one commit."""
+
+        if (
+            type(outcome) is not _EngineerCompileOutcome
+            or outcome.status is not CapabilityStatus.SUCCEEDED
+            or _engineer_compile_owned_outcome(dossier) != outcome
+            or not self._attachment_publication_authorized(
+                conn,
+                actor=actor,
+                items=items,
+                evidence_set=evidence_set,
+                expected_count=expected_count,
+                tenant_id=tenant_id,
+                fallback_person_id=fallback_person_id,
+            )
+        ):
+            return False
+
+        get_tool = getattr(self.kernel, "get_tool", None)
+        tool_spec = get_tool(_ENGINEER_COMPILE_ACTION_TOOL) if callable(get_tool) else None
+        expected_parameters = {
+            "type": "object",
+            "properties": {
+                "raw_id": {"type": "string", "pattern": r"^raw_[0-9a-f]{16}$"},
+                "expected_filename": {
+                    "type": "string",
+                    "pattern": r"^[A-Za-z_][A-Za-z0-9_]{0,119}\.java$",
+                },
+                "expected_sha256": {"type": "string", "pattern": r"^[0-9a-f]{64}$"},
+            },
+            "additionalProperties": False,
+            "required": ["raw_id", "expected_filename", "expected_sha256"],
+        }
+        if (
+            str(getattr(tool_spec, "name", "") or "") != _ENGINEER_COMPILE_ACTION_TOOL
+            or str(getattr(tool_spec, "security_id", "") or "") != "engineer.artifact.build"
+            or str(getattr(tool_spec, "risk", "") or "") != "mutate"
+            or getattr(tool_spec, "model_visible", None) is not False
+            or not callable(getattr(tool_spec, "handler", None))
+            or getattr(tool_spec, "parameters", None) != expected_parameters
+        ):
+            return False
+
+        principal = str(actor.own_id or "").strip()
+        principal_row = conn.execute(
+            "SELECT preset_key, status FROM users WHERE id=?",
+            (principal,),
+        ).fetchone()
+        authorization = getattr(self.kernel, "authorization", None)
+        if (
+            principal_row is None
+            or str(principal_row["status"] or "") != "active"
+            or authorization is None
+        ):
+            return False
+        fresh_actor = replace(actor, preset_key=str(principal_row["preset_key"] or "user"))
+        if not (
+            fresh_actor.is_owner
+            and authorization.authorize(fresh_actor, "engineer.use").allowed
+            and authorization.authorize(fresh_actor, "engineer.artifact.build").allowed
+            and authorization.authorize(fresh_actor, "files.read").allowed
+        ):
+            return False
+
+        if evidence_set is None or len(items) != len(evidence_set.items):
+            return False
+        source_matches = [
+            (item, view)
+            for item, view in zip(items, evidence_set.items, strict=True)
+            if view.raw_id == outcome.source_raw_id
+        ]
+        if len(source_matches) != 1 or not _carrier_matches_evidence_view(
+            source_matches[0][0], source_matches[0][1]
+        ):
+            return False
+        try:
+            stored = read_authorized_file_in_transaction(
+                conn,
+                self.settings.files_dir,
+                outcome.source_raw_id,
+                tenant_id,
+                person_id=principal,
+                max_bytes=min(int(self.settings.max_upload_bytes), 1024 * 1024),
+            )
+        except (AuthorizedFileReadError, FileRecordUnavailable, OSError, TypeError, ValueError):
+            return False
+        snapshot = stored.snapshot_token
+        source_sha256 = hashlib.sha256(stored.content).hexdigest()
+        if (
+            stored.raw_id != outcome.source_raw_id
+            or stored.filename != outcome.source_filename
+            or len(stored.content) != outcome.source_size_bytes
+            or not hmac.compare_digest(source_sha256, outcome.source_sha256)
+            or snapshot is None
+            or not authorized_file_snapshot_token_is_process_owned(snapshot)
+            or snapshot.source.raw_id != outcome.source_raw_id
+            or not hmac.compare_digest(snapshot.content_sha256, outcome.source_sha256)
+            or not hmac.compare_digest(
+                snapshot.source.identity_sha256,
+                outcome.source_identity_sha256,
+            )
+        ):
+            return False
+
+        private_attachment = _engineer_compile_attachment(dossier)
+        if private_attachment is None or not isinstance(response_files, list):
+            return False
+        jar_matches: list[Mapping[str, Any]] = []
+        for value in response_files:
+            if not isinstance(value, Mapping):
+                return False
+            if (
+                value.get("filename") == outcome.jar_filename
+                and value.get("mime_type") == "application/java-archive"
+            ):
+                jar_matches.append(value)
+        if len(jar_matches) != 1:
+            return False
+        jar_item = jar_matches[0]
+        if any(
+            jar_item.get(field) != private_attachment.get(field)
+            for field in ("kind", "filename", "mime_type", "content_base64")
+        ):
+            return False
+        encoded = jar_item.get("content_base64")
+        if not isinstance(encoded, str):
+            return False
+        try:
+            jar = base64.b64decode(encoded, validate=True)
+        except (binascii.Error, TypeError, ValueError):
+            return False
+        from friday.organs.engineer import compiler as engineer_compiler
+
+        inventory = engineer_compiler.validate_jar(jar)
+        return bool(
+            len(jar) == outcome.jar_size_bytes
+            and hmac.compare_digest(hashlib.sha256(jar).hexdigest(), outcome.jar_sha256)
+            and inventory is not None
+            and inventory.get("class_files") == outcome.class_files
+            and inventory.get("class_bytes") == outcome.class_bytes
         )
 
     @staticmethod
@@ -56775,6 +57103,10 @@ class AgentRuntime:
             engineer_network_report,
             _EngineerNetworkReport,
         )
+        compile_publication_reauth_required = bool(
+            engineer_compile_outcome is not None
+            and engineer_compile_outcome.status is CapabilityStatus.SUCCEEDED
+        )
         publication_reauth_required = bool(
             attachment_publication_reauth_required
             or source_search_publication_reauth_required
@@ -56783,6 +57115,7 @@ class AgentRuntime:
             or simple_public_news_publication_reauth_required
             or engineer_host_publication_reauth_required
             or network_report_publication_reauth_required
+            or compile_publication_reauth_required
         )
         accepted_simple_public_news_outcome = None
         accepted_archive_recall_outcome: ArchiveRecallOutcome | None = None
@@ -56945,6 +57278,22 @@ class AgentRuntime:
                     request=clean_message,
                 )
             )
+            compile_publication_authorized = bool(
+                not compile_publication_reauth_required
+                or isinstance(engineer_compile_outcome, _EngineerCompileOutcome)
+                and self._engineer_compile_publication_authorized(
+                    publication_conn,
+                    actor=actor,
+                    dossier=context.engineer_dossier,
+                    outcome=engineer_compile_outcome,
+                    items=active_attachment_set,
+                    evidence_set=active_source_evidence_set,
+                    expected_count=attachment_expected_count,
+                    tenant_id=attachment_authority_tenant,
+                    fallback_person_id=attachment_authority_person,
+                    response_files=response.get("file_clips"),
+                )
+            )
             publication_authorized = bool(
                 not publication_reauth_required
                 or attachment_publication_authorized
@@ -56954,6 +57303,7 @@ class AgentRuntime:
                 and simple_public_news_publication_authorized
                 and engineer_host_publication_authorized
                 and network_report_publication_authorized
+                and compile_publication_authorized
             )
             final_voice_publication_authorized = bool(
                 final_voice is None
@@ -56988,6 +57338,9 @@ class AgentRuntime:
             network_report_authority_changed_before_publication = bool(
                 network_report_publication_reauth_required and not network_report_publication_authorized
             )
+            compile_authority_changed_before_publication = bool(
+                compile_publication_reauth_required and not compile_publication_authorized
+            )
             if not publication_authorized:
                 LOGGER.warning("source-publication: authority changed before assistant commit")
                 publication_authority_issues = [
@@ -57020,6 +57373,10 @@ class AgentRuntime:
                         (
                             "network_report_authority_changed_before_publication",
                             network_report_authority_changed_before_publication,
+                        ),
+                        (
+                            "compile_authority_changed_before_publication",
+                            compile_authority_changed_before_publication,
                         ),
                     )
                     if changed
@@ -57054,6 +57411,8 @@ class AgentRuntime:
                         "Сетевое действие могло быть выполнено, но право публикации результата "
                         "изменилось; данные результата не публикую и автоматически не повторяю."
                     )
+                if compile_authority_changed_before_publication:
+                    authority_changed_notice = _ENGINEER_COMPILE_AUTHORITY_CHANGED_BEFORE_PUBLICATION
                 content = "\n\n".join(part for part in (safe_effect_notice, authority_changed_notice) if part)
                 response["content"] = content
                 response["file_clips"] = []
@@ -57086,6 +57445,8 @@ class AgentRuntime:
                     response["_engineer_network_report_authority_changed_owned"] = True
                 if engineer_host_authority_changed_before_publication:
                     response["_engineer_host_authority_changed_owned"] = True
+                if compile_authority_changed_before_publication:
+                    response["_engineer_compile_authority_changed_owned"] = True
                 response.pop("_document_metadata_owned", None)
                 response.pop("_office_exact_owned", None)
                 model_said = ""
@@ -57778,6 +58139,12 @@ class AgentRuntime:
                 # capability/source reauthorization, but before releasing this
                 # same BEGIN IMMEDIATE transaction. Raw handles, descriptors,
                 # accepted receipts and assistant text are one publication unit.
+                inline_batch_identity = _inline_generated_file_batch_identity(
+                    response.get("file_clips"),
+                    max_bytes=self.settings.max_upload_bytes,
+                )
+                if inline_batch_identity is None:
+                    raise ValueError("engineer generated-file input batch attestation failed")
                 generated_projection = persist_generated_response_files(
                     self.storage,
                     self.settings.files_dir,
@@ -57793,6 +58160,12 @@ class AgentRuntime:
                 persisted_files = generated_projection.get("files")
                 if not isinstance(persisted_files, list) or not persisted_files:
                     raise ValueError("engineer generated report durability attestation failed")
+                persisted_batch_identity = _inline_generated_file_batch_identity(
+                    persisted_files,
+                    max_bytes=self.settings.max_upload_bytes,
+                )
+                if persisted_batch_identity != inline_batch_identity:
+                    raise ValueError("engineer generated-file exact batch attestation failed")
                 if decompile_report_expected and (
                     engineer_decompile_outcome is None
                     or sum(
@@ -57813,6 +58186,9 @@ class AgentRuntime:
                         1
                         for item in persisted_files
                         if isinstance(item, Mapping)
+                        and item.get("filename") == engineer_compile_outcome.jar_filename
+                        and item.get("mime_type") == "application/java-archive"
+                        and item.get("size_bytes") == engineer_compile_outcome.jar_size_bytes
                         and hmac.compare_digest(
                             str(item.get("sha256") or ""),
                             engineer_compile_outcome.jar_sha256,
@@ -57879,6 +58255,7 @@ class AgentRuntime:
             or simple_public_news_authority_changed_before_publication
             or engineer_host_authority_changed_before_publication
             or network_report_authority_changed_before_publication
+            or compile_authority_changed_before_publication
         )
         if attributed_knowledge_ids:
             self.storage.record_knowledge_usage(
@@ -57899,6 +58276,7 @@ class AgentRuntime:
             "engineer_host_authority_changed_before_publication": (
                 engineer_host_authority_changed_before_publication
             ),
+            "compile_authority_changed_before_publication": (compile_authority_changed_before_publication),
             "source_search_authority_changed_before_publication": (
                 source_search_authority_changed_before_publication
             ),
@@ -58274,6 +58652,7 @@ class AgentRuntime:
         configured_network_requested = engineer_targets.requests_configured_network_assessment(message)
         artifact_decompile_requested = engineer_targets.requests_artifact_decompile(message)
         artifact_compile_requested = engineer_targets.requests_artifact_compile(message)
+        artifact_compile_filename = engineer_targets.requested_artifact_compile_filename(message)
         dossier["_artifact_decompile_action_requested"] = artifact_decompile_requested
         dossier["_artifact_compile_action_requested"] = artifact_compile_requested
         conflicting_artifact_action = bool(artifact_decompile_requested and artifact_compile_requested)
@@ -58770,10 +59149,13 @@ class AgentRuntime:
                 dossier["_artifact_decompile_error"] = "deadline_expired"
 
         if artifact_compile_requested and not conflicting_artifact_action:
-            if len(raw_ids) != 1:
-                dossier["_artifact_compile_reason"] = (
-                    "exact_artifact_required" if not raw_ids else "ambiguous_artifact"
-                )
+            compile_binding, compile_binding_reason = self._prepare_engineer_compile_source(
+                actor,
+                raw_ids,
+                requested_filename=artifact_compile_filename,
+            )
+            if compile_binding is None:
+                dossier["_artifact_compile_reason"] = compile_binding_reason
             elif (
                 turn_deadline is not None
                 and (_remaining_deadline_budget(turn_deadline) or 0.0) < _ENGINEER_COMPILE_MIN_REMAINING_SEC
@@ -58782,9 +59164,14 @@ class AgentRuntime:
                 # blocking thread cannot be abandoned safely after cancellation.
                 dossier["_artifact_compile_error"] = "deadline_expired"
             elif not _turn_deadline_expired(turn_deadline):
+                dossier["_artifact_compile_source_binding"] = compile_binding
                 result = await execute_audited(
                     _ENGINEER_COMPILE_ACTION_TOOL,
-                    {"raw_id": raw_ids[0]},
+                    {
+                        "raw_id": compile_binding.raw_id,
+                        "expected_filename": compile_binding.filename,
+                        "expected_sha256": compile_binding.source_sha256,
+                    },
                     "engineer.artifact.build",
                 )
                 if result is not None:

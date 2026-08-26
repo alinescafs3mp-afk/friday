@@ -449,9 +449,7 @@ _ARTIFACT_COMPILE_RU_OUTPUT = (
     r"(?:jar[- ]файл\w*|jar\b|бинарник\w*|бинарн\w*\s+артефакт\w*)"
     r"(?:\s*/\s*(?:jar[- ]файл\w*|jar\b|бинарник\w*|бинарн\w*\s+артефакт\w*))?"
 )
-_ARTIFACT_COMPILE_EN_DELIVERY = (
-    rf"(?:send|attach|upload|deliver)\s+(?:me\s+)?{_ARTIFACT_COMPILE_EN_OUTPUT}"
-)
+_ARTIFACT_COMPILE_EN_DELIVERY = rf"(?:send|attach|upload|deliver)\s+(?:me\s+)?{_ARTIFACT_COMPILE_EN_OUTPUT}"
 _ARTIFACT_COMPILE_RU_DELIVERY = (
     rf"(?:пришли(?:те)?|отправь(?:те)?|приложи(?:те)?|выгрузи(?:те)?)\s+"
     rf"(?:мне\s+)?{_ARTIFACT_COMPILE_RU_OUTPUT}"
@@ -1148,8 +1146,7 @@ def requests_artifact_compile(speech: str) -> bool:
         masked,
     )
     named_sources = {
-        match.group(0).casefold()
-        for match in re.finditer(_ARTIFACT_COMPILE_FILENAME, masked, re.IGNORECASE)
+        match.group(0).casefold() for match in re.finditer(_ARTIFACT_COMPILE_FILENAME, masked, re.IGNORECASE)
     }
     if (
         not masked.strip()
@@ -1192,6 +1189,23 @@ def requests_artifact_compile(speech: str) -> bool:
                 continue
         return True
     return False
+
+
+def requested_artifact_compile_filename(speech: str) -> str | None:
+    """Return the sole explicitly named Java source from an admitted request.
+
+    This is target data, not authority: callers must still bind it to one
+    current, owner-authorized Raw object.  Deictic/profile-only requests return
+    ``None`` and therefore retain the exact-single-current-file rule.
+    """
+
+    if not requests_artifact_compile(speech):
+        return None
+    _text, masked = _request_projection(speech)
+    distinct: dict[str, str] = {}
+    for match in re.finditer(_ARTIFACT_COMPILE_FILENAME, masked, re.IGNORECASE):
+        distinct.setdefault(match.group(0).casefold(), match.group(0))
+    return next(iter(distinct.values())) if len(distinct) == 1 else None
 
 
 def artifact_compile_request_is_atomic(speech: str) -> bool:
@@ -1446,6 +1460,7 @@ __all__ = [
     "parse_host_token",
     "requests_active_assessment",
     "requests_artifact_compile",
+    "requested_artifact_compile_filename",
     "requests_artifact_decompile",
     "requests_artifact_patch",
     "requests_configured_network_assessment",

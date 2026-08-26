@@ -12,10 +12,11 @@ from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
-from friday.execution_kernel import ToolSpec
+from friday.execution_kernel import ToolSpec, mark_tool_physical_start
 from friday.file_delivery import AuthorizedFileReadError, FileRecordUnavailable, read_authorized_file
 from friday.organs import ServiceContext
 from friday.permissions import ActorContext
+from friday.source_identity import authorized_file_snapshot_token_is_process_owned
 from friday.workers._blocking import run_blocking
 
 from . import (
@@ -42,6 +43,7 @@ _DECOMPILE_FUNCTION_STATUSES = frozenset({"completed", "failed", "timeout"})
 _DECOMPILE_WARNING_CODES = frozenset({"analysis_timeout", "function_index_truncated", "pseudocode_truncated"})
 _COMPILE_TIMEOUT_SEC = 70.0
 _COMPILE_FAILURE_STATUSES = {
+    "audit_start_unavailable": "unavailable",
     "compiler_busy": "unavailable",
     "compiler_memory_cgroup_unbounded": "unavailable",
     "compiler_pid_cgroup_unbounded": "unavailable",
@@ -50,6 +52,7 @@ _COMPILE_FAILURE_STATUSES = {
     "file_access_denied": "unavailable",
     "file_unavailable": "unavailable",
     "sandbox_unavailable": "unavailable",
+    "source_identity_changed": "unavailable",
     "toolchain_incomplete": "unavailable",
     "toolchain_missing": "unavailable",
     "toolchain_untrusted": "unavailable",
@@ -64,6 +67,7 @@ _COMPILE_FAILURE_STATUSES = {
     "invalid_artifact_handle": "failed",
     "invalid_filename": "failed",
     "worker_failed": "failed",
+    "worker_launch_failed": "failed",
     "worker_output_empty": "failed",
     "worker_output_exceeds_cap": "failed",
     "worker_result_invalid": "failed",
@@ -670,7 +674,13 @@ def build_engineer_tools(ctx: ServiceContext) -> tuple[ToolSpec, ...]:
             },
         }
 
-    async def compile_owned_java(*, actor: ActorContext, raw_id: str) -> dict[str, Any]:
+    async def compile_owned_java(
+        *,
+        actor: ActorContext,
+        raw_id: str,
+        expected_filename: str,
+        expected_sha256: str,
+    ) -> dict[str, Any]:
         try:
             stored = await run_blocking(_read_owned, ctx, actor, raw_id)
         except FileRecordUnavailable:
@@ -679,6 +689,23 @@ def build_engineer_tools(ctx: ServiceContext) -> tuple[ToolSpec, ...]:
             return _compile_failure("file_access_denied", work_started=False)
         except ValueError:
             return _compile_failure("invalid_artifact_handle", work_started=False)
+        snapshot = getattr(stored, "snapshot_token", None)
+        source_digest = hashlib.sha256(stored.content).hexdigest()
+        if (
+            not _RAW_ID.fullmatch(str(raw_id or ""))
+            or compiler.validate_source_payload(stored.content, stored.filename) is not None
+            or not isinstance(expected_filename, str)
+            or compiler.validate_source_payload(stored.content, expected_filename) is not None
+            or not re.fullmatch(r"[0-9a-f]{64}", str(expected_sha256 or ""))
+            or stored.raw_id != raw_id
+            or stored.filename != expected_filename
+            or not hmac.compare_digest(source_digest, expected_sha256)
+            or snapshot is None
+            or not authorized_file_snapshot_token_is_process_owned(snapshot)
+            or snapshot.source.raw_id != raw_id
+            or not hmac.compare_digest(snapshot.content_sha256, expected_sha256)
+        ):
+            return _compile_failure("source_identity_changed", work_started=False)
         try:
             jar, raw_report = await run_blocking(
                 sandbox.compile_java_artifact,
@@ -686,6 +713,7 @@ def build_engineer_tools(ctx: ServiceContext) -> tuple[ToolSpec, ...]:
                 stored.filename,
                 deadline=time.monotonic() + _COMPILE_TIMEOUT_SEC,
                 workspace_root=Path(ctx.settings.state_dir) / "engineer-tmp",
+                on_started=mark_tool_physical_start,
             )
         except sandbox.EngineerSandboxError as exc:
             error = "compiler_timeout" if exc.code == "worker_timeout" else exc.code
@@ -985,8 +1013,15 @@ def build_engineer_tools(ctx: ServiceContext) -> tuple[ToolSpec, ...]:
             name="engineer_compile_java",
             description="Internal fixed-profile Java 21 compilation of one code-authorized source.",
             parameters=_parameters(
-                {"raw_id": {"type": "string", "minLength": 20, "maxLength": 24}},
-                required=("raw_id",),
+                {
+                    "raw_id": {"type": "string", "pattern": r"^raw_[0-9a-f]{16}$"},
+                    "expected_filename": {
+                        "type": "string",
+                        "pattern": r"^[A-Za-z_][A-Za-z0-9_]{0,119}\.java$",
+                    },
+                    "expected_sha256": {"type": "string", "pattern": r"^[0-9a-f]{64}$"},
+                },
+                required=("raw_id", "expected_filename", "expected_sha256"),
             ),
             security_id="engineer.artifact.build",
             risk="mutate",

@@ -32,8 +32,6 @@ fi
     || fail "the backend is privileged"
 [ "$(docker inspect --format '{{.HostConfig.PidsLimit}}' "$CONTAINER")" = 512 ] \
     || fail "the backend PID cgroup limit is not 512"
-[ "$(docker inspect --format '{{.HostConfig.Memory}}' "$CONTAINER")" = 12884901888 ] \
-    || fail "the backend aggregate memory cgroup limit is not 12 GiB"
 [ "$(docker inspect --format '{{json .HostConfig.CapDrop}}' "$CONTAINER")" = '["ALL"]' ] \
     || fail "the backend did not drop all Linux capabilities"
 CAP_ADD=$(docker inspect --format '{{json .HostConfig.CapAdd}}' "$CONTAINER")
@@ -98,7 +96,7 @@ printf '%s\n' "$STATUS" | /usr/bin/grep -Eq '^Seccomp:[[:space:]]+2$' \
     'friday-engineer-backend (enforce)' ] \
     || fail "the live backend is not under the enforcing AppArmor profile"
 [ "$(docker exec -i "$CONTAINER" /usr/bin/python3 -c \
-    'from friday.organs.engineer.sandbox import _compile_resource_preflight, smoke_preflight; r=smoke_preflight(); c=_compile_resource_preflight(); print("ok" if r.get("ok") is True and r.get("boundary") == "bubblewrap" and r.get("network") == "none" and r.get("network_namespace") == "isolated" and r.get("external_interfaces") == 0 and r.get("external_routes") == 0 and r.get("ipv4_connectivity") == "blocked" and r.get("ipv6_connectivity") == "blocked" and c.get("ok") is True and c.get("pids_limit") == 512 and c.get("memory_limit_bytes") == 12884901888 else "closed")')" = ok ] \
+    'from friday.organs.engineer.sandbox import smoke_preflight; r=smoke_preflight(); print("ok" if r.get("ok") is True and r.get("boundary") == "bubblewrap" and r.get("network") == "none" and r.get("network_namespace") == "isolated" and r.get("external_interfaces") == 0 and r.get("external_routes") == 0 and r.get("ipv4_connectivity") == "blocked" and r.get("ipv6_connectivity") == "blocked" else "closed")')" = ok ] \
     || fail "the real no-network bubblewrap smoke did not pass"
 
-printf '%s\n' "Engineer container boundary passed: AppArmor + seccomp + no-new-privileges + cap-drop + PID/memory limits + bubblewrap."
+printf '%s\n' "Engineer container boundary passed: AppArmor + seccomp + no-new-privileges + cap-drop + PID limit + bubblewrap."

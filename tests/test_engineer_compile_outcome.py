@@ -6,6 +6,7 @@ import base64
 import hashlib
 import json
 from dataclasses import replace
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -14,12 +15,14 @@ from fastapi.testclient import TestClient
 from friday.agent_runtime import (
     AgentRuntime,
     _engineer_compile_owned_outcome,
+    _EngineerCompileSourceBinding,
     _render_engineer_compile_outcome,
 )
 from friday.execution_kernel import ToolResult
 from friday.interaction_control_plane.legacy_trace import CapabilityStatus
-from friday.organs.engineer import ENGINEER_BUILD, compiler
+from friday.organs.engineer import ENGINEER_BUILD, ENGINEER_USE, compiler
 from friday.permissions import LEGACY_OWNER_USER_ID, ActorContext
+from friday.source_identity import authorized_file_snapshot_token
 
 
 def _class_bytes() -> bytes:
@@ -32,11 +35,54 @@ def _jar() -> bytes:
     return payload
 
 
-def _complete_dossier(source: bytes = b"public class Main {}\n") -> dict[str, Any]:
+def _source_binding(
+    source: bytes,
+    *,
+    raw_id: str = "raw_0123456789abcdef",
+    source_identity_sha256: str = "a" * 64,
+) -> _EngineerCompileSourceBinding:
+    return _EngineerCompileSourceBinding(
+        raw_id=raw_id,
+        filename="Main.java",
+        source_sha256=hashlib.sha256(source).hexdigest(),
+        source_identity_sha256=source_identity_sha256,
+    )
+
+
+def _authorized_source_bytes(raw_id: str, filename: str, source: bytes) -> SimpleNamespace:
+    raw = {
+        "id": raw_id,
+        "source": "upload",
+        "source_ref": f"test:{raw_id}",
+        "content_type": "file",
+        "received_at": "2026-08-26T00:00:00+00:00",
+        "content_hash": hashlib.sha256(source).hexdigest(),
+        "_raw_content": "",
+        "_raw_metadata": "{}",
+    }
+    token = authorized_file_snapshot_token(
+        raw,
+        content_sha256=hashlib.sha256(source).hexdigest(),
+    )
+    assert token is not None
+    return SimpleNamespace(
+        raw_id=raw_id,
+        filename=filename,
+        content=source,
+        snapshot_token=token,
+    )
+
+
+def _complete_dossier(
+    source: bytes = b"public class Main {}\n",
+    *,
+    binding: _EngineerCompileSourceBinding | None = None,
+) -> dict[str, Any]:
     jar = _jar()
     return {
         "_artifact_compile_action_requested": True,
         "_artifact_compile_tool_started": True,
+        "_artifact_compile_source_binding": binding or _source_binding(source),
         "_artifact_compile_attachment": {
             "kind": "document",
             "filename": "Main.compiled.jar",
@@ -129,8 +175,8 @@ def test_complete_compile_has_owned_answer_and_content_free_receipt() -> None:
                 "_artifact_compile_tool_started": True,
                 "_artifact_compile_error": "compiler_timeout",
             },
-            CapabilityStatus.UNCERTAIN,
-            "Автоматически не повторяю",
+            CapabilityStatus.FAILED,
+            "JAR не публиковался",
         ),
         (
             {
@@ -210,12 +256,66 @@ def test_compile_fresh_actor_requires_current_build_and_files_read(
     actor = ActorContext(LEGACY_OWNER_USER_ID, "owner", "test")
     storage.ensure_user(actor.own_id, preset_key="owner")
     runtime = AgentRuntime(replace(settings, engineer_mode_enabled=True), storage)
+    runtime.kernel.authorization.register_capability(ENGINEER_USE)
     runtime.kernel.authorization.register_capability(ENGINEER_BUILD)
 
     assert runtime._fresh_engineer_actor(actor, "engineer.artifact.build") is not None  # noqa: SLF001
 
     storage.set_permission_override(actor.own_id, "files.read", "deny")
     assert runtime._fresh_engineer_actor(actor, "engineer.artifact.build") is None  # noqa: SLF001
+
+
+def test_compile_source_preparation_selects_one_exact_named_authorized_sibling(
+    settings,
+    storage,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import friday.agent_runtime as runtime_module
+
+    actor = ActorContext(LEGACY_OWNER_USER_ID, "owner", "test")
+    raw_main = "raw_0123456789abcdef"
+    raw_helper = "raw_fedcba9876543210"
+    sources = {
+        raw_main: _authorized_source_bytes(raw_main, "Main.java", b"class Main {}"),
+        raw_helper: _authorized_source_bytes(raw_helper, "Helper.java", b"class Helper {}"),
+    }
+    runtime = AgentRuntime(replace(settings, engineer_mode_enabled=True), storage)
+    monkeypatch.setattr(runtime, "_fresh_engineer_actor", lambda current, _capability: current)
+    monkeypatch.setattr(
+        runtime_module,
+        "read_authorized_file",
+        lambda _storage, _root, raw_id, _tenant, **_kwargs: sources[raw_id],
+    )
+
+    binding, reason = runtime._prepare_engineer_compile_source(  # noqa: SLF001
+        actor,
+        [raw_main, raw_helper],
+        requested_filename="Main.java",
+    )
+    assert reason == "none"
+    assert binding is not None and binding.raw_id == raw_main
+
+    missing, missing_reason = runtime._prepare_engineer_compile_source(  # noqa: SLF001
+        actor,
+        [raw_main, raw_helper],
+        requested_filename="main.java",
+    )
+    assert missing is None and missing_reason == "exact_artifact_required"
+
+    ambiguous, ambiguous_reason = runtime._prepare_engineer_compile_source(  # noqa: SLF001
+        actor,
+        [raw_main, raw_helper],
+        requested_filename=None,
+    )
+    assert ambiguous is None and ambiguous_reason == "ambiguous_artifact"
+
+    sources[raw_helper] = _authorized_source_bytes(raw_helper, "Main.java", b"class Main2 {}")
+    duplicate, duplicate_reason = runtime._prepare_engineer_compile_source(  # noqa: SLF001
+        actor,
+        [raw_main, raw_helper],
+        requested_filename="Main.java",
+    )
+    assert duplicate is None and duplicate_reason == "ambiguous_artifact"
 
 
 @pytest.mark.asyncio
@@ -262,6 +362,12 @@ async def test_autohunt_runs_compiler_once_with_exact_current_raw_handle(
         kernel=kernel,  # type: ignore[arg-type]
     )
     monkeypatch.setattr(runtime, "_fresh_engineer_actor", lambda current, _capability: current)
+    binding = _source_binding(b"public class Main {}\n", raw_id=raw_id)
+    monkeypatch.setattr(
+        runtime,
+        "_prepare_engineer_compile_source",
+        lambda *_args, **_kwargs: (binding, "none"),
+    )
 
     dossier = await runtime._engineer_autohunt(  # noqa: SLF001
         "скомпилируй этот Java-файл",
@@ -273,7 +379,14 @@ async def test_autohunt_runs_compiler_once_with_exact_current_raw_handle(
 
     assert kernel.calls == [
         ("engineer_analyze_artifact", {"raw_id": raw_id}),
-        ("engineer_compile_java", {"raw_id": raw_id}),
+        (
+            "engineer_compile_java",
+            {
+                "raw_id": raw_id,
+                "expected_filename": "Main.java",
+                "expected_sha256": binding.source_sha256,
+            },
+        ),
     ]
     assert dossier["_artifact_refs"] == {"artifact_1": raw_id}
     assert dossier["_artifact_compile_tool_started"] is True
@@ -286,7 +399,7 @@ async def test_autohunt_runs_compiler_once_with_exact_current_raw_handle(
     ("work_started", "error", "status"),
     (
         (False, "Engineer tool refused: compiler_busy", CapabilityStatus.UNAVAILABLE),
-        (True, "Engineer tool failed: compiler_timeout", CapabilityStatus.UNCERTAIN),
+        (True, "Engineer tool failed: compiler_timeout", CapabilityStatus.FAILED),
     ),
 )
 async def test_autohunt_compile_entry_truth_survives_kernel_projection(
@@ -320,6 +433,12 @@ async def test_autohunt_compile_entry_truth_survives_kernel_projection(
         kernel=Kernel(),  # type: ignore[arg-type]
     )
     monkeypatch.setattr(runtime, "_fresh_engineer_actor", lambda current, _capability: current)
+    binding = _source_binding(b"public class Main {}\n", raw_id=raw_id)
+    monkeypatch.setattr(
+        runtime,
+        "_prepare_engineer_compile_source",
+        lambda *_args, **_kwargs: (binding, "none"),
+    )
 
     dossier = await runtime._engineer_autohunt(  # noqa: SLF001
         "Compile Main.java",
@@ -359,6 +478,12 @@ async def test_autohunt_compile_timeout_without_envelope_is_conservatively_enter
         kernel=Kernel(),  # type: ignore[arg-type]
     )
     monkeypatch.setattr(runtime, "_fresh_engineer_actor", lambda current, _capability: current)
+    binding = _source_binding(b"public class Main {}\n", raw_id=raw_id)
+    monkeypatch.setattr(
+        runtime,
+        "_prepare_engineer_compile_source",
+        lambda *_args, **_kwargs: (binding, "none"),
+    )
 
     dossier = await runtime._engineer_autohunt(  # noqa: SLF001
         "Compile Main.java",
@@ -389,7 +514,13 @@ def test_successful_compile_reply_receipt_and_jar_publish_atomically(
     async def completed_autohunt(_message, attachments, **_kwargs):  # noqa: ANN001
         assert len(attachments) == 1
         raw_id = str(attachments[0].get("raw_object_id") or "")
-        dossier = _complete_dossier(source)
+        binding, reason = runtime._prepare_engineer_compile_source(  # noqa: SLF001
+            _kwargs["actor"],
+            [raw_id],
+            requested_filename=None,
+        )
+        assert reason == "none" and binding is not None
+        dossier = _complete_dossier(source, binding=binding)
         dossier["artifacts"] = [{"ok": True, "raw_id": raw_id}]
         dossier["_artifact_refs"] = {"artifact_1": raw_id}
         return dossier
@@ -434,10 +565,13 @@ def test_successful_compile_reply_receipt_and_jar_publish_atomically(
     assert metadata["generated_files"][0]["id"] == result.json()["files"][0]["id"]
 
 
+@pytest.mark.parametrize("failure", ("message_binding", "batch_identity"))
 def test_compile_persistence_failure_rolls_back_reply_receipt_and_file(
     settings,
     monkeypatch: pytest.MonkeyPatch,
+    failure: str,
 ) -> None:
+    import friday.agent_runtime as runtime_module
     from friday import generated_files
     from friday.server import create_app
 
@@ -447,12 +581,32 @@ def test_compile_persistence_failure_rolls_back_reply_receipt_and_file(
 
     async def completed_autohunt(_message, attachments, **_kwargs):  # noqa: ANN001
         raw_id = str(attachments[0].get("raw_object_id") or "")
-        dossier = _complete_dossier(source)
+        binding, reason = runtime._prepare_engineer_compile_source(  # noqa: SLF001
+            _kwargs["actor"],
+            [raw_id],
+            requested_filename=None,
+        )
+        assert reason == "none" and binding is not None
+        dossier = _complete_dossier(source, binding=binding)
         dossier["artifacts"] = [{"ok": True, "raw_id": raw_id}]
         dossier["_artifact_refs"] = {"artifact_1": raw_id}
         return dossier
 
-    monkeypatch.setattr(generated_files, "_attach_descriptors_to_message", lambda *_args, **_kwargs: False)
+    if failure == "message_binding":
+        monkeypatch.setattr(
+            generated_files,
+            "_attach_descriptors_to_message",
+            lambda *_args, **_kwargs: False,
+        )
+    else:
+        persist = runtime_module.persist_generated_response_files
+
+        def changed_persistence(*args, **kwargs):  # noqa: ANN002, ANN003
+            projection = persist(*args, **kwargs)
+            projection["files"][0]["mime_type"] = "application/octet-stream"
+            return projection
+
+        monkeypatch.setattr(runtime_module, "persist_generated_response_files", changed_persistence)
     with TestClient(app, raise_server_exceptions=False) as client:
         runtime = getattr(app.state.agent, "_legacy", app.state.agent)
         monkeypatch.setattr(runtime, "_engineer_autohunt", completed_autohunt)
@@ -463,12 +617,12 @@ def test_compile_persistence_failure_rolls_back_reply_receipt_and_file(
                 "message": "скомпилируй этот Java-файл",
                 "mode": "engineer",
                 "enable_tools": True,
-                "source_ref": "api-document:compile-persist-failure",
+                "source_ref": f"api-document:compile-persist-failure:{failure}",
                 "document": {
                     "filename": "Main.java",
                     "mime_type": "text/x-java-source",
                     "content_base64": base64.b64encode(source).decode("ascii"),
-                    "source_ref": "api-document:compile-persist-failure",
+                    "source_ref": f"api-document:compile-persist-failure:{failure}",
                 },
             },
         )
@@ -485,9 +639,22 @@ def test_compile_persistence_failure_rolls_back_reply_receipt_and_file(
     assert not list(configured.files_dir.glob("*/generated/*/*.blob"))
 
 
-def test_files_read_revoked_after_compile_suppresses_jar_and_success_receipt(
+@pytest.mark.parametrize(
+    "capability",
+    (
+        "files.read",
+        "engineer.use",
+        "engineer.artifact.build",
+        "owner_role",
+        "source_row",
+        "source_filename",
+        "jar_duplicate",
+    ),
+)
+def test_authority_revoked_after_compile_suppresses_jar_and_success_receipt(
     settings,
     monkeypatch: pytest.MonkeyPatch,
+    capability: str,
 ) -> None:
     from friday.server import create_app
 
@@ -497,14 +664,53 @@ def test_files_read_revoked_after_compile_suppresses_jar_and_success_receipt(
 
     async def revoke_after_compile(_message, attachments, **_kwargs):  # noqa: ANN001
         raw_id = str(attachments[0].get("raw_object_id") or "")
-        dossier = _complete_dossier(source)
+        binding, reason = runtime._prepare_engineer_compile_source(  # noqa: SLF001
+            _kwargs["actor"],
+            [raw_id],
+            requested_filename=None,
+        )
+        assert reason == "none" and binding is not None
+        dossier = _complete_dossier(source, binding=binding)
         dossier["artifacts"] = [{"ok": True, "raw_id": raw_id}]
         dossier["_artifact_refs"] = {"artifact_1": raw_id}
-        app.state.storage.set_permission_override(LEGACY_OWNER_USER_ID, "files.read", "deny")
+        if capability == "source_filename":
+            with app.state.storage.transaction() as conn:
+                conn.execute(
+                    "UPDATE raw_objects SET metadata_json=json_set(metadata_json, '$.filename', 'Other.java') "
+                    "WHERE id=?",
+                    (raw_id,),
+                )
+        elif capability == "source_row":
+            with app.state.storage.transaction() as conn:
+                conn.execute(
+                    "UPDATE raw_objects SET deleted_at='2026-08-26T12:00:00Z' WHERE id=?",
+                    (raw_id,),
+                )
+        elif capability == "owner_role":
+            with app.state.storage.transaction() as conn:
+                conn.execute(
+                    "UPDATE users SET preset_key='user' WHERE id=?",
+                    (LEGACY_OWNER_USER_ID,),
+                )
+        elif capability != "jar_duplicate":
+            app.state.storage.set_permission_override(LEGACY_OWNER_USER_ID, capability, "deny")
         return dossier
 
     with TestClient(app) as client:
         runtime = getattr(app.state.agent, "_legacy", app.state.agent)
+        if capability == "jar_duplicate":
+            authorize_compile = runtime._engineer_compile_publication_authorized  # noqa: SLF001
+
+            def duplicate_jar(*args, response_files, **kwargs):  # noqa: ANN002, ANN003
+                files = list(response_files)
+                files.append(dict(files[0]))
+                return authorize_compile(*args, response_files=files, **kwargs)
+
+            monkeypatch.setattr(
+                runtime,
+                "_engineer_compile_publication_authorized",
+                duplicate_jar,
+            )
         monkeypatch.setattr(runtime, "_engineer_autohunt", revoke_after_compile)
         result = client.post(
             "/api/chat",
@@ -513,12 +719,12 @@ def test_files_read_revoked_after_compile_suppresses_jar_and_success_receipt(
                 "message": "скомпилируй этот Java-файл",
                 "mode": "engineer",
                 "enable_tools": True,
-                "source_ref": "api-document:compile-late-deny",
+                "source_ref": f"api-document:compile-late-deny:{capability}",
                 "document": {
                     "filename": "Main.java",
                     "mime_type": "text/x-java-source",
                     "content_base64": base64.b64encode(source).decode("ascii"),
-                    "source_ref": "api-document:compile-late-deny",
+                    "source_ref": f"api-document:compile-late-deny:{capability}",
                 },
             },
         )
@@ -532,7 +738,9 @@ def test_files_read_revoked_after_compile_suppresses_jar_and_success_receipt(
         ).fetchall()
 
     assert result.status_code == 200, result.text
-    assert result.json()["attachment_authority_changed_before_publication"] is True
+    assert result.json()["compile_authority_changed_before_publication"] is True
+    if capability == "files.read":
+        assert result.json()["attachment_authority_changed_before_publication"] is True
     assert result.json()["files"] == []
     assert generated_rows == []
     assistant = next(row for row in reversed(rows) if row.get("role") == "assistant")

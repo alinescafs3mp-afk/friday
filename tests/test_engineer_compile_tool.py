@@ -12,15 +12,17 @@ from types import SimpleNamespace
 
 import pytest
 
-from friday.execution_kernel import ExecutionKernel
+from friday.execution_kernel import ExecutionKernel, mark_tool_physical_start
 from friday.organs import ServiceContext
 from friday.organs.engineer import ENGINEER_BUILD, compiler
 from friday.organs.engineer import tools as engineer_tools
 from friday.organs.engineer.targets import (
     artifact_compile_request_is_atomic,
+    requested_artifact_compile_filename,
     requests_artifact_compile,
 )
 from friday.permissions import LEGACY_OWNER_USER_ID, ActorContext, AuthorizationService
+from friday.source_identity import authorized_file_snapshot_token
 
 
 def _class_bytes() -> bytes:
@@ -67,6 +69,35 @@ def _worker_report(source: bytes, jar: bytes) -> dict[str, object]:
     }
 
 
+def _stored_source(
+    source: bytes,
+    *,
+    raw_id: str = "raw_0123456789abcdef",
+    filename: str = "Main.java",
+) -> SimpleNamespace:
+    raw = {
+        "id": raw_id,
+        "source": "upload",
+        "source_ref": "test:compile",
+        "content_type": "file",
+        "received_at": "2026-08-26T00:00:00+00:00",
+        "content_hash": hashlib.sha256(source).hexdigest(),
+        "_raw_content": "",
+        "_raw_metadata": "{}",
+    }
+    snapshot_token = authorized_file_snapshot_token(
+        raw,
+        content_sha256=hashlib.sha256(source).hexdigest(),
+    )
+    assert snapshot_token is not None
+    return SimpleNamespace(
+        raw_id=raw_id,
+        content=source,
+        filename=filename,
+        snapshot_token=snapshot_token,
+    )
+
+
 @pytest.mark.parametrize(
     "speech",
     (
@@ -106,6 +137,13 @@ def _worker_report(source: bytes, jar: bytes) -> dict[str, object]:
 )
 def test_direct_current_java_compile_requests_are_admitted(speech: str) -> None:
     assert requests_artifact_compile(speech) is True
+
+
+def test_compile_target_filename_is_exact_and_code_owned() -> None:
+    assert requested_artifact_compile_filename("Compile Main.java") == "Main.java"
+    assert requested_artifact_compile_filename("Скомпилируй этот Java-файл") is None
+    assert requested_artifact_compile_filename("Compile Main.java and Helper.java") is None
+    assert requested_artifact_compile_filename("`Compile Main.java`") is None
 
 
 @pytest.mark.parametrize(
@@ -273,7 +311,7 @@ async def test_compile_tool_is_hidden_and_separates_private_jar_attachment(
 
     def fake_read_owned(ctx, actor, selected_raw_id):  # noqa: ANN001
         observed["read"] = (ctx, actor, selected_raw_id)
-        return SimpleNamespace(content=source, filename="Main.java")
+        return _stored_source(source, raw_id=selected_raw_id)
 
     def fake_compile(
         content: bytes,
@@ -281,8 +319,10 @@ async def test_compile_tool_is_hidden_and_separates_private_jar_attachment(
         *,
         deadline: float,
         workspace_root: Path,
+        on_started,
     ) -> tuple[bytes, dict[str, object]]:
         observed["sandbox"] = (content, filename, deadline, workspace_root)
+        on_started()
         return jar, _worker_report(source, jar)
 
     monkeypatch.setattr(engineer_tools, "_read_owned", fake_read_owned)
@@ -308,7 +348,15 @@ async def test_compile_tool_is_hidden_and_separates_private_jar_attachment(
     actor = ActorContext(LEGACY_OWNER_USER_ID, "owner", "test")
     assert "engineer_compile_java" not in kernel.get_tool_names(actor)
 
-    result = await kernel.execute("engineer_compile_java", {"raw_id": raw_id}, actor=actor)
+    result = await kernel.execute(
+        "engineer_compile_java",
+        {
+            "raw_id": raw_id,
+            "expected_filename": "Main.java",
+            "expected_sha256": hashlib.sha256(source).hexdigest(),
+        },
+        actor=actor,
+    )
 
     assert result.success is True
     assert observed["read"][2] == raw_id  # type: ignore[index]
@@ -368,8 +416,12 @@ async def test_compile_kernel_started_audit_follows_physical_worker_attestation(
     )
     spec = {tool.name: tool for tool in engineer_tools.build_engineer_tools(ctx)}["engineer_compile_java"]
 
-    async def failed_handler(*, actor, raw_id: str):  # noqa: ANN001
-        del actor, raw_id
+    async def failed_handler(  # noqa: ANN001
+        *, actor, raw_id: str, expected_filename: str, expected_sha256: str
+    ):
+        del actor, raw_id, expected_filename, expected_sha256
+        if work_started:
+            mark_tool_physical_start()
         return {
             "ok": False,
             "status": "failed" if work_started else "unavailable",
@@ -387,7 +439,11 @@ async def test_compile_kernel_started_audit_follows_physical_worker_attestation(
 
     result = await kernel.execute(
         "engineer_compile_java",
-        {"raw_id": "raw_0123456789abcdef"},
+        {
+            "raw_id": "raw_0123456789abcdef",
+            "expected_filename": "Main.java",
+            "expected_sha256": "0" * 64,
+        },
         actor=ActorContext(LEGACY_OWNER_USER_ID, "owner", "test"),
     )
 
@@ -404,7 +460,7 @@ async def test_compile_kernel_started_audit_follows_physical_worker_attestation(
 
 
 @pytest.mark.asyncio
-async def test_compile_kernel_exception_uses_conservative_handler_entry_fallback(
+async def test_compile_kernel_exception_before_worker_is_safe_to_retry(
     settings,
     storage,
 ) -> None:
@@ -417,8 +473,10 @@ async def test_compile_kernel_exception_uses_conservative_handler_entry_fallback
     )
     spec = {tool.name: tool for tool in engineer_tools.build_engineer_tools(ctx)}["engineer_compile_java"]
 
-    async def broken_handler(*, actor, raw_id: str):  # noqa: ANN001
-        del actor, raw_id
+    async def broken_handler(  # noqa: ANN001
+        *, actor, raw_id: str, expected_filename: str, expected_sha256: str
+    ):
+        del actor, raw_id, expected_filename, expected_sha256
         raise RuntimeError("private compiler failure")
 
     spec.handler = broken_handler
@@ -431,20 +489,24 @@ async def test_compile_kernel_exception_uses_conservative_handler_entry_fallback
 
     result = await kernel.execute(
         "engineer_compile_java",
-        {"raw_id": "raw_0123456789abcdef"},
+        {
+            "raw_id": "raw_0123456789abcdef",
+            "expected_filename": "Main.java",
+            "expected_sha256": "0" * 64,
+        },
         actor=ActorContext(LEGACY_OWNER_USER_ID, "owner", "test"),
     )
 
     assert result.success is False
     assert result.handler_entered is True
-    assert result.work_started is None
-    assert "НАЧАВ" in str(result.error)
+    assert result.work_started is False
+    assert "не дошёл до запуска" in str(result.error)
     audit_reasons = [
         json.loads(str(row["after_json"] or "{}"))["reason"]
         for row in storage.list_audit_log(LEGACY_OWNER_USER_ID, limit=20)
         if row["target_id"] == "engineer_compile_java"
     ]
-    assert sorted(audit_reasons) == ["failed_after_start", "started"]
+    assert audit_reasons == ["failed"]
 
 
 @pytest.mark.asyncio
@@ -460,7 +522,7 @@ async def test_compile_tool_rejects_forged_report_or_changed_jar(
     monkeypatch.setattr(
         engineer_tools,
         "_read_owned",
-        lambda *_args: SimpleNamespace(content=source, filename="Main.java"),
+        lambda *_args: _stored_source(source),
     )
     monkeypatch.setattr(
         engineer_tools.sandbox,
@@ -480,6 +542,8 @@ async def test_compile_tool_rejects_forged_report_or_changed_jar(
     result = await spec.handler(
         actor=ActorContext(LEGACY_OWNER_USER_ID, "owner", "test"),
         raw_id="raw_0123456789abcdef",
+        expected_filename="Main.java",
+        expected_sha256=hashlib.sha256(source).hexdigest(),
     )
 
     assert result == {
@@ -489,6 +553,50 @@ async def test_compile_tool_rejects_forged_report_or_changed_jar(
         "_work_started": True,
     }
     assert "changed" not in json.dumps(result)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("expected_filename", "expected_sha256"),
+    (("Other.java", None), ("Main.java", "0" * 64)),
+)
+async def test_compile_tool_rechecks_code_owned_source_identity_before_spawn(
+    settings,
+    storage,
+    monkeypatch: pytest.MonkeyPatch,
+    expected_filename: str,
+    expected_sha256: str | None,
+) -> None:
+    source = b"class Main {}"
+    monkeypatch.setattr(engineer_tools, "_read_owned", lambda *_args: _stored_source(source))
+
+    def forbidden_spawn(*_args, **_kwargs):
+        raise AssertionError("sandbox must not start for a changed source identity")
+
+    monkeypatch.setattr(engineer_tools.sandbox, "compile_java_artifact", forbidden_spawn)
+    ctx = ServiceContext(
+        settings=settings,
+        storage=storage,
+        kg=None,
+        ingestion=SimpleNamespace(secondary_brain=None),
+        llm=None,
+    )
+    spec = {tool.name: tool for tool in engineer_tools.build_engineer_tools(ctx)}["engineer_compile_java"]
+    assert spec.handler is not None
+
+    result = await spec.handler(
+        actor=ActorContext(LEGACY_OWNER_USER_ID, "owner", "test"),
+        raw_id="raw_0123456789abcdef",
+        expected_filename=expected_filename,
+        expected_sha256=expected_sha256 or hashlib.sha256(source).hexdigest(),
+    )
+
+    assert result == {
+        "ok": False,
+        "status": "unavailable",
+        "error": "source_identity_changed",
+        "_work_started": False,
+    }
 
 
 @pytest.mark.asyncio
@@ -513,7 +621,7 @@ async def test_compile_failures_preserve_entry_truth(
     monkeypatch.setattr(
         engineer_tools,
         "_read_owned",
-        lambda *_args: SimpleNamespace(content=b"class Main {}", filename="Main.java"),
+        lambda *_args: _stored_source(b"class Main {}"),
     )
 
     def failed(*_args, **_kwargs):
@@ -533,6 +641,8 @@ async def test_compile_failures_preserve_entry_truth(
     result = await spec.handler(
         actor=ActorContext(LEGACY_OWNER_USER_ID, "owner", "test"),
         raw_id="raw_0123456789abcdef",
+        expected_filename="Main.java",
+        expected_sha256=hashlib.sha256(b"class Main {}").hexdigest(),
     )
 
     assert result == {
@@ -554,7 +664,7 @@ async def test_compile_respects_configured_generated_file_cap(
     monkeypatch.setattr(
         engineer_tools,
         "_read_owned",
-        lambda *_args: SimpleNamespace(content=source, filename="Main.java"),
+        lambda *_args: _stored_source(source),
     )
     monkeypatch.setattr(
         engineer_tools.sandbox,
@@ -574,6 +684,8 @@ async def test_compile_respects_configured_generated_file_cap(
     result = await spec.handler(
         actor=ActorContext(LEGACY_OWNER_USER_ID, "owner", "test"),
         raw_id="raw_0123456789abcdef",
+        expected_filename="Main.java",
+        expected_sha256=hashlib.sha256(source).hexdigest(),
     )
 
     assert result == {
