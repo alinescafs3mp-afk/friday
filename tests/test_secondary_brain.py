@@ -28,6 +28,7 @@ from friday.secondary_brain import (
     ModelWorkload,
     SecondaryEndpointConfig,
     SecondaryFailure,
+    SecondaryMode,
     SecondaryResult,
     SecondaryState,
     build_secondary_brain,
@@ -461,6 +462,24 @@ async def test_wrong_profile_manifest_fails_before_model_inventory() -> None:
 
 
 @pytest.mark.asyncio
+async def test_model_inventory_rejects_duplicate_data_keys() -> None:
+    async def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("/friday-profile"):
+            return _profile_response()
+        raw = ('{"data":[{"id":"wrong"}],"data":[{"id":"' + _ALIAS + '"}]}').encode("utf-8")
+        return httpx.Response(200, headers=_PROFILE_HEADERS, content=raw)
+
+    client = SecondaryEndpointClient(_endpoint_config(), transport=httpx.MockTransport(handler))
+    try:
+        failure = await client.probe_models(absolute_deadline_monotonic=time.monotonic() + 2.0)
+        assert failure is SecondaryFailure.MALFORMED_RESPONSE
+        assert client.status().state is SecondaryState.COOLDOWN
+        assert client.status().served_model_match is False
+    finally:
+        await client.aclose()
+
+
+@pytest.mark.asyncio
 async def test_exact_hashed_candidate_profile_is_never_admitted(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -776,6 +795,84 @@ async def test_every_generation_requires_exact_single_profile_headers(
         attempt = await client.call(_request())
         assert attempt.failure is SecondaryFailure.WRONG_PROFILE
         assert attempt.result is None
+    finally:
+        await client.aclose()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "raw",
+    [
+        (
+            '{"model":"wrong","model":"'
+            + _ALIAS
+            + '","choices":[{"message":{"role":"assistant","content":"accepted"},'
+            '"finish_reason":"stop"}]}'
+        ),
+        (
+            '{"model":"' + _ALIAS + '","choices":[{"message":{"role":"assistant","content":"accepted",'
+            '"tool_calls":[{"id":"hidden"}],"tool_calls":null},"finish_reason":"stop"}]}'
+        ),
+    ],
+)
+async def test_generation_envelope_rejects_duplicate_keys(raw: str) -> None:
+    async def handler(_request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, headers=_PROFILE_HEADERS, content=raw.encode("utf-8"))
+
+    client = SecondaryEndpointClient(_endpoint_config(), transport=httpx.MockTransport(handler))
+    try:
+        attempt = await client.call(_request())
+        assert attempt.failure is SecondaryFailure.MALFORMED_RESPONSE
+        assert attempt.result is None
+    finally:
+        await client.aclose()
+
+
+@pytest.mark.asyncio
+async def test_structured_visible_content_rejects_duplicate_keys() -> None:
+    async def handler(_request: httpx.Request) -> httpx.Response:
+        return _response(content='{"label":"first","label":"last"}')
+
+    client = SecondaryEndpointClient(_endpoint_config(), transport=httpx.MockTransport(handler))
+    try:
+        attempt = await client.call(_request(structured=True))
+        assert attempt.failure is SecondaryFailure.MALFORMED_RESPONSE
+        assert attempt.result is None
+    finally:
+        await client.aclose()
+
+
+@pytest.mark.asyncio
+async def test_deadline_is_rechecked_after_late_dispatch_validator() -> None:
+    now = [0.0]
+    posts = 0
+
+    async def handler(_request: httpx.Request) -> httpx.Response:
+        nonlocal posts
+        posts += 1
+        return _response()
+
+    def validator() -> bool:
+        now[0] = 2.0
+        return True
+
+    client = SecondaryEndpointClient(
+        _endpoint_config(),
+        transport=httpx.MockTransport(handler),
+        clock=lambda: now[0],
+    )
+    try:
+        attempt = await client.call(
+            replace(_request(), absolute_deadline_monotonic=1.0),
+            pre_dispatch_validator=validator,
+        )
+        assert attempt.failure is SecondaryFailure.DEADLINE
+        assert posts == 0
+        status = client.status()
+        assert status.active_requests == 0
+        assert status.selected_total == 1
+        assert status.endpoint_request_total == 0
+        assert status.endpoint_success_total == 0
     finally:
         await client.aclose()
 
@@ -2003,6 +2100,115 @@ async def test_bad_process_epoch_canary_prevents_workload_admission(settings: An
 
 
 @pytest.mark.asyncio
+async def test_plan_triggered_shared_probe_failure_opens_global_cooldown(settings: Any) -> None:
+    paths: list[str] = []
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        paths.append(request.url.path)
+        if request.url.path.endswith("/friday-profile"):
+            return _profile_response()
+        if request.url.path.endswith("/models"):
+            return httpx.Response(200, headers=_PROFILE_HEADERS, json={"data": "invalid"})
+        raise AssertionError("generation must remain closed after a malformed inventory")
+
+    scheduler = build_secondary_brain(
+        _configured_settings(settings),
+        transport=httpx.MockTransport(handler),
+    )
+    try:
+        first, _wait = await scheduler._ensure_epoch_admitted(  # noqa: SLF001
+            time.monotonic() + 2.0,
+            workload=ModelWorkload.PLAN_CANDIDATE,
+        )
+        assert scheduler.status().state is SecondaryState.COOLDOWN
+        assert scheduler.status().last_failure is SecondaryFailure.MALFORMED_RESPONSE
+        second, _wait = await scheduler._ensure_epoch_admitted(  # noqa: SLF001
+            time.monotonic() + 2.0,
+            workload=ModelWorkload.PLAN_CANDIDATE,
+        )
+
+        assert first is SecondaryFailure.MALFORMED_RESPONSE
+        assert second is SecondaryFailure.COOLDOWN
+        assert paths == ["/v1/friday-profile", "/v1/models"]
+        assert scheduler.status().state is SecondaryState.COOLDOWN
+    finally:
+        await scheduler.aclose()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("blocked_stage", ["profile", "canary"])
+async def test_foreground_preemption_during_plan_qualification_does_not_open_cooldown(
+    settings: Any,
+    blocked_stage: str,
+) -> None:
+    entered = asyncio.Event()
+    cancelled = asyncio.Event()
+    blocked_once = False
+    paths: list[str] = []
+
+    async def block_until_cancelled() -> None:
+        nonlocal blocked_once
+        blocked_once = True
+        entered.set()
+        try:
+            await asyncio.Event().wait()
+        finally:
+            cancelled.set()
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        paths.append(request.url.path)
+        if request.url.path.endswith("/friday-profile"):
+            if blocked_stage == "profile" and not blocked_once:
+                await block_until_cancelled()
+            return _profile_response()
+        if request.url.path.endswith("/models"):
+            return _models_response()
+        payload = json.loads(request.content)
+        is_canary = payload["messages"][-1]["content"] == "Reply with exactly: ready"
+        if blocked_stage == "canary" and is_canary and not blocked_once:
+            await block_until_cancelled()
+        return _response(content="ready" if is_canary else "foreground accepted")
+
+    scheduler = build_secondary_brain(
+        _configured_settings(settings, private=True),
+        transport=httpx.MockTransport(handler),
+    )
+    scheduler._supervisor_mode = SecondaryMode.SHADOW  # noqa: SLF001 - isolate priority transport
+    scheduler.allowed_workloads = scheduler.allowed_workloads | {ModelWorkload.PLAN_CANDIDATE}
+    plan_request = _request(
+        workload=ModelWorkload.PLAN_CANDIDATE,
+        messages=(
+            {"role": "system", "content": "Return one JSON object."},
+            {"role": "user", "content": "discarded semantic candidate"},
+        ),
+        structured=True,
+        private=True,
+    )
+    plan = asyncio.create_task(scheduler.evaluate_shadow(plan_request))
+    try:
+        await asyncio.wait_for(entered.wait(), timeout=0.5)
+        foreground = await scheduler.attempt(_request())
+        displaced = await plan
+
+        assert cancelled.is_set()
+        assert displaced.failure is SecondaryFailure.CANCELLED
+        assert foreground.result is not None
+        assert foreground.result.visible_content == "foreground accepted"
+        assert scheduler.status().state is SecondaryState.HEALTHY
+        assert scheduler.status().last_failure is None
+        assert paths[-4:] == [
+            "/v1/friday-profile",
+            "/v1/models",
+            "/v1/chat/completions",
+            "/v1/chat/completions",
+        ]
+    finally:
+        plan.cancel()
+        await asyncio.gather(plan, return_exceptions=True)
+        await scheduler.aclose()
+
+
+@pytest.mark.asyncio
 async def test_workload_never_queues_behind_process_epoch_probe(settings: Any) -> None:
     probe_entered = asyncio.Event()
     release_probe = asyncio.Event()
@@ -2106,12 +2312,66 @@ async def test_process_epoch_probe_checks_models_then_generation(settings: Any) 
     try:
         scheduler.start()
         for _ in range(100):
-            if scheduler.status().state is SecondaryState.HEALTHY and len(paths) == 3:
+            if (
+                scheduler.status().state is SecondaryState.HEALTHY
+                and len(paths) == 3
+                and scheduler.diagnostics_status()["endpoint_success_total"] == 3
+            ):
                 break
             await asyncio.sleep(0)
         assert paths == ["/v1/friday-profile", "/v1/models", "/v1/chat/completions"]
         assert scheduler.status().state is SecondaryState.HEALTHY
         assert scheduler.status().served_model_match is True
+        diagnostics = scheduler.diagnostics_status()
+        assert diagnostics["endpoint_admission_total"] == 2
+        assert diagnostics["endpoint_request_total"] == 3
+        assert diagnostics["endpoint_success_total"] == 3
+    finally:
+        await scheduler.aclose()
+
+
+@pytest.mark.asyncio
+async def test_cold_demand_snapshot_counts_profile_models_canary_and_product_http_tasks(
+    settings: Any,
+) -> None:
+    paths: list[str] = []
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        paths.append(request.url.path)
+        if request.url.path.endswith("/friday-profile"):
+            return _profile_response()
+        if request.url.path.endswith("/models"):
+            return _models_response()
+        payload = json.loads(request.content)
+        messages = payload.get("messages", [])
+        is_canary = bool(messages and messages[-1].get("content") == "Reply with exactly: ready")
+        return _response(content="ready" if is_canary else "accepted")
+
+    scheduler = build_secondary_brain(
+        _configured_settings(settings),
+        transport=httpx.MockTransport(handler),
+    )
+    try:
+        before = scheduler.diagnostics_status()
+        attempt = await scheduler.attempt(_request())
+        after = scheduler.diagnostics_status()
+
+        assert attempt.result is not None
+        assert paths == [
+            "/v1/friday-profile",
+            "/v1/models",
+            "/v1/chat/completions",
+            "/v1/chat/completions",
+        ]
+        assert after["endpoint_request_total"] - before["endpoint_request_total"] == 4
+        assert after["endpoint_success_total"] - before["endpoint_success_total"] == 4
+        # Inventory occupies one client permit even though it performs two
+        # physical reads; canary and product each occupy one more permit.
+        assert after["endpoint_admission_total"] - before["endpoint_admission_total"] == 3
+        assert after["probe_success_total"] - before["probe_success_total"] == 1
+        assert (
+            after["model_inventory_probe_success_total"] - before["model_inventory_probe_success_total"] == 1
+        )
     finally:
         await scheduler.aclose()
 

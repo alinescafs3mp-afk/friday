@@ -139,6 +139,8 @@ class _AcceptedSecondaryClient:
             context_cap_tokens=4096,
             served_model_match=True,
             profile_manifest_match=True,
+            endpoint_request_total=self.selected_total,
+            endpoint_success_total=self.success_total,
         )
 
     def protocol_rejection_counts(self) -> dict[Any, int]:

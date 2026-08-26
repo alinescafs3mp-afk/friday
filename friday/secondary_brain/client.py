@@ -7,17 +7,21 @@ import hashlib
 import ssl
 import time
 from collections.abc import Callable
+from contextlib import suppress
 from typing import Any
 
 import httpx
 
 from .contracts import (
+    PLAN_CANDIDATE_LOCAL_FAILURES,
     ModelRequest,
+    ModelWorkload,
     SecondaryAttempt,
     SecondaryEndpointConfig,
     SecondaryFailure,
     SecondaryState,
     SecondaryStatus,
+    _decode_strict_json,
     _load_pinned_ca_pem,
 )
 from .gpt_oss import GptOssProtocolAdapter, ProtocolRejection
@@ -115,6 +119,8 @@ class SecondaryEndpointClient:
         self._queue_wait_sum_sec = 0.0
         self._queue_wait_max_sec = 0.0
         self._protocol_rejection_total = 0
+        self._endpoint_request_total = 0
+        self._endpoint_success_total = 0
         self._protocol_rejection_by_reason = {reason: 0 for reason in _PROTOCOL_REJECTIONS}
         timeout = httpx.Timeout(
             config.read_timeout_sec,
@@ -181,6 +187,8 @@ class SecondaryEndpointClient:
             queue_wait_sum_sec=self._queue_wait_sum_sec,
             queue_wait_max_sec=self._queue_wait_max_sec,
             protocol_rejection_total=self._protocol_rejection_total,
+            endpoint_request_total=self._endpoint_request_total,
+            endpoint_success_total=self._endpoint_success_total,
         )
 
     def record_fallback(self) -> None:
@@ -291,7 +299,13 @@ class SecondaryEndpointClient:
         finally:
             self._state_lock.release()
 
-    async def _finish(self, failure: SecondaryFailure | None) -> None:
+    async def _finish(
+        self,
+        failure: SecondaryFailure | None,
+        *,
+        failure_scope_workload: ModelWorkload | None = None,
+        cancellation_is_local: bool = False,
+    ) -> None:
         async with self._state_lock:
             self._active_requests = max(0, self._active_requests - 1)
             self._semaphore.release()
@@ -302,6 +316,13 @@ class SecondaryEndpointClient:
                 self._success_total += 1
                 self._served_model_match = True
                 self._last_success_at = self._clock()
+                return
+            if (
+                failure_scope_workload is ModelWorkload.PLAN_CANDIDATE
+                and failure in PLAN_CANDIDATE_LOCAL_FAILURES
+            ) or (cancellation_is_local and failure is SecondaryFailure.CANCELLED):
+                self._skipped_total += 1
+                self._record_protocol_rejection(failure)
                 return
             self._last_failure = failure
             self._skipped_total += 1
@@ -316,18 +337,58 @@ class SecondaryEndpointClient:
             else:
                 self._state = SecondaryState.DEGRADED
 
-    async def call(self, request: ModelRequest) -> SecondaryAttempt:
+    async def _finish_cancellation_safe(
+        self,
+        failure: SecondaryFailure | None,
+        *,
+        failure_scope_workload: ModelWorkload | None = None,
+        cancellation_is_local: bool = False,
+    ) -> None:
+        """Release the sole permit even if cancellation is delivered twice."""
+
+        cleanup = asyncio.create_task(
+            self._finish(
+                failure,
+                failure_scope_workload=failure_scope_workload,
+                cancellation_is_local=cancellation_is_local,
+            )
+        )
+        interrupted = False
+        while not cleanup.done():
+            try:
+                await asyncio.shield(cleanup)
+            except asyncio.CancelledError:
+                interrupted = True
+        await cleanup
+        if interrupted:
+            raise asyncio.CancelledError
+
+    async def call(
+        self,
+        request: ModelRequest,
+        *,
+        pre_dispatch_validator: Callable[[], bool] | None = None,
+        dispatch_observer: Callable[[], None] | None = None,
+        cancellation_is_local: bool = False,
+    ) -> SecondaryAttempt:
         """Make one bounded generation attempt; never retry internally."""
+
+        failure_scope = request.workload
 
         try:
             payload = self._adapter.build_payload(self.config, request)
         except ProtocolRejection as rejection:
-            self._last_failure = rejection.failure
+            if not (
+                failure_scope is ModelWorkload.PLAN_CANDIDATE
+                and rejection.failure in PLAN_CANDIDATE_LOCAL_FAILURES
+            ):
+                self._last_failure = rejection.failure
             self._skipped_total += 1
             self._record_protocol_rejection(rejection.failure)
             return SecondaryAttempt.rejected(rejection.failure)
         except Exception:
-            self._last_failure = SecondaryFailure.MALFORMED_RESPONSE
+            if failure_scope is not ModelWorkload.PLAN_CANDIDATE:
+                self._last_failure = SecondaryFailure.MALFORMED_RESPONSE
             self._skipped_total += 1
             self._record_protocol_rejection(SecondaryFailure.MALFORMED_RESPONSE)
             return SecondaryAttempt.rejected(SecondaryFailure.MALFORMED_RESPONSE)
@@ -352,7 +413,29 @@ class SecondaryEndpointClient:
         task: asyncio.Task[httpx.Response] | None = None
         started = self._clock()
         try:
+            if pre_dispatch_validator is not None:
+                try:
+                    dispatch_admitted = pre_dispatch_validator() is True
+                except Exception:
+                    dispatch_admitted = False
+                if not dispatch_admitted:
+                    failure = SecondaryFailure.CANCELLED
+                    return SecondaryAttempt.rejected(failure, queue_wait_sec=queue_wait_sec)
+            # Admission and the synchronous late guard may consume the final
+            # budget. Recompute at the last point before an HTTP task exists.
+            remaining = min(
+                self.config.call_budget_sec,
+                request.absolute_deadline_monotonic - self._clock(),
+            )
+            if remaining <= 0.0:
+                failure = SecondaryFailure.DEADLINE
+                return SecondaryAttempt.rejected(failure, queue_wait_sec=queue_wait_sec)
             task = asyncio.create_task(self._http.post(self.config.chat_completions_url, json=payload))
+            self._endpoint_request_total += 1
+            if dispatch_observer is not None:
+                with suppress(Exception):
+                    # Optional structural telemetry cannot affect the request.
+                    dispatch_observer()
             try:
                 response = await asyncio.wait_for(task, timeout=remaining)
             except TimeoutError:
@@ -362,6 +445,7 @@ class SecondaryEndpointClient:
             failure = self._http_failure(response.status_code)
             if failure is not None:
                 return SecondaryAttempt.rejected(failure, queue_wait_sec=queue_wait_sec)
+            self._endpoint_success_total += 1
             failure = self._profile_header_failure(response)
             if failure is not None:
                 return SecondaryAttempt.rejected(failure, queue_wait_sec=queue_wait_sec)
@@ -369,8 +453,8 @@ class SecondaryEndpointClient:
                 failure = SecondaryFailure.MALFORMED_RESPONSE
                 return SecondaryAttempt.rejected(failure, queue_wait_sec=queue_wait_sec)
             try:
-                body: Any = response.json()
-            except Exception:
+                body: Any = _decode_strict_json(response.content)
+            except (UnicodeError, TypeError, ValueError):
                 failure = SecondaryFailure.MALFORMED_RESPONSE
                 return SecondaryAttempt.rejected(failure, queue_wait_sec=queue_wait_sec)
             try:
@@ -405,9 +489,18 @@ class SecondaryEndpointClient:
             if task is not None and not task.done():
                 task.cancel()
                 await asyncio.gather(task, return_exceptions=True)
-            await self._finish(failure)
+            await self._finish_cancellation_safe(
+                failure,
+                failure_scope_workload=failure_scope,
+                cancellation_is_local=cancellation_is_local,
+            )
 
-    async def probe_models(self, *, absolute_deadline_monotonic: float) -> SecondaryFailure | None:
+    async def probe_models(
+        self,
+        *,
+        absolute_deadline_monotonic: float,
+        cancellation_is_local: bool = False,
+    ) -> SecondaryFailure | None:
         """Verify the admitted profile manifest and exact served alias."""
 
         self._profile_manifest_match = False
@@ -432,6 +525,7 @@ class SecondaryEndpointClient:
         try:
             if self.config.profile_manifest_sha256:
                 task = asyncio.create_task(self._http.get(self.config.profile_url))
+                self._endpoint_request_total += 1
                 try:
                     response = await asyncio.wait_for(task, timeout=remaining)
                 except TimeoutError:
@@ -440,6 +534,7 @@ class SecondaryEndpointClient:
                 failure = self._http_failure(response.status_code)
                 if failure is not None:
                     return failure
+                self._endpoint_success_total += 1
                 failure = self._profile_header_failure(response)
                 if failure is not None:
                     return failure
@@ -462,6 +557,7 @@ class SecondaryEndpointClient:
                     failure = SecondaryFailure.DEADLINE
                     return failure
             task = asyncio.create_task(self._http.get(self.config.models_url))
+            self._endpoint_request_total += 1
             try:
                 response = await asyncio.wait_for(task, timeout=remaining)
             except TimeoutError:
@@ -470,6 +566,7 @@ class SecondaryEndpointClient:
             failure = self._http_failure(response.status_code)
             if failure is not None:
                 return failure
+            self._endpoint_success_total += 1
             failure = self._profile_header_failure(response)
             if failure is not None:
                 return failure
@@ -477,8 +574,8 @@ class SecondaryEndpointClient:
                 failure = SecondaryFailure.MALFORMED_RESPONSE
                 return failure
             try:
-                body: Any = response.json()
-            except Exception:
+                body: Any = _decode_strict_json(response.content)
+            except (UnicodeError, TypeError, ValueError):
                 failure = SecondaryFailure.MALFORMED_RESPONSE
                 return failure
             rows = body.get("data") if isinstance(body, dict) else None
@@ -514,7 +611,10 @@ class SecondaryEndpointClient:
             if task is not None and not task.done():
                 task.cancel()
                 await asyncio.gather(task, return_exceptions=True)
-            await self._finish(failure)
+            await self._finish_cancellation_safe(
+                failure,
+                cancellation_is_local=cancellation_is_local,
+            )
             if failure is None:
                 self._probe_success_total += 1
             else:

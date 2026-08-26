@@ -10,11 +10,13 @@ from typing import TYPE_CHECKING, TypeVar
 
 import httpx
 
+from friday import semantic_supervisor_policy
 from friday.model_input_hygiene import secondary_model_messages_are_secret_free
 
 from .client import SecondaryEndpointClient
 from .contracts import (
     ADVISORY_WORKLOADS,
+    PLAN_CANDIDATE_LOCAL_FAILURES,
     EffectClass,
     ModelModality,
     ModelPriority,
@@ -31,6 +33,7 @@ from .contracts import (
 )
 from .profiles import (
     SecondaryProfileAdmission,
+    SecondaryRuntimeAdmission,
     get_secondary_runtime_admission,
 )
 
@@ -92,15 +95,30 @@ class SecondaryBrainScheduler:
         profile_admission: SecondaryProfileAdmission | None,
         document_map_mode: SecondaryMode = SecondaryMode.DISABLED,
         supervisor_mode: SecondaryMode = SecondaryMode.DISABLED,
+        supervisor_admission: semantic_supervisor_policy.SupervisorPolicyAdmission | None = None,
     ) -> None:
         self.mode = mode
-        self.allowed_workloads = allowed_workloads & ADVISORY_WORKLOADS
         self.allow_private_text = allow_private_text
         self._client = client
         self._unavailable_state = unavailable_state
         self._profile_admission = profile_admission
         self._document_map_mode = document_map_mode
-        self._supervisor_mode = supervisor_mode
+        if supervisor_admission is None:
+            requested_mode = "shadow" if supervisor_mode is SecondaryMode.SHADOW else "off"
+            supervisor_admission = semantic_supervisor_policy.disabled_supervisor_policy_admission(
+                requested_mode=requested_mode
+            )
+        self._supervisor_admission = supervisor_admission
+        supervisor_available = bool(
+            supervisor_admission.workload_available
+            and mode is not SecondaryMode.DISABLED
+            and client is not None
+        )
+        self._supervisor_mode = SecondaryMode.SHADOW if supervisor_available else SecondaryMode.DISABLED
+        generic_workloads = (allowed_workloads & ADVISORY_WORKLOADS) - {ModelWorkload.PLAN_CANDIDATE}
+        self.allowed_workloads = generic_workloads | (
+            frozenset({ModelWorkload.PLAN_CANDIDATE}) if supervisor_available else frozenset()
+        )
         self._local_skipped_total = 0
         self._local_fallback_total = 0
         self._startup_probe_task: asyncio.Task[None] | None = None
@@ -110,6 +128,13 @@ class SecondaryBrainScheduler:
         self._observation_condition = asyncio.Condition()
         self._ordinary_attempts_in_flight = 0
         self._exclusive_observation = False
+        # PLAN_CANDIDATE is lower priority than every pre-existing product
+        # workload.  This gate makes registration/preemption atomic before the
+        # shared single-concurrency endpoint is touched.
+        self._plan_priority_lock = asyncio.Lock()
+        self._plan_candidate_attempts: set[asyncio.Task[SecondaryAttempt]] = set()
+        self._preempted_plan_attempts: set[asyncio.Task[SecondaryAttempt]] = set()
+        self._non_plan_attempts_in_flight = 0
         self._epoch_admitted = False
         self._last_probe_success_monotonic: float | None = None
         self._probe_success_total = 0
@@ -187,21 +212,42 @@ class SecondaryBrainScheduler:
             document_map_mode = SecondaryMode(settings.secondary_llm_document_map_mode)
         except ValueError:
             document_map_mode = SecondaryMode.DISABLED
-        requested_supervisor = (
-            str(getattr(settings, "semantic_supervisor_mode", "off") or "").strip().casefold()
-        )
-        supervisor_mode = (
-            SecondaryMode.SHADOW
-            if requested_supervisor in {"shadow", "assist", "canary"}
-            else SecondaryMode.DISABLED
-        )
+        requested_supervisor = getattr(settings, "semantic_supervisor_mode", "off")
+
+        def supervisor_admission(
+            runtime_state: str,
+            runtime_admission: SecondaryRuntimeAdmission | None,
+        ) -> semantic_supervisor_policy.SupervisorPolicyAdmission:
+            profile = runtime_admission.profile if runtime_admission is not None else None
+            return semantic_supervisor_policy.evaluate_supervisor_policy_admission(
+                requested_mode=requested_supervisor,
+                task_allowlist=getattr(settings, "semantic_supervisor_tasks", ()),
+                max_steps=getattr(settings, "semantic_supervisor_max_steps", 6),
+                max_review_rounds=getattr(
+                    settings,
+                    "semantic_supervisor_max_review_rounds",
+                    1,
+                ),
+                timeout_sec=getattr(settings, "semantic_supervisor_timeout_sec", 12.0),
+                allow_private_text=settings.secondary_llm_allow_private_text,
+                secondary_runtime_state=runtime_state,
+                profile_admission=(runtime_admission.kind.value if runtime_admission is not None else ""),
+                runtime_profile_id=profile.profile_id if profile is not None else "",
+                runtime_profile_manifest_sha256=(profile.manifest_sha256 if profile is not None else ""),
+            )
 
         workloads: set[ModelWorkload] = set()
+        generic_workload_names: list[str] = []
         for raw_workload in settings.secondary_llm_workloads:
+            normalized_workload = raw_workload.strip().casefold()
+            generic_workload_names.append(normalized_workload)
             try:
-                workloads.add(ModelWorkload(raw_workload.strip().casefold()))
+                workload = ModelWorkload(normalized_workload)
             except ValueError:
                 continue
+            if workload is ModelWorkload.PLAN_CANDIDATE:
+                continue
+            workloads.add(workload)
 
         if not settings.secondary_llm_enabled or mode is SecondaryMode.DISABLED:
             return cls(
@@ -212,7 +258,7 @@ class SecondaryBrainScheduler:
                 unavailable_state=SecondaryState.DISABLED,
                 profile_admission=None,
                 document_map_mode=document_map_mode,
-                supervisor_mode=supervisor_mode,
+                supervisor_admission=supervisor_admission("disabled", None),
             )
 
         admission = get_secondary_runtime_admission(
@@ -239,29 +285,60 @@ class SecondaryBrainScheduler:
             profile_manifest_sha256=profile.manifest_sha256 if profile is not None else "",
         )
         effective_workloads = frozenset(workloads) & ADVISORY_WORKLOADS
-        if (
-            not secondary_configuration_is_admissible(
+        # Endpoint/profile admission is independent of ENV workload selection.
+        # Use one runtime-certified neutral workload to validate the unchanged
+        # transport identity without granting it to a semantic-only scheduler.
+        base_workload_name = min(
+            (
+                profile.allowed_workloads
+                - {
+                    ModelWorkload.DOCUMENT_MAP.value,
+                    ModelWorkload.PLAN_CANDIDATE.value,
+                }
+            )
+            if profile is not None
+            else (),
+            default="",
+        )
+        base_configuration_is_admissible = secondary_configuration_is_admissible(
+            endpoint,
+            primary_base_url=settings.llm_base_url,
+            primary_model=settings.llm_model,
+            primary_timeout_sec=settings.llm_timeout_sec,
+            workload_names=(base_workload_name,),
+            mode=mode.value,
+            allow_private_text=settings.secondary_llm_allow_private_text,
+            document_map_mode=SecondaryMode.DISABLED.value,
+        )
+        generic_configuration_is_admissible = bool(
+            effective_workloads
+            and secondary_configuration_is_admissible(
                 endpoint,
                 primary_base_url=settings.llm_base_url,
                 primary_model=settings.llm_model,
                 primary_timeout_sec=settings.llm_timeout_sec,
-                workload_names=settings.secondary_llm_workloads,
+                workload_names=generic_workload_names,
                 mode=mode.value,
                 allow_private_text=settings.secondary_llm_allow_private_text,
                 document_map_mode=document_map_mode.value,
             )
-            or not effective_workloads
-            or admission is None
+        )
+        candidate_supervisor_admission = supervisor_admission("configured", admission)
+        admitted_workloads = effective_workloads if generic_configuration_is_admissible else frozenset()
+        if (
+            admission is None
+            or not base_configuration_is_admissible
+            or not (generic_configuration_is_admissible or candidate_supervisor_admission.workload_available)
         ):
             return cls(
                 mode=mode,
-                allowed_workloads=effective_workloads,
+                allowed_workloads=admitted_workloads,
                 allow_private_text=settings.secondary_llm_allow_private_text,
                 client=None,
                 unavailable_state=SecondaryState.MISCONFIGURED,
                 profile_admission=None,
                 document_map_mode=document_map_mode,
-                supervisor_mode=supervisor_mode,
+                supervisor_admission=supervisor_admission("misconfigured", admission),
             )
         try:
             client = SecondaryEndpointClient(
@@ -274,23 +351,23 @@ class SecondaryBrainScheduler:
             # may never turn into a primary startup failure or retain its raw error.
             return cls(
                 mode=mode,
-                allowed_workloads=effective_workloads,
+                allowed_workloads=admitted_workloads,
                 allow_private_text=settings.secondary_llm_allow_private_text,
                 client=None,
                 unavailable_state=SecondaryState.MISCONFIGURED,
                 profile_admission=None,
                 document_map_mode=document_map_mode,
-                supervisor_mode=supervisor_mode,
+                supervisor_admission=supervisor_admission("misconfigured", admission),
             )
         return cls(
             mode=mode,
-            allowed_workloads=effective_workloads,
+            allowed_workloads=admitted_workloads,
             allow_private_text=settings.secondary_llm_allow_private_text,
             client=client,
             unavailable_state=SecondaryState.PROBING,
             profile_admission=admission.kind,
             document_map_mode=document_map_mode,
-            supervisor_mode=supervisor_mode,
+            supervisor_admission=candidate_supervisor_admission,
         )
 
     async def aclose(self) -> None:
@@ -386,7 +463,10 @@ class SecondaryBrainScheduler:
         try:
             if self._admission_is_fresh():
                 return None, lock_wait_sec
-            failure = await self._client.probe_models(absolute_deadline_monotonic=absolute_deadline_monotonic)
+            failure = await self._client.probe_models(
+                absolute_deadline_monotonic=absolute_deadline_monotonic,
+                cancellation_is_local=workload is ModelWorkload.PLAN_CANDIDATE,
+            )
             if failure is not None:
                 self._epoch_admitted = False
                 self._probe_failure_total += 1
@@ -413,7 +493,10 @@ class SecondaryBrainScheduler:
                 max_output_tokens=min(256, self._client.config.max_output_tokens),
                 absolute_deadline_monotonic=absolute_deadline_monotonic,
             )
-            attempt = await self._client.call(canary)
+            attempt = await self._client.call(
+                canary,
+                cancellation_is_local=workload is ModelWorkload.PLAN_CANDIDATE,
+            )
             if attempt.result is None:
                 self._probe_failure_total += 1
                 failure = attempt.failure or SecondaryFailure.MALFORMED_RESPONSE
@@ -465,6 +548,28 @@ class SecondaryBrainScheduler:
             served_model_match=False,
         )
 
+    def _supervisor_status(self, status: SecondaryStatus) -> dict[str, object]:
+        workload_available = bool(
+            self._supervisor_admission.workload_available
+            and ModelWorkload.PLAN_CANDIDATE in self.allowed_workloads
+            and self.workload_mode(ModelWorkload.PLAN_CANDIDATE) is SecondaryMode.SHADOW
+        )
+        closed_reason = self._supervisor_admission.closed_reason
+        if self._supervisor_admission.workload_available and not workload_available:
+            closed_reason = semantic_supervisor_policy.SupervisorPolicyClosedReason.SECONDARY_MISCONFIGURED
+        return {
+            "workload": ModelWorkload.PLAN_CANDIDATE.value,
+            "requested_mode": self._supervisor_admission.requested_mode,
+            "effective_mode": self._supervisor_admission.effective_mode,
+            "policy_id": self._supervisor_admission.policy_id,
+            "policy_sha256": self._supervisor_admission.policy_sha256,
+            "workload_available": workload_available,
+            "runtime_available": bool(
+                workload_available and status.state is SecondaryState.HEALTHY and self._admission_is_fresh()
+            ),
+            "closed_reason": closed_reason.value,
+        }
+
     def public_status(self) -> dict[str, object]:
         """Return the compact projection safe for the public health route."""
 
@@ -477,20 +582,23 @@ class SecondaryBrainScheduler:
             "mode": self.mode.value,
             "state": status.state.value,
             "available": status.state is SecondaryState.HEALTHY and self._admission_is_fresh(),
+            "semantic_supervisor": self._supervisor_status(status),
         }
 
     def diagnostics_status(self) -> dict[str, object]:
         """Return bounded owner diagnostics without endpoint or content data."""
 
         status = self.status()
+        supervisor_status = self._supervisor_status(status)
         return {
             **self.public_status(),
             "last_failure": status.last_failure.value if status.last_failure is not None else None,
             "active_requests": status.active_requests,
             "selected_total": sum(self._selected_by_workload.values()),
             "success_total": sum(self._success_by_workload.values()),
-            "endpoint_request_total": status.selected_total,
-            "endpoint_success_total": status.success_total,
+            "endpoint_admission_total": status.selected_total,
+            "endpoint_request_total": status.endpoint_request_total,
+            "endpoint_success_total": status.endpoint_success_total,
             "skipped_total": status.skipped_total,
             "primary_fallback_total": status.fallback_total,
             "context_cap_tokens": status.context_cap_tokens,
@@ -528,6 +636,14 @@ class SecondaryBrainScheduler:
             "workloads": {
                 workload.value: {
                     "routing_mode": self.workload_mode(workload).value,
+                    **(
+                        {
+                            "available": supervisor_status["workload_available"],
+                            "closed_reason": supervisor_status["closed_reason"],
+                        }
+                        if workload is ModelWorkload.PLAN_CANDIDATE
+                        else {}
+                    ),
                     "selected_total": self._selected_by_workload[workload],
                     "success_total": self._success_by_workload[workload],
                     "latency_count": self._success_by_workload[workload],
@@ -547,7 +663,10 @@ class SecondaryBrainScheduler:
                         if self._fallback_by_workload_reason[(workload, reason)]
                     },
                 }
-                for workload in sorted(self.allowed_workloads, key=lambda value: value.value)
+                for workload in sorted(
+                    self.allowed_workloads | {ModelWorkload.PLAN_CANDIDATE},
+                    key=lambda value: value.value,
+                )
             },
             "skip_reasons": {
                 reason.value: count for reason, count in self._skipped_by_reason.items() if count
@@ -633,8 +752,113 @@ class SecondaryBrainScheduler:
             return protocol_failure
         return None
 
-    async def attempt(self, request: ModelRequest, *, shadow: bool = False) -> SecondaryAttempt:
-        """Run an attempt while respecting the causal-observation barrier."""
+    async def attempt(
+        self,
+        request: ModelRequest,
+        *,
+        shadow: bool = False,
+        pre_dispatch_validator: Callable[[], bool] | None = None,
+        dispatch_observer: Callable[[], None] | None = None,
+    ) -> SecondaryAttempt:
+        """Run one attempt; semantic plans yield to every existing workload."""
+
+        if request.workload is ModelWorkload.PLAN_CANDIDATE:
+            if dispatch_observer is None:
+                return await self._attempt_lowest_priority_plan(
+                    request,
+                    shadow=shadow,
+                    pre_dispatch_validator=pre_dispatch_validator,
+                )
+            return await self._attempt_lowest_priority_plan(
+                request,
+                shadow=shadow,
+                pre_dispatch_validator=pre_dispatch_validator,
+                dispatch_observer=dispatch_observer,
+            )
+        if pre_dispatch_validator is not None:
+            self._record_skip(request.workload, SecondaryFailure.WORKLOAD_DISALLOWED, local=True)
+            return SecondaryAttempt.rejected(SecondaryFailure.WORKLOAD_DISALLOWED)
+        return await self._attempt_preempting_plans(request, shadow=shadow)
+
+    async def _attempt_lowest_priority_plan(
+        self,
+        request: ModelRequest,
+        *,
+        shadow: bool,
+        pre_dispatch_validator: Callable[[], bool] | None,
+        dispatch_observer: Callable[[], None] | None = None,
+    ) -> SecondaryAttempt:
+        outer = asyncio.current_task()
+        if outer is None:
+            self._record_skip(request.workload, SecondaryFailure.ADMISSION_BUSY, local=True)
+            return SecondaryAttempt.rejected(SecondaryFailure.ADMISSION_BUSY)
+        async with self._plan_priority_lock:
+            if self._non_plan_attempts_in_flight:
+                self._record_skip(request.workload, SecondaryFailure.ADMISSION_BUSY, local=True)
+                return SecondaryAttempt.rejected(SecondaryFailure.ADMISSION_BUSY)
+            if dispatch_observer is None:
+                observed = self._attempt_observed(
+                    request,
+                    shadow=shadow,
+                    pre_dispatch_validator=pre_dispatch_validator,
+                )
+            else:
+                observed = self._attempt_observed(
+                    request,
+                    shadow=shadow,
+                    pre_dispatch_validator=pre_dispatch_validator,
+                    dispatch_observer=dispatch_observer,
+                )
+            runner = asyncio.create_task(observed)
+            self._plan_candidate_attempts.add(runner)
+        try:
+            return await runner
+        except asyncio.CancelledError:
+            if outer.cancelling():
+                await asyncio.gather(runner, return_exceptions=True)
+                raise
+            self._record_skip(request.workload, SecondaryFailure.CANCELLED, local=True)
+            return SecondaryAttempt.rejected(SecondaryFailure.CANCELLED)
+        finally:
+            # These bookkeeping mutations contain no suspension point and are
+            # atomic on this scheduler's event loop.  Keeping cleanup synchronous
+            # prevents repeated cancellation from stranding a priority marker.
+            self._plan_candidate_attempts.discard(runner)
+            self._preempted_plan_attempts.discard(runner)
+
+    async def _attempt_preempting_plans(
+        self,
+        request: ModelRequest,
+        *,
+        shadow: bool,
+    ) -> SecondaryAttempt:
+        async with self._plan_priority_lock:
+            self._non_plan_attempts_in_flight += 1
+            displaced = tuple(self._plan_candidate_attempts)
+            newly_displaced = tuple(task for task in displaced if task not in self._preempted_plan_attempts)
+            self._preempted_plan_attempts.update(newly_displaced)
+            for task in newly_displaced:
+                task.cancel()
+        try:
+            if displaced:
+                await asyncio.gather(*displaced, return_exceptions=True)
+            return await self._attempt_observed(
+                request,
+                shadow=shadow,
+                pre_dispatch_validator=None,
+            )
+        finally:
+            self._non_plan_attempts_in_flight -= 1
+
+    async def _attempt_observed(
+        self,
+        request: ModelRequest,
+        *,
+        shadow: bool,
+        pre_dispatch_validator: Callable[[], bool] | None,
+        dispatch_observer: Callable[[], None] | None = None,
+    ) -> SecondaryAttempt:
+        """Respect the causal-observation barrier after priority admission."""
 
         async with self._observation_condition:
             if self._exclusive_observation:
@@ -645,7 +869,18 @@ class SecondaryBrainScheduler:
                 return SecondaryAttempt.rejected(SecondaryFailure.ADMISSION_BUSY)
             self._ordinary_attempts_in_flight += 1
         try:
-            return await self._attempt_unobserved(request, shadow=shadow)
+            if dispatch_observer is None:
+                return await self._attempt_unobserved(
+                    request,
+                    shadow=shadow,
+                    pre_dispatch_validator=pre_dispatch_validator,
+                )
+            return await self._attempt_unobserved(
+                request,
+                shadow=shadow,
+                pre_dispatch_validator=pre_dispatch_validator,
+                dispatch_observer=dispatch_observer,
+            )
         finally:
             async with self._observation_condition:
                 self._ordinary_attempts_in_flight -= 1
@@ -656,6 +891,8 @@ class SecondaryBrainScheduler:
         request: ModelRequest,
         *,
         shadow: bool = False,
+        pre_dispatch_validator: Callable[[], bool] | None = None,
+        dispatch_observer: Callable[[], None] | None = None,
     ) -> SecondaryAttempt:
         failure = self._eligibility_failure(request, shadow=shadow)
         if failure is not None:
@@ -673,7 +910,19 @@ class SecondaryBrainScheduler:
         self._selected_by_workload[request.workload] += 1
         self._record_queue_wait(request.workload, probe_queue_wait_sec)
         try:
-            attempt = await self._client.call(request)
+            if pre_dispatch_validator is None and dispatch_observer is None:
+                attempt = await self._client.call(request)
+            elif dispatch_observer is None:
+                attempt = await self._client.call(
+                    request,
+                    pre_dispatch_validator=pre_dispatch_validator,
+                )
+            else:
+                attempt = await self._client.call(
+                    request,
+                    pre_dispatch_validator=pre_dispatch_validator,
+                    dispatch_observer=dispatch_observer,
+                )
         except Exception:
             # The secondary is never an availability dependency.  Cancellation
             # still propagates because asyncio.CancelledError is a BaseException.
@@ -692,7 +941,10 @@ class SecondaryBrainScheduler:
             return attempt
         attempt_failure = attempt.failure or SecondaryFailure.MALFORMED_RESPONSE
         self._record_skip(request.workload, attempt_failure)
-        if attempt_failure in _READMISSION_FAILURES:
+        if attempt_failure in _READMISSION_FAILURES and not (
+            request.workload is ModelWorkload.PLAN_CANDIDATE
+            and attempt_failure in PLAN_CANDIDATE_LOCAL_FAILURES
+        ):
             self._epoch_admitted = False
         return attempt
 
@@ -838,6 +1090,61 @@ class SecondaryBrainScheduler:
         self._record_success(request, attempt.result)
         return attempt.result
 
+    async def evaluate_shadow(
+        self,
+        request: ModelRequest,
+        *,
+        validator: Callable[[SecondaryResult], bool] | None = None,
+        invalidate_on_rejection: bool = True,
+        pre_dispatch_validator: Callable[[], bool] | None = None,
+        dispatch_observer: Callable[[], None] | None = None,
+    ) -> SecondaryAttempt:
+        """Evaluate and account for exactly one discarded advisory attempt."""
+
+        try:
+            if pre_dispatch_validator is None and dispatch_observer is None:
+                attempt = await self.attempt(request, shadow=True)
+            elif pre_dispatch_validator is None:
+                attempt = await self.attempt(
+                    request,
+                    shadow=True,
+                    dispatch_observer=dispatch_observer,
+                )
+            else:
+                attempt = await self.attempt(
+                    request,
+                    shadow=True,
+                    pre_dispatch_validator=pre_dispatch_validator,
+                    dispatch_observer=dispatch_observer,
+                )
+            if attempt.result is None:
+                self._shadow_skipped_total += 1
+                return attempt
+            if self._validated(attempt.result, validator):
+                self._record_success(request, attempt.result)
+                self._shadow_valid_total += 1
+                return attempt
+            if invalidate_on_rejection:
+                await self._reject_valid_result(request)
+            else:
+                # A schema-valid transport response that fails an advisory
+                # product policy is model-quality evidence, not an endpoint or
+                # shared-runtime failure.  Keep other accepted workloads out of
+                # the semantic supervisor's quality circuit.
+                self._record_skip(request.workload, SecondaryFailure.MALFORMED_RESPONSE)
+            self._shadow_invalid_total += 1
+            return SecondaryAttempt.rejected(
+                SecondaryFailure.MALFORMED_RESPONSE,
+                queue_wait_sec=attempt.queue_wait_sec,
+            )
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            # Runtime wrappers need a closed result even if an optional adapter,
+            # validator or invalidation hook fails unexpectedly.
+            self._shadow_invalid_total += 1
+            return SecondaryAttempt.rejected(SecondaryFailure.MALFORMED_RESPONSE)
+
     async def run_shadow(
         self,
         request_factory: Callable[[], ModelRequest],
@@ -932,11 +1239,21 @@ class SecondaryBrainScheduler:
         observation_owner: bool = False,
     ) -> None:
         try:
-            attempt = await (
-                self._attempt_unobserved(request, shadow=True)
-                if observation_owner
-                else self.attempt(request, shadow=True)
-            )
+            if not observation_owner:
+                attempt = await self.evaluate_shadow(request, validator=validator)
+                if attempt.result is not None and valid_result_observer is not None:
+                    try:
+                        await valid_result_observer(request, attempt.result)
+                    except asyncio.CancelledError:
+                        raise
+                    except Exception:
+                        # Evidence is optional to product traffic. A private
+                        # receipt write must never alter the already-returned
+                        # primary result or poison the secondary circuit.
+                        pass
+                return
+
+            attempt = await self._attempt_unobserved(request, shadow=True)
             if attempt.result is None:
                 self._shadow_skipped_total += 1
             elif self._validated(attempt.result, validator):
@@ -948,12 +1265,7 @@ class SecondaryBrainScheduler:
                     except asyncio.CancelledError:
                         raise
                     except Exception:
-                        if observation_owner:
-                            raise
-                        # Evidence is optional to product traffic. A private
-                        # receipt write must never alter the already-returned
-                        # primary result or poison the secondary circuit.
-                        pass
+                        raise
             else:
                 await self._reject_valid_result(request)
                 self._shadow_invalid_total += 1

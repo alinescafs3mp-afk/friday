@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import ipaddress
+import json
 import math
 import os
 import re
@@ -23,6 +24,32 @@ JsonValue: TypeAlias = JsonScalar | list["JsonValue"] | dict[str, "JsonValue"]
 # useful request instead of learning that a 4K profile cannot fit only after
 # admission.
 SECONDARY_CONTEXT_TOKEN_RESERVE = 256
+
+
+def _reject_json_constant(value: str) -> None:
+    raise ValueError(f"non-finite JSON number is forbidden: {value}")
+
+
+def _reject_duplicate_json_keys(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+    result: dict[str, Any] = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError("duplicate JSON key is forbidden")
+        result[key] = value
+    return result
+
+
+def _decode_strict_json(value: bytes | str) -> Any:
+    """Decode exact UTF-8 JSON without duplicate-key or non-finite ambiguity."""
+
+    text = value.decode("utf-8", errors="strict") if isinstance(value, bytes) else value
+    if type(text) is not str:
+        raise TypeError("JSON carrier must be bytes or text")
+    return json.loads(
+        text,
+        object_pairs_hook=_reject_duplicate_json_keys,
+        parse_constant=_reject_json_constant,
+    )
 
 
 class SecondaryMode(StrEnum):
@@ -112,6 +139,22 @@ class SecondaryFailure(StrEnum):
     REASONING_LEAK = "reasoning_leak"
     DEGENERATION = "degeneration"
     CANCELLED = "cancelled"
+
+
+# These outcomes describe one discarded semantic product body, not the health
+# or identity of the accepted shared endpoint.  They therefore stay local to a
+# PLAN_CANDIDATE attempt and must never put unrelated accepted workloads into
+# cooldown.  Cancellation is included because foreground work may preempt the
+# lowest-priority semantic shadow.
+PLAN_CANDIDATE_LOCAL_FAILURES = frozenset(
+    {
+        SecondaryFailure.MALFORMED_RESPONSE,
+        SecondaryFailure.TOOL_CALL_REJECTED,
+        SecondaryFailure.REASONING_LEAK,
+        SecondaryFailure.DEGENERATION,
+        SecondaryFailure.CANCELLED,
+    }
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -461,3 +504,5 @@ class SecondaryStatus:
     queue_wait_sum_sec: float = 0.0
     queue_wait_max_sec: float = 0.0
     protocol_rejection_total: int = 0
+    endpoint_request_total: int = 0
+    endpoint_success_total: int = 0
