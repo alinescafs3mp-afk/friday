@@ -6857,6 +6857,58 @@ _UNIT_INSTALL_PHASES = (
     "complete",
 )
 
+_RUNTIME_UNIT_NAMES = ("friday-backend.service", "friday-bridge.service")
+_UNIT_DROPIN_NAMES: Mapping[str, tuple[str, ...]] = {
+    "friday-backend.service": ("database.conf", "security.conf"),
+    "friday-bridge.service": ("database.conf", "dependency.conf", "security.conf"),
+}
+_UNIT_SURFACE_KEYS = (
+    "friday-backend.service",
+    "friday-backend.service.d/database.conf",
+    "friday-backend.service.d/security.conf",
+    "friday-bridge.service",
+    "friday-bridge.service.d/database.conf",
+    "friday-bridge.service.d/dependency.conf",
+    "friday-bridge.service.d/security.conf",
+)
+_LEGACY_PRIVATE_TMP_SECURITY = b"[Service]\nLimitCORE=0\nPrivateTmp=true\n"
+_RECOVERY_PRIVATE_TMP_SECURITY = b"[Service]\nLimitCORE=0\nPrivateTmp=false\n"
+
+
+def _unit_runtime_directory_name(unit: str) -> str:
+    names = {
+        "friday-backend.service": "friday-backend-tmp",
+        "friday-bridge.service": "friday-bridge-tmp",
+    }
+    try:
+        return names[unit]
+    except KeyError as exc:
+        raise ReleaseFailure("noncanonical_unit_name") from exc
+
+
+def _unit_runtime_tmp_directory(unit: str) -> Path:
+    return Path("/run/user") / str(os.geteuid()) / _unit_runtime_directory_name(unit)
+
+
+def _unit_security_dropin(unit: str) -> bytes:
+    runtime_name = _unit_runtime_directory_name(unit)
+    return (
+        "[Service]\n"
+        "LimitCORE=0\n"
+        "PrivateTmp=false\n"
+        "PrivateUsers=false\n"
+        f"RuntimeDirectory={runtime_name}\n"
+        "RuntimeDirectoryMode=0700\n"
+        "RuntimeDirectoryPreserve=no\n"
+        f"Environment=TMPDIR={_unit_runtime_tmp_directory(unit)}\n"
+    ).encode()
+
+
+def _unit_surface_path(unit_dir: Path, key: str) -> Path:
+    if key not in _UNIT_SURFACE_KEYS:
+        raise ReleaseFailure("unit_surface_key_invalid")
+    return unit_dir / Path(key)
+
 
 class DurableUnitInstallJournal:
     """Crash boundary for the only non-atomic part of first unit installation."""
@@ -6916,15 +6968,23 @@ class DurableUnitInstallJournal:
                 payload.get(key),
                 code="unit_install_journal_invalid",
             )
-        for key in ("candidate_unit_hashes", "transition_unit_hashes"):
-            hashes = payload.get(key)
-            if not isinstance(hashes, dict) or set(hashes) != {
-                "friday-backend.service",
-                "friday-bridge.service",
-            }:
-                raise ReleaseFailure("unit_install_journal_invalid")
+        candidate_hashes = payload.get("candidate_unit_hashes")
+        transition_hashes = payload.get("transition_unit_hashes")
+        if not isinstance(candidate_hashes, dict) or frozenset(candidate_hashes) not in {
+            frozenset(_RUNTIME_UNIT_NAMES),
+            frozenset(_UNIT_SURFACE_KEYS),
+        }:
+            raise ReleaseFailure("unit_install_journal_invalid")
+        if not isinstance(transition_hashes, dict) or set(transition_hashes) != set(_RUNTIME_UNIT_NAMES):
+            raise ReleaseFailure("unit_install_journal_invalid")
+        for hashes in (candidate_hashes, transition_hashes):
             for digest in hashes.values():
                 _closed_hash(str(digest or ""), "unit_install_journal_invalid")
+        if phase != "complete" and set(candidate_hashes) == set(_RUNTIME_UNIT_NAMES):
+            # Legacy two-file transactions may only be read at their durable
+            # terminal boundary.  An unfinished one must be resumed by the
+            # exact older sealed operator which created it.
+            raise ReleaseFailure("unit_install_journal_legacy_unfinished")
         if phase == "complete":
             candidate = payload["candidate"]
             previous = payload["previous"]
@@ -6965,6 +7025,10 @@ class DurableUnitInstallJournal:
                 return current
             if current["phase"] != "complete":
                 raise ReleaseFailure("unfinished_unit_install_identity_changed")
+            if current["candidate"] == identity["candidate"] and set(current["candidate_unit_hashes"]) == set(
+                _UNIT_SURFACE_KEYS
+            ):
+                raise ReleaseFailure("completed_unit_install_identity_changed")
         core = {
             "schema": UNIT_INSTALL_JOURNAL_SCHEMA,
             "transaction_id": os.urandom(32).hex(),
@@ -7061,6 +7125,189 @@ def _systemd_exec_argv(value: bytes, *, code: str) -> tuple[str, ...] | None:
     return argv
 
 
+def _systemd_environment(value: bytes, *, code: str) -> dict[str, str]:
+    if len(value) > 65_536:
+        raise ReleaseFailure(code)
+    try:
+        tokens = shlex.split(value.decode("utf-8"))
+    except (UnicodeError, ValueError) as exc:
+        raise ReleaseFailure(code) from exc
+    environment: dict[str, str] = {}
+    for token in tokens:
+        key, separator, item = token.partition("=")
+        if not separator or key in environment:
+            raise ReleaseFailure(code)
+        environment[key] = item
+    return environment
+
+
+def _read_owned_unit_surface_file(path: Path, *, code: str) -> bytes:
+    resolved = _regular_file(path, maximum_bytes=1 << 20, code=code)
+    status = os.stat(resolved, follow_symlinks=False)
+    if status.st_uid != os.geteuid() or status.st_nlink != 1 or stat.S_IMODE(status.st_mode) & 0o022:
+        raise ReleaseFailure(code)
+    return resolved.read_bytes()
+
+
+def _database_dropin_path(content: bytes) -> Path:
+    try:
+        text = content.decode("utf-8")
+    except UnicodeError as exc:
+        raise ReleaseFailure("installed_database_dropin_invalid") from exc
+    lines = text.splitlines()
+    path_prefix = "Environment=FRIDAY_DATABASE_PATH="
+    if len(lines) != 4 or lines[0] != "[Service]" or not lines[1].startswith(path_prefix):
+        raise ReleaseFailure("installed_database_dropin_invalid")
+    raw_path = lines[1].removeprefix(path_prefix)
+    database = Path(raw_path)
+    if (
+        not raw_path
+        or not database.is_absolute()
+        or any(character in raw_path for character in "\x00\r\n")
+        or lines[2] != "Environment=FRIDAY_DATABASE_MUST_EXIST=1"
+        or lines[3] != f"ExecStartPre=/usr/bin/test -s {database}"
+        or not text.endswith("\n")
+    ):
+        raise ReleaseFailure("installed_database_dropin_invalid")
+    return database
+
+
+def _candidate_unit_surface(
+    directory: Path,
+    main_content: Mapping[str, bytes],
+) -> tuple[dict[str, bytes], dict[str, bytes]]:
+    """Return exact target bytes and the safely admitted predecessor surface."""
+
+    current: dict[str, bytes] = {}
+    for unit in _RUNTIME_UNIT_NAMES:
+        dropin_directory = _owned_directory(directory / f"{unit}.d")
+        expected_paths = {dropin_directory / name for name in _UNIT_DROPIN_NAMES[unit]}
+        if set(dropin_directory.iterdir()) != expected_paths:
+            raise ReleaseFailure("installed_unit_dropin_set_invalid")
+        for path in expected_paths:
+            key = path.relative_to(directory).as_posix()
+            current[key] = _read_owned_unit_surface_file(
+                path,
+                code="installed_unit_dropin_invalid",
+            )
+
+    backend_database = current["friday-backend.service.d/database.conf"]
+    bridge_database = current["friday-bridge.service.d/database.conf"]
+    if _database_dropin_path(backend_database) != _database_dropin_path(bridge_database):
+        raise ReleaseFailure("installed_database_dropins_not_identical")
+    if backend_database != bridge_database:
+        raise ReleaseFailure("installed_database_dropins_not_identical")
+    expected_dependency = b"[Unit]\nWants=friday-backend.service\nAfter=friday-backend.service\n"
+    if current["friday-bridge.service.d/dependency.conf"] != expected_dependency:
+        raise ReleaseFailure("installed_dependency_dropin_invalid")
+
+    target: dict[str, bytes] = {}
+    for unit in _RUNTIME_UNIT_NAMES:
+        target[unit] = main_content[unit]
+        database_key = f"{unit}.d/database.conf"
+        target[database_key] = current[database_key]
+        if unit == "friday-bridge.service":
+            target[f"{unit}.d/dependency.conf"] = expected_dependency
+        security_key = f"{unit}.d/security.conf"
+        security = current[security_key]
+        if security not in {
+            _LEGACY_PRIVATE_TMP_SECURITY,
+            _RECOVERY_PRIVATE_TMP_SECURITY,
+            _unit_security_dropin(unit),
+        }:
+            raise ReleaseFailure("installed_security_dropin_invalid")
+        target[security_key] = _unit_security_dropin(unit)
+    if tuple(target) != _UNIT_SURFACE_KEYS:
+        raise ReleaseFailure("unit_surface_identity_invalid")
+    return target, current
+
+
+def _verify_converged_unit_surface(directory: Path, expected: Mapping[str, bytes]) -> None:
+    if tuple(expected) != _UNIT_SURFACE_KEYS:
+        raise ReleaseFailure("unit_surface_identity_invalid")
+    for key, content in expected.items():
+        path = _unit_surface_path(directory, key)
+        _verify_owned_static_file(path, content, code="installed_unit_surface_drift")
+        if stat.S_IMODE(os.stat(path, follow_symlinks=False).st_mode) != 0o600:
+            raise ReleaseFailure("installed_unit_surface_mode_invalid")
+
+
+def _unit_surface_environment(directory: Path, unit: str) -> dict[str, str]:
+    paths = [directory / unit]
+    paths.extend(directory / f"{unit}.d" / name for name in _UNIT_DROPIN_NAMES[unit])
+    environment: dict[str, str] = {}
+    try:
+        for path in paths:
+            content = _read_owned_unit_surface_file(path, code="installed_unit_surface_drift")
+            for line in content.decode("utf-8").splitlines():
+                if not line.startswith("Environment="):
+                    continue
+                assignments = shlex.split(line.removeprefix("Environment="))
+                if not assignments:
+                    raise ReleaseFailure("installed_unit_environment_invalid")
+                for assignment in assignments:
+                    key, separator, value = assignment.partition("=")
+                    if not separator or key in environment:
+                        raise ReleaseFailure("installed_unit_environment_invalid")
+                    environment[key] = value
+    except (UnicodeError, ValueError) as exc:
+        raise ReleaseFailure("installed_unit_environment_invalid") from exc
+    if environment.get("TMPDIR") != str(_unit_runtime_tmp_directory(unit)):
+        raise ReleaseFailure("installed_unit_environment_invalid")
+    return environment
+
+
+def _verify_manager_unit_surface(
+    directory: Path,
+    unit: str,
+    expected_argv: Sequence[str],
+) -> None:
+    manager_argv = _systemd_exec_argv(
+        _run_systemctl("show", unit, "--property=ExecStart", "--value").stdout,
+        code="systemd_manager_execstart_invalid",
+    )
+    if manager_argv != tuple(expected_argv):
+        raise ReleaseFailure("systemd_manager_execstart_invalid")
+    fragment = _run_systemctl("show", unit, "--property=FragmentPath", "--value").stdout
+    try:
+        fragment_path = Path(fragment.decode("utf-8").strip())
+    except UnicodeError as exc:
+        raise ReleaseFailure("systemd_manager_fragment_invalid") from exc
+    if fragment_path != directory / unit:
+        raise ReleaseFailure("systemd_manager_fragment_invalid")
+    dropins = _run_systemctl("show", unit, "--property=DropInPaths", "--value").stdout
+    try:
+        manager_dropins = tuple(Path(item) for item in shlex.split(dropins.decode("utf-8")))
+    except (UnicodeError, ValueError) as exc:
+        raise ReleaseFailure("systemd_manager_dropins_invalid") from exc
+    expected_dropins = tuple(directory / f"{unit}.d" / name for name in _UNIT_DROPIN_NAMES[unit])
+    if manager_dropins != expected_dropins:
+        raise ReleaseFailure("systemd_manager_dropins_invalid")
+    environment = _systemd_environment(
+        _run_systemctl("show", unit, "--property=Environment", "--value").stdout,
+        code="systemd_manager_environment_invalid",
+    )
+    if environment != _unit_surface_environment(directory, unit):
+        raise ReleaseFailure("systemd_manager_environment_invalid")
+    exact_properties = {
+        "LimitCORE": b"0",
+        "PrivateTmp": b"no",
+        "PrivateUsers": b"no",
+        "RuntimeDirectory": _unit_runtime_directory_name(unit).encode(),
+        "RuntimeDirectoryMode": b"0700",
+        "RuntimeDirectoryPreserve": b"no",
+    }
+    for property_name, expected_value in exact_properties.items():
+        actual_value = _run_systemctl(
+            "show",
+            unit,
+            f"--property={property_name}",
+            "--value",
+        ).stdout.strip()
+        if actual_value != expected_value:
+            raise ReleaseFailure("systemd_manager_property_invalid")
+
+
 def _run_systemctl(*arguments: str, check: bool = True) -> subprocess.CompletedProcess[bytes]:
     result = subprocess.run(  # noqa: S603
         ["/usr/bin/systemctl", "--user", *arguments],
@@ -7115,7 +7362,7 @@ def install_units(
     transition_unit_hashes: Mapping[str, str],
     journal: DurableUnitInstallJournal,
 ) -> dict[str, str]:
-    """Converge both units without ever exposing two effective runtime roots."""
+    """Converge the complete unit surface without mixed runtime roots."""
 
     _require_venv_relocation_contract(
         candidate,
@@ -7123,23 +7370,23 @@ def install_units(
     )
     directory = _owned_directory(unit_dir)
     transition_root = _owned_directory(transition_runtime_root)
-    names = ("friday-backend.service", "friday-bridge.service")
-    if set(transition_unit_hashes) != set(names):
+    if set(transition_unit_hashes) != set(_RUNTIME_UNIT_NAMES):
         raise ReleaseFailure("transition_unit_hashes_invalid")
-    expected_content: dict[str, bytes] = {}
+    main_content: dict[str, bytes] = {}
     expected_argv: dict[str, tuple[str, ...]] = {}
-    candidate_hashes: dict[str, str] = {}
-    for name in names:
+    for name in _RUNTIME_UNIT_NAMES:
         source = _regular_file(
             candidate.root / "artifacts" / name,
             maximum_bytes=1 << 20,
             code="release_unit_invalid",
         )
         content = source.read_bytes()
-        expected_content[name] = content
+        main_content[name] = content
         expected_argv[name] = _unit_exec_argv(content, code="release_unit_exec_invalid")
-        candidate_hashes[name] = _sha256_bytes(content)
         _closed_hash(str(transition_unit_hashes[name]), "transition_unit_hash_invalid")
+    expected_content, predecessor_dropins = _candidate_unit_surface(directory, main_content)
+    candidate_hashes = {key: _sha256_bytes(content) for key, content in expected_content.items()}
+    for name in _RUNTIME_UNIT_NAMES:
         enabled = _run_systemctl("is-enabled", name, check=False)
         if enabled.returncode != 0 or enabled.stdout.strip() != b"enabled":
             raise ReleaseFailure("systemd_unit_not_enabled")
@@ -7153,22 +7400,16 @@ def install_units(
     phase = str(state["phase"])
     if phase == "complete":
         _run_systemctl("daemon-reload")
-        for name in names:
-            if _sha256_file(directory / name) != candidate_hashes[name]:
-                raise ReleaseFailure("completed_unit_install_drift")
-            manager_argv = _systemd_exec_argv(
-                _run_systemctl("show", name, "--property=ExecStart", "--value").stdout,
-                code="systemd_manager_execstart_invalid",
-            )
-            if manager_argv != expected_argv[name]:
-                raise ReleaseFailure("systemd_manager_execstart_invalid")
+        _verify_converged_unit_surface(directory, expected_content)
+        for name in _RUNTIME_UNIT_NAMES:
+            _verify_manager_unit_surface(directory, name, expected_argv[name])
         if not anchor.is_symlink() or anchor.resolve(strict=True) != previous.root.resolve(strict=True):
             raise ReleaseFailure("completed_unit_anchor_drift")
         return candidate_hashes
 
     before_manager_reload = _UNIT_INSTALL_PHASES.index(phase) < _UNIT_INSTALL_PHASES.index("manager_reloaded")
     if before_manager_reload:
-        for name in names:
+        for name in _RUNTIME_UNIT_NAMES:
             installed = _regular_file(
                 directory / name,
                 maximum_bytes=1 << 20,
@@ -7177,11 +7418,26 @@ def install_units(
             digest = _sha256_file(installed)
             if digest not in {str(transition_unit_hashes[name]), candidate_hashes[name]}:
                 raise ReleaseFailure("installed_transition_unit_digest_mismatch")
+        for key, predecessor_content in predecessor_dropins.items():
+            installed_content = _read_owned_unit_surface_file(
+                _unit_surface_path(directory, key),
+                code="installed_transition_dropin_invalid",
+            )
+            if key.endswith("/security.conf"):
+                unit = key.partition(".d/")[0]
+                if installed_content not in {
+                    _LEGACY_PRIVATE_TMP_SECURITY,
+                    _RECOVERY_PRIVATE_TMP_SECURITY,
+                    _unit_security_dropin(unit),
+                }:
+                    raise ReleaseFailure("installed_transition_security_invalid")
+            elif installed_content != predecessor_content or installed_content != expected_content[key]:
+                raise ReleaseFailure("installed_transition_dropin_digest_mismatch")
         _atomic_anchor_root(anchor, transition_root)
         if phase == "prepared":
             journal.record("transition_anchor_active")
             phase = "transition_anchor_active"
-        for name in names:
+        for name in _RUNTIME_UNIT_NAMES:
             current = (directory / name).read_bytes()
             argv = _unit_exec_argv(current, code="installed_transition_unit_exec_invalid")
             if not _unit_effective_root_is(
@@ -7202,30 +7458,20 @@ def install_units(
                 transition_root=transition_root,
             ):
                 raise ReleaseFailure("systemd_transition_would_mix_runtime_roots")
-        for name in names:
-            _replace_unit_file(directory / name, expected_content[name])
+        for key, content in expected_content.items():
+            _replace_unit_file(_unit_surface_path(directory, key), content)
+        _verify_converged_unit_surface(directory, expected_content)
         if phase == "transition_anchor_active":
             journal.record("units_converged")
         _run_systemctl("daemon-reload")
-        for name in names:
-            manager_argv = _systemd_exec_argv(
-                _run_systemctl("show", name, "--property=ExecStart", "--value").stdout,
-                code="systemd_manager_execstart_invalid",
-            )
-            if manager_argv != expected_argv[name]:
-                raise ReleaseFailure("systemd_manager_execstart_invalid")
+        for name in _RUNTIME_UNIT_NAMES:
+            _verify_manager_unit_surface(directory, name, expected_argv[name])
         journal.record("manager_reloaded")
         phase = "manager_reloaded"
 
-    for name in names:
-        if _sha256_file(directory / name) != candidate_hashes[name]:
-            raise ReleaseFailure("installed_unit_drift")
-        manager_argv = _systemd_exec_argv(
-            _run_systemctl("show", name, "--property=ExecStart", "--value").stdout,
-            code="systemd_manager_execstart_invalid",
-        )
-        if manager_argv != expected_argv[name]:
-            raise ReleaseFailure("systemd_manager_execstart_invalid")
+    _verify_converged_unit_surface(directory, expected_content)
+    for name in _RUNTIME_UNIT_NAMES:
+        _verify_manager_unit_surface(directory, name, expected_argv[name])
     _atomic_anchor(anchor, previous)
     if phase == "manager_reloaded":
         journal.record("previous_anchor_active")
@@ -7246,7 +7492,7 @@ def _expected_unit_dropins(config: SystemdConfig, unit: str) -> tuple[tuple[Path
         "Environment=FRIDAY_DATABASE_MUST_EXIST=1\n"
         f"ExecStartPre=/usr/bin/test -s {config.database}\n"
     ).encode()
-    security = b"[Service]\nLimitCORE=0\nPrivateTmp=true\n"
+    security = _unit_security_dropin(unit)
     directory = config.unit_dir / f"{unit}.d"
     values: list[tuple[Path, bytes]] = [(directory / "database.conf", database)]
     if unit == config.bridge_unit:
@@ -7884,25 +8130,15 @@ print(json.dumps({'memory_vault_mode':effective_memory_vault_mode,'obsidian_mode
             )
             if manager_dropins != expected_manager_dropins:
                 raise ReleaseFailure("systemd_manager_dropins_invalid")
-            environment = self._systemctl("show", unit, "--property=Environment", "--value").stdout
-            if len(environment) > 65_536:
-                raise ReleaseFailure("systemd_manager_environment_invalid")
-            try:
-                tokens = shlex.split(environment.decode("utf-8"))
-            except (UnicodeError, ValueError) as exc:
-                raise ReleaseFailure("systemd_manager_environment_invalid") from exc
-            relevant: dict[str, str] = {}
-            for token in tokens:
-                key, separator, value = token.partition("=")
-                if not separator:
-                    raise ReleaseFailure("systemd_manager_environment_invalid")
-                if key in relevant:
-                    raise ReleaseFailure("systemd_manager_environment_invalid")
-                relevant[key] = value
+            relevant = _systemd_environment(
+                self._systemctl("show", unit, "--property=Environment", "--value").stdout,
+                code="systemd_manager_environment_invalid",
+            )
             if relevant != {
                 "FRIDAY_DATABASE_MUST_EXIST": "1",
                 "FRIDAY_DATABASE_PATH": str(self.config.database),
                 "FRIDAY_HOME": str(self.config.friday_home),
+                "TMPDIR": str(_unit_runtime_tmp_directory(unit)),
             }:
                 raise ReleaseFailure("systemd_manager_environment_invalid")
             if (
@@ -7938,7 +8174,11 @@ print(json.dumps({'memory_vault_mode':effective_memory_vault_mode,'obsidian_mode
             exact_properties = {
                 "EnvironmentFiles": b"",
                 "LimitCORE": b"0",
-                "PrivateTmp": b"yes",
+                "PrivateTmp": b"no",
+                "PrivateUsers": b"no",
+                "RuntimeDirectory": _unit_runtime_directory_name(unit).encode(),
+                "RuntimeDirectoryMode": b"0700",
+                "RuntimeDirectoryPreserve": b"no",
                 "UnsetEnvironment": b"PYTHONPATH",
                 "WorkingDirectory": str(self.config.friday_home).encode(),
             }

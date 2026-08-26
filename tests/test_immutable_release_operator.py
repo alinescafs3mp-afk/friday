@@ -351,6 +351,108 @@ def test_units_share_one_atomic_anchor_and_bound_restart_storm(tmp_path: Path) -
         assert "candidate" not in unit
 
 
+def test_unit_security_dropins_disable_implicit_userns_and_isolate_tmpdir(
+    tmp_path: Path,
+) -> None:
+    port = _systemd_test_port(tmp_path)
+    observed: dict[str, bytes] = {}
+
+    for unit in (port.config.backend_unit, port.config.bridge_unit):
+        dropins = dict(operator._expected_unit_dropins(port.config, unit))  # noqa: SLF001
+        security = dropins[port.config.unit_dir / f"{unit}.d/security.conf"]
+        runtime_name = operator._unit_runtime_directory_name(unit)  # noqa: SLF001
+        tmp_directory = Path("/run/user") / str(os.geteuid()) / runtime_name
+        assert (
+            security
+            == (
+                "[Service]\n"
+                "LimitCORE=0\n"
+                "PrivateTmp=false\n"
+                "PrivateUsers=false\n"
+                f"RuntimeDirectory={runtime_name}\n"
+                "RuntimeDirectoryMode=0700\n"
+                "RuntimeDirectoryPreserve=no\n"
+                f"Environment=TMPDIR={tmp_directory}\n"
+            ).encode()
+        )
+        assert b"%t" not in security
+        observed[unit] = security
+
+    assert observed[port.config.backend_unit] != observed[port.config.bridge_unit]
+
+
+@pytest.mark.parametrize("predecessor", ["private-tmp", "recovery", "current"])
+def test_unit_surface_admits_only_known_security_predecessors(
+    tmp_path: Path,
+    predecessor: str,
+) -> None:
+    tmp_path.chmod(0o700)
+    unit_dir = tmp_path / "units"
+    unit_dir.mkdir(mode=0o700)
+    database = (
+        "[Service]\n"
+        f"Environment=FRIDAY_DATABASE_PATH={tmp_path / 'state.sqlite3'}\n"
+        "Environment=FRIDAY_DATABASE_MUST_EXIST=1\n"
+        f"ExecStartPre=/usr/bin/test -s {tmp_path / 'state.sqlite3'}\n"
+    ).encode()
+    for unit in operator._RUNTIME_UNIT_NAMES:  # noqa: SLF001
+        dropin_directory = unit_dir / f"{unit}.d"
+        dropin_directory.mkdir(mode=0o700)
+        (dropin_directory / "database.conf").write_bytes(database)
+        if unit == "friday-bridge.service":
+            (dropin_directory / "dependency.conf").write_bytes(
+                b"[Unit]\nWants=friday-backend.service\nAfter=friday-backend.service\n"
+            )
+        security = {
+            "private-tmp": operator._LEGACY_PRIVATE_TMP_SECURITY,  # noqa: SLF001
+            "recovery": operator._RECOVERY_PRIVATE_TMP_SECURITY,  # noqa: SLF001
+            "current": operator._unit_security_dropin(unit),  # noqa: SLF001
+        }[predecessor]
+        (dropin_directory / "security.conf").write_bytes(security)
+        for path in dropin_directory.iterdir():
+            path.chmod(0o600)
+
+    target, _current = operator._candidate_unit_surface(  # noqa: SLF001
+        unit_dir,
+        {unit: f"candidate:{unit}".encode() for unit in operator._RUNTIME_UNIT_NAMES},  # noqa: SLF001
+    )
+
+    assert tuple(target) == operator._UNIT_SURFACE_KEYS  # noqa: SLF001
+    for unit in operator._RUNTIME_UNIT_NAMES:  # noqa: SLF001
+        assert target[f"{unit}.d/security.conf"] == operator._unit_security_dropin(unit)  # noqa: SLF001
+
+
+def test_unit_surface_rejects_unknown_security_before_convergence(tmp_path: Path) -> None:
+    tmp_path.chmod(0o700)
+    unit_dir = tmp_path / "units"
+    unit_dir.mkdir(mode=0o700)
+    database = (
+        "[Service]\n"
+        f"Environment=FRIDAY_DATABASE_PATH={tmp_path / 'state.sqlite3'}\n"
+        "Environment=FRIDAY_DATABASE_MUST_EXIST=1\n"
+        f"ExecStartPre=/usr/bin/test -s {tmp_path / 'state.sqlite3'}\n"
+    ).encode()
+    for unit in operator._RUNTIME_UNIT_NAMES:  # noqa: SLF001
+        dropin_directory = unit_dir / f"{unit}.d"
+        dropin_directory.mkdir(mode=0o700)
+        (dropin_directory / "database.conf").write_bytes(database)
+        if unit == "friday-bridge.service":
+            (dropin_directory / "dependency.conf").write_bytes(
+                b"[Unit]\nWants=friday-backend.service\nAfter=friday-backend.service\n"
+            )
+        (dropin_directory / "security.conf").write_bytes(
+            b"[Service]\nLimitCORE=0\nPrivateTmp=false\nEnvironment=TMPDIR=/tmp\n"
+        )
+        for path in dropin_directory.iterdir():
+            path.chmod(0o600)
+
+    with pytest.raises(operator.ReleaseFailure, match="^installed_security_dropin_invalid$"):
+        operator._candidate_unit_surface(  # noqa: SLF001
+            unit_dir,
+            {unit: f"candidate:{unit}".encode() for unit in operator._RUNTIME_UNIT_NAMES},  # noqa: SLF001
+        )
+
+
 def test_tree_manifest_records_final_artifacts_mode_and_detects_mode_drift(tmp_path: Path) -> None:
     release_root = tmp_path / "release"
     artifacts = release_root / "artifacts"
@@ -3926,12 +4028,27 @@ def test_manager_units_are_exact_anchor_fragments_and_database_environment(
             path.write_bytes(dropin_content)
             path.chmod(0o600)
     candidate = operator.ReleaseIdentity(candidate_root, "c" * 40, "0.206.0", "d" * 64, 34)
-    environment = (
-        f"FRIDAY_HOME={port.config.friday_home} "
-        f"FRIDAY_DATABASE_PATH={port.config.database} FRIDAY_DATABASE_MUST_EXIST=1"
-    ).encode()
+    environment = {
+        unit: (
+            f"FRIDAY_HOME={port.config.friday_home} "
+            f"FRIDAY_DATABASE_PATH={port.config.database} FRIDAY_DATABASE_MUST_EXIST=1 "
+            f"TMPDIR={operator._unit_runtime_tmp_directory(unit)}"  # noqa: SLF001
+        ).encode()
+        for unit in units
+    }
     extra_exec = b""
     extra_manager_dropin = ""
+    security_properties = {
+        "LimitCORE": b"0\n",
+        "PrivateTmp": b"no\n",
+        "PrivateUsers": b"no\n",
+        "RuntimeDirectoryMode": b"0700\n",
+        "RuntimeDirectoryPreserve": b"no\n",
+    }
+    runtime_directories = {
+        unit: operator._unit_runtime_directory_name(unit)  # noqa: SLF001
+        for unit in units
+    }
 
     def exec_record(argv: list[str]) -> bytes:
         joined = " ".join(argv)
@@ -3978,17 +4095,18 @@ def test_manager_units_are_exact_anchor_fragments_and_database_environment(
                 values.append(extra_manager_dropin)
             stdout = " ".join(values).encode()
         elif "--property=Environment" in arguments:
-            stdout = environment
+            stdout = environment[arguments[1]]
         elif "--property=KillMode" in arguments:
             stdout = b"control-group\n"
         elif "--property=UMask" in arguments:
             stdout = b"0077\n"
         elif "--property=UnitFileState" in arguments:
             stdout = b"enabled\n"
-        elif "--property=LimitCORE" in arguments:
-            stdout = b"0\n"
-        elif "--property=PrivateTmp" in arguments:
-            stdout = b"yes\n"
+        elif "--property=RuntimeDirectory" in arguments:
+            stdout = runtime_directories[arguments[1]].encode() + b"\n"
+        elif any(f"--property={name}" in arguments for name in security_properties):
+            property_name = next(name for name in security_properties if f"--property={name}" in arguments)
+            stdout = security_properties[property_name]
         elif "--property=UnsetEnvironment" in arguments:
             stdout = b"PYTHONPATH\n"
         elif "--property=WorkingDirectory" in arguments:
@@ -3997,10 +4115,41 @@ def test_manager_units_are_exact_anchor_fragments_and_database_environment(
 
     monkeypatch.setattr(port, "_systemctl", systemctl)
     port.verify_units(candidate)
-    environment = environment.replace(b"FRIDAY_DATABASE_MUST_EXIST=1", b"FRIDAY_DATABASE_MUST_EXIST=0")
+    backend = port.config.backend_unit
+    environment[backend] = environment[backend].replace(
+        b"FRIDAY_DATABASE_MUST_EXIST=1",
+        b"FRIDAY_DATABASE_MUST_EXIST=0",
+    )
     with pytest.raises(operator.ReleaseFailure, match="manager_environment"):
         port.verify_units(candidate)
-    environment = environment.replace(b"FRIDAY_DATABASE_MUST_EXIST=0", b"FRIDAY_DATABASE_MUST_EXIST=1")
+    environment[backend] = environment[backend].replace(
+        b"FRIDAY_DATABASE_MUST_EXIST=0",
+        b"FRIDAY_DATABASE_MUST_EXIST=1",
+    )
+    for property_name, invalid in (
+        ("PrivateTmp", b"yes\n"),
+        ("PrivateUsers", b"yes\n"),
+        ("RuntimeDirectoryMode", b"0755\n"),
+        ("RuntimeDirectoryPreserve", b"yes\n"),
+    ):
+        valid = security_properties[property_name]
+        security_properties[property_name] = invalid
+        with pytest.raises(operator.ReleaseFailure, match="manager_property"):
+            port.verify_units(candidate)
+        security_properties[property_name] = valid
+    expected_runtime = runtime_directories[backend]
+    runtime_directories[backend] = "shared-tmp"
+    with pytest.raises(operator.ReleaseFailure, match="manager_property"):
+        port.verify_units(candidate)
+    runtime_directories[backend] = expected_runtime
+    expected_environment = environment[backend]
+    environment[backend] = expected_environment.replace(
+        str(operator._unit_runtime_tmp_directory(backend)).encode(),  # noqa: SLF001
+        b"/tmp",
+    )
+    with pytest.raises(operator.ReleaseFailure, match="manager_environment"):
+        port.verify_units(candidate)
+    environment[backend] = expected_environment
     extra_exec = exec_record(["/bin/sh", "-c", "false"])
     with pytest.raises(operator.ReleaseFailure, match="manager_extra_exec"):
         port.verify_units(candidate)
@@ -4497,9 +4646,96 @@ def test_process_identity_requires_anchor_argv_and_exact_release_executable(tmp_
     assert not port._process_matches(1234, release, "backend", proc_root=proc_root)  # noqa: SLF001
 
 
+def test_completed_legacy_unit_journal_starts_a_full_surface_identity(tmp_path: Path) -> None:
+    tmp_path.chmod(0o700)
+    state_dir = tmp_path / "state"
+    state_dir.mkdir(mode=0o700)
+    candidate = operator.ReleaseIdentity(
+        tmp_path / "candidate",
+        "c" * 40,
+        "0.207.36",
+        "d" * 64,
+        43,
+    )
+    previous = operator.ReleaseIdentity(
+        tmp_path / "previous",
+        "a" * 40,
+        "0.207.35",
+        "e" * 64,
+        43,
+    )
+    legacy_hashes = {unit: "1" * 64 for unit in operator._RUNTIME_UNIT_NAMES}  # noqa: SLF001
+    transition_hashes = {unit: "2" * 64 for unit in operator._RUNTIME_UNIT_NAMES}  # noqa: SLF001
+    journal = operator.DurableUnitInstallJournal(state_dir / "immutable-release-unit-install.v1.json")
+    initial = journal.begin_or_resume(
+        candidate=candidate,
+        previous=previous,
+        transition_root=tmp_path / "transition",
+        candidate_unit_hashes=legacy_hashes,
+        transition_unit_hashes=transition_hashes,
+    )
+    for phase in operator._UNIT_INSTALL_PHASES[1:-1]:  # noqa: SLF001
+        journal.record(phase)
+    receipt = hashlib.sha256(
+        operator._canonical_json(  # noqa: SLF001
+            {
+                "candidate_tree_sha256": candidate.tree_manifest_sha256,
+                "previous_tree_sha256": previous.tree_manifest_sha256,
+                "unit_hashes": legacy_hashes,
+            }
+        )
+    ).hexdigest()
+    journal.record("complete", receipt_sha256=receipt)
+
+    legacy_terminal = operator.DurableUnitInstallJournal(journal.path).load()
+    assert legacy_terminal["phase"] == "complete"
+    assert legacy_terminal["candidate_unit_hashes"] == legacy_hashes
+    full_hashes = {key: "3" * 64 for key in operator._UNIT_SURFACE_KEYS}  # noqa: SLF001
+    migrated = operator.DurableUnitInstallJournal(journal.path).begin_or_resume(
+        candidate=candidate,
+        previous=previous,
+        transition_root=tmp_path / "transition",
+        candidate_unit_hashes=full_hashes,
+        transition_unit_hashes=transition_hashes,
+    )
+
+    assert migrated["phase"] == "prepared"
+    assert migrated["candidate_unit_hashes"] == full_hashes
+    assert migrated["transaction_id"] != initial["transaction_id"]
+
+    terminal = operator.DurableUnitInstallJournal(journal.path)
+    for phase in operator._UNIT_INSTALL_PHASES[1:-1]:  # noqa: SLF001
+        terminal.record(phase)
+    full_receipt = hashlib.sha256(
+        operator._canonical_json(  # noqa: SLF001
+            {
+                "candidate_tree_sha256": candidate.tree_manifest_sha256,
+                "previous_tree_sha256": previous.tree_manifest_sha256,
+                "unit_hashes": full_hashes,
+            }
+        )
+    ).hexdigest()
+    terminal.record("complete", receipt_sha256=full_receipt)
+    drifted = dict(full_hashes)
+    drifted["friday-backend.service.d/security.conf"] = "4" * 64
+    with pytest.raises(
+        operator.ReleaseFailure,
+        match="^completed_unit_install_identity_changed$",
+    ):
+        operator.DurableUnitInstallJournal(journal.path).begin_or_resume(
+            candidate=candidate,
+            previous=previous,
+            transition_root=tmp_path / "transition",
+            candidate_unit_hashes=drifted,
+            transition_unit_hashes=transition_hashes,
+        )
+
+
+@pytest.mark.parametrize("crash_after", [1, 3, 7, "manager-reload"])
 def test_unit_pair_crash_converges_without_exposing_mixed_runtime_roots(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
+    crash_after: int | str,
 ) -> None:
     tmp_path.chmod(0o700)
     unit_dir = tmp_path / "units"
@@ -4537,6 +4773,25 @@ def test_unit_pair_crash_converges_without_exposing_mixed_runtime_roots(
             str(env_file),
             role,
         )
+        dropin_directory = unit_dir / f"{name}.d"
+        dropin_directory.mkdir(mode=0o700)
+        database = (
+            "[Service]\n"
+            f"Environment=FRIDAY_DATABASE_PATH={state_dir / 'jericho.sqlite3'}\n"
+            "Environment=FRIDAY_DATABASE_MUST_EXIST=1\n"
+            f"ExecStartPre=/usr/bin/test -s {state_dir / 'jericho.sqlite3'}\n"
+        )
+        (dropin_directory / "database.conf").write_text(database, encoding="utf-8")
+        if name == "friday-bridge.service":
+            (dropin_directory / "dependency.conf").write_text(
+                "[Unit]\nWants=friday-backend.service\nAfter=friday-backend.service\n",
+                encoding="utf-8",
+            )
+        (dropin_directory / "security.conf").write_bytes(
+            operator._RECOVERY_PRIVATE_TMP_SECURITY  # noqa: SLF001
+        )
+        for dropin in dropin_directory.iterdir():
+            dropin.chmod(0o644)
     candidate = operator.ReleaseIdentity(
         candidate_root,
         "c" * 40,
@@ -4553,11 +4808,18 @@ def test_unit_pair_crash_converges_without_exposing_mixed_runtime_roots(
             "start_time=[n/a] ; stop_time=[n/a] ; pid=0 ; code=(null) ; status=0/0 }"
         ).encode()
 
+    replacements = 0
+    reload_crashed = False
+
     def systemctl(*arguments: str, check: bool = True) -> subprocess.CompletedProcess[bytes]:
+        nonlocal reload_crashed
         del check
         if arguments[0] == "is-enabled":
             return subprocess.CompletedProcess(arguments, 0, stdout=b"enabled\n", stderr=b"")
         if arguments[0] == "daemon-reload":
+            if crash_after == "manager-reload" and not reload_crashed:
+                reload_crashed = True
+                raise RuntimeError("synthetic power loss during manager reload")
             for name in units:
                 manager_argv[name] = operator._unit_exec_argv(  # noqa: SLF001
                     (unit_dir / name).read_bytes(),
@@ -4565,18 +4827,44 @@ def test_unit_pair_crash_converges_without_exposing_mixed_runtime_roots(
                 )
             return subprocess.CompletedProcess(arguments, 0, stdout=b"", stderr=b"")
         name = arguments[1]
-        return subprocess.CompletedProcess(arguments, 0, stdout=record(manager_argv[name]), stderr=b"")
+        stdout = b""
+        if "--property=ExecStart" in arguments:
+            stdout = record(manager_argv[name])
+        elif "--property=FragmentPath" in arguments:
+            stdout = str(unit_dir / name).encode() + b"\n"
+        elif "--property=DropInPaths" in arguments:
+            stdout = " ".join(
+                str(unit_dir / f"{name}.d" / dropin)
+                for dropin in operator._UNIT_DROPIN_NAMES[name]  # noqa: SLF001
+            ).encode()
+        elif "--property=Environment" in arguments:
+            stdout = (
+                f"FRIDAY_HOME={tmp_path} "
+                f"FRIDAY_DATABASE_PATH={state_dir / 'jericho.sqlite3'} "
+                "FRIDAY_DATABASE_MUST_EXIST=1 "
+                f"TMPDIR={operator._unit_runtime_tmp_directory(name)}\n"  # noqa: SLF001
+            ).encode()
+        elif "--property=LimitCORE" in arguments:
+            stdout = b"0\n"
+        elif "--property=PrivateTmp" in arguments or "--property=PrivateUsers" in arguments:
+            stdout = b"no\n"
+        elif "--property=RuntimeDirectory" in arguments:
+            stdout = operator._unit_runtime_directory_name(name).encode() + b"\n"  # noqa: SLF001
+        elif "--property=RuntimeDirectoryMode" in arguments:
+            stdout = b"0700\n"
+        elif "--property=RuntimeDirectoryPreserve" in arguments:
+            stdout = b"no\n"
+        return subprocess.CompletedProcess(arguments, 0, stdout=stdout, stderr=b"")
 
     monkeypatch.setattr(operator, "_run_systemctl", systemctl)
     journal = operator.DurableUnitInstallJournal(state_dir / "immutable-release-unit-install.v1.json")
     original_replace = operator._replace_unit_file  # noqa: SLF001
-    replacements = 0
 
     def crash_after_first(destination: Path, content: bytes) -> None:
         nonlocal replacements
         original_replace(destination, content)
         replacements += 1
-        if replacements == 1:
+        if isinstance(crash_after, int) and replacements == crash_after:
             raise RuntimeError("synthetic power loss")
 
     monkeypatch.setattr(operator, "_replace_unit_file", crash_after_first)
@@ -4590,7 +4878,8 @@ def test_unit_pair_crash_converges_without_exposing_mixed_runtime_roots(
             transition_unit_hashes=transition_hashes,
             journal=journal,
         )
-    assert journal.load()["phase"] == "transition_anchor_active"
+    expected_phase = "units_converged" if crash_after == "manager-reload" else "transition_anchor_active"
+    assert journal.load()["phase"] == expected_phase
     assert anchor.resolve(strict=True) == transition_root
     for name in units:
         argv = operator._unit_exec_argv((unit_dir / name).read_bytes(), code="test")  # noqa: SLF001
@@ -4616,7 +4905,11 @@ def test_unit_pair_crash_converges_without_exposing_mixed_runtime_roots(
     )
     assert journal.load()["phase"] == "complete"
     assert anchor.resolve(strict=True) == previous_root
-    assert hashes == {name: hashlib.sha256((artifacts / name).read_bytes()).hexdigest() for name in units}
+    assert set(hashes) == set(operator._UNIT_SURFACE_KEYS)  # noqa: SLF001
+    assert hashes == {
+        key: hashlib.sha256(operator._unit_surface_path(unit_dir, key).read_bytes()).hexdigest()  # noqa: SLF001
+        for key in operator._UNIT_SURFACE_KEYS  # noqa: SLF001
+    }
 
 
 def test_unit_install_rejects_a_legacy_candidate_before_systemd_or_journal(
