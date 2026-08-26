@@ -19,7 +19,11 @@ from friday.interaction_control_plane import (
 from friday.model_input_hygiene import secondary_model_messages_are_secret_free
 from friday.orchestration.capability_manifest import bounded_capability_manifest
 from friday.orchestration.contracts import TurnInput
-from friday.orchestration.policy_kernel import PolicyAdmissionContext, admit_supervisor_proposal
+from friday.orchestration.policy_kernel import (
+    PolicyAdmissionContext,
+    PolicyDecision,
+    admit_supervisor_proposal,
+)
 from friday.orchestration.supervisor_contracts import (
     ARCHIVE_SEARCH_ID,
     FILE_CURRENT_READ_ID,
@@ -127,6 +131,14 @@ class SupervisorEligibility:
     eligible: bool
     skip_reason: SupervisorSkipReason
     task_class: TaskClass
+
+
+@dataclass(frozen=True, slots=True)
+class ParsedSupervisorProposal:
+    """Process-local parse result; only its code-owned decision may execute."""
+
+    proposal_digest: str
+    decision: PolicyDecision
 
 
 def supervisor_mode_from_settings(settings: object) -> SupervisorMode:
@@ -649,6 +661,30 @@ def validate_shadow_proposal(
     supervisor_input: SupervisorInput,
     context: PolicyAdmissionContext,
 ) -> tuple[str, str, str, int, tuple[str, ...]]:
+    parsed = parse_and_admit_supervisor_proposal(result, supervisor_input, context)
+    decision = parsed.decision
+    structured = _structured_to_mapping(result.structured_output)
+    assert structured is not None  # proved by parse_and_admit_supervisor_proposal
+    proposal = SupervisorProposal.parse(structured)
+    effects = tuple(
+        dict.fromkeys(step.effect_class.value for step in (decision.plan.steps if decision.plan else ()))
+    )
+    return (
+        parsed.proposal_digest,
+        "valid" if decision.admitted else "rejected",
+        decision.reason_code,
+        len(proposal.steps),
+        effects,
+    )
+
+
+def parse_and_admit_supervisor_proposal(
+    result: SecondaryResult,
+    supervisor_input: SupervisorInput,
+    context: PolicyAdmissionContext,
+) -> ParsedSupervisorProposal:
+    """Reparse one exact response and retain the kernel-minted plan in memory."""
+
     structured = _structured_to_mapping(result.structured_output)
     if structured is None:
         raise SupervisorContractError("supervisor proposal must be one JSON object")
@@ -661,15 +697,9 @@ def validate_shadow_proposal(
     if structured_proposal.canonical_sha256() != proposal.canonical_sha256():
         raise SupervisorContractError("supervisor raw and structured proposals differ")
     decision = admit_supervisor_proposal(proposal, supervisor_input, context)
-    effects = tuple(
-        dict.fromkeys(step.effect_class.value for step in (decision.plan.steps if decision.plan else ()))
-    )
-    return (
-        proposal.canonical_sha256(),
-        "valid" if decision.admitted else "rejected",
-        decision.reason_code,
-        len(proposal.steps),
-        effects,
+    return ParsedSupervisorProposal(
+        proposal_digest=proposal.canonical_sha256(),
+        decision=decision,
     )
 
 
