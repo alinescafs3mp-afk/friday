@@ -152,6 +152,7 @@ from friday.orchestration.supervisor_assist_production import (
     SupervisorAssistRestartActorResolver,
     supervisor_assist_read_only_effect_gate,
 )
+from friday.orchestration.supervisor_contracts import SupervisorMode
 from friday.organs import ServiceContext, build_registry, local_now, resolve_chat_id
 from friday.organs.obsidian.conversation import (
     obsidian_conversation_intent,
@@ -2425,23 +2426,31 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
                 shared_tenant=LEGACY_OWNER_USER_ID if settings.shared_archive else "",
             )
             assist_graph_adapter = SupervisorAssistGraphAdapter(storage)
-            # A process restart invalidates private evidence handles.  Reconcile
-            # each durable owner through current principal/source/authority
-            # checks before any endpoint or worker can observe it; denied owners
-            # remain non-publishing and are exposed in bounded startup health.
-            try:
+            requested_supervisor_mode = SupervisorMode.fail_closed(settings.semantic_supervisor_mode)
+            promoted_restart_requested = requested_supervisor_mode in {
+                SupervisorMode.ASSIST,
+                SupervisorMode.CANARY,
+            }
+            assist_restart_batches: tuple[AssistRestartBatch, ...] = ()
+
+            async def retire_unrecoverable_restart_graphs() -> tuple[AssistRestartBatch, ...]:
+                # Off/shadow, or a failed promoted composition, cannot resume
+                # process-private control state.  Preserve the existing honest
+                # terminalization path before exposing an endpoint.
                 restart_authority = SupervisorAssistAuthorityGate(storage, auth_service)
-                assist_restart_batches = await asyncio.to_thread(
+                return await asyncio.to_thread(
                     assist_graph_adapter.reconcile_all_active_after_restart,
                     actor_resolver=SupervisorAssistRestartActorResolver(auth_service),
                     authority_check=restart_authority,
-                    effect_check=lambda _actor, boundary: (
-                        supervisor_assist_read_only_effect_gate(boundary)
-                    ),
+                    effect_check=lambda _actor, boundary: supervisor_assist_read_only_effect_gate(boundary),
                 )
-            except BaseException:
-                storage.close()
-                raise
+
+            if not promoted_restart_requested:
+                try:
+                    assist_restart_batches = await retire_unrecoverable_restart_graphs()
+                except BaseException:
+                    storage.close()
+                    raise
             llm = LLMRouter(settings)
             secondary_brain = build_secondary_brain(settings)
             (
@@ -2581,6 +2590,12 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
                     type(exc).__name__,
                 )
                 promoted_agent = None
+            if promoted_agent is None and promoted_restart_requested:
+                try:
+                    assist_restart_batches = await retire_unrecoverable_restart_graphs()
+                except BaseException:
+                    storage.close()
+                    raise
             agent = (
                 promoted_agent
                 if promoted_agent is not None
@@ -2696,6 +2711,7 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
                     for batch in assist_restart_batches
                     if type(batch) is AssistRestartBatch
                 ),
+                "resume_scheduled": promoted_agent is not None,
             }
             application.state.llm = llm
             application.state.secondary_brain = secondary_brain
@@ -2709,9 +2725,7 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
             application.state.orchestration_agent = orchestrated_agent
             application.state.semantic_supervisor_runtime = semantic_supervisor_runtime
             application.state.semantic_supervisor_activation = semantic_supervisor_activation
-            application.state.semantic_supervisor_binding_snapshot = (
-                semantic_supervisor_binding_snapshot
-            )
+            application.state.semantic_supervisor_binding_snapshot = semantic_supervisor_binding_snapshot
             application.state.v12_model_runtime = attempted_v12_runtime
             application.state.v12_startup_reason = v12_startup_reason
             application.state.v12_registered_routes = tuple(sorted(route.value for route in route_handlers))
@@ -2723,6 +2737,11 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
             application.state.organs = organs
             application.state.rate_limiter = SlidingWindowLimiter()
             secondary_brain.start()
+            if promoted_agent is not None:
+                # Scheduling is non-blocking.  The recovery controller performs
+                # fresh laptop/profile/policy/authority checks per graph and
+                # retains ownership when an optional dependency is unavailable.
+                promoted_agent.start_restart_recovery()
             if settings.mcp_enabled:
                 try:
                     mcp_manager = MCPClientManager([workspace_server_definition(settings)])
@@ -5226,19 +5245,15 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
                     supervisor_assist_pending_decision = assist_relation
                     pending_durable_intake_suppressed = assist_relation.suppresses_ingestion
                 else:
-                    pending_durable_intake_admission = (
-                        _pending_durable_turn_admission_before_ingestion(
-                            state.agent,
-                            person_id=actor.own_id,
-                            message=message,
-                            actor=actor,
-                            conversation_id=conversation_id,
-                            current_attachment_count=pending_comparison_attachment_count,
-                        )
+                    pending_durable_intake_admission = _pending_durable_turn_admission_before_ingestion(
+                        state.agent,
+                        person_id=actor.own_id,
+                        message=message,
+                        actor=actor,
+                        conversation_id=conversation_id,
+                        current_attachment_count=pending_comparison_attachment_count,
                     )
-                    pending_durable_intake_suppressed = (
-                        pending_durable_intake_admission is not False
-                    )
+                    pending_durable_intake_suppressed = pending_durable_intake_admission is not False
 
             ingestion_result = None
             if state.auth_service.authorize(actor, "knowledge.create").allowed:
@@ -5357,14 +5372,10 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
                     semantic_supervisor_kwargs["_semantic_supervisor_explicit_mode_requested"] = (
                         explicit_mode_requested
                     )
-                if callable(
-                    getattr(state.agent, "classify_supervisor_assist_pending", None)
-                ):
+                if callable(getattr(state.agent, "classify_supervisor_assist_pending", None)):
                     semantic_supervisor_kwargs.update(
                         _semantic_supervisor_ingress_binding=semantic_supervisor_ingress,
-                        _semantic_supervisor_pending_decision=(
-                            supervisor_assist_pending_decision
-                        ),
+                        _semantic_supervisor_pending_decision=(supervisor_assist_pending_decision),
                     )
                 result = await state.agent.chat(
                     actor.user_id,

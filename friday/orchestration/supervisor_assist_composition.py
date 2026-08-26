@@ -28,6 +28,9 @@ from friday.orchestration.supervisor_assist_promotion import (
     SUPERVISOR_ASSIST_PROMOTION_MAX_REVIEW_ROUNDS,
     SUPERVISOR_ASSIST_PROMOTION_MAX_STEPS,
 )
+from friday.orchestration.supervisor_assist_recovery import (
+    SupervisorAssistRecoverySurfaceLoader,
+)
 from friday.orchestration.supervisor_assist_runtime import SemanticSupervisorAssistRuntime
 from friday.orchestration.supervisor_contracts import SupervisorMode
 from friday.orchestration.supervisor_plan_authority_gate import (
@@ -74,8 +77,7 @@ def build_supervisor_assist_production_runtime(
         or material.requested_mode is not requested
         or tuple(getattr(settings, "semantic_supervisor_tasks", ()))
         != ("compare_current_file_with_current_web",)
-        or getattr(settings, "semantic_supervisor_max_steps", None)
-        != SUPERVISOR_ASSIST_PROMOTION_MAX_STEPS
+        or getattr(settings, "semantic_supervisor_max_steps", None) != SUPERVISOR_ASSIST_PROMOTION_MAX_STEPS
         or getattr(settings, "semantic_supervisor_max_review_rounds", None)
         != SUPERVISOR_ASSIST_PROMOTION_MAX_REVIEW_ROUNDS
         or not _has_exact_turn_deadline(settings)
@@ -113,6 +115,10 @@ def build_supervisor_assist_production_runtime(
         effect_check=supervisor_assist_read_only_effect_gate,
         post_commit_observer=observer,
         max_review_rounds=SUPERVISOR_ASSIST_PROMOTION_MAX_REVIEW_ROUNDS,
+        recovery_surface_loader=SupervisorAssistRecoverySurfaceLoader(
+            storage,
+            authorization,
+        ),
     )
     return SemanticSupervisorAssistRuntime(
         settings=settings,

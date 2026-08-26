@@ -108,21 +108,16 @@ class SupervisorAssistRecoverySurfaceLoader:
             return None
         projection = dict(row)
         if (
-            raw_source_identity_sha256(projection)
-            != graph.current_file_source_identity_sha256
+            raw_source_identity_sha256(projection) != graph.current_file_source_identity_sha256
             or str(row["content_hash"] or "") != graph.current_file_content_sha256
         ):
             return None
         try:
             metadata = json.loads(str(row["_anchor_metadata"] or "{}"))
         except (TypeError, ValueError) as exc:
-            raise SupervisorAssistRecoveryDataError(
-                "assist recovery anchor metadata is corrupt"
-            ) from exc
+            raise SupervisorAssistRecoveryDataError("assist recovery anchor metadata is corrupt") from exc
         if not isinstance(metadata, dict):
-            raise SupervisorAssistRecoveryDataError(
-                "assist recovery anchor metadata is not an object"
-            )
+            raise SupervisorAssistRecoveryDataError("assist recovery anchor metadata is not an object")
         if SUPERVISOR_ASSIST_INGRESS_METADATA_KEY not in metadata:
             # Exact schema-45 graphs admitted before restart roots were persisted
             # remain owned until their bounded TTL retirement; they are not guessed.
@@ -130,9 +125,7 @@ class SupervisorAssistRecoverySurfaceLoader:
         try:
             ingress = load_supervisor_assist_ingress_binding(metadata)
         except (TypeError, ValueError) as exc:
-            raise SupervisorAssistRecoveryDataError(
-                "assist recovery ingress binding is corrupt"
-            ) from exc
+            raise SupervisorAssistRecoveryDataError("assist recovery ingress binding is corrupt") from exc
         if ingress.canonical_sha256() != graph.anchor_request_binding_sha256:
             raise SupervisorAssistRecoveryDataError(
                 "assist recovery ingress binding does not match the durable graph"
@@ -141,11 +134,7 @@ class SupervisorAssistRecoverySurfaceLoader:
             graph.user_id,
             source="semantic-recovery",
         )
-        if (
-            type(actor) is not ActorContext
-            or actor.user_id != graph.user_id
-            or actor.own_id != graph.user_id
-        ):
+        if type(actor) is not ActorContext or actor.user_id != graph.user_id or actor.own_id != graph.user_id:
             return None
         message = str(row["_anchor_content"] or "")
         if not current_file_web_request_is_admitted(message):
@@ -154,7 +143,14 @@ class SupervisorAssistRecoverySurfaceLoader:
             message=message,
             actor=actor,
             conversation_id=graph.conversation_id,
-            attachments=[],
+            attachments=[
+                {
+                    "mime_type": str(row["content_type"] or "application/octet-stream"),
+                    # Only the resulting boolean descriptor reaches planning.
+                    # The durable body stays behind the authorized file reader.
+                    "transient_text": "available",
+                }
+            ],
             enable_tools=True,
             synthetic_document_notice=False,
             mode=None,

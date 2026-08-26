@@ -9,6 +9,7 @@ import pytest
 
 import friday.orchestration.current_file_web_comparison as comparison_module
 import friday.orchestration.transient_web_comparison as web_module
+from friday import semantic_supervisor_policy
 from friday.execution_kernel import request_effect_possible, track_request_effects
 from friday.interaction_control_plane.compare_current_file_web_work_graph import (
     COMPARE_CURRENT_FILE_WEB_CANCELLED_RESPONSE,
@@ -69,7 +70,14 @@ from friday.orchestration.supervisor_assist_surface import CurrentFileWebAssistS
 from friday.orchestration.supervisor_contracts import (
     CapabilityEffectClass,
     CompletionCriterion,
+    SupervisorBudgets,
     canonical_sha256,
+)
+from friday.orchestration.supervisor_plan_authority import (
+    PlanAuthorityScope,
+    PlanSourceBinding,
+    durable_authority_binding_sha256,
+    source_bindings_sha256,
 )
 from friday.orchestration.supervisor_review_policy import AdmittedReadRecovery
 from friday.orchestration.transient_web_comparison import (
@@ -175,6 +183,20 @@ def _seed_surface(storage, label: str) -> tuple[CurrentFileWebAssistSurface, dic
 
 def _plan(surface: CurrentFileWebAssistSurface) -> ValidatedExecutionPlan:
     query = surface.turn.message.rsplit('"', 2)[1]
+    policy = semantic_supervisor_policy.supervisor_product_policy_identity_for_mode("assist")
+    budgets = SupervisorBudgets(
+        max_steps=policy.max_steps,
+        max_parallel_reads=policy.max_parallel_reads,
+        turn_deadline_ms=policy.turn_deadline_ms,
+        per_step_deadline_ms=policy.per_step_deadline_ms,
+        max_supervisor_calls=policy.max_supervisor_calls,
+        max_model_calls=policy.max_model_calls,
+        max_tool_calls=policy.max_tool_calls,
+        max_capability_calls=policy.max_capability_calls,
+        max_review_rounds=policy.max_review_rounds,
+        max_recovery_rounds=policy.max_recovery_rounds,
+        max_output_tokens=policy.max_output_tokens,
+    )
     steps = (
         ValidatedStep(
             step_id="s1",
@@ -187,6 +209,9 @@ def _plan(surface: CurrentFileWebAssistSurface) -> ValidatedExecutionPlan:
             parallel_group="evidence",
             input={"attachment_ordinal": 1},
             idempotency_key=_sha256("file:" + surface.conversation_id),
+            deadline_ms=budgets.per_step_deadline_ms,
+            max_calls=1,
+            max_output_tokens=0,
         ),
         ValidatedStep(
             step_id="s2",
@@ -201,6 +226,9 @@ def _plan(surface: CurrentFileWebAssistSurface) -> ValidatedExecutionPlan:
             parallel_group="evidence",
             input={"query_intent": query},
             idempotency_key=_sha256("web:" + surface.conversation_id),
+            deadline_ms=budgets.per_step_deadline_ms,
+            max_calls=2,
+            max_output_tokens=0,
         ),
         ValidatedStep(
             step_id="s3",
@@ -213,15 +241,56 @@ def _plan(surface: CurrentFileWebAssistSurface) -> ValidatedExecutionPlan:
             parallel_group=None,
             input={},
             idempotency_key=_sha256("model:" + surface.conversation_id),
+            deadline_ms=budgets.per_step_deadline_ms,
+            max_calls=semantic_supervisor_policy.SUPERVISOR_PRIMARY_MODEL_CALLS,
+            max_output_tokens=semantic_supervisor_policy.SUPERVISOR_PRIMARY_OUTPUT_TOKENS,
         ),
     )
+    proposal_digest = _sha256("proposal:" + surface.conversation_id)
+    manifest_digest = _sha256("manifest:" + surface.conversation_id)
+    binding_snapshot_sha256 = _sha256("registry:" + surface.conversation_id)
+    actor_binding_sha256 = _sha256("actor:" + surface.actor.user_id)
+    conversation_binding_sha256 = _sha256("conversation:" + surface.conversation_id)
+    source = PlanSourceBinding.current_raw_object(
+        raw_object_id=surface.attachment.raw_object_id,
+        source_identity_sha256=surface.attachment.source_identity_sha256,
+        content_sha256=surface.attachment_content_sha256,
+    )
+    source_digest = source_bindings_sha256((source,))
+    budget_digest = budgets.canonical_sha256()
+    required_security_ids = tuple(
+        sorted(
+            step.resolved_security_id
+            for step in steps
+            if step.resolved_security_id is not None
+        )
+    )
     return ValidatedExecutionPlan(
-        proposal_digest=_sha256("proposal:" + surface.conversation_id),
-        manifest_digest=_sha256("manifest:" + surface.conversation_id),
-        binding_snapshot_sha256=_sha256("registry:" + surface.conversation_id),
-        policy_version="semantic-supervisor-product-policy-v1",
-        actor_binding_sha256=_sha256("actor:" + surface.actor.user_id),
-        conversation_binding_sha256=_sha256("conversation:" + surface.conversation_id),
+        proposal_digest=proposal_digest,
+        manifest_digest=manifest_digest,
+        binding_snapshot_sha256=binding_snapshot_sha256,
+        policy_version=policy.policy_id,
+        policy_sha256=policy.policy_sha256,
+        actor_binding_sha256=actor_binding_sha256,
+        conversation_binding_sha256=conversation_binding_sha256,
+        authority_scope=PlanAuthorityScope.ASSIST_EXECUTION,
+        authority_binding_sha256=durable_authority_binding_sha256(
+            scope=PlanAuthorityScope.ASSIST_EXECUTION,
+            actor_binding_sha256=actor_binding_sha256,
+            conversation_binding_sha256=conversation_binding_sha256,
+            proposal_sha256=proposal_digest,
+            manifest_sha256=manifest_digest,
+            policy_sha256=policy.policy_sha256,
+            source_bindings_sha256=source_digest,
+            capability_bindings_sha256=binding_snapshot_sha256,
+            budget_sha256=budget_digest,
+            required_security_ids=required_security_ids,
+        ),
+        required_security_ids=required_security_ids,
+        source_bindings=(source,),
+        source_bindings_sha256=source_digest,
+        budget_sha256=budget_digest,
+        budgets=budgets,
         effect_classes=tuple(step.effect_class for step in steps),
         confirmation_required=False,
         confirmation_present=False,
@@ -390,6 +459,8 @@ def test_claim_denial_is_atomic_and_review_recovery_is_typed(storage) -> None:
         )
     current = adapter.load_current(AssistConversationScope(graph.user_id, graph.conversation_id))
     assert current == graph
+
+
     assert current.steps[1].state is CompareCurrentFileWebStepState.PENDING
 
     graph = _claim(adapter, graph, surface, CompareCurrentFileWebStepKind.WEB_READ)
@@ -428,6 +499,35 @@ def test_claim_denial_is_atomic_and_review_recovery_is_typed(storage) -> None:
         restarted.results[0].publication.graph.outcome_reason
         is CompareCurrentFileWebGraphOutcomeReason.EVIDENCE_NOT_REPLAYABLE
     )
+
+
+def test_restart_scan_pages_one_stable_insertion_snapshot(storage: Any) -> None:
+    adapter = SupervisorAssistGraphAdapter(storage)
+    first_surface, _ = _seed_surface(storage, "restart-scan-first")
+    second_surface, _ = _seed_surface(storage, "restart-scan-second")
+    first = _admit(adapter, first_surface)
+    second = _admit(adapter, second_surface)
+
+    first_page = adapter.active_after_restart(limit=1)
+    assert first_page.has_more is True
+    assert first_page.next_after_rowid is not None
+    assert first_page.snapshot_upper_rowid is not None
+    assert tuple(item.graph_id for item in first_page.cursors) == (first.id,)
+
+    later_surface, _ = _seed_surface(storage, "restart-scan-later")
+    later = _admit(adapter, later_surface)
+    second_page = adapter.active_after_restart(
+        limit=1,
+        after_rowid=first_page.next_after_rowid,
+        snapshot_upper_rowid=first_page.snapshot_upper_rowid,
+    )
+    assert second_page.has_more is False
+    assert second_page.next_after_rowid is None
+    assert second_page.snapshot_upper_rowid == first_page.snapshot_upper_rowid
+    assert tuple(item.graph_id for item in second_page.cursors) == (second.id,)
+
+    fresh = adapter.active_after_restart(limit=100)
+    assert {item.graph_id for item in fresh.cursors} == {first.id, second.id, later.id}
 
 
 @pytest.mark.parametrize(

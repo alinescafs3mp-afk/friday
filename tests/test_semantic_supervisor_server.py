@@ -90,6 +90,7 @@ def test_health_exposes_closed_semantic_supervisor_default(settings: Any) -> Non
                 "evidence_loaded": False,
                 "evidence_authority": "none",
                 "operator_gate_enabled": False,
+                "representative_window_verified": False,
                 "canary_actor_binding_count": 0,
                 "promotion_admitted": False,
                 "evidence_accepted": False,
@@ -203,7 +204,7 @@ def test_promotion_settings_without_loaded_material_remain_discarded_shadow(
     assert activation_loads == 1
 
 
-def test_promoted_server_drains_restart_graphs_and_keeps_model_attestation_lazy(
+def test_promoted_server_schedules_restart_recovery_and_keeps_model_attestation_lazy(
     settings: Any,
     monkeypatch: Any,
 ) -> None:
@@ -225,8 +226,7 @@ def test_promoted_server_drains_restart_graphs_and_keeps_model_attestation_lazy(
             sequence.append("graph_adapter_created")
 
         def reconcile_all_active_after_restart(self, **_kwargs: Any) -> tuple[Any, ...]:
-            sequence.append("restart_graphs_drained")
-            return ()
+            raise AssertionError("promoted restart graphs must be rebound, not drained")
 
     class LazyModel:
         def __init__(self) -> None:
@@ -239,6 +239,11 @@ def test_promoted_server_drains_restart_graphs_and_keeps_model_attestation_lazy(
     class PromotedRuntime:
         def __init__(self) -> None:
             self.closed = 0
+            self.restart_calls = 0
+
+        def start_restart_recovery(self) -> None:
+            sequence.append("restart_recovery_started")
+            self.restart_calls += 1
 
         async def close(self) -> None:
             sequence.append("promoted_closed")
@@ -289,10 +294,16 @@ def test_promoted_server_drains_restart_graphs_and_keeps_model_attestation_lazy(
         assert app.state.semantic_supervisor_runtime is promoted
         assert app.state.v12_model_runtime is model
         assert model.attest_calls == 0
+        assert promoted.restart_calls == 1
         assert len(composition_calls) == 1
         assert composition_calls[0]["primary_model_runtime"] is model
-        assert sequence.index("restart_graphs_drained") < sequence.index("promoted_composed")
-        assert sequence.index("restart_graphs_drained") < sequence.index("secondary_started")
+        assert sequence.index("promoted_composed") < sequence.index("secondary_started")
+        assert sequence.index("secondary_started") < sequence.index("restart_recovery_started")
+        assert app.state.semantic_supervisor_restart_reconciliation == {
+            "retired": 0,
+            "retained": 0,
+            "resume_scheduled": True,
+        }
 
     assert promoted.closed == 1
     assert sequence.index("promoted_closed") < sequence.index("secondary_closed")

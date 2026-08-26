@@ -40,6 +40,7 @@ from friday.interaction_control_plane.compare_current_file_web_work_graph import
 )
 from friday.interaction_control_plane.compare_current_file_web_work_graph_store import (
     CompareCurrentFileWebExpiryBatch,
+    CompareCurrentFileWebGraphConflictError,
     CompareCurrentFileWebRestartRebind,
     admit_compare_current_file_web_review_recovery_in_transaction,
     claim_compare_current_file_web_step_in_transaction,
@@ -152,6 +153,10 @@ class SupervisorAssistRecoveryBoundaryError(SupervisorAssistGraphAdapterError):
     """A current principal, source, dialogue, authority, or effect check denied recovery."""
 
 
+class SupervisorAssistGraphCursorConflict(SupervisorAssistGraphAdapterError):
+    """A concurrent owner advanced the durable graph beyond a captured cursor."""
+
+
 class _TransactionStorage(Protocol):
     def transaction(self) -> AbstractContextManager[Any]: ...
 
@@ -184,9 +189,10 @@ class AssistConversationScope:
     conversation_id: str
 
     def __post_init__(self) -> None:
-        if _USER_ID_RE.fullmatch(self.user_id) is None or _CONVERSATION_ID_RE.fullmatch(
-            self.conversation_id
-        ) is None:
+        if (
+            _USER_ID_RE.fullmatch(self.user_id) is None
+            or _CONVERSATION_ID_RE.fullmatch(self.conversation_id) is None
+        ):
             raise ValueError("assist conversation scope is invalid")
 
 
@@ -199,7 +205,11 @@ class AssistGraphCursor:
 
     def __post_init__(self) -> None:
         AssistConversationScope(self.user_id, self.conversation_id)
-        if _GRAPH_ID_RE.fullmatch(self.graph_id) is None or type(self.revision) is not int or self.revision < 1:
+        if (
+            _GRAPH_ID_RE.fullmatch(self.graph_id) is None
+            or type(self.revision) is not int
+            or self.revision < 1
+        ):
             raise ValueError("assist graph cursor is invalid")
 
     @classmethod
@@ -535,6 +545,31 @@ class AssistRestartBatch:
 class AssistRestartScan:
     cursors: tuple[AssistGraphCursor, ...]
     has_more: bool
+    next_after_rowid: int | None = None
+    snapshot_upper_rowid: int | None = None
+
+    def __post_init__(self) -> None:
+        if (
+            type(self.cursors) is not tuple
+            or any(type(item) is not AssistGraphCursor for item in self.cursors)
+            or type(self.has_more) is not bool
+            or (
+                self.next_after_rowid is not None
+                and (type(self.next_after_rowid) is not int or self.next_after_rowid < 1)
+            )
+            or (
+                self.snapshot_upper_rowid is not None
+                and (type(self.snapshot_upper_rowid) is not int or self.snapshot_upper_rowid < 1)
+            )
+            or self.has_more != (self.next_after_rowid is not None)
+            or (self.cursors and self.snapshot_upper_rowid is None)
+            or (
+                self.next_after_rowid is not None
+                and self.snapshot_upper_rowid is not None
+                and self.next_after_rowid > self.snapshot_upper_rowid
+            )
+        ):
+            raise ValueError("assist restart scan is invalid")
 
 
 @dataclass(frozen=True, slots=True)
@@ -589,7 +624,10 @@ def _step_inputs(
             )
         else:
             material["read_inputs_sha256"] = canonical_sha256(
-                [inputs[CompareCurrentFileWebStepKind.FILE_READ], inputs[CompareCurrentFileWebStepKind.WEB_READ]]
+                [
+                    inputs[CompareCurrentFileWebStepKind.FILE_READ],
+                    inputs[CompareCurrentFileWebStepKind.WEB_READ],
+                ]
             )
         inputs[kind] = canonical_sha256(material)
         keys[kind] = binding.plan_step.idempotency_key
@@ -639,7 +677,11 @@ class SupervisorAssistGraphAdapter:
             "SELECT mode,is_archived FROM conversations WHERE id=? AND user_id=?",
             (scope.conversation_id, scope.user_id),
         ).fetchone()
-        if row is None or int(row["is_archived"]) != 0 or normalize_conversation_mode(row["mode"]) != "dialogue":
+        if (
+            row is None
+            or int(row["is_archived"]) != 0
+            or normalize_conversation_mode(row["mode"]) != "dialogue"
+        ):
             raise SupervisorAssistGraphAdapterError("assist conversation is not a live dialogue")
 
     @staticmethod
@@ -793,11 +835,9 @@ class SupervisorAssistGraphAdapter:
                 or surface.actor.user_id != surface.actor.own_id
                 or graph.conversation_id != surface.conversation_id
                 or not graph.has_exact_request_binding
-                or graph.anchor_request_binding_sha256
-                != surface.ingress_binding.canonical_sha256()
+                or graph.anchor_request_binding_sha256 != surface.ingress_binding.canonical_sha256()
                 or graph.current_file_raw_object_id != surface.attachment.raw_object_id
-                or graph.current_file_source_identity_sha256
-                != surface.attachment.source_identity_sha256
+                or graph.current_file_source_identity_sha256 != surface.attachment.source_identity_sha256
                 or graph.current_file_content_sha256 != surface.attachment_content_sha256
             ):
                 raise SupervisorAssistRecoveryBoundaryError(
@@ -867,18 +907,45 @@ class SupervisorAssistGraphAdapter:
                 conn, user_id=scope.user_id, conversation_id=scope.conversation_id
             )
 
-    def active_after_restart(self, *, limit: int = _MAX_RECONCILE) -> AssistRestartScan:
-        """Return one bounded, immutable startup snapshot page."""
+    def active_after_restart(
+        self,
+        *,
+        limit: int = _MAX_RECONCILE,
+        after_rowid: int | None = None,
+        snapshot_upper_rowid: int | None = None,
+    ) -> AssistRestartScan:
+        """Return one bounded page from a startup-stable insertion window."""
 
         if type(limit) is not int or not 1 <= limit <= _MAX_RECONCILE:
             raise ValueError("assist restart scan limit must be between 1 and 100")
+        if after_rowid is not None and (type(after_rowid) is not int or after_rowid < 1):
+            raise ValueError("assist restart scan cursor is invalid")
+        if snapshot_upper_rowid is not None and (
+            type(snapshot_upper_rowid) is not int or snapshot_upper_rowid < 1
+        ):
+            raise ValueError("assist restart scan upper bound is invalid")
+        if after_rowid is not None and snapshot_upper_rowid is None:
+            raise ValueError("assist restart continuation requires its snapshot upper bound")
         with read_only_storage_snapshot(self._storage) as conn:
+            upper = snapshot_upper_rowid
+            if upper is None:
+                upper_row = conn.execute(
+                    "SELECT MAX(rowid) AS upper_rowid "
+                    "FROM work_item_compare_current_file_web_graphs "
+                    "WHERE state='active'"
+                ).fetchone()
+                upper = None if upper_row is None else upper_row["upper_rowid"]
+            if upper is None:
+                return AssistRestartScan((), False)
             rows = conn.execute(
-                """SELECT id,user_id,conversation_id,revision
+                """SELECT rowid AS _scan_rowid,id,user_id,conversation_id,revision
                      FROM work_item_compare_current_file_web_graphs
-                    WHERE state='active' ORDER BY created_at,id LIMIT ?""",
-                (limit + 1,),
+                    WHERE state='active' AND rowid<=? AND (? IS NULL OR rowid>?)
+                    ORDER BY rowid LIMIT ?""",
+                (upper, after_rowid, after_rowid, limit + 1),
             ).fetchall()
+        page = rows[:limit]
+        has_more = len(rows) > limit
         return AssistRestartScan(
             cursors=tuple(
                 AssistGraphCursor(
@@ -887,9 +954,11 @@ class SupervisorAssistGraphAdapter:
                     str(row["conversation_id"]),
                     int(row["revision"]),
                 )
-                for row in rows[:limit]
+                for row in page
             ),
-            has_more=len(rows) > limit,
+            has_more=has_more,
+            next_after_rowid=(int(page[-1]["_scan_rowid"]) if has_more else None),
+            snapshot_upper_rowid=int(upper),
         )
 
     def claim(
@@ -1101,8 +1170,12 @@ class SupervisorAssistGraphAdapter:
             user_id=cursor.user_id,
             conversation_id=cursor.conversation_id,
         )
-        if graph is None or graph.state is not CompareCurrentFileWebGraphState.ACTIVE or graph.revision != cursor.revision:
-            raise SupervisorAssistGraphAdapterError("assist graph cursor is stale")
+        if (
+            graph is None
+            or graph.state is not CompareCurrentFileWebGraphState.ACTIVE
+            or graph.revision != cursor.revision
+        ):
+            raise SupervisorAssistGraphCursorConflict("assist graph cursor is stale")
         return graph
 
     def publish_comparison(
@@ -1341,8 +1414,7 @@ class SupervisorAssistGraphAdapter:
                 evidence_not_replayable=False,
                 cancelled=False,
                 final_authority_rechecked=(
-                    publication.expected_status
-                    is CompareCurrentFileWebGraphOutcomeStatus.PARTIAL
+                    publication.expected_status is CompareCurrentFileWebGraphOutcomeStatus.PARTIAL
                 ),
             )
 
@@ -1448,9 +1520,7 @@ class SupervisorAssistGraphAdapter:
                 state=CompareCurrentFileWebStepState.UNAVAILABLE,
                 outcome_sha256=canonical_sha256(
                     {
-                        "schema": (
-                            "friday.semantic-supervisor-assist-mixed-authority-synthesis.v1"
-                        ),
+                        "schema": ("friday.semantic-supervisor-assist-mixed-authority-synthesis.v1"),
                         "accepted_plan_sha256": graph.accepted_plan_sha256,
                         "denied_read": denied[0].kind.value,
                         "state": CompareCurrentFileWebStepState.UNAVAILABLE.value,
@@ -1462,9 +1532,7 @@ class SupervisorAssistGraphAdapter:
                 verified=False,
             )
             if settled.terminal_disposition() != (expected_status, expected_reason):
-                raise SupervisorAssistGraphAdapterError(
-                    "mixed-authority terminal disposition changed"
-                )
+                raise SupervisorAssistGraphAdapterError("mixed-authority terminal disposition changed")
             content = _TERMINAL_CONTENT[expected_reason]
             return self._publish_terminal_in_transaction(
                 conn,
@@ -1663,13 +1731,9 @@ class SupervisorAssistGraphAdapter:
                 reason=CompareCurrentFileWebGraphOutcomeReason.EVIDENCE_NOT_REPLAYABLE,
             )
             if authority_check(boundary) is not True:
-                raise SupervisorAssistRecoveryBoundaryError(
-                    "restart retirement authority denied"
-                )
+                raise SupervisorAssistRecoveryBoundaryError("restart retirement authority denied")
             if effect_check(boundary) is not True:
-                raise SupervisorAssistRecoveryBoundaryError(
-                    "restart retirement effect denied"
-                )
+                raise SupervisorAssistRecoveryBoundaryError("restart retirement effect denied")
             self._stage(conn)
             return self._publish_terminal_in_transaction(
                 conn,
@@ -1758,19 +1822,13 @@ class SupervisorAssistGraphAdapter:
                     or actor.user_id != graph.user_id
                     or actor.own_id != graph.user_id
                 ):
-                    raise SupervisorAssistRecoveryBoundaryError(
-                        "restart retirement principal is unavailable"
-                    )
+                    raise SupervisorAssistRecoveryBoundaryError("restart retirement principal is unavailable")
                 results.append(
                     self.restart_or_retire(
                         cursor,
                         actor=actor,
-                        authority_check=lambda boundary, current=actor: authority_check(
-                            current, boundary
-                        ),
-                        effect_check=lambda boundary, current=actor: effect_check(
-                            current, boundary
-                        ),
+                        authority_check=lambda boundary, current=actor: authority_check(current, boundary),
+                        effect_check=lambda boundary, current=actor: effect_check(current, boundary),
                     )
                 )
             except SupervisorAssistRecoveryBoundaryError:
@@ -1778,6 +1836,16 @@ class SupervisorAssistGraphAdapter:
                 # ACTIVE preserves its durable owner and prevents fallback; an
                 # authenticated explicit cancellation can still retire it.
                 retained.append(cursor)
+            except (SupervisorAssistGraphCursorConflict, CompareCurrentFileWebGraphConflictError):
+                # A bounded page is only a snapshot.  A concurrent cancellation,
+                # expiry or owner transition must not abort later pages or be
+                # overwritten with the captured revision.
+                current = self.load(cursor)
+                if (
+                    type(current) is CompareCurrentFileWebWorkGraph
+                    and current.state is CompareCurrentFileWebGraphState.ACTIVE
+                ):
+                    retained.append(AssistGraphCursor.from_graph(current))
         return AssistRestartBatch(tuple(results), has_more, tuple(retained))
 
     def retire_active_after_restart(
@@ -1897,5 +1965,6 @@ __all__ = [
     "AssistTraceInput",
     "SupervisorAssistGraphAdapter",
     "SupervisorAssistGraphAdapterError",
+    "SupervisorAssistGraphCursorConflict",
     "SupervisorAssistRecoveryBoundaryError",
 ]

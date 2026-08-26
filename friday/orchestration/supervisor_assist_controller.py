@@ -14,6 +14,7 @@ import hmac
 import inspect
 import math
 import re
+import secrets
 import time
 from collections import Counter
 from collections.abc import Awaitable, Callable, Mapping
@@ -56,6 +57,7 @@ from friday.orchestration.semantic_supervisor import (
     ParsedSupervisorProposal,
     binding_digest,
     build_supervisor_input,
+    supervisor_timeout_sec,
 )
 from friday.orchestration.supervisor_assist_graph_adapter import (
     AssistAdmissionBoundary,
@@ -71,8 +73,8 @@ from friday.orchestration.supervisor_assist_graph_adapter import (
     AssistMixedAuthorityTerminalPublication,
     AssistPublicationBoundary,
     AssistRestartRebindBoundary,
-    AssistRestartScan,
     AssistRestartResult,
+    AssistRestartScan,
     AssistStepSettlement,
     AssistTerminalPublication,
     AssistTraceInput,
@@ -89,7 +91,6 @@ from friday.orchestration.supervisor_assist_promotion import (
 )
 from friday.orchestration.supervisor_assist_recovery import (
     RecoveredAssistSurface,
-    SupervisorAssistRecoverySurfaceLoader,
 )
 from friday.orchestration.supervisor_assist_surface import (
     CurrentFileWebAssistSurface,
@@ -340,7 +341,13 @@ class SupervisorAssistGraphPort(Protocol):
         scope: AssistConversationScope,
     ) -> CompareCurrentFileWebWorkGraph | None: ...
 
-    def active_after_restart(self, *, limit: int) -> AssistRestartScan: ...
+    def active_after_restart(
+        self,
+        *,
+        limit: int,
+        after_rowid: int | None = None,
+        snapshot_upper_rowid: int | None = None,
+    ) -> AssistRestartScan: ...
 
     def rebind_after_restart(
         self,
@@ -583,8 +590,7 @@ def _graph_matches_pristine_admission(
             surface.ingress_binding.canonical_sha256(),
         )
         and admitted_graph.current_file_raw_object_id == surface.attachment.raw_object_id
-        and admitted_graph.current_file_source_identity_sha256
-        == surface.attachment.source_identity_sha256
+        and admitted_graph.current_file_source_identity_sha256 == surface.attachment.source_identity_sha256
         and admitted_graph.current_file_content_sha256 == surface.attachment_content_sha256
         and admitted_graph.proposal_sha256 == plan.proposal_digest
         and admitted_graph.accepted_plan_sha256 == plan.canonical_sha256()
@@ -629,8 +635,7 @@ def _graph_matches_restart_rebind(
             surface.ingress_binding.canonical_sha256(),
         )
         and rebound.current_file_raw_object_id == surface.attachment.raw_object_id
-        and rebound.current_file_source_identity_sha256
-        == surface.attachment.source_identity_sha256
+        and rebound.current_file_source_identity_sha256 == surface.attachment.source_identity_sha256
         and rebound.current_file_content_sha256 == surface.attachment_content_sha256
         and rebound.proposal_sha256 == plan.proposal_digest
         and rebound.accepted_plan_sha256 == plan.canonical_sha256()
@@ -641,13 +646,11 @@ def _graph_matches_restart_rebind(
         and rebound.actor_binding_sha256 == plan.actor_binding_sha256
         and rebound.conversation_binding_sha256 == plan.conversation_binding_sha256
         and all(
-            rebound.step(binding.graph_step_id).state
-            is CompareCurrentFileWebStepState.PENDING
+            rebound.step(binding.graph_step_id).state is CompareCurrentFileWebStepState.PENDING
             for binding in bindings
         )
         and all(
-            rebound.step(binding.graph_step_id).idempotency_key_sha256
-            == binding.plan_step.idempotency_key
+            rebound.step(binding.graph_step_id).idempotency_key_sha256 == binding.plan_step.idempotency_key
             for binding in bindings
         )
     )
@@ -723,6 +726,9 @@ class SupervisorAssistController:
         max_review_rounds: int,
         binding_snapshot_factory: Callable[[], CapabilityBindingSnapshot] = (operational_capability_snapshot),
         synthesizer: AssistComparisonSynthesizer | None = None,
+        recovery_surface_loader: (
+            Callable[[CompareCurrentFileWebWorkGraph], RecoveredAssistSurface | None] | None
+        ) = None,
     ) -> None:
         if type(max_review_rounds) is not int or max_review_rounds not in {0, 1}:
             raise ValueError("assist controller review rounds must be zero or one")
@@ -744,6 +750,8 @@ class SupervisorAssistController:
                 raise TypeError(f"{label} is unavailable")
         if reviewer is not None and not callable(getattr(reviewer, "review", None)):
             raise TypeError("reviewer is unavailable")
+        if recovery_surface_loader is not None and not callable(recovery_surface_loader):
+            raise TypeError("recovery surface loader is unavailable")
         self._settings = settings
         self._promotion = promotion_evaluator
         self._planner = planner
@@ -764,6 +772,8 @@ class SupervisorAssistController:
             if synthesizer is None
             else synthesizer
         )
+        self._recovery_surface_loader = recovery_surface_loader
+        self._restart_binding_nonce = secrets.token_hex(32)
         self._active_by_scope: dict[tuple[str, str], _OwnedRun] = {}
         self._active_by_graph: dict[str, _OwnedRun] = {}
         self._retained_by_scope: dict[tuple[str, str], _OwnedRun] = {}
@@ -834,9 +844,7 @@ class SupervisorAssistController:
             "promotion_evaluation_total": self._promotion_evaluation_total,
             "promotion_admitted_total": self._promotion_admitted_total,
             "active_tasks": len(self._active_by_graph),
-            "retained_active_graphs": len(
-                set(self._retained_by_scope) | self._known_durable_active_scopes
-            ),
+            "retained_active_graphs": len(set(self._retained_by_scope) | self._known_durable_active_scopes),
             "fallback_total": self._fallback_total,
             "invoked_total": self._invoked_total,
             "publication_total": self._publication_total,
@@ -870,6 +878,284 @@ class SupervisorAssistController:
             "failed": self._restart_recovery_failed,
             "has_more": self._restart_recovery_has_more,
         }
+
+    def _restart_rebind_or_recover(
+        self,
+        predecessor: CompareCurrentFileWebWorkGraph,
+        prospective: _ProspectiveAdmission,
+    ) -> _AdmissionAttempt:
+        """Cross the one-shot restart CAS and recover a lost commit acknowledgement."""
+
+        request = AssistGraphAdmission(
+            surface=prospective.surface,
+            plan=prospective.plan,
+            runtime_profile_sha256=SUPERVISOR_RUNTIME_PROFILE_MANIFEST_SHA256,
+        )
+
+        def restart_check(
+            downstream: AssistBoundaryCheck[AssistRestartRebindBoundary],
+        ) -> AssistBoundaryCheck[AssistRestartRebindBoundary]:
+            def check(boundary: AssistRestartRebindBoundary) -> bool:
+                if self._closed:
+                    return False
+                fresh = self._fresh_snapshot()
+                if (
+                    type(boundary) is not AssistRestartRebindBoundary
+                    or fresh is None
+                    or fresh.digest_hex() != prospective.plan.binding_snapshot_sha256
+                    or self._decide_promotion(
+                        fresh,
+                        canary_actor_binding=prospective.canary_actor_binding_sha256,
+                        count_evaluation=False,
+                    )
+                    is None
+                    or boundary.actor is not prospective.surface.actor
+                    or boundary.graph_id != predecessor.id
+                    or boundary.user_id != predecessor.user_id
+                    or boundary.conversation_id != predecessor.conversation_id
+                    or boundary.expected_revision != predecessor.revision
+                    or boundary.request_binding_sha256 != predecessor.anchor_request_binding_sha256
+                    or boundary.predecessor_plan_sha256 != predecessor.accepted_plan_sha256
+                    or boundary.accepted_plan_sha256 != prospective.plan.canonical_sha256()
+                    or boundary.adapter_registry_sha256 != prospective.plan.binding_snapshot_sha256
+                    or boundary.actor_binding_sha256 != prospective.plan.actor_binding_sha256
+                    or boundary.conversation_binding_sha256 != prospective.plan.conversation_binding_sha256
+                    or hmac.compare_digest(
+                        boundary.actor_binding_sha256,
+                        predecessor.actor_binding_sha256,
+                    )
+                    or hmac.compare_digest(
+                        boundary.conversation_binding_sha256,
+                        predecessor.conversation_binding_sha256,
+                    )
+                    or boundary.current_file_raw_object_id != predecessor.current_file_raw_object_id
+                    or boundary.current_file_source_identity_sha256
+                    != predecessor.current_file_source_identity_sha256
+                    or boundary.current_file_content_sha256 != predecessor.current_file_content_sha256
+                    or boundary.web_plan_sha256 != prospective.surface.web_plan.canonical_sha256()
+                    or boundary.web_query_sha256 != prospective.surface.web_plan.query_sha256
+                    or boundary.runtime_profile_sha256 != SUPERVISOR_RUNTIME_PROFILE_MANIFEST_SHA256
+                ):
+                    return False
+                try:
+                    return downstream(boundary) is True
+                except Exception:
+                    return False
+
+            return check
+
+        failure: BaseException | None = None
+        try:
+            graph = self._graph_adapter.rebind_after_restart(
+                AssistGraphCursor.from_graph(predecessor),
+                request,
+                authority_check=restart_check(
+                    self._authority_for(prospective.surface.actor),
+                ),
+                effect_check=restart_check(self._effect_check),
+            )
+        except BaseException as exc:  # the CAS acknowledgement can be lost
+            failure = exc
+            graph = None
+        if _graph_matches_restart_rebind(graph, prospective, predecessor):
+            return _AdmissionAttempt(
+                certainty=_AdmissionCertainty.OWNED,
+                graph=graph,
+                interrupted=isinstance(failure, asyncio.CancelledError),
+            )
+        try:
+            current = self._graph_adapter.load_current(
+                AssistConversationScope(
+                    user_id=predecessor.user_id,
+                    conversation_id=predecessor.conversation_id,
+                )
+            )
+        except BaseException:
+            return _AdmissionAttempt(
+                certainty=_AdmissionCertainty.UNCERTAIN,
+                interrupted=isinstance(failure, asyncio.CancelledError),
+            )
+        if _graph_matches_restart_rebind(current, prospective, predecessor):
+            return _AdmissionAttempt(
+                certainty=_AdmissionCertainty.OWNED,
+                graph=current,
+                interrupted=isinstance(failure, asyncio.CancelledError),
+            )
+        return _AdmissionAttempt(
+            certainty=_AdmissionCertainty.UNCERTAIN,
+            interrupted=isinstance(failure, asyncio.CancelledError),
+        )
+
+    def _retain_restart_scope(
+        self,
+        scope: tuple[str, str],
+        *,
+        failed: bool = False,
+    ) -> None:
+        self._known_durable_active_scopes.add(scope)
+        self._restart_recovery_retained += 1
+        if failed:
+            self._restart_recovery_failed += 1
+
+    async def _recover_restart_cursor(self, cursor: AssistGraphCursor) -> None:
+        """Freshly re-plan and resume one exact durable owner without legacy fallback."""
+
+        self._restart_recovery_discovered += 1
+        scope = (cursor.user_id, cursor.conversation_id)
+        self._known_durable_active_scopes.add(scope)
+        started_at = time.monotonic()
+        try:
+            graph = self._graph_adapter.load(cursor)
+        except asyncio.CancelledError:
+            raise
+        except BaseException:
+            self._retain_restart_scope(scope, failed=True)
+            return
+        if graph is None:
+            self._known_durable_active_scopes.discard(scope)
+            return
+        if (
+            type(graph) is not CompareCurrentFileWebWorkGraph
+            or graph.id != cursor.graph_id
+            or graph.user_id != cursor.user_id
+            or graph.conversation_id != cursor.conversation_id
+        ):
+            self._retain_restart_scope(scope, failed=True)
+            return
+        if graph.state is not CompareCurrentFileWebGraphState.ACTIVE:
+            self._known_durable_active_scopes.discard(scope)
+            return
+        if scope in self._active_by_scope or scope in self._retained_by_scope:
+            self._retain_restart_scope(scope)
+            return
+        if graph.restart_count != 0 or self._recovery_surface_loader is None:
+            self._retain_restart_scope(scope)
+            return
+        try:
+            recovered = self._recovery_surface_loader(graph)
+        except asyncio.CancelledError:
+            raise
+        except BaseException:
+            self._retain_restart_scope(scope, failed=True)
+            return
+        if (
+            type(recovered) is not RecoveredAssistSurface
+            or recovered.graph != graph
+            or recovered.surface.actor.user_id != graph.user_id
+            or recovered.surface.conversation_id != graph.conversation_id
+        ):
+            self._retain_restart_scope(scope)
+            return
+        deadline = time.monotonic() + supervisor_timeout_sec(self._settings)
+        try:
+            prospective = await self._prepare_prospective(
+                recovered.surface,
+                absolute_deadline=deadline,
+                restart_cursor=AssistGraphCursor.from_graph(graph),
+            )
+        except asyncio.CancelledError:
+            raise
+        except BaseException:
+            prospective = None
+        if prospective is None:
+            self._retain_restart_scope(scope)
+            return
+        attempt = self._restart_rebind_or_recover(graph, prospective)
+        if attempt.certainty is not _AdmissionCertainty.OWNED or attempt.graph is None:
+            self._retain_restart_scope(scope, failed=True)
+            return
+        record: _OwnedRun | None = None
+        try:
+            record = self._register_owned(
+                prospective,
+                attempt.graph,
+                started_at=started_at,
+                state_restored=True,
+            )
+            self._restart_recovery_rebound += 1
+            if attempt.interrupted or self._closed:
+                self._retain_restart_scope(scope)
+                return
+            result = await self._run_owned(record, absolute_deadline=deadline)
+            if result.outcome in {
+                SupervisorAssistOutcome.PUBLISHED,
+                SupervisorAssistOutcome.TERMINAL,
+                SupervisorAssistOutcome.CANCELLED,
+            }:
+                self._restart_recovery_completed += 1
+            else:
+                self._retain_restart_scope(scope)
+        except asyncio.CancelledError:
+            self._retain_restart_scope(scope)
+            raise
+        except BaseException:
+            self._retain_restart_scope(scope, failed=True)
+        finally:
+            if record is not None:
+                self._unregister_owned(record)
+
+    async def _recover_active_after_restart(self, *, batch_limit: int) -> None:
+        after_rowid: int | None = None
+        snapshot_upper_rowid: int | None = None
+        try:
+            while not self._closed:
+                scan = self._graph_adapter.active_after_restart(
+                    limit=batch_limit,
+                    after_rowid=after_rowid,
+                    snapshot_upper_rowid=snapshot_upper_rowid,
+                )
+                if type(scan) is not AssistRestartScan:
+                    raise SupervisorAssistControllerError("assist restart scan returned an invalid page")
+                scan.__post_init__()
+                if snapshot_upper_rowid is not None and scan.snapshot_upper_rowid != snapshot_upper_rowid:
+                    raise SupervisorAssistControllerError("assist restart scan changed its snapshot boundary")
+                snapshot_upper_rowid = scan.snapshot_upper_rowid
+                self._restart_recovery_has_more = scan.has_more
+                for cursor in scan.cursors:
+                    if self._closed:
+                        return
+                    await self._recover_restart_cursor(cursor)
+                if not scan.has_more:
+                    self._restart_recovery_has_more = False
+                    return
+                if (
+                    not scan.cursors
+                    or scan.next_after_rowid is None
+                    or (after_rowid is not None and scan.next_after_rowid <= after_rowid)
+                ):
+                    raise SupervisorAssistControllerError("assist restart scan did not advance")
+                after_rowid = scan.next_after_rowid
+                await asyncio.sleep(0)
+        except asyncio.CancelledError:
+            self._restart_recovery_has_more = True
+            raise
+        except BaseException:
+            self._restart_recovery_failed += 1
+            self._restart_recovery_has_more = True
+        finally:
+            self._restart_recovery_finished = True
+
+    def start_restart_recovery(self, *, batch_limit: int = 100) -> None:
+        """Start one bounded, non-boot-gating recovery pass."""
+
+        if type(batch_limit) is not int or not 1 <= batch_limit <= 100:
+            raise ValueError("assist restart recovery batch limit must be between 1 and 100")
+        if self._closed or self._restart_recovery_started:
+            return
+        loop = asyncio.get_running_loop()
+        self._restart_recovery_started = True
+        self._restart_recovery_finished = False
+        self._restart_recovery_task = loop.create_task(
+            self._recover_active_after_restart(batch_limit=batch_limit),
+            name="semantic-supervisor-restart-recovery",
+        )
+
+    async def wait_restart_recovery(self) -> None:
+        """Wait for the one startup pass; intended for shutdown and proof tests."""
+
+        task = self._restart_recovery_task
+        if task is not None:
+            await asyncio.shield(task)
 
     async def _legacy(
         self,
@@ -938,11 +1224,13 @@ class SupervisorAssistController:
         surface: CurrentFileWebAssistSurface,
         *,
         absolute_deadline: float,
+        restart_cursor: AssistGraphCursor | None = None,
     ) -> _ProspectiveAdmission | None:
         if (
             type(surface) is not CurrentFileWebAssistSurface
             or surface.actor.user_id != surface.actor.own_id
             or not current_file_web_request_is_admitted(surface.turn.message)
+            or (restart_cursor is not None and type(restart_cursor) is not AssistGraphCursor)
             or self._closed
         ):
             return None
@@ -973,10 +1261,25 @@ class SupervisorAssistController:
             return None
         try:
             supervisor_input = build_supervisor_input(surface.turn, self._settings)
-            actor_binding_sha256 = binding_digest("actor", surface.actor.own_id)
+            restart_material = (
+                ()
+                if restart_cursor is None
+                else (
+                    "restart",
+                    self._restart_binding_nonce,
+                    restart_cursor.graph_id,
+                    str(restart_cursor.revision),
+                )
+            )
+            actor_binding_sha256 = binding_digest(
+                "actor",
+                surface.actor.own_id,
+                *restart_material,
+            )
             conversation_binding_sha256 = binding_digest(
                 "conversation",
                 surface.conversation_id,
+                *restart_material,
             )
             source_binding = PlanSourceBinding.current_raw_object(
                 raw_object_id=surface.attachment.raw_object_id,
@@ -989,19 +1292,14 @@ class SupervisorAssistController:
                     type(boundary) is not PlanAuthorityBoundary
                     or boundary.scope is not PlanAuthorityScope.ASSIST_EXECUTION
                     or boundary.actor_binding_sha256 != actor_binding_sha256
-                    or boundary.conversation_binding_sha256
-                    != conversation_binding_sha256
+                    or boundary.conversation_binding_sha256 != conversation_binding_sha256
                     or boundary.manifest_sha256 != supervisor_input.manifest.digest_hex()
                     or boundary.policy_sha256 != SUPERVISOR_ASSIST_PRODUCT_POLICY_SHA256
-                    or boundary.budget_sha256
-                    != supervisor_input.budgets.canonical_sha256()
+                    or boundary.budget_sha256 != supervisor_input.budgets.canonical_sha256()
                     or boundary.capability_bindings_sha256 != snapshot.digest_hex()
-                    or boundary.turn_deadline_monotonic_ns
-                    != int(absolute_deadline * 1_000_000_000)
+                    or boundary.turn_deadline_monotonic_ns != int(absolute_deadline * 1_000_000_000)
                 ):
-                    return PlanAuthorityDecision.rejected(
-                        PlanAuthorityReason.INVALID_BOUNDARY
-                    )
+                    return PlanAuthorityDecision.rejected(PlanAuthorityReason.INVALID_BOUNDARY)
                 try:
                     result = self._plan_authority_check(surface, boundary)
                 except Exception:
@@ -1048,10 +1346,7 @@ class SupervisorAssistController:
         if type(parsed) is not ParsedSupervisorProposal:
             return None
         proposal = cast(ParsedSupervisorProposal, parsed)
-        if (
-            not proposal.decision.admitted
-            or type(proposal.decision.plan) is not ValidatedExecutionPlan
-        ):
+        if not proposal.decision.admitted or type(proposal.decision.plan) is not ValidatedExecutionPlan:
             return None
         plan = cast(ValidatedExecutionPlan, proposal.decision.plan)
         if (
@@ -1135,23 +1430,16 @@ class SupervisorAssistController:
                     or boundary.request_binding_sha256
                     != prospective.surface.ingress_binding.canonical_sha256()
                     or boundary.accepted_plan_sha256 != prospective.plan.canonical_sha256()
-                    or boundary.adapter_registry_sha256
-                    != prospective.plan.binding_snapshot_sha256
-                    or boundary.actor_binding_sha256
-                    != prospective.plan.actor_binding_sha256
-                    or boundary.conversation_binding_sha256
-                    != prospective.plan.conversation_binding_sha256
-                    or boundary.current_file_raw_object_id
-                    != prospective.surface.attachment.raw_object_id
+                    or boundary.adapter_registry_sha256 != prospective.plan.binding_snapshot_sha256
+                    or boundary.actor_binding_sha256 != prospective.plan.actor_binding_sha256
+                    or boundary.conversation_binding_sha256 != prospective.plan.conversation_binding_sha256
+                    or boundary.current_file_raw_object_id != prospective.surface.attachment.raw_object_id
                     or boundary.current_file_source_identity_sha256
                     != prospective.surface.attachment.source_identity_sha256
-                    or boundary.current_file_content_sha256
-                    != prospective.surface.attachment_content_sha256
-                    or boundary.web_plan_sha256
-                    != prospective.surface.web_plan.canonical_sha256()
+                    or boundary.current_file_content_sha256 != prospective.surface.attachment_content_sha256
+                    or boundary.web_plan_sha256 != prospective.surface.web_plan.canonical_sha256()
                     or boundary.web_query_sha256 != prospective.surface.web_plan.query_sha256
-                    or boundary.runtime_profile_sha256
-                    != SUPERVISOR_RUNTIME_PROFILE_MANIFEST_SHA256
+                    or boundary.runtime_profile_sha256 != SUPERVISOR_RUNTIME_PROFILE_MANIFEST_SHA256
                 ):
                     return False
                 try:
@@ -1256,10 +1544,7 @@ class SupervisorAssistController:
             self._active_by_scope.pop(scope, None)
         if self._active_by_graph.get(record.graph.id) is record:
             self._active_by_graph.pop(record.graph.id, None)
-        if (
-            record.graph.state is CompareCurrentFileWebGraphState.ACTIVE
-            and record.committed_result is None
-        ):
+        if record.graph.state is CompareCurrentFileWebGraphState.ACTIVE and record.committed_result is None:
             self._retained_by_scope[scope] = record
             self._known_durable_active_scopes.add(scope)
         else:
@@ -1608,8 +1893,7 @@ class SupervisorAssistController:
                 or boundary.current_file_raw_object_id != record.surface.attachment.raw_object_id
                 or boundary.current_file_source_identity_sha256
                 != record.surface.attachment.source_identity_sha256
-                or boundary.current_file_content_sha256
-                != record.surface.attachment_content_sha256
+                or boundary.current_file_content_sha256 != record.surface.attachment_content_sha256
             ):
                 return False
             try:
@@ -1649,8 +1933,7 @@ class SupervisorAssistController:
                 or boundary.current_file_raw_object_id != record.surface.attachment.raw_object_id
                 or boundary.current_file_source_identity_sha256
                 != record.surface.attachment.source_identity_sha256
-                or boundary.current_file_content_sha256
-                != record.surface.attachment_content_sha256
+                or boundary.current_file_content_sha256 != record.surface.attachment_content_sha256
             ):
                 return False
             try:
@@ -2513,8 +2796,7 @@ class SupervisorAssistController:
                 active.graph.id != pending.work_graph_id
                 or pending.revision is None
                 or active.graph.revision < pending.revision
-                or active.graph.anchor_request_binding_sha256
-                != decision.root_request_binding_sha256
+                or active.graph.anchor_request_binding_sha256 != decision.root_request_binding_sha256
                 or active.pending.work_graph_id != active.graph.id
                 or active.pending.revision != active.graph.revision
             ):
@@ -2531,8 +2813,7 @@ class SupervisorAssistController:
             if (
                 retained.graph.id != pending.work_graph_id
                 or retained.graph.revision != pending.revision
-                or retained.graph.anchor_request_binding_sha256
-                != decision.root_request_binding_sha256
+                or retained.graph.anchor_request_binding_sha256 != decision.root_request_binding_sha256
                 or retained.pending != pending
             ):
                 return AssistPendingGraphDisposition.UNCERTAIN
@@ -2706,8 +2987,7 @@ class SupervisorAssistController:
             record.graph.id != pending.work_graph_id
             or pending.revision is None
             or record.graph.revision < pending.revision
-            or record.graph.anchor_request_binding_sha256
-            != decision.root_request_binding_sha256
+            or record.graph.anchor_request_binding_sha256 != decision.root_request_binding_sha256
         ):
             return None
         if (
@@ -2777,6 +3057,10 @@ class SupervisorAssistController:
         if self._closed:
             return
         self._closed = True
+        current = asyncio.current_task()
+        recovery_task = self._restart_recovery_task
+        if recovery_task is not None and recovery_task is not current and not recovery_task.done():
+            recovery_task.cancel()
         records = tuple(self._active_by_graph.values())
         owned_tasks = {record.task for record in records}
         children: list[asyncio.Task[Any]] = []
@@ -2787,7 +3071,6 @@ class SupervisorAssistController:
         for child in children:
             if not child.done():
                 child.cancel()
-        current = asyncio.current_task()
         preownership = tuple(
             task
             for task in self._dispatch_tasks
@@ -2800,6 +3083,8 @@ class SupervisorAssistController:
         remaining = tuple(task for task in self._dispatch_tasks if task is not current and not task.done())
         if remaining:
             await asyncio.gather(*remaining, return_exceptions=True)
+        if recovery_task is not None and recovery_task is not current:
+            await asyncio.gather(recovery_task, return_exceptions=True)
 
 
 __all__ = [

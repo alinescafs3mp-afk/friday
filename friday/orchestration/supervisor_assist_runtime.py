@@ -47,6 +47,10 @@ class _PrimaryChatRuntime(Protocol):
 class _AssistController(Protocol):
     def semantic_supervisor_status(self) -> dict[str, object]: ...
 
+    def start_restart_recovery(self, *, batch_limit: int = 100) -> None: ...
+
+    async def wait_restart_recovery(self) -> None: ...
+
     def pending_durable_turn_admission(
         self,
         user_id: str,
@@ -364,13 +368,16 @@ class SemanticSupervisorAssistRuntime:
         conversation_id: str | None,
         current_attachment_count: int = 0,
     ) -> bool:
-        return self.pending_durable_turn_admission(
-            user_id,
-            message,
-            actor=actor,
-            conversation_id=conversation_id,
-            current_attachment_count=current_attachment_count,
-        ) is not False
+        return (
+            self.pending_durable_turn_admission(
+                user_id,
+                message,
+                actor=actor,
+                conversation_id=conversation_id,
+                current_attachment_count=current_attachment_count,
+            )
+            is not False
+        )
 
     async def _observe_ordinary(self, response: Mapping[str, Any], actor: ActorContext) -> None:
         if self._ordinary_observer is None:
@@ -454,8 +461,7 @@ class SemanticSupervisorAssistRuntime:
             active = _semantic_supervisor_pending_decision
             expected_current = (
                 None
-                if type(_semantic_supervisor_ingress_binding)
-                is not SupervisorAssistIngressBindingV1
+                if type(_semantic_supervisor_ingress_binding) is not SupervisorAssistIngressBindingV1
                 else _semantic_supervisor_ingress_binding.canonical_sha256()
             )
             if (
@@ -524,9 +530,7 @@ class SemanticSupervisorAssistRuntime:
             except asyncio.CancelledError:
                 raise
             except Exception as exc:
-                raise SupervisorAssistRuntimeError(
-                    "durable assist reconciliation is uncertain"
-                ) from exc
+                raise SupervisorAssistRuntimeError("durable assist reconciliation is uncertain") from exc
             if disposition is AssistPendingGraphDisposition.UNCERTAIN:
                 raise SupervisorAssistRuntimeError("durable assist reconciliation is uncertain")
             if disposition not in {
@@ -585,6 +589,14 @@ class SemanticSupervisorAssistRuntime:
         if type(result.response) is not dict:
             raise SupervisorAssistRuntimeError("promoted owner has no committed response")
         return result.response
+
+    def start_restart_recovery(self, *, batch_limit: int = 100) -> None:
+        if self._closed:
+            return
+        self._controller.start_restart_recovery(batch_limit=batch_limit)
+
+    async def wait_restart_recovery(self) -> None:
+        await self._controller.wait_restart_recovery()
 
     async def close(self) -> None:
         if self._closed:

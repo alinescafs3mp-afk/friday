@@ -161,7 +161,7 @@ def test_schema45_exact_binding_is_durable_immutable_and_revision_cas(storage) -
     graph = _seed_bound_graph(storage, "exact")
 
     assert SCHEMA_VERSION == 45
-    assert COMPARE_CURRENT_FILE_WEB_WORK_GRAPH_SCHEMA.endswith(".v2")
+    assert COMPARE_CURRENT_FILE_WEB_WORK_GRAPH_SCHEMA.endswith(".v3")
     assert graph.has_exact_request_binding is True
     assert graph.payload()["anchor_request_binding_sha256"] == graph.anchor_request_binding_sha256
     validate_work_item_schema(storage.conn)

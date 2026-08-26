@@ -7,7 +7,7 @@ import time
 from collections.abc import Callable
 from dataclasses import replace
 from types import SimpleNamespace
-from typing import Any, cast
+from typing import Any, NoReturn, cast
 
 import pytest
 
@@ -35,6 +35,8 @@ from friday.interaction_control_plane.compare_current_file_web_work_graph import
     CompareCurrentFileWebStepState,
     CompareCurrentFileWebWorkGraph,
 )
+from friday.interaction_control_plane.runtime_trace import INTERACTION_TRACE_METADATA_KEY
+from friday.interaction_control_plane.turn_trace import TurnTrace
 from friday.model_profiles import ModelProfileLease, ModelRequirements
 from friday.orchestration.capability_binding import (
     CapabilityBindingSnapshot,
@@ -73,6 +75,9 @@ from friday.orchestration.supervisor_assist_promotion import (
     AssistPromotionDecision,
     AssistPromotionReadiness,
     AssistPromotionReason,
+)
+from friday.orchestration.supervisor_assist_recovery import (
+    SupervisorAssistRecoverySurfaceLoader,
 )
 from friday.orchestration.supervisor_assist_surface import (
     CurrentFileWebAssistSurface,
@@ -745,6 +750,7 @@ class _CountingAdapter(SupervisorAssistGraphAdapter):
         self.mixed_terminal_calls = 0
         self.cancel_calls = 0
         self.restart_calls = 0
+        self.rebind_calls = 0
 
     def admit(self, *args: Any, **kwargs: Any) -> CompareCurrentFileWebWorkGraph:
         self.admit_calls += 1
@@ -782,6 +788,14 @@ class _CountingAdapter(SupervisorAssistGraphAdapter):
         self.restart_calls += 1
         return super().restart_or_retire(*args, **kwargs)
 
+    def rebind_after_restart(
+        self,
+        *args: Any,
+        **kwargs: Any,
+    ) -> CompareCurrentFileWebWorkGraph:
+        self.rebind_calls += 1
+        return super().rebind_after_restart(*args, **kwargs)
+
 
 def _controller(
     *,
@@ -803,10 +817,13 @@ def _controller(
         witness_sha256="9" * 64,
     ),
     effect_check: Any = lambda _boundary: True,
+    recovery_surface_loader: Any = None,
 ) -> SupervisorAssistController:
     kwargs: dict[str, Any] = {}
     if synthesizer is not None:
         kwargs["synthesizer"] = synthesizer
+    if recovery_surface_loader is not None:
+        kwargs["recovery_surface_loader"] = recovery_surface_loader
     return SupervisorAssistController(
         settings=settings or _settings(),
         promotion_evaluator=promotion or _Promotion(),
@@ -825,6 +842,65 @@ def _controller(
         binding_snapshot_factory=binding_snapshot_factory,
         **kwargs,
     )
+
+
+async def _seed_interrupted_active_graph(
+    storage: Any,
+    label: str,
+) -> tuple[
+    CurrentFileWebAssistSurface,
+    dict[str, object],
+    CompareCurrentFileWebWorkGraph,
+]:
+    surface, projection = _stored_surface(storage, label)
+    adapter = _CountingAdapter(storage)
+    gate = asyncio.Event()
+    file_reader = _FileReader(_prepared_file(surface, projection), gate=gate)
+    web_reader = _WebReader(_web_evidence(surface), gate=gate)
+    controller = _controller(
+        graph_adapter=adapter,
+        file_reader=file_reader,
+        web_reader=web_reader,
+    )
+    legacy_calls = 0
+
+    async def forbidden_legacy() -> dict[str, object]:
+        nonlocal legacy_calls
+        legacy_calls += 1
+        raise AssertionError("legacy cannot run after ownership")
+
+    task = asyncio.create_task(
+        controller.execute(
+            surface,
+            legacy_primary=forbidden_legacy,
+            absolute_deadline=time.monotonic() + 5,
+        )
+    )
+    await asyncio.wait_for(
+        asyncio.gather(file_reader.started.wait(), web_reader.started.wait()),
+        timeout=2,
+    )
+    task.cancel()
+    interrupted = await asyncio.wait_for(task, timeout=2)
+    await controller.close()
+
+    pending = interrupted.pending_admission
+    assert interrupted.outcome is SupervisorAssistOutcome.INTERRUPTED
+    assert pending is not None
+    assert pending.work_graph_id is not None and pending.revision is not None
+    graph = adapter.load(
+        AssistGraphCursor(
+            graph_id=pending.work_graph_id,
+            user_id=surface.actor.user_id,
+            conversation_id=surface.conversation_id,
+            revision=pending.revision,
+        )
+    )
+    assert graph is not None and graph.state is CompareCurrentFileWebGraphState.ACTIVE
+    assert graph.restart_count == 0
+    assert adapter.publish_calls == adapter.terminal_calls == adapter.restart_calls == 0
+    assert legacy_calls == 0
+    return surface, projection, graph
 
 
 @pytest.mark.asyncio
@@ -1775,3 +1851,189 @@ async def test_close_drains_process_tasks_but_leaves_graph_for_startup_retiremen
     assert status["active_tasks"] == 0
     assert status["retained_active_graphs"] == 1
     assert surface.turn.message not in json.dumps(status, ensure_ascii=False)
+
+
+@pytest.mark.asyncio
+async def test_startup_restart_recovery_replans_rebinds_and_publishes_once(
+    storage: Any,
+) -> None:
+    surface, projection, predecessor = await _seed_interrupted_active_graph(
+        storage,
+        "restart-resume",
+    )
+    storage.update_user(surface.actor.user_id, preset_key="owner")
+    loader = SupervisorAssistRecoverySurfaceLoader(storage, AuthorizationService(storage))
+    recovered = loader(predecessor)
+    assert recovered is not None and recovered.graph == predecessor
+    assert recovered.surface.actor is not surface.actor
+    assert recovered.surface.ingress_binding == surface.ingress_binding
+
+    adapter = _CountingAdapter(storage)
+    planner = _Planner()
+    primary = _Primary()
+    file_reader = _FileReader(_prepared_file(recovered.surface, projection))
+    web_reader = _WebReader(_web_evidence(recovered.surface))
+    observed: list[object] = []
+    controller = _controller(
+        planner=planner,
+        primary=primary,
+        graph_adapter=adapter,
+        file_reader=file_reader,
+        web_reader=web_reader,
+        observer=observed.append,
+        recovery_surface_loader=loader,
+    )
+
+    controller.start_restart_recovery(batch_limit=1)
+    controller.start_restart_recovery(batch_limit=1)
+    await asyncio.wait_for(controller.wait_restart_recovery(), timeout=5)
+
+    status = controller.restart_recovery_status()
+    assert status == {
+        "schema": "friday.semantic-supervisor-assist-restart-status.v1",
+        "started": True,
+        "running": False,
+        "finished": True,
+        "discovered": 1,
+        "rebound": 1,
+        "completed": 1,
+        "retained": 0,
+        "failed": 0,
+        "has_more": False,
+    }
+    assert planner.calls == 1
+    assert primary.prepare_calls == 1
+    assert file_reader.calls == web_reader.calls == 1
+    assert adapter.admit_calls == 0
+    assert adapter.rebind_calls == adapter.publish_calls == 1
+    assert (
+        adapter.terminal_calls
+        == adapter.mixed_terminal_calls
+        == adapter.cancel_calls
+        == adapter.restart_calls
+        == 0
+    )
+    assert len(observed) == 1
+    assert controller.semantic_supervisor_status()["fallback_total"] == 0
+
+    completed = adapter.load(AssistGraphCursor.from_graph(predecessor))
+    assert completed is not None
+    assert completed.state is CompareCurrentFileWebGraphState.COMPLETED
+    assert completed.restart_count == 1
+    assistant = storage.execute(
+        "SELECT metadata_json FROM messages WHERE id=?",
+        (completed.publication_assistant_message_id,),
+    ).fetchone()
+    assert assistant is not None
+    trace = TurnTrace.parse(json.loads(assistant["metadata_json"])[INTERACTION_TRACE_METADATA_KEY])
+    assert trace.state_restored is True
+    assert (
+        storage.execute(
+            "SELECT COUNT(*) FROM messages WHERE conversation_id=? AND role='user'",
+            (surface.conversation_id,),
+        ).fetchone()[0]
+        == 1
+    )
+    assert (
+        storage.execute(
+            "SELECT COUNT(*) FROM messages WHERE conversation_id=? AND role='assistant'",
+            (surface.conversation_id,),
+        ).fetchone()[0]
+        == 1
+    )
+    await controller.close()
+
+
+@pytest.mark.asyncio
+async def test_startup_restart_recovery_recovers_lost_rebind_ack_without_duplicate(
+    storage: Any,
+) -> None:
+    surface, projection, predecessor = await _seed_interrupted_active_graph(
+        storage,
+        "restart-lost-rebind-ack",
+    )
+    storage.update_user(surface.actor.user_id, preset_key="owner")
+    loader = SupervisorAssistRecoverySurfaceLoader(storage, AuthorizationService(storage))
+    recovered = loader(predecessor)
+    assert recovered is not None
+
+    class LostAckAdapter(_CountingAdapter):
+        def rebind_after_restart(self, *args: Any, **kwargs: Any) -> NoReturn:
+            super().rebind_after_restart(*args, **kwargs)
+            raise RuntimeError("synthetic lost restart commit acknowledgement")
+
+    adapter = LostAckAdapter(storage)
+    controller = _controller(
+        graph_adapter=adapter,
+        file_reader=_FileReader(_prepared_file(recovered.surface, projection)),
+        web_reader=_WebReader(_web_evidence(recovered.surface)),
+        recovery_surface_loader=loader,
+    )
+
+    controller.start_restart_recovery()
+    await asyncio.wait_for(controller.wait_restart_recovery(), timeout=5)
+
+    status = controller.restart_recovery_status()
+    assert status["rebound"] == status["completed"] == 1
+    assert status["retained"] == status["failed"] == 0
+    assert adapter.rebind_calls == adapter.publish_calls == 1
+    completed = adapter.load(AssistGraphCursor.from_graph(predecessor))
+    assert completed is not None and completed.state is CompareCurrentFileWebGraphState.COMPLETED
+    assert (
+        storage.execute(
+            "SELECT COUNT(*) FROM messages WHERE conversation_id=? AND role='assistant'",
+            (surface.conversation_id,),
+        ).fetchone()[0]
+        == 1
+    )
+    await controller.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("label", "loader_result"),
+    (("unavailable", None), ("invalid", object())),
+)
+async def test_startup_restart_recovery_retains_invalid_or_unavailable_surface(
+    storage: Any,
+    label: str,
+    loader_result: object | None,
+) -> None:
+    surface, _projection, predecessor = await _seed_interrupted_active_graph(
+        storage,
+        f"restart-retain-{label}",
+    )
+    adapter = _CountingAdapter(storage)
+
+    def recovery_loader(_graph: CompareCurrentFileWebWorkGraph) -> Any:
+        return loader_result
+
+    controller = _controller(
+        graph_adapter=adapter,
+        recovery_surface_loader=recovery_loader,
+    )
+
+    controller.start_restart_recovery(batch_limit=1)
+    await asyncio.wait_for(controller.wait_restart_recovery(), timeout=5)
+
+    status = controller.restart_recovery_status()
+    assert status["started"] is status["finished"] is True
+    assert status["running"] is status["has_more"] is False
+    assert status["discovered"] == status["retained"] == 1
+    assert status["rebound"] == status["completed"] == 0
+    assert adapter.rebind_calls == adapter.publish_calls == adapter.terminal_calls == 0
+    assert adapter.restart_calls == adapter.cancel_calls == 0
+    assert controller.semantic_supervisor_status()["fallback_total"] == 0
+
+    retained = adapter.load(AssistGraphCursor.from_graph(predecessor))
+    assert retained == predecessor
+    assert retained is not None and retained.state is CompareCurrentFileWebGraphState.ACTIVE
+    assert retained.restart_count == 0
+    assert (
+        storage.execute(
+            "SELECT COUNT(*) FROM messages WHERE conversation_id=? AND role='assistant'",
+            (surface.conversation_id,),
+        ).fetchone()[0]
+        == 0
+    )
+    await controller.close()
