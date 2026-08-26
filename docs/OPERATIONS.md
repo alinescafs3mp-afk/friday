@@ -145,9 +145,11 @@ raw receipt и lookup token в source отсутствуют. Только disti
 atomic owner-only consume могут сменить ровно
 `DOCUMENT_MAP_MODE=shadow→assist`; ENV/CLI не могут подменить эти digests.
 
-На GPU эта дорога заметна только для документов, которые runtime разбивает на
-иерархические MAP/REDUCE-фрагменты. Небольшой документ, обычный диалог,
-web-search и финальный ответ по-прежнему могут вообще не обращаться к ноутбуку.
+В `0.207.33` GPU-дорога также включается для полного текста обычного текущего
+документа: bare upload и естественные RU/EN запросы summary/review/analysis/compare
+дают до восьми byte-safe MAP-вызовов под общим 15-секундным deadline. После них
+выполняется ровно один primary final. Oversize, laptop-off, timeout или malformed ответ
+дают прежний primary-only путь. Обычный диалог, web-search и final не публикуются secondary.
 
 Source 0.207.27 не расширяет полномочия secondary: bounded Inbox
 extraction запрашивает точную code-owned JSON Schema и по-прежнему
@@ -755,7 +757,7 @@ orchestration.model_gate.verified_context_tokens = 8192
 ```
 
 Во время probe `/api/health` ещё недоступен. Ждите до 420 секунд и дополнительно
-требуйте `status=ok` и `version=0.207.32`.
+требуйте `status=ok` и `version=0.207.33`.
 
 HTTP `status=ok` при `installed_mode=legacy` означает безопасную деградацию, но
 не успешный canary. В `canary`/`v12` Sentinel не реже раза в минуту

@@ -1,3 +1,27 @@
+## 0.207.33 — 2026-08-26
+
+### Current-document secondary assist and fail-open publication guards
+
+- Complete current text and Office documents now reach the accepted GPT-OSS
+  document-map assist on bare upload and natural RU/EN summary, review,
+  analysis and comparison requests. Byte-safe MAP batches share one 15-second
+  ceiling; malformed, slow, unavailable or oversized advice falls back to
+  exactly one unchanged primary synthesis.
+- Secondary routing uses clause-aware intent boundaries: partial, exact,
+  metadata, effect, replay, reply and historical requests remain excluded,
+  while ordinary wording and negative output constraints no longer suppress a
+  valid read-only review.
+- Deed and web publication guards now require either the matching requested
+  effect/web route or an unmistakable current self-action. Ambiguous passive
+  prose in document, archive, local-search and informational answers is no
+  longer allowed to erase the whole answer; explicit unsupported completion
+  claims remain blocked.
+- Ambient attachment state can no longer hide a content-free image-generation
+  capability question. Explicit attachment image work remains on the normal
+  attachment route.
+- Schema, live secondary profile, accepted policy and environment are
+  unchanged.
+
 ## 0.207.32 — 2026-08-26
 
 ### Capability-offer output-guard hotfix
