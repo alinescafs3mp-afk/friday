@@ -1,4 +1,12 @@
-"""Exact schema-42 projection for bounded durable interaction Work Items."""
+"""Exact schema-42 projection for bounded durable interaction Work Items.
+
+The core database marker remains 43.  ``WORK_ITEM_SCHEMA`` additionally carries
+one dormant reader-compatible shape: a completed archive candidate replay may
+anchor a new selected-evidence reader while the immutable evidence keeps its
+original search boundary.  The released schema-42 trigger remains an accepted
+exact fallback until the separate writer package deliberately installs the new
+trigger on an existing database.
+"""
 
 from __future__ import annotations
 
@@ -2022,7 +2030,72 @@ BEGIN SELECT RAISE(ABORT,'comparison Work Item lifecycle is invalid'); END;
 
 
 _WORK_ITEM_SCHEMA_42 = _schema_42_full_from_40()
-WORK_ITEM_SCHEMA = _WORK_ITEM_SCHEMA_42
+
+
+def _selected_evidence_promotion_reader_from_42() -> str:
+    """Add dormant candidate-to-reader lineage without changing table shape.
+
+    The selected evidence sidecar already distinguishes its immutable origin
+    from the Work Item's current publication anchor, and the Python reader has
+    always admitted ``evidence_replayed`` at revision two or later.  The
+    released insert trigger was narrower: it allowed a reader only while its
+    two boundaries were identical.  This exact extension admits a different
+    anchor only when an already-completed candidate Work Item proves the
+    selected ordinal, receipt, coverage and source identities.
+    """
+
+    released = f"""                (work.kind='recall_selected_archive_evidence'
+                 AND work.active_frame_json='{RECALL_SELECTED_ARCHIVE_EVIDENCE_ACTIVE_FRAME_JSON}'
+                 AND work.anchor_user_message_id=NEW.origin_boundary_user_message_id)
+"""
+    reader = f"""                (work.kind='recall_selected_archive_evidence'
+                 AND work.active_frame_json='{RECALL_SELECTED_ARCHIVE_EVIDENCE_ACTIVE_FRAME_JSON}'
+                 AND (
+                      (work.anchor_user_message_id=NEW.origin_boundary_user_message_id)
+                      OR
+                      (work.state='active'
+                       AND work.transition='evidence_replayed'
+                       AND work.revision>=2
+                       AND work.anchor_user_message_id<>NEW.origin_boundary_user_message_id
+                       AND EXISTS (
+                           SELECT 1
+                             FROM work_items candidate_work
+                             JOIN work_item_archive_candidate_sets candidate_set
+                               ON candidate_set.work_item_id=candidate_work.id
+                             JOIN work_item_archive_candidate_questions question
+                               ON question.work_item_id=candidate_work.id
+                              AND question.candidate_set_id=candidate_set.id
+                             JOIN work_item_archive_candidate_set_items candidate
+                               ON candidate.work_item_id=candidate_work.id
+                              AND candidate.candidate_set_id=candidate_set.id
+                              AND candidate.ordinal=question.selected_ordinal
+                            WHERE candidate_work.user_id=work.user_id
+                              AND candidate_work.conversation_id=work.conversation_id
+                              AND candidate_work.kind='select_archive_candidate_and_replay_evidence'
+                              AND candidate_work.state='completed'
+                              AND candidate_work.transition='candidate_replayed'
+                              AND question.state='answered'
+                              AND question.replay_boundary_user_message_id=work.anchor_user_message_id
+                              AND question.replay_assistant_message_id=work.anchor_assistant_message_id
+                              AND question.accepted_replay_plan_sha256=work.accepted_plan_sha256
+                              AND question.accepted_replay_outcome_sha256=work.accepted_outcome_sha256
+                              AND candidate_set.origin_boundary_user_message_id=
+                                  NEW.origin_boundary_user_message_id
+                              AND candidate_set.coverage_sha256=NEW.coverage_sha256
+                              AND candidate_set.coverage_grade=NEW.coverage_grade
+                              AND candidate.corpus=NEW.corpus
+                              AND json(candidate.source_ref_json)=json(NEW.source_ref_json)
+                              AND json(candidate.passage_refs_json)=json(NEW.passage_refs_json)
+                              AND candidate.source_snapshot_sha256=NEW.source_snapshot_sha256
+                       ))
+                 ))
+"""
+    if _WORK_ITEM_SCHEMA_42.count(released) != 1:
+        raise RuntimeError("released selected-evidence reader anchor is ambiguous")
+    return _WORK_ITEM_SCHEMA_42.replace(released, reader)
+
+
+WORK_ITEM_SCHEMA = _selected_evidence_promotion_reader_from_42()
 
 
 def _normalize_schema_sql(value: str) -> str:
@@ -2611,7 +2684,7 @@ def _validate_current_data(conn: sqlite3.Connection) -> None:
 
 
 def validate_work_item_schema(conn: sqlite3.Connection, *, required: bool = True) -> None:
-    """Fail closed when the exact schema-42 Work Item projection is weakened."""
+    """Fail closed outside the two exact reader-compatible schema projections."""
 
     row = conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='work_items'").fetchone()
     if row is None:
@@ -2621,7 +2694,11 @@ def validate_work_item_schema(conn: sqlite3.Connection, *, required: bool = True
             raise sqlite3.DatabaseError("Schema 42 work item DDL is incomplete or altered")
         return
     register_work_item_connection_functions(conn)
-    if _schema_objects(conn, current=True) != _canonical_work_item_schema_objects():
+    installed = _schema_objects(conn, current=True)
+    if installed not in (
+        _canonical_work_item_schema_objects(),
+        _canonical_schema_42_objects(),
+    ):
         raise sqlite3.DatabaseError("Schema 42 work item DDL is incomplete or altered")
 
     expected_index_columns = {
@@ -2885,7 +2962,10 @@ def upgrade_work_item_schema_to_42(
         if required:
             raise sqlite3.DatabaseError("Work Item store is missing")
         return
-    if _schema_objects(conn, current=True) == _canonical_work_item_schema_objects():
+    if _schema_objects(conn, current=True) in (
+        _canonical_work_item_schema_objects(),
+        _canonical_schema_42_objects(),
+    ):
         validate_work_item_schema(conn)
         return
 

@@ -35,6 +35,10 @@ from friday.interaction_control_plane.archive_candidate_selection_store import (
     reask_archive_candidate_selection_in_transaction,
     suspend_after_replay_failure_in_transaction,
 )
+from friday.interaction_control_plane.archive_evidence_work_item_store import (
+    get_current_recall_selected_archive_evidence_work_item_in_transaction,
+    new_recall_selected_archive_evidence_work_item_id,
+)
 from friday.interaction_control_plane.selected_archive_evidence import SelectedArchiveCorpus
 from friday.interaction_control_plane.work_item_contract import (
     RECALL_SELECTED_ARCHIVE_EVIDENCE_ACTIVE_FRAME_JSON,
@@ -44,6 +48,7 @@ from friday.interaction_control_plane.work_item_contract import (
 from friday.interaction_control_plane.work_item_schema import (
     _WORK_ITEM_SCHEMA_39,
     _WORK_ITEM_SCHEMA_40,
+    _WORK_ITEM_SCHEMA_42,
     _WORK_ITEM_TABLES,
     WORK_ITEM_SCHEMA,
     _execute_schema,
@@ -340,6 +345,91 @@ def _publish_replay_failure(
         reply_to=boundary["id"],
     )
     return boundary, assistant, outcome, outcome_sha256
+
+
+def _install_promoted_selected_evidence_reader(
+    storage: Any,
+    item: Any,
+    *,
+    ordinal: int = 2,
+    mutation: str = "",
+) -> tuple[Any, Any, Any, Any]:
+    """Install only the future reader row; production has no writer yet."""
+
+    boundary, assistant, outcome, outcome_sha256 = _publish_replay(
+        storage,
+        item,
+        ordinal=ordinal,
+    )
+    work_item_id = new_recall_selected_archive_evidence_work_item_id()
+    selected_ordinal = 1 if mutation == "selected_source" else ordinal
+    accepted_plan_sha256 = "0" * 64 if mutation == "accepted_plan" else outcome.plan_sha256
+    promoted_at = "2026-08-25T05:01:00+00:00"
+    with storage.transaction() as conn:
+        accept_archive_candidate_selection_in_transaction(
+            conn,
+            work_item_id=item.id,
+            user_id=item.user_id,
+            conversation_id=item.conversation_id,
+            expected_revision=item.revision,
+            selected_ordinal=ordinal,
+            new_boundary_user_message_id=boundary["id"],
+            new_assistant_message_id=assistant["id"],
+            new_accepted_plan_sha256=outcome.plan_sha256,
+            new_accepted_outcome_sha256=outcome_sha256,
+            now=promoted_at,
+        )
+    origin_boundary_user_message_id = item.candidate_set.origin_boundary_user_message_id
+    if mutation == "origin_boundary":
+        origin_boundary_user_message_id = storage.store_message(
+            item.conversation_id,
+            item.user_id,
+            "user",
+            "unrelated archive origin",
+        )["id"]
+    evidence = replace(
+        item.candidate_set.selected_evidence(selected_ordinal),
+        work_item_id=work_item_id,
+        origin_boundary_user_message_id=origin_boundary_user_message_id,
+    )
+    with storage.transaction() as conn:
+        conn.execute(
+            """INSERT INTO work_items(
+                   id,user_id,conversation_id,kind,goal,state,playbook,
+                   completion_contract,active_frame_json,anchor_user_message_id,
+                   anchor_assistant_message_id,accepted_plan_sha256,
+                   accepted_outcome_sha256,revision,transition,created_at,
+                   updated_at,expires_at,closed_at
+               ) VALUES(?,?,?,'recall_selected_archive_evidence',
+                        'exact_selected_archive_evidence_recall','active',
+                        'recall_selected_archive_evidence',
+                        'accepted_exact_selected_archive_evidence',?,?,?,?,?,2,
+                        'evidence_replayed',?,?,?,NULL)""",
+            (
+                work_item_id,
+                item.user_id,
+                item.conversation_id,
+                RECALL_SELECTED_ARCHIVE_EVIDENCE_ACTIVE_FRAME_JSON,
+                boundary["id"],
+                assistant["id"],
+                accepted_plan_sha256,
+                outcome_sha256,
+                promoted_at,
+                promoted_at,
+                "2026-08-25T17:01:00+00:00",
+            ),
+        )
+        conn.execute(
+            """INSERT INTO work_item_selected_evidence(
+                   work_item_id,corpus,source_ref_json,passage_refs_json,
+                   source_snapshot_sha256,coverage_sha256,coverage_grade,
+                   origin_boundary_user_message_id
+               ) VALUES(:work_item_id,:corpus,:source_ref_json,:passage_refs_json,
+                        :source_snapshot_sha256,:coverage_sha256,:coverage_grade,
+                        :origin_boundary_user_message_id)""",
+            evidence.to_storage_payload(),
+        )
+    return boundary, assistant, outcome, evidence
 
 
 @pytest.mark.parametrize("mutation", ["accept", "reask", "failure"])
@@ -1466,6 +1556,122 @@ def test_restore_refuses_manifest_valid_backup_with_forged_candidate_receipt(sto
             backup["database"],
             safety_label="candidate-forged-receipt-pre-restore",
         )
+
+
+def test_promoted_selected_evidence_reader_survives_schema43_restart(
+    settings: Any,
+    tmp_path: Path,
+) -> None:
+    database = tmp_path / "promoted-selected-reader.sqlite3"
+    initial = FridayStorage(replace(settings, database_path=database))
+    item = _create_work(initial, "promoted-selected-reader-owner")
+    boundary, assistant, outcome, evidence = _install_promoted_selected_evidence_reader(
+        initial,
+        item,
+    )
+    try:
+        validate_work_item_schema(initial.conn)
+        assert (
+            initial.execute("SELECT value FROM schema_meta WHERE key='schema_version'").fetchone()[0] == "43"
+        )
+        with initial.transaction() as conn:
+            loaded = get_current_recall_selected_archive_evidence_work_item_in_transaction(
+                conn,
+                user_id=item.user_id,
+                conversation_id=item.conversation_id,
+                now="2026-08-25T05:02:00+00:00",
+            )
+        assert loaded is not None
+        assert loaded.id == evidence.work_item_id
+        assert loaded.state is WorkState.ACTIVE
+        assert loaded.transition is WorkTransition.EVIDENCE_REPLAYED
+        assert loaded.revision == 2
+        assert loaded.anchor_user_message_id == boundary["id"]
+        assert loaded.anchor_assistant_message_id == assistant["id"]
+        assert loaded.accepted_plan_sha256 == outcome.plan_sha256
+        assert loaded.selected_evidence == evidence
+        assert (
+            loaded.selected_evidence.origin_boundary_user_message_id
+            == item.candidate_set.origin_boundary_user_message_id
+        )
+    finally:
+        initial.close()
+
+    reopened = FridayStorage(
+        replace(
+            settings,
+            database_path=database,
+            database_must_exist=True,
+        )
+    )
+    try:
+        validate_work_item_schema(reopened.conn)
+        with reopened.transaction() as conn:
+            restored = get_current_recall_selected_archive_evidence_work_item_in_transaction(
+                conn,
+                user_id=item.user_id,
+                conversation_id=item.conversation_id,
+                now="2026-08-25T05:02:00+00:00",
+            )
+        assert restored == loaded
+        assert (
+            reopened.execute("SELECT value FROM schema_meta WHERE key='schema_version'").fetchone()[0] == "43"
+        )
+    finally:
+        reopened.close()
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    ["selected_source", "origin_boundary", "accepted_plan"],
+)
+def test_promoted_reader_trigger_rejects_unproved_candidate_lineage(
+    storage: Any,
+    mutation: str,
+) -> None:
+    item = _create_work(storage, f"promoted-reader-forgery-{mutation}")
+    with pytest.raises(sqlite3.IntegrityError, match="selected archive evidence scope"):
+        _install_promoted_selected_evidence_reader(
+            storage,
+            item,
+            mutation=mutation,
+        )
+
+    assert (
+        storage.execute(
+            """SELECT COUNT(*) FROM work_items
+             WHERE user_id=? AND conversation_id=?
+               AND kind='recall_selected_archive_evidence'""",
+            (item.user_id, item.conversation_id),
+        ).fetchone()[0]
+        == 0
+    )
+    completed = storage.execute(
+        "SELECT state,transition FROM work_items WHERE id=?",
+        (item.id,),
+    ).fetchone()
+    assert tuple(completed) == ("completed", "candidate_replayed")
+
+
+def test_released_schema42_reader_is_accepted_without_trigger_rewrite(storage: Any) -> None:
+    assert WORK_ITEM_SCHEMA != _WORK_ITEM_SCHEMA_42
+    trigger = "trg_work_item_selected_evidence_scope_insert"
+    with storage.transaction() as conn:
+        conn.execute(f'DROP TRIGGER "{trigger}"')
+        _execute_schema(conn, _WORK_ITEM_SCHEMA_42)
+        before = conn.execute(
+            "SELECT sql FROM sqlite_master WHERE type='trigger' AND name=?",
+            (trigger,),
+        ).fetchone()[0]
+        validate_work_item_schema(conn)
+        upgrade_work_item_schema_to_42(conn, required=True)
+        after = conn.execute(
+            "SELECT sql FROM sqlite_master WHERE type='trigger' AND name=?",
+            (trigger,),
+        ).fetchone()[0]
+
+    assert before == after
+    validate_work_item_schema(storage.conn)
 
 
 def test_expired_candidate_rejects_selection_and_exact_schema39_upgrades(storage: Any) -> None:
