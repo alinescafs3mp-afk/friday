@@ -3972,12 +3972,18 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
                 response["host_job_closed"] = bool(closed_job_id)
                 response["host_job_id"] = closed_job_id
             return response
-        result = await request.app.state.kernel.execute_approved(
-            str(approval_id),
-            actor=actor,
-            confirmation_update_id=command_confirmation_update_id,
-            confirmation_body_hash=command_confirmation_body_hash,
-        )
+        if command_confirmation_update_id:
+            result = await request.app.state.kernel.execute_approved(
+                str(approval_id),
+                actor=actor,
+                confirmation_update_id=command_confirmation_update_id,
+                confirmation_body_hash=command_confirmation_body_hash,
+            )
+        else:
+            result = await request.app.state.kernel.execute_approved(
+                str(approval_id),
+                actor=actor,
+            )
         response = {
             "approval": await run_blocking(
                 request.app.state.storage.get_action_approval,

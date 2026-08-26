@@ -363,6 +363,28 @@ def test_stream_ack_has_a_finite_deadline() -> None:
         receiver.close()
 
 
+def test_broker_socket_fd_comes_from_exact_process_argv(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured: dict[str, object] = {}
+    broker_socket = object()
+
+    def _socket(*, fileno: int) -> object:
+        captured["fileno"] = fileno
+        return broker_socket
+
+    monkeypatch.setenv("FRIDAY_SPAWN_SOCKFD", "999")
+    monkeypatch.setattr(sys, "argv", ["spawn_helper.py", "--broker", "17"])
+    monkeypatch.setattr(spawn_helper_module.socket, "socket", _socket)
+    monkeypatch.setattr(
+        spawn_helper_module,
+        "_broker_main",
+        lambda sock: captured.update(socket=sock),
+    )
+
+    spawn_helper_module.main()
+
+    assert captured == {"fileno": 17, "socket": broker_socket}
+
+
 def test_low_block_pipe_fd_is_duplicated_before_posix_spawn_actions(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

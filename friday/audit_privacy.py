@@ -332,6 +332,7 @@ _SAFE_AUDIT_TARGET_TYPES = frozenset(
         "relation",
         "relation_candidate",
         "resolution",
+        "semantic_supervisor_witness",
         "tool",
         "user",
     }

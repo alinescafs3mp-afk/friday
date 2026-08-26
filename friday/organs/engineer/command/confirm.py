@@ -10,11 +10,12 @@ from __future__ import annotations
 
 import hmac
 import json
-import os
 import secrets
 import time
 from hashlib import sha256
 from typing import Any
+
+from friday.config import env as config_env
 
 from .contracts import (
     ALLOWED_CHANNELS,
@@ -68,7 +69,7 @@ class OwnerConfirmationAuthority:
 
     @classmethod
     def from_env(cls, name: str = "FRIDAY_ENGINEER_OWNER_CONFIRM_SECRET") -> OwnerConfirmationAuthority:
-        raw = os.environ.get(name, "")
+        raw = config_env(name, "")
         if not raw:
             raise CommandError("confirm_secret_missing")
         secret = raw.encode("utf-8") if isinstance(raw, str) else bytes(raw)
