@@ -450,15 +450,19 @@ PROFILES["qwen36-27b-nvfp4-nvidia"] = RuntimeProfile(
 )
 
 
-# Exact graph-only Qwen3.8 dispatcher measured on 2026-08-18.  The model and
-# SGLang identities are code-owned provenance; ``dispatcher`` remains only the
-# OpenAI-compatible served alias.  V12 authority is registered independently in
-# ``friday.model_profiles`` and still requires a fresh live attestation.
+# Exact graph-only abliterated Qwen3.8 dispatcher activated on 2026-08-26.  The
+# model and SGLang identities are code-owned provenance; ``dispatcher`` remains
+# only the OpenAI-compatible served alias.  V12 authority is registered
+# independently in ``friday.model_profiles`` and still requires a fresh live
+# attestation for this exact v12.15 pairing.
 PROFILES["qwen38-27b-nvfp4-sglang"] = RuntimeProfile(
     name="qwen38-27b-nvfp4-sglang",
-    title="Qwen3.8 27B A2Genesis NVFP4 (SGLang)",
-    description=("Aligned multimodal Qwen3.8 27B served by the pinned graph-only SGLang runtime."),
-    model_dir_name="qwen3.8-27b-nvfp4-a2genesis-bfd9b312",
+    title="Qwen3.8 27B Huihui Abliterated NVFP4 (SGLang)",
+    description=(
+        "Abliterated multimodal Qwen3.8 27B with ModelOpt W4A4 NVFP4 and FP8 KV, "
+        "served by the pinned graph-only SGLang runtime."
+    ),
+    model_dir_name="qwen3.8-27b-abliterated-nvfp4-vtuber-43aa7ff5",
     eager_mode=False,
     max_steps=24,
     temperature=0.25,
@@ -470,20 +474,20 @@ PROFILES["qwen38-27b-nvfp4-sglang"] = RuntimeProfile(
     cpu_offload_gb=0,
     kv_offloading_gb=0,
     inference_backend="sglang",
-    model_repository="a2genesis/Qwen3.8-27B-NVFP4",
-    model_revision="bfd9b31207712e0850eec9da32261e8c5ee16af7",
-    model_quantization="W4A16_NVFP4",
+    model_repository="Vtuber-plan/Huihui-Qwen3.8-27B-abliterated-NVFP4",
+    model_revision="43aa7ff5eef05ab50a3bfa6aca581085312c7a04",
+    model_quantization="W4A4_NVFP4_FP8_KV",
     runtime_image=("lmsysorg/sglang@sha256:506525a5907ea22c9d445afb7c03603959b912de034d86915cf17da814f1a124"),
     runtime_source_revision="c4271c3fe1262fc2adbd162c33b25de5255251c5",
     runtime_reported_version="0.0.0.dev0+qwen38.27b.g561c8f3",
-    engine_image_id="sha256:4a38144134d84d6f78c1844314f209c48ef69c4bd8bf7da1e5c400f9abda6f26",
+    engine_image_id="sha256:62ae2bb57a54a1dfcc33c05cdfd200cc69705ac94ad503cd4ec00a409804acaf",
     engine_base_image_digest=(
         "lmsysorg/sglang@sha256:506525a5907ea22c9d445afb7c03603959b912de034d86915cf17da814f1a124"
     ),
     engine_base_image_id="sha256:317b75ce527f3b6ee482e9437c753e98f4df6e6b17a335f8681af5d86a8a9de8",
-    model_snapshot_manifest_sha256="da435c4b7556d8d5feed8551024914b0da0b48bb3fe85850536a0eb3b2489333",
-    launch_manifest_sha256="640a1ea428b2526ff6f3b3e412c18fef8e48f1fa882b3a94f9859a190678f62b",
-    proxy_image_id="sha256:37ae13a39a5d8a0780b0b0f226065753c0d929c31956be27f7f375f79cdef750",
+    model_snapshot_manifest_sha256="e5fa0d366c3bcf6546f9f3d0cb418b8e2530e2701a5a1506367f88fd08d1d1a4",
+    launch_manifest_sha256="ed18fc43f7a865dc0d01c568f22200fb71eebdcc2cef354f859860c966f3a19a",
+    proxy_image_id="sha256:2227ed08bc4360eea50b1bba31b0f07d5652ba63344a0ab0f135aec63fb680de",
     proxy_policy_sha256="d51c092ca2ef566f092ef9d55320e302c2d10b710d319d27a6d982aba018dcfe",
     tokenizer_mode="auto",
     quantization=None,
@@ -510,14 +514,15 @@ PROFILES["qwen38-27b-nvfp4-sglang"] = RuntimeProfile(
         weight_version="default",
         speculative_algorithm=None,
     ),
-    certification="certified",
-    interactive_certified=True,
+    certification="quick_smoke_only",
+    interactive_certified=False,
     default_recommended=False,
     research_only=False,
     readiness_deadline_sec=900.0,
     certification_reason=(
-        "Live graph-only dispatcher attested at 40K/6 with FP8 KV, text/image "
-        "smokes and soak; V12 authority still requires its own startup probe."
+        "Live activation verified health, models, ordinary chat, and native tool "
+        "calling at the 40K-configured launch; long-context, vision, soak, and V12 "
+        "startup probes remain fail-closed pending the coordinated release."
     ),
     menu_visible=True,
     requires_experimental_opt_in=False,

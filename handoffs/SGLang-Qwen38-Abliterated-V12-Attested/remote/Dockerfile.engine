@@ -1,0 +1,26 @@
+FROM lmsysorg/sglang@sha256:506525a5907ea22c9d445afb7c03603959b912de034d86915cf17da814f1a124
+
+LABEL org.opencontainers.image.title="Friday Qwen3.8 attested SGLang engine" \
+      org.opencontainers.image.base.name="lmsysorg/sglang@sha256:506525a5907ea22c9d445afb7c03603959b912de034d86915cf17da814f1a124" \
+      org.opencontainers.image.base.digest="sha256:506525a5907ea22c9d445afb7c03603959b912de034d86915cf17da814f1a124" \
+      com.friday.base-image-id="sha256:317b75ce527f3b6ee482e9437c753e98f4df6e6b17a335f8681af5d86a8a9de8" \
+      com.friday.profile-id="qwen38-27b-nvfp4-sglang:dispatcher:v12.15" \
+      com.friday.runtime-source-revision="c4271c3fe1262fc2adbd162c33b25de5255251c5" \
+      com.friday.model-manifest-sha256="e5fa0d366c3bcf6546f9f3d0cb418b8e2530e2701a5a1506367f88fd08d1d1a4" \
+      com.friday.model-volume-schema="friday.sealed-model-volume.v1" \
+      com.friday.model-sealer-sha256="546a88c98bbbd882fe20bb5dfc3671f38ee07f379f2e5baeea097b6e9985da63" \
+      com.friday.launch-manifest-sha256="ed18fc43f7a865dc0d01c568f22200fb71eebdcc2cef354f859860c966f3a19a" \
+      com.friday.proxy-policy-sha256="d51c092ca2ef566f092ef9d55320e302c2d10b710d319d27a6d982aba018dcfe"
+
+COPY engine-witness-entrypoint.py /usr/local/bin/friday-engine-witness
+COPY model-volume-sealer.py /usr/local/bin/friday-model-volume-sealer
+COPY deployment-identity.v1.json /usr/local/share/friday/deployment-identity.v1.json
+COPY qwen38-model-manifest.v1.json /usr/local/share/friday/qwen38-model-manifest.v1.json
+COPY launch-manifest.v1.json /usr/local/share/friday/launch-manifest.v1.json
+RUN chmod 0555 /usr/local/bin/friday-engine-witness /usr/local/bin/friday-model-volume-sealer \
+    && chmod 0444 /usr/local/share/friday/deployment-identity.v1.json \
+                  /usr/local/share/friday/qwen38-model-manifest.v1.json \
+                  /usr/local/share/friday/launch-manifest.v1.json
+
+ENTRYPOINT ["/usr/local/bin/friday-engine-witness"]
+CMD ["--model-path", "/models/qwen3.8-27b-abliterated-nvfp4-vtuber-43aa7ff5", "--served-model-name", "dispatcher", "--context-length", "40960", "--mem-fraction-static", "0.90", "--kv-cache-dtype", "fp8_e4m3", "--max-running-requests", "6", "--max-total-tokens", "40960", "--chunked-prefill-size", "2048", "--mamba-ssm-dtype", "bfloat16", "--max-mamba-cache-size", "6", "--disable-radix-cache", "--cuda-graph-backend-decode", "full", "--cuda-graph-max-bs-decode", "6", "--cuda-graph-bs-decode", "1", "2", "3", "4", "5", "6", "--cuda-graph-backend-prefill", "disabled", "--attention-backend", "flashinfer", "--reasoning-parser", "qwen3", "--tool-call-parser", "qwen3_coder", "--mm-feature-transport", "cpu", "--enable-metrics", "--limit-mm-data-per-request", "{\"image\":4,\"video\":0,\"audio\":0}", "--host", "0.0.0.0", "--port", "30000"]

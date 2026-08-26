@@ -1,0 +1,15 @@
+{
+  "schema": "friday.sglang-deployment-identity.v1",
+  "profile_id": "qwen38-27b-nvfp4-sglang:dispatcher:v12.15",
+  "engine_base_image_digest": "lmsysorg/sglang@sha256:506525a5907ea22c9d445afb7c03603959b912de034d86915cf17da814f1a124",
+  "engine_base_image_id": "sha256:317b75ce527f3b6ee482e9437c753e98f4df6e6b17a335f8681af5d86a8a9de8",
+  "runtime_source_revision": "c4271c3fe1262fc2adbd162c33b25de5255251c5",
+  "runtime_reported_version": "0.0.0.dev0+qwen38.27b.g561c8f3",
+  "model_repository": "Vtuber-plan/Huihui-Qwen3.8-27B-abliterated-NVFP4",
+  "model_revision": "43aa7ff5eef05ab50a3bfa6aca581085312c7a04",
+  "model_snapshot_manifest_sha256": "e5fa0d366c3bcf6546f9f3d0cb418b8e2530e2701a5a1506367f88fd08d1d1a4",
+  "model_quantization": "W4A4_NVFP4_FP8_KV",
+  "served_model_alias": "dispatcher",
+  "launch_manifest_sha256": "ed18fc43f7a865dc0d01c568f22200fb71eebdcc2cef354f859860c966f3a19a",
+  "proxy_policy_sha256": "d51c092ca2ef566f092ef9d55320e302c2d10b710d319d27a6d982aba018dcfe"
+}

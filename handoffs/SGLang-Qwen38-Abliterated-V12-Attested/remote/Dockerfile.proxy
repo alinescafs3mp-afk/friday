@@ -1,0 +1,13 @@
+FROM nginx:1.28.3-alpine@sha256:a8b39bd9cf0f83869a2162827a0caf6137ddf759d50a171451b335cecc87d236
+
+LABEL org.opencontainers.image.title="Friday Qwen3.8 attested allowlist proxy" \
+      org.opencontainers.image.base.name="nginx:1.28.3-alpine@sha256:a8b39bd9cf0f83869a2162827a0caf6137ddf759d50a171451b335cecc87d236" \
+      org.opencontainers.image.base.digest="sha256:a8b39bd9cf0f83869a2162827a0caf6137ddf759d50a171451b335cecc87d236" \
+      com.friday.base-image-id="sha256:dc73b49f5124cf2ee538dfbdfbd121f0b4ccdcb20fea30f3a81bd477c02e2bb5" \
+      com.friday.profile-id="qwen38-27b-nvfp4-sglang:dispatcher:v12.15" \
+      com.friday.proxy-policy-sha256="d51c092ca2ef566f092ef9d55320e302c2d10b710d319d27a6d982aba018dcfe"
+
+COPY default.conf.template /etc/nginx/templates/default.conf.template
+RUN chmod 0444 /etc/nginx/templates/default.conf.template
+
+EXPOSE 8080
