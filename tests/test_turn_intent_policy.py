@@ -429,7 +429,7 @@ def test_current_attachment_keeps_terse_image_wording_on_the_runtime_path(
         ("english-current-work", "Do you generate images now?"),
         ("english-current-work", "Do you really generate images now?"),
         ("english-reported", "He asked: ‘Do you generate images?’"),
-        ("english-reported", "He said: \"Can Friday generate images?\""),
+        ("english-reported", 'He said: "Can Friday generate images?"'),
         ("english-quoted", "`Do you have image generation?`"),
     ],
 )

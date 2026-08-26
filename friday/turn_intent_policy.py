@@ -895,10 +895,7 @@ def decide_turn_policy(
     # A terse caption such as "Можешь сделать картинку?" is ambiguous only in
     # isolation.  Check the code-owned current-file marker before even
     # normalizing capability language, so no wording can discard that carrier.
-    if (
-        not turn_context.current_attachment_present
-        and _is_image_generation_capability_question(text)
-    ):
+    if not turn_context.current_attachment_present and _is_image_generation_capability_question(text):
         image_projection = image_generation or ImageGenerationProjection(False)
         return TurnPolicyDecision(
             intent=TurnIntent.META_IMAGE_GENERATION,
