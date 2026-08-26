@@ -45,10 +45,16 @@ from friday.orchestration.supervisor_assist_promotion import (
     SupervisorSchedulerAdmissionSnapshot,
 )
 from friday.orchestration.supervisor_contracts import SupervisorMode, TaskClass
+from friday.orchestration.supervisor_promoted_product_event import (
+    AcceptedSupervisorLatencyBudget,
+    PromotedProductEventError,
+    load_accepted_supervisor_latency_budget,
+)
 
 SUPERVISOR_ASSIST_ACTIVATION_STATUS_SCHEMA = "friday.supervisor-assist-activation-status.v1"
 
 _MAX_EVIDENCE_BYTES = 32 << 10
+_MAX_LATENCY_BUDGET_BYTES = 4_096
 _MAX_RELEASE_TREE_BYTES = 64 << 20
 _MAX_PATH_CHARS = 4_096
 _DIGEST_RE = re.compile(r"[0-9a-f]{64}\Z")
@@ -129,6 +135,8 @@ _READINESS_EVIDENCE_KEYS = frozenset(
         "baseline_failure_class_count",
         "readiness_witness_sha256",
         "readiness_observation_count",
+        "latency_budget_target_mode",
+        "latency_budget_source_revision_sha256",
         "latency_budget_ms",
         "latency_budget_sha256",
         "latency_total_ms",
@@ -154,6 +162,8 @@ _OUTCOME_EVIDENCE_KEYS = frozenset(
         "documented_failure_class_sha256",
         "baseline_failure_class_count",
         "promoted_failure_class_count",
+        "latency_budget_target_mode",
+        "latency_budget_source_revision_sha256",
         "latency_budget_ms",
         "latency_budget_sha256",
         "latency_observation_count",
@@ -199,6 +209,10 @@ class AssistPromotionActivationReason(StrEnum):
     EVIDENCE_DIGEST_MISMATCH = "evidence_digest_mismatch"
     EVIDENCE_INVALID = "evidence_invalid"
     EVIDENCE_IDENTITY_MISMATCH = "evidence_identity_mismatch"
+    LATENCY_BUDGET_FILE_UNAVAILABLE = "latency_budget_file_unavailable"
+    LATENCY_BUDGET_DIGEST_MISMATCH = "latency_budget_digest_mismatch"
+    LATENCY_BUDGET_INVALID = "latency_budget_invalid"
+    LATENCY_BUDGET_IDENTITY_MISMATCH = "latency_budget_identity_mismatch"
     CANARY_ALLOWLIST_INVALID = "canary_allowlist_invalid"
 
 
@@ -218,6 +232,8 @@ class RawAssistPromotionActivationSettings:
     requested_mode: object = SupervisorMode.OFF.value
     evidence_file: object = ""
     evidence_sha256: object = ""
+    latency_budget_file: object = ""
+    latency_budget_sha256: object = ""
     source_revision_sha256: object = ""
     registry_binding_sha256: object = ""
     canary_actor_bindings: object = ()
@@ -247,6 +263,7 @@ class AssistPromotionActivationMaterial:
     registry_binding_sha256: str | None
     scheduler_snapshot: SupervisorSchedulerAdmissionSnapshot | None
     loaded_evidence: LoadedAssistPromotionEvidence | None
+    accepted_latency_budget: AcceptedSupervisorLatencyBudget | None
     operator_gate: AssistPromotionOperatorGate
 
     def __post_init__(self) -> None:
@@ -263,6 +280,7 @@ class AssistPromotionActivationMaterial:
             or self.registry_binding_sha256 is None
             or self.scheduler_snapshot is None
             or self.loaded_evidence is None
+            or self.accepted_latency_budget is None
             or not self.operator_gate.enabled
         ):
             raise ValueError("configured activation material is incomplete")
@@ -270,6 +288,19 @@ class AssistPromotionActivationMaterial:
             _typed_digest(self.source_revision_sha256, label="source_revision_sha256")
         if self.registry_binding_sha256 is not None:
             _typed_digest(self.registry_binding_sha256, label="registry_binding_sha256")
+        if self.accepted_latency_budget is not None:
+            if type(self.accepted_latency_budget) is not AcceptedSupervisorLatencyBudget:
+                raise TypeError("accepted latency budget must be exact")
+            document = self.accepted_latency_budget.document
+            if (
+                document.target_mode is not self.requested_mode
+                or self.source_revision_sha256 is None
+                or not hmac.compare_digest(
+                    document.source_revision_sha256,
+                    self.source_revision_sha256,
+                )
+            ):
+                raise ValueError("accepted latency budget identity does not match material")
 
     def public_status(self) -> dict[str, object]:
         """Return a body-free status; loading is explicitly not acceptance."""
@@ -310,7 +341,7 @@ class AssistPromotionActivationMaterial:
         registry drift simply return no candidate for that turn.
         """
 
-        if not self.configured or self.loaded_evidence is None:
+        if not self.configured or self.loaded_evidence is None or self.accepted_latency_budget is None:
             return None
         if not isinstance(binding_snapshot, CapabilityBindingSnapshot):
             raise TypeError("binding_snapshot must be typed")
@@ -326,6 +357,13 @@ class AssistPromotionActivationMaterial:
         if snapshot.requested_mode != self.requested_mode.value:
             return None
         evidence = self.loaded_evidence.evidence
+        budget = self.accepted_latency_budget
+        if (
+            budget.document.target_mode is not self.requested_mode
+            or budget.document.source_revision_sha256 != self.source_revision_sha256
+            or not _evidence_budget_identity_matches(evidence, budget)
+        ):
+            return None
         try:
             return AssistPromotionCandidate(
                 requested_mode=self.requested_mode,
@@ -336,6 +374,8 @@ class AssistPromotionActivationMaterial:
                 scheduler=snapshot,
                 max_steps=evidence.max_steps,
                 max_review_rounds=evidence.max_review_rounds,
+                latency_budget_sha256=budget.document_sha256,
+                latency_budget_ms=budget.document.maximum_user_visible_latency_ms,
                 actor_binding_sha256=actor_binding_sha256,
             )
         except ValueError:
@@ -553,6 +593,10 @@ def parse_assist_promotion_live_evidence(
                 baseline_failure_class_count=product_payload["baseline_failure_class_count"],
                 readiness_witness_sha256=product_payload["readiness_witness_sha256"],
                 readiness_observation_count=product_payload["readiness_observation_count"],
+                latency_budget_target_mode=SupervisorMode(product_payload["latency_budget_target_mode"]),
+                latency_budget_source_revision_sha256=product_payload[
+                    "latency_budget_source_revision_sha256"
+                ],
                 latency_budget_ms=product_payload["latency_budget_ms"],
                 latency_budget_sha256=product_payload["latency_budget_sha256"],
                 latency_total_ms=product_payload["latency_total_ms"],
@@ -580,6 +624,10 @@ def parse_assist_promotion_live_evidence(
                 documented_failure_class_sha256=product_payload["documented_failure_class_sha256"],
                 baseline_failure_class_count=product_payload["baseline_failure_class_count"],
                 promoted_failure_class_count=product_payload["promoted_failure_class_count"],
+                latency_budget_target_mode=SupervisorMode(product_payload["latency_budget_target_mode"]),
+                latency_budget_source_revision_sha256=product_payload[
+                    "latency_budget_source_revision_sha256"
+                ],
                 latency_budget_ms=product_payload["latency_budget_ms"],
                 latency_budget_sha256=product_payload["latency_budget_sha256"],
                 latency_observation_count=product_payload["latency_observation_count"],
@@ -763,6 +811,7 @@ def _closed_material(
     registry_binding_sha256: str | None = None,
     scheduler_snapshot: SupervisorSchedulerAdmissionSnapshot | None = None,
     loaded_evidence: LoadedAssistPromotionEvidence | None = None,
+    accepted_latency_budget: AcceptedSupervisorLatencyBudget | None = None,
 ) -> AssistPromotionActivationMaterial:
     return AssistPromotionActivationMaterial(
         configured=False,
@@ -772,13 +821,14 @@ def _closed_material(
         registry_binding_sha256=registry_binding_sha256,
         scheduler_snapshot=scheduler_snapshot,
         loaded_evidence=loaded_evidence,
+        accepted_latency_budget=accepted_latency_budget,
         operator_gate=AssistPromotionOperatorGate(),
     )
 
 
 def _validated_raw_settings(
     raw: RawAssistPromotionActivationSettings,
-) -> tuple[SupervisorMode, Path, str, str, str, tuple[str, ...]]:
+) -> tuple[SupervisorMode, Path, str, Path, str, str, str, tuple[str, ...]]:
     if raw.enabled is not True:
         raise AssistPromotionActivationError(AssistPromotionActivationReason.RAW_SETTINGS_INVALID)
     if type(raw.requested_mode) is not str:
@@ -799,10 +849,26 @@ def _validated_raw_settings(
     evidence_path = Path(raw.evidence_file)
     if not evidence_path.is_absolute() or str(evidence_path) != raw.evidence_file:
         raise AssistPromotionActivationError(AssistPromotionActivationReason.RAW_SETTINGS_INVALID)
+    if (
+        type(raw.latency_budget_file) is not str
+        or not raw.latency_budget_file
+        or len(raw.latency_budget_file) > _MAX_PATH_CHARS
+        or any(character in raw.latency_budget_file for character in "\x00\r\n")
+    ):
+        raise AssistPromotionActivationError(AssistPromotionActivationReason.RAW_SETTINGS_INVALID)
+    latency_budget_path = Path(raw.latency_budget_file)
+    if not latency_budget_path.is_absolute() or str(latency_budget_path) != raw.latency_budget_file:
+        raise AssistPromotionActivationError(AssistPromotionActivationReason.RAW_SETTINGS_INVALID)
     evidence_sha256 = _raw_digest(raw.evidence_sha256)
+    latency_budget_sha256 = _raw_digest(raw.latency_budget_sha256)
     source_sha256 = _raw_digest(raw.source_revision_sha256)
     registry_sha256 = _raw_digest(raw.registry_binding_sha256)
-    if evidence_sha256 is None or source_sha256 is None or registry_sha256 is None:
+    if (
+        evidence_sha256 is None
+        or latency_budget_sha256 is None
+        or source_sha256 is None
+        or registry_sha256 is None
+    ):
         raise AssistPromotionActivationError(AssistPromotionActivationReason.RAW_SETTINGS_INVALID)
     if type(raw.canary_actor_bindings) is not tuple:
         raise AssistPromotionActivationError(AssistPromotionActivationReason.CANARY_ALLOWLIST_INVALID)
@@ -815,7 +881,33 @@ def _validated_raw_settings(
         or (mode is SupervisorMode.CANARY and not actors)
     ):
         raise AssistPromotionActivationError(AssistPromotionActivationReason.CANARY_ALLOWLIST_INVALID)
-    return mode, evidence_path, evidence_sha256, source_sha256, registry_sha256, actors
+    return (
+        mode,
+        evidence_path,
+        evidence_sha256,
+        latency_budget_path,
+        latency_budget_sha256,
+        source_sha256,
+        registry_sha256,
+        actors,
+    )
+
+
+def _evidence_budget_identity_matches(
+    evidence: AssistPromotionLiveEvidence,
+    budget: AcceptedSupervisorLatencyBudget,
+) -> bool:
+    product = evidence.product_evidence
+    document = budget.document
+    return bool(
+        product.latency_budget_target_mode is document.target_mode
+        and hmac.compare_digest(
+            product.latency_budget_source_revision_sha256,
+            document.source_revision_sha256,
+        )
+        and hmac.compare_digest(product.latency_budget_sha256, budget.document_sha256)
+        and product.latency_budget_ms == document.maximum_user_visible_latency_ms
+    )
 
 
 def _evidence_identity_matches(
@@ -824,6 +916,7 @@ def _evidence_identity_matches(
     requested_mode: SupervisorMode,
     source_revision_sha256: str,
     registry_binding_sha256: str,
+    accepted_latency_budget: AcceptedSupervisorLatencyBudget,
 ) -> bool:
     expected_predecessor = (
         SupervisorMode.SHADOW if requested_mode is SupervisorMode.ASSIST else SupervisorMode.ASSIST
@@ -857,6 +950,7 @@ def _evidence_identity_matches(
         and evidence.registry_binding_sha256 == registry_binding_sha256
         and evidence.max_steps == SUPERVISOR_ASSIST_PROMOTION_MAX_STEPS
         and evidence.max_review_rounds == SUPERVISOR_ASSIST_PROMOTION_MAX_REVIEW_ROUNDS
+        and _evidence_budget_identity_matches(evidence, accepted_latency_budget)
     )
 
 
@@ -889,6 +983,8 @@ def load_assist_promotion_activation(
             mode,
             evidence_path,
             expected_evidence_sha256,
+            latency_budget_path,
+            expected_latency_budget_sha256,
             expected_source_sha256,
             expected_registry_sha256,
             actor_bindings,
@@ -908,12 +1004,56 @@ def load_assist_promotion_activation(
             requested_mode=mode,
             source_revision_sha256=source_sha256,
         )
+    try:
+        latency_budget_raw = _stable_regular_file_bytes(
+            latency_budget_path,
+            maximum_bytes=_MAX_LATENCY_BUDGET_BYTES,
+            allowed_modes=frozenset({0o400, 0o600}),
+            reason=AssistPromotionActivationReason.LATENCY_BUDGET_FILE_UNAVAILABLE,
+        )
+    except AssistPromotionActivationError as exc:
+        return _closed_material(
+            exc.reason,
+            requested_mode=mode,
+            source_revision_sha256=source_sha256,
+        )
+    if not hmac.compare_digest(
+        hashlib.sha256(latency_budget_raw).hexdigest(),
+        expected_latency_budget_sha256,
+    ):
+        return _closed_material(
+            AssistPromotionActivationReason.LATENCY_BUDGET_DIGEST_MISMATCH,
+            requested_mode=mode,
+            source_revision_sha256=source_sha256,
+        )
+    try:
+        accepted_latency_budget = load_accepted_supervisor_latency_budget(
+            latency_budget_raw,
+            expected_document_sha256=expected_latency_budget_sha256,
+        )
+    except (PromotedProductEventError, TypeError):
+        return _closed_material(
+            AssistPromotionActivationReason.LATENCY_BUDGET_INVALID,
+            requested_mode=mode,
+            source_revision_sha256=source_sha256,
+        )
+    if accepted_latency_budget.document.target_mode is not mode or not hmac.compare_digest(
+        accepted_latency_budget.document.source_revision_sha256,
+        source_sha256,
+    ):
+        return _closed_material(
+            AssistPromotionActivationReason.LATENCY_BUDGET_IDENTITY_MISMATCH,
+            requested_mode=mode,
+            source_revision_sha256=source_sha256,
+            accepted_latency_budget=None,
+        )
     current_registry_sha256 = binding_snapshot.digest_hex()
     if not hmac.compare_digest(current_registry_sha256, expected_registry_sha256):
         return _closed_material(
             AssistPromotionActivationReason.REGISTRY_BINDING_MISMATCH,
             requested_mode=mode,
             source_revision_sha256=source_sha256,
+            accepted_latency_budget=accepted_latency_budget,
             registry_binding_sha256=current_registry_sha256,
         )
     try:
@@ -926,6 +1066,7 @@ def load_assist_promotion_activation(
             exc.reason,
             requested_mode=mode,
             source_revision_sha256=source_sha256,
+            accepted_latency_budget=accepted_latency_budget,
             registry_binding_sha256=current_registry_sha256,
         )
     if scheduler_snapshot.requested_mode != mode.value:
@@ -933,6 +1074,7 @@ def load_assist_promotion_activation(
             AssistPromotionActivationReason.SCHEDULER_IDENTITY_MISMATCH,
             requested_mode=mode,
             source_revision_sha256=source_sha256,
+            accepted_latency_budget=accepted_latency_budget,
             registry_binding_sha256=current_registry_sha256,
             scheduler_snapshot=scheduler_snapshot,
         )
@@ -954,6 +1096,7 @@ def load_assist_promotion_activation(
         requested_mode=mode,
         source_revision_sha256=source_sha256,
         registry_binding_sha256=current_registry_sha256,
+        accepted_latency_budget=accepted_latency_budget,
     ):
         return _closed_material(
             AssistPromotionActivationReason.EVIDENCE_IDENTITY_MISMATCH,
@@ -962,6 +1105,7 @@ def load_assist_promotion_activation(
             registry_binding_sha256=current_registry_sha256,
             scheduler_snapshot=scheduler_snapshot,
             loaded_evidence=loaded_evidence,
+            accepted_latency_budget=accepted_latency_budget,
         )
     try:
         gate = AssistPromotionOperatorGate(
@@ -983,6 +1127,7 @@ def load_assist_promotion_activation(
             registry_binding_sha256=current_registry_sha256,
             scheduler_snapshot=scheduler_snapshot,
             loaded_evidence=loaded_evidence,
+            accepted_latency_budget=accepted_latency_budget,
         )
     return AssistPromotionActivationMaterial(
         configured=True,
@@ -992,6 +1137,7 @@ def load_assist_promotion_activation(
         registry_binding_sha256=current_registry_sha256,
         scheduler_snapshot=scheduler_snapshot,
         loaded_evidence=loaded_evidence,
+        accepted_latency_budget=accepted_latency_budget,
         operator_gate=gate,
     )
 

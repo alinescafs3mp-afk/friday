@@ -31,9 +31,9 @@ from friday.orchestration.supervisor_contracts import (
     canonical_sha256,
 )
 
-SUPERVISOR_ASSIST_PROMOTION_SCHEMA = "friday.supervisor-assist-promotion.v3"
-SUPERVISOR_ASSIST_READINESS_EVIDENCE_SCHEMA = "friday.supervisor-assist-readiness-evidence.v1"
-SUPERVISOR_ASSIST_OUTCOME_EVIDENCE_SCHEMA = "friday.supervisor-assist-outcome-evidence.v1"
+SUPERVISOR_ASSIST_PROMOTION_SCHEMA = "friday.supervisor-assist-promotion.v4"
+SUPERVISOR_ASSIST_READINESS_EVIDENCE_SCHEMA = "friday.supervisor-assist-readiness-evidence.v2"
+SUPERVISOR_ASSIST_OUTCOME_EVIDENCE_SCHEMA = "friday.supervisor-assist-outcome-evidence.v2"
 SUPERVISOR_ASSIST_PROMOTION_GATE_ID = "semantic-supervisor-current-file-web-promotion-v2"
 SUPERVISOR_ASSIST_PROMOTION_MAX_STEPS = 6
 SUPERVISOR_ASSIST_PROMOTION_MAX_REVIEW_ROUNDS = 1
@@ -204,6 +204,8 @@ class AssistPromotionReadinessEvidence:
     baseline_failure_class_count: int
     readiness_witness_sha256: str
     readiness_observation_count: int
+    latency_budget_target_mode: SupervisorMode
+    latency_budget_source_revision_sha256: str
     latency_budget_ms: int
     latency_budget_sha256: str
     latency_total_ms: int
@@ -219,9 +221,15 @@ class AssistPromotionReadinessEvidence:
             ("baseline_window_sha256", self.baseline_window_sha256),
             ("documented_failure_class_sha256", self.documented_failure_class_sha256),
             ("readiness_witness_sha256", self.readiness_witness_sha256),
+            (
+                "latency_budget_source_revision_sha256",
+                self.latency_budget_source_revision_sha256,
+            ),
             ("latency_budget_sha256", self.latency_budget_sha256),
         ):
             _require_digest(value, label=label)
+        if self.latency_budget_target_mode is not SupervisorMode.ASSIST:
+            raise ValueError("readiness latency budget target mode must be assist")
         if (
             type(self.documented_failure_class_id) is not str
             or self.documented_failure_class_id == "none"
@@ -275,6 +283,8 @@ class AssistPromotionReadinessEvidence:
             "baseline_failure_class_count": self.baseline_failure_class_count,
             "readiness_witness_sha256": self.readiness_witness_sha256,
             "readiness_observation_count": self.readiness_observation_count,
+            "latency_budget_target_mode": self.latency_budget_target_mode.value,
+            "latency_budget_source_revision_sha256": (self.latency_budget_source_revision_sha256),
             "latency_budget_ms": self.latency_budget_ms,
             "latency_budget_sha256": self.latency_budget_sha256,
             "latency_total_ms": self.latency_total_ms,
@@ -302,6 +312,8 @@ class AssistPromotionOutcomeEvidence:
     documented_failure_class_sha256: str | None
     baseline_failure_class_count: int
     promoted_failure_class_count: int
+    latency_budget_target_mode: SupervisorMode
+    latency_budget_source_revision_sha256: str
     latency_budget_ms: int
     latency_budget_sha256: str
     latency_observation_count: int
@@ -319,9 +331,15 @@ class AssistPromotionOutcomeEvidence:
         for label, value in (
             ("baseline_window_sha256", self.baseline_window_sha256),
             ("promoted_window_sha256", self.promoted_window_sha256),
+            (
+                "latency_budget_source_revision_sha256",
+                self.latency_budget_source_revision_sha256,
+            ),
             ("latency_budget_sha256", self.latency_budget_sha256),
         ):
             _require_digest(value, label=label)
+        if self.latency_budget_target_mode is not SupervisorMode.CANARY:
+            raise ValueError("outcome latency budget target mode must be canary")
         if hmac.compare_digest(self.baseline_window_sha256, self.promoted_window_sha256):
             raise ValueError("product evidence windows must be distinct")
         for label in (
@@ -406,6 +424,8 @@ class AssistPromotionOutcomeEvidence:
             "documented_failure_class_sha256": self.documented_failure_class_sha256,
             "baseline_failure_class_count": self.baseline_failure_class_count,
             "promoted_failure_class_count": self.promoted_failure_class_count,
+            "latency_budget_target_mode": self.latency_budget_target_mode.value,
+            "latency_budget_source_revision_sha256": (self.latency_budget_source_revision_sha256),
             "latency_budget_ms": self.latency_budget_ms,
             "latency_budget_sha256": self.latency_budget_sha256,
             "latency_observation_count": self.latency_observation_count,
@@ -472,6 +492,8 @@ class AssistPromotionCandidate:
     scheduler: SupervisorSchedulerAdmissionSnapshot
     max_steps: int
     max_review_rounds: int
+    latency_budget_sha256: str
+    latency_budget_ms: int
     actor_binding_sha256: str | None = None
 
     def __post_init__(self) -> None:
@@ -490,6 +512,10 @@ class AssistPromotionCandidate:
             raise ValueError("scheduler must be a typed admission snapshot")
         if type(self.max_steps) is not int or type(self.max_review_rounds) is not int:
             raise ValueError("promotion bounds must be integers")
+        _require_digest(self.latency_budget_sha256, label="latency_budget_sha256")
+        _require_positive_count(self.latency_budget_ms, label="latency_budget_ms")
+        if self.latency_budget_ms > _MAX_LATENCY_MS:
+            raise ValueError("latency_budget_ms exceeds the trace contract")
         _require_optional_digest(self.actor_binding_sha256, label="actor_binding_sha256")
 
 
@@ -856,6 +882,19 @@ def _live_evidence_reason(
             or product.user_visible_observation_count != product.promoted_observation_count
         ):
             return AssistPromotionReason.EVIDENCE_WINDOW_INCOMPLETE
+    if (
+        product.latency_budget_target_mode is not candidate.requested_mode
+        or not hmac.compare_digest(
+            product.latency_budget_source_revision_sha256,
+            candidate.source_revision_sha256,
+        )
+        or not hmac.compare_digest(
+            product.latency_budget_sha256,
+            candidate.latency_budget_sha256,
+        )
+        or product.latency_budget_ms != candidate.latency_budget_ms
+    ):
+        return AssistPromotionReason.EVIDENCE_IDENTITY_DRIFT
     if not all(
         (
             evidence.representative_window_attested,

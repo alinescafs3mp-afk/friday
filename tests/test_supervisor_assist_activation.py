@@ -38,6 +38,9 @@ from friday.orchestration.supervisor_assist_promotion import (
     AssistPromotionReadinessEvidence,
 )
 from friday.orchestration.supervisor_contracts import SupervisorMode, TaskClass
+from friday.orchestration.supervisor_promoted_product_event import (
+    SupervisorLatencyBudgetDocument,
+)
 
 ACTOR = "1" * 64
 OTHER = "f" * 64
@@ -54,6 +57,8 @@ def _readiness_product(**changes: object) -> AssistPromotionReadinessEvidence:
         "baseline_failure_class_count": 5,
         "readiness_witness_sha256": "6" * 64,
         "readiness_observation_count": 20,
+        "latency_budget_target_mode": SupervisorMode.ASSIST,
+        "latency_budget_source_revision_sha256": _ZERO,
         "latency_budget_ms": 2_500,
         "latency_budget_sha256": "7" * 64,
         "latency_total_ms": 20_000,
@@ -81,6 +86,8 @@ def _outcome_product(**changes: object) -> AssistPromotionOutcomeEvidence:
         "documented_failure_class_sha256": None,
         "baseline_failure_class_count": 0,
         "promoted_failure_class_count": 0,
+        "latency_budget_target_mode": SupervisorMode.CANARY,
+        "latency_budget_source_revision_sha256": _ZERO,
         "latency_budget_ms": 2_500,
         "latency_budget_sha256": "7" * 64,
         "latency_observation_count": 20,
@@ -169,12 +176,12 @@ def _evidence(
     registry_sha256: str,
     observed_mode: SupervisorMode = SupervisorMode.SHADOW,
     authority: AssistPromotionEvidenceAuthority = AssistPromotionEvidenceAuthority.PRODUCTION_JOINED,
+    latency_budget_sha256: str = "7" * 64,
+    latency_budget_ms: int = 2_500,
     **changes: object,
 ) -> AssistPromotionLiveEvidence:
     # Future contract fixture only.  No repository or live acceptance is claimed.
-    observed_policy = semantic_supervisor_policy.supervisor_product_policy_identity_for_mode(
-        observed_mode
-    )
+    observed_policy = semantic_supervisor_policy.supervisor_product_policy_identity_for_mode(observed_mode)
     values: dict[str, object] = {
         "evidence_id": "future_activation_loader_fixture",
         "authority": authority,
@@ -206,7 +213,17 @@ def _evidence(
         "duplicate_publication_count": 0,
         "false_completion_regression_count": 0,
         "product_evidence": (
-            _outcome_product() if observed_mode is SupervisorMode.ASSIST else _readiness_product()
+            _outcome_product(
+                latency_budget_source_revision_sha256=source_sha256,
+                latency_budget_sha256=latency_budget_sha256,
+                latency_budget_ms=latency_budget_ms,
+            )
+            if observed_mode is SupervisorMode.ASSIST
+            else _readiness_product(
+                latency_budget_source_revision_sha256=source_sha256,
+                latency_budget_sha256=latency_budget_sha256,
+                latency_budget_ms=latency_budget_ms,
+            )
         ),
     }
     values.update(changes)
@@ -231,10 +248,38 @@ def _evidence_file(tmp_path: Path, evidence: AssistPromotionLiveEvidence) -> tup
     return path, hashlib.sha256(raw).hexdigest()
 
 
+def _latency_budget_file(
+    tmp_path: Path,
+    *,
+    mode: SupervisorMode,
+    source_sha256: str,
+    maximum_ms: int = 2_500,
+    label: str = "",
+) -> tuple[Path, str]:
+    document = SupervisorLatencyBudgetDocument(
+        target_mode=mode,
+        source_revision_sha256=source_sha256,
+        maximum_user_visible_latency_ms=maximum_ms,
+    )
+    raw = json.dumps(
+        document.payload(),
+        ensure_ascii=True,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("ascii")
+    suffix = f"-{label}" if label else ""
+    path = tmp_path / f"private-{mode.value}-latency-budget{suffix}.json"
+    path.write_bytes(raw)
+    path.chmod(0o600)
+    return path, hashlib.sha256(raw).hexdigest()
+
+
 def _raw_settings(
     *,
     evidence_path: Path,
     evidence_sha256: str,
+    latency_budget_path: Path,
+    latency_budget_sha256: str,
     source_sha256: str,
     registry_sha256: str,
     mode: str = "assist",
@@ -246,6 +291,8 @@ def _raw_settings(
         "requested_mode": mode,
         "evidence_file": str(evidence_path),
         "evidence_sha256": evidence_sha256,
+        "latency_budget_file": str(latency_budget_path),
+        "latency_budget_sha256": latency_budget_sha256,
         "source_revision_sha256": source_sha256,
         "registry_binding_sha256": registry_sha256,
         "canary_actor_bindings": actors,
@@ -270,16 +317,24 @@ def _activation_fixture(
     root, source = _release_root(tmp_path)
     binding = operational_capability_snapshot()
     observed = SupervisorMode.ASSIST if mode == "canary" else SupervisorMode.SHADOW
+    budget_path, budget_sha256 = _latency_budget_file(
+        tmp_path,
+        mode=SupervisorMode(mode),
+        source_sha256=source,
+    )
     evidence = _evidence(
         source_sha256=source,
         registry_sha256=binding.digest_hex(),
         observed_mode=observed,
         authority=authority,
+        latency_budget_sha256=budget_sha256,
     )
     evidence_path, evidence_sha = _evidence_file(tmp_path, evidence)
     raw = _raw_settings(
         evidence_path=evidence_path,
         evidence_sha256=evidence_sha,
+        latency_budget_path=budget_path,
+        latency_budget_sha256=budget_sha256,
         source_sha256=source,
         registry_sha256=binding.digest_hex(),
         mode=mode,
@@ -445,7 +500,7 @@ def test_evidence_parser_rejects_extra_missing_nonfinite_and_malformed_fields(
     assert captured.value.reason is AssistPromotionActivationReason.EVIDENCE_INVALID
 
 
-def test_old_v1_v2_evidence_and_old_product_grammar_are_explicitly_rejected(
+def test_old_v1_v2_v3_evidence_and_old_product_grammar_are_explicitly_rejected(
     tmp_path: Path,
 ) -> None:
     _root, source = _release_root(tmp_path)
@@ -462,12 +517,19 @@ def test_old_v1_v2_evidence_and_old_product_grammar_are_explicitly_rejected(
     old_v2["p1_policy_sha256"] = old_v2.pop("observed_policy_sha256")
     old_v2.pop("target_policy_id")
     old_v2.pop("target_policy_sha256")
+    old_v3 = evidence.payload()
+    old_v3["schema"] = "friday.supervisor-assist-promotion.v3"
+    old_v3_product = old_v3["product_evidence"]
+    assert isinstance(old_v3_product, dict)
+    old_v3_product["schema"] = "friday.supervisor-assist-readiness-evidence.v1"
+    old_v3_product.pop("latency_budget_target_mode")
+    old_v3_product.pop("latency_budget_source_revision_sha256")
     old_product = evidence.payload()
     product = old_product["product_evidence"]
     assert isinstance(product, dict)
     product["schema"] = "friday.supervisor-assist-product-evidence.v1"
 
-    for payload in (old_top, old_v2, old_product):
+    for payload in (old_top, old_v2, old_v3, old_product):
         with pytest.raises(AssistPromotionActivationError) as captured:
             _parse_payload(payload)
         assert captured.value.reason is AssistPromotionActivationReason.EVIDENCE_INVALID
@@ -672,6 +734,14 @@ def test_default_raw_settings_are_closed_without_touching_missing_files(tmp_path
         ({"requested_mode": "ASSIST"}, AssistPromotionActivationReason.MODE_NOT_ADMITTED),
         ({"evidence_file": "relative.json"}, AssistPromotionActivationReason.RAW_SETTINGS_INVALID),
         ({"evidence_sha256": "bad"}, AssistPromotionActivationReason.RAW_SETTINGS_INVALID),
+        (
+            {"latency_budget_file": "relative.json"},
+            AssistPromotionActivationReason.RAW_SETTINGS_INVALID,
+        ),
+        (
+            {"latency_budget_sha256": "bad"},
+            AssistPromotionActivationReason.RAW_SETTINGS_INVALID,
+        ),
         ({"source_revision_sha256": "bad"}, AssistPromotionActivationReason.RAW_SETTINGS_INVALID),
         ({"registry_binding_sha256": "bad"}, AssistPromotionActivationReason.RAW_SETTINGS_INVALID),
         ({"canary_actor_bindings": []}, AssistPromotionActivationReason.CANARY_ALLOWLIST_INVALID),
@@ -777,6 +847,12 @@ def test_valid_static_material_is_loaded_but_never_described_as_accepted(
     assert material.source_revision_sha256 == raw.source_revision_sha256
     assert material.registry_binding_sha256 == binding.digest_hex()
     assert material.loaded_evidence is not None
+    assert material.accepted_latency_budget is not None
+    assert material.accepted_latency_budget.document_sha256 == raw.latency_budget_sha256
+    assert material.accepted_latency_budget.document.target_mode is SupervisorMode.ASSIST
+    assert material.accepted_latency_budget.document.source_revision_sha256 == raw.source_revision_sha256
+    assert material.accepted_latency_budget.document.maximum_user_visible_latency_ms == 2_500
+    assert not hasattr(material.accepted_latency_budget, "raw")
     assert material.operator_gate.enabled is True
     status = material.public_status()
     assert status == {
@@ -802,6 +878,8 @@ def test_valid_static_material_is_loaded_but_never_described_as_accepted(
         "evidence_file",
         "source_revision_sha256",
         "registry_binding_sha256",
+        "latency_budget_file",
+        "latency_budget_sha256",
         "actor_binding",
         "body",
         "prompt",
@@ -895,6 +973,149 @@ def test_source_registry_scheduler_evidence_hash_and_identity_drift_close_typed(
     assert identity_drift.reason is AssistPromotionActivationReason.EVIDENCE_IDENTITY_MISMATCH
 
 
+def test_latency_budget_file_and_digest_fail_closed_before_evidence_admission(
+    tmp_path: Path,
+) -> None:
+    raw, root, public, diagnostics, binding = _activation_fixture(tmp_path)
+
+    missing = load_assist_promotion_activation(
+        replace(raw, latency_budget_file=str(tmp_path / "missing-budget.json")),
+        installed_release_root=root,
+        scheduler_public_status=public,
+        scheduler_diagnostics_status=diagnostics,
+        binding_snapshot=binding,
+    )
+    wrong_digest = load_assist_promotion_activation(
+        replace(raw, latency_budget_sha256=OTHER),
+        installed_release_root=root,
+        scheduler_public_status=public,
+        scheduler_diagnostics_status=diagnostics,
+        binding_snapshot=binding,
+    )
+    malformed_path = tmp_path / "malformed-latency-budget.json"
+    malformed_bytes = b"{}"
+    malformed_path.write_bytes(malformed_bytes)
+    malformed_path.chmod(0o600)
+    malformed = load_assist_promotion_activation(
+        replace(
+            raw,
+            latency_budget_file=str(malformed_path),
+            latency_budget_sha256=hashlib.sha256(malformed_bytes).hexdigest(),
+        ),
+        installed_release_root=root,
+        scheduler_public_status=public,
+        scheduler_diagnostics_status=diagnostics,
+        binding_snapshot=binding,
+    )
+    budget_path = Path(str(raw.latency_budget_file))
+    budget_path.chmod(0o644)
+    public_file = load_assist_promotion_activation(
+        raw,
+        installed_release_root=root,
+        scheduler_public_status=public,
+        scheduler_diagnostics_status=diagnostics,
+        binding_snapshot=binding,
+    )
+    budget_path.chmod(0o600)
+    alias = tmp_path / "budget-alias.json"
+    alias.symlink_to(budget_path)
+    symlink = load_assist_promotion_activation(
+        replace(raw, latency_budget_file=str(alias)),
+        installed_release_root=root,
+        scheduler_public_status=public,
+        scheduler_diagnostics_status=diagnostics,
+        binding_snapshot=binding,
+    )
+
+    assert missing.reason is AssistPromotionActivationReason.LATENCY_BUDGET_FILE_UNAVAILABLE
+    assert wrong_digest.reason is AssistPromotionActivationReason.LATENCY_BUDGET_DIGEST_MISMATCH
+    assert malformed.reason is AssistPromotionActivationReason.LATENCY_BUDGET_INVALID
+    assert public_file.reason is AssistPromotionActivationReason.LATENCY_BUDGET_FILE_UNAVAILABLE
+    assert symlink.reason is AssistPromotionActivationReason.LATENCY_BUDGET_FILE_UNAVAILABLE
+
+
+def test_latency_budget_mode_source_value_and_evidence_binding_are_exact(
+    tmp_path: Path,
+) -> None:
+    raw, root, public, diagnostics, binding = _activation_fixture(tmp_path)
+    assert isinstance(raw.source_revision_sha256, str)
+
+    wrong_mode_path, wrong_mode_sha = _latency_budget_file(
+        tmp_path,
+        mode=SupervisorMode.CANARY,
+        source_sha256=raw.source_revision_sha256,
+        label="wrong-mode",
+    )
+    wrong_source_path, wrong_source_sha = _latency_budget_file(
+        tmp_path,
+        mode=SupervisorMode.ASSIST,
+        source_sha256=OTHER,
+        label="wrong-source",
+    )
+    different_value_path, different_value_sha = _latency_budget_file(
+        tmp_path,
+        mode=SupervisorMode.ASSIST,
+        source_sha256=raw.source_revision_sha256,
+        maximum_ms=2_400,
+        label="different-value",
+    )
+    cases = (
+        (
+            replace(
+                raw,
+                latency_budget_file=str(wrong_mode_path),
+                latency_budget_sha256=wrong_mode_sha,
+            ),
+            AssistPromotionActivationReason.LATENCY_BUDGET_IDENTITY_MISMATCH,
+        ),
+        (
+            replace(
+                raw,
+                latency_budget_file=str(wrong_source_path),
+                latency_budget_sha256=wrong_source_sha,
+            ),
+            AssistPromotionActivationReason.LATENCY_BUDGET_IDENTITY_MISMATCH,
+        ),
+        (
+            replace(
+                raw,
+                latency_budget_file=str(different_value_path),
+                latency_budget_sha256=different_value_sha,
+            ),
+            AssistPromotionActivationReason.EVIDENCE_IDENTITY_MISMATCH,
+        ),
+    )
+    for configured, reason in cases:
+        material = load_assist_promotion_activation(
+            configured,
+            installed_release_root=root,
+            scheduler_public_status=public,
+            scheduler_diagnostics_status=diagnostics,
+            binding_snapshot=binding,
+        )
+        assert material.configured is False
+        assert material.reason is reason
+
+    loaded = load_assist_promotion_live_evidence(
+        Path(str(raw.evidence_file)),
+        str(raw.evidence_sha256),
+    )
+    drifted_product = replace(
+        loaded.evidence.product_evidence,
+        latency_budget_source_revision_sha256=OTHER,
+    )
+    drifted_evidence = replace(loaded.evidence, product_evidence=drifted_product)
+    evidence_path, evidence_sha = _evidence_file(tmp_path, drifted_evidence)
+    evidence_drift = load_assist_promotion_activation(
+        replace(raw, evidence_file=str(evidence_path), evidence_sha256=evidence_sha),
+        installed_release_root=root,
+        scheduler_public_status=public,
+        scheduler_diagnostics_status=diagnostics,
+        binding_snapshot=binding,
+    )
+    assert evidence_drift.reason is AssistPromotionActivationReason.EVIDENCE_IDENTITY_MISMATCH
+
+
 def test_prestart_material_rebuilds_a_fresh_candidate_after_laptop_health_changes(
     tmp_path: Path,
 ) -> None:
@@ -923,6 +1144,8 @@ def test_prestart_material_rebuilds_a_fresh_candidate_after_laptop_health_change
     assert material.scheduler_snapshot.runtime_available is False
     assert initial is not None and initial.scheduler.runtime_available is False
     assert healthy is not None and healthy.scheduler.runtime_available is True
+    assert healthy.latency_budget_sha256 == raw.latency_budget_sha256
+    assert healthy.latency_budget_ms == 2_500
     assert healthy.actor_binding_sha256 == ACTOR
     assert material.scheduler_snapshot.runtime_available is False
 

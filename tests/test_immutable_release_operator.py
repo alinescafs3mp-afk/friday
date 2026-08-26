@@ -2440,6 +2440,8 @@ def _semantic_supervisor_values(mode: str) -> dict[str, str]:
         "FRIDAY_SEMANTIC_SUPERVISOR_PROMOTION_ENABLED": "0",
         "FRIDAY_SEMANTIC_SUPERVISOR_PROMOTION_EVIDENCE_FILE": "",
         "FRIDAY_SEMANTIC_SUPERVISOR_PROMOTION_EVIDENCE_SHA256": "",
+        "FRIDAY_SEMANTIC_SUPERVISOR_PROMOTION_LATENCY_BUDGET_FILE": "",
+        "FRIDAY_SEMANTIC_SUPERVISOR_PROMOTION_LATENCY_BUDGET_SHA256": "",
         "FRIDAY_SEMANTIC_SUPERVISOR_PROMOTION_REGISTRY_BINDING_SHA256": "",
         "FRIDAY_SEMANTIC_SUPERVISOR_PROMOTION_SOURCE_REVISION_SHA256": "",
         "FRIDAY_SEMANTIC_SUPERVISOR_TASKS": (
@@ -2487,6 +2489,26 @@ def _semantic_supervisor_legacy_environment(current: bytes, *, mode: str) -> byt
     return unrelated + semantic + secondary
 
 
+def _semantic_supervisor_pre_latency_environment(current: bytes, *, mode: str) -> bytes:
+    assert mode in {"off", "shadow"}
+    secondary_values, nonsecondary, secondary = operator._secondary_environment_parts(  # noqa: SLF001
+        current
+    )
+    _current_values, unrelated, _current = operator._semantic_supervisor_environment_parts(  # noqa: SLF001
+        nonsecondary
+    )
+    values = (
+        operator._SEMANTIC_SUPERVISOR_PRE_LATENCY_OFF_EXACT_VALUES  # noqa: SLF001
+        if mode == "off"
+        else operator._SEMANTIC_SUPERVISOR_PRE_LATENCY_SHADOW_EXACT_VALUES  # noqa: SLF001
+    )
+    semantic = b"".join(f"{key}={value}\n".encode() for key, value in sorted(values.items()))
+    assert secondary == b"".join(
+        f"{key}={value}\n".encode() for key, value in sorted(secondary_values.items())
+    )
+    return unrelated + semantic + secondary
+
+
 def _semantic_supervisor_promoted_values(
     *,
     mode: str,
@@ -2496,7 +2518,114 @@ def _semantic_supervisor_promoted_values(
     actors: tuple[str, ...] = (),
 ) -> dict[str, str]:
     assert mode in {"assist", "canary"}
-    evidence = evidence_file.read_bytes()
+    budget_file = evidence_file.with_name(f"{evidence_file.stem}-latency-budget.json")
+    budget_payload = {
+        "schema": "friday.semantic-supervisor-latency-budget-document.v1",
+        "budget_id": "current-file-web-user-visible-latency-v1",
+        "task_class": "compare_current_file_with_current_web",
+        "target_mode": mode,
+        "source_revision_sha256": source_sha256,
+        "latency_measurement": "committed_turn_trace.budget.latency_ms",
+        "maximum_user_visible_latency_ms": 2_500,
+    }
+    budget = json.dumps(
+        budget_payload,
+        ensure_ascii=True,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("ascii")
+    budget_file.write_bytes(budget)
+    budget_file.chmod(0o600)
+    budget_sha256 = hashlib.sha256(budget).hexdigest()
+    if mode == "assist":
+        product_evidence: dict[str, object] = {
+            "schema": "friday.supervisor-assist-readiness-evidence.v2",
+            "baseline_window_sha256": "1" * 64,
+            "baseline_observation_count": 20,
+            "baseline_complete_count": 8,
+            "documented_failure_class_id": "capability:source_unavailable",
+            "documented_failure_class_sha256": "2" * 64,
+            "baseline_failure_class_count": 5,
+            "readiness_witness_sha256": "3" * 64,
+            "readiness_observation_count": 20,
+            "latency_budget_target_mode": mode,
+            "latency_budget_source_revision_sha256": source_sha256,
+            "latency_budget_ms": 2_500,
+            "latency_budget_sha256": budget_sha256,
+            "latency_total_ms": 20_000,
+            "latency_max_ms": 1_500,
+            "call_rate_observation_count": 20,
+            "supervisor_invocation_count": 20,
+            "unnecessary_supervisor_invocation_count": 0,
+            "user_visible_observation_count": 20,
+            "user_visible_regression_count": 0,
+        }
+    else:
+        product_evidence = {
+            "schema": "friday.supervisor-assist-outcome-evidence.v2",
+            "quality_basis": "completion_rate_improvement",
+            "baseline_window_sha256": "1" * 64,
+            "promoted_window_sha256": "4" * 64,
+            "baseline_observation_count": 20,
+            "baseline_complete_count": 8,
+            "promoted_observation_count": 20,
+            "promoted_complete_count": 12,
+            "documented_failure_class_id": "none",
+            "documented_failure_class_sha256": None,
+            "baseline_failure_class_count": 0,
+            "promoted_failure_class_count": 0,
+            "latency_budget_target_mode": mode,
+            "latency_budget_source_revision_sha256": source_sha256,
+            "latency_budget_ms": 2_500,
+            "latency_budget_sha256": budget_sha256,
+            "latency_observation_count": 20,
+            "latency_total_ms": 20_000,
+            "latency_max_ms": 1_500,
+            "call_rate_observation_count": 20,
+            "supervisor_invocation_count": 20,
+            "unnecessary_supervisor_invocation_count": 0,
+            "user_visible_observation_count": 20,
+            "user_visible_regression_count": 0,
+        }
+    evidence_payload = {
+        "schema": "friday.supervisor-assist-promotion.v4",
+        "evidence_id": f"operator_{mode}_fixture",
+        "authority": "production_joined",
+        "observed_mode": "shadow" if mode == "assist" else "assist",
+        "task_class": "compare_current_file_with_current_web",
+        "source_revision_sha256": source_sha256,
+        "promotion_policy_sha256": "5" * 64,
+        "observed_policy_id": "gptoss20b-semantic-supervisor-v1",
+        "observed_policy_sha256": "6" * 64,
+        "target_policy_id": "gptoss20b-semantic-supervisor-v2",
+        "target_policy_sha256": "7" * 64,
+        "runtime_profile_id": "gptoss20b-2335df123cac7fc0e13e347cde1e1ffa8562daafcaf0fc76ade1a851d2b0ff1f",
+        "runtime_profile_manifest_sha256": "8" * 64,
+        "registry_binding_sha256": registry_sha256,
+        "max_steps": 6,
+        "max_review_rounds": 1,
+        "observation_count": 20,
+        "joined_trace_count": 20,
+        "representative_window_attested": True,
+        "primary_fallback_proven": True,
+        "laptop_unavailable_fallback_proven": True,
+        "final_authority_recheck_proven": True,
+        "primary_publication_owner_proven": True,
+        "hidden_owner_count": 0,
+        "duplicate_capability_count": 0,
+        "duplicate_effect_count": 0,
+        "duplicate_publication_count": 0,
+        "false_completion_regression_count": 0,
+        "product_evidence": product_evidence,
+    }
+    evidence = json.dumps(
+        evidence_payload,
+        ensure_ascii=True,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("ascii")
+    evidence_file.write_bytes(evidence)
+    evidence_file.chmod(0o600)
     return {
         "FRIDAY_SEMANTIC_SUPERVISOR_MAX_REVIEW_ROUNDS": "1",
         "FRIDAY_SEMANTIC_SUPERVISOR_MAX_STEPS": "6",
@@ -2505,6 +2634,8 @@ def _semantic_supervisor_promoted_values(
         "FRIDAY_SEMANTIC_SUPERVISOR_PROMOTION_ENABLED": "1",
         "FRIDAY_SEMANTIC_SUPERVISOR_PROMOTION_EVIDENCE_FILE": str(evidence_file),
         "FRIDAY_SEMANTIC_SUPERVISOR_PROMOTION_EVIDENCE_SHA256": hashlib.sha256(evidence).hexdigest(),
+        "FRIDAY_SEMANTIC_SUPERVISOR_PROMOTION_LATENCY_BUDGET_FILE": str(budget_file),
+        "FRIDAY_SEMANTIC_SUPERVISOR_PROMOTION_LATENCY_BUDGET_SHA256": budget_sha256,
         "FRIDAY_SEMANTIC_SUPERVISOR_PROMOTION_REGISTRY_BINDING_SHA256": registry_sha256,
         "FRIDAY_SEMANTIC_SUPERVISOR_PROMOTION_SOURCE_REVISION_SHA256": source_sha256,
         "FRIDAY_SEMANTIC_SUPERVISOR_TASKS": "compare_current_file_with_current_web",
@@ -2641,6 +2772,8 @@ def _semantic_supervisor_health_payload(mode: str) -> dict[str, object]:
             "terminal_publication_total": 0,
             "event_success_total": 0,
             "event_failure_total": 0,
+            "ordinary_event_success_total": 0,
+            "ordinary_event_failure_total": 0,
             "ownership_uncertain_total": 0,
             "fallback_reasons": {},
             "runtime_owner": "durable_graph_after_admission",
@@ -2810,6 +2943,15 @@ def test_semantic_supervisor_promoted_health_binds_loaded_activation_material(mo
             expected_mode=mode,
         )
 
+    for key in ("ordinary_event_success_total", "ordinary_event_failure_total"):
+        for invalid in (-1, True):
+            mutated = json.loads(json.dumps(payload))
+            mutated["semantic_supervisor"][key] = invalid
+            assert not operator._semantic_supervisor_health_identity_matches(  # noqa: SLF001
+                mutated,
+                expected_mode=mode,
+            )
+
     discarded = json.loads(json.dumps(payload))
     discarded["semantic_supervisor"] = {
         "schema": "friday.semantic-supervisor-shadow-runtime.v1",
@@ -2912,6 +3054,8 @@ def test_systemd_port_round_trips_exact_semantic_supervisor_shadow(
         "FRIDAY_SEMANTIC_SUPERVISOR_PROMOTION_ENABLED",
         "FRIDAY_SEMANTIC_SUPERVISOR_PROMOTION_EVIDENCE_FILE",
         "FRIDAY_SEMANTIC_SUPERVISOR_PROMOTION_EVIDENCE_SHA256",
+        "FRIDAY_SEMANTIC_SUPERVISOR_PROMOTION_LATENCY_BUDGET_FILE",
+        "FRIDAY_SEMANTIC_SUPERVISOR_PROMOTION_LATENCY_BUDGET_SHA256",
         "FRIDAY_SEMANTIC_SUPERVISOR_PROMOTION_REGISTRY_BINDING_SHA256",
         "FRIDAY_SEMANTIC_SUPERVISOR_PROMOTION_SOURCE_REVISION_SHA256",
         "FRIDAY_SEMANTIC_SUPERVISOR_TASKS",
@@ -3080,6 +3224,7 @@ def test_systemd_port_round_trips_exact_semantic_supervisor_assist_and_canary(
         "review_round",
         "task_widened",
         "evidence_digest_mismatch",
+        "latency_budget_digest_mismatch",
         "source_digest_noncanonical",
         "assist_actor_present",
         "unknown_key",
@@ -3102,6 +3247,10 @@ def test_semantic_supervisor_assist_rejects_noncanonical_or_drifted_environment(
         mode="assist",
         evidence_file=evidence,
     )
+    target_values, _unrelated, _secondary = operator._semantic_supervisor_environment_parts(  # noqa: SLF001
+        operator._secondary_environment_parts(target)[1]  # noqa: SLF001
+    )
+    latency_budget_sha256 = target_values["FRIDAY_SEMANTIC_SUPERVISOR_PROMOTION_LATENCY_BUDGET_SHA256"]
     replacements = {
         "gate_disabled": (
             b"FRIDAY_SEMANTIC_SUPERVISOR_PROMOTION_ENABLED=1\n",
@@ -3121,6 +3270,12 @@ def test_semantic_supervisor_assist_rejects_noncanonical_or_drifted_environment(
             + hashlib.sha256(evidence.read_bytes()).hexdigest().encode()
             + b"\n",
             b"FRIDAY_SEMANTIC_SUPERVISOR_PROMOTION_EVIDENCE_SHA256=" + b"f" * 64 + b"\n",
+        ),
+        "latency_budget_digest_mismatch": (
+            b"FRIDAY_SEMANTIC_SUPERVISOR_PROMOTION_LATENCY_BUDGET_SHA256="
+            + latency_budget_sha256.encode()
+            + b"\n",
+            b"FRIDAY_SEMANTIC_SUPERVISOR_PROMOTION_LATENCY_BUDGET_SHA256=" + b"f" * 64 + b"\n",
         ),
         "source_digest_noncanonical": (
             b"FRIDAY_SEMANTIC_SUPERVISOR_PROMOTION_SOURCE_REVISION_SHA256=" + b"b" * 64 + b"\n",
@@ -3158,6 +3313,101 @@ def test_semantic_supervisor_assist_rejects_noncanonical_or_drifted_environment(
             "semantic_supervisor_shadow_to_assist",
             shadow,
             mutated,
+        )
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    (
+        "budget_extra_key",
+        "budget_target_mode",
+        "budget_source_revision",
+        "budget_value_not_bound_by_evidence",
+        "evidence_budget_digest",
+        "old_evidence_schema",
+    ),
+)
+def test_semantic_supervisor_operator_binds_exact_budget_document_to_evidence(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    mutation: str,
+) -> None:
+    _base, shadow = _semantic_supervisor_shadow_port(tmp_path, monkeypatch)
+    evidence_file = tmp_path / "accepted-assist-evidence.json"
+    evidence_file.write_bytes(b"placeholder")
+    evidence_file.chmod(0o600)
+    target = _semantic_supervisor_promoted_environment(
+        shadow,
+        mode="assist",
+        evidence_file=evidence_file,
+    )
+    _secondary_values, nonsecondary, _secondary = operator._secondary_environment_parts(  # noqa: SLF001
+        target
+    )
+    values, _unrelated, _semantic = operator._semantic_supervisor_environment_parts(  # noqa: SLF001
+        nonsecondary
+    )
+    budget_file = Path(values["FRIDAY_SEMANTIC_SUPERVISOR_PROMOTION_LATENCY_BUDGET_FILE"])
+    old_budget_sha = values["FRIDAY_SEMANTIC_SUPERVISOR_PROMOTION_LATENCY_BUDGET_SHA256"]
+    old_evidence_sha = values["FRIDAY_SEMANTIC_SUPERVISOR_PROMOTION_EVIDENCE_SHA256"]
+    budget_payload = json.loads(budget_file.read_text(encoding="ascii"))
+    evidence_payload = json.loads(evidence_file.read_text(encoding="ascii"))
+
+    if mutation == "budget_extra_key":
+        budget_payload["body"] = "not accepted"
+    elif mutation == "budget_target_mode":
+        budget_payload["target_mode"] = "canary"
+    elif mutation == "budget_source_revision":
+        budget_payload["source_revision_sha256"] = "f" * 64
+    elif mutation == "budget_value_not_bound_by_evidence":
+        budget_payload["maximum_user_visible_latency_ms"] = 2_400
+    elif mutation == "evidence_budget_digest":
+        evidence_payload["product_evidence"]["latency_budget_sha256"] = "f" * 64
+    else:
+        evidence_payload["schema"] = "friday.supervisor-assist-promotion.v3"
+
+    if mutation.startswith("budget_"):
+        budget_raw = json.dumps(
+            budget_payload,
+            ensure_ascii=True,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("ascii")
+        budget_file.write_bytes(budget_raw)
+        budget_file.chmod(0o600)
+        new_budget_sha = hashlib.sha256(budget_raw).hexdigest()
+        target = target.replace(
+            f"FRIDAY_SEMANTIC_SUPERVISOR_PROMOTION_LATENCY_BUDGET_SHA256={old_budget_sha}\n".encode(),
+            f"FRIDAY_SEMANTIC_SUPERVISOR_PROMOTION_LATENCY_BUDGET_SHA256={new_budget_sha}\n".encode(),
+            1,
+        )
+        if mutation == "budget_value_not_bound_by_evidence":
+            evidence_payload["product_evidence"]["latency_budget_sha256"] = new_budget_sha
+    if mutation in {
+        "budget_value_not_bound_by_evidence",
+        "evidence_budget_digest",
+        "old_evidence_schema",
+    }:
+        evidence_raw = json.dumps(
+            evidence_payload,
+            ensure_ascii=True,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("ascii")
+        evidence_file.write_bytes(evidence_raw)
+        evidence_file.chmod(0o600)
+        new_evidence_sha = hashlib.sha256(evidence_raw).hexdigest()
+        target = target.replace(
+            f"FRIDAY_SEMANTIC_SUPERVISOR_PROMOTION_EVIDENCE_SHA256={old_evidence_sha}\n".encode(),
+            f"FRIDAY_SEMANTIC_SUPERVISOR_PROMOTION_EVIDENCE_SHA256={new_evidence_sha}\n".encode(),
+            1,
+        )
+
+    with pytest.raises(operator.ReleaseFailure):
+        operator._validate_staged_environment_transition(  # noqa: SLF001
+            "semantic_supervisor_shadow_to_assist",
+            shadow,
+            target,
         )
 
 
@@ -3223,6 +3473,43 @@ def test_semantic_supervisor_exact_legacy_p1_blocks_have_a_closed_upgrade_path(
     operator._validate_staged_environment_transition(  # noqa: SLF001
         "semantic_supervisor_shadow_disable",
         legacy_shadow,
+        canonical_off,
+    )
+
+
+def test_semantic_supervisor_pre_latency_shadow_has_an_exact_upgrade_path(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    base, canonical_off = _semantic_supervisor_off_port(tmp_path, monkeypatch)
+    pre_latency_off = _semantic_supervisor_pre_latency_environment(canonical_off, mode="off")
+    canonical_shadow = _semantic_supervisor_environment(pre_latency_off, mode="shadow")
+    operator._validate_staged_environment_transition(  # noqa: SLF001
+        "semantic_supervisor_shadow_enable",
+        pre_latency_off,
+        canonical_shadow,
+    )
+
+    pre_latency_shadow = _semantic_supervisor_pre_latency_environment(
+        canonical_shadow,
+        mode="shadow",
+    )
+    evidence = tmp_path / "pre-latency-assist-evidence.json"
+    evidence.write_bytes(b"placeholder")
+    evidence.chmod(0o600)
+    assist = _semantic_supervisor_promoted_environment(
+        pre_latency_shadow,
+        mode="assist",
+        evidence_file=evidence,
+    )
+    operator._validate_staged_environment_transition(  # noqa: SLF001
+        "semantic_supervisor_shadow_to_assist",
+        pre_latency_shadow,
+        assist,
+    )
+    operator._validate_staged_environment_transition(  # noqa: SLF001
+        "semantic_supervisor_shadow_disable",
+        pre_latency_shadow,
         canonical_off,
     )
 

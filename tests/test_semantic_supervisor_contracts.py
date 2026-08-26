@@ -817,9 +817,7 @@ def test_assist_proposal_transport_and_kernel_bind_the_distinct_v2_policy() -> N
     payload = json.loads(user["content"])
     trusted = payload["trusted_policy"]
     assert trusted["policy_id"] == semantic_supervisor_policy.SUPERVISOR_ASSIST_PRODUCT_POLICY_ID
-    assert trusted["policy_sha256"] == (
-        semantic_supervisor_policy.SUPERVISOR_ASSIST_PRODUCT_POLICY_SHA256
-    )
+    assert trusted["policy_sha256"] == (semantic_supervisor_policy.SUPERVISOR_ASSIST_PRODUCT_POLICY_SHA256)
     assert payload["untrusted_payload"]["constraints"]["max_review_rounds"] == 1
     assert trusted["tools_allowed"] is False
     assert trusted["effects_allowed"] is False
@@ -836,9 +834,7 @@ def test_assist_proposal_transport_and_kernel_bind_the_distinct_v2_policy() -> N
     )
     assert decision.admitted is True
     assert decision.plan is not None
-    assert decision.plan.policy_version == (
-        semantic_supervisor_policy.SUPERVISOR_ASSIST_PRODUCT_POLICY_ID
-    )
+    assert decision.plan.policy_version == (semantic_supervisor_policy.SUPERVISOR_ASSIST_PRODUCT_POLICY_ID)
     assert decision.plan.confirmation_required is False
     assert decision.plan.publication_owner == "primary"
 
@@ -952,15 +948,19 @@ def test_configuration_defaults_and_unknown_mode_stay_off(settings, monkeypatch)
         "raw_settings_valid": True,
         "evidence_file_configured": False,
         "evidence_sha256_configured": False,
+        "latency_budget_file_configured": False,
+        "latency_budget_sha256_configured": False,
         "source_revision_configured": False,
         "registry_binding_configured": False,
         "canary_actor_binding_count": 0,
         "evidence_path_public": False,
+        "latency_budget_path_public": False,
     }
     raw = settings.semantic_supervisor_promotion_activation_settings()
     assert raw.enabled is False
     assert raw.requested_mode == "off"
     assert raw.evidence_file == ""
+    assert raw.latency_budget_file == ""
     assert raw.canary_actor_bindings == ()
     monkeypatch.setenv("FRIDAY_SEMANTIC_SUPERVISOR_MODE", "please-assist")
     from friday.config import load_settings
@@ -975,6 +975,8 @@ def test_promotion_config_retains_exact_private_bindings_but_redacts_them(
 ) -> None:
     evidence_path = "/private/friday/promotion-evidence.json"
     evidence_sha256 = "a" * 64
+    latency_budget_path = "/private/friday/latency-budget.json"
+    latency_budget_sha256 = "f" * 64
     source_sha256 = "b" * 64
     registry_sha256 = "c" * 64
     actors = ("d" * 64, "e" * 64)
@@ -982,6 +984,14 @@ def test_promotion_config_retains_exact_private_bindings_but_redacts_them(
     monkeypatch.setenv("FRIDAY_SEMANTIC_SUPERVISOR_PROMOTION_ENABLED", "1")
     monkeypatch.setenv("FRIDAY_SEMANTIC_SUPERVISOR_PROMOTION_EVIDENCE_FILE", evidence_path)
     monkeypatch.setenv("FRIDAY_SEMANTIC_SUPERVISOR_PROMOTION_EVIDENCE_SHA256", evidence_sha256)
+    monkeypatch.setenv(
+        "FRIDAY_SEMANTIC_SUPERVISOR_PROMOTION_LATENCY_BUDGET_FILE",
+        latency_budget_path,
+    )
+    monkeypatch.setenv(
+        "FRIDAY_SEMANTIC_SUPERVISOR_PROMOTION_LATENCY_BUDGET_SHA256",
+        latency_budget_sha256,
+    )
     monkeypatch.setenv(
         "FRIDAY_SEMANTIC_SUPERVISOR_PROMOTION_SOURCE_REVISION_SHA256",
         source_sha256,
@@ -1002,6 +1012,8 @@ def test_promotion_config_retains_exact_private_bindings_but_redacts_them(
     assert raw.requested_mode == "canary"
     assert raw.evidence_file == evidence_path
     assert raw.evidence_sha256 == evidence_sha256
+    assert raw.latency_budget_file == latency_budget_path
+    assert raw.latency_budget_sha256 == latency_budget_sha256
     assert raw.source_revision_sha256 == source_sha256
     assert raw.registry_binding_sha256 == registry_sha256
     assert raw.canary_actor_bindings == actors
@@ -1014,13 +1026,24 @@ def test_promotion_config_retains_exact_private_bindings_but_redacts_them(
         "raw_settings_valid": True,
         "evidence_file_configured": True,
         "evidence_sha256_configured": True,
+        "latency_budget_file_configured": True,
+        "latency_budget_sha256_configured": True,
         "source_revision_configured": True,
         "registry_binding_configured": True,
         "canary_actor_binding_count": 2,
         "evidence_path_public": False,
+        "latency_budget_path_public": False,
     }
     serialized = json.dumps(public, sort_keys=True)
-    for private_value in (evidence_path, evidence_sha256, source_sha256, registry_sha256, *actors):
+    for private_value in (
+        evidence_path,
+        evidence_sha256,
+        latency_budget_path,
+        latency_budget_sha256,
+        source_sha256,
+        registry_sha256,
+        *actors,
+    ):
         assert private_value not in serialized
 
 
@@ -1146,6 +1169,8 @@ def test_semantic_supervisor_config_is_forwarded_by_operator_templates() -> None
         ("FRIDAY_SEMANTIC_SUPERVISOR_PROMOTION_ENABLED", "0"),
         ("FRIDAY_SEMANTIC_SUPERVISOR_PROMOTION_EVIDENCE_FILE", ""),
         ("FRIDAY_SEMANTIC_SUPERVISOR_PROMOTION_EVIDENCE_SHA256", ""),
+        ("FRIDAY_SEMANTIC_SUPERVISOR_PROMOTION_LATENCY_BUDGET_FILE", ""),
+        ("FRIDAY_SEMANTIC_SUPERVISOR_PROMOTION_LATENCY_BUDGET_SHA256", ""),
         ("FRIDAY_SEMANTIC_SUPERVISOR_PROMOTION_REGISTRY_BINDING_SHA256", ""),
         ("FRIDAY_SEMANTIC_SUPERVISOR_PROMOTION_SOURCE_REVISION_SHA256", ""),
         ("FRIDAY_SEMANTIC_SUPERVISOR_TASKS", ""),

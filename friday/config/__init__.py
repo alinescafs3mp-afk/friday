@@ -734,6 +734,8 @@ class FridaySettings:
     semantic_supervisor_promotion_enabled: bool | None
     semantic_supervisor_promotion_evidence_file: str
     semantic_supervisor_promotion_evidence_sha256: str
+    semantic_supervisor_promotion_latency_budget_file: str
+    semantic_supervisor_promotion_latency_budget_sha256: str
     semantic_supervisor_promotion_source_revision_sha256: str
     semantic_supervisor_promotion_registry_binding_sha256: str
     semantic_supervisor_promotion_canary_actor_bindings: tuple[str, ...] | None
@@ -1163,7 +1165,9 @@ class FridaySettings:
     def public_dict(self) -> dict[str, object]:
         actor_bindings = self.semantic_supervisor_promotion_canary_actor_bindings
         evidence_file = self.semantic_supervisor_promotion_evidence_file
+        latency_budget_file = self.semantic_supervisor_promotion_latency_budget_file
         evidence_path = Path(evidence_file)
+        latency_budget_path = Path(latency_budget_file)
         evidence_file_configured = bool(evidence_file)
         evidence_path_valid = bool(
             evidence_file_configured
@@ -1174,6 +1178,20 @@ class FridaySettings:
         )
         evidence_sha256_configured = bool(
             re.fullmatch(r"[0-9a-f]{64}", self.semantic_supervisor_promotion_evidence_sha256)
+        )
+        latency_budget_file_configured = bool(latency_budget_file)
+        latency_budget_path_valid = bool(
+            latency_budget_file_configured
+            and latency_budget_path.is_absolute()
+            and str(latency_budget_path) == latency_budget_file
+            and Path(os.path.abspath(latency_budget_path)) == latency_budget_path
+            and not any(character in latency_budget_file for character in "\x00\r\n")
+        )
+        latency_budget_sha256_configured = bool(
+            re.fullmatch(
+                r"[0-9a-f]{64}",
+                self.semantic_supervisor_promotion_latency_budget_sha256,
+            )
         )
         source_revision_configured = bool(
             re.fullmatch(
@@ -1202,6 +1220,8 @@ class FridaySettings:
                     not promotion_requested
                     and not evidence_file
                     and not self.semantic_supervisor_promotion_evidence_sha256
+                    and not latency_budget_file
+                    and not self.semantic_supervisor_promotion_latency_budget_sha256
                     and not self.semantic_supervisor_promotion_source_revision_sha256
                     and not self.semantic_supervisor_promotion_registry_binding_sha256
                     and not actor_bindings
@@ -1210,6 +1230,8 @@ class FridaySettings:
                     self.semantic_supervisor_mode in {"assist", "canary"}
                     and evidence_path_valid
                     and evidence_sha256_configured
+                    and latency_budget_path_valid
+                    and latency_budget_sha256_configured
                     and source_revision_configured
                     and registry_binding_configured
                     and (
@@ -1268,12 +1290,15 @@ class FridaySettings:
                     "raw_settings_valid": promotion_settings_valid,
                     "evidence_file_configured": evidence_file_configured,
                     "evidence_sha256_configured": evidence_sha256_configured,
+                    "latency_budget_file_configured": latency_budget_file_configured,
+                    "latency_budget_sha256_configured": (latency_budget_sha256_configured),
                     "source_revision_configured": source_revision_configured,
                     "registry_binding_configured": registry_binding_configured,
                     "canary_actor_binding_count": (
                         len(actor_bindings) if isinstance(actor_bindings, tuple) else 0
                     ),
                     "evidence_path_public": False,
+                    "latency_budget_path_public": False,
                 },
                 "promotion_admitted": False,
             },
@@ -1396,6 +1421,8 @@ class FridaySettings:
             requested_mode=self.semantic_supervisor_mode,
             evidence_file=self.semantic_supervisor_promotion_evidence_file,
             evidence_sha256=self.semantic_supervisor_promotion_evidence_sha256,
+            latency_budget_file=self.semantic_supervisor_promotion_latency_budget_file,
+            latency_budget_sha256=self.semantic_supervisor_promotion_latency_budget_sha256,
             source_revision_sha256=self.semantic_supervisor_promotion_source_revision_sha256,
             registry_binding_sha256=self.semantic_supervisor_promotion_registry_binding_sha256,
             canary_actor_bindings=self.semantic_supervisor_promotion_canary_actor_bindings,
@@ -1609,6 +1636,14 @@ def load_settings(profile_name: str | None = None) -> FridaySettings:
         ),
         semantic_supervisor_promotion_evidence_sha256=env(
             "FRIDAY_SEMANTIC_SUPERVISOR_PROMOTION_EVIDENCE_SHA256",
+            "",
+        ),
+        semantic_supervisor_promotion_latency_budget_file=env(
+            "FRIDAY_SEMANTIC_SUPERVISOR_PROMOTION_LATENCY_BUDGET_FILE",
+            "",
+        ),
+        semantic_supervisor_promotion_latency_budget_sha256=env(
+            "FRIDAY_SEMANTIC_SUPERVISOR_PROMOTION_LATENCY_BUDGET_SHA256",
             "",
         ),
         semantic_supervisor_promotion_source_revision_sha256=env(

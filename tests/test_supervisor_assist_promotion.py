@@ -47,6 +47,8 @@ def _readiness_product(**changes: object) -> AssistPromotionReadinessEvidence:
         "baseline_failure_class_count": 5,
         "readiness_witness_sha256": "6" * 64,
         "readiness_observation_count": 20,
+        "latency_budget_target_mode": SupervisorMode.ASSIST,
+        "latency_budget_source_revision_sha256": SOURCE,
         "latency_budget_ms": 2_500,
         "latency_budget_sha256": "7" * 64,
         "latency_total_ms": 20_000,
@@ -74,6 +76,8 @@ def _outcome_product(**changes: object) -> AssistPromotionOutcomeEvidence:
         "documented_failure_class_sha256": None,
         "baseline_failure_class_count": 0,
         "promoted_failure_class_count": 0,
+        "latency_budget_target_mode": SupervisorMode.CANARY,
+        "latency_budget_source_revision_sha256": SOURCE,
         "latency_budget_ms": 2_500,
         "latency_budget_sha256": "7" * 64,
         "latency_observation_count": 20,
@@ -125,6 +129,8 @@ def _candidate(
         "scheduler": _scheduler(requested_mode=mode.value),
         "max_steps": SUPERVISOR_ASSIST_PROMOTION_MAX_STEPS,
         "max_review_rounds": SUPERVISOR_ASSIST_PROMOTION_MAX_REVIEW_ROUNDS,
+        "latency_budget_sha256": "7" * 64,
+        "latency_budget_ms": 2_500,
         "actor_binding_sha256": ACTOR if mode is SupervisorMode.CANARY else None,
     }
     values.update(changes)
@@ -138,7 +144,9 @@ def _evidence(
     # This is a contract fixture for a future evidence producer.  It is not a
     # claim that the repository currently has accepted production evidence.
     observed_policy = semantic_supervisor_policy.supervisor_product_policy_identity_for_mode(
-        candidate.requested_mode if candidate.requested_mode is SupervisorMode.CANARY else SupervisorMode.SHADOW
+        candidate.requested_mode
+        if candidate.requested_mode is SupervisorMode.CANARY
+        else SupervisorMode.SHADOW
     )
     values: dict[str, object] = {
         "evidence_id": "future_joined_operator_fixture",
@@ -564,9 +572,7 @@ def test_local_assist_product_policy_drift_rejects_even_an_exact_scheduler_proje
     monkeypatch.setattr(
         semantic_supervisor_policy,
         "SUPERVISOR_ASSIST_PRODUCT_POLICY",
-        MappingProxyType(
-            {"policy_id": semantic_supervisor_policy.SUPERVISOR_ASSIST_PRODUCT_POLICY_ID}
-        ),
+        MappingProxyType({"policy_id": semantic_supervisor_policy.SUPERVISOR_ASSIST_PRODUCT_POLICY_ID}),
     )
 
     decision = admit_supervisor_assist_promotion(
@@ -700,6 +706,33 @@ def test_live_evidence_is_exact_joined_body_free_and_invariant_bound(
 
     assert decision.promotion_admitted is False
     assert decision.reason is reason
+
+
+@pytest.mark.parametrize(
+    "product",
+    (
+        _readiness_product(latency_budget_sha256=OTHER),
+        _readiness_product(latency_budget_source_revision_sha256=OTHER),
+        _readiness_product(latency_budget_ms=2_499),
+    ),
+)
+def test_product_latency_budget_must_match_the_fresh_candidate(
+    product: AssistPromotionReadinessEvidence,
+) -> None:
+    candidate = _candidate()
+    evidence = _evidence(candidate, product_evidence=product)
+
+    decision = admit_supervisor_assist_promotion(candidate, evidence, _gate(candidate, evidence))
+
+    assert decision.promotion_admitted is False
+    assert decision.reason is AssistPromotionReason.EVIDENCE_IDENTITY_DRIFT
+
+
+def test_product_latency_budget_target_mode_is_closed_by_evidence_type() -> None:
+    with pytest.raises(ValueError, match="target mode must be assist"):
+        _readiness_product(latency_budget_target_mode=SupervisorMode.CANARY)
+    with pytest.raises(ValueError, match="target mode must be canary"):
+        _outcome_product(latency_budget_target_mode=SupervisorMode.ASSIST)
 
 
 def test_independent_gate_is_evidence_source_registry_and_mode_bound() -> None:
