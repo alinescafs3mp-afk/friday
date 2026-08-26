@@ -2501,6 +2501,11 @@ class WebSurfer:
             if not batch:
                 return
             requested_sources += len(batch)
+            if timeout <= 0:
+                # The search results are selected and therefore requested, but
+                # no outbound fetch may enter after the total budget expires.
+                timed_out_sources += len(batch)
+                return
             attempted_hosts.update(host for result in batch if (host := _host_of(result.url)))
             tasks = [asyncio.create_task(self.fetch(result.url, max_length=20_000)) for result in batch]
             done: set[asyncio.Task[FetchResult]] = set()

@@ -81,6 +81,36 @@ class _SlowSearchHarness(_ResearchHarness):
         return []
 
 
+class _ImmediateFetchEntryHarness(_ResearchHarness):
+    def __init__(self) -> None:
+        self.entered: list[str] = []
+
+    async def search(self, query: str, *, max_results: int) -> list[SearchResult]:
+        del query, max_results
+        return [SearchResult("Source 1", "https://source-1.example.com/", "", "fixture")]
+
+    async def fetch(self, url: str, *, max_length: int) -> FetchResult:
+        del max_length
+        self.entered.append(url)
+        await asyncio.sleep(0)
+        return FetchResult(url, "Source 1", "fact", 4, status_code=200)
+
+
+@pytest.mark.asyncio
+async def test_research_does_not_enter_fetch_after_total_budget_expires(monkeypatch) -> None:
+    monkeypatch.setattr(web_surfer_module, "_RESEARCH_TOTAL_BUDGET", 0.0, raising=False)
+    harness = _ImmediateFetchEntryHarness()
+
+    result = await harness.research("same query", max_sources=1)
+
+    assert harness.entered == []
+    assert (
+        result["target_sources"],
+        result["requested_sources"],
+        result["timed_out_sources"],
+    ) == (1, 1, 1)
+
+
 @pytest.mark.asyncio
 async def test_research_returns_completed_sources_before_its_deadline(monkeypatch) -> None:
     """Two completed fetches are evidence; one slow peer must not erase both at timeout."""
