@@ -40870,18 +40870,21 @@ class AgentRuntime:
         private_attachment = _engineer_compile_attachment(dossier)
         if private_attachment is None or not isinstance(response_files, list):
             return False
-        jar_matches: list[Mapping[str, Any]] = []
+        jar_filename_matches: list[Mapping[str, Any]] = []
         for value in response_files:
             if not isinstance(value, Mapping):
                 return False
-            if (
-                value.get("filename") == outcome.jar_filename
-                and value.get("mime_type") == "application/java-archive"
-            ):
-                jar_matches.append(value)
-        if len(jar_matches) != 1:
+            if value.get("filename") == outcome.jar_filename:
+                jar_filename_matches.append(value)
+        # Telegram presents the filename as the primary identity.  A sibling
+        # with the same name but another MIME type would be indistinguishable
+        # to the recipient even though the exact compiler JAR is also present.
+        # Reserve that name for one and only one exact compiler carrier.
+        if len(jar_filename_matches) != 1:
             return False
-        jar_item = jar_matches[0]
+        jar_item = jar_filename_matches[0]
+        if jar_item.get("mime_type") != "application/java-archive":
+            return False
         if any(
             jar_item.get(field) != private_attachment.get(field)
             for field in ("kind", "filename", "mime_type", "content_base64")

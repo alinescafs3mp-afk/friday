@@ -649,6 +649,7 @@ def test_compile_persistence_failure_rolls_back_reply_receipt_and_file(
         "source_row",
         "source_filename",
         "jar_duplicate",
+        "jar_filename_collision",
     ),
 )
 def test_authority_revoked_after_compile_suppresses_jar_and_success_receipt(
@@ -698,12 +699,15 @@ def test_authority_revoked_after_compile_suppresses_jar_and_success_receipt(
 
     with TestClient(app) as client:
         runtime = getattr(app.state.agent, "_legacy", app.state.agent)
-        if capability == "jar_duplicate":
+        if capability in {"jar_duplicate", "jar_filename_collision"}:
             authorize_compile = runtime._engineer_compile_publication_authorized  # noqa: SLF001
 
             def duplicate_jar(*args, response_files, **kwargs):  # noqa: ANN002, ANN003
                 files = list(response_files)
-                files.append(dict(files[0]))
+                duplicate = dict(files[0])
+                if capability == "jar_filename_collision":
+                    duplicate["mime_type"] = "application/octet-stream"
+                files.append(duplicate)
                 return authorize_compile(*args, response_files=files, **kwargs)
 
             monkeypatch.setattr(
