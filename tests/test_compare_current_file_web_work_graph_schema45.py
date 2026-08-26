@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import sqlite3
 from dataclasses import replace
 from pathlib import Path
@@ -14,13 +15,16 @@ from friday.interaction_control_plane.compare_current_file_web_work_graph import
     COMPARE_CURRENT_FILE_WEB_WORK_GRAPH_SCHEMA,
     FILE_READ_STEP_ID,
     CompareCurrentFileWebStepKind,
+    CompareCurrentFileWebStepState,
     CompareCurrentFileWebWorkGraph,
 )
 from friday.interaction_control_plane.compare_current_file_web_work_graph_store import (
     CompareCurrentFileWebGraphConflictError,
+    CompareCurrentFileWebRestartRebind,
     claim_compare_current_file_web_step_in_transaction,
     create_compare_current_file_web_work_graph_in_transaction,
     get_compare_current_file_web_work_graph_in_transaction,
+    rebind_compare_current_file_web_work_graph_after_restart_in_transaction,
 )
 from friday.interaction_control_plane.work_item_schema import (
     _WORK_ITEM_SCHEMA_44_EXTENSION,
@@ -119,6 +123,8 @@ def _downgrade_graph_projection_to_released_schema44(database: Path) -> None:
             if key not in schema42
         }
         _drop_legacy_schema_objects(conn, current_extension)
+        conn.execute("DROP TABLE work_item_compare_current_file_web_restart_rebind_steps")
+        conn.execute("DROP TABLE work_item_compare_current_file_web_restart_rebinds")
         conn.execute(
             "ALTER TABLE work_item_compare_current_file_web_steps "
             "RENAME TO work_item_compare_current_file_web_steps_schema45"
@@ -193,6 +199,112 @@ def test_schema45_exact_binding_is_durable_immutable_and_revision_cas(storage) -
             expected_revision=graph.revision,
             step_id=FILE_READ_STEP_ID,
             now="2026-08-26T10:00:02+00:00",
+        )
+
+
+def test_schema45_restart_rebind_is_one_shot_atomic_and_predecessor_audited(storage) -> None:
+    graph = _seed_bound_graph(storage, "restart-rebind")
+    with storage.transaction() as conn:
+        graph = claim_compare_current_file_web_step_in_transaction(
+            conn,
+            graph_id=graph.id,
+            user_id=graph.user_id,
+            conversation_id=graph.conversation_id,
+            expected_revision=graph.revision,
+            step_id=FILE_READ_STEP_ID,
+            now="2026-08-26T10:00:01+00:00",
+        )
+    predecessor_plan = graph.accepted_plan_sha256
+    predecessor_file = graph.step(FILE_READ_STEP_ID)
+    kinds = tuple(CompareCurrentFileWebStepKind)
+    rebind = CompareCurrentFileWebRestartRebind(
+        proposal_sha256=_sha256("restart:proposal"),
+        accepted_plan_sha256=_sha256("restart:plan"),
+        manifest_sha256=_sha256("restart:manifest"),
+        policy_sha256=_sha256("restart:policy"),
+        runtime_profile_sha256=_sha256("restart:runtime"),
+        adapter_registry_sha256=_sha256("restart:registry"),
+        actor_binding_sha256=_sha256("restart:actor"),
+        conversation_binding_sha256=_sha256("restart:conversation"),
+        step_input_identities={kind: _sha256(f"restart:input:{kind.value}") for kind in kinds},
+        step_idempotency_keys={kind: _sha256(f"restart:key:{kind.value}") for kind in kinds},
+    )
+    with storage.transaction() as conn:
+        rebound = rebind_compare_current_file_web_work_graph_after_restart_in_transaction(
+            conn,
+            graph_id=graph.id,
+            user_id=graph.user_id,
+            conversation_id=graph.conversation_id,
+            expected_revision=graph.revision,
+            rebind=rebind,
+            now="2026-08-26T10:00:02+00:00",
+        )
+
+    assert rebound.revision == graph.revision + 1
+    assert rebound.accepted_plan_sha256 == rebind.accepted_plan_sha256
+    assert all(step.state is CompareCurrentFileWebStepState.PENDING for step in rebound.steps)
+    assert rebound.step(FILE_READ_STEP_ID).attempt == predecessor_file.attempt == 1
+    assert rebound.step(FILE_READ_STEP_ID).started_at is None
+    assert all(
+        step.input_identity_sha256 == rebind.step_input_identities[step.kind]
+        and step.idempotency_key_sha256 == rebind.step_idempotency_keys[step.kind]
+        for step in rebound.steps
+    )
+    audit = storage.execute(
+        "SELECT * FROM work_item_compare_current_file_web_restart_rebinds WHERE graph_id=?",
+        (graph.id,),
+    ).fetchone()
+    assert audit is not None
+    assert audit["from_revision"] == graph.revision
+    assert audit["to_revision"] == rebound.revision
+    assert audit["predecessor_accepted_plan_sha256"] == predecessor_plan
+    assert audit["successor_accepted_plan_sha256"] == rebind.accepted_plan_sha256
+    histories = storage.execute(
+        "SELECT * FROM work_item_compare_current_file_web_restart_rebind_steps "
+        "WHERE graph_id=? ORDER BY step_id",
+        (graph.id,),
+    ).fetchall()
+    assert len(histories) == 3
+    file_history = next(row for row in histories if row["step_id"] == FILE_READ_STEP_ID)
+    assert file_history["predecessor_state"] == "running"
+    assert file_history["predecessor_attempt"] == 1
+    assert file_history["predecessor_started_at"] == predecessor_file.started_at
+    assert file_history["successor_input_identity_sha256"] == (
+        rebind.step_input_identities[CompareCurrentFileWebStepKind.FILE_READ]
+    )
+    validate_work_item_schema(storage.conn)
+    exported = storage.export_user(graph.user_id)
+    payload = json.loads(Path(exported["path"]).read_text(encoding="utf-8"))
+    assert len(payload["work_item_compare_current_file_web_restart_rebinds"]) == 1
+    assert len(payload["work_item_compare_current_file_web_restart_rebind_steps"]) == 3
+    assert "synthetic schema45 file" not in json.dumps(
+        payload["work_item_compare_current_file_web_restart_rebind_steps"],
+        sort_keys=True,
+    )
+
+    with (
+        pytest.raises(CompareCurrentFileWebGraphConflictError, match="one-shot|CAS"),
+        storage.transaction() as conn,
+    ):
+        rebind_compare_current_file_web_work_graph_after_restart_in_transaction(
+            conn,
+            graph_id=rebound.id,
+            user_id=rebound.user_id,
+            conversation_id=rebound.conversation_id,
+            expected_revision=rebound.revision,
+            rebind=replace(
+                rebind,
+                actor_binding_sha256=_sha256("restart:actor:second"),
+                conversation_binding_sha256=_sha256("restart:conversation:second"),
+            ),
+            now="2026-08-26T10:00:03+00:00",
+        )
+
+    with pytest.raises(sqlite3.IntegrityError, match="immutable"), storage.transaction() as conn:
+        conn.execute(
+            "UPDATE work_item_compare_current_file_web_restart_rebinds "
+            "SET predecessor_accepted_plan_sha256=? WHERE graph_id=?",
+            (_sha256("forged-predecessor"), graph.id),
         )
 
 

@@ -28,6 +28,7 @@ from friday.orchestration.supervisor_assist_graph_adapter import (
     AssistCapabilityBoundary,
     AssistPublicationAction,
     AssistPublicationBoundary,
+    AssistRestartRebindBoundary,
 )
 from friday.orchestration.supervisor_assist_ports import AssistPromotionEvaluator
 from friday.orchestration.supervisor_assist_surface import CurrentFileWebAssistSurface
@@ -44,6 +45,7 @@ from friday.storage._base import normalize_conversation_mode
 from friday.storage._core import read_only_storage_snapshot
 
 _FILE_SECURITY_ID = "files.read"
+_CHAT_SECURITY_ID = "chat.use"
 _ALLOWED_SECURITY_IDS = frozenset({_FILE_SECURITY_ID, TRANSIENT_WEB_SECURITY_ID})
 
 
@@ -118,6 +120,29 @@ class SupervisorAssistActorBinding:
             return supervisor_canary_actor_binding_from_transaction(conn, actor)
 
 
+class SupervisorAssistRestartActorResolver:
+    """Reconstruct only the current personal account principal after restart."""
+
+    __slots__ = ("_authorization",)
+
+    def __init__(self, authorization: AuthorizationService) -> None:
+        if not isinstance(authorization, AuthorizationService):
+            raise TypeError("assist restart actor resolver requires AuthorizationService")
+        self._authorization = authorization
+
+    def __call__(self, graph: object) -> ActorContext | None:
+        user_id = getattr(graph, "user_id", None)
+        if type(user_id) is not str:
+            return None
+        actor = self._authorization.actor_for_user(
+            user_id,
+            source="semantic-recovery",
+        )
+        if type(actor) is not ActorContext or actor.user_id != user_id or actor.own_id != user_id:
+            return None
+        return actor
+
+
 class SupervisorAssistAuthorityGate:
     """Fresh permission gate evaluated in the adapter's current DB snapshot."""
 
@@ -139,10 +164,14 @@ class SupervisorAssistAuthorityGate:
             AssistAdmissionBoundary,
             AssistCapabilityBoundary,
             AssistPublicationBoundary,
+            AssistRestartRebindBoundary,
         }:
             return None
         carried = cast(
-            AssistAdmissionBoundary | AssistCapabilityBoundary | AssistPublicationBoundary,
+            AssistAdmissionBoundary
+            | AssistCapabilityBoundary
+            | AssistPublicationBoundary
+            | AssistRestartRebindBoundary,
             boundary,
         )
         if (
@@ -151,7 +180,7 @@ class SupervisorAssistAuthorityGate:
             or carried.user_id != actor.user_id
         ):
             return None
-        if type(boundary) is AssistAdmissionBoundary:
+        if type(boundary) in {AssistAdmissionBoundary, AssistRestartRebindBoundary}:
             return (_FILE_SECURITY_ID, TRANSIENT_WEB_SECURITY_ID)
         if type(boundary) is AssistCapabilityBoundary:
             security_id = cast(AssistCapabilityBoundary, boundary).security_id
@@ -162,38 +191,44 @@ class SupervisorAssistAuthorityGate:
             action = cast(AssistPublicationBoundary, boundary).action
             if action is AssistPublicationAction.COMPARISON:
                 return (_FILE_SECURITY_ID, TRANSIENT_WEB_SECURITY_ID)
+            if action is AssistPublicationAction.TERMINAL:
+                if (
+                    cast(AssistPublicationBoundary, boundary).expected_reason.value
+                    == "authority_denied"
+                ):
+                    return (_CHAT_SECURITY_ID,)
+                return (_FILE_SECURITY_ID, TRANSIENT_WEB_SECURITY_ID)
+            if action is AssistPublicationAction.CANCEL:
+                return (_CHAT_SECURITY_ID,)
             if action in {
-                AssistPublicationAction.TERMINAL,
-                AssistPublicationAction.CANCEL,
                 AssistPublicationAction.RESTART_RETIREMENT,
             }:
-                return ()
+                return (_FILE_SECURITY_ID, TRANSIENT_WEB_SECURITY_ID)
         return None
 
     def __call__(self, actor: ActorContext, boundary: object) -> bool:
         capabilities = self._capabilities(actor, boundary)
         if capabilities is None:
             return False
-        try:
-            with read_only_storage_snapshot(self._storage) as conn:
-                row = conn.execute(
-                    "SELECT status FROM users WHERE id=?",
-                    (actor.own_id,),
-                ).fetchone()
-                if row is None or str(row["status"] or "") != "active":
-                    return False
-                return all(
-                    self._authorization.authorize_in_transaction(conn, actor, security_id).allowed
-                    for security_id in capabilities
-                )
-        except Exception:
-            return False
+        with read_only_storage_snapshot(self._storage) as conn:
+            row = conn.execute(
+                "SELECT status FROM users WHERE id=?",
+                (actor.own_id,),
+            ).fetchone()
+            if row is None or str(row["status"] or "") != "active":
+                return False
+            return all(
+                self._authorization.authorize_in_transaction(conn, actor, security_id).allowed
+                for security_id in capabilities
+            )
 
 
 def supervisor_assist_read_only_effect_gate(boundary: object) -> bool:
     """Admit only the fixed read graph; the adapter owns the durable request fence."""
 
     if type(boundary) is AssistAdmissionBoundary:
+        return True
+    if type(boundary) is AssistRestartRebindBoundary:
         return True
     if type(boundary) is AssistCapabilityBoundary:
         security_id = cast(AssistCapabilityBoundary, boundary).security_id
@@ -204,6 +239,7 @@ def supervisor_assist_read_only_effect_gate(boundary: object) -> bool:
             AssistPublicationAction.TERMINAL,
             AssistPublicationAction.CANCEL,
             AssistPublicationAction.RESTART_RETIREMENT,
+            AssistPublicationAction.EXPIRY_RETIREMENT,
         }
     return False
 
@@ -330,6 +366,7 @@ __all__ = [
     "CurrentTurnAssistFileEvidenceReader",
     "SupervisorAssistActorBinding",
     "SupervisorAssistAuthorityGate",
+    "SupervisorAssistRestartActorResolver",
     "SupervisorPromotedProductObserver",
     "supervisor_assist_read_only_effect_gate",
 ]

@@ -70,6 +70,8 @@ from friday.orchestration.supervisor_assist_graph_adapter import (
     AssistGraphPublication,
     AssistMixedAuthorityTerminalPublication,
     AssistPublicationBoundary,
+    AssistRestartRebindBoundary,
+    AssistRestartScan,
     AssistRestartResult,
     AssistStepSettlement,
     AssistTerminalPublication,
@@ -84,6 +86,10 @@ from friday.orchestration.supervisor_assist_promotion import (
     AssistPromotionDecision,
     AssistPromotionReadiness,
     AssistPromotionReason,
+)
+from friday.orchestration.supervisor_assist_recovery import (
+    RecoveredAssistSurface,
+    SupervisorAssistRecoverySurfaceLoader,
 )
 from friday.orchestration.supervisor_assist_surface import (
     CurrentFileWebAssistSurface,
@@ -128,6 +134,7 @@ from friday.semantic_supervisor_policy import (
 from friday.source_identity import authorized_file_snapshot_token_is_process_owned
 
 SUPERVISOR_ASSIST_CONTROLLER_STATUS_SCHEMA = "friday.semantic-supervisor-assist-controller-status.v1"
+SUPERVISOR_ASSIST_RESTART_STATUS_SCHEMA = "friday.semantic-supervisor-assist-restart-status.v1"
 
 _DIGEST_RE = re.compile(r"[0-9a-f]{64}\Z")
 _MAX_STATUS_REASON_KEYS = 32
@@ -333,6 +340,17 @@ class SupervisorAssistGraphPort(Protocol):
         scope: AssistConversationScope,
     ) -> CompareCurrentFileWebWorkGraph | None: ...
 
+    def active_after_restart(self, *, limit: int) -> AssistRestartScan: ...
+
+    def rebind_after_restart(
+        self,
+        cursor: AssistGraphCursor,
+        admission: AssistGraphAdmission,
+        *,
+        authority_check: AssistBoundaryCheck[AssistRestartRebindBoundary],
+        effect_check: AssistBoundaryCheck[AssistRestartRebindBoundary],
+    ) -> CompareCurrentFileWebWorkGraph: ...
+
     def claim(
         self,
         cursor: AssistGraphCursor,
@@ -423,6 +441,7 @@ class _RunMetrics:
     model_calls: int = 1  # one admitted supervisor proposal call
     capability_calls: int = 0
     accounting_complete: bool = True
+    state_restored: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -583,6 +602,57 @@ def _graph_matches_pristine_admission(
     )
 
 
+def _graph_matches_restart_rebind(
+    graph: object,
+    prospective: _ProspectiveAdmission,
+    predecessor: CompareCurrentFileWebWorkGraph,
+) -> bool:
+    if type(graph) is not CompareCurrentFileWebWorkGraph:
+        return False
+    rebound = cast(CompareCurrentFileWebWorkGraph, graph)
+    surface = prospective.surface
+    plan = prospective.plan
+    bindings = bind_assist_plan_to_surface(plan, surface)
+    if bindings is None:
+        return False
+    return bool(
+        rebound.id == predecessor.id
+        and rebound.state is CompareCurrentFileWebGraphState.ACTIVE
+        and rebound.transition is CompareCurrentFileWebGraphTransition.RESTART_REBIND
+        and rebound.revision == predecessor.revision + 1
+        and getattr(rebound, "restart_count", 0) == 1
+        and rebound.user_id == surface.actor.user_id
+        and rebound.conversation_id == surface.conversation_id
+        and rebound.anchor_user_message_id == predecessor.anchor_user_message_id
+        and hmac.compare_digest(
+            rebound.anchor_request_binding_sha256,
+            surface.ingress_binding.canonical_sha256(),
+        )
+        and rebound.current_file_raw_object_id == surface.attachment.raw_object_id
+        and rebound.current_file_source_identity_sha256
+        == surface.attachment.source_identity_sha256
+        and rebound.current_file_content_sha256 == surface.attachment_content_sha256
+        and rebound.proposal_sha256 == plan.proposal_digest
+        and rebound.accepted_plan_sha256 == plan.canonical_sha256()
+        and rebound.manifest_sha256 == plan.manifest_digest
+        and rebound.policy_sha256 == plan.policy_sha256
+        and rebound.runtime_profile_sha256 == SUPERVISOR_RUNTIME_PROFILE_MANIFEST_SHA256
+        and rebound.adapter_registry_sha256 == plan.binding_snapshot_sha256
+        and rebound.actor_binding_sha256 == plan.actor_binding_sha256
+        and rebound.conversation_binding_sha256 == plan.conversation_binding_sha256
+        and all(
+            rebound.step(binding.graph_step_id).state
+            is CompareCurrentFileWebStepState.PENDING
+            for binding in bindings
+        )
+        and all(
+            rebound.step(binding.graph_step_id).idempotency_key_sha256
+            == binding.plan_step.idempotency_key
+            for binding in bindings
+        )
+    )
+
+
 def _safe_counter(counter: Counter[str]) -> dict[str, int]:
     return dict(sorted(counter.items())[:_MAX_STATUS_REASON_KEYS])
 
@@ -710,6 +780,15 @@ class SupervisorAssistController:
         self._event_success_total = 0
         self._event_failure_total = 0
         self._ownership_uncertain_total = 0
+        self._restart_recovery_task: asyncio.Task[None] | None = None
+        self._restart_recovery_discovered = 0
+        self._restart_recovery_rebound = 0
+        self._restart_recovery_completed = 0
+        self._restart_recovery_retained = 0
+        self._restart_recovery_failed = 0
+        self._restart_recovery_has_more = False
+        self._restart_recovery_started = False
+        self._restart_recovery_finished = False
         self._last_admitted_mode = SupervisorMode.OFF
         self._last_admitted_actor_binding_sha256: str | None = None
         self._closed = False
@@ -765,6 +844,7 @@ class SupervisorAssistController:
             "event_success_total": self._event_success_total,
             "event_failure_total": self._event_failure_total,
             "ownership_uncertain_total": self._ownership_uncertain_total,
+            "restart_recovery": self.restart_recovery_status(),
             "fallback_reasons": _safe_counter(self._fallback_reasons),
             "runtime_owner": "durable_graph_after_admission",
             "publication_owner": "primary",
@@ -772,6 +852,23 @@ class SupervisorAssistController:
             "effects_allowed": False,
             "closed": self._closed,
             "scheduler": _scheduler_identity(self._promotion),
+        }
+
+    def restart_recovery_status(self) -> dict[str, object]:
+        """Expose bounded counters only; never graph, request, or user identity."""
+
+        task = self._restart_recovery_task
+        return {
+            "schema": SUPERVISOR_ASSIST_RESTART_STATUS_SCHEMA,
+            "started": self._restart_recovery_started,
+            "running": task is not None and not task.done(),
+            "finished": self._restart_recovery_finished,
+            "discovered": self._restart_recovery_discovered,
+            "rebound": self._restart_recovery_rebound,
+            "completed": self._restart_recovery_completed,
+            "retained": self._restart_recovery_retained,
+            "failed": self._restart_recovery_failed,
+            "has_more": self._restart_recovery_has_more,
         }
 
     async def _legacy(
@@ -1115,6 +1212,7 @@ class SupervisorAssistController:
         graph: CompareCurrentFileWebWorkGraph,
         *,
         started_at: float,
+        state_restored: bool = False,
     ) -> _OwnedRun:
         task = asyncio.current_task()
         if task is None:
@@ -1140,7 +1238,10 @@ class SupervisorAssistController:
             pending=pending,
             graph=graph,
             task=task,
-            metrics=_RunMetrics(started_at=started_at),
+            metrics=_RunMetrics(
+                started_at=started_at,
+                state_restored=state_restored,
+            ),
         )
         self._active_by_scope[scope] = record
         self._active_by_graph[graph.id] = record
@@ -1803,7 +1904,7 @@ class SupervisorAssistController:
             model_call_accounting=accounting,
             capability_calls=record.metrics.capability_calls,
             capability_call_accounting=accounting,
-            state_restored=False,
+            state_restored=record.metrics.state_restored,
         )
 
     def _committed_result(

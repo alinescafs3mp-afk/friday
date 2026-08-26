@@ -59,6 +59,8 @@ _SCHEMA_42_TABLES = (
     "work_items",
 )
 _WORK_ITEM_TABLES = (
+    "work_item_compare_current_file_web_restart_rebind_steps",
+    "work_item_compare_current_file_web_restart_rebinds",
     "work_item_compare_current_file_web_steps",
     "work_item_compare_current_file_web_graphs",
     *_SCHEMA_42_TABLES,
@@ -2730,7 +2732,14 @@ _WORK_ITEM_SCHEMA_44 = _WORK_ITEM_SCHEMA_42 + _WORK_ITEM_SCHEMA_44_EXTENSION
 
 
 def _schema_45_extension_from_44() -> str:
-    """Add one immutable body-free root-request identity to schema 44."""
+    """Add an exact request root and one audit-preserving restart rebind.
+
+    Schema 45 has not shipped.  Its fixed graph may therefore gain the restart
+    contract here without creating a second migration marker.  A rebind is a
+    single graph UPDATE: SQLite snapshots the predecessor control/step rows,
+    installs fresh plan identities, and resets all three read-only nodes in one
+    atomic trigger program.  Old process-private evidence is never restored.
+    """
 
     schema = _WORK_ITEM_SCHEMA_44_EXTENSION
     replacements = (
@@ -2740,6 +2749,20 @@ def _schema_45_extension_from_44() -> str:
             """    anchor_user_message_id TEXT NOT NULL REFERENCES messages(id),
     anchor_request_binding_sha256 TEXT NOT NULL,
     current_file_raw_object_id TEXT NOT NULL REFERENCES raw_objects(id),""",
+        ),
+        (
+            f"""    max_attempts INTEGER NOT NULL CHECK(max_attempts={COMPARE_CURRENT_FILE_WEB_MAX_ATTEMPTS}),
+    created_at TEXT NOT NULL,""",
+            f"""    max_attempts INTEGER NOT NULL CHECK(max_attempts={COMPARE_CURRENT_FILE_WEB_MAX_ATTEMPTS}),
+    restart_count INTEGER NOT NULL CHECK(restart_count IN (0,1)),
+    restart_rebound_at TEXT,
+    restart_file_input_identity_sha256 TEXT,
+    restart_file_idempotency_key_sha256 TEXT,
+    restart_web_input_identity_sha256 TEXT,
+    restart_web_idempotency_key_sha256 TEXT,
+    restart_synthesis_input_identity_sha256 TEXT,
+    restart_synthesis_idempotency_key_sha256 TEXT,
+    created_at TEXT NOT NULL,""",
         ),
         (
             """    CHECK(length(anchor_user_message_id)=20 AND substr(anchor_user_message_id,1,4)='msg_'
@@ -2758,11 +2781,483 @@ def _schema_45_extension_from_44() -> str:
   OR NEW.anchor_request_binding_sha256<>OLD.anchor_request_binding_sha256
   OR NEW.current_file_raw_object_id<>OLD.current_file_raw_object_id""",
         ),
+        (
+            """    CHECK(terminal_publication_receipt_sha256 IS NULL
+          OR (length(terminal_publication_receipt_sha256)=64
+              AND terminal_publication_receipt_sha256 NOT GLOB '*[^0-9a-f]*')),
+    CHECK(length(created_at)""",
+            """    CHECK(terminal_publication_receipt_sha256 IS NULL
+          OR (length(terminal_publication_receipt_sha256)=64
+              AND terminal_publication_receipt_sha256 NOT GLOB '*[^0-9a-f]*')),
+    CHECK((restart_count=0
+           AND restart_rebound_at IS NULL
+           AND restart_file_input_identity_sha256 IS NULL
+           AND restart_file_idempotency_key_sha256 IS NULL
+           AND restart_web_input_identity_sha256 IS NULL
+           AND restart_web_idempotency_key_sha256 IS NULL
+           AND restart_synthesis_input_identity_sha256 IS NULL
+           AND restart_synthesis_idempotency_key_sha256 IS NULL)
+          OR (restart_count=1
+              AND length(restart_rebound_at) BETWEEN 20 AND 64
+              AND unixepoch(restart_rebound_at) IS NOT NULL
+              AND restart_rebound_at>=created_at AND restart_rebound_at<=updated_at
+              AND length(restart_file_input_identity_sha256)=64
+              AND restart_file_input_identity_sha256 NOT GLOB '*[^0-9a-f]*'
+              AND length(restart_file_idempotency_key_sha256)=64
+              AND restart_file_idempotency_key_sha256 NOT GLOB '*[^0-9a-f]*'
+              AND length(restart_web_input_identity_sha256)=64
+              AND restart_web_input_identity_sha256 NOT GLOB '*[^0-9a-f]*'
+              AND length(restart_web_idempotency_key_sha256)=64
+              AND restart_web_idempotency_key_sha256 NOT GLOB '*[^0-9a-f]*'
+              AND length(restart_synthesis_input_identity_sha256)=64
+              AND restart_synthesis_input_identity_sha256 NOT GLOB '*[^0-9a-f]*'
+              AND length(restart_synthesis_idempotency_key_sha256)=64
+              AND restart_synthesis_idempotency_key_sha256 NOT GLOB '*[^0-9a-f]*')),
+    CHECK(transition<>'restart_rebind' OR restart_count=1),
+    CHECK(length(created_at)""",
+        ),
     )
     for old, new in replacements:
         if schema.count(old) != 1:
             raise RuntimeError("released schema-44 transformation anchor is ambiguous")
         schema = schema.replace(old, new)
+
+    # These eight bindings are process/plan authority, not durable request
+    # identity.  They may change only through the exact one-shot trigger below.
+    mutable_identity_lines = """  OR NEW.proposal_sha256<>OLD.proposal_sha256
+  OR NEW.accepted_plan_sha256<>OLD.accepted_plan_sha256
+  OR NEW.manifest_sha256<>OLD.manifest_sha256
+  OR NEW.policy_sha256<>OLD.policy_sha256
+  OR NEW.runtime_profile_sha256<>OLD.runtime_profile_sha256
+  OR NEW.adapter_registry_sha256<>OLD.adapter_registry_sha256
+  OR NEW.actor_binding_sha256<>OLD.actor_binding_sha256
+  OR NEW.conversation_binding_sha256<>OLD.conversation_binding_sha256
+"""
+    if schema.count(mutable_identity_lines) != 1:
+        raise RuntimeError("released graph mutable-identity anchor is ambiguous")
+    schema = schema.replace(mutable_identity_lines, "")
+
+    history_sql = f"""
+CREATE TABLE IF NOT EXISTS work_item_compare_current_file_web_restart_rebinds (
+    graph_id TEXT PRIMARY KEY
+        REFERENCES work_item_compare_current_file_web_graphs(id) ON DELETE CASCADE,
+    from_revision INTEGER NOT NULL CHECK(from_revision BETWEEN 1 AND 2147483646),
+    from_transition TEXT NOT NULL CHECK(from_transition IN (
+        'admitted','step_claimed','step_settled','step_requeued',
+        'review_recovery_admitted'
+    )),
+    from_updated_at TEXT NOT NULL,
+    to_revision INTEGER NOT NULL CHECK(to_revision=from_revision+1),
+    rebound_at TEXT NOT NULL,
+    predecessor_proposal_sha256 TEXT NOT NULL,
+    successor_proposal_sha256 TEXT NOT NULL,
+    predecessor_accepted_plan_sha256 TEXT NOT NULL,
+    successor_accepted_plan_sha256 TEXT NOT NULL,
+    predecessor_manifest_sha256 TEXT NOT NULL,
+    successor_manifest_sha256 TEXT NOT NULL,
+    predecessor_policy_sha256 TEXT NOT NULL,
+    successor_policy_sha256 TEXT NOT NULL,
+    predecessor_runtime_profile_sha256 TEXT NOT NULL,
+    successor_runtime_profile_sha256 TEXT NOT NULL,
+    predecessor_adapter_registry_sha256 TEXT NOT NULL,
+    successor_adapter_registry_sha256 TEXT NOT NULL,
+    predecessor_actor_binding_sha256 TEXT NOT NULL,
+    successor_actor_binding_sha256 TEXT NOT NULL,
+    predecessor_conversation_binding_sha256 TEXT NOT NULL,
+    successor_conversation_binding_sha256 TEXT NOT NULL,
+    CHECK(length(from_updated_at) BETWEEN 20 AND 64
+          AND unixepoch(from_updated_at) IS NOT NULL
+          AND length(rebound_at) BETWEEN 20 AND 64
+          AND unixepoch(rebound_at) IS NOT NULL
+          AND rebound_at>=from_updated_at),
+    CHECK(length(predecessor_proposal_sha256)=64
+          AND predecessor_proposal_sha256 NOT GLOB '*[^0-9a-f]*'
+          AND length(successor_proposal_sha256)=64
+          AND successor_proposal_sha256 NOT GLOB '*[^0-9a-f]*'
+          AND length(predecessor_accepted_plan_sha256)=64
+          AND predecessor_accepted_plan_sha256 NOT GLOB '*[^0-9a-f]*'
+          AND length(successor_accepted_plan_sha256)=64
+          AND successor_accepted_plan_sha256 NOT GLOB '*[^0-9a-f]*'
+          AND length(predecessor_manifest_sha256)=64
+          AND predecessor_manifest_sha256 NOT GLOB '*[^0-9a-f]*'
+          AND length(successor_manifest_sha256)=64
+          AND successor_manifest_sha256 NOT GLOB '*[^0-9a-f]*'
+          AND length(predecessor_policy_sha256)=64
+          AND predecessor_policy_sha256 NOT GLOB '*[^0-9a-f]*'
+          AND length(successor_policy_sha256)=64
+          AND successor_policy_sha256 NOT GLOB '*[^0-9a-f]*'
+          AND length(predecessor_runtime_profile_sha256)=64
+          AND predecessor_runtime_profile_sha256 NOT GLOB '*[^0-9a-f]*'
+          AND length(successor_runtime_profile_sha256)=64
+          AND successor_runtime_profile_sha256 NOT GLOB '*[^0-9a-f]*'
+          AND length(predecessor_adapter_registry_sha256)=64
+          AND predecessor_adapter_registry_sha256 NOT GLOB '*[^0-9a-f]*'
+          AND length(successor_adapter_registry_sha256)=64
+          AND successor_adapter_registry_sha256 NOT GLOB '*[^0-9a-f]*'
+          AND length(predecessor_actor_binding_sha256)=64
+          AND predecessor_actor_binding_sha256 NOT GLOB '*[^0-9a-f]*'
+          AND length(successor_actor_binding_sha256)=64
+          AND successor_actor_binding_sha256 NOT GLOB '*[^0-9a-f]*'
+          AND length(predecessor_conversation_binding_sha256)=64
+          AND predecessor_conversation_binding_sha256 NOT GLOB '*[^0-9a-f]*'
+          AND length(successor_conversation_binding_sha256)=64
+          AND successor_conversation_binding_sha256 NOT GLOB '*[^0-9a-f]*'),
+    CHECK(predecessor_actor_binding_sha256<>successor_actor_binding_sha256),
+    CHECK(predecessor_conversation_binding_sha256<>successor_conversation_binding_sha256)
+);
+
+CREATE TABLE IF NOT EXISTS work_item_compare_current_file_web_restart_rebind_steps (
+    graph_id TEXT NOT NULL
+        REFERENCES work_item_compare_current_file_web_restart_rebinds(graph_id)
+        ON DELETE CASCADE,
+    step_id TEXT NOT NULL,
+    kind TEXT NOT NULL CHECK(kind IN (
+        'file_current_read','web_current_read','primary_synthesis'
+    )),
+    predecessor_input_identity_sha256 TEXT NOT NULL,
+    successor_input_identity_sha256 TEXT NOT NULL,
+    predecessor_idempotency_key_sha256 TEXT NOT NULL,
+    successor_idempotency_key_sha256 TEXT NOT NULL,
+    predecessor_state TEXT NOT NULL CHECK(predecessor_state IN (
+        'pending','running','complete','partial','empty','unavailable','denied','failed'
+    )),
+    predecessor_attempt INTEGER NOT NULL CHECK(
+        predecessor_attempt BETWEEN 0 AND {COMPARE_CURRENT_FILE_WEB_MAX_ATTEMPTS - 1}
+    ),
+    predecessor_outcome_sha256 TEXT,
+    predecessor_prior_outcome_sha256 TEXT,
+    predecessor_recovery_review_sha256 TEXT,
+    predecessor_recovery_context_sha256 TEXT,
+    predecessor_evidence_identity_sha256 TEXT,
+    predecessor_authority_rechecked INTEGER NOT NULL CHECK(
+        predecessor_authority_rechecked IN (0,1)
+    ),
+    predecessor_verified INTEGER NOT NULL CHECK(predecessor_verified IN (0,1)),
+    predecessor_started_at TEXT,
+    predecessor_settled_at TEXT,
+    successor_attempt INTEGER NOT NULL CHECK(
+        successor_attempt=predecessor_attempt
+        AND successor_attempt BETWEEN 0 AND {COMPARE_CURRENT_FILE_WEB_MAX_ATTEMPTS - 1}
+    ),
+    successor_prior_outcome_sha256 TEXT,
+    PRIMARY KEY(graph_id,step_id),
+    UNIQUE(graph_id,kind),
+    CHECK((kind='file_current_read' AND step_id='read_current_file')
+          OR (kind='web_current_read' AND step_id='read_current_web')
+          OR (kind='primary_synthesis' AND step_id='primary_synthesis')),
+    CHECK(length(predecessor_input_identity_sha256)=64
+          AND predecessor_input_identity_sha256 NOT GLOB '*[^0-9a-f]*'
+          AND length(successor_input_identity_sha256)=64
+          AND successor_input_identity_sha256 NOT GLOB '*[^0-9a-f]*'
+          AND length(predecessor_idempotency_key_sha256)=64
+          AND predecessor_idempotency_key_sha256 NOT GLOB '*[^0-9a-f]*'
+          AND length(successor_idempotency_key_sha256)=64
+          AND successor_idempotency_key_sha256 NOT GLOB '*[^0-9a-f]*'),
+    CHECK(predecessor_outcome_sha256 IS NULL
+          OR (length(predecessor_outcome_sha256)=64
+              AND predecessor_outcome_sha256 NOT GLOB '*[^0-9a-f]*')),
+    CHECK(predecessor_prior_outcome_sha256 IS NULL
+          OR (length(predecessor_prior_outcome_sha256)=64
+              AND predecessor_prior_outcome_sha256 NOT GLOB '*[^0-9a-f]*')),
+    CHECK(predecessor_recovery_review_sha256 IS NULL
+          OR (length(predecessor_recovery_review_sha256)=64
+              AND predecessor_recovery_review_sha256 NOT GLOB '*[^0-9a-f]*')),
+    CHECK(predecessor_recovery_context_sha256 IS NULL
+          OR (length(predecessor_recovery_context_sha256)=64
+              AND predecessor_recovery_context_sha256 NOT GLOB '*[^0-9a-f]*')),
+    CHECK(predecessor_evidence_identity_sha256 IS NULL
+          OR (length(predecessor_evidence_identity_sha256)=64
+              AND predecessor_evidence_identity_sha256 NOT GLOB '*[^0-9a-f]*')),
+    CHECK(successor_prior_outcome_sha256 IS NULL
+          OR (length(successor_prior_outcome_sha256)=64
+              AND successor_prior_outcome_sha256 NOT GLOB '*[^0-9a-f]*')),
+    CHECK((predecessor_started_at IS NULL
+           OR (length(predecessor_started_at) BETWEEN 20 AND 64
+               AND unixepoch(predecessor_started_at) IS NOT NULL))
+          AND (predecessor_settled_at IS NULL
+               OR (length(predecessor_settled_at) BETWEEN 20 AND 64
+                   AND unixepoch(predecessor_settled_at) IS NOT NULL))),
+    CHECK(successor_prior_outcome_sha256 IS
+          CASE WHEN predecessor_state IN (
+              'complete','partial','empty','unavailable','denied','failed'
+          ) THEN predecessor_outcome_sha256
+          ELSE predecessor_prior_outcome_sha256 END)
+);
+
+CREATE TRIGGER IF NOT EXISTS trg_work_item_compare_current_file_web_restart_rebinds_insert_guard
+BEFORE INSERT ON work_item_compare_current_file_web_restart_rebinds
+WHEN NOT EXISTS (
+    SELECT 1 FROM work_item_compare_current_file_web_graphs graph
+     WHERE graph.id=NEW.graph_id AND graph.state='active'
+       AND graph.transition='restart_rebind' AND graph.restart_count=1
+       AND graph.revision=NEW.to_revision AND graph.updated_at=NEW.rebound_at
+       AND graph.proposal_sha256=NEW.successor_proposal_sha256
+       AND graph.accepted_plan_sha256=NEW.successor_accepted_plan_sha256
+       AND graph.manifest_sha256=NEW.successor_manifest_sha256
+       AND graph.policy_sha256=NEW.successor_policy_sha256
+       AND graph.runtime_profile_sha256=NEW.successor_runtime_profile_sha256
+       AND graph.adapter_registry_sha256=NEW.successor_adapter_registry_sha256
+       AND graph.actor_binding_sha256=NEW.successor_actor_binding_sha256
+       AND graph.conversation_binding_sha256=NEW.successor_conversation_binding_sha256
+)
+BEGIN SELECT RAISE(ABORT,'restart rebind audit has no exact successor graph'); END;
+
+CREATE TRIGGER IF NOT EXISTS trg_work_item_compare_current_file_web_restart_rebinds_update_immutable
+BEFORE UPDATE ON work_item_compare_current_file_web_restart_rebinds
+BEGIN SELECT RAISE(ABORT,'restart rebind audit is immutable'); END;
+
+CREATE TRIGGER IF NOT EXISTS trg_work_item_compare_current_file_web_restart_rebinds_delete_immutable
+BEFORE DELETE ON work_item_compare_current_file_web_restart_rebinds
+WHEN EXISTS (
+    SELECT 1 FROM work_item_compare_current_file_web_graphs graph
+     WHERE graph.id=OLD.graph_id
+)
+BEGIN SELECT RAISE(ABORT,'restart rebind audit is immutable'); END;
+
+CREATE TRIGGER IF NOT EXISTS trg_work_item_compare_current_file_web_restart_steps_insert_guard
+BEFORE INSERT ON work_item_compare_current_file_web_restart_rebind_steps
+WHEN NOT EXISTS (
+        SELECT 1 FROM work_item_compare_current_file_web_restart_rebinds audit
+         WHERE audit.graph_id=NEW.graph_id
+    )
+ OR NOT EXISTS (
+        SELECT 1 FROM work_item_compare_current_file_web_steps step
+         WHERE step.graph_id=NEW.graph_id AND step.step_id=NEW.step_id
+           AND step.kind=NEW.kind
+           AND step.input_identity_sha256=NEW.predecessor_input_identity_sha256
+           AND step.idempotency_key_sha256=NEW.predecessor_idempotency_key_sha256
+           AND step.state=NEW.predecessor_state
+           AND step.attempt=NEW.predecessor_attempt
+           AND step.outcome_sha256 IS NEW.predecessor_outcome_sha256
+           AND step.prior_outcome_sha256 IS NEW.predecessor_prior_outcome_sha256
+           AND step.recovery_review_sha256 IS NEW.predecessor_recovery_review_sha256
+           AND step.recovery_context_sha256 IS NEW.predecessor_recovery_context_sha256
+           AND step.evidence_identity_sha256 IS NEW.predecessor_evidence_identity_sha256
+           AND step.authority_rechecked=NEW.predecessor_authority_rechecked
+           AND step.verified=NEW.predecessor_verified
+           AND step.started_at IS NEW.predecessor_started_at
+           AND step.settled_at IS NEW.predecessor_settled_at
+    )
+BEGIN SELECT RAISE(ABORT,'restart rebind step audit is not predecessor-exact'); END;
+
+CREATE TRIGGER IF NOT EXISTS trg_work_item_compare_current_file_web_restart_steps_update_immutable
+BEFORE UPDATE ON work_item_compare_current_file_web_restart_rebind_steps
+BEGIN SELECT RAISE(ABORT,'restart rebind step audit is immutable'); END;
+
+CREATE TRIGGER IF NOT EXISTS trg_work_item_compare_current_file_web_restart_steps_delete_immutable
+BEFORE DELETE ON work_item_compare_current_file_web_restart_rebind_steps
+WHEN EXISTS (
+    SELECT 1 FROM work_item_compare_current_file_web_graphs graph
+     WHERE graph.id=OLD.graph_id
+)
+BEGIN SELECT RAISE(ABORT,'restart rebind step audit is immutable'); END;
+
+CREATE TRIGGER IF NOT EXISTS trg_work_item_compare_current_file_web_graphs_restart_apply
+AFTER UPDATE ON work_item_compare_current_file_web_graphs
+WHEN OLD.restart_count=0 AND NEW.restart_count=1 AND NEW.transition='restart_rebind'
+BEGIN
+    INSERT INTO work_item_compare_current_file_web_restart_rebinds(
+        graph_id,from_revision,from_transition,from_updated_at,to_revision,rebound_at,
+        predecessor_proposal_sha256,successor_proposal_sha256,
+        predecessor_accepted_plan_sha256,successor_accepted_plan_sha256,
+        predecessor_manifest_sha256,successor_manifest_sha256,
+        predecessor_policy_sha256,successor_policy_sha256,
+        predecessor_runtime_profile_sha256,successor_runtime_profile_sha256,
+        predecessor_adapter_registry_sha256,successor_adapter_registry_sha256,
+        predecessor_actor_binding_sha256,successor_actor_binding_sha256,
+        predecessor_conversation_binding_sha256,successor_conversation_binding_sha256
+    ) VALUES(
+        OLD.id,OLD.revision,OLD.transition,OLD.updated_at,NEW.revision,NEW.updated_at,
+        OLD.proposal_sha256,NEW.proposal_sha256,
+        OLD.accepted_plan_sha256,NEW.accepted_plan_sha256,
+        OLD.manifest_sha256,NEW.manifest_sha256,
+        OLD.policy_sha256,NEW.policy_sha256,
+        OLD.runtime_profile_sha256,NEW.runtime_profile_sha256,
+        OLD.adapter_registry_sha256,NEW.adapter_registry_sha256,
+        OLD.actor_binding_sha256,NEW.actor_binding_sha256,
+        OLD.conversation_binding_sha256,NEW.conversation_binding_sha256
+    );
+    INSERT INTO work_item_compare_current_file_web_restart_rebind_steps(
+        graph_id,step_id,kind,
+        predecessor_input_identity_sha256,successor_input_identity_sha256,
+        predecessor_idempotency_key_sha256,successor_idempotency_key_sha256,
+        predecessor_state,predecessor_attempt,predecessor_outcome_sha256,
+        predecessor_prior_outcome_sha256,predecessor_recovery_review_sha256,
+        predecessor_recovery_context_sha256,predecessor_evidence_identity_sha256,
+        predecessor_authority_rechecked,predecessor_verified,
+        predecessor_started_at,predecessor_settled_at,
+        successor_attempt,successor_prior_outcome_sha256
+    )
+    SELECT step.graph_id,step.step_id,step.kind,
+           step.input_identity_sha256,
+           CASE step.step_id
+             WHEN 'read_current_file' THEN NEW.restart_file_input_identity_sha256
+             WHEN 'read_current_web' THEN NEW.restart_web_input_identity_sha256
+             ELSE NEW.restart_synthesis_input_identity_sha256 END,
+           step.idempotency_key_sha256,
+           CASE step.step_id
+             WHEN 'read_current_file' THEN NEW.restart_file_idempotency_key_sha256
+             WHEN 'read_current_web' THEN NEW.restart_web_idempotency_key_sha256
+             ELSE NEW.restart_synthesis_idempotency_key_sha256 END,
+           step.state,step.attempt,step.outcome_sha256,step.prior_outcome_sha256,
+           step.recovery_review_sha256,step.recovery_context_sha256,
+           step.evidence_identity_sha256,step.authority_rechecked,step.verified,
+           step.started_at,step.settled_at,step.attempt,
+           CASE WHEN step.state IN (
+               'complete','partial','empty','unavailable','denied','failed'
+           ) THEN step.outcome_sha256 ELSE step.prior_outcome_sha256 END
+      FROM work_item_compare_current_file_web_steps step
+     WHERE step.graph_id=NEW.id;
+    UPDATE work_item_compare_current_file_web_steps
+       SET input_identity_sha256=CASE step_id
+             WHEN 'read_current_file' THEN NEW.restart_file_input_identity_sha256
+             WHEN 'read_current_web' THEN NEW.restart_web_input_identity_sha256
+             ELSE NEW.restart_synthesis_input_identity_sha256 END,
+           idempotency_key_sha256=CASE step_id
+             WHEN 'read_current_file' THEN NEW.restart_file_idempotency_key_sha256
+             WHEN 'read_current_web' THEN NEW.restart_web_idempotency_key_sha256
+             ELSE NEW.restart_synthesis_idempotency_key_sha256 END,
+           state='pending',
+           outcome_sha256=NULL,
+           prior_outcome_sha256=CASE WHEN state IN (
+               'complete','partial','empty','unavailable','denied','failed'
+           ) THEN outcome_sha256 ELSE prior_outcome_sha256 END,
+           recovery_review_sha256=NULL,recovery_context_sha256=NULL,
+           evidence_identity_sha256=NULL,authority_rechecked=0,verified=0,
+           started_at=NULL,settled_at=NULL
+     WHERE graph_id=NEW.id;
+    SELECT RAISE(ABORT,'restart rebind did not reset the exact fixed graph')
+     WHERE (SELECT COUNT(*) FROM work_item_compare_current_file_web_steps
+             WHERE graph_id=NEW.id)<>3
+        OR EXISTS (
+            SELECT 1 FROM work_item_compare_current_file_web_steps step
+             WHERE step.graph_id=NEW.id
+               AND (step.state<>'pending' OR step.attempt>={COMPARE_CURRENT_FILE_WEB_MAX_ATTEMPTS})
+        );
+END;
+"""
+
+    scope_trigger = (
+        "CREATE TRIGGER IF NOT EXISTS "
+        "trg_work_item_compare_current_file_web_graphs_scope_insert"
+    )
+    if schema.count(scope_trigger) != 1:
+        raise RuntimeError("released graph scope trigger anchor is ambiguous")
+    schema = schema.replace(scope_trigger, history_sql + "\n" + scope_trigger)
+
+    control_trigger = f"""
+CREATE TRIGGER IF NOT EXISTS trg_work_item_compare_current_file_web_graphs_control_rebind
+BEFORE UPDATE ON work_item_compare_current_file_web_graphs
+WHEN (
+       NEW.proposal_sha256<>OLD.proposal_sha256
+    OR NEW.accepted_plan_sha256<>OLD.accepted_plan_sha256
+    OR NEW.manifest_sha256<>OLD.manifest_sha256
+    OR NEW.policy_sha256<>OLD.policy_sha256
+    OR NEW.runtime_profile_sha256<>OLD.runtime_profile_sha256
+    OR NEW.adapter_registry_sha256<>OLD.adapter_registry_sha256
+    OR NEW.actor_binding_sha256<>OLD.actor_binding_sha256
+    OR NEW.conversation_binding_sha256<>OLD.conversation_binding_sha256
+    OR NEW.restart_count<>OLD.restart_count
+    OR NEW.restart_rebound_at IS NOT OLD.restart_rebound_at
+    OR NEW.restart_file_input_identity_sha256 IS NOT OLD.restart_file_input_identity_sha256
+    OR NEW.restart_file_idempotency_key_sha256 IS NOT OLD.restart_file_idempotency_key_sha256
+    OR NEW.restart_web_input_identity_sha256 IS NOT OLD.restart_web_input_identity_sha256
+    OR NEW.restart_web_idempotency_key_sha256 IS NOT OLD.restart_web_idempotency_key_sha256
+    OR NEW.restart_synthesis_input_identity_sha256 IS NOT OLD.restart_synthesis_input_identity_sha256
+    OR NEW.restart_synthesis_idempotency_key_sha256 IS NOT OLD.restart_synthesis_idempotency_key_sha256
+)
+AND NOT (
+    OLD.state='active' AND NEW.state='active'
+    AND OLD.restart_count=0 AND NEW.restart_count=1
+    AND OLD.restart_rebound_at IS NULL AND NEW.restart_rebound_at=NEW.updated_at
+    AND NEW.transition='restart_rebind' AND NEW.revision=OLD.revision+1
+    AND NEW.actor_binding_sha256<>OLD.actor_binding_sha256
+    AND NEW.conversation_binding_sha256<>OLD.conversation_binding_sha256
+    AND (SELECT COUNT(*) FROM work_item_compare_current_file_web_steps step
+          WHERE step.graph_id=OLD.id)=3
+    AND NOT EXISTS (
+        SELECT 1 FROM work_item_compare_current_file_web_steps step
+         WHERE step.graph_id=OLD.id AND step.attempt>={COMPARE_CURRENT_FILE_WEB_MAX_ATTEMPTS}
+    )
+)
+BEGIN SELECT RAISE(ABORT,'current-file/web WorkGraph control rebind is invalid'); END;
+
+CREATE TRIGGER IF NOT EXISTS trg_work_item_compare_current_file_web_graphs_restart_transition
+BEFORE UPDATE ON work_item_compare_current_file_web_graphs
+WHEN NEW.transition='restart_rebind'
+ AND NOT (OLD.restart_count=0 AND NEW.restart_count=1
+          AND NEW.revision=OLD.revision+1 AND NEW.restart_rebound_at=NEW.updated_at)
+BEGIN SELECT RAISE(ABORT,'current-file/web WorkGraph restart rebind is not one-shot'); END;
+
+"""
+    lifecycle_trigger = (
+        "CREATE TRIGGER IF NOT EXISTS "
+        "trg_work_item_compare_current_file_web_graphs_lifecycle"
+    )
+    if schema.count(lifecycle_trigger) != 1:
+        raise RuntimeError("released graph lifecycle trigger anchor is ambiguous")
+    schema = schema.replace(lifecycle_trigger, control_trigger + lifecycle_trigger)
+
+    old_step_identity_tail = """  OR NEW.input_identity_sha256<>OLD.input_identity_sha256
+  OR NEW.idempotency_key_sha256<>OLD.idempotency_key_sha256
+  OR NEW.outcome_schema<>OLD.outcome_schema
+"""
+    new_step_identity_tail = """  OR NEW.outcome_schema<>OLD.outcome_schema
+  OR ((NEW.input_identity_sha256<>OLD.input_identity_sha256
+       OR NEW.idempotency_key_sha256<>OLD.idempotency_key_sha256)
+      AND NOT EXISTS (
+          SELECT 1 FROM work_item_compare_current_file_web_graphs graph
+           WHERE graph.id=OLD.graph_id AND graph.state='active'
+             AND graph.transition='restart_rebind' AND graph.restart_count=1
+             AND OLD.attempt<2
+             AND NEW.input_identity_sha256=CASE OLD.step_id
+                 WHEN 'read_current_file' THEN graph.restart_file_input_identity_sha256
+                 WHEN 'read_current_web' THEN graph.restart_web_input_identity_sha256
+                 ELSE graph.restart_synthesis_input_identity_sha256 END
+             AND NEW.idempotency_key_sha256=CASE OLD.step_id
+                 WHEN 'read_current_file' THEN graph.restart_file_idempotency_key_sha256
+                 WHEN 'read_current_web' THEN graph.restart_web_idempotency_key_sha256
+                 ELSE graph.restart_synthesis_idempotency_key_sha256 END
+      ))
+"""
+    if schema.count(old_step_identity_tail) != 1:
+        raise RuntimeError("released step identity trigger anchor is ambiguous")
+    schema = schema.replace(old_step_identity_tail, new_step_identity_tail)
+
+    restart_lifecycle_branch = f"""    OR
+    (NEW.state='pending' AND NEW.attempt=OLD.attempt
+     AND OLD.attempt<{COMPARE_CURRENT_FILE_WEB_MAX_ATTEMPTS}
+     AND NEW.started_at IS NULL AND NEW.settled_at IS NULL
+     AND NEW.outcome_sha256 IS NULL AND NEW.evidence_identity_sha256 IS NULL
+     AND NEW.prior_outcome_sha256 IS CASE WHEN OLD.state IN (
+         'complete','partial','empty','unavailable','denied','failed'
+     ) THEN OLD.outcome_sha256 ELSE OLD.prior_outcome_sha256 END
+     AND NEW.recovery_review_sha256 IS NULL
+     AND NEW.recovery_context_sha256 IS NULL
+     AND NEW.authority_rechecked=0 AND NEW.verified=0
+     AND EXISTS (
+         SELECT 1 FROM work_item_compare_current_file_web_graphs graph
+          WHERE graph.id=OLD.graph_id AND graph.state='active'
+            AND graph.transition='restart_rebind' AND graph.restart_count=1
+            AND NEW.input_identity_sha256=CASE OLD.step_id
+                WHEN 'read_current_file' THEN graph.restart_file_input_identity_sha256
+                WHEN 'read_current_web' THEN graph.restart_web_input_identity_sha256
+                ELSE graph.restart_synthesis_input_identity_sha256 END
+            AND NEW.idempotency_key_sha256=CASE OLD.step_id
+                WHEN 'read_current_file' THEN graph.restart_file_idempotency_key_sha256
+                WHEN 'read_current_web' THEN graph.restart_web_idempotency_key_sha256
+                ELSE graph.restart_synthesis_idempotency_key_sha256 END
+     ))
+"""
+    settled_restart_anchor = """    OR
+    (OLD.state IN ('complete','partial','empty') AND NEW.state='pending'
+"""
+    if schema.count(settled_restart_anchor) != 1:
+        raise RuntimeError("released step restart lifecycle anchor is ambiguous")
+    schema = schema.replace(
+        settled_restart_anchor,
+        restart_lifecycle_branch + settled_restart_anchor,
+    )
     return schema
 
 
@@ -2985,6 +3480,57 @@ def _validate_current_data(conn: sqlite3.Connection) -> None:
     ).fetchone()
     if graph_orphan is not None:
         raise sqlite3.DatabaseError("Schema 45 current-file/web WorkGraph step is orphaned")
+
+    restart_mismatch = conn.execute(
+        """SELECT 1
+             FROM work_item_compare_current_file_web_graphs graph
+             LEFT JOIN work_item_compare_current_file_web_restart_rebinds audit
+               ON audit.graph_id=graph.id
+            WHERE (graph.restart_count=0 AND audit.graph_id IS NOT NULL)
+               OR (graph.restart_count=1 AND (
+                      audit.graph_id IS NULL
+                   OR audit.to_revision>graph.revision
+                   OR audit.rebound_at<>graph.restart_rebound_at
+                   OR audit.successor_proposal_sha256<>graph.proposal_sha256
+                   OR audit.successor_accepted_plan_sha256<>graph.accepted_plan_sha256
+                   OR audit.successor_manifest_sha256<>graph.manifest_sha256
+                   OR audit.successor_policy_sha256<>graph.policy_sha256
+                   OR audit.successor_runtime_profile_sha256<>graph.runtime_profile_sha256
+                   OR audit.successor_adapter_registry_sha256<>graph.adapter_registry_sha256
+                   OR audit.successor_actor_binding_sha256<>graph.actor_binding_sha256
+                   OR audit.successor_conversation_binding_sha256
+                      <>graph.conversation_binding_sha256
+                   OR (SELECT COUNT(*)
+                         FROM work_item_compare_current_file_web_restart_rebind_steps history
+                        WHERE history.graph_id=graph.id)<>3
+                   OR EXISTS (
+                       SELECT 1
+                         FROM work_item_compare_current_file_web_restart_rebind_steps history
+                         JOIN work_item_compare_current_file_web_steps step
+                           ON step.graph_id=history.graph_id
+                          AND step.step_id=history.step_id
+                        WHERE history.graph_id=graph.id
+                          AND (step.input_identity_sha256
+                               <>history.successor_input_identity_sha256
+                               OR step.idempotency_key_sha256
+                                  <>history.successor_idempotency_key_sha256)
+                   )
+               ))
+            LIMIT 1"""
+    ).fetchone()
+    if restart_mismatch is not None:
+        raise sqlite3.DatabaseError("Schema 45 restart rebind audit is inconsistent")
+
+    restart_orphan = conn.execute(
+        """SELECT 1
+             FROM work_item_compare_current_file_web_restart_rebind_steps history
+             LEFT JOIN work_item_compare_current_file_web_steps step
+               ON step.graph_id=history.graph_id AND step.step_id=history.step_id
+            WHERE step.graph_id IS NULL
+            LIMIT 1"""
+    ).fetchone()
+    if restart_orphan is not None:
+        raise sqlite3.DatabaseError("Schema 45 restart rebind step audit is orphaned")
 
     recall_cursor = conn.execute("SELECT * FROM work_items WHERE kind='recall_conversation' ORDER BY id")
     recall_columns = tuple(str(item[0]) for item in recall_cursor.description or ())
@@ -3605,6 +4151,14 @@ def validate_work_item_schema(conn: sqlite3.Connection, *, required: bool = True
         "fallback_owner": ("TEXT", 1, 0),
         "publication_owner": ("TEXT", 1, 0),
         "max_attempts": ("INTEGER", 1, 0),
+        "restart_count": ("INTEGER", 1, 0),
+        "restart_rebound_at": ("TEXT", 0, 0),
+        "restart_file_input_identity_sha256": ("TEXT", 0, 0),
+        "restart_file_idempotency_key_sha256": ("TEXT", 0, 0),
+        "restart_web_input_identity_sha256": ("TEXT", 0, 0),
+        "restart_web_idempotency_key_sha256": ("TEXT", 0, 0),
+        "restart_synthesis_input_identity_sha256": ("TEXT", 0, 0),
+        "restart_synthesis_idempotency_key_sha256": ("TEXT", 0, 0),
         "created_at": ("TEXT", 1, 0),
         "updated_at": ("TEXT", 1, 0),
         "expires_at": ("TEXT", 1, 0),
@@ -3650,6 +4204,68 @@ def validate_work_item_schema(conn: sqlite3.Connection, *, required: bool = True
         "settled_at": ("TEXT", 0, 0),
     }:
         raise sqlite3.DatabaseError("Schema 45 current-file/web WorkGraph step shape is invalid")
+
+    restart_columns = {
+        str(item[1]): (str(item[2]).upper(), int(item[3]), int(item[5]))
+        for item in conn.execute(
+            "PRAGMA table_info(work_item_compare_current_file_web_restart_rebinds)"
+        )
+    }
+    if restart_columns != {
+        "graph_id": ("TEXT", 0, 1),
+        "from_revision": ("INTEGER", 1, 0),
+        "from_transition": ("TEXT", 1, 0),
+        "from_updated_at": ("TEXT", 1, 0),
+        "to_revision": ("INTEGER", 1, 0),
+        "rebound_at": ("TEXT", 1, 0),
+        "predecessor_proposal_sha256": ("TEXT", 1, 0),
+        "successor_proposal_sha256": ("TEXT", 1, 0),
+        "predecessor_accepted_plan_sha256": ("TEXT", 1, 0),
+        "successor_accepted_plan_sha256": ("TEXT", 1, 0),
+        "predecessor_manifest_sha256": ("TEXT", 1, 0),
+        "successor_manifest_sha256": ("TEXT", 1, 0),
+        "predecessor_policy_sha256": ("TEXT", 1, 0),
+        "successor_policy_sha256": ("TEXT", 1, 0),
+        "predecessor_runtime_profile_sha256": ("TEXT", 1, 0),
+        "successor_runtime_profile_sha256": ("TEXT", 1, 0),
+        "predecessor_adapter_registry_sha256": ("TEXT", 1, 0),
+        "successor_adapter_registry_sha256": ("TEXT", 1, 0),
+        "predecessor_actor_binding_sha256": ("TEXT", 1, 0),
+        "successor_actor_binding_sha256": ("TEXT", 1, 0),
+        "predecessor_conversation_binding_sha256": ("TEXT", 1, 0),
+        "successor_conversation_binding_sha256": ("TEXT", 1, 0),
+    }:
+        raise sqlite3.DatabaseError("Schema 45 restart rebind audit shape is invalid")
+
+    restart_step_columns = {
+        str(item[1]): (str(item[2]).upper(), int(item[3]), int(item[5]))
+        for item in conn.execute(
+            "PRAGMA table_info(work_item_compare_current_file_web_restart_rebind_steps)"
+        )
+    }
+    if restart_step_columns != {
+        "graph_id": ("TEXT", 1, 1),
+        "step_id": ("TEXT", 1, 2),
+        "kind": ("TEXT", 1, 0),
+        "predecessor_input_identity_sha256": ("TEXT", 1, 0),
+        "successor_input_identity_sha256": ("TEXT", 1, 0),
+        "predecessor_idempotency_key_sha256": ("TEXT", 1, 0),
+        "successor_idempotency_key_sha256": ("TEXT", 1, 0),
+        "predecessor_state": ("TEXT", 1, 0),
+        "predecessor_attempt": ("INTEGER", 1, 0),
+        "predecessor_outcome_sha256": ("TEXT", 0, 0),
+        "predecessor_prior_outcome_sha256": ("TEXT", 0, 0),
+        "predecessor_recovery_review_sha256": ("TEXT", 0, 0),
+        "predecessor_recovery_context_sha256": ("TEXT", 0, 0),
+        "predecessor_evidence_identity_sha256": ("TEXT", 0, 0),
+        "predecessor_authority_rechecked": ("INTEGER", 1, 0),
+        "predecessor_verified": ("INTEGER", 1, 0),
+        "predecessor_started_at": ("TEXT", 0, 0),
+        "predecessor_settled_at": ("TEXT", 0, 0),
+        "successor_attempt": ("INTEGER", 1, 0),
+        "successor_prior_outcome_sha256": ("TEXT", 0, 0),
+    }:
+        raise sqlite3.DatabaseError("Schema 45 restart rebind step audit shape is invalid")
 
     work_item_foreign_keys = {
         (str(item[3]), str(item[2]), str(item[4]), str(item[5]), str(item[6]))
@@ -3732,6 +4348,38 @@ def validate_work_item_schema(conn: sqlite3.Connection, *, required: bool = True
         ),
     }:
         raise sqlite3.DatabaseError("Schema 45 current-file/web WorkGraph step ownership is invalid")
+    restart_foreign_keys = {
+        (str(item[3]), str(item[2]), str(item[4]), str(item[5]), str(item[6]))
+        for item in conn.execute(
+            "PRAGMA foreign_key_list(work_item_compare_current_file_web_restart_rebinds)"
+        )
+    }
+    if restart_foreign_keys != {
+        (
+            "graph_id",
+            "work_item_compare_current_file_web_graphs",
+            "id",
+            "NO ACTION",
+            "CASCADE",
+        ),
+    }:
+        raise sqlite3.DatabaseError("Schema 45 restart rebind audit ownership is invalid")
+    restart_step_foreign_keys = {
+        (str(item[3]), str(item[2]), str(item[4]), str(item[5]), str(item[6]))
+        for item in conn.execute(
+            "PRAGMA foreign_key_list(work_item_compare_current_file_web_restart_rebind_steps)"
+        )
+    }
+    if restart_step_foreign_keys != {
+        (
+            "graph_id",
+            "work_item_compare_current_file_web_restart_rebinds",
+            "graph_id",
+            "NO ACTION",
+            "CASCADE",
+        ),
+    }:
+        raise sqlite3.DatabaseError("Schema 45 restart rebind step ownership is invalid")
     _validate_current_data(conn)
 
 
@@ -3805,7 +4453,14 @@ def _upgrade_exact_schema_44_graph_to_45(conn: sqlite3.Connection) -> None:
                adapter_registry_sha256,actor_binding_sha256,
                conversation_binding_sha256,current_file_source_identity_sha256,
                current_file_content_sha256,completion_contract,fallback_owner,
-               publication_owner,max_attempts,created_at,updated_at,expires_at,
+               publication_owner,max_attempts,restart_count,restart_rebound_at,
+               restart_file_input_identity_sha256,
+               restart_file_idempotency_key_sha256,
+               restart_web_input_identity_sha256,
+               restart_web_idempotency_key_sha256,
+               restart_synthesis_input_identity_sha256,
+               restart_synthesis_idempotency_key_sha256,
+               created_at,updated_at,expires_at,
                closed_at,outcome_status,outcome_reason,
                publication_assistant_message_id,accepted_graph_outcome_sha256,
                accepted_steps_sha256,terminal_publication_receipt_sha256,
@@ -3818,6 +4473,7 @@ def _upgrade_exact_schema_44_graph_to_45(conn: sqlite3.Connection) -> None:
                   actor_binding_sha256,conversation_binding_sha256,
                   current_file_source_identity_sha256,current_file_content_sha256,
                   completion_contract,fallback_owner,publication_owner,max_attempts,
+                  0,NULL,NULL,NULL,NULL,NULL,NULL,NULL,
                   created_at,updated_at,expires_at,closed_at,outcome_status,
                   outcome_reason,publication_assistant_message_id,
                   accepted_graph_outcome_sha256,accepted_steps_sha256,

@@ -224,7 +224,7 @@ def test_promoted_server_drains_restart_graphs_and_keeps_model_attestation_lazy(
         def __init__(self, _storage: Any) -> None:
             sequence.append("graph_adapter_created")
 
-        def reconcile_all_active_after_restart(self) -> tuple[Any, ...]:
+        def reconcile_all_active_after_restart(self, **_kwargs: Any) -> tuple[Any, ...]:
             sequence.append("restart_graphs_drained")
             return ()
 
@@ -310,7 +310,7 @@ def test_server_aborts_before_runtime_exposure_when_restart_drain_is_uncertain(
         def __init__(self, _storage: Any) -> None:
             pass
 
-        def reconcile_all_active_after_restart(self) -> None:
+        def reconcile_all_active_after_restart(self, **_kwargs: Any) -> None:
             raise RuntimeError("synthetic restart uncertainty")
 
     def build_secondary(_settings: Any) -> object:

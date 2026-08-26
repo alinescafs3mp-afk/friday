@@ -39,13 +39,17 @@ from friday.interaction_control_plane.compare_current_file_web_work_graph import
     bind_validated_plan_to_compare_current_file_web_graph,
 )
 from friday.interaction_control_plane.compare_current_file_web_work_graph_store import (
+    CompareCurrentFileWebExpiryBatch,
+    CompareCurrentFileWebRestartRebind,
     admit_compare_current_file_web_review_recovery_in_transaction,
     claim_compare_current_file_web_step_in_transaction,
     close_compare_current_file_web_work_graph_terminal_in_transaction,
     complete_compare_current_file_web_work_graph_in_transaction,
     create_compare_current_file_web_work_graph_in_transaction,
+    expire_due_compare_current_file_web_work_graphs_in_transaction,
     get_compare_current_file_web_work_graph_in_transaction,
     get_current_compare_current_file_web_work_graph_in_transaction,
+    rebind_compare_current_file_web_work_graph_after_restart_in_transaction,
     settle_compare_current_file_web_step_in_transaction,
 )
 from friday.interaction_control_plane.runtime_trace import (
@@ -73,6 +77,9 @@ from friday.orchestration.current_file_web_comparison import (
     current_file_web_request_is_admitted,
 )
 from friday.orchestration.execution_plan import ValidatedExecutionPlan
+from friday.orchestration.supervisor_assist_ingress import (
+    attach_supervisor_assist_ingress_binding,
+)
 from friday.orchestration.supervisor_assist_surface import (
     CurrentFileWebAssistSurface,
     bind_assist_plan_to_surface,
@@ -141,6 +148,10 @@ class SupervisorAssistGraphAdapterError(RuntimeError):
     """The closed adapter boundary could not be proved or committed."""
 
 
+class SupervisorAssistRecoveryBoundaryError(SupervisorAssistGraphAdapterError):
+    """A current principal, source, dialogue, authority, or effect check denied recovery."""
+
+
 class _TransactionStorage(Protocol):
     def transaction(self) -> AbstractContextManager[Any]: ...
 
@@ -153,6 +164,18 @@ class AssistBoundaryCheck(Protocol[_BoundaryT]):
     """A synchronous check called inside the adapter-owned transaction."""
 
     def __call__(self, boundary: _BoundaryT, /) -> bool: ...
+
+
+class AssistRestartActorResolver(Protocol):
+    """Reconstruct one current account principal without restoring request identity."""
+
+    def __call__(self, graph: CompareCurrentFileWebWorkGraph, /) -> ActorContext | None: ...
+
+
+class AssistRestartBoundaryCheck(Protocol):
+    """Recheck a reconstructed restart principal against one exact boundary."""
+
+    def __call__(self, actor: ActorContext, boundary: AssistPublicationBoundary, /) -> bool: ...
 
 
 @dataclass(frozen=True, slots=True)
@@ -224,6 +247,29 @@ class AssistAdmissionBoundary:
 
 
 @dataclass(frozen=True, slots=True, repr=False)
+class AssistRestartRebindBoundary:
+    """Fresh authority boundary for replacing stale process control state."""
+
+    actor: ActorContext = field(repr=False, compare=False)
+    graph_id: str
+    user_id: str
+    conversation_id: str
+    expected_revision: int
+    request_binding_sha256: str
+    predecessor_plan_sha256: str
+    accepted_plan_sha256: str
+    adapter_registry_sha256: str
+    actor_binding_sha256: str
+    conversation_binding_sha256: str
+    current_file_raw_object_id: str
+    current_file_source_identity_sha256: str
+    current_file_content_sha256: str
+    web_plan_sha256: str
+    web_query_sha256: str
+    runtime_profile_sha256: str
+
+
+@dataclass(frozen=True, slots=True, repr=False)
 class AssistCapabilityBoundary:
     actor: ActorContext = field(repr=False, compare=False)
     graph_id: str
@@ -249,6 +295,7 @@ class AssistPublicationAction(StrEnum):
     TERMINAL = "terminal"
     CANCEL = "cancel"
     RESTART_RETIREMENT = "restart_retirement"
+    EXPIRY_RETIREMENT = "expiry_retirement"
 
 
 @dataclass(frozen=True, slots=True, repr=False)
@@ -481,6 +528,19 @@ class AssistRestartResult:
 class AssistRestartBatch:
     results: tuple[AssistRestartResult, ...]
     has_more: bool
+    retained: tuple[AssistGraphCursor, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
+class AssistRestartScan:
+    cursors: tuple[AssistGraphCursor, ...]
+    has_more: bool
+
+
+@dataclass(frozen=True, slots=True)
+class AssistExpiryBatch:
+    retired: tuple[CompareCurrentFileWebWorkGraph, ...]
+    retained: tuple[AssistGraphCursor, ...]
 
 
 def _require(check: Callable[[Any], bool], boundary: object, *, label: str) -> None:
@@ -497,9 +557,7 @@ def _source_projection(row: Any) -> dict[str, Any]:
 
 
 def _policy_sha256(plan: ValidatedExecutionPlan) -> str:
-    return canonical_sha256(
-        {"schema": "friday.semantic-supervisor-policy-pin.v1", "policy_version": plan.policy_version}
-    )
+    return plan.policy_sha256
 
 
 def _step_inputs(
@@ -556,6 +614,12 @@ class SupervisorAssistGraphAdapter:
             raise
         confirm_staged_request_effect()
         return result
+
+    def _write_recovery(self, operation: Callable[[Any], _ResultT]) -> _ResultT:
+        """Commit code-owned recovery state without touching an HTTP effect fence."""
+
+        with self._storage.transaction() as conn:
+            return operation(conn)
 
     @staticmethod
     def _stage(
@@ -655,12 +719,15 @@ class SupervisorAssistGraphAdapter:
                 boundary.user_id,
                 "user",
                 surface.turn.message,
-                {
-                    "answer_mode": "semantic_supervisor_assist_request",
-                    "accepted_plan_sha256": boundary.accepted_plan_sha256,
-                    "interaction_mode": "dialogue",
-                    "private_context_lineage": True,
-                },
+                attach_supervisor_assist_ingress_binding(
+                    {
+                        "answer_mode": "semantic_supervisor_assist_request",
+                        "accepted_plan_sha256": boundary.accepted_plan_sha256,
+                        "interaction_mode": "dialogue",
+                        "private_context_lineage": True,
+                    },
+                    surface.ingress_binding,
+                ),
             )
             anchor = str(user.get("id") or "")
             if _MESSAGE_ID_RE.fullmatch(anchor) is None:
@@ -703,6 +770,95 @@ class SupervisorAssistGraphAdapter:
                 conversation_id=cursor.conversation_id,
             )
 
+    def rebind_after_restart(
+        self,
+        cursor: AssistGraphCursor,
+        admission: AssistGraphAdmission,
+        *,
+        authority_check: AssistBoundaryCheck[AssistRestartRebindBoundary],
+        effect_check: AssistBoundaryCheck[AssistRestartRebindBoundary],
+    ) -> CompareCurrentFileWebWorkGraph:
+        """Install one fresh plan without accepting predecessor evidence."""
+
+        if type(cursor) is not AssistGraphCursor or type(admission) is not AssistGraphAdmission:
+            raise TypeError("assist restart rebind requires exact typed inputs")
+        admission.__post_init__()
+        surface, plan = admission.surface, admission.plan
+        inputs, keys = _step_inputs(admission)
+
+        def operation(conn: Any) -> CompareCurrentFileWebWorkGraph:
+            graph = self._active(conn, cursor)
+            if (
+                graph.user_id != surface.actor.user_id
+                or surface.actor.user_id != surface.actor.own_id
+                or graph.conversation_id != surface.conversation_id
+                or not graph.has_exact_request_binding
+                or graph.anchor_request_binding_sha256
+                != surface.ingress_binding.canonical_sha256()
+                or graph.current_file_raw_object_id != surface.attachment.raw_object_id
+                or graph.current_file_source_identity_sha256
+                != surface.attachment.source_identity_sha256
+                or graph.current_file_content_sha256 != surface.attachment_content_sha256
+            ):
+                raise SupervisorAssistRecoveryBoundaryError(
+                    "restart rebind surface does not match the durable request root"
+                )
+            self._live_dialogue(
+                conn,
+                AssistConversationScope(graph.user_id, graph.conversation_id),
+            )
+            self._raw_pin(
+                conn,
+                user_id=graph.user_id,
+                raw_id=graph.current_file_raw_object_id,
+                source_sha256=graph.current_file_source_identity_sha256,
+                content_sha256=graph.current_file_content_sha256,
+            )
+            boundary = AssistRestartRebindBoundary(
+                actor=surface.actor,
+                graph_id=graph.id,
+                user_id=graph.user_id,
+                conversation_id=graph.conversation_id,
+                expected_revision=graph.revision,
+                request_binding_sha256=graph.anchor_request_binding_sha256,
+                predecessor_plan_sha256=graph.accepted_plan_sha256,
+                accepted_plan_sha256=plan.canonical_sha256(),
+                adapter_registry_sha256=plan.binding_snapshot_sha256,
+                actor_binding_sha256=plan.actor_binding_sha256,
+                conversation_binding_sha256=plan.conversation_binding_sha256,
+                current_file_raw_object_id=graph.current_file_raw_object_id,
+                current_file_source_identity_sha256=graph.current_file_source_identity_sha256,
+                current_file_content_sha256=graph.current_file_content_sha256,
+                web_plan_sha256=surface.web_plan.canonical_sha256(),
+                web_query_sha256=surface.web_plan.query_sha256,
+                runtime_profile_sha256=admission.runtime_profile_sha256,
+            )
+            _require(authority_check, boundary, label="restart rebind authority")
+            _require(effect_check, boundary, label="restart rebind effect")
+            return rebind_compare_current_file_web_work_graph_after_restart_in_transaction(
+                conn,
+                graph_id=graph.id,
+                user_id=graph.user_id,
+                conversation_id=graph.conversation_id,
+                expected_revision=graph.revision,
+                rebind=CompareCurrentFileWebRestartRebind(
+                    proposal_sha256=plan.proposal_digest,
+                    accepted_plan_sha256=boundary.accepted_plan_sha256,
+                    manifest_sha256=plan.manifest_digest,
+                    policy_sha256=_policy_sha256(plan),
+                    runtime_profile_sha256=boundary.runtime_profile_sha256,
+                    adapter_registry_sha256=boundary.adapter_registry_sha256,
+                    actor_binding_sha256=boundary.actor_binding_sha256,
+                    conversation_binding_sha256=boundary.conversation_binding_sha256,
+                    step_input_identities=inputs,
+                    step_idempotency_keys=keys,
+                ),
+            )
+
+        rebound = self._write_recovery(operation)
+        self._actors[rebound.id] = surface.actor
+        return rebound
+
     def load_current(self, scope: AssistConversationScope) -> CompareCurrentFileWebWorkGraph | None:
         if type(scope) is not AssistConversationScope:
             raise TypeError("assist current lookup requires a scope")
@@ -710,6 +866,31 @@ class SupervisorAssistGraphAdapter:
             return get_current_compare_current_file_web_work_graph_in_transaction(
                 conn, user_id=scope.user_id, conversation_id=scope.conversation_id
             )
+
+    def active_after_restart(self, *, limit: int = _MAX_RECONCILE) -> AssistRestartScan:
+        """Return one bounded, immutable startup snapshot page."""
+
+        if type(limit) is not int or not 1 <= limit <= _MAX_RECONCILE:
+            raise ValueError("assist restart scan limit must be between 1 and 100")
+        with read_only_storage_snapshot(self._storage) as conn:
+            rows = conn.execute(
+                """SELECT id,user_id,conversation_id,revision
+                     FROM work_item_compare_current_file_web_graphs
+                    WHERE state='active' ORDER BY created_at,id LIMIT ?""",
+                (limit + 1,),
+            ).fetchall()
+        return AssistRestartScan(
+            cursors=tuple(
+                AssistGraphCursor(
+                    str(row["id"]),
+                    str(row["user_id"]),
+                    str(row["conversation_id"]),
+                    int(row["revision"]),
+                )
+                for row in rows[:limit]
+            ),
+            has_more=len(rows) > limit,
+        )
 
     def claim(
         self,
@@ -1113,6 +1294,14 @@ class SupervisorAssistGraphAdapter:
 
         def operation(conn: Any) -> AssistGraphPublication:
             graph = self._active(conn, cursor)
+            self._live_dialogue(conn, AssistConversationScope(graph.user_id, graph.conversation_id))
+            self._raw_pin(
+                conn,
+                user_id=graph.user_id,
+                raw_id=graph.current_file_raw_object_id,
+                source_sha256=graph.current_file_source_identity_sha256,
+                content_sha256=graph.current_file_content_sha256,
+            )
             boundary = self._publication_boundary(
                 graph,
                 actor=self._actors.get(graph.id),
@@ -1151,6 +1340,10 @@ class SupervisorAssistGraphAdapter:
                 trace_input=publication.trace,
                 evidence_not_replayable=False,
                 cancelled=False,
+                final_authority_rechecked=(
+                    publication.expected_status
+                    is CompareCurrentFileWebGraphOutcomeStatus.PARTIAL
+                ),
             )
 
         result = self._write(operation)
@@ -1280,6 +1473,7 @@ class SupervisorAssistGraphAdapter:
                 trace_input=publication.trace,
                 evidence_not_replayable=False,
                 cancelled=False,
+                final_authority_rechecked=False,
             )
 
         result = self._write(operation)
@@ -1295,7 +1489,10 @@ class SupervisorAssistGraphAdapter:
         trace_input: AssistTraceInput,
         evidence_not_replayable: bool,
         cancelled: bool,
+        final_authority_rechecked: bool,
     ) -> AssistGraphPublication:
+        if type(final_authority_rechecked) is not bool:
+            raise TypeError("terminal publication authority state must be boolean")
         status, reason = graph.terminal_disposition(
             evidence_not_replayable=evidence_not_replayable,
             cancelled=cancelled,
@@ -1316,12 +1513,12 @@ class SupervisorAssistGraphAdapter:
             completion=completion,
             failure_stage=(FailureStage.NONE if cancelled else FailureStage.CAPABILITY),
             failure_reason=failure_reason,
-            authority_rechecked=False,
+            authority_rechecked=final_authority_rechecked,
         )
         receipt = graph.terminal_publication_receipt(
             evidence_not_replayable=evidence_not_replayable,
             cancelled=cancelled,
-            final_authority_rechecked=False,
+            final_authority_rechecked=final_authority_rechecked,
         )
         metadata = self._base_metadata(graph, verified=False)
         metadata["terminal"] = {"status": status.value, "reason": reason.value}
@@ -1371,6 +1568,7 @@ class SupervisorAssistGraphAdapter:
 
         def operation(conn: Any) -> AssistGraphPublication:
             graph = self._active(conn, cursor)
+            self._live_dialogue(conn, AssistConversationScope(graph.user_id, graph.conversation_id))
             boundary = self._publication_boundary(
                 graph,
                 actor=self._actors.get(graph.id),
@@ -1401,6 +1599,7 @@ class SupervisorAssistGraphAdapter:
                 trace_input=cancellation.trace,
                 evidence_not_replayable=False,
                 cancelled=True,
+                final_authority_rechecked=False,
             )
 
         result = self._write(operation)
@@ -1422,6 +1621,7 @@ class SupervisorAssistGraphAdapter:
         self,
         cursor: AssistGraphCursor,
         *,
+        actor: ActorContext | None = None,
         authority_check: AssistBoundaryCheck[AssistPublicationBoundary],
         effect_check: AssistBoundaryCheck[AssistPublicationBoundary],
     ) -> AssistRestartResult:
@@ -1430,15 +1630,46 @@ class SupervisorAssistGraphAdapter:
 
         def operation(conn: Any) -> AssistGraphPublication:
             graph = self._active(conn, cursor)
+            restart_actor = actor if actor is not None else self._actors.get(graph.id)
+            if (
+                type(restart_actor) is not ActorContext
+                or restart_actor.user_id != graph.user_id
+                or restart_actor.own_id != graph.user_id
+            ):
+                raise SupervisorAssistRecoveryBoundaryError(
+                    "restart retirement has no current personal principal"
+                )
+            try:
+                self._live_dialogue(
+                    conn,
+                    AssistConversationScope(graph.user_id, graph.conversation_id),
+                )
+                self._raw_pin(
+                    conn,
+                    user_id=graph.user_id,
+                    raw_id=graph.current_file_raw_object_id,
+                    source_sha256=graph.current_file_source_identity_sha256,
+                    content_sha256=graph.current_file_content_sha256,
+                )
+            except SupervisorAssistGraphAdapterError as exc:
+                raise SupervisorAssistRecoveryBoundaryError(
+                    "restart retirement source boundary changed"
+                ) from exc
             boundary = self._publication_boundary(
                 graph,
-                actor=self._actors.get(graph.id),
+                actor=restart_actor,
                 action=AssistPublicationAction.RESTART_RETIREMENT,
                 status=CompareCurrentFileWebGraphOutcomeStatus.UNAVAILABLE,
                 reason=CompareCurrentFileWebGraphOutcomeReason.EVIDENCE_NOT_REPLAYABLE,
             )
-            _require(authority_check, boundary, label="restart authority")
-            _require(effect_check, boundary, label="restart effect")
+            if authority_check(boundary) is not True:
+                raise SupervisorAssistRecoveryBoundaryError(
+                    "restart retirement authority denied"
+                )
+            if effect_check(boundary) is not True:
+                raise SupervisorAssistRecoveryBoundaryError(
+                    "restart retirement effect denied"
+                )
             self._stage(conn)
             return self._publish_terminal_in_transaction(
                 conn,
@@ -1447,6 +1678,7 @@ class SupervisorAssistGraphAdapter:
                 trace_input=self._restart_trace(),
                 evidence_not_replayable=True,
                 cancelled=False,
+                final_authority_rechecked=False,
             )
 
         publication = self._write(operation)
@@ -1456,61 +1688,186 @@ class SupervisorAssistGraphAdapter:
             publication,
         )
 
-    def retire_active_after_restart(self, *, limit: int = _MAX_RECONCILE) -> AssistRestartBatch:
-        """Deterministically retire a bounded page of process-private ACTIVE graphs."""
+    def expire_due(
+        self,
+        *,
+        lifecycle_check: AssistBoundaryCheck[AssistPublicationBoundary],
+        now: str | None = None,
+        limit: int = _MAX_RECONCILE,
+    ) -> AssistExpiryBatch:
+        """Publish only the code-owned, source-free TTL disposition.
+
+        Expiry never cites or consumes file/web evidence and therefore does not
+        impersonate a request actor after restart.  The durable graph deadline,
+        owner anchors and CAS are verified by the store; this outer check proves
+        that the caller still admits exactly the non-effectful expiry action.
+        """
+
+        if not callable(lifecycle_check):
+            raise TypeError("assist expiry requires a lifecycle boundary check")
+        if type(limit) is not int or not 1 <= limit <= _MAX_RECONCILE:
+            raise ValueError("assist expiry limit must be between 1 and 100")
+
+        def operation(conn: Any) -> CompareCurrentFileWebExpiryBatch:
+            def retirement_check(graph: CompareCurrentFileWebWorkGraph) -> bool:
+                boundary = self._publication_boundary(
+                    graph,
+                    actor=None,
+                    action=AssistPublicationAction.EXPIRY_RETIREMENT,
+                    status=CompareCurrentFileWebGraphOutcomeStatus.UNAVAILABLE,
+                    reason=CompareCurrentFileWebGraphOutcomeReason.EXPIRED,
+                )
+                if lifecycle_check(boundary) is not True:
+                    return False
+                self._stage(conn)
+                return True
+
+            return expire_due_compare_current_file_web_work_graphs_in_transaction(
+                conn,
+                retirement_check=retirement_check,
+                now=now,
+                limit=limit,
+            )
+
+        result = self._write(operation)
+        for graph in result.retired:
+            self._actors.pop(graph.id, None)
+        return AssistExpiryBatch(
+            retired=result.retired,
+            retained=tuple(AssistGraphCursor.from_graph(graph) for graph in result.retained),
+        )
+
+    def _restart_page(
+        self,
+        cursors: tuple[AssistGraphCursor, ...],
+        *,
+        actor_resolver: AssistRestartActorResolver,
+        authority_check: AssistRestartBoundaryCheck,
+        effect_check: AssistRestartBoundaryCheck,
+        has_more: bool,
+    ) -> AssistRestartBatch:
+        results: list[AssistRestartResult] = []
+        retained: list[AssistGraphCursor] = []
+        for cursor in cursors:
+            try:
+                graph = self.load(cursor)
+                actor = None if graph is None else actor_resolver(graph)
+                if (
+                    graph is None
+                    or type(actor) is not ActorContext
+                    or actor.user_id != graph.user_id
+                    or actor.own_id != graph.user_id
+                ):
+                    raise SupervisorAssistRecoveryBoundaryError(
+                        "restart retirement principal is unavailable"
+                    )
+                results.append(
+                    self.restart_or_retire(
+                        cursor,
+                        actor=actor,
+                        authority_check=lambda boundary, current=actor: authority_check(
+                            current, boundary
+                        ),
+                        effect_check=lambda boundary, current=actor: effect_check(
+                            current, boundary
+                        ),
+                    )
+                )
+            except SupervisorAssistRecoveryBoundaryError:
+                # Authority/source drift must not publish.  Keeping the graph
+                # ACTIVE preserves its durable owner and prevents fallback; an
+                # authenticated explicit cancellation can still retire it.
+                retained.append(cursor)
+        return AssistRestartBatch(tuple(results), has_more, tuple(retained))
+
+    def retire_active_after_restart(
+        self,
+        *,
+        actor_resolver: AssistRestartActorResolver,
+        authority_check: AssistRestartBoundaryCheck,
+        effect_check: AssistRestartBoundaryCheck,
+        limit: int = _MAX_RECONCILE,
+    ) -> AssistRestartBatch:
+        """Reconcile one bounded snapshot page without publishing on drift."""
 
         if type(limit) is not int or not 1 <= limit <= _MAX_RECONCILE:
             raise ValueError("assist restart retirement limit must be between 1 and 100")
-
-        def operation(conn: Any) -> AssistRestartBatch:
-            self._stage(conn)
+        if not callable(actor_resolver) or not callable(authority_check) or not callable(effect_check):
+            raise TypeError("assist restart reconciliation requires current boundary checks")
+        with read_only_storage_snapshot(self._storage) as conn:
             rows = conn.execute(
                 """SELECT id,user_id,conversation_id,revision
                      FROM work_item_compare_current_file_web_graphs
                     WHERE state='active' ORDER BY created_at,id LIMIT ?""",
                 (limit + 1,),
             ).fetchall()
-            results: list[AssistRestartResult] = []
-            for row in rows[:limit]:
-                graph = get_compare_current_file_web_work_graph_in_transaction(
-                    conn,
-                    graph_id=str(row["id"]),
-                    user_id=str(row["user_id"]),
-                    conversation_id=str(row["conversation_id"]),
-                )
-                if graph is None or graph.state is not CompareCurrentFileWebGraphState.ACTIVE:
-                    continue
-                publication = self._publish_terminal_in_transaction(
-                    conn,
-                    graph,
-                    content=COMPARE_CURRENT_FILE_WEB_RESTART_UNAVAILABLE_RESPONSE,
-                    trace_input=self._restart_trace(),
-                    evidence_not_replayable=True,
-                    cancelled=False,
-                )
-                results.append(
-                    AssistRestartResult(
-                        AssistRestartDisposition.RETIRED_EVIDENCE_NOT_REPLAYABLE,
-                        publication,
-                    )
-                )
-            return AssistRestartBatch(tuple(results), len(rows) > limit)
-
-        return self._write(operation)
+        cursors = tuple(
+            AssistGraphCursor(
+                str(row["id"]),
+                str(row["user_id"]),
+                str(row["conversation_id"]),
+                int(row["revision"]),
+            )
+            for row in rows[:limit]
+        )
+        return self._restart_page(
+            cursors,
+            actor_resolver=actor_resolver,
+            authority_check=authority_check,
+            effect_check=effect_check,
+            has_more=len(rows) > limit,
+        )
 
     def reconcile_all_active_after_restart(
-        self, *, batch_limit: int = _MAX_RECONCILE
+        self,
+        *,
+        actor_resolver: AssistRestartActorResolver,
+        authority_check: AssistRestartBoundaryCheck,
+        effect_check: AssistRestartBoundaryCheck,
+        batch_limit: int = _MAX_RECONCILE,
     ) -> tuple[AssistRestartBatch, ...]:
-        """Drain every ACTIVE graph before startup admits new traffic."""
+        """Reconcile the startup snapshot once, retaining every unproved owner."""
 
         if type(batch_limit) is not int or not 1 <= batch_limit <= _MAX_RECONCILE:
             raise ValueError("assist restart batch limit must be between 1 and 100")
+        if not callable(actor_resolver) or not callable(authority_check) or not callable(effect_check):
+            raise TypeError("assist restart reconciliation requires current boundary checks")
+        pages: list[tuple[AssistGraphCursor, ...]] = []
+        with read_only_storage_snapshot(self._storage) as conn:
+            cursor = conn.execute(
+                """SELECT id,user_id,conversation_id,revision
+                     FROM work_item_compare_current_file_web_graphs
+                    WHERE state='active' ORDER BY created_at,id"""
+            )
+            while True:
+                rows = cursor.fetchmany(batch_limit)
+                if not rows:
+                    break
+                pages.append(
+                    tuple(
+                        AssistGraphCursor(
+                            str(row["id"]),
+                            str(row["user_id"]),
+                            str(row["conversation_id"]),
+                            int(row["revision"]),
+                        )
+                        for row in rows
+                    )
+                )
+        if not pages:
+            return (AssistRestartBatch((), False),)
         batches: list[AssistRestartBatch] = []
-        while True:
-            batch = self.retire_active_after_restart(limit=batch_limit)
-            batches.append(batch)
-            if not batch.has_more:
-                return tuple(batches)
+        for index, page in enumerate(pages):
+            batches.append(
+                self._restart_page(
+                    page,
+                    actor_resolver=actor_resolver,
+                    authority_check=authority_check,
+                    effect_check=effect_check,
+                    has_more=index + 1 < len(pages),
+                )
+            )
+        return tuple(batches)
 
 
 __all__ = [
@@ -1521,6 +1878,7 @@ __all__ = [
     "AssistClaimedStep",
     "AssistComparisonPublication",
     "AssistConversationScope",
+    "AssistExpiryBatch",
     "AssistGraphAdmission",
     "AssistGraphCursor",
     "AssistGraphPublication",
@@ -1528,6 +1886,10 @@ __all__ = [
     "AssistPublicationAction",
     "AssistPublicationBoundary",
     "AssistRestartBatch",
+    "AssistRestartRebindBoundary",
+    "AssistRestartScan",
+    "AssistRestartActorResolver",
+    "AssistRestartBoundaryCheck",
     "AssistRestartDisposition",
     "AssistRestartResult",
     "AssistStepSettlement",
@@ -1535,4 +1897,5 @@ __all__ = [
     "AssistTraceInput",
     "SupervisorAssistGraphAdapter",
     "SupervisorAssistGraphAdapterError",
+    "SupervisorAssistRecoveryBoundaryError",
 ]

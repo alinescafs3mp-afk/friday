@@ -139,10 +139,18 @@ from friday.orchestration.supervisor_assist_activation import (
 from friday.orchestration.supervisor_assist_composition import (
     build_supervisor_assist_production_runtime,
 )
-from friday.orchestration.supervisor_assist_graph_adapter import SupervisorAssistGraphAdapter
+from friday.orchestration.supervisor_assist_graph_adapter import (
+    AssistRestartBatch,
+    SupervisorAssistGraphAdapter,
+)
 from friday.orchestration.supervisor_assist_ingress import (
     SupervisorAssistIngressBindingV1,
     SupervisorAssistPendingDecision,
+)
+from friday.orchestration.supervisor_assist_production import (
+    SupervisorAssistAuthorityGate,
+    SupervisorAssistRestartActorResolver,
+    supervisor_assist_read_only_effect_gate,
 )
 from friday.organs import ServiceContext, build_registry, local_now, resolve_chat_id
 from friday.organs.obsidian.conversation import (
@@ -2417,11 +2425,20 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
                 shared_tenant=LEGACY_OWNER_USER_ID if settings.shared_archive else "",
             )
             assist_graph_adapter = SupervisorAssistGraphAdapter(storage)
-            # A process restart invalidates the private evidence/actor handles
-            # carried by every ACTIVE assist graph.  Retire the complete set
-            # before any endpoint or worker can observe pending ownership.
+            # A process restart invalidates private evidence handles.  Reconcile
+            # each durable owner through current principal/source/authority
+            # checks before any endpoint or worker can observe it; denied owners
+            # remain non-publishing and are exposed in bounded startup health.
             try:
-                await asyncio.to_thread(assist_graph_adapter.reconcile_all_active_after_restart)
+                restart_authority = SupervisorAssistAuthorityGate(storage, auth_service)
+                assist_restart_batches = await asyncio.to_thread(
+                    assist_graph_adapter.reconcile_all_active_after_restart,
+                    actor_resolver=SupervisorAssistRestartActorResolver(auth_service),
+                    authority_check=restart_authority,
+                    effect_check=lambda _actor, boundary: (
+                        supervisor_assist_read_only_effect_gate(boundary)
+                    ),
+                )
             except BaseException:
                 storage.close()
                 raise
@@ -2668,6 +2685,18 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
             application.state.settings = settings
             application.state.storage = storage
             application.state.auth_service = auth_service
+            application.state.semantic_supervisor_restart_reconciliation = {
+                "retired": sum(
+                    len(batch.results)
+                    for batch in assist_restart_batches
+                    if type(batch) is AssistRestartBatch
+                ),
+                "retained": sum(
+                    len(batch.retained)
+                    for batch in assist_restart_batches
+                    if type(batch) is AssistRestartBatch
+                ),
+            }
             application.state.llm = llm
             application.state.secondary_brain = secondary_brain
             application.state.embeddings = embeddings

@@ -8,9 +8,12 @@ Callers must already own an SQLite transaction and all authority decisions.
 from __future__ import annotations
 
 import json
+import re
 import sqlite3
-from dataclasses import replace
+from collections.abc import Callable, Mapping
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime
+from types import MappingProxyType
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
@@ -64,6 +67,7 @@ from friday.interaction_control_plane.work_item_contract import canonical_work_i
 _GRAPH_TABLE = "work_item_compare_current_file_web_graphs"
 _STEP_TABLE = "work_item_compare_current_file_web_steps"
 _SAVEPOINT = "compare_current_file_web_graph_mutation"
+_SHA256_RE = re.compile(r"[0-9a-f]{64}")
 
 
 class CompareCurrentFileWebGraphConflictError(CompareCurrentFileWebGraphError):
@@ -72,6 +76,60 @@ class CompareCurrentFileWebGraphConflictError(CompareCurrentFileWebGraphError):
 
 class CompareCurrentFileWebGraphAnchorError(CompareCurrentFileWebGraphError):
     """A durable source, conversation or publication anchor is not exact."""
+
+
+@dataclass(frozen=True, slots=True)
+class CompareCurrentFileWebExpiryBatch:
+    """One bounded expiry scan, including graphs denied safe publication."""
+
+    retired: tuple[CompareCurrentFileWebWorkGraph, ...]
+    retained: tuple[CompareCurrentFileWebWorkGraph, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class CompareCurrentFileWebRestartRebind:
+    """Fresh body-free control identities for one bounded restart replay."""
+
+    proposal_sha256: str
+    accepted_plan_sha256: str
+    manifest_sha256: str
+    policy_sha256: str
+    runtime_profile_sha256: str
+    adapter_registry_sha256: str
+    actor_binding_sha256: str
+    conversation_binding_sha256: str
+    step_input_identities: Mapping[CompareCurrentFileWebStepKind, str]
+    step_idempotency_keys: Mapping[CompareCurrentFileWebStepKind, str]
+
+    def __post_init__(self) -> None:
+        for value in (
+            self.proposal_sha256,
+            self.accepted_plan_sha256,
+            self.manifest_sha256,
+            self.policy_sha256,
+            self.runtime_profile_sha256,
+            self.adapter_registry_sha256,
+            self.actor_binding_sha256,
+            self.conversation_binding_sha256,
+        ):
+            if type(value) is not str or _SHA256_RE.fullmatch(value) is None:
+                raise CompareCurrentFileWebGraphError("restart rebind identity is not a digest")
+        fixed = set(CompareCurrentFileWebStepKind)
+        if set(self.step_input_identities) != fixed or set(self.step_idempotency_keys) != fixed:
+            raise CompareCurrentFileWebGraphError("restart rebind needs every fixed step identity")
+        for value in (*self.step_input_identities.values(), *self.step_idempotency_keys.values()):
+            if type(value) is not str or _SHA256_RE.fullmatch(value) is None:
+                raise CompareCurrentFileWebGraphError("restart step identity is not a digest")
+        object.__setattr__(
+            self,
+            "step_input_identities",
+            MappingProxyType(dict(self.step_input_identities)),
+        )
+        object.__setattr__(
+            self,
+            "step_idempotency_keys",
+            MappingProxyType(dict(self.step_idempotency_keys)),
+        )
 
 
 def _require_transaction(conn: sqlite3.Connection) -> None:
@@ -261,11 +319,16 @@ def _insert_graph(conn: sqlite3.Connection, graph: CompareCurrentFileWebWorkGrap
                policy_sha256,runtime_profile_sha256,adapter_registry_sha256,actor_binding_sha256,
                conversation_binding_sha256,current_file_source_identity_sha256,
                current_file_content_sha256,completion_contract,fallback_owner,publication_owner,
-               max_attempts,created_at,updated_at,expires_at,closed_at,
+               max_attempts,restart_count,restart_rebound_at,
+               restart_file_input_identity_sha256,restart_file_idempotency_key_sha256,
+               restart_web_input_identity_sha256,restart_web_idempotency_key_sha256,
+               restart_synthesis_input_identity_sha256,
+               restart_synthesis_idempotency_key_sha256,
+               created_at,updated_at,expires_at,closed_at,
                outcome_status,outcome_reason,publication_assistant_message_id,accepted_graph_outcome_sha256,
                accepted_steps_sha256,terminal_publication_receipt_sha256,
                publication_receipt_sha256
-           ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",  # nosec B608
+           ) VALUES({','.join('?' for _item in range(42))})""",  # nosec B608
         (
             graph.id,
             graph.user_id,
@@ -290,6 +353,14 @@ def _insert_graph(conn: sqlite3.Connection, graph: CompareCurrentFileWebWorkGrap
             COMPARE_CURRENT_FILE_WEB_FALLBACK_OWNER,
             COMPARE_CURRENT_FILE_WEB_PUBLICATION_OWNER,
             COMPARE_CURRENT_FILE_WEB_MAX_ATTEMPTS,
+            graph.restart_count,
+            graph.restart_rebound_at,
+            graph.restart_file_input_identity_sha256,
+            graph.restart_file_idempotency_key_sha256,
+            graph.restart_web_input_identity_sha256,
+            graph.restart_web_idempotency_key_sha256,
+            graph.restart_synthesis_input_identity_sha256,
+            graph.restart_synthesis_idempotency_key_sha256,
             graph.created_at,
             graph.updated_at,
             graph.expires_at,
@@ -843,6 +914,143 @@ def admit_compare_current_file_web_review_recovery_in_transaction(
     return updated
 
 
+def rebind_compare_current_file_web_work_graph_after_restart_in_transaction(
+    conn: sqlite3.Connection,
+    *,
+    graph_id: str,
+    user_id: str,
+    conversation_id: str,
+    expected_revision: int,
+    rebind: CompareCurrentFileWebRestartRebind,
+    now: str | None = None,
+) -> CompareCurrentFileWebWorkGraph:
+    """Atomically bind one crashed graph to a fresh plan and replay budget.
+
+    The schema trigger snapshots every predecessor identity/lifecycle field and
+    resets the three effect-free nodes to pending.  No process-private outcome
+    or authority decision is accepted as current after this call.
+    """
+
+    _require_transaction(conn)
+    if type(rebind) is not CompareCurrentFileWebRestartRebind:
+        raise TypeError("restart rebind requires the exact typed contract")
+    graph = _current_for_mutation(
+        conn,
+        graph_id=graph_id,
+        user_id=user_id,
+        conversation_id=conversation_id,
+        expected_revision=expected_revision,
+    )
+    _require_active_revision_available(graph)
+    if not graph.has_exact_request_binding:
+        raise CompareCurrentFileWebGraphAnchorError(
+            "restart rebind requires an exact durable request root"
+        )
+    if (
+        rebind.actor_binding_sha256 == graph.actor_binding_sha256
+        or rebind.conversation_binding_sha256 == graph.conversation_binding_sha256
+    ):
+        raise CompareCurrentFileWebGraphAnchorError(
+            "restart rebind requires fresh process-owned authority bindings"
+        )
+    if any(step.attempt >= COMPARE_CURRENT_FILE_WEB_MAX_ATTEMPTS for step in graph.steps):
+        raise CompareCurrentFileWebGraphConflictError(
+            "restart rebind replay budget is exhausted"
+        )
+    timestamp = _logical_now(now, graph=graph)
+    next_revision = graph.revision + 1
+    file_kind = CompareCurrentFileWebStepKind.FILE_READ
+    web_kind = CompareCurrentFileWebStepKind.WEB_READ
+    synthesis_kind = CompareCurrentFileWebStepKind.PRIMARY_SYNTHESIS
+    _begin_savepoint(conn)
+    try:
+        cursor = conn.execute(
+            f"""UPDATE {_GRAPH_TABLE}
+                   SET revision=?,transition='restart_rebind',
+                       proposal_sha256=?,accepted_plan_sha256=?,manifest_sha256=?,
+                       policy_sha256=?,runtime_profile_sha256=?,adapter_registry_sha256=?,
+                       actor_binding_sha256=?,conversation_binding_sha256=?,
+                       restart_count=1,restart_rebound_at=?,
+                       restart_file_input_identity_sha256=?,
+                       restart_file_idempotency_key_sha256=?,
+                       restart_web_input_identity_sha256=?,
+                       restart_web_idempotency_key_sha256=?,
+                       restart_synthesis_input_identity_sha256=?,
+                       restart_synthesis_idempotency_key_sha256=?,updated_at=?
+                 WHERE id=? AND user_id=? AND conversation_id=?
+                   AND state='active' AND revision=? AND restart_count=0
+                   AND restart_rebound_at IS NULL""",  # nosec B608
+            (
+                next_revision,
+                rebind.proposal_sha256,
+                rebind.accepted_plan_sha256,
+                rebind.manifest_sha256,
+                rebind.policy_sha256,
+                rebind.runtime_profile_sha256,
+                rebind.adapter_registry_sha256,
+                rebind.actor_binding_sha256,
+                rebind.conversation_binding_sha256,
+                timestamp,
+                rebind.step_input_identities[file_kind],
+                rebind.step_idempotency_keys[file_kind],
+                rebind.step_input_identities[web_kind],
+                rebind.step_idempotency_keys[web_kind],
+                rebind.step_input_identities[synthesis_kind],
+                rebind.step_idempotency_keys[synthesis_kind],
+                timestamp,
+                graph.id,
+                graph.user_id,
+                graph.conversation_id,
+                graph.revision,
+            ),
+        )
+        if cursor.rowcount != 1:
+            raise CompareCurrentFileWebGraphConflictError("restart rebind lost its CAS race")
+        updated = _fetch(
+            conn,
+            graph_id=graph.id,
+            user_id=graph.user_id,
+            conversation_id=graph.conversation_id,
+        )
+        if updated is None:  # pragma: no cover - same transaction updated it
+            raise CompareCurrentFileWebGraphConflictError("rebound WorkGraph disappeared")
+        if (
+            updated.revision != next_revision
+            or updated.transition is not CompareCurrentFileWebGraphTransition.RESTART_REBIND
+            or updated.proposal_sha256 != rebind.proposal_sha256
+            or updated.accepted_plan_sha256 != rebind.accepted_plan_sha256
+            or updated.manifest_sha256 != rebind.manifest_sha256
+            or updated.policy_sha256 != rebind.policy_sha256
+            or updated.runtime_profile_sha256 != rebind.runtime_profile_sha256
+            or updated.adapter_registry_sha256 != rebind.adapter_registry_sha256
+            or updated.actor_binding_sha256 != rebind.actor_binding_sha256
+            or updated.conversation_binding_sha256 != rebind.conversation_binding_sha256
+            or any(
+                step.state is not CompareCurrentFileWebStepState.PENDING
+                or step.input_identity_sha256 != rebind.step_input_identities[step.kind]
+                or step.idempotency_key_sha256 != rebind.step_idempotency_keys[step.kind]
+                or step.outcome_sha256 is not None
+                or step.evidence_identity_sha256 is not None
+                or step.authority_rechecked
+                or step.verified
+                for step in updated.steps
+            )
+        ):
+            raise CompareCurrentFileWebGraphConflictError(
+                "restart rebind did not install the exact fresh control state"
+            )
+        _validate_stored_graph(conn, updated)
+    except BaseException as exc:
+        _rollback_savepoint(conn)
+        if isinstance(exc, sqlite3.IntegrityError):
+            raise CompareCurrentFileWebGraphConflictError(
+                "restart rebind violated the durable one-shot contract"
+            ) from exc
+        raise
+    _release_savepoint(conn)
+    return updated
+
+
 def prepare_compare_current_file_web_restart_rebind_in_transaction(
     conn: sqlite3.Connection,
     *,
@@ -880,6 +1088,7 @@ def prepare_compare_current_file_web_restart_rebind_in_transaction(
         conversation_archived=False,
         cancelled=False,
         expired=False,
+        final_authority_rechecked=False,
         now=timestamp,
     )
 
@@ -1132,6 +1341,7 @@ def _publish_deterministic_retirement(
     conversation_archived: bool,
     cancelled: bool,
     expired: bool,
+    final_authority_rechecked: bool,
     now: str,
 ) -> CompareCurrentFileWebWorkGraph:
     from friday.storage._conversations import store_message_in_transaction
@@ -1141,7 +1351,7 @@ def _publish_deterministic_retirement(
         conversation_archived=conversation_archived,
         cancelled=cancelled,
         expired=expired,
-        final_authority_rechecked=False,
+        final_authority_rechecked=final_authority_rechecked,
     )
     metadata = attach_compare_current_file_web_terminal_publication_receipt({}, receipt)
     savepoint = "compare_current_file_web_retirement"
@@ -1235,6 +1445,7 @@ def retire_compare_current_file_web_work_graph_for_archived_conversation_in_tran
         conversation_archived=True,
         cancelled=False,
         expired=False,
+        final_authority_rechecked=False,
         now=timestamp,
     )
 
@@ -1242,12 +1453,15 @@ def retire_compare_current_file_web_work_graph_for_archived_conversation_in_tran
 def expire_due_compare_current_file_web_work_graphs_in_transaction(
     conn: sqlite3.Connection,
     *,
+    retirement_check: Callable[[CompareCurrentFileWebWorkGraph], bool],
     now: str | None = None,
     limit: int = 100,
-) -> tuple[CompareCurrentFileWebWorkGraph, ...]:
+) -> CompareCurrentFileWebExpiryBatch:
     """Bounded worker seam for deterministic expiry publication; it executes no capability."""
 
     _require_transaction(conn)
+    if not callable(retirement_check):
+        raise TypeError("expiry retirement requires a current boundary check")
     if type(limit) is not int or not 1 <= limit <= 100:
         raise CompareCurrentFileWebGraphError("expiry retirement limit must be between 1 and 100")
     timestamp = canonical_work_item_instant(
@@ -1263,6 +1477,7 @@ def expire_due_compare_current_file_web_work_graphs_in_transaction(
         (timestamp, limit),
     ).fetchall()
     retired: list[CompareCurrentFileWebWorkGraph] = []
+    retained: list[CompareCurrentFileWebWorkGraph] = []
     for row in rows:
         item = (
             dict(row)
@@ -1281,6 +1496,10 @@ def expire_due_compare_current_file_web_work_graphs_in_transaction(
             conversation_id=str(item["conversation_id"]),
             expected_revision=int(item["revision"]),
         )
+        admitted = retirement_check(graph)
+        if admitted is not True:
+            retained.append(graph)
+            continue
         retired.append(
             _publish_deterministic_retirement(
                 conn,
@@ -1289,10 +1508,11 @@ def expire_due_compare_current_file_web_work_graphs_in_transaction(
                 conversation_archived=False,
                 cancelled=False,
                 expired=True,
+                final_authority_rechecked=False,
                 now=timestamp,
             )
         )
-    return tuple(retired)
+    return CompareCurrentFileWebExpiryBatch(tuple(retired), tuple(retained))
 
 
 def cancel_compare_current_file_web_work_graph_in_transaction(
@@ -1326,6 +1546,7 @@ def cancel_compare_current_file_web_work_graph_in_transaction(
         conversation_archived=False,
         cancelled=True,
         expired=False,
+        final_authority_rechecked=False,
         now=timestamp,
     )
 
@@ -1418,7 +1639,9 @@ def complete_compare_current_file_web_work_graph_in_transaction(
 
 __all__ = [
     "CompareCurrentFileWebGraphAnchorError",
+    "CompareCurrentFileWebExpiryBatch",
     "CompareCurrentFileWebGraphConflictError",
+    "CompareCurrentFileWebRestartRebind",
     "admit_compare_current_file_web_review_recovery_in_transaction",
     "cancel_compare_current_file_web_work_graph_in_transaction",
     "claim_compare_current_file_web_step_in_transaction",
@@ -1429,6 +1652,7 @@ __all__ = [
     "get_compare_current_file_web_work_graph_in_transaction",
     "get_current_compare_current_file_web_work_graph_in_transaction",
     "prepare_compare_current_file_web_restart_rebind_in_transaction",
+    "rebind_compare_current_file_web_work_graph_after_restart_in_transaction",
     "requeue_interrupted_compare_current_file_web_step_in_transaction",
     "retire_compare_current_file_web_work_graph_for_archived_conversation_in_transaction",
     "settle_compare_current_file_web_step_in_transaction",

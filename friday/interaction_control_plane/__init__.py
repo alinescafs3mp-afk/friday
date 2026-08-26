@@ -120,6 +120,7 @@ from friday.interaction_control_plane.compare_current_file_web_work_graph import
     load_compare_current_file_web_terminal_publication_receipt,
 )
 from friday.interaction_control_plane.compare_current_file_web_work_graph_store import (
+    CompareCurrentFileWebExpiryBatch,
     CompareCurrentFileWebGraphAnchorError,
     CompareCurrentFileWebGraphConflictError,
     admit_compare_current_file_web_review_recovery_in_transaction,
@@ -260,6 +261,7 @@ __all__ = [
     "WEB_SEARCH_CURRENT_CAPABILITY_ID",
     "WEB_SEARCH_CURRENT_ADAPTER_ID",
     "WEB_SEARCH_CURRENT_SECURITY_ID",
+    "CompareCurrentFileWebExpiryBatch",
     "ARCHIVE_CANDIDATE_CANCELLED",
     "ARCHIVE_CANDIDATE_EXPIRED",
     "ARCHIVE_CANDIDATE_STALE",

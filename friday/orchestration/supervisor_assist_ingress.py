@@ -11,12 +11,14 @@ import hashlib
 import hmac
 import json
 import re
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from enum import StrEnum
 
 from friday.pending_durable_turn import PendingDurableTurnAdmission
 
 SUPERVISOR_ASSIST_INGRESS_BINDING_SCHEMA = "friday.supervisor-assist-ingress-binding.v1"
+SUPERVISOR_ASSIST_INGRESS_METADATA_KEY = "semantic_supervisor_ingress_binding"
 
 _DIGEST_RE = re.compile(r"[0-9a-f]{64}\Z")
 _USER_ID_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:@+-]{0,199}\Z")
@@ -86,6 +88,47 @@ class SupervisorAssistIngressBindingV1:
 
     def canonical_sha256(self) -> str:
         return _canonical_sha256(self.payload())
+
+    @classmethod
+    def parse(cls, value: object) -> SupervisorAssistIngressBindingV1:
+        if type(value) is not dict or set(value) != {
+            "schema",
+            "source_ref_sha256",
+            "request_fingerprint_sha256",
+        }:
+            raise ValueError("stored assist ingress binding shape is invalid")
+        item = value
+        if item.get("schema") != SUPERVISOR_ASSIST_INGRESS_BINDING_SCHEMA:
+            raise ValueError("stored assist ingress binding schema is invalid")
+        return cls(
+            source_ref_sha256=str(item.get("source_ref_sha256") or ""),
+            request_fingerprint_sha256=str(
+                item.get("request_fingerprint_sha256") or ""
+            ),
+        )
+
+
+def attach_supervisor_assist_ingress_binding(
+    metadata: Mapping[str, object],
+    binding: SupervisorAssistIngressBindingV1,
+) -> dict[str, object]:
+    """Persist only the two body-free roots needed to reconstruct a restart surface."""
+
+    if not isinstance(metadata, Mapping) or type(binding) is not SupervisorAssistIngressBindingV1:
+        raise TypeError("assist ingress metadata requires an exact binding")
+    result = dict(metadata)
+    result[SUPERVISOR_ASSIST_INGRESS_METADATA_KEY] = binding.payload()
+    return result
+
+
+def load_supervisor_assist_ingress_binding(
+    metadata: Mapping[str, object],
+) -> SupervisorAssistIngressBindingV1:
+    if not isinstance(metadata, Mapping):
+        raise TypeError("assist ingress metadata must be a mapping")
+    return SupervisorAssistIngressBindingV1.parse(
+        metadata.get(SUPERVISOR_ASSIST_INGRESS_METADATA_KEY)
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -203,7 +246,11 @@ class SupervisorAssistPendingDecision:
 
 __all__ = [
     "SUPERVISOR_ASSIST_INGRESS_BINDING_SCHEMA",
+    "SUPERVISOR_ASSIST_INGRESS_METADATA_KEY",
+    "SUPERVISOR_ASSIST_INGRESS_BINDING_SCHEMA",
     "SupervisorAssistIngressBindingV1",
     "SupervisorAssistPendingDecision",
     "SupervisorAssistPendingRelation",
+    "attach_supervisor_assist_ingress_binding",
+    "load_supervisor_assist_ingress_binding",
 ]

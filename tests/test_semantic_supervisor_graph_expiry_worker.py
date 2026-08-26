@@ -20,38 +20,32 @@ def test_graph_expiry_worker_is_unconditional_and_runs_immediately(settings) -> 
 
 
 @pytest.mark.asyncio
-async def test_graph_expiry_worker_uses_one_bounded_storage_transaction(
+async def test_graph_expiry_worker_uses_checked_graph_adapter_with_one_bounded_page(
     settings,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     events: list[object] = []
-    connection = object()
+    storage = object()
 
-    class Transaction:
-        def __enter__(self) -> object:
-            events.append("begin")
-            return connection
+    class Adapter:
+        def __init__(self, current_storage: object) -> None:
+            events.append(("adapter", current_storage))
 
-        def __exit__(self, exc_type, exc, traceback) -> None:
-            del exc_type, exc, traceback
-            events.append("commit")
-
-    class Storage:
-        @staticmethod
-        def transaction() -> Transaction:
-            return Transaction()
-
-    def expire(conn: object, *, limit: int):
-        events.append((conn, limit))
-        return (object(), object())
+        def expire_due(self, **kwargs: object) -> object:
+            events.append(("expire", kwargs))
+            return type("Batch", (), {"retired": (object(), object()), "retained": ()})()
 
     monkeypatch.setattr(
-        workers,
-        "expire_due_compare_current_file_web_work_graphs_in_transaction",
-        expire,
+        "friday.orchestration.supervisor_assist_graph_adapter.SupervisorAssistGraphAdapter",
+        Adapter,
     )
-    manager = WorkersManager(settings, Storage(), ingestion=None, kg=None)
+    manager = WorkersManager(settings, storage, ingestion=None, kg=None)
 
     await manager._semantic_supervisor_graph_expiry()  # noqa: SLF001
 
-    assert events == ["begin", (connection, 100), "commit"]
+    assert events[0] == ("adapter", storage)
+    assert events[1][0] == "expire"
+    kwargs = events[1][1]
+    assert isinstance(kwargs, dict)
+    assert callable(kwargs["lifecycle_check"])
+    assert kwargs["limit"] == 100

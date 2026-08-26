@@ -12,11 +12,13 @@ import friday.orchestration.transient_web_comparison as web_module
 from friday.execution_kernel import request_effect_possible, track_request_effects
 from friday.interaction_control_plane.compare_current_file_web_work_graph import (
     COMPARE_CURRENT_FILE_WEB_CANCELLED_RESPONSE,
+    COMPARE_CURRENT_FILE_WEB_EXPIRED_RESPONSE,
     CompareCurrentFileWebGraphOutcomeReason,
     CompareCurrentFileWebGraphOutcomeStatus,
     CompareCurrentFileWebGraphState,
     CompareCurrentFileWebStepKind,
     CompareCurrentFileWebStepState,
+    load_compare_current_file_web_terminal_publication_receipt,
 )
 from friday.interaction_control_plane.runtime_trace import INTERACTION_TRACE_METADATA_KEY
 from friday.interaction_control_plane.turn_trace import (
@@ -55,6 +57,14 @@ from friday.orchestration.supervisor_assist_graph_adapter import (
     SupervisorAssistGraphAdapterError,
 )
 from friday.orchestration.supervisor_assist_ingress import SupervisorAssistIngressBindingV1
+from friday.orchestration.supervisor_assist_production import (
+    SupervisorAssistAuthorityGate,
+    SupervisorAssistRestartActorResolver,
+    supervisor_assist_read_only_effect_gate,
+)
+from friday.orchestration.supervisor_assist_recovery import (
+    SupervisorAssistRecoverySurfaceLoader,
+)
 from friday.orchestration.supervisor_assist_surface import CurrentFileWebAssistSurface
 from friday.orchestration.supervisor_contracts import (
     CapabilityEffectClass,
@@ -66,7 +76,7 @@ from friday.orchestration.transient_web_comparison import (
     TransientWebComparisonEvidence,
     seal_explicit_public_web_query,
 )
-from friday.permissions import ActorContext
+from friday.permissions import ActorContext, AuthorizationService
 from friday.source_identity import authorized_file_snapshot_token, raw_source_identity_sha256
 from friday.storage.models import RawObject
 
@@ -83,6 +93,18 @@ def _trace() -> AssistTraceInput:
         capability_calls=2,
         capability_call_accounting=CountAccounting.COMPLETE,
     )
+
+
+def _restart_actor(graph: Any) -> ActorContext:
+    return ActorContext(str(graph.user_id), "owner", "semantic-recovery")
+
+
+def _restart_authority(actor: ActorContext, boundary: Any) -> bool:
+    return bool(boundary.actor is actor and boundary.user_id == actor.user_id)
+
+
+def _restart_effect(actor: ActorContext, boundary: Any) -> bool:
+    return bool(boundary.actor is actor)
 
 
 def _seed_surface(storage, label: str) -> tuple[CurrentFileWebAssistSurface, dict[str, object]]:
@@ -391,7 +413,12 @@ def test_claim_denial_is_atomic_and_review_recovery_is_typed(storage) -> None:
     assert graph.steps[1].state is CompareCurrentFileWebStepState.PENDING
     assert graph.steps[1].prior_outcome_sha256 == step.outcome_sha256
 
-    restarted = SupervisorAssistGraphAdapter(storage).retire_active_after_restart(limit=1)
+    restarted = SupervisorAssistGraphAdapter(storage).retire_active_after_restart(
+        actor_resolver=_restart_actor,
+        authority_check=_restart_authority,
+        effect_check=_restart_effect,
+        limit=1,
+    )
     assert len(restarted.results) == 1
     assert (
         restarted.results[0].disposition
@@ -490,7 +517,12 @@ def test_mixed_authority_terminal_fails_closed_on_restart_drift_and_forgery(stor
             authority_check=lambda _boundary: True,
             effect_check=lambda _boundary: True,
         )
-    restarted = restarted_adapter.reconcile_all_active_after_restart(batch_limit=1)
+    restarted = restarted_adapter.reconcile_all_active_after_restart(
+        actor_resolver=_restart_actor,
+        authority_check=_restart_authority,
+        effect_check=_restart_effect,
+        batch_limit=1,
+    )
     assert restarted[-1].has_more is False
     retired = restarted_adapter.load(AssistGraphCursor.from_graph(restart_graph))
     assert retired is not None
@@ -768,7 +800,12 @@ def test_terminal_cancel_and_startup_reconcile_publish_closed_receipts(storage) 
     second, _ = _seed_surface(storage, "restart-two")
     first_graph = _admit(adapter, first)
     second_graph = _admit(adapter, second)
-    restarted = SupervisorAssistGraphAdapter(storage).reconcile_all_active_after_restart(batch_limit=1)
+    restarted = SupervisorAssistGraphAdapter(storage).reconcile_all_active_after_restart(
+        actor_resolver=_restart_actor,
+        authority_check=_restart_authority,
+        effect_check=_restart_effect,
+        batch_limit=1,
+    )
     flattened = tuple(item for batch in restarted for item in batch.results)
     assert len(flattened) == 2
     assert all(
@@ -792,3 +829,154 @@ def test_terminal_cancel_and_startup_reconcile_publish_closed_receipts(storage) 
             "SELECT COUNT(*) FROM messages WHERE conversation_id=? AND role='user'",
             (restart_surface.conversation_id,),
         ).fetchone()[0] == 1
+
+
+def test_startup_recovery_rechecks_production_boundaries_and_does_not_mask_faults(
+    storage: Any,
+) -> None:
+    adapter = SupervisorAssistGraphAdapter(storage)
+    surfaces: dict[str, CurrentFileWebAssistSurface] = {}
+    graphs: dict[str, Any] = {}
+    for label in ("current", "denied", "drift", "inactive", "archived"):
+        surface, _ = _seed_surface(storage, f"restart-production-{label}")
+        storage.update_user(surface.actor.user_id, preset_key="user")
+        surfaces[label] = surface
+        graphs[label] = _admit(adapter, surface)
+
+    authorization = AuthorizationService(storage)
+    for surface in surfaces.values():
+        authorization.grant_permission(surface.actor.user_id, "web.compare.transient")
+    recovered = SupervisorAssistRecoverySurfaceLoader(storage, authorization)(
+        graphs["current"]
+    )
+    assert recovered is not None
+    assert recovered.graph == graphs["current"]
+    assert recovered.surface.turn.message == surfaces["current"].turn.message
+    assert recovered.surface.actor is not surfaces["current"].actor
+    assert recovered.surface.ingress_binding == surfaces["current"].ingress_binding
+    assert recovered.surface.attachment.raw_object_id == graphs["current"].current_file_raw_object_id
+    authorization.deny_permission(surfaces["denied"].actor.user_id, "files.read")
+    storage.update_user(surfaces["inactive"].actor.user_id, status="disabled")
+    storage.archive_conversation(
+        surfaces["archived"].conversation_id,
+        surfaces["archived"].actor.user_id,
+    )
+    with storage.transaction() as conn:
+        conn.execute(
+            "UPDATE raw_objects SET content_hash=? WHERE id=? AND user_id=?",
+            (
+                _sha256("changed-after-admission"),
+                surfaces["drift"].attachment.raw_object_id,
+                surfaces["drift"].actor.user_id,
+            ),
+        )
+    loader = SupervisorAssistRecoverySurfaceLoader(storage, authorization)
+    assert loader(graphs["drift"]) is None
+    assert loader(graphs["inactive"]) is None
+    assert loader(graphs["archived"]) is None
+
+    gate = SupervisorAssistAuthorityGate(storage, authorization)
+    checked: list[tuple[str, AssistPublicationAction]] = []
+
+    def authority(actor: ActorContext, boundary: Any) -> bool:
+        checked.append((actor.user_id, boundary.action))
+        return gate(actor, boundary)
+
+    batches = SupervisorAssistGraphAdapter(storage).reconcile_all_active_after_restart(
+        actor_resolver=SupervisorAssistRestartActorResolver(authorization),
+        authority_check=authority,
+        effect_check=lambda _actor, boundary: supervisor_assist_read_only_effect_gate(
+            boundary
+        ),
+        batch_limit=2,
+    )
+    results = tuple(item for batch in batches for item in batch.results)
+    retained = tuple(item for batch in batches for item in batch.retained)
+    assert len(results) == 1
+    assert results[0].publication.graph.id == graphs["current"].id
+    assert {item.graph_id for item in retained} == {
+        graphs[label].id for label in ("denied", "drift", "inactive", "archived")
+    }
+    assert (
+        surfaces["current"].actor.user_id,
+        AssistPublicationAction.RESTART_RETIREMENT,
+    ) in checked
+    for label in ("denied", "drift", "inactive", "archived"):
+        current = adapter.load(AssistGraphCursor.from_graph(graphs[label]))
+        assert current is not None and current.state is CompareCurrentFileWebGraphState.ACTIVE
+        assistant_count = storage.execute(
+            "SELECT COUNT(*) FROM messages WHERE conversation_id=? AND role='assistant'",
+            (surfaces[label].conversation_id,),
+        ).fetchone()[0]
+        assert assistant_count == 0
+
+    fault_surface, _ = _seed_surface(storage, "restart-production-fault")
+    fault_graph = _admit(adapter, fault_surface)
+    with pytest.raises(RuntimeError, match="injected recovery fault"):
+        SupervisorAssistGraphAdapter(storage).retire_active_after_restart(
+            actor_resolver=_restart_actor,
+            authority_check=lambda _actor, _boundary: (_ for _ in ()).throw(
+                RuntimeError("injected recovery fault")
+            ),
+            effect_check=_restart_effect,
+            limit=100,
+        )
+    assert adapter.load(AssistGraphCursor.from_graph(fault_graph)) == fault_graph
+
+
+def test_expiry_is_bounded_source_free_and_does_not_mask_lifecycle_faults(storage: Any) -> None:
+    adapter = SupervisorAssistGraphAdapter(storage)
+    surface, _ = _seed_surface(storage, "expiry-production")
+    graph = _admit(adapter, surface)
+    storage.update_user(surface.actor.user_id, status="disabled")
+    storage.archive_conversation(surface.conversation_id, surface.actor.user_id)
+    with storage.transaction() as conn:
+        conn.execute(
+            "UPDATE raw_objects SET content_hash=? WHERE id=? AND user_id=?",
+            (
+                _sha256("expiry-source-drift"),
+                surface.attachment.raw_object_id,
+                surface.actor.user_id,
+            ),
+        )
+
+    denied = SupervisorAssistGraphAdapter(storage).expire_due(
+        lifecycle_check=lambda _boundary: False,
+        now=graph.expires_at,
+    )
+    assert denied.retired == ()
+    assert tuple(item.graph_id for item in denied.retained) == (graph.id,)
+    assert adapter.load(AssistGraphCursor.from_graph(graph)) == graph
+    assert storage.execute(
+        "SELECT COUNT(*) FROM messages WHERE conversation_id=? AND role='assistant'",
+        (surface.conversation_id,),
+    ).fetchone()[0] == 0
+
+    def fail_lifecycle(_boundary: Any) -> bool:
+        raise RuntimeError("injected expiry lifecycle fault")
+
+    with pytest.raises(RuntimeError, match="injected expiry lifecycle fault"):
+        SupervisorAssistGraphAdapter(storage).expire_due(
+            lifecycle_check=fail_lifecycle,
+            now=graph.expires_at,
+        )
+    assert adapter.load(AssistGraphCursor.from_graph(graph)) == graph
+
+    retired = SupervisorAssistGraphAdapter(storage).expire_due(
+        lifecycle_check=supervisor_assist_read_only_effect_gate,
+        now=graph.expires_at,
+    )
+    assert len(retired.retired) == 1
+    assert retired.retained == ()
+    assert retired.retired[0].outcome_reason is CompareCurrentFileWebGraphOutcomeReason.EXPIRED
+    assistant = storage.execute(
+        """SELECT content,metadata_json FROM messages
+             WHERE conversation_id=? AND role='assistant'""",
+        (surface.conversation_id,),
+    ).fetchone()
+    assert assistant is not None and assistant["content"] == COMPARE_CURRENT_FILE_WEB_EXPIRED_RESPONSE
+    receipt = load_compare_current_file_web_terminal_publication_receipt(
+        str(assistant["metadata_json"])
+    )
+    assert receipt.model_spoke is receipt.evidence_cited is False
+    assert receipt.final_authority_rechecked is receipt.completion_claimed is False

@@ -30,9 +30,6 @@ from friday.document_catalog.worker_state import (
     encode_document_catalog_worker_state,
     load_document_catalog_worker_namespace_key,
 )
-from friday.interaction_control_plane.compare_current_file_web_work_graph_store import (
-    expire_due_compare_current_file_web_work_graphs_in_transaction,
-)
 from friday.retrieval import (
     chunk_scheme,
     knowledge_chunk_units,
@@ -2142,14 +2139,27 @@ class WorkersManager:
             )
 
     def _expire_semantic_supervisor_graph_batch(self) -> int:
-        """Retire one bounded page under the storage writer transaction."""
+        """Retire one bounded page only through fresh source/authority checks."""
 
-        with self.storage.transaction() as conn:
-            retired = expire_due_compare_current_file_web_work_graphs_in_transaction(
-                conn,
-                limit=100,
+        # Lazy imports keep the worker package usable by the execution kernel:
+        # the assist adapter itself imports that kernel for request-effect
+        # staging, so importing the adapter at module load would form a cycle.
+        from friday.orchestration.supervisor_assist_graph_adapter import (
+            SupervisorAssistGraphAdapter,
+        )
+        from friday.orchestration.supervisor_assist_production import (
+            supervisor_assist_read_only_effect_gate,
+        )
+        batch = SupervisorAssistGraphAdapter(self.storage).expire_due(
+            lifecycle_check=supervisor_assist_read_only_effect_gate,
+            limit=100,
+        )
+        if batch.retained:
+            LOGGER.warning(
+                "Semantic supervisor graph expiry retained %d graph(s) after current boundary denial",
+                len(batch.retained),
             )
-        return len(retired)
+        return len(batch.retired)
 
     async def _semantic_supervisor_graph_expiry(self) -> None:
         """Close expired durable ownership without invoking or replaying capabilities."""

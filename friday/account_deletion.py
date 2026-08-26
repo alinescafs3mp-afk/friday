@@ -72,6 +72,16 @@ class _Scope:
 # its append-only trigger correctly refuses ordinary DELETE.
 _DELETE_SCOPES: tuple[_Scope, ...] = (
     _Scope(
+        "work_item_compare_current_file_web_restart_rebind_steps",
+        "work_item_compare_current_file_web_restart_rebind_steps",
+        "graph_id IN (SELECT id FROM work_item_compare_current_file_web_graphs WHERE user_id=?)",
+    ),
+    _Scope(
+        "work_item_compare_current_file_web_restart_rebinds",
+        "work_item_compare_current_file_web_restart_rebinds",
+        "graph_id IN (SELECT id FROM work_item_compare_current_file_web_graphs WHERE user_id=?)",
+    ),
+    _Scope(
         "work_item_compare_current_file_web_steps",
         "work_item_compare_current_file_web_steps",
         "graph_id IN (SELECT id FROM work_item_compare_current_file_web_graphs WHERE user_id=?)",
@@ -187,6 +197,8 @@ _DELETE_SCOPES: tuple[_Scope, ...] = (
 
 _CANDIDATE_CASCADE_DELETE_KEYS = frozenset(
     {
+        "work_item_compare_current_file_web_restart_rebind_steps",
+        "work_item_compare_current_file_web_restart_rebinds",
         "work_item_compare_current_file_web_steps",
         "work_item_compare_outcomes",
         "work_item_compare_document_evidence",
