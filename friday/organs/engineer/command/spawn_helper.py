@@ -52,6 +52,9 @@ _MAX_PATH_ROOT_FDS = 16
 _ACK_TIMEOUT_SEC = 8.0
 _ACTION_SOURCE_FD_MIN = HELPER_PATH_ROOT_BASE + _MAX_PATH_ROOT_FDS
 _HELD_LAUNCHER_PATH = f"/proc/self/fd/{BWRAP_LAUNCHER_FD}"
+_CGROUP_MOVE_TIMEOUT_SEC = 2.0
+_CGROUP_SAMPLE_SEC = 0.025
+_CGROUP_STABLE_SAMPLES = 5
 
 
 def _pid_starttime(pid: int) -> int | None:
@@ -193,11 +196,76 @@ def _kill_pidfd(pidfd: int) -> None:
         return
 
 
+def _release_stopped_child(pidfd: int, block_w: int) -> None:
+    """Resume the attested monitor before releasing its blocked clone."""
+    try:
+        signal.pidfd_send_signal(pidfd, signal.SIGCONT)
+    except OSError:
+        _kill_pidfd(pidfd)
+        raise
+    if os.write(block_w, b"x") != 1:
+        raise OSError("short bwrap gate write")
+    os.close(block_w)
+
+
+def _read_child_cgroup(pid: int) -> str:
+    raw = Path(f"/proc/{pid}/cgroup").read_text(encoding="ascii")
+    for line in raw.splitlines():
+        if line.startswith("0::"):
+            relative = line[3:]
+            if relative.startswith("/"):
+                return relative.rstrip("/") or "/"
+    raise RuntimeError("unified cgroup membership unavailable")
+
+
+def _wait_child_stopped(pid: int, *, timeout: float = 1.0) -> None:
+    """Prove our exact child has stopped before changing its cgroup."""
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        waited_pid, status = os.waitpid(pid, os.WNOHANG | os.WUNTRACED)
+        if waited_pid == 0:
+            time.sleep(_CGROUP_SAMPLE_SEC)
+            continue
+        if waited_pid != pid or not os.WIFSTOPPED(status):
+            raise RuntimeError("spawn child exited before resource admission")
+        return
+    raise RuntimeError("spawn child did not stop")
+
+
+def _wait_cgroup_stable(pid: int, *, deadline: float) -> str:
+    """Wait for a stable membership so an asynchronous caller move has settled."""
+    previous = ""
+    consecutive = 0
+    last = ""
+    while time.monotonic() < deadline:
+        try:
+            current = _read_child_cgroup(pid)
+        except (OSError, RuntimeError, UnicodeError) as exc:
+            last = str(exc)
+            previous = ""
+            consecutive = 0
+        else:
+            last = current
+            if current == previous:
+                consecutive += 1
+            else:
+                previous = current
+                consecutive = 1
+            if consecutive >= _CGROUP_STABLE_SAMPLES:
+                return current
+        time.sleep(_CGROUP_SAMPLE_SEC)
+    raise RuntimeError(f"cgroup membership did not stabilize: {last!r}")
+
+
 def _move_cgroup(cgroup: str, pid: int) -> None:
     procs = os.path.join(cgroup, "cgroup.procs")
-    expected = cgroup.removeprefix("/sys/fs/cgroup")
-    deadline = time.monotonic() + 1.0
+    expected = cgroup.removeprefix("/sys/fs/cgroup").rstrip("/") or "/"
+    deadline = time.monotonic() + _CGROUP_MOVE_TIMEOUT_SEC
     last = ""
+    # Desktop launchers can assign a freshly spawned descendant to their
+    # transient scope asynchronously.  The child is SIGSTOPed by our caller;
+    # wait for that external assignment to settle before making the final move.
+    _wait_cgroup_stable(pid, deadline=deadline)
     while time.monotonic() < deadline:
         try:
             fd = os.open(procs, os.O_WRONLY | getattr(os, "O_CLOEXEC", 0))
@@ -210,20 +278,13 @@ def _move_cgroup(cgroup: str, pid: int) -> None:
             time.sleep(0.02)
             continue
         try:
-            raw = Path(f"/proc/{pid}/cgroup").read_text(encoding="ascii")
-        except OSError as exc:
+            relative = _wait_cgroup_stable(pid, deadline=deadline)
+        except RuntimeError as exc:
             last = str(exc)
-            time.sleep(0.02)
-            continue
-        relative = ""
-        for line in raw.splitlines():
-            if line.startswith("0::"):
-                relative = line[3:]
-                break
+            break
         if relative == expected or relative.startswith(expected.rstrip("/") + "/"):
             return
         last = relative
-        time.sleep(0.02)
     raise RuntimeError(f"cgroup {last!r} != {expected!r}")
 
 
@@ -289,6 +350,14 @@ def _job_main() -> None:
     child_pid = 0
     child_pidfd = -1
     try:
+        # Enter the durable scope before spawning bwrap.  Every bwrap setup
+        # descendant therefore inherits the boundary; moving only bwrap's
+        # original PID after --block-fd can miss children forked during setup.
+        try:
+            _move_cgroup(cgroup, os.getpid())
+        except Exception:
+            _send_ready({"error": "resource_boundary_unproven"})
+            raise SystemExit(1) from None
         actions = _bwrap_file_actions(
             block_r=block_r,
             has_script=has_script,
@@ -316,6 +385,13 @@ def _job_main() -> None:
             _send_ready({"error": "resource_boundary_unproven"})
             raise SystemExit(1)
         try:
+            signal.pidfd_send_signal(child_pidfd, signal.SIGSTOP)
+            _wait_child_stopped(child_pid)
+        except (OSError, RuntimeError) as exc:
+            _kill_pidfd(child_pidfd)
+            _send_ready({"error": "resource_boundary_unproven"})
+            raise SystemExit(1) from exc
+        try:
             resource.prlimit(child_pid, resource.RLIMIT_FSIZE, (fsize, fsize))
         except (OSError, ValueError) as exc:
             _kill_pidfd(child_pidfd)
@@ -337,8 +413,13 @@ def _job_main() -> None:
         if go != b"1":
             _kill_pidfd(child_pidfd)
             raise SystemExit(1)
-        os.write(block_w, b"x")
-        os.close(block_w)
+        # The bwrap clone remains blocked until the stopped monitor has been
+        # successfully resumed.  Never release the workload after a failed
+        # SIGCONT of its pidfd-attested supervisor.
+        try:
+            _release_stopped_child(child_pidfd, block_w)
+        except OSError as exc:
+            raise SystemExit(1) from exc
         block_w = -1
         _, status = os.waitpid(child_pid, 0)
         rc = int(os.waitstatus_to_exitcode(status))

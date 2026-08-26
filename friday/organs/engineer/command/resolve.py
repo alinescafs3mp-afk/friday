@@ -240,13 +240,33 @@ def attest_open_fd(
     return resolved
 
 
-def confirm_held_fd(fd: int, expected: ResolvedExecutable) -> None:
-    if not _seals_are_final(fd):
+def confirm_held_fd(fd: int, expected: ResolvedExecutable, *, require_seals: bool = True) -> None:
+    if require_seals and not _seals_are_final(fd):
         raise CommandError("identity_changed")
     try:
         st = os.fstat(fd)
     except OSError as exc:
         raise CommandError("identity_changed") from exc
+    observed = (
+        int(st.st_dev),
+        int(st.st_ino),
+        int(st.st_mode),
+        int(st.st_uid),
+        int(st.st_gid),
+        int(st.st_size),
+        int(getattr(st, "st_mtime_ns", int(st.st_mtime * 1_000_000_000))),
+    )
+    attested = (
+        expected.device,
+        expected.inode,
+        expected.mode,
+        expected.owner_uid,
+        expected.owner_gid,
+        expected.size_bytes,
+        expected.mtime_ns,
+    )
+    if not require_seals and observed != attested:
+        raise CommandError("identity_changed")
     if int(st.st_size) != expected.size_bytes:
         raise CommandError("identity_changed")
     if _hash_fd(fd) != expected.sha256:
@@ -254,7 +274,7 @@ def confirm_held_fd(fd: int, expected: ResolvedExecutable) -> None:
 
 
 def confirm_held(held: HeldExecutable) -> None:
-    confirm_held_fd(held.executable_fd, held.resolved)
+    confirm_held_fd(held.executable_fd, held.resolved, require_seals=held.executable_sealed)
     if held.interpreter_fd is not None and held.interpreter is not None:
         confirm_held_fd(held.interpreter_fd, held.interpreter)
     if held.script_fd is not None and held.script is not None:
@@ -418,12 +438,14 @@ def resolve_root_helper(path: str) -> HeldExecutable:
         if st.st_uid != 0:
             raise CommandError("helper_untrusted")
         resolved = attest_open_fd(fd, named=named)
-        sealed = snapshot_sealed_memfd(fd, label=Path(named).name or "friday-helper")
+        # Keep the root-owned original inode: executing a copied memfd loses
+        # Ubuntu's path-based bwrap AppArmor profile.  The exact held fd is
+        # fully re-attested immediately before the spawn seam.
+        os.set_inheritable(fd, True)
     except Exception:
         os.close(fd)
         raise
-    os.close(fd)
-    return HeldExecutable(resolved=resolved, executable_fd=sealed)
+    return HeldExecutable(resolved=resolved, executable_fd=fd, executable_sealed=False)
 
 
 def require_destructive_grant(
@@ -483,38 +505,39 @@ def resolve_bwrap() -> HeldExecutable:
 
 def _canonical_path_root(directory: str) -> str:
     try:
-        st = os.lstat(directory)
-    except OSError as exc:
+        named = os.path.realpath(directory, strict=True)
+        st = os.lstat(named)
+    except (OSError, ValueError) as exc:
         raise CommandError("untrusted_path_root") from exc
-    if stat.S_ISLNK(st.st_mode):
-        try:
-            target = os.readlink(directory)
-        except OSError as exc:
-            raise CommandError("untrusted_path_root") from exc
-        dest = target if target.startswith("/") else str(Path(directory).parent / target)
-        dest = _lexical_normalize(dest)
-        try:
-            dest_st = os.lstat(dest)
-        except OSError as exc:
-            raise CommandError("untrusted_path_root") from exc
-        if stat.S_ISLNK(dest_st.st_mode) or not stat.S_ISDIR(dest_st.st_mode):
-            raise CommandError("untrusted_path_root")
-        return dest
-    if not stat.S_ISDIR(st.st_mode):
+    if not named.startswith("/") or stat.S_ISLNK(st.st_mode) or not stat.S_ISDIR(st.st_mode):
         raise CommandError("untrusted_path_root")
-    return directory
+    return named
+
+
+def _open_directory_chain(path: str) -> int:
+    """Open every canonical component without following a later symlink swap."""
+    flags = os.O_RDONLY | os.O_DIRECTORY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0)
+    current = os.open("/", flags)
+    try:
+        for part in Path(path).parts[1:]:
+            next_fd = os.open(part, flags, dir_fd=current)
+            os.close(current)
+            current = next_fd
+        return current
+    except Exception:
+        os.close(current)
+        raise
 
 
 def attest_trusted_path(contract: TrustedPathContract) -> tuple[PathRoot, ...]:
     roots: list[PathRoot] = []
     seen: set[tuple[int, int]] = set()
-    flags = os.O_RDONLY | os.O_DIRECTORY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0)
     for directory in contract.directories:
         named = _canonical_path_root(directory)
         if path_root_is_sensitive(named):
             raise CommandError("untrusted_path_root")
         try:
-            fd = os.open(named, flags)
+            fd = _open_directory_chain(named)
         except OSError as exc:
             raise CommandError("untrusted_path_root") from exc
         keep_fd = False

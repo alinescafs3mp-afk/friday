@@ -6,8 +6,9 @@ import contextlib
 import os
 import stat
 import subprocess
+import threading
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from .contracts import (
@@ -51,6 +52,49 @@ def _open_cgroup_dir(cgroup: Path) -> int:
         raise CommandError("resource_boundary_unproven") from exc
 
 
+class _ScopeCleanupOwner:
+    """Process-lifetime owner for scopes whose first bounded cleanup failed."""
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._pending: dict[int, ProvenScope] = {}
+        self._worker: threading.Thread | None = None
+
+    def retain(self, scope: ProvenScope) -> None:
+        with self._lock:
+            self._pending[id(scope)] = scope
+            if self._worker is None or not self._worker.is_alive():
+                self._worker = threading.Thread(
+                    target=self._run,
+                    name="friday-command-scope-cleanup",
+                    daemon=True,
+                )
+                self._worker.start()
+
+    def discard(self, scope: ProvenScope) -> None:
+        with self._lock:
+            self._pending.pop(id(scope), None)
+
+    def _run(self) -> None:
+        while True:
+            with self._lock:
+                pending = tuple(self._pending.values())
+                if not pending:
+                    self._worker = None
+                    return
+            for scope in pending:
+                try:
+                    proven = scope._kill_once()
+                except Exception:
+                    proven = False
+                if proven:
+                    self.discard(scope)
+            time.sleep(0.25)
+
+
+_SCOPE_CLEANUP_OWNER = _ScopeCleanupOwner()
+
+
 @dataclass
 class ProvenScope:
     job_id: str
@@ -59,8 +103,25 @@ class ProvenScope:
     limits: ResourceLimits
     cgroup_fd: int | None = None
     _tree_empty_proven: bool = False
+    _cleanup_lock: threading.Lock = field(default_factory=threading.Lock, repr=False)
 
     def kill(self) -> bool:
+        proven = self._kill_once()
+        if proven:
+            _SCOPE_CLEANUP_OWNER.discard(self)
+        elif self.cgroup_fd is not None and self.unit == f"friday-ecmd-{self.job_id}.service":
+            # Do not let callers dropping this object also drop the sole held
+            # cgroup identity.  The daemon owner retries each bounded cleanup
+            # pass for the lifetime of this process (restart reconciliation is
+            # backed by the durable unit/cgroup row).
+            _SCOPE_CLEANUP_OWNER.retain(self)
+        return proven
+
+    def _kill_once(self) -> bool:
+        with self._cleanup_lock:
+            return self._kill_once_locked()
+
+    def _kill_once_locked(self) -> bool:
         if self.unit != f"friday-ecmd-{self.job_id}.service":
             if self.cgroup_fd is not None:
                 with contextlib.suppress(OSError):
@@ -144,9 +205,8 @@ class ResourceBoundary:
         """Re-attest persisted scope identity before any restart cleanup."""
         raise CommandError("resource_boundary_unproven")
 
-    def stop(self, scope: ProvenScope | None) -> None:
-        if scope is not None:
-            scope.kill()
+    def stop(self, scope: ProvenScope | None) -> bool:
+        return True if scope is None else scope.kill()
 
 
 class MissingControllerBoundary(ResourceBoundary):
@@ -179,9 +239,23 @@ class SystemdCgroupBoundary(ResourceBoundary):
             raise CommandError("resource_boundary_unproven")
         try:
             st = os.lstat(cgroup)
-            fd = _open_cgroup_dir(cgroup)
+        except FileNotFoundError as exc:
+            # A cgroup cannot disappear while populated.  Collection of the
+            # strictly validated transient unit completes the absence proof
+            # for a cleanup-pending row recovered after restart.
+            if _stop_and_collect(unit):
+                return ProvenScope(
+                    job_id=job_id,
+                    unit=unit,
+                    cgroup=cgroup,
+                    limits=limits,
+                    cgroup_fd=None,
+                    _tree_empty_proven=True,
+                )
+            raise CommandError("resource_boundary_unproven") from exc
         except OSError as exc:
             raise CommandError("resource_boundary_unproven") from exc
+        fd = _open_cgroup_dir(cgroup)
         try:
             opened = os.fstat(fd)
             if not stat.S_ISDIR(st.st_mode) or (st.st_dev, st.st_ino) != (opened.st_dev, opened.st_ino):

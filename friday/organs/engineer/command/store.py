@@ -158,6 +158,7 @@ class CommandJobStore:
                 max_stdout_bytes INTEGER NOT NULL,
                 max_stderr_bytes INTEGER NOT NULL,
                 effect_boundary_crossed INTEGER NOT NULL DEFAULT 0,
+                cleanup_pending INTEGER NOT NULL DEFAULT 0,
                 cancelled INTEGER NOT NULL DEFAULT 0,
                 timed_out INTEGER NOT NULL DEFAULT 0,
                 truncated_stdout INTEGER NOT NULL DEFAULT 0,
@@ -192,6 +193,26 @@ class CommandJobStore:
             );
             """
         )
+        columns = {str(row[1]) for row in self._conn.execute("PRAGMA table_info(jobs)").fetchall()}
+        if "cleanup_pending" not in columns:
+            self._conn.execute("BEGIN IMMEDIATE")
+            try:
+                self._conn.execute(
+                    "ALTER TABLE jobs ADD COLUMN cleanup_pending INTEGER NOT NULL DEFAULT 0"
+                )
+                # A pre-marker UNKNOWN row with a durable unit identity may be
+                # an interrupted cleanup.  DDL and backfill commit atomically,
+                # so a crash can never leave the new marker silently clear.
+                self._conn.execute(
+                    """UPDATE jobs SET cleanup_pending=1
+                       WHERE status='unknown'
+                         AND systemd_unit IS NOT NULL AND cgroup_path IS NOT NULL"""
+                )
+            except Exception:
+                self._conn.execute("ROLLBACK")
+                raise
+            else:
+                self._conn.execute("COMMIT")
         # Pending confirmations created by a pre-ledger build cannot prove that
         # their immutable ingress row/update was minted only once. Invalidate
         # them on upgrade instead of silently widening authority.
@@ -372,7 +393,8 @@ class CommandJobStore:
     def list_unreaped(self) -> list[dict[str, Any]]:
         with self._local:
             rows = self._conn.execute(
-                "SELECT * FROM jobs WHERE status IN ('admitted','running')"
+                """SELECT * FROM jobs
+                   WHERE status IN ('admitted','running') OR cleanup_pending=1"""
             ).fetchall()
             return [{str(key): value for key, value in dict(row).items()} for row in rows]
 

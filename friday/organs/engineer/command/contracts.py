@@ -471,6 +471,7 @@ class ResolvedExecutable:
 class HeldExecutable:
     resolved: ResolvedExecutable
     executable_fd: int
+    executable_sealed: bool = True
     interpreter: ResolvedExecutable | None = None
     interpreter_fd: int | None = None
     script: ResolvedExecutable | None = None

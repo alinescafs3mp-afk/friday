@@ -54,7 +54,7 @@ def _pid_starttime(pid: int) -> int | None:
         return None
 
 
-def _terminate_process(proc: _SpawnedProcess, scope: ProvenScope | None) -> None:
+def _terminate_process(proc: _SpawnedProcess, scope: ProvenScope | None) -> bool:
     """Signal only the pidfd identity; use cgroup.kill for the full tree."""
     pidfd = proc.pidfd
     if pidfd is not None:
@@ -66,8 +66,7 @@ def _terminate_process(proc: _SpawnedProcess, scope: ProvenScope | None) -> None
     if proc.poll() is None and pidfd is not None:
         with contextlib.suppress(OSError):
             signal.pidfd_send_signal(pidfd, signal.SIGKILL)
-    if scope is not None:
-        scope.kill()
+    return False if scope is None else scope.kill()
 
 
 class _SpawnedProcess:
@@ -297,6 +296,9 @@ class SpawnedCommand:
         started: StartedJob | None = None
         try:
             self.started_at = time.time()
+            # Re-attest the exact unsealed, root-owned bwrap inode at the
+            # transfer seam.  User payload executables remain sealed memfds.
+            confirm_held(bwrap)
             started = broker.start_job(
                 argv=argv,
                 env=child_env,
@@ -346,12 +348,12 @@ class SpawnedCommand:
     def abort(self) -> None:
         proc = self.process
         if proc is not None:
-            _terminate_process(proc, self.scope)
+            self.tree_empty = _terminate_process(proc, self.scope)
             with contextlib.suppress(Exception):
                 proc.wait(timeout=2)
             proc.close_ctrl()
         elif self.scope is not None:
-            self.scope.kill()
+            self.tree_empty = self.scope.kill()
         self._close_pipes()
 
     def request_cancel(self) -> None:

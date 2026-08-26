@@ -7,6 +7,7 @@ import os
 import shutil
 import signal
 import socket
+import sqlite3
 import sys
 import threading
 import time
@@ -39,8 +40,10 @@ from friday.organs.engineer.command.isolate import bwrap_argv, extra_ro_binds
 from friday.organs.engineer.command.kernel import CommandKernel
 from friday.organs.engineer.command.resolve import (
     attest_trusted_path,
+    confirm_held,
     confirm_path_roots,
     require_destructive_grant,
+    resolve_bwrap,
     resolve_held,
 )
 from friday.organs.engineer.command.runner import (
@@ -58,9 +61,11 @@ from friday.organs.engineer.command.spawn_helper import (
     _bwrap_file_actions,
     _job_main,
     _make_collision_free_block_pipe,
+    _move_cgroup,
     _pidfd_identity,
     _recv_fds_message,
     _recv_socket_line,
+    _release_stopped_child,
     _send_fds_message,
 )
 from friday.organs.engineer.command.store import CommandJobStore
@@ -156,6 +161,92 @@ def test_store_root_has_a_process_lifetime_single_kernel_lease(tmp_path: Path) -
         first.close()
     reopened = CommandJobStore(root)
     reopened.close()
+
+
+def test_store_lists_cleanup_pending_unknown_jobs_for_restart(tmp_path: Path) -> None:
+    store = CommandJobStore(tmp_path / "store")
+    request = _request("/usr/bin/true")
+    job_id = "9" * 32
+    try:
+        with store.transaction():
+            store.insert_job(
+                {
+                    "job_id": job_id,
+                    "actor_id": "owner",
+                    "tenant_id": "tenant",
+                    "conversation_id": "conversation",
+                    "channel": "cli_test",
+                    "source_row_id": "row",
+                    "source_hash": "b" * 64,
+                    "telegram_update_id": "update",
+                    "isolation_profile": IsolationProfile.ISOLATED_WORKSPACE.value,
+                    "host_user_authorized": False,
+                    "idempotency_key": request.idempotency_key,
+                    "command_digest": request.digest,
+                    "argv_sha256": request.argv_sha256,
+                    "lane": request.lane.value,
+                    "origin": request.origin.value,
+                    "status": CommandStatus.UNKNOWN.value,
+                    "grant_nonce": "grant",
+                    "timeout_sec": 30,
+                    "max_stdout_bytes": 1024,
+                    "max_stderr_bytes": 1024,
+                    "created_at": time.time(),
+                    "executable_json": "{}",
+                }
+            )
+            store.update_job(
+                job_id,
+                {
+                    "cleanup_pending": 1,
+                    "systemd_unit": f"friday-ecmd-{job_id}.service",
+                    "cgroup_path": f"/sys/fs/cgroup/friday-ecmd-{job_id}.service",
+                },
+            )
+        assert [row["job_id"] for row in store.list_unreaped()] == [job_id]
+        with store.transaction():
+            store.update_job(job_id, {"cleanup_pending": 0})
+        assert store.list_unreaped() == []
+    finally:
+        store.close()
+
+
+def test_store_migration_backfills_legacy_unknown_scope_cleanup(tmp_path: Path) -> None:
+    root = tmp_path / "legacy-store"
+    root.mkdir()
+    database = root / "kernel.sqlite"
+    connection = sqlite3.connect(database)
+    try:
+        connection.execute(
+            """CREATE TABLE jobs (
+                   job_id TEXT PRIMARY KEY,
+                   status TEXT NOT NULL,
+                   systemd_unit TEXT,
+                   cgroup_path TEXT
+               )"""
+        )
+        job_id = "7" * 32
+        connection.execute(
+            "INSERT INTO jobs(job_id,status,systemd_unit,cgroup_path) VALUES(?,?,?,?)",
+            (
+                job_id,
+                CommandStatus.UNKNOWN.value,
+                f"friday-ecmd-{job_id}.service",
+                f"/sys/fs/cgroup/friday-ecmd-{job_id}.service",
+            ),
+        )
+        connection.commit()
+    finally:
+        connection.close()
+
+    store = CommandJobStore(root)
+    try:
+        pending = store.list_unreaped()
+        assert len(pending) == 1
+        assert pending[0]["job_id"] == job_id
+        assert pending[0]["cleanup_pending"] == 1
+    finally:
+        store.close()
 
 
 @pytest.mark.parametrize(
@@ -301,7 +392,7 @@ def test_low_block_pipe_fd_is_duplicated_before_posix_spawn_actions(
     assert closed == [3]
 
 
-def test_job_helper_executes_transferred_bwrap_memfd(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_job_helper_executes_transferred_held_bwrap_fd(monkeypatch: pytest.MonkeyPatch) -> None:
     captured: dict[str, object] = {}
     request = {
         "argv": ["bwrap", "--version"],
@@ -325,6 +416,7 @@ def test_job_helper_executes_transferred_bwrap_memfd(monkeypatch: pytest.MonkeyP
     monkeypatch.setattr(sys, "argv", ["spawn_helper.py", "--job", json.dumps(request)])
     monkeypatch.setattr(signal, "signal", lambda *_args: None)
     monkeypatch.setattr(spawn_helper_module, "_make_collision_free_block_pipe", lambda: (96, 97))
+    monkeypatch.setattr(spawn_helper_module, "_move_cgroup", lambda *_args: None)
     monkeypatch.setattr(os, "posix_spawn", _posix_spawn)
     monkeypatch.setattr(os, "close", lambda _fd: None)
     monkeypatch.setattr(spawn_helper_module, "_send_ready", lambda *_args, **_kwargs: None)
@@ -338,6 +430,117 @@ def test_job_helper_executes_transferred_bwrap_memfd(monkeypatch: pytest.MonkeyP
     assert captured["path"] == _HELD_LAUNCHER_PATH
     assert f"/proc/self/fd/{BWRAP_LAUNCHER_FD}" == _HELD_LAUNCHER_PATH
     assert (os.POSIX_SPAWN_DUP2, HELPER_LAUNCHER, BWRAP_LAUNCHER_FD) in actions
+
+
+def test_bwrap_launcher_holds_and_reconfirms_root_owned_original_inode() -> None:
+    held = resolve_bwrap()
+    try:
+        observed = os.fstat(held.executable_fd)
+        assert held.executable_sealed is False
+        assert (int(observed.st_dev), int(observed.st_ino)) == (
+            held.resolved.device,
+            held.resolved.inode,
+        )
+        confirm_held(held)
+    finally:
+        held.close()
+
+
+def test_cgroup_move_rejects_transient_match_until_membership_is_stable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    target = "/user.slice/friday-ecmd-" + "a" * 32 + ".service"
+    readings = iter(
+        ["/user.slice/ptyxis.scope"] * 5
+        + [target, "/user.slice/ptyxis.scope"]
+        + ["/user.slice/ptyxis.scope"] * 4
+        + [target] * 5
+    )
+    writes: list[bytes] = []
+
+    monkeypatch.setattr(spawn_helper_module, "_read_child_cgroup", lambda _pid: next(readings))
+    monkeypatch.setattr(os, "open", lambda *_args, **_kwargs: 99)
+    monkeypatch.setattr(os, "write", lambda _fd, payload: writes.append(payload) or len(payload))
+    monkeypatch.setattr(os, "close", lambda _fd: None)
+    monkeypatch.setattr(time, "sleep", lambda _seconds: None)
+
+    _move_cgroup("/sys/fs/cgroup" + target, 4321)
+
+    assert writes == [b"4321\n", b"4321\n"]
+
+
+def test_job_helper_enters_scope_before_spawn_and_releases_stopped_child(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    events: list[tuple[str, int | str]] = []
+    request = {
+        "argv": ["bwrap", "--version"],
+        "cgroup": "/sys/fs/cgroup/mock",
+        "env": {"PATH": "/usr/bin"},
+        "fsize": 1024,
+        "has_script": False,
+        "path_root_count": 0,
+    }
+    waits = iter(((0, 0), (4321, 0)))
+
+    def _move(_cgroup: str, pid: int) -> None:
+        events.append(("move", pid))
+
+    def _pidfd_signal(_pidfd: int, sig: int, *_args: object) -> None:
+        events.append(("signal", sig))
+
+    def _write(fd: int, payload: bytes) -> int:
+        if fd == 97:
+            events.append(("gate", payload.decode("ascii")))
+        return len(payload)
+
+    monkeypatch.setattr(sys, "argv", ["spawn_helper.py", "--job", json.dumps(request)])
+    monkeypatch.setattr(signal, "signal", lambda *_args: None)
+    monkeypatch.setattr(signal, "pidfd_send_signal", _pidfd_signal)
+    monkeypatch.setattr(spawn_helper_module, "_make_collision_free_block_pipe", lambda: (96, 97))
+    monkeypatch.setattr(spawn_helper_module, "_move_cgroup", _move)
+    monkeypatch.setattr(spawn_helper_module, "_wait_child_stopped", lambda pid: events.append(("stopped", pid)))
+    monkeypatch.setattr(os, "posix_spawn", lambda *_args, **_kwargs: events.append(("spawn", 4321)) or 4321)
+    monkeypatch.setattr(os, "pidfd_open", lambda *_args: 88)
+    monkeypatch.setattr(os, "waitpid", lambda *_args: next(waits))
+    monkeypatch.setattr(os, "getpid", lambda: 1234)
+    monkeypatch.setattr(os, "read", lambda *_args: b"1")
+    monkeypatch.setattr(os, "write", _write)
+    monkeypatch.setattr(os, "close", lambda _fd: None)
+    monkeypatch.setattr(spawn_helper_module.resource, "prlimit", lambda *_args: None)
+    monkeypatch.setattr(spawn_helper_module, "_send_ready", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(spawn_helper_module, "_send_json_fd", lambda *_args, **_kwargs: None)
+
+    _job_main()
+
+    assert events == [
+        ("move", 1234),
+        ("spawn", 4321),
+        ("signal", signal.SIGSTOP),
+        ("stopped", 4321),
+        ("move", 4321),
+        ("signal", signal.SIGCONT),
+        ("gate", "x"),
+    ]
+
+
+def test_failed_pidfd_resume_never_releases_bwrap_gate(monkeypatch: pytest.MonkeyPatch) -> None:
+    killed: list[int] = []
+    writes: list[tuple[int, bytes]] = []
+
+    def _fail_resume(_pidfd: int, sig: int, *_args: object) -> None:
+        assert sig == signal.SIGCONT
+        raise OSError("stale pidfd")
+
+    monkeypatch.setattr(signal, "pidfd_send_signal", _fail_resume)
+    monkeypatch.setattr(spawn_helper_module, "_kill_pidfd", killed.append)
+    monkeypatch.setattr(os, "write", lambda fd, payload: writes.append((fd, payload)) or len(payload))
+
+    with pytest.raises(OSError, match="stale pidfd"):
+        _release_stopped_child(88, 97)
+
+    assert killed == [88]
+    assert writes == []
 
 
 def test_exit_frame_before_pipe_eof_still_drains_captured_output(tmp_path: Path) -> None:
@@ -643,7 +846,11 @@ def test_scope_identity_commits_before_spawn_helper_can_release_go(tmp_path: Pat
 
         @staticmethod
         def update_job(_job_id: str, fields: dict[str, object]) -> None:
-            assert fields == {"cgroup_path": str(scope.cgroup), "systemd_unit": scope.unit}
+            assert fields == {
+                "cgroup_path": str(scope.cgroup),
+                "systemd_unit": scope.unit,
+                "cleanup_pending": 1,
+            }
             events.append("scope-row")
 
     class _Workspace:
@@ -795,6 +1002,62 @@ def test_restart_reconciles_admitted_job_with_persisted_scope(tmp_path: Path) ->
     assert events == ["recover", "stop", "unknown"]
 
 
+@pytest.mark.parametrize(("cleanup_proven", "pending"), [(False, 1), (True, 0)])
+def test_restart_keeps_cleanup_marker_until_scope_collection_is_proven(
+    tmp_path: Path,
+    cleanup_proven: bool,
+    pending: int,
+) -> None:
+    job_id = "e" * 32
+    scope = ProvenScope(
+        job_id=job_id,
+        unit=f"friday-ecmd-{job_id}.service",
+        cgroup=tmp_path / f"friday-ecmd-{job_id}.service",
+        limits=ResourceLimits.default(),
+    )
+    updates: list[dict[str, object]] = []
+
+    class _Store:
+        @staticmethod
+        def list_unreaped() -> list[dict[str, object]]:
+            return [
+                {
+                    "job_id": job_id,
+                    "status": CommandStatus.UNKNOWN.value,
+                    "systemd_unit": scope.unit,
+                    "cgroup_path": str(scope.cgroup),
+                    "timeout_sec": 30,
+                    "cleanup_pending": 1,
+                }
+            ]
+
+        @staticmethod
+        @contextmanager
+        def transaction():
+            yield
+
+        @staticmethod
+        def update_job(_job_id: str, fields: dict[str, object]) -> None:
+            updates.append(dict(fields))
+
+    class _Boundary:
+        @staticmethod
+        def recover_scope(*_args: object, **_kwargs: object) -> ProvenScope:
+            return scope
+
+        @staticmethod
+        def stop(_scope: ProvenScope) -> bool:
+            return cleanup_proven
+
+    kernel = CommandKernel.__new__(CommandKernel)
+    kernel.store = _Store()  # type: ignore[assignment]
+    kernel.boundary = _Boundary()  # type: ignore[assignment]
+    kernel.limits = ResourceLimits.default()
+    kernel._reconcile_stale()
+
+    assert updates[-1]["cleanup_pending"] == pending
+
+
 def test_transient_scope_requests_collect_and_cleanup_is_bounded(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -843,7 +1106,10 @@ def test_scope_retains_attested_cgroup_fd_until_cleanup_retry_is_proven(
     (cgroup / "cgroup.kill").write_text("", encoding="ascii")
     fd = os.open(cgroup, os.O_RDONLY | os.O_DIRECTORY)
     outcomes = iter((False, False, True))
+    retained: list[ProvenScope] = []
     monkeypatch.setattr(boundary_module, "_stop_and_collect", lambda _unit: next(outcomes))
+    monkeypatch.setattr(boundary_module._SCOPE_CLEANUP_OWNER, "retain", retained.append)
+    monkeypatch.setattr(boundary_module._SCOPE_CLEANUP_OWNER, "discard", lambda _scope: None)
     scope = ProvenScope(
         job_id="f" * 32,
         unit=f"friday-ecmd-{'f' * 32}.service",
@@ -855,6 +1121,7 @@ def test_scope_retains_attested_cgroup_fd_until_cleanup_retry_is_proven(
     try:
         assert scope.kill() is False
         assert scope.cgroup_fd == fd
+        assert retained == [scope]
         os.fstat(fd)
         assert scope.kill() is True
         assert scope.cgroup_fd is None
@@ -864,6 +1131,33 @@ def test_scope_retains_attested_cgroup_fd_until_cleanup_retry_is_proven(
         if scope.cgroup_fd is not None:
             os.close(scope.cgroup_fd)
             scope.cgroup_fd = None
+
+
+def test_restart_proves_already_collected_validated_scope_without_path_fallback(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    job_id = "8" * 32
+    unit = f"friday-ecmd-{job_id}.service"
+    calls: list[str] = []
+    monkeypatch.setattr(
+        boundary_module,
+        "_stop_and_collect",
+        lambda candidate: calls.append(candidate) or True,
+    )
+
+    boundary = SystemdCgroupBoundary()
+    scope = boundary.recover_scope(
+        job_id,
+        unit,
+        f"/sys/fs/cgroup/user.slice/{unit}",
+        ResourceLimits.default(),
+        timeout_sec=30,
+    )
+
+    assert scope.cgroup_fd is None
+    assert scope.tree_empty() is True
+    assert boundary.stop(scope) is True
+    assert calls == [unit, unit]
 
 
 def test_path_lookup_and_bind_stay_on_held_root_after_rename(tmp_path: Path) -> None:
@@ -905,5 +1199,16 @@ def test_trusted_path_attestation_rejects_alias_to_sensitive_root(tmp_path: Path
     alias = tmp_path / "run-alias"
     alias.symlink_to("/run")
     contract = TrustedPathContract(directories=(str(alias),))
+    with pytest.raises(CommandError, match="untrusted_path_root"):
+        attest_trusted_path(contract)
+
+
+def test_trusted_path_attestation_rejects_sensitive_root_through_parent_symlink(
+    tmp_path: Path,
+) -> None:
+    safe = tmp_path / "safe"
+    safe.mkdir()
+    (safe / "link").symlink_to("/")
+    contract = TrustedPathContract(directories=(str(safe / "link" / "proc"),))
     with pytest.raises(CommandError, match="untrusted_path_root"):
         attest_trusted_path(contract)

@@ -156,6 +156,7 @@ class CommandKernel:
             job_id = str(job["job_id"])
             unit = str(job.get("systemd_unit") or "")
             cgroup_path = str(job.get("cgroup_path") or "")
+            cleanup_proven = False
             if unit and cgroup_path:
                 try:
                     scope = self.boundary.recover_scope(
@@ -168,7 +169,7 @@ class CommandKernel:
                 except CommandError:
                     scope = None
                 if scope is not None:
-                    self.boundary.stop(scope)
+                    cleanup_proven = bool(self.boundary.stop(scope))
             with self.store.transaction():
                 self.store.update_job(
                     job_id,
@@ -176,6 +177,7 @@ class CommandKernel:
                         "status": CommandStatus.UNKNOWN.value,
                         "error_code": "unknown_after_restart",
                         "finished_at": time.time(),
+                        "cleanup_pending": 1 if unit and cgroup_path and not cleanup_proven else 0,
                     },
                 )
 
@@ -198,6 +200,7 @@ class CommandKernel:
                     {
                         "cgroup_path": str(scope.cgroup),
                         "systemd_unit": scope.unit,
+                        "cleanup_pending": 1,
                     },
                 )
         except Exception as exc:
@@ -320,6 +323,7 @@ class CommandKernel:
                             "effect_boundary_crossed": 1 if spawned.effect_boundary_crossed else 0,
                             "systemd_unit": scope.unit if scope is not None else None,
                             "cgroup_path": str(scope.cgroup) if scope is not None else None,
+                            "cleanup_pending": 0 if scope is None or spawned.tree_empty else 1,
                         },
                     )
                 receipt = self._receipt_from_spawned(
@@ -346,6 +350,7 @@ class CommandKernel:
                             "systemd_unit": scope.unit if scope is not None else None,
                             "started_at": spawned.started_at,
                             "effect_boundary_crossed": 1,
+                            "cleanup_pending": 1,
                         },
                     )
             except CommandError as persist_exc:
@@ -358,6 +363,7 @@ class CommandKernel:
                             "error_code": "unknown_after_spawn",
                             "finished_at": time.time(),
                             "effect_boundary_crossed": 1,
+                            "cleanup_pending": 0 if spawned.tree_empty else 1,
                         },
                     )
                 raise CommandError("unknown_after_spawn") from persist_exc
@@ -386,6 +392,7 @@ class CommandKernel:
                             "error_code": "unknown_after_spawn",
                             "finished_at": time.time(),
                             "effect_boundary_crossed": 1,
+                            "cleanup_pending": 0 if spawned.tree_empty else 1,
                         },
                     )
                 receipt = self._receipt_from_spawned(
@@ -580,6 +587,7 @@ class CommandKernel:
                 "truncated_stderr": 1 if value.truncated_stderr else 0,
                 "truncated_stdout": 1 if value.truncated_stdout else 0,
                 "effect_boundary_crossed": 1 if value.effect_boundary_crossed else 0,
+                "cleanup_pending": 0 if spawned.tree_empty else 1,
             }
 
         try:
