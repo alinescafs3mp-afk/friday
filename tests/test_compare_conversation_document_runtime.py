@@ -950,7 +950,7 @@ async def test_duplicate_filename_publishes_complete_durable_q2(
     assert q2.document_candidate_set is not None
     assert tuple(
         item.source_ref.canonical_object_id for item in q2.document_candidate_set.candidates
-    ) == tuple(sorted((raws[0].id, raws[1].id)))
+    ) == tuple(raw.id for raw in sorted(raws, key=lambda raw: (raw.received_at, raw.id)))
     prompt_id = q2.document_questions[-1].prompt_assistant_message_id
     prompt = storage.execute(
         "SELECT content,metadata_json FROM messages WHERE id=?",
