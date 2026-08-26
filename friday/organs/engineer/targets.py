@@ -298,16 +298,27 @@ _TRAILING_REQUEST_CANCEL = re.compile(
     r"\b(?:отмена|отмени(?:те)?|передумал(?:а)?)\b|"
     r"\b(?:do\s+not|don't|dont|never)\s+(?:do|scan|run|execute)\b|"
     r"\b(?:cancel(?:\s+(?:it|that))?|never\s+mind)\b|"
-    r"(?:\A|[.!?]\s*)(?:(?:actually|вообще)\s*[,;:]?\s*)?"
-    r"(?:no|нет)\s*[.!?…]*\s*\Z)",
+    r"(?:\A|[.!?…]\s*)(?:(?:actually|wait|sorry|вообще|погоди(?:те)?)\s*[,;:]?\s*)?"
+    r"(?:"
+    r"(?:no|nope|nah|нет|неа)"
+    r"(?:\s*[,;:]?\s*(?:thanks?|thank\s+you|thx|спасибо|благодарю))?|"
+    r"(?:i\s+changed\s+my\s+mind|я\s+передумал(?:а)?|"
+    r"cancel(?:\s+(?:it|that))?|never\s+mind|отмена|отбой)"
+    r")\s*[.!?…]*(?=\s*(?:\Z|\n)))",
     re.IGNORECASE,
 )
 _TRAILING_REQUEST_META = re.compile(
-    r"\A\s*(?:[,;:()]|[.!?…—–-])*\s*(?:"
+    r"\A\s*(?:[,;:()]|[.!?…—–-])*\s*"
+    r"(?:(?:and|then|и|а\s+(?:затем|потом))\s+)?"
+    r"(?:(?:please|пожалуйста)\s*[,;:]?\s*)?(?:"
     r"(?:what\s+(?:does|would)\s+(?:that|this|it)\s+mean)|"
     r"(?:means?\s+what)|"
+    r"(?:(?:explain|clarify|tell\s+me)\s+"
+    r"(?:what\s+)?(?:that|this|it|the\s+(?:command|phrase))\s+means?)|"
     r"(?:что\s+(?:это\s+)?значит)|"
-    r"(?:(?:это\s+)?означает\s+что)"
+    r"(?:(?:это\s+)?означает\s+что)|"
+    r"(?:(?:объясни|объясните|уточни|уточните)\s*[,;:]?\s*"
+    r"(?:что\s+)?(?:это|эта\s+(?:команда|фраза))\s+значит)"
     r")\b",
     re.IGNORECASE,
 )
@@ -1197,8 +1208,7 @@ def _accepted_artifact_compile_requests(
     for request in _direct_request_matches(text, _ARTIFACT_COMPILE_REQUEST):
         unit = masked[request.unit_start : request.unit_end]
         named_sources = {
-            match.group(0).casefold()
-            for match in re.finditer(_ARTIFACT_COMPILE_FILENAME, unit, re.IGNORECASE)
+            match.group(0) for match in re.finditer(_ARTIFACT_COMPILE_FILENAME, unit, re.IGNORECASE)
         }
         if len(named_sources) > 1:
             continue
@@ -1259,7 +1269,7 @@ def requested_artifact_compile_filename(speech: str) -> str | None:
     for request in requests:
         accepted_span = masked[request.start : request.end]
         for match in re.finditer(_ARTIFACT_COMPILE_FILENAME, accepted_span, re.IGNORECASE):
-            distinct.setdefault(match.group(0).casefold(), match.group(0))
+            distinct.setdefault(match.group(0), match.group(0))
     return next(iter(distinct.values())) if len(distinct) == 1 else None
 
 
