@@ -1,3 +1,13 @@
+## 0.207.47 — 2026-08-26
+
+### Crash-safe predecessor convergence
+
+- The unit-install transition and resume boundary now admits the same exact
+  pre-limit security drop-in as its initial surface validator. Power-loss
+  recovery remains closed to every unknown byte sequence.
+- Release `0.207.46` was superseded before activation; database schema remains
+  43.
+
 ## 0.207.46 — 2026-08-26
 
 ### Safe predecessor convergence for Java resource limits

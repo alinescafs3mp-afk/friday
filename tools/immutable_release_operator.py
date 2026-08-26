@@ -7457,6 +7457,7 @@ def install_units(
                 if installed_content not in {
                     _LEGACY_PRIVATE_TMP_SECURITY,
                     _RECOVERY_PRIVATE_TMP_SECURITY,
+                    _pre_aggregate_unit_security_dropin(unit),
                     _unit_security_dropin(unit),
                 }:
                     raise ReleaseFailure("installed_transition_security_invalid")

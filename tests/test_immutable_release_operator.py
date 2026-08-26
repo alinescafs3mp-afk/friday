@@ -4861,7 +4861,7 @@ def test_unit_pair_crash_converges_without_exposing_mixed_runtime_roots(
                 encoding="utf-8",
             )
         (dropin_directory / "security.conf").write_bytes(
-            operator._RECOVERY_PRIVATE_TMP_SECURITY  # noqa: SLF001
+            operator._pre_aggregate_unit_security_dropin(name)  # noqa: SLF001
         )
         for dropin in dropin_directory.iterdir():
             dropin.chmod(0o644)
