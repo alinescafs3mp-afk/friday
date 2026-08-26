@@ -7424,10 +7424,11 @@ _SUPPORTED_READY_QUALIFIER_TOKEN = (
     r"(?!(?:можно|сейчас|здесь|тут|ниже|уже|теперь|"
     r"тебя|вас|он|она|оно|они|"
     r"доступ\w*|наход\w*|леж\w*|открыва\w*|ссылк\w*)\b)"
-    r"(?:[а-яё0-9][а-яё0-9._-]{1,39})"
+    r"(?!(?:[а-яё-]*)(?:ть|ти|чь)(?:ся|сь)?\b)"
+    r"(?:[A-Za-zА-ЯЁа-яё0-9][A-Za-zА-ЯЁа-яё0-9._-]{1,39})"
 )
 _SUPPORTED_READY_PREPOSITIONAL_PHRASE = (
-    rf"(?:из|по|для|с|за)\s+{_SUPPORTED_READY_QUALIFIER_TOKEN}"
+    rf"(?:из|по|для|с|за|в|на|к)\s+{_SUPPORTED_READY_QUALIFIER_TOKEN}"
     rf"(?:\s+{_SUPPORTED_READY_QUALIFIER_TOKEN}){{0,2}}"
 )
 _SUPPORTED_READY_NOMINAL_QUALIFIER = (
@@ -7469,6 +7470,8 @@ _SUPPORTED_READY_MASCULINE_HEAD = (
 )
 _SUPPORTED_READY_FEMININE_HEAD = (
     rf"(?:{_SUPPORTED_READY_FEMININE_OBJECT}|"
+    rf"{_SUPPORTED_READY_FORMAT_OBJECT}[-–—\s]+{_SUPPORTED_READY_FEMININE_OBJECT}|"
+    rf"{_SUPPORTED_READY_FEMININE_OBJECT}[-–—\s]+{_SUPPORTED_READY_FORMAT_OBJECT}|"
     rf"{_SUPPORTED_READY_FORMAT_OBJECT}[-–—\s]+версия|"
     rf"версия[-–—\s]+{_SUPPORTED_READY_FORMAT_OBJECT})"
 )
@@ -7483,12 +7486,16 @@ _SUPPORTED_READY_FILE_POSTFIX = (
 )
 _SUPPORTED_READY_FILE_NOMINATIVE_REFERENCE = (
     rf"(?:\bготовый(?:\s+{_SUPPORTED_READY_MASCULINE_DESCRIPTOR}){{0,2}}\s+"
+    rf"(?:{_SUPPORTED_READY_PREPOSITIONAL_PHRASE}\s+)?"
     rf"{_SUPPORTED_READY_MASCULINE_HEAD}\b|"
     rf"\bготовая(?:\s+{_SUPPORTED_READY_FEMININE_DESCRIPTOR}){{0,2}}\s+"
+    rf"(?:{_SUPPORTED_READY_PREPOSITIONAL_PHRASE}\s+)?"
     rf"{_SUPPORTED_READY_FEMININE_HEAD}\b|"
     rf"\bготовое(?:\s+{_SUPPORTED_READY_NEUTER_DESCRIPTOR}){{0,2}}\s+"
+    rf"(?:{_SUPPORTED_READY_PREPOSITIONAL_PHRASE}\s+)?"
     rf"{_SUPPORTED_READY_NEUTER_OBJECT}\b|"
     rf"\bготовые(?:\s+{_SUPPORTED_READY_PLURAL_DESCRIPTOR}){{0,2}}\s+"
+    rf"(?:{_SUPPORTED_READY_PREPOSITIONAL_PHRASE}\s+)?"
     rf"{_SUPPORTED_READY_PLURAL_OBJECT}\b)"
     rf"{_SUPPORTED_READY_FILE_POSTFIX}"
 )
@@ -7506,7 +7513,7 @@ _SUPPORTED_FILE_STRONG_CARRIER_SUFFIX = (
     r"(?:\b(?:он|она|оно|они)?\s*"
     r"(?:(?:прямо\s+)?сейчас\s+|уже\s+|теперь\s+)?"
     r"(?:доступ\w*|наход\w*|леж\w*|открыва\w*)\b[^.!?\n]{0,24}"
-    r"(?:\b(?:здесь|тут|ниже)\b|\b(?:по|через)\s+ссылк\w*\b|"
+    r"(?:\b(?:здесь|тут|ниже)\b|"
     r"\bв\s+чат\w*\b|\b(?:у|для)\s+(?:тебя|вас)\b)|"
     r"\b(?:уже|теперь)\s+(?:(?:он|она|оно|они)\s+)?"
     r"(?:у\s+(?:тебя|вас)|в\s+чат\w*)\b)"
@@ -7516,8 +7523,8 @@ _SUPPORTED_FILE_WEAK_CARRIER_SUFFIX = (
     r"(?:(?:прямо\s+)?сейчас\s+|уже\s+|теперь\s+)?"
     r"(?:здесь|тут|ниже|в\s+чат\w*|для\s+(?:тебя|вас)|"
     r"у\s+(?:тебя|вас))\b|"
-    r"\b(?:вот\s+)?ссылк\w*(?:\s+(?:здесь|тут|ниже))?\b|"
-    r"https?://[^\s)\]>]+|\[[^\]\n]{1,120}\]\(https?://[^\s)]+\)|"
+    r"\b(?:вот\s+ссылк\w*(?:\s+(?:здесь|тут|ниже))?|"
+    r"ссылк\w*\s+(?:здесь|тут|ниже))\b|"
     r"\b(?:держи(?:те)?|забирай(?:те)?|забери(?:те)?)\b"
     r"[^.!?\n]{0,24}(?:\b(?:по|через)\s+ссылк\w*\b)?)"
 )
@@ -7529,6 +7536,19 @@ _SUPPORTED_READY_FILE_CARRIER_COMPLETION = (
 )
 _SUPPORTED_READY_FILE_CARRIER_COMPLETION_RE = re.compile(
     _SUPPORTED_READY_FILE_CARRIER_COMPLETION,
+    re.IGNORECASE,
+)
+_SUPPORTED_FILE_GENERIC_LINK_SUFFIX = (
+    r"(?:\b(?:(?:он|она|оно|они)\s+)?"
+    r"(?:доступ\w*|наход\w*|леж\w*|открыва\w*)\b[^.!?\n]{0,24}"
+    r"\b(?:по|через)\s+ссылк\w*\b|"
+    r"\bссылк\w*(?:\s+https?://[^\s)\]>]+)?|"
+    r"https?://[^\s)\]>]+)"
+)
+_SUPPORTED_READY_FILE_EXPLICIT_HANDOFF_RE = re.compile(
+    rf"^\W*(?:вот|держи(?:те)?)\s+(?P<reference>{_SUPPORTED_READY_FILE_REFERENCE})"
+    rf"{_SUPPORTED_FILE_CARRIER_BRIDGE}{_SUPPORTED_FILE_GENERIC_LINK_SUFFIX}"
+    r"\s*[.!]?\s*$",
     re.IGNORECASE,
 )
 _SUPPORTED_READY_FILE_NOMINATIVE_REFERENCE_RE = re.compile(
@@ -8660,6 +8680,21 @@ def _actual_supported_ready_file_claims(answer: str) -> tuple[str, ...]:
             reference_match.start(),
             reference_match.end(),
         )
+        handoff_match = _SUPPORTED_READY_FILE_EXPLICIT_HANDOFF_RE.fullmatch(context)
+        if handoff_match is not None and _supported_ready_claim_is_actual(
+            context,
+            literals_valid=literals_valid,
+        ):
+            reference = handoff_match.group("reference")
+            claims.append(
+                _supported_ready_reference_evidence_scope(
+                    normalized,
+                    masked,
+                    reference,
+                    reference_match.start(),
+                )
+            )
+            continue
         bare_match = _SUPPORTED_READY_FILE_BARE_COMPLETION_RE.fullmatch(context)
         if bare_match is not None and _supported_ready_claim_is_actual(
             context,
