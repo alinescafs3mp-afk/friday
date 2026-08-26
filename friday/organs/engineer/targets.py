@@ -266,9 +266,11 @@ _REQUEST_CODE_TEXT = re.compile(
 )
 _QUOTED_REQUEST_TEXT = re.compile(
     r"«[\s\S]*?(?:»|\Z)|“[\s\S]*?(?:”|\Z)|„[\s\S]*?(?:“|\Z)|"
+    r"‘[\s\S]*?(?:’|\Z)|‚[\s\S]*?(?:‘|\Z)|‹[\s\S]*?(?:›|\Z)|"
+    r"「[\s\S]*?(?:」|\Z)|『[\s\S]*?(?:』|\Z)|"
     r"(?<!\w)(?P<request_quote>[\"'])[\s\S]*?(?:(?P=request_quote)|\Z)",
 )
-_REQUEST_BLOCKQUOTE = re.compile(r"(?m)^[ \t]*>[^\r\n]*$")
+_REQUEST_BLOCKQUOTE_START = re.compile(r"^[ \t]{0,3}>")
 _REQUEST_INDENTED_CODE = re.compile(r"(?: {4}| {0,3}\t)")
 _REQUEST_UNIT_BOUNDARY = re.compile(r"(?:[!?;]+(?:\s+|$)|\.(?:\s+|$)|\n+)")
 _REQUEST_SOFT_BOUNDARY = re.compile(r"(?:,\s+|\s+[—–-]\s+)")
@@ -295,7 +297,18 @@ _TRAILING_REQUEST_CANCEL = re.compile(
     r"запускай(?:те)?|сканируй(?:те)?)\b|"
     r"\b(?:отмена|отмени(?:те)?|передумал(?:а)?)\b|"
     r"\b(?:do\s+not|don't|dont|never)\s+(?:do|scan|run|execute)\b|"
-    r"\b(?:cancel(?:\s+(?:it|that))?|never\s+mind)\b)",
+    r"\b(?:cancel(?:\s+(?:it|that))?|never\s+mind)\b|"
+    r"(?:\A|[.!?]\s*)(?:(?:actually|вообще)\s*[,;:]?\s*)?"
+    r"(?:no|нет)\s*[.!?…]*\s*\Z)",
+    re.IGNORECASE,
+)
+_TRAILING_REQUEST_META = re.compile(
+    r"\A\s*(?:[,;:()]|[.!?…—–-])*\s*(?:"
+    r"(?:what\s+(?:does|would)\s+(?:that|this|it)\s+mean)|"
+    r"(?:means?\s+what)|"
+    r"(?:что\s+(?:это\s+)?значит)|"
+    r"(?:(?:это\s+)?означает\s+что)"
+    r")\b",
     re.IGNORECASE,
 )
 _LEADING_REQUEST_CANCEL = re.compile(
@@ -865,13 +878,27 @@ def _mask_request_data(text: str) -> str:
     """Blank quoted/code/reported Markdown payloads without moving offsets."""
 
     masked = text
-    for pattern in (
-        _REQUEST_CODE_TEXT,
-        _QUOTED_REQUEST_TEXT,
-        _REQUEST_BLOCKQUOTE,
-    ):
+    for pattern in (_REQUEST_CODE_TEXT, _QUOTED_REQUEST_TEXT):
         masked = pattern.sub(lambda match: " " * len(match.group(0)), masked)
-    return masked
+    # CommonMark permits paragraph continuation lines in a block quote to omit
+    # the ``>`` marker.  Mask the complete contiguous paragraph; otherwise a
+    # quoted imperative on its second line could become current authority.
+    projected: list[str] = []
+    in_blockquote_paragraph = False
+    for line in masked.splitlines(keepends=True):
+        content = line.rstrip("\r\n")
+        ending = line[len(content) :]
+        if not content.strip():
+            in_blockquote_paragraph = False
+            projected.append(line)
+            continue
+        if _REQUEST_BLOCKQUOTE_START.match(content):
+            in_blockquote_paragraph = True
+        if in_blockquote_paragraph:
+            projected.append((" " * len(content)) + ending)
+        else:
+            projected.append(line)
+    return "".join(projected)
 
 
 def _request_projection(speech: str) -> tuple[str, str]:
@@ -1016,7 +1043,11 @@ def _direct_request_matches(speech: str, pattern: re.Pattern[str]) -> tuple[_Dir
             request_start = start + request.start()
             request_end = start + request.end()
             trailing = masked[request_end:]
-            if _TRAILING_REQUEST_CANCEL.search(trailing) or _TRAILING_REQUEST_ATTRIBUTION.search(trailing):
+            if (
+                _TRAILING_REQUEST_CANCEL.search(trailing)
+                or _TRAILING_REQUEST_META.search(trailing)
+                or _TRAILING_REQUEST_ATTRIBUTION.search(trailing)
+            ):
                 return ()
             found.append(
                 _DirectRequestSpan(
@@ -1200,7 +1231,10 @@ def _accepted_artifact_compile_requests(
             ):
                 continue
         accepted.append(request)
-    return text, masked, tuple(accepted)
+    # This fixed profile owns exactly one source action.  Multiple admitted
+    # compile clauses must not collapse to the deictic ``filename is None``
+    # representation, which would otherwise select an unrelated sole upload.
+    return text, masked, tuple(accepted) if len(accepted) == 1 else ()
 
 
 def requests_artifact_compile(speech: str) -> bool:

@@ -44,6 +44,8 @@ def test_direct_current_artifact_decompile_requests_are_admitted(speech: str) ->
         "`Декомпилируй этот файл`",
         "```\nReverse engineer this executable\n```",
         "> Проанализируй бинарник",
+        "> Цитата\nДекомпилируй этот файл",
+        "‘\nReverse engineer this executable\n’",
         # Reported/example/meta text never becomes current authority.
         "Он сказал, декомпилируй его",
         "Он сказал. Декомпилируй его",
