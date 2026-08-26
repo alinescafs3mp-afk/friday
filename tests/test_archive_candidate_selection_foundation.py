@@ -32,6 +32,7 @@ from friday.interaction_control_plane.archive_candidate_selection_store import (
     get_current_archive_candidate_selection_work_item_in_transaction,
     new_archive_candidate_selection_work_item_id,
     new_archive_candidate_set_id,
+    promote_archive_candidate_selection_in_transaction,
     reask_archive_candidate_selection_in_transaction,
     suspend_after_replay_failure_in_transaction,
 )
@@ -52,6 +53,7 @@ from friday.interaction_control_plane.work_item_schema import (
     _WORK_ITEM_TABLES,
     WORK_ITEM_SCHEMA,
     _execute_schema,
+    install_selected_evidence_promotion_reader_trigger,
     upgrade_work_item_schema_to_42,
     validate_work_item_schema,
 )
@@ -1565,12 +1567,34 @@ def test_promoted_selected_evidence_reader_survives_schema43_restart(
     database = tmp_path / "promoted-selected-reader.sqlite3"
     initial = FridayStorage(replace(settings, database_path=database))
     item = _create_work(initial, "promoted-selected-reader-owner")
-    boundary, assistant, outcome, evidence = _install_promoted_selected_evidence_reader(
-        initial,
-        item,
-    )
+    boundary, assistant, outcome, outcome_sha256 = _publish_replay(initial, item, ordinal=2)
+    selected_work_item_id = new_recall_selected_archive_evidence_work_item_id()
+    statements: list[str] = []
+    with initial.transaction() as conn:
+        conn.set_trace_callback(statements.append)
+        try:
+            completed, promoted = promote_archive_candidate_selection_in_transaction(
+                conn,
+                work_item_id=item.id,
+                selected_evidence_work_item_id=selected_work_item_id,
+                user_id=item.user_id,
+                conversation_id=item.conversation_id,
+                expected_revision=item.revision,
+                selected_ordinal=2,
+                new_boundary_user_message_id=boundary["id"],
+                new_assistant_message_id=assistant["id"],
+                new_accepted_plan_sha256=outcome.plan_sha256,
+                new_accepted_outcome_sha256=outcome_sha256,
+                now="2026-08-25T05:01:00+00:00",
+            )
+        finally:
+            conn.set_trace_callback(None)
     try:
         validate_work_item_schema(initial.conn)
+        assert completed.state is WorkState.COMPLETED
+        assert completed.transition is WorkTransition.CANDIDATE_REPLAYED
+        assert completed.question.selected_ordinal == 2
+        assert sum(statement.lstrip().upper().startswith("SAVEPOINT") for statement in statements) == 1
         assert (
             initial.execute("SELECT value FROM schema_meta WHERE key='schema_version'").fetchone()[0] == "43"
         )
@@ -1582,14 +1606,15 @@ def test_promoted_selected_evidence_reader_survives_schema43_restart(
                 now="2026-08-25T05:02:00+00:00",
             )
         assert loaded is not None
-        assert loaded.id == evidence.work_item_id
+        assert loaded == promoted
+        assert promoted.id == selected_work_item_id
         assert loaded.state is WorkState.ACTIVE
         assert loaded.transition is WorkTransition.EVIDENCE_REPLAYED
         assert loaded.revision == 2
         assert loaded.anchor_user_message_id == boundary["id"]
         assert loaded.anchor_assistant_message_id == assistant["id"]
         assert loaded.accepted_plan_sha256 == outcome.plan_sha256
-        assert loaded.selected_evidence == evidence
+        assert loaded.selected_evidence.work_item_id == selected_work_item_id
         assert (
             loaded.selected_evidence.origin_boundary_user_message_id
             == item.candidate_set.origin_boundary_user_message_id
@@ -1619,6 +1644,121 @@ def test_promoted_selected_evidence_reader_survives_schema43_restart(
         )
     finally:
         reopened.close()
+
+
+def test_promotion_writer_rolls_back_candidate_when_reader_insert_fails(storage: Any) -> None:
+    item = _create_work(storage, "promoted-reader-rollback-owner")
+    boundary, assistant, outcome, outcome_sha256 = _publish_replay(
+        storage,
+        item,
+        ordinal=2,
+    )
+    selected_work_item_id = new_recall_selected_archive_evidence_work_item_id()
+    with storage.transaction() as conn:
+        conn.execute(
+            """CREATE TEMP TRIGGER force_promoted_reader_failure
+               BEFORE INSERT ON work_item_selected_evidence
+               BEGIN SELECT RAISE(ABORT,'forced promoted reader failure'); END"""
+        )
+        try:
+            with pytest.raises(WorkItemConflictError, match="promotion lost its state race"):
+                promote_archive_candidate_selection_in_transaction(
+                    conn,
+                    work_item_id=item.id,
+                    selected_evidence_work_item_id=selected_work_item_id,
+                    user_id=item.user_id,
+                    conversation_id=item.conversation_id,
+                    expected_revision=item.revision,
+                    selected_ordinal=2,
+                    new_boundary_user_message_id=boundary["id"],
+                    new_assistant_message_id=assistant["id"],
+                    new_accepted_plan_sha256=outcome.plan_sha256,
+                    new_accepted_outcome_sha256=outcome_sha256,
+                    now="2026-08-25T05:01:00+00:00",
+                )
+        finally:
+            conn.execute("DROP TRIGGER force_promoted_reader_failure")
+
+        restored = get_archive_candidate_selection_work_item_in_transaction(
+            conn,
+            work_item_id=item.id,
+            user_id=item.user_id,
+            conversation_id=item.conversation_id,
+        )
+        assert restored == item
+        assert (
+            conn.execute(
+                "SELECT COUNT(*) FROM work_items WHERE id=?",
+                (selected_work_item_id,),
+            ).fetchone()[0]
+            == 0
+        )
+
+
+def test_promotion_writer_repeat_cas_leaves_exactly_one_active_reader(storage: Any) -> None:
+    item = _create_work(storage, "promoted-reader-repeat-owner")
+    boundary, assistant, outcome, outcome_sha256 = _publish_replay(
+        storage,
+        item,
+        ordinal=2,
+    )
+    selected_work_item_id = new_recall_selected_archive_evidence_work_item_id()
+    with storage.transaction() as conn:
+        _completed, promoted = promote_archive_candidate_selection_in_transaction(
+            conn,
+            work_item_id=item.id,
+            selected_evidence_work_item_id=selected_work_item_id,
+            user_id=item.user_id,
+            conversation_id=item.conversation_id,
+            expected_revision=item.revision,
+            selected_ordinal=2,
+            new_boundary_user_message_id=boundary["id"],
+            new_assistant_message_id=assistant["id"],
+            new_accepted_plan_sha256=outcome.plan_sha256,
+            new_accepted_outcome_sha256=outcome_sha256,
+            now="2026-08-25T05:01:00+00:00",
+        )
+
+    duplicate_work_item_id = new_recall_selected_archive_evidence_work_item_id()
+    with storage.transaction() as conn:
+        with pytest.raises(WorkItemConflictError, match="revision/state is no longer current"):
+            promote_archive_candidate_selection_in_transaction(
+                conn,
+                work_item_id=item.id,
+                selected_evidence_work_item_id=duplicate_work_item_id,
+                user_id=item.user_id,
+                conversation_id=item.conversation_id,
+                expected_revision=item.revision,
+                selected_ordinal=2,
+                new_boundary_user_message_id=boundary["id"],
+                new_assistant_message_id=assistant["id"],
+                new_accepted_plan_sha256=outcome.plan_sha256,
+                new_accepted_outcome_sha256=outcome_sha256,
+                now="2026-08-25T05:01:00+00:00",
+            )
+        assert (
+            conn.execute(
+                """SELECT COUNT(*) FROM work_items
+                 WHERE user_id=? AND conversation_id=?
+                   AND kind='recall_selected_archive_evidence' AND state='active'""",
+                (item.user_id, item.conversation_id),
+            ).fetchone()[0]
+            == 1
+        )
+        assert (
+            conn.execute(
+                "SELECT COUNT(*) FROM work_item_selected_evidence WHERE work_item_id=?",
+                (duplicate_work_item_id,),
+            ).fetchone()[0]
+            == 0
+        )
+        current = get_current_recall_selected_archive_evidence_work_item_in_transaction(
+            conn,
+            user_id=item.user_id,
+            conversation_id=item.conversation_id,
+            now="2026-08-25T05:02:00+00:00",
+        )
+        assert current == promoted
 
 
 @pytest.mark.parametrize(
@@ -1672,6 +1812,124 @@ def test_released_schema42_reader_is_accepted_without_trigger_rewrite(storage: A
 
     assert before == after
     validate_work_item_schema(storage.conn)
+
+
+def test_selected_evidence_reader_installer_is_exact_and_idempotent(storage: Any) -> None:
+    trigger = "trg_work_item_selected_evidence_scope_insert"
+    with storage.transaction() as conn:
+        conn.execute(f'DROP TRIGGER "{trigger}"')
+        _execute_schema(conn, _WORK_ITEM_SCHEMA_42)
+        released = conn.execute(
+            "SELECT sql FROM sqlite_master WHERE type='trigger' AND name=?",
+            (trigger,),
+        ).fetchone()[0]
+        marker = conn.execute(
+            "SELECT key,value,updated_at FROM schema_meta WHERE key='schema_version'"
+        ).fetchone()
+        tables = conn.execute(
+            "SELECT name,sql,rootpage FROM sqlite_master WHERE type='table' ORDER BY name"
+        ).fetchall()
+
+        validate_work_item_schema(conn)
+        install_selected_evidence_promotion_reader_trigger(conn)
+        installed = conn.execute(
+            "SELECT sql FROM sqlite_master WHERE type='trigger' AND name=?",
+            (trigger,),
+        ).fetchone()[0]
+        assert installed != released
+        assert (
+            conn.execute("SELECT key,value,updated_at FROM schema_meta WHERE key='schema_version'").fetchone()
+            == marker
+        )
+        assert (
+            conn.execute(
+                "SELECT name,sql,rootpage FROM sqlite_master WHERE type='table' ORDER BY name"
+            ).fetchall()
+            == tables
+        )
+
+        install_selected_evidence_promotion_reader_trigger(conn)
+        assert (
+            conn.execute(
+                "SELECT sql FROM sqlite_master WHERE type='trigger' AND name=?",
+                (trigger,),
+            ).fetchone()[0]
+            == installed
+        )
+        validate_work_item_schema(conn)
+
+
+def test_selected_evidence_reader_installer_fails_before_altered_schema_mutation(storage: Any) -> None:
+    trigger = "trg_work_item_selected_evidence_scope_insert"
+    missing_index = "idx_work_item_archive_candidate_questions_work"
+    with storage.transaction() as conn:
+        conn.execute(f'DROP TRIGGER "{trigger}"')
+        _execute_schema(conn, _WORK_ITEM_SCHEMA_42)
+        released = conn.execute(
+            "SELECT sql FROM sqlite_master WHERE type='trigger' AND name=?",
+            (trigger,),
+        ).fetchone()[0]
+        conn.execute(f'DROP INDEX "{missing_index}"')
+        try:
+            with pytest.raises(sqlite3.DatabaseError, match="incomplete or altered"):
+                install_selected_evidence_promotion_reader_trigger(conn)
+            assert (
+                conn.execute(
+                    "SELECT sql FROM sqlite_master WHERE type='trigger' AND name=?",
+                    (trigger,),
+                ).fetchone()[0]
+                == released
+            )
+        finally:
+            _execute_schema(conn, _WORK_ITEM_SCHEMA_42)
+        validate_work_item_schema(conn)
+
+
+def test_schema43_startup_installs_selected_evidence_promotion_reader(
+    settings: Any,
+    tmp_path: Path,
+) -> None:
+    database = tmp_path / "released-selected-reader.sqlite3"
+    trigger = "trg_work_item_selected_evidence_scope_insert"
+    initial = FridayStorage(replace(settings, database_path=database))
+    try:
+        with initial.transaction() as conn:
+            conn.execute(f'DROP TRIGGER "{trigger}"')
+            _execute_schema(conn, _WORK_ITEM_SCHEMA_42)
+            released = conn.execute(
+                "SELECT sql FROM sqlite_master WHERE type='trigger' AND name=?",
+                (trigger,),
+            ).fetchone()[0]
+            validate_work_item_schema(conn)
+    finally:
+        initial.close()
+
+    reopened = FridayStorage(replace(settings, database_path=database, database_must_exist=True))
+    try:
+        installed = reopened.execute(
+            "SELECT sql FROM sqlite_master WHERE type='trigger' AND name=?",
+            (trigger,),
+        ).fetchone()[0]
+        assert installed != released
+        assert (
+            reopened.execute("SELECT value FROM schema_meta WHERE key='schema_version'").fetchone()[0] == "43"
+        )
+        validate_work_item_schema(reopened.conn)
+    finally:
+        reopened.close()
+
+    again = FridayStorage(replace(settings, database_path=database, database_must_exist=True))
+    try:
+        assert (
+            again.execute(
+                "SELECT sql FROM sqlite_master WHERE type='trigger' AND name=?",
+                (trigger,),
+            ).fetchone()[0]
+            == installed
+        )
+        validate_work_item_schema(again.conn)
+    finally:
+        again.close()
 
 
 def test_expired_candidate_rejects_selection_and_exact_schema39_upgrades(storage: Any) -> None:
