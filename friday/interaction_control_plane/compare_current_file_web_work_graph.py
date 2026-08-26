@@ -6,9 +6,9 @@ body-free: durable inputs, evidence, actors and conversations are represented by
 already code-owned identifiers or SHA-256 identities, never by prompts, queries,
 paths or evidence text.
 
-The module owns no adapter, executor, model client or publication handle.  It is
-the dormant schema-44 state contract on which a later separately admitted P3
-runtime may depend.
+The module owns no adapter, executor, model client or publication handle.  Its
+schema-45 contract adds only an immutable body-free ingress identity to the
+fixed schema-44 topology.
 """
 
 from __future__ import annotations
@@ -36,7 +36,7 @@ from friday.orchestration.supervisor_contracts import (
     CapabilityEffectClass,
 )
 
-COMPARE_CURRENT_FILE_WEB_WORK_GRAPH_SCHEMA = "friday.compare-current-file-with-current-web-work-graph.v1"
+COMPARE_CURRENT_FILE_WEB_WORK_GRAPH_SCHEMA = "friday.compare-current-file-with-current-web-work-graph.v2"
 COMPARE_CURRENT_FILE_WEB_STEP_OUTCOME_SCHEMA = "friday.compare-current-file-with-current-web-step-outcome.v1"
 COMPARE_CURRENT_FILE_WEB_PUBLICATION_RECEIPT_SCHEMA = (
     "friday.accepted-compare-current-file-with-current-web-work-graph-receipt.v1"
@@ -64,6 +64,9 @@ COMPARE_CURRENT_FILE_WEB_EXPIRED_RESPONSE = (
 )
 COMPARE_CURRENT_FILE_WEB_RESTART_UNAVAILABLE_RESPONSE = (
     "Сравнение нельзя безопасно продолжить после перезапуска: веб-источники не повторяются."
+)
+COMPARE_CURRENT_FILE_WEB_UNBOUND_SCHEMA44_REQUEST_SHA256 = (
+    "9f71c254b3de04b624ae4b12e3ffd4e034f9fa9605c7b6a3b877a359f2925d79"
 )
 
 FILE_READ_STEP_ID = "read_current_file"
@@ -796,6 +799,7 @@ class CompareCurrentFileWebWorkGraph:
     terminal_publication_receipt_sha256: str | None
     publication_receipt_sha256: str | None
     steps: tuple[CompareCurrentFileWebGraphStep, ...]
+    anchor_request_binding_sha256: str = COMPARE_CURRENT_FILE_WEB_UNBOUND_SCHEMA44_REQUEST_SHA256
 
     def __post_init__(self) -> None:
         _identifier(self.id, _GRAPH_ID_RE, label="graph id")
@@ -818,6 +822,7 @@ class CompareCurrentFileWebWorkGraph:
         ):
             raise CompareCurrentFileWebGraphError("graph outcome reason must be closed")
         for label, value in (
+            ("anchor_request_binding_sha256", self.anchor_request_binding_sha256),
             ("proposal_sha256", self.proposal_sha256),
             ("accepted_plan_sha256", self.accepted_plan_sha256),
             ("manifest_sha256", self.manifest_sha256),
@@ -1006,6 +1011,9 @@ class CompareCurrentFileWebWorkGraph:
         current_file_content_sha256: str,
         step_input_identities: Mapping[CompareCurrentFileWebStepKind, str],
         step_idempotency_keys: Mapping[CompareCurrentFileWebStepKind, str],
+        anchor_request_binding_sha256: str = (
+            COMPARE_CURRENT_FILE_WEB_UNBOUND_SCHEMA44_REQUEST_SHA256
+        ),
         graph_id: str | None = None,
         now: str | None = None,
         expires_at: str | None = None,
@@ -1064,6 +1072,13 @@ class CompareCurrentFileWebWorkGraph:
             terminal_publication_receipt_sha256=None,
             publication_receipt_sha256=None,
             steps=steps,
+            anchor_request_binding_sha256=anchor_request_binding_sha256,
+        )
+
+    @property
+    def has_exact_request_binding(self) -> bool:
+        return self.anchor_request_binding_sha256 != (
+            COMPARE_CURRENT_FILE_WEB_UNBOUND_SCHEMA44_REQUEST_SHA256
         )
 
     def step(self, step_id: str) -> CompareCurrentFileWebGraphStep:
@@ -1269,6 +1284,7 @@ class CompareCurrentFileWebWorkGraph:
             "user_id": self.user_id,
             "conversation_id": self.conversation_id,
             "anchor_user_message_id": self.anchor_user_message_id,
+            "anchor_request_binding_sha256": self.anchor_request_binding_sha256,
             "current_file_raw_object_id": self.current_file_raw_object_id,
             "state": self.state.value,
             "revision": self.revision,
@@ -1355,6 +1371,7 @@ class CompareCurrentFileWebWorkGraph:
                 user_id=str(graph["user_id"]),
                 conversation_id=str(graph["conversation_id"]),
                 anchor_user_message_id=str(graph["anchor_user_message_id"]),
+                anchor_request_binding_sha256=str(graph["anchor_request_binding_sha256"]),
                 current_file_raw_object_id=str(graph["current_file_raw_object_id"]),
                 state=CompareCurrentFileWebGraphState(str(graph["state"])),
                 revision=int(graph["revision"]),
@@ -1526,6 +1543,7 @@ __all__ = [
     "COMPARE_CURRENT_FILE_WEB_STEP_OUTCOME_SCHEMA",
     "COMPARE_CURRENT_FILE_WEB_TERMINAL_PUBLICATION_METADATA_KEY",
     "COMPARE_CURRENT_FILE_WEB_TERMINAL_PUBLICATION_RECEIPT_SCHEMA",
+    "COMPARE_CURRENT_FILE_WEB_UNBOUND_SCHEMA44_REQUEST_SHA256",
     "COMPARE_CURRENT_FILE_WEB_WORK_GRAPH_SCHEMA",
     "EVIDENCE_PARALLEL_GROUP",
     "FILE_CURRENT_READ_CAPABILITY_ID",

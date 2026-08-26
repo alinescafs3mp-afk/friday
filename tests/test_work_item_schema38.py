@@ -59,8 +59,8 @@ def _install_released_work_item_schema_39(conn: sqlite3.Connection) -> None:
 
 
 def test_schema_42_installs_the_exact_work_item_projection(storage) -> None:
-    assert SCHEMA_VERSION == 44
-    assert storage.execute("SELECT value FROM schema_meta WHERE key='schema_version'").fetchone()[0] == "44"
+    assert SCHEMA_VERSION == 45
+    assert storage.execute("SELECT value FROM schema_meta WHERE key='schema_version'").fetchone()[0] == "45"
     objects = {
         (str(row[0]), str(row[1])): "".join(str(row[2]).split())
         for row in storage.execute(
@@ -89,7 +89,7 @@ def test_released_schema_37_migrates_to_40_without_losing_seed_data(settings, tm
     migrated = FridayStorage(replace(settings, database_path=database, database_must_exist=True))
     try:
         assert (
-            migrated.execute("SELECT value FROM schema_meta WHERE key='schema_version'").fetchone()[0] == "44"
+            migrated.execute("SELECT value FROM schema_meta WHERE key='schema_version'").fetchone()[0] == "45"
         )
         assert (
             migrated.execute("SELECT COUNT(*) FROM raw_objects WHERE user_id='fixture-owner'").fetchone()[0]
@@ -126,7 +126,7 @@ def test_exact_interrupted_37_to_40_attempt_is_recoverable(settings, tmp_path) -
     try:
         assert (
             recovered.execute("SELECT value FROM schema_meta WHERE key='schema_version'").fetchone()[0]
-            == "44"
+            == "45"
         )
         assert recovered.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
     finally:
@@ -185,7 +185,7 @@ def test_released_schema_38_rebuild_preserves_every_recall_row(settings, tmp_pat
     try:
         assert tuple(migrated.execute("SELECT * FROM work_items").fetchone()) == row
         assert (
-            migrated.execute("SELECT value FROM schema_meta WHERE key='schema_version'").fetchone()[0] == "44"
+            migrated.execute("SELECT value FROM schema_meta WHERE key='schema_version'").fetchone()[0] == "45"
         )
         assert migrated.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
         assert migrated.execute("PRAGMA foreign_key_check").fetchall() == []

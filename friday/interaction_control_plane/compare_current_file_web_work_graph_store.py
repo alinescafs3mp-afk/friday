@@ -255,7 +255,8 @@ def _require_active_revision_available(graph: CompareCurrentFileWebWorkGraph) ->
 def _insert_graph(conn: sqlite3.Connection, graph: CompareCurrentFileWebWorkGraph) -> None:
     conn.execute(
         f"""INSERT INTO {_GRAPH_TABLE}(
-               id,user_id,conversation_id,anchor_user_message_id,current_file_raw_object_id,
+               id,user_id,conversation_id,anchor_user_message_id,
+               anchor_request_binding_sha256,current_file_raw_object_id,
                state,revision,transition,proposal_sha256,accepted_plan_sha256,manifest_sha256,
                policy_sha256,runtime_profile_sha256,adapter_registry_sha256,actor_binding_sha256,
                conversation_binding_sha256,current_file_source_identity_sha256,
@@ -264,12 +265,13 @@ def _insert_graph(conn: sqlite3.Connection, graph: CompareCurrentFileWebWorkGrap
                outcome_status,outcome_reason,publication_assistant_message_id,accepted_graph_outcome_sha256,
                accepted_steps_sha256,terminal_publication_receipt_sha256,
                publication_receipt_sha256
-           ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",  # nosec B608
+           ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",  # nosec B608
         (
             graph.id,
             graph.user_id,
             graph.conversation_id,
             graph.anchor_user_message_id,
+            graph.anchor_request_binding_sha256,
             graph.current_file_raw_object_id,
             graph.state.value,
             graph.revision,

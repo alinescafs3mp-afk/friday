@@ -1,4 +1,4 @@
-"""Exact schema-44 projection for bounded durable interaction Work Items/graphs."""
+"""Exact schema-45 projection for bounded durable interaction Work Items/graphs."""
 
 from __future__ import annotations
 
@@ -21,6 +21,7 @@ from friday.interaction_control_plane.compare_current_file_web_work_graph import
     COMPARE_CURRENT_FILE_WEB_STEP_OUTCOME_SCHEMA,
     COMPARE_CURRENT_FILE_WEB_TERMINAL_PUBLICATION_METADATA_KEY,
     COMPARE_CURRENT_FILE_WEB_TERMINAL_PUBLICATION_RECEIPT_SCHEMA,
+    COMPARE_CURRENT_FILE_WEB_UNBOUND_SCHEMA44_REQUEST_SHA256,
     WEB_SEARCH_CURRENT_ADAPTER_ID,
     WEB_SEARCH_CURRENT_SECURITY_ID,
 )
@@ -42,7 +43,7 @@ from friday.interaction_control_plane.work_item_contract import (
 )
 from friday.orchestration.archive_recall_outcome import ARCHIVE_EVIDENCE_REPLAY_UNAVAILABLE
 
-WORK_ITEM_SCHEMA_VERSION = 44
+WORK_ITEM_SCHEMA_VERSION = 45
 WORK_ITEM_SELECTED_SOURCE_REF_MAX_BYTES = 4_096
 WORK_ITEM_SELECTED_PASSAGE_REFS_MAX_BYTES = 65_536
 WORK_ITEM_SELECTED_PASSAGE_MAX_COUNT = 8
@@ -2726,7 +2727,48 @@ END;
 """
 
 _WORK_ITEM_SCHEMA_44 = _WORK_ITEM_SCHEMA_42 + _WORK_ITEM_SCHEMA_44_EXTENSION
-WORK_ITEM_SCHEMA = _WORK_ITEM_SCHEMA_44
+
+
+def _schema_45_extension_from_44() -> str:
+    """Add one immutable body-free root-request identity to schema 44."""
+
+    schema = _WORK_ITEM_SCHEMA_44_EXTENSION
+    replacements = (
+        (
+            """    anchor_user_message_id TEXT NOT NULL REFERENCES messages(id),
+    current_file_raw_object_id TEXT NOT NULL REFERENCES raw_objects(id),""",
+            """    anchor_user_message_id TEXT NOT NULL REFERENCES messages(id),
+    anchor_request_binding_sha256 TEXT NOT NULL,
+    current_file_raw_object_id TEXT NOT NULL REFERENCES raw_objects(id),""",
+        ),
+        (
+            """    CHECK(length(anchor_user_message_id)=20 AND substr(anchor_user_message_id,1,4)='msg_'
+          AND substr(anchor_user_message_id,5) NOT GLOB '*[^0-9a-f]*'),
+    CHECK(length(current_file_raw_object_id)=20""",
+            """    CHECK(length(anchor_user_message_id)=20 AND substr(anchor_user_message_id,1,4)='msg_'
+          AND substr(anchor_user_message_id,5) NOT GLOB '*[^0-9a-f]*'),
+    CHECK(length(anchor_request_binding_sha256)=64
+          AND anchor_request_binding_sha256 NOT GLOB '*[^0-9a-f]*'),
+    CHECK(length(current_file_raw_object_id)=20""",
+        ),
+        (
+            """  OR NEW.anchor_user_message_id<>OLD.anchor_user_message_id
+  OR NEW.current_file_raw_object_id<>OLD.current_file_raw_object_id""",
+            """  OR NEW.anchor_user_message_id<>OLD.anchor_user_message_id
+  OR NEW.anchor_request_binding_sha256<>OLD.anchor_request_binding_sha256
+  OR NEW.current_file_raw_object_id<>OLD.current_file_raw_object_id""",
+        ),
+    )
+    for old, new in replacements:
+        if schema.count(old) != 1:
+            raise RuntimeError("released schema-44 transformation anchor is ambiguous")
+        schema = schema.replace(old, new)
+    return schema
+
+
+_WORK_ITEM_SCHEMA_45_EXTENSION = _schema_45_extension_from_44()
+_WORK_ITEM_SCHEMA_45 = _WORK_ITEM_SCHEMA_42 + _WORK_ITEM_SCHEMA_45_EXTENSION
+WORK_ITEM_SCHEMA = _WORK_ITEM_SCHEMA_45
 
 
 def _normalize_schema_sql(value: str) -> str:
@@ -2775,6 +2817,16 @@ def _canonical_work_item_schema_objects() -> dict[tuple[str, str], str]:
     conn = sqlite3.connect(":memory:")
     try:
         _execute_schema(conn, WORK_ITEM_SCHEMA)
+        return _schema_objects(conn, current=True)
+    finally:
+        conn.close()
+
+
+@lru_cache(maxsize=1)
+def _canonical_schema_44_objects() -> dict[tuple[str, str], str]:
+    conn = sqlite3.connect(":memory:")
+    try:
+        _execute_schema(conn, _WORK_ITEM_SCHEMA_44)
         return _schema_objects(conn, current=True)
     finally:
         conn.close()
@@ -2918,10 +2970,10 @@ def _validate_current_data(conn: sqlite3.Connection) -> None:
                 conversation_id=conversation_id,
             )
             if graph is None:
-                raise sqlite3.DatabaseError("Schema 44 WorkGraph disappeared during validation")
+                raise sqlite3.DatabaseError("Schema 45 WorkGraph disappeared during validation")
             _validate_current_file_web_graph(conn, graph)
         except (ValueError, sqlite3.IntegrityError) as exc:
-            raise sqlite3.DatabaseError("Schema 44 current-file/web WorkGraph data is invalid") from exc
+            raise sqlite3.DatabaseError("Schema 45 current-file/web WorkGraph data is invalid") from exc
 
     graph_orphan = conn.execute(
         """SELECT 1
@@ -2932,7 +2984,7 @@ def _validate_current_data(conn: sqlite3.Connection) -> None:
             LIMIT 1"""
     ).fetchone()
     if graph_orphan is not None:
-        raise sqlite3.DatabaseError("Schema 44 current-file/web WorkGraph step is orphaned")
+        raise sqlite3.DatabaseError("Schema 45 current-file/web WorkGraph step is orphaned")
 
     recall_cursor = conn.execute("SELECT * FROM work_items WHERE kind='recall_conversation' ORDER BY id")
     recall_columns = tuple(str(item[0]) for item in recall_cursor.description or ())
@@ -3356,18 +3408,18 @@ def _validate_current_data(conn: sqlite3.Connection) -> None:
 
 
 def validate_work_item_schema(conn: sqlite3.Connection, *, required: bool = True) -> None:
-    """Fail closed when the exact schema-44 Work Item/graph projection is weakened."""
+    """Fail closed when the exact schema-45 Work Item/graph projection is weakened."""
 
     row = conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='work_items'").fetchone()
     if row is None:
         if required:
-            raise sqlite3.DatabaseError("Schema 44 work item store is missing")
+            raise sqlite3.DatabaseError("Schema 45 work item store is missing")
         if _related_schema_objects(conn):
-            raise sqlite3.DatabaseError("Schema 44 work item DDL is incomplete or altered")
+            raise sqlite3.DatabaseError("Schema 45 work item DDL is incomplete or altered")
         return
     register_work_item_connection_functions(conn)
     if _schema_objects(conn, current=True) != _canonical_work_item_schema_objects():
-        raise sqlite3.DatabaseError("Schema 44 work item DDL is incomplete or altered")
+        raise sqlite3.DatabaseError("Schema 45 work item DDL is incomplete or altered")
 
     expected_index_columns = {
         "idx_work_item_compare_current_file_web_steps_state": ("graph_id", "state", "step_id"),
@@ -3414,7 +3466,7 @@ def validate_work_item_schema(conn: sqlite3.Connection, *, required: bool = True
         for name in expected_index_columns
     }
     if named_index_columns != expected_index_columns:
-        raise sqlite3.DatabaseError("Schema 44 work item indexes are invalid")
+        raise sqlite3.DatabaseError("Schema 45 work item indexes are invalid")
 
     columns = {
         str(item[1]): (str(item[2]).upper(), int(item[3]), int(item[5]))
@@ -3534,6 +3586,7 @@ def validate_work_item_schema(conn: sqlite3.Connection, *, required: bool = True
         "user_id": ("TEXT", 1, 0),
         "conversation_id": ("TEXT", 1, 0),
         "anchor_user_message_id": ("TEXT", 1, 0),
+        "anchor_request_binding_sha256": ("TEXT", 1, 0),
         "current_file_raw_object_id": ("TEXT", 1, 0),
         "state": ("TEXT", 1, 0),
         "revision": ("INTEGER", 1, 0),
@@ -3564,7 +3617,7 @@ def validate_work_item_schema(conn: sqlite3.Connection, *, required: bool = True
         "terminal_publication_receipt_sha256": ("TEXT", 0, 0),
         "publication_receipt_sha256": ("TEXT", 0, 0),
     }:
-        raise sqlite3.DatabaseError("Schema 44 current-file/web WorkGraph store shape is invalid")
+        raise sqlite3.DatabaseError("Schema 45 current-file/web WorkGraph store shape is invalid")
 
     graph_step_columns = {
         str(item[1]): (str(item[2]).upper(), int(item[3]), int(item[5]))
@@ -3596,7 +3649,7 @@ def validate_work_item_schema(conn: sqlite3.Connection, *, required: bool = True
         "started_at": ("TEXT", 0, 0),
         "settled_at": ("TEXT", 0, 0),
     }:
-        raise sqlite3.DatabaseError("Schema 44 current-file/web WorkGraph step shape is invalid")
+        raise sqlite3.DatabaseError("Schema 45 current-file/web WorkGraph step shape is invalid")
 
     work_item_foreign_keys = {
         (str(item[3]), str(item[2]), str(item[4]), str(item[5]), str(item[6]))
@@ -3664,7 +3717,7 @@ def validate_work_item_schema(conn: sqlite3.Connection, *, required: bool = True
         ("current_file_raw_object_id", "raw_objects", "id", "NO ACTION", "NO ACTION"),
         ("publication_assistant_message_id", "messages", "id", "NO ACTION", "NO ACTION"),
     }:
-        raise sqlite3.DatabaseError("Schema 44 current-file/web WorkGraph anchors are invalid")
+        raise sqlite3.DatabaseError("Schema 45 current-file/web WorkGraph anchors are invalid")
     graph_step_foreign_keys = {
         (str(item[3]), str(item[2]), str(item[4]), str(item[5]), str(item[6]))
         for item in conn.execute("PRAGMA foreign_key_list(work_item_compare_current_file_web_steps)")
@@ -3678,7 +3731,7 @@ def validate_work_item_schema(conn: sqlite3.Connection, *, required: bool = True
             "CASCADE",
         ),
     }:
-        raise sqlite3.DatabaseError("Schema 44 current-file/web WorkGraph step ownership is invalid")
+        raise sqlite3.DatabaseError("Schema 45 current-file/web WorkGraph step ownership is invalid")
     _validate_current_data(conn)
 
 
@@ -3724,7 +3777,79 @@ def _copy_work_items(conn: sqlite3.Connection, source_table: str) -> None:
     )
 
 
-def upgrade_work_item_schema_to_44(
+def _upgrade_exact_schema_44_graph_to_45(conn: sqlite3.Connection) -> None:
+    """Rebuild only the fixed graph tables and mark unrecoverable root identity."""
+
+    old_objects = _canonical_schema_44_objects()
+    schema_42_objects = _canonical_schema_42_objects()
+    old_extension_objects = {
+        key: value for key, value in old_objects.items() if key not in schema_42_objects
+    }
+    _drop_legacy_schema_objects(conn, old_extension_objects)
+    conn.execute(
+        "ALTER TABLE work_item_compare_current_file_web_steps "
+        "RENAME TO work_item_compare_current_file_web_steps_schema44"
+    )
+    conn.execute(
+        "ALTER TABLE work_item_compare_current_file_web_graphs "
+        "RENAME TO work_item_compare_current_file_web_graphs_schema44"
+    )
+    _execute_schema(conn, WORK_ITEM_SCHEMA)
+    _drop_current_work_item_triggers(conn)
+    conn.execute(
+        """INSERT INTO work_item_compare_current_file_web_graphs(
+               id,user_id,conversation_id,anchor_user_message_id,
+               anchor_request_binding_sha256,current_file_raw_object_id,
+               state,revision,transition,proposal_sha256,accepted_plan_sha256,
+               manifest_sha256,policy_sha256,runtime_profile_sha256,
+               adapter_registry_sha256,actor_binding_sha256,
+               conversation_binding_sha256,current_file_source_identity_sha256,
+               current_file_content_sha256,completion_contract,fallback_owner,
+               publication_owner,max_attempts,created_at,updated_at,expires_at,
+               closed_at,outcome_status,outcome_reason,
+               publication_assistant_message_id,accepted_graph_outcome_sha256,
+               accepted_steps_sha256,terminal_publication_receipt_sha256,
+               publication_receipt_sha256
+           )
+           SELECT id,user_id,conversation_id,anchor_user_message_id,?,
+                  current_file_raw_object_id,state,revision,transition,
+                  proposal_sha256,accepted_plan_sha256,manifest_sha256,
+                  policy_sha256,runtime_profile_sha256,adapter_registry_sha256,
+                  actor_binding_sha256,conversation_binding_sha256,
+                  current_file_source_identity_sha256,current_file_content_sha256,
+                  completion_contract,fallback_owner,publication_owner,max_attempts,
+                  created_at,updated_at,expires_at,closed_at,outcome_status,
+                  outcome_reason,publication_assistant_message_id,
+                  accepted_graph_outcome_sha256,accepted_steps_sha256,
+                  terminal_publication_receipt_sha256,publication_receipt_sha256
+             FROM work_item_compare_current_file_web_graphs_schema44""",
+        (COMPARE_CURRENT_FILE_WEB_UNBOUND_SCHEMA44_REQUEST_SHA256,),
+    )
+    conn.execute(
+        """INSERT INTO work_item_compare_current_file_web_steps(
+               graph_id,step_id,kind,capability_id,security_id,adapter_id,
+               effect_class,evidence_replayability,depends_on_json,parallel_group,
+               input_identity_sha256,idempotency_key_sha256,state,attempt,
+               outcome_schema,outcome_sha256,prior_outcome_sha256,
+               recovery_review_sha256,recovery_context_sha256,
+               evidence_identity_sha256,authority_rechecked,verified,
+               started_at,settled_at
+           )
+           SELECT graph_id,step_id,kind,capability_id,security_id,adapter_id,
+                  effect_class,evidence_replayability,depends_on_json,parallel_group,
+                  input_identity_sha256,idempotency_key_sha256,state,attempt,
+                  outcome_schema,outcome_sha256,prior_outcome_sha256,
+                  recovery_review_sha256,recovery_context_sha256,
+                  evidence_identity_sha256,authority_rechecked,verified,
+                  started_at,settled_at
+             FROM work_item_compare_current_file_web_steps_schema44"""
+    )
+    conn.execute("DROP TABLE work_item_compare_current_file_web_steps_schema44")
+    conn.execute("DROP TABLE work_item_compare_current_file_web_graphs_schema44")
+    _execute_schema(conn, WORK_ITEM_SCHEMA)
+
+
+def upgrade_work_item_schema_to_45(
     conn: sqlite3.Connection,
     *,
     required: bool,
@@ -3742,12 +3867,19 @@ def upgrade_work_item_schema_to_44(
         validate_work_item_schema(conn)
         return
 
+    installed_44 = _schema_objects(conn, current=True)
+    canonical_44 = _canonical_schema_44_objects()
+    if installed_44 == canonical_44 and related == canonical_44:
+        _upgrade_exact_schema_44_graph_to_45(conn)
+        validate_work_item_schema(conn)
+        return
+
     installed_42 = _schema_objects_for_tables(conn, _SCHEMA_42_TABLES)
     if installed_42 == _canonical_schema_42_objects() and related == installed_42:
         # Schema 43's Work Item sub-projection is exactly schema 42.  Add only
-        # the dormant schema-44 graph tables/triggers; no released Work Item row
+        # the schema-45 graph tables/triggers; no released Work Item row
         # is rebuilt or rewritten.
-        _execute_schema(conn, _WORK_ITEM_SCHEMA_44_EXTENSION)
+        _execute_schema(conn, _WORK_ITEM_SCHEMA_45_EXTENSION)
         validate_work_item_schema(conn)
         return
 
@@ -3830,9 +3962,10 @@ def upgrade_work_item_schema_to_44(
     validate_work_item_schema(conn)
 
 
-# Historical tests and offline callers import the released upgrader name.  Keep
-# it as a source-compatible alias while all new core wiring names schema 44.
-upgrade_work_item_schema_to_42 = upgrade_work_item_schema_to_44
+# Historical tests and offline callers import released upgrader names. Keep
+# source-compatible aliases while new core wiring names schema 45.
+upgrade_work_item_schema_to_44 = upgrade_work_item_schema_to_45
+upgrade_work_item_schema_to_42 = upgrade_work_item_schema_to_45
 
 
 __all__ = [
@@ -3841,5 +3974,6 @@ __all__ = [
     "register_work_item_connection_functions",
     "upgrade_work_item_schema_to_42",
     "upgrade_work_item_schema_to_44",
+    "upgrade_work_item_schema_to_45",
     "validate_work_item_schema",
 ]

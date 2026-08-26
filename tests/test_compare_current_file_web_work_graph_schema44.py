@@ -188,6 +188,7 @@ def _seed_graph(
         conversation_binding_sha256=_sha256(f"conversation:{conversation['id']}"),
         current_file_source_identity_sha256=_sha256(f"source-identity:{raw_id}"),
         current_file_content_sha256=_sha256(f"file-content:{label}"),
+        anchor_request_binding_sha256=_sha256(f"request-binding:{label}"),
         step_input_identities={kind: _sha256(f"input:{label}:{kind.value}") for kind in kinds},
         step_idempotency_keys={kind: _sha256(f"idempotency:{label}:{kind.value}") for kind in kinds},
         now=now,
@@ -334,11 +335,11 @@ def _admitted_web_recovery(graph: CompareCurrentFileWebWorkGraph):
     return decision.recovery
 
 
-def test_schema44_contract_is_fixed_body_free_dormant_and_transient_web_bound(storage) -> None:
+def test_schema45_contract_is_fixed_body_free_dormant_and_transient_web_bound(storage) -> None:
     graph = _seed_graph(storage, "fixed-contract")
     file_step, web_step, synthesis = graph.steps
 
-    assert SCHEMA_VERSION == 44
+    assert SCHEMA_VERSION == 45
     assert (file_step.step_id, web_step.step_id, synthesis.step_id) == (
         FILE_READ_STEP_ID,
         WEB_READ_STEP_ID,
@@ -371,7 +372,7 @@ def test_schema44_contract_is_fixed_body_free_dormant_and_transient_web_bound(st
         replace(file_step, capability_id="web.research")
 
 
-def test_released_schema43_migrates_to44_without_rewriting_old_data(settings, tmp_path) -> None:
+def test_released_schema43_migrates_to45_without_rewriting_old_data(settings, tmp_path) -> None:
     database = tmp_path / "schema-43.sqlite3"
     with gzip.open(_SCHEMA_FIXTURES / "schema-43.sqlite3.gz", "rb") as packed, database.open("wb") as raw:
         shutil.copyfileobj(packed, raw)
@@ -379,7 +380,7 @@ def test_released_schema43_migrates_to44_without_rewriting_old_data(settings, tm
     migrated = FridayStorage(replace(settings, database_path=database, database_must_exist=True))
     try:
         assert (
-            migrated.execute("SELECT value FROM schema_meta WHERE key='schema_version'").fetchone()[0] == "44"
+            migrated.execute("SELECT value FROM schema_meta WHERE key='schema_version'").fetchone()[0] == "45"
         )
         assert (
             migrated.execute("SELECT value FROM runtime_kv WHERE key='fixture:marker'").fetchone()[0]
