@@ -463,6 +463,27 @@ def test_output_symlink_is_not_admitted(tmp_path: Path) -> None:
     assert receipt.generated_files == ()
 
 
+def test_payload_cannot_forge_the_export_error_marker(tmp_path: Path) -> None:
+    kernel = _kernel(tmp_path)
+    request = _shell(
+        "printf output_symlink_refused > output/.friday-export-error.v1",
+        key=_key("reserved-export-marker"),
+    )
+    receipt = _wait(kernel, _submit(kernel, request, destructive=True))
+    assert receipt.status is CommandStatus.FAILED
+    assert receipt.error_code == "output_reserved_name"
+    assert receipt.generated_files == ()
+
+
+def test_payload_exit_125_is_not_mistaken_for_an_export_refusal(tmp_path: Path) -> None:
+    kernel = _kernel(tmp_path)
+    request = _shell("exit 125", key=_key("payload-exit-125"))
+    receipt = _wait(kernel, _submit(kernel, request, destructive=True))
+    assert receipt.status is CommandStatus.FAILED
+    assert receipt.error_code == "nonzero_exit"
+    assert receipt.exit_code == 125
+
+
 def test_stdout_truncation_is_honest(tmp_path: Path) -> None:
     kernel = _kernel(tmp_path)
     request = _argv(

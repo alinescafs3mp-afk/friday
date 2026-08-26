@@ -15,6 +15,21 @@ import stat
 import sys
 
 OUTPUT_DIR_FD = 29
+EXPORT_ERROR_MARKER = ".friday-export-error.v1"
+EXPORT_ERROR_CODES = frozenset(
+    {
+        "output_depth_overflow",
+        "output_export_failed",
+        "output_file_too_large",
+        "output_hardlink_refused",
+        "output_identity_changed",
+        "output_not_regular",
+        "output_reserved_name",
+        "output_symlink_refused",
+        "output_tree_overflow",
+        "path_escape",
+    }
+)
 MAX_FILES = 64
 MAX_DIRS = 64
 MAX_DEPTH = 8
@@ -80,6 +95,27 @@ def _copy_file(source_fd: int, dest_dir_fd: int, name: str, before: os.stat_resu
         os.close(dest_fd)
 
 
+def _write_export_error(dest_dir_fd: int, code: str) -> None:
+    """Write one wrapper-owned result which the payload cannot forge."""
+
+    safe_code = code if code in EXPORT_ERROR_CODES else "output_export_failed"
+    payload = f"{safe_code}\n".encode("ascii")
+    marker_fd = os.open(
+        EXPORT_ERROR_MARKER,
+        os.O_WRONLY | os.O_CREAT | os.O_EXCL | _CLOEXEC | _NOFOLLOW | _NONBLOCK,
+        0o400,
+        dir_fd=dest_dir_fd,
+    )
+    try:
+        view = memoryview(payload)
+        while view:
+            view = view[os.write(marker_fd, view) :]
+        os.fsync(marker_fd)
+        os.fchmod(marker_fd, 0o400)
+    finally:
+        os.close(marker_fd)
+
+
 def _export_tree(
     source_dir_fd: int,
     dest_dir_fd: int,
@@ -92,6 +128,8 @@ def _export_tree(
     for name in sorted(os.listdir(f"/proc/self/fd/{source_dir_fd}")):
         if not name or name in {".", ".."} or "/" in name or "\x00" in name:
             raise ValueError("path_escape")
+        if name == EXPORT_ERROR_MARKER:
+            raise ValueError("output_reserved_name")
         before = os.stat(name, dir_fd=source_dir_fd, follow_symlinks=False)
         if stat.S_ISDIR(before.st_mode):
             counters[1] += 1
@@ -121,8 +159,12 @@ def _export_tree(
                 os.close(dest_child)
                 os.close(source_child)
             continue
-        if not stat.S_ISREG(before.st_mode) or before.st_nlink != 1:
+        if stat.S_ISLNK(before.st_mode):
+            raise ValueError("output_symlink_refused")
+        if not stat.S_ISREG(before.st_mode):
             raise ValueError("output_not_regular")
+        if before.st_nlink != 1:
+            raise ValueError("output_hardlink_refused")
         if before.st_size > MAX_FILE_BYTES:
             raise ValueError("output_file_too_large")
         counters[0] += 1
@@ -185,7 +227,10 @@ def main() -> int:
             os.fsync(output_fd)
         finally:
             os.close(source_fd)
-    except BaseException:
+    except BaseException as exc:
+        if output_fd >= 0:
+            with contextlib.suppress(BaseException):
+                _write_export_error(output_fd, str(exc))
         return 125
     finally:
         if output_fd >= 0:
