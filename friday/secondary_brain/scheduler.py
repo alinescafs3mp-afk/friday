@@ -91,6 +91,7 @@ class SecondaryBrainScheduler:
         unavailable_state: SecondaryState,
         profile_admission: SecondaryProfileAdmission | None,
         document_map_mode: SecondaryMode = SecondaryMode.DISABLED,
+        supervisor_mode: SecondaryMode = SecondaryMode.DISABLED,
     ) -> None:
         self.mode = mode
         self.allowed_workloads = allowed_workloads & ADVISORY_WORKLOADS
@@ -99,6 +100,7 @@ class SecondaryBrainScheduler:
         self._unavailable_state = unavailable_state
         self._profile_admission = profile_admission
         self._document_map_mode = document_map_mode
+        self._supervisor_mode = supervisor_mode
         self._local_skipped_total = 0
         self._local_fallback_total = 0
         self._startup_probe_task: asyncio.Task[None] | None = None
@@ -164,6 +166,10 @@ class SecondaryBrainScheduler:
             if self.mode is SecondaryMode.DISABLED or self._client is None:
                 return SecondaryMode.DISABLED
             return self._document_map_mode
+        if workload is ModelWorkload.PLAN_CANDIDATE:
+            if self.mode is SecondaryMode.DISABLED or self._client is None:
+                return SecondaryMode.DISABLED
+            return self._supervisor_mode
         return self.mode
 
     @classmethod
@@ -181,6 +187,14 @@ class SecondaryBrainScheduler:
             document_map_mode = SecondaryMode(settings.secondary_llm_document_map_mode)
         except ValueError:
             document_map_mode = SecondaryMode.DISABLED
+        requested_supervisor = (
+            str(getattr(settings, "semantic_supervisor_mode", "off") or "").strip().casefold()
+        )
+        supervisor_mode = (
+            SecondaryMode.SHADOW
+            if requested_supervisor in {"shadow", "assist", "canary"}
+            else SecondaryMode.DISABLED
+        )
 
         workloads: set[ModelWorkload] = set()
         for raw_workload in settings.secondary_llm_workloads:
@@ -198,6 +212,7 @@ class SecondaryBrainScheduler:
                 unavailable_state=SecondaryState.DISABLED,
                 profile_admission=None,
                 document_map_mode=document_map_mode,
+                supervisor_mode=supervisor_mode,
             )
 
         admission = get_secondary_runtime_admission(
@@ -246,6 +261,7 @@ class SecondaryBrainScheduler:
                 unavailable_state=SecondaryState.MISCONFIGURED,
                 profile_admission=None,
                 document_map_mode=document_map_mode,
+                supervisor_mode=supervisor_mode,
             )
         try:
             client = SecondaryEndpointClient(
@@ -264,6 +280,7 @@ class SecondaryBrainScheduler:
                 unavailable_state=SecondaryState.MISCONFIGURED,
                 profile_admission=None,
                 document_map_mode=document_map_mode,
+                supervisor_mode=supervisor_mode,
             )
         return cls(
             mode=mode,
@@ -273,6 +290,7 @@ class SecondaryBrainScheduler:
             unavailable_state=SecondaryState.PROBING,
             profile_admission=admission.kind,
             document_map_mode=document_map_mode,
+            supervisor_mode=supervisor_mode,
         )
 
     async def aclose(self) -> None:

@@ -631,6 +631,14 @@ class FridaySettings:
     # the already-live Inbox extraction remains in assist.  Unknown values are
     # normalized to disabled by the closed env parser.
     secondary_llm_document_map_mode: str
+    # Independent GPT-OSS semantic supervisor product policy.  Unknown values
+    # fail closed to off.  P1 implements shadow observation only: assist/canary
+    # are accepted as labels but never promote a proposal into execution.
+    semantic_supervisor_mode: str
+    semantic_supervisor_tasks: tuple[str, ...]
+    semantic_supervisor_max_steps: int
+    semantic_supervisor_max_review_rounds: int
+    semantic_supervisor_timeout_sec: float
 
     embeddings_enabled: bool
     embeddings_base_url: str
@@ -1081,6 +1089,14 @@ class FridaySettings:
                 "document_map_mode": self.secondary_llm_document_map_mode,
                 "workloads": list(self.secondary_llm_workloads),
             },
+            "semantic_supervisor": {
+                "mode": self.semantic_supervisor_mode,
+                "tasks": list(self.semantic_supervisor_tasks),
+                "max_steps": self.semantic_supervisor_max_steps,
+                "max_review_rounds": self.semantic_supervisor_max_review_rounds,
+                "timeout_sec": self.semantic_supervisor_timeout_sec,
+                "promotion_admitted": False,
+            },
             "orchestration": {
                 "mode": self.router_mode,
                 "canary_routes": list(self.router_canary_routes),
@@ -1319,6 +1335,26 @@ def load_settings(profile_name: str | None = None) -> FridaySettings:
             "FRIDAY_SECONDARY_LLM_DOCUMENT_MAP_MODE",
             "disabled",
             ("disabled", "shadow", "assist"),
+        ),
+        semantic_supervisor_mode=_fail_closed_choice_env(
+            "FRIDAY_SEMANTIC_SUPERVISOR_MODE",
+            "off",
+            ("off", "shadow", "assist", "canary"),
+        ),
+        semantic_supervisor_tasks=tuple(
+            item.casefold() for item in _list_env("FRIDAY_SEMANTIC_SUPERVISOR_TASKS") if item.strip()
+        ),
+        semantic_supervisor_max_steps=min(
+            6,
+            _int_env("FRIDAY_SEMANTIC_SUPERVISOR_MAX_STEPS", 6, minimum=1),
+        ),
+        semantic_supervisor_max_review_rounds=min(
+            1,
+            _int_env("FRIDAY_SEMANTIC_SUPERVISOR_MAX_REVIEW_ROUNDS", 1, minimum=0),
+        ),
+        semantic_supervisor_timeout_sec=min(
+            15.0,
+            _float_env("FRIDAY_SEMANTIC_SUPERVISOR_TIMEOUT_SEC", 12.0, minimum=0.1),
         ),
         embeddings_enabled=_bool_env("FRIDAY_EMBEDDINGS_ENABLED", False),
         embeddings_base_url=env("FRIDAY_EMBEDDINGS_BASE_URL", llm_base_url).rstrip("/"),
