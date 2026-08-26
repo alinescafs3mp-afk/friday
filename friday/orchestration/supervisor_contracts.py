@@ -715,28 +715,95 @@ class SupervisorContinuation:
 class SupervisorBudgets:
     max_steps: int
     max_parallel_reads: int
+    turn_deadline_ms: int
+    per_step_deadline_ms: int
+    max_supervisor_calls: int
+    max_model_calls: int
+    max_tool_calls: int
+    max_capability_calls: int
     max_review_rounds: int
+    max_recovery_rounds: int
+    max_output_tokens: int
 
     def payload(self) -> dict[str, Any]:
         return {
             "max_steps": self.max_steps,
             "max_parallel_reads": self.max_parallel_reads,
+            "turn_deadline_ms": self.turn_deadline_ms,
+            "per_step_deadline_ms": self.per_step_deadline_ms,
+            "max_supervisor_calls": self.max_supervisor_calls,
+            "max_model_calls": self.max_model_calls,
+            "max_tool_calls": self.max_tool_calls,
+            "max_capability_calls": self.max_capability_calls,
             "max_review_rounds": self.max_review_rounds,
+            "max_recovery_rounds": self.max_recovery_rounds,
+            "max_output_tokens": self.max_output_tokens,
         }
+
+    def canonical_sha256(self) -> str:
+        return canonical_sha256(
+            {
+                "schema": "friday.supervisor-execution-budgets.v1",
+                **self.payload(),
+            }
+        )
 
     @classmethod
     def parse(cls, value: object) -> SupervisorBudgets:
         if not isinstance(value, Mapping):
             raise SupervisorContractError("budgets must be an object")
         item = dict(value)
-        _closed_keys(item, {"max_steps", "max_parallel_reads", "max_review_rounds"}, label="budgets")
+        _closed_keys(
+            item,
+            {
+                "max_steps",
+                "max_parallel_reads",
+                "turn_deadline_ms",
+                "per_step_deadline_ms",
+                "max_supervisor_calls",
+                "max_model_calls",
+                "max_tool_calls",
+                "max_capability_calls",
+                "max_review_rounds",
+                "max_recovery_rounds",
+                "max_output_tokens",
+            },
+            label="budgets",
+        )
         return cls(
             max_steps=_bounded_int(item["max_steps"], label="max_steps", minimum=1, maximum=_MAX_STEPS),
             max_parallel_reads=_bounded_int(
                 item["max_parallel_reads"], label="max_parallel_reads", minimum=1, maximum=2
             ),
+            turn_deadline_ms=_bounded_int(
+                item["turn_deadline_ms"], label="turn_deadline_ms", minimum=100, maximum=15_000
+            ),
+            per_step_deadline_ms=_bounded_int(
+                item["per_step_deadline_ms"],
+                label="per_step_deadline_ms",
+                minimum=100,
+                maximum=15_000,
+            ),
+            max_supervisor_calls=_bounded_int(
+                item["max_supervisor_calls"], label="max_supervisor_calls", minimum=1, maximum=2
+            ),
+            max_model_calls=_bounded_int(
+                item["max_model_calls"], label="max_model_calls", minimum=1, maximum=4
+            ),
+            max_tool_calls=_bounded_int(
+                item["max_tool_calls"], label="max_tool_calls", minimum=0, maximum=2
+            ),
+            max_capability_calls=_bounded_int(
+                item["max_capability_calls"], label="max_capability_calls", minimum=0, maximum=3
+            ),
             max_review_rounds=_bounded_int(
                 item["max_review_rounds"], label="max_review_rounds", minimum=0, maximum=1
+            ),
+            max_recovery_rounds=_bounded_int(
+                item["max_recovery_rounds"], label="max_recovery_rounds", minimum=0, maximum=1
+            ),
+            max_output_tokens=_bounded_int(
+                item["max_output_tokens"], label="max_output_tokens", minimum=1, maximum=1_792
             ),
         )
 
@@ -906,6 +973,7 @@ def _assert_acyclic(steps: Sequence[SupervisorStep]) -> None:
 @dataclass(frozen=True, slots=True)
 class SupervisorProposal:
     manifest_id: str
+    budget_sha256: str
     task_class: TaskClass
     goal: str
     continuation_decision: ContinuationDecision
@@ -919,6 +987,7 @@ class SupervisorProposal:
         return {
             "schema": SUPERVISOR_PROPOSAL_SCHEMA,
             "manifest_id": self.manifest_id,
+            "budget_sha256": self.budget_sha256,
             "task_class": self.task_class.value,
             "goal": self.goal,
             "continuation_decision": self.continuation_decision.value,
@@ -940,6 +1009,7 @@ class SupervisorProposal:
             {
                 "schema",
                 "manifest_id",
+                "budget_sha256",
                 "task_class",
                 "goal",
                 "continuation_decision",
@@ -984,6 +1054,7 @@ class SupervisorProposal:
             raise SupervisorContractError("completion_criteria must be unique")
         return cls(
             manifest_id=format_manifest_id(_manifest_digest_hex(item["manifest_id"])),
+            budget_sha256=_manifest_digest_hex(item["budget_sha256"]),
             task_class=TaskClass(_enum(TaskClass, item["task_class"], label="task_class")),
             goal=parse_supervisor_goal(item["goal"]),
             continuation_decision=ContinuationDecision(
@@ -1118,6 +1189,7 @@ def supervisor_proposal_json_schema(*, task_class: TaskClass | None = None) -> d
         "required": [
             "schema",
             "manifest_id",
+            "budget_sha256",
             "task_class",
             "goal",
             "continuation_decision",
@@ -1130,6 +1202,7 @@ def supervisor_proposal_json_schema(*, task_class: TaskClass | None = None) -> d
         "properties": {
             "schema": {"type": "string", "enum": [SUPERVISOR_PROPOSAL_SCHEMA]},
             "manifest_id": {"type": "string", "minLength": 71, "maxLength": 71},
+            "budget_sha256": {"type": "string", "minLength": 64, "maxLength": 64},
             "task_class": {"type": "string", "enum": admitted_task_classes},
             "goal": {"type": "string", "minLength": 1, "maxLength": _MAX_GOAL_CHARS},
             "continuation_decision": {

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from typing import Any, cast
 
 from friday.orchestration.supervisor_assist_activation import (
@@ -29,8 +30,22 @@ from friday.orchestration.supervisor_assist_promotion import (
 )
 from friday.orchestration.supervisor_assist_runtime import SemanticSupervisorAssistRuntime
 from friday.orchestration.supervisor_contracts import SupervisorMode
+from friday.orchestration.supervisor_plan_authority_gate import (
+    SupervisorAssistPlanAuthorityGate,
+)
 from friday.orchestration.transient_web_comparison import TransientWebComparisonAdapter
 from friday.permissions import AuthorizationService
+from friday.semantic_supervisor_policy import SUPERVISOR_TURN_DEADLINE_MS
+
+
+def _has_exact_turn_deadline(settings: object) -> bool:
+    value = getattr(settings, "semantic_supervisor_timeout_sec", None)
+    return bool(
+        isinstance(value, int | float)
+        and not isinstance(value, bool)
+        and math.isfinite(float(value))
+        and int(round(float(value) * 1_000)) == SUPERVISOR_TURN_DEADLINE_MS
+    )
 
 
 def build_supervisor_assist_production_runtime(
@@ -63,6 +78,7 @@ def build_supervisor_assist_production_runtime(
         != SUPERVISOR_ASSIST_PROMOTION_MAX_STEPS
         or getattr(settings, "semantic_supervisor_max_review_rounds", None)
         != SUPERVISOR_ASSIST_PROMOTION_MAX_REVIEW_ROUNDS
+        or not _has_exact_turn_deadline(settings)
         or not isinstance(authorization, AuthorizationService)
         or type(graph_adapter) is not SupervisorAssistGraphAdapter
         or primary_model_runtime is None
@@ -93,6 +109,7 @@ def build_supervisor_assist_production_runtime(
         web_reader=TransientWebComparisonAdapter(authorization, web),
         canary_actor_binding=actor_binding,
         authority_check=SupervisorAssistAuthorityGate(storage, authorization),
+        plan_authority_check=SupervisorAssistPlanAuthorityGate(storage, authorization),
         effect_check=supervisor_assist_read_only_effect_gate,
         post_commit_observer=observer,
         max_review_rounds=SUPERVISOR_ASSIST_PROMOTION_MAX_REVIEW_ROUNDS,

@@ -22,6 +22,10 @@ from friday.orchestration.router import ReadOnlyAttachmentReference, current_att
 from friday.orchestration.semantic_supervisor import supervisor_eligibility
 from friday.orchestration.supervisor_assist_ingress import SupervisorAssistIngressBindingV1
 from friday.orchestration.supervisor_contracts import TaskClass
+from friday.orchestration.supervisor_plan_authority import (
+    PlanAuthorityScope,
+    current_raw_source_matches,
+)
 from friday.orchestration.transient_web_comparison import (
     SealedPublicWebQuery,
     TransientWebComparisonError,
@@ -198,7 +202,18 @@ def bind_assist_plan_to_surface(
 ) -> tuple[CompareCurrentFileWebPlanStepBinding, ...] | None:
     """Bind proposal-local steps to the fixed graph and exact outbound query."""
 
-    if type(plan) is not ValidatedExecutionPlan or type(surface) is not CurrentFileWebAssistSurface:
+    if (
+        type(plan) is not ValidatedExecutionPlan
+        or type(surface) is not CurrentFileWebAssistSurface
+        or plan.authority_scope is not PlanAuthorityScope.ASSIST_EXECUTION
+        or len(plan.source_bindings) != 1
+        or not current_raw_source_matches(
+            plan.source_bindings[0],
+            raw_object_id=surface.attachment.raw_object_id,
+            source_identity_sha256=surface.attachment.source_identity_sha256,
+            content_sha256=surface.attachment_content_sha256,
+        )
+    ):
         return None
     try:
         bindings = bind_validated_plan_to_compare_current_file_web_graph(plan)

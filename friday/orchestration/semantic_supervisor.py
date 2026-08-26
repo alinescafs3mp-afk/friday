@@ -42,6 +42,7 @@ from friday.orchestration.supervisor_contracts import (
     SupervisorTurnProjection,
     TaskClass,
     canonical_dumps,
+    canonical_sha256,
     supervisor_proposal_json_schema,
 )
 from friday.orchestration.supervisor_observation import (
@@ -49,6 +50,16 @@ from friday.orchestration.supervisor_observation import (
     SupervisorSkipReason,
     parsed_observation,
     skipped_observation,
+)
+from friday.orchestration.supervisor_plan_authority import (
+    PlanAuthorityBoundary,
+    PlanAuthorityDecision,
+    PlanAuthorityReason,
+    PlanAuthorityScope,
+    PlanSourceBinding,
+    attest_plan_authority,
+    authority_witness_sha256,
+    source_bindings_sha256,
 )
 from friday.secondary_brain import (
     EffectClass,
@@ -156,7 +167,15 @@ def supervisor_budgets_from_settings(settings: object) -> SupervisorBudgets:
     return SupervisorBudgets(
         max_steps=identity.max_steps,
         max_parallel_reads=identity.max_parallel_reads,
+        turn_deadline_ms=identity.turn_deadline_ms,
+        per_step_deadline_ms=identity.per_step_deadline_ms,
+        max_supervisor_calls=identity.max_supervisor_calls,
+        max_model_calls=identity.max_model_calls,
+        max_tool_calls=identity.max_tool_calls,
+        max_capability_calls=identity.max_capability_calls,
         max_review_rounds=identity.max_review_rounds,
+        max_recovery_rounds=identity.max_recovery_rounds,
+        max_output_tokens=identity.max_output_tokens,
     )
 
 
@@ -504,6 +523,7 @@ def _response_template(supervisor_input: SupervisorInput, task: TaskClass) -> di
     return {
         "schema": SUPERVISOR_PROPOSAL_SCHEMA,
         "manifest_id": supervisor_input.manifest.manifest_id,
+        "budget_sha256": supervisor_input.budgets.canonical_sha256(),
         "task_class": task.value,
         "goal": "Compare supplied evidence with current public rules.",
         "continuation_decision": "new_task",
@@ -586,6 +606,14 @@ def build_supervisor_messages(supervisor_input: SupervisorInput) -> tuple[dict[s
         identity is None
         or supervisor_input.budgets.max_steps != identity.max_steps
         or supervisor_input.budgets.max_parallel_reads != identity.max_parallel_reads
+        or supervisor_input.budgets.turn_deadline_ms != identity.turn_deadline_ms
+        or supervisor_input.budgets.per_step_deadline_ms != identity.per_step_deadline_ms
+        or supervisor_input.budgets.max_supervisor_calls != identity.max_supervisor_calls
+        or supervisor_input.budgets.max_model_calls != identity.max_model_calls
+        or supervisor_input.budgets.max_tool_calls != identity.max_tool_calls
+        or supervisor_input.budgets.max_capability_calls != identity.max_capability_calls
+        or supervisor_input.budgets.max_recovery_rounds != identity.max_recovery_rounds
+        or supervisor_input.budgets.max_output_tokens != identity.max_output_tokens
         or task.value not in identity.admitted_tasks
     ):
         raise SupervisorContractError("supervisor input budgets have no accepted product policy")
@@ -612,6 +640,14 @@ def build_supervisor_messages(supervisor_input: SupervisorInput) -> tuple[dict[s
                 "max_steps": 3,
                 "max_parallel_reads": supervisor_input.budgets.max_parallel_reads,
                 "max_review_rounds": identity.max_review_rounds,
+                "max_recovery_rounds": identity.max_recovery_rounds,
+                "turn_deadline_ms": identity.turn_deadline_ms,
+                "per_step_deadline_ms": identity.per_step_deadline_ms,
+                "max_supervisor_calls": identity.max_supervisor_calls,
+                "max_model_calls": identity.max_model_calls,
+                "max_tool_calls": identity.max_tool_calls,
+                "max_capability_calls": identity.max_capability_calls,
+                "max_output_tokens": identity.max_output_tokens,
             },
             "response_template": _response_template(supervisor_input, task),
         },
@@ -656,6 +692,60 @@ def build_supervisor_request(
 def binding_digest(*parts: str) -> str:
     material = "\0".join(parts).encode("utf-8")
     return hmac.new(_BINDING_HMAC_KEY, _BINDING_DOMAIN + material, hashlib.sha256).hexdigest()
+
+
+def shadow_policy_admission_context(
+    supervisor_input: SupervisorInput,
+    *,
+    actor_binding_sha256: str,
+    conversation_binding_sha256: str,
+    turn_deadline_monotonic_ns: int,
+) -> PolicyAdmissionContext:
+    """Bind a non-executable shadow plan to one authenticated projection."""
+
+    source = PlanSourceBinding.shadow_projection(
+        projection_sha256=supervisor_input.canonical_sha256(),
+        manifest_sha256=supervisor_input.manifest.digest_hex(),
+        turn_sha256=canonical_sha256(supervisor_input.turn.payload()),
+    )
+    source_sha256 = source_bindings_sha256((source,))
+    policy_identity = (
+        semantic_supervisor_policy.supervisor_product_policy_identity_for_review_rounds(
+            supervisor_input.budgets.max_review_rounds
+        )
+    )
+    if policy_identity is None:
+        raise SupervisorContractError("shadow authority has no product policy")
+
+    def attest(boundary: PlanAuthorityBoundary) -> PlanAuthorityDecision:
+        if (
+            type(boundary) is not PlanAuthorityBoundary
+            or boundary.scope is not PlanAuthorityScope.SHADOW_ONLY
+            or boundary.actor_binding_sha256 != actor_binding_sha256
+            or boundary.conversation_binding_sha256 != conversation_binding_sha256
+            or boundary.manifest_sha256 != supervisor_input.manifest.digest_hex()
+            or boundary.policy_sha256 != policy_identity.policy_sha256
+            or boundary.source_bindings_sha256 != source_sha256
+            or boundary.budget_sha256 != supervisor_input.budgets.canonical_sha256()
+            or boundary.turn_deadline_monotonic_ns != turn_deadline_monotonic_ns
+        ):
+            return PlanAuthorityDecision.rejected(PlanAuthorityReason.INVALID_BOUNDARY)
+        return attest_plan_authority(
+            boundary,
+            witness_sha256=authority_witness_sha256(
+                boundary,
+                source.canonical_sha256(),
+            ),
+        )
+
+    return PolicyAdmissionContext(
+        actor_binding_sha256=actor_binding_sha256,
+        conversation_binding_sha256=conversation_binding_sha256,
+        authority_scope=PlanAuthorityScope.SHADOW_ONLY,
+        source_bindings=(source,),
+        turn_deadline_monotonic_ns=turn_deadline_monotonic_ns,
+        authority_attestor=attest,
+    )
 
 
 def _structured_to_mapping(value: object) -> Mapping[str, Any] | None:
@@ -773,9 +863,12 @@ async def observe_semantic_supervisor_shadow(
         return result, observation
 
     try:
-        context = PolicyAdmissionContext(
+        context = shadow_policy_admission_context(
+            supervisor_input,
             actor_binding_sha256=actor_binding_sha256,
             conversation_binding_sha256=conversation_binding_sha256,
+            turn_deadline_monotonic_ns=time.monotonic_ns()
+            + supervisor_input.budgets.turn_deadline_ms * 1_000_000,
         )
     except SupervisorContractError:
         observation = skipped_observation(

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import time
 from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
@@ -16,7 +17,7 @@ from friday.orchestration.capability_binding import (
 )
 from friday.orchestration.capability_manifest import bounded_capability_manifest
 from friday.orchestration.contracts import TurnInput
-from friday.orchestration.execution_plan import ValidatedExecutionPlan
+from friday.orchestration.execution_plan import ExecutionPlanError, ValidatedExecutionPlan
 from friday.orchestration.policy_kernel import (
     PolicyAdmissionContext,
     PolicyReason,
@@ -29,6 +30,7 @@ from friday.orchestration.semantic_supervisor import (
     build_supervisor_messages,
     build_supervisor_request,
     classify_supervisor_task,
+    shadow_policy_admission_context,
     supervisor_eligibility,
     supervisor_mode_from_settings,
 )
@@ -47,6 +49,15 @@ from friday.orchestration.supervisor_contracts import (
     canonical_sha256,
 )
 from friday.orchestration.supervisor_observation import SupervisorSkipReason
+from friday.orchestration.supervisor_plan_authority import (
+    PlanAuthorityBoundary,
+    PlanAuthorityDecision,
+    PlanAuthorityReason,
+    PlanAuthorityScope,
+    PlanSourceBinding,
+    attest_plan_authority,
+    authority_witness_sha256,
+)
 from friday.orchestration.transient_web_comparison import (
     TRANSIENT_WEB_ADAPTER_ID,
     TRANSIENT_WEB_SECURITY_ID,
@@ -138,6 +149,7 @@ def _proposal_payload(supervisor_input: Any, **overrides: Any) -> dict[str, Any]
     payload = {
         "schema": SUPERVISOR_PROPOSAL_SCHEMA,
         "manifest_id": supervisor_input.manifest.manifest_id,
+        "budget_sha256": supervisor_input.budgets.canonical_sha256(),
         "task_class": "compare_current_file_with_current_web",
         "goal": "Compare the supplied document with current public rules.",
         "continuation_decision": "new_task",
@@ -153,6 +165,50 @@ def _proposal_payload(supervisor_input: Any, **overrides: Any) -> dict[str, Any]
     }
     payload.update(overrides)
     return payload
+
+
+def _policy_context(
+    supervisor_input: Any,
+    *,
+    capability_bindings: CapabilityBindingSnapshot | None = None,
+) -> PolicyAdmissionContext:
+    actor_binding = "a" * 64
+    conversation_binding = "b" * 64
+    deadline_ns = time.monotonic_ns() + supervisor_input.budgets.turn_deadline_ms * 1_000_000
+    if supervisor_input.budgets.max_review_rounds == 0:
+        context = shadow_policy_admission_context(
+            supervisor_input,
+            actor_binding_sha256=actor_binding,
+            conversation_binding_sha256=conversation_binding,
+            turn_deadline_monotonic_ns=deadline_ns,
+        )
+    else:
+        source = PlanSourceBinding.current_raw_object(
+            raw_object_id="raw-test",
+            source_identity_sha256="c" * 64,
+            content_sha256="d" * 64,
+        )
+
+        def attest(boundary: PlanAuthorityBoundary) -> PlanAuthorityDecision:
+            return attest_plan_authority(
+                boundary,
+                witness_sha256=authority_witness_sha256(
+                    boundary,
+                    source.canonical_sha256(),
+                ),
+            )
+
+        context = PolicyAdmissionContext(
+            actor_binding_sha256=actor_binding,
+            conversation_binding_sha256=conversation_binding,
+            authority_scope=PlanAuthorityScope.ASSIST_EXECUTION,
+            source_bindings=(source,),
+            turn_deadline_monotonic_ns=deadline_ns,
+            authority_attestor=attest,
+        )
+    if capability_bindings is not None:
+        context = replace(context, capability_bindings=capability_bindings)
+    return context
 
 
 def test_unknown_supervisor_mode_fails_closed_to_off() -> None:
@@ -378,10 +434,7 @@ def test_policy_kernel_rechecks_control_text_on_parser_bypassed_typed_objects(
     decision = admit_supervisor_proposal(
         bypassed,
         supervisor_input,
-        PolicyAdmissionContext(
-            actor_binding_sha256="a" * 64,
-            conversation_binding_sha256="b" * 64,
-        ),
+        _policy_context(supervisor_input),
     )
 
     assert decision.admitted is False
@@ -400,8 +453,16 @@ def test_proposal_cannot_construct_validated_execution_plan() -> None:
             manifest_digest=supervisor_input.manifest.digest_hex(),
             binding_snapshot_sha256="f" * 64,
             policy_version="x",
+            policy_sha256="e" * 64,
             actor_binding_sha256="a" * 64,
             conversation_binding_sha256="b" * 64,
+            authority_scope=PlanAuthorityScope.SHADOW_ONLY,
+            authority_binding_sha256="c" * 64,
+            required_security_ids=(),
+            source_bindings=(),
+            source_bindings_sha256="d" * 64,
+            budget_sha256=supervisor_input.budgets.canonical_sha256(),
+            budgets=supervisor_input.budgets,
             effect_classes=(),
             confirmation_required=False,
             confirmation_present=False,
@@ -414,7 +475,7 @@ def test_proposal_cannot_construct_validated_execution_plan() -> None:
 
 def test_policy_kernel_admits_compare_and_rejects_stale_unknown_and_effects() -> None:
     supervisor_input = build_supervisor_input(_compare_turn(), _settings())
-    context = PolicyAdmissionContext(actor_binding_sha256="a" * 64, conversation_binding_sha256="b" * 64)
+    context = _policy_context(supervisor_input)
     admitted = admit_supervisor_proposal(
         SupervisorProposal.parse(_proposal_payload(supervisor_input)),
         supervisor_input,
@@ -461,6 +522,114 @@ def test_policy_kernel_admits_compare_and_rejects_stale_unknown_and_effects() ->
     assert rejected.reason is PolicyReason.SELF_APPROVAL
 
 
+def test_policy_kernel_rejects_unauthorized_stale_and_drifted_source_before_plan_mint() -> None:
+    supervisor_input = build_supervisor_input(_compare_turn(), _settings())
+    proposal = SupervisorProposal.parse(_proposal_payload(supervisor_input))
+    trusted = _policy_context(supervisor_input)
+
+    denied = admit_supervisor_proposal(
+        proposal,
+        supervisor_input,
+        replace(
+            trusted,
+            authority_attestor=lambda _boundary: PlanAuthorityDecision.rejected(
+                PlanAuthorityReason.DENIED
+            ),
+        ),
+    )
+    assert denied.reason is PolicyReason.AUTHORITY_DENIED
+    assert denied.plan is None
+
+    drifted = admit_supervisor_proposal(
+        proposal,
+        supervisor_input,
+        replace(
+            trusted,
+            authority_attestor=lambda _boundary: PlanAuthorityDecision.rejected(
+                PlanAuthorityReason.SOURCE_DRIFT
+            ),
+        ),
+    )
+    assert drifted.reason is PolicyReason.SOURCE_DRIFT
+    assert drifted.plan is None
+
+    def expired(boundary: PlanAuthorityBoundary) -> PlanAuthorityDecision:
+        return attest_plan_authority(
+            boundary,
+            witness_sha256="e" * 64,
+            now_ns=time.monotonic_ns() - 1_000_000,
+            freshness_ns=1,
+        )
+
+    stale = admit_supervisor_proposal(
+        proposal,
+        supervisor_input,
+        replace(trusted, authority_attestor=expired),
+    )
+    assert stale.reason is PolicyReason.AUTHORITY_STALE
+    assert stale.plan is None
+
+
+def test_policy_kernel_rejects_budget_drift_and_plan_binds_every_ceiling() -> None:
+    supervisor_input = build_supervisor_input(_compare_turn(), _settings())
+    proposal = SupervisorProposal.parse(_proposal_payload(supervisor_input))
+    context = _policy_context(supervisor_input)
+
+    proposal_drift = admit_supervisor_proposal(
+        replace(proposal, budget_sha256="f" * 64),
+        supervisor_input,
+        context,
+    )
+    assert proposal_drift.reason is PolicyReason.BUDGET_DRIFT
+    assert proposal_drift.plan is None
+
+    input_drift = replace(
+        supervisor_input,
+        budgets=replace(supervisor_input.budgets, max_tool_calls=1),
+    )
+    budget_drift = admit_supervisor_proposal(proposal, input_drift, context)
+    assert budget_drift.reason is PolicyReason.BUDGET_DRIFT
+    assert budget_drift.plan is None
+
+    admitted = admit_supervisor_proposal(proposal, supervisor_input, context)
+    assert admitted.plan is not None
+    plan = admitted.plan
+    assert plan.budget_sha256 == supervisor_input.budgets.canonical_sha256()
+    assert plan.budgets == supervisor_input.budgets
+    assert all(step.deadline_ms == plan.budgets.per_step_deadline_ms for step in plan.steps)
+    assert [(step.max_calls, step.max_output_tokens) for step in plan.steps] == [
+        (1, 0),
+        (1, 0),
+        (2, 1_024),
+    ]
+    assert "monotonic" not in json.dumps(plan.payload(), sort_keys=True)
+
+    with pytest.raises(ExecutionPlanError, match="budget binding is stale"):
+        replace(plan, budget_sha256="f" * 64)
+    with pytest.raises(ExecutionPlanError, match="source binding digest is stale"):
+        replace(
+            plan,
+            source_bindings=(
+                PlanSourceBinding.shadow_projection(
+                    projection_sha256="1" * 64,
+                    manifest_sha256="2" * 64,
+                    turn_sha256="3" * 64,
+                ),
+            ),
+        )
+    with pytest.raises(ExecutionPlanError, match="authority binding is stale"):
+        replace(plan, authority_binding_sha256="f" * 64)
+    with pytest.raises(ExecutionPlanError, match="authority binding is stale"):
+        replace(plan, manifest_digest="f" * 64)
+    with pytest.raises(ExecutionPlanError, match="authority binding is stale"):
+        replace(plan, policy_sha256="f" * 64)
+    with pytest.raises(ExecutionPlanError, match="deadline binding is stale"):
+        replace(
+            plan,
+            steps=(replace(plan.steps[0], deadline_ms=11_999), *plan.steps[1:]),
+        )
+
+
 def test_policy_kernel_rejects_private_binding_registry_drift() -> None:
     supervisor_input = build_supervisor_input(_compare_turn(), _settings())
     snapshot = operational_capability_snapshot()
@@ -479,11 +648,7 @@ def test_policy_kernel_rejects_private_binding_registry_drift() -> None:
     decision = admit_supervisor_proposal(
         SupervisorProposal.parse(_proposal_payload(supervisor_input)),
         supervisor_input,
-        PolicyAdmissionContext(
-            actor_binding_sha256="a" * 64,
-            conversation_binding_sha256="b" * 64,
-            capability_bindings=drifted,
-        ),
+        _policy_context(supervisor_input, capability_bindings=drifted),
     )
 
     assert decision.admitted is False
@@ -499,10 +664,7 @@ def test_policy_kernel_rejects_manifest_reparsed_without_private_binding_witness
     decision = admit_supervisor_proposal(
         proposal,
         reparsed,
-        PolicyAdmissionContext(
-            actor_binding_sha256="a" * 64,
-            conversation_binding_sha256="b" * 64,
-        ),
+        _policy_context(reparsed),
     )
 
     assert decision.reason is PolicyReason.REGISTRY_DRIFT
@@ -537,10 +699,7 @@ def test_policy_kernel_recomputes_step_semantics(
     decision = admit_supervisor_proposal(
         SupervisorProposal.parse(_proposal_payload(supervisor_input, steps=steps)),
         supervisor_input,
-        PolicyAdmissionContext(
-            actor_binding_sha256="a" * 64,
-            conversation_binding_sha256="b" * 64,
-        ),
+        _policy_context(supervisor_input),
     )
     assert decision.reason is expected_reason
 
@@ -568,10 +727,7 @@ def test_policy_kernel_binds_proposal_task_to_code_owned_turn_class() -> None:
             )
         ),
         supervisor_input,
-        PolicyAdmissionContext(
-            actor_binding_sha256="a" * 64,
-            conversation_binding_sha256="b" * 64,
-        ),
+        _policy_context(supervisor_input),
     )
     assert decision.reason is PolicyReason.TASK_CLASS_MISMATCH
 
@@ -582,10 +738,7 @@ def test_policy_kernel_requires_complete_capability_and_code_owned_completion_sh
         attachments=[{"mime_type": "application/pdf"}],
     )
     partial_input = build_supervisor_input(partial_turn, _settings())
-    context = PolicyAdmissionContext(
-        actor_binding_sha256="a" * 64,
-        conversation_binding_sha256="b" * 64,
-    )
+    context = _policy_context(partial_input)
     partial = admit_supervisor_proposal(
         SupervisorProposal.parse(_proposal_payload(partial_input)),
         partial_input,
@@ -705,10 +858,7 @@ def test_archive_and_current_web_route_mints_exact_two_read_plan_shape() -> None
     decision = admit_supervisor_proposal(
         proposal,
         supervisor_input,
-        PolicyAdmissionContext(
-            actor_binding_sha256="a" * 64,
-            conversation_binding_sha256="b" * 64,
-        ),
+        _policy_context(supervisor_input),
     )
 
     assert decision.admitted is True
@@ -778,10 +928,7 @@ def test_supervisor_messages_keep_untrusted_user_text_out_of_policy() -> None:
     admitted = admit_supervisor_proposal(
         proposal,
         supervisor_input,
-        PolicyAdmissionContext(
-            actor_binding_sha256="a" * 64,
-            conversation_binding_sha256="b" * 64,
-        ),
+        _policy_context(supervisor_input),
     )
     assert admitted.admitted is True
     request = build_supervisor_request(
@@ -827,14 +974,15 @@ def test_assist_proposal_transport_and_kernel_bind_the_distinct_v2_policy() -> N
     decision = admit_supervisor_proposal(
         proposal,
         supervisor_input,
-        PolicyAdmissionContext(
-            actor_binding_sha256="a" * 64,
-            conversation_binding_sha256="b" * 64,
-        ),
+        _policy_context(supervisor_input),
     )
     assert decision.admitted is True
     assert decision.plan is not None
     assert decision.plan.policy_version == (semantic_supervisor_policy.SUPERVISOR_ASSIST_PRODUCT_POLICY_ID)
+    assert decision.plan.budgets.max_capability_calls == 3
+    assert {step.capability_id: step.max_calls for step in decision.plan.steps}[
+        WEB_SEARCH_CURRENT_ID
+    ] == 2
     assert decision.plan.confirmation_required is False
     assert decision.plan.publication_owner == "primary"
 

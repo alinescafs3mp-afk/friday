@@ -8,9 +8,16 @@ from typing import Any
 
 from friday.orchestration.supervisor_contracts import (
     CapabilityEffectClass,
+    SupervisorBudgets,
     SupervisorContractError,
     SupervisorProposal,
     canonical_sha256,
+)
+from friday.orchestration.supervisor_plan_authority import (
+    PlanAuthorityScope,
+    PlanSourceBinding,
+    durable_authority_binding_sha256,
+    source_bindings_sha256,
 )
 
 VALIDATED_EXECUTION_PLAN_SCHEMA = "friday.validated-execution-plan.v1"
@@ -39,6 +46,9 @@ class ValidatedStep:
     parallel_group: str | None
     input: Mapping[str, Any]
     idempotency_key: str
+    deadline_ms: int
+    max_calls: int
+    max_output_tokens: int
 
     def __post_init__(self) -> None:
         identities = (
@@ -51,6 +61,14 @@ class ValidatedStep:
         for item in identities:
             if item is not None and (not item or len(item) > 256 or item != item.strip()):
                 raise ExecutionPlanError("resolved capability identity is invalid")
+        if type(self.deadline_ms) is not int or not 100 <= self.deadline_ms <= 15_000:
+            raise ExecutionPlanError("validated step deadline is invalid")
+        if type(self.max_calls) is not int or not 1 <= self.max_calls <= 2:
+            raise ExecutionPlanError("validated step call budget is invalid")
+        if type(self.max_output_tokens) is not int or not 0 <= self.max_output_tokens <= 1_024:
+            raise ExecutionPlanError("validated step output budget is invalid")
+        if self.resolved_security_id is not None and self.max_output_tokens != 0:
+            raise ExecutionPlanError("capability step call/output budget is invalid")
 
     def payload(self) -> dict[str, Any]:
         return {
@@ -64,6 +82,9 @@ class ValidatedStep:
             "parallel_group": self.parallel_group,
             "input": dict(self.input),
             "idempotency_key": self.idempotency_key,
+            "deadline_ms": self.deadline_ms,
+            "max_calls": self.max_calls,
+            "max_output_tokens": self.max_output_tokens,
         }
 
 
@@ -73,8 +94,16 @@ class ValidatedExecutionPlan:
     manifest_digest: str
     binding_snapshot_sha256: str
     policy_version: str
+    policy_sha256: str
     actor_binding_sha256: str
     conversation_binding_sha256: str
+    authority_scope: PlanAuthorityScope
+    authority_binding_sha256: str
+    required_security_ids: tuple[str, ...]
+    source_bindings: tuple[PlanSourceBinding, ...]
+    source_bindings_sha256: str
+    budget_sha256: str
+    budgets: SupervisorBudgets
     effect_classes: tuple[CapabilityEffectClass, ...]
     confirmation_required: bool
     confirmation_present: bool
@@ -86,14 +115,82 @@ class ValidatedExecutionPlan:
     def __post_init__(self) -> None:
         if not isinstance(self._seal, _AdmissionSeal) or self._seal.token != "policy-kernel-v1":
             raise ExecutionPlanError("validated execution plan cannot be constructed from model output")
-        if len(self.binding_snapshot_sha256) != 64 or any(
-            ch not in "0123456789abcdef" for ch in self.binding_snapshot_sha256
+        for label, value in (
+            ("binding snapshot", self.binding_snapshot_sha256),
+            ("policy", self.policy_sha256),
+            ("authority binding", self.authority_binding_sha256),
+            ("source bindings", self.source_bindings_sha256),
+            ("budget", self.budget_sha256),
         ):
-            raise ExecutionPlanError("validated execution plan binding snapshot is invalid")
+            if len(value) != 64 or any(ch not in "0123456789abcdef" for ch in value):
+                raise ExecutionPlanError(f"validated execution plan {label} is invalid")
+        if type(self.authority_scope) is not PlanAuthorityScope:
+            raise ExecutionPlanError("validated execution plan authority scope is invalid")
+        try:
+            exact_sources = source_bindings_sha256(self.source_bindings)
+        except (TypeError, ValueError) as exc:
+            raise ExecutionPlanError("validated execution plan source bindings are invalid") from exc
+        if exact_sources != self.source_bindings_sha256:
+            raise ExecutionPlanError("validated execution plan source binding digest is stale")
+        if type(self.budgets) is not SupervisorBudgets or (
+            self.budgets.canonical_sha256() != self.budget_sha256
+        ):
+            raise ExecutionPlanError("validated execution plan budget binding is stale")
+        try:
+            exact_authority = durable_authority_binding_sha256(
+                scope=self.authority_scope,
+                actor_binding_sha256=self.actor_binding_sha256,
+                conversation_binding_sha256=self.conversation_binding_sha256,
+                proposal_sha256=self.proposal_digest,
+                manifest_sha256=self.manifest_digest,
+                policy_sha256=self.policy_sha256,
+                source_bindings_sha256=self.source_bindings_sha256,
+                capability_bindings_sha256=self.binding_snapshot_sha256,
+                budget_sha256=self.budget_sha256,
+                required_security_ids=self.required_security_ids,
+            )
+        except (TypeError, ValueError) as exc:
+            raise ExecutionPlanError("validated execution plan authority binding is invalid") from exc
+        if exact_authority != self.authority_binding_sha256:
+            raise ExecutionPlanError("validated execution plan authority binding is stale")
+        if any(step.deadline_ms != self.budgets.per_step_deadline_ms for step in self.steps):
+            raise ExecutionPlanError("validated execution plan deadline binding is stale")
         if not self.steps:
             raise ExecutionPlanError("validated execution plan needs at least one admitted step")
         if any(effect is not CapabilityEffectClass.READ for effect in self.effect_classes):
             raise ExecutionPlanError("P1 validated plans may admit read steps only")
+        if self.effect_classes != tuple(step.effect_class for step in self.steps):
+            raise ExecutionPlanError("validated execution plan effect binding is stale")
+        capability_steps = tuple(
+            step for step in self.steps if step.resolved_security_id is not None
+        )
+        model_steps = tuple(step for step in self.steps if step.resolved_security_id is None)
+        if tuple(
+            sorted(
+                {
+                    step.resolved_security_id
+                    for step in capability_steps
+                    if step.resolved_security_id is not None
+                }
+            )
+        ) != self.required_security_ids:
+            raise ExecutionPlanError("validated execution plan security binding is stale")
+        if (
+            len(self.steps) > self.budgets.max_steps
+            or sum(step.max_calls for step in capability_steps)
+            != self.budgets.max_capability_calls
+            or sum(step.max_calls for step in model_steps)
+            > self.budgets.max_model_calls - self.budgets.max_supervisor_calls
+            or sum(step.max_output_tokens for step in model_steps)
+            > self.budgets.max_output_tokens
+        ):
+            raise ExecutionPlanError("validated execution plan resource binding is stale")
+        parallel_counts: dict[str, int] = {}
+        for step in capability_steps:
+            if step.parallel_group is not None:
+                parallel_counts[step.parallel_group] = parallel_counts.get(step.parallel_group, 0) + 1
+        if any(count > self.budgets.max_parallel_reads for count in parallel_counts.values()):
+            raise ExecutionPlanError("validated execution plan parallel budget is stale")
         if self.publication_owner != "primary":
             raise ExecutionPlanError("publication owner must remain the primary model")
         if self.fallback_owner != "primary_only":
@@ -106,8 +203,16 @@ class ValidatedExecutionPlan:
             "manifest_digest": self.manifest_digest,
             "binding_snapshot_sha256": self.binding_snapshot_sha256,
             "policy_version": self.policy_version,
+            "policy_sha256": self.policy_sha256,
             "actor_binding_sha256": self.actor_binding_sha256,
             "conversation_binding_sha256": self.conversation_binding_sha256,
+            "authority_scope": self.authority_scope.value,
+            "authority_binding_sha256": self.authority_binding_sha256,
+            "required_security_ids": list(self.required_security_ids),
+            "source_bindings": [item.payload() for item in self.source_bindings],
+            "source_bindings_sha256": self.source_bindings_sha256,
+            "budget_sha256": self.budget_sha256,
+            "budgets": self.budgets.payload(),
             "effect_classes": [item.value for item in self.effect_classes],
             "confirmation_required": self.confirmation_required,
             "confirmation_present": self.confirmation_present,
@@ -137,8 +242,14 @@ def plan_from_admitted_proposal(
     manifest_digest: str,
     binding_snapshot_sha256: str,
     policy_version: str,
+    policy_sha256: str,
     actor_binding_sha256: str,
     conversation_binding_sha256: str,
+    authority_scope: PlanAuthorityScope,
+    authority_binding_sha256: str,
+    required_security_ids: tuple[str, ...],
+    source_bindings: tuple[PlanSourceBinding, ...],
+    budgets: SupervisorBudgets,
     steps: tuple[ValidatedStep, ...],
     seal: _AdmissionSeal,
 ) -> ValidatedExecutionPlan:
@@ -148,8 +259,16 @@ def plan_from_admitted_proposal(
         manifest_digest=manifest_digest,
         binding_snapshot_sha256=binding_snapshot_sha256,
         policy_version=policy_version,
+        policy_sha256=policy_sha256,
         actor_binding_sha256=actor_binding_sha256,
         conversation_binding_sha256=conversation_binding_sha256,
+        authority_scope=authority_scope,
+        authority_binding_sha256=authority_binding_sha256,
+        required_security_ids=required_security_ids,
+        source_bindings=source_bindings,
+        source_bindings_sha256=source_bindings_sha256(source_bindings),
+        budget_sha256=budgets.canonical_sha256(),
+        budgets=budgets,
         effect_classes=effects,
         confirmation_required=False,
         confirmation_present=False,

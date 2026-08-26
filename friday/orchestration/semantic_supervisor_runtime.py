@@ -26,6 +26,7 @@ from friday.orchestration.semantic_supervisor import (
     build_supervisor_input,
     build_supervisor_request,
     map_secondary_failure,
+    shadow_policy_admission_context,
     supervisor_eligibility,
     supervisor_mode_from_settings,
     supervisor_timeout_sec,
@@ -549,6 +550,11 @@ class SemanticSupervisorShadowRuntime:
             deadline = min(deadline, external_deadline)
 
         try:
+            supervisor_input = build_supervisor_input(turn, self._settings)
+        except Exception:
+            return None, self._skipped(SupervisorSkipReason.EVIDENCE_UNAVAILABLE, turn=turn)
+
+        try:
             person_id = str(actor.own_id or "")
             conversation_scope = str(conversation_id or "new-conversation")
             if not 1 <= len(person_id) <= 512 or not 1 <= len(conversation_scope) <= 512:
@@ -559,17 +565,14 @@ class SemanticSupervisorShadowRuntime:
                 actor_binding,
                 conversation_scope,
             )
-            context = PolicyAdmissionContext(
+            context = shadow_policy_admission_context(
+                supervisor_input,
                 actor_binding_sha256=actor_binding,
                 conversation_binding_sha256=conversation_binding,
+                turn_deadline_monotonic_ns=int(deadline * 1_000_000_000),
             )
         except Exception:
             return None, self._skipped(SupervisorSkipReason.BINDING_UNAVAILABLE, turn=turn)
-
-        try:
-            supervisor_input = build_supervisor_input(turn, self._settings)
-        except Exception:
-            return None, self._skipped(SupervisorSkipReason.EVIDENCE_UNAVAILABLE, turn=turn)
 
         try:
             request = build_supervisor_request(

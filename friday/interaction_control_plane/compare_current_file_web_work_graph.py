@@ -35,6 +35,15 @@ from friday.orchestration.supervisor_contracts import (
     WEB_SEARCH_CURRENT_ID,
     CapabilityEffectClass,
 )
+from friday.orchestration.supervisor_plan_authority import (
+    PlanAuthorityScope,
+    PlanSourceKind,
+)
+from friday.semantic_supervisor_policy import (
+    SUPERVISOR_PRIMARY_MODEL_CALLS,
+    SUPERVISOR_PRIMARY_OUTPUT_TOKENS,
+    supervisor_product_policy_identity_for_mode,
+)
 
 COMPARE_CURRENT_FILE_WEB_WORK_GRAPH_SCHEMA = "friday.compare-current-file-with-current-web-work-graph.v2"
 COMPARE_CURRENT_FILE_WEB_STEP_OUTCOME_SCHEMA = "friday.compare-current-file-with-current-web-step-outcome.v1"
@@ -541,7 +550,29 @@ def bind_validated_plan_to_compare_current_file_web_graph(
     controller identifiers.  No alias is accepted in the opposite namespace.
     """
 
-    if type(plan) is not ValidatedExecutionPlan or len(plan.steps) != len(_FIXED_STEP_ORDER):
+    assist_policy = supervisor_product_policy_identity_for_mode("assist")
+    budgets = plan.budgets if type(plan) is ValidatedExecutionPlan else None
+    if (
+        type(plan) is not ValidatedExecutionPlan
+        or len(plan.steps) != len(_FIXED_STEP_ORDER)
+        or plan.policy_version != assist_policy.policy_id
+        or plan.policy_sha256 != assist_policy.policy_sha256
+        or plan.authority_scope is not PlanAuthorityScope.ASSIST_EXECUTION
+        or len(plan.source_bindings) != 1
+        or plan.source_bindings[0].kind is not PlanSourceKind.CURRENT_RAW_OBJECT
+        or budgets is None
+        or budgets.max_steps != assist_policy.max_steps
+        or budgets.max_parallel_reads != assist_policy.max_parallel_reads
+        or budgets.turn_deadline_ms != assist_policy.turn_deadline_ms
+        or budgets.per_step_deadline_ms != assist_policy.per_step_deadline_ms
+        or budgets.max_supervisor_calls != assist_policy.max_supervisor_calls
+        or budgets.max_model_calls != assist_policy.max_model_calls
+        or budgets.max_tool_calls != assist_policy.max_tool_calls
+        or budgets.max_capability_calls != assist_policy.max_capability_calls
+        or budgets.max_review_rounds != assist_policy.max_review_rounds
+        or budgets.max_recovery_rounds != assist_policy.max_recovery_rounds
+        or budgets.max_output_tokens != assist_policy.max_output_tokens
+    ):
         raise CompareCurrentFileWebGraphError("P3 graph requires one exact admitted P2 plan")
     by_capability: dict[str, ValidatedStep] = {}
     for step in plan.steps:
@@ -562,6 +593,15 @@ def bind_validated_plan_to_compare_current_file_web_graph(
         or file_step.parallel_group is None
         or file_step.parallel_group != web_step.parallel_group
         or synthesis.parallel_group is not None
+        or file_step.deadline_ms != budgets.per_step_deadline_ms
+        or web_step.deadline_ms != budgets.per_step_deadline_ms
+        or synthesis.deadline_ms != budgets.per_step_deadline_ms
+        or file_step.max_calls != 1
+        or web_step.max_calls != 2
+        or synthesis.max_calls != SUPERVISOR_PRIMARY_MODEL_CALLS
+        or file_step.max_output_tokens != 0
+        or web_step.max_output_tokens != 0
+        or synthesis.max_output_tokens != SUPERVISOR_PRIMARY_OUTPUT_TOKENS
     ):
         raise CompareCurrentFileWebGraphError("P2 plan dependency shape does not match P3")
     return tuple(

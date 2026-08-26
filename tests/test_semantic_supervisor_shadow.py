@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import time
 from types import SimpleNamespace
 from typing import Any
 
@@ -14,6 +15,7 @@ from friday.orchestration.semantic_supervisor import (
     build_supervisor_messages,
     build_supervisor_request,
     observe_semantic_supervisor_shadow,
+    shadow_policy_admission_context,
     validate_shadow_proposal,
 )
 from friday.orchestration.supervisor_contracts import (
@@ -64,6 +66,7 @@ def _valid_proposal(supervisor_input: Any) -> dict[str, Any]:
     return {
         "schema": SUPERVISOR_PROPOSAL_SCHEMA,
         "manifest_id": supervisor_input.manifest.manifest_id,
+        "budget_sha256": supervisor_input.budgets.canonical_sha256(),
         "task_class": "compare_current_file_with_current_web",
         "goal": "Compare the supplied document with current public rules.",
         "continuation_decision": "new_task",
@@ -108,6 +111,17 @@ def _valid_proposal(supervisor_input: Any) -> dict[str, Any]:
         "review_mode": "none",
         "fallback": "primary_only",
     }
+
+
+def _policy_context(supervisor_input: Any) -> PolicyAdmissionContext:
+    return shadow_policy_admission_context(
+        supervisor_input,
+        actor_binding_sha256="a" * 64,
+        conversation_binding_sha256="b" * 64,
+        turn_deadline_monotonic_ns=(
+            time.monotonic_ns() + supervisor_input.budgets.turn_deadline_ms * 1_000_000
+        ),
+    )
 
 
 class _FakeScheduler:
@@ -362,10 +376,7 @@ def test_shadow_validator_reparses_raw_json_and_rejects_duplicate_keys() -> None
         validate_shadow_proposal(
             result,
             supervisor_input,
-            PolicyAdmissionContext(
-                actor_binding_sha256="a" * 64,
-                conversation_binding_sha256="b" * 64,
-            ),
+            _policy_context(supervisor_input),
         )
 
 
@@ -407,7 +418,7 @@ def test_quoted_injection_cannot_add_a_capability() -> None:
     decision = admit_supervisor_proposal(
         proposal,
         supervisor_input,
-        PolicyAdmissionContext(actor_binding_sha256="a" * 64, conversation_binding_sha256="b" * 64),
+        _policy_context(supervisor_input),
     )
     assert decision.admitted is False
     assert decision.reason_code == "unknown_capability"

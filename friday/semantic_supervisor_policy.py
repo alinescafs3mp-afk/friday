@@ -35,6 +35,19 @@ SUPERVISOR_ADMITTED_TASKS = frozenset(
 )
 SUPERVISOR_ASSIST_ADMITTED_TASKS = frozenset({"compare_current_file_with_current_web"})
 
+# Exact end-to-end ceilings for the first bounded comparison journey.  They are
+# product policy, not loose runtime hints: any change creates a new policy hash
+# and therefore invalidates previously admitted promotion evidence.
+SUPERVISOR_TURN_DEADLINE_MS = 12_000
+SUPERVISOR_STEP_DEADLINE_MS = 12_000
+SUPERVISOR_MAX_CAPABILITY_CALLS = 2
+SUPERVISOR_ASSIST_MAX_CAPABILITY_CALLS = 3
+SUPERVISOR_MAX_TOOL_CALLS = 0
+SUPERVISOR_PRIMARY_MODEL_CALLS = 2
+SUPERVISOR_PLANNING_OUTPUT_TOKENS = 512
+SUPERVISOR_PRIMARY_OUTPUT_TOKENS = 1_024
+SUPERVISOR_REVIEW_OUTPUT_TOKENS = 256
+
 
 def _canonical_sha256(value: object) -> str:
     raw = json.dumps(
@@ -67,7 +80,17 @@ _EXPECTED_SUPERVISOR_PRODUCT_POLICY: Mapping[str, object] = MappingProxyType(
         "knowledge_writes_allowed": False,
         "max_steps": 6,
         "max_parallel_reads": 2,
+        "turn_deadline_ms": SUPERVISOR_TURN_DEADLINE_MS,
+        "per_step_deadline_ms": SUPERVISOR_STEP_DEADLINE_MS,
+        "max_supervisor_calls": 1,
+        "max_model_calls": 1 + SUPERVISOR_PRIMARY_MODEL_CALLS,
+        "max_tool_calls": SUPERVISOR_MAX_TOOL_CALLS,
+        "max_capability_calls": SUPERVISOR_MAX_CAPABILITY_CALLS,
         "max_review_rounds": 0,
+        "max_recovery_rounds": 0,
+        "max_output_tokens": (
+            SUPERVISOR_PLANNING_OUTPUT_TOKENS + SUPERVISOR_PRIMARY_OUTPUT_TOKENS
+        ),
         "promotion_admitted": False,
         "primary_fallback_required": True,
     }
@@ -99,7 +122,19 @@ _EXPECTED_SUPERVISOR_ASSIST_PRODUCT_POLICY: Mapping[str, object] = MappingProxyT
         "knowledge_writes_allowed": False,
         "max_steps": 6,
         "max_parallel_reads": 2,
+        "turn_deadline_ms": SUPERVISOR_TURN_DEADLINE_MS,
+        "per_step_deadline_ms": SUPERVISOR_STEP_DEADLINE_MS,
+        "max_supervisor_calls": 2,
+        "max_model_calls": 2 + SUPERVISOR_PRIMARY_MODEL_CALLS,
+        "max_tool_calls": SUPERVISOR_MAX_TOOL_CALLS,
+        "max_capability_calls": SUPERVISOR_ASSIST_MAX_CAPABILITY_CALLS,
         "max_review_rounds": 1,
+        "max_recovery_rounds": 1,
+        "max_output_tokens": (
+            SUPERVISOR_PLANNING_OUTPUT_TOKENS
+            + SUPERVISOR_PRIMARY_OUTPUT_TOKENS
+            + SUPERVISOR_REVIEW_OUTPUT_TOKENS
+        ),
         "promotion_admitted": False,
         "primary_fallback_required": True,
     }
@@ -153,7 +188,15 @@ class SupervisorProductPolicyIdentity:
     admitted_tasks: frozenset[str]
     max_steps: int
     max_parallel_reads: int
+    turn_deadline_ms: int
+    per_step_deadline_ms: int
+    max_supervisor_calls: int
+    max_model_calls: int
+    max_tool_calls: int
+    max_capability_calls: int
     max_review_rounds: int
+    max_recovery_rounds: int
+    max_output_tokens: int
 
 
 def supervisor_product_policy_identity_for_mode(
@@ -175,7 +218,19 @@ def supervisor_product_policy_identity_for_mode(
             admitted_tasks=SUPERVISOR_ASSIST_ADMITTED_TASKS,
             max_steps=6,
             max_parallel_reads=2,
+            turn_deadline_ms=SUPERVISOR_TURN_DEADLINE_MS,
+            per_step_deadline_ms=SUPERVISOR_STEP_DEADLINE_MS,
+            max_supervisor_calls=2,
+            max_model_calls=2 + SUPERVISOR_PRIMARY_MODEL_CALLS,
+            max_tool_calls=SUPERVISOR_MAX_TOOL_CALLS,
+            max_capability_calls=SUPERVISOR_ASSIST_MAX_CAPABILITY_CALLS,
             max_review_rounds=1,
+            max_recovery_rounds=1,
+            max_output_tokens=(
+                SUPERVISOR_PLANNING_OUTPUT_TOKENS
+                + SUPERVISOR_PRIMARY_OUTPUT_TOKENS
+                + SUPERVISOR_REVIEW_OUTPUT_TOKENS
+            ),
         )
     return SupervisorProductPolicyIdentity(
         schema=SUPERVISOR_POLICY_SCHEMA,
@@ -185,7 +240,17 @@ def supervisor_product_policy_identity_for_mode(
         admitted_tasks=SUPERVISOR_ADMITTED_TASKS,
         max_steps=6,
         max_parallel_reads=2,
+        turn_deadline_ms=SUPERVISOR_TURN_DEADLINE_MS,
+        per_step_deadline_ms=SUPERVISOR_STEP_DEADLINE_MS,
+        max_supervisor_calls=1,
+        max_model_calls=1 + SUPERVISOR_PRIMARY_MODEL_CALLS,
+        max_tool_calls=SUPERVISOR_MAX_TOOL_CALLS,
+        max_capability_calls=SUPERVISOR_MAX_CAPABILITY_CALLS,
         max_review_rounds=0,
+        max_recovery_rounds=0,
+        max_output_tokens=(
+            SUPERVISOR_PLANNING_OUTPUT_TOKENS + SUPERVISOR_PRIMARY_OUTPUT_TOKENS
+        ),
     )
 
 
@@ -287,7 +352,7 @@ def evaluate_supervisor_policy_admission(
         and isinstance(timeout_sec, (int, float))
         and not isinstance(timeout_sec, bool)
         and math.isfinite(timeout_sec)
-        and 0.1 <= timeout_sec <= 15.0
+        and int(round(float(timeout_sec) * 1_000)) == identity.turn_deadline_ms
     )
 
     reason = SupervisorPolicyClosedReason.ADMITTED

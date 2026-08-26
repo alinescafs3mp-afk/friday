@@ -74,6 +74,13 @@ def test_composition_stays_absent_without_the_exact_promoted_configuration(
         )
         is None
     )
+    assert (
+        composition.build_supervisor_assist_production_runtime(
+            settings=_settings(tmp_path, semantic_supervisor_timeout_sec=12.001),
+            **common,
+        )
+        is None
+    )
 
 
 def test_composition_binds_one_controller_and_both_postcommit_observers(

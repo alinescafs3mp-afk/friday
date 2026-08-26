@@ -43,7 +43,11 @@ from friday.orchestration.capability_binding import (
 from friday.orchestration.contracts import TurnInput
 from friday.orchestration.policy_kernel import PolicyAdmissionContext, admit_supervisor_proposal
 from friday.orchestration.router import ReadOnlyAttachmentReference
-from friday.orchestration.semantic_supervisor import ParsedSupervisorProposal
+from friday.orchestration.semantic_supervisor import (
+    ParsedSupervisorProposal,
+    binding_digest,
+    build_supervisor_input,
+)
 from friday.orchestration.supervisor_assist_controller import (
     SUPERVISOR_ASSIST_CONTROLLER_STATUS_SCHEMA,
     AssistObservationStatus,
@@ -84,6 +88,18 @@ from friday.orchestration.supervisor_contracts import (
     SupervisorProposal,
     SupervisorReview,
 )
+from friday.orchestration.supervisor_plan_authority import (
+    PlanAuthorityBoundary,
+    PlanAuthorityDecision,
+    PlanAuthorityReason,
+    PlanAuthorityScope,
+    PlanSourceBinding,
+    attest_plan_authority,
+    source_bindings_sha256,
+)
+from friday.orchestration.supervisor_plan_authority_gate import (
+    SupervisorAssistPlanAuthorityGate,
+)
 from friday.orchestration.supervisor_review_policy import (
     SupervisorReviewContext,
     admit_supervisor_review,
@@ -94,7 +110,7 @@ from friday.orchestration.transient_web_comparison import (
     TransientWebEvidenceStatus,
 )
 from friday.pending_durable_turn import PendingDurableTurnAdmission
-from friday.permissions import ActorContext, AuthorizationError
+from friday.permissions import ActorContext, AuthorizationError, AuthorizationService
 from friday.source_identity import (
     authorized_file_snapshot_token,
     raw_source_identity_sha256,
@@ -243,6 +259,7 @@ class _Planner:
                 {
                     "schema": SUPERVISOR_PROPOSAL_SCHEMA,
                     "manifest_id": supervisor_input.manifest.manifest_id,
+                    "budget_sha256": supervisor_input.budgets.canonical_sha256(),
                     "task_class": "compare_current_file_with_current_web",
                     "goal": "Compare the supplied file with current public evidence.",
                     "continuation_decision": "new_task",
@@ -781,6 +798,10 @@ def _controller(
     binding_snapshot_factory: Any = operational_capability_snapshot,
     settings: Any = None,
     authority_check: Any = lambda _actor, _boundary: True,
+    plan_authority_check: Any = lambda _surface, boundary: attest_plan_authority(
+        boundary,
+        witness_sha256="9" * 64,
+    ),
     effect_check: Any = lambda _boundary: True,
 ) -> SupervisorAssistController:
     kwargs: dict[str, Any] = {}
@@ -797,6 +818,7 @@ def _controller(
         web_reader=web_reader or SimpleNamespace(research=lambda *_args, **_kwargs: None),
         canary_actor_binding=lambda _actor: "c" * 64,
         authority_check=authority_check,
+        plan_authority_check=plan_authority_check,
         effect_check=effect_check,
         post_commit_observer=observer,
         max_review_rounds=max_review_rounds,
@@ -826,6 +848,84 @@ async def test_preownership_failure_calls_legacy_exactly_once() -> None:
     assert result.outcome is SupervisorAssistOutcome.LEGACY
     assert calls == 1
     assert planner.calls == 0
+
+
+@pytest.mark.asyncio
+async def test_plan_mint_authority_denial_falls_back_before_graph_admission() -> None:
+    planner = _Planner()
+    controller = _controller(
+        planner=planner,
+        plan_authority_check=lambda _surface, _boundary: PlanAuthorityDecision.rejected(
+            PlanAuthorityReason.DENIED
+        ),
+    )
+    legacy_calls = 0
+
+    async def legacy() -> dict[str, object]:
+        nonlocal legacy_calls
+        legacy_calls += 1
+        return {"message": "legacy"}
+
+    result = await controller.execute(
+        _surface(),
+        legacy_primary=legacy,
+        absolute_deadline=time.monotonic() + 3,
+    )
+
+    assert result.outcome is SupervisorAssistOutcome.LEGACY
+    assert planner.calls == 1
+    assert legacy_calls == 1
+
+
+def test_production_plan_authority_gate_rechecks_principal_and_exact_raw_source(storage: Any) -> None:
+    surface, _ = _stored_surface(storage, "plan-authority")
+    supervisor_input = build_supervisor_input(surface.turn, _settings())
+    snapshot = operational_capability_snapshot()
+    source = PlanSourceBinding.current_raw_object(
+        raw_object_id=surface.attachment.raw_object_id,
+        source_identity_sha256=surface.attachment.source_identity_sha256,
+        content_sha256=surface.attachment_content_sha256,
+    )
+    boundary = PlanAuthorityBoundary(
+        scope=PlanAuthorityScope.ASSIST_EXECUTION,
+        actor_binding_sha256=binding_digest("actor", str(surface.actor.own_id)),
+        conversation_binding_sha256=binding_digest(
+            "conversation",
+            surface.conversation_id,
+        ),
+        proposal_sha256="a" * 64,
+        manifest_sha256=supervisor_input.manifest.digest_hex(),
+        policy_sha256=semantic_supervisor_policy.SUPERVISOR_ASSIST_PRODUCT_POLICY_SHA256,
+        source_bindings_sha256=source_bindings_sha256((source,)),
+        capability_bindings_sha256=snapshot.digest_hex(),
+        budget_sha256=supervisor_input.budgets.canonical_sha256(),
+        required_security_ids=("files.read", "web.compare.transient"),
+        turn_deadline_monotonic_ns=(
+            time.monotonic_ns() + supervisor_input.budgets.turn_deadline_ms * 1_000_000
+        ),
+    )
+    authorization = AuthorizationService(storage)
+    authorization.grant_permission(surface.actor.user_id, "web.compare.transient")
+    gate = SupervisorAssistPlanAuthorityGate(storage, authorization)
+
+    admitted = gate(surface, boundary)
+    assert admitted.reason is PlanAuthorityReason.ADMITTED
+    assert admitted.attestation is not None
+    assert admitted.attestation.is_fresh_for(boundary, now_ns=time.monotonic_ns())
+
+    storage.execute(
+        "UPDATE raw_objects SET content_hash=? WHERE id=? AND user_id=?",
+        ("f" * 64, surface.attachment.raw_object_id, surface.actor.user_id),
+    )
+    storage.conn.commit()
+    assert gate(surface, boundary).reason is PlanAuthorityReason.SOURCE_DRIFT
+
+    storage.execute(
+        "UPDATE users SET status='disabled' WHERE id=?",
+        (surface.actor.own_id,),
+    )
+    storage.conn.commit()
+    assert gate(surface, boundary).reason is PlanAuthorityReason.DENIED
 
 
 @pytest.mark.asyncio

@@ -103,9 +103,11 @@ class _Primary:
 def _valid_proposal(request: Any) -> dict[str, Any]:
     envelope = json.loads(request.messages[1]["content"])
     manifest_id = envelope["untrusted_payload"]["capability_manifest"]["manifest_id"]
+    budget_sha256 = envelope["untrusted_payload"]["response_template"]["budget_sha256"]
     return {
         "schema": SUPERVISOR_PROPOSAL_SCHEMA,
         "manifest_id": manifest_id,
+        "budget_sha256": budget_sha256,
         "task_class": "compare_current_file_with_current_web",
         "goal": "Compare the supplied document with current public rules.",
         "continuation_decision": "new_task",

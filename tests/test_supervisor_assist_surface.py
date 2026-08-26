@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+import time
 from types import SimpleNamespace
 from typing import Any
 
@@ -19,6 +21,11 @@ from friday.orchestration.supervisor_assist_surface import (
 from friday.orchestration.supervisor_contracts import (
     SUPERVISOR_PROPOSAL_SCHEMA,
     SupervisorProposal,
+)
+from friday.orchestration.supervisor_plan_authority import (
+    PlanAuthorityScope,
+    PlanSourceBinding,
+    attest_plan_authority,
 )
 from friday.pending_durable_turn import PendingDurableTurnAdmission
 from friday.permissions import ActorContext
@@ -128,6 +135,7 @@ def _plan(surface: CurrentFileWebAssistSurface, *, query: str) -> Any:
         {
             "schema": SUPERVISOR_PROPOSAL_SCHEMA,
             "manifest_id": supervisor_input.manifest.manifest_id,
+            "budget_sha256": supervisor_input.budgets.canonical_sha256(),
             "task_class": "compare_current_file_with_current_web",
             "goal": "Compare the supplied file with current public evidence.",
             "continuation_decision": "new_task",
@@ -179,6 +187,21 @@ def _plan(surface: CurrentFileWebAssistSurface, *, query: str) -> Any:
         PolicyAdmissionContext(
             actor_binding_sha256="a" * 64,
             conversation_binding_sha256="b" * 64,
+            authority_scope=PlanAuthorityScope.ASSIST_EXECUTION,
+            source_bindings=(
+                PlanSourceBinding.current_raw_object(
+                    raw_object_id=surface.attachment.raw_object_id,
+                    source_identity_sha256=surface.attachment.source_identity_sha256,
+                    content_sha256=surface.attachment_content_sha256,
+                ),
+            ),
+            turn_deadline_monotonic_ns=(
+                time.monotonic_ns() + supervisor_input.budgets.turn_deadline_ms * 1_000_000
+            ),
+            authority_attestor=lambda boundary: attest_plan_authority(
+                boundary,
+                witness_sha256="9" * 64,
+            ),
             capability_bindings=operational_capability_snapshot(),
         ),
     )
@@ -318,6 +341,12 @@ def test_plan_binding_requires_exact_sealed_outbound_query() -> None:
         "read_current_web",
         "primary_synthesis",
     ]
+    private_plan = json.dumps(matching.payload(), sort_keys=True)
+    assert surface.attachment.raw_object_id not in private_plan
+    assert surface.attachment.source_identity_sha256 in private_plan
+    assert surface.attachment_content_sha256 in private_plan
+    assert matching.budget_sha256 == matching.budgets.canonical_sha256()
+    assert matching.budgets.turn_deadline_ms == 12_000
 
     mismatched = _plan(surface, query="другие публичные правила 2026")
     assert bind_assist_plan_to_surface(mismatched, surface) is None

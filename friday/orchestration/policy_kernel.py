@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import time
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from enum import StrEnum
@@ -44,6 +45,16 @@ from friday.orchestration.supervisor_contracts import (
     parse_supervisor_goal,
     parse_supervisor_purpose,
 )
+from friday.orchestration.supervisor_plan_authority import (
+    PlanAuthorityAttestor,
+    PlanAuthorityBoundary,
+    PlanAuthorityDecision,
+    PlanAuthorityReason,
+    PlanAuthorityScope,
+    PlanSourceBinding,
+    PlanSourceKind,
+    source_bindings_sha256,
+)
 
 
 class PolicyReason(StrEnum):
@@ -68,6 +79,11 @@ class PolicyReason(StrEnum):
     COMPLETION_CRITERIA_MISMATCH = "completion_criteria_mismatch"
     REVIEW_NOT_ADMITTED = "review_not_admitted"
     CONTROL_TEXT_NOT_ADMITTED = "control_text_not_admitted"
+    BUDGET_DRIFT = "budget_drift"
+    DEADLINE_EXPIRED = "deadline_expired"
+    AUTHORITY_DENIED = "authority_denied"
+    AUTHORITY_STALE = "authority_stale"
+    SOURCE_DRIFT = "source_drift"
 
 
 _EXPECTED_OUTCOME_BY_TARGET = {
@@ -105,6 +121,10 @@ _REQUIRED_CRITERIA_BY_TASK = {
 class PolicyAdmissionContext:
     actor_binding_sha256: str
     conversation_binding_sha256: str
+    authority_scope: PlanAuthorityScope
+    source_bindings: tuple[PlanSourceBinding, ...]
+    turn_deadline_monotonic_ns: int
+    authority_attestor: PlanAuthorityAttestor = field(repr=False, compare=False)
     confirmation_present: bool = False
     capability_bindings: CapabilityBindingSnapshot = field(
         default_factory=operational_capability_snapshot,
@@ -125,6 +145,18 @@ class PolicyAdmissionContext:
                 raise ExecutionPlanError(f"{label} must be a lowercase SHA-256 digest")
         if not isinstance(self.capability_bindings, CapabilityBindingSnapshot):
             raise ExecutionPlanError("capability bindings must be a code-owned snapshot")
+        if type(self.authority_scope) is not PlanAuthorityScope:
+            raise ExecutionPlanError("authority scope must be code-owned")
+        try:
+            source_bindings_sha256(self.source_bindings)
+        except (TypeError, ValueError) as exc:
+            raise ExecutionPlanError("source bindings must be code-owned") from exc
+        if (
+            type(self.turn_deadline_monotonic_ns) is not int
+            or self.turn_deadline_monotonic_ns <= 0
+            or not callable(self.authority_attestor)
+        ):
+            raise ExecutionPlanError("deadline and authority attestor must be code-owned")
 
 
 @dataclass(frozen=True, slots=True)
@@ -277,6 +309,41 @@ def _parallel_read_groups(proposal: SupervisorProposal) -> dict[str, int]:
     return counts
 
 
+def _budget_matches_policy(supervisor_input: SupervisorInput, identity: object) -> bool:
+    budgets = supervisor_input.budgets
+    return bool(
+        budgets.max_steps == getattr(identity, "max_steps", None)
+        and budgets.max_parallel_reads == getattr(identity, "max_parallel_reads", None)
+        and budgets.turn_deadline_ms == getattr(identity, "turn_deadline_ms", None)
+        and budgets.per_step_deadline_ms == getattr(identity, "per_step_deadline_ms", None)
+        and budgets.max_supervisor_calls == getattr(identity, "max_supervisor_calls", None)
+        and budgets.max_model_calls == getattr(identity, "max_model_calls", None)
+        and budgets.max_tool_calls == getattr(identity, "max_tool_calls", None)
+        and budgets.max_capability_calls == getattr(identity, "max_capability_calls", None)
+        and budgets.max_review_rounds == getattr(identity, "max_review_rounds", None)
+        and budgets.max_recovery_rounds == getattr(identity, "max_recovery_rounds", None)
+        and budgets.max_output_tokens == getattr(identity, "max_output_tokens", None)
+    )
+
+
+def _source_scope_is_admitted(
+    context: PolicyAdmissionContext,
+    *,
+    max_review_rounds: int,
+) -> bool:
+    if max_review_rounds == 1:
+        return bool(
+            context.authority_scope is PlanAuthorityScope.ASSIST_EXECUTION
+            and len(context.source_bindings) == 1
+            and context.source_bindings[0].kind is PlanSourceKind.CURRENT_RAW_OBJECT
+        )
+    return bool(
+        context.authority_scope is PlanAuthorityScope.SHADOW_ONLY
+        and len(context.source_bindings) == 1
+        and context.source_bindings[0].kind is PlanSourceKind.SHADOW_PROJECTION
+    )
+
+
 def admit_supervisor_proposal(
     proposal: SupervisorProposal,
     supervisor_input: SupervisorInput,
@@ -289,12 +356,24 @@ def admit_supervisor_proposal(
             supervisor_input.budgets.max_review_rounds
         )
     )
-    if (
-        policy_identity is None
-        or supervisor_input.budgets.max_steps != policy_identity.max_steps
-        or supervisor_input.budgets.max_parallel_reads != policy_identity.max_parallel_reads
-    ):
+    if policy_identity is None:
         return _reject(PolicyReason.REVIEW_NOT_ADMITTED)
+    if not _budget_matches_policy(supervisor_input, policy_identity):
+        return _reject(PolicyReason.BUDGET_DRIFT)
+    if proposal.budget_sha256 != supervisor_input.budgets.canonical_sha256():
+        return _reject(PolicyReason.BUDGET_DRIFT)
+    now_ns = time.monotonic_ns()
+    if (
+        context.turn_deadline_monotonic_ns <= now_ns
+        or context.turn_deadline_monotonic_ns - now_ns
+        > supervisor_input.budgets.turn_deadline_ms * 1_000_000
+    ):
+        return _reject(PolicyReason.DEADLINE_EXPIRED)
+    if not _source_scope_is_admitted(
+        context,
+        max_review_rounds=supervisor_input.budgets.max_review_rounds,
+    ):
+        return _reject(PolicyReason.SOURCE_DRIFT)
     if proposal.task_class.value not in policy_identity.admitted_tasks:
         return _reject(PolicyReason.TASK_CLASS_MISMATCH)
     if proposal.manifest_id != supervisor_input.manifest.manifest_id:
@@ -321,6 +400,46 @@ def admit_supervisor_proposal(
     shape_reason = _validate_task_shape(proposal, supervisor_input)
     if shape_reason is not None:
         return _reject(shape_reason)
+
+    required_security_ids = tuple(
+        sorted(
+            {
+                binding.security_id
+                for step in proposal.steps
+                if step.kind is StepKind.CAPABILITY
+                for binding in (context.capability_bindings.binding_for(step.target_id),)
+                if binding is not None and binding.security_id
+            }
+        )
+    )
+    authority_boundary = PlanAuthorityBoundary(
+        scope=context.authority_scope,
+        actor_binding_sha256=context.actor_binding_sha256,
+        conversation_binding_sha256=context.conversation_binding_sha256,
+        proposal_sha256=proposal.canonical_sha256(),
+        manifest_sha256=supervisor_input.manifest.digest_hex(),
+        policy_sha256=policy_identity.policy_sha256,
+        source_bindings_sha256=source_bindings_sha256(context.source_bindings),
+        capability_bindings_sha256=context.capability_bindings.digest_hex(),
+        budget_sha256=supervisor_input.budgets.canonical_sha256(),
+        required_security_ids=required_security_ids,
+        turn_deadline_monotonic_ns=context.turn_deadline_monotonic_ns,
+    )
+    try:
+        authority = context.authority_attestor(authority_boundary)
+    except Exception:
+        return _reject(PolicyReason.AUTHORITY_DENIED)
+    if type(authority) is not PlanAuthorityDecision:
+        return _reject(PolicyReason.AUTHORITY_DENIED)
+    if authority.reason is PlanAuthorityReason.SOURCE_DRIFT:
+        return _reject(PolicyReason.SOURCE_DRIFT)
+    if authority.reason is PlanAuthorityReason.STALE:
+        return _reject(PolicyReason.AUTHORITY_STALE)
+    if authority.reason is not PlanAuthorityReason.ADMITTED or authority.attestation is None:
+        return _reject(PolicyReason.AUTHORITY_DENIED)
+    now_ns = time.monotonic_ns()
+    if not authority.attestation.is_fresh_for(authority_boundary, now_ns=now_ns):
+        return _reject(PolicyReason.AUTHORITY_STALE)
 
     admitted_step_items: list[ValidatedStep] = []
     for step in proposal.steps:
@@ -357,7 +476,26 @@ def admit_supervisor_proposal(
                         "tool_id": tool_id,
                         "adapter_id": adapter_id,
                         "actor_binding_sha256": context.actor_binding_sha256,
+                        "authority_binding_sha256": authority_boundary.durable_binding_sha256(),
+                        "source_bindings_sha256": authority_boundary.source_bindings_sha256,
+                        "budget_sha256": authority_boundary.budget_sha256,
                     }
+                ),
+                deadline_ms=supervisor_input.budgets.per_step_deadline_ms,
+                max_calls=(
+                    semantic_supervisor_policy.SUPERVISOR_PRIMARY_MODEL_CALLS
+                    if binding is None
+                    else 1 + supervisor_input.budgets.max_recovery_rounds
+                    if (
+                        step.target_id == WEB_SEARCH_CURRENT_ID
+                        and supervisor_input.budgets.max_recovery_rounds == 1
+                    )
+                    else 1
+                ),
+                max_output_tokens=(
+                    semantic_supervisor_policy.SUPERVISOR_PRIMARY_OUTPUT_TOKENS
+                    if binding is None
+                    else 0
                 ),
             )
         )
@@ -367,11 +505,19 @@ def admit_supervisor_proposal(
         manifest_digest=supervisor_input.manifest.digest_hex(),
         binding_snapshot_sha256=context.capability_bindings.digest_hex(),
         policy_version=policy_identity.policy_id,
+        policy_sha256=policy_identity.policy_sha256,
         actor_binding_sha256=context.actor_binding_sha256,
         conversation_binding_sha256=context.conversation_binding_sha256,
+        authority_scope=context.authority_scope,
+        authority_binding_sha256=authority_boundary.durable_binding_sha256(),
+        required_security_ids=required_security_ids,
+        source_bindings=context.source_bindings,
+        budgets=supervisor_input.budgets,
         steps=admitted_steps,
         seal=mint_admission_seal(),
     )
+    if not authority.attestation.is_fresh_for(authority_boundary, now_ns=time.monotonic_ns()):
+        return _reject(PolicyReason.AUTHORITY_STALE)
     return PolicyDecision(admitted=True, reason=PolicyReason.ADMITTED, plan=plan)
 
 

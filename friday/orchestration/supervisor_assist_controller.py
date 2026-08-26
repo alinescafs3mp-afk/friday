@@ -97,6 +97,15 @@ from friday.orchestration.supervisor_contracts import (
     SupervisorMode,
     canonical_sha256,
 )
+from friday.orchestration.supervisor_plan_authority import (
+    PlanAuthorityAttestor,
+    PlanAuthorityBoundary,
+    PlanAuthorityDecision,
+    PlanAuthorityReason,
+    PlanAuthorityScope,
+    PlanSourceBinding,
+    current_raw_source_matches,
+)
 from friday.orchestration.supervisor_review_policy import (
     AdmittedReadRecovery,
     DeterministicReviewState,
@@ -111,7 +120,11 @@ from friday.orchestration.transient_web_comparison import (
 )
 from friday.pending_durable_turn import PendingDurableTurnAdmission
 from friday.permissions import ActorContext, AuthorizationError
-from friday.semantic_supervisor_policy import SUPERVISOR_RUNTIME_PROFILE_MANIFEST_SHA256
+from friday.semantic_supervisor_policy import (
+    SUPERVISOR_ASSIST_PRODUCT_POLICY_ID,
+    SUPERVISOR_ASSIST_PRODUCT_POLICY_SHA256,
+    SUPERVISOR_RUNTIME_PROFILE_MANIFEST_SHA256,
+)
 from friday.source_identity import authorized_file_snapshot_token_is_process_owned
 
 SUPERVISOR_ASSIST_CONTROLLER_STATUS_SCHEMA = "friday.semantic-supervisor-assist-controller-status.v1"
@@ -289,6 +302,17 @@ class AssistEffectCheck(Protocol):
     """Request-fence check invoked at the adapter's first persistent seam."""
 
     def __call__(self, boundary: object, /) -> bool: ...
+
+
+class AssistPlanAuthorityCheck(Protocol):
+    """Fresh personal/source admission invoked by Policy Kernel before mint."""
+
+    def __call__(
+        self,
+        surface: CurrentFileWebAssistSurface,
+        boundary: PlanAuthorityBoundary,
+        /,
+    ) -> PlanAuthorityDecision: ...
 
 
 class SupervisorAssistGraphPort(Protocol):
@@ -546,6 +570,7 @@ def _graph_matches_pristine_admission(
         and admitted_graph.proposal_sha256 == plan.proposal_digest
         and admitted_graph.accepted_plan_sha256 == plan.canonical_sha256()
         and admitted_graph.manifest_sha256 == plan.manifest_digest
+        and admitted_graph.policy_sha256 == plan.policy_sha256
         and admitted_graph.runtime_profile_sha256 == SUPERVISOR_RUNTIME_PROFILE_MANIFEST_SHA256
         and admitted_graph.adapter_registry_sha256 == plan.binding_snapshot_sha256
         and admitted_graph.actor_binding_sha256 == plan.actor_binding_sha256
@@ -622,6 +647,7 @@ class SupervisorAssistController:
         web_reader: AssistWebEvidenceReader,
         canary_actor_binding: Callable[[ActorContext], str],
         authority_check: AssistAuthorityCheck,
+        plan_authority_check: AssistPlanAuthorityCheck,
         effect_check: AssistEffectCheck,
         post_commit_observer: AssistPostCommitObserver,
         max_review_rounds: int,
@@ -638,6 +664,7 @@ class SupervisorAssistController:
             ("web reader", getattr(web_reader, "research", None)),
             ("canary actor binding", canary_actor_binding),
             ("authority check", authority_check),
+            ("plan authority check", plan_authority_check),
             ("effect check", effect_check),
             ("post-commit observer", post_commit_observer),
             ("binding snapshot factory", binding_snapshot_factory),
@@ -657,6 +684,7 @@ class SupervisorAssistController:
         self._web_reader = web_reader
         self._canary_actor_binding = canary_actor_binding
         self._authority_check = authority_check
+        self._plan_authority_check = plan_authority_check
         self._effect_check = effect_check
         self._post_commit_observer = post_commit_observer
         self._max_review_rounds = max_review_rounds
@@ -848,12 +876,52 @@ class SupervisorAssistController:
             return None
         try:
             supervisor_input = build_supervisor_input(surface.turn, self._settings)
+            actor_binding_sha256 = binding_digest("actor", surface.actor.own_id)
+            conversation_binding_sha256 = binding_digest(
+                "conversation",
+                surface.conversation_id,
+            )
+            source_binding = PlanSourceBinding.current_raw_object(
+                raw_object_id=surface.attachment.raw_object_id,
+                source_identity_sha256=surface.attachment.source_identity_sha256,
+                content_sha256=surface.attachment_content_sha256,
+            )
+
+            def attest(boundary: PlanAuthorityBoundary) -> PlanAuthorityDecision:
+                if (
+                    type(boundary) is not PlanAuthorityBoundary
+                    or boundary.scope is not PlanAuthorityScope.ASSIST_EXECUTION
+                    or boundary.actor_binding_sha256 != actor_binding_sha256
+                    or boundary.conversation_binding_sha256
+                    != conversation_binding_sha256
+                    or boundary.manifest_sha256 != supervisor_input.manifest.digest_hex()
+                    or boundary.policy_sha256 != SUPERVISOR_ASSIST_PRODUCT_POLICY_SHA256
+                    or boundary.budget_sha256
+                    != supervisor_input.budgets.canonical_sha256()
+                    or boundary.capability_bindings_sha256 != snapshot.digest_hex()
+                    or boundary.turn_deadline_monotonic_ns
+                    != int(absolute_deadline * 1_000_000_000)
+                ):
+                    return PlanAuthorityDecision.rejected(
+                        PlanAuthorityReason.INVALID_BOUNDARY
+                    )
+                try:
+                    result = self._plan_authority_check(surface, boundary)
+                except Exception:
+                    return PlanAuthorityDecision.rejected(PlanAuthorityReason.DENIED)
+                return (
+                    result
+                    if type(result) is PlanAuthorityDecision
+                    else PlanAuthorityDecision.rejected(PlanAuthorityReason.DENIED)
+                )
+
             context = PolicyAdmissionContext(
-                actor_binding_sha256=binding_digest("actor", surface.actor.own_id),
-                conversation_binding_sha256=binding_digest(
-                    "conversation",
-                    surface.conversation_id,
-                ),
+                actor_binding_sha256=actor_binding_sha256,
+                conversation_binding_sha256=conversation_binding_sha256,
+                authority_scope=PlanAuthorityScope.ASSIST_EXECUTION,
+                source_bindings=(source_binding,),
+                turn_deadline_monotonic_ns=int(absolute_deadline * 1_000_000_000),
+                authority_attestor=cast(PlanAuthorityAttestor, attest),
                 capability_bindings=snapshot,
             )
         except Exception:
@@ -891,9 +959,22 @@ class SupervisorAssistController:
         plan = cast(ValidatedExecutionPlan, proposal.decision.plan)
         if (
             proposal.proposal_digest != plan.proposal_digest
+            or plan.manifest_digest != supervisor_input.manifest.digest_hex()
+            or plan.policy_version != SUPERVISOR_ASSIST_PRODUCT_POLICY_ID
+            or plan.policy_sha256 != SUPERVISOR_ASSIST_PRODUCT_POLICY_SHA256
             or plan.binding_snapshot_sha256 != snapshot.digest_hex()
             or plan.actor_binding_sha256 != context.actor_binding_sha256
             or plan.conversation_binding_sha256 != context.conversation_binding_sha256
+            or plan.authority_scope is not PlanAuthorityScope.ASSIST_EXECUTION
+            or plan.budget_sha256 != supervisor_input.budgets.canonical_sha256()
+            or plan.budgets != supervisor_input.budgets
+            or len(plan.source_bindings) != 1
+            or not current_raw_source_matches(
+                plan.source_bindings[0],
+                raw_object_id=surface.attachment.raw_object_id,
+                source_identity_sha256=surface.attachment.source_identity_sha256,
+                content_sha256=surface.attachment_content_sha256,
+            )
             or bind_assist_plan_to_surface(plan, surface) is None
         ):
             return None
@@ -2628,6 +2709,7 @@ __all__ = [
     "AssistFileEvidenceReader",
     "AssistObservationStatus",
     "AssistPendingGraphDisposition",
+    "AssistPlanAuthorityCheck",
     "AssistPlanner",
     "AssistPostCommitObserver",
     "AssistPrimaryModel",
