@@ -2243,6 +2243,7 @@ class WebSurfer:
                     title = ""
                 else:
                     text, title = raw_text, ""
+            text_truncated = len(text) > text_budget
             text = text[:text_budget]
             return FetchResult(
                 url=final_url,
@@ -2250,6 +2251,7 @@ class WebSurfer:
                 text=text,
                 text_length=len(text),
                 status_code=status,
+                truncated=text_truncated,
             )
         except (httpx.TimeoutException, TimeoutError):
             # TimeoutError explicitly: it is NOT a subclass of httpx.TimeoutException,

@@ -64672,7 +64672,9 @@ class AgentRuntime:
                     SimplePublicNewsEvidenceStatus.PARTIAL,
                 }
                 report_for_evidence = (
-                    web_payload
+                    None
+                    if typed_status is SimplePublicNewsEvidenceStatus.UNAVAILABLE
+                    else web_payload
                     if isinstance(web_payload, Mapping)
                     else simple_projected_report
                     if isinstance(simple_projected_report, Mapping)

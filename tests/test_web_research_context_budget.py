@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 
+import httpx
 import pytest
 
 import friday.web_surfer as web_surfer_module
@@ -289,6 +290,44 @@ class _ScriptedRefillHarness:
             status_code=200,
             truncated=outcome == "truncated",
         )
+
+
+class _RealFetchRefillHarness(WebSurfer):
+    def __init__(self, settings) -> None:  # noqa: ANN001
+        super().__init__(settings)
+        self.fetched: list[str] = []
+
+    async def search(self, query: str, *, max_results: int) -> list[SearchResult]:
+        del query, max_results
+        return [
+            SearchResult("Long", "https://long.example/", "", "fixture"),
+            SearchResult("Complete", "https://complete.example/", "", "fixture"),
+        ]
+
+    async def _robots_verdict(self, url: str) -> str:
+        del url
+        return ""
+
+    async def _be_polite_to(self, host: str) -> None:
+        del host
+
+    async def _request_bytes(self, url: str):  # noqa: ANN202
+        self.fetched.append(url)
+        body = b"A" * 25_000 if "long.example" in url else b"complete public fact"
+        return body, httpx.Response(200, headers={"content-type": "text/plain"}), url
+
+
+@pytest.mark.asyncio
+async def test_research_refills_text_truncated_by_the_real_fetch_budget(settings) -> None:
+    harness = _RealFetchRefillHarness(settings)
+
+    result = await harness.research("synthetic public fact", max_sources=1)
+
+    assert harness.fetched == ["https://long.example/", "https://complete.example/"]
+    assert [item["url"] for item in result["sources"]] == ["https://complete.example/"]
+    assert result["requested_sources"] == 2
+    assert result["completed_sources"] == 1
+    assert result["failed_sources"] == 1
 
 
 @pytest.mark.anyio
