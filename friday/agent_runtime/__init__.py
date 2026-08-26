@@ -9183,7 +9183,11 @@ _SUPPORTED_FILE_CURRENT_CARRIER = re.compile(
 
 def _supported_deed_families(answer: str) -> frozenset[str]:
     families: set[str] = set()
-    if _SUPPORTED_FILE_COMPLETION.search(answer) or _actual_supported_ready_file_claims(answer):
+    if (
+        _SUPPORTED_FILE_COMPLETION.search(answer)
+        or _SUPPORTED_EXTERNAL_WORKSPACE_COMPLETION.search(answer)
+        or _actual_supported_ready_file_claims(answer)
+    ):
         families.add("file")
     if _SUPPORTED_REMINDER_COMPLETION.search(answer):
         families.add("reminder")
@@ -46459,7 +46463,7 @@ class AgentRuntime:
         )
         current_document_secondary_task = (
             ""
-            if document_metadata_owned or quoted_file_command_is_data
+            if document_metadata_owned or quoted_file_command_is_data or message_locate_flow
             else (
                 "summary"
                 if synthetic_document_notice and active_attachment_set
@@ -50795,7 +50799,20 @@ class AgentRuntime:
             # The authenticated parser and coverage guards remain authoritative;
             # neither the model judge nor its derivative drift/repair path runs
             # in this open lane.
-            and (synthetic_document_notice or pure_file_read_turn)
+            and (
+                synthetic_document_notice
+                or (
+                    pure_file_read_turn
+                    and (
+                        # A reply resumes the already-open document-review
+                        # contour.  A direct current upload, by contrast, keeps
+                        # an explicit operator verifier opt-in if one was
+                        # configured.  Production leaves that opt-in disabled.
+                        reply_assistant_reference
+                        or not self.settings.verify_answers
+                    )
+                )
+            )
             and authenticated_attachment_scope
             and attachment_expected_count > 0
             and attachment_context_complete

@@ -3,23 +3,18 @@
 - Updated: 2026-08-26
 - Architecture order:
   `outer_sol/OPTIONAL_SECONDARY_BRAIN_SGLANG_GPT_OSS_20B_ARCHITECT_BRIEF.md`
-- Phase: **evidence-bound document-map assist candidate ready; live remains shadow until activation**
-- Live production: Friday `0.207.29` /
-  `7f217aa96561532240203f63729e17160b03ebfb`, tree
-  `beefea549b9c568e8573b39582b1af14a67dd5a3a4ef6c724ca0c5beb0a33c1b`, wheel
-  `0b575041a636385541cc932bb55e959e074b2ba51bd295d3892d8fb286020140`,
-  schema 42; immediate predecessor Friday `0.207.28` /
-  `6007c9f05fdb63b1ab8c2ccc0e086efd849c77c8`, tree
-  `5fe37a037bc99f845ef6695dd53bfcc90eac3cb6ff7808920cc4b191e5f7cc4c`;
-  schema-capable fallback Friday `0.207.27` /
-  `b7378686a70465fbdc9a7b27aef1e0bbae5edd52`, tree
-  `7ce723b56aafcf80cdde21c86717d3973e79884c605d175df87c7cf4b0c0f076`,
-  wheel `60b05e50a08107dc185e8a6cbd52f3bf2e18d5dd53a08b805a1a9f0390b128ae`
+- Phase: **document-map assist live; complete-current-document expansion is the `0.207.33` release candidate**
+- Live production: Friday `0.207.32` /
+  `da3cb95a9cdd464e292c3435b17f67faf1f05195`, source tree
+  `ea9fd1fc7d34e5f3caa77ae6d7b08da53885bcecf0048f9f3ac470512f532c15`,
+  sealed tree `7cd37d788039cfd73ee3f471e700de335fdf89cca52481bc0aa69b159e504752`,
+  wheel `1e6054b7159e84449b4352e6184d270cf312c583cdfadb788cd73e01cc140660`,
+  schema 42; immediate predecessor and schema-capable fallback Friday `0.207.31`.
 - Rollout policy: the primary model remains required and final. The secondary
   is live only as bounded optional advice; it has no tool, effect, publication,
-  knowledge-write or V12 authority. Live `0.207.29` binds exactly one accepted
-  profile and an empty provisional registry. Extraction is bounded assist;
-  document mapping is discarded shadow. Unavailability skips/falls back to the
+  knowledge-write or V12 authority. Live `0.207.32` binds exactly one accepted
+  profile and an empty provisional registry. Extraction and evidence-bound
+  document mapping are bounded assist. Unavailability skips/falls back to the
   unchanged primary path.
 
 ## Durable access and measured host
@@ -132,11 +127,12 @@
 ## Friday checkpoint
 
 - The accepted-profile path contains typed private Inbox extraction and bounded
-  private document map/reduce seams. Live `0.207.28` runs structured, text-only,
-  effect-free extraction assist plus discarded document-map shadow. Every
-  required assist result has
-  exactly one primary fallback; optional advice is skipped; secondary output
-  cannot execute tools or publish a final answer.
+  private document map/reduce seams. Live `0.207.32` runs structured, text-only,
+  effect-free extraction and document-map assist. Candidate `0.207.33` routes
+  complete current text and Office documents through that same bounded contour.
+  Every admitted request has exactly one primary fallback; optional advice is
+  skipped on any miss, and secondary output cannot execute tools or publish a
+  final answer.
 - Product/runtime admission is profile-v2 and binds the exact source manifest,
   OCI/config identities, package versions, kernels and every candidate engine
   choice. Quality now includes deterministic near-limit recall derived from the
@@ -162,13 +158,11 @@
   admission, transport, profile or model identity falls back to the unchanged
   primary map exactly once. Primary still performs final synthesis and owns all
   tools, effects and publication.
-- Rollout is independently staged while current Inbox extraction remains in
-  assist: `secondary_assist_enable_document_map_shadow` adds discarded
-  document-map shadow. V1 deliberately has no assist transition: a later
-  release must bind the separate shadow checkpoint to a new policy and operator
-  evidence gate before secondary output may influence document mapping. The
-  source/operator shadow path is now live; promotion-grade product evidence is
-  the next separate checkpoint.
+- Rollout was independently staged: `0.207.28` added discarded document-map
+  shadow, `0.207.30` captured the promotion evidence, and `0.207.31` consumed it
+  through the distinct v2 shadow-to-assist transition. Current Inbox extraction
+  and document mapping are both bounded assist; their admission policies remain
+  separate.
 - The evidence boundary produced one accepted promotion receipt.
   Natural owner shadow remains causal/content-free, but promotion evidence is
   restricted to one owner-token-only empty-body same-process call. It proves a
@@ -181,15 +175,15 @@
   immutable, while a new PID/epoch may issue a new current receipt without
   deleting that audit. The operator re-verifies the full sealed predecessor
   tree after consume. It has a distinct-candidate
-  `secondary_document_map_shadow_to_assist` path. Release candidate `0.207.31`
-  binds v2 policy SHA-256
+  `secondary_document_map_shadow_to_assist` path. Live release `0.207.31`
+  bound v2 policy SHA-256
   `d2ab9b67ff24a54727fec9592dcd0db1c35036e1b5ee91ac6a5daf4d3694e92e`,
   accepted-manifest SHA-256
   `933c671759724e36fe686185aa8ad03fa09f90e26e3095900796707cfef36855`
   and exact live receipt SHA-256
   `a00f18f8c50a7449d1fa6a357d8d5bb1ca37b0c397c81a96c0e621231bc09e2d`.
-  Raw receipt/lookup token remain outside source. Activation may change only
-  document-map `shadow→assist`; the laptop runtime and extract assist stay exact.
+  Raw receipt/lookup token remain outside source. Activation changed only
+  document-map `shadow→assist`; the laptop runtime and extract assist stayed exact.
 
 ## Parallel parent checkpoint
 
@@ -201,8 +195,8 @@
 
 ## Active order
 
-1. Activate the distinct evidence-bound `0.207.31` candidate while the exact
-   receipt is fresh, then verify assist and laptop-off primary fallback.
+1. Certify and activate `0.207.33`, then verify a natural complete-current-file
+   call and the unchanged primary fallback boundary.
 2. Retain a separate product-counter outage/recovery drill as operational
    evidence; it is not a prerequisite for ordinary optional operation.
 3. Continue the next durable ICP journey and V12 refinement with the secondary

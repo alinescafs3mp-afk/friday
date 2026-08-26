@@ -16,9 +16,6 @@
   prose in document, archive, local-search and informational answers is no
   longer allowed to erase the whole answer; explicit unsupported completion
   claims remain blocked.
-- Ambient attachment state can no longer hide a content-free image-generation
-  capability question. Explicit attachment image work remains on the normal
-  attachment route.
 - Schema, live secondary profile, accepted policy and environment are
   unchanged.
 

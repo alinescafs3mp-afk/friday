@@ -6,28 +6,24 @@ the current production identity, completed packages, active work and next order.
 
 - Updated: 2026-08-26
 - Branch: `main`
-- Secondary acceptance base: source candidate `0.207.31` binds the exact v2
-  document-map assist policy and live receipt; live `0.207.29` admits one accepted
-  profile with extraction in bounded `assist` and document mapping in
-  discarded `shadow`; the provisional registry is empty and the primary
-  remains the only publication, tool and effect authority.
-- Deployed implementation head: `7f217aa96561532240203f63729e17160b03ebfb`
-- Live: Friday `0.207.29` / `7f217aa96561532240203f63729e17160b03ebfb`;
-  tree `beefea549b9c568e8573b39582b1af14a67dd5a3a4ef6c724ca0c5beb0a33c1b`;
-  wheel `0b575041a636385541cc932bb55e959e074b2ba51bd295d3892d8fb286020140`
-- Immediate predecessor: Friday `0.207.28` /
-  `6007c9f05fdb63b1ab8c2ccc0e086efd849c77c8`, tree
-  `5fe37a037bc99f845ef6695dd53bfcc90eac3cb6ff7808920cc4b191e5f7cc4c`.
-  Schema-capable fallback: Friday `0.207.27` /
-  `b7378686a70465fbdc9a7b27aef1e0bbae5edd52`, tree
-  `7ce723b56aafcf80cdde21c86717d3973e79884c605d175df87c7cf4b0c0f076`.
+- Secondary acceptance base: the exact v2 document-map policy is live in
+  bounded `assist`; extraction remains bounded assist, the provisional registry
+  is empty, and the primary remains the sole final-publication, tool and effect
+  authority. Candidate `0.207.33` extends that assist to complete current
+  text/Office-document reviews with an exact primary fallback.
+- Deployed implementation head: `da3cb95a9cdd464e292c3435b17f67faf1f05195`
+- Live: Friday `0.207.32` / `da3cb95a9cdd464e292c3435b17f67faf1f05195`;
+  tree `ea9fd1fc7d34e5f3caa77ae6d7b08da53885bcecf0048f9f3ac470512f532c15`;
+  sealed tree `7cd37d788039cfd73ee3f471e700de335fdf89cca52481bc0aa69b159e504752`;
+  wheel `1e6054b7159e84449b4352e6184d270cf312c583cdfadb788cd73e01cc140660`.
+- Immediate predecessor and schema-capable fallback: Friday `0.207.31`.
 - Database schema: 42
 - Production state: immutable activation `clear`; backend and Telegram bridge
   active; trusted-CA HTTPS health `200`; SQLite integrity and FK checks clean;
   exact accepted profile is configured in bounded `assist` and is probed on
   demand; its exact post-cutover canary passed, while laptop absence preserves
-  the primary-only path. Document MAP/REDUCE shadow is enabled but cannot
-  influence a user answer. The primary V12
+  the primary-only path. Bounded document MAP advice may influence only the
+  primary model's prompt and can never publish directly. The primary V12
   canary is installed for `archive_read` and `file_read` with a live exact
   attestation. The exact,
   body-free schema-41 DocumentCatalog now has its bounded durable worker and
@@ -42,12 +38,14 @@ the current production identity, completed packages, active work and next order.
 
 ## Active objective
 
-Activate the distinct evidence-bound document-map assist candidate while
-preserving exact primary-only behavior whenever the laptop is absent. Public shadow, private
-shadow, bounded extraction assist, exact physical loss and automatic recovery
-are complete. The schema-41 DocumentCatalog, archive candidate runtime,
+Release `0.207.33`: make complete current text and Office documents reach the
+already accepted document-map assist, while preserving one exact primary-only
+fallback whenever the laptop is absent, slow, busy, malformed or the source is
+too large. Narrow deterministic publication guards to explicit current effects
+so ordinary document, archive, local-search and informational prose is not
+discarded. The schema-42 DocumentCatalog, archive candidate runtime,
 receipt-backed Obsidian effect vertical, selected-evidence V12 explanation and
-durable conversation/document comparison are live.
+durable conversation/document comparison remain live.
 
 The measured and accepted finalist is exact profile
 `gptoss20b-2335df123cac7fc0e13e347cde1e1ffa8562daafcaf0fc76ade1a851d2b0ff1f`
@@ -73,10 +71,10 @@ accepted profile manifest hashes to
 `93ea5698b8b6a9bf8a7dc697ffe37d7353055aa16555188991747bba73d059e3` and
 its accepted physical-failure evidence hashes to
 `9dc72f80caed3320bd154cf1219a8bd6b1339142b690b00dd1cbe1fb05964006`.
-Live `0.207.29` admits exactly that profile, with no provisional entries:
-extraction is in bounded `assist`, document mapping remains discarded
-`shadow`. It grants no tools, effects, publication or knowledge-write authority;
-failure preserves the exact primary-only path.
+Live `0.207.32` admits exactly that profile, with no provisional entries:
+extraction and evidence-bound document mapping are in bounded `assist`. It
+grants no tools, effects, publication or knowledge-write authority; failure
+preserves the exact primary-only path.
 
 Detailed active tracker:
 `outer_sol/OPTIONAL_SECONDARY_BRAIN_IMPLEMENTATION_STATUS.md`.
@@ -151,12 +149,12 @@ course, with these repository-specific constraints:
 
 ## In progress
 
-1. Activate `0.207.31` through the one-use exact shadow→assist operator gate,
-   then verify assist plus laptop-off primary fallback.
-2. Extend machine-reconcilable release evidence without promoting
-   component-only gates, then start the next V12 refinement package.
-3. Continue with the next ICP/V12 refinement package after the complete golden
-   journey. The accepted laptop runtime and gateway manifest remain unchanged.
+1. Certify and activate `0.207.33`: complete-current-document GPT-OSS advice,
+   exact single primary fallback, and route-scoped fail-open publication guards.
+2. Finish the bounded partial-result/refill web-search package already isolated
+   from this release.
+3. Land the next release-evidence foundation package, then continue the planned
+   ICP and V12 refinement packages. Engineer Mode remains separately owned.
 
 ## Completed and deployed packages
 
