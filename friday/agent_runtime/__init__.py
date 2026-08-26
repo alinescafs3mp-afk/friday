@@ -30431,9 +30431,12 @@ _ENGLISH_CURRENT_WEB_ACTION = re.compile(
 )
 _CURRENT_PUBLIC_WEB_RESULT = re.compile(
     r"\b(?:по\s+(?:текущ|свеж|актуальн)\w+\s+данн\w*|"
-    r"(?:текущ|свеж|актуальн)\w+\s+(?:цен|курс|налич|расписан|верси|новост|статус|данн)\w*|"
-    r"(?:цен|курс|налич|расписан|верси|новост|статус|данн)\w*\s+на\s+сегодня|"
-    r"(?:current|latest|up-to-date)\s+(?:price|rate|availability|schedule|version|news|status|data))\b",
+    r"(?:текущ|свеж|актуальн)\w+\s+(?:цен|курс|налич|расписан|верси|новост|статус|"
+    r"данн|значени|показател)\w*|"
+    r"(?:цен|курс|налич|расписан|верси|новост|статус|данн|значени|показател)\w*"
+    r"\s+на\s+сегодня|"
+    r"(?:current|latest|up-to-date)\s+(?:price|rate|availability|schedule|version|news|"
+    r"status|data|value|indicator))\b",
     re.IGNORECASE,
 )
 _CURRENT_PUBLIC_WEB_RESULT_DENIAL = re.compile(
@@ -51023,11 +51026,14 @@ class AgentRuntime:
                 or (
                     pure_file_read_turn
                     and (
-                        # A reply resumes the already-open document-review
-                        # contour.  A direct current upload, by contrast, keeps
-                        # an explicit operator verifier opt-in if one was
-                        # configured.  Production leaves that opt-in disabled.
-                        reply_assistant_reference or not self.settings.verify_answers
+                        # Historical/reply carriers resume an already-open
+                        # document-review contour.  Only a direct current upload
+                        # keeps an explicit operator verifier opt-in if one was
+                        # configured. Production leaves that opt-in disabled.
+                        reply_assistant_reference
+                        or quoted_attachment_reference
+                        or supplied_attachment_count == 0
+                        or not self.settings.verify_answers
                     )
                 )
             )

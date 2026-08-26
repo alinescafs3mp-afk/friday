@@ -14,8 +14,8 @@ the current production identity, completed packages, active work and next order.
 - Deployed implementation head: `da3cb95a9cdd464e292c3435b17f67faf1f05195`
 - Live: Friday `0.207.32` / `da3cb95a9cdd464e292c3435b17f67faf1f05195`;
   tree `ea9fd1fc7d34e5f3caa77ae6d7b08da53885bcecf0048f9f3ac470512f532c15`;
-  sealed tree `7cd37d788039cfd73ee3f471e700de335fdf89cca52481bc0aa69b159e504752`;
-  wheel `1e6054b7159e84449b4352e6184d270cf312c583cdfadb788cd73e01cc140660`.
+  wheel `1e6054b7159e84449b4352e6184d270cf312c583cdfadb788cd73e01cc140660`;
+  sealed tree `7cd37d788039cfd73ee3f471e700de335fdf89cca52481bc0aa69b159e504752`.
 - Immediate predecessor and schema-capable fallback: Friday `0.207.31`.
 - Database schema: 42
 - Production state: immutable activation `clear`; backend and Telegram bridge
