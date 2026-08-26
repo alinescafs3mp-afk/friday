@@ -4,16 +4,15 @@
 - Architecture order:
   `outer_sol/OPTIONAL_SECONDARY_BRAIN_SGLANG_GPT_OSS_20B_ARCHITECT_BRIEF.md`
 - Phase: **document-map and complete-current-document assist live**
-- Live production: Friday `0.207.33` /
-  `ca3f1af0ce6f9cdcb4b9582fc670e5f6b6bfc72c`, source tree
-  `fd6c4b3a9574630c1aeb12764977500dbcd6afb1eeb72438c0e09afd065a0a70`,
-  sealed tree `ba328952baaa42a1a44c5b2152f0caa3e2105365642da0e95127ea30e5536862`,
-  wheel `b2bd43afe8300f51b2885d69dc861d56d62e8a9b9cc51fd49c0af5b419691f4e`,
-  schema 42; immediate predecessor and schema-capable fallback Friday
-  `0.207.32` / `da3cb95a9cdd464e292c3435b17f67faf1f05195`.
+- Live production: Friday `0.207.48` /
+  `e8721168de8b8f0a6dddf3cffa4b29cee57488e1`, sealed tree
+  `9098e7dd9862b33a1e6348e08563b9c64aa8cbcb275d14367e28b51b779cafb6`,
+  wheel `da0b20ebbb05dcfbfde080e920c78d83103d3149fba02e13e017d9829a9de40c`,
+  schema 43; immediate predecessor and schema-capable fallback Friday
+  `0.207.47` / `7f84db39b387d6101aef941203b6787c364500e4`.
 - Rollout policy: the primary model remains required and final. The secondary
   is live only as bounded optional advice; it has no tool, effect, publication,
-  knowledge-write or V12 authority. Live `0.207.33` binds exactly one accepted
+  knowledge-write or V12 authority. Live `0.207.48` binds exactly one accepted
   profile and an empty provisional registry. Extraction and evidence-bound
   document mapping are bounded assist. Unavailability skips/falls back to the
   unchanged primary path.
@@ -111,6 +110,13 @@
   `secondary_shadow_to_assist`; terminal receipt SHA-256 is
   `1b07dac7750d744d0ab8c9998418e58985751966a71b85e65e771ad460d4bf86`.
   Live health is `ok`; the accepted manifest is admitted and demand-probed.
+- Release `0.207.48` restarted the production contour without changing the
+  accepted laptop profile. Startup performed two successful endpoint calls and
+  one successful exact model-inventory probe; health reported `healthy` and
+  available while the admission window was fresh. Availability intentionally
+  becomes false when that short window expires and is re-established by the
+  next qualifying workload's bounded demand probe; this is not a circuit
+  failure and preserves primary-only fallback.
 - The fresh assist product receipt hashes to
   `7b4fa2b40f70047020e29e00a74498ee5bef13a2153a0a5e51ce9f9647f79a80`.
   The exact `0.207.26` causal power-cut, off-state and recovered-candidate
@@ -128,9 +134,10 @@
 ## Friday checkpoint
 
 - The accepted-profile path contains typed private Inbox extraction and bounded
-  private document map/reduce seams. Live `0.207.33` runs structured, text-only,
+  private document map/reduce seams. Live `0.207.48` runs structured, text-only,
   effect-free extraction, document-map assist and complete-current-text/Office-
-  document advice through that same bounded contour.
+  document advice through that same bounded contour and retains the accepted
+  profile.
   Every admitted request has exactly one primary fallback; optional advice is
   skipped on any miss, and secondary output cannot execute tools or publish a
   final answer.
@@ -191,7 +198,7 @@
 - ICP schema 40, the durable exact archive candidate-selection runtime, bounded
   body-free DocumentCatalog worker/archive consumer and complete durable
   conversation/document comparison are deployed. The secondary boundary is
-  live in `0.207.33` as a separate optional advisory contour and remains
+  live in `0.207.48` as a separate optional advisory contour and remains
   authority-free.
 
 ## Active order
