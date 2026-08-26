@@ -3,16 +3,17 @@
 - Updated: 2026-08-26
 - Architecture order:
   `outer_sol/OPTIONAL_SECONDARY_BRAIN_SGLANG_GPT_OSS_20B_ARCHITECT_BRIEF.md`
-- Phase: **document-map assist live; complete-current-document expansion is the `0.207.33` release candidate**
-- Live production: Friday `0.207.32` /
-  `da3cb95a9cdd464e292c3435b17f67faf1f05195`, source tree
-  `ea9fd1fc7d34e5f3caa77ae6d7b08da53885bcecf0048f9f3ac470512f532c15`,
-  sealed tree `7cd37d788039cfd73ee3f471e700de335fdf89cca52481bc0aa69b159e504752`,
-  wheel `1e6054b7159e84449b4352e6184d270cf312c583cdfadb788cd73e01cc140660`,
-  schema 42; immediate predecessor and schema-capable fallback Friday `0.207.31`.
+- Phase: **document-map and complete-current-document assist live**
+- Live production: Friday `0.207.33` /
+  `ca3f1af0ce6f9cdcb4b9582fc670e5f6b6bfc72c`, source tree
+  `fd6c4b3a9574630c1aeb12764977500dbcd6afb1eeb72438c0e09afd065a0a70`,
+  sealed tree `ba328952baaa42a1a44c5b2152f0caa3e2105365642da0e95127ea30e5536862`,
+  wheel `b2bd43afe8300f51b2885d69dc861d56d62e8a9b9cc51fd49c0af5b419691f4e`,
+  schema 42; immediate predecessor and schema-capable fallback Friday
+  `0.207.32` / `da3cb95a9cdd464e292c3435b17f67faf1f05195`.
 - Rollout policy: the primary model remains required and final. The secondary
   is live only as bounded optional advice; it has no tool, effect, publication,
-  knowledge-write or V12 authority. Live `0.207.32` binds exactly one accepted
+  knowledge-write or V12 authority. Live `0.207.33` binds exactly one accepted
   profile and an empty provisional registry. Extraction and evidence-bound
   document mapping are bounded assist. Unavailability skips/falls back to the
   unchanged primary path.
@@ -127,9 +128,9 @@
 ## Friday checkpoint
 
 - The accepted-profile path contains typed private Inbox extraction and bounded
-  private document map/reduce seams. Live `0.207.32` runs structured, text-only,
-  effect-free extraction and document-map assist. Candidate `0.207.33` routes
-  complete current text and Office documents through that same bounded contour.
+  private document map/reduce seams. Live `0.207.33` runs structured, text-only,
+  effect-free extraction, document-map assist and complete-current-text/Office-
+  document advice through that same bounded contour.
   Every admitted request has exactly one primary fallback; optional advice is
   skipped on any miss, and secondary output cannot execute tools or publish a
   final answer.
@@ -138,10 +139,10 @@
   choice. Quality now includes deterministic near-limit recall derived from the
   profile context; endpoint/capacity evidence is bound to exact HTTPS, private
   CA, profile epoch, context and memory without retaining raw prompts.
-- The exact `0.207.28` source passed 18,918 non-UI and 31 UI tests with zero
-  skips; its wheel reproduced byte-for-byte. Immutable activation completed
-  `clear` with receipt
-  `601134e2830b5e55e6821ea56c3a630bd4a4a39e93d8637276766ab74a5b45f7`.
+- The exact `0.207.33` source passed 19,540 non-UI and 31 UI tests. Its wheel
+  reproduced byte-for-byte. Immutable activation completed `clear` with
+  terminal receipt
+  `43640940064139433b4b42c2713f3ae7e864cd7dc1db16d0fd900b5967ce06c9`.
 
 ## Document-map expansion production checkpoint
 
@@ -189,16 +190,16 @@
 
 - ICP schema 40, the durable exact archive candidate-selection runtime, bounded
   body-free DocumentCatalog worker/archive consumer and complete durable
-  conversation/document comparison are deployed. The document-map evidence
-  boundary remains a separate optional advisory contour until genuine live
-  evidence is bound by a later distinct candidate.
+  conversation/document comparison are deployed. The secondary boundary is
+  live in `0.207.33` as a separate optional advisory contour and remains
+  authority-free.
 
 ## Active order
 
-1. Certify and activate `0.207.33`, then verify a natural complete-current-file
-   call and the unchanged primary fallback boundary.
-2. Retain a separate product-counter outage/recovery drill as operational
-   evidence; it is not a prerequisite for ordinary optional operation.
+1. Observe the next natural complete-current-file call and its unchanged
+   primary fallback boundary without generating synthetic product traffic.
+2. Retain the separate product-counter outage/recovery drill as optional
+   operational evidence.
 3. Continue the next durable ICP journey and V12 refinement with the secondary
    remaining advisory only.
 
