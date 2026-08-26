@@ -377,6 +377,8 @@ def _sandbox_argv(
         "--ro-bind-try",
         "/lib64",
         "/lib64",
+        "--perms",
+        "0555",
         "--dir",
         "/etc",
         "--ro-bind-try",
@@ -386,19 +388,29 @@ def _sandbox_argv(
         "/proc",
         "--dev",
         "/dev",
+        # The device nodes remain usable, but the synthetic devtmpfs and its
+        # /dev/shm directory may not become a second writable scratch store.
+        "--remount-ro",
+        "/dev",
         *(["--size", str(COMPILE_WORKSPACE_TMPFS_BYTES)] if mount_jdk and not mount_decompiler else []),
         "--tmpfs",
         "/tmp",
+        "--perms",
+        "0555",
         "--dir",
         "/app",
         "--ro-bind",
         str(package_root),
         "/app/friday",
+        "--perms",
+        "0555",
+        "--dir",
+        "/root",
     ]
     if mount_decompiler or mount_jdk:
         # Only the required verified, versioned owner-local trees are visible.
         # The rest of /home and /home/jericho/.jericho is absent.
-        argv.extend(["--dir", "/opt"])
+        argv.extend(["--perms", "0555", "--dir", "/opt"])
         if mount_decompiler:
             argv.extend(
                 [
@@ -437,6 +449,11 @@ def _sandbox_argv(
             "--bind",
             str(workspace / "output.bin"),
             "/work/output.bin",
+            # Bubblewrap's synthetic root starts as a writable tmpfs.  Freeze
+            # that mount after constructing the namespace; /tmp and the two
+            # exact output file mounts are separate mounts and stay writable.
+            "--remount-ro",
+            "/",
             "--chdir",
             "/work",
             "--clearenv",

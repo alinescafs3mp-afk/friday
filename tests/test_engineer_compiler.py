@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import errno
 import hashlib
 import io
 import json
@@ -41,6 +42,27 @@ def _fake_jdk(tmp_path: pathlib.Path, monkeypatch) -> pathlib.Path:
         compiler._tree_identity(jdk, maximum_bytes=compiler.MAX_JDK_TREE_BYTES),  # noqa: SLF001
     )
     return jdk
+
+
+def _real_sandbox_workspace(
+    tmp_path: pathlib.Path,
+    *,
+    request: dict[str, object] | None = None,
+    source: bytes = b"probe",
+) -> pathlib.Path:
+    workspace = tmp_path / "sandbox-work"
+    workspace.mkdir(mode=0o700)
+    payloads = {
+        "request.json": json.dumps(request or {}).encode("utf-8"),
+        "input.bin": source,
+        "result.json": b"",
+        "output.bin": b"",
+    }
+    for name, payload in payloads.items():
+        path = workspace / name
+        path.write_bytes(payload)
+        path.chmod(0o600)
+    return workspace
 
 
 def test_compiler_profile_and_owner_local_jdk_are_exact() -> None:
@@ -340,12 +362,12 @@ def test_compiler_bwrap_mounts_only_jdk_read_only_and_has_finite_limits() -> Non
         "--tmpfs",
         "/tmp",
     ]
-    assert argv[argv.index("--perms") : argv.index("--perms") + 4] == [
-        "--perms",
-        "0555",
-        "--dir",
-        "/work",
-    ]
+    for directory in ("/etc", "/app", "/opt", "/root", "/work"):
+        assert ["--perms", "0555", "--dir", directory] in [
+            argv[index : index + 4] for index in range(len(argv) - 3)
+        ]
+    assert ["--remount-ro", "/dev"] in [argv[index : index + 2] for index in range(len(argv) - 1)]
+    assert ["--remount-ro", "/"] in [argv[index : index + 2] for index in range(len(argv) - 1)]
     assert [(argv[index + 1], argv[index + 2]) for index, value in enumerate(argv) if value == "--bind"] == [
         (str(workspace / "result.json"), "/work/result.json"),
         (str(workspace / "output.bin"), "/work/output.bin"),
@@ -368,6 +390,194 @@ def test_compiler_bwrap_mounts_only_jdk_read_only_and_has_finite_limits() -> Non
         "--",
     ]
     assert compiler.JAVAC_TIMEOUT_SECONDS < sandbox.COMPILE_MAX_WALL_SECONDS
+
+
+def test_real_compiler_bwrap_denies_extra_scratch_and_exhausts_only_bounded_tmpfs(
+    tmp_path: pathlib.Path,
+) -> None:
+    workspace = _real_sandbox_workspace(tmp_path)
+    argv = sandbox._limited_sandbox_argv(  # noqa: SLF001
+        workspace,
+        action="compile_java",
+        mount_jdk=True,
+    )
+    boundary = max(index for index, value in enumerate(argv) if value == "--")
+    probe = r"""
+import json
+import os
+
+denied = {}
+for path in (
+    "/friday-probe",
+    "/etc/friday-probe",
+    "/app/friday-probe",
+    "/opt/friday-probe",
+    "/dev/friday-probe",
+    "/dev/shm/friday-probe",
+    "/root/friday-probe",
+    "/work/friday-probe",
+):
+    try:
+        descriptor = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+    except OSError as exc:
+        denied[path] = exc.errno
+    else:
+        os.close(descriptor)
+        denied[path] = 0
+
+immutable_inputs = {}
+for path in ("/work/request.json", "/work/input.bin"):
+    try:
+        descriptor = os.open(path, os.O_WRONLY)
+    except OSError as exc:
+        immutable_inputs[path] = exc.errno
+    else:
+        os.close(descriptor)
+        immutable_inputs[path] = 0
+
+carriers = {}
+for path in ("/work/result.json", "/work/output.bin"):
+    descriptor = os.open(path, os.O_WRONLY)
+    try:
+        carriers[path] = os.write(descriptor, b"x") == 1
+    finally:
+        os.close(descriptor)
+
+null_descriptor = os.open("/dev/null", os.O_WRONLY)
+try:
+    device_write = os.write(null_descriptor, b"device") == 6
+finally:
+    os.close(null_descriptor)
+random_descriptor = os.open("/dev/urandom", os.O_RDONLY)
+try:
+    device_read = len(os.read(random_descriptor, 1)) == 1
+finally:
+    os.close(random_descriptor)
+
+chunk = b"x" * (1024 * 1024)
+tmpfs_bytes = 0
+tmpfs_files = 0
+tmpfs_error = 0
+for index in range(64):
+    try:
+        descriptor = os.open(
+            f"/tmp/friday-fill-{index}",
+            os.O_CREAT | os.O_EXCL | os.O_WRONLY,
+            0o600,
+        )
+    except OSError as exc:
+        tmpfs_error = exc.errno
+        break
+    try:
+        offset = 0
+        while offset < len(chunk):
+            try:
+                written = os.write(descriptor, chunk[offset:])
+            except OSError as exc:
+                tmpfs_error = exc.errno
+                break
+            offset += written
+            tmpfs_bytes += written
+    finally:
+        os.close(descriptor)
+    tmpfs_files += 1
+    if tmpfs_error:
+        break
+
+print(json.dumps({
+    "carriers": carriers,
+    "denied": denied,
+    "device_read": device_read,
+    "device_write": device_write,
+    "immutable_inputs": immutable_inputs,
+    "tmpfs_bytes": tmpfs_bytes,
+    "tmpfs_error": tmpfs_error,
+    "tmpfs_files": tmpfs_files,
+}, sort_keys=True))
+"""
+    completed = subprocess.run(  # noqa: S603 - fixed bwrap/prlimit prefix and test probe
+        [
+            *argv[: boundary + 1],
+            str(sandbox.PYTHON),
+            "-I",
+            "-S",
+            "-B",
+            "-c",
+            probe,
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=20,
+    )
+
+    assert completed.returncode == 0, completed.stderr
+    proof = json.loads(completed.stdout)
+    assert set(proof["denied"]) == {
+        "/friday-probe",
+        "/app/friday-probe",
+        "/dev/friday-probe",
+        "/dev/shm/friday-probe",
+        "/etc/friday-probe",
+        "/opt/friday-probe",
+        "/root/friday-probe",
+        "/work/friday-probe",
+    }
+    assert set(proof["denied"].values()) <= {errno.EACCES, errno.EROFS}
+    assert set(proof["immutable_inputs"]) == {
+        "/work/input.bin",
+        "/work/request.json",
+    }
+    assert set(proof["immutable_inputs"].values()) <= {errno.EACCES, errno.EROFS}
+    assert proof["carriers"] == {
+        "/work/output.bin": True,
+        "/work/result.json": True,
+    }
+    assert proof["device_read"] is True
+    assert proof["device_write"] is True
+    assert proof["tmpfs_error"] == errno.ENOSPC
+    assert 1 < proof["tmpfs_files"] < 64
+    assert 0 < proof["tmpfs_bytes"] <= sandbox.COMPILE_WORKSPACE_TMPFS_BYTES
+
+
+def test_real_pinned_javac_runs_with_read_only_root_and_devices(tmp_path: pathlib.Path) -> None:
+    toolchain = compiler.host_toolchain_preflight()
+    if toolchain.get("ok") is not True:
+        pytest.skip("pinned owner-local JDK is not installed")
+    source = b"public class Main { public int value() { return 21; } }\n"
+    workspace = _real_sandbox_workspace(
+        tmp_path,
+        request={
+            "protocol": worker.PROTOCOL_VERSION,
+            "action": "compile_java",
+            "filename": "Main.java",
+            "operations": [],
+            "compiler_toolchain": toolchain,
+        },
+        source=source,
+    )
+
+    completed = subprocess.run(  # noqa: S603 - exact production prlimit/bwrap/worker argv
+        sandbox._limited_sandbox_argv(  # noqa: SLF001
+            workspace,
+            action="compile_java",
+            mount_jdk=True,
+        ),
+        check=False,
+        capture_output=True,
+        timeout=sandbox.COMPILE_MAX_WALL_SECONDS,
+    )
+
+    assert completed.returncode == 0, completed.stderr.decode("utf-8", errors="replace")
+    report = json.loads((workspace / "result.json").read_text(encoding="utf-8"))
+    jar = (workspace / "output.bin").read_bytes()
+    assert report["ok"] is True
+    assert report["tool_version"] == compiler.JDK_VERSION
+    assert report["source_sha256"] == _sha256(source)
+    assert compiler.validate_jar(jar) == {
+        "class_files": 1,
+        "class_bytes": report["class_bytes"],
+    }
 
 
 def test_compiler_requires_finite_aggregate_pid_and_memory_cgroups(monkeypatch) -> None:
