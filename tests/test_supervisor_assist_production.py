@@ -10,11 +10,15 @@ import pytest
 
 import friday.orchestration.supervisor_assist_production as production
 from friday.interaction_control_plane.compare_current_file_web_work_graph import (
+    CompareCurrentFileWebGraphOutcomeReason,
+    CompareCurrentFileWebGraphOutcomeStatus,
     CompareCurrentFileWebStepKind,
 )
 from friday.orchestration.router import ReadOnlyAttachmentReference
 from friday.orchestration.supervisor_assist_graph_adapter import (
     AssistCapabilityBoundary,
+    AssistPublicationAction,
+    AssistPublicationBoundary,
 )
 from friday.orchestration.supervisor_assist_production import (
     AssistConversationModeReader,
@@ -79,6 +83,26 @@ def test_production_authority_is_fresh_exact_and_default_deny(storage) -> None:
 
     authorization.deny_permission("alice", "files.read")
     assert gate(actor, file_boundary) is False
+    terminal_boundary = AssistPublicationBoundary(
+        actor=actor,
+        action=AssistPublicationAction.TERMINAL,
+        graph_id=file_boundary.graph_id,
+        user_id=file_boundary.user_id,
+        conversation_id=file_boundary.conversation_id,
+        revision=file_boundary.revision,
+        accepted_plan_sha256=file_boundary.accepted_plan_sha256,
+        adapter_registry_sha256=file_boundary.adapter_registry_sha256,
+        current_file_raw_object_id=file_boundary.current_file_raw_object_id,
+        current_file_source_identity_sha256=file_boundary.current_file_source_identity_sha256,
+        current_file_content_sha256=file_boundary.current_file_content_sha256,
+        expected_status=CompareCurrentFileWebGraphOutcomeStatus.DENIED,
+        expected_reason=CompareCurrentFileWebGraphOutcomeReason.AUTHORITY_DENIED,
+    )
+    assert gate(actor, terminal_boundary) is True
+    assert (
+        gate(actor, replace(terminal_boundary, action=AssistPublicationAction.COMPARISON))
+        is False
+    )
     authorization.grant_permission("alice", "files.read")
     storage.update_user("alice", status="disabled")
     assert gate(actor, file_boundary) is False

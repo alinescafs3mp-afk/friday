@@ -28,7 +28,9 @@ from friday.file_evidence_reader import FileEvidenceUnavailable, PreparedFileEvi
 from friday.interaction_control_plane.compare_current_file_web_work_graph import (
     FILE_READ_STEP_ID,
     WEB_READ_STEP_ID,
+    CompareCurrentFileWebGraphOutcomeReason,
     CompareCurrentFileWebGraphState,
+    CompareCurrentFileWebStepKind,
     CompareCurrentFileWebStepState,
     CompareCurrentFileWebWorkGraph,
 )
@@ -49,9 +51,12 @@ from friday.orchestration.supervisor_assist_controller import (
     SupervisorAssistOutcome,
 )
 from friday.orchestration.supervisor_assist_graph_adapter import (
+    AssistCapabilityBoundary,
     AssistConversationScope,
     AssistGraphCursor,
     AssistGraphPublication,
+    AssistPublicationAction,
+    AssistPublicationBoundary,
     SupervisorAssistGraphAdapter,
 )
 from friday.orchestration.supervisor_assist_promotion import (
@@ -83,7 +88,7 @@ from friday.orchestration.transient_web_comparison import (
     TransientWebEvidenceStatus,
 )
 from friday.pending_durable_turn import PendingDurableTurnAdmission
-from friday.permissions import ActorContext
+from friday.permissions import ActorContext, AuthorizationError
 from friday.source_identity import (
     authorized_file_snapshot_token,
     raw_source_identity_sha256,
@@ -657,6 +662,7 @@ class _CountingAdapter(SupervisorAssistGraphAdapter):
         self.admit_calls = 0
         self.publish_calls = 0
         self.terminal_calls = 0
+        self.mixed_terminal_calls = 0
         self.cancel_calls = 0
         self.restart_calls = 0
 
@@ -682,6 +688,12 @@ class _CountingAdapter(SupervisorAssistGraphAdapter):
         self.terminal_calls += 1
         return super().publish_terminal(*args, **kwargs)
 
+    def publish_terminal_after_mixed_authority_denial(
+        self, *args: Any, **kwargs: Any
+    ) -> AssistGraphPublication:
+        self.mixed_terminal_calls += 1
+        return super().publish_terminal_after_mixed_authority_denial(*args, **kwargs)
+
     def cancel(self, *args: Any, **kwargs: Any) -> AssistGraphPublication:
         self.cancel_calls += 1
         return super().cancel(*args, **kwargs)
@@ -705,6 +717,8 @@ def _controller(
     synthesizer: Any = None,
     binding_snapshot_factory: Any = operational_capability_snapshot,
     settings: Any = None,
+    authority_check: Any = lambda _actor, _boundary: True,
+    effect_check: Any = lambda _boundary: True,
 ) -> SupervisorAssistController:
     kwargs: dict[str, Any] = {}
     if synthesizer is not None:
@@ -719,8 +733,8 @@ def _controller(
         file_reader=file_reader or SimpleNamespace(prepare=lambda *_args, **_kwargs: None),
         web_reader=web_reader or SimpleNamespace(research=lambda *_args, **_kwargs: None),
         canary_actor_binding=lambda _actor: "c" * 64,
-        authority_check=lambda _actor, _boundary: True,
-        effect_check=lambda _boundary: True,
+        authority_check=authority_check,
+        effect_check=effect_check,
         post_commit_observer=observer,
         max_review_rounds=max_review_rounds,
         binding_snapshot_factory=binding_snapshot_factory,
@@ -986,6 +1000,68 @@ async def test_postownership_synthesis_failure_terminalizes_without_legacy(stora
         AssistConversationScope(surface.actor.user_id, surface.conversation_id)
     )
     assert current is None
+
+
+@pytest.mark.asyncio
+async def test_mixed_authority_denial_closes_without_synthesis_capability(storage: Any) -> None:
+    surface, projection = _stored_surface(storage, "mixed-authority")
+    adapter = _CountingAdapter(storage)
+    primary = _Primary()
+    capability_claims: list[CompareCurrentFileWebStepKind] = []
+    publication_actions: list[AssistPublicationAction] = []
+
+    class DeniedWebReader:
+        async def research(self, **_kwargs: Any) -> Any:
+            raise AuthorizationError("web authority was revoked after claim")
+
+    def authority(actor: ActorContext, boundary: object) -> bool:
+        assert actor is surface.actor
+        if type(boundary) is AssistCapabilityBoundary:
+            capability_claims.append(boundary.step_kind)
+            return boundary.step_kind is not CompareCurrentFileWebStepKind.PRIMARY_SYNTHESIS
+        if type(boundary) is AssistPublicationBoundary:
+            publication_actions.append(boundary.action)
+            return boundary.action is AssistPublicationAction.TERMINAL
+        return True
+
+    controller = _controller(
+        primary=primary,
+        graph_adapter=adapter,
+        file_reader=_FileReader(_prepared_file(surface, projection)),
+        web_reader=DeniedWebReader(),
+        authority_check=authority,
+    )
+
+    async def forbidden_legacy() -> dict[str, object]:
+        raise AssertionError("legacy cannot run after ownership")
+
+    result = await controller.execute(
+        surface,
+        legacy_primary=forbidden_legacy,
+        absolute_deadline=time.monotonic() + 4,
+    )
+
+    assert result.outcome is SupervisorAssistOutcome.TERMINAL
+    assert capability_claims == [
+        CompareCurrentFileWebStepKind.FILE_READ,
+        CompareCurrentFileWebStepKind.WEB_READ,
+    ]
+    assert publication_actions == [AssistPublicationAction.TERMINAL]
+    assert primary.acquire_calls == 0 and primary.calls == []
+    assert adapter.mixed_terminal_calls == 1
+    assert adapter.terminal_calls == adapter.publish_calls == 0
+    pending = result.pending_admission
+    assert pending is not None and pending.work_graph_id is not None and pending.revision is not None
+    closed = adapter.load(
+        AssistGraphCursor(
+            graph_id=pending.work_graph_id,
+            user_id=surface.actor.user_id,
+            conversation_id=surface.conversation_id,
+            revision=pending.revision,
+        )
+    )
+    assert closed is not None
+    assert closed.outcome_reason is CompareCurrentFileWebGraphOutcomeReason.AUTHORITY_DENIED
 
 
 @pytest.mark.asyncio

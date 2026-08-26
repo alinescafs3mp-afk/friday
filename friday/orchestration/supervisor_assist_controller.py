@@ -67,6 +67,7 @@ from friday.orchestration.supervisor_assist_graph_adapter import (
     AssistGraphAdmission,
     AssistGraphCursor,
     AssistGraphPublication,
+    AssistMixedAuthorityTerminalPublication,
     AssistPublicationBoundary,
     AssistRestartResult,
     AssistStepSettlement,
@@ -337,6 +338,15 @@ class SupervisorAssistGraphPort(Protocol):
         self,
         cursor: AssistGraphCursor,
         publication: AssistTerminalPublication,
+        *,
+        authority_check: AssistBoundaryCheck[AssistPublicationBoundary],
+        effect_check: AssistBoundaryCheck[AssistPublicationBoundary],
+    ) -> AssistGraphPublication: ...
+
+    def publish_terminal_after_mixed_authority_denial(
+        self,
+        cursor: AssistGraphCursor,
+        publication: AssistMixedAuthorityTerminalPublication,
         *,
         authority_check: AssistBoundaryCheck[AssistPublicationBoundary],
         effect_check: AssistBoundaryCheck[AssistPublicationBoundary],
@@ -1834,6 +1844,37 @@ class SupervisorAssistController:
                 return None
         return await self._observe_committed(record, result)
 
+    async def _publish_mixed_authority_terminal(
+        self,
+        record: _OwnedRun,
+    ) -> SupervisorAssistResult | None:
+        request = AssistMixedAuthorityTerminalPublication(trace=self._trace(record))
+        async with record.mutation_lock:
+            if record.stop.is_set() or record.committed_result is not None:
+                return record.committed_result
+            try:
+                publication = self._graph_adapter.publish_terminal_after_mixed_authority_denial(
+                    self._cursor(record),
+                    request,
+                    authority_check=self._publication_check(
+                        record,
+                        self._authority_for(record.surface.actor),
+                    ),
+                    effect_check=self._publication_check(
+                        record,
+                        self._effect_check,
+                    ),
+                )
+                result = self._committed_result(
+                    record,
+                    publication,
+                    outcome=SupervisorAssistOutcome.TERMINAL,
+                    include_file_citation=False,
+                )
+            except Exception:
+                return None
+        return await self._observe_committed(record, result)
+
     async def _stop_result(self, record: _OwnedRun) -> SupervisorAssistResult:
         if record.cancel_requested:
             await record.cancellation_done.wait()
@@ -2046,6 +2087,25 @@ class SupervisorAssistController:
                 }
                 for step_id in (FILE_READ_STEP_ID, WEB_READ_STEP_ID)
             )
+            mixed_authority_denial = (
+                sum(
+                    record.graph.step(step_id).state is CompareCurrentFileWebStepState.DENIED
+                    for step_id in (FILE_READ_STEP_ID, WEB_READ_STEP_ID)
+                )
+                == 1
+                and sum(
+                    record.graph.step(step_id).state
+                    in {
+                        CompareCurrentFileWebStepState.COMPLETE,
+                        CompareCurrentFileWebStepState.PARTIAL,
+                    }
+                    for step_id in (FILE_READ_STEP_ID, WEB_READ_STEP_ID)
+                )
+                == 1
+            )
+            if mixed_authority_denial:
+                terminal = await self._publish_mixed_authority_terminal(record)
+                return terminal or await self._stop_result(record)
             if usable_read:
                 async with record.mutation_lock:
                     synthesis_claimed = await self._claim(

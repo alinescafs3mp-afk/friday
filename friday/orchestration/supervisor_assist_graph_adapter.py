@@ -410,6 +410,17 @@ class AssistTerminalPublication:
 
 
 @dataclass(frozen=True, slots=True)
+class AssistMixedAuthorityTerminalPublication:
+    """Code-owned closure request for one usable read plus one denied read."""
+
+    trace: AssistTraceInput
+
+    def __post_init__(self) -> None:
+        if type(self.trace) is not AssistTraceInput:
+            raise ValueError("mixed-authority terminal publication is invalid")
+
+
+@dataclass(frozen=True, slots=True)
 class AssistCancellation:
     user_message: str
     trace: AssistTraceInput
@@ -1127,6 +1138,135 @@ class SupervisorAssistGraphAdapter:
         self._actors.pop(result.graph.id, None)
         return result
 
+    def publish_terminal_after_mixed_authority_denial(
+        self,
+        cursor: AssistGraphCursor,
+        publication: AssistMixedAuthorityTerminalPublication,
+        *,
+        authority_check: AssistBoundaryCheck[AssistPublicationBoundary],
+        effect_check: AssistBoundaryCheck[AssistPublicationBoundary],
+    ) -> AssistGraphPublication:
+        """Atomically close mixed usable/denied reads without a model capability."""
+
+        if (
+            type(cursor) is not AssistGraphCursor
+            or type(publication) is not AssistMixedAuthorityTerminalPublication
+        ):
+            raise TypeError("mixed-authority terminal publication requires typed inputs")
+        publication.__post_init__()
+
+        def operation(conn: Any) -> AssistGraphPublication:
+            graph = self._active(conn, cursor)
+            actor = self._actors.get(graph.id)
+            if (
+                type(actor) is not ActorContext
+                or actor.user_id != graph.user_id
+                or actor.own_id != graph.user_id
+            ):
+                raise SupervisorAssistGraphAdapterError(
+                    "mixed-authority terminal publication lost its process actor"
+                )
+            reads = graph.steps[:2]
+            synthesis = graph.steps[2]
+            denied = tuple(
+                step
+                for step in reads
+                if step.state is CompareCurrentFileWebStepState.DENIED
+                and step.authority_rechecked
+                and not step.verified
+                and step.evidence_identity_sha256 is None
+            )
+            usable = tuple(
+                step
+                for step in reads
+                if step.state
+                in {
+                    CompareCurrentFileWebStepState.COMPLETE,
+                    CompareCurrentFileWebStepState.PARTIAL,
+                }
+                and step.authority_rechecked
+                and step.verified
+                and step.evidence_identity_sha256 is not None
+            )
+            if (
+                len(denied) != 1
+                or len(usable) != 1
+                or not all(step.settled for step in reads)
+                or synthesis.state is not CompareCurrentFileWebStepState.PENDING
+                or synthesis.attempt != 0
+            ):
+                raise SupervisorAssistGraphAdapterError(
+                    "mixed-authority terminal publication graph is not exact"
+                )
+            self._live_dialogue(conn, AssistConversationScope(graph.user_id, graph.conversation_id))
+            self._raw_pin(
+                conn,
+                user_id=graph.user_id,
+                raw_id=graph.current_file_raw_object_id,
+                source_sha256=graph.current_file_source_identity_sha256,
+                content_sha256=graph.current_file_content_sha256,
+            )
+            expected_status = CompareCurrentFileWebGraphOutcomeStatus.DENIED
+            expected_reason = CompareCurrentFileWebGraphOutcomeReason.AUTHORITY_DENIED
+            boundary = self._publication_boundary(
+                graph,
+                actor=actor,
+                action=AssistPublicationAction.TERMINAL,
+                status=expected_status,
+                reason=expected_reason,
+            )
+            _require(authority_check, boundary, label="mixed-authority terminal authority")
+            _require(effect_check, boundary, label="mixed-authority terminal effect")
+            self._stage(conn)
+            claimed = claim_compare_current_file_web_step_in_transaction(
+                conn,
+                graph_id=graph.id,
+                user_id=graph.user_id,
+                conversation_id=graph.conversation_id,
+                expected_revision=graph.revision,
+                step_id=PRIMARY_SYNTHESIS_STEP_ID,
+            )
+            settled = settle_compare_current_file_web_step_in_transaction(
+                conn,
+                graph_id=claimed.id,
+                user_id=claimed.user_id,
+                conversation_id=claimed.conversation_id,
+                expected_revision=claimed.revision,
+                step_id=PRIMARY_SYNTHESIS_STEP_ID,
+                state=CompareCurrentFileWebStepState.UNAVAILABLE,
+                outcome_sha256=canonical_sha256(
+                    {
+                        "schema": (
+                            "friday.semantic-supervisor-assist-mixed-authority-synthesis.v1"
+                        ),
+                        "accepted_plan_sha256": graph.accepted_plan_sha256,
+                        "denied_read": denied[0].kind.value,
+                        "state": CompareCurrentFileWebStepState.UNAVAILABLE.value,
+                        "usable_read_outcome_sha256": usable[0].outcome_sha256,
+                    }
+                ),
+                evidence_identity_sha256=None,
+                authority_rechecked=False,
+                verified=False,
+            )
+            if settled.terminal_disposition() != (expected_status, expected_reason):
+                raise SupervisorAssistGraphAdapterError(
+                    "mixed-authority terminal disposition changed"
+                )
+            content = _TERMINAL_CONTENT[expected_reason]
+            return self._publish_terminal_in_transaction(
+                conn,
+                settled,
+                content=content,
+                trace_input=publication.trace,
+                evidence_not_replayable=False,
+                cancelled=False,
+            )
+
+        result = self._write(operation)
+        self._actors.pop(result.graph.id, None)
+        return result
+
     def _publish_terminal_in_transaction(
         self,
         conn: Any,
@@ -1362,6 +1502,7 @@ __all__ = [
     "AssistGraphAdmission",
     "AssistGraphCursor",
     "AssistGraphPublication",
+    "AssistMixedAuthorityTerminalPublication",
     "AssistPublicationAction",
     "AssistPublicationBoundary",
     "AssistRestartBatch",

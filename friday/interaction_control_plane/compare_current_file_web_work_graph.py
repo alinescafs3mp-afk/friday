@@ -1128,6 +1128,13 @@ class CompareCurrentFileWebWorkGraph:
                 CompareCurrentFileWebGraphOutcomeStatus.PARTIAL,
                 CompareCurrentFileWebGraphOutcomeReason.PARTIAL_EVIDENCE,
             )
+        if synthesis.state is CompareCurrentFileWebStepState.UNAVAILABLE and any(
+            step.state is CompareCurrentFileWebStepState.DENIED for step in reads
+        ):
+            return (
+                CompareCurrentFileWebGraphOutcomeStatus.DENIED,
+                CompareCurrentFileWebGraphOutcomeReason.AUTHORITY_DENIED,
+            )
         if synthesis.state is CompareCurrentFileWebStepState.UNAVAILABLE:
             return (
                 CompareCurrentFileWebGraphOutcomeStatus.UNAVAILABLE,

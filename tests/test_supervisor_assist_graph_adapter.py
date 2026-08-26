@@ -45,6 +45,8 @@ from friday.orchestration.supervisor_assist_graph_adapter import (
     AssistConversationScope,
     AssistGraphAdmission,
     AssistGraphCursor,
+    AssistMixedAuthorityTerminalPublication,
+    AssistPublicationAction,
     AssistRestartDisposition,
     AssistStepSettlement,
     AssistTerminalPublication,
@@ -242,6 +244,32 @@ def _settle(adapter, graph, kind, state, evidence=None):
     )
 
 
+def _mixed_authority_graph(
+    adapter: SupervisorAssistGraphAdapter,
+    surface: CurrentFileWebAssistSurface,
+    *,
+    denied_kind: CompareCurrentFileWebStepKind,
+):
+    graph = _admit(adapter, surface)
+    for kind in (
+        CompareCurrentFileWebStepKind.FILE_READ,
+        CompareCurrentFileWebStepKind.WEB_READ,
+    ):
+        graph = _claim(adapter, graph, surface, kind)
+        graph = _settle(
+            adapter,
+            graph,
+            kind,
+            (
+                CompareCurrentFileWebStepState.DENIED
+                if kind is denied_kind
+                else CompareCurrentFileWebStepState.COMPLETE
+            ),
+            None if kind is denied_kind else _sha256(f"usable:{graph.id}:{kind.value}"),
+        )
+    return graph
+
+
 def test_admission_is_one_existing_dialogue_transaction_and_never_upgrades_file_token(storage) -> None:
     adapter = SupervisorAssistGraphAdapter(storage)
     surface, _projection = _seed_surface(storage, "admit")
@@ -363,6 +391,133 @@ def test_claim_denial_is_atomic_and_review_recovery_is_typed(storage) -> None:
         restarted.results[0].publication.graph.outcome_reason
         is CompareCurrentFileWebGraphOutcomeReason.EVIDENCE_NOT_REPLAYABLE
     )
+
+
+@pytest.mark.parametrize(
+    "denied_kind",
+    [
+        CompareCurrentFileWebStepKind.FILE_READ,
+        CompareCurrentFileWebStepKind.WEB_READ,
+    ],
+)
+def test_mixed_authority_denial_terminalizes_atomically_without_model(
+    storage: Any,
+    denied_kind: CompareCurrentFileWebStepKind,
+) -> None:
+    adapter = SupervisorAssistGraphAdapter(storage)
+    surface, _ = _seed_surface(storage, f"mixed-{denied_kind.value}")
+    graph = _mixed_authority_graph(adapter, surface, denied_kind=denied_kind)
+    request = AssistMixedAuthorityTerminalPublication(_trace())
+    boundary_actions: list[AssistPublicationAction] = []
+
+    with pytest.raises(SupervisorAssistGraphAdapterError, match="authority"):
+        adapter.publish_terminal_after_mixed_authority_denial(
+            AssistGraphCursor.from_graph(graph),
+            request,
+            authority_check=lambda _boundary: False,
+            effect_check=lambda _boundary: True,
+        )
+    assert adapter.load(AssistGraphCursor.from_graph(graph)) == graph
+
+    def authority(boundary: Any) -> bool:
+        boundary_actions.append(boundary.action)
+        return bool(
+            boundary.actor is surface.actor
+            and boundary.expected_status is CompareCurrentFileWebGraphOutcomeStatus.DENIED
+            and boundary.expected_reason is CompareCurrentFileWebGraphOutcomeReason.AUTHORITY_DENIED
+        )
+
+    published = adapter.publish_terminal_after_mixed_authority_denial(
+        AssistGraphCursor.from_graph(graph),
+        request,
+        authority_check=authority,
+        effect_check=lambda boundary: boundary.actor is surface.actor,
+    )
+
+    assert boundary_actions == [AssistPublicationAction.TERMINAL]
+    assert published.graph.state is CompareCurrentFileWebGraphState.TERMINAL
+    assert published.graph.outcome_status is CompareCurrentFileWebGraphOutcomeStatus.DENIED
+    assert published.graph.outcome_reason is CompareCurrentFileWebGraphOutcomeReason.AUTHORITY_DENIED
+    assert published.graph.revision == graph.revision + 3
+    synthesis = published.graph.steps[2]
+    assert synthesis.state is CompareCurrentFileWebStepState.UNAVAILABLE
+    assert synthesis.attempt == 1
+    assert synthesis.evidence_identity_sha256 is None
+    assert published.public_citations == ()
+    messages = storage.execute(
+        "SELECT role,metadata_json FROM messages WHERE conversation_id=? ORDER BY rowid",
+        (surface.conversation_id,),
+    ).fetchall()
+    assert [row["role"] for row in messages] == ["user", "assistant"]
+    assert all("private body" not in row["metadata_json"] for row in messages)
+
+    with pytest.raises(SupervisorAssistGraphAdapterError):
+        adapter.publish_terminal_after_mixed_authority_denial(
+            AssistGraphCursor.from_graph(graph),
+            request,
+            authority_check=lambda _boundary: True,
+            effect_check=lambda _boundary: True,
+        )
+    assert storage.execute(
+        "SELECT COUNT(*) FROM messages WHERE conversation_id=? AND role='assistant'",
+        (surface.conversation_id,),
+    ).fetchone()[0] == 1
+
+
+def test_mixed_authority_terminal_fails_closed_on_restart_drift_and_forgery(storage: Any) -> None:
+    adapter = SupervisorAssistGraphAdapter(storage)
+    restart_surface, _ = _seed_surface(storage, "mixed-restart")
+    restart_graph = _mixed_authority_graph(
+        adapter,
+        restart_surface,
+        denied_kind=CompareCurrentFileWebStepKind.WEB_READ,
+    )
+    restarted_adapter = SupervisorAssistGraphAdapter(storage)
+    with pytest.raises(SupervisorAssistGraphAdapterError, match="process actor"):
+        restarted_adapter.publish_terminal_after_mixed_authority_denial(
+            AssistGraphCursor.from_graph(restart_graph),
+            AssistMixedAuthorityTerminalPublication(_trace()),
+            authority_check=lambda _boundary: True,
+            effect_check=lambda _boundary: True,
+        )
+    restarted = restarted_adapter.reconcile_all_active_after_restart(batch_limit=1)
+    assert restarted[-1].has_more is False
+    retired = restarted_adapter.load(AssistGraphCursor.from_graph(restart_graph))
+    assert retired is not None
+    assert retired.outcome_reason is CompareCurrentFileWebGraphOutcomeReason.EVIDENCE_NOT_REPLAYABLE
+
+    drift_surface, _ = _seed_surface(storage, "mixed-drift")
+    drift_graph = _mixed_authority_graph(
+        adapter,
+        drift_surface,
+        denied_kind=CompareCurrentFileWebStepKind.FILE_READ,
+    )
+    storage.archive_conversation(drift_surface.conversation_id, drift_surface.actor.user_id)
+    with pytest.raises(SupervisorAssistGraphAdapterError, match="live dialogue"):
+        adapter.publish_terminal_after_mixed_authority_denial(
+            AssistGraphCursor.from_graph(drift_graph),
+            AssistMixedAuthorityTerminalPublication(_trace()),
+            authority_check=lambda _boundary: True,
+            effect_check=lambda _boundary: True,
+        )
+    assert adapter.load(AssistGraphCursor.from_graph(drift_graph)) == drift_graph
+
+    forged_surface, _ = _seed_surface(storage, "mixed-forged")
+    forged_graph = _mixed_authority_graph(
+        adapter,
+        forged_surface,
+        denied_kind=CompareCurrentFileWebStepKind.WEB_READ,
+    )
+    forged_request = AssistMixedAuthorityTerminalPublication(_trace())
+    object.__setattr__(forged_request, "trace", object())
+    with pytest.raises(ValueError, match="mixed-authority"):
+        adapter.publish_terminal_after_mixed_authority_denial(
+            AssistGraphCursor.from_graph(forged_graph),
+            forged_request,
+            authority_check=lambda _boundary: True,
+            effect_check=lambda _boundary: True,
+        )
+    assert adapter.load(AssistGraphCursor.from_graph(forged_graph)) == forged_graph
 
 
 def _web_evidence(surface: CurrentFileWebAssistSurface) -> TransientWebComparisonEvidence:

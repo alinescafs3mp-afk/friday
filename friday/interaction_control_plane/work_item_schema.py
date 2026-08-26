@@ -2465,12 +2465,37 @@ WHEN NEW.state='terminal' AND NOT (
               WHERE synthesis.graph_id=OLD.id AND synthesis.step_id='primary_synthesis'
                 AND synthesis.state='partial'
          ))
+        OR (NEW.outcome_status='denied'
+            AND NEW.outcome_reason='authority_denied'
+            AND EXISTS (
+                SELECT 1 FROM work_item_compare_current_file_web_steps synthesis
+                 WHERE synthesis.graph_id=OLD.id AND synthesis.step_id='primary_synthesis'
+                   AND synthesis.state='unavailable'
+            )
+            AND EXISTS (
+                SELECT 1 FROM work_item_compare_current_file_web_steps read_step
+                 WHERE read_step.graph_id=OLD.id
+                   AND read_step.step_id IN ('read_current_file','read_current_web')
+                   AND read_step.state='denied'
+            )
+            AND EXISTS (
+                SELECT 1 FROM work_item_compare_current_file_web_steps read_step
+                 WHERE read_step.graph_id=OLD.id
+                   AND read_step.step_id IN ('read_current_file','read_current_web')
+                   AND read_step.state IN ('complete','partial')
+            ))
         OR (NEW.outcome_status='unavailable'
             AND NEW.outcome_reason='capability_unavailable'
             AND EXISTS (
                 SELECT 1 FROM work_item_compare_current_file_web_steps synthesis
                  WHERE synthesis.graph_id=OLD.id AND synthesis.step_id='primary_synthesis'
                    AND synthesis.state='unavailable'
+            )
+            AND NOT EXISTS (
+                SELECT 1 FROM work_item_compare_current_file_web_steps read_step
+                 WHERE read_step.graph_id=OLD.id
+                   AND read_step.step_id IN ('read_current_file','read_current_web')
+                   AND read_step.state='denied'
             ))
         OR (NEW.outcome_status='failed' AND NEW.outcome_reason='step_failed'
             AND EXISTS (
