@@ -134,6 +134,12 @@ class AssistObservationStatus(StrEnum):
     FAILED = "failed"
 
 
+class AssistPendingGraphDisposition(StrEnum):
+    LIVE_IN_PROCESS = "live_in_process"
+    RETIRED = "retired"
+    UNCERTAIN = "uncertain"
+
+
 class _AdmissionCertainty(StrEnum):
     NO_COMMIT = "no_commit"
     OWNED = "owned"
@@ -2076,6 +2082,72 @@ class SupervisorAssistController:
         self._known_durable_active_scopes.discard(scope)
         return True
 
+    async def reconcile_pending_before_legacy(
+        self,
+        scope: AssistConversationScope,
+        pending: PendingDurableTurnAdmission,
+        *,
+        absolute_deadline: float,
+    ) -> AssistPendingGraphDisposition:
+        """Retire same-process interrupted work before an overlapping legacy turn."""
+
+        if (
+            type(scope) is not AssistConversationScope
+            or type(pending) is not PendingDurableTurnAdmission
+            or not pending.is_owned
+            or pending.work_graph_id is None
+            or pending.work_item_id is not None
+            or not pending.matches_scope(
+                person_id=scope.user_id,
+                conversation_id=scope.conversation_id,
+            )
+            or _exact_future_deadline(absolute_deadline) is None
+            or self._closed
+        ):
+            return AssistPendingGraphDisposition.UNCERTAIN
+        key = (scope.user_id, scope.conversation_id)
+        active = self._active_by_scope.get(key)
+        if active is not None:
+            if (
+                active.graph.id != pending.work_graph_id
+                or pending.revision is None
+                or active.graph.revision < pending.revision
+                or active.pending.work_graph_id != active.graph.id
+                or active.pending.revision != active.graph.revision
+            ):
+                return AssistPendingGraphDisposition.UNCERTAIN
+            if (
+                active.graph.state is CompareCurrentFileWebGraphState.ACTIVE
+                and active.committed_result is None
+            ):
+                return AssistPendingGraphDisposition.LIVE_IN_PROCESS
+            return AssistPendingGraphDisposition.RETIRED
+
+        retained = self._retained_by_scope.get(key)
+        if retained is not None:
+            if (
+                retained.graph.id != pending.work_graph_id
+                or retained.graph.revision != pending.revision
+                or retained.pending != pending
+            ):
+                return AssistPendingGraphDisposition.UNCERTAIN
+            return (
+                AssistPendingGraphDisposition.RETIRED
+                if await self._reconcile_retained(retained)
+                else AssistPendingGraphDisposition.UNCERTAIN
+            )
+
+        try:
+            current = self._graph_adapter.load_current(scope)
+        except Exception:
+            self._known_durable_active_scopes.add(key)
+            return AssistPendingGraphDisposition.UNCERTAIN
+        if current is None:
+            self._known_durable_active_scopes.discard(key)
+            return AssistPendingGraphDisposition.RETIRED
+        self._known_durable_active_scopes.add(key)
+        return AssistPendingGraphDisposition.UNCERTAIN
+
     async def execute(
         self,
         surface: CurrentFileWebAssistSurface | None,
@@ -2309,6 +2381,7 @@ __all__ = [
     "AssistEffectCheck",
     "AssistFileEvidenceReader",
     "AssistObservationStatus",
+    "AssistPendingGraphDisposition",
     "AssistPlanner",
     "AssistPostCommitObserver",
     "AssistPrimaryModel",

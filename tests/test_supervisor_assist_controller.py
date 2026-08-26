@@ -44,6 +44,7 @@ from friday.orchestration.semantic_supervisor import ParsedSupervisorProposal
 from friday.orchestration.supervisor_assist_controller import (
     SUPERVISOR_ASSIST_CONTROLLER_STATUS_SCHEMA,
     AssistObservationStatus,
+    AssistPendingGraphDisposition,
     SupervisorAssistController,
     SupervisorAssistOutcome,
 )
@@ -1011,6 +1012,20 @@ async def test_overlapping_turn_uses_legacy_once_and_exact_cancel_drains_childre
     assert active_graph is not None
     assert isinstance(active_pending, PendingDurableTurnAdmission)
     assert active_pending.revision == active_graph.revision
+    lagging_pending = PendingDurableTurnAdmission.owned(
+        person_id=active_pending.person_id,
+        conversation_id=active_pending.conversation_id,
+        work_graph_id=active_pending.work_graph_id,
+        revision=active_graph.revision - 1,
+    )
+    assert (
+        await controller.reconcile_pending_before_legacy(
+            AssistConversationScope(surface.actor.user_id, surface.conversation_id),
+            lagging_pending,
+            absolute_deadline=time.monotonic() + 3,
+        )
+        is AssistPendingGraphDisposition.LIVE_IN_PROCESS
+    )
     overlap = await controller.execute(
         surface,
         legacy_primary=overlap_legacy,
@@ -1148,6 +1163,63 @@ async def test_retained_owner_is_visible_with_zero_attachments_and_can_be_cancel
     assert isinstance(pending, PendingDurableTurnAdmission) and pending.is_owned
     assert cancelled is not None and cancelled.outcome is SupervisorAssistOutcome.CANCELLED
     assert adapter.cancel_calls == 1
+    assert controller.semantic_supervisor_status()["retained_active_graphs"] == 0
+
+
+@pytest.mark.asyncio
+async def test_retained_owner_is_retired_before_an_overlapping_legacy_turn(storage: Any) -> None:
+    surface, projection = _stored_surface(storage, "retained-reconcile")
+    adapter = _CountingAdapter(storage)
+    gate = asyncio.Event()
+    file_reader = _FileReader(_prepared_file(surface, projection), gate=gate)
+    web_reader = _WebReader(_web_evidence(surface), gate=gate)
+    observed: list[object] = []
+    controller = _controller(
+        graph_adapter=adapter,
+        file_reader=file_reader,
+        web_reader=web_reader,
+        observer=observed.append,
+    )
+
+    async def forbidden_legacy() -> dict[str, object]:
+        raise AssertionError("legacy cannot run after ownership")
+
+    task = asyncio.create_task(
+        controller.execute(
+            surface,
+            legacy_primary=forbidden_legacy,
+            absolute_deadline=time.monotonic() + 5,
+        )
+    )
+    await asyncio.wait_for(
+        asyncio.gather(file_reader.started.wait(), web_reader.started.wait()),
+        timeout=2,
+    )
+    task.cancel()
+    interrupted = await asyncio.wait_for(task, timeout=2)
+    pending = controller.pending_durable_turn_admission(
+        surface.actor.user_id,
+        "новый ход",
+        actor=surface.actor,
+        conversation_id=surface.conversation_id,
+    )
+    assert isinstance(pending, PendingDurableTurnAdmission)
+
+    disposition = await controller.reconcile_pending_before_legacy(
+        AssistConversationScope(surface.actor.user_id, surface.conversation_id),
+        pending,
+        absolute_deadline=time.monotonic() + 3,
+    )
+    assert interrupted.outcome is SupervisorAssistOutcome.INTERRUPTED
+    assert disposition is AssistPendingGraphDisposition.RETIRED
+    assert adapter.restart_calls == 1
+    assert len(observed) == 1
+    assert (
+        adapter.load_current(
+            AssistConversationScope(surface.actor.user_id, surface.conversation_id)
+        )
+        is None
+    )
     assert controller.semantic_supervisor_status()["retained_active_graphs"] == 0
 
 

@@ -8,6 +8,7 @@ graph already present in the conversation always stays ahead of new planning.
 
 from __future__ import annotations
 
+import asyncio
 import inspect
 import math
 import time
@@ -15,9 +16,11 @@ from collections.abc import Awaitable, Callable, Mapping
 from typing import Any, Protocol
 
 from friday.orchestration.supervisor_assist_controller import (
+    AssistPendingGraphDisposition,
     SupervisorAssistOutcome,
     SupervisorAssistResult,
 )
+from friday.orchestration.supervisor_assist_graph_adapter import AssistConversationScope
 from friday.orchestration.supervisor_assist_surface import (
     prepare_current_file_web_assist_surface,
 )
@@ -58,11 +61,19 @@ class _AssistController(Protocol):
 
     async def cancel_active(
         self,
-        scope: object,
+        scope: AssistConversationScope,
         *,
         user_message: str,
         absolute_deadline: float,
     ) -> SupervisorAssistResult | None: ...
+
+    async def reconcile_pending_before_legacy(
+        self,
+        scope: AssistConversationScope,
+        pending: PendingDurableTurnAdmission,
+        *,
+        absolute_deadline: float,
+    ) -> AssistPendingGraphDisposition: ...
 
     async def close(self) -> None: ...
 
@@ -137,6 +148,10 @@ class SemanticSupervisorAssistRuntime:
                 getattr(controller, "pending_durable_turn_admission", None),
             ),
             ("controller cancellation", getattr(controller, "cancel_active", None)),
+            (
+                "controller pending reconciliation",
+                getattr(controller, "reconcile_pending_before_legacy", None),
+            ),
             ("controller close", getattr(controller, "close", None)),
             ("conversation mode reader", conversation_is_dialogue),
         ):
@@ -369,13 +384,15 @@ class SemanticSupervisorAssistRuntime:
 
         deadline = _future_deadline(self._settings, turn_deadline)
         normalized = message.strip().casefold() if isinstance(message, str) else ""
-        if isinstance(active, PendingDurableTurnAdmission) and normalized in {"отмена", "cancel"}:
-            from friday.orchestration.supervisor_assist_graph_adapter import AssistConversationScope
-
-            scope = AssistConversationScope(
+        scope = (
+            AssistConversationScope(
                 user_id=actor.own_id,
                 conversation_id=str(conversation_id or ""),
             )
+            if isinstance(active, PendingDurableTurnAdmission)
+            else None
+        )
+        if scope is not None and normalized in {"отмена", "cancel"}:
             cancelled = await self._controller.cancel_active(
                 scope,
                 user_message=normalized,
@@ -385,7 +402,26 @@ class SemanticSupervisorAssistRuntime:
                 raise SupervisorAssistRuntimeError("active assist cancellation is uncertain")
             return cancelled.response
 
-        if isinstance(active, PendingDurableTurnAdmission):
+        if isinstance(active, PendingDurableTurnAdmission) and scope is not None:
+            try:
+                disposition = await self._controller.reconcile_pending_before_legacy(
+                    scope,
+                    active,
+                    absolute_deadline=deadline,
+                )
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                raise SupervisorAssistRuntimeError(
+                    "durable assist reconciliation is uncertain"
+                ) from exc
+            if disposition is AssistPendingGraphDisposition.UNCERTAIN:
+                raise SupervisorAssistRuntimeError("durable assist reconciliation is uncertain")
+            if disposition not in {
+                AssistPendingGraphDisposition.LIVE_IN_PROCESS,
+                AssistPendingGraphDisposition.RETIRED,
+            }:
+                raise SupervisorAssistRuntimeError("durable assist reconciliation is invalid")
             if (
                 isinstance(legacy_kwargs.get("_pending_durable_admission"), PendingDurableTurnAdmission)
                 and legacy_kwargs["_pending_durable_admission"].work_graph_id is not None

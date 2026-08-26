@@ -7,6 +7,7 @@ from typing import Any
 import pytest
 
 from friday.orchestration.supervisor_assist_controller import (
+    AssistPendingGraphDisposition,
     SupervisorAssistOutcome,
     SupervisorAssistResult,
 )
@@ -46,6 +47,8 @@ class _Controller:
         self.execute_mode = SupervisorAssistOutcome.LEGACY
         self.execute_calls = 0
         self.cancel_calls = 0
+        self.reconcile_calls = 0
+        self.reconcile_disposition = AssistPendingGraphDisposition.LIVE_IN_PROCESS
         self.closed = 0
         self.surface: object = None
 
@@ -88,6 +91,14 @@ class _Controller:
     async def cancel_active(self, *_args: Any, **_kwargs: Any) -> SupervisorAssistResult | None:
         self.cancel_calls += 1
         return None
+
+    async def reconcile_pending_before_legacy(
+        self,
+        *_args: Any,
+        **_kwargs: Any,
+    ) -> AssistPendingGraphDisposition:
+        self.reconcile_calls += 1
+        return self.reconcile_disposition
 
     async def close(self) -> None:
         self.closed += 1
@@ -202,8 +213,16 @@ async def test_promoted_response_never_crosses_legacy_or_ordinary_observer(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "disposition",
+    [
+        AssistPendingGraphDisposition.LIVE_IN_PROCESS,
+        AssistPendingGraphDisposition.RETIRED,
+    ],
+)
 async def test_existing_graph_bypasses_new_planning_and_does_not_bind_legacy_work_item(
     monkeypatch: pytest.MonkeyPatch,
+    disposition: AssistPendingGraphDisposition,
 ) -> None:
     import friday.orchestration.supervisor_assist_runtime as module
 
@@ -225,6 +244,7 @@ async def test_existing_graph_bypasses_new_planning_and_does_not_bind_legacy_wor
         work_graph_id="graph_0123456789abcdef",
         revision=3,
     )
+    controller.reconcile_disposition = disposition
     runtime = _runtime(primary, controller)
 
     result = await runtime.chat(
@@ -237,9 +257,34 @@ async def test_existing_graph_bypasses_new_planning_and_does_not_bind_legacy_wor
 
     assert result["message"] == "ordinary overlap"
     assert controller.execute_calls == 0
+    assert controller.reconcile_calls == 1
     assert primary.calls == 1
     assert primary.kwargs is not None
     assert primary.kwargs["_pending_durable_admission"] is None
+
+
+@pytest.mark.asyncio
+async def test_pending_reconciliation_uncertainty_never_calls_legacy() -> None:
+    primary = _Primary({"message": "must not run"})
+    controller = _Controller()
+    controller.pending = PendingDurableTurnAdmission.owned(
+        person_id=_PERSON,
+        conversation_id=_CONVERSATION,
+        work_graph_id="graph_0123456789abcdef",
+        revision=3,
+    )
+    controller.reconcile_disposition = AssistPendingGraphDisposition.UNCERTAIN
+    runtime = _runtime(primary, controller)
+
+    with pytest.raises(SupervisorAssistRuntimeError, match="reconciliation is uncertain"):
+        await runtime.chat(
+            _PERSON,
+            "новый ход",
+            actor=_actor(),
+            conversation_id=_CONVERSATION,
+        )
+    assert controller.reconcile_calls == 1
+    assert primary.calls == controller.execute_calls == 0
 
 
 def test_pending_graph_precedes_primary_and_uncertainty_suppresses_ingestion() -> None:
