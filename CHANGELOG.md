@@ -1,3 +1,18 @@
+## 0.207.51 — 2026-08-26
+
+### V12 document-passage projection contract
+
+- A storage-independent private contract now freezes exact Raw version/content
+  identity, extracted-text identity, the code-owned passage-policy revision and
+  at most 64 body-free half-open passage locators with exact slice digests.
+- Long natural text and unbroken blobs retain complete first-to-last character
+  coverage rather than silently dropping the tail. Incomplete sources carry a
+  closed reason and zero passages; pending state is never promoted to evidence
+  authority by this projection.
+- This is the first bounded post-ICP V12 refinement package. It changes no
+  database schema, runtime route, model profile, policy kernel or companion
+  plugin; the next package may add reader-first manifest and passage tables.
+
 ## 0.207.50 — 2026-08-26
 
 ### Durable locate, choose and explain document journey
