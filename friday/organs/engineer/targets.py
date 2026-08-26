@@ -297,29 +297,34 @@ _TRAILING_REQUEST_CANCEL = re.compile(
     r"запускай(?:те)?|сканируй(?:те)?)\b|"
     r"\b(?:отмена|отмени(?:те)?|передумал(?:а)?)\b|"
     r"\b(?:do\s+not|don't|dont|never)\s+(?:do|scan|run|execute)\b|"
-    r"\b(?:cancel(?:\s+(?:it|that))?|never\s+mind)\b|"
-    r"(?:\A|[.!?…]\s*)(?:(?:actually|wait|sorry|вообще|погоди(?:те)?)\s*[,;:]?\s*)?"
-    r"(?:"
-    r"(?:no|nope|nah|нет|неа)"
-    r"(?:\s*[,;:]?\s*(?:thanks?|thank\s+you|thx|спасибо|благодарю))?|"
-    r"(?:i\s+changed\s+my\s+mind|я\s+передумал(?:а)?|"
-    r"cancel(?:\s+(?:it|that))?|never\s+mind|отмена|отбой)"
-    r")\s*[.!?…]*(?=\s*(?:\Z|\n)))",
+    r"\b(?:cancel(?:\s+(?:it|that))?|never\s+mind|forget\s+it|"
+    r"i(?:'d|\s+would)\s+(?:rather|prefer)\s+not|"
+    r"(?:я\s+)?(?:лучше\s+)?не\s+(?:буду|хочу)|"
+    r"(?:не\s+)?забудь(?:те)?\s+(?:об\s+этом|это)|"
+    r"передумал(?:а)?)\b|"
+    r"(?:\A|[,;.!?…—–-]\s*)"
+    r"(?:(?:actually|wait|sorry|but|however|вообще|но|однако|погоди(?:те)?)"
+    r"\s*[,;:]?\s*)?"
+    r"(?:(?:please\s+)?(?:do\s+not|don't|dont)\b|(?:no|nope|nah|нет|неа)\b))",
     re.IGNORECASE,
 )
 _TRAILING_REQUEST_META = re.compile(
-    r"\A\s*(?:[,;:()]|[.!?…—–-])*\s*"
-    r"(?:(?:and|then|и|а\s+(?:затем|потом))\s+)?"
-    r"(?:(?:please|пожалуйста)\s*[,;:]?\s*)?(?:"
-    r"(?:what\s+(?:does|would)\s+(?:that|this|it)\s+mean)|"
-    r"(?:means?\s+what)|"
-    r"(?:(?:explain|clarify|tell\s+me)\s+"
-    r"(?:what\s+)?(?:that|this|it|the\s+(?:command|phrase))\s+means?)|"
-    r"(?:что\s+(?:это\s+)?значит)|"
-    r"(?:(?:это\s+)?означает\s+что)|"
-    r"(?:(?:объясни|объясните|уточни|уточните)\s*[,;:]?\s*"
-    r"(?:что\s+)?(?:это|эта\s+(?:команда|фраза))\s+значит)"
-    r")\b",
+    r"(?:"
+    r"\bwhat\s+(?:(?:does|would)\s+)?"
+    r"(?:that|this|it|(?:that|this|the)\s+(?:command|phrase|wording))\s+mean\b|"
+    r"\bwhat\s+do\s+you\s+mean\s+by\s+(?:that|this|it)\b|"
+    r"\bmeans?\s+what\b|"
+    r"\b(?:explain|clarify|tell|define|interpret)\w*\b[^.!?\n]{0,80}"
+    r"\b(?:that|this|it|(?:that|this|the)\s+(?:command|phrase|wording))\b"
+    r"[^.!?\n]{0,40}\b(?:mean|means|meaning|is)\b|"
+    r"\b(?:explain|clarify|define|interpret)\w*\s+the\s+"
+    r"(?:command|phrase|wording)\b|"
+    r"\bчто\s+(?:это|эта\s+(?:команда|фраза)|эти\s+слова)\s+знач\w*\b|"
+    r"\b(?:объясн|поясн|уточн|расшифр)\w*\b[^.!?\n]{0,80}"
+    r"\b(?:это|эт(?:а|у|ой)\s+(?:команд|фраз)\w*|эти\s+слова)\b"
+    r"[^.!?\n]{0,40}\b(?:знач|означ|смысл)\w*\b|"
+    r"\b(?:значение|смысл)\s+(?:этой\s+)?(?:команды|фразы)\b"
+    r")",
     re.IGNORECASE,
 )
 _LEADING_REQUEST_CANCEL = re.compile(
