@@ -47,14 +47,15 @@ class ProvenScope:
                 empty = True
                 break
             time.sleep(0.05)
-        subprocess.run(
-            [SYSTEMCTL_EXECUTABLE, "--user", "stop", self.unit],
-            check=False,
-            stdin=subprocess.DEVNULL,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            timeout=5,
-        )
+        with contextlib.suppress(Exception):
+            subprocess.run(
+                [SYSTEMCTL_EXECUTABLE, "--user", "stop", self.unit],
+                check=False,
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                timeout=5,
+            )
         if not self.cgroup.is_dir():
             empty = True
         return empty
@@ -110,7 +111,7 @@ class SystemdCgroupBoundary(ResourceBoundary):
             "-p",
             f"RuntimeMaxSec={runtime}",
             "-p",
-            "KillMode=process",
+            "KillMode=control-group",
             "-p",
             "Delegate=yes",
             "--",
@@ -133,6 +134,7 @@ class SystemdCgroupBoundary(ResourceBoundary):
         cgroup = _wait_unit_cgroup(unit)
         try:
             _prove_limits(cgroup, limits)
+            _prove_unit_contract(unit, runtime_sec=runtime)
         except CommandError:
             subprocess.run(
                 [SYSTEMCTL_EXECUTABLE, "--user", "stop", unit],
@@ -210,6 +212,77 @@ def _cpu_quota_usec(percent: int) -> str:
     period = 100_000
     quota = int(period * int(percent) / 100)
     return f"{quota} {period}"
+
+
+def _parse_systemd_usec(raw: str) -> int:
+    text = str(raw or "").strip().lower()
+    if not text or text in {"infinity", "inf", "[not set]"}:
+        raise CommandError("resource_boundary_unproven")
+    units = (
+        ("usec", 1),
+        ("us", 1),
+        ("msec", 1_000),
+        ("ms", 1_000),
+        ("sec", 1_000_000),
+        ("min", 60_000_000),
+        ("h", 3_600_000_000),
+        ("s", 1_000_000),
+    )
+    for suffix, multiplier in units:
+        if text.endswith(suffix):
+            number = text[: -len(suffix)]
+            if not number:
+                raise CommandError("resource_boundary_unproven")
+            try:
+                return int(float(number) * multiplier)
+            except ValueError as exc:
+                raise CommandError("resource_boundary_unproven") from exc
+    try:
+        return int(text)
+    except ValueError as exc:
+        raise CommandError("resource_boundary_unproven") from exc
+
+
+def _prove_unit_contract(unit: str, *, runtime_sec: int) -> None:
+    try:
+        shown = subprocess.run(  # noqa: S603
+            [
+                SYSTEMCTL_EXECUTABLE,
+                "--user",
+                "show",
+                unit,
+                "-p",
+                "KillMode",
+                "-p",
+                "RuntimeMaxUSec",
+                "-p",
+                "Delegate",
+            ],
+            check=False,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            timeout=3,
+            text=True,
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        raise CommandError("resource_boundary_unproven") from exc
+    kill_mode = ""
+    runtime_raw = ""
+    delegate = ""
+    for line in (shown.stdout or "").splitlines():
+        if line.startswith("KillMode="):
+            kill_mode = line.split("=", 1)[1]
+        elif line.startswith("RuntimeMaxUSec="):
+            runtime_raw = line.split("=", 1)[1]
+        elif line.startswith("Delegate="):
+            delegate = line.split("=", 1)[1]
+    if kill_mode != "control-group":
+        raise CommandError("resource_boundary_unproven")
+    if delegate.strip().lower() not in {"yes", "1", "true"}:
+        raise CommandError("resource_boundary_unproven")
+    if _parse_systemd_usec(runtime_raw) != int(runtime_sec) * 1_000_000:
+        raise CommandError("resource_boundary_unproven")
 
 
 def _prove_limits(cgroup: Path, limits: ResourceLimits) -> None:

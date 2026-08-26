@@ -61,6 +61,7 @@ class CommandGrantAuthority:
 
     def bind_store(self, store: CommandJobStore) -> None:
         self._store = store
+        self.confirm_authority.bind_store(store)
 
     def issue(
         self,
@@ -80,6 +81,9 @@ class CommandGrantAuthority:
         confirmed = False
         confirmation_nonce = ""
         confirmation_mac = ""
+        confirmation_expires_at = 0
+        now = int(self._clock())
+        exp = now + ttl_sec
         if confirmation is not None:
             checked = self.confirm_authority.verify(
                 confirmation,
@@ -89,17 +93,19 @@ class CommandGrantAuthority:
             confirmed = True
             confirmation_nonce = checked.nonce
             confirmation_mac = checked.mac
-        now = int(self._clock())
+            confirmation_expires_at = int(checked.expires_at)
+            exp = min(exp, confirmation_expires_at)
         payload = {
             "actor_id": sealed.actor_id,
             "argv_sha256": request.argv_sha256,
             "channel": sealed.channel,
             "command_digest": request.digest,
+            "confirmation_expires_at": confirmation_expires_at,
             "confirmation_mac": confirmation_mac,
             "confirmation_nonce": confirmation_nonce,
             "conversation_id": sealed.conversation_id,
             "destructive_confirmed": confirmed,
-            "exp": now + ttl_sec,
+            "exp": exp,
             "iat": now,
             "idempotency_key": sealed.idempotency_key,
             "isolation_profile": sealed.isolation_profile.value,
@@ -111,7 +117,7 @@ class CommandGrantAuthority:
             "source_row_id": sealed.source_row_id,
             "telegram_update_id": sealed.telegram_update_id,
             "tenant_id": sealed.tenant_id,
-            "v": 3,
+            "v": 4,
         }
         return self._encode(payload)
 
@@ -127,7 +133,7 @@ class CommandGrantAuthority:
     ) -> VerifiedCommandGrant:
         payload = self._decode(token)
         now = int(self._clock())
-        if payload.get("schema") != SCHEMA or payload.get("v") != 3:
+        if payload.get("schema") != SCHEMA or payload.get("v") != 4:
             raise CommandError("invalid_grant")
         if str(payload.get("actor_id") or "") != actor_id:
             raise CommandError("grant_actor_mismatch")
@@ -153,6 +159,13 @@ class CommandGrantAuthority:
             raise CommandError("host_user_requires_broker")
         exp = int(payload.get("exp") or 0)
         iat = int(payload.get("iat") or 0)
+        confirmation_expires_at = int(payload.get("confirmation_expires_at") or 0)
+        destructive_confirmed = bool(payload.get("destructive_confirmed"))
+        if destructive_confirmed:
+            if confirmation_expires_at <= 0:
+                raise CommandError("invalid_grant")
+            if confirmation_expires_at <= now:
+                raise CommandError("confirmation_expired")
         if iat > now + 5 or exp <= now:
             raise CommandError("grant_expired")
         nonce = str(payload.get("nonce") or "")
@@ -172,14 +185,17 @@ class CommandGrantAuthority:
             argv_sha256=str(payload["argv_sha256"]),
             lane=lane,
             origin=origin,
-            destructive_confirmed=bool(payload.get("destructive_confirmed")),
+            destructive_confirmed=destructive_confirmed,
             confirmation_nonce=str(payload.get("confirmation_nonce") or ""),
+            confirmation_expires_at=confirmation_expires_at,
             expires_at=exp,
             nonce=nonce,
         )
 
     def still_valid(self, grant: VerifiedCommandGrant) -> None:
         now = int(self._clock())
+        if grant.destructive_confirmed and grant.confirmation_expires_at <= now:
+            raise CommandError("confirmation_expired")
         if grant.expires_at <= now:
             raise CommandError("grant_expired")
         if self._store is not None and self._store.nonce_revoked(grant.nonce):

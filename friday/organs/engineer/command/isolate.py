@@ -6,7 +6,13 @@ import os
 from pathlib import Path
 
 from .contracts import (
+    BWRAP_BLOCK_FD,
+    BWRAP_EXEC_FD,
     BWRAP_EXECUTABLE,
+    BWRAP_EXPORT_FD,
+    BWRAP_SCRIPT_FD,
+    SANDBOX_EXPORT,
+    SANDBOX_HOST_OUTPUT,
     SANDBOX_JOB,
     SANDBOX_SCRIPT,
     CommandError,
@@ -16,6 +22,21 @@ from .contracts import (
     ResourceLimits,
 )
 from .workspace import JobWorkspace
+
+OUTPUT_EXPORT_SCRIPT = b"""#!/usr/bin/bash
+set -u
+argv0=$1
+shift
+set +e
+/usr/bin/bash -c 'exec -a "$1" "${@:2}"' _ "$argv0" "$@"
+status=$?
+/usr/bin/cp -a /job/output/. /job/host-output/
+copy=$?
+if [ "$copy" -ne 0 ]; then
+  exit 125
+fi
+exit "$status"
+"""
 
 
 def extra_ro_binds(roots: tuple[PathRoot, ...]) -> tuple[tuple[str, str], ...]:
@@ -38,44 +59,46 @@ def bwrap_argv(
     limits: ResourceLimits,
     sync_fd: int | None = None,
 ) -> list[str]:
-    exec_bind_fd = 3
-    script_bind_fd = 4
-    block_bind_fd = 5
     command = [
         BWRAP_EXECUTABLE,
     ]
     if sync_fd is not None:
-        command.extend(["--block-fd", str(block_bind_fd)])
+        command.extend(["--block-fd", str(BWRAP_BLOCK_FD)])
     command.extend(
         [
-        "--unshare-all",
-        "--unshare-user",
-        "--uid",
-        str(os.geteuid()),
-        "--gid",
-        str(os.getegid()),
-        "--cap-drop",
-        "ALL",
-        "--disable-userns",
-        "--die-with-parent",
-        "--new-session",
-        "--dir",
-        "/run",
-        "--dir",
-        "/run/friday",
-        "--dir",
-        "/run/friday/bin",
+            "--unshare-all",
+            "--unshare-user",
+            "--uid",
+            str(os.geteuid()),
+            "--gid",
+            str(os.getegid()),
+            "--cap-drop",
+            "ALL",
+            "--disable-userns",
+            "--die-with-parent",
+            "--new-session",
+            "--dir",
+            "/run",
+            "--dir",
+            "/run/friday",
+            "--dir",
+            "/run/friday/bin",
         ]
     )
     exec_name = Path(held.resolved.canonical_path).name
     if not exec_name or "/" in exec_name or exec_name in {".", ".."}:
         raise CommandError("invalid_executable")
     exec_dest = f"/run/friday/bin/{exec_name}"
-    command.extend(["--perms", "0755", "--ro-bind-data", str(exec_bind_fd), exec_dest])
+    command.extend(["--perms", "0755", "--ro-bind-data", str(BWRAP_EXEC_FD), exec_dest])
     if held.script_fd is not None:
-        command.extend(["--perms", "0755", "--ro-bind-data", str(script_bind_fd), SANDBOX_SCRIPT])
+        command.extend(["--perms", "0755", "--ro-bind-data", str(BWRAP_SCRIPT_FD), SANDBOX_SCRIPT])
     command.extend(
         [
+            "--perms",
+            "0755",
+            "--ro-bind-data",
+            str(BWRAP_EXPORT_FD),
+            SANDBOX_EXPORT,
             "--ro-bind",
             "/usr",
             "/usr",
@@ -104,9 +127,13 @@ def bwrap_argv(
             str(int(limits.tmpfs_workspace)),
             "--tmpfs",
             f"{SANDBOX_JOB}/workspace",
+            "--size",
+            str(int(limits.output_bytes)),
+            "--tmpfs",
+            f"{SANDBOX_JOB}/output",
             "--bind",
             str(workspace.output),
-            f"{SANDBOX_JOB}/output",
+            SANDBOX_HOST_OUTPUT,
             "--size",
             str(int(limits.tmpfs_job_tmp)),
             "--tmpfs",
@@ -120,21 +147,12 @@ def bwrap_argv(
     command.extend(["--clearenv"])
     for key in ("HOME", "LANG", "LC_ALL", "PATH", "PWD", "TMPDIR", "TZ"):
         command.extend(["--setenv", key, env[key]])
-    command.extend(["--argv0", held.resolved.canonical_path, "--"])
+    command.extend(["--", SANDBOX_EXPORT, held.resolved.canonical_path])
     if held.script_fd is not None:
         command.extend([exec_dest, SANDBOX_SCRIPT, *held.inner_rest])
     else:
         command.extend([exec_dest, *held.inner_rest])
     return command
-
-
-def pass_fds_for(held: HeldExecutable, *, bwrap_fd: int | None, extra: tuple[int, ...] = ()) -> tuple[int, ...]:
-    fds = [held.executable_fd, *extra]
-    if held.script_fd is not None:
-        fds.append(held.script_fd)
-    if bwrap_fd is not None:
-        fds.append(bwrap_fd)
-    return tuple(sorted(set(fd for fd in fds if fd is not None and fd >= 0)))
 
 
 def require_profile(profile: IsolationProfile) -> None:

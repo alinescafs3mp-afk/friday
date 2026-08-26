@@ -151,6 +151,13 @@ class CommandJobStore:
                 kind TEXT NOT NULL,
                 exp INTEGER NOT NULL
             );
+            CREATE TABLE IF NOT EXISTS confirmation_events (
+                handle TEXT PRIMARY KEY,
+                payload_json TEXT NOT NULL,
+                mac TEXT NOT NULL,
+                exp INTEGER NOT NULL,
+                consumed INTEGER NOT NULL DEFAULT 0
+            );
             """
         )
 
@@ -224,6 +231,30 @@ class CommandJobStore:
                    ON CONFLICT(nonce) DO UPDATE SET kind='revoked', exp=excluded.exp""",
                 (nonce, "revoked", int(exp)),
             )
+
+    def insert_confirmation_event(self, *, handle: str, payload_json: str, mac: str, exp: int) -> None:
+        try:
+            self._conn.execute(
+                "INSERT INTO confirmation_events(handle, payload_json, mac, exp, consumed) VALUES(?,?,?,?,0)",
+                (handle, payload_json, mac, int(exp)),
+            )
+        except sqlite3.IntegrityError as exc:
+            raise CommandError("confirmation_replay") from exc
+
+    def take_confirmation_event(self, handle: str, *, now: int) -> dict[str, Any]:
+        self._conn.execute("DELETE FROM confirmation_events WHERE exp<=? AND consumed=1", (now,))
+        row = self._conn.execute(
+            "SELECT handle, payload_json, mac, exp, consumed FROM confirmation_events WHERE handle=?",
+            (handle,),
+        ).fetchone()
+        if row is None:
+            raise CommandError("confirmation_event_missing")
+        if int(row["consumed"] or 0) != 0:
+            raise CommandError("confirmation_replay")
+        if int(row["exp"] or 0) <= int(now):
+            raise CommandError("confirmation_expired")
+        self._conn.execute("UPDATE confirmation_events SET consumed=1 WHERE handle=?", (handle,))
+        return {str(key): value for key, value in dict(row).items()}
 
     def insert_job(self, payload: dict[str, Any]) -> None:
         columns = (

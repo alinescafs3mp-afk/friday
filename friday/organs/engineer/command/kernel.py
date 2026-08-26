@@ -8,6 +8,7 @@ import os
 import secrets
 import threading
 import time
+import weakref
 from pathlib import Path
 
 from .boundary import ProvenScope, ResourceBoundary, SystemdCgroupBoundary
@@ -32,6 +33,7 @@ from .grant import CommandGrantAuthority
 from .isolate import require_profile
 from .resolve import attest_trusted_path, resolve_bwrap, resolve_request
 from .runner import SpawnedCommand, _pid_starttime
+from .spawn_helper import SpawnBroker
 from .store import CommandJobStore, decode_json_list
 from .workspace import JobWorkspace
 
@@ -129,6 +131,8 @@ class CommandKernel:
         self._live: dict[str, SpawnedCommand] = {}
         self._threads: dict[str, threading.Thread] = {}
         self._receipts: dict[str, CommandReceipt] = {}
+        self._broker = SpawnBroker()
+        self._finalizer = weakref.finalize(self, self._broker.close)
         self._reconcile_stale()
 
     def _reconcile_stale(self) -> None:
@@ -242,6 +246,7 @@ class CommandKernel:
                         path_roots=self.path_roots,
                         bwrap=bwrap,
                         scope=scope,
+                        broker=self._broker,
                     )
             except CommandError as exc:
                 spawned.abort()
@@ -308,7 +313,35 @@ class CommandKernel:
             )
             with self._lock:
                 self._threads[job_id] = worker
-            worker.start()
+            try:
+                worker.start()
+            except Exception as exc:
+                spawned.abort()
+                with self._lock:
+                    self._live.pop(job_id, None)
+                    self._threads.pop(job_id, None)
+                with contextlib.suppress(CommandError), self.store.transaction():
+                    self.store.update_job(
+                        job_id,
+                        {
+                            "status": CommandStatus.UNKNOWN.value,
+                            "error_code": "unknown_after_spawn",
+                            "finished_at": time.time(),
+                            "effect_boundary_crossed": 1,
+                        },
+                    )
+                receipt = self._receipt_from_spawned(
+                    job_id,
+                    request,
+                    grant.isolation_profile,
+                    grant.source_hash,
+                    held.resolved,
+                    spawned,
+                    error_code="unknown_after_spawn",
+                    status=CommandStatus.UNKNOWN,
+                )
+                self._receipts[job_id] = receipt
+                raise CommandError("unknown_after_spawn") from exc
             held = None
             bwrap = None
             return job_id
@@ -418,7 +451,7 @@ class CommandKernel:
             else:
                 if spawned.quota_exceeded:
                     status = CommandStatus.FAILED
-                    error_code = "output_quota_exceeded"
+                    error_code = spawned.quota_code or "output_quota_exceeded"
                 elif not spawned.eof_proven or not spawned.tree_empty:
                     status = CommandStatus.UNKNOWN
                     error_code = "tree_or_eof_unproven"

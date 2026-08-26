@@ -11,13 +11,19 @@ from enum import StrEnum
 from pathlib import Path
 from typing import Any, Literal
 
-SCHEMA = "friday.engineer.command.v3"
+SCHEMA = "friday.engineer.command.v4"
 BASH_EXECUTABLE = "/usr/bin/bash"
 SHELL_FLAG_PREFIX = ("--noprofile", "--norc", "-o", "pipefail", "-c")
 SANDBOX_COMMAND = "/run/friday/command"
 SANDBOX_INTERPRETER = "/run/friday/interpreter"
 SANDBOX_SCRIPT = "/run/friday/script"
+SANDBOX_EXPORT = "/run/friday/export"
 SANDBOX_JOB = "/job"
+SANDBOX_HOST_OUTPUT = "/job/host-output"
+BWRAP_EXEC_FD = 3
+BWRAP_SCRIPT_FD = 4
+BWRAP_BLOCK_FD = 5
+BWRAP_EXPORT_FD = 6
 BWRAP_EXECUTABLE = "/usr/bin/bwrap"
 FIXED_ENV_KEYS = ("HOME", "LANG", "LC_ALL", "PATH", "PWD", "TMPDIR", "TZ")
 ALLOWED_CHANNELS = frozenset({"telegram", "cli_test", "owner_console"})
@@ -51,6 +57,7 @@ DEFAULT_FSIZE_BYTES = 32 * 1024 * 1024
 DEFAULT_TMPFS_TMP = 16 * 1024 * 1024
 DEFAULT_TMPFS_WORKSPACE = 16 * 1024 * 1024
 DEFAULT_TMPFS_JOB_TMP = 8 * 1024 * 1024
+DEFAULT_OUTPUT_BYTES = MAX_OUTPUT_TREE_BYTES
 DESTRUCTIVE_BASENAMES = frozenset(
     {
         "chage",
@@ -208,6 +215,7 @@ class ResourceLimits:
     tmpfs_tmp: int = DEFAULT_TMPFS_TMP
     tmpfs_workspace: int = DEFAULT_TMPFS_WORKSPACE
     tmpfs_job_tmp: int = DEFAULT_TMPFS_JOB_TMP
+    output_bytes: int = DEFAULT_OUTPUT_BYTES
     runtime_grace_sec: int = 5
 
     def __post_init__(self) -> None:
@@ -218,6 +226,7 @@ class ResourceLimits:
             "tmpfs_tmp",
             "tmpfs_workspace",
             "tmpfs_job_tmp",
+            "output_bytes",
         ):
             value = getattr(self, name)
             if isinstance(value, bool) or not isinstance(value, int) or value < 1:
@@ -259,7 +268,7 @@ class OwnerSource:
             "source_row_id": self.source_row_id,
             "telegram_update_id": self.telegram_update_id,
             "tenant_id": self.tenant_id,
-            "v": 3,
+            "v": 4,
         }
 
 
@@ -290,7 +299,7 @@ class OwnerConfirmation:
             "nonce": self.nonce,
             "schema": SCHEMA,
             "tenant_id": self.tenant_id,
-            "v": 3,
+            "v": 4,
         }
 
 
@@ -387,6 +396,7 @@ class VerifiedCommandGrant:
     origin: CommandOrigin
     destructive_confirmed: bool
     confirmation_nonce: str
+    confirmation_expires_at: int
     expires_at: int
     nonce: str
 
@@ -571,9 +581,15 @@ __all__ = [
     "MAX_STDOUT_BYTES",
     "MAX_TIMEOUT_SEC",
     "SANDBOX_COMMAND",
+    "SANDBOX_EXPORT",
+    "SANDBOX_HOST_OUTPUT",
     "SANDBOX_INTERPRETER",
     "SANDBOX_JOB",
     "SANDBOX_SCRIPT",
+    "BWRAP_BLOCK_FD",
+    "BWRAP_EXEC_FD",
+    "BWRAP_EXPORT_FD",
+    "BWRAP_SCRIPT_FD",
     "SCHEMA",
     "SHELL_FLAG_PREFIX",
     "CommandError",

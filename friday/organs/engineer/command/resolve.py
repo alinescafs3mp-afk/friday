@@ -29,23 +29,6 @@ from .contracts import (
 
 _MAX_SHEBANG = 4096
 _INTERPRETER_DEPTH = 1
-_DANGEROUS_SHELL_MARKERS = (
-    "sudo",
-    "doas",
-    "pkexec",
-    "machinectl",
-    "nsenter",
-    "unshare",
-    "chroot",
-    "docker",
-    "podman",
-    "nerdctl",
-    "chmod 777",
-    "rm -rf /",
-    "rm -fr /",
-    "/var/run/docker.sock",
-    "/run/docker.sock",
-)
 
 
 def _is_forbidden(path: str) -> bool:
@@ -149,6 +132,28 @@ def _read_shebang(fd: int) -> str | None:
     if interpreter in {"/usr/bin/env", "/bin/env"}:
         raise CommandError("env_shebang_refused")
     return interpreter
+
+
+def sealed_payload_memfd(payload: bytes, *, label: str = "friday-payload") -> int:
+    dest = os.memfd_create(label[:249], os.MFD_CLOEXEC | os.MFD_ALLOW_SEALING)
+    try:
+        view = memoryview(payload)
+        while view:
+            written = os.write(dest, view)
+            view = view[written:]
+        os.lseek(dest, 0, os.SEEK_SET)
+        fcntl.fcntl(
+            dest,
+            fcntl.F_ADD_SEALS,
+            fcntl.F_SEAL_WRITE | fcntl.F_SEAL_GROW | fcntl.F_SEAL_SHRINK | fcntl.F_SEAL_SEAL,
+        )
+        flags = fcntl.fcntl(dest, fcntl.F_GETFD)
+        fcntl.fcntl(dest, fcntl.F_SETFD, flags & ~fcntl.FD_CLOEXEC)
+        os.set_inheritable(dest, True)
+        return dest
+    except Exception:
+        os.close(dest)
+        raise
 
 
 def snapshot_sealed_memfd(src_fd: int, *, label: str = "friday-exec") -> int:
@@ -352,24 +357,19 @@ def resolve_root_helper(path: str) -> HeldExecutable:
     return HeldExecutable(resolved=resolved, executable_fd=sealed)
 
 
-def _shell_requires_confirmation(command: str) -> bool:
-    lowered = command.lower()
-    return any(marker in lowered for marker in _DANGEROUS_SHELL_MARKERS)
-
-
 def require_destructive_grant(
     request: CommandRequest,
     grant: VerifiedCommandGrant,
     resolved: ResolvedExecutable,
 ) -> None:
-    basename = Path(resolved.canonical_path).name
-    needs = basename in DESTRUCTIVE_BASENAMES
-    if (
-        request.lane is CommandLane.SHELL
-        and request.shell_command
-        and _shell_requires_confirmation(request.shell_command)
-    ):
+    # Shell has no attested subcommand policy in this slice: every shell-lane
+    # execution needs a distinct confirmation. Substring filters are not an
+    # authority boundary.
+    if request.lane is CommandLane.SHELL:
         needs = True
+    else:
+        basename = Path(resolved.canonical_path).name
+        needs = basename in DESTRUCTIVE_BASENAMES
     if needs and not grant.destructive_confirmed:
         raise CommandError("destructive_confirmation_required")
 
