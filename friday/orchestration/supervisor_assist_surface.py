@@ -106,6 +106,7 @@ def prepare_current_file_web_assist_surface(
         not isinstance(actor, ActorContext)
         or type(user_id) is not str
         or user_id != actor.user_id
+        or actor.user_id != actor.own_id
         or type(message) is not str
         or type(conversation_id) is not str
         or _CONVERSATION_ID_RE.fullmatch(conversation_id) is None

@@ -246,6 +246,48 @@ def test_surface_rejects_unstamped_historical_or_non_dialogue_inputs() -> None:
     )
 
 
+def test_surface_keeps_schema44_tenant_and_conversation_owner_exact() -> None:
+    foreign_person = ActorContext(
+        "local:tenant",
+        "owner",
+        "test",
+        shared_tenant=True,
+        person_id="local:alice",
+    )
+    assert (
+        prepare_current_file_web_assist_surface(
+            _settings(),
+            **_surface_kwargs(
+                user_id=foreign_person.user_id,
+                actor=foreign_person,
+                conversation_is_dialogue=lambda *_args: True,
+            ),
+        )
+        is None
+    )
+
+    archive_owner = ActorContext(
+        "local:tenant",
+        "owner",
+        "test",
+        shared_tenant=True,
+        person_id="local:tenant",
+    )
+    assert isinstance(
+        prepare_current_file_web_assist_surface(
+            _settings(),
+            **_surface_kwargs(
+                user_id=archive_owner.user_id,
+                actor=archive_owner,
+                conversation_is_dialogue=lambda person_id, _conversation_id: (
+                    person_id == "local:tenant"
+                ),
+            ),
+        ),
+        CurrentFileWebAssistSurface,
+    )
+
+
 def test_surface_accepts_only_exact_transient_web_ingestion_shape() -> None:
     assert _surface(ingestion_result=None)
     malformed = dict(_surface_kwargs()["ingestion_result"])
