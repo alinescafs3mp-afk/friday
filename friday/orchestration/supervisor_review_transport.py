@@ -15,8 +15,8 @@ from typing import Any
 
 from friday.model_input_hygiene import secondary_model_messages_are_secret_free
 from friday.orchestration.supervisor_contracts import (
-    SUPERVISOR_PRODUCT_POLICY_ID,
-    SUPERVISOR_PRODUCT_POLICY_SHA256,
+    SUPERVISOR_ASSIST_PRODUCT_POLICY_ID,
+    SUPERVISOR_ASSIST_PRODUCT_POLICY_SHA256,
     SUPERVISOR_REVIEW_SCHEMA,
     CompletionCriterion,
     ReviewRecommendedAction,
@@ -40,7 +40,7 @@ from friday.secondary_brain import (
     SecondaryResult,
 )
 
-SUPERVISOR_REVIEW_INPUT_SCHEMA = "friday.supervisor-review-input.v1"
+SUPERVISOR_REVIEW_INPUT_SCHEMA = "friday.supervisor-review-input.v2"
 
 # Same exact accepted 4K-profile input allowance used by proposal planning:
 # 4096 total - 512 output - 256 adapter reserve.  The review output is smaller,
@@ -126,8 +126,8 @@ def supervisor_review_messages(
     payload = {
         "schema": SUPERVISOR_REVIEW_INPUT_SCHEMA,
         "trusted_policy": {
-            "product_policy_id": SUPERVISOR_PRODUCT_POLICY_ID,
-            "product_policy_sha256": SUPERVISOR_PRODUCT_POLICY_SHA256,
+            "product_policy_id": SUPERVISOR_ASSIST_PRODUCT_POLICY_ID,
+            "product_policy_sha256": SUPERVISOR_ASSIST_PRODUCT_POLICY_SHA256,
             "review_policy_version": SUPERVISOR_REVIEW_POLICY_VERSION,
             "tools_allowed": False,
             "effects_allowed": False,

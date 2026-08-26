@@ -7,6 +7,7 @@ from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Any
 
+from friday import semantic_supervisor_policy
 from friday.orchestration.capability_binding import (
     CapabilityBindingSnapshot,
     manifest_matches_snapshot,
@@ -25,7 +26,6 @@ from friday.orchestration.supervisor_contracts import (
     FILE_CURRENT_READ_ID,
     PRIMARY_SYNTHESIS_ID,
     SECONDARY_SUPERVISOR_ID,
-    SUPERVISOR_PRODUCT_POLICY_ID,
     WEB_SEARCH_CURRENT_ID,
     CapabilityAvailability,
     CapabilityEffectClass,
@@ -284,6 +284,19 @@ def admit_supervisor_proposal(
 ) -> PolicyDecision:
     """Validate one untrusted proposal against the current projection and policy."""
 
+    policy_identity = (
+        semantic_supervisor_policy.supervisor_product_policy_identity_for_review_rounds(
+            supervisor_input.budgets.max_review_rounds
+        )
+    )
+    if (
+        policy_identity is None
+        or supervisor_input.budgets.max_steps != policy_identity.max_steps
+        or supervisor_input.budgets.max_parallel_reads != policy_identity.max_parallel_reads
+    ):
+        return _reject(PolicyReason.REVIEW_NOT_ADMITTED)
+    if proposal.task_class.value not in policy_identity.admitted_tasks:
+        return _reject(PolicyReason.TASK_CLASS_MISMATCH)
     if proposal.manifest_id != supervisor_input.manifest.manifest_id:
         return _reject(PolicyReason.STALE_MANIFEST)
     current_bindings = operational_capability_snapshot()
@@ -353,7 +366,7 @@ def admit_supervisor_proposal(
         proposal,
         manifest_digest=supervisor_input.manifest.digest_hex(),
         binding_snapshot_sha256=context.capability_bindings.digest_hex(),
-        policy_version=SUPERVISOR_PRODUCT_POLICY_ID,
+        policy_version=policy_identity.policy_id,
         actor_binding_sha256=context.actor_binding_sha256,
         conversation_binding_sha256=context.conversation_binding_sha256,
         steps=admitted_steps,

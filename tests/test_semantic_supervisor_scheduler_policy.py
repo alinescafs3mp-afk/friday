@@ -68,7 +68,9 @@ def _exact_loopback_settings(
         semantic_supervisor_mode=requested_mode,
         semantic_supervisor_tasks=tasks,
         semantic_supervisor_max_steps=6,
-        semantic_supervisor_max_review_rounds=0,
+        semantic_supervisor_max_review_rounds=(
+            1 if requested_mode in policy.SUPERVISOR_ASSIST_REQUESTED_MODES else 0
+        ),
         semantic_supervisor_timeout_sec=12.0,
     )
     return replace(configured, **changes)
@@ -184,6 +186,20 @@ def test_orchestration_and_scheduler_share_one_immutable_runtime_bound_policy() 
     with pytest.raises(TypeError):
         policy.SUPERVISOR_PRODUCT_POLICY["effective_mode"] = "assist"  # type: ignore[index]
 
+    assert (
+        supervisor_contracts.SUPERVISOR_ASSIST_PRODUCT_POLICY
+        is policy.SUPERVISOR_ASSIST_PRODUCT_POLICY
+    )
+    assert (
+        supervisor_contracts.SUPERVISOR_ASSIST_PRODUCT_POLICY_SHA256
+        == policy.SUPERVISOR_ASSIST_PRODUCT_POLICY_SHA256
+        == supervisor_contracts.canonical_sha256(dict(policy.SUPERVISOR_ASSIST_PRODUCT_POLICY))
+    )
+    assert policy.SUPERVISOR_ASSIST_PRODUCT_POLICY["max_review_rounds"] == 1
+    assert policy.SUPERVISOR_PRODUCT_POLICY["max_review_rounds"] == 0
+    with pytest.raises(TypeError):
+        policy.SUPERVISOR_ASSIST_PRODUCT_POLICY["max_review_rounds"] = 0  # type: ignore[index]
+
 
 @pytest.mark.parametrize("requested_mode", ["shadow", "assist", "canary"])
 def test_semantic_only_scheduler_auto_admits_plan_candidate_in_shadow(
@@ -204,12 +220,13 @@ def test_semantic_only_scheduler_auto_admits_plan_candidate_in_shadow(
         assert scheduler.workload_mode(ModelWorkload.PLAN_CANDIDATE) is SecondaryMode.SHADOW
         public = scheduler.public_status()
         supervisor = public["semantic_supervisor"]
+        identity = policy.supervisor_product_policy_identity_for_mode(requested_mode)
         assert supervisor == {
             "workload": "plan_candidate",
             "requested_mode": requested_mode,
             "effective_mode": "shadow",
-            "policy_id": policy.SUPERVISOR_PRODUCT_POLICY_ID,
-            "policy_sha256": policy.SUPERVISOR_PRODUCT_POLICY_SHA256,
+            "policy_id": identity.policy_id,
+            "policy_sha256": identity.policy_sha256,
             "workload_available": True,
             "runtime_available": False,
             "closed_reason": "admitted",
@@ -220,6 +237,26 @@ def test_semantic_only_scheduler_auto_admits_plan_candidate_in_shadow(
         assert diagnostics["workloads"]["plan_candidate"]["available"] is True
     finally:
         asyncio.run(scheduler.aclose())
+
+
+def test_assist_policy_requires_its_exact_review_budget_and_narrow_task() -> None:
+    admitted = _admission(
+        requested_mode="assist",
+        max_review_rounds=1,
+    )
+    assert admitted.workload_available is True
+    assert admitted.effective_mode == "shadow"
+    assert admitted.policy_id == policy.SUPERVISOR_ASSIST_PRODUCT_POLICY_ID
+    assert admitted.policy_sha256 == policy.SUPERVISOR_ASSIST_PRODUCT_POLICY_SHA256
+
+    wrong_budget = _admission(requested_mode="assist", max_review_rounds=0)
+    assert wrong_budget.closed_reason is policy.SupervisorPolicyClosedReason.INVALID_BOUNDS
+    widened_task = _admission(
+        requested_mode="assist",
+        max_review_rounds=1,
+        task_allowlist=("compare_archive_with_current_web",),
+    )
+    assert widened_task.closed_reason is policy.SupervisorPolicyClosedReason.TASK_ALLOWLIST_INVALID
 
 
 @pytest.mark.parametrize(

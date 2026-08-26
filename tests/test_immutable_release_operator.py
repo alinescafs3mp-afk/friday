@@ -2498,7 +2498,7 @@ def _semantic_supervisor_promoted_values(
     assert mode in {"assist", "canary"}
     evidence = evidence_file.read_bytes()
     return {
-        "FRIDAY_SEMANTIC_SUPERVISOR_MAX_REVIEW_ROUNDS": "0",
+        "FRIDAY_SEMANTIC_SUPERVISOR_MAX_REVIEW_ROUNDS": "1",
         "FRIDAY_SEMANTIC_SUPERVISOR_MAX_STEPS": "6",
         "FRIDAY_SEMANTIC_SUPERVISOR_MODE": mode,
         "FRIDAY_SEMANTIC_SUPERVISOR_PROMOTION_CANARY_ACTOR_BINDINGS": ",".join(actors),
@@ -2611,28 +2611,78 @@ def _semantic_supervisor_health_payload(mode: str) -> dict[str, object]:
     assert mode in {"off", "shadow", "assist", "canary"}
     installed = mode != "off"
     effective_mode = "shadow" if installed else "off"
-    semantic: dict[str, object] = {
-        "schema": "friday.semantic-supervisor-shadow-runtime.v1",
-        "installed": installed,
-        "role": "discarded_advisory_shadow",
-        "requested_mode": mode,
-        "effective_mode": effective_mode,
-        "promotion_admitted": False,
-        "runtime_owner": "unchanged",
-        "publication_owner": "primary",
-        "tools_allowed": False,
-        "effects_allowed": False,
-        "execution_allowed": False,
-    }
-    if installed:
-        semantic.update(
-            {
-                "policy_id": operator._SEMANTIC_SUPERVISOR_POLICY_ID,  # noqa: SLF001
-                "policy_sha256": operator._SEMANTIC_SUPERVISOR_POLICY_SHA256,  # noqa: SLF001
-                "accepted_profile_id": operator._SECONDARY_FINALIST_PROFILE_ID,  # noqa: SLF001
-                "max_pending": 4,
-            }
-        )
+    policy_id = (
+        operator._SEMANTIC_SUPERVISOR_ASSIST_POLICY_ID  # noqa: SLF001
+        if mode in {"assist", "canary"}
+        else operator._SEMANTIC_SUPERVISOR_SHADOW_POLICY_ID  # noqa: SLF001
+    )
+    policy_sha256 = (
+        operator._SEMANTIC_SUPERVISOR_ASSIST_POLICY_SHA256  # noqa: SLF001
+        if mode in {"assist", "canary"}
+        else operator._SEMANTIC_SUPERVISOR_SHADOW_POLICY_SHA256  # noqa: SLF001
+    )
+    if mode in {"assist", "canary"}:
+        semantic: dict[str, object] = {
+            "schema": "friday.semantic-supervisor-assist-controller-status.v1",
+            "installed": True,
+            "role": "durable_read_only_assist",
+            "requested_mode": mode,
+            "effective_mode": "off",
+            "promotion_admitted": False,
+            "max_review_rounds": 1,
+            "promotion_attempt_total": 0,
+            "promotion_evaluation_total": 0,
+            "promotion_admitted_total": 0,
+            "active_tasks": 0,
+            "retained_active_graphs": 0,
+            "fallback_total": 0,
+            "invoked_total": 0,
+            "publication_total": 0,
+            "terminal_publication_total": 0,
+            "event_success_total": 0,
+            "event_failure_total": 0,
+            "ownership_uncertain_total": 0,
+            "fallback_reasons": {},
+            "runtime_owner": "durable_graph_after_admission",
+            "publication_owner": "primary",
+            "tools_allowed": False,
+            "effects_allowed": False,
+            "closed": False,
+            "scheduler": {
+                "state": "probing",
+                "available": False,
+                "workload": "plan_candidate",
+                "policy_id": policy_id,
+                "policy_sha256": policy_sha256,
+                "workload_available": True,
+                "runtime_available": False,
+                "closed_reason": "admitted",
+                "circuit_retry_after_sec": 0.0,
+            },
+        }
+    else:
+        semantic = {
+            "schema": "friday.semantic-supervisor-shadow-runtime.v1",
+            "installed": installed,
+            "role": "discarded_advisory_shadow",
+            "requested_mode": mode,
+            "effective_mode": effective_mode,
+            "promotion_admitted": False,
+            "runtime_owner": "unchanged",
+            "publication_owner": "primary",
+            "tools_allowed": False,
+            "effects_allowed": False,
+            "execution_allowed": False,
+        }
+        if installed:
+            semantic.update(
+                {
+                    "policy_id": policy_id,
+                    "policy_sha256": policy_sha256,
+                    "accepted_profile_id": operator._SECONDARY_FINALIST_PROFILE_ID,  # noqa: SLF001
+                    "max_pending": 4,
+                }
+            )
     if mode in {"assist", "canary"}:
         semantic["activation"] = {
             "schema": "friday.supervisor-assist-activation-status.v1",
@@ -2666,8 +2716,8 @@ def _semantic_supervisor_health_payload(mode: str) -> dict[str, object]:
                 "workload": "plan_candidate",
                 "requested_mode": mode,
                 "effective_mode": effective_mode,
-                "policy_id": operator._SEMANTIC_SUPERVISOR_POLICY_ID,  # noqa: SLF001
-                "policy_sha256": operator._SEMANTIC_SUPERVISOR_POLICY_SHA256,  # noqa: SLF001
+                "policy_id": policy_id,
+                "policy_sha256": policy_sha256,
                 "workload_available": installed,
                 "runtime_available": False,
                 "closed_reason": "admitted" if installed else "mode_off",
@@ -2745,6 +2795,42 @@ def test_semantic_supervisor_promoted_health_binds_loaded_activation_material(mo
     )
     assert not operator._semantic_supervisor_health_identity_matches(  # noqa: SLF001
         wrong_count,
+        expected_mode=mode,
+    )
+
+    for key, value in (
+        ("schema", "friday.semantic-supervisor-shadow-runtime.v1"),
+        ("role", "discarded_advisory_shadow"),
+        ("max_review_rounds", 0),
+    ):
+        mutated = json.loads(json.dumps(payload))
+        mutated["semantic_supervisor"][key] = value
+        assert not operator._semantic_supervisor_health_identity_matches(  # noqa: SLF001
+            mutated,
+            expected_mode=mode,
+        )
+
+    discarded = json.loads(json.dumps(payload))
+    discarded["semantic_supervisor"] = {
+        "schema": "friday.semantic-supervisor-shadow-runtime.v1",
+        "installed": True,
+        "role": "discarded_advisory_shadow",
+        "requested_mode": mode,
+        "effective_mode": "shadow",
+        "promotion_admitted": False,
+        "policy_id": operator._SEMANTIC_SUPERVISOR_ASSIST_POLICY_ID,  # noqa: SLF001
+        "policy_sha256": operator._SEMANTIC_SUPERVISOR_ASSIST_POLICY_SHA256,  # noqa: SLF001
+        "accepted_profile_id": operator._SECONDARY_FINALIST_PROFILE_ID,  # noqa: SLF001
+        "runtime_owner": "unchanged",
+        "publication_owner": "primary",
+        "tools_allowed": False,
+        "effects_allowed": False,
+        "execution_allowed": False,
+        "max_pending": 4,
+        "activation": activation,
+    }
+    assert not operator._semantic_supervisor_health_identity_matches(  # noqa: SLF001
+        discarded,
         expected_mode=mode,
     )
 
@@ -3022,8 +3108,8 @@ def test_semantic_supervisor_assist_rejects_noncanonical_or_drifted_environment(
             b"FRIDAY_SEMANTIC_SUPERVISOR_PROMOTION_ENABLED=0\n",
         ),
         "review_round": (
-            b"FRIDAY_SEMANTIC_SUPERVISOR_MAX_REVIEW_ROUNDS=0\n",
             b"FRIDAY_SEMANTIC_SUPERVISOR_MAX_REVIEW_ROUNDS=1\n",
+            b"FRIDAY_SEMANTIC_SUPERVISOR_MAX_REVIEW_ROUNDS=0\n",
         ),
         "task_widened": (
             b"FRIDAY_SEMANTIC_SUPERVISOR_TASKS=compare_current_file_with_current_web\n",

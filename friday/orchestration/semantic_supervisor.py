@@ -12,6 +12,7 @@ from dataclasses import dataclass, replace
 from typing import Any, TypeVar
 from urllib.parse import unquote, unquote_plus, urlsplit
 
+from friday import semantic_supervisor_policy
 from friday.interaction_control_plane import (
     archive_candidate_cancel_requested,
     parse_archive_candidate_ordinal,
@@ -28,8 +29,6 @@ from friday.orchestration.supervisor_contracts import (
     ARCHIVE_SEARCH_ID,
     FILE_CURRENT_READ_ID,
     PRIMARY_SYNTHESIS_ID,
-    SUPERVISOR_PRODUCT_POLICY_ID,
-    SUPERVISOR_PRODUCT_POLICY_SHA256,
     SUPERVISOR_PROPOSAL_SCHEMA,
     WEB_SEARCH_CURRENT_ID,
     ContinuationDecision,
@@ -151,23 +150,22 @@ def supervisor_task_allowlist(settings: object) -> frozenset[str]:
 
 
 def supervisor_budgets_from_settings(settings: object) -> SupervisorBudgets:
-    max_steps = getattr(settings, "semantic_supervisor_max_steps", 6)
-    if not isinstance(max_steps, int) or isinstance(max_steps, bool):
-        max_steps = 6
+    identity = semantic_supervisor_policy.supervisor_product_policy_identity_for_mode(
+        supervisor_mode_from_settings(settings).value
+    )
     return SupervisorBudgets(
-        max_steps=max(1, min(6, max_steps)),
-        max_parallel_reads=2,
-        max_review_rounds=0,
+        max_steps=identity.max_steps,
+        max_parallel_reads=identity.max_parallel_reads,
+        max_review_rounds=identity.max_review_rounds,
     )
 
 
 def supervisor_review_rounds_from_settings(settings: object) -> int:
-    """P1 never reviews.  The setting is retained for a later admitted phase."""
+    """Return the selected immutable policy budget, never a loose ENV value."""
 
-    raw = getattr(settings, "semantic_supervisor_max_review_rounds", 1)
-    if not isinstance(raw, int) or isinstance(raw, bool):
-        return 0
-    return 0
+    return semantic_supervisor_policy.supervisor_product_policy_identity_for_mode(
+        supervisor_mode_from_settings(settings).value
+    ).max_review_rounds
 
 
 def supervisor_timeout_sec(settings: object) -> float:
@@ -581,9 +579,19 @@ def _compact_manifest(supervisor_input: SupervisorInput, task: TaskClass) -> dic
 
 def build_supervisor_messages(supervisor_input: SupervisorInput) -> tuple[dict[str, str], ...]:
     task = _candidate_task_class(supervisor_input)
+    identity = semantic_supervisor_policy.supervisor_product_policy_identity_for_review_rounds(
+        supervisor_input.budgets.max_review_rounds
+    )
+    if (
+        identity is None
+        or supervisor_input.budgets.max_steps != identity.max_steps
+        or supervisor_input.budgets.max_parallel_reads != identity.max_parallel_reads
+        or task.value not in identity.admitted_tasks
+    ):
+        raise SupervisorContractError("supervisor input budgets have no accepted product policy")
     trusted = {
-        "policy_id": SUPERVISOR_PRODUCT_POLICY_ID,
-        "policy_sha256": SUPERVISOR_PRODUCT_POLICY_SHA256,
+        "policy_id": identity.policy_id,
+        "policy_sha256": identity.policy_sha256,
         "tools_allowed": False,
         "effects_allowed": False,
         "publication_allowed": False,
@@ -603,7 +611,7 @@ def build_supervisor_messages(supervisor_input: SupervisorInput) -> tuple[dict[s
                 "continuation_decision": "new_task",
                 "max_steps": 3,
                 "max_parallel_reads": supervisor_input.budgets.max_parallel_reads,
-                "max_review_rounds": 0,
+                "max_review_rounds": identity.max_review_rounds,
             },
             "response_template": _response_template(supervisor_input, task),
         },

@@ -12,6 +12,8 @@ from dataclasses import dataclass
 from enum import StrEnum
 
 from friday.orchestration.supervisor_contracts import (
+    SUPERVISOR_ASSIST_PRODUCT_POLICY_ID,
+    SUPERVISOR_ASSIST_PRODUCT_POLICY_SHA256,
     CapabilityEffectClass,
     CompletionCriterion,
     ReviewRecommendedAction,
@@ -20,8 +22,8 @@ from friday.orchestration.supervisor_contracts import (
     canonical_sha256,
 )
 
-SUPERVISOR_REVIEW_CONTEXT_SCHEMA = "friday.supervisor-review-context.v1"
-SUPERVISOR_REVIEW_POLICY_VERSION = "semantic-supervisor-review-policy-v1"
+SUPERVISOR_REVIEW_CONTEXT_SCHEMA = "friday.supervisor-review-context.v2"
+SUPERVISOR_REVIEW_POLICY_VERSION = "semantic-supervisor-review-policy-v2"
 
 _DIGEST_RE = re.compile(r"[0-9a-f]{64}")
 _SAFE_ID_RE = re.compile(r"[a-z][a-z0-9_.-]{0,63}")
@@ -37,6 +39,7 @@ class DeterministicReviewState(StrEnum):
 class ReviewPolicyReason(StrEnum):
     ADMITTED = "admitted"
     DIGEST_MISMATCH = "digest_mismatch"
+    PRODUCT_POLICY_MISMATCH = "product_policy_mismatch"
     REVIEW_ROUND_EXHAUSTED = "review_round_exhausted"
     PUBLICATION_ALREADY_STARTED = "publication_already_started"
     EFFECT_SCOPE_NOT_ADMITTED = "effect_scope_not_admitted"
@@ -89,6 +92,8 @@ class SupervisorReviewContext:
     effect_started: bool
     publication_started: bool
     recovery_candidate: ReadRecoveryCandidate | None
+    product_policy_id: str = SUPERVISOR_ASSIST_PRODUCT_POLICY_ID
+    product_policy_sha256: str = SUPERVISOR_ASSIST_PRODUCT_POLICY_SHA256
 
     def __post_init__(self) -> None:
         for label, value in (
@@ -98,6 +103,10 @@ class SupervisorReviewContext:
         ):
             if _DIGEST_RE.fullmatch(value) is None:
                 raise ValueError(f"{label} is invalid")
+        if _SAFE_ID_RE.fullmatch(self.product_policy_id) is None:
+            raise ValueError("product_policy_id is invalid")
+        if _DIGEST_RE.fullmatch(self.product_policy_sha256) is None:
+            raise ValueError("product_policy_sha256 is invalid")
         if not isinstance(self.work_revision, int) or isinstance(self.work_revision, bool):
             raise ValueError("work_revision is invalid")
         if self.work_revision < 1:
@@ -134,6 +143,8 @@ class SupervisorReviewContext:
         candidate = self.recovery_candidate
         return {
             "schema": SUPERVISOR_REVIEW_CONTEXT_SCHEMA,
+            "product_policy_id": self.product_policy_id,
+            "product_policy_sha256": self.product_policy_sha256,
             "plan_digest": self.plan_digest,
             "outcome_digest": self.outcome_digest,
             "work_item_digest": self.work_item_digest,
@@ -197,6 +208,14 @@ def admit_supervisor_review(
 
     if not isinstance(review, SupervisorReview) or not isinstance(context, SupervisorReviewContext):
         raise TypeError("review admission requires typed contracts")
+    if (
+        context.product_policy_id != SUPERVISOR_ASSIST_PRODUCT_POLICY_ID
+        or not hmac.compare_digest(
+            context.product_policy_sha256,
+            SUPERVISOR_ASSIST_PRODUCT_POLICY_SHA256,
+        )
+    ):
+        return _reject(ReviewPolicyReason.PRODUCT_POLICY_MISMATCH)
     if not hmac.compare_digest(review.plan_digest, context.plan_digest) or not hmac.compare_digest(
         review.outcome_digest,
         context.outcome_digest,

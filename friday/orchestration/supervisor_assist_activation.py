@@ -55,6 +55,8 @@ _DIGEST_RE = re.compile(r"[0-9a-f]{64}\Z")
 _MANIFEST_DIGEST_RE = re.compile(r"[0-9a-f]{64}\Z")
 _P1_POLICY_ID = semantic_supervisor_policy.SUPERVISOR_PRODUCT_POLICY_ID
 _P1_POLICY_SHA256 = semantic_supervisor_policy.SUPERVISOR_PRODUCT_POLICY_SHA256
+_ASSIST_POLICY_ID = semantic_supervisor_policy.SUPERVISOR_ASSIST_PRODUCT_POLICY_ID
+_ASSIST_POLICY_SHA256 = semantic_supervisor_policy.SUPERVISOR_ASSIST_PRODUCT_POLICY_SHA256
 _P1_PROFILE_ID = semantic_supervisor_policy.SUPERVISOR_RUNTIME_PROFILE_ID
 _P1_PROFILE_MANIFEST_SHA256 = semantic_supervisor_policy.SUPERVISOR_RUNTIME_PROFILE_MANIFEST_SHA256
 _P1_WORKLOAD = semantic_supervisor_policy.SUPERVISOR_WORKLOAD
@@ -92,8 +94,10 @@ _EVIDENCE_KEYS = frozenset(
         "task_class",
         "source_revision_sha256",
         "promotion_policy_sha256",
-        "p1_policy_id",
-        "p1_policy_sha256",
+        "observed_policy_id",
+        "observed_policy_sha256",
+        "target_policy_id",
+        "target_policy_sha256",
         "runtime_profile_id",
         "runtime_profile_manifest_sha256",
         "registry_binding_sha256",
@@ -598,8 +602,10 @@ def parse_assist_promotion_live_evidence(
             task_class=TaskClass(decoded["task_class"]),
             source_revision_sha256=decoded["source_revision_sha256"],
             promotion_policy_sha256=decoded["promotion_policy_sha256"],
-            p1_policy_id=decoded["p1_policy_id"],
-            p1_policy_sha256=decoded["p1_policy_sha256"],
+            observed_policy_id=decoded["observed_policy_id"],
+            observed_policy_sha256=decoded["observed_policy_sha256"],
+            target_policy_id=decoded["target_policy_id"],
+            target_policy_sha256=decoded["target_policy_sha256"],
             runtime_profile_id=decoded["runtime_profile_id"],
             runtime_profile_manifest_sha256=decoded["runtime_profile_manifest_sha256"],
             registry_binding_sha256=decoded["registry_binding_sha256"],
@@ -668,7 +674,7 @@ def scheduler_admission_snapshot_from_status(
     public_status: Mapping[str, object],
     diagnostics_status: Mapping[str, object],
 ) -> SupervisorSchedulerAdmissionSnapshot:
-    """Construct the exact body-free P1 admission projection.
+    """Construct the exact body-free assist/P4 admission projection.
 
     The runtime-profile manifest digest is code-owned because the current
     scheduler projection exposes only the accepted profile ID and a manifest
@@ -713,8 +719,8 @@ def scheduler_admission_snapshot_from_status(
         or supervisor.get("workload") != _P1_WORKLOAD
         or supervisor.get("requested_mode") not in {"assist", "canary"}
         or supervisor.get("effective_mode") != "shadow"
-        or supervisor.get("policy_id") != _P1_POLICY_ID
-        or supervisor.get("policy_sha256") != _P1_POLICY_SHA256
+        or supervisor.get("policy_id") != _ASSIST_POLICY_ID
+        or supervisor.get("policy_sha256") != _ASSIST_POLICY_SHA256
         or supervisor.get("workload_available") is not True
         or type(runtime_available) is not bool
         or supervisor.get("closed_reason") != "admitted"
@@ -738,8 +744,8 @@ def scheduler_admission_snapshot_from_status(
         workload=_P1_WORKLOAD,
         requested_mode=str(supervisor["requested_mode"]),
         effective_mode=SupervisorMode.SHADOW.value,
-        policy_id=_P1_POLICY_ID,
-        policy_sha256=_P1_POLICY_SHA256,
+        policy_id=_ASSIST_POLICY_ID,
+        policy_sha256=_ASSIST_POLICY_SHA256,
         runtime_profile_id=_P1_PROFILE_ID,
         runtime_profile_manifest_sha256=_P1_PROFILE_MANIFEST_SHA256,
         profile_admission="accepted",
@@ -822,6 +828,11 @@ def _evidence_identity_matches(
     expected_predecessor = (
         SupervisorMode.SHADOW if requested_mode is SupervisorMode.ASSIST else SupervisorMode.ASSIST
     )
+    expected_observed_policy_id, expected_observed_policy_sha256 = (
+        (_P1_POLICY_ID, _P1_POLICY_SHA256)
+        if expected_predecessor is SupervisorMode.SHADOW
+        else (_ASSIST_POLICY_ID, _ASSIST_POLICY_SHA256)
+    )
     return bool(
         evidence.observed_mode is expected_predecessor
         and (
@@ -837,13 +848,15 @@ def _evidence_identity_matches(
         and evidence.task_class is TaskClass.COMPARE_CURRENT_FILE_WITH_CURRENT_WEB
         and evidence.source_revision_sha256 == source_revision_sha256
         and evidence.promotion_policy_sha256 == SUPERVISOR_ASSIST_PROMOTION_POLICY_SHA256
-        and evidence.p1_policy_id == _P1_POLICY_ID
-        and evidence.p1_policy_sha256 == _P1_POLICY_SHA256
+        and evidence.observed_policy_id == expected_observed_policy_id
+        and evidence.observed_policy_sha256 == expected_observed_policy_sha256
+        and evidence.target_policy_id == _ASSIST_POLICY_ID
+        and evidence.target_policy_sha256 == _ASSIST_POLICY_SHA256
         and evidence.runtime_profile_id == _P1_PROFILE_ID
         and evidence.runtime_profile_manifest_sha256 == _P1_PROFILE_MANIFEST_SHA256
         and evidence.registry_binding_sha256 == registry_binding_sha256
         and evidence.max_steps == SUPERVISOR_ASSIST_PROMOTION_MAX_STEPS
-        and evidence.max_review_rounds in {0, SUPERVISOR_ASSIST_PROMOTION_MAX_REVIEW_ROUNDS}
+        and evidence.max_review_rounds == SUPERVISOR_ASSIST_PROMOTION_MAX_REVIEW_ROUNDS
     )
 
 

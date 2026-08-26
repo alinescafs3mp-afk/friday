@@ -4,6 +4,7 @@ import json
 
 import pytest
 
+from friday import semantic_supervisor_policy
 from friday.orchestration.supervisor_contracts import (
     CapabilityEffectClass,
     CompletionCriterion,
@@ -84,6 +85,16 @@ def test_request_is_body_free_effect_free_and_bounded() -> None:
     assert len(serialized.encode("utf-8")) < 3_500
     assert 'tools_allowed":false' in request.messages[1]["content"]
     assert 'publication_allowed":false' in request.messages[1]["content"]
+    payload = json.loads(request.messages[1]["content"])
+    assert payload["trusted_policy"]["product_policy_id"] == (
+        semantic_supervisor_policy.SUPERVISOR_ASSIST_PRODUCT_POLICY_ID
+    )
+    assert payload["trusted_policy"]["product_policy_sha256"] == (
+        semantic_supervisor_policy.SUPERVISOR_ASSIST_PRODUCT_POLICY_SHA256
+    )
+    assert payload["deterministic_context"]["product_policy_id"] == (
+        semantic_supervisor_policy.SUPERVISOR_ASSIST_PRODUCT_POLICY_ID
+    )
 
 
 def test_parsed_review_maps_only_to_code_declared_recovery() -> None:

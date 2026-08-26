@@ -7,9 +7,9 @@ publish an answer, write product state, or turn a P1 shadow observation into
 authority.
 
 The accepted P1 product policy remains the exact discarded-shadow policy.  A
-separate operator gate, bound to one body-free evidence digest, is required for
-promotion.  This keeps source readiness distinct from live acceptance and lets
-the optional laptop fail closed without changing the primary-only path.
+distinct P4 product policy admits one review round for assist/canary while the
+scheduler remains non-owning shadow.  A separate operator gate, bound to one
+body-free evidence digest, is still required for promotion.
 """
 
 from __future__ import annotations
@@ -31,10 +31,10 @@ from friday.orchestration.supervisor_contracts import (
     canonical_sha256,
 )
 
-SUPERVISOR_ASSIST_PROMOTION_SCHEMA = "friday.supervisor-assist-promotion.v2"
+SUPERVISOR_ASSIST_PROMOTION_SCHEMA = "friday.supervisor-assist-promotion.v3"
 SUPERVISOR_ASSIST_READINESS_EVIDENCE_SCHEMA = "friday.supervisor-assist-readiness-evidence.v1"
 SUPERVISOR_ASSIST_OUTCOME_EVIDENCE_SCHEMA = "friday.supervisor-assist-outcome-evidence.v1"
-SUPERVISOR_ASSIST_PROMOTION_GATE_ID = "semantic-supervisor-current-file-web-promotion-v1"
+SUPERVISOR_ASSIST_PROMOTION_GATE_ID = "semantic-supervisor-current-file-web-promotion-v2"
 SUPERVISOR_ASSIST_PROMOTION_MAX_STEPS = 6
 SUPERVISOR_ASSIST_PROMOTION_MAX_REVIEW_ROUNDS = 1
 SUPERVISOR_ASSIST_PROMOTION_MIN_PRODUCT_OBSERVATIONS = 20
@@ -46,6 +46,8 @@ _SAFE_FAILURE_CLASS_RE = re.compile(r"[a-z][a-z0-9_.:-]{0,127}\Z")
 _MAX_LATENCY_MS = 86_400_000
 _P1_POLICY_ID = semantic_supervisor_policy.SUPERVISOR_PRODUCT_POLICY_ID
 _P1_POLICY_SHA256 = semantic_supervisor_policy.SUPERVISOR_PRODUCT_POLICY_SHA256
+_ASSIST_POLICY_ID = semantic_supervisor_policy.SUPERVISOR_ASSIST_PRODUCT_POLICY_ID
+_ASSIST_POLICY_SHA256 = semantic_supervisor_policy.SUPERVISOR_ASSIST_PRODUCT_POLICY_SHA256
 _P1_PROFILE_ID = semantic_supervisor_policy.SUPERVISOR_RUNTIME_PROFILE_ID
 _P1_PROFILE_MANIFEST_SHA256 = semantic_supervisor_policy.SUPERVISOR_RUNTIME_PROFILE_MANIFEST_SHA256
 _P1_WORKLOAD = semantic_supervisor_policy.SUPERVISOR_WORKLOAD
@@ -65,8 +67,10 @@ _EXPECTED_PROMOTION_POLICY = MappingProxyType(
     {
         "schema": SUPERVISOR_ASSIST_PROMOTION_SCHEMA,
         "gate_id": SUPERVISOR_ASSIST_PROMOTION_GATE_ID,
-        "source_policy_id": _P1_POLICY_ID,
-        "source_policy_sha256": _P1_POLICY_SHA256,
+        "shadow_policy_id": _P1_POLICY_ID,
+        "shadow_policy_sha256": _P1_POLICY_SHA256,
+        "target_policy_id": _ASSIST_POLICY_ID,
+        "target_policy_sha256": _ASSIST_POLICY_SHA256,
         "runtime_profile_id": _P1_PROFILE_ID,
         "runtime_profile_manifest_sha256": _P1_PROFILE_MANIFEST_SHA256,
         "scheduler_workload": _P1_WORKLOAD,
@@ -122,6 +126,7 @@ class AssistPromotionReason(StrEnum):
     TASK_NOT_ADMITTED = "task_not_admitted"
     BOUNDS_DRIFT = "bounds_drift"
     P1_POLICY_IDENTITY_DRIFT = "p1_policy_identity_drift"
+    ASSIST_POLICY_IDENTITY_DRIFT = "assist_policy_identity_drift"
     RUNTIME_PROFILE_IDENTITY_DRIFT = "runtime_profile_identity_drift"
     SCHEDULER_IDENTITY_DRIFT = "scheduler_identity_drift"
     SCHEDULER_WORKLOAD_UNAVAILABLE = "scheduler_workload_unavailable"
@@ -416,7 +421,7 @@ class AssistPromotionOutcomeEvidence:
 
 @dataclass(frozen=True, slots=True)
 class SupervisorSchedulerAdmissionSnapshot:
-    """Body-free projection of the existing P1 scheduler admission."""
+    """Body-free projection of the selected target scheduler admission."""
 
     workload: str
     requested_mode: str
@@ -498,8 +503,10 @@ class AssistPromotionLiveEvidence:
     task_class: TaskClass
     source_revision_sha256: str
     promotion_policy_sha256: str
-    p1_policy_id: str
-    p1_policy_sha256: str
+    observed_policy_id: str
+    observed_policy_sha256: str
+    target_policy_id: str
+    target_policy_sha256: str
     runtime_profile_id: str
     runtime_profile_manifest_sha256: str
     registry_binding_sha256: str
@@ -530,12 +537,14 @@ class AssistPromotionLiveEvidence:
         for label, value in (
             ("source_revision_sha256", self.source_revision_sha256),
             ("promotion_policy_sha256", self.promotion_policy_sha256),
-            ("p1_policy_sha256", self.p1_policy_sha256),
+            ("observed_policy_sha256", self.observed_policy_sha256),
+            ("target_policy_sha256", self.target_policy_sha256),
             ("runtime_profile_manifest_sha256", self.runtime_profile_manifest_sha256),
             ("registry_binding_sha256", self.registry_binding_sha256),
         ):
             _require_digest(value, label=label)
-        _require_safe_id(self.p1_policy_id, label="p1_policy_id")
+        _require_safe_id(self.observed_policy_id, label="observed_policy_id")
+        _require_safe_id(self.target_policy_id, label="target_policy_id")
         _require_safe_id(self.runtime_profile_id, label="runtime_profile_id")
         if type(self.max_steps) is not int or type(self.max_review_rounds) is not int:
             raise ValueError("evidence bounds must be integers")
@@ -574,8 +583,10 @@ class AssistPromotionLiveEvidence:
             "task_class": self.task_class.value,
             "source_revision_sha256": self.source_revision_sha256,
             "promotion_policy_sha256": self.promotion_policy_sha256,
-            "p1_policy_id": self.p1_policy_id,
-            "p1_policy_sha256": self.p1_policy_sha256,
+            "observed_policy_id": self.observed_policy_id,
+            "observed_policy_sha256": self.observed_policy_sha256,
+            "target_policy_id": self.target_policy_id,
+            "target_policy_sha256": self.target_policy_sha256,
             "runtime_profile_id": self.runtime_profile_id,
             "runtime_profile_manifest_sha256": self.runtime_profile_manifest_sha256,
             "registry_binding_sha256": self.registry_binding_sha256,
@@ -697,11 +708,13 @@ def _scheduler_source_reason(
     scheduler = candidate.scheduler
     if not semantic_supervisor_policy.supervisor_product_policy_is_well_formed():
         return AssistPromotionReason.P1_POLICY_IDENTITY_DRIFT
-    if scheduler.policy_id != _P1_POLICY_ID or not hmac.compare_digest(
+    if not semantic_supervisor_policy.supervisor_assist_product_policy_is_well_formed():
+        return AssistPromotionReason.ASSIST_POLICY_IDENTITY_DRIFT
+    if scheduler.policy_id != _ASSIST_POLICY_ID or not hmac.compare_digest(
         scheduler.policy_sha256,
-        _P1_POLICY_SHA256,
+        _ASSIST_POLICY_SHA256,
     ):
-        return AssistPromotionReason.P1_POLICY_IDENTITY_DRIFT
+        return AssistPromotionReason.ASSIST_POLICY_IDENTITY_DRIFT
     if scheduler.runtime_profile_id != _P1_PROFILE_ID or not hmac.compare_digest(
         scheduler.runtime_profile_manifest_sha256,
         _P1_PROFILE_MANIFEST_SHA256,
@@ -750,10 +763,10 @@ def _source_reason(candidate: AssistPromotionCandidate) -> AssistPromotionReason
         return AssistPromotionReason.MODE_NOT_ADMITTED
     if candidate.task_class is not TaskClass.COMPARE_CURRENT_FILE_WITH_CURRENT_WEB:
         return AssistPromotionReason.TASK_NOT_ADMITTED
-    if candidate.max_steps != SUPERVISOR_ASSIST_PROMOTION_MAX_STEPS or candidate.max_review_rounds not in {
-        0,
-        SUPERVISOR_ASSIST_PROMOTION_MAX_REVIEW_ROUNDS,
-    }:
+    if (
+        candidate.max_steps != SUPERVISOR_ASSIST_PROMOTION_MAX_STEPS
+        or candidate.max_review_rounds != SUPERVISOR_ASSIST_PROMOTION_MAX_REVIEW_ROUNDS
+    ):
         return AssistPromotionReason.BOUNDS_DRIFT
     scheduler_reason = _scheduler_source_reason(candidate)
     if scheduler_reason is not None:
@@ -775,6 +788,11 @@ def _live_evidence_reason(
         SupervisorMode.ASSIST: SupervisorMode.SHADOW,
         SupervisorMode.CANARY: SupervisorMode.ASSIST,
     }[candidate.requested_mode]
+    expected_observed_policy_id, expected_observed_policy_sha256 = (
+        (_P1_POLICY_ID, _P1_POLICY_SHA256)
+        if expected_stage is SupervisorMode.SHADOW
+        else (_ASSIST_POLICY_ID, _ASSIST_POLICY_SHA256)
+    )
     if evidence.observed_mode is not expected_stage:
         return AssistPromotionReason.EVIDENCE_STAGE_DRIFT
     if (
@@ -787,8 +805,16 @@ def _live_evidence_reason(
             evidence.promotion_policy_sha256,
             SUPERVISOR_ASSIST_PROMOTION_POLICY_SHA256,
         )
-        or evidence.p1_policy_id != _P1_POLICY_ID
-        or not hmac.compare_digest(evidence.p1_policy_sha256, _P1_POLICY_SHA256)
+        or evidence.observed_policy_id != expected_observed_policy_id
+        or not hmac.compare_digest(
+            evidence.observed_policy_sha256,
+            expected_observed_policy_sha256,
+        )
+        or evidence.target_policy_id != _ASSIST_POLICY_ID
+        or not hmac.compare_digest(
+            evidence.target_policy_sha256,
+            _ASSIST_POLICY_SHA256,
+        )
         or evidence.runtime_profile_id != _P1_PROFILE_ID
         or not hmac.compare_digest(
             evidence.runtime_profile_manifest_sha256,

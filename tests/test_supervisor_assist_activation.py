@@ -117,8 +117,8 @@ def _scheduler_status(
         "workload": semantic_supervisor_policy.SUPERVISOR_WORKLOAD,
         "requested_mode": requested_mode,
         "effective_mode": "shadow",
-        "policy_id": semantic_supervisor_policy.SUPERVISOR_PRODUCT_POLICY_ID,
-        "policy_sha256": semantic_supervisor_policy.SUPERVISOR_PRODUCT_POLICY_SHA256,
+        "policy_id": semantic_supervisor_policy.SUPERVISOR_ASSIST_PRODUCT_POLICY_ID,
+        "policy_sha256": semantic_supervisor_policy.SUPERVISOR_ASSIST_PRODUCT_POLICY_SHA256,
         "workload_available": True,
         "runtime_available": runtime_available,
         "closed_reason": "admitted",
@@ -172,6 +172,9 @@ def _evidence(
     **changes: object,
 ) -> AssistPromotionLiveEvidence:
     # Future contract fixture only.  No repository or live acceptance is claimed.
+    observed_policy = semantic_supervisor_policy.supervisor_product_policy_identity_for_mode(
+        observed_mode
+    )
     values: dict[str, object] = {
         "evidence_id": "future_activation_loader_fixture",
         "authority": authority,
@@ -179,8 +182,10 @@ def _evidence(
         "task_class": TaskClass.COMPARE_CURRENT_FILE_WITH_CURRENT_WEB,
         "source_revision_sha256": source_sha256,
         "promotion_policy_sha256": SUPERVISOR_ASSIST_PROMOTION_POLICY_SHA256,
-        "p1_policy_id": semantic_supervisor_policy.SUPERVISOR_PRODUCT_POLICY_ID,
-        "p1_policy_sha256": semantic_supervisor_policy.SUPERVISOR_PRODUCT_POLICY_SHA256,
+        "observed_policy_id": observed_policy.policy_id,
+        "observed_policy_sha256": observed_policy.policy_sha256,
+        "target_policy_id": semantic_supervisor_policy.SUPERVISOR_ASSIST_PRODUCT_POLICY_ID,
+        "target_policy_sha256": semantic_supervisor_policy.SUPERVISOR_ASSIST_PRODUCT_POLICY_SHA256,
         "runtime_profile_id": semantic_supervisor_policy.SUPERVISOR_RUNTIME_PROFILE_ID,
         "runtime_profile_manifest_sha256": (
             semantic_supervisor_policy.SUPERVISOR_RUNTIME_PROFILE_MANIFEST_SHA256
@@ -440,7 +445,7 @@ def test_evidence_parser_rejects_extra_missing_nonfinite_and_malformed_fields(
     assert captured.value.reason is AssistPromotionActivationReason.EVIDENCE_INVALID
 
 
-def test_old_v1_evidence_and_old_product_grammar_are_explicitly_rejected(
+def test_old_v1_v2_evidence_and_old_product_grammar_are_explicitly_rejected(
     tmp_path: Path,
 ) -> None:
     _root, source = _release_root(tmp_path)
@@ -451,12 +456,18 @@ def test_old_v1_evidence_and_old_product_grammar_are_explicitly_rejected(
     old_top = evidence.payload()
     old_top["schema"] = "friday.supervisor-assist-promotion.v1"
     old_top.pop("product_evidence")
+    old_v2 = evidence.payload()
+    old_v2["schema"] = "friday.supervisor-assist-promotion.v2"
+    old_v2["p1_policy_id"] = old_v2.pop("observed_policy_id")
+    old_v2["p1_policy_sha256"] = old_v2.pop("observed_policy_sha256")
+    old_v2.pop("target_policy_id")
+    old_v2.pop("target_policy_sha256")
     old_product = evidence.payload()
     product = old_product["product_evidence"]
     assert isinstance(product, dict)
     product["schema"] = "friday.supervisor-assist-product-evidence.v1"
 
-    for payload in (old_top, old_product):
+    for payload in (old_top, old_v2, old_product):
         with pytest.raises(AssistPromotionActivationError) as captured:
             _parse_payload(payload)
         assert captured.value.reason is AssistPromotionActivationReason.EVIDENCE_INVALID
@@ -558,7 +569,7 @@ def test_scheduler_projection_is_exact_and_prestart_unavailability_is_retained()
 
     assert snapshot.requested_mode == "assist"
     assert snapshot.effective_mode == "shadow"
-    assert snapshot.policy_id == semantic_supervisor_policy.SUPERVISOR_PRODUCT_POLICY_ID
+    assert snapshot.policy_id == semantic_supervisor_policy.SUPERVISOR_ASSIST_PRODUCT_POLICY_ID
     assert snapshot.runtime_profile_id == semantic_supervisor_policy.SUPERVISOR_RUNTIME_PROFILE_ID
     assert snapshot.runtime_profile_manifest_sha256 == (
         semantic_supervisor_policy.SUPERVISOR_RUNTIME_PROFILE_MANIFEST_SHA256
@@ -587,7 +598,7 @@ def test_healthy_scheduler_projection_requires_profile_and_served_model_match() 
         {"supervisor__workload": "extract"},
         {"supervisor__requested_mode": "shadow"},
         {"supervisor__effective_mode": "assist"},
-        {"supervisor__policy_id": "gptoss20b-semantic-supervisor-v2"},
+        {"supervisor__policy_id": semantic_supervisor_policy.SUPERVISOR_PRODUCT_POLICY_ID},
         {"supervisor__policy_sha256": OTHER},
         {"supervisor__workload_available": False},
         {"supervisor__closed_reason": "endpoint_unavailable"},

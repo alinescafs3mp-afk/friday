@@ -235,6 +235,28 @@ def test_builder_preserves_identity_when_off_or_policy_gate_is_not_shadow() -> N
     assert build_semantic_supervisor_runtime(_settings(), primary, scheduler) is primary
 
 
+def test_assist_requested_shadow_runtime_reports_v2_without_claiming_authority() -> None:
+    wrapper, _, _ = _wrapper(
+        settings=_settings(
+            semantic_supervisor_mode="assist",
+            semantic_supervisor_max_review_rounds=1,
+        )
+    )
+
+    status = wrapper.semantic_supervisor_status()
+    assert status["role"] == "discarded_advisory_shadow"
+    assert status["requested_mode"] == "assist"
+    assert status["effective_mode"] == "shadow"
+    assert status["policy_id"] == semantic_supervisor_policy.SUPERVISOR_ASSIST_PRODUCT_POLICY_ID
+    assert status["policy_sha256"] == (
+        semantic_supervisor_policy.SUPERVISOR_ASSIST_PRODUCT_POLICY_SHA256
+    )
+    assert status["promotion_admitted"] is False
+    assert status["execution_allowed"] is False
+    assert status["tools_allowed"] is False
+    assert status["effects_allowed"] is False
+
+
 @pytest.mark.asyncio
 async def test_primary_identity_and_no_shadow_before_successful_primary() -> None:
     primary_gate = asyncio.Event()

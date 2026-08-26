@@ -4,6 +4,7 @@ from dataclasses import replace
 
 import pytest
 
+from friday import semantic_supervisor_policy
 from friday.orchestration.supervisor_contracts import (
     SUPERVISOR_REVIEW_SCHEMA,
     CapabilityEffectClass,
@@ -155,6 +156,16 @@ def test_complete_deterministic_result_accepts_only_complete_publish_review() ->
             _review(),
             _context(recovery_budget_remaining=0),
             ReviewPolicyReason.RECOVERY_BUDGET_EXHAUSTED,
+        ),
+        (
+            _review(),
+            _context(product_policy_id=semantic_supervisor_policy.SUPERVISOR_PRODUCT_POLICY_ID),
+            ReviewPolicyReason.PRODUCT_POLICY_MISMATCH,
+        ),
+        (
+            _review(),
+            _context(product_policy_sha256="5" * 64),
+            ReviewPolicyReason.PRODUCT_POLICY_MISMATCH,
         ),
     ],
 )

@@ -8,6 +8,7 @@ from typing import Any
 
 import pytest
 
+from friday import semantic_supervisor_policy
 from friday.orchestration.capability_binding import (
     CapabilityBindingSnapshot,
     manifest_binding_snapshot_sha256,
@@ -803,6 +804,54 @@ def test_supervisor_messages_keep_untrusted_user_text_out_of_policy() -> None:
     )
     assert payload["max_tokens"] == 512
     assert payload["response_format"]["type"] == "json_schema"
+
+
+def test_assist_proposal_transport_and_kernel_bind_the_distinct_v2_policy() -> None:
+    supervisor_input = build_supervisor_input(
+        _compare_turn(),
+        _settings(semantic_supervisor_mode="assist"),
+    )
+    assert supervisor_input.budgets.max_review_rounds == 1
+    system, user = build_supervisor_messages(supervisor_input)
+    assert "advisory only" in system["content"].casefold()
+    payload = json.loads(user["content"])
+    trusted = payload["trusted_policy"]
+    assert trusted["policy_id"] == semantic_supervisor_policy.SUPERVISOR_ASSIST_PRODUCT_POLICY_ID
+    assert trusted["policy_sha256"] == (
+        semantic_supervisor_policy.SUPERVISOR_ASSIST_PRODUCT_POLICY_SHA256
+    )
+    assert payload["untrusted_payload"]["constraints"]["max_review_rounds"] == 1
+    assert trusted["tools_allowed"] is False
+    assert trusted["effects_allowed"] is False
+    assert trusted["publication_allowed"] is False
+
+    proposal = SupervisorProposal.parse(payload["untrusted_payload"]["response_template"])
+    decision = admit_supervisor_proposal(
+        proposal,
+        supervisor_input,
+        PolicyAdmissionContext(
+            actor_binding_sha256="a" * 64,
+            conversation_binding_sha256="b" * 64,
+        ),
+    )
+    assert decision.admitted is True
+    assert decision.plan is not None
+    assert decision.plan.policy_version == (
+        semantic_supervisor_policy.SUPERVISOR_ASSIST_PRODUCT_POLICY_ID
+    )
+    assert decision.plan.confirmation_required is False
+    assert decision.plan.publication_owner == "primary"
+
+
+def test_assist_v2_transport_rejects_the_broader_shadow_archive_journey() -> None:
+    with pytest.raises(SupervisorContractError, match="accepted product policy"):
+        build_supervisor_input(
+            _turn("Сравни переписку из архива с текущими данными в интернете."),
+            _settings(
+                semantic_supervisor_mode="assist",
+                semantic_supervisor_tasks=("compare_archive_with_current_web",),
+            ),
+        )
 
 
 @pytest.mark.parametrize(

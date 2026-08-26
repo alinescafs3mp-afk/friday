@@ -260,6 +260,9 @@ class SemanticSupervisorShadowRuntime:
         """Return a bounded body-free aggregate suitable for health surfaces."""
 
         requested = _closed_requested_mode(self._settings)
+        policy_identity = semantic_supervisor_policy.supervisor_product_policy_identity_for_mode(
+            requested
+        )
         return {
             "schema": _RUNTIME_STATUS_SCHEMA,
             "installed": True,
@@ -267,8 +270,8 @@ class SemanticSupervisorShadowRuntime:
             "requested_mode": requested,
             "effective_mode": "shadow" if requested != "off" and not self._closed else "off",
             "promotion_admitted": False,
-            "policy_id": semantic_supervisor_policy.SUPERVISOR_PRODUCT_POLICY_ID,
-            "policy_sha256": semantic_supervisor_policy.SUPERVISOR_PRODUCT_POLICY_SHA256,
+            "policy_id": policy_identity.policy_id,
+            "policy_sha256": policy_identity.policy_sha256,
             "accepted_profile_id": _accepted_profile_id(self._settings),
             "runtime_owner": "unchanged",
             "publication_owner": "primary",

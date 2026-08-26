@@ -104,8 +104,17 @@ _SEMANTIC_SUPERVISOR_SHADOW_TO_ASSIST_TRANSITION = "semantic_supervisor_shadow_t
 _SEMANTIC_SUPERVISOR_ASSIST_TO_SHADOW_TRANSITION = "semantic_supervisor_assist_to_shadow"
 _SEMANTIC_SUPERVISOR_ASSIST_TO_CANARY_TRANSITION = "semantic_supervisor_assist_to_canary"
 _SEMANTIC_SUPERVISOR_CANARY_TO_ASSIST_TRANSITION = "semantic_supervisor_canary_to_assist"
-_SEMANTIC_SUPERVISOR_POLICY_ID = "gptoss20b-semantic-supervisor-v1"
-_SEMANTIC_SUPERVISOR_POLICY_SHA256 = "9f0c1e8132200a3a4416448cd2de03a4736da5e4968536d8c9e518fd5e88051a"
+_SEMANTIC_SUPERVISOR_SHADOW_POLICY_ID = "gptoss20b-semantic-supervisor-v1"
+_SEMANTIC_SUPERVISOR_SHADOW_POLICY_SHA256 = (
+    "9f0c1e8132200a3a4416448cd2de03a4736da5e4968536d8c9e518fd5e88051a"
+)
+_SEMANTIC_SUPERVISOR_ASSIST_POLICY_ID = "gptoss20b-semantic-supervisor-v2"
+_SEMANTIC_SUPERVISOR_ASSIST_POLICY_SHA256 = (
+    "534905cdaac794f485b43e25895761f1a3588ff8eabcc20527530d7f3bd4f96e"
+)
+# P1 compatibility aliases remain source-stable for shadow rollout tests.
+_SEMANTIC_SUPERVISOR_POLICY_ID = _SEMANTIC_SUPERVISOR_SHADOW_POLICY_ID
+_SEMANTIC_SUPERVISOR_POLICY_SHA256 = _SEMANTIC_SUPERVISOR_SHADOW_POLICY_SHA256
 _PRIMARY_PROCESS_EPOCH_DOMAIN = b"friday.primary-process-epoch.v2\0"
 _SECONDARY_PRODUCT_STAGE_SCHEMA = "friday.secondary-product-stage-evidence.v3"
 _SECONDARY_PRODUCT_OPERATION_SCHEMA = "friday.secondary-product-operation-core.v1"
@@ -742,6 +751,53 @@ _SEMANTIC_SUPERVISOR_ACTIVATION_STATUS_KEYS = frozenset(
         "body_free",
     }
 )
+_SEMANTIC_SUPERVISOR_ASSIST_CONTROLLER_STATUS_SCHEMA = (
+    "friday.semantic-supervisor-assist-controller-status.v1"
+)
+_SEMANTIC_SUPERVISOR_ASSIST_CONTROLLER_STATUS_KEYS = frozenset(
+    {
+        "schema",
+        "installed",
+        "role",
+        "requested_mode",
+        "effective_mode",
+        "promotion_admitted",
+        "max_review_rounds",
+        "promotion_attempt_total",
+        "promotion_evaluation_total",
+        "promotion_admitted_total",
+        "active_tasks",
+        "retained_active_graphs",
+        "fallback_total",
+        "invoked_total",
+        "publication_total",
+        "terminal_publication_total",
+        "event_success_total",
+        "event_failure_total",
+        "ownership_uncertain_total",
+        "fallback_reasons",
+        "runtime_owner",
+        "publication_owner",
+        "tools_allowed",
+        "effects_allowed",
+        "closed",
+        "scheduler",
+        "activation",
+    }
+)
+_SEMANTIC_SUPERVISOR_ASSIST_CONTROLLER_SCHEDULER_KEYS = frozenset(
+    {
+        "state",
+        "available",
+        "workload",
+        "policy_id",
+        "policy_sha256",
+        "workload_available",
+        "runtime_available",
+        "closed_reason",
+        "circuit_retry_after_sec",
+    }
+)
 _SEMANTIC_SUPERVISOR_MAX_PROMOTION_EVIDENCE_BYTES = 32 << 10
 BOOTSTRAP_WHEELS = (("pip", "26.1.2", "pip-26.1.2-py3-none-any.whl"),)
 _ACTIVATION_SMOKE_RECEIPT = b"friday-activation-smoke:clear:v1\n"
@@ -859,7 +915,136 @@ def _semantic_supervisor_health_identity_matches(
     nested = secondary.get("semantic_supervisor")
     if not isinstance(nested, Mapping):
         return False
-    common = bool(
+    expected_policy_id, expected_policy_sha256 = (
+        (
+            _SEMANTIC_SUPERVISOR_ASSIST_POLICY_ID,
+            _SEMANTIC_SUPERVISOR_ASSIST_POLICY_SHA256,
+        )
+        if expected_mode in {"assist", "canary"}
+        else (
+            _SEMANTIC_SUPERVISOR_SHADOW_POLICY_ID,
+            _SEMANTIC_SUPERVISOR_SHADOW_POLICY_SHA256,
+        )
+    )
+    secondary_common = bool(
+        secondary.get("schema") == "friday.optional-secondary-health.v1"
+        and secondary.get("role") == "optional_advisory"
+        and secondary.get("enabled") is True
+        and secondary.get("configured") is True
+        and secondary.get("mode") == "assist"
+        and type(secondary.get("available")) is bool
+        and nested.get("workload") == "plan_candidate"
+        and nested.get("policy_id") == expected_policy_id
+        and nested.get("policy_sha256") == expected_policy_sha256
+        and type(nested.get("runtime_available")) is bool
+    )
+    if not secondary_common:
+        return False
+
+    if expected_mode in {"assist", "canary"}:
+        if set(semantic) != _SEMANTIC_SUPERVISOR_ASSIST_CONTROLLER_STATUS_KEYS:
+            return False
+        controller_scheduler = semantic.get("scheduler")
+        activation = semantic.get("activation")
+        if (
+            not isinstance(controller_scheduler, Mapping)
+            or set(controller_scheduler)
+            != _SEMANTIC_SUPERVISOR_ASSIST_CONTROLLER_SCHEDULER_KEYS
+            or not isinstance(activation, Mapping)
+            or set(activation) != _SEMANTIC_SUPERVISOR_ACTIVATION_STATUS_KEYS
+        ):
+            return False
+        counters = (
+            "promotion_attempt_total",
+            "promotion_evaluation_total",
+            "promotion_admitted_total",
+            "active_tasks",
+            "retained_active_graphs",
+            "fallback_total",
+            "invoked_total",
+            "publication_total",
+            "terminal_publication_total",
+            "event_success_total",
+            "event_failure_total",
+            "ownership_uncertain_total",
+        )
+        if any(type(semantic.get(key)) is not int or semantic[key] < 0 for key in counters):
+            return False
+        fallback_reasons = semantic.get("fallback_reasons")
+        if not isinstance(fallback_reasons, Mapping) or len(fallback_reasons) > 32 or any(
+            type(key) is not str or type(value) is not int or value < 0
+            for key, value in fallback_reasons.items()
+        ):
+            return False
+        retry_after = controller_scheduler.get("circuit_retry_after_sec")
+        if retry_after is not None and (
+            isinstance(retry_after, bool)
+            or not isinstance(retry_after, int | float)
+            or not math.isfinite(float(retry_after))
+            or float(retry_after) < 0
+        ):
+            return False
+        actor_count = activation.get("canary_actor_binding_count")
+        if not bool(
+            type(actor_count) is int
+            and (actor_count == 0 if expected_mode == "assist" else 1 <= actor_count <= 32)
+        ):
+            return False
+        promotion_admitted = semantic.get("promotion_admitted")
+        effective_mode = semantic.get("effective_mode")
+        if type(promotion_admitted) is not bool or effective_mode != (
+            expected_mode if promotion_admitted else "off"
+        ):
+            return False
+        return bool(
+            semantic.get("schema") == _SEMANTIC_SUPERVISOR_ASSIST_CONTROLLER_STATUS_SCHEMA
+            and semantic.get("installed") is True
+            and semantic.get("role") == "durable_read_only_assist"
+            and semantic.get("requested_mode") == expected_mode
+            and semantic.get("max_review_rounds") == 1
+            and semantic.get("runtime_owner") == "durable_graph_after_admission"
+            and semantic.get("publication_owner") == "primary"
+            and semantic.get("tools_allowed") is False
+            and semantic.get("effects_allowed") is False
+            and semantic.get("closed") is False
+            and semantic["promotion_admitted_total"] <= semantic["promotion_evaluation_total"]
+            and semantic["promotion_evaluation_total"] <= semantic["promotion_attempt_total"]
+            and controller_scheduler.get("state")
+            in {"probing", "healthy", "degraded", "cooldown"}
+            and type(controller_scheduler.get("available")) is bool
+            and controller_scheduler.get("workload") == "plan_candidate"
+            and controller_scheduler.get("policy_id") == expected_policy_id
+            and controller_scheduler.get("policy_sha256") == expected_policy_sha256
+            and controller_scheduler.get("workload_available") is True
+            and type(controller_scheduler.get("runtime_available")) is bool
+            and controller_scheduler.get("closed_reason") == "admitted"
+            and controller_scheduler.get("state") == secondary.get("state")
+            and controller_scheduler.get("available") == secondary.get("available")
+            and controller_scheduler.get("runtime_available") == nested.get("runtime_available")
+            and nested.get("requested_mode") == expected_mode
+            and nested.get("effective_mode") == "shadow"
+            and nested.get("workload_available") is True
+            and nested.get("closed_reason") == "admitted"
+            and activation.get("schema") == _SEMANTIC_SUPERVISOR_ACTIVATION_STATUS_SCHEMA
+            and activation.get("configured") is True
+            and activation.get("reason") == "material_loaded_not_accepted"
+            and activation.get("requested_mode") == expected_mode
+            and activation.get("source_revision_loaded") is True
+            and activation.get("registry_binding_loaded") is True
+            and activation.get("scheduler_projection_loaded") is True
+            and type(activation.get("scheduler_runtime_available")) is bool
+            and activation.get("scheduler_runtime_available")
+            == controller_scheduler.get("runtime_available")
+            and activation.get("evidence_loaded") is True
+            and activation.get("evidence_authority") == "production_joined"
+            and activation.get("operator_gate_enabled") is True
+            and activation.get("promotion_admitted") is False
+            and activation.get("evidence_accepted") is False
+            and activation.get("acceptance_authority") == "none"
+            and activation.get("body_free") is True
+        )
+
+    shadow_common = bool(
         semantic.get("schema") == "friday.semantic-supervisor-shadow-runtime.v1"
         and semantic.get("role") == "discarded_advisory_shadow"
         and semantic.get("promotion_admitted") is False
@@ -868,60 +1053,20 @@ def _semantic_supervisor_health_identity_matches(
         and semantic.get("tools_allowed") is False
         and semantic.get("effects_allowed") is False
         and semantic.get("execution_allowed") is False
-        and secondary.get("schema") == "friday.optional-secondary-health.v1"
-        and secondary.get("role") == "optional_advisory"
-        and secondary.get("enabled") is True
-        and secondary.get("configured") is True
-        and secondary.get("mode") == "assist"
-        and type(secondary.get("available")) is bool
-        and nested.get("workload") == "plan_candidate"
-        and nested.get("policy_id") == _SEMANTIC_SUPERVISOR_POLICY_ID
-        and nested.get("policy_sha256") == _SEMANTIC_SUPERVISOR_POLICY_SHA256
-        and type(nested.get("runtime_available")) is bool
     )
-    if not common:
+    if not shadow_common:
         return False
-    if expected_mode in {"shadow", "assist", "canary"}:
-        expected_effective_mode = "shadow"
-        activation = semantic.get("activation")
-        if expected_mode in {"assist", "canary"}:
-            if not isinstance(activation, Mapping) or set(activation) != (
-                _SEMANTIC_SUPERVISOR_ACTIVATION_STATUS_KEYS
-            ):
-                return False
-            actor_count = activation.get("canary_actor_binding_count")
-            expected_actor_count = bool(
-                type(actor_count) is int
-                and (actor_count == 0 if expected_mode == "assist" else 1 <= actor_count <= 32)
-            )
-            if not expected_actor_count or not bool(
-                activation.get("schema") == _SEMANTIC_SUPERVISOR_ACTIVATION_STATUS_SCHEMA
-                and activation.get("configured") is True
-                and activation.get("reason") == "material_loaded_not_accepted"
-                and activation.get("requested_mode") == expected_mode
-                and activation.get("source_revision_loaded") is True
-                and activation.get("registry_binding_loaded") is True
-                and activation.get("scheduler_projection_loaded") is True
-                and type(activation.get("scheduler_runtime_available")) is bool
-                and activation.get("evidence_loaded") is True
-                and activation.get("evidence_authority") == "production_joined"
-                and activation.get("operator_gate_enabled") is True
-                and activation.get("promotion_admitted") is False
-                and activation.get("evidence_accepted") is False
-                and activation.get("acceptance_authority") == "none"
-                and activation.get("body_free") is True
-            ):
-                return False
+    if expected_mode == "shadow":
         return bool(
             semantic.get("installed") is True
-            and semantic.get("requested_mode") == expected_mode
-            and semantic.get("effective_mode") == expected_effective_mode
-            and semantic.get("policy_id") == _SEMANTIC_SUPERVISOR_POLICY_ID
-            and semantic.get("policy_sha256") == _SEMANTIC_SUPERVISOR_POLICY_SHA256
+            and semantic.get("requested_mode") == "shadow"
+            and semantic.get("effective_mode") == "shadow"
+            and semantic.get("policy_id") == expected_policy_id
+            and semantic.get("policy_sha256") == expected_policy_sha256
             and semantic.get("accepted_profile_id") == _SECONDARY_FINALIST_PROFILE_ID
             and semantic.get("max_pending") == 4
-            and nested.get("requested_mode") == expected_mode
-            and nested.get("effective_mode") == expected_effective_mode
+            and nested.get("requested_mode") == "shadow"
+            and nested.get("effective_mode") == "shadow"
             and nested.get("workload_available") is True
             and nested.get("closed_reason") == "admitted"
         )
@@ -1581,7 +1726,7 @@ def _validate_semantic_supervisor_promoted_values(
     if mode not in {"assist", "canary"}:  # pragma: no cover - code-owned callers
         raise ReleaseFailure("staged_config_transition_invalid")
     expected_literals = {
-        "FRIDAY_SEMANTIC_SUPERVISOR_MAX_REVIEW_ROUNDS": "0",
+        "FRIDAY_SEMANTIC_SUPERVISOR_MAX_REVIEW_ROUNDS": "1",
         "FRIDAY_SEMANTIC_SUPERVISOR_MAX_STEPS": "6",
         "FRIDAY_SEMANTIC_SUPERVISOR_MODE": mode,
         "FRIDAY_SEMANTIC_SUPERVISOR_PROMOTION_ENABLED": "1",

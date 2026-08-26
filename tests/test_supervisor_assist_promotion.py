@@ -94,8 +94,8 @@ def _scheduler(**changes: object) -> SupervisorSchedulerAdmissionSnapshot:
         "workload": semantic_supervisor_policy.SUPERVISOR_WORKLOAD,
         "requested_mode": SupervisorMode.ASSIST.value,
         "effective_mode": SupervisorMode.SHADOW.value,
-        "policy_id": semantic_supervisor_policy.SUPERVISOR_PRODUCT_POLICY_ID,
-        "policy_sha256": semantic_supervisor_policy.SUPERVISOR_PRODUCT_POLICY_SHA256,
+        "policy_id": semantic_supervisor_policy.SUPERVISOR_ASSIST_PRODUCT_POLICY_ID,
+        "policy_sha256": semantic_supervisor_policy.SUPERVISOR_ASSIST_PRODUCT_POLICY_SHA256,
         "runtime_profile_id": semantic_supervisor_policy.SUPERVISOR_RUNTIME_PROFILE_ID,
         "runtime_profile_manifest_sha256": (
             semantic_supervisor_policy.SUPERVISOR_RUNTIME_PROFILE_MANIFEST_SHA256
@@ -137,6 +137,9 @@ def _evidence(
 ) -> AssistPromotionLiveEvidence:
     # This is a contract fixture for a future evidence producer.  It is not a
     # claim that the repository currently has accepted production evidence.
+    observed_policy = semantic_supervisor_policy.supervisor_product_policy_identity_for_mode(
+        candidate.requested_mode if candidate.requested_mode is SupervisorMode.CANARY else SupervisorMode.SHADOW
+    )
     values: dict[str, object] = {
         "evidence_id": "future_joined_operator_fixture",
         "authority": AssistPromotionEvidenceAuthority.PRODUCTION_JOINED,
@@ -148,8 +151,10 @@ def _evidence(
         "task_class": TaskClass.COMPARE_CURRENT_FILE_WITH_CURRENT_WEB,
         "source_revision_sha256": candidate.source_revision_sha256,
         "promotion_policy_sha256": SUPERVISOR_ASSIST_PROMOTION_POLICY_SHA256,
-        "p1_policy_id": semantic_supervisor_policy.SUPERVISOR_PRODUCT_POLICY_ID,
-        "p1_policy_sha256": semantic_supervisor_policy.SUPERVISOR_PRODUCT_POLICY_SHA256,
+        "observed_policy_id": observed_policy.policy_id,
+        "observed_policy_sha256": observed_policy.policy_sha256,
+        "target_policy_id": semantic_supervisor_policy.SUPERVISOR_ASSIST_PRODUCT_POLICY_ID,
+        "target_policy_sha256": semantic_supervisor_policy.SUPERVISOR_ASSIST_PRODUCT_POLICY_SHA256,
         "runtime_profile_id": semantic_supervisor_policy.SUPERVISOR_RUNTIME_PROFILE_ID,
         "runtime_profile_manifest_sha256": (
             semantic_supervisor_policy.SUPERVISOR_RUNTIME_PROFILE_MANIFEST_SHA256
@@ -475,12 +480,12 @@ def test_assist_rejects_a_canary_allowlist_instead_of_blurring_modes() -> None:
     ("scheduler", "reason"),
     [
         (
-            _scheduler(policy_id="gptoss20b-semantic-supervisor-v2"),
-            AssistPromotionReason.P1_POLICY_IDENTITY_DRIFT,
+            _scheduler(policy_id=semantic_supervisor_policy.SUPERVISOR_PRODUCT_POLICY_ID),
+            AssistPromotionReason.ASSIST_POLICY_IDENTITY_DRIFT,
         ),
         (
             _scheduler(policy_sha256=OTHER),
-            AssistPromotionReason.P1_POLICY_IDENTITY_DRIFT,
+            AssistPromotionReason.ASSIST_POLICY_IDENTITY_DRIFT,
         ),
         (
             _scheduler(runtime_profile_id="gptoss20b-other-profile"),
@@ -516,7 +521,7 @@ def test_assist_rejects_a_canary_allowlist_instead_of_blurring_modes() -> None:
         ),
     ],
 )
-def test_exact_p1_policy_profile_and_shadow_scheduler_identity_are_required(
+def test_exact_assist_policy_profile_and_shadow_scheduler_identity_are_required(
     scheduler: SupervisorSchedulerAdmissionSnapshot,
     reason: AssistPromotionReason,
 ) -> None:
@@ -550,6 +555,28 @@ def test_local_p1_product_policy_drift_rejects_even_an_exact_scheduler_projectio
 
     assert decision.source_ready is False
     assert decision.reason is AssistPromotionReason.P1_POLICY_IDENTITY_DRIFT
+
+
+def test_local_assist_product_policy_drift_rejects_even_an_exact_scheduler_projection(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    candidate = _candidate()
+    monkeypatch.setattr(
+        semantic_supervisor_policy,
+        "SUPERVISOR_ASSIST_PRODUCT_POLICY",
+        MappingProxyType(
+            {"policy_id": semantic_supervisor_policy.SUPERVISOR_ASSIST_PRODUCT_POLICY_ID}
+        ),
+    )
+
+    decision = admit_supervisor_assist_promotion(
+        candidate,
+        None,
+        AssistPromotionOperatorGate(),
+    )
+
+    assert decision.source_ready is False
+    assert decision.reason is AssistPromotionReason.ASSIST_POLICY_IDENTITY_DRIFT
 
 
 def test_laptop_unavailable_rejects_without_erasing_source_or_live_readiness() -> None:
@@ -589,13 +616,12 @@ def test_exact_step_budget_and_at_most_one_review_are_enforced(
     assert decision.source_ready is False
 
 
-def test_zero_review_p2_candidate_is_valid_but_needs_matching_fresh_evidence() -> None:
+def test_zero_review_p1_budget_cannot_be_promoted_as_the_p4_target() -> None:
     candidate = _candidate(max_review_rounds=0)
-    evidence = _evidence(candidate)
+    decision = admit_supervisor_assist_promotion(candidate, None, AssistPromotionOperatorGate())
 
-    decision = admit_supervisor_assist_promotion(candidate, evidence, _gate(candidate, evidence))
-
-    assert decision.promotion_admitted is True
+    assert decision.promotion_admitted is False
+    assert decision.reason is AssistPromotionReason.BOUNDS_DRIFT
 
 
 def test_registry_digest_and_exact_transient_web_binding_are_required() -> None:
@@ -634,7 +660,16 @@ def test_registry_digest_and_exact_transient_web_binding_are_required() -> None:
     [
         ({"source_revision_sha256": OTHER}, AssistPromotionReason.EVIDENCE_IDENTITY_DRIFT),
         ({"promotion_policy_sha256": OTHER}, AssistPromotionReason.EVIDENCE_IDENTITY_DRIFT),
-        ({"p1_policy_sha256": OTHER}, AssistPromotionReason.EVIDENCE_IDENTITY_DRIFT),
+        (
+            {"observed_policy_id": semantic_supervisor_policy.SUPERVISOR_ASSIST_PRODUCT_POLICY_ID},
+            AssistPromotionReason.EVIDENCE_IDENTITY_DRIFT,
+        ),
+        ({"observed_policy_sha256": OTHER}, AssistPromotionReason.EVIDENCE_IDENTITY_DRIFT),
+        (
+            {"target_policy_id": semantic_supervisor_policy.SUPERVISOR_PRODUCT_POLICY_ID},
+            AssistPromotionReason.EVIDENCE_IDENTITY_DRIFT,
+        ),
+        ({"target_policy_sha256": OTHER}, AssistPromotionReason.EVIDENCE_IDENTITY_DRIFT),
         (
             {"runtime_profile_manifest_sha256": OTHER},
             AssistPromotionReason.EVIDENCE_IDENTITY_DRIFT,
@@ -744,8 +779,10 @@ def test_live_evidence_payload_is_closed_body_free_and_digest_sensitive() -> Non
         "task_class",
         "source_revision_sha256",
         "promotion_policy_sha256",
-        "p1_policy_id",
-        "p1_policy_sha256",
+        "observed_policy_id",
+        "observed_policy_sha256",
+        "target_policy_id",
+        "target_policy_sha256",
         "runtime_profile_id",
         "runtime_profile_manifest_sha256",
         "registry_binding_sha256",

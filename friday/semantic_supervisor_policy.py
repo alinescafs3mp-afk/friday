@@ -17,6 +17,8 @@ from types import MappingProxyType
 
 SUPERVISOR_POLICY_SCHEMA = "friday.supervisor-policy.v1"
 SUPERVISOR_PRODUCT_POLICY_ID = "gptoss20b-semantic-supervisor-v1"
+SUPERVISOR_ASSIST_POLICY_SCHEMA = "friday.supervisor-policy.v2"
+SUPERVISOR_ASSIST_PRODUCT_POLICY_ID = "gptoss20b-semantic-supervisor-v2"
 SUPERVISOR_RUNTIME_PROFILE_ID = "gptoss20b-2335df123cac7fc0e13e347cde1e1ffa8562daafcaf0fc76ade1a851d2b0ff1f"
 SUPERVISOR_RUNTIME_PROFILE_MANIFEST_SHA256 = (
     "93ea5698b8b6a9bf8a7dc697ffe37d7353055aa16555188991747bba73d059e3"
@@ -24,12 +26,14 @@ SUPERVISOR_RUNTIME_PROFILE_MANIFEST_SHA256 = (
 SUPERVISOR_WORKLOAD = "plan_candidate"
 SUPERVISOR_EFFECTIVE_MODE = "shadow"
 SUPERVISOR_REQUESTED_MODES = frozenset({"shadow", "assist", "canary"})
+SUPERVISOR_ASSIST_REQUESTED_MODES = frozenset({"assist", "canary"})
 SUPERVISOR_ADMITTED_TASKS = frozenset(
     {
         "compare_archive_with_current_web",
         "compare_current_file_with_current_web",
     }
 )
+SUPERVISOR_ASSIST_ADMITTED_TASKS = frozenset({"compare_current_file_with_current_web"})
 
 
 def _canonical_sha256(value: object) -> str:
@@ -75,6 +79,38 @@ _EXPECTED_SUPERVISOR_PRODUCT_POLICY: Mapping[str, object] = MappingProxyType(
 SUPERVISOR_PRODUCT_POLICY: Mapping[str, object] = MappingProxyType(dict(_EXPECTED_SUPERVISOR_PRODUCT_POLICY))
 SUPERVISOR_PRODUCT_POLICY_SHA256 = _canonical_sha256(dict(_EXPECTED_SUPERVISOR_PRODUCT_POLICY))
 
+_EXPECTED_SUPERVISOR_ASSIST_PRODUCT_POLICY: Mapping[str, object] = MappingProxyType(
+    {
+        "schema": SUPERVISOR_ASSIST_POLICY_SCHEMA,
+        "policy_id": SUPERVISOR_ASSIST_PRODUCT_POLICY_ID,
+        "status": "assist_ready",
+        "runtime_profile_id": SUPERVISOR_RUNTIME_PROFILE_ID,
+        "runtime_profile_manifest_sha256": SUPERVISOR_RUNTIME_PROFILE_MANIFEST_SHA256,
+        "runtime_profile_admission": "accepted",
+        "runtime_recertification": False,
+        "workload": SUPERVISOR_WORKLOAD,
+        "requested_modes": tuple(sorted(SUPERVISOR_ASSIST_REQUESTED_MODES)),
+        "effective_mode": SUPERVISOR_EFFECTIVE_MODE,
+        "admitted_tasks": tuple(sorted(SUPERVISOR_ASSIST_ADMITTED_TASKS)),
+        "private_text_required": True,
+        "tools_allowed": False,
+        "effects_allowed": False,
+        "publication_allowed": False,
+        "knowledge_writes_allowed": False,
+        "max_steps": 6,
+        "max_parallel_reads": 2,
+        "max_review_rounds": 1,
+        "promotion_admitted": False,
+        "primary_fallback_required": True,
+    }
+)
+SUPERVISOR_ASSIST_PRODUCT_POLICY: Mapping[str, object] = MappingProxyType(
+    dict(_EXPECTED_SUPERVISOR_ASSIST_PRODUCT_POLICY)
+)
+SUPERVISOR_ASSIST_PRODUCT_POLICY_SHA256 = _canonical_sha256(
+    dict(_EXPECTED_SUPERVISOR_ASSIST_PRODUCT_POLICY)
+)
+
 
 class SupervisorPolicyClosedReason(StrEnum):
     """Finite scheduler reasons; never retain malformed configuration text."""
@@ -104,6 +140,64 @@ class SupervisorPolicyAdmission:
     admitted_tasks: frozenset[str]
     workload_available: bool
     closed_reason: SupervisorPolicyClosedReason
+
+
+@dataclass(frozen=True, slots=True)
+class SupervisorProductPolicyIdentity:
+    """Closed code-owned identity selected before any supervisor request."""
+
+    schema: str
+    policy_id: str
+    policy_sha256: str
+    effective_mode: str
+    admitted_tasks: frozenset[str]
+    max_steps: int
+    max_parallel_reads: int
+    max_review_rounds: int
+
+
+def supervisor_product_policy_identity_for_mode(
+    requested_mode: object,
+) -> SupervisorProductPolicyIdentity:
+    """Select P1 for shadow/off and P4-v2 for assist/canary.
+
+    The selected policy still has effective mode ``shadow`` and grants no
+    execution or publication authority.  Promotion remains a separate gate.
+    """
+
+    normalized = str(requested_mode or "").strip().casefold()
+    if normalized in SUPERVISOR_ASSIST_REQUESTED_MODES:
+        return SupervisorProductPolicyIdentity(
+            schema=SUPERVISOR_ASSIST_POLICY_SCHEMA,
+            policy_id=SUPERVISOR_ASSIST_PRODUCT_POLICY_ID,
+            policy_sha256=SUPERVISOR_ASSIST_PRODUCT_POLICY_SHA256,
+            effective_mode=SUPERVISOR_EFFECTIVE_MODE,
+            admitted_tasks=SUPERVISOR_ASSIST_ADMITTED_TASKS,
+            max_steps=6,
+            max_parallel_reads=2,
+            max_review_rounds=1,
+        )
+    return SupervisorProductPolicyIdentity(
+        schema=SUPERVISOR_POLICY_SCHEMA,
+        policy_id=SUPERVISOR_PRODUCT_POLICY_ID,
+        policy_sha256=SUPERVISOR_PRODUCT_POLICY_SHA256,
+        effective_mode=SUPERVISOR_EFFECTIVE_MODE,
+        admitted_tasks=SUPERVISOR_ADMITTED_TASKS,
+        max_steps=6,
+        max_parallel_reads=2,
+        max_review_rounds=0,
+    )
+
+
+def supervisor_product_policy_identity_for_review_rounds(
+    max_review_rounds: object,
+) -> SupervisorProductPolicyIdentity | None:
+    """Resolve only the two code-owned proposal policy budgets."""
+
+    if type(max_review_rounds) is not int or max_review_rounds not in {0, 1}:
+        return None
+    mode = "shadow" if max_review_rounds == 0 else "assist"
+    return supervisor_product_policy_identity_for_mode(mode)
 
 
 def admitted_supervisor_tasks(raw: object) -> frozenset[str]:
@@ -138,6 +232,22 @@ def supervisor_product_policy_is_well_formed(
         return False
 
 
+def supervisor_assist_product_policy_is_well_formed(
+    policy: Mapping[str, object] | None = None,
+) -> bool:
+    """Verify the distinct assist/P4 policy without weakening P1 identity."""
+
+    candidate = SUPERVISOR_ASSIST_PRODUCT_POLICY if policy is None else policy
+    try:
+        return bool(
+            dict(candidate) == dict(_EXPECTED_SUPERVISOR_ASSIST_PRODUCT_POLICY)
+            and _canonical_sha256(dict(candidate)) == SUPERVISOR_ASSIST_PRODUCT_POLICY_SHA256
+            and candidate.get("runtime_recertification") is False
+        )
+    except (AttributeError, TypeError, ValueError):
+        return False
+
+
 def evaluate_supervisor_policy_admission(
     *,
     requested_mode: object,
@@ -160,14 +270,20 @@ def evaluate_supervisor_policy_admission(
         normalized_mode = raw_mode
     else:
         normalized_mode = "invalid"
+    identity = supervisor_product_policy_identity_for_mode(normalized_mode)
     tasks = admitted_supervisor_tasks(task_allowlist)
+    selected_policy_is_well_formed = (
+        supervisor_assist_product_policy_is_well_formed()
+        if normalized_mode in SUPERVISOR_ASSIST_REQUESTED_MODES
+        else supervisor_product_policy_is_well_formed()
+    )
     bounds_are_valid = bool(
         isinstance(max_steps, int)
         and not isinstance(max_steps, bool)
-        and max_steps == _EXPECTED_SUPERVISOR_PRODUCT_POLICY["max_steps"]
+        and max_steps == identity.max_steps
         and isinstance(max_review_rounds, int)
         and not isinstance(max_review_rounds, bool)
-        and max_review_rounds == _EXPECTED_SUPERVISOR_PRODUCT_POLICY["max_review_rounds"]
+        and max_review_rounds == identity.max_review_rounds
         and isinstance(timeout_sec, (int, float))
         and not isinstance(timeout_sec, bool)
         and math.isfinite(timeout_sec)
@@ -179,9 +295,9 @@ def evaluate_supervisor_policy_admission(
         reason = SupervisorPolicyClosedReason.MODE_OFF
     elif normalized_mode == "invalid":
         reason = SupervisorPolicyClosedReason.INVALID_MODE
-    elif not supervisor_product_policy_is_well_formed():
+    elif not selected_policy_is_well_formed:
         reason = SupervisorPolicyClosedReason.POLICY_INVALID
-    elif not tasks:
+    elif not tasks or not tasks <= identity.admitted_tasks:
         reason = (
             SupervisorPolicyClosedReason.TASK_ALLOWLIST_EMPTY
             if isinstance(task_allowlist, (tuple, list)) and not task_allowlist
@@ -208,8 +324,8 @@ def evaluate_supervisor_policy_admission(
         effective_mode=(
             SUPERVISOR_EFFECTIVE_MODE if reason is SupervisorPolicyClosedReason.ADMITTED else "off"
         ),
-        policy_id=SUPERVISOR_PRODUCT_POLICY_ID,
-        policy_sha256=SUPERVISOR_PRODUCT_POLICY_SHA256,
+        policy_id=identity.policy_id,
+        policy_sha256=identity.policy_sha256,
         admitted_tasks=tasks,
         workload_available=reason is SupervisorPolicyClosedReason.ADMITTED,
         closed_reason=reason,
@@ -226,7 +342,9 @@ def disabled_supervisor_policy_admission(
         requested_mode=requested_mode,
         task_allowlist=(),
         max_steps=6,
-        max_review_rounds=0,
+        max_review_rounds=supervisor_product_policy_identity_for_mode(
+            requested_mode
+        ).max_review_rounds,
         timeout_sec=12.0,
         allow_private_text=False,
         secondary_runtime_state="disabled",

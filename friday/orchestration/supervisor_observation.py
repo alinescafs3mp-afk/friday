@@ -7,9 +7,8 @@ from dataclasses import dataclass, replace
 from enum import StrEnum
 from typing import Any
 
+from friday import semantic_supervisor_policy
 from friday.orchestration.supervisor_contracts import (
-    SUPERVISOR_PRODUCT_POLICY_ID,
-    SUPERVISOR_PRODUCT_POLICY_SHA256,
     SupervisorMode,
     canonical_sha256,
 )
@@ -147,6 +146,9 @@ def skipped_observation(
     supervisor_input_digest: str = "",
 ) -> SupervisorObservation:
     mode = SupervisorMode.fail_closed(requested_mode)
+    identity = semantic_supervisor_policy.supervisor_product_policy_identity_for_mode(
+        requested_mode
+    )
     return SupervisorObservation(
         supervisor_mode=mode,
         requested_mode=requested_mode,
@@ -154,8 +156,8 @@ def skipped_observation(
         promotion_admitted=False,
         invoked=False,
         skip_reason=skip_reason,
-        policy_id=SUPERVISOR_PRODUCT_POLICY_ID,
-        policy_sha256=SUPERVISOR_PRODUCT_POLICY_SHA256,
+        policy_id=identity.policy_id,
+        policy_sha256=identity.policy_sha256,
         accepted_profile_id=accepted_profile_id,
         manifest_digest=manifest_digest,
         supervisor_input_digest=supervisor_input_digest,
@@ -203,6 +205,9 @@ def parsed_observation(
     planner_latency_bucket: str = "unavailable",
 ) -> SupervisorObservation:
     mode = SupervisorMode.fail_closed(requested_mode)
+    identity = semantic_supervisor_policy.supervisor_product_policy_identity_for_mode(
+        requested_mode
+    )
     return SupervisorObservation(
         supervisor_mode=mode,
         requested_mode=requested_mode,
@@ -210,8 +215,8 @@ def parsed_observation(
         promotion_admitted=False,
         invoked=invoked,
         skip_reason=skip_reason,
-        policy_id=SUPERVISOR_PRODUCT_POLICY_ID,
-        policy_sha256=SUPERVISOR_PRODUCT_POLICY_SHA256,
+        policy_id=identity.policy_id,
+        policy_sha256=identity.policy_sha256,
         accepted_profile_id=accepted_profile_id,
         manifest_digest=manifest_digest,
         supervisor_input_digest=supervisor_input_digest,
