@@ -462,17 +462,19 @@ def _file_evidence_matches_surface(
     evidence: object,
     surface: CurrentFileWebAssistSurface,
 ) -> bool:
+    if type(evidence) is not PreparedFileEvidence:
+        return False
+    prepared = cast(PreparedFileEvidence, evidence)
     if (
-        type(evidence) is not PreparedFileEvidence
-        or not prepared_file_evidence_is_process_owned(evidence)
-        or evidence.tenant_id != surface.actor.user_id
-        or evidence.person_id != surface.actor.own_id
-        or evidence.historical_selection is not None
-        or evidence.raw_ids != (surface.attachment.raw_object_id,)
-        or len(evidence.snapshot_tokens) != 1
+        not prepared_file_evidence_is_process_owned(prepared)
+        or prepared.tenant_id != surface.actor.user_id
+        or prepared.person_id != surface.actor.own_id
+        or prepared.historical_selection is not None
+        or prepared.raw_ids != (surface.attachment.raw_object_id,)
+        or len(prepared.snapshot_tokens) != 1
     ):
         return False
-    token = evidence.snapshot_tokens[0]
+    token = prepared.snapshot_tokens[0]
     return bool(
         authorized_file_snapshot_token_is_process_owned(token)
         and token.source.raw_id == surface.attachment.raw_object_id
@@ -487,11 +489,12 @@ def _web_evidence_matches_surface(
 ) -> bool:
     if type(evidence) is not TransientWebComparisonEvidence:
         return False
+    web_evidence = cast(TransientWebComparisonEvidence, evidence)
     try:
-        evidence.__post_init__()
+        web_evidence.__post_init__()
         return bool(
-            evidence.plan_sha256 == surface.web_plan.canonical_sha256()
-            and evidence.query_sha256 == surface.web_plan.query_sha256
+            web_evidence.plan_sha256 == surface.web_plan.canonical_sha256()
+            and web_evidence.query_sha256 == surface.web_plan.query_sha256
         )
     except Exception:
         return False
@@ -503,29 +506,32 @@ def _graph_matches_pristine_admission(
 ) -> bool:
     if type(graph) is not CompareCurrentFileWebWorkGraph:
         return False
+    admitted_graph = cast(CompareCurrentFileWebWorkGraph, graph)
     surface = prospective.surface
     plan = prospective.plan
     bindings = bind_assist_plan_to_surface(plan, surface)
     if bindings is None:
         return False
     return bool(
-        graph.state is CompareCurrentFileWebGraphState.ACTIVE
-        and graph.transition is CompareCurrentFileWebGraphTransition.ADMITTED
-        and graph.revision == 1
-        and graph.user_id == surface.actor.user_id
-        and graph.conversation_id == surface.conversation_id
-        and graph.current_file_raw_object_id == surface.attachment.raw_object_id
-        and graph.current_file_source_identity_sha256 == surface.attachment.source_identity_sha256
-        and graph.current_file_content_sha256 == surface.attachment_content_sha256
-        and graph.proposal_sha256 == plan.proposal_digest
-        and graph.accepted_plan_sha256 == plan.canonical_sha256()
-        and graph.manifest_sha256 == plan.manifest_digest
-        and graph.runtime_profile_sha256 == SUPERVISOR_RUNTIME_PROFILE_MANIFEST_SHA256
-        and graph.adapter_registry_sha256 == plan.binding_snapshot_sha256
-        and graph.actor_binding_sha256 == plan.actor_binding_sha256
-        and graph.conversation_binding_sha256 == plan.conversation_binding_sha256
+        admitted_graph.state is CompareCurrentFileWebGraphState.ACTIVE
+        and admitted_graph.transition is CompareCurrentFileWebGraphTransition.ADMITTED
+        and admitted_graph.revision == 1
+        and admitted_graph.user_id == surface.actor.user_id
+        and admitted_graph.conversation_id == surface.conversation_id
+        and admitted_graph.current_file_raw_object_id == surface.attachment.raw_object_id
+        and admitted_graph.current_file_source_identity_sha256
+        == surface.attachment.source_identity_sha256
+        and admitted_graph.current_file_content_sha256 == surface.attachment_content_sha256
+        and admitted_graph.proposal_sha256 == plan.proposal_digest
+        and admitted_graph.accepted_plan_sha256 == plan.canonical_sha256()
+        and admitted_graph.manifest_sha256 == plan.manifest_digest
+        and admitted_graph.runtime_profile_sha256 == SUPERVISOR_RUNTIME_PROFILE_MANIFEST_SHA256
+        and admitted_graph.adapter_registry_sha256 == plan.binding_snapshot_sha256
+        and admitted_graph.actor_binding_sha256 == plan.actor_binding_sha256
+        and admitted_graph.conversation_binding_sha256 == plan.conversation_binding_sha256
         and all(
-            graph.step(binding.graph_step_id).idempotency_key_sha256 == binding.plan_step.idempotency_key
+            admitted_graph.step(binding.graph_step_id).idempotency_key_sha256
+            == binding.plan_step.idempotency_key
             for binding in bindings
         )
     )
@@ -741,20 +747,22 @@ class SupervisorAssistController:
             )
         except Exception:
             return None
+        if type(decision) is not AssistPromotionDecision:
+            return None
+        admitted = cast(AssistPromotionDecision, decision)
         if (
-            type(decision) is not AssistPromotionDecision
-            or not decision.promotion_admitted
-            or decision.reason is not AssistPromotionReason.ADMITTED
-            or decision.readiness is not AssistPromotionReadiness.LIVE_EVIDENCE_READY
-            or decision.admitted_mode not in {SupervisorMode.ASSIST, SupervisorMode.CANARY}
-            or decision.requested_mode is not decision.admitted_mode
-            or decision.evidence_sha256 is None
-            or decision.execution_authorized
-            or decision.publication_authorized
-            or decision.storage_write_authorized
+            not admitted.promotion_admitted
+            or admitted.reason is not AssistPromotionReason.ADMITTED
+            or admitted.readiness is not AssistPromotionReadiness.LIVE_EVIDENCE_READY
+            or admitted.admitted_mode not in {SupervisorMode.ASSIST, SupervisorMode.CANARY}
+            or admitted.requested_mode is not admitted.admitted_mode
+            or admitted.evidence_sha256 is None
+            or admitted.execution_authorized
+            or admitted.publication_authorized
+            or admitted.storage_write_authorized
         ):
             return None
-        return decision
+        return admitted
 
     async def _prepare_prospective(
         self,
@@ -821,15 +829,17 @@ class SupervisorAssistController:
             absolute_deadline=absolute_deadline,
             pre_dispatch_validator=planning_still_current,
         )
+        if type(parsed) is not ParsedSupervisorProposal:
+            return None
+        proposal = cast(ParsedSupervisorProposal, parsed)
         if (
-            type(parsed) is not ParsedSupervisorProposal
-            or not parsed.decision.admitted
-            or type(parsed.decision.plan) is not ValidatedExecutionPlan
+            not proposal.decision.admitted
+            or type(proposal.decision.plan) is not ValidatedExecutionPlan
         ):
             return None
-        plan = parsed.decision.plan
+        plan = cast(ValidatedExecutionPlan, proposal.decision.plan)
         if (
-            parsed.proposal_digest != plan.proposal_digest
+            proposal.proposal_digest != plan.proposal_digest
             or plan.binding_snapshot_sha256 != snapshot.digest_hex()
             or plan.actor_binding_sha256 != context.actor_binding_sha256
             or plan.conversation_binding_sha256 != context.conversation_binding_sha256
@@ -1269,16 +1279,19 @@ class SupervisorAssistController:
         except Exception:
             record.metrics.accounting_complete = False
             return None
+        if type(admitted) is not AdmittedSupervisorReview:
+            record.metrics.accounting_complete = False
+            return None
+        reviewed = cast(AdmittedSupervisorReview, admitted)
         if (
-            type(admitted) is not AdmittedSupervisorReview
-            or admitted.context_sha256 != context.canonical_sha256()
-            or not admitted.decision.admitted
-            or admitted.decision.recovery is None
+            reviewed.context_sha256 != context.canonical_sha256()
+            or not reviewed.decision.admitted
+            or reviewed.decision.recovery is None
         ):
             record.metrics.accounting_complete = False
             return None
         record.metrics.model_calls += 1
-        return admitted.decision.recovery
+        return reviewed.decision.recovery
 
     @staticmethod
     def _cursor(record: _OwnedRun) -> AssistGraphCursor:
@@ -2171,7 +2184,8 @@ class SupervisorAssistController:
                 return await self._legacy(legacy_primary, reason="controller_closed")
             if type(surface) is not CurrentFileWebAssistSurface:
                 return await self._legacy(legacy_primary, reason="surface_not_admitted")
-            scope = (surface.actor.user_id, surface.conversation_id)
+            admitted_surface = cast(CurrentFileWebAssistSurface, surface)
+            scope = (admitted_surface.actor.user_id, admitted_surface.conversation_id)
             if scope in self._active_by_scope:
                 return await self._legacy(legacy_primary, reason="conversation_assist_active")
             retained = self._retained_by_scope.get(scope)
@@ -2181,17 +2195,17 @@ class SupervisorAssistController:
                     return SupervisorAssistResult(
                         outcome=SupervisorAssistOutcome.OWNERSHIP_UNCERTAIN,
                         pending_admission=PendingDurableTurnAdmission.uncertain(
-                            person_id=surface.actor.user_id,
-                            conversation_id=surface.conversation_id,
+                            person_id=admitted_surface.actor.user_id,
+                            conversation_id=admitted_surface.conversation_id,
                         ),
                         promotion_decision=retained.decision,
                     )
             elif scope in self._known_durable_active_scopes:
                 pending = self.pending_durable_turn_admission(
-                    surface.actor.user_id,
-                    surface.turn.message,
-                    actor=surface.actor,
-                    conversation_id=surface.conversation_id,
+                    admitted_surface.actor.user_id,
+                    admitted_surface.turn.message,
+                    actor=admitted_surface.actor,
+                    conversation_id=admitted_surface.conversation_id,
                     current_attachment_count=1,
                 )
                 if pending is not False:
@@ -2202,8 +2216,8 @@ class SupervisorAssistController:
                             pending
                             if type(pending) is PendingDurableTurnAdmission
                             else PendingDurableTurnAdmission.uncertain(
-                                person_id=surface.actor.user_id,
-                                conversation_id=surface.conversation_id,
+                                person_id=admitted_surface.actor.user_id,
+                                conversation_id=admitted_surface.conversation_id,
                             )
                         ),
                     )
@@ -2211,7 +2225,7 @@ class SupervisorAssistController:
                 return await self._legacy(legacy_primary, reason="deadline_exhausted")
             try:
                 prospective = await self._prepare_prospective(
-                    surface,
+                    admitted_surface,
                     absolute_deadline=deadline,
                 )
             except asyncio.CancelledError:
@@ -2230,8 +2244,8 @@ class SupervisorAssistController:
                 return SupervisorAssistResult(
                     outcome=SupervisorAssistOutcome.OWNERSHIP_UNCERTAIN,
                     pending_admission=PendingDurableTurnAdmission.uncertain(
-                        person_id=surface.actor.user_id,
-                        conversation_id=surface.conversation_id,
+                        person_id=admitted_surface.actor.user_id,
+                        conversation_id=admitted_surface.conversation_id,
                     ),
                     promotion_decision=prospective.decision,
                 )
@@ -2246,8 +2260,8 @@ class SupervisorAssistController:
                 return SupervisorAssistResult(
                     outcome=SupervisorAssistOutcome.OWNERSHIP_UNCERTAIN,
                     pending_admission=PendingDurableTurnAdmission.uncertain(
-                        person_id=surface.actor.user_id,
-                        conversation_id=surface.conversation_id,
+                        person_id=admitted_surface.actor.user_id,
+                        conversation_id=admitted_surface.conversation_id,
                     ),
                     promotion_decision=prospective.decision,
                 )
@@ -2280,7 +2294,8 @@ class SupervisorAssistController:
             or self._closed
         ):
             return None
-        key = (scope.user_id, scope.conversation_id)
+        exact_scope = cast(AssistConversationScope, scope)
+        key = (exact_scope.user_id, exact_scope.conversation_id)
         record = self._active_by_scope.get(key)
         retained = False
         if record is None:
