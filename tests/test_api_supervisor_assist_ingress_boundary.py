@@ -221,6 +221,80 @@ def test_non_new_assist_relation_suppresses_ingestion(
     )
 
 
+@pytest.mark.parametrize(
+    ("relation", "message"),
+    (
+        (SupervisorAssistPendingRelation.EXPLICIT_CANCEL, "обычный вопрос"),
+        (SupervisorAssistPendingRelation.NEW_TURN, "cancel"),
+    ),
+)
+def test_relation_that_disagrees_with_message_becomes_scoped_uncertainty(
+    settings: Any,
+    monkeypatch: pytest.MonkeyPatch,
+    relation: SupervisorAssistPendingRelation,
+    message: str,
+) -> None:
+    from friday.orchestration.supervisor_assist_runtime import SupervisorAssistRuntimeError
+    from friday.server import create_app
+
+    app = create_app(settings)
+    headers = {"Authorization": f"Bearer {settings.api_token}"}
+    agent_calls: list[dict[str, Any]] = []
+
+    def classify(
+        _person_id: str,
+        _message: str,
+        *,
+        ingress_binding: SupervisorAssistIngressBindingV1,
+        **_kwargs: Any,
+    ) -> SupervisorAssistPendingDecision:
+        return SupervisorAssistPendingDecision.for_graph(
+            relation=relation,
+            pending=_pending(),
+            root_request_binding_sha256=_binding("message-mismatch-root").canonical_sha256(),
+            current=ingress_binding,
+        )
+
+    async def forbidden_ingest(*_args: Any, **_kwargs: Any) -> dict[str, Any]:
+        raise AssertionError("message/relation mismatch reached ingestion")
+
+    async def chat(_user_id: str, _message: str, **kwargs: Any) -> dict[str, Any]:
+        agent_calls.append(kwargs)
+        decision = kwargs["_semantic_supervisor_pending_decision"]
+        if (
+            type(decision) is SupervisorAssistPendingDecision
+            and decision.relation is SupervisorAssistPendingRelation.UNCERTAIN
+        ):
+            raise SupervisorAssistRuntimeError("durable assist ownership is uncertain")
+        raise AssertionError("message/relation mismatch escaped fail-closed routing")
+
+    with TestClient(app, raise_server_exceptions=False) as client:
+        monkeypatch.setattr(
+            app.state.agent,
+            "classify_supervisor_assist_pending",
+            classify,
+            raising=False,
+        )
+        monkeypatch.setattr(app.state.agent, "chat", chat)
+        monkeypatch.setattr(app.state.ingestion, "ingest_text", forbidden_ingest)
+        response = client.post(
+            "/api/chat",
+            json={
+                "message": message,
+                "conversation_id": _CONVERSATION_ID,
+                "source_ref": f"api-assist:message-mismatch:{relation.value}",
+            },
+            headers=headers,
+        )
+
+    assert response.status_code == 500
+    assert len(agent_calls) == 1
+    carried = agent_calls[0]["_semantic_supervisor_pending_decision"]
+    assert type(carried) is SupervisorAssistPendingDecision
+    assert carried.relation is SupervisorAssistPendingRelation.UNCERTAIN
+    assert agent_calls[0]["ingestion_result"] is None
+
+
 @pytest.mark.parametrize("forgery", ("stale_binding", "foreign_scope"))
 def test_mismatched_carried_assist_identity_becomes_scoped_uncertainty(
     settings: Any,

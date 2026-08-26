@@ -210,6 +210,7 @@ class AssistAdmissionBoundary:
     graph_id: str
     user_id: str
     conversation_id: str
+    request_binding_sha256: str
     accepted_plan_sha256: str
     adapter_registry_sha256: str
     actor_binding_sha256: str
@@ -424,9 +425,14 @@ class AssistMixedAuthorityTerminalPublication:
 class AssistCancellation:
     user_message: str
     trace: AssistTraceInput
+    request_binding_sha256: str
 
     def __post_init__(self) -> None:
-        if self.user_message not in {"отмена", "cancel"} or type(self.trace) is not AssistTraceInput:
+        if (
+            self.user_message not in {"отмена", "cancel"}
+            or type(self.trace) is not AssistTraceInput
+            or _DIGEST_RE.fullmatch(self.request_binding_sha256) is None
+        ):
             raise ValueError("assist cancellation is invalid")
 
 
@@ -509,6 +515,7 @@ def _step_inputs(
         material: dict[str, object] = {
             "schema": "friday.semantic-supervisor-assist-step-input.v1",
             "accepted_plan_sha256": plan_sha256,
+            "request_binding_sha256": surface.ingress_binding.canonical_sha256(),
             "kind": kind.value,
         }
         if kind is CompareCurrentFileWebStepKind.FILE_READ:
@@ -551,8 +558,15 @@ class SupervisorAssistGraphAdapter:
         return result
 
     @staticmethod
-    def _stage(conn: Any) -> None:
-        if not stage_request_effect_possible_in_transaction(conn):
+    def _stage(
+        conn: Any,
+        *,
+        expected_request_binding_sha256: str | None = None,
+    ) -> None:
+        if not stage_request_effect_possible_in_transaction(
+            conn,
+            expected_request_binding_sha256=expected_request_binding_sha256,
+        ):
             raise SupervisorAssistGraphAdapterError("request effect fence was not committed")
 
     @staticmethod
@@ -606,6 +620,7 @@ class SupervisorAssistGraphAdapter:
             graph_id=graph_id,
             user_id=surface.actor.user_id,
             conversation_id=surface.conversation_id,
+            request_binding_sha256=surface.ingress_binding.canonical_sha256(),
             accepted_plan_sha256=plan.canonical_sha256(),
             adapter_registry_sha256=plan.binding_snapshot_sha256,
             actor_binding_sha256=plan.actor_binding_sha256,
@@ -630,7 +645,10 @@ class SupervisorAssistGraphAdapter:
             )
             _require(authority_check, boundary, label="admission authority")
             _require(effect_check, boundary, label="admission effect")
-            self._stage(conn)
+            self._stage(
+                conn,
+                expected_request_binding_sha256=boundary.request_binding_sha256,
+            )
             user = store_message_in_transaction(
                 conn,
                 boundary.conversation_id,
@@ -653,6 +671,7 @@ class SupervisorAssistGraphAdapter:
                 user_id=boundary.user_id,
                 conversation_id=boundary.conversation_id,
                 anchor_user_message_id=anchor,
+                anchor_request_binding_sha256=boundary.request_binding_sha256,
                 current_file_raw_object_id=boundary.current_file_raw_object_id,
                 proposal_sha256=plan.proposal_digest,
                 accepted_plan_sha256=boundary.accepted_plan_sha256,
@@ -1361,7 +1380,10 @@ class SupervisorAssistGraphAdapter:
             )
             _require(authority_check, boundary, label="cancellation authority")
             _require(effect_check, boundary, label="cancellation effect")
-            self._stage(conn)
+            self._stage(
+                conn,
+                expected_request_binding_sha256=cancellation.request_binding_sha256,
+            )
             cancel_user = store_message_in_transaction(
                 conn,
                 graph.conversation_id,

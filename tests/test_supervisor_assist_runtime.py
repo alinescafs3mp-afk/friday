@@ -11,6 +11,11 @@ from friday.orchestration.supervisor_assist_controller import (
     SupervisorAssistOutcome,
     SupervisorAssistResult,
 )
+from friday.orchestration.supervisor_assist_ingress import (
+    SupervisorAssistIngressBindingV1,
+    SupervisorAssistPendingDecision,
+    SupervisorAssistPendingRelation,
+)
 from friday.orchestration.supervisor_assist_runtime import (
     SemanticSupervisorAssistRuntime,
     SupervisorAssistRuntimeError,
@@ -20,6 +25,31 @@ from friday.permissions import ActorContext
 
 _PERSON = "assist-runtime-person"
 _CONVERSATION = "conv_0123456789abcdef"
+_ROOT_INGRESS = SupervisorAssistIngressBindingV1.from_claimed_request(
+    source_ref="assist-runtime:root",
+    request_fingerprint_sha256="a" * 64,
+)
+_NEW_INGRESS = SupervisorAssistIngressBindingV1.from_claimed_request(
+    source_ref="assist-runtime:new",
+    request_fingerprint_sha256="b" * 64,
+)
+
+
+def _assist_decision(
+    relation: SupervisorAssistPendingRelation,
+) -> SupervisorAssistPendingDecision:
+    current = _ROOT_INGRESS if relation is SupervisorAssistPendingRelation.ROOT_REPLAY else _NEW_INGRESS
+    return SupervisorAssistPendingDecision.for_graph(
+        relation=relation,
+        pending=PendingDurableTurnAdmission.owned(
+            person_id=_PERSON,
+            conversation_id=_CONVERSATION,
+            work_graph_id="graph_0123456789abcdef",
+            revision=3,
+        ),
+        root_request_binding_sha256=_ROOT_INGRESS.canonical_sha256(),
+        current=current,
+    )
 
 
 @dataclass
@@ -44,9 +74,11 @@ class _Primary:
 class _Controller:
     def __init__(self) -> None:
         self.pending: object = False
+        self.assist_pending: object = False
         self.execute_mode = SupervisorAssistOutcome.LEGACY
         self.execute_calls = 0
         self.cancel_calls = 0
+        self.cancel_result: SupervisorAssistResult | None = None
         self.reconcile_calls = 0
         self.reconcile_disposition = AssistPendingGraphDisposition.LIVE_IN_PROCESS
         self.closed = 0
@@ -62,6 +94,9 @@ class _Controller:
 
     def pending_durable_turn_admission(self, *_args: Any, **_kwargs: Any) -> object:
         return self.pending
+
+    def classify_supervisor_assist_pending(self, *_args: Any, **_kwargs: Any) -> object:
+        return self.assist_pending
 
     async def execute(
         self,
@@ -90,7 +125,7 @@ class _Controller:
 
     async def cancel_active(self, *_args: Any, **_kwargs: Any) -> SupervisorAssistResult | None:
         self.cancel_calls += 1
-        return None
+        return self.cancel_result
 
     async def reconcile_pending_before_legacy(
         self,
@@ -238,12 +273,7 @@ async def test_existing_graph_bypasses_new_planning_and_does_not_bind_legacy_wor
         }
     )
     controller = _Controller()
-    controller.pending = PendingDurableTurnAdmission.owned(
-        person_id=_PERSON,
-        conversation_id=_CONVERSATION,
-        work_graph_id="graph_0123456789abcdef",
-        revision=3,
-    )
+    controller.assist_pending = _assist_decision(SupervisorAssistPendingRelation.NEW_TURN)
     controller.reconcile_disposition = disposition
     runtime = _runtime(primary, controller)
 
@@ -252,7 +282,8 @@ async def test_existing_graph_bypasses_new_planning_and_does_not_bind_legacy_wor
         "ещё один вопрос",
         actor=_actor(),
         conversation_id=_CONVERSATION,
-        _pending_durable_admission=controller.pending,  # type: ignore[arg-type]
+        _semantic_supervisor_ingress_binding=_NEW_INGRESS,
+        _semantic_supervisor_pending_decision=controller.assist_pending,  # type: ignore[arg-type]
     )
 
     assert result["message"] == "ordinary overlap"
@@ -264,15 +295,87 @@ async def test_existing_graph_bypasses_new_planning_and_does_not_bind_legacy_wor
 
 
 @pytest.mark.asyncio
+async def test_root_replay_never_crosses_legacy_or_controller_execution() -> None:
+    primary = _Primary({"message": "must not run"})
+    controller = _Controller()
+    decision = _assist_decision(SupervisorAssistPendingRelation.ROOT_REPLAY)
+    runtime = _runtime(primary, controller)
+
+    with pytest.raises(SupervisorAssistRuntimeError, match="root replay"):
+        await runtime.chat(
+            _PERSON,
+            "исходный запрос",
+            actor=_actor(),
+            conversation_id=_CONVERSATION,
+            _semantic_supervisor_ingress_binding=_ROOT_INGRESS,
+            _semantic_supervisor_pending_decision=decision,
+        )
+
+    assert primary.calls == controller.execute_calls == 0
+    assert controller.cancel_calls == controller.reconcile_calls == 0
+
+
+@pytest.mark.asyncio
+async def test_explicit_cancel_uses_exact_decision_without_legacy() -> None:
+    response = {"message": "cancelled", "conversation_id": _CONVERSATION}
+    primary = _Primary({"message": "must not run"})
+    controller = _Controller()
+    decision = _assist_decision(SupervisorAssistPendingRelation.EXPLICIT_CANCEL)
+    controller.cancel_result = SupervisorAssistResult(
+        outcome=SupervisorAssistOutcome.CANCELLED,
+        response=response,
+    )
+    runtime = _runtime(primary, controller)
+
+    result = await runtime.chat(
+        _PERSON,
+        " Отмена ",
+        actor=_actor(),
+        conversation_id=_CONVERSATION,
+        _semantic_supervisor_ingress_binding=_NEW_INGRESS,
+        _semantic_supervisor_pending_decision=decision,
+    )
+
+    assert result is response
+    assert controller.cancel_calls == 1
+    assert primary.calls == controller.execute_calls == controller.reconcile_calls == 0
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("relation", "message"),
+    (
+        (SupervisorAssistPendingRelation.EXPLICIT_CANCEL, "обычный вопрос"),
+        (SupervisorAssistPendingRelation.NEW_TURN, "cancel"),
+    ),
+)
+async def test_carried_relation_that_disagrees_with_message_fails_closed(
+    relation: SupervisorAssistPendingRelation,
+    message: str,
+) -> None:
+    primary = _Primary({"message": "must not run"})
+    controller = _Controller()
+    runtime = _runtime(primary, controller)
+
+    with pytest.raises(SupervisorAssistRuntimeError, match="carried assist ingress decision"):
+        await runtime.chat(
+            _PERSON,
+            message,
+            actor=_actor(),
+            conversation_id=_CONVERSATION,
+            _semantic_supervisor_ingress_binding=_NEW_INGRESS,
+            _semantic_supervisor_pending_decision=_assist_decision(relation),
+        )
+
+    assert primary.calls == controller.execute_calls == 0
+    assert controller.cancel_calls == controller.reconcile_calls == 0
+
+
+@pytest.mark.asyncio
 async def test_pending_reconciliation_uncertainty_never_calls_legacy() -> None:
     primary = _Primary({"message": "must not run"})
     controller = _Controller()
-    controller.pending = PendingDurableTurnAdmission.owned(
-        person_id=_PERSON,
-        conversation_id=_CONVERSATION,
-        work_graph_id="graph_0123456789abcdef",
-        revision=3,
-    )
+    controller.assist_pending = _assist_decision(SupervisorAssistPendingRelation.NEW_TURN)
     controller.reconcile_disposition = AssistPendingGraphDisposition.UNCERTAIN
     runtime = _runtime(primary, controller)
 
@@ -282,6 +385,7 @@ async def test_pending_reconciliation_uncertainty_never_calls_legacy() -> None:
             "новый ход",
             actor=_actor(),
             conversation_id=_CONVERSATION,
+            _semantic_supervisor_ingress_binding=_NEW_INGRESS,
         )
     assert controller.reconcile_calls == 1
     assert primary.calls == controller.execute_calls == 0
@@ -336,7 +440,11 @@ async def test_uncertain_graph_never_falls_through_and_observer_failure_is_non_a
         }
     )
     controller = _Controller()
-    controller.pending = None
+    controller.assist_pending = SupervisorAssistPendingDecision.uncertain(
+        person_id=_PERSON,
+        conversation_id=_CONVERSATION,
+        current=_NEW_INGRESS,
+    )
     runtime = _runtime(primary, controller)
     with pytest.raises(SupervisorAssistRuntimeError, match="ownership is uncertain"):
         await runtime.chat(
@@ -344,10 +452,11 @@ async def test_uncertain_graph_never_falls_through_and_observer_failure_is_non_a
             "request",
             actor=_actor(),
             conversation_id=_CONVERSATION,
+            _semantic_supervisor_ingress_binding=_NEW_INGRESS,
         )
     assert primary.calls == controller.execute_calls == 0
 
-    controller.pending = False
+    controller.assist_pending = False
 
     def broken_observer(_response: object, _actor: ActorContext) -> None:
         raise RuntimeError("private body must not escape")

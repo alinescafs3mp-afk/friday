@@ -21,6 +21,11 @@ from friday.orchestration.supervisor_assist_controller import (
     SupervisorAssistResult,
 )
 from friday.orchestration.supervisor_assist_graph_adapter import AssistConversationScope
+from friday.orchestration.supervisor_assist_ingress import (
+    SupervisorAssistIngressBindingV1,
+    SupervisorAssistPendingDecision,
+    SupervisorAssistPendingRelation,
+)
 from friday.orchestration.supervisor_assist_surface import (
     CurrentFileWebAssistSurface,
     prepare_current_file_web_assist_surface,
@@ -52,6 +57,17 @@ class _AssistController(Protocol):
         current_attachment_count: int = 0,
     ) -> PendingDurableTurnAdmission | bool | None: ...
 
+    def classify_supervisor_assist_pending(
+        self,
+        user_id: str,
+        message: str,
+        *,
+        actor: ActorContext,
+        conversation_id: str | None,
+        ingress_binding: SupervisorAssistIngressBindingV1 | None,
+        current_attachment_count: int = 0,
+    ) -> SupervisorAssistPendingDecision | bool: ...
+
     async def execute(
         self,
         surface: CurrentFileWebAssistSurface | None,
@@ -64,6 +80,7 @@ class _AssistController(Protocol):
         self,
         scope: AssistConversationScope,
         *,
+        decision: SupervisorAssistPendingDecision,
         user_message: str,
         absolute_deadline: float,
     ) -> SupervisorAssistResult | None: ...
@@ -71,7 +88,7 @@ class _AssistController(Protocol):
     async def reconcile_pending_before_legacy(
         self,
         scope: AssistConversationScope,
-        pending: PendingDurableTurnAdmission,
+        decision: SupervisorAssistPendingDecision,
         *,
         absolute_deadline: float,
     ) -> AssistPendingGraphDisposition: ...
@@ -147,6 +164,10 @@ class SemanticSupervisorAssistRuntime:
             (
                 "controller pending admission",
                 getattr(controller, "pending_durable_turn_admission", None),
+            ),
+            (
+                "controller assist ingress classifier",
+                getattr(controller, "classify_supervisor_assist_pending", None),
             ),
             ("controller cancellation", getattr(controller, "cancel_active", None)),
             (
@@ -283,6 +304,57 @@ class SemanticSupervisorAssistRuntime:
             )
         return False
 
+    def classify_supervisor_assist_pending(
+        self,
+        user_id: str,
+        message: str,
+        *,
+        actor: ActorContext,
+        conversation_id: str | None,
+        ingress_binding: SupervisorAssistIngressBindingV1 | None,
+        current_attachment_count: int = 0,
+    ) -> SupervisorAssistPendingDecision | bool:
+        """Expose the assist-only root/new/cancel relation without legacy collapse."""
+
+        if (
+            not conversation_id
+            or type(current_attachment_count) is not int
+            or current_attachment_count not in {0, 1}
+        ):
+            return False
+        person_id = actor.own_id if actor.shared_tenant else user_id
+        try:
+            value = self._controller.classify_supervisor_assist_pending(
+                person_id,
+                message,
+                actor=actor,
+                conversation_id=conversation_id,
+                ingress_binding=ingress_binding,
+                current_attachment_count=current_attachment_count,
+            )
+        except Exception:
+            value = None
+        if value is False:
+            return False
+        current_sha256 = (
+            None
+            if type(ingress_binding) is not SupervisorAssistIngressBindingV1
+            else ingress_binding.canonical_sha256()
+        )
+        if (
+            type(value) is SupervisorAssistPendingDecision
+            and value.person_id == person_id
+            and value.conversation_id == conversation_id
+            and value.current_request_binding_sha256 == current_sha256
+            and value.matches_message(message)
+        ):
+            return value
+        return SupervisorAssistPendingDecision.uncertain(
+            person_id=person_id,
+            conversation_id=conversation_id,
+            current=ingress_binding,
+        )
+
     def owns_pending_durable_turn(
         self,
         user_id: str,
@@ -336,6 +408,8 @@ class SemanticSupervisorAssistRuntime:
         turn_policy: TurnPolicyDecision | None = None,
         turn_deadline: float | None = None,
         _pending_durable_admission: PendingDurableTurnAdmission | None = None,
+        _semantic_supervisor_ingress_binding: SupervisorAssistIngressBindingV1 | None = None,
+        _semantic_supervisor_pending_decision: SupervisorAssistPendingDecision | None = None,
         _semantic_supervisor_explicit_mode_requested: bool = False,
     ) -> dict[str, Any]:
         if self._closed:
@@ -373,29 +447,62 @@ class SemanticSupervisorAssistRuntime:
             return response
 
         attachment_count = len(attachments) if isinstance(attachments, list) else 0
-        active = self._controller_pending(
-            user_id,
-            message,
-            actor=actor,
-            conversation_id=conversation_id,
-            current_attachment_count=1 if attachment_count == 1 else 0,
-        )
-        if active is None:
-            raise SupervisorAssistRuntimeError("durable assist ownership is uncertain")
-
         deadline = _future_deadline(self._settings, turn_deadline)
         normalized = message.strip().casefold() if isinstance(message, str) else ""
+        active: SupervisorAssistPendingDecision | bool
+        if _semantic_supervisor_pending_decision is not None:
+            active = _semantic_supervisor_pending_decision
+            expected_current = (
+                None
+                if type(_semantic_supervisor_ingress_binding)
+                is not SupervisorAssistIngressBindingV1
+                else _semantic_supervisor_ingress_binding.canonical_sha256()
+            )
+            if (
+                type(active) is not SupervisorAssistPendingDecision
+                or active.person_id != actor.own_id
+                or active.conversation_id != str(conversation_id or "")
+                or active.current_request_binding_sha256 != expected_current
+                or not active.matches_message(message)
+            ):
+                raise SupervisorAssistRuntimeError("carried assist ingress decision is invalid")
+        else:
+            active = self.classify_supervisor_assist_pending(
+                user_id,
+                message,
+                actor=actor,
+                conversation_id=conversation_id,
+                ingress_binding=_semantic_supervisor_ingress_binding,
+                current_attachment_count=1 if attachment_count == 1 else 0,
+            )
+        if (
+            type(active) is SupervisorAssistPendingDecision
+            and active.relation is SupervisorAssistPendingRelation.UNCERTAIN
+        ):
+            raise SupervisorAssistRuntimeError("durable assist ownership is uncertain")
         scope = (
             AssistConversationScope(
                 user_id=actor.own_id,
                 conversation_id=str(conversation_id or ""),
             )
-            if isinstance(active, PendingDurableTurnAdmission)
+            if type(active) is SupervisorAssistPendingDecision
             else None
         )
-        if scope is not None and normalized in {"отмена", "cancel"}:
+        if (
+            scope is not None
+            and type(active) is SupervisorAssistPendingDecision
+            and active.relation is SupervisorAssistPendingRelation.ROOT_REPLAY
+        ):
+            raise SupervisorAssistRuntimeError("assist root replay crossed the idempotency boundary")
+        if (
+            scope is not None
+            and type(active) is SupervisorAssistPendingDecision
+            and active.relation is SupervisorAssistPendingRelation.EXPLICIT_CANCEL
+            and normalized in {"отмена", "cancel"}
+        ):
             cancelled = await self._controller.cancel_active(
                 scope,
+                decision=active,
                 user_message=normalized,
                 absolute_deadline=deadline,
             )
@@ -403,7 +510,11 @@ class SemanticSupervisorAssistRuntime:
                 raise SupervisorAssistRuntimeError("active assist cancellation is uncertain")
             return cancelled.response
 
-        if isinstance(active, PendingDurableTurnAdmission) and scope is not None:
+        if (
+            type(active) is SupervisorAssistPendingDecision
+            and active.relation is SupervisorAssistPendingRelation.NEW_TURN
+            and scope is not None
+        ):
             try:
                 disposition = await self._controller.reconcile_pending_before_legacy(
                     scope,
@@ -454,6 +565,7 @@ class SemanticSupervisorAssistRuntime:
             reply_assistant_message_id=reply_assistant_message_id,
             turn_policy=turn_policy,
             pending_durable_admission=_pending_durable_admission,
+            ingress_binding=_semantic_supervisor_ingress_binding,
             conversation_is_dialogue=self._conversation_is_dialogue,
         )
         result = await self._controller.execute(

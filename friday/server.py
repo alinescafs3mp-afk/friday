@@ -21,7 +21,7 @@ from contextlib import ExitStack, asynccontextmanager, suppress
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import Any, cast
+from typing import Any, Protocol, cast
 from urllib.parse import urlsplit
 
 from fastapi import FastAPI, HTTPException, Query, Request
@@ -140,6 +140,10 @@ from friday.orchestration.supervisor_assist_composition import (
     build_supervisor_assist_production_runtime,
 )
 from friday.orchestration.supervisor_assist_graph_adapter import SupervisorAssistGraphAdapter
+from friday.orchestration.supervisor_assist_ingress import (
+    SupervisorAssistIngressBindingV1,
+    SupervisorAssistPendingDecision,
+)
 from friday.organs import ServiceContext, build_registry, local_now, resolve_chat_id
 from friday.organs.obsidian.conversation import (
     obsidian_conversation_intent,
@@ -206,6 +210,11 @@ from friday.v12_model_transport import create_attested_v12_model_runtime
 from friday.web_surfer import WebSurfer
 from friday.workers import IntervalTask, WorkersManager
 from friday.workers._blocking import current_activity, run_blocking, wait_until_idle
+
+
+class _AsyncClosableRuntime(Protocol):
+    async def close(self) -> None: ...
+
 
 _HOST_CONTROL_APPROVAL_TOOLS = frozenset({"host_action_execute", "software_install_execute"})
 _HOST_JOB_ID = re.compile(r"hjob_[0-9a-f]{32}")
@@ -962,6 +971,64 @@ def _pending_durable_turn_admission_before_ingestion(
             person_id=person_id,
             conversation_id=str(conversation_id or ""),
         )
+
+
+def _supervisor_assist_pending_before_ingestion(
+    agent: Any,
+    *,
+    person_id: str,
+    message: str,
+    actor: ActorContext,
+    conversation_id: str,
+    ingress_binding: SupervisorAssistIngressBindingV1 | None,
+    current_attachment_count: int,
+) -> SupervisorAssistPendingDecision | bool:
+    """Classify one promoted graph without collapsing NEW into ownership."""
+
+    classifier = getattr(agent, "classify_supervisor_assist_pending", None)
+    if not callable(classifier):
+        return False
+    try:
+        result = classifier(
+            person_id,
+            message,
+            actor=actor,
+            conversation_id=conversation_id,
+            ingress_binding=ingress_binding,
+            current_attachment_count=current_attachment_count,
+        )
+        if inspect.isawaitable(result):
+            if inspect.iscoroutine(result):
+                result.close()
+            elif isinstance(result, asyncio.Future):
+                result.cancel()
+            return SupervisorAssistPendingDecision.uncertain(
+                person_id=person_id,
+                conversation_id=conversation_id,
+                current=ingress_binding,
+            )
+        current_sha256 = (
+            None
+            if type(ingress_binding) is not SupervisorAssistIngressBindingV1
+            else ingress_binding.canonical_sha256()
+        )
+        if result is False:
+            return False
+        if (
+            type(result) is SupervisorAssistPendingDecision
+            and result.person_id == person_id
+            and result.conversation_id == conversation_id
+            and result.current_request_binding_sha256 == current_sha256
+            and result.matches_message(message)
+        ):
+            return result
+    except Exception:
+        pass
+    return SupervisorAssistPendingDecision.uncertain(
+        person_id=person_id,
+        conversation_id=conversation_id,
+        current=ingress_binding,
+    )
 
 
 class RequestBodyTooLargeError(RuntimeError):
@@ -2506,7 +2573,9 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
                     secondary_brain,
                 )
             )
-            semantic_supervisor_runtime = agent if agent is not orchestrated_agent else None
+            semantic_supervisor_runtime = (
+                cast(_AsyncClosableRuntime, agent) if agent is not orchestrated_agent else None
+            )
             executive = ExecutiveService(settings, storage, auth_service, kernel, llm, ingestion)
             kernel.bind_executive(executive)
             memory_vault: MemoryVault | None = None
@@ -3989,6 +4058,8 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
         # Claim the key atomically before any side effect. A plain lookup followed
         # by a later insert allows concurrent retries to invoke the agent twice.
         lease_token = ""
+        request_hash = ""
+        semantic_supervisor_ingress: SupervisorAssistIngressBindingV1 | None = None
         heartbeat: asyncio.Task[None] | None = None
         if source_ref:
             request_hash = _chat_request_fingerprint(
@@ -4036,6 +4107,12 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
                     headers={"Retry-After": "2"},
                 )
             lease_token = str(claim.get("lease_token") or "")
+            if claim.get("status") != "acquired" or not lease_token:
+                raise RuntimeError("Request idempotency claim returned an invalid state")
+            semantic_supervisor_ingress = SupervisorAssistIngressBindingV1.from_claimed_request(
+                source_ref=source_ref,
+                request_fingerprint_sha256=request_hash,
+            )
 
             async def renew_lease() -> None:
                 while True:
@@ -4049,6 +4126,8 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
         effect_stack = ExitStack()
         request_effects = None
         if source_ref and lease_token:
+            if semantic_supervisor_ingress is None:
+                raise RuntimeError("Claimed request has no semantic supervisor ingress binding")
             request_effects = effect_stack.enter_context(
                 track_request_effects(
                     functools.partial(
@@ -4064,6 +4143,7 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
                         request_key=source_ref,
                         lease_token=lease_token,
                     ),
+                    request_binding_sha256=semantic_supervisor_ingress.canonical_sha256(),
                 )
             )
 
@@ -5086,6 +5166,8 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
                 reply_assistant_reference = False
 
             pending_durable_intake_admission: PendingDurableTurnAdmission | bool = False
+            supervisor_assist_pending_decision: SupervisorAssistPendingDecision | None = None
+            pending_durable_intake_suppressed = False
             if (
                 conversation_id is not None
                 and (
@@ -5102,18 +5184,36 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
                 and requested_mode is None
                 and not turn_policy.handled
             ):
-                pending_durable_intake_admission = _pending_durable_turn_admission_before_ingestion(
+                assist_relation = _supervisor_assist_pending_before_ingestion(
                     state.agent,
                     person_id=actor.own_id,
                     message=message,
                     actor=actor,
                     conversation_id=conversation_id,
+                    ingress_binding=semantic_supervisor_ingress,
                     current_attachment_count=pending_comparison_attachment_count,
                 )
+                if type(assist_relation) is SupervisorAssistPendingDecision:
+                    supervisor_assist_pending_decision = assist_relation
+                    pending_durable_intake_suppressed = assist_relation.suppresses_ingestion
+                else:
+                    pending_durable_intake_admission = (
+                        _pending_durable_turn_admission_before_ingestion(
+                            state.agent,
+                            person_id=actor.own_id,
+                            message=message,
+                            actor=actor,
+                            conversation_id=conversation_id,
+                            current_attachment_count=pending_comparison_attachment_count,
+                        )
+                    )
+                    pending_durable_intake_suppressed = (
+                        pending_durable_intake_admission is not False
+                    )
 
             ingestion_result = None
             if state.auth_service.authorize(actor, "knowledge.create").allowed:
-                if pending_durable_intake_admission is not False:
+                if pending_durable_intake_suppressed:
                     # Exact ownership and uncertainty both stay side-effect
                     # free until the router/runtime performs its own fresh
                     # owner+conversation+revision check.
@@ -5223,11 +5323,20 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
                         }
 
             with bind_failure_trace_scope(failure_scope):
-                semantic_supervisor_kwargs = (
-                    {"_semantic_supervisor_explicit_mode_requested": (explicit_mode_requested)}
-                    if getattr(state, "semantic_supervisor_runtime", None) is state.agent
-                    else {}
-                )
+                semantic_supervisor_kwargs: dict[str, object] = {}
+                if getattr(state, "semantic_supervisor_runtime", None) is state.agent:
+                    semantic_supervisor_kwargs["_semantic_supervisor_explicit_mode_requested"] = (
+                        explicit_mode_requested
+                    )
+                if callable(
+                    getattr(state.agent, "classify_supervisor_assist_pending", None)
+                ):
+                    semantic_supervisor_kwargs.update(
+                        _semantic_supervisor_ingress_binding=semantic_supervisor_ingress,
+                        _semantic_supervisor_pending_decision=(
+                            supervisor_assist_pending_decision
+                        ),
+                    )
                 result = await state.agent.chat(
                     actor.user_id,
                     message,

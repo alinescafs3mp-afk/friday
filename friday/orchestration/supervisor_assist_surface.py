@@ -20,6 +20,7 @@ from friday.orchestration.contracts import TurnInput
 from friday.orchestration.execution_plan import ValidatedExecutionPlan
 from friday.orchestration.router import ReadOnlyAttachmentReference, current_attachment_references
 from friday.orchestration.semantic_supervisor import supervisor_eligibility
+from friday.orchestration.supervisor_assist_ingress import SupervisorAssistIngressBindingV1
 from friday.orchestration.supervisor_contracts import TaskClass
 from friday.orchestration.transient_web_comparison import (
     SealedPublicWebQuery,
@@ -43,6 +44,7 @@ class CurrentFileWebAssistSurface:
     attachment: ReadOnlyAttachmentReference = field(repr=False)
     attachment_content_sha256: str
     web_plan: SealedPublicWebQuery = field(repr=False)
+    ingress_binding: SupervisorAssistIngressBindingV1 = field(repr=False)
 
     def __post_init__(self) -> None:
         if (
@@ -52,6 +54,7 @@ class CurrentFileWebAssistSurface:
             or type(self.attachment) is not ReadOnlyAttachmentReference
             or re.fullmatch(r"[0-9a-f]{64}", self.attachment_content_sha256) is None
             or type(self.web_plan) is not SealedPublicWebQuery
+            or type(self.ingress_binding) is not SupervisorAssistIngressBindingV1
         ):
             raise ValueError("assist surface is invalid")
 
@@ -98,6 +101,7 @@ def prepare_current_file_web_assist_surface(
     reply_assistant_message_id: str | None,
     turn_policy: TurnPolicyDecision | None,
     pending_durable_admission: PendingDurableTurnAdmission | None,
+    ingress_binding: SupervisorAssistIngressBindingV1 | None,
     conversation_is_dialogue: Callable[[str, str], bool],
 ) -> CurrentFileWebAssistSurface | None:
     """Recognize the promoted surface without reading a file or calling a model."""
@@ -123,6 +127,7 @@ def prepare_current_file_web_assist_surface(
         or reply_assistant_message_id is not None
         or turn_policy is not None
         or pending_durable_admission is not None
+        or type(ingress_binding) is not SupervisorAssistIngressBindingV1
         or not _transient_web_ingestion(ingestion_result)
         or type(attachments) is not list
         or len(attachments) != 1
@@ -183,6 +188,7 @@ def prepare_current_file_web_assist_surface(
         attachment=references[0],
         attachment_content_sha256=token.content_sha256,
         web_plan=web_plan,
+        ingress_binding=ingress_binding,
     )
 
 

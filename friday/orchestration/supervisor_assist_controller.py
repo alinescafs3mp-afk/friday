@@ -10,6 +10,7 @@ process-local and never become execution or publication authority.
 from __future__ import annotations
 
 import asyncio
+import hmac
 import inspect
 import math
 import re
@@ -73,6 +74,11 @@ from friday.orchestration.supervisor_assist_graph_adapter import (
     AssistStepSettlement,
     AssistTerminalPublication,
     AssistTraceInput,
+)
+from friday.orchestration.supervisor_assist_ingress import (
+    SupervisorAssistIngressBindingV1,
+    SupervisorAssistPendingDecision,
+    SupervisorAssistPendingRelation,
 )
 from friday.orchestration.supervisor_assist_promotion import (
     AssistPromotionDecision,
@@ -529,6 +535,10 @@ def _graph_matches_pristine_admission(
         and admitted_graph.revision == 1
         and admitted_graph.user_id == surface.actor.user_id
         and admitted_graph.conversation_id == surface.conversation_id
+        and hmac.compare_digest(
+            admitted_graph.anchor_request_binding_sha256,
+            surface.ingress_binding.canonical_sha256(),
+        )
         and admitted_graph.current_file_raw_object_id == surface.attachment.raw_object_id
         and admitted_graph.current_file_source_identity_sha256
         == surface.attachment.source_identity_sha256
@@ -944,6 +954,8 @@ class SupervisorAssistController:
                     or re.fullmatch(r"graph_[0-9a-f]{16}", boundary.graph_id) is None
                     or boundary.user_id != prospective.surface.actor.user_id
                     or boundary.conversation_id != prospective.surface.conversation_id
+                    or boundary.request_binding_sha256
+                    != prospective.surface.ingress_binding.canonical_sha256()
                     or boundary.accepted_plan_sha256 != prospective.plan.canonical_sha256()
                     or boundary.adapter_registry_sha256
                     != prospective.plan.binding_snapshot_sha256
@@ -1538,6 +1550,92 @@ class SupervisorAssistController:
             self._replace_graph(retained, graph)
             pending = retained.pending
         return pending
+
+    def classify_supervisor_assist_pending(
+        self,
+        user_id: str,
+        message: str,
+        *,
+        actor: ActorContext,
+        conversation_id: str | None,
+        ingress_binding: SupervisorAssistIngressBindingV1 | None,
+        current_attachment_count: int = 0,
+    ) -> SupervisorAssistPendingDecision | bool:
+        """Classify one request against the immutable root of an ACTIVE graph."""
+
+        person_id = actor.own_id if isinstance(actor, ActorContext) else ""
+        if type(conversation_id) is not str:
+            return False
+        pending = self.pending_durable_turn_admission(
+            user_id,
+            message,
+            actor=actor,
+            conversation_id=conversation_id,
+            current_attachment_count=current_attachment_count,
+        )
+        if pending is False:
+            return False
+        if type(pending) is not PendingDurableTurnAdmission or pending.work_graph_id is None:
+            return SupervisorAssistPendingDecision.uncertain(
+                person_id=person_id,
+                conversation_id=conversation_id,
+                current=ingress_binding,
+            )
+        try:
+            graph = self._graph_adapter.load(
+                AssistGraphCursor(
+                    graph_id=pending.work_graph_id,
+                    user_id=pending.person_id,
+                    conversation_id=pending.conversation_id,
+                    revision=int(pending.revision or 0),
+                )
+            )
+        except Exception:
+            return SupervisorAssistPendingDecision.uncertain(
+                person_id=person_id,
+                conversation_id=conversation_id,
+                current=ingress_binding,
+            )
+        if graph is None or graph.state is not CompareCurrentFileWebGraphState.ACTIVE:
+            return False
+        if (
+            graph.id != pending.work_graph_id
+            or graph.user_id != pending.person_id
+            or graph.conversation_id != pending.conversation_id
+            or not graph.has_exact_request_binding
+            or type(ingress_binding) is not SupervisorAssistIngressBindingV1
+        ):
+            return SupervisorAssistPendingDecision.uncertain(
+                person_id=person_id,
+                conversation_id=conversation_id,
+                current=ingress_binding,
+            )
+        exact_pending = PendingDurableTurnAdmission.owned(
+            person_id=graph.user_id,
+            conversation_id=graph.conversation_id,
+            work_graph_id=graph.id,
+            revision=graph.revision,
+        )
+        current_sha256 = ingress_binding.canonical_sha256()
+        normalized = message.strip().casefold()
+        relation = (
+            SupervisorAssistPendingRelation.EXPLICIT_CANCEL
+            if normalized in {"отмена", "cancel"}
+            else (
+                SupervisorAssistPendingRelation.ROOT_REPLAY
+                if hmac.compare_digest(
+                    graph.anchor_request_binding_sha256,
+                    current_sha256,
+                )
+                else SupervisorAssistPendingRelation.NEW_TURN
+            )
+        )
+        return SupervisorAssistPendingDecision.for_graph(
+            relation=relation,
+            pending=exact_pending,
+            root_request_binding_sha256=graph.anchor_request_binding_sha256,
+            current=ingress_binding,
+        )
 
     async def _claim(
         self,
@@ -2203,14 +2301,17 @@ class SupervisorAssistController:
     async def reconcile_pending_before_legacy(
         self,
         scope: AssistConversationScope,
-        pending: PendingDurableTurnAdmission,
+        decision: SupervisorAssistPendingDecision,
         *,
         absolute_deadline: float,
     ) -> AssistPendingGraphDisposition:
         """Retire same-process interrupted work before an overlapping legacy turn."""
 
+        pending = decision.pending if type(decision) is SupervisorAssistPendingDecision else None
         if (
             type(scope) is not AssistConversationScope
+            or type(decision) is not SupervisorAssistPendingDecision
+            or decision.relation is not SupervisorAssistPendingRelation.NEW_TURN
             or type(pending) is not PendingDurableTurnAdmission
             or not pending.is_owned
             or pending.work_graph_id is None
@@ -2230,6 +2331,8 @@ class SupervisorAssistController:
                 active.graph.id != pending.work_graph_id
                 or pending.revision is None
                 or active.graph.revision < pending.revision
+                or active.graph.anchor_request_binding_sha256
+                != decision.root_request_binding_sha256
                 or active.pending.work_graph_id != active.graph.id
                 or active.pending.revision != active.graph.revision
             ):
@@ -2246,6 +2349,8 @@ class SupervisorAssistController:
             if (
                 retained.graph.id != pending.work_graph_id
                 or retained.graph.revision != pending.revision
+                or retained.graph.anchor_request_binding_sha256
+                != decision.root_request_binding_sha256
                 or retained.pending != pending
             ):
                 return AssistPendingGraphDisposition.UNCERTAIN
@@ -2386,14 +2491,21 @@ class SupervisorAssistController:
         self,
         scope: object,
         *,
+        decision: SupervisorAssistPendingDecision,
         user_message: str,
         absolute_deadline: float,
     ) -> SupervisorAssistResult | None:
         """Cancel exactly one in-process graph after draining its body tasks."""
 
         deadline = _exact_future_deadline(absolute_deadline)
+        pending = decision.pending if type(decision) is SupervisorAssistPendingDecision else None
         if (
             type(scope) is not AssistConversationScope
+            or type(decision) is not SupervisorAssistPendingDecision
+            or decision.relation is not SupervisorAssistPendingRelation.EXPLICIT_CANCEL
+            or type(pending) is not PendingDurableTurnAdmission
+            or pending.work_graph_id is None
+            or decision.current_request_binding_sha256 is None
             or user_message not in {"отмена", "cancel"}
             or deadline is None
             or self._closed
@@ -2407,6 +2519,14 @@ class SupervisorAssistController:
             record = self._retained_by_scope.get(key)
             retained = record is not None
         if record is None:
+            return None
+        if (
+            record.graph.id != pending.work_graph_id
+            or pending.revision is None
+            or record.graph.revision < pending.revision
+            or record.graph.anchor_request_binding_sha256
+            != decision.root_request_binding_sha256
+        ):
             return None
         if (
             record.graph.state is not CompareCurrentFileWebGraphState.ACTIVE
@@ -2432,6 +2552,7 @@ class SupervisorAssistController:
                     request = AssistCancellation(
                         user_message=user_message,
                         trace=self._trace(record),
+                        request_binding_sha256=decision.current_request_binding_sha256,
                     )
                     publication = self._graph_adapter.cancel(
                         self._cursor(record),

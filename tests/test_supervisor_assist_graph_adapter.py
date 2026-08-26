@@ -54,6 +54,7 @@ from friday.orchestration.supervisor_assist_graph_adapter import (
     SupervisorAssistGraphAdapter,
     SupervisorAssistGraphAdapterError,
 )
+from friday.orchestration.supervisor_assist_ingress import SupervisorAssistIngressBindingV1
 from friday.orchestration.supervisor_assist_surface import CurrentFileWebAssistSurface
 from friday.orchestration.supervisor_contracts import (
     CapabilityEffectClass,
@@ -142,6 +143,10 @@ def _seed_surface(storage, label: str) -> tuple[CurrentFileWebAssistSurface, dic
             actor=actor,
             conversation_id=str(conversation["id"]),
         ),
+        ingress_binding=SupervisorAssistIngressBindingV1.from_claimed_request(
+            source_ref=f"assist-adapter:{label}",
+            request_fingerprint_sha256=_sha256(f"request:{label}"),
+        ),
     )
     return surface, projection
 
@@ -206,11 +211,16 @@ def _plan(surface: CurrentFileWebAssistSurface) -> ValidatedExecutionPlan:
 
 
 def _admit(adapter: SupervisorAssistGraphAdapter, surface: CurrentFileWebAssistSurface):
-    return adapter.admit(
-        AssistGraphAdmission(surface, _plan(surface), _sha256("runtime")),
-        authority_check=lambda boundary: boundary.actor is surface.actor,
-        effect_check=lambda boundary: boundary.actor is surface.actor,
-    )
+    with track_request_effects(
+        lambda: True,
+        before_effect_in_transaction=lambda _conn: True,
+        request_binding_sha256=surface.ingress_binding.canonical_sha256(),
+    ):
+        return adapter.admit(
+            AssistGraphAdmission(surface, _plan(surface), _sha256("runtime")),
+            authority_check=lambda boundary: boundary.actor is surface.actor,
+            effect_check=lambda boundary: boundary.actor is surface.actor,
+        )
 
 
 def _claim(adapter, graph, surface, kind):
@@ -668,6 +678,41 @@ def test_comparison_settlement_trace_assistant_receipt_and_closure_are_atomic(st
     assert web.sources[0]._text not in row["metadata_json"]  # noqa: SLF001
 
 
+def test_cancel_rejects_wrong_request_effect_fence_atomically(storage) -> None:
+    adapter = SupervisorAssistGraphAdapter(storage)
+    surface, _ = _seed_surface(storage, "cancel-fence")
+    graph = _admit(adapter, surface)
+    expected_binding = _sha256("cancel-fence:expected")
+
+    with track_request_effects(
+        lambda: True,
+        before_effect_in_transaction=lambda _conn: True,
+        request_binding_sha256=_sha256("cancel-fence:actual"),
+    ), pytest.raises(SupervisorAssistGraphAdapterError, match="request effect fence"):
+        adapter.cancel(
+            AssistGraphCursor.from_graph(graph),
+            AssistCancellation(
+                "cancel",
+                _trace(),
+                request_binding_sha256=expected_binding,
+            ),
+            authority_check=lambda _boundary: True,
+            effect_check=lambda _boundary: True,
+        )
+
+    current = adapter.load_current(
+        AssistConversationScope(surface.actor.user_id, surface.conversation_id)
+    )
+    rows = storage.execute(
+        "SELECT role,content FROM messages WHERE conversation_id=? ORDER BY rowid",
+        (surface.conversation_id,),
+    ).fetchall()
+    assert current is not None and current.state is CompareCurrentFileWebGraphState.ACTIVE
+    assert [(row["role"], row["content"]) for row in rows] == [
+        ("user", surface.turn.message)
+    ]
+
+
 def test_terminal_cancel_and_startup_reconcile_publish_closed_receipts(storage) -> None:
     adapter = SupervisorAssistGraphAdapter(storage)
     surface, _ = _seed_surface(storage, "terminal")
@@ -692,12 +737,22 @@ def test_terminal_cancel_and_startup_reconcile_publish_closed_receipts(storage) 
 
     cancel_surface, _ = _seed_surface(storage, "cancel")
     cancel_graph = _admit(adapter, cancel_surface)
-    cancelled = adapter.cancel(
-        AssistGraphCursor.from_graph(cancel_graph),
-        AssistCancellation("cancel", _trace()),
-        authority_check=lambda boundary: boundary.actor is cancel_surface.actor,
-        effect_check=lambda boundary: boundary.actor is cancel_surface.actor,
-    )
+    cancel_request_binding_sha256 = _sha256("cancel-request")
+    with track_request_effects(
+        lambda: True,
+        before_effect_in_transaction=lambda _conn: True,
+        request_binding_sha256=cancel_request_binding_sha256,
+    ):
+        cancelled = adapter.cancel(
+            AssistGraphCursor.from_graph(cancel_graph),
+            AssistCancellation(
+                "cancel",
+                _trace(),
+                request_binding_sha256=cancel_request_binding_sha256,
+            ),
+            authority_check=lambda boundary: boundary.actor is cancel_surface.actor,
+            effect_check=lambda boundary: boundary.actor is cancel_surface.actor,
+        )
     roles = storage.execute(
         "SELECT role,content FROM messages WHERE conversation_id=? ORDER BY rowid",
         (cancel_surface.conversation_id,),

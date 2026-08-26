@@ -14,6 +14,7 @@ import pytest
 import friday.orchestration.transient_web_comparison as web_module
 from friday import semantic_supervisor_policy
 from friday.evidence_bundle import CitationBinding, EvidenceBundle, EvidencePart
+from friday.execution_kernel import track_request_effects
 from friday.file_evidence import (
     FileBodyKind,
     FileEvidenceSet,
@@ -59,6 +60,11 @@ from friday.orchestration.supervisor_assist_graph_adapter import (
     AssistPublicationBoundary,
     SupervisorAssistGraphAdapter,
 )
+from friday.orchestration.supervisor_assist_ingress import (
+    SupervisorAssistIngressBindingV1,
+    SupervisorAssistPendingDecision,
+    SupervisorAssistPendingRelation,
+)
 from friday.orchestration.supervisor_assist_promotion import (
     AssistPromotionDecision,
     AssistPromotionReadiness,
@@ -94,6 +100,61 @@ from friday.source_identity import (
     raw_source_identity_sha256,
 )
 from friday.storage.models import RawObject
+
+_INGRESS_BINDING = SupervisorAssistIngressBindingV1.from_claimed_request(
+    source_ref="assist-controller:test",
+    request_fingerprint_sha256="f" * 64,
+)
+
+
+@pytest.fixture(autouse=True)
+def _exact_request_effect_fence():
+    with track_request_effects(
+        lambda: True,
+        before_effect_in_transaction=lambda _conn: True,
+        request_binding_sha256=_INGRESS_BINDING.canonical_sha256(),
+    ):
+        yield
+
+
+def _pending_decision(
+    relation: SupervisorAssistPendingRelation,
+    pending: PendingDurableTurnAdmission,
+) -> SupervisorAssistPendingDecision:
+    return SupervisorAssistPendingDecision.for_graph(
+        relation=relation,
+        pending=pending,
+        root_request_binding_sha256=_INGRESS_BINDING.canonical_sha256(),
+        current=(
+            _INGRESS_BINDING
+            if relation is SupervisorAssistPendingRelation.ROOT_REPLAY
+            else SupervisorAssistIngressBindingV1.from_claimed_request(
+                source_ref=f"assist-controller:{relation.value}",
+                request_fingerprint_sha256="e" * 64,
+            )
+        ),
+    )
+
+
+async def _cancel_pending(
+    controller: SupervisorAssistController,
+    scope: AssistConversationScope,
+    pending: PendingDurableTurnAdmission,
+    *,
+    user_message: str = "cancel",
+) -> Any:
+    decision = _pending_decision(SupervisorAssistPendingRelation.EXPLICIT_CANCEL, pending)
+    with track_request_effects(
+        lambda: True,
+        before_effect_in_transaction=lambda _conn: True,
+        request_binding_sha256=decision.current_request_binding_sha256,
+    ):
+        return await controller.cancel_active(
+            scope,
+            decision=decision,
+            user_message=user_message,
+            absolute_deadline=time.monotonic() + 3,
+        )
 
 
 class _Carrier(dict[str, Any]):
@@ -373,6 +434,7 @@ def _surface(*, actor: ActorContext | None = None) -> CurrentFileWebAssistSurfac
         reply_assistant_message_id=None,
         turn_policy=None,
         pending_durable_admission=None,
+        ingress_binding=_INGRESS_BINDING,
         conversation_is_dialogue=lambda person_id, conversation_id: (
             person_id == actor.own_id and conversation_id == "conv_1234567890abcdef"
         ),
@@ -452,6 +514,7 @@ def _stored_surface(
             actor=actor,
             conversation_id=str(conversation["id"]),
         ),
+        ingress_binding=_INGRESS_BINDING,
     )
     return surface, projection
 
@@ -945,10 +1008,22 @@ async def test_committed_graph_is_not_pending_or_cancellable_during_observer(sto
         actor=surface.actor,
         conversation_id=surface.conversation_id,
     )
-    stable = await controller.cancel_active(
+    completed_row = storage.execute(
+        """SELECT id,revision FROM work_item_compare_current_file_web_graphs
+             WHERE user_id=? AND conversation_id=? ORDER BY updated_at DESC LIMIT 1""",
+        (surface.actor.user_id, surface.conversation_id),
+    ).fetchone()
+    assert completed_row is not None
+    completed_pending = PendingDurableTurnAdmission.owned(
+        person_id=surface.actor.user_id,
+        conversation_id=surface.conversation_id,
+        work_graph_id=str(completed_row["id"]),
+        revision=int(completed_row["revision"]),
+    )
+    stable = await _cancel_pending(
+        controller,
         AssistConversationScope(surface.actor.user_id, surface.conversation_id),
-        user_message="cancel",
-        absolute_deadline=time.monotonic() + 3,
+        completed_pending,
     )
 
     assert pending is False
@@ -1166,7 +1241,7 @@ async def test_overlapping_turn_uses_legacy_once_and_exact_cancel_drains_childre
     assert (
         await controller.reconcile_pending_before_legacy(
             AssistConversationScope(surface.actor.user_id, surface.conversation_id),
-            lagging_pending,
+            _pending_decision(SupervisorAssistPendingRelation.NEW_TURN, lagging_pending),
             absolute_deadline=time.monotonic() + 3,
         )
         is AssistPendingGraphDisposition.LIVE_IN_PROCESS
@@ -1176,10 +1251,10 @@ async def test_overlapping_turn_uses_legacy_once_and_exact_cancel_drains_childre
         legacy_primary=overlap_legacy,
         absolute_deadline=time.monotonic() + 4,
     )
-    cancelled = await controller.cancel_active(
+    cancelled = await _cancel_pending(
+        controller,
         AssistConversationScope(surface.actor.user_id, surface.conversation_id),
-        user_message="cancel",
-        absolute_deadline=time.monotonic() + 3,
+        active_pending,
     )
     first = await asyncio.wait_for(first_task, timeout=2)
 
@@ -1246,10 +1321,10 @@ async def test_pending_revision_tracks_settlements_before_cancellation(storage: 
     assert isinstance(pending, PendingDurableTurnAdmission)
     assert pending.revision == graph.revision
 
-    cancelled = await controller.cancel_active(
+    cancelled = await _cancel_pending(
+        controller,
         AssistConversationScope(surface.actor.user_id, surface.conversation_id),
-        user_message="cancel",
-        absolute_deadline=time.monotonic() + 3,
+        pending,
     )
     original = await asyncio.wait_for(task, timeout=2)
     closed = adapter.load(AssistGraphCursor.from_graph(graph))
@@ -1297,10 +1372,11 @@ async def test_retained_owner_is_visible_with_zero_attachments_and_can_be_cancel
         actor=surface.actor,
         conversation_id=surface.conversation_id,
     )
-    cancelled = await controller.cancel_active(
+    assert isinstance(pending, PendingDurableTurnAdmission)
+    cancelled = await _cancel_pending(
+        controller,
         AssistConversationScope(surface.actor.user_id, surface.conversation_id),
-        user_message="cancel",
-        absolute_deadline=time.monotonic() + 3,
+        pending,
     )
 
     assert interrupted.outcome is SupervisorAssistOutcome.INTERRUPTED
@@ -1309,6 +1385,100 @@ async def test_retained_owner_is_visible_with_zero_attachments_and_can_be_cancel
     assert cancelled is not None and cancelled.outcome is SupervisorAssistOutcome.CANCELLED
     assert adapter.cancel_calls == 1
     assert controller.semantic_supervisor_status()["retained_active_graphs"] == 0
+
+
+@pytest.mark.asyncio
+async def test_pending_classifier_binds_root_new_cancel_and_missing_ingress(storage: Any) -> None:
+    surface, projection = _stored_surface(storage, "pending-classifier")
+    adapter = _CountingAdapter(storage)
+    gate = asyncio.Event()
+    file_reader = _FileReader(_prepared_file(surface, projection), gate=gate)
+    web_reader = _WebReader(_web_evidence(surface), gate=gate)
+    controller = _controller(
+        graph_adapter=adapter,
+        file_reader=file_reader,
+        web_reader=web_reader,
+    )
+
+    async def forbidden_legacy() -> dict[str, object]:
+        raise AssertionError("legacy cannot run after ownership")
+
+    task = asyncio.create_task(
+        controller.execute(
+            surface,
+            legacy_primary=forbidden_legacy,
+            absolute_deadline=time.monotonic() + 5,
+        )
+    )
+    await asyncio.wait_for(
+        asyncio.gather(file_reader.started.wait(), web_reader.started.wait()),
+        timeout=2,
+    )
+    new_ingress = SupervisorAssistIngressBindingV1.from_claimed_request(
+        source_ref="assist-controller:new-turn",
+        request_fingerprint_sha256="d" * 64,
+    )
+    cancel_ingress = SupervisorAssistIngressBindingV1.from_claimed_request(
+        source_ref="assist-controller:explicit-cancel",
+        request_fingerprint_sha256="c" * 64,
+    )
+
+    root = controller.classify_supervisor_assist_pending(
+        surface.actor.user_id,
+        surface.turn.message,
+        actor=surface.actor,
+        conversation_id=surface.conversation_id,
+        ingress_binding=surface.ingress_binding,
+        current_attachment_count=1,
+    )
+    new = controller.classify_supervisor_assist_pending(
+        surface.actor.user_id,
+        "ещё один вопрос",
+        actor=surface.actor,
+        conversation_id=surface.conversation_id,
+        ingress_binding=new_ingress,
+    )
+    cancel = controller.classify_supervisor_assist_pending(
+        surface.actor.user_id,
+        " ОтМеНа ",
+        actor=surface.actor,
+        conversation_id=surface.conversation_id,
+        ingress_binding=cancel_ingress,
+    )
+    missing = controller.classify_supervisor_assist_pending(
+        surface.actor.user_id,
+        "ещё один вопрос",
+        actor=surface.actor,
+        conversation_id=surface.conversation_id,
+        ingress_binding=None,
+    )
+
+    assert type(root) is SupervisorAssistPendingDecision
+    assert root.relation is SupervisorAssistPendingRelation.ROOT_REPLAY
+    assert type(new) is SupervisorAssistPendingDecision
+    assert new.relation is SupervisorAssistPendingRelation.NEW_TURN
+    assert new.pending == root.pending
+    assert type(cancel) is SupervisorAssistPendingDecision
+    assert cancel.relation is SupervisorAssistPendingRelation.EXPLICIT_CANCEL
+    assert cancel.pending == root.pending
+    assert type(missing) is SupervisorAssistPendingDecision
+    assert missing.relation is SupervisorAssistPendingRelation.UNCERTAIN
+    assert missing.pending is None
+
+    with track_request_effects(
+        lambda: True,
+        before_effect_in_transaction=lambda _conn: True,
+        request_binding_sha256=cancel.current_request_binding_sha256,
+    ):
+        cancelled = await controller.cancel_active(
+            AssistConversationScope(surface.actor.user_id, surface.conversation_id),
+            decision=cancel,
+            user_message="отмена",
+            absolute_deadline=time.monotonic() + 3,
+        )
+    original = await asyncio.wait_for(task, timeout=2)
+    assert cancelled is not None and cancelled.outcome is SupervisorAssistOutcome.CANCELLED
+    assert original.outcome is SupervisorAssistOutcome.CANCELLED
 
 
 @pytest.mark.asyncio
@@ -1352,7 +1522,7 @@ async def test_retained_owner_is_retired_before_an_overlapping_legacy_turn(stora
 
     disposition = await controller.reconcile_pending_before_legacy(
         AssistConversationScope(surface.actor.user_id, surface.conversation_id),
-        pending,
+        _pending_decision(SupervisorAssistPendingRelation.NEW_TURN, pending),
         absolute_deadline=time.monotonic() + 3,
     )
     assert interrupted.outcome is SupervisorAssistOutcome.INTERRUPTED

@@ -88,6 +88,8 @@ def test_active_graph_decision_is_closed_and_exactly_scoped(
     assert decision.conversation_id == pending.conversation_id
     assert decision.suppresses_ingestion is suppresses_ingestion
     assert decision.permits_legacy is permits_legacy
+    assert decision.matches_message("cancel" if current_label == "cancel" else "обычный ход")
+    assert not decision.matches_message("обычный ход" if current_label == "cancel" else "cancel")
     assert "graph_fedcba9876543210" not in repr(decision)
 
 
@@ -103,6 +105,7 @@ def test_uncertain_decision_suppresses_both_ingestion_and_legacy() -> None:
     assert decision.root_request_binding_sha256 is None
     assert decision.suppresses_ingestion is True
     assert decision.permits_legacy is False
+    assert decision.matches_message("любой непустой ход")
 
 
 def test_relation_claims_fail_closed_on_binding_or_scope_mismatch() -> None:
@@ -119,6 +122,13 @@ def test_relation_claims_fail_closed_on_binding_or_scope_mismatch() -> None:
     with pytest.raises(ValueError, match="new turn"):
         SupervisorAssistPendingDecision.for_graph(
             relation=SupervisorAssistPendingRelation.NEW_TURN,
+            pending=pending,
+            root_request_binding_sha256=root,
+            current=_binding("root"),
+        )
+    with pytest.raises(ValueError, match="cancellation"):
+        SupervisorAssistPendingDecision.for_graph(
+            relation=SupervisorAssistPendingRelation.EXPLICIT_CANCEL,
             pending=pending,
             root_request_binding_sha256=root,
             current=_binding("root"),

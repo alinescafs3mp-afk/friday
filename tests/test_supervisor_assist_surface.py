@@ -10,6 +10,7 @@ from friday.file_evidence import stamp_current_turn_file_reference
 from friday.orchestration.capability_binding import operational_capability_snapshot
 from friday.orchestration.policy_kernel import PolicyAdmissionContext, admit_supervisor_proposal
 from friday.orchestration.semantic_supervisor import build_supervisor_input
+from friday.orchestration.supervisor_assist_ingress import SupervisorAssistIngressBindingV1
 from friday.orchestration.supervisor_assist_surface import (
     CurrentFileWebAssistSurface,
     bind_assist_plan_to_surface,
@@ -100,6 +101,10 @@ def _surface_kwargs(**overrides: Any) -> dict[str, Any]:
         "reply_assistant_message_id": None,
         "turn_policy": None,
         "pending_durable_admission": None,
+        "ingress_binding": SupervisorAssistIngressBindingV1.from_claimed_request(
+            source_ref="assist-surface:1",
+            request_fingerprint_sha256="f" * 64,
+        ),
         "conversation_is_dialogue": lambda person_id, conversation_id: (
             person_id == actor.own_id and conversation_id == "conv_1234567890abcdef"
         ),
@@ -210,6 +215,7 @@ def test_exact_surface_mints_only_process_owned_file_and_public_query_pins() -> 
                 conversation_id="conv_1234567890abcdef",
             ),
         ),
+        ("ingress_binding", None),
     ],
 )
 def test_special_or_already_owned_surfaces_never_enter_assist(field: str, value: object) -> None:

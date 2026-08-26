@@ -136,6 +136,8 @@ class SupervisorAssistPendingDecision:
             raise ValueError("root replay does not match the admitted request")
         if self.relation is SupervisorAssistPendingRelation.NEW_TURN and same_request:
             raise ValueError("new turn reuses the admitted request binding")
+        if self.relation is SupervisorAssistPendingRelation.EXPLICIT_CANCEL and same_request:
+            raise ValueError("cancellation reuses the admitted request binding")
 
     @classmethod
     def for_graph(
@@ -185,6 +187,18 @@ class SupervisorAssistPendingDecision:
     @property
     def permits_legacy(self) -> bool:
         return self.relation is SupervisorAssistPendingRelation.NEW_TURN
+
+    def matches_message(self, message: object) -> bool:
+        """Reject a carried cancel/new relation that disagrees with current text."""
+
+        if type(message) is not str or not message:
+            return False
+        if self.relation is SupervisorAssistPendingRelation.UNCERTAIN:
+            return True
+        explicit_cancel = message.strip().casefold() in {"отмена", "cancel"}
+        return explicit_cancel is (
+            self.relation is SupervisorAssistPendingRelation.EXPLICIT_CANCEL
+        )
 
 
 __all__ = [
