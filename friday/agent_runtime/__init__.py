@@ -339,6 +339,12 @@ from friday.orchestration.simple_public_news_outcome import (
     simple_public_news_source_ledger_identity,
     simple_public_news_topic_mismatch_is_empty,
 )
+from friday.organs.engineer.publication import (
+    ExactGeneratedFileBatch,
+    ExactGeneratedFilePublicationError,
+    exact_generated_file_batch,
+    persist_exact_generated_file_batch,
+)
 from friday.organs.obsidian.conversation import (
     OBSIDIAN_READ_TOOL_NAMES,
     OBSIDIAN_TOOL_NAMES,
@@ -2160,7 +2166,13 @@ _ENGINEER_TOOL_CAPABILITIES = {
 _ENGINEER_CAPABILITIES = frozenset({"engineer.use", *_ENGINEER_TOOL_CAPABILITIES.values()})
 _HOST_CONTROL_CONTEXT_TOOL_NAMES = frozenset({"host_action_run", "host_json_extract", "software_install"})
 _HOST_CONTROL_PRIVATE_ARGUMENTS = frozenset({"_conversation_id", "_raw_id", "_source_message_id", "raw_id"})
-_ENGINEER_COMMAND_CONTEXT_TOOL_NAMES = frozenset({"engineer_command_run"})
+_ENGINEER_COMMAND_RUN_CONTEXT_TOOL_NAMES = frozenset({"engineer_command_run"})
+_ENGINEER_COMMAND_MANAGE_CONTEXT_TOOL_NAMES = frozenset(
+    {"engineer_command_status", "engineer_command_cancel"}
+)
+_ENGINEER_COMMAND_CONTEXT_TOOL_NAMES = (
+    _ENGINEER_COMMAND_RUN_CONTEXT_TOOL_NAMES | _ENGINEER_COMMAND_MANAGE_CONTEXT_TOOL_NAMES
+)
 _ENGINEER_COMMAND_PRIVATE_ARGUMENTS = frozenset(
     {"_conversation_id", "_source_message_id", "_telegram_update_id"}
 )
@@ -36363,6 +36375,15 @@ class AgentContext:
     #: Authenticated Telegram update which carried the current owner command.
     #: It is transport provenance, never a model argument or generic API claim.
     engineer_command_telegram_update_id: str = ""
+    #: Exact process-owned identity of a terminal Engineer command attachment.
+    #: The binary carrier remains out of the model transcript and may be
+    #: persisted only if this batch still matches at the final publication
+    #: boundary after a fresh capability check.
+    engineer_command_generated_file_batch: ExactGeneratedFileBatch | None = field(
+        default=None,
+        repr=False,
+        compare=False,
+    )
     #: Local calendar day frozen on the immutable root turn. Dynamic words such
     #: as "today" must resolve to the same arguments on a regenerate after
     #: midnight, otherwise one idempotency key would name two effects.
@@ -57235,6 +57256,9 @@ class AgentRuntime:
             engineer_compile_outcome is not None
             and engineer_compile_outcome.status is CapabilityStatus.SUCCEEDED
         )
+        engineer_command_publication_reauth_required = bool(
+            type(context.engineer_command_generated_file_batch) is ExactGeneratedFileBatch
+        )
         publication_reauth_required = bool(
             attachment_publication_reauth_required
             or source_search_publication_reauth_required
@@ -57244,6 +57268,7 @@ class AgentRuntime:
             or engineer_host_publication_reauth_required
             or network_report_publication_reauth_required
             or compile_publication_reauth_required
+            or engineer_command_publication_reauth_required
         )
         accepted_simple_public_news_outcome = None
         accepted_archive_recall_outcome: ArchiveRecallOutcome | None = None
@@ -57265,6 +57290,7 @@ class AgentRuntime:
                     engineer_compile_outcome is not None
                     and engineer_compile_outcome.status is CapabilityStatus.SUCCEEDED
                 )
+                or engineer_command_publication_reauth_required
             )
             else None
         )
@@ -57422,6 +57448,38 @@ class AgentRuntime:
                     response_files=response.get("file_clips"),
                 )
             )
+            engineer_command_publication_authorized = not (
+                engineer_command_publication_reauth_required
+            )
+            engineer_command_carrier_integrity_ok = not (
+                engineer_command_publication_reauth_required
+            )
+            engineer_command_fresh_authorized = not (
+                engineer_command_publication_reauth_required
+            )
+            if engineer_command_publication_reauth_required:
+                expected_command_batch = context.engineer_command_generated_file_batch
+                observed_command_batch = None
+                try:
+                    raw_command_files = response.get("file_clips")
+                    if isinstance(raw_command_files, list):
+                        observed_command_batch = exact_generated_file_batch(
+                            [item for item in raw_command_files if isinstance(item, Mapping)],
+                            max_bytes=self.settings.max_upload_bytes,
+                        )
+                except ExactGeneratedFilePublicationError:
+                    observed_command_batch = None
+                engineer_command_carrier_integrity_ok = bool(
+                    type(expected_command_batch) is ExactGeneratedFileBatch
+                    and observed_command_batch == expected_command_batch
+                )
+                engineer_command_fresh_authorized = bool(
+                    self._fresh_engineer_actor(actor, "engineer.command.manage") is not None
+                )
+                engineer_command_publication_authorized = bool(
+                    engineer_command_carrier_integrity_ok
+                    and engineer_command_fresh_authorized
+                )
             publication_authorized = bool(
                 not publication_reauth_required
                 or attachment_publication_authorized
@@ -57432,6 +57490,7 @@ class AgentRuntime:
                 and engineer_host_publication_authorized
                 and network_report_publication_authorized
                 and compile_publication_authorized
+                and engineer_command_publication_authorized
             )
             final_voice_publication_authorized = bool(
                 final_voice is None
@@ -57468,6 +57527,15 @@ class AgentRuntime:
             )
             compile_authority_changed_before_publication = bool(
                 compile_publication_reauth_required and not compile_publication_authorized
+            )
+            engineer_command_authority_changed_before_publication = bool(
+                engineer_command_publication_reauth_required
+                and engineer_command_carrier_integrity_ok
+                and not engineer_command_fresh_authorized
+            )
+            engineer_command_carrier_changed_before_publication = bool(
+                engineer_command_publication_reauth_required
+                and not engineer_command_carrier_integrity_ok
             )
             if not publication_authorized:
                 LOGGER.warning("source-publication: authority changed before assistant commit")
@@ -57506,6 +57574,14 @@ class AgentRuntime:
                             "compile_authority_changed_before_publication",
                             compile_authority_changed_before_publication,
                         ),
+                        (
+                            "engineer_command_authority_changed_before_publication",
+                            engineer_command_authority_changed_before_publication,
+                        ),
+                        (
+                            "engineer_command_carrier_changed_before_publication",
+                            engineer_command_carrier_changed_before_publication,
+                        ),
                     )
                     if changed
                 ]
@@ -57541,6 +57617,16 @@ class AgentRuntime:
                     )
                 if compile_authority_changed_before_publication:
                     authority_changed_notice = _ENGINEER_COMPILE_AUTHORITY_CHANGED_BEFORE_PUBLICATION
+                if engineer_command_authority_changed_before_publication:
+                    authority_changed_notice = (
+                        "Результат Engineer-команды готов, но право его публикации изменилось; "
+                        "файл не отправляю. Команда автоматически не повторялась."
+                    )
+                if engineer_command_carrier_changed_before_publication:
+                    authority_changed_notice = (
+                        "Результат Engineer-команды изменился до публикации или не прошёл "
+                        "проверку целостности; файл не отправляю. Команда автоматически не повторялась."
+                    )
                 content = "\n\n".join(part for part in (safe_effect_notice, authority_changed_notice) if part)
                 response["content"] = content
                 response["file_clips"] = []
@@ -57575,6 +57661,10 @@ class AgentRuntime:
                     response["_engineer_host_authority_changed_owned"] = True
                 if compile_authority_changed_before_publication:
                     response["_engineer_compile_authority_changed_owned"] = True
+                if engineer_command_authority_changed_before_publication:
+                    response["_engineer_command_authority_changed_owned"] = True
+                if engineer_command_carrier_changed_before_publication:
+                    response["_engineer_command_carrier_changed_owned"] = True
                 response.pop("_document_metadata_owned", None)
                 response.pop("_office_exact_owned", None)
                 model_said = ""
@@ -58261,7 +58351,10 @@ class AgentRuntime:
                 and engineer_compile_outcome.status is CapabilityStatus.SUCCEEDED
             )
             if publication_authorized and (
-                decompile_report_expected or network_report_expected or compile_jar_expected
+                decompile_report_expected
+                or network_report_expected
+                or compile_jar_expected
+                or engineer_command_publication_reauth_required
             ):
                 # Freeze every process-owned report only after its final
                 # capability/source reauthorization, but before releasing this
@@ -58273,18 +58366,38 @@ class AgentRuntime:
                 )
                 if inline_batch_identity is None:
                     raise ValueError("engineer generated-file input batch attestation failed")
-                generated_projection = persist_generated_response_files(
-                    self.storage,
-                    self.settings.files_dir,
-                    {
-                        "message_id": str(assistant_message.get("id") or ""),
-                        "files": response.get("file_clips") or [],
-                    },
-                    tenant_id=actor.user_id,
-                    person_id=actor.own_id,
-                    max_bytes=self.settings.max_upload_bytes,
-                    rollback_guard=generated_files_rollback_guard,
-                )
+                generated_response = {
+                    "message_id": str(assistant_message.get("id") or ""),
+                    "files": response.get("file_clips") or [],
+                }
+                if engineer_command_publication_reauth_required:
+                    if (
+                        type(expected_command_batch) is not ExactGeneratedFileBatch
+                        or generated_files_rollback_guard is None
+                    ):
+                        raise ValueError("Engineer command generated-file authority is unavailable")
+                    exact_publication = persist_exact_generated_file_batch(
+                        self.storage,
+                        self.settings.files_dir,
+                        generated_response,
+                        expected_command_batch,
+                        tenant_id=actor.user_id,
+                        person_id=actor.own_id,
+                        max_bytes=self.settings.max_upload_bytes,
+                        rollback_guard=generated_files_rollback_guard,
+                    )
+                    generated_projection = exact_publication.response
+                    generated_files_attestation = exact_publication.attestation
+                else:
+                    generated_projection = persist_generated_response_files(
+                        self.storage,
+                        self.settings.files_dir,
+                        generated_response,
+                        tenant_id=actor.user_id,
+                        person_id=actor.own_id,
+                        max_bytes=self.settings.max_upload_bytes,
+                        rollback_guard=generated_files_rollback_guard,
+                    )
                 persisted_files = generated_projection.get("files")
                 if not isinstance(persisted_files, list) or not persisted_files:
                     raise ValueError("engineer generated report durability attestation failed")
@@ -58367,12 +58480,13 @@ class AgentRuntime:
                         != engineer_network_report_receipt
                     ):
                         raise ValueError("engineer network report receipt binding changed")
-                generated_files_attestation = generated_files_persistence_attestation(
-                    {
-                        "message_id": str(assistant_message.get("id") or ""),
-                        "files": persisted_files,
-                    }
-                )
+                if generated_files_attestation is None:
+                    generated_files_attestation = generated_files_persistence_attestation(
+                        {
+                            "message_id": str(assistant_message.get("id") or ""),
+                            "files": persisted_files,
+                        }
+                    )
                 if generated_files_attestation is None:
                     raise ValueError("engineer generated-file persistence attestation is unavailable")
         publication_authority_changed_before_publication = bool(
@@ -58384,6 +58498,8 @@ class AgentRuntime:
             or engineer_host_authority_changed_before_publication
             or network_report_authority_changed_before_publication
             or compile_authority_changed_before_publication
+            or engineer_command_authority_changed_before_publication
+            or engineer_command_carrier_changed_before_publication
         )
         if attributed_knowledge_ids:
             self.storage.record_knowledge_usage(
@@ -58405,6 +58521,12 @@ class AgentRuntime:
                 engineer_host_authority_changed_before_publication
             ),
             "compile_authority_changed_before_publication": (compile_authority_changed_before_publication),
+            "engineer_command_authority_changed_before_publication": (
+                engineer_command_authority_changed_before_publication
+            ),
+            "engineer_command_carrier_changed_before_publication": (
+                engineer_command_carrier_changed_before_publication
+            ),
             "source_search_authority_changed_before_publication": (
                 source_search_authority_changed_before_publication
             ),
@@ -63205,6 +63327,14 @@ class AgentRuntime:
                 ),
                 None,
             )
+            engineer_command_status_batch_index = next(
+                (
+                    index
+                    for index, selected_call in enumerate(selected_calls)
+                    if selected_call.name == "engineer_command_status"
+                ),
+                None,
+            )
             forced_workspace_filename = (
                 workspace_intent.filename if forced_workspace_call and workspace_intent else ""
             )
@@ -63291,6 +63421,24 @@ class AgentRuntime:
                 # authority to START its siblings afterwards.  Keep a tool
                 # result for every selected call so the assistant/tool message
                 # protocol remains valid while failing the skipped calls closed.
+                if (
+                    engineer_command_status_batch_index is not None
+                    and selected_index != engineer_command_status_batch_index
+                ):
+                    # A status result can carry sealed privileged bytes. Keep
+                    # it as the sole call in its model-selected batch so no
+                    # sibling can mutate the exact carrier set or start an
+                    # unrelated effect before the publication boundary.
+                    _record_trace_tool_outcome(context, call.name, CapabilityStatus.NOT_STARTED)
+                    total_calls += 1
+                    round_results.append(
+                        (
+                            str(openai_call["id"]),
+                            "Инструмент не запущен: результат Engineer-команды "
+                            "требует отдельного изолированного шага.",
+                        )
+                    )
+                    continue
                 if archive_search_batch_index is not None and selected_index != archive_search_batch_index:
                     # One federated page is the sole private disclosure in its
                     # model-selected batch.  Even local siblings are closed:
@@ -63468,21 +63616,28 @@ class AgentRuntime:
                         )
                         or context.interaction_mode != "engineer"
                         or not context.conversation_id
-                        or not context.effect_root_user_message_id
-                        or re.fullmatch(
-                            r"[0-9]{1,20}",
-                            context.engineer_command_telegram_update_id,
-                        )
-                        is None
                     ):
                         carrier_allowed = False
                     else:
                         call_arguments = dict(model_arguments)
                         call_arguments["_conversation_id"] = context.conversation_id
-                        call_arguments["_source_message_id"] = context.effect_root_user_message_id
-                        call_arguments["_telegram_update_id"] = (
-                            context.engineer_command_telegram_update_id
-                        )
+                        if call.name in _ENGINEER_COMMAND_RUN_CONTEXT_TOOL_NAMES:
+                            if (
+                                not context.effect_root_user_message_id
+                                or re.fullmatch(
+                                    r"[0-9]{1,20}",
+                                    context.engineer_command_telegram_update_id,
+                                )
+                                is None
+                            ):
+                                carrier_allowed = False
+                            else:
+                                call_arguments["_source_message_id"] = (
+                                    context.effect_root_user_message_id
+                                )
+                                call_arguments["_telegram_update_id"] = (
+                                    context.engineer_command_telegram_update_id
+                                )
                 elif call.name in _HOST_CONTROL_CONTEXT_TOOL_NAMES:
                     model_arguments = call.arguments if isinstance(call.arguments, Mapping) else {}
                     if (
@@ -64113,6 +64268,54 @@ class AgentRuntime:
                     _trace_tool_result_status(call.name, tool_result),
                 )
                 total_calls += 1
+                if (
+                    tool_result.success
+                    and call.name == "engineer_command_status"
+                    and isinstance(tool_result.attachment, Mapping)
+                ):
+                    command_data = tool_result.data if isinstance(tool_result.data, Mapping) else {}
+                    command_receipt = command_data.get("receipt")
+                    command_status = str(command_data.get("status") or "")
+                    attachment_kind = str(tool_result.attachment.get("kind") or "")
+                    receipt_matches = bool(
+                        isinstance(command_receipt, Mapping)
+                        and str(command_receipt.get("job_id") or "")
+                        == str(command_data.get("job_id") or "")
+                        and str(command_receipt.get("status") or "") == command_status
+                    )
+                    if command_status not in {
+                        "completed",
+                        "failed",
+                        "cancelled",
+                        "timeout",
+                    } or attachment_kind != "document" or not receipt_matches:
+                        # The attachment is an out-of-band privileged carrier;
+                        # a malformed status envelope may still be shown as
+                        # ordinary tool data, but its bytes never leave.
+                        tool_result.attachment = None
+                    else:
+                        try:
+                            context.engineer_command_generated_file_batch = (
+                                exact_generated_file_batch(
+                                    [
+                                        *[
+                                            dict(item)
+                                            for item in file_clips
+                                            if isinstance(item, Mapping)
+                                        ],
+                                        dict(tool_result.attachment),
+                                    ],
+                                    max_bytes=self.settings.max_upload_bytes,
+                                )
+                            )
+                        except ExactGeneratedFilePublicationError:
+                            tool_result.attachment = None
+                        else:
+                            # No later model-selected tool may add a sibling
+                            # binary carrier after this exact batch was frozen.
+                            # The final publication boundary checks the batch
+                            # again and fresh-rechecks Engineer authority.
+                            tools.clear()
                 if tool_result.success and tool_result.attachment:
                     # Голос и собранный файл — разные вложения и разные способы
                     # доставки: голосовое сообщение и документ. Складывать их в

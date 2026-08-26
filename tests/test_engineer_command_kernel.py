@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import secrets
 import shutil
@@ -161,6 +162,139 @@ def test_shell_writes_admitted_output_file(tmp_path: Path) -> None:
     assert generated.size_bytes == 6
     sealed = kernel.store.job_dir(receipt.job_id) / "sealed" / "note.txt"
     assert sealed.read_bytes() == b"hello\n"
+
+
+def test_terminal_result_is_conversation_scoped_and_returns_sealed_bytes(tmp_path: Path) -> None:
+    kernel = _kernel(tmp_path)
+    request = _shell("printf 'sealed-result' > output/result.bin", key=_key("terminal-result"))
+    job_id = _submit(kernel, request, destructive=True)
+    _wait(kernel, job_id)
+
+    with pytest.raises(CommandError, match="conversation_mismatch"):
+        kernel.terminal_result(
+            job_id,
+            actor_id=ACTOR,
+            conversation_id="conv-other",
+        )
+    with pytest.raises(CommandError, match="conversation_required"):
+        kernel.terminal_result(
+            job_id,
+            actor_id=ACTOR,
+            conversation_id=None,  # type: ignore[arg-type]
+        )
+
+    receipt, outputs = kernel.terminal_result(
+        job_id,
+        actor_id=ACTOR,
+        conversation_id="conv-1",
+    )
+    assert receipt.status is CommandStatus.COMPLETED
+    assert outputs == ((receipt.generated_files[0], b"sealed-result"),)
+
+
+def test_legacy_receipt_remains_status_readable_but_outputs_are_not_publishable(
+    tmp_path: Path,
+) -> None:
+    kernel = _kernel(tmp_path)
+    request = _shell("printf legacy > output/result.bin", key=_key("legacy-receipt"))
+    job_id = _submit(kernel, request, destructive=True)
+    receipt = _wait(kernel, job_id)
+    legacy_payload = receipt.to_public_payload()
+    legacy_payload.pop("generated_files_sha256")
+    legacy_mac = kernel.authority.sign_receipt(legacy_payload)
+    store_root = kernel.store.root
+    with kernel.store.transaction():
+        kernel.store.update_job(job_id, {"receipt_mac": legacy_mac})
+    kernel.close()
+
+    restarted = CommandKernel(store_root, _authority())
+    legacy_receipt, mac_version = restarted.terminal_receipt(
+        job_id,
+        actor_id=ACTOR,
+        conversation_id="conv-1",
+    )
+    assert legacy_receipt.status is CommandStatus.COMPLETED
+    assert mac_version == 1
+    with pytest.raises(CommandError, match="legacy_output_receipt_unpublishable"):
+        restarted.terminal_result(
+            job_id,
+            actor_id=ACTOR,
+            conversation_id="conv-1",
+        )
+
+
+def test_terminal_result_refuses_a_tampered_receipt_mac(tmp_path: Path) -> None:
+    kernel = _kernel(tmp_path)
+    request = _shell("printf result > output/result.bin", key=_key("receipt-mac"))
+    job_id = _submit(kernel, request, destructive=True)
+    _wait(kernel, job_id)
+    store_root = kernel.store.root
+    with kernel.store.transaction():
+        kernel.store.update_job(job_id, {"receipt_mac": "0" * 64})
+    kernel.close()
+
+    restarted = CommandKernel(store_root, _authority())
+    with pytest.raises(CommandError, match="corrupt_job_state"):
+        restarted.terminal_result(
+            job_id,
+            actor_id=ACTOR,
+            conversation_id="conv-1",
+        )
+
+
+def test_terminal_result_receipt_mac_binds_the_exact_output_inventory(tmp_path: Path) -> None:
+    kernel = _kernel(tmp_path)
+    request = _shell("printf result > output/result.bin", key=_key("inventory-mac"))
+    job_id = _submit(kernel, request, destructive=True)
+    receipt = _wait(kernel, job_id)
+    descriptor = receipt.generated_files[0]
+    forged_inventory = json.dumps(
+        [
+            {
+                "mode": descriptor.mode ^ 0o100,
+                "relative_path": descriptor.relative_path,
+                "sha256": descriptor.sha256,
+                "size_bytes": descriptor.size_bytes,
+            }
+        ],
+        ensure_ascii=True,
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    store_root = kernel.store.root
+    with kernel.store.transaction():
+        kernel.store.update_job(job_id, {"generated_files_json": forged_inventory})
+    kernel.close()
+
+    restarted = CommandKernel(store_root, _authority())
+    with pytest.raises(CommandError, match="corrupt_job_state"):
+        restarted.terminal_result(
+            job_id,
+            actor_id=ACTOR,
+            conversation_id="conv-1",
+        )
+
+
+@pytest.mark.parametrize(
+    "corrupt_fields",
+    [
+        {"status": "not-a-command-status"},
+        {"started_at": "nan"},
+    ],
+)
+def test_progress_normalizes_corrupt_durable_state(
+    tmp_path: Path,
+    corrupt_fields: dict[str, object],
+) -> None:
+    kernel = _kernel(tmp_path)
+    request = _argv("/usr/bin/true", key=_key("corrupt-progress"))
+    job_id = _submit(kernel, request, destructive=True)
+    _wait(kernel, job_id)
+    with kernel.store.transaction():
+        kernel.store.update_job(job_id, corrupt_fields)
+
+    with pytest.raises(CommandError, match="corrupt_job_state"):
+        kernel.progress(job_id, actor_id=ACTOR, conversation_id="conv-1")
 
 
 def test_long_job_progress_is_truthful_then_cancel(tmp_path: Path) -> None:

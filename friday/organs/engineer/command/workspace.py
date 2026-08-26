@@ -5,6 +5,7 @@ from __future__ import annotations
 import contextlib
 import errno
 import hashlib
+import hmac
 import os
 import stat
 from pathlib import Path
@@ -132,6 +133,153 @@ class JobWorkspace:
                 os.close(fd)
         finally:
             os.close(dir_fd)
+
+    def read_generated_file_verified(self, generated: GeneratedFile) -> bytes:
+        """Re-read one sealed output only while its receipt identity remains exact."""
+
+        parts = self._validated_generated_file_receipt(generated)
+        try:
+            root_fd = open_dir_nofollow(self.sealed)
+        except CommandError as exc:
+            raise CommandError("corrupt_generated_output") from exc
+        open_fds = [root_fd]
+        linked_identities: list[tuple[int, str, os.stat_result]] = []
+        try:
+            root_before = os.fstat(root_fd)
+            if not stat.S_ISDIR(root_before.st_mode):
+                raise CommandError("corrupt_generated_output")
+            parent_fd = root_fd
+            directory_flags = (
+                os.O_RDONLY
+                | os.O_DIRECTORY
+                | getattr(os, "O_CLOEXEC", 0)
+                | getattr(os, "O_NOFOLLOW", 0)
+                | getattr(os, "O_NONBLOCK", 0)
+            )
+            for name in parts[:-1]:
+                try:
+                    child_fd = os.open(name, directory_flags, dir_fd=parent_fd)
+                except OSError as exc:
+                    raise CommandError("corrupt_generated_output") from exc
+                open_fds.append(child_fd)
+                opened = os.fstat(child_fd)
+                if not stat.S_ISDIR(opened.st_mode):
+                    raise CommandError("corrupt_generated_output")
+                linked_identities.append((parent_fd, name, opened))
+                parent_fd = child_fd
+
+            file_flags = (
+                os.O_RDONLY
+                | getattr(os, "O_CLOEXEC", 0)
+                | getattr(os, "O_NOFOLLOW", 0)
+                | getattr(os, "O_NONBLOCK", 0)
+            )
+            try:
+                file_fd = os.open(parts[-1], file_flags, dir_fd=parent_fd)
+            except OSError as exc:
+                raise CommandError("corrupt_generated_output") from exc
+            open_fds.append(file_fd)
+            before = os.fstat(file_fd)
+            if (
+                not stat.S_ISREG(before.st_mode)
+                or before.st_nlink != 1
+                or stat.S_IMODE(before.st_mode) != 0o400
+                or before.st_size != generated.size_bytes
+            ):
+                raise CommandError("corrupt_generated_output")
+            linked_identities.append((parent_fd, parts[-1], before))
+
+            hasher = hashlib.sha256()
+            chunks: list[bytes] = []
+            total = 0
+            while True:
+                chunk = os.read(file_fd, 65536)
+                if not chunk:
+                    break
+                total += len(chunk)
+                if total > generated.size_bytes or total > MAX_OUTPUT_FILE_BYTES:
+                    raise CommandError("corrupt_generated_output")
+                hasher.update(chunk)
+                chunks.append(chunk)
+            after = os.fstat(file_fd)
+            if (
+                not self._same_file_identity(before, after)
+                or total != generated.size_bytes
+                or not hmac.compare_digest(hasher.hexdigest(), generated.sha256)
+            ):
+                raise CommandError("corrupt_generated_output")
+
+            for link_parent_fd, name, expected in linked_identities:
+                try:
+                    linked = os.stat(name, dir_fd=link_parent_fd, follow_symlinks=False)
+                except OSError as exc:
+                    raise CommandError("corrupt_generated_output") from exc
+                if not self._same_file_identity(expected, linked):
+                    raise CommandError("corrupt_generated_output")
+            try:
+                root_linked = os.stat(self.sealed, follow_symlinks=False)
+            except OSError as exc:
+                raise CommandError("corrupt_generated_output") from exc
+            if not self._same_file_identity(root_before, root_linked):
+                raise CommandError("corrupt_generated_output")
+            return b"".join(chunks)
+        except CommandError:
+            raise
+        except OSError as exc:
+            raise CommandError("corrupt_generated_output") from exc
+        finally:
+            for fd in reversed(open_fds):
+                with contextlib.suppress(OSError):
+                    os.close(fd)
+
+    @staticmethod
+    def _validated_generated_file_receipt(generated: GeneratedFile) -> tuple[str, ...]:
+        if type(generated) is not GeneratedFile:
+            raise CommandError("corrupt_generated_output")
+        path = generated.relative_path
+        if not isinstance(path, str) or not path or "\x00" in path or path.startswith("/"):
+            raise CommandError("corrupt_generated_output")
+        parts = tuple(path.split("/"))
+        if (
+            not parts
+            or any(not part or part in {".", ".."} for part in parts)
+            or len(parts) - 1 > MAX_OUTPUT_DEPTH
+            or isinstance(generated.size_bytes, bool)
+            or not isinstance(generated.size_bytes, int)
+            or not 0 <= generated.size_bytes <= MAX_OUTPUT_FILE_BYTES
+            or not isinstance(generated.sha256, str)
+            or len(generated.sha256) != 64
+            or any(char not in "0123456789abcdef" for char in generated.sha256)
+            or isinstance(generated.mode, bool)
+            or not isinstance(generated.mode, int)
+            or not 0 <= generated.mode <= 0o7777
+        ):
+            raise CommandError("corrupt_generated_output")
+        return parts
+
+    @staticmethod
+    def _same_file_identity(before: os.stat_result, after: os.stat_result) -> bool:
+        return (
+            before.st_dev,
+            before.st_ino,
+            before.st_mode,
+            before.st_uid,
+            before.st_gid,
+            before.st_size,
+            before.st_mtime_ns,
+            before.st_ctime_ns,
+            before.st_nlink,
+        ) == (
+            after.st_dev,
+            after.st_ino,
+            after.st_mode,
+            after.st_uid,
+            after.st_gid,
+            after.st_size,
+            after.st_mtime_ns,
+            after.st_ctime_ns,
+            after.st_nlink,
+        )
 
     def open_evidence(self, name: str) -> int:
         if name not in {"stdout.bin", "stderr.bin"}:

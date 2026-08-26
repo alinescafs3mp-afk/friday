@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import contextlib
+import hmac
 import json
+import math
 import os
 import secrets
 import threading
@@ -82,17 +84,22 @@ def _resolved_from_json(raw: str | None) -> ResolvedExecutable | None:
 
 
 def _files_from_json(raw: str | None) -> tuple[GeneratedFile, ...]:
-    files: list[GeneratedFile] = []
-    for item in decode_json_list(raw):
-        files.append(
-            GeneratedFile(
-                relative_path=str(item.get("relative_path") or ""),
-                size_bytes=int(item.get("size_bytes") or 0),
-                sha256=str(item.get("sha256") or ""),
-                mode=int(item.get("mode") or 0),
+    try:
+        files: list[GeneratedFile] = []
+        for item in decode_json_list(raw):
+            files.append(
+                GeneratedFile(
+                    relative_path=str(item.get("relative_path") or ""),
+                    size_bytes=int(item.get("size_bytes") or 0),
+                    sha256=str(item.get("sha256") or ""),
+                    mode=int(item.get("mode") or 0),
+                )
             )
-        )
-    return tuple(files)
+        return tuple(files)
+    except CommandError:
+        raise
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise CommandError("corrupt_job_state") from exc
 
 
 def _executable_json(resolved: ResolvedExecutable) -> str:
@@ -233,6 +240,10 @@ class CommandKernel:
                         raise CommandError("idempotency_conflict")
                     return existing["job_id"]
             grant = self.authority.parse(grant_token, request, actor_id=actor_id)
+            # A revoked grant is dead before executable resolution or command
+            # classification.  Keep this check again at both effect boundaries
+            # below to close revocation races during admission and spawn.
+            self.authority.still_valid(grant)
             require_profile(grant.isolation_profile)
             held = resolve_request(
                 request,
@@ -416,8 +427,14 @@ class CommandKernel:
             if bwrap is not None:
                 bwrap.close()
 
-    def progress(self, job_id: str, *, actor_id: str) -> CommandProgress:
-        self._require_actor(job_id, actor_id)
+    def progress(
+        self,
+        job_id: str,
+        *,
+        actor_id: str,
+        conversation_id: str | None = None,
+    ) -> CommandProgress:
+        self._require_actor(job_id, actor_id, conversation_id=conversation_id)
         with self._lock:
             live = self._live.get(job_id)
         if live is not None:
@@ -432,8 +449,16 @@ class CommandKernel:
                 isolation_profile=live.isolation,
             )
         job = self.store.read_job(job_id)
-        status = CommandStatus(str(job.get("status") or CommandStatus.UNKNOWN.value))
-        isolation = IsolationProfile(str(job.get("isolation_profile") or IsolationProfile.ISOLATED_WORKSPACE.value))
+        try:
+            status = CommandStatus(str(job.get("status") or CommandStatus.UNKNOWN.value))
+            isolation = IsolationProfile(
+                str(
+                    job.get("isolation_profile")
+                    or IsolationProfile.ISOLATED_WORKSPACE.value
+                )
+            )
+        except (TypeError, ValueError) as exc:
+            raise CommandError("corrupt_job_state") from exc
         if status in {CommandStatus.RUNNING, CommandStatus.ADMITTED}:
             if _pid_alive_matching(job.get("pid"), job.get("pid_starttime")):
                 status = CommandStatus.UNKNOWN
@@ -447,9 +472,20 @@ class CommandKernel:
                         "error_code": "unknown_after_restart",
                     },
                 )
-        started = float(job.get("started_at") or time.time())
-        finished = job.get("finished_at")
-        elapsed = float(finished or time.time()) - started
+        try:
+            started = float(job.get("started_at") or time.time())
+            finished = job.get("finished_at")
+            finished_value = float(finished) if finished is not None else time.time()
+        except (TypeError, ValueError, OverflowError) as exc:
+            raise CommandError("corrupt_job_state") from exc
+        if (
+            not math.isfinite(started)
+            or not math.isfinite(finished_value)
+            or finished is not None
+            and finished_value < started
+        ):
+            raise CommandError("corrupt_job_state")
+        elapsed = finished_value - started
         workspace = JobWorkspace(self.store.job_dir(job_id))
         stdout_bytes = workspace.stdout_path.stat().st_size if workspace.stdout_path.exists() else 0
         stderr_bytes = workspace.stderr_path.stat().st_size if workspace.stderr_path.exists() else 0
@@ -463,16 +499,29 @@ class CommandKernel:
             isolation_profile=isolation,
         )
 
-    def cancel(self, job_id: str, *, actor_id: str) -> None:
-        self._require_actor(job_id, actor_id)
+    def cancel(
+        self,
+        job_id: str,
+        *,
+        actor_id: str,
+        conversation_id: str | None = None,
+    ) -> None:
+        self._require_actor(job_id, actor_id, conversation_id=conversation_id)
         with self._lock:
             live = self._live.get(job_id)
         if live is None:
             raise CommandError("job_not_running")
         live.request_cancel()
 
-    def wait(self, job_id: str, *, actor_id: str, timeout_sec: float | None = None) -> CommandReceipt:
-        self._require_actor(job_id, actor_id)
+    def wait(
+        self,
+        job_id: str,
+        *,
+        actor_id: str,
+        timeout_sec: float | None = None,
+        conversation_id: str | None = None,
+    ) -> CommandReceipt:
+        self._require_actor(job_id, actor_id, conversation_id=conversation_id)
         deadline = time.monotonic() + (float(timeout_sec) if timeout_sec is not None else 3600.0)
         while True:
             with self._lock:
@@ -491,15 +540,102 @@ class CommandKernel:
                     return receipt
                 raise CommandError("wait_timeout")
             job = self.store.read_job(job_id)
-            status = CommandStatus(str(job.get("status") or CommandStatus.UNKNOWN.value))
+            try:
+                status = CommandStatus(str(job.get("status") or CommandStatus.UNKNOWN.value))
+            except (TypeError, ValueError) as exc:
+                raise CommandError("corrupt_job_state") from exc
             if status not in {CommandStatus.ADMITTED, CommandStatus.RUNNING, CommandStatus.PLANNED}:
                 return self._receipt_from_job(job_id)
             time.sleep(min(0.02, max(0.0, remaining)))
 
-    def _require_actor(self, job_id: str, actor_id: str) -> None:
+    def terminal_receipt(
+        self,
+        job_id: str,
+        *,
+        actor_id: str,
+        conversation_id: str,
+        timeout_sec: float = 0.1,
+    ) -> tuple[CommandReceipt, int]:
+        """Return one scoped terminal receipt and its verified MAC version."""
+
+        if not isinstance(conversation_id, str) or not conversation_id:
+            raise CommandError("conversation_required")
+        try:
+            receipt = self.wait(
+                job_id,
+                actor_id=actor_id,
+                conversation_id=conversation_id,
+                timeout_sec=timeout_sec,
+            )
+            public_receipt = receipt.to_public_payload()
+            expected_receipt_mac = self.authority.sign_receipt(public_receipt)
+        except CommandError:
+            raise
+        except (KeyError, OSError, TypeError, ValueError, OverflowError) as exc:
+            raise CommandError("corrupt_job_state") from exc
+        if receipt.status in {
+            CommandStatus.PLANNED,
+            CommandStatus.ADMITTED,
+            CommandStatus.RUNNING,
+        }:
+            raise CommandError("job_not_terminal")
+        if not hmac.compare_digest(receipt.receipt_mac, expected_receipt_mac):
+            legacy_receipt = dict(public_receipt)
+            legacy_receipt.pop("generated_files_sha256", None)
+            expected_legacy_mac = self.authority.sign_receipt(legacy_receipt)
+            if not hmac.compare_digest(receipt.receipt_mac, expected_legacy_mac):
+                raise CommandError("corrupt_job_state")
+            return receipt, 1
+        return receipt, 2
+
+    def terminal_result(
+        self,
+        job_id: str,
+        *,
+        actor_id: str,
+        conversation_id: str,
+        timeout_sec: float = 0.1,
+    ) -> tuple[CommandReceipt, tuple[tuple[GeneratedFile, bytes], ...]]:
+        """Freeze one publishable receipt and its revalidated sealed bytes."""
+
+        receipt, receipt_mac_version = self.terminal_receipt(
+            job_id,
+            actor_id=actor_id,
+            conversation_id=conversation_id,
+            timeout_sec=timeout_sec,
+        )
+        if receipt_mac_version < 2:
+            raise CommandError("legacy_output_receipt_unpublishable")
+        if receipt.status not in {
+            CommandStatus.COMPLETED,
+            CommandStatus.FAILED,
+            CommandStatus.CANCELLED,
+            CommandStatus.TIMEOUT,
+        }:
+            raise CommandError("job_output_unpublishable")
+        workspace = JobWorkspace(self.store.job_dir(job_id))
+        generated = tuple(
+            (item, workspace.read_generated_file_verified(item))
+            for item in receipt.generated_files
+        )
+        # Repeat the private scope check after filesystem reads. Job ownership
+        # is immutable, but a corrupt/replaced ledger must never be treated as
+        # an already-authorized binary carrier.
+        self._require_actor(job_id, actor_id, conversation_id=conversation_id)
+        return receipt, generated
+
+    def _require_actor(
+        self,
+        job_id: str,
+        actor_id: str,
+        *,
+        conversation_id: str | None = None,
+    ) -> None:
         job = self.store.read_job(job_id)
         if str(job.get("actor_id") or "") != actor_id:
             raise CommandError("actor_mismatch")
+        if conversation_id is not None and str(job.get("conversation_id") or "") != conversation_id:
+            raise CommandError("conversation_mismatch")
 
     def _reap(self, job_id: str, request: CommandRequest, grant, held, bwrap, spawned: SpawnedCommand) -> None:
         error_code = ""

@@ -499,6 +499,24 @@ class GeneratedFile:
     mode: int
 
 
+def generated_files_sha256(files: tuple[GeneratedFile, ...]) -> str:
+    """Bind the exact ordered output inventory into the command receipt."""
+
+    return sha256_bytes(
+        canonical_json_bytes(
+            [
+                {
+                    "mode": item.mode,
+                    "relative_path": item.relative_path,
+                    "sha256": item.sha256,
+                    "size_bytes": item.size_bytes,
+                }
+                for item in files
+            ]
+        )
+    )
+
+
 @dataclass(frozen=True, slots=True)
 class CommandProgress:
     job_id: str
@@ -569,6 +587,7 @@ class CommandReceipt:
             "error_code": self.error_code,
             "exit_code": self.exit_code,
             "generated_file_count": len(self.generated_files),
+            "generated_files_sha256": generated_files_sha256(self.generated_files),
             "isolated": self.isolation_profile is IsolationProfile.ISOLATED_WORKSPACE,
             "isolation_profile": self.isolation_profile.value,
             "job_id": self.job_id,
@@ -651,6 +670,7 @@ __all__ = [
     "VerifiedCommandGrant",
     "canonical_json_bytes",
     "framed_argv_digest",
+    "generated_files_sha256",
     "path_root_is_sensitive",
     "sha256_bytes",
 ]

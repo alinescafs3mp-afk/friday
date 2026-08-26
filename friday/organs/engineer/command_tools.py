@@ -7,7 +7,9 @@ import hmac
 import json
 import os
 import re
+import sqlite3
 import stat
+import threading
 import time
 from collections.abc import Mapping
 from pathlib import Path
@@ -22,12 +24,18 @@ from .command import (
     CommandKernel,
     CommandLane,
     CommandOrigin,
+    CommandReceipt,
     CommandRequest,
     CommandStatus,
     IsolationProfile,
     OwnerConfirmationAuthority,
     OwnerSourceAuthority,
     TrustedPathContract,
+)
+from .command.publication import (
+    CommandOutputArchive,
+    CommandOutputPublicationError,
+    build_command_output_archive,
 )
 
 _MESSAGE_ID = re.compile(r"msg_[0-9a-f]{16}")
@@ -41,6 +49,7 @@ _TERMINAL = frozenset(
         CommandStatus.UNKNOWN,
     }
 )
+_PUBLISHABLE_TERMINAL = _TERMINAL - {CommandStatus.UNKNOWN}
 _UNCERTAIN_SUBMIT_ERRORS = frozenset(
     {
         "unknown_after_spawn",
@@ -122,6 +131,49 @@ class EngineerCommandService:
             trusted_path=trusted,
         )
         self.storage = ctx.storage
+        self.max_upload_bytes = int(ctx.settings.max_upload_bytes)
+        self._archive_lock = threading.Lock()
+        self._archive_cache: tuple[
+            tuple[str, str],
+            CommandOutputArchive,
+            dict[str, str],
+        ] | None = None
+
+    def _archive_for_receipt(
+        self,
+        receipt: CommandReceipt,
+        *,
+        actor_id: str,
+        conversation_id: str,
+    ) -> tuple[CommandOutputArchive, dict[str, str]]:
+        """Build one exact archive per receipt identity, with bounded single-flight caching."""
+
+        lock = getattr(self, "_archive_lock", None)
+        if lock is None:
+            lock = threading.Lock()
+            self._archive_lock = lock
+            self._archive_cache = None
+        key = (receipt.job_id, receipt.receipt_mac)
+        with lock:
+            cached = self._archive_cache
+            if cached is not None and cached[0] == key:
+                return cached[1], dict(cached[2])
+            frozen_receipt, outputs = self.kernel.terminal_result(
+                receipt.job_id,
+                actor_id=actor_id,
+                conversation_id=conversation_id,
+                timeout_sec=0.1,
+            )
+            if frozen_receipt != receipt:
+                raise CommandOutputPublicationError("command_output_receipt_changed")
+            archive = build_command_output_archive(
+                receipt,
+                outputs,
+                max_archive_bytes=self.max_upload_bytes,
+            )
+            attachment = archive.attachment()
+            self._archive_cache = (key, archive, attachment)
+            return archive, dict(attachment)
 
     def execute(
         self,
@@ -216,7 +268,11 @@ class EngineerCommandService:
                 ttl_sec=120,
             )
             job_id = self.kernel.submit(request, grant, actor_id=actor.own_id)
-            progress = self.kernel.progress(job_id, actor_id=actor.own_id)
+            progress = self.kernel.progress(
+                job_id,
+                actor_id=actor.own_id,
+                conversation_id=str(_conversation_id),
+            )
         except CommandError as exc:
             return _refusal(
                 exc.code,
@@ -224,35 +280,123 @@ class EngineerCommandService:
             )
         return {"ok": True, **progress.to_public_payload()}
 
-    def status(self, *, actor: Any, job_id: str) -> dict[str, Any]:
+    def status(
+        self,
+        *,
+        actor: Any,
+        job_id: str,
+        _conversation_id: str = "",
+    ) -> dict[str, Any]:
+        conversation_id = str(_conversation_id or "").strip()
+        if not actor.is_owner:
+            return _refusal("authorization_denied")
+        if not conversation_id:
+            return _refusal("conversation_required")
         try:
-            progress = self.kernel.progress(str(job_id), actor_id=actor.own_id)
+            progress = self.kernel.progress(
+                str(job_id),
+                actor_id=actor.own_id,
+                conversation_id=conversation_id,
+            )
             payload = {"ok": True, **progress.to_public_payload()}
-            if progress.status in _TERMINAL:
-                receipt = self.kernel.wait(str(job_id), actor_id=actor.own_id, timeout_sec=0.1)
-                payload["receipt"] = receipt.to_public_payload()
+            if progress.status in _PUBLISHABLE_TERMINAL:
+                receipt, receipt_mac_version = self.kernel.terminal_receipt(
+                    str(job_id),
+                    actor_id=actor.own_id,
+                    conversation_id=conversation_id,
+                    timeout_sec=0.1,
+                )
+                public_receipt = receipt.to_public_payload()
+                if receipt_mac_version < 2:
+                    public_receipt.pop("generated_files_sha256", None)
+                payload["receipt"] = public_receipt
+                payload["receipt"]["mac_version"] = receipt_mac_version
+                payload["receipt"]["generated_files_authenticated"] = (
+                    receipt_mac_version >= 2
+                )
                 payload["stdout"] = _safe_output(receipt.stdout)
                 payload["stderr"] = _safe_output(receipt.stderr)
                 payload["stdout_display_truncated"] = len(receipt.stdout) > _DISPLAY_BYTES
                 payload["stderr_display_truncated"] = len(receipt.stderr) > _DISPLAY_BYTES
-                payload["generated_files"] = [
-                    {
-                        "relative_path": item.relative_path,
-                        "sha256": item.sha256,
-                        "size_bytes": item.size_bytes,
+                payload["generated_files"] = (
+                    [
+                        {
+                            "relative_path": item.relative_path,
+                            "sha256": item.sha256,
+                            "size_bytes": item.size_bytes,
+                        }
+                        for item in receipt.generated_files
+                    ]
+                    if receipt_mac_version >= 2
+                    else []
+                )
+                if receipt.generated_files and receipt_mac_version < 2:
+                    payload["artifact_delivery"] = {
+                        "available": False,
+                        "error_code": "legacy_output_receipt_unpublishable",
                     }
-                    for item in receipt.generated_files
-                ]
+                elif receipt.generated_files:
+                    try:
+                        archive, attachment = self._archive_for_receipt(
+                            receipt,
+                            actor_id=actor.own_id,
+                            conversation_id=conversation_id,
+                        )
+                    except CommandOutputPublicationError as exc:
+                        payload["artifact_delivery"] = {
+                            "available": False,
+                            "error_code": exc.code,
+                        }
+                    else:
+                        payload["artifact_delivery"] = {
+                            "available": True,
+                            "filename": archive.filename,
+                            "sha256": archive.sha256,
+                            "size_bytes": len(archive.payload),
+                        }
+                        payload["_attachment"] = attachment
+            elif progress.status is CommandStatus.UNKNOWN:
+                # A stale RUNNING job can be reconciled to UNKNOWN without a
+                # trustworthy terminal receipt. Report only the scoped durable
+                # progress state; never reinterpret it as corruption or read
+                # possibly live output bytes.
+                payload["artifact_delivery"] = {
+                    "available": False,
+                    "error_code": "job_output_unpublishable",
+                }
             return payload
         except CommandError as exc:
             return _refusal(exc.code)
+        except (KeyError, OSError, TypeError, ValueError, OverflowError, sqlite3.Error):
+            return _refusal("corrupt_job_state")
 
-    def cancel(self, *, actor: Any, job_id: str) -> dict[str, Any]:
+    def cancel(
+        self,
+        *,
+        actor: Any,
+        job_id: str,
+        _conversation_id: str = "",
+    ) -> dict[str, Any]:
+        conversation_id = str(_conversation_id or "").strip()
+        if not actor.is_owner:
+            return _refusal("authorization_denied")
+        if not conversation_id:
+            return _refusal("conversation_required")
         try:
-            self.kernel.cancel(str(job_id), actor_id=actor.own_id)
-            progress = self.kernel.progress(str(job_id), actor_id=actor.own_id)
+            self.kernel.cancel(
+                str(job_id),
+                actor_id=actor.own_id,
+                conversation_id=conversation_id,
+            )
+            progress = self.kernel.progress(
+                str(job_id),
+                actor_id=actor.own_id,
+                conversation_id=conversation_id,
+            )
         except CommandError as exc:
             return _refusal(exc.code)
+        except (KeyError, OSError, TypeError, ValueError, OverflowError, sqlite3.Error):
+            return _refusal("corrupt_job_state")
         return {"ok": True, "cancel_requested": True, **progress.to_public_payload()}
 
 
@@ -276,11 +420,29 @@ def build_engineer_command_tools(ctx: ServiceContext) -> tuple[ToolSpec, ...]:
     async def run_exact(**arguments: Any) -> dict[str, Any]:
         return service.execute(**arguments)
 
-    async def status_exact(*, actor: Any, job_id: str) -> dict[str, Any]:
-        return service.status(actor=actor, job_id=job_id)
+    async def status_exact(
+        *,
+        actor: Any,
+        job_id: str,
+        _conversation_id: str = "",
+    ) -> dict[str, Any]:
+        return service.status(
+            actor=actor,
+            job_id=job_id,
+            _conversation_id=_conversation_id,
+        )
 
-    async def cancel_exact(*, actor: Any, job_id: str) -> dict[str, Any]:
-        return service.cancel(actor=actor, job_id=job_id)
+    async def cancel_exact(
+        *,
+        actor: Any,
+        job_id: str,
+        _conversation_id: str = "",
+    ) -> dict[str, Any]:
+        return service.cancel(
+            actor=actor,
+            job_id=job_id,
+            _conversation_id=_conversation_id,
+        )
 
     job_parameters = {
         "type": "object",

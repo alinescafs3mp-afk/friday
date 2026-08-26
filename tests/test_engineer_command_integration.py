@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import hashlib
+import io
 import json
 import re
+import zipfile
 from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
@@ -17,12 +20,17 @@ from friday.config import validate_settings
 from friday.execution_kernel import ToolResult
 from friday.organs.engineer.command import (
     CommandGrantAuthority,
+    CommandLane,
+    CommandOrigin,
     CommandProgress,
+    CommandReceipt,
     CommandStatus,
+    GeneratedFile,
     IsolationProfile,
     OwnerConfirmationAuthority,
     OwnerSourceAuthority,
 )
+from friday.organs.engineer.command.contracts import sha256_bytes
 from friday.organs.engineer.command.store import CommandJobStore
 from friday.organs.engineer.command_tools import EngineerCommandService
 from friday.permissions import LEGACY_OWNER_USER_ID, ActorContext
@@ -331,9 +339,16 @@ class _FakeCommandKernel:
         self.parsed = self.authority.parse(grant, request, actor_id=actor_id)
         return "1" * 32
 
-    def progress(self, job_id: str, *, actor_id: str) -> CommandProgress:
+    def progress(
+        self,
+        job_id: str,
+        *,
+        actor_id: str,
+        conversation_id: str | None = None,
+    ) -> CommandProgress:
         assert job_id == "1" * 32
         assert actor_id == LEGACY_OWNER_USER_ID
+        assert conversation_id == "conv_owner"
         return CommandProgress(
             job_id=job_id,
             status=CommandStatus.RUNNING,
@@ -343,6 +358,253 @@ class _FakeCommandKernel:
             output_activity=False,
             isolation_profile=IsolationProfile.ISOLATED_WORKSPACE,
         )
+
+
+class _TerminalOutputKernel:
+    def __init__(self, *, receipt_mac_version: int = 2) -> None:
+        self.calls: list[tuple[str, str, str | None]] = []
+        self.receipt_mac_version = receipt_mac_version
+        payload = b"exact output bytes\n"
+        descriptor = GeneratedFile(
+            relative_path="reports/result.txt",
+            size_bytes=len(payload),
+            sha256=sha256_bytes(payload),
+            mode=0o640,
+        )
+        self.outputs = ((descriptor, payload),)
+        self.receipt = CommandReceipt(
+            job_id="2" * 32,
+            status=CommandStatus.COMPLETED,
+            lane=CommandLane.ARGV,
+            origin=CommandOrigin.OWNER_TURN,
+            isolation_profile=IsolationProfile.ISOLATED_WORKSPACE,
+            command_digest="3" * 64,
+            argv_sha256="4" * 64,
+            source_hash="5" * 64,
+            exit_code=0,
+            signal=None,
+            timed_out=False,
+            cancelled=False,
+            truncated_stdout=False,
+            truncated_stderr=False,
+            started_at=10.0,
+            finished_at=11.0,
+            executable=None,
+            stdout_sha256=sha256_bytes(b"done\n"),
+            stderr_sha256=sha256_bytes(b""),
+            stdout=b"done\n",
+            stderr=b"",
+            generated_files=(descriptor,),
+            error_code="",
+            effect_boundary_crossed=True,
+            receipt_mac="6" * 64,
+        )
+
+    def progress(
+        self,
+        job_id: str,
+        *,
+        actor_id: str,
+        conversation_id: str | None = None,
+    ) -> CommandProgress:
+        self.calls.append(("progress", actor_id, conversation_id))
+        return CommandProgress(
+            job_id=job_id,
+            status=CommandStatus.COMPLETED,
+            elapsed_sec=1.0,
+            stdout_bytes=5,
+            stderr_bytes=0,
+            output_activity=True,
+            isolation_profile=IsolationProfile.ISOLATED_WORKSPACE,
+        )
+
+    def terminal_result(
+        self,
+        job_id: str,
+        *,
+        actor_id: str,
+        conversation_id: str | None,
+        timeout_sec: float,
+    ):
+        assert job_id == self.receipt.job_id
+        assert timeout_sec == 0.1
+        self.calls.append(("terminal_result", actor_id, conversation_id))
+        return self.receipt, self.outputs
+
+    def terminal_receipt(
+        self,
+        job_id: str,
+        *,
+        actor_id: str,
+        conversation_id: str | None,
+        timeout_sec: float,
+    ) -> tuple[CommandReceipt, int]:
+        assert job_id == self.receipt.job_id
+        assert timeout_sec == 0.1
+        self.calls.append(("terminal_receipt", actor_id, conversation_id))
+        return self.receipt, self.receipt_mac_version
+
+
+def test_terminal_status_builds_one_exact_private_delivery_archive() -> None:
+    actor = ActorContext(LEGACY_OWNER_USER_ID, "owner", "telegram-bridge")
+    kernel = _TerminalOutputKernel()
+    service = EngineerCommandService.__new__(EngineerCommandService)
+    service.kernel = kernel
+    service.max_upload_bytes = 4 * 1024 * 1024
+
+    result = service.status(
+        actor=actor,
+        job_id=kernel.receipt.job_id,
+        _conversation_id="conv-owner",
+    )
+    repeated = service.status(
+        actor=actor,
+        job_id=kernel.receipt.job_id,
+        _conversation_id="conv-owner",
+    )
+
+    assert result["ok"] is True
+    assert result["artifact_delivery"]["available"] is True
+    assert repeated["_attachment"] == result["_attachment"]
+    assert kernel.calls == [
+        ("progress", actor.own_id, "conv-owner"),
+        ("terminal_receipt", actor.own_id, "conv-owner"),
+        ("terminal_result", actor.own_id, "conv-owner"),
+        ("progress", actor.own_id, "conv-owner"),
+        ("terminal_receipt", actor.own_id, "conv-owner"),
+    ]
+    attachment = result.pop("_attachment")
+    archive_bytes = base64.b64decode(attachment["content_base64"], validate=True)
+    assert sha256_bytes(archive_bytes) == result["artifact_delivery"]["sha256"]
+    with zipfile.ZipFile(io.BytesIO(archive_bytes)) as archive:
+        assert archive.read("outputs/reports/result.txt") == b"exact output bytes\n"
+        assert json.loads(archive.read("RECEIPT.json"))["job_id"] == kernel.receipt.job_id
+
+
+def test_legacy_terminal_status_is_readable_without_publishing_outputs() -> None:
+    actor = ActorContext(LEGACY_OWNER_USER_ID, "owner", "telegram-bridge")
+    kernel = _TerminalOutputKernel(receipt_mac_version=1)
+    service = EngineerCommandService.__new__(EngineerCommandService)
+    service.kernel = kernel
+    service.max_upload_bytes = 4 * 1024 * 1024
+
+    result = service.status(
+        actor=actor,
+        job_id=kernel.receipt.job_id,
+        _conversation_id="conv-owner",
+    )
+
+    assert result["ok"] is True
+    assert result["receipt"]["mac_version"] == 1
+    assert result["receipt"]["generated_files_authenticated"] is False
+    assert "generated_files_sha256" not in result["receipt"]
+    assert result["generated_files"] == []
+    assert result["artifact_delivery"] == {
+        "available": False,
+        "error_code": "legacy_output_receipt_unpublishable",
+    }
+    assert "_attachment" not in result
+    assert not any(call[0] == "terminal_result" for call in kernel.calls)
+
+
+def test_unknown_after_restart_remains_honest_without_reading_a_receipt_or_output() -> None:
+    actor = ActorContext(LEGACY_OWNER_USER_ID, "owner", "telegram-bridge")
+
+    class _UnknownKernel:
+        def progress(
+            self,
+            job_id: str,
+            *,
+            actor_id: str,
+            conversation_id: str | None = None,
+        ) -> CommandProgress:
+            return CommandProgress(
+                job_id=job_id,
+                status=CommandStatus.UNKNOWN,
+                elapsed_sec=1.0,
+                stdout_bytes=0,
+                stderr_bytes=0,
+                output_activity=False,
+                isolation_profile=IsolationProfile.ISOLATED_WORKSPACE,
+            )
+
+        def terminal_receipt(self, *_args, **_kwargs):  # noqa: ANN002, ANN003, ANN201
+            raise AssertionError("UNKNOWN must not read a terminal receipt")
+
+    service = EngineerCommandService.__new__(EngineerCommandService)
+    service.kernel = _UnknownKernel()
+    service.max_upload_bytes = 4 * 1024 * 1024
+
+    result = service.status(
+        actor=actor,
+        job_id="7" * 32,
+        _conversation_id="conv-owner",
+    )
+
+    assert result["ok"] is True
+    assert result["status"] == "unknown"
+    assert result["artifact_delivery"] == {
+        "available": False,
+        "error_code": "job_output_unpublishable",
+    }
+
+
+@pytest.mark.parametrize(
+    ("actor", "conversation_id", "error_code"),
+    [
+        (
+            ActorContext("ordinary-user", "user", "telegram-bridge"),
+            "conv-owner",
+            "authorization_denied",
+        ),
+        (
+            ActorContext(LEGACY_OWNER_USER_ID, "owner", "telegram-bridge"),
+            "",
+            "conversation_required",
+        ),
+    ],
+)
+def test_command_management_requires_owner_and_exact_conversation(
+    actor: ActorContext,
+    conversation_id: str,
+    error_code: str,
+) -> None:
+    kernel = _TerminalOutputKernel()
+    service = EngineerCommandService.__new__(EngineerCommandService)
+    service.kernel = kernel
+    service.max_upload_bytes = 4 * 1024 * 1024
+
+    result = service.status(
+        actor=actor,
+        job_id=kernel.receipt.job_id,
+        _conversation_id=conversation_id,
+    )
+
+    assert result["ok"] is False
+    assert result["error_code"] == error_code
+    assert kernel.calls == []
+
+
+def test_command_status_normalizes_corrupt_ledger_failures() -> None:
+    actor = ActorContext(LEGACY_OWNER_USER_ID, "owner", "telegram-bridge")
+    service = EngineerCommandService.__new__(EngineerCommandService)
+    service.kernel = SimpleNamespace(
+        progress=lambda *_args, **_kwargs: (_ for _ in ()).throw(ValueError("private corruption"))
+    )
+    service.max_upload_bytes = 4 * 1024 * 1024
+
+    result = service.status(
+        actor=actor,
+        job_id="2" * 32,
+        _conversation_id="conv-owner",
+    )
+
+    assert result == {
+        "effect_boundary_crossed": False,
+        "error_code": "corrupt_job_state",
+        "ok": False,
+        "status": "failed",
+    }
 
 
 def test_distinct_authenticated_callback_mints_one_bound_grant(tmp_path: Path) -> None:
