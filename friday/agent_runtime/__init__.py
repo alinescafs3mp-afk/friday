@@ -19938,6 +19938,181 @@ def _attachment_whole_document_task(message: str, *, file_count: int = 0) -> str
     return ""
 
 
+_CURRENT_DOCUMENT_SECONDARY_PARTIAL_SCOPE = re.compile(
+    r"(?:"
+    r"\b(?:глав(?:а|ы|е|у|ой|ою|ами|ах)|раздел|заключени|введени|предислови|"
+    r"аннотаци|страниц|лист|абзац|фрагмент|отрывок|част(?:ь|и|ью|ей|ям|ями|ях))\w*\b|"
+    r"\b(?:chapter|section|conclusion|introduction|abstract|page|sheet|paragraph|excerpt|"
+    r"part|portion)s?\b"
+    r")",
+    re.IGNORECASE,
+)
+_CURRENT_DOCUMENT_SECONDARY_SELECTIVE_SCOPE = re.compile(
+    r"(?:"
+    r"\b(?:по\s+теме|касательно|относительно)\b|"
+    r"\b(?:про|о|об)\s+(?!ч[её]м\b|что\b|эт\w*\s+(?:файл|документ|вложени|текст)|"
+    r"данн\w*\s+(?:файл|документ|вложени|текст)|"
+    r"текущ\w*\s+(?:файл|документ|вложени|текст))|"
+    r"\b(?:regarding|concerning)\b|"
+    r"\babout\s+(?!this\s+(?:file|document|attachment|text)\b|"
+    r"the\s+(?:current|attached)\s+(?:file|document|attachment|text)\b)"
+    r")",
+    re.IGNORECASE,
+)
+_CURRENT_DOCUMENT_SECONDARY_EXACT_OR_METADATA = re.compile(
+    r"(?:"
+    r"\b(?:сколько|посчита(?:й|йте)|подсчита(?:й|йте)|количеств|число|точн|дословн|"
+    r"процитир|строк|запис|метаданн|mime|хеш|hash|sha-?256|укаж|назов|выпиш|покаж|"
+    r"извлек|верн|реквизит|номер|код|значени|поле|автор|дат|сумм|адрес)\w*\b|"
+    r"\b(?:имя|названи|размер)\s+файл\w*\b|"
+    r"\b(?:count|exact|verbatim|quote|rows?|records?|metadata|filename|file\s+name|"
+    r"file\s+size|mime\s*type|state|show|extract|return|author|date|number|code|"
+    r"value|field|identifier|address)\b|"
+    r"\btell\s+me\s+(?!about\b)"
+    r")",
+    re.IGNORECASE,
+)
+_CURRENT_DOCUMENT_SECONDARY_EFFECT = re.compile(
+    r"(?:"
+    r"\b(?:созда(?:й|йте|ть)|сохрани(?:ть|те)?|запиши(?:те|сь|ть)?|добав(?:ь|ьте|ить)|"
+    r"удали(?:те|ть)?|измени(?:те|ть)?|отправ(?:ь|ьте|ить)|перешли(?:те|ть)?|"
+    r"опублику(?:й|йте|овать)|напомни(?:те|ть)?|озвуч(?:ь|ьте|ить)|экспортир\w*)\b|"
+    r"\b(?:create|save|store|delete|update|send|forward|publish|remind|export)\b|"
+    r"\bwrite\b[^.!?\n]{0,40}\b(?:file|document)\b|"
+    r"\b(?:интернет|web)\b[^.!?\n]{0,40}\b(?:найд|поиск|search|look\s+up)\w*\b|"
+    r"\b(?:найд|поищ|поиск|search|look\s+up)\w*\b[^.!?\n]{0,40}\b(?:интернет|web)\b"
+    r")",
+    re.IGNORECASE,
+)
+_CURRENT_DOCUMENT_SECONDARY_NEGATED_OR_REPORTED = re.compile(
+    r"(?:"
+    r"\bне\b(?!\s+мог(?:ла|ли)?\s+бы\b)|\bникогда\b|"
+    r"\b(?:do\s+not|don't|never|not)\b|"
+    r"\b(?:вчера|раньше|ранее|до\s+этого|уже|попросил|просил|сказал|говорил|"
+    r"написал|предлагал|yesterday|earlier|previously|already|asked|said|told)\w*\b|"
+    r"^\s*(?:почему|когда|зачем|why|when|did|was|were)\b|"
+    r"\b(?:это|this\s+is)\s+(?:пример|фраз|цитат|команд|текст|an?\s+example|"
+    r"a\s+phrase|a\s+quote|a\s+command)\w*\b"
+    r")",
+    re.IGNORECASE,
+)
+_CURRENT_DOCUMENT_SECONDARY_CURRENT_REFERENCE = re.compile(
+    r"\b(?:эт\w*|данн\w*|текущ\w*|прикрепл[её]нн\w*|загруженн\w*)\s+"
+    r"(?:файл|документ|вложени|текст)\w*\b|"
+    r"\b(?:this|the\s+current|the\s+attached|attached)\s+"
+    r"(?:file|document|attachment|text)\b",
+    re.IGNORECASE,
+)
+_CURRENT_DOCUMENT_SECONDARY_RU_IMPERATIVE = re.compile(
+    r"^\s*(?:(?:пятница|пожалуйста|будь\s+добр(?:а|ы)?)\s*[,—:-]?\s*)?"
+    r"(?:(?:кратко|подробно|внимательно|полностью|критически)\s+){0,2}"
+    r"(?:сдела(?:й|йте)|да(?:й|йте)|подготов(?:ь|ьте)|состав(?:ь|ьте)|напиши(?:те)?|"
+    r"провед(?:и|ите)|проанализиру(?:й|йте)|разбер(?:и|ите)|оцени(?:те)?|"
+    r"проверь(?:те)?|обобщи(?:те)?|резюмиру(?:й|йте)|перескажи(?:те)?|"
+    r"суммаризиру(?:й|йте)|сравни(?:те)?|сопостав(?:ь|ьте)|свер(?:ь|ьте)|"
+    r"выдели(?:те)?|найди(?:те)?|расскажи(?:те)?|структуриру(?:й|йте))\b",
+    re.IGNORECASE,
+)
+_CURRENT_DOCUMENT_SECONDARY_RU_POLITE = re.compile(
+    r"^\s*(?:(?:пятница|пожалуйста)\s*[,—:-]?\s*)?"
+    r"(?:можешь(?:\s+ли)?|сможешь|не\s+мог(?:ла|ли)?\s+бы)\s+(?:ты\s+)?"
+    r"(?:сделать|дать|подготовить|провести|проанализировать|разобрать|оценить|"
+    r"проверить|обобщить|резюмировать|пересказать|сравнить|сопоставить|выделить|"
+    r"найти|рассказать|структурировать)\b",
+    re.IGNORECASE,
+)
+_CURRENT_DOCUMENT_SECONDARY_EN_REQUEST = re.compile(
+    r"^\s*(?:(?:please|friday)\s*[,—:-]?\s*)?"
+    r"(?:(?:briefly|carefully|critically|fully|in\s+detail)\s+){0,2}"
+    r"(?:summari[sz]e|analy[sz]e|review|critique|compare|contrast|assess|evaluate|"
+    r"inspect|identify|outline|tell|give|provide|prepare)\b",
+    re.IGNORECASE,
+)
+_CURRENT_DOCUMENT_SECONDARY_EN_POLITE = re.compile(
+    r"^\s*(?:(?:please|friday)\s*[,—:-]?\s*)?"
+    r"(?:can|could|would)\s+you\s+(?:please\s+)?"
+    r"(?:summari[sz]e|analy[sz]e|review|critique|compare|contrast|assess|evaluate|"
+    r"inspect|identify|outline|tell|give|provide|prepare)\b",
+    re.IGNORECASE,
+)
+_CURRENT_DOCUMENT_SECONDARY_OPEN_QUESTION = re.compile(
+    r"^\s*(?:"
+    r"что\s+(?:ты\s+)?дума\w*\s+(?:об|про)|"
+    r"что\s+(?:ты\s+)?(?:можешь\s+)?сказа\w*\s+(?:об|про)|"
+    r"о\s+ч[её]м|про\s+что|в\s+ч[её]м\s+(?:основн\w*\s+)?(?:смысл|суть)\w*|"
+    r"what\s+is\s+.+\s+about|what\s+do\s+you\s+think\s+(?:about|of)"
+    r")\b",
+    re.IGNORECASE,
+)
+_CURRENT_DOCUMENT_SECONDARY_SUMMARY_CUE = re.compile(
+    r"\b(?:сводк|резюме|обзор|ревью|пересказ|содержани|итог|вывод|тезис|"
+    r"обобщ|резюм|суммариз|summary|overview|summari[sz]e|outline|key\s+points?)\w*\b",
+    re.IGNORECASE,
+)
+_CURRENT_DOCUMENT_SECONDARY_ANALYSIS_CUE = re.compile(
+    r"\b(?:анализ|проанализ|разбор|оцени|оценк|проверь|ошиб|противореч|риск|"
+    r"слабы\w*\s+мест|дума|смысл|суть|analy[sz]|review|critique|assess|evaluate|"
+    r"inspect|risks?|weakness(?:es)?|what\s+is)\w*\b",
+    re.IGNORECASE,
+)
+
+
+def _current_document_secondary_task_kind(message: str, *, file_count: int) -> str:
+    """Return a present, whole-current-document advisory task or ``""``.
+
+    The general attachment classifier deliberately has broad recall because it
+    also feeds the primary fallback. Sending private text to the optional model
+    needs a stronger contract: a current request, a whole-source task and no
+    exact, partial, metadata or effect-bearing sibling clause.
+    """
+
+    if file_count < 1:
+        return ""
+    command = " ".join(_record_source_command_text(message).split())
+    if (
+        not command
+        or _attachment_explicitly_partial_scope(message)
+        or _CURRENT_DOCUMENT_SECONDARY_PARTIAL_SCOPE.search(command)
+        or _CURRENT_DOCUMENT_SECONDARY_SELECTIVE_SCOPE.search(command)
+        or _CURRENT_DOCUMENT_SECONDARY_EXACT_OR_METADATA.search(command)
+        or _is_document_metadata_request(message)
+        or _CURRENT_DOCUMENT_SECONDARY_EFFECT.search(command)
+        or _CURRENT_DOCUMENT_SECONDARY_NEGATED_OR_REPORTED.search(command)
+        or _document_authored_file_command_is_data(message)
+    ):
+        return ""
+
+    present_request = bool(
+        _CURRENT_DOCUMENT_SECONDARY_RU_IMPERATIVE.search(command)
+        or _CURRENT_DOCUMENT_SECONDARY_EN_REQUEST.search(command)
+        or _noun_first_attachment_review_request(message)
+        or (
+            _CURRENT_DOCUMENT_SECONDARY_OPEN_QUESTION.search(command)
+            and _CURRENT_DOCUMENT_SECONDARY_CURRENT_REFERENCE.search(command)
+        )
+        or (
+            (
+                _CURRENT_DOCUMENT_SECONDARY_RU_POLITE.search(command)
+                or _CURRENT_DOCUMENT_SECONDARY_EN_POLITE.search(command)
+            )
+            and _CURRENT_DOCUMENT_SECONDARY_CURRENT_REFERENCE.search(command)
+        )
+    )
+    if not present_request:
+        return ""
+
+    classified = _attachment_whole_document_task(message, file_count=file_count)
+    if classified in {"summary", "analysis", "comparison"}:
+        return classified
+    if file_count >= 2 and _ATTACHMENT_COMPARISON_REQUEST.search(command):
+        return "comparison"
+    if _CURRENT_DOCUMENT_SECONDARY_ANALYSIS_CUE.search(command):
+        return "analysis"
+    if _CURRENT_DOCUMENT_SECONDARY_SUMMARY_CUE.search(command):
+        return "summary"
+    return ""
+
+
 def _attachment_query_anchors(message: str, terms: tuple[str, ...]) -> tuple[str, ...]:
     """Return only strong targets which can authorize a closed absence.
 
@@ -29257,6 +29432,8 @@ def _current_attachment_can_skip_archive(
         return True
     text = " ".join(str(message or "").split())
     if not text:
+        return True
+    if _current_document_secondary_task_kind(message, file_count=supplied_attachment_count):
         return True
     if _supported_direct_attachment_file_only_request(text):
         return True
@@ -45734,6 +45911,14 @@ class AgentRuntime:
                 )
             )
         )
+        current_document_secondary_task = (
+            ""
+            if synthetic_document_notice or document_metadata_owned or quoted_file_command_is_data
+            else _current_document_secondary_task_kind(
+                attachment_task_message,
+                file_count=len(active_attachment_set),
+            )
+        )
         whole_document_source_chars = sum(
             len(str(item.get("transient_text") or ""))
             for item in active_attachment_set
@@ -46165,8 +46350,12 @@ class AgentRuntime:
         )
         file_web = file_turn.proved("web")
         file_voice = file_turn.proved("voice")
-        file_create = file_turn.proved("file_create")
-        file_effect = file_turn.has_tool_effect()
+        # ``сделай резюме этого файла`` is a read, not a request to create a
+        # second carrier. The stricter whole-document predicate has already
+        # rejected every real effect sibling, so it may safely disambiguate the
+        # broad direct-file classifier for this one current-source contour.
+        file_create = file_turn.proved("file_create") and not current_document_secondary_task
+        file_effect = file_turn.has_tool_effect() and not current_document_secondary_task
         file_source_only = bool(
             (file_turn.source_only() or implicit_topic_attachment_read) and not quoted_file_command_is_data
         )
@@ -46200,6 +46389,7 @@ class AgentRuntime:
                         attachment_request_projection.applied
                         or _attachment_summary_request(file_turn.speech)
                         or bool(whole_document_task)
+                        or bool(current_document_secondary_task)
                         or synthetic_document_notice
                         or (file_source_only and active_attachment_set)
                     )
@@ -46223,6 +46413,7 @@ class AgentRuntime:
             and (
                 workspace_inbox_resolution.attachment is not None
                 or _closed_attachment_read_only_request(clean_message)
+                or bool(current_document_secondary_task)
             )
             and not unsupported_host_path_request
             and not file_access_denied
@@ -47524,6 +47715,11 @@ class AgentRuntime:
         )
         if not archive_search_requested_for_turn:
             visible_tools = _file_turn_capability_tools(visible_tools, file_turn)
+        if current_document_secondary_task:
+            # This whole-speech proof rejects every effect sibling. Clear a
+            # false ``make_file`` projection before the first model token; the
+            # optional model never receives tools.
+            visible_tools = []
         if (
             file_source_only
             and not message_locate_flow
@@ -48145,8 +48341,8 @@ class AgentRuntime:
         )
         current_document_secondary_request: tuple[list[dict[str, Any]], int, int] | None = None
         if (
-            whole_document_task in {"summary", "analysis", "comparison"}
-            and (synthetic_document_notice or pure_file_read_turn)
+            current_document_secondary_task in {"summary", "analysis", "comparison"}
+            and pure_file_read_turn
             and supplied_attachment_count > 0
             and supplied_attachment_count == attachment_expected_count
             and attachment_expected_count == len(active_attachment_set)
@@ -48193,7 +48389,7 @@ class AgentRuntime:
             current_document_secondary_request = self._current_document_secondary_map_request(
                 authenticated_attachment_model_request,
                 [item for item in active_attachment_set if isinstance(item, dict)],
-                task_kind=whole_document_task,
+                task_kind=current_document_secondary_task,
             )
         response: dict[str, Any]
         if archive_search_requested_for_turn and archive_search_competing_turn:
@@ -54323,9 +54519,10 @@ class AgentRuntime:
         def supported_carrier(item: Any) -> bool:
             if not isinstance(item, Mapping):
                 return False
-            filename = str(item.get("filename") or item.get("name") or "").strip().casefold()
-            suffix = "." + filename.rsplit(".", 1)[1] if "." in filename else ""
-            mime_type = str(item.get("mime_type") or item.get("media_type") or "")
+            filename = str(item.get("filename") or item.get("name") or "").strip()
+            folded_filename = filename.casefold()
+            suffix = "." + folded_filename.rsplit(".", 1)[1] if "." in folded_filename else ""
+            mime_type = str(item.get("mime_type") or item.get("media_type") or item.get("mime") or "")
             return bool(
                 office_document_candidate(filename, mime_type)
                 or suffix in _CURRENT_DOCUMENT_SECONDARY_TEXT_SUFFIXES

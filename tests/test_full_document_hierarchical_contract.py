@@ -31,6 +31,7 @@ from friday.agent_runtime import (
     _attachment_source_complete,
     _attachment_whole_document_task,
     _bounded_attachment_projection,
+    _current_document_secondary_task_kind,
     _OwnedAttachment,
 )
 from friday.agent_runtime._office_attachments import (
@@ -529,6 +530,7 @@ async def _run(
     llm: _HierarchyLLM,
     kernel: ExecutionKernel | None = None,
     secondary_brain: Any = None,
+    chat_kwargs: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     owner = "synthetic-whole-document-owner"
     storage.ensure_user(owner, preset_key="owner")
@@ -547,6 +549,7 @@ async def _run(
         actor=actor,
         attachments=attachments,
         enable_tools=True,
+        **(chat_kwargs or {}),
     )
 
 
@@ -732,6 +735,32 @@ async def _secondary_prepass(
 
 
 @pytest.mark.parametrize(
+    ("question", "file_count", "expected"),
+    [
+        ("Сделай сводку по документу.", 1, "summary"),
+        ("Критически оцени весь документ.", 1, "analysis"),
+        ("Сравни эти два документа.", 2, "comparison"),
+        ("Can you review this document?", 1, "analysis"),
+        ("Не могла бы ты проанализировать этот документ?", 1, "analysis"),
+        ("Review the conclusion of this document.", 1, ""),
+        ("Summarize the document and give the exact row count.", 1, ""),
+        ("Сделай обзор документа и укажи дату подписания.", 1, ""),
+        ("Summarize the document regarding Nextcloud.", 1, ""),
+        ("Я попросил тебя сделать обзор документа вчера.", 1, ""),
+        ("Do not summarize this document.", 1, ""),
+        ("Can you review documents?", 1, ""),
+        ("Сделай обзор документа и создай файл.", 1, ""),
+    ],
+)
+def test_current_document_secondary_task_requires_a_present_whole_read_only_request(
+    question: str,
+    file_count: int,
+    expected: str,
+) -> None:
+    assert _current_document_secondary_task_kind(question, file_count=file_count) == expected
+
+
+@pytest.mark.parametrize(
     ("question", "sources", "task_kind"),
     [
         (
@@ -748,6 +777,46 @@ async def _secondary_prepass(
             "Compare these two documents and explain the differences.",
             [("small-a.docx", "Version A"), ("small-b.txt", "Version B")],
             "comparison",
+        ),
+        (
+            "Сделай резюме этого файла.",
+            [("small-summary-ru.txt", "Complete Russian summary source.")],
+            "summary",
+        ),
+        (
+            "Проанализируй весь документ и выдели риски.",
+            [("small-risks-ru.pdf", "Complete Russian risk source.")],
+            "analysis",
+        ),
+        (
+            "Дай критический разбор этого файла.",
+            [("small-critique-ru.txt", "Complete Russian critique source.")],
+            "analysis",
+        ),
+        (
+            "Проверь этот документ на ошибки и противоречия.",
+            [("small-errors-ru.txt", "Complete Russian review source.")],
+            "analysis",
+        ),
+        (
+            "Выдели основные тезисы документа.",
+            [("small-points-ru.txt", "Complete Russian key-points source.")],
+            "summary",
+        ),
+        (
+            "Identify risks and weaknesses across the whole document.",
+            [("small-risks-en.txt", "Complete English risk source.")],
+            "analysis",
+        ),
+        (
+            "Can you review this document?",
+            [("small-polite-en.txt", "Complete English review source.")],
+            "analysis",
+        ),
+        (
+            "Не могла бы ты проанализировать этот документ?",
+            [("small-polite-ru.txt", "Complete Russian polite review source.")],
+            "analysis",
         ),
     ],
 )
@@ -1184,12 +1253,33 @@ async def test_cancelling_current_document_secondary_never_starts_primary(
 
 
 @pytest.mark.parametrize(
-    "question",
+    ("question", "file_count"),
     [
-        "Сколько записей в этом документе?",
-        "Покажи технические метаданные этого документа.",
-        "Review only the conclusion of this document.",
-        "Сделай обзор документа и создай из него новый файл.",
+        ("Сколько записей в этом документе?", 1),
+        ("Покажи технические метаданные этого документа.", 1),
+        ("Review only the conclusion of this document.", 1),
+        ("Сделай обзор документа и создай из него новый файл.", 1),
+        ("Сделай обзор главы про риски в этом документе.", 1),
+        ("Review the conclusion of this document.", 1),
+        ("Summarize chapter 2 of this document.", 1),
+        ("Analyze the risks section of this file.", 1),
+        ("Compare section 2 in these documents.", 2),
+        ("Кратко перескажи документ и посчитай все записи.", 1),
+        ("Summarize the document and give the exact row count.", 1),
+        ("Review this document and tell me its filename.", 1),
+        ("Сделай обзор документа и укажи дату подписания.", 1),
+        ("Summarize and tell me the contract number.", 1),
+        ("Сделай обзор документа про QNAP.", 1),
+        ("Summarize the document regarding Nextcloud.", 1),
+        ("Я попросил тебя сделать обзор документа вчера.", 1),
+        ("Почему ты не сделал обзор документа?", 1),
+        ("Ты уже сделал обзор этого документа?", 1),
+        ("I asked you to review this document yesterday.", 1),
+        ("Did you summarize this document?", 1),
+        ("Do not summarize this document.", 1),
+        ("Can you review documents?", 1),
+        ("Можешь ли ты анализировать документы?", 1),
+        ("Summarize the document and search the web for updates.", 1),
     ],
 )
 @pytest.mark.asyncio
@@ -1198,6 +1288,7 @@ async def test_current_document_secondary_does_not_expand_exact_partial_metadata
     storage: Any,
     monkeypatch: pytest.MonkeyPatch,
     question: str,
+    file_count: int,
 ) -> None:
     secondary = _DocumentMapSecondary()
     llm = _HierarchyLLM("ordinary primary result")
@@ -1207,7 +1298,9 @@ async def test_current_document_secondary_does_not_expand_exact_partial_metadata
         storage,
         monkeypatch,
         question=question,
-        attachments=[_owned("negative-control.txt", "One\nTwo\nThree")],
+        attachments=[
+            _owned(f"negative-control-{index}.txt", "One\nTwo\nThree") for index in range(file_count)
+        ],
         llm=llm,
         secondary_brain=secondary,
     )
@@ -1310,6 +1403,39 @@ def test_current_document_secondary_keeps_non_text_media_archives_and_mail_outsi
 
 
 @pytest.mark.parametrize(
+    "chat_kwargs",
+    [
+        {
+            "reply_to": "Earlier assistant answer.",
+            "reply_assistant_reference": True,
+        },
+        {"quoted_attachment_reference": True},
+        {"replay_source_message_id": "00000000-0000-0000-0000-000000000001"},
+    ],
+)
+@pytest.mark.asyncio
+async def test_current_document_secondary_never_consumes_reply_or_replay_lineage(
+    settings: Any,
+    storage: Any,
+    monkeypatch: pytest.MonkeyPatch,
+    chat_kwargs: dict[str, Any],
+) -> None:
+    secondary = _DocumentMapSecondary()
+    await _run(
+        settings,
+        storage,
+        monkeypatch,
+        question="Review this document.",
+        attachments=[_owned("reply-control.txt", "Complete current source.")],
+        llm=_HierarchyLLM("ordinary primary result"),
+        secondary_brain=secondary,
+        chat_kwargs=chat_kwargs,
+    )
+
+    assert secondary.requests == []
+
+
+@pytest.mark.parametrize(
     "source",
     [
         _owned("incomplete.txt", "partial", extraction_truncated=True),
@@ -1339,6 +1465,47 @@ def test_current_document_secondary_rejects_incomplete_wrong_carrier_or_oversize
         is None
     )
     assert secondary.requests == []
+
+
+@pytest.mark.parametrize(
+    ("filename", "accepted"),
+    [
+        ("source.txt", True),
+        ("source.pdf", True),
+        ("source.docx", True),
+        ("source.xlsx", True),
+        ("source.pptx", True),
+        ("source.odt", True),
+        ("source.ods", True),
+        ("source.odp", True),
+        ("source.rtf", True),
+        ("source.html", True),
+        ("source.png", False),
+        ("source.zip", False),
+        ("source.eml", False),
+        ("source.epub", False),
+    ],
+)
+def test_current_document_secondary_uses_the_complete_office_pdf_text_carrier_family(
+    settings: Any,
+    storage: Any,
+    filename: str,
+    accepted: bool,
+) -> None:
+    runtime = AgentRuntime(
+        settings,
+        storage,
+        llm=_HierarchyLLM("unused"),
+        secondary_brain=_DocumentMapSecondary(),
+    )
+
+    request = runtime._current_document_secondary_map_request(  # noqa: SLF001
+        "Review this document.",
+        [_owned(filename, "Complete source text.")],
+        task_kind="analysis",
+    )
+
+    assert (request is not None) is accepted
 
 
 @pytest.mark.asyncio
