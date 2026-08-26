@@ -2673,9 +2673,8 @@ def _engineer_network_report(
         return None
     target = targets[0]
     request_binding = target_source_sha256(request, outcome.scope)
-    if (
-        str(target.get("host") or "") != outcome.scope
-        or not hmac.compare_digest(str(target.get("source_sha256") or ""), request_binding)
+    if str(target.get("host") or "") != outcome.scope or not hmac.compare_digest(
+        str(target.get("source_sha256") or ""), request_binding
     ):
         return None
 
@@ -55287,8 +55286,7 @@ class AgentRuntime:
                 and not simple_public_news_publication_authorized
             )
             network_report_authority_changed_before_publication = bool(
-                network_report_publication_reauth_required
-                and not network_report_publication_authorized
+                network_report_publication_reauth_required and not network_report_publication_authorized
             )
             if not publication_authorized:
                 LOGGER.warning("source-publication: authority changed before assistant commit")
@@ -55346,9 +55344,7 @@ class AgentRuntime:
                         else _OBSIDIAN_READ_AUTHORITY_CHANGED_BEFORE_PUBLICATION
                     )
                 if network_report_authority_changed_before_publication:
-                    authority_changed_notice = (
-                        _ENGINEER_NETWORK_REPORT_AUTHORITY_CHANGED_BEFORE_PUBLICATION
-                    )
+                    authority_changed_notice = _ENGINEER_NETWORK_REPORT_AUTHORITY_CHANGED_BEFORE_PUBLICATION
                 content = "\n\n".join(part for part in (safe_effect_notice, authority_changed_notice) if part)
                 response["content"] = content
                 response["file_clips"] = []
@@ -56042,8 +56038,7 @@ class AgentRuntime:
                 in {CapabilityStatus.SUCCEEDED, CapabilityStatus.PARTIAL}
             )
             network_report_expected = bool(
-                network_report_publication_reauth_required
-                and network_report_publication_authorized
+                network_report_publication_reauth_required and network_report_publication_authorized
             )
             if publication_authorized and (decompile_report_expected or network_report_expected):
                 # Freeze every process-owned report only after its final
@@ -62386,9 +62381,11 @@ class AgentRuntime:
                 # A report carrier is owned only by the exact current scan.
                 # Neither the remainder arbiter nor a later model may turn a
                 # historical prose answer into data or silently rerun packets.
-                unsafe_rest = unsafe_rest or requests_network_report_output_clause(
-                    rest
-                ) or requests_active_assessment(rest)
+                unsafe_rest = (
+                    unsafe_rest
+                    or requests_network_report_output_clause(rest)
+                    or requests_active_assessment(rest)
+                )
             if settles_engineer_decompile:
                 from friday.organs.engineer.targets import requests_artifact_decompile
 

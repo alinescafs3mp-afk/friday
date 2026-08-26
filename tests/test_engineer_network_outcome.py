@@ -118,10 +118,7 @@ def test_complete_network_action_has_a_typed_owned_answer_and_content_free_recei
 def test_network_report_is_deterministic_and_contains_only_validated_projection(
     report_format: str,
 ) -> None:
-    message = (
-        "Просканируй мою подсеть и приложи отчёт как "
-        f"{report_format}-файл"
-    )
+    message = f"Просканируй мою подсеть и приложи отчёт как {report_format}-файл"
     dossier = _complete_dossier(message)
     outcome = _engineer_network_owned_outcome(dossier)
 
@@ -436,9 +433,7 @@ def test_direct_network_report_is_code_owned_persisted_and_downloadable(
     metadata = json.loads(str(assistant.get("metadata_json") or "{}"))
     receipt = metadata[_ENGINEER_NETWORK_REPORT_METADATA_KEY]
     assert receipt["report_sha256"] == body["files"][0]["sha256"]
-    assert receipt["outcome_sha256"] == metadata[_ENGINEER_NETWORK_OUTCOME_METADATA_KEY][
-        "outcome_sha256"
-    ]
+    assert receipt["outcome_sha256"] == metadata[_ENGINEER_NETWORK_OUTCOME_METADATA_KEY]["outcome_sha256"]
     assert metadata["generated_files"][0]["id"] == body["files"][0]["id"]
     assert len(model.calls) == 1
 

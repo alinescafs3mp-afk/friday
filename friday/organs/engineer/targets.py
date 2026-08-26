@@ -124,9 +124,7 @@ _NETWORK_REPORT_EXPORT_VERB = (
 )
 _NETWORK_REPORT_RESULT_OBJECT = r"(?:отч[её]т\w*|результат\w*|reports?|results?)"
 _NETWORK_REPORT_RESULT = re.compile(rf"\b{_NETWORK_REPORT_RESULT_OBJECT}\b", re.IGNORECASE)
-_NETWORK_REPORT_FILE_CARRIER = (
-    r"(?:json|markdown|маркдаун\w*|md|файл\w*|вложени\w*|files?|attachments?)"
-)
+_NETWORK_REPORT_FILE_CARRIER = r"(?:json|markdown|маркдаун\w*|md|файл\w*|вложени\w*|files?|attachments?)"
 _NETWORK_REPORT_EXPORT = re.compile(
     rf"\b{_NETWORK_REPORT_EXPORT_VERB}\b[^.!?;\n]{{0,120}}(?:"
     rf"\b{_NETWORK_REPORT_RESULT_OBJECT}\b[^.!?;\n]{{0,80}}\b{_NETWORK_REPORT_FILE_CARRIER}\b|"
@@ -889,8 +887,7 @@ def _requests_network_report_output_clause(
         ):
             continue
         has_target_context = bool(
-            _NETWORK_REPORT_TARGET_CONTEXT.search(unit)
-            or _NETWORK_REPORT_LITERAL_TARGET_CONTEXT.search(unit)
+            _NETWORK_REPORT_TARGET_CONTEXT.search(unit) or _NETWORK_REPORT_LITERAL_TARGET_CONTEXT.search(unit)
         )
         has_network_result_context = bool(
             _NETWORK_REPORT_SCAN_CONTEXT.search(unit)
