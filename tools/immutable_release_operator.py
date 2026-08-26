@@ -6860,6 +6860,8 @@ _UNIT_INSTALL_PHASES = (
 _RUNTIME_UNIT_NAMES = ("friday-backend.service", "friday-bridge.service")
 _BACKEND_TASKS_MAX = 512
 _BACKEND_MEMORY_MAX_BYTES = 12 * 1024**3
+_BACKEND_MEMORY_SWAP_MAX_BYTES = 0
+_CGROUP_ROOT = Path("/sys/fs/cgroup")
 _UNIT_DROPIN_NAMES: Mapping[str, tuple[str, ...]] = {
     "friday-backend.service": ("database.conf", "security.conf"),
     "friday-bridge.service": ("database.conf", "dependency.conf", "security.conf"),
@@ -6895,7 +6897,9 @@ def _unit_runtime_tmp_directory(unit: str) -> Path:
 def _unit_security_dropin(unit: str) -> bytes:
     runtime_name = _unit_runtime_directory_name(unit)
     aggregate_limits = (
-        f"TasksMax={_BACKEND_TASKS_MAX}\nMemoryMax=12G\n" if unit == "friday-backend.service" else ""
+        f"TasksMax={_BACKEND_TASKS_MAX}\nMemoryMax=12G\nMemorySwapMax=0\n"
+        if unit == "friday-backend.service"
+        else ""
     )
     return (
         "[Service]\n"
@@ -7303,6 +7307,8 @@ def _verify_manager_unit_surface(
         "RuntimeDirectoryMode": b"0700",
         "RuntimeDirectoryPreserve": b"no",
     }
+    if unit == "friday-backend.service":
+        exact_properties["MemorySwapMax"] = b"0"
     for property_name, expected_value in exact_properties.items():
         actual_value = _run_systemctl(
             "show",
@@ -8188,6 +8194,8 @@ print(json.dumps({'memory_vault_mode':effective_memory_vault_mode,'obsidian_mode
                 "UnsetEnvironment": b"PYTHONPATH",
                 "WorkingDirectory": str(self.config.friday_home).encode(),
             }
+            if unit == self.config.backend_unit:
+                exact_properties["MemorySwapMax"] = b"0"
             for property_name, expected_value in exact_properties.items():
                 actual_value = self._systemctl(
                     "show",
@@ -9148,12 +9156,54 @@ print(json.dumps({'schema':SCHEMA_VERSION,'status':'clear'},sort_keys=True,separ
         self._systemctl("start", unit)
         self._wait_process(unit, release, role)
 
+    @staticmethod
+    def _read_cgroup_v2_leaf(control_group: bytes, leaf: str) -> bytes | None:
+        """Read one kernel cgroup leaf without following any path component."""
+
+        try:
+            value = control_group.decode("ascii").strip()
+        except UnicodeError:
+            return None
+        if not value.startswith("/") or len(value) > 4096 or not leaf.isascii() or not leaf or "/" in leaf:
+            return None
+        parts = value[1:].split("/")
+        if not parts or any(not part or part in {".", ".."} for part in parts):
+            return None
+
+        directory_flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0)
+        directory_flags |= getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0)
+        file_flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0)
+        try:
+            directory_fd = os.open(_CGROUP_ROOT, directory_flags)
+        except OSError:
+            return None
+        try:
+            for part in parts:
+                next_fd = os.open(part, directory_flags, dir_fd=directory_fd)
+                os.close(directory_fd)
+                directory_fd = next_fd
+            descriptor = os.open(leaf, file_flags, dir_fd=directory_fd)
+            try:
+                details = os.fstat(descriptor)
+                payload = os.read(descriptor, 64)
+                overflow = os.read(descriptor, 1)
+            finally:
+                os.close(descriptor)
+        except OSError:
+            return None
+        finally:
+            os.close(directory_fd)
+        if not stat.S_ISREG(details.st_mode) or overflow:
+            return None
+        return payload.strip()
+
     def _verify_backend_resource_limits(self) -> None:
-        """Require the manager's effective finite aggregate compiler bounds."""
+        """Require manager and live-kernel aggregate compiler boundaries."""
 
         expected = {
             "TasksMax": _BACKEND_TASKS_MAX,
             "MemoryMax": _BACKEND_MEMORY_MAX_BYTES,
+            "MemorySwapMax": _BACKEND_MEMORY_SWAP_MAX_BYTES,
         }
         for property_name, expected_value in expected.items():
             result = self._systemctl(
@@ -9166,6 +9216,18 @@ print(json.dumps({'schema':SCHEMA_VERSION,'status':'clear'},sort_keys=True,separ
             raw = result.stdout.strip()
             if result.returncode != 0 or not raw.isdigit() or int(raw) != expected_value:
                 raise ReleaseFailure("backend_resource_boundary_unavailable")
+        control_group = self._systemctl(
+            "show",
+            self.config.backend_unit,
+            "--property=ControlGroup",
+            "--value",
+            check=False,
+        )
+        if (
+            control_group.returncode != 0
+            or self._read_cgroup_v2_leaf(control_group.stdout, "memory.swap.max") != b"0"
+        ):
+            raise ReleaseFailure("backend_resource_boundary_unavailable")
 
     def _process_matches(
         self,

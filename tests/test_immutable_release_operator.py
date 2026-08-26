@@ -362,7 +362,9 @@ def test_unit_security_dropins_disable_implicit_userns_and_isolate_tmpdir(
         security = dropins[port.config.unit_dir / f"{unit}.d/security.conf"]
         runtime_name = operator._unit_runtime_directory_name(unit)  # noqa: SLF001
         tmp_directory = Path("/run/user") / str(os.geteuid()) / runtime_name
-        aggregate_limits = "TasksMax=512\nMemoryMax=12G\n" if unit == port.config.backend_unit else ""
+        aggregate_limits = (
+            "TasksMax=512\nMemoryMax=12G\nMemorySwapMax=0\n" if unit == port.config.backend_unit else ""
+        )
         assert (
             security
             == (
@@ -388,9 +390,16 @@ def test_backend_startup_requires_effective_aggregate_compiler_limits(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     port = _systemd_test_port(tmp_path)
+    cgroup_root = tmp_path / "cgroup"
+    backend_cgroup = cgroup_root / "user.slice" / "friday-backend.service"
+    backend_cgroup.mkdir(parents=True)
+    (backend_cgroup / "memory.swap.max").write_text("0\n", encoding="ascii")
+    monkeypatch.setattr(operator, "_CGROUP_ROOT", cgroup_root)
     values = {
         "--property=TasksMax": b"512\n",
         "--property=MemoryMax": b"12884901888\n",
+        "--property=MemorySwapMax": b"0\n",
+        "--property=ControlGroup": b"/user.slice/friday-backend.service\n",
     }
 
     def systemctl(*arguments: str, check: bool = True) -> subprocess.CompletedProcess[bytes]:
@@ -404,6 +413,42 @@ def test_backend_startup_requires_effective_aggregate_compiler_limits(
     values["--property=MemoryMax"] = b"infinity\n"
     with pytest.raises(operator.ReleaseFailure, match="backend_resource_boundary_unavailable"):
         port._verify_backend_resource_limits()  # noqa: SLF001
+
+    values["--property=MemoryMax"] = b"12884901888\n"
+    values["--property=MemorySwapMax"] = b"infinity\n"
+    with pytest.raises(operator.ReleaseFailure, match="backend_resource_boundary_unavailable"):
+        port._verify_backend_resource_limits()  # noqa: SLF001
+
+    values["--property=MemorySwapMax"] = b"0\n"
+    (backend_cgroup / "memory.swap.max").write_text("max\n", encoding="ascii")
+    with pytest.raises(operator.ReleaseFailure, match="backend_resource_boundary_unavailable"):
+        port._verify_backend_resource_limits()  # noqa: SLF001
+
+
+def test_backend_cgroup_swap_reader_rejects_traversal_and_symlink(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    cgroup_root = tmp_path / "cgroup"
+    cgroup_root.mkdir()
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "memory.swap.max").write_text("0\n", encoding="ascii")
+    (cgroup_root / "escape").symlink_to(outside, target_is_directory=True)
+    monkeypatch.setattr(operator, "_CGROUP_ROOT", cgroup_root)
+
+    assert (
+        operator.SystemdActivationPort._read_cgroup_v2_leaf(  # noqa: SLF001
+            b"/../outside", "memory.swap.max"
+        )
+        is None
+    )
+    assert (
+        operator.SystemdActivationPort._read_cgroup_v2_leaf(  # noqa: SLF001
+            b"/escape", "memory.swap.max"
+        )
+        is None
+    )
 
 
 @pytest.mark.parametrize("predecessor", ["private-tmp", "recovery", "current"])
@@ -4065,6 +4110,7 @@ def test_manager_units_are_exact_anchor_fragments_and_database_environment(
     extra_manager_dropin = ""
     security_properties = {
         "LimitCORE": b"0\n",
+        "MemorySwapMax": b"0\n",
         "PrivateTmp": b"no\n",
         "PrivateUsers": b"no\n",
         "RuntimeDirectoryMode": b"0700\n",
@@ -4152,6 +4198,7 @@ def test_manager_units_are_exact_anchor_fragments_and_database_environment(
         b"FRIDAY_DATABASE_MUST_EXIST=1",
     )
     for property_name, invalid in (
+        ("MemorySwapMax", b"infinity\n"),
         ("PrivateTmp", b"yes\n"),
         ("PrivateUsers", b"yes\n"),
         ("RuntimeDirectoryMode", b"0755\n"),
@@ -4869,7 +4916,7 @@ def test_unit_pair_crash_converges_without_exposing_mixed_runtime_roots(
                 "FRIDAY_DATABASE_MUST_EXIST=1 "
                 f"TMPDIR={operator._unit_runtime_tmp_directory(name)}\n"  # noqa: SLF001
             ).encode()
-        elif "--property=LimitCORE" in arguments:
+        elif "--property=LimitCORE" in arguments or "--property=MemorySwapMax" in arguments:
             stdout = b"0\n"
         elif "--property=PrivateTmp" in arguments or "--property=PrivateUsers" in arguments:
             stdout = b"no\n"

@@ -261,14 +261,15 @@ _NETWORK_REPORT_EXPORT_META = re.compile(
     re.IGNORECASE,
 )
 _REQUEST_CODE_TEXT = re.compile(
-    r"```[\s\S]*?(?:```|\Z)|~~~[\s\S]*?(?:~~~|\Z)|`[^`\r\n]*(?:`|$)",
-    re.MULTILINE,
+    r"(?P<request_ticks>`+)[\s\S]*?(?:(?P=request_ticks)|\Z)|"
+    r"(?P<request_tildes>~{3,})[\s\S]*?(?:(?P=request_tildes)|\Z)"
 )
 _QUOTED_REQUEST_TEXT = re.compile(
-    r"«[^»]*»|“[^”]*”|„[^“]*“|\"[^\"\r\n]*\"|'[^'\r\n]*'",
+    r"«[\s\S]*?(?:»|\Z)|“[\s\S]*?(?:”|\Z)|„[\s\S]*?(?:“|\Z)|"
+    r"(?<!\w)(?P<request_quote>[\"'])[\s\S]*?(?:(?P=request_quote)|\Z)",
 )
-_UNTERMINATED_REQUEST_QUOTE = re.compile(r"(?m)[«“„\"][^\r\n]*$")
 _REQUEST_BLOCKQUOTE = re.compile(r"(?m)^[ \t]*>[^\r\n]*$")
+_REQUEST_INDENTED_CODE = re.compile(r"(?: {4}| {0,3}\t)")
 _REQUEST_UNIT_BOUNDARY = re.compile(r"(?:[!?;]+(?:\s+|$)|\.(?:\s+|$)|\n+)")
 _REQUEST_SOFT_BOUNDARY = re.compile(r"(?:,\s+|\s+[—–-]\s+)")
 _REPORTED_REQUEST_CUE = re.compile(
@@ -851,7 +852,13 @@ def _normalize_request_text(speech: str) -> str:
     """Normalize words while retaining newline authority boundaries."""
 
     normalized = unicodedata.normalize("NFKC", str(speech or ""))
-    return "\n".join(" ".join(line.split()) for line in normalized.splitlines())
+    lines: list[str] = []
+    for line in normalized.splitlines():
+        compact = " ".join(line.split())
+        # CommonMark indented code is data.  Detect its original indentation
+        # before whitespace normalization can turn it into an imperative.
+        lines.append(" " * len(compact) if _REQUEST_INDENTED_CODE.match(line) else compact)
+    return "\n".join(lines)
 
 
 def _mask_request_data(text: str) -> str:
@@ -861,7 +868,6 @@ def _mask_request_data(text: str) -> str:
     for pattern in (
         _REQUEST_CODE_TEXT,
         _QUOTED_REQUEST_TEXT,
-        _UNTERMINATED_REQUEST_QUOTE,
         _REQUEST_BLOCKQUOTE,
     ):
         masked = pattern.sub(lambda match: " " * len(match.group(0)), masked)
@@ -1137,28 +1143,34 @@ def artifact_decompile_request_is_atomic(speech: str) -> bool:
     return False
 
 
-def requests_artifact_compile(speech: str) -> bool:
-    """Admit one direct current-human request for the fixed Java profile."""
+def _accepted_artifact_compile_requests(
+    speech: str,
+) -> tuple[str, str, tuple[_DirectRequestSpan, ...]]:
+    """Return Java compile clauses which survive the complete intent gate."""
 
     text, masked = _request_projection(speech)
     negation_surface = _POLITE_NEGATIVE_MODAL.sub(
         lambda match: " " * len(match.group(0)),
         masked,
     )
-    named_sources = {
-        match.group(0).casefold() for match in re.finditer(_ARTIFACT_COMPILE_FILENAME, masked, re.IGNORECASE)
-    }
     if (
         not masked.strip()
-        or len(named_sources) > 1
         or _ARTIFACT_COMPILE_NEGATION.search(negation_surface)
         or _ARTIFACT_COMPILE_DELIVERY_NEGATION.search(masked)
         or _ARTIFACT_COMPILE_TARGET_EXCLUSION.search(masked)
         or _ARTIFACT_COMPILE_MIXED_TARGETS.search(masked)
         or _ARTIFACT_COMPILE_CAPABILITY.search(masked)
     ):
-        return False
+        return text, masked, ()
+    accepted: list[_DirectRequestSpan] = []
     for request in _direct_request_matches(text, _ARTIFACT_COMPILE_REQUEST):
+        unit = masked[request.unit_start : request.unit_end]
+        named_sources = {
+            match.group(0).casefold()
+            for match in re.finditer(_ARTIFACT_COMPILE_FILENAME, unit, re.IGNORECASE)
+        }
+        if len(named_sources) > 1:
+            continue
         trailing = masked[request.end : request.unit_end]
         full_trailing = masked[request.end :]
         if (
@@ -1187,8 +1199,15 @@ def requests_artifact_compile(speech: str) -> bool:
                 or _CONDITIONAL_REQUEST_CUE.search(prior)
             ):
                 continue
-        return True
-    return False
+        accepted.append(request)
+    return text, masked, tuple(accepted)
+
+
+def requests_artifact_compile(speech: str) -> bool:
+    """Admit one direct current-human request for the fixed Java profile."""
+
+    _text, _masked, requests = _accepted_artifact_compile_requests(speech)
+    return bool(requests)
 
 
 def requested_artifact_compile_filename(speech: str) -> str | None:
@@ -1199,22 +1218,24 @@ def requested_artifact_compile_filename(speech: str) -> str | None:
     ``None`` and therefore retain the exact-single-current-file rule.
     """
 
-    if not requests_artifact_compile(speech):
+    _text, masked, requests = _accepted_artifact_compile_requests(speech)
+    if not requests:
         return None
-    _text, masked = _request_projection(speech)
     distinct: dict[str, str] = {}
-    for match in re.finditer(_ARTIFACT_COMPILE_FILENAME, masked, re.IGNORECASE):
-        distinct.setdefault(match.group(0).casefold(), match.group(0))
+    for request in requests:
+        accepted_span = masked[request.start : request.end]
+        for match in re.finditer(_ARTIFACT_COMPILE_FILENAME, accepted_span, re.IGNORECASE):
+            distinct.setdefault(match.group(0).casefold(), match.group(0))
     return next(iter(distinct.values())) if len(distinct) == 1 else None
 
 
 def artifact_compile_request_is_atomic(speech: str) -> bool:
     """Whether fixed-profile Java compilation is the sole current clause."""
 
-    if not requests_artifact_compile(speech):
+    _text, masked, requests = _accepted_artifact_compile_requests(speech)
+    if not requests:
         return False
-    text, masked = _request_projection(speech)
-    for request in _direct_request_matches(text, _ARTIFACT_COMPILE_REQUEST):
+    for request in requests:
         trailing = masked[request.end : request.unit_end]
         if (
             _ARTIFACT_COMPILE_TRAILING_CONDITION.match(trailing)

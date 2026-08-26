@@ -270,8 +270,53 @@ def _current_cgroup_memory_limit() -> int | None:
     return None
 
 
+def _current_cgroup_swap_limit() -> int | None:
+    """Return the finite cgroup-v2 swap ceiling for the current process."""
+
+    try:
+        lines = SELF_CGROUP.read_text(encoding="ascii").splitlines()
+    except (OSError, UnicodeError):
+        return None
+
+    candidates: list[Path] = []
+    for line in lines:
+        fields = line.split(":", 2)
+        if len(fields) != 3:
+            continue
+        hierarchy, controllers, raw_path = fields
+        relative = _cgroup_path(raw_path)
+        if relative is not None and hierarchy == "0" and not controllers:
+            candidates.append(CGROUP_ROOT / relative / "memory.swap.max")
+    candidates.append(CGROUP_ROOT / "memory.swap.max")
+    seen: set[Path] = set()
+    for path in candidates:
+        if path in seen:
+            continue
+        seen.add(path)
+        flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0)
+        try:
+            descriptor = os.open(path, flags)
+        except OSError:
+            continue
+        try:
+            details = os.fstat(descriptor)
+            payload = os.read(descriptor, 64)
+            overflow = os.read(descriptor, 1)
+        except OSError:
+            continue
+        finally:
+            os.close(descriptor)
+        if not stat.S_ISREG(details.st_mode) or overflow:
+            return None
+        value = payload.strip()
+        if not value or value == b"max" or not value.isdigit():
+            return None
+        return int(value)
+    return None
+
+
 def _compile_resource_preflight() -> dict[str, Any]:
-    """Require aggregate PID and memory boundaries around the compiler tree."""
+    """Require aggregate PID, memory and no-swap compiler boundaries."""
 
     pids_limit = _current_cgroup_pids_limit()
     if pids_limit is None or pids_limit > COMPILE_MAX_CGROUP_PIDS:
@@ -283,10 +328,14 @@ def _compile_resource_preflight() -> dict[str, Any]:
         or memory_limit > COMPILE_MAX_CGROUP_MEMORY_BYTES
     ):
         return {"ok": False, "reason": "compiler_memory_cgroup_unbounded"}
+    swap_limit = _current_cgroup_swap_limit()
+    if swap_limit != 0:
+        return {"ok": False, "reason": "compiler_memory_cgroup_unbounded"}
     return {
         "ok": True,
         "pids_limit": pids_limit,
         "memory_limit_bytes": memory_limit,
+        "swap_limit_bytes": swap_limit,
     }
 
 
@@ -365,11 +414,29 @@ def _sandbox_argv(
                 str(compiler.SANDBOX_JDK_ROOT),
             ]
         )
+    # Do not expose the host-backed temporary directory as a writable mount.
+    # The two immutable inputs and two pre-created outputs are the complete
+    # host filesystem surface.  The 0555 synthetic directory prevents the
+    # worker (or a compromised toolchain child) from creating extra files;
+    # writable scratch belongs only on the separately size-capped /tmp tmpfs.
     argv.extend(
         [
-            "--bind",
-            str(workspace),
+            "--perms",
+            "0555",
+            "--dir",
             "/work",
+            "--ro-bind",
+            str(workspace / "request.json"),
+            "/work/request.json",
+            "--ro-bind",
+            str(workspace / "input.bin"),
+            "/work/input.bin",
+            "--bind",
+            str(workspace / "result.json"),
+            "/work/result.json",
+            "--bind",
+            str(workspace / "output.bin"),
+            "/work/output.bin",
             "--chdir",
             "/work",
             "--clearenv",
@@ -480,6 +547,7 @@ def _run_worker(
             **admission,
             "compile_pids_limit": resource_admission.get("pids_limit"),
             "compile_memory_limit_bytes": resource_admission.get("memory_limit_bytes"),
+            "compile_swap_limit_bytes": resource_admission.get("swap_limit_bytes"),
         }
     if action not in {"analyze", "compile_java", "decompile", "patch", "preflight"}:
         raise EngineerSandboxError("unknown_action")
@@ -550,6 +618,11 @@ def _run_worker(
         stderr_path = workspace / "stderr.log"
         _write_private_bytes(request_path, encoded_request)
         _write_private_bytes(input_path, data)
+        # Bubblewrap bind-mounts only these exact host files.  They must exist
+        # before namespace construction, and RLIMIT_FSIZE bounds either file
+        # even if the pinned parser/compiler process is compromised.
+        _write_private_bytes(result_path, b"")
+        _write_private_bytes(output_path, b"")
         with open_private_text_write(stderr_path) as stderr_handle:
             # Toolchain verification and workspace preparation may consume the
             # remaining budget. Resolve the exact wait bound immediately before

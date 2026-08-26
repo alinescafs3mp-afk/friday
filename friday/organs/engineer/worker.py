@@ -98,16 +98,44 @@ def _read_regular(path: Path, maximum: int) -> bytes:
 def _write_regular(path: Path, payload: bytes, maximum: int) -> None:
     if len(payload) > maximum:
         raise ValueError("output_size_invalid")
-    flags = os.O_CREAT | os.O_EXCL | os.O_WRONLY
-    flags |= getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0)
-    descriptor = os.open(path, flags, 0o600)
+    # The parent creates each writable target before bubblewrap enters and
+    # mounts that exact regular file.  Never create a new path: /work itself is
+    # intentionally non-writable, and an already populated target means that a
+    # toolchain child touched the carrier before the trusted worker did.
+    flags = os.O_WRONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0)
     try:
+        descriptor = os.open(path, flags)
+    except OSError as exc:
+        raise ValueError("output_target_invalid") from exc
+    try:
+        details = os.fstat(descriptor)
+        try:
+            current = path.lstat()
+        except OSError as exc:
+            raise ValueError("output_target_invalid") from exc
+        identity = (details.st_dev, details.st_ino, details.st_mode, details.st_size, details.st_nlink)
+        if (
+            not stat.S_ISREG(details.st_mode)
+            or details.st_size != 0
+            or details.st_nlink != 1
+            or identity
+            != (
+                current.st_dev,
+                current.st_ino,
+                current.st_mode,
+                current.st_size,
+                current.st_nlink,
+            )
+        ):
+            raise ValueError("output_target_invalid")
         view = memoryview(payload)
         while view:
             written = os.write(descriptor, view)
             if written <= 0:
                 raise ValueError("output_write_failed")
             view = view[written:]
+        if os.fstat(descriptor).st_size != len(payload):
+            raise ValueError("output_write_failed")
     finally:
         os.close(descriptor)
 

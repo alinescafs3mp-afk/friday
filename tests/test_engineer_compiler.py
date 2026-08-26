@@ -312,6 +312,8 @@ def test_compile_worker_reads_only_source_cap_and_writes_bounded_output(
         encoding="utf-8",
     )
     source.write_text("class Main {}", encoding="utf-8")
+    result.write_bytes(b"")
+    output.write_bytes(b"")
     jar = b"PK\x03\x04bounded"
     report = {"ok": True, "status": "completed", "jar_size_bytes": len(jar)}
     monkeypatch.setattr(compiler, "compile_artifact", lambda *_args: (jar, report))
@@ -322,9 +324,10 @@ def test_compile_worker_reads_only_source_cap_and_writes_bounded_output(
 
 
 def test_compiler_bwrap_mounts_only_jdk_read_only_and_has_finite_limits() -> None:
-    argv = sandbox._sandbox_argv(pathlib.Path("/private/work"), mount_jdk=True)  # noqa: SLF001
+    workspace = pathlib.Path("/private/work")
+    argv = sandbox._sandbox_argv(workspace, mount_jdk=True)  # noqa: SLF001
     limited = sandbox._limited_sandbox_argv(  # noqa: SLF001
-        pathlib.Path("/private/work"), action="compile_java", mount_jdk=True
+        workspace, action="compile_java", mount_jdk=True
     )
 
     assert "--unshare-all" in argv
@@ -337,6 +340,23 @@ def test_compiler_bwrap_mounts_only_jdk_read_only_and_has_finite_limits() -> Non
         "--tmpfs",
         "/tmp",
     ]
+    assert argv[argv.index("--perms") : argv.index("--perms") + 4] == [
+        "--perms",
+        "0555",
+        "--dir",
+        "/work",
+    ]
+    assert [(argv[index + 1], argv[index + 2]) for index, value in enumerate(argv) if value == "--bind"] == [
+        (str(workspace / "result.json"), "/work/result.json"),
+        (str(workspace / "output.bin"), "/work/output.bin"),
+    ]
+    assert (str(workspace / "request.json"), "/work/request.json") in [
+        (argv[index + 1], argv[index + 2]) for index, value in enumerate(argv) if value == "--ro-bind"
+    ]
+    assert (str(workspace / "input.bin"), "/work/input.bin") in [
+        (argv[index + 1], argv[index + 2]) for index, value in enumerate(argv) if value == "--ro-bind"
+    ]
+    assert str(workspace) not in argv
     assert "/home" not in argv
     assert limited[:7] == [
         "/usr/bin/prlimit",
@@ -353,10 +373,12 @@ def test_compiler_bwrap_mounts_only_jdk_read_only_and_has_finite_limits() -> Non
 def test_compiler_requires_finite_aggregate_pid_and_memory_cgroups(monkeypatch) -> None:
     monkeypatch.setattr(sandbox, "_current_cgroup_pids_limit", lambda: 512)
     monkeypatch.setattr(sandbox, "_current_cgroup_memory_limit", lambda: 12 * 1024**3)
+    monkeypatch.setattr(sandbox, "_current_cgroup_swap_limit", lambda: 0)
     assert sandbox._compile_resource_preflight() == {  # noqa: SLF001
         "ok": True,
         "pids_limit": 512,
         "memory_limit_bytes": 12 * 1024**3,
+        "swap_limit_bytes": 0,
     }
 
     monkeypatch.setattr(sandbox, "_current_cgroup_pids_limit", lambda: 513)
@@ -371,6 +393,55 @@ def test_compiler_requires_finite_aggregate_pid_and_memory_cgroups(monkeypatch) 
         "ok": False,
         "reason": "compiler_memory_cgroup_unbounded",
     }
+
+    monkeypatch.setattr(sandbox, "_current_cgroup_memory_limit", lambda: 12 * 1024**3)
+    monkeypatch.setattr(sandbox, "_current_cgroup_swap_limit", lambda: None)
+    assert sandbox._compile_resource_preflight() == {  # noqa: SLF001
+        "ok": False,
+        "reason": "compiler_memory_cgroup_unbounded",
+    }
+
+
+def test_compiler_reads_zero_swap_from_its_exact_unified_cgroup(
+    tmp_path: pathlib.Path,
+    monkeypatch,
+) -> None:
+    cgroup_root = tmp_path / "cgroup"
+    current = cgroup_root / "user.slice" / "friday-backend.service"
+    current.mkdir(parents=True)
+    swap_limit = current / "memory.swap.max"
+    swap_limit.write_text("0\n", encoding="ascii")
+    membership = tmp_path / "self.cgroup"
+    membership.write_text("0::/user.slice/friday-backend.service\n", encoding="ascii")
+    monkeypatch.setattr(sandbox, "CGROUP_ROOT", cgroup_root)
+    monkeypatch.setattr(sandbox, "SELF_CGROUP", membership)
+
+    assert sandbox._current_cgroup_swap_limit() == 0  # noqa: SLF001
+    swap_limit.write_text("max\n", encoding="ascii")
+    assert sandbox._current_cgroup_swap_limit() is None  # noqa: SLF001
+
+
+def test_worker_writes_only_an_empty_precreated_single_link_target(tmp_path: pathlib.Path) -> None:
+    target = tmp_path / "result.json"
+    with pytest.raises(ValueError, match="output_target_invalid"):
+        worker._write_regular(target, b"bounded", 32)  # noqa: SLF001
+
+    target.write_bytes(b"attacker-controlled")
+    with pytest.raises(ValueError, match="output_target_invalid"):
+        worker._write_regular(target, b"bounded", 32)  # noqa: SLF001
+    assert target.read_bytes() == b"attacker-controlled"
+
+    target.unlink()
+    target.write_bytes(b"")
+    alias = tmp_path / "alias"
+    alias.hardlink_to(target)
+    with pytest.raises(ValueError, match="output_target_invalid"):
+        worker._write_regular(target, b"bounded", 32)  # noqa: SLF001
+    assert target.read_bytes() == b""
+
+    alias.unlink()
+    worker._write_regular(target, b"bounded", 32)  # noqa: SLF001
+    assert target.read_bytes() == b"bounded"
 
 
 def test_compile_start_audit_is_durable_before_worker_spawn(monkeypatch) -> None:

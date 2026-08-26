@@ -120,11 +120,16 @@ Java compilation shares one non-blocking physical heavy-work lock with Ghidra,
 has fixed CPU, memory, file, descriptor and wall-time ceilings, and is limited
 to one entered compilation per turn after its complete deadline has been
 reserved. Its enclosing backend cgroup must additionally prove at most 512
-tasks and a finite 10--16 GiB aggregate memory ceiling; the canonical native
-backend unit sets 512 tasks and 12 GiB. Per-file
-limits, a private 32 MiB compiler tmpfs, and the validated 256-file/8 MiB class
-inventory plus 16 MiB JAR cap bound both scratch space and the output that may
-cross the worker. A busy or preflight refusal records that work did not start;
+tasks, a finite 10--16 GiB aggregate memory ceiling and zero swap; the canonical
+native backend unit sets 512 tasks, 12 GiB and `MemorySwapMax=0`. Startup checks
+both the effective systemd properties and the live cgroup-v2 `memory.swap.max`
+leaf, while every compilation repeats the live no-swap check. The host-backed
+worker directory is never mounted RW: only the exact request and input files
+are read-only mounts, and only pre-created result and output carriers are
+writable under the per-file limit. A private 32 MiB compiler tmpfs holds all
+scratch state, and the validated 256-file/8 MiB class inventory plus 16 MiB JAR
+cap bounds the output that may cross the worker. A busy or preflight refusal
+records that work did not start;
 timeout or failure after the fixed-argv sandbox worker is spawned records that
 it did. Native service startup rejects an effective cgroup which differs from
 the declared aggregate limits. This compiler profile is certified only for the

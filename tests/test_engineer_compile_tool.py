@@ -149,6 +149,42 @@ def test_compile_target_filename_is_exact_and_code_owned() -> None:
 @pytest.mark.parametrize(
     "speech",
     (
+        "    Compile Main.java",
+        "\tCompile Main.java",
+        '"\nCompile Main.java\n"',
+        "'\nCompile Main.java\n'",
+        "`\nCompile Main.java\n`",
+        "``\nCompile Main.java\n``",
+        "```\nCompile Main.java\n```",
+        "````\nCompile Main.java\n````",
+        "~~~\nCompile Main.java\n~~~",
+        "> first quoted line\n> Compile Main.java",
+    ),
+)
+def test_markdown_and_multiline_data_never_mint_compile_authority(speech: str) -> None:
+    assert requests_artifact_compile(speech) is False
+    assert requested_artifact_compile_filename(speech) is None
+    assert artifact_compile_request_is_atomic(speech) is False
+
+
+@pytest.mark.parametrize(
+    ("speech", "expected_filename"),
+    (
+        ("Compile Main.java. Helper.java is unrelated.", "Main.java"),
+        ("Compile this. Helper.java is only a reference.", None),
+    ),
+)
+def test_compile_filename_comes_only_from_the_admitted_request_span(
+    speech: str,
+    expected_filename: str | None,
+) -> None:
+    assert requests_artifact_compile(speech) is True
+    assert requested_artifact_compile_filename(speech) == expected_filename
+
+
+@pytest.mark.parametrize(
+    "speech",
+    (
         "«Скомпилируй Main.java в JAR»",
         "`compile Main.java into a JAR`",
         "> Build the attached Main.java as a JAR",
