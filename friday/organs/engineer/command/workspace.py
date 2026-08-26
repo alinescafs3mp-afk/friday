@@ -63,6 +63,55 @@ class JobWorkspace:
             "TZ": "UTC",
         }
 
+    def read_evidence_verified(self, name: str, *, expected_sha256: str, cap: int) -> bytes:
+        if name not in {"stdout.bin", "stderr.bin"}:
+            raise CommandError("corrupt_evidence")
+        if not expected_sha256 or len(expected_sha256) != 64:
+            raise CommandError("corrupt_evidence")
+        dir_fd = open_dir_nofollow(self.evidence)
+        flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0)
+        try:
+            try:
+                fd = os.open(name, flags, dir_fd=dir_fd)
+            except OSError as exc:
+                if exc.errno == errno.ELOOP:
+                    raise CommandError("corrupt_evidence") from exc
+                raise CommandError("corrupt_evidence") from exc
+            try:
+                before = os.fstat(fd)
+                if not stat.S_ISREG(before.st_mode) or before.st_nlink != 1:
+                    raise CommandError("corrupt_evidence")
+                if before.st_size > cap:
+                    raise CommandError("corrupt_evidence")
+                hasher = hashlib.sha256()
+                chunks: list[bytes] = []
+                total = 0
+                os.lseek(fd, 0, os.SEEK_SET)
+                while True:
+                    chunk = os.read(fd, 65536)
+                    if not chunk:
+                        break
+                    total += len(chunk)
+                    if total > cap:
+                        raise CommandError("corrupt_evidence")
+                    hasher.update(chunk)
+                    chunks.append(chunk)
+                after = os.fstat(fd)
+                digest = hasher.hexdigest()
+                if (
+                    digest != expected_sha256
+                    or total != before.st_size
+                    or after.st_ino != before.st_ino
+                    or after.st_size != before.st_size
+                    or after.st_mtime_ns != before.st_mtime_ns
+                ):
+                    raise CommandError("corrupt_evidence")
+                return b"".join(chunks)
+            finally:
+                os.close(fd)
+        finally:
+            os.close(dir_fd)
+
     def open_evidence(self, name: str) -> int:
         if name not in {"stdout.bin", "stderr.bin"}:
             raise CommandError("invalid_evidence")

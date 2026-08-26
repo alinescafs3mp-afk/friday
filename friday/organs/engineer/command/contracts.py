@@ -11,7 +11,7 @@ from enum import StrEnum
 from pathlib import Path
 from typing import Any, Literal
 
-SCHEMA = "friday.engineer.command.v2"
+SCHEMA = "friday.engineer.command.v3"
 BASH_EXECUTABLE = "/usr/bin/bash"
 SHELL_FLAG_PREFIX = ("--noprofile", "--norc", "-o", "pipefail", "-c")
 SANDBOX_COMMAND = "/run/friday/command"
@@ -39,6 +39,18 @@ MAX_OUTPUT_DIRS = 64
 MAX_GRANT_CHARS = 16384
 MAX_EXECUTABLE_BYTES = 64 * 1024 * 1024
 DEFAULT_TRUSTED_PATH = ("/usr/bin", "/bin")
+SYSTEMD_RUN_EXECUTABLE = "/usr/bin/systemd-run"
+SYSTEMCTL_EXECUTABLE = "/usr/bin/systemctl"
+TRUE_EXECUTABLE = "/usr/bin/true"
+SLEEP_EXECUTABLE = "/usr/bin/sleep"
+DEFAULT_TASKS_MAX = 64
+DEFAULT_MEMORY_MAX = 128 * 1024 * 1024
+DEFAULT_MEMORY_SWAP_MAX = 0
+DEFAULT_CPU_QUOTA_PERCENT = 80
+DEFAULT_FSIZE_BYTES = 32 * 1024 * 1024
+DEFAULT_TMPFS_TMP = 16 * 1024 * 1024
+DEFAULT_TMPFS_WORKSPACE = 16 * 1024 * 1024
+DEFAULT_TMPFS_JOB_TMP = 8 * 1024 * 1024
 DESTRUCTIVE_BASENAMES = frozenset(
     {
         "chage",
@@ -172,6 +184,55 @@ class TrustedPathContract:
 
 
 @dataclass(frozen=True, slots=True)
+class PathRoot:
+    """Attested trusted-PATH directory. Rebound only if identity still matches."""
+
+    path: str
+    owner_uid: int
+    owner_gid: int
+    mode: int
+    device: int
+    inode: int
+    mtime_ns: int
+
+
+@dataclass(frozen=True, slots=True)
+class ResourceLimits:
+    """Finite cgroup/tmpfs/rlimit envelope. Admission fails if these cannot be proven."""
+
+    tasks_max: int = DEFAULT_TASKS_MAX
+    memory_max: int = DEFAULT_MEMORY_MAX
+    memory_swap_max: int = DEFAULT_MEMORY_SWAP_MAX
+    cpu_quota_percent: int = DEFAULT_CPU_QUOTA_PERCENT
+    fsize_bytes: int = DEFAULT_FSIZE_BYTES
+    tmpfs_tmp: int = DEFAULT_TMPFS_TMP
+    tmpfs_workspace: int = DEFAULT_TMPFS_WORKSPACE
+    tmpfs_job_tmp: int = DEFAULT_TMPFS_JOB_TMP
+    runtime_grace_sec: int = 5
+
+    def __post_init__(self) -> None:
+        for name in (
+            "tasks_max",
+            "memory_max",
+            "fsize_bytes",
+            "tmpfs_tmp",
+            "tmpfs_workspace",
+            "tmpfs_job_tmp",
+        ):
+            value = getattr(self, name)
+            if isinstance(value, bool) or not isinstance(value, int) or value < 1:
+                raise CommandError("invalid_resource_limits")
+        if isinstance(self.memory_swap_max, bool) or self.memory_swap_max < 0:
+            raise CommandError("invalid_resource_limits")
+        if isinstance(self.cpu_quota_percent, bool) or not 1 <= self.cpu_quota_percent <= 100:
+            raise CommandError("invalid_resource_limits")
+
+    @classmethod
+    def default(cls) -> ResourceLimits:
+        return cls()
+
+
+@dataclass(frozen=True, slots=True)
 class OwnerSource:
     """HMAC-sealed authenticated current source. Not inventable from origin/argv."""
 
@@ -183,7 +244,6 @@ class OwnerSource:
     source_hash: str
     telegram_update_id: str
     isolation_profile: IsolationProfile
-    host_user_authorized: bool
     idempotency_key: str
     mac: str
 
@@ -192,7 +252,6 @@ class OwnerSource:
             "actor_id": self.actor_id,
             "channel": self.channel,
             "conversation_id": self.conversation_id,
-            "host_user_authorized": self.host_user_authorized,
             "idempotency_key": self.idempotency_key,
             "isolation_profile": self.isolation_profile.value,
             "schema": SCHEMA,
@@ -200,27 +259,46 @@ class OwnerSource:
             "source_row_id": self.source_row_id,
             "telegram_update_id": self.telegram_update_id,
             "tenant_id": self.tenant_id,
-            "v": 2,
+            "v": 3,
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class OwnerConfirmation:
+    """Separately sealed current-owner confirmation row. Not a boolean or a hash claim."""
+
+    actor_id: str
+    tenant_id: str
+    conversation_id: str
+    channel: str
+    confirmation_row_id: str
+    confirmation_update_id: str
+    command_digest: str
+    expires_at: int
+    nonce: str
+    mac: str
+
+    def identity_payload(self) -> dict[str, Any]:
+        return {
+            "actor_id": self.actor_id,
+            "channel": self.channel,
+            "command_digest": self.command_digest,
+            "confirmation_row_id": self.confirmation_row_id,
+            "confirmation_update_id": self.confirmation_update_id,
+            "conversation_id": self.conversation_id,
+            "expires_at": self.expires_at,
+            "nonce": self.nonce,
+            "schema": SCHEMA,
+            "tenant_id": self.tenant_id,
+            "v": 3,
         }
 
 
 @dataclass(frozen=True, slots=True)
 class DestructiveApproval:
-    """Separate sealed current-source confirmation. A boolean is not a grant."""
+    """Alias kept for the grant seam: a sealed OwnerConfirmation, never a boolean."""
 
-    source_hash: str
-    confirmation_hash: str
-    command_digest: str
-    mac: str
-
-    def identity_payload(self) -> dict[str, Any]:
-        return {
-            "command_digest": self.command_digest,
-            "confirmation_hash": self.confirmation_hash,
-            "schema": SCHEMA,
-            "source_hash": self.source_hash,
-            "v": 2,
-        }
+    confirmation: OwnerConfirmation
 
 
 @dataclass(frozen=True, slots=True)
@@ -302,13 +380,13 @@ class VerifiedCommandGrant:
     source_hash: str
     telegram_update_id: str
     isolation_profile: IsolationProfile
-    host_user_authorized: bool
     idempotency_key: str
     command_digest: str
     argv_sha256: str
     lane: CommandLane
     origin: CommandOrigin
     destructive_confirmed: bool
+    confirmation_nonce: str
     expires_at: int
     nonce: str
 
@@ -434,10 +512,11 @@ class CommandReceipt:
     error_code: str
     effect_boundary_crossed: bool
     receipt_mac: str
+    shell_subcommands_attested: Literal[False] = False
     authorization_complete: Literal[False] = False
 
     def to_public_payload(self) -> dict[str, Any]:
-        return {
+        payload = {
             "authorization_complete": False,
             "argv_sha256": self.argv_sha256,
             "cancelled": self.cancelled,
@@ -460,6 +539,9 @@ class CommandReceipt:
             "truncated_stderr": self.truncated_stderr,
             "truncated_stdout": self.truncated_stdout,
         }
+        if self.lane is CommandLane.SHELL:
+            payload["shell_subcommands_attested"] = False
+        return payload
 
 
 __all__ = [
@@ -505,8 +587,11 @@ __all__ = [
     "GeneratedFile",
     "HeldExecutable",
     "IsolationProfile",
+    "OwnerConfirmation",
     "OwnerSource",
+    "PathRoot",
     "ResolvedExecutable",
+    "ResourceLimits",
     "TrustedPathContract",
     "VerifiedCommandGrant",
     "canonical_json_bytes",

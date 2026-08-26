@@ -1,36 +1,36 @@
-"""Held-FD spawn. isolated_workspace uses bwrap; host_user is not isolated."""
+"""Held-FD spawn inside a proven systemd/cgroup scope. host_user is not in-process."""
 
 from __future__ import annotations
 
 import contextlib
 import os
+import resource
 import selectors
 import signal
+import stat
 import subprocess
 import threading
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from .contracts import CommandError, HeldExecutable, IsolationProfile
-from .isolate import (
-    bwrap_argv,
-    cgroup_pids,
-    cgroup_populated,
-    create_job_cgroup,
-    extra_ro_binds,
-    host_user_argv,
-    move_pid,
-    pass_fds_for,
-    remove_cgroup,
+from .boundary import ProvenScope
+from .contracts import (
+    MAX_OUTPUT_FILES,
+    MAX_OUTPUT_TREE_BYTES,
+    CommandError,
+    HeldExecutable,
+    IsolationProfile,
+    PathRoot,
+    ResourceLimits,
 )
-from .resolve import confirm_held
+from .isolate import bwrap_argv, extra_ro_binds
+from .resolve import confirm_held, confirm_path_roots
 from .workspace import JobWorkspace
 
 _POLL_SEC = 0.05
 _KILL_GRACE_SEC = 2.0
 _EOF_GRACE_SEC = 2.0
-_CGROUP_GRACE_SEC = 2.0
 
 
 def _pid_starttime(pid: int) -> int | None:
@@ -51,40 +51,111 @@ def _pid_starttime(pid: int) -> int | None:
 
 
 def _kill_session(pid: int) -> None:
-    try:
-        os.killpg(pid, signal.SIGTERM)
-    except ProcessLookupError:
+    def _kill(sig: int) -> bool:
+        try:
+            os.killpg(pid, sig)
+            return True
+        except (ProcessLookupError, PermissionError, OSError):
+            try:
+                os.kill(pid, sig)
+                return True
+            except ProcessLookupError:
+                return False
+            except OSError:
+                return False
+
+    if not _kill(signal.SIGTERM):
         return
     deadline = time.monotonic() + _KILL_GRACE_SEC
     while time.monotonic() < deadline:
         try:
-            os.killpg(pid, 0)
+            os.kill(pid, 0)
         except ProcessLookupError:
             return
         time.sleep(0.05)
+    _kill(signal.SIGKILL)
+
+
+class _SpawnedProcess:
+    """Child reaped via pidfd. The spawn helper is the actual parent."""
+
+    def __init__(self, pid: int, pidfd: int | None) -> None:
+        self.pid = int(pid)
+        self.pidfd = pidfd
+        self.returncode: int | None = None
+
+    def poll(self) -> int | None:
+        if self.returncode is not None:
+            return self.returncode
+        waited, status = os.waitpid(self.pid, os.WNOHANG)
+        if waited == 0:
+            return None
+        self.returncode = os.waitstatus_to_exitcode(status)
+        return self.returncode
+
+    def wait(self, timeout: float | None = None) -> int:
+        if self.returncode is not None:
+            return self.returncode
+        deadline = None if timeout is None else time.monotonic() + float(timeout)
+        while deadline is None or time.monotonic() < deadline:
+            code = self.poll()
+            if code is not None:
+                return code
+            time.sleep(0.01)
+        raise subprocess.TimeoutExpired("bwrap", float(timeout or 0))
+
+
+def _output_usage(output: Path) -> tuple[int, int]:
+    files = 0
+    total = 0
     try:
-        os.killpg(pid, signal.SIGKILL)
-    except ProcessLookupError:
-        return
+        dir_fd = os.open(
+            str(output),
+            os.O_RDONLY | os.O_DIRECTORY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0),
+        )
+    except OSError:
+        return 0, 0
+    try:
+        files, total = _usage_walk(dir_fd, depth=0)
+    finally:
+        os.close(dir_fd)
+    return files, total
 
 
-def _drain_cgroup(cgroup: Path | None) -> bool:
-    if cgroup is None:
-        return True
-    deadline = time.monotonic() + _CGROUP_GRACE_SEC
-    while time.monotonic() < deadline:
-        populated = cgroup_populated(cgroup)
-        if populated is False:
-            return True
-        for pid in cgroup_pids(cgroup):
+def _usage_walk(dir_fd: int, *, depth: int) -> tuple[int, int]:
+    if depth > 8:
+        return 0, 0
+    files = 0
+    total = 0
+    try:
+        names = os.listdir(f"/proc/self/fd/{dir_fd}")
+    except OSError:
+        return 0, 0
+    flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0)
+    for name in names:
+        if name in {".", ".."} or "/" in name:
+            continue
+        try:
+            child = os.open(name, flags | os.O_DIRECTORY, dir_fd=dir_fd)
+            nested = True
+        except OSError:
             try:
-                os.kill(pid, signal.SIGKILL)
-            except ProcessLookupError:
+                child = os.open(name, flags, dir_fd=dir_fd)
+            except OSError:
                 continue
-            except PermissionError:
-                return False
-        time.sleep(0.05)
-    return cgroup_populated(cgroup) is False
+            nested = False
+        try:
+            st = os.fstat(child)
+            if nested:
+                nested_files, nested_bytes = _usage_walk(child, depth=depth + 1)
+                files += nested_files
+                total += nested_bytes
+            elif stat.S_ISREG(st.st_mode):
+                files += 1
+                total += int(st.st_size)
+        finally:
+            os.close(child)
+    return files, total
 
 
 @dataclass
@@ -94,7 +165,8 @@ class SpawnedCommand:
     max_stdout_bytes: int
     max_stderr_bytes: int
     isolation: IsolationProfile
-    process: subprocess.Popen[bytes] | None = None
+    limits: ResourceLimits
+    process: _SpawnedProcess | None = None
     started_at: float = 0.0
     finished_at: float | None = None
     exit_code: int | None = None
@@ -114,7 +186,8 @@ class SpawnedCommand:
     pid: int | None = None
     pid_starttime: int | None = None
     pidfd: int | None = None
-    cgroup: Path | None = None
+    scope: ProvenScope | None = None
+    quota_exceeded: bool = False
     _cancel: threading.Event = field(default_factory=threading.Event)
     _lock: threading.Lock = field(default_factory=threading.Lock)
 
@@ -124,32 +197,39 @@ class SpawnedCommand:
         *,
         stdin: bytes,
         env: dict[str, str],
-        trusted_path,
+        path_roots: tuple[PathRoot, ...],
         bwrap: HeldExecutable | None,
-        job_id: str,
+        scope: ProvenScope,
     ) -> None:
+        if self.isolation is IsolationProfile.HOST_USER:
+            raise CommandError("host_user_requires_broker")
+        if self.isolation is not IsolationProfile.ISOLATED_WORKSPACE:
+            raise CommandError("invalid_isolation_profile")
+        if bwrap is None:
+            raise CommandError("bubblewrap_unavailable")
         confirm_held(held)
+        confirm_held(bwrap)
+        confirm_path_roots(path_roots)
         os.lseek(held.executable_fd, 0, os.SEEK_SET)
         if held.script_fd is not None:
             os.lseek(held.script_fd, 0, os.SEEK_SET)
-        if self.isolation is IsolationProfile.ISOLATED_WORKSPACE:
-            if bwrap is None:
-                raise CommandError("bubblewrap_unavailable")
-            confirm_held(bwrap)
-            extra = extra_ro_binds(trusted_path)
-            argv = bwrap_argv(workspace=self.workspace, held=held, env=env, extra_binds=extra)
-            launcher = f"/proc/self/fd/{bwrap.executable_fd}"
-            inherited = pass_fds_for(held, bwrap_fd=bwrap.executable_fd)
-            cwd = None
-            child_env = {"PATH": "/usr/bin", "LANG": "C.UTF-8"}
-        elif self.isolation is IsolationProfile.HOST_USER:
-            argv = host_user_argv(held)
-            launcher = f"/proc/self/fd/{held.executable_fd}"
-            inherited = pass_fds_for(held, bwrap_fd=None)
-            cwd = str(self.workspace.job_dir)
-            child_env = env
-        else:
-            raise CommandError("invalid_isolation_profile")
+        extra = extra_ro_binds(path_roots)
+        block_r, block_w = os.pipe()
+        block_child = os.dup(block_r)
+        os.set_inheritable(block_child, True)
+        os.close(block_r)
+        argv = bwrap_argv(
+            workspace=self.workspace,
+            held=held,
+            env=env,
+            extra_binds=extra,
+            limits=self.limits,
+            sync_fd=block_child,
+        )
+        # Exec the root-owned bwrap path (uid_map is denied from a memfd). The
+        # job executable/interpreter/script still enter via sealed memfds.
+        launcher = bwrap.resolved.canonical_path
+        child_env = {"PATH": "/usr/bin", "LANG": "C.UTF-8"}
 
         stdin_r, stdin_w = os.pipe()
         stdout_r, stdout_w = os.pipe()
@@ -165,37 +245,97 @@ class SpawnedCommand:
         self._stderr_w = stderr_w
         self._stdin_payload = stdin
         self._stdin_offset = 0
-        self.cgroup = create_job_cgroup(job_id)
+        self.scope = scope
         try:
             self.started_at = time.time()
-            self.process = subprocess.Popen(  # noqa: S603 - held-FD launcher, closed argv
-                argv,
-                executable=launcher,
-                cwd=cwd,
-                env=child_env,
-                stdin=stdin_r,
-                stdout=stdout_w,
-                stderr=stderr_w,
-                shell=False,
-                close_fds=True,
-                pass_fds=inherited,
-                start_new_session=True,
-            )
+            actions: list[tuple] = [
+                (os.POSIX_SPAWN_DUP2, stdin_r, 0),
+                (os.POSIX_SPAWN_DUP2, stdout_w, 1),
+                (os.POSIX_SPAWN_DUP2, stderr_w, 2),
+                (os.POSIX_SPAWN_DUP2, held.executable_fd, 3),
+            ]
+            if held.script_fd is not None:
+                actions.append((os.POSIX_SPAWN_DUP2, held.script_fd, 4))
+            else:
+                actions.append((os.POSIX_SPAWN_CLOSE, 4))
+            actions.append((os.POSIX_SPAWN_DUP2, block_child, 5))
+            actions.append((os.POSIX_SPAWN_CLOSEFROM, 6))
+            pid = os.posix_spawn(launcher, argv, child_env, file_actions=actions)
             self.effect_boundary_crossed = True
-            self.pid = int(self.process.pid)
+            self.pid = int(pid)
             self.pid_starttime = _pid_starttime(self.pid)
             try:
                 self.pidfd = os.pidfd_open(self.pid, 0)
             except OSError:
                 self.pidfd = None
-            if self.cgroup is not None:
+            self.process = _SpawnedProcess(pid, self.pidfd)
+            os.close(block_child)
+            try:
+                resource.prlimit(
+                    self.pid,
+                    resource.RLIMIT_FSIZE,
+                    (int(self.limits.fsize_bytes), int(self.limits.fsize_bytes)),
+                )
+            except (OSError, ValueError) as exc:
+                if block_w >= 0:
+                    os.close(block_w)
+                self.abort()
+                raise CommandError("resource_boundary_unproven") from exc
+            expected = str(scope.cgroup).removeprefix("/sys/fs/cgroup")
+            moved = False
+            last_relative = ""
+            deadline = time.monotonic() + 1.0
+            while time.monotonic() < deadline:
                 try:
-                    move_pid(self.cgroup, self.pid)
-                except CommandError:
-                    self.cgroup = None
+                    procs_fd = os.open(
+                        str(scope.cgroup / "cgroup.procs"),
+                        os.O_WRONLY | getattr(os, "O_CLOEXEC", 0),
+                    )
+                    try:
+                        os.write(procs_fd, f"{int(self.pid)}\n".encode("ascii"))
+                    finally:
+                        os.close(procs_fd)
+                except OSError as exc:
+                    last_relative = str(exc)
+                    time.sleep(0.02)
+                    continue
+                try:
+                    raw = Path(f"/proc/{self.pid}/cgroup").read_text(encoding="ascii")
+                except OSError as exc:
+                    if block_w >= 0:
+                        os.close(block_w)
+                    self.abort()
+                    raise CommandError("resource_boundary_unproven") from exc
+                last_relative = ""
+                for line in raw.splitlines():
+                    if line.startswith("0::"):
+                        last_relative = line[3:]
+                        break
+                if last_relative == expected or last_relative.startswith(expected.rstrip("/") + "/"):
+                    moved = True
+                    break
+                time.sleep(0.02)
+            if not moved:
+                if block_w >= 0:
+                    os.close(block_w)
+                self.abort()
+                raise CommandError(
+                    "resource_boundary_unproven",
+                    detail=f"cgroup {last_relative!r} != {expected!r}",
+                )
+            if block_w >= 0:
+                try:
+                    os.write(block_w, b"x")
+                except OSError as exc:
+                    os.close(block_w)
+                    self.abort()
+                    raise CommandError("spawn_failed") from exc
+                os.close(block_w)
+        except CommandError:
+            raise
         except OSError as exc:
+            self.abort()
             self._close_pipes()
-            remove_cgroup(self.cgroup)
             raise CommandError("spawn_failed") from exc
         os.close(stdin_r)
         os.close(stdout_w)
@@ -204,11 +344,23 @@ class SpawnedCommand:
         self._stdout_w = -1
         self._stderr_w = -1
 
+    def abort(self) -> None:
+        proc = self.process
+        if proc is not None and proc.pid:
+            _kill_session(proc.pid)
+            with contextlib.suppress(Exception):
+                proc.wait(timeout=2)
+        if self.scope is not None:
+            self.scope.kill()
+        self._close_pipes()
+
     def request_cancel(self) -> None:
         self._cancel.set()
         proc = self.process
         if proc is not None and proc.poll() is None and proc.pid:
             _kill_session(proc.pid)
+        if self.scope is not None:
+            self.scope.kill()
 
     def wait(self) -> None:
         proc = self.process
@@ -242,9 +394,19 @@ class SpawnedCommand:
                 if not cancelled and self._cancel.is_set():
                     cancelled = True
                     _kill_session(proc.pid)
+                    if self.scope is not None:
+                        self.scope.kill()
                 elif not timed_out and time.monotonic() >= deadline:
                     timed_out = True
                     _kill_session(proc.pid)
+                    if self.scope is not None:
+                        self.scope.kill()
+                files, nbytes = _output_usage(self.workspace.output)
+                if files > MAX_OUTPUT_FILES or nbytes > MAX_OUTPUT_TREE_BYTES:
+                    self.quota_exceeded = True
+                    _kill_session(proc.pid)
+                    if self.scope is not None:
+                        self.scope.kill()
                 timeout = _POLL_SEC
                 try:
                     events = selector.select(timeout)
@@ -321,10 +483,11 @@ class SpawnedCommand:
         if proc.poll() is None:
             _kill_session(proc.pid)
             proc.wait()
-        drained = _drain_cgroup(self.cgroup)
-        self.tree_empty = True if self.isolation is IsolationProfile.ISOLATED_WORKSPACE else drained
-        remove_cgroup(self.cgroup)
         code = proc.returncode
+        if self.scope is not None:
+            self.tree_empty = bool(self.scope.kill())
+        else:
+            self.tree_empty = False
         with self._lock:
             self.stdout = b"".join(stdout_chunks)
             self.stderr = b"".join(stderr_chunks)

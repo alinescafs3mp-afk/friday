@@ -10,7 +10,6 @@ from typing import Any
 from .contracts import (
     ALLOWED_CHANNELS,
     CommandError,
-    DestructiveApproval,
     IsolationProfile,
     OwnerSource,
     canonical_json_bytes,
@@ -56,13 +55,12 @@ class OwnerSourceAuthority:
         telegram_update_id: str,
         isolation_profile: IsolationProfile,
         idempotency_key: str,
-        host_user_authorized: bool = False,
     ) -> OwnerSource:
         if not isinstance(isolation_profile, IsolationProfile):
             raise CommandError("invalid_isolation_profile")
-        if isolation_profile is IsolationProfile.HOST_USER and not host_user_authorized:
-            raise CommandError("host_user_authorization_required")
-        if isolation_profile is IsolationProfile.ISOLATED_WORKSPACE and host_user_authorized:
+        if isolation_profile is IsolationProfile.HOST_USER:
+            raise CommandError("host_user_requires_broker")
+        if isolation_profile is not IsolationProfile.ISOLATED_WORKSPACE:
             raise CommandError("invalid_isolation_profile")
         channel_text = _as_token(channel, code="invalid_channel", limit=32)
         if channel_text not in ALLOWED_CHANNELS:
@@ -79,7 +77,6 @@ class OwnerSourceAuthority:
             source_hash=source_hash_text,
             telegram_update_id=_as_token(telegram_update_id, code="invalid_telegram_update", limit=128),
             isolation_profile=isolation_profile,
-            host_user_authorized=bool(host_user_authorized),
             idempotency_key=_as_token(idempotency_key, code="invalid_request", limit=128),
             mac="",
         )
@@ -93,7 +90,6 @@ class OwnerSourceAuthority:
             source_hash=source.source_hash,
             telegram_update_id=source.telegram_update_id,
             isolation_profile=source.isolation_profile,
-            host_user_authorized=source.host_user_authorized,
             idempotency_key=source.idempotency_key,
             mac=mac,
         )
@@ -106,45 +102,8 @@ class OwnerSourceAuthority:
             raise CommandError("invalid_owner_source")
         if source.channel not in ALLOWED_CHANNELS:
             raise CommandError("invalid_channel")
-        if source.isolation_profile is IsolationProfile.HOST_USER and not source.host_user_authorized:
-            raise CommandError("host_user_authorization_required")
-        if source.isolation_profile is IsolationProfile.ISOLATED_WORKSPACE and source.host_user_authorized:
+        if source.isolation_profile is IsolationProfile.HOST_USER:
+            raise CommandError("host_user_requires_broker")
+        if source.isolation_profile is not IsolationProfile.ISOLATED_WORKSPACE:
             raise CommandError("invalid_isolation_profile")
         return source
-
-    def approve_destructive(
-        self,
-        source: OwnerSource,
-        *,
-        confirmation_hash: str,
-        command_digest: str,
-    ) -> DestructiveApproval:
-        self.verify(source)
-        confirm = _as_token(confirmation_hash, code="invalid_confirmation", limit=64)
-        digest = _as_token(command_digest, code="invalid_command_digest", limit=64)
-        if len(confirm) != 64 or len(digest) != 64:
-            raise CommandError("invalid_confirmation")
-        approval = DestructiveApproval(
-            source_hash=source.source_hash,
-            confirmation_hash=confirm,
-            command_digest=digest,
-            mac="",
-        )
-        mac = _mac(self._secret, approval.identity_payload())
-        return DestructiveApproval(
-            source_hash=approval.source_hash,
-            confirmation_hash=approval.confirmation_hash,
-            command_digest=approval.command_digest,
-            mac=mac,
-        )
-
-    def verify_destructive(self, source: OwnerSource, approval: DestructiveApproval) -> DestructiveApproval:
-        self.verify(source)
-        if not isinstance(approval, DestructiveApproval):
-            raise CommandError("destructive_confirmation_required")
-        expected = _mac(self._secret, approval.identity_payload())
-        if not hmac.compare_digest(expected, str(approval.mac or "")):
-            raise CommandError("invalid_destructive_approval")
-        if approval.source_hash != source.source_hash:
-            raise CommandError("destructive_source_mismatch")
-        return approval

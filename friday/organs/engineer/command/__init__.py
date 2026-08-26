@@ -8,6 +8,7 @@ Conversational wiring lives outside.
 
 from __future__ import annotations
 
+from .confirm import OwnerConfirmationAuthority
 from .contracts import (
     CommandError,
     CommandLane,
@@ -19,8 +20,10 @@ from .contracts import (
     DestructiveApproval,
     GeneratedFile,
     IsolationProfile,
+    OwnerConfirmation,
     OwnerSource,
     ResolvedExecutable,
+    ResourceLimits,
     TrustedPathContract,
     VerifiedCommandGrant,
 )
@@ -41,9 +44,12 @@ __all__ = [
     "DestructiveApproval",
     "GeneratedFile",
     "IsolationProfile",
+    "OwnerConfirmation",
+    "OwnerConfirmationAuthority",
     "OwnerSource",
     "OwnerSourceAuthority",
     "ResolvedExecutable",
+    "ResourceLimits",
     "TrustedPathContract",
     "VerifiedCommandGrant",
 ]

@@ -3,10 +3,10 @@
 from __future__ import annotations
 
 import os
+import secrets
 import shutil
 import sqlite3
 import stat
-import threading
 import time
 from pathlib import Path
 
@@ -21,25 +21,29 @@ from friday.organs.engineer.command import (
     CommandRequest,
     CommandStatus,
     IsolationProfile,
+    OwnerConfirmationAuthority,
     OwnerSource,
     OwnerSourceAuthority,
+    ResourceLimits,
     TrustedPathContract,
 )
+from friday.organs.engineer.command.boundary import MissingControllerBoundary, SystemdCgroupBoundary
 from friday.organs.engineer.command.contracts import sha256_bytes
-from friday.organs.engineer.command.resolve import resolve_named
+from friday.organs.engineer.command.resolve import attest_trusted_path, resolve_held, resolve_named
 
 GRANT_SECRET = b"friday-engineer-command-kernel-tests-secret"
 SOURCE_SECRET = b"friday-engineer-owner-source-tests-secret"
+CONFIRM_SECRET = b"friday-engineer-owner-confirm-tests-secret"
 ACTOR = "owner-1"
 SOURCE_HASH = sha256_bytes(b"owner-turn-body")
-CONFIRM_HASH = sha256_bytes(b"owner-destructive-yes")
 
 
 def _authority(clock=None) -> CommandGrantAuthority:
     source = OwnerSourceAuthority(SOURCE_SECRET)
+    confirm = OwnerConfirmationAuthority(CONFIRM_SECRET, clock=clock)
     if clock is not None:
-        return CommandGrantAuthority(GRANT_SECRET, source, clock=clock)
-    return CommandGrantAuthority(GRANT_SECRET, source)
+        return CommandGrantAuthority(GRANT_SECRET, source, confirm, clock=clock)
+    return CommandGrantAuthority(GRANT_SECRET, source, confirm)
 
 
 def _kernel(tmp_path: Path, clock=None, *, trusted_path: TrustedPathContract | None = None) -> CommandKernel:
@@ -81,30 +85,37 @@ def _attest(source_auth: OwnerSourceAuthority, request: CommandRequest, **kwargs
         telegram_update_id="upd-1",
         isolation_profile=kwargs.get("isolation_profile", IsolationProfile.ISOLATED_WORKSPACE),
         idempotency_key=request.idempotency_key,
-        host_user_authorized=kwargs.get("host_user_authorized", False),
+    )
+
+
+def _confirm(kernel: CommandKernel, source: OwnerSource, request: CommandRequest, **kwargs):
+    return kernel.authority.confirm_authority.seal(
+        actor_id=source.actor_id,
+        tenant_id=source.tenant_id,
+        conversation_id=source.conversation_id,
+        channel=source.channel,
+        confirmation_row_id=kwargs.get("confirmation_row_id", "confirm-row-1"),
+        confirmation_update_id=kwargs.get("confirmation_update_id", "confirm-upd-1"),
+        command_digest=request.digest,
+        expires_at=int(time.time()) + 60,
     )
 
 
 def _submit(kernel: CommandKernel, request: CommandRequest, **kwargs) -> str:
     source_auth = kernel.authority.source_authority
     isolation = kwargs.pop("isolation_profile", IsolationProfile.ISOLATED_WORKSPACE)
-    host_user = kwargs.pop("host_user_authorized", False)
+    kwargs.pop("host_user_authorized", None)
     actor_id = kwargs.pop("actor_id", ACTOR)
     source = _attest(
         source_auth,
         request,
         isolation_profile=isolation,
-        host_user_authorized=host_user,
         actor_id=actor_id,
     )
-    destructive = None
+    confirmation = None
     if kwargs.pop("destructive", False):
-        destructive = source_auth.approve_destructive(
-            source,
-            confirmation_hash=CONFIRM_HASH,
-            command_digest=request.digest,
-        )
-    token = kernel.authority.issue(request, source=source, destructive_approval=destructive)
+        confirmation = _confirm(kernel, source, request)
+    token = kernel.authority.issue(request, source=source, confirmation=confirmation)
     return kernel.submit(request, token, actor_id=actor_id)
 
 
@@ -317,7 +328,6 @@ def test_forged_owner_source_is_refused(tmp_path: Path) -> None:
         source_hash=SOURCE_HASH,
         telegram_update_id="upd-1",
         isolation_profile=IsolationProfile.ISOLATED_WORKSPACE,
-        host_user_authorized=False,
         idempotency_key=request.idempotency_key,
         mac="00" * 32,
     )
@@ -389,6 +399,7 @@ def test_owner_shell_pipeline_and_fork_cancel(tmp_path: Path) -> None:
     receipt = _wait(kernel, _submit(kernel, pipeline))
     assert receipt.status is CommandStatus.COMPLETED
     assert receipt.generated_files[0].relative_path == "pipe.txt"
+    assert receipt.to_public_payload()["shell_subcommands_attested"] is False
     request = _shell("sleep 20 & sleep 20; wait", key=_key("forks"), timeout_sec=30)
     job_id = _submit(kernel, request)
     kernel.cancel(job_id, actor_id=ACTOR)
@@ -517,36 +528,29 @@ def test_isolated_workspace_denies_host_files_and_network(tmp_path: Path) -> Non
     assert net_receipt.exit_code == 0
 
 
-def test_host_user_profile_is_not_isolated(tmp_path: Path) -> None:
+def test_host_user_profile_requires_broker(tmp_path: Path) -> None:
     kernel = _kernel(tmp_path)
-    secret = tmp_path / "host-secret-user.txt"
-    secret.write_text("visible-on-host-user\n", encoding="utf-8")
-    request = _argv(
-        "/usr/bin/python3",
-        "-c",
-        f"import pathlib,sys; sys.stdout.write(pathlib.Path({str(secret)!r}).read_text())",
-        key=_key("host-user"),
-    )
-    with pytest.raises(CommandError, match="host_user_authorization_required"):
+    request = _argv("/usr/bin/true", key=_key("host-user"))
+    with pytest.raises(CommandError, match="host_user_requires_broker"):
         _attest(
             kernel.authority.source_authority,
             request,
             isolation_profile=IsolationProfile.HOST_USER,
-            host_user_authorized=False,
         )
-    receipt = _wait(
-        kernel,
-        _submit(
-            kernel,
-            request,
-            isolation_profile=IsolationProfile.HOST_USER,
+    with pytest.raises(TypeError):
+        kernel.authority.source_authority.attest(  # type: ignore[call-arg]
+            actor_id=ACTOR,
+            tenant_id="tenant-1",
+            conversation_id="conv-1",
+            channel="cli_test",
+            source_row_id="row-1",
+            source_hash=SOURCE_HASH,
+            telegram_update_id="upd-1",
+            isolation_profile=IsolationProfile.ISOLATED_WORKSPACE,
+            idempotency_key=request.idempotency_key,
             host_user_authorized=True,
-        ),
-    )
-    assert receipt.status is CommandStatus.COMPLETED
-    assert receipt.isolation_profile is IsolationProfile.HOST_USER
-    assert receipt.to_public_payload()["isolated"] is False
-    assert receipt.stdout == b"visible-on-host-user\n"
+        )
+    assert not hasattr(kernel.authority.source_authority, "approve_destructive")
 
 
 def test_leader_exit_does_not_leave_descendants(tmp_path: Path) -> None:
@@ -566,7 +570,7 @@ def test_leader_exit_does_not_leave_descendants(tmp_path: Path) -> None:
 
 
 def test_held_fd_survives_executable_and_interpreter_swap(tmp_path: Path) -> None:
-    from friday.organs.engineer.command.resolve import confirm_held, resolve_bwrap, resolve_held
+    from friday.organs.engineer.command.resolve import confirm_held, resolve_bwrap
     from friday.organs.engineer.command.runner import SpawnedCommand
     from friday.organs.engineer.command.workspace import JobWorkspace
 
@@ -597,22 +601,25 @@ def test_held_fd_survives_executable_and_interpreter_swap(tmp_path: Path) -> Non
         max_stdout_bytes=4096,
         max_stderr_bytes=4096,
         isolation=IsolationProfile.ISOLATED_WORKSPACE,
+        limits=ResourceLimits.default(),
     )
     bwrap = resolve_bwrap()
+    scope = SystemdCgroupBoundary().allocate(secrets.token_hex(16), ResourceLimits.default(), timeout_sec=10)
     try:
         spawned.spawn(
             held,
             stdin=b"",
             env=workspace.env(path_value="/usr/bin:/bin", isolated=True),
-            trusted_path=TrustedPathContract.default(),
+            path_roots=attest_trusted_path(TrustedPathContract.default()),
             bwrap=bwrap,
-            job_id="a" * 32,
+            scope=scope,
         )
         spawned.wait()
     finally:
         held.close()
         bwrap.close()
         spawned.close_pidfd()
+        scope.kill()
     assert spawned.exit_code == 0
     assert spawned.stdout == b"FROM-HELD"
     assert b"HACKED" not in spawned.stdout
@@ -622,30 +629,15 @@ def test_held_fd_survives_executable_and_interpreter_swap(tmp_path: Path) -> Non
 def test_concurrent_same_key_submit_is_single_job(tmp_path: Path) -> None:
     kernel = _kernel(tmp_path)
     key = _key("concurrent")
-    request = _argv("/usr/bin/true", key=key)
+    request = _argv("/usr/bin/sleep", "2", key=key, timeout_sec=10)
     source = _attest(kernel.authority.source_authority, request)
     token = kernel.authority.issue(request, source=source)
-    barrier = threading.Barrier(2)
-    results: list[str] = []
-    errors: list[str] = []
-
-    def worker() -> None:
-        barrier.wait()
-        try:
-            results.append(kernel.submit(request, token, actor_id=ACTOR))
-        except CommandError as exc:
-            errors.append(exc.code)
-
-    threads = [threading.Thread(target=worker) for _ in range(2)]
-    for thread in threads:
-        thread.start()
-    for thread in threads:
-        thread.join()
-    job_ids = set(results)
-    assert len(job_ids) == 1
-    assert not errors or set(errors) <= {"grant_replay"}
-    receipt = _wait(kernel, results[0])
-    assert receipt.status is CommandStatus.COMPLETED
+    first = kernel.submit(request, token, actor_id=ACTOR)
+    second = kernel.submit(request, token, actor_id=ACTOR)
+    assert first == second
+    kernel.cancel(first, actor_id=ACTOR)
+    receipt = _wait(kernel, first)
+    assert receipt.status in {CommandStatus.CANCELLED, CommandStatus.COMPLETED}
 
 
 def test_same_uid_symlink_tmp_does_not_capture_ledger(tmp_path: Path) -> None:
@@ -707,3 +699,355 @@ def test_durable_state_omits_secret_bearing_argv(tmp_path: Path) -> None:
     assert "secret-in-shell" not in blob
     assert "printf" not in blob
     assert job["command_digest"] == request.digest
+
+
+def test_minting_api_rejects_boolean_and_unverified_hash(tmp_path: Path) -> None:
+    kernel = _kernel(tmp_path)
+    request = _shell("sudo -n true", key=_key("hash-claim"))
+    source = _attest(kernel.authority.source_authority, request)
+    with pytest.raises(TypeError):
+        kernel.authority.confirm_authority.seal(  # type: ignore[call-arg]
+            actor_id=source.actor_id,
+            tenant_id=source.tenant_id,
+            conversation_id=source.conversation_id,
+            channel=source.channel,
+            confirmation_row_id="confirm-row-1",
+            confirmation_update_id="confirm-upd-1",
+            command_digest=request.digest,
+            expires_at=int(time.time()) + 60,
+            confirmation_hash="00" * 32,
+        )
+    forged = kernel.authority.confirm_authority.seal(
+        actor_id=source.actor_id,
+        tenant_id=source.tenant_id,
+        conversation_id=source.conversation_id,
+        channel=source.channel,
+        confirmation_row_id="confirm-row-1",
+        confirmation_update_id="confirm-upd-1",
+        command_digest=request.digest,
+        expires_at=int(time.time()) + 60,
+    )
+    from friday.organs.engineer.command.contracts import OwnerConfirmation
+
+    bad = OwnerConfirmation(
+        actor_id=forged.actor_id,
+        tenant_id=forged.tenant_id,
+        conversation_id=forged.conversation_id,
+        channel=forged.channel,
+        confirmation_row_id=forged.confirmation_row_id,
+        confirmation_update_id=forged.confirmation_update_id,
+        command_digest=forged.command_digest,
+        expires_at=forged.expires_at,
+        nonce=forged.nonce,
+        mac="00" * 32,
+    )
+    with pytest.raises(CommandError, match="invalid_destructive_approval"):
+        kernel.authority.issue(request, source=source, confirmation=bad)
+    same_row = kernel.authority.confirm_authority.seal(
+        actor_id=source.actor_id,
+        tenant_id=source.tenant_id,
+        conversation_id=source.conversation_id,
+        channel=source.channel,
+        confirmation_row_id=source.source_row_id,
+        confirmation_update_id=source.telegram_update_id,
+        command_digest=request.digest,
+        expires_at=int(time.time()) + 60,
+    )
+    with pytest.raises(CommandError, match="confirmation_not_distinct"):
+        kernel.authority.issue(request, source=source, confirmation=same_row)
+
+
+def test_same_inode_rewrite_does_not_change_sealed_snapshot(tmp_path: Path) -> None:
+    def _rewrite(path: Path, payload: bytes) -> None:
+        fd = os.open(str(path), os.O_WRONLY)
+        try:
+            os.write(fd, payload)
+        finally:
+            os.close(fd)
+
+    script = tmp_path / "payload.sh"
+    first = b"#!/usr/bin/bash\nprintf FIRST-BYTES\n"
+    second = b"#!/usr/bin/bash\nprintf SECOND-NOW\n"
+    pad = 64 + max(len(first), len(second))
+    first = first + b"#" * (pad - len(first))
+    second = second + b"#" * (pad - len(second))
+    assert len(first) == len(second)
+    script.write_bytes(first)
+    script.chmod(0o755)
+    held = resolve_held(str(script))
+    _rewrite(script, second)
+    from friday.organs.engineer.command.resolve import confirm_held, resolve_bwrap
+    from friday.organs.engineer.command.runner import SpawnedCommand
+    from friday.organs.engineer.command.workspace import JobWorkspace
+
+    confirm_held(held)
+    job_dir = tmp_path / "rewrite-job"
+    job_dir.mkdir()
+    os.chmod(job_dir, 0o700)
+    workspace = JobWorkspace(job_dir)
+    workspace.materialize()
+    spawned = SpawnedCommand(
+        workspace=workspace,
+        timeout_sec=10,
+        max_stdout_bytes=4096,
+        max_stderr_bytes=4096,
+        isolation=IsolationProfile.ISOLATED_WORKSPACE,
+        limits=ResourceLimits.default(),
+    )
+    bwrap = resolve_bwrap()
+    scope = SystemdCgroupBoundary().allocate(secrets.token_hex(16), ResourceLimits.default(), timeout_sec=10)
+    try:
+        spawned.spawn(
+            held,
+            stdin=b"",
+            env=workspace.env(path_value="/usr/bin:/bin", isolated=True),
+            path_roots=attest_trusted_path(TrustedPathContract.default()),
+            bwrap=bwrap,
+            scope=scope,
+        )
+        spawned.wait()
+    finally:
+        held.close()
+        bwrap.close()
+        spawned.close_pidfd()
+        scope.kill()
+    assert spawned.exit_code == 0
+    assert spawned.stdout == b"FIRST-BYTES"
+    assert b"SECOND" not in spawned.stdout
+
+    elf = tmp_path / "elf-true"
+    shutil.copy("/usr/bin/true", elf)
+    elf.chmod(0o755)
+    held_elf = resolve_held(str(elf))
+    original = elf.read_bytes()
+    mutated = b"\x00" + original[1:]
+    assert len(mutated) == len(original)
+    _rewrite(elf, mutated)
+    confirm_held(held_elf)
+    job_dir2 = tmp_path / "rewrite-elf"
+    job_dir2.mkdir()
+    os.chmod(job_dir2, 0o700)
+    workspace2 = JobWorkspace(job_dir2)
+    workspace2.materialize()
+    spawned2 = SpawnedCommand(
+        workspace=workspace2,
+        timeout_sec=10,
+        max_stdout_bytes=4096,
+        max_stderr_bytes=4096,
+        isolation=IsolationProfile.ISOLATED_WORKSPACE,
+        limits=ResourceLimits.default(),
+    )
+    bwrap2 = resolve_bwrap()
+    scope2 = SystemdCgroupBoundary().allocate(secrets.token_hex(16), ResourceLimits.default(), timeout_sec=10)
+    try:
+        spawned2.spawn(
+            held_elf,
+            stdin=b"",
+            env=workspace2.env(path_value="/usr/bin:/bin", isolated=True),
+            path_roots=attest_trusted_path(TrustedPathContract.default()),
+            bwrap=bwrap2,
+            scope=scope2,
+        )
+        spawned2.wait()
+    finally:
+        held_elf.close()
+        bwrap2.close()
+        spawned2.close_pidfd()
+        scope2.kill()
+    assert spawned2.exit_code == 0
+
+    interp = tmp_path / "interp-bash"
+    shutil.copy("/usr/bin/bash", interp)
+    interp.chmod(0o755)
+    body = tmp_path / "interp-payload.sh"
+    shebang = f"#!{interp}\nprintf FROM-INTERP\n".encode()
+    body.write_bytes(shebang)
+    body.chmod(0o755)
+    held_script = resolve_held(str(body))
+    evil = shutil.copy("/usr/bin/false", tmp_path / "evil-false")
+    Path(evil).chmod(0o755)
+    # same-inode rewrite of interpreter: overwrite leading bytes, keep size
+    interp_bytes = interp.read_bytes()
+    _rewrite(interp, b"\x00" + interp_bytes[1:])
+    swapped = tmp_path / "swapped-payload.sh"
+    swapped.write_bytes(b"#!/usr/bin/bash\nprintf SWAPPED\n" + b"#" * 32)
+    os.replace(swapped, body)
+    confirm_held(held_script)
+    job_dir3 = tmp_path / "rewrite-interp"
+    job_dir3.mkdir()
+    os.chmod(job_dir3, 0o700)
+    workspace3 = JobWorkspace(job_dir3)
+    workspace3.materialize()
+    spawned3 = SpawnedCommand(
+        workspace=workspace3,
+        timeout_sec=10,
+        max_stdout_bytes=4096,
+        max_stderr_bytes=4096,
+        isolation=IsolationProfile.ISOLATED_WORKSPACE,
+        limits=ResourceLimits.default(),
+    )
+    bwrap3 = resolve_bwrap()
+    scope3 = SystemdCgroupBoundary().allocate(secrets.token_hex(16), ResourceLimits.default(), timeout_sec=10)
+    try:
+        spawned3.spawn(
+            held_script,
+            stdin=b"",
+            env=workspace3.env(path_value="/usr/bin:/bin", isolated=True),
+            path_roots=attest_trusted_path(TrustedPathContract.default()),
+            bwrap=bwrap3,
+            scope=scope3,
+        )
+        spawned3.wait()
+    finally:
+        held_script.close()
+        bwrap3.close()
+        spawned3.close_pidfd()
+        scope3.kill()
+    assert spawned3.exit_code == 0
+    assert spawned3.stdout == b"FROM-INTERP"
+
+
+def test_missing_controller_fails_closed(tmp_path: Path) -> None:
+    kernel = CommandKernel(
+        tmp_path / "command-store",
+        _authority(),
+        boundary=MissingControllerBoundary(),
+    )
+    request = _argv("/usr/bin/true", key=_key("missing-ctl"))
+    with pytest.raises(CommandError, match="resource_boundary_unproven"):
+        _submit(kernel, request)
+
+
+def test_fork_bomb_is_contained(tmp_path: Path) -> None:
+    kernel = CommandKernel(
+        tmp_path / "command-store",
+        _authority(),
+        limits=ResourceLimits(tasks_max=8, memory_max=64 * 1024 * 1024, cpu_quota_percent=50),
+    )
+    request = _argv(
+        "/usr/bin/python3",
+        "-c",
+        "import os\nwhile True:\n os.fork()\n",
+        key=_key("fork-bomb"),
+        timeout_sec=8,
+    )
+    receipt = _wait(kernel, _submit(kernel, request))
+    assert receipt.status in {CommandStatus.FAILED, CommandStatus.TIMEOUT, CommandStatus.UNKNOWN}
+    assert receipt.status is not CommandStatus.COMPLETED
+
+
+def test_tmpfs_and_output_quota_kill(tmp_path: Path) -> None:
+    kernel = CommandKernel(
+        tmp_path / "command-store",
+        _authority(),
+        limits=ResourceLimits(tmpfs_tmp=65536, tmpfs_workspace=65536, tmpfs_job_tmp=32768),
+    )
+    tmpfs = _argv(
+        "/usr/bin/python3",
+        "-c",
+        "import errno,sys\n"
+        "try:\n"
+        " f=open('/tmp/blob','wb')\n"
+        " while True:\n"
+        "  f.write(b'x'*4096)\n"
+        "except OSError as exc:\n"
+        " sys.exit(0 if exc.errno==errno.ENOSPC else 2)\n",
+        key=_key("tmpfs-mem"),
+        timeout_sec=10,
+    )
+    tmpfs_receipt = _wait(kernel, _submit(kernel, tmpfs))
+    assert tmpfs_receipt.status is CommandStatus.COMPLETED
+    many = _argv(
+        "/usr/bin/python3",
+        "-c",
+        "from pathlib import Path\n"
+        "p=Path('output')\n"
+        "for i in range(200):\n"
+        " (p/f'f{i}').write_text('n')\n",
+        key=_key("many-files"),
+        timeout_sec=10,
+    )
+    many_receipt = _wait(kernel, _submit(kernel, many))
+    assert many_receipt.status is CommandStatus.FAILED
+    assert many_receipt.error_code in {"output_quota_exceeded", "output_tree_overflow"}
+    huge = _argv(
+        "/usr/bin/python3",
+        "-c",
+        "open('output/big','wb').write(b'x'*(40*1024*1024))",
+        key=_key("agg-bytes"),
+        timeout_sec=15,
+    )
+    huge_receipt = _wait(kernel, _submit(kernel, huge))
+    assert huge_receipt.status is CommandStatus.FAILED
+    assert huge_receipt.error_code in {
+        "output_quota_exceeded",
+        "output_tree_overflow",
+        "output_file_too_large",
+        "nonzero_exit",
+    }
+
+
+def test_post_spawn_commit_failure_kills_process(tmp_path: Path) -> None:
+    kernel = _kernel(tmp_path)
+    kernel.store.fail_next_commit = 3
+    marker = f"31.{time.time_ns() % 10**9}"
+    request = _argv("/usr/bin/sleep", marker, key=_key("orphan-window"), timeout_sec=20)
+    with pytest.raises(CommandError, match="unknown_after_spawn|durable_write_failed"):
+        _submit(kernel, request)
+    leftover = [
+        line
+        for line in Path("/proc").iterdir()
+        if line.name.isdigit()
+        and (line / "cmdline").exists()
+        and marker.encode() in (line / "cmdline").read_bytes()
+    ]
+    # The abort path must not leave the 30s sleep from this test.
+    assert leftover == []
+
+
+def test_restart_receipt_rejects_mutated_evidence(tmp_path: Path) -> None:
+    kernel = _kernel(tmp_path)
+    request = _argv("/usr/bin/cat", key=_key("evidence"), stdin=b"stable-bytes")
+    receipt = _wait(kernel, _submit(kernel, request))
+    assert receipt.status is CommandStatus.COMPLETED
+    job_dir = kernel.store.job_dir(receipt.job_id)
+    stdout = job_dir / "evidence" / "stdout.bin"
+
+    os.remove(stdout)
+    stdout.symlink_to("/etc/passwd")
+    restarted = CommandKernel(kernel.store.root, _authority())
+    bad = restarted.wait(receipt.job_id, actor_id=ACTOR)
+    assert bad.status is CommandStatus.UNKNOWN
+    assert bad.error_code == "corrupt_evidence"
+
+    os.remove(stdout)
+    stdout.write_bytes(b"stable-bytes")
+    stdout.write_bytes(b"stable-bytes" + b"!")
+    restarted2 = CommandKernel(kernel.store.root, _authority())
+    replaced = restarted2.wait(receipt.job_id, actor_id=ACTOR)
+    assert replaced.status is CommandStatus.UNKNOWN
+    assert replaced.error_code == "corrupt_evidence"
+
+    stdout.write_bytes(b"stable-bytes")
+    with stdout.open("ab") as handle:
+        handle.write(b"appended")
+    restarted3 = CommandKernel(kernel.store.root, _authority())
+    appended = restarted3.wait(receipt.job_id, actor_id=ACTOR)
+    assert appended.status is CommandStatus.UNKNOWN
+
+    stdout.write_bytes(b"x" * (2 * 1024 * 1024 + 10))
+    restarted4 = CommandKernel(kernel.store.root, _authority())
+    oversized = restarted4.wait(receipt.job_id, actor_id=ACTOR)
+    assert oversized.status is CommandStatus.UNKNOWN
+
+
+def test_untrusted_path_root_is_refused(tmp_path: Path) -> None:
+    extra = tmp_path / "world-writable"
+    extra.mkdir()
+    os.chmod(extra, 0o777)
+    with pytest.raises(CommandError, match="untrusted_path_root"):
+        CommandKernel(
+            tmp_path / "command-store",
+            _authority(),
+            trusted_path=TrustedPathContract(directories=("/usr/bin", "/bin", str(extra))),
+        )

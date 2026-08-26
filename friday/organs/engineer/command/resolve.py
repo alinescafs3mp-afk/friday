@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import errno
+import fcntl
 import hashlib
 import os
 import stat
@@ -20,6 +21,7 @@ from .contracts import (
     CommandLane,
     CommandRequest,
     HeldExecutable,
+    PathRoot,
     ResolvedExecutable,
     TrustedPathContract,
     VerifiedCommandGrant,
@@ -149,6 +151,43 @@ def _read_shebang(fd: int) -> str | None:
     return interpreter
 
 
+def snapshot_sealed_memfd(src_fd: int, *, label: str = "friday-exec") -> int:
+    """Copy attested bytes into a sealed memfd. Later in-place rewrites cannot alter it."""
+    dest = os.memfd_create(label[:249], os.MFD_CLOEXEC | os.MFD_ALLOW_SEALING)
+    try:
+        os.lseek(src_fd, 0, os.SEEK_SET)
+        while True:
+            chunk = os.read(src_fd, 1024 * 1024)
+            if not chunk:
+                break
+            view = memoryview(chunk)
+            while view:
+                written = os.write(dest, view)
+                view = view[written:]
+        os.lseek(dest, 0, os.SEEK_SET)
+        fcntl.fcntl(
+            dest,
+            fcntl.F_ADD_SEALS,
+            fcntl.F_SEAL_WRITE | fcntl.F_SEAL_GROW | fcntl.F_SEAL_SHRINK | fcntl.F_SEAL_SEAL,
+        )
+        flags = fcntl.fcntl(dest, fcntl.F_GETFD)
+        fcntl.fcntl(dest, fcntl.F_SETFD, flags & ~fcntl.FD_CLOEXEC)
+        os.set_inheritable(dest, True)
+        return dest
+    except Exception:
+        os.close(dest)
+        raise
+
+
+def _seals_are_final(fd: int) -> bool:
+    try:
+        seals = int(fcntl.fcntl(fd, fcntl.F_GET_SEALS))
+    except OSError:
+        return False
+    required = fcntl.F_SEAL_WRITE | fcntl.F_SEAL_GROW | fcntl.F_SEAL_SHRINK | fcntl.F_SEAL_SEAL
+    return seals & required == required
+
+
 def attest_open_fd(fd: int, *, named: str, expected: ResolvedExecutable | None = None) -> ResolvedExecutable:
     try:
         st = os.fstat(fd)
@@ -191,18 +230,15 @@ def attest_open_fd(fd: int, *, named: str, expected: ResolvedExecutable | None =
 
 
 def confirm_held_fd(fd: int, expected: ResolvedExecutable) -> None:
+    if not _seals_are_final(fd):
+        raise CommandError("identity_changed")
     try:
         st = os.fstat(fd)
     except OSError as exc:
         raise CommandError("identity_changed") from exc
-    if (
-        int(st.st_dev) != expected.device
-        or int(st.st_ino) != expected.inode
-        or int(st.st_uid) != expected.owner_uid
-        or int(st.st_gid) != expected.owner_gid
-        or int(st.st_mode) != expected.mode
-        or int(st.st_size) != expected.size_bytes
-    ):
+    if int(st.st_size) != expected.size_bytes:
+        raise CommandError("identity_changed")
+    if _hash_fd(fd) != expected.sha256:
         raise CommandError("identity_changed")
 
 
@@ -258,7 +294,9 @@ def resolve_named(
             interp_held = resolve_held(shebang, trusted_path=contract, depth=depth + 1)
             interp_held.close()
         if hold:
-            return resolved, fd, shebang
+            sealed = snapshot_sealed_memfd(fd, label=Path(named).name or "friday-exec")
+            os.close(fd)
+            return resolved, sealed, shebang
     except Exception:
         os.close(fd)
         raise
@@ -306,11 +344,12 @@ def resolve_root_helper(path: str) -> HeldExecutable:
         if st.st_uid != 0:
             raise CommandError("helper_untrusted")
         resolved = attest_open_fd(fd, named=named)
+        sealed = snapshot_sealed_memfd(fd, label=Path(named).name or "friday-helper")
     except Exception:
         os.close(fd)
         raise
-    os.set_inheritable(fd, True)
-    return HeldExecutable(resolved=resolved, executable_fd=fd)
+    os.close(fd)
+    return HeldExecutable(resolved=resolved, executable_fd=sealed)
 
 
 def _shell_requires_confirmation(command: str) -> bool:
@@ -370,3 +409,86 @@ def resolve_request(
 
 def resolve_bwrap() -> HeldExecutable:
     return resolve_root_helper(BWRAP_EXECUTABLE)
+
+
+def _canonical_path_root(directory: str) -> str:
+    try:
+        st = os.lstat(directory)
+    except OSError as exc:
+        raise CommandError("untrusted_path_root") from exc
+    if stat.S_ISLNK(st.st_mode):
+        try:
+            target = os.readlink(directory)
+        except OSError as exc:
+            raise CommandError("untrusted_path_root") from exc
+        dest = target if target.startswith("/") else str(Path(directory).parent / target)
+        dest = _lexical_normalize(dest)
+        try:
+            dest_st = os.lstat(dest)
+        except OSError as exc:
+            raise CommandError("untrusted_path_root") from exc
+        if stat.S_ISLNK(dest_st.st_mode) or not stat.S_ISDIR(dest_st.st_mode):
+            raise CommandError("untrusted_path_root")
+        return dest
+    if not stat.S_ISDIR(st.st_mode):
+        raise CommandError("untrusted_path_root")
+    return directory
+
+
+def attest_trusted_path(contract: TrustedPathContract) -> tuple[PathRoot, ...]:
+    roots: list[PathRoot] = []
+    seen: set[tuple[int, int]] = set()
+    flags = os.O_RDONLY | os.O_DIRECTORY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0)
+    for directory in contract.directories:
+        named = _canonical_path_root(directory)
+        try:
+            fd = os.open(named, flags)
+        except OSError as exc:
+            raise CommandError("untrusted_path_root") from exc
+        try:
+            st = os.fstat(fd)
+            if not stat.S_ISDIR(st.st_mode):
+                raise CommandError("untrusted_path_root")
+            mode = stat.S_IMODE(st.st_mode)
+            if mode & 0o022:
+                raise CommandError("untrusted_path_root")
+            ident = (int(st.st_dev), int(st.st_ino))
+            if ident in seen:
+                continue
+            seen.add(ident)
+            roots.append(
+                PathRoot(
+                    path=named,
+                    owner_uid=int(st.st_uid),
+                    owner_gid=int(st.st_gid),
+                    mode=int(st.st_mode),
+                    device=int(st.st_dev),
+                    inode=int(st.st_ino),
+                    mtime_ns=int(getattr(st, "st_mtime_ns", int(st.st_mtime * 1_000_000_000))),
+                )
+            )
+        finally:
+            os.close(fd)
+    return tuple(roots)
+
+
+def confirm_path_roots(roots: tuple[PathRoot, ...]) -> None:
+    flags = os.O_RDONLY | os.O_DIRECTORY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0)
+    for root in roots:
+        try:
+            fd = os.open(root.path, flags)
+        except OSError as exc:
+            raise CommandError("untrusted_path_root") from exc
+        try:
+            st = os.fstat(fd)
+            if (
+                int(st.st_uid) != root.owner_uid
+                or int(st.st_gid) != root.owner_gid
+                or int(st.st_mode) != root.mode
+                or int(st.st_dev) != root.device
+                or int(st.st_ino) != root.inode
+                or int(getattr(st, "st_mtime_ns", int(st.st_mtime * 1_000_000_000))) != root.mtime_ns
+            ):
+                raise CommandError("untrusted_path_root")
+        finally:
+            os.close(fd)

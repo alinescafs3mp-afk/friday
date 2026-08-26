@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import secrets
@@ -9,7 +10,10 @@ import threading
 import time
 from pathlib import Path
 
+from .boundary import ProvenScope, ResourceBoundary, SystemdCgroupBoundary
 from .contracts import (
+    MAX_STDERR_BYTES,
+    MAX_STDOUT_BYTES,
     CommandError,
     CommandLane,
     CommandOrigin,
@@ -20,12 +24,13 @@ from .contracts import (
     GeneratedFile,
     IsolationProfile,
     ResolvedExecutable,
+    ResourceLimits,
     TrustedPathContract,
     sha256_bytes,
 )
 from .grant import CommandGrantAuthority
 from .isolate import require_profile
-from .resolve import resolve_bwrap, resolve_request
+from .resolve import attest_trusted_path, resolve_bwrap, resolve_request
 from .runner import SpawnedCommand, _pid_starttime
 from .store import CommandJobStore, decode_json_list
 from .workspace import JobWorkspace
@@ -109,12 +114,18 @@ class CommandKernel:
         authority: CommandGrantAuthority,
         *,
         trusted_path: TrustedPathContract | None = None,
+        limits: ResourceLimits | None = None,
+        boundary: ResourceBoundary | None = None,
     ) -> None:
         self.store = CommandJobStore(Path(store_root))
         self.authority = authority
         self.authority.bind_store(self.store)
         self.trusted_path = trusted_path or TrustedPathContract.default()
+        self.path_roots = attest_trusted_path(self.trusted_path)
+        self.limits = limits or ResourceLimits.default()
+        self.boundary = boundary if boundary is not None else SystemdCgroupBoundary()
         self._lock = threading.Lock()
+        self._spawn_lock = threading.Lock()
         self._live: dict[str, SpawnedCommand] = {}
         self._threads: dict[str, threading.Thread] = {}
         self._receipts: dict[str, CommandReceipt] = {}
@@ -123,6 +134,20 @@ class CommandKernel:
     def _reconcile_stale(self) -> None:
         for job in self.store.list_unreaped():
             job_id = str(job["job_id"])
+            unit = str(job.get("systemd_unit") or "")
+            cgroup_path = str(job.get("cgroup_path") or "")
+            if cgroup_path:
+                kill_file = Path(cgroup_path) / "cgroup.kill"
+                with contextlib.suppress(OSError):
+                    kill_file.write_text("1", encoding="ascii")
+            if unit:
+                scope = ProvenScope(
+                    job_id=job_id,
+                    unit=unit,
+                    cgroup=Path(cgroup_path) if cgroup_path else Path("/nonexistent"),
+                    limits=self.limits,
+                )
+                self.boundary.stop(scope)
             with self.store.transaction():
                 self.store.update_job(
                     job_id,
@@ -145,10 +170,9 @@ class CommandKernel:
                         raise CommandError("idempotency_conflict")
                     return existing["job_id"]
             grant = self.authority.parse(grant_token, request, actor_id=actor_id)
-            require_profile(grant.isolation_profile, grant.host_user_authorized)
+            require_profile(grant.isolation_profile)
             held = resolve_request(request, grant, trusted_path=self.trusted_path)
-            if grant.isolation_profile is IsolationProfile.ISOLATED_WORKSPACE:
-                bwrap = resolve_bwrap()
+            bwrap = resolve_bwrap()
             job_id = secrets.token_hex(16)
             job_dir = self.store.job_dir(job_id)
             job_dir.mkdir(parents=True, exist_ok=True)
@@ -163,6 +187,12 @@ class CommandKernel:
                     return existing["job_id"]
                 self.authority.still_valid(grant)
                 self.store.consume_nonce(grant.nonce, exp=grant.expires_at, now=int(time.time()))
+                if grant.confirmation_nonce:
+                    self.store.consume_nonce(
+                        grant.confirmation_nonce,
+                        exp=grant.expires_at,
+                        now=int(time.time()),
+                    )
                 self.store.insert_job(
                     {
                         "job_id": job_id,
@@ -174,7 +204,7 @@ class CommandKernel:
                         "source_hash": grant.source_hash,
                         "telegram_update_id": grant.telegram_update_id,
                         "isolation_profile": grant.isolation_profile.value,
-                        "host_user_authorized": grant.host_user_authorized,
+                        "host_user_authorized": False,
                         "idempotency_key": grant.idempotency_key,
                         "command_digest": request.digest,
                         "argv_sha256": request.argv_sha256,
@@ -195,29 +225,38 @@ class CommandKernel:
                 max_stdout_bytes=request.max_stdout_bytes,
                 max_stderr_bytes=request.max_stderr_bytes,
                 isolation=grant.isolation_profile,
+                limits=self.limits,
             )
+            scope = None
             try:
                 self.authority.still_valid(grant)
-                spawned.spawn(
-                    held,
-                    stdin=request.stdin,
-                    env=workspace.env(
-                        path_value=self.trusted_path.runtime_path,
-                        isolated=grant.isolation_profile is IsolationProfile.ISOLATED_WORKSPACE,
-                    ),
-                    trusted_path=self.trusted_path,
-                    bwrap=bwrap,
-                    job_id=job_id,
-                )
+                with self._spawn_lock:
+                    scope = self.boundary.allocate(job_id, self.limits, timeout_sec=request.timeout_sec)
+                    spawned.spawn(
+                        held,
+                        stdin=request.stdin,
+                        env=workspace.env(
+                            path_value=self.trusted_path.runtime_path,
+                            isolated=True,
+                        ),
+                        path_roots=self.path_roots,
+                        bwrap=bwrap,
+                        scope=scope,
+                    )
             except CommandError as exc:
+                spawned.abort()
                 with self.store.transaction():
                     self.store.update_job(
                         job_id,
                         {
-                            "status": CommandStatus.FAILED.value,
+                            "status": CommandStatus.FAILED.value
+                            if not spawned.effect_boundary_crossed
+                            else CommandStatus.UNKNOWN.value,
                             "error_code": exc.code,
                             "finished_at": time.time(),
                             "effect_boundary_crossed": 1 if spawned.effect_boundary_crossed else 0,
+                            "systemd_unit": scope.unit if scope is not None else None,
+                            "cgroup_path": str(scope.cgroup) if scope is not None else None,
                         },
                     )
                 receipt = self._receipt_from_spawned(
@@ -228,33 +267,50 @@ class CommandKernel:
                     held.resolved,
                     spawned,
                     error_code=exc.code,
-                    status=CommandStatus.FAILED,
+                    status=CommandStatus.UNKNOWN if spawned.effect_boundary_crossed else CommandStatus.FAILED,
                 )
                 self._receipts[job_id] = receipt
                 raise
-            with self.store.transaction():
-                self.store.update_job(
-                    job_id,
-                    {
-                        "status": CommandStatus.RUNNING.value,
-                        "pid": spawned.pid,
-                        "pid_starttime": spawned.pid_starttime,
-                        "cgroup_path": str(spawned.cgroup) if spawned.cgroup is not None else None,
-                        "started_at": spawned.started_at,
-                        "effect_boundary_crossed": 1,
-                    },
-                )
+            try:
+                with self.store.transaction():
+                    self.store.update_job(
+                        job_id,
+                        {
+                            "status": CommandStatus.RUNNING.value,
+                            "pid": spawned.pid,
+                            "pid_starttime": spawned.pid_starttime,
+                            "cgroup_path": str(scope.cgroup) if scope is not None else None,
+                            "systemd_unit": scope.unit if scope is not None else None,
+                            "started_at": spawned.started_at,
+                            "effect_boundary_crossed": 1,
+                        },
+                    )
+            except CommandError as persist_exc:
+                spawned.abort()
+                with contextlib.suppress(CommandError), self.store.transaction():
+                    self.store.update_job(
+                        job_id,
+                        {
+                            "status": CommandStatus.UNKNOWN.value,
+                            "error_code": "unknown_after_spawn",
+                            "finished_at": time.time(),
+                            "effect_boundary_crossed": 1,
+                        },
+                    )
+                raise CommandError("unknown_after_spawn") from persist_exc
             with self._lock:
                 self._live[job_id] = spawned
             worker = threading.Thread(
                 target=self._reap,
-                args=(job_id, request, grant, held.resolved, spawned),
+                args=(job_id, request, grant, held, bwrap, spawned),
                 name=f"engineer-command-{job_id[:8]}",
                 daemon=False,
             )
             with self._lock:
                 self._threads[job_id] = worker
             worker.start()
+            held = None
+            bwrap = None
             return job_id
         finally:
             if held is not None:
@@ -347,10 +403,11 @@ class CommandKernel:
         if str(job.get("actor_id") or "") != actor_id:
             raise CommandError("actor_mismatch")
 
-    def _reap(self, job_id: str, request: CommandRequest, grant, resolved, spawned: SpawnedCommand) -> None:
+    def _reap(self, job_id: str, request: CommandRequest, grant, held, bwrap, spawned: SpawnedCommand) -> None:
         error_code = ""
         status = CommandStatus.FAILED
         generated: tuple[GeneratedFile, ...] = ()
+        resolved = held.resolved
         try:
             spawned.wait()
             try:
@@ -359,9 +416,10 @@ class CommandKernel:
                 error_code = exc.code
                 status = CommandStatus.FAILED
             else:
-                if not spawned.eof_proven or (
-                    spawned.isolation is IsolationProfile.HOST_USER and not spawned.tree_empty
-                ):
+                if spawned.quota_exceeded:
+                    status = CommandStatus.FAILED
+                    error_code = "output_quota_exceeded"
+                elif not spawned.eof_proven or not spawned.tree_empty:
                     status = CommandStatus.UNKNOWN
                     error_code = "tree_or_eof_unproven"
                 elif spawned.timed_out:
@@ -381,6 +439,10 @@ class CommandKernel:
             status = CommandStatus.FAILED
         finally:
             spawned.close_pidfd()
+            if held is not None:
+                held.close()
+            if bwrap is not None:
+                bwrap.close()
         receipt = self._receipt_from_spawned(
             job_id,
             request,
@@ -469,6 +531,7 @@ class CommandKernel:
             error_code=error_code,
             effect_boundary_crossed=spawned.effect_boundary_crossed,
             receipt_mac="",
+            shell_subcommands_attested=False,
         )
         mac = self.authority.sign_receipt(receipt.to_public_payload())
         return CommandReceipt(
@@ -497,6 +560,7 @@ class CommandKernel:
             error_code=receipt.error_code,
             effect_boundary_crossed=receipt.effect_boundary_crossed,
             receipt_mac=mac,
+            shell_subcommands_attested=False,
         )
 
     def _receipt_from_job(self, job_id: str) -> CommandReceipt:
@@ -511,8 +575,37 @@ class CommandKernel:
                 )
             job = self.store.read_job(job_id)
         workspace = JobWorkspace(self.store.job_dir(job_id))
-        stdout = workspace.stdout_path.read_bytes() if workspace.stdout_path.exists() else b""
-        stderr = workspace.stderr_path.read_bytes() if workspace.stderr_path.exists() else b""
+        stdout_sha = str(job.get("stdout_sha256") or "")
+        stderr_sha = str(job.get("stderr_sha256") or "")
+        try:
+            stdout = (
+                workspace.read_evidence_verified(
+                    "stdout.bin",
+                    expected_sha256=stdout_sha,
+                    cap=int(job.get("max_stdout_bytes") or MAX_STDOUT_BYTES),
+                )
+                if stdout_sha
+                else b""
+            )
+            stderr = (
+                workspace.read_evidence_verified(
+                    "stderr.bin",
+                    expected_sha256=stderr_sha,
+                    cap=int(job.get("max_stderr_bytes") or MAX_STDERR_BYTES),
+                )
+                if stderr_sha
+                else b""
+            )
+        except CommandError:
+            status = CommandStatus.UNKNOWN
+            stdout = b""
+            stderr = b""
+            with self.store.transaction():
+                self.store.update_job(
+                    job_id,
+                    {"status": status.value, "error_code": "corrupt_evidence"},
+                )
+            job = self.store.read_job(job_id)
         isolation = IsolationProfile(str(job.get("isolation_profile") or IsolationProfile.ISOLATED_WORKSPACE.value))
         receipt = CommandReceipt(
             job_id=job_id,
@@ -540,5 +633,6 @@ class CommandKernel:
             error_code=str(job.get("error_code") or ""),
             effect_boundary_crossed=bool(job.get("effect_boundary_crossed")),
             receipt_mac=str(job.get("receipt_mac") or ""),
+            shell_subcommands_attested=False,
         )
         return receipt

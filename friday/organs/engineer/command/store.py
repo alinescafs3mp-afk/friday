@@ -87,6 +87,7 @@ class CommandJobStore:
             raise CommandError("durable_write_failed") from exc
         os.fchmod(self._lock_fd, 0o600)
         self._local = threading.RLock()
+        self.fail_next_commit = 0
         self._conn = sqlite3.connect(str(self.db_path), isolation_level=None, check_same_thread=False)
         self._conn.row_factory = sqlite3.Row
         self._conn.execute("PRAGMA journal_mode=WAL")
@@ -123,6 +124,7 @@ class CommandJobStore:
                 pid INTEGER,
                 pid_starttime INTEGER,
                 cgroup_path TEXT,
+                systemd_unit TEXT,
                 grant_nonce TEXT NOT NULL,
                 timeout_sec INTEGER NOT NULL,
                 max_stdout_bytes INTEGER NOT NULL,
@@ -164,6 +166,10 @@ class CommandJobStore:
                 self._conn.execute("ROLLBACK")
                 raise
             else:
+                if self.fail_next_commit > 0:
+                    self.fail_next_commit -= 1
+                    self._conn.execute("ROLLBACK")
+                    raise CommandError("durable_write_failed")
                 self._conn.execute("COMMIT")
         finally:
             _flock(self._lock_fd, _LOCK_UN)
