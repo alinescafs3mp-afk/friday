@@ -824,12 +824,118 @@ def test_canonical_digest_is_order_independent() -> None:
 def test_configuration_defaults_and_unknown_mode_stay_off(settings, monkeypatch) -> None:
     assert settings.semantic_supervisor_mode == "off"
     assert settings.semantic_supervisor_tasks == ()
-    assert settings.public_dict()["semantic_supervisor"]["promotion_admitted"] is False
+    public = settings.public_dict()["semantic_supervisor"]
+    assert public["promotion_admitted"] is False
+    assert public["promotion_config"] == {
+        "operator_gate_enabled": False,
+        "raw_settings_valid": True,
+        "evidence_file_configured": False,
+        "evidence_sha256_configured": False,
+        "source_revision_configured": False,
+        "registry_binding_configured": False,
+        "canary_actor_binding_count": 0,
+        "evidence_path_public": False,
+    }
+    raw = settings.semantic_supervisor_promotion_activation_settings()
+    assert raw.enabled is False
+    assert raw.requested_mode == "off"
+    assert raw.evidence_file == ""
+    assert raw.canary_actor_bindings == ()
     monkeypatch.setenv("FRIDAY_SEMANTIC_SUPERVISOR_MODE", "please-assist")
     from friday.config import load_settings
 
     loaded = load_settings()
     assert loaded.semantic_supervisor_mode == "off"
+
+
+def test_promotion_config_retains_exact_private_bindings_but_redacts_them(
+    settings: object,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    evidence_path = "/private/friday/promotion-evidence.json"
+    evidence_sha256 = "a" * 64
+    source_sha256 = "b" * 64
+    registry_sha256 = "c" * 64
+    actors = ("d" * 64, "e" * 64)
+    monkeypatch.setenv("FRIDAY_SEMANTIC_SUPERVISOR_MODE", "canary")
+    monkeypatch.setenv("FRIDAY_SEMANTIC_SUPERVISOR_PROMOTION_ENABLED", "1")
+    monkeypatch.setenv("FRIDAY_SEMANTIC_SUPERVISOR_PROMOTION_EVIDENCE_FILE", evidence_path)
+    monkeypatch.setenv("FRIDAY_SEMANTIC_SUPERVISOR_PROMOTION_EVIDENCE_SHA256", evidence_sha256)
+    monkeypatch.setenv(
+        "FRIDAY_SEMANTIC_SUPERVISOR_PROMOTION_SOURCE_REVISION_SHA256",
+        source_sha256,
+    )
+    monkeypatch.setenv(
+        "FRIDAY_SEMANTIC_SUPERVISOR_PROMOTION_REGISTRY_BINDING_SHA256",
+        registry_sha256,
+    )
+    monkeypatch.setenv(
+        "FRIDAY_SEMANTIC_SUPERVISOR_PROMOTION_CANARY_ACTOR_BINDINGS",
+        ",".join(actors),
+    )
+    from friday.config import load_settings
+
+    loaded = load_settings()
+    raw = loaded.semantic_supervisor_promotion_activation_settings()
+    assert raw.enabled is True
+    assert raw.requested_mode == "canary"
+    assert raw.evidence_file == evidence_path
+    assert raw.evidence_sha256 == evidence_sha256
+    assert raw.source_revision_sha256 == source_sha256
+    assert raw.registry_binding_sha256 == registry_sha256
+    assert raw.canary_actor_bindings == actors
+    semantic_public = loaded.public_dict()["semantic_supervisor"]
+    assert isinstance(semantic_public, dict)
+    public = semantic_public["promotion_config"]
+    assert isinstance(public, dict)
+    assert public == {
+        "operator_gate_enabled": True,
+        "raw_settings_valid": True,
+        "evidence_file_configured": True,
+        "evidence_sha256_configured": True,
+        "source_revision_configured": True,
+        "registry_binding_configured": True,
+        "canary_actor_binding_count": 2,
+        "evidence_path_public": False,
+    }
+    serialized = json.dumps(public, sort_keys=True)
+    for private_value in (evidence_path, evidence_sha256, source_sha256, registry_sha256, *actors):
+        assert private_value not in serialized
+
+
+@pytest.mark.parametrize(
+    ("name", "value", "attribute"),
+    (
+        (
+            "FRIDAY_SEMANTIC_SUPERVISOR_PROMOTION_ENABLED",
+            "true",
+            "semantic_supervisor_promotion_enabled",
+        ),
+        (
+            "FRIDAY_SEMANTIC_SUPERVISOR_PROMOTION_CANARY_ACTOR_BINDINGS",
+            f"{'e' * 64},{'d' * 64}",
+            "semantic_supervisor_promotion_canary_actor_bindings",
+        ),
+    ),
+)
+def test_noncanonical_promotion_env_retains_a_closed_invalid_sentinel(
+    settings: object,
+    monkeypatch: pytest.MonkeyPatch,
+    name: str,
+    value: str,
+    attribute: str,
+) -> None:
+    monkeypatch.setenv(name, value)
+    from friday.config import load_settings
+
+    loaded = load_settings()
+    assert getattr(loaded, attribute) is None
+    semantic_public = loaded.public_dict()["semantic_supervisor"]
+    assert isinstance(semantic_public, dict)
+    public = semantic_public["promotion_config"]
+    assert isinstance(public, dict)
+    assert public["operator_gate_enabled"] is False
+    assert public["raw_settings_valid"] is False
 
 
 @pytest.mark.parametrize(
@@ -915,6 +1021,12 @@ def test_semantic_supervisor_config_is_forwarded_by_operator_templates() -> None
         ("FRIDAY_SEMANTIC_SUPERVISOR_MAX_REVIEW_ROUNDS", "1"),
         ("FRIDAY_SEMANTIC_SUPERVISOR_MAX_STEPS", "6"),
         ("FRIDAY_SEMANTIC_SUPERVISOR_MODE", "off"),
+        ("FRIDAY_SEMANTIC_SUPERVISOR_PROMOTION_CANARY_ACTOR_BINDINGS", ""),
+        ("FRIDAY_SEMANTIC_SUPERVISOR_PROMOTION_ENABLED", "0"),
+        ("FRIDAY_SEMANTIC_SUPERVISOR_PROMOTION_EVIDENCE_FILE", ""),
+        ("FRIDAY_SEMANTIC_SUPERVISOR_PROMOTION_EVIDENCE_SHA256", ""),
+        ("FRIDAY_SEMANTIC_SUPERVISOR_PROMOTION_REGISTRY_BINDING_SHA256", ""),
+        ("FRIDAY_SEMANTIC_SUPERVISOR_PROMOTION_SOURCE_REVISION_SHA256", ""),
         ("FRIDAY_SEMANTIC_SUPERVISOR_TASKS", ""),
         ("FRIDAY_SEMANTIC_SUPERVISOR_TIMEOUT_SEC", "12"),
     )
