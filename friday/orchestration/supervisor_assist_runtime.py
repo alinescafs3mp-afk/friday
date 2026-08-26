@@ -22,6 +22,7 @@ from friday.orchestration.supervisor_assist_controller import (
 )
 from friday.orchestration.supervisor_assist_graph_adapter import AssistConversationScope
 from friday.orchestration.supervisor_assist_surface import (
+    CurrentFileWebAssistSurface,
     prepare_current_file_web_assist_surface,
 )
 from friday.orchestration.supervisor_contracts import SupervisorMode
@@ -53,7 +54,7 @@ class _AssistController(Protocol):
 
     async def execute(
         self,
-        surface: object | None,
+        surface: CurrentFileWebAssistSurface | None,
         *,
         legacy_primary: Callable[[], Awaitable[Mapping[str, Any]]],
         absolute_deadline: float,
