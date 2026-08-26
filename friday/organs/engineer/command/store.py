@@ -200,13 +200,13 @@ class CommandJobStore:
                 self._conn.execute(
                     "ALTER TABLE jobs ADD COLUMN cleanup_pending INTEGER NOT NULL DEFAULT 0"
                 )
-                # A pre-marker UNKNOWN row with a durable unit identity may be
-                # an interrupted cleanup.  DDL and backfill commit atomically,
-                # so a crash can never leave the new marker silently clear.
+                # Any pre-marker row with a durable unit identity may have an
+                # interrupted cleanup, including FAILED/COMPLETED rows written
+                # by older builds.  DDL and backfill commit atomically, so a
+                # crash can never leave the new marker silently clear.
                 self._conn.execute(
                     """UPDATE jobs SET cleanup_pending=1
-                       WHERE status='unknown'
-                         AND systemd_unit IS NOT NULL AND cgroup_path IS NOT NULL"""
+                       WHERE systemd_unit IS NOT NULL AND cgroup_path IS NOT NULL"""
                 )
             except Exception:
                 self._conn.execute("ROLLBACK")

@@ -211,7 +211,14 @@ def test_store_lists_cleanup_pending_unknown_jobs_for_restart(tmp_path: Path) ->
         store.close()
 
 
-def test_store_migration_backfills_legacy_unknown_scope_cleanup(tmp_path: Path) -> None:
+@pytest.mark.parametrize(
+    "legacy_status",
+    [CommandStatus.UNKNOWN, CommandStatus.FAILED, CommandStatus.COMPLETED],
+)
+def test_store_migration_backfills_every_legacy_scope_bearing_row(
+    tmp_path: Path,
+    legacy_status: CommandStatus,
+) -> None:
     root = tmp_path / "legacy-store"
     root.mkdir()
     database = root / "kernel.sqlite"
@@ -230,7 +237,7 @@ def test_store_migration_backfills_legacy_unknown_scope_cleanup(tmp_path: Path) 
             "INSERT INTO jobs(job_id,status,systemd_unit,cgroup_path) VALUES(?,?,?,?)",
             (
                 job_id,
-                CommandStatus.UNKNOWN.value,
+                legacy_status.value,
                 f"friday-ecmd-{job_id}.service",
                 f"/sys/fs/cgroup/friday-ecmd-{job_id}.service",
             ),
