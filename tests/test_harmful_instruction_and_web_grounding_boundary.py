@@ -28,6 +28,7 @@ from friday.agent_runtime import (
 )
 from friday.execution_kernel import (
     ExecutionKernel,
+    ToolResult,
     _capturable_public_web_url,
     _capturable_web_sources,
 )
@@ -1652,6 +1653,7 @@ def test_refilled_research_target_is_sourced_despite_discarded_attempts() -> Non
             "timed_out_sources": 0,
             "search_timed_out": False,
         },
+        research_max_sources=3,
     )
 
     assert status == "sourced"
@@ -1675,6 +1677,7 @@ def test_filled_research_target_stays_sourced_when_extra_direct_row_is_bounded_o
             "search_timed_out": False,
         },
         limit=3,
+        research_max_sources=3,
     )
 
     assert status == "sourced"
@@ -1697,6 +1700,7 @@ def test_unfilled_research_target_remains_partial_with_exact_counts() -> None:
             "timed_out_sources": 0,
             "search_timed_out": False,
         },
+        research_max_sources=3,
     )
 
     assert status == "partial"
@@ -1736,6 +1740,280 @@ def test_research_without_target_keeps_legacy_completeness_semantics() -> None:
             "search_timed_out": False,
         },
     )
+    assert status == "sourced"
+    assert len(sources) == 1
+    assert payload is not None
+
+
+def test_legacy_research_without_a_source_list_is_malformed_not_empty() -> None:
+    report = {
+        "outbound_attempted": True,
+        "requested_sources": 0,
+        "completed_sources": 0,
+        "failed_sources": 0,
+        "timed_out_sources": 0,
+        "search_timed_out": False,
+    }
+
+    assert _project_web_tool_result("web_research", report) == ("failed", [], None)
+
+
+def test_legacy_research_resource_bounds_apply_before_projection_and_capture() -> None:
+    huge = 10**5_000
+    rows = _complete_research_rows(12)
+    for row in rows:
+        row["text"] = str(row["text"]) * 10
+        row["text_length"] = len(str(row["text"]))
+    report = {
+        "outbound_attempted": True,
+        "sources": rows[:1],
+        "requested_sources": huge,
+        "completed_sources": 1,
+        "failed_sources": huge - 1,
+        "timed_out_sources": 0,
+        "search_timed_out": False,
+    }
+
+    assert _project_web_tool_result("web_research", report) == ("failed", [], None)
+    assert _capturable_web_sources(report) == []
+
+    report.update(
+        {
+            "sources": rows,
+            "requested_sources": 12,
+            "completed_sources": 12,
+            "failed_sources": 0,
+        }
+    )
+    assert _project_web_tool_result("web_research", report) == ("failed", [], None)
+    assert _capturable_web_sources(report) == []
+
+
+def test_research_projection_emits_only_closed_top_level_metadata() -> None:
+    report = {
+        "query": "bounded query",
+        "outbound_attempted": True,
+        "sources": _complete_research_rows(1),
+        "target_sources": 1,
+        "requested_sources": 1,
+        "completed_sources": 1,
+        "failed_sources": 0,
+        "timed_out_sources": 0,
+        "search_timed_out": False,
+        "freshness": object(),
+        "applied_search_filters": {"nested": object()},
+    }
+
+    status, _sources, payload = _project_web_tool_result(
+        "web_research",
+        report,
+        expected_query="bounded query",
+        research_max_sources=3,
+    )
+
+    assert status == "sourced"
+    assert payload is not None
+    assert "freshness" not in payload
+    assert "applied_search_filters" not in payload
+    assert ToolResult("web_research", True, payload).to_llm_message()
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    (
+        {"text": "x" * 20_001, "text_length": 20_001},
+        {"title": {"nested": "not a title"}},
+        {"text_length": 10**5_000},
+    ),
+    ids=("oversized_text", "non_string_title", "oversized_declared_length"),
+)
+def test_target_row_resource_violation_is_neither_projected_nor_captured(
+    mutation: dict[str, Any],
+) -> None:
+    rows = _complete_research_rows(1)
+    rows[0]["text"] = str(rows[0]["text"]) * 10
+    rows[0]["text_length"] = len(str(rows[0]["text"]))
+    rows[0].update(mutation)
+    report = {
+        "outbound_attempted": True,
+        "sources": rows,
+        "target_sources": 1,
+        "requested_sources": 1,
+        "completed_sources": 1,
+        "failed_sources": 0,
+        "timed_out_sources": 0,
+        "search_timed_out": False,
+    }
+
+    assert _project_web_tool_result(
+        "web_research",
+        report,
+        research_max_sources=3,
+    ) == ("failed", [], None)
+    assert _capturable_web_sources(report, configured_max_sources=3) == []
+
+
+@pytest.mark.parametrize(
+    ("text_length", "expected_status"),
+    ((6, "partial"), (4, "sourced")),
+)
+def test_research_projection_binds_declared_length_to_stripped_text(
+    text_length: int,
+    expected_status: str,
+) -> None:
+    rows = _complete_research_rows(1)
+    rows[0]["text"] = " fact "
+    rows[0]["text_length"] = text_length
+    report = {
+        "outbound_attempted": True,
+        "sources": rows,
+        "target_sources": 1,
+        "requested_sources": 1,
+        "completed_sources": 1,
+        "failed_sources": 0,
+        "timed_out_sources": 0,
+        "search_timed_out": False,
+    }
+
+    status, _sources, payload = _project_web_tool_result(
+        "web_research",
+        report,
+        research_max_sources=3,
+    )
+
+    assert status == expected_status
+    assert payload is not None
+    assert payload["sources"][0]["text"] == "fact"
+
+
+def test_target_report_cannot_understate_the_configured_research_goal() -> None:
+    report = {
+        "outbound_attempted": True,
+        "sources": _complete_research_rows(1),
+        "target_sources": 1,
+        "requested_sources": 3,
+        "completed_sources": 1,
+        "failed_sources": 2,
+        "timed_out_sources": 0,
+        "search_timed_out": False,
+    }
+
+    assert _project_web_tool_result(
+        "web_research",
+        report,
+        research_max_sources=3,
+    ) == ("failed", [], None)
+    assert _capturable_web_sources(report, configured_max_sources=3) == []
+
+
+def test_target_report_canonical_duplicates_fail_before_projection_or_capture() -> None:
+    text = "Complete public fact. " * 20
+    rows = [
+        {
+            "url": "https://duplicate.synthetic.example.com/a",
+            "title": "First",
+            "text": text,
+            "text_length": len(text),
+            "status_code": 200,
+            "error": "",
+            "truncated": False,
+        },
+        {
+            "url": "https://duplicate.synthetic.example.com:443/a#copy",
+            "title": "Duplicate",
+            "text": text,
+            "text_length": len(text),
+            "status_code": 200,
+            "error": "",
+            "truncated": False,
+        },
+        {
+            "url": "https://distinct.synthetic.example.com/b",
+            "title": "Distinct",
+            "text": text,
+            "text_length": len(text),
+            "status_code": 200,
+            "error": "",
+            "truncated": False,
+        },
+    ]
+    report = {
+        "outbound_attempted": True,
+        "sources": rows,
+        "target_sources": 2,
+        "requested_sources": 2,
+        "completed_sources": 3,
+        "failed_sources": 0,
+        "timed_out_sources": 0,
+        "search_timed_out": False,
+    }
+
+    assert _project_web_tool_result(
+        "web_research",
+        report,
+        research_max_sources=3,
+    ) == ("failed", [], None)
+    assert _capturable_web_sources(report, configured_max_sources=3) == []
+
+
+def test_target_report_bounds_unrequested_direct_rows_before_capture() -> None:
+    report = {
+        "outbound_attempted": True,
+        "sources": _complete_research_rows(7),
+        "target_sources": 3,
+        "requested_sources": 3,
+        "completed_sources": 7,
+        "failed_sources": 0,
+        "timed_out_sources": 0,
+        "search_timed_out": False,
+    }
+
+    assert _project_web_tool_result(
+        "web_research",
+        report,
+        research_max_sources=3,
+    ) == ("failed", [], None)
+    assert _capturable_web_sources(report, configured_max_sources=3) == []
+
+
+def test_research_projection_rejects_a_report_for_a_different_query() -> None:
+    report = {
+        "query": "different query",
+        "outbound_attempted": True,
+        "sources": _complete_research_rows(1),
+        "requested_sources": 1,
+        "completed_sources": 1,
+        "failed_sources": 0,
+        "timed_out_sources": 0,
+        "search_timed_out": False,
+    }
+
+    assert _project_web_tool_result(
+        "web_research",
+        report,
+        expected_query="executed query",
+    ) == ("failed", [], None)
+
+
+def test_research_projection_binds_the_normalized_outbound_query() -> None:
+    raw_query = "  " + "Q" * 250
+    report = {
+        "query": "Q" * 200,
+        "outbound_attempted": True,
+        "sources": _complete_research_rows(1),
+        "requested_sources": 1,
+        "completed_sources": 1,
+        "failed_sources": 0,
+        "timed_out_sources": 0,
+        "search_timed_out": False,
+    }
+
+    status, sources, payload = _project_web_tool_result(
+        "web_research",
+        report,
+        expected_query=raw_query,
+    )
+
     assert status == "sourced"
     assert len(sources) == 1
     assert payload is not None
@@ -2763,7 +3041,7 @@ async def test_llm_projection_truncation_makes_complete_provider_report_partial(
     storage.ensure_user("alice", preset_key="owner")
     query = "SYNTHETIC-LONG-WEB-QUERY"
     source_url = "https://long.synthetic.example.com/fact"
-    source_text = "Complete provider fact. " * 2_000
+    source_text = "Complete provider fact. " * 650
     report = {
         "sources": [
             {
@@ -2896,3 +3174,81 @@ async def test_real_web_handler_with_a_readable_source_persists_accepted_evidenc
     assert '"content_source": "web_research"' in str(captured["metadata_json"])
     expected_calls = 1 if path == "prefetch" else 2
     assert len(router.calls) == expected_calls
+
+
+@pytest.mark.asyncio
+async def test_refilled_current_web_target_keeps_answer_and_full_provenance(
+    settings,
+    storage,
+    monkeypatch,
+) -> None:
+    """A filled target remains grounded when one discarded attempt is reported."""
+
+    storage.ensure_user("alice", preset_key="owner")
+    query = "SYNTHETIC-CURRENT-VALUE-QUERY"
+    fact = "SYNTHETIC-CURRENT-VALUE-73"
+    source_rows = [
+        {
+            "url": f"https://current-{index}.synthetic.example.com/value",
+            "title": f"Current value source {index}",
+            "text": (f"{query}: independent source {index} confirms {fact}. " * 4).strip(),
+            "status_code": 200,
+            "error": "",
+            "truncated": False,
+        }
+        for index in range(1, 4)
+    ]
+    surfer = _SyntheticWebSurfer(
+        {
+            "sources": source_rows,
+            "target_sources": 3,
+            "requested_sources": 4,
+            "completed_sources": 3,
+            "failed_sources": 1,
+            "timed_out_sources": 0,
+            "search_timed_out": False,
+        }
+    )
+    answer = f"Текущее синтетическое значение подтверждено: {fact}."
+    kernel = _bound_web_kernel(settings, storage, surfer)
+    router = _WebPathRouter(path="prefetch", answer=answer, query=query)
+    runtime = AgentRuntime(
+        replace(settings, verify_answers=False),
+        storage,
+        llm=router,
+        kernel=kernel,
+    )
+    monkeypatch.setattr(runtime, "_prepare_context", _web_context(query))
+
+    reply = await runtime.chat(
+        "alice",
+        "Найди в интернете текущее синтетическое значение.",
+        actor=_actor(),
+        enable_tools=True,
+    )
+
+    expected_ledger = [{"title": row["title"], "url": row["url"]} for row in source_rows]
+    assert surfer.queries == [query]
+    assert len(router.calls) == 1
+    assert answer in reply["message"]
+    assert reply["message"] != _WEB_EVIDENCE_MISSING
+    assert reply["tools_used"] == ["web_research"]
+    assert reply["web_evidence_status"] == "sourced"
+    assert reply["web_sources"] == expected_ledger
+
+    metadata = _stored_metadata(storage, reply)
+    assert metadata["web_evidence_used"] is True
+    assert metadata["web_evidence_status"] == "sourced"
+    assert metadata["web_sources"] == expected_ledger
+    assert not metadata["structural"].get("output_guards", {}).get("web_evidence_replaced")
+
+    captured = storage.execute(
+        "SELECT source_ref, metadata_json FROM raw_objects "
+        "WHERE user_id='alice' AND source='web' ORDER BY source_ref"
+    ).fetchall()
+    assert len(captured) == 3
+    assert all(
+        any(str(row["source_ref"]).startswith(f"{source['url']}#") for row in captured)
+        for source in source_rows
+    )
+    assert all('"content_source": "web_research"' in str(row["metadata_json"]) for row in captured)

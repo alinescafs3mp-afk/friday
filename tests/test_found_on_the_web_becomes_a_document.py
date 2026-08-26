@@ -46,7 +46,8 @@ class _Surfer:
         sources: list[dict] = []
         for raw in self.sources:
             item = dict(raw)
-            text = str(item.get("text") or "")
+            text = str(item.get("text") or "").strip()
+            item["text"] = text
             item.update(
                 {
                     "text_length": len(text),
@@ -270,6 +271,50 @@ async def test_collision_only_report_fails_without_capturing_an_airport(settings
     assert not (result.data.get("captured") or [])
     assert storage.list_inbox("alice") == []
     assert storage.execute("SELECT COUNT(*) AS c FROM raw_objects WHERE user_id='alice'").fetchone()["c"] == 0
+
+
+@pytest.mark.anyio
+async def test_incomplete_collision_row_cannot_prove_an_empty_topic(settings, storage):
+    class _IncompleteTopicSurfer(_Surfer):
+        async def research(self, query: str, *, max_sources: int = 3) -> dict:
+            report = await super().research(query, max_sources=max_sources)
+            report["sources"][0]["truncated"] = True
+            report["sources"][0]["text_length"] += 20
+            return report
+
+    storage.ensure_user("alice", preset_key="admin")
+    airport_text = (
+        "SVO airport departure board for terminals, airlines, baggage and scheduled flights. "
+    ) * 5
+    kernel = _kernel(
+        settings,
+        storage,
+        _IncompleteTopicSurfer(
+            [
+                {
+                    "url": "https://www.svo.aero/en/timetable/departures/",
+                    "title": "SVO airport departures",
+                    "text": airport_text,
+                }
+            ]
+        ),
+    )
+    actor = ActorContext(user_id="alice", preset_key="admin", source="test")
+
+    result = await kernel.execute(
+        "web_research",
+        {
+            "query": "Russia Ukraine war latest news",
+            "topic_class": "russia_ukraine_war_news",
+        },
+        actor=actor,
+    )
+
+    assert result.data["search_failed"] is True
+    assert result.data["error"] == "topic_evidence_incomplete"
+    assert result.data["sources"] == []
+    assert not result.data.get("captured")
+    assert storage.list_inbox("alice") == []
 
 
 @pytest.mark.anyio

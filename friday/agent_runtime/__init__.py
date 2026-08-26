@@ -319,6 +319,7 @@ from friday.orchestration.simple_public_news_outcome import (
     LegacySimplePublicNewsPlan,
     SimplePublicNewsEvidence,
     SimplePublicNewsEvidenceStatus,
+    SimplePublicNewsOutcomeError,
     build_simple_public_news_result,
     require_accepted_simple_public_news_publication,
     simple_public_news_content_identity,
@@ -345,6 +346,7 @@ from friday.pending_durable_turn import (
 )
 from friday.people import unambiguous
 from friday.permissions import ActorContext, AuthorizationService
+from friday.public_web_url import canonical_public_web_url_key, sanitize_public_web_url
 from friday.reports import SUPPORTED_KINDS, sheet_title_from_report_title, spec_from_payload
 from friday.retrieval import best_snippet, is_relational_query
 from friday.retrieval.archive_evidence_replay import (
@@ -436,6 +438,15 @@ from friday.turn_intent_policy import (
     TurnPolicyDecision,
     WebDisposition,
     decide_turn_policy,
+)
+from friday.web_research_contract import (
+    MAX_OUTBOUND_WEB_QUERY_CHARS,
+    MAX_RESEARCH_ATTEMPTS,
+    MAX_RESEARCH_DECLARED_TEXT_CHARS,
+    MAX_RESEARCH_SOURCE_ROWS,
+    MAX_RESEARCH_SOURCE_TEXT_CHARS,
+    normalize_outbound_web_query,
+    target_research_report_is_valid,
 )
 from friday.web_surfer import (
     SEARCH_FILTER_ATTESTATION_KEY,
@@ -24917,73 +24928,15 @@ _PRIVATE_DNS_SUFFIXES = (
 def _sanitized_web_url(value: Any) -> str:
     """Return one bounded public HTTP(S) URL, never a display-time surprise."""
 
-    url = str(value or "").strip()
-    if (
-        not url
-        or len(url) > 2_048
-        or any(
-            char.isspace() or ord(char) == 127 or unicodedata.category(char).startswith("C") for char in url
-        )
-        or "\\" in url
-    ):
-        return ""
-    try:
-        parsed = urllib.parse.urlsplit(url)
-        # ``urlsplit`` defers port validation until this property is read.
-        # Without it, ``:99999`` crossed the provenance and delivery boundary.
-        port = parsed.port
-    except ValueError:
-        return ""
-    if parsed.scheme.casefold() not in {"http", "https"} or not parsed.hostname:
-        return ""
-    # Credentials in a source URL are neither useful provenance nor safe chat
-    # material.  Query strings are retained: many public sources need them to
-    # identify the exact page that was read.
-    if parsed.username is not None or parsed.password is not None:
-        return ""
-    raw_hostname = parsed.hostname.rstrip(".").casefold()
-    if not raw_hostname or "%" in raw_hostname:
-        return ""
-    try:
-        hostname = raw_hostname.encode("idna").decode("ascii").rstrip(".").casefold()
-    except UnicodeError:
-        return ""
-    if (
-        not hostname
-        or hostname in {"home.arpa", "localhost", "localhost.localdomain"}
-        or hostname.endswith(_PRIVATE_DNS_SUFFIXES)
-    ):
-        return ""
-    try:
-        address = ipaddress.ip_address(hostname.strip("[]"))
-    except ValueError:
-        # Browsers and socket stacks still accept shorthand/octal/hex IPv4
-        # spellings (127.1, 2130706433, 0177..., 0x7f...).  Treat those as
-        # numeric literals, never as ordinary DNS names which might resolve
-        # inside the host network.
-        if _LEGACY_NUMERIC_IPV4.fullmatch(hostname) or "." not in hostname:
-            return ""
-    else:
-        if not address.is_global or address.is_multicast or address.is_reserved:
-            return ""
-    netloc = f"[{hostname}]" if ":" in hostname else hostname
-    if port is not None:
-        netloc = f"{netloc}:{port}"
-    return urllib.parse.urlunsplit(
-        (
-            parsed.scheme.casefold(),
-            netloc,
-            parsed.path,
-            parsed.query,
-            parsed.fragment,
-        )
-    )
+    return sanitize_public_web_url(value) if isinstance(value, str) else ""
 
 
 def _sanitized_web_title(value: Any) -> str:
     """Bound an untrusted page title before it becomes durable/chat-visible."""
 
-    raw = str(value or "")
+    if not isinstance(value, str):
+        return ""
+    raw = value[:500]
     if any(unicodedata.category(char).startswith("C") for char in raw):
         return ""
     title = " ".join(raw.split())[:120]
@@ -24994,68 +24947,36 @@ def _sanitized_web_title(value: Any) -> str:
 def _canonical_web_url_key(url: str) -> str:
     """Canonical identity for dedupe; the original safe URL remains displayable."""
 
-    safe = _sanitized_web_url(url)
-    if not safe:
-        return ""
-    try:
-        parsed = urllib.parse.urlsplit(safe)
-        port = parsed.port
-        hostname = (parsed.hostname or "").rstrip(".").casefold().encode("idna").decode("ascii")
-    except (UnicodeError, ValueError):
-        return ""
-    host = f"[{hostname}]" if ":" in hostname else hostname
-    if port is not None and not (
-        (parsed.scheme.casefold() == "http" and port == 80)
-        or (parsed.scheme.casefold() == "https" and port == 443)
-    ):
-        host = f"{host}:{port}"
-    unreserved = frozenset("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~")
+    return canonical_public_web_url_key(url)
 
-    def normalize_component(value: str) -> str:
-        return re.sub(
-            r"%([0-9A-Fa-f]{2})",
-            lambda match: (
-                decoded
-                if (decoded := chr(int(match.group(1), 16))) in unreserved
-                else f"%{match.group(1).upper()}"
-            ),
-            value,
-        )
 
-    def remove_dot_segments(path: str) -> str:
-        absolute = path.startswith("/")
-        trailing = path.endswith(("/.", "/.."))
-        output: list[str] = []
-        for segment in path.split("/"):
-            if segment == ".":
-                continue
-            if segment == "..":
-                if output and output[-1] != ".." and not (absolute and len(output) == 1 and output[0] == ""):
-                    output.pop()
-                elif not absolute:
-                    output.append(segment)
-                continue
-            output.append(segment)
-        result = "/".join(output)
-        if absolute and not result.startswith("/"):
-            result = f"/{result}"
-        if absolute and not result:
-            result = "/"
-        if trailing and result != "/" and not result.endswith("/"):
-            result = f"{result}/"
-        return result
+_WEB_RESEARCH_METADATA_LIMITS = {
+    "id": 120,
+    "snippet": 320,
+    "source": 80,
+}
+_WEB_SEARCH_PROJECTED_ROW_MAX = 20
+_WEB_SEARCH_FACT_MAX_CHARS = 2_000
+_WEB_FETCH_TEXT_MAX_CHARS = 50_000
 
-    raw_path = normalize_component(parsed.path or "/")
-    normalized_path = remove_dot_segments(raw_path)
-    return urllib.parse.urlunsplit(
-        (
-            parsed.scheme.casefold(),
-            host,
-            normalized_path,
-            normalize_component(parsed.query),
-            "",
-        )
-    )
+
+def _bounded_web_research_metadata(item: Mapping[str, Any]) -> dict[str, str] | None:
+    """Keep only bounded JSON-string metadata from an untrusted research row."""
+
+    projected: dict[str, str] = {}
+    for key, limit in _WEB_RESEARCH_METADATA_LIMITS.items():
+        if key not in item:
+            continue
+        value = item.get(key)
+        if not isinstance(value, str):
+            return None
+        projected[key] = value[:limit]
+    if "search_title" in item:
+        search_title = item.get("search_title")
+        if not isinstance(search_title, str):
+            return None
+        projected["search_title"] = _sanitized_web_title(search_title)
+    return projected
 
 
 def _web_tool_execution_notice(tool_name: str, arguments: Any, result_data: Any = None) -> str:
@@ -25988,6 +25909,8 @@ def _project_web_tool_result(
     limit: int = 5,
     freshness: str = "",
     source_class: str = "",
+    expected_query: str = "",
+    research_max_sources: int | None = None,
 ) -> tuple[str, list[dict[str, str]], dict[str, Any] | None]:
     """Classify a web tool result by usable evidence, not handler transport.
 
@@ -26004,6 +25927,17 @@ def _project_web_tool_result(
         return "failed", [], None
     if not transport_success or not isinstance(data, Mapping):
         return "failed", [], None
+    if "error" in data and not isinstance(data.get("error"), str):
+        return "failed", [], None
+    if "query" in data and (
+        not isinstance(data.get("query"), str)
+        or len(cast(str, data.get("query"))) > MAX_OUTBOUND_WEB_QUERY_CHARS
+    ):
+        return "failed", [], None
+    if expected_query:
+        normalized_expected_query = normalize_outbound_web_query(expected_query)
+        if not normalized_expected_query or data.get("query") != normalized_expected_query:
+            return "failed", [], None
     if freshness and (
         tool_name not in {"web_search", "web_research"}
         or data.get("freshness") != freshness
@@ -26046,6 +25980,11 @@ def _project_web_tool_result(
     target_sources: int | None = None
 
     if tool_name == "web_research":
+        if not target_research_report_is_valid(
+            data,
+            configured_max_sources=research_max_sources,
+        ):
+            return "failed", [], None
         candidates = data.get("sources")
         raw_items = list(candidates) if isinstance(candidates, list) else []
         report_shape_incomplete = not {
@@ -26057,13 +25996,19 @@ def _project_web_tool_result(
         }.issubset(data)
         if candidates is not None and not isinstance(candidates, list):
             unusable_count += 1
+        if len(raw_items) > MAX_RESEARCH_SOURCE_ROWS:
+            return "failed", [], None
         for item in raw_items:
             if not isinstance(item, Mapping):
                 unusable_count += 1
                 continue
             url = _sanitized_web_url(item.get("url"))
             raw_text = item.get("text")
-            text = raw_text.strip() if isinstance(raw_text, str) else ""
+            text = (
+                raw_text.strip()
+                if isinstance(raw_text, str) and len(raw_text) <= MAX_RESEARCH_SOURCE_TEXT_CHARS
+                else ""
+            )
             status_code = item.get("status_code")
             item_shape_incomplete = not {
                 "text_length",
@@ -26083,16 +26028,22 @@ def _project_web_tool_result(
                 isinstance(text_length, int)
                 and not isinstance(text_length, bool)
                 and text_length >= len(text)
+                and text_length <= MAX_RESEARCH_DECLARED_TEXT_CHARS
             )
             valid_error = "error" not in item or isinstance(item.get("error"), str)
+            metadata = _bounded_web_research_metadata(item)
             if (
                 not url
                 or not text
+                or len(text) > MAX_RESEARCH_SOURCE_TEXT_CHARS
+                or "title" in item
+                and not isinstance(item.get("title"), str)
                 or str(item.get("error") or "").strip()
                 or not valid_status
                 or not valid_truncated
                 or not valid_text_length
                 or not valid_error
+                or metadata is None
             ):
                 unusable_count += 1
                 continue
@@ -26102,28 +26053,19 @@ def _project_web_tool_result(
                     "title": _sanitized_web_title(item.get("title") or item.get("search_title")),
                 }
             )
-            usable_payload_items.append(
-                {
-                    key: value
-                    for key, value in item.items()
-                    if key
-                    in {
-                        "id",
-                        "url",
-                        "title",
-                        "text",
-                        "text_length",
-                        "status_code",
-                        "error",
-                        "truncated",
-                        "search_title",
-                        "snippet",
-                        "source",
-                    }
-                }
-            )
-            usable_payload_items[-1]["url"] = url
-            usable_payload_items[-1]["title"] = usable[-1]["title"]
+            payload_item: dict[str, Any] = {
+                **metadata,
+                "url": url,
+                "title": usable[-1]["title"],
+                "text": text,
+                "text_length": text_length,
+                "status_code": status_code,
+            }
+            if "error" in item:
+                payload_item["error"] = str(item.get("error") or "")
+            if "truncated" in item:
+                payload_item["truncated"] = truncated
+            usable_payload_items.append(payload_item)
             item_incomplete = bool(
                 item_shape_incomplete
                 or truncated
@@ -26139,14 +26081,27 @@ def _project_web_tool_result(
         completed_sources = data.get("completed_sources")
         requested_sources = data.get("requested_sources")
         raw_target_sources = data.get("target_sources")
+        raw_topic_filtered_sources = data.get("topic_filtered_sources")
         count_fields = {
             "failed_sources": failed_sources,
             "timed_out_sources": timed_out_sources,
             "completed_sources": completed_sources,
             "requested_sources": requested_sources,
         }
+        count_limits = {
+            "failed_sources": MAX_RESEARCH_ATTEMPTS,
+            "timed_out_sources": MAX_RESEARCH_ATTEMPTS,
+            "completed_sources": MAX_RESEARCH_SOURCE_ROWS,
+            "requested_sources": MAX_RESEARCH_ATTEMPTS,
+        }
         invalid_counts = any(
-            key in data and (not isinstance(value, int) or isinstance(value, bool) or value < 0)
+            key in data
+            and (
+                not isinstance(value, int)
+                or isinstance(value, bool)
+                or value < 0
+                or value > count_limits[key]
+            )
             for key, value in count_fields.items()
         )
         count_contradiction = bool(
@@ -26184,29 +26139,48 @@ def _project_web_tool_result(
             target_sources = raw_target_sources
         if invalid_counts or count_contradiction or (target_sources is not None and unusable_count):
             return "failed", [], None
+        if "topic_filtered_sources" in data and (
+            not isinstance(raw_topic_filtered_sources, int)
+            or isinstance(raw_topic_filtered_sources, bool)
+            or raw_topic_filtered_sources < 0
+            or not isinstance(failed_sources, int)
+            or raw_topic_filtered_sources > failed_sources
+        ):
+            return "failed", [], None
+        topic_filtered_sources = (
+            raw_topic_filtered_sources if isinstance(raw_topic_filtered_sources, int) else 0
+        )
         incomplete = bool(
             report_shape_incomplete
             or (isinstance(failed_sources, int) and failed_sources > 0)
             or (isinstance(timed_out_sources, int) and timed_out_sources > 0)
             or unusable_count
             or incomplete_usable_count
+            or topic_filtered_sources
         )
     elif tool_name == "web_search":
         candidates = data.get("results")
         raw_items = list(candidates) if isinstance(candidates, list) else []
         if candidates is not None and not isinstance(candidates, list):
             unusable_count += 1
+        if len(raw_items) > _WEB_SEARCH_PROJECTED_ROW_MAX:
+            return "failed", [], None
         for item in raw_items:
             if not isinstance(item, Mapping):
                 unusable_count += 1
                 continue
             url = _sanitized_web_url(item.get("url"))
             raw_fact = item.get("snippet") or item.get("text")
-            fact = raw_fact.strip() if isinstance(raw_fact, str) else ""
+            fact = (
+                raw_fact.strip()
+                if isinstance(raw_fact, str) and len(raw_fact) <= _WEB_SEARCH_FACT_MAX_CHARS
+                else ""
+            )
             item_shape_incomplete = not {"title", "snippet", "source"}.issubset(item)
             if (
                 not url
                 or not fact
+                or len(fact) > _WEB_SEARCH_FACT_MAX_CHARS
                 or str(item.get("error") or "").strip()
                 or ("title" in item and not isinstance(item.get("title"), str))
                 or ("source" in item and not isinstance(item.get("source"), str))
@@ -26251,6 +26225,7 @@ def _project_web_tool_result(
                 or returned_results < 0
                 or returned_results != len(raw_items)
                 or returned_results > requested_results
+                or requested_results > _WEB_SEARCH_PROJECTED_ROW_MAX
                 or not isinstance(underfilled, bool)
                 or underfilled != (returned_results < requested_results)
             ):
@@ -26268,7 +26243,11 @@ def _project_web_tool_result(
         }.issubset(data)
         url = _sanitized_web_url(data.get("url"))
         raw_text = data.get("text")
-        text = raw_text.strip() if isinstance(raw_text, str) else ""
+        text = (
+            raw_text.strip()
+            if isinstance(raw_text, str) and len(raw_text) <= _WEB_FETCH_TEXT_MAX_CHARS
+            else ""
+        )
         status_code = data.get("status_code")
         valid_status = (
             isinstance(status_code, int) and not isinstance(status_code, bool) and 200 <= status_code < 300
@@ -26276,18 +26255,23 @@ def _project_web_tool_result(
         truncated = data.get("truncated", False)
         valid_truncated = isinstance(truncated, bool)
         text_length = data.get("text_length", len(text))
-        valid_text_length = (
-            isinstance(text_length, int) and not isinstance(text_length, bool) and text_length >= len(text)
+        valid_text_length = bool(
+            isinstance(text_length, int)
+            and not isinstance(text_length, bool)
+            and text_length >= len(text)
+            and text_length <= MAX_RESEARCH_DECLARED_TEXT_CHARS
         )
         valid_error = "error" not in data or isinstance(data.get("error"), str)
         if (
             url
             and text
+            and len(text) <= _WEB_FETCH_TEXT_MAX_CHARS
             and not str(data.get("error") or "").strip()
             and valid_status
             and valid_truncated
             and valid_text_length
             and valid_error
+            and ("title" not in data or isinstance(data.get("title"), str))
         ):
             usable.append({"url": url, "title": _sanitized_web_title(data.get("title"))})
             usable_payload_items.append(
@@ -26355,7 +26339,7 @@ def _project_web_tool_result(
             usable = [source for source, _payload in retained]
             usable_payload_items = [payload for _source, payload in retained]
             usable_complete = [True] * len(retained)
-            incomplete = False
+            incomplete = bool(topic_filtered_sources)
         else:
             incomplete = True
 
@@ -26371,6 +26355,8 @@ def _project_web_tool_result(
     if tool_name == "web_research" and len(all_distinct) < len(usable):
         # Duplicate provider rows shrink the verifier's evidence universe.
         # They remain usable, but cannot authorize a complete publication.
+        if target_sources is not None:
+            return "failed", [], None
         incomplete = True
     source_limit = max(1, min(int(limit), 10))
     deduplicated = all_distinct[:source_limit]
@@ -26400,8 +26386,6 @@ def _project_web_tool_result(
                 key: data[key]
                 for key in (
                     "query",
-                    "freshness",
-                    SEARCH_FILTER_ATTESTATION_KEY,
                     "target_sources",
                     "requested_sources",
                     "completed_sources",
@@ -58543,15 +58527,28 @@ class AgentRuntime:
                             web_notice.append(outbound_notice)
                     requested_source_class = ""
                     requested_freshness = ""
+                    expected_web_query = ""
+                    requested_research_sources: int | None = None
                     if isinstance(call_arguments, Mapping):
                         requested_source_class = str(call_arguments.get("source_class") or "")
                         requested_freshness = str(call_arguments.get("freshness") or "")
+                        if call.name == "web_research":
+                            expected_web_query = str(call_arguments.get("query") or "")
+                            raw_requested_sources = call_arguments.get("max_sources", 3)
+                            requested_research_sources = (
+                                raw_requested_sources
+                                if isinstance(raw_requested_sources, int)
+                                and not isinstance(raw_requested_sources, bool)
+                                else 0
+                            )
                     web_status, web_sources, web_payload = _project_web_tool_result(
                         call.name,
                         tool_result.data,
                         transport_success=tool_result.success,
                         freshness=requested_freshness,
                         source_class=requested_source_class,
+                        expected_query=expected_web_query,
+                        research_max_sources=requested_research_sources,
                     )
                     self._record_web_projection(context, web_status, web_sources)
                     if web_status not in {"sourced", "partial"} or not web_sources:
@@ -64436,6 +64433,7 @@ class AgentRuntime:
             if source_class == "foreign":
                 topic_class = _web_research_collision_topic_class(turn_auth.speech)
             query = _public_news_search_query(turn_auth.speech, query, source_class)
+        query = normalize_outbound_web_query(query)
         web_arguments: dict[str, Any] = {"query": query, "max_sources": 3}
         if simple_public_news_request:
             # The lane is admitted only when its exact closed provider window is
@@ -64546,13 +64544,18 @@ class AgentRuntime:
             limit=3 if simple_public_news_request else 5,
             freshness=str(web_arguments.get("freshness") or ""),
             source_class=source_class,
+            expected_query=query,
+            research_max_sources=int(web_arguments["max_sources"]),
         )
         simple_projected_report = web_payload
         simple_topic_mismatch = bool(
             simple_public_news_request
+            and isinstance(outbound_result_data, Mapping)
+            and outbound_result_data.get("query") == query
             and simple_public_news_topic_mismatch_is_empty(
                 outbound_result_data,
                 expected_topic_class=topic_class,
+                expected_max_sources=3,
             )
         )
         raw_topic_filtered_sources = (
@@ -64640,7 +64643,11 @@ class AgentRuntime:
         rendered = ""
         if web_status in {"sourced", "partial"} and web_sources and web_payload is not None:
             result.data = web_payload
-            rendered = result.to_llm_message()
+            try:
+                rendered = result.to_llm_message()
+            except Exception as exc:  # noqa: BLE001 — untrusted adapter data must not abort the turn
+                LOGGER.warning("Projected web evidence could not be rendered (%s)", type(exc).__name__)
+                web_status, web_sources, web_payload, rendered = "failed", [], None, ""
             if not rendered:
                 web_status, web_sources = "failed", []
             elif bool(getattr(result, "truncated", False)):
@@ -64649,11 +64656,7 @@ class AgentRuntime:
                 # becomes partial evidence when its bounded LLM projection is
                 # truncated.
                 web_status = "partial"
-            if context is not None:
-                context.web_evidence_tools.append("web_research")
-                context.web_evidence_scope = "open_search"
         if context is not None:
-            self._record_web_projection(context, web_status, web_sources)
             if simple_public_news_request:
                 plan = context.simple_public_news_plan
                 if type(plan) is not LegacySimplePublicNewsPlan:
@@ -64700,21 +64703,47 @@ class AgentRuntime:
                         # the local collision filter above retained a source row.
                         report_for_evidence["topic_class"] = plan.topic_class
                         report_for_evidence["topic_class_satisfied"] = True
-                context.simple_public_news_evidence = SimplePublicNewsEvidence.from_projection(
-                    plan,
-                    status=typed_status,
-                    executed_query=query,
-                    outbound_attempted=bool(
-                        isinstance(outbound_result_data, Mapping)
-                        and outbound_result_data.get("outbound_attempted") is True
-                    ),
-                    research_call_count=1,
-                    report=report_for_evidence,
-                    model_envelope=rendered if source_bearing else "",
-                    sources=web_sources if source_bearing else [],
-                    topic_filtered_sources=simple_topic_filtered_sources,
-                    projection_truncated=bool(getattr(result, "truncated", False)),
-                )
+                try:
+                    context.simple_public_news_evidence = SimplePublicNewsEvidence.from_projection(
+                        plan,
+                        status=typed_status,
+                        executed_query=query,
+                        outbound_attempted=bool(
+                            isinstance(outbound_result_data, Mapping)
+                            and outbound_result_data.get("outbound_attempted") is True
+                        ),
+                        research_call_count=1,
+                        report=report_for_evidence,
+                        model_envelope=rendered if source_bearing else "",
+                        sources=web_sources if source_bearing else [],
+                        topic_filtered_sources=simple_topic_filtered_sources,
+                        projection_truncated=bool(getattr(result, "truncated", False)),
+                    )
+                except SimplePublicNewsOutcomeError as exc:
+                    # An inconsistent provider/custom-kernel report is an
+                    # unavailable search, not a reason to abort the user turn.
+                    LOGGER.warning(
+                        "Simple public-news evidence rejected (%s)",
+                        type(exc).__name__,
+                    )
+                    web_status, web_sources, web_payload, rendered = "failed", [], None, ""
+                    context.simple_public_news_evidence = SimplePublicNewsEvidence.from_projection(
+                        plan,
+                        status=SimplePublicNewsEvidenceStatus.UNAVAILABLE,
+                        executed_query=query,
+                        outbound_attempted=bool(
+                            isinstance(outbound_result_data, Mapping)
+                            and outbound_result_data.get("outbound_attempted") is True
+                        ),
+                        research_call_count=1,
+                        report=None,
+                        model_envelope="",
+                        sources=[],
+                    )
+            self._record_web_projection(context, web_status, web_sources)
+            if rendered and web_status in {"sourced", "partial"} and web_sources:
+                context.web_evidence_tools.append("web_research")
+                context.web_evidence_scope = "open_search"
         # Что именно ушло в поисковик — человеку, сразу, в самом ответе. В
         # неудаляемый журнал запрос класть нельзя (туда попадёт и «пароль от
         # роутера …»), но и хеш никого не спасает: когда детектор намерения

@@ -247,6 +247,24 @@ class _MalformedTargetNewsKernel(_SyntheticNewsKernel):
         return result
 
 
+class _MalformedSourceMetadataNewsKernel(_SyntheticNewsKernel):
+    def __init__(self, variant: str) -> None:
+        super().__init__()
+        self.variant = variant
+
+    async def execute(self, tool, params, actor=None):  # noqa: ANN001, ARG002
+        result = await super().execute(tool, params, actor=actor)
+        result.data["target_sources"] = 1
+        if self.variant == "non_json_object":
+            snippet: Any = object()
+        else:
+            snippet = {"payload": "x" * 100_000}
+            for _level in range(16):
+                snippet = {"nested": [snippet]}
+        result.data["sources"][0]["snippet"] = snippet
+        return result
+
+
 class _OverreturningNewsKernel(_SyntheticNewsKernel):
     async def execute(self, tool, params, actor=None):  # noqa: ANN001, ARG002
         result = await super().execute(tool, params, actor=actor)
@@ -265,6 +283,82 @@ class _OverreturningNewsKernel(_SyntheticNewsKernel):
             )
         result.data["requested_sources"] = 4
         result.data["completed_sources"] = 4
+        return result
+
+
+class _RefilledTargetNewsKernel(_SyntheticNewsKernel):
+    async def execute(self, tool, params, actor=None):  # noqa: ANN001, ARG002
+        result = await super().execute(tool, params, actor=actor)
+        for index in range(2, 4):
+            text = f"{PUBLIC_FACT} Synthetic refill source {index}."
+            result.data["sources"].append(
+                {
+                    "url": f"https://foreign-refill-{index}.synthetic.example.com/news",
+                    "title": f"Synthetic refill {index}",
+                    "text": text,
+                    "text_length": len(text),
+                    "status_code": 200,
+                    "error": "",
+                    "truncated": False,
+                }
+            )
+        result.data.update(
+            {
+                "target_sources": 3,
+                "requested_sources": 4,
+                "completed_sources": 3,
+                "failed_sources": 1,
+            }
+        )
+        return result
+
+
+class _LegacyDirectOverflowNewsKernel(_SyntheticNewsKernel):
+    async def execute(self, tool, params, actor=None):  # noqa: ANN001, ARG002
+        result = await super().execute(tool, params, actor=actor)
+        text = f"{PUBLIC_FACT} Synthetic direct adapter corroboration."
+        result.data["sources"].append(
+            {
+                "url": "https://foreign-direct.synthetic.example.com/news",
+                "title": "Synthetic direct source",
+                "text": text,
+                "text_length": len(text),
+                "status_code": 200,
+                "error": "",
+                "truncated": False,
+            }
+        )
+        result.data["requested_sources"] = 1
+        result.data["completed_sources"] = 2
+        return result
+
+
+class _OversizedTargetNewsKernel(_OverreturningNewsKernel):
+    async def execute(self, tool, params, actor=None):  # noqa: ANN001, ARG002
+        result = await super().execute(tool, params, actor=actor)
+        result.data["target_sources"] = 4
+        return result
+
+
+class _WrongQueryNewsKernel(_SyntheticNewsKernel):
+    async def execute(self, tool, params, actor=None):  # noqa: ANN001, ARG002
+        result = await super().execute(tool, params, actor=actor)
+        result.data["query"] = "different provider query"
+        return result
+
+
+class _CanonicalDuplicateTargetNewsKernel(_OverreturningNewsKernel):
+    async def execute(self, tool, params, actor=None):  # noqa: ANN001, ARG002
+        result = await super().execute(tool, params, actor=actor)
+        result.data["sources"][1]["url"] = "https://foreign.synthetic.example.com:443/svo-update#duplicate"
+        result.data["target_sources"] = 3
+        return result
+
+
+class _TargetMixedCollisionKernel(_RefilledTargetNewsKernel):
+    async def execute(self, tool, params, actor=None):  # noqa: ANN001, ARG002
+        result = await super().execute(tool, params, actor=actor)
+        result.data["topic_filtered_sources"] = 1
         return result
 
 
@@ -938,6 +1032,9 @@ async def test_simple_svo_news_rejects_the_airport_lexical_collision_without_syn
         (_EmptyNewsKernel, "empty", CapabilityOutcomeStatus.EMPTY),
         (_UnavailableNewsKernel, "failed", CapabilityOutcomeStatus.UNAVAILABLE),
         (_MalformedTargetNewsKernel, "failed", CapabilityOutcomeStatus.UNAVAILABLE),
+        (_OversizedTargetNewsKernel, "failed", CapabilityOutcomeStatus.UNAVAILABLE),
+        (_WrongQueryNewsKernel, "failed", CapabilityOutcomeStatus.UNAVAILABLE),
+        (_CanonicalDuplicateTargetNewsKernel, "failed", CapabilityOutcomeStatus.UNAVAILABLE),
     ),
 )
 async def test_simple_news_distinguishes_validated_empty_from_unavailable(
@@ -965,6 +1062,33 @@ async def test_simple_news_distinguishes_validated_empty_from_unavailable(
     assert reply["web_sources"] == []
     assert "не получила проверяемую" in reply["message"].casefold()
     assert _stored_news_receipt(storage, reply)[0].outcome.status is outcome_status
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("metadata_variant", ("non_json_object", "huge_nested_json"))
+async def test_simple_news_malformed_source_metadata_fails_without_aborting_turn(
+    settings,
+    storage,
+    monkeypatch,
+    metadata_variant: str,
+) -> None:
+    kernel = _MalformedSourceMetadataNewsKernel(metadata_variant)
+    runtime = _runtime(settings, storage, model=_NeverModel(), kernel=kernel)
+
+    async def forbidden_context(*args: Any, **kwargs: Any) -> AgentContext:
+        del args, kwargs
+        raise AssertionError("simple public-news turn entered ambient context/classifier retrieval")
+
+    monkeypatch.setattr(runtime, "_prepare_context", forbidden_context)
+
+    reply = await runtime.chat(OWNER, REQUEST, actor=_actor())
+
+    assert len(kernel.calls) == 1
+    assert reply["tools_used"] == ["web_research"]
+    assert reply["web_evidence_status"] == "failed"
+    assert reply["web_sources"] == []
+    assert "не получила проверяемую" in reply["message"].casefold()
+    assert _stored_news_receipt(storage, reply)[0].outcome.status is CapabilityOutcomeStatus.UNAVAILABLE
 
 
 @pytest.mark.asyncio
@@ -1133,6 +1257,57 @@ async def test_simple_news_provider_overreturn_is_capped_and_partial(
     receipt, _metadata = _stored_news_receipt(storage, reply)
     assert receipt.outcome.status is CapabilityOutcomeStatus.PARTIAL
     assert receipt.outcome.citation_labels == ("A1", "A2", "A3")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("kernel_type", (_RefilledTargetNewsKernel, _LegacyDirectOverflowNewsKernel))
+async def test_simple_news_complete_reports_cross_projector_and_typed_boundary(
+    settings,
+    storage,
+    monkeypatch,
+    kernel_type,
+) -> None:
+    kernel = kernel_type()
+    model = _OneShotNewsModel()
+    runtime = _runtime(settings, storage, model=model, kernel=kernel)
+
+    async def forbidden_context(*args: Any, **kwargs: Any) -> AgentContext:
+        del args, kwargs
+        raise AssertionError("simple public-news turn entered ambient context/classifier retrieval")
+
+    monkeypatch.setattr(runtime, "_prepare_context", forbidden_context)
+    monkeypatch.setattr(runtime, "_repair_once", _forbid_repair)
+
+    reply = await runtime.chat(OWNER, REQUEST, actor=_actor())
+
+    assert reply["web_evidence_status"] == "sourced"
+    assert len(reply["web_sources"]) in {2, 3}
+    assert _stored_news_receipt(storage, reply)[0].outcome.status is CapabilityOutcomeStatus.COMPLETE
+
+
+@pytest.mark.asyncio
+async def test_topic_filtered_filled_target_remains_partial_without_aborting_turn(
+    settings,
+    storage,
+    monkeypatch,
+) -> None:
+    kernel = _TargetMixedCollisionKernel()
+    model = _OneShotNewsModel()
+    runtime = _runtime(settings, storage, model=model, kernel=kernel)
+
+    async def forbidden_context(*args: Any, **kwargs: Any) -> AgentContext:
+        del args, kwargs
+        raise AssertionError("simple public-news turn entered ambient context/classifier retrieval")
+
+    monkeypatch.setattr(runtime, "_prepare_context", forbidden_context)
+    monkeypatch.setattr(runtime, "_repair_once", _forbid_repair)
+
+    reply = await runtime.chat(OWNER, REQUEST, actor=_actor())
+
+    assert reply["web_evidence_status"] == "partial"
+    assert len(reply["web_sources"]) == 3
+    assert all("svo.aero" not in row["url"] for row in reply["web_sources"])
+    assert _stored_news_receipt(storage, reply)[0].outcome.status is CapabilityOutcomeStatus.PARTIAL
 
 
 @pytest.mark.asyncio

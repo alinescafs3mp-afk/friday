@@ -28,6 +28,7 @@ import httpx
 from bs4 import BeautifulSoup
 
 from friday.config import FridaySettings
+from friday.public_web_url import canonical_public_web_url_key
 from friday.retrieval import best_snippet
 from friday.web_surfer._direct import direct_answers
 
@@ -67,6 +68,7 @@ _FETCH_TOTAL_BUDGET = 60.0
 # completed pages because one peer was still streaming.
 _RESEARCH_TOTAL_BUDGET = 27.0
 _RESEARCH_FETCH_BUDGET = 12.0
+_RESEARCH_DIRECT_BUDGET = 8.0
 #: Срок на чтение `robots.txt`. Отдельный и короткий: файл правил крошечный, а
 #: без своего срока он становится дорогой в обход страничного бюджета.
 _ROBOTS_TIMEOUT = 10.0
@@ -2387,7 +2389,17 @@ class WebSurfer:
         direct: list[dict[str, Any]] = []
         if not freshness:
             try:
-                direct = await direct_answers(query, await self._get_client())
+                remaining_total = max(0.0, _RESEARCH_TOTAL_BUDGET - (loop.time() - started_at))
+                fetch_reserve = min(_RESEARCH_FETCH_BUDGET, remaining_total)
+                direct_budget = min(
+                    _RESEARCH_DIRECT_BUDGET,
+                    max(0.0, remaining_total - fetch_reserve),
+                )
+                if direct_budget > 0:
+                    async with asyncio.timeout(direct_budget):
+                        direct = await direct_answers(query, await self._get_client())
+            except TimeoutError:
+                direct = []
             except Exception as exc:  # noqa: BLE001 — прямой источник не должен ронять исследование
                 LOGGER.warning("Прямые источники данных не ответили (%s)", type(exc).__name__)
         # Direct adapters have no publication-window contract.  A current quote
@@ -2422,7 +2434,7 @@ class WebSurfer:
 
             nonlocal failed_sources
             url = str(item.get("url") or "")
-            key = _canonical_url(url)
+            key = canonical_public_web_url_key(url)
             text = str(item.get("text") or "").strip()
             status_code = item.get("status_code")
             error = item.get("error")
@@ -2468,7 +2480,7 @@ class WebSurfer:
                 return
             if key in partial_keys:
                 for index, (old_item, old_attempted) in enumerate(partial):
-                    if _canonical_url(str(old_item.get("url") or "")) != key:
+                    if canonical_public_web_url_key(str(old_item.get("url") or "")) != key:
                         continue
                     partial.pop(index)
                     partial_keys.remove(key)

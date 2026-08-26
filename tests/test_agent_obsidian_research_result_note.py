@@ -278,6 +278,7 @@ class _Kernel:
                 name,
                 True,
                 data={
+                    "query": payload["query"],
                     "outbound_attempted": True,
                     "sources": [
                         {

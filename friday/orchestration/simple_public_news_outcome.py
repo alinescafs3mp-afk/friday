@@ -13,7 +13,6 @@ import hashlib
 import hmac
 import json
 import re
-import urllib.parse
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from enum import StrEnum
@@ -26,6 +25,12 @@ from friday.orchestration.capability_outcome import (
     CompletionGateDecision,
 )
 from friday.orchestration.contracts import RouteClass
+from friday.public_web_url import canonical_public_web_url_key, sanitize_public_web_url
+from friday.web_research_contract import (
+    MAX_RESEARCH_ATTEMPTS,
+    MAX_RESEARCH_SOURCE_ROWS,
+    target_research_report_is_valid,
+)
 from friday.web_surfer import web_source_matches_class
 
 SIMPLE_PUBLIC_NEWS_PLAN_SCHEMA = "friday.legacy-simple-public-news-plan.v1"
@@ -176,7 +181,8 @@ def _optional_count(report: Mapping[str, Any] | None, key: str) -> int | None:
     if report is None or key not in report:
         return None
     value = report.get(key)
-    if not isinstance(value, int) or isinstance(value, bool) or value < 0:
+    limit = MAX_RESEARCH_SOURCE_ROWS if key == "completed_sources" else MAX_RESEARCH_ATTEMPTS
+    if not isinstance(value, int) or isinstance(value, bool) or not 0 <= value <= limit:
         return None
     return value
 
@@ -208,7 +214,10 @@ def _validated_empty_proof_sha256(
     if simple_public_news_topic_mismatch_is_empty(
         report,
         expected_topic_class=plan.topic_class,
+        expected_max_sources=plan.max_sources,
     ):
+        if plan.source_class and report.get("source_class_satisfied") is not True:
+            raise SimplePublicNewsOutcomeError("empty news evidence has no source-class proof")
         return (
             SimplePublicNewsEmptyKind.TOPIC_MISMATCH,
             _canonical_sha256(
@@ -265,63 +274,7 @@ def _validated_empty_proof_sha256(
 def _canonical_news_source_url(url: str) -> str:
     """Match the runtime's source identity before minting typed evidence."""
 
-    try:
-        parsed = urllib.parse.urlsplit(url)
-        port = parsed.port
-        hostname = (parsed.hostname or "").rstrip(".").casefold().encode("idna").decode("ascii")
-    except (UnicodeError, ValueError):
-        return ""
-    scheme = parsed.scheme.casefold()
-    if scheme not in {"http", "https"} or not hostname:
-        return ""
-    host = f"[{hostname}]" if ":" in hostname else hostname
-    if port is not None and not ((scheme == "http" and port == 80) or (scheme == "https" and port == 443)):
-        host = f"{host}:{port}"
-    unreserved = frozenset("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~")
-
-    def normalize_component(value: str) -> str:
-        return re.sub(
-            r"%([0-9A-Fa-f]{2})",
-            lambda match: (
-                decoded
-                if (decoded := chr(int(match.group(1), 16))) in unreserved
-                else f"%{match.group(1).upper()}"
-            ),
-            value,
-        )
-
-    def remove_dot_segments(path: str) -> str:
-        absolute = path.startswith("/")
-        trailing = path.endswith(("/.", "/.."))
-        output: list[str] = []
-        for segment in path.split("/"):
-            if segment == ".":
-                continue
-            if segment == "..":
-                if output and output[-1] != ".." and not (absolute and len(output) == 1 and output[0] == ""):
-                    output.pop()
-                elif not absolute:
-                    output.append(segment)
-                continue
-            output.append(segment)
-        result = "/".join(output)
-        if absolute and not result.startswith("/"):
-            result = f"/{result}"
-        if absolute and not result:
-            result = "/"
-        if trailing and result != "/" and not result.endswith("/"):
-            result = f"{result}/"
-        return result
-
-    return urllib.parse.urlunsplit(
-        (
-            scheme,
-            host,
-            remove_dot_segments(normalize_component(parsed.path or "/")),
-            normalize_component(parsed.query),
-            "",
-        )
-    )
+    return canonical_public_web_url_key(url)
 
 
 def simple_public_news_source_ledger_identity(
@@ -344,16 +297,7 @@ def simple_public_news_source_ledger_identity(
             raise SimplePublicNewsOutcomeError("news source ledger has an invalid URL")
         if not isinstance(title, str) or len(title) > 500:
             raise SimplePublicNewsOutcomeError("news source ledger has an invalid title")
-        try:
-            parsed = urllib.parse.urlsplit(url)
-        except ValueError as exc:
-            raise SimplePublicNewsOutcomeError("news source ledger has an invalid URL") from exc
-        if (
-            parsed.scheme.casefold() not in {"http", "https"}
-            or not parsed.hostname
-            or parsed.username is not None
-            or parsed.password is not None
-        ):
+        if not sanitize_public_web_url(url):
             raise SimplePublicNewsOutcomeError("news source ledger has an unsafe URL")
         identity = _canonical_news_source_url(url)
         if not identity or identity in seen_urls:
@@ -496,16 +440,26 @@ class SimplePublicNewsEvidence:
             ("failed_sources", self.failed_sources),
             ("timed_out_sources", self.timed_out_sources),
         ):
-            if value is not None and (not isinstance(value, int) or isinstance(value, bool) or value < 0):
+            limit = (
+                _MAX_SOURCES
+                if label == "target_sources"
+                else MAX_RESEARCH_SOURCE_ROWS
+                if label == "completed_sources"
+                else MAX_RESEARCH_ATTEMPTS
+            )
+            if value is not None and (
+                not isinstance(value, int) or isinstance(value, bool) or not 0 <= value <= limit
+            ):
                 raise SimplePublicNewsOutcomeError(f"news evidence {label} is invalid")
-        if self.target_sources is not None and self.target_sources > _MAX_SOURCES:
-            raise SimplePublicNewsOutcomeError("news evidence target_sources exceeds its closed limit")
         if self.search_timed_out is not None and not isinstance(self.search_timed_out, bool):
             raise SimplePublicNewsOutcomeError("news evidence timeout flag is invalid")
         if (
             not isinstance(self.topic_filtered_sources, int)
             or isinstance(self.topic_filtered_sources, bool)
             or self.topic_filtered_sources < 0
+            or self.topic_filtered_sources > MAX_RESEARCH_ATTEMPTS
+            or self.failed_sources is not None
+            and self.topic_filtered_sources > self.failed_sources
         ):
             raise SimplePublicNewsOutcomeError("news evidence topic-filter count is invalid")
         if not isinstance(self.projection_truncated, bool):
@@ -613,6 +567,12 @@ class SimplePublicNewsEvidence:
         topic_filtered_sources: int = 0,
         projection_truncated: bool = False,
     ) -> SimplePublicNewsEvidence:
+        if (
+            not isinstance(topic_filtered_sources, int)
+            or isinstance(topic_filtered_sources, bool)
+            or not 0 <= topic_filtered_sources <= MAX_RESEARCH_ATTEMPTS
+        ):
+            raise SimplePublicNewsOutcomeError("news topic-filter count is invalid")
         executed_query_sha256 = _sha256_text(executed_query, label="executed news query")
         if executed_query_sha256 != plan.outbound_query_sha256:
             raise SimplePublicNewsOutcomeError("executed news query is not bound to the plan")
@@ -646,6 +606,18 @@ class SimplePublicNewsEvidence:
         failed_sources = _optional_count(report, "failed_sources")
         timed_out_sources = _optional_count(report, "timed_out_sources")
         search_timed_out = _optional_boolean(report, "search_timed_out")
+        if failed_sources is not None and topic_filtered_sources > failed_sources:
+            raise SimplePublicNewsOutcomeError("news topic-filter count exceeds failed sources")
+        if (
+            report is not None
+            and "target_sources" in report
+            and not target_research_report_is_valid(
+                report,
+                configured_max_sources=plan.max_sources,
+                allow_source_subset=True,
+            )
+        ):
+            raise SimplePublicNewsOutcomeError("news report target contract is malformed")
         if "target_sources" in (report or {}) and (
             target_sources is None
             or target_sources > plan.max_sources
@@ -782,7 +754,10 @@ class SimplePublicNewsEvidence:
             )
             legacy_complete_projection = bool(
                 complete_shape
-                and requested_sources == completed_sources == len(labels)
+                and completed_sources == len(labels)
+                and requested_sources is not None
+                and completed_sources is not None
+                and 0 < requested_sources <= completed_sources
                 and failed_sources == 0
                 and timed_out_sources == 0
                 and retained_topic_filtered_sources == 0
@@ -1020,10 +995,17 @@ def simple_public_news_topic_mismatch_is_empty(
     report: object,
     *,
     expected_topic_class: str,
+    expected_max_sources: int = 3,
 ) -> bool:
     """Recognise only the kernel's closed, outbound, all-filtered report."""
 
     if not expected_topic_class or not isinstance(report, Mapping):
+        return False
+    if not target_research_report_is_valid(
+        report,
+        configured_max_sources=expected_max_sources,
+        allow_source_subset=True,
+    ):
         return False
     sources = report.get("sources")
     filtered = report.get("topic_filtered_sources")
@@ -1078,6 +1060,8 @@ def simple_public_news_topic_mismatch_is_empty(
         and completed == 0
         and (legacy_complete or target_complete)
         and report.get("search_timed_out") is False
+        and report.get("refused", False) is False
+        and report.get("quota_exhausted", False) is False
     )
 
 

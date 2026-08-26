@@ -8,7 +8,6 @@ import calendar
 import hashlib
 import inspect
 import io
-import ipaddress
 import json
 import logging
 import math
@@ -55,6 +54,7 @@ from friday.permissions import (
     current_actor,
 )
 from friday.private_fs import open_private_text_write
+from friday.public_web_url import canonical_public_web_url_key, sanitize_public_web_url
 from friday.raw_metadata import bounded_raw_file_metadata
 from friday.reminder_schedule import reminder_clock, reminder_clock_description, reminder_when_text
 from friday.reports import SUPPORTED_KINDS, render, spec_from_payload
@@ -92,6 +92,15 @@ from friday.storage.models import (
     utc_now,
 )
 from friday.tts import TTSUnavailable, synthesize_speech
+from friday.web_research_contract import (
+    MAX_OUTBOUND_WEB_QUERY_CHARS,
+    MAX_RESEARCH_ATTEMPTS,
+    MAX_RESEARCH_DECLARED_TEXT_CHARS,
+    MAX_RESEARCH_SOURCE_ROWS,
+    MAX_RESEARCH_SOURCE_TEXT_CHARS,
+    normalize_outbound_web_query,
+    target_research_report_is_valid,
+)
 from friday.web_surfer import (
     SEARCH_DOMAIN_LIST_MAX,
     SEARCH_FILTER_ATTESTATION_KEY,
@@ -178,142 +187,86 @@ def _web_research_source_matches_topic(item: Mapping[str, Any], topic_class: str
     evidence = _WEB_RESEARCH_TOPIC_EVIDENCE.get(str(topic_class or "").strip())
     if evidence is None:
         return not str(topic_class or "").strip()
-    surface = " ".join(str(item.get(key) or "") for key in ("title", "search_title", "snippet", "text"))
+    limits = {
+        "title": 500,
+        "search_title": 500,
+        "snippet": 2_000,
+        "text": MAX_RESEARCH_SOURCE_TEXT_CHARS,
+    }
+    surface = " ".join(
+        value[: limits[key]] if isinstance((value := item.get(key)), str) else ""
+        for key in ("title", "search_title", "snippet", "text")
+    )
     return bool(evidence.search(surface))
 
 
 def _capturable_public_web_url(value: Any) -> str:
     """One safe public URL for durable Raw/Inbox provenance, without DNS."""
 
-    url = str(value or "").strip()
-    if (
-        not url
-        or len(url) > 2_048
-        or any(
-            char.isspace() or ord(char) == 127 or unicodedata.category(char).startswith("C") for char in url
-        )
-        or "\\" in url
-    ):
-        return ""
-    try:
-        parsed = urllib.parse.urlsplit(url)
-        port = parsed.port
-    except ValueError:
-        return ""
-    if (
-        parsed.scheme.casefold() not in {"http", "https"}
-        or not parsed.hostname
-        or parsed.username is not None
-        or parsed.password is not None
-    ):
-        return ""
-    raw_hostname = parsed.hostname.rstrip(".").casefold()
-    if not raw_hostname or "%" in raw_hostname:
-        return ""
-    try:
-        hostname = raw_hostname.encode("idna").decode("ascii").rstrip(".").casefold()
-    except UnicodeError:
-        return ""
-    if (
-        not hostname
-        or hostname in {"home.arpa", "localhost", "localhost.localdomain"}
-        or hostname.endswith(_PRIVATE_DNS_SUFFIXES)
-    ):
-        return ""
-    try:
-        address = ipaddress.ip_address(hostname.strip("[]"))
-    except ValueError:
-        if _LEGACY_NUMERIC_IPV4.fullmatch(hostname) or "." not in hostname:
-            return ""
-    else:
-        if not address.is_global or address.is_multicast or address.is_reserved:
-            return ""
-    netloc = f"[{hostname}]" if ":" in hostname else hostname
-    if port is not None:
-        netloc = f"{netloc}:{port}"
-    return urllib.parse.urlunsplit(
-        (
-            parsed.scheme.casefold(),
-            netloc,
-            parsed.path,
-            parsed.query,
-            parsed.fragment,
-        )
-    )
+    return sanitize_public_web_url(value) if isinstance(value, str) else ""
 
 
 def _canonical_capturable_web_url_key(url: str) -> str:
     """Canonical identity for deduplicating already-safe public sources."""
 
-    safe = _capturable_public_web_url(url)
-    if not safe:
-        return ""
-    try:
-        parsed = urllib.parse.urlsplit(safe)
-        port = parsed.port
-    except ValueError:
-        return ""
-    host = str(parsed.hostname or "").casefold()
-    if not host:
-        return ""
-    netloc = f"[{host}]" if ":" in host else host
-    if port is not None and not (
-        (parsed.scheme.casefold() == "http" and port == 80)
-        or (parsed.scheme.casefold() == "https" and port == 443)
-    ):
-        netloc = f"{netloc}:{port}"
+    return canonical_public_web_url_key(url)
 
-    unreserved = frozenset("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~")
 
-    def normalize_component(value: str) -> str:
-        return re.sub(
-            r"%([0-9A-Fa-f]{2})",
-            lambda match: (
-                chr(int(match.group(1), 16))
-                if chr(int(match.group(1), 16)) in unreserved
-                else f"%{match.group(1).upper()}"
-            ),
-            value,
+def _public_web_research_row_is_valid(
+    item: Any,
+    *,
+    require_complete: bool = False,
+    source_class: str = "",
+) -> bool:
+    """Validate one public fact row without trusting adapter counters."""
+
+    if not isinstance(item, Mapping):
+        return False
+    url = _capturable_public_web_url(item.get("url"))
+    raw_text = item.get("text")
+    text = (
+        raw_text.strip()
+        if isinstance(raw_text, str) and len(raw_text) <= MAX_RESEARCH_SOURCE_TEXT_CHARS
+        else ""
+    )
+    status_code = item.get("status_code")
+    text_length = item.get("text_length")
+    error = item.get("error")
+    truncated = item.get("truncated")
+    return bool(
+        isinstance(item.get("url"), str)
+        and url
+        and text
+        and len(text) <= MAX_RESEARCH_SOURCE_TEXT_CHARS
+        and isinstance(status_code, int)
+        and not isinstance(status_code, bool)
+        and 200 <= status_code < 300
+        and isinstance(text_length, int)
+        and not isinstance(text_length, bool)
+        and text_length >= len(text)
+        and text_length <= MAX_RESEARCH_DECLARED_TEXT_CHARS
+        and all(
+            key not in item or isinstance(item.get(key), str)
+            for key in ("id", "title", "search_title", "snippet", "source")
         )
-
-    def remove_dot_segments(path: str) -> str:
-        absolute = path.startswith("/")
-        trailing = path.endswith(("/.", "/.."))
-        output: list[str] = []
-        for segment in path.split("/"):
-            if segment == ".":
-                continue
-            if segment == "..":
-                if output and output[-1] != ".." and not (absolute and len(output) == 1 and output[0] == ""):
-                    output.pop()
-                elif not absolute:
-                    output.append(segment)
-                continue
-            output.append(segment)
-        result = "/".join(output)
-        if absolute and not result.startswith("/"):
-            result = f"/{result}"
-        if absolute and not result:
-            result = "/"
-        if trailing and result != "/" and not result.endswith("/"):
-            result = f"{result}/"
-        return result
-
-    return urllib.parse.urlunsplit(
-        (
-            parsed.scheme.casefold(),
-            netloc,
-            remove_dot_segments(normalize_component(parsed.path or "/")),
-            normalize_component(parsed.query),
-            "",
-        )
+        and isinstance(error, str)
+        and not error.strip()
+        and isinstance(truncated, bool)
+        and (not require_complete or truncated is False and text_length == len(text))
+        and (not source_class or web_source_matches_class(url, source_class))
     )
 
 
-def _capturable_web_sources(report: Any) -> list[dict[str, Any]]:
+def _capturable_web_sources(
+    report: Any,
+    *,
+    configured_max_sources: int | None = None,
+) -> list[dict[str, Any]]:
     """Project only readable public sources before durable ingestion begins."""
 
     if not isinstance(report, Mapping):
+        return []
+    if "error" in report and not isinstance(report.get("error"), str):
         return []
     failure_values = [report.get(flag) for flag in _WEB_REPORT_FAILURE_FLAGS if flag in report]
     if (
@@ -323,7 +276,7 @@ def _capturable_web_sources(report: Any) -> list[dict[str, Any]]:
     ):
         return []
     raw_sources = report.get("sources")
-    if not isinstance(raw_sources, list) or not raw_sources:
+    if not isinstance(raw_sources, list) or not raw_sources or len(raw_sources) > MAX_RESEARCH_SOURCE_ROWS:
         return []
     if not {
         "requested_sources",
@@ -335,6 +288,11 @@ def _capturable_web_sources(report: Any) -> list[dict[str, Any]]:
         # This function runs before the runtime projector.  A source-shaped
         # legacy mapping without the production research completeness contract
         # must not become a durable Raw/Inbox row presented as a whole page.
+        return []
+    if not target_research_report_is_valid(
+        report,
+        configured_max_sources=configured_max_sources,
+    ):
         return []
     numeric_fields = (
         report.get("requested_sources"),
@@ -348,28 +306,34 @@ def _capturable_web_sources(report: Any) -> list[dict[str, Any]]:
             return []
         normalized_numeric_fields.append(value)
     requested, completed, failed, timed_out = normalized_numeric_fields
-    target = report.get("target_sources")
-    if "target_sources" in report and (
-        not isinstance(target, int)
-        or isinstance(target, bool)
-        or not 0 <= target <= 8
-        or (bool(raw_sources) and target == 0)
-        or target > requested
-    ):
-        return []
     if (
-        completed != len(raw_sources)
+        requested > MAX_RESEARCH_ATTEMPTS
+        or completed > MAX_RESEARCH_SOURCE_ROWS
+        or failed > MAX_RESEARCH_ATTEMPTS
+        or timed_out > MAX_RESEARCH_ATTEMPTS
+        or completed != len(raw_sources)
         or requested == 0
         or failed + timed_out > requested
         or requested > completed + failed + timed_out
     ):
         return []
+    if "target_sources" in report:
+        target_identities: set[str] = set()
+        for raw in raw_sources:
+            if not _public_web_research_row_is_valid(raw):
+                return []
+            identity = _canonical_capturable_web_url_key(str(raw.get("url") or ""))
+            if not identity or identity in target_identities:
+                return []
+            target_identities.add(identity)
     projected: list[dict[str, Any]] = []
     seen_sources: set[str] = set()
     for raw in raw_sources:
         if not isinstance(raw, Mapping):
             continue
         if not {"text_length", "status_code", "error", "truncated"}.issubset(raw):
+            continue
+        if not _public_web_research_row_is_valid(raw):
             continue
         url = _capturable_public_web_url(raw.get("url"))
         raw_text = raw.get("text")
@@ -380,8 +344,11 @@ def _capturable_web_sources(report: Any) -> list[dict[str, Any]]:
         )
         truncated = raw.get("truncated")
         text_length = raw.get("text_length")
-        valid_length = (
-            isinstance(text_length, int) and not isinstance(text_length, bool) and text_length >= len(text)
+        valid_length = bool(
+            isinstance(text_length, int)
+            and not isinstance(text_length, bool)
+            and text_length >= len(text)
+            and text_length <= MAX_RESEARCH_DECLARED_TEXT_CHARS
         )
         if (
             not url
@@ -397,7 +364,7 @@ def _capturable_web_sources(report: Any) -> list[dict[str, Any]]:
         if not identity or identity in seen_sources:
             continue
         seen_sources.add(identity)
-        raw_title = str(raw.get("title") or raw.get("search_title") or url)
+        raw_title = str(raw.get("title") or raw.get("search_title") or url)[:500]
         title = (
             ""
             if any(unicodedata.category(char).startswith("C") for char in raw_title)
@@ -405,10 +372,12 @@ def _capturable_web_sources(report: Any) -> list[dict[str, Any]]:
         )
         projected.append(
             {
-                **dict(raw),
                 "url": url,
                 "title": title or url,
                 "text": text,
+                "text_length": text_length,
+                "status_code": status_code,
+                "error": "",
                 # A larger declared original length means the body is a known
                 # prefix even when a legacy/provider row forgot to set its
                 # boolean truncation flag.  Persist the conservative truth so
@@ -3012,7 +2981,7 @@ def _bound_source_search_payload(payload: dict[str, Any]) -> dict[str, Any]:
 #: которые к поиску отношения не имеют. Поисковику больше двух сотен знаков и не
 #: нужно, а цена утечки растёт с каждым: в журнале остаётся только хеш, и что
 #: именно ушло, владелец потом не узнает.
-_MAX_OUTBOUND_QUERY_CHARS = 200
+_MAX_OUTBOUND_QUERY_CHARS = MAX_OUTBOUND_WEB_QUERY_CHARS
 _GLOBAL_OPERATOR_TOOLS = frozenset(
     {"workspace_create", "workspace_list", "workspace_read", "workspace_search"}
 )
@@ -6066,7 +6035,7 @@ class ExecutionKernel:
         region: str = "",
     ) -> dict[str, Any]:
         _, _, web, _ = self._require_services()
-        query = str(query or "").strip()
+        query = normalize_outbound_web_query(query)
         if not query:
             return {
                 "query": "",
@@ -6088,7 +6057,6 @@ class ExecutionKernel:
         exhausted = self._web_quota_refusal(actor)
         if exhausted:
             return {**exhausted, "query": query, "outbound_attempted": False}
-        query = query[:_MAX_OUTBOUND_QUERY_CHARS]
         search_options: dict[str, Any] = {
             "max_results": max(1, min(int(max_results), 10)),
         }
@@ -6256,7 +6224,7 @@ class ExecutionKernel:
         topic_class: str = "",
     ) -> dict[str, Any]:
         _, _, web, _ = self._require_services()
-        query = str(query or "").strip()
+        query = normalize_outbound_web_query(query)
         topic_class = str(topic_class or "").strip()
         try:
             freshness = normalize_search_freshness(freshness)
@@ -6297,7 +6265,6 @@ class ExecutionKernel:
         exhausted = self._web_quota_refusal(actor)
         if exhausted:
             return {**exhausted, "query": query, "sources": [], "outbound_attempted": False}
-        query = query[:_MAX_OUTBOUND_QUERY_CHARS]
         bounded_sources = max(1, min(int(max_sources), 8))
         try:
             research_options: dict[str, Any] = {"max_sources": bounded_sources}
@@ -6335,6 +6302,35 @@ class ExecutionKernel:
                 report["source_class"] = source_class
             if topic_class:
                 report["topic_class"] = topic_class
+            contract_valid = target_research_report_is_valid(
+                report,
+                configured_max_sources=bounded_sources,
+            )
+            target_rows_valid = True
+            if contract_valid and "target_sources" in report:
+                seen_target_rows: set[str] = set()
+                for row in cast(list[Any], report["sources"]):
+                    if not _public_web_research_row_is_valid(row):
+                        target_rows_valid = False
+                        break
+                    identity = _canonical_capturable_web_url_key(str(row.get("url") or ""))
+                    if not identity or identity in seen_target_rows:
+                        target_rows_valid = False
+                        break
+                    seen_target_rows.add(identity)
+            if not contract_valid or not target_rows_valid:
+                return {
+                    "query": query,
+                    "sources": [],
+                    "requested_sources": 0,
+                    "completed_sources": 0,
+                    "timed_out_sources": 0,
+                    "failed_sources": 0,
+                    "search_timed_out": False,
+                    "outbound_attempted": True,
+                    "search_failed": True,
+                    "error": "research_report_malformed",
+                }
         except SearchFilterUnavailableError as capability_failure:
             LOGGER.warning(
                 "Web research filter unavailable (%d chars): %s",
@@ -6457,14 +6453,27 @@ class ExecutionKernel:
             )
             report["topic_filtered_sources"] = filtered_sources
             report["topic_class_satisfied"] = bool(relevant_sources)
-            if not relevant_sources:
+            if not relevant_sources and raw_sources:
+                complete_topic_proof = all(
+                    _public_web_research_row_is_valid(
+                        item,
+                        require_complete=True,
+                        source_class=source_class,
+                    )
+                    for item in raw_sources
+                )
                 report.update(
                     {
                         "search_failed": True,
-                        "error": "topic_mismatch",
+                        "error": ("topic_mismatch" if complete_topic_proof else "topic_evidence_incomplete"),
                     }
                 )
-        captured = await self._capture_web_sources(actor, query, report)
+        captured = await self._capture_web_sources(
+            actor,
+            query,
+            report,
+            configured_max_sources=bounded_sources,
+        )
         return {**report, "captured": captured} if captured else report
 
     def _web_quota_refusal(self, actor: ActorContext) -> dict[str, Any] | None:
@@ -6508,7 +6517,12 @@ class ExecutionKernel:
         }
 
     async def _capture_web_sources(
-        self, actor: ActorContext, query: str, report: dict[str, Any]
+        self,
+        actor: ActorContext,
+        query: str,
+        report: dict[str, Any],
+        *,
+        configured_max_sources: int | None = None,
     ) -> list[dict[str, Any]]:
         """Найденное в интернете — такой же материал, как присланный файл.
 
@@ -6525,7 +6539,10 @@ class ExecutionKernel:
         Права проверяются честно: без `knowledge.create` поиск работает, а запись
         не делается — искать и запоминать это разные разрешения.
         """
-        sources = _capturable_web_sources(report)
+        sources = _capturable_web_sources(
+            report,
+            configured_max_sources=configured_max_sources,
+        )
         if not sources:
             return []
         if not (self.authorization and self.authorization.authorize(actor, "knowledge.create").allowed):

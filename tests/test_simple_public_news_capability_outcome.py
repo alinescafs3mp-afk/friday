@@ -28,6 +28,7 @@ from friday.orchestration.simple_public_news_outcome import (
     simple_public_news_model_envelope_identity,
     simple_public_news_outcome,
     simple_public_news_source_ledger_identity,
+    simple_public_news_topic_mismatch_is_empty,
 )
 
 REQUEST = "private-query-sentinel news this week"
@@ -36,7 +37,7 @@ BODY = "model-evidence-body-sentinel"
 ANSWER = "Grounded public-news summary."
 SOURCES = [
     {
-        "url": "https://public-source-sentinel.example/news",
+        "url": "https://public-source-sentinel.example.com/news",
         "title": "private-title-sentinel",
     }
 ]
@@ -322,7 +323,7 @@ def test_source_evidence_factory_rejects_forged_complete_and_undegraded_partial(
 def test_refilled_simple_public_news_evidence_is_complete() -> None:
     sources = [
         {
-            "url": f"https://refill-{index}.example/news",
+            "url": f"https://refill-{index}.example.com/news",
             "title": f"Refill {index}",
         }
         for index in range(1, 4)
@@ -392,9 +393,9 @@ def test_unfilled_target_cannot_forge_complete_simple_public_news_evidence() -> 
 
 def test_duplicate_rows_cannot_forge_a_filled_simple_public_news_target() -> None:
     sources = [
-        {"url": "https://duplicate.example/news", "title": "First"},
-        {"url": "https://duplicate.example:443/news#copy", "title": "Duplicate"},
-        {"url": "https://different.example/news", "title": "Different"},
+        {"url": "https://duplicate.example.com/news", "title": "First"},
+        {"url": "https://duplicate.example.com:443/news#copy", "title": "Duplicate"},
+        {"url": "https://different.example.com/news", "title": "Different"},
     ]
     report = _report()
     report.update(
@@ -426,6 +427,76 @@ def test_duplicate_rows_cannot_forge_a_filled_simple_public_news_target() -> Non
             report=report,
             model_envelope=BODY,
             sources=sources,
+        )
+
+
+@pytest.mark.parametrize(
+    "url",
+    (
+        "http://127.0.0.1/admin",
+        "http://2130706433/admin",
+        "http://localhost/admin",
+        "http://intranet/admin",
+        "https://service.internal/admin",
+        "https://user:secret@public.example.com/admin",
+        "https://public.example.com/a\\b",
+        "https://public.example.com/a\nheader",
+    ),
+)
+def test_typed_news_ledger_rejects_non_public_source_urls(url: str) -> None:
+    with pytest.raises(SimplePublicNewsOutcomeError, match="URL"):
+        simple_public_news_source_ledger_identity([{"url": url, "title": "Unsafe"}])
+
+
+def test_legacy_direct_overflow_is_complete_when_every_retained_row_is_complete() -> None:
+    sources = [
+        {"url": "https://direct-one.example.com/news", "title": "Direct one"},
+        {"url": "https://direct-two.example.com/news", "title": "Direct two"},
+    ]
+    report = _report(requested=1, completed=1)
+    report["sources"] = [
+        {
+            **source,
+            "text": f"Complete direct fact {index}.",
+            "text_length": len(f"Complete direct fact {index}."),
+            "status_code": 200,
+            "error": "",
+            "truncated": False,
+        }
+        for index, source in enumerate(sources, start=1)
+    ]
+    report["completed_sources"] = 2
+
+    evidence = SimplePublicNewsEvidence.from_projection(
+        _plan(),
+        status=SimplePublicNewsEvidenceStatus.SOURCED,
+        executed_query=QUERY,
+        outbound_attempted=True,
+        research_call_count=1,
+        report=report,
+        model_envelope=BODY,
+        sources=sources,
+    )
+
+    assert evidence.status is SimplePublicNewsEvidenceStatus.SOURCED
+    assert evidence.requested_sources == 1
+    assert evidence.completed_sources == 2
+
+
+def test_understated_target_cannot_forge_complete_news_evidence() -> None:
+    report = _report(requested=3, completed=1)
+    report.update({"target_sources": 1, "failed_sources": 2})
+
+    with pytest.raises(SimplePublicNewsOutcomeError, match="target contract"):
+        SimplePublicNewsEvidence.from_projection(
+            _plan(),
+            status=SimplePublicNewsEvidenceStatus.SOURCED,
+            executed_query=QUERY,
+            outbound_attempted=True,
+            research_call_count=1,
+            report=report,
+            model_envelope=BODY,
+            sources=SOURCES,
         )
 
 
@@ -678,6 +749,7 @@ def test_topic_mismatch_empty_proof_requires_exact_all_filtered_counters(
         "freshness": "week",
         "applied_search_filters": {"freshness": "week"},
         "source_class": "foreign",
+        "source_class_satisfied": True,
         "topic_class": "public_news",
         "topic_class_satisfied": False,
         "sources": [],
@@ -702,6 +774,19 @@ def test_topic_mismatch_empty_proof_requires_exact_all_filtered_counters(
     )
     assert accepted.empty_proof_sha256 is not None
 
+    for failure_flag in ("refused", "quota_exhausted"):
+        with pytest.raises(SimplePublicNewsOutcomeError, match="validated complete zero"):
+            SimplePublicNewsEvidence.from_projection(
+                plan,
+                status=SimplePublicNewsEvidenceStatus.EMPTY,
+                executed_query=QUERY,
+                outbound_attempted=True,
+                research_call_count=1,
+                report={**report, failure_flag: True},
+                model_envelope="",
+                sources=[],
+            )
+
     with pytest.raises(SimplePublicNewsOutcomeError, match="validated complete zero"):
         SimplePublicNewsEvidence.from_projection(
             plan,
@@ -710,6 +795,52 @@ def test_topic_mismatch_empty_proof_requires_exact_all_filtered_counters(
             outbound_attempted=True,
             research_call_count=1,
             report={**report, **mutation},
+            model_envelope="",
+            sources=[],
+        )
+
+
+def test_legacy_topic_mismatch_rejects_unbounded_counters_without_hashing_them() -> None:
+    plan = LegacySimplePublicNewsPlan.from_request(
+        REQUEST,
+        QUERY,
+        freshness="week",
+        source_class="foreign",
+        topic_class="public_news",
+    )
+    huge = 10**5_000
+    report: dict[str, object] = {
+        "query": QUERY,
+        "outbound_attempted": True,
+        "freshness": "week",
+        "applied_search_filters": {"freshness": "week"},
+        "source_class": "foreign",
+        "source_class_satisfied": True,
+        "topic_class": "public_news",
+        "topic_class_satisfied": False,
+        "sources": [],
+        "requested_sources": huge,
+        "completed_sources": 0,
+        "failed_sources": huge,
+        "timed_out_sources": 0,
+        "topic_filtered_sources": huge,
+        "search_timed_out": False,
+        "search_failed": True,
+        "error": "topic_mismatch",
+    }
+
+    assert not simple_public_news_topic_mismatch_is_empty(
+        report,
+        expected_topic_class="public_news",
+    )
+    with pytest.raises(SimplePublicNewsOutcomeError, match="validated complete zero"):
+        SimplePublicNewsEvidence.from_projection(
+            plan,
+            status=SimplePublicNewsEvidenceStatus.EMPTY,
+            executed_query=QUERY,
+            outbound_attempted=True,
+            research_call_count=1,
+            report=report,
             model_envelope="",
             sources=[],
         )
@@ -729,6 +860,7 @@ def test_refilled_target_can_mint_and_retain_a_complete_topic_mismatch_proof() -
         "freshness": "week",
         "applied_search_filters": {"freshness": "week"},
         "source_class": "foreign",
+        "source_class_satisfied": True,
         "topic_class": "public_news",
         "topic_class_satisfied": False,
         "sources": [],
@@ -790,7 +922,6 @@ def test_refilled_target_can_mint_and_retain_a_complete_topic_mismatch_proof() -
     (
         {"requested_sources": None},
         {"search_timed_out": True},
-        {"topic_filtered_sources": 1},
         {"empty_proof_sha256": "a" * 64},
     ),
 )
@@ -825,6 +956,33 @@ def test_gate_rejects_forged_retained_zero_empty_evidence(mutation: dict[str, ob
         )
 
 
+def test_evidence_rejects_topic_filter_count_beyond_failed_sources_at_construction() -> None:
+    with pytest.raises(SimplePublicNewsOutcomeError, match="topic-filter count"):
+        replace(
+            _evidence(SimplePublicNewsEvidenceStatus.EMPTY),
+            topic_filtered_sources=1,
+        )
+
+
+@pytest.mark.parametrize("filtered", (1, 999))
+def test_evidence_factory_rejects_topic_filter_count_beyond_report_failures(filtered: int) -> None:
+    report = _report()
+    report["target_sources"] = 1
+
+    with pytest.raises(SimplePublicNewsOutcomeError, match="topic-filter count"):
+        SimplePublicNewsEvidence.from_projection(
+            _plan(),
+            status=SimplePublicNewsEvidenceStatus.PARTIAL,
+            executed_query=QUERY,
+            outbound_attempted=True,
+            research_call_count=1,
+            report=report,
+            model_envelope=BODY,
+            sources=SOURCES,
+            topic_filtered_sources=filtered,
+        )
+
+
 @pytest.mark.parametrize(
     "mutation",
     (
@@ -849,6 +1007,7 @@ def test_gate_rejects_forged_retained_topic_empty_evidence(mutation: dict[str, o
         "freshness": "week",
         "applied_search_filters": {"freshness": "week"},
         "source_class": "foreign",
+        "source_class_satisfied": True,
         "topic_class": "public_news",
         "topic_class_satisfied": False,
         "sources": [],

@@ -15,7 +15,7 @@ from friday.web_surfer import FetchResult, SearchResult, WebSurfer
 
 def _source(number: int) -> dict[str, object]:
     return {
-        "url": f"https://source-{number}.example/report",
+        "url": f"https://source-{number}.example.com/report",
         "title": f"Source {number}",
         "text": f"SOURCE-{number} " + (chr(64 + number) * 20_000),
         "text_length": 20_009,
@@ -44,9 +44,9 @@ def test_each_research_source_survives_the_tool_context_budget() -> None:
 
     assert len(message) <= 12_100
     assert [item["url"] for item in payload["sources"]] == [
-        "https://source-1.example/report",
-        "https://source-2.example/report",
-        "https://source-3.example/report",
+        "https://source-1.example.com/report",
+        "https://source-2.example.com/report",
+        "https://source-3.example.com/report",
     ]
     assert [item["text"].split()[0] for item in payload["sources"]] == [
         "SOURCE-1",
@@ -62,7 +62,7 @@ class _ResearchHarness:
     async def search(self, query: str, *, max_results: int) -> list[SearchResult]:
         del query, max_results
         return [
-            SearchResult(f"Source {number}", f"https://source-{number}.example/", "", "fixture")
+            SearchResult(f"Source {number}", f"https://source-{number}.example.com/", "", "fixture")
             for number in range(1, 4)
         ]
 
@@ -89,8 +89,8 @@ async def test_research_returns_completed_sources_before_its_deadline(monkeypatc
     result = await asyncio.wait_for(_ResearchHarness().research("same query", max_sources=3), 0.1)
 
     assert [item["url"] for item in result["sources"]] == [
-        "https://source-1.example/",
-        "https://source-2.example/",
+        "https://source-1.example.com/",
+        "https://source-2.example.com/",
     ]
     assert result["requested_sources"] == 3
     assert result["completed_sources"] == 2
@@ -113,7 +113,7 @@ async def test_research_search_stage_keeps_margin_for_the_kernel_deadline(monkey
 class _CancelledFetchHarness(_ResearchHarness):
     async def search(self, query: str, *, max_results: int) -> list[SearchResult]:
         del query, max_results
-        return [SearchResult("Source 1", "https://source-1.example/", "", "fixture")]
+        return [SearchResult("Source 1", "https://source-1.example.com/", "", "fixture")]
 
     async def fetch(self, url: str, *, max_length: int) -> FetchResult:
         del url, max_length
@@ -151,7 +151,7 @@ def test_the_slot_budget_keeps_the_matching_passage_not_the_top_of_the_page() ->
 
     sources = [
         {
-            "url": f"https://source-{number}.example/report",
+            "url": f"https://source-{number}.example.com/report",
             "title": f"Source {number}",
             "text": page,
             "text_length": len(page),
@@ -186,7 +186,8 @@ class _UnreadableFirstPagesHarness:
     async def search(self, query: str, *, max_results: int) -> list[SearchResult]:
         del query, max_results
         return [
-            SearchResult(f"Source {n}", f"https://source-{n}.example/", "", "fixture") for n in range(1, 7)
+            SearchResult(f"Source {n}", f"https://source-{n}.example.com/", "", "fixture")
+            for n in range(1, 7)
         ]
 
     async def fetch(self, url: str, *, max_length: int) -> FetchResult:
@@ -197,6 +198,47 @@ class _UnreadableFirstPagesHarness:
             return FetchResult(url, "", "", 0, status_code=200)
         text = "Нефть Brent торгуется по 78,40 доллара за баррель."
         return FetchResult(url, f"Source {number}", text, len(text), status_code=200)
+
+
+class _CanonicalAliasRefillHarness:
+    research = WebSurfer.research
+
+    def __init__(self) -> None:
+        self.fetched: list[str] = []
+
+    async def search(self, query: str, *, max_results: int) -> list[SearchResult]:
+        del query, max_results
+        return [
+            SearchResult("Alias one", "https://alias.synthetic.example.com/a/../fact", "", "fixture"),
+            SearchResult(
+                "Alias two",
+                "https://alias.synthetic.example.com:443/fact#copy",
+                "",
+                "fixture",
+            ),
+            SearchResult("Second", "https://second.synthetic.example.com/fact", "", "fixture"),
+            SearchResult("Spare", "https://spare.synthetic.example.com/fact", "", "fixture"),
+        ]
+
+    async def fetch(self, url: str, *, max_length: int) -> FetchResult:
+        del max_length
+        self.fetched.append(url)
+        text = f"Complete public fact from {url}."
+        return FetchResult(url, "Complete", text, len(text), status_code=200)
+
+
+@pytest.mark.anyio
+async def test_research_refills_a_canonical_duplicate_with_a_distinct_spare() -> None:
+    harness = _CanonicalAliasRefillHarness()
+
+    result = await harness.research("synthetic fact", max_sources=3)
+
+    assert len(harness.fetched) == 4
+    assert len(result["sources"]) == 3
+    assert result["target_sources"] == 3
+    assert result["requested_sources"] == 4
+    assert result["failed_sources"] == 1
+    assert result["completed_sources"] == 3
 
 
 @pytest.mark.anyio
@@ -263,7 +305,7 @@ class _ScriptedRefillHarness:
     async def search(self, query: str, *, max_results: int) -> list[SearchResult]:
         del query
         return [
-            SearchResult(f"Source {number}", f"https://source-{number}.example/", "", "fixture")
+            SearchResult(f"Source {number}", f"https://source-{number}.example.com/", "", "fixture")
             for number in range(1, min(max_results, len(self.outcomes)) + 1)
         ]
 
@@ -300,20 +342,23 @@ class _RealFetchRefillHarness(WebSurfer):
     async def search(self, query: str, *, max_results: int) -> list[SearchResult]:
         del query, max_results
         return [
-            SearchResult("Long", "https://long.example/", "", "fixture"),
-            SearchResult("Complete", "https://complete.example/", "", "fixture"),
+            SearchResult("Long", "https://long.example.com/", "", "fixture"),
+            SearchResult("Complete", "https://complete.example.com/", "", "fixture"),
         ]
 
     async def _robots_verdict(self, url: str) -> str:
         del url
         return ""
 
+    async def _get_client(self):  # noqa: ANN202
+        return object()
+
     async def _be_polite_to(self, host: str) -> None:
         del host
 
     async def _request_bytes(self, url: str):  # noqa: ANN202
         self.fetched.append(url)
-        body = b"A" * 25_000 if "long.example" in url else b"complete public fact"
+        body = b"A" * 25_000 if "long.example.com" in url else b"complete public fact"
         return body, httpx.Response(200, headers={"content-type": "text/plain"}), url
 
 
@@ -323,11 +368,37 @@ async def test_research_refills_text_truncated_by_the_real_fetch_budget(settings
 
     result = await harness.research("synthetic public fact", max_sources=1)
 
-    assert harness.fetched == ["https://long.example/", "https://complete.example/"]
-    assert [item["url"] for item in result["sources"]] == ["https://complete.example/"]
+    assert harness.fetched == ["https://long.example.com/", "https://complete.example.com/"]
+    assert [item["url"] for item in result["sources"]] == ["https://complete.example.com/"]
     assert result["requested_sources"] == 2
     assert result["completed_sources"] == 1
     assert result["failed_sources"] == 1
+
+
+@pytest.mark.asyncio
+async def test_slow_direct_source_is_cancelled_inside_the_total_research_budget(
+    settings,
+    monkeypatch,
+) -> None:
+    cancelled = asyncio.Event()
+
+    async def slow_direct_answers(query, client):  # noqa: ANN001
+        del query, client
+        try:
+            await asyncio.sleep(10)
+        finally:
+            cancelled.set()
+
+    monkeypatch.setattr(web_surfer_module, "_RESEARCH_TOTAL_BUDGET", 0.1)
+    monkeypatch.setattr(web_surfer_module, "_RESEARCH_FETCH_BUDGET", 0.05)
+    monkeypatch.setattr(web_surfer_module, "_RESEARCH_DIRECT_BUDGET", 0.01)
+    monkeypatch.setattr(web_surfer_module, "direct_answers", slow_direct_answers)
+    harness = _RealFetchRefillHarness(settings)
+
+    result = await asyncio.wait_for(harness.research("synthetic public fact", max_sources=1), 0.2)
+
+    assert cancelled.is_set()
+    assert [item["url"] for item in result["sources"]] == ["https://complete.example.com/"]
 
 
 @pytest.mark.anyio
@@ -338,9 +409,9 @@ async def test_research_refills_partial_first_wave_to_source_target() -> None:
 
     assert harness.fetched == [1, 2, 3, 4]
     assert [item["url"] for item in result["sources"]] == [
-        "https://source-1.example/",
-        "https://source-2.example/",
-        "https://source-4.example/",
+        "https://source-1.example.com/",
+        "https://source-2.example.com/",
+        "https://source-4.example.com/",
     ]
     assert (
         result["target_sources"],
@@ -361,7 +432,7 @@ async def test_research_replaces_truncated_page_with_complete_spare() -> None:
 
     assert harness.fetched == [1, 2, 3, 4]
     assert all(item["truncated"] is False for item in result["sources"])
-    assert all("source-3.example" not in item["url"] for item in result["sources"])
+    assert all("source-3.example.com" not in item["url"] for item in result["sources"])
     assert (
         result["target_sources"],
         result["requested_sources"],
@@ -396,7 +467,7 @@ async def test_research_retains_useful_partial_row_only_when_target_cannot_be_fi
 
     assert harness.fetched == [1, 2, 3, 4, 5, 6]
     assert len(result["sources"]) == 3
-    assert result["sources"][-1]["url"] == "https://source-3.example/"
+    assert result["sources"][-1]["url"] == "https://source-3.example.com/"
     assert result["sources"][-1]["truncated"] is True
     assert (
         result["target_sources"],
