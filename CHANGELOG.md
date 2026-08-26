@@ -1,3 +1,19 @@
+## 0.207.41 — 2026-08-26
+
+### Engineer file, archive and web continuity
+
+- Engineer Mode again exposes ordinary web search, file creation and archive
+  collection when the authenticated current request explicitly asks for them;
+  private attachment lineage still blocks outbound tools and ordinary mode
+  never inherits Engineer-only capabilities.
+- A deterministic, non-executing bundle contract can bind exact authorized or
+  same-turn generated sources to structurally checked outputs, human-readable
+  manifests and receipts. Direct artifacts plus their ZIP share one cumulative
+  Telegram upload cap and one exact atomic publication boundary.
+- Database schema remains 43. The new bundle seam does not execute generated
+  artifacts and does not widen Host Control, package installation or public
+  network authority.
+
 ## 0.207.40 — 2026-08-26
 
 ### Bounded native decompilation and long-operation progress
