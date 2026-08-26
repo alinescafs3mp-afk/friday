@@ -463,7 +463,8 @@ _ARTIFACT_COMPILE_DELIVERY_SUFFIX = (
 )
 _ARTIFACT_COMPILE_REQUEST = re.compile(
     r"\A\s*(?:(?:hi|hello|hey|привет|здравствуй(?:те)?)[!,.;:\s]+)?"
-    r"(?:(?:and|so|then|now|а|и|ну|тогда|теперь|сейчас)\s+){0,2}"
+    r"(?:(?:and|so|then|now|okay|ok|alright|а|и|ну|так|тогда|теперь|"
+    r"сейчас|ладно|хорошо)\s*[,;:]?\s+){0,2}"
     r"(?:(?:please|pls|kindly|can\s+you|could\s+you|would\s+you|"
     r"i\s+(?:want|need|ask|authorize)\s+you\s+to|"
     r"пожалуйста|прошу|можешь|можете|сможешь|сможете|"
@@ -582,8 +583,9 @@ _ARTIFACT_COMPILE_DELIVERY_NEGATION = re.compile(
     r"(?:jar|binary|build\s+artifact)\b|"
     r"\bwithout\s+(?:sending|attaching|uploading|delivering)\b"
     r"[^.!?\n]{0,48}\b(?:jar|binary|build\s+artifact)\b|"
-    r"\b(?:не|никогда)\b[^.!?\n]{0,48}\b"
-    r"(?:присыл|пришл|отправ|прикладыв|прилож|выгруж|выгруз)\w*\b"
+    r"\b(?:никогда\s+не\s+|не\s+)(?:присылай(?:те)?|пришли(?:те)?|"
+    r"отправляй(?:те)?|отправь(?:те)?|прикладывай(?:те)?|приложи(?:те)?|"
+    r"выгружай(?:те)?|выгрузи(?:те)?)\b"
     r"[^.!?\n]{0,48}\b(?:jar|бинарник|бинарн\w*\s+артефакт)\w*\b|"
     r"\bбез\s+(?:отправки|приложения|выгрузки|передачи)\b"
     r"[^.!?\n]{0,48}\b(?:jar|бинарник|бинарн\w*\s+артефакт)\w*\b"
@@ -675,15 +677,18 @@ _ARTIFACT_COMPILE_SAFE_COMPANION_REMAINDER = re.compile(
     r"\A\s*(?:(?:and|then|also|please|и|затем|также|пожалуйста|"
     r"а\s+потом)\s+){0,3}(?:"
     r"explain(?:\s+to\s+me)?\s+(?:"
-    r"what\s+(?:this|the)\s+(?:code|source|class|method|compiler\s+error)\s+(?:means?|does)|"
-    r"how\s+(?:it|the\s+(?:code|source|class|method))\s+works?|"
+    r"what\s+(?:(?:this|the)\s+(?:code|source|class|method|compiler\s+error)|it)\s+"
+    r"(?:means?|does)|"
+    r"how\s+(?:it|(?:the|this)\s+(?:code|source|class|method))\s+works?|"
     r"(?:(?:the|this|any)\s+)?(?:code|source|class|method|"
     r"compiler(?:\s+(?:error|diagnostics?))?|"
     r"diagnostics?|build\s+result|jar|output|generated\s+artifact))|"
     r"(?:review|summari[sz]e|describe|analy[sz]e|inspect|check)\s+"
     r"(?:(?:the|this|any)\s+)?(?:code|source|class|method|"
     r"compiler(?:\s+(?:error|diagnostics?))?|"
-    r"diagnostics?|build\s+result|jar|output|generated\s+artifact)|"
+    r"diagnostics?|build\s+result|jar|output|generated\s+artifact)"
+    r"(?:\s+for\s+(?:(?:security|correctness|quality)\s+)?"
+    r"(?:issues?|bugs?|vulnerabilit(?:y|ies)|problems?))?|"
     r"(?:объясни(?:те)?|поясни(?:те)?)\s+(?:мне\s+)?(?:"
     r"как\s+(?:код|исходник|класс|метод)\s+работа\w*|"
     r"что\s+(?:означа\w*|дела\w*)\s+(?:код|исходник|класс|метод)|"
@@ -696,6 +701,11 @@ _ARTIFACT_COMPILE_SAFE_COMPANION_REMAINDER = re.compile(
     r"диагностик\w*|ошибк\w*\s+компил\w*|результат\w*\s+сборк\w*|"
     r"jar|выход\w*|артефакт\w*)"
     r")\s*[.!?…]*\s*\Z",
+    re.IGNORECASE,
+)
+_ARTIFACT_COMPILE_CONTEXT_RESET = re.compile(
+    r"\A\s*(?:(?:and|so|а|и)\s+)?(?:now|then|finally|okay|ok|alright|"
+    r"теперь|сейчас|наконец|ладно|хорошо|так)\b",
     re.IGNORECASE,
 )
 _METADATA_V4 = ipaddress.ip_address("169.254.169.254")
@@ -1281,6 +1291,10 @@ def _accepted_artifact_compile_requests(
         # after arbitrary prose (``Per Alice, ...`` / ``For reference, ...``)
         # turns reported or meta text into an effect and is therefore inert.
         if request.start != request.unit_start:
+            continue
+        if request.unit_start != 0 and not _ARTIFACT_COMPILE_CONTEXT_RESET.match(
+            masked[request.unit_start :]
+        ):
             continue
         unit = masked[request.unit_start : request.unit_end]
         named_sources = {
