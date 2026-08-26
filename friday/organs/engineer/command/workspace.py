@@ -21,6 +21,22 @@ from .contracts import (
 )
 from .store import atomic_write, open_dir_nofollow
 
+EXPORT_ERROR_MARKER = ".friday-export-error.v1"
+EXPORT_ERROR_CODES = frozenset(
+    {
+        "output_depth_overflow",
+        "output_export_failed",
+        "output_file_too_large",
+        "output_hardlink_refused",
+        "output_identity_changed",
+        "output_not_regular",
+        "output_reserved_name",
+        "output_symlink_refused",
+        "output_tree_overflow",
+        "path_escape",
+    }
+)
+
 
 def _listdir_fd(dir_fd: int) -> list[str]:
     return sorted(os.listdir(f"/proc/self/fd/{dir_fd}"))
@@ -145,6 +161,9 @@ class JobWorkspace:
         output_fd = open_dir_nofollow(self.output)
         sealed_fd = open_dir_nofollow(self.sealed)
         try:
+            export_error = self._consume_export_error(output_fd)
+            if export_error is not None:
+                raise CommandError(export_error)
             admitted, _dirs, _bytes = self._walk(
                 output_fd,
                 sealed_fd,
@@ -158,6 +177,42 @@ class JobWorkspace:
         finally:
             os.close(sealed_fd)
             os.close(output_fd)
+
+    @staticmethod
+    def _consume_export_error(output_fd: int) -> str | None:
+        flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0)
+        try:
+            marker_fd = os.open(EXPORT_ERROR_MARKER, flags, dir_fd=output_fd)
+        except FileNotFoundError:
+            return None
+        except OSError as exc:
+            raise CommandError("output_export_failed") from exc
+        try:
+            before = os.fstat(marker_fd)
+            if not stat.S_ISREG(before.st_mode) or before.st_nlink != 1 or not 1 <= before.st_size <= 64:
+                raise CommandError("output_export_failed")
+            payload = os.read(marker_fd, 65)
+            after = os.fstat(marker_fd)
+            if (
+                len(payload) != before.st_size
+                or after.st_ino != before.st_ino
+                or after.st_size != before.st_size
+                or after.st_mtime_ns != before.st_mtime_ns
+            ):
+                raise CommandError("output_export_failed")
+            try:
+                code = payload.decode("ascii").strip()
+            except UnicodeDecodeError as exc:
+                raise CommandError("output_export_failed") from exc
+            if code not in EXPORT_ERROR_CODES:
+                raise CommandError("output_export_failed")
+        finally:
+            os.close(marker_fd)
+        try:
+            os.unlink(EXPORT_ERROR_MARKER, dir_fd=output_fd)
+        except OSError as exc:
+            raise CommandError("output_export_failed") from exc
+        return code
 
     def _walk(
         self,
