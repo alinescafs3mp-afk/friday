@@ -245,6 +245,16 @@ FRIDAY_MCP_RESULT_CHARS=7000
 FRIDAY_MAX_UPLOAD_BYTES=52428800
 FRIDAY_MAX_ARCHIVE_ENTRIES=500
 FRIDAY_MAX_ARCHIVE_UNCOMPRESSED_BYTES=262144000
+
+# GPT-OSS semantic supervision is a separate default-off, shadow-only product
+# policy. Enabling it also requires the exact accepted secondary profile and an
+# explicit task allowlist. Keep this lexical block at EOF so a later immutable
+# secondary transition can append its canonical block without reordering it.
+FRIDAY_SEMANTIC_SUPERVISOR_MAX_REVIEW_ROUNDS=1
+FRIDAY_SEMANTIC_SUPERVISOR_MAX_STEPS=6
+FRIDAY_SEMANTIC_SUPERVISOR_MODE=off
+FRIDAY_SEMANTIC_SUPERVISOR_TASKS=
+FRIDAY_SEMANTIC_SUPERVISOR_TIMEOUT_SEC=12
 """
     _write_private_text_atomic(target, content)
     print(f"Friday инициализирован: {settings.home}")

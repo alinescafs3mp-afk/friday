@@ -7,6 +7,7 @@ secrets, and the whole installation can be moved or backed up as one directory.
 from __future__ import annotations
 
 import ipaddress
+import math
 import os
 import platform
 import re
@@ -104,6 +105,31 @@ def _float_env(name: str, default: float, *, minimum: float | None = None) -> fl
     except ValueError:
         value = default
     return max(minimum, value) if minimum is not None else value
+
+
+def _fail_closed_rollout_int_env(name: str, default: int, *, invalid: int) -> int:
+    """Parse a policy bound without turning malformed input into an admitted default."""
+
+    raw = env(name)
+    if raw is None:
+        return default
+    try:
+        return int(raw.strip())
+    except (TypeError, ValueError):
+        return invalid
+
+
+def _fail_closed_rollout_float_env(name: str, default: float, *, invalid: float) -> float:
+    """Preserve finite rollout bounds and map malformed/non-finite input to a closed sentinel."""
+
+    raw = env(name)
+    if raw is None:
+        return default
+    try:
+        value = float(raw.strip())
+    except (TypeError, ValueError):
+        return invalid
+    return value if math.isfinite(value) else invalid
 
 
 def _list_env(name: str, default: list[str] | None = None) -> list[str]:
@@ -1420,17 +1446,20 @@ def load_settings(profile_name: str | None = None) -> FridaySettings:
         semantic_supervisor_tasks=tuple(
             item.casefold() for item in _list_env("FRIDAY_SEMANTIC_SUPERVISOR_TASKS") if item.strip()
         ),
-        semantic_supervisor_max_steps=min(
+        semantic_supervisor_max_steps=_fail_closed_rollout_int_env(
+            "FRIDAY_SEMANTIC_SUPERVISOR_MAX_STEPS",
             6,
-            _int_env("FRIDAY_SEMANTIC_SUPERVISOR_MAX_STEPS", 6, minimum=1),
+            invalid=0,
         ),
-        semantic_supervisor_max_review_rounds=min(
+        semantic_supervisor_max_review_rounds=_fail_closed_rollout_int_env(
+            "FRIDAY_SEMANTIC_SUPERVISOR_MAX_REVIEW_ROUNDS",
             1,
-            _int_env("FRIDAY_SEMANTIC_SUPERVISOR_MAX_REVIEW_ROUNDS", 1, minimum=0),
+            invalid=-1,
         ),
-        semantic_supervisor_timeout_sec=min(
-            15.0,
-            _float_env("FRIDAY_SEMANTIC_SUPERVISOR_TIMEOUT_SEC", 12.0, minimum=0.1),
+        semantic_supervisor_timeout_sec=_fail_closed_rollout_float_env(
+            "FRIDAY_SEMANTIC_SUPERVISOR_TIMEOUT_SEC",
+            12.0,
+            invalid=0.0,
         ),
         embeddings_enabled=_bool_env("FRIDAY_EMBEDDINGS_ENABLED", False),
         embeddings_base_url=env("FRIDAY_EMBEDDINGS_BASE_URL", llm_base_url).rstrip("/"),

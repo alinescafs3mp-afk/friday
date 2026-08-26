@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+from dataclasses import replace
+from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
@@ -16,13 +18,16 @@ from friday.orchestration.policy_kernel import (
     risk_hints_cannot_downgrade_effect,
 )
 from friday.orchestration.semantic_supervisor import (
+    SUPERVISOR_ADAPTER_INPUT_BUDGET_BYTES,
     build_supervisor_input,
     build_supervisor_messages,
+    build_supervisor_request,
     classify_supervisor_task,
     supervisor_eligibility,
     supervisor_mode_from_settings,
 )
 from friday.orchestration.supervisor_contracts import (
+    ARCHIVE_SEARCH_ID,
     FILE_CURRENT_READ_ID,
     HOST_SCAN_LOCAL_ID,
     PRIMARY_SYNTHESIS_ID,
@@ -35,6 +40,7 @@ from friday.orchestration.supervisor_contracts import (
     canonical_sha256,
 )
 from friday.orchestration.supervisor_observation import SupervisorSkipReason
+from friday.secondary_brain.gpt_oss import GptOssProtocolAdapter
 
 
 def _actor() -> SimpleNamespace:
@@ -273,6 +279,132 @@ def test_policy_kernel_admits_compare_and_rejects_stale_unknown_and_effects() ->
     assert rejected.reason is PolicyReason.SELF_APPROVAL
 
 
+@pytest.mark.parametrize(
+    ("mutation", "expected_reason"),
+    (
+        (
+            lambda steps: steps.__setitem__(
+                0,
+                {**steps[0], "expected_outcome": "verified_current_sources"},
+            ),
+            PolicyReason.EXPECTED_OUTCOME_MISMATCH,
+        ),
+        (
+            lambda steps: steps.__setitem__(
+                2,
+                {**steps[2], "depends_on": ["s1"]},
+            ),
+            PolicyReason.DEPENDENCY_SHAPE_MISMATCH,
+        ),
+    ),
+)
+def test_policy_kernel_recomputes_step_semantics(
+    mutation: Any,
+    expected_reason: PolicyReason,
+) -> None:
+    supervisor_input = build_supervisor_input(_compare_turn(), _settings())
+    steps = _compare_steps()
+    mutation(steps)
+    decision = admit_supervisor_proposal(
+        SupervisorProposal.parse(_proposal_payload(supervisor_input, steps=steps)),
+        supervisor_input,
+        PolicyAdmissionContext(
+            actor_binding_sha256="a" * 64,
+            conversation_binding_sha256="b" * 64,
+        ),
+    )
+    assert decision.reason is expected_reason
+
+
+def test_policy_kernel_binds_proposal_task_to_code_owned_turn_class() -> None:
+    supervisor_input = build_supervisor_input(_compare_turn(), _settings())
+    steps = _compare_steps()
+    steps[0] = {
+        **steps[0],
+        "target_id": ARCHIVE_SEARCH_ID,
+        "input": {"query_intent": "archived document relevant to this comparison"},
+        "expected_outcome": "archive_evidence",
+    }
+    decision = admit_supervisor_proposal(
+        SupervisorProposal.parse(
+            _proposal_payload(
+                supervisor_input,
+                task_class="compare_archive_with_current_web",
+                steps=steps,
+                completion_criteria=[
+                    "archive_evidence_present",
+                    "current_public_evidence_has_coverage",
+                    "material_differences_source_bound",
+                ],
+            )
+        ),
+        supervisor_input,
+        PolicyAdmissionContext(
+            actor_binding_sha256="a" * 64,
+            conversation_binding_sha256="b" * 64,
+        ),
+    )
+    assert decision.reason is PolicyReason.TASK_CLASS_MISMATCH
+
+
+def test_policy_kernel_requires_complete_capability_and_code_owned_completion_shape() -> None:
+    partial_turn = _turn(
+        "Сравни этот договор с текущими публичными правилами в интернете.",
+        attachments=[{"mime_type": "application/pdf"}],
+    )
+    partial_input = build_supervisor_input(partial_turn, _settings())
+    context = PolicyAdmissionContext(
+        actor_binding_sha256="a" * 64,
+        conversation_binding_sha256="b" * 64,
+    )
+    partial = admit_supervisor_proposal(
+        SupervisorProposal.parse(_proposal_payload(partial_input)),
+        partial_input,
+        context,
+    )
+    assert partial.reason is PolicyReason.PARTIAL_CAPABILITY
+
+    mixed_turn = _turn(
+        "Сравни документы с текущими публичными правилами в интернете.",
+        attachments=[
+            {"mime_type": "application/pdf"},
+            {"mime_type": "text/plain", "text": "readable"},
+        ],
+    )
+    mixed_input = build_supervisor_input(mixed_turn, _settings())
+    unreadable_ordinal = admit_supervisor_proposal(
+        SupervisorProposal.parse(_proposal_payload(mixed_input)),
+        mixed_input,
+        context,
+    )
+    assert unreadable_ordinal.reason is PolicyReason.INPUT_NOT_IN_PROJECTION
+
+    complete_input = build_supervisor_input(_compare_turn(), _settings())
+    wrong_criteria = admit_supervisor_proposal(
+        SupervisorProposal.parse(
+            _proposal_payload(
+                complete_input,
+                completion_criteria=["current_attachment_evidence_present"],
+            )
+        ),
+        complete_input,
+        context,
+    )
+    assert wrong_criteria.reason is PolicyReason.COMPLETION_CRITERIA_MISMATCH
+
+    premature_review = admit_supervisor_proposal(
+        SupervisorProposal.parse(
+            _proposal_payload(
+                complete_input,
+                review_mode="secondary_after_deterministic_checks",
+            )
+        ),
+        complete_input,
+        context,
+    )
+    assert premature_review.reason is PolicyReason.REVIEW_NOT_ADMITTED
+
+
 def test_model_risk_hints_cannot_downgrade_code_owned_effects() -> None:
     supervisor_input = build_supervisor_input(_compare_turn(), _settings())
     proposal = SupervisorProposal.parse(_proposal_payload(supervisor_input, risk_hints=[]))
@@ -309,6 +441,23 @@ def test_routing_keeps_exact_lanes_and_small_talk_off_the_supervisor() -> None:
     assert compare.task_class is TaskClass.COMPARE_CURRENT_FILE_WITH_CURRENT_WEB
     assert classify_supervisor_task(_compare_turn()) is TaskClass.COMPARE_CURRENT_FILE_WITH_CURRENT_WEB
 
+    for unavailable in (
+        [{"mime_type": "application/pdf"}],
+        [
+            {"mime_type": "text/plain", "text": "one"},
+            {"mime_type": "text/plain", "text": "two"},
+        ],
+    ):
+        closed = supervisor_eligibility(
+            _turn(
+                "Сравни документы с текущими публичными правилами в интернете.",
+                attachments=unavailable,
+            ),
+            settings,
+        )
+        assert closed.eligible is False
+        assert closed.skip_reason is SupervisorSkipReason.EVIDENCE_UNAVAILABLE
+
 
 def test_empty_task_allowlist_never_invokes_supervisor() -> None:
     eligibility = supervisor_eligibility(_compare_turn(), _settings(semantic_supervisor_tasks=()))
@@ -316,16 +465,166 @@ def test_empty_task_allowlist_never_invokes_supervisor() -> None:
     assert eligibility.skip_reason is SupervisorSkipReason.TASK_NOT_ALLOWLISTED
 
 
+def test_mixed_or_duplicate_task_allowlist_fails_closed() -> None:
+    for tasks in (
+        ("compare_current_file_with_current_web", "not-admitted"),
+        (
+            "compare_current_file_with_current_web",
+            "compare_current_file_with_current_web",
+        ),
+    ):
+        eligibility = supervisor_eligibility(
+            _compare_turn(),
+            _settings(semantic_supervisor_tasks=tasks),
+        )
+        assert eligibility.eligible is False
+        assert eligibility.skip_reason is SupervisorSkipReason.TASK_NOT_ALLOWLISTED
+
+
+def test_deeply_nested_contract_input_fails_closed() -> None:
+    supervisor_input = build_supervisor_input(_compare_turn(), _settings())
+    payload = _proposal_payload(supervisor_input)
+    nested: dict[str, Any] = {}
+    cursor = nested
+    for _ in range(20):
+        child: dict[str, Any] = {}
+        cursor["nested"] = child
+        cursor = child
+    payload["steps"][0]["input"] = nested
+    with pytest.raises(SupervisorContractError, match="nesting depth"):
+        SupervisorProposal.parse(payload)
+
+
 def test_supervisor_messages_keep_untrusted_user_text_out_of_policy() -> None:
     turn = _compare_turn()
     supervisor_input = build_supervisor_input(turn, _settings())
     system, user = build_supervisor_messages(supervisor_input)
-    assert "do not authorize" in system["content"].casefold()
+    assert "advisory only" in system["content"].casefold()
     payload = json.loads(user["content"])
     assert payload["trusted_policy"]["tools_allowed"] is False
     assert payload["trusted_policy"]["publication_allowed"] is False
     assert payload["untrusted_turn"]["message"] == supervisor_input.turn.message
     assert "FRIDAY_" not in user["content"]
+    compact_manifest = payload["untrusted_payload"]["capability_manifest"]
+    assert compact_manifest["manifest_id"] == supervisor_input.manifest.manifest_id
+    assert all(
+        set(item) == {"id", "class", "availability", "input_schema_id"}
+        for item in compact_manifest["capabilities"]
+    )
+    template = payload["untrusted_payload"]["response_template"]
+    proposal = SupervisorProposal.parse(template)
+    admitted = admit_supervisor_proposal(
+        proposal,
+        supervisor_input,
+        PolicyAdmissionContext(
+            actor_binding_sha256="a" * 64,
+            conversation_binding_sha256="b" * 64,
+        ),
+    )
+    assert admitted.admitted is True
+    request = build_supervisor_request(
+        supervisor_input,
+        absolute_deadline_monotonic=1.0,
+    )
+    schema = request.structured_output_schema
+    assert schema is not None
+    assert schema["properties"]["task_class"]["enum"] == ["compare_current_file_with_current_web"]
+    assert schema["properties"]["steps"]["minItems"] == 3
+    assert schema["properties"]["steps"]["maxItems"] == 3
+    assert sum(len(item["content"].encode("utf-8")) for item in request.messages) < 3_100
+    payload = GptOssProtocolAdapter().build_payload(
+        SimpleNamespace(
+            max_context_tokens=4096,
+            max_output_tokens=512,
+            served_model_alias="accepted-profile-alias",
+        ),
+        request,
+    )
+    assert payload["max_tokens"] == 512
+    assert payload["response_format"]["type"] == "json_schema"
+
+
+@pytest.mark.parametrize(
+    ("filler", "language_hint"),
+    (("a", "en"), ("я", "ru")),
+)
+def test_supervisor_message_projection_exactly_fits_4k_adapter_budget(
+    filler: str,
+    language_hint: str,
+) -> None:
+    prefix = "compare current public web rules " if filler == "a" else "сравни публичные правила в интернете "
+    source = prefix + filler * 1_200
+    supervisor_input = build_supervisor_input(
+        _turn(source, attachments=[{"mime_type": "text/plain", "text": "clause"}]),
+        _settings(),
+    )
+    assert supervisor_input.turn.language_hint == language_hint
+    assert supervisor_input.turn.message == source[: len(supervisor_input.turn.message)]
+    assert len(supervisor_input.turn.message) < 1_200
+
+    messages = build_supervisor_messages(supervisor_input)
+    envelope_bytes = sum(len(item["content"].encode("utf-8")) for item in messages)
+    assert envelope_bytes <= SUPERVISOR_ADAPTER_INPUT_BUDGET_BYTES
+    request = build_supervisor_request(supervisor_input, absolute_deadline_monotonic=1.0)
+    GptOssProtocolAdapter().build_payload(
+        SimpleNamespace(
+            max_context_tokens=4_096,
+            max_output_tokens=512,
+            served_model_alias="accepted-profile-alias",
+        ),
+        request,
+    )
+
+    next_character = source[len(supervisor_input.turn.message)]
+    oversized = replace(
+        supervisor_input,
+        turn=replace(
+            supervisor_input.turn,
+            message=supervisor_input.turn.message + next_character,
+        ),
+    )
+    oversized_bytes = sum(
+        len(item["content"].encode("utf-8")) for item in build_supervisor_messages(oversized)
+    )
+    assert oversized_bytes > SUPERVISOR_ADAPTER_INPUT_BUDGET_BYTES
+    with pytest.raises(SupervisorContractError, match="adapter input budget"):
+        build_supervisor_request(oversized, absolute_deadline_monotonic=1.0)
+
+
+@pytest.mark.parametrize(
+    "private_suffix",
+    (
+        "/home/alice/private.docx",
+        "Bearer " + "A" * 32,
+        "https://example.com/?next=file:///home/alice/private.docx",
+        "https://example.com/?next=/home/alice/private.docx",
+        "https://example.com/?next=%2Fhome%2Falice%2Fprivate.docx",
+        "https://example.com?next=%2Fhome%2Falice%2Fprivate.docx",
+        "https://example.com#next=%2Fhome%2Falice%2Fprivate.docx",
+        "https://example.com/?next=%2525252Fhome%2525252Falice%2525252Fprivate.docx",
+        "https://example.com/?next=%ZZ",
+        "https://exa%ZZmple.com/",
+        "https://example.com/file:///home/alice/private.docx",
+        "https://example.com/%66ile%3A%2F%2F%2Fhome/alice/private.docx",
+        "https://file:%2F%2F%2Fhome@example.com/public",
+        "https://example.com/C:%5CUsers%5Calice%5Csecret.txt",
+        "https://example.com/%5C%5Cserver%5Cshare%5Csecret.txt",
+        "https://example.com/redirect/..%2F..%2Fhome%2Falice%2Fsecret.txt",
+        "https://example.com/?token=%73%6B%2D" + "%41" * 20,
+        "https://example.com?token=%73%6B%2D" + "%41" * 20,
+        "https://example.com/?authorization=Bearer+" + "A" * 32,
+        "https://example.com/?authorization=Bearer%2B" + "A" * 32,
+        "https://example.com/?id=%72%61%77%5F" + "%61" * 16,
+    ),
+)
+def test_byte_projection_does_not_hide_a_private_suffix(private_suffix: str) -> None:
+    source = "Сравни документ с публичными правилами в интернете. " + "я" * 1_200 + " " + private_suffix
+    supervisor_input = build_supervisor_input(
+        _turn(source, attachments=[{"mime_type": "text/plain", "text": "clause"}]),
+        _settings(),
+    )
+    with pytest.raises(SupervisorContractError, match="private|secret material"):
+        build_supervisor_request(supervisor_input, absolute_deadline_monotonic=1.0)
 
 
 def test_canonical_digest_is_order_independent() -> None:
@@ -342,3 +641,100 @@ def test_configuration_defaults_and_unknown_mode_stay_off(settings, monkeypatch)
 
     loaded = load_settings()
     assert loaded.semantic_supervisor_mode == "off"
+
+
+@pytest.mark.parametrize(
+    ("env_name", "raw", "attribute", "public_key", "expected"),
+    (
+        (
+            "FRIDAY_SEMANTIC_SUPERVISOR_MAX_STEPS",
+            "999",
+            "semantic_supervisor_max_steps",
+            "max_steps",
+            999,
+        ),
+        (
+            "FRIDAY_SEMANTIC_SUPERVISOR_MAX_STEPS",
+            "not-an-int",
+            "semantic_supervisor_max_steps",
+            "max_steps",
+            0,
+        ),
+        (
+            "FRIDAY_SEMANTIC_SUPERVISOR_MAX_REVIEW_ROUNDS",
+            "-1",
+            "semantic_supervisor_max_review_rounds",
+            "max_review_rounds",
+            -1,
+        ),
+        (
+            "FRIDAY_SEMANTIC_SUPERVISOR_MAX_REVIEW_ROUNDS",
+            "not-an-int",
+            "semantic_supervisor_max_review_rounds",
+            "max_review_rounds",
+            -1,
+        ),
+        (
+            "FRIDAY_SEMANTIC_SUPERVISOR_TIMEOUT_SEC",
+            "15.1",
+            "semantic_supervisor_timeout_sec",
+            "timeout_sec",
+            15.1,
+        ),
+        (
+            "FRIDAY_SEMANTIC_SUPERVISOR_TIMEOUT_SEC",
+            "nan",
+            "semantic_supervisor_timeout_sec",
+            "timeout_sec",
+            0.0,
+        ),
+        (
+            "FRIDAY_SEMANTIC_SUPERVISOR_TIMEOUT_SEC",
+            "inf",
+            "semantic_supervisor_timeout_sec",
+            "timeout_sec",
+            0.0,
+        ),
+    ),
+)
+def test_invalid_semantic_rollout_numeric_env_stays_closed(
+    settings: object,
+    monkeypatch: pytest.MonkeyPatch,
+    env_name: str,
+    raw: str,
+    attribute: str,
+    public_key: str,
+    expected: int | float,
+) -> None:
+    monkeypatch.setenv(env_name, raw)
+    from friday.config import load_settings
+
+    loaded = load_settings()
+    assert getattr(loaded, attribute) == expected
+    projection = loaded.public_dict()["semantic_supervisor"]
+    assert projection[public_key] == expected
+    assert projection["promotion_admitted"] is False
+    json.dumps(projection, allow_nan=False)
+
+
+def test_semantic_supervisor_config_is_forwarded_by_operator_templates() -> None:
+    root = Path(__file__).resolve().parents[1]
+    env_example = (root / ".env.example").read_text(encoding="utf-8")
+    compose = (root / "docker-compose.yml").read_text(encoding="utf-8")
+    cli = (root / "friday" / "cli.py").read_text(encoding="utf-8")
+    expected_defaults = (
+        ("FRIDAY_SEMANTIC_SUPERVISOR_MAX_REVIEW_ROUNDS", "1"),
+        ("FRIDAY_SEMANTIC_SUPERVISOR_MAX_STEPS", "6"),
+        ("FRIDAY_SEMANTIC_SUPERVISOR_MODE", "off"),
+        ("FRIDAY_SEMANTIC_SUPERVISOR_TASKS", ""),
+        ("FRIDAY_SEMANTIC_SUPERVISOR_TIMEOUT_SEC", "12"),
+    )
+    for key, value in expected_defaults:
+        assert f"{key}={value}" in env_example
+        assert f"{key}={value}" in cli
+        assert f"{key}: ${{{key}:-{value}}}" in compose
+    env_block = "\n".join(f"{key}={value}" for key, value in expected_defaults)
+    compose_block = "\n".join(f"  {key}: ${{{key}:-{value}}}" for key, value in expected_defaults)
+    assert env_example.rstrip().endswith(env_block)
+    assert f'{env_block}\n"""' in cli
+    assert compose_block in compose

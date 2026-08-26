@@ -14,6 +14,7 @@ from friday.orchestration.semantic_supervisor import (
     build_supervisor_messages,
     build_supervisor_request,
     observe_semantic_supervisor_shadow,
+    validate_shadow_proposal,
 )
 from friday.orchestration.supervisor_contracts import (
     FILE_CURRENT_READ_ID,
@@ -24,7 +25,7 @@ from friday.orchestration.supervisor_contracts import (
     SupervisorProposal,
 )
 from friday.orchestration.supervisor_observation import SupervisorSkipReason
-from friday.secondary_brain import ModelWorkload, SecondaryResult
+from friday.secondary_brain import ModelWorkload, SecondaryAttempt, SecondaryFailure, SecondaryResult
 
 
 def _actor() -> SimpleNamespace:
@@ -119,21 +120,27 @@ class _FakeScheduler:
     def new_advisory_deadline(self) -> float:
         return 1.0
 
-    async def run_shadow(self, request_factory: Any, primary: Any, *, validator: Any = None) -> Any:
-        result = await primary()
+    async def evaluate_shadow(
+        self,
+        request: Any,
+        *,
+        validator: Any = None,
+        invalidate_on_rejection: bool = True,
+    ) -> SecondaryAttempt:
+        assert invalidate_on_rejection is False
         self.primary_before_shadow += 1
-        request = request_factory()
         self.requests.append(request)
         if self.structured is None:
-            return result
+            return SecondaryAttempt.rejected(SecondaryFailure.CONNECT_FAILED)
         secondary = SecondaryResult(
             visible_content=json.dumps(self.structured, ensure_ascii=False),
             structured_output=self.structured,
             served_model_alias="gpt-oss-test",
         )
-        if validator is not None:
-            validator(secondary)
-        return result
+        accepted = bool(validator(secondary)) if validator is not None else False
+        if accepted:
+            return SecondaryAttempt.success(secondary)
+        return SecondaryAttempt.rejected(SecondaryFailure.MALFORMED_RESPONSE)
 
 
 @pytest.mark.asyncio
@@ -166,6 +173,11 @@ async def test_shadow_never_changes_primary_result_or_route() -> None:
     assert observation.step_count == 3
     assert scheduler.requests[0].workload is ModelWorkload.PLAN_CANDIDATE
     assert scheduler.primary_before_shadow == 1
+    assert observation.supervisor_input_digest != supervisor_input.canonical_sha256()
+    assert (
+        observation.proposal_digest
+        != SupervisorProposal.parse(_valid_proposal(supervisor_input)).canonical_sha256()
+    )
 
 
 @pytest.mark.asyncio
@@ -193,6 +205,25 @@ async def test_shadow_skips_when_mode_off_and_when_secondary_is_absent() -> None
     )
     assert missing_result == "primary"
     assert missing_observation.skip_reason is SupervisorSkipReason.SECONDARY_UNAVAILABLE
+
+
+@pytest.mark.asyncio
+async def test_shadow_without_private_bindings_keeps_primary_and_never_calls_secondary() -> None:
+    scheduler = _FakeScheduler({})
+
+    async def primary() -> str:
+        return "primary"
+
+    result, observation = await observe_semantic_supervisor_shadow(
+        _compare_turn(),
+        _settings(),
+        primary,
+        scheduler=scheduler,
+    )
+    assert result == "primary"
+    assert scheduler.requests == []
+    assert observation.skip_reason is SupervisorSkipReason.BINDING_UNAVAILABLE
+    assert observation.invoked is False
 
 
 @pytest.mark.asyncio
@@ -246,6 +277,96 @@ def test_supervisor_request_is_secret_free_and_rejects_env_blobs() -> None:
     serialized = json.dumps(messages[1]["content"])
     assert "api_key" not in serialized.casefold()
     assert "Bearer " not in serialized
+
+
+@pytest.mark.parametrize(
+    "private_fragment",
+    (
+        "/home/alice/private.docx",
+        "/private/alice.docx",
+        "~/private/alice.docx",
+        r"C:\Users\Alice\private.docx",
+        r"D:\vault\private.docx",
+        r"\\fileserver\private\contract.docx",
+        "docs/private/client.txt",
+        r"private\client.txt",
+        "../private/client.txt",
+        "./private/client.txt",
+        "raw_0123456789abcdef",
+        "work_0123456789abcdef",
+    ),
+)
+def test_supervisor_request_rejects_private_paths_and_identifiers(private_fragment: str) -> None:
+    turn = TurnInput.from_chat(
+        message=f"Сравни {private_fragment} с публичными правилами в интернете.",
+        actor=_actor(),
+        conversation_id="conv-1",
+        attachments=[{"mime_type": "text/plain", "text": "clause"}],
+        enable_tools=True,
+        synthetic_document_notice=False,
+        mode="dialogue",
+        reply_to=None,
+        quoted_attachment_reference=False,
+        reply_assistant_reference=False,
+    )
+    with pytest.raises(SupervisorContractError, match="private"):
+        build_supervisor_request(
+            build_supervisor_input(turn, _settings()),
+            absolute_deadline_monotonic=1.0,
+        )
+
+
+@pytest.mark.parametrize(
+    "public_url",
+    (
+        "https://example.com/current/rules?section=latest#summary",
+        "https://example.com/current/%72ules?section=%6Catest#summary",
+        "https://example.com?section=latest",
+        "https://example.com.",
+    ),
+)
+def test_supervisor_request_allows_a_well_formed_public_http_url(public_url: str) -> None:
+    turn = TurnInput.from_chat(
+        message=f"Сравни этот документ с правилами {public_url} в интернете.",
+        actor=_actor(),
+        conversation_id="conv-1",
+        attachments=[{"mime_type": "text/plain", "text": "clause"}],
+        enable_tools=True,
+        synthetic_document_notice=False,
+        mode="dialogue",
+        reply_to=None,
+        quoted_attachment_reference=False,
+        reply_assistant_reference=False,
+    )
+    request = build_supervisor_request(
+        build_supervisor_input(turn, _settings()),
+        absolute_deadline_monotonic=1.0,
+    )
+    assert public_url in request.messages[1]["content"]
+
+
+def test_shadow_validator_reparses_raw_json_and_rejects_duplicate_keys() -> None:
+    supervisor_input = build_supervisor_input(_compare_turn(), _settings())
+    payload = _valid_proposal(supervisor_input)
+    raw = json.dumps(payload).replace(
+        '"task_class": "compare_current_file_with_current_web"',
+        '"task_class": "compare_current_file_with_current_web", "task_class": "ordinary_dialogue"',
+        1,
+    )
+    result = SecondaryResult(
+        visible_content=raw,
+        structured_output=payload,
+        served_model_alias="gpt-oss-test",
+    )
+    with pytest.raises(SupervisorContractError, match="duplicate key"):
+        validate_shadow_proposal(
+            result,
+            supervisor_input,
+            PolicyAdmissionContext(
+                actor_binding_sha256="a" * 64,
+                conversation_binding_sha256="b" * 64,
+            ),
+        )
 
 
 def test_quoted_injection_cannot_add_a_capability() -> None:
@@ -324,3 +445,26 @@ async def test_secret_in_user_text_skips_supervisor_and_keeps_primary() -> None:
     assert result == "primary-kept"
     assert observation.skip_reason is SupervisorSkipReason.SECRET_MATERIAL
     assert observation.promotion_admitted is False
+
+
+@pytest.mark.asyncio
+async def test_rejected_proposal_does_not_claim_code_owned_effect_classes() -> None:
+    turn = _compare_turn()
+    supervisor_input = build_supervisor_input(turn, _settings())
+    injected = _valid_proposal(supervisor_input)
+    injected["steps"][1]["target_id"] = "host.scan.local"
+    injected["steps"][1]["input"] = {}
+
+    async def primary() -> str:
+        return "primary"
+
+    _, observation = await observe_semantic_supervisor_shadow(
+        turn,
+        _settings(),
+        primary,
+        scheduler=_FakeScheduler(injected),
+        actor_binding_sha256="a" * 64,
+        conversation_binding_sha256="b" * 64,
+    )
+    assert observation.policy_verdict == "rejected"
+    assert observation.effect_classes == ()

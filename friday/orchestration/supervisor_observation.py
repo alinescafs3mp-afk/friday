@@ -25,7 +25,10 @@ class SupervisorSkipReason(StrEnum):
     ESTABLISHED_FILE_READ = "established_file_read"
     TASK_NOT_ALLOWLISTED = "task_not_allowlisted"
     SECONDARY_UNAVAILABLE = "secondary_unavailable"
+    SPECIAL_SURFACE = "special_surface"
+    EVIDENCE_UNAVAILABLE = "evidence_unavailable"
     SECRET_MATERIAL = "secret_material"
+    BINDING_UNAVAILABLE = "binding_unavailable"
     MALFORMED_PROPOSAL = "malformed_proposal"
     POLICY_REJECTED = "policy_rejected"
     WORKLOAD_DISALLOWED = "workload_disallowed"
@@ -145,6 +148,7 @@ def parsed_observation(
     endpoint_health_class: str,
     accepted_profile_id: str,
     skip_reason: SupervisorSkipReason = SupervisorSkipReason.NONE,
+    invoked: bool = True,
 ) -> SupervisorObservation:
     mode = SupervisorMode.fail_closed(requested_mode)
     return SupervisorObservation(
@@ -152,7 +156,7 @@ def parsed_observation(
         requested_mode=requested_mode,
         effective_mode="shadow",
         promotion_admitted=False,
-        invoked=True,
+        invoked=invoked,
         skip_reason=skip_reason,
         policy_id=SUPERVISOR_PRODUCT_POLICY_ID,
         policy_sha256=SUPERVISOR_PRODUCT_POLICY_SHA256,

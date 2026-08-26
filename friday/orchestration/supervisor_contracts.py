@@ -16,12 +16,17 @@ from enum import StrEnum
 from types import MappingProxyType
 from typing import Any
 
+from friday import semantic_supervisor_policy as _supervisor_policy
+
+SUPERVISOR_POLICY_SCHEMA = _supervisor_policy.SUPERVISOR_POLICY_SCHEMA
+SUPERVISOR_PRODUCT_POLICY = _supervisor_policy.SUPERVISOR_PRODUCT_POLICY
+SUPERVISOR_PRODUCT_POLICY_ID = _supervisor_policy.SUPERVISOR_PRODUCT_POLICY_ID
+SUPERVISOR_PRODUCT_POLICY_SHA256 = _supervisor_policy.SUPERVISOR_PRODUCT_POLICY_SHA256
+
 CAPABILITY_MANIFEST_SCHEMA = "friday.capability-manifest.v1"
 SUPERVISOR_INPUT_SCHEMA = "friday.supervisor-input.v1"
 SUPERVISOR_PROPOSAL_SCHEMA = "friday.supervisor-proposal.v1"
 SUPERVISOR_REVIEW_SCHEMA = "friday.supervisor-review.v1"
-SUPERVISOR_POLICY_SCHEMA = "friday.supervisor-policy.v1"
-SUPERVISOR_PRODUCT_POLICY_ID = "gptoss20b-semantic-supervisor-v1"
 
 FILE_CURRENT_READ_ID = "file.current.read"
 ARCHIVE_SEARCH_ID = "archive.search"
@@ -52,6 +57,7 @@ _MAX_CRITERIA = 4
 _MAX_RISK_HINTS = 4
 _MAX_DEPENDENCIES = 5
 _MAX_ATTACHMENTS = 16
+_MAX_JSON_DEPTH = 16
 _DIGEST = re.compile(r"(?:sha256:)?[0-9a-f]{64}\Z")
 _STEP_ID = re.compile(r"s[1-9][0-9]?\Z")
 _SAFE_ID = re.compile(r"[a-z][a-z0-9_.-]{0,63}\Z")
@@ -246,7 +252,9 @@ def _closed_json_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
     return result
 
 
-def _freeze_json(value: object, *, label: str) -> Any:
+def _freeze_json(value: object, *, label: str, depth: int = 0) -> Any:
+    if depth > _MAX_JSON_DEPTH:
+        raise SupervisorContractError(f"{label} exceeds the maximum nesting depth")
     if value is None or isinstance(value, (bool, int)):
         return value
     if isinstance(value, str):
@@ -260,7 +268,7 @@ def _freeze_json(value: object, *, label: str) -> Any:
             raise SupervisorContractError(f"{label} contains a non-finite number")
         return value
     if isinstance(value, list):
-        return tuple(_freeze_json(item, label=label) for item in value)
+        return tuple(_freeze_json(item, label=label, depth=depth + 1) for item in value)
     if isinstance(value, Mapping):
         frozen: dict[str, Any] = {}
         for key, item in value.items():
@@ -270,7 +278,7 @@ def _freeze_json(value: object, *, label: str) -> Any:
                 key.encode("utf-8", errors="strict")
             except UnicodeEncodeError as exc:
                 raise SupervisorContractError(f"{label} object keys must be valid UTF-8") from exc
-            frozen[key] = _freeze_json(item, label=label)
+            frozen[key] = _freeze_json(item, label=label, depth=depth + 1)
         return MappingProxyType(frozen)
     raise SupervisorContractError(f"{label} must contain JSON values only")
 
@@ -359,25 +367,6 @@ def parse_capability_input(capability_id: str, value: object) -> Mapping[str, An
         _closed_keys(item, set(), label=f"{capability_id} input")
         return MappingProxyType({})
     raise SupervisorContractError(f"capability {capability_id} is not in the closed input catalog")
-
-
-SUPERVISOR_PRODUCT_POLICY: Mapping[str, Any] = MappingProxyType(
-    {
-        "schema": SUPERVISOR_POLICY_SCHEMA,
-        "policy_id": SUPERVISOR_PRODUCT_POLICY_ID,
-        "tools_allowed": False,
-        "effects_allowed": False,
-        "publication_allowed": False,
-        "knowledge_writes_allowed": False,
-        "max_steps": _MAX_STEPS,
-        "max_parallel_reads": 2,
-        "max_review_rounds": 0,
-        "promotion_admitted": False,
-        "primary_fallback_required": True,
-        "runtime_recertification": False,
-    }
-)
-SUPERVISOR_PRODUCT_POLICY_SHA256 = canonical_sha256(dict(SUPERVISOR_PRODUCT_POLICY))
 
 
 @dataclass(frozen=True, slots=True)
@@ -1021,9 +1010,38 @@ class SupervisorReview:
         )
 
 
-def supervisor_proposal_json_schema() -> dict[str, Any]:
+def _required_completion_criteria(task_class: TaskClass) -> tuple[CompletionCriterion, ...]:
+    if task_class is TaskClass.COMPARE_CURRENT_FILE_WITH_CURRENT_WEB:
+        return (
+            CompletionCriterion.CURRENT_ATTACHMENT_EVIDENCE_PRESENT,
+            CompletionCriterion.CURRENT_PUBLIC_EVIDENCE_HAS_COVERAGE,
+            CompletionCriterion.MATERIAL_DIFFERENCES_SOURCE_BOUND,
+        )
+    if task_class is TaskClass.COMPARE_ARCHIVE_WITH_CURRENT_WEB:
+        return (
+            CompletionCriterion.ARCHIVE_EVIDENCE_PRESENT,
+            CompletionCriterion.CURRENT_PUBLIC_EVIDENCE_HAS_COVERAGE,
+            CompletionCriterion.MATERIAL_DIFFERENCES_SOURCE_BOUND,
+        )
+    raise SupervisorContractError("task_class has no admitted P1 proposal grammar")
+
+
+def supervisor_proposal_json_schema(*, task_class: TaskClass | None = None) -> dict[str, Any]:
     """Compact grammar for the accepted GPT-OSS structured-output transport."""
 
+    admitted_task_classes = (
+        [task_class.value] if task_class is not None else [item.value for item in TaskClass]
+    )
+    completion_values = (
+        [item.value for item in _required_completion_criteria(task_class)]
+        if task_class is not None
+        else [item.value for item in CompletionCriterion]
+    )
+    step_id_schema: dict[str, Any] = (
+        {"type": "string", "enum": ["s1", "s2", "s3"]}
+        if task_class is not None
+        else {"type": "string", "minLength": 2, "maxLength": 3}
+    )
     return {
         "type": "object",
         "additionalProperties": False,
@@ -1042,11 +1060,15 @@ def supervisor_proposal_json_schema() -> dict[str, Any]:
         "properties": {
             "schema": {"type": "string", "enum": [SUPERVISOR_PROPOSAL_SCHEMA]},
             "manifest_id": {"type": "string", "minLength": 71, "maxLength": 71},
-            "task_class": {"type": "string", "enum": [item.value for item in TaskClass]},
+            "task_class": {"type": "string", "enum": admitted_task_classes},
             "goal": {"type": "string", "minLength": 1, "maxLength": _MAX_GOAL_CHARS},
             "continuation_decision": {
                 "type": "string",
-                "enum": [item.value for item in ContinuationDecision],
+                "enum": (
+                    [ContinuationDecision.NEW_TASK.value]
+                    if task_class is not None
+                    else [item.value for item in ContinuationDecision]
+                ),
             },
             "risk_hints": {
                 "type": "array",
@@ -1055,8 +1077,8 @@ def supervisor_proposal_json_schema() -> dict[str, Any]:
             },
             "steps": {
                 "type": "array",
-                "minItems": 1,
-                "maxItems": _MAX_STEPS,
+                "minItems": 3 if task_class is not None else 1,
+                "maxItems": 3 if task_class is not None else _MAX_STEPS,
                 "items": {
                     "type": "object",
                     "additionalProperties": False,
@@ -1071,7 +1093,7 @@ def supervisor_proposal_json_schema() -> dict[str, Any]:
                         "expected_outcome",
                     ],
                     "properties": {
-                        "step_id": {"type": "string", "minLength": 2, "maxLength": 3},
+                        "step_id": step_id_schema,
                         "kind": {"type": "string", "enum": [item.value for item in StepKind]},
                         "target_id": {"type": "string", "minLength": 1, "maxLength": 64},
                         "purpose": {"type": "string", "minLength": 1, "maxLength": _MAX_PURPOSE_CHARS},
@@ -1091,11 +1113,16 @@ def supervisor_proposal_json_schema() -> dict[str, Any]:
             },
             "completion_criteria": {
                 "type": "array",
-                "minItems": 1,
-                "maxItems": _MAX_CRITERIA,
-                "items": {"type": "string", "enum": [item.value for item in CompletionCriterion]},
+                "minItems": 3 if task_class is not None else 1,
+                "maxItems": 3 if task_class is not None else _MAX_CRITERIA,
+                "items": {"type": "string", "enum": completion_values},
             },
-            "review_mode": {"type": "string", "enum": [item.value for item in ReviewMode]},
+            "review_mode": {
+                "type": "string",
+                "enum": (
+                    [ReviewMode.NONE.value] if task_class is not None else [item.value for item in ReviewMode]
+                ),
+            },
             "fallback": {"type": "string", "enum": [item.value for item in ProposalFallback]},
         },
     }

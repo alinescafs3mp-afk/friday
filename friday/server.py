@@ -125,6 +125,10 @@ from friday.orchestration import (
 )
 from friday.orchestration.archive_read import V12ArchiveReadHandler
 from friday.orchestration.file_read import V12FileReadHandler
+from friday.orchestration.semantic_supervisor_runtime import (
+    SemanticSupervisorShadowRuntime,
+    build_semantic_supervisor_runtime,
+)
 from friday.organs import ServiceContext, build_registry, local_now, resolve_chat_id
 from friday.organs.obsidian.conversation import (
     obsidian_conversation_intent,
@@ -2310,12 +2314,20 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
                 for route, handler in available_route_handlers.items()
                 if route.value in enabled_route_values
             }
-            agent = build_orchestrated_agent(
+            orchestrated_agent = build_orchestrated_agent(
                 settings,
                 legacy_agent,
                 llm,
                 route_handlers=route_handlers,
                 attested_runtime=attested_v12_runtime,
+            )
+            agent = build_semantic_supervisor_runtime(
+                settings,
+                orchestrated_agent,
+                secondary_brain,
+            )
+            semantic_supervisor_runtime = (
+                agent if isinstance(agent, SemanticSupervisorShadowRuntime) else None
             )
             executive = ExecutiveService(settings, storage, auth_service, kernel, llm, ingestion)
             kernel.bind_executive(executive)
@@ -2418,6 +2430,8 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
             application.state.web_surfer = web_surfer
             application.state.kernel = kernel
             application.state.agent = agent
+            application.state.orchestration_agent = orchestrated_agent
+            application.state.semantic_supervisor_runtime = semantic_supervisor_runtime
             application.state.v12_model_runtime = attempted_v12_runtime
             application.state.v12_startup_reason = v12_startup_reason
             application.state.v12_registered_routes = tuple(sorted(route.value for route in route_handlers))
@@ -2458,15 +2472,19 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
             try:
                 yield
             finally:
-                if isinstance(agent, OrchestrationRouter):
-                    await agent.close()
-                await workers.stop()
-                await secondary_brain.aclose()
-                if obsidian_runtime is not None:
-                    await obsidian_runtime.close()
-                await web_surfer.close()
-                if mcp_manager is not None:
-                    await mcp_manager.close()
+                try:
+                    if semantic_supervisor_runtime is not None:
+                        await semantic_supervisor_runtime.close()
+                finally:
+                    if isinstance(orchestrated_agent, OrchestrationRouter):
+                        await orchestrated_agent.close()
+                    await workers.stop()
+                    await secondary_brain.aclose()
+                    if obsidian_runtime is not None:
+                        await obsidian_runtime.close()
+                    await web_surfer.close()
+                    if mcp_manager is not None:
+                        await mcp_manager.close()
                 # workers.stop() only cancels the asyncio tasks; a worker cancelled
                 # while awaiting asyncio.to_thread(storage.<db op>) leaves that call
                 # still running on the default executor thread.
@@ -2765,7 +2783,12 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
     @application.get("/api/health", tags=["system"])
     async def health(request: Request) -> dict[str, Any]:
         storage = getattr(request.app.state, "storage", None)
-        agent = getattr(request.app.state, "agent", None)
+        orchestrated_agent = getattr(request.app.state, "orchestration_agent", None)
+        semantic_supervisor_runtime = getattr(
+            request.app.state,
+            "semantic_supervisor_runtime",
+            None,
+        )
         runtime = getattr(request.app.state, "v12_model_runtime", None)
         secondary_brain = getattr(request.app.state, "secondary_brain", None)
         gate_status = (
@@ -2798,6 +2821,23 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
                     "available": False,
                 }
             ),
+            "semantic_supervisor": (
+                semantic_supervisor_runtime.semantic_supervisor_status()
+                if isinstance(semantic_supervisor_runtime, SemanticSupervisorShadowRuntime)
+                else {
+                    "schema": "friday.semantic-supervisor-shadow-runtime.v1",
+                    "installed": False,
+                    "role": "discarded_advisory_shadow",
+                    "requested_mode": settings.semantic_supervisor_mode,
+                    "effective_mode": "off",
+                    "promotion_admitted": False,
+                    "runtime_owner": "unchanged",
+                    "publication_owner": "primary",
+                    "tools_allowed": False,
+                    "effects_allowed": False,
+                    "execution_allowed": False,
+                }
+            ),
             "profile": settings.profile.name,
             "memory_vault": {
                 "mode": settings.memory_vault_mode,
@@ -2809,7 +2849,9 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
                 "schema": "friday.v12-orchestration-health.v1",
                 "configured_mode": settings.router_mode,
                 "installed_mode": (
-                    agent.mode.value if isinstance(agent, OrchestrationRouter) else RouterMode.LEGACY.value
+                    orchestrated_agent.mode.value
+                    if isinstance(orchestrated_agent, OrchestrationRouter)
+                    else RouterMode.LEGACY.value
                 ),
                 "registered_routes": list(getattr(request.app.state, "v12_registered_routes", ())),
                 "model_gate": gate_status,
@@ -3494,6 +3536,7 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
             body.get("force_knowledge"), field="force_knowledge", default=False
         )
         enable_tools = _parse_json_bool(body.get("enable_tools"), field="enable_tools", default=True)
+        explicit_mode_requested = body.get("mode") is not None
         try:
             requested_mode = (
                 normalize_conversation_mode(str(body["mode"])) if body.get("mode") is not None else None
@@ -4998,6 +5041,11 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
                         }
 
             with bind_failure_trace_scope(failure_scope):
+                semantic_supervisor_kwargs = (
+                    {"_semantic_supervisor_explicit_mode_requested": (explicit_mode_requested)}
+                    if getattr(state, "semantic_supervisor_runtime", None) is state.agent
+                    else {}
+                )
                 result = await state.agent.chat(
                     actor.user_id,
                     message,
@@ -5031,6 +5079,7 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
                         )
                         else None
                     ),
+                    **semantic_supervisor_kwargs,
                 )
             if staged_duplicate_count:
                 duplicate_notice = (
