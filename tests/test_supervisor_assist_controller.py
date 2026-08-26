@@ -884,6 +884,66 @@ async def test_admission_ack_loss_recovers_owner_and_never_calls_legacy(storage:
 
 
 @pytest.mark.asyncio
+async def test_committed_graph_is_not_pending_or_cancellable_during_observer(storage: Any) -> None:
+    surface, projection = _stored_surface(storage, "committed-observer")
+    adapter = _CountingAdapter(storage)
+    observer_started = asyncio.Event()
+    release_observer = asyncio.Event()
+    observer_calls = 0
+
+    async def observer(_observation: object) -> None:
+        nonlocal observer_calls
+        observer_calls += 1
+        observer_started.set()
+        await release_observer.wait()
+
+    controller = _controller(
+        graph_adapter=adapter,
+        file_reader=_FileReader(_prepared_file(surface, projection)),
+        web_reader=_WebReader(_web_evidence(surface)),
+        observer=observer,
+    )
+
+    async def forbidden_legacy() -> dict[str, object]:
+        raise AssertionError("legacy cannot run after ownership")
+
+    task = asyncio.create_task(
+        controller.execute(
+            surface,
+            legacy_primary=forbidden_legacy,
+            absolute_deadline=time.monotonic() + 5,
+        )
+    )
+    await asyncio.wait_for(observer_started.wait(), timeout=3)
+
+    pending = controller.pending_durable_turn_admission(
+        surface.actor.user_id,
+        "cancel",
+        actor=surface.actor,
+        conversation_id=surface.conversation_id,
+    )
+    stable = await controller.cancel_active(
+        AssistConversationScope(surface.actor.user_id, surface.conversation_id),
+        user_message="cancel",
+        absolute_deadline=time.monotonic() + 3,
+    )
+
+    assert pending is False
+    assert stable is not None and stable.outcome is SupervisorAssistOutcome.PUBLISHED
+    assert stable.response is not None
+    assert stable.observation_status is AssistObservationStatus.NOT_APPLICABLE
+    assert adapter.cancel_calls == 0
+    assert observer_calls == 1
+
+    release_observer.set()
+    completed = await asyncio.wait_for(task, timeout=3)
+    assert completed.outcome is SupervisorAssistOutcome.PUBLISHED
+    assert completed.response == stable.response
+    assert completed.observation_status is AssistObservationStatus.EMITTED
+    assert observer_calls == 1
+
+
+@pytest.mark.asyncio
 async def test_postownership_synthesis_failure_terminalizes_without_legacy(storage: Any) -> None:
     surface, projection = _stored_surface(storage, "post-owner")
     adapter = _CountingAdapter(storage)

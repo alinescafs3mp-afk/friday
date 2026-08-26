@@ -1454,7 +1454,19 @@ class SupervisorAssistController:
         key = (scope.user_id, scope.conversation_id)
         active = self._active_by_scope.get(key)
         if active is not None:
-            return active.pending
+            if (
+                active.graph.state is CompareCurrentFileWebGraphState.ACTIVE
+                and active.committed_result is None
+            ):
+                return active.pending
+            if (
+                active.graph.state is not CompareCurrentFileWebGraphState.ACTIVE
+                and active.committed_result is not None
+            ):
+                self._known_durable_active_scopes.discard(key)
+                return False
+            self._known_durable_active_scopes.add(key)
+            return None
         retained = self._retained_by_scope.get(key)
         try:
             graph = self._graph_adapter.load_current(scope)
@@ -2304,6 +2316,11 @@ class SupervisorAssistController:
             retained = record is not None
         if record is None:
             return None
+        if (
+            record.graph.state is not CompareCurrentFileWebGraphState.ACTIVE
+            and record.committed_result is not None
+        ):
+            return record.committed_result
         record.cancel_requested = True
         record.stop.set()
         for child in tuple(record.children):
