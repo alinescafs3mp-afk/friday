@@ -411,13 +411,23 @@ _ARTIFACT_DECOMPILE_REPORTED = re.compile(
 _ARTIFACT_COMPILE_FILENAME = r"(?<![\w./\\-])[A-Za-z_][A-Za-z0-9_]{0,119}\.java(?![\w./\\-])"
 _ARTIFACT_COMPILE_PROFILE = r"(?<![\w-])java21_single_source_library_jar_v1(?![\w-])"
 _ARTIFACT_COMPILE_EN_SOURCE = (
+    r"(?:"
     r"(?:(?:this|that|the|an?|attached|current)\s+){0,2}"
-    r"(?:java(?:[- ]21)?\s+(?:source|source\s+file|file)|source\s+file\s+in\s+java)"
+    r"(?:java(?:[- ]21)?\s+(?:source|source\s+file|file)|source\s+file\s+in\s+java)|"
+    r"(?:(?:this|that|the\s+(?:attached|current)|attached|current)\s+)"
+    r"(?:source(?:\s+file)?|file)|"
+    r"(?:it|this|that)(?=\s*(?:[.!?…]*\Z|,?\s+(?:and|then)\b))"
+    r")"
 )
 _ARTIFACT_COMPILE_RU_SOURCE = (
+    r"(?:"
     r"(?:(?:этот|эту|данн\w*|приложенн\w*|текущ\w*)\s+){0,2}"
     r"(?:java(?:[- ]21)?[- ]файл\w*|java(?:[- ]21)?\s+исходник\w*|"
-    r"исходник\w*\s+java(?:[- ]21)?)"
+    r"исходник\w*\s+java(?:[- ]21)?)|"
+    r"(?:этот|эту|данн\w*|приложенн\w*|текущ\w*)\s+"
+    r"(?:файл\w*|исходник\w*)|"
+    r"это(?=\s*(?:[.!?…]*\Z|,?\s+(?:и|а\s+затем)\b))"
+    r")"
 )
 _ARTIFACT_COMPILE_EN_NAMED = (
     rf"(?:(?:(?:this|that|the|an?|attached|current)\s+){{0,2}}"
@@ -428,6 +438,27 @@ _ARTIFACT_COMPILE_RU_NAMED = (
     rf"(?:(?:(?:этот|эту|данн\w*|приложенн\w*|текущ\w*)\s+){{0,2}}"
     rf"(?:файл\w*\s+)?{_ARTIFACT_COMPILE_FILENAME}|"
     rf"(?:(?:(?:по|с)\s+)?профил\w*\s+)?{_ARTIFACT_COMPILE_PROFILE})"
+)
+_ARTIFACT_COMPILE_EN_OUTPUT = (
+    r"(?:(?:the|an?)\s+)?(?:(?:compiled|resulting)\s+)?"
+    r"(?:jar|binary|build\s+artifact)\b"
+    r"(?:\s*/\s*(?:jar|binary|build\s+artifact)\b)?"
+)
+_ARTIFACT_COMPILE_RU_OUTPUT = (
+    r"(?:(?:готов\w*|собранн\w*|скомпилированн\w*)\s+)?"
+    r"(?:jar[- ]файл\w*|jar\b|бинарник\w*|бинарн\w*\s+артефакт\w*)"
+    r"(?:\s*/\s*(?:jar[- ]файл\w*|jar\b|бинарник\w*|бинарн\w*\s+артефакт\w*))?"
+)
+_ARTIFACT_COMPILE_EN_DELIVERY = (
+    rf"(?:send|attach|upload|deliver)\s+(?:me\s+)?{_ARTIFACT_COMPILE_EN_OUTPUT}"
+)
+_ARTIFACT_COMPILE_RU_DELIVERY = (
+    rf"(?:пришли(?:те)?|отправь(?:те)?|приложи(?:те)?|выгрузи(?:те)?)\s+"
+    rf"(?:мне\s+)?{_ARTIFACT_COMPILE_RU_OUTPUT}"
+)
+_ARTIFACT_COMPILE_DELIVERY_SUFFIX = (
+    rf"(?:\s*,?\s+(?:and|then)\s+{_ARTIFACT_COMPILE_EN_DELIVERY}|"
+    rf"\s*,?\s+(?:и|а\s+затем)\s+{_ARTIFACT_COMPILE_RU_DELIVERY})"
 )
 _ARTIFACT_COMPILE_REQUEST = re.compile(
     r"\A\s*(?:(?:hi|hello|hey|привет|здравствуй(?:те)?)[!,.;:\s]+)?"
@@ -442,11 +473,14 @@ _ARTIFACT_COMPILE_REQUEST = re.compile(
     rf"{_ARTIFACT_COMPILE_EN_SOURCE}|{_ARTIFACT_COMPILE_EN_NAMED}"
     r")"
     r"(?:\s+(?:into|as)\s+(?:an?\s+)?jar)?|"
+    rf"(?:compile|build)\s+(?:and|then)\s+{_ARTIFACT_COMPILE_EN_DELIVERY}|"
     r"(?:скомпилируй(?:те)?|компилируй(?:те)?|собери(?:те)?|"
     r"скомпилировать|компилировать|собрать)\s+(?:"
     rf"{_ARTIFACT_COMPILE_RU_SOURCE}|{_ARTIFACT_COMPILE_RU_NAMED}"
     r")"
     r"(?:\s+в\s+jar)?|"
+    rf"(?:скомпилируй(?:те)?|компилируй(?:те)?|собери(?:те)?)\s+"
+    rf"(?:и|а\s+затем)\s+{_ARTIFACT_COMPILE_RU_DELIVERY}|"
     r"(?:сборка|компиляция)\s+(?:"
     rf"{_ARTIFACT_COMPILE_RU_SOURCE}|{_ARTIFACT_COMPILE_RU_NAMED}"
     r")(?:\s+в\s+jar)?|"
@@ -454,7 +488,8 @@ _ARTIFACT_COMPILE_REQUEST = re.compile(
     r"(?:сборку|компиляцию)\s+(?:"
     rf"{_ARTIFACT_COMPILE_RU_SOURCE}|{_ARTIFACT_COMPILE_RU_NAMED}"
     r")(?:\s+в\s+jar)?"
-    r")",
+    r")"
+    rf"(?:{_ARTIFACT_COMPILE_DELIVERY_SUFFIX})?",
     re.IGNORECASE,
 )
 _ARTIFACT_COMPILE_NEGATION = re.compile(
@@ -464,15 +499,124 @@ _ARTIFACT_COMPILE_NEGATION = re.compile(
     r"(?:компилир|скомпилир|собир|собер|сборк|компиляц)\w*\b)",
     re.IGNORECASE,
 )
+_ARTIFACT_COMPILE_TARGET_EXCLUSION = re.compile(
+    rf"(?:"
+    rf"\b(?:but\s+)?not\s+(?:(?:this|that|the\s+(?:attached|current))\s+"
+    rf"(?:java\s+)?(?:file|source)|this|that|it|the\s+(?:attached|current)\s+one|"
+    rf"{_ARTIFACT_COMPILE_FILENAME})\b|"
+    rf"\b(?:except|exclude|excluding)\s+"
+    rf"(?:this|that|it|the\s+(?:attached|current)\s+one|"
+    rf"{_ARTIFACT_COMPILE_FILENAME})\b|"
+    rf"\b(?:но\s+)?(?:только\s+)?не\s+(?:(?:этот|эту|данн\w*|текущ\w*|"
+    rf"приложенн\w*)\s+(?:java[- ]?)?(?:файл\w*|исходник\w*)|"
+    rf"это|этого|этот|эту|его|е[её]|"
+    rf"{_ARTIFACT_COMPILE_FILENAME})\b|"
+    rf"\b(?:кроме|исключая|исключи(?:те)?)\s+(?:этого|этот|эту|его|е[её]|"
+    rf"{_ARTIFACT_COMPILE_FILENAME})\b"
+    rf")",
+    re.IGNORECASE,
+)
+_ARTIFACT_COMPILE_MIXED_TARGETS = re.compile(
+    rf"(?:"
+    rf"\b(?:it|this|that|(?:this|that|the\s+(?:attached|current)|attached|current)\s+"
+    rf"(?:file|source))\b\s*(?:,|and|or|plus)\s*{_ARTIFACT_COMPILE_FILENAME}|"
+    rf"{_ARTIFACT_COMPILE_FILENAME}\s*(?:,|and|or|plus)\s*\b"
+    rf"(?:it|this|that|(?:this|that|the\s+(?:attached|current)|attached|current)\s+"
+    rf"(?:file|source))\b|"
+    rf"\b(?:это|(?:этот|эту|данн\w*|приложенн\w*|текущ\w*)\s+"
+    rf"(?:файл\w*|исходник\w*))\b\s*(?:,|и|или|плюс)\s*"
+    rf"{_ARTIFACT_COMPILE_FILENAME}|"
+    rf"{_ARTIFACT_COMPILE_FILENAME}\s*(?:,|и|или|плюс)\s*\b"
+    rf"(?:это|(?:этот|эту|данн\w*|приложенн\w*|текущ\w*)\s+"
+    rf"(?:файл\w*|исходник\w*))\b"
+    rf")",
+    re.IGNORECASE,
+)
+_ARTIFACT_COMPILE_DEFERRED_PREFIX = re.compile(
+    r"\b(?:after|before|once|upon|when(?:ever)?|provided|assuming|pending|"
+    r"tomorrow|later|next\s+(?:week|month)|at\s+\d{1,2}(?::\d{2})?|"
+    r"in\s+\d+\s+(?:seconds?|minutes?|hours?|days?)|with\s+(?:my\s+)?approval|"
+    r"после|до|когда|как\s+только|завтра|позже|потом|"
+    r"на\s+следующ\w*\s+(?:недел\w*|месяц\w*)|"
+    r"в\s+\d{1,2}(?::\d{2})?|через\s+\d+\s+(?:секунд\w*|минут\w*|час\w*|дн\w*)|"
+    r"при\s+условии|при\s+подтверждении|"
+    r"после\s+(?:подтверждения|одобрения|разрешения))\b",
+    re.IGNORECASE,
+)
+_ARTIFACT_COMPILE_TRAILING_CONDITION = re.compile(
+    r"\A\s*(?:[,;:()]|[—–-])?\s*(?:(?:but|and|но|и)\s+)?"
+    r"(?:(?:only|just|только)\s+)?(?:"
+    r"when(?:ever)?|after|before|once|upon|provided(?:\s+that)?|"
+    r"assuming(?:\s+that)?|subject\s+to|pending|until|as\s+soon\s+as|"
+    r"tomorrow|next\s+(?:week|month)|at\s+\d{1,2}(?::\d{2})?|"
+    r"in\s+\d+\s+(?:seconds?|minutes?|hours?|days?)|with\s+(?:my\s+)?approval|"
+    r"когда|после|до|как\s+только|завтра|"
+    r"на\s+следующ\w*\s+(?:недел\w*|месяц\w*)|"
+    r"в\s+\d{1,2}(?::\d{2})?|через\s+\d+\s+(?:секунд\w*|минут\w*|час\w*|дн\w*)|"
+    r"при\s+условии|при\s+подтверждении|"
+    r"с\s+(?:моего\s+)?(?:подтверждения|одобрения|разрешения)"
+    r")\b",
+    re.IGNORECASE,
+)
 _ARTIFACT_COMPILE_TRAILING_DENIAL = re.compile(
-    r"\A\s*(?:(?:is\s+not|isn't)\s+(?:needed|required|requested)|"
-    r"не\s+(?:нужн|требу|заказан|запрошен)\w*)\b",
+    r"\A\s*(?:[,;:()]|[—–-])?\s*(?:(?:but|however|actually|но|однако)\s+)?(?:"
+    r"(?:is\s+not|isn't)\s+(?:needed|required|requested)|"
+    r"(?:this|that|it)\s+(?:is\s+not|isn't|was\s+not|wasn't)\s+"
+    r"(?:a\s+)?(?:request|command)|"
+    r"(?:not\s+now|not\s+this\s+time|no\s+need|later(?:\s+instead)?|hold\s+off|"
+    r"wait|skip\s+(?:it|that)|(?:i\s+)?changed\s+my\s+mind|scratch\s+that|"
+    r"forget\s+it|"
+    r"ignore\s+(?:it|that))|"
+    r"не\s+(?:нужн|требу|заказан|запрошен)\w*|"
+    r"это\s+не\s+(?:просьба|команда|запрос)|"
+    r"(?:не\s+сейчас|позже|потом|подожди(?:те)?|отложи(?:те)?|"
+    r"пропусти(?:те)?|игнорируй(?:те)?)"
+    r")\b",
+    re.IGNORECASE,
+)
+_ARTIFACT_COMPILE_DELIVERY_NEGATION = re.compile(
+    r"(?:"
+    r"\b(?:do\s+not|don't|dont|never|without)\b[^.!?\n]{0,48}\b"
+    r"(?:send|attach|upload|deliver)\w*\b[^.!?\n]{0,48}\b"
+    r"(?:jar|binary|build\s+artifact)\b|"
+    r"\b(?:не|никогда|без)\b[^.!?\n]{0,48}\b"
+    r"(?:присыл|пришл|отправ|прикладыв|прилож|выгруж|выгруз)\w*\b"
+    r"[^.!?\n]{0,48}\b(?:jar|бинарник|бинарн\w*\s+артефакт)\w*\b"
+    r")",
     re.IGNORECASE,
 )
 _ARTIFACT_COMPILE_TRAILING_REPORT = re.compile(
-    r"\A\s*(?:(?:(?:is|was|has\s+been)\s+)?"
-    r"(?:completed|finished|failed|successful)|"
-    r"(?:заверш|выполн|готов|успеш|провал|не\s+удал)\w*)\b",
+    r"\A\s*(?:[,;:()]|[—–-])?\s*(?:(?:the\s+)?build\s+)?(?:"
+    r"(?:(?:is|was|has|has\s+been)\s+)?(?:completed|finished|failed|successful)|"
+    r"(?:сборка\s+)?(?:уже\s+)?(?:(?:была|был|было)\s+)?"
+    r"(?:заверш|выполн|готов|успеш|провал|не\s+удал)\w*"
+    r")\b",
+    re.IGNORECASE,
+)
+_ARTIFACT_COMPILE_REPORTED_PREFIX = re.compile(
+    r"\b(?:requested|requesting|ordered|attributed|according\s+to|"
+    r"запросил\w*|поручил\w*|приписал\w*|по\s+словам)\b",
+    re.IGNORECASE,
+)
+_ARTIFACT_COMPILE_TRAILING_ATTRIBUTION = re.compile(
+    r"(?:\A|[,;.!?()]\s*|\s+[—–-]\s+)(?:"
+    r"according\s+to|per\s+(?:[A-Za-z0-9_@.-]+\s+){0,3}"
+    r"[A-Za-z0-9_@.-]+['’]s\s+(?:request|command)|(?:a\s+)?quote\s+from|"
+    r"(?:said|wrote|asked|requested|ordered)\b|"
+    r"(?:[A-Za-z0-9_@.'’-]+\s+){1,4}(?:said|wrote|asked|requested|ordered)\b|"
+    r"(?:[A-Za-z0-9_@.-]+\s+){0,3}[A-Za-z0-9_@.-]+['’]s\s+"
+    r"(?:request|command|quote)\b|"
+    r"(?:this|that)\s+(?:is|was)\b[^.!?\n]{0,40}\b(?:request|command|quote)\b|"
+    r"по\s+(?:словам|просьбе|команде|поручению)|"
+    r"(?:цитата|просьба|команда)\s+(?:от|из)|"
+    r"(?:сказал|сказала|сказали|написал|написала|написали|попросил|попросила|"
+    r"попросили|велел|велела|велели)\b|"
+    r"(?:[А-Яа-яЁёA-Za-z0-9_@.'’-]+\s+){1,4}"
+    r"(?:сказал|сказала|сказали|написал|написала|написали|попросил|попросила|"
+    r"попросили|велел|велела|велели)\b|"
+    r"(?:просьба|команда|цитата)\s+[А-Яа-яЁёA-Za-z0-9_@.'’-]+\b|"
+    r"это\s+(?:была|был|есть)?\s*(?:просьба|команда|цитата)\b"
+    r")",
     re.IGNORECASE,
 )
 _ARTIFACT_COMPILE_CAPABILITY = re.compile(
@@ -1003,20 +1147,37 @@ def requests_artifact_compile(speech: str) -> bool:
         lambda match: " " * len(match.group(0)),
         masked,
     )
+    named_sources = {
+        match.group(0).casefold()
+        for match in re.finditer(_ARTIFACT_COMPILE_FILENAME, masked, re.IGNORECASE)
+    }
     if (
         not masked.strip()
+        or len(named_sources) > 1
         or _ARTIFACT_COMPILE_NEGATION.search(negation_surface)
+        or _ARTIFACT_COMPILE_DELIVERY_NEGATION.search(masked)
+        or _ARTIFACT_COMPILE_TARGET_EXCLUSION.search(masked)
+        or _ARTIFACT_COMPILE_MIXED_TARGETS.search(masked)
         or _ARTIFACT_COMPILE_CAPABILITY.search(masked)
     ):
         return False
     for request in _direct_request_matches(text, _ARTIFACT_COMPILE_REQUEST):
         trailing = masked[request.end : request.unit_end]
-        if _ARTIFACT_COMPILE_TRAILING_DENIAL.match(trailing) or _ARTIFACT_COMPILE_TRAILING_REPORT.match(
-            trailing
+        full_trailing = masked[request.end :]
+        if (
+            _ARTIFACT_COMPILE_TRAILING_CONDITION.match(trailing)
+            or _ARTIFACT_COMPILE_TRAILING_DENIAL.match(trailing)
+            or _ARTIFACT_COMPILE_TRAILING_REPORT.match(trailing)
+            or _ARTIFACT_COMPILE_TRAILING_ATTRIBUTION.search(full_trailing)
         ):
             continue
         prefix = masked[request.unit_start : request.start]
-        if _META_REQUEST_CUE.search(prefix) or _REPORTED_REQUEST_CUE.search(prefix):
+        if (
+            _META_REQUEST_CUE.search(prefix)
+            or _REPORTED_REQUEST_CUE.search(prefix)
+            or _ARTIFACT_COMPILE_REPORTED_PREFIX.search(prefix)
+            or _ARTIFACT_COMPILE_DEFERRED_PREFIX.search(prefix)
+        ):
             continue
         prior_units = tuple(_request_units(masked[: request.unit_start]))
         if prior_units and not _EXPLICIT_REQUEST_CONTEXT_RESET.match(masked[request.unit_start :]):
@@ -1024,6 +1185,7 @@ def requests_artifact_compile(speech: str) -> bool:
             prior = masked[prior_start:prior_end]
             if (
                 _REPORTED_REQUEST_CUE.search(prior)
+                or _ARTIFACT_COMPILE_REPORTED_PREFIX.search(prior)
                 or _META_REQUEST_CUE.search(prior)
                 or _CONDITIONAL_REQUEST_CUE.search(prior)
             ):
@@ -1040,8 +1202,11 @@ def artifact_compile_request_is_atomic(speech: str) -> bool:
     text, masked = _request_projection(speech)
     for request in _direct_request_matches(text, _ARTIFACT_COMPILE_REQUEST):
         trailing = masked[request.end : request.unit_end]
-        if _ARTIFACT_COMPILE_TRAILING_DENIAL.match(trailing) or _ARTIFACT_COMPILE_TRAILING_REPORT.match(
-            trailing
+        if (
+            _ARTIFACT_COMPILE_TRAILING_CONDITION.match(trailing)
+            or _ARTIFACT_COMPILE_TRAILING_DENIAL.match(trailing)
+            or _ARTIFACT_COMPILE_TRAILING_REPORT.match(trailing)
+            or _ARTIFACT_COMPILE_TRAILING_ATTRIBUTION.search(masked[request.end :])
         ):
             continue
         if request.unit_start != 0:
