@@ -642,6 +642,48 @@ def build_engineer_tools(ctx: ServiceContext) -> tuple[ToolSpec, ...]:
             "exploit_payloads_sent": False,
         }
 
+    async def assess_host_vulnerabilities(
+        *,
+        actor: ActorContext,
+        host: str,
+        target_ticket: str,
+    ) -> dict[str, Any]:
+        try:
+            target, deadline = _verified_target(
+                actor,
+                host,
+                target_ticket,
+                allowed_cidrs=allowed_cidrs,
+                allow_public=allow_public,
+            )
+            snapshot = hosts.admit_pinned_target_policy(
+                target,
+                allowed_cidrs=allowed_cidrs,
+                allow_public=False,
+                public_action_approved=False,
+            )
+            classifications = {item.classification for item in snapshot.bindings}
+            if (
+                snapshot.target_count != 1
+                or not classifications
+                or not classifications.issubset({"operator_approved_private", "approved_ipv6_ula"})
+            ):
+                raise hosts.EngineerTargetPolicyError("private_single_host_required")
+            result = await run_blocking(
+                hosts.assess_target_vulnerabilities,
+                target,
+                deadline=deadline,
+            )
+        except (ValueError, TimeoutError) as exc:
+            return {
+                "ok": False,
+                "error": str(exc),
+                "active_probes_sent": False,
+                "exploit_payloads_sent": False,
+                "_work_started": False,
+            }
+        return {**result, "_work_started": True}
+
     async def tool_inventory(*, actor: ActorContext) -> dict[str, Any]:
         del actor
         binaries = await run_blocking(local_binaries.inventory)
@@ -788,6 +830,19 @@ def build_engineer_tools(ctx: ServiceContext) -> tuple[ToolSpec, ...]:
             risk="observe",
             timeout_sec=120.0,
             handler=hunt_named,
+        ),
+        ToolSpec(
+            name="engineer_assess_host_vulnerabilities",
+            description=(
+                "Internal code-owned light nmap service/exposure assessment of one exact "
+                "authorized private host; no arbitrary flags, exploits or CVE claims."
+            ),
+            parameters=_parameters(target_properties, network_required),
+            security_id="engineer.host.audit",
+            risk="observe",
+            timeout_sec=120.0,
+            model_visible=False,
+            handler=assess_host_vulnerabilities,
         ),
         ToolSpec(
             name="engineer_http_enum",

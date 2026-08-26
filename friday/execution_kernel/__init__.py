@@ -3064,6 +3064,7 @@ _ENGINEER_NETWORK_AUDIT_TOOLS = frozenset(
     {
         "engineer_hunt",
         "engineer_audit_host",
+        "engineer_assess_host_vulnerabilities",
         "engineer_http_enum",
         "engineer_dns",
         "engineer_adversary_rehearsal",

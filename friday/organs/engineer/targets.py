@@ -116,6 +116,97 @@ _NETWORK_SCAN_MECHANISM = re.compile(
     r"сканер\w*|сканирован\w*|скан\w*\s+порт\w*)\b",
     re.IGNORECASE,
 )
+_HOST_VULNERABILITY_CUE = re.compile(
+    r"\b(?:vulnerabilit(?:y|ies)|security\s+(?:weakness(?:es)?|exposure)|"
+    r"weakness(?:es)?|misconfigurations?|"
+    r"уязвимост\w*|слаб(?:ое\s+место|ые\s+места|ост)\w*|"
+    r"небезопасн\w*\s+(?:служб|сервис|настройк)\w*|опасн\w*\s+(?:служб|сервис)\w*)\b",
+    re.IGNORECASE,
+)
+_HOST_VULNERABILITY_FOLLOWUP = re.compile(
+    r"\A\s*(?:(?:hi|hello|hey|привет)[!,.;:\s]+)?"
+    r"(?:(?:and|so|then|now|а|и|ну|так|теперь|сейчас)\s+){0,2}"
+    r"(?:(?:please|pls|kindly|пожалуйста|прошу|скажи(?:те)?|покажи(?:те)?)\s*[,;:]?\s+)?"
+    r"(?:"
+    r"(?:what|which)\s+(?:known\s+)?(?:vulnerabilit(?:y|ies)|weakness(?:es)?)\s+"
+    r"(?:does\s+)?(?:it|that\s+host|the\s+host)(?:\s+have)?|"
+    r"does\s+(?:it|that\s+host|the\s+host)\s+have\s+(?:any\s+)?"
+    r"(?:vulnerabilit(?:y|ies)|weakness(?:es)?)|"
+    r"(?:check|scan|assess|inspect)\s+(?:it|that\s+host|the\s+host)\s+for\s+"
+    r"(?:vulnerabilit(?:y|ies)|weakness(?:es)?)|"
+    r"find\s+(?:vulnerabilit(?:y|ies)|weakness(?:es)?)\s+(?:on|in)\s+"
+    r"(?:it|that\s+host|the\s+host)|"
+    r"(?:какие|что\s+за)\s+(?:уязвимост\w*|слаб\w*\s+мест\w*)\s+"
+    r"(?:есть\s+)?(?:у\s+него|у\s+этого\s+хоста|на\s+н[её]м)|"
+    r"какие\s+(?:у\s+него|у\s+этого\s+хоста|на\s+н[её]м)\s+(?:есть\s+)?"
+    r"(?:уязвимост\w*|слаб\w*\s+мест\w*)|"
+    r"есть\s+ли\s+(?:у\s+него|у\s+этого\s+хоста|на\s+н[её]м)\s+"
+    r"(?:уязвимост\w*|слаб\w*\s+мест\w*)|"
+    r"(?:проверь(?:те)?|просканиру(?:й|йте)|оцени(?:те)?|исследу(?:й|йте))\s+"
+    r"(?:его|этот\s+хост)\s+на\s+(?:уязвимост\w*|слаб\w*\s+мест\w*)|"
+    r"найди(?:те)?\s+(?:у\s+него|на\s+н[её]м|у\s+этого\s+хоста)\s+"
+    r"(?:уязвимост\w*|слаб\w*\s+мест\w*)"
+    r")\b",
+    re.IGNORECASE,
+)
+_HOST_VULNERABILITY_QUESTION = re.compile(
+    r"\A\s*(?:(?:hi|hello|hey|привет)[!,.;:\s]+)?"
+    r"(?:(?:and|so|then|now|а|и|ну|так|теперь|сейчас)\s+){0,2}"
+    r"(?:(?:please|пожалуйста|скажи(?:те)?|покажи(?:те)?)\s*[,;:]?\s+)?(?:"
+    r"какие\s+(?:есть\s+)?(?:уязвимост\w*|слаб\w*\s+мест\w*)\s+(?:у|на)|"
+    r"что\s+(?:там\s+)?с\s+безопасност\w*|"
+    r"есть\s+ли\s+(?:уязвимост\w*|слаб\w*\s+мест\w*)\s+(?:у|на)|"
+    r"насколько\s+безопас\w*|"
+    r"what\s+(?:known\s+)?(?:vulnerabilit(?:y|ies)|weakness(?:es)?)\s+(?:does|do)|"
+    r"does\s+.+?\s+have\s+(?:any\s+)?(?:vulnerabilit(?:y|ies)|weakness(?:es)?)|"
+    r"how\s+secure\s+(?:is|are)|is\s+.+?\s+vulnerable|"
+    r"what\s+is\s+the\s+security\s+(?:state|posture)\s+of"
+    r")\b",
+    re.IGNORECASE,
+)
+_HOST_EFFECT_TARGET_TAIL = re.compile(
+    r"[\s,:—–-]*(?:(?:у|на)\s+)?"
+    r"(?:(?:the|this|that|этот|этого|данный|данного)\s+)?"
+    r"(?:(?:host|server|target|machine|address|ip|"
+    r"хост\w*|сервер\w*|узл\w*|адрес\w*)\s+)?",
+    re.IGNORECASE,
+)
+_HOST_VULNERABILITY_QUESTION_NEGATION = re.compile(
+    r"(?:\A|[.!?;]\s*)(?:мне\s+)?(?:"
+    r"не\s+(?:отвечай(?:те)?|надо\s+отвечать|нужно\s+отвечать|"
+    r"спрашиваю|интересн\w*|говори(?:те)?|рассказывай(?:те)?|показывай(?:те)?)|"
+    r"(?:no\s+need\s+to|do\s+not|don't|dont|never)\s+"
+    r"(?:answer|tell|explain|show|ask)|"
+    r"i(?:'m|\s+am)?\s+not\s+(?:asking|interested)"
+    r")\b",
+    re.IGNORECASE,
+)
+_NMAP_CAPABILITY_TRUTH = re.compile(
+    r"\A\s*(?:(?:hi|hello|hey|привет)[!,.;:\s]+)?(?:"
+    r"(?:у\s+тебя|у\s+вас)\s+(?:(?:же\s+)?(?:должен|должна|должно)\s+быть\s+)?"
+    r"(?:есть\s+)?(?:доступ|доступа|возможност\w*)\s+(?:к\s+)?nmap|"
+    r"(?:есть|имеется)\s+ли\s+(?:у\s+тебя|у\s+вас)\s+(?:доступ|возможност\w*)\s+(?:к\s+)?nmap|"
+    r"(?:ты|вы)\s+(?:же\s+)?(?:умеешь|умеете|можешь|можете|способна|способен)\s+"
+    r"(?:использовать|запускать|запустить)\s+nmap|"
+    r"можешь\s+ли\s+ты\s+(?:использовать|запускать|запустить)\s+nmap|"
+    r"nmap\s+(?:тебе|вам)?\s*(?:доступен|доступна|установлен|работает)|"
+    r"(?:you\s+(?:should|must)\s+have|do\s+you\s+have|have\s+you\s+got)\s+"
+    r"(?:access\s+to\s+)?nmap|"
+    r"(?:can|could|would)\s+you\s+(?:use|run|launch)\s+nmap|"
+    r"are\s+you\s+able\s+to\s+(?:use|run|launch)\s+nmap|"
+    r"you\s+(?:can|are\s+able\s+to)\s+(?:use|run)\s+nmap|"
+    r"is\s+nmap\s+(?:available|installed|usable)|"
+    r"nmap\s+(?:же\s+)?установлен[^.!?\n]{0,80}почему\s+не\s+использу\w*|"
+    r"nmap\s+is\s+installed[^.!?\n]{0,80}why\s+(?:don't|do\s+not)\s+you\s+use\s+it"
+    r")\b",
+    re.IGNORECASE,
+)
+_NMAP_CAPABILITY_NEGATION = re.compile(
+    r"\b(?:нет|не|без|never|no|not|without|don't|dont|cannot|can't)\b"
+    r"[^.!?\n]{0,64}\bnmap\b|\bnmap\b[^.!?\n]{0,64}"
+    r"\b(?:недоступ\w*|не\s+установ\w*|not\s+available|not\s+installed|cannot|can't)\b",
+    re.IGNORECASE,
+)
 _NETWORK_REPORT_EXPORT_VERB = (
     r"(?:пришл(?:и|ите)|отправ(?:ь|ьте)|прилож(?:и|ите)|прикреп(?:и|ите)|"
     r"сохран(?:и|ите)|выгруз(?:и|ите)|экспортируй(?:те)?|сформируй(?:те)?|"
@@ -181,7 +272,7 @@ _REQUEST_BLOCKQUOTE = re.compile(r"(?m)^[ \t]*>[^\r\n]*$")
 _REQUEST_UNIT_BOUNDARY = re.compile(r"(?:[!?;]+(?:\s+|$)|\.(?:\s+|$)|\n+)")
 _REQUEST_SOFT_BOUNDARY = re.compile(r"(?:,\s+|\s+[—–-]\s+)")
 _REPORTED_REQUEST_CUE = re.compile(
-    r"\b(?:сказа\w*|говор\w*|написа\w*|указа\w*|попрос\w*|просил\w*|велел\w*|"
+    r"\b(?:сказа\w*|говор\w*|написа\w*|указа\w*|спрос\w*|попрос\w*|просил\w*|велел\w*|"
     r"предлож\w*|посовет\w*|требу\w*|цитир\w*|цитат\w*|повтор\w*|"
     r"перевед\w*|означа\w*|said|says?|wrote|told|asked|ordered|"
     r"suggested|recommended|required|quote\w*|repeat\w*|translat\w*|means?)\b",
@@ -204,6 +295,14 @@ _TRAILING_REQUEST_CANCEL = re.compile(
     r"\b(?:отмена|отмени(?:те)?|передумал(?:а)?)\b|"
     r"\b(?:do\s+not|don't|dont|never)\s+(?:do|scan|run|execute)\b|"
     r"\b(?:cancel(?:\s+(?:it|that))?|never\s+mind)\b)",
+    re.IGNORECASE,
+)
+_LEADING_REQUEST_CANCEL = re.compile(
+    r"\b(?:"
+    r"отмена|отбой|стоп|я\s+передумал(?:а)?|не\s+(?:надо|нужно)|"
+    r"cancel(?:\s+(?:it|that))?|never\s+mind|stop|no\s+need|"
+    r"do\s+not|don't|dont"
+    r")\b",
     re.IGNORECASE,
 )
 _TRAILING_REQUEST_ATTRIBUTION = re.compile(
@@ -640,6 +739,22 @@ def _newline_payload_has_inert_governor(masked: str, unit_start: int) -> bool:
     )
 
 
+def _prior_request_unit_has_inert_governor(masked: str, unit_start: int) -> bool:
+    """Keep a prior reported/meta/negative sentence from minting a new effect."""
+
+    prior_units = tuple(_request_units(masked[:unit_start]))
+    if not prior_units or _EXPLICIT_REQUEST_CONTEXT_RESET.match(masked[unit_start:]):
+        return False
+    prior_start, prior_end = prior_units[-1]
+    prior = masked[prior_start:prior_end]
+    return bool(
+        _REPORTED_REQUEST_CUE.search(prior)
+        or _META_REQUEST_CUE.search(prior)
+        or _HOST_VULNERABILITY_QUESTION_NEGATION.search(prior)
+        or _LEADING_REQUEST_CANCEL.search(prior)
+    )
+
+
 def _direct_request_matches(speech: str, pattern: re.Pattern[str]) -> tuple[_DirectRequestSpan, ...]:
     """Locate direct action clauses and keep data/reported speech inert.
 
@@ -666,7 +781,11 @@ def _direct_request_matches(speech: str, pattern: re.Pattern[str]) -> tuple[_Dir
             if request is None:
                 continue
             governing_prefix = masked[unit_start:start]
-            if _REPORTED_REQUEST_CUE.search(governing_prefix) or _META_REQUEST_CUE.search(governing_prefix):
+            if (
+                _REPORTED_REQUEST_CUE.search(governing_prefix)
+                or _META_REQUEST_CUE.search(governing_prefix)
+                or _LEADING_REQUEST_CANCEL.search(governing_prefix)
+            ):
                 continue
             request_start = start + request.start()
             request_end = start + request.end()
@@ -845,6 +964,104 @@ def requests_network_scan(speech: str) -> bool:
     )
 
 
+def requests_host_vulnerability_assessment(speech: str) -> bool:
+    """Classify one explicit current-message vulnerability assessment.
+
+    This is intent only. It neither chooses a destination nor authorizes
+    packets; callers must separately pin exactly one policy-admitted host.
+    """
+
+    text, masked = _request_projection(speech)
+    targets = extract_targets(text)
+    target_ranges: list[tuple[int, int]] = []
+    for target in targets:
+        token = str(target.get("token") or "")
+        start = text.casefold().find(token.casefold())
+        if start >= 0:
+            target_ranges.append((start, start + len(token)))
+
+    def target_is_bound_to_request(item: _DirectRequestSpan) -> bool:
+        for target_start, target_end in target_ranges:
+            if target_start < item.unit_start or target_end > item.unit_end:
+                continue
+            if target_start < item.end:
+                if target_end <= item.end:
+                    return True
+                continue
+            tail = masked[item.end:target_start]
+            if len(tail) <= 64 and _HOST_EFFECT_TARGET_TAIL.fullmatch(tail) is not None:
+                return True
+        return False
+
+    active = requests_active_assessment(text) and any(
+        (not targets or target_is_bound_to_request(item))
+        and not _prior_request_unit_has_inert_governor(masked, item.unit_start)
+        and _HOST_VULNERABILITY_CUE.search(masked[item.unit_start : item.unit_end]) is not None
+        for item in _direct_request_matches(text, _ACTIVE_ASSESSMENT_VERB)
+    )
+    question = any(
+        bool(targets)
+        and target_is_bound_to_request(item)
+        and not _prior_request_unit_has_inert_governor(masked, item.unit_start)
+        and _HOST_VULNERABILITY_QUESTION_NEGATION.search(
+            masked[item.unit_start : item.unit_end]
+        )
+        is None
+        and _PASSIVE_ASSESSMENT_OBJECT.search(masked[item.unit_start : item.unit_end]) is None
+        and _REPORTED_REQUEST_CUE.search(masked[item.unit_start : item.unit_end]) is None
+        for item in _direct_request_matches(text, _HOST_VULNERABILITY_QUESTION)
+    )
+    return active or question
+
+
+def requests_host_vulnerability_followup(speech: str) -> bool:
+    """Classify a direct deictic vulnerability continuation, without binding it."""
+
+    text, masked = _request_projection(speech)
+    if (
+        not masked.strip()
+        or extract_targets(text)
+        or _request_is_negated(masked)
+        or _HOST_VULNERABILITY_QUESTION_NEGATION.search(masked)
+    ):
+        return False
+    return bool(_direct_request_matches(text, _HOST_VULNERABILITY_FOLLOWUP))
+
+
+def requests_nmap_capability_truth(speech: str) -> bool:
+    """Recognise a direct question/assertion about Friday's nmap capability."""
+
+    text, masked = _request_projection(speech)
+    if (
+        not masked.strip()
+        or extract_targets(text)
+        or requests_active_assessment(text)
+        or (
+            _NMAP_CAPABILITY_NEGATION.search(masked)
+            and re.search(r"\b(?:почему\s+не\s+использу\w*|why\s+(?:don't|do\s+not)\s+you\s+use)\b", masked)
+            is None
+        )
+        or _META_REQUEST_CUE.search(masked)
+    ):
+        return False
+    for unit_start, unit_end in _request_units(masked):
+        unit = masked[unit_start:unit_end]
+        if (
+            _newline_payload_has_inert_governor(masked, unit_start)
+            or _prior_request_unit_has_inert_governor(masked, unit_start)
+            or _CONDITIONAL_REQUEST_CUE.search(unit)
+            or _REPORTED_REQUEST_CUE.search(unit)
+            or _META_REQUEST_CUE.search(unit)
+            or _HOST_VULNERABILITY_QUESTION_NEGATION.search(unit)
+            or _TRAILING_REQUEST_CANCEL.search(unit)
+            or _TRAILING_REQUEST_ATTRIBUTION.search(unit)
+        ):
+            continue
+        if _NMAP_CAPABILITY_TRUTH.match(unit):
+            return True
+    return False
+
+
 def requested_network_report_format(speech: str) -> str | None:
     """Return one direct current-turn network report format, if unambiguous.
 
@@ -934,6 +1151,9 @@ __all__ = [
     "requests_artifact_decompile",
     "requests_artifact_patch",
     "requests_configured_network_assessment",
+    "requests_host_vulnerability_assessment",
+    "requests_host_vulnerability_followup",
+    "requests_nmap_capability_truth",
     "requests_network_scan",
     "requested_network_report_format",
     "requests_network_report_export",
