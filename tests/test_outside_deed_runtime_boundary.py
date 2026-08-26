@@ -1156,6 +1156,9 @@ def test_common_file_reminder_and_voice_completions_need_evidence(claim: str) ->
         "Готовый PDF доступен по ссылке.",
         "Готовый PDF: ссылка https://example.test/report.pdf.",
         "На официальном сайте ведомства готовый PDF: ссылка https://example.test/report.pdf.",
+        "Готовое PNG-изображение могу проанализировать.",
+        "Готовое изображение PNG могу проверить.",
+        "Могу подготовить готовое PDF-вложение после уточнения.",
     ],
 )
 def test_capability_and_readiness_propositions_are_not_completed_deeds(offer: str) -> None:
@@ -1243,6 +1246,9 @@ def test_capability_and_readiness_propositions_are_not_completed_deeds(offer: st
         "Я подготовила готовый PDF, он доступен по ссылке.",
         "Вот готовый PDF: ссылка https://example.test/report.pdf.",
         "Держи готовый PDF: он открывается по ссылке.",
+        "Готовое PNG-изображение ниже.",
+        "Готовое изображение PNG ниже.",
+        "Готовое PDF-вложение ниже.",
     ],
 )
 def test_capability_language_cannot_hide_an_independent_completed_effect(claim: str) -> None:
@@ -1296,6 +1302,9 @@ def test_ready_carrier_examples_and_nonactual_context_are_not_handoffs(statement
         ("Готовый документ «Отчёт по зарплате» уже у вас.", "Отчёт по зарплате.pdf"),
         ("Готовый документ `report.pdf` уже у вас.", "report.pdf"),
         ("Готовый файл report.pdf уже у вас.", "report.pdf"),
+        ("Готовое PNG-изображение ниже.", "image.png"),
+        ("Готовое изображение PNG ниже.", "image.png"),
+        ("Готовое PDF-вложение ниже.", "report.pdf"),
     ],
 )
 def test_ready_carrier_location_is_not_part_of_artifact_evidence(
@@ -1325,6 +1334,20 @@ def test_ready_carrier_still_requires_the_claimed_artifact_format() -> None:
         reminder_succeeded=False,
         file_descriptors=["Прогноз погоды.pdf"],
         file_format_descriptors=["Прогноз погоды.pdf"],
+    )
+    assert _claims_an_unconfirmed_supported_deed(
+        "Готовое PNG-изображение ниже.",
+        has_file=True,
+        reminder_succeeded=False,
+        file_descriptors=["report.pdf"],
+        file_format_descriptors=["report.pdf"],
+    )
+    assert _claims_an_unconfirmed_supported_deed(
+        "Готовое PDF-вложение ниже.",
+        has_file=True,
+        reminder_succeeded=False,
+        file_descriptors=["image.png"],
+        file_format_descriptors=["image.png"],
     )
     assert _claims_an_unconfirmed_supported_deed(
         "Готовый документ «Первый.pdf» ниже. Готовый документ «Второй.pdf» ниже.",
