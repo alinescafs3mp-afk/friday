@@ -9335,8 +9335,7 @@ def _explicit_supported_file_claim(
         if _SUPPORTED_FILE_BARE_HANDOFF.search(clause):
             return True
         has_file_completion = bool(
-            _SUPPORTED_FILE_COMPLETION.search(clause)
-            or _PASSIVE_ATTACHMENT_READY_DESCRIPTION.search(clause)
+            _SUPPORTED_FILE_COMPLETION.search(clause) or _PASSIVE_ATTACHMENT_READY_DESCRIPTION.search(clause)
         )
         unsafe_description = _READ_ONLY_ATTACHMENT_UNSAFE_DESCRIPTION_SUFFIX.search(clause)
         named_external_model = _SUPPORTED_FILE_NAMED_EXTERNAL_MODEL_AGENT.search(clause)
@@ -9351,18 +9350,14 @@ def _explicit_supported_file_claim(
             or (unsafe_description is not None and not unsafe_is_named_external_model)
             or _PASSIVE_INPUT_CURRENT_DELIVERY.search(clause)
             or _PASSIVE_INPUT_CURRENT_AVAILABILITY.search(clause)
-            or (
-                _SUPPORTED_FILE_EXPLICIT_MODEL_AGENT.search(clause)
-                and named_external_model is None
-            )
+            or (_SUPPORTED_FILE_EXPLICIT_MODEL_AGENT.search(clause) and named_external_model is None)
             or _SUPPORTED_FILE_CURRENT_CARRIER.search(clause)
         ):
             return True
         if _SUPPORTED_FILE_DIRECT_ACTIVE_COMPLETION.search(clause):
             return True
     whole_completion = bool(
-        _SUPPORTED_FILE_COMPLETION.search(answer)
-        or _PASSIVE_ATTACHMENT_READY_DESCRIPTION.search(answer)
+        _SUPPORTED_FILE_COMPLETION.search(answer) or _PASSIVE_ATTACHMENT_READY_DESCRIPTION.search(answer)
     )
     whole_unsafe = _READ_ONLY_ATTACHMENT_UNSAFE_DESCRIPTION_SUFFIX.search(answer)
     whole_named_external_model = _SUPPORTED_FILE_NAMED_EXTERNAL_MODEL_AGENT.search(answer)
@@ -9446,8 +9441,7 @@ def _runtime_unconfirmed_supported_deed(
     if _claims_an_unconfirmed_obsidian_deed(answer) and _OBSIDIAN_EXPLICIT_SUPPORTED_DEED.search(answer):
         return True
     if "obsidian" in requested_effects and any(
-        _OBSIDIAN_BARE_PASSIVE_COMPLETION.fullmatch(clause)
-        for clause in _model_authored_clauses(answer)
+        _OBSIDIAN_BARE_PASSIVE_COMPLETION.fullmatch(clause) for clause in _model_authored_clauses(answer)
     ):
         return True
     if _explicit_supported_file_claim(
@@ -25225,6 +25219,8 @@ def _has_public_web_literal(text: str) -> bool:
         for pattern in (_MODEL_PLAIN_WEB_URL, _MODEL_ANY_DOMAIN_OR_IP)
         for match in pattern.finditer(source)
     )
+
+
 _WEB_PROVENANCE_SEGMENT_BREAK = re.compile(
     r"(?:[!?;\n]+|\.(?=\s|$)|[,—–]\s*|"
     r"\b(?:тем\s+не\s+менее|однако|зато|хотя|просто|но|а|и)\b)",
@@ -30471,13 +30467,7 @@ def _runtime_claims_unconfirmed_web_evidence(
     has_web_literal = _has_public_web_literal(answer)
     return bool(
         _has_explicit_web_provenance_claim(answer)
-        or (
-            has_web_literal
-            and (
-                provenance_followup
-                or _MODEL_WEB_PROVENANCE_CLAIM.search(answer)
-            )
-        )
+        or (has_web_literal and (provenance_followup or _MODEL_WEB_PROVENANCE_CLAIM.search(answer)))
     )
 
 
@@ -51037,8 +51027,7 @@ class AgentRuntime:
                         # contour.  A direct current upload, by contrast, keeps
                         # an explicit operator verifier opt-in if one was
                         # configured.  Production leaves that opt-in disabled.
-                        reply_assistant_reference
-                        or not self.settings.verify_answers
+                        reply_assistant_reference or not self.settings.verify_answers
                     )
                 )
             )
