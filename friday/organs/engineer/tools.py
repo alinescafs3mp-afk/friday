@@ -15,7 +15,7 @@ from friday.organs import ServiceContext
 from friday.permissions import ActorContext
 from friday.workers._blocking import run_blocking
 
-from . import advice, artifacts, authority, hosts, hunt, local_binaries, sandbox
+from . import advice, artifacts, authority, environment, hosts, hunt, local_binaries, sandbox
 from .targets import PinnedTarget
 
 _RAW_ID = re.compile(r"^raw_[0-9a-f]{16}$")
@@ -329,9 +329,51 @@ def build_engineer_tools(ctx: ServiceContext) -> tuple[ToolSpec, ...]:
 
     async def tool_inventory(*, actor: ActorContext) -> dict[str, Any]:
         del actor
+        binaries = await run_blocking(local_binaries.inventory)
         return {
             "ok": True,
-            "binaries": {name: bool(path) for name, path in sorted(local_binaries.inventory().items())},
+            "binaries": {name: bool(path) for name, path in sorted(binaries.items())},
+            "environment": environment.environment_passport(
+                allowed_cidrs=allowed_cidrs,
+                binaries=binaries,
+                host_control_enabled=bool(getattr(ctx.settings, "host_control_enabled", False)),
+                package_install_enabled=bool(getattr(ctx.settings, "host_package_install_enabled", False)),
+            ),
+        }
+
+    async def scan_configured_network(
+        *,
+        actor: ActorContext,
+        cidr: str,
+        profile: str = "discover",
+    ) -> dict[str, Any]:
+        del actor
+        try:
+            snapshot = hosts.configured_private_network_snapshot(
+                allowed_cidrs,
+                requested_cidr=str(cidr or ""),
+            )
+        except hosts.EngineerTargetPolicyError as exc:
+            return {"ok": False, "error": exc.code, "tool": "nmap"}
+        if snapshot.execution_targets != (str(cidr or ""),):
+            return {"ok": False, "error": "configured_network_identity_mismatch", "tool": "nmap"}
+        try:
+            result = await run_blocking(
+                local_binaries.nmap_network_scan,
+                snapshot,
+                profile=profile,
+                deadline=time.monotonic() + _NETWORK_TIMEOUT_SEC,
+            )
+        except TimeoutError:
+            return {"ok": False, "error": "deadline", "tool": "nmap"}
+        return {
+            **result,
+            "profile": profile,
+            "scope": cidr,
+            "target_count": snapshot.target_count,
+            "active_probes_sent": result.get("used") is True,
+            "active_probes": [f"nmap_{profile}"] if result.get("used") is True else [],
+            "exploit_payloads_sent": False,
         }
 
     port_schema = {
@@ -450,6 +492,24 @@ def build_engineer_tools(ctx: ServiceContext) -> tuple[ToolSpec, ...]:
             security_id="engineer.use",
             risk="observe",
             handler=tool_inventory,
+        ),
+        ToolSpec(
+            name="engineer_scan_configured_network",
+            description=(
+                "Code-owned nmap scan of the sole operator-configured private network; "
+                "never exposed as a free-form model target."
+            ),
+            parameters=_parameters(
+                {
+                    "cidr": {"type": "string", "minLength": 3, "maxLength": 80},
+                    "profile": {"type": "string", "enum": ["discover", "services"]},
+                },
+                required=("cidr", "profile"),
+            ),
+            security_id="engineer.host.audit",
+            risk="observe",
+            timeout_sec=120.0,
+            handler=scan_configured_network,
         ),
         ToolSpec(
             name="engineer_adversary_rehearsal",

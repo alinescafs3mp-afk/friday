@@ -3059,6 +3059,7 @@ _ENGINEER_NETWORK_AUDIT_TOOLS = frozenset(
         "engineer_http_enum",
         "engineer_dns",
         "engineer_adversary_rehearsal",
+        "engineer_scan_configured_network",
     }
 )
 _ENGINEER_ARTIFACT_AUDIT_TOOLS = frozenset({"engineer_analyze_artifact", "engineer_patch_artifact"})
@@ -4425,6 +4426,18 @@ class ExecutionKernel:
                             canonical_host.encode("utf-8")
                         ).hexdigest()
                         engineer_details["host_chars"] = len(host)
+
+                cidr = args.get("cidr")
+                if isinstance(cidr, str) and cidr:
+                    canonical_cidr = cidr.strip().casefold()
+                    if canonical_cidr:
+                        engineer_details["cidr_sha256"] = hashlib.sha256(
+                            canonical_cidr.encode("utf-8")
+                        ).hexdigest()
+                        engineer_details["cidr_chars"] = len(cidr)
+                profile = args.get("profile")
+                if profile in {"discover", "services"}:
+                    engineer_details["network_profile"] = profile
 
                 target_ticket = args.get("target_ticket")
                 if isinstance(target_ticket, str) and target_ticket:

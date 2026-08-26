@@ -94,6 +94,7 @@ DEFAULT_PORTS = (
 )
 MAX_PORTS = 64
 MAX_TARGET_ADDRESSES = 16
+MAX_CONFIGURED_NETWORK_ADDRESSES = 256
 CONNECT_TIMEOUT_SEC = 1.2
 DNS_RESOLVE_TIMEOUT_SEC = 5.0
 MAX_AUDIT_SECONDS = 115.0
@@ -248,6 +249,50 @@ def _configured_network_policy(
         )
     except ContractError as exc:
         raise EngineerTargetPolicyError("target_policy_invalid") from exc
+
+
+def configured_private_network_snapshot(
+    allowed_cidrs: Sequence[str],
+    *,
+    requested_cidr: str = "",
+) -> NetworkTargetSnapshot:
+    """Resolve an explicit CIDR or “my subnet” under exact operator policy."""
+
+    canonical: list[str] = []
+    for raw in allowed_cidrs:
+        try:
+            network = ipaddress.ip_network(str(raw), strict=True)
+        except ValueError as exc:
+            raise EngineerTargetPolicyError("target_policy_invalid") from exc
+        if str(network) != str(raw) or network.prefixlen == 0:
+            raise EngineerTargetPolicyError("target_policy_invalid")
+        canonical.append(str(network))
+    if not canonical:
+        raise EngineerTargetPolicyError("configured_private_network_missing")
+    requested = str(requested_cidr or "")
+    if not requested and len(canonical) != 1:
+        raise EngineerTargetPolicyError("configured_private_network_ambiguous")
+    if not requested:
+        requested = canonical[0]
+    try:
+        policy = NetworkPolicy(
+            connected_cidrs=(),
+            allowed_cidrs=tuple(canonical),
+            allow_public=False,
+            max_targets=MAX_CONFIGURED_NETWORK_ADDRESSES,
+            max_target_tokens=1,
+        )
+        snapshot = normalize_network_targets((requested,), policy)
+    except ContractError as exc:
+        raise EngineerTargetPolicyError("configured_private_network_not_admitted") from exc
+    classifications = {item.classification for item in snapshot.bindings}
+    if (
+        snapshot.approval_required
+        or snapshot.target_count > MAX_CONFIGURED_NETWORK_ADDRESSES
+        or not classifications.issubset({"operator_approved_private", "approved_ipv6_ula"})
+    ):
+        raise EngineerTargetPolicyError("configured_private_network_not_admitted")
+    return snapshot
 
 
 def admit_pinned_target_policy(
@@ -862,6 +907,7 @@ __all__ = [
     "HTTP_PORTS",
     "MAX_PORTS",
     "MAX_AUDIT_SECONDS",
+    "MAX_CONFIGURED_NETWORK_ADDRESSES",
     "MAX_TARGET_ADDRESSES",
     "TLS_PORTS",
     "audit_host",
@@ -869,6 +915,7 @@ __all__ = [
     "active_assessment_requested",
     "admit_pinned_target_policy",
     "authorize_target",
+    "configured_private_network_snapshot",
     "host_markdown",
     "http_hunt",
     "pin_target_from_speech",

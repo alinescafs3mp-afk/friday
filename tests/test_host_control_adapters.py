@@ -176,6 +176,14 @@ def test_nmap_parser_rejects_entities_and_malformed_xml_without_expansion() -> N
     result = parse_nmap_xml(entity, target_snapshot=target_snapshot, exit_code=0)
     assert result.parser_status is ParserStatus.UNAVAILABLE
     assert result.warnings == ("xml_entities_forbidden",)
+    for unsafe_doctype in (
+        b'<!DOCTYPE nmaprun SYSTEM "file:///etc/passwd"><nmaprun/>',
+        b"<!DOCTYPE nmaprun><!DOCTYPE nmaprun><nmaprun/>",
+        b'<!DOCTYPE nmaprun><!ENTITY boom "secret"><nmaprun/>',
+    ):
+        unsafe = parse_nmap_xml(unsafe_doctype, target_snapshot=target_snapshot, exit_code=0)
+        assert unsafe.parser_status is ParserStatus.UNAVAILABLE
+        assert unsafe.warnings == ("xml_entities_forbidden",)
     malformed = parse_nmap_xml(b"<nmaprun>", target_snapshot=target_snapshot, exit_code=0)
     assert malformed.parser_status is ParserStatus.UNAVAILABLE
 

@@ -29,8 +29,16 @@ _HOSTNAME = re.compile(
 )
 _TRAILING = re.compile(r"[),.;,]+$")
 _HOST_LABEL = re.compile(r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?", re.IGNORECASE)
+_CIDR = re.compile(
+    r"(?<![0-9a-f:.])(?:"
+    r"(?:(?:25[0-5]|2[0-4]\d|[01]?\d\d?)\.){3}(?:25[0-5]|2[0-4]\d|[01]?\d\d?)|"
+    r"[0-9a-f:]*:[0-9a-f:.]+"
+    r")/[^\s,;.!?()\[\]{}<>\"']*",
+    re.IGNORECASE,
+)
 _ACTIVE_ASSESSMENT_VERB = re.compile(
-    r"\A\s*(?:(?:please|pls|kindly|can\s+you|could\s+you|would\s+you|"
+    r"\A\s*(?:(?:hi|hello|hey|привет|здравствуй(?:те)?)[!,.;:\s]+)?"
+    r"(?:(?:please|pls|kindly|can\s+you|could\s+you|would\s+you|"
     r"i\s+(?:want|need|ask|authorize)\s+you\s+to|"
     r"пожалуйста|прошу|можешь|можете|нужно|надо|хочу|разрешаю)\s*[,;:]?\s+)?"
     r"(?:actively\s+|активно\s+)?(?:"
@@ -54,8 +62,36 @@ _ACTIVE_ASSESSMENT_NEGATION = re.compile(
 )
 _PASSIVE_ASSESSMENT_OBJECT = re.compile(
     r"\b(?:report|results?|log|document|file|text|article|screenshot|"
+    r"configuration|settings?|status|topology|diagram|inventory|"
     r"отч[её]т\w*|результат\w*|лог\w*|документ\w*|файл\w*|текст\w*|"
-    r"стать\w*|скриншот\w*)\b",
+    r"стать\w*|скриншот\w*|конфигурац\w*|настройк\w*|"
+    r"состоян\w*|статус\w*|тополог\w*|схем\w*|инвентар\w*)\b",
+    re.IGNORECASE,
+)
+_CONFIGURED_NETWORK_OBJECT = re.compile(
+    r"\b(?:"
+    r"my\s+(?:(?:local|home|private)\s+)?(?:subnet|network|lan)|"
+    r"(?:local|home|private)\s+(?:subnet|network|lan)|"
+    r"мо(?:ю|я|ей)\s+(?:(?:локальн|домашн|частн)\w*\s+)?(?:подсет\w*|сет\w*)|"
+    r"(?:локальн|домашн|частн)\w*\s+(?:подсет\w*|сет\w*)"
+    r")\b",
+    re.IGNORECASE,
+)
+_CONFIGURED_NETWORK_ACTIVE_VERB = re.compile(
+    r"\A\s*(?:(?:hi|hello|hey|привет|здравствуй(?:те)?)[!,.;:\s]+)?"
+    r"(?:(?:please|pls|kindly|can\s+you|could\s+you|would\s+you|"
+    r"i\s+(?:want|need|ask|authorize)\s+you\s+to|"
+    r"пожалуйста|прошу|можешь|можете|нужно|надо|хочу|разрешаю)\s*[,;:]?\s+)?"
+    r"(?:actively\s+|активно\s+)?(?:"
+    r"scan|probe|audit|enumerate|discover|"
+    r"run\s+(?:an?\s+)?(?:scan|probe|audit)|"
+    r"start\s+(?:an?\s+)?(?:scan|probe|audit)|"
+    r"perform\s+(?:an?\s+)?(?:scan|probe|audit)|"
+    r"просканиру(?:й|йте)|сканиру(?:й|йте)|проаудиру(?:й|йте)|"
+    r"обследу(?:й|йте)|исследу(?:й|йте)|"
+    r"запусти(?:те)?\s+(?:сканирование|аудит)|"
+    r"проведи(?:те)?\s+(?:сканирование|аудит|обследование)"
+    r")\b",
     re.IGNORECASE,
 )
 _ARTIFACT_PATCH_REQUEST = re.compile(
@@ -260,6 +296,35 @@ def extract_single_target(speech: str) -> dict[str, str | int | None] | None:
     return targets[0]
 
 
+def extract_single_cidr(speech: str) -> str | None:
+    """Return one canonical explicit CIDR and reject mixed target authority."""
+
+    text = str(speech or "")
+    url_ranges = [(item.start(), item.end()) for item in _URL.finditer(text)]
+    matches = [
+        item
+        for item in _CIDR.finditer(text)
+        if not any(item.start() < end and item.end() > start for start, end in url_ranges)
+    ]
+    if not matches:
+        return None
+    if len(matches) != 1:
+        raise ValueError("engineer network turn must name exactly one CIDR")
+    match = matches[0]
+    token = match.group()
+    masked = text[: match.start()] + (" " * len(token)) + text[match.end() :]
+    if extract_targets(masked):
+        raise ValueError("engineer network turn cannot mix a CIDR with another target")
+    try:
+        network = ipaddress.ip_network(token, strict=True)
+    except ValueError as exc:
+        raise ValueError("engineer network CIDR is invalid or noncanonical") from exc
+    canonical = str(network)
+    if token.casefold() != canonical.casefold():
+        raise ValueError("engineer network CIDR is invalid or noncanonical")
+    return canonical
+
+
 def requests_active_assessment(speech: str) -> bool:
     """Return whether the current human text explicitly asks for active probes.
 
@@ -313,6 +378,33 @@ def requests_artifact_patch(speech: str) -> bool:
     )
 
 
+def requests_configured_network_assessment(speech: str) -> bool:
+    """Admit the sole configured private network only from current speech.
+
+    This is the code-owned meaning of “scan my subnet”.  Passive reports and
+    configuration questions never authorize packets; an ambiguous configured
+    scope is rejected later by policy rather than selected by a model.
+    """
+
+    text = " ".join(str(speech or "").split())
+    return bool(
+        requests_network_scan(text)
+        and not extract_targets(text)
+        and _CONFIGURED_NETWORK_OBJECT.search(text) is not None
+    )
+
+
+def requests_network_scan(speech: str) -> bool:
+    """Require explicit packet-intent language for a CIDR-wide effect."""
+
+    text = " ".join(str(speech or "").split())
+    return bool(
+        requests_active_assessment(text)
+        and _CONFIGURED_NETWORK_ACTIVE_VERB.search(text) is not None
+        and _PASSIVE_ASSESSMENT_OBJECT.search(text) is None
+    )
+
+
 def target_source_sha256(speech: str, token: str) -> str:
     body = f"{str(speech or '')}\x00{str(token or '')}".encode("utf-8", errors="replace")
     return hashlib.sha256(body).hexdigest()
@@ -323,11 +415,14 @@ __all__ = [
     "bind_pinned_target",
     "current_pinned_target",
     "extract_single_target",
+    "extract_single_cidr",
     "extract_targets",
     "is_forbidden_address",
     "normalize_ip_address",
     "parse_host_token",
     "requests_active_assessment",
     "requests_artifact_patch",
+    "requests_configured_network_assessment",
+    "requests_network_scan",
     "target_source_sha256",
 ]

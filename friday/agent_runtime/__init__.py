@@ -2095,13 +2095,16 @@ _ENGINEER_MODEL_TOOL_NAMES = frozenset(
         "engineer_adversary_rehearsal",
     }
 )
-_ENGINEER_REGISTERED_TOOL_NAMES = frozenset({"engineer_hunt", *_ENGINEER_MODEL_TOOL_NAMES})
+_ENGINEER_REGISTERED_TOOL_NAMES = frozenset(
+    {"engineer_hunt", "engineer_scan_configured_network", *_ENGINEER_MODEL_TOOL_NAMES}
+)
 _ENGINEER_HOST_TOOL_NAMES = frozenset(
     {
         "engineer_audit_host",
         "engineer_http_enum",
         "engineer_dns",
         "engineer_adversary_rehearsal",
+        "engineer_scan_configured_network",
     }
 )
 _ENGINEER_ARTIFACT_TOOL_NAMES = frozenset({"engineer_analyze_artifact", "engineer_patch_artifact"})
@@ -2113,6 +2116,7 @@ _ENGINEER_TOOL_CAPABILITIES = {
     "engineer_dns": "engineer.host.audit",
     "engineer_local_tools": "engineer.use",
     "engineer_adversary_rehearsal": "engineer.host.audit",
+    "engineer_scan_configured_network": "engineer.host.audit",
 }
 _ENGINEER_CAPABILITIES = frozenset({"engineer.use", *_ENGINEER_TOOL_CAPABILITIES.values()})
 _HOST_CONTROL_CONTEXT_TOOL_NAMES = frozenset({"host_action_run", "host_json_extract", "software_install"})
@@ -2274,7 +2278,18 @@ def _record_engineer_action_receipt(
                 "Invalid tool arguments",
             )
         )
-        if isinstance(reported, bool) or rejected_before_handler:
+        rejected_before_probe = error in {
+            "Engineer tool refused: configured_network_identity_mismatch",
+            "Engineer tool refused: configured_private_network_ambiguous",
+            "Engineer tool refused: configured_private_network_missing",
+            "Engineer tool refused: configured_private_network_not_admitted",
+            "Engineer tool refused: invalid_arguments",
+            "Engineer tool refused: invalid_profile",
+            "Engineer tool refused: invalid_target",
+            "Engineer tool refused: nmap_missing",
+            "Engineer tool refused: nmap_unattested",
+        }
+        if isinstance(reported, bool) or rejected_before_handler or rejected_before_probe:
             pending = max(0, int(ledger.get("active_probe_uncertain_count") or 0))
             ledger["active_probe_uncertain_count"] = max(0, pending - 1)
         if reported is True:
@@ -2288,6 +2303,15 @@ def _record_engineer_action_receipt(
     ledger["exploit_payloads_sent"] = bool(
         ledger.get("exploit_payloads_sent") is True or data.get("exploit_payloads_sent") is True
     )
+    if tool_name == "engineer_scan_configured_network":
+        attestation = data.get("executable_attestation")
+        observed_version = (
+            str(attestation.get("observed_version") or "") if isinstance(attestation, Mapping) else ""
+        )
+        if observed_version.startswith("Nmap version ") and len(observed_version) <= 160:
+            versions = ledger.setdefault("tool_versions", {})
+            if isinstance(versions, dict):
+                versions["nmap"] = observed_version
     if tool_name in _ENGINEER_ARTIFACT_TOOL_NAMES:
         admission = data.get("sandbox")
         if (
@@ -2338,6 +2362,14 @@ def _engineer_dossier_receipt(dossier: Mapping[str, Any]) -> dict[str, Any]:
     artifacts = dossier.get("artifacts")
     action_ledger = dossier.get("_action_ledger")
     action_ledger = action_ledger if isinstance(action_ledger, Mapping) else {}
+    raw_target_count = dossier.get("target_count")
+    target_count = (
+        int(raw_target_count)
+        if isinstance(raw_target_count, int)
+        and not isinstance(raw_target_count, bool)
+        and 0 <= raw_target_count <= 256
+        else min(8, len(targets) if isinstance(targets, list) else 0)
+    )
     known_probes_sent = bool(
         dossier.get("active_probes_sent") is True or action_ledger.get("active_probes_sent") is True
     )
@@ -2345,7 +2377,7 @@ def _engineer_dossier_receipt(dossier: Mapping[str, Any]) -> dict[str, Any]:
     return {
         "schema": "friday.engineer-receipt.v1",
         "dossier_sha256": hashlib.sha256(encoded).hexdigest(),
-        "target_count": min(8, len(targets) if isinstance(targets, list) else 0),
+        "target_count": target_count,
         "artifact_count": min(20, len(artifacts) if isinstance(artifacts, list) else 0),
         "active_probes_sent": True if known_probes_sent else None if probes_uncertain else False,
         "active_probes_status": (
@@ -54968,8 +55000,20 @@ class AgentRuntime:
             return {}
 
         from friday.organs.engineer import authority as engineer_authority
+        from friday.organs.engineer import environment as engineer_environment
         from friday.organs.engineer import hosts as engineer_hosts
         from friday.organs.engineer import hunt as engineer_hunt
+        from friday.organs.engineer import local_binaries as engineer_local_binaries
+        from friday.organs.engineer import targets as engineer_targets
+
+        try:
+            engineer_binaries = await _await_with_turn_deadline(
+                run_blocking(engineer_local_binaries.inventory),
+                turn_deadline,
+                expired="turn deadline expired during engineer environment inventory",
+            )
+        except TimeoutError:
+            engineer_binaries = {}
 
         dossier: dict[str, Any] = {
             "ok": True,
@@ -54983,8 +55027,27 @@ class AgentRuntime:
             "exploit_payloads_sent": False,
             "sandboxed": False,
             "tool_versions": {},
+            "environment": engineer_environment.environment_passport(
+                allowed_cidrs=tuple(getattr(self.settings, "host_allowed_cidrs", ()) or ()),
+                binaries=engineer_binaries,
+                host_control_enabled=bool(getattr(self.settings, "host_control_enabled", False)),
+                package_install_enabled=bool(getattr(self.settings, "host_package_install_enabled", False)),
+            ),
         }
         network_requested = engineer_hosts.active_assessment_requested(message)
+        configured_network_requested = engineer_targets.requests_configured_network_assessment(message)
+        explicit_network_cidr = ""
+        explicit_network_error = ""
+        if network_requested:
+            try:
+                explicit_network_cidr = engineer_targets.extract_single_cidr(message) or ""
+            except ValueError:
+                explicit_network_error = "configured_network_target_invalid_or_ambiguous"
+            if explicit_network_cidr and not engineer_targets.requests_network_scan(message):
+                explicit_network_error = "configured_network_scan_intent_required"
+        network_scope_requested = bool(
+            configured_network_requested or explicit_network_cidr or explicit_network_error
+        )
         dossier["network_request_status"] = (
             "explicit_active_request" if network_requested else "not_requested"
         )
@@ -55042,7 +55105,67 @@ class AgentRuntime:
                 details=details,
             )
 
-        if host_actor is not None and not _turn_deadline_expired(turn_deadline):
+        if host_actor is not None and network_scope_requested and not _turn_deadline_expired(turn_deadline):
+            if explicit_network_error:
+                dossier["ok"] = False
+                dossier["target_error"] = explicit_network_error
+                await audit_target_pinning("configured_network_policy_denied_before_tool")
+            else:
+                try:
+                    configured_snapshot = engineer_hosts.configured_private_network_snapshot(
+                        tuple(getattr(self.settings, "host_allowed_cidrs", ()) or ()),
+                        requested_cidr=explicit_network_cidr,
+                    )
+                except engineer_hosts.EngineerTargetPolicyError as exc:
+                    dossier["ok"] = False
+                    dossier["target_error"] = exc.code
+                    await audit_target_pinning("configured_network_policy_denied_before_tool")
+                else:
+                    configured_cidr = configured_snapshot.execution_targets[0]
+                    dossier["targets"] = [
+                        {
+                            "host": configured_cidr,
+                            "addresses": [],
+                            "implied_port": None,
+                            "source_sha256": hashlib.sha256(
+                                f"{message}\x00{configured_cidr}".encode("utf-8", errors="replace")
+                            ).hexdigest(),
+                        }
+                    ]
+                    dossier["target_count"] = configured_snapshot.target_count
+                    result = await execute_audited(
+                        "engineer_scan_configured_network",
+                        {"cidr": configured_cidr, "profile": "discover"},
+                        "engineer.host.audit",
+                    )
+                    if result is not None:
+                        data = result.data if isinstance(result.data, Mapping) else None
+                        if isinstance(data, Mapping):
+                            dossier["network_scan"] = dict(data)
+                            dossier["active_probes_sent"] = data.get("active_probes_sent") is True
+                            dossier["exploit_payloads_sent"] = False
+                            if data.get("ok") is not True:
+                                dossier["ok"] = False
+                            active_probes = data.get("active_probes")
+                            if isinstance(active_probes, list):
+                                dossier["active_probes"] = [str(item)[:80] for item in active_probes[:32]]
+                        else:
+                            dossier["ok"] = False
+                            scan_error = str(result.error or "scan_unavailable")[:120]
+                            if scan_error.startswith("Engineer tool refused: "):
+                                scan_error = scan_error.removeprefix("Engineer tool refused: ")
+                            dossier["network_scan"] = {
+                                "ok": False,
+                                "error": scan_error,
+                                "scope": configured_cidr,
+                                "target_count": configured_snapshot.target_count,
+                            }
+
+        if (
+            host_actor is not None
+            and not network_scope_requested
+            and not _turn_deadline_expired(turn_deadline)
+        ):
             try:
                 pinned_target = await _await_with_turn_deadline(
                     run_blocking(

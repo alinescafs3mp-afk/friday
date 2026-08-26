@@ -178,6 +178,49 @@ def test_engineer_local_inventory_has_no_argument_projection() -> None:
 
 
 @pytest.mark.asyncio
+async def test_configured_network_scope_survives_durable_audit_as_an_opaque_reference(
+    settings,
+    storage,
+) -> None:
+    kernel, actor = _engineer_test_kernel(settings, storage)
+    cidr = "192.168.1.0/24"
+
+    async def handler(*, actor, cidr: str, profile: str):  # noqa: ANN001
+        del actor, cidr, profile
+        return {"ok": True, "active_probes_sent": True}
+
+    kernel.register(
+        ToolSpec(
+            name="engineer_scan_configured_network",
+            description="synthetic configured-network observation",
+            parameters={"type": "object", "properties": {}},
+            security_id="knowledge.read",
+            risk="observe",
+            handler=handler,
+        )
+    )
+
+    result = await kernel.execute(
+        "engineer_scan_configured_network",
+        {"cidr": cidr, "profile": "discover"},
+        actor=actor,
+    )
+
+    assert result.success is True
+    rows = [
+        row
+        for row in storage.list_audit_log("alice", limit=20)
+        if row["target_id"] == "engineer_scan_configured_network"
+    ]
+    assert len(rows) == 1
+    payload = json.loads(str(rows[0]["after_json"] or "{}"))
+    assert str(payload["cidr_ref"]).startswith("fpref_")
+    assert payload["cidr_chars"] == len(cidr)
+    assert payload["network_profile"] == "discover"
+    assert cidr not in json.dumps(payload, ensure_ascii=False)
+
+
+@pytest.mark.asyncio
 async def test_cancelled_engineer_observation_gets_an_uncertain_terminal_audit(
     settings,
     storage,

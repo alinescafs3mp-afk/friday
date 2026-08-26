@@ -7,7 +7,7 @@ from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
-from . import advice, artifacts, hosts, sandbox
+from . import advice, artifacts, environment, hosts, sandbox
 from .redaction import redact_text
 from .targets import PinnedTarget, extract_single_target, requests_active_assessment
 
@@ -174,8 +174,77 @@ def _secondary_markdown(value: object) -> str:
     return "\n".join(lines)
 
 
+def _network_scan_markdown(value: object) -> str:
+    if not isinstance(value, Mapping):
+        return ""
+    scope = redact_text(value.get("scope"), limit=80)
+    target_count = value.get("target_count")
+    if value.get("ok") is not True:
+        return (
+            "## Configured network scan\n"
+            f"scope: `{scope or 'unknown'}`\n"
+            f"status: unavailable ({redact_text(value.get('error'), limit=120) or 'unknown'})"
+        )
+    projection = value.get("report")
+    projection = projection if isinstance(projection, Mapping) else {}
+    structured = projection.get("result")
+    structured = structured if isinstance(structured, Mapping) else {}
+    coverage = value.get("coverage")
+    coverage = coverage if isinstance(coverage, Mapping) else {}
+    lines = [
+        "## Configured network scan",
+        f"scope: `{scope or 'unknown'}`",
+        f"profile: `{redact_text(value.get('profile'), limit=24) or 'unknown'}`",
+        "coverage: "
+        f"{redact_text(coverage.get('grade'), limit=24) or 'unknown'}; "
+        f"accounted {coverage.get('accounted', '?')}/{coverage.get('requested', target_count or '?')}",
+        f"nmap version: {redact_text(structured.get('nmap_version'), limit=80) or 'unknown'}",
+        f"hosts up: {structured.get('hosts_up', '?')}; "
+        f"down/unknown: {structured.get('hosts_down_or_unknown', '?')}",
+        "exploit payloads sent: no",
+    ]
+    raw_hosts = structured.get("hosts")
+    host_rows = raw_hosts if isinstance(raw_hosts, list) else []
+    for item in host_rows[:256]:
+        if not isinstance(item, Mapping) or str(item.get("state") or "") != "up":
+            continue
+        addresses = item.get("addresses")
+        addresses = addresses if isinstance(addresses, list) else []
+        address_text = ", ".join(
+            redact_text(entry.get("address"), limit=80)
+            for entry in addresses[:8]
+            if isinstance(entry, Mapping) and entry.get("address")
+        )
+        names = item.get("hostnames")
+        names = names if isinstance(names, list) else []
+        name_text = ", ".join(redact_text(name, limit=253) for name in names[:8] if name)
+        ports = item.get("ports")
+        ports = ports if isinstance(ports, list) else []
+        open_ports = [
+            str(entry.get("port"))
+            for entry in ports[:64]
+            if isinstance(entry, Mapping) and entry.get("state") == "open"
+        ]
+        detail = f"- `{address_text or 'address unavailable'}`"
+        if name_text:
+            detail += f" names: {name_text}"
+        if open_ports:
+            detail += " open: " + ",".join(open_ports)
+        lines.append(detail)
+    evidence = value.get("evidence")
+    evidence = evidence if isinstance(evidence, list) else []
+    first = evidence[0] if evidence and isinstance(evidence[0], Mapping) else {}
+    digest = str(first.get("sha256") or "")
+    if len(digest) == 64:
+        lines.append(f"nmap XML evidence sha256: `{digest}`")
+    return "\n".join(lines)[:12_000]
+
+
 def dossier_markdown(dossier: Mapping[str, Any]) -> str:
     parts: list[str] = []
+    passport = dossier.get("environment")
+    if isinstance(passport, Mapping):
+        parts.append(environment.environment_markdown(passport))
     target_error = dossier.get("target_error")
     if target_error:
         parts.append("Network target refused: " + redact_text(target_error, limit=240))
@@ -186,6 +255,9 @@ def dossier_markdown(dossier: Mapping[str, Any]) -> str:
             parts.append(str(report["markdown"])[:12_000])
         elif report.get("error"):
             parts.append("# Target unavailable\nerror: " + redact_text(report["error"], limit=240))
+    network_scan = _network_scan_markdown(dossier.get("network_scan"))
+    if network_scan:
+        parts.append(network_scan)
     secondary = _secondary_markdown(dossier.get("secondary"))
     if secondary:
         parts.append(secondary)

@@ -13,7 +13,7 @@ from friday.host_control.adapters.nmap import (
     build_nmap_execution,
     probe_nmap_version,
 )
-from friday.host_control.contracts import ExecutableAttestation
+from friday.host_control.contracts import EvidenceRef, ExecutableAttestation
 from friday.host_control.plans import create_action_plan
 from friday.host_control.policy import NetworkPolicy, normalize_network_targets
 from friday.organs.engineer import hosts, local_binaries
@@ -49,6 +49,14 @@ def _xml() -> bytes:
         b'<service name="https" product="example" version="1" conf="7"/>'
         b'</port></ports></host><runstats><finished timestr="later"/>'
         b'<hosts up="1" down="0" total="1"/></runstats></nmaprun>'
+    )
+
+
+def _production_xml() -> bytes:
+    return _xml().replace(
+        b"?>",
+        b'?>\n<!DOCTYPE nmaprun>\n<?xml-stylesheet href="file:///usr/share/nmap/nmap.xsl" type="text/xsl"?>',
+        1,
     )
 
 
@@ -156,6 +164,29 @@ def test_engineer_and_host_share_exact_nmap_argv_parser_and_projection(
     assert "UNTRUSTED_HOST_APPLICATION_EVIDENCE" in markdown
     assert hashlib.sha256(_xml()).hexdigest() in markdown
     assert _xml().decode() not in markdown
+
+
+def test_shared_parser_accepts_the_exact_inert_doctype_emitted_by_real_nmap() -> None:
+    snapshot = local_binaries._exact_ip_snapshot("192.168.1.7")
+    payload = _production_xml()
+
+    parsed = NmapAdapter().parse_xml(
+        payload,
+        target_snapshot=snapshot,
+        exit_code=0,
+        evidence=(
+            EvidenceRef(
+                evidence_id="evidence_" + hashlib.sha256(payload).hexdigest()[:32],
+                sha256=hashlib.sha256(payload).hexdigest(),
+                size_bytes=len(payload),
+                media_type="application/xml",
+            ),
+        ),
+    )
+
+    assert parsed.parser_status.value == "complete"
+    assert parsed.coverage.grade.value == "complete"
+    assert parsed.structured["targets_scanned"] == 1
 
 
 def test_engineer_rejects_invalid_inputs_and_unattested_nmap_before_capture(

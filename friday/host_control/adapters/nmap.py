@@ -38,6 +38,7 @@ MAX_PORT_ROWS = 8192
 NMAP_EXECUTABLE = "/usr/bin/nmap"
 SERVICE_PORTS = (22, 25, 53, 80, 110, 143, 443, 445, 587, 993, 995, 3000, 5432, 8000, 8080, 8443)
 _FORBIDDEN_XML = re.compile(rb"<!\s*(?:DOCTYPE|ENTITY)\b", re.IGNORECASE)
+_CANONICAL_NMAP_DOCTYPE = b"<!DOCTYPE nmaprun>"
 
 
 NMAP_SPEC = AdapterSpec(
@@ -352,13 +353,20 @@ def parse_nmap_xml(
     unavailable_reason = ""
     if not isinstance(payload, bytes) or not payload or len(payload) > MAX_XML_BYTES:
         unavailable_reason = "xml_missing_or_oversized"
-    elif _FORBIDDEN_XML.search(payload):
-        unavailable_reason = "xml_entities_forbidden"
+    parse_payload = payload
+    if not unavailable_reason:
+        # Nmap's own ``-oX -`` output contains one inert canonical doctype.
+        # Strip only that exact declaration; every other DTD/entity spelling
+        # remains forbidden before ElementTree sees the bytes.
+        if parse_payload.count(_CANONICAL_NMAP_DOCTYPE) == 1:
+            parse_payload = parse_payload.replace(_CANONICAL_NMAP_DOCTYPE, b"", 1)
+        if _FORBIDDEN_XML.search(parse_payload):
+            unavailable_reason = "xml_entities_forbidden"
     root: ET.Element | None = None
     if not unavailable_reason:
         try:
             parser = ET.XMLParser()
-            root = ET.fromstring(payload, parser=parser)
+            root = ET.fromstring(parse_payload, parser=parser)
         except ET.ParseError:
             unavailable_reason = "xml_malformed_or_truncated"
     if root is None or root.tag != "nmaprun":

@@ -296,44 +296,36 @@ def _nmap_error(output: _NmapProcessOutput, parser_status: ParserStatus) -> str:
     return ""
 
 
-def nmap_connect_scan(
-    host: str,
-    ports: Sequence[int],
+def _nmap_snapshot_scan(
+    target_snapshot: NetworkTargetSnapshot,
+    action_id: str,
     *,
+    ports: Sequence[int] | None = None,
     deadline: float | None = None,
 ) -> dict[str, Any]:
-    """Run shared ``selected_ports`` against one already-authorized pinned IP."""
+    """Execute the shared reviewed adapter against one code-owned snapshot."""
 
-    if not ports:
-        return {"ok": False, "error": "no_ports", "tool": "nmap"}
-    if len(ports) > MAX_PORTS:
-        return {"ok": False, "error": "invalid_ports", "tool": "nmap"}
-    try:
-        target_snapshot = _exact_ip_snapshot(host)
-    except ContractError:
-        return {"ok": False, "error": "invalid_target", "tool": "nmap"}
     adapter = NmapAdapter()
     try:
+        supplied: dict[str, Any] = {"target_snapshot_digest": target_snapshot.digest}
+        if action_id == "selected_ports":
+            supplied["ports"] = list(ports or ())
         normalized = adapter.normalize_arguments(
-            "selected_ports",
-            {
-                "ports": list(ports),
-                "target_snapshot_digest": target_snapshot.digest,
-            },
+            action_id,
+            supplied,
             target_snapshot=target_snapshot,
         )
-        normalized_ports = normalized.get("ports")
-        if not isinstance(normalized_ports, list):
-            raise ContractError("Engineer nmap selected ports were not normalized")
+        raw_normalized_ports = normalized.get("ports")
+        normalized_ports = raw_normalized_ports if isinstance(raw_normalized_ports, list) else None
     except ContractError:
-        return {"ok": False, "error": "invalid_ports", "tool": "nmap"}
+        return {"ok": False, "error": "invalid_arguments", "tool": "nmap"}
     executable_state = _inspect_nmap_executable()
     attestation = executable_state.attestation
     if attestation is None:
         return {"ok": False, "error": executable_state.error, "tool": "nmap"}
     try:
         execution = build_nmap_execution(
-            "selected_ports",
+            action_id,
             target_snapshot=target_snapshot,
             ports=normalized_ports,
             executable=attestation.canonical_path,
@@ -391,6 +383,48 @@ def nmap_connect_scan(
     if error:
         result["error"] = error
     return result
+
+
+def nmap_connect_scan(
+    host: str,
+    ports: Sequence[int],
+    *,
+    deadline: float | None = None,
+) -> dict[str, Any]:
+    """Run shared ``selected_ports`` against one already-authorized pinned IP."""
+
+    if not ports:
+        return {"ok": False, "error": "no_ports", "tool": "nmap"}
+    if len(ports) > MAX_PORTS:
+        return {"ok": False, "error": "invalid_ports", "tool": "nmap"}
+    try:
+        target_snapshot = _exact_ip_snapshot(host)
+    except ContractError:
+        return {"ok": False, "error": "invalid_target", "tool": "nmap"}
+    result = _nmap_snapshot_scan(
+        target_snapshot,
+        "selected_ports",
+        ports=ports,
+        deadline=deadline,
+    )
+    if result.get("error") == "invalid_arguments":
+        result["error"] = "invalid_ports"
+    return result
+
+
+def nmap_network_scan(
+    target_snapshot: NetworkTargetSnapshot,
+    *,
+    profile: str = "discover",
+    deadline: float | None = None,
+) -> dict[str, Any]:
+    """Run one bounded subnet profile selected by code, never raw nmap flags."""
+
+    if profile not in {"discover", "services"}:
+        return {"ok": False, "error": "invalid_profile", "tool": "nmap"}
+    if target_snapshot.approval_required or not 1 <= target_snapshot.target_count <= 256:
+        return {"ok": False, "error": "invalid_target", "tool": "nmap"}
+    return _nmap_snapshot_scan(target_snapshot, profile, deadline=deadline)
 
 
 def dig_records(host: str, *, deadline: float | None = None) -> dict[str, Any]:
