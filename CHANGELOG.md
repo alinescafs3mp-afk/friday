@@ -1,3 +1,21 @@
+## 0.207.53 — 2026-08-27
+
+### Sealed Engineer command result delivery
+
+- A terminal Engineer command status can now deliver its sealed outputs as one
+  deterministic ZIP with an exact manifest and command receipt. The archive is
+  persisted through the existing generated-file Raw boundary and reaches
+  Telegram without exposing its binary carrier to either model.
+- Output paths, types, link identity, sizes and SHA-256 digests are revalidated
+  from the sealed job tree. The v2 receipt MAC binds the complete ordered output
+  inventory; legacy receipts remain status-readable but cannot publish files.
+- Result publication is owner- and conversation-scoped, isolated from sibling
+  model tool calls and freshly reauthorized immediately before persistence.
+  UNKNOWN/restart state, late revocation, carrier drift and corrupt ledgers fail
+  closed without replaying the command.
+- Trusted wrapper output refusals now preserve their precise stable error code
+  instead of collapsing into a generic exit-125 failure.
+
 ## 0.207.52 — 2026-08-27
 
 ### Telegram canary routing hotfix
