@@ -55,6 +55,11 @@ _DOCUMENT_MAP_ASSIST_ACCEPTED_PATH = (
     / "windows-sglang"
     / "workload-policy.document-map.v2.acceptance.json"
 )
+_ABLITERATED_PROFILE_ID = "gptoss20b-d4c2207151c7507f9d71a1d3d5d387d6ae98bb89b04f3171ba667098c2ad2d25"
+_ABLITERATED_CANDIDATE_SHA256 = "612ed412143458fc32bcee2b78cfa66afdaec0f947b7c6b78422afa6d9fd5a64"
+_ABLITERATED_CANDIDATE_PATH = (
+    Path(__file__).parent / "fixtures" / "secondary_abliterated_profile_candidate.json"
+)
 _EVIDENCE_KEYS = (
     "quality_evidence_sha256",
     "capacity_evidence_sha256",
@@ -71,7 +76,8 @@ def test_finalist_is_registered_only_as_the_exact_accepted_profile() -> None:
     assert hashlib.sha256(raw).hexdigest() == _ACCEPTED_SHA256
     assert hashlib.sha256(candidate_raw).hexdigest() == _CANDIDATE_SHA256
     assert set(ACCEPTED_SECONDARY_RUNTIME_PROFILES) == {_PROFILE_ID}
-    assert PROVISIONAL_SHADOW_SECONDARY_RUNTIME_PROFILES == {}
+    assert set(PROVISIONAL_SHADOW_SECONDARY_RUNTIME_PROFILES) == {_ABLITERATED_PROFILE_ID}
+    assert set(ACCEPTED_SECONDARY_RUNTIME_PROFILES).isdisjoint(PROVISIONAL_SHADOW_SECONDARY_RUNTIME_PROFILES)
 
     profile = ACCEPTED_SECONDARY_RUNTIME_PROFILES[_PROFILE_ID]
     assert profile.is_well_formed is True
@@ -295,3 +301,50 @@ def test_exact_code_owned_acceptance_binding_is_the_only_runtime_assist_opening(
         allow_private_text=True,
         document_map_mode="assist",
     )
+
+
+def test_abliterated_candidate_is_exact_provisional_shadow_only() -> None:
+    raw = _ABLITERATED_CANDIDATE_PATH.read_bytes()
+    value = json.loads(raw)
+
+    assert hashlib.sha256(raw).hexdigest() == _ABLITERATED_CANDIDATE_SHA256
+    assert value["status"] == "candidate"
+    assert value["profile_id"] == _ABLITERATED_PROFILE_ID
+    assert value["engine_binding_sha256"] == _ABLITERATED_PROFILE_ID.removeprefix("gptoss20b-")
+    assert value["served_model_alias"] == f"friday-secondary-{_ABLITERATED_PROFILE_ID}"
+    assert value["source_model_repository"] == ("huihui-ai/Huihui-gpt-oss-20b-mxfp4-abliterated-v2")
+    assert value["source_model_revision"] == "79f64a520a4a0275f639c1a47d9a5614a8a54477"
+    assert value["source_model_manifest_sha256"] == (
+        "8dfc3a50d1a9407fbb07dde5f1b494157664c75cdd0e140ecb85f7d55732a296"
+    )
+    assert all(value[key] == "0" * 64 for key in _EVIDENCE_KEYS)
+
+    profile = PROVISIONAL_SHADOW_SECONDARY_RUNTIME_PROFILES[_ABLITERATED_PROFILE_ID]
+    assert profile.is_well_formed is True
+    assert profile.manifest_sha256 == _ABLITERATED_CANDIDATE_SHA256
+    assert profile.allowed_modes == frozenset({"assist", "shadow"})
+    assert profile.allowed_workloads == frozenset({"extract"})
+    assert profile.cuda_graph_backend_decode == "full"
+    assert profile.cuda_graph_max_bs_decode == 1
+    assert profile.cuda_graph_bs_decode == (1,)
+    assert get_secondary_runtime_profile(_ABLITERATED_PROFILE_ID) is None
+    assert get_secondary_runtime_admission(_ABLITERATED_PROFILE_ID, mode="assist") is None
+
+    admission = get_secondary_runtime_admission(_ABLITERATED_PROFILE_ID, mode="shadow")
+    assert admission == SecondaryRuntimeAdmission(
+        profile=profile,
+        kind=SecondaryProfileAdmission.PROVISIONAL_SHADOW,
+    )
+    assert admission.accepts_manifest(raw) is True
+    assert profile.accepts_manifest(raw) is False
+    assert admission.accepts_manifest(raw + b" ") is False
+
+    accepted_lookalike = raw.replace(b'"status":"candidate"', b'"status":"accepted"')
+    lookalike = SecondaryRuntimeAdmission(
+        profile=replace(
+            profile,
+            manifest_sha256=hashlib.sha256(accepted_lookalike).hexdigest(),
+        ),
+        kind=SecondaryProfileAdmission.PROVISIONAL_SHADOW,
+    )
+    assert lookalike.accepts_manifest(accepted_lookalike) is False

@@ -196,7 +196,12 @@ def _digest_field(payload: bytes) -> bytes:
     return len(payload).to_bytes(8, "big") + payload
 
 
-def _tree_identity(root: Path, *, maximum_bytes: int) -> str | None:
+def _tree_identity(
+    root: Path,
+    *,
+    maximum_bytes: int,
+    maximum_entries: int = MAX_TREE_ENTRIES,
+) -> str | None:
     """Hash every admitted tree entry, including modes and symlink targets."""
 
     try:
@@ -219,7 +224,7 @@ def _tree_identity(root: Path, *, maximum_bytes: int) -> str | None:
             return None
         for child in children:
             entries += 1
-            if entries > MAX_TREE_ENTRIES:
+            if entries > maximum_entries:
                 return None
             path = Path(child.path)
             try:

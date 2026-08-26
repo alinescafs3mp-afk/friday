@@ -17,6 +17,7 @@ import signal
 import subprocess
 import sys
 import tempfile
+import threading
 import unicodedata
 import urllib.parse
 import zipfile
@@ -1399,6 +1400,51 @@ class UncertainToolOutcome(RuntimeError):
     boundary.  The approval must become ``uncertain`` so a retry cannot happen
     until reconciliation proves the real host state.
     """
+
+
+class _PhysicalToolStart:
+    """One process-shared, thread-safe durable launch-boundary witness."""
+
+    __slots__ = ("_callback", "_lock", "started")
+
+    def __init__(self, callback: Callable[[], None]) -> None:
+        self._callback = callback
+        self._lock = threading.Lock()
+        self.started = False
+
+    def mark(self) -> None:
+        with self._lock:
+            if self.started:
+                return
+            # The callback commits the immutable audit row.  The witness is
+            # published only afterwards, so a failed audit cannot authorize a
+            # worker launch which would have no durable start record.
+            self._callback()
+            self.started = True
+
+
+_PHYSICAL_TOOL_START: ContextVar[_PhysicalToolStart | None] = ContextVar(
+    "jericho_physical_tool_start",
+    default=None,
+)
+
+
+@contextmanager
+def _track_physical_tool_start(witness: _PhysicalToolStart) -> Iterator[None]:
+    token = _PHYSICAL_TOOL_START.set(witness)
+    try:
+        yield
+    finally:
+        _PHYSICAL_TOOL_START.reset(token)
+
+
+def mark_tool_physical_start() -> None:
+    """Commit the current tool's start row immediately before process spawn."""
+
+    witness = _PHYSICAL_TOOL_START.get()
+    if type(witness) is not _PhysicalToolStart:
+        raise RuntimeError("compiler start witness is unavailable")
+    witness.mark()
 
 
 @dataclass
@@ -3088,6 +3134,7 @@ _ENGINEER_NETWORK_AUDIT_TOOLS = frozenset(
     {
         "engineer_hunt",
         "engineer_audit_host",
+        "engineer_assess_host_vulnerabilities",
         "engineer_http_enum",
         "engineer_dns",
         "engineer_adversary_rehearsal",
@@ -3095,13 +3142,21 @@ _ENGINEER_NETWORK_AUDIT_TOOLS = frozenset(
     }
 )
 _ENGINEER_ARTIFACT_AUDIT_TOOLS = frozenset(
-    {"engineer_analyze_artifact", "engineer_decompile_artifact", "engineer_patch_artifact"}
+    {
+        "engineer_analyze_artifact",
+        "engineer_compile_java",
+        "engineer_decompile_artifact",
+        "engineer_patch_artifact",
+    }
 )
 _ENGINEER_TOOLS = frozenset(
     {
         *_ENGINEER_NETWORK_AUDIT_TOOLS,
         *_ENGINEER_ARTIFACT_AUDIT_TOOLS,
         "engineer_local_tools",
+        "engineer_command_run",
+        "engineer_command_status",
+        "engineer_command_cancel",
     }
 )
 _ENGINEER_PATCH_OPERATION_KINDS = frozenset({"write_at", "replace_bytes", "zip_replace"})
@@ -3118,6 +3173,9 @@ _HOST_CONTROL_TOOLS = frozenset(
         "software_install",
         "software_remove",
         "host_program_run_once",
+        "engineer_command_run",
+        "engineer_command_status",
+        "engineer_command_cancel",
         "host_action_execute",
         "software_install_execute",
         "software_remove_execute",
@@ -3834,6 +3892,8 @@ class ExecutionKernel:
         except TypeError:
             await self._audit(actor, name, False, "invalid_arguments", details=details)
             return ToolResult(name, False, error="Invalid tool arguments: TypeError")
+        deferred_engineer_start = bool(changes_data and name == "engineer_compile_java")
+        physical_start: _PhysicalToolStart | None = None
         if changes_data:
             # The surrounding request's durable terminal fence must be committed
             # before the first persistent boundary, including the durable
@@ -3846,10 +3906,25 @@ class ExecutionKernel:
                     False,
                     error="Mutating tool refused: request idempotency fence could not be committed",
                 )
-            await self._audit(actor, name, True, "started", details=details)
+            if not deferred_engineer_start:
+                await self._audit(actor, name, True, "started", details=details)
+            else:
+                physical_start = _PhysicalToolStart(
+                    lambda: self._audit_now(
+                        actor,
+                        name,
+                        True,
+                        "started",
+                        details=details,
+                    )
+                )
         try:
             async with asyncio.timeout(timeout):
-                data: Any = await tool.handler(actor=actor, **(arguments or {}))
+                if physical_start is None:
+                    data: Any = await tool.handler(actor=actor, **(arguments or {}))
+                else:
+                    with _track_physical_tool_start(physical_start):
+                        data = await tool.handler(actor=actor, **(arguments or {}))
             prepared_archive_search = None
             archive_exact_file_reader = None
             archive_exact_file_reader_owner_id = ""
@@ -3873,6 +3948,24 @@ class ExecutionKernel:
                 attachment = data.pop("_attachment", None)
                 raw_work_started = data.pop("_work_started", None)
                 work_started = raw_work_started if type(raw_work_started) is bool else None
+            if deferred_engineer_start and (
+                physical_start is None or work_started is None or work_started is not physical_start.started
+            ):
+                boundary_entered = bool(physical_start is not None and physical_start.started)
+                await self._audit(
+                    actor,
+                    name,
+                    False,
+                    "failed_after_start" if boundary_entered else "failed",
+                    details=details,
+                )
+                return ToolResult(
+                    name,
+                    False,
+                    error="Engineer tool refused: invalid_start_attestation",
+                    handler_entered=True,
+                    work_started=boundary_entered,
+                )
             if (
                 name in _ENGINEER_NETWORK_AUDIT_TOOLS | _ENGINEER_ARTIFACT_AUDIT_TOOLS
                 and isinstance(data, Mapping)
@@ -3881,16 +3974,31 @@ class ExecutionKernel:
                 # Engineer handlers use a bounded data envelope for expected
                 # target/file/sandbox refusals.  A normal coroutine return must
                 # not turn that envelope into a successful kernel result/audit.
-                reason = "failed_after_start" if changes_data else "failed"
+                reason = (
+                    "failed_after_start"
+                    if changes_data and (not deferred_engineer_start or work_started is True)
+                    else "failed"
+                )
                 await self._audit(actor, name, False, reason, details=details)
                 if changes_data:
+                    if deferred_engineer_start:
+                        error_code = str(data.get("error") or "")
+                        if not re.fullmatch(r"[a-z][a-z0-9_]{0,79}", error_code):
+                            error_code = "engineer_tool_refused"
+                        error = (
+                            f"Engineer tool failed: {error_code}"
+                            if work_started is True
+                            else f"Engineer tool refused: {error_code}"
+                        )
+                    else:
+                        error = (
+                            "Инженерный инструмент завершился после начала операции. "
+                            "Проверьте результат, прежде чем повторять."
+                        )
                     return ToolResult(
                         name,
                         False,
-                        error=(
-                            "Инженерный инструмент завершился после начала операции. "
-                            "Проверьте результат, прежде чем повторять."
-                        ),
+                        error=error,
                         handler_entered=True,
                         work_started=work_started,
                     )
@@ -3957,7 +4065,16 @@ class ExecutionKernel:
             # after a mutate handler has changed state.  The immutable start row
             # protects mutations; this terminal row makes cancelled observations
             # equally visible instead of looking as if the tool never ran.
-            await self._audit(actor, name, False, "uncertain", details=details)
+            boundary_entered = bool(
+                not deferred_engineer_start or physical_start is not None and physical_start.started
+            )
+            await self._audit(
+                actor,
+                name,
+                False,
+                "uncertain" if boundary_entered else "failed",
+                details=details,
+            )
             raise
         except TimeoutError:
             # Таймаут наступает ПОСЛЕ начала работы, а значит эффект мог случиться.
@@ -3971,15 +4088,27 @@ class ExecutionKernel:
             # Наблюдающему инструменту таймаут ничем не грозит: читать нечего
             # дважды, и там остаётся прежний честный отказ.
             if changes_data:
-                await self._audit(actor, name, False, "uncertain", details=details)
+                boundary_entered = bool(
+                    not deferred_engineer_start or physical_start is not None and physical_start.started
+                )
+                await self._audit(
+                    actor,
+                    name,
+                    False,
+                    "uncertain" if boundary_entered else "failed",
+                    details=details,
+                )
                 return ToolResult(
                     name,
                     False,
                     error=(
                         "Инструмент не ответил вовремя, и НЕИЗВЕСТНО, успел ли он "
                         "выполнить действие. Проверьте результат, прежде чем повторять."
+                        if boundary_entered
+                        else "Инструмент не дошёл до физического запуска до истечения времени."
                     ),
                     handler_entered=True,
+                    work_started=boundary_entered if deferred_engineer_start else None,
                 )
             await self._audit(actor, name, False, "timeout", details=details)
             return ToolResult(name, False, error="Tool execution timed out", handler_entered=True)
@@ -4008,15 +4137,27 @@ class ExecutionKernel:
                 # class names are useful in the bounded runtime log above, but
                 # they are not part of the content-free audit schema (and a
                 # custom exception may have a caller-controlled class name).
-                await self._audit(actor, name, False, "failed_after_start", details=details)
+                boundary_entered = bool(
+                    not deferred_engineer_start or physical_start is not None and physical_start.started
+                )
+                await self._audit(
+                    actor,
+                    name,
+                    False,
+                    "failed_after_start" if boundary_entered else "failed",
+                    details=details,
+                )
                 return ToolResult(
                     name,
                     False,
                     error=(
                         f"Инструмент {name} прервался ошибкой ({type(exc).__name__}) уже НАЧАВ "
                         "работу. Проверьте, не выполнено ли действие, прежде чем повторять."
+                        if boundary_entered
+                        else f"Инструмент {name} не дошёл до запуска: {type(exc).__name__}."
                     ),
                     handler_entered=True,
+                    work_started=boundary_entered,
                 )
             if isinstance(exc, TypeError | ValueError):
                 await self._audit(actor, name, False, "invalid_arguments", details=details)
@@ -4232,9 +4373,43 @@ class ExecutionKernel:
                 except (TypeError, ValueError) as exc:
                     raise ValueError("exact host-action approval summary is unavailable") from exc
             raise ValueError("exact host-action approval summary is unavailable")
+        if name == "engineer_command_run":
+            import shlex
+
+            argv = arguments.get("argv")
+            timeout_sec = arguments.get("timeout_sec")
+            if (
+                not isinstance(argv, list)
+                or not 1 <= len(argv) <= 64
+                or any(
+                    not isinstance(item, str)
+                    or not item
+                    or len(item) > 512
+                    or "\x00" in item
+                    for item in argv
+                )
+                or isinstance(timeout_sec, bool)
+                or not isinstance(timeout_sec, int)
+                or not 1 <= timeout_sec <= 3600
+            ):
+                raise ValueError("exact Engineer argv approval summary is unavailable")
+            exact_argv = shlex.join(argv)
+            if len(exact_argv) > 2_800:
+                raise ValueError("exact Engineer argv is too long for confirmation")
+            return (
+                "Запустить в изолированном Engineer workspace (без host-файлов, сети и секретов), "
+                f"таймаут {timeout_sec} с:\n{exact_argv}"
+            )
         return f"Выполнить {name}"
 
-    async def execute_approved(self, approval_id: str, *, actor: ActorContext | None = None) -> ToolResult:
+    async def execute_approved(
+        self,
+        approval_id: str,
+        *,
+        actor: ActorContext | None = None,
+        confirmation_update_id: str = "",
+        confirmation_body_hash: str = "",
+    ) -> ToolResult:
         """Исполнить действие, которое человек подтвердил. Ровно один раз.
 
         Заявление (`claim_action_approval`) само по себе является повторной
@@ -4301,6 +4476,23 @@ class ExecutionKernel:
                     "просрочено или аргументы изменились"
                 ),
             )
+
+        if name == "engineer_command_run":
+            if (
+                not re.fullmatch(r"[0-9]{1,20}", str(confirmation_update_id or ""))
+                or not re.fullmatch(r"[0-9a-f]{64}", str(confirmation_body_hash or ""))
+            ):
+                await run_blocking(
+                    storage.finish_action_approval,
+                    approval_id,
+                    actor.user_id,
+                    success=False,
+                    error="authenticated Telegram confirmation is unavailable",
+                )
+                return ToolResult(name, False, error="Authenticated Telegram confirmation is unavailable")
+            arguments["_approval_id"] = approval_id
+            arguments["_confirmation_update_id"] = str(confirmation_update_id)
+            arguments["_confirmation_body_hash"] = str(confirmation_body_hash)
 
         details = self._audit_details(name, arguments)
         timeout = tool.timeout_sec or 30
@@ -4734,7 +4926,7 @@ class ExecutionKernel:
             }
         return {}
 
-    async def _audit(
+    def _audit_now(
         self,
         actor: ActorContext,
         tool_name: str,
@@ -4766,6 +4958,23 @@ class ExecutionKernel:
                     **(details or {}),
                 },
             )
+        )
+
+    async def _audit(
+        self,
+        actor: ActorContext,
+        tool_name: str,
+        success: bool,
+        reason: str,
+        *,
+        details: dict[str, Any] | None = None,
+    ) -> None:
+        self._audit_now(
+            actor,
+            tool_name,
+            success,
+            reason,
+            details=details,
         )
 
     def _capability_requires_person(self, security_id: str) -> bool:  # noqa: D401

@@ -16,14 +16,14 @@ import subprocess
 import tempfile
 import threading
 import time
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from contextlib import suppress
 from pathlib import Path
 from typing import Any
 
 from friday.private_fs import ensure_private_directory, open_private_text_write
 
-from . import decompiler
+from . import compiler, decompiler
 
 BWRAP = Path("/usr/bin/bwrap")
 PYTHON = Path("/usr/bin/python3")
@@ -43,10 +43,18 @@ DECOMPILE_MAX_WALL_SECONDS = 240.0
 DECOMPILE_MAX_CPU_SECONDS = 960
 DECOMPILE_MAX_ADDRESS_SPACE_BYTES = 8 * 1024 * 1024 * 1024
 DECOMPILE_MAX_FILE_BYTES = 128 * 1024 * 1024
+COMPILE_MAX_WALL_SECONDS = 60.0
+COMPILE_MAX_CPU_SECONDS = 45
+COMPILE_MAX_ADDRESS_SPACE_BYTES = 2 * 1024 * 1024 * 1024
+COMPILE_MAX_FILE_BYTES = compiler.MAX_JAR_BYTES
+COMPILE_WORKSPACE_TMPFS_BYTES = 32 * 1024 * 1024
+COMPILE_MAX_CGROUP_PIDS = 512
+COMPILE_MIN_CGROUP_MEMORY_BYTES = 10 * 1024 * 1024 * 1024
+COMPILE_MAX_CGROUP_MEMORY_BYTES = 16 * 1024 * 1024 * 1024
 MAX_ADMITTED_CGROUP_PIDS = 65_536
 _SMOKE_SUCCESS_KEY: tuple[object, ...] | None = None
 _SMOKE_SUCCESS_RESULT: dict[str, Any] | None = None
-_DECOMPILER_LOCK = threading.Lock()
+_HEAVY_ARTIFACT_LOCK = threading.Lock()
 
 
 class EngineerSandboxError(ValueError):
@@ -207,6 +215,130 @@ def _current_cgroup_pids_limit() -> int | None:
     return None
 
 
+def _current_cgroup_memory_limit() -> int | None:
+    """Return the finite aggregate memory ceiling for the current cgroup."""
+
+    try:
+        lines = SELF_CGROUP.read_text(encoding="ascii").splitlines()
+    except (OSError, UnicodeError):
+        return None
+
+    candidates: list[Path] = []
+    for line in lines:
+        fields = line.split(":", 2)
+        if len(fields) != 3:
+            continue
+        hierarchy, controllers, raw_path = fields
+        relative = _cgroup_path(raw_path)
+        if relative is None:
+            continue
+        if hierarchy == "0" and not controllers:
+            candidates.append(CGROUP_ROOT / relative / "memory.max")
+        elif "memory" in controllers.split(","):
+            candidates.append(CGROUP_ROOT / "memory" / relative / "memory.limit_in_bytes")
+    candidates.extend(
+        (
+            CGROUP_ROOT / "memory.max",
+            CGROUP_ROOT / "memory" / "memory.limit_in_bytes",
+        )
+    )
+    seen: set[Path] = set()
+    for path in candidates:
+        if path in seen:
+            continue
+        seen.add(path)
+        flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0)
+        try:
+            descriptor = os.open(path, flags)
+        except OSError:
+            continue
+        try:
+            details = os.fstat(descriptor)
+            payload = os.read(descriptor, 64)
+            overflow = os.read(descriptor, 1)
+        except OSError:
+            continue
+        finally:
+            os.close(descriptor)
+        if not stat.S_ISREG(details.st_mode) or overflow:
+            return None
+        value = payload.strip()
+        if not value or value == b"max" or not value.isdigit():
+            return None
+        limit = int(value)
+        return limit if limit > 0 else None
+    return None
+
+
+def _current_cgroup_swap_limit() -> int | None:
+    """Return the finite cgroup-v2 swap ceiling for the current process."""
+
+    try:
+        lines = SELF_CGROUP.read_text(encoding="ascii").splitlines()
+    except (OSError, UnicodeError):
+        return None
+
+    candidates: list[Path] = []
+    for line in lines:
+        fields = line.split(":", 2)
+        if len(fields) != 3:
+            continue
+        hierarchy, controllers, raw_path = fields
+        relative = _cgroup_path(raw_path)
+        if relative is not None and hierarchy == "0" and not controllers:
+            candidates.append(CGROUP_ROOT / relative / "memory.swap.max")
+    candidates.append(CGROUP_ROOT / "memory.swap.max")
+    seen: set[Path] = set()
+    for path in candidates:
+        if path in seen:
+            continue
+        seen.add(path)
+        flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0)
+        try:
+            descriptor = os.open(path, flags)
+        except OSError:
+            continue
+        try:
+            details = os.fstat(descriptor)
+            payload = os.read(descriptor, 64)
+            overflow = os.read(descriptor, 1)
+        except OSError:
+            continue
+        finally:
+            os.close(descriptor)
+        if not stat.S_ISREG(details.st_mode) or overflow:
+            return None
+        value = payload.strip()
+        if not value or value == b"max" or not value.isdigit():
+            return None
+        return int(value)
+    return None
+
+
+def _compile_resource_preflight() -> dict[str, Any]:
+    """Require aggregate PID, memory and no-swap compiler boundaries."""
+
+    pids_limit = _current_cgroup_pids_limit()
+    if pids_limit is None or pids_limit > COMPILE_MAX_CGROUP_PIDS:
+        return {"ok": False, "reason": "compiler_pid_cgroup_unbounded"}
+    memory_limit = _current_cgroup_memory_limit()
+    if (
+        memory_limit is None
+        or memory_limit < COMPILE_MIN_CGROUP_MEMORY_BYTES
+        or memory_limit > COMPILE_MAX_CGROUP_MEMORY_BYTES
+    ):
+        return {"ok": False, "reason": "compiler_memory_cgroup_unbounded"}
+    swap_limit = _current_cgroup_swap_limit()
+    if swap_limit != 0:
+        return {"ok": False, "reason": "compiler_memory_cgroup_unbounded"}
+    return {
+        "ok": True,
+        "pids_limit": pids_limit,
+        "memory_limit_bytes": memory_limit,
+        "swap_limit_bytes": swap_limit,
+    }
+
+
 def _remaining_timeout(deadline: float | None, maximum: float = MAX_WALL_SECONDS) -> float:
     if deadline is None:
         return maximum
@@ -216,7 +348,12 @@ def _remaining_timeout(deadline: float | None, maximum: float = MAX_WALL_SECONDS
     return min(maximum, remaining)
 
 
-def _sandbox_argv(workspace: Path, *, mount_decompiler: bool = False) -> list[str]:
+def _sandbox_argv(
+    workspace: Path,
+    *,
+    mount_decompiler: bool = False,
+    mount_jdk: bool = False,
+) -> list[str]:
     package_root = Path(__file__).resolve().parents[2]
     if package_root.name != "friday" or not package_root.is_dir() or package_root.is_symlink():
         raise EngineerSandboxError("package_root_untrusted")
@@ -240,6 +377,8 @@ def _sandbox_argv(workspace: Path, *, mount_decompiler: bool = False) -> list[st
         "--ro-bind-try",
         "/lib64",
         "/lib64",
+        "--perms",
+        "0555",
         "--dir",
         "/etc",
         "--ro-bind-try",
@@ -249,34 +388,72 @@ def _sandbox_argv(workspace: Path, *, mount_decompiler: bool = False) -> list[st
         "/proc",
         "--dev",
         "/dev",
+        # The device nodes remain usable, but the synthetic devtmpfs and its
+        # /dev/shm directory may not become a second writable scratch store.
+        "--remount-ro",
+        "/dev",
+        *(["--size", str(COMPILE_WORKSPACE_TMPFS_BYTES)] if mount_jdk and not mount_decompiler else []),
         "--tmpfs",
         "/tmp",
+        "--perms",
+        "0555",
         "--dir",
         "/app",
         "--ro-bind",
         str(package_root),
         "/app/friday",
+        "--perms",
+        "0555",
+        "--dir",
+        "/root",
     ]
-    if mount_decompiler:
-        # Only the two verified, versioned owner-local trees are visible.  The
-        # rest of /home and /home/jericho/.jericho is absent from the namespace.
+    if mount_decompiler or mount_jdk:
+        # Only the required verified, versioned owner-local trees are visible.
+        # The rest of /home and /home/jericho/.jericho is absent.
+        argv.extend(["--perms", "0555", "--dir", "/opt"])
+        if mount_decompiler:
+            argv.extend(
+                [
+                    "--ro-bind",
+                    str(decompiler.GHIDRA_ROOT),
+                    str(decompiler.SANDBOX_GHIDRA_ROOT),
+                ]
+            )
         argv.extend(
             [
-                "--dir",
-                "/opt",
                 "--ro-bind",
-                str(decompiler.GHIDRA_ROOT),
-                str(decompiler.SANDBOX_GHIDRA_ROOT),
-                "--ro-bind",
-                str(decompiler.JDK_ROOT),
-                str(decompiler.SANDBOX_JDK_ROOT),
+                str(compiler.JDK_ROOT),
+                str(compiler.SANDBOX_JDK_ROOT),
             ]
         )
+    # Do not expose the host-backed temporary directory as a writable mount.
+    # The two immutable inputs and two pre-created outputs are the complete
+    # host filesystem surface.  The 0555 synthetic directory prevents the
+    # worker (or a compromised toolchain child) from creating extra files;
+    # writable scratch belongs only on the separately size-capped /tmp tmpfs.
     argv.extend(
         [
-            "--bind",
-            str(workspace),
+            "--perms",
+            "0555",
+            "--dir",
             "/work",
+            "--ro-bind",
+            str(workspace / "request.json"),
+            "/work/request.json",
+            "--ro-bind",
+            str(workspace / "input.bin"),
+            "/work/input.bin",
+            "--bind",
+            str(workspace / "result.json"),
+            "/work/result.json",
+            "--bind",
+            str(workspace / "output.bin"),
+            "/work/output.bin",
+            # Bubblewrap's synthetic root starts as a writable tmpfs.  Freeze
+            # that mount after constructing the namespace; /tmp and the two
+            # exact output file mounts are separate mounts and stay writable.
+            "--remount-ro",
+            "/",
             "--chdir",
             "/work",
             "--clearenv",
@@ -318,6 +495,7 @@ def _limited_sandbox_argv(
     *,
     action: str = "analyze",
     mount_decompiler: bool = False,
+    mount_jdk: bool = False,
 ) -> list[str]:
     """Apply non-PID limits in a trusted executable, never a Python fork hook."""
 
@@ -326,6 +504,11 @@ def _limited_sandbox_argv(
         file_bytes = DECOMPILE_MAX_FILE_BYTES
         address_space_bytes = DECOMPILE_MAX_ADDRESS_SPACE_BYTES
         nofile = 512
+    elif action == "compile_java":
+        cpu_seconds = COMPILE_MAX_CPU_SECONDS
+        file_bytes = COMPILE_MAX_FILE_BYTES
+        address_space_bytes = COMPILE_MAX_ADDRESS_SPACE_BYTES
+        nofile = 128
     else:
         cpu_seconds = MAX_CPU_SECONDS
         file_bytes = MAX_OUTPUT_BYTES
@@ -339,7 +522,11 @@ def _limited_sandbox_argv(
         f"--as={address_space_bytes}:{address_space_bytes}",
         f"--nofile={nofile}:{nofile}",
         "--",
-        *_sandbox_argv(workspace, mount_decompiler=mount_decompiler),
+        *_sandbox_argv(
+            workspace,
+            mount_decompiler=mount_decompiler,
+            mount_jdk=mount_jdk,
+        ),
     ]
 
 
@@ -351,8 +538,15 @@ def _run_worker(
     operations: Sequence[Mapping[str, Any]] | None = None,
     deadline: float | None = None,
     workspace_root: Path | None = None,
+    on_started: Callable[[], None] | None = None,
 ) -> tuple[dict[str, Any], bytes | None]:
-    maximum = DECOMPILE_MAX_WALL_SECONDS if action == "decompile" else MAX_WALL_SECONDS
+    maximum = (
+        DECOMPILE_MAX_WALL_SECONDS
+        if action == "decompile"
+        else COMPILE_MAX_WALL_SECONDS
+        if action == "compile_java"
+        else MAX_WALL_SECONDS
+    )
     # A queued ``run_blocking`` call retains its original deadline. Refuse it
     # before any expensive admission work so a drained queue cannot resurrect
     # a request whose enclosing turn has already ended.
@@ -360,9 +554,22 @@ def _run_worker(
     admission = preflight()
     if not admission.get("ok"):
         raise EngineerSandboxError(str(admission.get("reason") or "sandbox_unavailable"))
-    if action not in {"analyze", "decompile", "patch", "preflight"}:
+    if action == "compile_java":
+        resource_admission = _compile_resource_preflight()
+        if resource_admission.get("ok") is not True:
+            raise EngineerSandboxError(
+                str(resource_admission.get("reason") or "compiler_resource_boundary_unavailable")
+            )
+        admission = {
+            **admission,
+            "compile_pids_limit": resource_admission.get("pids_limit"),
+            "compile_memory_limit_bytes": resource_admission.get("memory_limit_bytes"),
+            "compile_swap_limit_bytes": resource_admission.get("swap_limit_bytes"),
+        }
+    if action not in {"analyze", "compile_java", "decompile", "patch", "preflight"}:
         raise EngineerSandboxError("unknown_action")
-    if not isinstance(data, bytes) or not data or len(data) > MAX_INPUT_BYTES:
+    input_cap = compiler.MAX_SOURCE_BYTES if action == "compile_java" else MAX_INPUT_BYTES
+    if not isinstance(data, bytes) or not data or len(data) > input_cap:
         raise EngineerSandboxError("input_size_invalid")
     request = {
         "protocol": PROTOCOL_VERSION,
@@ -371,6 +578,7 @@ def _run_worker(
         "operations": [dict(item) for item in (operations or ())],
     }
     mount_decompiler = False
+    mount_jdk = False
     if action == "decompile":
         toolchain = decompiler.host_toolchain_preflight()
         mount_decompiler = toolchain.get("ok") is True
@@ -386,6 +594,20 @@ def _run_worker(
                 "reason": str(toolchain.get("reason") or "toolchain_untrusted")[:80],
             }
         )
+    elif action == "compile_java":
+        source_error = compiler.validate_source_payload(data, filename)
+        if source_error is not None:
+            raise EngineerSandboxError(source_error)
+        toolchain = compiler.host_toolchain_preflight()
+        if toolchain.get("ok") is not True:
+            reason = str(toolchain.get("reason") or "toolchain_untrusted")[:80]
+            raise EngineerSandboxError(reason)
+        mount_jdk = True
+        request["compiler_toolchain"] = {
+            "ok": True,
+            "tool_version": compiler.JDK_VERSION,
+            "jdk_version": compiler.JDK_VERSION,
+        }
     if action == "preflight":
         try:
             request["parent_netns"] = os.readlink("/proc/self/ns/net")
@@ -413,17 +635,30 @@ def _run_worker(
         stderr_path = workspace / "stderr.log"
         _write_private_bytes(request_path, encoded_request)
         _write_private_bytes(input_path, data)
+        # Bubblewrap bind-mounts only these exact host files.  They must exist
+        # before namespace construction, and RLIMIT_FSIZE bounds either file
+        # even if the pinned parser/compiler process is compromised.
+        _write_private_bytes(result_path, b"")
+        _write_private_bytes(output_path, b"")
         with open_private_text_write(stderr_path) as stderr_handle:
             # Toolchain verification and workspace preparation may consume the
             # remaining budget. Resolve the exact wait bound immediately before
             # process creation; an expired request must never launch bwrap.
             worker_timeout = _remaining_timeout(deadline, maximum)
+            launch_boundary_entered = False
+            if on_started is not None:
+                try:
+                    on_started()
+                except Exception as exc:  # noqa: BLE001 - launch requires durable audit
+                    raise EngineerSandboxError("audit_start_unavailable") from exc
+                launch_boundary_entered = True
             try:
                 process = subprocess.Popen(  # noqa: S603 - fixed trusted prlimit/bwrap argv
                     _limited_sandbox_argv(
                         workspace,
                         action=action,
                         mount_decompiler=mount_decompiler,
+                        mount_jdk=mount_jdk,
                     ),
                     stdin=subprocess.DEVNULL,
                     stdout=subprocess.DEVNULL,
@@ -432,7 +667,10 @@ def _run_worker(
                     start_new_session=True,
                 )
             except OSError as exc:
-                raise EngineerSandboxError("worker_launch_failed") from exc
+                raise EngineerSandboxError(
+                    "worker_launch_failed",
+                    work_started=launch_boundary_entered,
+                ) from exc
             try:
                 process.wait(timeout=worker_timeout)
             except BaseException as exc:
@@ -466,9 +704,10 @@ def _run_worker(
             raise EngineerSandboxError("worker_protocol_mismatch", work_started=True)
         parsed["sandbox"] = admission
         output = None
-        if action == "patch" and parsed.get("ok") is True:
+        if action in {"compile_java", "patch"} and parsed.get("ok") is True:
+            output_cap = compiler.MAX_JAR_BYTES if action == "compile_java" else MAX_OUTPUT_BYTES
             try:
-                output = _read_bounded_regular(output_path, MAX_OUTPUT_BYTES)
+                output = _read_bounded_regular(output_path, output_cap)
             except EngineerSandboxError as exc:
                 raise EngineerSandboxError(exc.code, work_started=True) from exc
             if not output:
@@ -502,7 +741,7 @@ def decompile_artifact(
 ) -> dict[str, Any]:
     """Return a bounded Ghidra function index for one PE or ELF artifact."""
 
-    if not _DECOMPILER_LOCK.acquire(blocking=False):
+    if not _HEAVY_ARTIFACT_LOCK.acquire(blocking=False):
         raise EngineerSandboxError("decompiler_busy")
     try:
         result, _output = _run_worker(
@@ -514,7 +753,42 @@ def decompile_artifact(
         )
         return result
     finally:
-        _DECOMPILER_LOCK.release()
+        _HEAVY_ARTIFACT_LOCK.release()
+
+
+def compile_java_artifact(
+    data: bytes,
+    filename: str,
+    *,
+    deadline: float | None = None,
+    workspace_root: Path | None = None,
+    on_started: Callable[[], None] | None = None,
+) -> tuple[bytes, dict[str, Any]]:
+    """Compile one exact owned Java source without executing the result."""
+
+    source_error = compiler.validate_source_payload(data, filename)
+    if source_error is not None:
+        raise EngineerSandboxError(source_error)
+    if not _HEAVY_ARTIFACT_LOCK.acquire(blocking=False):
+        raise EngineerSandboxError("compiler_busy")
+    try:
+        result, output = _run_worker(
+            "compile_java",
+            data,
+            filename,
+            deadline=deadline,
+            workspace_root=workspace_root,
+            on_started=on_started,
+        )
+    finally:
+        _HEAVY_ARTIFACT_LOCK.release()
+    if result.get("ok") is not True or output is None:
+        error = str(result.get("error") or "compiler_failed")
+        # Every returned worker report follows successful fixed-argv bwrap
+        # spawn. Host admission, source validation and heavy-lock refusals have
+        # already raised above with the default pre-start marker.
+        raise EngineerSandboxError(error, work_started=True)
+    return output, result
 
 
 def patch_artifact(
@@ -623,6 +897,7 @@ def smoke_preflight(
 __all__ = [
     "EngineerSandboxError",
     "analyze_artifact",
+    "compile_java_artifact",
     "decompile_artifact",
     "patch_artifact",
     "preflight",

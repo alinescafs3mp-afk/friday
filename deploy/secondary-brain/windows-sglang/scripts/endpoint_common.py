@@ -23,7 +23,9 @@ from urllib.parse import urlsplit, urlunsplit
 MAX_RESPONSE_BYTES = 1_048_576
 EXPECTED_MODEL = "friday-secondary-gptoss20b"
 EXPECTED_HARDWARE_RUNTIME_RECEIPT_SHA256 = "0c1c9e6f54aa0004c3dfc89acd6904cfbb0f834d0988e971e34b9699b3d9031f"
-EXPECTED_SOURCE_MODEL_MANIFEST_SHA256 = "438df0a0b2f6b4164c2fd9d9ed309925abbc94ed8deb056b692d2ccad7887fd9"
+EXPECTED_SOURCE_MODEL_REPOSITORY = "huihui-ai/Huihui-gpt-oss-20b-mxfp4-abliterated-v2"
+EXPECTED_SOURCE_MODEL_REVISION = "79f64a520a4a0275f639c1a47d9a5614a8a54477"
+EXPECTED_SOURCE_MODEL_MANIFEST_SHA256 = "8dfc3a50d1a9407fbb07dde5f1b494157664c75cdd0e140ecb85f7d55732a296"
 EXPECTED_RUNTIME_IMAGE = (
     "lmsysorg/sglang@sha256:297f0bfea5e9f92680f8dd49ae18d048c9634f953be50b37f9bfe9509e947405"
 )
@@ -36,12 +38,8 @@ EXPECTED_RUNTIME_IMAGE_OCI_MANIFEST_DIGEST = (
 EXPECTED_RUNTIME_SOURCE_REVISION = "29481685462732237d80d86076d6563e1f658102"
 _PROFILE_ID = re.compile(r"[a-z0-9][a-z0-9._-]{2,79}\Z")
 _SHA256 = re.compile(r"[0-9a-f]{64}\Z")
-_CONTEXT_LADDER = frozenset(
-    {4096, 8192, 12288, 16384, 24576, 32768, 40960, 49152, 65536}
-)
-_MEMORY_FRACTIONS = frozenset(
-    {"0.86", "0.88", "0.90", "0.92", "0.94", "0.95", "0.96", "0.97"}
-)
+_CONTEXT_LADDER = frozenset({4096, 8192, 12288, 16384, 24576, 32768, 40960, 49152, 65536})
+_MEMORY_FRACTIONS = frozenset({"0.86", "0.88", "0.90", "0.92", "0.94", "0.95", "0.96", "0.97"})
 _REASONING_EFFORTS = frozenset({"low", "medium", "high"})
 _MODES = frozenset({"shadow", "assist"})
 _WORKLOADS = frozenset(
@@ -401,8 +399,8 @@ def configure_expected_model(profile_manifest: Path, ca_file: Path | None = None
         or _PROFILE_ID.fullmatch(profile_id) is None
         or value.get("engine_binding_sha256") != binding
         or value.get("hardware_runtime_receipt_sha256") != EXPECTED_HARDWARE_RUNTIME_RECEIPT_SHA256
-        or value.get("source_model_repository") != "openai/gpt-oss-20b"
-        or value.get("source_model_revision") != "6cee5e81ee83917806bbde320786a8fb61efebee"
+        or value.get("source_model_repository") != EXPECTED_SOURCE_MODEL_REPOSITORY
+        or value.get("source_model_revision") != EXPECTED_SOURCE_MODEL_REVISION
         or value.get("source_model_manifest_sha256") != EXPECTED_SOURCE_MODEL_MANIFEST_SHA256
         or value.get("runtime_image") != EXPECTED_RUNTIME_IMAGE
         or value.get("runtime_image_config_digest") != EXPECTED_RUNTIME_IMAGE_CONFIG_DIGEST
@@ -688,9 +686,7 @@ def runtime_process_epoch(
         timeout_sec=timeout_sec,
         ca_file=ca_file,
     )
-    if first_body != second_body or re.fullmatch(
-        r"[1-9][0-9]*(?:\.[0-9]+)?", first_body
-    ) is None:
+    if first_body != second_body or re.fullmatch(r"[1-9][0-9]*(?:\.[0-9]+)?", first_body) is None:
         raise EndpointError("runtime process epoch is missing or ambiguous")
     try:
         value = Decimal(first_body)

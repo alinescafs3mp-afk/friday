@@ -227,7 +227,7 @@ networks:
 
 volumes:
   model-snapshot:
-    name: ${FRIDAY_SECONDARY_MODEL_VOLUME:?sealed official source model volume is required}
+    name: ${FRIDAY_SECONDARY_MODEL_VOLUME:?sealed source model volume is required}
     external: true
   runtime-cache:
     name: friday-secondary-sglang-cache

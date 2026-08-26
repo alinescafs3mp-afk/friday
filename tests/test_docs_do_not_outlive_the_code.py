@@ -99,7 +99,7 @@ def test_secondary_runbook_is_bound_to_the_only_accepted_finalist():
     )
 
     (profile,) = ACCEPTED_SECONDARY_RUNTIME_PROFILES.values()
-    assert PROVISIONAL_SHADOW_SECONDARY_RUNTIME_PROFILES == {}
+    assert set(ACCEPTED_SECONDARY_RUNTIME_PROFILES).isdisjoint(PROVISIONAL_SHADOW_SECONDARY_RUNTIME_PROFILES)
     section = OPERATIONS.split("### Optional GPT-OSS secondary brain", 1)[1].split("## 2.", 1)[0]
 
     exact_lines = {

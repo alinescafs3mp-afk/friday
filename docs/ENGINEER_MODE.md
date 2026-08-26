@@ -52,6 +52,15 @@ address while retaining the logical hostname for HTTP and TLS. Every report
 states whether active probes were sent. Engineer v1 does not generate or send
 exploit payloads, shells or automatic exploit chains.
 
+A direct light-exposure request for one exact private host, or an immediate
+deictic follow-up to its authenticated successful host scan, uses a hidden
+code-owned profile: pure TCP reachability over the fixed bounded port set,
+followed only for observed open ports by the shared nmap
+`-sT -sV --version-light` adapter. It reports reachable surfaces and service
+classes, never infers a CVE from a banner, and labels incomplete TCP or nmap
+coverage as partial. The follow-up receipt stores no address or remote content
+and is displaced by an unrelated turn.
+
 When Host Capability Plane is enabled, its `nmap` action reuses this release's
 same target normalization, fixed `/usr/bin/nmap` argv builder, version probe,
 bounded XML parser, evidence and coverage contract. The two entry points do not
@@ -75,6 +84,89 @@ rewrite the source Raw object. Runtime starts at most one patch per turn,
 reserves its full declared deadline before entry, and persistence rejects a
 generated-file batch whose cumulative decoded bytes exceed the configured
 upload limit.
+
+### Bounded Java 21 compilation
+
+The only source compilation admitted by this contract is one exact, owned,
+UTF-8 Java source file into one deterministic library JAR. The authenticated
+current human message must directly request compilation and identify exactly
+one current Raw file whose safe ASCII basename ends in `.java`; an explicitly
+named source may select one exact match among separately authorized siblings.
+Source text, upload metadata, conversation history and model output cannot
+create that authority. Runtime rechecks the owner's `engineer.artifact.build`
+and `files.read` capabilities immediately before the hidden compiler tool enters.
+
+Compilation uses only the fixed owner-local Temurin JDK `21.0.12.1+1` tree at
+`/home/jericho/.jericho/tools/jdk-21.0.12.1+1`. The complete tree identity,
+owner, modes, links and launch-chain files are verified before the read-only
+bind and again inside the sandbox. PATH discovery, a system JDK, caller-supplied
+executables, flags, class paths, module paths, annotation processors, compiler
+plugins, dependency resolution and build scripts are not accepted. The worker
+invokes a code-owned `javac --release 21` argument vector with annotation
+processing and implicit source discovery disabled. It never invokes `java`,
+loads a compiled class or executes the submitted source or generated JAR.
+
+The compile profile accepts at most 1 MiB of source and emits at most 256 class
+files, 8 MiB of class bytes and a 16 MiB JAR. Class paths, names, magic and Java
+21 versions are checked before packaging. Packaging is code-owned and
+deterministic: entries are sorted, timestamps and modes are fixed, compression
+is not environment-dependent, and no manifest or `Main-Class` is added. The
+result explicitly records `sample_executed=false`, `network=none`, the source
+and output SHA-256 digests, the pinned toolchain identity, structural checks,
+and that runtime validation was not performed. Compiler diagnostics, source
+text, paths and parser-controlled stderr never cross the worker boundary.
+
+Java compilation shares one non-blocking physical heavy-work lock with Ghidra,
+has fixed CPU, memory, file, descriptor and wall-time ceilings, and is limited
+to one entered compilation per turn after its complete deadline has been
+reserved. Its enclosing backend cgroup must additionally prove at most 512
+tasks, a finite 10--16 GiB aggregate memory ceiling and zero swap; the canonical
+native backend unit sets 512 tasks, 12 GiB and `MemorySwapMax=0`. Startup checks
+both the effective systemd properties and the live cgroup-v2 `memory.swap.max`
+leaf, while every compilation repeats the live no-swap check. The host-backed
+worker directory is never mounted RW: only the exact request and input files
+are read-only mounts, and only pre-created result and output carriers are
+writable under the per-file limit. A private 32 MiB compiler tmpfs holds all
+scratch state, and the validated 256-file/8 MiB class inventory plus 16 MiB JAR
+cap bounds the output that may cross the worker. A busy or preflight refusal
+records that work did not start;
+timeout or failure after the fixed-argv sandbox worker is spawned records that
+it did. Native service startup rejects an effective cgroup which differs from
+the declared aggregate limits. This compiler profile is certified only for the
+native production contour: the optional Docker Engineer profile neither ships
+the pinned owner-local JDK nor certifies compiler resource admission. The
+source Raw object remains byte-for-byte unchanged. A successful JAR, its bounded accepted-outcome receipt
+and the assistant message are committed through the existing person-owned
+generated-file path in one transaction, after final source identity and
+`files.read` reauthorization. Failure or revocation publishes neither JAR nor a
+success receipt. Friday never calls the artifact tested merely because it
+compiled; running and runtime testing remain with the operator elsewhere.
+
+### Owner-confirmed installed-program execution
+
+`FRIDAY_ENGINEER_COMMAND_ENABLED=1` adds three owner-only capabilities to an
+already enabled Engineer installation: submit one exact argv, inspect its
+durable job, and request cancellation. The start tool is advertised only for an
+authenticated Telegram update. It stores no model-supplied authority fields;
+runtime injects the exact conversation/source row, and a distinct Telegram
+callback must approve the exact rendered argv before a process can start.
+
+Resolution uses a code-owned service-account PATH and admits only an executable
+whose owner, mode, inode and bytes can be held and sealed through spawn. Every
+job runs under a bounded transient user-systemd cgroup and fresh bubblewrap
+namespace with finite tasks, memory, CPU, time, stdout/stderr and output-tree
+budgets. It inherits no credentials or ambient environment and receives no
+host data, network, home, Docker socket or writable host path. There is no
+implicit or privileged host shell. If the owner explicitly asks for a shell,
+its executable and arguments are shown in the same approval and it remains
+inside this sandbox.
+
+The process starts in `/job`, may use `/job/workspace` and `/job/tmp`, and may
+place deliverables only below `/job/output`. Terminal status exposes bounded,
+sanitized stdout/stderr and a hashed generated-file inventory. Cancellation,
+timeout, crash reconciliation and leader exit apply to the complete cgroup;
+an unproved tree or receipt becomes `unknown`, never success. This slice does
+not yet publish the output inventory as a Telegram archive.
 
 The optional secondary brain may refine a secret-stripped structured finding
 list only when its ordinary admission policy allows that extraction. It receives
@@ -114,7 +206,14 @@ of the following without skips or local substitutions:
 2. the engineer production, security, organ and audit contract tests in
    `tests/test_engineer_mode_production.py`,
    `tests/test_engineer_security_contracts.py`, `tests/test_organs_engineer.py`
-   and `tests/test_engineer_audit_projection.py`;
+   and `tests/test_engineer_audit_projection.py`; a candidate which includes
+   Java compilation additionally passes `tests/test_engineer_compiler.py`,
+   `tests/test_engineer_compile_tool.py` and
+   `tests/test_engineer_compile_outcome.py`; a candidate which includes the
+   installed-program runner additionally passes
+   `tests/test_engineer_command_kernel.py`,
+   `tests/test_engineer_command_p0.py` and
+   `tests/test_engineer_command_integration.py`;
 3. the canonical full release gate: `python tools/quality_gate.py`.
 
 Keep `FRIDAY_ENGINEER_MODE_ENABLED=0` during rollout preparation. Enable it only
@@ -124,8 +223,11 @@ and a benign owner-controlled fixture completes with an accurate receipt.
 
 ## Explicit non-goals for v1
 
-The shipped mode has no generic code execution, autonomous target discovery,
-multi-host assessment, exploit validation worker, persistence on a target,
-credential use, or background scanning. Those ideas require a separate design,
-threat review and acceptance contract; their presence in a historical brief is
-not implementation or authorization.
+The installed-program runner is not a host-equivalent console: it cannot read
+host data, inherit credentials, reach the network or Docker, or escape its
+bounded workspace. The mode also has no autonomous target discovery, multi-host assessment,
+exploit validation worker, persistence on a target, credential use, background
+scanning, arbitrary dependency builds, native compilation, Android rebuilds or
+artifact signing. Those ideas require a separate design, threat review and
+acceptance contract; their presence in a historical brief is not implementation
+or authorization.

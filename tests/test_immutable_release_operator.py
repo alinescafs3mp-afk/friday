@@ -393,11 +393,15 @@ def test_unit_security_dropins_disable_implicit_userns_and_isolate_tmpdir(
         security = dropins[port.config.unit_dir / f"{unit}.d/security.conf"]
         runtime_name = operator._unit_runtime_directory_name(unit)  # noqa: SLF001
         tmp_directory = Path("/run/user") / str(os.geteuid()) / runtime_name
+        aggregate_limits = (
+            "TasksMax=512\nMemoryMax=12G\nMemorySwapMax=0\n" if unit == port.config.backend_unit else ""
+        )
         assert (
             security
             == (
                 "[Service]\n"
                 "LimitCORE=0\n"
+                f"{aggregate_limits}"
                 "PrivateTmp=false\n"
                 "PrivateUsers=false\n"
                 f"RuntimeDirectory={runtime_name}\n"
@@ -412,7 +416,73 @@ def test_unit_security_dropins_disable_implicit_userns_and_isolate_tmpdir(
     assert observed[port.config.backend_unit] != observed[port.config.bridge_unit]
 
 
-@pytest.mark.parametrize("predecessor", ["private-tmp", "recovery", "current"])
+def test_backend_startup_requires_effective_aggregate_compiler_limits(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    port = _systemd_test_port(tmp_path)
+    cgroup_root = tmp_path / "cgroup"
+    backend_cgroup = cgroup_root / "user.slice" / "friday-backend.service"
+    backend_cgroup.mkdir(parents=True)
+    (backend_cgroup / "memory.swap.max").write_text("0\n", encoding="ascii")
+    monkeypatch.setattr(operator, "_CGROUP_ROOT", cgroup_root)
+    values = {
+        "--property=TasksMax": b"512\n",
+        "--property=MemoryMax": b"12884901888\n",
+        "--property=MemorySwapMax": b"0\n",
+        "--property=ControlGroup": b"/user.slice/friday-backend.service\n",
+    }
+
+    def systemctl(*arguments: str, check: bool = True) -> subprocess.CompletedProcess[bytes]:
+        del check
+        selected = next((values[item] for item in arguments if item in values), b"")
+        return subprocess.CompletedProcess(arguments, 0, selected, b"")
+
+    monkeypatch.setattr(port, "_systemctl", systemctl)
+    port._verify_backend_resource_limits()  # noqa: SLF001
+
+    values["--property=MemoryMax"] = b"infinity\n"
+    with pytest.raises(operator.ReleaseFailure, match="backend_resource_boundary_unavailable"):
+        port._verify_backend_resource_limits()  # noqa: SLF001
+
+    values["--property=MemoryMax"] = b"12884901888\n"
+    values["--property=MemorySwapMax"] = b"infinity\n"
+    with pytest.raises(operator.ReleaseFailure, match="backend_resource_boundary_unavailable"):
+        port._verify_backend_resource_limits()  # noqa: SLF001
+
+    values["--property=MemorySwapMax"] = b"0\n"
+    (backend_cgroup / "memory.swap.max").write_text("max\n", encoding="ascii")
+    with pytest.raises(operator.ReleaseFailure, match="backend_resource_boundary_unavailable"):
+        port._verify_backend_resource_limits()  # noqa: SLF001
+
+
+def test_backend_cgroup_swap_reader_rejects_traversal_and_symlink(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    cgroup_root = tmp_path / "cgroup"
+    cgroup_root.mkdir()
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "memory.swap.max").write_text("0\n", encoding="ascii")
+    (cgroup_root / "escape").symlink_to(outside, target_is_directory=True)
+    monkeypatch.setattr(operator, "_CGROUP_ROOT", cgroup_root)
+
+    assert (
+        operator.SystemdActivationPort._read_cgroup_v2_leaf(  # noqa: SLF001
+            b"/../outside", "memory.swap.max"
+        )
+        is None
+    )
+    assert (
+        operator.SystemdActivationPort._read_cgroup_v2_leaf(  # noqa: SLF001
+            b"/escape", "memory.swap.max"
+        )
+        is None
+    )
+
+
+@pytest.mark.parametrize("predecessor", ["private-tmp", "recovery", "pre-aggregate", "current"])
 def test_unit_surface_admits_only_known_security_predecessors(
     tmp_path: Path,
     predecessor: str,
@@ -437,6 +507,7 @@ def test_unit_surface_admits_only_known_security_predecessors(
         security = {
             "private-tmp": operator._LEGACY_PRIVATE_TMP_SECURITY,  # noqa: SLF001
             "recovery": operator._RECOVERY_PRIVATE_TMP_SECURITY,  # noqa: SLF001
+            "pre-aggregate": operator._pre_aggregate_unit_security_dropin(unit),  # noqa: SLF001
             "current": operator._unit_security_dropin(unit),  # noqa: SLF001
         }[predecessor]
         (dropin_directory / "security.conf").write_bytes(security)
@@ -1858,6 +1929,89 @@ def _engineer_mode_enabled_environment(predecessor: bytes) -> bytes:
             target += b"\n"
         target += b"".join(missing)
     return target
+
+
+def _engineer_command_enabled_environment(predecessor: bytes) -> bytes:
+    disabled = b"FRIDAY_ENGINEER_COMMAND_ENABLED=0\n"
+    enabled = b"FRIDAY_ENGINEER_COMMAND_ENABLED=1\n"
+    if disabled in predecessor:
+        assert predecessor.count(disabled) == 1
+        return predecessor.replace(disabled, enabled, 1)
+    return predecessor + (b"" if predecessor.endswith(b"\n") else b"\n") + enabled
+
+
+@pytest.mark.parametrize(
+    "predecessor",
+    [
+        b"FRIDAY_PROFILE=production\nFRIDAY_ENGINEER_MODE_ENABLED=1\n",
+        (
+            b"# preserve\r\n"
+            b"FRIDAY_ENGINEER_MODE_ENABLED=1\n"
+            b"FRIDAY_ENGINEER_COMMAND_ENABLED=0\n"
+            b"FRIDAY_SECONDARY_LLM_ENABLED=1\n"
+        ),
+    ],
+)
+def test_engineer_command_enable_accepts_only_the_exact_runner_switch(
+    predecessor: bytes,
+) -> None:
+    target = _engineer_command_enabled_environment(predecessor)
+    operator._validate_staged_environment_transition(  # noqa: SLF001
+        "engineer_command_enable",
+        predecessor,
+        target,
+    )
+    operator._validate_staged_environment_transition(  # noqa: SLF001
+        "engineer_command_enable",
+        None,
+        target,
+    )
+
+
+@pytest.mark.parametrize(
+    ("predecessor", "target", "failure"),
+    [
+        (
+            b"FRIDAY_ENGINEER_MODE_ENABLED=0\n",
+            b"FRIDAY_ENGINEER_MODE_ENABLED=0\nFRIDAY_ENGINEER_COMMAND_ENABLED=1\n",
+            "engineer_command_engineer_mode_not_enabled",
+        ),
+        (
+            b"FRIDAY_ENGINEER_MODE_ENABLED=1\nFRIDAY_ENGINEER_COMMAND_ENABLED=1\n",
+            b"FRIDAY_ENGINEER_MODE_ENABLED=1\nFRIDAY_ENGINEER_COMMAND_ENABLED=1\n",
+            "engineer_command_predecessor_not_disabled",
+        ),
+        (
+            b"FRIDAY_ENGINEER_MODE_ENABLED=1\n",
+            (
+                b"FRIDAY_ENGINEER_MODE_ENABLED=1\n"
+                b"FRIDAY_PROFILE=changed\n"
+                b"FRIDAY_ENGINEER_COMMAND_ENABLED=1\n"
+            ),
+            "engineer_command_unrelated_environment_changed",
+        ),
+        (
+            b"FRIDAY_ENGINEER_MODE_ENABLED=1\n",
+            (
+                b"FRIDAY_ENGINEER_MODE_ENABLED=1\n"
+                b"FRIDAY_ENGINEER_COMMAND_ENABLED=1\n"
+                b"FRIDAY_ENGINEER_COMMAND_ENABLED=1\n"
+            ),
+            "engineer_command_environment_invalid",
+        ),
+    ],
+)
+def test_engineer_command_enable_rejects_unsafe_environment_changes(
+    predecessor: bytes,
+    target: bytes,
+    failure: str,
+) -> None:
+    with pytest.raises(operator.ReleaseFailure, match=failure):
+        operator._validate_staged_environment_transition(  # noqa: SLF001
+            "engineer_command_enable",
+            predecessor,
+            target,
+        )
 
 
 @pytest.mark.parametrize(
@@ -7138,6 +7292,7 @@ def test_manager_units_are_exact_anchor_fragments_and_database_environment(
     extra_manager_dropin = ""
     security_properties = {
         "LimitCORE": b"0\n",
+        "MemorySwapMax": b"0\n",
         "PrivateTmp": b"no\n",
         "PrivateUsers": b"no\n",
         "RuntimeDirectoryMode": b"0700\n",
@@ -7225,6 +7380,7 @@ def test_manager_units_are_exact_anchor_fragments_and_database_environment(
         b"FRIDAY_DATABASE_MUST_EXIST=1",
     )
     for property_name, invalid in (
+        ("MemorySwapMax", b"infinity\n"),
         ("PrivateTmp", b"yes\n"),
         ("PrivateUsers", b"yes\n"),
         ("RuntimeDirectoryMode", b"0755\n"),
@@ -7886,7 +8042,7 @@ def test_unit_pair_crash_converges_without_exposing_mixed_runtime_roots(
                 encoding="utf-8",
             )
         (dropin_directory / "security.conf").write_bytes(
-            operator._RECOVERY_PRIVATE_TMP_SECURITY  # noqa: SLF001
+            operator._pre_aggregate_unit_security_dropin(name)  # noqa: SLF001
         )
         for dropin in dropin_directory.iterdir():
             dropin.chmod(0o644)
@@ -7942,7 +8098,7 @@ def test_unit_pair_crash_converges_without_exposing_mixed_runtime_roots(
                 "FRIDAY_DATABASE_MUST_EXIST=1 "
                 f"TMPDIR={operator._unit_runtime_tmp_directory(name)}\n"  # noqa: SLF001
             ).encode()
-        elif "--property=LimitCORE" in arguments:
+        elif "--property=LimitCORE" in arguments or "--property=MemorySwapMax" in arguments:
             stdout = b"0\n"
         elif "--property=PrivateTmp" in arguments or "--property=PrivateUsers" in arguments:
             stdout = b"no\n"

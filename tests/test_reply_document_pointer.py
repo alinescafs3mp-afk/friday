@@ -1919,6 +1919,161 @@ def test_deduplicated_current_upload_and_exact_telegram_reply_keep_the_fresh_fil
         )
 
 
+def test_deduplicated_current_telegram_java_compile_uses_fresh_alias_through_publication(
+    settings,
+    monkeypatch,
+) -> None:
+    from friday.organs.engineer import compiler
+    from friday.organs.engineer import tools as engineer_tools
+    from friday.server import create_app
+
+    scoped = replace(
+        settings,
+        engineer_mode_enabled=True,
+        verify_answers=False,
+        shared_archive=True,
+    )
+    app = create_app(scoped)
+    storage: Any = None
+    source = b"public class Main {}\n"
+    compile_filenames: list[str] = []
+
+    async def upload_ack(user_id, _message, **kwargs):  # noqa: ANN001
+        conversation_id = str(kwargs.get("conversation_id") or "")
+        if not conversation_id:
+            conversation_id = str(storage.create_conversation(user_id)["id"])
+        return {
+            "conversation_id": conversation_id,
+            "message": "accepted",
+            "context": {"interaction_mode": "dialogue"},
+        }
+
+    def static_hunt(_content, _filename, **_kwargs):  # noqa: ANN001
+        return {
+            "ok": True,
+            "sandbox": {"ok": True, "boundary": "bubblewrap", "network": "none"},
+        }
+
+    def compiled(content, filename, *, on_started, **_kwargs):  # noqa: ANN001
+        assert content == source
+        compile_filenames.append(filename)
+        on_started()
+        class_bytes = b"\xca\xfe\xba\xbe\x00\x00\x00\x41bounded-main"
+        jar = compiler._deterministic_jar([("Main.class", class_bytes)])  # noqa: SLF001
+        assert jar is not None
+        return jar, {
+            "ok": True,
+            "status": "completed",
+            "schema": compiler.SCHEMA,
+            "profile": compiler.PROFILE,
+            "tool_name": compiler.TOOL_NAME,
+            "tool_version": compiler.JDK_VERSION,
+            "jdk_version": compiler.JDK_VERSION,
+            "source_sha256": hashlib.sha256(source).hexdigest(),
+            "jar_sha256": hashlib.sha256(jar).hexdigest(),
+            "source_size_bytes": len(source),
+            "class_files": 1,
+            "class_bytes": len(class_bytes),
+            "jar_size_bytes": len(jar),
+            "java_release": 21,
+            "class_major_version": 65,
+            "archive": "jar",
+            "compression": "stored",
+            "signed": False,
+            "manifest": False,
+            "runtime_validation": "not_performed",
+            "sample_executed": False,
+            "network": "none",
+            "sandbox": {
+                "ok": True,
+                "boundary": "bubblewrap",
+                "network": "none",
+                "compile_pids_limit": 512,
+                "compile_memory_limit_bytes": 12 * 1024**3,
+            },
+        }
+
+    with TestClient(app) as client:
+        storage = app.state.storage
+        storage.ensure_user(LEGACY_OWNER_USER_ID, preset_key="owner")
+        storage.link_identity(
+            "telegram",
+            "1001",
+            LEGACY_OWNER_USER_ID,
+            linked_by=LEGACY_OWNER_USER_ID,
+        )
+        canonical_chat = app.state.agent.chat
+        monkeypatch.setattr(app.state.agent, "chat", upload_ack)
+        first = _bridge_call(
+            client,
+            scoped,
+            "POST",
+            "/api/chat",
+            {
+                "message": "",
+                "source_ref": "telegram-update:java-alias-old",
+                "telegram_message_id": 7801,
+                "telegram_user": {"id": 1001, "first_name": "Owner"},
+                "document": {
+                    "filename": "Legacy.java",
+                    "mime_type": "text/x-java-source",
+                    "media_kind": "document",
+                    "source_ref": "telegram-file:JAVA-ALIAS-OLD",
+                    "content_base64": base64.b64encode(source).decode("ascii"),
+                },
+            },
+            user="1001",
+        )
+        assert first.status_code == 200, first.text
+        monkeypatch.setattr(app.state.agent, "chat", canonical_chat)
+        monkeypatch.setattr(engineer_tools.local_binaries, "inventory", lambda: {})
+        monkeypatch.setattr(engineer_tools.hunt, "hunt_artifact", static_hunt)
+        monkeypatch.setattr(engineer_tools.sandbox, "compile_java_artifact", compiled)
+
+        result = _bridge_call(
+            client,
+            scoped,
+            "POST",
+            "/api/chat",
+            {
+                "message": "скомпилируй этот Java-файл",
+                "mode": "engineer",
+                "enable_tools": True,
+                "source_ref": "telegram-update:java-alias-current",
+                "telegram_message_id": 7802,
+                "telegram_user": {"id": 1001, "first_name": "Owner"},
+                "document": {
+                    "filename": "Main.java",
+                    "mime_type": "text/x-java-source",
+                    "media_kind": "document",
+                    "source_ref": "telegram-file:JAVA-ALIAS-CURRENT",
+                    "content_base64": base64.b64encode(source).decode("ascii"),
+                },
+            },
+            user="1001",
+        )
+
+        old_raw = storage.resolve_owned_file_source_ref(
+            LEGACY_OWNER_USER_ID,
+            LEGACY_OWNER_USER_ID,
+            "telegram-file:JAVA-ALIAS-OLD",
+        )
+        current_raw = storage.resolve_owned_file_source_ref(
+            LEGACY_OWNER_USER_ID,
+            LEGACY_OWNER_USER_ID,
+            "telegram-file:JAVA-ALIAS-CURRENT",
+        )
+        canonical = storage.get_raw_object(str(current_raw or ""), LEGACY_OWNER_USER_ID)
+
+    assert result.status_code == 200, result.text
+    assert old_raw and current_raw == old_raw
+    assert canonical is not None
+    assert json.loads(str(canonical["metadata_json"]))["filename"] == "Legacy.java"
+    assert compile_filenames == ["Main.java"]
+    assert result.json()["compile_authority_changed_before_publication"] is False
+    assert result.json()["files"][0]["filename"] == "Main.compiled.jar"
+
+
 @pytest.mark.anyio
 async def test_same_odt_text_with_changed_technical_metadata_keeps_second_reply_target(
     settings,

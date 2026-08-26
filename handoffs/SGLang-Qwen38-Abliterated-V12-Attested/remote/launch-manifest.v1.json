@@ -1,0 +1,40 @@
+{
+  "schema": "friday.sglang-launch-manifest.v1",
+  "profile_id": "qwen38-27b-nvfp4-sglang:dispatcher:v12.15",
+  "executable": ["sglang", "serve"],
+  "model_mount_path": "/models/qwen3.8-27b-abliterated-nvfp4-vtuber-43aa7ff5",
+  "served_model_alias": "dispatcher",
+  "arguments": [
+    "--model-path", "/models/qwen3.8-27b-abliterated-nvfp4-vtuber-43aa7ff5",
+    "--served-model-name", "dispatcher",
+    "--context-length", "40960",
+    "--mem-fraction-static", "0.90",
+    "--kv-cache-dtype", "fp8_e4m3",
+    "--max-running-requests", "6",
+    "--max-total-tokens", "40960",
+    "--chunked-prefill-size", "2048",
+    "--mamba-ssm-dtype", "bfloat16",
+    "--max-mamba-cache-size", "6",
+    "--disable-radix-cache",
+    "--cuda-graph-backend-decode", "full",
+    "--cuda-graph-max-bs-decode", "6",
+    "--cuda-graph-bs-decode", "1", "2", "3", "4", "5", "6",
+    "--cuda-graph-backend-prefill", "disabled",
+    "--attention-backend", "flashinfer",
+    "--reasoning-parser", "qwen3",
+    "--tool-call-parser", "qwen3_coder",
+    "--mm-feature-transport", "cpu",
+    "--enable-metrics",
+    "--limit-mm-data-per-request", "{\"image\":4,\"video\":0,\"audio\":0}",
+    "--host", "0.0.0.0",
+    "--port", "30000"
+  ],
+  "dynamic_argument": {
+    "flag": "--random-seed",
+    "minimum": 1,
+    "maximum": 1073741823
+  },
+  "expected_server_info": {
+    "weight_version": "default"
+  }
+}

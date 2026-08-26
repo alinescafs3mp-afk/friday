@@ -461,6 +461,8 @@ def test_spoofed_native_headers_never_enter_toolchain(
         encoding="utf-8",
     )
     artifact.write_bytes(payload)
+    result.write_bytes(b"")
+    output.write_bytes(b"")
     monkeypatch.setattr(
         decompiler,
         "sandbox_toolchain_preflight",
@@ -517,6 +519,8 @@ def test_worker_reports_unsupported_before_missing_toolchain(tmp_path) -> None:
         encoding="utf-8",
     )
     artifact.write_bytes(b"plain data")
+    result.write_bytes(b"")
+    output.write_bytes(b"")
 
     assert worker.run(request, artifact, result, output) == 0
     parsed = json.loads(result.read_text(encoding="utf-8"))

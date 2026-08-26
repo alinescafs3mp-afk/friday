@@ -13,8 +13,9 @@ from typing import Any
 
 SCHEMA = "friday.secondary-runtime-profile.v7"
 EXPECTED_MODEL_PATH = "/source/snapshot"
-EXPECTED_SOURCE_REVISION = "6cee5e81ee83917806bbde320786a8fb61efebee"
-EXPECTED_SOURCE_MANIFEST_SHA256 = "438df0a0b2f6b4164c2fd9d9ed309925abbc94ed8deb056b692d2ccad7887fd9"
+EXPECTED_SOURCE_REPOSITORY = "huihui-ai/Huihui-gpt-oss-20b-mxfp4-abliterated-v2"
+EXPECTED_SOURCE_REVISION = "79f64a520a4a0275f639c1a47d9a5614a8a54477"
+EXPECTED_SOURCE_MANIFEST_SHA256 = "8dfc3a50d1a9407fbb07dde5f1b494157664c75cdd0e140ecb85f7d55732a296"
 EXPECTED_HARDWARE_RUNTIME_RECEIPT_SHA256 = "0c1c9e6f54aa0004c3dfc89acd6904cfbb0f834d0988e971e34b9699b3d9031f"
 EXPECTED_RUNTIME_IMAGE = (
     "lmsysorg/sglang@sha256:297f0bfea5e9f92680f8dd49ae18d048c9634f953be50b37f9bfe9509e947405"
@@ -30,12 +31,8 @@ _SHA256_RE = re.compile(r"[0-9a-f]{64}")
 _IMAGE_ID_RE = re.compile(r"sha256:[0-9a-f]{64}")
 _REVISION_RE = re.compile(r"[0-9a-f]{40}")
 _PROFILE_ID_RE = re.compile(r"[a-z0-9][a-z0-9._-]{2,79}")
-_MEMORY_FRACTIONS = frozenset(
-    {"0.86", "0.88", "0.90", "0.92", "0.94", "0.95", "0.96", "0.97"}
-)
-_CONTEXT_LADDER = frozenset(
-    {4096, 8192, 12288, 16384, 24576, 32768, 40960, 49152, 65536}
-)
+_MEMORY_FRACTIONS = frozenset({"0.86", "0.88", "0.90", "0.92", "0.94", "0.95", "0.96", "0.97"})
+_CONTEXT_LADDER = frozenset({4096, 8192, 12288, 16384, 24576, 32768, 40960, 49152, 65536})
 _CHUNKED_PREFILL_GRID = frozenset({256, 512, 1024, 1536, 2048})
 _MODES = frozenset({"shadow", "assist"})
 _WORKLOADS = frozenset(
@@ -393,7 +390,7 @@ def load_launch_profile(
     if value["served_model_alias"] != expected_alias or value["model_path"] != EXPECTED_MODEL_PATH:
         raise ProfileContractError("profile model projection is invalid")
     if (
-        value["source_model_repository"] != "openai/gpt-oss-20b"
+        value["source_model_repository"] != EXPECTED_SOURCE_REPOSITORY
         or value["source_model_revision"] != EXPECTED_SOURCE_REVISION
     ):
         raise ProfileContractError("profile source identity is invalid")
@@ -474,9 +471,12 @@ def load_launch_profile(
         raise ProfileContractError("profile scheduler selection is invalid")
     if value["hybrid_swa_memory_enabled"] is not True:
         raise ProfileContractError("profile hybrid SWA memory selection is invalid")
-    if not isinstance(value["swa_full_tokens_ratio"], str) or value[
-        "swa_full_tokens_ratio"
-    ] not in {"0.25", "0.50", "0.80", "1.00"}:
+    if not isinstance(value["swa_full_tokens_ratio"], str) or value["swa_full_tokens_ratio"] not in {
+        "0.25",
+        "0.50",
+        "0.80",
+        "1.00",
+    }:
         raise ProfileContractError("profile SWA token ratio is invalid")
     context_tokens = _exact_int(value["context_tokens"], minimum=4096, maximum=65536)
     if context_tokens not in _CONTEXT_LADDER:
@@ -500,9 +500,7 @@ def load_launch_profile(
         "full",
     }:
         raise ProfileContractError("profile CUDA graph selection is invalid")
-    cuda_graph_max_bs_decode = _exact_int(
-        value["cuda_graph_max_bs_decode"], minimum=0, maximum=1
-    )
+    cuda_graph_max_bs_decode = _exact_int(value["cuda_graph_max_bs_decode"], minimum=0, maximum=1)
     cuda_graph_bs_value = value["cuda_graph_bs_decode"]
     if not isinstance(cuda_graph_bs_value, list) or any(
         isinstance(item, bool) or not isinstance(item, int) for item in cuda_graph_bs_value
@@ -510,10 +508,9 @@ def load_launch_profile(
         raise ProfileContractError("profile CUDA graph batch sizes are invalid")
     cuda_graph_bs_decode = tuple(cuda_graph_bs_value)
     expected_graph_shape = (0, ()) if cuda_graph_backend_decode == "disabled" else (1, (1,))
-    if (
-        (cuda_graph_max_bs_decode, cuda_graph_bs_decode) != expected_graph_shape
-        or value["cuda_graph_backend_prefill"] != "disabled"
-    ):
+    if (cuda_graph_max_bs_decode, cuda_graph_bs_decode) != expected_graph_shape or value[
+        "cuda_graph_backend_prefill"
+    ] != "disabled":
         raise ProfileContractError("profile CUDA graph selection is invalid")
     _closed_list(value["allowed_modes"], _MODES)
     _closed_list(value["allowed_workloads"], _WORKLOADS)

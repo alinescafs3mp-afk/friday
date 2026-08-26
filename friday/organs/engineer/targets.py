@@ -116,6 +116,97 @@ _NETWORK_SCAN_MECHANISM = re.compile(
     r"сканер\w*|сканирован\w*|скан\w*\s+порт\w*)\b",
     re.IGNORECASE,
 )
+_HOST_VULNERABILITY_CUE = re.compile(
+    r"\b(?:vulnerabilit(?:y|ies)|security\s+(?:weakness(?:es)?|exposure)|"
+    r"weakness(?:es)?|misconfigurations?|"
+    r"уязвимост\w*|слаб(?:ое\s+место|ые\s+места|ост)\w*|"
+    r"небезопасн\w*\s+(?:служб|сервис|настройк)\w*|опасн\w*\s+(?:служб|сервис)\w*)\b",
+    re.IGNORECASE,
+)
+_HOST_VULNERABILITY_FOLLOWUP = re.compile(
+    r"\A\s*(?:(?:hi|hello|hey|привет)[!,.;:\s]+)?"
+    r"(?:(?:and|so|then|now|а|и|ну|так|теперь|сейчас)\s+){0,2}"
+    r"(?:(?:please|pls|kindly|пожалуйста|прошу|скажи(?:те)?|покажи(?:те)?)\s*[,;:]?\s+)?"
+    r"(?:"
+    r"(?:what|which)\s+(?:known\s+)?(?:vulnerabilit(?:y|ies)|weakness(?:es)?)\s+"
+    r"(?:does\s+)?(?:it|that\s+host|the\s+host)(?:\s+have)?|"
+    r"does\s+(?:it|that\s+host|the\s+host)\s+have\s+(?:any\s+)?"
+    r"(?:vulnerabilit(?:y|ies)|weakness(?:es)?)|"
+    r"(?:check|scan|assess|inspect)\s+(?:it|that\s+host|the\s+host)\s+for\s+"
+    r"(?:vulnerabilit(?:y|ies)|weakness(?:es)?)|"
+    r"find\s+(?:vulnerabilit(?:y|ies)|weakness(?:es)?)\s+(?:on|in)\s+"
+    r"(?:it|that\s+host|the\s+host)|"
+    r"(?:какие|что\s+за)\s+(?:уязвимост\w*|слаб\w*\s+мест\w*)\s+"
+    r"(?:есть\s+)?(?:у\s+него|у\s+этого\s+хоста|на\s+н[её]м)|"
+    r"какие\s+(?:у\s+него|у\s+этого\s+хоста|на\s+н[её]м)\s+(?:есть\s+)?"
+    r"(?:уязвимост\w*|слаб\w*\s+мест\w*)|"
+    r"есть\s+ли\s+(?:у\s+него|у\s+этого\s+хоста|на\s+н[её]м)\s+"
+    r"(?:уязвимост\w*|слаб\w*\s+мест\w*)|"
+    r"(?:проверь(?:те)?|просканиру(?:й|йте)|оцени(?:те)?|исследу(?:й|йте))\s+"
+    r"(?:его|этот\s+хост)\s+на\s+(?:уязвимост\w*|слаб\w*\s+мест\w*)|"
+    r"найди(?:те)?\s+(?:у\s+него|на\s+н[её]м|у\s+этого\s+хоста)\s+"
+    r"(?:уязвимост\w*|слаб\w*\s+мест\w*)"
+    r")\b",
+    re.IGNORECASE,
+)
+_HOST_VULNERABILITY_QUESTION = re.compile(
+    r"\A\s*(?:(?:hi|hello|hey|привет)[!,.;:\s]+)?"
+    r"(?:(?:and|so|then|now|а|и|ну|так|теперь|сейчас)\s+){0,2}"
+    r"(?:(?:please|пожалуйста|скажи(?:те)?|покажи(?:те)?)\s*[,;:]?\s+)?(?:"
+    r"какие\s+(?:есть\s+)?(?:уязвимост\w*|слаб\w*\s+мест\w*)\s+(?:у|на)|"
+    r"что\s+(?:там\s+)?с\s+безопасност\w*|"
+    r"есть\s+ли\s+(?:уязвимост\w*|слаб\w*\s+мест\w*)\s+(?:у|на)|"
+    r"насколько\s+безопас\w*|"
+    r"what\s+(?:known\s+)?(?:vulnerabilit(?:y|ies)|weakness(?:es)?)\s+(?:does|do)|"
+    r"does\s+.+?\s+have\s+(?:any\s+)?(?:vulnerabilit(?:y|ies)|weakness(?:es)?)|"
+    r"how\s+secure\s+(?:is|are)|is\s+.+?\s+vulnerable|"
+    r"what\s+is\s+the\s+security\s+(?:state|posture)\s+of"
+    r")\b",
+    re.IGNORECASE,
+)
+_HOST_EFFECT_TARGET_TAIL = re.compile(
+    r"[\s,:—–-]*(?:(?:у|на)\s+)?"
+    r"(?:(?:the|this|that|этот|этого|данный|данного)\s+)?"
+    r"(?:(?:host|server|target|machine|address|ip|"
+    r"хост\w*|сервер\w*|узл\w*|адрес\w*)\s+)?",
+    re.IGNORECASE,
+)
+_HOST_VULNERABILITY_QUESTION_NEGATION = re.compile(
+    r"(?:\A|[.!?;]\s*)(?:мне\s+)?(?:"
+    r"не\s+(?:отвечай(?:те)?|надо\s+отвечать|нужно\s+отвечать|"
+    r"спрашиваю|интересн\w*|говори(?:те)?|рассказывай(?:те)?|показывай(?:те)?)|"
+    r"(?:no\s+need\s+to|do\s+not|don't|dont|never)\s+"
+    r"(?:answer|tell|explain|show|ask)|"
+    r"i(?:'m|\s+am)?\s+not\s+(?:asking|interested)"
+    r")\b",
+    re.IGNORECASE,
+)
+_NMAP_CAPABILITY_TRUTH = re.compile(
+    r"\A\s*(?:(?:hi|hello|hey|привет)[!,.;:\s]+)?(?:"
+    r"(?:у\s+тебя|у\s+вас)\s+(?:(?:же\s+)?(?:должен|должна|должно)\s+быть\s+)?"
+    r"(?:есть\s+)?(?:доступ|доступа|возможност\w*)\s+(?:к\s+)?nmap|"
+    r"(?:есть|имеется)\s+ли\s+(?:у\s+тебя|у\s+вас)\s+(?:доступ|возможност\w*)\s+(?:к\s+)?nmap|"
+    r"(?:ты|вы)\s+(?:же\s+)?(?:умеешь|умеете|можешь|можете|способна|способен)\s+"
+    r"(?:использовать|запускать|запустить)\s+nmap|"
+    r"можешь\s+ли\s+ты\s+(?:использовать|запускать|запустить)\s+nmap|"
+    r"nmap\s+(?:тебе|вам)?\s*(?:доступен|доступна|установлен|работает)|"
+    r"(?:you\s+(?:should|must)\s+have|do\s+you\s+have|have\s+you\s+got)\s+"
+    r"(?:access\s+to\s+)?nmap|"
+    r"(?:can|could|would)\s+you\s+(?:use|run|launch)\s+nmap|"
+    r"are\s+you\s+able\s+to\s+(?:use|run|launch)\s+nmap|"
+    r"you\s+(?:can|are\s+able\s+to)\s+(?:use|run)\s+nmap|"
+    r"is\s+nmap\s+(?:available|installed|usable)|"
+    r"nmap\s+(?:же\s+)?установлен[^.!?\n]{0,80}почему\s+не\s+использу\w*|"
+    r"nmap\s+is\s+installed[^.!?\n]{0,80}why\s+(?:don't|do\s+not)\s+you\s+use\s+it"
+    r")\b",
+    re.IGNORECASE,
+)
+_NMAP_CAPABILITY_NEGATION = re.compile(
+    r"\b(?:нет|не|без|never|no|not|without|don't|dont|cannot|can't)\b"
+    r"[^.!?\n]{0,64}\bnmap\b|\bnmap\b[^.!?\n]{0,64}"
+    r"\b(?:недоступ\w*|не\s+установ\w*|not\s+available|not\s+installed|cannot|can't)\b",
+    re.IGNORECASE,
+)
 _NETWORK_REPORT_EXPORT_VERB = (
     r"(?:пришл(?:и|ите)|отправ(?:ь|ьте)|прилож(?:и|ите)|прикреп(?:и|ите)|"
     r"сохран(?:и|ите)|выгруз(?:и|ите)|экспортируй(?:те)?|сформируй(?:те)?|"
@@ -170,18 +261,21 @@ _NETWORK_REPORT_EXPORT_META = re.compile(
     re.IGNORECASE,
 )
 _REQUEST_CODE_TEXT = re.compile(
-    r"```[\s\S]*?(?:```|\Z)|~~~[\s\S]*?(?:~~~|\Z)|`[^`\r\n]*(?:`|$)",
-    re.MULTILINE,
+    r"(?P<request_ticks>`+)[\s\S]*?(?:(?P=request_ticks)|\Z)|"
+    r"(?P<request_tildes>~{3,})[\s\S]*?(?:(?P=request_tildes)|\Z)"
 )
 _QUOTED_REQUEST_TEXT = re.compile(
-    r"«[^»]*»|“[^”]*”|„[^“]*“|\"[^\"\r\n]*\"|'[^'\r\n]*'",
+    r"«[\s\S]*?(?:»|\Z)|“[\s\S]*?(?:”|\Z)|„[\s\S]*?(?:“|\Z)|"
+    r"‘[\s\S]*?(?:’|\Z)|‚[\s\S]*?(?:‘|\Z)|‹[\s\S]*?(?:›|\Z)|"
+    r"「[\s\S]*?(?:」|\Z)|『[\s\S]*?(?:』|\Z)|"
+    r"(?<!\w)(?P<request_quote>[\"'])[\s\S]*?(?:(?P=request_quote)|\Z)",
 )
-_UNTERMINATED_REQUEST_QUOTE = re.compile(r"(?m)[«“„\"][^\r\n]*$")
-_REQUEST_BLOCKQUOTE = re.compile(r"(?m)^[ \t]*>[^\r\n]*$")
+_REQUEST_BLOCKQUOTE_START = re.compile(r"^[ \t]{0,3}>")
+_REQUEST_INDENTED_CODE = re.compile(r"(?: {4}| {0,3}\t)")
 _REQUEST_UNIT_BOUNDARY = re.compile(r"(?:[!?;]+(?:\s+|$)|\.(?:\s+|$)|\n+)")
 _REQUEST_SOFT_BOUNDARY = re.compile(r"(?:,\s+|\s+[—–-]\s+)")
 _REPORTED_REQUEST_CUE = re.compile(
-    r"\b(?:сказа\w*|говор\w*|написа\w*|указа\w*|попрос\w*|просил\w*|велел\w*|"
+    r"\b(?:сказа\w*|говор\w*|написа\w*|указа\w*|спрос\w*|попрос\w*|просил\w*|велел\w*|"
     r"предлож\w*|посовет\w*|требу\w*|цитир\w*|цитат\w*|повтор\w*|"
     r"перевед\w*|означа\w*|said|says?|wrote|told|asked|ordered|"
     r"suggested|recommended|required|quote\w*|repeat\w*|translat\w*|means?)\b",
@@ -204,6 +298,14 @@ _TRAILING_REQUEST_CANCEL = re.compile(
     r"\b(?:отмена|отмени(?:те)?|передумал(?:а)?)\b|"
     r"\b(?:do\s+not|don't|dont|never)\s+(?:do|scan|run|execute)\b|"
     r"\b(?:cancel(?:\s+(?:it|that))?|never\s+mind)\b)",
+    re.IGNORECASE,
+)
+_LEADING_REQUEST_CANCEL = re.compile(
+    r"\b(?:"
+    r"отмена|отбой|стоп|я\s+передумал(?:а)?|не\s+(?:надо|нужно)|"
+    r"cancel(?:\s+(?:it|that))?|never\s+mind|stop|no\s+need|"
+    r"do\s+not|don't|dont"
+    r")\b",
     re.IGNORECASE,
 )
 _TRAILING_REQUEST_ATTRIBUTION = re.compile(
@@ -307,6 +409,321 @@ _ARTIFACT_DECOMPILE_META = re.compile(
 )
 _ARTIFACT_DECOMPILE_REPORTED = re.compile(
     r"\b(?:сообщ\w*|ответ\w*|пересказ\w*|states?|reports?|reported|replied)\b",
+    re.IGNORECASE,
+)
+_ARTIFACT_COMPILE_FILENAME = r"(?<![\w./\\-])[A-Za-z_][A-Za-z0-9_]{0,119}\.java(?![\w./\\-])"
+_ARTIFACT_COMPILE_PROFILE = r"(?<![\w-])java21_single_source_library_jar_v1(?![\w-])"
+_ARTIFACT_COMPILE_EN_SOURCE = (
+    r"(?:"
+    r"(?:(?:this|that|the|an?|attached|current)\s+){0,2}"
+    r"(?:java(?:[- ]21)?\s+(?:source|source\s+file|file)|source\s+file\s+in\s+java)|"
+    r"(?:(?:this|that|the\s+(?:attached|current)|attached|current)\s+)"
+    r"(?:source(?:\s+file)?|file)|"
+    r"(?:it|this|that)(?=\s*(?:[.!?…]*\Z|,?\s+(?:and|then)\b))"
+    r")"
+)
+_ARTIFACT_COMPILE_RU_SOURCE = (
+    r"(?:"
+    r"(?:(?:этот|эту|данн\w*|приложенн\w*|текущ\w*)\s+){0,2}"
+    r"(?:java(?:[- ]21)?[- ]файл\w*|java(?:[- ]21)?\s+исходник\w*|"
+    r"исходник\w*\s+java(?:[- ]21)?)|"
+    r"(?:этот|эту|данн\w*|приложенн\w*|текущ\w*)\s+"
+    r"(?:файл\w*|исходник\w*)|"
+    r"это(?=\s*(?:[.!?…]*\Z|,?\s+(?:и|а\s+затем)\b))"
+    r")"
+)
+_ARTIFACT_COMPILE_EN_NAMED = (
+    rf"(?:(?:(?:this|that|the|an?|attached|current)\s+){{0,2}}"
+    rf"(?:file\s+)?{_ARTIFACT_COMPILE_FILENAME}|"
+    rf"(?:(?:(?:using|with)\s+)?(?:the\s+)?profile\s+)?{_ARTIFACT_COMPILE_PROFILE})"
+)
+_ARTIFACT_COMPILE_RU_NAMED = (
+    rf"(?:(?:(?:этот|эту|данн\w*|приложенн\w*|текущ\w*)\s+){{0,2}}"
+    rf"(?:файл\w*\s+)?{_ARTIFACT_COMPILE_FILENAME}|"
+    rf"(?:(?:(?:по|с)\s+)?профил\w*\s+)?{_ARTIFACT_COMPILE_PROFILE})"
+)
+_ARTIFACT_COMPILE_EN_OUTPUT = (
+    r"(?:(?:the|an?)\s+)?(?:(?:compiled|resulting)\s+)?"
+    r"(?:jar|binary|build\s+artifact)\b"
+    r"(?:\s*/\s*(?:jar|binary|build\s+artifact)\b)?"
+)
+_ARTIFACT_COMPILE_RU_OUTPUT = (
+    r"(?:(?:готов\w*|собранн\w*|скомпилированн\w*)\s+)?"
+    r"(?:jar[- ]файл\w*|jar\b|бинарник\w*|бинарн\w*\s+артефакт\w*)"
+    r"(?:\s*/\s*(?:jar[- ]файл\w*|jar\b|бинарник\w*|бинарн\w*\s+артефакт\w*))?"
+)
+_ARTIFACT_COMPILE_EN_DELIVERY = (
+    rf"(?:send|attach|upload|deliver|provide|return)\s+(?:me\s+)?"
+    rf"{_ARTIFACT_COMPILE_EN_OUTPUT}"
+    rf"(?:\s+to\s+me)?"
+)
+_ARTIFACT_COMPILE_RU_DELIVERY = (
+    rf"(?:пришли(?:те)?|отправь(?:те)?|приложи(?:те)?|выгрузи(?:те)?|"
+    rf"предоставь(?:те)?|верни(?:те)?|выдай(?:те)?)\s+"
+    rf"(?:мне\s+)?{_ARTIFACT_COMPILE_RU_OUTPUT}"
+)
+_ARTIFACT_COMPILE_DELIVERY_SUFFIX = (
+    rf"(?:\s*,?\s+(?:and|then)\s+(?:please\s+)?{_ARTIFACT_COMPILE_EN_DELIVERY}|"
+    rf"\s*,?\s+(?:и|а\s+затем)\s*,?\s*(?:пожалуйста\s*,?\s*)?"
+    rf"{_ARTIFACT_COMPILE_RU_DELIVERY})"
+)
+_ARTIFACT_COMPILE_REQUEST = re.compile(
+    r"\A\s*(?:(?:hi|hello|hey|friday|привет|пятница|здравствуй(?:те)?)[!,.;:\s]+)?"
+    r"(?:(?:and|so|then|now|finally|okay|ok|alright|а|и|ну|так|тогда|"
+    r"теперь|сейчас|наконец|ладно|хорошо)\s*[,;:]?\s+){0,2}"
+    r"(?:(?:please|pls|kindly|(?:can|could|would)\s+you"
+    r"(?:\s*[,;:]?\s+please)?|"
+    r"i\s+(?:want|need|ask|authorize)\s+you\s+to|"
+    r"пожалуйста|прошу|можешь|можете|сможешь|сможете|"
+    r"(?:не\s+)?мог(?:ла|ли)?\s+бы(?:\s+(?:ты|вы))?|"
+    r"нужно|надо|хочу|разрешаю)\s*[,;:]?\s+)?"
+    r"(?:"
+    r"(?:compile|build)\s+(?:"
+    rf"{_ARTIFACT_COMPILE_EN_SOURCE}|{_ARTIFACT_COMPILE_EN_NAMED}"
+    r")"
+    r"(?:\s+(?:into|as)\s+(?:an?\s+)?jar)?|"
+    rf"(?:compile|build)\s+(?:and|then)\s+{_ARTIFACT_COMPILE_EN_DELIVERY}|"
+    r"(?:скомпилируй(?:те)?|компилируй(?:те)?|собери(?:те)?|"
+    r"скомпилировать|компилировать|собрать)\s+(?:"
+    rf"{_ARTIFACT_COMPILE_RU_SOURCE}|{_ARTIFACT_COMPILE_RU_NAMED}"
+    r")"
+    r"(?:\s+в\s+jar)?|"
+    rf"(?:скомпилируй(?:те)?|компилируй(?:те)?|собери(?:те)?)\s+"
+    rf"(?:и|а\s+затем)\s+{_ARTIFACT_COMPILE_RU_DELIVERY}|"
+    r"(?:сборка|компиляция)\s+(?:"
+    rf"{_ARTIFACT_COMPILE_RU_SOURCE}|{_ARTIFACT_COMPILE_RU_NAMED}"
+    r")(?:\s+в\s+jar)?|"
+    r"(?:выполни(?:те)?|сделай(?:те)?|запусти(?:те)?|проведи(?:те)?)\s+"
+    r"(?:сборку|компиляцию)\s+(?:"
+    rf"{_ARTIFACT_COMPILE_RU_SOURCE}|{_ARTIFACT_COMPILE_RU_NAMED}"
+    r")(?:\s+в\s+jar)?"
+    r")"
+    rf"(?:{_ARTIFACT_COMPILE_DELIVERY_SUFFIX})?",
+    re.IGNORECASE,
+)
+_ARTIFACT_COMPILE_NEGATION = re.compile(
+    r"(?:\b(?:do\s+not|don't|dont|never|without)\b[^.!?\n]{0,48}\b"
+    r"(?:compil|build)\w*\b|"
+    r"\b(?:не|никогда|без)\b[^.!?\n]{0,48}\b"
+    r"(?:компилир|скомпилир|собир|собер|сборк|компиляц)\w*\b)",
+    re.IGNORECASE,
+)
+_ARTIFACT_COMPILE_TARGET_EXCLUSION = re.compile(
+    rf"(?:"
+    rf"\b(?:but\s+)?not\s+(?:(?:this|that|the\s+(?:attached|current))\s+"
+    rf"(?:java\s+)?(?:file|source)|this|that|it|the\s+(?:attached|current)\s+one|"
+    rf"{_ARTIFACT_COMPILE_FILENAME})\b|"
+    rf"\b(?:except|exclude|excluding)\s+"
+    rf"(?:this|that|it|the\s+(?:attached|current)\s+one|"
+    rf"{_ARTIFACT_COMPILE_FILENAME})\b|"
+    rf"\b(?:но\s+)?(?:только\s+)?не\s+(?:(?:этот|эту|данн\w*|текущ\w*|"
+    rf"приложенн\w*)\s+(?:java[- ]?)?(?:файл\w*|исходник\w*)|"
+    rf"это|этого|этот|эту|его|е[её]|"
+    rf"{_ARTIFACT_COMPILE_FILENAME})\b|"
+    rf"\b(?:кроме|исключая|исключи(?:те)?)\s+(?:этого|этот|эту|его|е[её]|"
+    rf"{_ARTIFACT_COMPILE_FILENAME})\b"
+    rf")",
+    re.IGNORECASE,
+)
+_ARTIFACT_COMPILE_MIXED_TARGETS = re.compile(
+    rf"(?:"
+    rf"\b(?:it|this|that|(?:this|that|the\s+(?:attached|current)|attached|current)\s+"
+    rf"(?:file|source))\b\s*(?:,|and|or|plus)\s*{_ARTIFACT_COMPILE_FILENAME}|"
+    rf"{_ARTIFACT_COMPILE_FILENAME}\s*(?:,|and|or|plus)\s*\b"
+    rf"(?:it|this|that|(?:this|that|the\s+(?:attached|current)|attached|current)\s+"
+    rf"(?:file|source))\b|"
+    rf"\b(?:это|(?:этот|эту|данн\w*|приложенн\w*|текущ\w*)\s+"
+    rf"(?:файл\w*|исходник\w*))\b\s*(?:,|и|или|плюс)\s*"
+    rf"{_ARTIFACT_COMPILE_FILENAME}|"
+    rf"{_ARTIFACT_COMPILE_FILENAME}\s*(?:,|и|или|плюс)\s*\b"
+    rf"(?:это|(?:этот|эту|данн\w*|приложенн\w*|текущ\w*)\s+"
+    rf"(?:файл\w*|исходник\w*))\b"
+    rf")",
+    re.IGNORECASE,
+)
+_ARTIFACT_COMPILE_DEFERRED_PREFIX = re.compile(
+    r"\b(?:after|before|once|upon|when(?:ever)?|provided|assuming|pending|"
+    r"tomorrow|later|next\s+(?:week|month)|at\s+\d{1,2}(?::\d{2})?|"
+    r"in\s+\d+\s+(?:seconds?|minutes?|hours?|days?)|with\s+(?:my\s+)?approval|"
+    r"после|до|когда|как\s+только|завтра|позже|потом|"
+    r"на\s+следующ\w*\s+(?:недел\w*|месяц\w*)|"
+    r"в\s+\d{1,2}(?::\d{2})?|через\s+\d+\s+(?:секунд\w*|минут\w*|час\w*|дн\w*)|"
+    r"при\s+условии|при\s+подтверждении|"
+    r"после\s+(?:подтверждения|одобрения|разрешения))\b",
+    re.IGNORECASE,
+)
+_ARTIFACT_COMPILE_TRAILING_CONDITION = re.compile(
+    r"\A\s*(?:[,;:()]|[—–-])?\s*(?:(?:but|and|но|и)\s+)?"
+    r"(?:(?:only|just|только)\s+)?(?:"
+    r"when(?:ever)?|after|before|once|upon|provided(?:\s+that)?|"
+    r"assuming(?:\s+that)?|subject\s+to|pending|until|as\s+soon\s+as|"
+    r"tomorrow|next\s+(?:week|month)|at\s+\d{1,2}(?::\d{2})?|"
+    r"in\s+\d+\s+(?:seconds?|minutes?|hours?|days?)|with\s+(?:my\s+)?approval|"
+    r"когда|после|до|как\s+только|завтра|"
+    r"на\s+следующ\w*\s+(?:недел\w*|месяц\w*)|"
+    r"в\s+\d{1,2}(?::\d{2})?|через\s+\d+\s+(?:секунд\w*|минут\w*|час\w*|дн\w*)|"
+    r"при\s+условии|при\s+подтверждении|"
+    r"с\s+(?:моего\s+)?(?:подтверждения|одобрения|разрешения)"
+    r")\b",
+    re.IGNORECASE,
+)
+_ARTIFACT_COMPILE_TRAILING_DENIAL = re.compile(
+    r"\A\s*(?:[,;:()]|[—–-])?\s*(?:(?:but|however|actually|но|однако)\s+)?(?:"
+    r"(?:is\s+not|isn't)\s+(?:needed|required|requested)|"
+    r"(?:this|that|it)\s+(?:is\s+not|isn't|was\s+not|wasn't)\s+"
+    r"(?:a\s+)?(?:request|command)|"
+    r"(?:not\s+now|not\s+this\s+time|no\s+need|later(?:\s+instead)?|hold\s+off|"
+    r"wait|skip\s+(?:it|that)|(?:i\s+)?changed\s+my\s+mind|scratch\s+that|"
+    r"forget\s+it|"
+    r"ignore\s+(?:it|that))|"
+    r"не\s+(?:нужн|требу|заказан|запрошен)\w*|"
+    r"это\s+не\s+(?:просьба|команда|запрос)|"
+    r"(?:не\s+сейчас|позже|потом|подожди(?:те)?|отложи(?:те)?|"
+    r"пропусти(?:те)?|игнорируй(?:те)?)"
+    r")\b",
+    re.IGNORECASE,
+)
+_ARTIFACT_COMPILE_DELIVERY_NEGATION = re.compile(
+    r"(?:"
+    r"\b(?:do\s+not|don't|dont|never)\b[^.!?\n]{0,48}\b"
+    r"(?:send|attach|upload|deliver)\w*\b[^.!?\n]{0,48}\b"
+    r"(?:jar|binary|build\s+artifact)\b|"
+    r"\bwithout\s+(?:sending|attaching|uploading|delivering)\b"
+    r"[^.!?\n]{0,48}\b(?:jar|binary|build\s+artifact)\b|"
+    r"\b(?:никогда\s+не\s+|не\s+)(?:присылай(?:те)?|пришли(?:те)?|"
+    r"отправляй(?:те)?|отправь(?:те)?|прикладывай(?:те)?|приложи(?:те)?|"
+    r"выгружай(?:те)?|выгрузи(?:те)?)\b"
+    r"[^.!?\n]{0,48}\b(?:jar|бинарник|бинарн\w*\s+артефакт)\w*\b|"
+    r"\bбез\s+(?:отправки|приложения|выгрузки|передачи)\b"
+    r"[^.!?\n]{0,48}\b(?:jar|бинарник|бинарн\w*\s+артефакт)\w*\b"
+    r")",
+    re.IGNORECASE,
+)
+_ARTIFACT_COMPILE_TRAILING_REPORT = re.compile(
+    r"\A\s*(?:[,;:()]|[—–-])?\s*(?:(?:the\s+)?build\s+)?(?:"
+    r"(?:(?:is|was|has|has\s+been)\s+)?(?:completed|finished|failed|successful)|"
+    r"(?:сборка\s+)?(?:уже\s+)?(?:(?:была|был|было)\s+)?"
+    r"(?:заверш|выполн|готов|успеш|провал|не\s+удал)\w*"
+    r")\b",
+    re.IGNORECASE,
+)
+_ARTIFACT_COMPILE_REPORTED_PREFIX = re.compile(
+    r"\b(?:requested|requesting|ordered|attributed|according\s+to|"
+    r"запросил\w*|поручил\w*|приписал\w*|по\s+словам)\b",
+    re.IGNORECASE,
+)
+_ARTIFACT_COMPILE_TRAILING_ATTRIBUTION = re.compile(
+    r"(?:\A|[,;.!?()]\s*|\s+[—–-]\s+)(?:"
+    r"according\s+to|per\s+(?:[A-Za-z0-9_@.-]+\s+){0,3}"
+    r"[A-Za-z0-9_@.-]+['’]s\s+(?:request|command)|(?:a\s+)?quote\s+from|"
+    r"(?:said|wrote|asked|requested|ordered)\b|"
+    r"(?:[A-Za-z0-9_@.'’-]+\s+){1,4}(?:said|wrote|asked|requested|ordered)\b|"
+    r"(?:[A-Za-z0-9_@.-]+\s+){0,3}[A-Za-z0-9_@.-]+['’]s\s+"
+    r"(?:request|command|quote)\b|"
+    r"(?:this|that)\s+(?:is|was)\b[^.!?\n]{0,40}\b(?:request|command|quote)\b|"
+    r"по\s+(?:словам|просьбе|команде|поручению)|"
+    r"(?:цитата|просьба|команда)\s+(?:от|из)|"
+    r"(?:сказал|сказала|сказали|написал|написала|написали|попросил|попросила|"
+    r"попросили|велел|велела|велели)\b|"
+    r"(?:[А-Яа-яЁёA-Za-z0-9_@.'’-]+\s+){1,4}"
+    r"(?:сказал|сказала|сказали|написал|написала|написали|попросил|попросила|"
+    r"попросили|велел|велела|велели)\b|"
+    r"(?:просьба|команда|цитата)\s+[А-Яа-яЁёA-Za-z0-9_@.'’-]+\b|"
+    r"это\s+(?:была|был|есть)?\s*(?:просьба|команда|цитата)\b"
+    r")",
+    re.IGNORECASE,
+)
+_ARTIFACT_COMPILE_CAPABILITY = re.compile(
+    r"(?:\A|[.!?]\s*)(?:"
+    r"(?:ты\s+)?(?:умеешь|способна|можешь\s+ли|можете\s+ли)\b[^.!?\n]{0,64}\b"
+    r"(?:компилир\w*|сборк\w*|собир\w*)[^.!?\n]{0,80}\?\s*$|"
+    r"(?:есть|имеется)\s+ли\b[^.!?\n]{0,64}\b(?:возможност|поддержк)\w*"
+    r"[^.!?\n]{0,80}\b(?:компиляц|сборк|компилир)\w*[^.!?\n]*\?\s*$|"
+    r"(?:are\s+you\s+able\s+to|do\s+you\s+know\s+how\s+to|do\s+you\s+support)\s+"
+    r"(?:compil\w*|build\w*)[^.!?\n]{0,100}\?\s*$"
+    r")",
+    re.IGNORECASE,
+)
+_ARTIFACT_COMPILE_REMAINDER_DENIAL = re.compile(
+    r"(?:"
+    r"\b(?:do\s+not|don't|dont|never\s+mind|forget\s+it|cancel(?:\s+(?:it|that))?|"
+    r"hold\s+off|skip\s+(?:it|that)|stop)\b|"
+    r"\b(?:i(?:'d|\s+would)\s+(?:rather|prefer)|better|let(?:'s|\s+us))\s+not\b|"
+    r"\b(?:could|would)\s+you\s+not\b|"
+    r"\bi\s+(?:do\s+not|don't|dont)\s+want\b|"
+    r"(?:\A|[,;.!?…—–-]\s*)(?:no|nope|nah|нет|неа)\b|"
+    r"\b(?:давай(?:те)?|лучше)\s+не\b|"
+    r"\b(?:я\s+)?(?:лучше\s+)?не\s+(?:буду|хочу)\b|"
+    r"\bне\s+(?:делай(?:те)?|компилируй(?:те)?|собирай(?:те)?|"
+    r"запускай(?:те)?|выполняй(?:те)?|надо|нужно)\b|"
+    r"\b(?:отмена|отбой|стоп|передумал(?:а)?)\b"
+    r")",
+    re.IGNORECASE,
+)
+_ARTIFACT_COMPILE_SAFE_DELIVERY_REMAINDER = re.compile(
+    r"\A\s*(?:"
+    r"(?:no|without)\s+(?:explanation|commentary|details?)"
+    r"(?:\s+(?:is|are))?\s*(?:needed|required)?\s*[,;:—–-]*\s*"
+    r"(?:just\s+)?(?:send|attach|upload|deliver)\s+(?:me\s+)?(?:the\s+)?"
+    r"(?:jar|binary|build\s+artifact)|"
+    r"(?:без\s+(?:объяснен\w*|комментар\w*|подробност\w*)|"
+    r"(?:объяснен\w*|комментар\w*|подробност\w*)\s+не\s+нужн\w*)"
+    r"\s*[,;:—–-]*\s*(?:просто\s+)?"
+    r"(?:пришли(?:те)?|отправь(?:те)?|приложи(?:те)?|выгрузи(?:те)?)\s+"
+    r"(?:мне\s+)?(?:jar|бинарник|артефакт)\w*"
+    r")\s*[.!?…]*\s*\Z",
+    re.IGNORECASE,
+)
+_ARTIFACT_COMPILE_SAFE_CONTEXT_REMAINDER = re.compile(
+    rf"\A\s*(?P<context_filename>{_ARTIFACT_COMPILE_FILENAME})\s+(?:"
+    r"is\s+(?:unrelated|only\s+(?:an?\s+)?(?:reference|example))|"
+    r"(?:лишь|только)\s+(?:ссылка|пример))\s*[.!?…]*\s*\Z",
+    re.IGNORECASE,
+)
+_ARTIFACT_COMPILE_SAFE_COMPANION_REMAINDER = re.compile(
+    r"\A\s*(?:(?:and|then|also|please|и|затем|также|пожалуйста|"
+    r"а\s+потом)\s+){0,3}(?:"
+    r"explain(?:\s+to\s+me)?\s+(?:"
+    r"what\s+(?:(?:this|the)\s+(?:code|source|class|method|compiler\s+error)|it)\s+"
+    r"(?:means?|does|is\s+doing)|"
+    r"how\s+(?:it|(?:the|this)\s+(?:code|source|class|method))\s+works?|"
+    r"(?:(?:the|this|any)\s+)?(?:code|source|class|method|"
+    r"compiler(?:\s+(?:error|diagnostics?))?|"
+    r"diagnostics?|build\s+result|jar|output|generated\s+artifact)"
+    r"(?:\s+to\s+me)?)|"
+    r"(?:review|summari[sz]e|describe|analy[sz]e|inspect|check)\s+"
+    r"(?:(?:the|this|any)\s+)?(?:code|source|class|method|"
+    r"compiler(?:\s+(?:error|diagnostics?))?|"
+    r"diagnostics?|build\s+result|jar|output|generated\s+artifact)"
+    r"(?:\s+for\s+(?:(?:security|correctness|quality)\s+)?"
+    r"(?:issues?|bugs?|defects?|vulnerabilit(?:y|ies)|problems?))?|"
+    r"(?:объясни(?:те)?|поясни(?:те)?)\s*[,;:]?\s+(?:мне\s*[,;:]?\s+)?(?:"
+    r"как\s+(?:(?:код|исходник|класс|метод)\s+работа\w*|"
+    r"работа\w*\s+(?:(?:этот|данный)\s+)?(?:код|исходник|класс|метод))|"
+    r"что\s+(?:означа\w*|дела\w*)\s+(?:код|исходник|класс|метод)|"
+    r"(?:этот|данный)?\s*(?:код|исходник|класс|метод|компилятор|"
+    r"диагностик\w*|ошибк\w*\s+компил\w*|результат\w*\s+сборк\w*|"
+    r"jar|выход\w*|артефакт\w*))|"
+    r"(?:проверь(?:те)?|разбери(?:те)?|проанализируй(?:те)?|опиши(?:те)?|"
+    r"суммаризируй(?:те)?|сделай(?:те)?\s+ревью)\s+"
+    r"(?:этот|данный)?\s*(?:код|исходник|класс|метод|компилятор|"
+    r"диагностик\w*|ошибк\w*\s+компил\w*|результат\w*\s+сборк\w*|"
+    r"jar|выход\w*|артефакт\w*)"
+    r"(?:\s+на\s+(?:уязвимост\w*|ошибк\w*|безопасност\w*))?"
+    r")\s*[.!?…]*\s*\Z",
+    re.IGNORECASE,
+)
+_ARTIFACT_COMPILE_SAFE_PRIOR_CONTEXT = re.compile(
+    rf"\A\s*(?:"
+    rf"i(?:'ve|\s+have)?\s+(?:attached|uploaded|provided)\s+(?:the\s+)?"
+    rf"(?:(?:java\s+)?(?:source|file)|{_ARTIFACT_COMPILE_FILENAME})|"
+    rf"(?:the\s+)?(?:(?:java\s+)?(?:source|file)|{_ARTIFACT_COMPILE_FILENAME})\s+"
+    rf"(?:(?:is|has\s+been)\s+)?(?:attached|uploaded|provided|ready)|"
+    rf"(?:я\s+)?(?:приложил(?:а)?|загрузил(?:а)?|отправил(?:а)?)\s+"
+    rf"(?:(?:java[- ]?)?(?:файл|исходник)\w*|{_ARTIFACT_COMPILE_FILENAME})|"
+    rf"(?:(?:java[- ]?)?(?:файл|исходник)\w*|{_ARTIFACT_COMPILE_FILENAME})\s+"
+    rf"(?:приложен|загружен|отправлен|готов)\w*"
+    r")\s*[.!?…]*\s*\Z",
     re.IGNORECASE,
 )
 _METADATA_V4 = ipaddress.ip_address("169.254.169.254")
@@ -532,21 +949,40 @@ def _normalize_request_text(speech: str) -> str:
     """Normalize words while retaining newline authority boundaries."""
 
     normalized = unicodedata.normalize("NFKC", str(speech or ""))
-    return "\n".join(" ".join(line.split()) for line in normalized.splitlines())
+    lines: list[str] = []
+    for line in normalized.splitlines():
+        compact = " ".join(line.split())
+        # CommonMark indented code is data.  Detect its original indentation
+        # before whitespace normalization can turn it into an imperative.
+        lines.append(" " * len(compact) if _REQUEST_INDENTED_CODE.match(line) else compact)
+    return "\n".join(lines)
 
 
 def _mask_request_data(text: str) -> str:
     """Blank quoted/code/reported Markdown payloads without moving offsets."""
 
     masked = text
-    for pattern in (
-        _REQUEST_CODE_TEXT,
-        _QUOTED_REQUEST_TEXT,
-        _UNTERMINATED_REQUEST_QUOTE,
-        _REQUEST_BLOCKQUOTE,
-    ):
+    for pattern in (_REQUEST_CODE_TEXT, _QUOTED_REQUEST_TEXT):
         masked = pattern.sub(lambda match: " " * len(match.group(0)), masked)
-    return masked
+    # CommonMark permits paragraph continuation lines in a block quote to omit
+    # the ``>`` marker.  Mask the complete contiguous paragraph; otherwise a
+    # quoted imperative on its second line could become current authority.
+    projected: list[str] = []
+    in_blockquote_paragraph = False
+    for line in masked.splitlines(keepends=True):
+        content = line.rstrip("\r\n")
+        ending = line[len(content) :]
+        if not content.strip():
+            in_blockquote_paragraph = False
+            projected.append(line)
+            continue
+        if _REQUEST_BLOCKQUOTE_START.match(content):
+            in_blockquote_paragraph = True
+        if in_blockquote_paragraph:
+            projected.append((" " * len(content)) + ending)
+        else:
+            projected.append(line)
+    return "".join(projected)
 
 
 def _request_projection(speech: str) -> tuple[str, str]:
@@ -640,6 +1076,22 @@ def _newline_payload_has_inert_governor(masked: str, unit_start: int) -> bool:
     )
 
 
+def _prior_request_unit_has_inert_governor(masked: str, unit_start: int) -> bool:
+    """Keep a prior reported/meta/negative sentence from minting a new effect."""
+
+    prior_units = tuple(_request_units(masked[:unit_start]))
+    if not prior_units or _EXPLICIT_REQUEST_CONTEXT_RESET.match(masked[unit_start:]):
+        return False
+    prior_start, prior_end = prior_units[-1]
+    prior = masked[prior_start:prior_end]
+    return bool(
+        _REPORTED_REQUEST_CUE.search(prior)
+        or _META_REQUEST_CUE.search(prior)
+        or _HOST_VULNERABILITY_QUESTION_NEGATION.search(prior)
+        or _LEADING_REQUEST_CANCEL.search(prior)
+    )
+
+
 def _direct_request_matches(speech: str, pattern: re.Pattern[str]) -> tuple[_DirectRequestSpan, ...]:
     """Locate direct action clauses and keep data/reported speech inert.
 
@@ -666,7 +1118,11 @@ def _direct_request_matches(speech: str, pattern: re.Pattern[str]) -> tuple[_Dir
             if request is None:
                 continue
             governing_prefix = masked[unit_start:start]
-            if _REPORTED_REQUEST_CUE.search(governing_prefix) or _META_REQUEST_CUE.search(governing_prefix):
+            if (
+                _REPORTED_REQUEST_CUE.search(governing_prefix)
+                or _META_REQUEST_CUE.search(governing_prefix)
+                or _LEADING_REQUEST_CANCEL.search(governing_prefix)
+            ):
                 continue
             request_start = start + request.start()
             request_end = start + request.end()
@@ -798,6 +1254,170 @@ def artifact_decompile_request_is_atomic(speech: str) -> bool:
     return False
 
 
+def _artifact_compile_remainder_is_safe(
+    remainder: str,
+    *,
+    requested_filename: str | None,
+) -> bool:
+    """Admit only closed, code-owned companion wording after javac authority."""
+
+    if re.fullmatch(r"[\s,;.!?…—–-]*", remainder):
+        return True
+    surface = remainder.strip(" \t\r\n,;:.!?…—–-")
+    if not surface or len(surface) > 240 or "\n" in surface:
+        return False
+    if _ARTIFACT_COMPILE_SAFE_DELIVERY_REMAINDER.fullmatch(surface):
+        return True
+    context = _ARTIFACT_COMPILE_SAFE_CONTEXT_REMAINDER.fullmatch(surface)
+    if context is not None:
+        context_filename = context.group("context_filename")
+        return requested_filename is not None and context_filename != requested_filename
+    if _ARTIFACT_COMPILE_REMAINDER_DENIAL.search(surface):
+        return False
+    # A second sentence is a distinct speech act.  It cannot silently inherit
+    # compile authority; the owner can issue it as a separate turn.
+    if re.search(r"[.!?…]\s+\S", surface):
+        return False
+    return bool(_ARTIFACT_COMPILE_SAFE_COMPANION_REMAINDER.fullmatch(surface))
+
+
+def _artifact_compile_context_filenames(
+    masked: str,
+    request: _DirectRequestSpan,
+) -> tuple[str, ...]:
+    """Return exact Java names from the admitted clause and safe prior context."""
+
+    spans = [masked[request.start : request.end]]
+    if request.unit_start != 0:
+        prior_units = tuple(_request_units(masked[: request.unit_start]))
+        if len(prior_units) == 1:
+            prior_start, prior_end = prior_units[0]
+            spans.append(masked[prior_start:prior_end])
+    distinct: dict[str, str] = {}
+    for span in spans:
+        for match in re.finditer(_ARTIFACT_COMPILE_FILENAME, span, re.IGNORECASE):
+            distinct.setdefault(match.group(0), match.group(0))
+    return tuple(distinct.values())
+
+
+def _accepted_artifact_compile_requests(
+    speech: str,
+) -> tuple[str, str, tuple[_DirectRequestSpan, ...]]:
+    """Return Java compile clauses which survive the complete intent gate."""
+
+    text, masked = _request_projection(speech)
+    negation_surface = _POLITE_NEGATIVE_MODAL.sub(
+        lambda match: " " * len(match.group(0)),
+        masked,
+    )
+    if (
+        not masked.strip()
+        or _ARTIFACT_COMPILE_NEGATION.search(negation_surface)
+        or _ARTIFACT_COMPILE_DELIVERY_NEGATION.search(masked)
+        or _ARTIFACT_COMPILE_TARGET_EXCLUSION.search(masked)
+        or _ARTIFACT_COMPILE_MIXED_TARGETS.search(masked)
+        or _ARTIFACT_COMPILE_CAPABILITY.search(masked)
+    ):
+        return text, masked, ()
+    direct_requests = _direct_request_matches(text, _ARTIFACT_COMPILE_REQUEST)
+    if len(direct_requests) != 1:
+        return text, masked, ()
+    accepted: list[_DirectRequestSpan] = []
+    for request in direct_requests:
+        # Compile authority must begin the current request unit.  Starting it
+        # after arbitrary prose (``Per Alice, ...`` / ``For reference, ...``)
+        # turns reported or meta text into an effect and is therefore inert.
+        if request.start != request.unit_start:
+            continue
+        prior_units = tuple(_request_units(masked[: request.unit_start]))
+        if request.unit_start != 0:
+            if len(prior_units) != 1:
+                continue
+            prior_start, prior_end = prior_units[0]
+            if not _ARTIFACT_COMPILE_SAFE_PRIOR_CONTEXT.fullmatch(masked[prior_start:prior_end]):
+                continue
+        unit = masked[request.unit_start : request.unit_end]
+        named_sources = {
+            match.group(0) for match in re.finditer(_ARTIFACT_COMPILE_FILENAME, unit, re.IGNORECASE)
+        }
+        if len(named_sources) > 1:
+            continue
+        context_filenames = _artifact_compile_context_filenames(masked, request)
+        if len(context_filenames) > 1:
+            continue
+        requested_filename = context_filenames[0] if context_filenames else None
+        trailing = masked[request.end : request.unit_end]
+        full_trailing = masked[request.end :]
+        if (
+            _ARTIFACT_COMPILE_TRAILING_CONDITION.match(trailing)
+            or _ARTIFACT_COMPILE_TRAILING_DENIAL.match(trailing)
+            or _ARTIFACT_COMPILE_TRAILING_REPORT.match(trailing)
+            or _ARTIFACT_COMPILE_TRAILING_ATTRIBUTION.search(full_trailing)
+            or not _artifact_compile_remainder_is_safe(
+                full_trailing,
+                requested_filename=requested_filename,
+            )
+        ):
+            continue
+        prefix = masked[request.unit_start : request.start]
+        if (
+            _META_REQUEST_CUE.search(prefix)
+            or _REPORTED_REQUEST_CUE.search(prefix)
+            or _ARTIFACT_COMPILE_REPORTED_PREFIX.search(prefix)
+            or _ARTIFACT_COMPILE_DEFERRED_PREFIX.search(prefix)
+        ):
+            continue
+        accepted.append(request)
+    return text, masked, tuple(accepted)
+
+
+def requests_artifact_compile(speech: str) -> bool:
+    """Admit one direct current-human request for the fixed Java profile."""
+
+    _text, _masked, requests = _accepted_artifact_compile_requests(speech)
+    return bool(requests)
+
+
+def requested_artifact_compile_filename(speech: str) -> str | None:
+    """Return the sole explicitly named Java source from admitted request context.
+
+    This is target data, not authority: callers must still bind it to one
+    current, owner-authorized Raw object.  Deictic/profile-only requests return
+    ``None`` and therefore retain the exact-single-current-file rule.
+    """
+
+    _text, masked, requests = _accepted_artifact_compile_requests(speech)
+    if not requests:
+        return None
+    distinct: dict[str, str] = {}
+    for request in requests:
+        for filename in _artifact_compile_context_filenames(masked, request):
+            distinct.setdefault(filename, filename)
+    return next(iter(distinct.values())) if len(distinct) == 1 else None
+
+
+def artifact_compile_request_is_atomic(speech: str) -> bool:
+    """Whether fixed-profile Java compilation is the sole current clause."""
+
+    _text, masked, requests = _accepted_artifact_compile_requests(speech)
+    if not requests:
+        return False
+    for request in requests:
+        trailing = masked[request.end : request.unit_end]
+        if (
+            _ARTIFACT_COMPILE_TRAILING_CONDITION.match(trailing)
+            or _ARTIFACT_COMPILE_TRAILING_DENIAL.match(trailing)
+            or _ARTIFACT_COMPILE_TRAILING_REPORT.match(trailing)
+            or _ARTIFACT_COMPILE_TRAILING_ATTRIBUTION.search(masked[request.end :])
+        ):
+            continue
+        if request.unit_start != 0:
+            continue
+        if re.fullmatch(r"[\s.!?…]*", masked[request.end :]):
+            return True
+    return False
+
+
 def requests_configured_network_assessment(speech: str) -> bool:
     """Admit the sole configured private network only from current speech.
 
@@ -843,6 +1463,101 @@ def requests_network_scan(speech: str) -> bool:
         and _NETWORK_SCAN_MECHANISM.search(masked[item.start : item.unit_end])
         for item in _direct_request_matches(text, _ACTIVE_ASSESSMENT_VERB)
     )
+
+
+def requests_host_vulnerability_assessment(speech: str) -> bool:
+    """Classify one explicit current-message vulnerability assessment.
+
+    This is intent only. It neither chooses a destination nor authorizes
+    packets; callers must separately pin exactly one policy-admitted host.
+    """
+
+    text, masked = _request_projection(speech)
+    targets = extract_targets(text)
+    target_ranges: list[tuple[int, int]] = []
+    for target in targets:
+        token = str(target.get("token") or "")
+        start = text.casefold().find(token.casefold())
+        if start >= 0:
+            target_ranges.append((start, start + len(token)))
+
+    def target_is_bound_to_request(item: _DirectRequestSpan) -> bool:
+        for target_start, target_end in target_ranges:
+            if target_start < item.unit_start or target_end > item.unit_end:
+                continue
+            if target_start < item.end:
+                if target_end <= item.end:
+                    return True
+                continue
+            tail = masked[item.end : target_start]
+            if len(tail) <= 64 and _HOST_EFFECT_TARGET_TAIL.fullmatch(tail) is not None:
+                return True
+        return False
+
+    active = requests_active_assessment(text) and any(
+        (not targets or target_is_bound_to_request(item))
+        and not _prior_request_unit_has_inert_governor(masked, item.unit_start)
+        and _HOST_VULNERABILITY_CUE.search(masked[item.unit_start : item.unit_end]) is not None
+        for item in _direct_request_matches(text, _ACTIVE_ASSESSMENT_VERB)
+    )
+    question = any(
+        bool(targets)
+        and target_is_bound_to_request(item)
+        and not _prior_request_unit_has_inert_governor(masked, item.unit_start)
+        and _HOST_VULNERABILITY_QUESTION_NEGATION.search(masked[item.unit_start : item.unit_end]) is None
+        and _PASSIVE_ASSESSMENT_OBJECT.search(masked[item.unit_start : item.unit_end]) is None
+        and _REPORTED_REQUEST_CUE.search(masked[item.unit_start : item.unit_end]) is None
+        for item in _direct_request_matches(text, _HOST_VULNERABILITY_QUESTION)
+    )
+    return active or question
+
+
+def requests_host_vulnerability_followup(speech: str) -> bool:
+    """Classify a direct deictic vulnerability continuation, without binding it."""
+
+    text, masked = _request_projection(speech)
+    if (
+        not masked.strip()
+        or extract_targets(text)
+        or _request_is_negated(masked)
+        or _HOST_VULNERABILITY_QUESTION_NEGATION.search(masked)
+    ):
+        return False
+    return bool(_direct_request_matches(text, _HOST_VULNERABILITY_FOLLOWUP))
+
+
+def requests_nmap_capability_truth(speech: str) -> bool:
+    """Recognise a direct question/assertion about Friday's nmap capability."""
+
+    text, masked = _request_projection(speech)
+    if (
+        not masked.strip()
+        or extract_targets(text)
+        or requests_active_assessment(text)
+        or (
+            _NMAP_CAPABILITY_NEGATION.search(masked)
+            and re.search(r"\b(?:почему\s+не\s+использу\w*|why\s+(?:don't|do\s+not)\s+you\s+use)\b", masked)
+            is None
+        )
+        or _META_REQUEST_CUE.search(masked)
+    ):
+        return False
+    for unit_start, unit_end in _request_units(masked):
+        unit = masked[unit_start:unit_end]
+        if (
+            _newline_payload_has_inert_governor(masked, unit_start)
+            or _prior_request_unit_has_inert_governor(masked, unit_start)
+            or _CONDITIONAL_REQUEST_CUE.search(unit)
+            or _REPORTED_REQUEST_CUE.search(unit)
+            or _META_REQUEST_CUE.search(unit)
+            or _HOST_VULNERABILITY_QUESTION_NEGATION.search(unit)
+            or _TRAILING_REQUEST_CANCEL.search(unit)
+            or _TRAILING_REQUEST_ATTRIBUTION.search(unit)
+        ):
+            continue
+        if _NMAP_CAPABILITY_TRUTH.match(unit):
+            return True
+    return False
 
 
 def requested_network_report_format(speech: str) -> str | None:
@@ -920,6 +1635,7 @@ def target_source_sha256(speech: str, token: str) -> str:
 
 
 __all__ = [
+    "artifact_compile_request_is_atomic",
     "artifact_decompile_request_is_atomic",
     "PinnedTarget",
     "bind_pinned_target",
@@ -931,9 +1647,14 @@ __all__ = [
     "normalize_ip_address",
     "parse_host_token",
     "requests_active_assessment",
+    "requests_artifact_compile",
+    "requested_artifact_compile_filename",
     "requests_artifact_decompile",
     "requests_artifact_patch",
     "requests_configured_network_assessment",
+    "requests_host_vulnerability_assessment",
+    "requests_host_vulnerability_followup",
+    "requests_nmap_capability_truth",
     "requests_network_scan",
     "requested_network_report_format",
     "requests_network_report_export",

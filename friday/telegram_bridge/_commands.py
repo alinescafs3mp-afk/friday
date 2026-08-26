@@ -12,7 +12,7 @@ import json
 import re
 from datetime import date, timedelta
 
-from friday.organs.engineer.targets import requests_artifact_decompile
+from friday.organs.engineer.targets import requests_artifact_compile, requests_artifact_decompile
 from friday.retrieval._keyboard import switched
 from friday.telegram_bridge._base import (
     BOT_COMMANDS,
@@ -75,6 +75,18 @@ _DECOMPILE_PROGRESS_SCHEDULE: tuple[tuple[float, str], ...] = (
         "продолжаю ждать ограниченный backend-ход.",
     ),
 )
+_COMPILE_PROGRESS_SCHEDULE: tuple[tuple[float, str], ...] = (
+    (
+        12.0,
+        "⏳ Запрос на компиляцию ещё обрабатывается. Это уведомление отражает только "
+        "прошедшее время запроса; факт запуска javac подтвердит итоговый отчёт.",
+    ),
+    (
+        45.0,
+        "⏳ Запрос на компиляцию всё ещё обрабатывается. Продолжаю ждать ограниченный "
+        "backend-ход; итог пришлю после его завершения.",
+    ),
+)
 _GENERIC_PROGRESS_SCHEDULE: tuple[tuple[float, str], ...] = (
     (
         30.0,
@@ -95,6 +107,8 @@ class _ChatProgressState:
         self.schedule = (
             _DECOMPILE_PROGRESS_SCHEDULE
             if requests_artifact_decompile(speech)
+            else _COMPILE_PROGRESS_SCHEDULE
+            if requests_artifact_compile(speech)
             else _GENERIC_PROGRESS_SCHEDULE
         )
         self.next_notice = 0
@@ -432,7 +446,12 @@ class CommandsMixin(BridgeShared):
     ) -> None:
         callback = update.get("callback_query")
         if isinstance(callback, dict):
-            await self._process_callback_query(telegram, backend, callback)
+            await self._process_callback_query(
+                telegram,
+                backend,
+                callback,
+                update_id=int(update.get("update_id") or -1),
+            )
             return
 
         edited = update.get("edited_message")

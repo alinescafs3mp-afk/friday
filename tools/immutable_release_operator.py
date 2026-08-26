@@ -91,6 +91,7 @@ MAX_OBSIDIAN_BACKUP_BYTES = 16 << 30
 _SMOKE_SCRATCH_ROOT = Path("/var/tmp/friday-immutable-smoke")
 _OBSIDIAN_ENABLE_TRANSITION = "obsidian_enable"
 _ENGINEER_MODE_ENABLE_TRANSITION = "engineer_mode_enable"
+_ENGINEER_COMMAND_ENABLE_TRANSITION = "engineer_command_enable"
 _SECONDARY_SHADOW_ENABLE_TRANSITION = "secondary_shadow_enable"
 _SECONDARY_SHADOW_DISABLE_TRANSITION = "secondary_shadow_disable"
 _SECONDARY_SHADOW_TO_PRIVATE_SHADOW_TRANSITION = "secondary_shadow_to_private_shadow"
@@ -200,6 +201,7 @@ _SEMANTIC_SUPERVISOR_TRANSITION_MODES = {
 _EXACT_ENV_CONFIG_TRANSITIONS = frozenset(
     {
         _ENGINEER_MODE_ENABLE_TRANSITION,
+        _ENGINEER_COMMAND_ENABLE_TRANSITION,
         *_SECONDARY_CONFIG_TRANSITIONS,
         *_SEMANTIC_SUPERVISOR_CONFIG_TRANSITIONS,
         *_SEMANTIC_EFFECT_CONFIG_TRANSITIONS,
@@ -229,6 +231,10 @@ _ENGINEER_MODE_LEGACY_ENV_KEYS = frozenset(
         "JERICHO_HOST_ALLOWED_CIDRS",
     }
 )
+_ENGINEER_COMMAND_ENV_KEY = "FRIDAY_ENGINEER_COMMAND_ENABLED"
+_ENGINEER_COMMAND_ENV_DISABLED = b"FRIDAY_ENGINEER_COMMAND_ENABLED=0\n"
+_ENGINEER_COMMAND_ENV_ENABLED = b"FRIDAY_ENGINEER_COMMAND_ENABLED=1\n"
+_ENGINEER_COMMAND_LEGACY_ENV_KEYS = frozenset({"JERICHO_ENGINEER_COMMAND_ENABLED"})
 _SECONDARY_LLM_ENV_PREFIX = "FRIDAY_SECONDARY_LLM_"
 _SECONDARY_LLM_ENV_KEYS = frozenset(
     {
@@ -2288,6 +2294,90 @@ def _validate_engineer_mode_enable_environment(
         raise ReleaseFailure("engineer_mode_unrelated_environment_changed")
 
 
+def _engineer_command_environment_parts(
+    raw: bytes,
+    *,
+    code: str,
+) -> tuple[list[bytes], int | None]:
+    """Locate the sole command-runner switch without normalizing bytes."""
+
+    try:
+        text = raw.decode("utf-8", errors="strict")
+    except UnicodeError as exc:
+        raise ReleaseFailure(code) from exc
+    raw_lines = text.splitlines(keepends=True)
+    if "".join(raw_lines) != text:  # pragma: no cover - Python owns splitlines
+        raise ReleaseFailure(code)
+    encoded_lines: list[bytes] = []
+    assignment: int | None = None
+    for index, raw_line in enumerate(raw_lines):
+        encoded_lines.append(raw_line.encode("utf-8"))
+        stripped = raw_line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        if stripped.startswith("export "):
+            stripped = stripped[7:].strip()
+        key, separator, _value = stripped.partition("=")
+        key = key.strip()
+        if key in _ENGINEER_COMMAND_LEGACY_ENV_KEYS:
+            raise ReleaseFailure(code)
+        if key != _ENGINEER_COMMAND_ENV_KEY:
+            continue
+        if not separator or assignment is not None:
+            raise ReleaseFailure(code)
+        assignment = index
+    return encoded_lines, assignment
+
+
+def _validate_engineer_command_enable_environment(
+    predecessor: bytes | None,
+    target: bytes,
+) -> None:
+    """Enable only the runner switch on an already-enabled Engineer host."""
+
+    target_mode_lines, target_mode_assignments = _engineer_mode_environment_parts(
+        target,
+        code="engineer_command_environment_invalid",
+    )
+    mode_index = target_mode_assignments.get("FRIDAY_ENGINEER_MODE_ENABLED")
+    if mode_index is None or target_mode_lines[mode_index] != b"FRIDAY_ENGINEER_MODE_ENABLED=1\n":
+        raise ReleaseFailure("engineer_command_engineer_mode_not_enabled")
+    target_lines, target_assignment = _engineer_command_environment_parts(
+        target,
+        code="engineer_command_environment_invalid",
+    )
+    if target_assignment is None or target_lines[target_assignment] != _ENGINEER_COMMAND_ENV_ENABLED:
+        raise ReleaseFailure("engineer_command_environment_invalid")
+    if predecessor is None:
+        return
+
+    predecessor_mode_lines, predecessor_mode_assignments = _engineer_mode_environment_parts(
+        predecessor,
+        code="engineer_command_predecessor_invalid",
+    )
+    predecessor_mode_index = predecessor_mode_assignments.get("FRIDAY_ENGINEER_MODE_ENABLED")
+    if (
+        predecessor_mode_index is None
+        or predecessor_mode_lines[predecessor_mode_index] != b"FRIDAY_ENGINEER_MODE_ENABLED=1\n"
+    ):
+        raise ReleaseFailure("engineer_command_engineer_mode_not_enabled")
+    predecessor_lines, predecessor_assignment = _engineer_command_environment_parts(
+        predecessor,
+        code="engineer_command_predecessor_invalid",
+    )
+    expected = list(predecessor_lines)
+    if predecessor_assignment is None:
+        if predecessor and not predecessor.endswith((b"\n", b"\r")):
+            expected.append(b"\n")
+        expected.append(_ENGINEER_COMMAND_ENV_ENABLED)
+    elif predecessor_lines[predecessor_assignment] == _ENGINEER_COMMAND_ENV_DISABLED:
+        expected[predecessor_assignment] = _ENGINEER_COMMAND_ENV_ENABLED
+    else:
+        raise ReleaseFailure("engineer_command_predecessor_not_disabled")
+    if b"".join(expected) != target:
+        raise ReleaseFailure("engineer_command_unrelated_environment_changed")
+
+
 def _validate_staged_environment_transition(
     transition: str,
     predecessor: bytes | None,
@@ -2297,6 +2387,9 @@ def _validate_staged_environment_transition(
 
     if transition == _ENGINEER_MODE_ENABLE_TRANSITION:
         _validate_engineer_mode_enable_environment(predecessor, target)
+        return
+    if transition == _ENGINEER_COMMAND_ENABLE_TRANSITION:
+        _validate_engineer_command_enable_environment(predecessor, target)
         return
     if transition in _SECONDARY_CONFIG_TRANSITIONS:
         _validate_secondary_config_transition(transition, predecessor, target)
@@ -10110,6 +10203,10 @@ _UNIT_INSTALL_PHASES = (
 )
 
 _RUNTIME_UNIT_NAMES = ("friday-backend.service", "friday-bridge.service")
+_BACKEND_TASKS_MAX = 512
+_BACKEND_MEMORY_MAX_BYTES = 12 * 1024**3
+_BACKEND_MEMORY_SWAP_MAX_BYTES = 0
+_CGROUP_ROOT = Path("/sys/fs/cgroup")
 _UNIT_DROPIN_NAMES: Mapping[str, tuple[str, ...]] = {
     "friday-backend.service": ("database.conf", "security.conf"),
     "friday-bridge.service": ("database.conf", "dependency.conf", "security.conf"),
@@ -10143,6 +10240,28 @@ def _unit_runtime_tmp_directory(unit: str) -> Path:
 
 
 def _unit_security_dropin(unit: str) -> bytes:
+    runtime_name = _unit_runtime_directory_name(unit)
+    aggregate_limits = (
+        f"TasksMax={_BACKEND_TASKS_MAX}\nMemoryMax=12G\nMemorySwapMax=0\n"
+        if unit == "friday-backend.service"
+        else ""
+    )
+    return (
+        "[Service]\n"
+        "LimitCORE=0\n"
+        f"{aggregate_limits}"
+        "PrivateTmp=false\n"
+        "PrivateUsers=false\n"
+        f"RuntimeDirectory={runtime_name}\n"
+        "RuntimeDirectoryMode=0700\n"
+        "RuntimeDirectoryPreserve=no\n"
+        f"Environment=TMPDIR={_unit_runtime_tmp_directory(unit)}\n"
+    ).encode()
+
+
+def _pre_aggregate_unit_security_dropin(unit: str) -> bytes:
+    """Return the exact security drop-in emitted before compiler cgroup limits."""
+
     runtime_name = _unit_runtime_directory_name(unit)
     return (
         "[Service]\n"
@@ -10465,6 +10584,7 @@ def _candidate_unit_surface(
         if security not in {
             _LEGACY_PRIVATE_TMP_SECURITY,
             _RECOVERY_PRIVATE_TMP_SECURITY,
+            _pre_aggregate_unit_security_dropin(unit),
             _unit_security_dropin(unit),
         }:
             raise ReleaseFailure("installed_security_dropin_invalid")
@@ -10549,6 +10669,8 @@ def _verify_manager_unit_surface(
         "RuntimeDirectoryMode": b"0700",
         "RuntimeDirectoryPreserve": b"no",
     }
+    if unit == "friday-backend.service":
+        exact_properties["MemorySwapMax"] = b"0"
     for property_name, expected_value in exact_properties.items():
         actual_value = _run_systemctl(
             "show",
@@ -10680,6 +10802,7 @@ def install_units(
                 if installed_content not in {
                     _LEGACY_PRIVATE_TMP_SECURITY,
                     _RECOVERY_PRIVATE_TMP_SECURITY,
+                    _pre_aggregate_unit_security_dropin(unit),
                     _unit_security_dropin(unit),
                 }:
                     raise ReleaseFailure("installed_transition_security_invalid")
@@ -11505,6 +11628,8 @@ print(json.dumps({'memory_vault_mode':effective_memory_vault_mode,'obsidian_mode
                 "UnsetEnvironment": b"PYTHONPATH",
                 "WorkingDirectory": str(self.config.friday_home).encode(),
             }
+            if unit == self.config.backend_unit:
+                exact_properties["MemorySwapMax"] = b"0"
             for property_name, expected_value in exact_properties.items():
                 actual_value = self._systemctl(
                     "show",
@@ -12678,6 +12803,79 @@ print(json.dumps({'schema':SCHEMA_VERSION,'status':'clear'},sort_keys=True,separ
         self._systemctl("start", unit)
         self._wait_process(unit, release, role)
 
+    @staticmethod
+    def _read_cgroup_v2_leaf(control_group: bytes, leaf: str) -> bytes | None:
+        """Read one kernel cgroup leaf without following any path component."""
+
+        try:
+            value = control_group.decode("ascii").strip()
+        except UnicodeError:
+            return None
+        if not value.startswith("/") or len(value) > 4096 or not leaf.isascii() or not leaf or "/" in leaf:
+            return None
+        parts = value[1:].split("/")
+        if not parts or any(not part or part in {".", ".."} for part in parts):
+            return None
+
+        directory_flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0)
+        directory_flags |= getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0)
+        file_flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0)
+        try:
+            directory_fd = os.open(_CGROUP_ROOT, directory_flags)
+        except OSError:
+            return None
+        try:
+            for part in parts:
+                next_fd = os.open(part, directory_flags, dir_fd=directory_fd)
+                os.close(directory_fd)
+                directory_fd = next_fd
+            descriptor = os.open(leaf, file_flags, dir_fd=directory_fd)
+            try:
+                details = os.fstat(descriptor)
+                payload = os.read(descriptor, 64)
+                overflow = os.read(descriptor, 1)
+            finally:
+                os.close(descriptor)
+        except OSError:
+            return None
+        finally:
+            os.close(directory_fd)
+        if not stat.S_ISREG(details.st_mode) or overflow:
+            return None
+        return payload.strip()
+
+    def _verify_backend_resource_limits(self) -> None:
+        """Require manager and live-kernel aggregate compiler boundaries."""
+
+        expected = {
+            "TasksMax": _BACKEND_TASKS_MAX,
+            "MemoryMax": _BACKEND_MEMORY_MAX_BYTES,
+            "MemorySwapMax": _BACKEND_MEMORY_SWAP_MAX_BYTES,
+        }
+        for property_name, expected_value in expected.items():
+            result = self._systemctl(
+                "show",
+                self.config.backend_unit,
+                f"--property={property_name}",
+                "--value",
+                check=False,
+            )
+            raw = result.stdout.strip()
+            if result.returncode != 0 or not raw.isdigit() or int(raw) != expected_value:
+                raise ReleaseFailure("backend_resource_boundary_unavailable")
+        control_group = self._systemctl(
+            "show",
+            self.config.backend_unit,
+            "--property=ControlGroup",
+            "--value",
+            check=False,
+        )
+        if (
+            control_group.returncode != 0
+            or self._read_cgroup_v2_leaf(control_group.stdout, "memory.swap.max") != b"0"
+        ):
+            raise ReleaseFailure("backend_resource_boundary_unavailable")
+
     def _process_matches(
         self,
         pid: int,
@@ -12714,6 +12912,7 @@ print(json.dumps({'schema':SCHEMA_VERSION,'status':'clear'},sort_keys=True,separ
     def start_backend(self, release: ReleaseIdentity) -> None:
         self._verify_environment_file()
         self._start(self.config.backend_unit, release, "backend")
+        self._verify_backend_resource_limits()
 
     def _expected_semantic_health_mode(self) -> str:
         """Bind every staged-transition writer to the canonical ENV generation."""

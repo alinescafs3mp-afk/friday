@@ -15,7 +15,7 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
-from . import artifacts, decompiler, local_binaries, toolchain
+from . import artifacts, compiler, decompiler, local_binaries, toolchain
 
 PROTOCOL_VERSION = 1
 MAX_REQUEST_BYTES = 512 * 1024
@@ -98,16 +98,44 @@ def _read_regular(path: Path, maximum: int) -> bytes:
 def _write_regular(path: Path, payload: bytes, maximum: int) -> None:
     if len(payload) > maximum:
         raise ValueError("output_size_invalid")
-    flags = os.O_CREAT | os.O_EXCL | os.O_WRONLY
-    flags |= getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0)
-    descriptor = os.open(path, flags, 0o600)
+    # The parent creates each writable target before bubblewrap enters and
+    # mounts that exact regular file.  Never create a new path: /work itself is
+    # intentionally non-writable, and an already populated target means that a
+    # toolchain child touched the carrier before the trusted worker did.
+    flags = os.O_WRONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0)
     try:
+        descriptor = os.open(path, flags)
+    except OSError as exc:
+        raise ValueError("output_target_invalid") from exc
+    try:
+        details = os.fstat(descriptor)
+        try:
+            current = path.lstat()
+        except OSError as exc:
+            raise ValueError("output_target_invalid") from exc
+        identity = (details.st_dev, details.st_ino, details.st_mode, details.st_size, details.st_nlink)
+        if (
+            not stat.S_ISREG(details.st_mode)
+            or details.st_size != 0
+            or details.st_nlink != 1
+            or identity
+            != (
+                current.st_dev,
+                current.st_ino,
+                current.st_mode,
+                current.st_size,
+                current.st_nlink,
+            )
+        ):
+            raise ValueError("output_target_invalid")
         view = memoryview(payload)
         while view:
             written = os.write(descriptor, view)
             if written <= 0:
                 raise ValueError("output_write_failed")
             view = view[written:]
+        if os.fstat(descriptor).st_size != len(payload):
+            raise ValueError("output_write_failed")
     finally:
         os.close(descriptor)
 
@@ -135,8 +163,10 @@ def run(request_path: Path, input_path: Path, result_path: Path, output_path: Pa
         if not isinstance(request_payload, dict) or request_payload.get("protocol") != PROTOCOL_VERSION:
             raise ValueError("request_protocol_invalid")
         action = str(request_payload.get("action") or "")
-        filename = Path(str(request_payload.get("filename") or "artifact.bin")).name[:180]
-        data = _read_regular(input_path, artifacts.MAX_ANALYZE_BYTES)
+        raw_filename = str(request_payload.get("filename") or "artifact.bin")
+        filename = raw_filename[:180] if action == "compile_java" else Path(raw_filename).name[:180]
+        input_cap = compiler.MAX_SOURCE_BYTES if action == "compile_java" else artifacts.MAX_ANALYZE_BYTES
+        data = _read_regular(input_path, input_cap)
         if action == "preflight":
             result: dict[str, Any] = {
                 "protocol": PROTOCOL_VERSION,
@@ -166,6 +196,21 @@ def run(request_path: Path, input_path: Path, result_path: Path, output_path: Pa
                 **decompile_report,
                 "protocol": PROTOCOL_VERSION,
                 "ok": bool(decompile_report.get("ok")),
+            }
+        elif action == "compile_java":
+            jar, compile_report = compiler.compile_artifact(
+                input_path,
+                filename,
+                request_payload.get("compiler_toolchain"),
+            )
+            if compile_report.get("ok") is True:
+                if jar is None:
+                    raise ValueError("compiler_output_invalid")
+                _write_regular(output_path, jar, compiler.MAX_JAR_BYTES)
+            result = {
+                **compile_report,
+                "protocol": PROTOCOL_VERSION,
+                "ok": bool(compile_report.get("ok")),
             }
         elif action == "patch":
             raw_operations = request_payload.get("operations")

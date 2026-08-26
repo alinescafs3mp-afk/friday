@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import errno
 import hashlib
 import ipaddress
+import re
 import socket
 import ssl
 import time
@@ -415,7 +417,10 @@ def _probe_port(target: PinnedTarget, port: int, deadline: float | None) -> dict
             if banner:
                 entry["banner"] = banner
                 entry["probes"].append("banner_read")
-    except (OSError, TimeoutError):
+    except TimeoutError:
+        entry["state"] = "timeout"
+        return entry
+    except OSError:
         return entry
     if port in TLS_PORTS:
         entry["tls"] = _tls_summary(target, port, deadline=deadline)
@@ -429,6 +434,24 @@ def _probe_port(target: PinnedTarget, port: int, deadline: float | None) -> dict
     if port == 11211:
         entry["memcached"] = _line_probe(target, port, b"stats\r\n", deadline=deadline)
         entry["probes"].append("memcached_stats")
+    return entry
+
+
+def _probe_tcp_connect(target: PinnedTarget, port: int, deadline: float | None) -> dict[str, Any]:
+    """Observe only TCP reachability; never send application-layer bytes."""
+
+    entry: dict[str, Any] = {"port": port, "state": "closed", "probes": ["tcp_connect"]}
+    try:
+        with socket.create_connection(
+            (target.connect_address, port),
+            timeout=_remaining(deadline, CONNECT_TIMEOUT_SEC),
+        ):
+            entry["state"] = "open"
+    except TimeoutError:
+        entry["state"] = "timeout"
+    except OSError as exc:
+        if exc.errno != errno.ECONNREFUSED:
+            entry["state"] = "probe_error"
     return entry
 
 
@@ -543,7 +566,11 @@ def _line_probe(
 
 
 def _scan_ports(
-    target: PinnedTarget, ports: Sequence[int], *, deadline: float | None
+    target: PinnedTarget,
+    ports: Sequence[int],
+    *,
+    deadline: float | None,
+    connect_only: bool = False,
 ) -> list[dict[str, Any]]:
     ordered = list(ports)
     workers = max(1, min(SCAN_WORKERS, len(ordered)))
@@ -551,9 +578,10 @@ def _scan_ports(
         deadline,
         CONNECT_TIMEOUT_SEC * (1 + len(ordered) / workers) + 4.0,
     )
+    probe = _probe_tcp_connect if connect_only else _probe_port
     pool = ThreadPoolExecutor(max_workers=workers, thread_name_prefix="friday-engineer-scan")
     futures: dict[Future[dict[str, Any]], int] = {
-        pool.submit(_probe_port, target, port, deadline): port for port in ordered
+        pool.submit(probe, target, port, deadline): port for port in ordered
     }
     try:
         done, pending = wait(futures, timeout=timeout)
@@ -756,6 +784,209 @@ def audit_target(
         "active_probes": sorted(probe_names),
         "exploit_payloads_sent": False,
         "payloads_sent": False,
+    }
+
+
+_SERVICE_EXPOSURE_CODES: dict[int, str] = {
+    21: "cleartext_or_administration_port_reachable",
+    22: "administration_port_reachable",
+    23: "cleartext_or_administration_port_reachable",
+    25: "cleartext_transport_port_reachable",
+    80: "cleartext_transport_port_reachable",
+    110: "cleartext_transport_port_reachable",
+    139: "file_sharing_port_reachable",
+    143: "cleartext_transport_port_reachable",
+    445: "file_sharing_port_reachable",
+    2375: "container_control_port_reachable",
+    2376: "container_control_port_reachable",
+    3000: "alternate_web_port_reachable",
+    3306: "data_store_port_reachable",
+    5000: "alternate_web_port_reachable",
+    5432: "data_store_port_reachable",
+    6379: "data_store_port_reachable",
+    8000: "alternate_web_port_reachable",
+    8080: "alternate_web_port_reachable",
+    8443: "alternate_web_port_reachable",
+    9200: "data_store_port_reachable",
+    11211: "data_store_port_reachable",
+    27017: "data_store_port_reachable",
+}
+_NMAP_SERVICE_CLASSES = {
+    "domain": "dns",
+    "http": "web",
+    "http-alt": "web",
+    "https": "tls_web",
+    "imap": "mail",
+    "imaps": "tls_mail",
+    "microsoft-ds": "file_sharing",
+    "pop3": "mail",
+    "pop3s": "tls_mail",
+    "postgresql": "data_store",
+    "smtp": "mail",
+    "ssh": "remote_administration",
+    "ssl/http": "tls_web",
+}
+
+
+def _nmap_service_observations(
+    scan: Mapping[str, Any],
+    selected_ports: Sequence[int],
+) -> list[dict[str, Any]]:
+    report = scan.get("report")
+    report = report if isinstance(report, Mapping) else {}
+    result = report.get("result")
+    result = result if isinstance(result, Mapping) else {}
+    hosts = result.get("hosts")
+    observations: list[dict[str, Any]] = []
+    for host_row in hosts if isinstance(hosts, list) else []:
+        if not isinstance(host_row, Mapping):
+            continue
+        ports = host_row.get("ports")
+        for row in ports if isinstance(ports, list) else []:
+            if not isinstance(row, Mapping) or row.get("state") != "open":
+                continue
+            port = row.get("port")
+            if isinstance(port, bool) or not isinstance(port, int) or port not in selected_ports:
+                continue
+            service = row.get("service")
+            service = service if isinstance(service, Mapping) else {}
+            raw_name = str(service.get("name") or "").strip().casefold()
+            observations.append(
+                {
+                    "port": port,
+                    "protocol": "tcp",
+                    "service_class": _NMAP_SERVICE_CLASSES.get(raw_name, "unknown"),
+                    "confidence": service.get("confidence")
+                    if isinstance(service.get("confidence"), int)
+                    and not isinstance(service.get("confidence"), bool)
+                    and 0 <= int(service["confidence"]) <= 10
+                    else None,
+                }
+            )
+    return sorted(observations, key=lambda item: int(item["port"]))[:64]
+
+
+def assess_target_vulnerabilities(
+    target: PinnedTarget,
+    *,
+    deadline: float | None = None,
+) -> dict[str, Any]:
+    """Inspect one private pinned host with the existing closed nmap profile.
+
+    Findings describe reachable exposure only.  No exploit, intrusive NSE or
+    CVE lookup is performed, so the result never labels a service as a verified
+    vulnerability merely from its banner/version string.
+    """
+
+    if len(target.addresses) != 1 or target.implied_port is not None:
+        return {
+            "ok": False,
+            "error": "exact_single_host_required",
+            "active_probes_sent": False,
+            "exploit_payloads_sent": False,
+        }
+    effective_deadline = deadline if deadline is not None else time.monotonic() + MAX_AUDIT_SECONDS
+    port_results = _scan_ports(
+        target,
+        DEFAULT_PORTS,
+        deadline=effective_deadline,
+        connect_only=True,
+    )
+    open_ports = [int(item["port"]) for item in port_results if item.get("state") == "open"]
+    discovery_complete = all(item.get("state") in {"open", "closed"} for item in port_results)
+    try:
+        scan = (
+            local_binaries.nmap_connect_scan(
+                target.connect_address,
+                open_ports,
+                deadline=effective_deadline,
+            )
+            if open_ports
+            else {"ok": True, "used": False, "error": "no_open_ports", "tool": "nmap"}
+        )
+    except TimeoutError:
+        # TCP discovery has already crossed the packet boundary.  Preserve that
+        # phase truth instead of letting the handler report a pre-entry denial.
+        scan = {"ok": False, "used": False, "error": "deadline", "tool": "nmap"}
+    observations = _nmap_service_observations(scan, open_ports)
+    observed_ports = {int(item["port"]) for item in observations}
+    observations.extend(
+        {
+            "port": port,
+            "protocol": "tcp",
+            "service_class": "unknown",
+            "confidence": None,
+        }
+        for port in open_ports
+        if port not in observed_ports
+    )
+    observations.sort(key=lambda item: int(item["port"]))
+    findings = [
+        {
+            "code": code,
+            "port": port,
+            "detail": f"TCP port {port} is reachable; verify the actual service and configuration",
+        }
+        for port in open_ports
+        if (code := _SERVICE_EXPOSURE_CODES.get(port)) is not None
+    ]
+    coverage = scan.get("coverage")
+    coverage = coverage if isinstance(coverage, Mapping) else {}
+    raw_evidence = scan.get("evidence")
+    evidence = raw_evidence if isinstance(raw_evidence, list) else []
+    nmap_complete = bool(
+        scan.get("ok") is True
+        and scan.get("used") is True
+        and scan.get("parser_status") == "complete"
+        and coverage.get("grade") == "complete"
+        and coverage.get("requested") == 1
+        and coverage.get("accounted") == 1
+        and coverage.get("skipped") == 0
+        and any(
+            isinstance(item, Mapping) and re.fullmatch(r"[0-9a-f]{64}", str(item.get("sha256") or ""))
+            for item in evidence
+        )
+    )
+    return {
+        "ok": True,
+        "error": str((scan.get("error") or "") if discovery_complete else "tcp_discovery_incomplete")[:80],
+        "host": target.host,
+        "addresses": list(target.addresses),
+        "probed_address": target.connect_address,
+        "target_source_sha256": target.source_sha256,
+        "profile": "vulnerabilities",
+        "service_profile": "tcp_connect_then_nmap_selected_ports_version_light",
+        "ports_checked": len(DEFAULT_PORTS),
+        "open_ports": open_ports,
+        "services": observations,
+        "findings": findings,
+        "nmap": {
+            key: scan[key]
+            for key in (
+                "coverage",
+                "error",
+                "evidence",
+                "evidence_retention",
+                "executable_attestation",
+                "ok",
+                "parser_status",
+                "target_snapshot_digest",
+                "tool",
+                "used",
+            )
+            if key in scan
+        },
+        "active_probes_sent": True,
+        "active_probes": [
+            "bounded_tcp_connect",
+            *(["nmap_selected_ports_version_light"] if scan.get("used") is True else []),
+        ],
+        "exploit_payloads_sent": False,
+        "cve_assessment_performed": False,
+        "verified_vulnerability_claims": False,
+        "assessment_status": (
+            "complete" if discovery_complete and (nmap_complete or not open_ports) else "partial"
+        ),
     }
 
 

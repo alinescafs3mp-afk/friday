@@ -573,12 +573,13 @@ QWEN36_27B_V12_PROFILE = V12ModelProfileSpec(
 )
 
 QWEN38_27B_SGLANG_V12_PROFILE = V12ModelProfileSpec(
-    profile_id="qwen38-27b-nvfp4-sglang:dispatcher:v12.14",
+    profile_id="qwen38-27b-nvfp4-sglang:dispatcher:v12.15",
     runtime_profile_name="qwen38-27b-nvfp4-sglang",
     served_model_alias="dispatcher",
-    # V12.14 changes the exact model/runtime pairing, not the narrow route
+    # V12.15 changes the exact model/runtime pairing, not the narrow route
     # authority.  The same byte-bound planner and live-probe contracts must pass
-    # freshly against Qwen3.8 before this profile can issue a lease.
+    # freshly against the abliterated Qwen3.8 checkpoint before this profile can
+    # issue a lease.
     planner_contract_sha256=_QWEN36_27B_PLANNER_CONTRACT_SHA256,
     probe_suite_sha256=_QWEN36_27B_PROBE_SUITE_SHA256,
     allowed_capabilities=QWEN36_27B_V12_PROFILE.allowed_capabilities,

@@ -2,7 +2,7 @@
 
 **Friday** (по-русски — **Пятница**; ex codename Jericho) — локальная многопользовательская Knowledge Operating System: она принимает текст и документы, сохраняет первоисточник, строит граф знаний, ищет по личной базе и отвечает через Telegram или HTTP API. Веб-панель предназначена для администрирования, разбора Inbox, работы с сущностями, правами, резервными копиями и диагностикой.
 
-Текущая версия: **0.207.42**. Авторизованный read-only `archive_search`
+Текущая версия: **0.207.48**. Авторизованный read-only `archive_search`
 объединяет личные документы, знания, сообщения и Obsidian с точными
 источниками, покрытием и финальной повторной проверкой прав. Schema 44
 добавила fixed WorkGraph ровно для сравнения текущего файла с текущим вебом:
@@ -30,7 +30,7 @@ body-free набор archive-кандидатов и durable ordinal question. �
 Первичная модель остаётся финальной; secondary не имеет доступа к
 инструментам, эффектам и публикации. Obsidian core остаётся opt-in beta,
 а companion plugin не требуется. Opt-in V12 routes `file_read` и `archive_read`
-аттестуются как `qwen38-27b-nvfp4-sglang:dispatcher:v12.14` на точном
+аттестуются как `qwen38-27b-nvfp4-sglang:dispatcher:v12.15` на точном
 graph-only SGLang deployment; всё неподдержанное остаётся в legacy без
 урезания контекста, concurrency или CUDA graphs. После точного выбора
 архивного источника закрытый follow-up на объяснение использует этот
@@ -139,6 +139,13 @@ scope без operator flag и отдельного action approval закрыт.
 выключен по умолчанию и требует Linux acceptance из
 [`docs/ENGINEER_MODE.md`](docs/ENGINEER_MODE.md).
 
+Опциональный command runner внутри этого режима запускает установленную
+программу по точному `argv` только после отдельного подтверждения владельца в
+Telegram. Процесс получает новый ограниченный workspace без host data, сети,
+секретов и Docker socket; состояние и отмена доступны по durable job ID.
+Явно запрошенный shell остаётся внутри того же sandbox и не превращается в
+консоль хоста.
+
 Отдельный Host Capability Plane позволяет использовать reviewed Ubuntu CLI как
 функцию, а не просто запускать приложение. Первый вертикальный срез обнаруживает
 или через точный human-approved APT plan устанавливает `nmap`, аттестует
@@ -191,7 +198,7 @@ jericho init --home D:\jericho
 Канонический внешне управляемый SGLang profile ожидает exact snapshot:
 
 ```text
-D:\jericho\models\qwen3.8-27b-nvfp4-a2genesis-bfd9b312\
+D:\jericho\models\qwen3.8-27b-abliterated-nvfp4-vtuber-43aa7ff5\
 ```
 
 Включённый ниже reference Compose recipe для совместимости по-прежнему
@@ -327,10 +334,10 @@ VRAM обнаружился при старте, а не на первом по�
 
 | Параметр | Значение |
 |---|---:|
-| model | `/models/qwen3.8-27b-nvfp4-a2genesis-bfd9b312` |
+| model | `/models/qwen3.8-27b-abliterated-nvfp4-vtuber-43aa7ff5` |
 | served model name | `dispatcher` |
-| repository / revision | `a2genesis/Qwen3.8-27B-NVFP4` / `bfd9b31207712e0850eec9da32261e8c5ee16af7` |
-| quantization | `W4A16_NVFP4` |
+| repository / revision | `Vtuber-plan/Huihui-Qwen3.8-27B-abliterated-NVFP4` / `43aa7ff5eef05ab50a3bfa6aca581085312c7a04` |
+| quantization | `W4A4_NVFP4_FP8_KV` |
 | runtime image | `lmsysorg/sglang@sha256:506525a5907ea22c9d445afb7c03603959b912de034d86915cf17da814f1a124` |
 | runtime source / reported version | `c4271c3fe1262fc2adbd162c33b25de5255251c5` / `0.0.0.dev0+qwen38.27b.g561c8f3` |
 | max model length | `40960` |
@@ -357,7 +364,7 @@ fan-out одной задачи. Иерархическое чтение док�
 `/v1/models`, bounded `/metrics`, `/server_info` и per-process deployment
 witness с code-owned identities и launch graph. Любой drift, неполный
 witness или незамкнутый same-origin proxy оставляют routes в `legacy`.
-Успешный canary startup должен показать в `/api/health` версию `0.207.42`,
+Успешный canary startup должен показать в `/api/health` версию `0.207.48`,
 точный profile id, `canary_ready`, `live_attestation_clear` и оба
 зарегистрированных route; простого HTTP `status=ok` недостаточно.
 

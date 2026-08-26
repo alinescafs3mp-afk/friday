@@ -1995,9 +1995,13 @@ _PRIVATE_SOURCE_LOCAL_TOOL_NAMES = frozenset(
         "entity_merge_decide",
         "entity_merge_undo",
         "engineer_analyze_artifact",
+        "engineer_compile_java",
         "engineer_decompile_artifact",
         "engineer_local_tools",
         "engineer_patch_artifact",
+        "engineer_command_run",
+        "engineer_command_status",
+        "engineer_command_cancel",
         "host_action_run",
         "host_capability_describe",
         "host_capability_search",
@@ -2102,6 +2106,9 @@ _ENGINEER_NATIVE_MODEL_TOOL_NAMES = frozenset(
         "engineer_dns",
         "engineer_local_tools",
         "engineer_adversary_rehearsal",
+        "engineer_command_run",
+        "engineer_command_status",
+        "engineer_command_cancel",
     }
 )
 _ENGINEER_ORDINARY_MODEL_TOOL_NAMES = frozenset({"make_file", "collect_files", *_WEB_TOOL_NAMES})
@@ -2110,6 +2117,8 @@ _ENGINEER_REGISTERED_TOOL_NAMES = frozenset(
     {
         "engineer_hunt",
         "engineer_scan_configured_network",
+        "engineer_assess_host_vulnerabilities",
+        "engineer_compile_java",
         "engineer_decompile_artifact",
         *_ENGINEER_NATIVE_MODEL_TOOL_NAMES,
     }
@@ -2117,6 +2126,7 @@ _ENGINEER_REGISTERED_TOOL_NAMES = frozenset(
 _ENGINEER_HOST_TOOL_NAMES = frozenset(
     {
         "engineer_audit_host",
+        "engineer_assess_host_vulnerabilities",
         "engineer_http_enum",
         "engineer_dns",
         "engineer_adversary_rehearsal",
@@ -2124,22 +2134,36 @@ _ENGINEER_HOST_TOOL_NAMES = frozenset(
     }
 )
 _ENGINEER_ARTIFACT_TOOL_NAMES = frozenset(
-    {"engineer_analyze_artifact", "engineer_decompile_artifact", "engineer_patch_artifact"}
+    {
+        "engineer_analyze_artifact",
+        "engineer_compile_java",
+        "engineer_decompile_artifact",
+        "engineer_patch_artifact",
+    }
 )
 _ENGINEER_TOOL_CAPABILITIES = {
     "engineer_analyze_artifact": "engineer.artifact.analyze",
+    "engineer_compile_java": "engineer.artifact.build",
     "engineer_decompile_artifact": "engineer.artifact.analyze",
     "engineer_patch_artifact": "engineer.artifact.patch",
     "engineer_audit_host": "engineer.host.audit",
+    "engineer_assess_host_vulnerabilities": "engineer.host.audit",
     "engineer_http_enum": "engineer.host.audit",
     "engineer_dns": "engineer.host.audit",
     "engineer_local_tools": "engineer.use",
     "engineer_adversary_rehearsal": "engineer.host.audit",
     "engineer_scan_configured_network": "engineer.host.audit",
+    "engineer_command_run": "engineer.command.run",
+    "engineer_command_status": "engineer.command.manage",
+    "engineer_command_cancel": "engineer.command.manage",
 }
 _ENGINEER_CAPABILITIES = frozenset({"engineer.use", *_ENGINEER_TOOL_CAPABILITIES.values()})
 _HOST_CONTROL_CONTEXT_TOOL_NAMES = frozenset({"host_action_run", "host_json_extract", "software_install"})
 _HOST_CONTROL_PRIVATE_ARGUMENTS = frozenset({"_conversation_id", "_raw_id", "_source_message_id", "raw_id"})
+_ENGINEER_COMMAND_CONTEXT_TOOL_NAMES = frozenset({"engineer_command_run"})
+_ENGINEER_COMMAND_PRIVATE_ARGUMENTS = frozenset(
+    {"_conversation_id", "_source_message_id", "_telegram_update_id"}
+)
 _ENGINEER_RECEIPT_BASE_TOOL_VERSIONS = {
     "engineer_organ": "builtin-v1",
     "host_probe": "bounded-connect-v1",
@@ -2152,6 +2176,22 @@ _ENGINEER_NETWORK_REPORT_METADATA_KEY = "accepted_engineer_network_report"
 _ENGINEER_NETWORK_REPORT_SCHEMA = "friday.engineer.network-report.v1"
 _ENGINEER_NETWORK_REPORT_RECEIPT_SCHEMA = "friday.accepted-engineer-network-report-receipt.v1"
 _ENGINEER_NETWORK_ACTION_TOOL = "engineer_scan_configured_network"
+_ENGINEER_HOST_AUDIT_ACTION_TOOL = "engineer_audit_host"
+_ENGINEER_HOST_VULNERABILITY_ACTION_TOOL = "engineer_assess_host_vulnerabilities"
+_ENGINEER_HOST_OUTCOME_METADATA_KEY = "accepted_engineer_host_outcome"
+_ENGINEER_HOST_OUTCOME_SCHEMA = "friday.engineer-host-outcome.v1"
+_ENGINEER_HOST_OUTCOME_RECEIPT_SCHEMA = "friday.accepted-engineer-host-outcome-receipt.v1"
+_ENGINEER_HOST_CONTINUATION_TTL_SEC = 30 * 60
+_ENGINEER_COMPILE_ACTION_TOOL = "engineer_compile_java"
+_ENGINEER_COMPILE_OUTCOME_METADATA_KEY = "accepted_engineer_compile_outcome"
+_ENGINEER_COMPILE_OUTCOME_SCHEMA = "friday.engineer-compile-outcome.v1"
+_ENGINEER_COMPILE_OUTCOME_RECEIPT_SCHEMA = "friday.accepted-engineer-compile-outcome-receipt.v1"
+_ENGINEER_COMPILE_REPORT_SCHEMA = "friday.engineer.compile.v1"
+_ENGINEER_COMPILE_PROFILE = "java21_single_source_library_jar_v1"
+_ENGINEER_COMPILE_REPORT_TOOL = "temurin-javac"
+_ENGINEER_COMPILE_REPORT_TOOL_VERSION = "21.0.12.1+1"
+_ENGINEER_COMPILE_REPORT_JDK_VERSION = "21.0.12.1+1"
+_ENGINEER_COMPILE_MIN_REMAINING_SEC = 85.0
 _ENGINEER_DECOMPILE_ACTION_TOOL = "engineer_decompile_artifact"
 _ENGINEER_DECOMPILE_OUTCOME_METADATA_KEY = "accepted_engineer_decompile_outcome"
 _ENGINEER_DECOMPILE_OUTCOME_SCHEMA = "friday.engineer-decompile-outcome.v1"
@@ -2169,10 +2209,51 @@ _ENGINEER_PRE_HANDLER_ERROR_PREFIXES = (
     "Invalid tool arguments",
 )
 _ENGINEER_DECOMPILE_OUTCOME_RECEIPT_SCHEMA = "friday.accepted-engineer-decompile-outcome-receipt.v1"
+_ENGINEER_COMPILE_FAILURE_REASONS = frozenset(
+    {
+        "ambiguous_artifact",
+        "audit_start_unavailable",
+        "authorization_unavailable",
+        "conflicting_artifact_action",
+        "compiler_busy",
+        "compiler_failed",
+        "compiler_launch_failed",
+        "compiler_memory_cgroup_unbounded",
+        "compiler_output_exceeds_cap",
+        "compiler_output_invalid",
+        "compiler_pid_cgroup_unbounded",
+        "compiler_report_invalid",
+        "compiler_resource_boundary_unavailable",
+        "compiler_timeout",
+        "compile_unavailable",
+        "deadline_expired",
+        "exact_artifact_required",
+        "file_access_denied",
+        "file_unavailable",
+        "input_encoding_invalid",
+        "input_size_invalid",
+        "invalid_artifact_handle",
+        "invalid_filename",
+        "malformed_result",
+        "sandbox_unavailable",
+        "source_identity_changed",
+        "toolchain_incomplete",
+        "toolchain_missing",
+        "toolchain_untrusted",
+        "worker_failed",
+        "worker_launch_failed",
+        "worker_output_empty",
+        "worker_output_exceeds_cap",
+        "worker_result_invalid",
+        "worker_timeout",
+        "workspace_not_clean",
+    }
+)
 _ENGINEER_DECOMPILE_FAILURE_REASONS = frozenset(
     {
         "ambiguous_artifact",
         "authorization_unavailable",
+        "conflicting_artifact_action",
         "deadline_expired",
         "decompile_unavailable",
         "decompiler_failed",
@@ -2214,6 +2295,268 @@ _ENGINEER_NETWORK_FAILURE_REASONS = frozenset(
         "turn_deadline_expired",
     }
 )
+_ENGINEER_HOST_FAILURE_REASONS = frozenset(
+    {
+        "authorization_unavailable",
+        "deadline",
+        "exact_current_target_required",
+        "exact_single_host_required",
+        "malformed_result",
+        "private_single_host_required",
+        "scan_unavailable",
+        "target_not_authorized",
+        "target_outside_operator_policy",
+        "target_policy_denied",
+        "target_resolution_timeout",
+        "turn_deadline_expired",
+    }
+)
+_ENGINEER_HOST_SERVICE_CLASSES = frozenset(
+    {
+        "data_store",
+        "dns",
+        "file_sharing",
+        "mail",
+        "remote_administration",
+        "tls_mail",
+        "tls_web",
+        "unknown",
+        "web",
+    }
+)
+_ENGINEER_HOST_FINDING_CODES = frozenset(
+    {
+        "administration_port_reachable",
+        "alternate_web_port_reachable",
+        "cleartext_or_administration_port_reachable",
+        "cleartext_transport_port_reachable",
+        "container_control_port_reachable",
+        "data_store_port_reachable",
+        "file_sharing_port_reachable",
+    }
+)
+
+
+def _engineer_host_private_digest(
+    namespace_key: bytes,
+    domain: str,
+    *values: str,
+) -> str:
+    """Bind private host state without publishing brute-forceable identifiers."""
+
+    if not isinstance(namespace_key, bytes) or len(namespace_key) < 32:
+        raise ValueError("engineer host binding namespace is unavailable")
+    if re.fullmatch(r"[a-z0-9-]{1,40}", domain) is None:
+        raise ValueError("engineer host binding domain is invalid")
+    payload = json.dumps(
+        [str(value or "") for value in values],
+        ensure_ascii=False,
+        separators=(",", ":"),
+    ).encode("utf-8", errors="strict")
+    return hmac.new(
+        namespace_key,
+        b"friday.engineer-host-binding.v1\0" + domain.encode("ascii") + b"\0" + payload,
+        hashlib.sha256,
+    ).hexdigest()
+
+
+@dataclass(frozen=True, slots=True)
+class _EngineerHostContinuation:
+    target: Any
+    source_user_message_id: str
+    source_assistant_message_id: str
+    accepted_outcome_sha256: str
+    request_binding_sha256: str
+    _seal: object = field(repr=False, compare=False)
+
+    def __post_init__(self) -> None:
+        if self._seal is not _ENGINEER_HOST_CONTINUATION_SEAL:
+            raise ValueError("engineer host continuation is not process-owned")
+        if not all(
+            re.fullmatch(r"msg_[0-9a-f]{16}", value)
+            for value in (self.source_user_message_id, self.source_assistant_message_id)
+        ):
+            raise ValueError("engineer host continuation message identity is invalid")
+        if any(
+            re.fullmatch(r"[0-9a-f]{64}", value) is None
+            for value in (self.accepted_outcome_sha256, self.request_binding_sha256)
+        ):
+            raise ValueError("engineer host continuation outcome identity is invalid")
+
+
+_ENGINEER_HOST_CONTINUATION_SEAL = object()
+
+
+@dataclass(frozen=True, slots=True)
+class _EngineerHostOutcome:
+    """Process-owned exact-host action result and content-free durable binding."""
+
+    status: CapabilityStatus
+    profile: Literal["services", "vulnerabilities"]
+    target: str
+    address: str
+    open_ports: tuple[int, ...]
+    services: tuple[tuple[int, str, int | None], ...]
+    findings: tuple[tuple[str, int], ...]
+    active_probes_status: Literal["sent", "not_sent", "uncertain"]
+    evidence_sha256: str
+    reason_code: str
+    tool_started: bool
+    source_user_message_id: str
+    request_binding_sha256: str
+    target_identity_sha256: str
+    tenant_sha256: str
+    person_sha256: str
+    continuation_source_assistant_id: str = ""
+
+    def __post_init__(self) -> None:
+        if self.status not in {
+            CapabilityStatus.SUCCEEDED,
+            CapabilityStatus.PARTIAL,
+            CapabilityStatus.DENIED,
+            CapabilityStatus.UNAVAILABLE,
+            CapabilityStatus.UNCERTAIN,
+        }:
+            raise ValueError("engineer host outcome status is not closed")
+        if self.profile not in {"services", "vulnerabilities"}:
+            raise ValueError("engineer host outcome profile is invalid")
+        if self.target or self.address:
+            try:
+                address = ipaddress.ip_address(self.address)
+            except ValueError as exc:
+                raise ValueError("engineer host outcome address is invalid") from exc
+            if str(address) != self.address or not self.target or len(self.target) > 253:
+                raise ValueError("engineer host outcome target identity is invalid")
+        elif self.status not in {CapabilityStatus.DENIED, CapabilityStatus.UNAVAILABLE}:
+            raise ValueError("entered engineer host outcome lost its target")
+        if (
+            not isinstance(self.open_ports, tuple)
+            or len(self.open_ports) > 64
+            or tuple(sorted(set(self.open_ports))) != self.open_ports
+            or any(
+                isinstance(port, bool) or not isinstance(port, int) or not 1 <= port <= 65535
+                for port in self.open_ports
+            )
+        ):
+            raise ValueError("engineer host outcome ports are invalid")
+        if (
+            not isinstance(self.services, tuple)
+            or len(self.services) > 64
+            or any(not isinstance(item, tuple) or len(item) != 3 for item in self.services)
+        ):
+            raise ValueError("engineer host outcome services are invalid")
+        canonical_services = tuple(
+            sorted(
+                set(self.services),
+                key=lambda item: (item[0], item[1], -1 if item[2] is None else item[2]),
+            )
+        )
+        if (
+            canonical_services != self.services
+            or len({item[0] for item in self.services}) != len(self.services)
+            or any(
+                isinstance(port, bool)
+                or not isinstance(port, int)
+                or port not in self.open_ports
+                or service_class not in _ENGINEER_HOST_SERVICE_CLASSES
+                or confidence is not None
+                and (
+                    isinstance(confidence, bool)
+                    or not isinstance(confidence, int)
+                    or not 0 <= confidence <= 10
+                )
+                for port, service_class, confidence in self.services
+            )
+        ):
+            raise ValueError("engineer host outcome services are invalid")
+        if (
+            not isinstance(self.findings, tuple)
+            or len(self.findings) > 64
+            or any(not isinstance(item, tuple) or len(item) != 2 for item in self.findings)
+        ):
+            raise ValueError("engineer host outcome findings are invalid")
+        if tuple(sorted(set(self.findings), key=lambda item: (item[1], item[0]))) != self.findings or any(
+            code not in _ENGINEER_HOST_FINDING_CODES
+            or isinstance(port, bool)
+            or not isinstance(port, int)
+            or port not in self.open_ports
+            for code, port in self.findings
+        ):
+            raise ValueError("engineer host outcome findings are invalid")
+        if self.active_probes_status not in {"sent", "not_sent", "uncertain"}:
+            raise ValueError("engineer host outcome probe status is invalid")
+        if self.evidence_sha256 and re.fullmatch(r"[0-9a-f]{64}", self.evidence_sha256) is None:
+            raise ValueError("engineer host outcome evidence digest is invalid")
+        if self.reason_code not in _ENGINEER_HOST_FAILURE_REASONS | {"none"}:
+            raise ValueError("engineer host outcome reason is not closed")
+        if not isinstance(self.tool_started, bool):
+            raise ValueError("engineer host outcome start marker is invalid")
+        if re.fullmatch(r"msg_[0-9a-f]{16}", self.source_user_message_id) is None:
+            raise ValueError("engineer host outcome source message is invalid")
+        for digest in (
+            self.request_binding_sha256,
+            self.target_identity_sha256,
+            self.tenant_sha256,
+            self.person_sha256,
+        ):
+            if re.fullmatch(r"[0-9a-f]{64}", digest) is None:
+                raise ValueError("engineer host outcome binding is invalid")
+        if (
+            self.continuation_source_assistant_id
+            and re.fullmatch(r"msg_[0-9a-f]{16}", self.continuation_source_assistant_id) is None
+        ):
+            raise ValueError("engineer host outcome continuation source is invalid")
+        if self.status is CapabilityStatus.SUCCEEDED and not (
+            self.tool_started
+            and self.active_probes_status == "sent"
+            and self.reason_code == "none"
+            and (self.profile == "vulnerabilities" or self.evidence_sha256)
+        ):
+            raise ValueError("successful engineer host outcome is incomplete")
+        if self.status in {CapabilityStatus.DENIED, CapabilityStatus.UNAVAILABLE} and self.tool_started:
+            raise ValueError("pre-entry engineer host outcome claims tool work")
+        if self.status is CapabilityStatus.PARTIAL and not (
+            self.tool_started and self.active_probes_status == "sent"
+        ):
+            raise ValueError("partial engineer host outcome lacks observed work")
+        if self.status is CapabilityStatus.UNCERTAIN and not (
+            self.tool_started and self.active_probes_status == "uncertain"
+        ):
+            raise ValueError("uncertain engineer host outcome lacks entered work")
+
+    def receipt(self) -> dict[str, object]:
+        outcome: dict[str, object] = {
+            "schema": _ENGINEER_HOST_OUTCOME_SCHEMA,
+            "status": self.status.value,
+            "profile": self.profile,
+            "target_count": 1 if self.target else 0,
+            "open_port_count": len(self.open_ports),
+            "service_count": len(self.services),
+            "finding_count": len(self.findings),
+            "active_probes_status": self.active_probes_status,
+            "evidence_sha256": self.evidence_sha256 or None,
+            "reason_code": self.reason_code,
+            "tool_started": self.tool_started,
+            "source_user_message_id": self.source_user_message_id,
+            "request_binding_sha256": self.request_binding_sha256,
+            "target_identity_sha256": self.target_identity_sha256,
+            "tenant_sha256": self.tenant_sha256,
+            "person_sha256": self.person_sha256,
+            "exploit_payloads_sent": False,
+            "cve_assessment_performed": False,
+        }
+        encoded = json.dumps(
+            outcome,
+            ensure_ascii=True,
+            sort_keys=True,
+            separators=(",", ":"),
+            allow_nan=False,
+        ).encode("ascii")
+        return {
+            "schema": _ENGINEER_HOST_OUTCOME_RECEIPT_SCHEMA,
+            "outcome": outcome,
+            "outcome_sha256": hashlib.sha256(encoded).hexdigest(),
+        }
 
 
 @dataclass(frozen=True, slots=True)
@@ -2744,6 +3087,7 @@ def _engineer_network_report(
 
 _ENGINEER_NETWORK_REASON_TEXT = {
     "authorization_unavailable": "для этого хода не удалось подтвердить право Engineer",
+    "conflicting_artifact_action": "в одном ходе запрошены несовместимые действия над файлом",
     "configured_network_identity_mismatch": "разрешённая сеть изменилась до запуска",
     "configured_network_scan_intent_required": "не было явной просьбы отправлять сетевые пакеты",
     "configured_network_target_invalid_or_ambiguous": "цель указана неоднозначно или некорректно",
@@ -2802,6 +3146,456 @@ def _render_engineer_network_outcome(outcome: _EngineerNetworkOutcome) -> str:
             "Автоматически не повторяю, чтобы не дублировать сетевое действие."
         )
     return f"Сканирование не выполнено: {reason}."
+
+
+def _engineer_host_evidence_sha256(scan: Mapping[str, Any]) -> str:
+    raw_evidence = scan.get("evidence")
+    first = raw_evidence[0] if isinstance(raw_evidence, list) and raw_evidence else None
+    digest = str(first.get("sha256") or "") if isinstance(first, Mapping) else ""
+    return digest if re.fullmatch(r"[0-9a-f]{64}", digest) else ""
+
+
+def _engineer_host_service_rows(
+    scan: Mapping[str, Any],
+    open_ports: tuple[int, ...],
+) -> tuple[tuple[int, str, int | None], ...]:
+    classes = {
+        "domain": "dns",
+        "http": "web",
+        "http-alt": "web",
+        "https": "tls_web",
+        "imap": "mail",
+        "imaps": "tls_mail",
+        "microsoft-ds": "file_sharing",
+        "pop3": "mail",
+        "pop3s": "tls_mail",
+        "postgresql": "data_store",
+        "smtp": "mail",
+        "ssh": "remote_administration",
+        "ssl/http": "tls_web",
+    }
+    report = scan.get("report")
+    report = report if isinstance(report, Mapping) else {}
+    result = report.get("result")
+    result = result if isinstance(result, Mapping) else {}
+    hosts = result.get("hosts")
+    rows: dict[int, tuple[int, str, int | None]] = {}
+    for host_row in hosts if isinstance(hosts, list) else []:
+        if not isinstance(host_row, Mapping):
+            continue
+        raw_ports = host_row.get("ports")
+        for item in raw_ports if isinstance(raw_ports, list) else []:
+            if not isinstance(item, Mapping) or item.get("state") != "open":
+                continue
+            port = item.get("port")
+            if isinstance(port, bool) or not isinstance(port, int) or port not in open_ports:
+                continue
+            service = item.get("service")
+            service = service if isinstance(service, Mapping) else {}
+            confidence = service.get("confidence")
+            confidence = (
+                confidence
+                if isinstance(confidence, int) and not isinstance(confidence, bool) and 0 <= confidence <= 10
+                else None
+            )
+            rows[port] = (
+                port,
+                classes.get(str(service.get("name") or "").strip().casefold(), "unknown"),
+                confidence,
+            )
+    return tuple(rows[port] for port in sorted(rows))
+
+
+def _engineer_host_owned_outcome_unchecked(dossier: Mapping[str, Any]) -> _EngineerHostOutcome | None:
+    if dossier.get("_named_host_action_requested") is not True:
+        return None
+    profile_value = str(dossier.get("_named_host_profile") or "services")
+    profile: Literal["services", "vulnerabilities"] = (
+        cast(Literal["services", "vulnerabilities"], profile_value)
+        if profile_value in {"services", "vulnerabilities"}
+        else "services"
+    )
+    tool_started = dossier.get("_named_host_tool_started") is True
+    raw_targets = dossier.get("targets")
+    targets = raw_targets if isinstance(raw_targets, list) else []
+    target_row = targets[0] if len(targets) == 1 and isinstance(targets[0], Mapping) else {}
+    target = str(target_row.get("host") or "")
+    raw_addresses = target_row.get("addresses")
+    addresses = raw_addresses if isinstance(raw_addresses, list) else []
+    address = str(addresses[0] or "") if len(addresses) == 1 else ""
+    target_error = str(dossier.get("target_error") or "")
+    if target and not address and target_error:
+        target = ""
+    if target or address:
+        from friday.organs.engineer.targets import parse_host_token
+
+        parsed_host, parsed_port = parse_host_token(target)
+        if parsed_host != target or parsed_port is not None or str(ipaddress.ip_address(address)) != address:
+            raise ValueError("engineer host target projection changed")
+    source_user_message_id = str(dossier.get("_named_host_source_user_message_id") or "")
+    request_binding = str(dossier.get("_named_host_request_sha256") or "")
+    target_identity = str(dossier.get("_named_host_target_identity_sha256") or "")
+    tenant_sha256 = str(dossier.get("_named_host_tenant_sha256") or "")
+    person_sha256 = str(dossier.get("_named_host_person_sha256") or "")
+    continuation_source = str(dossier.get("_named_host_continuation_source_assistant_id") or "")
+    if target_error:
+        reason = target_error if target_error in _ENGINEER_HOST_FAILURE_REASONS else "target_policy_denied"
+        return _EngineerHostOutcome(
+            status=CapabilityStatus.DENIED,
+            profile=profile,
+            target=target,
+            address=address,
+            open_ports=(),
+            services=(),
+            findings=(),
+            active_probes_status="not_sent",
+            evidence_sha256="",
+            reason_code=reason,
+            tool_started=False,
+            source_user_message_id=source_user_message_id,
+            request_binding_sha256=request_binding,
+            target_identity_sha256=target_identity,
+            tenant_sha256=tenant_sha256,
+            person_sha256=person_sha256,
+            continuation_source_assistant_id=continuation_source,
+        )
+    result_value = dossier.get("host_vulnerability_assessment") if profile == "vulnerabilities" else None
+    if profile == "services":
+        host_rows = dossier.get("hosts")
+        result_value = host_rows[0] if isinstance(host_rows, list) and len(host_rows) == 1 else None
+    result = result_value if isinstance(result_value, Mapping) else {}
+    if not result:
+        return _EngineerHostOutcome(
+            status=CapabilityStatus.UNCERTAIN if tool_started else CapabilityStatus.UNAVAILABLE,
+            profile=profile,
+            target=target,
+            address=address,
+            open_ports=(),
+            services=(),
+            findings=(),
+            active_probes_status="uncertain" if tool_started else "not_sent",
+            evidence_sha256="",
+            reason_code="scan_unavailable",
+            tool_started=tool_started,
+            source_user_message_id=source_user_message_id,
+            request_binding_sha256=request_binding,
+            target_identity_sha256=target_identity,
+            tenant_sha256=tenant_sha256,
+            person_sha256=person_sha256,
+            continuation_source_assistant_id=continuation_source,
+        )
+    raw_open_ports = result.get("open_ports")
+    open_ports = tuple(
+        sorted(
+            {
+                item
+                for item in (raw_open_ports if isinstance(raw_open_ports, list) else [])
+                if isinstance(item, int) and not isinstance(item, bool) and 1 <= item <= 65535
+            }
+        )
+    )
+    scan_value = result.get("nmap")
+    scan = scan_value if isinstance(scan_value, Mapping) else {}
+    evidence_sha256 = _engineer_host_evidence_sha256(scan)
+    if profile == "vulnerabilities":
+        raw_services = result.get("services")
+        service_rows: list[tuple[int, str, int | None]] = []
+        for item in raw_services if isinstance(raw_services, list) else []:
+            if not isinstance(item, Mapping):
+                continue
+            port = item.get("port")
+            service_class = str(item.get("service_class") or "")
+            confidence = item.get("confidence")
+            if (
+                isinstance(port, int)
+                and not isinstance(port, bool)
+                and port in open_ports
+                and service_class in _ENGINEER_HOST_SERVICE_CLASSES
+                and (
+                    confidence is None
+                    or isinstance(confidence, int)
+                    and not isinstance(confidence, bool)
+                    and 0 <= confidence <= 10
+                )
+            ):
+                service_rows.append((port, service_class, cast(int | None, confidence)))
+        services = tuple(
+            sorted(
+                set(service_rows),
+                key=lambda item: (item[0], item[1], -1 if item[2] is None else item[2]),
+            )
+        )
+        raw_findings = result.get("findings")
+        finding_rows: list[tuple[str, int]] = []
+        for item in raw_findings if isinstance(raw_findings, list) else []:
+            if not isinstance(item, Mapping):
+                continue
+            code = str(item.get("code") or "")
+            port = item.get("port")
+            if code in _ENGINEER_HOST_FINDING_CODES and isinstance(port, int) and port in open_ports:
+                finding_rows.append((code, port))
+        findings = tuple(sorted(set(finding_rows), key=lambda item: (item[1], item[0])))
+        coverage_value = scan.get("coverage")
+        coverage = coverage_value if isinstance(coverage_value, Mapping) else {}
+        safe_contract = bool(
+            result.get("profile") == "vulnerabilities"
+            and result.get("service_profile") == "tcp_connect_then_nmap_selected_ports_version_light"
+            and result.get("ports_checked") == 64
+            and result.get("exploit_payloads_sent") is False
+            and result.get("cve_assessment_performed") is False
+            and result.get("verified_vulnerability_claims") is False
+        )
+        nmap_complete = bool(
+            not open_ports
+            or scan.get("ok") is True
+            and scan.get("used") is True
+            and scan.get("parser_status") == "complete"
+            and coverage.get("grade") == "complete"
+            and coverage.get("requested") == 1
+            and coverage.get("accounted") == 1
+            and coverage.get("skipped") == 0
+            and evidence_sha256
+        )
+        complete = bool(
+            safe_contract
+            and nmap_complete
+            and result.get("ok") is True
+            and result.get("assessment_status") == "complete"
+        )
+        partial = bool(
+            safe_contract and result.get("ok") is True and result.get("assessment_status") == "partial"
+        )
+    else:
+        services = _engineer_host_service_rows(scan, open_ports)
+        findings = ()
+        service_coverage_value = scan.get("coverage")
+        service_coverage = service_coverage_value if isinstance(service_coverage_value, Mapping) else {}
+        complete = bool(
+            result.get("ok") is True
+            and scan.get("ok") is True
+            and scan.get("parser_status") == "complete"
+            and service_coverage.get("grade") == "complete"
+            and evidence_sha256
+        )
+        partial = bool(result.get("ok") is True and result.get("active_probes_sent") is True)
+    active_sent = result.get("active_probes_sent") is True
+    if complete and active_sent and tool_started:
+        status = CapabilityStatus.SUCCEEDED
+        reason = "none"
+        probe_status: Literal["sent", "not_sent", "uncertain"] = "sent"
+    elif partial and active_sent and tool_started:
+        status = CapabilityStatus.PARTIAL
+        reason = "scan_unavailable"
+        probe_status = "sent"
+    else:
+        status = CapabilityStatus.UNCERTAIN if tool_started else CapabilityStatus.UNAVAILABLE
+        reason = "malformed_result"
+        probe_status = "uncertain" if tool_started else "not_sent"
+    return _EngineerHostOutcome(
+        status=status,
+        profile=profile,
+        target=target,
+        address=address,
+        open_ports=open_ports,
+        services=services,
+        findings=findings,
+        active_probes_status=probe_status,
+        evidence_sha256=evidence_sha256,
+        reason_code=reason,
+        tool_started=tool_started,
+        source_user_message_id=source_user_message_id,
+        request_binding_sha256=request_binding,
+        target_identity_sha256=target_identity,
+        tenant_sha256=tenant_sha256,
+        person_sha256=person_sha256,
+        continuation_source_assistant_id=continuation_source,
+    )
+
+
+def _engineer_host_owned_outcome(dossier: Mapping[str, Any]) -> _EngineerHostOutcome | None:
+    try:
+        return _engineer_host_owned_outcome_unchecked(dossier)
+    except (TypeError, ValueError):
+        return None
+
+
+_ENGINEER_HOST_REASON_TEXT = {
+    "authorization_unavailable": "не удалось подтвердить права Engineer",
+    "deadline": "истёк лимит времени после входа в сетевой контур",
+    "exact_current_target_required": "нужен ровно один явный хост",
+    "exact_single_host_required": "профиль требует один IP без расширения портом",
+    "malformed_result": "результат не прошёл структурную проверку",
+    "private_single_host_required": "разрешён только один operator-approved private/ULA host",
+    "scan_unavailable": "полное покрытие service/version не подтверждено",
+    "target_not_authorized": "цель не прошла текущую сетевую политику",
+    "target_outside_operator_policy": "цель вне operator-approved private scope",
+    "target_policy_denied": "цель не прошла текущую сетевую политику",
+    "target_resolution_timeout": "истёк лимит разрешения цели",
+    "turn_deadline_expired": "общий лимит хода истёк до запуска",
+}
+
+
+def _render_engineer_host_outcome(outcome: _EngineerHostOutcome) -> str:
+    if outcome.status in {CapabilityStatus.SUCCEEDED, CapabilityStatus.PARTIAL}:
+        qualifier = "завершена" if outcome.status is CapabilityStatus.SUCCEEDED else "завершена частично"
+        if outcome.profile == "vulnerabilities":
+            lines = [
+                f"Безопасная проверка поверхности хоста `{outcome.address}` {qualifier}.",
+                (
+                    "Проверены фиксированные TCP-порты и закрытый light service/version profile; "
+                    "эксплойты и произвольные команды не запускались."
+                    if outcome.status is CapabilityStatus.SUCCEEDED and outcome.open_ports
+                    else "Bounded TCP discovery завершена; открытых портов для запуска "
+                    "light service/version profile не обнаружено. Эксплойты и произвольные "
+                    "команды не запускались."
+                    if outcome.status is CapabilityStatus.SUCCEEDED
+                    else "Выполнена bounded TCP discovery; полное покрытие light service/version "
+                    "не подтверждено. Эксплойты и произвольные команды не запускались."
+                ),
+            ]
+            if outcome.findings:
+                lines.append("Поверхности для проверки:")
+                lines.extend(
+                    f"- `{port}/tcp`: TCP-порт доступен; фактический сервис и его "
+                    "конфигурация не подтверждены."
+                    for _code, port in outcome.findings
+                )
+            else:
+                lines.append(
+                    "На проверенных портах code-owned exposure-эвристики не сработали; "
+                    "это не доказывает отсутствие уязвимостей."
+                )
+            lines.append("CVE-проверка не выполнялась; подтверждённых CVE-утверждений нет.")
+        else:
+            lines = [f"Сканирование хоста `{outcome.address}` {qualifier}."]
+            lines.append(
+                "Открытые TCP-порты: "
+                + (
+                    ", ".join(f"`{port}`" for port in outcome.open_ports)
+                    if outcome.open_ports
+                    else "не обнаружены"
+                )
+                + "."
+            )
+            known_services = [row for row in outcome.services if row[1] != "unknown"]
+            if known_services:
+                lines.append(
+                    "Нормализованные классы service/version evidence: "
+                    + ", ".join(
+                        f"`{port}` — `{service_class}`"
+                        + (f" (confidence {confidence}/10)" if confidence is not None else "")
+                        for port, service_class, confidence in known_services
+                    )
+                    + "."
+                )
+            lines.append("Активные пробы отправлены; эксплуатационные payload не запускались.")
+        if outcome.status is CapabilityStatus.PARTIAL:
+            lines.append("Покрытие неполное; автоматически повторять сетевое действие не буду.")
+        return "\n".join(lines)
+    reason = _ENGINEER_HOST_REASON_TEXT.get(outcome.reason_code, "результат недоступен")
+    if outcome.status is CapabilityStatus.DENIED:
+        return f"Проверка хоста не запускалась: {reason}."
+    if outcome.status is CapabilityStatus.UNCERTAIN:
+        return (
+            f"Проверка хоста была запущена, но её итог не подтверждён: {reason}. "
+            "Автоматически не повторяю сетевое действие."
+        )
+    return f"Проверка хоста не выполнена: {reason}."
+
+
+def _accepted_engineer_host_receipt(value: object) -> tuple[Mapping[str, Any], str] | None:
+    if isinstance(value, str):
+        try:
+            value = json.loads(value)
+        except (TypeError, ValueError, json.JSONDecodeError):
+            return None
+    if not isinstance(value, Mapping) or value.get("schema") != _ENGINEER_HOST_OUTCOME_RECEIPT_SCHEMA:
+        return None
+    outcome = value.get("outcome")
+    digest = str(value.get("outcome_sha256") or "")
+    if not isinstance(outcome, Mapping) or re.fullmatch(r"[0-9a-f]{64}", digest) is None:
+        return None
+    expected_keys = {
+        "active_probes_status",
+        "cve_assessment_performed",
+        "evidence_sha256",
+        "exploit_payloads_sent",
+        "finding_count",
+        "open_port_count",
+        "person_sha256",
+        "profile",
+        "reason_code",
+        "request_binding_sha256",
+        "schema",
+        "service_count",
+        "source_user_message_id",
+        "status",
+        "target_count",
+        "target_identity_sha256",
+        "tenant_sha256",
+        "tool_started",
+    }
+    if set(outcome) != expected_keys or outcome.get("schema") != _ENGINEER_HOST_OUTCOME_SCHEMA:
+        return None
+    try:
+        encoded = json.dumps(
+            dict(outcome),
+            ensure_ascii=True,
+            sort_keys=True,
+            separators=(",", ":"),
+            allow_nan=False,
+        ).encode("ascii")
+    except (TypeError, ValueError, UnicodeEncodeError):
+        return None
+    if not hmac.compare_digest(hashlib.sha256(encoded).hexdigest(), digest):
+        return None
+    counts = (
+        outcome.get("target_count"),
+        outcome.get("open_port_count"),
+        outcome.get("service_count"),
+        outcome.get("finding_count"),
+    )
+    if any(isinstance(item, bool) or not isinstance(item, int) or not 0 <= item <= 64 for item in counts):
+        return None
+    for key in (
+        "evidence_sha256",
+        "person_sha256",
+        "request_binding_sha256",
+        "target_identity_sha256",
+        "tenant_sha256",
+    ):
+        if re.fullmatch(r"[0-9a-f]{64}", str(outcome.get(key) or "")) is None:
+            return None
+    if (
+        outcome.get("status") != CapabilityStatus.SUCCEEDED.value
+        or outcome.get("profile") != "services"
+        or outcome.get("target_count") != 1
+        or outcome.get("active_probes_status") != "sent"
+        or outcome.get("reason_code") != "none"
+        or outcome.get("tool_started") is not True
+        or outcome.get("exploit_payloads_sent") is not False
+        or outcome.get("cve_assessment_performed") is not False
+        or re.fullmatch(r"msg_[0-9a-f]{16}", str(outcome.get("source_user_message_id") or "")) is None
+    ):
+        return None
+    return outcome, digest
+
+
+def _render_engineer_nmap_capability_truth(dossier: Mapping[str, Any]) -> str:
+    environment = dossier.get("environment")
+    environment = environment if isinstance(environment, Mapping) else {}
+    tools = environment.get("tools")
+    tools = tools if isinstance(tools, Mapping) else {}
+    if tools.get("nmap") is True:
+        return (
+            "Проверенный nmap доступен и запускается через закрытые code-owned профили: "
+            "ограниченное сканирование и light service/version assessment. Произвольный shell, "
+            "произвольные флаги и подтверждённые CVE-выводы этот контур не предоставляет."
+        )
+    return (
+        "Проверенный nmap в этом ходе не прошёл attestation или недоступен. "
+        "Произвольный shell вместо него не используется."
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -3082,6 +3876,7 @@ def _engineer_decompile_owned_outcome(
 _ENGINEER_DECOMPILE_REASON_TEXT = {
     "ambiguous_artifact": "в активном контексте несколько файлов; нужен ровно один",
     "authorization_unavailable": "для этого хода не удалось подтвердить право Engineer",
+    "conflicting_artifact_action": "в одном ходе запрошены несовместимые действия над файлом",
     "deadline_expired": "общий лимит времени хода истёк",
     "decompile_unavailable": "инструмент не вернул проверяемый результат",
     "decompiler_failed": "Ghidra завершилась без проверяемого отчёта",
@@ -3134,6 +3929,426 @@ def _render_engineer_decompile_outcome(outcome: _EngineerDecompileOutcome) -> st
             f"Декомпилятор был запущен, но подтвердить итог не удалось: {reason}. Автоматически не повторяю."
         )
     return f"Декомпиляция не выполнена: {reason}."
+
+
+@dataclass(frozen=True, slots=True)
+class _EngineerCompileSourceBinding:
+    """Private identity of the exact Raw bytes admitted for one compilation."""
+
+    raw_id: str
+    filename: str
+    source_sha256: str
+    source_identity_sha256: str
+
+    def __post_init__(self) -> None:
+        if re.fullmatch(r"raw_[0-9a-f]{16}", self.raw_id) is None:
+            raise ValueError("engineer compile source Raw id is invalid")
+        if re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]{0,119}\.java", self.filename) is None:
+            raise ValueError("engineer compile source filename is invalid")
+        if any(
+            re.fullmatch(r"[0-9a-f]{64}", digest) is None
+            for digest in (self.source_sha256, self.source_identity_sha256)
+        ):
+            raise ValueError("engineer compile source identity is invalid")
+
+
+@dataclass(frozen=True, slots=True)
+class _EngineerCompileOutcome:
+    """Closed projection of one code-owned fixed-profile Java build."""
+
+    status: CapabilityStatus
+    source_size_bytes: int
+    class_files: int
+    class_bytes: int
+    jar_size_bytes: int
+    source_sha256: str
+    jar_sha256: str
+    jar_prepared: bool
+    tool_version: str
+    jdk_version: str
+    reason_code: str
+    tool_started: bool
+    source_raw_id: str = ""
+    source_filename: str = ""
+    source_identity_sha256: str = ""
+    jar_filename: str = ""
+
+    def __post_init__(self) -> None:
+        if self.status not in {
+            CapabilityStatus.SUCCEEDED,
+            CapabilityStatus.DENIED,
+            CapabilityStatus.UNAVAILABLE,
+            CapabilityStatus.FAILED,
+            CapabilityStatus.UNCERTAIN,
+        }:
+            raise ValueError("engineer compile outcome status is not closed")
+        counts = (
+            (self.source_size_bytes, 0, 1024 * 1024),
+            (self.class_files, 0, 256),
+            (self.class_bytes, 0, 8 * 1024 * 1024),
+            (self.jar_size_bytes, 0, 16 * 1024 * 1024),
+        )
+        if any(
+            isinstance(value, bool) or not isinstance(value, int) or not minimum <= value <= maximum
+            for value, minimum, maximum in counts
+        ):
+            raise ValueError("engineer compile accounting is invalid")
+        for digest in (self.source_sha256, self.jar_sha256):
+            if digest and re.fullmatch(r"[0-9a-f]{64}", digest) is None:
+                raise ValueError("engineer compile digest is invalid")
+        if self.source_identity_sha256 and re.fullmatch(r"[0-9a-f]{64}", self.source_identity_sha256) is None:
+            raise ValueError("engineer compile source identity digest is invalid")
+        for version in (self.tool_version, self.jdk_version):
+            if version and re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9.+_-]{0,39}", version) is None:
+                raise ValueError("engineer compile version is invalid")
+        if self.reason_code not in _ENGINEER_COMPILE_FAILURE_REASONS | {"none"}:
+            raise ValueError("engineer compile reason is not closed")
+        if self.status is CapabilityStatus.SUCCEEDED and not (
+            self.tool_started
+            and self.source_size_bytes > 0
+            and self.class_files > 0
+            and self.class_bytes >= 8
+            and self.jar_size_bytes > 0
+            and self.source_sha256
+            and self.jar_sha256
+            and self.jar_prepared
+            and re.fullmatch(r"raw_[0-9a-f]{16}", self.source_raw_id) is not None
+            and re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]{0,119}\.java", self.source_filename) is not None
+            and self.source_identity_sha256
+            and re.fullmatch(r"[A-Za-z0-9._-]{1,180}\.jar", self.jar_filename) is not None
+            and self.tool_version == _ENGINEER_COMPILE_REPORT_TOOL_VERSION
+            and self.jdk_version == _ENGINEER_COMPILE_REPORT_JDK_VERSION
+            and self.reason_code == "none"
+        ):
+            raise ValueError("successful engineer compile outcome is incomplete")
+        if self.status is CapabilityStatus.DENIED and self.tool_started:
+            raise ValueError("denied engineer compile outcome claims an entered tool")
+        if self.status in {CapabilityStatus.FAILED, CapabilityStatus.UNCERTAIN} and not self.tool_started:
+            raise ValueError("entered engineer compile outcome has no entered boundary")
+
+    def receipt(self) -> dict[str, object]:
+        outcome: dict[str, object] = {
+            "schema": _ENGINEER_COMPILE_OUTCOME_SCHEMA,
+            "status": self.status.value,
+            "profile": _ENGINEER_COMPILE_PROFILE,
+            "source_size_bytes": self.source_size_bytes,
+            "class_files": self.class_files,
+            "class_bytes": self.class_bytes,
+            "jar_size_bytes": self.jar_size_bytes,
+            "source_sha256": self.source_sha256 or None,
+            "jar_sha256": self.jar_sha256 or None,
+            "jar_prepared": self.jar_prepared,
+            "tool_version": self.tool_version or None,
+            "jdk_version": self.jdk_version or None,
+            "java_release": 21,
+            "class_major_version": 65,
+            "sample_executed": False,
+            "network": "none",
+            "runtime_validation": "not_performed",
+            "reason_code": self.reason_code,
+            "tool_started": self.tool_started,
+        }
+        encoded = json.dumps(
+            outcome,
+            ensure_ascii=True,
+            sort_keys=True,
+            separators=(",", ":"),
+            allow_nan=False,
+        ).encode("ascii")
+        return {
+            "schema": _ENGINEER_COMPILE_OUTCOME_RECEIPT_SCHEMA,
+            "outcome": outcome,
+            "outcome_sha256": hashlib.sha256(encoded).hexdigest(),
+        }
+
+
+def _engineer_compile_failure_reason(value: object) -> str:
+    reason = str(value or "").strip().casefold()
+    for prefix in ("engineer tool refused: ", "engineer tool failed: "):
+        if reason.startswith(prefix):
+            reason = reason.removeprefix(prefix)
+    if "deadline" in reason:
+        reason = "deadline_expired"
+    return reason if reason in _ENGINEER_COMPILE_FAILURE_REASONS else "compile_unavailable"
+
+
+def _engineer_compile_attachment(dossier: Mapping[str, Any]) -> dict[str, Any] | None:
+    value = dossier.get("_artifact_compile_attachment")
+    if not isinstance(value, Mapping):
+        return None
+    filename = str(value.get("filename") or "")
+    content = value.get("content_base64")
+    raw_result = dossier.get("artifact_compile")
+    result = raw_result if isinstance(raw_result, Mapping) else {}
+    raw_report = result.get("report")
+    report = raw_report if isinstance(raw_report, Mapping) else {}
+    expected_sha256 = str(report.get("jar_sha256") or "")
+    if (
+        value.get("kind") != "document"
+        or not filename.casefold().endswith(".jar")
+        or not 1 <= len(filename) <= 180
+        or re.fullmatch(r"[A-Za-z0-9._-]+", filename) is None
+        or value.get("mime_type") != "application/java-archive"
+        or not isinstance(content, str)
+        or not content
+        or len(content) > 22_369_624
+        or re.fullmatch(r"[0-9a-f]{64}", expected_sha256) is None
+    ):
+        return None
+    try:
+        decoded = base64.b64decode(content, validate=True)
+    except (binascii.Error, ValueError):
+        return None
+    if not 1 <= len(decoded) <= 16 * 1024 * 1024 or not hmac.compare_digest(
+        hashlib.sha256(decoded).hexdigest(), expected_sha256
+    ):
+        return None
+    from friday.organs.engineer import compiler as engineer_compiler
+
+    inventory = engineer_compiler.validate_jar(decoded)
+    if (
+        inventory is None
+        or inventory.get("class_files") != report.get("class_files")
+        or inventory.get("class_bytes") != report.get("class_bytes")
+        or len(decoded) != report.get("jar_size_bytes")
+    ):
+        return None
+    return dict(value)
+
+
+def _inline_generated_file_batch_identity(
+    values: object,
+    *,
+    max_bytes: int,
+) -> tuple[tuple[str, str, int, str], ...] | None:
+    """Structurally bind every inline output before and after persistence."""
+
+    if not isinstance(values, list) or not 1 <= len(values) <= 16:
+        return None
+    byte_cap = max(0, int(max_bytes))
+    total = 0
+    identities: list[tuple[str, str, int, str]] = []
+    for value in values:
+        if not isinstance(value, Mapping):
+            return None
+        filename = value.get("filename")
+        mime_type = value.get("mime_type")
+        encoded = value.get("content_base64")
+        if (
+            not isinstance(filename, str)
+            or not filename
+            or len(filename) > 180
+            or not isinstance(mime_type, str)
+            or not mime_type
+            or len(mime_type) > 128
+            or not isinstance(encoded, str)
+            or not encoded
+        ):
+            return None
+        try:
+            payload = base64.b64decode(encoded, validate=True)
+        except (binascii.Error, TypeError, ValueError):
+            return None
+        total += len(payload)
+        if len(payload) > byte_cap or total > byte_cap:
+            return None
+        identities.append((filename, mime_type, len(payload), hashlib.sha256(payload).hexdigest()))
+    return tuple(identities)
+
+
+def _engineer_compile_owned_outcome_unchecked(
+    dossier: Mapping[str, Any],
+) -> _EngineerCompileOutcome | None:
+    if dossier.get("_artifact_compile_action_requested") is not True:
+        return None
+    tool_started = dossier.get("_artifact_compile_tool_started") is True
+    reason = _engineer_compile_failure_reason(
+        dossier.get("_artifact_compile_error") or dossier.get("_artifact_compile_reason")
+    )
+    raw_result = dossier.get("artifact_compile")
+    result = raw_result if isinstance(raw_result, Mapping) else {}
+    raw_report = result.get("report")
+    report = raw_report if isinstance(raw_report, Mapping) else {}
+    attachment = _engineer_compile_attachment(dossier)
+    binding = dossier.get("_artifact_compile_source_binding")
+    if result.get("ok") is not True:
+        status = (
+            CapabilityStatus.DENIED
+            if not tool_started and reason in {"exact_artifact_required", "ambiguous_artifact"}
+            else CapabilityStatus.UNCERTAIN
+            if tool_started and reason == "deadline_expired"
+            else CapabilityStatus.FAILED
+            if tool_started
+            else CapabilityStatus.UNAVAILABLE
+        )
+        return _EngineerCompileOutcome(
+            status=status,
+            source_size_bytes=0,
+            class_files=0,
+            class_bytes=0,
+            jar_size_bytes=0,
+            source_sha256="",
+            jar_sha256="",
+            jar_prepared=False,
+            tool_version="",
+            jdk_version="",
+            reason_code=reason,
+            tool_started=tool_started,
+        )
+
+    def bounded_int(name: str, minimum: int, maximum: int) -> int:
+        value = report.get(name)
+        if isinstance(value, bool) or not isinstance(value, int) or not minimum <= value <= maximum:
+            raise ValueError(f"invalid compile report field: {name}")
+        return value
+
+    raw_sandbox = result.get("sandbox")
+    sandbox_report = raw_sandbox if isinstance(raw_sandbox, Mapping) else {}
+    pids_limit = sandbox_report.get("compile_pids_limit")
+    memory_limit = sandbox_report.get("compile_memory_limit_bytes")
+    if (
+        type(binding) is not _EngineerCompileSourceBinding
+        or report.get("schema") != _ENGINEER_COMPILE_REPORT_SCHEMA
+        or report.get("status") != "completed"
+        or report.get("profile") != _ENGINEER_COMPILE_PROFILE
+        or report.get("tool_name") != _ENGINEER_COMPILE_REPORT_TOOL
+        or report.get("tool_version") != _ENGINEER_COMPILE_REPORT_TOOL_VERSION
+        or report.get("jdk_version") != _ENGINEER_COMPILE_REPORT_JDK_VERSION
+        or report.get("java_release") != 21
+        or report.get("class_major_version") != 65
+        or report.get("archive") != "jar"
+        or report.get("compression") != "stored"
+        or report.get("signed") is not False
+        or report.get("manifest") is not False
+        or report.get("runtime_validation") != "not_performed"
+        or report.get("sample_executed") is not False
+        or report.get("network") != "none"
+        or report.get("jar_prepared") is not True
+        or sandbox_report.get("ok") is not True
+        or sandbox_report.get("boundary") != "bubblewrap"
+        or sandbox_report.get("network") != "none"
+        or isinstance(pids_limit, bool)
+        or not isinstance(pids_limit, int)
+        or not 1 <= pids_limit <= 512
+        or isinstance(memory_limit, bool)
+        or not isinstance(memory_limit, int)
+        or not 10 * 1024**3 <= memory_limit <= 16 * 1024**3
+    ):
+        raise ValueError("invalid compile safety attestation")
+    source_sha256 = str(report.get("source_sha256") or "")
+    jar_sha256 = str(report.get("jar_sha256") or "")
+    if (
+        re.fullmatch(r"[0-9a-f]{64}", source_sha256) is None
+        or re.fullmatch(r"[0-9a-f]{64}", jar_sha256) is None
+        or not hmac.compare_digest(source_sha256, binding.source_sha256)
+        or attachment is None
+    ):
+        raise ValueError("invalid compile report digest")
+    return _EngineerCompileOutcome(
+        status=CapabilityStatus.SUCCEEDED,
+        source_size_bytes=bounded_int("source_size_bytes", 1, 1024 * 1024),
+        class_files=bounded_int("class_files", 1, 256),
+        class_bytes=bounded_int("class_bytes", 8, 8 * 1024 * 1024),
+        jar_size_bytes=bounded_int("jar_size_bytes", 1, 16 * 1024 * 1024),
+        source_sha256=source_sha256,
+        jar_sha256=jar_sha256,
+        jar_prepared=attachment is not None,
+        tool_version=str(report.get("tool_version") or ""),
+        jdk_version=str(report.get("jdk_version") or ""),
+        reason_code="none",
+        tool_started=tool_started,
+        source_raw_id=binding.raw_id,
+        source_filename=binding.filename,
+        source_identity_sha256=binding.source_identity_sha256,
+        jar_filename=str(attachment.get("filename") or ""),
+    )
+
+
+def _engineer_compile_owned_outcome(
+    dossier: Mapping[str, Any],
+) -> _EngineerCompileOutcome | None:
+    try:
+        return _engineer_compile_owned_outcome_unchecked(dossier)
+    except (TypeError, ValueError):
+        if dossier.get("_artifact_compile_action_requested") is not True:
+            return None
+        tool_started = dossier.get("_artifact_compile_tool_started") is True
+        return _EngineerCompileOutcome(
+            status=CapabilityStatus.UNCERTAIN if tool_started else CapabilityStatus.UNAVAILABLE,
+            source_size_bytes=0,
+            class_files=0,
+            class_bytes=0,
+            jar_size_bytes=0,
+            source_sha256="",
+            jar_sha256="",
+            jar_prepared=False,
+            tool_version="",
+            jdk_version="",
+            reason_code="malformed_result",
+            tool_started=tool_started,
+        )
+
+
+_ENGINEER_COMPILE_REASON_TEXT = {
+    "ambiguous_artifact": "в активном контексте несколько файлов; нужен ровно один",
+    "audit_start_unavailable": "не удалось сохранить обязательную запись о старте",
+    "authorization_unavailable": "для этого хода не удалось подтвердить право Engineer",
+    "compiler_busy": "другая тяжёлая операция Engineer уже выполняется",
+    "compiler_failed": "javac завершился с ошибкой без публикации JAR",
+    "compiler_launch_failed": "не удалось запустить проверенный javac",
+    "compiler_memory_cgroup_unbounded": "не подтверждён конечный aggregate memory cgroup",
+    "compiler_output_exceeds_cap": "JAR превышает разрешённый предел",
+    "compiler_output_invalid": "классы или JAR не прошли проверку целостности",
+    "compiler_pid_cgroup_unbounded": "не подтверждён предел процессов compiler cgroup",
+    "compiler_report_invalid": "отчёт компилятора не прошёл проверку целостности",
+    "compiler_resource_boundary_unavailable": "ресурсная граница компилятора недоступна",
+    "compiler_timeout": "javac превысил лимит времени",
+    "compile_unavailable": "компилятор не вернул проверяемый результат",
+    "conflicting_artifact_action": "в одном ходе запрошены несовместимые действия над файлом",
+    "deadline_expired": "общий лимит времени хода истёк",
+    "exact_artifact_required": "не найден единственный явно выбранный Java-файл",
+    "file_access_denied": "доступ к исходному файлу отозван",
+    "file_unavailable": "исходный файл стал недоступен",
+    "input_encoding_invalid": "исходник не является допустимым UTF-8 Java-текстом",
+    "input_size_invalid": "размер исходника не входит в разрешённый предел",
+    "invalid_artifact_handle": "идентификатор исходного файла некорректен",
+    "invalid_filename": "нужен безопасный basename с расширением .java",
+    "malformed_result": "результат компилятора не прошёл проверку целостности",
+    "sandbox_unavailable": "изолированная среда недоступна",
+    "source_identity_changed": "имя или байты исходного файла изменились до запуска",
+    "toolchain_incomplete": "проверенный JDK неполон",
+    "toolchain_missing": "проверенный JDK не установлен",
+    "toolchain_untrusted": "JDK не прошёл проверку целостности",
+    "worker_failed": "изолированный обработчик завершился без отчёта",
+    "worker_launch_failed": "не удалось запустить изолированный обработчик",
+    "worker_output_empty": "изолированный обработчик не вернул JAR",
+    "worker_output_exceeds_cap": "выход обработчика превышает предел",
+    "worker_result_invalid": "ответ обработчика не прошёл проверку",
+    "worker_timeout": "изолированный обработчик превысил лимит времени",
+    "workspace_not_clean": "не удалось подготовить чистое рабочее пространство",
+}
+
+
+def _render_engineer_compile_outcome(outcome: _EngineerCompileOutcome) -> str:
+    if outcome.status is CapabilityStatus.SUCCEEDED:
+        return (
+            f"Java 21 source скомпилирован: {outcome.class_files} class-файл(ов), "
+            f"{outcome.class_bytes} байт bytecode; подготовлен детерминированный JAR "
+            f"размером {outcome.jar_size_bytes} байт. Temurin {outcome.jdk_version}. "
+            "Исходник, class-файлы и JAR не запускались; сеть отсутствовала, "
+            "runtime-проверка не выполнялась."
+        )
+    reason = _ENGINEER_COMPILE_REASON_TEXT.get(
+        outcome.reason_code,
+        _ENGINEER_COMPILE_REASON_TEXT["compile_unavailable"],
+    )
+    if outcome.status is CapabilityStatus.DENIED:
+        return f"Компиляция не запускалась: {reason}."
+    if outcome.status is CapabilityStatus.UNCERTAIN:
+        return f"Компилятор был запущен, но подтвердить итог не удалось: {reason}. Автоматически не повторяю."
+    if outcome.status is CapabilityStatus.FAILED:
+        return f"Компиляция завершилась ошибкой: {reason}. JAR не публиковался."
+    return f"Компиляция не выполнена: {reason}."
 
 
 def _engineer_tool_name(schema: Mapping[str, Any]) -> str:
@@ -3355,6 +4570,18 @@ def _record_engineer_action_receipt(
             if isinstance(versions, dict):
                 for name, raw_version in (
                     ("ghidra", report.get("tool_version")),
+                    ("jdk", report.get("jdk_version")),
+                ):
+                    version = " ".join(str(raw_version or "").split())[:160]
+                    if re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9.+_-]{0,39}", version):
+                        versions.setdefault(name, version)
+        elif tool_name == _ENGINEER_COMPILE_ACTION_TOOL:
+            raw_report = data.get("report")
+            report = raw_report if isinstance(raw_report, Mapping) else {}
+            versions = ledger.setdefault("tool_versions", {})
+            if isinstance(versions, dict):
+                for name, raw_version in (
+                    ("javac", report.get("tool_version")),
                     ("jdk", report.get("jdk_version")),
                 ):
                     version = " ".join(str(raw_version or "").split())[:160]
@@ -6275,6 +7502,9 @@ _PRIVATE_SOURCE_RESULT_TOOL_NAMES = frozenset(
         "host_job_cancel",
         "host_job_status",
         "host_json_extract",
+        "engineer_command_run",
+        "engineer_command_status",
+        "engineer_command_cancel",
         "software_install",
         "software_remove",
         "software_search",
@@ -11373,6 +12603,10 @@ _ARCHIVE_SEARCH_AUTHORITY_CHANGED_BEFORE_PUBLICATION = (
 _ENGINEER_NETWORK_REPORT_AUTHORITY_CHANGED_BEFORE_PUBLICATION = (
     "Право на Engineer-аудит или точная привязка результата изменились до публикации. "
     "Сетевой результат и отчёт-файл не опубликованы; новый скан автоматически не запускаю."
+)
+_ENGINEER_COMPILE_AUTHORITY_CHANGED_BEFORE_PUBLICATION = (
+    "Право на Engineer-сборку, исходник или точный JAR изменились до публикации. "
+    "Результат и JAR не опубликованы; компиляция автоматически не повторялась."
 )
 _ENGINEER_NETWORK_REPORT_FOLLOWUP_UNAVAILABLE = (
     "В этом сообщении нет точного текущего результата, из которого можно безопасно собрать "
@@ -34926,7 +36160,12 @@ MODE_GUIDANCE = {
         "с конкретным offset/section/service/response. Не объявляй CVE или подтверждённую "
         "уязвимость только по строке версии. При изменении файла сохраняй исходник и указывай "
         "точные операции и хэши. Активное подтверждение через эксплуатацию в этом профиле не "
-        "выполняется; допустим только основанный на найденных фактах план проверки защит."
+        "выполняется; допустим только основанный на найденных фактах план проверки защит. "
+        "Если владелец просит запустить установленную консольную программу и тебе предложен "
+        "engineer_command_run, сформируй точный argv и вызови его: не заявляй, что запуск "
+        "произвольной установленной программы недоступен. Этот инструмент сам покажет точную "
+        "команду владельцу и начнёт её только после отдельного подтверждения. Не подменяй argv "
+        "shell-строкой и не обещай доступ к сети или host-файлам, которого нет в описании инструмента."
     ),
 }
 
@@ -35121,6 +36360,9 @@ class AgentContext:
     #: regenerate inherits the original row, so the same Obsidian operation is
     #: reconciled instead of being emitted under a fresh caller-controlled key.
     effect_root_user_message_id: str = ""
+    #: Authenticated Telegram update which carried the current owner command.
+    #: It is transport provenance, never a model argument or generic API claim.
+    engineer_command_telegram_update_id: str = ""
     #: Local calendar day frozen on the immutable root turn. Dynamic words such
     #: as "today" must resolve to the same arguments on a regenerate after
     #: midnight, otherwise one idempotency key would name two effects.
@@ -35348,6 +36590,7 @@ class AgentContext:
     ingestion: dict[str, Any] = field(default_factory=dict)
     interaction_mode: str = "dialogue"
     engineer_dossier: dict[str, Any] = field(default_factory=dict)
+    engineer_host_outcome: _EngineerHostOutcome | None = None
     engineer_network_outcome: _EngineerNetworkOutcome | None = None
     engineer_network_report: _EngineerNetworkReport | None = field(
         default=None,
@@ -35355,6 +36598,7 @@ class AgentContext:
         compare=False,
     )
     engineer_decompile_outcome: _EngineerDecompileOutcome | None = None
+    engineer_compile_outcome: _EngineerCompileOutcome | None = None
     pending_relations: int = 0
     pending_conflicts: int = 0
     feedback_summary: dict[str, Any] = field(default_factory=dict)
@@ -37578,6 +38822,194 @@ class AgentRuntime:
             trace_state_restored=False,
         )
 
+    def _engineer_host_continuation(
+        self,
+        conn: Any,
+        *,
+        actor: ActorContext,
+        conversation_id: str,
+        current_user_message_id: str,
+    ) -> _EngineerHostContinuation | None:
+        """Restore only a fresh accepted exact-host receipt, never assistant prose."""
+
+        from friday.organs.engineer.targets import (
+            PinnedTarget,
+            extract_single_target,
+            requests_active_assessment,
+            requests_host_vulnerability_assessment,
+            requests_host_vulnerability_followup,
+            requests_nmap_capability_truth,
+            target_source_sha256,
+        )
+
+        current = conn.execute(
+            """SELECT rowid,id,role,content FROM messages
+                 WHERE id=? AND conversation_id=? AND user_id=?""",
+            (current_user_message_id, conversation_id, actor.user_id),
+        ).fetchone()
+        latest = conn.execute(
+            """SELECT id FROM messages WHERE conversation_id=? AND user_id=?
+                 ORDER BY rowid DESC LIMIT 1""",
+            (conversation_id, actor.user_id),
+        ).fetchone()
+        if (
+            current is None
+            or latest is None
+            or str(current["role"] or "") != "user"
+            or str(latest["id"] or "") != current_user_message_id
+            or not requests_host_vulnerability_followup(str(current["content"] or ""))
+        ):
+            return None
+        try:
+            namespace_key = load_trace_namespace_key(conn)
+        except RuntimeError:
+            return None
+        rows = conn.execute(
+            """SELECT rowid,id,role,content,metadata_json,reply_to,created_at
+                 FROM messages WHERE conversation_id=? AND user_id=? AND rowid<?
+                 ORDER BY rowid DESC LIMIT 8""",
+            (conversation_id, actor.user_id, int(current["rowid"])),
+        ).fetchall()
+        candidate_index = -1
+        candidate_metadata: Mapping[str, Any] | None = None
+        accepted: tuple[Mapping[str, Any], str] | None = None
+        for index, row in enumerate(rows):
+            if str(row["role"] or "") != "assistant":
+                continue
+            try:
+                metadata = json.loads(str(row["metadata_json"] or "{}"))
+            except (TypeError, ValueError, json.JSONDecodeError):
+                continue
+            if not isinstance(metadata, Mapping):
+                continue
+            receipt = _accepted_engineer_host_receipt(metadata.get(_ENGINEER_HOST_OUTCOME_METADATA_KEY))
+            if receipt is not None:
+                candidate_index = index
+                candidate_metadata = metadata
+                accepted = receipt
+                break
+        if candidate_index < 0 or candidate_metadata is None or accepted is None:
+            return None
+        # The only non-displacing gap admitted by this hotfix is one or more
+        # exact capability-truth exchanges.  Assistant prose is never parsed.
+        gap = rows[:candidate_index]
+        if len(gap) % 2:
+            return None
+        for index in range(0, len(gap), 2):
+            assistant_row = gap[index]
+            user_row = gap[index + 1]
+            if (
+                str(assistant_row["role"] or "") != "assistant"
+                or str(user_row["role"] or "") != "user"
+                or str(assistant_row["reply_to"] or "") != str(user_row["id"] or "")
+                or not requests_nmap_capability_truth(str(user_row["content"] or ""))
+            ):
+                return None
+            try:
+                gap_metadata = json.loads(str(assistant_row["metadata_json"] or "{}"))
+            except (TypeError, ValueError, json.JSONDecodeError):
+                return None
+            if isinstance(gap_metadata, Mapping) and gap_metadata.get(_ENGINEER_HOST_OUTCOME_METADATA_KEY):
+                return None
+        candidate = rows[candidate_index]
+        outcome, outcome_sha256 = accepted
+        source_user_message_id = str(outcome.get("source_user_message_id") or "")
+        if str(candidate["reply_to"] or "") != source_user_message_id:
+            return None
+        try:
+            accepted_at = datetime.fromisoformat(str(candidate["created_at"] or "").replace("Z", "+00:00"))
+        except ValueError:
+            return None
+        if accepted_at.tzinfo is None or datetime.now(UTC) - accepted_at.astimezone(UTC) > timedelta(
+            seconds=_ENGINEER_HOST_CONTINUATION_TTL_SEC
+        ):
+            return None
+        source = conn.execute(
+            """SELECT id,role,content FROM messages
+                 WHERE id=? AND conversation_id=? AND user_id=?""",
+            (source_user_message_id, conversation_id, actor.user_id),
+        ).fetchone()
+        if source is None or str(source["role"] or "") != "user":
+            return None
+        source_content = str(source["content"] or "")
+        if not requests_active_assessment(source_content) or requests_host_vulnerability_assessment(
+            source_content
+        ):
+            return None
+        try:
+            selected = extract_single_target(source_content)
+        except ValueError:
+            return None
+        token = str(selected.get("token") or "") if selected is not None else ""
+        if selected is None or selected.get("port") is not None:
+            return None
+        try:
+            address = ipaddress.ip_address(token)
+        except ValueError:
+            return None
+        canonical = str(address)
+        if token != canonical or str(selected.get("host") or "") != canonical:
+            return None
+        source_sha256 = target_source_sha256(source_content, token)
+        binding = _engineer_host_private_digest(
+            namespace_key,
+            "request",
+            actor.user_id,
+            actor.own_id,
+            conversation_id,
+            source_user_message_id,
+            source_content,
+            token,
+        )
+        target_identity = _engineer_host_private_digest(
+            namespace_key,
+            "target",
+            actor.user_id,
+            actor.own_id,
+            canonical,
+            canonical,
+        )
+        if not all(
+            (
+                hmac.compare_digest(str(outcome.get("request_binding_sha256") or ""), binding),
+                hmac.compare_digest(
+                    str(outcome.get("target_identity_sha256") or ""),
+                    target_identity,
+                ),
+                hmac.compare_digest(
+                    str(outcome.get("tenant_sha256") or ""),
+                    _engineer_host_private_digest(namespace_key, "tenant", actor.user_id),
+                ),
+                hmac.compare_digest(
+                    str(outcome.get("person_sha256") or ""),
+                    _engineer_host_private_digest(namespace_key, "person", actor.own_id),
+                ),
+            )
+        ):
+            return None
+        generic = candidate_metadata.get("engineer_receipt")
+        if not isinstance(generic, Mapping) or not (
+            generic.get("schema") == "friday.engineer-receipt.v1"
+            and generic.get("target_count") == 1
+            and generic.get("active_probes_status") == "sent"
+            and generic.get("exploit_payloads_sent") is False
+        ):
+            return None
+        return _EngineerHostContinuation(
+            target=PinnedTarget(
+                host=canonical,
+                addresses=(canonical,),
+                implied_port=None,
+                source_token=token,
+                source_sha256=source_sha256,
+            ),
+            source_user_message_id=source_user_message_id,
+            source_assistant_message_id=str(candidate["id"] or ""),
+            accepted_outcome_sha256=outcome_sha256,
+            request_binding_sha256=binding,
+            _seal=_ENGINEER_HOST_CONTINUATION_SEAL,
+        )
+
     def _fresh_engineer_actor(
         self,
         actor: ActorContext,
@@ -37603,10 +39035,19 @@ class AgentRuntime:
                 if row is None or str(row["status"] or "") != "active":
                     return None
                 fresh_actor = replace(actor, preset_key=str(row["preset_key"] or "user"))
-                if not fresh_actor.is_owner or not authorization.authorize(fresh_actor, capability).allowed:
+                if (
+                    not fresh_actor.is_owner
+                    or not authorization.authorize(fresh_actor, "engineer.use").allowed
+                    or not authorization.authorize(fresh_actor, capability).allowed
+                ):
                     return None
                 if (
-                    capability in {"engineer.artifact.analyze", "engineer.artifact.patch"}
+                    capability
+                    in {
+                        "engineer.artifact.analyze",
+                        "engineer.artifact.build",
+                        "engineer.artifact.patch",
+                    }
                     and not authorization.authorize(fresh_actor, "files.read").allowed
                 ):
                     return None
@@ -37614,6 +39055,142 @@ class AgentRuntime:
         except Exception as exc:  # noqa: BLE001 - unavailable proof denies engineer work
             LOGGER.warning("engineer capability recheck failed (%s)", type(exc).__name__)
             return None
+
+    def _prepare_engineer_compile_source(
+        self,
+        actor: ActorContext,
+        sources: Sequence[Any],
+        *,
+        requested_filename: str | None,
+    ) -> tuple[_EngineerCompileSourceBinding | None, str]:
+        """Select and pin one exact authorized Java Raw/name before kernel entry.
+
+        A current Telegram upload can content-deduplicate onto an older Raw whose
+        immutable metadata contains another filename.  The current supplied
+        filename is carried only by a process-private, storage-proved attachment
+        authority, so keep the carrier until selection is complete instead of
+        reducing the request to Raw ids.  Plain Raw-id callers retain the
+        canonical-name path; caller-authored mapping fields never become name
+        authority.
+        """
+
+        candidates: list[tuple[str, _ExplicitFilenameDirectReadAuthority | None]] = []
+        seen_candidates: set[tuple[str, str]] = set()
+        for value in sources:
+            raw_id = (
+                str(value.get("raw_object_id") or value.get("raw_id") or "").strip()
+                if isinstance(value, Mapping)
+                else str(value or "").strip()
+            )
+            direct_authority = _explicit_filename_direct_read_authority_of(value)
+            key = (raw_id, direct_authority.filename if direct_authority is not None else "")
+            if key not in seen_candidates:
+                seen_candidates.add(key)
+                candidates.append((raw_id, direct_authority))
+        exact_ids = tuple(dict.fromkeys(raw_id for raw_id, _authority in candidates))
+        if not exact_ids or any(re.fullmatch(r"raw_[0-9a-f]{16}", value) is None for value in exact_ids):
+            return None, "exact_artifact_required"
+        if requested_filename is None and len(exact_ids) != 1:
+            return None, "ambiguous_artifact"
+        if (
+            requested_filename is not None
+            and re.fullmatch(
+                r"[A-Za-z_][A-Za-z0-9_]{0,119}\.java",
+                requested_filename,
+            )
+            is None
+        ):
+            return None, "exact_artifact_required"
+        fresh_actor = self._fresh_engineer_actor(actor, "engineer.artifact.build")
+        if fresh_actor is None:
+            return None, "authorization_unavailable"
+
+        matches: list[_EngineerCompileSourceBinding] = []
+        single_read_error = ""
+        for raw_id, direct_authority in candidates:
+            try:
+                stored = read_authorized_file(
+                    self.storage,
+                    self.settings.files_dir,
+                    raw_id,
+                    fresh_actor.user_id,
+                    person_id=fresh_actor.own_id,
+                    max_bytes=min(int(self.settings.max_upload_bytes), 1024 * 1024),
+                )
+            except FileRecordUnavailable:
+                single_read_error = "file_unavailable"
+                continue
+            except AuthorizedFileReadError:
+                single_read_error = "file_access_denied"
+                continue
+            except (OSError, TypeError, ValueError):
+                single_read_error = "source_identity_changed"
+                continue
+            snapshot = stored.snapshot_token
+            content_sha256 = hashlib.sha256(stored.content).hexdigest()
+            if (
+                stored.raw_id != raw_id
+                or snapshot is None
+                or not authorized_file_snapshot_token_is_process_owned(snapshot)
+                or snapshot.source.raw_id != raw_id
+                or not hmac.compare_digest(snapshot.content_sha256, content_sha256)
+            ):
+                single_read_error = "source_identity_changed"
+                continue
+            effective_filename = stored.filename
+            if direct_authority is not None:
+                if (
+                    direct_authority.raw_object_id != raw_id
+                    or direct_authority.tenant_id != fresh_actor.user_id
+                    or direct_authority.uploaded_by != fresh_actor.own_id
+                ):
+                    single_read_error = "source_identity_changed"
+                    continue
+                exact_name_rows = resolve_owned_file_exact_raw_filename_direct_read(
+                    self.storage,
+                    fresh_actor.user_id,
+                    fresh_actor.own_id,
+                    raw_id,
+                    direct_authority.filename,
+                )
+                if (
+                    len(exact_name_rows) != 1
+                    or str(exact_name_rows[0].get("id") or "") != raw_id
+                    or not hmac.compare_digest(
+                        str(exact_name_rows[0].get("content_hash") or "").casefold(),
+                        content_sha256,
+                    )
+                ):
+                    single_read_error = "source_identity_changed"
+                    continue
+                effective_filename = direct_authority.filename
+            if (
+                re.fullmatch(
+                    r"[A-Za-z_][A-Za-z0-9_]{0,119}\.java",
+                    effective_filename,
+                )
+                is None
+            ):
+                single_read_error = "source_identity_changed"
+                continue
+            if requested_filename is not None and effective_filename != requested_filename:
+                continue
+            matches.append(
+                _EngineerCompileSourceBinding(
+                    raw_id=raw_id,
+                    filename=effective_filename,
+                    source_sha256=content_sha256,
+                    source_identity_sha256=snapshot.source.identity_sha256,
+                )
+            )
+
+        if len(matches) != 1:
+            if len(matches) > 1:
+                return None, "ambiguous_artifact"
+            if len(exact_ids) == 1 and single_read_error:
+                return None, single_read_error
+            return None, "exact_artifact_required"
+        return matches[0], "none"
 
     def _require_fresh_engineer_mode_actor(self, actor: ActorContext) -> ActorContext:
         """Require the feature switch and a current engineer.use decision."""
@@ -39078,6 +40655,360 @@ class AgentRuntime:
             and authorization.authorize(fresh_actor, "engineer.host.audit").allowed
         )
 
+    def _engineer_host_outcome_publication_authorized(
+        self,
+        conn: Any,
+        *,
+        actor: ActorContext,
+        conversation_id: str,
+        current_user_message_id: str,
+        request: str,
+        dossier: Mapping[str, Any],
+        outcome: _EngineerHostOutcome,
+    ) -> bool:
+        """Reauthorize one exact private host result inside assistant commit."""
+
+        from friday.organs.engineer import hosts as engineer_hosts
+        from friday.organs.engineer.targets import (
+            PinnedTarget,
+            extract_single_target,
+            requests_active_assessment,
+            requests_host_vulnerability_assessment,
+            requests_host_vulnerability_followup,
+        )
+
+        if (
+            type(outcome) is not _EngineerHostOutcome
+            or _engineer_host_owned_outcome(dossier) != outcome
+            or getattr(self.settings, "engineer_mode_enabled", False) is not True
+        ):
+            return False
+        tool_name = (
+            _ENGINEER_HOST_VULNERABILITY_ACTION_TOOL
+            if outcome.profile == "vulnerabilities"
+            else _ENGINEER_HOST_AUDIT_ACTION_TOOL
+        )
+        get_tool = getattr(self.kernel, "get_tool", None)
+        tool_spec = get_tool(tool_name) if callable(get_tool) else None
+        if (
+            str(getattr(tool_spec, "name", "") or "") != tool_name
+            or str(getattr(tool_spec, "security_id", "") or "") != "engineer.host.audit"
+            or str(getattr(tool_spec, "risk", "") or "") != "observe"
+            or (
+                tool_name == _ENGINEER_HOST_VULNERABILITY_ACTION_TOOL
+                and getattr(tool_spec, "model_visible", True) is not False
+            )
+        ):
+            return False
+        principal_row = conn.execute(
+            "SELECT preset_key,status FROM users WHERE id=?",
+            (actor.own_id,),
+        ).fetchone()
+        current = conn.execute(
+            """SELECT id,role,content FROM messages
+                 WHERE id=? AND conversation_id=? AND user_id=?""",
+            (current_user_message_id, conversation_id, actor.user_id),
+        ).fetchone()
+        authorization = getattr(self.kernel, "authorization", None)
+        if (
+            principal_row is None
+            or str(principal_row["status"] or "") != "active"
+            or authorization is None
+            or current is None
+            or str(current["role"] or "") != "user"
+            or str(current["content"] or "") != request
+            or outcome.source_user_message_id != current_user_message_id
+        ):
+            return False
+        try:
+            namespace_key = load_trace_namespace_key(conn)
+        except RuntimeError:
+            return False
+        fresh_actor = replace(actor, preset_key=str(principal_row["preset_key"] or "user"))
+        if not (
+            fresh_actor.is_owner
+            and authorization.authorize(fresh_actor, "engineer.use").allowed
+            and authorization.authorize(fresh_actor, "engineer.host.audit").allowed
+            and hmac.compare_digest(
+                outcome.tenant_sha256,
+                _engineer_host_private_digest(namespace_key, "tenant", actor.user_id),
+            )
+            and hmac.compare_digest(
+                outcome.person_sha256,
+                _engineer_host_private_digest(namespace_key, "person", actor.own_id),
+            )
+            and hmac.compare_digest(
+                outcome.target_identity_sha256,
+                _engineer_host_private_digest(
+                    namespace_key,
+                    "target",
+                    actor.user_id,
+                    actor.own_id,
+                    outcome.target,
+                    outcome.address,
+                ),
+            )
+        ):
+            return False
+        if outcome.continuation_source_assistant_id:
+            if not requests_host_vulnerability_followup(request):
+                return False
+            continuation = self._engineer_host_continuation(
+                conn,
+                actor=fresh_actor,
+                conversation_id=conversation_id,
+                current_user_message_id=current_user_message_id,
+            )
+            if (
+                type(continuation) is not _EngineerHostContinuation
+                or continuation.source_assistant_message_id != outcome.continuation_source_assistant_id
+                or continuation.target.host != outcome.target
+                or continuation.target.connect_address != outcome.address
+                or not hmac.compare_digest(
+                    continuation.request_binding_sha256,
+                    outcome.request_binding_sha256,
+                )
+            ):
+                return False
+        else:
+            if (
+                outcome.profile == "vulnerabilities"
+                and not requests_host_vulnerability_assessment(request)
+                or outcome.profile == "services"
+                and not requests_active_assessment(request)
+            ):
+                return False
+            try:
+                selected = extract_single_target(request)
+            except ValueError:
+                return False
+            token = str(selected.get("token") or "") if selected is not None else ""
+            if (
+                selected is None
+                or str(selected.get("host") or "") != outcome.target
+                or outcome.profile == "vulnerabilities"
+                and selected.get("port") is not None
+                or not hmac.compare_digest(
+                    _engineer_host_private_digest(
+                        namespace_key,
+                        "request",
+                        actor.user_id,
+                        actor.own_id,
+                        conversation_id,
+                        current_user_message_id,
+                        request,
+                        token,
+                    ),
+                    outcome.request_binding_sha256,
+                )
+            ):
+                return False
+        pinned = PinnedTarget(
+            host=outcome.target,
+            addresses=(outcome.address,),
+            implied_port=None,
+            source_token=outcome.target,
+            source_sha256=outcome.request_binding_sha256,
+        )
+        try:
+            snapshot = engineer_hosts.admit_pinned_target_policy(
+                pinned,
+                allowed_cidrs=tuple(getattr(self.settings, "host_allowed_cidrs", ()) or ()),
+                allow_public=False,
+                public_action_approved=False,
+            )
+        except (ValueError, engineer_hosts.EngineerTargetPolicyError):
+            return False
+        classifications = {item.classification for item in snapshot.bindings}
+        return bool(
+            snapshot.target_count == 1
+            and classifications
+            and classifications.issubset({"operator_approved_private", "approved_ipv6_ula"})
+        )
+
+    def _engineer_compile_publication_authorized(
+        self,
+        conn: Any,
+        *,
+        actor: ActorContext,
+        dossier: Mapping[str, Any],
+        outcome: _EngineerCompileOutcome,
+        items: Sequence[Mapping[str, Any]],
+        evidence_set: FileEvidenceSet | None,
+        expected_count: int,
+        tenant_id: str,
+        fallback_person_id: str,
+        response_files: object,
+    ) -> bool:
+        """Rebind authority, exact source bytes and exact JAR in one commit."""
+
+        if (
+            type(outcome) is not _EngineerCompileOutcome
+            or outcome.status is not CapabilityStatus.SUCCEEDED
+            or _engineer_compile_owned_outcome(dossier) != outcome
+            or not self._attachment_publication_authorized(
+                conn,
+                actor=actor,
+                items=items,
+                evidence_set=evidence_set,
+                expected_count=expected_count,
+                tenant_id=tenant_id,
+                fallback_person_id=fallback_person_id,
+            )
+        ):
+            return False
+
+        get_tool = getattr(self.kernel, "get_tool", None)
+        tool_spec = get_tool(_ENGINEER_COMPILE_ACTION_TOOL) if callable(get_tool) else None
+        expected_parameters = {
+            "type": "object",
+            "properties": {
+                "raw_id": {"type": "string", "pattern": r"^raw_[0-9a-f]{16}$"},
+                "expected_filename": {
+                    "type": "string",
+                    "pattern": r"^[A-Za-z_][A-Za-z0-9_]{0,119}\.java$",
+                },
+                "expected_sha256": {"type": "string", "pattern": r"^[0-9a-f]{64}$"},
+            },
+            "additionalProperties": False,
+            "required": ["raw_id", "expected_filename", "expected_sha256"],
+        }
+        if (
+            str(getattr(tool_spec, "name", "") or "") != _ENGINEER_COMPILE_ACTION_TOOL
+            or str(getattr(tool_spec, "security_id", "") or "") != "engineer.artifact.build"
+            or str(getattr(tool_spec, "risk", "") or "") != "mutate"
+            or getattr(tool_spec, "model_visible", None) is not False
+            or not callable(getattr(tool_spec, "handler", None))
+            or getattr(tool_spec, "parameters", None) != expected_parameters
+        ):
+            return False
+
+        principal = str(actor.own_id or "").strip()
+        principal_row = conn.execute(
+            "SELECT preset_key, status FROM users WHERE id=?",
+            (principal,),
+        ).fetchone()
+        authorization = getattr(self.kernel, "authorization", None)
+        if principal_row is None or str(principal_row["status"] or "") != "active" or authorization is None:
+            return False
+        fresh_actor = replace(actor, preset_key=str(principal_row["preset_key"] or "user"))
+        if not (
+            fresh_actor.is_owner
+            and authorization.authorize(fresh_actor, "engineer.use").allowed
+            and authorization.authorize(fresh_actor, "engineer.artifact.build").allowed
+            and authorization.authorize(fresh_actor, "files.read").allowed
+        ):
+            return False
+
+        if evidence_set is None or len(items) != len(evidence_set.items):
+            return False
+        source_matches = [
+            (item, view)
+            for item, view in zip(items, evidence_set.items, strict=True)
+            if view.raw_id == outcome.source_raw_id
+        ]
+        if len(source_matches) != 1 or not _carrier_matches_evidence_view(
+            source_matches[0][0], source_matches[0][1]
+        ):
+            return False
+        source_item = source_matches[0][0]
+        try:
+            stored = read_authorized_file_in_transaction(
+                conn,
+                self.settings.files_dir,
+                outcome.source_raw_id,
+                tenant_id,
+                person_id=principal,
+                max_bytes=min(int(self.settings.max_upload_bytes), 1024 * 1024),
+            )
+        except (AuthorizedFileReadError, FileRecordUnavailable, OSError, TypeError, ValueError):
+            return False
+        snapshot = stored.snapshot_token
+        source_sha256 = hashlib.sha256(stored.content).hexdigest()
+        direct_authority = _explicit_filename_direct_read_authority_of(source_item)
+        effective_filename = stored.filename
+        if direct_authority is not None:
+            if (
+                direct_authority.raw_object_id != outcome.source_raw_id
+                or direct_authority.tenant_id != tenant_id
+                or direct_authority.uploaded_by != principal
+                or direct_authority.filename != outcome.source_filename
+            ):
+                return False
+            exact_name_rows = resolve_owned_file_exact_raw_filename_direct_read(
+                conn,
+                tenant_id,
+                principal,
+                outcome.source_raw_id,
+                direct_authority.filename,
+            )
+            if (
+                len(exact_name_rows) != 1
+                or str(exact_name_rows[0].get("id") or "") != outcome.source_raw_id
+                or not hmac.compare_digest(
+                    str(exact_name_rows[0].get("content_hash") or "").casefold(),
+                    source_sha256,
+                )
+            ):
+                return False
+            effective_filename = direct_authority.filename
+        if (
+            stored.raw_id != outcome.source_raw_id
+            or effective_filename != outcome.source_filename
+            or len(stored.content) != outcome.source_size_bytes
+            or not hmac.compare_digest(source_sha256, outcome.source_sha256)
+            or snapshot is None
+            or not authorized_file_snapshot_token_is_process_owned(snapshot)
+            or snapshot.source.raw_id != outcome.source_raw_id
+            or not hmac.compare_digest(snapshot.content_sha256, outcome.source_sha256)
+            or not hmac.compare_digest(
+                snapshot.source.identity_sha256,
+                outcome.source_identity_sha256,
+            )
+        ):
+            return False
+
+        private_attachment = _engineer_compile_attachment(dossier)
+        if private_attachment is None or not isinstance(response_files, list):
+            return False
+        jar_filename_matches: list[Mapping[str, Any]] = []
+        for value in response_files:
+            if not isinstance(value, Mapping):
+                return False
+            if value.get("filename") == outcome.jar_filename:
+                jar_filename_matches.append(value)
+        # Telegram presents the filename as the primary identity.  A sibling
+        # with the same name but another MIME type would be indistinguishable
+        # to the recipient even though the exact compiler JAR is also present.
+        # Reserve that name for one and only one exact compiler carrier.
+        if len(jar_filename_matches) != 1:
+            return False
+        jar_item = jar_filename_matches[0]
+        if jar_item.get("mime_type") != "application/java-archive":
+            return False
+        if any(
+            jar_item.get(field) != private_attachment.get(field)
+            for field in ("kind", "filename", "mime_type", "content_base64")
+        ):
+            return False
+        encoded = jar_item.get("content_base64")
+        if not isinstance(encoded, str):
+            return False
+        try:
+            jar = base64.b64decode(encoded, validate=True)
+        except (binascii.Error, TypeError, ValueError):
+            return False
+        from friday.organs.engineer import compiler as engineer_compiler
+
+        inventory = engineer_compiler.validate_jar(jar)
+        return bool(
+            len(jar) == outcome.jar_size_bytes
+            and hmac.compare_digest(hashlib.sha256(jar).hexdigest(), outcome.jar_sha256)
+            and inventory is not None
+            and inventory.get("class_files") == outcome.class_files
+            and inventory.get("class_bytes") == outcome.class_bytes
+        )
+
     @staticmethod
     def _effect_private_digest(namespace_key: bytes, domain: str, value: str) -> str:
         if not isinstance(namespace_key, bytes) or len(namespace_key) < 32:
@@ -39707,8 +41638,10 @@ class AgentRuntime:
         context.ingestion = {}
         context.interaction_mode = "dialogue"
         context.engineer_dossier = {}
+        context.engineer_host_outcome = None
         context.engineer_network_outcome = None
         context.engineer_decompile_outcome = None
+        context.engineer_compile_outcome = None
         context.feedback_summary = {}
         context.knowledge_citations = {}
         context.rerank_dropped = 0
@@ -45059,10 +46992,13 @@ class AgentRuntime:
             # therefore an unresolved file, not permission to fall through to
             # an ambient/latest catalog candidate.
             return [], len(raw_ids)
-        from friday.organs.engineer.targets import requests_artifact_decompile
+        from friday.organs.engineer.targets import (
+            requests_artifact_compile,
+            requests_artifact_decompile,
+        )
 
-        if requests_artifact_decompile(message):
-            # Decompilation's singular anaphora is bound only to the exact
+        if requests_artifact_decompile(message) or requests_artifact_compile(message):
+            # Engineer artifact actions' singular anaphora is bound only to the exact
             # immediately preceding user-upload/assistant-used lineage.  A
             # plural set is an ambiguity, never permission to pick the newest.
             return (hydrated, 1) if len(hydrated) == 1 else ([], len(raw_ids))
@@ -45900,9 +47836,13 @@ class AgentRuntime:
                 if recovered_expected:
                     return recovered, recovered_expected
             reference_kind = _attachment_reference_kind(message)
-            from friday.organs.engineer.targets import requests_artifact_decompile
+            from friday.organs.engineer.targets import (
+                requests_artifact_compile,
+                requests_artifact_decompile,
+            )
 
             artifact_decompile_request = requests_artifact_decompile(message)
+            artifact_compile_request = requests_artifact_compile(message)
             archived_lookup = bool(_archived_source_search_query(message))
             if not reference_kind and archived_lookup:
                 # A fresh-conversation request to find a fact in a file sent
@@ -45917,6 +47857,7 @@ class AgentRuntime:
                 and not _quoted_record_source_command_is_data(message)
                 and (
                     artifact_decompile_request
+                    or artifact_compile_request
                     or _unquoted_topic_continuation_cue(message)
                     or bool(_attachment_topic_terms(message))
                     and not file_turn_authority(message).has_effect()
@@ -46096,6 +48037,7 @@ class AgentRuntime:
         reply_assistant_reference: bool = False,
         reply_assistant_message_id: str | None = None,
         turn_policy: TurnPolicyDecision | None = None,
+        telegram_update_id: str | None = None,
         turn_deadline: float | None = None,
         _pending_durable_admission: PendingDurableTurnAdmission | None = None,
     ) -> dict[str, Any]:
@@ -46114,6 +48056,12 @@ class AgentRuntime:
             if isinstance(configured_budget, (int, float)) and configured_budget > 0:
                 turn_deadline = turn_started + float(configured_budget)
         clean_message = (message or "").strip()
+        trusted_telegram_update_id = str(telegram_update_id or "").strip()
+        if trusted_telegram_update_id and (
+            actor.source != "telegram-bridge"
+            or re.fullmatch(r"[0-9]{1,20}", trusted_telegram_update_id) is None
+        ):
+            raise ValueError("telegram_update_id must come from the authenticated Telegram bridge")
         archive_evidence_followup_kind = parse_archive_evidence_followup(clean_message)
         archive_candidate_surface_has_attachments = bool(attachments)
         archive_evidence_bound_for_routing = bool(
@@ -46960,10 +48908,16 @@ class AgentRuntime:
         may_read_files = bool(
             authorization is not None and authorization.authorize(actor, "files.read").allowed
         )
-        from friday.organs.engineer.targets import requests_artifact_decompile
+        from friday.organs.engineer.targets import (
+            requests_artifact_compile,
+            requests_artifact_decompile,
+        )
 
         artifact_decompile_requested = bool(
             interaction_mode == "engineer" and requests_artifact_decompile(clean_message)
+        )
+        artifact_compile_requested = bool(
+            interaction_mode == "engineer" and requests_artifact_compile(clean_message)
         )
         filename_continuation_decomposition = _closed_locate_remainder(clean_message)
         filename_continuation_visible = _classification_text(
@@ -47014,6 +48968,7 @@ class AgentRuntime:
             and (
                 supplied_attachment_count
                 or artifact_decompile_requested
+                or artifact_compile_requested
                 or quoted_attachment_reference
                 or reply_assistant_lineage_requested
                 or attachment_reference_kind
@@ -48158,6 +50113,11 @@ class AgentRuntime:
             **(user_metadata or {}),
             "tools_enabled": enable_tools is True,
             "interaction_mode": interaction_mode,
+            **(
+                {"telegram_update_id": trusted_telegram_update_id}
+                if trusted_telegram_update_id
+                else {}
+            ),
         }
         if not mark_request_effect_possible():
             raise RuntimeError("Request idempotency fence could not be committed before message storage")
@@ -49016,7 +50976,12 @@ class AgentRuntime:
         )
         attachment_tool_action_requested = bool(
             not synthetic_document_notice
-            and (file_effect or host_json_attachment_raw_id or artifact_decompile_requested)
+            and (
+                file_effect
+                or host_json_attachment_raw_id
+                or artifact_decompile_requested
+                or artifact_compile_requested
+            )
         )
         if (
             file_source_only
@@ -49975,10 +51940,15 @@ class AgentRuntime:
         # entry, not on when routing/context preparation happened to finish.
         context.turn_deadline = turn_deadline
         network_report_requested = False
+        nmap_capability_truth_requested = False
         if interaction_mode == "engineer":
-            from friday.organs.engineer.targets import requests_network_report_export
+            from friday.organs.engineer.targets import (
+                requests_network_report_export,
+                requests_nmap_capability_truth,
+            )
 
             network_report_requested = requests_network_report_export(clean_message)
+            nmap_capability_truth_requested = requests_nmap_capability_truth(clean_message)
         if (
             interaction_mode == "engineer"
             and enable_tools is True
@@ -49990,7 +51960,42 @@ class AgentRuntime:
                 actor=actor,
                 turn_deadline=turn_deadline,
                 enable_tools=enable_tools,
+                conversation_id=conversation_id,
+                source_user_message_id=source_search_lineage_user_message_id,
             )
+            context.engineer_host_outcome = _engineer_host_owned_outcome(context.engineer_dossier)
+            if context.engineer_host_outcome is not None:
+                context.structural_answer = "\n\n".join(
+                    part
+                    for part in (
+                        context.structural_answer,
+                        _render_engineer_host_outcome(context.engineer_host_outcome),
+                    )
+                    if part
+                )
+                await self._settle_structural_remainder(
+                    context,
+                    clean_message,
+                    (
+                        "прямая безопасная проверка поверхности одного private host"
+                        if context.engineer_host_outcome.profile == "vulnerabilities"
+                        else "активное сканирование одного явно названного host"
+                    ),
+                )
+            if nmap_capability_truth_requested:
+                context.structural_answer = "\n\n".join(
+                    part
+                    for part in (
+                        context.structural_answer,
+                        _render_engineer_nmap_capability_truth(context.engineer_dossier),
+                    )
+                    if part
+                )
+                await self._settle_structural_remainder(
+                    context,
+                    clean_message,
+                    "вопрос о фактически attested nmap capability",
+                )
             context.engineer_network_outcome = _engineer_network_owned_outcome(context.engineer_dossier)
             if context.engineer_network_outcome is not None:
                 context.engineer_network_report = _engineer_network_report(
@@ -50048,6 +52053,42 @@ class AgentRuntime:
                         clean_message,
                         "запрос на декомпиляцию выбранного бинарного файла",
                     )
+            context.engineer_compile_outcome = _engineer_compile_owned_outcome(context.engineer_dossier)
+            if context.engineer_compile_outcome is not None:
+                rendered_compile_outcome = _render_engineer_compile_outcome(context.engineer_compile_outcome)
+                from friday.organs.engineer.targets import requests_artifact_patch
+
+                if requests_artifact_patch(clean_message):
+                    rendered_compile_outcome += (
+                        "\nПроизводный патч в этом же ходе не создавался: отправьте исправление "
+                        "отдельной командой, чтобы каждый файл прошёл собственную проверку доставки."
+                    )
+                context.structural_answer = "\n\n".join(
+                    part for part in (context.structural_answer, rendered_compile_outcome) if part
+                )
+                from friday.organs.engineer.targets import artifact_compile_request_is_atomic
+
+                if artifact_compile_request_is_atomic(clean_message):
+                    context.open_remainder = ""
+                    context.remainder_known = True
+                else:
+                    await self._settle_structural_remainder(
+                        context,
+                        clean_message,
+                        "запрос на компиляцию выбранного Java-файла",
+                    )
+        if nmap_capability_truth_requested and not context.engineer_dossier:
+            context.structural_answer = "\n\n".join(
+                part
+                for part in (
+                    context.structural_answer,
+                    "В этом ходе Engineer tools отключены или deadline уже истёк; "
+                    "фактическая доступность nmap не проверялась и запуск не выполнялся.",
+                )
+                if part
+            )
+            context.open_remainder = ""
+            context.remainder_known = True
         if network_report_requested and context.engineer_network_outcome is None:
             context.structural_answer = "\n\n".join(
                 part
@@ -50086,6 +52127,7 @@ class AgentRuntime:
             workspace_exact_direct_authorized = False
         context.source_search_lineage_user_message_id = source_search_lineage_user_message_id
         context.effect_root_user_message_id = effect_root_user_message_id
+        context.engineer_command_telegram_update_id = trusted_telegram_update_id
         context.effect_local_date = obsidian_effect_local_date
         obsidian_result_request = obsidian_result_request_candidate if isolated_obsidian_result_turn else None
         context.obsidian_result_note_turn = obsidian_result_request is not None
@@ -50407,8 +52449,8 @@ class AgentRuntime:
             # remain available in ordinary dialogue/research, but they are not
             # silently inherited by this mode.
             visible_tools = _project_engineer_tool_schemas(visible_tools, authority=file_turn)
-            if context.engineer_decompile_outcome is not None:
-                # A decompile report consumes this turn's sole generated-file
+            if context.engineer_decompile_outcome is not None or context.engineer_compile_outcome is not None:
+                # A code-owned artifact report consumes this turn's sole generated-file
                 # carrier. A patch can be requested in the immediately
                 # following turn against the same persisted source lineage.
                 visible_tools = [
@@ -51420,6 +53462,24 @@ class AgentRuntime:
                 else await self._generate_response(generation_context, asked_of_model, attachments)
             )
 
+        engineer_host_outcome = context.engineer_host_outcome
+        if engineer_host_outcome is not None:
+            response["_engineer_host_owned"] = True
+            if engineer_host_outcome.tool_started:
+                host_tool = (
+                    _ENGINEER_HOST_VULNERABILITY_ACTION_TOOL
+                    if engineer_host_outcome.profile == "vulnerabilities"
+                    else _ENGINEER_HOST_AUDIT_ACTION_TOOL
+                )
+                response["tools_used"] = list(
+                    dict.fromkeys(
+                        [
+                            host_tool,
+                            *(str(name) for name in (response.get("tools_used") or []) if str(name)),
+                        ]
+                    )
+                )
+
         engineer_network_outcome = context.engineer_network_outcome
         if engineer_network_outcome is not None:
             response["_engineer_network_owned"] = True
@@ -51470,6 +53530,32 @@ class AgentRuntime:
                     else 0
                 )
                 response["file_clips"] = [decompile_attachment, *existing_files]
+                response["_structural_file_count"] = existing_structural_count + 1
+
+        engineer_compile_outcome = context.engineer_compile_outcome
+        if engineer_compile_outcome is not None:
+            response["_engineer_compile_owned"] = True
+            if engineer_compile_outcome.tool_started:
+                response["tools_used"] = list(
+                    dict.fromkeys(
+                        [
+                            _ENGINEER_COMPILE_ACTION_TOOL,
+                            *(str(name) for name in (response.get("tools_used") or []) if str(name)),
+                        ]
+                    )
+                )
+            compile_attachment = _engineer_compile_attachment(context.engineer_dossier)
+            if compile_attachment is not None and engineer_compile_outcome.jar_prepared:
+                existing_files = [
+                    dict(item) for item in (response.get("file_clips") or []) if isinstance(item, Mapping)
+                ]
+                raw_structural_count = response.get("_structural_file_count")
+                existing_structural_count = (
+                    max(0, min(len(existing_files), raw_structural_count))
+                    if isinstance(raw_structural_count, int) and not isinstance(raw_structural_count, bool)
+                    else 0
+                )
+                response["file_clips"] = [compile_attachment, *existing_files]
                 response["_structural_file_count"] = existing_structural_count + 1
 
         if context.archive_search_isolated_turn:
@@ -52467,7 +54553,12 @@ class AgentRuntime:
                     or workspace_authority_message
                     or bool(
                         attempted_supported_deed_tools.intersection(
-                            {"make_file", "workspace_create", _ENGINEER_DECOMPILE_ACTION_TOOL}
+                            {
+                                "make_file",
+                                "workspace_create",
+                                _ENGINEER_COMPILE_ACTION_TOOL,
+                                _ENGINEER_DECOMPILE_ACTION_TOOL,
+                            }
                         )
                     ),
                 ),
@@ -54495,6 +56586,12 @@ class AgentRuntime:
             if interaction_mode == "engineer" and isinstance(context.engineer_dossier, Mapping)
             else {}
         )
+        engineer_host_outcome_receipt = (
+            context.engineer_host_outcome.receipt()
+            if interaction_mode == "engineer"
+            and isinstance(context.engineer_host_outcome, _EngineerHostOutcome)
+            else {}
+        )
         engineer_network_outcome_receipt = (
             context.engineer_network_outcome.receipt()
             if interaction_mode == "engineer"
@@ -54515,6 +56612,12 @@ class AgentRuntime:
             and isinstance(context.engineer_decompile_outcome, _EngineerDecompileOutcome)
             else {}
         )
+        engineer_compile_outcome_receipt = (
+            context.engineer_compile_outcome.receipt()
+            if interaction_mode == "engineer"
+            and isinstance(context.engineer_compile_outcome, _EngineerCompileOutcome)
+            else {}
+        )
         assistant_used_attachment = bool(
             attachment_readable_count > 0
             or response.get("_document_metadata_owned") is True
@@ -54524,6 +56627,8 @@ class AgentRuntime:
             or engineer_unreadable_artifacts_covered
             and active_attachment_set
             or context.engineer_decompile_outcome is not None
+            and active_attachment_set
+            or context.engineer_compile_outcome is not None
             and active_attachment_set
         )
         assistant_attachment_raw_ids = (
@@ -54712,6 +56817,8 @@ class AgentRuntime:
                 "verdict_kind": (
                     "office_exact"
                     if response.get("_office_exact_owned") is True
+                    else "engineer_artifact_compile"
+                    if response.get("_engineer_compile_owned") is True
                     else "engineer_artifact_decompile"
                     if response.get("_engineer_decompile_owned") is True
                     else "engineer_network_scan"
@@ -54725,6 +56832,7 @@ class AgentRuntime:
                 "answer_present": (
                     bool(spoken)
                     or response.get("_office_exact_owned") is True
+                    or response.get("_engineer_compile_owned") is True
                     or response.get("_engineer_decompile_owned") is True
                     or response.get("_obsidian_owned") is True
                     or response.get("_obsidian_result_note_owned") is True
@@ -54931,6 +57039,10 @@ class AgentRuntime:
             # Persist only bounded provenance. The full dossier (host banners,
             # strings and other potentially secret source data) remains transient.
             assistant_metadata["engineer_receipt"] = engineer_receipt
+        if engineer_host_outcome_receipt:
+            # Target, ports and service evidence stay transient.  This accepted
+            # receipt carries only counts, opaque digests and durable row ids.
+            assistant_metadata[_ENGINEER_HOST_OUTCOME_METADATA_KEY] = engineer_host_outcome_receipt
         if engineer_network_outcome_receipt:
             # The raw scope, host list and banners stay transient.  This closed
             # accepted-outcome receipt is committed atomically with the reply.
@@ -54943,6 +57055,10 @@ class AgentRuntime:
             # Source bytes, Raw identity, symbols and pseudocode remain outside
             # durable metadata; only the closed accounting receipt is stored.
             assistant_metadata[_ENGINEER_DECOMPILE_OUTCOME_METADATA_KEY] = engineer_decompile_outcome_receipt
+        if engineer_compile_outcome_receipt:
+            # Source bytes, names and bytecode remain outside durable metadata;
+            # only the bounded fixed-profile accounting receipt is stored.
+            assistant_metadata[_ENGINEER_COMPILE_OUTCOME_METADATA_KEY] = engineer_compile_outcome_receipt
         # Final audio is another source-derived carrier, not decoration on an
         # already-published message.  Synthesize it before the definitive
         # provider re-read/assistant transaction: the voice helper admits the
@@ -55093,9 +57209,20 @@ class AgentRuntime:
         obsidian_publication_reauth_required = bool(obsidian_owned_response and obsidian_tool_ledger)
         simple_public_news_owned_response = response.get("_simple_public_news_owned") is True
         simple_public_news_publication_reauth_required = simple_public_news_owned_response
+        engineer_host_publication_reauth_required = isinstance(
+            engineer_host_outcome,
+            _EngineerHostOutcome,
+        ) and engineer_host_outcome.status in {
+            CapabilityStatus.SUCCEEDED,
+            CapabilityStatus.PARTIAL,
+        }
         network_report_publication_reauth_required = isinstance(
             engineer_network_report,
             _EngineerNetworkReport,
+        )
+        compile_publication_reauth_required = bool(
+            engineer_compile_outcome is not None
+            and engineer_compile_outcome.status is CapabilityStatus.SUCCEEDED
         )
         publication_reauth_required = bool(
             attachment_publication_reauth_required
@@ -55103,7 +57230,9 @@ class AgentRuntime:
             or archive_search_publication_reauth_required
             or obsidian_owned_response
             or simple_public_news_publication_reauth_required
+            or engineer_host_publication_reauth_required
             or network_report_publication_reauth_required
+            or compile_publication_reauth_required
         )
         accepted_simple_public_news_outcome = None
         accepted_archive_recall_outcome: ArchiveRecallOutcome | None = None
@@ -55121,6 +57250,10 @@ class AgentRuntime:
                     in {CapabilityStatus.SUCCEEDED, CapabilityStatus.PARTIAL}
                 )
                 or network_report_publication_reauth_required
+                or (
+                    engineer_compile_outcome is not None
+                    and engineer_compile_outcome.status is CapabilityStatus.SUCCEEDED
+                )
             )
             else None
         )
@@ -55236,6 +57369,19 @@ class AgentRuntime:
                     actor=actor,
                 )
             )
+            engineer_host_publication_authorized = bool(
+                not engineer_host_publication_reauth_required
+                or isinstance(engineer_host_outcome, _EngineerHostOutcome)
+                and self._engineer_host_outcome_publication_authorized(
+                    publication_conn,
+                    actor=actor,
+                    conversation_id=conversation_id,
+                    current_user_message_id=source_search_lineage_user_message_id,
+                    request=clean_message,
+                    dossier=context.engineer_dossier,
+                    outcome=engineer_host_outcome,
+                )
+            )
             network_report_publication_authorized = bool(
                 not network_report_publication_reauth_required
                 or isinstance(engineer_network_outcome, _EngineerNetworkOutcome)
@@ -55249,6 +57395,22 @@ class AgentRuntime:
                     request=clean_message,
                 )
             )
+            compile_publication_authorized = bool(
+                not compile_publication_reauth_required
+                or isinstance(engineer_compile_outcome, _EngineerCompileOutcome)
+                and self._engineer_compile_publication_authorized(
+                    publication_conn,
+                    actor=actor,
+                    dossier=context.engineer_dossier,
+                    outcome=engineer_compile_outcome,
+                    items=active_attachment_set,
+                    evidence_set=active_source_evidence_set,
+                    expected_count=attachment_expected_count,
+                    tenant_id=attachment_authority_tenant,
+                    fallback_person_id=attachment_authority_person,
+                    response_files=response.get("file_clips"),
+                )
+            )
             publication_authorized = bool(
                 not publication_reauth_required
                 or attachment_publication_authorized
@@ -55256,7 +57418,9 @@ class AgentRuntime:
                 and archive_search_publication_authorized
                 and obsidian_publication_authorized
                 and simple_public_news_publication_authorized
+                and engineer_host_publication_authorized
                 and network_report_publication_authorized
+                and compile_publication_authorized
             )
             final_voice_publication_authorized = bool(
                 final_voice is None
@@ -55285,8 +57449,14 @@ class AgentRuntime:
                 simple_public_news_publication_reauth_required
                 and not simple_public_news_publication_authorized
             )
+            engineer_host_authority_changed_before_publication = bool(
+                engineer_host_publication_reauth_required and not engineer_host_publication_authorized
+            )
             network_report_authority_changed_before_publication = bool(
                 network_report_publication_reauth_required and not network_report_publication_authorized
+            )
+            compile_authority_changed_before_publication = bool(
+                compile_publication_reauth_required and not compile_publication_authorized
             )
             if not publication_authorized:
                 LOGGER.warning("source-publication: authority changed before assistant commit")
@@ -55314,8 +57484,16 @@ class AgentRuntime:
                             simple_public_news_authority_changed_before_publication,
                         ),
                         (
+                            "engineer_host_authority_changed_before_publication",
+                            engineer_host_authority_changed_before_publication,
+                        ),
+                        (
                             "network_report_authority_changed_before_publication",
                             network_report_authority_changed_before_publication,
+                        ),
+                        (
+                            "compile_authority_changed_before_publication",
+                            compile_authority_changed_before_publication,
                         ),
                     )
                     if changed
@@ -55345,6 +57523,13 @@ class AgentRuntime:
                     )
                 if network_report_authority_changed_before_publication:
                     authority_changed_notice = _ENGINEER_NETWORK_REPORT_AUTHORITY_CHANGED_BEFORE_PUBLICATION
+                if engineer_host_authority_changed_before_publication:
+                    authority_changed_notice = (
+                        "Сетевое действие могло быть выполнено, но право публикации результата "
+                        "изменилось; данные результата не публикую и автоматически не повторяю."
+                    )
+                if compile_authority_changed_before_publication:
+                    authority_changed_notice = _ENGINEER_COMPILE_AUTHORITY_CHANGED_BEFORE_PUBLICATION
                 content = "\n\n".join(part for part in (safe_effect_notice, authority_changed_notice) if part)
                 response["content"] = content
                 response["file_clips"] = []
@@ -55375,6 +57560,10 @@ class AgentRuntime:
                     response["_obsidian_authority_changed_owned"] = True
                 if network_report_authority_changed_before_publication:
                     response["_engineer_network_report_authority_changed_owned"] = True
+                if engineer_host_authority_changed_before_publication:
+                    response["_engineer_host_authority_changed_owned"] = True
+                if compile_authority_changed_before_publication:
+                    response["_engineer_compile_authority_changed_owned"] = True
                 response.pop("_document_metadata_owned", None)
                 response.pop("_office_exact_owned", None)
                 model_said = ""
@@ -55483,11 +57672,16 @@ class AgentRuntime:
                 # even when the attachment's own files.read authority survived.
                 assistant_metadata.pop(_ENGINEER_DECOMPILE_OUTCOME_METADATA_KEY, None)
                 engineer_decompile_outcome_receipt = {}
+                if engineer_host_publication_reauth_required:
+                    assistant_metadata.pop(_ENGINEER_HOST_OUTCOME_METADATA_KEY, None)
+                    engineer_host_outcome_receipt = {}
                 if network_report_publication_reauth_required:
                     assistant_metadata.pop(_ENGINEER_NETWORK_REPORT_METADATA_KEY, None)
                     assistant_metadata.pop(_ENGINEER_NETWORK_OUTCOME_METADATA_KEY, None)
                     engineer_network_report_receipt = {}
                     engineer_network_outcome_receipt = {}
+                assistant_metadata.pop(_ENGINEER_COMPILE_OUTCOME_METADATA_KEY, None)
+                engineer_compile_outcome_receipt = {}
 
             obsidian_effect_operation_id = str(response.get("_obsidian_effect_operation_id") or "").strip()
             if obsidian_effect_operation_id:
@@ -56032,6 +58226,17 @@ class AgentRuntime:
                     assistant_message.get("metadata_json"),
                     expected_outcome=accepted_obsidian_effect_outcome,
                 )
+            if engineer_host_publication_reauth_required and engineer_host_publication_authorized:
+                try:
+                    stored_host_metadata = json.loads(str(assistant_message.get("metadata_json") or "{}"))
+                except (TypeError, ValueError, json.JSONDecodeError) as exc:
+                    raise ValueError("engineer host outcome metadata reread failed") from exc
+                if (
+                    not isinstance(stored_host_metadata, Mapping)
+                    or stored_host_metadata.get(_ENGINEER_HOST_OUTCOME_METADATA_KEY)
+                    != engineer_host_outcome_receipt
+                ):
+                    raise ValueError("engineer host outcome receipt binding changed")
             decompile_report_expected = bool(
                 engineer_decompile_outcome is not None
                 and engineer_decompile_outcome.status
@@ -56040,11 +58245,23 @@ class AgentRuntime:
             network_report_expected = bool(
                 network_report_publication_reauth_required and network_report_publication_authorized
             )
-            if publication_authorized and (decompile_report_expected or network_report_expected):
+            compile_jar_expected = bool(
+                engineer_compile_outcome is not None
+                and engineer_compile_outcome.status is CapabilityStatus.SUCCEEDED
+            )
+            if publication_authorized and (
+                decompile_report_expected or network_report_expected or compile_jar_expected
+            ):
                 # Freeze every process-owned report only after its final
                 # capability/source reauthorization, but before releasing this
                 # same BEGIN IMMEDIATE transaction. Raw handles, descriptors,
                 # accepted receipts and assistant text are one publication unit.
+                inline_batch_identity = _inline_generated_file_batch_identity(
+                    response.get("file_clips"),
+                    max_bytes=self.settings.max_upload_bytes,
+                )
+                if inline_batch_identity is None:
+                    raise ValueError("engineer generated-file input batch attestation failed")
                 generated_projection = persist_generated_response_files(
                     self.storage,
                     self.settings.files_dir,
@@ -56060,6 +58277,12 @@ class AgentRuntime:
                 persisted_files = generated_projection.get("files")
                 if not isinstance(persisted_files, list) or not persisted_files:
                     raise ValueError("engineer generated report durability attestation failed")
+                persisted_batch_identity = _inline_generated_file_batch_identity(
+                    persisted_files,
+                    max_bytes=self.settings.max_upload_bytes,
+                )
+                if persisted_batch_identity != inline_batch_identity:
+                    raise ValueError("engineer generated-file exact batch attestation failed")
                 if decompile_report_expected and (
                     engineer_decompile_outcome is None
                     or sum(
@@ -56074,6 +58297,23 @@ class AgentRuntime:
                     != 1
                 ):
                     raise ValueError("engineer decompile report durability attestation failed")
+                if compile_jar_expected and (
+                    engineer_compile_outcome is None
+                    or sum(
+                        1
+                        for item in persisted_files
+                        if isinstance(item, Mapping)
+                        and item.get("filename") == engineer_compile_outcome.jar_filename
+                        and item.get("mime_type") == "application/java-archive"
+                        and item.get("size_bytes") == engineer_compile_outcome.jar_size_bytes
+                        and hmac.compare_digest(
+                            str(item.get("sha256") or ""),
+                            engineer_compile_outcome.jar_sha256,
+                        )
+                    )
+                    != 1
+                ):
+                    raise ValueError("engineer compile JAR durability attestation failed")
                 if network_report_expected and (
                     not isinstance(engineer_network_report, _EngineerNetworkReport)
                     or sum(
@@ -56130,7 +58370,9 @@ class AgentRuntime:
             or archive_search_authority_changed_before_publication
             or obsidian_authority_changed_before_publication
             or simple_public_news_authority_changed_before_publication
+            or engineer_host_authority_changed_before_publication
             or network_report_authority_changed_before_publication
+            or compile_authority_changed_before_publication
         )
         if attributed_knowledge_ids:
             self.storage.record_knowledge_usage(
@@ -56148,6 +58390,10 @@ class AgentRuntime:
             "network_report_authority_changed_before_publication": (
                 network_report_authority_changed_before_publication
             ),
+            "engineer_host_authority_changed_before_publication": (
+                engineer_host_authority_changed_before_publication
+            ),
+            "compile_authority_changed_before_publication": (compile_authority_changed_before_publication),
             "source_search_authority_changed_before_publication": (
                 source_search_authority_changed_before_publication
             ),
@@ -56261,6 +58507,11 @@ class AgentRuntime:
                 "restored_attachment_count": restored_history_attachment_count,
                 **({"engineer_receipt": engineer_receipt} if engineer_receipt else {}),
                 **(
+                    {_ENGINEER_HOST_OUTCOME_METADATA_KEY: engineer_host_outcome_receipt}
+                    if engineer_host_outcome_receipt
+                    else {}
+                ),
+                **(
                     {_ENGINEER_NETWORK_OUTCOME_METADATA_KEY: (engineer_network_outcome_receipt)}
                     if engineer_network_outcome_receipt
                     else {}
@@ -56268,6 +58519,11 @@ class AgentRuntime:
                 **(
                     {_ENGINEER_DECOMPILE_OUTCOME_METADATA_KEY: engineer_decompile_outcome_receipt}
                     if engineer_decompile_outcome_receipt
+                    else {}
+                ),
+                **(
+                    {_ENGINEER_COMPILE_OUTCOME_METADATA_KEY: engineer_compile_outcome_receipt}
+                    if engineer_compile_outcome_receipt
                     else {}
                 ),
             },
@@ -56448,6 +58704,8 @@ class AgentRuntime:
         actor: ActorContext,
         turn_deadline: float | None,
         enable_tools: bool,
+        conversation_id: str = "",
+        source_user_message_id: str = "",
     ) -> dict[str, Any]:
         """Build passive artifact evidence and run explicitly requested targets.
 
@@ -56502,10 +58760,22 @@ class AgentRuntime:
                 package_install_enabled=bool(getattr(self.settings, "host_package_install_enabled", False)),
             ),
         }
-        network_requested = engineer_hosts.active_assessment_requested(message)
+        active_network_requested = engineer_hosts.active_assessment_requested(message)
+        direct_vulnerability_requested = engineer_targets.requests_host_vulnerability_assessment(message)
+        vulnerability_followup_requested = engineer_targets.requests_host_vulnerability_followup(message)
+        network_requested = bool(
+            active_network_requested or direct_vulnerability_requested or vulnerability_followup_requested
+        )
         configured_network_requested = engineer_targets.requests_configured_network_assessment(message)
         artifact_decompile_requested = engineer_targets.requests_artifact_decompile(message)
+        artifact_compile_requested = engineer_targets.requests_artifact_compile(message)
+        artifact_compile_filename = engineer_targets.requested_artifact_compile_filename(message)
         dossier["_artifact_decompile_action_requested"] = artifact_decompile_requested
+        dossier["_artifact_compile_action_requested"] = artifact_compile_requested
+        conflicting_artifact_action = bool(artifact_decompile_requested and artifact_compile_requested)
+        if conflicting_artifact_action:
+            dossier["_artifact_decompile_reason"] = "conflicting_artifact_action"
+            dossier["_artifact_compile_reason"] = "conflicting_artifact_action"
         explicit_network_cidr = ""
         explicit_network_error = ""
         if network_requested:
@@ -56522,6 +58792,46 @@ class AgentRuntime:
         # acquire a process-owned configured-network outcome.  It never enters
         # the model dossier or durable content by itself.
         dossier["_configured_network_action_requested"] = network_scope_requested
+        named_host_action_requested = bool(network_requested and not network_scope_requested)
+        host_binding_namespace_key: bytes | None = None
+        if named_host_action_requested:
+            try:
+                host_binding_namespace_key = load_trace_namespace_key(self.storage.conn)
+            except RuntimeError:
+                host_binding_namespace_key = None
+        empty_binding = "0" * 64
+        dossier["_named_host_action_requested"] = named_host_action_requested
+        dossier["_named_host_profile"] = (
+            "vulnerabilities"
+            if direct_vulnerability_requested or vulnerability_followup_requested
+            else "services"
+        )
+        dossier["_named_host_source_user_message_id"] = source_user_message_id
+        dossier["_named_host_request_sha256"] = (
+            _engineer_host_private_digest(
+                host_binding_namespace_key,
+                "request",
+                actor.user_id,
+                actor.own_id,
+                conversation_id,
+                source_user_message_id,
+                message,
+                "",
+            )
+            if host_binding_namespace_key is not None
+            else empty_binding
+        )
+        dossier["_named_host_target_identity_sha256"] = empty_binding
+        dossier["_named_host_tenant_sha256"] = (
+            _engineer_host_private_digest(host_binding_namespace_key, "tenant", actor.user_id)
+            if host_binding_namespace_key is not None
+            else empty_binding
+        )
+        dossier["_named_host_person_sha256"] = (
+            _engineer_host_private_digest(host_binding_namespace_key, "person", actor.own_id)
+            if host_binding_namespace_key is not None
+            else empty_binding
+        )
         dossier["network_request_status"] = (
             "explicit_active_request" if network_requested else "not_requested"
         )
@@ -56536,6 +58846,8 @@ class AgentRuntime:
                     dossier["_configured_network_unavailable_reason"] = "turn_deadline_expired"
                 elif tool_name == _ENGINEER_DECOMPILE_ACTION_TOOL:
                     dossier["_artifact_decompile_error"] = "deadline_expired"
+                elif tool_name == _ENGINEER_COMPILE_ACTION_TOOL:
+                    dossier["_artifact_compile_error"] = "deadline_expired"
                 return None
             fresh_actor = self._fresh_engineer_actor(actor, capability)
             if fresh_actor is None:
@@ -56543,9 +58855,21 @@ class AgentRuntime:
                     dossier["_configured_network_unavailable_reason"] = "authorization_unavailable"
                 elif tool_name == _ENGINEER_DECOMPILE_ACTION_TOOL:
                     dossier["_artifact_decompile_error"] = "authorization_unavailable"
+                elif tool_name in {
+                    _ENGINEER_HOST_AUDIT_ACTION_TOOL,
+                    _ENGINEER_HOST_VULNERABILITY_ACTION_TOOL,
+                }:
+                    dossier["target_error"] = "authorization_unavailable"
+                elif tool_name == _ENGINEER_COMPILE_ACTION_TOOL:
+                    dossier["_artifact_compile_error"] = "authorization_unavailable"
                 return None
             if tool_name == _ENGINEER_NETWORK_ACTION_TOOL:
                 dossier["_configured_network_tool_started"] = True
+            elif tool_name in {
+                _ENGINEER_HOST_AUDIT_ACTION_TOOL,
+                _ENGINEER_HOST_VULNERABILITY_ACTION_TOOL,
+            }:
+                dossier["_named_host_tool_started"] = True
             elif tool_name == _ENGINEER_DECOMPILE_ACTION_TOOL:
                 dossier["_artifact_decompile_tool_started"] = True
             _mark_engineer_action_started(dossier, tool_name)
@@ -56559,6 +58883,17 @@ class AgentRuntime:
                     dossier["_artifact_decompile_tool_started"] = bool(
                         result.handler_entered and result.work_started is not False
                     )
+                elif tool_name in {
+                    _ENGINEER_HOST_AUDIT_ACTION_TOOL,
+                    _ENGINEER_HOST_VULNERABILITY_ACTION_TOOL,
+                }:
+                    dossier["_named_host_tool_started"] = bool(
+                        result.handler_entered and result.work_started is not False
+                    )
+                elif tool_name == _ENGINEER_COMPILE_ACTION_TOOL:
+                    dossier["_artifact_compile_tool_started"] = bool(
+                        result.handler_entered and result.work_started is not False
+                    )
                 _record_engineer_action_receipt(dossier, tool_name, result)
                 return result
             except TimeoutError:
@@ -56566,6 +58901,15 @@ class AgentRuntime:
                 # terminal audit before propagating it through ``wait_for``.
                 if tool_name == _ENGINEER_DECOMPILE_ACTION_TOOL:
                     dossier["_artifact_decompile_error"] = "deadline_expired"
+                elif tool_name == _ENGINEER_COMPILE_ACTION_TOOL:
+                    # No private result envelope survived the timeout, so the
+                    # runtime cannot prove a pre-spawn refusal.  The compile
+                    # call had already crossed fresh capability admission and
+                    # entered the kernel; preserve the same conservative
+                    # fallback as the kernel's cancellation audit instead of
+                    # falsely claiming that work never started.
+                    dossier["_artifact_compile_tool_started"] = True
+                    dossier["_artifact_compile_error"] = "deadline_expired"
                 return ToolResult(
                     tool_name,
                     False,
@@ -56576,7 +58920,15 @@ class AgentRuntime:
         # active-assessment language in this current human turn may cross even
         # the DNS pinning preflight.  Exact policy is then checked before a
         # ticket is minted, and again inside the tool handler before any socket.
-        host_actor = self._fresh_engineer_actor(actor, "engineer.host.audit") if network_requested else None
+        host_actor = (
+            self._fresh_engineer_actor(actor, "engineer.host.audit")
+            if network_requested
+            and (not named_host_action_requested or host_binding_namespace_key is not None)
+            else None
+        )
+        if named_host_action_requested and host_actor is None:
+            dossier["ok"] = False
+            dossier["target_error"] = "authorization_unavailable"
 
         async def audit_target_pinning(outcome: str) -> None:
             if host_actor is None:
@@ -56659,11 +59011,31 @@ class AgentRuntime:
             and not network_scope_requested
             and not _turn_deadline_expired(turn_deadline)
         ):
+            continuation: _EngineerHostContinuation | None = None
+            if vulnerability_followup_requested and conversation_id and source_user_message_id:
+                try:
+                    with self.storage.transaction() as continuation_conn:
+                        continuation = self._engineer_host_continuation(
+                            continuation_conn,
+                            actor=host_actor,
+                            conversation_id=conversation_id,
+                            current_user_message_id=source_user_message_id,
+                        )
+                except Exception as exc:  # noqa: BLE001 - a stale/corrupt receipt denies reuse
+                    LOGGER.warning(
+                        "engineer host continuation restore failed (%s)",
+                        type(exc).__name__,
+                    )
+            pinning_message = (
+                f"scan {continuation.target.connect_address}"
+                if type(continuation) is _EngineerHostContinuation
+                else message
+            )
             try:
                 pinned_target = await _await_with_turn_deadline(
                     run_blocking(
                         engineer_hosts.pin_target_from_speech,
-                        message,
+                        pinning_message,
                         deadline=turn_deadline,
                         allowed_cidrs=tuple(getattr(self.settings, "host_allowed_cidrs", ()) or ()),
                         allow_public=bool(getattr(self.settings, "host_public_network_enabled", False)),
@@ -56674,6 +59046,16 @@ class AgentRuntime:
                     turn_deadline,
                     expired="turn deadline expired during engineer target pinning",
                 )
+                if type(continuation) is _EngineerHostContinuation:
+                    if (
+                        pinned_target is None
+                        or pinned_target.connect_address != continuation.target.connect_address
+                    ):
+                        raise engineer_hosts.EngineerTargetPolicyError("target_outside_operator_policy")
+                    pinned_target = continuation.target
+                    dossier["_named_host_continuation_source_assistant_id"] = (
+                        continuation.source_assistant_message_id
+                    )
             except asyncio.CancelledError:
                 # ``run_blocking`` cannot stop an already-entered resolver
                 # thread. Record that its external outcome is unknown before
@@ -56703,6 +59085,35 @@ class AgentRuntime:
             if pinned_target is None and "target_error" not in dossier:
                 dossier["ok"] = False
                 dossier["target_error"] = "exact_current_target_required"
+            if pinned_target is not None and (
+                len(pinned_target.addresses) != 1
+                or dossier["_named_host_profile"] == "vulnerabilities"
+                and pinned_target.implied_port is not None
+            ):
+                dossier["ok"] = False
+                dossier["targets"] = [pinned_target.public_dict()]
+                dossier["target_error"] = "exact_single_host_required"
+                pinned_target = None
+            if pinned_target is not None and dossier["_named_host_profile"] == "vulnerabilities":
+                try:
+                    vulnerability_snapshot = engineer_hosts.admit_pinned_target_policy(
+                        pinned_target,
+                        allowed_cidrs=tuple(getattr(self.settings, "host_allowed_cidrs", ()) or ()),
+                        allow_public=False,
+                        public_action_approved=False,
+                    )
+                except engineer_hosts.EngineerTargetPolicyError:
+                    dossier["ok"] = False
+                    dossier["targets"] = [pinned_target.public_dict()]
+                    dossier["target_error"] = "private_single_host_required"
+                    pinned_target = None
+                else:
+                    vulnerability_classes = {item.classification for item in vulnerability_snapshot.bindings}
+                    if not vulnerability_classes.issubset({"operator_approved_private", "approved_ipv6_ula"}):
+                        dossier["ok"] = False
+                        dossier["targets"] = [pinned_target.public_dict()]
+                        dossier["target_error"] = "private_single_host_required"
+                        pinned_target = None
             if pinned_target is not None and not _turn_deadline_expired(turn_deadline):
                 host = pinned_target.host
                 remaining = _remaining_deadline_budget(turn_deadline)
@@ -56723,26 +59134,59 @@ class AgentRuntime:
                     host_actor.own_id,
                     ttl_sec=ticket_ttl,
                 )
+                if host_binding_namespace_key is None:
+                    raise RuntimeError("engineer host binding authority disappeared")
+                dossier["_named_host_request_sha256"] = (
+                    continuation.request_binding_sha256
+                    if type(continuation) is _EngineerHostContinuation
+                    else _engineer_host_private_digest(
+                        host_binding_namespace_key,
+                        "request",
+                        actor.user_id,
+                        actor.own_id,
+                        conversation_id,
+                        source_user_message_id,
+                        message,
+                        pinned_target.source_token,
+                    )
+                )
+                dossier["_named_host_target_identity_sha256"] = _engineer_host_private_digest(
+                    host_binding_namespace_key,
+                    "target",
+                    actor.user_id,
+                    actor.own_id,
+                    pinned_target.host,
+                    pinned_target.connect_address,
+                )
                 dossier["targets"] = [pinned_target.public_dict()]
                 dossier["_pinned_targets"] = {host.casefold(): pinned_target}
                 arguments: dict[str, Any] = {
                     "host": host,
                     "target_ticket": target_ticket,
                 }
-                if pinned_target.implied_port is not None:
+                if dossier["_named_host_profile"] == "services" and pinned_target.implied_port is not None:
                     arguments["ports"] = [pinned_target.implied_port]
+                action_tool = (
+                    _ENGINEER_HOST_VULNERABILITY_ACTION_TOOL
+                    if dossier["_named_host_profile"] == "vulnerabilities"
+                    else _ENGINEER_HOST_AUDIT_ACTION_TOOL
+                )
                 result = await execute_audited(
-                    "engineer_audit_host",
+                    action_tool,
                     arguments,
                     "engineer.host.audit",
                 )
                 if result is not None:
                     data = result.data if result.success and isinstance(result.data, Mapping) else None
-                    host_rows = data.get("hosts") if isinstance(data, Mapping) else None
-                    if isinstance(host_rows, list):
-                        dossier["hosts"].extend(item for item in host_rows if isinstance(item, Mapping))
-                    elif not result.success:
-                        dossier["hosts"].append({"ok": False, "host": host, "error": "audit_unavailable"})
+                    if action_tool == _ENGINEER_HOST_VULNERABILITY_ACTION_TOOL:
+                        if isinstance(data, Mapping):
+                            dossier["host_vulnerability_assessment"] = dict(data)
+                    else:
+                        host_rows = data.get("hosts") if isinstance(data, Mapping) else None
+                        if isinstance(host_rows, list):
+                            dossier["hosts"].extend(item for item in host_rows if isinstance(item, Mapping))
+                        elif not result.success:
+                            dossier["hosts"].append({"ok": False, "host": host, "error": "audit_unavailable"})
                     if isinstance(data, Mapping):
                         dossier["active_probes_sent"] = data.get("active_probes_sent") is True
                         dossier["exploit_payloads_sent"] = data.get("exploit_payloads_sent") is True
@@ -56788,7 +59232,7 @@ class AgentRuntime:
                     }
                 )
 
-        if artifact_decompile_requested:
+        if artifact_decompile_requested and not conflicting_artifact_action:
             if len(raw_ids) != 1:
                 dossier["_artifact_decompile_reason"] = (
                     "exact_artifact_required" if not raw_ids else "ambiguous_artifact"
@@ -56820,6 +59264,42 @@ class AgentRuntime:
                         )
             else:
                 dossier["_artifact_decompile_error"] = "deadline_expired"
+
+        if artifact_compile_requested and not conflicting_artifact_action:
+            compile_binding, compile_binding_reason = self._prepare_engineer_compile_source(
+                actor,
+                attachments,
+                requested_filename=artifact_compile_filename,
+            )
+            if compile_binding is None:
+                dossier["_artifact_compile_reason"] = compile_binding_reason
+            elif (
+                turn_deadline is not None
+                and (_remaining_deadline_budget(turn_deadline) or 0.0) < _ENGINEER_COMPILE_MIN_REMAINING_SEC
+            ):
+                # The sandbox supervisor has a shorter fixed bound, but its
+                # blocking thread cannot be abandoned safely after cancellation.
+                dossier["_artifact_compile_error"] = "deadline_expired"
+            elif not _turn_deadline_expired(turn_deadline):
+                dossier["_artifact_compile_source_binding"] = compile_binding
+                result = await execute_audited(
+                    _ENGINEER_COMPILE_ACTION_TOOL,
+                    {
+                        "raw_id": compile_binding.raw_id,
+                        "expected_filename": compile_binding.filename,
+                        "expected_sha256": compile_binding.source_sha256,
+                    },
+                    "engineer.artifact.build",
+                )
+                if result is not None:
+                    if result.success and isinstance(result.data, Mapping):
+                        dossier["artifact_compile"] = dict(result.data)
+                        if isinstance(result.attachment, Mapping):
+                            dossier["_artifact_compile_attachment"] = dict(result.attachment)
+                    else:
+                        dossier["_artifact_compile_error"] = _engineer_compile_failure_reason(result.error)
+            else:
+                dossier["_artifact_compile_error"] = "deadline_expired"
 
         successful_artifacts = [
             item for item in dossier["artifacts"] if isinstance(item, Mapping) and item.get("ok") is True
@@ -59461,6 +61941,18 @@ class AgentRuntime:
             # Repeat the closed allowlist for direct adapters/tests which enter
             # this seam without the outer chat projection.
             tools[:] = _project_engineer_tool_schemas(tools, authority=turn_auth)
+            if re.fullmatch(
+                r"[0-9]{1,20}",
+                context.engineer_command_telegram_update_id,
+            ) is None:
+                # Starting a command requires independently authenticated
+                # Telegram provenance.  Do not advertise a capability which
+                # this turn cannot carry across the execution boundary.
+                tools[:] = [
+                    tool
+                    for tool in tools
+                    if _engineer_tool_name(tool) != "engineer_command_run"
+                ]
         else:
             # Direct callers do not get to bypass the mode-owned schema fence.
             tools[:] = [
@@ -60956,6 +63448,30 @@ class AgentRuntime:
                             )
                     else:
                         carrier_allowed = False
+                elif call.name in _ENGINEER_COMMAND_CONTEXT_TOOL_NAMES:
+                    model_arguments = call.arguments if isinstance(call.arguments, Mapping) else {}
+                    if (
+                        not isinstance(call.arguments, Mapping)
+                        or _ENGINEER_COMMAND_PRIVATE_ARGUMENTS.intersection(
+                            str(key) for key in model_arguments
+                        )
+                        or context.interaction_mode != "engineer"
+                        or not context.conversation_id
+                        or not context.effect_root_user_message_id
+                        or re.fullmatch(
+                            r"[0-9]{1,20}",
+                            context.engineer_command_telegram_update_id,
+                        )
+                        is None
+                    ):
+                        carrier_allowed = False
+                    else:
+                        call_arguments = dict(model_arguments)
+                        call_arguments["_conversation_id"] = context.conversation_id
+                        call_arguments["_source_message_id"] = context.effect_root_user_message_id
+                        call_arguments["_telegram_update_id"] = (
+                            context.engineer_command_telegram_update_id
+                        )
                 elif call.name in _HOST_CONTROL_CONTEXT_TOOL_NAMES:
                     model_arguments = call.arguments if isinstance(call.arguments, Mapping) else {}
                     if (
@@ -61004,7 +63520,11 @@ class AgentRuntime:
                         context.interaction_mode != "engineer"
                         or not selected_artifact_raw_id
                         or selected_artifact_raw_id not in engineer_pinned_raw_ids
-                        or call.name == _ENGINEER_DECOMPILE_ACTION_TOOL
+                        or call.name
+                        in {
+                            _ENGINEER_COMPILE_ACTION_TOOL,
+                            _ENGINEER_DECOMPILE_ACTION_TOOL,
+                        }
                         or (call.name == "engineer_patch_artifact" and not engineer_patch_authorized)
                     ):
                         carrier_allowed = False
@@ -62321,6 +64841,7 @@ class AgentRuntime:
         settles_engineer_network = "активное сканирование настроенной lan" in folded_settled
         settles_engineer_network_report = "сетевой отчёт" in folded_settled
         settles_engineer_decompile = "декомпиляцию выбранного бинарного файла" in folded_settled
+        settles_engineer_compile = "компиляцию выбранного java-файла" in folded_settled
         tag_remainder_clauses = (
             _tag_inventory_open_remainder_clauses(
                 message,
@@ -62390,6 +64911,10 @@ class AgentRuntime:
                 from friday.organs.engineer.targets import requests_artifact_decompile
 
                 unsafe_rest = unsafe_rest or requests_artifact_decompile(rest)
+            if settles_engineer_compile:
+                from friday.organs.engineer.targets import requests_artifact_compile
+
+                unsafe_rest = unsafe_rest or requests_artifact_compile(rest)
             if "сч" in folded_settled and "тчик" in folded_settled:
                 source_clauses = (
                     _split_tag_request_clauses(message)
