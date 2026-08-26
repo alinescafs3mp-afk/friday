@@ -297,34 +297,7 @@ _TRAILING_REQUEST_CANCEL = re.compile(
     r"запускай(?:те)?|сканируй(?:те)?)\b|"
     r"\b(?:отмена|отмени(?:те)?|передумал(?:а)?)\b|"
     r"\b(?:do\s+not|don't|dont|never)\s+(?:do|scan|run|execute)\b|"
-    r"\b(?:cancel(?:\s+(?:it|that))?|never\s+mind|forget\s+it|"
-    r"i(?:'d|\s+would)\s+(?:rather|prefer)\s+not|"
-    r"(?:я\s+)?(?:лучше\s+)?не\s+(?:буду|хочу)|"
-    r"(?:не\s+)?забудь(?:те)?\s+(?:об\s+этом|это)|"
-    r"передумал(?:а)?)\b|"
-    r"(?:\A|[,;.!?…—–-]\s*)"
-    r"(?:(?:actually|wait|sorry|but|however|вообще|но|однако|погоди(?:те)?)"
-    r"\s*[,;:]?\s*)?"
-    r"(?:(?:please\s+)?(?:do\s+not|don't|dont)\b|(?:no|nope|nah|нет|неа)\b))",
-    re.IGNORECASE,
-)
-_TRAILING_REQUEST_META = re.compile(
-    r"(?:"
-    r"\bwhat\s+(?:(?:does|would)\s+)?"
-    r"(?:that|this|it|(?:that|this|the)\s+(?:command|phrase|wording))\s+mean\b|"
-    r"\bwhat\s+do\s+you\s+mean\s+by\s+(?:that|this|it)\b|"
-    r"\bmeans?\s+what\b|"
-    r"\b(?:explain|clarify|tell|define|interpret)\w*\b[^.!?\n]{0,80}"
-    r"\b(?:that|this|it|(?:that|this|the)\s+(?:command|phrase|wording))\b"
-    r"[^.!?\n]{0,40}\b(?:mean|means|meaning|is)\b|"
-    r"\b(?:explain|clarify|define|interpret)\w*\s+the\s+"
-    r"(?:command|phrase|wording)\b|"
-    r"\bчто\s+(?:это|эта\s+(?:команда|фраза)|эти\s+слова)\s+знач\w*\b|"
-    r"\b(?:объясн|поясн|уточн|расшифр)\w*\b[^.!?\n]{0,80}"
-    r"\b(?:это|эт(?:а|у|ой)\s+(?:команд|фраз)\w*|эти\s+слова)\b"
-    r"[^.!?\n]{0,40}\b(?:знач|означ|смысл)\w*\b|"
-    r"\b(?:значение|смысл)\s+(?:этой\s+)?(?:команды|фразы)\b"
-    r")",
+    r"\b(?:cancel(?:\s+(?:it|that))?|never\s+mind)\b)",
     re.IGNORECASE,
 )
 _LEADING_REQUEST_CANCEL = re.compile(
@@ -656,6 +629,68 @@ _ARTIFACT_COMPILE_CAPABILITY = re.compile(
     r"(?:are\s+you\s+able\s+to|do\s+you\s+know\s+how\s+to|do\s+you\s+support)\s+"
     r"(?:compil\w*|build\w*)[^.!?\n]{0,100}\?\s*$"
     r")",
+    re.IGNORECASE,
+)
+_ARTIFACT_COMPILE_REMAINDER_DENIAL = re.compile(
+    r"(?:"
+    r"\b(?:do\s+not|don't|dont|never\s+mind|forget\s+it|cancel(?:\s+(?:it|that))?|"
+    r"hold\s+off|skip\s+(?:it|that)|stop)\b|"
+    r"\b(?:i(?:'d|\s+would)\s+(?:rather|prefer)|better|let(?:'s|\s+us))\s+not\b|"
+    r"\b(?:could|would)\s+you\s+not\b|"
+    r"\bi\s+(?:do\s+not|don't|dont)\s+want\b|"
+    r"(?:\A|[,;.!?…—–-]\s*)(?:no|nope|nah|нет|неа)\b|"
+    r"\b(?:давай(?:те)?|лучше)\s+не\b|"
+    r"\b(?:я\s+)?(?:лучше\s+)?не\s+(?:буду|хочу)\b|"
+    r"\bне\s+(?:делай(?:те)?|компилируй(?:те)?|собирай(?:те)?|"
+    r"запускай(?:те)?|выполняй(?:те)?|надо|нужно)\b|"
+    r"\b(?:отмена|отбой|стоп|передумал(?:а)?)\b"
+    r")",
+    re.IGNORECASE,
+)
+_ARTIFACT_COMPILE_SAFE_DELIVERY_REMAINDER = re.compile(
+    r"\A\s*(?:"
+    r"(?:no|without)\s+(?:explanation|commentary|details?)"
+    r"(?:\s+(?:is|are))?\s*(?:needed|required)?\s*[,;:—–-]*\s*"
+    r"(?:just\s+)?(?:send|attach|upload|deliver)\s+(?:me\s+)?(?:the\s+)?"
+    r"(?:jar|binary|build\s+artifact)|"
+    r"(?:без\s+(?:объяснен\w*|комментар\w*|подробност\w*)|"
+    r"(?:объяснен\w*|комментар\w*|подробност\w*)\s+не\s+нужн\w*)"
+    r"\s*[,;:—–-]*\s*(?:просто\s+)?"
+    r"(?:пришли(?:те)?|отправь(?:те)?|приложи(?:те)?|выгрузи(?:те)?)\s+"
+    r"(?:мне\s+)?(?:jar|бинарник|артефакт)\w*"
+    r")\s*[.!?…]*\s*\Z",
+    re.IGNORECASE,
+)
+_ARTIFACT_COMPILE_SAFE_CONTEXT_REMAINDER = re.compile(
+    rf"\A\s*{_ARTIFACT_COMPILE_FILENAME}\s+(?:"
+    r"is\s+(?:unrelated|only\s+(?:an?\s+)?(?:reference|example)|not\s+the\s+target)|"
+    r"(?:не\s+является|не)\s+(?:целью|исходником)|"
+    r"(?:лишь|только)\s+(?:ссылка|пример))\s*[.!?…]*\s*\Z",
+    re.IGNORECASE,
+)
+_ARTIFACT_COMPILE_SAFE_COMPANION_REMAINDER = re.compile(
+    r"\A\s*(?:(?:and|then|also|please|и|затем|также|пожалуйста|"
+    r"а\s+потом)\s+){0,3}(?:"
+    r"explain(?:\s+to\s+me)?\s+(?:"
+    r"what\s+(?:this|the)\s+(?:code|source|class|method|compiler\s+error)\s+means?|"
+    r"how\s+(?:it|the\s+(?:code|source|class|method))\s+works?|"
+    r"(?:the\s+|this\s+)?(?:code|source|class|method|compiler(?:\s+error)?|"
+    r"diagnostics?|build\s+result|jar|output|generated\s+artifact))|"
+    r"(?:review|summari[sz]e|describe|analy[sz]e|inspect|check)\s+"
+    r"(?:the\s+|this\s+)?(?:code|source|class|method|compiler(?:\s+error)?|"
+    r"diagnostics?|build\s+result|jar|output|generated\s+artifact)|"
+    r"(?:объясни(?:те)?|поясни(?:те)?)\s+(?:мне\s+)?(?:"
+    r"как\s+(?:код|исходник|класс|метод)\s+работа\w*|"
+    r"что\s+(?:означа\w*|дела\w*)\s+(?:код|исходник|класс|метод)|"
+    r"(?:этот|данный)?\s*(?:код|исходник|класс|метод|компилятор|"
+    r"диагностик\w*|ошибк\w*\s+компил\w*|результат\w*\s+сборк\w*|"
+    r"jar|выход\w*|артефакт\w*))|"
+    r"(?:проверь(?:те)?|разбери(?:те)?|проанализируй(?:те)?|опиши(?:те)?|"
+    r"суммаризируй(?:те)?|сделай(?:те)?\s+ревью)\s+"
+    r"(?:этот|данный)?\s*(?:код|исходник|класс|метод|компилятор|"
+    r"диагностик\w*|ошибк\w*\s+компил\w*|результат\w*\s+сборк\w*|"
+    r"jar|выход\w*|артефакт\w*)"
+    r")\s*[.!?…]*\s*\Z",
     re.IGNORECASE,
 )
 _METADATA_V4 = ipaddress.ip_address("169.254.169.254")
@@ -1059,11 +1094,7 @@ def _direct_request_matches(speech: str, pattern: re.Pattern[str]) -> tuple[_Dir
             request_start = start + request.start()
             request_end = start + request.end()
             trailing = masked[request_end:]
-            if (
-                _TRAILING_REQUEST_CANCEL.search(trailing)
-                or _TRAILING_REQUEST_META.search(trailing)
-                or _TRAILING_REQUEST_ATTRIBUTION.search(trailing)
-            ):
+            if _TRAILING_REQUEST_CANCEL.search(trailing) or _TRAILING_REQUEST_ATTRIBUTION.search(trailing):
                 return ()
             found.append(
                 _DirectRequestSpan(
@@ -1190,6 +1221,27 @@ def artifact_decompile_request_is_atomic(speech: str) -> bool:
     return False
 
 
+def _artifact_compile_remainder_is_safe(remainder: str) -> bool:
+    """Admit only closed, code-owned companion wording after javac authority."""
+
+    if re.fullmatch(r"[\s,;.!?…—–-]*", remainder):
+        return True
+    surface = remainder.strip(" \t\r\n,;:.!?…—–-")
+    if not surface or len(surface) > 240 or "\n" in surface:
+        return False
+    if _ARTIFACT_COMPILE_SAFE_DELIVERY_REMAINDER.fullmatch(surface):
+        return True
+    if _ARTIFACT_COMPILE_SAFE_CONTEXT_REMAINDER.fullmatch(surface):
+        return True
+    if _ARTIFACT_COMPILE_REMAINDER_DENIAL.search(surface):
+        return False
+    # A second sentence is a distinct speech act.  It cannot silently inherit
+    # compile authority; the owner can issue it as a separate turn.
+    if re.search(r"[.!?…]\s+\S", surface):
+        return False
+    return bool(_ARTIFACT_COMPILE_SAFE_COMPANION_REMAINDER.fullmatch(surface))
+
+
 def _accepted_artifact_compile_requests(
     speech: str,
 ) -> tuple[str, str, tuple[_DirectRequestSpan, ...]]:
@@ -1209,8 +1261,11 @@ def _accepted_artifact_compile_requests(
         or _ARTIFACT_COMPILE_CAPABILITY.search(masked)
     ):
         return text, masked, ()
+    direct_requests = _direct_request_matches(text, _ARTIFACT_COMPILE_REQUEST)
+    if len(direct_requests) != 1:
+        return text, masked, ()
     accepted: list[_DirectRequestSpan] = []
-    for request in _direct_request_matches(text, _ARTIFACT_COMPILE_REQUEST):
+    for request in direct_requests:
         unit = masked[request.unit_start : request.unit_end]
         named_sources = {
             match.group(0) for match in re.finditer(_ARTIFACT_COMPILE_FILENAME, unit, re.IGNORECASE)
@@ -1224,6 +1279,7 @@ def _accepted_artifact_compile_requests(
             or _ARTIFACT_COMPILE_TRAILING_DENIAL.match(trailing)
             or _ARTIFACT_COMPILE_TRAILING_REPORT.match(trailing)
             or _ARTIFACT_COMPILE_TRAILING_ATTRIBUTION.search(full_trailing)
+            or not _artifact_compile_remainder_is_safe(full_trailing)
         ):
             continue
         prefix = masked[request.unit_start : request.start]
@@ -1246,10 +1302,7 @@ def _accepted_artifact_compile_requests(
             ):
                 continue
         accepted.append(request)
-    # This fixed profile owns exactly one source action.  Multiple admitted
-    # compile clauses must not collapse to the deictic ``filename is None``
-    # representation, which would otherwise select an unrelated sole upload.
-    return text, masked, tuple(accepted) if len(accepted) == 1 else ()
+    return text, masked, tuple(accepted)
 
 
 def requests_artifact_compile(speech: str) -> bool:
