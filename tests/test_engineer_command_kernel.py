@@ -97,8 +97,8 @@ def _confirm(kernel: CommandKernel, source: OwnerSource, request: CommandRequest
         tenant_id=source.tenant_id,
         conversation_id=source.conversation_id,
         channel=source.channel,
-        confirmation_row_id=kwargs.get("confirmation_row_id", "confirm-row-1"),
-        confirmation_update_id=kwargs.get("confirmation_update_id", "confirm-upd-1"),
+        confirmation_row_id=kwargs.get("confirmation_row_id", f"confirm-row-{request.idempotency_key}"),
+        confirmation_update_id=kwargs.get("confirmation_update_id", f"confirm-upd-{request.idempotency_key}"),
         command_digest=request.digest,
         body_hash=kwargs.get("body_hash", sha256_bytes(b"confirm-body")),
         expires_at=int(expires_at),
@@ -462,7 +462,7 @@ def test_stdout_truncation_is_honest(tmp_path: Path) -> None:
         max_stdout_bytes=1024,
         timeout_sec=10,
     )
-    receipt = _wait(kernel, _submit(kernel, request))
+    receipt = _wait(kernel, _submit(kernel, request, destructive=True))
     assert receipt.truncated_stdout is True
     assert len(receipt.stdout) == 1024
 
@@ -473,7 +473,7 @@ def test_user_script_with_direct_shebang_runs(tmp_path: Path) -> None:
     script.chmod(0o755)
     kernel = _kernel(tmp_path)
     request = _argv(str(script), key=_key("script"))
-    receipt = _wait(kernel, _submit(kernel, request))
+    receipt = _wait(kernel, _submit(kernel, request, destructive=True))
     assert receipt.status is CommandStatus.COMPLETED
     assert receipt.stdout == b"script-ok"
 
@@ -513,7 +513,7 @@ def test_isolated_workspace_denies_host_files_and_network(tmp_path: Path) -> Non
         f"import pathlib,sys; p=pathlib.Path({str(secret)!r}); sys.exit(2 if p.exists() else 0)",
         key=_key("host-file"),
     )
-    leak_receipt = _wait(kernel, _submit(kernel, leak))
+    leak_receipt = _wait(kernel, _submit(kernel, leak, destructive=True))
     assert leak_receipt.status is CommandStatus.COMPLETED
     assert leak_receipt.exit_code == 0
     net = _argv(
@@ -528,7 +528,7 @@ def test_isolated_workspace_denies_host_files_and_network(tmp_path: Path) -> Non
         key=_key("net"),
         timeout_sec=10,
     )
-    net_receipt = _wait(kernel, _submit(kernel, net))
+    net_receipt = _wait(kernel, _submit(kernel, net, destructive=True))
     assert net_receipt.status is CommandStatus.COMPLETED
     assert net_receipt.exit_code == 0
 
@@ -683,7 +683,7 @@ def test_trusted_path_is_used_for_resolve_and_runtime(tmp_path: Path) -> None:
     contract = TrustedPathContract(directories=("/usr/bin", "/bin", str(extra)))
     kernel = _kernel(tmp_path, trusted_path=contract)
     request = _argv("svc-echo", key=_key("svcpath"))
-    receipt = _wait(kernel, _submit(kernel, request))
+    receipt = _wait(kernel, _submit(kernel, request, destructive=True))
     assert receipt.status is CommandStatus.COMPLETED
     text = receipt.stdout.decode()
     assert str(extra) in text
@@ -694,7 +694,7 @@ def test_trusted_path_is_used_for_resolve_and_runtime(tmp_path: Path) -> None:
         "import os; print(os.environ.get('UNTRUSTED_PATH_VAR','missing'))",
         key=_key("no-ambient"),
     )
-    env_receipt = _wait(kernel, _submit(kernel, ambient))
+    env_receipt = _wait(kernel, _submit(kernel, ambient, destructive=True))
     assert b"missing" in env_receipt.stdout
 
 
@@ -932,7 +932,7 @@ def test_fork_bomb_is_contained(tmp_path: Path) -> None:
         key=_key("fork-bomb"),
         timeout_sec=8,
     )
-    receipt = _wait(kernel, _submit(kernel, request))
+    receipt = _wait(kernel, _submit(kernel, request, destructive=True))
     assert receipt.status in {CommandStatus.FAILED, CommandStatus.TIMEOUT, CommandStatus.UNKNOWN}
     assert receipt.status is not CommandStatus.COMPLETED
 
@@ -956,7 +956,7 @@ def test_tmpfs_and_output_quota_kill(tmp_path: Path) -> None:
         key=_key("tmpfs-mem"),
         timeout_sec=10,
     )
-    tmpfs_receipt = _wait(kernel, _submit(kernel, tmpfs))
+    tmpfs_receipt = _wait(kernel, _submit(kernel, tmpfs, destructive=True))
     assert tmpfs_receipt.status is CommandStatus.COMPLETED
     many = _argv(
         "/usr/bin/python3",
@@ -968,7 +968,7 @@ def test_tmpfs_and_output_quota_kill(tmp_path: Path) -> None:
         key=_key("many-files"),
         timeout_sec=10,
     )
-    many_receipt = _wait(kernel, _submit(kernel, many))
+    many_receipt = _wait(kernel, _submit(kernel, many, destructive=True))
     assert many_receipt.status is CommandStatus.FAILED
     assert many_receipt.error_code in {"output_quota_exceeded", "output_tree_overflow"}
     huge = _argv(
@@ -978,7 +978,7 @@ def test_tmpfs_and_output_quota_kill(tmp_path: Path) -> None:
         key=_key("agg-bytes"),
         timeout_sec=15,
     )
-    huge_receipt = _wait(kernel, _submit(kernel, huge))
+    huge_receipt = _wait(kernel, _submit(kernel, huge, destructive=True))
     assert huge_receipt.status is CommandStatus.FAILED
     assert huge_receipt.error_code in {
         "output_quota_exceeded",
@@ -1131,7 +1131,7 @@ def test_deep_output_tree_is_killed(tmp_path: Path) -> None:
         key=_key("deep-out"),
         timeout_sec=15,
     )
-    receipt = _wait(kernel, _submit(kernel, request))
+    receipt = _wait(kernel, _submit(kernel, request, destructive=True))
     assert receipt.status is CommandStatus.FAILED
     assert receipt.error_code in {
         "output_quota_exceeded",

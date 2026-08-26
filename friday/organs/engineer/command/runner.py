@@ -27,7 +27,7 @@ from .contracts import (
     PathRoot,
     ResourceLimits,
 )
-from .isolate import OUTPUT_EXPORT_SCRIPT, bwrap_argv, extra_ro_binds
+from .isolate import OUTPUT_EXPORT_IMPL, OUTPUT_EXPORT_SCRIPT, bwrap_argv, extra_ro_binds
 from .resolve import confirm_held, confirm_path_roots, sealed_payload_memfd
 from .spawn_helper import SpawnBroker, StartedJob
 from .workspace import JobWorkspace
@@ -54,30 +54,20 @@ def _pid_starttime(pid: int) -> int | None:
         return None
 
 
-def _kill_session(pid: int) -> None:
-    def _kill(sig: int) -> bool:
-        try:
-            os.killpg(pid, sig)
-            return True
-        except (ProcessLookupError, PermissionError, OSError):
-            try:
-                os.kill(pid, sig)
-                return True
-            except ProcessLookupError:
-                return False
-            except OSError:
-                return False
-
-    if not _kill(signal.SIGTERM):
-        return
+def _terminate_process(proc: _SpawnedProcess, scope: ProvenScope | None) -> None:
+    """Signal only the pidfd identity; use cgroup.kill for the full tree."""
+    pidfd = proc.pidfd
+    if pidfd is not None:
+        with contextlib.suppress(OSError):
+            signal.pidfd_send_signal(pidfd, signal.SIGTERM)
     deadline = time.monotonic() + _KILL_GRACE_SEC
-    while time.monotonic() < deadline:
-        try:
-            os.kill(pid, 0)
-        except ProcessLookupError:
-            return
+    while proc.poll() is None and time.monotonic() < deadline:
         time.sleep(0.05)
-    _kill(signal.SIGKILL)
+    if proc.poll() is None and pidfd is not None:
+        with contextlib.suppress(OSError):
+            signal.pidfd_send_signal(pidfd, signal.SIGKILL)
+    if scope is not None:
+        scope.kill()
 
 
 class _SpawnedProcess:
@@ -170,7 +160,12 @@ def _usage_walk(dir_fd: int, *, depth: int, dirs: int) -> tuple[int, int, int]:
         raise CommandError("output_unreadable") from exc
     files = 0
     total = 0
-    flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0)
+    flags = (
+        os.O_RDONLY
+        | getattr(os, "O_CLOEXEC", 0)
+        | getattr(os, "O_NOFOLLOW", 0)
+        | getattr(os, "O_NONBLOCK", 0)
+    )
     for name in names:
         if name in {".", ".."} or "/" in name:
             raise CommandError("path_escape")
@@ -273,20 +268,24 @@ class SpawnedCommand:
         launcher = bwrap.resolved.canonical_path
         child_env = {"PATH": "/usr/bin", "LANG": "C.UTF-8"}
         export_fd = sealed_payload_memfd(OUTPUT_EXPORT_SCRIPT, label="friday-export")
-        stdin_r, stdin_w = os.pipe()
+        export_impl_fd = sealed_payload_memfd(OUTPUT_EXPORT_IMPL, label="friday-export-impl")
+        stdin_payload_fd = sealed_payload_memfd(stdin, label="friday-stdin")
+        output_dir_fd = os.open(
+            str(self.workspace.output),
+            os.O_RDONLY
+            | os.O_DIRECTORY
+            | getattr(os, "O_CLOEXEC", 0)
+            | getattr(os, "O_NOFOLLOW", 0)
+            | getattr(os, "O_NONBLOCK", 0),
+        )
         stdout_r, stdout_w = os.pipe()
         stderr_r, stderr_w = os.pipe()
-        os.set_inheritable(stdin_r, True)
         os.set_inheritable(stdout_w, True)
         os.set_inheritable(stderr_w, True)
-        self._stdin_r = stdin_r
-        self._stdin_w = stdin_w
         self._stdout_r = stdout_r
         self._stdout_w = stdout_w
         self._stderr_r = stderr_r
         self._stderr_w = stderr_w
-        self._stdin_payload = stdin
-        self._stdin_offset = 0
         self.scope = scope
         started: StartedJob | None = None
         try:
@@ -297,23 +296,24 @@ class SpawnedCommand:
                 env=child_env,
                 cgroup=str(scope.cgroup),
                 fsize=int(self.limits.fsize_bytes),
-                stdin_r=stdin_r,
+                stdin_r=output_dir_fd,
                 stdout_w=stdout_w,
                 stderr_w=stderr_w,
                 exec_fd=held.executable_fd,
                 export_fd=export_fd,
+                export_impl_fd=export_impl_fd,
+                stdin_payload_fd=stdin_payload_fd,
                 script_fd=held.script_fd,
+                path_root_fds=[root.dir_fd for root in path_roots],
             )
             self.effect_boundary_crossed = True
             self.pid = int(started.pid)
             self.pid_starttime = started.starttime if started.starttime is not None else _pid_starttime(self.pid)
             self.pidfd = started.pidfd
-            os.set_blocking(started.ctrl_fd, False)
             self.process = _SpawnedProcess(started.pid, started.pidfd, started.ctrl_fd)
-            os.close(stdin_r)
+            os.set_blocking(started.ctrl_fd, False)
             os.close(stdout_w)
             os.close(stderr_w)
-            self._stdin_r = -1
             self._stdout_w = -1
             self._stderr_w = -1
         except CommandError:
@@ -329,24 +329,30 @@ class SpawnedCommand:
         finally:
             with contextlib.suppress(OSError):
                 os.close(export_fd)
+            with contextlib.suppress(OSError):
+                os.close(export_impl_fd)
+            with contextlib.suppress(OSError):
+                os.close(output_dir_fd)
+            with contextlib.suppress(OSError):
+                os.close(stdin_payload_fd)
 
     def abort(self) -> None:
         proc = self.process
-        if proc is not None and proc.pid:
-            _kill_session(proc.pid)
+        if proc is not None:
+            _terminate_process(proc, self.scope)
             with contextlib.suppress(Exception):
                 proc.wait(timeout=2)
             proc.close_ctrl()
-        if self.scope is not None:
+        elif self.scope is not None:
             self.scope.kill()
         self._close_pipes()
 
     def request_cancel(self) -> None:
         self._cancel.set()
         proc = self.process
-        if proc is not None and proc.poll() is None and proc.pid:
-            _kill_session(proc.pid)
-        if self.scope is not None:
+        if proc is not None and proc.poll() is None:
+            _terminate_process(proc, self.scope)
+        elif self.scope is not None:
             self.scope.kill()
 
     def wait(self) -> None:
@@ -364,16 +370,10 @@ class SpawnedCommand:
         selector = selectors.DefaultSelector()
         os.set_blocking(self._stdout_r, False)
         os.set_blocking(self._stderr_r, False)
-        os.set_blocking(self._stdin_w, False)
         selector.register(self._stdout_r, selectors.EVENT_READ, "stdout")
         selector.register(self._stderr_r, selectors.EVENT_READ, "stderr")
         if proc.ctrl_fd >= 0:
             selector.register(proc.ctrl_fd, selectors.EVENT_READ, "exit")
-        if self._stdin_payload:
-            selector.register(self._stdin_w, selectors.EVENT_WRITE, "stdin")
-        else:
-            os.close(self._stdin_w)
-            self._stdin_w = -1
         deadline = time.monotonic() + self.timeout_sec
         timed_out = False
         cancelled = False
@@ -382,14 +382,10 @@ class SpawnedCommand:
             while proc.poll() is None:
                 if not cancelled and self._cancel.is_set():
                     cancelled = True
-                    _kill_session(proc.pid)
-                    if self.scope is not None:
-                        self.scope.kill()
+                    _terminate_process(proc, self.scope)
                 elif not timed_out and time.monotonic() >= deadline:
                     timed_out = True
-                    _kill_session(proc.pid)
-                    if self.scope is not None:
-                        self.scope.kill()
+                    _terminate_process(proc, self.scope)
                 try:
                     files, nbytes = _output_usage(self.workspace.output)
                     if files > MAX_OUTPUT_FILES or nbytes > MAX_OUTPUT_TREE_BYTES:
@@ -402,9 +398,7 @@ class SpawnedCommand:
                     }:
                         self.quota_exceeded = True
                         self.quota_code = exc.code
-                        _kill_session(proc.pid)
-                        if self.scope is not None:
-                            self.scope.kill()
+                        _terminate_process(proc, self.scope)
                     elif exc.code.startswith("output_"):
                         pass
                     else:
@@ -417,20 +411,7 @@ class SpawnedCommand:
                 for key, mask in events:
                     kind = key.data
                     try:
-                        if kind == "stdin" and mask & selectors.EVENT_WRITE:
-                            remaining = self._stdin_payload[self._stdin_offset :]
-                            if not remaining:
-                                selector.unregister(self._stdin_w)
-                                os.close(self._stdin_w)
-                                self._stdin_w = -1
-                                continue
-                            written = os.write(self._stdin_w, remaining)
-                            self._stdin_offset += written
-                            if self._stdin_offset >= len(self._stdin_payload):
-                                selector.unregister(self._stdin_w)
-                                os.close(self._stdin_w)
-                                self._stdin_w = -1
-                        elif kind in {"stdout", "stderr"} and mask & selectors.EVENT_READ:
+                        if kind in {"stdout", "stderr"} and mask & selectors.EVENT_READ:
                             chunk = os.read(key.fd, 65536)
                             if not chunk:
                                 selector.unregister(key.fd)

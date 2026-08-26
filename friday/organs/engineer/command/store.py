@@ -158,7 +158,21 @@ class CommandJobStore:
                 exp INTEGER NOT NULL,
                 consumed INTEGER NOT NULL DEFAULT 0
             );
+            CREATE TABLE IF NOT EXISTS confirmation_source_ledger (
+                source_key TEXT PRIMARY KEY,
+                handle TEXT NOT NULL
+            );
             """
+        )
+        # Pending confirmations created by a pre-ledger build cannot prove that
+        # their immutable ingress row/update was minted only once. Invalidate
+        # them on upgrade instead of silently widening authority.
+        self._conn.execute(
+            """DELETE FROM confirmation_events
+               WHERE NOT EXISTS (
+                   SELECT 1 FROM confirmation_source_ledger
+                   WHERE confirmation_source_ledger.handle=confirmation_events.handle
+               )"""
         )
 
     @contextmanager
@@ -232,8 +246,21 @@ class CommandJobStore:
                 (nonce, "revoked", int(exp)),
             )
 
-    def insert_confirmation_event(self, *, handle: str, payload_json: str, mac: str, exp: int) -> None:
+    def insert_confirmation_event(
+        self,
+        *,
+        handle: str,
+        payload_json: str,
+        mac: str,
+        exp: int,
+        row_source_key: str,
+        update_source_key: str,
+    ) -> None:
         try:
+            self._conn.executemany(
+                "INSERT INTO confirmation_source_ledger(source_key, handle) VALUES(?,?)",
+                ((row_source_key, handle), (update_source_key, handle)),
+            )
             self._conn.execute(
                 "INSERT INTO confirmation_events(handle, payload_json, mac, exp, consumed) VALUES(?,?,?,?,0)",
                 (handle, payload_json, mac, int(exp)),

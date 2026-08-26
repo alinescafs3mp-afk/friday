@@ -11,7 +11,7 @@ import time
 import weakref
 from pathlib import Path
 
-from .boundary import ProvenScope, ResourceBoundary, SystemdCgroupBoundary
+from .boundary import ResourceBoundary, SystemdCgroupBoundary
 from .contracts import (
     MAX_STDERR_BYTES,
     MAX_STDOUT_BYTES,
@@ -36,6 +36,12 @@ from .runner import SpawnedCommand, _pid_starttime
 from .spawn_helper import SpawnBroker
 from .store import CommandJobStore, decode_json_list
 from .workspace import JobWorkspace
+
+
+def _close_fds(fds: tuple[int, ...]) -> None:
+    for fd in fds:
+        with contextlib.suppress(OSError):
+            os.close(fd)
 
 
 def _pid_alive_matching(pid: int | None, starttime: int | None) -> bool:
@@ -133,6 +139,7 @@ class CommandKernel:
         self._receipts: dict[str, CommandReceipt] = {}
         self._broker = SpawnBroker()
         self._finalizer = weakref.finalize(self, self._broker.close)
+        self._path_finalizer = weakref.finalize(self, _close_fds, tuple(root.dir_fd for root in self.path_roots))
         self._reconcile_stale()
 
     def _reconcile_stale(self) -> None:
@@ -140,18 +147,19 @@ class CommandKernel:
             job_id = str(job["job_id"])
             unit = str(job.get("systemd_unit") or "")
             cgroup_path = str(job.get("cgroup_path") or "")
-            if cgroup_path:
-                kill_file = Path(cgroup_path) / "cgroup.kill"
-                with contextlib.suppress(OSError):
-                    kill_file.write_text("1", encoding="ascii")
-            if unit:
-                scope = ProvenScope(
-                    job_id=job_id,
-                    unit=unit,
-                    cgroup=Path(cgroup_path) if cgroup_path else Path("/nonexistent"),
-                    limits=self.limits,
-                )
-                self.boundary.stop(scope)
+            if unit and cgroup_path:
+                try:
+                    scope = self.boundary.recover_scope(
+                        job_id,
+                        unit,
+                        cgroup_path,
+                        self.limits,
+                        timeout_sec=int(job.get("timeout_sec") or 0),
+                    )
+                except CommandError:
+                    scope = None
+                if scope is not None:
+                    self.boundary.stop(scope)
             with self.store.transaction():
                 self.store.update_job(
                     job_id,
@@ -175,7 +183,12 @@ class CommandKernel:
                     return existing["job_id"]
             grant = self.authority.parse(grant_token, request, actor_id=actor_id)
             require_profile(grant.isolation_profile)
-            held = resolve_request(request, grant, trusted_path=self.trusted_path)
+            held = resolve_request(
+                request,
+                grant,
+                trusted_path=self.trusted_path,
+                path_roots=self.path_roots,
+            )
             bwrap = resolve_bwrap()
             job_id = secrets.token_hex(16)
             job_dir = self.store.job_dir(job_id)
@@ -468,8 +481,13 @@ class CommandKernel:
                     status = CommandStatus.FAILED
                     error_code = "nonzero_exit"
         except CommandError as exc:
+            spawned.abort()
             error_code = exc.code
-            status = CommandStatus.FAILED
+            status = CommandStatus.UNKNOWN if spawned.effect_boundary_crossed else CommandStatus.FAILED
+        except Exception:
+            spawned.abort()
+            error_code = "reap_failed"
+            status = CommandStatus.UNKNOWN
         finally:
             spawned.close_pidfd()
             if held is not None:
@@ -501,29 +519,51 @@ class CommandKernel:
             sort_keys=True,
             separators=(",", ":"),
         )
-        with self.store.transaction():
-            self.store.update_job(
+        def _fields(value: CommandReceipt) -> dict[str, object]:
+            return {
+                "cancelled": 1 if value.cancelled else 0,
+                "error_code": value.error_code,
+                "exit_code": value.exit_code,
+                "finished_at": value.finished_at,
+                "generated_files_json": generated_json,
+                "receipt_mac": value.receipt_mac,
+                "signal": value.signal,
+                "status": value.status.value,
+                "stderr_sha256": value.stderr_sha256,
+                "stdout_sha256": value.stdout_sha256,
+                "timed_out": 1 if value.timed_out else 0,
+                "truncated_stderr": 1 if value.truncated_stderr else 0,
+                "truncated_stdout": 1 if value.truncated_stdout else 0,
+                "effect_boundary_crossed": 1 if value.effect_boundary_crossed else 0,
+            }
+
+        try:
+            with self.store.transaction():
+                self.store.update_job(job_id, _fields(receipt))
+        except Exception:
+            spawned.abort()
+            receipt = self._receipt_from_spawned(
                 job_id,
-                {
-                    "cancelled": 1 if receipt.cancelled else 0,
-                    "error_code": receipt.error_code,
-                    "exit_code": receipt.exit_code,
-                    "finished_at": receipt.finished_at,
-                    "generated_files_json": generated_json,
-                    "receipt_mac": receipt.receipt_mac,
-                    "signal": receipt.signal,
-                    "status": receipt.status.value,
-                    "stderr_sha256": receipt.stderr_sha256,
-                    "stdout_sha256": receipt.stdout_sha256,
-                    "timed_out": 1 if receipt.timed_out else 0,
-                    "truncated_stderr": 1 if receipt.truncated_stderr else 0,
-                    "truncated_stdout": 1 if receipt.truncated_stdout else 0,
-                    "effect_boundary_crossed": 1 if receipt.effect_boundary_crossed else 0,
-                },
+                request,
+                grant.isolation_profile,
+                grant.source_hash,
+                resolved,
+                spawned,
+                error_code="final_receipt_persist_failed",
+                status=CommandStatus.UNKNOWN,
+                generated=generated,
             )
-        with self._lock:
-            self._receipts[job_id] = receipt
-            self._live.pop(job_id, None)
+            # A transient first commit failure may still permit a durable
+            # UNKNOWN marker. If storage remains unavailable, the in-memory
+            # receipt below unblocks waiters and restart reconciliation sees
+            # the earlier RUNNING record.
+            with contextlib.suppress(Exception), self.store.transaction():
+                self.store.update_job(job_id, _fields(receipt))
+        finally:
+            with self._lock:
+                self._receipts[job_id] = receipt
+                self._live.pop(job_id, None)
+                self._threads.pop(job_id, None)
 
     def _receipt_from_spawned(
         self,

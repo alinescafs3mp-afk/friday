@@ -29,6 +29,73 @@ from .contracts import (
 
 _MAX_SHEBANG = 4096
 _INTERPRETER_DEPTH = 1
+_ARGV_DISPATCHERS = frozenset(
+    {
+        "awk",
+        "bash",
+        "busybox",
+        "chrt",
+        "cmake",
+        "csh",
+        "dash",
+        "dotnet",
+        "env",
+        "find",
+        "fish",
+        "gawk",
+        "git",
+        "gmake",
+        "guile",
+        "ionice",
+        "java",
+        "ksh",
+        "lua",
+        "luajit",
+        "make",
+        "mawk",
+        "meson",
+        "mksh",
+        "mono",
+        "nawk",
+        "nice",
+        "ninja",
+        "node",
+        "nodejs",
+        "nohup",
+        "parallel",
+        "perl",
+        "php",
+        "prlimit",
+        "ruby",
+        "sed",
+        "setsid",
+        "sh",
+        "stdbuf",
+        "taskset",
+        "tcsh",
+        "tclsh",
+        "timeout",
+        "toybox",
+        "watch",
+        "wish",
+        "xargs",
+        "zsh",
+    }
+)
+
+
+def _argv_can_dispatch(request: CommandRequest, resolved: ResolvedExecutable) -> bool:
+    """Recognize argv entry points that can execute a second, unattested command."""
+    basename = Path(resolved.canonical_path).name.lower()
+    if basename == "env":
+        # Plain ``env`` only reports the fixed child environment. Any operand
+        # can become a command after option/assignment parsing, so fail closed.
+        return bool(request.argv[1:])
+    if basename == "find":
+        return any(item in {"-exec", "-execdir", "-ok", "-okdir"} for item in request.argv[1:])
+    if basename in _ARGV_DISPATCHERS:
+        return True
+    return basename.startswith(("python", "pypy", "ruby", "perl"))
 
 
 def _is_forbidden(path: str) -> bool:
@@ -193,10 +260,16 @@ def _seals_are_final(fd: int) -> bool:
     return seals & required == required
 
 
-def attest_open_fd(fd: int, *, named: str, expected: ResolvedExecutable | None = None) -> ResolvedExecutable:
+def attest_open_fd(
+    fd: int,
+    *,
+    named: str,
+    expected: ResolvedExecutable | None = None,
+    named_stat: os.stat_result | None = None,
+) -> ResolvedExecutable:
     try:
         st = os.fstat(fd)
-        named_st = os.lstat(named)
+        named_st = named_stat if named_stat is not None else os.lstat(named)
     except OSError as exc:
         raise CommandError("executable_unreadable") from exc
     if stat.S_ISLNK(named_st.st_mode):
@@ -273,6 +346,47 @@ def _lookup_relative(name: str, trusted_path: TrustedPathContract) -> str:
     raise CommandError("executable_not_found")
 
 
+def _open_relative_held(name: str, roots: tuple[PathRoot, ...]) -> tuple[int, str, os.stat_result]:
+    """Open a PATH entry relative to an attested directory descriptor."""
+    if "/" in name or name in {".", ".."} or name.startswith("-"):
+        raise CommandError("relative_name_invalid")
+    flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_CLOEXEC", 0)
+    for root in roots:
+        candidate = name
+        display = f"{root.path}/{name}"
+        try:
+            named_st = os.stat(candidate, dir_fd=root.dir_fd, follow_symlinks=False)
+        except OSError:
+            continue
+        if stat.S_ISLNK(named_st.st_mode):
+            try:
+                target = os.readlink(candidate, dir_fd=root.dir_fd)
+            except OSError:
+                continue
+            # A one-hop same-directory alias is sufficient for normal PATH
+            # layouts and remains anchored to the held directory. Absolute,
+            # nested, or parent-relative aliases would reintroduce pathname
+            # traversal and are refused.
+            if not target or target.startswith("/") or "/" in target or target in {".", ".."}:
+                continue
+            candidate = target
+            display = f"{root.path}/{target}"
+            try:
+                named_st = os.stat(candidate, dir_fd=root.dir_fd, follow_symlinks=False)
+            except OSError:
+                continue
+            if stat.S_ISLNK(named_st.st_mode):
+                continue
+        if _is_forbidden(display):
+            continue
+        try:
+            fd = os.open(candidate, flags, dir_fd=root.dir_fd)
+        except OSError:
+            continue
+        return fd, display, named_st
+    raise CommandError("executable_not_found")
+
+
 def resolve_named(
     path: str,
     *,
@@ -280,23 +394,33 @@ def resolve_named(
     depth: int = 0,
     expected: ResolvedExecutable | None = None,
     hold: bool = False,
+    path_roots: tuple[PathRoot, ...] | None = None,
 ) -> ResolvedExecutable | tuple[ResolvedExecutable, int, str | None]:
     contract = trusted_path or TrustedPathContract.default()
     _reject_traversal(path)
-    named = path if path.startswith("/") else _lookup_relative(path, contract)
-    named = _one_hop_alias(named)
-    if _is_forbidden(named):
-        raise CommandError("forbidden_path")
-    fd = _open_named_nofollow(named)
+    named_stat = None
+    if path.startswith("/") or path_roots is None:
+        named = path if path.startswith("/") else _lookup_relative(path, contract)
+        named = _one_hop_alias(named)
+        if _is_forbidden(named):
+            raise CommandError("forbidden_path")
+        fd = _open_named_nofollow(named)
+    else:
+        fd, named, named_stat = _open_relative_held(path, path_roots)
     try:
-        resolved = attest_open_fd(fd, named=named, expected=expected)
+        resolved = attest_open_fd(fd, named=named, expected=expected, named_stat=named_stat)
         shebang = _read_shebang(fd)
         if shebang:
             if depth >= _INTERPRETER_DEPTH:
                 raise CommandError("nested_script_refused")
             if not shebang.startswith("/"):
                 raise CommandError("relative_interpreter")
-            interp_held = resolve_held(shebang, trusted_path=contract, depth=depth + 1)
+            interp_held = resolve_held(
+                shebang,
+                trusted_path=contract,
+                depth=depth + 1,
+                path_roots=path_roots,
+            )
             interp_held.close()
         if hold:
             sealed = snapshot_sealed_memfd(fd, label=Path(named).name or "friday-exec")
@@ -314,9 +438,16 @@ def resolve_held(
     *,
     trusted_path: TrustedPathContract | None = None,
     depth: int = 0,
+    path_roots: tuple[PathRoot, ...] | None = None,
 ) -> HeldExecutable:
     contract = trusted_path or TrustedPathContract.default()
-    resolved, fd, shebang = resolve_named(path, trusted_path=contract, depth=depth, hold=True)  # type: ignore[misc]
+    resolved, fd, shebang = resolve_named(  # type: ignore[misc]
+        path,
+        trusted_path=contract,
+        depth=depth,
+        hold=True,
+        path_roots=path_roots,
+    )
     assert isinstance(resolved, ResolvedExecutable)
     if not shebang:
         os.set_inheritable(fd, True)
@@ -325,7 +456,12 @@ def resolve_held(
         os.close(fd)
         raise CommandError("nested_script_refused")
     try:
-        interpreter = resolve_held(shebang, trusted_path=contract, depth=depth + 1)
+        interpreter = resolve_held(
+            shebang,
+            trusted_path=contract,
+            depth=depth + 1,
+            path_roots=path_roots,
+        )
     except Exception:
         os.close(fd)
         raise
@@ -369,7 +505,11 @@ def require_destructive_grant(
         needs = True
     else:
         basename = Path(resolved.canonical_path).name
-        needs = basename in DESTRUCTIVE_BASENAMES
+        needs = (
+            basename in DESTRUCTIVE_BASENAMES
+            or _argv_can_dispatch(request, resolved)
+            or resolved.owner_uid != 0
+        )
     if needs and not grant.destructive_confirmed:
         raise CommandError("destructive_confirmation_required")
 
@@ -379,9 +519,10 @@ def resolve_request(
     grant: VerifiedCommandGrant,
     *,
     trusted_path: TrustedPathContract,
+    path_roots: tuple[PathRoot, ...] | None = None,
 ) -> HeldExecutable:
     if request.lane is CommandLane.SHELL:
-        held = resolve_held(BASH_EXECUTABLE, trusted_path=trusted_path)
+        held = resolve_held(BASH_EXECUTABLE, trusted_path=trusted_path, path_roots=path_roots)
         if Path(held.resolved.canonical_path).name != "bash":
             held.close()
             raise CommandError("bash_path_mismatch")
@@ -392,9 +533,13 @@ def resolve_request(
             raise
         held.inner_rest = (*SHELL_FLAG_PREFIX, request.shell_command or "")
         return held
-    held = resolve_held(request.argv[0], trusted_path=trusted_path)
+    held = resolve_held(request.argv[0], trusted_path=trusted_path, path_roots=path_roots)
     try:
         require_destructive_grant(request, grant, held.script or held.resolved)
+        if held.script is not None:
+            # A script is arbitrary code even if its filename is innocuous;
+            # also classify its held interpreter independently.
+            require_destructive_grant(request, grant, held.resolved)
         for item in request.argv[1:]:
             if item.startswith("/proc/") or item.startswith("/sys/") or item.startswith("/dev/"):
                 raise CommandError("forbidden_path")
@@ -445,6 +590,7 @@ def attest_trusted_path(contract: TrustedPathContract) -> tuple[PathRoot, ...]:
             fd = os.open(named, flags)
         except OSError as exc:
             raise CommandError("untrusted_path_root") from exc
+        keep_fd = False
         try:
             st = os.fstat(fd)
             if not stat.S_ISDIR(st.st_mode):
@@ -465,30 +611,29 @@ def attest_trusted_path(contract: TrustedPathContract) -> tuple[PathRoot, ...]:
                     device=int(st.st_dev),
                     inode=int(st.st_ino),
                     mtime_ns=int(getattr(st, "st_mtime_ns", int(st.st_mtime * 1_000_000_000))),
+                    dir_fd=fd,
                 )
             )
+            keep_fd = True
         finally:
-            os.close(fd)
+            if not keep_fd:
+                os.close(fd)
     return tuple(roots)
 
 
 def confirm_path_roots(roots: tuple[PathRoot, ...]) -> None:
-    flags = os.O_RDONLY | os.O_DIRECTORY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0)
     for root in roots:
         try:
-            fd = os.open(root.path, flags)
+            st = os.fstat(root.dir_fd)
         except OSError as exc:
             raise CommandError("untrusted_path_root") from exc
-        try:
-            st = os.fstat(fd)
-            if (
-                int(st.st_uid) != root.owner_uid
-                or int(st.st_gid) != root.owner_gid
-                or int(st.st_mode) != root.mode
-                or int(st.st_dev) != root.device
-                or int(st.st_ino) != root.inode
-                or int(getattr(st, "st_mtime_ns", int(st.st_mtime * 1_000_000_000))) != root.mtime_ns
-            ):
-                raise CommandError("untrusted_path_root")
-        finally:
-            os.close(fd)
+        if (
+            not stat.S_ISDIR(st.st_mode)
+            or int(st.st_uid) != root.owner_uid
+            or int(st.st_gid) != root.owner_gid
+            or int(st.st_mode) != root.mode
+            or int(st.st_dev) != root.device
+            or int(st.st_ino) != root.inode
+            or int(getattr(st, "st_mtime_ns", int(st.st_mtime * 1_000_000_000))) != root.mtime_ns
+        ):
+            raise CommandError("untrusted_path_root")

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import contextlib
 import os
+import stat
 import subprocess
 import time
 from dataclasses import dataclass
@@ -25,47 +26,95 @@ def _read_text(path: Path) -> str | None:
         return None
 
 
+def _read_text_at(dir_fd: int, name: str) -> str | None:
+    flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0)
+    try:
+        fd = os.open(name, flags, dir_fd=dir_fd)
+        try:
+            return os.read(fd, 8192).decode("ascii").strip()
+        finally:
+            os.close(fd)
+    except (OSError, UnicodeError):
+        return None
+
+
+def _open_cgroup_dir(cgroup: Path) -> int:
+    try:
+        return os.open(
+            str(cgroup),
+            os.O_RDONLY
+            | os.O_DIRECTORY
+            | getattr(os, "O_CLOEXEC", 0)
+            | getattr(os, "O_NOFOLLOW", 0),
+        )
+    except OSError as exc:
+        raise CommandError("resource_boundary_unproven") from exc
+
+
 @dataclass
 class ProvenScope:
     job_id: str
     unit: str
     cgroup: Path
     limits: ResourceLimits
+    cgroup_fd: int | None = None
+    _tree_empty_proven: bool = False
 
     def kill(self) -> bool:
-        kill_path = self.cgroup / "cgroup.kill"
-        with contextlib.suppress(OSError):
-            kill_path.write_text("1", encoding="ascii")
+        if self.unit != f"friday-ecmd-{self.job_id}.service":
+            if self.cgroup_fd is not None:
+                with contextlib.suppress(OSError):
+                    os.close(self.cgroup_fd)
+                self.cgroup_fd = None
+            return False
+        held_fd = self.cgroup_fd
+        if held_fd is not None:
+            try:
+                kill_fd = os.open(
+                    "cgroup.kill",
+                    os.O_WRONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0),
+                    dir_fd=held_fd,
+                )
+                try:
+                    os.write(kill_fd, b"1")
+                finally:
+                    os.close(kill_fd)
+            except OSError:
+                pass
         empty = False
         deadline = time.monotonic() + 2.0
         while time.monotonic() < deadline:
-            events = _read_text(self.cgroup / "cgroup.events") or ""
-            if any(line == "populated 0" for line in events.splitlines()):
+            events = _read_text_at(held_fd, "cgroup.events") if held_fd is not None else None
+            if any(line == "populated 0" for line in (events or "").splitlines()):
                 empty = True
                 break
             if not self.cgroup.is_dir():
                 empty = True
                 break
             time.sleep(0.05)
-        with contextlib.suppress(Exception):
-            subprocess.run(
-                [SYSTEMCTL_EXECUTABLE, "--user", "stop", self.unit],
-                check=False,
-                stdin=subprocess.DEVNULL,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-                timeout=5,
-            )
+        collected = _stop_and_collect(self.unit)
+        if held_fd is not None:
+            with contextlib.suppress(OSError):
+                os.close(held_fd)
+            self.cgroup_fd = None
         if not self.cgroup.is_dir():
             empty = True
-        return empty
+        if empty:
+            self._tree_empty_proven = True
+        return collected and self._tree_empty_proven
 
     def tree_empty(self) -> bool:
-        events = _read_text(self.cgroup / "cgroup.events") or ""
-        return any(line == "populated 0" for line in events.splitlines())
+        if self.cgroup_fd is None:
+            return self._tree_empty_proven
+        events = _read_text_at(self.cgroup_fd, "cgroup.events") or ""
+        if any(line == "populated 0" for line in events.splitlines()):
+            self._tree_empty_proven = True
+        return self._tree_empty_proven
 
     def pids(self) -> list[int]:
-        raw = _read_text(self.cgroup / "cgroup.procs") or ""
+        if self.cgroup_fd is None:
+            return []
+        raw = _read_text_at(self.cgroup_fd, "cgroup.procs") or ""
         return [int(line) for line in raw.splitlines() if line.isdigit()]
 
 
@@ -78,6 +127,18 @@ class ResourceBoundary:
     def prove_pid(self, scope: ProvenScope, pid: int) -> None:
         raise CommandError("resource_boundary_unproven")
 
+    def recover_scope(
+        self,
+        job_id: str,
+        unit: str,
+        cgroup_path: str,
+        limits: ResourceLimits,
+        *,
+        timeout_sec: int,
+    ) -> ProvenScope:
+        """Re-attest persisted scope identity before any restart cleanup."""
+        raise CommandError("resource_boundary_unproven")
+
     def stop(self, scope: ProvenScope | None) -> None:
         if scope is not None:
             scope.kill()
@@ -88,8 +149,52 @@ class MissingControllerBoundary(ResourceBoundary):
 
 
 class SystemdCgroupBoundary(ResourceBoundary):
+    def recover_scope(
+        self,
+        job_id: str,
+        unit: str,
+        cgroup_path: str,
+        limits: ResourceLimits,
+        *,
+        timeout_sec: int,
+    ) -> ProvenScope:
+        if len(job_id) != 32 or not all(ch in "0123456789abcdef" for ch in job_id):
+            raise CommandError("resource_boundary_unproven")
+        expected_unit = f"friday-ecmd-{job_id}.service"
+        if unit != expected_unit:
+            raise CommandError("resource_boundary_unproven")
+        cgroup = Path(cgroup_path)
+        normalized = os.path.normpath(cgroup_path)
+        if (
+            not cgroup.is_absolute()
+            or normalized != cgroup_path
+            or not normalized.startswith("/sys/fs/cgroup/")
+            or cgroup.name != expected_unit
+        ):
+            raise CommandError("resource_boundary_unproven")
+        try:
+            st = os.lstat(cgroup)
+            fd = _open_cgroup_dir(cgroup)
+        except OSError as exc:
+            raise CommandError("resource_boundary_unproven") from exc
+        try:
+            opened = os.fstat(fd)
+            if not stat.S_ISDIR(st.st_mode) or (st.st_dev, st.st_ino) != (opened.st_dev, opened.st_ino):
+                raise CommandError("resource_boundary_unproven")
+            control_group, active = _show_unit_identity(unit)
+            expected_control = cgroup_path.removeprefix("/sys/fs/cgroup")
+            if active not in {"active", "activating", "deactivating"} or control_group != expected_control:
+                raise CommandError("resource_boundary_unproven")
+            runtime = max(1, int(timeout_sec) + int(limits.runtime_grace_sec))
+            _prove_limits(cgroup, limits)
+            _prove_unit_contract(unit, runtime_sec=runtime)
+            return ProvenScope(job_id=job_id, unit=unit, cgroup=cgroup, limits=limits, cgroup_fd=fd)
+        except Exception:
+            os.close(fd)
+            raise
+
     def allocate(self, job_id: str, limits: ResourceLimits, *, timeout_sec: int) -> ProvenScope:
-        if not job_id or "/" in job_id or not all(ch in "0123456789abcdef" for ch in job_id):
+        if len(job_id) != 32 or not all(ch in "0123456789abcdef" for ch in job_id):
             raise CommandError("invalid_job_id")
         if not os.path.isfile(SYSTEMD_RUN_EXECUTABLE) or not os.path.isfile(SYSTEMCTL_EXECUTABLE):
             raise CommandError("resource_boundary_unproven")
@@ -99,6 +204,7 @@ class SystemdCgroupBoundary(ResourceBoundary):
             SYSTEMD_RUN_EXECUTABLE,
             "--user",
             "--no-block",
+            "--collect",
             f"--unit=friday-ecmd-{job_id}",
             "-p",
             f"MemoryMax={int(limits.memory_max)}",
@@ -128,24 +234,24 @@ class SystemdCgroupBoundary(ResourceBoundary):
                 timeout=8,
             )
         except (OSError, subprocess.TimeoutExpired) as exc:
+            _stop_and_collect(unit)
             raise CommandError("resource_boundary_unproven") from exc
         if completed.returncode not in {0, None}:
+            _stop_and_collect(unit)
             raise CommandError("resource_boundary_unproven")
-        cgroup = _wait_unit_cgroup(unit)
         try:
+            cgroup = _wait_unit_cgroup(unit)
             _prove_limits(cgroup, limits)
             _prove_unit_contract(unit, runtime_sec=runtime)
         except CommandError:
-            subprocess.run(
-                [SYSTEMCTL_EXECUTABLE, "--user", "stop", unit],
-                check=False,
-                stdin=subprocess.DEVNULL,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-                timeout=5,
-            )
+            _stop_and_collect(unit)
             raise
-        return ProvenScope(job_id=job_id, unit=unit, cgroup=cgroup, limits=limits)
+        try:
+            cgroup_fd = _open_cgroup_dir(cgroup)
+        except CommandError:
+            _stop_and_collect(unit)
+            raise
+        return ProvenScope(job_id=job_id, unit=unit, cgroup=cgroup, limits=limits, cgroup_fd=cgroup_fd)
 
     def prove_pid(self, scope: ProvenScope, pid: int) -> None:
         try:
@@ -208,6 +314,74 @@ def _wait_unit_cgroup(unit: str) -> Path:
     raise CommandError("resource_boundary_unproven")
 
 
+def _show_unit_identity(unit: str) -> tuple[str, str]:
+    try:
+        shown = subprocess.run(  # noqa: S603
+            [SYSTEMCTL_EXECUTABLE, "--user", "show", unit, "-p", "ControlGroup", "-p", "ActiveState"],
+            check=False,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            timeout=3,
+            text=True,
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        raise CommandError("resource_boundary_unproven") from exc
+    if shown.returncode not in {0, None}:
+        raise CommandError("resource_boundary_unproven")
+    control = ""
+    active = ""
+    for line in (shown.stdout or "").splitlines():
+        if line.startswith("ControlGroup="):
+            control = line.split("=", 1)[1]
+        elif line.startswith("ActiveState="):
+            active = line.split("=", 1)[1]
+    return control, active
+
+
+def _stop_and_collect(unit: str) -> bool:
+    """Bounded cleanup for a validated transient unit; verify it unloads."""
+    if not unit.startswith("friday-ecmd-") or not unit.endswith(".service"):
+        return False
+    middle = unit.removeprefix("friday-ecmd-").removesuffix(".service")
+    if len(middle) != 32 or not all(ch in "0123456789abcdef" for ch in middle):
+        return False
+    for verb in ("stop", "reset-failed"):
+        with contextlib.suppress(OSError, subprocess.TimeoutExpired):
+            subprocess.run(
+                [SYSTEMCTL_EXECUTABLE, "--user", verb, unit],
+                check=False,
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                timeout=3,
+            )
+    deadline = time.monotonic() + 2.0
+    while time.monotonic() < deadline:
+        try:
+            shown = subprocess.run(  # noqa: S603
+                [SYSTEMCTL_EXECUTABLE, "--user", "show", unit, "-p", "LoadState"],
+                check=False,
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.DEVNULL,
+                timeout=2,
+                text=True,
+            )
+        except (OSError, subprocess.TimeoutExpired):
+            return False
+        load_state = ""
+        for line in (shown.stdout or "").splitlines():
+            if line.startswith("LoadState="):
+                load_state = line.split("=", 1)[1]
+        if load_state == "not-found":
+            return True
+        if shown.returncode not in {0, None}:
+            return False
+        time.sleep(0.05)
+    return False
+
+
 def _cpu_quota_usec(percent: int) -> str:
     period = 100_000
     quota = int(period * int(percent) / 100)
@@ -257,6 +431,8 @@ def _prove_unit_contract(unit: str, *, runtime_sec: int) -> None:
                 "RuntimeMaxUSec",
                 "-p",
                 "Delegate",
+                "-p",
+                "CollectMode",
             ],
             check=False,
             stdin=subprocess.DEVNULL,
@@ -270,6 +446,7 @@ def _prove_unit_contract(unit: str, *, runtime_sec: int) -> None:
     kill_mode = ""
     runtime_raw = ""
     delegate = ""
+    collect_mode = ""
     for line in (shown.stdout or "").splitlines():
         if line.startswith("KillMode="):
             kill_mode = line.split("=", 1)[1]
@@ -277,9 +454,13 @@ def _prove_unit_contract(unit: str, *, runtime_sec: int) -> None:
             runtime_raw = line.split("=", 1)[1]
         elif line.startswith("Delegate="):
             delegate = line.split("=", 1)[1]
+        elif line.startswith("CollectMode="):
+            collect_mode = line.split("=", 1)[1]
     if kill_mode != "control-group":
         raise CommandError("resource_boundary_unproven")
     if delegate.strip().lower() not in {"yes", "1", "true"}:
+        raise CommandError("resource_boundary_unproven")
+    if collect_mode != "inactive-or-failed":
         raise CommandError("resource_boundary_unproven")
     if _parse_systemd_usec(runtime_raw) != int(runtime_sec) * 1_000_000:
         raise CommandError("resource_boundary_unproven")

@@ -44,6 +44,18 @@ def _mac(secret: bytes, payload: dict[str, Any]) -> str:
     return hmac.new(secret, canonical_json_bytes(payload), sha256).hexdigest()
 
 
+def _immutable_source_keys(event: dict[str, Any]) -> tuple[str, str]:
+    """Return durable one-shot identities for the ingress row and update."""
+    common = {
+        "channel": event["channel"],
+        "schema": SCHEMA,
+        "tenant_id": event["tenant_id"],
+    }
+    row = {**common, "kind": "row", "value": event["confirmation_row_id"]}
+    update = {**common, "kind": "update", "value": event["confirmation_update_id"]}
+    return sha256(canonical_json_bytes(row)).hexdigest(), sha256(canonical_json_bytes(update)).hexdigest()
+
+
 class OwnerConfirmationAuthority:
     """Seals a distinct current-owner confirmation from a stored ingress event."""
 
@@ -106,12 +118,15 @@ class OwnerConfirmationAuthority:
         }
         handle = secrets.token_hex(16)
         mac = _mac(self._secret, event)
+        row_source_key, update_source_key = _immutable_source_keys(event)
         with self._store.transaction():
             self._store.insert_confirmation_event(
                 handle=handle,
                 payload_json=canonical_json_bytes(event).decode("ascii"),
                 mac=mac,
                 exp=int(expires_at),
+                row_source_key=row_source_key,
+                update_source_key=update_source_key,
             )
         return handle
 

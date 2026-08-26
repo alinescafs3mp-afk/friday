@@ -18,12 +18,17 @@ SANDBOX_COMMAND = "/run/friday/command"
 SANDBOX_INTERPRETER = "/run/friday/interpreter"
 SANDBOX_SCRIPT = "/run/friday/script"
 SANDBOX_EXPORT = "/run/friday/export"
+SANDBOX_EXPORT_IMPL = "/run/friday/export-impl.py"
+SANDBOX_STDIN = "/run/friday/stdin"
 SANDBOX_JOB = "/job"
-SANDBOX_HOST_OUTPUT = "/job/host-output"
 BWRAP_EXEC_FD = 3
 BWRAP_SCRIPT_FD = 4
 BWRAP_BLOCK_FD = 5
 BWRAP_EXPORT_FD = 6
+BWRAP_PATH_ROOT_FD_BASE = 7
+MAX_TRUSTED_PATH_ROOTS = 16
+BWRAP_STDIN_PAYLOAD_FD = BWRAP_PATH_ROOT_FD_BASE + MAX_TRUSTED_PATH_ROOTS
+BWRAP_EXPORT_IMPL_FD = BWRAP_STDIN_PAYLOAD_FD + 1
 BWRAP_EXECUTABLE = "/usr/bin/bwrap"
 FIXED_ENV_KEYS = ("HOME", "LANG", "LC_ALL", "PATH", "PWD", "TMPDIR", "TZ")
 ALLOWED_CHANNELS = frozenset({"telegram", "cli_test", "owner_console"})
@@ -165,7 +170,7 @@ class TrustedPathContract:
     directories: tuple[str, ...]
 
     def __post_init__(self) -> None:
-        if not self.directories:
+        if not self.directories or len(self.directories) > MAX_TRUSTED_PATH_ROOTS:
             raise CommandError("invalid_trusted_path")
         cleaned: list[str] = []
         seen: set[str] = set()
@@ -192,7 +197,7 @@ class TrustedPathContract:
 
 @dataclass(frozen=True, slots=True)
 class PathRoot:
-    """Attested trusted-PATH directory. Rebound only if identity still matches."""
+    """Attested trusted-PATH directory held open through sandbox setup."""
 
     path: str
     owner_uid: int
@@ -201,6 +206,7 @@ class PathRoot:
     device: int
     inode: int
     mtime_ns: int
+    dir_fd: int
 
 
 @dataclass(frozen=True, slots=True)
@@ -582,13 +588,17 @@ __all__ = [
     "MAX_TIMEOUT_SEC",
     "SANDBOX_COMMAND",
     "SANDBOX_EXPORT",
-    "SANDBOX_HOST_OUTPUT",
+    "SANDBOX_EXPORT_IMPL",
     "SANDBOX_INTERPRETER",
     "SANDBOX_JOB",
+    "SANDBOX_STDIN",
     "SANDBOX_SCRIPT",
     "BWRAP_BLOCK_FD",
     "BWRAP_EXEC_FD",
     "BWRAP_EXPORT_FD",
+    "BWRAP_EXPORT_IMPL_FD",
+    "BWRAP_STDIN_PAYLOAD_FD",
+    "BWRAP_PATH_ROOT_FD_BASE",
     "BWRAP_SCRIPT_FD",
     "SCHEMA",
     "SHELL_FLAG_PREFIX",

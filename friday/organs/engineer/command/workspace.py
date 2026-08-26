@@ -69,7 +69,12 @@ class JobWorkspace:
         if not expected_sha256 or len(expected_sha256) != 64:
             raise CommandError("corrupt_evidence")
         dir_fd = open_dir_nofollow(self.evidence)
-        flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0)
+        flags = (
+            os.O_RDONLY
+            | getattr(os, "O_CLOEXEC", 0)
+            | getattr(os, "O_NOFOLLOW", 0)
+            | getattr(os, "O_NONBLOCK", 0)
+        )
         try:
             try:
                 fd = os.open(name, flags, dir_fd=dir_fd)
@@ -116,11 +121,23 @@ class JobWorkspace:
         if name not in {"stdout.bin", "stderr.bin"}:
             raise CommandError("invalid_evidence")
         dir_fd = open_dir_nofollow(self.evidence)
-        flags = os.O_WRONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0)
+        flags = (
+            os.O_WRONLY
+            | getattr(os, "O_CLOEXEC", 0)
+            | getattr(os, "O_NOFOLLOW", 0)
+            | getattr(os, "O_NONBLOCK", 0)
+        )
         try:
             fd = os.open(name, flags, dir_fd=dir_fd)
-            os.fchmod(fd, 0o600)
-            return fd
+            try:
+                st = os.fstat(fd)
+                if not stat.S_ISREG(st.st_mode) or st.st_nlink != 1:
+                    raise CommandError("invalid_evidence")
+                os.fchmod(fd, 0o600)
+                return fd
+            except Exception:
+                os.close(fd)
+                raise
         finally:
             os.close(dir_fd)
 
@@ -159,7 +176,12 @@ class JobWorkspace:
             if name in {".", ".."} or "/" in name or "\x00" in name:
                 raise CommandError("path_escape")
             child_rel = name if not relative else f"{relative}/{name}"
-            flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0)
+            flags = (
+                os.O_RDONLY
+                | getattr(os, "O_CLOEXEC", 0)
+                | getattr(os, "O_NOFOLLOW", 0)
+                | getattr(os, "O_NONBLOCK", 0)
+            )
             try:
                 child_fd = os.open(name, flags | os.O_DIRECTORY, dir_fd=dir_fd)
                 is_dir = True
