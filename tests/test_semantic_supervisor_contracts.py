@@ -532,9 +532,7 @@ def test_policy_kernel_rejects_unauthorized_stale_and_drifted_source_before_plan
         supervisor_input,
         replace(
             trusted,
-            authority_attestor=lambda _boundary: PlanAuthorityDecision.rejected(
-                PlanAuthorityReason.DENIED
-            ),
+            authority_attestor=lambda _boundary: PlanAuthorityDecision.rejected(PlanAuthorityReason.DENIED),
         ),
     )
     assert denied.reason is PolicyReason.AUTHORITY_DENIED
@@ -980,9 +978,7 @@ def test_assist_proposal_transport_and_kernel_bind_the_distinct_v2_policy() -> N
     assert decision.plan is not None
     assert decision.plan.policy_version == (semantic_supervisor_policy.SUPERVISOR_ASSIST_PRODUCT_POLICY_ID)
     assert decision.plan.budgets.max_capability_calls == 3
-    assert {step.capability_id: step.max_calls for step in decision.plan.steps}[
-        WEB_SEARCH_CURRENT_ID
-    ] == 2
+    assert {step.capability_id: step.max_calls for step in decision.plan.steps}[WEB_SEARCH_CURRENT_ID] == 2
     assert decision.plan.confirmation_required is False
     assert decision.plan.publication_owner == "primary"
 
@@ -1115,6 +1111,24 @@ def test_configuration_defaults_and_unknown_mode_stay_off(settings, monkeypatch)
 
     loaded = load_settings()
     assert loaded.semantic_supervisor_mode == "off"
+
+
+def test_invalid_effect_mode_remains_closed_and_diagnosable(
+    settings: object,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    del settings
+    monkeypatch.setenv("FRIDAY_SEMANTIC_SUPERVISOR_EFFECT_MODE", "please-shadow")
+    from friday.config import load_settings
+
+    loaded = load_settings()
+    assert loaded.semantic_supervisor_effect_mode == "invalid"
+    semantic = loaded.public_dict()["semantic_supervisor"]
+    assert isinstance(semantic, dict)
+    effect = semantic["effect_shadow_config"]
+    assert isinstance(effect, dict)
+    assert effect["mode"] == "invalid"
+    assert effect["raw_settings_valid"] is False
 
 
 def test_promotion_config_retains_exact_private_bindings_but_redacts_them(
@@ -1310,6 +1324,9 @@ def test_semantic_supervisor_config_is_forwarded_by_operator_templates() -> None
     compose = (root / "docker-compose.yml").read_text(encoding="utf-8")
     cli = (root / "friday" / "cli.py").read_text(encoding="utf-8")
     expected_defaults = (
+        ("FRIDAY_SEMANTIC_SUPERVISOR_EFFECT_EVIDENCE_FILE", ""),
+        ("FRIDAY_SEMANTIC_SUPERVISOR_EFFECT_EVIDENCE_SHA256", ""),
+        ("FRIDAY_SEMANTIC_SUPERVISOR_EFFECT_MODE", "off"),
         ("FRIDAY_SEMANTIC_SUPERVISOR_MAX_REVIEW_ROUNDS", "1"),
         ("FRIDAY_SEMANTIC_SUPERVISOR_MAX_STEPS", "6"),
         ("FRIDAY_SEMANTIC_SUPERVISOR_MODE", "off"),

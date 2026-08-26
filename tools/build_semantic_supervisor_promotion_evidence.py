@@ -16,6 +16,9 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
+from friday.orchestration.capability_binding import (  # noqa: E402
+    expected_effect_capability_snapshot,
+)
 from friday.orchestration.supervisor_assist_promotion import (  # noqa: E402
     AssistPromotionQualityBasis,
 )
@@ -23,6 +26,10 @@ from friday.orchestration.supervisor_contracts import (  # noqa: E402
     SupervisorMode,
     canonical_dumps,
     canonical_sha256,
+)
+from friday.orchestration.supervisor_effect_maturity import (  # noqa: E402
+    build_read_only_maturity_artifact,
+    load_accepted_read_only_maturity_witness,
 )
 from friday.orchestration.supervisor_promotion_evidence_producer import (  # noqa: E402
     SupervisorPromotionArtifactKind,
@@ -41,6 +48,7 @@ from friday.orchestration.supervisor_promotion_evidence_producer import (  # noq
 _MAX_BASELINE_BYTES = 1_048_576
 _MAX_BUDGET_BYTES = 4_096
 _MAX_REPRESENTATIVE_WINDOW_ISSUE_BYTES = 65_536
+_MAX_PROMOTION_BUNDLE_BYTES = 2_097_152
 
 
 def _read_regular_file(path: Path, *, maximum_bytes: int) -> bytes:
@@ -216,11 +224,34 @@ def _parser() -> argparse.ArgumentParser:
     evidence.add_argument("--precursor-assist-promotion-evidence-sha256")
     evidence.add_argument("--output", required=True, type=Path)
     _add_attestation_flags(evidence)
+
+    maturity = subparsers.add_parser(
+        "effect-maturity",
+        help="build an inert P5 maturity artifact from exact accepted CANARY evidence",
+    )
+    maturity.add_argument("--production-baseline", required=True, type=Path)
+    maturity.add_argument("--production-baseline-sha256", required=True)
+    maturity.add_argument("--canary-promotion-bundle", required=True, type=Path)
+    maturity.add_argument("--canary-promotion-bundle-sha256", required=True)
+    maturity.add_argument("--canary-latency-budget", required=True, type=Path)
+    maturity.add_argument("--canary-latency-budget-sha256", required=True)
+    maturity.add_argument("--source-revision-sha256", required=True)
+    maturity.add_argument("--registry-binding-sha256", required=True)
+    maturity.add_argument("--effect-registry-binding-sha256", required=True)
+    maturity.add_argument("--output", required=True, type=Path)
+    subparsers.add_parser(
+        "effect-registry-binding",
+        help="derive the body-free code-owned P5 contour digest without activation",
+    )
     return parser
 
 
 def _emit_receipt(receipt: SupervisorPromotionArtifactReceipt) -> None:
     sys.stdout.write(canonical_dumps(receipt.payload()) + "\n")
+
+
+def _emit_payload(payload: dict[str, object]) -> None:
+    sys.stdout.write(canonical_dumps(payload) + "\n")
 
 
 def _build_budget(args: argparse.Namespace) -> None:
@@ -289,12 +320,8 @@ def _build_evidence(args: argparse.Namespace) -> None:
         zero_duplicate_capabilities_attested=args.attest_zero_duplicate_capabilities,
         zero_duplicate_effects_attested=args.attest_zero_duplicate_effects,
         zero_duplicate_publications_attested=args.attest_zero_duplicate_publications,
-        zero_false_completion_regressions_attested=(
-            args.attest_zero_false_completion_regressions
-        ),
-        precursor_assist_promotion_evidence_sha256=(
-            args.precursor_assist_promotion_evidence_sha256
-        ),
+        zero_false_completion_regressions_attested=(args.attest_zero_false_completion_regressions),
+        precursor_assist_promotion_evidence_sha256=(args.precursor_assist_promotion_evidence_sha256),
         quality_basis=quality,
     )
     if mode is SupervisorMode.ASSIST:
@@ -346,14 +373,86 @@ def _build_evidence(args: argparse.Namespace) -> None:
     )
 
 
+def _build_effect_maturity(args: argparse.Namespace) -> None:
+    expected_effect_registry = expected_effect_capability_snapshot().digest_hex()
+    if args.effect_registry_binding_sha256 != expected_effect_registry:
+        raise SupervisorPromotionEvidenceProducerError(
+            "effect registry binding does not match this source tree"
+        )
+    baseline_raw = _read_regular_file(
+        args.production_baseline,
+        maximum_bytes=_MAX_BASELINE_BYTES,
+    )
+    bundle_raw = _read_regular_file(
+        args.canary_promotion_bundle,
+        maximum_bytes=_MAX_PROMOTION_BUNDLE_BYTES,
+    )
+    budget_raw = _read_regular_file(
+        args.canary_latency_budget,
+        maximum_bytes=_MAX_BUDGET_BYTES,
+    )
+    raw = build_read_only_maturity_artifact(
+        production_baseline_raw=baseline_raw,
+        expected_production_baseline_file_sha256=args.production_baseline_sha256,
+        canary_promotion_bundle_raw=bundle_raw,
+        expected_canary_promotion_bundle_file_sha256=(args.canary_promotion_bundle_sha256),
+        canary_budget_raw=budget_raw,
+        expected_canary_budget_file_sha256=args.canary_latency_budget_sha256,
+        expected_source_revision_sha256=args.source_revision_sha256,
+        expected_registry_binding_sha256=args.registry_binding_sha256,
+        expected_effect_registry_binding_sha256=expected_effect_registry,
+    )
+    output_sha256 = hashlib.sha256(raw).hexdigest()
+    witness = load_accepted_read_only_maturity_witness(
+        raw,
+        expected_file_sha256=output_sha256,
+        expected_source_revision_sha256=args.source_revision_sha256,
+        expected_registry_binding_sha256=args.registry_binding_sha256,
+        expected_effect_registry_binding_sha256=expected_effect_registry,
+    )
+    _write_private_no_replace(args.output, raw)
+    _emit_payload(
+        {
+            "schema": "friday.semantic-supervisor-effect-maturity-artifact-receipt.v1",
+            "output_file_sha256": output_sha256,
+            "maturity_facts_sha256": witness.maturity_facts_sha256,
+            "source_revision_sha256": witness.source_revision_sha256,
+            "registry_binding_sha256": witness.registry_binding_sha256,
+            "effect_registry_binding_sha256": witness.effect_registry_binding_sha256,
+            "body_free": True,
+            "runtime_authority_granted": False,
+            "activation_performed": False,
+            "write_effect_authorized": False,
+        }
+    )
+
+
+def _build_effect_registry_binding() -> None:
+    snapshot = expected_effect_capability_snapshot()
+    _emit_payload(
+        {
+            "schema": "friday.semantic-supervisor-effect-registry-binding-receipt.v1",
+            "effect_registry_binding_sha256": snapshot.digest_hex(),
+            "body_free": True,
+            "runtime_composition_verified": False,
+            "activation_performed": False,
+            "write_effect_authorized": False,
+        }
+    )
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = _parser()
     args = parser.parse_args(argv)
     try:
         if args.command == "latency-budget":
             _build_budget(args)
-        else:
+        elif args.command == "promotion-evidence":
             _build_evidence(args)
+        elif args.command == "effect-maturity":
+            _build_effect_maturity(args)
+        else:
+            _build_effect_registry_binding()
     except (OSError, TypeError, ValueError, SupervisorPromotionEvidenceProducerError) as error:
         parser.error(type(error).__name__)
     return 0

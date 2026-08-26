@@ -15,19 +15,41 @@ import hmac
 import json
 import re
 import secrets
+import unicodedata
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Any
 
+from friday.model_input_hygiene import secondary_model_messages_are_secret_free
 from friday.orchestration.effect_outcome import EffectAction, EffectCapability
 from friday.orchestration.supervisor_contracts import CapabilityEffectClass
 
 SUPERVISOR_EFFECT_INTENT_SCHEMA = "friday.supervisor-effect-intent.v1"
 SUPERVISOR_EFFECT_INTENT_POLICY = "semantic-supervisor-effect-intent-v1"
+SUPERVISOR_EFFECT_INTENT_SELECTION_SCHEMA = "friday.supervisor-effect-intent-selection.v2"
+SUPERVISOR_EFFECT_INTENT_PROJECTION_SCHEMA = "friday.supervisor-effect-intent-projection.v2"
+SUPERVISOR_EFFECT_SYMBOL_MANIFEST_SCHEMA = "friday.supervisor-effect-symbol-manifest.v2"
+SUPERVISOR_EFFECT_INTENT_SELECTION_POLICY = "semantic-supervisor-effect-intent-selection-v2"
 
 _MAX_MODEL_JSON_BYTES = 2_048
 _DIGEST_RE = re.compile(r"[0-9a-f]{64}")
+_PRIVATE_ID_RE = re.compile(
+    r"(?:\b[0-9a-f]{8}-[0-9a-f-]{27,}\b|\b[0-9a-f]{16,}\b|\b\d{5,}\b|"
+    r"\b(?:actor|chat|conversation|person|request|tenant|user)[ _-]?id\b|"
+    r"\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b)",
+    re.IGNORECASE,
+)
+_PATH_OR_ADDRESS_RE = re.compile(
+    r"(?:[/\\]|(?:^|\s)[A-Za-z]:|\b(?:file|https?|ssh)://|(?:^|\s)~\b|@[A-Za-z0-9_])",
+    re.IGNORECASE,
+)
+_MAX_PROJECTION_UTF8_BYTES = 512
+_PERSISTED_PROJECTION_IDENTITY_CONTEXT = (
+    b"friday.supervisor-effect-intent.persisted-projection-identity.v1\x00"
+)
+_MIN_IDENTITY_KEY_BYTES = 32
+_MAX_IDENTITY_KEY_BYTES = 4_096
 _PROCESS_AUTHORITY = object()
 _PROCESS_SEAL_KEY = secrets.token_bytes(32)
 _OBSIDIAN_SECURITY_ID = "obsidian.write"
@@ -47,6 +69,56 @@ class EffectIntentReason(StrEnum):
 
     EXPLICIT_USER_REQUEST = "explicit_user_request"
     DECLARED_PLAN_EFFECT = "declared_plan_effect"
+
+
+class EffectIntentCapabilitySelection(StrEnum):
+    """The entire non-authorizing v2 capability vocabulary."""
+
+    NONE = "none"
+    OBSIDIAN_NOTE_MUTATION = "obsidian_note_mutation"
+
+
+class EffectIntentActionSelection(StrEnum):
+    """The entire non-authorizing v2 action vocabulary."""
+
+    NONE = "none"
+    CREATE = "create"
+    APPEND = "append"
+
+
+_EFFECT_SYMBOL_PAIRS = (
+    (EffectIntentCapabilitySelection.NONE, EffectIntentActionSelection.NONE),
+    (
+        EffectIntentCapabilitySelection.OBSIDIAN_NOTE_MUTATION,
+        EffectIntentActionSelection.CREATE,
+    ),
+    (
+        EffectIntentCapabilitySelection.OBSIDIAN_NOTE_MUTATION,
+        EffectIntentActionSelection.APPEND,
+    ),
+)
+
+
+def supervisor_effect_symbol_manifest_v2() -> dict[str, object]:
+    """Return the exact code-owned symbols from which v2 may choose."""
+
+    return {
+        "schema": SUPERVISOR_EFFECT_SYMBOL_MANIFEST_SCHEMA,
+        "choices": [
+            {"capability": capability.value, "action": action.value}
+            for capability, action in _EFFECT_SYMBOL_PAIRS
+        ],
+    }
+
+
+SUPERVISOR_EFFECT_SYMBOL_MANIFEST_SHA256 = hashlib.sha256(
+    json.dumps(
+        supervisor_effect_symbol_manifest_v2(),
+        ensure_ascii=True,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("ascii")
+).hexdigest()
 
 
 class EffectLifecycle(StrEnum):
@@ -103,6 +175,186 @@ def _reject_constant(value: str) -> None:
 
 def _canonical_json(payload: Mapping[str, object]) -> str:
     return json.dumps(payload, ensure_ascii=True, sort_keys=True, separators=(",", ":"))
+
+
+@dataclass(frozen=True, slots=True)
+class EffectIntentProjectionV2:
+    """Bounded model-visible semantics with no path, secret, or private ID."""
+
+    semantic_text: str
+    projection_digest: str
+
+    def __post_init__(self) -> None:
+        if type(self.semantic_text) is not str or not self.semantic_text:
+            raise EffectIntentError("effect intent projection text is unavailable")
+        if unicodedata.normalize("NFC", self.semantic_text) != self.semantic_text:
+            raise EffectIntentError("effect intent projection text is not normalized")
+        try:
+            encoded = self.semantic_text.encode("utf-8", errors="strict")
+        except UnicodeError as exc:
+            raise EffectIntentError("effect intent projection text must be valid UTF-8") from exc
+        if len(encoded) > _MAX_PROJECTION_UTF8_BYTES:
+            raise EffectIntentError("effect intent projection text is too large")
+        if any(unicodedata.category(char) in {"Cc", "Cf", "Cs"} for char in self.semantic_text):
+            raise EffectIntentError("effect intent projection text contains control characters")
+        if _PATH_OR_ADDRESS_RE.search(self.semantic_text):
+            raise EffectIntentError("effect intent projection contains a path or address")
+        if _PRIVATE_ID_RE.search(self.semantic_text):
+            raise EffectIntentError("effect intent projection contains a private identifier")
+        if not secondary_model_messages_are_secret_free(({"role": "user", "content": self.semantic_text},)):
+            raise EffectIntentError("effect intent projection contains secret material")
+        expected = hashlib.sha256(
+            _canonical_json(
+                {
+                    "schema": SUPERVISOR_EFFECT_INTENT_PROJECTION_SCHEMA,
+                    "semantic_text": self.semantic_text,
+                }
+            ).encode("ascii")
+        ).hexdigest()
+        _require_digest(self.projection_digest, label="projection_digest")
+        if not hmac.compare_digest(self.projection_digest, expected):
+            raise EffectIntentError("effect intent projection digest has drifted")
+
+    def to_payload(self) -> dict[str, str]:
+        return {
+            "schema": SUPERVISOR_EFFECT_INTENT_PROJECTION_SCHEMA,
+            "semantic_text": self.semantic_text,
+            "projection_digest": self.projection_digest,
+        }
+
+
+def prepare_effect_intent_projection_v2(semantic_text: str) -> EffectIntentProjectionV2:
+    """Validate and bind one bounded, secret-free semantic projection.
+
+    The remaining ordinary prose is still private and must use a profile whose
+    private-text admission was explicitly enabled.
+    """
+
+    if type(semantic_text) is not str:
+        raise EffectIntentError("effect intent projection text is unavailable")
+    try:
+        normalized = unicodedata.normalize("NFC", semantic_text)
+        digest = hashlib.sha256(
+            _canonical_json(
+                {
+                    "schema": SUPERVISOR_EFFECT_INTENT_PROJECTION_SCHEMA,
+                    "semantic_text": normalized,
+                }
+            ).encode("ascii")
+        ).hexdigest()
+    except (TypeError, UnicodeError) as exc:
+        raise EffectIntentError("effect intent projection text must be valid UTF-8") from exc
+    return EffectIntentProjectionV2(semantic_text=normalized, projection_digest=digest)
+
+
+def derive_persisted_effect_intent_projection_identity(
+    projection: EffectIntentProjectionV2,
+    *,
+    namespace_key: bytes,
+) -> str:
+    """Return a process/deployment-keyed identity safe to persist.
+
+    ``projection_digest`` intentionally remains an unkeyed, call-local protocol
+    binding because the secondary model must repeat it.  Persisting that value
+    would make short user commands recoverable by offline dictionary matching.
+    This domain-separated HMAC is the only projection identity intended for a
+    durable observation event.
+    """
+
+    if type(projection) is not EffectIntentProjectionV2:
+        raise EffectIntentError("effect intent projection is unavailable")
+    if type(namespace_key) is not bytes or not (
+        _MIN_IDENTITY_KEY_BYTES <= len(namespace_key) <= _MAX_IDENTITY_KEY_BYTES
+    ):
+        raise EffectIntentError("projection identity key must contain 32 to 4096 bytes")
+    # Reconstruct the frozen value so object.__setattr__ tampering cannot turn
+    # this helper into a keyed oracle for an invalid projection.
+    EffectIntentProjectionV2(
+        semantic_text=projection.semantic_text,
+        projection_digest=projection.projection_digest,
+    )
+    return hmac.new(
+        namespace_key,
+        _PERSISTED_PROJECTION_IDENTITY_CONTEXT + projection.projection_digest.encode("ascii"),
+        hashlib.sha256,
+    ).hexdigest()
+
+
+@dataclass(frozen=True, slots=True)
+class EffectIntentSelectionV2:
+    """Untrusted symbolic selection; it intentionally cannot authorize anything."""
+
+    capability: EffectIntentCapabilitySelection
+    action: EffectIntentActionSelection
+    manifest_digest: str
+    projection_digest: str
+    execution_authorized: bool = field(default=False, init=False)
+    publication_authorized: bool = field(default=False, init=False)
+
+    def __post_init__(self) -> None:
+        if (self.capability, self.action) not in _EFFECT_SYMBOL_PAIRS:
+            raise EffectIntentError("effect intent selection is not in the symbolic manifest")
+        if not hmac.compare_digest(
+            _require_digest(self.manifest_digest, label="manifest_digest"),
+            SUPERVISOR_EFFECT_SYMBOL_MANIFEST_SHA256,
+        ):
+            raise EffectIntentError("effect intent symbolic manifest has drifted")
+        _require_digest(self.projection_digest, label="projection_digest")
+
+    def to_payload(self) -> dict[str, str]:
+        return {
+            "schema": SUPERVISOR_EFFECT_INTENT_SELECTION_SCHEMA,
+            "capability": self.capability.value,
+            "action": self.action.value,
+            "manifest_digest": self.manifest_digest,
+            "projection_digest": self.projection_digest,
+        }
+
+    def to_json(self) -> str:
+        return _canonical_json(self.to_payload())
+
+    def canonical_sha256(self) -> str:
+        return hashlib.sha256(self.to_json().encode("ascii")).hexdigest()
+
+    @classmethod
+    def parse(cls, value: str | Mapping[str, object]) -> EffectIntentSelectionV2:
+        if isinstance(value, str):
+            try:
+                encoded = value.encode("utf-8", errors="strict")
+            except UnicodeEncodeError as exc:
+                raise EffectIntentError("effect intent selection JSON must be valid UTF-8") from exc
+            if len(encoded) > _MAX_MODEL_JSON_BYTES:
+                raise EffectIntentError("effect intent selection JSON is too large")
+            try:
+                decoded = json.loads(
+                    value,
+                    object_pairs_hook=_closed_object,
+                    parse_constant=_reject_constant,
+                )
+            except json.JSONDecodeError as exc:
+                raise EffectIntentError("effect intent selection must be one JSON object") from exc
+        else:
+            decoded = value
+        expected = {"schema", "capability", "action", "manifest_digest", "projection_digest"}
+        if (
+            not isinstance(decoded, Mapping)
+            or any(type(key) is not str for key in decoded)
+            or set(decoded) != expected
+        ):
+            raise EffectIntentError("effect intent selection keys do not match the closed contract")
+        if decoded["schema"] != SUPERVISOR_EFFECT_INTENT_SELECTION_SCHEMA:
+            raise EffectIntentError("effect intent selection schema is not supported")
+        try:
+            capability = EffectIntentCapabilitySelection(decoded["capability"])
+            action = EffectIntentActionSelection(decoded["action"])
+        except (TypeError, ValueError) as exc:
+            raise EffectIntentError("effect intent selection symbol is unavailable") from exc
+        return cls(
+            capability=capability,
+            action=action,
+            manifest_digest=_require_digest(decoded["manifest_digest"], label="manifest_digest"),
+            projection_digest=_require_digest(decoded["projection_digest"], label="projection_digest"),
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -593,16 +845,28 @@ def gate_supervisor_effect_intent(
 
 __all__ = [
     "BoundAdvisoryEffectIntent",
+    "EffectIntentActionSelection",
+    "EffectIntentCapabilitySelection",
     "EffectIntentError",
     "EffectIntentGateDecision",
     "EffectIntentGateReason",
     "EffectIntentReason",
+    "EffectIntentProjectionV2",
+    "EffectIntentSelectionV2",
     "EffectIntentV1",
     "EffectLifecycle",
     "FreshEffectGateState",
     "PreparedEffectBinding",
     "SUPERVISOR_EFFECT_INTENT_POLICY",
+    "SUPERVISOR_EFFECT_INTENT_PROJECTION_SCHEMA",
     "SUPERVISOR_EFFECT_INTENT_SCHEMA",
+    "SUPERVISOR_EFFECT_INTENT_SELECTION_POLICY",
+    "SUPERVISOR_EFFECT_INTENT_SELECTION_SCHEMA",
+    "SUPERVISOR_EFFECT_SYMBOL_MANIFEST_SCHEMA",
+    "SUPERVISOR_EFFECT_SYMBOL_MANIFEST_SHA256",
     "gate_supervisor_effect_intent",
+    "derive_persisted_effect_intent_projection_identity",
+    "prepare_effect_intent_projection_v2",
     "prepare_obsidian_effect_binding",
+    "supervisor_effect_symbol_manifest_v2",
 ]

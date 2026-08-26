@@ -1,12 +1,15 @@
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import inspect
 import json
 import os
+import time
 from collections.abc import Mapping
 from dataclasses import replace
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -70,6 +73,14 @@ from friday.orchestration.supervisor_representative_window_attestation import (
     AcceptedRepresentativeWindowAttestation,
     representative_window_sha256,
 )
+from friday.secondary_brain import (
+    ModelWorkload,
+    SecondaryMode,
+    SecondaryState,
+    SecondaryStatus,
+)
+from friday.secondary_brain.profiles import SecondaryProfileAdmission
+from friday.secondary_brain.scheduler import SecondaryBrainScheduler
 
 ACTOR = "1" * 64
 OTHER = "f" * 64
@@ -104,9 +115,7 @@ def _accepted_representative_window(
         "registry_binding_sha256": server["registry_binding_sha256"],
         "observer_runner_sha256": server["observer_runner_sha256"],
         "representative_window_sha256": server["representative_window_sha256"],
-        "precursor_assist_promotion_evidence_sha256": server[
-            "precursor_assist_promotion_evidence_sha256"
-        ],
+        "precursor_assist_promotion_evidence_sha256": server["precursor_assist_promotion_evidence_sha256"],
         "server_attestation_sha256": issue["server_attestation_sha256"],
         "consume_binding_sha256": "a" * 64,
         "consumed_response_sha256": "b" * 64,
@@ -209,6 +218,16 @@ def _scheduler_status(
         "runtime_available": runtime_available,
         "closed_reason": "admitted",
     }
+    effect_shadow: dict[str, object] = {
+        "workload": semantic_supervisor_policy.SUPERVISOR_EFFECT_WORKLOAD,
+        "requested_mode": "off",
+        "effective_mode": "off",
+        "policy_id": semantic_supervisor_policy.SUPERVISOR_EFFECT_SHADOW_POLICY_ID,
+        "policy_sha256": semantic_supervisor_policy.SUPERVISOR_EFFECT_SHADOW_POLICY_SHA256,
+        "workload_available": False,
+        "runtime_available": False,
+        "closed_reason": "mode_off",
+    }
     state = "healthy" if runtime_available else "probing"
     public: dict[str, object] = {
         "schema": "friday.optional-secondary-health.v1",
@@ -219,6 +238,7 @@ def _scheduler_status(
         "state": state,
         "available": runtime_available,
         "semantic_supervisor": supervisor,
+        "effect_shadow": effect_shadow,
     }
     diagnostics: dict[str, object] = {
         **public,
@@ -243,10 +263,87 @@ def _scheduler_status(
         elif key.startswith("plan__"):
             plan = diagnostics["workloads"]["plan_candidate"]  # type: ignore[index]
             plan[key.removeprefix("plan__")] = value  # type: ignore[index]
+        elif key.startswith("effect__"):
+            effect_shadow[key.removeprefix("effect__")] = value
         else:
             public[key] = value
             diagnostics[key] = value
     return public, diagnostics
+
+
+class _HealthySecondaryClient:
+    def __init__(self) -> None:
+        self.config = SimpleNamespace(
+            profile_id=semantic_supervisor_policy.SUPERVISOR_RUNTIME_PROFILE_ID,
+            served_model_alias="gpt-oss-20b",
+            max_context_tokens=131_072,
+            max_output_tokens=1_024,
+            health_interval_sec=60.0,
+        )
+
+    def status(self) -> SecondaryStatus:
+        return SecondaryStatus(
+            state=SecondaryState.HEALTHY,
+            last_failure=None,
+            selected_total=0,
+            success_total=0,
+            skipped_total=0,
+            fallback_total=0,
+            active_requests=0,
+            context_cap_tokens=131_072,
+            served_model_match=True,
+            profile_manifest_match=True,
+        )
+
+    def protocol_rejection_counts(self) -> dict[object, int]:
+        return {}
+
+    async def aclose(self) -> None:
+        return None
+
+
+def _real_admitted_scheduler(
+    requested_mode: str,
+    *,
+    effect_mode: str = "off",
+) -> SecondaryBrainScheduler:
+    supervisor_admission = semantic_supervisor_policy.evaluate_supervisor_policy_admission(
+        requested_mode=requested_mode,
+        task_allowlist=(TaskClass.COMPARE_CURRENT_FILE_WITH_CURRENT_WEB.value,),
+        max_steps=6,
+        max_review_rounds=1,
+        timeout_sec=12.0,
+        allow_private_text=True,
+        secondary_runtime_state="configured",
+        profile_admission="accepted",
+        runtime_profile_id=semantic_supervisor_policy.SUPERVISOR_RUNTIME_PROFILE_ID,
+        runtime_profile_manifest_sha256=(
+            semantic_supervisor_policy.SUPERVISOR_RUNTIME_PROFILE_MANIFEST_SHA256
+        ),
+    )
+    effect_admission = semantic_supervisor_policy.evaluate_supervisor_effect_shadow_policy_admission(
+        requested_mode=effect_mode,
+        allow_private_text=True,
+        secondary_runtime_state="configured",
+        profile_admission="accepted",
+        runtime_profile_id=semantic_supervisor_policy.SUPERVISOR_RUNTIME_PROFILE_ID,
+        runtime_profile_manifest_sha256=(
+            semantic_supervisor_policy.SUPERVISOR_RUNTIME_PROFILE_MANIFEST_SHA256
+        ),
+    )
+    scheduler = SecondaryBrainScheduler(
+        mode=SecondaryMode.ASSIST,
+        allowed_workloads=frozenset({ModelWorkload.PLAN_CANDIDATE}),
+        allow_private_text=True,
+        client=_HealthySecondaryClient(),  # type: ignore[arg-type]
+        unavailable_state=SecondaryState.PROBING,
+        profile_admission=SecondaryProfileAdmission.ACCEPTED,
+        supervisor_admission=supervisor_admission,
+        effect_shadow_admission=effect_admission,
+    )
+    scheduler._epoch_admitted = True  # noqa: SLF001 - model one accepted process epoch
+    scheduler._last_probe_success_monotonic = time.monotonic()  # noqa: SLF001
+    return scheduler
 
 
 def _evidence(
@@ -581,13 +678,9 @@ def _promotion_bundle_file(
         zero_duplicate_effects_attested=True,
         zero_duplicate_publications_attested=True,
         zero_false_completion_regressions_attested=True,
-        precursor_assist_promotion_evidence_sha256=(
-            "c" * 64 if mode is SupervisorMode.CANARY else None
-        ),
+        precursor_assist_promotion_evidence_sha256=("c" * 64 if mode is SupervisorMode.CANARY else None),
         quality_basis=(
-            AssistPromotionQualityBasis.COMPLETION_RATE_IMPROVEMENT
-            if mode is SupervisorMode.CANARY
-            else None
+            AssistPromotionQualityBasis.COMPLETION_RATE_IMPROVEMENT if mode is SupervisorMode.CANARY else None
         ),
     )
     evidence = (
@@ -608,9 +701,7 @@ def _promotion_bundle_file(
         )
     )
     lookup_token = "7" * 64
-    observed_mode = (
-        SupervisorMode.SHADOW if mode is SupervisorMode.ASSIST else SupervisorMode.ASSIST
-    )
+    observed_mode = SupervisorMode.SHADOW if mode is SupervisorMode.ASSIST else SupervisorMode.ASSIST
     server_attestation: dict[str, object] = {
         "schema": REPRESENTATIVE_WINDOW_ATTESTATION_SCHEMA,
         "attestation_id": "sswindow_" + "6" * 32,
@@ -624,9 +715,7 @@ def _promotion_bundle_file(
         "latency_budget_target_mode": mode.value,
         "latency_budget_source_revision_sha256": source_sha256,
         "maximum_user_visible_latency_ms": 2_500,
-        "precursor_assist_promotion_evidence_sha256": (
-            "c" * 64 if mode is SupervisorMode.CANARY else None
-        ),
+        "precursor_assist_promotion_evidence_sha256": ("c" * 64 if mode is SupervisorMode.CANARY else None),
         "source_revision_sha256": source_sha256,
         "registry_binding_sha256": registry_sha256,
         "primary_pid": 100,
@@ -638,9 +727,7 @@ def _promotion_bundle_file(
         "observed_release_tree_sha256": "2" * 64,
         "observed_registry_binding_sha256": registry_sha256,
         "supervisor_policy_id": semantic_supervisor_policy.SUPERVISOR_ASSIST_PRODUCT_POLICY_ID,
-        "supervisor_policy_sha256": (
-            semantic_supervisor_policy.SUPERVISOR_ASSIST_PRODUCT_POLICY_SHA256
-        ),
+        "supervisor_policy_sha256": (semantic_supervisor_policy.SUPERVISOR_ASSIST_PRODUCT_POLICY_SHA256),
         "runtime_profile_id": semantic_supervisor_policy.SUPERVISOR_RUNTIME_PROFILE_ID,
         "runtime_profile_manifest_sha256": (
             semantic_supervisor_policy.SUPERVISOR_RUNTIME_PROFILE_MANIFEST_SHA256
@@ -667,9 +754,7 @@ def _promotion_bundle_file(
         "schema": REPRESENTATIVE_WINDOW_ISSUE_RESPONSE_SCHEMA,
         "status": "unused",
         "server_attestation": server_attestation,
-        "server_attestation_sha256": representative_window_sha256(
-            server_attestation
-        ),
+        "server_attestation_sha256": representative_window_sha256(server_attestation),
         "attestation_lookup_token": lookup_token,
         "lookup_token_sha256": server_attestation["lookup_token_sha256"],
         "state_version": 1,
@@ -1063,6 +1148,25 @@ def test_scheduler_projection_is_exact_and_prestart_unavailability_is_retained()
     assert not hasattr(snapshot, "body")
 
 
+@pytest.mark.parametrize("requested_mode", ("assist", "canary"))
+@pytest.mark.parametrize("effect_mode", ("off", "shadow"))
+def test_real_scheduler_projection_keeps_assist_and_canary_activation_compatible(
+    requested_mode: str,
+    effect_mode: str,
+) -> None:
+    scheduler = _real_admitted_scheduler(requested_mode, effect_mode=effect_mode)
+    try:
+        snapshot = scheduler_admission_snapshot_from_status(
+            scheduler.public_status(),
+            scheduler.diagnostics_status(),
+        )
+    finally:
+        asyncio.run(scheduler.aclose())
+
+    assert snapshot.requested_mode == requested_mode
+    assert snapshot.runtime_available is True
+
+
 def test_healthy_scheduler_projection_requires_profile_and_served_model_match() -> None:
     public, diagnostics = _scheduler_status(runtime_available=True)
     assert scheduler_admission_snapshot_from_status(public, diagnostics).runtime_available is True
@@ -1090,6 +1194,13 @@ def test_healthy_scheduler_projection_requires_profile_and_served_model_match() 
         {"plan__routing_mode": "assist"},
         {"plan__available": False},
         {"plan__closed_reason": "disabled"},
+        {"effect__workload": "plan_candidate"},
+        {"effect__requested_mode": "shadow"},
+        {"effect__policy_id": semantic_supervisor_policy.SUPERVISOR_PRODUCT_POLICY_ID},
+        {"effect__policy_sha256": OTHER},
+        {"effect__workload_available": True},
+        {"effect__runtime_available": True},
+        {"effect__closed_reason": "admitted"},
         {"mode": "shadow"},
     ],
 )
@@ -1130,6 +1241,15 @@ def test_scheduler_projection_rejects_extra_public_keys_mismatch_and_body_fields
     }
     with pytest.raises(AssistPromotionActivationError):
         scheduler_admission_snapshot_from_status(nested_public, diagnostics)
+
+    nested_effect = dict(public)
+    nested_effect["effect_shadow"] = {
+        **public["effect_shadow"],  # type: ignore[dict-item]
+        "new_field": True,
+    }
+    with pytest.raises(AssistPromotionActivationError) as effect_extra:
+        scheduler_admission_snapshot_from_status(nested_effect, diagnostics)
+    assert effect_extra.value.reason is AssistPromotionActivationReason.SCHEDULER_PROJECTION_INVALID
 
 
 def test_default_raw_settings_are_closed_without_touching_missing_files(tmp_path: Path) -> None:
@@ -1336,9 +1456,7 @@ def test_activation_uses_the_same_exact_promotion_artifact_modes_as_operator(
     mode: int,
 ) -> None:
     raw, root, public, diagnostics, binding = _activation_fixture(tmp_path)
-    target = Path(
-        str(raw.evidence_file if artifact == "evidence" else raw.latency_budget_file)
-    )
+    target = Path(str(raw.evidence_file if artifact == "evidence" else raw.latency_budget_file))
     target.chmod(mode)
 
     material = load_assist_promotion_activation(
@@ -1571,9 +1689,7 @@ def test_latency_budget_mode_source_value_and_evidence_binding_are_exact(
         assert material.reason is reason
 
     bundle = json.loads(Path(str(raw.evidence_file)).read_bytes())
-    bundle["promotion_evidence"]["product_evidence"][
-        "latency_budget_source_revision_sha256"
-    ] = OTHER
+    bundle["promotion_evidence"]["product_evidence"]["latency_budget_source_revision_sha256"] = OTHER
     drifted_raw = canonical_json_file_bytes(bundle)
     evidence_path = tmp_path / "budget-drift-bundle.json"
     evidence_path.write_bytes(drifted_raw)

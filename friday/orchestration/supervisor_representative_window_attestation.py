@@ -76,7 +76,17 @@ _PROCESS_ACCEPTANCE_AUTHORITY = object()
 _PROCESS_ACCEPTANCE_KEY = secrets.token_bytes(32)
 
 _SCHEDULER_PUBLIC_KEYS = frozenset(
-    {"schema", "role", "enabled", "configured", "mode", "state", "available", "semantic_supervisor"}
+    {
+        "schema",
+        "role",
+        "enabled",
+        "configured",
+        "mode",
+        "state",
+        "available",
+        "semantic_supervisor",
+        "effect_shadow",
+    }
 )
 _SCHEDULER_SUPERVISOR_KEYS = frozenset(
     {
@@ -90,6 +100,7 @@ _SCHEDULER_SUPERVISOR_KEYS = frozenset(
         "closed_reason",
     }
 )
+_SCHEDULER_EFFECT_KEYS = _SCHEDULER_SUPERVISOR_KEYS
 
 _STABLE_SERVER_IDENTITY_KEYS = frozenset(
     {
@@ -501,12 +512,37 @@ def representative_window_current_server_identity(
             raise ValueError("scheduler status is not closed")
         scheduler = public.get("semantic_supervisor")
         diagnostic_scheduler = diagnostics.get("semantic_supervisor")
+        effect_shadow = public.get("effect_shadow")
+        diagnostic_effect_shadow = diagnostics.get("effect_shadow")
         requested_mode = scheduler.get("requested_mode") if type(scheduler) is dict else None
+        effect_requested_mode = effect_shadow.get("requested_mode") if type(effect_shadow) is dict else None
+        effect_runtime_available = (
+            effect_shadow.get("runtime_available") if type(effect_shadow) is dict else None
+        )
+        effect_is_off = bool(
+            type(effect_shadow) is dict
+            and effect_requested_mode == "off"
+            and effect_shadow.get("effective_mode") == "off"
+            and effect_shadow.get("workload_available") is False
+            and effect_runtime_available is False
+            and effect_shadow.get("closed_reason") == "mode_off"
+        )
+        effect_is_admitted = bool(
+            type(effect_shadow) is dict
+            and effect_requested_mode == "shadow"
+            and effect_shadow.get("effective_mode") == "shadow"
+            and effect_shadow.get("workload_available") is True
+            and effect_runtime_available is True
+            and effect_shadow.get("closed_reason") == "admitted"
+        )
         if (
             set(public) != _SCHEDULER_PUBLIC_KEYS
             or type(scheduler) is not dict
             or set(scheduler) != _SCHEDULER_SUPERVISOR_KEYS
             or diagnostic_scheduler != scheduler
+            or type(effect_shadow) is not dict
+            or set(effect_shadow) != _SCHEDULER_EFFECT_KEYS
+            or diagnostic_effect_shadow != effect_shadow
             or public.get("schema") != "friday.optional-secondary-health.v1"
             or public.get("role") != "optional_advisory"
             or public.get("enabled") is not True
@@ -524,6 +560,11 @@ def representative_window_current_server_identity(
             or scheduler.get("workload_available") is not True
             or scheduler.get("runtime_available") is not True
             or scheduler.get("closed_reason") != "admitted"
+            or effect_shadow.get("workload") != semantic_supervisor_policy.SUPERVISOR_EFFECT_WORKLOAD
+            or effect_shadow.get("policy_id") != semantic_supervisor_policy.SUPERVISOR_EFFECT_SHADOW_POLICY_ID
+            or effect_shadow.get("policy_sha256")
+            != semantic_supervisor_policy.SUPERVISOR_EFFECT_SHADOW_POLICY_SHA256
+            or not (effect_is_off or effect_is_admitted)
             or diagnostics.get("profile") != semantic_supervisor_policy.SUPERVISOR_RUNTIME_PROFILE_ID
             or diagnostics.get("profile_admission") != "accepted"
             or diagnostics.get("profile_manifest_match") is not True

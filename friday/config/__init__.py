@@ -130,6 +130,13 @@ def _fail_closed_choice_env(name: str, default: str, allowed: tuple[str, ...]) -
     return value if value in allowed else default
 
 
+def _invalid_rollout_choice_env(name: str, default: str, allowed: tuple[str, ...]) -> str:
+    """Preserve an explicitly malformed rollout value as a closed sentinel."""
+
+    value = (env(name) or default).strip().casefold()
+    return value if value in allowed else "invalid"
+
+
 def _int_env(name: str, default: int, *, minimum: int | None = None) -> int:
     try:
         value = int(env(name, str(default)) or default)
@@ -739,6 +746,11 @@ class FridaySettings:
     semantic_supervisor_promotion_source_revision_sha256: str
     semantic_supervisor_promotion_registry_binding_sha256: str
     semantic_supervisor_promotion_canary_actor_bindings: tuple[str, ...] | None
+    # P5 is a separate advisory-only workload.  It remains off unless a
+    # self-contained, exact-hash maturity artifact is accepted at composition.
+    semantic_supervisor_effect_mode: str
+    semantic_supervisor_effect_evidence_file: str
+    semantic_supervisor_effect_evidence_sha256: str
 
     embeddings_enabled: bool
     embeddings_base_url: str
@@ -1122,6 +1134,7 @@ class FridaySettings:
 
     @property
     def secondary_llm_configured(self) -> bool:
+        from friday import semantic_supervisor_policy
         from friday.secondary_brain.contracts import (
             SecondaryEndpointConfig,
             secondary_configuration_is_admissible,
@@ -1151,15 +1164,63 @@ class FridaySettings:
             profile_id=self.secondary_llm_profile,
             profile_manifest_sha256=profile.manifest_sha256 if profile is not None else "",
         )
-        return secondary_configuration_is_admissible(
+        generic_configuration_is_admissible = bool(
+            self.secondary_llm_workloads
+            and secondary_configuration_is_admissible(
+                endpoint,
+                primary_base_url=self.llm_base_url,
+                primary_model=self.llm_model,
+                primary_timeout_sec=self.llm_timeout_sec,
+                workload_names=self.secondary_llm_workloads,
+                mode=self.secondary_llm_mode,
+                allow_private_text=self.secondary_llm_allow_private_text,
+                document_map_mode=self.secondary_llm_document_map_mode,
+            )
+        )
+        base_workload_name = min(
+            (profile.allowed_workloads - {"document_map", "plan_candidate", "effect_planning"})
+            if profile is not None
+            else (),
+            default="",
+        )
+        base_configuration_is_admissible = secondary_configuration_is_admissible(
             endpoint,
             primary_base_url=self.llm_base_url,
             primary_model=self.llm_model,
             primary_timeout_sec=self.llm_timeout_sec,
-            workload_names=self.secondary_llm_workloads,
+            workload_names=(base_workload_name,),
             mode=self.secondary_llm_mode,
             allow_private_text=self.secondary_llm_allow_private_text,
-            document_map_mode=self.secondary_llm_document_map_mode,
+            document_map_mode="disabled",
+        )
+        supervisor_admission = semantic_supervisor_policy.evaluate_supervisor_policy_admission(
+            requested_mode=self.semantic_supervisor_mode,
+            task_allowlist=self.semantic_supervisor_tasks,
+            max_steps=self.semantic_supervisor_max_steps,
+            max_review_rounds=self.semantic_supervisor_max_review_rounds,
+            timeout_sec=self.semantic_supervisor_timeout_sec,
+            allow_private_text=self.secondary_llm_allow_private_text,
+            secondary_runtime_state="configured",
+            profile_admission=admission.kind.value if admission is not None else "",
+            runtime_profile_id=profile.profile_id if profile is not None else "",
+            runtime_profile_manifest_sha256=(profile.manifest_sha256 if profile is not None else ""),
+        )
+        effect_admission = semantic_supervisor_policy.evaluate_supervisor_effect_shadow_policy_admission(
+            requested_mode=self.semantic_supervisor_effect_mode,
+            allow_private_text=self.secondary_llm_allow_private_text,
+            secondary_runtime_state="configured",
+            profile_admission=admission.kind.value if admission is not None else "",
+            runtime_profile_id=profile.profile_id if profile is not None else "",
+            runtime_profile_manifest_sha256=(profile.manifest_sha256 if profile is not None else ""),
+        )
+        return bool(
+            admission is not None
+            and base_configuration_is_admissible
+            and (
+                generic_configuration_is_admissible
+                or supervisor_admission.workload_available
+                or effect_admission.workload_available
+            )
         )
 
     def public_dict(self) -> dict[str, object]:
@@ -1168,6 +1229,8 @@ class FridaySettings:
         latency_budget_file = self.semantic_supervisor_promotion_latency_budget_file
         evidence_path = Path(evidence_file)
         latency_budget_path = Path(latency_budget_file)
+        effect_evidence_file = self.semantic_supervisor_effect_evidence_file
+        effect_evidence_path = Path(effect_evidence_file)
         evidence_file_configured = bool(evidence_file)
         evidence_path_valid = bool(
             evidence_file_configured
@@ -1178,6 +1241,29 @@ class FridaySettings:
         )
         evidence_sha256_configured = bool(
             re.fullmatch(r"[0-9a-f]{64}", self.semantic_supervisor_promotion_evidence_sha256)
+        )
+        effect_evidence_file_configured = bool(effect_evidence_file)
+        effect_evidence_path_valid = bool(
+            effect_evidence_file_configured
+            and effect_evidence_path.is_absolute()
+            and str(effect_evidence_path) == effect_evidence_file
+            and Path(os.path.abspath(effect_evidence_path)) == effect_evidence_path
+            and not any(character in effect_evidence_file for character in "\x00\r\n")
+        )
+        effect_evidence_sha256_configured = bool(
+            re.fullmatch(r"[0-9a-f]{64}", self.semantic_supervisor_effect_evidence_sha256)
+        )
+        effect_shadow_settings_valid = bool(
+            (
+                self.semantic_supervisor_effect_mode == "off"
+                and not effect_evidence_file
+                and not self.semantic_supervisor_effect_evidence_sha256
+            )
+            or (
+                self.semantic_supervisor_effect_mode == "shadow"
+                and effect_evidence_path_valid
+                and effect_evidence_sha256_configured
+            )
         )
         latency_budget_file_configured = bool(latency_budget_file)
         latency_budget_path_valid = bool(
@@ -1301,6 +1387,14 @@ class FridaySettings:
                     "latency_budget_path_public": False,
                 },
                 "promotion_admitted": False,
+                "effect_shadow_config": {
+                    "mode": self.semantic_supervisor_effect_mode,
+                    "raw_settings_valid": effect_shadow_settings_valid,
+                    "evidence_file_configured": effect_evidence_file_configured,
+                    "evidence_sha256_configured": effect_evidence_sha256_configured,
+                    "evidence_path_public": False,
+                    "maturity_accepted": False,
+                },
             },
             "orchestration": {
                 "mode": self.router_mode,
@@ -1656,6 +1750,19 @@ def load_settings(profile_name: str | None = None) -> FridaySettings:
         ),
         semantic_supervisor_promotion_canary_actor_bindings=_closed_digest_tuple_env(
             "FRIDAY_SEMANTIC_SUPERVISOR_PROMOTION_CANARY_ACTOR_BINDINGS"
+        ),
+        semantic_supervisor_effect_mode=_invalid_rollout_choice_env(
+            "FRIDAY_SEMANTIC_SUPERVISOR_EFFECT_MODE",
+            "off",
+            ("off", "shadow"),
+        ),
+        semantic_supervisor_effect_evidence_file=env(
+            "FRIDAY_SEMANTIC_SUPERVISOR_EFFECT_EVIDENCE_FILE",
+            "",
+        ),
+        semantic_supervisor_effect_evidence_sha256=env(
+            "FRIDAY_SEMANTIC_SUPERVISOR_EFFECT_EVIDENCE_SHA256",
+            "",
         ),
         embeddings_enabled=_bool_env("FRIDAY_EMBEDDINGS_ENABLED", False),
         embeddings_base_url=env("FRIDAY_EMBEDDINGS_BASE_URL", llm_base_url).rstrip("/"),

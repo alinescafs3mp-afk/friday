@@ -186,10 +186,7 @@ def test_orchestration_and_scheduler_share_one_immutable_runtime_bound_policy() 
     with pytest.raises(TypeError):
         policy.SUPERVISOR_PRODUCT_POLICY["effective_mode"] = "assist"  # type: ignore[index]
 
-    assert (
-        supervisor_contracts.SUPERVISOR_ASSIST_PRODUCT_POLICY
-        is policy.SUPERVISOR_ASSIST_PRODUCT_POLICY
-    )
+    assert supervisor_contracts.SUPERVISOR_ASSIST_PRODUCT_POLICY is policy.SUPERVISOR_ASSIST_PRODUCT_POLICY
     assert (
         supervisor_contracts.SUPERVISOR_ASSIST_PRODUCT_POLICY_SHA256
         == policy.SUPERVISOR_ASSIST_PRODUCT_POLICY_SHA256
@@ -199,6 +196,60 @@ def test_orchestration_and_scheduler_share_one_immutable_runtime_bound_policy() 
     assert policy.SUPERVISOR_PRODUCT_POLICY["max_review_rounds"] == 0
     with pytest.raises(TypeError):
         policy.SUPERVISOR_ASSIST_PRODUCT_POLICY["max_review_rounds"] = 0  # type: ignore[index]
+
+    assert (
+        supervisor_contracts.canonical_sha256(dict(policy.SUPERVISOR_EFFECT_SHADOW_POLICY))
+        == policy.SUPERVISOR_EFFECT_SHADOW_POLICY_SHA256
+    )
+    assert policy.SUPERVISOR_EFFECT_SHADOW_POLICY["workload"] == "effect_planning"
+    assert policy.SUPERVISOR_EFFECT_SHADOW_POLICY["contains_private_text"] is True
+    assert policy.SUPERVISOR_EFFECT_SHADOW_POLICY["effects_allowed"] is False
+    assert policy.SUPERVISOR_EFFECT_SHADOW_POLICY["publication_allowed"] is False
+    with pytest.raises(TypeError):
+        policy.SUPERVISOR_EFFECT_SHADOW_POLICY["effects_allowed"] = True  # type: ignore[index]
+
+
+@pytest.mark.parametrize(
+    ("private", "available", "closed_reason"),
+    ((True, True, "admitted"), (False, False, "private_text_required")),
+)
+def test_effect_shadow_has_an_independent_private_capable_scheduler_lane(
+    settings: Any,
+    monkeypatch: pytest.MonkeyPatch,
+    private: bool,
+    available: bool,
+    closed_reason: str,
+) -> None:
+    configured = _exact_loopback_settings(
+        settings,
+        monkeypatch,
+        requested_mode="off",
+        generic_workloads=(),
+        private=private,
+        semantic_supervisor_effect_mode="shadow",
+    )
+    assert configured.secondary_llm_configured is available
+    scheduler = build_secondary_brain(configured, transport=_closed_transport())
+    try:
+        assert (ModelWorkload.EFFECT_PLANNING in scheduler.allowed_workloads) is available
+        assert scheduler.workload_mode(ModelWorkload.PLAN_CANDIDATE) is SecondaryMode.DISABLED
+        assert scheduler.workload_mode(ModelWorkload.EFFECT_PLANNING) is (
+            SecondaryMode.SHADOW if available else SecondaryMode.DISABLED
+        )
+        effect = scheduler.public_status()["effect_shadow"]
+        assert effect == {
+            "workload": "effect_planning",
+            "requested_mode": "shadow",
+            "effective_mode": "shadow" if available else "off",
+            "policy_id": policy.SUPERVISOR_EFFECT_SHADOW_POLICY_ID,
+            "policy_sha256": policy.SUPERVISOR_EFFECT_SHADOW_POLICY_SHA256,
+            "workload_available": available,
+            "runtime_available": False,
+            "closed_reason": closed_reason,
+        }
+        assert scheduler.diagnostics_status()["effect_shadow"] == effect
+    finally:
+        asyncio.run(scheduler.aclose())
 
 
 @pytest.mark.parametrize("requested_mode", ["shadow", "assist", "canary"])

@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 import sqlite3
+import time
 from contextlib import contextmanager
 from dataclasses import replace
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -17,6 +20,7 @@ from friday.interaction_control_plane.turn_trace import (
     IntentClass,
     PlaybookClass,
 )
+from friday.orchestration import supervisor_representative_window_attestation as window_module
 from friday.orchestration.supervisor_contracts import SupervisorMode, TaskClass, canonical_sha256
 from friday.orchestration.supervisor_observation import parsed_observation
 from friday.orchestration.supervisor_production_baseline import (
@@ -36,6 +40,7 @@ from friday.orchestration.supervisor_representative_window_attestation import (
     consume_representative_window_attestation,
     is_accepted_representative_window_attestation,
     issue_representative_window_attestation,
+    representative_window_current_server_identity,
     representative_window_observer_runner_sha256,
     representative_window_sha256,
     verify_persisted_consumed_representative_window_issue,
@@ -45,12 +50,95 @@ from friday.orchestration.supervisor_trace_join import (
     SUPERVISOR_TRACE_JOIN_SCHEMA,
     PrimaryTraceProjection,
 )
+from friday.secondary_brain import (
+    ModelWorkload,
+    SecondaryMode,
+    SecondaryState,
+    SecondaryStatus,
+)
+from friday.secondary_brain.profiles import SecondaryProfileAdmission
+from friday.secondary_brain.scheduler import SecondaryBrainScheduler
 
 NOW = 1_800_000_000
 SOURCE = "a" * 64
 OBSERVED_SOURCE = "b" * 64
 REGISTRY = "c" * 64
 PRECURSOR = "d" * 64
+
+
+class _HealthySecondaryClient:
+    def __init__(self) -> None:
+        self.config = SimpleNamespace(
+            profile_id=semantic_supervisor_policy.SUPERVISOR_RUNTIME_PROFILE_ID,
+            served_model_alias="gpt-oss-20b",
+            max_context_tokens=131_072,
+            max_output_tokens=1_024,
+            health_interval_sec=60.0,
+        )
+
+    def status(self) -> SecondaryStatus:
+        return SecondaryStatus(
+            state=SecondaryState.HEALTHY,
+            last_failure=None,
+            selected_total=0,
+            success_total=0,
+            skipped_total=0,
+            fallback_total=0,
+            active_requests=0,
+            context_cap_tokens=131_072,
+            served_model_match=True,
+            profile_manifest_match=True,
+        )
+
+    def protocol_rejection_counts(self) -> dict[object, int]:
+        return {}
+
+    async def aclose(self) -> None:
+        return None
+
+
+def _real_admitted_scheduler(
+    requested_mode: SupervisorMode,
+    *,
+    effect_mode: str,
+) -> SecondaryBrainScheduler:
+    supervisor_admission = semantic_supervisor_policy.evaluate_supervisor_policy_admission(
+        requested_mode=requested_mode.value,
+        task_allowlist=(TaskClass.COMPARE_CURRENT_FILE_WITH_CURRENT_WEB.value,),
+        max_steps=6,
+        max_review_rounds=1,
+        timeout_sec=12.0,
+        allow_private_text=True,
+        secondary_runtime_state="configured",
+        profile_admission="accepted",
+        runtime_profile_id=semantic_supervisor_policy.SUPERVISOR_RUNTIME_PROFILE_ID,
+        runtime_profile_manifest_sha256=(
+            semantic_supervisor_policy.SUPERVISOR_RUNTIME_PROFILE_MANIFEST_SHA256
+        ),
+    )
+    effect_admission = semantic_supervisor_policy.evaluate_supervisor_effect_shadow_policy_admission(
+        requested_mode=effect_mode,
+        allow_private_text=True,
+        secondary_runtime_state="configured",
+        profile_admission="accepted",
+        runtime_profile_id=semantic_supervisor_policy.SUPERVISOR_RUNTIME_PROFILE_ID,
+        runtime_profile_manifest_sha256=(
+            semantic_supervisor_policy.SUPERVISOR_RUNTIME_PROFILE_MANIFEST_SHA256
+        ),
+    )
+    scheduler = SecondaryBrainScheduler(
+        mode=SecondaryMode.ASSIST,
+        allowed_workloads=frozenset({ModelWorkload.PLAN_CANDIDATE}),
+        allow_private_text=True,
+        client=_HealthySecondaryClient(),  # type: ignore[arg-type]
+        unavailable_state=SecondaryState.PROBING,
+        profile_admission=SecondaryProfileAdmission.ACCEPTED,
+        supervisor_admission=supervisor_admission,
+        effect_shadow_admission=effect_admission,
+    )
+    scheduler._epoch_admitted = True  # noqa: SLF001 - model one accepted process epoch
+    scheduler._last_probe_success_monotonic = time.monotonic()  # noqa: SLF001
+    return scheduler
 
 
 class _Storage:
@@ -272,6 +360,43 @@ def _consume_request(issue: dict[str, Any]) -> dict[str, Any]:
             "precursor_assist_promotion_evidence_sha256"
         ],
     }
+
+
+@pytest.mark.parametrize("target", (SupervisorMode.ASSIST, SupervisorMode.CANARY))
+@pytest.mark.parametrize("effect_mode", ("off", "shadow"))
+def test_real_scheduler_remains_valid_for_representative_window_identity(
+    settings: Any,
+    monkeypatch: pytest.MonkeyPatch,
+    target: SupervisorMode,
+    effect_mode: str,
+) -> None:
+    scheduler = _real_admitted_scheduler(target, effect_mode=effect_mode)
+    configured = replace(settings, semantic_supervisor_mode=target.value)
+    monkeypatch.setattr(
+        window_module,
+        "_live_release_identity",
+        lambda *, verify_tree: {
+            "predecessor_release_commit": "f" * 40,
+            "predecessor_release_metadata_sha256": "1" * 64,
+            "predecessor_release_tree_manifest_sha256": OBSERVED_SOURCE,
+        },
+    )
+    monkeypatch.setattr(
+        window_module,
+        "operational_capability_snapshot",
+        lambda: SimpleNamespace(digest_hex=lambda: REGISTRY),
+    )
+    try:
+        identity = representative_window_current_server_identity(
+            configured,
+            scheduler,
+            target_mode=target,
+        )
+    finally:
+        asyncio.run(scheduler.aclose())
+
+    assert identity["requested_mode"] == target.value
+    assert identity["observed_registry_binding_sha256"] == REGISTRY
 
 
 @pytest.mark.parametrize("target", (SupervisorMode.ASSIST, SupervisorMode.CANARY))

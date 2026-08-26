@@ -14,6 +14,7 @@ import httpx
 
 from .contracts import (
     PLAN_CANDIDATE_LOCAL_FAILURES,
+    SEMANTIC_SHADOW_WORKLOADS,
     ModelRequest,
     ModelWorkload,
     SecondaryAttempt,
@@ -318,7 +319,7 @@ class SecondaryEndpointClient:
                 self._last_success_at = self._clock()
                 return
             if (
-                failure_scope_workload is ModelWorkload.PLAN_CANDIDATE
+                failure_scope_workload in SEMANTIC_SHADOW_WORKLOADS
                 and failure in PLAN_CANDIDATE_LOCAL_FAILURES
             ) or (cancellation_is_local and failure is SecondaryFailure.CANCELLED):
                 self._skipped_total += 1
@@ -379,7 +380,7 @@ class SecondaryEndpointClient:
             payload = self._adapter.build_payload(self.config, request)
         except ProtocolRejection as rejection:
             if not (
-                failure_scope is ModelWorkload.PLAN_CANDIDATE
+                failure_scope in SEMANTIC_SHADOW_WORKLOADS
                 and rejection.failure in PLAN_CANDIDATE_LOCAL_FAILURES
             ):
                 self._last_failure = rejection.failure
@@ -387,7 +388,7 @@ class SecondaryEndpointClient:
             self._record_protocol_rejection(rejection.failure)
             return SecondaryAttempt.rejected(rejection.failure)
         except Exception:
-            if failure_scope is not ModelWorkload.PLAN_CANDIDATE:
+            if failure_scope not in SEMANTIC_SHADOW_WORKLOADS:
                 self._last_failure = SecondaryFailure.MALFORMED_RESPONSE
             self._skipped_total += 1
             self._record_protocol_rejection(SecondaryFailure.MALFORMED_RESPONSE)

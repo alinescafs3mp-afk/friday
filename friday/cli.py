@@ -250,6 +250,9 @@ FRIDAY_MAX_ARCHIVE_UNCOMPRESSED_BYTES=262144000
 # Promotion remains independently closed without exact source/evidence/registry
 # bindings. Keep this lexical block at EOF so a later immutable
 # secondary transition can append its canonical block without reordering it.
+FRIDAY_SEMANTIC_SUPERVISOR_EFFECT_EVIDENCE_FILE=
+FRIDAY_SEMANTIC_SUPERVISOR_EFFECT_EVIDENCE_SHA256=
+FRIDAY_SEMANTIC_SUPERVISOR_EFFECT_MODE=off
 FRIDAY_SEMANTIC_SUPERVISOR_MAX_REVIEW_ROUNDS=1
 FRIDAY_SEMANTIC_SUPERVISOR_MAX_STEPS=6
 FRIDAY_SEMANTIC_SUPERVISOR_MODE=off

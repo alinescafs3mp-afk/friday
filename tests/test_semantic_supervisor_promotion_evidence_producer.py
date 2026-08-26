@@ -67,9 +67,7 @@ def _metrics(
     latency_max: int,
     window: str,
 ) -> dict[str, object]:
-    completion_counts = (
-        {} if observations == 0 else {"complete": complete, "failed": observations - complete}
-    )
+    completion_counts = {} if observations == 0 else {"complete": complete, "failed": observations - complete}
     return {
         "schema": SUPERVISOR_PRODUCT_WINDOW_SCHEMA,
         "stage": stage,
@@ -329,9 +327,7 @@ def _representative_window_issue(
         "observed_registry_binding_sha256": REGISTRY,
         "requested_mode": SupervisorMode.ASSIST.value,
         "supervisor_policy_id": semantic_supervisor_policy.SUPERVISOR_ASSIST_PRODUCT_POLICY_ID,
-        "supervisor_policy_sha256": (
-            semantic_supervisor_policy.SUPERVISOR_ASSIST_PRODUCT_POLICY_SHA256
-        ),
+        "supervisor_policy_sha256": (semantic_supervisor_policy.SUPERVISOR_ASSIST_PRODUCT_POLICY_SHA256),
         "runtime_profile_id": semantic_supervisor_policy.SUPERVISOR_RUNTIME_PROFILE_ID,
         "runtime_profile_manifest_sha256": (
             semantic_supervisor_policy.SUPERVISOR_RUNTIME_PROFILE_MANIFEST_SHA256
@@ -705,19 +701,22 @@ def test_cli_writes_private_nonreplaceable_artifacts_and_body_free_receipts(
     baseline_path = tmp_path / "baseline.json"
     baseline_path.write_bytes(baseline_raw)
     budget_path = tmp_path / "budget.json"
-    assert cli.main(
-        [
-            "latency-budget",
-            "--target-mode",
-            "assist",
-            "--source-revision-sha256",
-            SOURCE,
-            "--maximum-user-visible-latency-ms",
-            "2500",
-            "--output",
-            str(budget_path),
-        ]
-    ) == 0
+    assert (
+        cli.main(
+            [
+                "latency-budget",
+                "--target-mode",
+                "assist",
+                "--source-revision-sha256",
+                SOURCE,
+                "--maximum-user-visible-latency-ms",
+                "2500",
+                "--output",
+                str(budget_path),
+            ]
+        )
+        == 0
+    )
     budget_receipt = json.loads(capsys.readouterr().out)
     budget_raw = budget_path.read_bytes()
     assert stat.S_IMODE(budget_path.stat().st_mode) == 0o600
@@ -797,7 +796,9 @@ def test_cli_requires_each_operator_attestation_before_reading_or_writing(tmp_pa
     assert not output.exists()
 
 
-def test_cli_builds_precursor_bound_canary_outcome(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+def test_cli_builds_precursor_bound_canary_outcome(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
     baseline_raw = _baseline_raw()
     baseline_path = tmp_path / "baseline.json"
     baseline_path.write_bytes(baseline_raw)
@@ -889,19 +890,18 @@ def test_immutable_operator_accepts_exact_producer_output(tmp_path: Path) -> Non
     budget_path.chmod(0o600)
     evidence_path.chmod(0o600)
     values = {
+        "FRIDAY_SEMANTIC_SUPERVISOR_EFFECT_EVIDENCE_FILE": "",
+        "FRIDAY_SEMANTIC_SUPERVISOR_EFFECT_EVIDENCE_SHA256": "",
+        "FRIDAY_SEMANTIC_SUPERVISOR_EFFECT_MODE": "off",
         "FRIDAY_SEMANTIC_SUPERVISOR_MAX_REVIEW_ROUNDS": "1",
         "FRIDAY_SEMANTIC_SUPERVISOR_MAX_STEPS": "6",
         "FRIDAY_SEMANTIC_SUPERVISOR_MODE": "assist",
         "FRIDAY_SEMANTIC_SUPERVISOR_PROMOTION_CANARY_ACTOR_BINDINGS": "",
         "FRIDAY_SEMANTIC_SUPERVISOR_PROMOTION_ENABLED": "1",
         "FRIDAY_SEMANTIC_SUPERVISOR_PROMOTION_EVIDENCE_FILE": str(evidence_path),
-        "FRIDAY_SEMANTIC_SUPERVISOR_PROMOTION_EVIDENCE_SHA256": hashlib.sha256(
-            evidence_raw
-        ).hexdigest(),
+        "FRIDAY_SEMANTIC_SUPERVISOR_PROMOTION_EVIDENCE_SHA256": hashlib.sha256(evidence_raw).hexdigest(),
         "FRIDAY_SEMANTIC_SUPERVISOR_PROMOTION_LATENCY_BUDGET_FILE": str(budget_path),
-        "FRIDAY_SEMANTIC_SUPERVISOR_PROMOTION_LATENCY_BUDGET_SHA256": hashlib.sha256(
-            budget_raw
-        ).hexdigest(),
+        "FRIDAY_SEMANTIC_SUPERVISOR_PROMOTION_LATENCY_BUDGET_SHA256": hashlib.sha256(budget_raw).hexdigest(),
         "FRIDAY_SEMANTIC_SUPERVISOR_PROMOTION_REGISTRY_BINDING_SHA256": REGISTRY,
         "FRIDAY_SEMANTIC_SUPERVISOR_PROMOTION_SOURCE_REVISION_SHA256": SOURCE,
         "FRIDAY_SEMANTIC_SUPERVISOR_TASKS": "compare_current_file_with_current_web",
@@ -943,9 +943,7 @@ def test_bundle_loader_rebuilds_every_claim_and_rejects_standalone_or_tampered_m
     invented_metric["promotion_evidence"]["product_evidence"]["latency_total_ms"] += 1
     variants.append(invented_metric)
     swapped_baseline = json.loads(json.dumps(original))
-    swapped_baseline["baseline"]["product_windows"]["shadow_readiness"]["baseline"][
-        "latency_total_ms"
-    ] += 1
+    swapped_baseline["baseline"]["product_windows"]["shadow_readiness"]["baseline"]["latency_total_ms"] += 1
     variants.append(swapped_baseline)
     forged_receipt = json.loads(json.dumps(original))
     forged_receipt["producer_receipt"]["promotion_evidence_file_sha256"] = "f" * 64
@@ -989,9 +987,9 @@ def test_producer_canary_output_binds_exact_predecessor_for_operator(tmp_path: P
     precursor_sha256 = assist_evidence.canonical_sha256()
 
     canary_report = _report()
-    canary_report["product_windows"]["promoted_execution"]["assist"][
-        "promotion_evidence_sha256"
-    ] = precursor_sha256
+    canary_report["product_windows"]["promoted_execution"]["assist"]["promotion_evidence_sha256"] = (
+        precursor_sha256
+    )
     canary_baseline_raw = _resign(canary_report)
     canary_baseline = load_accepted_supervisor_production_baseline(
         canary_baseline_raw,
@@ -1032,15 +1030,16 @@ def test_producer_canary_output_binds_exact_predecessor_for_operator(tmp_path: P
     canary_path.chmod(0o600)
     budget_path.chmod(0o600)
     values = {
+        "FRIDAY_SEMANTIC_SUPERVISOR_EFFECT_EVIDENCE_FILE": "",
+        "FRIDAY_SEMANTIC_SUPERVISOR_EFFECT_EVIDENCE_SHA256": "",
+        "FRIDAY_SEMANTIC_SUPERVISOR_EFFECT_MODE": "off",
         "FRIDAY_SEMANTIC_SUPERVISOR_MAX_REVIEW_ROUNDS": "1",
         "FRIDAY_SEMANTIC_SUPERVISOR_MAX_STEPS": "6",
         "FRIDAY_SEMANTIC_SUPERVISOR_MODE": "canary",
         "FRIDAY_SEMANTIC_SUPERVISOR_PROMOTION_CANARY_ACTOR_BINDINGS": "d" * 64,
         "FRIDAY_SEMANTIC_SUPERVISOR_PROMOTION_ENABLED": "1",
         "FRIDAY_SEMANTIC_SUPERVISOR_PROMOTION_EVIDENCE_FILE": str(canary_path),
-        "FRIDAY_SEMANTIC_SUPERVISOR_PROMOTION_EVIDENCE_SHA256": hashlib.sha256(
-            canary_raw
-        ).hexdigest(),
+        "FRIDAY_SEMANTIC_SUPERVISOR_PROMOTION_EVIDENCE_SHA256": hashlib.sha256(canary_raw).hexdigest(),
         "FRIDAY_SEMANTIC_SUPERVISOR_PROMOTION_LATENCY_BUDGET_FILE": str(budget_path),
         "FRIDAY_SEMANTIC_SUPERVISOR_PROMOTION_LATENCY_BUDGET_SHA256": hashlib.sha256(
             canary_budget_raw

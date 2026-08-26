@@ -13,16 +13,25 @@ import pytest
 from friday import semantic_supervisor_policy
 from friday.orchestration.effect_outcome import EffectAction, EffectCapability
 from friday.orchestration.supervisor_effect_intent import (
+    SUPERVISOR_EFFECT_SYMBOL_MANIFEST_SHA256,
+    EffectIntentActionSelection,
+    EffectIntentCapabilitySelection,
     EffectIntentReason,
+    EffectIntentSelectionV2,
     EffectIntentV1,
+    prepare_effect_intent_projection_v2,
 )
 from friday.orchestration.supervisor_effect_intent_transport import (
     SUPERVISOR_EFFECT_INTENT_INPUT_SCHEMA,
+    SUPERVISOR_EFFECT_INTENT_SELECTION_INPUT_SCHEMA,
     SupervisorEffectIntentTransportError,
     SupervisorEffectIntentTransportFailure,
     build_supervisor_effect_intent_request,
+    build_supervisor_effect_intent_selection_request,
     describe_supervisor_effect_intent,
     parse_supervisor_effect_intent_result,
+    parse_supervisor_effect_intent_selection_result,
+    select_supervisor_effect_intent,
     supervisor_effect_intent_messages,
 )
 from friday.secondary_brain import (
@@ -124,6 +133,16 @@ def _diagnostics(*, requested_mode: str = "shadow") -> dict[str, object]:
             "runtime_available": True,
             "closed_reason": "admitted",
         },
+        "effect_shadow": {
+            "workload": ModelWorkload.EFFECT_PLANNING.value,
+            "requested_mode": "shadow",
+            "effective_mode": "shadow",
+            "policy_id": semantic_supervisor_policy.SUPERVISOR_EFFECT_SHADOW_POLICY_ID,
+            "policy_sha256": semantic_supervisor_policy.SUPERVISOR_EFFECT_SHADOW_POLICY_SHA256,
+            "workload_available": True,
+            "runtime_available": True,
+            "closed_reason": "admitted",
+        },
     }
 
 
@@ -217,13 +236,13 @@ async def _describe(
 def test_request_is_symbolic_effect_free_structured_and_bounded() -> None:
     request = _request()
 
-    assert request.workload is ModelWorkload.PLAN_CANDIDATE
+    assert request.workload is ModelWorkload.EFFECT_PLANNING
     assert request.priority is ModelPriority.BACKGROUND
     assert request.effect_class is EffectClass.NONE
-    assert request.max_output_tokens == 256
+    assert request.max_output_tokens == (semantic_supervisor_policy.SUPERVISOR_EFFECT_SHADOW_OUTPUT_TOKENS)
     assert request.require_structured_output is True
     assert request.require_independent_model is True
-    assert request.contains_private_text is False
+    assert request.contains_private_text is True
     schema = request.structured_output_schema
     assert isinstance(schema, Mapping)
     assert schema["additionalProperties"] is False
@@ -296,76 +315,34 @@ async def test_one_current_scheduler_call_returns_exact_untrusted_intent(
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize(
-    ("requested_mode", "expected_policy_id", "expected_policy_sha256"),
-    [
-        (
-            "shadow",
-            semantic_supervisor_policy.SUPERVISOR_PRODUCT_POLICY_ID,
-            semantic_supervisor_policy.SUPERVISOR_PRODUCT_POLICY_SHA256,
-        ),
-        (
-            "assist",
-            semantic_supervisor_policy.SUPERVISOR_ASSIST_PRODUCT_POLICY_ID,
-            semantic_supervisor_policy.SUPERVISOR_ASSIST_PRODUCT_POLICY_SHA256,
-        ),
-        (
-            "canary",
-            semantic_supervisor_policy.SUPERVISOR_ASSIST_PRODUCT_POLICY_ID,
-            semantic_supervisor_policy.SUPERVISOR_ASSIST_PRODUCT_POLICY_SHA256,
-        ),
-    ],
-)
-async def test_transport_requires_the_mode_owned_non_authorizing_policy_identity(
+@pytest.mark.parametrize("requested_mode", ["shadow", "assist", "canary"])
+async def test_transport_requires_the_independent_effect_shadow_policy_identity(
     requested_mode: str,
-    expected_policy_id: str,
-    expected_policy_sha256: str,
 ) -> None:
     scheduler = _Scheduler(requested_mode=requested_mode)
 
     intent = await _describe(scheduler)
 
     assert intent == _intent()
-    supervisor = scheduler.diagnostics["semantic_supervisor"]
-    assert isinstance(supervisor, dict)
-    assert supervisor["policy_id"] == expected_policy_id
-    assert supervisor["policy_sha256"] == expected_policy_sha256
-    assert supervisor["effective_mode"] == "shadow"
+    effect_shadow = scheduler.diagnostics["effect_shadow"]
+    assert isinstance(effect_shadow, dict)
+    assert effect_shadow["policy_id"] == (semantic_supervisor_policy.SUPERVISOR_EFFECT_SHADOW_POLICY_ID)
+    assert effect_shadow["policy_sha256"] == (
+        semantic_supervisor_policy.SUPERVISOR_EFFECT_SHADOW_POLICY_SHA256
+    )
+    assert effect_shadow["effective_mode"] == "shadow"
     assert scheduler.evaluate_calls == scheduler.dispatches == 1
+    assert scheduler.requests[0].workload is ModelWorkload.EFFECT_PLANNING
     assert scheduler.requests[0].effect_class is EffectClass.NONE
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize(
-    ("requested_mode", "foreign_policy_id", "foreign_policy_sha256"),
-    [
-        (
-            "shadow",
-            semantic_supervisor_policy.SUPERVISOR_ASSIST_PRODUCT_POLICY_ID,
-            semantic_supervisor_policy.SUPERVISOR_ASSIST_PRODUCT_POLICY_SHA256,
-        ),
-        (
-            "assist",
-            semantic_supervisor_policy.SUPERVISOR_PRODUCT_POLICY_ID,
-            semantic_supervisor_policy.SUPERVISOR_PRODUCT_POLICY_SHA256,
-        ),
-        (
-            "canary",
-            semantic_supervisor_policy.SUPERVISOR_PRODUCT_POLICY_ID,
-            semantic_supervisor_policy.SUPERVISOR_PRODUCT_POLICY_SHA256,
-        ),
-    ],
-)
-async def test_cross_mode_policy_identity_fails_before_model_call(
-    requested_mode: str,
-    foreign_policy_id: str,
-    foreign_policy_sha256: str,
-) -> None:
-    scheduler = _Scheduler(requested_mode=requested_mode)
-    supervisor = scheduler.diagnostics["semantic_supervisor"]
-    assert isinstance(supervisor, dict)
-    supervisor["policy_id"] = foreign_policy_id
-    supervisor["policy_sha256"] = foreign_policy_sha256
+async def test_effect_shadow_policy_drift_fails_before_model_call() -> None:
+    scheduler = _Scheduler()
+    effect_shadow = scheduler.diagnostics["effect_shadow"]
+    assert isinstance(effect_shadow, dict)
+    effect_shadow["policy_id"] = semantic_supervisor_policy.SUPERVISOR_PRODUCT_POLICY_ID
+    effect_shadow["policy_sha256"] = semantic_supervisor_policy.SUPERVISOR_PRODUCT_POLICY_SHA256
 
     with pytest.raises(SupervisorEffectIntentTransportError) as raised:
         await _describe(scheduler)
@@ -459,7 +436,7 @@ def test_request_rejects_untyped_symbols_digests_and_deadlines() -> None:
         lambda runtime: runtime.diagnostics.__setitem__("profile_manifest_match", False),
         lambda runtime: runtime.diagnostics.__setitem__("probe_success_total", 0),
         lambda runtime: runtime.diagnostics.__setitem__("model_inventory_probe_success_total", 0),
-        lambda runtime: runtime.diagnostics["semantic_supervisor"].__setitem__("runtime_available", False),
+        lambda runtime: runtime.diagnostics["effect_shadow"].__setitem__("runtime_available", False),
     ],
 )
 async def test_unaccepted_profile_alias_or_epoch_fails_before_call(
@@ -492,13 +469,13 @@ async def test_lease_drift_immediately_before_dispatch_fails_without_model_call(
 
 @pytest.mark.asyncio
 async def test_policy_identity_drift_before_dispatch_fails_without_model_call() -> None:
-    scheduler = _Scheduler(requested_mode="assist")
+    scheduler = _Scheduler()
 
     def drift_policy(runtime: _Scheduler) -> None:
-        supervisor = runtime.diagnostics["semantic_supervisor"]
-        assert isinstance(supervisor, dict)
-        supervisor["policy_id"] = semantic_supervisor_policy.SUPERVISOR_PRODUCT_POLICY_ID
-        supervisor["policy_sha256"] = semantic_supervisor_policy.SUPERVISOR_PRODUCT_POLICY_SHA256
+        effect_shadow = runtime.diagnostics["effect_shadow"]
+        assert isinstance(effect_shadow, dict)
+        effect_shadow["policy_id"] = semantic_supervisor_policy.SUPERVISOR_PRODUCT_POLICY_ID
+        effect_shadow["policy_sha256"] = semantic_supervisor_policy.SUPERVISOR_PRODUCT_POLICY_SHA256
 
     scheduler.mutate_before_dispatch = drift_policy
 
@@ -516,7 +493,7 @@ async def test_policy_identity_drift_before_dispatch_fails_without_model_call() 
     [
         lambda runtime: runtime.diagnostics.__setitem__("probe_success_total", 8),
         lambda runtime: setattr(runtime, "alias", "different-model"),
-        lambda runtime: runtime.diagnostics["semantic_supervisor"].__setitem__("runtime_available", False),
+        lambda runtime: runtime.diagnostics["effect_shadow"].__setitem__("runtime_available", False),
     ],
 )
 async def test_epoch_alias_or_admission_drift_after_response_discards_intent(
@@ -535,12 +512,12 @@ async def test_epoch_alias_or_admission_drift_after_response_discards_intent(
 
 @pytest.mark.asyncio
 async def test_policy_identity_drift_after_response_discards_intent() -> None:
-    scheduler = _Scheduler(requested_mode="canary")
+    scheduler = _Scheduler()
 
     def drift_policy(runtime: _Scheduler) -> None:
-        supervisor = runtime.diagnostics["semantic_supervisor"]
-        assert isinstance(supervisor, dict)
-        supervisor["policy_sha256"] = _OTHER
+        effect_shadow = runtime.diagnostics["effect_shadow"]
+        assert isinstance(effect_shadow, dict)
+        effect_shadow["policy_sha256"] = _OTHER
 
     scheduler.mutate_after_result = drift_policy
 
@@ -606,3 +583,169 @@ async def test_caller_cancellation_is_control_flow_not_a_model_result() -> None:
     with pytest.raises(asyncio.CancelledError):
         await _describe(scheduler)
     assert scheduler.evaluate_calls == 1
+
+
+def _selection_result(
+    capability: EffectIntentCapabilitySelection,
+    action: EffectIntentActionSelection,
+    *,
+    projection_digest: str,
+    structured: dict[str, Any] | None = None,
+) -> SecondaryResult:
+    selection = EffectIntentSelectionV2(
+        capability=capability,
+        action=action,
+        manifest_digest=SUPERVISOR_EFFECT_SYMBOL_MANIFEST_SHA256,
+        projection_digest=projection_digest,
+    )
+    return SecondaryResult(
+        visible_content=selection.to_json(),
+        structured_output=cast(
+            JsonValue,
+            selection.to_payload() if structured is None else structured,
+        ),
+        served_model_alias=_PROFILE.served_model_alias,
+    )
+
+
+def test_v2_request_exposes_projection_and_all_exact_choices_without_effect_surface() -> None:
+    projection = prepare_effect_intent_projection_v2(
+        "Choose whether the request asks to create or append an Obsidian note."
+    )
+
+    request = build_supervisor_effect_intent_selection_request(
+        projection=projection,
+        absolute_deadline_monotonic=time.monotonic() + 10.0,
+    )
+
+    assert request.effect_class is EffectClass.NONE
+    assert request.workload is ModelWorkload.EFFECT_PLANNING
+    assert request.contains_private_text is True
+    assert request.require_independent_model is True
+    payload = json.loads(request.messages[1]["content"])
+    assert payload["schema"] == SUPERVISOR_EFFECT_INTENT_SELECTION_INPUT_SCHEMA
+    assert payload["symbolic_manifest"]["choices"] == [
+        {"capability": "none", "action": "none"},
+        {"capability": "obsidian_note_mutation", "action": "create"},
+        {"capability": "obsidian_note_mutation", "action": "append"},
+    ]
+    assert payload["manifest_digest"] == SUPERVISOR_EFFECT_SYMBOL_MANIFEST_SHA256
+    assert payload["semantic_projection"] == projection.to_payload()
+    properties = payload["response_schema"]["properties"]
+    assert properties["capability"]["enum"] == ["none", "obsidian_note_mutation"]
+    assert properties["action"]["enum"] == ["none", "create", "append"]
+    assert set(properties) == {
+        "schema",
+        "capability",
+        "action",
+        "manifest_digest",
+        "projection_digest",
+    }
+    assert set(inspect.signature(select_supervisor_effect_intent).parameters) == {
+        "runtime",
+        "projection",
+        "absolute_deadline_monotonic",
+    }
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("capability", "action"),
+    [
+        (EffectIntentCapabilitySelection.NONE, EffectIntentActionSelection.NONE),
+        (
+            EffectIntentCapabilitySelection.OBSIDIAN_NOTE_MUTATION,
+            EffectIntentActionSelection.CREATE,
+        ),
+        (
+            EffectIntentCapabilitySelection.OBSIDIAN_NOTE_MUTATION,
+            EffectIntentActionSelection.APPEND,
+        ),
+    ],
+)
+async def test_v2_model_selects_one_manifest_pair_in_one_effect_free_call(
+    capability: EffectIntentCapabilitySelection,
+    action: EffectIntentActionSelection,
+) -> None:
+    projection = prepare_effect_intent_projection_v2("Select the supported note effect, if any.")
+    scheduler = _Scheduler(
+        _selection_result(capability, action, projection_digest=projection.projection_digest)
+    )
+
+    selected = await select_supervisor_effect_intent(
+        scheduler,
+        projection=projection,
+        absolute_deadline_monotonic=time.monotonic() + 10.0,
+    )
+
+    assert (selected.capability, selected.action) == (capability, action)
+    assert selected.execution_authorized is False
+    assert selected.publication_authorized is False
+    assert scheduler.evaluate_calls == scheduler.dispatches == 1
+    assert scheduler.requests[0].effect_class is EffectClass.NONE
+
+
+def test_v2_parser_rejects_forged_fields_crossed_pair_and_projection_drift() -> None:
+    projection = prepare_effect_intent_projection_v2("No supported note effect is requested.")
+    valid = _selection_result(
+        EffectIntentCapabilitySelection.NONE,
+        EffectIntentActionSelection.NONE,
+        projection_digest=projection.projection_digest,
+    )
+    parsed = parse_supervisor_effect_intent_selection_result(valid, projection=projection)
+    assert parsed.capability is EffectIntentCapabilitySelection.NONE
+
+    payload = parsed.to_payload()
+    for forged in (
+        {**payload, "path": "forged"},
+        {**payload, "authorization": True},
+        {**payload, "capability": "none", "action": "create"},
+        {**payload, "projection_digest": _OTHER},
+    ):
+        result = SecondaryResult(
+            visible_content=json.dumps(forged),
+            structured_output=cast(JsonValue, forged),
+            served_model_alias=_PROFILE.served_model_alias,
+        )
+        with pytest.raises(SupervisorEffectIntentTransportError) as raised:
+            parse_supervisor_effect_intent_selection_result(result, projection=projection)
+        assert raised.value.failure is SupervisorEffectIntentTransportFailure.INVALID_RESPONSE
+
+
+def test_v2_transport_revalidates_a_tampered_projection_before_model_visibility() -> None:
+    projection = prepare_effect_intent_projection_v2("No supported effect is requested.")
+    object.__setattr__(projection, "semantic_text", "/home/private/note.md")
+
+    with pytest.raises(SupervisorEffectIntentTransportError) as raised:
+        build_supervisor_effect_intent_selection_request(
+            projection=projection,
+            absolute_deadline_monotonic=time.monotonic() + 10.0,
+        )
+
+    assert raised.value.failure is SupervisorEffectIntentTransportFailure.INVALID_REQUEST
+
+
+@pytest.mark.asyncio
+async def test_v2_epoch_drift_discards_selection_after_the_only_call() -> None:
+    projection = prepare_effect_intent_projection_v2("Append a note if the request requires it.")
+    scheduler = _Scheduler(
+        _selection_result(
+            EffectIntentCapabilitySelection.OBSIDIAN_NOTE_MUTATION,
+            EffectIntentActionSelection.APPEND,
+            projection_digest=projection.projection_digest,
+        )
+    )
+
+    def drift(runtime: _Scheduler) -> None:
+        runtime.diagnostics["probe_success_total"] = 8
+
+    scheduler.mutate_after_result = drift
+    with pytest.raises(SupervisorEffectIntentTransportError) as raised:
+        await select_supervisor_effect_intent(
+            scheduler,
+            projection=projection,
+            absolute_deadline_monotonic=time.monotonic() + 10.0,
+        )
+
+    assert raised.value.failure is SupervisorEffectIntentTransportFailure.RUNTIME_STALE
+    assert scheduler.evaluate_calls == scheduler.dispatches == 1

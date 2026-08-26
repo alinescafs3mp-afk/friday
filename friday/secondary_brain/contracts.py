@@ -83,6 +83,14 @@ ADVISORY_WORKLOADS = frozenset(
         ModelWorkload.DOCUMENT_MAP,
         ModelWorkload.CRITIQUE,
         ModelWorkload.VERIFY,
+        ModelWorkload.EFFECT_PLANNING,
+        ModelWorkload.PLAN_CANDIDATE,
+    }
+)
+
+SEMANTIC_SHADOW_WORKLOADS = frozenset(
+    {
+        ModelWorkload.EFFECT_PLANNING,
         ModelWorkload.PLAN_CANDIDATE,
     }
 )
@@ -143,7 +151,7 @@ class SecondaryFailure(StrEnum):
 
 # These outcomes describe one discarded semantic product body, not the health
 # or identity of the accepted shared endpoint.  They therefore stay local to a
-# PLAN_CANDIDATE attempt and must never put unrelated accepted workloads into
+# semantic-shadow attempt and must never put unrelated accepted workloads into
 # cooldown.  Cancellation is included because foreground work may preempt the
 # lowest-priority semantic shadow.
 PLAN_CANDIDATE_LOCAL_FAILURES = frozenset(

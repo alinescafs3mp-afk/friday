@@ -140,6 +140,341 @@ def test_server_installs_and_closes_non_owning_shadow_without_hiding_router_mode
     assert app.state.agent.semantic_supervisor_status()["effective_mode"] == "off"
 
 
+def test_server_closes_semantic_runtime_when_worker_startup_fails(
+    settings: Any,
+    monkeypatch: Any,
+) -> None:
+    import friday.server as server
+
+    scheduler = _AdmittedShadowScheduler()
+
+    class Runtime:
+        def __init__(self, primary: Any) -> None:
+            self.primary = primary
+            self.closed = 0
+
+        def __getattr__(self, name: str) -> Any:
+            return getattr(self.primary, name)
+
+        async def close(self) -> None:
+            self.closed += 1
+
+    runtime: Runtime | None = None
+
+    def build_runtime(_settings: Any, primary: Any, _scheduler: Any) -> Runtime:
+        nonlocal runtime
+        runtime = Runtime(primary)
+        return runtime
+
+    async def fail_start(_workers: Any) -> None:
+        raise RuntimeError("synthetic worker startup failure")
+
+    monkeypatch.setattr(server, "build_secondary_brain", lambda _settings: scheduler)
+    monkeypatch.setattr(
+        server,
+        "_load_semantic_supervisor_activation_material",
+        lambda *_args: (None, None),
+    )
+    monkeypatch.setattr(server, "build_semantic_supervisor_runtime", build_runtime)
+    monkeypatch.setattr(server.WorkersManager, "start", fail_start)
+
+    app = server.create_app(replace(settings, semantic_supervisor_mode="shadow"))
+    with pytest.raises(RuntimeError, match="synthetic worker startup failure"), TestClient(app):
+        pass
+
+    assert runtime is not None
+    assert runtime.closed == 1
+    assert scheduler.closed == 1
+
+
+def test_server_composes_mature_effect_shadow_after_registry_and_closes_it_first(
+    settings: Any,
+    monkeypatch: Any,
+) -> None:
+    import friday.server as server
+
+    sequence: list[str] = []
+    original_registry_assert = server.ExecutionKernel.assert_risk_declarations_agree
+    original_effect_binding = server.operational_effect_capability_snapshot
+
+    class Scheduler(_AdmittedShadowScheduler):
+        def start(self) -> None:
+            sequence.append("secondary_started")
+            super().start()
+
+        async def aclose(self) -> None:
+            sequence.append("secondary_closed")
+            await super().aclose()
+
+    class EffectRuntime:
+        def __init__(self, primary: Any) -> None:
+            self.primary = primary
+            self.closed = 0
+
+        def __getattr__(self, name: str) -> Any:
+            return getattr(self.primary, name)
+
+        def semantic_supervisor_effect_status(self) -> dict[str, object]:
+            return {
+                "schema": "friday.semantic-supervisor-effect-shadow-runtime.v1",
+                "installed": True,
+                "requested_mode": "shadow",
+                "effective_mode": "shadow" if not self.closed else "off",
+                "maturity_accepted": not self.closed,
+                "evidence_sha256": "a" * 64 if not self.closed else "",
+                "maturity_facts_sha256": "b" * 64 if not self.closed else "",
+                "source_revision_sha256": "c" * 64 if not self.closed else "",
+                "registry_binding_sha256": "d" * 64 if not self.closed else "",
+                "effect_registry_binding_sha256": "e" * 64 if not self.closed else "",
+                "policy_id": semantic_supervisor_policy.SUPERVISOR_EFFECT_SHADOW_POLICY_ID,
+                "policy_sha256": semantic_supervisor_policy.SUPERVISOR_EFFECT_SHADOW_POLICY_SHA256,
+                "workload": "effect_planning",
+                "runtime_owner": "unchanged",
+                "publication_owner": "primary",
+                "primary_result_unchanged": True,
+                "tools_allowed": False,
+                "effects_allowed": False,
+                "execution_authorized": False,
+                "publication_authorized": False,
+                "max_pending": 4,
+                "pending": 0,
+                "dedupe_retention": "process_lifetime",
+                "dedupe_algorithm": "fixed_hmac_sha256_bloom_v1",
+                "dedupe_identity": "accepted_effect_id_and_outcome_sha256_v1",
+                "dedupe_identity_count": 2,
+                "dedupe_memory_bounded": True,
+                "dedupe_memory_bytes": 512 * 1_024,
+                "dedupe_bit_capacity": 512 * 1_024 * 8,
+                "dedupe_hash_count": 7,
+                "dedupe_bit_probes_per_receipt": 14,
+                "dedupe_insert_total": 0,
+                "dispatch_total": 0,
+                "observation_total": 0,
+                "agreements": {},
+                "skip_reasons": {},
+                "body_free": True,
+            }
+
+        async def close(self) -> None:
+            sequence.append("effect_closed")
+            self.closed += 1
+
+    def registry_assert(kernel: Any) -> None:
+        original_registry_assert(kernel)
+        sequence.append("registry_closed")
+
+    witness = object()
+    scheduler = Scheduler()
+    effect_runtime: EffectRuntime | None = None
+    effect_binding_digest = ""
+
+    def effect_binding(**kwargs: Any) -> object:
+        nonlocal effect_binding_digest
+        assert sequence[-1] == "registry_closed"
+        snapshot = original_effect_binding(**kwargs)
+        assert [item.tool_id for item in snapshot.bindings] == [
+            "obsidian_create_note",
+            "obsidian_append_note",
+        ]
+        effect_binding_digest = snapshot.digest_hex()
+        sequence.append("effect_binding_loaded")
+        return snapshot
+
+    def load_maturity(*_args: Any, **kwargs: Any) -> tuple[object, dict[str, object]]:
+        assert sequence[-1] == "effect_binding_loaded"
+        assert kwargs["binding_snapshot"].digest_hex() != effect_binding_digest
+        assert kwargs["effect_binding_snapshot"].digest_hex() == effect_binding_digest
+        sequence.append("maturity_loaded")
+        return witness, {"maturity_accepted": True}
+
+    def build_effect(
+        _settings: Any,
+        primary: Any,
+        received_scheduler: Any,
+        storage: Any,
+        received_witness: Any,
+    ) -> EffectRuntime:
+        nonlocal effect_runtime
+        assert received_scheduler is scheduler
+        assert storage is not None
+        assert received_witness is witness
+        assert sequence[-1] == "maturity_loaded"
+        sequence.append("effect_composed")
+        effect_runtime = EffectRuntime(primary)
+        return effect_runtime
+
+    monkeypatch.setattr(server, "build_secondary_brain", lambda _settings: scheduler)
+    monkeypatch.setattr(
+        server,
+        "_load_semantic_supervisor_activation_material",
+        lambda *_args: (None, None),
+    )
+    monkeypatch.setattr(server.ExecutionKernel, "assert_risk_declarations_agree", registry_assert)
+    monkeypatch.setattr(server, "operational_effect_capability_snapshot", effect_binding)
+    monkeypatch.setattr(server, "load_configured_supervisor_effect_maturity", load_maturity)
+    monkeypatch.setattr(server, "build_supervisor_effect_intent_runtime", build_effect)
+    configured = replace(
+        settings,
+        semantic_supervisor_mode="off",
+        semantic_supervisor_effect_mode="shadow",
+        semantic_supervisor_effect_evidence_file="/private/maturity.json",
+        semantic_supervisor_effect_evidence_sha256="a" * 64,
+        obsidian_enabled=True,
+    )
+
+    app = server.create_app(configured)
+    with TestClient(app) as client:
+        assert effect_runtime is not None
+        assert app.state.agent is effect_runtime
+        assert app.state.semantic_supervisor_effect_runtime is effect_runtime
+        effect = client.get("/api/health").json()["semantic_supervisor_effect"]
+        assert effect == {
+            "schema": "friday.semantic-supervisor-effect-shadow-health.v1",
+            "installed": True,
+            "requested_mode": "shadow",
+            "effective_mode": "shadow",
+            "maturity_accepted": True,
+            "evidence_sha256": "a" * 64,
+            "maturity_facts_sha256": "b" * 64,
+            "source_revision_sha256": "c" * 64,
+            "registry_binding_sha256": "d" * 64,
+            "effect_registry_binding_sha256": "e" * 64,
+            "policy_id": semantic_supervisor_policy.SUPERVISOR_EFFECT_SHADOW_POLICY_ID,
+            "policy_sha256": semantic_supervisor_policy.SUPERVISOR_EFFECT_SHADOW_POLICY_SHA256,
+            "execution_authorized": False,
+            "publication_authorized": False,
+        }
+        maturity_index = sequence.index("maturity_loaded")
+        assert sequence[maturity_index - 2 : maturity_index + 3] == [
+            "registry_closed",
+            "effect_binding_loaded",
+            "maturity_loaded",
+            "effect_composed",
+            "secondary_started",
+        ]
+
+    assert effect_runtime.closed == 1
+    assert sequence.index("effect_closed") < sequence.index("secondary_closed")
+
+
+def test_effect_shadow_default_off_never_loads_optional_activation(
+    settings: Any,
+    monkeypatch: Any,
+) -> None:
+    import friday.server as server
+
+    def forbidden(*_args: Any, **_kwargs: Any) -> Any:
+        raise AssertionError("default-off effect activation must stay lazy")
+
+    monkeypatch.setattr(
+        server,
+        "_load_semantic_supervisor_activation_material",
+        lambda *_args: (None, None),
+    )
+    monkeypatch.setattr(server, "operational_capability_snapshot", forbidden)
+    monkeypatch.setattr(server, "operational_effect_capability_snapshot", forbidden)
+    monkeypatch.setattr(server, "load_configured_supervisor_effect_maturity", forbidden)
+    monkeypatch.setattr(server, "build_supervisor_effect_intent_runtime", forbidden)
+
+    app = server.create_app(replace(settings, semantic_supervisor_effect_mode="off"))
+    with TestClient(app) as client:
+        status = client.get("/api/health").json()["semantic_supervisor_effect"]
+        assert app.state.semantic_supervisor_effect_runtime is None
+        assert status["installed"] is False
+        assert status["requested_mode"] == "off"
+        assert status["effective_mode"] == "off"
+        assert status["maturity_accepted"] is False
+
+
+def test_effect_shadow_with_disabled_obsidian_fails_off_without_loading_evidence(
+    settings: Any,
+    monkeypatch: Any,
+) -> None:
+    import friday.server as server
+
+    monkeypatch.setattr(
+        server,
+        "_load_semantic_supervisor_activation_material",
+        lambda *_args: (None, None),
+    )
+
+    def forbidden(*_args: Any, **_kwargs: Any) -> Any:
+        raise AssertionError("disabled Obsidian must close before maturity loading")
+
+    monkeypatch.setattr(server, "load_configured_supervisor_effect_maturity", forbidden)
+    configured = replace(
+        settings,
+        semantic_supervisor_effect_mode="shadow",
+        semantic_supervisor_effect_evidence_file="/private/maturity.json",
+        semantic_supervisor_effect_evidence_sha256="a" * 64,
+        obsidian_enabled=False,
+    )
+
+    app = server.create_app(configured)
+    with TestClient(app) as client:
+        status = client.get("/api/health").json()["semantic_supervisor_effect"]
+        assert app.state.semantic_supervisor_effect_runtime is None
+        assert status["requested_mode"] == "shadow"
+        assert status["effective_mode"] == "off"
+        assert status["maturity_accepted"] is False
+        assert status["registry_binding_sha256"] == ""
+        assert status["effect_registry_binding_sha256"] == ""
+
+
+@pytest.mark.parametrize("failure_point", ["binding", "maturity", "composition"])
+def test_effect_shadow_activation_failure_never_blocks_server_startup(
+    settings: Any,
+    monkeypatch: Any,
+    failure_point: str,
+) -> None:
+    import friday.server as server
+
+    monkeypatch.setattr(
+        server,
+        "_load_semantic_supervisor_activation_material",
+        lambda *_args: (None, None),
+    )
+
+    def binding(**_kwargs: Any) -> object:
+        if failure_point == "binding":
+            raise RuntimeError("synthetic binding failure")
+        return object()
+
+    def maturity(*_args: Any, **_kwargs: Any) -> tuple[object, dict[str, object]]:
+        if failure_point == "maturity":
+            raise RuntimeError("synthetic maturity failure")
+        return object(), {
+            "installed": False,
+            "requested_mode": "shadow",
+            "effective_mode": "off",
+            "maturity_accepted": True,
+        }
+
+    def composition(*_args: Any, **_kwargs: Any) -> Any:
+        if failure_point == "composition":
+            raise RuntimeError("synthetic composition failure")
+        raise AssertionError("composition is unreachable before its selected failure")
+
+    monkeypatch.setattr(server, "operational_effect_capability_snapshot", binding)
+    monkeypatch.setattr(server, "load_configured_supervisor_effect_maturity", maturity)
+    monkeypatch.setattr(server, "build_supervisor_effect_intent_runtime", composition)
+    configured = replace(
+        settings,
+        semantic_supervisor_effect_mode="shadow",
+        semantic_supervisor_effect_evidence_file="/private/maturity.json",
+        semantic_supervisor_effect_evidence_sha256="a" * 64,
+    )
+
+    app = server.create_app(configured)
+    with TestClient(app) as client:
+        status = client.get("/api/health").json()["semantic_supervisor_effect"]
+        assert app.state.semantic_supervisor_effect_runtime is None
+        assert status["installed"] is False
+        assert status["requested_mode"] == "shadow"
+        assert status["effective_mode"] == "off"
+        assert status["maturity_accepted"] is False
+
+
 def test_promotion_settings_without_loaded_material_remain_discarded_shadow(
     settings: Any,
     monkeypatch: Any,

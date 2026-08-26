@@ -127,6 +127,7 @@ from friday.orchestration.archive_read import V12ArchiveReadHandler
 from friday.orchestration.capability_binding import (
     CapabilityBindingSnapshot,
     operational_capability_snapshot,
+    operational_effect_capability_snapshot,
 )
 from friday.orchestration.file_read import V12FileReadHandler
 from friday.orchestration.semantic_supervisor_runtime import build_semantic_supervisor_runtime
@@ -153,6 +154,11 @@ from friday.orchestration.supervisor_assist_production import (
     supervisor_assist_read_only_effect_gate,
 )
 from friday.orchestration.supervisor_contracts import SupervisorMode
+from friday.orchestration.supervisor_effect_intent_runtime import (
+    build_supervisor_effect_intent_runtime,
+    load_configured_supervisor_effect_maturity,
+    supervisor_effect_shadow_health_status,
+)
 from friday.organs import ServiceContext, build_registry, local_now, resolve_chat_id
 from friday.organs.obsidian.conversation import (
     obsidian_conversation_intent,
@@ -2673,6 +2679,61 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
             for tool in organs.tools(organ_ctx):
                 kernel.register(tool)
             kernel.assert_risk_declarations_agree()
+            # P5 observes only the final durable outcome of a capability that
+            # has actually been registered.  Load its exact current-release
+            # maturity witness and install the non-owning wrapper only after
+            # the first-party Obsidian organ's capability/tool contour and
+            # risk declarations have closed.  Later workspace MCP tools are
+            # deliberately outside this effect-registry identity.
+            effect_agent = agent
+            effect_shadow_activation_status = supervisor_effect_shadow_health_status(
+                None,
+                None,
+                settings,
+            )
+            if settings.semantic_supervisor_effect_mode == "shadow":
+                try:
+                    effect_read_binding_snapshot = operational_capability_snapshot()
+                    effect_binding_snapshot = operational_effect_capability_snapshot(
+                        settings=settings,
+                        kernel=kernel,
+                        authorization=auth_service,
+                        obsidian_runtime=obsidian_runtime,
+                    )
+                    (
+                        effect_maturity,
+                        effect_shadow_activation_status,
+                    ) = load_configured_supervisor_effect_maturity(
+                        settings,
+                        installed_release_root=Path(__file__).resolve(strict=True).parents[1],
+                        binding_snapshot=effect_read_binding_snapshot,
+                        effect_binding_snapshot=effect_binding_snapshot,
+                    )
+                    effect_agent = build_supervisor_effect_intent_runtime(
+                        settings,
+                        agent,
+                        secondary_brain,
+                        storage,
+                        effect_maturity,
+                    )
+                except Exception as exc:
+                    # This observer is optional by construction.  A registry,
+                    # evidence, or composition defect must close only the
+                    # observer and must never become an application boot gate.
+                    effect_agent = agent
+                    effect_shadow_activation_status = supervisor_effect_shadow_health_status(
+                        None,
+                        None,
+                        settings,
+                    )
+                    LOGGER.warning(
+                        "Semantic supervisor effect shadow unavailable (%s)",
+                        type(exc).__name__,
+                    )
+            semantic_supervisor_effect_runtime = (
+                cast(_AsyncClosableRuntime, effect_agent) if effect_agent is not agent else None
+            )
+            agent = effect_agent
             organ_workers = [
                 IntervalTask(
                     name=worker.name,
@@ -2724,6 +2785,8 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
             application.state.agent = agent
             application.state.orchestration_agent = orchestrated_agent
             application.state.semantic_supervisor_runtime = semantic_supervisor_runtime
+            application.state.semantic_supervisor_effect_runtime = semantic_supervisor_effect_runtime
+            application.state.semantic_supervisor_effect_activation = effect_shadow_activation_status
             application.state.semantic_supervisor_activation = semantic_supervisor_activation
             application.state.semantic_supervisor_binding_snapshot = semantic_supervisor_binding_snapshot
             application.state.v12_model_runtime = attempted_v12_runtime
@@ -2753,6 +2816,10 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
                 except BaseException:
                     if mcp_manager is not None:
                         await mcp_manager.close()
+                    if semantic_supervisor_effect_runtime is not None:
+                        await semantic_supervisor_effect_runtime.close()
+                    if semantic_supervisor_runtime is not None:
+                        await semantic_supervisor_runtime.close()
                     await secondary_brain.aclose()
                     if obsidian_runtime is not None:
                         await obsidian_runtime.close()
@@ -2763,6 +2830,10 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
             except BaseException:
                 if mcp_manager is not None:
                     await mcp_manager.close()
+                if semantic_supervisor_effect_runtime is not None:
+                    await semantic_supervisor_effect_runtime.close()
+                if semantic_supervisor_runtime is not None:
+                    await semantic_supervisor_runtime.close()
                 await secondary_brain.aclose()
                 if obsidian_runtime is not None:
                     await obsidian_runtime.close()
@@ -2772,18 +2843,22 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
                 yield
             finally:
                 try:
-                    if semantic_supervisor_runtime is not None:
-                        await semantic_supervisor_runtime.close()
+                    if semantic_supervisor_effect_runtime is not None:
+                        await semantic_supervisor_effect_runtime.close()
                 finally:
-                    if isinstance(orchestrated_agent, OrchestrationRouter):
-                        await orchestrated_agent.close()
-                    await workers.stop()
-                    await secondary_brain.aclose()
-                    if obsidian_runtime is not None:
-                        await obsidian_runtime.close()
-                    await web_surfer.close()
-                    if mcp_manager is not None:
-                        await mcp_manager.close()
+                    try:
+                        if semantic_supervisor_runtime is not None:
+                            await semantic_supervisor_runtime.close()
+                    finally:
+                        if isinstance(orchestrated_agent, OrchestrationRouter):
+                            await orchestrated_agent.close()
+                        await workers.stop()
+                        await secondary_brain.aclose()
+                        if obsidian_runtime is not None:
+                            await obsidian_runtime.close()
+                        await web_surfer.close()
+                        if mcp_manager is not None:
+                            await mcp_manager.close()
                 # workers.stop() only cancels the asyncio tasks; a worker cancelled
                 # while awaiting asyncio.to_thread(storage.<db op>) leaves that call
                 # still running on the default executor thread.
@@ -3093,6 +3168,16 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
             "semantic_supervisor_activation",
             None,
         )
+        semantic_supervisor_effect_runtime = getattr(
+            request.app.state,
+            "semantic_supervisor_effect_runtime",
+            None,
+        )
+        semantic_supervisor_effect_activation = getattr(
+            request.app.state,
+            "semantic_supervisor_effect_activation",
+            None,
+        )
         runtime = getattr(request.app.state, "v12_model_runtime", None)
         secondary_brain = getattr(request.app.state, "secondary_brain", None)
         gate_status = (
@@ -3136,6 +3221,15 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
                     )
                     else None
                 ),
+            ),
+            "semantic_supervisor_effect": supervisor_effect_shadow_health_status(
+                semantic_supervisor_effect_runtime,
+                (
+                    semantic_supervisor_effect_activation
+                    if isinstance(semantic_supervisor_effect_activation, Mapping)
+                    else None
+                ),
+                settings,
             ),
             "profile": settings.profile.name,
             "memory_vault": {
@@ -5368,7 +5462,7 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
 
             with bind_failure_trace_scope(failure_scope):
                 semantic_supervisor_kwargs: dict[str, object] = {}
-                if getattr(state, "semantic_supervisor_runtime", None) is state.agent:
+                if getattr(state, "semantic_supervisor_runtime", None) is not None:
                     semantic_supervisor_kwargs["_semantic_supervisor_explicit_mode_requested"] = (
                         explicit_mode_requested
                     )

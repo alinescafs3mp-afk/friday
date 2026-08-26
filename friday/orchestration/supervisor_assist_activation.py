@@ -75,6 +75,9 @@ _ASSIST_POLICY_SHA256 = semantic_supervisor_policy.SUPERVISOR_ASSIST_PRODUCT_POL
 _P1_PROFILE_ID = semantic_supervisor_policy.SUPERVISOR_RUNTIME_PROFILE_ID
 _P1_PROFILE_MANIFEST_SHA256 = semantic_supervisor_policy.SUPERVISOR_RUNTIME_PROFILE_MANIFEST_SHA256
 _P1_WORKLOAD = semantic_supervisor_policy.SUPERVISOR_WORKLOAD
+_EFFECT_POLICY_ID = semantic_supervisor_policy.SUPERVISOR_EFFECT_SHADOW_POLICY_ID
+_EFFECT_POLICY_SHA256 = semantic_supervisor_policy.SUPERVISOR_EFFECT_SHADOW_POLICY_SHA256
+_EFFECT_WORKLOAD = semantic_supervisor_policy.SUPERVISOR_EFFECT_WORKLOAD
 
 _PUBLIC_STATUS_KEYS = frozenset(
     {
@@ -86,6 +89,7 @@ _PUBLIC_STATUS_KEYS = frozenset(
         "state",
         "available",
         "semantic_supervisor",
+        "effect_shadow",
     }
 )
 _SUPERVISOR_STATUS_KEYS = frozenset(
@@ -100,6 +104,7 @@ _SUPERVISOR_STATUS_KEYS = frozenset(
         "closed_reason",
     }
 )
+_EFFECT_STATUS_KEYS = _SUPERVISOR_STATUS_KEYS
 _EVIDENCE_KEYS = frozenset(
     {
         "schema",
@@ -319,9 +324,7 @@ class AssistPromotionActivationMaterial:
             ):
                 raise ValueError("accepted latency budget identity does not match material")
         if self.accepted_representative_window is not None and not (
-            is_accepted_representative_window_attestation(
-                self.accepted_representative_window
-            )
+            is_accepted_representative_window_attestation(self.accepted_representative_window)
         ):
             raise TypeError("representative-window witness must be process accepted")
 
@@ -342,9 +345,7 @@ class AssistPromotionActivationMaterial:
             "evidence_loaded": evidence is not None,
             "evidence_authority": (evidence.evidence.authority.value if evidence is not None else "none"),
             "operator_gate_enabled": self.operator_gate.enabled,
-            "representative_window_verified": (
-                self.accepted_representative_window is not None
-            ),
+            "representative_window_verified": (self.accepted_representative_window is not None),
             "canary_actor_binding_count": len(self.operator_gate.canary_actor_bindings),
             "promotion_admitted": False,
             "evidence_accepted": False,
@@ -686,9 +687,7 @@ def parse_assist_promotion_live_evidence(
             baseline_file_sha256=decoded["baseline_file_sha256"],
             baseline_report_sha256=decoded["baseline_report_sha256"],
             operator_attestation_sha256=decoded["operator_attestation_sha256"],
-            precursor_assist_promotion_evidence_sha256=decoded[
-                "precursor_assist_promotion_evidence_sha256"
-            ],
+            precursor_assist_promotion_evidence_sha256=decoded["precursor_assist_promotion_evidence_sha256"],
             max_steps=decoded["max_steps"],
             max_review_rounds=decoded["max_review_rounds"],
             observation_count=decoded["observation_count"],
@@ -778,15 +777,46 @@ def scheduler_admission_snapshot_from_status(
         raise AssistPromotionActivationError(reason)
     supervisor = _mapping(public.get("semantic_supervisor"), reason=reason)
     diagnostic_supervisor = _mapping(diagnostics.get("semantic_supervisor"), reason=reason)
+    effect_shadow = _mapping(public.get("effect_shadow"), reason=reason)
+    diagnostic_effect_shadow = _mapping(diagnostics.get("effect_shadow"), reason=reason)
     workloads = _mapping(diagnostics.get("workloads"), reason=reason)
     plan_workload = _mapping(workloads.get(_P1_WORKLOAD), reason=reason)
-    if set(supervisor) != _SUPERVISOR_STATUS_KEYS or dict(diagnostic_supervisor) != dict(supervisor):
+    if (
+        set(supervisor) != _SUPERVISOR_STATUS_KEYS
+        or dict(diagnostic_supervisor) != dict(supervisor)
+        or set(effect_shadow) != _EFFECT_STATUS_KEYS
+        or dict(diagnostic_effect_shadow) != dict(effect_shadow)
+    ):
         raise AssistPromotionActivationError(reason)
     for key in _PUBLIC_STATUS_KEYS:
-        if key == "semantic_supervisor":
+        if key in {"semantic_supervisor", "effect_shadow"}:
             continue
         if diagnostics.get(key) != public.get(key):
             raise AssistPromotionActivationError(reason)
+    effect_requested_mode = effect_shadow.get("requested_mode")
+    effect_runtime_available = effect_shadow.get("runtime_available")
+    effect_is_off = (
+        effect_requested_mode == "off"
+        and effect_shadow.get("effective_mode") == "off"
+        and effect_shadow.get("workload_available") is False
+        and effect_runtime_available is False
+        and effect_shadow.get("closed_reason") == "mode_off"
+    )
+    effect_is_admitted = (
+        effect_requested_mode == "shadow"
+        and effect_shadow.get("effective_mode") == "shadow"
+        and effect_shadow.get("workload_available") is True
+        and type(effect_runtime_available) is bool
+        and effect_runtime_available is public.get("available")
+        and effect_shadow.get("closed_reason") == "admitted"
+    )
+    if (
+        effect_shadow.get("workload") != _EFFECT_WORKLOAD
+        or effect_shadow.get("policy_id") != _EFFECT_POLICY_ID
+        or effect_shadow.get("policy_sha256") != _EFFECT_POLICY_SHA256
+        or not (effect_is_off or effect_is_admitted)
+    ):
+        raise AssistPromotionActivationError(AssistPromotionActivationReason.SCHEDULER_IDENTITY_MISMATCH)
     runtime_available = supervisor.get("runtime_available")
     if (
         public.get("schema") != "friday.optional-secondary-health.v1"
@@ -1004,9 +1034,7 @@ def _representative_window_identity_matches(
     if type(server) is not dict:
         return False
     expected_observed = (
-        SupervisorMode.SHADOW
-        if requested_mode is SupervisorMode.ASSIST
-        else SupervisorMode.ASSIST
+        SupervisorMode.SHADOW if requested_mode is SupervisorMode.ASSIST else SupervisorMode.ASSIST
     )
     return bool(
         witness.target_mode is requested_mode
@@ -1039,12 +1067,12 @@ def _representative_window_identity_matches(
         )
         and witness.precursor_assist_promotion_evidence_sha256
         == evidence.precursor_assist_promotion_evidence_sha256
-        and issue.get("server_attestation_sha256")
-        == witness.server_attestation_sha256
+        and issue.get("server_attestation_sha256") == witness.server_attestation_sha256
         and server.get("observer_runner_sha256") == witness.observer_runner_sha256
-        and server.get("representative_window_sha256")
-        == witness.representative_window_sha256
+        and server.get("representative_window_sha256") == witness.representative_window_sha256
     )
+
+
 def load_assist_promotion_activation(
     raw: RawAssistPromotionActivationSettings,
     *,
@@ -1073,9 +1101,7 @@ def load_assist_promotion_activation(
         raise TypeError("scheduler status projections must be mappings")
     if not isinstance(binding_snapshot, CapabilityBindingSnapshot):
         raise TypeError("binding_snapshot must be typed")
-    if representative_window_verifier is not None and not callable(
-        representative_window_verifier
-    ):
+    if representative_window_verifier is not None and not callable(representative_window_verifier):
         raise TypeError("representative-window verifier must be callable")
 
     if raw.enabled is False:
@@ -1191,9 +1217,7 @@ def load_assist_promotion_activation(
             hashlib.sha256(bundle_raw).hexdigest(),
             expected_evidence_sha256,
         ):
-            raise AssistPromotionActivationError(
-                AssistPromotionActivationReason.EVIDENCE_DIGEST_MISMATCH
-            )
+            raise AssistPromotionActivationError(AssistPromotionActivationReason.EVIDENCE_DIGEST_MISMATCH)
         accepted_bundle = load_accepted_supervisor_promotion_bundle(
             bundle_raw,
             expected_file_sha256=expected_evidence_sha256,

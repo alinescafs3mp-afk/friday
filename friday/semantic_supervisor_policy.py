@@ -47,6 +47,10 @@ SUPERVISOR_PRIMARY_MODEL_CALLS = 2
 SUPERVISOR_PLANNING_OUTPUT_TOKENS = 512
 SUPERVISOR_PRIMARY_OUTPUT_TOKENS = 1_024
 SUPERVISOR_REVIEW_OUTPUT_TOKENS = 256
+SUPERVISOR_EFFECT_SHADOW_POLICY_SCHEMA = "friday.supervisor-effect-shadow-policy.v1"
+SUPERVISOR_EFFECT_SHADOW_POLICY_ID = "gptoss20b-semantic-supervisor-effect-shadow-v1"
+SUPERVISOR_EFFECT_WORKLOAD = "effect_planning"
+SUPERVISOR_EFFECT_SHADOW_OUTPUT_TOKENS = 128
 
 
 def _canonical_sha256(value: object) -> str:
@@ -88,9 +92,7 @@ _EXPECTED_SUPERVISOR_PRODUCT_POLICY: Mapping[str, object] = MappingProxyType(
         "max_capability_calls": SUPERVISOR_MAX_CAPABILITY_CALLS,
         "max_review_rounds": 0,
         "max_recovery_rounds": 0,
-        "max_output_tokens": (
-            SUPERVISOR_PLANNING_OUTPUT_TOKENS + SUPERVISOR_PRIMARY_OUTPUT_TOKENS
-        ),
+        "max_output_tokens": (SUPERVISOR_PLANNING_OUTPUT_TOKENS + SUPERVISOR_PRIMARY_OUTPUT_TOKENS),
         "promotion_admitted": False,
         "primary_fallback_required": True,
     }
@@ -142,9 +144,40 @@ _EXPECTED_SUPERVISOR_ASSIST_PRODUCT_POLICY: Mapping[str, object] = MappingProxyT
 SUPERVISOR_ASSIST_PRODUCT_POLICY: Mapping[str, object] = MappingProxyType(
     dict(_EXPECTED_SUPERVISOR_ASSIST_PRODUCT_POLICY)
 )
-SUPERVISOR_ASSIST_PRODUCT_POLICY_SHA256 = _canonical_sha256(
-    dict(_EXPECTED_SUPERVISOR_ASSIST_PRODUCT_POLICY)
+SUPERVISOR_ASSIST_PRODUCT_POLICY_SHA256 = _canonical_sha256(dict(_EXPECTED_SUPERVISOR_ASSIST_PRODUCT_POLICY))
+
+_EXPECTED_SUPERVISOR_EFFECT_SHADOW_POLICY: Mapping[str, object] = MappingProxyType(
+    {
+        "schema": SUPERVISOR_EFFECT_SHADOW_POLICY_SCHEMA,
+        "policy_id": SUPERVISOR_EFFECT_SHADOW_POLICY_ID,
+        "status": "maturity_gated_shadow",
+        "runtime_profile_id": SUPERVISOR_RUNTIME_PROFILE_ID,
+        "runtime_profile_manifest_sha256": SUPERVISOR_RUNTIME_PROFILE_MANIFEST_SHA256,
+        "runtime_profile_admission": "accepted",
+        "runtime_recertification": False,
+        "workload": SUPERVISOR_EFFECT_WORKLOAD,
+        "requested_modes": ("shadow",),
+        "effective_mode": "shadow",
+        # A secret-free semantic projection can still contain ordinary private
+        # user prose.  It therefore uses only the explicitly private-capable
+        # admitted profile; lexical hygiene is not a declassification step.
+        "contains_private_text": True,
+        "priority": "background",
+        "effect_class": "none",
+        "tools_allowed": False,
+        "effects_allowed": False,
+        "publication_allowed": False,
+        "knowledge_writes_allowed": False,
+        "max_model_calls": 1,
+        "max_output_tokens": SUPERVISOR_EFFECT_SHADOW_OUTPUT_TOKENS,
+        "maturity_witness_required": True,
+        "primary_result_unchanged": True,
+    }
 )
+SUPERVISOR_EFFECT_SHADOW_POLICY: Mapping[str, object] = MappingProxyType(
+    dict(_EXPECTED_SUPERVISOR_EFFECT_SHADOW_POLICY)
+)
+SUPERVISOR_EFFECT_SHADOW_POLICY_SHA256 = _canonical_sha256(dict(_EXPECTED_SUPERVISOR_EFFECT_SHADOW_POLICY))
 
 
 class SupervisorPolicyClosedReason(StrEnum):
@@ -173,6 +206,18 @@ class SupervisorPolicyAdmission:
     policy_id: str
     policy_sha256: str
     admitted_tasks: frozenset[str]
+    workload_available: bool
+    closed_reason: SupervisorPolicyClosedReason
+
+
+@dataclass(frozen=True, slots=True)
+class SupervisorEffectShadowPolicyAdmission:
+    """Independent scheduler admission for the P5 advisory-only workload."""
+
+    requested_mode: str
+    effective_mode: str
+    policy_id: str
+    policy_sha256: str
     workload_available: bool
     closed_reason: SupervisorPolicyClosedReason
 
@@ -248,9 +293,7 @@ def supervisor_product_policy_identity_for_mode(
         max_capability_calls=SUPERVISOR_MAX_CAPABILITY_CALLS,
         max_review_rounds=0,
         max_recovery_rounds=0,
-        max_output_tokens=(
-            SUPERVISOR_PLANNING_OUTPUT_TOKENS + SUPERVISOR_PRIMARY_OUTPUT_TOKENS
-        ),
+        max_output_tokens=(SUPERVISOR_PLANNING_OUTPUT_TOKENS + SUPERVISOR_PRIMARY_OUTPUT_TOKENS),
     )
 
 
@@ -311,6 +354,88 @@ def supervisor_assist_product_policy_is_well_formed(
         )
     except (AttributeError, TypeError, ValueError):
         return False
+
+
+def supervisor_effect_shadow_policy_is_well_formed(
+    policy: Mapping[str, object] | None = None,
+) -> bool:
+    """Verify the separate P5 workload overlay without granting maturity."""
+
+    candidate = SUPERVISOR_EFFECT_SHADOW_POLICY if policy is None else policy
+    try:
+        return bool(
+            dict(candidate) == dict(_EXPECTED_SUPERVISOR_EFFECT_SHADOW_POLICY)
+            and _canonical_sha256(dict(candidate)) == SUPERVISOR_EFFECT_SHADOW_POLICY_SHA256
+            and candidate.get("runtime_recertification") is False
+            and candidate.get("effects_allowed") is False
+            and candidate.get("publication_allowed") is False
+        )
+    except (AttributeError, TypeError, ValueError):
+        return False
+
+
+def evaluate_supervisor_effect_shadow_policy_admission(
+    *,
+    requested_mode: object,
+    secondary_runtime_state: str,
+    profile_admission: str,
+    runtime_profile_id: str,
+    runtime_profile_manifest_sha256: str,
+    allow_private_text: object,
+) -> SupervisorEffectShadowPolicyAdmission:
+    """Admit only the independent, lowest-priority P5 shadow transport lane.
+
+    This decision deliberately does not accept a maturity witness.  The
+    production wrapper must independently hold a process-accepted witness
+    before it may submit work to this lane.
+    """
+
+    raw_mode = str(requested_mode or "").strip().casefold()
+    normalized_mode = raw_mode if raw_mode in {"off", "shadow"} else "invalid"
+    reason = SupervisorPolicyClosedReason.ADMITTED
+    if normalized_mode == "off":
+        reason = SupervisorPolicyClosedReason.MODE_OFF
+    elif normalized_mode == "invalid":
+        reason = SupervisorPolicyClosedReason.INVALID_MODE
+    elif not supervisor_effect_shadow_policy_is_well_formed():
+        reason = SupervisorPolicyClosedReason.POLICY_INVALID
+    elif allow_private_text is not True:
+        reason = SupervisorPolicyClosedReason.PRIVATE_TEXT_REQUIRED
+    elif secondary_runtime_state == "disabled":
+        reason = SupervisorPolicyClosedReason.SECONDARY_DISABLED
+    elif profile_admission != "accepted":
+        reason = SupervisorPolicyClosedReason.ACCEPTED_PROFILE_REQUIRED
+    elif (
+        runtime_profile_id != SUPERVISOR_RUNTIME_PROFILE_ID
+        or runtime_profile_manifest_sha256 != SUPERVISOR_RUNTIME_PROFILE_MANIFEST_SHA256
+    ):
+        reason = SupervisorPolicyClosedReason.RUNTIME_PROFILE_MISMATCH
+    elif secondary_runtime_state != "configured":
+        reason = SupervisorPolicyClosedReason.SECONDARY_MISCONFIGURED
+    return SupervisorEffectShadowPolicyAdmission(
+        requested_mode=normalized_mode,
+        effective_mode=("shadow" if reason is SupervisorPolicyClosedReason.ADMITTED else "off"),
+        policy_id=SUPERVISOR_EFFECT_SHADOW_POLICY_ID,
+        policy_sha256=SUPERVISOR_EFFECT_SHADOW_POLICY_SHA256,
+        workload_available=reason is SupervisorPolicyClosedReason.ADMITTED,
+        closed_reason=reason,
+    )
+
+
+def disabled_supervisor_effect_shadow_policy_admission(
+    *,
+    requested_mode: str = "off",
+) -> SupervisorEffectShadowPolicyAdmission:
+    """Return a constructor-safe closed P5 default."""
+
+    return evaluate_supervisor_effect_shadow_policy_admission(
+        requested_mode=requested_mode,
+        secondary_runtime_state="disabled",
+        profile_admission="",
+        runtime_profile_id="",
+        runtime_profile_manifest_sha256="",
+        allow_private_text=False,
+    )
 
 
 def evaluate_supervisor_policy_admission(
@@ -407,9 +532,7 @@ def disabled_supervisor_policy_admission(
         requested_mode=requested_mode,
         task_allowlist=(),
         max_steps=6,
-        max_review_rounds=supervisor_product_policy_identity_for_mode(
-            requested_mode
-        ).max_review_rounds,
+        max_review_rounds=supervisor_product_policy_identity_for_mode(requested_mode).max_review_rounds,
         timeout_sec=12.0,
         allow_private_text=False,
         secondary_runtime_state="disabled",

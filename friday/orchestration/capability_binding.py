@@ -27,6 +27,13 @@ from friday.permissions import AuthorizationService, CapabilityDefinition
 
 _DIGEST = re.compile(r"[0-9a-f]{64}\Z")
 
+_OBSIDIAN_EFFECT_SECURITY_ID = "obsidian.write"
+_OBSIDIAN_EFFECT_TOOL_RISK = "mutate"
+_OBSIDIAN_EFFECT_CONTOURS = (
+    ("obsidian_note_mutation:create", "create", "obsidian_create_note"),
+    ("obsidian_note_mutation:append", "append", "obsidian_append_note"),
+)
+
 
 def _qualified_name(value: object) -> str:
     module = str(getattr(value, "__module__", "") or "")
@@ -323,6 +330,238 @@ def operational_capability_snapshot() -> CapabilityBindingSnapshot:
             ),
         )
     )
+
+
+def _handler_binds_runtime(handler: object, runtime: object) -> bool:
+    """Prove that one code-owned closure targets this exact runtime instance."""
+
+    code = getattr(handler, "__code__", None)
+    closure = getattr(handler, "__closure__", None)
+    if code is None or not isinstance(closure, tuple) or len(code.co_freevars) != len(closure):
+        return False
+    for name, cell in zip(code.co_freevars, closure, strict=True):
+        if name != "runtime":
+            continue
+        try:
+            return cell.cell_contents is runtime
+        except ValueError:
+            return False
+    return False
+
+
+def _effect_tool_identity_payload(
+    tool: object,
+    *,
+    action: str,
+    manifest_sha256: str,
+) -> dict[str, Any]:
+    handler = getattr(tool, "handler", None)
+    approval_predicate = getattr(tool, "approval_predicate", None)
+    return {
+        "schema": "friday.supervisor-effect-operational-contour-binding.v1",
+        "body_free": True,
+        "capability": "obsidian_note_mutation",
+        "action": action,
+        "symbol_manifest_sha256": manifest_sha256,
+        "kernel_id": "friday.execution_kernel.ExecutionKernel",
+        "authorization_id": "friday.permissions.AuthorizationService",
+        "runtime_id": "friday.organs.obsidian.runtime.ObsidianRuntime",
+        "tool_id": str(getattr(tool, "name", "") or ""),
+        "security_id": str(getattr(tool, "security_id", "") or ""),
+        "effect_class": CapabilityEffectClass.WRITE.value,
+        "risk": str(getattr(tool, "risk", "") or ""),
+        "description_sha256": canonical_sha256(str(getattr(tool, "description", "") or "")),
+        "input_schema_sha256": canonical_sha256(getattr(tool, "parameters", {})),
+        "handler_id": _qualified_name(handler),
+        "allowed_execution_scopes": sorted(getattr(tool, "allowed_execution_scopes", ())),
+        "timeout_sec": getattr(tool, "timeout_sec", None),
+        "model_visible": getattr(tool, "model_visible", None),
+        "approval_predicate_id": _qualified_name(approval_predicate),
+        "enabled": True,
+        "permission_registered": True,
+        "kernel_registered": True,
+        "runtime_bound": True,
+    }
+
+
+def expected_effect_capability_snapshot() -> CapabilityBindingSnapshot:
+    """Derive the stable code-owned P5 contour identity without activation."""
+
+    from friday.execution_kernel import ToolSpec
+    from friday.orchestration.supervisor_effect_intent import (
+        SUPERVISOR_EFFECT_SYMBOL_MANIFEST_SHA256,
+    )
+    from friday.organs import ServiceContext
+    from friday.organs.obsidian import OBSIDIAN_WRITE
+    from friday.organs.obsidian.runtime import ObsidianRuntime
+    from friday.organs.obsidian.tools import build_obsidian_tools
+
+    sentinel_runtime = object.__new__(ObsidianRuntime)
+    tools = {
+        tool.name: tool
+        for tool in build_obsidian_tools(
+            ServiceContext(
+                settings=object(),  # type: ignore[arg-type]
+                storage=object(),
+                kg=object(),
+                ingestion=object(),
+                obsidian=sentinel_runtime,
+            )
+        )
+        if tool.name in {item[2] for item in _OBSIDIAN_EFFECT_CONTOURS}
+    }
+    permission_digest = canonical_sha256(_permission_payload(OBSIDIAN_WRITE))
+    bindings: list[OperationalCapabilityBinding] = []
+    for capability_id, action, tool_name in _OBSIDIAN_EFFECT_CONTOURS:
+        tool = tools.get(tool_name)
+        if (
+            type(tool) is not ToolSpec
+            or tool.security_id != _OBSIDIAN_EFFECT_SECURITY_ID
+            or tool.risk != _OBSIDIAN_EFFECT_TOOL_RISK
+            or tool.model_visible is not True
+            or not callable(tool.handler)
+            or not _handler_binds_runtime(tool.handler, sentinel_runtime)
+        ):
+            raise SupervisorContractError("expected Obsidian effect contour is unavailable")
+        bindings.append(
+            OperationalCapabilityBinding(
+                supervisor_capability_id=capability_id,
+                effect_class=CapabilityEffectClass.WRITE,
+                security_id=_OBSIDIAN_EFFECT_SECURITY_ID,
+                tool_id=tool_name,
+                adapter_id=_qualified_name(tool.handler),
+                permission_identity_sha256=permission_digest,
+                adapter_identity_sha256=canonical_sha256(
+                    _effect_tool_identity_payload(
+                        tool,
+                        action=action,
+                        manifest_sha256=SUPERVISOR_EFFECT_SYMBOL_MANIFEST_SHA256,
+                    )
+                ),
+                permission_registered=True,
+                adapter_registered=True,
+            )
+        )
+    return CapabilityBindingSnapshot(bindings=tuple(bindings))
+
+
+def operational_effect_capability_snapshot(
+    *,
+    settings: object,
+    kernel: object,
+    authorization: object,
+    obsidian_runtime: object,
+) -> CapabilityBindingSnapshot:
+    """Bind P5 only to the enabled, registered Obsidian write contour.
+
+    Unlike the read-capability snapshot, this identity is captured from the
+    already composed production objects. No synthetic registry or import-level
+    declaration can make the effect observer available: both create and append
+    must be exact code-built tools registered in this kernel, backed by the
+    exact registered permission and exact Obsidian runtime instance. The
+    returned identity contains only closed symbols and digests.
+    """
+
+    try:
+        from friday.execution_kernel import ExecutionKernel, ToolSpec
+        from friday.orchestration.supervisor_effect_intent import (
+            SUPERVISOR_EFFECT_SYMBOL_MANIFEST_SHA256,
+        )
+        from friday.organs import ServiceContext
+        from friday.organs.obsidian import OBSIDIAN_WRITE
+        from friday.organs.obsidian.runtime import ObsidianRuntime
+        from friday.organs.obsidian.tools import build_obsidian_tools
+
+        obsidian_enabled = getattr(settings, "obsidian_enabled", None)
+        if (
+            type(obsidian_enabled) is not bool
+            or obsidian_enabled is not True
+            or type(kernel) is not ExecutionKernel
+            or type(authorization) is not AuthorizationService
+            or type(obsidian_runtime) is not ObsidianRuntime
+            or kernel.authorization is not authorization
+            or kernel.settings is not settings
+            or authorization.storage is None
+            or kernel.storage is not authorization.storage
+            or obsidian_runtime.settings is not settings
+            or obsidian_runtime.storage is not authorization.storage
+            or authorization.get_capability(_OBSIDIAN_EFFECT_SECURITY_ID) != OBSIDIAN_WRITE
+        ):
+            raise SupervisorContractError("Obsidian effect contour is not composed")
+
+        effect_tool_names = {item[2] for item in _OBSIDIAN_EFFECT_CONTOURS}
+        expected_tools = {
+            tool.name: tool
+            for tool in build_obsidian_tools(
+                ServiceContext(
+                    settings=settings,
+                    storage=authorization.storage,
+                    kg=kernel.kg,
+                    ingestion=kernel.ingestion,
+                    auth=authorization,
+                    obsidian=obsidian_runtime,
+                )
+            )
+            if tool.name in effect_tool_names
+        }
+        permission_digest = canonical_sha256(_permission_payload(OBSIDIAN_WRITE))
+        bindings: list[OperationalCapabilityBinding] = []
+        for capability_id, action, tool_name in _OBSIDIAN_EFFECT_CONTOURS:
+            tool = kernel.get_tool(tool_name)
+            expected = expected_tools.get(tool_name)
+            if (
+                type(tool) is not ToolSpec
+                or type(expected) is not ToolSpec
+                or tool.name != expected.name
+                or tool.description != expected.description
+                or tool.parameters != expected.parameters
+                or tool.security_id != _OBSIDIAN_EFFECT_SECURITY_ID
+                or tool.security_id != expected.security_id
+                or tool.risk != _OBSIDIAN_EFFECT_TOOL_RISK
+                or tool.risk != expected.risk
+                or tool.allowed_execution_scopes != expected.allowed_execution_scopes
+                or tool.timeout_sec != expected.timeout_sec
+                or tool.model_visible is not True
+                or tool.model_visible is not expected.model_visible
+                or tool.approval_predicate is not expected.approval_predicate
+                or not callable(tool.handler)
+                or not callable(expected.handler)
+                or tool.handler.__code__ is not expected.handler.__code__
+                or _qualified_name(tool.handler) != _qualified_name(expected.handler)
+                or not _handler_binds_runtime(tool.handler, obsidian_runtime)
+            ):
+                raise SupervisorContractError("Obsidian effect tool registry does not match")
+            adapter_payload = _effect_tool_identity_payload(
+                tool,
+                action=action,
+                manifest_sha256=SUPERVISOR_EFFECT_SYMBOL_MANIFEST_SHA256,
+            )
+            bindings.append(
+                OperationalCapabilityBinding(
+                    supervisor_capability_id=capability_id,
+                    effect_class=CapabilityEffectClass.WRITE,
+                    security_id=_OBSIDIAN_EFFECT_SECURITY_ID,
+                    tool_id=tool_name,
+                    adapter_id=_qualified_name(tool.handler),
+                    permission_identity_sha256=permission_digest,
+                    adapter_identity_sha256=canonical_sha256(adapter_payload),
+                    permission_registered=True,
+                    adapter_registered=True,
+                )
+            )
+        snapshot = CapabilityBindingSnapshot(bindings=tuple(bindings))
+        if len(snapshot.bindings) != len(_OBSIDIAN_EFFECT_CONTOURS) or not all(
+            binding.available and binding.effect_class is CapabilityEffectClass.WRITE
+            for binding in snapshot.bindings
+        ):
+            raise SupervisorContractError("Obsidian effect contour is incomplete")
+        if snapshot.digest_hex() != expected_effect_capability_snapshot().digest_hex():
+            raise SupervisorContractError("Obsidian effect contour identity does not match")
+        return snapshot
+    except SupervisorContractError:
+        raise
+    except (AttributeError, KeyError, TypeError, ValueError) as exc:
+        raise SupervisorContractError("Obsidian effect contour is unavailable") from exc
 
 
 def bind_manifest_to_snapshot(

@@ -17,6 +17,7 @@ from .client import SecondaryEndpointClient
 from .contracts import (
     ADVISORY_WORKLOADS,
     PLAN_CANDIDATE_LOCAL_FAILURES,
+    SEMANTIC_SHADOW_WORKLOADS,
     EffectClass,
     ModelModality,
     ModelPriority,
@@ -96,6 +97,10 @@ class SecondaryBrainScheduler:
         document_map_mode: SecondaryMode = SecondaryMode.DISABLED,
         supervisor_mode: SecondaryMode = SecondaryMode.DISABLED,
         supervisor_admission: semantic_supervisor_policy.SupervisorPolicyAdmission | None = None,
+        effect_shadow_mode: SecondaryMode = SecondaryMode.DISABLED,
+        effect_shadow_admission: (
+            semantic_supervisor_policy.SupervisorEffectShadowPolicyAdmission | None
+        ) = None,
     ) -> None:
         self.mode = mode
         self.allow_private_text = allow_private_text
@@ -115,10 +120,27 @@ class SecondaryBrainScheduler:
             and client is not None
         )
         self._supervisor_mode = SecondaryMode.SHADOW if supervisor_available else SecondaryMode.DISABLED
-        generic_workloads = (allowed_workloads & ADVISORY_WORKLOADS) - {ModelWorkload.PLAN_CANDIDATE}
-        self.allowed_workloads = generic_workloads | (
-            frozenset({ModelWorkload.PLAN_CANDIDATE}) if supervisor_available else frozenset()
+        if effect_shadow_admission is None:
+            requested_effect_mode = "shadow" if effect_shadow_mode is SecondaryMode.SHADOW else "off"
+            effect_shadow_admission = (
+                semantic_supervisor_policy.disabled_supervisor_effect_shadow_policy_admission(
+                    requested_mode=requested_effect_mode
+                )
+            )
+        self._effect_shadow_admission = effect_shadow_admission
+        effect_shadow_available = bool(
+            effect_shadow_admission.workload_available
+            and mode is not SecondaryMode.DISABLED
+            and client is not None
         )
+        self._effect_shadow_mode = SecondaryMode.SHADOW if effect_shadow_available else SecondaryMode.DISABLED
+        generic_workloads = (allowed_workloads & ADVISORY_WORKLOADS) - SEMANTIC_SHADOW_WORKLOADS
+        semantic_workloads: set[ModelWorkload] = set()
+        if supervisor_available:
+            semantic_workloads.add(ModelWorkload.PLAN_CANDIDATE)
+        if effect_shadow_available:
+            semantic_workloads.add(ModelWorkload.EFFECT_PLANNING)
+        self.allowed_workloads = generic_workloads | frozenset(semantic_workloads)
         self._local_skipped_total = 0
         self._local_fallback_total = 0
         self._startup_probe_task: asyncio.Task[None] | None = None
@@ -128,7 +150,7 @@ class SecondaryBrainScheduler:
         self._observation_condition = asyncio.Condition()
         self._ordinary_attempts_in_flight = 0
         self._exclusive_observation = False
-        # PLAN_CANDIDATE is lower priority than every pre-existing product
+        # Semantic shadow work is lower priority than every pre-existing product
         # workload.  This gate makes registration/preemption atomic before the
         # shared single-concurrency endpoint is touched.
         self._plan_priority_lock = asyncio.Lock()
@@ -195,6 +217,10 @@ class SecondaryBrainScheduler:
             if self.mode is SecondaryMode.DISABLED or self._client is None:
                 return SecondaryMode.DISABLED
             return self._supervisor_mode
+        if workload is ModelWorkload.EFFECT_PLANNING:
+            if self.mode is SecondaryMode.DISABLED or self._client is None:
+                return SecondaryMode.DISABLED
+            return self._effect_shadow_mode
         return self.mode
 
     @classmethod
@@ -213,6 +239,7 @@ class SecondaryBrainScheduler:
         except ValueError:
             document_map_mode = SecondaryMode.DISABLED
         requested_supervisor = getattr(settings, "semantic_supervisor_mode", "off")
+        requested_effect_shadow = getattr(settings, "semantic_supervisor_effect_mode", "off")
 
         def supervisor_admission(
             runtime_state: str,
@@ -236,6 +263,20 @@ class SecondaryBrainScheduler:
                 runtime_profile_manifest_sha256=(profile.manifest_sha256 if profile is not None else ""),
             )
 
+        def effect_shadow_admission(
+            runtime_state: str,
+            runtime_admission: SecondaryRuntimeAdmission | None,
+        ) -> semantic_supervisor_policy.SupervisorEffectShadowPolicyAdmission:
+            profile = runtime_admission.profile if runtime_admission is not None else None
+            return semantic_supervisor_policy.evaluate_supervisor_effect_shadow_policy_admission(
+                requested_mode=requested_effect_shadow,
+                allow_private_text=settings.secondary_llm_allow_private_text,
+                secondary_runtime_state=runtime_state,
+                profile_admission=(runtime_admission.kind.value if runtime_admission is not None else ""),
+                runtime_profile_id=profile.profile_id if profile is not None else "",
+                runtime_profile_manifest_sha256=(profile.manifest_sha256 if profile is not None else ""),
+            )
+
         workloads: set[ModelWorkload] = set()
         generic_workload_names: list[str] = []
         for raw_workload in settings.secondary_llm_workloads:
@@ -245,7 +286,7 @@ class SecondaryBrainScheduler:
                 workload = ModelWorkload(normalized_workload)
             except ValueError:
                 continue
-            if workload is ModelWorkload.PLAN_CANDIDATE:
+            if workload in SEMANTIC_SHADOW_WORKLOADS:
                 continue
             workloads.add(workload)
 
@@ -259,6 +300,7 @@ class SecondaryBrainScheduler:
                 profile_admission=None,
                 document_map_mode=document_map_mode,
                 supervisor_admission=supervisor_admission("disabled", None),
+                effect_shadow_admission=effect_shadow_admission("disabled", None),
             )
 
         admission = get_secondary_runtime_admission(
@@ -294,6 +336,7 @@ class SecondaryBrainScheduler:
                 - {
                     ModelWorkload.DOCUMENT_MAP.value,
                     ModelWorkload.PLAN_CANDIDATE.value,
+                    ModelWorkload.EFFECT_PLANNING.value,
                 }
             )
             if profile is not None
@@ -324,11 +367,16 @@ class SecondaryBrainScheduler:
             )
         )
         candidate_supervisor_admission = supervisor_admission("configured", admission)
+        candidate_effect_shadow_admission = effect_shadow_admission("configured", admission)
         admitted_workloads = effective_workloads if generic_configuration_is_admissible else frozenset()
         if (
             admission is None
             or not base_configuration_is_admissible
-            or not (generic_configuration_is_admissible or candidate_supervisor_admission.workload_available)
+            or not (
+                generic_configuration_is_admissible
+                or candidate_supervisor_admission.workload_available
+                or candidate_effect_shadow_admission.workload_available
+            )
         ):
             return cls(
                 mode=mode,
@@ -339,6 +387,7 @@ class SecondaryBrainScheduler:
                 profile_admission=None,
                 document_map_mode=document_map_mode,
                 supervisor_admission=supervisor_admission("misconfigured", admission),
+                effect_shadow_admission=effect_shadow_admission("misconfigured", admission),
             )
         try:
             client = SecondaryEndpointClient(
@@ -358,6 +407,7 @@ class SecondaryBrainScheduler:
                 profile_admission=None,
                 document_map_mode=document_map_mode,
                 supervisor_admission=supervisor_admission("misconfigured", admission),
+                effect_shadow_admission=effect_shadow_admission("misconfigured", admission),
             )
         return cls(
             mode=mode,
@@ -368,6 +418,7 @@ class SecondaryBrainScheduler:
             profile_admission=admission.kind,
             document_map_mode=document_map_mode,
             supervisor_admission=candidate_supervisor_admission,
+            effect_shadow_admission=candidate_effect_shadow_admission,
         )
 
     async def aclose(self) -> None:
@@ -465,7 +516,7 @@ class SecondaryBrainScheduler:
                 return None, lock_wait_sec
             failure = await self._client.probe_models(
                 absolute_deadline_monotonic=absolute_deadline_monotonic,
-                cancellation_is_local=workload is ModelWorkload.PLAN_CANDIDATE,
+                cancellation_is_local=workload in SEMANTIC_SHADOW_WORKLOADS,
             )
             if failure is not None:
                 self._epoch_admitted = False
@@ -495,7 +546,7 @@ class SecondaryBrainScheduler:
             )
             attempt = await self._client.call(
                 canary,
-                cancellation_is_local=workload is ModelWorkload.PLAN_CANDIDATE,
+                cancellation_is_local=workload in SEMANTIC_SHADOW_WORKLOADS,
             )
             if attempt.result is None:
                 self._probe_failure_total += 1
@@ -570,6 +621,28 @@ class SecondaryBrainScheduler:
             "closed_reason": closed_reason.value,
         }
 
+    def _effect_shadow_status(self, status: SecondaryStatus) -> dict[str, object]:
+        workload_available = bool(
+            self._effect_shadow_admission.workload_available
+            and ModelWorkload.EFFECT_PLANNING in self.allowed_workloads
+            and self.workload_mode(ModelWorkload.EFFECT_PLANNING) is SecondaryMode.SHADOW
+        )
+        closed_reason = self._effect_shadow_admission.closed_reason
+        if self._effect_shadow_admission.workload_available and not workload_available:
+            closed_reason = semantic_supervisor_policy.SupervisorPolicyClosedReason.SECONDARY_MISCONFIGURED
+        return {
+            "workload": ModelWorkload.EFFECT_PLANNING.value,
+            "requested_mode": self._effect_shadow_admission.requested_mode,
+            "effective_mode": self._effect_shadow_admission.effective_mode,
+            "policy_id": self._effect_shadow_admission.policy_id,
+            "policy_sha256": self._effect_shadow_admission.policy_sha256,
+            "workload_available": workload_available,
+            "runtime_available": bool(
+                workload_available and status.state is SecondaryState.HEALTHY and self._admission_is_fresh()
+            ),
+            "closed_reason": closed_reason.value,
+        }
+
     def public_status(self) -> dict[str, object]:
         """Return the compact projection safe for the public health route."""
 
@@ -583,6 +656,7 @@ class SecondaryBrainScheduler:
             "state": status.state.value,
             "available": status.state is SecondaryState.HEALTHY and self._admission_is_fresh(),
             "semantic_supervisor": self._supervisor_status(status),
+            "effect_shadow": self._effect_shadow_status(status),
         }
 
     def diagnostics_status(self) -> dict[str, object]:
@@ -590,6 +664,7 @@ class SecondaryBrainScheduler:
 
         status = self.status()
         supervisor_status = self._supervisor_status(status)
+        effect_shadow_status = self._effect_shadow_status(status)
         return {
             **self.public_status(),
             "last_failure": status.last_failure.value if status.last_failure is not None else None,
@@ -642,7 +717,14 @@ class SecondaryBrainScheduler:
                             "closed_reason": supervisor_status["closed_reason"],
                         }
                         if workload is ModelWorkload.PLAN_CANDIDATE
-                        else {}
+                        else (
+                            {
+                                "available": effect_shadow_status["workload_available"],
+                                "closed_reason": effect_shadow_status["closed_reason"],
+                            }
+                            if workload is ModelWorkload.EFFECT_PLANNING
+                            else {}
+                        )
                     ),
                     "selected_total": self._selected_by_workload[workload],
                     "success_total": self._success_by_workload[workload],
@@ -664,7 +746,7 @@ class SecondaryBrainScheduler:
                     },
                 }
                 for workload in sorted(
-                    self.allowed_workloads | {ModelWorkload.PLAN_CANDIDATE},
+                    self.allowed_workloads | SEMANTIC_SHADOW_WORKLOADS,
                     key=lambda value: value.value,
                 )
             },
@@ -762,7 +844,7 @@ class SecondaryBrainScheduler:
     ) -> SecondaryAttempt:
         """Run one attempt; semantic plans yield to every existing workload."""
 
-        if request.workload is ModelWorkload.PLAN_CANDIDATE:
+        if request.workload in SEMANTIC_SHADOW_WORKLOADS:
             if dispatch_observer is None:
                 return await self._attempt_lowest_priority_plan(
                     request,
@@ -942,8 +1024,7 @@ class SecondaryBrainScheduler:
         attempt_failure = attempt.failure or SecondaryFailure.MALFORMED_RESPONSE
         self._record_skip(request.workload, attempt_failure)
         if attempt_failure in _READMISSION_FAILURES and not (
-            request.workload is ModelWorkload.PLAN_CANDIDATE
-            and attempt_failure in PLAN_CANDIDATE_LOCAL_FAILURES
+            request.workload in SEMANTIC_SHADOW_WORKLOADS and attempt_failure in PLAN_CANDIDATE_LOCAL_FAILURES
         ):
             self._epoch_admitted = False
         return attempt

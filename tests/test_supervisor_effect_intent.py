@@ -11,16 +11,23 @@ from friday.orchestration.effect_outcome import EffectAction, EffectCapability, 
 from friday.orchestration.supervisor_contracts import CapabilityEffectClass
 from friday.orchestration.supervisor_effect_intent import (
     SUPERVISOR_EFFECT_INTENT_SCHEMA,
+    SUPERVISOR_EFFECT_SYMBOL_MANIFEST_SHA256,
     BoundAdvisoryEffectIntent,
+    EffectIntentActionSelection,
+    EffectIntentCapabilitySelection,
     EffectIntentError,
     EffectIntentGateReason,
     EffectIntentReason,
+    EffectIntentSelectionV2,
     EffectIntentV1,
     EffectLifecycle,
     FreshEffectGateState,
     PreparedEffectBinding,
+    derive_persisted_effect_intent_projection_identity,
     gate_supervisor_effect_intent,
+    prepare_effect_intent_projection_v2,
     prepare_obsidian_effect_binding,
+    supervisor_effect_symbol_manifest_v2,
 )
 
 
@@ -142,9 +149,13 @@ def test_model_intent_is_a_closed_six_field_round_trip() -> None:
 
 def test_model_json_rejects_duplicate_and_non_closed_keys() -> None:
     payload = _intent().to_payload()
-    duplicate = _intent().to_json().replace(
-        '"action":"create"',
-        '"action":"create","action":"append"',
+    duplicate = (
+        _intent()
+        .to_json()
+        .replace(
+            '"action":"create"',
+            '"action":"create","action":"append"',
+        )
     )
 
     with pytest.raises(EffectIntentError, match="duplicate"):
@@ -439,3 +450,155 @@ def test_intent_json_size_and_utf8_are_bounded() -> None:
         EffectIntentV1.parse(json.dumps({**payload, "padding": "x" * 3_000}))
     with pytest.raises(EffectIntentError, match="valid UTF-8"):
         EffectIntentV1.parse("\ud800")
+
+
+def test_v2_manifest_is_exact_and_includes_a_real_none_choice() -> None:
+    manifest = supervisor_effect_symbol_manifest_v2()
+
+    assert manifest == {
+        "schema": "friday.supervisor-effect-symbol-manifest.v2",
+        "choices": [
+            {"capability": "none", "action": "none"},
+            {"capability": "obsidian_note_mutation", "action": "create"},
+            {"capability": "obsidian_note_mutation", "action": "append"},
+        ],
+    }
+    canonical = json.dumps(manifest, ensure_ascii=True, sort_keys=True, separators=(",", ":"))
+    assert hashlib.sha256(canonical.encode("ascii")).hexdigest() == (SUPERVISOR_EFFECT_SYMBOL_MANIFEST_SHA256)
+
+
+@pytest.mark.parametrize(
+    ("capability", "action"),
+    [
+        (EffectIntentCapabilitySelection.NONE, EffectIntentActionSelection.NONE),
+        (
+            EffectIntentCapabilitySelection.OBSIDIAN_NOTE_MUTATION,
+            EffectIntentActionSelection.CREATE,
+        ),
+        (
+            EffectIntentCapabilitySelection.OBSIDIAN_NOTE_MUTATION,
+            EffectIntentActionSelection.APPEND,
+        ),
+    ],
+)
+def test_v2_selection_round_trips_only_manifest_pairs(
+    capability: EffectIntentCapabilitySelection,
+    action: EffectIntentActionSelection,
+) -> None:
+    projection = prepare_effect_intent_projection_v2("Create or append a durable note if useful.")
+    selection = EffectIntentSelectionV2(
+        capability=capability,
+        action=action,
+        manifest_digest=SUPERVISOR_EFFECT_SYMBOL_MANIFEST_SHA256,
+        projection_digest=projection.projection_digest,
+    )
+
+    assert EffectIntentSelectionV2.parse(selection.to_json()) == selection
+    assert selection.execution_authorized is False
+    assert selection.publication_authorized is False
+    assert set(selection.to_payload()) == {
+        "schema",
+        "capability",
+        "action",
+        "manifest_digest",
+        "projection_digest",
+    }
+
+
+@pytest.mark.parametrize(
+    ("capability", "action"),
+    [
+        (EffectIntentCapabilitySelection.NONE, EffectIntentActionSelection.CREATE),
+        (
+            EffectIntentCapabilitySelection.OBSIDIAN_NOTE_MUTATION,
+            EffectIntentActionSelection.NONE,
+        ),
+    ],
+)
+def test_v2_selection_rejects_crossed_symbols(
+    capability: EffectIntentCapabilitySelection,
+    action: EffectIntentActionSelection,
+) -> None:
+    projection = prepare_effect_intent_projection_v2("No supported note effect is requested.")
+
+    with pytest.raises(EffectIntentError, match="symbolic manifest"):
+        EffectIntentSelectionV2(
+            capability=capability,
+            action=action,
+            manifest_digest=SUPERVISOR_EFFECT_SYMBOL_MANIFEST_SHA256,
+            projection_digest=projection.projection_digest,
+        )
+
+
+@pytest.mark.parametrize(
+    "semantic_text",
+    [
+        "/home/private/note.md",
+        "open C:\\private\\note.md",
+        "send to person@example.com",
+        "user_id 773311",
+        "request 550e8400-e29b-41d4-a716-446655440000",
+        "TOKEN=abcdefghijklmnop",
+        "Bearer abcdefghijklmnopqrstuvwxyz",
+        "visit https://private.example",
+        "message @private_handle",
+        "bad\x00control",
+        "x" * 513,
+    ],
+)
+def test_v2_projection_rejects_path_secret_private_id_and_overflow(
+    semantic_text: str,
+) -> None:
+    with pytest.raises(EffectIntentError):
+        prepare_effect_intent_projection_v2(semantic_text)
+
+
+def test_v2_projection_digest_cannot_drift_and_selection_rejects_authority_fields() -> None:
+    projection = prepare_effect_intent_projection_v2("Append a short note if that effect is intended.")
+    selection = EffectIntentSelectionV2(
+        capability=EffectIntentCapabilitySelection.OBSIDIAN_NOTE_MUTATION,
+        action=EffectIntentActionSelection.APPEND,
+        manifest_digest=SUPERVISOR_EFFECT_SYMBOL_MANIFEST_SHA256,
+        projection_digest=projection.projection_digest,
+    )
+
+    with pytest.raises(EffectIntentError, match="digest has drifted"):
+        replace(projection, projection_digest=_DIGESTS["other"])
+    for field_name in (
+        "args",
+        "path",
+        "body",
+        "authorization",
+        "confirmation",
+        "idempotency_key",
+        "execution",
+        "publication",
+    ):
+        with pytest.raises(EffectIntentError, match="keys"):
+            EffectIntentSelectionV2.parse({**selection.to_payload(), field_name: "forged"})
+
+
+def test_persisted_projection_identity_is_keyed_domain_separated_and_not_raw_digest() -> None:
+    projection = prepare_effect_intent_projection_v2("Create a short grocery note.")
+    first = derive_persisted_effect_intent_projection_identity(
+        projection,
+        namespace_key=b"a" * 32,
+    )
+    repeated = derive_persisted_effect_intent_projection_identity(
+        projection,
+        namespace_key=b"a" * 32,
+    )
+    other_namespace = derive_persisted_effect_intent_projection_identity(
+        projection,
+        namespace_key=b"b" * 32,
+    )
+
+    assert first == repeated
+    assert first != other_namespace
+    assert first != projection.projection_digest
+    assert len(first) == 64
+    with pytest.raises(EffectIntentError, match="32 to 4096"):
+        derive_persisted_effect_intent_projection_identity(
+            projection,
+            namespace_key=b"short",
+        )
