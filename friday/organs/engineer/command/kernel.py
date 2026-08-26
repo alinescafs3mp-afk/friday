@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import secrets
 import threading
@@ -17,57 +18,59 @@ from .contracts import (
     CommandRequest,
     CommandStatus,
     GeneratedFile,
+    IsolationProfile,
     ResolvedExecutable,
+    TrustedPathContract,
     sha256_bytes,
 )
 from .grant import CommandGrantAuthority
-from .resolve import resolve_request
-from .runner import SpawnedCommand
-from .store import CommandJobStore, atomic_write_json
+from .isolate import require_profile
+from .resolve import resolve_bwrap, resolve_request
+from .runner import SpawnedCommand, _pid_starttime
+from .store import CommandJobStore, decode_json_list
 from .workspace import JobWorkspace
 
 
-def _pid_alive(pid: int) -> bool:
-    if pid <= 0:
+def _pid_alive_matching(pid: int | None, starttime: int | None) -> bool:
+    if pid is None or int(pid) <= 0:
         return False
+    observed = _pid_starttime(int(pid))
+    if observed is None:
+        return False
+    if starttime is None:
+        return False
+    return int(observed) == int(starttime)
+
+
+def _resolved_from_json(raw: str | None) -> ResolvedExecutable | None:
+    if not raw:
+        return None
     try:
-        os.kill(pid, 0)
-    except ProcessLookupError:
-        return False
-    except PermissionError:
-        return True
-    return True
-
-
-def _resolved_from_state(payload: dict) -> ResolvedExecutable | None:
-    raw = payload.get("executable")
-    if not isinstance(raw, dict) or not raw:
+        payload = json.loads(raw)
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(payload, dict):
         return None
     try:
         return ResolvedExecutable(
-            requested=str(raw.get("requested") or ""),
-            canonical_path=str(raw.get("canonical_path") or ""),
-            owner_uid=int(raw["owner_uid"]),
-            owner_gid=int(raw["owner_gid"]),
-            mode=int(raw["mode"]),
-            device=int(raw["device"]),
-            inode=int(raw["inode"]),
-            size_bytes=int(raw["size_bytes"]),
-            mtime_ns=int(raw["mtime_ns"]),
-            sha256=str(raw["sha256"]),
+            requested=str(payload.get("requested") or ""),
+            canonical_path=str(payload.get("canonical_path") or ""),
+            owner_uid=int(payload["owner_uid"]),
+            owner_gid=int(payload["owner_gid"]),
+            mode=int(payload["mode"]),
+            device=int(payload["device"]),
+            inode=int(payload["inode"]),
+            size_bytes=int(payload["size_bytes"]),
+            mtime_ns=int(payload["mtime_ns"]),
+            sha256=str(payload["sha256"]),
         )
     except (KeyError, TypeError, ValueError):
         return None
 
 
-def _files_from_state(payload: dict) -> tuple[GeneratedFile, ...]:
-    items = payload.get("generated_files") or []
-    if not isinstance(items, list):
-        return ()
+def _files_from_json(raw: str | None) -> tuple[GeneratedFile, ...]:
     files: list[GeneratedFile] = []
-    for item in items:
-        if not isinstance(item, dict):
-            continue
+    for item in decode_json_list(raw):
         files.append(
             GeneratedFile(
                 relative_path=str(item.get("relative_path") or ""),
@@ -79,106 +82,188 @@ def _files_from_state(payload: dict) -> tuple[GeneratedFile, ...]:
     return tuple(files)
 
 
+def _executable_json(resolved: ResolvedExecutable) -> str:
+    return json.dumps(
+        {
+            "canonical_path": resolved.canonical_path,
+            "device": resolved.device,
+            "inode": resolved.inode,
+            "mode": resolved.mode,
+            "mtime_ns": resolved.mtime_ns,
+            "owner_gid": resolved.owner_gid,
+            "owner_uid": resolved.owner_uid,
+            "requested": resolved.requested,
+            "sha256": resolved.sha256,
+            "size_bytes": resolved.size_bytes,
+        },
+        ensure_ascii=True,
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+
+
 class CommandKernel:
-    def __init__(self, store_root: Path, authority: CommandGrantAuthority) -> None:
+    def __init__(
+        self,
+        store_root: Path,
+        authority: CommandGrantAuthority,
+        *,
+        trusted_path: TrustedPathContract | None = None,
+    ) -> None:
         self.store = CommandJobStore(Path(store_root))
         self.authority = authority
-        self.authority.bind_ledger(self.store.root / "grant-nonces.json")
+        self.authority.bind_store(self.store)
+        self.trusted_path = trusted_path or TrustedPathContract.default()
         self._lock = threading.Lock()
         self._live: dict[str, SpawnedCommand] = {}
         self._threads: dict[str, threading.Thread] = {}
         self._receipts: dict[str, CommandReceipt] = {}
+        self._reconcile_stale()
+
+    def _reconcile_stale(self) -> None:
+        for job in self.store.list_unreaped():
+            job_id = str(job["job_id"])
+            with self.store.transaction():
+                self.store.update_job(
+                    job_id,
+                    {
+                        "status": CommandStatus.UNKNOWN.value,
+                        "error_code": "unknown_after_restart",
+                        "finished_at": time.time(),
+                    },
+                )
 
     def submit(self, request: CommandRequest, grant_token: str, *, actor_id: str) -> str:
-        existing = self.store.lookup_idempotency(actor_id, request.idempotency_key)
-        if existing is not None:
-            if existing["digest"] != request.digest:
-                raise CommandError("idempotency_conflict")
-            return existing["job_id"]
-        grant = self.authority.verify(grant_token, request, actor_id=actor_id)
-        argv, resolved = resolve_request(request, grant)
-        self.authority.still_valid(grant)
-        for item in argv:
-            if item.startswith("/proc/") or item.startswith("/sys/") or item.startswith("/dev/"):
-                raise CommandError("forbidden_path")
-            if "docker.sock" in item:
-                raise CommandError("forbidden_path")
-        job_id = secrets.token_hex(16)
-        job_dir = self.store.job_dir(job_id)
-        job_dir.mkdir(parents=True, exist_ok=True)
-        os.chmod(job_dir, 0o700)
-        workspace = JobWorkspace(job_dir)
-        workspace.materialize(stdin=request.stdin)
-        state = {
-            "actor_id": actor_id,
-            "argv": list(argv),
-            "command_digest": request.digest,
-            "effect_boundary_crossed": False,
-            "error_code": "",
-            "executable": {
-                "canonical_path": resolved.canonical_path,
-                "device": resolved.device,
-                "inode": resolved.inode,
-                "mode": resolved.mode,
-                "mtime_ns": resolved.mtime_ns,
-                "owner_gid": resolved.owner_gid,
-                "owner_uid": resolved.owner_uid,
-                "requested": resolved.requested,
-                "sha256": resolved.sha256,
-                "size_bytes": resolved.size_bytes,
-            },
-            "grant_nonce": grant.nonce,
-            "idempotency_key": request.idempotency_key,
-            "job_id": job_id,
-            "lane": request.lane.value,
-            "max_stderr_bytes": request.max_stderr_bytes,
-            "max_stdout_bytes": request.max_stdout_bytes,
-            "origin": request.origin.value,
-            "pid": None,
-            "status": CommandStatus.ADMITTED.value,
-            "timeout_sec": request.timeout_sec,
-            "turn_id": grant.turn_id,
-        }
-        self.store.write_state(job_id, state)
-        atomic_write_json(job_dir / "request.json", {"argv": list(argv), "digest": request.digest, "lane": request.lane.value})
-        self.store.remember_idempotency(actor_id, request.idempotency_key, job_id, request.digest)
-        spawned = SpawnedCommand(
-            argv=argv,
-            workspace=workspace,
-            timeout_sec=request.timeout_sec,
-            max_stdout_bytes=request.max_stdout_bytes,
-            max_stderr_bytes=request.max_stderr_bytes,
-        )
+        grant = None
+        held = None
+        bwrap = None
         try:
-            self.authority.still_valid(grant)
-            spawned.spawn(resolved)
-        except CommandError as exc:
-            state["status"] = CommandStatus.FAILED.value
-            state["error_code"] = exc.code
-            state["finished_at"] = time.time()
-            self.store.write_state(job_id, state)
-            receipt = self._receipt_from_spawned(job_id, request, resolved, spawned, error_code=exc.code, status=CommandStatus.FAILED)
-            self._receipts[job_id] = receipt
-            raise
-        state["status"] = CommandStatus.RUNNING.value
-        state["pid"] = spawned.process.pid if spawned.process is not None else None
-        state["started_at"] = spawned.started_at
-        state["effect_boundary_crossed"] = True
-        self.store.write_state(job_id, state)
-        with self._lock:
-            self._live[job_id] = spawned
-        worker = threading.Thread(
-            target=self._reap,
-            args=(job_id, request, resolved, spawned),
-            name=f"engineer-command-{job_id[:8]}",
-            daemon=True,
-        )
-        with self._lock:
-            self._threads[job_id] = worker
-        worker.start()
-        return job_id
+            with self.store.transaction():
+                existing = self.store.lookup_idempotency(actor_id, request.idempotency_key)
+                if existing is not None:
+                    if existing["digest"] != request.digest:
+                        raise CommandError("idempotency_conflict")
+                    return existing["job_id"]
+            grant = self.authority.parse(grant_token, request, actor_id=actor_id)
+            require_profile(grant.isolation_profile, grant.host_user_authorized)
+            held = resolve_request(request, grant, trusted_path=self.trusted_path)
+            if grant.isolation_profile is IsolationProfile.ISOLATED_WORKSPACE:
+                bwrap = resolve_bwrap()
+            job_id = secrets.token_hex(16)
+            job_dir = self.store.job_dir(job_id)
+            job_dir.mkdir(parents=True, exist_ok=True)
+            os.chmod(job_dir, 0o700)
+            workspace = JobWorkspace(job_dir)
+            workspace.materialize()
+            with self.store.transaction():
+                existing = self.store.lookup_idempotency(actor_id, request.idempotency_key)
+                if existing is not None:
+                    if existing["digest"] != request.digest:
+                        raise CommandError("idempotency_conflict")
+                    return existing["job_id"]
+                self.authority.still_valid(grant)
+                self.store.consume_nonce(grant.nonce, exp=grant.expires_at, now=int(time.time()))
+                self.store.insert_job(
+                    {
+                        "job_id": job_id,
+                        "actor_id": grant.actor_id,
+                        "tenant_id": grant.tenant_id,
+                        "conversation_id": grant.conversation_id,
+                        "channel": grant.channel,
+                        "source_row_id": grant.source_row_id,
+                        "source_hash": grant.source_hash,
+                        "telegram_update_id": grant.telegram_update_id,
+                        "isolation_profile": grant.isolation_profile.value,
+                        "host_user_authorized": grant.host_user_authorized,
+                        "idempotency_key": grant.idempotency_key,
+                        "command_digest": request.digest,
+                        "argv_sha256": request.argv_sha256,
+                        "lane": request.lane.value,
+                        "origin": request.origin.value,
+                        "status": CommandStatus.ADMITTED.value,
+                        "grant_nonce": grant.nonce,
+                        "timeout_sec": request.timeout_sec,
+                        "max_stdout_bytes": request.max_stdout_bytes,
+                        "max_stderr_bytes": request.max_stderr_bytes,
+                        "created_at": time.time(),
+                        "executable_json": _executable_json(held.resolved),
+                    }
+                )
+            spawned = SpawnedCommand(
+                workspace=workspace,
+                timeout_sec=request.timeout_sec,
+                max_stdout_bytes=request.max_stdout_bytes,
+                max_stderr_bytes=request.max_stderr_bytes,
+                isolation=grant.isolation_profile,
+            )
+            try:
+                self.authority.still_valid(grant)
+                spawned.spawn(
+                    held,
+                    stdin=request.stdin,
+                    env=workspace.env(
+                        path_value=self.trusted_path.runtime_path,
+                        isolated=grant.isolation_profile is IsolationProfile.ISOLATED_WORKSPACE,
+                    ),
+                    trusted_path=self.trusted_path,
+                    bwrap=bwrap,
+                    job_id=job_id,
+                )
+            except CommandError as exc:
+                with self.store.transaction():
+                    self.store.update_job(
+                        job_id,
+                        {
+                            "status": CommandStatus.FAILED.value,
+                            "error_code": exc.code,
+                            "finished_at": time.time(),
+                            "effect_boundary_crossed": 1 if spawned.effect_boundary_crossed else 0,
+                        },
+                    )
+                receipt = self._receipt_from_spawned(
+                    job_id,
+                    request,
+                    grant.isolation_profile,
+                    grant.source_hash,
+                    held.resolved,
+                    spawned,
+                    error_code=exc.code,
+                    status=CommandStatus.FAILED,
+                )
+                self._receipts[job_id] = receipt
+                raise
+            with self.store.transaction():
+                self.store.update_job(
+                    job_id,
+                    {
+                        "status": CommandStatus.RUNNING.value,
+                        "pid": spawned.pid,
+                        "pid_starttime": spawned.pid_starttime,
+                        "cgroup_path": str(spawned.cgroup) if spawned.cgroup is not None else None,
+                        "started_at": spawned.started_at,
+                        "effect_boundary_crossed": 1,
+                    },
+                )
+            with self._lock:
+                self._live[job_id] = spawned
+            worker = threading.Thread(
+                target=self._reap,
+                args=(job_id, request, grant, held.resolved, spawned),
+                name=f"engineer-command-{job_id[:8]}",
+                daemon=False,
+            )
+            with self._lock:
+                self._threads[job_id] = worker
+            worker.start()
+            return job_id
+        finally:
+            if held is not None:
+                held.close()
+            if bwrap is not None:
+                bwrap.close()
 
-    def progress(self, job_id: str) -> CommandProgress:
+    def progress(self, job_id: str, *, actor_id: str) -> CommandProgress:
+        self._require_actor(job_id, actor_id)
         with self._lock:
             live = self._live.get(job_id)
         if live is not None:
@@ -190,64 +275,79 @@ class CommandKernel:
                 stdout_bytes=live.stdout_bytes,
                 stderr_bytes=live.stderr_bytes,
                 output_activity=live.output_activity,
+                isolation_profile=live.isolation,
             )
-        state = self.store.read_state(job_id)
-        status = CommandStatus(str(state.get("status") or CommandStatus.UNKNOWN.value))
-        if status is CommandStatus.RUNNING:
-            pid = int(state.get("pid") or 0)
-            if not _pid_alive(pid):
+        job = self.store.read_job(job_id)
+        status = CommandStatus(str(job.get("status") or CommandStatus.UNKNOWN.value))
+        isolation = IsolationProfile(str(job.get("isolation_profile") or IsolationProfile.ISOLATED_WORKSPACE.value))
+        if status in {CommandStatus.RUNNING, CommandStatus.ADMITTED}:
+            if _pid_alive_matching(job.get("pid"), job.get("pid_starttime")):
                 status = CommandStatus.UNKNOWN
-                state["status"] = status.value
-                state["error_code"] = "unknown_after_restart"
-                self.store.write_state(job_id, state)
-        started = float(state.get("started_at") or time.time())
-        finished = state.get("finished_at")
+            else:
+                status = CommandStatus.UNKNOWN
+            with self.store.transaction():
+                self.store.update_job(
+                    job_id,
+                    {
+                        "status": status.value,
+                        "error_code": "unknown_after_restart",
+                    },
+                )
+        started = float(job.get("started_at") or time.time())
+        finished = job.get("finished_at")
         elapsed = float(finished or time.time()) - started
-        stdout_bytes = 0
-        stderr_bytes = 0
         workspace = JobWorkspace(self.store.job_dir(job_id))
-        if workspace.stdout_path.exists():
-            stdout_bytes = workspace.stdout_path.stat().st_size
-        if workspace.stderr_path.exists():
-            stderr_bytes = workspace.stderr_path.stat().st_size
+        stdout_bytes = workspace.stdout_path.stat().st_size if workspace.stdout_path.exists() else 0
+        stderr_bytes = workspace.stderr_path.stat().st_size if workspace.stderr_path.exists() else 0
         return CommandProgress(
             job_id=job_id,
             status=status,
             elapsed_sec=max(0.0, elapsed),
-            stdout_bytes=stdout_bytes,
-            stderr_bytes=stderr_bytes,
+            stdout_bytes=int(stdout_bytes),
+            stderr_bytes=int(stderr_bytes),
             output_activity=bool(stdout_bytes or stderr_bytes),
+            isolation_profile=isolation,
         )
 
-    def cancel(self, job_id: str) -> None:
+    def cancel(self, job_id: str, *, actor_id: str) -> None:
+        self._require_actor(job_id, actor_id)
         with self._lock:
             live = self._live.get(job_id)
         if live is None:
             raise CommandError("job_not_running")
         live.request_cancel()
 
-    def wait(self, job_id: str, *, timeout_sec: float | None = None) -> CommandReceipt:
-        with self._lock:
-            receipt = self._receipts.get(job_id)
-            worker = self._threads.get(job_id)
-        if receipt is not None:
-            return receipt
-        if worker is not None:
-            worker.join(timeout=timeout_sec)
+    def wait(self, job_id: str, *, actor_id: str, timeout_sec: float | None = None) -> CommandReceipt:
+        self._require_actor(job_id, actor_id)
+        deadline = time.monotonic() + (float(timeout_sec) if timeout_sec is not None else 3600.0)
+        while True:
             with self._lock:
                 receipt = self._receipts.get(job_id)
+                worker = self._threads.get(job_id)
             if receipt is not None:
                 return receipt
-            raise CommandError("wait_timeout")
-        return self._receipt_from_state(job_id)
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise CommandError("wait_timeout")
+            if worker is not None:
+                worker.join(timeout=remaining)
+                with self._lock:
+                    receipt = self._receipts.get(job_id)
+                if receipt is not None:
+                    return receipt
+                raise CommandError("wait_timeout")
+            job = self.store.read_job(job_id)
+            status = CommandStatus(str(job.get("status") or CommandStatus.UNKNOWN.value))
+            if status not in {CommandStatus.ADMITTED, CommandStatus.RUNNING, CommandStatus.PLANNED}:
+                return self._receipt_from_job(job_id)
+            time.sleep(min(0.02, max(0.0, remaining)))
 
-    def _reap(
-        self,
-        job_id: str,
-        request: CommandRequest,
-        resolved: ResolvedExecutable,
-        spawned: SpawnedCommand,
-    ) -> None:
+    def _require_actor(self, job_id: str, actor_id: str) -> None:
+        job = self.store.read_job(job_id)
+        if str(job.get("actor_id") or "") != actor_id:
+            raise CommandError("actor_mismatch")
+
+    def _reap(self, job_id: str, request: CommandRequest, grant, resolved, spawned: SpawnedCommand) -> None:
         error_code = ""
         status = CommandStatus.FAILED
         generated: tuple[GeneratedFile, ...] = ()
@@ -259,7 +359,12 @@ class CommandKernel:
                 error_code = exc.code
                 status = CommandStatus.FAILED
             else:
-                if spawned.timed_out:
+                if not spawned.eof_proven or (
+                    spawned.isolation is IsolationProfile.HOST_USER and not spawned.tree_empty
+                ):
+                    status = CommandStatus.UNKNOWN
+                    error_code = "tree_or_eof_unproven"
+                elif spawned.timed_out:
                     status = CommandStatus.TIMEOUT
                     error_code = "timeout"
                 elif spawned.cancelled:
@@ -274,45 +379,53 @@ class CommandKernel:
         except CommandError as exc:
             error_code = exc.code
             status = CommandStatus.FAILED
+        finally:
+            spawned.close_pidfd()
         receipt = self._receipt_from_spawned(
             job_id,
             request,
+            grant.isolation_profile,
+            grant.source_hash,
             resolved,
             spawned,
             error_code=error_code,
             status=status,
             generated=generated,
         )
-        state = self.store.read_state(job_id)
-        state.update(
-            {
-                "cancelled": receipt.cancelled,
-                "error_code": receipt.error_code,
-                "exit_code": receipt.exit_code,
-                "finished_at": receipt.finished_at,
-                "generated_files": [
-                    {
-                        "mode": item.mode,
-                        "relative_path": item.relative_path,
-                        "sha256": item.sha256,
-                        "size_bytes": item.size_bytes,
-                    }
-                    for item in receipt.generated_files
-                ],
-                "signal": receipt.signal,
-                "status": receipt.status.value,
-                "stderr_sha256": receipt.stderr_sha256,
-                "stdout_sha256": receipt.stdout_sha256,
-                "timed_out": receipt.timed_out,
-                "truncated_stderr": receipt.truncated_stderr,
-                "truncated_stdout": receipt.truncated_stdout,
-            }
+        generated_json = json.dumps(
+            [
+                {
+                    "mode": item.mode,
+                    "relative_path": item.relative_path,
+                    "sha256": item.sha256,
+                    "size_bytes": item.size_bytes,
+                }
+                for item in receipt.generated_files
+            ],
+            ensure_ascii=True,
+            sort_keys=True,
+            separators=(",", ":"),
         )
-        self.store.write_state(job_id, state)
-        atomic_write_json(
-            self.store.job_dir(job_id) / "receipt.json",
-            receipt.to_public_payload(),
-        )
+        with self.store.transaction():
+            self.store.update_job(
+                job_id,
+                {
+                    "cancelled": 1 if receipt.cancelled else 0,
+                    "error_code": receipt.error_code,
+                    "exit_code": receipt.exit_code,
+                    "finished_at": receipt.finished_at,
+                    "generated_files_json": generated_json,
+                    "receipt_mac": receipt.receipt_mac,
+                    "signal": receipt.signal,
+                    "status": receipt.status.value,
+                    "stderr_sha256": receipt.stderr_sha256,
+                    "stdout_sha256": receipt.stdout_sha256,
+                    "timed_out": 1 if receipt.timed_out else 0,
+                    "truncated_stderr": 1 if receipt.truncated_stderr else 0,
+                    "truncated_stdout": 1 if receipt.truncated_stdout else 0,
+                    "effect_boundary_crossed": 1 if receipt.effect_boundary_crossed else 0,
+                },
+            )
         with self._lock:
             self._receipts[job_id] = receipt
             self._live.pop(job_id, None)
@@ -321,6 +434,8 @@ class CommandKernel:
         self,
         job_id: str,
         request: CommandRequest,
+        isolation: IsolationProfile,
+        source_hash: str,
         resolved: ResolvedExecutable,
         spawned: SpawnedCommand,
         *,
@@ -328,12 +443,15 @@ class CommandKernel:
         status: CommandStatus,
         generated: tuple[GeneratedFile, ...] = (),
     ) -> CommandReceipt:
-        return CommandReceipt(
+        receipt = CommandReceipt(
             job_id=job_id,
             status=status,
             lane=request.lane,
             origin=request.origin,
-            argv=spawned.argv,
+            isolation_profile=isolation,
+            command_digest=request.digest,
+            argv_sha256=request.argv_sha256,
+            source_hash=source_hash,
             exit_code=spawned.exit_code,
             signal=spawned.signal_num,
             timed_out=spawned.timed_out,
@@ -350,42 +468,77 @@ class CommandKernel:
             generated_files=generated,
             error_code=error_code,
             effect_boundary_crossed=spawned.effect_boundary_crossed,
+            receipt_mac="",
+        )
+        mac = self.authority.sign_receipt(receipt.to_public_payload())
+        return CommandReceipt(
+            job_id=receipt.job_id,
+            status=receipt.status,
+            lane=receipt.lane,
+            origin=receipt.origin,
+            isolation_profile=receipt.isolation_profile,
+            command_digest=receipt.command_digest,
+            argv_sha256=receipt.argv_sha256,
+            source_hash=receipt.source_hash,
+            exit_code=receipt.exit_code,
+            signal=receipt.signal,
+            timed_out=receipt.timed_out,
+            cancelled=receipt.cancelled,
+            truncated_stdout=receipt.truncated_stdout,
+            truncated_stderr=receipt.truncated_stderr,
+            started_at=receipt.started_at,
+            finished_at=receipt.finished_at,
+            executable=receipt.executable,
+            stdout_sha256=receipt.stdout_sha256,
+            stderr_sha256=receipt.stderr_sha256,
+            stdout=receipt.stdout,
+            stderr=receipt.stderr,
+            generated_files=receipt.generated_files,
+            error_code=receipt.error_code,
+            effect_boundary_crossed=receipt.effect_boundary_crossed,
+            receipt_mac=mac,
         )
 
-    def _receipt_from_state(self, job_id: str) -> CommandReceipt:
-        state = self.store.read_state(job_id)
-        status = CommandStatus(str(state.get("status") or CommandStatus.UNKNOWN.value))
-        if status is CommandStatus.RUNNING and not _pid_alive(int(state.get("pid") or 0)):
+    def _receipt_from_job(self, job_id: str) -> CommandReceipt:
+        job = self.store.read_job(job_id)
+        status = CommandStatus(str(job.get("status") or CommandStatus.UNKNOWN.value))
+        if status in {CommandStatus.RUNNING, CommandStatus.ADMITTED}:
             status = CommandStatus.UNKNOWN
-            state["status"] = status.value
-            state["error_code"] = "unknown_after_restart"
-            self.store.write_state(job_id, state)
+            with self.store.transaction():
+                self.store.update_job(
+                    job_id,
+                    {"status": status.value, "error_code": "unknown_after_restart"},
+                )
+            job = self.store.read_job(job_id)
         workspace = JobWorkspace(self.store.job_dir(job_id))
         stdout = workspace.stdout_path.read_bytes() if workspace.stdout_path.exists() else b""
         stderr = workspace.stderr_path.read_bytes() if workspace.stderr_path.exists() else b""
-        lane = CommandLane(str(state.get("lane") or CommandLane.ARGV.value))
-        origin = CommandOrigin(str(state.get("origin") or CommandOrigin.OWNER_TURN.value))
-        argv = tuple(str(item) for item in (state.get("argv") or ()))
-        return CommandReceipt(
+        isolation = IsolationProfile(str(job.get("isolation_profile") or IsolationProfile.ISOLATED_WORKSPACE.value))
+        receipt = CommandReceipt(
             job_id=job_id,
             status=status,
-            lane=lane,
-            origin=origin,
-            argv=argv,
-            exit_code=state.get("exit_code"),
-            signal=state.get("signal"),
-            timed_out=bool(state.get("timed_out")),
-            cancelled=bool(state.get("cancelled")),
-            truncated_stdout=bool(state.get("truncated_stdout")),
-            truncated_stderr=bool(state.get("truncated_stderr")),
-            started_at=float(state.get("started_at") or 0.0),
-            finished_at=state.get("finished_at"),
-            executable=_resolved_from_state(state),
-            stdout_sha256=str(state.get("stdout_sha256") or sha256_bytes(stdout)),
-            stderr_sha256=str(state.get("stderr_sha256") or sha256_bytes(stderr)),
+            lane=CommandLane(str(job.get("lane") or CommandLane.ARGV.value)),
+            origin=CommandOrigin(str(job.get("origin") or CommandOrigin.OWNER_TURN.value)),
+            isolation_profile=isolation,
+            command_digest=str(job.get("command_digest") or ""),
+            argv_sha256=str(job.get("argv_sha256") or ""),
+            source_hash=str(job.get("source_hash") or ""),
+            exit_code=job.get("exit_code"),
+            signal=job.get("signal"),
+            timed_out=bool(job.get("timed_out")),
+            cancelled=bool(job.get("cancelled")),
+            truncated_stdout=bool(job.get("truncated_stdout")),
+            truncated_stderr=bool(job.get("truncated_stderr")),
+            started_at=float(job.get("started_at") or 0.0),
+            finished_at=job.get("finished_at"),
+            executable=_resolved_from_json(job.get("executable_json")),
+            stdout_sha256=str(job.get("stdout_sha256") or sha256_bytes(stdout)),
+            stderr_sha256=str(job.get("stderr_sha256") or sha256_bytes(stderr)),
             stdout=stdout,
             stderr=stderr,
-            generated_files=_files_from_state(state),
-            error_code=str(state.get("error_code") or ""),
-            effect_boundary_crossed=bool(state.get("effect_boundary_crossed")),
+            generated_files=_files_from_json(job.get("generated_files_json")),
+            error_code=str(job.get("error_code") or ""),
+            effect_boundary_crossed=bool(job.get("effect_boundary_crossed")),
+            receipt_mac=str(job.get("receipt_mac") or ""),
         )
+        return receipt

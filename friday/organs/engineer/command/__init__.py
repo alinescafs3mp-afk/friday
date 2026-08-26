@@ -1,8 +1,9 @@
 """Isolated universal Engineer command-runner kernel.
 
 This package executes argv or exact-owner shell under an explicit short-lived
-grant. It does not mint authority from inventory, PATH, model output, documents
-or the typed installed-tool registry. Conversational wiring lives outside.
+grant bound to an authenticated owner source. Inventory, PATH, model output,
+documents and the typed installed-tool registry cannot mint that source.
+Conversational wiring lives outside.
 """
 
 from __future__ import annotations
@@ -15,12 +16,17 @@ from .contracts import (
     CommandReceipt,
     CommandRequest,
     CommandStatus,
+    DestructiveApproval,
     GeneratedFile,
+    IsolationProfile,
+    OwnerSource,
     ResolvedExecutable,
+    TrustedPathContract,
     VerifiedCommandGrant,
 )
 from .grant import CommandGrantAuthority
 from .kernel import CommandKernel
+from .source import OwnerSourceAuthority
 
 __all__ = [
     "CommandError",
@@ -32,7 +38,12 @@ __all__ = [
     "CommandReceipt",
     "CommandRequest",
     "CommandStatus",
+    "DestructiveApproval",
     "GeneratedFile",
+    "IsolationProfile",
+    "OwnerSource",
+    "OwnerSourceAuthority",
     "ResolvedExecutable",
+    "TrustedPathContract",
     "VerifiedCommandGrant",
 ]

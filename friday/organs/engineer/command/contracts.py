@@ -2,17 +2,25 @@
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import json
+import os
 from dataclasses import dataclass
 from enum import StrEnum
+from pathlib import Path
 from typing import Any, Literal
 
-SCHEMA = "friday.engineer.command.v1"
-TRUSTED_PATH = ("/usr/bin", "/bin", "/usr/local/bin")
-BASH_EXECUTABLE = "/bin/bash"
-SHELL_ARGV_PREFIX = ("/bin/bash", "--noprofile", "--norc", "-o", "pipefail", "-c")
+SCHEMA = "friday.engineer.command.v2"
+BASH_EXECUTABLE = "/usr/bin/bash"
+SHELL_FLAG_PREFIX = ("--noprofile", "--norc", "-o", "pipefail", "-c")
+SANDBOX_COMMAND = "/run/friday/command"
+SANDBOX_INTERPRETER = "/run/friday/interpreter"
+SANDBOX_SCRIPT = "/run/friday/script"
+SANDBOX_JOB = "/job"
+BWRAP_EXECUTABLE = "/usr/bin/bwrap"
 FIXED_ENV_KEYS = ("HOME", "LANG", "LC_ALL", "PATH", "PWD", "TMPDIR", "TZ")
+ALLOWED_CHANNELS = frozenset({"telegram", "cli_test", "owner_console"})
 GRANT_TTL_DEFAULT_SEC = 90
 GRANT_TTL_MAX_SEC = 180
 MAX_ARGV_ITEMS = 256
@@ -26,7 +34,11 @@ MAX_TIMEOUT_SEC = 3600
 MAX_OUTPUT_FILES = 64
 MAX_OUTPUT_FILE_BYTES = 16 * 1024 * 1024
 MAX_OUTPUT_TREE_BYTES = 32 * 1024 * 1024
-MAX_GRANT_CHARS = 8192
+MAX_OUTPUT_DEPTH = 8
+MAX_OUTPUT_DIRS = 64
+MAX_GRANT_CHARS = 16384
+MAX_EXECUTABLE_BYTES = 64 * 1024 * 1024
+DEFAULT_TRUSTED_PATH = ("/usr/bin", "/bin")
 DESTRUCTIVE_BASENAMES = frozenset(
     {
         "chage",
@@ -109,6 +121,11 @@ class CommandStatus(StrEnum):
     UNKNOWN = "unknown"
 
 
+class IsolationProfile(StrEnum):
+    ISOLATED_WORKSPACE = "isolated_workspace"
+    HOST_USER = "host_user"
+
+
 def canonical_json_bytes(value: Any) -> bytes:
     return json.dumps(value, ensure_ascii=True, sort_keys=True, separators=(",", ":")).encode("ascii")
 
@@ -120,6 +137,90 @@ def sha256_bytes(payload: bytes) -> str:
 def framed_argv_digest(argv: tuple[str, ...]) -> str:
     framed = b"".join(len(item.encode("utf-8")).to_bytes(4, "big") + item.encode("utf-8") for item in argv)
     return sha256_bytes(framed)
+
+
+@dataclass(frozen=True, slots=True)
+class TrustedPathContract:
+    """Code-owned PATH used for both resolution and the child environment."""
+
+    directories: tuple[str, ...]
+
+    def __post_init__(self) -> None:
+        if not self.directories:
+            raise CommandError("invalid_trusted_path")
+        cleaned: list[str] = []
+        seen: set[str] = set()
+        for item in self.directories:
+            if not isinstance(item, str) or not item.startswith("/") or "\x00" in item:
+                raise CommandError("invalid_trusted_path")
+            if any(part in {".", ".."} for part in Path(item).parts):
+                raise CommandError("invalid_trusted_path")
+            normalized = item if item == "/" else item.rstrip("/")
+            if normalized in seen:
+                raise CommandError("invalid_trusted_path")
+            seen.add(normalized)
+            cleaned.append(normalized)
+        object.__setattr__(self, "directories", tuple(cleaned))
+
+    @classmethod
+    def default(cls) -> TrustedPathContract:
+        return cls(directories=DEFAULT_TRUSTED_PATH)
+
+    @property
+    def runtime_path(self) -> str:
+        return ":".join(self.directories)
+
+
+@dataclass(frozen=True, slots=True)
+class OwnerSource:
+    """HMAC-sealed authenticated current source. Not inventable from origin/argv."""
+
+    actor_id: str
+    tenant_id: str
+    conversation_id: str
+    channel: str
+    source_row_id: str
+    source_hash: str
+    telegram_update_id: str
+    isolation_profile: IsolationProfile
+    host_user_authorized: bool
+    idempotency_key: str
+    mac: str
+
+    def identity_payload(self) -> dict[str, Any]:
+        return {
+            "actor_id": self.actor_id,
+            "channel": self.channel,
+            "conversation_id": self.conversation_id,
+            "host_user_authorized": self.host_user_authorized,
+            "idempotency_key": self.idempotency_key,
+            "isolation_profile": self.isolation_profile.value,
+            "schema": SCHEMA,
+            "source_hash": self.source_hash,
+            "source_row_id": self.source_row_id,
+            "telegram_update_id": self.telegram_update_id,
+            "tenant_id": self.tenant_id,
+            "v": 2,
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class DestructiveApproval:
+    """Separate sealed current-source confirmation. A boolean is not a grant."""
+
+    source_hash: str
+    confirmation_hash: str
+    command_digest: str
+    mac: str
+
+    def identity_payload(self) -> dict[str, Any]:
+        return {
+            "command_digest": self.command_digest,
+            "confirmation_hash": self.confirmation_hash,
+            "schema": SCHEMA,
+            "source_hash": self.source_hash,
+            "v": 2,
+        }
 
 
 @dataclass(frozen=True, slots=True)
@@ -184,12 +285,27 @@ class CommandRequest:
         }
         return sha256_bytes(canonical_json_bytes(payload))
 
+    @property
+    def argv_sha256(self) -> str:
+        if self.lane is CommandLane.SHELL:
+            return framed_argv_digest((*SHELL_FLAG_PREFIX, self.shell_command or ""))
+        return framed_argv_digest(self.argv)
+
 
 @dataclass(frozen=True, slots=True)
 class VerifiedCommandGrant:
     actor_id: str
-    turn_id: str
+    tenant_id: str
+    conversation_id: str
+    channel: str
+    source_row_id: str
+    source_hash: str
+    telegram_update_id: str
+    isolation_profile: IsolationProfile
+    host_user_authorized: bool
+    idempotency_key: str
     command_digest: str
+    argv_sha256: str
     lane: CommandLane
     origin: CommandOrigin
     destructive_confirmed: bool
@@ -230,6 +346,29 @@ class ResolvedExecutable:
         }
 
 
+@dataclass(slots=True)
+class HeldExecutable:
+    resolved: ResolvedExecutable
+    executable_fd: int
+    interpreter: ResolvedExecutable | None = None
+    interpreter_fd: int | None = None
+    script: ResolvedExecutable | None = None
+    script_fd: int | None = None
+    inner_rest: tuple[str, ...] = ()
+
+    def close(self) -> None:
+        seen: set[int] = set()
+        for fd in (self.executable_fd, self.interpreter_fd, self.script_fd):
+            if fd is None or fd < 0 or fd in seen:
+                continue
+            seen.add(fd)
+            with contextlib.suppress(OSError):
+                os.close(fd)
+        self.executable_fd = -1
+        self.interpreter_fd = None
+        self.script_fd = None
+
+
 @dataclass(frozen=True, slots=True)
 class GeneratedFile:
     relative_path: str
@@ -246,12 +385,15 @@ class CommandProgress:
     stdout_bytes: int
     stderr_bytes: int
     output_activity: bool
+    isolation_profile: IsolationProfile = IsolationProfile.ISOLATED_WORKSPACE
     percent: float | None = None
     eta_sec: float | None = None
 
     def to_public_payload(self) -> dict[str, Any]:
         payload: dict[str, Any] = {
             "elapsed_sec": round(self.elapsed_sec, 3),
+            "isolated": self.isolation_profile is IsolationProfile.ISOLATED_WORKSPACE,
+            "isolation_profile": self.isolation_profile.value,
             "job_id": self.job_id,
             "output_activity": self.output_activity,
             "status": self.status.value,
@@ -271,7 +413,10 @@ class CommandReceipt:
     status: CommandStatus
     lane: CommandLane
     origin: CommandOrigin
-    argv: tuple[str, ...]
+    isolation_profile: IsolationProfile
+    command_digest: str
+    argv_sha256: str
+    source_hash: str
     exit_code: int | None
     signal: int | None
     timed_out: bool
@@ -288,19 +433,26 @@ class CommandReceipt:
     generated_files: tuple[GeneratedFile, ...]
     error_code: str
     effect_boundary_crossed: bool
+    receipt_mac: str
     authorization_complete: Literal[False] = False
 
     def to_public_payload(self) -> dict[str, Any]:
         return {
             "authorization_complete": False,
+            "argv_sha256": self.argv_sha256,
             "cancelled": self.cancelled,
+            "command_digest": self.command_digest,
             "effect_boundary_crossed": self.effect_boundary_crossed,
             "error_code": self.error_code,
             "exit_code": self.exit_code,
             "generated_file_count": len(self.generated_files),
+            "isolated": self.isolation_profile is IsolationProfile.ISOLATED_WORKSPACE,
+            "isolation_profile": self.isolation_profile.value,
             "job_id": self.job_id,
             "lane": self.lane.value,
+            "receipt_mac": self.receipt_mac,
             "signal": self.signal,
+            "source_hash": self.source_hash,
             "status": self.status.value,
             "stderr_sha256": self.stderr_sha256,
             "stdout_sha256": self.stdout_sha256,
@@ -311,7 +463,10 @@ class CommandReceipt:
 
 
 __all__ = [
+    "ALLOWED_CHANNELS",
     "BASH_EXECUTABLE",
+    "BWRAP_EXECUTABLE",
+    "DEFAULT_TRUSTED_PATH",
     "DESTRUCTIVE_BASENAMES",
     "FIXED_ENV_KEYS",
     "FORBIDDEN_EXACT_PATHS",
@@ -321,7 +476,10 @@ __all__ = [
     "MAX_ARG_CHARS",
     "MAX_ARGV_BYTES",
     "MAX_ARGV_ITEMS",
+    "MAX_EXECUTABLE_BYTES",
     "MAX_GRANT_CHARS",
+    "MAX_OUTPUT_DEPTH",
+    "MAX_OUTPUT_DIRS",
     "MAX_OUTPUT_FILE_BYTES",
     "MAX_OUTPUT_FILES",
     "MAX_OUTPUT_TREE_BYTES",
@@ -330,9 +488,12 @@ __all__ = [
     "MAX_STDIN_BYTES",
     "MAX_STDOUT_BYTES",
     "MAX_TIMEOUT_SEC",
+    "SANDBOX_COMMAND",
+    "SANDBOX_INTERPRETER",
+    "SANDBOX_JOB",
+    "SANDBOX_SCRIPT",
     "SCHEMA",
-    "SHELL_ARGV_PREFIX",
-    "TRUSTED_PATH",
+    "SHELL_FLAG_PREFIX",
     "CommandError",
     "CommandLane",
     "CommandOrigin",
@@ -340,8 +501,13 @@ __all__ = [
     "CommandReceipt",
     "CommandRequest",
     "CommandStatus",
+    "DestructiveApproval",
     "GeneratedFile",
+    "HeldExecutable",
+    "IsolationProfile",
+    "OwnerSource",
     "ResolvedExecutable",
+    "TrustedPathContract",
     "VerifiedCommandGrant",
     "canonical_json_bytes",
     "framed_argv_digest",

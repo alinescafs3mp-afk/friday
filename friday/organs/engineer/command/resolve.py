@@ -1,25 +1,28 @@
-"""Resolve and re-attest executables without following the named path."""
+"""Resolve and hold attested executable FDs. Do not re-open by pathname at spawn."""
 
 from __future__ import annotations
 
 import errno
+import hashlib
 import os
 import stat
 from pathlib import Path
 
 from .contracts import (
     BASH_EXECUTABLE,
+    BWRAP_EXECUTABLE,
     DESTRUCTIVE_BASENAMES,
     FORBIDDEN_EXACT_PATHS,
     FORBIDDEN_PATH_PREFIXES,
-    SHELL_ARGV_PREFIX,
-    TRUSTED_PATH,
+    MAX_EXECUTABLE_BYTES,
+    SHELL_FLAG_PREFIX,
     CommandError,
     CommandLane,
     CommandRequest,
+    HeldExecutable,
     ResolvedExecutable,
+    TrustedPathContract,
     VerifiedCommandGrant,
-    sha256_bytes,
 )
 
 _MAX_SHEBANG = 4096
@@ -114,18 +117,18 @@ def _one_hop_alias(named: str) -> str:
 
 def _hash_fd(fd: int) -> str:
     os.lseek(fd, 0, os.SEEK_SET)
-    chunks: list[bytes] = []
+    digest = hashlib.sha256()
     total = 0
     while True:
         chunk = os.read(fd, 1024 * 1024)
         if not chunk:
             break
         total += len(chunk)
-        if total > 64 * 1024 * 1024:
+        if total > MAX_EXECUTABLE_BYTES:
             raise CommandError("executable_too_large")
-        chunks.append(chunk)
+        digest.update(chunk)
     os.lseek(fd, 0, os.SEEK_SET)
-    return sha256_bytes(b"".join(chunks))
+    return digest.hexdigest()
 
 
 def _read_shebang(fd: int) -> str | None:
@@ -146,7 +149,7 @@ def _read_shebang(fd: int) -> str | None:
     return interpreter
 
 
-def _attest_fd(fd: int, *, named: str, expected: ResolvedExecutable | None = None) -> ResolvedExecutable:
+def attest_open_fd(fd: int, *, named: str, expected: ResolvedExecutable | None = None) -> ResolvedExecutable:
     try:
         st = os.fstat(fd)
         named_st = os.lstat(named)
@@ -166,9 +169,7 @@ def _attest_fd(fd: int, *, named: str, expected: ResolvedExecutable | None = Non
     euid = os.geteuid()
     egid = os.getegid()
     executable = bool(
-        (st.st_uid == euid and mode & 0o100)
-        or (st.st_gid == egid and mode & 0o010)
-        or (mode & 0o001)
+        (st.st_uid == euid and mode & 0o100) or (st.st_gid == egid and mode & 0o010) or (mode & 0o001)
     )
     if not executable:
         raise CommandError("not_executable")
@@ -189,11 +190,35 @@ def _attest_fd(fd: int, *, named: str, expected: ResolvedExecutable | None = Non
     return resolved
 
 
-def _lookup_relative(name: str) -> str:
+def confirm_held_fd(fd: int, expected: ResolvedExecutable) -> None:
+    try:
+        st = os.fstat(fd)
+    except OSError as exc:
+        raise CommandError("identity_changed") from exc
+    if (
+        int(st.st_dev) != expected.device
+        or int(st.st_ino) != expected.inode
+        or int(st.st_uid) != expected.owner_uid
+        or int(st.st_gid) != expected.owner_gid
+        or int(st.st_mode) != expected.mode
+        or int(st.st_size) != expected.size_bytes
+    ):
+        raise CommandError("identity_changed")
+
+
+def confirm_held(held: HeldExecutable) -> None:
+    confirm_held_fd(held.executable_fd, held.resolved)
+    if held.interpreter_fd is not None and held.interpreter is not None:
+        confirm_held_fd(held.interpreter_fd, held.interpreter)
+    if held.script_fd is not None and held.script is not None:
+        confirm_held_fd(held.script_fd, held.script)
+
+
+def _lookup_relative(name: str, trusted_path: TrustedPathContract) -> str:
     if "/" in name or name in {".", ".."} or name.startswith("-"):
         raise CommandError("relative_name_invalid")
-    for directory in TRUSTED_PATH:
-        candidate = f"{directory.rstrip('/')}/{name}"
+    for directory in trusted_path.directories:
+        candidate = f"{directory}/{name}"
         try:
             os.lstat(candidate)
         except OSError:
@@ -207,25 +232,85 @@ def _lookup_relative(name: str) -> str:
     raise CommandError("executable_not_found")
 
 
-def resolve_named(path: str, *, depth: int = 0, expected: ResolvedExecutable | None = None) -> ResolvedExecutable:
+def resolve_named(
+    path: str,
+    *,
+    trusted_path: TrustedPathContract | None = None,
+    depth: int = 0,
+    expected: ResolvedExecutable | None = None,
+    hold: bool = False,
+) -> ResolvedExecutable | tuple[ResolvedExecutable, int, str | None]:
+    contract = trusted_path or TrustedPathContract.default()
     _reject_traversal(path)
-    named = path if path.startswith("/") else _lookup_relative(path)
+    named = path if path.startswith("/") else _lookup_relative(path, contract)
     named = _one_hop_alias(named)
     if _is_forbidden(named):
         raise CommandError("forbidden_path")
     fd = _open_named_nofollow(named)
     try:
-        resolved = _attest_fd(fd, named=named, expected=expected)
+        resolved = attest_open_fd(fd, named=named, expected=expected)
         shebang = _read_shebang(fd)
-    finally:
+        if shebang:
+            if depth >= _INTERPRETER_DEPTH:
+                raise CommandError("nested_script_refused")
+            if not shebang.startswith("/"):
+                raise CommandError("relative_interpreter")
+            interp_held = resolve_held(shebang, trusted_path=contract, depth=depth + 1)
+            interp_held.close()
+        if hold:
+            return resolved, fd, shebang
+    except Exception:
         os.close(fd)
-    if shebang:
-        if depth >= _INTERPRETER_DEPTH:
-            raise CommandError("nested_script_refused")
-        if not shebang.startswith("/"):
-            raise CommandError("relative_interpreter")
-        resolve_named(shebang, depth=depth + 1)
+        raise
+    os.close(fd)
     return resolved
+
+
+def resolve_held(
+    path: str,
+    *,
+    trusted_path: TrustedPathContract | None = None,
+    depth: int = 0,
+) -> HeldExecutable:
+    contract = trusted_path or TrustedPathContract.default()
+    resolved, fd, shebang = resolve_named(path, trusted_path=contract, depth=depth, hold=True)  # type: ignore[misc]
+    assert isinstance(resolved, ResolvedExecutable)
+    if not shebang:
+        os.set_inheritable(fd, True)
+        return HeldExecutable(resolved=resolved, executable_fd=fd)
+    if depth >= _INTERPRETER_DEPTH:
+        os.close(fd)
+        raise CommandError("nested_script_refused")
+    try:
+        interpreter = resolve_held(shebang, trusted_path=contract, depth=depth + 1)
+    except Exception:
+        os.close(fd)
+        raise
+    os.set_inheritable(fd, True)
+    os.set_inheritable(interpreter.executable_fd, True)
+    return HeldExecutable(
+        resolved=interpreter.resolved,
+        executable_fd=interpreter.executable_fd,
+        interpreter=interpreter.resolved,
+        interpreter_fd=interpreter.executable_fd,
+        script=resolved,
+        script_fd=fd,
+    )
+
+
+def resolve_root_helper(path: str) -> HeldExecutable:
+    named = _one_hop_alias(path)
+    fd = _open_named_nofollow(named)
+    try:
+        st = os.fstat(fd)
+        if st.st_uid != 0:
+            raise CommandError("helper_untrusted")
+        resolved = attest_open_fd(fd, named=named)
+    except Exception:
+        os.close(fd)
+        raise
+    os.set_inheritable(fd, True)
+    return HeldExecutable(resolved=resolved, executable_fd=fd)
 
 
 def _shell_requires_confirmation(command: str) -> bool:
@@ -233,35 +318,55 @@ def _shell_requires_confirmation(command: str) -> bool:
     return any(marker in lowered for marker in _DANGEROUS_SHELL_MARKERS)
 
 
-def require_destructive_grant(request: CommandRequest, grant: VerifiedCommandGrant, resolved: ResolvedExecutable) -> None:
+def require_destructive_grant(
+    request: CommandRequest,
+    grant: VerifiedCommandGrant,
+    resolved: ResolvedExecutable,
+) -> None:
     basename = Path(resolved.canonical_path).name
-    if basename in DESTRUCTIVE_BASENAMES and not grant.destructive_confirmed:
-        raise CommandError("destructive_confirmation_required")
+    needs = basename in DESTRUCTIVE_BASENAMES
     if (
         request.lane is CommandLane.SHELL
         and request.shell_command
         and _shell_requires_confirmation(request.shell_command)
-        and not grant.destructive_confirmed
     ):
+        needs = True
+    if needs and not grant.destructive_confirmed:
         raise CommandError("destructive_confirmation_required")
 
 
-def resolve_request(request: CommandRequest, grant: VerifiedCommandGrant) -> tuple[tuple[str, ...], ResolvedExecutable]:
+def resolve_request(
+    request: CommandRequest,
+    grant: VerifiedCommandGrant,
+    *,
+    trusted_path: TrustedPathContract,
+) -> HeldExecutable:
     if request.lane is CommandLane.SHELL:
-        resolved = resolve_named(BASH_EXECUTABLE)
-        if Path(resolved.canonical_path).name != "bash":
+        held = resolve_held(BASH_EXECUTABLE, trusted_path=trusted_path)
+        if Path(held.resolved.canonical_path).name != "bash":
+            held.close()
             raise CommandError("bash_path_mismatch")
-        argv = (*SHELL_ARGV_PREFIX, request.shell_command or "")
-        require_destructive_grant(request, grant, resolved)
-        return argv, resolved
-    resolved = resolve_named(request.argv[0])
-    require_destructive_grant(request, grant, resolved)
-    return (resolved.canonical_path, *request.argv[1:]), resolved
-
-
-def reopen_and_confirm(resolved: ResolvedExecutable) -> None:
-    fd = _open_named_nofollow(resolved.canonical_path)
+        try:
+            require_destructive_grant(request, grant, held.resolved)
+        except CommandError:
+            held.close()
+            raise
+        held.inner_rest = (*SHELL_FLAG_PREFIX, request.shell_command or "")
+        return held
+    held = resolve_held(request.argv[0], trusted_path=trusted_path)
     try:
-        _attest_fd(fd, named=resolved.canonical_path, expected=resolved)
-    finally:
-        os.close(fd)
+        require_destructive_grant(request, grant, held.script or held.resolved)
+        for item in request.argv[1:]:
+            if item.startswith("/proc/") or item.startswith("/sys/") or item.startswith("/dev/"):
+                raise CommandError("forbidden_path")
+            if "docker.sock" in item:
+                raise CommandError("forbidden_path")
+    except CommandError:
+        held.close()
+        raise
+    held.inner_rest = request.argv[1:]
+    return held
+
+
+def resolve_bwrap() -> HeldExecutable:
+    return resolve_root_helper(BWRAP_EXECUTABLE)
