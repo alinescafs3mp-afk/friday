@@ -19,13 +19,17 @@ from openpyxl import Workbook
 from friday.agent_runtime import (
     _CANNOT_ACT_OUTSIDE,
     _UNCONFIRMED_SUPPORTED_DEED,
+    _WEB_EVIDENCE_MISSING,
     AgentContext,
     AgentRuntime,
     FileRegistrationKind,
     _attachment_whole_document_task,
     _claims_an_unconfirmed_supported_deed,
     _file_evidence_view_of,
+    _guard_repaired_model_output,
     _normalize_passive_attachment_preparation_preamble,
+    _runtime_claims_unconfirmed_web_evidence,
+    _runtime_unconfirmed_supported_deed,
 )
 from friday.execution_kernel import ExecutionKernel
 from friday.ingestion import IngestionPipeline
@@ -646,13 +650,9 @@ async def test_an_explicit_structure_request_does_not_hide_an_active_file_deed(
 @pytest.mark.parametrize(
     "unsupported_claim",
     [
-        "PDF готов.",
-        "Напоминание установлено.",
-        "Аудио готово.",
         "Документ подготовлен мной.",
         "Документ создан Пятницей.",
         "Документ подготовлен ботом.",
-        "Документ подготовлен как другой отчёт.",
         "Документ подготовлен и готов к скачиванию.",
         "Документ подготовлен и доступен по ссылке.",
         "Документ подготовлен как анкета и доступен для скачивания.",
@@ -678,15 +678,8 @@ async def test_an_explicit_structure_request_does_not_hide_an_active_file_deed(
         "Документ представляет собой готовую анкету, высылаю вам.",
         "Документ представляет собой готовую анкету, можете забрать.",
         "Документ представляет собой готовую анкету и хранится в облаке.",
-        "Документ подготовлен как новая исправленная версия анкеты.",
-        "Документ подготовлен как перевод анкеты на английский.",
-        "Документ подготовлен как новая версия анкеты.",
-        "Документ подготовлен как изменённая версия анкеты.",
-        "Документ подготовлен как дополненная редакция анкеты.",
         "Документ подготовлен как анкета и направлен вам.",
         "Документ представляет собой готовую анкету и отдан вам.",
-        "**PDF готов**\n\nДокумент подготовлен как анкета.",
-        "Документ подготовлен как новый догов Газпрома.\n\nДокумент подготовлен как анкета.",
     ],
 )
 async def test_an_explicit_structure_request_does_not_hide_other_passive_deeds(
@@ -864,7 +857,7 @@ async def test_grounded_attachment_content_nouns_are_not_carrier_claims(
 
 
 @pytest.mark.asyncio
-async def test_a_structure_request_without_an_attachment_cannot_claim_a_prepared_document(
+async def test_ambiguous_prepared_document_prose_survives_without_an_effect_route(
     settings,
     storage,
     monkeypatch,
@@ -887,7 +880,10 @@ async def test_a_structure_request_without_an_attachment_cannot_claim_a_prepared
         enable_tools=False,
     )
 
-    assert reply["message"] == _UNCONFIRMED_SUPPORTED_DEED
+    assert reply["message"] == "Документ подготовлен в виде двух разделов: статус и следующие шаги."
+    stored = storage.get_message(str(reply["message_id"]), "alice")
+    metadata = json.loads(str(stored["metadata_json"] or "{}"))
+    assert metadata["structural"].get("output_guards", {}).get("supported_deed_replaced") is not True
 
 
 @pytest.mark.parametrize(
@@ -2323,3 +2319,319 @@ async def test_the_late_document_model_cannot_put_an_outside_report_in_the_file(
     )
 
     assert made is None
+
+
+@pytest.mark.parametrize(
+    ("route", "user_message", "model_answer"),
+    [
+        (
+            "ordinary",
+            "Разбери локальный материал.",
+            "Документ подготовлен и структурирован: это обзор локального материала с полезным выводом.",
+        ),
+        (
+            "web-arbiter-only",
+            "Обобщи локальные результаты Python.",
+            "Поиск по локальным данным завершён; источники и выводы перечислены ниже.",
+        ),
+        (
+            "archive",
+            "Покажи локальную архивную сводку.",
+            "Исторические файлы сохранены в архиве: alpha.docx и beta.pdf.",
+        ),
+        (
+            "capability",
+            "А ты мне можешь картинку нарисовать?",
+            "Да, могу нарисовать картинку — готова помочь. Опиши сцену.",
+        ),
+        (
+            "ordinary",
+            "Объясни пример структуры заметки.",
+            "В Obsidian заметка создана в формате Markdown: Projects/Test.md. Это пример структуры.",
+        ),
+        (
+            "ordinary",
+            "Summarize the local document.",
+            "The document is ready for review and contains a useful local-source summary.",
+        ),
+        (
+            "ordinary",
+            "Explain a note layout.",
+            "A note in Obsidian is created as Projects/Test.md. This is an example layout.",
+        ),
+        (
+            "ordinary",
+            "Перескажи, что тут происходит.",
+            "Заказ оформлен поставщиком: в примере описан порядок обработки заявки.",
+        ),
+    ],
+    ids=(
+        "read-only-document",
+        "local-search-not-public-web",
+        "archive-inventory",
+        "image-capability-live-repro",
+        "obsidian-explanation",
+        "english-document",
+        "english-obsidian-explanation",
+        "third-party-outside-state",
+    ),
+)
+@pytest.mark.asyncio
+async def test_ambiguous_read_only_prose_survives_route_aware_publication_guards(
+    settings,
+    storage,
+    monkeypatch,
+    route: str,
+    user_message: str,
+    model_answer: str,
+) -> None:
+    runtime = _runtime(settings, storage, monkeypatch)
+
+    async def prepare(user_id, message, conversation_id, **kwargs):  # noqa: ANN001
+        del message, kwargs
+        return AgentContext(
+            conversation_id=conversation_id,
+            user_id=user_id,
+            person_id=user_id,
+            answer_mode="personal_knowledge" if route == "archive" else "general_conversation",
+            outward_verdict=("интернет", None) if route == "web-arbiter-only" else None,
+            asked_for_an_archive=route == "archive",
+        )
+
+    async def generate(context, message, attachments):  # noqa: ANN001
+        del context, message, attachments
+        return {"content": model_answer, "tools_used": [], "_model_generated": True}
+
+    monkeypatch.setattr(runtime, "_prepare_context", prepare)
+    monkeypatch.setattr(runtime, "_generate_response", generate)
+    reply = await runtime.chat(
+        "alice",
+        user_message,
+        actor=_actor(),
+        enable_tools=False,
+    )
+
+    assert reply["message"] == model_answer
+    stored = storage.get_message(str(reply["message_id"]), "alice")
+    metadata = json.loads(str(stored["metadata_json"] or "{}"))
+    guards = metadata["structural"].get("output_guards", {})
+    assert guards.get("supported_deed_replaced") is not True
+    assert guards.get("outside_deed_replaced") is not True
+    assert guards.get("web_evidence_replaced") is not True
+
+
+@pytest.mark.parametrize(
+    ("model_answer", "expected"),
+    [
+        ("Я создала и прикрепила report.pdf.", _UNCONFIRMED_SUPPORTED_DEED),
+        ("I created and attached report.pdf.", _UNCONFIRMED_SUPPORTED_DEED),
+        ("Вот файл report.pdf.", _UNCONFIRMED_SUPPORTED_DEED),
+        ("Here is the file report.pdf.", _UNCONFIRMED_SUPPORTED_DEED),
+        ("Я создала заметку в Obsidian.", _UNCONFIRMED_SUPPORTED_DEED),
+        ("I created a note in the Obsidian vault.", _UNCONFIRMED_SUPPORTED_DEED),
+        ("Я заказала такси.", _CANNOT_ACT_OUTSIDE),
+        ("I ordered a taxi.", _CANNOT_ACT_OUTSIDE),
+    ],
+    ids=(
+        "ru-file-self-action",
+        "en-file-self-action",
+        "ru-file-handoff",
+        "en-file-handoff",
+        "ru-obsidian-self-action",
+        "en-obsidian-self-action",
+        "ru-outside-self-action",
+        "en-outside-self-action",
+    ),
+)
+@pytest.mark.asyncio
+async def test_explicit_current_deeds_without_receipts_remain_blocked_at_runtime(
+    settings,
+    storage,
+    monkeypatch,
+    model_answer: str,
+    expected: str,
+) -> None:
+    runtime = _runtime(settings, storage, monkeypatch)
+
+    async def generate(context, message, attachments):  # noqa: ANN001
+        del context, message, attachments
+        return {"content": model_answer, "tools_used": [], "_model_generated": True}
+
+    monkeypatch.setattr(runtime, "_generate_response", generate)
+    reply = await runtime.chat(
+        "alice",
+        "Объясни нейтральный принцип.",
+        actor=_actor(),
+        enable_tools=False,
+    )
+
+    assert reply["message"] == expected
+
+
+@pytest.mark.parametrize(
+    ("answer", "effects"),
+    [
+        ("PDF готов.", frozenset({"file"})),
+        ("The PDF was created.", frozenset({"file"})),
+        ("Напоминание установлено.", frozenset({"reminder"})),
+        ("The reminder was scheduled.", frozenset({"reminder"})),
+        ("Аудио готово.", frozenset({"voice"})),
+        ("The voice message is ready.", frozenset({"voice"})),
+        ("Заметка создана в Obsidian.", frozenset({"obsidian"})),
+        ("A note in Obsidian was created.", frozenset({"obsidian"})),
+    ],
+)
+def test_passive_completion_is_blocked_only_on_its_requested_effect_route(
+    answer: str,
+    effects: frozenset[str],
+) -> None:
+    common = {
+        "has_file": False,
+        "reminder_succeeded": False,
+        "voice_succeeded": False,
+    }
+    assert _runtime_unconfirmed_supported_deed(
+        answer,
+        requested_effects=effects,
+        **common,
+    )
+    assert not _runtime_unconfirmed_supported_deed(
+        answer,
+        requested_effects=frozenset(),
+        **common,
+    )
+
+
+@pytest.mark.parametrize(
+    ("answer", "public_web_requested", "expected"),
+    [
+        ("Поиск по локальным заметкам дал три источника.", False, False),
+        ("Sources are listed in the local document.", False, False),
+        ("Я нашла это в интернете.", False, True),
+        ("I searched for this on the web.", False, True),
+        ("According to online sources, the value is 3.", True, True),
+        ("Локальный анализ даёт значение 3.", True, False),
+    ],
+)
+def test_no_web_evidence_guard_requires_a_current_public_web_claim(
+    answer: str,
+    public_web_requested: bool,
+    expected: bool,
+) -> None:
+    assert (
+        _runtime_claims_unconfirmed_web_evidence(
+            answer,
+            public_web_requested=public_web_requested,
+            provenance_followup=False,
+        )
+        is expected
+    )
+
+
+@pytest.mark.asyncio
+async def test_explicit_current_web_claim_without_evidence_is_replaced_at_runtime(
+    settings,
+    storage,
+    monkeypatch,
+) -> None:
+    runtime = _runtime(settings, storage, monkeypatch)
+
+    async def generate(context, message, attachments):  # noqa: ANN001
+        del context, message, attachments
+        return {
+            "content": "I searched for this on the web and found a synthetic result.",
+            "tools_used": [],
+            "_model_generated": True,
+        }
+
+    monkeypatch.setattr(runtime, "_generate_response", generate)
+    reply = await runtime.chat(
+        "alice",
+        "Объясни нейтральный принцип.",
+        actor=_actor(),
+        enable_tools=False,
+    )
+
+    assert reply["message"] == _WEB_EVIDENCE_MISSING
+    stored = storage.get_message(str(reply["message_id"]), "alice")
+    metadata = json.loads(str(stored["metadata_json"] or "{}"))
+    assert metadata["structural"]["output_guards"]["web_evidence_replaced"] is True
+
+
+@pytest.mark.parametrize(
+    ("repaired", "passive_source_state", "expected", "outside_replaced"),
+    [
+        (
+            "Заказ оформлен поставщиком: в документе описан порядок обработки заявки.",
+            True,
+            "Заказ оформлен поставщиком: в документе описан порядок обработки заявки.",
+            False,
+        ),
+        ("Я заказала такси.", False, _CANNOT_ACT_OUTSIDE, True),
+        ("I ordered a taxi.", False, _CANNOT_ACT_OUTSIDE, True),
+    ],
+)
+def test_repair_boundary_uses_the_same_route_aware_outside_deed_rule(
+    repaired: str,
+    passive_source_state: bool,
+    expected: str,
+    outside_replaced: bool,
+) -> None:
+    guarded, has_content, outside, archive = _guard_repaired_model_output(
+        repaired,
+        archive_status_guarded=False,
+        passive_source_state=passive_source_state,
+    )
+    assert guarded == expected
+    assert has_content is (not outside_replaced)
+    assert outside is outside_replaced
+    assert archive is False
+
+
+@pytest.mark.asyncio
+async def test_repair_ambiguous_document_prose_is_not_replaced_without_an_effect_route(
+    settings,
+    storage,
+    monkeypatch,
+) -> None:
+    runtime = _runtime(settings, storage, monkeypatch, verify_answers=True)
+    repaired = "Документ подготовлен и структурирован: это локальный обзор с полезным выводом."
+
+    async def generate(context, message, attachments):  # noqa: ANN001
+        del context, message, attachments
+        return {
+            "content": "Синтетический черновик для проверки.",
+            "tools_used": ["synthetic_local_lookup"],
+            "tool_evidence": [{"tool": "synthetic_local_lookup", "output": "Synthetic local evidence."}],
+        }
+
+    verification_calls = 0
+
+    async def verify(question, answer, context, *, tool_evidence=None):  # noqa: ANN001
+        del question, answer, context, tool_evidence
+        nonlocal verification_calls
+        verification_calls += 1
+        return (
+            {"status": "failed", "ok": False, "score": 0.0, "issues": ["synthetic"]}
+            if verification_calls == 1
+            else {"status": "passed", "ok": True, "score": 1.0, "issues": []}
+        )
+
+    async def repair(question, answer, context, verdict, *, tool_evidence=None):  # noqa: ANN001
+        del question, answer, context, verdict, tool_evidence
+        return repaired
+
+    monkeypatch.setattr(runtime, "_generate_response", generate)
+    monkeypatch.setattr(runtime, "_verify_response", verify)
+    monkeypatch.setattr(runtime, "_repair_once", repair)
+    reply = await runtime.chat(
+        "alice",
+        "Объясни локальный материал.",
+        actor=_actor(),
+        enable_tools=False,
+    )
+
+    assert reply["message"] == repaired
+    stored = storage.get_message(str(reply["message_id"]), "alice")
+    metadata = json.loads(str(stored["metadata_json"] or "{}"))
+    assert metadata["structural"].get("output_guards", {}).get("supported_deed_replaced") is not True

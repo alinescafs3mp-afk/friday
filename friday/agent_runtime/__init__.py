@@ -6483,6 +6483,48 @@ def claims_a_deed_it_cannot_do(
     )
 
 
+_OUTSIDE_CURRENT_COMPLETION = re.compile(
+    r"^\W*(?:готово|сделано|выполнено|только\s+что)\b",
+    re.IGNORECASE,
+)
+_ENGLISH_CURRENT_OUTSIDE_DEED = re.compile(
+    r"^\W*(?:i|we)\s+(?:have\s+|already\s+|just\s+)*"
+    r"(?:ordered|called|booked|paid|bought|reserved|hired|cancelled|canceled|"
+    r"rescheduled|refunded|submitted|printed|sent|delivered|restarted)\b",
+    re.IGNORECASE,
+)
+_OUTSIDE_EFFECT_REQUEST = re.compile(
+    r"\b(?:закаж|вызов|оплат|купи|заброниру|организу|достав|распечат|позвон|"
+    r"перезапуст|отправ)\w*\b[^.!?\n]{0,96}\b"
+    r"(?:такси|курьер|доставк|заказ|сч[её]т|плат[её]ж|билет|покупк|"
+    r"столик|принтер|телефон|устройств)\w*\b",
+    re.IGNORECASE,
+)
+
+
+def _claims_an_explicit_current_outside_deed(
+    answer: str,
+    *,
+    passive_source_state: bool = False,
+    effect_requested: bool = False,
+) -> bool:
+    """Narrow publication guard for current real-world actions."""
+
+    del passive_source_state  # Passive source prose is deliberately fail-open.
+    if _ENGLISH_CURRENT_OUTSIDE_DEED.search(_classification_text(answer)):
+        return True
+    if not claims_a_deed_it_cannot_do(answer):
+        return False
+    if effect_requested or _OUTSIDE_CURRENT_COMPLETION.search(_classification_text(answer)):
+        return True
+    return any(
+        _has_self_action_relation(clause)
+        or _OUTSIDE_DEED_OBJECT_FIRST_IMPLICIT.search(clause)
+        or _OUTSIDE_DEED_SELF_AGENT.search(clause)
+        for clause in _model_authored_clauses(answer)
+    )
+
+
 _FABRICATED_OUTSIDE_DEED_LEAD = re.compile(
     r"^\W*(?:сообщ\w*|подтверд\w*|скаж\w*|утвержда\w*|заверь\w*|ответ\w*|"
     r"напиш\w*)\b[^.!?;\n]{0,48}?\b(?:как\s+будто|будто|якобы|что)\b"
@@ -9071,6 +9113,202 @@ def _claims_an_unconfirmed_obsidian_deed(answer: str) -> bool:
     return False
 
 
+_ENGLISH_SUPPORTED_DEED_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
+    (
+        "file",
+        re.compile(
+            r"\b(?:files?|documents?|reports?|attachments?|pdf|docx?|xlsx?|images?)\b"
+            r"[^.!?\n]{0,96}\b(?:created|made|generated|saved|exported|prepared|"
+            r"attached|sent|uploaded|delivered|ready)\b|"
+            r"\b(?:created|made|generated|saved|exported|prepared|attached|sent|"
+            r"uploaded|delivered)\b[^.!?\n]{0,96}"
+            r"\b(?:files?|documents?|reports?|attachments?|pdf|docx?|xlsx?|images?)\b|"
+            r"^\W*(?:here\s+(?:is|are)|here['’]s)\b[^.!?\n]{0,64}"
+            r"\b(?:files?|documents?|reports?|attachments?|pdf|docx?|xlsx?|images?)\b",
+            re.IGNORECASE,
+        ),
+    ),
+    (
+        "reminder",
+        re.compile(
+            r"\breminders?\b[^.!?\n]{0,96}\b(?:set|created|scheduled|saved|ready)\b|"
+            r"\b(?:set|created|scheduled|saved)\b[^.!?\n]{0,96}\breminders?\b",
+            re.IGNORECASE,
+        ),
+    ),
+    (
+        "voice",
+        re.compile(
+            r"\b(?:voice|audio)(?:\s+(?:message|note|reply))?\b[^.!?\n]{0,96}"
+            r"\b(?:recorded|created|sent|attached|ready)\b|"
+            r"\b(?:recorded|created|sent|attached)\b[^.!?\n]{0,96}"
+            r"\b(?:voice|audio)(?:\s+(?:message|note|reply))?\b",
+            re.IGNORECASE,
+        ),
+    ),
+    (
+        "obsidian",
+        re.compile(
+            r"(?=[^.!?\n]*\b(?:obsidian|vault)\b)"
+            r"(?=[^.!?\n]*\b(?:notes?|markdown)\b)"
+            r"[^.!?\n]*\b(?:created|saved|written|added|updated|changed|ready)\b",
+            re.IGNORECASE,
+        ),
+    ),
+)
+_ENGLISH_EXPLICIT_SUPPORTED_DEED = re.compile(
+    r"^\W*(?:(?:i|we)\s+(?:have\s+|already\s+|just\s+)*"
+    r"(?:created|made|generated|saved|exported|prepared|attached|sent|uploaded|"
+    r"delivered|set|scheduled|recorded|wrote|added|updated|changed)|"
+    r"here\s+(?:is|are)|here['’]s)\b",
+    re.IGNORECASE,
+)
+_OBSIDIAN_EXPLICIT_SUPPORTED_DEED = re.compile(
+    r"(?:\b(?:я|мы)\s+(?:создал|сохранил|записал|добавил|дописал|обновил|изменил)\w*\b|"
+    r"^\W*(?:готово|сделано|выполнено|вот|держи(?:те)?)\b)",
+    re.IGNORECASE,
+)
+_SUPPORTED_FILE_EXPLICIT_MODEL_AGENT = re.compile(
+    r"\b(?:мной|нами|пятниц\w*|бот\w*|модел\w*|"
+    r"искусственн\w+\s+интеллект\w*)\b",
+    re.IGNORECASE,
+)
+_SUPPORTED_FILE_CURRENT_CARRIER = re.compile(
+    r"\b(?:прикрепл[её]н|приложен|отправлен|выгружен|загружен)\w*\b|"
+    r"\b(?:наход|леж)\w*\s+(?:в\s+(?:облак|хранилищ|чат)\w*|по\s+ссылк\w*)|"
+    r"\b(?:вот\s+ссылк\w*|ссылк\w*\s+(?:здесь|тут|ниже))\b",
+    re.IGNORECASE,
+)
+
+
+def _supported_deed_families(answer: str) -> frozenset[str]:
+    families: set[str] = set()
+    if _SUPPORTED_FILE_COMPLETION.search(answer) or _actual_supported_ready_file_claims(answer):
+        families.add("file")
+    if _SUPPORTED_REMINDER_COMPLETION.search(answer):
+        families.add("reminder")
+    if _SUPPORTED_VOICE_COMPLETION.search(answer):
+        families.add("voice")
+    if (
+        _UNCONFIRMED_OBSIDIAN_CHANNEL.search(answer)
+        and _UNCONFIRMED_OBSIDIAN_NOTE.search(answer)
+        and _UNCONFIRMED_OBSIDIAN_COMPLETION.search(answer)
+    ):
+        families.add("obsidian")
+    families.update(kind for kind, pattern in _ENGLISH_SUPPORTED_DEED_PATTERNS if pattern.search(answer))
+    return frozenset(families)
+
+
+def _explicit_supported_file_claim(answer: str) -> bool:
+    has_file_completion = bool(
+        _SUPPORTED_FILE_COMPLETION.search(answer) or _PASSIVE_ATTACHMENT_READY_DESCRIPTION.search(answer)
+    )
+    return bool(
+        _SUPPORTED_FILE_BARE_HANDOFF.search(answer)
+        or (
+            has_file_completion
+            and (
+                _READ_ONLY_ATTACHMENT_CARRIER_CLAIM.search(answer)
+                or _READ_ONLY_ATTACHMENT_UNSAFE_DESCRIPTION_SUFFIX.search(answer)
+                or _PASSIVE_INPUT_CURRENT_DELIVERY.search(answer)
+                or _PASSIVE_INPUT_CURRENT_AVAILABILITY.search(answer)
+                or _SUPPORTED_FILE_EXPLICIT_MODEL_AGENT.search(answer)
+                or _SUPPORTED_FILE_CURRENT_CARRIER.search(answer)
+            )
+        )
+        or (
+            _SUPPORTED_FILE_ACTIVE_COMPLETION.search(answer)
+            and (
+                re.search(rf"\b{_SUPPORTED_FILE_OBJECT}\b", answer, re.IGNORECASE)
+                or _attachment_filename_mentions(answer)
+            )
+        )
+    )
+
+
+def _supported_file_claim_has_receipt(answer: str, descriptors: Sequence[str]) -> bool:
+    if not descriptors or not _supported_file_formats_match_evidence(answer, tuple(descriptors)):
+        return False
+    claimed = set(_attachment_filename_mentions(answer))
+    evidenced = {
+        filename
+        for descriptor in descriptors
+        for filename in _attachment_filename_mentions(str(descriptor or ""))
+    }
+    return not claimed or claimed.issubset(evidenced)
+
+
+def _runtime_unconfirmed_supported_deed(
+    answer: str,
+    *,
+    requested_effects: frozenset[str],
+    has_file: bool,
+    reminder_succeeded: bool,
+    reminder_delivery_scheduled: bool = False,
+    voice_succeeded: bool = False,
+    file_descriptors: list[str] | tuple[str, ...] = (),
+    file_format_descriptors: list[str] | tuple[str, ...] | None = None,
+    external_file_descriptors: list[str] | tuple[str, ...] = (),
+    reminder_descriptors: list[str] | tuple[str, ...] = (),
+    read_only_timeline_file_report: bool = False,
+    passive_source_state: bool = False,
+    passive_input_file_state_evidence: Sequence[str] = (),
+    bounded_historical_archive_report: bool = False,
+    read_only_attachment_review: bool = False,
+    read_only_attachment_descriptors: Sequence[str] = (),
+) -> bool:
+    """Reject supported deeds only on their effect route or explicit hand-off."""
+
+    families = _supported_deed_families(answer)
+    russian_unconfirmed = _claims_an_unconfirmed_supported_deed(
+        answer,
+        has_file=has_file,
+        reminder_succeeded=reminder_succeeded,
+        reminder_delivery_scheduled=reminder_delivery_scheduled,
+        voice_succeeded=voice_succeeded,
+        file_descriptors=file_descriptors,
+        file_format_descriptors=file_format_descriptors,
+        external_file_descriptors=external_file_descriptors,
+        reminder_descriptors=reminder_descriptors,
+        read_only_timeline_file_report=read_only_timeline_file_report,
+        passive_source_state=passive_source_state,
+        passive_input_file_state_evidence=passive_input_file_state_evidence,
+        bounded_historical_archive_report=bounded_historical_archive_report,
+        read_only_attachment_review=read_only_attachment_review,
+        read_only_attachment_descriptors=read_only_attachment_descriptors,
+    )
+    if russian_unconfirmed and families.intersection(requested_effects):
+        return True
+    if _claims_an_unconfirmed_obsidian_deed(answer) and _OBSIDIAN_EXPLICIT_SUPPORTED_DEED.search(answer):
+        return True
+    if _explicit_supported_file_claim(answer) and not _supported_file_claim_has_receipt(
+        answer, file_descriptors
+    ):
+        return True
+    for family, pattern in _ENGLISH_SUPPORTED_DEED_PATTERNS:
+        if not pattern.search(answer):
+            continue
+        explicit = _ENGLISH_EXPLICIT_SUPPORTED_DEED.search(answer) is not None
+        if not explicit and family not in requested_effects:
+            continue
+        if family == "file":
+            if not _supported_file_claim_has_receipt(answer, file_descriptors):
+                return True
+        elif family == "reminder":
+            if not reminder_succeeded:
+                return True
+        elif family == "voice":
+            if not voice_succeeded:
+                return True
+        else:
+            return True
+    return bool(
+        "obsidian" in requested_effects
+        and "obsidian" in families
+        and not _claims_an_unconfirmed_obsidian_deed(answer)
+    )
+
+
 #: Служебный отрицательный статус внутреннего поиска не отвечает на обычный
 #: вопрос. Два признака нужны одновременно: КАКОЕ хранилище и ЧТО в нём не
 #: нашлось. Одного слова «архив» недостаточно — публичный архив бывает предметом
@@ -9300,6 +9538,7 @@ def _guard_repaired_model_output(
     *,
     archive_status_guarded: bool,
     passive_source_state: bool = False,
+    outside_effect_requested: bool = False,
 ) -> tuple[str, bool, bool, bool]:
     """Повторить выходные рубежи после единственного repair.
 
@@ -9308,9 +9547,10 @@ def _guard_repaired_model_output(
     последующая проверка по-прежнему встречаются в коде ровно по одному разу.
     """
 
-    if claims_a_deed_it_cannot_do(
+    if _claims_an_explicit_current_outside_deed(
         answer,
         passive_source_state=passive_source_state,
+        effect_requested=outside_effect_requested,
     ):
         return _CANNOT_ACT_OUTSIDE, False, True, False
     if archive_status_guarded:
@@ -9318,9 +9558,10 @@ def _guard_repaired_model_output(
         if (
             changed
             and has_model_content
-            and claims_a_deed_it_cannot_do(
+            and _claims_an_explicit_current_outside_deed(
                 cleaned,
                 passive_source_state=passive_source_state,
+                effect_requested=outside_effect_requested,
             )
         ):
             return _CANNOT_ACT_OUTSIDE, False, True, True
@@ -29963,6 +30204,50 @@ def _claims_current_answer_came_from_the_web(answer: str) -> bool:
     return _has_affirmative_web_provenance(answer, max_chars=8000)
 
 
+_ENGLISH_CURRENT_WEB_ACTION = re.compile(
+    r"\b(?:i|we)\s+(?:have\s+|already\s+|just\s+)*"
+    r"(?:searched|found|checked|looked\s+up|researched)\b[^.!?;\n]{0,64}"
+    r"\b(?:on|in|through|using)\s+(?:the\s+)?(?:internet|web|online)\b",
+    re.IGNORECASE,
+)
+_CURRENT_PUBLIC_WEB_RESULT = re.compile(
+    r"\b(?:текущ\w*|свеж\w*|актуальн\w*|на\s+сегодня|current|latest|up-to-date)\b",
+    re.IGNORECASE,
+)
+
+
+def _runtime_claims_unconfirmed_web_evidence(
+    answer: str,
+    *,
+    public_web_requested: bool,
+    provenance_followup: bool,
+) -> bool:
+    """Keep local search/source prose outside the public-web guard."""
+
+    if _claims_current_answer_came_from_the_web(answer) or _ENGLISH_CURRENT_WEB_ACTION.search(answer):
+        return True
+    if public_web_requested and _CURRENT_PUBLIC_WEB_RESULT.search(answer):
+        return True
+    if not (public_web_requested or provenance_followup):
+        return False
+    has_web_literal = bool(
+        _MODEL_MARKDOWN_WEB_LINK.search(answer)
+        or _MODEL_PLAIN_WEB_URL.search(answer)
+        or _MODEL_ANY_DOMAIN_OR_IP.search(answer)
+    )
+    return bool(
+        _has_explicit_web_provenance_claim(answer)
+        or (
+            has_web_literal
+            and (
+                provenance_followup
+                or _MODEL_WEB_PROVENANCE_CLAIM.search(answer)
+                or _model_text_has_external_source(answer)
+            )
+        )
+    )
+
+
 _PRIOR_WEB_SOURCE_FOLLOWUP = re.compile(
     r"^\s*(?:(?:источник\w*|ссылк\w*)\s*|(?:есть\s+)?ссылк\w*\s*|"
     r"(?:откуда|где)\s+(?:эта\s+)?(?:(?:информац|иформац)\w*|данн\w*|сведени\w*|это)\s*|"
@@ -49340,6 +49625,13 @@ class AgentRuntime:
             response["file_clips"] = []
             response["voice_clip"] = None
             response["knowledge_object_ids"] = []
+        public_web_publication_route = bool(
+            asks_for_the_web(clean_message)
+            or policy_web_query
+            or public_product_spec_query
+            or public_market_query
+            or explicit_public_web_query
+        )
         web_evidence_replaced = bool(
             not dangerous_instruction_request
             and not dangerous_output_replaced
@@ -49354,35 +49646,10 @@ class AgentRuntime:
             and response.get("_advisory_attachment_literal_owned") is not True
             and not attachment_web_literal_grounded
             and not web_evidence_used
-            and (
-                (web_intent_authorized and web_evidence_status in {"failed", "empty"})
-                or file_web
-                or _claims_current_answer_came_from_the_web(content)
-                or _has_explicit_web_provenance_claim(content)
-                or bool(
-                    _model_text_has_external_source(content)
-                    and (
-                        _MODEL_MARKDOWN_WEB_LINK.search(content)
-                        or _MODEL_PLAIN_WEB_URL.search(content)
-                        or _MODEL_ANY_DOMAIN_OR_IP.search(content)
-                    )
-                )
-                or bool(
-                    _PRIOR_WEB_SOURCE_FOLLOWUP.fullmatch(clean_message)
-                    and (
-                        _MODEL_MARKDOWN_WEB_LINK.search(content)
-                        or _MODEL_PLAIN_WEB_URL.search(content)
-                        or _MODEL_ANY_DOMAIN_OR_IP.search(content)
-                    )
-                )
-                or bool(
-                    _MODEL_WEB_PROVENANCE_CLAIM.search(content)
-                    and (
-                        _MODEL_MARKDOWN_WEB_LINK.search(content)
-                        or _MODEL_PLAIN_WEB_URL.search(content)
-                        or _MODEL_ANY_DOMAIN_OR_IP.search(content)
-                    )
-                )
+            and _runtime_claims_unconfirmed_web_evidence(
+                content,
+                public_web_requested=public_web_publication_route,
+                provenance_followup=_PRIOR_WEB_SOURCE_FOLLOWUP.fullmatch(clean_message) is not None,
             )
         )
         if web_evidence_replaced:
@@ -49616,6 +49883,9 @@ class AgentRuntime:
         # двух источников, а человек уже прочёл первое предложение и пошёл ждать
         # машину. Производные тоже выбрасываются — иначе ложный отчёт уехал бы
         # человеку голосом или файлом после того, как из чата его убрали.
+        outside_effect_requested = (
+            _OUTSIDE_EFFECT_REQUEST.search(_record_source_command_text(clean_message)) is not None
+        )
         outside_deed_detected = bool(
             response.get("_attachment_model_failure_owned") is not True
             and response.get("_attachment_guard_rejection_owned") is not True
@@ -49624,9 +49894,10 @@ class AgentRuntime:
                 _has_explicit_external_deed_agent(clean_message)
                 and _has_explicit_external_deed_agent(content)
             )
-            and claims_a_deed_it_cannot_do(
+            and _claims_an_explicit_current_outside_deed(
                 content,
                 passive_source_state=passive_attachment_summary_scope,
+                effect_requested=outside_effect_requested,
             )
         )
         outside_deed_replaced = outside_deed_detected
@@ -49865,9 +50136,10 @@ class AgentRuntime:
                 # Старый голос уже содержит исходную модельную строку. Новый при
                 # необходимости синтезируется позднее из окончательного текста.
                 response["voice_clip"] = None
-                if archive_model_content and claims_a_deed_it_cannot_do(
+                if archive_model_content and _claims_an_explicit_current_outside_deed(
                     content,
                     passive_source_state=passive_attachment_summary_scope,
+                    effect_requested=outside_effect_requested,
                 ):
                     LOGGER.warning("outside-deed: снятие служебного статуса открыло ложный отчёт")
                     outside_deed_replaced = True
@@ -49907,32 +50179,69 @@ class AgentRuntime:
                 for entry in (response.get("tool_evidence") or [])
             )
         )
+        attempted_supported_deed_tools = {
+            str(name) for name in (response.get("tools_used") or []) if str(name)
+        } | {
+            str(entry.get("tool") or "")
+            for entry in (response.get("tool_evidence") or [])
+            if isinstance(entry, Mapping) and str(entry.get("tool") or "")
+        }
+        requested_supported_deed_effects = frozenset(
+            kind
+            for kind, requested in (
+                (
+                    "file",
+                    file_create
+                    or file_turn.proved("workspace")
+                    or clean_workspace_channel_requested
+                    or workspace_authority_message
+                    or bool(attempted_supported_deed_tools.intersection({"make_file", "workspace_create"})),
+                ),
+                (
+                    "reminder",
+                    file_turn.proved("reminder")
+                    or bool(context.successful_reminders)
+                    or "remind" in attempted_supported_deed_tools,
+                ),
+                (
+                    "voice",
+                    file_voice or answer_with_voice or "speak" in attempted_supported_deed_tools,
+                ),
+                (
+                    "obsidian",
+                    obsidian_result_request is not None
+                    or bool(attempted_supported_deed_tools.intersection(OBSIDIAN_WRITE_TOOL_NAMES))
+                    or bool(
+                        obsidian_intent is not None and obsidian_intent.tool_name in OBSIDIAN_WRITE_TOOL_NAMES
+                    ),
+                ),
+            )
+            if requested
+        )
         if (
             response.get("_office_exact_owned") is not True
             and response.get("_obsidian_owned") is not True
             and response.get("_attachment_model_failure_owned") is not True
             and response.get("_attachment_guard_rejection_owned") is not True
             and not outside_deed_replaced
-            and (
-                _claims_an_unconfirmed_obsidian_deed(content)
-                or _claims_an_unconfirmed_supported_deed(
-                    content,
-                    has_file=bool(file_deed_descriptors),
-                    reminder_succeeded=bool(context.successful_reminders),
-                    reminder_delivery_scheduled=reminder_delivery_scheduled,
-                    # Mid-turn speak is discarded and resynthesised later; it is not
-                    # evidence that the final voice attachment already exists.
-                    voice_succeeded=False,
-                    file_descriptors=file_deed_descriptors,
-                    external_file_descriptors=external_file_deed_descriptors,
-                    reminder_descriptors=reminder_deed_descriptors,
-                    read_only_timeline_file_report=read_only_timeline_file_report,
-                    passive_source_state=passive_attachment_summary_scope,
-                    passive_input_file_state_evidence=passive_input_file_state_evidence,
-                    bounded_historical_archive_report=named_person_passive_source_scope,
-                    read_only_attachment_review=read_only_attachment_review_scope,
-                    read_only_attachment_descriptors=read_only_attachment_descriptors,
-                )
+            and _runtime_unconfirmed_supported_deed(
+                content,
+                requested_effects=requested_supported_deed_effects,
+                has_file=bool(file_deed_descriptors),
+                reminder_succeeded=bool(context.successful_reminders),
+                reminder_delivery_scheduled=reminder_delivery_scheduled,
+                # Mid-turn speak is discarded and resynthesised later; it is not
+                # evidence that the final voice attachment already exists.
+                voice_succeeded=False,
+                file_descriptors=file_deed_descriptors,
+                external_file_descriptors=external_file_deed_descriptors,
+                reminder_descriptors=reminder_deed_descriptors,
+                read_only_timeline_file_report=read_only_timeline_file_report,
+                passive_source_state=passive_attachment_summary_scope,
+                passive_input_file_state_evidence=passive_input_file_state_evidence,
+                bounded_historical_archive_report=named_person_passive_source_scope,
+                read_only_attachment_review=read_only_attachment_review_scope,
+                read_only_attachment_descriptors=read_only_attachment_descriptors,
             )
         ):
             # Проверяется модельная часть ДО late builder: иначе выдуманное
@@ -50752,6 +51061,7 @@ class AgentRuntime:
                     repaired,
                     archive_status_guarded=archive_status_guarded,
                     passive_source_state=passive_attachment_summary_scope,
+                    outside_effect_requested=outside_effect_requested,
                 )
                 if (
                     read_only_attachment_review_scope
@@ -50767,8 +51077,9 @@ class AgentRuntime:
                     passive_attachment_preamble_normalized = bool(
                         passive_attachment_preamble_normalized or repaired_preamble_normalized
                     )
-                if repaired_has_model_content and _claims_an_unconfirmed_supported_deed(
+                if repaired_has_model_content and _runtime_unconfirmed_supported_deed(
                     repaired_model_said,
+                    requested_effects=requested_supported_deed_effects,
                     has_file=bool(file_deed_descriptors),
                     reminder_succeeded=bool(context.successful_reminders),
                     reminder_delivery_scheduled=reminder_delivery_scheduled,
