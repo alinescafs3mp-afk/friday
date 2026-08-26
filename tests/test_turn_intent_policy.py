@@ -376,11 +376,24 @@ def test_image_generation_capability_fails_closed_without_a_visible_png_renderer
         "Can Friday generate images?",
     ],
 )
-def test_current_attachment_keeps_terse_image_wording_on_the_runtime_path(
+def test_ambient_current_attachment_cannot_hide_an_image_capability_question(
     message: str,
 ) -> None:
+    projection = ImageGenerationProjection(structured_png_card_available=True)
     decision = decide_turn_policy(
         message,
+        context=TurnPolicyContext(current_attachment_present=True),
+        image_generation=projection,
+    )
+
+    assert decision.intent is TurnIntent.META_IMAGE_GENERATION
+    assert decision.attachments is AttachmentDisposition.NONE
+    assert decision.public_response == projection.render_ru()
+
+
+def test_explicit_attachment_image_work_keeps_the_carrier_on_the_runtime_path() -> None:
+    decision = decide_turn_policy(
+        "Можешь сделать картинку по этому файлу?",
         context=TurnPolicyContext(current_attachment_present=True),
         image_generation=ImageGenerationProjection(structured_png_card_available=True),
     )
