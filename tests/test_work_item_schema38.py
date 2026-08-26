@@ -29,6 +29,8 @@ def _schema_37_copy(tmp_path: Path) -> Path:
 
 
 def _install_released_work_item_schema_38(conn: sqlite3.Connection) -> None:
+    conn.execute("DROP TABLE work_item_compare_current_file_web_restart_rebind_steps")
+    conn.execute("DROP TABLE work_item_compare_current_file_web_restart_rebinds")
     conn.execute("DROP TABLE work_item_compare_current_file_web_steps")
     conn.execute("DROP TABLE work_item_compare_current_file_web_graphs")
     conn.execute("DROP TABLE work_item_compare_outcomes")
@@ -44,6 +46,8 @@ def _install_released_work_item_schema_38(conn: sqlite3.Connection) -> None:
 
 
 def _install_released_work_item_schema_39(conn: sqlite3.Connection) -> None:
+    conn.execute("DROP TABLE work_item_compare_current_file_web_restart_rebind_steps")
+    conn.execute("DROP TABLE work_item_compare_current_file_web_restart_rebinds")
     conn.execute("DROP TABLE work_item_compare_current_file_web_steps")
     conn.execute("DROP TABLE work_item_compare_current_file_web_graphs")
     conn.execute("DROP TABLE work_item_compare_outcomes")

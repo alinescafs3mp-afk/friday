@@ -27,6 +27,7 @@ from friday.interaction_control_plane.compare_current_file_web_work_graph_store 
     rebind_compare_current_file_web_work_graph_after_restart_in_transaction,
 )
 from friday.interaction_control_plane.work_item_schema import (
+    _WORK_ITEM_SCHEMA_42,
     _WORK_ITEM_SCHEMA_44_EXTENSION,
     _canonical_schema_42_objects,
     _canonical_schema_44_objects,
@@ -118,10 +119,14 @@ def _downgrade_graph_projection_to_released_schema44(database: Path) -> None:
         conn.execute("PRAGMA foreign_keys=OFF")
         conn.execute("BEGIN IMMEDIATE")
         schema42 = _canonical_schema_42_objects()
-        current_extension = {
-            key: value for key, value in _canonical_work_item_schema_objects().items() if key not in schema42
+        current = _canonical_work_item_schema_objects()
+        current_extension = {key: value for key, value in current.items() if key not in schema42}
+        changed_schema42_objects = {
+            key: value for key, value in current.items() if key in schema42 and value != schema42[key]
         }
         _drop_legacy_schema_objects(conn, current_extension)
+        _drop_legacy_schema_objects(conn, changed_schema42_objects)
+        _execute_schema(conn, _WORK_ITEM_SCHEMA_42)
         conn.execute("DROP TABLE work_item_compare_current_file_web_restart_rebind_steps")
         conn.execute("DROP TABLE work_item_compare_current_file_web_restart_rebinds")
         conn.execute(
