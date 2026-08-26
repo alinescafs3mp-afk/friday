@@ -847,6 +847,105 @@ def _check_replay_or_conflict(
             )
 
 
+def _emit_promoted_supervisor_product_event_in_transaction(
+    conn: sqlite3.Connection,
+    *,
+    promotion_decision: AssistPromotionDecision,
+    request: PromotedProductEmissionRequest,
+    outcome_evaluator: PromotedUserVisibleOutcomeEvaluator | None = None,
+) -> PromotedProductEventEmissionReceipt:
+    mode, promotion_evidence_sha256 = _promotion_identity(promotion_decision)
+    namespace_key = load_trace_namespace_key(conn)
+    if request.eligibility is PromotedObservationEligibility.PROMOTED_JOURNEY:
+        _trace, outcome_input = _journey_projection(
+            conn,
+            request,
+            mode=mode,
+            namespace_key=namespace_key,
+        )
+        task_class = TaskClass.COMPARE_CURRENT_FILE_WITH_CURRENT_WEB
+    else:
+        _trace, outcome_input = _other_turn_projection(
+            conn,
+            request,
+            mode=mode,
+            namespace_key=namespace_key,
+        )
+        task_class = None
+    outcome_receipt = _outcome_receipt(outcome_input, outcome_evaluator)
+    event = PromotedSupervisorProductObservation(
+        mode=mode,
+        task_class=task_class,
+        eligibility=request.eligibility,
+        primary_trace_sha256=request.primary_trace_sha256,
+        promotion_evidence_sha256=promotion_evidence_sha256,
+        execution_receipt_sha256=request.execution_receipt_sha256,
+        supervisor_invoked=request.supervisor_invoked,
+        user_visible_outcome=outcome_receipt.outcome,
+    )
+    _check_replay_or_conflict(conn, event)
+    event_payload = event.payload()
+    conn.execute(
+        "INSERT INTO runtime_events(id,event_type,payload,created_at) VALUES(?,?,?,?)",
+        (
+            new_id("evt"),
+            SUPERVISOR_PROMOTED_PRODUCT_EVENT,
+            json.dumps(
+                event_payload,
+                ensure_ascii=True,
+                sort_keys=True,
+                separators=(",", ":"),
+                allow_nan=False,
+            ),
+            utc_now(),
+        ),
+    )
+    conn.execute(
+        """DELETE FROM runtime_events WHERE id IN (
+               SELECT id FROM runtime_events ORDER BY created_at DESC,rowid DESC
+               LIMIT -1 OFFSET ?
+           )""",
+        (RUNTIME_EVENT_CAP,),
+    )
+    return PromotedProductEventEmissionReceipt(
+        event_sha256=canonical_sha256(event_payload),
+        primary_trace_sha256=request.primary_trace_sha256,
+        promotion_evidence_sha256=promotion_evidence_sha256,
+        execution_receipt_sha256=request.execution_receipt_sha256,
+        outcome_evaluation_sha256=outcome_receipt.canonical_sha256(),
+    )
+
+
+def emit_promoted_supervisor_product_event_in_transaction(
+    conn: sqlite3.Connection,
+    *,
+    promotion_decision: AssistPromotionDecision,
+    request: PromotedProductEmissionRequest,
+    outcome_evaluator: PromotedUserVisibleOutcomeEvaluator | None = None,
+) -> PromotedProductEventEmissionReceipt:
+    """Append under a caller-owned serialized post-publication transaction."""
+
+    if not isinstance(conn, sqlite3.Connection):
+        raise TypeError("promoted event producer requires a sqlite3 connection")
+    if type(request) is not PromotedProductEmissionRequest:
+        raise PromotedProductEventError("emission request must use the exact closed contract")
+    if not conn.in_transaction:
+        raise PromotedProductEventError("promoted event transaction is not active")
+    try:
+        return _emit_promoted_supervisor_product_event_in_transaction(
+            conn,
+            promotion_decision=promotion_decision,
+            request=request,
+            outcome_evaluator=outcome_evaluator,
+        )
+    except BaseException as exc:
+        if not isinstance(exc, Exception):
+            raise
+        if isinstance(exc, (PromotedProductEventError, TypeError)):
+            raise
+        raise PromotedProductEventError("promoted product event emission failed closed") from exc
+
+
 def emit_promoted_supervisor_product_event(
     conn: sqlite3.Connection,
     *,
@@ -854,12 +953,7 @@ def emit_promoted_supervisor_product_event(
     request: PromotedProductEmissionRequest,
     outcome_evaluator: PromotedUserVisibleOutcomeEvaluator | None = None,
 ) -> PromotedProductEventEmissionReceipt:
-    """Prove committed state and atomically append one promoted product event.
-
-    ``conn`` must not already own a transaction.  This forces publication to
-    have committed before observation and gives replay checking one immediate
-    SQLite writer boundary.
-    """
+    """Prove committed state and append in one self-owned writer boundary."""
 
     if not isinstance(conn, sqlite3.Connection):
         raise TypeError("promoted event producer requires a sqlite3 connection")
@@ -867,68 +961,13 @@ def emit_promoted_supervisor_product_event(
         raise PromotedProductEventError("emission request must use the exact closed contract")
     if conn.in_transaction:
         raise PromotedProductEventError("promoted event emission requires a post-commit boundary")
-    mode, promotion_evidence_sha256 = _promotion_identity(promotion_decision)
-
     try:
         conn.execute("BEGIN IMMEDIATE")
-        namespace_key = load_trace_namespace_key(conn)
-        if request.eligibility is PromotedObservationEligibility.PROMOTED_JOURNEY:
-            _trace, outcome_input = _journey_projection(
-                conn,
-                request,
-                mode=mode,
-                namespace_key=namespace_key,
-            )
-            task_class = TaskClass.COMPARE_CURRENT_FILE_WITH_CURRENT_WEB
-        else:
-            _trace, outcome_input = _other_turn_projection(
-                conn,
-                request,
-                mode=mode,
-                namespace_key=namespace_key,
-            )
-            task_class = None
-        outcome_receipt = _outcome_receipt(outcome_input, outcome_evaluator)
-        event = PromotedSupervisorProductObservation(
-            mode=mode,
-            task_class=task_class,
-            eligibility=request.eligibility,
-            primary_trace_sha256=request.primary_trace_sha256,
-            promotion_evidence_sha256=promotion_evidence_sha256,
-            execution_receipt_sha256=request.execution_receipt_sha256,
-            supervisor_invoked=request.supervisor_invoked,
-            user_visible_outcome=outcome_receipt.outcome,
-        )
-        _check_replay_or_conflict(conn, event)
-        event_payload = event.payload()
-        conn.execute(
-            "INSERT INTO runtime_events(id,event_type,payload,created_at) VALUES(?,?,?,?)",
-            (
-                new_id("evt"),
-                SUPERVISOR_PROMOTED_PRODUCT_EVENT,
-                json.dumps(
-                    event_payload,
-                    ensure_ascii=True,
-                    sort_keys=True,
-                    separators=(",", ":"),
-                    allow_nan=False,
-                ),
-                utc_now(),
-            ),
-        )
-        conn.execute(
-            """DELETE FROM runtime_events WHERE id IN (
-                   SELECT id FROM runtime_events ORDER BY created_at DESC,rowid DESC
-                   LIMIT -1 OFFSET ?
-               )""",
-            (RUNTIME_EVENT_CAP,),
-        )
-        emission = PromotedProductEventEmissionReceipt(
-            event_sha256=canonical_sha256(event_payload),
-            primary_trace_sha256=request.primary_trace_sha256,
-            promotion_evidence_sha256=promotion_evidence_sha256,
-            execution_receipt_sha256=request.execution_receipt_sha256,
-            outcome_evaluation_sha256=outcome_receipt.canonical_sha256(),
+        emission = emit_promoted_supervisor_product_event_in_transaction(
+            conn,
+            promotion_decision=promotion_decision,
+            request=request,
+            outcome_evaluator=outcome_evaluator,
         )
         conn.commit()
         return emission
@@ -964,5 +1003,6 @@ __all__ = [
     "SupervisorLatencyBudgetDocument",
     "build_promoted_other_turn_emission_request",
     "emit_promoted_supervisor_product_event",
+    "emit_promoted_supervisor_product_event_in_transaction",
     "load_accepted_supervisor_latency_budget",
 ]

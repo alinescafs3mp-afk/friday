@@ -129,16 +129,17 @@ from friday.orchestration.capability_binding import (
     operational_capability_snapshot,
 )
 from friday.orchestration.file_read import V12FileReadHandler
-from friday.orchestration.semantic_supervisor_runtime import (
-    SemanticSupervisorShadowRuntime,
-    build_semantic_supervisor_runtime,
-)
+from friday.orchestration.semantic_supervisor_runtime import build_semantic_supervisor_runtime
 from friday.orchestration.supervisor_assist_activation import (
     SUPERVISOR_ASSIST_ACTIVATION_STATUS_SCHEMA,
     AssistPromotionActivationMaterial,
     RawAssistPromotionActivationSettings,
     load_assist_promotion_activation,
 )
+from friday.orchestration.supervisor_assist_composition import (
+    build_supervisor_assist_production_runtime,
+)
+from friday.orchestration.supervisor_assist_graph_adapter import SupervisorAssistGraphAdapter
 from friday.organs import ServiceContext, build_registry, local_now, resolve_chat_id
 from friday.organs.obsidian.conversation import (
     obsidian_conversation_intent,
@@ -2348,6 +2349,15 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
                 storage,
                 shared_tenant=LEGACY_OWNER_USER_ID if settings.shared_archive else "",
             )
+            assist_graph_adapter = SupervisorAssistGraphAdapter(storage)
+            # A process restart invalidates the private evidence/actor handles
+            # carried by every ACTIVE assist graph.  Retire the complete set
+            # before any endpoint or worker can observe pending ownership.
+            try:
+                await asyncio.to_thread(assist_graph_adapter.reconcile_all_active_after_restart)
+            except BaseException:
+                storage.close()
+                raise
             llm = LLMRouter(settings)
             secondary_brain = build_secondary_brain(settings)
             (
@@ -2380,6 +2390,20 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
                 else:
                     attested_v12_runtime = attempted_v12_runtime
                     v12_startup_reason = "live_attestation_clear"
+            elif (
+                isinstance(semantic_supervisor_activation, AssistPromotionActivationMaterial)
+                and semantic_supervisor_activation.configured
+                and semantic_supervisor_activation.requested_mode.value in {"assist", "canary"}
+            ):
+                # Promoted assist attests immediately before ownership, not at
+                # startup: the optional laptop must never become a boot gate.
+                try:
+                    attempted_v12_runtime = create_attested_v12_model_runtime(llm)
+                except Exception as exc:
+                    LOGGER.warning(
+                        "Semantic supervisor primary model adapter unavailable (%s)",
+                        type(exc).__name__,
+                    )
             embeddings = EmbeddingBackend(settings)
             # Переранжировщик подключается, только если настроен адрес И задана
             # глубина: два условия, потому что поднять службу и забыть включить шаг —
@@ -2452,14 +2476,37 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
                 route_handlers=route_handlers,
                 attested_runtime=attested_v12_runtime,
             )
-            agent = build_semantic_supervisor_runtime(
-                settings,
-                orchestrated_agent,
-                secondary_brain,
+            try:
+                promoted_agent = build_supervisor_assist_production_runtime(
+                    settings=settings,
+                    primary=orchestrated_agent,
+                    storage=storage,
+                    authorization=auth_service,
+                    scheduler=secondary_brain,
+                    activation_material=semantic_supervisor_activation,
+                    graph_adapter=assist_graph_adapter,
+                    web=web_surfer,
+                    primary_model_runtime=attempted_v12_runtime,
+                )
+            except Exception as exc:
+                # Configuration and dependency faults retain the non-owning
+                # shadow/primary seam; the immutable health gate will reject
+                # a requested promotion because no controller is installed.
+                LOGGER.warning(
+                    "Semantic supervisor promoted runtime unavailable (%s)",
+                    type(exc).__name__,
+                )
+                promoted_agent = None
+            agent = (
+                promoted_agent
+                if promoted_agent is not None
+                else build_semantic_supervisor_runtime(
+                    settings,
+                    orchestrated_agent,
+                    secondary_brain,
+                )
             )
-            semantic_supervisor_runtime = (
-                agent if isinstance(agent, SemanticSupervisorShadowRuntime) else None
-            )
+            semantic_supervisor_runtime = agent if agent is not orchestrated_agent else None
             executive = ExecutiveService(settings, storage, auth_service, kernel, llm, ingestion)
             kernel.bind_executive(executive)
             memory_vault: MemoryVault | None = None

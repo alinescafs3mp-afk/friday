@@ -6,10 +6,13 @@ import uuid
 from dataclasses import replace
 from typing import Any
 
+import pytest
 from fastapi.testclient import TestClient
 
 from friday import semantic_supervisor_policy
 from friday.orchestration.semantic_supervisor_runtime import SemanticSupervisorShadowRuntime
+from friday.orchestration.supervisor_assist_activation import AssistPromotionActivationMaterial
+from friday.orchestration.supervisor_contracts import SupervisorMode
 from friday.secondary_brain import ModelWorkload
 from friday.security import sign_bridge_request
 
@@ -198,6 +201,130 @@ def test_promotion_settings_without_loaded_material_remain_discarded_shadow(
             "body_free": True,
         }
     assert activation_loads == 1
+
+
+def test_promoted_server_drains_restart_graphs_and_keeps_model_attestation_lazy(
+    settings: Any,
+    monkeypatch: Any,
+) -> None:
+    import friday.server as server
+
+    sequence: list[str] = []
+
+    class Scheduler(_AdmittedShadowScheduler):
+        def start(self) -> None:
+            sequence.append("secondary_started")
+            super().start()
+
+        async def aclose(self) -> None:
+            sequence.append("secondary_closed")
+            await super().aclose()
+
+    class GraphAdapter:
+        def __init__(self, _storage: Any) -> None:
+            sequence.append("graph_adapter_created")
+
+        def reconcile_all_active_after_restart(self) -> tuple[Any, ...]:
+            sequence.append("restart_graphs_drained")
+            return ()
+
+    class LazyModel:
+        def __init__(self) -> None:
+            self.attest_calls = 0
+
+        async def attest(self, **_kwargs: Any) -> None:
+            self.attest_calls += 1
+            raise AssertionError("assist model was attested at startup")
+
+    class PromotedRuntime:
+        def __init__(self) -> None:
+            self.closed = 0
+
+        async def close(self) -> None:
+            sequence.append("promoted_closed")
+            self.closed += 1
+
+    material = object.__new__(AssistPromotionActivationMaterial)
+    object.__setattr__(material, "configured", True)
+    object.__setattr__(material, "requested_mode", SupervisorMode.ASSIST)
+    scheduler = Scheduler()
+    model = LazyModel()
+    promoted = PromotedRuntime()
+    composition_calls: list[dict[str, Any]] = []
+
+    monkeypatch.setattr(server, "SupervisorAssistGraphAdapter", GraphAdapter)
+    monkeypatch.setattr(server, "build_secondary_brain", lambda _settings: scheduler)
+    monkeypatch.setattr(
+        server,
+        "_load_semantic_supervisor_activation_material",
+        lambda _settings, _scheduler: (material, None),
+    )
+    monkeypatch.setattr(server, "create_attested_v12_model_runtime", lambda _llm: model)
+
+    def build_promoted(**kwargs: Any) -> PromotedRuntime:
+        composition_calls.append(kwargs)
+        sequence.append("promoted_composed")
+        return promoted
+
+    monkeypatch.setattr(server, "build_supervisor_assist_production_runtime", build_promoted)
+    monkeypatch.setattr(
+        server,
+        "build_semantic_supervisor_runtime",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("shadow was built after promoted composition")
+        ),
+    )
+    configured = replace(
+        settings,
+        semantic_supervisor_mode="assist",
+        semantic_supervisor_tasks=("compare_current_file_with_current_web",),
+        semantic_supervisor_max_steps=6,
+        semantic_supervisor_max_review_rounds=1,
+        semantic_supervisor_timeout_sec=12.0,
+    )
+
+    app = server.create_app(configured)
+    with TestClient(app):
+        assert app.state.agent is promoted
+        assert app.state.semantic_supervisor_runtime is promoted
+        assert app.state.v12_model_runtime is model
+        assert model.attest_calls == 0
+        assert len(composition_calls) == 1
+        assert composition_calls[0]["primary_model_runtime"] is model
+        assert sequence.index("restart_graphs_drained") < sequence.index("promoted_composed")
+        assert sequence.index("restart_graphs_drained") < sequence.index("secondary_started")
+
+    assert promoted.closed == 1
+    assert sequence.index("promoted_closed") < sequence.index("secondary_closed")
+
+
+def test_server_aborts_before_runtime_exposure_when_restart_drain_is_uncertain(
+    settings: Any,
+    monkeypatch: Any,
+) -> None:
+    import friday.server as server
+
+    secondary_built = False
+
+    class BrokenGraphAdapter:
+        def __init__(self, _storage: Any) -> None:
+            pass
+
+        def reconcile_all_active_after_restart(self) -> None:
+            raise RuntimeError("synthetic restart uncertainty")
+
+    def build_secondary(_settings: Any) -> object:
+        nonlocal secondary_built
+        secondary_built = True
+        return object()
+
+    monkeypatch.setattr(server, "SupervisorAssistGraphAdapter", BrokenGraphAdapter)
+    monkeypatch.setattr(server, "build_secondary_brain", build_secondary)
+    app = server.create_app(settings)
+
+    with pytest.raises(RuntimeError, match="synthetic restart uncertainty"), TestClient(app):
+        pass
+    assert secondary_built is False
 
 
 def test_server_distinguishes_restored_telegram_mode_from_body_explicit_mode(

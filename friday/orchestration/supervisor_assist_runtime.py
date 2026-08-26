@@ -1,0 +1,451 @@
+"""Production wrapper for the one promoted semantic-supervisor journey.
+
+The wrapper owns no capability and no durable state.  It recognizes the exact
+prospective surface, delegates a promoted turn to the bounded controller, and
+otherwise invokes the pre-existing primary runtime exactly once.  A durable
+graph already present in the conversation always stays ahead of new planning.
+"""
+
+from __future__ import annotations
+
+import inspect
+import math
+import time
+from collections.abc import Awaitable, Callable, Mapping
+from typing import Any, Protocol
+
+from friday.orchestration.supervisor_assist_controller import (
+    SupervisorAssistOutcome,
+    SupervisorAssistResult,
+)
+from friday.orchestration.supervisor_assist_surface import (
+    prepare_current_file_web_assist_surface,
+)
+from friday.orchestration.supervisor_contracts import SupervisorMode
+from friday.pending_durable_turn import PendingDurableTurnAdmission
+from friday.permissions import ActorContext
+from friday.turn_intent_policy import TurnPolicyDecision
+
+
+class SupervisorAssistRuntimeError(RuntimeError):
+    """The promoted wrapper could not prove one safe response owner."""
+
+
+class _PrimaryChatRuntime(Protocol):
+    async def chat(self, user_id: str, message: str, **kwargs: Any) -> dict[str, Any]: ...
+
+
+class _AssistController(Protocol):
+    def semantic_supervisor_status(self) -> dict[str, object]: ...
+
+    def pending_durable_turn_admission(
+        self,
+        user_id: str,
+        message: str,
+        *,
+        actor: ActorContext,
+        conversation_id: str | None,
+        current_attachment_count: int = 0,
+    ) -> PendingDurableTurnAdmission | bool | None: ...
+
+    async def execute(
+        self,
+        surface: object | None,
+        *,
+        legacy_primary: Callable[[], Awaitable[Mapping[str, Any]]],
+        absolute_deadline: float,
+    ) -> SupervisorAssistResult: ...
+
+    async def cancel_active(
+        self,
+        scope: object,
+        *,
+        user_message: str,
+        absolute_deadline: float,
+    ) -> SupervisorAssistResult | None: ...
+
+    async def close(self) -> None: ...
+
+
+class AssistOrdinaryPostCommitObserver(Protocol):
+    """Observe only an already-committed primary response; never infer facts."""
+
+    def __call__(
+        self,
+        response: Mapping[str, Any],
+        actor: ActorContext,
+    ) -> Awaitable[bool | None] | bool | None: ...
+
+
+def _future_deadline(settings: object, inherited: object) -> float:
+    now = time.monotonic()
+    configured = getattr(settings, "semantic_supervisor_timeout_sec", None)
+    if (
+        isinstance(configured, bool)
+        or not isinstance(configured, int | float)
+        or not math.isfinite(float(configured))
+        or float(configured) <= 0
+    ):
+        configured = 0.001
+    deadline = now + float(configured)
+    if (
+        not isinstance(inherited, bool)
+        and isinstance(inherited, int | float)
+        and math.isfinite(float(inherited))
+    ):
+        deadline = min(deadline, float(inherited))
+    # The controller treats an exhausted deadline as an ordinary pre-ownership
+    # fallback.  Keep the value finite and let that single owner make the call.
+    return max(now, deadline)
+
+
+def _validated_pending(
+    value: object,
+    *,
+    person_id: str,
+    conversation_id: str,
+) -> PendingDurableTurnAdmission | bool | None:
+    if value is False:
+        return False
+    if value is None:
+        return None
+    if isinstance(value, PendingDurableTurnAdmission) and value.matches_scope(
+        person_id=person_id,
+        conversation_id=conversation_id,
+    ):
+        return value
+    return None
+
+
+class SemanticSupervisorAssistRuntime:
+    """Install assist/canary without replacing the primary compatibility API."""
+
+    def __init__(
+        self,
+        *,
+        settings: object,
+        primary: _PrimaryChatRuntime,
+        controller: _AssistController,
+        conversation_is_dialogue: Callable[[str, str], bool],
+        ordinary_observer: AssistOrdinaryPostCommitObserver | None = None,
+    ) -> None:
+        for label, dependency in (
+            ("primary chat", getattr(primary, "chat", None)),
+            ("controller execute", getattr(controller, "execute", None)),
+            (
+                "controller pending admission",
+                getattr(controller, "pending_durable_turn_admission", None),
+            ),
+            ("controller cancellation", getattr(controller, "cancel_active", None)),
+            ("controller close", getattr(controller, "close", None)),
+            ("conversation mode reader", conversation_is_dialogue),
+        ):
+            if not callable(dependency):
+                raise TypeError(f"{label} is unavailable")
+        if ordinary_observer is not None and not callable(ordinary_observer):
+            raise TypeError("ordinary observer is unavailable")
+        requested = SupervisorMode.fail_closed(
+            getattr(settings, "semantic_supervisor_mode", SupervisorMode.OFF.value)
+        )
+        if requested not in {SupervisorMode.ASSIST, SupervisorMode.CANARY}:
+            raise ValueError("assist runtime requires an exact promoted mode")
+        self._settings = settings
+        self._primary = primary
+        self._controller = controller
+        self._conversation_is_dialogue = conversation_is_dialogue
+        self._ordinary_observer = ordinary_observer
+        self._closed = False
+        self._ordinary_event_success_total = 0
+        self._ordinary_event_failure_total = 0
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._primary, name)
+
+    def semantic_supervisor_status(self) -> dict[str, object]:
+        method = getattr(self._controller, "semantic_supervisor_status", None)
+        try:
+            value = method() if callable(method) else {}
+        except Exception:
+            value = {}
+        status = dict(value) if isinstance(value, Mapping) else {}
+        status["ordinary_event_success_total"] = self._ordinary_event_success_total
+        status["ordinary_event_failure_total"] = self._ordinary_event_failure_total
+        if self._closed:
+            status["effective_mode"] = SupervisorMode.OFF.value
+            status["promotion_admitted"] = False
+            status["closed"] = True
+        return status
+
+    def _controller_pending(
+        self,
+        user_id: str,
+        message: str,
+        *,
+        actor: ActorContext,
+        conversation_id: str | None,
+        current_attachment_count: int,
+    ) -> PendingDurableTurnAdmission | bool | None:
+        if not conversation_id:
+            return False
+        person_id = actor.own_id if actor.shared_tenant else user_id
+        try:
+            value = self._controller.pending_durable_turn_admission(
+                person_id,
+                message,
+                actor=actor,
+                conversation_id=conversation_id,
+                current_attachment_count=current_attachment_count,
+            )
+        except Exception:
+            return None
+        return _validated_pending(
+            value,
+            person_id=person_id,
+            conversation_id=conversation_id,
+        )
+
+    def pending_durable_turn_admission(
+        self,
+        user_id: str,
+        message: str,
+        *,
+        actor: ActorContext,
+        conversation_id: str | None,
+        current_attachment_count: int = 0,
+    ) -> PendingDurableTurnAdmission | bool:
+        """Put the promoted graph ahead of ingestion and every new planner call."""
+
+        if type(current_attachment_count) is not int or current_attachment_count not in {0, 1}:
+            return False
+        if not conversation_id:
+            return False
+        person_id = actor.own_id if actor.shared_tenant else user_id
+        controller = self._controller_pending(
+            user_id,
+            message,
+            actor=actor,
+            conversation_id=conversation_id,
+            current_attachment_count=current_attachment_count,
+        )
+        if isinstance(controller, PendingDurableTurnAdmission):
+            return controller
+        if controller is None:
+            return PendingDurableTurnAdmission.uncertain(
+                person_id=person_id,
+                conversation_id=conversation_id,
+            )
+
+        method = getattr(self._primary, "pending_durable_turn_admission", None)
+        if not callable(method):
+            method = getattr(self._primary, "owns_pending_durable_turn", None)
+        if not callable(method):
+            return False
+        try:
+            value = method(
+                person_id,
+                message,
+                actor=actor,
+                conversation_id=conversation_id,
+                current_attachment_count=current_attachment_count,
+            )
+        except Exception:
+            return PendingDurableTurnAdmission.uncertain(
+                person_id=person_id,
+                conversation_id=conversation_id,
+            )
+        primary = _validated_pending(
+            value,
+            person_id=person_id,
+            conversation_id=conversation_id,
+        )
+        if isinstance(primary, PendingDurableTurnAdmission):
+            return primary
+        if primary is None:
+            return PendingDurableTurnAdmission.uncertain(
+                person_id=person_id,
+                conversation_id=conversation_id,
+            )
+        return False
+
+    def owns_pending_durable_turn(
+        self,
+        user_id: str,
+        message: str,
+        *,
+        actor: ActorContext,
+        conversation_id: str | None,
+        current_attachment_count: int = 0,
+    ) -> bool:
+        return self.pending_durable_turn_admission(
+            user_id,
+            message,
+            actor=actor,
+            conversation_id=conversation_id,
+            current_attachment_count=current_attachment_count,
+        ) is not False
+
+    async def _observe_ordinary(self, response: Mapping[str, Any], actor: ActorContext) -> None:
+        if self._ordinary_observer is None:
+            return
+        try:
+            emitted = self._ordinary_observer(response, actor)
+            if inspect.isawaitable(emitted):
+                emitted = await emitted
+        except BaseException:
+            self._ordinary_event_failure_total += 1
+        else:
+            if emitted is not False:
+                self._ordinary_event_success_total += 1
+
+    async def chat(
+        self,
+        user_id: str,
+        message: str,
+        *,
+        actor: ActorContext,
+        conversation_id: str | None = None,
+        attachments: list[dict[str, Any]] | None = None,
+        enable_tools: bool = True,
+        kg: Any = None,
+        hybrid_searcher: Any = None,
+        ingestion_result: dict[str, Any] | None = None,
+        synthetic_document_notice: bool = False,
+        replay_source_message_id: str | None = None,
+        mode: str | None = None,
+        answer_with_voice: bool = False,
+        reply_to: str | None = None,
+        quoted_attachment_reference: bool = False,
+        reply_assistant_reference: bool = False,
+        reply_assistant_message_id: str | None = None,
+        turn_policy: TurnPolicyDecision | None = None,
+        turn_deadline: float | None = None,
+        _pending_durable_admission: PendingDurableTurnAdmission | None = None,
+        _semantic_supervisor_explicit_mode_requested: bool = False,
+    ) -> dict[str, Any]:
+        if self._closed:
+            raise SupervisorAssistRuntimeError("assist runtime is closed")
+        legacy_kwargs: dict[str, Any] = {
+            "actor": actor,
+            "conversation_id": conversation_id,
+            "attachments": attachments,
+            "enable_tools": enable_tools,
+            "kg": kg,
+            "hybrid_searcher": hybrid_searcher,
+            "ingestion_result": ingestion_result,
+            "synthetic_document_notice": synthetic_document_notice,
+            "replay_source_message_id": replay_source_message_id,
+            "mode": mode,
+            "answer_with_voice": answer_with_voice,
+            "reply_to": reply_to,
+            "quoted_attachment_reference": quoted_attachment_reference,
+            "reply_assistant_reference": reply_assistant_reference,
+            "reply_assistant_message_id": reply_assistant_message_id,
+            "turn_policy": turn_policy,
+            "turn_deadline": turn_deadline,
+            "_pending_durable_admission": _pending_durable_admission,
+        }
+        legacy_calls = 0
+
+        async def legacy_primary() -> dict[str, Any]:
+            nonlocal legacy_calls
+            legacy_calls += 1
+            if legacy_calls != 1:
+                raise SupervisorAssistRuntimeError("legacy primary was requested more than once")
+            response = await self._primary.chat(user_id, message, **legacy_kwargs)
+            if type(response) is not dict:
+                raise SupervisorAssistRuntimeError("legacy primary returned an invalid response")
+            return response
+
+        attachment_count = len(attachments) if isinstance(attachments, list) else 0
+        active = self._controller_pending(
+            user_id,
+            message,
+            actor=actor,
+            conversation_id=conversation_id,
+            current_attachment_count=1 if attachment_count == 1 else 0,
+        )
+        if active is None:
+            raise SupervisorAssistRuntimeError("durable assist ownership is uncertain")
+
+        deadline = _future_deadline(self._settings, turn_deadline)
+        normalized = message.strip().casefold() if isinstance(message, str) else ""
+        if isinstance(active, PendingDurableTurnAdmission) and normalized in {"отмена", "cancel"}:
+            from friday.orchestration.supervisor_assist_graph_adapter import AssistConversationScope
+
+            scope = AssistConversationScope(
+                user_id=actor.own_id,
+                conversation_id=str(conversation_id or ""),
+            )
+            cancelled = await self._controller.cancel_active(
+                scope,
+                user_message=normalized,
+                absolute_deadline=deadline,
+            )
+            if cancelled is None or type(cancelled.response) is not dict:
+                raise SupervisorAssistRuntimeError("active assist cancellation is uncertain")
+            return cancelled.response
+
+        if isinstance(active, PendingDurableTurnAdmission):
+            if (
+                isinstance(legacy_kwargs.get("_pending_durable_admission"), PendingDurableTurnAdmission)
+                and legacy_kwargs["_pending_durable_admission"].work_graph_id is not None
+            ):
+                # The graph binding fenced intake for this wrapper.  It is not a
+                # legacy Work Item grant and must not be reinterpreted as one.
+                legacy_kwargs["_pending_durable_admission"] = None
+            response = await legacy_primary()
+            await self._observe_ordinary(response, actor)
+            return response
+
+        surface = prepare_current_file_web_assist_surface(
+            self._settings,
+            user_id=user_id,
+            message=message,
+            actor=actor,
+            conversation_id=conversation_id,
+            attachments=attachments,
+            enable_tools=enable_tools,
+            ingestion_result=ingestion_result,
+            synthetic_document_notice=synthetic_document_notice,
+            replay_source_message_id=replay_source_message_id,
+            mode=mode,
+            explicit_mode_requested=_semantic_supervisor_explicit_mode_requested,
+            answer_with_voice=answer_with_voice,
+            reply_to=reply_to,
+            quoted_attachment_reference=quoted_attachment_reference,
+            reply_assistant_reference=reply_assistant_reference,
+            reply_assistant_message_id=reply_assistant_message_id,
+            turn_policy=turn_policy,
+            pending_durable_admission=_pending_durable_admission,
+            conversation_is_dialogue=self._conversation_is_dialogue,
+        )
+        result = await self._controller.execute(
+            surface,
+            legacy_primary=legacy_primary,
+            absolute_deadline=deadline,
+        )
+        if type(result) is not SupervisorAssistResult:
+            raise SupervisorAssistRuntimeError("assist controller returned an invalid result")
+        if result.outcome is SupervisorAssistOutcome.LEGACY:
+            if legacy_calls != 1 or type(result.response) is not dict:
+                raise SupervisorAssistRuntimeError("legacy fallback has no exact response")
+            await self._observe_ordinary(result.response, actor)
+            return result.response
+        if legacy_calls != 0:
+            raise SupervisorAssistRuntimeError("promoted owner crossed the legacy boundary")
+        if type(result.response) is not dict:
+            raise SupervisorAssistRuntimeError("promoted owner has no committed response")
+        return result.response
+
+    async def close(self) -> None:
+        if self._closed:
+            return
+        self._closed = True
+        await self._controller.close()
+
+
+__all__ = [
+    "AssistOrdinaryPostCommitObserver",
+    "SemanticSupervisorAssistRuntime",
+    "SupervisorAssistRuntimeError",
+]

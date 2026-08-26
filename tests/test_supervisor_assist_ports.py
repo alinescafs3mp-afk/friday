@@ -221,6 +221,7 @@ def test_default_off_activation_never_creates_a_promoted_decision() -> None:
         registry_binding_sha256=None,
         scheduler_snapshot=None,
         loaded_evidence=None,
+        accepted_latency_budget=None,
         operator_gate=AssistPromotionOperatorGate(),
     )
     evaluator = ports.AssistPromotionEvaluator(material, object())

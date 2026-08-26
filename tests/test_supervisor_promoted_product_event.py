@@ -65,6 +65,7 @@ from friday.orchestration.supervisor_promoted_product_event import (
     SupervisorLatencyBudgetDocument,
     build_promoted_other_turn_emission_request,
     emit_promoted_supervisor_product_event,
+    emit_promoted_supervisor_product_event_in_transaction,
     load_accepted_supervisor_latency_budget,
 )
 from friday.storage._conversations import store_message_in_transaction
@@ -366,6 +367,32 @@ def test_full_graph_event_requires_exact_committed_trace_and_receipt(storage) ->
         "private file body",
     ):
         assert forbidden not in serialized
+
+
+def test_storage_owned_transaction_can_serialize_product_event_emission(storage) -> None:
+    _graph, trace, receipt_sha256 = _complete_graph(storage, "serialized")
+    request = PromotedProductEmissionRequest(
+        eligibility=PromotedObservationEligibility.PROMOTED_JOURNEY,
+        primary_trace_sha256=canonical_sha256(trace.to_payload()),  # type: ignore[attr-defined]
+        execution_receipt_sha256=receipt_sha256,
+        supervisor_invoked=True,
+    )
+
+    with storage.transaction() as conn:
+        emitted = emit_promoted_supervisor_product_event_in_transaction(
+            conn,
+            promotion_decision=_promotion(),
+            request=request,
+        )
+
+    assert emitted.primary_trace_sha256 == request.primary_trace_sha256
+    assert _event_payload(storage)["primary_trace_sha256"] == request.primary_trace_sha256
+    with pytest.raises(PromotedProductEventError, match="transaction is not active"):
+        emit_promoted_supervisor_product_event_in_transaction(
+            storage.conn,
+            promotion_decision=_promotion(),
+            request=request,
+        )
 
 
 def test_exact_terminal_receipt_can_emit_without_a_completion_claim(storage) -> None:
