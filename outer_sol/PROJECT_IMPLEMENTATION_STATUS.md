@@ -11,13 +11,12 @@ the current production identity, completed packages, active work and next order.
   the provisional registry is empty, and the primary remains the sole
   final-publication, tool and effect authority. Every secondary miss preserves
   the exact primary-only path.
-- Deployed implementation head: `31c2241f2b443664d439f3049b1a90bc3e14f709`
-- Live: Friday `0.207.43` / `31c2241f2b443664d439f3049b1a90bc3e14f709`;
-  tree `25927d3f37e41777307fd38f5594dd23445f51c7c53405ca96194905ddd40480`;
-  wheel `aa594a0d44e8bfb9f97ed26546e10979e691cf649c39dde91dd8e8b8f872514b`.
-- Immediate predecessor: Friday `0.207.42` /
-  `b9890bb5cfed262c9be86ef5c1925b85ba8fd44d`; schema-capable fallback:
-  Friday `0.207.39` / `83ae001f7323b9868ba077f5989825de44f8847e`.
+- Deployed implementation head: `e8721168de8b8f0a6dddf3cffa4b29cee57488e1`
+- Live: Friday `0.207.48` / `e8721168de8b8f0a6dddf3cffa4b29cee57488e1`;
+  tree `9098e7dd9862b33a1e6348e08563b9c64aa8cbcb275d14367e28b51b779cafb6`;
+  wheel `da0b20ebbb05dcfbfde080e920c78d83103d3149fba02e13e017d9829a9de40c`.
+- Immediate predecessor and schema-capable fallback: Friday `0.207.47` /
+  `7f84db39b387d6101aef941203b6787c364500e4`.
 - Database schema: 43
 - Production state: immutable activation `clear`; backend and Telegram bridge
   active; trusted-CA HTTPS health `200`; SQLite integrity and FK checks clean.
@@ -49,8 +48,13 @@ the current production identity, completed packages, active work and next order.
   exchange, now execute a hidden bounded pure-TCP then selected-open-port nmap
   profile. Results distinguish reachable surfaces from verified CVEs and retain
   partial coverage honestly.
-  The activation terminal receipt is
-  `0f9523fed3ae1252b34982d5fcfeb49c1a6e5fcd9a6c744c5e17d44635b0f1be`.
+  Owner-confirmed execution of installed console programs is now live through
+  an isolated universal Engineer runner: every exact argv or shell start needs
+  a distinct authenticated Telegram confirmation, persists as a durable job,
+  and has truthful status/cancel plus bounded output evidence. The runner has
+  no host-file, host-secret, Docker or network authority; network audits keep
+  using their dedicated attested tools. The activation terminal receipt is
+  `ed41fb57530aa6945eb1036afedc7df7715dc28bfec2a46b8c31898c4a1e40a9`.
   The exact accepted secondary profile remains configured in bounded `assist`
   and is probed on
   demand; its exact post-cutover canary passed, while laptop absence preserves
@@ -71,9 +75,9 @@ the current production identity, completed packages, active work and next order.
 
 ## Active objective
 
-Deliver the universal owner-authorized Engineer command runner, then close the
-compiler/artifact loop before returning to the next complete ICP golden journey
-and ordered V12 refinement. The source candidate also contains the independently
+Close the compiler/artifact loop, then return to the next complete ICP golden
+journey before ordered V12 refinement; the restored document-contour WIP audit
+is already closed. The source candidate also contains the independently
 default-off schema-45 Semantic Supervisor current-file/current-web journey,
 promoted restart rebind/resume and maturity-gated post-commit effect observer.
 It remains a separate release input rather than a dependency of Engineer Mode;
@@ -105,7 +109,7 @@ accepted profile manifest hashes to
 `93ea5698b8b6a9bf8a7dc697ffe37d7353055aa16555188991747bba73d059e3` and
 its accepted physical-failure evidence hashes to
 `9dc72f80caed3320bd154cf1219a8bd6b1339142b690b00dd1cbe1fb05964006`.
-Live `0.207.43` admits exactly that profile, with no provisional entries:
+Live `0.207.48` admits exactly that profile, with no provisional entries:
 extraction, evidence-bound document mapping and complete current text/Office
 document reviews are in bounded `assist`. It grants no tools, effects,
 publication or knowledge-write authority; failure preserves the exact
@@ -184,24 +188,39 @@ course, with these repository-specific constraints:
 
 ## In progress
 
-1. Build the universal owner-authorized Engineer runner for every executable or
-   script available to the Friday service account: exact argv and explicit
-   shell lanes, durable jobs, truthful progress/cancel, bounded evidence and
-   generated-file delivery. Inventory never manufactures execution authority.
-2. Close the Engineer artifact loop: Java 21 first, then C/C++/Zig/Go, with
+1. Close the Engineer artifact loop: Java 21 first, then C/C++/Zig/Go, with
    immutable source lineage, deterministic source/binary bundles and exact
    Telegram delivery without automatically executing produced artifacts.
-3. Integrate the default-off schema-45 Semantic Supervisor source candidate
+2. Integrate the default-off schema-45 Semantic Supervisor source candidate
    through a clean release artifact and prove activation rollback. Assist needs
    new production evidence; its separate effect shadow additionally requires
    mature accepted CANARY evidence. Current P6 is `NO_ELIGIBLE_CANDIDATE`, so no
    mixed or invariant guard may be deleted and the candidate must not be called live.
-4. Select and finish the next complete ICP golden journey from the remaining
+3. Select and finish the next complete ICP golden journey from the remaining
    readiness gaps, then continue the ordered V12 refinement package.
-5. Keep physical Android/Syncthing acceptance explicitly `UNVERIFIED`; the
+4. Keep physical Android/Syncthing acceptance explicitly `UNVERIFIED`; the
    companion plugin remains out of scope.
 
 ## Completed and deployed packages
+
+### Universal owner-confirmed Engineer command runner (`0.207.48`)
+
+- An authenticated Telegram owner turn can request any installed executable
+  visible to the Friday service account. Friday proposes an exact argv and
+  timeout; a separate Telegram approval is bound to that exact request before
+  the process can start. Explicit shell commands use the same confirmation
+  boundary.
+- Jobs are durable and idempotent, with truthful progress, cancellation,
+  bounded stdout/stderr evidence and restart-safe cleanup. Execution is pinned
+  to held executable identities and runs under a delegated systemd cgroup plus
+  bubblewrap workspace without host files, secrets, network or Docker access.
+- P0 review closed the pre-GO fd collision, dispatcher bypasses, output-tail
+  loss, fd-reuse hazards, cleanup ownership, trusted-PATH aliasing and Ubuntu
+  AppArmor launch compatibility. The merged gate passed 52 adversarial mock
+  cases, 12 integration cases, the release-transition cases, 159 secondary
+  regressions and one real isolated command. Two clean wheel builds were
+  byte-identical. Immutable activation completed `clear` with terminal receipt
+  `ed41fb57530aa6945eb1036afedc7df7715dc28bfec2a46b8c31898c4a1e40a9`.
 
 ### Exact-host nmap continuation and exposure truth (`0.207.43`)
 
@@ -716,12 +735,15 @@ claims at this checkpoint.
 
 ## Current cumulative gate
 
-- Friday `0.207.43` passed the complete static gate, 20,546 non-UI and 31 UI
-  tests without skips. Both source-archive wheel builds were byte-identical.
-- It is live at the exact source/sealed-tree/wheel identity above, schema 43,
-  with `0.207.42` as predecessor and `0.207.39` as schema-capable fallback.
-  Immutable activation is `clear`; backend and bridge are active, health is
-  `ok`, and SQLite quick-integrity/FK checks are clean.
+- The latest recorded complete repository-wide gate is Friday `0.207.43`: the
+  static gate, 20,546 non-UI tests and 31 UI tests passed without skips, and
+  both source-archive wheel builds were byte-identical.
+- Friday `0.207.48` is live at the exact source/sealed-tree/wheel identity and
+  schema-43 state recorded above. Its Engineer-runner delta passed the focused
+  adversarial, integration, release-transition, secondary-regression and real
+  isolated-command gates; both clean wheel builds were byte-identical.
+  Immutable activation is `clear`, backend and bridge are active, health is
+  `ok`, and SQLite integrity/FK checks are clean.
 - The optional laptop node remains demand-probed and removable; its absence
   does not widen retries or change primary publication semantics. Semantic
   Supervisor work is present only in the default-off schema-45 source
@@ -730,25 +752,21 @@ claims at this checkpoint.
 
 ## Next order
 
-1. Land the universal asynchronous Engineer command runner, including exact
-   owner approval, service-user PATH/executable attestation, progress/cancel,
-   output freeze and Telegram delivery. Do not widen model/document/web or
-   secondary authority.
-2. Integrate Java 21 compile-to-bundle delivery, then add C/C++/Zig/Go profiles.
-3. Build and verify a clean release artifact containing the default-off
+1. Integrate Java 21 compile-to-bundle delivery, then add C/C++/Zig/Go profiles.
+2. Build and verify a clean release artifact containing the default-off
    Semantic Supervisor source, then prove activation rollback before any live
    promotion. Collect exact assist evidence only from a new accepted production
    window; stage the effect observer only after mature accepted CANARY evidence.
-4. Select the next incomplete ICP golden journey from the canonical readiness
+3. Select the next incomplete ICP golden journey from the canonical readiness
    matrix and finish it end-to-end.
-5. Extend V12 only through the proven journey boundary; do not duplicate the
+4. Extend V12 only through the proven journey boundary; do not duplicate the
    installed Semantic Supervisor policy role.
-6. Implement document passages, current embeddings, typed dates and an
+5. Implement document passages, current embeddings, typed dates and an
    owner-visible pending semantic projection as a new schema-43+ package, not
    by reviving the obsolete document WIP blobs.
-7. Keep HTTP document search/details/review below the Telegram/ICP and
+6. Keep HTTP document search/details/review below the Telegram/ICP and
    document-index work unless a user-facing blocker changes that order.
-8. Run physical Android/Syncthing and restore/fault certification when owner
+7. Run physical Android/Syncthing and restore/fault certification when owner
    presence is available. Companion work remains out of scope.
 
 ## WIP source retention
