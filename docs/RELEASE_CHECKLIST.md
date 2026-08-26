@@ -410,7 +410,20 @@ failed/error/skipped-тест в любой фазе делает гейт кр�
 
 Проверить:
 
-- schema version = 43;
+- schema version = 44;
+- schema 43 → 44 атомарно добавляет exact dormant body-free
+  `compare_current_file_with_current_web` WorkGraph: ровно два independent
+  read-шага и один dependent primary-synthesis, immutable identities,
+  bounded CAS/restart state, один review-admitted retry только для failed
+  current-web read и раздельные exact full/terminal publication receipts;
+- archive разговора атомарно добавляет один code-owned assistant receipt
+  `conversation_archived` и закрывает graph; bounded expiry seam делает то же
+  с `expired`, без model/tool calls, evidence claims и completion claim;
+- explicit user cancellation использует отдельную причину `cancelled`, один
+  code-owned anchor reply и атомарный CAS; stale/replay/ошибка не оставляют
+  assistant без terminal graph;
+- expiry scheduler, web/model execution и production route в schema 44 не
+  активируются: включение запрещено до отдельного runtime/lifecycle gate;
 - schema 42 → 43 атомарно добавляет exact durable Host Action jobs,
   person-scoped idempotency, restart-safe `unknown`/reconciliation и append-only
   lifecycle events; Host Capability Plane остаётся выключенным по умолчанию;

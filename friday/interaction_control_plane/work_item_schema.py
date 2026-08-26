@@ -1,4 +1,4 @@
-"""Exact schema-42 projection for bounded durable interaction Work Items."""
+"""Exact schema-44 projection for bounded durable interaction Work Items/graphs."""
 
 from __future__ import annotations
 
@@ -6,6 +6,23 @@ import re
 import sqlite3
 from functools import lru_cache
 
+from friday.interaction_control_plane.compare_current_file_web_work_graph import (
+    COMPARE_CURRENT_FILE_WEB_ARCHIVED_RESPONSE,
+    COMPARE_CURRENT_FILE_WEB_CANCELLED_RESPONSE,
+    COMPARE_CURRENT_FILE_WEB_COMPLETION_CONTRACT,
+    COMPARE_CURRENT_FILE_WEB_EXPIRED_RESPONSE,
+    COMPARE_CURRENT_FILE_WEB_FALLBACK_OWNER,
+    COMPARE_CURRENT_FILE_WEB_MAX_ACTIVE_REVISION,
+    COMPARE_CURRENT_FILE_WEB_MAX_ATTEMPTS,
+    COMPARE_CURRENT_FILE_WEB_PUBLICATION_METADATA_KEY,
+    COMPARE_CURRENT_FILE_WEB_PUBLICATION_OWNER,
+    COMPARE_CURRENT_FILE_WEB_PUBLICATION_RECEIPT_SCHEMA,
+    COMPARE_CURRENT_FILE_WEB_STEP_OUTCOME_SCHEMA,
+    COMPARE_CURRENT_FILE_WEB_TERMINAL_PUBLICATION_METADATA_KEY,
+    COMPARE_CURRENT_FILE_WEB_TERMINAL_PUBLICATION_RECEIPT_SCHEMA,
+    WEB_SEARCH_CURRENT_ADAPTER_ID,
+    WEB_SEARCH_CURRENT_SECURITY_ID,
+)
 from friday.interaction_control_plane.work_item_contract import (
     ARCHIVE_CANDIDATE_MAX_COUNT,
     ARCHIVE_CANDIDATE_SELECTION_ACTIVE_FRAME_JSON,
@@ -24,12 +41,12 @@ from friday.interaction_control_plane.work_item_contract import (
 )
 from friday.orchestration.archive_recall_outcome import ARCHIVE_EVIDENCE_REPLAY_UNAVAILABLE
 
-WORK_ITEM_SCHEMA_VERSION = 42
+WORK_ITEM_SCHEMA_VERSION = 44
 WORK_ITEM_SELECTED_SOURCE_REF_MAX_BYTES = 4_096
 WORK_ITEM_SELECTED_PASSAGE_REFS_MAX_BYTES = 65_536
 WORK_ITEM_SELECTED_PASSAGE_MAX_COUNT = 8
 
-_WORK_ITEM_TABLES = (
+_SCHEMA_42_TABLES = (
     "work_item_compare_outcomes",
     "work_item_compare_document_evidence",
     "work_item_compare_document_questions",
@@ -39,7 +56,12 @@ _WORK_ITEM_TABLES = (
     "work_item_selected_evidence",
     "work_items",
 )
-_WORK_ITEM_INDEXES = (
+_WORK_ITEM_TABLES = (
+    "work_item_compare_current_file_web_steps",
+    "work_item_compare_current_file_web_graphs",
+    *_SCHEMA_42_TABLES,
+)
+_SCHEMA_42_INDEXES = (
     "idx_work_item_compare_outcomes_assistant",
     "idx_work_item_compare_document_evidence_origin",
     "uq_work_item_compare_document_question_waiting",
@@ -52,6 +74,14 @@ _WORK_ITEM_INDEXES = (
     "idx_work_items_expiry",
     "idx_work_items_owner_state_updated",
     "uq_work_items_open_conversation",
+)
+_WORK_ITEM_INDEXES = (
+    "idx_work_item_compare_current_file_web_steps_state",
+    "idx_work_item_compare_current_file_web_graphs_expiry",
+    "idx_work_item_compare_current_file_web_graphs_owner",
+    "uq_work_item_compare_current_file_web_graphs_assistant",
+    "uq_work_item_compare_current_file_web_graphs_active",
+    *_SCHEMA_42_INDEXES,
 )
 _SCHEMA_39_TABLES = ("work_item_selected_evidence", "work_items")
 _SCHEMA_39_INDEXES = (
@@ -2022,7 +2052,660 @@ BEGIN SELECT RAISE(ABORT,'comparison Work Item lifecycle is invalid'); END;
 
 
 _WORK_ITEM_SCHEMA_42 = _schema_42_full_from_40()
-WORK_ITEM_SCHEMA = _WORK_ITEM_SCHEMA_42
+
+# Schema 44 adds one dormant, journey-specific execution graph.  It deliberately
+# does not alter the released schema-42 Work Item tables and it exposes no
+# generic graph/node vocabulary.  The only admitted topology is enforced by the
+# step table checks below: two independent reads followed by primary synthesis.
+_WORK_ITEM_SCHEMA_44_EXTENSION = f"""
+CREATE TABLE IF NOT EXISTS work_item_compare_current_file_web_graphs (
+    id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL REFERENCES users(id),
+    conversation_id TEXT NOT NULL REFERENCES conversations(id),
+    anchor_user_message_id TEXT NOT NULL REFERENCES messages(id),
+    current_file_raw_object_id TEXT NOT NULL REFERENCES raw_objects(id),
+    state TEXT NOT NULL CHECK(state IN ('active','terminal','completed')),
+    revision INTEGER NOT NULL CHECK(revision BETWEEN 1 AND 2147483647),
+    transition TEXT NOT NULL CHECK(transition IN (
+        'admitted','step_claimed','step_settled','step_requeued','restart_rebind',
+        'review_recovery_admitted','terminal_settled','publication_committed'
+    )),
+    proposal_sha256 TEXT NOT NULL,
+    accepted_plan_sha256 TEXT NOT NULL,
+    manifest_sha256 TEXT NOT NULL,
+    policy_sha256 TEXT NOT NULL,
+    runtime_profile_sha256 TEXT NOT NULL,
+    adapter_registry_sha256 TEXT NOT NULL,
+    actor_binding_sha256 TEXT NOT NULL,
+    conversation_binding_sha256 TEXT NOT NULL,
+    current_file_source_identity_sha256 TEXT NOT NULL,
+    current_file_content_sha256 TEXT NOT NULL,
+    completion_contract TEXT NOT NULL CHECK(
+        completion_contract='{COMPARE_CURRENT_FILE_WEB_COMPLETION_CONTRACT}'
+    ),
+    fallback_owner TEXT NOT NULL CHECK(
+        fallback_owner='{COMPARE_CURRENT_FILE_WEB_FALLBACK_OWNER}'
+    ),
+    publication_owner TEXT NOT NULL CHECK(
+        publication_owner='{COMPARE_CURRENT_FILE_WEB_PUBLICATION_OWNER}'
+    ),
+    max_attempts INTEGER NOT NULL CHECK(max_attempts={COMPARE_CURRENT_FILE_WEB_MAX_ATTEMPTS}),
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    expires_at TEXT NOT NULL,
+    closed_at TEXT,
+    outcome_status TEXT CHECK(outcome_status IN (
+        'complete','partial','empty','unavailable','denied','failed'
+    )),
+    outcome_reason TEXT CHECK(outcome_reason IN (
+        'none','partial_evidence','no_comparable_evidence','capability_unavailable',
+        'authority_denied','step_failed','evidence_not_replayable',
+        'conversation_archived','cancelled','expired'
+    )),
+    publication_assistant_message_id TEXT REFERENCES messages(id),
+    accepted_graph_outcome_sha256 TEXT,
+    accepted_steps_sha256 TEXT,
+    terminal_publication_receipt_sha256 TEXT,
+    publication_receipt_sha256 TEXT,
+    CHECK(length(id)=22 AND substr(id,1,6)='graph_'
+          AND substr(id,7) NOT GLOB '*[^0-9a-f]*'),
+    CHECK(length(anchor_user_message_id)=20 AND substr(anchor_user_message_id,1,4)='msg_'
+          AND substr(anchor_user_message_id,5) NOT GLOB '*[^0-9a-f]*'),
+    CHECK(length(current_file_raw_object_id)=20 AND substr(current_file_raw_object_id,1,4)='raw_'
+          AND substr(current_file_raw_object_id,5) NOT GLOB '*[^0-9a-f]*'),
+    CHECK(publication_assistant_message_id IS NULL
+          OR (length(publication_assistant_message_id)=20
+              AND substr(publication_assistant_message_id,1,4)='msg_'
+              AND substr(publication_assistant_message_id,5) NOT GLOB '*[^0-9a-f]*')),
+    CHECK(length(proposal_sha256)=64 AND proposal_sha256 NOT GLOB '*[^0-9a-f]*'
+          AND length(accepted_plan_sha256)=64 AND accepted_plan_sha256 NOT GLOB '*[^0-9a-f]*'
+          AND length(manifest_sha256)=64 AND manifest_sha256 NOT GLOB '*[^0-9a-f]*'
+          AND length(policy_sha256)=64 AND policy_sha256 NOT GLOB '*[^0-9a-f]*'
+          AND length(runtime_profile_sha256)=64 AND runtime_profile_sha256 NOT GLOB '*[^0-9a-f]*'
+          AND length(adapter_registry_sha256)=64 AND adapter_registry_sha256 NOT GLOB '*[^0-9a-f]*'
+          AND length(actor_binding_sha256)=64 AND actor_binding_sha256 NOT GLOB '*[^0-9a-f]*'
+          AND length(conversation_binding_sha256)=64 AND conversation_binding_sha256 NOT GLOB '*[^0-9a-f]*'
+          AND length(current_file_source_identity_sha256)=64
+              AND current_file_source_identity_sha256 NOT GLOB '*[^0-9a-f]*'
+          AND length(current_file_content_sha256)=64
+              AND current_file_content_sha256 NOT GLOB '*[^0-9a-f]*'),
+    CHECK(accepted_graph_outcome_sha256 IS NULL
+          OR (length(accepted_graph_outcome_sha256)=64
+              AND accepted_graph_outcome_sha256 NOT GLOB '*[^0-9a-f]*')),
+    CHECK(accepted_steps_sha256 IS NULL
+          OR (length(accepted_steps_sha256)=64
+              AND accepted_steps_sha256 NOT GLOB '*[^0-9a-f]*')),
+    CHECK(publication_receipt_sha256 IS NULL
+          OR (length(publication_receipt_sha256)=64
+              AND publication_receipt_sha256 NOT GLOB '*[^0-9a-f]*')),
+    CHECK(terminal_publication_receipt_sha256 IS NULL
+          OR (length(terminal_publication_receipt_sha256)=64
+              AND terminal_publication_receipt_sha256 NOT GLOB '*[^0-9a-f]*')),
+    CHECK(length(created_at) BETWEEN 20 AND 64 AND unixepoch(created_at) IS NOT NULL
+          AND length(updated_at) BETWEEN 20 AND 64 AND unixepoch(updated_at) IS NOT NULL
+          AND length(expires_at) BETWEEN 20 AND 64 AND unixepoch(expires_at) IS NOT NULL
+          AND (closed_at IS NULL
+               OR (length(closed_at) BETWEEN 20 AND 64 AND unixepoch(closed_at) IS NOT NULL))),
+    CHECK(updated_at>=created_at
+          AND ((state='active' AND expires_at>updated_at)
+               OR (state<>'active' AND closed_at=updated_at))
+          AND unixepoch(expires_at)-unixepoch(created_at)<={WORK_ITEM_TTL_HOURS * 60 * 60}),
+    CHECK(state<>'active' OR revision<={COMPARE_CURRENT_FILE_WEB_MAX_ACTIVE_REVISION}),
+    CHECK((state='active' AND transition IN (
+              'admitted','step_claimed','step_settled','step_requeued','restart_rebind',
+              'review_recovery_admitted'
+          ) AND closed_at IS NULL
+          AND outcome_status IS NULL AND outcome_reason IS NULL
+          AND publication_assistant_message_id IS NULL
+          AND accepted_graph_outcome_sha256 IS NULL
+          AND accepted_steps_sha256 IS NULL
+          AND terminal_publication_receipt_sha256 IS NULL
+          AND publication_receipt_sha256 IS NULL)
+          OR (state='terminal' AND transition='terminal_settled'
+              AND closed_at=updated_at
+              AND outcome_status IN ('partial','empty','unavailable','denied','failed')
+              AND outcome_reason IN (
+                  'partial_evidence','no_comparable_evidence','capability_unavailable',
+                  'authority_denied','step_failed','evidence_not_replayable',
+                  'conversation_archived','cancelled','expired'
+              )
+              AND publication_assistant_message_id IS NOT NULL
+              AND accepted_graph_outcome_sha256 IS NOT NULL
+              AND accepted_steps_sha256 IS NOT NULL
+              AND terminal_publication_receipt_sha256 IS NOT NULL
+              AND publication_receipt_sha256 IS NULL)
+          OR (state='completed' AND transition='publication_committed'
+              AND closed_at=updated_at
+              AND outcome_status='complete' AND outcome_reason='none'
+              AND publication_assistant_message_id IS NOT NULL
+              AND accepted_graph_outcome_sha256 IS NOT NULL
+              AND accepted_steps_sha256 IS NOT NULL
+              AND terminal_publication_receipt_sha256 IS NULL
+              AND publication_receipt_sha256 IS NOT NULL)),
+    CHECK((transition='admitted' AND revision=1)
+          OR (transition<>'admitted' AND revision>=2))
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS uq_work_item_compare_current_file_web_graphs_active
+    ON work_item_compare_current_file_web_graphs(user_id,conversation_id)
+    WHERE state='active';
+CREATE INDEX IF NOT EXISTS idx_work_item_compare_current_file_web_graphs_owner
+    ON work_item_compare_current_file_web_graphs(user_id,state,updated_at DESC,id DESC);
+CREATE INDEX IF NOT EXISTS idx_work_item_compare_current_file_web_graphs_expiry
+    ON work_item_compare_current_file_web_graphs(state,expires_at);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_work_item_compare_current_file_web_graphs_assistant
+    ON work_item_compare_current_file_web_graphs(publication_assistant_message_id)
+    WHERE publication_assistant_message_id IS NOT NULL;
+
+CREATE TABLE IF NOT EXISTS work_item_compare_current_file_web_steps (
+    graph_id TEXT NOT NULL REFERENCES work_item_compare_current_file_web_graphs(id) ON DELETE CASCADE,
+    step_id TEXT NOT NULL,
+    kind TEXT NOT NULL CHECK(kind IN ('file_current_read','web_current_read','primary_synthesis')),
+    capability_id TEXT NOT NULL,
+    security_id TEXT,
+    adapter_id TEXT,
+    effect_class TEXT NOT NULL CHECK(effect_class='read'),
+    evidence_replayability TEXT NOT NULL CHECK(evidence_replayability='process_private'),
+    depends_on_json TEXT NOT NULL CHECK(json_valid(depends_on_json) AND json_type(depends_on_json)='array'),
+    parallel_group TEXT,
+    input_identity_sha256 TEXT NOT NULL,
+    idempotency_key_sha256 TEXT NOT NULL,
+    state TEXT NOT NULL CHECK(state IN (
+        'pending','running','complete','partial','empty','unavailable','denied','failed'
+    )),
+    attempt INTEGER NOT NULL CHECK(attempt BETWEEN 0 AND {COMPARE_CURRENT_FILE_WEB_MAX_ATTEMPTS}),
+    outcome_schema TEXT NOT NULL CHECK(outcome_schema='{COMPARE_CURRENT_FILE_WEB_STEP_OUTCOME_SCHEMA}'),
+    outcome_sha256 TEXT,
+    prior_outcome_sha256 TEXT,
+    recovery_review_sha256 TEXT,
+    recovery_context_sha256 TEXT,
+    evidence_identity_sha256 TEXT,
+    authority_rechecked INTEGER NOT NULL CHECK(authority_rechecked IN (0,1)),
+    verified INTEGER NOT NULL CHECK(verified IN (0,1)),
+    started_at TEXT,
+    settled_at TEXT,
+    PRIMARY KEY(graph_id,step_id),
+    UNIQUE(graph_id,kind),
+    CHECK(length(step_id) BETWEEN 1 AND 64),
+    CHECK((kind='file_current_read' AND step_id='read_current_file'
+           AND capability_id='file.current.read' AND security_id IS NULL
+           AND adapter_id IS NULL AND depends_on_json='[]'
+           AND parallel_group='current_evidence')
+          OR (kind='web_current_read' AND step_id='read_current_web'
+              AND capability_id='web.search.current'
+              AND security_id='{WEB_SEARCH_CURRENT_SECURITY_ID}'
+              AND adapter_id='{WEB_SEARCH_CURRENT_ADAPTER_ID}'
+              AND depends_on_json='[]'
+              AND parallel_group='current_evidence')
+          OR (kind='primary_synthesis' AND step_id='primary_synthesis'
+              AND capability_id='model.primary.synthesis' AND security_id IS NULL
+              AND adapter_id IS NULL
+              AND depends_on_json='["read_current_file","read_current_web"]'
+              AND parallel_group IS NULL)),
+    CHECK(length(input_identity_sha256)=64 AND input_identity_sha256 NOT GLOB '*[^0-9a-f]*'
+          AND length(idempotency_key_sha256)=64
+              AND idempotency_key_sha256 NOT GLOB '*[^0-9a-f]*'),
+    CHECK(outcome_sha256 IS NULL
+          OR (length(outcome_sha256)=64 AND outcome_sha256 NOT GLOB '*[^0-9a-f]*')),
+    CHECK(prior_outcome_sha256 IS NULL
+          OR (length(prior_outcome_sha256)=64
+              AND prior_outcome_sha256 NOT GLOB '*[^0-9a-f]*')),
+    CHECK((recovery_review_sha256 IS NULL AND recovery_context_sha256 IS NULL)
+          OR (kind='web_current_read' AND attempt>=1 AND prior_outcome_sha256 IS NOT NULL
+              AND length(recovery_review_sha256)=64
+              AND recovery_review_sha256 NOT GLOB '*[^0-9a-f]*'
+              AND length(recovery_context_sha256)=64
+              AND recovery_context_sha256 NOT GLOB '*[^0-9a-f]*')),
+    CHECK(evidence_identity_sha256 IS NULL
+          OR (length(evidence_identity_sha256)=64
+              AND evidence_identity_sha256 NOT GLOB '*[^0-9a-f]*')),
+    CHECK((started_at IS NULL
+           OR (length(started_at) BETWEEN 20 AND 64 AND unixepoch(started_at) IS NOT NULL))
+          AND (settled_at IS NULL
+               OR (length(settled_at) BETWEEN 20 AND 64 AND unixepoch(settled_at) IS NOT NULL))),
+    CHECK((state='pending' AND outcome_sha256 IS NULL AND evidence_identity_sha256 IS NULL
+           AND authority_rechecked=0 AND verified=0 AND started_at IS NULL AND settled_at IS NULL
+           AND (prior_outcome_sha256 IS NULL OR attempt>=1))
+          OR (state='running' AND attempt>=1 AND started_at IS NOT NULL AND settled_at IS NULL
+              AND outcome_sha256 IS NULL AND evidence_identity_sha256 IS NULL
+              AND authority_rechecked=0 AND verified=0
+              AND (attempt>1 OR prior_outcome_sha256 IS NULL))
+          OR (state IN ('complete','partial','empty') AND attempt>=1
+              AND started_at IS NOT NULL AND settled_at>=started_at AND outcome_sha256 IS NOT NULL
+              AND evidence_identity_sha256 IS NOT NULL AND verified=1
+              AND ((kind IN ('file_current_read','web_current_read') AND authority_rechecked=1)
+                   OR (kind='primary_synthesis' AND authority_rechecked=0
+                       AND state IN ('complete','partial'))))
+          OR (state='denied' AND kind IN ('file_current_read','web_current_read') AND attempt>=1
+              AND started_at IS NOT NULL AND settled_at>=started_at AND outcome_sha256 IS NOT NULL
+              AND evidence_identity_sha256 IS NULL AND authority_rechecked=1 AND verified=0)
+          OR (state IN ('unavailable','failed') AND attempt>=1
+              AND started_at IS NOT NULL AND settled_at>=started_at AND outcome_sha256 IS NOT NULL
+              AND evidence_identity_sha256 IS NULL AND authority_rechecked=0 AND verified=0)),
+    CHECK(kind<>'primary_synthesis' OR state NOT IN ('empty','denied'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_work_item_compare_current_file_web_steps_state
+    ON work_item_compare_current_file_web_steps(graph_id,state,step_id);
+
+CREATE TRIGGER IF NOT EXISTS trg_work_item_compare_current_file_web_graphs_scope_insert
+BEFORE INSERT ON work_item_compare_current_file_web_graphs
+WHEN NOT EXISTS (
+        SELECT 1
+          FROM conversations conversation
+          JOIN messages boundary
+            ON boundary.id=NEW.anchor_user_message_id
+           AND boundary.user_id=conversation.user_id
+           AND boundary.conversation_id=conversation.id
+           AND boundary.role='user'
+          JOIN raw_objects source
+            ON source.id=NEW.current_file_raw_object_id
+           AND source.user_id=conversation.user_id
+         WHERE conversation.id=NEW.conversation_id
+           AND conversation.user_id=NEW.user_id
+           AND conversation.is_archived=0
+    )
+    OR EXISTS (
+        SELECT 1 FROM work_items work
+         WHERE work.user_id=NEW.user_id AND work.conversation_id=NEW.conversation_id
+           AND work.state IN ('active','waiting_for_input')
+    )
+BEGIN
+    SELECT RAISE(ABORT,'current-file/web WorkGraph scope is invalid or already owned');
+END;
+
+CREATE TRIGGER IF NOT EXISTS trg_work_items_current_file_web_graph_owner_insert
+BEFORE INSERT ON work_items
+WHEN NEW.state IN ('active','waiting_for_input')
+ AND EXISTS (
+     SELECT 1 FROM work_item_compare_current_file_web_graphs graph
+      WHERE graph.user_id=NEW.user_id AND graph.conversation_id=NEW.conversation_id
+        AND graph.state='active'
+ )
+BEGIN
+    SELECT RAISE(ABORT,'current-file/web WorkGraph already owns the conversation');
+END;
+
+CREATE TRIGGER IF NOT EXISTS trg_work_items_current_file_web_graph_owner_update
+BEFORE UPDATE OF user_id,conversation_id,state ON work_items
+WHEN NEW.state IN ('active','waiting_for_input')
+ AND EXISTS (
+     SELECT 1 FROM work_item_compare_current_file_web_graphs graph
+      WHERE graph.user_id=NEW.user_id AND graph.conversation_id=NEW.conversation_id
+        AND graph.state='active'
+ )
+BEGIN
+    SELECT RAISE(ABORT,'current-file/web WorkGraph already owns the conversation');
+END;
+
+CREATE TRIGGER IF NOT EXISTS trg_work_item_compare_current_file_web_graphs_identity_immutable
+BEFORE UPDATE ON work_item_compare_current_file_web_graphs
+WHEN NEW.id<>OLD.id OR NEW.user_id<>OLD.user_id
+  OR NEW.conversation_id<>OLD.conversation_id
+  OR NEW.anchor_user_message_id<>OLD.anchor_user_message_id
+  OR NEW.current_file_raw_object_id<>OLD.current_file_raw_object_id
+  OR NEW.proposal_sha256<>OLD.proposal_sha256
+  OR NEW.accepted_plan_sha256<>OLD.accepted_plan_sha256
+  OR NEW.manifest_sha256<>OLD.manifest_sha256
+  OR NEW.policy_sha256<>OLD.policy_sha256
+  OR NEW.runtime_profile_sha256<>OLD.runtime_profile_sha256
+  OR NEW.adapter_registry_sha256<>OLD.adapter_registry_sha256
+  OR NEW.actor_binding_sha256<>OLD.actor_binding_sha256
+  OR NEW.conversation_binding_sha256<>OLD.conversation_binding_sha256
+  OR NEW.current_file_source_identity_sha256<>OLD.current_file_source_identity_sha256
+  OR NEW.current_file_content_sha256<>OLD.current_file_content_sha256
+  OR NEW.completion_contract<>OLD.completion_contract
+  OR NEW.fallback_owner<>OLD.fallback_owner
+  OR NEW.publication_owner<>OLD.publication_owner
+  OR NEW.max_attempts<>OLD.max_attempts
+  OR NEW.created_at<>OLD.created_at OR NEW.expires_at<>OLD.expires_at
+BEGIN
+    SELECT RAISE(ABORT,'current-file/web WorkGraph identity is immutable');
+END;
+
+CREATE TRIGGER IF NOT EXISTS trg_work_item_compare_current_file_web_graphs_lifecycle
+BEFORE UPDATE ON work_item_compare_current_file_web_graphs
+WHEN OLD.state<>'active'
+  OR NEW.revision<>OLD.revision+1
+  OR NEW.updated_at<OLD.updated_at
+  OR (NEW.state='active' AND NEW.updated_at>=NEW.expires_at)
+  OR NOT (
+      (NEW.state='active'
+       AND NEW.transition IN (
+           'step_claimed','step_settled','step_requeued','restart_rebind',
+           'review_recovery_admitted'
+       )
+       AND NEW.closed_at IS NULL
+       AND NEW.outcome_status IS NULL AND NEW.outcome_reason IS NULL
+       AND NEW.publication_assistant_message_id IS NULL
+       AND NEW.accepted_graph_outcome_sha256 IS NULL
+       AND NEW.accepted_steps_sha256 IS NULL
+       AND NEW.terminal_publication_receipt_sha256 IS NULL
+       AND NEW.publication_receipt_sha256 IS NULL)
+      OR
+      (NEW.state='terminal' AND NEW.transition='terminal_settled'
+       AND NEW.closed_at=NEW.updated_at
+       AND NEW.outcome_status IN ('partial','empty','unavailable','denied','failed')
+       AND NEW.outcome_reason IN (
+           'partial_evidence','no_comparable_evidence','capability_unavailable',
+           'authority_denied','step_failed','evidence_not_replayable',
+           'conversation_archived','cancelled','expired'
+       )
+       AND NEW.publication_assistant_message_id IS NOT NULL
+       AND NEW.accepted_graph_outcome_sha256 IS NOT NULL
+       AND NEW.accepted_steps_sha256 IS NOT NULL
+       AND NEW.terminal_publication_receipt_sha256 IS NOT NULL
+       AND NEW.publication_receipt_sha256 IS NULL)
+      OR
+      (NEW.state='completed' AND NEW.transition='publication_committed'
+       AND NEW.closed_at=NEW.updated_at
+       AND NEW.outcome_status='complete' AND NEW.outcome_reason='none'
+       AND NEW.publication_assistant_message_id IS NOT NULL
+       AND NEW.accepted_graph_outcome_sha256 IS NOT NULL
+       AND NEW.accepted_steps_sha256 IS NOT NULL
+       AND NEW.terminal_publication_receipt_sha256 IS NULL
+       AND NEW.publication_receipt_sha256 IS NOT NULL)
+  )
+BEGIN
+    SELECT RAISE(ABORT,'current-file/web WorkGraph lifecycle is invalid');
+END;
+
+CREATE TRIGGER IF NOT EXISTS trg_work_item_compare_current_file_web_graphs_completion
+BEFORE UPDATE ON work_item_compare_current_file_web_graphs
+WHEN NEW.state='completed' AND NOT (
+    (SELECT COUNT(*) FROM work_item_compare_current_file_web_steps step
+      WHERE step.graph_id=OLD.id)=3
+    AND NOT EXISTS (
+        SELECT 1 FROM work_item_compare_current_file_web_steps step
+         WHERE step.graph_id=OLD.id AND step.state<>'complete'
+    )
+    AND EXISTS (
+        SELECT 1 FROM messages assistant
+         WHERE assistant.id=NEW.publication_assistant_message_id
+           AND assistant.user_id=OLD.user_id
+           AND assistant.conversation_id=OLD.conversation_id
+           AND assistant.role='assistant'
+           AND assistant.reply_to=OLD.anchor_user_message_id
+           AND json_valid(assistant.metadata_json)
+           AND json_extract(assistant.metadata_json,
+                            '$.{COMPARE_CURRENT_FILE_WEB_PUBLICATION_METADATA_KEY}.schema')
+               ='{COMPARE_CURRENT_FILE_WEB_PUBLICATION_RECEIPT_SCHEMA}'
+           AND json_extract(assistant.metadata_json,
+                            '$.{COMPARE_CURRENT_FILE_WEB_PUBLICATION_METADATA_KEY}.graph_id')=OLD.id
+           AND json_extract(assistant.metadata_json,
+                            '$.{COMPARE_CURRENT_FILE_WEB_PUBLICATION_METADATA_KEY}.completed_revision')
+               =NEW.revision
+           AND json_extract(assistant.metadata_json,
+                            '$.{COMPARE_CURRENT_FILE_WEB_PUBLICATION_METADATA_KEY}.accepted_plan_sha256')
+               =OLD.accepted_plan_sha256
+           AND json_extract(assistant.metadata_json,
+                            '$.{COMPARE_CURRENT_FILE_WEB_PUBLICATION_METADATA_KEY}.graph_outcome_sha256')
+               =NEW.accepted_graph_outcome_sha256
+           AND json_extract(assistant.metadata_json,
+                            '$.{COMPARE_CURRENT_FILE_WEB_PUBLICATION_METADATA_KEY}.steps_sha256')
+               =NEW.accepted_steps_sha256
+           AND json_extract(assistant.metadata_json,
+                            '$.{COMPARE_CURRENT_FILE_WEB_PUBLICATION_METADATA_KEY}.final_authority_rechecked')=1
+    )
+)
+BEGIN
+    SELECT RAISE(ABORT,'current-file/web WorkGraph publication receipt is invalid');
+END;
+
+CREATE TRIGGER IF NOT EXISTS trg_work_item_compare_current_file_web_graphs_terminal_publication
+BEFORE UPDATE ON work_item_compare_current_file_web_graphs
+WHEN NEW.state='terminal' AND NOT (
+    (SELECT COUNT(*) FROM work_item_compare_current_file_web_steps step
+      WHERE step.graph_id=OLD.id)=3
+    AND (
+        (NEW.outcome_status='partial' AND NEW.outcome_reason='partial_evidence'
+         AND EXISTS (
+             SELECT 1 FROM work_item_compare_current_file_web_steps synthesis
+              WHERE synthesis.graph_id=OLD.id AND synthesis.step_id='primary_synthesis'
+                AND synthesis.state='partial'
+         ))
+        OR (NEW.outcome_status='unavailable'
+            AND NEW.outcome_reason='capability_unavailable'
+            AND EXISTS (
+                SELECT 1 FROM work_item_compare_current_file_web_steps synthesis
+                 WHERE synthesis.graph_id=OLD.id AND synthesis.step_id='primary_synthesis'
+                   AND synthesis.state='unavailable'
+            ))
+        OR (NEW.outcome_status='failed' AND NEW.outcome_reason='step_failed'
+            AND EXISTS (
+                SELECT 1 FROM work_item_compare_current_file_web_steps synthesis
+                 WHERE synthesis.graph_id=OLD.id AND synthesis.step_id='primary_synthesis'
+                   AND synthesis.state='failed'
+            ))
+        OR (NEW.outcome_reason='evidence_not_replayable'
+            AND NEW.outcome_status='unavailable'
+            AND EXISTS (
+                SELECT 1 FROM work_item_compare_current_file_web_steps exhausted
+                 WHERE exhausted.graph_id=OLD.id AND exhausted.attempt={COMPARE_CURRENT_FILE_WEB_MAX_ATTEMPTS}
+                   AND (exhausted.state IN ('complete','partial','empty')
+                        OR (exhausted.step_id='primary_synthesis'
+                            AND exhausted.state IN ('pending','running')))
+            ))
+        OR (NEW.outcome_status='unavailable'
+            AND NEW.outcome_reason='conversation_archived'
+            AND EXISTS (
+                SELECT 1 FROM conversations conversation
+                 WHERE conversation.id=OLD.conversation_id
+                   AND conversation.user_id=OLD.user_id
+                   AND conversation.is_archived=1
+            ))
+        OR (NEW.outcome_status='unavailable'
+            AND NEW.outcome_reason='cancelled')
+        OR (NEW.outcome_status='unavailable'
+            AND NEW.outcome_reason='expired'
+            AND NEW.updated_at>=OLD.expires_at)
+        OR (EXISTS (
+                SELECT 1 FROM work_item_compare_current_file_web_steps synthesis
+                 WHERE synthesis.graph_id=OLD.id AND synthesis.step_id='primary_synthesis'
+                   AND synthesis.state='pending'
+            )
+            AND NOT EXISTS (
+                SELECT 1 FROM work_item_compare_current_file_web_steps read_step
+                 WHERE read_step.graph_id=OLD.id
+                   AND read_step.step_id IN ('read_current_file','read_current_web')
+                   AND read_step.state IN ('pending','running','complete','partial')
+            )
+            AND (
+                (NEW.outcome_status='denied' AND NEW.outcome_reason='authority_denied'
+                 AND EXISTS (
+                     SELECT 1 FROM work_item_compare_current_file_web_steps read_step
+                      WHERE read_step.graph_id=OLD.id
+                        AND read_step.step_id IN ('read_current_file','read_current_web')
+                        AND read_step.state='denied'
+                 ))
+                OR (NEW.outcome_status='failed' AND NEW.outcome_reason='step_failed'
+                    AND NOT EXISTS (
+                        SELECT 1 FROM work_item_compare_current_file_web_steps read_step
+                         WHERE read_step.graph_id=OLD.id
+                           AND read_step.step_id IN ('read_current_file','read_current_web')
+                           AND read_step.state='denied'
+                    )
+                    AND EXISTS (
+                        SELECT 1 FROM work_item_compare_current_file_web_steps read_step
+                         WHERE read_step.graph_id=OLD.id
+                           AND read_step.step_id IN ('read_current_file','read_current_web')
+                           AND read_step.state='failed'
+                    ))
+                OR (NEW.outcome_status='unavailable'
+                    AND NEW.outcome_reason='capability_unavailable'
+                    AND NOT EXISTS (
+                        SELECT 1 FROM work_item_compare_current_file_web_steps read_step
+                         WHERE read_step.graph_id=OLD.id
+                           AND read_step.step_id IN ('read_current_file','read_current_web')
+                           AND read_step.state IN ('denied','failed')
+                    )
+                    AND EXISTS (
+                        SELECT 1 FROM work_item_compare_current_file_web_steps read_step
+                         WHERE read_step.graph_id=OLD.id
+                           AND read_step.step_id IN ('read_current_file','read_current_web')
+                           AND read_step.state='unavailable'
+                    ))
+                OR (NEW.outcome_status='empty'
+                    AND NEW.outcome_reason='no_comparable_evidence'
+                    AND NOT EXISTS (
+                        SELECT 1 FROM work_item_compare_current_file_web_steps read_step
+                         WHERE read_step.graph_id=OLD.id
+                           AND read_step.step_id IN ('read_current_file','read_current_web')
+                           AND read_step.state<>'empty'
+                    ))
+            ))
+    )
+    AND EXISTS (
+        SELECT 1 FROM messages assistant
+         WHERE assistant.id=NEW.publication_assistant_message_id
+           AND assistant.user_id=OLD.user_id
+           AND assistant.conversation_id=OLD.conversation_id
+           AND assistant.role='assistant'
+           AND assistant.reply_to=OLD.anchor_user_message_id
+           AND json_valid(assistant.metadata_json)
+           AND json_extract(assistant.metadata_json,
+                            '$.{COMPARE_CURRENT_FILE_WEB_TERMINAL_PUBLICATION_METADATA_KEY}.schema')
+               ='{COMPARE_CURRENT_FILE_WEB_TERMINAL_PUBLICATION_RECEIPT_SCHEMA}'
+           AND json_extract(assistant.metadata_json,
+                            '$.{COMPARE_CURRENT_FILE_WEB_TERMINAL_PUBLICATION_METADATA_KEY}.graph_id')=OLD.id
+           AND json_extract(assistant.metadata_json,
+                            '$.{COMPARE_CURRENT_FILE_WEB_TERMINAL_PUBLICATION_METADATA_KEY}.terminal_revision')
+               =NEW.revision
+           AND json_extract(assistant.metadata_json,
+                            '$.{COMPARE_CURRENT_FILE_WEB_TERMINAL_PUBLICATION_METADATA_KEY}.accepted_plan_sha256')
+               =OLD.accepted_plan_sha256
+           AND json_extract(assistant.metadata_json,
+                            '$.{COMPARE_CURRENT_FILE_WEB_TERMINAL_PUBLICATION_METADATA_KEY}.status')
+               =NEW.outcome_status
+           AND json_extract(assistant.metadata_json,
+                            '$.{COMPARE_CURRENT_FILE_WEB_TERMINAL_PUBLICATION_METADATA_KEY}.reason')
+               =NEW.outcome_reason
+           AND json_extract(assistant.metadata_json,
+                            '$.{COMPARE_CURRENT_FILE_WEB_TERMINAL_PUBLICATION_METADATA_KEY}.graph_outcome_sha256')
+               =NEW.accepted_graph_outcome_sha256
+           AND json_extract(assistant.metadata_json,
+                            '$.{COMPARE_CURRENT_FILE_WEB_TERMINAL_PUBLICATION_METADATA_KEY}.steps_sha256')
+               =NEW.accepted_steps_sha256
+           AND json_extract(assistant.metadata_json,
+                            '$.{COMPARE_CURRENT_FILE_WEB_TERMINAL_PUBLICATION_METADATA_KEY}.completion_claimed')=0
+           AND (NEW.outcome_reason<>'conversation_archived'
+                OR assistant.content='{COMPARE_CURRENT_FILE_WEB_ARCHIVED_RESPONSE}')
+           AND (NEW.outcome_reason<>'cancelled'
+                OR assistant.content='{COMPARE_CURRENT_FILE_WEB_CANCELLED_RESPONSE}')
+           AND (NEW.outcome_reason<>'expired'
+                OR assistant.content='{COMPARE_CURRENT_FILE_WEB_EXPIRED_RESPONSE}')
+           AND (
+               (NEW.outcome_status='partial'
+                AND json_extract(assistant.metadata_json,
+                    '$.{COMPARE_CURRENT_FILE_WEB_TERMINAL_PUBLICATION_METADATA_KEY}.model_spoke')=1
+                AND json_extract(assistant.metadata_json,
+                    '$.{COMPARE_CURRENT_FILE_WEB_TERMINAL_PUBLICATION_METADATA_KEY}.evidence_cited')=1
+                AND json_extract(assistant.metadata_json,
+                    '$.{COMPARE_CURRENT_FILE_WEB_TERMINAL_PUBLICATION_METADATA_KEY}.final_authority_rechecked')=1)
+               OR (NEW.outcome_status<>'partial'
+                   AND json_extract(assistant.metadata_json,
+                       '$.{COMPARE_CURRENT_FILE_WEB_TERMINAL_PUBLICATION_METADATA_KEY}.model_spoke')=0
+                   AND json_extract(assistant.metadata_json,
+                       '$.{COMPARE_CURRENT_FILE_WEB_TERMINAL_PUBLICATION_METADATA_KEY}.evidence_cited')=0
+                   AND json_extract(assistant.metadata_json,
+                       '$.{COMPARE_CURRENT_FILE_WEB_TERMINAL_PUBLICATION_METADATA_KEY}.final_authority_rechecked')=0)
+           )
+    )
+)
+BEGIN
+    SELECT RAISE(ABORT,'current-file/web WorkGraph terminal publication receipt is invalid');
+END;
+
+CREATE TRIGGER IF NOT EXISTS trg_work_item_compare_current_file_web_steps_identity_immutable
+BEFORE UPDATE ON work_item_compare_current_file_web_steps
+WHEN NEW.graph_id<>OLD.graph_id OR NEW.step_id<>OLD.step_id OR NEW.kind<>OLD.kind
+  OR NEW.capability_id<>OLD.capability_id OR NEW.effect_class<>OLD.effect_class
+  OR NEW.security_id IS NOT OLD.security_id OR NEW.adapter_id IS NOT OLD.adapter_id
+  OR NEW.evidence_replayability<>OLD.evidence_replayability
+  OR NEW.depends_on_json<>OLD.depends_on_json
+  OR NEW.parallel_group IS NOT OLD.parallel_group
+  OR NEW.input_identity_sha256<>OLD.input_identity_sha256
+  OR NEW.idempotency_key_sha256<>OLD.idempotency_key_sha256
+  OR NEW.outcome_schema<>OLD.outcome_schema
+BEGIN
+    SELECT RAISE(ABORT,'current-file/web WorkGraph step identity is immutable');
+END;
+
+CREATE TRIGGER IF NOT EXISTS trg_work_item_compare_current_file_web_steps_lifecycle
+BEFORE UPDATE ON work_item_compare_current_file_web_steps
+WHEN NOT (
+    (OLD.state='pending' AND NEW.state='running' AND NEW.attempt=OLD.attempt+1
+     AND NEW.started_at IS NOT NULL AND NEW.settled_at IS NULL
+     AND NEW.outcome_sha256 IS NULL AND NEW.evidence_identity_sha256 IS NULL
+     AND NEW.prior_outcome_sha256 IS OLD.prior_outcome_sha256
+     AND NEW.recovery_review_sha256 IS OLD.recovery_review_sha256
+     AND NEW.recovery_context_sha256 IS OLD.recovery_context_sha256
+     AND NEW.authority_rechecked=0 AND NEW.verified=0)
+    OR
+    (OLD.state='running'
+     AND NEW.state IN ('complete','partial','empty','unavailable','denied','failed')
+     AND NEW.attempt=OLD.attempt AND NEW.started_at=OLD.started_at
+     AND NEW.prior_outcome_sha256 IS OLD.prior_outcome_sha256
+     AND NEW.recovery_review_sha256 IS OLD.recovery_review_sha256
+     AND NEW.recovery_context_sha256 IS OLD.recovery_context_sha256
+     AND NEW.settled_at>=OLD.started_at AND NEW.outcome_sha256 IS NOT NULL)
+    OR
+    (OLD.state='running' AND NEW.state='pending' AND NEW.attempt=OLD.attempt
+     AND NEW.started_at IS NULL AND NEW.settled_at IS NULL
+     AND NEW.outcome_sha256 IS NULL AND NEW.evidence_identity_sha256 IS NULL
+     AND NEW.prior_outcome_sha256 IS OLD.prior_outcome_sha256
+     AND NEW.recovery_review_sha256 IS OLD.recovery_review_sha256
+     AND NEW.recovery_context_sha256 IS OLD.recovery_context_sha256
+     AND NEW.authority_rechecked=0 AND NEW.verified=0)
+    OR
+    (OLD.state IN ('complete','partial','empty') AND NEW.state='pending'
+     AND OLD.attempt<{COMPARE_CURRENT_FILE_WEB_MAX_ATTEMPTS}
+     AND NEW.attempt=OLD.attempt AND NEW.started_at IS NULL AND NEW.settled_at IS NULL
+     AND NEW.outcome_sha256 IS NULL AND NEW.evidence_identity_sha256 IS NULL
+     AND NEW.prior_outcome_sha256=OLD.outcome_sha256
+     AND NEW.recovery_review_sha256 IS OLD.recovery_review_sha256
+     AND NEW.recovery_context_sha256 IS OLD.recovery_context_sha256
+     AND NEW.authority_rechecked=0 AND NEW.verified=0
+     AND EXISTS (
+         SELECT 1 FROM work_item_compare_current_file_web_graphs graph
+          WHERE graph.id=OLD.graph_id AND graph.state='active'
+            AND graph.transition='restart_rebind'
+     ))
+    OR
+    (OLD.kind='web_current_read'
+     AND OLD.state IN ('empty','unavailable','failed')
+     AND OLD.attempt<{COMPARE_CURRENT_FILE_WEB_MAX_ATTEMPTS}
+     AND OLD.prior_outcome_sha256 IS NULL
+     AND OLD.recovery_review_sha256 IS NULL AND OLD.recovery_context_sha256 IS NULL
+     AND NEW.state='pending' AND NEW.attempt=OLD.attempt
+     AND NEW.started_at IS NULL AND NEW.settled_at IS NULL
+     AND NEW.outcome_sha256 IS NULL AND NEW.evidence_identity_sha256 IS NULL
+     AND NEW.prior_outcome_sha256=OLD.outcome_sha256
+     AND NEW.recovery_review_sha256 IS NOT NULL
+     AND NEW.recovery_context_sha256 IS NOT NULL
+     AND NEW.authority_rechecked=0 AND NEW.verified=0
+     AND EXISTS (
+         SELECT 1 FROM work_item_compare_current_file_web_graphs graph
+          WHERE graph.id=OLD.graph_id AND graph.state='active'
+            AND graph.transition='review_recovery_admitted'
+     ))
+)
+BEGIN
+    SELECT RAISE(ABORT,'current-file/web WorkGraph step lifecycle is invalid');
+END;
+
+CREATE TRIGGER IF NOT EXISTS trg_work_item_compare_current_file_web_steps_delete_immutable
+BEFORE DELETE ON work_item_compare_current_file_web_steps
+WHEN EXISTS (
+    SELECT 1 FROM work_item_compare_current_file_web_graphs graph WHERE graph.id=OLD.graph_id
+)
+BEGIN
+    SELECT RAISE(ABORT,'current-file/web WorkGraph step deletion is immutable');
+END;
+"""
+
+_WORK_ITEM_SCHEMA_44 = _WORK_ITEM_SCHEMA_42 + _WORK_ITEM_SCHEMA_44_EXTENSION
+WORK_ITEM_SCHEMA = _WORK_ITEM_SCHEMA_44
 
 
 def _normalize_schema_sql(value: str) -> str:
@@ -2081,7 +2764,7 @@ def _canonical_schema_42_objects() -> dict[tuple[str, str], str]:
     conn = sqlite3.connect(":memory:")
     try:
         _execute_schema(conn, _WORK_ITEM_SCHEMA_42)
-        return _schema_objects(conn, current=True)
+        return _schema_objects_for_tables(conn, _SCHEMA_42_TABLES)
     finally:
         conn.close()
 
@@ -2180,6 +2863,12 @@ def _validate_current_data(conn: sqlite3.Connection) -> None:
     from friday.interaction_control_plane.compare_conversation_document_store import (
         _validate_stored_item as _validate_compare_stored_item,
     )
+    from friday.interaction_control_plane.compare_current_file_web_work_graph_store import (
+        _fetch as _fetch_current_file_web_graph,
+    )
+    from friday.interaction_control_plane.compare_current_file_web_work_graph_store import (
+        _validate_stored_graph as _validate_current_file_web_graph,
+    )
     from friday.interaction_control_plane.selected_archive_evidence import (
         SelectedArchiveEvidence,
         SelectedArchiveEvidenceError,
@@ -2188,6 +2877,41 @@ def _validate_current_data(conn: sqlite3.Connection) -> None:
         RecallConversationWorkItem,
         WorkItemContractError,
     )
+
+    graph_rows = conn.execute(
+        """SELECT id,user_id,conversation_id
+             FROM work_item_compare_current_file_web_graphs
+            ORDER BY id"""
+    ).fetchall()
+    for graph_row in graph_rows:
+        graph_id = str(graph_row["id"] if isinstance(graph_row, sqlite3.Row) else graph_row[0])
+        user_id = str(graph_row["user_id"] if isinstance(graph_row, sqlite3.Row) else graph_row[1])
+        conversation_id = str(
+            graph_row["conversation_id"] if isinstance(graph_row, sqlite3.Row) else graph_row[2]
+        )
+        try:
+            graph = _fetch_current_file_web_graph(
+                conn,
+                graph_id=graph_id,
+                user_id=user_id,
+                conversation_id=conversation_id,
+            )
+            if graph is None:
+                raise sqlite3.DatabaseError("Schema 44 WorkGraph disappeared during validation")
+            _validate_current_file_web_graph(conn, graph)
+        except (ValueError, sqlite3.IntegrityError) as exc:
+            raise sqlite3.DatabaseError("Schema 44 current-file/web WorkGraph data is invalid") from exc
+
+    graph_orphan = conn.execute(
+        """SELECT 1
+             FROM work_item_compare_current_file_web_steps step
+             LEFT JOIN work_item_compare_current_file_web_graphs graph
+               ON graph.id=step.graph_id
+            WHERE graph.id IS NULL
+            LIMIT 1"""
+    ).fetchone()
+    if graph_orphan is not None:
+        raise sqlite3.DatabaseError("Schema 44 current-file/web WorkGraph step is orphaned")
 
     recall_cursor = conn.execute("SELECT * FROM work_items WHERE kind='recall_conversation' ORDER BY id")
     recall_columns = tuple(str(item[0]) for item in recall_cursor.description or ())
@@ -2611,20 +3335,29 @@ def _validate_current_data(conn: sqlite3.Connection) -> None:
 
 
 def validate_work_item_schema(conn: sqlite3.Connection, *, required: bool = True) -> None:
-    """Fail closed when the exact schema-42 Work Item projection is weakened."""
+    """Fail closed when the exact schema-44 Work Item/graph projection is weakened."""
 
     row = conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='work_items'").fetchone()
     if row is None:
         if required:
-            raise sqlite3.DatabaseError("Schema 42 work item store is missing")
+            raise sqlite3.DatabaseError("Schema 44 work item store is missing")
         if _related_schema_objects(conn):
-            raise sqlite3.DatabaseError("Schema 42 work item DDL is incomplete or altered")
+            raise sqlite3.DatabaseError("Schema 44 work item DDL is incomplete or altered")
         return
     register_work_item_connection_functions(conn)
     if _schema_objects(conn, current=True) != _canonical_work_item_schema_objects():
-        raise sqlite3.DatabaseError("Schema 42 work item DDL is incomplete or altered")
+        raise sqlite3.DatabaseError("Schema 44 work item DDL is incomplete or altered")
 
     expected_index_columns = {
+        "idx_work_item_compare_current_file_web_steps_state": ("graph_id", "state", "step_id"),
+        "idx_work_item_compare_current_file_web_graphs_expiry": ("state", "expires_at"),
+        "idx_work_item_compare_current_file_web_graphs_owner": (
+            "user_id",
+            "state",
+            "updated_at",
+            "id",
+        ),
+        "uq_work_item_compare_current_file_web_graphs_active": ("user_id", "conversation_id"),
         "idx_work_item_compare_outcomes_assistant": ("answer_assistant_message_id",),
         "idx_work_item_compare_document_evidence_origin": (
             "origin_boundary_user_message_id",
@@ -2660,7 +3393,7 @@ def validate_work_item_schema(conn: sqlite3.Connection, *, required: bool = True
         for name in expected_index_columns
     }
     if named_index_columns != expected_index_columns:
-        raise sqlite3.DatabaseError("Schema 42 work item indexes are invalid")
+        raise sqlite3.DatabaseError("Schema 44 work item indexes are invalid")
 
     columns = {
         str(item[1]): (str(item[2]).upper(), int(item[3]), int(item[5]))
@@ -2771,6 +3504,79 @@ def validate_work_item_schema(conn: sqlite3.Connection, *, required: bool = True
     }:
         raise sqlite3.DatabaseError("Schema 42 comparison outcome store shape is invalid")
 
+    graph_columns = {
+        str(item[1]): (str(item[2]).upper(), int(item[3]), int(item[5]))
+        for item in conn.execute("PRAGMA table_info(work_item_compare_current_file_web_graphs)")
+    }
+    if graph_columns != {
+        "id": ("TEXT", 0, 1),
+        "user_id": ("TEXT", 1, 0),
+        "conversation_id": ("TEXT", 1, 0),
+        "anchor_user_message_id": ("TEXT", 1, 0),
+        "current_file_raw_object_id": ("TEXT", 1, 0),
+        "state": ("TEXT", 1, 0),
+        "revision": ("INTEGER", 1, 0),
+        "transition": ("TEXT", 1, 0),
+        "proposal_sha256": ("TEXT", 1, 0),
+        "accepted_plan_sha256": ("TEXT", 1, 0),
+        "manifest_sha256": ("TEXT", 1, 0),
+        "policy_sha256": ("TEXT", 1, 0),
+        "runtime_profile_sha256": ("TEXT", 1, 0),
+        "adapter_registry_sha256": ("TEXT", 1, 0),
+        "actor_binding_sha256": ("TEXT", 1, 0),
+        "conversation_binding_sha256": ("TEXT", 1, 0),
+        "current_file_source_identity_sha256": ("TEXT", 1, 0),
+        "current_file_content_sha256": ("TEXT", 1, 0),
+        "completion_contract": ("TEXT", 1, 0),
+        "fallback_owner": ("TEXT", 1, 0),
+        "publication_owner": ("TEXT", 1, 0),
+        "max_attempts": ("INTEGER", 1, 0),
+        "created_at": ("TEXT", 1, 0),
+        "updated_at": ("TEXT", 1, 0),
+        "expires_at": ("TEXT", 1, 0),
+        "closed_at": ("TEXT", 0, 0),
+        "outcome_status": ("TEXT", 0, 0),
+        "outcome_reason": ("TEXT", 0, 0),
+        "publication_assistant_message_id": ("TEXT", 0, 0),
+        "accepted_graph_outcome_sha256": ("TEXT", 0, 0),
+        "accepted_steps_sha256": ("TEXT", 0, 0),
+        "terminal_publication_receipt_sha256": ("TEXT", 0, 0),
+        "publication_receipt_sha256": ("TEXT", 0, 0),
+    }:
+        raise sqlite3.DatabaseError("Schema 44 current-file/web WorkGraph store shape is invalid")
+
+    graph_step_columns = {
+        str(item[1]): (str(item[2]).upper(), int(item[3]), int(item[5]))
+        for item in conn.execute("PRAGMA table_info(work_item_compare_current_file_web_steps)")
+    }
+    if graph_step_columns != {
+        "graph_id": ("TEXT", 1, 1),
+        "step_id": ("TEXT", 1, 2),
+        "kind": ("TEXT", 1, 0),
+        "capability_id": ("TEXT", 1, 0),
+        "security_id": ("TEXT", 0, 0),
+        "adapter_id": ("TEXT", 0, 0),
+        "effect_class": ("TEXT", 1, 0),
+        "evidence_replayability": ("TEXT", 1, 0),
+        "depends_on_json": ("TEXT", 1, 0),
+        "parallel_group": ("TEXT", 0, 0),
+        "input_identity_sha256": ("TEXT", 1, 0),
+        "idempotency_key_sha256": ("TEXT", 1, 0),
+        "state": ("TEXT", 1, 0),
+        "attempt": ("INTEGER", 1, 0),
+        "outcome_schema": ("TEXT", 1, 0),
+        "outcome_sha256": ("TEXT", 0, 0),
+        "prior_outcome_sha256": ("TEXT", 0, 0),
+        "recovery_review_sha256": ("TEXT", 0, 0),
+        "recovery_context_sha256": ("TEXT", 0, 0),
+        "evidence_identity_sha256": ("TEXT", 0, 0),
+        "authority_rechecked": ("INTEGER", 1, 0),
+        "verified": ("INTEGER", 1, 0),
+        "started_at": ("TEXT", 0, 0),
+        "settled_at": ("TEXT", 0, 0),
+    }:
+        raise sqlite3.DatabaseError("Schema 44 current-file/web WorkGraph step shape is invalid")
+
     work_item_foreign_keys = {
         (str(item[3]), str(item[2]), str(item[4]), str(item[5]), str(item[6]))
         for item in conn.execute("PRAGMA foreign_key_list(work_items)")
@@ -2826,6 +3632,32 @@ def validate_work_item_schema(conn: sqlite3.Connection, *, required: bool = True
         ("answer_assistant_message_id", "messages", "id", "NO ACTION", "NO ACTION"),
     }:
         raise sqlite3.DatabaseError("Schema 42 comparison outcome foreign keys are invalid")
+    graph_foreign_keys = {
+        (str(item[3]), str(item[2]), str(item[4]), str(item[5]), str(item[6]))
+        for item in conn.execute("PRAGMA foreign_key_list(work_item_compare_current_file_web_graphs)")
+    }
+    if graph_foreign_keys != {
+        ("user_id", "users", "id", "NO ACTION", "NO ACTION"),
+        ("conversation_id", "conversations", "id", "NO ACTION", "NO ACTION"),
+        ("anchor_user_message_id", "messages", "id", "NO ACTION", "NO ACTION"),
+        ("current_file_raw_object_id", "raw_objects", "id", "NO ACTION", "NO ACTION"),
+        ("publication_assistant_message_id", "messages", "id", "NO ACTION", "NO ACTION"),
+    }:
+        raise sqlite3.DatabaseError("Schema 44 current-file/web WorkGraph anchors are invalid")
+    graph_step_foreign_keys = {
+        (str(item[3]), str(item[2]), str(item[4]), str(item[5]), str(item[6]))
+        for item in conn.execute("PRAGMA foreign_key_list(work_item_compare_current_file_web_steps)")
+    }
+    if graph_step_foreign_keys != {
+        (
+            "graph_id",
+            "work_item_compare_current_file_web_graphs",
+            "id",
+            "NO ACTION",
+            "CASCADE",
+        ),
+    }:
+        raise sqlite3.DatabaseError("Schema 44 current-file/web WorkGraph step ownership is invalid")
     _validate_current_data(conn)
 
 
@@ -2871,7 +3703,7 @@ def _copy_work_items(conn: sqlite3.Connection, source_table: str) -> None:
     )
 
 
-def upgrade_work_item_schema_to_42(
+def upgrade_work_item_schema_to_44(
     conn: sqlite3.Connection,
     *,
     required: bool,
@@ -2886,6 +3718,15 @@ def upgrade_work_item_schema_to_42(
             raise sqlite3.DatabaseError("Work Item store is missing")
         return
     if _schema_objects(conn, current=True) == _canonical_work_item_schema_objects():
+        validate_work_item_schema(conn)
+        return
+
+    installed_42 = _schema_objects_for_tables(conn, _SCHEMA_42_TABLES)
+    if installed_42 == _canonical_schema_42_objects() and related == installed_42:
+        # Schema 43's Work Item sub-projection is exactly schema 42.  Add only
+        # the dormant schema-44 graph tables/triggers; no released Work Item row
+        # is rebuilt or rewritten.
+        _execute_schema(conn, _WORK_ITEM_SCHEMA_44_EXTENSION)
         validate_work_item_schema(conn)
         return
 
@@ -2968,10 +3809,16 @@ def upgrade_work_item_schema_to_42(
     validate_work_item_schema(conn)
 
 
+# Historical tests and offline callers import the released upgrader name.  Keep
+# it as a source-compatible alias while all new core wiring names schema 44.
+upgrade_work_item_schema_to_42 = upgrade_work_item_schema_to_44
+
+
 __all__ = [
     "WORK_ITEM_SCHEMA",
     "WORK_ITEM_SCHEMA_VERSION",
     "register_work_item_connection_functions",
     "upgrade_work_item_schema_to_42",
+    "upgrade_work_item_schema_to_44",
     "validate_work_item_schema",
 ]

@@ -363,8 +363,11 @@ class ConversationsMixin(StorageShared):
         сообщение из Telegram продолжит убранный разговор.
 
         Короткая операционная память разговора тоже больше не может продолжаться:
-        открытые Work Items атомарно переходят в ``cancelled``. Строка, уже
-        исчерпавшая конечный revision-space, удаляется как disposable control
+        открытые Work Items атомарно переходят в ``cancelled``. Dormant schema-44
+        current-file/current-web graph сначала публикует один deterministic
+        assistant receipt ``conversation_archived`` и лишь затем освобождает
+        conversation ownership в той же транзакции. Строка обычного Work Item,
+        уже исчерпавшая конечный revision-space, удаляется как disposable control
         state вместо переполнения revision и отказа архивировать разговор.
 
         Имя метода сохранено: его зовёт маршрут `DELETE /api/conversations/{id}`
@@ -380,6 +383,28 @@ class ConversationsMixin(StorageShared):
                 "UPDATE conversations SET is_archived=1, updated_at=? WHERE id=? AND user_id=?",
                 (now, conversation_id, user_id),
             )
+            active_graph = conn.execute(
+                """SELECT id,revision
+                     FROM work_item_compare_current_file_web_graphs
+                    WHERE user_id=? AND conversation_id=? AND state='active'
+                    ORDER BY id LIMIT 1""",
+                (user_id, conversation_id),
+            ).fetchone()
+            retired_graphs = 0
+            if active_graph is not None:
+                from friday.interaction_control_plane.compare_current_file_web_work_graph_store import (
+                    retire_compare_current_file_web_work_graph_for_archived_conversation_in_transaction,
+                )
+
+                retire_compare_current_file_web_work_graph_for_archived_conversation_in_transaction(
+                    conn,
+                    graph_id=str(active_graph["id"]),
+                    user_id=user_id,
+                    conversation_id=conversation_id,
+                    expected_revision=int(active_graph["revision"]),
+                    now=now,
+                )
+                retired_graphs = 1
             sessions = conn.execute(
                 "DELETE FROM channel_sessions WHERE user_id=? AND conversation_id=?",
                 (user_id, conversation_id),
@@ -445,7 +470,10 @@ class ConversationsMixin(StorageShared):
                 )
                 if count
             },
-            "cancelled": {"work_items": max(0, int(cancelled_work_items.rowcount))},
+            "cancelled": {
+                **({"compare_current_file_web_graphs": retired_graphs} if retired_graphs else {}),
+                "work_items": max(0, int(cancelled_work_items.rowcount)),
+            },
         }
 
     def set_conversation_mode(self, conversation_id: str, user_id: str, mode: str) -> dict[str, Any] | None:
