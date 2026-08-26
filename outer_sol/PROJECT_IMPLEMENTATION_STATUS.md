@@ -11,12 +11,13 @@ the current production identity, completed packages, active work and next order.
   the provisional registry is empty, and the primary remains the sole
   final-publication, tool and effect authority. Every secondary miss preserves
   the exact primary-only path.
-- Deployed implementation head: `a99f14ce429e7a5472a05ef54c6c639bf4f7edf4`
-- Live: Friday `0.207.40` / `a99f14ce429e7a5472a05ef54c6c639bf4f7edf4`;
-  tree `7436616a7cd967393d4a93176a4a095208da92856412b316cdf87b5da4753a09`;
-  wheel `a787a2d7d6f41e7f3a1c90cf5089ddd8e99f075d2225e326d2ab660ad6ed74f0`.
-- Immediate predecessor and schema-capable fallback: Friday `0.207.39` /
-  `83ae001f7323b9868ba077f5989825de44f8847e`.
+- Deployed implementation head: `85f97e0708e2f0d0493a99877b652b33894b6a6f`
+- Live: Friday `0.207.41` / `85f97e0708e2f0d0493a99877b652b33894b6a6f`;
+  tree `e8e86c54a97b4cd006b68ce8469f50ff1469be611f8a76f10fe859e788c90a9e`;
+  wheel `865a703d15e712902ca0aa12c4813036c43dcd7e4c1ea1ada90c54d41949e684`.
+- Immediate predecessor: Friday `0.207.40` /
+  `a99f14ce429e7a5472a05ef54c6c639bf4f7edf4`; schema-capable fallback:
+  Friday `0.207.39` / `83ae001f7323b9868ba077f5989825de44f8847e`.
 - Database schema: 43
 - Production state: immutable activation `clear`; backend and Telegram bridge
   active; trusted-CA HTTPS health `200`; SQLite integrity and FK checks clean.
@@ -36,8 +37,12 @@ the current production identity, completed packages, active work and next order.
   runtime temporary directories. Bounded PE/ELF static decompilation through
   pinned Ghidra 12.1.3 and Temurin 21 is live; uploaded code is never executed.
   Long decompilation emits sparse elapsed-time notifications without invented
-  percentages. The activation terminal receipt is
-  `e36ead2e3ee97d2e622f7eaccc56283e440daa958bd2f1bffdb75eaa8ee2c277`.
+  percentages. Engineer Mode again retains explicitly requested ordinary web,
+  file-creation and archive tools while private-source outbound isolation stays
+  intact. The deterministic non-executing source/output bundle and exact
+  multi-file publication seams are deployed for the compiler/rebuilder paths.
+  The activation terminal receipt is
+  `d666d3941066f0ddc427ad527a44193ead83a9e640af972d5e3af6fded74ff56`.
   The exact accepted secondary profile remains configured in bounded `assist`
   and is probed on
   demand; its exact post-cutover canary passed, while laptop absence preserves
@@ -87,7 +92,7 @@ accepted profile manifest hashes to
 `93ea5698b8b6a9bf8a7dc697ffe37d7353055aa16555188991747bba73d059e3` and
 its accepted physical-failure evidence hashes to
 `9dc72f80caed3320bd154cf1219a8bd6b1339142b690b00dd1cbe1fb05964006`.
-Live `0.207.40` admits exactly that profile, with no provisional entries:
+Live `0.207.41` admits exactly that profile, with no provisional entries:
 extraction, evidence-bound document mapping and complete current text/Office
 document reviews are in bounded `assist`. It grants no tools, effects,
 publication or knowledge-write authority; failure preserves the exact
@@ -179,6 +184,21 @@ course, with these repository-specific constraints:
    companion plugin remains out of scope.
 
 ## Completed and deployed packages
+
+### Engineer file/archive/web continuity (`0.207.41`)
+
+- Engineer Mode preserves ordinary web search, file generation and archive
+  collection only when the authenticated current request proves that intent.
+  Current private attachment lineage still removes outbound tools, and
+  ordinary dialogue never inherits Engineer-native capabilities.
+- A deterministic ZIP contract now binds exact reauthorized or same-turn
+  generated sources, structurally checked outputs, manifests and non-execution
+  receipts. Direct outputs plus the complete bundle share one cumulative upload
+  cap and one exact atomic generated-file publication seam.
+- The canonical static gate and 20,388 non-UI plus 31 UI tests passed without
+  skips; two source-archive wheel builds were byte-identical. Immutable
+  activation completed `clear` with terminal receipt
+  `d666d3941066f0ddc427ad527a44193ead83a9e640af972d5e3af6fded74ff56`.
 
 ### Bounded static decompilation and truthful progress (`0.207.40`)
 
