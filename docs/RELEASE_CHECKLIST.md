@@ -410,20 +410,28 @@ failed/error/skipped-тест в любой фазе делает гейт кр�
 
 Проверить:
 
-- schema version = 44;
+- schema version = 45;
 - schema 43 → 44 атомарно добавляет exact dormant body-free
   `compare_current_file_with_current_web` WorkGraph: ровно два independent
   read-шага и один dependent primary-synthesis, immutable identities,
   bounded CAS/restart state, один review-admitted retry только для failed
   current-web read и раздельные exact full/terminal publication receipts;
+- schema 44 → 45 сначала побайтно проверяет exact canonical DDL WorkGraph из
+  unreleased feature predecessor `c287468` и
+  только затем добавляет immutable `anchor_request_binding_sha256`; старые
+  graphs получают explicit unbound sentinel, новые принимают только code-owned
+  body-free ingress binding, а request body/source ref не восстанавливаются и
+  не сохраняются; fixture correction не переопределяет production DB — live
+  predecessor остаётся schema 43;
 - archive разговора атомарно добавляет один code-owned assistant receipt
   `conversation_archived` и закрывает graph; bounded expiry seam делает то же
   с `expired`, без model/tool calls, evidence claims и completion claim;
 - explicit user cancellation использует отдельную причину `cancelled`, один
   code-owned anchor reply и атомарный CAS; stale/replay/ошибка не оставляют
   assistant без terminal graph;
-- expiry scheduler, web/model execution и production route в schema 44 не
-  активируются: включение запрещено до отдельного runtime/lifecycle gate;
+- сама schema migration не активирует expiry scheduler, web/model execution или
+  production route: source-wired assist остаётся default-off и допускается
+  только отдельным evidence-bound runtime/lifecycle gate;
 - schema 42 → 43 атомарно добавляет exact durable Host Action jobs,
   person-scoped idempotency, restart-safe `unknown`/reconciliation и append-only
   lifecycle events; Host Capability Plane остаётся выключенным по умолчанию;

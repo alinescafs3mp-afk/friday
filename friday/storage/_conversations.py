@@ -363,7 +363,7 @@ class ConversationsMixin(StorageShared):
         сообщение из Telegram продолжит убранный разговор.
 
         Короткая операционная память разговора тоже больше не может продолжаться:
-        открытые Work Items атомарно переходят в ``cancelled``. Dormant schema-44
+        открытые Work Items атомарно переходят в ``cancelled``. Fixed
         current-file/current-web graph сначала публикует один deterministic
         assistant receipt ``conversation_archived`` и лишь затем освобождает
         conversation ownership в той же транзакции. Строка обычного Work Item,

@@ -252,7 +252,7 @@ def test_surface_rejects_unstamped_historical_or_non_dialogue_inputs() -> None:
     )
 
 
-def test_surface_keeps_schema44_tenant_and_conversation_owner_exact() -> None:
+def test_surface_keeps_tenant_and_conversation_owner_exact() -> None:
     foreign_person = ActorContext(
         "local:tenant",
         "owner",
