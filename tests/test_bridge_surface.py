@@ -360,7 +360,10 @@ EXPECTED_BRIDGE: dict[str, str] = {
     "_poll_watchdog": "(self) -> 'None'",
     "_prepare_document": "(self, telegram: 'httpx.AsyncClient', message: 'dict[str, Any]', update: 'dict[str, Any]') -> 'dict[str, Any] | None'",
     "_reply_document_source_ref": "(message: 'dict[str, Any]') -> 'str'",
-    "_process_callback_query": "(self, telegram: 'httpx.AsyncClient', backend: 'httpx.AsyncClient', callback: 'dict[str, Any]') -> 'None'",
+    "_process_callback_query": (
+        "(self, telegram: 'httpx.AsyncClient', backend: 'httpx.AsyncClient', "
+        "callback: 'dict[str, Any]', *, update_id: 'int' = -1) -> 'None'"
+    ),
     "_post_message_chunk": (
         "(self, client: 'httpx.AsyncClient', payload: 'dict[str, Any]', chunk: 'str', *, "
         "resume_key: 'int | None' = None, chunk_number: 'int | None' = None) -> 'httpx.Response'"
