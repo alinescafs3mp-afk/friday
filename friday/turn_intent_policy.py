@@ -678,6 +678,34 @@ _IMAGE_GENERATION_CAPABILITY_EN = re.compile(
     r")\s*[?!.]*\)*$",
     re.IGNORECASE,
 )
+_IMAGE_CAPABILITY_QUOTED = re.compile(r"[\"`«»“”„‟]")
+_IMAGE_CAPABILITY_PROTECTED_CONTEXT = re.compile(
+    r"\b(?:"
+    r"если|сейчас|теперь|уже|раньше|вчера|"
+    r"этот|эта|это|эту|эти|этого|этому|данн\w*|"
+    r"файл\w*|документ\w*|вложени\w*|прикрепл\w*|"
+    r"if|now|currently|already|yesterday|previously|"
+    r"this|that|these|those|attached|file|document|attachment|reply|"
+    r"спросил\w*|сказал\w*|написал\w*|asked|said|wrote"
+    r")\b",
+    re.IGNORECASE,
+)
+_IMAGE_CAPABILITY_TERMINAL_CHOICE = re.compile(
+    r"\s+(?:или\s+нет|or\s+not)(?=\s*[?!.]*\)*$)",
+    re.IGNORECASE,
+)
+_IMAGE_CAPABILITY_COMPOUND = re.compile(r"\b(?:и|или|and|or)\b", re.IGNORECASE)
+_RU_IMAGE_POLITE_LEAD_IN = re.compile(
+    r"^(?:(?:пятниц\w*)(?:\s*[,—:-]\s*|\s+))?"
+    r"(?:а\s+)?(?:скажи|подскажи)(?:\s+пожалуйста)?(?:\s*[,—:-]\s*|\s+)",
+    re.IGNORECASE,
+)
+_RU_IMAGE_DISCOURSE_FILLER = re.compile(
+    r"\b(?:вообще(?:-то)?|действительно|реально|правда|же|вс[её]-таки)\b",
+    re.IGNORECASE,
+)
+_EN_IMAGE_DISCOURSE_FILLER = re.compile(r"\b(?:actually|really|also)\b", re.IGNORECASE)
+_EN_IMAGE_FRIDAY_ACTOR = re.compile(r"^(can|could)\s+friday\b", re.IGNORECASE)
 
 
 def _bounded_text(message: str) -> str:
@@ -744,17 +772,41 @@ def _is_meta_capability_question(text: str) -> bool:
     )
 
 
+def _normalize_image_generation_capability_question(text: str) -> str | None:
+    """Remove only bounded, non-semantic fillers from a protected utterance."""
+
+    # These tokens can change a capability question into quoted, historical or
+    # concrete work.  Reject them on the original text before removing even a
+    # polite lead-in or an intensifier.
+    if _IMAGE_CAPABILITY_QUOTED.search(text) or _IMAGE_CAPABILITY_PROTECTED_CONTEXT.search(text):
+        return None
+
+    without_terminal_choice = _IMAGE_CAPABILITY_TERMINAL_CHOICE.sub("", text, count=1)
+    if _IMAGE_CAPABILITY_COMPOUND.search(without_terminal_choice):
+        return None
+
+    normalized = _RU_IMAGE_POLITE_LEAD_IN.sub("", text, count=1)
+    normalized = _IMAGE_CAPABILITY_TERMINAL_CHOICE.sub("", normalized, count=1)
+    normalized = _RU_IMAGE_DISCOURSE_FILLER.sub("", normalized)
+    normalized = _EN_IMAGE_DISCOURSE_FILLER.sub("", normalized)
+    normalized = _EN_IMAGE_FRIDAY_ACTOR.sub(r"\1 you", normalized, count=1)
+    return _bounded_text(normalized)
+
+
 def _is_image_generation_capability_question(text: str) -> bool:
     """Recognise only a whole, content-free image capability question.
 
     The same modal grammar is commonly used for real requests in Russian.
-    Requiring the entire utterance to contain only a generic image object keeps
-    imperatives, creative briefs, reported speech and compound work on their
-    established runtime paths.
+    After conservative normalization, the strict whole-utterance grammar still
+    rejects imperatives, creative briefs and all unconsumed work qualifiers.
     """
 
+    normalized = _normalize_image_generation_capability_question(text)
+    if normalized is None:
+        return False
     return bool(
-        _IMAGE_GENERATION_CAPABILITY_RU.fullmatch(text) or _IMAGE_GENERATION_CAPABILITY_EN.fullmatch(text)
+        _IMAGE_GENERATION_CAPABILITY_RU.fullmatch(normalized)
+        or _IMAGE_GENERATION_CAPABILITY_EN.fullmatch(normalized)
     )
 
 
@@ -840,14 +892,13 @@ def decide_turn_policy(
             capability_projection=projection,
         )
 
-    if _is_image_generation_capability_question(text):
-        # A terse caption such as "Можешь сделать картинку?" is ambiguous only
-        # in isolation.  A server-authorized current file makes it a request to
-        # work on that file, so keep both the request and its private carrier on
-        # the ordinary runtime path.  The marker is code-owned; user text or
-        # conversation history cannot set it.
-        if turn_context.current_attachment_present:
-            return TurnPolicyDecision(intent=TurnIntent.PASSTHROUGH)
+    # A terse caption such as "Можешь сделать картинку?" is ambiguous only in
+    # isolation.  Check the code-owned current-file marker before even
+    # normalizing capability language, so no wording can discard that carrier.
+    if (
+        not turn_context.current_attachment_present
+        and _is_image_generation_capability_question(text)
+    ):
         image_projection = image_generation or ImageGenerationProjection(False)
         return TurnPolicyDecision(
             intent=TurnIntent.META_IMAGE_GENERATION,
