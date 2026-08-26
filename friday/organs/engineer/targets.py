@@ -463,8 +463,8 @@ _ARTIFACT_COMPILE_DELIVERY_SUFFIX = (
 )
 _ARTIFACT_COMPILE_REQUEST = re.compile(
     r"\A\s*(?:(?:hi|hello|hey|привет|здравствуй(?:те)?)[!,.;:\s]+)?"
-    r"(?:(?:and|so|then|now|okay|ok|alright|а|и|ну|так|тогда|теперь|"
-    r"сейчас|ладно|хорошо)\s*[,;:]?\s+){0,2}"
+    r"(?:(?:and|so|then|now|finally|okay|ok|alright|а|и|ну|так|тогда|"
+    r"теперь|сейчас|наконец|ладно|хорошо)\s*[,;:]?\s+){0,2}"
     r"(?:(?:please|pls|kindly|can\s+you|could\s+you|would\s+you|"
     r"i\s+(?:want|need|ask|authorize)\s+you\s+to|"
     r"пожалуйста|прошу|можешь|можете|сможешь|сможете|"

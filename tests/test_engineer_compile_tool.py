@@ -144,6 +144,8 @@ def _stored_source(
         "Now, compile Main.java.",
         "Так, скомпилируй Main.java.",
         "The source is ready. Now, compile Main.java.",
+        "This is Bob's wish. Finally, compile Main.java.",
+        "Это желание Боба. Наконец, скомпилируй Main.java.",
         "Compile Main.java and explain what it does.",
         "Compile Main.java and explain how this code works.",
         "Compile Main.java and review the source for security issues.",
