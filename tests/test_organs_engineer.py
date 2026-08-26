@@ -48,8 +48,43 @@ def _minimal_pe() -> bytes:
 
 def _minimal_elf() -> bytes:
     ident = bytes([0x7F, 0x45, 0x4C, 0x46, 2, 1, 1, 0]) + b"\x00" * 8
-    header = ident + struct.pack("<HHIQQQIHHHHHH", 2, 62, 1, 0, 0, 64, 0, 64, 0, 0, 0, 0, 0)
-    return header + b"/lib64/ld-linux-x86-64.so.2\x00libssl.so.3\x00"
+    section_offset = 128
+    names = b"\x00.text\x00.shstrtab\x00"
+    header = ident + struct.pack(
+        "<HHIQQQIHHHHHH",
+        2,
+        62,
+        1,
+        0,
+        0,
+        section_offset,
+        0,
+        64,
+        0,
+        0,
+        64,
+        3,
+        2,
+    )
+    prefix = header + b"/lib64/ld-linux-x86-64.so.2\x00libssl.so.3\x00"
+    prefix += b"\x00" * (section_offset - len(prefix))
+    section_table = b"\x00" * 64
+    section_table += struct.pack("<IIQQQQIIQQ", 1, 1, 6, 0, 0, 0, 0, 0, 16, 0)
+    names_offset = section_offset + 3 * 64
+    section_table += struct.pack(
+        "<IIQQQQIIQQ",
+        7,
+        3,
+        0,
+        0,
+        names_offset,
+        len(names),
+        0,
+        0,
+        1,
+        0,
+    )
+    return prefix + section_table + names
 
 
 def _zip_with(name: str, payload: bytes) -> bytes:
@@ -78,6 +113,24 @@ def test_pe_elf_and_apk_reports_are_code_owned():
     elf = artifacts.analyze_bytes(_minimal_elf(), "agent.so")
     assert elf["kind"] == "elf"
     assert "libssl.so.3" in elf["format"]["needed"]
+    assert elf["format"]["section_names"] == [".text", ".shstrtab"]
+
+    macho = artifacts.analyze_bytes(
+        b"\xcf\xfa\xed\xfe" + struct.pack("<I", 0x01000007) + b"\x00" * 24,
+        "agent.dylib",
+    )
+    assert macho["kind"] == "macho"
+    assert macho["format"]["cpu"] == "x86_64"
+
+    fat_macho = artifacts.analyze_bytes(
+        b"\xca\xfe\xba\xbe"
+        + struct.pack(">I", 2)
+        + struct.pack(">IIIII", 0x01000007, 3, 48, 0, 0)
+        + struct.pack(">IIIII", 0x0100000C, 0, 48, 0, 0),
+        "universal.dylib",
+    )
+    assert fat_macho["kind"] == "macho_fat"
+    assert fat_macho["format"]["cpus"] == ["x86_64", "arm64"]
 
     apk = artifacts.analyze_bytes(_zip_with("classes.dex", b"dex\n035\x00"), "app.apk")
     assert apk["kind"] == "apk"
@@ -160,6 +213,39 @@ async def test_secondary_advice_is_optional_and_skips_when_absent():
     ctx = SimpleNamespace(ingestion=SimpleNamespace(secondary_brain=None))
     result = await advise(ctx, "artifact", {"kind": "pe", "finding_codes": ["rwx_section"]})
     assert result == unused("absent")
+
+
+def test_secondary_projection_has_no_target_identity_or_unbounded_artifact_details() -> None:
+    host_payload = hosts.public_host_payload(
+        {
+            "host": "private.example",
+            "addresses": ["192.168.1.9"],
+            "open_ports": [22, 443],
+            "weaknesses": [{"code": "tls_legacy", "detail": "private banner"}],
+        }
+    )
+    assert host_payload == {"open_ports": [22, 443], "weakness_codes": ["tls_legacy"]}
+
+    artifact_payload = artifacts.public_finding_payload(
+        {
+            "kind": "elf",
+            "size_bytes": 99,
+            "entropy": 7.5,
+            "hashes": {"sha256": "a" * 64},
+            "finding_codes": ["gnu_stack_unseen"],
+            "format": {
+                "section_names": [".text"],
+                "imports": ["PrivateImport"],
+                "needed": ["private-library.so"],
+            },
+        }
+    )
+    assert artifact_payload == {
+        "kind": "elf",
+        "hashes": {"sha256": "a" * 64},
+        "finding_codes": ["gnu_stack_unseen"],
+        "section_names": [".text"],
+    }
 
 
 @pytest.mark.asyncio
@@ -344,6 +430,22 @@ def test_analyze_tool_reads_an_owned_file(settings, storage):
     assert result["ok"] is True
     assert result["kind"] == "pe"
     assert result["secondary"]["used"] is False
+
+    before = storage.get_raw_object(raw_id, owner)
+    source_bytes = path.read_bytes()
+    patched = asyncio.run(
+        tools["engineer_patch_artifact"].handler(
+            actor=actor,
+            raw_id=raw_id,
+            operations=[{"kind": "write_at", "offset": 0, "bytes": "5a5a"}],
+        )
+    )
+    after = storage.get_raw_object(raw_id, owner)
+    assert patched["ok"] is True
+    assert before == after
+    assert path.read_bytes() == source_bytes
+    assert patched["original_sha256"] == digest
+    assert patched["patched_sha256"] != digest
 
 
 @pytest.mark.asyncio

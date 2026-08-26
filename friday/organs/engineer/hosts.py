@@ -97,7 +97,7 @@ MAX_TARGET_ADDRESSES = 16
 CONNECT_TIMEOUT_SEC = 1.2
 DNS_RESOLVE_TIMEOUT_SEC = 5.0
 MAX_AUDIT_SECONDS = 115.0
-BANNER_BYTES = 384
+BANNER_BYTES = 256
 SCAN_WORKERS = 24
 TLS_PORTS = frozenset({443, 465, 636, 993, 995, 2083, 2376, 4443, 5986, 6443, 8443, 9443})
 HTTP_PORTS = frozenset(
@@ -786,17 +786,15 @@ def rehearsal_playbook(audit: Mapping[str, Any], artifact: Mapping[str, Any] | N
 
 
 def public_host_payload(audit: Mapping[str, Any]) -> dict[str, Any]:
+    """Return only the closed fact vocabulary admitted to secondary EXTRACT."""
+
     return {
-        "host": audit.get("host"),
-        "addresses": list(audit.get("addresses") or [])[:8],
         "open_ports": list(audit.get("open_ports") or [])[:MAX_PORTS],
-        "weaknesses": sorted(
+        "weakness_codes": sorted(
             str(item.get("code"))
             for item in list(audit.get("weaknesses") or [])
             if isinstance(item, Mapping) and item.get("code")
         )[:64],
-        "active_probes": list(audit.get("active_probes") or [])[:16],
-        "exploit_payloads_sent": False,
     }
 
 

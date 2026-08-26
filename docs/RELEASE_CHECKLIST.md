@@ -298,8 +298,8 @@ failed/error/skipped-тест в любой фазе делает гейт кр�
 - schema 42 → 43 атомарно добавляет exact durable Host Action jobs,
   person-scoped idempotency, restart-safe `unknown`/reconciliation и append-only
   lifecycle events; Host Capability Plane остаётся выключенным по умолчанию;
-- текущий опубликованный baseline 0.207.27 имеет schema 42; exact upgrade
-  0.207.27 → назначенная интегратором новая версия обязан дать schema 43 и
+- текущий опубликованный baseline 0.207.34 имеет schema 42; exact upgrade
+  0.207.34 → 0.207.35 обязан дать schema 43 и
   сохранить все schema-42 данные до Host Control acceptance;
 - historical release 0.207.26 имеет schema 41; переход
   0.207.26 → 0.207.27 атомарно добавляет exact body-free dormant

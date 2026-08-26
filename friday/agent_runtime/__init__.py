@@ -2095,6 +2095,7 @@ _ENGINEER_MODEL_TOOL_NAMES = frozenset(
         "engineer_adversary_rehearsal",
     }
 )
+_ENGINEER_REGISTERED_TOOL_NAMES = frozenset({"engineer_hunt", *_ENGINEER_MODEL_TOOL_NAMES})
 _ENGINEER_HOST_TOOL_NAMES = frozenset(
     {
         "engineer_audit_host",
@@ -36495,6 +36496,7 @@ class AgentRuntime:
             trace_continuation=ContinuationKind.REFERENCE,
             trace_state_restored=False,
         )
+
     def _fresh_engineer_actor(
         self,
         actor: ActorContext,
@@ -49178,6 +49180,16 @@ class AgentRuntime:
             # remain available in ordinary dialogue/research, but they are not
             # silently inherited by this mode.
             visible_tools = _project_engineer_tool_schemas(visible_tools)
+        else:
+            # Registering the optional organ must not enlarge ordinary model
+            # surfaces.  Mode is the product boundary; capability checks alone
+            # are only an execution boundary and would still invite useless or
+            # misleading calls in dialogue/research.
+            visible_tools = [
+                tool
+                for tool in visible_tools
+                if _engineer_tool_name(tool) not in _ENGINEER_REGISTERED_TOOL_NAMES
+            ]
         if archive_search_requested_for_turn:
             # Absolute mutual exclusion starts before every code-owned
             # prefetch and before the first model token.  An absent archive
@@ -57794,6 +57806,11 @@ class AgentRuntime:
             # Repeat the closed allowlist for direct adapters/tests which enter
             # this seam without the outer chat projection.
             tools[:] = _project_engineer_tool_schemas(tools)
+        else:
+            # Direct callers do not get to bypass the mode-owned schema fence.
+            tools[:] = [
+                tool for tool in tools if _engineer_tool_name(tool) not in _ENGINEER_REGISTERED_TOOL_NAMES
+            ]
         engineer_patch_authorized = False
         if context.interaction_mode == "engineer":
             from friday.organs.engineer.targets import requests_artifact_patch

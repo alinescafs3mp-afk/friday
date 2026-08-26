@@ -1228,6 +1228,53 @@ async def test_model_host_call_gets_a_fresh_private_ticket_and_updates_receipt(
     assert receipt["exploit_payloads_sent"] is False
 
 
+@pytest.mark.asyncio
+async def test_engineer_schemas_are_hidden_outside_engineer_mode(settings, storage) -> None:
+    actor = _owner_actor()
+    model = _EngineerNativeToolModel([])
+    kernel = _EngineerRecordingKernel(
+        risk="observe",
+        timeout_sec=10.0,
+        result=ToolResult("synthetic_safe_observe", True, data={"ok": True}),
+    )
+    runtime = AgentRuntime(
+        replace(settings, engineer_mode_enabled=True),
+        storage,
+        llm=model,  # type: ignore[arg-type]
+        kernel=kernel,  # type: ignore[arg-type]
+    )
+    context = AgentContext(
+        conversation_id="conv-dialogue-engineer-schema-fence",
+        user_id=actor.user_id,
+        interaction_mode="dialogue",
+        turn_deadline=time.monotonic() + 10.0,
+    )
+    schemas = [
+        _engineer_tool_schema(
+            "engineer_hunt",
+            {"host": {"type": "string"}, "target_ticket": {"type": "string"}},
+            ["host", "target_ticket"],
+        ),
+        _engineer_tool_schema(
+            "engineer_analyze_artifact",
+            {"raw_id": {"type": "string"}},
+            ["raw_id"],
+        ),
+        _engineer_tool_schema("synthetic_safe_observe", {}, []),
+    ]
+
+    await runtime._agentic_loop(  # noqa: SLF001
+        context,
+        "ordinary dialogue",
+        actor,
+        tools=schemas,
+        attachments=None,
+    )
+
+    offered = {str((item.get("function") or {}).get("name") or "") for item in model.schemas[0]}
+    assert offered == {"synthetic_safe_observe"}
+
+
 def test_entered_engineer_network_failure_is_reported_as_uncertain() -> None:
     from friday.agent_runtime import (
         _engineer_dossier_receipt,

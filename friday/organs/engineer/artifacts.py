@@ -70,6 +70,14 @@ _ELF_MACHINES = {
     183: "aarch64",
 }
 _ELF_TYPES = {1: "relocatable", 2: "executable", 3: "shared", 4: "core"}
+_MACHO_CPUS = {
+    7: "x86",
+    0x01000007: "x86_64",
+    12: "arm",
+    0x0100000C: "arm64",
+    18: "powerpc",
+    0x01000012: "powerpc64",
+}
 
 
 def _check_deadline(deadline: float | None) -> None:
@@ -361,6 +369,7 @@ def _analyze_elf(data: bytes) -> dict[str, Any]:
     findings: list[dict[str, str]] = []
     needed: list[str] = []
     interpreter = ""
+    section_names: list[str] = []
     for match in re.finditer(rb"lib[\w.-]+\.so(?:\.\d+)*", data[: min(len(data), 256 * 1024)]):
         item = match.group().decode("ascii", errors="ignore")
         if item not in needed:
@@ -372,6 +381,39 @@ def _analyze_elf(data: bytes) -> dict[str, Any]:
         interpreter = _read_cstr(data, interp, 80)
     if b"GNU_STACK" not in data[: min(len(data), 64 * 1024)]:
         findings.append({"code": "gnu_stack_unseen", "detail": "PT_GNU_STACK not in first 64KiB"})
+    section_offset = _u64(data, 40, endian) if is64 else _u32(data, 32, endian)
+    section_entry_size = _u16(data, 58 if is64 else 46, endian) or 0
+    section_count = _u16(data, 60 if is64 else 48, endian) or 0
+    names_index = _u16(data, 62 if is64 else 50, endian)
+    minimum_entry_size = 64 if is64 else 40
+    if (
+        section_offset is not None
+        and names_index is not None
+        and 0 < section_count <= 256
+        and names_index < section_count
+        and section_entry_size >= minimum_entry_size
+        and section_offset + section_entry_size * section_count <= len(data)
+    ):
+        names_header = section_offset + section_entry_size * names_index
+        names_offset = (
+            _u64(data, names_header + 24, endian) if is64 else _u32(data, names_header + 16, endian)
+        )
+        names_size = _u64(data, names_header + 32, endian) if is64 else _u32(data, names_header + 20, endian)
+        if (
+            names_offset is not None
+            and names_size is not None
+            and 0 < names_size <= 256 * 1024
+            and names_offset + names_size <= len(data)
+        ):
+            for index in range(section_count):
+                name_offset = _u32(data, section_offset + section_entry_size * index, endian)
+                if name_offset is None or name_offset >= names_size:
+                    continue
+                name = _read_cstr(data, names_offset + name_offset, 80)
+                if name and name not in section_names:
+                    section_names.append(name)
+                if len(section_names) >= 128:
+                    break
     return {
         "readable": True,
         "class": "elf64" if is64 else "elf32",
@@ -380,7 +422,42 @@ def _analyze_elf(data: bytes) -> dict[str, Any]:
         "machine": _ELF_MACHINES.get(machine, str(machine)),
         "interpreter": interpreter,
         "needed": needed,
+        "section_names": section_names,
         "findings": findings,
+    }
+
+
+def _macho_cpu(value: int | None) -> str:
+    if value is None:
+        return "unknown"
+    return _MACHO_CPUS.get(value, f"0x{value:08x}")
+
+
+def _analyze_macho(data: bytes, *, fat: bool) -> dict[str, Any]:
+    magic = data[:4]
+    endian = ">" if magic in {b"\xfe\xed\xfa\xce", b"\xfe\xed\xfa\xcf", b"\xca\xfe\xba\xbe"} else "<"
+    if not fat:
+        cpu = _macho_cpu(_u32(data, 4, endian))
+        return {
+            "readable": len(data) >= 8,
+            "magic": magic.hex(),
+            "fat": False,
+            "cpu": cpu,
+            "cpus": [cpu] if cpu != "unknown" else [],
+        }
+    architecture_count = _u32(data, 4, endian) or 0
+    cpus: list[str] = []
+    if 0 < architecture_count <= 32 and 8 + architecture_count * 20 <= len(data):
+        for index in range(architecture_count):
+            cpu = _macho_cpu(_u32(data, 8 + index * 20, endian))
+            if cpu != "unknown" and cpu not in cpus:
+                cpus.append(cpu)
+    return {
+        "readable": bool(cpus),
+        "magic": magic.hex(),
+        "fat": True,
+        "cpu": cpus[0] if len(cpus) == 1 else "multiple" if cpus else "unknown",
+        "cpus": cpus,
     }
 
 
@@ -537,12 +614,7 @@ def analyze_bytes(
         elif kind == "elf":
             report["format"] = _analyze_elf(data)
         elif kind in {"macho", "macho_fat"}:
-            magic = data[:4].hex()
-            report["format"] = {
-                "readable": True,
-                "magic": magic,
-                "fat": kind == "macho_fat",
-            }
+            report["format"] = _analyze_macho(data, fat=kind == "macho_fat")
         elif kind == "dex":
             report["format"] = {
                 "readable": True,
@@ -842,6 +914,12 @@ def render_markdown(report: Mapping[str, Any]) -> str:
             "sections: "
             + ", ".join(redact_text(item.get("name") or "?", limit=32) for item in fmt["sections"][:16])
         )
+    if fmt.get("section_names"):
+        lines.append(
+            "sections: " + ", ".join(redact_text(item, limit=80) for item in fmt["section_names"][:32])
+        )
+    if fmt.get("cpus"):
+        lines.append("CPU: " + ", ".join(redact_text(item, limit=32) for item in fmt["cpus"][:16]))
     if fmt.get("needed"):
         lines.append("needed: " + ", ".join(redact_text(item, limit=120) for item in fmt["needed"][:16]))
     if fmt.get("native_libs"):
@@ -856,24 +934,28 @@ def public_finding_payload(report: Mapping[str, Any]) -> dict[str, Any]:
     """Bounded, secret-stripped projection for the optional secondary brain."""
 
     fmt = report.get("format") if isinstance(report.get("format"), Mapping) else {}
+    raw_section_names = [
+        str(item.get("name") or "")
+        for item in list((fmt or {}).get("sections") or [])[:32]
+        if isinstance(item, Mapping) and str(item.get("name") or "")
+    ] + [str(item) for item in list((fmt or {}).get("section_names") or [])[:32]]
+    section_names: list[str] = []
+    for raw_name in raw_section_names:
+        projected = redact_text(raw_name, limit=80)
+        if (
+            not projected
+            or projected != raw_name[:80]
+            or "[REDACTED" in projected
+            or "[APPLICATION_MARKUP_REMOVED]" in projected
+            or projected in section_names
+        ):
+            continue
+        section_names.append(projected)
+        if len(section_names) >= 32:
+            break
     return {
         "kind": report.get("kind"),
-        "size_bytes": report.get("size_bytes"),
-        "entropy": report.get("entropy"),
         "hashes": dict(report.get("hashes") or {}),
         "finding_codes": list(report.get("finding_codes") or []),
-        "imports": list((fmt or {}).get("imports") or [])[:16],
-        "sections": [
-            {
-                "name": item.get("name"),
-                "entropy": item.get("entropy"),
-                "executable": item.get("executable"),
-                "writable": item.get("writable"),
-            }
-            for item in list((fmt or {}).get("sections") or [])[:16]
-            if isinstance(item, Mapping)
-        ],
-        "needed": list((fmt or {}).get("needed") or [])[:16],
-        "signed": (fmt or {}).get("signed"),
-        "clr": (fmt or {}).get("clr"),
+        "section_names": section_names,
     }
