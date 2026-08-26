@@ -21,7 +21,10 @@ from friday.orchestration.supervisor_assist_promotion import (
     AssistPromotionEvidenceAuthority,
     AssistPromotionLiveEvidence,
     AssistPromotionOperatorGate,
+    AssistPromotionOutcomeEvidence,
+    AssistPromotionQualityBasis,
     AssistPromotionReadiness,
+    AssistPromotionReadinessEvidence,
     AssistPromotionReason,
     SupervisorSchedulerAdmissionSnapshot,
     admit_supervisor_assist_promotion,
@@ -32,6 +35,58 @@ SOURCE = "1" * 64
 ACTOR = "2" * 64
 OTHER_ACTOR = "3" * 64
 OTHER = "f" * 64
+
+
+def _readiness_product(**changes: object) -> AssistPromotionReadinessEvidence:
+    values: dict[str, object] = {
+        "baseline_window_sha256": "4" * 64,
+        "baseline_observation_count": 20,
+        "baseline_complete_count": 8,
+        "documented_failure_class_id": "capability:source_unavailable",
+        "documented_failure_class_sha256": "5" * 64,
+        "baseline_failure_class_count": 5,
+        "readiness_witness_sha256": "6" * 64,
+        "readiness_observation_count": 20,
+        "latency_budget_ms": 2_500,
+        "latency_budget_sha256": "7" * 64,
+        "latency_total_ms": 20_000,
+        "latency_max_ms": 1_500,
+        "call_rate_observation_count": 20,
+        "supervisor_invocation_count": 20,
+        "unnecessary_supervisor_invocation_count": 0,
+        "user_visible_observation_count": 20,
+        "user_visible_regression_count": 0,
+    }
+    values.update(changes)
+    return AssistPromotionReadinessEvidence(**values)  # type: ignore[arg-type]
+
+
+def _outcome_product(**changes: object) -> AssistPromotionOutcomeEvidence:
+    values: dict[str, object] = {
+        "quality_basis": AssistPromotionQualityBasis.COMPLETION_RATE_IMPROVEMENT,
+        "baseline_window_sha256": "4" * 64,
+        "promoted_window_sha256": "8" * 64,
+        "baseline_observation_count": 20,
+        "baseline_complete_count": 8,
+        "promoted_observation_count": 20,
+        "promoted_complete_count": 12,
+        "documented_failure_class_id": "none",
+        "documented_failure_class_sha256": None,
+        "baseline_failure_class_count": 0,
+        "promoted_failure_class_count": 0,
+        "latency_budget_ms": 2_500,
+        "latency_budget_sha256": "7" * 64,
+        "latency_observation_count": 20,
+        "latency_total_ms": 20_000,
+        "latency_max_ms": 1_500,
+        "call_rate_observation_count": 20,
+        "supervisor_invocation_count": 20,
+        "unnecessary_supervisor_invocation_count": 0,
+        "user_visible_observation_count": 20,
+        "user_visible_regression_count": 0,
+    }
+    values.update(changes)
+    return AssistPromotionOutcomeEvidence(**values)  # type: ignore[arg-type]
 
 
 def _scheduler(**changes: object) -> SupervisorSchedulerAdmissionSnapshot:
@@ -114,6 +169,9 @@ def _evidence(
         "duplicate_effect_count": 0,
         "duplicate_publication_count": 0,
         "false_completion_regression_count": 0,
+        "product_evidence": (
+            _outcome_product() if candidate.requested_mode is SupervisorMode.CANARY else _readiness_product()
+        ),
     }
     values.update(changes)
     return AssistPromotionLiveEvidence(**values)  # type: ignore[arg-type]
@@ -263,6 +321,114 @@ def test_assist_and_canary_require_distinct_predecessor_evidence() -> None:
     assert assist_decision.promotion_admitted is True
     assert canary_decision.promotion_admitted is False
     assert canary_decision.reason is AssistPromotionReason.EVIDENCE_STAGE_DRIFT
+
+
+def test_target_modes_require_distinct_readiness_and_actual_outcome_contracts() -> None:
+    assist = _candidate()
+    canary = _candidate(mode=SupervisorMode.CANARY)
+    assist_with_outcome = _evidence(assist, product_evidence=_outcome_product())
+    canary_with_readiness = _evidence(canary, product_evidence=_readiness_product())
+
+    assist_decision = admit_supervisor_assist_promotion(
+        assist,
+        assist_with_outcome,
+        _gate(assist, assist_with_outcome),
+    )
+    canary_decision = admit_supervisor_assist_promotion(
+        canary,
+        canary_with_readiness,
+        _gate(canary, canary_with_readiness),
+    )
+
+    assert assist_decision.reason is AssistPromotionReason.EVIDENCE_STAGE_DRIFT
+    assert canary_decision.reason is AssistPromotionReason.EVIDENCE_STAGE_DRIFT
+
+
+def test_shadow_to_assist_proves_a_baseline_failure_without_claiming_removal() -> None:
+    candidate = _candidate()
+    evidence = _evidence(candidate)
+
+    decision = admit_supervisor_assist_promotion(candidate, evidence, _gate(candidate, evidence))
+
+    assert decision.promotion_admitted is True
+    product = evidence.payload()["product_evidence"]
+    assert isinstance(product, dict)
+    assert "promoted_window_sha256" not in product
+    assert "promoted_failure_class_count" not in product
+    assert "quality_basis" not in product
+
+
+def test_assist_readiness_requires_an_observed_documented_baseline_failure() -> None:
+    candidate = _candidate()
+    evidence = _evidence(
+        candidate,
+        product_evidence=_readiness_product(baseline_failure_class_count=0),
+    )
+
+    decision = admit_supervisor_assist_promotion(candidate, evidence, _gate(candidate, evidence))
+
+    assert decision.reason is AssistPromotionReason.PRODUCT_QUALITY_NOT_PROVEN
+
+
+def test_canary_requires_measurable_completion_improvement_or_exact_removal() -> None:
+    candidate = _candidate(mode=SupervisorMode.CANARY)
+    equal = _evidence(
+        candidate,
+        product_evidence=_outcome_product(promoted_complete_count=8),
+    )
+    removed = _evidence(
+        candidate,
+        product_evidence=_outcome_product(
+            quality_basis=AssistPromotionQualityBasis.DOCUMENTED_FAILURE_CLASS_REMOVAL,
+            documented_failure_class_id="capability:source_unavailable",
+            documented_failure_class_sha256="5" * 64,
+            baseline_failure_class_count=4,
+            promoted_failure_class_count=0,
+        ),
+    )
+
+    equal_decision = admit_supervisor_assist_promotion(
+        candidate,
+        equal,
+        _gate(candidate, equal),
+    )
+    removed_decision = admit_supervisor_assist_promotion(
+        candidate,
+        removed,
+        _gate(candidate, removed),
+    )
+
+    assert equal_decision.reason is AssistPromotionReason.PRODUCT_QUALITY_NOT_PROVEN
+    assert removed_decision.promotion_admitted is True
+
+
+@pytest.mark.parametrize(
+    ("product", "reason"),
+    [
+        (
+            _readiness_product(latency_max_ms=2_501, latency_total_ms=20_001),
+            AssistPromotionReason.PRODUCT_LATENCY_BUDGET_EXCEEDED,
+        ),
+        (
+            _readiness_product(unnecessary_supervisor_invocation_count=1),
+            AssistPromotionReason.UNNECESSARY_SUPERVISOR_CALL_RATE_EXCEEDED,
+        ),
+        (
+            _readiness_product(user_visible_regression_count=1),
+            AssistPromotionReason.USER_VISIBLE_REGRESSION_OBSERVED,
+        ),
+    ],
+)
+def test_product_budgets_are_measured_counts_not_free_acceptance_booleans(
+    product: AssistPromotionReadinessEvidence,
+    reason: AssistPromotionReason,
+) -> None:
+    candidate = _candidate()
+    evidence = _evidence(candidate, product_evidence=product)
+
+    decision = admit_supervisor_assist_promotion(candidate, evidence, _gate(candidate, evidence))
+
+    assert decision.reason is reason
 
 
 def test_canary_requires_nonempty_exact_actor_binding_allowlist() -> None:
@@ -597,7 +763,9 @@ def test_live_evidence_payload_is_closed_body_free_and_digest_sensitive() -> Non
         "duplicate_effect_count",
         "duplicate_publication_count",
         "false_completion_regression_count",
+        "product_evidence",
     }
+    assert payload["product_evidence"] == _readiness_product().payload()
     assert not {
         "body",
         "prompt",

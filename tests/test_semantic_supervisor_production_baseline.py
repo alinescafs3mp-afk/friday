@@ -10,11 +10,19 @@ from friday.interaction_control_plane.turn_trace import (
     IntentClass,
     PlaybookClass,
 )
-from friday.orchestration.supervisor_contracts import canonical_sha256
+from friday.orchestration.supervisor_contracts import (
+    SupervisorMode,
+    TaskClass,
+    canonical_sha256,
+)
 from friday.orchestration.supervisor_observation import parsed_observation
 from friday.orchestration.supervisor_production_baseline import (
     SUPERVISOR_PRODUCTION_BASELINE_KIND,
     SUPERVISOR_PRODUCTION_BASELINE_SCHEMA,
+    SUPERVISOR_PROMOTED_PRODUCT_EVENT,
+    PromotedObservationEligibility,
+    PromotedSupervisorProductObservation,
+    PromotedUserVisibleOutcome,
     build_production_baseline,
 )
 from friday.orchestration.supervisor_trace_join import (
@@ -45,10 +53,10 @@ def _connection() -> sqlite3.Connection:
     return conn
 
 
-def _trace() -> object:
+def _trace(*, turn_identifier: str = "msg_aaaaaaaaaaaaaaaa") -> object:
     return build_committed_direct_trace(
         namespace_key=b"p" * 32,
-        turn_identifier="msg_aaaaaaaaaaaaaaaa",
+        turn_identifier=turn_identifier,
         conversation_identifier="conv_bbbbbbbbbbbbbbbb",
         intent=IntentClass.MIXED,
         playbook=PlaybookClass.COMPARE_INTERNAL_AND_EXTERNAL_SOURCES,
@@ -62,7 +70,7 @@ def _trace() -> object:
     )
 
 
-def _insert_trace_and_join(conn: sqlite3.Connection) -> None:
+def _insert_trace_and_join(conn: sqlite3.Connection) -> object:
     trace = _trace()
     conn.execute(
         "INSERT INTO messages(id,role,content,metadata_json) VALUES(?,?,?,?)",
@@ -113,6 +121,36 @@ def _insert_trace_and_join(conn: sqlite3.Connection) -> None:
         ),
     )
     conn.commit()
+    return trace
+
+
+def _insert_trace(
+    conn: sqlite3.Connection,
+    *,
+    trace: object,
+    message_id: str,
+) -> None:
+    conn.execute(
+        "INSERT INTO messages(id,role,content,metadata_json) VALUES(?,?,?,?)",
+        (
+            message_id,
+            "assistant",
+            "ANOTHER PRIVATE ANSWER BODY",
+            json.dumps({"interaction_trace": trace.to_payload()}),  # type: ignore[attr-defined]
+        ),
+    )
+
+
+def _insert_promoted(
+    conn: sqlite3.Connection,
+    *,
+    event_id: str,
+    event: PromotedSupervisorProductObservation,
+) -> None:
+    conn.execute(
+        "INSERT INTO runtime_events(id,event_type,payload) VALUES(?,?,?)",
+        (event_id, SUPERVISOR_PROMOTED_PRODUCT_EVENT, json.dumps(event.payload())),
+    )
 
 
 def test_baseline_aggregates_only_typed_body_free_rows() -> None:
@@ -136,8 +174,15 @@ def test_baseline_aggregates_only_typed_body_free_rows() -> None:
         "limit": 100,
         "turn_traces": 1,
         "joined_supervisor_events": 1,
+        "promoted_product_events": 0,
         "malformed_turn_traces": 0,
         "malformed_joined_events": 0,
+        "malformed_promoted_product_events": 0,
+        "duplicate_turn_trace_digests": 0,
+        "duplicate_shadow_product_events": 0,
+        "duplicate_promoted_product_events": 0,
+        "unmatched_shadow_product_events": 0,
+        "unmatched_promoted_product_events": 0,
     }
     assert report["primary_baseline"]["completion_counts"] == {"complete": 1}
     joined = report["supervisor_join"]
@@ -152,6 +197,14 @@ def test_baseline_aggregates_only_typed_body_free_rows() -> None:
     }
     assert joined["invoked_count"] == 1
     assert joined["admitted_count"] == 1
+    readiness = report["product_windows"]["shadow_readiness"]
+    assert readiness["actual_promoted_execution"] is False
+    assert readiness["quality_claim"] == "documented_baseline_failure_only"
+    assert readiness["baseline"]["observation_count"] == 1
+    assert readiness["baseline"]["complete_count"] == 1
+    assert readiness["call_rate_observation_count"] == 1
+    assert readiness["unnecessary_supervisor_invocation_count"] == 0
+    assert report["product_windows"]["promoted_execution"]["assist"]["observation_count"] == 0
     unsigned = dict(report)
     digest = unsigned.pop("report_sha256")
     assert digest == canonical_sha256(unsigned)
@@ -192,3 +245,154 @@ def test_malformed_trace_and_join_are_counted_but_never_reflected() -> None:
     assert report["sample"]["joined_supervisor_events"] == 0
     assert report["sample"]["malformed_joined_events"] == 1
     assert "SECRET BODY" not in json.dumps(report)
+
+
+def test_promoted_assist_and_canary_windows_never_count_as_shadow() -> None:
+    conn = _connection()
+    _insert_trace_and_join(conn)
+    assist_trace = _trace(turn_identifier="msg_1111111111111111")
+    ordinary_trace = _trace(turn_identifier="msg_2222222222222222")
+    canary_trace = _trace(turn_identifier="msg_3333333333333333")
+    _insert_trace(conn, trace=assist_trace, message_id="msg_1111111111111111")
+    _insert_trace(conn, trace=ordinary_trace, message_id="msg_2222222222222222")
+    _insert_trace(conn, trace=canary_trace, message_id="msg_3333333333333333")
+    _insert_promoted(
+        conn,
+        event_id="evt_1111111111111111",
+        event=PromotedSupervisorProductObservation(
+            mode=SupervisorMode.ASSIST,
+            task_class=TaskClass.COMPARE_CURRENT_FILE_WITH_CURRENT_WEB,
+            eligibility=PromotedObservationEligibility.PROMOTED_JOURNEY,
+            primary_trace_sha256=canonical_sha256(assist_trace.to_payload()),  # type: ignore[attr-defined]
+            promotion_evidence_sha256="8" * 64,
+            execution_receipt_sha256="9" * 64,
+            supervisor_invoked=True,
+            user_visible_outcome=PromotedUserVisibleOutcome.NO_REGRESSION,
+        ),
+    )
+    _insert_promoted(
+        conn,
+        event_id="evt_2222222222222222",
+        event=PromotedSupervisorProductObservation(
+            mode=SupervisorMode.ASSIST,
+            task_class=None,
+            eligibility=PromotedObservationEligibility.OTHER_TURN,
+            primary_trace_sha256=canonical_sha256(ordinary_trace.to_payload()),  # type: ignore[attr-defined]
+            promotion_evidence_sha256="8" * 64,
+            execution_receipt_sha256=None,
+            supervisor_invoked=True,
+            user_visible_outcome=PromotedUserVisibleOutcome.NOT_EVALUATED,
+        ),
+    )
+    _insert_promoted(
+        conn,
+        event_id="evt_3333333333333333",
+        event=PromotedSupervisorProductObservation(
+            mode=SupervisorMode.CANARY,
+            task_class=TaskClass.COMPARE_CURRENT_FILE_WITH_CURRENT_WEB,
+            eligibility=PromotedObservationEligibility.PROMOTED_JOURNEY,
+            primary_trace_sha256=canonical_sha256(canary_trace.to_payload()),  # type: ignore[attr-defined]
+            promotion_evidence_sha256="a" * 64,
+            execution_receipt_sha256="b" * 64,
+            supervisor_invoked=True,
+            user_visible_outcome=PromotedUserVisibleOutcome.REGRESSION,
+        ),
+    )
+    conn.commit()
+
+    report = build_production_baseline(conn, limit=100)
+
+    shadow = report["product_windows"]["shadow_readiness"]
+    assist = report["product_windows"]["promoted_execution"]["assist"]
+    canary = report["product_windows"]["promoted_execution"]["canary"]
+    assert shadow["observation_count"] == 1
+    assert shadow["actual_promoted_execution"] is False
+    assert assist["actual_promoted_execution"] is True
+    assert assist["observation_count"] == 2
+    assert assist["promoted"]["observation_count"] == 1
+    assert assist["promoted"]["complete_count"] == 1
+    assert assist["call_rate_observation_count"] == 2
+    assert assist["supervisor_invocation_count"] == 2
+    assert assist["unnecessary_supervisor_invocation_count"] == 1
+    assert assist["user_visible_observation_count"] == 1
+    assert assist["user_visible_regression_count"] == 0
+    assert canary["observation_count"] == 1
+    assert canary["user_visible_regression_count"] == 1
+    assert report["sample"]["promoted_product_events"] == 3
+
+
+def test_promoted_product_seam_rejects_extensions_and_unmatched_traces() -> None:
+    conn = _connection()
+    valid_shape = PromotedSupervisorProductObservation(
+        mode=SupervisorMode.ASSIST,
+        task_class=TaskClass.COMPARE_CURRENT_FILE_WITH_CURRENT_WEB,
+        eligibility=PromotedObservationEligibility.PROMOTED_JOURNEY,
+        primary_trace_sha256="4" * 64,
+        promotion_evidence_sha256="8" * 64,
+        execution_receipt_sha256="9" * 64,
+        supervisor_invoked=True,
+        user_visible_outcome=PromotedUserVisibleOutcome.NO_REGRESSION,
+    ).payload()
+    extended = dict(valid_shape)
+    extended["body"] = "SECRET PRODUCT BODY"
+    conn.execute(
+        "INSERT INTO runtime_events(id,event_type,payload) VALUES(?,?,?)",
+        (
+            "evt_4444444444444444",
+            SUPERVISOR_PROMOTED_PRODUCT_EVENT,
+            json.dumps(extended),
+        ),
+    )
+    conn.execute(
+        "INSERT INTO runtime_events(id,event_type,payload) VALUES(?,?,?)",
+        (
+            "evt_5555555555555555",
+            SUPERVISOR_PROMOTED_PRODUCT_EVENT,
+            json.dumps(valid_shape),
+        ),
+    )
+    conn.commit()
+
+    report = build_production_baseline(conn, limit=100)
+
+    assert report["sample"]["malformed_promoted_product_events"] == 1
+    assert report["sample"]["unmatched_promoted_product_events"] == 1
+    assert report["product_windows"]["promoted_execution"]["assist"]["observation_count"] == 0
+    assert "SECRET PRODUCT BODY" not in json.dumps(report)
+
+
+def test_promoted_product_seam_excludes_conflicting_replays_of_one_trace() -> None:
+    conn = _connection()
+    trace = _trace(turn_identifier="msg_6666666666666666")
+    _insert_trace(conn, trace=trace, message_id="msg_6666666666666666")
+    base = {
+        "mode": SupervisorMode.ASSIST,
+        "task_class": TaskClass.COMPARE_CURRENT_FILE_WITH_CURRENT_WEB,
+        "eligibility": PromotedObservationEligibility.PROMOTED_JOURNEY,
+        "primary_trace_sha256": canonical_sha256(trace.to_payload()),  # type: ignore[attr-defined]
+        "promotion_evidence_sha256": "8" * 64,
+        "execution_receipt_sha256": "9" * 64,
+        "supervisor_invoked": True,
+    }
+    _insert_promoted(
+        conn,
+        event_id="evt_6666666666666666",
+        event=PromotedSupervisorProductObservation(
+            **base,
+            user_visible_outcome=PromotedUserVisibleOutcome.NO_REGRESSION,
+        ),  # type: ignore[arg-type]
+    )
+    _insert_promoted(
+        conn,
+        event_id="evt_7777777777777777",
+        event=PromotedSupervisorProductObservation(
+            **base,
+            user_visible_outcome=PromotedUserVisibleOutcome.REGRESSION,
+        ),  # type: ignore[arg-type]
+    )
+    conn.commit()
+
+    report = build_production_baseline(conn, limit=100)
+
+    assert report["sample"]["duplicate_promoted_product_events"] == 1
+    assert report["product_windows"]["promoted_execution"]["assist"]["observation_count"] == 0

@@ -28,15 +28,20 @@ from typing import Any
 from friday import semantic_supervisor_policy
 from friday.orchestration.capability_binding import CapabilityBindingSnapshot
 from friday.orchestration.supervisor_assist_promotion import (
+    SUPERVISOR_ASSIST_OUTCOME_EVIDENCE_SCHEMA,
     SUPERVISOR_ASSIST_PROMOTION_GATE_ID,
     SUPERVISOR_ASSIST_PROMOTION_MAX_REVIEW_ROUNDS,
     SUPERVISOR_ASSIST_PROMOTION_MAX_STEPS,
     SUPERVISOR_ASSIST_PROMOTION_POLICY_SHA256,
     SUPERVISOR_ASSIST_PROMOTION_SCHEMA,
+    SUPERVISOR_ASSIST_READINESS_EVIDENCE_SCHEMA,
     AssistPromotionCandidate,
     AssistPromotionEvidenceAuthority,
     AssistPromotionLiveEvidence,
     AssistPromotionOperatorGate,
+    AssistPromotionOutcomeEvidence,
+    AssistPromotionQualityBasis,
+    AssistPromotionReadinessEvidence,
     SupervisorSchedulerAdmissionSnapshot,
 )
 from friday.orchestration.supervisor_contracts import SupervisorMode, TaskClass
@@ -106,6 +111,55 @@ _EVIDENCE_KEYS = frozenset(
         "duplicate_effect_count",
         "duplicate_publication_count",
         "false_completion_regression_count",
+        "product_evidence",
+    }
+)
+_READINESS_EVIDENCE_KEYS = frozenset(
+    {
+        "schema",
+        "baseline_window_sha256",
+        "baseline_observation_count",
+        "baseline_complete_count",
+        "documented_failure_class_id",
+        "documented_failure_class_sha256",
+        "baseline_failure_class_count",
+        "readiness_witness_sha256",
+        "readiness_observation_count",
+        "latency_budget_ms",
+        "latency_budget_sha256",
+        "latency_total_ms",
+        "latency_max_ms",
+        "call_rate_observation_count",
+        "supervisor_invocation_count",
+        "unnecessary_supervisor_invocation_count",
+        "user_visible_observation_count",
+        "user_visible_regression_count",
+    }
+)
+_OUTCOME_EVIDENCE_KEYS = frozenset(
+    {
+        "schema",
+        "quality_basis",
+        "baseline_window_sha256",
+        "promoted_window_sha256",
+        "baseline_observation_count",
+        "baseline_complete_count",
+        "promoted_observation_count",
+        "promoted_complete_count",
+        "documented_failure_class_id",
+        "documented_failure_class_sha256",
+        "baseline_failure_class_count",
+        "promoted_failure_class_count",
+        "latency_budget_ms",
+        "latency_budget_sha256",
+        "latency_observation_count",
+        "latency_total_ms",
+        "latency_max_ms",
+        "call_rate_observation_count",
+        "supervisor_invocation_count",
+        "unnecessary_supervisor_invocation_count",
+        "user_visible_observation_count",
+        "user_visible_regression_count",
     }
 )
 _FORBIDDEN_STATUS_KEYS = frozenset(
@@ -477,7 +531,66 @@ def parse_assist_promotion_live_evidence(
         raise AssistPromotionActivationError(AssistPromotionActivationReason.EVIDENCE_INVALID)
     if decoded.get("schema") != SUPERVISOR_ASSIST_PROMOTION_SCHEMA:
         raise AssistPromotionActivationError(AssistPromotionActivationReason.EVIDENCE_INVALID)
+    product_payload = decoded.get("product_evidence")
+    if type(product_payload) is not dict:
+        raise AssistPromotionActivationError(AssistPromotionActivationReason.EVIDENCE_INVALID)
+    product_evidence: AssistPromotionReadinessEvidence | AssistPromotionOutcomeEvidence
     try:
+        product_schema = product_payload.get("schema")
+        if product_schema == SUPERVISOR_ASSIST_READINESS_EVIDENCE_SCHEMA:
+            if set(product_payload) != _READINESS_EVIDENCE_KEYS:
+                raise ValueError("readiness evidence keys do not match")
+            product_evidence = AssistPromotionReadinessEvidence(
+                baseline_window_sha256=product_payload["baseline_window_sha256"],
+                baseline_observation_count=product_payload["baseline_observation_count"],
+                baseline_complete_count=product_payload["baseline_complete_count"],
+                documented_failure_class_id=product_payload["documented_failure_class_id"],
+                documented_failure_class_sha256=product_payload["documented_failure_class_sha256"],
+                baseline_failure_class_count=product_payload["baseline_failure_class_count"],
+                readiness_witness_sha256=product_payload["readiness_witness_sha256"],
+                readiness_observation_count=product_payload["readiness_observation_count"],
+                latency_budget_ms=product_payload["latency_budget_ms"],
+                latency_budget_sha256=product_payload["latency_budget_sha256"],
+                latency_total_ms=product_payload["latency_total_ms"],
+                latency_max_ms=product_payload["latency_max_ms"],
+                call_rate_observation_count=product_payload["call_rate_observation_count"],
+                supervisor_invocation_count=product_payload["supervisor_invocation_count"],
+                unnecessary_supervisor_invocation_count=product_payload[
+                    "unnecessary_supervisor_invocation_count"
+                ],
+                user_visible_observation_count=product_payload["user_visible_observation_count"],
+                user_visible_regression_count=product_payload["user_visible_regression_count"],
+            )
+        elif product_schema == SUPERVISOR_ASSIST_OUTCOME_EVIDENCE_SCHEMA:
+            if set(product_payload) != _OUTCOME_EVIDENCE_KEYS:
+                raise ValueError("outcome evidence keys do not match")
+            product_evidence = AssistPromotionOutcomeEvidence(
+                quality_basis=AssistPromotionQualityBasis(product_payload["quality_basis"]),
+                baseline_window_sha256=product_payload["baseline_window_sha256"],
+                promoted_window_sha256=product_payload["promoted_window_sha256"],
+                baseline_observation_count=product_payload["baseline_observation_count"],
+                baseline_complete_count=product_payload["baseline_complete_count"],
+                promoted_observation_count=product_payload["promoted_observation_count"],
+                promoted_complete_count=product_payload["promoted_complete_count"],
+                documented_failure_class_id=product_payload["documented_failure_class_id"],
+                documented_failure_class_sha256=product_payload["documented_failure_class_sha256"],
+                baseline_failure_class_count=product_payload["baseline_failure_class_count"],
+                promoted_failure_class_count=product_payload["promoted_failure_class_count"],
+                latency_budget_ms=product_payload["latency_budget_ms"],
+                latency_budget_sha256=product_payload["latency_budget_sha256"],
+                latency_observation_count=product_payload["latency_observation_count"],
+                latency_total_ms=product_payload["latency_total_ms"],
+                latency_max_ms=product_payload["latency_max_ms"],
+                call_rate_observation_count=product_payload["call_rate_observation_count"],
+                supervisor_invocation_count=product_payload["supervisor_invocation_count"],
+                unnecessary_supervisor_invocation_count=product_payload[
+                    "unnecessary_supervisor_invocation_count"
+                ],
+                user_visible_observation_count=product_payload["user_visible_observation_count"],
+                user_visible_regression_count=product_payload["user_visible_regression_count"],
+            )
+        else:
+            raise ValueError("product evidence schema is invalid")
         evidence = AssistPromotionLiveEvidence(
             evidence_id=decoded["evidence_id"],
             authority=AssistPromotionEvidenceAuthority(decoded["authority"]),
@@ -504,6 +617,7 @@ def parse_assist_promotion_live_evidence(
             duplicate_effect_count=decoded["duplicate_effect_count"],
             duplicate_publication_count=decoded["duplicate_publication_count"],
             false_completion_regression_count=decoded["false_completion_regression_count"],
+            product_evidence=product_evidence,
         )
     except (KeyError, TypeError, ValueError) as exc:
         raise AssistPromotionActivationError(AssistPromotionActivationReason.EVIDENCE_INVALID) from exc
@@ -710,6 +824,16 @@ def _evidence_identity_matches(
     )
     return bool(
         evidence.observed_mode is expected_predecessor
+        and (
+            (
+                requested_mode is SupervisorMode.ASSIST
+                and isinstance(evidence.product_evidence, AssistPromotionReadinessEvidence)
+            )
+            or (
+                requested_mode is SupervisorMode.CANARY
+                and isinstance(evidence.product_evidence, AssistPromotionOutcomeEvidence)
+            )
+        )
         and evidence.task_class is TaskClass.COMPARE_CURRENT_FILE_WITH_CURRENT_WEB
         and evidence.source_revision_sha256 == source_revision_sha256
         and evidence.promotion_policy_sha256 == SUPERVISOR_ASSIST_PROMOTION_POLICY_SHA256

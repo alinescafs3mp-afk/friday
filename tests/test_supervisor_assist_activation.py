@@ -33,12 +33,67 @@ from friday.orchestration.supervisor_assist_promotion import (
     SUPERVISOR_ASSIST_PROMOTION_POLICY_SHA256,
     AssistPromotionEvidenceAuthority,
     AssistPromotionLiveEvidence,
+    AssistPromotionOutcomeEvidence,
+    AssistPromotionQualityBasis,
+    AssistPromotionReadinessEvidence,
 )
 from friday.orchestration.supervisor_contracts import SupervisorMode, TaskClass
 
 ACTOR = "1" * 64
 OTHER = "f" * 64
 _ZERO = "0" * 64
+
+
+def _readiness_product(**changes: object) -> AssistPromotionReadinessEvidence:
+    values: dict[str, object] = {
+        "baseline_window_sha256": "4" * 64,
+        "baseline_observation_count": 20,
+        "baseline_complete_count": 8,
+        "documented_failure_class_id": "capability:source_unavailable",
+        "documented_failure_class_sha256": "5" * 64,
+        "baseline_failure_class_count": 5,
+        "readiness_witness_sha256": "6" * 64,
+        "readiness_observation_count": 20,
+        "latency_budget_ms": 2_500,
+        "latency_budget_sha256": "7" * 64,
+        "latency_total_ms": 20_000,
+        "latency_max_ms": 1_500,
+        "call_rate_observation_count": 20,
+        "supervisor_invocation_count": 20,
+        "unnecessary_supervisor_invocation_count": 0,
+        "user_visible_observation_count": 20,
+        "user_visible_regression_count": 0,
+    }
+    values.update(changes)
+    return AssistPromotionReadinessEvidence(**values)  # type: ignore[arg-type]
+
+
+def _outcome_product(**changes: object) -> AssistPromotionOutcomeEvidence:
+    values: dict[str, object] = {
+        "quality_basis": AssistPromotionQualityBasis.COMPLETION_RATE_IMPROVEMENT,
+        "baseline_window_sha256": "4" * 64,
+        "promoted_window_sha256": "8" * 64,
+        "baseline_observation_count": 20,
+        "baseline_complete_count": 8,
+        "promoted_observation_count": 20,
+        "promoted_complete_count": 12,
+        "documented_failure_class_id": "none",
+        "documented_failure_class_sha256": None,
+        "baseline_failure_class_count": 0,
+        "promoted_failure_class_count": 0,
+        "latency_budget_ms": 2_500,
+        "latency_budget_sha256": "7" * 64,
+        "latency_observation_count": 20,
+        "latency_total_ms": 20_000,
+        "latency_max_ms": 1_500,
+        "call_rate_observation_count": 20,
+        "supervisor_invocation_count": 20,
+        "unnecessary_supervisor_invocation_count": 0,
+        "user_visible_observation_count": 20,
+        "user_visible_regression_count": 0,
+    }
+    values.update(changes)
+    return AssistPromotionOutcomeEvidence(**values)  # type: ignore[arg-type]
 
 
 def _release_root(tmp_path: Path, *, manifest: bytes | None = None) -> tuple[Path, str]:
@@ -145,6 +200,9 @@ def _evidence(
         "duplicate_effect_count": 0,
         "duplicate_publication_count": 0,
         "false_completion_regression_count": 0,
+        "product_evidence": (
+            _outcome_product() if observed_mode is SupervisorMode.ASSIST else _readiness_product()
+        ),
     }
     values.update(changes)
     return AssistPromotionLiveEvidence(**values)  # type: ignore[arg-type]
@@ -368,7 +426,7 @@ def test_evidence_parser_rejects_extra_missing_nonfinite_and_malformed_fields(
     elif mutation == "finite_float":
         payload["observation_count"] = 20.0
     elif mutation == "wrong_schema":
-        payload["schema"] = "friday.supervisor-assist-promotion.v2"
+        payload["schema"] = "friday.supervisor-assist-promotion.v1"
     elif mutation == "wrong_enum":
         payload["authority"] = "operator_says_yes"
     elif mutation == "wrong_bool":
@@ -380,6 +438,68 @@ def test_evidence_parser_rejects_extra_missing_nonfinite_and_malformed_fields(
         _parse_payload(payload)
 
     assert captured.value.reason is AssistPromotionActivationReason.EVIDENCE_INVALID
+
+
+def test_old_v1_evidence_and_old_product_grammar_are_explicitly_rejected(
+    tmp_path: Path,
+) -> None:
+    _root, source = _release_root(tmp_path)
+    evidence = _evidence(
+        source_sha256=source,
+        registry_sha256=operational_capability_snapshot().digest_hex(),
+    )
+    old_top = evidence.payload()
+    old_top["schema"] = "friday.supervisor-assist-promotion.v1"
+    old_top.pop("product_evidence")
+    old_product = evidence.payload()
+    product = old_product["product_evidence"]
+    assert isinstance(product, dict)
+    product["schema"] = "friday.supervisor-assist-product-evidence.v1"
+
+    for payload in (old_top, old_product):
+        with pytest.raises(AssistPromotionActivationError) as captured:
+            _parse_payload(payload)
+        assert captured.value.reason is AssistPromotionActivationReason.EVIDENCE_INVALID
+
+
+@pytest.mark.parametrize("mutation", ["extra", "missing", "wrong_schema"])
+def test_nested_readiness_evidence_uses_an_exact_closed_keyset(
+    tmp_path: Path,
+    mutation: str,
+) -> None:
+    _root, source = _release_root(tmp_path)
+    payload = _evidence(
+        source_sha256=source,
+        registry_sha256=operational_capability_snapshot().digest_hex(),
+    ).payload()
+    product = payload["product_evidence"]
+    assert isinstance(product, dict)
+    if mutation == "extra":
+        product["path"] = "/private/file"
+    elif mutation == "missing":
+        product.pop("readiness_witness_sha256")
+    else:
+        product["schema"] = "friday.supervisor-assist-outcome-evidence.v1"
+
+    with pytest.raises(AssistPromotionActivationError) as captured:
+        _parse_payload(payload)
+    assert captured.value.reason is AssistPromotionActivationReason.EVIDENCE_INVALID
+
+
+def test_parser_round_trips_the_distinct_actual_assist_outcome_contract(
+    tmp_path: Path,
+) -> None:
+    _root, source = _release_root(tmp_path)
+    evidence = _evidence(
+        source_sha256=source,
+        registry_sha256=operational_capability_snapshot().digest_hex(),
+        observed_mode=SupervisorMode.ASSIST,
+    )
+
+    loaded = _parse_payload(evidence.payload())
+
+    assert loaded.evidence == evidence
+    assert isinstance(loaded.evidence.product_evidence, AssistPromotionOutcomeEvidence)
 
 
 def test_evidence_parser_rejects_duplicate_keys_invalid_utf8_and_wrong_digest(
@@ -597,6 +717,34 @@ def test_canary_raw_settings_require_a_nonempty_unique_exact_digest_allowlist(
     assert configured.operator_gate.canary_actor_bindings == (ACTOR,)
     assert empty.reason is AssistPromotionActivationReason.CANARY_ALLOWLIST_INVALID
     assert duplicate.reason is AssistPromotionActivationReason.CANARY_ALLOWLIST_INVALID
+
+
+def test_activation_identity_rejects_actual_outcome_evidence_for_first_assist(
+    tmp_path: Path,
+) -> None:
+    raw, root, public, diagnostics, binding = _activation_fixture(tmp_path)
+    assert isinstance(raw.source_revision_sha256, str)
+    wrong = _evidence(
+        source_sha256=raw.source_revision_sha256,
+        registry_sha256=binding.digest_hex(),
+        product_evidence=_outcome_product(),
+    )
+    evidence_path, evidence_sha256 = _evidence_file(tmp_path, wrong)
+
+    material = load_assist_promotion_activation(
+        replace(
+            raw,
+            evidence_file=str(evidence_path),
+            evidence_sha256=evidence_sha256,
+        ),
+        installed_release_root=root,
+        scheduler_public_status=public,
+        scheduler_diagnostics_status=diagnostics,
+        binding_snapshot=binding,
+    )
+
+    assert material.configured is False
+    assert material.reason is AssistPromotionActivationReason.EVIDENCE_IDENTITY_MISMATCH
 
 
 def test_valid_static_material_is_loaded_but_never_described_as_accepted(

@@ -31,13 +31,19 @@ from friday.orchestration.supervisor_contracts import (
     canonical_sha256,
 )
 
-SUPERVISOR_ASSIST_PROMOTION_SCHEMA = "friday.supervisor-assist-promotion.v1"
+SUPERVISOR_ASSIST_PROMOTION_SCHEMA = "friday.supervisor-assist-promotion.v2"
+SUPERVISOR_ASSIST_READINESS_EVIDENCE_SCHEMA = "friday.supervisor-assist-readiness-evidence.v1"
+SUPERVISOR_ASSIST_OUTCOME_EVIDENCE_SCHEMA = "friday.supervisor-assist-outcome-evidence.v1"
 SUPERVISOR_ASSIST_PROMOTION_GATE_ID = "semantic-supervisor-current-file-web-promotion-v1"
 SUPERVISOR_ASSIST_PROMOTION_MAX_STEPS = 6
 SUPERVISOR_ASSIST_PROMOTION_MAX_REVIEW_ROUNDS = 1
+SUPERVISOR_ASSIST_PROMOTION_MIN_PRODUCT_OBSERVATIONS = 20
+SUPERVISOR_ASSIST_MAX_UNNECESSARY_CALL_RATE_BPS = 0
 
 _DIGEST_RE = re.compile(r"[0-9a-f]{64}\Z")
 _SAFE_ID_RE = re.compile(r"[a-z][a-z0-9_.-]{0,95}\Z")
+_SAFE_FAILURE_CLASS_RE = re.compile(r"[a-z][a-z0-9_.:-]{0,127}\Z")
+_MAX_LATENCY_MS = 86_400_000
 _P1_POLICY_ID = semantic_supervisor_policy.SUPERVISOR_PRODUCT_POLICY_ID
 _P1_POLICY_SHA256 = semantic_supervisor_policy.SUPERVISOR_PRODUCT_POLICY_SHA256
 _P1_PROFILE_ID = semantic_supervisor_policy.SUPERVISOR_RUNTIME_PROFILE_ID
@@ -69,6 +75,11 @@ _EXPECTED_PROMOTION_POLICY = MappingProxyType(
         "promotion_modes": (SupervisorMode.ASSIST.value, SupervisorMode.CANARY.value),
         "max_steps": SUPERVISOR_ASSIST_PROMOTION_MAX_STEPS,
         "max_review_rounds": SUPERVISOR_ASSIST_PROMOTION_MAX_REVIEW_ROUNDS,
+        "readiness_evidence_schema": SUPERVISOR_ASSIST_READINESS_EVIDENCE_SCHEMA,
+        "outcome_evidence_schema": SUPERVISOR_ASSIST_OUTCOME_EVIDENCE_SCHEMA,
+        "minimum_product_observations": SUPERVISOR_ASSIST_PROMOTION_MIN_PRODUCT_OBSERVATIONS,
+        "max_unnecessary_call_rate_bps": SUPERVISOR_ASSIST_MAX_UNNECESSARY_CALL_RATE_BPS,
+        "user_visible_regression_budget": 0,
         "canary_requires_exact_actor_allowlist": True,
         "operator_gate_required": True,
         "live_production_joined_evidence_required": True,
@@ -95,6 +106,13 @@ class AssistPromotionReadiness(StrEnum):
     LIVE_EVIDENCE_READY = "live_evidence_ready"
 
 
+class AssistPromotionQualityBasis(StrEnum):
+    """The two product claims that may justify one bounded promotion."""
+
+    COMPLETION_RATE_IMPROVEMENT = "completion_rate_improvement"
+    DOCUMENTED_FAILURE_CLASS_REMOVAL = "documented_failure_class_removal"
+
+
 class AssistPromotionReason(StrEnum):
     ADMITTED = "admitted"
     MALFORMED = "malformed"
@@ -115,6 +133,10 @@ class AssistPromotionReason(StrEnum):
     EVIDENCE_IDENTITY_DRIFT = "evidence_identity_drift"
     EVIDENCE_WINDOW_INCOMPLETE = "evidence_window_incomplete"
     EVIDENCE_INVARIANT_FAILED = "evidence_invariant_failed"
+    PRODUCT_QUALITY_NOT_PROVEN = "product_quality_not_proven"
+    PRODUCT_LATENCY_BUDGET_EXCEEDED = "product_latency_budget_exceeded"
+    UNNECESSARY_SUPERVISOR_CALL_RATE_EXCEEDED = "unnecessary_supervisor_call_rate_exceeded"
+    USER_VISIBLE_REGRESSION_OBSERVED = "user_visible_regression_observed"
     OPERATOR_GATE_CLOSED = "operator_gate_closed"
     OPERATOR_GATE_DRIFT = "operator_gate_drift"
     OPERATOR_EVIDENCE_NOT_BOUND = "operator_evidence_not_bound"
@@ -151,6 +173,245 @@ def _require_count(value: object, *, label: str) -> int:
     if type(value) is not int or value < 0:
         raise ValueError(f"{label} must be a non-negative integer")
     return value
+
+
+def _require_positive_count(value: object, *, label: str) -> int:
+    count = _require_count(value, label=label)
+    if count < 1:
+        raise ValueError(f"{label} must be a positive integer")
+    return count
+
+
+@dataclass(frozen=True, slots=True)
+class AssistPromotionReadinessEvidence:
+    """Shadow-stage evidence that justifies a bounded assist experiment.
+
+    This receipt proves a real baseline failure and a separately digested
+    counterfactual/readiness battery.  It deliberately has no promoted outcome
+    fields and cannot claim that the failure class has already disappeared.
+    """
+
+    baseline_window_sha256: str
+    baseline_observation_count: int
+    baseline_complete_count: int
+    documented_failure_class_id: str
+    documented_failure_class_sha256: str
+    baseline_failure_class_count: int
+    readiness_witness_sha256: str
+    readiness_observation_count: int
+    latency_budget_ms: int
+    latency_budget_sha256: str
+    latency_total_ms: int
+    latency_max_ms: int
+    call_rate_observation_count: int
+    supervisor_invocation_count: int
+    unnecessary_supervisor_invocation_count: int
+    user_visible_observation_count: int
+    user_visible_regression_count: int
+
+    def __post_init__(self) -> None:
+        for label, value in (
+            ("baseline_window_sha256", self.baseline_window_sha256),
+            ("documented_failure_class_sha256", self.documented_failure_class_sha256),
+            ("readiness_witness_sha256", self.readiness_witness_sha256),
+            ("latency_budget_sha256", self.latency_budget_sha256),
+        ):
+            _require_digest(value, label=label)
+        if (
+            type(self.documented_failure_class_id) is not str
+            or self.documented_failure_class_id == "none"
+            or _SAFE_FAILURE_CLASS_RE.fullmatch(self.documented_failure_class_id) is None
+        ):
+            raise ValueError("documented_failure_class_id is invalid")
+        for label in (
+            "baseline_observation_count",
+            "baseline_complete_count",
+            "baseline_failure_class_count",
+            "readiness_observation_count",
+            "latency_total_ms",
+            "latency_max_ms",
+            "call_rate_observation_count",
+            "supervisor_invocation_count",
+            "unnecessary_supervisor_invocation_count",
+            "user_visible_observation_count",
+            "user_visible_regression_count",
+        ):
+            _require_count(getattr(self, label), label=label)
+        _require_positive_count(self.baseline_observation_count, label="baseline_observation_count")
+        _require_positive_count(self.readiness_observation_count, label="readiness_observation_count")
+        _require_positive_count(self.latency_budget_ms, label="latency_budget_ms")
+        if self.latency_budget_ms > _MAX_LATENCY_MS or self.latency_max_ms > _MAX_LATENCY_MS:
+            raise ValueError("readiness latency exceeds the trace contract")
+        if self.baseline_complete_count > self.baseline_observation_count:
+            raise ValueError("baseline_complete_count exceeds its observation window")
+        if self.baseline_failure_class_count > self.baseline_observation_count:
+            raise ValueError("baseline failure count exceeds its observation window")
+        if self.supervisor_invocation_count > self.call_rate_observation_count:
+            raise ValueError("supervisor invocation count exceeds its observation window")
+        if self.unnecessary_supervisor_invocation_count > self.supervisor_invocation_count:
+            raise ValueError("unnecessary invocation count exceeds all invocations")
+        if self.user_visible_regression_count > self.user_visible_observation_count:
+            raise ValueError("user-visible regression count exceeds its observation window")
+        if (
+            not self.latency_max_ms
+            <= self.latency_total_ms
+            <= (self.latency_max_ms * self.readiness_observation_count)
+        ):
+            raise ValueError("readiness latency aggregate is inconsistent")
+
+    def payload(self) -> dict[str, object]:
+        return {
+            "schema": SUPERVISOR_ASSIST_READINESS_EVIDENCE_SCHEMA,
+            "baseline_window_sha256": self.baseline_window_sha256,
+            "baseline_observation_count": self.baseline_observation_count,
+            "baseline_complete_count": self.baseline_complete_count,
+            "documented_failure_class_id": self.documented_failure_class_id,
+            "documented_failure_class_sha256": self.documented_failure_class_sha256,
+            "baseline_failure_class_count": self.baseline_failure_class_count,
+            "readiness_witness_sha256": self.readiness_witness_sha256,
+            "readiness_observation_count": self.readiness_observation_count,
+            "latency_budget_ms": self.latency_budget_ms,
+            "latency_budget_sha256": self.latency_budget_sha256,
+            "latency_total_ms": self.latency_total_ms,
+            "latency_max_ms": self.latency_max_ms,
+            "call_rate_observation_count": self.call_rate_observation_count,
+            "supervisor_invocation_count": self.supervisor_invocation_count,
+            "unnecessary_supervisor_invocation_count": (self.unnecessary_supervisor_invocation_count),
+            "user_visible_observation_count": self.user_visible_observation_count,
+            "user_visible_regression_count": self.user_visible_regression_count,
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class AssistPromotionOutcomeEvidence:
+    """Actual assist observations required before a canary promotion."""
+
+    quality_basis: AssistPromotionQualityBasis
+    baseline_window_sha256: str
+    promoted_window_sha256: str
+    baseline_observation_count: int
+    baseline_complete_count: int
+    promoted_observation_count: int
+    promoted_complete_count: int
+    documented_failure_class_id: str
+    documented_failure_class_sha256: str | None
+    baseline_failure_class_count: int
+    promoted_failure_class_count: int
+    latency_budget_ms: int
+    latency_budget_sha256: str
+    latency_observation_count: int
+    latency_total_ms: int
+    latency_max_ms: int
+    call_rate_observation_count: int
+    supervisor_invocation_count: int
+    unnecessary_supervisor_invocation_count: int
+    user_visible_observation_count: int
+    user_visible_regression_count: int
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.quality_basis, AssistPromotionQualityBasis):
+            raise ValueError("quality_basis must be typed")
+        for label, value in (
+            ("baseline_window_sha256", self.baseline_window_sha256),
+            ("promoted_window_sha256", self.promoted_window_sha256),
+            ("latency_budget_sha256", self.latency_budget_sha256),
+        ):
+            _require_digest(value, label=label)
+        if hmac.compare_digest(self.baseline_window_sha256, self.promoted_window_sha256):
+            raise ValueError("product evidence windows must be distinct")
+        for label in (
+            "baseline_observation_count",
+            "baseline_complete_count",
+            "promoted_observation_count",
+            "promoted_complete_count",
+            "baseline_failure_class_count",
+            "promoted_failure_class_count",
+            "latency_observation_count",
+            "latency_total_ms",
+            "latency_max_ms",
+            "call_rate_observation_count",
+            "supervisor_invocation_count",
+            "unnecessary_supervisor_invocation_count",
+            "user_visible_observation_count",
+            "user_visible_regression_count",
+        ):
+            _require_count(getattr(self, label), label=label)
+        _require_positive_count(self.baseline_observation_count, label="baseline_observation_count")
+        _require_positive_count(self.promoted_observation_count, label="promoted_observation_count")
+        _require_positive_count(self.latency_budget_ms, label="latency_budget_ms")
+        if self.latency_budget_ms > _MAX_LATENCY_MS:
+            raise ValueError("latency_budget_ms exceeds the trace contract")
+        if self.latency_max_ms > _MAX_LATENCY_MS:
+            raise ValueError("latency_max_ms exceeds the trace contract")
+        if self.baseline_complete_count > self.baseline_observation_count:
+            raise ValueError("baseline_complete_count exceeds its observation window")
+        if self.promoted_complete_count > self.promoted_observation_count:
+            raise ValueError("promoted_complete_count exceeds its observation window")
+        if self.baseline_failure_class_count > self.baseline_observation_count:
+            raise ValueError("baseline failure count exceeds its observation window")
+        if self.promoted_failure_class_count > self.promoted_observation_count:
+            raise ValueError("promoted failure count exceeds its observation window")
+        if self.supervisor_invocation_count > self.call_rate_observation_count:
+            raise ValueError("supervisor invocation count exceeds its observation window")
+        if self.unnecessary_supervisor_invocation_count > self.supervisor_invocation_count:
+            raise ValueError("unnecessary invocation count exceeds all invocations")
+        if self.user_visible_regression_count > self.user_visible_observation_count:
+            raise ValueError("user-visible regression count exceeds its observation window")
+        if self.latency_observation_count:
+            if (
+                not self.latency_max_ms
+                <= self.latency_total_ms
+                <= (self.latency_max_ms * self.latency_observation_count)
+            ):
+                raise ValueError("latency aggregate is inconsistent")
+        elif self.latency_total_ms or self.latency_max_ms:
+            raise ValueError("empty latency window must have zero aggregate")
+        if (
+            type(self.documented_failure_class_id) is not str
+            or _SAFE_FAILURE_CLASS_RE.fullmatch(self.documented_failure_class_id) is None
+        ):
+            raise ValueError("documented_failure_class_id is invalid")
+        if self.documented_failure_class_sha256 is not None:
+            _require_digest(
+                self.documented_failure_class_sha256,
+                label="documented_failure_class_sha256",
+            )
+        if self.quality_basis is AssistPromotionQualityBasis.COMPLETION_RATE_IMPROVEMENT:
+            if (
+                self.documented_failure_class_id != "none"
+                or self.documented_failure_class_sha256 is not None
+                or self.baseline_failure_class_count
+                or self.promoted_failure_class_count
+            ):
+                raise ValueError("completion improvement must not carry a failure-class claim")
+        elif self.documented_failure_class_id == "none" or self.documented_failure_class_sha256 is None:
+            raise ValueError("failure-class removal requires an exact documented identity")
+
+    def payload(self) -> dict[str, object]:
+        return {
+            "schema": SUPERVISOR_ASSIST_OUTCOME_EVIDENCE_SCHEMA,
+            "quality_basis": self.quality_basis.value,
+            "baseline_window_sha256": self.baseline_window_sha256,
+            "promoted_window_sha256": self.promoted_window_sha256,
+            "baseline_observation_count": self.baseline_observation_count,
+            "baseline_complete_count": self.baseline_complete_count,
+            "promoted_observation_count": self.promoted_observation_count,
+            "promoted_complete_count": self.promoted_complete_count,
+            "documented_failure_class_id": self.documented_failure_class_id,
+            "documented_failure_class_sha256": self.documented_failure_class_sha256,
+            "baseline_failure_class_count": self.baseline_failure_class_count,
+            "promoted_failure_class_count": self.promoted_failure_class_count,
+            "latency_budget_ms": self.latency_budget_ms,
+            "latency_budget_sha256": self.latency_budget_sha256,
+            "latency_observation_count": self.latency_observation_count,
+            "latency_total_ms": self.latency_total_ms,
+            "latency_max_ms": self.latency_max_ms,
+            "call_rate_observation_count": self.call_rate_observation_count,
+            "supervisor_invocation_count": self.supervisor_invocation_count,
+            "unnecessary_supervisor_invocation_count": (self.unnecessary_supervisor_invocation_count),
+            "user_visible_observation_count": self.user_visible_observation_count,
+            "user_visible_regression_count": self.user_visible_regression_count,
+        }
 
 
 @dataclass(frozen=True, slots=True)
@@ -256,6 +517,7 @@ class AssistPromotionLiveEvidence:
     duplicate_effect_count: int
     duplicate_publication_count: int
     false_completion_regression_count: int
+    product_evidence: AssistPromotionReadinessEvidence | AssistPromotionOutcomeEvidence
 
     def __post_init__(self) -> None:
         _require_safe_id(self.evidence_id, label="evidence_id")
@@ -297,6 +559,11 @@ class AssistPromotionLiveEvidence:
             _require_bool(getattr(self, label), label=label)
         if self.joined_trace_count > self.observation_count:
             raise ValueError("joined_trace_count exceeds observation_count")
+        if not isinstance(
+            self.product_evidence,
+            (AssistPromotionReadinessEvidence, AssistPromotionOutcomeEvidence),
+        ):
+            raise ValueError("product_evidence must be typed")
 
     def payload(self) -> dict[str, object]:
         return {
@@ -326,6 +593,7 @@ class AssistPromotionLiveEvidence:
             "duplicate_effect_count": self.duplicate_effect_count,
             "duplicate_publication_count": self.duplicate_publication_count,
             "false_completion_regression_count": self.false_completion_regression_count,
+            "product_evidence": self.product_evidence.payload(),
         }
 
     def canonical_sha256(self) -> str:
@@ -534,8 +802,34 @@ def _live_evidence_reason(
         or evidence.max_review_rounds != candidate.max_review_rounds
     ):
         return AssistPromotionReason.EVIDENCE_IDENTITY_DRIFT
-    if evidence.observation_count < 1 or evidence.joined_trace_count != evidence.observation_count:
-        return AssistPromotionReason.EVIDENCE_WINDOW_INCOMPLETE
+    product = evidence.product_evidence
+    if candidate.requested_mode is SupervisorMode.ASSIST:
+        if not isinstance(product, AssistPromotionReadinessEvidence):
+            return AssistPromotionReason.EVIDENCE_STAGE_DRIFT
+        if (
+            evidence.observation_count < SUPERVISOR_ASSIST_PROMOTION_MIN_PRODUCT_OBSERVATIONS
+            or evidence.joined_trace_count != evidence.observation_count
+            or product.call_rate_observation_count != evidence.observation_count
+            or product.baseline_observation_count < SUPERVISOR_ASSIST_PROMOTION_MIN_PRODUCT_OBSERVATIONS
+            or product.readiness_observation_count < SUPERVISOR_ASSIST_PROMOTION_MIN_PRODUCT_OBSERVATIONS
+            or product.readiness_observation_count > evidence.observation_count
+            or product.user_visible_observation_count != product.readiness_observation_count
+        ):
+            return AssistPromotionReason.EVIDENCE_WINDOW_INCOMPLETE
+    else:
+        if not isinstance(product, AssistPromotionOutcomeEvidence):
+            return AssistPromotionReason.EVIDENCE_STAGE_DRIFT
+        if (
+            evidence.observation_count < SUPERVISOR_ASSIST_PROMOTION_MIN_PRODUCT_OBSERVATIONS
+            or evidence.joined_trace_count != evidence.observation_count
+            or product.call_rate_observation_count != evidence.observation_count
+            or product.baseline_observation_count < SUPERVISOR_ASSIST_PROMOTION_MIN_PRODUCT_OBSERVATIONS
+            or product.promoted_observation_count < SUPERVISOR_ASSIST_PROMOTION_MIN_PRODUCT_OBSERVATIONS
+            or product.promoted_observation_count > evidence.observation_count
+            or product.latency_observation_count != product.promoted_observation_count
+            or product.user_visible_observation_count != product.promoted_observation_count
+        ):
+            return AssistPromotionReason.EVIDENCE_WINDOW_INCOMPLETE
     if not all(
         (
             evidence.representative_window_attested,
@@ -554,6 +848,33 @@ def _live_evidence_reason(
         )
     ):
         return AssistPromotionReason.EVIDENCE_INVARIANT_FAILED
+    if isinstance(product, AssistPromotionReadinessEvidence):
+        if product.baseline_failure_class_count < 1:
+            return AssistPromotionReason.PRODUCT_QUALITY_NOT_PROVEN
+        latency_observation_count = product.readiness_observation_count
+    else:
+        if product.quality_basis is AssistPromotionQualityBasis.COMPLETION_RATE_IMPROVEMENT:
+            measurable_improvement = (
+                product.promoted_complete_count * product.baseline_observation_count
+                > product.baseline_complete_count * product.promoted_observation_count
+            )
+            if not measurable_improvement:
+                return AssistPromotionReason.PRODUCT_QUALITY_NOT_PROVEN
+        elif product.baseline_failure_class_count < 1 or product.promoted_failure_class_count != 0:
+            return AssistPromotionReason.PRODUCT_QUALITY_NOT_PROVEN
+        latency_observation_count = product.latency_observation_count
+    if (
+        product.latency_max_ms > product.latency_budget_ms
+        or product.latency_total_ms > product.latency_budget_ms * latency_observation_count
+    ):
+        return AssistPromotionReason.PRODUCT_LATENCY_BUDGET_EXCEEDED
+    if (
+        product.unnecessary_supervisor_invocation_count * 10_000
+        > SUPERVISOR_ASSIST_MAX_UNNECESSARY_CALL_RATE_BPS * product.call_rate_observation_count
+    ):
+        return AssistPromotionReason.UNNECESSARY_SUPERVISOR_CALL_RATE_EXCEEDED
+    if product.user_visible_regression_count:
+        return AssistPromotionReason.USER_VISIBLE_REGRESSION_OBSERVED
     return None
 
 
@@ -684,13 +1005,20 @@ __all__ = [
     "AssistPromotionEvidenceAuthority",
     "AssistPromotionLiveEvidence",
     "AssistPromotionOperatorGate",
+    "AssistPromotionOutcomeEvidence",
+    "AssistPromotionQualityBasis",
+    "AssistPromotionReadinessEvidence",
     "AssistPromotionReadiness",
     "AssistPromotionReason",
     "SUPERVISOR_ASSIST_PROMOTION_GATE_ID",
     "SUPERVISOR_ASSIST_PROMOTION_MAX_REVIEW_ROUNDS",
     "SUPERVISOR_ASSIST_PROMOTION_MAX_STEPS",
+    "SUPERVISOR_ASSIST_PROMOTION_MIN_PRODUCT_OBSERVATIONS",
     "SUPERVISOR_ASSIST_PROMOTION_POLICY_SHA256",
     "SUPERVISOR_ASSIST_PROMOTION_SCHEMA",
+    "SUPERVISOR_ASSIST_OUTCOME_EVIDENCE_SCHEMA",
+    "SUPERVISOR_ASSIST_READINESS_EVIDENCE_SCHEMA",
+    "SUPERVISOR_ASSIST_MAX_UNNECESSARY_CALL_RATE_BPS",
     "SupervisorSchedulerAdmissionSnapshot",
     "admit_supervisor_assist_promotion",
 ]
