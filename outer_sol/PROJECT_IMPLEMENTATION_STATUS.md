@@ -11,13 +11,12 @@ the current production identity, completed packages, active work and next order.
   the provisional registry is empty, and the primary remains the sole
   final-publication, tool and effect authority. Every secondary miss preserves
   the exact primary-only path.
-- Deployed implementation head: `83ae001f7323b9868ba077f5989825de44f8847e`
-- Live: Friday `0.207.39` / `83ae001f7323b9868ba077f5989825de44f8847e`;
-  tree `138b8867a43a3aaa7fdb56edc665171c91356fb3d10ac12aad0448450a29afac`;
-  wheel `1923d01e03c4c64089bde5aea47934cededcc6715e3a2524e54326e9dcbbdba9`.
-- Immediate predecessor: Friday `0.207.38` /
-  `27bf8acaa68843c097e5dad512ea789304267cf2`. Schema-capable fallback:
-  Friday `0.207.37` / `c7feb84229c70d302d600582db575a76eeb0f536`.
+- Deployed implementation head: `a99f14ce429e7a5472a05ef54c6c639bf4f7edf4`
+- Live: Friday `0.207.40` / `a99f14ce429e7a5472a05ef54c6c639bf4f7edf4`;
+  tree `7436616a7cd967393d4a93176a4a095208da92856412b316cdf87b5da4753a09`;
+  wheel `a787a2d7d6f41e7f3a1c90cf5089ddd8e99f075d2225e326d2ab660ad6ed74f0`.
+- Immediate predecessor and schema-capable fallback: Friday `0.207.39` /
+  `83ae001f7323b9868ba077f5989825de44f8847e`.
 - Database schema: 43
 - Production state: immutable activation `clear`; backend and Telegram bridge
   active; trusted-CA HTTPS health `200`; SQLite integrity and FK checks clean.
@@ -34,8 +33,11 @@ the current production identity, completed packages, active work and next order.
   package installation, desktop, one-shot and public
   network execution remain disabled. The seven-file user-systemd surface is
   crash-resumable and exactly receipted; backend and bridge use separate 0700
-  runtime temporary directories. The activation terminal receipt is
-  `e0fa76b1da762a47091677bcdfc7834c05b136a3563788abda1bc0e65d0acebc`.
+  runtime temporary directories. Bounded PE/ELF static decompilation through
+  pinned Ghidra 12.1.3 and Temurin 21 is live; uploaded code is never executed.
+  Long decompilation emits sparse elapsed-time notifications without invented
+  percentages. The activation terminal receipt is
+  `e36ead2e3ee97d2e622f7eaccc56283e440daa958bd2f1bffdb75eaa8ee2c277`.
   The exact accepted secondary profile remains configured in bounded `assist`
   and is probed on
   demand; its exact post-cutover canary passed, while laptop absence preserves
@@ -85,7 +87,7 @@ accepted profile manifest hashes to
 `93ea5698b8b6a9bf8a7dc697ffe37d7353055aa16555188991747bba73d059e3` and
 its accepted physical-failure evidence hashes to
 `9dc72f80caed3320bd154cf1219a8bd6b1339142b690b00dd1cbe1fb05964006`.
-Live `0.207.39` admits exactly that profile, with no provisional entries:
+Live `0.207.40` admits exactly that profile, with no provisional entries:
 extraction, evidence-bound document mapping and complete current text/Office
 document reviews are in bounded `assist`. It grants no tools, effects,
 publication or knowledge-write authority; failure preserves the exact
@@ -164,16 +166,33 @@ course, with these repository-specific constraints:
 
 ## In progress
 
-1. Finish the bounded uploaded-binary decompilation path and exact deictic
-   artifact continuation without ever executing uploaded code.
-2. Select and finish the next complete ICP golden journey from the remaining
+1. Close the Engineer artifact loop: bounded compilation for explicitly
+   supported toolchains, immutable source lineage, deterministic source/binary
+   bundles and exact Telegram delivery without executing produced artifacts.
+2. Add bounded file export for Engineer network audit results while preserving
+   ordinary Friday file creation and archive delivery.
+3. Select and finish the next complete ICP golden journey from the remaining
    readiness gaps.
-3. Continue the ordered V12 refinement package without pre-baking the future
+4. Continue the ordered V12 refinement package without pre-baking the future
    Semantic Supervisor.
-4. Keep physical Android/Syncthing acceptance explicitly `UNVERIFIED`; the
+5. Keep physical Android/Syncthing acceptance explicitly `UNVERIFIED`; the
    companion plugin remains out of scope.
 
 ## Completed and deployed packages
+
+### Bounded static decompilation and truthful progress (`0.207.40`)
+
+- Exact owner-authorized PE/ELF attachments can be statically decompiled by the
+  pinned, fully attested Ghidra/JDK trees in a no-network sandbox; source
+  authority and `files.read` are rechecked before one atomic report publication.
+- Physical work is single-flight and deadline-bounded. Process groups are
+  killed and reaped on every post-spawn failure, and pre-spawn failures never
+  claim that work started. Telegram receives only sparse elapsed-time notices,
+  never synthetic readiness percentages.
+- A real 2.3 MiB PE completed in 54.85 seconds. The full release gate passed
+  20,377 non-UI and 31 UI tests; two wheels reproduced byte-for-byte. Immutable
+  activation completed `clear` with terminal receipt
+  `e36ead2e3ee97d2e622f7eaccc56283e440daa958bd2f1bffdb75eaa8ee2c277`.
 
 ### Engineer-owned network outcomes and visible synthesis (`0.207.39`)
 
