@@ -52,6 +52,22 @@ from friday.interaction_control_plane.compare_current_file_web_work_graph_store 
     retire_compare_current_file_web_work_graph_for_archived_conversation_in_transaction,
     settle_compare_current_file_web_step_in_transaction,
 )
+from friday.interaction_control_plane.runtime_trace import (
+    INTERACTION_TRACE_METADATA_KEY,
+    load_trace_namespace_key,
+)
+from friday.interaction_control_plane.turn_trace import (
+    CompletionDecision,
+    ContinuationKind,
+    FailureReason,
+    FailureStage,
+    OutcomeStatus,
+    PublicationStatus,
+    TraceIdentifierDomain,
+    TurnTrace,
+    WorkRelation,
+    derive_trace_identifier,
+)
 from friday.interaction_control_plane.work_item_schema import validate_work_item_schema
 from friday.orchestration.supervisor_contracts import (
     CapabilityEffectClass,
@@ -98,6 +114,34 @@ def _next_instant(graph: CompareCurrentFileWebWorkGraph) -> str:
     from datetime import datetime
 
     return (datetime.fromisoformat(graph.updated_at) + timedelta(seconds=1)).isoformat()
+
+
+def _stored_retirement_trace(
+    storage: FridayStorage,
+    assistant: dict[str, object],
+    graph: CompareCurrentFileWebWorkGraph,
+) -> TurnTrace:
+    metadata = json.loads(str(assistant["metadata_json"]))
+    trace = TurnTrace.parse(metadata[INTERACTION_TRACE_METADATA_KEY])
+    namespace_key = load_trace_namespace_key(storage)
+    assert trace.turn_digest == derive_trace_identifier(
+        domain=TraceIdentifierDomain.TURN,
+        raw_identifier=str(assistant["id"]),
+        namespace_key=namespace_key,
+    )
+    assert trace.conversation_digest == derive_trace_identifier(
+        domain=TraceIdentifierDomain.CONVERSATION,
+        raw_identifier=graph.conversation_id,
+        namespace_key=namespace_key,
+    )
+    assert trace.work_item_digest == derive_trace_identifier(
+        domain=TraceIdentifierDomain.WORK_ITEM,
+        raw_identifier=graph.id,
+        namespace_key=namespace_key,
+    )
+    assert trace.publication is PublicationStatus.ASSISTANT_COMMITTED
+    assert trace.authority_rechecked is False
+    return trace
 
 
 def _seed_graph(
@@ -726,6 +770,18 @@ def test_restart_rebind_never_treats_digests_as_replayable_bodies(settings, tmp_
         )
         assert receipt.reason is CompareCurrentFileWebGraphOutcomeReason.EVIDENCE_NOT_REPLAYABLE
         assert receipt.completion_claimed is receipt.model_spoke is receipt.evidence_cited is False
+        trace = _stored_retirement_trace(reopened, assistant, graph)
+        assert trace.work_relation is WorkRelation.CONTINUED
+        assert trace.continuation is ContinuationKind.RESUME
+        assert trace.completion is CompletionDecision.FAILED
+        assert trace.failure_stage is FailureStage.STATE_LOSS
+        assert trace.failure_reason is FailureReason.STALE_STATE
+        assert trace.state_restored is True
+        assert tuple(step.outcome for step in trace.steps) == (
+            OutcomeStatus.SUCCEEDED,
+            OutcomeStatus.SUCCEEDED,
+            OutcomeStatus.UNAVAILABLE,
+        )
         assert reopened.count_messages(graph.conversation_id, user_id=graph.user_id) == 2
     finally:
         reopened.close()
@@ -999,6 +1055,18 @@ def test_user_cancellation_is_exact_race_safe_rollback_atomic_and_not_replayable
     assert receipt.reason is CompareCurrentFileWebGraphOutcomeReason.CANCELLED
     assert receipt.model_spoke is receipt.evidence_cited is False
     assert receipt.final_authority_rechecked is receipt.completion_claimed is False
+    trace = _stored_retirement_trace(storage, assistant, cancelled)
+    assert trace.work_relation is WorkRelation.NEW
+    assert trace.continuation is ContinuationKind.NONE
+    assert trace.completion is CompletionDecision.INCOMPLETE
+    assert trace.failure_stage is FailureStage.NONE
+    assert trace.failure_reason is FailureReason.NONE
+    assert trace.state_restored is False
+    assert tuple(step.outcome for step in trace.steps) == (
+        OutcomeStatus.CANCELLED,
+        OutcomeStatus.NOT_STARTED,
+        OutcomeStatus.NOT_STARTED,
+    )
     with (
         pytest.raises(CompareCurrentFileWebGraphConflictError, match="revision/state"),
         storage.transaction() as conn,
@@ -1108,6 +1176,13 @@ def test_conversation_archive_retires_graph_with_one_atomic_code_owned_assistant
     assert receipt.reason is CompareCurrentFileWebGraphOutcomeReason.CONVERSATION_ARCHIVED
     assert receipt.model_spoke is receipt.evidence_cited is False
     assert receipt.final_authority_rechecked is receipt.completion_claimed is False
+    trace = _stored_retirement_trace(storage, assistant, graph)
+    assert trace.work_relation is WorkRelation.NEW
+    assert trace.completion is CompletionDecision.FAILED
+    assert trace.failure_stage is FailureStage.STATE_LOSS
+    assert trace.failure_reason is FailureReason.STATE_CONFLICT
+    assert trace.state_restored is False
+    assert all(step.outcome is OutcomeStatus.NOT_STARTED for step in trace.steps)
     with storage.transaction() as conn:
         retired = get_compare_current_file_web_work_graph_in_transaction(
             conn,
@@ -1249,6 +1324,13 @@ def test_expiry_worker_seam_retires_restart_orphan_once_without_execution(settin
         assert receipt.reason is CompareCurrentFileWebGraphOutcomeReason.EXPIRED
         assert receipt.model_spoke is receipt.evidence_cited is False
         assert receipt.final_authority_rechecked is receipt.completion_claimed is False
+        trace = _stored_retirement_trace(reopened, assistant, terminal)
+        assert trace.work_relation is WorkRelation.NEW
+        assert trace.completion is CompletionDecision.FAILED
+        assert trace.failure_stage is FailureStage.CAPABILITY
+        assert trace.failure_reason is FailureReason.TIMEOUT
+        assert trace.state_restored is False
+        assert all(step.outcome is OutcomeStatus.NOT_STARTED for step in trace.steps)
         with reopened.transaction() as conn:
             assert (
                 get_current_compare_current_file_web_work_graph_in_transaction(

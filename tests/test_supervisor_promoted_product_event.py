@@ -14,16 +14,16 @@ from friday.interaction_control_plane.compare_current_file_web_work_graph import
     CompareCurrentFileWebStepState,
     CompareCurrentFileWebWorkGraph,
     attach_compare_current_file_web_publication_receipt,
-    attach_compare_current_file_web_terminal_publication_receipt,
 )
 from friday.interaction_control_plane.compare_current_file_web_work_graph_store import (
+    cancel_compare_current_file_web_work_graph_in_transaction,
     claim_compare_current_file_web_step_in_transaction,
-    close_compare_current_file_web_work_graph_terminal_in_transaction,
     complete_compare_current_file_web_work_graph_in_transaction,
     create_compare_current_file_web_work_graph_in_transaction,
     settle_compare_current_file_web_step_in_transaction,
 )
 from friday.interaction_control_plane.runtime_trace import (
+    INTERACTION_TRACE_METADATA_KEY,
     attach_trace_to_metadata,
     build_committed_direct_trace,
     build_work_trace,
@@ -39,6 +39,7 @@ from friday.interaction_control_plane.turn_trace import (
     IntentClass,
     OutcomeStatus,
     PlaybookClass,
+    TurnTrace,
     WorkRelation,
 )
 from friday.orchestration.supervisor_assist_promotion import (
@@ -291,46 +292,34 @@ def _complete_graph(
 
 def _terminal_graph(storage, label: str) -> tuple[CompareCurrentFileWebWorkGraph, object, str]:
     graph = _seed_graph(storage, label)
-    graph = _settle(storage, graph, FILE_READ_STEP_ID, CompareCurrentFileWebStepState.UNAVAILABLE)
-    graph = _settle(storage, graph, WEB_READ_STEP_ID, CompareCurrentFileWebStepState.DENIED)
-    receipt = graph.terminal_publication_receipt(final_authority_rechecked=False)
     with storage.transaction() as conn:
-        assistant = store_message_in_transaction(
-            conn,
-            graph.conversation_id,
-            graph.user_id,
-            "assistant",
-            "PRIVATE TERMINAL ANSWER",
-            {},
-            graph.anchor_user_message_id,
-        )
-        trace = _work_trace(
-            conn,
-            graph=graph,
-            assistant_id=str(assistant["id"]),
-            work_item_identifier=graph.id,
-            completion=CompletionDecision.FAILED,
-            failure_stage=FailureStage.CAPABILITY,
-            failure_reason=FailureReason.AUTHORITY_DENIED,
-            authority_rechecked=False,
-        )
-        metadata = attach_compare_current_file_web_terminal_publication_receipt({}, receipt)
-        assert attach_trace_to_metadata(metadata, trace)  # type: ignore[arg-type]
-        conn.execute(
-            "UPDATE messages SET metadata_json=? WHERE id=?",
-            (json.dumps(metadata, sort_keys=True), str(assistant["id"])),
-        )
-        terminal = close_compare_current_file_web_work_graph_terminal_in_transaction(
+        graph = claim_compare_current_file_web_step_in_transaction(
             conn,
             graph_id=graph.id,
             user_id=graph.user_id,
             conversation_id=graph.conversation_id,
             expected_revision=graph.revision,
-            publication_assistant_message_id=str(assistant["id"]),
-            receipt=receipt,
+            step_id=FILE_READ_STEP_ID,
             now=_next_instant(graph),
         )
-    return terminal, trace, receipt.canonical_sha256()
+    with storage.transaction() as conn:
+        terminal = cancel_compare_current_file_web_work_graph_in_transaction(
+            conn,
+            graph_id=graph.id,
+            user_id=graph.user_id,
+            conversation_id=graph.conversation_id,
+            expected_revision=graph.revision,
+            now=_next_instant(graph),
+        )
+    assistant = storage.get_message(
+        str(terminal.publication_assistant_message_id),
+        terminal.user_id,
+    )
+    assert assistant is not None
+    metadata = json.loads(str(assistant["metadata_json"]))
+    trace = TurnTrace.parse(metadata[INTERACTION_TRACE_METADATA_KEY])
+    assert terminal.terminal_publication_receipt_sha256 is not None
+    return terminal, trace, terminal.terminal_publication_receipt_sha256
 
 
 def _event_payload(storage) -> dict[str, object]:

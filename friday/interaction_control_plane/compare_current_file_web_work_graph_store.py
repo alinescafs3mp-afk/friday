@@ -27,6 +27,8 @@ from friday.interaction_control_plane.compare_current_file_web_work_graph import
     COMPARE_CURRENT_FILE_WEB_PUBLICATION_OWNER,
     COMPARE_CURRENT_FILE_WEB_RESTART_UNAVAILABLE_RESPONSE,
     CompareCurrentFileWebGraphError,
+    CompareCurrentFileWebGraphOutcomeReason,
+    CompareCurrentFileWebGraphOutcomeStatus,
     CompareCurrentFileWebGraphState,
     CompareCurrentFileWebGraphStep,
     CompareCurrentFileWebGraphTransition,
@@ -38,6 +40,24 @@ from friday.interaction_control_plane.compare_current_file_web_work_graph import
     attach_compare_current_file_web_terminal_publication_receipt,
     load_compare_current_file_web_publication_receipt,
     load_compare_current_file_web_terminal_publication_receipt,
+)
+from friday.interaction_control_plane.runtime_trace import (
+    attach_trace_to_metadata,
+    build_work_trace,
+    load_trace_namespace_key,
+)
+from friday.interaction_control_plane.turn_trace import (
+    CapabilityClass,
+    CompletionDecision,
+    ContinuationKind,
+    CountAccounting,
+    FailureReason,
+    FailureStage,
+    IntentClass,
+    OutcomeStatus,
+    PlaybookClass,
+    PublicationStatus,
+    WorkRelation,
 )
 from friday.interaction_control_plane.work_item_contract import canonical_work_item_instant
 
@@ -1005,6 +1025,103 @@ def close_compare_current_file_web_work_graph_terminal_in_transaction(
     return terminal
 
 
+_TRACE_CAPABILITY_BY_STEP_KIND = {
+    CompareCurrentFileWebStepKind.FILE_READ: CapabilityClass.DOCUMENT_RETRIEVAL,
+    CompareCurrentFileWebStepKind.WEB_READ: CapabilityClass.WEB_RESEARCH,
+    CompareCurrentFileWebStepKind.PRIMARY_SYNTHESIS: CapabilityClass.MODEL_SYNTHESIS,
+}
+_TRACE_OUTCOME_BY_STEP_STATE = {
+    CompareCurrentFileWebStepState.PENDING: OutcomeStatus.NOT_STARTED,
+    CompareCurrentFileWebStepState.RUNNING: OutcomeStatus.UNAVAILABLE,
+    CompareCurrentFileWebStepState.COMPLETE: OutcomeStatus.SUCCEEDED,
+    CompareCurrentFileWebStepState.PARTIAL: OutcomeStatus.PARTIAL,
+    CompareCurrentFileWebStepState.EMPTY: OutcomeStatus.EMPTY,
+    CompareCurrentFileWebStepState.UNAVAILABLE: OutcomeStatus.UNAVAILABLE,
+    CompareCurrentFileWebStepState.DENIED: OutcomeStatus.DENIED,
+    CompareCurrentFileWebStepState.FAILED: OutcomeStatus.FAILED,
+}
+
+
+def _retirement_trace_disposition(
+    receipt: CompareCurrentFileWebTerminalPublicationReceipt,
+) -> tuple[CompletionDecision, FailureStage, FailureReason]:
+    if receipt.reason is CompareCurrentFileWebGraphOutcomeReason.CANCELLED:
+        return CompletionDecision.INCOMPLETE, FailureStage.NONE, FailureReason.NONE
+    if receipt.status is CompareCurrentFileWebGraphOutcomeStatus.PARTIAL:
+        return (
+            CompletionDecision.PARTIAL,
+            FailureStage.COMPLETION,
+            FailureReason.COMPLETION_UNSATISFIED,
+        )
+    if receipt.reason is CompareCurrentFileWebGraphOutcomeReason.AUTHORITY_DENIED:
+        return CompletionDecision.FAILED, FailureStage.CAPABILITY, FailureReason.AUTHORITY_DENIED
+    if receipt.reason is CompareCurrentFileWebGraphOutcomeReason.CAPABILITY_UNAVAILABLE:
+        return CompletionDecision.FAILED, FailureStage.CAPABILITY, FailureReason.SOURCE_UNAVAILABLE
+    if receipt.reason is CompareCurrentFileWebGraphOutcomeReason.EVIDENCE_NOT_REPLAYABLE:
+        return CompletionDecision.FAILED, FailureStage.STATE_LOSS, FailureReason.STALE_STATE
+    if receipt.reason is CompareCurrentFileWebGraphOutcomeReason.CONVERSATION_ARCHIVED:
+        return CompletionDecision.FAILED, FailureStage.STATE_LOSS, FailureReason.STATE_CONFLICT
+    if receipt.reason is CompareCurrentFileWebGraphOutcomeReason.EXPIRED:
+        return CompletionDecision.FAILED, FailureStage.CAPABILITY, FailureReason.TIMEOUT
+    if receipt.reason is CompareCurrentFileWebGraphOutcomeReason.NO_COMPARABLE_EVIDENCE:
+        return (
+            CompletionDecision.INCOMPLETE,
+            FailureStage.CAPABILITY,
+            FailureReason.COMPLETION_UNSATISFIED,
+        )
+    return CompletionDecision.FAILED, FailureStage.CAPABILITY, FailureReason.UNKNOWN
+
+
+def _build_deterministic_retirement_trace(
+    conn: sqlite3.Connection,
+    *,
+    graph: CompareCurrentFileWebWorkGraph,
+    assistant_message_id: str,
+    receipt: CompareCurrentFileWebTerminalPublicationReceipt,
+    evidence_not_replayable: bool,
+    cancelled: bool,
+    now: str,
+):
+    completion, failure_stage, failure_reason = _retirement_trace_disposition(receipt)
+    outcomes = tuple(
+        (
+            _TRACE_CAPABILITY_BY_STEP_KIND[step.kind],
+            OutcomeStatus.CANCELLED
+            if cancelled and step.state is CompareCurrentFileWebStepState.RUNNING
+            else _TRACE_OUTCOME_BY_STEP_STATE[step.state],
+        )
+        for step in graph.steps
+    )
+    settled_reads = sum(step.settled for step in graph.steps[:2])
+    settled_synthesis = int(graph.steps[2].settled)
+    elapsed = datetime.fromisoformat(now) - datetime.fromisoformat(graph.created_at)
+    return build_work_trace(
+        namespace_key=load_trace_namespace_key(conn),
+        turn_identifier=assistant_message_id,
+        conversation_identifier=graph.conversation_id,
+        work_item_identifier=graph.id,
+        work_relation=(WorkRelation.CONTINUED if evidence_not_replayable else WorkRelation.NEW),
+        intent=IntentClass.MIXED,
+        playbook=PlaybookClass.COMPARE_INTERNAL_AND_EXTERNAL_SOURCES,
+        capability_outcomes=outcomes,
+        capability_attempts=tuple(step.attempt for step in graph.steps),
+        continuation=(ContinuationKind.RESUME if evidence_not_replayable else ContinuationKind.NONE),
+        completion=completion,
+        failure_stage=failure_stage,
+        failure_reason=failure_reason,
+        ambiguity_present=False,
+        partial_coverage=receipt.status is CompareCurrentFileWebGraphOutcomeStatus.PARTIAL,
+        state_restored=evidence_not_replayable,
+        latency_ms=min(86_400_000, max(0, int(elapsed.total_seconds() * 1_000))),
+        model_calls=settled_synthesis,
+        model_call_accounting=CountAccounting.LOWER_BOUND,
+        capability_calls=settled_reads,
+        capability_call_accounting=CountAccounting.LOWER_BOUND,
+        authority_rechecked=receipt.final_authority_rechecked,
+        publication=PublicationStatus.ASSISTANT_COMMITTED,
+    )
+
+
 def _publish_deterministic_retirement(
     conn: sqlite3.Connection,
     *,
@@ -1038,13 +1155,40 @@ def _publish_deterministic_retirement(
             metadata,
             graph.anchor_user_message_id,
         )
+        assistant_id = str(assistant.get("id") or "")
+        trace = _build_deterministic_retirement_trace(
+            conn,
+            graph=graph,
+            assistant_message_id=assistant_id,
+            receipt=receipt,
+            evidence_not_replayable=evidence_not_replayable,
+            cancelled=cancelled,
+            now=now,
+        )
+        if not attach_trace_to_metadata(metadata, trace):
+            raise CompareCurrentFileWebGraphError(
+                "deterministic retirement TurnTrace exceeds assistant metadata"
+            )
+        updated = conn.execute(
+            "UPDATE messages SET metadata_json=? WHERE id=? AND user_id=? AND conversation_id=?",
+            (
+                json.dumps(metadata, ensure_ascii=False, sort_keys=True),
+                assistant_id,
+                graph.user_id,
+                graph.conversation_id,
+            ),
+        )
+        if updated.rowcount != 1:
+            raise CompareCurrentFileWebGraphConflictError(
+                "deterministic retirement assistant disappeared before closure"
+            )
         terminal = close_compare_current_file_web_work_graph_terminal_in_transaction(
             conn,
             graph_id=graph.id,
             user_id=graph.user_id,
             conversation_id=graph.conversation_id,
             expected_revision=graph.revision,
-            publication_assistant_message_id=str(assistant["id"]),
+            publication_assistant_message_id=assistant_id,
             receipt=receipt,
             evidence_not_replayable=evidence_not_replayable,
             conversation_archived=conversation_archived,
