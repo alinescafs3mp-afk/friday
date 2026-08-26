@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import inspect
 import json
 import time
 from dataclasses import replace
@@ -10,6 +11,7 @@ from typing import Any
 
 import pytest
 
+from friday.agent_runtime import AgentRuntime
 from friday.file_evidence import stamp_current_turn_file_reference
 from friday.model_profiles import (
     ModelProfileLease,
@@ -501,6 +503,37 @@ def test_builder_returns_the_same_legacy_object_without_a_planner(settings) -> N
     )
 
 
+def test_router_chat_surface_matches_the_legacy_runtime() -> None:
+    """A canary router must remain a transparent wrapper for every API carrier."""
+
+    legacy = inspect.signature(AgentRuntime.chat).parameters
+    router = inspect.signature(OrchestrationRouter.chat).parameters
+
+    assert tuple(router) == tuple(legacy)
+    for name in legacy:
+        assert router[name].kind is legacy[name].kind
+        assert router[name].default == legacy[name].default
+
+
+@pytest.mark.asyncio
+async def test_router_forwards_authenticated_telegram_identity_to_legacy() -> None:
+    legacy = _Runtime()
+    router = OrchestrationRouter(legacy, _Planner(), mode="canary")
+    kwargs = _chat_kwargs()
+
+    await router.chat(
+        "owner",
+        "обычный Telegram-запрос",
+        **kwargs,
+        telegram_update_id="102500461",
+    )
+
+    assert len(legacy.calls) == 1
+    assert legacy.calls[0][:2] == ("owner", "обычный Telegram-запрос")
+    assert legacy.calls[0][2]["telegram_update_id"] == "102500461"
+    assert legacy.calls[0][2]["turn_deadline"] == kwargs["turn_deadline"]
+
+
 def test_server_wiring_keeps_legacy_exact_and_shadow_handlerless(settings) -> None:
     from fastapi.testclient import TestClient
 
@@ -548,14 +581,13 @@ def test_server_registers_file_read_only_after_live_attestation(
         "create_attested_v12_model_runtime",
         lambda _llm: runtime,
     )
-    app = server_module.create_app(
-        replace(
-            settings,
-            router_mode="canary",
-            router_canary_routes=("file_read",),
-            router_canary_user_ids=("owner",),
-        )
+    tuned = replace(
+        settings,
+        router_mode="canary",
+        router_canary_routes=("file_read",),
+        router_canary_user_ids=("owner",),
     )
+    app = server_module.create_app(tuned)
 
     with TestClient(app) as client:
         assert type(app.state.agent) is OrchestrationRouter
@@ -566,6 +598,50 @@ def test_server_registers_file_read_only_after_live_attestation(
         assert health["installed_mode"] == "canary"
         assert health["registered_routes"] == ["file_read"]
         assert health["model_gate"]["status"] == "canary_ready"
+
+        async def no_network_research(query: str, **_kwargs: Any) -> dict[str, Any]:
+            return {
+                "query": query,
+                "sources": [],
+                "requested_sources": 0,
+                "completed_sources": 0,
+                "failed_sources": 0,
+                "timed_out_sources": 0,
+                "search_timed_out": False,
+            }
+
+        monkeypatch.setattr(app.state.web_surfer, "research", no_network_research)
+        from tests.test_api_vertical_slice import _bridge_request
+
+        response = _bridge_request(
+            client,
+            tuned,
+            "/api/chat",
+            {
+                "message": "Покажи новости за 26 число",
+                "force_knowledge": False,
+                "source_ref": "telegram-update:102500461",
+                "telegram_message_id": 461,
+                "telegram_user": {"id": 5001, "first_name": "Owner"},
+            },
+            user="5001",
+            chat="5001",
+        )
+
+        assert response.status_code == 200, response.text
+        conversation_id = str(response.json()["conversation_id"])
+        telegram_user_id = next(
+            str(item["id"])
+            for item in app.state.storage.list_users(limit=50)
+            if str(item.get("external_id") or "") == "5001"
+        )
+        messages = app.state.storage.get_conversation_messages(
+            conversation_id,
+            user_id=telegram_user_id,
+            limit=10,
+        )
+        user_message = next(item for item in messages if item["role"] == "user")
+        assert json.loads(user_message["metadata_json"])["telegram_update_id"] == "102500461"
 
 
 def test_server_wires_bounded_dynamic_model_gate_status_to_organs(

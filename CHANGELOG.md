@@ -1,3 +1,15 @@
+## 0.207.52 — 2026-08-27
+
+### Telegram canary routing hotfix
+
+- Canary orchestration now preserves the authenticated Telegram update
+  identity when it falls back to the legacy runtime. Previously every normal
+  Telegram chat request failed before model or tool execution while a V12
+  canary router was installed.
+- A structural signature-parity guard and a signed `/api/chat` regression now
+  prevent transport carriers from drifting between `AgentRuntime` and its
+  orchestration wrapper.
+
 ## 0.207.51 — 2026-08-26
 
 ### V12 document-passage projection contract

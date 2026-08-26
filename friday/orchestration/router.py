@@ -98,6 +98,7 @@ class ChatRuntime(Protocol):
         reply_assistant_reference: bool = False,
         reply_assistant_message_id: str | None = None,
         turn_policy: TurnPolicyDecision | None = None,
+        telegram_update_id: str | None = None,
         turn_deadline: float | None = None,
         _pending_durable_admission: PendingDurableTurnAdmission | None = None,
     ) -> dict[str, Any]: ...
@@ -728,6 +729,7 @@ class OrchestrationRouter:
         reply_assistant_reference: bool = False,
         reply_assistant_message_id: str | None = None,
         turn_policy: TurnPolicyDecision | None = None,
+        telegram_update_id: str | None = None,
         turn_deadline: float | None = None,
         _pending_durable_admission: PendingDurableTurnAdmission | None = None,
     ) -> dict[str, Any]:
@@ -747,6 +749,7 @@ class OrchestrationRouter:
             "quoted_attachment_reference": quoted_attachment_reference,
             "reply_assistant_reference": reply_assistant_reference,
             "reply_assistant_message_id": reply_assistant_message_id,
+            "telegram_update_id": telegram_update_id,
             "turn_deadline": turn_deadline,
         }
         carried_durable_admission: PendingDurableTurnAdmission | None = None
