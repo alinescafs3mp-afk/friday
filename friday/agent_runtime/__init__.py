@@ -6484,13 +6484,26 @@ def claims_a_deed_it_cannot_do(
 
 
 _OUTSIDE_CURRENT_COMPLETION = re.compile(
-    r"^\W*(?:готово|сделано|выполнено|только\s+что)\b",
+    r"^\W*(?:готово|сделано|выполнено|только\s+что)\b\s*[,;:—–-]+\s*\S",
     re.IGNORECASE,
 )
 _ENGLISH_CURRENT_OUTSIDE_DEED = re.compile(
     r"^\W*(?:i|we)\s+(?:have\s+|already\s+|just\s+)*"
-    r"(?:ordered|called|booked|paid|bought|reserved|hired|cancelled|canceled|"
-    r"rescheduled|refunded|submitted|printed|sent|delivered|restarted)\b",
+    r"(?:"
+    r"ordered\b[^.!?;\n]{0,48}\b(?:taxi|cab|courier|food|meal|item|product)|"
+    r"called\b[^.!?;\n]{0,48}\b(?:taxi|cab|courier|doctor|police|ambulance)|"
+    r"(?:booked|reserved)\b[^.!?;\n]{0,48}\b(?:ticket|table|room|hotel|appointment|flight)|"
+    r"(?:paid|refunded)\b[^.!?;\n]{0,48}\b(?:bill|invoice|order|payment|money)|"
+    r"bought\b[^.!?;\n]{0,48}\b(?:ticket|item|product|goods)|"
+    r"hired\b[^.!?;\n]{0,48}\b(?:courier|driver|doctor|contractor)|"
+    r"(?:cancelled|canceled|rescheduled)\b[^.!?;\n]{0,48}"
+    r"\b(?:order|booking|appointment|meeting|reservation)|"
+    r"printed\b[^.!?;\n]{0,48}\b(?:on\s+(?:a\s+)?printer|paper\s+cop(?:y|ies))|"
+    r"restarted\b[^.!?;\n]{0,48}\b(?:device|server|computer|laptop|router|printer)|"
+    r"submitted\b[^.!?;\n]{0,48}\b(?:application|request|claim|form)\b|"
+    r"(?:sent|delivered)\b[^.!?;\n]{0,64}"
+    r"\b(?:e-?mail|package|parcel|shipment|external\s+address|recipient)\b"
+    r")",
     re.IGNORECASE,
 )
 _OUTSIDE_EFFECT_REQUEST = re.compile(
@@ -6500,6 +6513,36 @@ _OUTSIDE_EFFECT_REQUEST = re.compile(
     r"столик|принтер|телефон|устройств)\w*\b",
     re.IGNORECASE,
 )
+_OUTSIDE_INFORMATIONAL_EFFECT_REQUEST = re.compile(
+    r"^\W*(?:"
+    r"(?:как|каким\s+образом|почему|когда|что\s+(?:будет|произойд[её]т)\s*,?\s*если|"
+    r"можно\s+ли)\b|"
+    r"(?:объясн|расскаж|покаж|опиш|подскаж)\w*\b[^.!?;\n]{0,96}\b"
+    r"(?:как|способ|порядок|процесс|инструкц)\w*\b|"
+    r"(?:инструкц|способ|порядок|процесс)\w*\b[^.!?;\n]{0,64}"
+    r")",
+    re.IGNORECASE,
+)
+_OUTSIDE_EFFECT_CLAUSE_BOUNDARY = re.compile(
+    r"\s+и\s+(?=(?:закаж|вызов|оплат|купи|заброниру|организу|достав|"
+    r"распечат|позвон|перезапуст|отправ)\w*\b)",
+    re.IGNORECASE,
+)
+
+
+def _requests_current_outside_effect(message: str) -> bool:
+    """Separate an actual effect request from a how-to question about it."""
+
+    candidate = _classification_text(message)
+    for clause in re.split(r"[.!?;\n]+", candidate):
+        subclauses = _OUTSIDE_EFFECT_CLAUSE_BOUNDARY.split(clause)
+        for subclause in subclauses:
+            if not _OUTSIDE_EFFECT_REQUEST.search(subclause):
+                continue
+            if _OUTSIDE_INFORMATIONAL_EFFECT_REQUEST.search(subclause):
+                continue
+            return True
+    return False
 
 
 def _claims_an_explicit_current_outside_deed(
@@ -8036,7 +8079,9 @@ _SUPPORTED_FILE_BARE_HANDOFF = re.compile(
     rf"\b(?:держи(?:те)?|вот)\s+"
     r"(?:(?:этот|тот|готовый|готовое|ваш|ваша|нужный|нужное|"
     r"запрошенный|запрошенное)\s+){0,2}"
-    rf"{_SUPPORTED_FILE_OBJECT}\b|"
+    rf"{_SUPPORTED_FILE_OBJECT}\b"
+    rf"(?:\s*(?::|—|–|-)?\s*{_SUPPORTED_READY_FILENAME_DESCRIPTOR})?"
+    r"(?=\s*(?:[.!?]|$))|"
     rf"\b{_SUPPORTED_FILE_OBJECT}\b[^.!?\n]{{0,64}}"
     r"\b(?:во\s+вложени\w*|(?:уже|теперь|наход\w*|леж\w*)\s+в\s+чат\w*)\b",
     re.IGNORECASE,
@@ -9156,16 +9201,54 @@ _ENGLISH_SUPPORTED_DEED_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
         ),
     ),
 )
-_ENGLISH_EXPLICIT_SUPPORTED_DEED = re.compile(
-    r"^\W*(?:(?:i|we)\s+(?:have\s+|already\s+|just\s+)*"
+_ENGLISH_SUPPORTED_OBJECT = (
+    r"(?:files?|documents?|reports?|attachments?|pdf|docx?|xlsx?|images?|"
+    r"reminders?|notifications?|(?:voice|audio)(?:\s+(?:message|note|reply))?|"
+    r"notes?|markdown|vault|[A-Za-z0-9@+(),\[\]-]+(?:\.[A-Za-z0-9@+(),\[\]-]+)+)"
+)
+_ENGLISH_SUPPORTED_ACTION = (
     r"(?:created|made|generated|saved|exported|prepared|attached|sent|uploaded|"
-    r"delivered|set|scheduled|recorded|wrote|added|updated|changed)|"
-    r"here\s+(?:is|are)|here['’]s)\b",
+    r"delivered|set|scheduled|recorded|wrote|added|updated|changed)"
+)
+_ENGLISH_EXPLICIT_SUPPORTED_DEED = re.compile(
+    rf"^\W*(?:(?:i|we)\s+(?:have\s+|already\s+|just\s+)*"
+    rf"{_ENGLISH_SUPPORTED_ACTION}(?:\s+and\s+{_ENGLISH_SUPPORTED_ACTION})?\s+"
+    rf"(?:(?:a|an|the|this|that|your|requested|ready|new|updated|final)\s+){{0,3}}"
+    rf"(?:[A-Za-z][A-Za-z-]{{1,32}}\s+){{0,2}}{_ENGLISH_SUPPORTED_OBJECT}\b|"
+    rf"(?:here\s+(?:is|are)|here['’]s)\s+"
+    rf"(?:(?:a|an|the|this|that|your|requested|ready|new|updated|final)\s+){{0,3}}"
+    rf"(?:[A-Za-z][A-Za-z-]{{1,32}}\s+){{0,2}}{_ENGLISH_SUPPORTED_OBJECT}\b)",
+    re.IGNORECASE,
+)
+_ENGLISH_SUPPORTED_DEED_NONACTUAL = re.compile(
+    r"^\W*(?:(?:here\s+(?:is|are)|here['’]s)\s+)?"
+    r"(?:why|how|when|what|an?\s+(?:analysis|summary|review|explanation|description))\b|"
+    r"\b(?:not|never)\b[^.!?;\n]{0,48}\b"
+    r"(?:created|made|generated|saved|exported|prepared|attached|sent|uploaded|"
+    r"delivered|set|scheduled|recorded|written|added|updated|changed|ready)\b|"
+    r"\b(?:will|would|could|should|may|might|must|needs?\s+to)\s+(?:be\s+)?"
+    r"(?:created|made|generated|saved|exported|prepared|attached|sent|uploaded|"
+    r"delivered|set|scheduled|recorded|written|added|updated|changed|ready)\b|"
+    r"\b(?:created|made|generated|saved|exported|prepared|attached|sent|uploaded|"
+    r"delivered|set|scheduled|recorded|written|added|updated|changed)\b"
+    r"[^.!?;\n]{0,48}\bby\s+(?:the\s+)?(?:user|customer|author|client|service|application)\b",
     re.IGNORECASE,
 )
 _OBSIDIAN_EXPLICIT_SUPPORTED_DEED = re.compile(
     r"(?:\b(?:я|мы)\s+(?:создал|сохранил|записал|добавил|дописал|обновил|изменил)\w*\b|"
-    r"^\W*(?:готово|сделано|выполнено|вот|держи(?:те)?)\b)",
+    r"^\W*(?:готово|сделано|выполнено)\b[^.!?\n]{0,96}"
+    r"\b(?:obsidian|vault|заметк)\w*\b|"
+    r"^\W*(?:вот|держи(?:те)?)\s+(?:готов\w+\s+)?(?:заметк|markdown)\w*\b)",
+    re.IGNORECASE,
+)
+_OBSIDIAN_BARE_PASSIVE_COMPLETION = re.compile(
+    r"^\W*(?:(?:markdown[- ]?)?заметк\w*\s+"
+    r"(?:создан|сохран[её]н|записан|добавлен|обновл[её]н|измен[её]н)(?:а|о|ы)?\s+"
+    r"(?:в|внутри)\s+(?:obsidian|vault)\w*|"
+    r"(?:в|внутри)\s+(?:obsidian|vault)\w*\s+"
+    r"(?:markdown[- ]?)?заметк\w*\s+"
+    r"(?:создан|сохран[её]н|записан|добавлен|обновл[её]н|измен[её]н)(?:а|о|ы)?)"
+    r"\s*[.!]?\s*$",
     re.IGNORECASE,
 )
 _SUPPORTED_FILE_EXPLICIT_MODEL_AGENT = re.compile(
@@ -9173,10 +9256,24 @@ _SUPPORTED_FILE_EXPLICIT_MODEL_AGENT = re.compile(
     r"искусственн\w+\s+интеллект\w*)\b",
     re.IGNORECASE,
 )
+_SUPPORTED_FILE_NAMED_EXTERNAL_MODEL_AGENT = re.compile(
+    r"\bмодел\w*\s+(?:Stable\s+Diffusion|DALL-E|Midjourney|Flux|Imagen|"
+    r"GPT(?:-\w+)?|Claude|Gemini|Llama)\b",
+    re.IGNORECASE,
+)
 _SUPPORTED_FILE_CURRENT_CARRIER = re.compile(
     r"\b(?:прикрепл[её]н|приложен|отправлен|выгружен|загружен)\w*\b|"
     r"\b(?:наход|леж)\w*\s+(?:в\s+(?:облак|хранилищ|чат)\w*|по\s+ссылк\w*)|"
     r"\b(?:вот\s+ссылк\w*|ссылк\w*\s+(?:здесь|тут|ниже))\b",
+    re.IGNORECASE,
+)
+_SUPPORTED_FILE_DIRECT_ACTIVE_COMPLETION = re.compile(
+    rf"^\W*(?:я\s+)?{_SUPPORTED_FILE_ACTIVE_ACTION}"
+    rf"(?:\s+и\s+{_SUPPORTED_FILE_ACTIVE_ACTION})?"
+    r"(?:\s+(?:уже|успешно|только\s+что))?"
+    r"(?:\s+(?:для\s+(?:тебя|вас)|по\s+(?:твоему|вашему)\s+запросу)){0,2}\s+"
+    r"(?:[а-яё][а-яё-]{1,38}(?:ый|ий|ой|ая|яя|ое|ее|ые|ие|ую|юю|ого|его|ых|их)\s+){0,2}"
+    rf"(?:{_SUPPORTED_FILE_OBJECT}\b|{_SUPPORTED_READY_FILENAME_DESCRIPTOR}\b)",
     re.IGNORECASE,
 )
 
@@ -9203,29 +9300,79 @@ def _supported_deed_families(answer: str) -> frozenset[str]:
     return frozenset(families)
 
 
-def _explicit_supported_file_claim(answer: str) -> bool:
-    has_file_completion = bool(
-        _SUPPORTED_FILE_COMPLETION.search(answer) or _PASSIVE_ATTACHMENT_READY_DESCRIPTION.search(answer)
-    )
-    return bool(
-        _SUPPORTED_FILE_BARE_HANDOFF.search(answer)
-        or (
-            has_file_completion
-            and (
-                _READ_ONLY_ATTACHMENT_CARRIER_CLAIM.search(answer)
-                or _READ_ONLY_ATTACHMENT_UNSAFE_DESCRIPTION_SUFFIX.search(answer)
-                or _PASSIVE_INPUT_CURRENT_DELIVERY.search(answer)
-                or _PASSIVE_INPUT_CURRENT_AVAILABILITY.search(answer)
-                or _SUPPORTED_FILE_EXPLICIT_MODEL_AGENT.search(answer)
-                or _SUPPORTED_FILE_CURRENT_CARRIER.search(answer)
-            )
+def _explicit_supported_file_claim(
+    answer: str,
+    *,
+    passive_source_state: bool = False,
+    passive_input_file_state_evidence: Sequence[str] = (),
+    read_only_attachment_review: bool = False,
+    read_only_attachment_descriptors: Sequence[str] = (),
+) -> bool:
+    """Recognise only a current self-action or an actual carrier hand-off.
+
+    The underlying completion patterns are intentionally recall-oriented.  Do
+    not reconnect an active verb in one clause to a file noun in another, and
+    do not turn a proved input-carrier description back into an output deed.
+    """
+
+    for clause in _supported_deed_claim_clauses(answer):
+        if clause.rstrip().endswith("?"):
+            continue
+        if _SUPPORTED_DEED_NONACTUAL.search(clause):
+            continue
+        if _SUPPORTED_DEED_NEGATED.search(clause) or _SUPPORTED_DEED_ACTIVE_NEGATED.search(clause):
+            continue
+        if read_only_attachment_review and _read_only_attachment_source_file_description(
+            clause,
+            read_only_attachment_descriptors,
+        ):
+            continue
+        if passive_source_state and _passive_input_file_state_is_evidenced(
+            clause,
+            passive_input_file_state_evidence,
+        ):
+            continue
+        if _SUPPORTED_FILE_BARE_HANDOFF.search(clause):
+            return True
+        has_file_completion = bool(
+            _SUPPORTED_FILE_COMPLETION.search(clause)
+            or _PASSIVE_ATTACHMENT_READY_DESCRIPTION.search(clause)
         )
-        or (
-            _SUPPORTED_FILE_ACTIVE_COMPLETION.search(answer)
-            and (
-                re.search(rf"\b{_SUPPORTED_FILE_OBJECT}\b", answer, re.IGNORECASE)
-                or _attachment_filename_mentions(answer)
+        unsafe_description = _READ_ONLY_ATTACHMENT_UNSAFE_DESCRIPTION_SUFFIX.search(clause)
+        named_external_model = _SUPPORTED_FILE_NAMED_EXTERNAL_MODEL_AGENT.search(clause)
+        unsafe_is_named_external_model = bool(
+            unsafe_description is not None
+            and named_external_model is not None
+            and named_external_model.start() <= unsafe_description.start()
+            and unsafe_description.end() <= named_external_model.end()
+        )
+        if has_file_completion and (
+            _READ_ONLY_ATTACHMENT_CARRIER_CLAIM.search(clause)
+            or (unsafe_description is not None and not unsafe_is_named_external_model)
+            or _PASSIVE_INPUT_CURRENT_DELIVERY.search(clause)
+            or _PASSIVE_INPUT_CURRENT_AVAILABILITY.search(clause)
+            or (
+                _SUPPORTED_FILE_EXPLICIT_MODEL_AGENT.search(clause)
+                and named_external_model is None
             )
+            or _SUPPORTED_FILE_CURRENT_CARRIER.search(clause)
+        ):
+            return True
+        if _SUPPORTED_FILE_DIRECT_ACTIVE_COMPLETION.search(clause):
+            return True
+    whole_completion = bool(
+        _SUPPORTED_FILE_COMPLETION.search(answer)
+        or _PASSIVE_ATTACHMENT_READY_DESCRIPTION.search(answer)
+    )
+    whole_unsafe = _READ_ONLY_ATTACHMENT_UNSAFE_DESCRIPTION_SUFFIX.search(answer)
+    whole_named_external_model = _SUPPORTED_FILE_NAMED_EXTERNAL_MODEL_AGENT.search(answer)
+    return bool(
+        whole_completion
+        and whole_unsafe is not None
+        and not (
+            whole_named_external_model is not None
+            and whole_named_external_model.start() <= whole_unsafe.start()
+            and whole_unsafe.end() <= whole_named_external_model.end()
         )
     )
 
@@ -9240,6 +9387,19 @@ def _supported_file_claim_has_receipt(answer: str, descriptors: Sequence[str]) -
         for filename in _attachment_filename_mentions(str(descriptor or ""))
     }
     return not claimed or claimed.issubset(evidenced)
+
+
+def _actual_english_supported_deed_clauses(
+    answer: str,
+    pattern: re.Pattern[str],
+) -> tuple[str, ...]:
+    return tuple(
+        clause
+        for clause in _model_authored_clauses(answer)
+        if pattern.search(clause)
+        and not clause.rstrip().endswith("?")
+        and _ENGLISH_SUPPORTED_DEED_NONACTUAL.search(clause) is None
+    )
 
 
 def _runtime_unconfirmed_supported_deed(
@@ -9285,14 +9445,24 @@ def _runtime_unconfirmed_supported_deed(
         return True
     if _claims_an_unconfirmed_obsidian_deed(answer) and _OBSIDIAN_EXPLICIT_SUPPORTED_DEED.search(answer):
         return True
-    if _explicit_supported_file_claim(answer) and not _supported_file_claim_has_receipt(
-        answer, file_descriptors
+    if "obsidian" in requested_effects and any(
+        _OBSIDIAN_BARE_PASSIVE_COMPLETION.fullmatch(clause)
+        for clause in _model_authored_clauses(answer)
     ):
         return True
+    if _explicit_supported_file_claim(
+        answer,
+        passive_source_state=passive_source_state,
+        passive_input_file_state_evidence=passive_input_file_state_evidence,
+        read_only_attachment_review=read_only_attachment_review,
+        read_only_attachment_descriptors=read_only_attachment_descriptors,
+    ) and not _supported_file_claim_has_receipt(answer, file_descriptors):
+        return True
     for family, pattern in _ENGLISH_SUPPORTED_DEED_PATTERNS:
-        if not pattern.search(answer):
+        actual_clauses = _actual_english_supported_deed_clauses(answer, pattern)
+        if not actual_clauses:
             continue
-        explicit = _ENGLISH_EXPLICIT_SUPPORTED_DEED.search(answer) is not None
+        explicit = any(_ENGLISH_EXPLICIT_SUPPORTED_DEED.search(clause) for clause in actual_clauses)
         if not explicit and family not in requested_effects:
             continue
         if family == "file":
@@ -9306,11 +9476,7 @@ def _runtime_unconfirmed_supported_deed(
                 return True
         else:
             return True
-    return bool(
-        "obsidian" in requested_effects
-        and "obsidian" in families
-        and not _claims_an_unconfirmed_obsidian_deed(answer)
-    )
+    return False
 
 
 #: Служебный отрицательный статус внутреннего поиска не отвечает на обычный
@@ -25006,13 +25172,59 @@ _MODEL_WEB_ORIGIN_VERB_CLAIM = re.compile(
     re.IGNORECASE,
 )
 _MODEL_DOMAIN_LOCATIVE_ASSERTION = re.compile(
-    rf"(?:"
-    rf"\bна\s+(?:{_MODEL_ANY_DOMAIN_OR_IP.pattern})\s+"
+    rf"(?:\bна\s+(?:{_MODEL_ANY_DOMAIN_OR_IP.pattern})\s+"
     r"(?:написан|указан|видн|сказан|опубликован|сообща|глас|следу)\w*\b|"
-    rf"(?:{_MODEL_ANY_DOMAIN_OR_IP.pattern})\s*:\s*\S+"
-    r")",
+    rf"(?:{_MODEL_ANY_DOMAIN_OR_IP.pattern})\s*:\s*\S+)",
     re.IGNORECASE,
 )
+_NONPUBLIC_WEB_LITERAL_SUFFIXES = frozenset(
+    {
+        "csv",
+        "doc",
+        "docx",
+        "json",
+        "md",
+        "odt",
+        "pdf",
+        "ppt",
+        "pptx",
+        "txt",
+        "xls",
+        "xlsx",
+        "xml",
+        "yaml",
+        "yml",
+    }
+)
+
+
+def _web_literal_host_is_public(value: str) -> bool:
+    raw = str(value or "").strip(" \t\r\n<>()[]{}.,;:!?")
+    if not raw:
+        return False
+    parsed = urllib.parse.urlsplit(raw if raw.casefold().startswith(("http://", "https://")) else f"//{raw}")
+    host = str(parsed.hostname or "").rstrip(".").casefold()
+    if not host:
+        return False
+    try:
+        return ipaddress.ip_address(host).is_global
+    except ValueError:
+        pass
+    suffix = host.rsplit(".", 1)[-1]
+    return bool(
+        "." in host
+        and suffix not in _NONPUBLIC_WEB_LITERAL_SUFFIXES
+        and not host.endswith((".local", ".lan", ".internal", ".localhost"))
+    )
+
+
+def _has_public_web_literal(text: str) -> bool:
+    source = str(text or "")
+    return any(
+        _web_literal_host_is_public(match.group(0))
+        for pattern in (_MODEL_PLAIN_WEB_URL, _MODEL_ANY_DOMAIN_OR_IP)
+        for match in pattern.finditer(source)
+    )
 _WEB_PROVENANCE_SEGMENT_BREAK = re.compile(
     r"(?:[!?;\n]+|\.(?=\s|$)|[,—–]\s*|"
     r"\b(?:тем\s+не\s+менее|однако|зато|хотя|просто|но|а|и)\b)",
@@ -25099,9 +25311,16 @@ def _has_affirmative_web_provenance(text: str, *, max_chars: int) -> bool:
         _MODEL_DOMAIN_EVIDENCE_ASSERTION,
         _MODEL_DOMAIN_LOCATIVE_ASSERTION,
     )
+    literal_bound_patterns = {
+        _MODEL_URL_EVIDENCE_ASSERTION,
+        _MODEL_DOMAIN_EVIDENCE_ASSERTION,
+        _MODEL_DOMAIN_LOCATIVE_ASSERTION,
+    }
     for segment in _web_provenance_segments(source):
         for pattern in patterns:
             for match in pattern.finditer(segment):
+                if pattern in literal_bound_patterns and not _has_public_web_literal(match.group(0)):
+                    continue
                 if not _web_provenance_match_is_denied(segment, match.start(), match.end()):
                     return True
     return False
@@ -30215,7 +30434,18 @@ _ENGLISH_CURRENT_WEB_ACTION = re.compile(
     re.IGNORECASE,
 )
 _CURRENT_PUBLIC_WEB_RESULT = re.compile(
-    r"\b(?:текущ\w*|свеж\w*|актуальн\w*|на\s+сегодня|current|latest|up-to-date)\b",
+    r"\b(?:по\s+(?:текущ|свеж|актуальн)\w+\s+данн\w*|"
+    r"(?:текущ|свеж|актуальн)\w+\s+(?:цен|курс|налич|расписан|верси|новост|статус|данн)\w*|"
+    r"(?:цен|курс|налич|расписан|верси|новост|статус|данн)\w*\s+на\s+сегодня|"
+    r"(?:current|latest|up-to-date)\s+(?:price|rate|availability|schedule|version|news|status|data))\b",
+    re.IGNORECASE,
+)
+_CURRENT_PUBLIC_WEB_RESULT_DENIAL = re.compile(
+    r"\b(?:не\s+(?:удалось|получилось|могу|смог\w*)|нельзя|невозможно)\b[^.!?;\n]{0,64}"
+    r"\b(?:получ|най|провер|уточн|подтверд)\w*\b|"
+    r"\b(?:получ|най|провер|уточн|подтверд)\w*\b[^.!?;\n]{0,32}"
+    r"\bне\s+(?:удалось|получилось)\b|"
+    r"\b(?:неизвест|не\s+подтвержд)\w*\b",
     re.IGNORECASE,
 )
 
@@ -30230,15 +30460,15 @@ def _runtime_claims_unconfirmed_web_evidence(
 
     if _claims_current_answer_came_from_the_web(answer) or _ENGLISH_CURRENT_WEB_ACTION.search(answer):
         return True
-    if public_web_requested and _CURRENT_PUBLIC_WEB_RESULT.search(answer):
+    if (
+        public_web_requested
+        and _CURRENT_PUBLIC_WEB_RESULT.search(answer)
+        and _CURRENT_PUBLIC_WEB_RESULT_DENIAL.search(answer) is None
+    ):
         return True
     if not (public_web_requested or provenance_followup):
         return False
-    has_web_literal = bool(
-        _MODEL_MARKDOWN_WEB_LINK.search(answer)
-        or _MODEL_PLAIN_WEB_URL.search(answer)
-        or _MODEL_ANY_DOMAIN_OR_IP.search(answer)
-    )
+    has_web_literal = _has_public_web_literal(answer)
     return bool(
         _has_explicit_web_provenance_claim(answer)
         or (
@@ -30246,7 +30476,6 @@ def _runtime_claims_unconfirmed_web_evidence(
             and (
                 provenance_followup
                 or _MODEL_WEB_PROVENANCE_CLAIM.search(answer)
-                or _model_text_has_external_source(answer)
             )
         )
     )
@@ -49887,8 +50116,8 @@ class AgentRuntime:
         # двух источников, а человек уже прочёл первое предложение и пошёл ждать
         # машину. Производные тоже выбрасываются — иначе ложный отчёт уехал бы
         # человеку голосом или файлом после того, как из чата его убрали.
-        outside_effect_requested = (
-            _OUTSIDE_EFFECT_REQUEST.search(_record_source_command_text(clean_message)) is not None
+        outside_effect_requested = _requests_current_outside_effect(
+            _record_source_command_text(clean_message)
         )
         outside_deed_detected = bool(
             response.get("_attachment_model_failure_owned") is not True
