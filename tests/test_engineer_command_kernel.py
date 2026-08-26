@@ -288,6 +288,17 @@ def test_owner_shell_pipeline_and_fork_cancel(tmp_path: Path) -> None:
     assert cancelled.effect_boundary_crossed is True
 
 
+def test_grant_replay_survives_kernel_restart(tmp_path: Path) -> None:
+    kernel = _kernel(tmp_path)
+    request = _argv("/usr/bin/true", key=_key("persist-replay"))
+    token = kernel.authority.issue(request, actor_id=ACTOR, turn_id=TURN)
+    kernel.wait(kernel.submit(request, token, actor_id=ACTOR))
+    restarted = CommandKernel(kernel.store.root, _authority())
+    same_digest = _argv("/usr/bin/true", key=_key("persist-replay-2"))
+    with pytest.raises(CommandError, match="grant_replay"):
+        restarted.submit(same_digest, token, actor_id=ACTOR)
+
+
 def test_late_revoke_refuses_spawn(tmp_path: Path) -> None:
     kernel = _kernel(tmp_path)
     request = _argv("/usr/bin/true", key=_key("revoke"))

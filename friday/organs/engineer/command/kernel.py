@@ -83,6 +83,7 @@ class CommandKernel:
     def __init__(self, store_root: Path, authority: CommandGrantAuthority) -> None:
         self.store = CommandJobStore(Path(store_root))
         self.authority = authority
+        self.authority.bind_ledger(self.store.root / "grant-nonces.json")
         self._lock = threading.Lock()
         self._live: dict[str, SpawnedCommand] = {}
         self._threads: dict[str, threading.Thread] = {}

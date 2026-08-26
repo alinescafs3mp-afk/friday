@@ -8,6 +8,7 @@ import os
 import secrets
 import time
 from hashlib import sha256
+from pathlib import Path
 from typing import Any
 
 from .contracts import (
@@ -22,6 +23,7 @@ from .contracts import (
     VerifiedCommandGrant,
     canonical_json_bytes,
 )
+from .store import atomic_write_json, read_json
 
 
 def _now() -> int:
@@ -43,6 +45,7 @@ class CommandGrantAuthority:
         self._clock = clock
         self._used_nonces: dict[str, int] = {}
         self._revoked_nonces: dict[str, int] = {}
+        self._ledger_path: Path | None = None
 
     @classmethod
     def from_env(cls, name: str = "FRIDAY_ENGINEER_COMMAND_GRANT_SECRET") -> CommandGrantAuthority:
@@ -51,6 +54,19 @@ class CommandGrantAuthority:
             raise CommandError("grant_secret_missing")
         secret = raw.encode("utf-8") if isinstance(raw, str) else bytes(raw)
         return cls(secret)
+
+    def bind_ledger(self, path: Path) -> None:
+        self._ledger_path = Path(path)
+        if self._ledger_path.exists():
+            payload = read_json(self._ledger_path)
+            used = payload.get("used") or {}
+            revoked = payload.get("revoked") or {}
+            if not isinstance(used, dict) or not isinstance(revoked, dict):
+                raise CommandError("corrupt_grant_ledger")
+            self._used_nonces = {str(key): int(value) for key, value in used.items()}
+            self._revoked_nonces = {str(key): int(value) for key, value in revoked.items()}
+        else:
+            self._persist_nonces()
 
     def issue(
         self,
@@ -112,6 +128,7 @@ class CommandGrantAuthority:
         if nonce in self._revoked_nonces:
             raise CommandError("grant_revoked")
         self._used_nonces[nonce] = exp
+        self._persist_nonces()
         return VerifiedCommandGrant(
             actor_id=str(payload["actor_id"]),
             turn_id=str(payload["turn_id"]),
@@ -137,6 +154,7 @@ class CommandGrantAuthority:
             raise CommandError("invalid_grant")
         exp = int(payload.get("exp") or 0)
         self._revoked_nonces[nonce] = max(exp, int(self._clock()))
+        self._persist_nonces()
 
     def _encode(self, payload: dict[str, Any]) -> str:
         body = canonical_json_bytes(payload)
@@ -166,3 +184,16 @@ class CommandGrantAuthority:
             expired = [nonce for nonce, exp in table.items() if exp <= now]
             for nonce in expired:
                 table.pop(nonce, None)
+        self._persist_nonces()
+
+    def _persist_nonces(self) -> None:
+        if self._ledger_path is None:
+            return
+        atomic_write_json(
+            self._ledger_path,
+            {
+                "revoked": self._revoked_nonces,
+                "schema": SCHEMA,
+                "used": self._used_nonces,
+            },
+        )
