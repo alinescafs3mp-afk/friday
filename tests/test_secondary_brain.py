@@ -215,6 +215,11 @@ def _accepted_test_profile(monkeypatch: pytest.MonkeyPatch) -> None:
         "ACCEPTED_SECONDARY_RUNTIME_PROFILES",
         MappingProxyType({_PROFILE_ID: profile}),
     )
+    monkeypatch.setattr(
+        secondary_profiles,
+        "PROVISIONAL_SHADOW_SECONDARY_RUNTIME_PROFILES",
+        MappingProxyType({}),
+    )
 
 
 def _request(

@@ -10,7 +10,7 @@ param(
 
     [Parameter()]
     [ValidateNotNullOrEmpty()]
-    [string]$VolumeName = 'friday-secondary-source-gptoss20b',
+    [string]$VolumeName = 'friday-secondary-source-gptoss20b-ablit-79f64a52',
 
     [Parameter()]
     [string]$ManifestPath,
@@ -26,21 +26,21 @@ $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
 [Console]::OutputEncoding = [Text.UTF8Encoding]::new($false)
 
-$expectedVolumeName = 'friday-secondary-source-gptoss20b'
-$expectedRepository = 'openai/gpt-oss-20b'
-$expectedRevision = '6cee5e81ee83917806bbde320786a8fb61efebee'
+$expectedVolumeName = 'friday-secondary-source-gptoss20b-ablit-79f64a52'
+$expectedRepository = 'huihui-ai/Huihui-gpt-oss-20b-mxfp4-abliterated-v2'
+$expectedRevision = '79f64a520a4a0275f639c1a47d9a5614a8a54477'
 $expectedDownloaderImage = 'lmsysorg/sglang@sha256:297f0bfea5e9f92680f8dd49ae18d048c9634f953be50b37f9bfe9509e947405'
 $expectedDownloaderImageId = 'sha256:297f0bfea5e9f92680f8dd49ae18d048c9634f953be50b37f9bfe9509e947405'
 $expectedDownloaderManifest = 'sha256:297f0bfea5e9f92680f8dd49ae18d048c9634f953be50b37f9bfe9509e947405'
 $expectedDownloaderMediaType = 'application/vnd.oci.image.manifest.v1+json'
-$expectedManifestSha256 = '438df0a0b2f6b4164c2fd9d9ed309925abbc94ed8deb056b692d2ccad7887fd9'
-$expectedManifestSemanticSha256 = 'e75b176ed1817e762cf9b7f2262f6e58491a0f9d48d1ea51e466a6e2c3b8a3ab'
+$expectedManifestSha256 = '8dfc3a50d1a9407fbb07dde5f1b494157664c75cdd0e140ecb85f7d55732a296'
+$expectedManifestSemanticSha256 = '4ab38461ce42f76c32d998ed091b8cfc0a8b483279f676eb8221e56df28d6d02'
 
 if ($DownloaderImage -cne $expectedDownloaderImage) {
     throw 'DownloaderImage differs from the code-owned exact SGLang runtime.'
 }
 if ($VolumeName -cne $expectedVolumeName) {
-    throw 'VolumeName must be the canonical sealed official-source volume.'
+    throw 'VolumeName must be the canonical sealed abliterated-source volume.'
 }
 if ($Mode -eq 'Populate' -and [string]::IsNullOrWhiteSpace($OutputManifest)) {
     throw 'Populate requires OutputManifest.'
@@ -59,8 +59,8 @@ $plan = [ordered]@{
     revision = $expectedRevision
     manifest_raw_sha256 = $expectedManifestSha256
     manifest_semantic_sha256 = $expectedManifestSemanticSha256
-    file_count = 14
-    total_bytes = [int64]13789264674
+    file_count = 12
+    total_bytes = [int64]13789257124
     public_source = $true
     token_used = $false
 }
@@ -216,14 +216,14 @@ if ($Mode -eq 'Populate') {
             $verification.status -cne 'passed' -or
             $verification.manifest_raw_sha256 -cne $expectedManifestSha256 -or
             $verification.manifest_semantic_sha256 -cne $expectedManifestSemanticSha256 -or
-            [int]$verification.file_count -ne 14 -or
-            [int64]$verification.total_bytes -ne 13789264674
+            [int]$verification.file_count -ne 12 -or
+            [int64]$verification.total_bytes -ne 13789257124
         ) {
             throw 'Offline verification returned an unexpected source receipt.'
         }
         Write-NewUtf8File $resolvedOutput $manifestText
     } catch {
-        throw 'Pinned official-source population failed; the candidate volume was retained for inspection.'
+        throw 'Pinned abliterated-source population failed; the candidate volume was retained for inspection.'
     }
     [ordered]@{
         schema = 'friday.secondary-source-volume-population.v1'
@@ -233,8 +233,8 @@ if ($Mode -eq 'Populate') {
         revision = $expectedRevision
         manifest_path = $resolvedOutput
         manifest_raw_sha256 = $expectedManifestSha256
-        file_count = 14
-        total_bytes = [int64]13789264674
+        file_count = 12
+        total_bytes = [int64]13789257124
         offline_verified = $true
         token_used = $false
     } | ConvertTo-Json -Depth 4
@@ -268,9 +268,9 @@ if (
     $verification.status -cne 'passed' -or
     $verification.manifest_raw_sha256 -cne $expectedManifestSha256 -or
     $verification.manifest_semantic_sha256 -cne $expectedManifestSemanticSha256 -or
-    [int]$verification.file_count -ne 14 -or
-    [int64]$verification.total_bytes -ne 13789264674
+    [int]$verification.file_count -ne 12 -or
+    [int64]$verification.total_bytes -ne 13789257124
 ) {
-    throw 'Model volume does not match the canonical official-source manifest.'
+    throw 'Model volume does not match the canonical abliterated-source manifest.'
 }
 $verificationJson

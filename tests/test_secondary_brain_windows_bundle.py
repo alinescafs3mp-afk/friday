@@ -23,7 +23,7 @@ RUNTIME = BUNDLE / "runtime"
 SGLANG_IMAGE = "lmsysorg/sglang@sha256:297f0bfea5e9f92680f8dd49ae18d048c9634f953be50b37f9bfe9509e947405"
 SGLANG_CONFIG_DIGEST = "sha256:f7adc6c05df9ff711b82ad291cf1db6eaf30590c4d929833d632abfef3895efc"
 GATEWAY_INDEX_DIGEST = "sha256:d61d7ef52430df468e74ed6ee6e914429b80e20ba988e3176278a73165f876cf"
-SOURCE_MANIFEST_SHA256 = "438df0a0b2f6b4164c2fd9d9ed309925abbc94ed8deb056b692d2ccad7887fd9"
+SOURCE_MANIFEST_SHA256 = "8dfc3a50d1a9407fbb07dde5f1b494157664c75cdd0e140ecb85f7d55732a296"
 
 
 @pytest.fixture(scope="module", autouse=True)
@@ -46,9 +46,11 @@ def _compose() -> dict[str, Any]:
 def test_bundle_has_the_closed_operator_surface() -> None:
     required = {
         "README.md",
+        "ABLITERATED-MIGRATION.md",
         ".gitattributes",
         "compose.yml",
         ".env.example",
+        "abliterated-stage.env.example",
         "gateway.conf.template",
         "model-manifest.example.json",
         "runtime-manifest.example.json",
@@ -71,6 +73,8 @@ def test_bundle_has_the_closed_operator_surface() -> None:
         "scripts/model_volume_tool.py",
         "scripts/populate-model-volume.ps1",
         "scripts/probe_endpoint.py",
+        "scripts/candidate_smoke.py",
+        "scripts/transient-candidate-smoke.ps1",
         "scripts/quality_battery.py",
         "scripts/failure_battery.py",
         "scripts/live_failure_battery.py",
@@ -353,12 +357,12 @@ def test_examples_have_sealed_source_and_nonaccepted_runtime_placeholders() -> N
     assert hashlib.sha256(model_raw).hexdigest() == SOURCE_MANIFEST_SHA256
     assert model["schema"] == "friday.secondary-source-manifest.v1"
     assert model["status"] == "verified"
-    assert model["repository"] == "openai/gpt-oss-20b"
-    assert model["revision"] == "6cee5e81ee83917806bbde320786a8fb61efebee"
+    assert model["repository"] == "huihui-ai/Huihui-gpt-oss-20b-mxfp4-abliterated-v2"
+    assert model["revision"] == "79f64a520a4a0275f639c1a47d9a5614a8a54477"
     assert model["root_only"] is True
-    assert model["excluded_prefixes"] == ["metal/", "original/"]
-    assert model["file_count"] == len(model["files"]) == 14
-    assert model["total_bytes"] == 13_789_264_674
+    assert model["excluded_prefixes"] == ["GGUF/"]
+    assert model["file_count"] == len(model["files"]) == 12
+    assert model["total_bytes"] == 13_789_257_124
     assert runtime["status"] == "template_not_accepted"
     assert runtime["image_ref"] == SGLANG_IMAGE
     assert runtime["image_id"] == SGLANG_IMAGE.removeprefix("lmsysorg/sglang@")
@@ -391,7 +395,10 @@ def test_examples_have_sealed_source_and_nonaccepted_runtime_placeholders() -> N
     }
     env = (BUNDLE / ".env.example").read_text(encoding="utf-8")
     assert f"FRIDAY_SECONDARY_SGLANG_IMAGE={SGLANG_IMAGE}" in env
-    assert "FRIDAY_SECONDARY_MODEL_VOLUME=friday-secondary-source-gptoss20b" in env
+    assert (
+        "FRIDAY_SECONDARY_MODEL_VOLUME=friday-secondary-source-gptoss20b-ablit-79f64a52"
+        in env
+    )
     assert "FRIDAY_SECONDARY_CONVERTED_MODEL_MANIFEST_PATH" not in env
     assert "FRIDAY_SECONDARY_GATEWAY_IMAGE" not in env
     assert ("FRIDAY_SECONDARY_HARDWARE_RUNTIME_RECEIPT_PATH=./evidence/hardware-runtime.accepted.json") in env
@@ -633,9 +640,9 @@ def test_windows_mutations_are_explicit_and_firewall_is_closed_to_primary() -> N
     assert "'--network', 'none'" in population
     assert "--pull', 'never" in population
     assert "docker pull" not in population
-    assert "friday-secondary-source-gptoss20b" in population
-    assert "openai/gpt-oss-20b" in population
-    assert "6cee5e81ee83917806bbde320786a8fb61efebee" in population
+    assert "friday-secondary-source-gptoss20b-ablit-79f64a52" in population
+    assert "huihui-ai/Huihui-gpt-oss-20b-mxfp4-abliterated-v2" in population
+    assert "79f64a520a4a0275f639c1a47d9a5614a8a54477" in population
     assert SGLANG_IMAGE in population
     assert SGLANG_IMAGE.removeprefix("lmsysorg/sglang@") in population
     assert "$DownloaderImage -cne $expectedDownloaderImage" in population
@@ -949,8 +956,8 @@ def _candidate_runtime_profile() -> dict[str, Any]:
         "engine_binding_sha256": "0" * 64,
         "endpoint_base_url": "https://192.168.1.35:8443/v1",
         "served_model_alias": "pending",
-        "source_model_repository": "openai/gpt-oss-20b",
-        "source_model_revision": "6cee5e81ee83917806bbde320786a8fb61efebee",
+        "source_model_repository": "huihui-ai/Huihui-gpt-oss-20b-mxfp4-abliterated-v2",
+        "source_model_revision": "79f64a520a4a0275f639c1a47d9a5614a8a54477",
         "hardware_runtime_receipt_sha256": (
             "0c1c9e6f54aa0004c3dfc89acd6904cfbb0f834d0988e971e34b9699b3d9031f"
         ),

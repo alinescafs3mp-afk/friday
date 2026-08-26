@@ -1,4 +1,4 @@
-"""Content-free verifier for the sealed official GPT-OSS source snapshot."""
+"""Content-free verifier for the sealed abliterated GPT-OSS snapshot."""
 
 from __future__ import annotations
 
@@ -11,46 +11,44 @@ from pathlib import Path, PurePosixPath
 from typing import Any
 
 SCHEMA = "friday.secondary-source-manifest.v1"
-SOURCE_REPOSITORY = "openai/gpt-oss-20b"
-SOURCE_REVISION = "6cee5e81ee83917806bbde320786a8fb61efebee"
-SOURCE_FILE_COUNT = 14
-SOURCE_TOTAL_BYTES = 13_789_264_674
-SOURCE_EXCLUDED_PREFIXES = ["metal/", "original/"]
-SOURCE_MANIFEST_RAW_SHA256 = "438df0a0b2f6b4164c2fd9d9ed309925abbc94ed8deb056b692d2ccad7887fd9"
-SOURCE_MANIFEST_SEMANTIC_SHA256 = "e75b176ed1817e762cf9b7f2262f6e58491a0f9d48d1ea51e466a6e2c3b8a3ab"
+SOURCE_REPOSITORY = "huihui-ai/Huihui-gpt-oss-20b-mxfp4-abliterated-v2"
+SOURCE_REVISION = "79f64a520a4a0275f639c1a47d9a5614a8a54477"
+SOURCE_FILE_COUNT = 12
+SOURCE_TOTAL_BYTES = 13_789_257_124
+SOURCE_EXCLUDED_PREFIXES = ["GGUF/"]
+SOURCE_MANIFEST_RAW_SHA256 = "8dfc3a50d1a9407fbb07dde5f1b494157664c75cdd0e140ecb85f7d55732a296"
+SOURCE_MANIFEST_SEMANTIC_SHA256 = "4ab38461ce42f76c32d998ed091b8cfc0a8b483279f676eb8221e56df28d6d02"
 SOURCE_FILES = {
-    ".gitattributes": (1570, "34448b82c17d60fec9b65b1f093c115ddbaadc04beb1b0140b6bfed2e012a930"),
-    "LICENSE": (11357, "58d1e17ffe5109a7ae296caafcadfdbe6a7d176f0bc4ab01e12a689b0499d8bd"),
-    "README.md": (7095, "03c2fcf292549176757b85c911e7dcf527aef3e4241d64b6caec94af3ecf3ac2"),
-    "USAGE_POLICY": (200, "d6387ef7985019c45db8d9801e6ac5fd9f98f02b9f1c56f8c5af80c3e8f385d0"),
+    ".gitattributes": (1653, "47af3bffdadc5314122fc91026aca376ceea3932bac23a52dd950da21a07a8cc"),
+    "README.md": (9660, "436c7ebb1d039bb4651dcc2a90955c093a65ab4d683cb96b50fdb456f2b9a7aa"),
     "chat_template.jinja": (
-        16738,
-        "a4c9919cbbd4acdd51ccffe22da049264b1b73e59055fa58811a99efbd7c8146",
+        15078,
+        "445c3a7c29d9cf61860179de179f60b6cf24834518b491016993eba63c8b1ecc",
     ),
-    "config.json": (1806, "3a2a26ded679375b7928ddeca59764df7cea83220c1961035f6d6e232659e9ce"),
+    "config.json": (2091, "b25d0700aca90b471b3a39bdd6d6a2fea1f31086316cd0575d9ea7bd7c02d4ca"),
     "generation_config.json": (
-        177,
-        "f9970ada892d2d1f72e3ed0a6535ccebadd11897318794ca671d8c7014c957da",
+        165,
+        "97b165839e19bf43309d1e571d1720ebc081dde24e6722cfb644257215ad1e66",
     ),
-    "model-00000-of-00002.safetensors": (
-        4_792_272_488,
-        "16d0f997dcfc4462089d536bffe51b4bcea2f872f5c430be09ef8ed392312427",
+    "model-00001-of-00003.safetensors": (
+        4_999_744_880,
+        "a5720f36ef8e3c331388c17c01496a1d911282a8eb8deb7800cc40aa047ee554",
     ),
-    "model-00001-of-00002.safetensors": (
-        4_798_702_184,
-        "4fbe328ab445455d6f58dc73852b85873bd626986310abd91cd4d2ce3245eaea",
+    "model-00002-of-00003.safetensors": (
+        4_795_391_048,
+        "477e0bcd49ad66c87e7375848cf8f5125b9d25119e7dec108a082399b8506a72",
     ),
-    "model-00002-of-00002.safetensors": (
-        4_170_342_232,
-        "a18106b209e9ab35c3406db4f6f12a927364a058b21e9d1373d682e20674b303",
+    "model-00003-of-00003.safetensors": (
+        3_966_181_488,
+        "fa8cdf4bc70e87b551c3f5de19ec0ce08faced901db28f22bf2557d66be6e5b3",
     ),
     "model.safetensors.index.json": (
-        36355,
-        "0e085b977c4c9942f85938828e8c989ed7d5cdabf852e4da6a67c116cd502cd1",
+        38247,
+        "0138dfec3982a0d2673f0989eb2356109cf61318a88f03e75b546380f2ac6489",
     ),
     "special_tokens_map.json": (
-        98,
-        "dd5e191d20c12d2fee1da5bae14ca1db0f5f4215300af691f23cdee97120a293",
+        440,
+        "8464cabd6eda239fe46ebf8ae63b46c417721784a961a022f6b59174a2cda0e2",
     ),
     "tokenizer.json": (
         27_868_174,

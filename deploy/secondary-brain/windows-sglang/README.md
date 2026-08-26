@@ -8,8 +8,10 @@ the normal primary path.
 The immutable native-MXFP4 base is exact; only a profile selected from the
 closed candidate surface may vary its reviewed engine settings:
 
-- model `openai/gpt-oss-20b@6cee5e81ee83917806bbde320786a8fb61efebee`;
-- sealed volume `friday-secondary-source-gptoss20b`, mounted read-only at `/source`;
+- model
+  `huihui-ai/Huihui-gpt-oss-20b-mxfp4-abliterated-v2@79f64a520a4a0275f639c1a47d9a5614a8a54477`;
+- sealed volume `friday-secondary-source-gptoss20b-ablit-79f64a52`, mounted
+  read-only at `/source`;
 - model path `/source/snapshot` and manifest `/source/source-manifest.json`;
 - SGLang `0.5.17` image
   `lmsysorg/sglang@sha256:297f0bfea5e9f92680f8dd49ae18d048c9634f953be50b37f9bfe9509e947405`;
@@ -36,8 +38,8 @@ have been removed from this deployment bundle.
 - Gateway and SGLang use different file-backed bearer tokens. Neither belongs
   in `.env`, command lines, reports or version control.
 - The source volume is read-only. Before importing SGLang or creating CUDA
-  state, the launcher rehashes the exact source manifest and all 14 files
-  (13,789,264,674 bytes).
+  state, the launcher rehashes the exact source manifest and all 12 files
+  (13,789,257,124 bytes).
 - The runtime profile is canonical schema `friday.secondary-runtime-profile.v7`.
   It binds source, runtime image/config/OCI identities, backend selection,
   context, memory, graph policy, both exact SGLang compatibility files and every
@@ -94,6 +96,16 @@ it produced no success claim. Pre-acceptance deterministic/controlled/physical
 node evidence and profile acceptance remain pending; registration,
 private-shadow/assist and the later product-linked physical cycle follow them.
 
+The checkpoint above describes the rollback deployment, which stays live until
+Friday admits the replacement profile in a joint release. The abliterated
+replacement is staged separately at
+`C:\ProgramData\FridaySecondary\bundle-ablit-79f64a52` with candidate profile
+`gptoss20b-d4c2207151c7507f9d71a1d3d5d387d6ae98bb89b04f3171ba667098c2ad2d25`;
+its canonical bytes hash to
+`612ed412143458fc32bcee2b78cfa66afdaec0f947b7c6b78422afa6d9fd5a64`.
+No acceptance evidence from the rollback model carries over. See
+`ABLITERATED-MIGRATION.md` for the exact activation and rollback commands.
+
 ## 1. Management access and host preflight
 
 Use the existing key-only SSH alias `friday-secondary-brain`. Do not restore
@@ -143,13 +155,13 @@ The runtime promotion validates the exact image, package, GPU and gateway
 projections in the automated preflight and changes only the template status to
 `accepted`; it never overwrites an existing receipt.
 
-## 2. Populate or verify the sealed official model
+## 2. Populate or verify the sealed abliterated model
 
 The source is public and the operator has no token input. It downloads only the
-14 code-owned root files from the exact revision; `metal/`, `original/`, nested
-entries, links and any size/hash drift fail closed. Population refuses an
-existing volume and performs a second offline verification before writing the
-protected manifest copy.
+12 code-owned root files from the exact revision; `GGUF/`, other nested entries,
+links and any size/hash drift fail closed. Population refuses an existing
+volume and performs a second offline verification before writing the protected
+manifest copy.
 
 Use the already-pinned SGLang image as the downloader runtime:
 
@@ -172,10 +184,10 @@ The existing source volume must contain exactly two top-level entries:
 `source-manifest.json` and `snapshot`. The manifest identity is fixed:
 
 ```text
-raw sha256      438df0a0b2f6b4164c2fd9d9ed309925abbc94ed8deb056b692d2ccad7887fd9
-semantic sha256 e75b176ed1817e762cf9b7f2262f6e58491a0f9d48d1ea51e466a6e2c3b8a3ab
-files           14
-bytes           13789264674
+raw sha256      8dfc3a50d1a9407fbb07dde5f1b494157664c75cdd0e140ecb85f7d55732a296
+semantic sha256 4ab38461ce42f76c32d998ed091b8cfc0a8b483279f676eb8221e56df28d6d02
+files           12
+bytes           13789257124
 ```
 
 `model-manifest.example.json`, the manifest stored in the volume and the
@@ -226,9 +238,9 @@ python .\scripts\runtime_profile_operator.py candidate `
 ```
 
 The resulting profile ID must be
-`gptoss20b-2335df123cac7fc0e13e347cde1e1ffa8562daafcaf0fc76ade1a851d2b0ff1f`
+`gptoss20b-d4c2207151c7507f9d71a1d3d5d387d6ae98bb89b04f3171ba667098c2ad2d25`
 and the exact candidate bytes must hash to
-`51af2164fa07ff3c01813e318076f7ac8b37eeecb73e695b6ca7543061c93439`.
+`612ed412143458fc32bcee2b78cfa66afdaec0f947b7c6b78422afa6d9fd5a64`.
 
 `workload-policy.document-map.v1.json` is a Friday-side product rollout
 manifest, not a replacement runtime profile. Its SHA-256 is
