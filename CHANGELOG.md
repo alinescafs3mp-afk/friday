@@ -1,3 +1,23 @@
+## 0.207.52 — 2026-08-27
+
+### Default-off Semantic Supervisor and Policy Kernel
+
+- The primary runtime now has a typed, provenance-bound Semantic Supervisor
+  contour for critical document/web comparison decisions. It can observe and
+  advise, but it never becomes publication or effect authority; the primary
+  remains the sole owner of user-visible answers and side effects.
+- Schema 45 binds each fixed comparison graph to the exact accepted ingress
+  request and preserves a closed legacy sentinel instead of inventing replay
+  provenance. Schema 44 supplies the restart-safe fixed comparison graph,
+  review-bounded web recovery, exact publication receipts and atomic expiry.
+- Supervisor rollout, recommendation use, canary influence and the P5 effect
+  observer are independently gated and ship disabled. No historical evidence is
+  promoted by this source release, and P6 removes nothing because no eligible
+  legacy path exists.
+- The release is paired with a distinct schema-45-capable `0.207.51` rollback
+  twin. After the schema writer boundary, recovery therefore never starts the
+  live schema-43 predecessor against a schema-45 database.
+
 ## 0.207.51 — 2026-08-26
 
 ### V12 document-passage projection contract
