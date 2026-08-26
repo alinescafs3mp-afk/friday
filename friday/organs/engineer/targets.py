@@ -116,6 +116,61 @@ _NETWORK_SCAN_MECHANISM = re.compile(
     r"сканер\w*|сканирован\w*|скан\w*\s+порт\w*)\b",
     re.IGNORECASE,
 )
+_NETWORK_REPORT_EXPORT_VERB = (
+    r"(?:пришл(?:и|ите)|отправ(?:ь|ьте)|прилож(?:и|ите)|прикреп(?:и|ите)|"
+    r"сохран(?:и|ите)|выгруз(?:и|ите)|экспортируй(?:те)?|сформируй(?:те)?|"
+    r"подготов(?:ь|ьте)|сделай(?:те)?|создай(?:те)?|дай(?:те)?|"
+    r"send|attach|save|export|generate|create|prepare|provide|return|give)"
+)
+_NETWORK_REPORT_RESULT_OBJECT = r"(?:отч[её]т\w*|результат\w*|reports?|results?)"
+_NETWORK_REPORT_RESULT = re.compile(rf"\b{_NETWORK_REPORT_RESULT_OBJECT}\b", re.IGNORECASE)
+_NETWORK_REPORT_FILE_CARRIER = (
+    r"(?:json|markdown|маркдаун\w*|md|файл\w*|вложени\w*|files?|attachments?)"
+)
+_NETWORK_REPORT_EXPORT = re.compile(
+    rf"\b{_NETWORK_REPORT_EXPORT_VERB}\b[^.!?;\n]{{0,120}}(?:"
+    rf"\b{_NETWORK_REPORT_RESULT_OBJECT}\b[^.!?;\n]{{0,80}}\b{_NETWORK_REPORT_FILE_CARRIER}\b|"
+    rf"\b{_NETWORK_REPORT_FILE_CARRIER}\b[^.!?;\n]{{0,80}}\b{_NETWORK_REPORT_RESULT_OBJECT}\b"
+    rf")",
+    re.IGNORECASE,
+)
+_NETWORK_REPORT_CARRIER_EXPORT = re.compile(
+    rf"\b{_NETWORK_REPORT_EXPORT_VERB}\b[^.!?;\n]{{0,120}}"
+    rf"\b{_NETWORK_REPORT_FILE_CARRIER}\b",
+    re.IGNORECASE,
+)
+_NETWORK_REPORT_JSON = re.compile(r"(?<![\w.])(?:json|\.json)(?!\w)", re.IGNORECASE)
+_NETWORK_REPORT_MARKDOWN = re.compile(
+    r"(?<![\w.])(?:markdown|маркдаун\w*|md|\.md)(?!\w)",
+    re.IGNORECASE,
+)
+_NETWORK_REPORT_SCAN_CONTEXT = re.compile(
+    r"\b(?:nmap|scans?|scanning|скан\w*|проскан\w*)\b",
+    re.IGNORECASE,
+)
+_NETWORK_REPORT_AUDIT_CONTEXT = re.compile(
+    r"\b(?:audits?|auditing|probes?|probing|enumerat\w*|discover\w*|"
+    r"аудит\w*|обслед\w*|исслед\w*)\b",
+    re.IGNORECASE,
+)
+_NETWORK_REPORT_TARGET_CONTEXT = re.compile(
+    r"\b(?:hosts?|networks?|subnets?|lan|cidr|ip|хост\w*|сет\w*|подсет\w*)\b",
+    re.IGNORECASE,
+)
+_NETWORK_REPORT_LITERAL_TARGET_CONTEXT = re.compile(
+    r"(?<![\w.])(?:\d{1,3}\.){3}\d{1,3}(?:/\d{1,2})?(?![\w.])"
+)
+_NETWORK_REPORT_EXPORT_NEGATION = re.compile(
+    rf"(?:\b(?:не|без)\b|\b(?:do\s+not|don't|dont|without|no)\b)"
+    rf"[^.!?;\n]{{0,80}}(?:\b{_NETWORK_REPORT_EXPORT_VERB}\b|"
+    rf"\b{_NETWORK_REPORT_RESULT_OBJECT}\b|\b{_NETWORK_REPORT_FILE_CARRIER}\b)",
+    re.IGNORECASE,
+)
+_NETWORK_REPORT_EXPORT_META = re.compile(
+    rf"\b(?:как|почему|зачем|можно\s+ли|умеешь\s+ли|how|why|can\s+you)\b"
+    rf"[^.!?;\n]{{0,100}}\b{_NETWORK_REPORT_EXPORT_VERB}\b",
+    re.IGNORECASE,
+)
 _REQUEST_CODE_TEXT = re.compile(
     r"```[\s\S]*?(?:```|\Z)|~~~[\s\S]*?(?:~~~|\Z)|`[^`\r\n]*(?:`|$)",
     re.MULTILINE,
@@ -501,6 +556,53 @@ def _request_projection(speech: str) -> tuple[str, str]:
     return text, _mask_request_data(text)
 
 
+def _network_report_export_matches(unit: str) -> tuple[re.Match[str], ...]:
+    """Return bounded output clauses; quoted/reported masking happens upstream."""
+
+    object_matches = tuple(_NETWORK_REPORT_EXPORT.finditer(unit))
+    carrier_matches = tuple(
+        match
+        for match in _NETWORK_REPORT_CARRIER_EXPORT.finditer(unit)
+        if not any(
+            object_match.start() <= match.start() and match.end() <= object_match.end()
+            for object_match in object_matches
+        )
+    )
+    return tuple(sorted((*object_matches, *carrier_matches), key=lambda match: match.start()))
+
+
+def _network_report_export_requested_in_unit(unit: str) -> bool:
+    return bool(
+        _network_report_export_matches(unit)
+        and _NETWORK_REPORT_EXPORT_NEGATION.search(unit) is None
+        and _NETWORK_REPORT_EXPORT_META.search(unit) is None
+    )
+
+
+def _network_report_format_in_unit(unit: str) -> str | None:
+    matches = _network_report_export_matches(unit)
+    if not _network_report_export_requested_in_unit(unit):
+        return None
+    surface = " ".join(match.group(0) for match in matches)
+    requested: set[str] = set()
+    if _NETWORK_REPORT_JSON.search(surface):
+        requested.add("json")
+    if _NETWORK_REPORT_MARKDOWN.search(surface):
+        requested.add("markdown")
+    if len(requested) > 1:
+        return None
+    return next(iter(requested), "markdown")
+
+
+def _without_network_report_export_clause(unit: str) -> str:
+    """Remove only a proven output clause before passive-report scan checks."""
+
+    masked = unit
+    for match in reversed(_network_report_export_matches(unit)):
+        masked = masked[: match.start()] + (" " * (match.end() - match.start())) + masked[match.end() :]
+    return masked
+
+
 def _request_units(masked: str) -> Iterator[tuple[int, int]]:
     cursor = 0
     for boundary in _REQUEST_UNIT_BOUNDARY.finditer(masked):
@@ -605,7 +707,10 @@ def requests_active_assessment(speech: str) -> bool:
         # Preserve an explicit zero/multi-target request for the separate exact
         # target gate, which will return a useful refusal without doing DNS.
         return any(
-            _PASSIVE_ASSESSMENT_OBJECT.search(masked[item.unit_start : item.unit_end]) is None
+            _PASSIVE_ASSESSMENT_OBJECT.search(
+                _without_network_report_export_clause(masked[item.unit_start : item.unit_end])
+            )
+            is None
             for item in request_spans
         )
     token = str(targets[0].get("token") or "")
@@ -722,7 +827,10 @@ def requests_network_scan(speech: str) -> bool:
         return False
     packet_requests = _direct_request_matches(text, _CONFIGURED_NETWORK_ACTIVE_VERB)
     if any(
-        _PASSIVE_ASSESSMENT_OBJECT.search(masked[item.unit_start : item.unit_end]) is None
+        _PASSIVE_ASSESSMENT_OBJECT.search(
+            _without_network_report_export_clause(masked[item.unit_start : item.unit_end])
+        )
+        is None
         for item in packet_requests
     ):
         return True
@@ -730,10 +838,83 @@ def requests_network_scan(speech: str) -> bool:
     # names an explicit scanner.  “Check my network/config/password” stays
     # passive and cannot reach nmap.
     return any(
-        _PASSIVE_ASSESSMENT_OBJECT.search(masked[item.start : item.unit_end]) is None
+        _PASSIVE_ASSESSMENT_OBJECT.search(
+            _without_network_report_export_clause(masked[item.start : item.unit_end])
+        )
+        is None
         and _NETWORK_SCAN_MECHANISM.search(masked[item.start : item.unit_end])
         for item in _direct_request_matches(text, _ACTIVE_ASSESSMENT_VERB)
     )
+
+
+def requested_network_report_format(speech: str) -> str | None:
+    """Return one direct current-turn network report format, if unambiguous.
+
+    This classifies an output carrier only.  It grants neither packet authority
+    nor access to a historical result; callers must separately prove the exact
+    current scan and final owner capability.
+    """
+
+    text, masked = _request_projection(speech)
+    if not requests_network_scan(text):
+        return None
+    requests = _direct_request_matches(text, _CONFIGURED_NETWORK_ACTIVE_VERB)
+    if not requests:
+        requests = _direct_request_matches(text, _ACTIVE_ASSESSMENT_VERB)
+    formats = {
+        report_format
+        for item in requests
+        if (report_format := _network_report_format_in_unit(masked[item.unit_start : item.unit_end]))
+        is not None
+    }
+    return next(iter(formats)) if len(formats) == 1 else None
+
+
+def _requests_network_report_output_clause(
+    speech: str,
+    *,
+    require_network_context: bool,
+) -> bool:
+    _text, masked = _request_projection(speech)
+    if not masked.strip():
+        return False
+    for unit_start, unit_end in _request_units(masked):
+        if _newline_payload_has_inert_governor(masked, unit_start):
+            continue
+        unit = masked[unit_start:unit_end]
+        if (
+            _CONDITIONAL_REQUEST_CUE.search(unit)
+            or _REPORTED_REQUEST_CUE.search(unit)
+            or _META_REQUEST_CUE.search(unit)
+        ):
+            continue
+        has_target_context = bool(
+            _NETWORK_REPORT_TARGET_CONTEXT.search(unit)
+            or _NETWORK_REPORT_LITERAL_TARGET_CONTEXT.search(unit)
+        )
+        has_network_result_context = bool(
+            _NETWORK_REPORT_SCAN_CONTEXT.search(unit)
+            and (_NETWORK_REPORT_RESULT.search(unit) or has_target_context)
+            or _NETWORK_REPORT_AUDIT_CONTEXT.search(unit)
+            and has_target_context
+        )
+        if (
+            has_network_result_context or not require_network_context
+        ) and _network_report_export_requested_in_unit(unit):
+            return True
+    return False
+
+
+def requests_network_report_export(speech: str) -> bool:
+    """Recognise a direct network-result file clause without granting a scan."""
+
+    return _requests_network_report_output_clause(speech, require_network_context=True)
+
+
+def requests_network_report_output_clause(speech: str) -> bool:
+    """Recognise the output clause after a network result is already settled."""
+
+    return _requests_network_report_output_clause(speech, require_network_context=False)
 
 
 def target_source_sha256(speech: str, token: str) -> str:
@@ -757,5 +938,8 @@ __all__ = [
     "requests_artifact_patch",
     "requests_configured_network_assessment",
     "requests_network_scan",
+    "requested_network_report_format",
+    "requests_network_report_export",
+    "requests_network_report_output_clause",
     "target_source_sha256",
 ]

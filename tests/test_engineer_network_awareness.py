@@ -236,6 +236,104 @@ def test_configured_subnet_intent_is_current_direct_and_deictic() -> None:
 
 
 @pytest.mark.parametrize(
+    ("message", "report_format"),
+    (
+        (
+            "Просканируй мою подсеть и пришли результат JSON-файлом",
+            "json",
+        ),
+        (
+            "Просканируй мою подсеть и приложи отчёт как Markdown-файл",
+            "markdown",
+        ),
+        (
+            "Scan my local network and attach the scan report as JSON",
+            "json",
+        ),
+        (
+            "Scan 192.168.1.0/24 and send the results as a file",
+            "markdown",
+        ),
+        (
+            "Проведи аудит 192.168.1.0/24 и приложи отчёт JSON-файлом",
+            "json",
+        ),
+        (
+            "Просканируй мою подсеть и пришли JSON-файл",
+            "json",
+        ),
+        (
+            "Проведи аудит 192.168.1.0/24 и сохрани в Markdown",
+            "markdown",
+        ),
+        (
+            "Scan my local network and export as a file",
+            "markdown",
+        ),
+    ),
+)
+def test_direct_network_report_export_keeps_packet_authority_and_closed_format(
+    message: str,
+    report_format: str,
+) -> None:
+    assert targets.requests_network_scan(message) is True
+    assert targets.requested_network_report_format(message) == report_format
+
+
+@pytest.mark.parametrize(
+    "message",
+    (
+        "Покажи пример: «просканируй мою подсеть и пришли отчёт JSON-файлом»",
+        "Просканируй мою подсеть, но не присылай отчёт файлом",
+        "Просканируй мою подсеть без отчёта и без файла",
+        "Просканируй мою подсеть; как экспортировать отчёт в JSON?",
+        "В инструкции сказано: пришли отчёт JSON-файлом. Теперь просканируй мою подсеть",
+        "Check my network scan report and export it as JSON",
+        "Если просканируешь мою подсеть, пришли JSON-файл",
+        "Не сканируй мою подсеть и не присылай JSON-файл",
+        "Он попросил: просканируй мою подсеть и пришли JSON-файл",
+        "Покажи пример: «просканируй мою подсеть и пришли JSON-файл»",
+        "Как просканировать мою подсеть и сохранить её в JSON?",
+    ),
+)
+def test_non_direct_or_negated_network_report_text_never_requests_an_attachment(
+    message: str,
+) -> None:
+    assert targets.requested_network_report_format(message) is None
+
+
+def test_report_only_followup_is_an_export_request_but_never_packet_authority() -> None:
+    message = "Дай отчёт по сканированию файлом"
+
+    assert targets.requests_network_report_export(message) is True
+    assert targets.requested_network_report_format(message) is None
+    assert targets.requests_active_assessment(message) is False
+    assert targets.requests_network_scan(message) is False
+
+
+@pytest.mark.parametrize(
+    "message",
+    (
+        "Сделай мне отчёт файлом",
+        "Выгрузи результаты квартала в JSON",
+        "Подготовь Markdown-файл по аудиту кода",
+        "Пришли JSON-файл",
+        "Сохрани это в Markdown",
+    ),
+)
+def test_generic_file_report_is_not_hijacked_as_a_network_followup(message: str) -> None:
+    assert targets.requests_network_report_export(message) is False
+
+
+def test_ambiguous_network_report_format_is_closed_without_losing_export_intent() -> None:
+    message = "Просканируй мою подсеть и пришли отчёт как JSON и Markdown-файл"
+
+    assert targets.requests_network_scan(message) is True
+    assert targets.requests_network_report_export(message) is True
+    assert targets.requested_network_report_format(message) is None
+
+
+@pytest.mark.parametrize(
     "message",
     (
         "Теперь у тебя есть nmap, просканируй мою подсеть",

@@ -2148,6 +2148,9 @@ _ENGINEER_RECEIPT_BASE_TOOL_VERSIONS = {
 _ENGINEER_NETWORK_OUTCOME_METADATA_KEY = "accepted_engineer_network_outcome"
 _ENGINEER_NETWORK_OUTCOME_SCHEMA = "friday.engineer-network-outcome.v1"
 _ENGINEER_NETWORK_OUTCOME_RECEIPT_SCHEMA = "friday.accepted-engineer-network-outcome-receipt.v1"
+_ENGINEER_NETWORK_REPORT_METADATA_KEY = "accepted_engineer_network_report"
+_ENGINEER_NETWORK_REPORT_SCHEMA = "friday.engineer.network-report.v1"
+_ENGINEER_NETWORK_REPORT_RECEIPT_SCHEMA = "friday.accepted-engineer-network-report-receipt.v1"
 _ENGINEER_NETWORK_ACTION_TOOL = "engineer_scan_configured_network"
 _ENGINEER_DECOMPILE_ACTION_TOOL = "engineer_decompile_artifact"
 _ENGINEER_DECOMPILE_OUTCOME_METADATA_KEY = "accepted_engineer_decompile_outcome"
@@ -2342,6 +2345,70 @@ class _EngineerNetworkOutcome:
             "schema": _ENGINEER_NETWORK_OUTCOME_RECEIPT_SCHEMA,
             "outcome": outcome,
             "outcome_sha256": hashlib.sha256(encoded).hexdigest(),
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class _EngineerNetworkReport:
+    """Exact code-owned carrier prepared from one accepted current scan."""
+
+    format: Literal["markdown", "json"]
+    filename: str
+    mime_type: str
+    payload: bytes
+    report_sha256: str
+    request_binding_sha256: str
+    evidence_sha256: str
+
+    def __post_init__(self) -> None:
+        expected_identity = {
+            "markdown": ("friday-engineer-network-report.md", "text/markdown"),
+            "json": ("friday-engineer-network-report.json", "application/json"),
+        }.get(self.format)
+        if expected_identity != (self.filename, self.mime_type):
+            raise ValueError("engineer network report identity is invalid")
+        if not 1 <= len(self.payload) <= 64 * 1024:
+            raise ValueError("engineer network report size is invalid")
+        try:
+            text = self.payload.decode("utf-8", errors="strict")
+        except UnicodeDecodeError as exc:
+            raise ValueError("engineer network report is not UTF-8") from exc
+        if self.format == "markdown" and not text.startswith("# Friday Engineer network report\n"):
+            raise ValueError("engineer network Markdown header is invalid")
+        if self.format == "json":
+            try:
+                decoded = json.loads(text)
+            except (TypeError, ValueError) as exc:
+                raise ValueError("engineer network JSON report is invalid") from exc
+            if not isinstance(decoded, Mapping) or decoded.get("schema") != _ENGINEER_NETWORK_REPORT_SCHEMA:
+                raise ValueError("engineer network JSON schema is invalid")
+        if not hmac.compare_digest(hashlib.sha256(self.payload).hexdigest(), self.report_sha256):
+            raise ValueError("engineer network report digest is invalid")
+        for digest in (
+            self.report_sha256,
+            self.request_binding_sha256,
+            self.evidence_sha256,
+        ):
+            if re.fullmatch(r"[0-9a-f]{64}", digest) is None:
+                raise ValueError("engineer network report binding is invalid")
+
+    def attachment(self) -> dict[str, Any]:
+        return {
+            "kind": "document",
+            "filename": self.filename,
+            "mime_type": self.mime_type,
+            "content_base64": base64.b64encode(self.payload).decode("ascii"),
+        }
+
+    def receipt(self, outcome: _EngineerNetworkOutcome) -> dict[str, object]:
+        outcome_receipt = outcome.receipt()
+        return {
+            "schema": _ENGINEER_NETWORK_REPORT_RECEIPT_SCHEMA,
+            "format": self.format,
+            "report_sha256": self.report_sha256,
+            "request_binding_sha256": self.request_binding_sha256,
+            "evidence_sha256": self.evidence_sha256,
+            "outcome_sha256": outcome_receipt["outcome_sha256"],
         }
 
 
@@ -2576,6 +2643,104 @@ def _engineer_network_owned_outcome(
             reason_code="malformed_result",
             tool_started=tool_started,
         )
+
+
+def _engineer_network_report(
+    dossier: Mapping[str, Any],
+    outcome: _EngineerNetworkOutcome,
+    request: str,
+) -> _EngineerNetworkReport | None:
+    """Prepare one deterministic carrier from a current, exactly bound result."""
+
+    from friday.organs.engineer.targets import (
+        requested_network_report_format,
+        target_source_sha256,
+    )
+
+    report_format = requested_network_report_format(request)
+    if (
+        report_format not in {"markdown", "json"}
+        or outcome.status not in {CapabilityStatus.SUCCEEDED, CapabilityStatus.PARTIAL}
+        or not outcome.tool_started
+        or not outcome.scope
+        or not outcome.evidence_sha256
+        or _engineer_network_owned_outcome(dossier) != outcome
+    ):
+        return None
+    raw_targets = dossier.get("targets")
+    targets = raw_targets if isinstance(raw_targets, list) else []
+    if len(targets) != 1 or not isinstance(targets[0], Mapping):
+        return None
+    target = targets[0]
+    request_binding = target_source_sha256(request, outcome.scope)
+    if (
+        str(target.get("host") or "") != outcome.scope
+        or not hmac.compare_digest(str(target.get("source_sha256") or ""), request_binding)
+    ):
+        return None
+
+    result: dict[str, object] = {
+        "status": outcome.status.value,
+        "scope": outcome.scope,
+        "profile": outcome.profile,
+        "target_count": outcome.target_count,
+        "accounted": outcome.accounted,
+        "hosts_up": outcome.hosts_up,
+        "hosts_down_or_unknown": outcome.hosts_down_or_unknown,
+        "active_addresses": list(outcome.active_addresses),
+        "active_probes_status": outcome.active_probes_status,
+        "exploit_payloads_sent": False,
+        "coverage_grade": outcome.coverage_grade,
+        "evidence_sha256": outcome.evidence_sha256,
+        "nmap_version": outcome.nmap_version or None,
+    }
+    if report_format == "json":
+        payload = (
+            json.dumps(
+                {"schema": _ENGINEER_NETWORK_REPORT_SCHEMA, "result": result},
+                ensure_ascii=False,
+                sort_keys=True,
+                indent=2,
+                allow_nan=False,
+            )
+            + "\n"
+        ).encode()
+        filename = "friday-engineer-network-report.json"
+        mime_type = "application/json"
+    else:
+        active_addresses = (
+            ", ".join(f"`{address}`" for address in outcome.active_addresses)
+            if outcome.active_addresses
+            else "none"
+        )
+        payload = (
+            "# Friday Engineer network report\n\n"
+            f"- Schema: `{_ENGINEER_NETWORK_REPORT_SCHEMA}`\n"
+            f"- Status: `{outcome.status.value}`\n"
+            f"- Scope: `{outcome.scope}`\n"
+            f"- Profile: `{outcome.profile}`\n"
+            f"- Accounted addresses: {outcome.accounted} / {outcome.target_count}\n"
+            f"- Hosts up: {outcome.hosts_up if outcome.hosts_up is not None else 'unknown'}\n"
+            "- Hosts down or unknown: "
+            f"{outcome.hosts_down_or_unknown if outcome.hosts_down_or_unknown is not None else 'unknown'}\n"
+            f"- Active addresses: {active_addresses}\n"
+            f"- Coverage: `{outcome.coverage_grade}`\n"
+            f"- Active probes: `{outcome.active_probes_status}`\n"
+            "- Exploit payloads sent: `false`\n"
+            f"- Nmap version: `{outcome.nmap_version or 'unknown'}`\n"
+            f"- Evidence SHA-256: `{outcome.evidence_sha256}`\n"
+        ).encode()
+        filename = "friday-engineer-network-report.md"
+        mime_type = "text/markdown"
+    return _EngineerNetworkReport(
+        format=cast(Literal["markdown", "json"], report_format),
+        filename=filename,
+        mime_type=mime_type,
+        payload=payload,
+        report_sha256=hashlib.sha256(payload).hexdigest(),
+        request_binding_sha256=request_binding,
+        evidence_sha256=outcome.evidence_sha256,
+    )
 
 
 _ENGINEER_NETWORK_REASON_TEXT = {
@@ -11205,6 +11370,19 @@ _ATTACHMENT_AUTHORITY_CHANGED_BEFORE_PUBLICATION = (
 _ARCHIVE_SEARCH_AUTHORITY_CHANGED_BEFORE_PUBLICATION = (
     "Доступ или состав личного архива изменился во время обработки. Ответ по найденным "
     "материалам не опубликован; повторите запрос."
+)
+_ENGINEER_NETWORK_REPORT_AUTHORITY_CHANGED_BEFORE_PUBLICATION = (
+    "Право на Engineer-аудит или точная привязка результата изменились до публикации. "
+    "Сетевой результат и отчёт-файл не опубликованы; новый скан автоматически не запускаю."
+)
+_ENGINEER_NETWORK_REPORT_FOLLOWUP_UNAVAILABLE = (
+    "В этом сообщении нет точного текущего результата, из которого можно безопасно собрать "
+    "новый отчёт-файл. Я не буду восстанавливать его по тексту или повторно сканировать сеть. "
+    "Используй вложение из исходного ответа либо попроси сканирование и отчёт одним сообщением."
+)
+_ENGINEER_NETWORK_REPORT_UNAVAILABLE = (
+    "Отчёт-файл не создан: точный успешный или частичный результат этого сканирования "
+    "не удалось однозначно связать с выбранным форматом. Автоматически пересобирать данные не буду."
 )
 _ARCHIVE_SEARCH_UNAVAILABLE = (
     "Поиск по личному архиву сейчас недоступен. Ответ по памяти или другим источникам "
@@ -35172,6 +35350,11 @@ class AgentContext:
     interaction_mode: str = "dialogue"
     engineer_dossier: dict[str, Any] = field(default_factory=dict)
     engineer_network_outcome: _EngineerNetworkOutcome | None = None
+    engineer_network_report: _EngineerNetworkReport | None = field(
+        default=None,
+        repr=False,
+        compare=False,
+    )
     engineer_decompile_outcome: _EngineerDecompileOutcome | None = None
     pending_relations: int = 0
     pending_conflicts: int = 0
@@ -38850,6 +39033,51 @@ class AgentRuntime:
             return False
         fresh_actor = replace(actor, preset_key=str(principal_row["preset_key"] or "user"))
         return bool(authorization.authorize(fresh_actor, expected_security_id).allowed)
+
+    def _engineer_network_report_publication_authorized(
+        self,
+        conn: Any,
+        *,
+        actor: ActorContext,
+        dossier: Mapping[str, Any],
+        outcome: _EngineerNetworkOutcome,
+        report: _EngineerNetworkReport,
+        request: str,
+    ) -> bool:
+        """Rebind the exact current result and owner capability at commit."""
+
+        if type(outcome) is not _EngineerNetworkOutcome or type(report) is not _EngineerNetworkReport:
+            return False
+        fresh_outcome = _engineer_network_owned_outcome(dossier)
+        fresh_report = (
+            _engineer_network_report(dossier, fresh_outcome, request)
+            if type(fresh_outcome) is _EngineerNetworkOutcome
+            else None
+        )
+        if fresh_outcome != outcome or fresh_report != report:
+            return False
+        get_tool = getattr(self.kernel, "get_tool", None)
+        tool_spec = get_tool(_ENGINEER_NETWORK_ACTION_TOOL) if callable(get_tool) else None
+        if (
+            str(getattr(tool_spec, "name", "") or "") != _ENGINEER_NETWORK_ACTION_TOOL
+            or str(getattr(tool_spec, "security_id", "") or "") != "engineer.host.audit"
+            or str(getattr(tool_spec, "risk", "") or "") != "observe"
+        ):
+            return False
+        principal = str(actor.own_id or "").strip()
+        principal_row = conn.execute(
+            "SELECT preset_key, status FROM users WHERE id=?",
+            (principal,),
+        ).fetchone()
+        authorization = getattr(self.kernel, "authorization", None)
+        if principal_row is None or str(principal_row["status"] or "") != "active" or authorization is None:
+            return False
+        fresh_actor = replace(actor, preset_key=str(principal_row["preset_key"] or "user"))
+        return bool(
+            fresh_actor.is_owner
+            and authorization.authorize(fresh_actor, "engineer.use").allowed
+            and authorization.authorize(fresh_actor, "engineer.host.audit").allowed
+        )
 
     @staticmethod
     def _effect_private_digest(namespace_key: bytes, domain: str, value: str) -> str:
@@ -49747,6 +49975,11 @@ class AgentRuntime:
         # assignment is deliberately based on the timestamp captured at method
         # entry, not on when routing/context preparation happened to finish.
         context.turn_deadline = turn_deadline
+        network_report_requested = False
+        if interaction_mode == "engineer":
+            from friday.organs.engineer.targets import requests_network_report_export
+
+            network_report_requested = requests_network_report_export(clean_message)
         if (
             interaction_mode == "engineer"
             and enable_tools is True
@@ -49761,7 +49994,19 @@ class AgentRuntime:
             )
             context.engineer_network_outcome = _engineer_network_owned_outcome(context.engineer_dossier)
             if context.engineer_network_outcome is not None:
+                context.engineer_network_report = _engineer_network_report(
+                    context.engineer_dossier,
+                    context.engineer_network_outcome,
+                    clean_message,
+                )
                 rendered_network_outcome = _render_engineer_network_outcome(context.engineer_network_outcome)
+                if context.engineer_network_report is not None:
+                    rendered_network_outcome += (
+                        "\nОтчёт-файл подготовлен из этого проверенного результата: "
+                        f"`{context.engineer_network_report.filename}`."
+                    )
+                elif network_report_requested:
+                    rendered_network_outcome += f"\n{_ENGINEER_NETWORK_REPORT_UNAVAILABLE}"
                 context.structural_answer = "\n\n".join(
                     part for part in (context.structural_answer, rendered_network_outcome) if part
                 )
@@ -49772,7 +50017,11 @@ class AgentRuntime:
                 await self._settle_structural_remainder(
                     context,
                     clean_message,
-                    "запрос на активное сканирование настроенной LAN",
+                    (
+                        "запрос на активное сканирование настроенной LAN и сетевой отчёт-файл"
+                        if network_report_requested
+                        else "запрос на активное сканирование настроенной LAN"
+                    ),
                 )
             context.engineer_decompile_outcome = _engineer_decompile_owned_outcome(context.engineer_dossier)
             if context.engineer_decompile_outcome is not None:
@@ -49800,6 +50049,20 @@ class AgentRuntime:
                         clean_message,
                         "запрос на декомпиляцию выбранного бинарного файла",
                     )
+        if network_report_requested and context.engineer_network_outcome is None:
+            context.structural_answer = "\n\n".join(
+                part
+                for part in (
+                    context.structural_answer,
+                    _ENGINEER_NETWORK_REPORT_FOLLOWUP_UNAVAILABLE,
+                )
+                if part
+            )
+            await self._settle_structural_remainder(
+                context,
+                clean_message,
+                "сетевой отчёт по прошлому сканированию",
+            )
         engineer_unreadable_artifacts_covered = bool(
             interaction_mode == "engineer"
             and (unreadable_attachment_answer or partially_unreadable_attachment_answer)
@@ -51170,6 +51433,19 @@ class AgentRuntime:
                         ]
                     )
                 )
+            network_report = context.engineer_network_report
+            if network_report is not None:
+                existing_files = [
+                    dict(item) for item in (response.get("file_clips") or []) if isinstance(item, Mapping)
+                ]
+                raw_structural_count = response.get("_structural_file_count")
+                existing_structural_count = (
+                    max(0, min(len(existing_files), raw_structural_count))
+                    if isinstance(raw_structural_count, int) and not isinstance(raw_structural_count, bool)
+                    else 0
+                )
+                response["file_clips"] = [network_report.attachment(), *existing_files]
+                response["_structural_file_count"] = existing_structural_count + 1
 
         engineer_decompile_outcome = context.engineer_decompile_outcome
         if engineer_decompile_outcome is not None:
@@ -54226,6 +54502,14 @@ class AgentRuntime:
             and isinstance(context.engineer_network_outcome, _EngineerNetworkOutcome)
             else {}
         )
+        engineer_network_report = context.engineer_network_report
+        engineer_network_report_receipt = (
+            engineer_network_report.receipt(context.engineer_network_outcome)
+            if interaction_mode == "engineer"
+            and isinstance(engineer_network_report, _EngineerNetworkReport)
+            and isinstance(context.engineer_network_outcome, _EngineerNetworkOutcome)
+            else {}
+        )
         engineer_decompile_outcome_receipt = (
             context.engineer_decompile_outcome.receipt()
             if interaction_mode == "engineer"
@@ -54652,6 +54936,10 @@ class AgentRuntime:
             # The raw scope, host list and banners stay transient.  This closed
             # accepted-outcome receipt is committed atomically with the reply.
             assistant_metadata[_ENGINEER_NETWORK_OUTCOME_METADATA_KEY] = engineer_network_outcome_receipt
+        if engineer_network_report_receipt:
+            # Digest-only binding; CIDR and addresses live in the person-owned
+            # generated artifact, never duplicated into durable metadata.
+            assistant_metadata[_ENGINEER_NETWORK_REPORT_METADATA_KEY] = engineer_network_report_receipt
         if engineer_decompile_outcome_receipt:
             # Source bytes, Raw identity, symbols and pseudocode remain outside
             # durable metadata; only the closed accounting receipt is stored.
@@ -54806,12 +55094,17 @@ class AgentRuntime:
         obsidian_publication_reauth_required = bool(obsidian_owned_response and obsidian_tool_ledger)
         simple_public_news_owned_response = response.get("_simple_public_news_owned") is True
         simple_public_news_publication_reauth_required = simple_public_news_owned_response
+        network_report_publication_reauth_required = isinstance(
+            engineer_network_report,
+            _EngineerNetworkReport,
+        )
         publication_reauth_required = bool(
             attachment_publication_reauth_required
             or source_search_publication_reauth_required
             or archive_search_publication_reauth_required
             or obsidian_owned_response
             or simple_public_news_publication_reauth_required
+            or network_report_publication_reauth_required
         )
         accepted_simple_public_news_outcome = None
         accepted_archive_recall_outcome: ArchiveRecallOutcome | None = None
@@ -54822,8 +55115,14 @@ class AgentRuntime:
         generated_files_attestation = None
         generated_files_rollback_guard = (
             GeneratedFilesPersistenceRollbackGuard(self.settings.files_dir)
-            if engineer_decompile_outcome is not None
-            and engineer_decompile_outcome.status in {CapabilityStatus.SUCCEEDED, CapabilityStatus.PARTIAL}
+            if (
+                (
+                    engineer_decompile_outcome is not None
+                    and engineer_decompile_outcome.status
+                    in {CapabilityStatus.SUCCEEDED, CapabilityStatus.PARTIAL}
+                )
+                or network_report_publication_reauth_required
+            )
             else None
         )
         publication_transaction: Any = self.storage.transaction()
@@ -54938,6 +55237,19 @@ class AgentRuntime:
                     actor=actor,
                 )
             )
+            network_report_publication_authorized = bool(
+                not network_report_publication_reauth_required
+                or isinstance(engineer_network_outcome, _EngineerNetworkOutcome)
+                and isinstance(engineer_network_report, _EngineerNetworkReport)
+                and self._engineer_network_report_publication_authorized(
+                    publication_conn,
+                    actor=actor,
+                    dossier=context.engineer_dossier,
+                    outcome=engineer_network_outcome,
+                    report=engineer_network_report,
+                    request=clean_message,
+                )
+            )
             publication_authorized = bool(
                 not publication_reauth_required
                 or attachment_publication_authorized
@@ -54945,6 +55257,7 @@ class AgentRuntime:
                 and archive_search_publication_authorized
                 and obsidian_publication_authorized
                 and simple_public_news_publication_authorized
+                and network_report_publication_authorized
             )
             final_voice_publication_authorized = bool(
                 final_voice is None
@@ -54973,6 +55286,10 @@ class AgentRuntime:
                 simple_public_news_publication_reauth_required
                 and not simple_public_news_publication_authorized
             )
+            network_report_authority_changed_before_publication = bool(
+                network_report_publication_reauth_required
+                and not network_report_publication_authorized
+            )
             if not publication_authorized:
                 LOGGER.warning("source-publication: authority changed before assistant commit")
                 publication_authority_issues = [
@@ -54997,6 +55314,10 @@ class AgentRuntime:
                         (
                             "simple_public_news_authority_changed_before_publication",
                             simple_public_news_authority_changed_before_publication,
+                        ),
+                        (
+                            "network_report_authority_changed_before_publication",
+                            network_report_authority_changed_before_publication,
                         ),
                     )
                     if changed
@@ -55023,6 +55344,10 @@ class AgentRuntime:
                         _OBSIDIAN_WRITE_AUTHORITY_CHANGED_BEFORE_PUBLICATION
                         if obsidian_publication_tool in OBSIDIAN_WRITE_TOOL_NAMES
                         else _OBSIDIAN_READ_AUTHORITY_CHANGED_BEFORE_PUBLICATION
+                    )
+                if network_report_authority_changed_before_publication:
+                    authority_changed_notice = (
+                        _ENGINEER_NETWORK_REPORT_AUTHORITY_CHANGED_BEFORE_PUBLICATION
                     )
                 content = "\n\n".join(part for part in (safe_effect_notice, authority_changed_notice) if part)
                 response["content"] = content
@@ -55052,6 +55377,8 @@ class AgentRuntime:
                     assistant_metadata["model_output_truncated"] = False
                 if obsidian_authority_changed_before_publication:
                     response["_obsidian_authority_changed_owned"] = True
+                if network_report_authority_changed_before_publication:
+                    response["_engineer_network_report_authority_changed_owned"] = True
                 response.pop("_document_metadata_owned", None)
                 response.pop("_office_exact_owned", None)
                 model_said = ""
@@ -55160,6 +55487,11 @@ class AgentRuntime:
                 # even when the attachment's own files.read authority survived.
                 assistant_metadata.pop(_ENGINEER_DECOMPILE_OUTCOME_METADATA_KEY, None)
                 engineer_decompile_outcome_receipt = {}
+                if network_report_publication_reauth_required:
+                    assistant_metadata.pop(_ENGINEER_NETWORK_REPORT_METADATA_KEY, None)
+                    assistant_metadata.pop(_ENGINEER_NETWORK_OUTCOME_METADATA_KEY, None)
+                    engineer_network_report_receipt = {}
+                    engineer_network_outcome_receipt = {}
 
             obsidian_effect_operation_id = str(response.get("_obsidian_effect_operation_id") or "").strip()
             if obsidian_effect_operation_id:
@@ -55704,18 +56036,20 @@ class AgentRuntime:
                     assistant_message.get("metadata_json"),
                     expected_outcome=accepted_obsidian_effect_outcome,
                 )
-            if (
-                publication_authorized
-                and engineer_decompile_outcome is not None
+            decompile_report_expected = bool(
+                engineer_decompile_outcome is not None
                 and engineer_decompile_outcome.status
                 in {CapabilityStatus.SUCCEEDED, CapabilityStatus.PARTIAL}
-            ):
-                # Ghidra has already finished.  Freeze the exact report only
-                # after the final files.read/source reauthorization, but before
-                # releasing this same BEGIN IMMEDIATE transaction.  The Raw
-                # handle, descriptor, accepted outcome and assistant reply are
-                # therefore one publication unit; a later revoke cannot land in
-                # the former server-side persistence gap.
+            )
+            network_report_expected = bool(
+                network_report_publication_reauth_required
+                and network_report_publication_authorized
+            )
+            if publication_authorized and (decompile_report_expected or network_report_expected):
+                # Freeze every process-owned report only after its final
+                # capability/source reauthorization, but before releasing this
+                # same BEGIN IMMEDIATE transaction. Raw handles, descriptors,
+                # accepted receipts and assistant text are one publication unit.
                 generated_projection = persist_generated_response_files(
                     self.storage,
                     self.settings.files_dir,
@@ -55729,17 +56063,64 @@ class AgentRuntime:
                     rollback_guard=generated_files_rollback_guard,
                 )
                 persisted_files = generated_projection.get("files")
-                if (
-                    not isinstance(persisted_files, list)
-                    or not persisted_files
-                    or not isinstance(persisted_files[0], Mapping)
-                    or not hmac.compare_digest(
-                        str(persisted_files[0].get("sha256") or ""),
-                        engineer_decompile_outcome.report_sha256,
+                if not isinstance(persisted_files, list) or not persisted_files:
+                    raise ValueError("engineer generated report durability attestation failed")
+                if decompile_report_expected and (
+                    engineer_decompile_outcome is None
+                    or sum(
+                        1
+                        for item in persisted_files
+                        if isinstance(item, Mapping)
+                        and hmac.compare_digest(
+                            str(item.get("sha256") or ""),
+                            engineer_decompile_outcome.report_sha256,
+                        )
                     )
+                    != 1
                 ):
                     raise ValueError("engineer decompile report durability attestation failed")
+                if network_report_expected and (
+                    not isinstance(engineer_network_report, _EngineerNetworkReport)
+                    or sum(
+                        1
+                        for item in persisted_files
+                        if isinstance(item, Mapping)
+                        and item.get("filename") == engineer_network_report.filename
+                        and item.get("mime_type") == engineer_network_report.mime_type
+                        and item.get("size_bytes") == len(engineer_network_report.payload)
+                        and hmac.compare_digest(
+                            str(item.get("sha256") or ""),
+                            engineer_network_report.report_sha256,
+                        )
+                    )
+                    != 1
+                ):
+                    raise ValueError("engineer network report durability attestation failed")
                 response["file_clips"] = persisted_files
+                if network_report_expected:
+                    stored_row = publication_conn.execute(
+                        """SELECT metadata_json FROM messages
+                             WHERE id=? AND user_id IN (?, ?) AND role='assistant'""",
+                        (
+                            str(assistant_message.get("id") or ""),
+                            actor.own_id,
+                            actor.user_id,
+                        ),
+                    ).fetchone()
+                    try:
+                        stored_metadata = json.loads(
+                            str(stored_row["metadata_json"] or "") if stored_row is not None else ""
+                        )
+                    except (TypeError, ValueError, json.JSONDecodeError) as exc:
+                        raise ValueError("engineer network report metadata reread failed") from exc
+                    if (
+                        not isinstance(stored_metadata, Mapping)
+                        or stored_metadata.get(_ENGINEER_NETWORK_OUTCOME_METADATA_KEY)
+                        != engineer_network_outcome_receipt
+                        or stored_metadata.get(_ENGINEER_NETWORK_REPORT_METADATA_KEY)
+                        != engineer_network_report_receipt
+                    ):
+                        raise ValueError("engineer network report receipt binding changed")
                 generated_files_attestation = generated_files_persistence_attestation(
                     {
                         "message_id": str(assistant_message.get("id") or ""),
@@ -55747,13 +56128,14 @@ class AgentRuntime:
                     }
                 )
                 if generated_files_attestation is None:
-                    raise ValueError("engineer decompile persistence attestation is unavailable")
+                    raise ValueError("engineer generated-file persistence attestation is unavailable")
         publication_authority_changed_before_publication = bool(
             attachment_authority_changed_before_publication
             or source_search_authority_changed_before_publication
             or archive_search_authority_changed_before_publication
             or obsidian_authority_changed_before_publication
             or simple_public_news_authority_changed_before_publication
+            or network_report_authority_changed_before_publication
         )
         if attributed_knowledge_ids:
             self.storage.record_knowledge_usage(
@@ -55767,6 +56149,9 @@ class AgentRuntime:
             "message": content,
             "attachment_authority_changed_before_publication": (
                 attachment_authority_changed_before_publication
+            ),
+            "network_report_authority_changed_before_publication": (
+                network_report_authority_changed_before_publication
             ),
             "source_search_authority_changed_before_publication": (
                 source_search_authority_changed_before_publication
@@ -56239,9 +56624,10 @@ class AgentRuntime:
                             "host": configured_cidr,
                             "addresses": [],
                             "implied_port": None,
-                            "source_sha256": hashlib.sha256(
-                                f"{message}\x00{configured_cidr}".encode("utf-8", errors="replace")
-                            ).hexdigest(),
+                            "source_sha256": engineer_targets.target_source_sha256(
+                                message,
+                                configured_cidr,
+                            ),
                         }
                     ]
                     dossier["target_count"] = configured_snapshot.target_count
@@ -61938,6 +62324,7 @@ class AgentRuntime:
         settles_tags = "список тегов" in folded_settled or "инвентар" in folded_settled
         settles_archive_count = "общий счётчик личного архива" in folded_settled
         settles_engineer_network = "активное сканирование настроенной lan" in folded_settled
+        settles_engineer_network_report = "сетевой отчёт" in folded_settled
         settles_engineer_decompile = "декомпиляцию выбранного бинарного файла" in folded_settled
         tag_remainder_clauses = (
             _tag_inventory_open_remainder_clauses(
@@ -61990,6 +62377,18 @@ class AgentRuntime:
                 # literal clause, but it may never reopen that same effect for
                 # the main model/tool loop.
                 unsafe_rest = unsafe_rest or requests_active_assessment(rest)
+            if settles_engineer_network_report:
+                from friday.organs.engineer.targets import (
+                    requests_active_assessment,
+                    requests_network_report_output_clause,
+                )
+
+                # A report carrier is owned only by the exact current scan.
+                # Neither the remainder arbiter nor a later model may turn a
+                # historical prose answer into data or silently rerun packets.
+                unsafe_rest = unsafe_rest or requests_network_report_output_clause(
+                    rest
+                ) or requests_active_assessment(rest)
             if settles_engineer_decompile:
                 from friday.organs.engineer.targets import requests_artifact_decompile
 
