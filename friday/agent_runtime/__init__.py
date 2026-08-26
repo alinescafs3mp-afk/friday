@@ -2126,6 +2126,457 @@ _ENGINEER_RECEIPT_BASE_TOOL_VERSIONS = {
     "host_probe": "bounded-connect-v1",
     "artifact_worker": "sandbox-protocol-v1",
 }
+_ENGINEER_NETWORK_OUTCOME_METADATA_KEY = "accepted_engineer_network_outcome"
+_ENGINEER_NETWORK_OUTCOME_SCHEMA = "friday.engineer-network-outcome.v1"
+_ENGINEER_NETWORK_OUTCOME_RECEIPT_SCHEMA = "friday.accepted-engineer-network-outcome-receipt.v1"
+_ENGINEER_NETWORK_ACTION_TOOL = "engineer_scan_configured_network"
+_ENGINEER_NETWORK_FAILURE_REASONS = frozenset(
+    {
+        "authorization_unavailable",
+        "configured_network_identity_mismatch",
+        "configured_network_scan_intent_required",
+        "configured_network_target_invalid_or_ambiguous",
+        "configured_private_network_ambiguous",
+        "configured_private_network_missing",
+        "configured_private_network_not_admitted",
+        "deadline",
+        "invalid_arguments",
+        "invalid_profile",
+        "invalid_target",
+        "malformed_result",
+        "nmap_missing",
+        "nmap_unattested",
+        "scan_unavailable",
+        "turn_deadline_expired",
+    }
+)
+
+
+@dataclass(frozen=True, slots=True)
+class _EngineerNetworkOutcome:
+    """Process-owned, bounded result of the automatic configured-LAN action.
+
+    The full nmap projection stays transient in the Engineer dossier.  This
+    value contains only enough typed state to render the current request and to
+    persist a content-free receipt; model prose never decides its status.
+    """
+
+    status: CapabilityStatus
+    scope: str
+    profile: Literal["discover", "services"]
+    target_count: int
+    accounted: int
+    hosts_up: int | None
+    hosts_down_or_unknown: int | None
+    active_addresses: tuple[str, ...]
+    active_probes_status: Literal["sent", "not_sent", "uncertain"]
+    coverage_grade: Literal["complete", "partial", "unavailable"]
+    evidence_sha256: str
+    nmap_version: str
+    reason_code: str
+    tool_started: bool
+
+    def __post_init__(self) -> None:
+        if self.status not in {
+            CapabilityStatus.SUCCEEDED,
+            CapabilityStatus.PARTIAL,
+            CapabilityStatus.DENIED,
+            CapabilityStatus.UNAVAILABLE,
+            CapabilityStatus.UNCERTAIN,
+        }:
+            raise ValueError("engineer network outcome status is not closed")
+        if self.profile not in {"discover", "services"}:
+            raise ValueError("engineer network outcome profile is invalid")
+        if any(
+            isinstance(value, bool) or not isinstance(value, int) or not 0 <= value <= 256
+            for value in (self.target_count, self.accounted)
+        ):
+            raise ValueError("engineer network outcome accounting is invalid")
+        if self.accounted > self.target_count:
+            raise ValueError("engineer network outcome accounting exceeds its target")
+        for value in (self.hosts_up, self.hosts_down_or_unknown):
+            if value is not None and (
+                isinstance(value, bool) or not isinstance(value, int) or not 0 <= value <= 256
+            ):
+                raise ValueError("engineer network outcome host count is invalid")
+        if len(self.active_addresses) > 64 or len(set(self.active_addresses)) != len(self.active_addresses):
+            raise ValueError("engineer network outcome address projection is invalid")
+        network: ipaddress.IPv4Network | ipaddress.IPv6Network | None = None
+        if self.scope:
+            try:
+                network = ipaddress.ip_network(self.scope, strict=True)
+            except ValueError as exc:
+                raise ValueError("engineer network outcome scope is invalid") from exc
+            if str(network) != self.scope or network.num_addresses != self.target_count:
+                raise ValueError("engineer network outcome scope accounting changed")
+        elif self.target_count:
+            raise ValueError("engineer network outcome target has no scope")
+        for address in self.active_addresses:
+            try:
+                parsed = ipaddress.ip_address(address)
+            except ValueError as exc:
+                raise ValueError("engineer network outcome address is invalid") from exc
+            if network is None or parsed not in network:
+                raise ValueError("engineer network outcome address escaped its scope")
+        if self.active_probes_status not in {"sent", "not_sent", "uncertain"}:
+            raise ValueError("engineer network probe status is invalid")
+        if self.coverage_grade not in {"complete", "partial", "unavailable"}:
+            raise ValueError("engineer network coverage grade is invalid")
+        if self.evidence_sha256 and re.fullmatch(r"[0-9a-f]{64}", self.evidence_sha256) is None:
+            raise ValueError("engineer network evidence digest is invalid")
+        if self.nmap_version and re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9.+_-]{0,39}", self.nmap_version) is None:
+            raise ValueError("engineer network version is invalid")
+        if self.reason_code not in _ENGINEER_NETWORK_FAILURE_REASONS | {"none"}:
+            raise ValueError("engineer network reason is not closed")
+        if not isinstance(self.tool_started, bool):
+            raise ValueError("engineer network tool-start marker is invalid")
+        if self.status is CapabilityStatus.SUCCEEDED and not (
+            self.tool_started
+            and self.active_probes_status == "sent"
+            and self.coverage_grade == "complete"
+            and self.target_count > 0
+            and self.accounted == self.target_count
+            and self.hosts_up is not None
+            and self.hosts_down_or_unknown is not None
+            and self.hosts_up + self.hosts_down_or_unknown == self.target_count
+            and self.evidence_sha256
+            and self.reason_code == "none"
+        ):
+            raise ValueError("successful engineer network outcome is not fully accounted")
+        if self.status is CapabilityStatus.DENIED and (
+            self.tool_started or self.active_probes_status != "not_sent"
+        ):
+            raise ValueError("denied engineer network outcome claims an entered tool")
+        if self.status is CapabilityStatus.UNCERTAIN and not (
+            self.tool_started and self.active_probes_status == "uncertain"
+        ):
+            raise ValueError("uncertain engineer network outcome has no entered boundary")
+
+    def receipt(self) -> dict[str, object]:
+        """Return a content-free receipt bound to this exact closed outcome."""
+
+        outcome: dict[str, object] = {
+            "schema": _ENGINEER_NETWORK_OUTCOME_SCHEMA,
+            "status": self.status.value,
+            "profile": self.profile,
+            "target_count": self.target_count,
+            "accounted": self.accounted,
+            "hosts_up": self.hosts_up,
+            "hosts_down_or_unknown": self.hosts_down_or_unknown,
+            "active_probes_status": self.active_probes_status,
+            "coverage_grade": self.coverage_grade,
+            "evidence_sha256": self.evidence_sha256 or None,
+            "scope_sha256": hashlib.sha256(self.scope.encode("ascii")).hexdigest() if self.scope else None,
+            "reason_code": self.reason_code,
+            "tool_started": self.tool_started,
+        }
+        encoded = json.dumps(
+            outcome,
+            ensure_ascii=True,
+            sort_keys=True,
+            separators=(",", ":"),
+            allow_nan=False,
+        ).encode("ascii")
+        return {
+            "schema": _ENGINEER_NETWORK_OUTCOME_RECEIPT_SCHEMA,
+            "outcome": outcome,
+            "outcome_sha256": hashlib.sha256(encoded).hexdigest(),
+        }
+
+
+def _engineer_network_failure_reason(value: object) -> str:
+    reason = str(value or "").strip().casefold()
+    return reason if reason in _ENGINEER_NETWORK_FAILURE_REASONS else "scan_unavailable"
+
+
+def _engineer_network_scope(dossier: Mapping[str, Any], scan: Mapping[str, Any]) -> str:
+    raw_scope = str(scan.get("scope") or "").strip()
+    if not raw_scope:
+        targets = dossier.get("targets")
+        first = targets[0] if isinstance(targets, list) and targets else None
+        raw_scope = str(first.get("host") or "").strip() if isinstance(first, Mapping) else ""
+    try:
+        parsed = ipaddress.ip_network(raw_scope, strict=True)
+    except ValueError:
+        return ""
+    return str(parsed) if str(parsed) == raw_scope else ""
+
+
+def _engineer_network_owned_outcome_unchecked(
+    dossier: Mapping[str, Any],
+) -> _EngineerNetworkOutcome | None:
+    """Project one automatic configured-network request without model judgment."""
+
+    if dossier.get("_configured_network_action_requested") is not True:
+        return None
+    tool_started = dossier.get("_configured_network_tool_started") is True
+    ledger = dossier.get("_action_ledger")
+    ledger = ledger if isinstance(ledger, Mapping) else {}
+    probes_uncertain = int(ledger.get("active_probe_uncertain_count") or 0) > 0
+    target_count = dossier.get("target_count")
+    target_count = (
+        target_count
+        if isinstance(target_count, int) and not isinstance(target_count, bool) and 0 <= target_count <= 256
+        else 0
+    )
+    scan_value = dossier.get("network_scan")
+    scan = scan_value if isinstance(scan_value, Mapping) else {}
+    scope = _engineer_network_scope(dossier, scan)
+    profile_value = str(scan.get("profile") or "discover")
+    profile: Literal["discover", "services"] = (
+        cast(Literal["discover", "services"], profile_value)
+        if profile_value in {"discover", "services"}
+        else "discover"
+    )
+    target_error = str(dossier.get("target_error") or "")
+    if target_error:
+        return _EngineerNetworkOutcome(
+            status=CapabilityStatus.DENIED,
+            scope=scope,
+            profile=profile,
+            target_count=target_count,
+            accounted=0,
+            hosts_up=None,
+            hosts_down_or_unknown=None,
+            active_addresses=(),
+            active_probes_status="not_sent",
+            coverage_grade="unavailable",
+            evidence_sha256="",
+            nmap_version="",
+            reason_code=_engineer_network_failure_reason(target_error),
+            tool_started=False,
+        )
+
+    if scan.get("ok") is not True:
+        status = (
+            CapabilityStatus.UNCERTAIN if tool_started and probes_uncertain else CapabilityStatus.UNAVAILABLE
+        )
+        return _EngineerNetworkOutcome(
+            status=status,
+            scope=scope,
+            profile=profile,
+            target_count=target_count,
+            accounted=0,
+            hosts_up=None,
+            hosts_down_or_unknown=None,
+            active_addresses=(),
+            active_probes_status="uncertain" if status is CapabilityStatus.UNCERTAIN else "not_sent",
+            coverage_grade="unavailable",
+            evidence_sha256="",
+            nmap_version="",
+            reason_code=_engineer_network_failure_reason(
+                scan.get("error") or dossier.get("_configured_network_unavailable_reason")
+            ),
+            tool_started=tool_started,
+        )
+
+    coverage = scan.get("coverage")
+    coverage = coverage if isinstance(coverage, Mapping) else {}
+    grade = str(coverage.get("grade") or "")
+    requested = coverage.get("requested")
+    accounted = coverage.get("accounted")
+    skipped = coverage.get("skipped")
+    valid_accounting = bool(
+        grade in {"complete", "partial"}
+        and isinstance(requested, int)
+        and not isinstance(requested, bool)
+        and requested == target_count
+        and 1 <= requested <= 256
+        and isinstance(accounted, int)
+        and not isinstance(accounted, bool)
+        and 0 <= accounted <= requested
+        and isinstance(skipped, int)
+        and not isinstance(skipped, bool)
+        and 0 <= skipped <= requested - accounted
+        and scope
+        and ipaddress.ip_network(scope, strict=True).num_addresses == requested
+    )
+    report = scan.get("report")
+    report = report if isinstance(report, Mapping) else {}
+    structured = report.get("result")
+    structured = structured if isinstance(structured, Mapping) else {}
+    parser_status = str(scan.get("parser_status") or report.get("parser_status") or "")
+    hosts_up = structured.get("hosts_up")
+    hosts_down = structured.get("hosts_down_or_unknown")
+    valid_host_counts = bool(
+        isinstance(hosts_up, int)
+        and not isinstance(hosts_up, bool)
+        and 0 <= hosts_up <= 256
+        and isinstance(hosts_down, int)
+        and not isinstance(hosts_down, bool)
+        and 0 <= hosts_down <= 256
+        and hosts_up + hosts_down == target_count
+    )
+    raw_evidence = scan.get("evidence")
+    first_evidence = raw_evidence[0] if isinstance(raw_evidence, list) and raw_evidence else None
+    evidence_sha256 = str(first_evidence.get("sha256") or "") if isinstance(first_evidence, Mapping) else ""
+    if re.fullmatch(r"[0-9a-f]{64}", evidence_sha256) is None:
+        evidence_sha256 = ""
+    nmap_version = str(structured.get("nmap_version") or "").strip()
+    if re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9.+_-]{0,39}", nmap_version) is None:
+        nmap_version = ""
+    addresses: set[str] = set()
+    raw_hosts = structured.get("hosts")
+    network = ipaddress.ip_network(scope, strict=True) if scope else None
+    for row in raw_hosts if isinstance(raw_hosts, list) else []:
+        if len(addresses) >= 64 or not isinstance(row, Mapping) or row.get("state") != "up":
+            continue
+        raw_addresses = row.get("addresses")
+        for item in raw_addresses if isinstance(raw_addresses, list) else []:
+            if len(addresses) >= 64 or not isinstance(item, Mapping):
+                break
+            if str(item.get("type") or "") not in {"ipv4", "ipv6"}:
+                continue
+            try:
+                address = ipaddress.ip_address(str(item.get("address") or ""))
+            except ValueError:
+                continue
+            if network is not None and address in network:
+                addresses.add(str(address))
+    active_addresses = tuple(sorted(addresses, key=lambda value: int(ipaddress.ip_address(value))))
+    complete = bool(
+        valid_accounting
+        and grade == "complete"
+        and parser_status == "complete"
+        and accounted == requested
+        and valid_host_counts
+        and evidence_sha256
+        and scan.get("active_probes_sent") is True
+        and tool_started
+    )
+    partial = bool(
+        valid_accounting
+        and grade == "partial"
+        and parser_status in {"complete", "partial"}
+        and scan.get("active_probes_sent") is True
+        and tool_started
+    )
+    if not complete and not partial:
+        return _EngineerNetworkOutcome(
+            status=CapabilityStatus.UNCERTAIN if tool_started else CapabilityStatus.UNAVAILABLE,
+            scope=scope,
+            profile=profile,
+            target_count=target_count,
+            accounted=accounted if isinstance(accounted, int) and not isinstance(accounted, bool) else 0,
+            hosts_up=hosts_up if isinstance(hosts_up, int) and not isinstance(hosts_up, bool) else None,
+            hosts_down_or_unknown=(
+                hosts_down if isinstance(hosts_down, int) and not isinstance(hosts_down, bool) else None
+            ),
+            active_addresses=active_addresses,
+            active_probes_status="uncertain" if tool_started else "not_sent",
+            coverage_grade="unavailable",
+            evidence_sha256=evidence_sha256,
+            nmap_version=nmap_version,
+            reason_code="malformed_result",
+            tool_started=tool_started,
+        )
+    return _EngineerNetworkOutcome(
+        status=CapabilityStatus.SUCCEEDED if complete else CapabilityStatus.PARTIAL,
+        scope=scope,
+        profile=profile,
+        target_count=target_count,
+        accounted=cast(int, accounted),
+        hosts_up=cast(int, hosts_up) if valid_host_counts else None,
+        hosts_down_or_unknown=cast(int, hosts_down) if valid_host_counts else None,
+        active_addresses=active_addresses,
+        active_probes_status="sent",
+        coverage_grade="complete" if complete else "partial",
+        evidence_sha256=evidence_sha256,
+        nmap_version=nmap_version,
+        reason_code="none",
+        tool_started=True,
+    )
+
+
+def _engineer_network_owned_outcome(
+    dossier: Mapping[str, Any],
+) -> _EngineerNetworkOutcome | None:
+    """Fail closed while retaining ownership of an admitted network request."""
+
+    try:
+        return _engineer_network_owned_outcome_unchecked(dossier)
+    except (TypeError, ValueError):
+        if dossier.get("_configured_network_action_requested") is not True:
+            return None
+        tool_started = dossier.get("_configured_network_tool_started") is True
+        return _EngineerNetworkOutcome(
+            status=CapabilityStatus.UNCERTAIN if tool_started else CapabilityStatus.UNAVAILABLE,
+            scope="",
+            profile="discover",
+            target_count=0,
+            accounted=0,
+            hosts_up=None,
+            hosts_down_or_unknown=None,
+            active_addresses=(),
+            active_probes_status="uncertain" if tool_started else "not_sent",
+            coverage_grade="unavailable",
+            evidence_sha256="",
+            nmap_version="",
+            reason_code="malformed_result",
+            tool_started=tool_started,
+        )
+
+
+_ENGINEER_NETWORK_REASON_TEXT = {
+    "authorization_unavailable": "для этого хода не удалось подтвердить право Engineer",
+    "configured_network_identity_mismatch": "разрешённая сеть изменилась до запуска",
+    "configured_network_scan_intent_required": "не было явной просьбы отправлять сетевые пакеты",
+    "configured_network_target_invalid_or_ambiguous": "цель указана неоднозначно или некорректно",
+    "configured_private_network_ambiguous": "настроено несколько сетей; укажи точный CIDR",
+    "configured_private_network_missing": "оператор не настроил разрешённую LAN",
+    "configured_private_network_not_admitted": "эта сеть не входит в разрешённый частный диапазон",
+    "deadline": "истёк лимит времени сетевого действия",
+    "invalid_arguments": "закрытый профиль сканирования не принял параметры",
+    "invalid_profile": "профиль сканирования не разрешён",
+    "invalid_target": "цель не прошла сетевую политику",
+    "malformed_result": "результат nmap не прошёл проверку целостности",
+    "nmap_missing": "проверенный nmap недоступен",
+    "nmap_unattested": "nmap не прошёл проверку бинарника",
+    "scan_unavailable": "инструмент не вернул проверяемый результат",
+    "turn_deadline_expired": "общий лимит времени хода истёк до запуска",
+}
+
+
+def _render_engineer_network_outcome(outcome: _EngineerNetworkOutcome) -> str:
+    """Render only code-validated values; host-provided names never enter it."""
+
+    if outcome.status in {CapabilityStatus.SUCCEEDED, CapabilityStatus.PARTIAL}:
+        qualifier = "завершено" if outcome.status is CapabilityStatus.SUCCEEDED else "завершено частично"
+        lines = [
+            f"Сканирование подсети `{outcome.scope}` {qualifier}: "
+            f"учтено {outcome.accounted} из {outcome.target_count} адресов."
+        ]
+        if outcome.hosts_up is not None and outcome.hosts_down_or_unknown is not None:
+            lines.append(
+                f"Активных хостов: {outcome.hosts_up}; "
+                f"не ответили или не определены: {outcome.hosts_down_or_unknown}."
+            )
+        if outcome.active_addresses:
+            shown = ", ".join(f"`{item}`" for item in outcome.active_addresses)
+            suffix = (
+                f" (показаны первые {len(outcome.active_addresses)} из {outcome.hosts_up})"
+                if outcome.hosts_up is not None and outcome.hosts_up > len(outcome.active_addresses)
+                else ""
+            )
+            lines.append(f"Ответили: {shown}{suffix}.")
+        elif outcome.hosts_up == 0:
+            lines.append("Активных хостов не обнаружено.")
+        version = f" Nmap {outcome.nmap_version}." if outcome.nmap_version else ""
+        lines.append(f"Активные пробы отправлены; эксплуатационные payload не запускались.{version}")
+        if outcome.status is CapabilityStatus.PARTIAL:
+            lines.append("Покрытие неполное; автоматически повторять сканирование не буду.")
+        return "\n".join(lines)
+    reason = _ENGINEER_NETWORK_REASON_TEXT.get(
+        outcome.reason_code, _ENGINEER_NETWORK_REASON_TEXT["scan_unavailable"]
+    )
+    if outcome.status is CapabilityStatus.DENIED:
+        return f"Сканирование не запускалось: {reason}."
+    if outcome.status is CapabilityStatus.UNCERTAIN:
+        return (
+            f"Сканирование было запущено, но подтвердить его итог не удалось: {reason}. "
+            "Автоматически не повторяю, чтобы не дублировать сетевое действие."
+        )
+    return f"Сканирование не выполнено: {reason}."
 
 
 def _engineer_tool_name(schema: Mapping[str, Any]) -> str:
@@ -34306,6 +34757,7 @@ class AgentContext:
     ingestion: dict[str, Any] = field(default_factory=dict)
     interaction_mode: str = "dialogue"
     engineer_dossier: dict[str, Any] = field(default_factory=dict)
+    engineer_network_outcome: _EngineerNetworkOutcome | None = None
     pending_relations: int = 0
     pending_conflicts: int = 0
     feedback_summary: dict[str, Any] = field(default_factory=dict)
@@ -48867,6 +49319,21 @@ class AgentRuntime:
                 turn_deadline=turn_deadline,
                 enable_tools=enable_tools,
             )
+            context.engineer_network_outcome = _engineer_network_owned_outcome(context.engineer_dossier)
+            if context.engineer_network_outcome is not None:
+                rendered_network_outcome = _render_engineer_network_outcome(context.engineer_network_outcome)
+                context.structural_answer = "\n\n".join(
+                    part for part in (context.structural_answer, rendered_network_outcome) if part
+                )
+                # The automatic action has already settled the network clause.
+                # Feed only a separately proved compound tail to generation;
+                # an arbiter failure closes the tail instead of replaying the
+                # scan request to a model which can deny its own tool result.
+                await self._settle_structural_remainder(
+                    context,
+                    clean_message,
+                    "запрос на активное сканирование настроенной LAN",
+                )
         engineer_unreadable_artifacts_covered = bool(
             interaction_mode == "engineer"
             and (unreadable_attachment_answer or partially_unreadable_attachment_answer)
@@ -50217,6 +50684,19 @@ class AgentRuntime:
                 if current_document_secondary_request is not None
                 else await self._generate_response(generation_context, asked_of_model, attachments)
             )
+
+        engineer_network_outcome = context.engineer_network_outcome
+        if engineer_network_outcome is not None:
+            response["_engineer_network_owned"] = True
+            if engineer_network_outcome.tool_started:
+                response["tools_used"] = list(
+                    dict.fromkeys(
+                        [
+                            _ENGINEER_NETWORK_ACTION_TOOL,
+                            *(str(name) for name in (response.get("tools_used") or []) if str(name)),
+                        ]
+                    )
+                )
 
         if context.archive_search_isolated_turn:
             # Reassert the isolation fixed point after arbitrary model/adapter
@@ -53237,6 +53717,12 @@ class AgentRuntime:
             if interaction_mode == "engineer" and isinstance(context.engineer_dossier, Mapping)
             else {}
         )
+        engineer_network_outcome_receipt = (
+            context.engineer_network_outcome.receipt()
+            if interaction_mode == "engineer"
+            and isinstance(context.engineer_network_outcome, _EngineerNetworkOutcome)
+            else {}
+        )
         assistant_used_attachment = bool(
             attachment_readable_count > 0
             or response.get("_document_metadata_owned") is True
@@ -53432,6 +53918,8 @@ class AgentRuntime:
                 "verdict_kind": (
                     "office_exact"
                     if response.get("_office_exact_owned") is True
+                    else "engineer_network_scan"
+                    if response.get("_engineer_network_owned") is True
                     else "obsidian"
                     if response.get("_obsidian_owned") is True
                     else "obsidian_result_note"
@@ -53646,6 +54134,10 @@ class AgentRuntime:
             # Persist only bounded provenance. The full dossier (host banners,
             # strings and other potentially secret source data) remains transient.
             assistant_metadata["engineer_receipt"] = engineer_receipt
+        if engineer_network_outcome_receipt:
+            # The raw scope, host list and banners stay transient.  This closed
+            # accepted-outcome receipt is committed atomically with the reply.
+            assistant_metadata[_ENGINEER_NETWORK_OUTCOME_METADATA_KEY] = engineer_network_outcome_receipt
         # Final audio is another source-derived carrier, not decoration on an
         # already-published message.  Synthesize it before the definitive
         # provider re-read/assistant transaction: the voice helper admits the
@@ -54802,6 +55294,11 @@ class AgentRuntime:
                 "attachment_verification_complete": attachment_verification_complete,
                 "restored_attachment_count": restored_history_attachment_count,
                 **({"engineer_receipt": engineer_receipt} if engineer_receipt else {}),
+                **(
+                    {_ENGINEER_NETWORK_OUTCOME_METADATA_KEY: (engineer_network_outcome_receipt)}
+                    if engineer_network_outcome_receipt
+                    else {}
+                ),
             },
         }
 
@@ -55048,6 +55545,10 @@ class AgentRuntime:
         network_scope_requested = bool(
             configured_network_requested or explicit_network_cidr or explicit_network_error
         )
+        # Private control-plane marker: only this current human request may
+        # acquire a process-owned configured-network outcome.  It never enters
+        # the model dossier or durable content by itself.
+        dossier["_configured_network_action_requested"] = network_scope_requested
         dossier["network_request_status"] = (
             "explicit_active_request" if network_requested else "not_requested"
         )
@@ -55058,10 +55559,16 @@ class AgentRuntime:
             capability: str,
         ) -> ToolResult | None:
             if _turn_deadline_expired(turn_deadline):
+                if tool_name == _ENGINEER_NETWORK_ACTION_TOOL:
+                    dossier["_configured_network_unavailable_reason"] = "turn_deadline_expired"
                 return None
             fresh_actor = self._fresh_engineer_actor(actor, capability)
             if fresh_actor is None:
+                if tool_name == _ENGINEER_NETWORK_ACTION_TOOL:
+                    dossier["_configured_network_unavailable_reason"] = "authorization_unavailable"
                 return None
+            if tool_name == _ENGINEER_NETWORK_ACTION_TOOL:
+                dossier["_configured_network_tool_started"] = True
             _mark_engineer_action_started(dossier, tool_name)
             try:
                 result = await _await_with_turn_deadline(
@@ -56210,9 +56717,15 @@ class AgentRuntime:
             # Keep the engineer profile local to the primary Qwen lane. Explicit
             # narrower classifier/output limits still win, while ordinary modes
             # and legacy/test adapters retain their existing call signatures.
+            #
+            # The live 2026-08-26 PE turn proved that an unconstrained thinking
+            # pass can consume all 8192 completion tokens and return no visible
+            # answer at all.  Engineer evidence is already produced by bounded,
+            # code-owned tools; keep synthesis visible and deadline-safe instead
+            # of spending the whole response budget on transport-private notes.
             kwargs.setdefault("temperature", 0.1)
             kwargs.setdefault("max_tokens", 8_192)
-            kwargs.setdefault("enable_thinking", True)
+            kwargs.setdefault("enable_thinking", False)
         return await self._deadline_bounded_chat(
             context.turn_deadline if context is not None else None,
             messages,
@@ -56231,7 +56744,7 @@ class AgentRuntime:
         if context is not None and context.interaction_mode == "engineer" and isinstance(self.llm, LLMRouter):
             kwargs.setdefault("temperature", 0.1)
             kwargs.setdefault("max_tokens", 8_192)
-            kwargs.setdefault("enable_thinking", True)
+            kwargs.setdefault("enable_thinking", False)
         if context is not None and context.current_attachment_present and kwargs.get("max_tokens") is None:
             kwargs["max_tokens"] = _ATTACHMENT_PRIMARY_MODEL_OUTPUT_TOKENS
         if context is not None and context.current_attachment_present:
@@ -60778,6 +61291,7 @@ class AgentRuntime:
         folded_settled = settled.casefold()
         settles_tags = "список тегов" in folded_settled or "инвентар" in folded_settled
         settles_archive_count = "общий счётчик личного архива" in folded_settled
+        settles_engineer_network = "активное сканирование настроенной lan" in folded_settled
         tag_remainder_clauses = (
             _tag_inventory_open_remainder_clauses(
                 message,
@@ -60821,6 +61335,14 @@ class AgentRuntime:
             unsafe_rest = not rest_tokens or len(rest_tokens) >= len(original_tokens) or not is_subsequence
 
             folded_rest = _classification_text(rest).casefold()
+            if settles_engineer_network:
+                from friday.organs.engineer.targets import requests_active_assessment
+
+                # The structural action has already consumed the only packet
+                # authority in this turn.  A remainder model may select another
+                # literal clause, but it may never reopen that same effect for
+                # the main model/tool loop.
+                unsafe_rest = unsafe_rest or requests_active_assessment(rest)
             if "сч" in folded_settled and "тчик" in folded_settled:
                 source_clauses = (
                     _split_tag_request_clauses(message)

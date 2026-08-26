@@ -10,6 +10,7 @@ from __future__ import annotations
 import hashlib
 import ipaddress
 import re
+import unicodedata
 from collections.abc import Iterator
 from contextlib import contextmanager
 from contextvars import ContextVar
@@ -38,18 +39,25 @@ _CIDR = re.compile(
 )
 _ACTIVE_ASSESSMENT_VERB = re.compile(
     r"\A\s*(?:(?:hi|hello|hey|привет|здравствуй(?:те)?)[!,.;:\s]+)?"
+    r"(?:(?:and|so|then|now|а|и|ну|так|тогда|теперь|сейчас|уже)\s+){0,2}"
     r"(?:(?:please|pls|kindly|can\s+you|could\s+you|would\s+you|"
     r"i\s+(?:want|need|ask|authorize)\s+you\s+to|"
-    r"пожалуйста|прошу|можешь|можете|нужно|надо|хочу|разрешаю)\s*[,;:]?\s+)?"
+    r"пожалуйста|прошу|можешь|можете|сможешь|сможете|"
+    r"(?:не\s+)?мог(?:ла|ли)?\s+бы(?:\s+(?:ты|вы))?|давай(?:те)?|"
+    r"нужно|надо|хочу|разрешаю)\s*[,;:]?\s+)?"
+    r"(?:(?:now|then|finally|теперь|сейчас|уже|наконец)\s+)?"
     r"(?:actively\s+|активно\s+)?(?:"
     r"scan|probe|audit|assess|inspect|enumerate|discover|check|test|"
     r"run\s+(?:an?\s+)?(?:scan|probe|audit|assessment|inspection)|"
     r"start\s+(?:an?\s+)?(?:scan|probe|audit)|"
     r"perform\s+(?:an?\s+)?(?:scan|probe|audit|assessment|inspection)|"
-    r"просканиру(?:й|йте)|сканиру(?:й|йте)|проверь(?:те)?|провер(?:ь|ьте)|"
-    r"проаудиру(?:й|йте)|обследу(?:й|йте)|исследу(?:й|йте)|"
-    r"запусти(?:те)?\s+(?:сканирование|проверку|аудит)|"
-    r"проведи(?:те)?\s+(?:сканирование|проверку|аудит|обследование)"
+    r"просканиру(?:й|йте|ем)|просканировать|сканиру(?:й|йте|ем)|сканировать|"
+    r"проверь(?:те)?|провер(?:ь|ьте)|проверить|"
+    r"проаудиру(?:й|йте)|проаудировать|обследу(?:й|йте)|обследовать|"
+    r"исследу(?:й|йте)|исследовать|"
+    r"запусти(?:те)?\s*(?:,\s*пожалуйста\s*,?\s*)?(?:сканирование|проверку|аудит)|"
+    r"проведи(?:те)?\s*(?:,\s*пожалуйста\s*,?\s*)?"
+    r"(?:сканирование|проверку|аудит|обследование)"
     r")\b",
     re.IGNORECASE,
 )
@@ -62,10 +70,11 @@ _ACTIVE_ASSESSMENT_NEGATION = re.compile(
 )
 _PASSIVE_ASSESSMENT_OBJECT = re.compile(
     r"\b(?:report|results?|log|document|file|text|article|screenshot|"
-    r"configuration|settings?|status|topology|diagram|inventory|"
+    r"configuration|settings?|status|topology|diagram|inventory|connection|connectivity|"
     r"отч[её]т\w*|результат\w*|лог\w*|документ\w*|файл\w*|текст\w*|"
     r"стать\w*|скриншот\w*|конфигурац\w*|настройк\w*|"
-    r"состоян\w*|статус\w*|тополог\w*|схем\w*|инвентар\w*)\b",
+    r"состоян\w*|статус\w*|тополог\w*|схем\w*|инвентар\w*|"
+    r"подключен\w*|соединен\w*|соединён\w*)\b",
     re.IGNORECASE,
 )
 _CONFIGURED_NETWORK_OBJECT = re.compile(
@@ -79,19 +88,77 @@ _CONFIGURED_NETWORK_OBJECT = re.compile(
 )
 _CONFIGURED_NETWORK_ACTIVE_VERB = re.compile(
     r"\A\s*(?:(?:hi|hello|hey|привет|здравствуй(?:те)?)[!,.;:\s]+)?"
+    r"(?:(?:and|so|then|now|а|и|ну|так|тогда|теперь|сейчас|уже)\s+){0,2}"
     r"(?:(?:please|pls|kindly|can\s+you|could\s+you|would\s+you|"
     r"i\s+(?:want|need|ask|authorize)\s+you\s+to|"
-    r"пожалуйста|прошу|можешь|можете|нужно|надо|хочу|разрешаю)\s*[,;:]?\s+)?"
+    r"пожалуйста|прошу|можешь|можете|сможешь|сможете|"
+    r"(?:не\s+)?мог(?:ла|ли)?\s+бы(?:\s+(?:ты|вы))?|давай(?:те)?|"
+    r"нужно|надо|хочу|разрешаю)\s*[,;:]?\s+)?"
+    r"(?:(?:now|then|finally|теперь|сейчас|уже|наконец)\s+)?"
     r"(?:actively\s+|активно\s+)?(?:"
     r"scan|probe|audit|enumerate|discover|"
     r"run\s+(?:an?\s+)?(?:scan|probe|audit)|"
     r"start\s+(?:an?\s+)?(?:scan|probe|audit)|"
     r"perform\s+(?:an?\s+)?(?:scan|probe|audit)|"
-    r"просканиру(?:й|йте)|сканиру(?:й|йте)|проаудиру(?:й|йте)|"
-    r"обследу(?:й|йте)|исследу(?:й|йте)|"
-    r"запусти(?:те)?\s+(?:сканирование|аудит)|"
-    r"проведи(?:те)?\s+(?:сканирование|аудит|обследование)"
+    r"просканиру(?:й|йте|ем)|просканировать|сканиру(?:й|йте|ем)|сканировать|"
+    r"проаудиру(?:й|йте)|проаудировать|обследу(?:й|йте)|обследовать|"
+    r"исследу(?:й|йте)|исследовать|"
+    r"(?:use|run)\s+(?:nmap|a\s+(?:network|port)\s+scan)|"
+    r"(?:используй|используйте|запусти|запустите)\s+(?:nmap|сканер\w*)|"
+    r"запусти(?:те)?\s*(?:,\s*пожалуйста\s*,?\s*)?(?:сканирование|аудит)|"
+    r"проведи(?:те)?\s*(?:,\s*пожалуйста\s*,?\s*)?"
+    r"(?:сканирование|аудит|обследование)"
     r")\b",
+    re.IGNORECASE,
+)
+_NETWORK_SCAN_MECHANISM = re.compile(
+    r"\b(?:nmap|scanner|network\s+scan|port\s+scan|"
+    r"сканер\w*|сканирован\w*|скан\w*\s+порт\w*)\b",
+    re.IGNORECASE,
+)
+_REQUEST_CODE_TEXT = re.compile(
+    r"```[\s\S]*?(?:```|\Z)|~~~[\s\S]*?(?:~~~|\Z)|`[^`\r\n]*(?:`|$)",
+    re.MULTILINE,
+)
+_QUOTED_REQUEST_TEXT = re.compile(
+    r"«[^»]*»|“[^”]*”|„[^“]*“|\"[^\"\r\n]*\"|'[^'\r\n]*'",
+)
+_UNTERMINATED_REQUEST_QUOTE = re.compile(r"(?m)[«“„\"][^\r\n]*$")
+_REQUEST_BLOCKQUOTE = re.compile(r"(?m)^[ \t]*>[^\r\n]*$")
+_REQUEST_UNIT_BOUNDARY = re.compile(r"(?:[!?;]+(?:\s+|$)|\.(?:\s+|$)|\n+)")
+_REQUEST_SOFT_BOUNDARY = re.compile(r"(?:,\s+|\s+[—–-]\s+)")
+_REPORTED_REQUEST_CUE = re.compile(
+    r"\b(?:сказа\w*|говор\w*|написа\w*|указа\w*|попрос\w*|просил\w*|велел\w*|"
+    r"предлож\w*|посовет\w*|требу\w*|цитир\w*|цитат\w*|повтор\w*|"
+    r"перевед\w*|означа\w*|said|says?|wrote|told|asked|ordered|"
+    r"suggested|recommended|required|quote\w*|repeat\w*|translat\w*|means?)\b",
+    re.IGNORECASE,
+)
+_META_REQUEST_CUE = re.compile(
+    r"\b(?:пример\w*|фраз\w*|цитат\w*|инструкц\w*|шаблон\w*|"
+    r"команд\w*|examples?|phrases?|quot(?:e|es|ed)|instructions?|templates?|commands?)\b",
+    re.IGNORECASE,
+)
+_CONDITIONAL_REQUEST_CUE = re.compile(r"\b(?:если|if|unless)\b", re.IGNORECASE)
+_POLITE_NEGATIVE_MODAL = re.compile(
+    r"\bне\s+мог(?:ла|ли)?\s+бы(?:\s+(?:ты|вы))?\b",
+    re.IGNORECASE,
+)
+_TRAILING_REQUEST_CANCEL = re.compile(
+    r"(?:\b(?:но|однако|хотя|but|however)\b[^.!?\n]{0,40})?"
+    r"(?:\bне\s+(?:надо|нужно|стоит|делай(?:те)?|выполняй(?:те)?|"
+    r"запускай(?:те)?|сканируй(?:те)?)\b|"
+    r"\b(?:отмена|отмени(?:те)?|передумал(?:а)?)\b|"
+    r"\b(?:do\s+not|don't|dont|never)\s+(?:do|scan|run|execute)\b|"
+    r"\b(?:cancel(?:\s+(?:it|that))?|never\s+mind)\b)",
+    re.IGNORECASE,
+)
+_TRAILING_REQUEST_ATTRIBUTION = re.compile(
+    r"(?:[,;]\s*|\s+[—–-]\s+|(?:^|[.!?])\s*)"
+    r"(?:это\s+(?:пример|цитата|фраза|команда)|"
+    r"так\s+(?:сказал|написал)\w*|"
+    r"this\s+is\s+(?:an?\s+)?(?:example|quote|phrase|command)|"
+    r"(?:as\s+)?(?:said|written)\s+by)\b",
     re.IGNORECASE,
 )
 _ARTIFACT_PATCH_REQUEST = re.compile(
@@ -247,9 +314,14 @@ def parse_host_token(value: str) -> tuple[str, int | None]:
 
 
 def extract_targets(speech: str) -> list[dict[str, str | int | None]]:
-    """Return distinct targets in textual appearance order, without overlap."""
+    """Return unquoted current-speech targets in textual appearance order.
 
-    text = str(speech or "")
+    Quoted examples, code and Markdown blockquotes are data, not destination
+    authority.  Their bytes are position-preservingly blanked by the same
+    projection used by the action classifier before any target regex runs.
+    """
+
+    _, authority = _request_projection(speech)
     candidates: list[tuple[int, int, int, str, str]] = []
     for priority, (kind, pattern) in enumerate(
         (
@@ -260,7 +332,7 @@ def extract_targets(speech: str) -> list[dict[str, str | int | None]]:
             ("hostname", _HOSTNAME),
         )
     ):
-        for match in pattern.finditer(text):
+        for match in pattern.finditer(authority):
             candidates.append((match.start(), match.end(), priority, kind, match.group()))
     candidates.sort(key=lambda item: (item[0], item[2], -(item[1] - item[0])))
 
@@ -297,13 +369,13 @@ def extract_single_target(speech: str) -> dict[str, str | int | None] | None:
 
 
 def extract_single_cidr(speech: str) -> str | None:
-    """Return one canonical explicit CIDR and reject mixed target authority."""
+    """Return one unquoted canonical CIDR and reject mixed target authority."""
 
-    text = str(speech or "")
-    url_ranges = [(item.start(), item.end()) for item in _URL.finditer(text)]
+    _, authority = _request_projection(speech)
+    url_ranges = [(item.start(), item.end()) for item in _URL.finditer(authority)]
     matches = [
         item
-        for item in _CIDR.finditer(text)
+        for item in _CIDR.finditer(authority)
         if not any(item.start() < end and item.end() > start for start, end in url_ranges)
     ]
     if not matches:
@@ -312,7 +384,7 @@ def extract_single_cidr(speech: str) -> str | None:
         raise ValueError("engineer network turn must name exactly one CIDR")
     match = matches[0]
     token = match.group()
-    masked = text[: match.start()] + (" " * len(token)) + text[match.end() :]
+    masked = authority[: match.start()] + (" " * len(token)) + authority[match.end() :]
     if extract_targets(masked):
         raise ValueError("engineer network turn cannot mix a CIDR with another target")
     try:
@@ -325,6 +397,103 @@ def extract_single_cidr(speech: str) -> str | None:
     return canonical
 
 
+@dataclass(frozen=True, slots=True)
+class _DirectRequestSpan:
+    start: int
+    end: int
+    unit_start: int
+    unit_end: int
+
+
+def _normalize_request_text(speech: str) -> str:
+    """Normalize words while retaining newline authority boundaries."""
+
+    normalized = unicodedata.normalize("NFKC", str(speech or ""))
+    return "\n".join(" ".join(line.split()) for line in normalized.splitlines())
+
+
+def _mask_request_data(text: str) -> str:
+    """Blank quoted/code/reported Markdown payloads without moving offsets."""
+
+    masked = text
+    for pattern in (
+        _REQUEST_CODE_TEXT,
+        _QUOTED_REQUEST_TEXT,
+        _UNTERMINATED_REQUEST_QUOTE,
+        _REQUEST_BLOCKQUOTE,
+    ):
+        masked = pattern.sub(lambda match: " " * len(match.group(0)), masked)
+    return masked
+
+
+def _request_projection(speech: str) -> tuple[str, str]:
+    text = _normalize_request_text(speech)
+    return text, _mask_request_data(text)
+
+
+def _request_units(masked: str) -> Iterator[tuple[int, int]]:
+    cursor = 0
+    for boundary in _REQUEST_UNIT_BOUNDARY.finditer(masked):
+        if cursor < boundary.start():
+            yield cursor, boundary.start()
+        cursor = boundary.end()
+    if cursor < len(masked):
+        yield cursor, len(masked)
+
+
+def _request_is_negated(masked: str) -> bool:
+    # Russian ``не мог бы`` is a conventional polite request, not a
+    # cancellation. A second ``не`` before the action remains visible and denies it.
+    negation_surface = _POLITE_NEGATIVE_MODAL.sub(
+        lambda match: " " * len(match.group(0)),
+        masked,
+    )
+    return _ACTIVE_ASSESSMENT_NEGATION.search(negation_surface) is not None
+
+
+def _direct_request_matches(speech: str, pattern: re.Pattern[str]) -> tuple[_DirectRequestSpan, ...]:
+    """Locate direct action clauses and keep data/reported speech inert.
+
+    A fact may precede the request (``nmap is installed, scan ...``), but the
+    action itself must begin a punctuation-delimited clause.  Every governing
+    prefix in the same sentence is inspected, so inserting ``please`` between a
+    reporting verb and its quoted command cannot mint effect authority.
+    """
+
+    _text, masked = _request_projection(speech)
+    if not masked.strip():
+        return ()
+    found: list[_DirectRequestSpan] = []
+    for unit_start, unit_end in _request_units(masked):
+        unit = masked[unit_start:unit_end]
+        if _CONDITIONAL_REQUEST_CUE.search(unit):
+            continue
+        starts = [unit_start]
+        starts.extend(unit_start + boundary.end() for boundary in _REQUEST_SOFT_BOUNDARY.finditer(unit))
+        for start in starts:
+            request = pattern.match(masked[start:unit_end])
+            if request is None:
+                continue
+            governing_prefix = masked[unit_start:start]
+            if _REPORTED_REQUEST_CUE.search(governing_prefix) or _META_REQUEST_CUE.search(governing_prefix):
+                continue
+            request_start = start + request.start()
+            request_end = start + request.end()
+            trailing = masked[request_end:]
+            if _TRAILING_REQUEST_CANCEL.search(trailing) or _TRAILING_REQUEST_ATTRIBUTION.search(trailing):
+                return ()
+            found.append(
+                _DirectRequestSpan(
+                    start=request_start,
+                    end=request_end,
+                    unit_start=unit_start,
+                    unit_end=unit_end,
+                )
+            )
+            break
+    return tuple(found)
+
+
 def requests_active_assessment(speech: str) -> bool:
     """Return whether the current human text explicitly asks for active probes.
 
@@ -334,31 +503,37 @@ def requests_active_assessment(speech: str) -> bool:
     gates; this predicate alone can never authorize a destination.
     """
 
-    text = " ".join(str(speech or "").split())
-    if not text or _ACTIVE_ASSESSMENT_NEGATION.search(text):
+    text, masked = _request_projection(speech)
+    if not text or _request_is_negated(masked):
         return False
-    request = _ACTIVE_ASSESSMENT_VERB.search(text)
-    if request is None:
+    request_spans = _direct_request_matches(text, _ACTIVE_ASSESSMENT_VERB)
+    if not request_spans:
         return False
     targets = extract_targets(text)
     if len(targets) != 1:
         # Preserve an explicit zero/multi-target request for the separate exact
         # target gate, which will return a useful refusal without doing DNS.
-        return True
+        return any(
+            _PASSIVE_ASSESSMENT_OBJECT.search(masked[item.unit_start : item.unit_end]) is None
+            for item in request_spans
+        )
     token = str(targets[0].get("token") or "")
     target_start = text.casefold().find(token.casefold())
     if target_start < 0:
         return False
     target_end = target_start + len(token)
-    between = (
-        text[request.end() : target_start]
-        if request.end() <= target_start
-        else text[target_end : request.start()]
-    )
-    # “Inspect the report about host” is a request to inspect passive material,
-    # not permission to contact the host.  Keep the effect phrase close to the
-    # target and free of an intervening document/report object.
-    return len(between) <= 160 and _PASSIVE_ASSESSMENT_OBJECT.search(between) is None
+    for request_span in request_spans:
+        between = (
+            masked[request_span.end : target_start]
+            if request_span.end <= target_start
+            else masked[target_end : request_span.start]
+        )
+        # “Inspect the report about host” is a request to inspect passive
+        # material, not permission to contact the host. Keep the effect phrase
+        # close to the target and free of an intervening passive object.
+        if len(between) <= 160 and _PASSIVE_ASSESSMENT_OBJECT.search(between) is None:
+            return True
+    return False
 
 
 def requests_artifact_patch(speech: str) -> bool:
@@ -386,22 +561,36 @@ def requests_configured_network_assessment(speech: str) -> bool:
     scope is rejected later by policy rather than selected by a model.
     """
 
-    text = " ".join(str(speech or "").split())
-    return bool(
-        requests_network_scan(text)
-        and not extract_targets(text)
-        and _CONFIGURED_NETWORK_OBJECT.search(text) is not None
+    text, masked = _request_projection(speech)
+    if not requests_network_scan(text) or extract_targets(text):
+        return False
+    requests = _direct_request_matches(text, _CONFIGURED_NETWORK_ACTIVE_VERB)
+    if not requests:
+        requests = _direct_request_matches(text, _ACTIVE_ASSESSMENT_VERB)
+    return any(
+        _CONFIGURED_NETWORK_OBJECT.search(masked[item.start : item.unit_end]) is not None for item in requests
     )
 
 
 def requests_network_scan(speech: str) -> bool:
     """Require explicit packet-intent language for a CIDR-wide effect."""
 
-    text = " ".join(str(speech or "").split())
-    return bool(
-        requests_active_assessment(text)
-        and _CONFIGURED_NETWORK_ACTIVE_VERB.search(text) is not None
-        and _PASSIVE_ASSESSMENT_OBJECT.search(text) is None
+    text, masked = _request_projection(speech)
+    if not requests_active_assessment(text):
+        return False
+    packet_requests = _direct_request_matches(text, _CONFIGURED_NETWORK_ACTIVE_VERB)
+    if any(
+        _PASSIVE_ASSESSMENT_OBJECT.search(masked[item.unit_start : item.unit_end]) is None
+        for item in packet_requests
+    ):
+        return True
+    # A generic “check” is packet authority only when the current clause also
+    # names an explicit scanner.  “Check my network/config/password” stays
+    # passive and cannot reach nmap.
+    return any(
+        _PASSIVE_ASSESSMENT_OBJECT.search(masked[item.start : item.unit_end]) is None
+        and _NETWORK_SCAN_MECHANISM.search(masked[item.start : item.unit_end])
+        for item in _direct_request_matches(text, _ACTIVE_ASSESSMENT_VERB)
     )
 
 

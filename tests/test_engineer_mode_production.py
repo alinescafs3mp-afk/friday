@@ -274,9 +274,11 @@ async def test_engineer_primary_call_uses_real_qwen_payload_profile(settings, st
     )
 
     await runtime._turn_bounded_chat(engineer, messages)  # noqa: SLF001
+    engineer.current_attachment_present = True
+    await runtime._attachment_primary_chat(engineer, messages)  # noqa: SLF001
     await runtime._turn_bounded_chat(dialogue, messages)  # noqa: SLF001
 
-    engineer_payload, dialogue_payload = router.payloads
+    engineer_payload, engineer_attachment_payload, dialogue_payload = router.payloads
     default_payload = router._prepare_payload(  # noqa: SLF001
         messages,
         temperature=None,
@@ -285,7 +287,10 @@ async def test_engineer_primary_call_uses_real_qwen_payload_profile(settings, st
     )
     assert engineer_payload["temperature"] == 0.1
     assert engineer_payload["max_tokens"] == 8_192
-    assert engineer_payload["chat_template_kwargs"] == {"enable_thinking": True}
+    assert engineer_payload["chat_template_kwargs"] == {"enable_thinking": False}
+    assert engineer_attachment_payload["temperature"] == 0.1
+    assert engineer_attachment_payload["max_tokens"] == 8_192
+    assert engineer_attachment_payload["chat_template_kwargs"] == {"enable_thinking": False}
     assert dialogue_payload["temperature"] == default_payload["temperature"]
     assert dialogue_payload["max_tokens"] == default_payload["max_tokens"]
     assert dialogue_payload["chat_template_kwargs"] == {"enable_thinking": False}

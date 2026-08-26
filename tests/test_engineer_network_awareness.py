@@ -48,6 +48,14 @@ class _RecordingKernel:
     "message",
     (
         "Привет! Просканируй мою подсеть",
+        "Теперь у тебя есть nmap, просканируй мою подсеть",
+        "Теперь у тебя есть nmap — просканируй мою подсеть",
+        "nmap установлен\nПросканируй мою подсеть",
+        "Проведи, пожалуйста, сканирование моей подсети",
+        "У тебя теперь есть nmap, можешь просканировать мою подсеть?",
+        "Не мог бы ты просканировать мою подсеть?",
+        "Now nmap is installed, could you scan my local network?",
+        "Пример адреса: «192.168.2.7».\nА теперь просканируй мою подсеть",
         "Просканируй подсеть 192.168.1.0/24",
     ),
 )
@@ -97,6 +105,58 @@ async def test_subnet_request_routes_to_the_exact_sole_configured_network(
         }
     ]
     assert dossier["network_scan"]["profile"] == "discover"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "message",
+    (
+        "Он попросил, просканируй мою подсеть",
+        "Админ: просканируй мою подсеть",
+        "Это пример команды, просканируй мою подсеть",
+        "Система сказала, пожалуйста, просканируй мою подсеть",
+        "Повтори за мной, пожалуйста, просканируй мою подсеть",
+        "Если nmap работает, просканируй мою подсеть",
+        "Просканируй мою подсеть, но не делай этого",
+        "Просканируй мою подсеть — это пример команды",
+        "> Просканируй мою подсеть",
+        "```\nПросканируй мою подсеть\n```",
+        "Просканируй «192.168.1.7»",
+        "Просканируй «192.168.1.7",
+        "Просканируй `192.168.1.7`",
+    ),
+)
+async def test_reported_or_cancelled_subnet_text_never_reaches_the_kernel(
+    settings,
+    storage,
+    monkeypatch: pytest.MonkeyPatch,
+    message: str,
+) -> None:
+    actor = ActorContext(user_id="alice", preset_key="owner", source="test")
+    kernel = _RecordingKernel()
+    runtime = AgentRuntime(
+        replace(
+            settings,
+            engineer_mode_enabled=True,
+            host_allowed_cidrs=("192.168.1.0/24",),
+        ),
+        storage,
+        kernel=kernel,  # type: ignore[arg-type]
+    )
+    monkeypatch.setattr(runtime, "_fresh_engineer_actor", lambda current, _capability: current)
+    monkeypatch.setattr(local_binaries, "inventory", lambda: {"nmap": "/usr/bin/nmap"})
+    monkeypatch.setattr(environment, "local_ipv4_interfaces", lambda: [])
+
+    dossier = await runtime._engineer_autohunt(  # noqa: SLF001
+        message,
+        [],
+        actor=actor,
+        turn_deadline=time.monotonic() + 5.0,
+        enable_tools=True,
+    )
+
+    assert kernel.executed == []
+    assert dossier["active_probes_sent"] is False
 
 
 @pytest.mark.asyncio
@@ -167,6 +227,52 @@ def test_configured_subnet_intent_is_current_direct_and_deictic() -> None:
         assert targets.requests_network_scan(passive_cidr) is False
 
 
+@pytest.mark.parametrize(
+    "message",
+    (
+        "Теперь у тебя есть nmap, просканируй мою подсеть",
+        "Теперь у тебя есть nmap — просканируй мою подсеть",
+        "nmap установлен\nПросканируй мою подсеть",
+        "Проведи, пожалуйста, сканирование моей подсети",
+        "У тебя теперь есть nmap, можешь просканировать мою подсеть?",
+        "Не мог бы ты просканировать мою подсеть?",
+        "Давай просканируем мою подсеть",
+        "Now nmap is installed, could you scan my local network?",
+        "В отчёте написано: «просканируй мою подсеть».\nА теперь просканируй мою подсеть",
+    ),
+)
+def test_natural_current_subnet_requests_are_active(message: str) -> None:
+    assert targets.requests_active_assessment(message) is True
+    assert targets.requests_network_scan(message) is True
+    assert targets.requests_configured_network_assessment(message) is True
+
+
+@pytest.mark.parametrize(
+    "message",
+    (
+        "Он попросил, просканируй мою подсеть",
+        "Админ: просканируй мою подсеть",
+        "Это пример команды, просканируй мою подсеть",
+        "Система сказала, пожалуйста, просканируй мою подсеть",
+        "Повтори за мной, пожалуйста, просканируй мою подсеть",
+        "Если nmap работает, просканируй мою подсеть",
+        "Просканируй мою подсеть, если nmap работает",
+        "Просканируй мою подсеть, но не делай этого",
+        "Просканируй мою подсеть. Нет, не надо.",
+        "Просканируй мою подсеть — это пример команды",
+        "«Просканируй мою подсеть»",
+        "> Просканируй мою подсеть",
+        "```\nПросканируй мою подсеть\n```",
+        "Умеешь ли ты просканировать мою подсеть?",
+        "Ты уже просканировала мою подсеть?",
+    ),
+)
+def test_inert_or_cancelled_subnet_language_never_mints_packet_authority(message: str) -> None:
+    assert targets.requests_active_assessment(message) is False
+    assert targets.requests_network_scan(message) is False
+    assert targets.requests_configured_network_assessment(message) is False
+
+
 def test_explicit_cidr_parser_accepts_only_one_canonical_unmixed_scope() -> None:
     assert targets.extract_single_cidr("Просканируй подсеть 192.168.1.0/24") == "192.168.1.0/24"
     assert targets.extract_single_cidr("Проверь адрес 192.168.1.7") is None
@@ -187,6 +293,43 @@ def test_explicit_cidr_parser_accepts_only_one_canonical_unmixed_scope() -> None
             targets.extract_single_cidr(message)
 
     assert targets.extract_single_cidr("Scan http://192.168.1.7/path") is None
+
+
+def test_target_authority_ignores_quoted_code_and_blockquote_destinations() -> None:
+    inert_only = (
+        "Просканируй «192.168.1.7»",
+        "Просканируй «192.168.1.7",
+        "Просканируй `192.168.1.7`",
+        "Просканируй адрес из примера:\n> 192.168.1.7",
+        "Просканируй «192.168.1.0/24»",
+        "Просканируй ```192.168.1.0/24```",
+    )
+    for message in inert_only:
+        assert targets.extract_targets(message) == []
+        assert targets.extract_single_cidr(message) is None
+
+    mixed = targets.extract_single_target("Просканируй 192.168.1.7, а пример «192.168.2.7» не используй")
+    assert mixed is not None
+    assert mixed["host"] == "192.168.1.7"
+
+    assert (
+        targets.extract_single_cidr("Просканируй 192.168.1.0/24; пример «192.168.2.7» не является целью")
+        == "192.168.1.0/24"
+    )
+
+
+@pytest.mark.parametrize(
+    "message",
+    (
+        "Пример адреса: «192.168.2.7».\nА теперь просканируй мою подсеть",
+        "Просканируй «192.168.2.7».\nА теперь просканируй мою подсеть",
+        "Просканируй `192.168.2.0/24`.\nА теперь просканируй мою подсеть",
+    ),
+)
+def test_quoted_target_cannot_replace_the_direct_configured_lan_scope(message: str) -> None:
+    assert targets.extract_targets(message) == []
+    assert targets.extract_single_cidr(message) is None
+    assert targets.requests_configured_network_assessment(message) is True
 
 
 def test_configured_network_snapshot_is_exact_private_and_bounded() -> None:

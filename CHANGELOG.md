@@ -1,3 +1,18 @@
+## 0.207.39 — 2026-08-26
+
+### Engineer action outcomes and intent hardening
+
+- Natural current-turn LAN commands now reach the code-owned nmap action even
+  after conversational prefixes, punctuation and polite modal wording. Quoted,
+  code-block, reported, conditional, cancelled and example commands remain
+  inert, and target/CIDR extraction uses that same masked authority scope.
+- A configured-LAN scan now publishes a bounded structural result and durable
+  content-free receipt. Model prose can neither deny an executed tool nor
+  rewrite success, refusal, partial coverage or an uncertain entered action.
+- Engineer synthesis disables transport-private thinking after a live PE turn
+  spent all 8192 completion tokens on hidden reasoning and returned no visible
+  answer. The response budget is now reserved for user-visible synthesis.
+
 ## 0.207.38 — 2026-08-26
 
 ### Engineer LAN awareness and real nmap execution

@@ -83,10 +83,11 @@ no tools, target ticket or effect authority.
 ## Model and evidence contract
 
 The primary Qwen engineer lane uses temperature `0.1`, an output ceiling of
-`8192` tokens and model thinking when the real transport supports it. Thinking
-is transport-private and removed from the user-visible answer. The ordinary
-absolute turn deadline, bounded tool rounds and closed engineer tool allowlist
-still apply.
+`8192` tokens and transport-level thinking disabled. Engineer evidence already
+comes from bounded code-owned tools; this reserves the completion budget for a
+visible answer instead of allowing a private reasoning trace to exhaust it. The
+ordinary absolute turn deadline, bounded tool rounds and closed engineer tool
+allowlist still apply.
 
 Tool results are evidence, not instructions, and enter model context at user
 priority. ANSI/control sequences and application role/tool markup are removed
