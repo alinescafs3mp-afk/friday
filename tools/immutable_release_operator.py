@@ -91,6 +91,7 @@ MAX_OBSIDIAN_BACKUP_BYTES = 16 << 30
 _SMOKE_SCRATCH_ROOT = Path("/var/tmp/friday-immutable-smoke")
 _OBSIDIAN_ENABLE_TRANSITION = "obsidian_enable"
 _ENGINEER_MODE_ENABLE_TRANSITION = "engineer_mode_enable"
+_ENGINEER_COMMAND_ENABLE_TRANSITION = "engineer_command_enable"
 _SECONDARY_SHADOW_ENABLE_TRANSITION = "secondary_shadow_enable"
 _SECONDARY_SHADOW_DISABLE_TRANSITION = "secondary_shadow_disable"
 _SECONDARY_SHADOW_TO_PRIVATE_SHADOW_TRANSITION = "secondary_shadow_to_private_shadow"
@@ -153,6 +154,7 @@ _SECONDARY_CONFIG_TRANSITIONS = frozenset(
 _EXACT_ENV_CONFIG_TRANSITIONS = frozenset(
     {
         _ENGINEER_MODE_ENABLE_TRANSITION,
+        _ENGINEER_COMMAND_ENABLE_TRANSITION,
         *_SECONDARY_CONFIG_TRANSITIONS,
     }
 )
@@ -180,6 +182,10 @@ _ENGINEER_MODE_LEGACY_ENV_KEYS = frozenset(
         "JERICHO_HOST_ALLOWED_CIDRS",
     }
 )
+_ENGINEER_COMMAND_ENV_KEY = "FRIDAY_ENGINEER_COMMAND_ENABLED"
+_ENGINEER_COMMAND_ENV_DISABLED = b"FRIDAY_ENGINEER_COMMAND_ENABLED=0\n"
+_ENGINEER_COMMAND_ENV_ENABLED = b"FRIDAY_ENGINEER_COMMAND_ENABLED=1\n"
+_ENGINEER_COMMAND_LEGACY_ENV_KEYS = frozenset({"JERICHO_ENGINEER_COMMAND_ENABLED"})
 _SECONDARY_LLM_ENV_PREFIX = "FRIDAY_SECONDARY_LLM_"
 _SECONDARY_LLM_ENV_KEYS = frozenset(
     {
@@ -1200,6 +1206,90 @@ def _validate_engineer_mode_enable_environment(
         raise ReleaseFailure("engineer_mode_unrelated_environment_changed")
 
 
+def _engineer_command_environment_parts(
+    raw: bytes,
+    *,
+    code: str,
+) -> tuple[list[bytes], int | None]:
+    """Locate the sole command-runner switch without normalizing bytes."""
+
+    try:
+        text = raw.decode("utf-8", errors="strict")
+    except UnicodeError as exc:
+        raise ReleaseFailure(code) from exc
+    raw_lines = text.splitlines(keepends=True)
+    if "".join(raw_lines) != text:  # pragma: no cover - Python owns splitlines
+        raise ReleaseFailure(code)
+    encoded_lines: list[bytes] = []
+    assignment: int | None = None
+    for index, raw_line in enumerate(raw_lines):
+        encoded_lines.append(raw_line.encode("utf-8"))
+        stripped = raw_line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        if stripped.startswith("export "):
+            stripped = stripped[7:].strip()
+        key, separator, _value = stripped.partition("=")
+        key = key.strip()
+        if key in _ENGINEER_COMMAND_LEGACY_ENV_KEYS:
+            raise ReleaseFailure(code)
+        if key != _ENGINEER_COMMAND_ENV_KEY:
+            continue
+        if not separator or assignment is not None:
+            raise ReleaseFailure(code)
+        assignment = index
+    return encoded_lines, assignment
+
+
+def _validate_engineer_command_enable_environment(
+    predecessor: bytes | None,
+    target: bytes,
+) -> None:
+    """Enable only the runner switch on an already-enabled Engineer host."""
+
+    target_mode_lines, target_mode_assignments = _engineer_mode_environment_parts(
+        target,
+        code="engineer_command_environment_invalid",
+    )
+    mode_index = target_mode_assignments.get("FRIDAY_ENGINEER_MODE_ENABLED")
+    if mode_index is None or target_mode_lines[mode_index] != b"FRIDAY_ENGINEER_MODE_ENABLED=1\n":
+        raise ReleaseFailure("engineer_command_engineer_mode_not_enabled")
+    target_lines, target_assignment = _engineer_command_environment_parts(
+        target,
+        code="engineer_command_environment_invalid",
+    )
+    if target_assignment is None or target_lines[target_assignment] != _ENGINEER_COMMAND_ENV_ENABLED:
+        raise ReleaseFailure("engineer_command_environment_invalid")
+    if predecessor is None:
+        return
+
+    predecessor_mode_lines, predecessor_mode_assignments = _engineer_mode_environment_parts(
+        predecessor,
+        code="engineer_command_predecessor_invalid",
+    )
+    predecessor_mode_index = predecessor_mode_assignments.get("FRIDAY_ENGINEER_MODE_ENABLED")
+    if (
+        predecessor_mode_index is None
+        or predecessor_mode_lines[predecessor_mode_index] != b"FRIDAY_ENGINEER_MODE_ENABLED=1\n"
+    ):
+        raise ReleaseFailure("engineer_command_engineer_mode_not_enabled")
+    predecessor_lines, predecessor_assignment = _engineer_command_environment_parts(
+        predecessor,
+        code="engineer_command_predecessor_invalid",
+    )
+    expected = list(predecessor_lines)
+    if predecessor_assignment is None:
+        if predecessor and not predecessor.endswith((b"\n", b"\r")):
+            expected.append(b"\n")
+        expected.append(_ENGINEER_COMMAND_ENV_ENABLED)
+    elif predecessor_lines[predecessor_assignment] == _ENGINEER_COMMAND_ENV_DISABLED:
+        expected[predecessor_assignment] = _ENGINEER_COMMAND_ENV_ENABLED
+    else:
+        raise ReleaseFailure("engineer_command_predecessor_not_disabled")
+    if b"".join(expected) != target:
+        raise ReleaseFailure("engineer_command_unrelated_environment_changed")
+
+
 def _validate_staged_environment_transition(
     transition: str,
     predecessor: bytes | None,
@@ -1209,6 +1299,9 @@ def _validate_staged_environment_transition(
 
     if transition == _ENGINEER_MODE_ENABLE_TRANSITION:
         _validate_engineer_mode_enable_environment(predecessor, target)
+        return
+    if transition == _ENGINEER_COMMAND_ENABLE_TRANSITION:
+        _validate_engineer_command_enable_environment(predecessor, target)
         return
     if transition in _SECONDARY_CONFIG_TRANSITIONS:
         _validate_secondary_config_transition(transition, predecessor, target)

@@ -1900,6 +1900,89 @@ def _engineer_mode_enabled_environment(predecessor: bytes) -> bytes:
     return target
 
 
+def _engineer_command_enabled_environment(predecessor: bytes) -> bytes:
+    disabled = b"FRIDAY_ENGINEER_COMMAND_ENABLED=0\n"
+    enabled = b"FRIDAY_ENGINEER_COMMAND_ENABLED=1\n"
+    if disabled in predecessor:
+        assert predecessor.count(disabled) == 1
+        return predecessor.replace(disabled, enabled, 1)
+    return predecessor + (b"" if predecessor.endswith(b"\n") else b"\n") + enabled
+
+
+@pytest.mark.parametrize(
+    "predecessor",
+    [
+        b"FRIDAY_PROFILE=production\nFRIDAY_ENGINEER_MODE_ENABLED=1\n",
+        (
+            b"# preserve\r\n"
+            b"FRIDAY_ENGINEER_MODE_ENABLED=1\n"
+            b"FRIDAY_ENGINEER_COMMAND_ENABLED=0\n"
+            b"FRIDAY_SECONDARY_LLM_ENABLED=1\n"
+        ),
+    ],
+)
+def test_engineer_command_enable_accepts_only_the_exact_runner_switch(
+    predecessor: bytes,
+) -> None:
+    target = _engineer_command_enabled_environment(predecessor)
+    operator._validate_staged_environment_transition(  # noqa: SLF001
+        "engineer_command_enable",
+        predecessor,
+        target,
+    )
+    operator._validate_staged_environment_transition(  # noqa: SLF001
+        "engineer_command_enable",
+        None,
+        target,
+    )
+
+
+@pytest.mark.parametrize(
+    ("predecessor", "target", "failure"),
+    [
+        (
+            b"FRIDAY_ENGINEER_MODE_ENABLED=0\n",
+            b"FRIDAY_ENGINEER_MODE_ENABLED=0\nFRIDAY_ENGINEER_COMMAND_ENABLED=1\n",
+            "engineer_command_engineer_mode_not_enabled",
+        ),
+        (
+            b"FRIDAY_ENGINEER_MODE_ENABLED=1\nFRIDAY_ENGINEER_COMMAND_ENABLED=1\n",
+            b"FRIDAY_ENGINEER_MODE_ENABLED=1\nFRIDAY_ENGINEER_COMMAND_ENABLED=1\n",
+            "engineer_command_predecessor_not_disabled",
+        ),
+        (
+            b"FRIDAY_ENGINEER_MODE_ENABLED=1\n",
+            (
+                b"FRIDAY_ENGINEER_MODE_ENABLED=1\n"
+                b"FRIDAY_PROFILE=changed\n"
+                b"FRIDAY_ENGINEER_COMMAND_ENABLED=1\n"
+            ),
+            "engineer_command_unrelated_environment_changed",
+        ),
+        (
+            b"FRIDAY_ENGINEER_MODE_ENABLED=1\n",
+            (
+                b"FRIDAY_ENGINEER_MODE_ENABLED=1\n"
+                b"FRIDAY_ENGINEER_COMMAND_ENABLED=1\n"
+                b"FRIDAY_ENGINEER_COMMAND_ENABLED=1\n"
+            ),
+            "engineer_command_environment_invalid",
+        ),
+    ],
+)
+def test_engineer_command_enable_rejects_unsafe_environment_changes(
+    predecessor: bytes,
+    target: bytes,
+    failure: str,
+) -> None:
+    with pytest.raises(operator.ReleaseFailure, match=failure):
+        operator._validate_staged_environment_transition(  # noqa: SLF001
+            "engineer_command_enable",
+            predecessor,
+            target,
+        )
+
+
 @pytest.mark.parametrize(
     "predecessor",
     [
