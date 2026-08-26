@@ -7,6 +7,9 @@
   `v12.15`, including its exact model revision, launch graph, images and
   same-origin proxy witness. Unknown or drifting deployments still leave the
   narrow V12 routes in legacy mode.
+- Planner transport accepts the model's single exact JSON Markdown fence while
+  retaining bare-JSON parsing, closed schema validation and rejection of any
+  surrounding prose, whitespace or additional block.
 - The abliterated GPT-OSS-20B laptop candidate is registered only as an exact
   provisional `shadow/extract` profile. It cannot enter `assist`, use tools,
   own effects or publish until a fresh acceptance chain is completed.

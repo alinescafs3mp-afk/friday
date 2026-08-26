@@ -1515,6 +1515,45 @@ async def test_real_planner_uses_one_bounded_schema_only_model_call() -> None:
 
 
 @pytest.mark.asyncio
+async def test_real_planner_accepts_only_one_exact_json_fence_transport_wrapper() -> None:
+    payload = json.dumps(_plan_payload(), ensure_ascii=False)
+
+    class _Model:
+        def __init__(self, content: str) -> None:
+            self.content = content
+
+        async def chat(self, messages: list[dict[str, Any]], **kwargs: Any) -> dict[str, Any]:
+            del messages, kwargs
+            return {"content": self.content, "finish_reason": "stop", "tool_calls": None}
+
+    turn = TurnInput.from_chat(
+        message="сравни два файла",
+        actor=SimpleNamespace(is_owner=True, shared_tenant=False),
+        conversation_id=None,
+        attachments=_chat_kwargs()["attachments"],
+        enable_tools=True,
+        synthetic_document_notice=False,
+        mode="dialogue",
+        reply_to=None,
+        quoted_attachment_reference=False,
+        reply_assistant_reference=False,
+    )
+
+    accepted = await V12Planner(_Model(f"```json\n{payload}\n```"), timeout_sec=5).plan(turn)
+    assert accepted.route is RouteClass.FILE_READ
+
+    for rejected in (
+        f" ```json\n{payload}\n```",
+        f"```JSON\n{payload}\n```",
+        f"```json\r\n{payload}\r\n```",
+        f"```json\n{payload}\n```\n",
+        f"```json\n{payload}\n```\n```json\n{payload}\n```",
+    ):
+        with pytest.raises(TurnPlanError):
+            await V12Planner(_Model(rejected), timeout_sec=5).plan(turn)
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     "mutation",
     [

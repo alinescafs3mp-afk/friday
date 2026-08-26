@@ -40,6 +40,8 @@ and request attached_files evidence. For earlier stored files, choose archive_re
 For current external information, choose web_read and web evidence. Never invent a tool or source.
 """
 _MAX_ATTESTED_INPUT_UTF8_BYTES = 5_500
+_EXACT_JSON_FENCE_PREFIX = "```json\n"
+_EXACT_JSON_FENCE_SUFFIX = "\n```"
 _PLANNER_REQUIREMENTS = ModelRequirements(
     capabilities=frozenset(
         {
@@ -160,6 +162,14 @@ class V12Planner:
             or response.get("tool_calls") not in (None, [])
         ):
             raise ValueError("planner response is incomplete or effectful")
+        # Some otherwise conforming OpenAI-compatible profiles serialize the
+        # single requested JSON object in one exact Markdown JSON fence.  Admit
+        # only that closed transport wrapper: no surrounding whitespace/prose,
+        # alternate fence label or second block.  TurnPlan still performs the
+        # strict duplicate-key, schema and authority validation on the complete
+        # unwrapped payload, and its public parser remains bare-JSON-only.
+        if content.startswith(_EXACT_JSON_FENCE_PREFIX) and content.endswith(_EXACT_JSON_FENCE_SUFFIX):
+            content = content[len(_EXACT_JSON_FENCE_PREFIX) : -len(_EXACT_JSON_FENCE_SUFFIX)]
         return TurnPlan.parse(content)
 
     async def plan(self, turn: TurnInput, *, turn_deadline: float | None = None) -> TurnPlan:
