@@ -1,3 +1,23 @@
+## 0.207.34 — 2026-08-26
+
+### Complete web-source refill and total evidence boundaries
+
+- Web research now refills failed or incomplete fetches from its bounded spare
+  set while preserving the original total deadline and a reserved page-fetch
+  budget after optional direct-data adapters.
+- One shared, target-aware evidence contract now binds query, counters, source
+  count, canonical public URLs and complete/partial semantics across provider,
+  capture, runtime projection and typed public-news publication.
+- Malformed, oversized, duplicate or non-serializable adapter evidence fails to
+  an honest unavailable result without aborting the user turn or creating a
+  durable web capture; valid legacy and refilled reports retain their supported
+  behavior.
+- Obsidian research-note and current-web paths use the same exact query-bound
+  projection, preventing a successful provider response from being discarded
+  by a mismatched test or custom-kernel envelope.
+- Schema, accepted secondary profile and production rollout policy are
+  unchanged.
+
 ## 0.207.33 — 2026-08-26
 
 ### Current-document secondary assist and fail-open publication guards
