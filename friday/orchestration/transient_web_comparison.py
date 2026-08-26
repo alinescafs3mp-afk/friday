@@ -345,6 +345,34 @@ class TransientWebSource:
 
 
 @dataclass(frozen=True, slots=True)
+class TransientWebPublicCitation:
+    """Non-authorizing URL/title projection derived from process-owned evidence."""
+
+    label: str
+    url: str
+    title: str
+    source_content_sha256: str
+
+    def __post_init__(self) -> None:
+        if self.label not in {"W1", "W2", "W3"}:
+            raise TransientWebComparisonError("public citation label is invalid")
+        if _public_url(self.url) != self.url:
+            raise TransientWebComparisonError("public citation url is not canonical")
+        _bounded_utf8(
+            self.title,
+            label="public citation title",
+            maximum=_MAX_TITLE_CHARS,
+            allow_empty=True,
+        )
+        _require_digest(self.source_content_sha256, label="source_content_sha256")
+
+    def payload(self) -> dict[str, str]:
+        """Return only the fields safe to persist and show beside the answer."""
+
+        return {"label": self.label, "url": self.url, "title": self.title}
+
+
+@dataclass(frozen=True, slots=True)
 class TransientWebComparisonEvidence:
     plan_sha256: str
     query_sha256: str
@@ -437,6 +465,23 @@ class TransientWebComparisonEvidence:
             "status": self.status.value,
             "sources": [source.synthesis_payload() for source in self.sources],
         }
+
+    def public_citations(self) -> tuple[TransientWebPublicCitation, ...]:
+        """Project labels and public locator metadata without touching source text."""
+
+        self.__post_init__()
+        citations: list[TransientWebPublicCitation] = []
+        for source in self.sources:
+            source.__post_init__()
+            citations.append(
+                TransientWebPublicCitation(
+                    label=source.label,
+                    url=source._url,
+                    title=source._title,
+                    source_content_sha256=source.content_sha256,
+                )
+            )
+        return tuple(citations)
 
 
 def _counter(report: Mapping[str, Any], name: str) -> int:

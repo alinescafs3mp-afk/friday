@@ -256,6 +256,41 @@ async def test_projection_is_clamped_to_three_canonical_sources(storage) -> None
 
 
 @pytest.mark.anyio
+async def test_public_citation_projection_never_materializes_source_text(storage) -> None:
+    actor = _actor(storage)
+    authorization = _grant(storage, actor)
+    message = _message()
+    plan = seal_explicit_public_web_query(
+        current_user_message=message,
+        actor=actor,
+        conversation_id="conversation-1",
+    )
+    secret_source_body = "public source body that must remain process-local"
+    evidence = await TransientWebComparisonAdapter(
+        authorization,
+        _RecordingWeb(_report(_source(1, text=secret_source_body))),
+    ).research(
+        plan=plan,
+        actor=actor,
+        conversation_id="conversation-1",
+        current_user_message=message,
+    )
+
+    citations = evidence.public_citations()
+
+    assert [citation.payload() for citation in citations] == [
+        {
+            "label": "W1",
+            "url": "https://public-1.example/report",
+            "title": "Public source 1",
+        }
+    ]
+    serialized = json.dumps([citation.payload() for citation in citations])
+    assert secret_source_body not in serialized
+    assert citations[0].source_content_sha256 == evidence.sources[0].content_sha256
+
+
+@pytest.mark.anyio
 async def test_actor_message_and_conversation_are_rebound_before_outbound(storage) -> None:
     actor = _actor(storage)
     authorization = _grant(storage, actor)
