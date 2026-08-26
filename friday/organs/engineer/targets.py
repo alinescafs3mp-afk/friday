@@ -453,11 +453,13 @@ _ARTIFACT_COMPILE_RU_OUTPUT = (
     r"(?:\s*/\s*(?:jar[- ]файл\w*|jar\b|бинарник\w*|бинарн\w*\s+артефакт\w*))?"
 )
 _ARTIFACT_COMPILE_EN_DELIVERY = (
-    rf"(?:send|attach|upload|deliver)\s+(?:me\s+)?{_ARTIFACT_COMPILE_EN_OUTPUT}"
+    rf"(?:send|attach|upload|deliver|provide|return)\s+(?:me\s+)?"
+    rf"{_ARTIFACT_COMPILE_EN_OUTPUT}"
     rf"(?:\s+to\s+me)?"
 )
 _ARTIFACT_COMPILE_RU_DELIVERY = (
-    rf"(?:пришли(?:те)?|отправь(?:те)?|приложи(?:те)?|выгрузи(?:те)?)\s+"
+    rf"(?:пришли(?:те)?|отправь(?:те)?|приложи(?:те)?|выгрузи(?:те)?|"
+    rf"предоставь(?:те)?|верни(?:те)?|выдай(?:те)?)\s+"
     rf"(?:мне\s+)?{_ARTIFACT_COMPILE_RU_OUTPUT}"
 )
 _ARTIFACT_COMPILE_DELIVERY_SUFFIX = (
@@ -711,29 +713,17 @@ _ARTIFACT_COMPILE_SAFE_COMPANION_REMAINDER = re.compile(
     r")\s*[.!?…]*\s*\Z",
     re.IGNORECASE,
 )
-_ARTIFACT_COMPILE_CONTEXT_RESET = re.compile(
-    r"\A\s*(?:(?:and|so|а|и)\s+)?(?:now|finally|okay|ok|alright|"
-    r"теперь|сейчас|наконец|ладно|хорошо|так)\b",
-    re.IGNORECASE,
-)
 _ARTIFACT_COMPILE_SAFE_PRIOR_CONTEXT = re.compile(
     rf"\A\s*(?:"
-    rf"i\s+(?:have\s+)?(?:attached|uploaded|provided)\s+(?:the\s+)?"
+    rf"i(?:'ve|\s+have)?\s+(?:attached|uploaded|provided)\s+(?:the\s+)?"
     rf"(?:(?:java\s+)?(?:source|file)|{_ARTIFACT_COMPILE_FILENAME})|"
     rf"(?:the\s+)?(?:(?:java\s+)?(?:source|file)|{_ARTIFACT_COMPILE_FILENAME})\s+"
-    rf"(?:is\s+)?(?:attached|uploaded|provided|ready)|"
+    rf"(?:(?:is|has\s+been)\s+)?(?:attached|uploaded|provided|ready)|"
     rf"(?:я\s+)?(?:приложил(?:а)?|загрузил(?:а)?|отправил(?:а)?)\s+"
     rf"(?:(?:java[- ]?)?(?:файл|исходник)\w*|{_ARTIFACT_COMPILE_FILENAME})|"
     rf"(?:(?:java[- ]?)?(?:файл|исходник)\w*|{_ARTIFACT_COMPILE_FILENAME})\s+"
     rf"(?:приложен|загружен|отправлен|готов)\w*"
     r")\s*[.!?…]*\s*\Z",
-    re.IGNORECASE,
-)
-_ARTIFACT_COMPILE_PRIOR_DEFERRED = re.compile(
-    r"\b(?:wait(?:ing)?\s+for|hold\s+(?:off\s+)?until|only\s+after)\b"
-    r"[^.!?\n]{0,80}\b(?:approval|confirmation|permission)\b|"
-    r"\b(?:жди(?:те)?|дождись|дождитесь|только\s+после)\b"
-    r"[^.!?\n]{0,80}\b(?:одобрени|подтверждени|разрешени)\w*\b",
     re.IGNORECASE,
 )
 _METADATA_V4 = ipaddress.ip_address("169.254.169.254")
@@ -1322,21 +1312,11 @@ def _accepted_artifact_compile_requests(
             continue
         prior_units = tuple(_request_units(masked[: request.unit_start]))
         if request.unit_start != 0:
-            reset = _ARTIFACT_COMPILE_CONTEXT_RESET.match(masked[request.unit_start :])
-            prior_surface = masked[: request.unit_start]
-            if reset is not None:
-                if (
-                    _CONDITIONAL_REQUEST_CUE.search(prior_surface)
-                    or _ARTIFACT_COMPILE_DEFERRED_PREFIX.search(prior_surface)
-                    or _ARTIFACT_COMPILE_PRIOR_DEFERRED.search(prior_surface)
-                ):
-                    continue
-            elif len(prior_units) != 1:
+            if len(prior_units) != 1:
                 continue
-            else:
-                prior_start, prior_end = prior_units[0]
-                if not _ARTIFACT_COMPILE_SAFE_PRIOR_CONTEXT.fullmatch(masked[prior_start:prior_end]):
-                    continue
+            prior_start, prior_end = prior_units[0]
+            if not _ARTIFACT_COMPILE_SAFE_PRIOR_CONTEXT.fullmatch(masked[prior_start:prior_end]):
+                continue
         unit = masked[request.unit_start : request.unit_end]
         named_sources = {
             match.group(0) for match in re.finditer(_ARTIFACT_COMPILE_FILENAME, unit, re.IGNORECASE)
