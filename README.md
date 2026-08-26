@@ -2,9 +2,11 @@
 
 **Friday** (по-русски — **Пятница**; ex codename Jericho) — локальная многопользовательская Knowledge Operating System: она принимает текст и документы, сохраняет первоисточник, строит граф знаний, ищет по личной базе и отвечает через Telegram или HTTP API. Веб-панель предназначена для администрирования, разбора Inbox, работы с сущностями, правами, резервными копиями и диагностикой.
 
-Текущая версия: **0.207.34**. Авторизованный read-only `archive_search`
+Текущая версия: **0.207.35**. Авторизованный read-only `archive_search`
 объединяет личные документы, знания, сообщения и Obsidian с точными
-источниками, покрытием и финальной повторной проверкой прав. Schema 42
+источниками, покрытием и финальной повторной проверкой прав. Schema 43
+добавляет durable immutable Host Action jobs и append-only lifecycle events для
+выключенного по умолчанию Host Capability Plane. Schema 42
 обслуживает активный restart-safe путь сравнения: точный результат выбранных
 сообщений продолжается через durable Q1/Q2 выбора документа, затем два
 закрытых model-вызова синтезируют и независимо проверяют ответ перед
@@ -117,6 +119,28 @@ Telegram → подписанный durable bridge → Conversation + mode
 - Online backup SQLite включает `integrity_check`, SHA-256 manifest и повторную верификацию; вместе с БД он сохраняет append-only историю отношений и её completeness floor. Tenant export включает только принадлежащие этому пользователю `relation_revisions`. `restore-backup` требует остановленного backend через эксклюзивный lease, повторно сверяет staged copy, заменяет БД атомарно и возвращает точные DB/WAL/SHM при сбое; для уже повреждённой активной БД сохраняется отдельный явно непроверенный recovery bundle. Опциональная Markdown-проекция пишется только в явном `full_owner`; безопасное умолчание `disabled` не создаёт plaintext-копий.
 - Workers обслуживают всех активных tenants: lifecycle, entity-resolution candidates, ежедневный backup, SQLite optimize, read-only quality report и bounded advisory Inbox refinement. Vault-projector добавляется только в `FRIDAY_MEMORY_VAULT_MODE=full_owner`. Каждая задача публикует состояние, длительность, следующий запуск, timeout и consecutive failures для `status`, `doctor` и Admin UI.
 - Канонический multimodal profile `qwen38-27b-nvfp4-sglang` закрепляет точные model/runtime identities, graph-only 40K/6 launch contract и fail-closed V12 live attestation; прежний Qwen3.6/vLLM profile сохранён для совместимости.
+
+### Engineer Mode и Host Capability Plane (opt-in)
+
+Engineer Mode — owner-only defensive workbench с code-pinned единственной
+сетевой целью, bounded probes только по явному запросу текущего человека и
+no-network bubblewrap-разбором артефактов. Простое упоминание host/URL не
+запускает DNS или probes; адрес должен пройти общий exact CIDR policy, а public
+scope без operator flag и отдельного action approval закрыт. Режим
+выключен по умолчанию и требует Linux acceptance из
+[`docs/ENGINEER_MODE.md`](docs/ENGINEER_MODE.md).
+
+Отдельный Host Capability Plane позволяет использовать reviewed Ubuntu CLI как
+функцию, а не просто запускать приложение. Первый вертикальный срез обнаруживает
+или через точный human-approved APT plan устанавливает `nmap`, аттестует
+`/usr/bin/nmap`, автоматически продолжает исходную bounded local-network задачу,
+парсит XML и сохраняет evidence/coverage. Backend, непривилегированный user
+agent и узкий root package broker разделены; общего shell/sudo/Docker socket
+нет. Отдельный reviewed `jq` action извлекает только явно названные поля из
+принадлежащей владельцу Raw JSON-копии; произвольный jq-код и host path модели
+не принимаются, исходный файл не изменяется. Все `FRIDAY_HOST_*` flags
+default-off. Установка на Ubuntu, preflight,
+Compose override и rollback: [`deploy/host-control/README.md`](deploy/host-control/README.md).
 
 ### Obsidian на Android (beta)
 
@@ -281,7 +305,7 @@ VRAM обнаружился при старте, а не на первом по�
 2. Создайте новый sibling release только из wheel; установленный venv не правьте пофайлово.
 3. Дайте оператору остановить backend и Telegram bridge и сохранить проверенный согласованный снимок SQLite, WAL, Telegram inbox и exact Obsidian root.
 4. Выполните offline migration, переключите общий release anchor атомарно, примите backend и только затем запускайте bridge. При ошибке используйте exact rollback, а не повреждённый прежний каталог.
-5. Схема SQLite — **42**. Schema 31 один раз фиксирует `relation_history_complete_from`; schema 32 добавляет monotonic observed boundary и REPLACE/context guards; schema 33 — неизменяемые transport-id повторной загрузки; schema 34 — проверяемое имя, данное пользователем в конкретном сообщении; schema 35 — изолированные профили, vault, onboarding, журнал операций и конфликты Obsidian; schema 36 — стабильные note bindings, revision-aware index/link graph и expiring candidate/Active Frame state; schema 37 — ограниченное person-owned хранилище структурных ошибок до фиксации assistant-сообщения; schema 38 — короткоживущие owner-scoped `RecallConversation` Work Item и закрытый Active Frame, привязанные к точному принятому результату окна переписки; schema 39 — закрытые labels `RecallSelectedArchiveEvidence` и один body-free sidecar выбранного источника; schema 40 — immutable body-free набор archive-кандидатов и durable ordinal question; schema 41 — rebuildable body-free `document_catalog` с exact Raw revision/extraction binding и закрытыми explicit-incomplete состояниями; schema 42 — body-free Work Item/Active Frame и receipts активного restart-safe сравнения выбранных сообщений с точным документом через durable Q1/Q2. Миграция schema 35→36 сначала побайтно проверяет выпущенную Obsidian-схему и только затем атомарно расширяет operation contract; schema 37–42 отдельно проверяют свои точные DDL-проекции. Остальные авторитетные знания, Inbox и разговоры не переписываются; более новая неизвестная схема отклоняется без изменений.
+5. Схема SQLite — **43**. Schema 31 один раз фиксирует `relation_history_complete_from`; schema 32 добавляет monotonic observed boundary и REPLACE/context guards; schema 33 — неизменяемые transport-id повторной загрузки; schema 34 — проверяемое имя, данное пользователем в конкретном сообщении; schema 35 — изолированные профили, vault, onboarding, журнал операций и конфликты Obsidian; schema 36 — стабильные note bindings, revision-aware index/link graph и expiring candidate/Active Frame state; schema 37 — ограниченное person-owned хранилище структурных ошибок до фиксации assistant-сообщения; schema 38 — короткоживущие owner-scoped `RecallConversation` Work Item и закрытый Active Frame, привязанные к точному принятому результату окна переписки; schema 39 — закрытые labels `RecallSelectedArchiveEvidence` и один body-free sidecar выбранного источника; schema 40 — immutable body-free набор archive-кандидатов и durable ordinal question; schema 41 — rebuildable body-free `document_catalog` с exact Raw revision/extraction binding и закрытыми explicit-incomplete состояниями; schema 42 — body-free Work Item/Active Frame и receipts активного restart-safe сравнения выбранных сообщений с точным документом через durable Q1/Q2; schema 43 — immutable host action plans, person-scoped idempotency, restart-safe unknown/reconcile state и append-only host events. Миграция schema 35→36 сначала побайтно проверяет выпущенную Obsidian-схему и только затем атомарно расширяет operation contract; schema 37–43 отдельно проверяют свои точные DDL-проекции. Остальные авторитетные знания, Inbox и разговоры не переписываются; более новая неизвестная схема отклоняется без изменений.
 
 Перед обновлением можно дополнительно выполнить
 `jericho backup --label before-upgrade` и `jericho verify-backup`. Это SQLite-only
@@ -324,7 +348,7 @@ fan-out одной задачи. Иерархическое чтение док�
 `/v1/models`, bounded `/metrics`, `/server_info` и per-process deployment
 witness с code-owned identities и launch graph. Любой drift, неполный
 witness или незамкнутый same-origin proxy оставляют routes в `legacy`.
-Успешный canary startup должен показать в `/api/health` версию `0.207.34`,
+Успешный canary startup должен показать в `/api/health` версию `0.207.35`,
 точный profile id, `canary_ready`, `live_attestation_clear` и оба
 зарегистрированных route; простого HTTP `status=ok` недостаточно.
 

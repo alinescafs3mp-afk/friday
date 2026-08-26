@@ -913,7 +913,11 @@ def test_api_sqlite_meta_prompts_never_materialize_restored_attachments(
         assert current_user["content"] == message
         assert current_assistant["reply_to"] == current_user["id"]
         current_metadata = json.loads(str(current_user["metadata_json"] or "{}"))
-        assert current_metadata == {"turn_policy_intent": TurnIntent.META_CAPABILITIES.value}
+        assert current_metadata == {
+            "interaction_mode": "dialogue",
+            "tools_enabled": True,
+            "turn_policy_intent": TurnIntent.META_CAPABILITIES.value,
+        }
         assert raw_id not in response.text
         assert int(app.state.storage.execute("SELECT COUNT(*) FROM inbox").fetchone()[0]) == 0
 

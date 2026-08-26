@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import os
+import socket
 import stat
 import sys
 from collections.abc import Mapping
@@ -20,6 +21,58 @@ PROTOCOL_VERSION = 1
 MAX_REQUEST_BYTES = 512 * 1024
 MAX_RESULT_BYTES = 2 * 1024 * 1024
 MAX_OUTPUT_BYTES = 50 * 1024 * 1024
+
+
+def _network_namespace_proof(parent_netns: object) -> dict[str, Any]:
+    """Prove this worker has only loopback and no external route/connectivity."""
+
+    parent = str(parent_netns or "")
+    current = os.readlink("/proc/self/ns/net")
+    if not parent.startswith("net:[") or not parent.endswith("]") or current == parent:
+        raise ValueError("network_namespace_not_isolated")
+
+    interfaces: list[str] = []
+    for line in Path("/proc/net/dev").read_text(encoding="ascii").splitlines()[2:]:
+        name, separator, _details = line.partition(":")
+        if separator:
+            interfaces.append(name.strip())
+    external_interfaces = sorted(name for name in interfaces if name != "lo")
+
+    external_routes = 0
+    ipv4_lines = Path("/proc/net/route").read_text(encoding="ascii").splitlines()[1:]
+    external_routes += sum(1 for line in ipv4_lines if line.split() and line.split()[0] != "lo")
+    ipv6_lines = Path("/proc/net/ipv6_route").read_text(encoding="ascii").splitlines()
+    external_routes += sum(1 for line in ipv6_lines if line.split() and line.split()[-1] != "lo")
+    if external_interfaces or external_routes:
+        raise ValueError("network_route_present")
+
+    connectivity: dict[str, str] = {}
+    for label, family, address in (
+        ("ipv4", socket.AF_INET, ("192.0.2.1", 9)),
+        ("ipv6", socket.AF_INET6, ("2001:db8::1", 9, 0, 0)),
+    ):
+        try:
+            probe = socket.socket(family, socket.SOCK_DGRAM)
+        except OSError:
+            connectivity[label] = "blocked"
+            continue
+        try:
+            probe.settimeout(0.2)
+            probe.connect(address)
+        except OSError:
+            connectivity[label] = "blocked"
+        else:
+            raise ValueError("external_network_reachable")
+        finally:
+            probe.close()
+
+    return {
+        "namespace": "isolated",
+        "external_interfaces": 0,
+        "external_routes": 0,
+        "ipv4_connectivity": connectivity["ipv4"],
+        "ipv6_connectivity": connectivity["ipv6"],
+    }
 
 
 def _read_regular(path: Path, maximum: int) -> bytes:
@@ -88,6 +141,7 @@ def run(request_path: Path, input_path: Path, result_path: Path, output_path: Pa
             result: dict[str, Any] = {
                 "protocol": PROTOCOL_VERSION,
                 "ok": True,
+                "network_proof": _network_namespace_proof(request_payload.get("parent_netns")),
             }
         elif action == "analyze":
             report = artifacts.analyze_bytes(data, filename)

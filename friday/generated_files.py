@@ -120,6 +120,7 @@ def persist_generated_response_files(
             if not _attach_descriptors_to_message(
                 storage,
                 message_id=message_id,
+                tenant_id=str(tenant_id),
                 person_id=str(person_id),
                 descriptors=history_descriptors,
             ):
@@ -295,6 +296,7 @@ def _attach_descriptors_to_message(
     storage: Any,
     *,
     message_id: str,
+    tenant_id: str,
     person_id: str,
     descriptors: list[dict[str, Any]],
 ) -> bool:
@@ -303,8 +305,8 @@ def _attach_descriptors_to_message(
     with storage.transaction() as conn:
         row = conn.execute(
             """SELECT metadata_json FROM messages
-                 WHERE id=? AND user_id=? AND role='assistant'""",
-            (message_id, person_id),
+                 WHERE id=? AND user_id IN (?, ?) AND role='assistant'""",
+            (message_id, person_id, tenant_id),
         ).fetchone()
         if row is None:
             return False
@@ -326,8 +328,8 @@ def _attach_descriptors_to_message(
             raise GeneratedFilePersistenceError("assistant message metadata exceeds its limit")
         cursor = conn.execute(
             """UPDATE messages SET metadata_json=?
-                 WHERE id=? AND user_id=? AND role='assistant'""",
-            (encoded, message_id, person_id),
+                 WHERE id=? AND user_id IN (?, ?) AND role='assistant'""",
+            (encoded, message_id, person_id, tenant_id),
         )
         return cursor.rowcount == 1
 

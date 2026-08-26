@@ -241,7 +241,70 @@ Extractor:
 
 Для реального code execution нужен отдельный disposable sandbox service: rootless container/VM, seccomp, no network, read-only image, tmpfs quota, PID/memory/CPU limits и одноразовый workspace. До этого момента не выдавайте `code.run` пользователям.
 
-## 10. Секреты
+## 10. Host Capability Plane
+
+Host Control — опциональная Linux-возможность и по умолчанию отсутствует из
+runtime tool surface (`FRIDAY_HOST_CONTROL_ENABLED=0`). Она разделена на три
+границы доверия:
+
+- backend в контейнере выбирает reviewed adapter, проверяет actor/policy,
+  фиксирует immutable plan, approval и durable job; host shell у него нет;
+- `friday-host-agent` работает непривилегированным desktop-пользователем,
+  принимает только версионированные HMAC-запросы через Unix socket и запускает
+  закрытые argv в отдельных ограниченных `systemd --user` cgroup;
+- root-owned `friday-package-broker` принимает только expiring exact APT
+  transaction. В первом релизе policy допускает лишь `nmap`; API для shell,
+  записи файлов, репозиториев, ключей и произвольных apt options отсутствует.
+
+Package mutation включается отдельным
+`FRIDAY_HOST_PACKAGE_INSTALL_ENABLED=1`. Любая установка требует человеческого
+approval, связанного с точными версиями, зависимостями, origin, размером,
+continuation и digest плана. Broker повторно симулирует transaction перед
+commit; drift прекращает исполнение. Строка approval ID не является доверием:
+backend authorization boundary выдаёт короткоживущий Ed25519 proof, связанный с
+точными plan/actor/own/job/idempotency/expiry, а root broker независимо проверяет
+его и атомарно с execution claim фиксирует защиту от replay. Private seed доступен
+backend только через отдельный memberless supplemental GID; перед чтением seed
+процесс обязан подтвердить `PR_SET_DUMPABLE=0`, поэтому обычный same-UID host
+process не может извлечь ключ через ptrace или `/proc`. Его receipt подписан отдельным Ed25519
+ключом, а приватный signing seed не покидает root service. Потеря ответа после
+admission фиксируется как `unknown`: автоматический повтор запрещён, сначала
+нужен exact status/reconciliation.
+
+Ожидание backend action slot ограничено по времени и не переводит durable job
+через границу `request_sent`: до захвата slot он остаётся `planned` либо
+`awaiting_approval`. Saturation/cancellation закрывает job как доказанный
+pre-effect отказ. После backend crash уже claimed approval разрешено продолжить
+только при exact совпадении неизменяемого job/plan/actor и состоянии до send;
+`running`, `unknown` и terminal jobs автоматически не переисполняются.
+
+Обычный network adapter принимает только code-owned профили `discover`,
+`services`, `selected_ports`, точные IP/CIDR из configured policy и не принимает
+raw flags/NSE. Public scope выключен отдельно. Raw XML/stdout/stderr остаются в
+actor-scoped bounded evidence; модель получает только проверенную структурную
+проекцию и coverage. Контейнеру не монтируются `/home`, `/etc`, host executables,
+system D-Bus или Docker socket. Установка и rollback описаны в
+[`deploy/host-control/README.md`](../deploy/host-control/README.md).
+
+Локальный `jq` adapter принимает только opaque Raw file ID текущего владельца и
+закрытый список field paths. Backend повторно авторизует и хеширует исходные
+байты, создаёт private exact workspace grant, а adapter сам строит jq program;
+модель не передаёт executable, host path или jq expression. Установка `jq` через
+root broker в этом релизе не разрешена: action доступен только для уже
+package-attested `/usr/bin/jq`.
+
+Compose-интеграция Host Control использует только rootful Docker и явный
+`userns_mode: host`: backend собирается и запускается с числовыми UID/GID
+выбранного непривилегированного desktop-пользователя. Поэтому owner-only
+socket directory `0700`, socket `0600` и HMAC key `0600` остаются закрытыми, а
+agent принимает ровно тот же UID через `SO_PEERCRED`; host root, group fallback
+и произвольный UID в allowlist не допускаются. Rootless/subordinate-ID mapping
+для этого override не поддерживается и не является поводом расширять mode.
+Parent socket-каталог создаётся systemd-tmpfiles независимо от agent unit:
+остановка agent удаляет socket, но не bind-source, поэтому backend сохраняет
+fail-soft startup и показывает authenticated transport как disconnected.
+
+## 11. Секреты
 
 - `.env`, `.env.local`, токены и bridge secret исключены из Git/архива.
 - Не выводите их в screenshots. Стандартный logging formatter дополнительно редактирует известные credentials, Authorization values и Telegram token внутри URL/traceback, но это defense in depth, а не разрешение логировать секреты намеренно.
@@ -253,7 +316,7 @@ Extractor:
 - После подозрения на утечку одновременно смените API token, bridge secret и Telegram bot token.
 - Перезапустите backend/bridge после ротации.
 
-## 11. Audit
+## 12. Audit
 
 Audit log фиксирует actor, action, target, before/after, request ID и IP для административных изменений и tool invocations, а также для событий выгрузки данных и чтений чужих данных:
 
@@ -298,7 +361,7 @@ installation-local 256-bit HMAC key. Обычный SHA для коротког�
 открытии, но до удаления по отдельной retention-политике сам backup следует считать
 содержащим прежние audit payload.
 
-## 12. Контрольный список перед публикацией
+## 13. Контрольный список перед публикацией
 
 - [ ] `jericho doctor` без критических ошибок.
 - [ ] API token и bridge secret уникальны и длиннее 32 символов.
@@ -316,12 +379,22 @@ installation-local 256-bit HMAC key. Обычный SHA для коротког�
       startup smoke bubblewrap на целевом хосте.
 - [ ] При включённом Engineer mode `/engineer`, видимость и исполнение tools
       доступны только владельцу установки (не shared-участнику с preset
-      `owner`), а каждая сетевая операция связана с единственной целью из
-      текущей человеческой реплики и её code-pinned адресами; список портов
-      остаётся в закрытом лимите 64 для того же хоста.
+      `owner`), а простое упоминание host/URL не запускает DNS или probes.
+      Каждая сетевая операция требует явного активного запроса и единственной
+      цели из текущей человеческой реплики, её code-pinned адресов и допуска
+      exact `FRIDAY_HOST_ALLOWED_CIDRS`; public scope без operator flag и
+      отдельного per-action HITL всегда отклоняется. Явный URL-порт
+      остаётся точной частью подписанного scope, а цель без явного порта может
+      использовать не более 64 выбранных портов того же хоста. Потерянный
+      терминальный результат после входа в сетевой action фиксируется как
+      `uncertain`, а не как отсутствие probes.
 - [ ] На целевом хосте подтверждены no-network sandbox артефактов, отказ для
       неоднозначной/запрещённой цели и отсутствие exploit payloads; пройден
       rollout smoke из [`docs/ENGINEER_MODE.md`](ENGINEER_MODE.md).
+- [ ] Host Control и package install остаются `0`, пока exact candidate не прошёл
+      host-control contract/deployment tests и Ubuntu smoke. При включении
+      socket/key/job-root canonical, agent непривилегирован, broker policy
+      допускает только reviewed packages, а `unknown` jobs reconciled без replay.
 - [ ] `FRIDAY_CODE_EXECUTION_ENABLED=0`.
 - [ ] Backend bind только loopback/VPN/private interface.
 - [ ] vLLM не опубликован наружу.

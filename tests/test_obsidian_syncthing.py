@@ -466,9 +466,11 @@ class _UnixHandler(socketserver.StreamRequestHandler):
 
 @pytest.mark.skipif(not hasattr(socket, "AF_UNIX"), reason="Unix sockets are unavailable")
 def test_private_unix_transport_and_parent_permission_boundary(tmp_path: Path) -> None:
-    private = tmp_path / "private"
+    # AF_UNIX paths have a small platform limit (108 bytes on Linux).  Keep the
+    # test-owned suffix short so an isolated quality-gate TMPDIR remains valid.
+    private = tmp_path / "p"
     private.mkdir(mode=0o700)
-    socket_path = private / "syncthing.sock"
+    socket_path = private / "s"
     server = socketserver.UnixStreamServer(os.fspath(socket_path), _UnixHandler)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()

@@ -5054,11 +5054,13 @@ def test_actual_installed_source_smoke_ignores_a_poisoned_live_database(
         Path(entry).resolve(strict=True) for entry in sys.path if Path(entry).name == "site-packages"
     )
     (purelib / "runtime-dependencies.pth").write_text(f"{runtime_site}\n", encoding="ascii")
-    shutil.copytree(
-        Path(__file__).parents[1] / "friday",
-        purelib / "friday",
-        ignore=shutil.ignore_patterns("__pycache__", "*.pyc"),
-    )
+    source_root = Path(__file__).parents[1]
+    for package_root in ("friday", "friday_host_agent", "friday_package_broker"):
+        shutil.copytree(
+            source_root / package_root,
+            purelib / package_root,
+            ignore=shutil.ignore_patterns("__pycache__", "*.pyc"),
+        )
     version = friday.__version__
     metadata = purelib / f"friday-{version}.dist-info"
     metadata.mkdir()

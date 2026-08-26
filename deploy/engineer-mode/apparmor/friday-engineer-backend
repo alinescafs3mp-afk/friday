@@ -1,0 +1,50 @@
+# Docker's default AppArmor profile with only the namespace operations required
+# by Friday's fixed bubblewrap argv admitted.  Baseline provenance:
+# github.com/moby/profiles, commit f9bc03ec19b2dc4c091449b08e88f85c0caa9f0b,
+# apparmor/testdata/default.golden.  Ubuntu 24.04/AppArmor 4.0 is the floor.
+
+abi <abi/4.0>,
+
+@{PROC}=/proc/
+
+profile "friday-engineer-backend" flags=(attach_disconnected,mediate_deleted) {
+  network,
+  # Disallow AF_ALG (Linux kernel crypto API), matching docker-default.
+  deny network alg,
+  capability,
+  file,
+
+  # bubblewrap --unshare-all creates one user namespace and then constructs its
+  # private mount tree.  Docker still drops every initial-namespace capability;
+  # these AppArmor permissions do not grant a capability by themselves.
+  userns,
+  mount,
+  umount,
+  pivot_root,
+
+  # Host runtimes may stop the container, and confined processes may signal
+  # only peers under this same profile.
+  signal (receive) peer=unconfined,
+  signal (receive) peer=runc,
+  signal (receive) peer=crun,
+  signal (receive) peer="unconfined",
+  signal (send,receive) peer="friday-engineer-backend",
+
+  deny @{PROC}/* w,
+  deny @{PROC}/{[^1-9/],[^1-9/][^0-9/],[^1-9s/][^0-9y/][^0-9s/],[^1-9/][^0-9/][^0-9/][^0-9/]*}/** w,
+  deny @{PROC}/sys/[^k]** w,
+  deny @{PROC}/sys/kernel/{?,??,[^s][^h][^m]**} w,
+  deny @{PROC}/sysrq-trigger rwklx,
+  deny @{PROC}/kcore rwklx,
+
+  deny /sys/[^f]*/** wklx,
+  deny /sys/f[^s]*/** wklx,
+  deny /sys/fs/[^c]*/** wklx,
+  deny /sys/fs/c[^g]*/** wklx,
+  deny /sys/fs/cg[^r]*/** wklx,
+  deny /sys/firmware/** rwklx,
+  deny /sys/devices/virtual/powercap/** rwklx,
+  deny /sys/kernel/security/** rwklx,
+
+  ptrace (trace,tracedby,read,readby) peer="friday-engineer-backend",
+}

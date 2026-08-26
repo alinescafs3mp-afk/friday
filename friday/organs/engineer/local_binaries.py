@@ -2,21 +2,52 @@
 
 from __future__ import annotations
 
+import hashlib
+import ipaddress
+import os
+import selectors
 import shutil
+import signal
 import subprocess
 import tempfile
 import time
 from collections.abc import Sequence
-from typing import Any
+from dataclasses import dataclass
+from typing import Any, BinaryIO, cast
+
+from friday.host_control.adapters.base import ExecutionSpec, attest_execution
+from friday.host_control.adapters.nmap import (
+    MAX_PORTS,
+    NMAP_EXECUTABLE,
+    NMAP_SPEC,
+    NmapAdapter,
+    build_nmap_execution,
+    probe_nmap_version,
+)
+from friday.host_control.contracts import (
+    ContractError,
+    EvidenceRef,
+    ExecutableAttestation,
+    ParserStatus,
+)
+from friday.host_control.policy import NetworkPolicy, NetworkTargetSnapshot, normalize_network_targets
+from friday.host_control.result_projection import project_action_result
 
 from .redaction import redact_text
 
 INTERESTING = ("nmap", "file", "strings", "readelf", "objdump", "openssl", "dig", "host")
-MAX_PORTS = 64
+_NMAP_STDERR_BYTES = 4 * 1024
 
 
 def inventory() -> dict[str, str | None]:
-    return {name: shutil.which(name) for name in INTERESTING}
+    result = {name: shutil.which(name) for name in INTERESTING if name != "nmap"}
+    result["nmap"] = _fixed_nmap_path()
+    return result
+
+
+def _fixed_nmap_path() -> str | None:
+    state = _inspect_nmap_executable()
+    return state.attestation.canonical_path if state.attestation is not None else None
 
 
 def remaining_timeout(deadline: float | None, ceiling: float) -> float:
@@ -83,39 +114,282 @@ def describe_bytes(data: bytes, *, deadline: float | None = None) -> dict[str, A
     return result
 
 
+@dataclass(frozen=True, slots=True)
+class _NmapProcessOutput:
+    exit_code: int | None
+    stdout: bytes
+    stderr: bytes
+    timed_out: bool
+    truncated: bool
+
+
+@dataclass(frozen=True, slots=True)
+class _NmapExecutableState:
+    attestation: ExecutableAttestation | None
+    error: str
+
+
+def _inspect_nmap_executable() -> _NmapExecutableState:
+    """Use the host-agent inventory contract instead of PATH availability."""
+
+    from friday_host_agent.inventory import DpkgPackageResolver, ExecutableInventory
+
+    try:
+        inventory_snapshot = ExecutableInventory(
+            (NMAP_SPEC,),
+            package_resolver=DpkgPackageResolver(),
+            version_probes={NMAP_SPEC.adapter_id: probe_nmap_version},
+            allowed_owner_uids=(0,),
+        ).inspect(NMAP_SPEC.adapter_id)
+    except (OSError, RuntimeError, ValueError):
+        return _NmapExecutableState(None, "nmap_unattested")
+    if inventory_snapshot.attestation is not None and inventory_snapshot.state == "available":
+        try:
+            attest_execution(NMAP_SPEC, inventory_snapshot.attestation)
+        except ContractError:
+            return _NmapExecutableState(None, "nmap_unattested")
+        return _NmapExecutableState(inventory_snapshot.attestation, "")
+    error = "nmap_missing" if inventory_snapshot.state == "missing_package" else "nmap_unattested"
+    return _NmapExecutableState(None, error)
+
+
+def _verify_nmap_execution(
+    execution: ExecutionSpec,
+    attestation: ExecutableAttestation,
+) -> None:
+    """Reverify exact executable bytes at the Engineer execution seam."""
+
+    from friday_host_agent.executable_attestation import (
+        ExecutableAttestationError,
+        verify_executable,
+    )
+
+    try:
+        attest_execution(NMAP_SPEC, attestation)
+        observed = verify_executable(attestation, allowed_owner_uids=(0,))
+    except (ExecutableAttestationError, OSError, ValueError) as exc:
+        raise ContractError("Engineer nmap executable attestation failed") from exc
+    if observed != attestation or execution.executable != attestation.canonical_path:
+        raise ContractError("Engineer nmap execution drifted from its executable attestation")
+
+
+def _exact_ip_snapshot(host: str) -> NetworkTargetSnapshot:
+    raw = str(host or "")
+    try:
+        address = ipaddress.ip_address(raw)
+    except ValueError as exc:
+        raise ContractError("Engineer nmap target is not an exact IP") from exc
+    canonical = str(address)
+    if raw != canonical:
+        raise ContractError("Engineer nmap target is not a canonical exact IP")
+    exact_network = str(ipaddress.ip_network(f"{canonical}/{address.max_prefixlen}", strict=True))
+    policy = NetworkPolicy(
+        connected_cidrs=(),
+        allowed_cidrs=(exact_network,),
+        allow_public=True,
+        max_targets=1,
+        max_target_tokens=1,
+    )
+    return normalize_network_targets((canonical,), policy)
+
+
+def _read_pipe(descriptor: int, size: int = 64 * 1024) -> bytes:
+    return os.read(descriptor, size)
+
+
+def _terminate_process(process: subprocess.Popen[bytes]) -> None:
+    if process.poll() is not None:
+        return
+    try:
+        os.killpg(process.pid, signal.SIGTERM)
+        process.wait(timeout=0.5)
+    except (OSError, subprocess.TimeoutExpired):
+        try:
+            os.killpg(process.pid, signal.SIGKILL)
+            process.wait(timeout=0.5)
+        except (OSError, subprocess.TimeoutExpired):
+            pass
+
+
+def _capture_nmap_execution(
+    execution: ExecutionSpec,
+    *,
+    deadline: float | None,
+) -> _NmapProcessOutput:
+    """Run one shared nmap spec while bounding combined stdout/stderr in memory."""
+
+    timeout = remaining_timeout(deadline, float(execution.timeout_sec))
+    process: subprocess.Popen[bytes] | None = None
+    stdout = bytearray()
+    stderr = bytearray()
+    truncated = False
+    timed_out = False
+    try:
+        process = subprocess.Popen(  # noqa: S603 - shared adapter owns every argv token
+            execution.argv,
+            executable=execution.executable,
+            env=dict(execution.environment),
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            shell=False,
+            start_new_session=True,
+            close_fds=True,
+        )
+        assert process.stdout is not None and process.stderr is not None
+        with selectors.DefaultSelector() as selector:
+            selector.register(process.stdout, selectors.EVENT_READ, stdout)
+            selector.register(process.stderr, selectors.EVENT_READ, stderr)
+            expires_at = time.monotonic() + timeout
+            while selector.get_map():
+                if not timed_out and time.monotonic() >= expires_at:
+                    timed_out = True
+                    _terminate_process(process)
+                for key, _mask in selector.select(0.05):
+                    stream = cast(BinaryIO, key.fileobj)
+                    chunk = _read_pipe(stream.fileno())
+                    if not chunk:
+                        selector.unregister(stream)
+                        stream.close()
+                        continue
+                    destination: bytearray = key.data
+                    remaining = max(0, execution.max_output_bytes - len(stdout) - len(stderr))
+                    destination.extend(chunk[:remaining])
+                    truncated = truncated or len(chunk) > remaining
+        return_code = process.wait(timeout=2)
+        return _NmapProcessOutput(
+            exit_code=return_code,
+            stdout=bytes(stdout),
+            stderr=bytes(stderr),
+            timed_out=timed_out,
+            truncated=truncated,
+        )
+    except BaseException:
+        if process is not None:
+            _terminate_process(process)
+        raise
+
+
+def _nmap_evidence(payload: bytes) -> tuple[EvidenceRef, ...]:
+    if not payload:
+        return ()
+    digest = hashlib.sha256(payload).hexdigest()
+    return (
+        EvidenceRef(
+            evidence_id=f"evidence_{digest[:32]}",
+            sha256=digest,
+            size_bytes=len(payload),
+            media_type="application/xml",
+        ),
+    )
+
+
+def _nmap_error(output: _NmapProcessOutput, parser_status: ParserStatus) -> str:
+    if output.timed_out:
+        return "timeout"
+    if output.truncated:
+        return "output_truncated"
+    if output.exit_code != 0:
+        return "nmap_failed"
+    if parser_status is ParserStatus.UNAVAILABLE:
+        return "xml_unavailable"
+    return ""
+
+
 def nmap_connect_scan(
     host: str,
     ports: Sequence[int],
     *,
     deadline: float | None = None,
 ) -> dict[str, Any]:
-    path = shutil.which("nmap")
-    if not path:
-        return {"ok": False, "error": "nmap_missing"}
-    spec = ",".join(str(int(port)) for port in list(ports)[:MAX_PORTS])
-    if not spec:
-        return {"ok": False, "error": "no_ports"}
-    result = run_argv(
-        [
-            path,
-            "-sT",
-            "-Pn",
-            "-n",
-            "-T4",
-            "--host-timeout",
-            "25s",
-            "--max-retries",
-            "1",
-            "-sV",
-            "--version-light",
-            "-p",
-            spec,
-            str(host),
-        ],
-        timeout_sec=40.0,
-        deadline=deadline,
+    """Run shared ``selected_ports`` against one already-authorized pinned IP."""
+
+    if not ports:
+        return {"ok": False, "error": "no_ports", "tool": "nmap"}
+    if len(ports) > MAX_PORTS:
+        return {"ok": False, "error": "invalid_ports", "tool": "nmap"}
+    try:
+        target_snapshot = _exact_ip_snapshot(host)
+    except ContractError:
+        return {"ok": False, "error": "invalid_target", "tool": "nmap"}
+    adapter = NmapAdapter()
+    try:
+        normalized = adapter.normalize_arguments(
+            "selected_ports",
+            {
+                "ports": list(ports),
+                "target_snapshot_digest": target_snapshot.digest,
+            },
+            target_snapshot=target_snapshot,
+        )
+        normalized_ports = normalized.get("ports")
+        if not isinstance(normalized_ports, list):
+            raise ContractError("Engineer nmap selected ports were not normalized")
+    except ContractError:
+        return {"ok": False, "error": "invalid_ports", "tool": "nmap"}
+    executable_state = _inspect_nmap_executable()
+    attestation = executable_state.attestation
+    if attestation is None:
+        return {"ok": False, "error": executable_state.error, "tool": "nmap"}
+    try:
+        execution = build_nmap_execution(
+            "selected_ports",
+            target_snapshot=target_snapshot,
+            ports=normalized_ports,
+            executable=attestation.canonical_path,
+        )
+        _verify_nmap_execution(execution, attestation)
+    except ContractError:
+        return {"ok": False, "error": "nmap_unattested", "tool": "nmap"}
+    try:
+        output = _capture_nmap_execution(execution, deadline=deadline)
+    except TimeoutError:
+        raise
+    except OSError as exc:
+        return {
+            "ok": False,
+            "error": type(exc).__name__,
+            "binary": NMAP_EXECUTABLE,
+            "tool": "nmap",
+        }
+    evidence = _nmap_evidence(output.stdout)
+    parsed = adapter.parse_xml(
+        output.stdout,
+        target_snapshot=target_snapshot,
+        exit_code=output.exit_code,
+        timed_out=output.timed_out,
+        truncated=output.truncated,
+        evidence=evidence,
     )
-    result["tool"] = "nmap"
+    error = _nmap_error(output, parsed.parser_status)
+    result: dict[str, Any] = {
+        "binary": NMAP_EXECUTABLE,
+        "coverage": parsed.coverage.to_payload(),
+        "evidence": [item.to_payload() for item in evidence],
+        "evidence_retention": "digest_only",
+        "executable_attestation": {
+            "architecture": attestation.architecture,
+            "binary_sha256": attestation.sha256,
+            "digest": attestation.digest,
+            "observed_version": attestation.observed_version,
+            "package_name": attestation.package_name,
+            "package_version": attestation.package_version,
+        },
+        "exit_code": output.exit_code,
+        "ok": not error,
+        "parser_status": parsed.parser_status.value,
+        "report": project_action_result(parsed),
+        "stderr": redact_text(
+            output.stderr.decode("utf-8", errors="replace"),
+            limit=_NMAP_STDERR_BYTES,
+            single_line=False,
+        ),
+        "target_snapshot_digest": target_snapshot.digest,
+        "tool": "nmap",
+        "used": True,
+    }
+    if error:
+        result["error"] = error
     return result
 
 

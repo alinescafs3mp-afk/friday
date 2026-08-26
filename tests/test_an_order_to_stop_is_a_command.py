@@ -197,6 +197,8 @@ async def test_the_stop_path_does_not_open_an_attachment_boundary() -> None:
         "had_attachments": True,
         "attachment_count": 1,
         "private_context_lineage": True,
+        "interaction_mode": "dialogue",
+        "tools_enabled": True,
     }
 
 

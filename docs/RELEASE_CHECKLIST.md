@@ -67,6 +67,85 @@ failed/error/skipped-тест в любой фазе делает гейт кр�
 - weather без явного города не идёт в web; diagnostics требует exact
   capability, а MCP status строится из code-owned projection.
 
+Для optional Engineer Mode и Host Capability Plane дополнительно:
+
+- оба контура default-off; disabled/disconnected host agent не публикует tools
+  и не мешает обычному Friday;
+- host-control доступен только installation owner, actor/own_id перепроверяются
+  перед execution, а package capability отделена от action/network rights;
+- `nmap` использует общий reviewed argv/parser contract, code-owned target
+  normalization, не принимает raw flags/NSE и по умолчанию не допускает public scope;
+- preinstalled `jq` проходит owner Raw-file reauthorization → exact private
+  workspace grant → code-generated field-only program → receipt-bound output →
+  durable attachment с точными download/history/replay bytes; pending upload
+  поддерживается в том же turn, исходный файл не меняется, raw jq expression и
+  host path отсутствуют в schema;
+- полный fake-agent vertical slice проходит: missing `nmap` → exact APT plan →
+  payload-bound approval claim → install receipt/postcondition → executable
+  attestation → отдельный deterministic action job → scan evidence/coverage;
+- plan/dependency/origin/target/executable drift, replay и malformed receipt
+  fail-closed; потеря ответа после admission даёт durable `unknown`, status
+  reconciles exact transaction/unit без повторного execute;
+- broker crash после APT effect сверяется только read-only с exact pre/desired/
+  mixed package snapshot: desired возобновляет continuation через отдельный
+  подписанный reconciliation receipt без второго commit, pre-state допускает
+  только safe re-plan, mixed/unavailable остаются durable `unknown`;
+- APT stdout/stderr сохраняются только как bounded private content-addressed
+  evidence (`0600`, не более 1 MiB на stream); receipt честно различает retained
+  и total bytes/completeness/truncation, а raw bytes не попадают в SQLite,
+  journal, prompt или публичную projection;
+- cancel-before-commit и systemd-cgroup cancellation доказаны отдельными
+  receipts/status, а approval получает `failed`, `uncertain` или `done` по
+  фактической границе эффекта;
+- `tests/test_host_control_*`, `tests/test_friday_host_agent_*`,
+  `tests/test_package_broker_*` и deployment contracts зелёные;
+- Ubuntu acceptance выполняется только после source gate по инструкции
+  [`deploy/host-control/README.md`](../deploy/host-control/README.md), сначала с
+  flags `0`, затем на owner-controlled private target. Реальный APT/systemd
+  smoke является deployment evidence и не подменяется unit-тестом.
+- Docker Engineer Mode на Ubuntu запускается только с enforcing-профилями из
+  [`deploy/engineer-mode/README.md`](../deploy/engineer-mode/README.md):
+  `cap_drop: ALL`, no-new-privileges и PID limit сохранены, `unconfined` и
+  `CAP_SYS_ADMIN` отсутствуют, выбранный seccomp — exact canonical shipped file,
+  а `verify-runtime.sh` доказывает live seccomp, AppArmor, exact 512-task cgroup
+  и реальный no-network bubblewrap smoke до включения flag. Worker наследует
+  этот cgroup и не ставит UID-wide `RLIMIT_NPROC` по неполному container `/proc`.
+- host installer получает только canonical release wheel, собранный release
+  toolchain с `setuptools>=77`/`wheel>=0.45`, и SHA-256 из отдельного release
+  manifest; Ubuntu target не строит source и ставит wheel с `--no-index`.
+- host installer сначала полностью проверяет permanent versioned venv и все
+  staged unit/config файлы, затем атомарно переключает root-owned `current`;
+  failure или handled signal восстанавливает прежнюю activation, точные файлы
+  и изменённые installer-ом enable/linger/start states. Отложенное включение
+  user unit выполняется только через exact selected-user `runuser` +
+  HOME/XDG/DBus contour, а не через user manager оператора.
+- `tools/build_host_control_release_bundle.py` на чистом exact release commit
+  доказывает byte-for-byte соответствие wheel Git `HEAD`, закрытый набор и modes
+  deploy-файлов, deterministic archive и strict manifest. Перед распаковкой
+  trusted verifier обязан принять SHA-256, полученный по независимому каналу;
+  mismatch, extra/missing member, symlink/special Git entry или modified wheel
+  являются блокирующими.
+- rootful Compose build/run использует exact UID/GID выбранного desktop-user и
+  `userns_mode: host`; UID/GID внутри backend совпадают с host, успешный
+  authenticated handshake доказывает одновременно доступ к owner-only
+  directory/socket/key и exact `SO_PEERCRED`, без group/mode fallback.
+- stop-agent acceptance сохраняет tmpfiles-created socket parent `0700`, удаляет
+  только socket, допускает обычный backend restart с честным `disconnected`, а
+  последующий start-agent возвращает authenticated healthy handshake.
+- если public-network когда-либо включается, `jericho doctor` и backend
+  handshake оба обязаны сверить exact Ed25519 public-key digest реального backend
+  signer с agent health. Missing/malformed/mismatch signer identity не публикует
+  capabilities и не может считаться `ready`.
+- public action, ожидающий action-concurrency semaphore, получает short-lived
+  Ed25519 proof только после fresh owner/capability/target-policy и durable
+  claimed-approval recheck на send seam; queue time не старит готовый proof, а
+  revoke в очереди обязан завершиться до `request_sent`. До захвата bounded
+  slot durable job остаётся `planned`/`awaiting_approval`; saturation/cancel
+  закрывается как доказанный pre-effect failure. Exact retry уже claimed
+  approval после backend restart допустим только для совпадающего immutable
+  job в `awaiting_approval`/`approved`/`admitted`, без `started_at`, evidence и
+  reconciliation marker; `running`/`unknown` никогда не переисполняются.
+
 Для Obsidian Android beta дополнительно:
 
 - без `FRIDAY_OBSIDIAN_ENABLED=1` Organ, managed Syncthing и его workers не
@@ -86,7 +165,7 @@ failed/error/skipped-тест в любой фазе делает гейт кр�
 Для optional GPT-OSS secondary brain начиная с 0.207.11 дополнительно:
 
 - release принимается и первый раз запускается без `FRIDAY_SECONDARY_LLM_*`:
-  health имеет `status=ok`, `version=0.207.34`, `secondary.mode=disabled`,
+  health имеет `status=ok`, `version=0.207.35`, `secondary.mode=disabled`,
   `secondary.state=disabled` и `secondary.available=false`;
 - `ACCEPTED_SECONDARY_RUNTIME_PROFILES` содержит ровно finalist
   `gptoss20b-2335df123cac7fc0e13e347cde1e1ffa8562daafcaf0fc76ade1a851d2b0ff1f`
@@ -188,7 +267,7 @@ failed/error/skipped-тест в любой фазе делает гейт кр�
 - post-context load допускает bounded convergence не более 2 секунд с шагом
   50 мс только для valid same-epoch busy; invalid/epoch/deadline fail-closed, а
   initial idle и post-cancellation quiet остаются строгими;
-- final startup health имеет `status=ok`, `version=0.207.34`, configured/installed
+- final startup health имеет `status=ok`, `version=0.207.35`, configured/installed
   `canary`, routes `[archive_read, file_read]`, точный `profile_id`,
   `verified_context_tokens=8192` и непустой public `attestation_sha256`;
 - синтетические 1- и 2-файловые UTF-8 smokes дают одну публикацию с точными
@@ -215,8 +294,14 @@ failed/error/skipped-тест в любой фазе делает гейт кр�
 
 Проверить:
 
-- schema version = 42;
-- предыдущий live release 0.207.26 имеет schema 41; переход
+- schema version = 43;
+- schema 42 → 43 атомарно добавляет exact durable Host Action jobs,
+  person-scoped idempotency, restart-safe `unknown`/reconciliation и append-only
+  lifecycle events; Host Capability Plane остаётся выключенным по умолчанию;
+- текущий опубликованный baseline 0.207.27 имеет schema 42; exact upgrade
+  0.207.27 → назначенная интегратором новая версия обязан дать schema 43 и
+  сохранить все schema-42 данные до Host Control acceptance;
+- historical release 0.207.26 имеет schema 41; переход
   0.207.26 → 0.207.27 атомарно добавляет exact body-free dormant
   conversation/document Work Item projection; writer, admission и runtime route
   в этом release не активированы;

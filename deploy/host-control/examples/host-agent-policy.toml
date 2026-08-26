@@ -1,0 +1,10 @@
+[network]
+schema_version = 1
+
+# Empty is the fail-closed installation default. Add only exact canonical CIDRs
+# that are also configured as FRIDAY_HOST_ALLOWED_CIDRS in the backend.
+allowed_cidrs = []
+
+# Public targets additionally require the matching backend feature flag and an
+# exact per-action approval. Keep this false for the initial private rollout.
+allow_public = false

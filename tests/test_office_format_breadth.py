@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import io
 import sys
+import tempfile
 import time
 import zipfile
 from pathlib import Path
@@ -401,6 +402,11 @@ if any(item not in arguments for item in required):
     raise SystemExit(2)
 if os.environ.get('LD_LIBRARY_PATH') != {expected_library_path!r}:
     raise SystemExit(3)
+tmpdir = os.environ.get('TMPDIR', '')
+if (os.environ.get('HOME') != tmpdir or
+        not tmpdir.startswith('/tmp/friday-office-') or
+        pathlib.Path(tmpdir).parent != pathlib.Path('/tmp')):
+    raise SystemExit(4)
 source = pathlib.Path(arguments[-1])
 target = {_ALL_CONVERSION_TARGETS!r}[source.suffix[1:]]
 output = pathlib.Path(arguments[arguments.index('--outdir') + 1]) / ('source.' + target)
@@ -723,6 +729,21 @@ def test_libreoffice_private_root_does_not_follow_ambient_tmpdir(
     converted = convert_legacy_office(b"synthetic", "xls", executable=str(executable))
 
     assert converted.success is True, converted.error
+    assert list(ambient.iterdir()) == []
+
+
+def test_libreoffice_uses_attested_temp_root_instead_of_tempfile_default(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    ambient = tmp_path / "ambient-tmp"
+    ambient.mkdir()
+    monkeypatch.setattr(tempfile, "tempdir", str(ambient))
+    executable = _fake_libreoffice(tmp_path / "soffice")
+
+    converted = convert_legacy_office(_xlsx(), "xls", executable=str(executable))
+
+    assert converted.success is True
     assert list(ambient.iterdir()) == []
 
 

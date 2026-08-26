@@ -261,16 +261,19 @@ def test_writing_from_a_group_keeps_the_private_chat_on_file(settings):
 
 
 def test_the_documented_organ_list_matches_the_registry(settings):
-    """A hand-maintained list next to the thing it describes always drifts.
+    """The shipped inventory separates default organs from explicit opt-ins.
 
     `BUILTIN_ORGAN_NAMES` is the exported, documented inventory of shipped organs
-    and it silently lost `sentinel` — `build_registry` had six, the constant
-    named five. Pinned here so the next organ cannot be added to only one of them.
+    and it silently lost `sentinel` in the past. Engineer and Host Control are
+    shipped but default-off, so pin that exact difference instead of requiring
+    the disabled registry to instantiate them.
     """
     from friday.organs import BUILTIN_ORGAN_NAMES
 
-    registered = tuple(organ.name for organ in build_registry(settings).organs)
-    assert sorted(BUILTIN_ORGAN_NAMES) == sorted(registered)
+    registered = {organ.name for organ in build_registry(settings).organs}
+    documented = set(BUILTIN_ORGAN_NAMES)
+    assert registered <= documented
+    assert documented - registered == {"engineer", "host_control"}
 
 
 def test_a_reminder_that_exhausted_its_retries_can_be_queued_again(storage):

@@ -205,7 +205,7 @@ async def set_channel_mode(request: Request) -> dict[str, Any]:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     if mode == "engineer":
         if not request.app.state.settings.engineer_mode_enabled:
-            raise HTTPException(status_code=503, detail="Engineer mode is disabled")
+            raise HTTPException(status_code=503, detail="Инженерный режим отключён")
         if not actor.is_owner:
             raise AuthorizationError("Engineer mode is available only to the installation owner")
         _require(request, "engineer.use")

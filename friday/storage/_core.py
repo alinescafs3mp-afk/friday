@@ -35,6 +35,11 @@ from friday.document_catalog.schema import (
     register_document_catalog_connection_functions,
     validate_document_catalog_schema,
 )
+from friday.host_control.job_schema import (
+    HOST_CONTROL_JOB_SCHEMA,
+    HOST_CONTROL_SCHEMA_VERSION,
+    validate_host_control_job_schema,
+)
 from friday.interaction_control_plane.failure_schema import (
     INTERACTION_FAILURE_SCHEMA,
     INTERACTION_FAILURE_SCHEMA_VERSION,
@@ -2558,10 +2563,18 @@ class CoreMixin(StorageShared):
                 # Authenticate an exact interrupted schema-41 attempt, while an
                 # ordinary schema <=40 database legitimately has no sidecar yet.
                 validate_document_catalog_schema(conn, required=False, validate_data=False)
+            if parsed_version is not None and parsed_version >= HOST_CONTROL_SCHEMA_VERSION:
+                validate_host_control_job_schema(conn)
+            else:
+                # A schema-42 installation has no host-action tables. An
+                # interrupted schema-43 attempt is accepted only when it is
+                # either absent or the complete exact projection.
+                validate_host_control_job_schema(conn, required=False)
             self._execute_statements(conn, CORE_TABLE_SCHEMA)
             self._execute_statements(conn, OBSIDIAN_SCHEMA)
             self._execute_statements(conn, INTERACTION_FAILURE_SCHEMA)
             self._execute_statements(conn, WORK_ITEM_SCHEMA)
+            self._execute_statements(conn, HOST_CONTROL_JOB_SCHEMA)
             if not already_current:
                 self._migrate_legacy_schema(conn)
                 self._retire_outdated_indexes(conn)
@@ -2587,6 +2600,7 @@ class CoreMixin(StorageShared):
             validate_interaction_failure_schema(conn)
             validate_work_item_schema(conn)
             validate_document_catalog_schema(conn)
+            validate_host_control_job_schema(conn)
             _validate_private_material_cache(
                 conn,
                 fresh_entity_rebuild_from_live=True,

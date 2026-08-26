@@ -911,13 +911,18 @@ class CommandsMixin(BridgeShared):
                 await self._send_message(telegram, chat_id, "Ничего не ждёт вашего решения." + tail)
                 return
             total = int(data.get("total") or len(items))
-            lines = [f"Ждут вашего решения: {total}." if total else "Ждут вашего решения:"]
-            rows: list[list[dict[str, str]]] = []
+            await self._send_message(
+                telegram,
+                chat_id,
+                f"Ждут вашего решения: {total}." if total else "Ждут вашего решения:",
+            )
+            shown = 0
             for index, item in enumerate(items[:10], start=1):
                 if not isinstance(item, dict):
                     continue
                 approval_id = str(item.get("id") or "")
-                lines.append(f"{index}. {str(item.get('summary') or item.get('tool') or '')[:160]}")
+                summary = str(item.get("summary") or item.get("tool") or "").strip()
+                rows: list[list[dict[str, str]]] = []
                 if approval_id and CALLBACK_TARGET_RE.fullmatch(approval_id):
                     rows.append(
                         [
@@ -925,14 +930,22 @@ class CommandsMixin(BridgeShared):
                             {"text": f"✕ {index}", "callback_data": f"apr:no:{approval_id}"},
                         ]
                     )
-            if total > len(rows):
-                lines.append(f"\nПоказаны первые {len(rows)} из {total}.")
-            await self._send_message(
-                telegram,
-                chat_id,
-                "\n".join(lines) + tail,
-                reply_markup={"inline_keyboard": rows} if rows else None,
-            )
+                await self._send_message(
+                    telegram,
+                    chat_id,
+                    f"{index}. {summary}",
+                    reply_markup={"inline_keyboard": rows} if rows else None,
+                )
+                shown += 1
+            footer = ""
+            if total > shown:
+                footer = f"Показаны первые {shown} из {total}."
+            if footer or tail:
+                await self._send_message(
+                    telegram,
+                    chat_id,
+                    "\n".join(item for item in (footer, tail.strip()) if item),
+                )
             return
         if command == "/watching":
             data = await self._backend_json(
@@ -1134,11 +1147,12 @@ class CommandsMixin(BridgeShared):
             )
             raw_renamed = renamed.get("entity") if isinstance(renamed, dict) else None
             renamed_entity: dict[str, Any] = raw_renamed if isinstance(raw_renamed, dict) else {}
-            shown = str(renamed_entity.get("name") or new_name)
+            shown_name = str(renamed_entity.get("name") or new_name)
             await self._send_message(
                 telegram,
                 chat_id,
-                f"Объект переименован: «{shown}». Правку можно отменить в карточке: /profile {shown}",
+                f"Объект переименован: «{shown_name}». "
+                f"Правку можно отменить в карточке: /profile {shown_name}",
             )
             return
         if command == "/search":

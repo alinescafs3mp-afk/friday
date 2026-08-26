@@ -2143,7 +2143,7 @@ def test_dependency_hashes_are_frozen_to_the_authorized_inputs() -> None:
             "a20a650abd7929a527b09149e3f9bfd7151b51c9f739259f8f9199a6ab517c9c"
         ),
         "friday/diagnostics/__init__.py": (
-            "3920ed6300c4a01ce374643b1e1cbdbeeb04edce5054f29ab6f721ef964cecee"
+            "9e8593a74f1ae12d49e17fd873ef508385e0f074fae45169679ba937c0616446"
         ),
         "friday/diagnostics/runtime_lease.py": (
             "6986bcef0d21d1754672ad784746fbc205b4822de708c71b16dd93576f3d1926"

@@ -160,7 +160,9 @@ LOGGER = logging.getLogger("friday.storage")
 # 42 — dormant reader-first conversation/document Work Item projection.  Exact
 # message selection, Raw document pins, ambiguity history and accepted completion
 # receipts survive restart without persisting prompts, paths, titles or bodies.
-SCHEMA_VERSION = 42
+# 43 — durable immutable host-action plans, restart-safe lifecycle state and an
+# append-only event chain for the optional native host capability plane.
+SCHEMA_VERSION = 43
 
 #: Определение таблицы внешних источников отдельной константой: миграция схемы 29
 #: пересоздаёт её, чтобы ключом стала ПАРА `(user_id, name)`, и должна брать ровно

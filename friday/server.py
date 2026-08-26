@@ -86,7 +86,12 @@ from friday.execution_kernel import ExecutionKernel, mark_request_effect_possibl
 from friday.executive import ExecutiveService
 from friday.executive.api import admin_router as missions_admin_router
 from friday.executive.api import router as missions_router
-from friday.file_delivery import AuthorizedFileReadError, FileRecordUnavailable, read_authorized_file
+from friday.file_delivery import (
+    AuthorizedFileReadError,
+    FileRecordUnavailable,
+    authorize_current_upload_file,
+    read_authorized_file,
+)
 from friday.file_evidence import stamp_current_turn_file_reference
 from friday.generated_files import persist_generated_response_files
 from friday.http_errors import relation_history_http_detail
@@ -183,6 +188,249 @@ from friday.v12_model_transport import create_attested_v12_model_runtime
 from friday.web_surfer import WebSurfer
 from friday.workers import IntervalTask, WorkersManager
 from friday.workers._blocking import current_activity, run_blocking, wait_until_idle
+
+_HOST_CONTROL_APPROVAL_TOOLS = frozenset({"host_action_execute", "software_install_execute"})
+_HOST_JOB_ID = re.compile(r"hjob_[0-9a-f]{32}")
+
+
+def _host_result_text(value: object, maximum: int = 120) -> str:
+    """Return one bounded display token from already-untrusted host evidence."""
+
+    rendered = " ".join(str(value or "").split())
+    rendered = re.sub(
+        r"</?(?:tool_call|tool_result|function_call|assistant|system)(?:\s[^>]*)?>",
+        "[HOST_MARKUP_REMOVED]",
+        rendered,
+        flags=re.IGNORECASE,
+    )
+    rendered = "".join(character for character in rendered if character.isprintable())
+    return rendered[:maximum]
+
+
+def _host_result_job_ids(data: Mapping[str, Any]) -> tuple[str, ...]:
+    candidates = [data.get("job_id")]
+    resumed = data.get("resumed")
+    if isinstance(resumed, Mapping):
+        candidates.append(resumed.get("job_id"))
+    result: list[str] = []
+    for candidate in candidates:
+        job_id = str(candidate or "")
+        if _HOST_JOB_ID.fullmatch(job_id) is not None and job_id not in result:
+            result.append(job_id)
+    return tuple(result)
+
+
+def _render_host_approval_result(data: Mapping[str, Any], *, success: bool, error: str) -> str:
+    """Build the bounded final human response without another model round."""
+
+    lines = ["Хост-действие завершено." if success else "Хост-действие не подтверждено как успешное."]
+    package_job = str(data.get("job_id") or "")
+    if _HOST_JOB_ID.fullmatch(package_job) is not None:
+        lines.append(f"Задание: {package_job}.")
+    if data.get("package_outcome") is not None:
+        lines.append(
+            "APT: "
+            f"{_host_result_text(data.get('package_outcome'), 40)}; "
+            f"capability={'available' if data.get('capability_activated') is True else 'unavailable'}; "
+            f"receipt sha256 {_host_result_text(data.get('receipt_digest'), 64)[:16] or '?'}…"
+        )
+
+    resumed = data.get("resumed")
+    action = resumed if isinstance(resumed, Mapping) else data
+    action_job = str(action.get("job_id") or "")
+    if _HOST_JOB_ID.fullmatch(action_job) is not None and action_job != package_job:
+        lines.append(f"Возобновлённое сетевое задание: {action_job}.")
+    status = _host_result_text(action.get("status") or data.get("status"), 40)
+    if status:
+        lines.append(f"Статус: {status}.")
+
+    coverage = action.get("coverage")
+    if isinstance(coverage, Mapping):
+        grade = _host_result_text(coverage.get("grade"), 24) or "unknown"
+        requested = coverage.get("requested")
+        accounted = coverage.get("accounted")
+        skipped = coverage.get("skipped")
+        if all(isinstance(item, int) and not isinstance(item, bool) for item in (requested, accounted)):
+            lines.append(
+                f"Покрытие: {grade}, учтено {accounted}/{requested}"
+                + (f", пропущено {skipped}" if isinstance(skipped, int) and skipped else "")
+                + "."
+            )
+        else:
+            lines.append(f"Покрытие: {grade}.")
+
+    structured = action.get("result")
+    if isinstance(structured, Mapping):
+        hosts = structured.get("hosts")
+        host_rows = hosts if isinstance(hosts, list) else []
+        hosts_up = structured.get("hosts_up")
+        open_ports = structured.get("open_ports")
+        if isinstance(hosts_up, int) and not isinstance(hosts_up, bool):
+            lines.append(
+                f"Хостов доступно: {hosts_up}; открытых портов: "
+                f"{open_ports if isinstance(open_ports, int) and not isinstance(open_ports, bool) else '?'}"
+                "."
+            )
+        shown = 0
+        for raw_host in host_rows:
+            if shown >= 24 or not isinstance(raw_host, Mapping):
+                break
+            addresses = raw_host.get("addresses")
+            canonical_addresses: list[str] = []
+            if isinstance(addresses, list):
+                for raw_address in addresses[:8]:
+                    if not isinstance(raw_address, Mapping):
+                        continue
+                    try:
+                        canonical = str(ipaddress.ip_address(str(raw_address.get("address") or "")))
+                    except ValueError:
+                        continue
+                    if canonical not in canonical_addresses:
+                        canonical_addresses.append(canonical)
+            if not canonical_addresses:
+                continue
+            port_tokens: list[str] = []
+            raw_ports = raw_host.get("ports")
+            if isinstance(raw_ports, list):
+                for raw_port in raw_ports[:16]:
+                    if not isinstance(raw_port, Mapping) or raw_port.get("state") != "open":
+                        continue
+                    port = raw_port.get("port")
+                    protocol = str(raw_port.get("protocol") or "")
+                    if (
+                        isinstance(port, bool)
+                        or not isinstance(port, int)
+                        or not 1 <= port <= 65_535
+                        or protocol not in {"tcp", "udp", "sctp"}
+                    ):
+                        continue
+                    service = raw_port.get("service")
+                    service_name = (
+                        _host_result_text(service.get("name"), 40) if isinstance(service, Mapping) else ""
+                    )
+                    port_tokens.append(f"{port}/{protocol}" + (f" {service_name}" if service_name else ""))
+            state = _host_result_text(raw_host.get("state"), 24) or "unknown"
+            lines.append(
+                f"- {', '.join(canonical_addresses)}: {state}; "
+                + (", ".join(port_tokens) if port_tokens else "открытые сервисы не обнаружены")
+            )
+            shown += 1
+        if len(host_rows) > shown:
+            lines.append(f"Показаны {shown} из {len(host_rows)} строк хостов; полный результат сохранён.")
+
+    evidence = action.get("evidence")
+    evidence_tokens: list[str] = []
+    if isinstance(evidence, list):
+        for item in evidence[:8]:
+            if not isinstance(item, Mapping):
+                continue
+            evidence_id = _host_result_text(item.get("evidence_id"), 80)
+            digest = _host_result_text(item.get("sha256"), 64)
+            if (
+                evidence_id
+                and re.fullmatch(r"[A-Za-z0-9_.:-]{1,80}", evidence_id)
+                and re.fullmatch(r"[0-9a-f]{64}", digest)
+            ):
+                evidence_tokens.append(f"{evidence_id} sha256:{digest[:16]}…")
+    if evidence_tokens:
+        lines.append("Доказательства: " + "; ".join(evidence_tokens) + ".")
+    warnings = action.get("warnings")
+    if isinstance(warnings, list) and warnings:
+        rendered = [_host_result_text(item, 120) for item in warnings[:8]]
+        lines.append("Ограничения: " + "; ".join(item for item in rendered if item) + ".")
+    if not success and error:
+        lines.append("Ошибка: " + _host_result_text(error, 240) + ".")
+    return "\n".join(lines)[:3_800]
+
+
+def _persist_host_approval_final_response(
+    storage: Any,
+    *,
+    actor: ActorContext,
+    approval_id: str,
+    tool_name: str,
+    data: Mapping[str, Any],
+    success: bool,
+    error: str,
+) -> tuple[str, str]:
+    """Persist one assistant receipt linked to the exact source/job chain."""
+
+    job_ids = _host_result_job_ids(data)
+    if not job_ids:
+        return "", ""
+    placeholders = ",".join("?" for _ in job_ids)
+    rows = storage.execute(
+        f"""SELECT id,conversation_id,source_message_id,approval_id,status,
+                   receipt_ref,result_ref
+              FROM host_action_jobs
+             WHERE id IN ({placeholders}) AND user_id=? AND actor_own_id=?""",  # nosec B608
+        (*job_ids, actor.user_id, actor.own_id),
+    ).fetchall()
+    by_id = {str(row["id"]): dict(row) for row in rows}
+    if set(by_id) != set(job_ids):
+        return "", ""
+    if approval_id not in {str(row.get("approval_id") or "") for row in by_id.values()}:
+        return "", ""
+    conversation_ids = {str(row.get("conversation_id") or "") for row in by_id.values()}
+    source_ids = {str(row.get("source_message_id") or "") for row in by_id.values()}
+    if len(conversation_ids) != 1 or len(source_ids) != 1:
+        return "", ""
+    conversation_id = conversation_ids.pop()
+    source_message_id = source_ids.pop()
+    if not conversation_id or not source_message_id:
+        return "", ""
+    source = storage.execute(
+        """SELECT id FROM messages
+             WHERE id=? AND conversation_id=? AND user_id=? AND role='user'""",
+        (source_message_id, conversation_id, actor.own_id),
+    ).fetchone()
+    if source is None:
+        return "", ""
+    content = _render_host_approval_result(data, success=success, error=error)
+    metadata = {
+        "host_control_approval_id": approval_id,
+        "host_control_job_ids": list(job_ids),
+        "host_control_statuses": {job_id: str(by_id[job_id].get("status") or "") for job_id in job_ids},
+        "tools_used": [tool_name],
+    }
+    stored = storage.store_message(
+        conversation_id,
+        actor.own_id,
+        "assistant",
+        content,
+        metadata=metadata,
+        reply_to=source_message_id,
+    )
+    return content, str(stored.get("id") or "")
+
+
+def _close_rejected_host_approval(
+    storage: Any,
+    *,
+    actor: ActorContext,
+    approval: Mapping[str, Any],
+) -> str:
+    """Close the exact linked Host job after a no-effect human rejection."""
+
+    if str(approval.get("tool") or "") not in _HOST_CONTROL_APPROVAL_TOOLS:
+        return ""
+    payload = approval.get("payload")
+    if not isinstance(payload, Mapping):
+        return ""
+    job_id = str(payload.get("job_id") or "")
+    approval_id = str(approval.get("id") or "")
+    if _HOST_JOB_ID.fullmatch(job_id) is None or not approval_id:
+        return ""
+    from friday.host_control.jobs import HostJobStore
+
+    closed = HostJobStore(storage).close_rejected_approval(
+        job_id,
+        approval_id,
+        user_id=actor.user_id,
+        actor_own_id=actor.own_id,
+    )
+    return job_id if closed.get("status") == "cancelled" else ""
+
 
 LOGGER = logging.getLogger(__name__)
 VERSION = __version__
@@ -909,6 +1157,51 @@ def _current_replay_needs_reinspection(
     )
 
 
+async def _current_turn_upload_raw(
+    *,
+    state: Any,
+    actor: ActorContext,
+    raw_id: str,
+    filename: str,
+    mime_type: str,
+    file_content: bytes,
+) -> dict[str, Any] | None:
+    """Resolve ordinary Raw visibility or one exact local-JSON upload grant."""
+
+    files_allowed = bool(raw_id and state.auth_service.authorize(actor, "files.read").allowed)
+    current = (
+        await run_blocking(state.storage.get_raw_object, raw_id, actor.user_id) if files_allowed else None
+    )
+    normalized_mime = mime_type.partition(";")[0].strip().casefold()
+    json_host_input = bool(
+        filename.casefold().endswith(".json")
+        or normalized_mime in {"application/json", "text/json"}
+        or normalized_mime.endswith("+json")
+    )
+    if (
+        current is not None
+        or not files_allowed
+        or not json_host_input
+        or not state.settings.host_control_enabled
+        or not state.auth_service.authorize(actor, "host.files.read").allowed
+    ):
+        return current
+    try:
+        authorized = await run_blocking(
+            authorize_current_upload_file,
+            state.storage,
+            state.settings.files_dir,
+            raw_id,
+            actor.user_id,
+            person_id=actor.own_id,
+            expected_sha256=hashlib.sha256(file_content).hexdigest(),
+            max_bytes=min(state.settings.max_upload_bytes, 16 * 1024 * 1024),
+        )
+    except (AuthorizedFileReadError, FileRecordUnavailable, OSError, ValueError):
+        return None
+    return dict(authorized.raw)
+
+
 def _current_turn_file_attachment(
     *,
     filename: str,
@@ -927,8 +1220,13 @@ def _current_turn_file_attachment(
     """
 
     knowledge = file_ingestion.get("knowledge_object")
+    raw_metadata = bounded_raw_file_metadata((raw or {}).get("metadata_json"))
+    stored_filename = raw_metadata.get("filename")
+    authoritative_filename = (
+        stored_filename if isinstance(stored_filename, str) and stored_filename.strip() else filename
+    )
     attachment: dict[str, Any] = {
-        "filename": filename,
+        "filename": authoritative_filename,
         # A conversation may carry only this opaque reference into a follow-up
         # turn. AgentRuntime resolves it through a tenant-scoped storage read
         # and verifies the original uploader before exposing another bounded
@@ -940,7 +1238,6 @@ def _current_turn_file_attachment(
     }
     extraction_value = file_ingestion.get("extraction")
     extraction = extraction_value if isinstance(extraction_value, dict) else {}
-    raw_metadata = bounded_raw_file_metadata((raw or {}).get("metadata_json"))
     try:
         extracted_chars = max(0, int(extraction.get("chars") or 0))
     except (TypeError, ValueError):
@@ -1092,7 +1389,7 @@ def _current_turn_file_attachment(
         }
     )
     reinspect_current_upload = _current_replay_needs_reinspection(
-        filename=filename,
+        filename=authoritative_filename,
         file_ingestion=file_ingestion,
         raw=raw,
     )
@@ -2677,6 +2974,14 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
             )
         last_meta = _json_load(last_user.get("metadata_json"), {})
         had_attachments = bool(last_meta.get("had_attachments"))
+        source_mode = str(last_meta.get("interaction_mode") or "").strip()
+        if persisted_mode == "engineer" and source_mode != "engineer":
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    "Engineer regenerate requires a source turn that was originally executed in Engineer mode"
+                ),
+            )
         replay_enable_tools = (
             last_meta.get("tools_enabled") is True
             if "tools_enabled" in last_meta
@@ -3088,9 +3393,26 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
             raise HTTPException(status_code=404, detail="Заявка не найдена или уже решена")
         _audit(request, f"approval.{decision}", "action_approval", approval_id, after=decided)
         if decision == "reject":
-            return {"approval": decided, "executed": False}
+            response: dict[str, Any] = {"approval": decided, "executed": False}
+            if str(decided.get("tool") or "") in _HOST_CONTROL_APPROVAL_TOOLS:
+                try:
+                    closed_job_id = await run_blocking(
+                        _close_rejected_host_approval,
+                        request.app.state.storage,
+                        actor=actor,
+                        approval=decided,
+                    )
+                except Exception as exc:  # noqa: BLE001 - rejection itself remains authoritative
+                    LOGGER.error(
+                        "Rejected host-control job closure failed (%s)",
+                        type(exc).__name__,
+                    )
+                    closed_job_id = ""
+                response["host_job_closed"] = bool(closed_job_id)
+                response["host_job_id"] = closed_job_id
+            return response
         result = await request.app.state.kernel.execute_approved(str(approval_id), actor=actor)
-        return {
+        response = {
             "approval": await run_blocking(
                 request.app.state.storage.get_action_approval,
                 str(approval_id),
@@ -3100,6 +3422,29 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
             "executed": bool(result.success),
             "error": result.error,
         }
+        if result.tool_name in _HOST_CONTROL_APPROVAL_TOOLS and isinstance(result.data, Mapping):
+            # The approved host vertical resumes outside the ordinary model turn.
+            # Keep its bounded structured result and one deterministic assistant
+            # receipt instead of reducing a completed scan to the word “done”.
+            response["result"] = dict(result.data)
+            try:
+                final_response, final_message_id = await run_blocking(
+                    _persist_host_approval_final_response,
+                    request.app.state.storage,
+                    actor=actor,
+                    approval_id=str(approval_id),
+                    tool_name=result.tool_name,
+                    data=result.data,
+                    success=bool(result.success),
+                    error=str(result.error or ""),
+                )
+            except Exception as exc:  # noqa: BLE001 - an effect must not be reported as unexecuted
+                LOGGER.warning("Host-control final response persistence failed (%s)", type(exc).__name__)
+                final_response, final_message_id = "", ""
+            response["final_response"] = final_response
+            response["final_response_message_id"] = final_message_id
+            response["final_response_persisted"] = bool(final_message_id)
+        return response
 
     @application.post("/api/chat", tags=["chat"])
     async def chat(request: Request) -> dict[str, Any]:
@@ -4075,10 +4420,13 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
                         }
                         file_ingestions.append(batch_ingestion)
                         continue
-                    current_turn_raw = (
-                        await run_blocking(state.storage.get_raw_object, raw_id, actor.user_id)
-                        if raw_id and state.auth_service.authorize(actor, "files.read").allowed
-                        else None
+                    current_turn_raw = await _current_turn_upload_raw(
+                        state=state,
+                        actor=actor,
+                        raw_id=raw_id,
+                        filename=filename,
+                        mime_type=mime_type,
+                        file_content=batch_content,
                     )
                     attachments.append(
                         _current_turn_file_attachment(
@@ -4319,10 +4667,13 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
                                 raise IdempotencyConflictError(
                                     "Telegram reply identity could not be authorized"
                                 )
-                    current_turn_raw = (
-                        await run_blocking(state.storage.get_raw_object, raw_id, actor.user_id)
-                        if raw_id and state.auth_service.authorize(actor, "files.read").allowed
-                        else None
+                    current_turn_raw = await _current_turn_upload_raw(
+                        state=state,
+                        actor=actor,
+                        raw_id=raw_id,
+                        filename=filename,
+                        mime_type=mime_type,
+                        file_content=file_content,
                     )
                     attachments.append(
                         _current_turn_file_attachment(

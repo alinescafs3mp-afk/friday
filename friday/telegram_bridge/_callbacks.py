@@ -853,6 +853,7 @@ class CallbacksMixin(BridgeShared):
                     await self._send_message(telegram, chat_id, "Действие отклонено — оно не выполнено.")
                 else:
                     executed = bool(decided.get("executed"))
+                    final_response = str(decided.get("final_response") or "").strip()
                     await self._answer_callback(
                         telegram, callback_id, "Выполнено" if executed else "Не выполнено"
                     )
@@ -862,7 +863,9 @@ class CallbacksMixin(BridgeShared):
                     await self._send_message(
                         telegram,
                         chat_id,
-                        "Готово: действие выполнено."
+                        final_response
+                        if executed and final_response
+                        else "Готово: действие выполнено."
                         if executed
                         else (
                             "Решение записано, но действие НЕ выполнено: "

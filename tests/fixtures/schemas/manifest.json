@@ -30,6 +30,7 @@
     {"name": "schema-39.sqlite3.gz", "sha256": "52f6077b8359138103aeecd8077e073470b2bf9f0646ef9e74c9ed49906cf7be"},
     {"name": "schema-40.sqlite3.gz", "sha256": "3f7d4ced85e3a100466e16f193ab8984d5064ce6e11d8e279c50aa2c39787e3c"},
     {"name": "schema-41.sqlite3.gz", "sha256": "254ed2c8a33b2335bb5ed6ec7076850ed81d1c8a21b1d2f6e78b1e1f7d1a588a"},
-    {"name": "schema-42.sqlite3.gz", "sha256": "4cfaba31e1dd8718b7621f92420b85bf654391bdb86c6ce2cad3d009b682aba9"}
+    {"name": "schema-42.sqlite3.gz", "sha256": "4cfaba31e1dd8718b7621f92420b85bf654391bdb86c6ce2cad3d009b682aba9"},
+    {"name": "schema-43.sqlite3.gz", "sha256": "5d732305b352ae541aba5a5aaf18a378614de5f68fd3158a0e1f1459d327fa20"}
   ]
 }

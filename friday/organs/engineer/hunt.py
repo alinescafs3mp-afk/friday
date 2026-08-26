@@ -9,7 +9,7 @@ from typing import Any
 
 from . import advice, artifacts, hosts, sandbox
 from .redaction import redact_text
-from .targets import PinnedTarget, extract_single_target
+from .targets import PinnedTarget, extract_single_target, requests_active_assessment
 
 MAX_DOSSIER_FILES = 8
 MAX_DOSSIER_MARKDOWN_CHARS = 24_000
@@ -62,8 +62,11 @@ def hunt_from_speech(
     *,
     deadline: float | None = None,
     workspace_root: Path | None = None,
+    allowed_cidrs: Sequence[str] = (),
+    allow_public: bool = False,
+    public_action_approved: bool = False,
 ) -> dict[str, Any]:
-    """Mint at most one network target from only the current human turn."""
+    """Run an explicitly requested, policy-admitted current-turn assessment."""
 
     dossier: dict[str, Any] = {
         "ok": True,
@@ -73,16 +76,26 @@ def hunt_from_speech(
         "active_probes_sent": False,
         "active_probes": [],
         "exploit_payloads_sent": False,
+        "network_request_status": (
+            "explicit_active_request" if requests_active_assessment(speech) else "not_requested"
+        ),
     }
-    try:
-        selected = extract_single_target(speech)
-    except ValueError as exc:
-        selected = None
-        dossier["ok"] = False
-        dossier["target_error"] = str(exc)
+    selected = None
+    if dossier["network_request_status"] == "explicit_active_request":
+        try:
+            selected = extract_single_target(speech)
+        except ValueError as exc:
+            dossier["ok"] = False
+            dossier["target_error"] = str(exc)
     if selected is not None:
         try:
-            target = hosts.pin_target_from_speech(speech, deadline=deadline)
+            target = hosts.pin_target_from_speech(
+                speech,
+                deadline=deadline,
+                allowed_cidrs=allowed_cidrs,
+                allow_public=allow_public,
+                public_action_approved=public_action_approved,
+            )
             if target is not None:
                 dossier["targets"] = [target.public_dict()]
                 port = selected.get("port")

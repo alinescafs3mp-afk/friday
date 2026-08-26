@@ -196,13 +196,35 @@ _BLOCKING_CHAT_SCOPES: tuple[_Scope, ...] = (
     _Scope("conversations", "conversations", "user_id=?"),
 )
 
+# Schema 43 host-action events are append-only and their parent plan identity is
+# immutable.  Treat the complete lifecycle as retained history until a dedicated
+# erasure policy exists; silently deleting only the user row would either violate
+# that contract or leave an FK dependency discovered too late in the delete path.
+_BLOCKING_HOST_ACTION_SCOPES: tuple[_Scope, ...] = (
+    _Scope(
+        "host_action_events",
+        "host_action_events",
+        "job_id IN (SELECT id FROM host_action_jobs WHERE user_id=? OR actor_own_id=?)",
+    ),
+    _Scope(
+        "host_action_jobs",
+        "host_action_jobs",
+        "user_id=? OR actor_own_id=?",
+    ),
+)
+
 # Schema audit: a future table carrying one of these ownership columns must be
 # classified explicitly before deletion can proceed.  Otherwise a new feature can
 # silently turn a once-complete cascade into an orphan-producing one.
 _KNOWN_USER_SCOPES = frozenset(
     {
         (scope.table, "user_id")
-        for scope in (*_DELETE_SCOPES, *_BLOCKING_GRAPH_SCOPES, *_BLOCKING_CHAT_SCOPES)
+        for scope in (
+            *_DELETE_SCOPES,
+            *_BLOCKING_GRAPH_SCOPES,
+            *_BLOCKING_CHAT_SCOPES,
+            *_BLOCKING_HOST_ACTION_SCOPES,
+        )
         if scope.predicate == "user_id=?"
     }
     | {
@@ -217,6 +239,10 @@ _KNOWN_USER_SCOPES = frozenset(
         # compound delete scope above is authoritative for both columns.
         ("file_source_aliases", "user_id"),
         ("file_source_aliases", "uploaded_by"),
+        # Both user FKs are one immutable schema-43 host-action identity.  The
+        # compound blocking scope above owns both axes.
+        ("host_action_jobs", "user_id"),
+        ("host_action_jobs", "actor_own_id"),
     }
 )
 
@@ -607,7 +633,13 @@ def _cross_account_reference_counts(conn: sqlite3.Connection, user_id: str) -> d
 
 
 _ACCOUNT_ROW_SCOPES = {
-    scope.table: scope for scope in (*_DELETE_SCOPES, *_BLOCKING_GRAPH_SCOPES, *_BLOCKING_CHAT_SCOPES)
+    scope.table: scope
+    for scope in (
+        *_DELETE_SCOPES,
+        *_BLOCKING_GRAPH_SCOPES,
+        *_BLOCKING_CHAT_SCOPES,
+        *_BLOCKING_HOST_ACTION_SCOPES,
+    )
 }
 _ACCOUNT_ROW_SCOPES["users"] = _Scope("users", "users", "id=?")
 
@@ -1120,6 +1152,7 @@ _BLOCKER_MESSAGES = {
     "account_active": "Сначала отключите учётную запись и завершите её активные запросы.",
     "relation_history": "У аккаунта есть append-only история графа; её нельзя стирать обычным каскадом.",
     "chat_history": "У аккаунта есть неизменяемая история чата; действующая политика запрещает её стирать.",
+    "host_action_history": "У аккаунта есть неизменяемая история Host Action; для неё ещё не определён отдельный безопасный каскад удаления.",
     "private_quarantine": "Часть графа находится в неизменяемом приватном карантине.",
     "active_operations": "У аккаунта есть выполняющиеся операции; сначала завершите или отмените их.",
     "stored_files": "У аккаунта есть сохранённые файлы; требуется согласованное файловое удаление.",
@@ -1161,6 +1194,8 @@ def _preflight(
     counts.update(graph_counts)
     chat_counts = {scope.key: _count(conn, scope, user_id) for scope in _BLOCKING_CHAT_SCOPES}
     counts.update(chat_counts)
+    host_action_counts = {scope.key: _count(conn, scope, user_id) for scope in _BLOCKING_HOST_ACTION_SCOPES}
+    counts.update(host_action_counts)
     private_row = conn.execute(
         """SELECT COUNT(*) AS count FROM private_entity_material_cache
              WHERE entity_id IN (SELECT id FROM entities WHERE user_id=?)""",
@@ -1279,6 +1314,9 @@ def _preflight(
     chat_total = chat_counts["messages"] + chat_counts["conversations"]
     if chat_total:
         block("chat_history", chat_total)
+    host_action_total = host_action_counts["host_action_jobs"] + host_action_counts["host_action_events"]
+    if host_action_total:
+        block("host_action_history", host_action_total)
     if private_quarantine:
         block("private_quarantine", private_quarantine)
     if active_operations:

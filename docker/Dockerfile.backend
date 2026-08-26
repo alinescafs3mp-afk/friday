@@ -4,17 +4,50 @@
 FROM python:3.14-slim
 
 ARG TARGETARCH
+ARG FRIDAY_RUNTIME_UID
+ARG FRIDAY_RUNTIME_GID
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1
 
-RUN groupadd --system jericho \
-    && useradd --system --gid jericho --home-dir /home/jericho --create-home jericho
+# Engineer Mode's artifact boundary is an actual bubblewrap process, not a
+# Python-only emulation.  The worker intentionally pins the distro-owned paths
+# below (including the util-linux prlimit wrapper) and startup fails closed when
+# any executable is absent or writable by a non-root principal.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends bubblewrap python3-minimal util-linux nmap dnsutils file binutils openssl \
+    && for executable in \
+        /usr/bin/bwrap /usr/bin/python3 /usr/bin/prlimit /usr/bin/nmap \
+        /usr/bin/dig /usr/bin/host /usr/bin/file /usr/bin/strings \
+        /usr/bin/readelf /usr/bin/objdump /usr/bin/openssl; do \
+        [ -x "$executable" ] || exit 1; \
+    done \
+    && rm -rf /var/lib/apt/lists/*
+
+# The ordinary image keeps its historical system-user allocation.  The optional
+# Host Control Compose override supplies both numeric IDs so a rootful container
+# and the owner-private host-agent socket share one exact non-root kernel UID.
+RUN if [ -z "$FRIDAY_RUNTIME_UID" ] && [ -z "$FRIDAY_RUNTIME_GID" ]; then \
+        groupadd --system jericho \
+        && useradd --system --gid jericho --home-dir /home/jericho --create-home jericho; \
+    else \
+        case "$FRIDAY_RUNTIME_UID" in *[!0-9]*|'') exit 2 ;; esac; \
+        case "$FRIDAY_RUNTIME_GID" in *[!0-9]*|'') exit 2 ;; esac; \
+        [ "$FRIDAY_RUNTIME_UID" -ge 1000 ] \
+        && [ "$FRIDAY_RUNTIME_UID" -le 2147483647 ] \
+        && [ "$FRIDAY_RUNTIME_GID" -ge 1000 ] \
+        && [ "$FRIDAY_RUNTIME_GID" -le 2147483647 ] \
+        && groupadd --gid "$FRIDAY_RUNTIME_GID" jericho \
+        && useradd --uid "$FRIDAY_RUNTIME_UID" --gid jericho --no-log-init \
+            --home-dir /home/jericho --create-home --shell /usr/sbin/nologin jericho; \
+    fi
 
 WORKDIR /build
-COPY pyproject.toml README.md requirements.lock ./
+COPY pyproject.toml README.md LICENSE requirements.lock ./
 COPY friday/ ./friday/
+COPY friday_host_agent/ ./friday_host_agent/
+COPY friday_package_broker/ ./friday_package_broker/
 COPY docker/install_syncthing.py ./docker/install_syncthing.py
 # Constrained to the exact transitive versions the suite was green on, so a rebuild
 # months later cannot quietly resolve a different dependency tree. Every compiled

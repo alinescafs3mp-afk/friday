@@ -24,6 +24,7 @@ from friday.account_deletion import (
     preflight_account_deletion,
 )
 from friday.account_gate import AccountActivityGate, AccountGateClosed
+from friday.host_control.jobs import HostJobStore
 from friday.memory import VaultAccountWriteBlocked, _safe_component
 from friday.permissions import LEGACY_OWNER_USER_ID
 from friday.server import create_app
@@ -1834,6 +1835,40 @@ def test_relation_history_is_named_as_an_immutable_blocker(storage) -> None:
     assert plan["counts"]["relations"] == 1
     assert plan["counts"]["relation_revisions"] >= 1
     assert {item["code"] for item in plan["blockers"]} == {"relation_history"}
+
+
+def test_host_action_history_is_named_as_an_immutable_blocker(storage) -> None:
+    target = "local:host-action-history-delete"
+    storage.ensure_user(target)
+    digest = hashlib.sha256(b"host-action-account-deletion-fixture").hexdigest()
+    job, created = HostJobStore(storage).create_or_get(
+        user_id=target,
+        actor_own_id=target,
+        conversation_id=None,
+        source_message_id=None,
+        host_agent_id="local-user-agent",
+        capability_id="network.nmap.scan",
+        adapter_id="network.nmap",
+        adapter_version=1,
+        action_id="discover",
+        normalized_arguments={"targets": ["192.0.2.0/24"]},
+        plan={"schema_version": 1, "plan_digest_input": digest},
+        plan_digest=digest,
+        risk_class="network_observe",
+        authorization_basis="explicit_current_user_request",
+        idempotency_key="account-deletion-fixture",
+        continuation={"kind": "none"},
+    )
+    assert created is True
+    storage.update_user(target, status="disabled")
+
+    plan = _verified_plan(storage, target)
+
+    assert plan["ready"] is False
+    assert plan["counts"]["host_action_jobs"] == 1
+    assert plan["counts"]["host_action_events"] == 1
+    assert {item["code"] for item in plan["blockers"]} == {"host_action_history"}
+    assert HostJobStore(storage).get(job["id"], user_id=target, actor_own_id=target) is not None
 
 
 def test_transactional_service_rechecks_self_owner_and_system_protections(storage) -> None:

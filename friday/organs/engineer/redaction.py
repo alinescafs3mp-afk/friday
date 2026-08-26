@@ -10,8 +10,16 @@ from __future__ import annotations
 import re
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
-_CONTROL = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
+_ANSI = re.compile(r"\x1b(?:\[[0-?]*[ -/]*[@-~]|\][^\x07]*(?:\x07|\x1b\\))")
+_CONTROL = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f]")
 _SPACE = re.compile(r"\s+")
+_APPLICATION_MARKUP = re.compile(
+    r"(?:</?\s*(?:tool_call|tool_result|function_call|assistant|system|developer|user)"
+    r"(?:\s[^>]*)?>|"
+    r"<\|(?:im_start|im_end|system|assistant|developer|user|tool|tool_call|tool_result)\|>|"
+    r"\[/?INST\]|<<\s*/?SYS\s*>>)",
+    re.IGNORECASE,
+)
 _PEM = re.compile(
     r"-----BEGIN [^-\r\n]{0,80}(?:PRIVATE KEY|CREDENTIALS?)[^-\r\n]*-----"
     r".*?(?:-----END [^-\r\n]{0,80}-----|$)",
@@ -19,14 +27,14 @@ _PEM = re.compile(
 )
 _AUTH = re.compile(r"\b(?:bearer|basic)\s+[A-Za-z0-9._~+/=-]{8,}", re.IGNORECASE)
 _URI_USERINFO = re.compile(
-    r"(?P<scheme>\b[a-z][a-z0-9+.-]{1,31}://)[^/@\s]+@",
+    r"(?P<scheme>\b[a-z][a-z0-9+.-]{0,31}://)[^/@\s]+@",
     re.IGNORECASE,
 )
 _URL_TOKEN = re.compile(
-    r"\b[a-z][a-z0-9+.-]{1,31}://[^\s<>'\"]+",
+    r"\b[a-z][a-z0-9+.-]{0,31}://[^\s<>'\"]+",
     re.IGNORECASE,
 )
-_URL_SCHEME = re.compile(r"[a-z][a-z0-9+.-]{1,31}", re.IGNORECASE)
+_URL_SCHEME = re.compile(r"[a-z][a-z0-9+.-]{0,31}", re.IGNORECASE)
 _ASSIGNMENT = re.compile(
     r"(?P<key>[\"']?\b(?:pass(?:word|wd)?|secret|token|api[_-]?key|access[_-]?key|"
     r"client[_-]?secret|session(?:id)?|auth(?:orization)?)\b[\"']?)"
@@ -91,7 +99,9 @@ def _redact_generic(text: str, *, single_line: bool) -> str:
 def redact_text(value: object, *, limit: int = 512, single_line: bool = True) -> str:
     """Return a bounded, stable projection with common credential forms removed."""
 
-    text = _CONTROL.sub("", str(value or ""))
+    text = _ANSI.sub("", str(value or ""))
+    text = _CONTROL.sub("", text)
+    text = _APPLICATION_MARKUP.sub("[APPLICATION_MARKUP_REMOVED]", text)
     text = _URL_TOKEN.sub(lambda match: _project_url(match.group()), text)
     text = _redact_generic(text, single_line=single_line)
     return text[: max(0, int(limit))]

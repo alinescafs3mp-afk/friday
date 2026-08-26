@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import hashlib
+import hmac
 import ipaddress
 import json
 import math
 import os
+import re
 import socket
 import sqlite3
 import ssl
@@ -27,9 +29,14 @@ from friday.diagnostics.runtime_lease import (
     inspect_process_lease,
     process_owns_lease,
 )
+from friday.host_control.client import HostControlClient, HostControlClientError
+from friday.host_control.contracts import PROTOCOL_VERSION, AdapterState
+from friday.host_control.network_approval import NetworkApprovalSigner
+from friday.host_control.policy import NetworkPolicy
 from friday.memory import MemoryVaultDeletionHandle, VaultProjectionBoundaryError
 from friday.telemetry import SystemTelemetry
 from friday.telemetry.logging import redact_text
+from friday_package_broker.approval import load_backend_approval_signing_key
 
 if TYPE_CHECKING:
     from friday.storage import FridayStorage
@@ -109,6 +116,322 @@ def _model_status(path: Path) -> dict[str, Any]:
     status["usable_files_detected"] = count
     status["placeholder_only"] = count == 0
     return status
+
+
+_HOST_BUILD_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.+-]{0,119}$")
+_HOST_ADAPTER_ID = re.compile(r"^[a-z][a-z0-9_.-]{0,127}$")
+_HOST_REPORTED_STATE = re.compile(r"^[a-z][a-z0-9_]{0,63}$")
+_HOST_PROTOCOL = re.compile(r"^[0-9]{1,3}\.[0-9]{1,3}$")
+_HOST_DIGEST = re.compile(r"^[0-9a-f]{64}$")
+_HOST_ADAPTER_STATES = frozenset(item.value for item in AdapterState)
+_EMPTY_HOST_SQLITE_COUNTS: dict[str, bool | int] = {
+    "available": False,
+    "running_jobs": 0,
+    "unknown_jobs": 0,
+    "pending_package_jobs": 0,
+    "events": 0,
+}
+
+
+def _host_control_sqlite_counts(execute: Any) -> dict[str, bool | int]:
+    """Return only physical lifecycle counts from a schema-43 connection."""
+
+    try:
+        tables = {
+            str(row[0])
+            for row in execute(
+                "SELECT name FROM sqlite_master WHERE type='table' "
+                "AND name IN ('host_action_jobs','host_action_events')"
+            ).fetchall()
+        }
+        if tables != {"host_action_jobs", "host_action_events"}:
+            return dict(_EMPTY_HOST_SQLITE_COUNTS)
+        jobs = execute(
+            """SELECT
+                   COALESCE(SUM(CASE WHEN status='running' THEN 1 ELSE 0 END),0) AS running_jobs,
+                   COALESCE(SUM(CASE WHEN status='unknown' THEN 1 ELSE 0 END),0) AS unknown_jobs,
+                   COALESCE(SUM(CASE WHEN risk_class='package_mutation'
+                                      AND status='awaiting_approval' THEN 1 ELSE 0 END),0)
+                       AS pending_package_jobs
+                 FROM host_action_jobs"""
+        ).fetchone()
+        events = execute("SELECT COUNT(*) AS count FROM host_action_events").fetchone()
+        if jobs is None or events is None:
+            return dict(_EMPTY_HOST_SQLITE_COUNTS)
+        return {
+            "available": True,
+            "running_jobs": max(0, int(jobs["running_jobs"])),
+            "unknown_jobs": max(0, int(jobs["unknown_jobs"])),
+            "pending_package_jobs": max(0, int(jobs["pending_package_jobs"])),
+            "events": max(0, int(events["count"])),
+        }
+    except (KeyError, TypeError, ValueError, sqlite3.Error):
+        return dict(_EMPTY_HOST_SQLITE_COUNTS)
+
+
+def _offline_host_control_sqlite_counts(path: Path) -> dict[str, bool | int]:
+    if not path.is_file():
+        return dict(_EMPTY_HOST_SQLITE_COUNTS)
+    try:
+        conn = sqlite3.connect(f"{path.resolve().as_uri()}?mode=ro", uri=True, timeout=2)
+        conn.row_factory = sqlite3.Row
+        try:
+            conn.execute("PRAGMA query_only=ON")
+            return _host_control_sqlite_counts(conn.execute)
+        finally:
+            conn.close()
+    except (OSError, sqlite3.Error):
+        return dict(_EMPTY_HOST_SQLITE_COUNTS)
+
+
+def _host_control_flags(settings: FridaySettings) -> dict[str, bool | int]:
+    return {
+        "package_install": bool(settings.host_package_install_enabled),
+        "desktop_control": bool(settings.host_desktop_control_enabled),
+        "one_shot_exec": bool(settings.host_one_shot_exec_enabled),
+        "public_network": bool(settings.host_public_network_enabled),
+        "allowed_cidr_count": min(len(settings.host_allowed_cidrs), 32),
+        "allowed_path_root_count": min(len(settings.host_allowed_path_roots), 8),
+    }
+
+
+def _bounded_host_agent_health(
+    health: object,
+    *,
+    expected_agent_id: str,
+    expected_network_policy_digest: str,
+    expected_network_approval_public_key_digest: str | None,
+) -> dict[str, Any] | None:
+    if not isinstance(health, dict) or health.get("agent_id") != expected_agent_id:
+        return None
+    build_id = health.get("build_id")
+    protocols = health.get("protocol_versions")
+    inventory = health.get("inventory")
+    running = health.get("running_job_count")
+    desktop = health.get("desktop_capability")
+    package_broker = health.get("package_broker")
+    network_policy_digest = health.get("network_policy_digest")
+    network_approval_public_key_digest = health.get("network_approval_public_key_digest")
+    if (
+        not isinstance(build_id, str)
+        or _HOST_BUILD_ID.fullmatch(build_id) is None
+        or not isinstance(protocols, list)
+        or not 1 <= len(protocols) <= 8
+        or any(not isinstance(item, str) or _HOST_PROTOCOL.fullmatch(item) is None for item in protocols)
+        or PROTOCOL_VERSION not in protocols
+        or not isinstance(inventory, list)
+        or len(inventory) > 64
+        or isinstance(running, bool)
+        or not isinstance(running, int)
+        or not 0 <= running <= 1_000_000
+        or not isinstance(desktop, str)
+        or _HOST_REPORTED_STATE.fullmatch(desktop) is None
+        or not isinstance(package_broker, str)
+        or package_broker not in {"configured", "unavailable"}
+        or network_policy_digest != expected_network_policy_digest
+        or (
+            expected_network_approval_public_key_digest is not None
+            and (
+                not isinstance(network_approval_public_key_digest, str)
+                or _HOST_DIGEST.fullmatch(network_approval_public_key_digest) is None
+                or not hmac.compare_digest(
+                    network_approval_public_key_digest,
+                    expected_network_approval_public_key_digest,
+                )
+            )
+        )
+    ):
+        return None
+
+    adapter_states: list[dict[str, str]] = []
+    seen: set[str] = set()
+    for raw in inventory:
+        if not isinstance(raw, dict):
+            return None
+        adapter_id = raw.get("adapter_id")
+        state = raw.get("state")
+        if (
+            not isinstance(adapter_id, str)
+            or _HOST_ADAPTER_ID.fullmatch(adapter_id) is None
+            or adapter_id in seen
+            or not isinstance(state, str)
+            or state not in _HOST_ADAPTER_STATES
+        ):
+            return None
+        seen.add(adapter_id)
+        adapter_states.append({"adapter_id": adapter_id, "state": state})
+    adapter_states.sort(key=lambda item: item["adapter_id"])
+    bounded: dict[str, Any] = {
+        "agent": {
+            "reachable": True,
+            "authenticated": True,
+            "identity": expected_agent_id,
+            "build_id": build_id,
+            "protocol_versions": protocols,
+        },
+        "adapter_states": adapter_states,
+        "desktop": desktop,
+        "package_broker": package_broker,
+        "network_policy_match": True,
+        "running_job_count": running,
+    }
+    if expected_network_approval_public_key_digest is not None:
+        bounded["network_approval_public_key_match"] = True
+    return bounded
+
+
+def _host_control_status(
+    settings: FridaySettings,
+    sqlite_counts: dict[str, bool | int],
+) -> dict[str, Any]:
+    enabled = bool(settings.host_control_enabled)
+    status: dict[str, Any] = {
+        "enabled": enabled,
+        "flags": _host_control_flags(settings),
+        "state": "disabled" if not enabled else "unavailable",
+        "healthy": not enabled,
+        "agent": {"reachable": False, "authenticated": False},
+        "adapter_states": [],
+        "desktop": "not_reported",
+        "package_broker": "not_reported",
+        "network_approval_public_key_match": None,
+        "running_job_count": None,
+        "sqlite": dict(sqlite_counts),
+    }
+    if not enabled:
+        return status
+    try:
+        client = HostControlClient(
+            settings.host_agent_socket,
+            key_file=settings.host_agent_key_file,
+            agent_id=settings.host_agent_id,
+            timeout_sec=1.0,
+        )
+        health = client.handshake_sync(timeout_sec=1.0)
+    except HostControlClientError as exc:
+        code = str(exc.code or "host_agent_unavailable")
+        status["error_code"] = code if _HOST_REPORTED_STATE.fullmatch(code) else "host_agent_unavailable"
+        return status
+    except Exception:  # noqa: BLE001 - optional diagnostics must remain fail-soft
+        status["error_code"] = "host_agent_probe_failed"
+        return status
+
+    expected_policy_digest = NetworkPolicy(
+        connected_cidrs=(),
+        allowed_cidrs=tuple(settings.host_allowed_cidrs),
+        allow_public=bool(settings.host_public_network_enabled),
+    ).digest
+    expected_approval_key_digest: str | None = None
+    if settings.host_public_network_enabled:
+        try:
+            expected_approval_key_digest = NetworkApprovalSigner(
+                load_backend_approval_signing_key(settings.host_approval_signing_key_file)
+            ).public_key_digest
+        except Exception:  # noqa: BLE001 - diagnostics must fail closed without leaking key errors
+            status.update(
+                {
+                    "state": "approval_key_unavailable",
+                    "agent": {"reachable": True, "authenticated": True},
+                    "error_code": "network_approval_signer_unavailable",
+                }
+            )
+            return status
+    bounded = _bounded_host_agent_health(
+        health,
+        expected_agent_id=settings.host_agent_id,
+        expected_network_policy_digest=expected_policy_digest,
+        expected_network_approval_public_key_digest=expected_approval_key_digest,
+    )
+    if bounded is None:
+        status.update(
+            {
+                "state": "invalid_report",
+                "agent": {"reachable": True, "authenticated": True},
+                "error_code": "host_agent_report_invalid",
+            }
+        )
+        return status
+    status.update(bounded)
+    healthy = bool(sqlite_counts.get("available"))
+    if settings.host_package_install_enabled and bounded["package_broker"] != "configured":
+        healthy = False
+    if settings.host_desktop_control_enabled and bounded["desktop"] == "no_graphical_session":
+        healthy = False
+    status["healthy"] = healthy
+    status["state"] = "ready" if healthy else "degraded"
+    return status
+
+
+def _add_host_control_actions(add_action: Any, status: dict[str, Any]) -> None:
+    counts_value = status.get("sqlite")
+    counts: dict[str, Any] = counts_value if isinstance(counts_value, dict) else {}
+    unknown_jobs = int(counts.get("unknown_jobs") or 0)
+    if unknown_jobs:
+        add_action(
+            "host_control_unknown_jobs",
+            "warning",
+            "Есть host-задачи с неизвестным исходом",
+            f"Неизвестный исход сохранён для {unknown_jobs} задач; сверяйте их состояние до повтора.",
+            "jericho status",
+        )
+    if not status.get("enabled"):
+        return
+    state = str(status.get("state") or "unavailable")
+    if state == "unavailable":
+        add_action(
+            "host_control_agent_unavailable",
+            "error",
+            "Host-agent недоступен",
+            "Host Control включён, но аутентифицированный ответ user-service не получен. "
+            "Проверьте состояние friday-host-agent и его журнал.",
+            "systemctl --user status friday-host-agent.service",
+        )
+        return
+    if state == "invalid_report":
+        add_action(
+            "host_control_agent_report_invalid",
+            "error",
+            "Host-agent вернул неприемлемый health-отчёт",
+            "Ответ аутентифицирован, но его метаданные не прошли закрытый диагностический контракт.",
+            "systemctl --user status friday-host-agent.service",
+        )
+        return
+    if state == "approval_key_unavailable":
+        add_action(
+            "host_network_approval_signer_unavailable",
+            "error",
+            "Ключ подтверждения public-network недоступен",
+            "Public-network включён, но backend не смог загрузить свой Ed25519 signer; "
+            "сетевые возможности не подтверждены.",
+            "jericho doctor",
+        )
+        return
+    if not counts.get("available"):
+        add_action(
+            "host_control_store_unavailable",
+            "error",
+            "Durable Host Control state недоступен",
+            "Schema-backed счётчики задач не прочитаны; не повторяйте неизвестные операции вслепую.",
+            "jericho doctor",
+        )
+    flags_value = status.get("flags")
+    flags: dict[str, Any] = flags_value if isinstance(flags_value, dict) else {}
+    if flags.get("package_install") and status.get("package_broker") != "configured":
+        add_action(
+            "host_package_broker_unavailable",
+            "error",
+            "Package broker недоступен",
+            "Установка пакетов включена, но host-agent не подтвердил подключение root broker.",
+            "systemctl status friday-package-broker.socket friday-package-broker.service",
+        )
+    if flags.get("desktop_control") and status.get("desktop") == "no_graphical_session":
+        add_action(
+            "host_desktop_session_unavailable",
+            "warning",
+            "Графическая сессия для Host Control недоступна",
+            "Desktop control включён, но user-service не видит активную графическую сессию.",
+            "systemctl --user status friday-host-agent.service",
+        )
 
 
 def _port_reachable(url: str, timeout: float = 1.0) -> dict[str, Any]:
@@ -1501,6 +1824,9 @@ def _active_backend_diagnostics_unavailable(
             action["command"] = command
         actions.append(action)
 
+    host_control = _host_control_status(settings, dict(_EMPTY_HOST_SQLITE_COUNTS))
+    _add_host_control_actions(add_action, host_control)
+
     for issue in configuration:
         warning = issue.startswith("warning:")
         add_action(
@@ -1579,6 +1905,7 @@ def _active_backend_diagnostics_unavailable(
         "auth_failures": {"state": "active_backend_uninspected"},
         "embeddings_index": {"available": False},
         "memory_vault": memory_vault,
+        "host_control": host_control,
         "secondary": {
             "schema": "friday.optional-secondary-health.v1",
             "role": "optional_advisory",
@@ -1698,7 +2025,7 @@ def collect_diagnostics(
             storage_boundary.release()
 
     # A negative inspection is only a point-in-time observation.  Hold the
-    # backend's exact lease while all three main-database snapshots are taken,
+    # backend's exact lease while all four main-database snapshots are taken,
     # otherwise the backend can start after inspection and before any one of
     # these read-only connections maps its live WAL.  Release before backup
     # verification, filesystem scans and model probes so diagnostics cannot
@@ -1725,6 +2052,7 @@ def collect_diagnostics(
             None,
             threshold=settings.auth_failure_alert_threshold,
         )
+        offline_host_control_counts = _offline_host_control_sqlite_counts(settings.database_path)
     finally:
         boundary.release()
     return _collect_diagnostics_under_boundary(
@@ -1736,6 +2064,7 @@ def collect_diagnostics(
         offline_database=offline_database,
         offline_workers=offline_workers,
         offline_auth_failures=offline_auth_failures,
+        offline_host_control_counts=offline_host_control_counts,
     )
 
 
@@ -1749,18 +2078,26 @@ def _collect_diagnostics_under_boundary(
     offline_database: dict[str, Any] | None = None,
     offline_workers: dict[str, Any] | None = None,
     offline_auth_failures: dict[str, Any] | None = None,
+    offline_host_control_counts: dict[str, bool | int] | None = None,
 ) -> dict[str, Any]:
     """Build a report from in-process storage or lease-protected snapshots."""
 
     backend_active = backend_lease.get("active") is True or backend_lease.get("state") == "active_hint"
     if storage is None:
-        if offline_database is None or offline_workers is None or offline_auth_failures is None:
+        if (
+            offline_database is None
+            or offline_workers is None
+            or offline_auth_failures is None
+            or offline_host_control_counts is None
+        ):
             raise RuntimeError("offline diagnostics require lease-protected snapshots")
         database = offline_database
         workers = offline_workers
+        host_control_counts = offline_host_control_counts
     else:
         database = storage.diagnostics()
         workers = _worker_status(settings, storage)
+        host_control_counts = _host_control_sqlite_counts(storage.execute)
     workers = _configured_worker_status(settings, workers)
 
     configuration = validate_settings(settings, production=not settings.is_loopback_bind)
@@ -1793,6 +2130,9 @@ def _collect_diagnostics_under_boundary(
         if command:
             action["command"] = command
         actions.append(action)
+
+    host_control = _host_control_status(settings, host_control_counts)
+    _add_host_control_actions(add_action, host_control)
 
     for issue in configuration:
         warning = issue.startswith("warning:")
@@ -2065,7 +2405,8 @@ def _collect_diagnostics_under_boundary(
         and bool(database.get("ok", True))
         and backups.get("state") != "invalid"
         and bool(workers.get("healthy", True))
-        and bool(backend_lease.get("healthy", True)),
+        and bool(backend_lease.get("healthy", True))
+        and bool(host_control.get("healthy", True)),
         "configuration_issues": configuration,
         "paths": {
             "home": _path_status(settings.home),
@@ -2085,6 +2426,7 @@ def _collect_diagnostics_under_boundary(
         "auth_failures": auth_failures,
         "embeddings_index": embeddings_coverage,
         "memory_vault": memory_vault,
+        "host_control": host_control,
         "runtime": SystemTelemetry(settings.home).snapshot(),
         "features": {
             "llm_enabled": settings.llm_enabled,

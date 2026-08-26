@@ -58,6 +58,8 @@ def test_pre_release_inventory_is_exact_unique_and_candidate_bound() -> None:
     candidate_files = battery._candidate_source_paths(instrument_path=acceptance.RUNNER_PATH)
     assert acceptance.RUNNER_RELATIVE_PATH in candidate_files
     assert "tools/synthetic_live_battery.py" in candidate_files
+    assert "friday_host_agent/__init__.py" in candidate_files
+    assert "friday_package_broker/__init__.py" in candidate_files
     assert "sol/LIVE_TEST_2026-08-08.md" not in candidate_files
     assert "start.txt" not in candidate_files
 

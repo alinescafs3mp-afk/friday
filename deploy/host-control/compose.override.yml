@@ -1,0 +1,80 @@
+services:
+  backend:
+    # The base service already has a read-only root, no-new-privileges, and no
+    # Linux capabilities.  Repeat the boundary here so this optional override
+    # cannot silently weaken it during a future Compose merge.
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    # Rootful Docker with the host user namespace makes this numeric identity
+    # the identity observed by the native agent through SO_PEERCRED.  Both
+    # values come from the installer's output and name the selected non-root
+    # desktop user; root/rootless guesses are intentionally unsupported here.
+    user: "${FRIDAY_HOST_RUNTIME_UID:?use the UID printed by the host-control installer}:${FRIDAY_HOST_RUNTIME_GID:?use the GID printed by the host-control installer}"
+    group_add:
+      # Memberless on the host: Docker grants this GID only to the backend so a
+      # normal same-UID host process cannot read the root-owned signer seed.
+      - "${FRIDAY_HOST_APPROVAL_SIGNER_GID:?use the signer GID printed by the host-control installer}"
+    userns_mode: host
+    ulimits:
+      core:
+        soft: 0
+        hard: 0
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.backend
+      args:
+        FRIDAY_RUNTIME_UID: ${FRIDAY_HOST_RUNTIME_UID:?use the UID printed by the host-control installer}
+        FRIDAY_RUNTIME_GID: ${FRIDAY_HOST_RUNTIME_GID:?use the GID printed by the host-control installer}
+    environment:
+      FRIDAY_HOST_CONTROL_ENABLED: ${FRIDAY_HOST_CONTROL_ENABLED:-0}
+      FRIDAY_HOST_AGENT_SOCKET: /run/friday-host-agent/agent.sock
+      FRIDAY_HOST_AGENT_KEY_FILE: /run/secrets/friday_host_agent_hmac
+      # The backend receives only the private seed. The native agent receives
+      # only its root-owned public half through the host user unit.
+      FRIDAY_HOST_APPROVAL_SIGNING_KEY_FILE: /run/friday-backend-approval.key
+      # Must match the root-owned host-agent environment rendered by install.sh.
+      FRIDAY_HOST_AGENT_ID: local-user-agent
+      FRIDAY_HOST_JOB_ROOT: /runtime/data/host-control/jobs
+      FRIDAY_HOST_ACTION_MAX_CONCURRENCY: ${FRIDAY_HOST_ACTION_MAX_CONCURRENCY:-2}
+      FRIDAY_HOST_ACTION_DEFAULT_TIMEOUT_SEC: ${FRIDAY_HOST_ACTION_DEFAULT_TIMEOUT_SEC:-300}
+      FRIDAY_HOST_ACTION_MAX_OUTPUT_BYTES: ${FRIDAY_HOST_ACTION_MAX_OUTPUT_BYTES:-8388608}
+      FRIDAY_HOST_PACKAGE_INSTALL_ENABLED: ${FRIDAY_HOST_PACKAGE_INSTALL_ENABLED:-0}
+      # Reserved in this release; configuration validation refuses value 1.
+      FRIDAY_HOST_DESKTOP_CONTROL_ENABLED: ${FRIDAY_HOST_DESKTOP_CONTROL_ENABLED:-0}
+      FRIDAY_HOST_ONE_SHOT_EXEC_ENABLED: ${FRIDAY_HOST_ONE_SHOT_EXEC_ENABLED:-0}
+      FRIDAY_HOST_PUBLIC_NETWORK_ENABLED: ${FRIDAY_HOST_PUBLIC_NETWORK_ENABLED:-0}
+      FRIDAY_HOST_ALLOWED_CIDRS: ${FRIDAY_HOST_ALLOWED_CIDRS:-}
+      FRIDAY_HOST_ALLOWED_PATH_ROOTS: ${FRIDAY_HOST_ALLOWED_PATH_ROOTS:-}
+    volumes:
+      # create_host_path=false matters: Docker must never replace a missing
+      # private socket directory with a root-owned directory.
+      - type: bind
+        source: ${FRIDAY_HOST_AGENT_SOCKET_DIR_HOST:?run the host-control installer first}
+        target: /run/friday-host-agent
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ${FRIDAY_HOST_JOB_DATA_DIR_HOST:?set the exact host-control jobs directory}
+        target: /runtime/data/host-control/jobs
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ${FRIDAY_HOST_APPROVAL_SIGNING_KEY_FILE_HOST:?use the isolated signer key printed by the host-control installer}
+        target: /run/friday-backend-approval.key
+        read_only: true
+        bind:
+          create_host_path: false
+    secrets:
+      - source: friday_host_agent_hmac
+        target: friday_host_agent_hmac
+        uid: "${FRIDAY_HOST_RUNTIME_UID:?use the UID printed by the host-control installer}"
+        gid: "${FRIDAY_HOST_RUNTIME_GID:?use the GID printed by the host-control installer}"
+        mode: 0400
+
+secrets:
+  friday_host_agent_hmac:
+    file: ${FRIDAY_HOST_AGENT_KEY_FILE_HOST:?set the user-owned host-agent key file}

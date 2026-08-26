@@ -1,0 +1,3 @@
+# Rendered by install.sh with the selected non-root user's numeric identity.
+d /run/friday-host-agent 0711 root root -
+d /run/friday-host-agent/@USER_UID@ 0700 @USER_UID@ @USER_GID@ -

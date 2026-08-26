@@ -1063,6 +1063,49 @@ def _conflict_needs_a_person(arguments: dict[str, Any]) -> bool:
     return str(arguments.get("decision") or "").strip().casefold() in {"keep_a", "keep_b"}
 
 
+def _claimed_host_action_is_safely_resumable(
+    storage: Any,
+    record: Mapping[str, Any],
+    actor: ActorContext,
+    arguments: Mapping[str, Any],
+) -> bool:
+    """Admit an exact callback retry only while durable state proves no send."""
+
+    if (
+        record.get("status") != "claimed"
+        or record.get("tool") != "host_action_execute"
+        or record.get("requested_by") != actor.own_id
+        or record.get("payload") != dict(arguments)
+    ):
+        return False
+    job_id = str(arguments.get("job_id") or "")
+    plan = arguments.get("plan")
+    plan_digest = str(arguments.get("plan_digest") or "")
+    if not isinstance(plan, dict):
+        return False
+    try:
+        from friday.host_control.jobs import HostJobStore
+
+        job = HostJobStore(storage).get(
+            job_id,
+            user_id=actor.user_id,
+            actor_own_id=actor.own_id,
+        )
+    except (RuntimeError, ValueError):
+        return False
+    return bool(
+        job is not None
+        and job.get("status") in {"awaiting_approval", "approved", "admitted"}
+        and job.get("approval_id") == record.get("id")
+        and job.get("plan") == plan
+        and job.get("plan_digest") == plan_digest
+        and job.get("started_at") is None
+        and job.get("receipt_ref") is None
+        and job.get("result_ref") is None
+        and not job.get("reconciliation_required")
+    )
+
+
 def _merge_postcondition(storage, user_id: str, arguments: dict[str, Any]) -> tuple[bool, str]:
     """Слияние действительно случилось — прочитано из хранилища, а не из ответа.
 
@@ -1177,6 +1220,13 @@ class ToolSpec:
     # Optional per-tool ceiling for connectors whose bounded parser/model stage
     # legitimately exceeds the generic 30-second observation timeout.
     timeout_sec: float | None = None
+    # Internal approval executors remain callable only through an exact stored
+    # approval, but never enter model context or ordinary tool discovery.
+    model_visible: bool = True
+    # Organs may carry their own reviewed high-risk predicate without mutating
+    # the core global registry. A high tool must have one source or startup
+    # fails closed.
+    approval_predicate: Callable[[dict[str, Any]], bool] | None = None
 
     def __post_init__(self) -> None:
         scopes = frozenset(self.allowed_execution_scopes)
@@ -1188,6 +1238,8 @@ class ToolSpec:
         self.allowed_execution_scopes = scopes
         if self.timeout_sec is not None and self.timeout_sec <= 0:
             raise ValueError(f"tool timeout must be positive for {self.name!r}")
+        if self.approval_predicate is not None and self.risk != "high":
+            raise ValueError(f"approval predicate requires high risk for {self.name!r}")
 
     def to_openai(self, *, brief: bool = False) -> dict[str, Any]:
         """Описание для модели. `brief` — короткая форма, одна фраза.
@@ -1330,6 +1382,15 @@ class ToolResult:
             encoded = encoded[:11_900] + "\n… (truncated)"
             self.truncated = True
         return f"Результат {self.tool_name}:\n{encoded}"
+
+
+class UncertainToolOutcome(RuntimeError):
+    """A privileged effect may have completed despite a lost response.
+
+    Approved host mutations raise this after crossing their external effect
+    boundary.  The approval must become ``uncertain`` so a retry cannot happen
+    until reconciliation proves the real host state.
+    """
 
 
 @dataclass
@@ -3010,6 +3071,23 @@ _ENGINEER_TOOLS = frozenset(
 )
 _ENGINEER_PATCH_OPERATION_KINDS = frozenset({"write_at", "replace_bytes", "zip_replace"})
 _ENGINEER_RAW_ID_RE = re.compile(r"^raw_[0-9a-f]{16}$")
+_HOST_CONTROL_TOOLS = frozenset(
+    {
+        "host_capability_search",
+        "host_capability_describe",
+        "host_action_run",
+        "host_job_status",
+        "host_job_cancel",
+        "host_json_extract",
+        "software_search",
+        "software_install",
+        "software_remove",
+        "host_program_run_once",
+        "host_action_execute",
+        "software_install_execute",
+        "software_remove_execute",
+    }
+)
 _PERSON_DIRECTORY_LIMIT = 5000
 
 
@@ -3374,7 +3452,12 @@ class ExecutionKernel:
         """
         declared = {name for name, tool in self._tools.items() if tool.risk == "high"}
         with_predicate = set(HIGH_RISK_TOOLS)
-        missing_predicate = sorted(declared - with_predicate)
+        embedded = {
+            name
+            for name, tool in self._tools.items()
+            if tool.risk == "high" and tool.approval_predicate is not None
+        }
+        missing_predicate = sorted(declared - with_predicate - embedded)
         missing_declaration = sorted(name for name in with_predicate - declared if name in self._tools)
         problems = []
         if missing_predicate:
@@ -3584,11 +3667,15 @@ class ExecutionKernel:
             return []
         visible: list[ToolSpec] = []
         for tool in self._tools.values():
+            if not tool.model_visible:
+                continue
             if execution_scope not in tool.allowed_execution_scopes:
                 continue
             if tool.name == "code_run" and not (self.settings and self.settings.code_execution_enabled):
                 continue
             if tool.name in _ENGINEER_TOOLS and not actor.is_owner:
+                continue
+            if tool.name in _HOST_CONTROL_TOOLS and not actor.is_owner:
                 continue
             if tool.name in _GLOBAL_OPERATOR_TOOLS and not (actor.is_owner or actor.preset_key == "admin"):
                 continue
@@ -3642,6 +3729,9 @@ class ExecutionKernel:
         if name in _ENGINEER_TOOLS and not actor.is_owner:
             await self._audit(actor, name, False, "authorization_denied", details=details)
             return ToolResult(name, False, error="Authorization denied")
+        if name in _HOST_CONTROL_TOOLS and not actor.is_owner:
+            await self._audit(actor, name, False, "authorization_denied", details=details)
+            return ToolResult(name, False, error="Authorization denied")
         if name in _GLOBAL_OPERATOR_TOOLS and not (actor.is_owner or actor.preset_key == "admin"):
             await self._audit(actor, name, False, "authorization_denied", details=details)
             return ToolResult(name, False, error="Authorization denied")
@@ -3668,7 +3758,7 @@ class ExecutionKernel:
         # молча». Раньше поле не читал никто, и объявление его роняло старт.
         if self._capability_requires_person(effective_security_id):
             return await self._request_approval(actor, name, arguments or {}, details)
-        needs_person = HIGH_RISK_TOOLS.get(name)
+        needs_person = tool.approval_predicate or HIGH_RISK_TOOLS.get(name)
         if tool.risk == "high" and needs_person is None:
             LOGGER.warning("tool %s объявлен high, но предиката риска нет — требуем человека", name)
             return await self._request_approval(actor, name, arguments or {}, details)
@@ -3768,6 +3858,40 @@ class ExecutionKernel:
                 if not re.fullmatch(r"[a-z][a-z0-9_]{0,79}", error_code):
                     error_code = "engineer_tool_refused"
                 return ToolResult(name, False, error=f"Engineer tool refused: {error_code}")
+            if name in _HOST_CONTROL_TOOLS and isinstance(data, Mapping) and data.get("ok") is False:
+                crossed = data.get("effect_boundary_crossed") is True
+                error_code = str(data.get("error_code") or "host_control_refused")
+                if not re.fullmatch(r"[a-z][a-z0-9_]{0,79}", error_code):
+                    error_code = "host_control_refused"
+                await self._audit(
+                    actor,
+                    name,
+                    False,
+                    "uncertain" if crossed else "failed",
+                    details=details,
+                )
+                return ToolResult(
+                    name,
+                    False,
+                    data={
+                        "approval_id": str(data.get("approval_id") or "")[:128],
+                        "effect_boundary_crossed": crossed,
+                        "error_code": error_code,
+                        "job_id": str(data.get("job_id") or "")[:128],
+                        "status": str(data.get("status") or "failed")[:32],
+                        "summary": str(data.get("summary") or "")[:500],
+                    },
+                    error=(
+                        "Исход действия на хосте неизвестен; сначала проверьте задачу, не повторяйте."
+                        if crossed
+                        else (
+                            "Действие на хосте НЕ выполнено: требуется подтверждение. "
+                            f"{str(data.get('summary') or '')[:500]} Открыть: /approvals. Не повторяйте вызов."
+                            if error_code == "approval_required"
+                            else f"Host control refused: {error_code}"
+                        )
+                    ),
+                )
             await self._audit(actor, name, True, "ok", details=details)
             return ToolResult(
                 name,
@@ -4019,6 +4143,38 @@ class ExecutionKernel:
                 f"Выполнить код ({len(code)} знаков, sha256 "
                 f"{hashlib.sha256(code.encode()).hexdigest()[:12]}): {first_line[:80]}"
             )
+        if name == "software_install_execute":
+            plan = arguments.get("package_plan")
+            if isinstance(plan, dict):
+                try:
+                    from friday.host_control.approval_summary import package_install_approval_summary
+                    from friday_package_broker.contracts import AptInstallPlan
+
+                    exact = AptInstallPlan.from_payload(plan)
+                    capabilities = (
+                        ("network.nmap.scan",)
+                        if any(item.name == "nmap" for item in exact.transaction.requested)
+                        else ()
+                    )
+                    return package_install_approval_summary(
+                        exact,
+                        expected_capabilities=capabilities,
+                        original_request=exact.original_task_ref,
+                    )
+                except (TypeError, ValueError) as exc:
+                    raise ValueError("exact APT approval summary is unavailable") from exc
+            raise ValueError("exact APT approval summary is unavailable")
+        if name == "host_action_execute":
+            plan = arguments.get("plan")
+            if isinstance(plan, dict):
+                try:
+                    from friday.host_control.approval_summary import host_action_approval_summary
+                    from friday.host_control.plans import HostActionPlan
+
+                    return host_action_approval_summary(HostActionPlan.from_payload(plan))
+                except (TypeError, ValueError) as exc:
+                    raise ValueError("exact host-action approval summary is unavailable") from exc
+            raise ValueError("exact host-action approval summary is unavailable")
         return f"Выполнить {name}"
 
     async def execute_approved(self, approval_id: str, *, actor: ActorContext | None = None) -> ToolResult:
@@ -4044,6 +4200,15 @@ class ExecutionKernel:
             return ToolResult(name or "approval", False, error="Инструмент недоступен")
         if self.authorization is None:
             return ToolResult(name, False, error="Execution kernel has no authorization service")
+        if name in _HOST_CONTROL_TOOLS and not actor.is_owner:
+            await self._audit(
+                actor,
+                name,
+                False,
+                "authorization_denied",
+                details={"approval": approval_id},
+            )
+            return ToolResult(name, False, error="Authorization denied")
         try:
             self.authorization.require(actor, tool.security_id)
         except AuthorizationError:
@@ -4057,6 +4222,18 @@ class ExecutionKernel:
             actor.user_id,
             payload=arguments,
         )
+        if claimed is None and _claimed_host_action_is_safely_resumable(
+            storage,
+            record,
+            actor,
+            arguments,
+        ):
+            # A process may die after atomically claiming the human approval but
+            # before the backend reaches request_sent. The immutable Host Job is
+            # the proof that no host effect crossed; an exact callback retry may
+            # resume that one plan, while running/unknown/terminal jobs remain
+            # non-replayable.
+            claimed = record
         if not claimed:
             await self._audit(actor, name, False, "approval_not_claimable", details={"approval": approval_id})
             return ToolResult(
@@ -4088,6 +4265,22 @@ class ExecutionKernel:
             )
             await self._audit(actor, name, False, "timeout", details=details)
             return ToolResult(name, False, error="Tool execution timed out")
+        except UncertainToolOutcome as exc:
+            await run_blocking(
+                storage.mark_action_approval_uncertain,
+                approval_id,
+                actor.user_id,
+                error=safe_failure_text(exc),
+            )
+            await self._audit(actor, name, False, "uncertain", details=details)
+            return ToolResult(
+                name,
+                False,
+                error=(
+                    "Связь оборвалась после начала привилегированного действия; "
+                    "исход неизвестен. Сначала выполните сверку состояния, не повторяйте."
+                ),
+            )
         except Exception as exc:  # noqa: BLE001 - исход обязан быть записан любым
             LOGGER.warning("Approved tool %s failed (%s)", name, type(exc).__name__)
             await run_blocking(
@@ -4099,6 +4292,50 @@ class ExecutionKernel:
             )
             await self._audit(actor, name, False, type(exc).__name__, details=details)
             return ToolResult(name, False, error=f"Tool failed: {type(exc).__name__}")
+        if name in _HOST_CONTROL_TOOLS and isinstance(data, Mapping) and data.get("ok") is False:
+            crossed = data.get("effect_boundary_crossed") is True
+            error_code = str(data.get("error_code") or "host_control_refused")
+            if not re.fullmatch(r"[a-z][a-z0-9_]{0,79}", error_code):
+                error_code = "host_control_refused"
+            safe_data = {
+                "effect_boundary_crossed": crossed,
+                "error_code": error_code,
+                "job_id": str(data.get("job_id") or "")[:128],
+                "status": str(data.get("status") or "failed")[:32],
+            }
+            if crossed:
+                await run_blocking(
+                    storage.mark_action_approval_uncertain,
+                    approval_id,
+                    actor.user_id,
+                    error="host-control effect requires reconciliation",
+                )
+            else:
+                await run_blocking(
+                    storage.finish_action_approval,
+                    approval_id,
+                    actor.user_id,
+                    success=False,
+                    result=safe_data,
+                    error=f"host control refused: {error_code}",
+                )
+            await self._audit(
+                actor,
+                name,
+                False,
+                "uncertain" if crossed else "failed",
+                details={**details, "approval": approval_id},
+            )
+            return ToolResult(
+                name,
+                False,
+                data=safe_data,
+                error=(
+                    "Host-control outcome is unknown; reconcile the exact job before any retry."
+                    if crossed
+                    else f"Host control refused before effect: {error_code}"
+                ),
+            )
         verifier = POSTCONDITIONS.get(name)
         if verifier is not None:
             try:
@@ -4158,6 +4395,21 @@ class ExecutionKernel:
         on my behalf yesterday».
         """
         args = arguments or {}
+        if tool_name in _HOST_CONTROL_TOOLS:
+            try:
+                encoded = json.dumps(
+                    args,
+                    ensure_ascii=False,
+                    sort_keys=True,
+                    separators=(",", ":"),
+                    allow_nan=False,
+                ).encode("utf-8")
+            except (TypeError, ValueError):
+                return {"private_fields_count": len(args)}
+            return {
+                "body_sha256": hashlib.sha256(encoded).hexdigest(),
+                "chars": len(encoded),
+            }
         if tool_name in _ENGINEER_NETWORK_AUDIT_TOOLS | _ENGINEER_ARTIFACT_AUDIT_TOOLS:
             # This is an actor-independent transient projection. Storage later
             # domain-separates each ``*_sha256`` with the installation-local HMAC

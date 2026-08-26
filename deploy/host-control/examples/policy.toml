@@ -1,0 +1,13 @@
+[broker]
+broker_id = "local-package-broker"
+
+# install.sh renders this example to the exact desktop-user UID.  Keep the
+# example itself valid so it can also be checked by the broker policy loader.
+allowed_peer_uids = [1000]
+
+# First release: the broker can acquire only the reviewed nmap capability.
+allowed_packages = ["nmap"]
+max_package_changes = 32
+max_download_bytes = 536870912
+max_installed_delta_bytes = 1073741824
+plan_ttl_sec = 900

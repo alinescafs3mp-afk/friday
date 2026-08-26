@@ -322,6 +322,10 @@ def build_registry(settings: FridaySettings) -> OrganRegistry:
             raise RuntimeError(f"Engineer mode sandbox preflight failed: {reason}")
 
         organs.append(EngineerOrgan())
+    if settings.host_control_enabled:
+        from friday.organs.host_control import HostControlOrgan
+
+        organs.append(HostControlOrgan())
     if settings.obsidian_enabled:
         organs.append(ObsidianOrgan())
     return OrganRegistry(organs)
@@ -339,9 +343,10 @@ __all__ = [
     "resolve_chat_id",
 ]
 
-# Documented list of shipped organs. `sentinel` was missing here for three
-# releases while build_registry shipped it, so the drift is now pinned by
-# test_the_documented_organ_list_matches_the_registry rather than by a comment.
+# Documented list of shipped organs, including feature-gated organs that are
+# deliberately absent from the default registry. `sentinel` was missing here
+# for three releases, so both the default and opt-in portions are pinned by
+# test_the_documented_organ_list_matches_the_registry.
 BUILTIN_ORGAN_NAMES: tuple[str, ...] = (
     "reminders",
     "reflection",
@@ -352,4 +357,5 @@ BUILTIN_ORGAN_NAMES: tuple[str, ...] = (
     "sentinel",
     "compactor",
     "engineer",
+    "host_control",
 )

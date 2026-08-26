@@ -36,6 +36,15 @@ CONTAINER_OWNED = {
     "FRIDAY_WHISPER_DOWNLOAD_ROOT",
     "FRIDAY_ENV_FILE",
     "FRIDAY_API_HOST",
+    # Host Control deployment inputs are consumed only by Compose. Host paths
+    # and numeric IDs should not leak back through env_file.
+    "FRIDAY_HOST_RUNTIME_UID",
+    "FRIDAY_HOST_RUNTIME_GID",
+    "FRIDAY_HOST_AGENT_SOCKET_DIR_HOST",
+    "FRIDAY_HOST_AGENT_KEY_FILE_HOST",
+    "FRIDAY_HOST_APPROVAL_SIGNING_KEY_FILE_HOST",
+    "FRIDAY_HOST_APPROVAL_SIGNER_GID",
+    "FRIDAY_HOST_JOB_DATA_DIR_HOST",
     # Base Compose terminates external TLS at a separate proxy. These must stay
     # empty in BOTH services: otherwise env_file can hand a host-only key path to
     # the backend and, worse, expose that same private path to Telegram.
@@ -56,7 +65,13 @@ def _keys_read_by_code() -> set[str]:
 
 def _keys_used_by_compose() -> set[str]:
     """Host-side keys: consumed by `${...}` interpolation, never by the container."""
-    text = (ROOT / "docker-compose.yml").read_text(encoding="utf-8")
+    text = "\n".join(
+        path.read_text(encoding="utf-8")
+        for path in (
+            ROOT / "docker-compose.yml",
+            ROOT / "deploy" / "host-control" / "compose.override.yml",
+        )
+    )
     return set(re.findall(r"\$\{(FRIDAY_[A-Z0-9_]+)", text))
 
 
@@ -83,6 +98,16 @@ def test_backend_container_owned_paths_cannot_be_overridden_from_the_host() -> N
     assert not missing, (
         f"{service}: a host .env could redirect these into paths the container does not have: {missing}"
     )
+    for key in (
+        "FRIDAY_HOST_RUNTIME_UID",
+        "FRIDAY_HOST_RUNTIME_GID",
+        "FRIDAY_HOST_AGENT_SOCKET_DIR_HOST",
+        "FRIDAY_HOST_AGENT_KEY_FILE_HOST",
+        "FRIDAY_HOST_APPROVAL_SIGNING_KEY_FILE_HOST",
+        "FRIDAY_HOST_APPROVAL_SIGNER_GID",
+        "FRIDAY_HOST_JOB_DATA_DIR_HOST",
+    ):
+        assert environment[key] == ""
 
 
 def test_telegram_has_a_dedicated_state_and_no_backend_data_or_env_file() -> None:

@@ -1,3 +1,51 @@
+## 0.207.35 — 2026-08-26
+
+### Engineer Mode and Host Capability Plane
+
+- Engineer Mode is an owner-only, default-off defensive workbench with one
+  current-turn target, bounded network observations, shared reviewed nmap
+  semantics and no-network bubblewrap artifact analysis. Artifact mutation also
+  requires a direct current-human request; untrusted findings cannot expose or
+  authorize the patch tool, and application/tool markup is stripped from their
+  model-facing projection.
+- Schema 43 adds durable immutable Host Action jobs and append-only lifecycle
+  events. The optional three-domain Host Capability Plane supplies authenticated
+  plans, bounded systemd user jobs, signed evidence and fail-closed reconciliation.
+- The first privileged journey is limited to an exact human-approved APT plan
+  for `nmap`, followed by post-install attestation and automatic resumption of
+  the original bounded private-network scan. The broker has no generic command
+  or repository-management surface.
+- APT execution retains bounded raw stdout/stderr only as private
+  content-addressed evidence with honest completeness metadata. Crash-after-
+  effect recovery uses a separate signed read-only package-state reconciliation
+  and never repeats an uncertain commit.
+- Public-network execution, when separately enabled, requires a short-lived
+  Ed25519 proof bound to the exact approval/action identity, consumed in an
+  immutable restart-safe ledger and rechecked immediately before launch. The
+  backend mints it only after a queued action reaches the final authorization
+  seam, so queue time cannot consume its validity. Both handshake and
+  diagnostics pin the backend signer key digest.
+- Host actions remain durably `planned`/`awaiting_approval` while waiting for a
+  bounded execution slot. Queue saturation or cancellation closes the exact
+  job before `request_sent`; a backend restart may resume a claimed approval
+  only while its immutable job still proves that no request was sent.
+- A preinstalled reviewed `jq` adapter can extract named fields from an exact
+  owner-authorized Raw JSON copy without accepting arbitrary programs or host
+  paths and without modifying the source file.
+- Ubuntu deployment artifacts use an exact rootful Compose UID/GID mapping,
+  private persistent socket parent, default-off flags and explicit staging and
+  rollback acceptance. Desktop/GUI and one-shot execution remain unsupported
+  and fail configuration closed.
+- A deterministic release-bundle tool binds the exact clean Git commit,
+  canonical wheel and closed Host Control deployment set, including exact Git
+  blob types and executable modes; verification requires an archive SHA-256
+  obtained through an independent release channel before extraction or
+  installation.
+- The Engineer artifact worker uses the backend's finite PID cgroup instead of
+  an `RLIMIT_NPROC` derived from its private `/proc`; this preserves the exact
+  512-task production bound when Host Control shares the desktop UID with host
+  processes hidden outside the container PID namespace.
+
 ## 0.207.34 — 2026-08-26
 
 ### Complete web-source refill and total evidence boundaries
@@ -109,7 +157,6 @@
 - The immutable operator admits only the exact existing `assist/extract` to
   `assist/extract+document_map(shadow)` transition. Document-map assist remains
   fail-closed until this shadow phase produces separately bound evidence.
-
 ## 0.207.27 — 2026-08-25
 
 ### Durable comparison reader and document reliability hotfix

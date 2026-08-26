@@ -98,6 +98,8 @@ from friday.file_delivery import (
     REGISTERED_VALID,
     AuthorizedFileReadError,
     FileRecordUnavailable,
+    authorize_current_upload_file,
+    authorize_current_upload_file_in_transaction,
     classify_file_registration,
     read_authorized_file,
     read_authorized_file_in_transaction,
@@ -108,6 +110,7 @@ from friday.file_evidence import (
     FileEvidenceView,
     FileRegistrationKind,
     current_turn_file_reference_of,
+    retain_current_turn_file_reference,
 )
 from friday.file_evidence_reader import (
     FileEvidenceUnavailable,
@@ -1130,7 +1133,8 @@ def _private_owned_attachment_copy(
         carrier = _OwnedAttachment(value)
     carrier = cast(_OwnedAttachment, _retain_historical_direct_read_authority(source, carrier))
     carrier = cast(_OwnedAttachment, _retain_explicit_filename_direct_read(source, carrier))
-    return cast(_OwnedAttachment, _retain_file_evidence_stamp(source, carrier))
+    carrier = cast(_OwnedAttachment, _retain_file_evidence_stamp(source, carrier))
+    return cast(_OwnedAttachment, retain_current_turn_file_reference(source, carrier))
 
 
 _ATTACHMENT_RESTRICTIVE_TRUE_FIELDS = (
@@ -1224,6 +1228,7 @@ def _withhold_nonverifiable_attachment(item: Any) -> Any:
     carrier = _retain_historical_direct_read_authority(item, carrier)
     carrier = _retain_explicit_filename_direct_read(item, carrier)
     carrier = _retain_transient_attachment_recovery(item, carrier)
+    carrier = retain_current_turn_file_reference(item, carrier)
     view = _build_file_evidence_view(carrier)
     if view is not None and _carrier_matches_evidence_view(carrier, view):
         _stamp_file_evidence(carrier, view)
@@ -1984,6 +1989,15 @@ _PRIVATE_SOURCE_LOCAL_TOOL_NAMES = frozenset(
         "engineer_analyze_artifact",
         "engineer_local_tools",
         "engineer_patch_artifact",
+        "host_action_run",
+        "host_capability_describe",
+        "host_capability_search",
+        "host_job_cancel",
+        "host_job_status",
+        "host_json_extract",
+        "software_install",
+        "software_remove",
+        "software_search",
         "inbox_list",
         "kg_stats",
         "list_tags",
@@ -2100,6 +2114,8 @@ _ENGINEER_TOOL_CAPABILITIES = {
     "engineer_adversary_rehearsal": "engineer.host.audit",
 }
 _ENGINEER_CAPABILITIES = frozenset({"engineer.use", *_ENGINEER_TOOL_CAPABILITIES.values()})
+_HOST_CONTROL_CONTEXT_TOOL_NAMES = frozenset({"host_action_run", "host_json_extract", "software_install"})
+_HOST_CONTROL_PRIVATE_ARGUMENTS = frozenset({"_conversation_id", "_raw_id", "_source_message_id", "raw_id"})
 _ENGINEER_RECEIPT_BASE_TOOL_VERSIONS = {
     "engineer_organ": "builtin-v1",
     "host_probe": "bounded-connect-v1",
@@ -2238,14 +2254,33 @@ def _record_engineer_action_receipt(
     tool_name: str,
     result: ToolResult,
 ) -> None:
-    """OR-aggregate code-owned outcomes from model-selected engineer calls."""
+    """Settle one entered action without converting an unknown effect to false."""
 
-    if not result.success or not isinstance(result.data, Mapping):
-        return
     ledger = dossier.setdefault("_action_ledger", {})
     if not isinstance(ledger, dict):
         return
-    data = result.data
+    data = result.data if isinstance(result.data, Mapping) else None
+    if tool_name in _ENGINEER_HOST_TOOL_NAMES:
+        reported = data.get("active_probes_sent") if data is not None else None
+        error = str(result.error or "")
+        rejected_before_handler = error.startswith(
+            (
+                "Execution kernel has no authorization service",
+                "Unknown tool",
+                "Tool is not initialized",
+                "Tool is unavailable",
+                "Authorization denied",
+                "Invalid tool arguments",
+            )
+        )
+        if isinstance(reported, bool) or rejected_before_handler:
+            pending = max(0, int(ledger.get("active_probe_uncertain_count") or 0))
+            ledger["active_probe_uncertain_count"] = max(0, pending - 1)
+        if reported is True:
+            ledger["active_probes_sent"] = True
+
+    if not result.success or data is None:
+        return
     ledger["active_probes_sent"] = bool(
         ledger.get("active_probes_sent") is True or data.get("active_probes_sent") is True
     )
@@ -2273,6 +2308,18 @@ def _record_engineer_action_receipt(
                         versions.setdefault(name, version)
 
 
+def _mark_engineer_action_started(dossier: dict[str, Any], tool_name: str) -> None:
+    """Record possible network entry before crossing into the execution kernel."""
+
+    if tool_name not in _ENGINEER_HOST_TOOL_NAMES:
+        return
+    ledger = dossier.setdefault("_action_ledger", {})
+    if not isinstance(ledger, dict):
+        return
+    pending = max(0, int(ledger.get("active_probe_uncertain_count") or 0))
+    ledger["active_probe_uncertain_count"] = min(16, pending + 1)
+
+
 def _engineer_dossier_receipt(dossier: Mapping[str, Any]) -> dict[str, Any]:
     """Bounded, content-free provenance for response and durable metadata."""
 
@@ -2290,14 +2337,20 @@ def _engineer_dossier_receipt(dossier: Mapping[str, Any]) -> dict[str, Any]:
     artifacts = dossier.get("artifacts")
     action_ledger = dossier.get("_action_ledger")
     action_ledger = action_ledger if isinstance(action_ledger, Mapping) else {}
+    known_probes_sent = bool(
+        dossier.get("active_probes_sent") is True or action_ledger.get("active_probes_sent") is True
+    )
+    probes_uncertain = int(action_ledger.get("active_probe_uncertain_count") or 0) > 0
     return {
         "schema": "friday.engineer-receipt.v1",
         "dossier_sha256": hashlib.sha256(encoded).hexdigest(),
         "target_count": min(8, len(targets) if isinstance(targets, list) else 0),
         "artifact_count": min(20, len(artifacts) if isinstance(artifacts, list) else 0),
-        "active_probes_sent": bool(
-            dossier.get("active_probes_sent") is True or action_ledger.get("active_probes_sent") is True
+        "active_probes_sent": True if known_probes_sent else None if probes_uncertain else False,
+        "active_probes_status": (
+            "uncertain" if probes_uncertain else "sent" if known_probes_sent else "not_sent"
         ),
+        "active_probes_uncertain": probes_uncertain,
         "exploit_payloads_sent": bool(
             dossier.get("exploit_payloads_sent") is True or action_ledger.get("exploit_payloads_sent") is True
         ),
@@ -5154,6 +5207,15 @@ _PRIVATE_SOURCE_RESULT_TOOL_NAMES = frozenset(
         *OBSIDIAN_READ_TOOL_NAMES,
         "memory_search",
         *_PRIVATE_SOURCE_ACQUISITION_TOOL_NAMES,
+        "host_action_run",
+        "host_capability_describe",
+        "host_capability_search",
+        "host_job_cancel",
+        "host_job_status",
+        "host_json_extract",
+        "software_install",
+        "software_remove",
+        "software_search",
     }
 )
 _PERSON_EVIDENCE_TOOLS = frozenset(
@@ -30496,7 +30558,7 @@ def _file_turn_capability_tools(
 
     if not authority.proved("local_read"):
         return list(tools)
-    allowed: set[str] = set()
+    allowed: set[str] = {"host_json_extract"}
     for effect, names in _FILE_TURN_EFFECT_TOOL_NAMES.items():
         if authority.proved(effect):
             allowed.update(names)
@@ -30519,6 +30581,26 @@ def _file_turn_capability_tools(
         for tool in tools
         if str((tool.get("function") or {}).get("name") or tool.get("name") or "") in allowed
     ]
+
+
+def _single_authorized_json_attachment_raw_id(items: Sequence[Mapping[str, Any]]) -> str:
+    """Return one verified JSON Raw authority, never a model-visible selector."""
+
+    if len(items) != 1:
+        return ""
+    item = items[0]
+    raw_id = str(item.get("raw_object_id") or "").strip()
+    if _RAW_OBJECT_ID_RE.fullmatch(raw_id) is None or item.get("_registered_file_bytes_verified") is not True:
+        return ""
+    filename = str(item.get("filename") or item.get("name") or "").casefold()
+    mime_type = str(item.get("mime_type") or "").partition(";")[0].strip().casefold()
+    if not (
+        filename.endswith(".json")
+        or mime_type in {"application/json", "text/json"}
+        or mime_type.endswith("+json")
+    ):
+        return ""
+    return raw_id
 
 
 def _current_attachment_can_skip_archive(
@@ -33826,6 +33908,10 @@ class AgentContext:
     #: lineage: the flag guides prompt priority and performance, never grants a
     #: capability or proves that the bytes were readable.
     current_attachment_present: bool = False
+    #: Exact current owner-verified JSON Raw selected for the host jq adapter.
+    #: The model sees only the field-selection schema; this opaque authority is
+    #: injected at execution and is never serialized into a prompt or response.
+    host_json_attachment_raw_id: str = field(default="", repr=False, compare=False)
     #: The backend generated the bare-upload text; there was no human caption.
     #: Filename text is therefore data only and the product contract is a useful
     #: summary of the current attachment, with no tool/effect authority.
@@ -37536,6 +37622,7 @@ class AgentRuntime:
 
             direct_authority = _explicit_filename_direct_read_authority_of(item)
             historical_authority = _historical_direct_read_authority_of(item)
+            current_upload_file = None
             current = self._owned_file_attachment(
                 raw_id,
                 tenant_id=tenant_id,
@@ -37543,6 +37630,36 @@ class AgentRuntime:
                 direct_read_authority=direct_authority,
                 historical_authority=historical_authority,
             )
+            current_upload_token = current_turn_file_reference_of(item)
+            if current is None and current_upload_token is not None:
+                try:
+                    current_upload = authorize_current_upload_file_in_transaction(
+                        conn,
+                        self.settings.files_dir,
+                        raw_id,
+                        tenant_id,
+                        person_id=uploader,
+                        expected_sha256=current_upload_token.content_sha256,
+                        max_bytes=self.settings.max_upload_bytes,
+                    )
+                except (AuthorizedFileReadError, FileRecordUnavailable, OSError, ValueError):
+                    current_upload = None
+                if current_upload is not None:
+                    current_identity = _raw_source_identity_sha256(current_upload.raw)
+                    metadata = bounded_raw_file_metadata(current_upload.raw.get("metadata_json"))
+                    registration = classify_file_registration(
+                        metadata,
+                        content_hash=str(current_upload.raw.get("content_hash") or ""),
+                    )
+                    if registration.state == REGISTERED_VALID and hmac.compare_digest(
+                        current_upload_token.source_identity_sha256,
+                        current_identity,
+                    ):
+                        current_fields = dict(item)
+                        current_fields["_registered_file_record"] = "valid"
+                        current_fields[_RAW_SOURCE_IDENTITY_KEY] = current_identity
+                        current = _private_owned_attachment_copy(current_fields, source=item)
+                        current_upload_file = current_upload.file
             if current is None:
                 return False
             current_registration = str(current.get("_registered_file_record") or "invalid")
@@ -37612,17 +37729,20 @@ class AgentRuntime:
                     return False
 
             if view.registration == FileRegistrationKind.VALID:
-                try:
-                    stored = read_authorized_file_in_transaction(
-                        conn,
-                        self.settings.files_dir,
-                        raw_id,
-                        tenant_id,
-                        person_id=uploader,
-                        max_bytes=self.settings.max_upload_bytes,
-                    )
-                except (AuthorizedFileReadError, FileRecordUnavailable, OSError, ValueError):
-                    return False
+                if current_upload_file is not None:
+                    stored = current_upload_file
+                else:
+                    try:
+                        stored = read_authorized_file_in_transaction(
+                            conn,
+                            self.settings.files_dir,
+                            raw_id,
+                            tenant_id,
+                            person_id=uploader,
+                            max_bytes=self.settings.max_upload_bytes,
+                        )
+                    except (AuthorizedFileReadError, FileRecordUnavailable, OSError, ValueError):
+                        return False
                 if stored.raw_id != raw_id:
                     return False
         return True
@@ -41932,6 +42052,8 @@ class AgentRuntime:
             attachment_uploader = _resolved_telegram_reply_uploader(item) or person_id
             direct_read_authority = _explicit_filename_direct_read_authority_of(item)
             historical_authority = _historical_direct_read_authority_of(item)
+            current_upload_token = current_turn_file_reference_of(item)
+            current_upload_authorized = None
             canonical = self._owned_file_attachment(
                 raw_id,
                 tenant_id=tenant_id,
@@ -41939,6 +42061,45 @@ class AgentRuntime:
                 direct_read_authority=direct_read_authority,
                 historical_authority=historical_authority,
             )
+            if canonical is None and current_upload_token is not None:
+                try:
+                    current_upload_authorized = await _await_with_turn_deadline(
+                        run_blocking(
+                            authorize_current_upload_file,
+                            self.storage,
+                            self.settings.files_dir,
+                            raw_id,
+                            tenant_id,
+                            person_id=attachment_uploader,
+                            expected_sha256=current_upload_token.content_sha256,
+                            max_bytes=self.settings.max_upload_bytes,
+                        ),
+                        turn_deadline,
+                        expired="turn deadline expired during current-upload authorization",
+                    )
+                except (AuthorizedFileReadError, FileRecordUnavailable, OSError, ValueError):
+                    current_upload_authorized = None
+                if current_upload_authorized is not None:
+                    current_identity = _raw_source_identity_sha256(current_upload_authorized.raw)
+                    metadata = bounded_raw_file_metadata(current_upload_authorized.raw.get("metadata_json"))
+                    registration = classify_file_registration(
+                        metadata,
+                        content_hash=str(current_upload_authorized.raw.get("content_hash") or ""),
+                    )
+                    if (
+                        registration.state == REGISTERED_VALID
+                        and hmac.compare_digest(
+                            current_upload_token.source_identity_sha256,
+                            current_identity,
+                        )
+                        and str(item.get("filename") or "") == str(metadata.get("filename") or "")[:260]
+                        and str(item.get("mime_type") or "").partition(";")[0].strip().casefold()
+                        == str(metadata.get("mime_type") or "").partition(";")[0].strip().casefold()
+                    ):
+                        current_fields = dict(item)
+                        current_fields["_registered_file_record"] = "valid"
+                        current_fields[_RAW_SOURCE_IDENTITY_KEY] = current_identity
+                        canonical = _private_owned_attachment_copy(current_fields, source=item)
             if canonical is None:
                 hydrated.append(unavailable(item))
                 continue
@@ -41963,30 +42124,33 @@ class AgentRuntime:
                 continue
             filename = str(canonical.get("filename") or "attachment")[:260]
             mime_type = str(canonical.get("mime_type") or "")[:160]
-            try:
-                authorized = await _await_with_turn_deadline(
-                    run_blocking(
-                        read_authorized_file,
-                        self.storage,
-                        self.settings.files_dir,
-                        raw_id,
-                        tenant_id,
-                        person_id=attachment_uploader,
-                        max_bytes=self.settings.max_upload_bytes,
-                    ),
-                    turn_deadline,
-                    expired="turn deadline expired during attachment authorization",
-                )
-            except (AuthorizedFileReadError, FileRecordUnavailable, ValueError):
-                hydrated.append(unavailable(canonical))
-                continue
-            except Exception as exc:  # noqa: BLE001 - registered-byte read fails closed
-                LOGGER.warning(
-                    "Registered attachment byte verification failed (%s)",
-                    type(exc).__name__,
-                )
-                hydrated.append(unavailable(canonical))
-                continue
+            if current_upload_authorized is not None:
+                authorized = current_upload_authorized.file
+            else:
+                try:
+                    authorized = await _await_with_turn_deadline(
+                        run_blocking(
+                            read_authorized_file,
+                            self.storage,
+                            self.settings.files_dir,
+                            raw_id,
+                            tenant_id,
+                            person_id=attachment_uploader,
+                            max_bytes=self.settings.max_upload_bytes,
+                        ),
+                        turn_deadline,
+                        expired="turn deadline expired during attachment authorization",
+                    )
+                except (AuthorizedFileReadError, FileRecordUnavailable, ValueError):
+                    hydrated.append(unavailable(canonical))
+                    continue
+                except Exception as exc:  # noqa: BLE001 - registered-byte read fails closed
+                    LOGGER.warning(
+                        "Registered attachment byte verification failed (%s)",
+                        type(exc).__name__,
+                    )
+                    hydrated.append(unavailable(canonical))
+                    continue
 
             snapshot_token = _authorized_file_snapshot_for_parser(
                 authorized,
@@ -41999,13 +42163,14 @@ class AgentRuntime:
             # Re-check uploader ownership after the blocking read. A quarantine
             # or account-boundary change must invalidate even healthy cached
             # extractor text.
-            canonical = self._owned_file_attachment(
-                raw_id,
-                tenant_id=tenant_id,
-                person_id=attachment_uploader,
-                direct_read_authority=direct_read_authority,
-                historical_authority=historical_authority,
-            )
+            if current_upload_authorized is None:
+                canonical = self._owned_file_attachment(
+                    raw_id,
+                    tenant_id=tenant_id,
+                    person_id=attachment_uploader,
+                    direct_read_authority=direct_read_authority,
+                    historical_authority=historical_authority,
+                )
             if canonical is None:
                 hydrated.append(unavailable(item))
                 continue
@@ -42332,13 +42497,49 @@ class AgentRuntime:
             if not _RAW_OBJECT_ID_RE.fullmatch(raw_id) or raw_id in valid:
                 continue
             attachment_uploader = _resolved_telegram_reply_uploader(item) or person_id
-            if self._owned_file_attachment(
+            owned = self._owned_file_attachment(
                 raw_id,
                 tenant_id=tenant_id,
                 person_id=attachment_uploader,
                 historical_authority=_historical_direct_read_authority_of(item),
-            ):
+            )
+            if owned is not None:
                 valid.append(raw_id)
+            else:
+                # Inbox-first JSON is deliberately absent from the ordinary Raw
+                # visibility query during its upload turn.  Its process-private
+                # token can still authorize one exact durable message pointer;
+                # later readers must cross that message binding plus the same
+                # registered-byte/tenant/uploader checks again.
+                token = current_turn_file_reference_of(item)
+                if token is not None:
+                    try:
+                        current_upload = authorize_current_upload_file(
+                            self.storage,
+                            self.settings.files_dir,
+                            raw_id,
+                            tenant_id,
+                            person_id=attachment_uploader,
+                            expected_sha256=token.content_sha256,
+                            max_bytes=self.settings.max_upload_bytes,
+                        )
+                    except (AuthorizedFileReadError, FileRecordUnavailable, OSError, ValueError):
+                        current_upload = None
+                    if current_upload is not None:
+                        metadata = bounded_raw_file_metadata(current_upload.raw.get("metadata_json"))
+                        registration = classify_file_registration(
+                            metadata,
+                            content_hash=str(current_upload.raw.get("content_hash") or ""),
+                        )
+                        current_identity = _raw_source_identity_sha256(current_upload.raw)
+                        if (
+                            registration.state == REGISTERED_VALID
+                            and hmac.compare_digest(token.source_identity_sha256, current_identity)
+                            and str(item.get("filename") or "") == str(metadata.get("filename") or "")[:260]
+                            and str(item.get("mime_type") or "").partition(";")[0].strip().casefold()
+                            == str(metadata.get("mime_type") or "").partition(";")[0].strip().casefold()
+                        ):
+                            valid.append(raw_id)
             if len(valid) >= _CONVERSATION_ATTACHMENT_MAX_FILES:
                 break
         return valid[:_CONVERSATION_ATTACHMENT_MAX_FILES]
@@ -45349,6 +45550,7 @@ class AgentRuntime:
                 metadata={
                     "turn_policy_intent": turn_policy.intent.value,
                     "tools_enabled": enable_tools is True,
+                    "interaction_mode": interaction_mode,
                 },
                 reply_to=user_reply_parent_id,
             )
@@ -45569,6 +45771,7 @@ class AgentRuntime:
             stop_metadata = {
                 **(stop_metadata or {}),
                 "tools_enabled": enable_tools is True,
+                "interaction_mode": interaction_mode,
             }
             if not mark_request_effect_possible():
                 raise RuntimeError("Request idempotency fence could not be committed before message storage")
@@ -46802,6 +47005,7 @@ class AgentRuntime:
         user_metadata = {
             **(user_metadata or {}),
             "tools_enabled": enable_tools is True,
+            "interaction_mode": interaction_mode,
         }
         if not mark_request_effect_possible():
             raise RuntimeError("Request idempotency fence could not be committed before message storage")
@@ -47603,6 +47807,13 @@ class AgentRuntime:
                 for item in active_attachment_set
             )
         )
+        host_json_attachment_raw_id = _single_authorized_json_attachment_raw_id(active_attachment_set)
+        if host_json_attachment_raw_id:
+            # Generic file-query closure cannot inspect a parser-unreadable JSON
+            # body.  The reviewed jq adapter can operate on the separately
+            # byte-verified Raw object, so this exact local capability owns the
+            # turn instead of publishing a premature lexical UNKNOWN.
+            attachment_query_closed_answer = ""
         file_web = file_turn.proved("web")
         file_voice = file_turn.proved("voice")
         # ``сделай резюме этого файла`` is a read, not a request to create a
@@ -47651,7 +47862,9 @@ class AgentRuntime:
                 )
             )
         )
-        attachment_tool_action_requested = bool(not synthetic_document_notice and file_effect)
+        attachment_tool_action_requested = bool(
+            not synthetic_document_notice and (file_effect or host_json_attachment_raw_id)
+        )
         if (
             file_source_only
             and not message_locate_flow
@@ -48650,6 +48863,7 @@ class AgentRuntime:
         context.source_search_lineage_message_owner_id = user_id
         context.source_effect_authority = attachment_source_effect_authority
         context.source_effect_reauth_required = bool(active_attachment_set and attachment_expected_count > 0)
+        context.host_json_attachment_raw_id = host_json_attachment_raw_id
         filename_projection = (
             filename_result_continuation.projection
             if filename_result_continuation.applies
@@ -48942,7 +49156,10 @@ class AgentRuntime:
                 and not fabricated_outside_deed_request
                 and not private_web_search_blocked
                 and not document_metadata_owned
-                and not pure_file_read_turn
+                # A verified current JSON attachment has one reviewed local
+                # action even though the ordinary text-only file route is
+                # otherwise settled without model-visible tools.
+                and (not pure_file_read_turn or bool(host_json_attachment_raw_id))
                 and not (
                     context.structural_answer
                     and context.remainder_known
@@ -49004,13 +49221,26 @@ class AgentRuntime:
             # false ``make_file`` projection before the first model token; the
             # optional model never receives tools.
             visible_tools = []
+        if not context.host_json_attachment_raw_id:
+            visible_tools = [
+                tool
+                for tool in visible_tools
+                if str((tool.get("function") or {}).get("name") or tool.get("name") or "")
+                != "host_json_extract"
+            ]
         if (
             file_source_only
             and not message_locate_flow
             and (attachment_expected_count or supplied_attachment_count or active_attachment_set)
             and not quoted_file_command_is_data
         ):
-            visible_tools = []
+            visible_tools = [
+                tool
+                for tool in visible_tools
+                if context.host_json_attachment_raw_id
+                and str((tool.get("function") or {}).get("name") or tool.get("name") or "")
+                == "host_json_extract"
+            ]
         if workspace_channel_data_only:
             # A pasted/quoted MCP command is user data, not effect authority.
             # The broad direct-file classifier sees Markdown's rendered text;
@@ -49718,13 +49948,21 @@ class AgentRuntime:
                 "tools_used": [],
                 "_empty_attachment_owned": True,
             }
-        elif unreadable_attachment_answer and not engineer_unreadable_artifacts_covered:
+        elif (
+            unreadable_attachment_answer
+            and not engineer_unreadable_artifacts_covered
+            and not host_json_attachment_raw_id
+        ):
             response = {
                 "content": _UNREADABLE_ATTACHMENT_ANSWER,
                 "tools_used": [],
                 "_unreadable_attachment_owned": True,
             }
-        elif partially_unreadable_attachment_answer and not engineer_unreadable_artifacts_covered:
+        elif (
+            partially_unreadable_attachment_answer
+            and not engineer_unreadable_artifacts_covered
+            and not host_json_attachment_raw_id
+        ):
             response = {
                 "content": (
                     "Не могу надёжно ответить по всему выбранному набору: проверяемое "
@@ -54699,11 +54937,13 @@ class AgentRuntime:
         turn_deadline: float | None,
         enable_tools: bool,
     ) -> dict[str, Any]:
-        """Run current-turn targets through the audited kernel under one clock.
+        """Build passive artifact evidence and run explicitly requested targets.
 
-        The model never chooses these automatic arguments.  Each host and each
-        registered Raw file receives its own fresh capability decision and its
-        own ExecutionKernel audit outcome.  A transient byte blob without a Raw
+        A host mention alone never crosses DNS or the kernel.  For a direct
+        current-user active request, the model still never chooses automatic
+        arguments: the exact policy-admitted target receives a fresh capability
+        decision and audited outcome.  Each registered Raw file retains its
+        passive static-analysis path.  A transient byte blob without a Raw
         identity is deliberately not analysed here: there would be no durable,
         owner-scoped source fingerprint for the action receipt.
         """
@@ -54732,6 +54972,10 @@ class AgentRuntime:
             "sandboxed": False,
             "tool_versions": {},
         }
+        network_requested = engineer_hosts.active_assessment_requested(message)
+        dossier["network_request_status"] = (
+            "explicit_active_request" if network_requested else "not_requested"
+        )
 
         async def execute_audited(
             tool_name: str,
@@ -54743,12 +54987,15 @@ class AgentRuntime:
             fresh_actor = self._fresh_engineer_actor(actor, capability)
             if fresh_actor is None:
                 return None
+            _mark_engineer_action_started(dossier, tool_name)
             try:
-                return await _await_with_turn_deadline(
+                result = await _await_with_turn_deadline(
                     self.kernel.execute(tool_name, arguments, actor=fresh_actor),
                     turn_deadline,
                     expired=f"turn deadline expired during automatic {tool_name}",
                 )
+                _record_engineer_action_receipt(dossier, tool_name, result)
+                return result
             except TimeoutError:
                 # ExecutionKernel records the cancellation as an uncertain
                 # terminal audit before propagating it through ``wait_for``.
@@ -54758,11 +55005,11 @@ class AgentRuntime:
                     error="Automatic engineer action exceeded the turn deadline",
                 )
 
-        # Target authority is minted from exactly one token in the current human
-        # turn. DNS pinning is itself a network preflight, so it receives a fresh
-        # capability decision before it starts; the kernel checks the capability
-        # again immediately before the audited probe.
-        host_actor = self._fresh_engineer_actor(actor, "engineer.host.audit") if message.strip() else None
+        # A host/URL mention is evidence, never effect authority.  Only direct
+        # active-assessment language in this current human turn may cross even
+        # the DNS pinning preflight.  Exact policy is then checked before a
+        # ticket is minted, and again inside the tool handler before any socket.
+        host_actor = self._fresh_engineer_actor(actor, "engineer.host.audit") if network_requested else None
 
         async def audit_target_pinning(outcome: str) -> None:
             if host_actor is None:
@@ -54790,6 +55037,11 @@ class AgentRuntime:
                         engineer_hosts.pin_target_from_speech,
                         message,
                         deadline=turn_deadline,
+                        allowed_cidrs=tuple(getattr(self.settings, "host_allowed_cidrs", ()) or ()),
+                        allow_public=bool(getattr(self.settings, "host_public_network_enabled", False)),
+                        # Engineer v1 has no durable public-action approval
+                        # carrier.  Current-message prose is not HITL proof.
+                        public_action_approved=False,
                     ),
                     turn_deadline,
                     expired="turn deadline expired during engineer target pinning",
@@ -54806,6 +55058,11 @@ class AgentRuntime:
                         type(exc).__name__,
                     )
                 raise
+            except engineer_hosts.EngineerTargetPolicyError as exc:
+                dossier["ok"] = False
+                dossier["target_error"] = exc.code
+                await audit_target_pinning("target_policy_denied_before_tool")
+                pinned_target = None
             except (TimeoutError, ValueError) as exc:
                 dossier["ok"] = False
                 dossier["target_error"] = (
@@ -54815,6 +55072,9 @@ class AgentRuntime:
                     "uncertain" if isinstance(exc, TimeoutError) else "target_resolution_failed_before_tool"
                 )
                 pinned_target = None
+            if pinned_target is None and "target_error" not in dossier:
+                dossier["ok"] = False
+                dossier["target_error"] = "exact_current_target_required"
             if pinned_target is not None and not _turn_deadline_expired(turn_deadline):
                 host = pinned_target.host
                 remaining = _remaining_deadline_budget(turn_deadline)
@@ -57534,11 +57794,28 @@ class AgentRuntime:
             # Repeat the closed allowlist for direct adapters/tests which enter
             # this seam without the outer chat projection.
             tools[:] = _project_engineer_tool_schemas(tools)
+        engineer_patch_authorized = False
+        if context.interaction_mode == "engineer":
+            from friday.organs.engineer.targets import requests_artifact_patch
+
+            engineer_patch_authorized = requests_artifact_patch(message)
+            if not engineer_patch_authorized:
+                # Uploaded evidence is untrusted data, never mutation intent.
+                # Do not advertise the mutator unless this authenticated human
+                # turn itself asks for a derived patched artifact.
+                tools[:] = [tool for tool in tools if _engineer_tool_name(tool) != "engineer_patch_artifact"]
         engineer_dossier = context.engineer_dossier if isinstance(context.engineer_dossier, Mapping) else {}
         engineer_pinned_hosts = _engineer_pinned_hosts(engineer_dossier)
         engineer_private_targets = _engineer_private_pinned_targets(engineer_dossier)
         engineer_pinned_raw_ids = _engineer_pinned_raw_ids(engineer_dossier)
         engineer_artifact_refs = _engineer_private_artifact_refs(engineer_dossier)
+        if context.interaction_mode == "engineer" and not (
+            engineer_pinned_hosts and engineer_private_targets
+        ):
+            # Do not advertise active network effects on a passive host mention
+            # (or after policy/HITL refusal).  The execution seam below remains
+            # fail-closed as defence in depth for a fabricated native call.
+            tools[:] = [tool for tool in tools if _engineer_tool_name(tool) not in _ENGINEER_HOST_TOOL_NAMES]
 
         archive_search_was_offered = any(
             str((tool.get("function") or {}).get("name") or tool.get("name") or "")
@@ -59000,6 +59277,25 @@ class AgentRuntime:
                             )
                     else:
                         carrier_allowed = False
+                elif call.name in _HOST_CONTROL_CONTEXT_TOOL_NAMES:
+                    model_arguments = call.arguments if isinstance(call.arguments, Mapping) else {}
+                    if (
+                        not isinstance(call.arguments, Mapping)
+                        or _HOST_CONTROL_PRIVATE_ARGUMENTS.intersection(str(key) for key in model_arguments)
+                        or not context.conversation_id
+                        or not context.effect_root_user_message_id
+                    ):
+                        carrier_allowed = False
+                    else:
+                        call_arguments = dict(model_arguments)
+                        call_arguments["_conversation_id"] = context.conversation_id
+                        call_arguments["_source_message_id"] = context.effect_root_user_message_id
+                        if call.name == "host_json_extract":
+                            selected_raw_id = context.host_json_attachment_raw_id
+                            if _RAW_OBJECT_ID_RE.fullmatch(selected_raw_id) is None:
+                                carrier_allowed = False
+                            else:
+                                call_arguments["_raw_id"] = selected_raw_id
                 elif call.name in _ENGINEER_HOST_TOOL_NAMES:
                     model_arguments = call.arguments if isinstance(call.arguments, Mapping) else {}
                     requested_host = str(model_arguments.get("host") or "").strip()
@@ -59018,19 +59314,24 @@ class AgentRuntime:
                 elif call.name in _ENGINEER_ARTIFACT_TOOL_NAMES:
                     model_arguments = call.arguments if isinstance(call.arguments, Mapping) else {}
                     requested_ref = str(model_arguments.get("artifact_ref") or "").strip()
-                    selected_raw_id = engineer_artifact_refs.get(requested_ref)
-                    if not selected_raw_id and not requested_ref and len(engineer_artifact_refs) == 1:
-                        selected_raw_id = next(iter(engineer_artifact_refs.values()))
+                    selected_artifact_raw_id = engineer_artifact_refs.get(requested_ref)
+                    if (
+                        not selected_artifact_raw_id
+                        and not requested_ref
+                        and len(engineer_artifact_refs) == 1
+                    ):
+                        selected_artifact_raw_id = next(iter(engineer_artifact_refs.values()))
                     if (
                         context.interaction_mode != "engineer"
-                        or not selected_raw_id
-                        or selected_raw_id not in engineer_pinned_raw_ids
+                        or not selected_artifact_raw_id
+                        or selected_artifact_raw_id not in engineer_pinned_raw_ids
+                        or (call.name == "engineer_patch_artifact" and not engineer_patch_authorized)
                     ):
                         carrier_allowed = False
                     else:
                         call_arguments = dict(model_arguments)
                         call_arguments.pop("artifact_ref", None)
-                        call_arguments["raw_id"] = selected_raw_id
+                        call_arguments["raw_id"] = selected_artifact_raw_id
                 elif call.name == "make_file" and isinstance(call.arguments, Mapping):
                     requested_kind = _file_kind_from_request(file_create_message)
                     requested_filename, requested_filename_supported = _requested_output_filename_stem(
@@ -59213,6 +59514,11 @@ class AgentRuntime:
                             ),
                         )
                     elif declared_risk == "observe":
+                        if isinstance(context.engineer_dossier, dict):
+                            _mark_engineer_action_started(
+                                context.engineer_dossier,
+                                call.name,
+                            )
                         try:
                             tool_result = await _await_with_turn_deadline(
                                 self.kernel.execute(call.name, call_arguments, actor=tool_actor),
@@ -59601,7 +59907,16 @@ class AgentRuntime:
                     # доставки: голосовое сообщение и документ. Складывать их в
                     # одно поле значило бы, что отчёт отправится звуковым файлом.
                     if str(tool_result.attachment.get("kind") or "") == "document":
-                        file_clips.append(tool_result.attachment)
+                        if call.name == "host_json_extract":
+                            # The jq carrier is the exact receipt-bound stdout,
+                            # independently verified by HostControlService rather
+                            # than authored by the model.  Keep it in the protected
+                            # structural prefix so later prose/verifier repairs do
+                            # not discard an already completed local artifact.
+                            file_clips.insert(structural_file_count, tool_result.attachment)
+                            structural_file_count += 1
+                        else:
+                            file_clips.append(tool_result.attachment)
                     else:
                         voice_clip = tool_result.attachment
                 rendered = archive_rendered or tool_result.to_llm_message()

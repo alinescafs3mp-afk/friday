@@ -11,6 +11,9 @@ from collections.abc import Mapping, Sequence
 from concurrent.futures import Future, ThreadPoolExecutor, wait
 from typing import Any
 
+from friday.host_control.contracts import ContractError
+from friday.host_control.policy import NetworkPolicy, NetworkTargetSnapshot, normalize_network_targets
+
 from . import local_binaries
 from .redaction import redact_header, redact_text
 from .targets import (
@@ -19,6 +22,7 @@ from .targets import (
     is_forbidden_address,
     normalize_ip_address,
     parse_host_token,
+    requests_active_assessment,
     target_source_sha256,
 )
 
@@ -136,6 +140,14 @@ HUNT_PATHS = (
 MAX_HTTP_HITS = 32
 
 
+class EngineerTargetPolicyError(ValueError):
+    """Stable fail-closed reason for an exact Engineer network target."""
+
+    def __init__(self, code: str) -> None:
+        self.code = str(code)
+        super().__init__(self.code)
+
+
 def _remaining(deadline: float | None, ceiling: float) -> float:
     return local_binaries.remaining_timeout(deadline, ceiling)
 
@@ -209,19 +221,112 @@ def authorize_target(
     )
 
 
-def pin_target_from_speech(speech: str, *, deadline: float | None = None) -> PinnedTarget | None:
-    """Mint target authority only from exactly one current-speech token."""
+def _configured_network_policy(
+    allowed_cidrs: Sequence[str],
+    *,
+    allow_public: bool,
+) -> NetworkPolicy:
+    canonical: list[str] = []
+    for raw in allowed_cidrs:
+        try:
+            network = ipaddress.ip_network(str(raw), strict=True)
+        except ValueError as exc:
+            raise EngineerTargetPolicyError("target_policy_invalid") from exc
+        if str(network) != str(raw) or network.prefixlen == 0:
+            raise EngineerTargetPolicyError("target_policy_invalid")
+        canonical.append(str(network))
+    try:
+        return NetworkPolicy(
+            # The current release does not synthesize trust from RFC1918 alone.
+            # A private destination must be covered by an exact operator CIDR;
+            # loopback remains the policy module's built-in exception.
+            connected_cidrs=(),
+            allowed_cidrs=tuple(canonical),
+            allow_public=bool(allow_public),
+            max_targets=MAX_TARGET_ADDRESSES,
+            max_target_tokens=MAX_TARGET_ADDRESSES,
+        )
+    except ContractError as exc:
+        raise EngineerTargetPolicyError("target_policy_invalid") from exc
+
+
+def admit_pinned_target_policy(
+    target: PinnedTarget,
+    *,
+    allowed_cidrs: Sequence[str],
+    allow_public: bool,
+    public_action_approved: bool = False,
+) -> NetworkTargetSnapshot:
+    """Revalidate pinned addresses against the shared exact network policy.
+
+    Public scope requires both the operator feature flag and a separate
+    per-action approval.  Engineer v1 has no approval carrier, so its runtime
+    always calls this with ``public_action_approved=False`` and refuses before
+    any probe.  The explicit argument keeps the shared boundary testable for a
+    future reviewed HITL integration without treating prose as approval.
+    """
+
+    addresses: list[str] = []
+    any_public = False
+    for raw in target.addresses:
+        try:
+            address = normalize_ip_address(ipaddress.ip_address(raw))
+        except ValueError as exc:
+            raise EngineerTargetPolicyError("target_policy_invalid") from exc
+        addresses.append(str(address))
+        any_public = bool(any_public or address.is_global)
+    if any_public and not allow_public:
+        raise EngineerTargetPolicyError("public_target_requires_operator_flag")
+    policy = _configured_network_policy(allowed_cidrs, allow_public=allow_public)
+    try:
+        snapshot = normalize_network_targets(addresses, policy)
+    except ContractError as exc:
+        raise EngineerTargetPolicyError("target_outside_operator_policy") from exc
+    if snapshot.approval_required and public_action_approved is not True:
+        raise EngineerTargetPolicyError("public_target_requires_per_action_approval")
+    return snapshot
+
+
+def pin_target_from_speech(
+    speech: str,
+    *,
+    deadline: float | None = None,
+    allowed_cidrs: Sequence[str] | None = None,
+    allow_public: bool = False,
+    public_action_approved: bool = False,
+) -> PinnedTarget | None:
+    """Mint authority from one current-speech token and an exact policy.
+
+    ``allowed_cidrs=None`` retains the low-level compatibility entry used by
+    isolated parser tests.  Production runtime always supplies the configured
+    tuple, including an empty tuple, so an unconfigured private/public address
+    cannot be admitted accidentally.
+    """
 
     selected = extract_single_target(speech)
     if selected is None:
         return None
     token = str(selected.get("token") or "")
-    return authorize_target(
+    target = authorize_target(
         token,
         source_token=token,
         source_sha256=target_source_sha256(speech, token),
         deadline=deadline,
     )
+    if allowed_cidrs is not None:
+        admit_pinned_target_policy(
+            target,
+            allowed_cidrs=allowed_cidrs,
+            allow_public=allow_public,
+            public_action_approved=public_action_approved,
+        )
+    return target
+
+
+def active_assessment_requested(speech: str) -> bool:
+    """Expose the current-turn effect-intent gate beside target pinning."""
+
+    return requests_active_assessment(speech)
 
 
 def resolve_target(host: str) -> dict[str, Any]:
@@ -596,7 +701,9 @@ def audit_target(
         "ports": results,
         "weaknesses": _weaknesses(results),
         "dns": dns,
-        "nmap": nmap if nmap.get("ok") else {"used": False, "reason": nmap.get("error")},
+        "nmap": (
+            nmap if nmap.get("ok") or nmap.get("report") else {"used": False, "reason": nmap.get("error")}
+        ),
         "local_tools": {name: bool(path) for name, path in sorted(local_binaries.inventory().items())},
         "rehearsal": bool(rehearsal),
         "deadline_exhausted": deadline_exhausted,
@@ -718,14 +825,41 @@ def host_markdown(report: Mapping[str, Any]) -> str:
         lines.append(f"dns evidence: {len(records)} record groups, sha256 `{digest}`")
     nmap_value = report.get("nmap")
     nmap: Mapping[str, Any] = nmap_value if isinstance(nmap_value, Mapping) else {}
-    if nmap.get("ok") and nmap.get("stdout"):
-        stdout = str(nmap["stdout"])
-        digest = hashlib.sha256(stdout.encode("utf-8")).hexdigest()
-        lines.append(f"nmap evidence: {len(stdout)} chars, sha256 `{digest}`")
+    projection_value = nmap.get("report")
+    projection: Mapping[str, Any] = projection_value if isinstance(projection_value, Mapping) else {}
+    structured_value = projection.get("result")
+    structured: Mapping[str, Any] = structured_value if isinstance(structured_value, Mapping) else {}
+    if projection.get("label") == "UNTRUSTED_HOST_APPLICATION_EVIDENCE":
+        requested = structured.get("targets_requested")
+        scanned = structured.get("targets_scanned")
+        open_ports = structured.get("open_ports")
+        if all(
+            isinstance(value, int) and not isinstance(value, bool) and value >= 0
+            for value in (requested, scanned, open_ports)
+        ):
+            lines.append(
+                "nmap structured result: "
+                f"targets {scanned}/{requested}, open ports {open_ports}, "
+                f"parser `{redact_text(projection.get('parser_status'), limit=24)}`, "
+                "label `UNTRUSTED_HOST_APPLICATION_EVIDENCE`"
+            )
+    evidence = list(nmap.get("evidence") or [])
+    first_evidence = evidence[0] if evidence and isinstance(evidence[0], Mapping) else {}
+    evidence_digest = str(first_evidence.get("sha256") or "")
+    evidence_size = first_evidence.get("size_bytes")
+    if len(evidence_digest) == 64 and isinstance(evidence_size, int):
+        coverage_value = nmap.get("coverage")
+        coverage: Mapping[str, Any] = coverage_value if isinstance(coverage_value, Mapping) else {}
+        lines.append(
+            "nmap XML evidence: "
+            f"{evidence_size} bytes, sha256 `{evidence_digest}`, "
+            f"coverage `{redact_text(coverage.get('grade'), limit=24)}`"
+        )
     return "\n".join(lines)[:12_000]
 
 
 __all__ = [
+    "EngineerTargetPolicyError",
     "DEFAULT_PORTS",
     "HTTP_PORTS",
     "MAX_PORTS",
@@ -734,6 +868,8 @@ __all__ = [
     "TLS_PORTS",
     "audit_host",
     "audit_target",
+    "active_assessment_requested",
+    "admit_pinned_target_policy",
     "authorize_target",
     "host_markdown",
     "http_hunt",

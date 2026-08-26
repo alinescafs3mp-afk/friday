@@ -71,6 +71,14 @@ class AuthorizedFileBytes:
 
 
 @dataclass(frozen=True, slots=True)
+class AuthorizedCurrentUpload:
+    """Exact same-turn upload authority, including its immutable Raw row."""
+
+    raw: Mapping[str, Any]
+    file: AuthorizedFileBytes
+
+
+@dataclass(frozen=True, slots=True)
 class FileRegistrationVerdict:
     """Closed classification of one Raw file registration.
 
@@ -254,6 +262,163 @@ def read_authorized_file_in_transaction(
     if still is None:
         raise FileRecordUnavailable
     return stored
+
+
+def _current_upload_row(
+    conn: Any,
+    *,
+    raw_id: str,
+    tenant_id: str,
+    person_id: str,
+) -> Any:
+    """Resolve one uploader-owned Raw without granting generic archive recall.
+
+    Pending Inbox material is intentionally absent from ordinary Raw readers.
+    This narrower reader exists only for a process-authenticated current upload
+    (or the exact durable user-message pointer minted from that upload).
+    """
+
+    return conn.execute(
+        f"""SELECT r.id, r.user_id, r.source, r.source_ref, r.content_type,
+                   r.received_at, r.content_hash, r.raw_content,
+                   r.raw_content AS _raw_content, r.metadata_json,
+                   r.metadata_json AS _raw_metadata
+              FROM raw_objects r
+             WHERE r.id=? AND r.user_id=? AND r.source='upload'
+               AND r.content_type='file' AND r.deleted_at IS NULL
+               AND {_exact_uploader_raw_dependency("r")}""",  # nosec B608 - fixed predicate
+        (str(raw_id), str(tenant_id), str(person_id)),
+    ).fetchone()
+
+
+def authorize_current_upload_file(
+    storage: Any,
+    root: Path,
+    raw_id: str,
+    tenant_id: str,
+    *,
+    person_id: str,
+    expected_sha256: str,
+    max_bytes: int | None = None,
+) -> AuthorizedCurrentUpload:
+    """Authorize bytes returned by this process's just-completed upload call.
+
+    ``expected_sha256`` is computed from the authenticated request body, not
+    accepted from a model or API field. It prevents an opaque-id mix-up from
+    opening another quarantined Raw object through this deliberately narrow
+    same-turn exception.
+    """
+
+    with storage.transaction() as conn:
+        return authorize_current_upload_file_in_transaction(
+            conn,
+            root,
+            raw_id,
+            tenant_id,
+            person_id=person_id,
+            expected_sha256=expected_sha256,
+            max_bytes=max_bytes,
+        )
+
+
+def authorize_current_upload_file_in_transaction(
+    conn: Any,
+    root: Path,
+    raw_id: str,
+    tenant_id: str,
+    *,
+    person_id: str,
+    expected_sha256: str,
+    max_bytes: int | None = None,
+) -> AuthorizedCurrentUpload:
+    """Transaction-scoped same-turn upload authorization."""
+
+    digest = str(expected_sha256 or "").casefold()
+    if not _HEX64.fullmatch(digest):
+        raise FileRecordUnavailable
+    row = _current_upload_row(
+        conn,
+        raw_id=raw_id,
+        tenant_id=tenant_id,
+        person_id=person_id,
+    )
+    if row is None or not hmac.compare_digest(str(row["content_hash"] or "").casefold(), digest):
+        raise FileRecordUnavailable
+    stored = _read_authorized_row(row, root, max_bytes=max_bytes)
+    if not hmac.compare_digest(hashlib.sha256(stored.content).hexdigest(), digest):
+        raise FileRecordUnavailable
+    current = _current_upload_row(
+        conn,
+        raw_id=raw_id,
+        tenant_id=tenant_id,
+        person_id=person_id,
+    )
+    if current is None or not hmac.compare_digest(
+        str(current["content_hash"] or "").casefold(),
+        digest,
+    ):
+        raise FileRecordUnavailable
+    return AuthorizedCurrentUpload(raw=dict(current), file=stored)
+
+
+def read_current_message_upload_file(
+    storage: Any,
+    root: Path,
+    raw_id: str,
+    tenant_id: str,
+    *,
+    person_id: str,
+    conversation_id: str,
+    source_message_id: str,
+    max_bytes: int | None = None,
+) -> AuthorizedFileBytes:
+    """Read the exact upload recorded on one authenticated user message.
+
+    This is the restart-safe continuation of ``authorize_current_upload_file``.
+    It bypasses generic archive visibility only when the immutable message row
+    itself names the Raw id as a current upload for the exact participant.
+    """
+
+    with storage.transaction() as conn:
+        message = conn.execute(
+            """SELECT metadata_json FROM messages
+                WHERE id=? AND conversation_id=? AND user_id IN (?, ?) AND role='user'""",
+            (
+                str(source_message_id),
+                str(conversation_id),
+                str(person_id),
+                str(tenant_id),
+            ),
+        ).fetchone()
+        if message is None:
+            raise FileRecordUnavailable
+        metadata = _metadata_object(message["metadata_json"])
+        uploaded = metadata.get("conversation_uploaded_raw_ids")
+        if (
+            not isinstance(uploaded, list)
+            or len(uploaded) > 100
+            or uploaded.count(str(raw_id)) != 1
+            or any(not isinstance(item, str) for item in uploaded)
+        ):
+            raise FileRecordUnavailable
+        row = _current_upload_row(
+            conn,
+            raw_id=raw_id,
+            tenant_id=tenant_id,
+            person_id=person_id,
+        )
+        if row is None:
+            raise FileRecordUnavailable
+        stored = _read_authorized_row(row, root, max_bytes=max_bytes)
+        current = _current_upload_row(
+            conn,
+            raw_id=raw_id,
+            tenant_id=tenant_id,
+            person_id=person_id,
+        )
+        if current is None or str(current["content_hash"] or "") != str(row["content_hash"] or ""):
+            raise FileRecordUnavailable
+        return stored
 
 
 def read_authorized_generated_file(
@@ -455,6 +620,7 @@ def _read_regular_file(
 
 
 __all__ = [
+    "AuthorizedCurrentUpload",
     "AuthorizedFileBytes",
     "AuthorizedFileReadError",
     "FileRecordUnavailable",
@@ -463,9 +629,12 @@ __all__ = [
     "REGISTERED_INVALID",
     "REGISTERED_VALID",
     "attachment_content_disposition",
+    "authorize_current_upload_file",
+    "authorize_current_upload_file_in_transaction",
     "classify_file_registration",
     "read_authorized_file",
     "read_authorized_file_in_transaction",
     "read_authorized_generated_file",
+    "read_current_message_upload_file",
     "verify_registered_file_bytes",
 ]

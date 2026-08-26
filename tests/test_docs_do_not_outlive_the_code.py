@@ -63,8 +63,14 @@ def test_current_release_identity_matches_package_operator_docs_and_schema():
     project = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))["project"]
     assert project["version"] == __version__
 
-    changelog_version = re.match(r"## ([0-9]+(?:\.[0-9]+)+) —", CHANGELOG)
-    assert changelog_version, "CHANGELOG must start with the current release"
+    unreleased_header = "## Unreleased — version assigned by release integrator\n"
+    is_unreleased_candidate = CHANGELOG.startswith(unreleased_header)
+    if is_unreleased_candidate:
+        assert "неопубликованный release candidate" in README
+        changelog_version = re.search(r"^## ([0-9]+(?:\.[0-9]+)+) —", CHANGELOG, re.MULTILINE)
+    else:
+        changelog_version = re.match(r"## ([0-9]+(?:\.[0-9]+)+) —", CHANGELOG)
+    assert changelog_version, "CHANGELOG must name the current release baseline"
     assert changelog_version.group(1) == __version__
 
     operations_health = re.search(r"требуйте `status=ok` и `version=([0-9.]+)`", OPERATIONS)
@@ -73,7 +79,12 @@ def test_current_release_identity_matches_package_operator_docs_and_schema():
         RELEASE_CHECKLIST,
     )
     assert operations_health and operations_health.group(1) == __version__
-    assert checklist_health and checklist_health.group(1) == __version__
+    if is_unreleased_candidate:
+        assert "final startup health имеет `status=ok`, `version=<allocated release version>`" in (
+            RELEASE_CHECKLIST
+        )
+    else:
+        assert checklist_health and checklist_health.group(1) == __version__
 
     checklist_schema = re.search(r"- schema version = (\d+);", RELEASE_CHECKLIST)
     assert checklist_schema, "release checklist must state the compatibility schema"

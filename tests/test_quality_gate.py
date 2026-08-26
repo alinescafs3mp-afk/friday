@@ -91,9 +91,14 @@ def test_static_gate_checks_the_current_package_and_high_bandit_only() -> None:
         "tools/quality_toolchain_preflight.py",
     )
     assert command_by_name["whitespace errors"] == ("git", "diff", "--check")
-    assert command_by_name["ruff format"][-3:] == ("friday", "tests", "tools")
-    assert command_by_name["mypy"][-1] == "friday"
-    assert command_by_name["compileall"][-3:] == ("friday", "tests", "tools")
+    package_roots = ("friday", "friday_host_agent", "friday_package_broker")
+    deployment_root = "deploy/host-control"
+    assert all(root in command_by_name["ruff format"] for root in package_roots)
+    assert deployment_root in command_by_name["ruff format"]
+    assert all(root in command_by_name["mypy"] for root in package_roots)
+    assert deployment_root in command_by_name["mypy"]
+    assert all(root in command_by_name["compileall"] for root in package_roots)
+    assert deployment_root in command_by_name["compileall"]
     assert any(argument.startswith("pycache_prefix=") for argument in command_by_name["compileall"])
     assert command_by_name["bandit (HIGH only)"] == (
         "python",
@@ -101,6 +106,9 @@ def test_static_gate_checks_the_current_package_and_high_bandit_only() -> None:
         "bandit",
         "-r",
         "friday",
+        "friday_host_agent",
+        "friday_package_broker",
+        deployment_root,
         "-q",
         "--severity-level",
         "high",
@@ -110,7 +118,36 @@ def test_static_gate_checks_the_current_package_and_high_bandit_only() -> None:
         "--check",
         "friday/admin_ui/static/app.js",
     )
-    assert all("jericho" not in argument for command in commands for argument in command.argv)
+    assert command_by_name["host-control installer shell syntax"] == (
+        "/bin/sh",
+        "-n",
+        "deploy/host-control/install.sh",
+    )
+    assert command_by_name["host-control uninstaller shell syntax"] == (
+        "/bin/sh",
+        "-n",
+        "deploy/host-control/uninstall.sh",
+    )
+    assert command_by_name["engineer AppArmor installer shell syntax"] == (
+        "/bin/sh",
+        "-n",
+        "deploy/engineer-mode/install-apparmor.sh",
+    )
+    assert command_by_name["engineer AppArmor uninstaller shell syntax"] == (
+        "/bin/sh",
+        "-n",
+        "deploy/engineer-mode/uninstall-apparmor.sh",
+    )
+    assert command_by_name["engineer runtime verifier shell syntax"] == (
+        "/bin/sh",
+        "-n",
+        "deploy/engineer-mode/verify-runtime.sh",
+    )
+    assert all(
+        Path(argument).is_absolute() or Path(argument).parts[:1] != ("jericho",)
+        for command in commands
+        for argument in command.argv
+    )
     assert all(command.environment is None for command in commands)
 
 
@@ -832,10 +869,33 @@ def test_all_collection_partitions_disjointly_and_completely() -> None:
 
 def test_release_blocking_battery_requires_every_closed_nodeid_exactly_once() -> None:
     required = quality_gate.RELEASE_BLOCKING_BATTERY_NODEIDS
+    host_control_journeys = {
+        "tests/test_host_control_config.py::test_host_control_defaults_are_inert",
+        "tests/test_host_control_deployment.py::"
+        "test_compose_override_is_narrow_and_every_feature_defaults_off",
+        "tests/test_friday_host_agent_execution.py::"
+        "test_missing_nmap_install_approval_attestation_and_scan_resume_vertical",
+        "tests/test_host_control_natural_language_acceptance.py::"
+        "test_literal_russian_nmap_request_reject_then_approve_resumes_exact_vertical",
+        "tests/test_friday_host_agent_execution.py::"
+        "test_preinstalled_jq_runs_on_an_exact_owned_copy_and_retries_idempotently",
+        "tests/test_friday_host_agent_execution.py::"
+        "test_jq_pending_upload_output_is_durable_downloadable_and_idempotent",
+        "tests/test_host_control_agent_runtime.py::"
+        "test_current_json_model_call_gets_exact_code_owned_raw_and_runtime_context",
+        "tests/test_host_control_release_bundle.py::"
+        "test_build_is_byte_deterministic_and_manifest_covers_the_closed_bundle",
+        "tests/test_host_control_network_approval.py::"
+        "test_network_approval_ledger_is_full_sync_immutable_and_restart_safe",
+        "tests/test_package_broker_daemon.py::"
+        "test_crash_after_apt_effect_reconciles_exact_poststate_without_second_commit",
+        "tests/test_engineer_mode_production.py::test_untrusted_artifact_instruction_cannot_authorize_patch",
+    }
 
     assert required
     assert len(required) == len(set(required))
     assert all(nodeid.startswith("tests/") and nodeid.count("::") == 1 for nodeid in required)
+    assert host_control_journeys <= set(required)
     quality_gate.require_release_blocking_battery(required)
 
     with pytest.raises(ValueError, match="collection is incomplete: missing="):

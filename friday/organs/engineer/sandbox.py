@@ -24,6 +24,9 @@ from friday.private_fs import ensure_private_directory, open_private_text_write
 
 BWRAP = Path("/usr/bin/bwrap")
 PYTHON = Path("/usr/bin/python3")
+PRLIMIT = Path("/usr/bin/prlimit")
+CGROUP_ROOT = Path("/sys/fs/cgroup")
+SELF_CGROUP = Path("/proc/self/cgroup")
 PROTOCOL_VERSION = 1
 MAX_INPUT_BYTES = 32 * 1024 * 1024
 MAX_REQUEST_BYTES = 512 * 1024
@@ -33,6 +36,7 @@ MAX_STDERR_BYTES = 64 * 1024
 MAX_WALL_SECONDS = 45.0
 MAX_CPU_SECONDS = 30
 MAX_ADDRESS_SPACE_BYTES = 768 * 1024 * 1024
+MAX_ADMITTED_CGROUP_PIDS = 65_536
 _SMOKE_SUCCESS_KEY: tuple[object, ...] | None = None
 _SMOKE_SUCCESS_RESULT: dict[str, Any] | None = None
 
@@ -66,11 +70,17 @@ def preflight() -> dict[str, Any]:
         return {"ok": False, "reason": "bubblewrap_unavailable"}
     if not _trusted_root_executable(PYTHON):
         return {"ok": False, "reason": "python_untrusted"}
+    if not _trusted_root_executable(PRLIMIT):
+        return {"ok": False, "reason": "prlimit_unavailable"}
+    pids_limit = _current_cgroup_pids_limit()
+    if pids_limit is None or pids_limit > MAX_ADMITTED_CGROUP_PIDS:
+        return {"ok": False, "reason": "pid_cgroup_unbounded"}
     return {
         "ok": True,
         "boundary": "bubblewrap",
         "network": "none",
         "protocol": PROTOCOL_VERSION,
+        "pids_limit": pids_limit,
     }
 
 
@@ -116,47 +126,76 @@ def _read_bounded_regular(path: Path, maximum: int) -> bytes:
         os.close(descriptor)
 
 
-def _user_task_count() -> int:
-    uid = os.getuid()
-    total = 0
+def _cgroup_path(raw_path: str) -> Path | None:
+    """Map a kernel-reported cgroup path below its conventional mount."""
+
+    if not raw_path.startswith("/") or "\x00" in raw_path or len(raw_path) > 4096:
+        return None
+    parts = tuple(part for part in raw_path.split("/") if part)
+    if any(part in {".", ".."} for part in parts):
+        return None
+    return Path(*parts)
+
+
+def _current_cgroup_pids_limit() -> int | None:
+    """Return the finite PID-cgroup ceiling which bounds this process.
+
+    RLIMIT_NPROC is intentionally not used here.  In the supported combined
+    Host Control contour the container has the desktop user's real UID but a
+    private PID namespace, while the kernel accounts RLIMIT_NPROC across that
+    UID's hidden host tasks.  A limit derived from container ``/proc`` can thus
+    make bubblewrap fail before it starts.  Docker's PID cgroup is independent
+    of UID visibility and is the authoritative process-count boundary.
+    """
+
     try:
-        entries = list(Path("/proc").iterdir())
-    except OSError:
-        return 256
-    for entry in entries:
-        if not entry.name.isdigit():
+        lines = SELF_CGROUP.read_text(encoding="ascii").splitlines()
+    except (OSError, UnicodeError):
+        return None
+
+    candidates: list[Path] = []
+    for line in lines:
+        fields = line.split(":", 2)
+        if len(fields) != 3:
             continue
+        hierarchy, controllers, raw_path = fields
+        relative = _cgroup_path(raw_path)
+        if relative is None:
+            continue
+        if hierarchy == "0" and not controllers:
+            candidates.append(CGROUP_ROOT / relative / "pids.max")
+        elif "pids" in controllers.split(","):
+            candidates.append(CGROUP_ROOT / "pids" / relative / "pids.max")
+
+    # A private cgroup namespace commonly reports '/' and exposes the current
+    # cgroup directly at the mount root.  Keep explicit v2/v1 fallbacks for it.
+    candidates.extend((CGROUP_ROOT / "pids.max", CGROUP_ROOT / "pids" / "pids.max"))
+    seen: set[Path] = set()
+    for path in candidates:
+        if path in seen:
+            continue
+        seen.add(path)
+        flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0)
         try:
-            status_text = (entry / "status").read_text(encoding="ascii", errors="ignore")
+            descriptor = os.open(path, flags)
         except OSError:
             continue
-        real_uid = next(
-            (line.split()[1] for line in status_text.splitlines() if line.startswith("Uid:")),
-            "",
-        )
-        if real_uid != str(uid):
-            continue
         try:
-            tasks = len(list((entry / "task").iterdir()))
+            details = os.fstat(descriptor)
+            payload = os.read(descriptor, 64)
+            overflow = os.read(descriptor, 1)
         except OSError:
-            tasks = 1
-        total += max(1, tasks)
-    return max(1, total)
-
-
-def _limit_worker_resources(nproc_limit: int) -> None:
-    import resource
-
-    resource.setrlimit(resource.RLIMIT_CORE, (0, 0))
-    resource.setrlimit(resource.RLIMIT_CPU, (MAX_CPU_SECONDS, MAX_CPU_SECONDS + 1))
-    resource.setrlimit(resource.RLIMIT_FSIZE, (MAX_OUTPUT_BYTES, MAX_OUTPUT_BYTES))
-    resource.setrlimit(
-        resource.RLIMIT_AS,
-        (MAX_ADDRESS_SPACE_BYTES, MAX_ADDRESS_SPACE_BYTES),
-    )
-    resource.setrlimit(resource.RLIMIT_NOFILE, (64, 64))
-    with suppress(OSError, ValueError):
-        resource.setrlimit(resource.RLIMIT_NPROC, (nproc_limit, nproc_limit))
+            continue
+        finally:
+            os.close(descriptor)
+        if not stat.S_ISREG(details.st_mode) or overflow:
+            return None
+        value = payload.strip()
+        if not value or value == b"max" or not value.isdigit():
+            return None
+        limit = int(value)
+        return limit if limit > 0 else None
+    return None
 
 
 def _remaining_timeout(deadline: float | None) -> float:
@@ -246,6 +285,21 @@ def _sandbox_argv(workspace: Path) -> list[str]:
     return argv
 
 
+def _limited_sandbox_argv(workspace: Path) -> list[str]:
+    """Apply non-PID limits in a trusted executable, never a Python fork hook."""
+
+    return [
+        str(PRLIMIT),
+        "--core=0:0",
+        f"--cpu={MAX_CPU_SECONDS}:{MAX_CPU_SECONDS + 1}",
+        f"--fsize={MAX_OUTPUT_BYTES}:{MAX_OUTPUT_BYTES}",
+        f"--as={MAX_ADDRESS_SPACE_BYTES}:{MAX_ADDRESS_SPACE_BYTES}",
+        "--nofile=64:64",
+        "--",
+        *_sandbox_argv(workspace),
+    ]
+
+
 def _run_worker(
     action: str,
     data: bytes,
@@ -268,6 +322,11 @@ def _run_worker(
         "filename": Path(str(filename or "artifact.bin")).name[:180],
         "operations": [dict(item) for item in (operations or ())],
     }
+    if action == "preflight":
+        try:
+            request["parent_netns"] = os.readlink("/proc/self/ns/net")
+        except OSError as exc:
+            raise EngineerSandboxError("network_namespace_unavailable") from exc
     encoded_request = json.dumps(
         request,
         ensure_ascii=False,
@@ -290,16 +349,14 @@ def _run_worker(
         stderr_path = workspace / "stderr.log"
         _write_private_bytes(request_path, encoded_request)
         _write_private_bytes(input_path, data)
-        nproc_limit = _user_task_count() + 16
         with open_private_text_write(stderr_path) as stderr_handle:
-            process = subprocess.Popen(  # noqa: S603 - fixed trusted bwrap argv
-                _sandbox_argv(workspace),
+            process = subprocess.Popen(  # noqa: S603 - fixed trusted prlimit/bwrap argv
+                _limited_sandbox_argv(workspace),
                 stdin=subprocess.DEVNULL,
                 stdout=subprocess.DEVNULL,
                 stderr=stderr_handle,
                 close_fds=True,
                 start_new_session=True,
-                preexec_fn=lambda: _limit_worker_resources(nproc_limit),
             )
             try:
                 process.wait(timeout=_remaining_timeout(deadline))
@@ -381,6 +438,7 @@ def smoke_preflight(
     try:
         bwrap_stat = BWRAP.stat()
         python_stat = PYTHON.stat()
+        prlimit_stat = PRLIMIT.stat()
         root_key = str(Path(workspace_root).resolve()) if workspace_root is not None else ""
         cache_key: tuple[object, ...] = (
             str(BWRAP),
@@ -393,6 +451,11 @@ def smoke_preflight(
             python_stat.st_ino,
             python_stat.st_mtime_ns,
             python_stat.st_size,
+            str(PRLIMIT),
+            prlimit_stat.st_dev,
+            prlimit_stat.st_ino,
+            prlimit_stat.st_mtime_ns,
+            prlimit_stat.st_size,
             root_key,
             PROTOCOL_VERSION,
         )
@@ -412,6 +475,7 @@ def smoke_preflight(
     except EngineerSandboxError as exc:
         return {"ok": False, "reason": exc.code}
     admission = result.get("sandbox")
+    network_proof = result.get("network_proof")
     if (
         result.get("ok") is not True
         or not isinstance(admission, Mapping)
@@ -419,6 +483,12 @@ def smoke_preflight(
         or admission.get("boundary") != "bubblewrap"
         or admission.get("network") != "none"
         or admission.get("protocol") != PROTOCOL_VERSION
+        or not isinstance(network_proof, Mapping)
+        or network_proof.get("namespace") != "isolated"
+        or network_proof.get("external_interfaces") != 0
+        or network_proof.get("external_routes") != 0
+        or network_proof.get("ipv4_connectivity") != "blocked"
+        or network_proof.get("ipv6_connectivity") != "blocked"
     ):
         return {"ok": False, "reason": "sandbox_smoke_failed"}
     admitted = {
@@ -426,6 +496,11 @@ def smoke_preflight(
         "boundary": admission.get("boundary"),
         "network": admission.get("network"),
         "protocol": admission.get("protocol"),
+        "network_namespace": network_proof.get("namespace"),
+        "external_interfaces": network_proof.get("external_interfaces"),
+        "external_routes": network_proof.get("external_routes"),
+        "ipv4_connectivity": network_proof.get("ipv4_connectivity"),
+        "ipv6_connectivity": network_proof.get("ipv6_connectivity"),
     }
     _SMOKE_SUCCESS_KEY = cache_key
     _SMOKE_SUCCESS_RESULT = dict(admitted)

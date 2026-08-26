@@ -50,6 +50,25 @@ UI_TEST_MODULES = (
 # suite once; this inventory only makes deleting or renaming a required journey
 # terminal after the authoritative collection has completed.
 RELEASE_BLOCKING_BATTERY_NODEIDS = (
+    "tests/test_host_control_config.py::test_host_control_defaults_are_inert",
+    "tests/test_host_control_deployment.py::test_compose_override_is_narrow_and_every_feature_defaults_off",
+    "tests/test_friday_host_agent_execution.py::"
+    "test_missing_nmap_install_approval_attestation_and_scan_resume_vertical",
+    "tests/test_friday_host_agent_execution.py::"
+    "test_preinstalled_jq_runs_on_an_exact_owned_copy_and_retries_idempotently",
+    "tests/test_friday_host_agent_execution.py::"
+    "test_jq_pending_upload_output_is_durable_downloadable_and_idempotent",
+    "tests/test_host_control_natural_language_acceptance.py::"
+    "test_literal_russian_nmap_request_reject_then_approve_resumes_exact_vertical",
+    "tests/test_host_control_agent_runtime.py::"
+    "test_current_json_model_call_gets_exact_code_owned_raw_and_runtime_context",
+    "tests/test_host_control_release_bundle.py::"
+    "test_build_is_byte_deterministic_and_manifest_covers_the_closed_bundle",
+    "tests/test_host_control_network_approval.py::"
+    "test_network_approval_ledger_is_full_sync_immutable_and_restart_safe",
+    "tests/test_package_broker_daemon.py::"
+    "test_crash_after_apt_effect_reconciles_exact_poststate_without_second_commit",
+    "tests/test_engineer_mode_production.py::test_untrusted_artifact_instruction_cannot_authorize_patch",
     "tests/test_agent_obsidian_production_composition.py::"
     "test_note_create_append_and_daily_exact_messages_mutate_the_real_vault",
     "tests/test_archive_search_runtime_publication.py::"
@@ -566,9 +585,32 @@ def static_commands(python: str = sys.executable) -> tuple[GateCommand, ...]:
         GateCommand("ruff lint", (python, "-m", "ruff", "check", ".")),
         GateCommand(
             "ruff format",
-            (python, "-m", "ruff", "format", "--check", "friday", "tests", "tools"),
+            (
+                python,
+                "-m",
+                "ruff",
+                "format",
+                "--check",
+                "friday",
+                "friday_host_agent",
+                "friday_package_broker",
+                "deploy/host-control",
+                "tests",
+                "tools",
+            ),
         ),
-        GateCommand("mypy", (python, "-m", "mypy", "friday")),
+        GateCommand(
+            "mypy",
+            (
+                python,
+                "-m",
+                "mypy",
+                "friday",
+                "friday_host_agent",
+                "friday_package_broker",
+                "deploy/host-control",
+            ),
+        ),
         GateCommand(
             "compileall",
             (
@@ -580,6 +622,9 @@ def static_commands(python: str = sys.executable) -> tuple[GateCommand, ...]:
                 "-q",
                 "-f",
                 "friday",
+                "friday_host_agent",
+                "friday_package_broker",
+                "deploy/host-control",
                 "tests",
                 "tools",
             ),
@@ -592,12 +637,35 @@ def static_commands(python: str = sys.executable) -> tuple[GateCommand, ...]:
                 "bandit",
                 "-r",
                 "friday",
+                "friday_host_agent",
+                "friday_package_broker",
+                "deploy/host-control",
                 "-q",
                 "--severity-level",
                 "high",
             ),
         ),
         GateCommand("admin JavaScript syntax", ("node", "--check", "friday/admin_ui/static/app.js")),
+        GateCommand(
+            "host-control installer shell syntax",
+            ("/bin/sh", "-n", "deploy/host-control/install.sh"),
+        ),
+        GateCommand(
+            "host-control uninstaller shell syntax",
+            ("/bin/sh", "-n", "deploy/host-control/uninstall.sh"),
+        ),
+        GateCommand(
+            "engineer AppArmor installer shell syntax",
+            ("/bin/sh", "-n", "deploy/engineer-mode/install-apparmor.sh"),
+        ),
+        GateCommand(
+            "engineer AppArmor uninstaller shell syntax",
+            ("/bin/sh", "-n", "deploy/engineer-mode/uninstall-apparmor.sh"),
+        ),
+        GateCommand(
+            "engineer runtime verifier shell syntax",
+            ("/bin/sh", "-n", "deploy/engineer-mode/verify-runtime.sh"),
+        ),
         # Раскладка графа — отдельный поставляемый файл. Без собственной строки
         # здесь он поехал бы в браузер непроверенным: `app.js` его не импортирует,
         # а подключает страница.

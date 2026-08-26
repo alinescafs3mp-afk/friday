@@ -241,7 +241,7 @@ def test_pending_approvals_no_longer_hide_the_unknown() -> None:
     empty_at = source.index("if not items:", guidance_at - 2000)
     assert guidance_at < empty_at, "подсказка снова спрятана в ветку «ничего не ждёт»"
     # И она доезжает до непустого списка тоже.
-    assert '"\\n".join(lines) + tail' in source, "к списку заявок подсказка не добавляется"
+    assert "(footer, tail.strip())" in source, "к списку заявок подсказка не добавляется"
 
 
 def test_the_json_of_a_payload_survives_the_round_trip(storage) -> None:

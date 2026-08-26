@@ -8,6 +8,13 @@ license-files = ["LICENSE"]
 requires-python = ">=3.11"
 dependencies = [
     "beautifulsoup4>=4.14,<5",
+    # Ed25519 broker response/receipt signatures are a production trust boundary,
+    # so cryptography is a direct dependency rather than an accidental transitive.
+    # Ubuntu 24.04 LTS ships 41.0.7 with security backports.  That release
+    # supports Python 3.11+ and every Ed25519/raw-serialization API used by the
+    # broker; keep the regular lock newer without making the offline host venv
+    # metadata-unsatisfied.
+    "cryptography>=41.0.7,<51",
     "fastapi>=0.128,<1",
     "httpcore>=1,<2",
     "httpx>=0.28,<1",
@@ -83,9 +90,11 @@ friday = "friday.cli:main"
 # скриптах и в мышечной памяти. Переименование проекта не повод ломать чужие
 # запуски — «ex codename Jericho».
 jericho = "friday.cli:main"
+friday-host-agent = "friday_host_agent.__main__:main"
+friday-package-broker = "friday_package_broker.__main__:main"
 
 [build-system]
-requires = ["setuptools>=75", "wheel>=0.45"]
+requires = ["setuptools>=77", "wheel>=0.45"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools]

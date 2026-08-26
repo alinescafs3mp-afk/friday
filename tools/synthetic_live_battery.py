@@ -9975,8 +9975,9 @@ def _candidate_source_paths(
         capture_output=True,
         check=True,
     )
+    shipped_roots = ("friday", "friday_host_agent", "friday_package_broker")
     untracked_runtime = subprocess.run(
-        ["git", "ls-files", "--others", "--exclude-standard", "-z", "--", "friday"],
+        ["git", "ls-files", "--others", "--exclude-standard", "-z", "--", *shipped_roots],
         cwd=root,
         capture_output=True,
         check=True,
@@ -9990,7 +9991,7 @@ def _candidate_source_paths(
         os.fsdecode(value)
         for value in untracked_runtime.stdout.split(b"\0")
         if value
-        and os.fsdecode(value).startswith("friday/")
+        and os.fsdecode(value).startswith(tuple(f"{package}/" for package in shipped_roots))
         and os.fsdecode(value) not in _FORBIDDEN_PROVENANCE_PATHS
     ]
     explicit = [

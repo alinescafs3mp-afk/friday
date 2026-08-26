@@ -603,6 +603,25 @@ class FridaySettings:
     # deliberately admits its parser and outbound-diagnostics surface.
     engineer_mode_enabled: bool
 
+    # Optional native Ubuntu capability plane. The backend talks only to the
+    # unprivileged user agent over an authenticated Unix socket; package
+    # mutation remains a separately disabled broker capability.
+    host_control_enabled: bool
+    host_agent_socket: Path
+    host_agent_key_file: Path
+    host_approval_signing_key_file: Path
+    host_agent_id: str
+    host_job_root: Path
+    host_action_max_concurrency: int
+    host_action_default_timeout_sec: float
+    host_action_max_output_bytes: int
+    host_package_install_enabled: bool
+    host_desktop_control_enabled: bool
+    host_one_shot_exec_enabled: bool
+    host_public_network_enabled: bool
+    host_allowed_cidrs: tuple[str, ...]
+    host_allowed_path_roots: tuple[Path, ...]
+
     llm_base_url: str
     llm_model: str
     llm_enabled: bool
@@ -1064,6 +1083,16 @@ class FridaySettings:
             "home": str(self.home),
             "profile": profile_public_dict(self.profile),
             "engineer_mode": {"enabled": self.engineer_mode_enabled},
+            "host_control": {
+                "enabled": self.host_control_enabled,
+                "agent_id": self.host_agent_id if self.host_control_enabled else "",
+                "package_install_enabled": self.host_package_install_enabled,
+                "desktop_control_enabled": self.host_desktop_control_enabled,
+                "one_shot_exec_enabled": self.host_one_shot_exec_enabled,
+                "public_network_enabled": self.host_public_network_enabled,
+                "allowed_cidr_count": len(self.host_allowed_cidrs),
+                "allowed_path_root_count": len(self.host_allowed_path_roots),
+            },
             "llm": {
                 "enabled": self.llm_enabled,
                 "base_url": self.llm_base_url,
@@ -1276,6 +1305,46 @@ def load_settings(profile_name: str | None = None) -> FridaySettings:
         # Restore replaces the SQLite image which currently owns the tombstones.
         account_hard_delete_enabled=False,
         engineer_mode_enabled=_bool_env("FRIDAY_ENGINEER_MODE_ENABLED", False),
+        host_control_enabled=_bool_env("FRIDAY_HOST_CONTROL_ENABLED", False),
+        host_agent_socket=Path(
+            env("FRIDAY_HOST_AGENT_SOCKET", "/run/friday-host-agent/agent.sock")
+        ).expanduser(),
+        host_agent_key_file=Path(
+            env("FRIDAY_HOST_AGENT_KEY_FILE", data_dir / "host-control" / "agent.key")
+        ).expanduser(),
+        host_approval_signing_key_file=Path(
+            env(
+                "FRIDAY_HOST_APPROVAL_SIGNING_KEY_FILE",
+                data_dir / "host-control" / "backend-approval-signing.key",
+            )
+        ).expanduser(),
+        host_agent_id=env("FRIDAY_HOST_AGENT_ID", "local-user-agent").strip(),
+        host_job_root=Path(env("FRIDAY_HOST_JOB_ROOT", data_dir / "host-control" / "jobs"))
+        .expanduser()
+        .absolute(),
+        host_action_max_concurrency=_int_env(
+            "FRIDAY_HOST_ACTION_MAX_CONCURRENCY",
+            2,
+            minimum=1,
+        ),
+        host_action_default_timeout_sec=_float_env(
+            "FRIDAY_HOST_ACTION_DEFAULT_TIMEOUT_SEC",
+            300.0,
+            minimum=1.0,
+        ),
+        host_action_max_output_bytes=_int_env(
+            "FRIDAY_HOST_ACTION_MAX_OUTPUT_BYTES",
+            8 * 1024 * 1024,
+            minimum=1024,
+        ),
+        host_package_install_enabled=_bool_env("FRIDAY_HOST_PACKAGE_INSTALL_ENABLED", False),
+        host_desktop_control_enabled=_bool_env("FRIDAY_HOST_DESKTOP_CONTROL_ENABLED", False),
+        host_one_shot_exec_enabled=_bool_env("FRIDAY_HOST_ONE_SHOT_EXEC_ENABLED", False),
+        host_public_network_enabled=_bool_env("FRIDAY_HOST_PUBLIC_NETWORK_ENABLED", False),
+        host_allowed_cidrs=tuple(_list_env("FRIDAY_HOST_ALLOWED_CIDRS")),
+        host_allowed_path_roots=tuple(
+            Path(item).expanduser().absolute() for item in _list_env("FRIDAY_HOST_ALLOWED_PATH_ROOTS")
+        ),
         llm_base_url=llm_base_url,
         llm_model=env("FRIDAY_LLM_MODEL", "dispatcher"),
         llm_enabled=_bool_env("FRIDAY_LLM_ENABLED", True),
@@ -1855,6 +1924,165 @@ def validate_settings(settings: FridaySettings, *, production: bool = False) -> 
             or not os.access(bubblewrap, os.X_OK)
         ):
             errors.append("FRIDAY_ENGINEER_MODE_ENABLED requires trusted executable /usr/bin/bwrap")
+    host_subfeatures = (
+        settings.host_package_install_enabled
+        or settings.host_desktop_control_enabled
+        or settings.host_one_shot_exec_enabled
+        or settings.host_public_network_enabled
+    )
+    if host_subfeatures and not settings.host_control_enabled:
+        errors.append("Host-control subfeatures require FRIDAY_HOST_CONTROL_ENABLED=1")
+    if settings.host_desktop_control_enabled:
+        errors.append(
+            "FRIDAY_HOST_DESKTOP_CONTROL_ENABLED is reserved and unsupported in this release; keep it 0"
+        )
+    if settings.host_one_shot_exec_enabled:
+        errors.append(
+            "FRIDAY_HOST_ONE_SHOT_EXEC_ENABLED is reserved and unsupported in this release; keep it 0"
+        )
+    if settings.host_control_enabled:
+        if platform.system() != "Linux":
+            errors.append("FRIDAY_HOST_CONTROL_ENABLED requires Linux")
+        if not settings.host_agent_socket.is_absolute():
+            errors.append("FRIDAY_HOST_AGENT_SOCKET must be an absolute Unix-socket path")
+        if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,63}", settings.host_agent_id):
+            errors.append("FRIDAY_HOST_AGENT_ID must be a stable 1-64 character identifier")
+        try:
+            host_job_root = settings.host_job_root.resolve(strict=True)
+        except (OSError, RuntimeError):
+            errors.append("FRIDAY_HOST_JOB_ROOT must be a pre-created canonical directory")
+        else:
+            if (
+                not settings.host_job_root.is_absolute()
+                or host_job_root != settings.host_job_root
+                or _path_has_symlink_component(settings.host_job_root)
+                or not host_job_root.is_dir()
+            ):
+                errors.append("FRIDAY_HOST_JOB_ROOT must be a pre-created canonical directory")
+            else:
+                host_job_stat = host_job_root.stat()
+                if host_job_stat.st_uid != os.geteuid() or host_job_stat.st_mode & (
+                    stat.S_IRWXG | stat.S_IRWXO
+                ):
+                    errors.append(
+                        "FRIDAY_HOST_JOB_ROOT must be private and owned by the backend service user"
+                    )
+        if not 1 <= settings.host_action_max_concurrency <= 8:
+            errors.append("FRIDAY_HOST_ACTION_MAX_CONCURRENCY must be between 1 and 8")
+        if not 5.0 <= settings.host_action_default_timeout_sec <= 3_600.0:
+            errors.append("FRIDAY_HOST_ACTION_DEFAULT_TIMEOUT_SEC must be between 5 and 3600")
+        if not 1_024 <= settings.host_action_max_output_bytes <= 64 * 1024 * 1024:
+            errors.append("FRIDAY_HOST_ACTION_MAX_OUTPUT_BYTES must be between 1024 and 67108864")
+        key_fd = -1
+        try:
+            key_lstat = settings.host_agent_key_file.lstat()
+            if stat.S_ISLNK(key_lstat.st_mode):
+                raise OSError("key path is a symlink")
+            key_fd = os.open(
+                settings.host_agent_key_file,
+                os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0),
+            )
+            key_stat = os.fstat(key_fd)
+            key_bytes = os.read(key_fd, 65)
+        except OSError:
+            key_stat = None
+            key_bytes = b""
+        finally:
+            if key_fd >= 0:
+                os.close(key_fd)
+        if (
+            key_stat is None
+            or not stat.S_ISREG(key_stat.st_mode)
+            or key_stat.st_uid not in {0, os.geteuid()}
+            or key_stat.st_nlink != 1
+            or key_stat.st_mode & (stat.S_IRWXG | stat.S_IRWXO)
+            or not 32 <= len(key_bytes) <= 64
+        ):
+            errors.append(
+                "FRIDAY_HOST_AGENT_KEY_FILE must be a private, non-symlink 32-64 byte file "
+                "owned by the service user or root"
+            )
+        if settings.host_package_install_enabled or settings.host_public_network_enabled:
+            try:
+                from friday_package_broker.approval import load_backend_approval_signing_key
+
+                load_backend_approval_signing_key(settings.host_approval_signing_key_file)
+            except (OSError, ValueError):
+                errors.append(
+                    "FRIDAY_HOST_APPROVAL_SIGNING_KEY_FILE must be an exact private, "
+                    "non-symlink 32-byte Ed25519 seed available only to a non-dumpable backend signer"
+                )
+        if len(settings.host_allowed_cidrs) > 32:
+            errors.append("FRIDAY_HOST_ALLOWED_CIDRS accepts at most 32 exact networks")
+        seen_cidrs: list[ipaddress.IPv4Network | ipaddress.IPv6Network] = []
+        for raw_cidr in settings.host_allowed_cidrs:
+            try:
+                network = ipaddress.ip_network(raw_cidr, strict=True)
+            except ValueError:
+                errors.append(f"FRIDAY_HOST_ALLOWED_CIDRS contains invalid exact CIDR: {raw_cidr!r}")
+                continue
+            if network.prefixlen == 0:
+                errors.append("FRIDAY_HOST_ALLOWED_CIDRS cannot authorize an all-addresses network")
+            if network.is_global and not settings.host_public_network_enabled:
+                errors.append(f"public host network {network} requires FRIDAY_HOST_PUBLIC_NETWORK_ENABLED=1")
+            if any(
+                network.version == previous.version and network.overlaps(previous) for previous in seen_cidrs
+            ):
+                errors.append(f"FRIDAY_HOST_ALLOWED_CIDRS contains overlapping scope: {network}")
+            seen_cidrs.append(network)
+        if len(settings.host_allowed_path_roots) > 8:
+            errors.append("FRIDAY_HOST_ALLOWED_PATH_ROOTS accepts at most 8 roots")
+        forbidden_roots = {
+            Path("/"),
+            Path("/home"),
+            Path("/etc"),
+            Path("/usr"),
+            Path("/var"),
+            Path("/run"),
+            Path("/proc"),
+            Path("/sys"),
+            Path("/dev"),
+        }
+        sensitive_roots = (
+            settings.home,
+            settings.data_dir,
+            settings.state_dir,
+            settings.files_dir,
+            settings.backups_dir,
+            settings.exports_dir,
+            settings.log_dir,
+            settings.cache_dir,
+            settings.database_path.parent,
+        )
+        admitted_roots: list[Path] = []
+        for configured_root in settings.host_allowed_path_roots:
+            root = Path(configured_root)
+            try:
+                canonical_root = root.resolve(strict=True)
+            except (OSError, RuntimeError):
+                errors.append(f"host allowed path root does not exist: {root}")
+                continue
+            if (
+                not root.is_absolute()
+                or canonical_root != root
+                or _path_has_symlink_component(root)
+                or not canonical_root.is_dir()
+            ):
+                errors.append(f"host allowed path root must be an existing canonical directory: {root}")
+                continue
+            if canonical_root in forbidden_roots or any(
+                _path_is_within(canonical_root, sensitive) or _path_is_within(sensitive, canonical_root)
+                for sensitive in sensitive_roots
+            ):
+                errors.append(f"host allowed path root is too broad or contains Friday state: {root}")
+                continue
+            if any(
+                _path_is_within(canonical_root, previous) or _path_is_within(previous, canonical_root)
+                for previous in admitted_roots
+            ):
+                errors.append(f"host allowed path roots overlap: {root}")
+                continue
+            admitted_roots.append(canonical_root)
     if settings.secondary_llm_enabled:
         from friday.secondary_brain.profiles import get_secondary_runtime_admission
 
@@ -1969,17 +2197,17 @@ def validate_settings(settings: FridaySettings, *, production: bool = False) -> 
         errors.append("FRIDAY_API_PORT must be between 1 and 65535")
     if settings.trust_proxy_headers and not settings.trusted_proxy_networks:
         errors.append("FRIDAY_TRUSTED_PROXY_NETWORKS is required when proxy headers are trusted")
-    for network in settings.trusted_proxy_networks:
-        if network == "*":
+    for proxy_network in settings.trusted_proxy_networks:
+        if proxy_network == "*":
             errors.append("Wildcard trusted proxy networks are not allowed")
             continue
         try:
-            parsed_network = ipaddress.ip_network(network, strict=False)
+            parsed_network = ipaddress.ip_network(proxy_network, strict=False)
         except ValueError:
-            errors.append(f"Invalid trusted proxy network: {network}")
+            errors.append(f"Invalid trusted proxy network: {proxy_network}")
             continue
         if parsed_network.prefixlen == 0:
-            errors.append(f"Unrestricted trusted proxy network is not allowed: {network}")
+            errors.append(f"Unrestricted trusted proxy network is not allowed: {proxy_network}")
     if "*" in settings.cors_origins:
         errors.append("Wildcard CORS is not allowed for the authenticated Admin API")
     for origin in settings.cors_origins:

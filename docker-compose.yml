@@ -29,6 +29,16 @@ x-backend-environment: &backend-environment
   FRIDAY_LLM_TIMEOUT_SEC: ${FRIDAY_LLM_TIMEOUT_SEC:-240}
   FRIDAY_LLM_MAX_TOKENS: ${FRIDAY_LLM_MAX_TOKENS:-2048}
   FRIDAY_ENGINEER_MODE_ENABLED: ${FRIDAY_ENGINEER_MODE_ENABLED:-0}
+  # Optional Host Control interpolation belongs to the Docker host/build only.
+  # Keep host paths and numeric mapping out of the backend process even though
+  # env_file otherwise forwards every operator setting.
+  FRIDAY_HOST_RUNTIME_UID: ""
+  FRIDAY_HOST_RUNTIME_GID: ""
+  FRIDAY_HOST_AGENT_SOCKET_DIR_HOST: ""
+  FRIDAY_HOST_AGENT_KEY_FILE_HOST: ""
+  FRIDAY_HOST_APPROVAL_SIGNING_KEY_FILE_HOST: ""
+  FRIDAY_HOST_APPROVAL_SIGNER_GID: ""
+  FRIDAY_HOST_JOB_DATA_DIR_HOST: ""
   FRIDAY_SECONDARY_LLM_ENABLED: ${FRIDAY_SECONDARY_LLM_ENABLED:-0}
   FRIDAY_SECONDARY_LLM_MODE: ${FRIDAY_SECONDARY_LLM_MODE:-disabled}
   FRIDAY_SECONDARY_LLM_BASE_URL: ${FRIDAY_SECONDARY_LLM_BASE_URL:-}
@@ -195,6 +205,7 @@ services:
     container_name: jericho-backend
     restart: unless-stopped
     init: true
+    pids_limit: 512
     read_only: true
     tmpfs:
       - /tmp:size=256m,noexec,nosuid,nodev
@@ -232,6 +243,7 @@ services:
     container_name: jericho-telegram
     restart: unless-stopped
     init: true
+    pids_limit: 256
     read_only: true
     tmpfs:
       - /tmp:size=128m,noexec,nosuid,nodev

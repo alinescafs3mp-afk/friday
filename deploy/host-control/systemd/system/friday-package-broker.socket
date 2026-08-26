@@ -1,0 +1,18 @@
+[Unit]
+Description=Friday package broker authenticated local socket
+Documentation=file:///usr/local/share/doc/friday-host-control/README.md
+
+[Socket]
+ListenStream=/run/friday-package-broker/broker.sock
+SocketUser=root
+# install.sh replaces this fail-closed default with the selected user's private
+# primary group in a root-owned drop-in.
+SocketGroup=root
+SocketMode=0660
+DirectoryMode=0711
+RemoveOnStop=yes
+Accept=no
+Service=friday-package-broker.service
+
+[Install]
+WantedBy=sockets.target

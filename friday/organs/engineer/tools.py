@@ -64,14 +64,57 @@ def _verified_target(
     actor: ActorContext,
     host: str,
     target_ticket: str,
+    *,
+    allowed_cidrs: Sequence[str],
+    allow_public: bool,
 ) -> tuple[PinnedTarget, float]:
     verified = authority.verify_target_ticket(
         target_ticket,
         actor_id=actor.own_id,
         exact_host=host,
     )
+    # Ticket authenticity proves who minted the exact address set, not that the
+    # operator policy still admits it at the execution seam.  Recheck without
+    # DNS before the first socket.  Engineer v1 deliberately has no public HITL
+    # carrier, so public targets remain denied here even when the feature flag
+    # is enabled.
+    hosts.admit_pinned_target_policy(
+        verified.target,
+        allowed_cidrs=allowed_cidrs,
+        allow_public=allow_public,
+        public_action_approved=False,
+    )
     lifetime = max(0.001, min(_NETWORK_TIMEOUT_SEC, verified.expires_at - time.time()))
     return verified.target, time.monotonic() + lifetime
+
+
+def _authorized_target_ports(
+    target: PinnedTarget,
+    ports: Sequence[int] | None,
+) -> list[int] | None:
+    """Keep an explicit URL port inside the exact signed target scope."""
+
+    implied = target.implied_port
+    if implied is None:
+        return list(ports) if ports is not None else None
+    requested = list(ports or [implied])
+    if len(requested) != 1 or isinstance(requested[0], bool) or int(requested[0]) != implied:
+        raise ValueError("target ticket does not authorize the requested port")
+    return [implied]
+
+
+def _authorized_http_port(target: PinnedTarget, port: int | None) -> int:
+    """Resolve an HTTP port without widening an explicit URL target."""
+
+    selected = target.implied_port if port is None and target.implied_port is not None else port
+    if selected is None:
+        selected = 80
+    if isinstance(selected, bool) or not 1 <= int(selected) <= 65535:
+        raise ValueError("port must be between 1 and 65535")
+    normalized = int(selected)
+    if target.implied_port is not None and normalized != target.implied_port:
+        raise ValueError("target ticket does not authorize the requested port")
+    return normalized
 
 
 def _patched_attachment(
@@ -96,6 +139,9 @@ def _patched_attachment(
 
 
 def build_engineer_tools(ctx: ServiceContext) -> tuple[ToolSpec, ...]:
+    allowed_cidrs = tuple(getattr(ctx.settings, "host_allowed_cidrs", ()) or ())
+    allow_public = bool(getattr(ctx.settings, "host_public_network_enabled", False))
+
     async def hunt_named(
         *,
         actor: ActorContext,
@@ -104,8 +150,20 @@ def build_engineer_tools(ctx: ServiceContext) -> tuple[ToolSpec, ...]:
         ports: list[int] | None = None,
     ) -> dict[str, Any]:
         try:
-            target, deadline = _verified_target(actor, host, target_ticket)
-            report = await run_blocking(hunt.hunt_target, target, ports, deadline=deadline)
+            target, deadline = _verified_target(
+                actor,
+                host,
+                target_ticket,
+                allowed_cidrs=allowed_cidrs,
+                allow_public=allow_public,
+            )
+            authorized_ports = _authorized_target_ports(target, ports)
+            report = await run_blocking(
+                hunt.hunt_target,
+                target,
+                authorized_ports,
+                deadline=deadline,
+            )
         except (ValueError, TimeoutError) as exc:
             return {"ok": False, "error": str(exc)}
         dossier: dict[str, Any] = {
@@ -206,15 +264,22 @@ def build_engineer_tools(ctx: ServiceContext) -> tuple[ToolSpec, ...]:
         actor: ActorContext,
         host: str,
         target_ticket: str,
-        port: int = 80,
+        port: int | None = None,
     ) -> dict[str, Any]:
         try:
-            target, deadline = _verified_target(actor, host, target_ticket)
-            use_tls = int(port) in hosts.TLS_PORTS
+            target, deadline = _verified_target(
+                actor,
+                host,
+                target_ticket,
+                allowed_cidrs=allowed_cidrs,
+                allow_public=allow_public,
+            )
+            authorized_port = _authorized_http_port(target, port)
+            use_tls = authorized_port in hosts.TLS_PORTS
             hits = await run_blocking(
                 hosts.http_hunt,
                 target,
-                int(port),
+                authorized_port,
                 use_tls,
                 deadline=deadline,
             )
@@ -224,7 +289,7 @@ def build_engineer_tools(ctx: ServiceContext) -> tuple[ToolSpec, ...]:
             "ok": True,
             "host": target.host,
             "probed_address": target.connect_address,
-            "port": int(port),
+            "port": authorized_port,
             "hits": hits,
             "active_probes_sent": True,
             "active_probes": ["http_path_head"],
@@ -238,7 +303,13 @@ def build_engineer_tools(ctx: ServiceContext) -> tuple[ToolSpec, ...]:
         target_ticket: str,
     ) -> dict[str, Any]:
         try:
-            target, deadline = _verified_target(actor, host, target_ticket)
+            target, deadline = _verified_target(
+                actor,
+                host,
+                target_ticket,
+                allowed_cidrs=allowed_cidrs,
+                allow_public=allow_public,
+            )
             records = await run_blocking(
                 local_binaries.dig_records,
                 target.host,

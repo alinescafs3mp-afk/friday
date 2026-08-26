@@ -29,6 +29,60 @@ _HOSTNAME = re.compile(
 )
 _TRAILING = re.compile(r"[),.;,]+$")
 _HOST_LABEL = re.compile(r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?", re.IGNORECASE)
+_ACTIVE_ASSESSMENT_VERB = re.compile(
+    r"\A\s*(?:(?:please|pls|kindly|can\s+you|could\s+you|would\s+you|"
+    r"i\s+(?:want|need|ask|authorize)\s+you\s+to|"
+    r"пожалуйста|прошу|можешь|можете|нужно|надо|хочу|разрешаю)\s*[,;:]?\s+)?"
+    r"(?:actively\s+|активно\s+)?(?:"
+    r"scan|probe|audit|assess|inspect|enumerate|discover|check|test|"
+    r"run\s+(?:an?\s+)?(?:scan|probe|audit|assessment|inspection)|"
+    r"start\s+(?:an?\s+)?(?:scan|probe|audit)|"
+    r"perform\s+(?:an?\s+)?(?:scan|probe|audit|assessment|inspection)|"
+    r"просканиру(?:й|йте)|сканиру(?:й|йте)|проверь(?:те)?|провер(?:ь|ьте)|"
+    r"проаудиру(?:й|йте)|обследу(?:й|йте)|исследу(?:й|йте)|"
+    r"запусти(?:те)?\s+(?:сканирование|проверку|аудит)|"
+    r"проведи(?:те)?\s+(?:сканирование|проверку|аудит|обследование)"
+    r")\b",
+    re.IGNORECASE,
+)
+_ACTIVE_ASSESSMENT_NEGATION = re.compile(
+    r"(?:\b(?:do\s+not|don't|dont|never|without)\b[^.!?\n]{0,48}\b"
+    r"(?:scan|probe|audit|assess|inspect|enumerate|discover|check|test)\w*\b|"
+    r"\b(?:не|никогда|без)\b[^.!?\n]{0,48}\b"
+    r"(?:скан|провер|аудит|обслед|исслед|развед)\w*\b)",
+    re.IGNORECASE,
+)
+_PASSIVE_ASSESSMENT_OBJECT = re.compile(
+    r"\b(?:report|results?|log|document|file|text|article|screenshot|"
+    r"отч[её]т\w*|результат\w*|лог\w*|документ\w*|файл\w*|текст\w*|"
+    r"стать\w*|скриншот\w*)\b",
+    re.IGNORECASE,
+)
+_ARTIFACT_PATCH_REQUEST = re.compile(
+    r"\A\s*(?:(?:please|pls|kindly|can\s+you|could\s+you|would\s+you|"
+    r"i\s+(?:want|need|ask|authorize)\s+you\s+to|"
+    r"пожалуйста|прошу|можешь|можете|нужно|надо|хочу|разрешаю)\s*[,;:]?\s+)?"
+    r"(?:patch|fix|modify|edit|rewrite|change|repair|"
+    r"apply\s+(?:the\s+)?(?:patch|changes?)\s+to|"
+    r"(?:produce|create|generate)\s+[^.!?\n]{0,64}\b(?:derived|patched|modified)|"
+    r"исправь|исправьте|почини|почините|измени|измените|"
+    r"отредактируй|отредактируйте|перепиши|перепишите|"
+    r"пропатчь|пропатчьте|модифицируй|модифицируйте|"
+    r"примени(?:те)?\s+(?:патч|изменения)\s+(?:к|для)|"
+    r"(?:создай|создайте|сгенерируй|сгенерируйте)\s+[^.!?\n]{0,64}\b"
+    r"(?:исправленн|измен[её]нн|пропатченн)\w*)\b"
+    r"[^.!?\n]{0,120}\b(?:artifact|file|binary|executable|archive|attachment|"
+    r"it|this|артефакт\w*|файл\w*|бинарн\w*|исполняем\w*|архив\w*|"
+    r"вложени\w*|его|е[её]|это)\b",
+    re.IGNORECASE,
+)
+_ARTIFACT_PATCH_NEGATION = re.compile(
+    r"(?:\b(?:do\s+not|don't|dont|never|without)\b[^.!?\n,;]{0,48}\b"
+    r"(?:patch|fix|modify|edit|rewrite|change|repair)\b|"
+    r"\b(?:не|никогда|без)\b[^.!?\n,;]{0,48}\b"
+    r"(?:исправ|почин|измен|редактир|перепис|патч|модифицир)\w*\b)",
+    re.IGNORECASE,
+)
 _METADATA_V4 = ipaddress.ip_address("169.254.169.254")
 _METADATA_V6 = ipaddress.ip_address("fd00:ec2::254")
 _OTHER_METADATA_V4 = frozenset(
@@ -206,6 +260,59 @@ def extract_single_target(speech: str) -> dict[str, str | int | None] | None:
     return targets[0]
 
 
+def requests_active_assessment(speech: str) -> bool:
+    """Return whether the current human text explicitly asks for active probes.
+
+    A host or URL is data, not effect authority.  This deliberately narrow,
+    code-owned gate admits only direct request language and fails closed on a
+    negated request.  Target extraction and policy admission remain separate
+    gates; this predicate alone can never authorize a destination.
+    """
+
+    text = " ".join(str(speech or "").split())
+    if not text or _ACTIVE_ASSESSMENT_NEGATION.search(text):
+        return False
+    request = _ACTIVE_ASSESSMENT_VERB.search(text)
+    if request is None:
+        return False
+    targets = extract_targets(text)
+    if len(targets) != 1:
+        # Preserve an explicit zero/multi-target request for the separate exact
+        # target gate, which will return a useful refusal without doing DNS.
+        return True
+    token = str(targets[0].get("token") or "")
+    target_start = text.casefold().find(token.casefold())
+    if target_start < 0:
+        return False
+    target_end = target_start + len(token)
+    between = (
+        text[request.end() : target_start]
+        if request.end() <= target_start
+        else text[target_end : request.start()]
+    )
+    # “Inspect the report about host” is a request to inspect passive material,
+    # not permission to contact the host.  Keep the effect phrase close to the
+    # target and free of an intervening document/report object.
+    return len(between) <= 160 and _PASSIVE_ASSESSMENT_OBJECT.search(between) is None
+
+
+def requests_artifact_patch(speech: str) -> bool:
+    """Admit artifact mutation only from a direct, current-human request.
+
+    Static evidence is adversarial and may tell the model to call the patch
+    tool.  This narrow code-owned predicate is evaluated only against the
+    authenticated current user message; an uploaded file, prior conversation,
+    dossier text, or model output cannot satisfy it.
+    """
+
+    text = " ".join(str(speech or "").split())
+    return bool(
+        text
+        and _ARTIFACT_PATCH_NEGATION.search(text) is None
+        and _ARTIFACT_PATCH_REQUEST.search(text) is not None
+    )
+
+
 def target_source_sha256(speech: str, token: str) -> str:
     body = f"{str(speech or '')}\x00{str(token or '')}".encode("utf-8", errors="replace")
     return hashlib.sha256(body).hexdigest()
@@ -220,5 +327,7 @@ __all__ = [
     "is_forbidden_address",
     "normalize_ip_address",
     "parse_host_token",
+    "requests_active_assessment",
+    "requests_artifact_patch",
     "target_source_sha256",
 ]

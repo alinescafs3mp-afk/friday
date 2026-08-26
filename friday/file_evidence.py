@@ -28,6 +28,7 @@ class CurrentTurnFileReferenceToken:
 
     raw_id: str
     source_identity_sha256: str
+    content_sha256: str
     _process_authority: object = field(repr=False, compare=False)
     reinspect_current_upload: bool = False
 
@@ -56,6 +57,7 @@ def stamp_current_turn_file_reference(
     token = CurrentTurnFileReferenceToken(
         raw_id=raw_id,
         source_identity_sha256=raw_source_identity_sha256(projection),
+        content_sha256=str(raw.get("content_hash") or "").strip().casefold(),
         _process_authority=_PROCESS_AUTHORITY,
         reinspect_current_upload=reinspect_current_upload is True,
     )
@@ -74,9 +76,23 @@ def current_turn_file_reference_of(carrier: Any) -> CurrentTurnFileReferenceToke
         type(token) is not CurrentTurnFileReferenceToken
         or token._process_authority is not _PROCESS_AUTHORITY
         or str(carrier.get("raw_object_id") or "") != token.raw_id
+        or re.fullmatch(r"[0-9a-f]{64}", token.content_sha256) is None
     ):
         return None
     return token
+
+
+def retain_current_turn_file_reference(source: Any, carrier: Any) -> Any:
+    """Carry the process-owned upload token across an in-memory rewrap."""
+
+    token = current_turn_file_reference_of(source)
+    if token is None or str(carrier.get("raw_object_id") or "") != token.raw_id:
+        return carrier
+    try:
+        object.__setattr__(carrier, _CURRENT_TURN_REFERENCE_ATTR, token)
+    except (AttributeError, TypeError):
+        return carrier
+    return carrier
 
 
 class FileRegistrationKind(str, Enum):
@@ -203,5 +219,6 @@ __all__ = [
     "FileRegistrationKind",
     "MAX_FILE_EVIDENCE_ITEMS",
     "current_turn_file_reference_of",
+    "retain_current_turn_file_reference",
     "stamp_current_turn_file_reference",
 ]

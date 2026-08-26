@@ -1,0 +1,12 @@
+services:
+  backend:
+    # Repeat every invariant which this opt-in profile relies on.  The custom
+    # policies admit namespace construction; they never grant a host capability.
+    read_only: true
+    pids_limit: 512
+    security_opt:
+      - no-new-privileges:true
+      - seccomp=/etc/friday-engineer/seccomp.json
+      - apparmor=friday-engineer-backend
+    cap_drop:
+      - ALL
