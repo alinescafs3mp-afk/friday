@@ -79,6 +79,7 @@ from friday.document_metadata_codec import (
     TECHNICAL_METADATA_TEXT_CODEC_VERSION,
     decode_technical_metadata_text,
 )
+from friday.documents import office_document_candidate
 from friday.execution_kernel import (
     ExecutionKernel,
     ToolResult,
@@ -712,6 +713,8 @@ _CURRENT_DOCUMENT_SECONDARY_TEXT_SUFFIXES = frozenset(
         ".conf",
         ".csv",
         ".css",
+        ".htm",
+        ".html",
         ".ini",
         ".js",
         ".json",
@@ -54314,8 +54317,9 @@ class AgentRuntime:
                 return False
             filename = str(item.get("filename") or item.get("name") or "").strip().casefold()
             suffix = "." + filename.rsplit(".", 1)[1] if "." in filename else ""
+            mime_type = str(item.get("mime_type") or item.get("media_type") or "")
             return bool(
-                looks_like_office_attachment(item)
+                office_document_candidate(filename, mime_type)
                 or suffix in _CURRENT_DOCUMENT_SECONDARY_TEXT_SUFFIXES
             )
 
@@ -54361,8 +54365,7 @@ class AgentRuntime:
             return None
         serialized_chars = sum(_message_chars(item) for item in messages)
         utf8_bytes = sum(
-            len(str(item.get("content") or "").encode("utf-8", errors="surrogatepass"))
-            for item in messages
+            len(str(item.get("content") or "").encode("utf-8", errors="surrogatepass")) for item in messages
         )
         if max(serialized_chars, utf8_bytes) > input_budget:
             return None

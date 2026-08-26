@@ -1048,6 +1048,95 @@ async def test_current_document_secondary_does_not_expand_exact_partial_metadata
 
 
 @pytest.mark.parametrize(
+    ("filename", "mime_type"),
+    [
+        ("current.doc", ""),
+        ("current.ppt", ""),
+        ("current.pptx", ""),
+        ("current.odt", ""),
+        ("current.ods", ""),
+        ("current.odp", ""),
+        ("current.rtf", ""),
+        ("current.html", ""),
+        ("current.htm", ""),
+        ("extensionless-office", "application/msword"),
+    ],
+)
+def test_current_document_secondary_accepts_complete_supported_office_and_html_carriers(
+    settings: Any,
+    storage: Any,
+    filename: str,
+    mime_type: str,
+) -> None:
+    secondary = _DocumentMapSecondary()
+    runtime = AgentRuntime(
+        settings,
+        storage,
+        llm=_HierarchyLLM("unused"),
+        secondary_brain=secondary,
+    )
+    source_text = "Complete parser-owned document text."
+    source = _owned(filename, source_text, mime_type=mime_type)
+
+    request = runtime._current_document_secondary_map_request(  # noqa: SLF001
+        "Summarize this document.",
+        [source],
+        task_kind="summary",
+    )
+
+    assert request is not None
+    messages, _max_output_tokens, _max_output_chars = request
+    payload = next(
+        _payload(str(item["content"]), CHUNK_PREFIX)
+        for item in messages
+        if str(item.get("content") or "").startswith(CHUNK_PREFIX)
+    )
+    assert payload["filename"] == filename
+    assert payload["text"] == source_text
+
+
+@pytest.mark.parametrize(
+    ("filename", "mime_type"),
+    [
+        ("current.png", "image/png"),
+        ("current.jpg", "image/jpeg"),
+        ("current.tiff", "image/tiff"),
+        ("current.mp3", "audio/mpeg"),
+        ("current.wav", "audio/wav"),
+        ("current.mp4", "video/mp4"),
+        ("current.zip", "application/zip"),
+        ("current.rar", "application/vnd.rar"),
+        ("current.7z", "application/x-7z-compressed"),
+        ("current.eml", "message/rfc822"),
+        ("current.epub", "application/epub+zip"),
+        ("extensionless-image", "image/png"),
+    ],
+)
+def test_current_document_secondary_keeps_non_text_media_archives_and_mail_outside_carrier_family(
+    settings: Any,
+    storage: Any,
+    filename: str,
+    mime_type: str,
+) -> None:
+    secondary = _DocumentMapSecondary()
+    runtime = AgentRuntime(
+        settings,
+        storage,
+        llm=_HierarchyLLM("unused"),
+        secondary_brain=secondary,
+    )
+
+    assert (
+        runtime._current_document_secondary_map_request(  # noqa: SLF001
+            "Summarize this document.",
+            [_owned(filename, "Parser output must not authorize this carrier.", mime_type=mime_type)],
+            task_kind="summary",
+        )
+        is None
+    )
+
+
+@pytest.mark.parametrize(
     "source",
     [
         _owned("incomplete.txt", "partial", extraction_truncated=True),
