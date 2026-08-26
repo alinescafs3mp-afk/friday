@@ -22,6 +22,26 @@ def normalize_outbound_web_query(value: Any) -> str:
     return value[: MAX_OUTBOUND_WEB_QUERY_CHARS + 2].strip()[:MAX_OUTBOUND_WEB_QUERY_CHARS]
 
 
+def research_attempt_counters_are_conserved(report: Any) -> bool:
+    """Return whether every declared research attempt has one terminal state."""
+
+    if not isinstance(report, Mapping):
+        return False
+    values = tuple(
+        report.get(name)
+        for name in (
+            "requested_sources",
+            "completed_sources",
+            "failed_sources",
+            "timed_out_sources",
+        )
+    )
+    if any(not isinstance(value, int) or isinstance(value, bool) or value < 0 for value in values):
+        return False
+    requested, completed, failed, timed_out = cast(tuple[int, int, int, int], values)
+    return requested == completed + failed + timed_out
+
+
 def target_research_report_is_valid(
     report: Any,
     *,
@@ -115,5 +135,6 @@ __all__ = (
     "MAX_RESEARCH_SOURCE_TEXT_CHARS",
     "MAX_RESEARCH_SOURCES",
     "normalize_outbound_web_query",
+    "research_attempt_counters_are_conserved",
     "target_research_report_is_valid",
 )

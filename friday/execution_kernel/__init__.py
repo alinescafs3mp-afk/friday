@@ -99,6 +99,7 @@ from friday.web_research_contract import (
     MAX_RESEARCH_SOURCE_ROWS,
     MAX_RESEARCH_SOURCE_TEXT_CHARS,
     normalize_outbound_web_query,
+    research_attempt_counters_are_conserved,
     target_research_report_is_valid,
 )
 from friday.web_surfer import (
@@ -292,6 +293,11 @@ def _capturable_web_sources(
     if not target_research_report_is_valid(
         report,
         configured_max_sources=configured_max_sources,
+    ):
+        return []
+    raw_freshness = report.get("freshness", "")
+    if not isinstance(raw_freshness, str) or (
+        raw_freshness and not research_attempt_counters_are_conserved(report)
     ):
         return []
     numeric_fields = (
@@ -6306,6 +6312,14 @@ class ExecutionKernel:
                 report,
                 configured_max_sources=bounded_sources,
             )
+            complete_counter_group = {
+                "requested_sources",
+                "completed_sources",
+                "failed_sources",
+                "timed_out_sources",
+            }.issubset(report)
+            if freshness and complete_counter_group and not research_attempt_counters_are_conserved(report):
+                contract_valid = False
             target_rows_valid = True
             if contract_valid and "target_sources" in report:
                 seen_target_rows: set[str] = set()

@@ -1309,6 +1309,55 @@ async def test_kernel_threads_research_freshness_and_records_only_the_closed_enu
 
 
 @pytest.mark.asyncio
+async def test_kernel_rejects_nonconserved_fresh_research_before_capture(
+    settings,
+    storage,
+) -> None:
+    text = "Fresh fact-bearing source body. " * 20
+
+    class DoubleCountedFreshResearch:
+        @declares_search_filter_support("freshness")
+        async def research(self, query: str, **options: object) -> dict[str, object]:
+            freshness = str(options.get("freshness") or "")
+            return {
+                "query": query,
+                "freshness": freshness,
+                "applied_search_filters": {"freshness": freshness},
+                "sources": [
+                    {
+                        "url": f"https://fresh-{index}.synthetic.example.com/fact",
+                        "title": "Fresh fact",
+                        "text": text,
+                        "text_length": len(text),
+                        "status_code": 200,
+                        "error": "",
+                        "truncated": False,
+                    }
+                    for index in range(3)
+                ],
+                "target_sources": 3,
+                "requested_sources": 3,
+                "completed_sources": 3,
+                "failed_sources": 3,
+                "timed_out_sources": 0,
+                "search_timed_out": False,
+            }
+
+    kernel, actor = _research_kernel(settings, storage, DoubleCountedFreshResearch())
+
+    report = await kernel._web_research(  # noqa: SLF001
+        actor=actor,
+        query="needle",
+        max_sources=3,
+        freshness="day",
+    )
+
+    assert report["error"] == "research_report_malformed"
+    assert report["sources"] == []
+    assert storage.list_inbox("operator") == []
+
+
+@pytest.mark.asyncio
 async def test_kernel_rejects_invalid_or_unsupported_research_freshness_without_capture(
     settings,
     storage,

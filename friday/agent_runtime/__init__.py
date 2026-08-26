@@ -446,6 +446,7 @@ from friday.web_research_contract import (
     MAX_RESEARCH_SOURCE_ROWS,
     MAX_RESEARCH_SOURCE_TEXT_CHARS,
     normalize_outbound_web_query,
+    research_attempt_counters_are_conserved,
     target_research_report_is_valid,
 )
 from friday.web_surfer import (
@@ -25969,7 +25970,7 @@ def _project_web_tool_result(
         and simple_public_news_topic_mismatch_is_empty(
             data,
             expected_topic_class=topic_class,
-            expected_max_sources=research_max_sources or 3,
+            expected_max_sources=(research_max_sources if research_max_sources is not None else 3),
         )
         and data.get("source_class", "") == source_class
         and (
@@ -25984,7 +25985,6 @@ def _project_web_tool_result(
             "freshness": freshness,
             SEARCH_FILTER_ATTESTATION_KEY: {"freshness": freshness},
             "sources": [],
-            "target_sources": data.get("target_sources"),
             "requested_sources": data.get("requested_sources"),
             "completed_sources": data.get("completed_sources"),
             "failed_sources": data.get("failed_sources"),
@@ -26001,6 +26001,8 @@ def _project_web_tool_result(
         if source_class:
             topic_mismatch_report["source_class"] = source_class
             topic_mismatch_report["source_class_satisfied"] = True
+        if "target_sources" in data:
+            topic_mismatch_report["target_sources"] = data.get("target_sources")
     failure_values = [data.get(flag) for flag in _WEB_FAILURE_FLAGS if flag in data]
     malformed_failure_flag = any(not isinstance(value, bool) for value in failure_values)
     hard_failed = (
@@ -26167,7 +26169,7 @@ def _project_web_tool_result(
                 or failed_sources + timed_out_sources > requested_sources
                 or requested_sources > completed_sources + failed_sources + timed_out_sources
                 or bool(freshness)
-                and requested_sources != completed_sources + failed_sources + timed_out_sources
+                and not research_attempt_counters_are_conserved(data)
             )
         )
         if "target_sources" in data:

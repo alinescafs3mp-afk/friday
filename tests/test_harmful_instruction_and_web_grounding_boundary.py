@@ -1727,6 +1727,28 @@ def test_research_target_counter_is_fail_closed(target: Any) -> None:
     ) == ("failed", [], None)
 
 
+def test_topic_mismatch_does_not_replace_an_invalid_zero_source_limit() -> None:
+    assert _project_web_tool_result(
+        "web_research",
+        {
+            "outbound_attempted": True,
+            "sources": [],
+            "requested_sources": 1,
+            "completed_sources": 0,
+            "failed_sources": 1,
+            "timed_out_sources": 0,
+            "topic_filtered_sources": 1,
+            "search_timed_out": False,
+            "search_failed": True,
+            "error": "topic_mismatch",
+            "topic_class": "public_news",
+            "topic_class_satisfied": False,
+        },
+        research_max_sources=0,
+        topic_class="public_news",
+    ) == ("failed", [], None)
+
+
 def test_research_without_target_keeps_legacy_completeness_semantics() -> None:
     status, sources, payload = _project_web_tool_result(
         "web_research",
@@ -2299,6 +2321,33 @@ def test_capture_projection_canonical_deduplicates_aliases() -> None:
         }
     )
     assert len(captured) == 1
+
+
+def test_capture_projection_rejects_nonconserved_fresh_research_attempts() -> None:
+    text = "Fresh fact-bearing source body. " * 20
+    report = {
+        "freshness": "day",
+        "sources": [
+            {
+                "url": f"https://fresh-{index}.synthetic.example.com/fact",
+                "title": "Fresh fact",
+                "text": text,
+                "text_length": len(text),
+                "status_code": 200,
+                "error": "",
+                "truncated": False,
+            }
+            for index in range(3)
+        ],
+        "target_sources": 3,
+        "requested_sources": 3,
+        "completed_sources": 3,
+        "failed_sources": 3,
+        "timed_out_sources": 0,
+        "search_timed_out": False,
+    }
+
+    assert _capturable_web_sources(report, configured_max_sources=3) == []
 
 
 def test_capture_projection_rejects_failed_or_private_sources_before_raw_ingestion() -> None:

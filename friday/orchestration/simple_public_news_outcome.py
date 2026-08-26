@@ -29,6 +29,7 @@ from friday.public_web_url import canonical_public_web_url_key, sanitize_public_
 from friday.web_research_contract import (
     MAX_RESEARCH_ATTEMPTS,
     MAX_RESEARCH_SOURCE_ROWS,
+    research_attempt_counters_are_conserved,
     target_research_report_is_valid,
 )
 from friday.web_surfer import web_source_matches_class
@@ -624,7 +625,7 @@ class SimplePublicNewsEvidence:
             and completed_sources is not None
             and failed_sources is not None
             and timed_out_sources is not None
-            and requested_sources != completed_sources + failed_sources + timed_out_sources
+            and not research_attempt_counters_are_conserved(report)
         ):
             raise SimplePublicNewsOutcomeError("news attempt counters violate conservation")
         if failed_sources is not None and topic_filtered_sources > failed_sources:

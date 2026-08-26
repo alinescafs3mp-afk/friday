@@ -273,6 +273,13 @@ class _MalformedTopicMismatchNewsKernel(_TopicMismatchNewsKernel):
     source_class_satisfied = 0
 
 
+class _TargetlessTopicMismatchNewsKernel(_TopicMismatchNewsKernel):
+    async def execute(self, tool, params, actor=None):  # noqa: ANN001, ARG002
+        result = await super().execute(tool, params, actor=actor)
+        result.data.pop("target_sources")
+        return result
+
+
 class _TransportFailedTopicMismatchNewsKernel(_TopicMismatchNewsKernel):
     transport_success = False
 
@@ -1107,6 +1114,7 @@ async def test_simple_news_distinguishes_validated_empty_from_unavailable(
     ("kernel_type", "legacy_status", "outcome_status"),
     (
         (_TopicMismatchNewsKernel, "empty", CapabilityOutcomeStatus.EMPTY),
+        (_TargetlessTopicMismatchNewsKernel, "empty", CapabilityOutcomeStatus.EMPTY),
         (_MalformedTopicMismatchNewsKernel, "failed", CapabilityOutcomeStatus.UNAVAILABLE),
         (_TransportFailedTopicMismatchNewsKernel, "failed", CapabilityOutcomeStatus.UNAVAILABLE),
     ),
