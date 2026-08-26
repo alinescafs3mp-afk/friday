@@ -2594,13 +2594,27 @@ def _semantic_supervisor_promoted_values(
         "observed_mode": "shadow" if mode == "assist" else "assist",
         "task_class": "compare_current_file_with_current_web",
         "source_revision_sha256": source_sha256,
-        "promotion_policy_sha256": "5" * 64,
-        "observed_policy_id": "gptoss20b-semantic-supervisor-v1",
-        "observed_policy_sha256": "6" * 64,
+        "promotion_policy_sha256": (
+            "0897ff227eb0148a5bf670d71fb9133f8fa217747f33673c2b989c1c29e05cce"
+        ),
+        "observed_policy_id": (
+            "gptoss20b-semantic-supervisor-v1"
+            if mode == "assist"
+            else "gptoss20b-semantic-supervisor-v2"
+        ),
+        "observed_policy_sha256": (
+            "9f0c1e8132200a3a4416448cd2de03a4736da5e4968536d8c9e518fd5e88051a"
+            if mode == "assist"
+            else "534905cdaac794f485b43e25895761f1a3588ff8eabcc20527530d7f3bd4f96e"
+        ),
         "target_policy_id": "gptoss20b-semantic-supervisor-v2",
-        "target_policy_sha256": "7" * 64,
+        "target_policy_sha256": (
+            "534905cdaac794f485b43e25895761f1a3588ff8eabcc20527530d7f3bd4f96e"
+        ),
         "runtime_profile_id": "gptoss20b-2335df123cac7fc0e13e347cde1e1ffa8562daafcaf0fc76ade1a851d2b0ff1f",
-        "runtime_profile_manifest_sha256": "8" * 64,
+        "runtime_profile_manifest_sha256": (
+            "93ea5698b8b6a9bf8a7dc697ffe37d7353055aa16555188991747bba73d059e3"
+        ),
         "registry_binding_sha256": registry_sha256,
         "max_steps": 6,
         "max_review_rounds": 1,
@@ -2641,6 +2655,55 @@ def _semantic_supervisor_promoted_values(
         "FRIDAY_SEMANTIC_SUPERVISOR_TASKS": "compare_current_file_with_current_web",
         "FRIDAY_SEMANTIC_SUPERVISOR_TIMEOUT_SEC": "12",
     }
+
+
+def _semantic_supervisor_promoted_payload(
+    tmp_path: Path,
+    *,
+    mode: str,
+) -> tuple[Path, dict[str, str], dict[str, object]]:
+    evidence_file = tmp_path / f"accepted-{mode}-evidence.json"
+    evidence_file.write_bytes(b"placeholder")
+    evidence_file.chmod(0o600)
+    values = _semantic_supervisor_promoted_values(
+        mode=mode,
+        evidence_file=evidence_file,
+        actors=(("d" * 64,) if mode == "canary" else ()),
+    )
+    payload = json.loads(evidence_file.read_text(encoding="ascii"))
+    assert isinstance(payload, dict)
+    return evidence_file, values, payload
+
+
+def _semantic_supervisor_set_payload_path(
+    payload: dict[str, object],
+    path: tuple[str, ...],
+    value: object,
+) -> None:
+    current = payload
+    for key in path[:-1]:
+        child = current[key]
+        assert isinstance(child, dict)
+        current = child
+    current[path[-1]] = value
+
+
+def _semantic_supervisor_write_promoted_payload(
+    evidence_file: Path,
+    values: dict[str, str],
+    payload: dict[str, object],
+) -> None:
+    raw = json.dumps(
+        payload,
+        ensure_ascii=True,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("ascii")
+    evidence_file.write_bytes(raw)
+    evidence_file.chmod(0o600)
+    values["FRIDAY_SEMANTIC_SUPERVISOR_PROMOTION_EVIDENCE_SHA256"] = hashlib.sha256(
+        raw
+    ).hexdigest()
 
 
 def _semantic_supervisor_promoted_environment(
@@ -3408,6 +3471,218 @@ def test_semantic_supervisor_operator_binds_exact_budget_document_to_evidence(
             "semantic_supervisor_shadow_to_assist",
             shadow,
             target,
+        )
+
+
+@pytest.mark.parametrize(
+    ("mode", "path", "value"),
+    (
+        ("assist", ("authority",), "isolated_live_protocol"),
+        ("assist", ("observed_mode",), "assist"),
+        ("canary", ("observed_mode",), "shadow"),
+        ("assist", ("source_revision_sha256",), "f" * 64),
+        ("assist", ("registry_binding_sha256",), "f" * 64),
+        ("assist", ("promotion_policy_sha256",), "f" * 64),
+        ("assist", ("observed_policy_id",), "gptoss20b-semantic-supervisor-v2"),
+        ("canary", ("observed_policy_id",), "gptoss20b-semantic-supervisor-v1"),
+        ("assist", ("observed_policy_sha256",), "f" * 64),
+        ("assist", ("target_policy_id",), "gptoss20b-semantic-supervisor-v1"),
+        ("assist", ("target_policy_sha256",), "f" * 64),
+        ("assist", ("runtime_profile_id",), "wrong-profile"),
+        ("assist", ("runtime_profile_manifest_sha256",), "f" * 64),
+        ("assist", ("evidence_id",), "Not_Canonical"),
+        ("assist", ("max_steps",), 6.0),
+        ("assist", ("max_review_rounds",), True),
+        ("assist", ("observation_count",), 19),
+        ("assist", ("joined_trace_count",), 19),
+        ("assist", ("representative_window_attested",), False),
+        ("assist", ("primary_fallback_proven",), 1),
+        ("assist", ("laptop_unavailable_fallback_proven",), False),
+        ("assist", ("final_authority_recheck_proven",), False),
+        ("assist", ("primary_publication_owner_proven",), False),
+        ("assist", ("hidden_owner_count",), 1),
+        ("assist", ("hidden_owner_count",), -1),
+        ("assist", ("duplicate_capability_count",), True),
+        ("assist", ("duplicate_effect_count",), 1),
+        ("assist", ("duplicate_publication_count",), 1),
+        ("assist", ("false_completion_regression_count",), 1),
+        ("assist", ("product_evidence", "baseline_observation_count"), 19),
+        ("assist", ("product_evidence", "baseline_complete_count"), 21),
+        ("assist", ("product_evidence", "baseline_failure_class_count"), 0),
+        ("assist", ("product_evidence", "readiness_observation_count"), 19),
+        ("assist", ("product_evidence", "readiness_observation_count"), 21),
+        ("assist", ("product_evidence", "call_rate_observation_count"), 19),
+        ("assist", ("product_evidence", "user_visible_observation_count"), 19),
+        ("assist", ("product_evidence", "supervisor_invocation_count"), 21),
+        ("assist", ("product_evidence", "unnecessary_supervisor_invocation_count"), 1),
+        ("assist", ("product_evidence", "user_visible_regression_count"), 1),
+        ("assist", ("product_evidence", "latency_max_ms"), 2_501),
+        ("assist", ("product_evidence", "latency_total_ms"), 30_001),
+        ("assist", ("product_evidence", "documented_failure_class_id"), "none"),
+        ("assist", ("product_evidence", "documented_failure_class_id"), "Invalid"),
+        ("assist", ("product_evidence", "documented_failure_class_sha256"), "F" * 64),
+        ("assist", ("product_evidence", "baseline_observation_count"), True),
+        (
+            "assist",
+            ("product_evidence", "schema"),
+            "friday.supervisor-assist-outcome-evidence.v2",
+        ),
+        ("canary", ("product_evidence", "baseline_observation_count"), 19),
+        ("canary", ("product_evidence", "promoted_observation_count"), 19),
+        ("canary", ("product_evidence", "promoted_observation_count"), 21),
+        ("canary", ("product_evidence", "promoted_complete_count"), 8),
+        ("canary", ("product_evidence", "promoted_complete_count"), 21),
+        ("canary", ("product_evidence", "baseline_failure_class_count"), 21),
+        ("canary", ("product_evidence", "latency_observation_count"), 19),
+        ("canary", ("product_evidence", "call_rate_observation_count"), 19),
+        ("canary", ("product_evidence", "user_visible_observation_count"), 19),
+        ("canary", ("product_evidence", "unnecessary_supervisor_invocation_count"), 1),
+        ("canary", ("product_evidence", "user_visible_regression_count"), 1),
+        ("canary", ("product_evidence", "promoted_window_sha256"), "1" * 64),
+        ("canary", ("product_evidence", "latency_total_ms"), 30_001),
+    ),
+)
+def test_semantic_supervisor_operator_rejects_non_live_promotion_evidence(
+    tmp_path: Path,
+    mode: str,
+    path: tuple[str, ...],
+    value: object,
+) -> None:
+    evidence_file, values, payload = _semantic_supervisor_promoted_payload(
+        tmp_path,
+        mode=mode,
+    )
+    _semantic_supervisor_set_payload_path(payload, path, value)
+    _semantic_supervisor_write_promoted_payload(evidence_file, values, payload)
+
+    with pytest.raises(
+        operator.ReleaseFailure,
+        match="semantic_supervisor_live_evidence_invalid",
+    ):
+        operator._validate_semantic_supervisor_promoted_values(  # noqa: SLF001
+            values,
+            mode=mode,
+            invalid_code="semantic_supervisor_live_evidence_invalid",
+        )
+
+
+@pytest.mark.parametrize(
+    ("mutation", "value"),
+    (
+        ("baseline_failure_class_count", 0),
+        ("promoted_failure_class_count", 1),
+        ("documented_failure_class_sha256", None),
+        ("documented_failure_class_id", "none"),
+    ),
+)
+def test_semantic_supervisor_operator_requires_exact_failure_removal_claim(
+    tmp_path: Path,
+    mutation: str,
+    value: object,
+) -> None:
+    evidence_file, values, payload = _semantic_supervisor_promoted_payload(
+        tmp_path,
+        mode="canary",
+    )
+    product = payload["product_evidence"]
+    assert isinstance(product, dict)
+    product.update(
+        {
+            "quality_basis": "documented_failure_class_removal",
+            "documented_failure_class_id": "capability:source_unavailable",
+            "documented_failure_class_sha256": "e" * 64,
+            "baseline_failure_class_count": 5,
+            "promoted_failure_class_count": 0,
+        }
+    )
+    product[mutation] = value
+    _semantic_supervisor_write_promoted_payload(evidence_file, values, payload)
+
+    with pytest.raises(operator.ReleaseFailure):
+        operator._validate_semantic_supervisor_promoted_values(  # noqa: SLF001
+            values,
+            mode="canary",
+            invalid_code="semantic_supervisor_failure_removal_invalid",
+        )
+
+
+def test_semantic_supervisor_operator_accepts_exact_failure_removal_claim(
+    tmp_path: Path,
+) -> None:
+    evidence_file, values, payload = _semantic_supervisor_promoted_payload(
+        tmp_path,
+        mode="canary",
+    )
+    product = payload["product_evidence"]
+    assert isinstance(product, dict)
+    product.update(
+        {
+            "quality_basis": "documented_failure_class_removal",
+            "documented_failure_class_id": "capability:source_unavailable",
+            "documented_failure_class_sha256": "e" * 64,
+            "baseline_failure_class_count": 5,
+            "promoted_failure_class_count": 0,
+        }
+    )
+    _semantic_supervisor_write_promoted_payload(evidence_file, values, payload)
+
+    operator._validate_semantic_supervisor_promoted_values(  # noqa: SLF001
+        values,
+        mode="canary",
+        invalid_code="semantic_supervisor_failure_removal_invalid",
+    )
+
+
+@pytest.mark.parametrize("location", ("outer", "product"))
+def test_semantic_supervisor_operator_rejects_unknown_evidence_keys(
+    tmp_path: Path,
+    location: str,
+) -> None:
+    evidence_file, values, payload = _semantic_supervisor_promoted_payload(
+        tmp_path,
+        mode="assist",
+    )
+    target = payload if location == "outer" else payload["product_evidence"]
+    assert isinstance(target, dict)
+    target["private_body"] = "forbidden"
+    _semantic_supervisor_write_promoted_payload(evidence_file, values, payload)
+
+    with pytest.raises(operator.ReleaseFailure):
+        operator._validate_semantic_supervisor_promoted_values(  # noqa: SLF001
+            values,
+            mode="assist",
+            invalid_code="semantic_supervisor_unknown_evidence_key",
+        )
+
+
+@pytest.mark.parametrize(
+    "raw",
+    (
+        b'{"schema":"first","schema":"second"}',
+        b'{"value":NaN}',
+    ),
+)
+def test_semantic_supervisor_closed_json_maps_adversarial_input_to_release_failure(
+    raw: bytes,
+) -> None:
+    with pytest.raises(operator.ReleaseFailure, match="semantic_supervisor_json_invalid"):
+        operator._semantic_supervisor_closed_json(  # noqa: SLF001
+            raw,
+            invalid_code="semantic_supervisor_json_invalid",
+        )
+
+
+def test_semantic_supervisor_closed_json_maps_recursion_to_release_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def recursion_error(*_args: object, **_kwargs: object) -> object:
+        raise RecursionError("bounded parser recursion")
+
+    monkeypatch.setattr(operator.json, "loads", recursion_error)
+    with pytest.raises(operator.ReleaseFailure, match="semantic_supervisor_json_invalid"):
+        operator._semantic_supervisor_closed_json(  # noqa: SLF001
+            b"{}",
+            invalid_code="semantic_supervisor_json_invalid",
         )
 
 

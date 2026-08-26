@@ -813,6 +813,20 @@ _SEMANTIC_SUPERVISOR_MAX_LATENCY_BUDGET_BYTES = 4_096
 _SEMANTIC_SUPERVISOR_PROMOTION_SCHEMA = "friday.supervisor-assist-promotion.v4"
 _SEMANTIC_SUPERVISOR_READINESS_EVIDENCE_SCHEMA = "friday.supervisor-assist-readiness-evidence.v2"
 _SEMANTIC_SUPERVISOR_OUTCOME_EVIDENCE_SCHEMA = "friday.supervisor-assist-outcome-evidence.v2"
+_SEMANTIC_SUPERVISOR_PROMOTION_POLICY_SHA256 = (
+    "0897ff227eb0148a5bf670d71fb9133f8fa217747f33673c2b989c1c29e05cce"
+)
+_SEMANTIC_SUPERVISOR_RUNTIME_PROFILE_ID = (
+    "gptoss20b-2335df123cac7fc0e13e347cde1e1ffa8562daafcaf0fc76ade1a851d2b0ff1f"
+)
+_SEMANTIC_SUPERVISOR_RUNTIME_PROFILE_MANIFEST_SHA256 = (
+    "93ea5698b8b6a9bf8a7dc697ffe37d7353055aa16555188991747bba73d059e3"
+)
+_SEMANTIC_SUPERVISOR_MIN_PRODUCT_OBSERVATIONS = 20
+_SEMANTIC_SUPERVISOR_MAX_UNNECESSARY_CALL_RATE_BPS = 0
+_SEMANTIC_SUPERVISOR_MAX_LATENCY_MS = 86_400_000
+_SEMANTIC_SUPERVISOR_SAFE_EVIDENCE_ID = re.compile(r"[a-z][a-z0-9_.-]{0,95}")
+_SEMANTIC_SUPERVISOR_SAFE_FAILURE_CLASS_ID = re.compile(r"[a-z][a-z0-9_.:-]{0,127}")
 _SEMANTIC_SUPERVISOR_LATENCY_BUDGET_SCHEMA = "friday.semantic-supervisor-latency-budget-document.v1"
 _SEMANTIC_SUPERVISOR_LATENCY_BUDGET_ID = "current-file-web-user-visible-latency-v1"
 _SEMANTIC_SUPERVISOR_LATENCY_MEASUREMENT = "committed_turn_trace.budget.latency_ms"
@@ -1851,7 +1865,7 @@ def _semantic_supervisor_closed_json(raw: bytes, *, invalid_code: str) -> dict[s
             object_pairs_hook=pairs,
             parse_constant=reject_constant,
         )
-    except (UnicodeError, ValueError, json.JSONDecodeError) as exc:
+    except (UnicodeError, ValueError, json.JSONDecodeError, RecursionError) as exc:
         raise ReleaseFailure(invalid_code) from exc
     if type(parsed) is not dict:
         raise ReleaseFailure(invalid_code)
@@ -1881,10 +1895,219 @@ def _semantic_supervisor_latency_budget_identity(
         or document.get("source_revision_sha256") != expected_source_sha256
         or document.get("latency_measurement") != _SEMANTIC_SUPERVISOR_LATENCY_MEASUREMENT
         or type(maximum) is not int
-        or not 1 <= maximum <= 86_400_000
+        or not 1 <= maximum <= _SEMANTIC_SUPERVISOR_MAX_LATENCY_MS
     ):
         raise ReleaseFailure(invalid_code)
     return expected_source_sha256, maximum
+
+
+def _semantic_supervisor_is_digest(value: object) -> bool:
+    return type(value) is str and _HEX64.fullmatch(value) is not None
+
+
+def _semantic_supervisor_is_count(value: object) -> bool:
+    return type(value) is int and value >= 0
+
+
+def _semantic_supervisor_exact_counts(
+    payload: Mapping[str, Any],
+    keys: tuple[str, ...],
+) -> bool:
+    return all(_semantic_supervisor_is_count(payload.get(key)) for key in keys)
+
+
+def _semantic_supervisor_exact_digests(
+    payload: Mapping[str, Any],
+    keys: tuple[str, ...],
+) -> bool:
+    return all(_semantic_supervisor_is_digest(payload.get(key)) for key in keys)
+
+
+def _semantic_supervisor_readiness_evidence_is_live(
+    product: Mapping[str, Any],
+    *,
+    observation_count: int,
+    source_sha256: str,
+    latency_budget_sha256: str,
+    latency_budget_ms: int,
+) -> bool:
+    count_keys = (
+        "baseline_observation_count",
+        "baseline_complete_count",
+        "baseline_failure_class_count",
+        "readiness_observation_count",
+        "latency_budget_ms",
+        "latency_total_ms",
+        "latency_max_ms",
+        "call_rate_observation_count",
+        "supervisor_invocation_count",
+        "unnecessary_supervisor_invocation_count",
+        "user_visible_observation_count",
+        "user_visible_regression_count",
+    )
+    digest_keys = (
+        "baseline_window_sha256",
+        "documented_failure_class_sha256",
+        "readiness_witness_sha256",
+        "latency_budget_source_revision_sha256",
+        "latency_budget_sha256",
+    )
+    if not _semantic_supervisor_exact_counts(
+        product,
+        count_keys,
+    ) or not _semantic_supervisor_exact_digests(product, digest_keys):
+        return False
+
+    baseline_observations = product["baseline_observation_count"]
+    baseline_complete = product["baseline_complete_count"]
+    baseline_failures = product["baseline_failure_class_count"]
+    readiness_observations = product["readiness_observation_count"]
+    latency_total = product["latency_total_ms"]
+    latency_max = product["latency_max_ms"]
+    call_rate_observations = product["call_rate_observation_count"]
+    supervisor_invocations = product["supervisor_invocation_count"]
+    unnecessary_invocations = product["unnecessary_supervisor_invocation_count"]
+    visible_observations = product["user_visible_observation_count"]
+    visible_regressions = product["user_visible_regression_count"]
+    failure_class_id = product.get("documented_failure_class_id")
+    return bool(
+        product.get("schema") == _SEMANTIC_SUPERVISOR_READINESS_EVIDENCE_SCHEMA
+        and type(failure_class_id) is str
+        and failure_class_id != "none"
+        and _SEMANTIC_SUPERVISOR_SAFE_FAILURE_CLASS_ID.fullmatch(failure_class_id) is not None
+        and product.get("latency_budget_target_mode") == "assist"
+        and product.get("latency_budget_source_revision_sha256") == source_sha256
+        and product.get("latency_budget_sha256") == latency_budget_sha256
+        and product.get("latency_budget_ms") == latency_budget_ms
+        and baseline_observations >= _SEMANTIC_SUPERVISOR_MIN_PRODUCT_OBSERVATIONS
+        and readiness_observations >= _SEMANTIC_SUPERVISOR_MIN_PRODUCT_OBSERVATIONS
+        and readiness_observations <= observation_count
+        and call_rate_observations == observation_count
+        and visible_observations == readiness_observations
+        and baseline_complete <= baseline_observations
+        and 1 <= baseline_failures <= baseline_observations
+        and supervisor_invocations <= call_rate_observations
+        and unnecessary_invocations <= supervisor_invocations
+        and unnecessary_invocations * 10_000
+        <= _SEMANTIC_SUPERVISOR_MAX_UNNECESSARY_CALL_RATE_BPS * call_rate_observations
+        and visible_regressions == 0
+        and latency_max <= _SEMANTIC_SUPERVISOR_MAX_LATENCY_MS
+        and latency_max <= latency_total <= latency_max * readiness_observations
+        and latency_max <= latency_budget_ms
+        and latency_total <= latency_budget_ms * readiness_observations
+    )
+
+
+def _semantic_supervisor_outcome_evidence_is_live(
+    product: Mapping[str, Any],
+    *,
+    observation_count: int,
+    source_sha256: str,
+    latency_budget_sha256: str,
+    latency_budget_ms: int,
+) -> bool:
+    count_keys = (
+        "baseline_observation_count",
+        "baseline_complete_count",
+        "promoted_observation_count",
+        "promoted_complete_count",
+        "baseline_failure_class_count",
+        "promoted_failure_class_count",
+        "latency_budget_ms",
+        "latency_observation_count",
+        "latency_total_ms",
+        "latency_max_ms",
+        "call_rate_observation_count",
+        "supervisor_invocation_count",
+        "unnecessary_supervisor_invocation_count",
+        "user_visible_observation_count",
+        "user_visible_regression_count",
+    )
+    digest_keys = (
+        "baseline_window_sha256",
+        "promoted_window_sha256",
+        "latency_budget_source_revision_sha256",
+        "latency_budget_sha256",
+    )
+    if not _semantic_supervisor_exact_counts(
+        product,
+        count_keys,
+    ) or not _semantic_supervisor_exact_digests(product, digest_keys):
+        return False
+
+    baseline_window = product["baseline_window_sha256"]
+    promoted_window = product["promoted_window_sha256"]
+    baseline_observations = product["baseline_observation_count"]
+    baseline_complete = product["baseline_complete_count"]
+    promoted_observations = product["promoted_observation_count"]
+    promoted_complete = product["promoted_complete_count"]
+    baseline_failures = product["baseline_failure_class_count"]
+    promoted_failures = product["promoted_failure_class_count"]
+    latency_observations = product["latency_observation_count"]
+    latency_total = product["latency_total_ms"]
+    latency_max = product["latency_max_ms"]
+    call_rate_observations = product["call_rate_observation_count"]
+    supervisor_invocations = product["supervisor_invocation_count"]
+    unnecessary_invocations = product["unnecessary_supervisor_invocation_count"]
+    visible_observations = product["user_visible_observation_count"]
+    visible_regressions = product["user_visible_regression_count"]
+    failure_class_id = product.get("documented_failure_class_id")
+    failure_class_sha256 = product.get("documented_failure_class_sha256")
+    quality_basis = product.get("quality_basis")
+    completion_improved = (
+        promoted_complete * baseline_observations
+        > baseline_complete * promoted_observations
+    )
+    completion_claim_is_valid = bool(
+        quality_basis == "completion_rate_improvement"
+        and failure_class_id == "none"
+        and failure_class_sha256 is None
+        and baseline_failures == 0
+        and promoted_failures == 0
+        and completion_improved
+    )
+    removal_claim_is_valid = bool(
+        quality_basis == "documented_failure_class_removal"
+        and type(failure_class_id) is str
+        and failure_class_id != "none"
+        and _SEMANTIC_SUPERVISOR_SAFE_FAILURE_CLASS_ID.fullmatch(failure_class_id) is not None
+        and _semantic_supervisor_is_digest(failure_class_sha256)
+        and baseline_failures >= 1
+        and promoted_failures == 0
+    )
+    latency_aggregate_is_valid = (
+        latency_max <= latency_total <= latency_max * latency_observations
+        if latency_observations
+        else latency_total == latency_max == 0
+    )
+    return bool(
+        product.get("schema") == _SEMANTIC_SUPERVISOR_OUTCOME_EVIDENCE_SCHEMA
+        and product.get("latency_budget_target_mode") == "canary"
+        and product.get("latency_budget_source_revision_sha256") == source_sha256
+        and product.get("latency_budget_sha256") == latency_budget_sha256
+        and product.get("latency_budget_ms") == latency_budget_ms
+        and baseline_window != promoted_window
+        and baseline_observations >= _SEMANTIC_SUPERVISOR_MIN_PRODUCT_OBSERVATIONS
+        and promoted_observations >= _SEMANTIC_SUPERVISOR_MIN_PRODUCT_OBSERVATIONS
+        and promoted_observations <= observation_count
+        and baseline_complete <= baseline_observations
+        and promoted_complete <= promoted_observations
+        and baseline_failures <= baseline_observations
+        and promoted_failures <= promoted_observations
+        and latency_observations == promoted_observations
+        and call_rate_observations == observation_count
+        and supervisor_invocations <= call_rate_observations
+        and unnecessary_invocations <= supervisor_invocations
+        and unnecessary_invocations * 10_000
+        <= _SEMANTIC_SUPERVISOR_MAX_UNNECESSARY_CALL_RATE_BPS * call_rate_observations
+        and visible_observations == promoted_observations
+        and visible_regressions == 0
+        and latency_max <= _SEMANTIC_SUPERVISOR_MAX_LATENCY_MS
+        and latency_aggregate_is_valid
+        and latency_max <= latency_budget_ms
+        and latency_total <= latency_budget_ms * latency_observations
+        and (completion_claim_is_valid or removal_claim_is_valid)
+    )
 
 
 def _validate_semantic_supervisor_evidence_budget_binding(
@@ -1897,11 +2120,21 @@ def _validate_semantic_supervisor_evidence_budget_binding(
     latency_budget_ms: int,
     invalid_code: str,
 ) -> None:
-    """Require the accepted evidence to cite that exact product budget."""
+    """Require one exact live-ready evidence object bound to the product budget."""
 
     evidence = _semantic_supervisor_closed_json(raw, invalid_code=invalid_code)
     product = evidence.get("product_evidence")
     expected_observed_mode = "shadow" if mode == "assist" else "assist"
+    expected_observed_policy_id = (
+        _SEMANTIC_SUPERVISOR_SHADOW_POLICY_ID
+        if mode == "assist"
+        else _SEMANTIC_SUPERVISOR_ASSIST_POLICY_ID
+    )
+    expected_observed_policy_sha256 = (
+        _SEMANTIC_SUPERVISOR_SHADOW_POLICY_SHA256
+        if mode == "assist"
+        else _SEMANTIC_SUPERVISOR_ASSIST_POLICY_SHA256
+    )
     expected_product_schema = (
         _SEMANTIC_SUPERVISOR_READINESS_EVIDENCE_SCHEMA
         if mode == "assist"
@@ -1912,16 +2145,67 @@ def _validate_semantic_supervisor_evidence_budget_binding(
         if mode == "assist"
         else _SEMANTIC_SUPERVISOR_OUTCOME_EVIDENCE_KEYS
     )
+    count_keys = (
+        "observation_count",
+        "joined_trace_count",
+        "hidden_owner_count",
+        "duplicate_capability_count",
+        "duplicate_effect_count",
+        "duplicate_publication_count",
+        "false_completion_regression_count",
+    )
+    digest_keys = (
+        "source_revision_sha256",
+        "promotion_policy_sha256",
+        "observed_policy_sha256",
+        "target_policy_sha256",
+        "runtime_profile_manifest_sha256",
+        "registry_binding_sha256",
+    )
+    proof_keys = (
+        "representative_window_attested",
+        "primary_fallback_proven",
+        "laptop_unavailable_fallback_proven",
+        "final_authority_recheck_proven",
+        "primary_publication_owner_proven",
+    )
+    anomaly_keys = (
+        "hidden_owner_count",
+        "duplicate_capability_count",
+        "duplicate_effect_count",
+        "duplicate_publication_count",
+        "false_completion_regression_count",
+    )
+    evidence_id = evidence.get("evidence_id")
     if (
         set(evidence) != _SEMANTIC_SUPERVISOR_PROMOTION_EVIDENCE_KEYS
         or evidence.get("schema") != _SEMANTIC_SUPERVISOR_PROMOTION_SCHEMA
+        or type(evidence_id) is not str
+        or _SEMANTIC_SUPERVISOR_SAFE_EVIDENCE_ID.fullmatch(evidence_id) is None
         or evidence.get("authority") != "production_joined"
         or evidence.get("observed_mode") != expected_observed_mode
         or evidence.get("task_class") != _SEMANTIC_SUPERVISOR_PROMOTED_TASK
         or evidence.get("source_revision_sha256") != source_sha256
+        or evidence.get("promotion_policy_sha256")
+        != _SEMANTIC_SUPERVISOR_PROMOTION_POLICY_SHA256
+        or evidence.get("observed_policy_id") != expected_observed_policy_id
+        or evidence.get("observed_policy_sha256") != expected_observed_policy_sha256
+        or evidence.get("target_policy_id") != _SEMANTIC_SUPERVISOR_ASSIST_POLICY_ID
+        or evidence.get("target_policy_sha256") != _SEMANTIC_SUPERVISOR_ASSIST_POLICY_SHA256
+        or evidence.get("runtime_profile_id") != _SEMANTIC_SUPERVISOR_RUNTIME_PROFILE_ID
+        or evidence.get("runtime_profile_manifest_sha256")
+        != _SEMANTIC_SUPERVISOR_RUNTIME_PROFILE_MANIFEST_SHA256
         or evidence.get("registry_binding_sha256") != registry_sha256
+        or not _semantic_supervisor_exact_digests(evidence, digest_keys)
+        or type(evidence.get("max_steps")) is not int
         or evidence.get("max_steps") != 6
+        or type(evidence.get("max_review_rounds")) is not int
         or evidence.get("max_review_rounds") != 1
+        or not _semantic_supervisor_exact_counts(evidence, count_keys)
+        or evidence["observation_count"] < _SEMANTIC_SUPERVISOR_MIN_PRODUCT_OBSERVATIONS
+        or evidence["joined_trace_count"] != evidence["observation_count"]
+        or any(evidence.get(key) is not True for key in proof_keys)
+        or any(evidence.get(key) != 0 for key in anomaly_keys)
         or type(product) is not dict
         or set(product) != expected_product_keys
         or product.get("schema") != expected_product_schema
@@ -1930,6 +2214,25 @@ def _validate_semantic_supervisor_evidence_budget_binding(
         or product.get("latency_budget_sha256") != latency_budget_sha256
         or product.get("latency_budget_ms") != latency_budget_ms
     ):
+        raise ReleaseFailure(invalid_code)
+    product_is_live = (
+        _semantic_supervisor_readiness_evidence_is_live(
+            product,
+            observation_count=evidence["observation_count"],
+            source_sha256=source_sha256,
+            latency_budget_sha256=latency_budget_sha256,
+            latency_budget_ms=latency_budget_ms,
+        )
+        if mode == "assist"
+        else _semantic_supervisor_outcome_evidence_is_live(
+            product,
+            observation_count=evidence["observation_count"],
+            source_sha256=source_sha256,
+            latency_budget_sha256=latency_budget_sha256,
+            latency_budget_ms=latency_budget_ms,
+        )
+    )
+    if not product_is_live:
         raise ReleaseFailure(invalid_code)
 
 
