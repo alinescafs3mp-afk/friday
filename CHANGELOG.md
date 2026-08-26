@@ -1,3 +1,16 @@
+## 0.207.49 — 2026-08-26
+
+### Dormant archive-selection continuation reader
+
+- The schema-43 reader now accepts the exact durable shape needed to continue
+  an already-accepted archive candidate selection as selected evidence, while
+  proving its source, passages, coverage and publication receipt against the
+  completed candidate Work Item.
+- No writer or runtime route is enabled in this release. The previously
+  released schema-42 trigger remains an exact accepted fallback, so this build
+  can safely precede the separate writer activation and read its rows after a
+  rollback.
+
 ## 0.207.48 — 2026-08-26
 
 ### Owner-confirmed installed-program execution
