@@ -1,0 +1,224 @@
+"""Exact prospective surface for the one promoted read-only supervisor journey."""
+
+from __future__ import annotations
+
+import hashlib
+import hmac
+import re
+from collections.abc import Callable, Mapping
+from dataclasses import dataclass, field
+from typing import Any
+
+from friday.file_evidence import CurrentTurnFileReferenceToken, current_turn_file_reference_of
+from friday.interaction_control_plane.compare_current_file_web_work_graph import (
+    CompareCurrentFileWebGraphError,
+    CompareCurrentFileWebPlanStepBinding,
+    CompareCurrentFileWebStepKind,
+    bind_validated_plan_to_compare_current_file_web_graph,
+)
+from friday.orchestration.contracts import TurnInput
+from friday.orchestration.execution_plan import ValidatedExecutionPlan
+from friday.orchestration.router import ReadOnlyAttachmentReference, current_attachment_references
+from friday.orchestration.semantic_supervisor import supervisor_eligibility
+from friday.orchestration.supervisor_contracts import TaskClass
+from friday.orchestration.transient_web_comparison import (
+    SealedPublicWebQuery,
+    TransientWebComparisonError,
+    seal_explicit_public_web_query,
+)
+from friday.pending_durable_turn import PendingDurableTurnAdmission
+from friday.permissions import ActorContext
+from friday.turn_intent_policy import TurnPolicyDecision
+
+_CONVERSATION_ID_RE = re.compile(r"conv_[0-9a-f]{16}\Z")
+
+
+@dataclass(frozen=True, slots=True)
+class CurrentFileWebAssistSurface:
+    """Process-local exact facts; it grants no durable ownership by itself."""
+
+    turn: TurnInput = field(repr=False)
+    actor: ActorContext = field(repr=False)
+    conversation_id: str
+    attachment: ReadOnlyAttachmentReference = field(repr=False)
+    attachment_content_sha256: str
+    web_plan: SealedPublicWebQuery = field(repr=False)
+
+    def __post_init__(self) -> None:
+        if (
+            not isinstance(self.turn, TurnInput)
+            or not isinstance(self.actor, ActorContext)
+            or _CONVERSATION_ID_RE.fullmatch(self.conversation_id) is None
+            or type(self.attachment) is not ReadOnlyAttachmentReference
+            or re.fullmatch(r"[0-9a-f]{64}", self.attachment_content_sha256) is None
+            or type(self.web_plan) is not SealedPublicWebQuery
+        ):
+            raise ValueError("assist surface is invalid")
+
+
+def _transient_web_ingestion(value: object) -> bool:
+    if value is None:
+        return True
+    if type(value) is not dict or set(value) != {
+        "promoted",
+        "queued_for_review",
+        "action",
+        "category",
+        "reason",
+    }:
+        return False
+    return bool(
+        value.get("promoted") is False
+        and value.get("queued_for_review") is False
+        and value.get("action") == "transient"
+        and value.get("category") == "web_request"
+        and type(value.get("reason")) is str
+        and bool(str(value.get("reason") or "").strip())
+    )
+
+
+def prepare_current_file_web_assist_surface(
+    settings: object,
+    *,
+    user_id: str,
+    message: str,
+    actor: ActorContext,
+    conversation_id: str | None,
+    attachments: list[dict[str, Any]] | None,
+    enable_tools: bool,
+    ingestion_result: dict[str, Any] | None,
+    synthetic_document_notice: bool,
+    replay_source_message_id: str | None,
+    mode: str | None,
+    explicit_mode_requested: bool,
+    answer_with_voice: bool,
+    reply_to: str | None,
+    quoted_attachment_reference: bool,
+    reply_assistant_reference: bool,
+    reply_assistant_message_id: str | None,
+    turn_policy: TurnPolicyDecision | None,
+    pending_durable_admission: PendingDurableTurnAdmission | None,
+    conversation_is_dialogue: Callable[[str, str], bool],
+) -> CurrentFileWebAssistSurface | None:
+    """Recognize the promoted surface without reading a file or calling a model."""
+
+    if (
+        not isinstance(actor, ActorContext)
+        or type(user_id) is not str
+        or user_id != actor.user_id
+        or type(message) is not str
+        or type(conversation_id) is not str
+        or _CONVERSATION_ID_RE.fullmatch(conversation_id) is None
+        or type(explicit_mode_requested) is not bool
+        or explicit_mode_requested
+        or enable_tools is not True
+        or synthetic_document_notice is not False
+        or replay_source_message_id is not None
+        or mode is not None
+        or answer_with_voice is not False
+        or reply_to is not None
+        or quoted_attachment_reference is not False
+        or reply_assistant_reference is not False
+        or reply_assistant_message_id is not None
+        or turn_policy is not None
+        or pending_durable_admission is not None
+        or not _transient_web_ingestion(ingestion_result)
+        or type(attachments) is not list
+        or len(attachments) != 1
+        or not isinstance(attachments[0], Mapping)
+    ):
+        return None
+    try:
+        if conversation_is_dialogue(str(actor.own_id or ""), conversation_id) is not True:
+            return None
+    except Exception:
+        return None
+
+    carrier = attachments[0]
+    token = current_turn_file_reference_of(carrier)
+    if type(token) is not CurrentTurnFileReferenceToken:
+        return None
+    snapshot = dict(carrier)
+    try:
+        turn = TurnInput.from_chat(
+            message=message,
+            actor=actor,
+            conversation_id=conversation_id,
+            attachments=[snapshot],
+            enable_tools=True,
+            synthetic_document_notice=False,
+            mode=None,
+            reply_to=None,
+            quoted_attachment_reference=False,
+            reply_assistant_reference=False,
+        )
+    except Exception:
+        return None
+    if (
+        turn.message != message
+        or turn.message_truncated
+        or turn.attachments_truncated
+        or len(turn.attachments) != 1
+    ):
+        return None
+    references = current_attachment_references(turn, (snapshot,), (token,))
+    if len(references) != 1:
+        return None
+    eligibility = supervisor_eligibility(turn, settings)
+    if not eligibility.eligible or eligibility.task_class is not TaskClass.COMPARE_CURRENT_FILE_WITH_CURRENT_WEB:
+        return None
+    try:
+        web_plan = seal_explicit_public_web_query(
+            current_user_message=message,
+            actor=actor,
+            conversation_id=conversation_id,
+        )
+    except (TransientWebComparisonError, TypeError, ValueError, UnicodeError):
+        return None
+    return CurrentFileWebAssistSurface(
+        turn=turn,
+        actor=actor,
+        conversation_id=conversation_id,
+        attachment=references[0],
+        attachment_content_sha256=token.content_sha256,
+        web_plan=web_plan,
+    )
+
+
+def bind_assist_plan_to_surface(
+    plan: ValidatedExecutionPlan,
+    surface: CurrentFileWebAssistSurface,
+) -> tuple[CompareCurrentFileWebPlanStepBinding, ...] | None:
+    """Bind proposal-local steps to the fixed graph and exact outbound query."""
+
+    if type(plan) is not ValidatedExecutionPlan or type(surface) is not CurrentFileWebAssistSurface:
+        return None
+    try:
+        bindings = bind_validated_plan_to_compare_current_file_web_graph(plan)
+    except (CompareCurrentFileWebGraphError, TypeError, ValueError):
+        return None
+    by_kind = {item.graph_kind: item for item in bindings}
+    file_input = by_kind[CompareCurrentFileWebStepKind.FILE_READ].plan_step.input
+    web_input = by_kind[CompareCurrentFileWebStepKind.WEB_READ].plan_step.input
+    query_intent = web_input.get("query_intent")
+    try:
+        query_sha256 = (
+            hashlib.sha256(query_intent.encode("utf-8", errors="strict")).hexdigest()
+            if type(query_intent) is str
+            else ""
+        )
+    except UnicodeError:
+        return None
+    if file_input.get("attachment_ordinal") != 1 or not hmac.compare_digest(
+        query_sha256,
+        surface.web_plan.query_sha256,
+    ):
+        return None
+    return bindings
+
+
+__all__ = [
+    "CurrentFileWebAssistSurface",
+    "bind_assist_plan_to_surface",
+    "prepare_current_file_web_assist_surface",
+]
