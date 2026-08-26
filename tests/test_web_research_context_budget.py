@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import time
 
 import httpx
 import pytest
@@ -96,10 +97,52 @@ class _ImmediateFetchEntryHarness(_ResearchHarness):
         return FetchResult(url, "Source 1", "fact", 4, status_code=200)
 
 
+class _QueuedLateFetchEntryHarness(_ImmediateFetchEntryHarness):
+    async def search(self, query: str, *, max_results: int) -> list[SearchResult]:
+        del query, max_results
+        # This callback is queued before the fetch tasks.  It deterministically
+        # crosses the absolute research deadline after the caller calculated a
+        # positive batch timeout but before a child can enter ``fetch``.
+        asyncio.get_running_loop().call_soon(time.sleep, 0.03)
+        return [SearchResult("Source 1", "https://source-1.example.com/", "", "fixture")]
+
+
 @pytest.mark.asyncio
 async def test_research_does_not_enter_fetch_after_total_budget_expires(monkeypatch) -> None:
     monkeypatch.setattr(web_surfer_module, "_RESEARCH_TOTAL_BUDGET", 0.0, raising=False)
     harness = _ImmediateFetchEntryHarness()
+
+    result = await harness.research("same query", max_sources=1)
+
+    assert harness.entered == []
+    assert (
+        result["target_sources"],
+        result["requested_sources"],
+        result["timed_out_sources"],
+    ) == (1, 1, 1)
+
+
+@pytest.mark.asyncio
+async def test_research_rechecks_deadline_inside_queued_fetch_task(monkeypatch) -> None:
+    monkeypatch.setattr(web_surfer_module, "_RESEARCH_TOTAL_BUDGET", 0.02, raising=False)
+    monkeypatch.setattr(web_surfer_module, "_RESEARCH_FETCH_BUDGET", 0.02, raising=False)
+    harness = _QueuedLateFetchEntryHarness()
+
+    result = await harness.research("same query", max_sources=1)
+
+    assert harness.entered == []
+    assert (
+        result["target_sources"],
+        result["requested_sources"],
+        result["timed_out_sources"],
+    ) == (1, 1, 1)
+
+
+@pytest.mark.asyncio
+async def test_research_rechecks_wave_deadline_inside_queued_fetch_task(monkeypatch) -> None:
+    monkeypatch.setattr(web_surfer_module, "_RESEARCH_TOTAL_BUDGET", 0.2, raising=False)
+    monkeypatch.setattr(web_surfer_module, "_RESEARCH_FETCH_BUDGET", 0.02, raising=False)
+    harness = _QueuedLateFetchEntryHarness()
 
     result = await harness.research("same query", max_sources=1)
 

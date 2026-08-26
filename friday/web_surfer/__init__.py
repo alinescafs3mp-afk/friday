@@ -68,6 +68,7 @@ _FETCH_TOTAL_BUDGET = 60.0
 # completed pages because one peer was still streaming.
 _RESEARCH_TOTAL_BUDGET = 27.0
 _RESEARCH_FETCH_BUDGET = 12.0
+_RESEARCH_FETCH_ENTRY_MARGIN = 0.001
 _RESEARCH_DIRECT_BUDGET = 8.0
 #: Срок на чтение `robots.txt`. Отдельный и короткий: файл правил крошечный, а
 #: без своего срока он становится дорогой в обход страничного бюджета.
@@ -2300,6 +2301,7 @@ class WebSurfer:
         source_limit = max(1, min(int(max_sources), 8))
         loop = asyncio.get_running_loop()
         started_at = loop.time()
+        research_deadline = started_at + _RESEARCH_TOTAL_BUDGET
         try:
             async with asyncio.timeout(_RESEARCH_TOTAL_BUDGET):
                 search_options: dict[str, Any] = {"max_results": source_limit * 2}
@@ -2389,7 +2391,7 @@ class WebSurfer:
         direct: list[dict[str, Any]] = []
         if not freshness:
             try:
-                remaining_total = max(0.0, _RESEARCH_TOTAL_BUDGET - (loop.time() - started_at))
+                remaining_total = max(0.0, research_deadline - loop.time())
                 fetch_reserve = min(_RESEARCH_FETCH_BUDGET, remaining_total)
                 direct_budget = min(
                     _RESEARCH_DIRECT_BUDGET,
@@ -2501,17 +2503,29 @@ class WebSurfer:
             if not batch:
                 return
             requested_sources += len(batch)
-            if timeout <= 0:
+            batch_started_at = loop.time()
+            batch_deadline = min(research_deadline, batch_started_at + max(0.0, timeout))
+            if timeout <= 0 or batch_deadline - batch_started_at <= _RESEARCH_FETCH_ENTRY_MARGIN:
                 # The search results are selected and therefore requested, but
                 # no outbound fetch may enter after the total budget expires.
                 timed_out_sources += len(batch)
                 return
             attempted_hosts.update(host for result in batch if (host := _host_of(result.url)))
-            tasks = [asyncio.create_task(self.fetch(result.url, max_length=20_000)) for result in batch]
-            done: set[asyncio.Task[FetchResult]] = set()
-            pending: set[asyncio.Task[FetchResult]] = set(tasks)
+
+            async def enter_fetch(result: SearchResult) -> FetchResult | None:
+                # Task creation yields control later.  Recheck the absolute
+                # deadline in the child immediately before entering the fetch
+                # adapter so a queued callback cannot start outbound work late.
+                if loop.time() >= batch_deadline:
+                    return None
+                return await self.fetch(result.url, max_length=20_000)
+
+            tasks = [asyncio.create_task(enter_fetch(result)) for result in batch]
+            done: set[asyncio.Task[FetchResult | None]] = set()
+            pending: set[asyncio.Task[FetchResult | None]] = set(tasks)
             try:
-                done, pending = await asyncio.wait(tasks, timeout=max(0.0, timeout))
+                wait_budget = max(0.0, batch_deadline - loop.time())
+                done, pending = await asyncio.wait(tasks, timeout=wait_budget)
             finally:
                 unfinished = [task for task in tasks if not task.done()]
                 for task in unfinished:
@@ -2532,6 +2546,9 @@ class WebSurfer:
                     if host:
                         failed_hosts.add(host)
                     continue
+                if fetch_result is None:
+                    timed_out_sources += 1
+                    continue
                 item = fetch_result.to_dict(preview_chars=20_000, query=query)
                 item["search_title"] = search_result.title
                 item["snippet"] = search_result.snippet
@@ -2544,7 +2561,7 @@ class WebSurfer:
                     continue
                 record_item(item, attempted=True)
 
-        remaining_total = max(0.0, _RESEARCH_TOTAL_BUDGET - (loop.time() - started_at))
+        remaining_total = max(0.0, research_deadline - loop.time())
         await fetch_batch(selected, timeout=min(_RESEARCH_FETCH_BUDGET, remaining_total))
 
         # Refill every missing COMPLETE slot, one deficit-sized wave at a time.
@@ -2552,7 +2569,7 @@ class WebSurfer:
         # ceiling and the original total/fetch deadlines remain authoritative.
         unused = list(spare)
         while len(complete) < target_sources and unused:
-            remaining_total = max(0.0, _RESEARCH_TOTAL_BUDGET - (loop.time() - started_at))
+            remaining_total = max(0.0, research_deadline - loop.time())
             if remaining_total <= 0:
                 break
             elsewhere = [item for item in unused if _host_of(item.url) not in attempted_hosts]
