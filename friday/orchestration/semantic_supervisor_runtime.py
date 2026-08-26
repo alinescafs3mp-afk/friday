@@ -42,6 +42,11 @@ from friday.orchestration.supervisor_observation import (
     parsed_observation,
     skipped_observation,
 )
+from friday.orchestration.supervisor_trace_join import (
+    PrimaryTraceProjection,
+    load_primary_trace_projection,
+    persist_joined_supervisor_observation,
+)
 from friday.pending_durable_turn import (
     PendingDurableTurnAdmission,
     pending_comparison_current_attachment_count,
@@ -106,6 +111,7 @@ class _ShadowJob:
     """Process-local bookkeeping for exactly one accepted shadow job."""
 
     prepared: _PreparedShadow
+    primary_trace: PrimaryTraceProjection | None = None
     captured: dict[str, object] = field(
         default_factory=lambda: {
             "proposal_digest": "",
@@ -279,13 +285,47 @@ class SemanticSupervisorShadowRuntime:
             "policy_verdicts": dict(sorted(self._policy_counts.items())),
         }
 
-    def _record(self, observation: SupervisorObservation) -> None:
+    def _record(
+        self,
+        observation: SupervisorObservation,
+        primary_trace: PrimaryTraceProjection | None = None,
+    ) -> None:
+        if primary_trace is not None:
+            observation = observation.with_primary_trace(
+                trace_digest=primary_trace.trace_digest,
+                capability_outcomes=primary_trace.capability_outcomes,
+                completion=primary_trace.completion,
+                publication=primary_trace.publication,
+                authority_rechecked=primary_trace.authority_rechecked,
+                state_restored=primary_trace.state_restored,
+                retry_occurred=primary_trace.retry_occurred,
+            )
         self._observations.append(observation)
         self._observation_total += 1
         self._invoked_total += int(observation.invoked)
         self._skip_counts[observation.skip_reason.value] += 1
         self._parse_counts[observation.proposal_parse_status] += 1
         self._policy_counts[observation.policy_verdict] += 1
+        persist_joined_supervisor_observation(
+            self._primary,
+            observation_payload=observation.payload(),
+            primary_trace=primary_trace,
+        )
+
+    @staticmethod
+    def _latency_bucket(elapsed_sec: float) -> str:
+        elapsed_ms = max(0, round(elapsed_sec * 1_000))
+        if elapsed_ms < 250:
+            return "lt_250ms"
+        if elapsed_ms < 1_000:
+            return "250_999ms"
+        if elapsed_ms < 2_000:
+            return "1_2s"
+        if elapsed_ms < 5_000:
+            return "2_5s"
+        if elapsed_ms <= 15_000:
+            return "5_15s"
+        return "over_15s"
 
     def _advance_dispatch_epoch(self, actor: ActorContext, conversation_id: str | None) -> tuple[str, int]:
         """Invalidate older same-scope shadows before this turn can establish state."""
@@ -607,12 +647,13 @@ class SemanticSupervisorShadowRuntime:
             accepted_profile_id=prepared.accepted_profile_id,
             skip_reason=skip,
             invoked=dispatched,
+            planner_latency_bucket=str(captured.get("planner_latency_bucket", "not_called")),
         )
 
     def _record_terminal(self, job: _ShadowJob, observation: SupervisorObservation) -> None:
         if job.terminal_recorded:
             return
-        self._record(observation)
+        self._record(observation, job.primary_trace)
         job.terminal_recorded = True
 
     def _cancelled_job_observation(self, job: _ShadowJob) -> SupervisorObservation:
@@ -705,6 +746,7 @@ class SemanticSupervisorShadowRuntime:
             # It retains no endpoint, prompt, response, actor, or conversation data.
             captured["dispatched"] = True
 
+        planner_started = time.monotonic()
         try:
             evaluator = self._scheduler.evaluate_shadow
             attempt = await evaluator(
@@ -714,6 +756,7 @@ class SemanticSupervisorShadowRuntime:
                 pre_dispatch_validator=_dispatch_is_still_ordinary,
                 dispatch_observer=_mark_dispatched,
             )
+            captured["planner_latency_bucket"] = self._latency_bucket(time.monotonic() - planner_started)
             if not isinstance(attempt, SecondaryAttempt):
                 attempt = SecondaryAttempt.rejected(SecondaryFailure.MALFORMED_RESPONSE)
             elif attempt.succeeded and captured.get("proposal_parse_status") != "parsed":
@@ -725,6 +768,10 @@ class SemanticSupervisorShadowRuntime:
                 attempt = SecondaryAttempt.rejected(SecondaryFailure.MALFORMED_RESPONSE)
             self._record_terminal(job, self._observation_from_attempt(prepared, attempt, captured))
         except asyncio.CancelledError:
+            captured.setdefault(
+                "planner_latency_bucket",
+                self._latency_bucket(time.monotonic() - planner_started),
+            )
             if not isinstance(captured.get("skip"), SupervisorSkipReason):
                 captured["skip"] = job.cancel_reason or (
                     SupervisorSkipReason.SECONDARY_UNAVAILABLE
@@ -734,6 +781,10 @@ class SemanticSupervisorShadowRuntime:
             self._record_terminal(job, self._cancelled_job_observation(job))
             raise
         except Exception:
+            captured.setdefault(
+                "planner_latency_bucket",
+                self._latency_bucket(time.monotonic() - planner_started),
+            )
             self._record_terminal(
                 job,
                 self._observation_from_attempt(
@@ -747,23 +798,36 @@ class SemanticSupervisorShadowRuntime:
         self,
         prepared: _PreparedShadow | None,
         skipped: SupervisorObservation | None,
+        primary_trace: PrimaryTraceProjection | None,
     ) -> None:
         if skipped is not None:
-            self._record(skipped)
+            self._record(skipped, primary_trace)
             return
         if prepared is None:
-            self._record(self._skipped(SupervisorSkipReason.SECONDARY_UNAVAILABLE))
+            self._record(
+                self._skipped(SupervisorSkipReason.SECONDARY_UNAVAILABLE),
+                primary_trace,
+            )
             return
         if self._closed:
-            self._record(self._skipped(SupervisorSkipReason.SECONDARY_UNAVAILABLE, turn=prepared.turn))
+            self._record(
+                self._skipped(SupervisorSkipReason.SECONDARY_UNAVAILABLE, turn=prepared.turn),
+                primary_trace,
+            )
             return
         if prepared.request.absolute_deadline_monotonic <= time.monotonic():
-            self._record(self._skipped(SupervisorSkipReason.TIMEOUT, turn=prepared.turn))
+            self._record(
+                self._skipped(SupervisorSkipReason.TIMEOUT, turn=prepared.turn),
+                primary_trace,
+            )
             return
         if len(self._shadow_tasks) >= _MAX_PENDING_SHADOW_ATTEMPTS:
-            self._record(self._skipped(SupervisorSkipReason.SATURATED, turn=prepared.turn))
+            self._record(
+                self._skipped(SupervisorSkipReason.SATURATED, turn=prepared.turn),
+                primary_trace,
+            )
             return
-        job = _ShadowJob(prepared=prepared)
+        job = _ShadowJob(prepared=prepared, primary_trace=primary_trace)
         task = asyncio.create_task(
             self._complete_shadow(job),
             name="friday-semantic-supervisor-shadow",
@@ -935,5 +999,6 @@ class SemanticSupervisorShadowRuntime:
             ):
                 skipped = self._skipped(SupervisorSkipReason.EXACT_LANE, turn=prepared.turn)
                 prepared = None
-            self._schedule_after_primary(prepared, skipped)
+            primary_trace = load_primary_trace_projection(self._primary, primary_result)
+            self._schedule_after_primary(prepared, skipped, primary_trace)
         return primary_result

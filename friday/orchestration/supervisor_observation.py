@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from enum import StrEnum
 from typing import Any
 
@@ -62,6 +62,15 @@ class SupervisorObservation:
     endpoint_health_class: str
     current_route: str
     runtime_owner: str
+    planner_latency_bucket: str
+    review_latency_bucket: str
+    primary_trace_digest: str
+    capability_outcome_classes: tuple[str, ...]
+    completion_verdict: str
+    publication_result: str
+    authority_rechecked: str
+    state_restored: str
+    retry_occurred: str
 
     def payload(self) -> dict[str, Any]:
         return {
@@ -89,10 +98,43 @@ class SupervisorObservation:
             "endpoint_health_class": self.endpoint_health_class,
             "current_route": self.current_route,
             "runtime_owner": self.runtime_owner,
+            "planner_latency_bucket": self.planner_latency_bucket,
+            "review_latency_bucket": self.review_latency_bucket,
+            "primary_trace_digest": self.primary_trace_digest,
+            "capability_outcome_classes": list(self.capability_outcome_classes),
+            "completion_verdict": self.completion_verdict,
+            "publication_result": self.publication_result,
+            "authority_rechecked": self.authority_rechecked,
+            "state_restored": self.state_restored,
+            "retry_occurred": self.retry_occurred,
         }
 
     def canonical_sha256(self) -> str:
         return canonical_sha256(self.payload())
+
+    def with_primary_trace(
+        self,
+        *,
+        trace_digest: str,
+        capability_outcomes: tuple[str, ...],
+        completion: str,
+        publication: str,
+        authority_rechecked: bool,
+        state_restored: bool,
+        retry_occurred: bool,
+    ) -> SupervisorObservation:
+        """Join only closed facts from the already committed primary trace."""
+
+        return replace(
+            self,
+            primary_trace_digest=trace_digest,
+            capability_outcome_classes=capability_outcomes,
+            completion_verdict=completion,
+            publication_result=publication,
+            authority_rechecked="yes" if authority_rechecked else "no",
+            state_restored="yes" if state_restored else "no",
+            retry_occurred="yes" if retry_occurred else "no",
+        )
 
 
 def skipped_observation(
@@ -129,6 +171,15 @@ def skipped_observation(
         endpoint_health_class="not_called",
         current_route=current_route,
         runtime_owner="unchanged",
+        planner_latency_bucket="not_called",
+        review_latency_bucket="not_called",
+        primary_trace_digest="",
+        capability_outcome_classes=(),
+        completion_verdict="unavailable",
+        publication_result="unavailable",
+        authority_rechecked="unavailable",
+        state_restored="unavailable",
+        retry_occurred="unavailable",
     )
 
 
@@ -149,6 +200,7 @@ def parsed_observation(
     accepted_profile_id: str,
     skip_reason: SupervisorSkipReason = SupervisorSkipReason.NONE,
     invoked: bool = True,
+    planner_latency_bucket: str = "unavailable",
 ) -> SupervisorObservation:
     mode = SupervisorMode.fail_closed(requested_mode)
     return SupervisorObservation(
@@ -175,6 +227,15 @@ def parsed_observation(
         endpoint_health_class=endpoint_health_class,
         current_route=current_route,
         runtime_owner="unchanged",
+        planner_latency_bucket=planner_latency_bucket,
+        review_latency_bucket="not_called",
+        primary_trace_digest="",
+        capability_outcome_classes=(),
+        completion_verdict="unavailable",
+        publication_result="unavailable",
+        authority_rechecked="unavailable",
+        state_restored="unavailable",
+        retry_occurred="unavailable",
     )
 
 
