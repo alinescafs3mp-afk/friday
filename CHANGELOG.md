@@ -1,3 +1,21 @@
+## 0.207.43 — 2026-08-26
+
+### Exact-host nmap continuation and exposure truth
+
+- A direct owner request to assess one exact private host now executes a hidden,
+  bounded TCP discovery followed by the existing attested nmap service profile.
+  A deictic follow-up such as “какие у него есть уязвимости?” restores only the
+  exact authenticated target from a content-free durable receipt; unrelated
+  turns, ambiguity and public or multi-address targets fail closed.
+- Results distinguish reachable-port exposure from verified vulnerabilities.
+  Partial TCP or nmap coverage stays explicitly partial, and raw remote banners
+  cannot become claims, instructions or durable metadata.
+- Publication rechecks installation owner, `engineer.use`,
+  `engineer.host.audit` and the exact private-target policy in one transaction.
+  Target and principal bindings use deployment-local keyed digests.
+- Database schema remains 43. No arbitrary flags, NSE scripts, exploit payloads
+  or CVE claims were added.
+
 ## 0.207.42 — 2026-08-26
 
 ### Exact Engineer network report export

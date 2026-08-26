@@ -2359,13 +2359,10 @@ class _EngineerHostOutcome:
             raise ValueError("entered engineer host outcome lost its target")
         if (
             not isinstance(self.open_ports, tuple)
-            or
-            len(self.open_ports) > 64
+            or len(self.open_ports) > 64
             or tuple(sorted(set(self.open_ports))) != self.open_ports
             or any(
-                isinstance(port, bool)
-                or not isinstance(port, int)
-                or not 1 <= port <= 65535
+                isinstance(port, bool) or not isinstance(port, int) or not 1 <= port <= 65535
                 for port in self.open_ports
             )
         ):
@@ -2406,16 +2403,12 @@ class _EngineerHostOutcome:
             or any(not isinstance(item, tuple) or len(item) != 2 for item in self.findings)
         ):
             raise ValueError("engineer host outcome findings are invalid")
-        if (
-            tuple(sorted(set(self.findings), key=lambda item: (item[1], item[0])))
-            != self.findings
-            or any(
-                code not in _ENGINEER_HOST_FINDING_CODES
-                or isinstance(port, bool)
-                or not isinstance(port, int)
-                or port not in self.open_ports
-                for code, port in self.findings
-            )
+        if tuple(sorted(set(self.findings), key=lambda item: (item[1], item[0]))) != self.findings or any(
+            code not in _ENGINEER_HOST_FINDING_CODES
+            or isinstance(port, bool)
+            or not isinstance(port, int)
+            or port not in self.open_ports
+            for code, port in self.findings
         ):
             raise ValueError("engineer host outcome findings are invalid")
         if self.active_probes_status not in {"sent", "not_sent", "uncertain"}:
@@ -2436,9 +2429,10 @@ class _EngineerHostOutcome:
         ):
             if re.fullmatch(r"[0-9a-f]{64}", digest) is None:
                 raise ValueError("engineer host outcome binding is invalid")
-        if self.continuation_source_assistant_id and re.fullmatch(
-            r"msg_[0-9a-f]{16}", self.continuation_source_assistant_id
-        ) is None:
+        if (
+            self.continuation_source_assistant_id
+            and re.fullmatch(r"msg_[0-9a-f]{16}", self.continuation_source_assistant_id) is None
+        ):
             raise ValueError("engineer host outcome continuation source is invalid")
         if self.status is CapabilityStatus.SUCCEEDED and not (
             self.tool_started
@@ -3128,9 +3122,7 @@ def _engineer_host_service_rows(
             confidence = service.get("confidence")
             confidence = (
                 confidence
-                if isinstance(confidence, int)
-                and not isinstance(confidence, bool)
-                and 0 <= confidence <= 10
+                if isinstance(confidence, int) and not isinstance(confidence, bool) and 0 <= confidence <= 10
                 else None
             )
             rows[port] = (
@@ -3274,8 +3266,7 @@ def _engineer_host_owned_outcome_unchecked(dossier: Mapping[str, Any]) -> _Engin
         coverage = coverage_value if isinstance(coverage_value, Mapping) else {}
         safe_contract = bool(
             result.get("profile") == "vulnerabilities"
-            and result.get("service_profile")
-            == "tcp_connect_then_nmap_selected_ports_version_light"
+            and result.get("service_profile") == "tcp_connect_then_nmap_selected_ports_version_light"
             and result.get("ports_checked") == 64
             and result.get("exploit_payloads_sent") is False
             and result.get("cve_assessment_performed") is False
@@ -3299,17 +3290,13 @@ def _engineer_host_owned_outcome_unchecked(dossier: Mapping[str, Any]) -> _Engin
             and result.get("assessment_status") == "complete"
         )
         partial = bool(
-            safe_contract
-            and result.get("ok") is True
-            and result.get("assessment_status") == "partial"
+            safe_contract and result.get("ok") is True and result.get("assessment_status") == "partial"
         )
     else:
         services = _engineer_host_service_rows(scan, open_ports)
         findings = ()
         service_coverage_value = scan.get("coverage")
-        service_coverage = (
-            service_coverage_value if isinstance(service_coverage_value, Mapping) else {}
-        )
+        service_coverage = service_coverage_value if isinstance(service_coverage_value, Mapping) else {}
         complete = bool(
             result.get("ok") is True
             and scan.get("ok") is True
@@ -3373,6 +3360,8 @@ _ENGINEER_HOST_REASON_TEXT = {
     "target_resolution_timeout": "истёк лимит разрешения цели",
     "turn_deadline_expired": "общий лимит хода истёк до запуска",
 }
+
+
 def _render_engineer_host_outcome(outcome: _EngineerHostOutcome) -> str:
     if outcome.status in {CapabilityStatus.SUCCEEDED, CapabilityStatus.PARTIAL}:
         qualifier = "завершена" if outcome.status is CapabilityStatus.SUCCEEDED else "завершена частично"
@@ -3408,7 +3397,11 @@ def _render_engineer_host_outcome(outcome: _EngineerHostOutcome) -> str:
             lines = [f"Сканирование хоста `{outcome.address}` {qualifier}."]
             lines.append(
                 "Открытые TCP-порты: "
-                + (", ".join(f"`{port}`" for port in outcome.open_ports) if outcome.open_ports else "не обнаружены")
+                + (
+                    ", ".join(f"`{port}`" for port in outcome.open_ports)
+                    if outcome.open_ports
+                    else "не обнаружены"
+                )
                 + "."
             )
             known_services = [row for row in outcome.services if row[1] != "unknown"]
@@ -3483,11 +3476,13 @@ def _accepted_engineer_host_receipt(value: object) -> tuple[Mapping[str, Any], s
         return None
     if not hmac.compare_digest(hashlib.sha256(encoded).hexdigest(), digest):
         return None
-    counts = (outcome.get("target_count"), outcome.get("open_port_count"), outcome.get("service_count"), outcome.get("finding_count"))
-    if any(
-        isinstance(item, bool) or not isinstance(item, int) or not 0 <= item <= 64
-        for item in counts
-    ):
+    counts = (
+        outcome.get("target_count"),
+        outcome.get("open_port_count"),
+        outcome.get("service_count"),
+        outcome.get("finding_count"),
+    )
+    if any(isinstance(item, bool) or not isinstance(item, int) or not 0 <= item <= 64 for item in counts):
         return None
     for key in (
         "evidence_sha256",
@@ -38415,9 +38410,8 @@ class AgentRuntime:
         if source is None or str(source["role"] or "") != "user":
             return None
         source_content = str(source["content"] or "")
-        if (
-            not requests_active_assessment(source_content)
-            or requests_host_vulnerability_assessment(source_content)
+        if not requests_active_assessment(source_content) or requests_host_vulnerability_assessment(
+            source_content
         ):
             return None
         try:
@@ -56480,8 +56474,7 @@ class AgentRuntime:
                 and not simple_public_news_publication_authorized
             )
             engineer_host_authority_changed_before_publication = bool(
-                engineer_host_publication_reauth_required
-                and not engineer_host_publication_authorized
+                engineer_host_publication_reauth_required and not engineer_host_publication_authorized
             )
             network_report_authority_changed_before_publication = bool(
                 network_report_publication_reauth_required and not network_report_publication_authorized
@@ -57964,11 +57957,7 @@ class AgentRuntime:
             and not _turn_deadline_expired(turn_deadline)
         ):
             continuation: _EngineerHostContinuation | None = None
-            if (
-                vulnerability_followup_requested
-                and conversation_id
-                and source_user_message_id
-            ):
+            if vulnerability_followup_requested and conversation_id and source_user_message_id:
                 try:
                     with self.storage.transaction() as continuation_conn:
                         continuation = self._engineer_host_continuation(
@@ -58064,12 +58053,8 @@ class AgentRuntime:
                     dossier["target_error"] = "private_single_host_required"
                     pinned_target = None
                 else:
-                    vulnerability_classes = {
-                        item.classification for item in vulnerability_snapshot.bindings
-                    }
-                    if not vulnerability_classes.issubset(
-                        {"operator_approved_private", "approved_ipv6_ula"}
-                    ):
+                    vulnerability_classes = {item.classification for item in vulnerability_snapshot.bindings}
+                    if not vulnerability_classes.issubset({"operator_approved_private", "approved_ipv6_ula"}):
                         dossier["ok"] = False
                         dossier["targets"] = [pinned_target.public_dict()]
                         dossier["target_error"] = "private_single_host_required"
@@ -58124,10 +58109,7 @@ class AgentRuntime:
                     "host": host,
                     "target_ticket": target_ticket,
                 }
-                if (
-                    dossier["_named_host_profile"] == "services"
-                    and pinned_target.implied_port is not None
-                ):
+                if dossier["_named_host_profile"] == "services" and pinned_target.implied_port is not None:
                     arguments["ports"] = [pinned_target.implied_port]
                 action_tool = (
                     _ENGINEER_HOST_VULNERABILITY_ACTION_TOOL
@@ -58147,13 +58129,9 @@ class AgentRuntime:
                     else:
                         host_rows = data.get("hosts") if isinstance(data, Mapping) else None
                         if isinstance(host_rows, list):
-                            dossier["hosts"].extend(
-                                item for item in host_rows if isinstance(item, Mapping)
-                            )
+                            dossier["hosts"].extend(item for item in host_rows if isinstance(item, Mapping))
                         elif not result.success:
-                            dossier["hosts"].append(
-                                {"ok": False, "host": host, "error": "audit_unavailable"}
-                            )
+                            dossier["hosts"].append({"ok": False, "host": host, "error": "audit_unavailable"})
                     if isinstance(data, Mapping):
                         dossier["active_probes_sent"] = data.get("active_probes_sent") is True
                         dossier["exploit_payloads_sent"] = data.get("exploit_payloads_sent") is True

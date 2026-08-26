@@ -988,7 +988,7 @@ def requests_host_vulnerability_assessment(speech: str) -> bool:
                 if target_end <= item.end:
                     return True
                 continue
-            tail = masked[item.end:target_start]
+            tail = masked[item.end : target_start]
             if len(tail) <= 64 and _HOST_EFFECT_TARGET_TAIL.fullmatch(tail) is not None:
                 return True
         return False
@@ -1003,10 +1003,7 @@ def requests_host_vulnerability_assessment(speech: str) -> bool:
         bool(targets)
         and target_is_bound_to_request(item)
         and not _prior_request_unit_has_inert_governor(masked, item.unit_start)
-        and _HOST_VULNERABILITY_QUESTION_NEGATION.search(
-            masked[item.unit_start : item.unit_end]
-        )
-        is None
+        and _HOST_VULNERABILITY_QUESTION_NEGATION.search(masked[item.unit_start : item.unit_end]) is None
         and _PASSIVE_ASSESSMENT_OBJECT.search(masked[item.unit_start : item.unit_end]) is None
         and _REPORTED_REQUEST_CUE.search(masked[item.unit_start : item.unit_end]) is None
         for item in _direct_request_matches(text, _HOST_VULNERABILITY_QUESTION)

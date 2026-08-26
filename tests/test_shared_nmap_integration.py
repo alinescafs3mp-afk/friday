@@ -475,9 +475,7 @@ def test_vulnerability_tcp_discovery_never_sends_application_probes(
         monkeypatch.setattr(
             hosts,
             helper,
-            lambda *_args, _helper=helper, **_kwargs: pytest.fail(
-                f"application probe {_helper} was invoked"
-            ),
+            lambda *_args, _helper=helper, **_kwargs: pytest.fail(f"application probe {_helper} was invoked"),
         )
     target = hosts.PinnedTarget(
         host="192.168.1.120",
@@ -533,9 +531,7 @@ def test_service_assessment_requires_complete_nmap_coverage(
     monkeypatch.setattr(
         hosts,
         "_scan_ports",
-        lambda *_args, **_kwargs: [
-            {"port": 5000, "state": "open", "probes": ["tcp_connect"]}
-        ],
+        lambda *_args, **_kwargs: [{"port": 5000, "state": "open", "probes": ["tcp_connect"]}],
     )
     monkeypatch.setattr(
         local_binaries,

@@ -52,6 +52,15 @@ address while retaining the logical hostname for HTTP and TLS. Every report
 states whether active probes were sent. Engineer v1 does not generate or send
 exploit payloads, shells or automatic exploit chains.
 
+A direct light-exposure request for one exact private host, or an immediate
+deictic follow-up to its authenticated successful host scan, uses a hidden
+code-owned profile: pure TCP reachability over the fixed bounded port set,
+followed only for observed open ports by the shared nmap
+`-sT -sV --version-light` adapter. It reports reachable surfaces and service
+classes, never infers a CVE from a banner, and labels incomplete TCP or nmap
+coverage as partial. The follow-up receipt stores no address or remote content
+and is displaced by an unrelated turn.
+
 When Host Capability Plane is enabled, its `nmap` action reuses this release's
 same target normalization, fixed `/usr/bin/nmap` argv builder, version probe,
 bounded XML parser, evidence and coverage contract. The two entry points do not

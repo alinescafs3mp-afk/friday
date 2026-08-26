@@ -846,11 +846,7 @@ def _nmap_service_observations(
             if not isinstance(row, Mapping) or row.get("state") != "open":
                 continue
             port = row.get("port")
-            if (
-                isinstance(port, bool)
-                or not isinstance(port, int)
-                or port not in selected_ports
-            ):
+            if isinstance(port, bool) or not isinstance(port, int) or port not in selected_ports:
                 continue
             service = row.get("service")
             service = service if isinstance(service, Mapping) else {}
@@ -947,16 +943,13 @@ def assess_target_vulnerabilities(
         and coverage.get("accounted") == 1
         and coverage.get("skipped") == 0
         and any(
-            isinstance(item, Mapping)
-            and re.fullmatch(r"[0-9a-f]{64}", str(item.get("sha256") or ""))
+            isinstance(item, Mapping) and re.fullmatch(r"[0-9a-f]{64}", str(item.get("sha256") or ""))
             for item in evidence
         )
     )
     return {
         "ok": True,
-        "error": str(
-            (scan.get("error") or "") if discovery_complete else "tcp_discovery_incomplete"
-        )[:80],
+        "error": str((scan.get("error") or "") if discovery_complete else "tcp_discovery_incomplete")[:80],
         "host": target.host,
         "addresses": list(target.addresses),
         "probed_address": target.connect_address,
@@ -992,9 +985,7 @@ def assess_target_vulnerabilities(
         "cve_assessment_performed": False,
         "verified_vulnerability_claims": False,
         "assessment_status": (
-            "complete"
-            if discovery_complete and (nmap_complete or not open_ports)
-            else "partial"
+            "complete" if discovery_complete and (nmap_complete or not open_ports) else "partial"
         ),
     }
 

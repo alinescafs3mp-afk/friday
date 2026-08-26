@@ -427,12 +427,8 @@ async def test_live_receipt_followup_executes_hidden_profile_on_restored_exact_t
 
 
 def test_capability_truth_uses_attested_registry_projection() -> None:
-    available = _render_engineer_nmap_capability_truth(
-        {"environment": {"tools": {"nmap": True}}}
-    )
-    unavailable = _render_engineer_nmap_capability_truth(
-        {"environment": {"tools": {"nmap": False}}}
-    )
+    available = _render_engineer_nmap_capability_truth({"environment": {"tools": {"nmap": True}}})
+    unavailable = _render_engineer_nmap_capability_truth({"environment": {"tools": {"nmap": False}}})
 
     assert "Проверенный nmap доступен" in available
     assert "закрытые code-owned профили" in available
