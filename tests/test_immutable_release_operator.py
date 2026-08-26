@@ -5270,6 +5270,19 @@ def test_installed_surface_smoke_uses_one_hermetic_environment_and_cleans_it(
     assert all(os.environ[name] == value for name, value in poison.items())
 
 
+def test_surface_smoke_requires_host_packages_only_from_schema_43() -> None:
+    script = operator._smoke_script(  # noqa: SLF001
+        Path("/sealed/release"),
+        "0.207.35",
+        43,
+        operator.OBSIDIAN_CUTOVER_CONTRACT,
+    )
+
+    assert "if expected['schema']>=43:\n import friday_host_agent, friday_package_broker" in script
+    assert "friday.storage._conversations, friday.telegram_bridge)+host_modules" in script
+    compile(script, "<installed-surface-smoke>", "exec")
+
+
 def test_smoke_scratch_root_rejects_release_and_runtime_overlap(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

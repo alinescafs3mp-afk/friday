@@ -2810,14 +2810,16 @@ import importlib.metadata, inspect, json, os, pathlib, sys
 expected=json.loads({values!r})
 import friday, friday.cli, friday.config, friday.execution_kernel, friday.orchestration.file_read
 import friday.server, friday.storage, friday.storage._conversations, friday.telegram_bridge
-import friday_host_agent, friday_package_broker
+host_modules=()
+if expected['schema']>=43:
+ import friday_host_agent, friday_package_broker
+ host_modules=(friday_host_agent,friday_package_broker)
 root=pathlib.Path(expected['root']).resolve(strict=True)
 assert pathlib.Path(sys.prefix).resolve(strict=True)==(root/'venv').resolve(strict=True)
 assert pathlib.Path(sys.executable).resolve(strict=True)==(root/'venv/bin/python').resolve(strict=True)
 assert pathlib.Path(sys.base_prefix).resolve(strict=True)!=pathlib.Path(sys.prefix).resolve(strict=True)
 modules=(friday, friday.cli, friday.execution_kernel, friday.orchestration.file_read,
- friday.server, friday.storage, friday.storage._conversations, friday.telegram_bridge,
- friday_host_agent, friday_package_broker)
+ friday.server, friday.storage, friday.storage._conversations, friday.telegram_bridge)+host_modules
 assert all(pathlib.Path(m.__file__).resolve(strict=True).is_relative_to(root) for m in modules)
 assert friday.__version__ == expected['version']
 assert importlib.metadata.version('friday') == expected['version']
