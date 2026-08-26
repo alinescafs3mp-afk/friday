@@ -1,3 +1,20 @@
+## 0.207.37 — 2026-08-26
+
+### Native Engineer sandbox activation
+
+- Native user-systemd units no longer combine Engineer Mode with
+  `PrivateTmp`, whose implicit user namespace prevents bubblewrap from
+  creating the required isolated worker namespace. Backend and bridge instead
+  receive separate private runtime directories as their exact `TMPDIR` while
+  the Engineer worker keeps its no-network bubblewrap boundary.
+- Immutable unit installation now converges and receipts the complete
+  seven-file unit surface, including exact drop-ins, and resumes safely across
+  partial replacement. Only the former `PrivateTmp` contract, the exact
+  recovery state and the new isolated-runtime-directory contract are accepted
+  as predecessors.
+- Database schema remains 43. Host Control, package installation, desktop and
+  public-network execution remain disabled.
+
 ## 0.207.36 — 2026-08-26
 
 ### Engineer Mode production activation
