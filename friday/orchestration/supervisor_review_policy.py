@@ -116,13 +116,17 @@ class SupervisorReviewContext:
                 raise ValueError("complete deterministic state cannot have failed criteria")
         elif not self.failed_criteria:
             raise ValueError("non-complete deterministic state needs failed criteria")
-        for label, value in (
+        for numeric_label, numeric_value in (
             ("review_round", self.review_round),
             ("max_review_rounds", self.max_review_rounds),
             ("recovery_budget_remaining", self.recovery_budget_remaining),
         ):
-            if not isinstance(value, int) or isinstance(value, bool) or value not in {0, 1}:
-                raise ValueError(f"{label} must be zero or one")
+            if (
+                not isinstance(numeric_value, int)
+                or isinstance(numeric_value, bool)
+                or numeric_value not in {0, 1}
+            ):
+                raise ValueError(f"{numeric_label} must be zero or one")
         if not isinstance(self.effect_started, bool) or not isinstance(self.publication_started, bool):
             raise ValueError("review lifecycle fields must be boolean")
 
