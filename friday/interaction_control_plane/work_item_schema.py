@@ -2878,36 +2878,36 @@ CREATE TABLE IF NOT EXISTS work_item_compare_current_file_web_restart_rebinds (
           AND unixepoch(rebound_at) IS NOT NULL
           AND rebound_at>=from_updated_at),
     CHECK(length(predecessor_proposal_sha256)=64
-          AND predecessor_proposal_sha256 NOT GLOB '*[^0-9a-f]*'
-          AND length(successor_proposal_sha256)=64
-          AND successor_proposal_sha256 NOT GLOB '*[^0-9a-f]*'
-          AND length(predecessor_accepted_plan_sha256)=64
-          AND predecessor_accepted_plan_sha256 NOT GLOB '*[^0-9a-f]*'
-          AND length(successor_accepted_plan_sha256)=64
-          AND successor_accepted_plan_sha256 NOT GLOB '*[^0-9a-f]*'
-          AND length(predecessor_manifest_sha256)=64
-          AND predecessor_manifest_sha256 NOT GLOB '*[^0-9a-f]*'
-          AND length(successor_manifest_sha256)=64
-          AND successor_manifest_sha256 NOT GLOB '*[^0-9a-f]*'
-          AND length(predecessor_policy_sha256)=64
-          AND predecessor_policy_sha256 NOT GLOB '*[^0-9a-f]*'
-          AND length(successor_policy_sha256)=64
-          AND successor_policy_sha256 NOT GLOB '*[^0-9a-f]*'
-          AND length(predecessor_runtime_profile_sha256)=64
-          AND predecessor_runtime_profile_sha256 NOT GLOB '*[^0-9a-f]*'
-          AND length(successor_runtime_profile_sha256)=64
-          AND successor_runtime_profile_sha256 NOT GLOB '*[^0-9a-f]*'
-          AND length(predecessor_adapter_registry_sha256)=64
-          AND predecessor_adapter_registry_sha256 NOT GLOB '*[^0-9a-f]*'
-          AND length(successor_adapter_registry_sha256)=64
-          AND successor_adapter_registry_sha256 NOT GLOB '*[^0-9a-f]*'
-          AND length(predecessor_actor_binding_sha256)=64
-          AND predecessor_actor_binding_sha256 NOT GLOB '*[^0-9a-f]*'
-          AND length(successor_actor_binding_sha256)=64
-          AND successor_actor_binding_sha256 NOT GLOB '*[^0-9a-f]*'
-          AND length(predecessor_conversation_binding_sha256)=64
-          AND predecessor_conversation_binding_sha256 NOT GLOB '*[^0-9a-f]*'
-          AND length(successor_conversation_binding_sha256)=64
+          AND predecessor_proposal_sha256 NOT GLOB '*[^0-9a-f]*'),
+    CHECK(length(successor_proposal_sha256)=64
+          AND successor_proposal_sha256 NOT GLOB '*[^0-9a-f]*'),
+    CHECK(length(predecessor_accepted_plan_sha256)=64
+          AND predecessor_accepted_plan_sha256 NOT GLOB '*[^0-9a-f]*'),
+    CHECK(length(successor_accepted_plan_sha256)=64
+          AND successor_accepted_plan_sha256 NOT GLOB '*[^0-9a-f]*'),
+    CHECK(length(predecessor_manifest_sha256)=64
+          AND predecessor_manifest_sha256 NOT GLOB '*[^0-9a-f]*'),
+    CHECK(length(successor_manifest_sha256)=64
+          AND successor_manifest_sha256 NOT GLOB '*[^0-9a-f]*'),
+    CHECK(length(predecessor_policy_sha256)=64
+          AND predecessor_policy_sha256 NOT GLOB '*[^0-9a-f]*'),
+    CHECK(length(successor_policy_sha256)=64
+          AND successor_policy_sha256 NOT GLOB '*[^0-9a-f]*'),
+    CHECK(length(predecessor_runtime_profile_sha256)=64
+          AND predecessor_runtime_profile_sha256 NOT GLOB '*[^0-9a-f]*'),
+    CHECK(length(successor_runtime_profile_sha256)=64
+          AND successor_runtime_profile_sha256 NOT GLOB '*[^0-9a-f]*'),
+    CHECK(length(predecessor_adapter_registry_sha256)=64
+          AND predecessor_adapter_registry_sha256 NOT GLOB '*[^0-9a-f]*'),
+    CHECK(length(successor_adapter_registry_sha256)=64
+          AND successor_adapter_registry_sha256 NOT GLOB '*[^0-9a-f]*'),
+    CHECK(length(predecessor_actor_binding_sha256)=64
+          AND predecessor_actor_binding_sha256 NOT GLOB '*[^0-9a-f]*'),
+    CHECK(length(successor_actor_binding_sha256)=64
+          AND successor_actor_binding_sha256 NOT GLOB '*[^0-9a-f]*'),
+    CHECK(length(predecessor_conversation_binding_sha256)=64
+          AND predecessor_conversation_binding_sha256 NOT GLOB '*[^0-9a-f]*'),
+    CHECK(length(successor_conversation_binding_sha256)=64
           AND successor_conversation_binding_sha256 NOT GLOB '*[^0-9a-f]*'),
     CHECK(predecessor_actor_binding_sha256<>successor_actor_binding_sha256),
     CHECK(predecessor_conversation_binding_sha256<>successor_conversation_binding_sha256)
