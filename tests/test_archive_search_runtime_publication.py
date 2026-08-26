@@ -47,6 +47,7 @@ from friday.interaction_control_plane.archive_candidate_selection_store import (
     get_archive_candidate_selection_work_item_in_transaction,
 )
 from friday.interaction_control_plane.archive_evidence_work_item_store import (
+    get_current_recall_selected_archive_evidence_work_item_in_transaction,
     get_recall_selected_archive_evidence_work_item_in_transaction,
 )
 from friday.interaction_control_plane.legacy_trace import CapabilityStatus
@@ -898,6 +899,47 @@ async def _create_durable_archive_candidate_work(
     return response, item, runtime, kernel, actor, model, web
 
 
+async def _create_durable_archive_document_candidate_work(
+    settings: Any,
+    storage: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> tuple[dict[str, Any], Any, AgentRuntime, _SpyKernel, ActorContext, Any, WebSurfer]:
+    _seed_document(storage, suffix="-candidate-alpha", inbox_status=InboxStatus.CLASSIFIED)
+    _seed_document(storage, suffix="-candidate-beta", inbox_status=InboxStatus.CLASSIFIED)
+    model = _ArchiveModel(
+        final_answer=f"Сначала второй документ [A2.1], затем первый [A1.1]: {_QUERY}.",
+        first_arguments={"query": _QUERY, "corpora": ["documents"], "limit": 2},
+    )
+    runtime, kernel, actor, _model, web, _contexts = await _runtime(
+        settings,
+        storage,
+        monkeypatch,
+        model_override=model,
+    )
+    response = await _chat(
+        runtime,
+        actor,
+        answer_with_voice=False,
+        message="Найди документы с контрольным значением в моём личном архиве.",
+    )
+    row = storage.execute(
+        """SELECT id FROM work_items
+             WHERE user_id=? AND conversation_id=?
+               AND kind='select_archive_candidate_and_replay_evidence'""",
+        (_OWNER, str(response["conversation_id"])),
+    ).fetchone()
+    assert row is not None
+    with storage.transaction() as conn:
+        item = get_archive_candidate_selection_work_item_in_transaction(
+            conn,
+            work_item_id=str(row["id"]),
+            user_id=_OWNER,
+            conversation_id=str(response["conversation_id"]),
+        )
+    assert item is not None
+    return response, item, runtime, kernel, actor, model, web
+
+
 def _candidate_message_body(storage: Any, item: Any, ordinal: int) -> str:
     selected = item.candidate_set.selected_evidence(ordinal)
     row = storage.execute(
@@ -1456,11 +1498,27 @@ async def test_archive_candidate_offer_preserves_citation_order_and_replays_stri
             user_id=_OWNER,
             conversation_id=created.conversation_id,
         )
+        promoted = get_current_recall_selected_archive_evidence_work_item_in_transaction(
+            conn,
+            user_id=_OWNER,
+            conversation_id=created.conversation_id,
+        )
     assert completed is not None
     assert completed.state is WorkState.COMPLETED
     assert completed.transition is WorkTransition.CANDIDATE_REPLAYED
     assert completed.revision == 2
     assert completed.question.selected_ordinal == 2
+    assert promoted is not None
+    assert promoted.id != completed.id
+    assert promoted.state is WorkState.ACTIVE
+    assert promoted.transition is WorkTransition.EVIDENCE_REPLAYED
+    assert promoted.revision == 2
+    assert promoted.anchor_user_message_id == completed.question.replay_boundary_user_message_id
+    assert promoted.anchor_assistant_message_id == completed.question.replay_assistant_message_id
+    assert promoted.selected_evidence == replace(
+        completed.candidate_set.selected_evidence(2),
+        work_item_id=promoted.id,
+    )
 
 
 @pytest.mark.asyncio
@@ -2372,6 +2430,163 @@ async def test_archive_candidate_replays_ordinal_after_runtime_restart(
 
 
 @pytest.mark.asyncio
+async def test_locate_select_and_explain_document_survives_both_runtime_restarts(
+    settings: Any,
+    storage: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    (
+        initial,
+        created,
+        _runtime_instance,
+        initial_kernel,
+        _actor,
+        initial_model,
+        web,
+    ) = await _create_durable_archive_document_candidate_work(
+        settings,
+        storage,
+        monkeypatch,
+    )
+    await web.close()
+    conversation_id = created.conversation_id
+    expected = created.candidate_set.selected_evidence(2)
+
+    selection_storage = _reopen_storage(settings, storage)
+    selection_model = _DirectAnswerModel()
+    try:
+        selection_runtime, selection_kernel, actor, _model, selection_web, _contexts = await _runtime(
+            settings,
+            selection_storage,
+            monkeypatch,
+            model_override=selection_model,
+        )
+        try:
+            selection = await selection_runtime.chat(
+                _OWNER,
+                "второй",
+                actor=actor,
+                conversation_id=conversation_id,
+                enable_tools=True,
+                answer_with_voice=False,
+            )
+        finally:
+            await selection_web.close()
+        with selection_storage.transaction() as conn:
+            completed = get_archive_candidate_selection_work_item_in_transaction(
+                conn,
+                work_item_id=created.id,
+                user_id=_OWNER,
+                conversation_id=conversation_id,
+            )
+            promoted = get_current_recall_selected_archive_evidence_work_item_in_transaction(
+                conn,
+                user_id=_OWNER,
+                conversation_id=conversation_id,
+            )
+    finally:
+        selection_storage.close(final=True)
+
+    assert selection["verified"] is True
+    assert selection_model.calls == 0
+    assert selection_kernel.calls == []
+    assert initial_model.calls == 2
+    assert [name for name, _arguments in initial_kernel.calls] == ["archive_search"]
+    assert completed is not None
+    assert completed.state is WorkState.COMPLETED
+    assert completed.transition is WorkTransition.CANDIDATE_REPLAYED
+    assert completed.question.selected_ordinal == 2
+    assert promoted is not None
+    assert promoted.state is WorkState.ACTIVE
+    assert promoted.transition is WorkTransition.EVIDENCE_REPLAYED
+    assert promoted.revision == 2
+    assert promoted.selected_evidence == replace(expected, work_item_id=promoted.id)
+    assert promoted.selected_evidence.origin_boundary_user_message_id == (
+        created.candidate_set.origin_boundary_user_message_id
+    )
+    assert promoted.anchor_user_message_id == completed.question.replay_boundary_user_message_id
+    assert promoted.anchor_assistant_message_id == completed.question.replay_assistant_message_id
+
+    explanation_storage = _reopen_storage(settings, storage)
+    ordinary_model = _DirectAnswerModel()
+    explanation_model = _SelectedArchiveExplanationModel()
+    try:
+        explanation_runtime, explanation_kernel, actor, _model, explanation_web, _contexts = await _runtime(
+            settings,
+            explanation_storage,
+            monkeypatch,
+            model_override=ordinary_model,
+        )
+        explanation_runtime.settings = replace(
+            explanation_runtime.settings,
+            router_mode="v12",
+            router_canary_routes=("archive_read",),
+        )
+        explanation_runtime._selected_archive_model = explanation_model
+        planner = _NeverPlanner()
+        orchestrated = OrchestrationRouter(
+            explanation_runtime,
+            planner,
+            mode="v12",
+            allowed_routes=("archive_read",),
+        )
+        question = "Что сказано в выбранном документе?"
+        admission = orchestrated.pending_durable_turn_admission(
+            _OWNER,
+            question,
+            actor=actor,
+            conversation_id=conversation_id,
+        )
+        assert isinstance(admission, PendingDurableTurnAdmission)
+        assert admission.work_item_id == promoted.id
+        assert admission.revision == promoted.revision
+        try:
+            explanation = await orchestrated.chat(
+                _OWNER,
+                question,
+                actor=actor,
+                conversation_id=conversation_id,
+                enable_tools=True,
+                answer_with_voice=False,
+                _pending_durable_admission=admission,
+            )
+        finally:
+            await explanation_web.close()
+        stored = explanation_storage.get_message(str(explanation["message_id"]), _OWNER)
+        assert stored is not None
+        receipt = load_accepted_archive_recall_outcome_receipt(stored["metadata_json"])
+        with explanation_storage.transaction() as conn:
+            advanced = get_recall_selected_archive_evidence_work_item_in_transaction(
+                conn,
+                work_item_id=promoted.id,
+                user_id=_OWNER,
+                conversation_id=conversation_id,
+            )
+            open_count = conn.execute(
+                """SELECT COUNT(*) FROM work_items
+                     WHERE user_id=? AND conversation_id=?
+                       AND state IN ('active','waiting_for_input')""",
+                (_OWNER, conversation_id),
+            ).fetchone()[0]
+    finally:
+        explanation_storage.close(final=True)
+
+    assert explanation["message"].endswith(explanation_model.answer)
+    assert "Охват исходного поиска был частичным" in explanation["message"]
+    assert explanation["citations"] == [{"label": "A1.1"}]
+    assert len(explanation_model.calls) == 2
+    assert ordinary_model.calls == 0
+    assert planner.calls == 0
+    assert explanation_kernel.calls == []
+    assert receipt.outcome.lane is ArchiveRecallLane.SELECTED_EVIDENCE_EXPLANATION
+    assert receipt.outcome.semantic_verified is True
+    assert advanced is not None
+    assert advanced.revision == promoted.revision + 1
+    assert advanced.selected_evidence == promoted.selected_evidence
+    assert open_count == 1
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("failure", "expected_status"),
     [
@@ -2617,13 +2832,13 @@ async def test_archive_candidate_replay_cas_and_mutation_failures_leave_no_turn_
         expected_exception = WorkItemConflictError
     else:
 
-        def fail_candidate_accept(*_args: Any, **_kwargs: Any) -> Any:
-            raise RuntimeError("candidate accept failed")
+        def fail_candidate_promotion(*_args: Any, **_kwargs: Any) -> Any:
+            raise RuntimeError("candidate promotion failed")
 
         monkeypatch.setattr(
             agent_runtime_module,
-            "accept_archive_candidate_selection_in_transaction",
-            fail_candidate_accept,
+            "promote_archive_candidate_selection_in_transaction",
+            fail_candidate_promotion,
         )
         expected_exception = RuntimeError
 

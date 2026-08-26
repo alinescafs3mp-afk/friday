@@ -142,13 +142,13 @@ from friday.interaction_control_plane.archive_candidate_selection import (
     parse_archive_candidate_ordinal,
 )
 from friday.interaction_control_plane.archive_candidate_selection_store import (
-    accept_archive_candidate_selection_in_transaction,
     archive_candidate_selection_is_displaced_in_transaction,
     cancel_archive_candidate_selection_in_transaction,
     create_archive_candidate_selection_work_item_in_transaction,
     expire_archive_candidate_selection_in_transaction,
     get_current_archive_candidate_selection_work_item_in_transaction,
     get_waiting_archive_candidate_selection_work_item_in_transaction,
+    promote_archive_candidate_selection_in_transaction,
     reask_archive_candidate_selection_in_transaction,
     retire_displaced_archive_candidate_selection_in_transaction,
     suspend_after_replay_failure_in_transaction,
@@ -42618,23 +42618,34 @@ class AgentRuntime:
                 assistant_message.get("metadata_json"),
                 expected_outcome=outcome,
             )
-            mutation = (
-                accept_archive_candidate_selection_in_transaction
-                if exact
-                else suspend_after_replay_failure_in_transaction
-            )
-            mutation(
-                publication_conn,
-                work_item_id=current.id,
-                user_id=person_id,
-                conversation_id=conversation_id,
-                expected_revision=current.revision,
-                selected_ordinal=selected_ordinal,
-                new_boundary_user_message_id=boundary_message_id,
-                new_assistant_message_id=str(assistant_message["id"]),
-                new_accepted_plan_sha256=outcome.plan_sha256,
-                new_accepted_outcome_sha256=stored_receipt.outcome_sha256,
-            )
+            if exact:
+                selected_evidence_work_item_id = new_recall_selected_archive_evidence_work_item_id()
+                promote_archive_candidate_selection_in_transaction(
+                    publication_conn,
+                    work_item_id=current.id,
+                    selected_evidence_work_item_id=selected_evidence_work_item_id,
+                    user_id=person_id,
+                    conversation_id=conversation_id,
+                    expected_revision=current.revision,
+                    selected_ordinal=selected_ordinal,
+                    new_boundary_user_message_id=boundary_message_id,
+                    new_assistant_message_id=str(assistant_message["id"]),
+                    new_accepted_plan_sha256=outcome.plan_sha256,
+                    new_accepted_outcome_sha256=stored_receipt.outcome_sha256,
+                )
+            else:
+                suspend_after_replay_failure_in_transaction(
+                    publication_conn,
+                    work_item_id=current.id,
+                    user_id=person_id,
+                    conversation_id=conversation_id,
+                    expected_revision=current.revision,
+                    selected_ordinal=selected_ordinal,
+                    new_boundary_user_message_id=boundary_message_id,
+                    new_assistant_message_id=str(assistant_message["id"]),
+                    new_accepted_plan_sha256=outcome.plan_sha256,
+                    new_accepted_outcome_sha256=stored_receipt.outcome_sha256,
+                )
 
         return {
             "conversation_id": conversation_id,
