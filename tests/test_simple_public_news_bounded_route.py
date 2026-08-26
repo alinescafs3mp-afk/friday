@@ -240,6 +240,13 @@ class _UnavailableNewsKernel(_EmptyNewsKernel):
         return result
 
 
+class _MalformedEmptySourceClassNewsKernel(_EmptyNewsKernel):
+    async def execute(self, tool, params, actor=None):  # noqa: ANN001, ARG002
+        result = await super().execute(tool, params, actor=actor)
+        result.data["source_class"] = False
+        return result
+
+
 class _MalformedTargetNewsKernel(_SyntheticNewsKernel):
     async def execute(self, tool, params, actor=None):  # noqa: ANN001, ARG002
         result = await super().execute(tool, params, actor=actor)
@@ -1032,6 +1039,7 @@ async def test_simple_svo_news_rejects_the_airport_lexical_collision_without_syn
         (_EmptyNewsKernel, "empty", CapabilityOutcomeStatus.EMPTY),
         (_UnavailableNewsKernel, "failed", CapabilityOutcomeStatus.UNAVAILABLE),
         (_MalformedTargetNewsKernel, "failed", CapabilityOutcomeStatus.UNAVAILABLE),
+        (_MalformedEmptySourceClassNewsKernel, "failed", CapabilityOutcomeStatus.UNAVAILABLE),
         (_OversizedTargetNewsKernel, "failed", CapabilityOutcomeStatus.UNAVAILABLE),
         (_WrongQueryNewsKernel, "failed", CapabilityOutcomeStatus.UNAVAILABLE),
         (_CanonicalDuplicateTargetNewsKernel, "failed", CapabilityOutcomeStatus.UNAVAILABLE),

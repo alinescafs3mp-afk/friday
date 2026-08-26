@@ -25934,6 +25934,12 @@ def _project_web_tool_result(
         or len(cast(str, data.get("query"))) > MAX_OUTBOUND_WEB_QUERY_CHARS
     ):
         return "failed", [], None
+    for class_field in ("source_class", "topic_class"):
+        if class_field in data and not isinstance(data.get(class_field), str):
+            return "failed", [], None
+    for attestation_field in ("source_class_satisfied", "topic_class_satisfied"):
+        if attestation_field in data and not isinstance(data.get(attestation_field), bool):
+            return "failed", [], None
     if expected_query:
         normalized_expected_query = normalize_outbound_web_query(expected_query)
         if not normalized_expected_query or data.get("query") != normalized_expected_query:

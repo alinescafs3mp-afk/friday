@@ -107,6 +107,35 @@ def _evidence(status: SimplePublicNewsEvidenceStatus) -> SimplePublicNewsEvidenc
     )
 
 
+@pytest.mark.parametrize(
+    ("field", "value"),
+    (
+        ("source_class", False),
+        ("requested_sources", False),
+        ("completed_sources", False),
+        ("failed_sources", False),
+        ("timed_out_sources", False),
+        ("topic_filtered_sources", False),
+        ("error", False),
+    ),
+)
+def test_empty_news_factory_rejects_json_scalar_type_confusion(field: str, value: object) -> None:
+    report = _report(requested=0, completed=0)
+    report[field] = value
+
+    with pytest.raises(SimplePublicNewsOutcomeError):
+        SimplePublicNewsEvidence.from_projection(
+            _plan(),
+            status=SimplePublicNewsEvidenceStatus.EMPTY,
+            executed_query=QUERY,
+            outbound_attempted=True,
+            research_call_count=1,
+            report=report,
+            model_envelope="",
+            sources=[],
+        )
+
+
 def _gate(
     evidence: SimplePublicNewsEvidence,
     *,

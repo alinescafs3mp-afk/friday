@@ -194,6 +194,11 @@ def _optional_boolean(report: Mapping[str, Any] | None, key: str) -> bool | None
     return value if isinstance(value, bool) else None
 
 
+def _report_source_class_matches(report: Mapping[str, Any], expected: str) -> bool:
+    value = report.get("source_class", "")
+    return isinstance(value, str) and value == expected
+
+
 def _validated_empty_proof_sha256(
     plan: LegacySimplePublicNewsPlan,
     report: Mapping[str, Any] | None,
@@ -209,7 +214,7 @@ def _validated_empty_proof_sha256(
     filters = report.get("applied_search_filters")
     if not isinstance(filters, Mapping) or filters.get("freshness") != plan.freshness:
         raise SimplePublicNewsOutcomeError("empty news evidence has no filter attestation")
-    if str(report.get("source_class") or "") != plan.source_class:
+    if not _report_source_class_matches(report, plan.source_class):
         raise SimplePublicNewsOutcomeError("empty news evidence changed source class")
     if simple_public_news_topic_mismatch_is_empty(
         report,
@@ -245,13 +250,18 @@ def _validated_empty_proof_sha256(
     failure_flags = tuple(
         report.get(key, False) for key in ("search_failed", "search_timed_out", "refused", "quota_exhausted")
     )
+    raw_error = report.get("error", "")
+    topic_filtered_sources = report.get("topic_filtered_sources", 0)
     if (
         report.get("sources") != []
-        or counters != (0, 0, 0, 0)
+        or any(not isinstance(value, int) or isinstance(value, bool) or value != 0 for value in counters)
         or any(not isinstance(value, bool) for value in failure_flags)
         or any(failure_flags)
-        or str(report.get("error") or "").strip()
-        or report.get("topic_filtered_sources", 0) != 0
+        or not isinstance(raw_error, str)
+        or raw_error.strip()
+        or not isinstance(topic_filtered_sources, int)
+        or isinstance(topic_filtered_sources, bool)
+        or topic_filtered_sources != 0
     ):
         raise SimplePublicNewsOutcomeError("empty news evidence is not a validated complete zero result")
     return (
@@ -638,7 +648,7 @@ class SimplePublicNewsEvidence:
                 or report.get("freshness") != plan.freshness
                 or not isinstance(report.get("applied_search_filters"), Mapping)
                 or report["applied_search_filters"].get("freshness") != plan.freshness
-                or str(report.get("source_class") or "") != plan.source_class
+                or not _report_source_class_matches(report, plan.source_class)
                 or plan.topic_class
                 and (
                     report.get("topic_class") != plan.topic_class
