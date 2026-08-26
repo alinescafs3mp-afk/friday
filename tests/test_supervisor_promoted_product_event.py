@@ -63,6 +63,7 @@ from friday.orchestration.supervisor_promoted_product_event import (
     PromotedProductOutcomeInput,
     PromotedProductOutcomeReceipt,
     SupervisorLatencyBudgetDocument,
+    build_promoted_other_turn_emission_request,
     emit_promoted_supervisor_product_event,
     load_accepted_supervisor_latency_budget,
 )
@@ -598,16 +599,18 @@ def test_other_turn_adds_a_body_free_false_invocation_denominator(storage) -> No
             (json.dumps(metadata, sort_keys=True), str(assistant["id"])),
         )
     trace_sha256 = canonical_sha256(trace.to_payload())
+    request = build_promoted_other_turn_emission_request(
+        storage.conn,
+        assistant_message_id=str(assistant["id"]),
+        user_id=_OWNER,
+        conversation_id=str(conversation["id"]),
+    )
+    assert request.primary_trace_sha256 == trace_sha256
 
     emit_promoted_supervisor_product_event(
         storage.conn,
         promotion_decision=_promotion(),
-        request=PromotedProductEmissionRequest(
-            eligibility=PromotedObservationEligibility.OTHER_TURN,
-            primary_trace_sha256=trace_sha256,
-            execution_receipt_sha256=None,
-            supervisor_invoked=False,
-        ),
+        request=request,
         outcome_evaluator=_TypedEvaluator(),
     )
 
@@ -618,6 +621,24 @@ def test_other_turn_adds_a_body_free_false_invocation_denominator(storage) -> No
     assert event.supervisor_invoked is False
     assert event.user_visible_outcome is PromotedUserVisibleOutcome.NOT_EVALUATED
     assert _OWNER not in json.dumps(event.payload())
+
+    with pytest.raises(PromotedProductEventError, match="exact committed response"):
+        build_promoted_other_turn_emission_request(
+            storage.conn,
+            assistant_message_id=str(assistant["id"]),
+            user_id="wrong-owner",
+            conversation_id=str(conversation["id"]),
+        )
+    with storage.transaction() as conn, pytest.raises(
+        PromotedProductEventError,
+        match="post-commit",
+    ):
+        build_promoted_other_turn_emission_request(
+            conn,
+            assistant_message_id=str(assistant["id"]),
+            user_id=_OWNER,
+            conversation_id=str(conversation["id"]),
+        )
 
 
 def test_latency_budget_document_is_exact_hash_closed_and_body_free() -> None:

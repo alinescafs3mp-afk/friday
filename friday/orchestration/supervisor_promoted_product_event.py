@@ -732,6 +732,62 @@ def _other_turn_projection(
     )
 
 
+def build_promoted_other_turn_emission_request(
+    conn: sqlite3.Connection,
+    *,
+    assistant_message_id: str,
+    user_id: str,
+    conversation_id: str,
+) -> PromotedProductEmissionRequest:
+    """Bind one post-commit ordinary response to its exact durable TurnTrace."""
+
+    if not isinstance(conn, sqlite3.Connection):
+        raise TypeError("other-turn request builder requires a sqlite3 connection")
+    if conn.in_transaction:
+        raise PromotedProductEventError("other-turn request requires a post-commit boundary")
+    if any(
+        type(value) is not str or not value or len(value) > 256
+        for value in (assistant_message_id, user_id, conversation_id)
+    ):
+        raise PromotedProductEventError("other-turn durable scope is invalid")
+    row = conn.execute(
+        """SELECT assistant.metadata_json,assistant.reply_to
+             FROM messages assistant
+             JOIN messages turn
+               ON turn.id=assistant.reply_to
+              AND turn.user_id=assistant.user_id
+              AND turn.conversation_id=assistant.conversation_id
+              AND turn.role='user'
+            WHERE assistant.id=? AND assistant.user_id=?
+              AND assistant.conversation_id=? AND assistant.role='assistant'
+            LIMIT 1""",
+        (assistant_message_id, user_id, conversation_id),
+    ).fetchone()
+    if row is None:
+        raise PromotedProductEventError("other-turn assistant is not one exact committed response")
+    if isinstance(row, sqlite3.Row):
+        metadata = str(row["metadata_json"])
+        turn_message_id = str(row["reply_to"])
+    else:
+        metadata, turn_message_id = map(str, row)
+    trace = _trace_from_metadata(metadata)
+    _verify_trace_linkage(
+        trace,
+        namespace_key=load_trace_namespace_key(conn),
+        turn_message_id=turn_message_id,
+        conversation_id=conversation_id,
+        graph_id=None,
+    )
+    if trace.work_relation is not WorkRelation.DIRECT or trace.work_item_digest is not None:
+        raise PromotedProductEventError("other-turn TurnTrace is not direct work")
+    return PromotedProductEmissionRequest(
+        eligibility=PromotedObservationEligibility.OTHER_TURN,
+        primary_trace_sha256=canonical_sha256(trace.to_payload()),
+        execution_receipt_sha256=None,
+        supervisor_invoked=False,
+    )
+
+
 def _outcome_receipt(
     outcome_input: PromotedProductOutcomeInput,
     evaluator: PromotedUserVisibleOutcomeEvaluator | None,
@@ -906,6 +962,7 @@ __all__ = [
     "SUPERVISOR_PROMOTED_OUTCOME_INPUT_SCHEMA",
     "SUPERVISOR_PROMOTED_OUTCOME_RECEIPT_SCHEMA",
     "SupervisorLatencyBudgetDocument",
+    "build_promoted_other_turn_emission_request",
     "emit_promoted_supervisor_product_event",
     "load_accepted_supervisor_latency_budget",
 ]
