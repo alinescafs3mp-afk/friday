@@ -577,11 +577,15 @@ _ARTIFACT_COMPILE_TRAILING_DENIAL = re.compile(
 )
 _ARTIFACT_COMPILE_DELIVERY_NEGATION = re.compile(
     r"(?:"
-    r"\b(?:do\s+not|don't|dont|never|without)\b[^.!?\n]{0,48}\b"
+    r"\b(?:do\s+not|don't|dont|never)\b[^.!?\n]{0,48}\b"
     r"(?:send|attach|upload|deliver)\w*\b[^.!?\n]{0,48}\b"
     r"(?:jar|binary|build\s+artifact)\b|"
-    r"\b(?:не|никогда|без)\b[^.!?\n]{0,48}\b"
+    r"\bwithout\s+(?:sending|attaching|uploading|delivering)\b"
+    r"[^.!?\n]{0,48}\b(?:jar|binary|build\s+artifact)\b|"
+    r"\b(?:не|никогда)\b[^.!?\n]{0,48}\b"
     r"(?:присыл|пришл|отправ|прикладыв|прилож|выгруж|выгруз)\w*\b"
+    r"[^.!?\n]{0,48}\b(?:jar|бинарник|бинарн\w*\s+артефакт)\w*\b|"
+    r"\bбез\s+(?:отправки|приложения|выгрузки|передачи)\b"
     r"[^.!?\n]{0,48}\b(?:jar|бинарник|бинарн\w*\s+артефакт)\w*\b"
     r")",
     re.IGNORECASE,
@@ -662,9 +666,8 @@ _ARTIFACT_COMPILE_SAFE_DELIVERY_REMAINDER = re.compile(
     re.IGNORECASE,
 )
 _ARTIFACT_COMPILE_SAFE_CONTEXT_REMAINDER = re.compile(
-    rf"\A\s*{_ARTIFACT_COMPILE_FILENAME}\s+(?:"
-    r"is\s+(?:unrelated|only\s+(?:an?\s+)?(?:reference|example)|not\s+the\s+target)|"
-    r"(?:не\s+является|не)\s+(?:целью|исходником)|"
+    rf"\A\s*(?P<context_filename>{_ARTIFACT_COMPILE_FILENAME})\s+(?:"
+    r"is\s+(?:unrelated|only\s+(?:an?\s+)?(?:reference|example))|"
     r"(?:лишь|только)\s+(?:ссылка|пример))\s*[.!?…]*\s*\Z",
     re.IGNORECASE,
 )
@@ -672,12 +675,14 @@ _ARTIFACT_COMPILE_SAFE_COMPANION_REMAINDER = re.compile(
     r"\A\s*(?:(?:and|then|also|please|и|затем|также|пожалуйста|"
     r"а\s+потом)\s+){0,3}(?:"
     r"explain(?:\s+to\s+me)?\s+(?:"
-    r"what\s+(?:this|the)\s+(?:code|source|class|method|compiler\s+error)\s+means?|"
+    r"what\s+(?:this|the)\s+(?:code|source|class|method|compiler\s+error)\s+(?:means?|does)|"
     r"how\s+(?:it|the\s+(?:code|source|class|method))\s+works?|"
-    r"(?:the\s+|this\s+)?(?:code|source|class|method|compiler(?:\s+error)?|"
+    r"(?:(?:the|this|any)\s+)?(?:code|source|class|method|"
+    r"compiler(?:\s+(?:error|diagnostics?))?|"
     r"diagnostics?|build\s+result|jar|output|generated\s+artifact))|"
     r"(?:review|summari[sz]e|describe|analy[sz]e|inspect|check)\s+"
-    r"(?:the\s+|this\s+)?(?:code|source|class|method|compiler(?:\s+error)?|"
+    r"(?:(?:the|this|any)\s+)?(?:code|source|class|method|"
+    r"compiler(?:\s+(?:error|diagnostics?))?|"
     r"diagnostics?|build\s+result|jar|output|generated\s+artifact)|"
     r"(?:объясни(?:те)?|поясни(?:те)?)\s+(?:мне\s+)?(?:"
     r"как\s+(?:код|исходник|класс|метод)\s+работа\w*|"
@@ -1221,7 +1226,11 @@ def artifact_decompile_request_is_atomic(speech: str) -> bool:
     return False
 
 
-def _artifact_compile_remainder_is_safe(remainder: str) -> bool:
+def _artifact_compile_remainder_is_safe(
+    remainder: str,
+    *,
+    requested_filename: str | None,
+) -> bool:
     """Admit only closed, code-owned companion wording after javac authority."""
 
     if re.fullmatch(r"[\s,;.!?…—–-]*", remainder):
@@ -1231,8 +1240,10 @@ def _artifact_compile_remainder_is_safe(remainder: str) -> bool:
         return False
     if _ARTIFACT_COMPILE_SAFE_DELIVERY_REMAINDER.fullmatch(surface):
         return True
-    if _ARTIFACT_COMPILE_SAFE_CONTEXT_REMAINDER.fullmatch(surface):
-        return True
+    context = _ARTIFACT_COMPILE_SAFE_CONTEXT_REMAINDER.fullmatch(surface)
+    if context is not None:
+        context_filename = context.group("context_filename")
+        return requested_filename is not None and context_filename != requested_filename
     if _ARTIFACT_COMPILE_REMAINDER_DENIAL.search(surface):
         return False
     # A second sentence is a distinct speech act.  It cannot silently inherit
@@ -1266,12 +1277,23 @@ def _accepted_artifact_compile_requests(
         return text, masked, ()
     accepted: list[_DirectRequestSpan] = []
     for request in direct_requests:
+        # Compile authority must begin the current request unit.  Starting it
+        # after arbitrary prose (``Per Alice, ...`` / ``For reference, ...``)
+        # turns reported or meta text into an effect and is therefore inert.
+        if request.start != request.unit_start:
+            continue
         unit = masked[request.unit_start : request.unit_end]
         named_sources = {
             match.group(0) for match in re.finditer(_ARTIFACT_COMPILE_FILENAME, unit, re.IGNORECASE)
         }
         if len(named_sources) > 1:
             continue
+        request_surface = masked[request.start : request.end]
+        request_filenames = {
+            match.group(0)
+            for match in re.finditer(_ARTIFACT_COMPILE_FILENAME, request_surface, re.IGNORECASE)
+        }
+        requested_filename = next(iter(request_filenames)) if len(request_filenames) == 1 else None
         trailing = masked[request.end : request.unit_end]
         full_trailing = masked[request.end :]
         if (
@@ -1279,7 +1301,10 @@ def _accepted_artifact_compile_requests(
             or _ARTIFACT_COMPILE_TRAILING_DENIAL.match(trailing)
             or _ARTIFACT_COMPILE_TRAILING_REPORT.match(trailing)
             or _ARTIFACT_COMPILE_TRAILING_ATTRIBUTION.search(full_trailing)
-            or not _artifact_compile_remainder_is_safe(full_trailing)
+            or not _artifact_compile_remainder_is_safe(
+                full_trailing,
+                requested_filename=requested_filename,
+            )
         ):
             continue
         prefix = masked[request.unit_start : request.start]

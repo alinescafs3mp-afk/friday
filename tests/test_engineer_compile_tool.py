@@ -135,7 +135,11 @@ def _stored_source(
         "Build and attach the binary/JAR",
         "Compile Main.java and explain what this code means.",
         "Compile Main.java and explain what this compiler error means.",
+        "Compile Main.java and explain what this code does.",
+        "Compile Main.java and explain any compiler diagnostics.",
         "Compile Main.java, no explanation needed; just attach the JAR.",
+        "Compile Main.java, without explanation, just attach the JAR.",
+        "Скомпилируй Main.java, без объяснений, просто пришли JAR.",
         "Скомпилируй Main.java и объясни код",
     ),
 )
@@ -178,10 +182,7 @@ def test_markdown_and_multiline_data_never_mint_compile_authority(speech: str) -
 
 @pytest.mark.parametrize(
     ("speech", "expected_filename"),
-    (
-        ("Compile Main.java. Helper.java is unrelated.", "Main.java"),
-        ("Compile this. Helper.java is only a reference.", None),
-    ),
+    (("Compile Main.java. Helper.java is unrelated.", "Main.java"),),
 )
 def test_compile_filename_comes_only_from_the_admitted_request_span(
     speech: str,
@@ -323,6 +324,13 @@ def test_compile_filename_comes_only_from_the_admitted_request_span(
         "Скомпилируй Main.java — как это понимать?",
         "Compile Main.java and explain the code, but this is not a request.",
         "Compile Main.java and review the code? Actually, better not.",
+        "Compile Main.java. Main.java is unrelated.",
+        "Compile this. Main.java is only a reference.",
+        "Compile this. Helper.java is only a reference.",
+        "Per Alice, compile Main.java.",
+        "Alice's request, compile Main.java.",
+        "For reference, compile Main.java.",
+        "По просьбе Алисы, скомпилируй Main.java.",
         "Compile Main.java. Compile Helper.java.",
         "Compile this. Compile Main.java.",
         "Compile Main.java and main.java",
