@@ -8,17 +8,18 @@ the current production identity, completed packages, active work and next order.
 - Branch: `main`
 - Secondary acceptance base: the exact v2 document-map policy, extraction and
   complete-current-text/Office-document reviews are live in bounded `assist`;
-  the provisional registry is empty, and the primary remains the sole
-  final-publication, tool and effect authority. Every secondary miss preserves
-  the exact primary-only path.
-- Deployed implementation head: `4b9b48adf1462cfc9af4f81c7158078ec3aab20a`
-- Live: Friday `0.207.51` / `4b9b48adf1462cfc9af4f81c7158078ec3aab20a`;
-  tree `6a534f83cf030bb0beab856a4748abefcacca1b77f975c69ee2b0504451c8dd0`;
+  accepted/live remains `gptoss20b-2335df…`; abliterated `gptoss20b-d4c220…`
+  is code-staged only as provisional shadow/extract and is not accepted or live.
+  The primary remains the sole final-publication, tool and effect authority.
+  Every secondary miss preserves the exact primary-only path.
+- Deployed implementation head: `a8ba3a5dc0894c9f726993dc9ce768e6260d1edd`
+- Live: Friday `0.207.52` / `a8ba3a5dc0894c9f726993dc9ce768e6260d1edd`;
+  tree `aa2af9c8366131454902c5a3f50fe1055e22b0fb5a0604a46e98dee4f89ae360`;
+  wheel `e12d079386ad11e0dd93841f95e0a19ececdb274c4670f1e13e6fb13ff4f9a8e`.
+- Immediate predecessor and schema-capable fallback: Friday `0.207.51` /
+  `4b9b48adf1462cfc9af4f81c7158078ec3aab20a`, tree
+  `6a534f83cf030bb0beab856a4748abefcacca1b77f975c69ee2b0504451c8dd0`,
   wheel `6f0a08312ac8dd5d815004027e442e19ba96d648477990d2e54557701dceb529`.
-- Immediate predecessor and schema-capable fallback: Friday `0.207.50` /
-  `49cca50906dddebbefbd0d5842e193e741e06957`, tree
-  `c6673eea90974defc14b4f106a1011bb7182435e3a775cba70f513c7c33e2d25`,
-  wheel `febea38bdb586c2cd3162f7ecc66978d55579ae481d17cde2b4bef901e94aac0`.
 - Database schema: 43
 - Production state: immutable activation `clear`; backend and Telegram bridge
   active; trusted-CA HTTPS health `200`; SQLite integrity and FK checks clean.
@@ -73,20 +74,24 @@ the current production identity, completed packages, active work and next order.
   the reader-first `0.207.49` and atomic `0.207.50` runtime packages. The
   `0.207.51` body-free document-passage projection contract is deployed without
   a schema or runtime-route change. Catalog coverage remains honestly incomplete
-  while the backlog converges. The current activation terminal receipt is
-  `c508dc468a83d662fa57e23142d344d95128cd849416a1806fbf14148adfe507`.
+  while the backlog converges. `0.207.52` repairs the canary wrapper's full
+  Telegram carrier surface; signed Telegram requests no longer fail before the
+  model/tool boundary. The current activation terminal receipt is
+  `4d3e162debd65864b2e1072f6a13f3ce726237e5b62bc79ed8d9fa83862e05aa`.
 - Delivery constraints: no Docker for primary Friday release certification;
   companion plugin untouched; small commits and immutable wheel-only production
   releases. The optional laptop inference node is a separate Docker contour.
 
 ## Active objective
 
-Continue document-contour convergence from the deployed passage contract: land
-reader-first passage manifest/table capacity, then activate its writer/backfill,
-then add typed dates and embeddings as separately reversible packages. The WIP
-audit is closed with no salvage selected. The Semantic Supervisor remains
-separately owned and on `HOLD`; it is not a dependency of this sequence. Docker
-and companion-plugin work remain out of scope.
+First close the already-live Engineer Mode into a complete production workflow:
+confirmed installed application, truthful progress/current-job control and
+exact Telegram file/archive delivery. Next integrate and independently certify
+the Semantic Supervisor through default-off, shadow, limited assist and canary.
+After those two priorities, execute the remaining work by product value and
+risk. The full canonical order and estimates are in
+`outer_sol/PROJECT_EXECUTION_BACKLOG_2026-08-27.md`. Docker and companion-plugin
+work remain out of scope for primary Friday.
 
 The measured and accepted finalist is exact profile
 `gptoss20b-2335df123cac7fc0e13e347cde1e1ffa8562daafcaf0fc76ade1a851d2b0ff1f`
@@ -112,7 +117,8 @@ accepted profile manifest hashes to
 `93ea5698b8b6a9bf8a7dc697ffe37d7353055aa16555188991747bba73d059e3` and
 its accepted physical-failure evidence hashes to
 `9dc72f80caed3320bd154cf1219a8bd6b1339142b690b00dd1cbe1fb05964006`.
-Live `0.207.51` admits exactly that profile, with no provisional entries:
+Live `0.207.52` admits exactly that accepted profile. The separate abliterated
+candidate remains provisional and is not admitted to assist:
 extraction, evidence-bound document mapping and complete current text/Office
 document reviews are in bounded `assist`. It grants no tools, effects,
 publication or knowledge-write authority; failure preserves the exact
@@ -191,13 +197,15 @@ course, with these repository-specific constraints:
 
 ## In progress
 
-1. Land the reader-first document-passage manifest and table package with a
-   schema-capable fallback and no active writer.
-2. Activate the bounded writer and resumable backfill only after that reader is
-   deployed and fallback-proven.
-3. Add typed document dates and embeddings in later bounded packages. Keep the
-   separately owned Semantic Supervisor on `HOLD`; use no Docker or companion
-   changes in this sequence.
+1. Complete sealed Engineer command output publication, automatic terminal
+   delivery, current-job status/cancel and retention.
+2. Add exact Telegram input grants and wire deterministic bundle/publication
+   seams; then run the compact live approval/result smoke.
+3. Resolve the secondary profile dependency once, rebase and independently
+   gate the Semantic Supervisor, then roll it out default-off → shadow → limited
+   assist → canary.
+4. Continue release-evidence and document/retrieval convergence in the order
+   recorded by `PROJECT_EXECUTION_BACKLOG_2026-08-27.md`.
 
 ## Completed and deployed packages
 
