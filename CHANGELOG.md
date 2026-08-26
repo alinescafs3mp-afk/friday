@@ -1,3 +1,18 @@
+## 0.207.36 — 2026-08-26
+
+### Engineer Mode production activation
+
+- A distinct immutable configuration transition enables the owner-only
+  Engineer workbench for the private `192.168.1.0/24` scope after the accepted
+  schema-43 bridge release. Host Control, package installation and public
+  network execution remain disabled.
+- Release preflight now verifies Host Agent and Package Broker surfaces only
+  for schema-43 releases, preserving exact smoke compatibility with the live
+  schema-42 predecessor during the two-phase cutover.
+- Database schema remains 43. Ordinary dialogue, documents, web search,
+  Obsidian, the primary model and optional secondary assist keep their existing
+  ownership and fail-soft paths.
+
 ## 0.207.35 — 2026-08-26
 
 ### Engineer Mode and Host Capability Plane
