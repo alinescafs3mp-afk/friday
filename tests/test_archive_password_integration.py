@@ -8,12 +8,13 @@ import zipfile
 from dataclasses import replace
 from pathlib import Path
 
+import py7zr
 import pytest
 import pyzipper
 
 from friday.agent_runtime import AgentRuntime
 from friday.archive_formats import archive_dispatch_kind
-from friday.documents import DocumentResult
+from friday.documents import ArchiveDeadlineReached, DocumentResult
 from friday.ingestion import IngestionPipeline
 from friday.knowledge_graph import KnowledgeGraph
 from friday.permissions import ActorContext
@@ -41,6 +42,13 @@ def _encrypted_zip() -> bytes:
     ) as archive:
         archive.setpassword(_PASSWORD.encode())
         archive.writestr("nested/note.txt", "ARCHIVE-INTEGRATION-MARKER")
+    return payload.getvalue()
+
+
+def _encrypted_7z() -> bytes:
+    payload = io.BytesIO()
+    with py7zr.SevenZipFile(payload, mode="w", password=_PASSWORD) as archive:
+        archive.writestr(b"ARCHIVE-INTEGRATION-MARKER", "nested/note.txt")
     return payload.getvalue()
 
 
@@ -294,6 +302,48 @@ async def test_password_validation_deadline_cannot_replay_or_persist_archive(
     for table, old_count in old_counts.items():
         assert storage.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0] == old_count  # nosec B608
     assert {path for path in settings.files_dir.rglob("*") if path.is_file()} == old_files
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("archive_password", (None, _PASSWORD))
+async def test_early_7z_deadline_never_reaches_dedup_or_storage(
+    settings,
+    storage,
+    monkeypatch,
+    archive_password: str | None,
+) -> None:
+    pipeline = IngestionPipeline(settings, storage, KnowledgeGraph(storage))
+
+    def preflight_deadline(*_args, **_kwargs):
+        raise ArchiveDeadlineReached("synthetic 7z preflight deadline")
+
+    def forbidden_persistent_seam(*_args, **_kwargs):
+        raise AssertionError("ambiguous 7z deadline reached a persistent seam")
+
+    monkeypatch.setattr(pipeline._doc_extractor, "_preflight_7z_header", preflight_deadline)  # noqa: SLF001
+    monkeypatch.setattr(storage, "ensure_user", forbidden_persistent_seam)
+    monkeypatch.setattr(storage, "find_raw_by_source_ref", forbidden_persistent_seam)
+    monkeypatch.setattr(storage, "find_file_by_content_hash", forbidden_persistent_seam)
+
+    password_kwargs = {"archive_password": archive_password} if archive_password is not None else {}
+    result = await pipeline.ingest_file(
+        "alice",
+        None,
+        _encrypted_7z(),
+        filename="ambiguous.7z",
+        metadata={"uploaded_by": "alice"},
+        source_ref="ambiguous-7z-deadline",
+        **password_kwargs,
+    )
+
+    assert result["password_validation_incomplete"] is True
+    assert result["persisted"] is False
+    assert result["raw_object_id"] is None
+    assert result["extraction_success"] is False
+    assert storage.execute("SELECT COUNT(*) FROM raw_objects").fetchone()[0] == 0
+    assert storage.execute("SELECT COUNT(*) FROM inbox").fetchone()[0] == 0
+    assert storage.execute("SELECT COUNT(*) FROM knowledge_objects").fetchone()[0] == 0
+    assert not any(path.is_file() for path in settings.files_dir.rglob("*"))
 
 
 @pytest.mark.asyncio

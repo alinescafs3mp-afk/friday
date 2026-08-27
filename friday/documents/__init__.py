@@ -4764,10 +4764,24 @@ class DocumentExtractor:
         except ImportError as exc:  # pragma: no cover - required runtime dependency
             raise ArchiveBackendUnavailable from exc
 
+        # Until a complete catalogue/coder map proves this archive plain, an
+        # inherited deadline leaves encryption ambiguous.  Once encryption is
+        # known, only a passworded header or one encrypted member read to
+        # authenticated EOF proves the credential.  Neither uncertain state may
+        # cross ingestion's persistent seams, even when no password was supplied.
+        archive_access_proven = False
+
+        def deadline_failure(message: str) -> ArchiveExtractionError:
+            if not archive_access_proven:
+                return ArchivePasswordValidationIncomplete(deadline_reached=True)
+            return ArchiveDeadlineReached(message)
+
         if _deadline_expired(deadline):
-            raise ArchiveDeadlineReached("7z extraction deadline reached")
+            raise deadline_failure("7z extraction deadline reached")
         try:
             self._preflight_7z_header(content, deadline=deadline)
+        except ArchiveDeadlineReached as exc:
+            raise deadline_failure("7z header deadline reached") from exc
         except (ArchiveExtractionError, ArchiveLimitError):
             raise
         except Exception as exc:
@@ -4785,10 +4799,12 @@ class DocumentExtractor:
                 content_encrypted = encrypted
                 entries = probe.list()
                 if _deadline_expired(deadline):
-                    raise ArchiveDeadlineReached("7z catalog deadline reached")
+                    raise deadline_failure("7z password-free catalog deadline reached")
         except py7zr.PasswordRequired:
             encrypted = True
             entries = []
+        except ArchiveDeadlineReached as exc:
+            raise deadline_failure("7z password-free probe deadline reached") from exc
         except (ArchiveExtractionError, ArchiveLimitError):
             raise
         except Exception as exc:
@@ -4797,6 +4813,8 @@ class DocumentExtractor:
             raise ArchivePasswordRequired
 
         try:
+            if _deadline_expired(deadline):
+                raise deadline_failure("7z passworded open deadline reached")
             with py7zr.SevenZipFile(
                 io.BytesIO(content),
                 mode="r",
@@ -4806,26 +4824,40 @@ class DocumentExtractor:
                 self._validate_open_7z_coders(archive, deadline=deadline)
                 entries = archive.list()
                 if _deadline_expired(deadline):
-                    raise ArchiveDeadlineReached("7z catalog deadline reached")
+                    raise deadline_failure("7z passworded catalog deadline reached")
                 encrypted_member_names = self._encrypted_7z_member_names(archive)
                 if content_encrypted and not encrypted_member_names:
                     # The password-free probe observed data encryption, so an
                     # absent member mapping is parser ambiguity, not proof that
                     # the supplied password is valid.  Fail closed.
                     raise ArchiveExtractionError
+                encrypted = encrypted or bool(encrypted_member_names)
+                if encrypted and not password:
+                    raise ArchivePasswordRequired
                 if encrypted and not encrypted_member_names:
                     # Opening/listing an encrypted header authenticates it;
                     # there is no encrypted data member left to validate.
                     password_validated = True
+                    archive_access_proven = True
+                elif not encrypted:
+                    # Two complete catalogues and their coder maps agree that no
+                    # encrypted header or member exists.
+                    archive_access_proven = True
                 if len(entries) > self.max_archive_entries:
                     raise ArchiveLimitError("7z entry count exceeds configured limit")
                 names: list[str] = []
                 files: list[tuple[Any, str, int]] = []
                 seen_names: set[str] = set()
                 total = 0
+                exhausted = False
+                deadline_reached = False
                 for entry in entries:
                     if _deadline_expired(deadline):
-                        raise ArchiveDeadlineReached("7z catalog deadline reached")
+                        if not archive_access_proven:
+                            raise deadline_failure("7z catalog validation deadline reached")
+                        exhausted = True
+                        deadline_reached = True
+                        break
                     name = _safe_archive_member_name(getattr(entry, "filename", ""))
                     if name in seen_names:
                         raise ArchiveLimitError("Duplicate 7z member name")
@@ -4855,8 +4887,6 @@ class DocumentExtractor:
                     ]
 
                 selected: list[tuple[Any, str, int]] = []
-                exhausted = False
-                deadline_reached = False
                 reserved_bytes = 0
                 for item in ordered_files:
                     mandatory_validation = validation_item is not None and item[1] == validation_item[1]
@@ -4889,7 +4919,7 @@ class DocumentExtractor:
                 # archive.  An archive with only an encrypted header has no
                 # encrypted data member to force; an unusual empty encrypted
                 # archive still needs a bounded decoder attempt if possible.
-                if encrypted and files and not selected:
+                if encrypted and not archive_access_proven and files and not selected:
                     if deadline is not None and time.monotonic() >= deadline:
                         raise ArchivePasswordValidationIncomplete(deadline_reached=True)
                     if not budget.take_preview():
@@ -4946,6 +4976,7 @@ class DocumentExtractor:
                             raise
                         if mandatory_validation:
                             password_validated = True
+                            archive_access_proven = True
                         decompressed_count += len(batch)
                         for _entry, name, _size in batch:
                             if _deadline_expired(deadline):
@@ -4978,6 +5009,8 @@ class DocumentExtractor:
                             archive.reset()
         except py7zr.DecompressionBombError as exc:
             raise ArchiveLimitError("7z extraction exceeds configured limit") from exc
+        except ArchiveDeadlineReached as exc:
+            raise deadline_failure("7z password validation deadline reached") from exc
         except ArchiveLimitError:
             raise
         except (ArchiveExtractionError, ArchivePasswordRequired, ArchivePasswordInvalid):

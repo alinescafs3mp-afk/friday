@@ -324,6 +324,15 @@ def test_nested_deadline_is_propagated_to_parent_archive(monkeypatch) -> None:
     assert result.metadata["parse_deadline_reached"] is True
 
 
+def _encrypted_7z_payload() -> bytes:
+    import py7zr
+
+    source = io.BytesIO()
+    with py7zr.SevenZipFile(source, mode="w", password="correct-password") as archive:
+        archive.writestr(b"bounded", "note.txt")
+    return source.getvalue()
+
+
 def test_plain_7z_decoder_deadline_returns_truthful_partial(monkeypatch) -> None:
     import py7zr
 
@@ -343,20 +352,43 @@ def test_plain_7z_decoder_deadline_returns_truthful_partial(monkeypatch) -> None
     assert result.metadata["parse_deadline_reached"] is True
 
 
-def test_encrypted_7z_validation_deadline_fails_closed(monkeypatch) -> None:
+def test_plain_7z_deadline_after_complete_encryption_map_is_truthful_partial(monkeypatch) -> None:
     import py7zr
 
     source = io.BytesIO()
-    with py7zr.SevenZipFile(source, mode="w", password="correct-password") as archive:
+    with py7zr.SevenZipFile(source, mode="w") as archive:
         archive.writestr(b"bounded", "note.txt")
+    extractor = DocumentExtractor(secret_values=())
+    _silence_metadata(extractor)
+    expired = {"value": False}
+    original_names = extractor._encrypted_7z_member_names  # noqa: SLF001
 
+    def prove_plain_then_expire(archive):
+        names = original_names(archive)
+        assert names == set()
+        expired["value"] = True
+        return names
+
+    monkeypatch.setattr("friday.documents._deadline_expired", lambda _deadline: expired["value"])
+    monkeypatch.setattr(extractor, "_encrypted_7z_member_names", prove_plain_then_expire)
+
+    result = extractor.extract(source.getvalue(), "plain-proven.7z")
+
+    assert result.success is True
+    assert result.error == ""
+    assert result.metadata["parse_deadline_reached"] is True
+    assert result.metadata["archive_budget_exhausted"] is True
+    assert result.metadata["encrypted"] is False
+
+
+def test_encrypted_7z_validation_deadline_fails_closed(monkeypatch) -> None:
     def deadline_write(*_args, **_kwargs):
         raise ArchiveDeadlineReached("synthetic decoder deadline")
 
     monkeypatch.setattr("friday.documents._Bounded7zWriter.write", deadline_write)
 
     result = DocumentExtractor(secret_values=()).extract(
-        source.getvalue(),
+        _encrypted_7z_payload(),
         "bounded.7z",
         archive_password="correct-password",
     )
@@ -367,15 +399,178 @@ def test_encrypted_7z_validation_deadline_fails_closed(monkeypatch) -> None:
     assert result.metadata["parse_deadline_reached"] is True
 
 
-def test_nested_encrypted_validation_deadline_propagates_to_outer_archive(monkeypatch) -> None:
+def test_encrypted_7z_deadline_after_authenticated_member_is_truthful_partial(monkeypatch) -> None:
+    extractor = DocumentExtractor(secret_values=())
+    _silence_metadata(extractor)
+    monkeypatch.setattr(
+        extractor,
+        "_member_preview",
+        lambda *_args, **_kwargs: ("", True, True),
+    )
+
+    result = extractor.extract(
+        _encrypted_7z_payload(),
+        "validated-then-bounded.7z",
+        archive_password="correct-password",
+    )
+
+    assert result.success is True
+    assert result.error == ""
+    assert result.metadata["parse_deadline_reached"] is True
+    assert result.metadata["archive_budget_exhausted"] is True
+    assert result.metadata["encrypted"] is True
+
+
+@pytest.mark.parametrize(
+    ("phase", "archive_password"),
+    (
+        ("initial", "correct-password"),
+        ("preflight", "correct-password"),
+        ("password_free_open", "correct-password"),
+        ("password_free_coder", "correct-password"),
+        ("password_free_list", "correct-password"),
+        ("password_free_catalog", "correct-password"),
+        ("passworded_open", "correct-password"),
+        ("passworded_coder", "correct-password"),
+        ("passworded_list", "correct-password"),
+        ("passworded_catalog", "correct-password"),
+        ("encryption_map", "correct-password"),
+        ("entry_catalog", "correct-password"),
+        ("initial", None),
+        ("preflight", None),
+        ("password_free_open", None),
+        ("password_free_coder", None),
+        ("password_free_list", None),
+        ("password_free_catalog", None),
+    ),
+)
+def test_encrypted_7z_every_early_deadline_is_validation_incomplete(
+    monkeypatch,
+    phase: str,
+    archive_password: str | None,
+) -> None:
     import py7zr
 
-    inner = io.BytesIO()
-    with py7zr.SevenZipFile(inner, mode="w", password="correct-password") as archive:
-        archive.writestr(b"bounded", "note.txt")
+    payload = _encrypted_7z_payload()
+    extractor = DocumentExtractor(secret_values=())
+    _silence_metadata(extractor)
+    expired = {"value": phase == "initial"}
+    monkeypatch.setattr("friday.documents._deadline_expired", lambda _deadline: expired["value"])
+
+    if phase == "preflight":
+
+        def preflight_deadline(*_args, **_kwargs):
+            raise ArchiveDeadlineReached("synthetic preflight deadline")
+
+        monkeypatch.setattr(extractor, "_preflight_7z_header", preflight_deadline)
+
+    if phase in {"password_free_open", "passworded_open"}:
+        target_call = 1 if phase == "password_free_open" else 2
+        original_open = py7zr.SevenZipFile
+        open_calls = 0
+
+        def open_deadline(*args, **kwargs):
+            nonlocal open_calls
+            open_calls += 1
+            if open_calls == target_call:
+                raise ArchiveDeadlineReached("synthetic open deadline")
+            return original_open(*args, **kwargs)
+
+        monkeypatch.setattr(py7zr, "SevenZipFile", open_deadline)
+
+    if phase in {"password_free_coder", "passworded_coder"}:
+        target_call = 1 if phase == "password_free_coder" else 2
+        original_validate = extractor._validate_open_7z_coders  # noqa: SLF001
+        validate_calls = 0
+
+        def coder_deadline(*args, **kwargs):
+            nonlocal validate_calls
+            validate_calls += 1
+            if validate_calls == target_call:
+                raise ArchiveDeadlineReached("synthetic coder deadline")
+            return original_validate(*args, **kwargs)
+
+        monkeypatch.setattr(extractor, "_validate_open_7z_coders", coder_deadline)
+
+    if phase in {"password_free_list", "passworded_list"}:
+        target_call = 1 if phase == "password_free_list" else 2
+        original_list = py7zr.SevenZipFile.list
+        list_calls = 0
+
+        def list_deadline(archive):
+            nonlocal list_calls
+            list_calls += 1
+            if list_calls == target_call:
+                raise ArchiveDeadlineReached("synthetic list deadline")
+            return original_list(archive)
+
+        monkeypatch.setattr(py7zr.SevenZipFile, "list", list_deadline)
+
+    if phase in {"password_free_catalog", "passworded_catalog"}:
+        target_call = 1 if phase == "password_free_catalog" else 2
+        original_list = py7zr.SevenZipFile.list
+        list_calls = 0
+
+        def catalog_then_expire(archive):
+            nonlocal list_calls
+            entries = original_list(archive)
+            list_calls += 1
+            if list_calls == target_call:
+                expired["value"] = True
+            return entries
+
+        monkeypatch.setattr(py7zr.SevenZipFile, "list", catalog_then_expire)
+
+    if phase == "entry_catalog":
+        original_names = extractor._encrypted_7z_member_names  # noqa: SLF001
+
+        def map_encryption_then_expire(archive):
+            names = original_names(archive)
+            expired["value"] = True
+            return names
+
+        monkeypatch.setattr(extractor, "_encrypted_7z_member_names", map_encryption_then_expire)
+
+    if phase == "encryption_map":
+
+        def encryption_map_deadline(_archive):
+            raise ArchiveDeadlineReached("synthetic encryption-map deadline")
+
+        monkeypatch.setattr(extractor, "_encrypted_7z_member_names", encryption_map_deadline)
+
+    result = extractor.extract(
+        payload,
+        "early-deadline.7z",
+        archive_password=archive_password,
+    )
+
+    assert result.success is False
+    assert result.error == "password_validation_incomplete"
+    assert result.metadata["password_validation_incomplete"] is True
+    assert result.metadata["parse_deadline_reached"] is True
+
+
+def test_ambiguous_7z_preflight_deadline_without_password_is_validation_incomplete(monkeypatch) -> None:
+    extractor = DocumentExtractor(secret_values=())
+    _silence_metadata(extractor)
+
+    def preflight_deadline(*_args, **_kwargs):
+        raise ArchiveDeadlineReached("synthetic preflight deadline")
+
+    monkeypatch.setattr(extractor, "_preflight_7z_header", preflight_deadline)
+
+    result = extractor.extract(_encrypted_7z_payload(), "ambiguous.7z")
+
+    assert result.success is False
+    assert result.error == "password_validation_incomplete"
+    assert result.metadata["password_validation_incomplete"] is True
+    assert result.metadata["parse_deadline_reached"] is True
+
+
+def test_nested_encrypted_validation_deadline_propagates_to_outer_archive(monkeypatch) -> None:
     outer = io.BytesIO()
     with zipfile.ZipFile(outer, mode="w") as archive:
-        archive.writestr("nested.7z", inner.getvalue())
+        archive.writestr("nested.7z", _encrypted_7z_payload())
 
     def deadline_write(*_args, **_kwargs):
         raise ArchiveDeadlineReached("synthetic nested validation deadline")
@@ -383,6 +578,29 @@ def test_nested_encrypted_validation_deadline_propagates_to_outer_archive(monkey
     monkeypatch.setattr("friday.documents._Bounded7zWriter.write", deadline_write)
 
     result = DocumentExtractor(secret_values=()).extract(
+        outer.getvalue(),
+        "outer.zip",
+        archive_password="correct-password",
+    )
+
+    assert result.success is False
+    assert result.error == "password_validation_incomplete"
+    assert result.metadata["password_validation_incomplete"] is True
+    assert result.metadata["parse_deadline_reached"] is True
+
+
+def test_nested_encrypted_preflight_deadline_propagates_before_outer_partial(monkeypatch) -> None:
+    outer = io.BytesIO()
+    with zipfile.ZipFile(outer, mode="w") as archive:
+        archive.writestr("nested.7z", _encrypted_7z_payload())
+    extractor = DocumentExtractor(secret_values=())
+
+    def preflight_deadline(*_args, **_kwargs):
+        raise ArchiveDeadlineReached("synthetic nested preflight deadline")
+
+    monkeypatch.setattr(extractor, "_preflight_7z_header", preflight_deadline)
+
+    result = extractor.extract(
         outer.getvalue(),
         "outer.zip",
         archive_password="correct-password",
