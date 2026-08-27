@@ -104,9 +104,7 @@ def render_engineer_status(update: dict[str, Any]) -> str:
             "failed": "❌ Engineer-задача завершилась с ошибкой. Итог отправлен.",
             "cancelled": "⏹ Engineer-задача отменена. Итог отправлен.",
             "timeout": "⏱ Engineer-задача остановлена по тайм-ауту. Итог отправлен.",
-            "delivery_uncertain": (
-                "⚠️ Engineer-задача завершена; доставка результата не подтверждена."
-            ),
+            "delivery_uncertain": ("⚠️ Engineer-задача завершена; доставка результата не подтверждена."),
         }[stage]
         return f"{terminal_text}\nJob: {job_id}."
     elapsed = _elapsed_label(float(update["elapsed_sec"]))
@@ -283,9 +281,7 @@ class TelegramStatusMessageManager:
                     if send_outcome == "uncertain":
                         return "uncertain"
                     if replacement_id is None:
-                        raise RuntimeError(
-                            "accepted Telegram status send has no message id"
-                        ) from exc
+                        raise RuntimeError("accepted Telegram status send has no message id") from exc
                     message_id = replacement_id
                     outcome = "replaced"
                 else:
@@ -415,9 +411,7 @@ class TelegramStatusMessageManager:
             # fence for the next process rather than guessing non-acceptance.
             raise
         except Exception as exc:
-            if self._send_was_proven_rejected(
-                exc
-            ) and self._inbox.clear_telegram_status_send_fence(
+            if self._send_was_proven_rejected(exc) and self._inbox.clear_telegram_status_send_fence(
                 chat_id,
                 operation_id,
                 revision,

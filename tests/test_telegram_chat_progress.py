@@ -470,7 +470,9 @@ async def test_album_status_observes_download_staging_backend_and_delivery_in_or
             backend_seen.set()
         return "sent" if len(statuses) == 1 else "edited"
 
-    async def prepare(_telegram: object, message: dict[str, Any], _update_value: dict[str, Any]) -> dict[str, Any]:
+    async def prepare(
+        _telegram: object, message: dict[str, Any], _update_value: dict[str, Any]
+    ) -> dict[str, Any]:
         await receiving_seen.wait()
         photo = message["photo"][-1]
         return {
@@ -495,9 +497,7 @@ async def test_album_status_observes_download_staging_backend_and_delivery_in_or
                     {
                         "telegram_item_receipt": {
                             "telegram_message_id": int(item["telegram_message_id"]),
-                            "source_ref_sha256": hashlib.sha256(
-                                str(item["source_ref"]).encode()
-                            ).hexdigest(),
+                            "source_ref_sha256": hashlib.sha256(str(item["source_ref"]).encode()).hexdigest(),
                         },
                         "telegram_stage_ready": True,
                     }

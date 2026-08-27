@@ -238,9 +238,7 @@ def _engineer_status_update(item: dict[str, Any], *, chat_id: int) -> dict[str, 
             or raw["revision"] not in _ENGINEER_PROGRESS_REVISIONS
             or dedup_key != f"engineer-progress:v1:{job_id}:{raw['revision']}"
             or any(
-                isinstance(raw.get(field), bool)
-                or not isinstance(raw.get(field), int)
-                or int(raw[field]) < 0
+                isinstance(raw.get(field), bool) or not isinstance(raw.get(field), int) or int(raw[field]) < 0
                 for field in ("elapsed_sec", "timeout_sec", "stdout_bytes", "stderr_bytes")
             )
             or int(raw["elapsed_sec"]) < int(raw["revision"])
@@ -249,15 +247,12 @@ def _engineer_status_update(item: dict[str, Any], *, chat_id: int) -> dict[str, 
             raise ValueError("Engineer progress status update is invalid")
         timeout_sec = int(raw["timeout_sec"])
         remaining_sec = raw.get("remaining_sec")
-        if (
-            (timeout_sec == 0 and remaining_sec is not None)
-            or (
-                timeout_sec > 0
-                and (
-                    isinstance(remaining_sec, bool)
-                    or not isinstance(remaining_sec, int)
-                    or remaining_sec != max(0, timeout_sec - int(raw["elapsed_sec"]))
-                )
+        if (timeout_sec == 0 and remaining_sec is not None) or (
+            timeout_sec > 0
+            and (
+                isinstance(remaining_sec, bool)
+                or not isinstance(remaining_sec, int)
+                or remaining_sec != max(0, timeout_sec - int(raw["elapsed_sec"]))
             )
         ):
             raise ValueError("Engineer progress deadline is invalid")

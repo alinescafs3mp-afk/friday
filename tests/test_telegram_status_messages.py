@@ -42,32 +42,41 @@ async def test_status_sends_once_then_edits_same_persisted_message_after_restart
 
     inbox = _UpdateInbox(str(db_path))
     async with _client(telegram) as client:
-        assert await _manager(inbox).publish(
-            client,
-            5001,
-            "chat:8801",
-            1,
-            render_chat_status(TelegramStatusStage.RECEIVING_MEDIA, 12),
-            reply_to_message_id=91,
-        ) == "sent"
-        assert await _manager(inbox).publish(
-            client,
-            5001,
-            "chat:8801",
-            2,
-            render_chat_status(TelegramStatusStage.BACKEND_WAIT, 18),
-        ) == "edited"
+        assert (
+            await _manager(inbox).publish(
+                client,
+                5001,
+                "chat:8801",
+                1,
+                render_chat_status(TelegramStatusStage.RECEIVING_MEDIA, 12),
+                reply_to_message_id=91,
+            )
+            == "sent"
+        )
+        assert (
+            await _manager(inbox).publish(
+                client,
+                5001,
+                "chat:8801",
+                2,
+                render_chat_status(TelegramStatusStage.BACKEND_WAIT, 18),
+            )
+            == "edited"
+        )
     inbox.close()
 
     reopened = _UpdateInbox(str(db_path))
     async with _client(telegram) as client:
-        assert await _manager(reopened).publish(
-            client,
-            5001,
-            "chat:8801",
-            3,
-            render_chat_status(TelegramStatusStage.DELIVERING_RESULT, 24),
-        ) == "edited"
+        assert (
+            await _manager(reopened).publish(
+                client,
+                5001,
+                "chat:8801",
+                3,
+                render_chat_status(TelegramStatusStage.DELIVERING_RESULT, 24),
+            )
+            == "edited"
+        )
     try:
         assert calls[0][0] == "sendMessage"
         assert calls[0][1]["reply_parameters"] == {
@@ -105,14 +114,17 @@ async def test_stale_revisions_are_ignored_and_terminal_revision_is_absorbing(tm
         assert await manager.publish(client, 5001, "job:alpha", 4, "⏳ Технический этап.") == "sent"
         assert await manager.publish(client, 5001, "job:alpha", 4, "⏳ Устаревший этап.") == "stale"
         assert await manager.publish(client, 5001, "job:alpha", 3, "⏳ Старый этап.") == "stale"
-        assert await manager.publish(
-            client,
-            5001,
-            "job:alpha",
-            5,
-            render_chat_status(TelegramStatusStage.COMPLETE, 20),
-            terminal=True,
-        ) == "edited"
+        assert (
+            await manager.publish(
+                client,
+                5001,
+                "job:alpha",
+                5,
+                render_chat_status(TelegramStatusStage.COMPLETE, 20),
+                terminal=True,
+            )
+            == "edited"
+        )
         assert await manager.publish(client, 5001, "job:alpha", 99, "⏳ Поздний этап.") == "terminal"
     try:
         assert calls == ["sendMessage", "editMessageText"]
@@ -199,13 +211,16 @@ async def test_ambiguous_initial_send_is_fenced_across_restart_without_blind_ret
 
     inbox = _UpdateInbox(str(db_path))
     async with _client(telegram) as client:
-        assert await _manager(inbox).publish(
-            client,
-            5001,
-            "chat:ambiguous-create",
-            1,
-            "⏳ Первый этап.",
-        ) == "uncertain"
+        assert (
+            await _manager(inbox).publish(
+                client,
+                5001,
+                "chat:ambiguous-create",
+                1,
+                "⏳ Первый этап.",
+            )
+            == "uncertain"
+        )
         assert _manager(inbox).snapshot(5001, "chat:ambiguous-create") == {
             "revision": 1,
             "terminal": False,
@@ -215,13 +230,16 @@ async def test_ambiguous_initial_send_is_fenced_across_restart_without_blind_ret
 
     reopened = _UpdateInbox(str(db_path))
     async with _client(telegram) as client:
-        assert await _manager(reopened).publish(
-            client,
-            5001,
-            "chat:ambiguous-create",
-            2,
-            "⏳ Следующий этап.",
-        ) == "uncertain"
+        assert (
+            await _manager(reopened).publish(
+                client,
+                5001,
+                "chat:ambiguous-create",
+                2,
+                "⏳ Следующий этап.",
+            )
+            == "uncertain"
+        )
     try:
         assert calls == ["sendMessage"]
         assert reopened.telegram_status_send_fence(5001, "chat:ambiguous-create") == {
@@ -283,28 +301,37 @@ async def test_ambiguous_replacement_send_is_fenced_without_blind_retry(tmp_path
 
     manager = _manager(inbox)
     async with _client(telegram) as client:
-        assert await manager.publish(
-            client,
-            5001,
-            "chat:ambiguous-replacement",
-            1,
-            "⏳ Первый этап.",
-        ) == "sent"
-        assert await manager.publish(
-            client,
-            5001,
-            "chat:ambiguous-replacement",
-            2,
-            "⏳ Второй этап.",
-        ) == "uncertain"
-        assert await manager.publish(
-            client,
-            5001,
-            "chat:ambiguous-replacement",
-            3,
-            "✅ Готово.",
-            terminal=True,
-        ) == "uncertain"
+        assert (
+            await manager.publish(
+                client,
+                5001,
+                "chat:ambiguous-replacement",
+                1,
+                "⏳ Первый этап.",
+            )
+            == "sent"
+        )
+        assert (
+            await manager.publish(
+                client,
+                5001,
+                "chat:ambiguous-replacement",
+                2,
+                "⏳ Второй этап.",
+            )
+            == "uncertain"
+        )
+        assert (
+            await manager.publish(
+                client,
+                5001,
+                "chat:ambiguous-replacement",
+                3,
+                "✅ Готово.",
+                terminal=True,
+            )
+            == "uncertain"
+        )
     try:
         assert calls == ["sendMessage", "editMessageText", "sendMessage"]
         assert inbox.telegram_status_send_fence(5001, "chat:ambiguous-replacement") == {

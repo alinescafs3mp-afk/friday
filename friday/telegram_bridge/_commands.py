@@ -1966,9 +1966,7 @@ class CommandsMixin(BridgeShared):
             chat_id,
             message.get("message_id"),
             progress_state,
-            TelegramStatusStage.STAGING_DOCUMENTS
-            if album_messages
-            else TelegramStatusStage.BACKEND_WAIT,
+            TelegramStatusStage.STAGING_DOCUMENTS if album_messages else TelegramStatusStage.BACKEND_WAIT,
         )
 
         payload: dict[str, Any] = {
