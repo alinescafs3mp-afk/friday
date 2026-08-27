@@ -90,9 +90,9 @@ def test_engineer_phase_classifier_separates_status_execution_and_planning(
         ("I need a migration plan.", True),
         ("What is a good migration plan?", True),
         ("Migration plan for the service.", True),
-        ("I need a plan, including how to execute it.", True),
-        ("I need a plan, and I will execute it myself.", True),
-        ("Составь план, как выполнить миграцию.", True),
+        ("I need a plan, including how to execute it.", False),
+        ("I need a plan, and I will execute it myself.", False),
+        ("Составь план, как выполнить миграцию.", False),
         ("Спланируй комплексный анализ неизвестного сервиса.", True),
         ("Спланируй и выполни комплексный анализ сервиса.", False),
         ("Составь план и затем аккуратно выполни его.", False),
@@ -106,8 +106,11 @@ def test_engineer_phase_classifier_separates_status_execution_and_planning(
         ("Продолжи работу по этому плану", False),
         ("План не сработал, почини", False),
         ("Составь план и сохрани его в файл", False),
-        ("Составь план и запиши его подробно.", True),
-        ("Create a plan and write it clearly.", True),
+        ("Составь план и отправь мне документом", False),
+        ("План готов — действуй", False),
+        ("Составь план и приступи", False),
+        ("Составь план и запиши его подробно.", False),
+        ("Create a plan and write it clearly.", False),
         ("Сделай подробный и безопасный план.", True),
         ("Сделай аудит и составь план.", False),
         ("Сделай аудит и план исправлений.", False),
@@ -925,19 +928,35 @@ async def test_planning_only_turn_delivers_draft_with_normal_tools_but_no_execut
 
 
 @pytest.mark.asyncio
-async def test_planning_only_tool_call_uses_normal_protocol_without_capability_rejection(
+@pytest.mark.parametrize(
+    "initial_result",
+    [
+        _command_call("initial-native-plan-effect", "printf forbidden-native"),
+        {
+            "content": json.dumps(
+                {
+                    "name": "engineer_command_run",
+                    "arguments": {"command": "printf forbidden-text"},
+                }
+            ),
+            "tool_calls": None,
+        },
+    ],
+    ids=["native", "textual"],
+)
+async def test_planning_only_initial_tool_call_gets_one_no_effect_plan_delivery(
     settings,
     storage,
-    monkeypatch,
+    initial_result: dict[str, object],
 ) -> None:
     actor = ActorContext(LEGACY_OWNER_USER_ID, "owner", "telegram-bridge")
     storage.ensure_user(actor.own_id, preset_key="owner")
+    request = "Сделай план миграции сервиса."
     model = _PhaseScriptModel(
         settings,
         [
-            {"content": "Черновик плана.", "tool_calls": None},
-            _command_call("ordinary-plan-protocol", "printf observed"),
-            {"content": "План подготовлен после наблюдаемой проверки.", "tool_calls": None},
+            initial_result,
+            {"content": "План: 1. Инвентаризация. 2. Тестовый перенос.", "tool_calls": None},
         ],
     )
     kernel = _CommandKernel()
@@ -947,7 +966,69 @@ async def test_planning_only_tool_call_uses_normal_protocol_without_capability_r
         llm=model,
         kernel=kernel,  # type: ignore[arg-type]
     )
-    monkeypatch.setattr(runtime, "_fresh_engineer_actor", lambda current, _capability: current)
+
+    response = await runtime._agentic_loop(  # noqa: SLF001
+        _context(),
+        request,
+        actor,
+        tools=[_schema("engineer_command_run")],
+        attachments=None,
+    )
+
+    assert response["content"].startswith("План:")
+    assert kernel.executions == []
+    assert [item["enable_thinking"] for item in model.call_controls] == [True, False]
+    assert [item["tools"] for item in model.call_controls] == [
+        ["engineer_command_run"],
+        ["engineer_command_run"],
+    ]
+    assert model.call_controls[1]["require_full_context"] is True
+    assert model.message_snapshots[1][-1] == {"role": "user", "content": request}
+    delivery_system = "\n".join(
+        str(item.get("content") or "") for item in model.message_snapshots[1] if item.get("role") == "system"
+    )
+    assert "tool call отклонён до исполнения" in delivery_system
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "delivery_result",
+    [
+        _command_call("delivery-native-plan-effect", "printf forbidden-native"),
+        {
+            "content": json.dumps(
+                {
+                    "name": "engineer_command_run",
+                    "arguments": {"command": "printf forbidden-text"},
+                }
+            ),
+            "tool_calls": None,
+        },
+    ],
+    ids=["native", "textual"],
+)
+async def test_planning_only_delivery_tool_call_fails_without_effect_or_third_call(
+    settings,
+    storage,
+    delivery_result: dict[str, object],
+) -> None:
+    actor = ActorContext(LEGACY_OWNER_USER_ID, "owner", "telegram-bridge")
+    storage.ensure_user(actor.own_id, preset_key="owner")
+    model = _PhaseScriptModel(
+        settings,
+        [
+            {"content": "Черновик плана.", "tool_calls": None},
+            delivery_result,
+            {"content": "Этот третий ответ не должен запрашиваться.", "tool_calls": None},
+        ],
+    )
+    kernel = _CommandKernel()
+    runtime = AgentRuntime(
+        replace(settings, engineer_mode_enabled=True, engineer_command_enabled=True),
+        storage,
+        llm=model,
+        kernel=kernel,  # type: ignore[arg-type]
+    )
 
     response = await runtime._agentic_loop(  # noqa: SLF001
         _context(),
@@ -957,14 +1038,52 @@ async def test_planning_only_tool_call_uses_normal_protocol_without_capability_r
         attachments=None,
     )
 
-    assert response["content"] == "План подготовлен после наблюдаемой проверки."
-    assert [item[1]["command"] for item in kernel.executions] == ["printf observed"]
-    assert len(model.call_controls) == 3
+    assert response["llm_failed"] is True
+    assert response["_model_generated"] is False
+    assert kernel.executions == []
+    assert len(model.call_controls) == 2
+    assert [item["enable_thinking"] for item in model.call_controls] == [True, False]
     assert [item["tools"] for item in model.call_controls] == [
         ["engineer_command_run"],
         ["engineer_command_run"],
-        ["engineer_command_run"],
     ]
+
+
+@pytest.mark.asyncio
+async def test_planning_only_repeated_tool_call_after_edge_repair_fails_without_effect(
+    settings,
+    storage,
+) -> None:
+    actor = ActorContext(LEGACY_OWNER_USER_ID, "owner", "telegram-bridge")
+    storage.ensure_user(actor.own_id, preset_key="owner")
+    model = _PhaseScriptModel(
+        settings,
+        [
+            _command_call("initial-plan-effect", "printf first-forbidden"),
+            _command_call("repeated-plan-effect", "printf second-forbidden"),
+            {"content": "Третий ответ не должен запрашиваться.", "tool_calls": None},
+        ],
+    )
+    kernel = _CommandKernel()
+    runtime = AgentRuntime(
+        replace(settings, engineer_mode_enabled=True, engineer_command_enabled=True),
+        storage,
+        llm=model,
+        kernel=kernel,  # type: ignore[arg-type]
+    )
+
+    response = await runtime._agentic_loop(  # noqa: SLF001
+        _context(),
+        "Составь план миграции сервиса.",
+        actor,
+        tools=[_schema("engineer_command_run")],
+        attachments=None,
+    )
+
+    assert response["llm_failed"] is True
+    assert kernel.executions == []
+    assert len(model.call_controls) == 2
+    assert [item["enable_thinking"] for item in model.call_controls] == [True, False]
 
 
 @pytest.mark.asyncio
@@ -1013,6 +1132,9 @@ async def test_planning_only_invalid_delivery_is_not_repaired_with_a_third_call(
         "Продолжи работу по этому плану",
         "План не сработал, почини",
         "Составь план и сохрани его в файл",
+        "Составь план и отправь мне документом",
+        "План готов — действуй",
+        "Составь план и приступи",
     ],
 )
 async def test_plan_wording_with_execution_authority_keeps_normal_tool_protocol(
