@@ -65,7 +65,8 @@ class RuntimeMixin(StorageShared):
             f"""SELECT n.id, n.user_id, n.chat_id, n.kind, n.dedup_key, n.body
                   FROM outbound_notifications n
                  WHERE n.status='pending' AND n.attempts < ?
-                   AND {_not_private_notification_dependency("n")}
+                   AND (n.kind='engineer_command_terminal'
+                        OR {_not_private_notification_dependency("n")})
                  ORDER BY n.created_at ASC LIMIT ?""",  # nosec B608
             (max(1, int(max_attempts)), max(1, min(int(limit), 100))),
         ).fetchall()
@@ -206,61 +207,144 @@ class RuntimeMixin(StorageShared):
 
         The dedup key is released for the same reason it is released at the
         attempt cap: the row is gone, so the organ must be able to raise the
-        matter again if the chat is ever re-allowed.
+        matter again if the chat is ever re-allowed. Strict Engineer terminal
+        rows are the exception: their command reconciler needs the original
+        kind/key to observe ``failed`` and must never stage the artifact again.
         """
-        cleaned = [str(value) for value in ids if str(value)]
+        return len(self.discard_notifications_verified(ids, reason=reason))
+
+    def discard_notifications_verified(self, ids: Sequence[str], *, reason: str) -> list[str]:
+        """Retire undeliverable rows and return only ids changed by this transaction."""
+
+        cleaned = list(dict.fromkeys(str(value) for value in ids if str(value)))
         if not cleaned:
-            return 0
+            return []
         marker = f"undeliverable:{reason}"[:64]
-        changed = 0
+        changed: list[str] = []
         with self.transaction() as conn:
             for notification_id in cleaned:
                 cursor = conn.execute(
                     f"""UPDATE outbound_notifications AS n
-                       SET status='failed', dedup_key='', kind=?
+                       SET status='failed',
+                           dedup_key=CASE WHEN kind='engineer_command_terminal'
+                                          THEN dedup_key ELSE '' END,
+                           kind=CASE
+                               WHEN kind='engineer_command_terminal'
+                               THEN kind ELSE ? END
                        WHERE id=? AND status='pending'
-                         AND {_not_private_notification_dependency("n")}""",  # nosec B608
+                         AND (kind='engineer_command_terminal'
+                              OR {_not_private_notification_dependency("n")})""",  # nosec B608
                     (marker, notification_id),
                 )
-                changed += max(0, int(cursor.rowcount or 0))
+                if cursor.rowcount > 0:
+                    changed.append(notification_id)
         return changed
+
+    def acknowledge_notifications(
+        self,
+        sent_ids: Sequence[str] = (),
+        failed_ids: Sequence[str] = (),
+        uncertain_ids: Sequence[str] = (),
+        *,
+        max_attempts: int = 5,
+    ) -> dict[str, list[str]]:
+        """Apply one bridge ACK and return exact durable states under the same lock.
+
+        The response is evidence, not an echo of caller input. It lets a bridge
+        retire a pre-write delivery fence only after SQLite proves the matching
+        row is terminal. ``pending`` means a failed transport attempt was
+        recorded but remains retryable, so any already-confirmed strict parts
+        must stay checkpointed.
+        """
+
+        sent = list(dict.fromkeys(str(value) for value in sent_ids if str(value)))
+        failed = list(dict.fromkeys(str(value) for value in failed_ids if str(value)))
+        uncertain = list(dict.fromkeys(str(value) for value in uncertain_ids if str(value)))
+        requested = list(dict.fromkeys([*sent, *failed, *uncertain]))
+        states: dict[str, list[str]] = {
+            "sent": [],
+            "failed": [],
+            "uncertain": [],
+            "pending": [],
+            "dismissed": [],
+            "missing": [],
+            "unconfirmed": [],
+        }
+        attempt_cap = max(1, int(max_attempts))
+        with self.transaction() as conn:
+            for notif_id in sent:
+                conn.execute(
+                    f"""UPDATE outbound_notifications AS n SET status='sent', sent_at=?
+                         WHERE id=? AND status='pending'
+                           AND (kind='engineer_command_terminal'
+                                OR {_not_private_notification_dependency("n")})""",  # nosec B608
+                    (utc_now(), notif_id),
+                )
+            for notif_id in failed:
+                # A failed send stays pending for retry until the attempt cap;
+                # only the ordinary terminal transition releases its dedup key.
+                conn.execute(
+                    f"""UPDATE outbound_notifications AS n
+                       SET attempts=attempts+1,
+                           status=CASE WHEN attempts + 1 >= ? THEN 'failed' ELSE 'pending' END,
+                           dedup_key=CASE
+                               WHEN attempts + 1 >= ?
+                                AND kind<>'engineer_command_terminal'
+                               THEN '' ELSE dedup_key END
+                       WHERE id=? AND status='pending'
+                         AND (kind='engineer_command_terminal'
+                              OR {_not_private_notification_dependency("n")})""",  # nosec B608
+                    (attempt_cap, attempt_cap, notif_id),
+                )
+            for notif_id in uncertain:
+                # Ambiguous strict delivery is terminal but not claimed sent.
+                # Retaining the dedup key prevents a possibly accepted document
+                # from being re-enqueued under a fresh notification id.
+                conn.execute(
+                    """UPDATE outbound_notifications AS n
+                       SET status='uncertain', sent_at=?
+                       WHERE id=? AND kind='engineer_command_terminal' AND status='pending'
+                       """,
+                    (utc_now(), notif_id),
+                )
+            for notif_id in requested:
+                row = conn.execute(
+                    "SELECT n.status, n.kind FROM outbound_notifications n WHERE n.id=?",
+                    (notif_id,),
+                ).fetchone()
+                if row is None:
+                    states["missing"].append(notif_id)
+                    continue
+                status = str(row["status"] or "")
+                if str(row["kind"] or "") != "engineer_command_terminal":
+                    visible = conn.execute(
+                        f"""SELECT 1 FROM outbound_notifications n
+                             WHERE n.id=? AND {_not_private_notification_dependency("n")}""",  # nosec B608
+                        (notif_id,),
+                    ).fetchone()
+                    if visible is None:
+                        states["unconfirmed"].append(notif_id)
+                        continue
+                if status in states and status != "unconfirmed":
+                    states[status].append(notif_id)
+                else:
+                    states["unconfirmed"].append(notif_id)
+        return states
 
     def mark_notifications(
         self,
         sent_ids: Sequence[str] = (),
         failed_ids: Sequence[str] = (),
+        uncertain_ids: Sequence[str] = (),
         *,
         max_attempts: int = 5,
     ) -> None:
-        with self.transaction() as conn:
-            for notif_id in sent_ids:
-                conn.execute(
-                    f"""UPDATE outbound_notifications AS n SET status='sent', sent_at=?
-                         WHERE id=? AND {_not_private_notification_dependency("n")}""",  # nosec B608
-                    (utc_now(), str(notif_id)),
-                )
-            for notif_id in failed_ids:
-                # A failed send stays pending for retry until the attempt cap;
-                # then it becomes a terminal 'failed' row rather than looping.
-                #
-                # Reaching that cap also releases the dedup key. There is no delay
-                # column, and the bridge drains every 15 s, so five attempts are
-                # spent in about 75 seconds — a two-minute network outage exhausts
-                # every queued reminder. The key kept the row in `uq_outbound_dedup`
-                # (partial: `WHERE dedup_key <> ''`), so `enqueue_notification` then
-                # refused to queue that reminder ever again: an event silently lost
-                # its only notification because the WAN blinked. Clearing it lets the
-                # organ re-enqueue on its next scan. Only on the terminal transition
-                # — a `sent` row keeps its key, or the same message would be sent
-                # twice.
-                conn.execute(
-                    f"""UPDATE outbound_notifications AS n
-                       SET attempts=attempts+1,
-                           status=CASE WHEN attempts + 1 >= ? THEN 'failed' ELSE 'pending' END,
-                           dedup_key=CASE WHEN attempts + 1 >= ? THEN '' ELSE dedup_key END
-                       WHERE id=? AND {_not_private_notification_dependency("n")}""",  # nosec B608
-                    (max(1, int(max_attempts)), max(1, int(max_attempts)), str(notif_id)),
-                )
+        self.acknowledge_notifications(
+            sent_ids,
+            failed_ids,
+            uncertain_ids,
+            max_attempts=max_attempts,
+        )
 
     def idempotency_get(
         self,

@@ -4385,6 +4385,7 @@ class ExecutionKernel:
         actor: ActorContext | None = None,
         confirmation_update_id: str = "",
         confirmation_body_hash: str = "",
+        delivery_chat_id: str = "",
     ) -> ToolResult:
         """Исполнить действие, которое человек подтвердил. Ровно один раз.
 
@@ -4469,6 +4470,7 @@ class ExecutionKernel:
             arguments["_approval_id"] = approval_id
             arguments["_confirmation_update_id"] = str(confirmation_update_id)
             arguments["_confirmation_body_hash"] = str(confirmation_body_hash)
+            arguments["_delivery_chat_id"] = str(delivery_chat_id)
 
         details = self._audit_details(name, arguments)
         timeout = tool.timeout_sec or 30

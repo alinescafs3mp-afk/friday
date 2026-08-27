@@ -113,6 +113,7 @@ def _submit(kernel: CommandKernel, request: CommandRequest, **kwargs) -> str:
     isolation = kwargs.pop("isolation_profile", IsolationProfile.ISOLATED_WORKSPACE)
     kwargs.pop("host_user_authorized", None)
     actor_id = kwargs.pop("actor_id", ACTOR)
+    delivery_chat_id = kwargs.pop("delivery_chat_id", "")
     source = _attest(
         source_auth,
         request,
@@ -123,7 +124,12 @@ def _submit(kernel: CommandKernel, request: CommandRequest, **kwargs) -> str:
     if kwargs.pop("destructive", True):
         confirmation = _confirm(kernel, source, request)
     token = kernel.authority.issue(request, source=source, confirmation=confirmation)
-    return kernel.submit(request, token, actor_id=actor_id)
+    return kernel.submit(
+        request,
+        token,
+        actor_id=actor_id,
+        delivery_chat_id=delivery_chat_id,
+    )
 
 
 def _wait(kernel: CommandKernel, job_id: str):
@@ -340,6 +346,26 @@ def test_idempotent_submit_returns_same_job(tmp_path: Path) -> None:
     _wait(kernel, first)
     second = kernel.submit(request, "not-a-grant", actor_id=ACTOR)
     assert second == first
+
+
+def test_idempotent_submit_preserves_exact_delivery_scope(tmp_path: Path) -> None:
+    kernel = _kernel(tmp_path)
+    request = _argv("/usr/bin/true", key=_key("delivery-idem"))
+    first = _submit(kernel, request, delivery_chat_id="5001")
+    _wait(kernel, first)
+    assert kernel.submit(
+        request,
+        "not-a-grant",
+        actor_id=ACTOR,
+        delivery_chat_id="5001",
+    ) == first
+    with pytest.raises(CommandError, match="delivery_scope_mismatch"):
+        kernel.submit(
+            request,
+            "not-a-grant",
+            actor_id=ACTOR,
+            delivery_chat_id="5002",
+        )
 
 
 def test_idempotent_submit_does_not_refocus_an_older_job(tmp_path: Path) -> None:
@@ -1133,7 +1159,25 @@ def test_missing_controller_fails_closed(tmp_path: Path) -> None:
     )
     request = _argv("/usr/bin/true", key=_key("missing-ctl"))
     with pytest.raises(CommandError, match="resource_boundary_unproven"):
-        _submit(kernel, request)
+        _submit(kernel, request, delivery_chat_id="5001")
+    row = kernel.store._conn.execute("SELECT job_id,receipt_mac FROM jobs").fetchone()  # noqa: SLF001
+    assert row is not None and str(row["receipt_mac"])
+    job_id = str(row["job_id"])
+    store_root = kernel.store.root
+    kernel.close()
+    restarted = CommandKernel(
+        store_root,
+        _authority(),
+        boundary=MissingControllerBoundary(),
+    )
+    receipt, mac_version = restarted.terminal_receipt(
+        job_id,
+        actor_id=ACTOR,
+        conversation_id="conv-1",
+    )
+    assert receipt.status is CommandStatus.FAILED
+    assert receipt.error_code == "resource_boundary_unproven"
+    assert mac_version == 2
 
 
 def test_fork_bomb_is_contained(tmp_path: Path) -> None:

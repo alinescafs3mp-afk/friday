@@ -28,6 +28,8 @@ from .contracts import (
     MAX_OUTPUT_FILE_BYTES,
     MAX_OUTPUT_FILES,
     MAX_OUTPUT_TREE_BYTES,
+    MAX_STDERR_BYTES,
+    MAX_STDOUT_BYTES,
     CommandLane,
     CommandOrigin,
     CommandReceipt,
@@ -184,6 +186,12 @@ def _validated_receipt(receipt: object) -> CommandReceipt:
             )
         )
         or not isinstance(receipt.generated_files, tuple)
+        or not isinstance(receipt.stdout, bytes)
+        or not isinstance(receipt.stderr, bytes)
+        or len(receipt.stdout) > MAX_STDOUT_BYTES
+        or len(receipt.stderr) > MAX_STDERR_BYTES
+        or not hmac.compare_digest(_digest(receipt.stdout), receipt.stdout_sha256)
+        or not hmac.compare_digest(_digest(receipt.stderr), receipt.stderr_sha256)
     ):
         raise CommandOutputPublicationError("command_output_receipt_invalid")
     try:
@@ -210,7 +218,7 @@ def _validated_inventory(
     except TypeError as exc:
         raise CommandOutputPublicationError("command_output_inventory_invalid") from exc
     expected = tuple(receipt.generated_files)
-    if not 1 <= len(expected) <= MAX_OUTPUT_FILES or len(supplied) != len(expected):
+    if len(expected) > MAX_OUTPUT_FILES or len(supplied) != len(expected):
         raise CommandOutputPublicationError("command_output_count_invalid")
 
     expected_by_path: dict[str, GeneratedFile] = {}
@@ -315,11 +323,29 @@ def build_command_output_archive(
     inventory_bytes = _canonical_json(output_rows)
     public_receipt = checked_receipt.to_public_payload()
     public_receipt_bytes = _canonical_json(public_receipt)
+    evidence_rows = [
+        {
+            "archive_mode": "0644",
+            "archive_path": archive_path,
+            "sha256": digest,
+            "size_bytes": len(payload),
+            "truncated": truncated,
+        }
+        for archive_path, payload, digest, truncated in (
+            ("stdout.bin", checked_receipt.stdout, checked_receipt.stdout_sha256, checked_receipt.truncated_stdout),
+            ("stderr.bin", checked_receipt.stderr, checked_receipt.stderr_sha256, checked_receipt.truncated_stderr),
+        )
+        if payload
+    ]
+    evidence_bytes = _canonical_json(evidence_rows)
     manifest: dict[str, Any] = {
         "schema": COMMAND_OUTPUT_MANIFEST_SCHEMA,
         "job_id": checked_receipt.job_id,
         "command_digest": checked_receipt.command_digest,
         "command_receipt_sha256": _digest(public_receipt_bytes),
+        "evidence": evidence_rows,
+        "evidence_count": len(evidence_rows),
+        "evidence_inventory_sha256": _digest(evidence_bytes),
         "output_count": len(output_rows),
         "output_bytes": sum(row["size_bytes"] for row in output_rows),
         "output_inventory_sha256": _digest(inventory_bytes),
@@ -333,6 +359,7 @@ def build_command_output_archive(
         "command_digest": checked_receipt.command_digest,
         "command_receipt": public_receipt,
         "command_receipt_sha256": _digest(public_receipt_bytes),
+        "evidence_inventory_sha256": _digest(evidence_bytes),
         "manifest_sha256": _digest(manifest_bytes),
         "output_inventory_sha256": _digest(inventory_bytes),
     }
@@ -350,6 +377,10 @@ def build_command_output_archive(
             archive.comment = b""
             _write_entry(archive, "MANIFEST.json", manifest_bytes)
             _write_entry(archive, "RECEIPT.json", delivery_receipt_bytes)
+            if checked_receipt.stdout:
+                _write_entry(archive, "stdout.bin", checked_receipt.stdout)
+            if checked_receipt.stderr:
+                _write_entry(archive, "stderr.bin", checked_receipt.stderr)
             for descriptor, payload in ordered:
                 _write_entry(archive, f"outputs/{descriptor.relative_path}", payload)
     except (OSError, OverflowError, ValueError, zipfile.BadZipFile, zipfile.LargeZipFile) as exc:

@@ -177,6 +177,7 @@ def test_explicit_reference_refocuses_but_lookup_replay_does_not(tmp_path: Path)
         assert store.locked_lookup_idempotency(ACTOR, "idem-first") == {
             "job_id": first,
             "digest": "2" * 64,
+            "delivery_chat_id": "",
         }
         assert _resolve(store) == second
 

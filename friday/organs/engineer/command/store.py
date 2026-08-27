@@ -25,6 +25,8 @@ _KNOWN_JOB_STATUSES = frozenset(
 )
 _UNRESOLVED_JOB_STATUSES = frozenset({"planned", "admitted", "running", "unknown"})
 _CANCELLABLE_JOB_STATUSES = frozenset({"planned", "admitted", "running"})
+_PUBLICATION_STATES = frozenset({"pending", "staged", "sent", "uncertain", "blocked"})
+_PUBLICATION_MAX_ATTEMPTS = 5
 
 
 def _flock(fd: int, op: int) -> None:
@@ -220,8 +222,6 @@ class CommandJobStore:
             BEGIN
                 SELECT RAISE(ABORT, 'command_job_focus_scope_mismatch');
             END;
-            CREATE INDEX IF NOT EXISTS idx_command_jobs_scope_status
-                ON jobs(actor_id, tenant_id, conversation_id, channel, status, job_id);
             CREATE TABLE IF NOT EXISTS grant_nonces (
                 nonce TEXT PRIMARY KEY,
                 kind TEXT NOT NULL,
@@ -269,6 +269,36 @@ class CommandJobStore:
                 raise
             else:
                 self._conn.execute("COMMIT")
+        if {
+            "actor_id",
+            "tenant_id",
+            "conversation_id",
+            "channel",
+            "source_row_id",
+            "receipt_mac",
+            "created_at",
+        }.issubset(columns):
+            self._conn.executescript(
+                """
+                CREATE INDEX IF NOT EXISTS idx_command_jobs_scope_status
+                    ON jobs(actor_id, tenant_id, conversation_id,channel,status,job_id);
+                CREATE TABLE IF NOT EXISTS command_job_publications (
+                    job_id TEXT PRIMARY KEY REFERENCES jobs(job_id) ON DELETE RESTRICT,
+                    delivery_chat_id TEXT NOT NULL,
+                    state TEXT NOT NULL
+                        CHECK(state IN ('pending','staged','sent','uncertain','blocked')),
+                    notification_id TEXT NOT NULL DEFAULT '',
+                    dedup_key TEXT NOT NULL DEFAULT '',
+                    envelope_sha256 TEXT NOT NULL DEFAULT '',
+                    attempts INTEGER NOT NULL DEFAULT 0 CHECK(attempts >= 0),
+                    last_error_code TEXT NOT NULL DEFAULT '',
+                    created_at REAL NOT NULL,
+                    updated_at REAL NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS idx_command_job_publications_state
+                    ON command_job_publications(state, updated_at, job_id);
+                """
+            )
         # Pending confirmations created by a pre-ledger build cannot prove that
         # their immutable ingress row/update was minted only once. Invalidate
         # them on upgrade instead of silently widening authority.
@@ -308,12 +338,21 @@ class CommandJobStore:
 
     def lookup_idempotency(self, actor_id: str, key: str) -> dict[str, str] | None:
         row = self._conn.execute(
-            "SELECT job_id, command_digest FROM jobs WHERE actor_id=? AND idempotency_key=?",
+            """SELECT jobs.job_id, jobs.command_digest,
+                      COALESCE(publication.delivery_chat_id, '') AS delivery_chat_id
+                 FROM jobs
+                 LEFT JOIN command_job_publications AS publication
+                   ON publication.job_id=jobs.job_id
+                WHERE jobs.actor_id=? AND jobs.idempotency_key=?""",
             (actor_id, key),
         ).fetchone()
         if row is None:
             return None
-        return {"job_id": str(row["job_id"]), "digest": str(row["command_digest"])}
+        return {
+            "job_id": str(row["job_id"]),
+            "digest": str(row["command_digest"]),
+            "delivery_chat_id": str(row["delivery_chat_id"]),
+        }
 
     def locked_lookup_idempotency(self, actor_id: str, key: str) -> dict[str, str] | None:
         with self._local:
@@ -434,8 +473,157 @@ class CommandJobStore:
                 focused_at=float(payload["created_at"]),
                 reason="submit",
             )
+            delivery_chat_id = str(payload.get("delivery_chat_id") or "")
+            if delivery_chat_id:
+                created_at = float(payload["created_at"])
+                self._conn.execute(
+                    """INSERT INTO command_job_publications(
+                           job_id,delivery_chat_id,state,created_at,updated_at)
+                       VALUES(?,?,'pending',?,?)""",
+                    (str(payload["job_id"]), delivery_chat_id, created_at, created_at),
+                )
         except sqlite3.IntegrityError as exc:
             raise CommandError("idempotency_conflict") from exc
+
+    def list_terminal_publication_candidates(self, *, limit: int = 20) -> list[dict[str, Any]]:
+        """Return bounded publishable terminal jobs that still need staging."""
+
+        with self._local:
+            rows = self._conn.execute(
+                """SELECT jobs.*, publication.delivery_chat_id,
+                          publication.state AS publication_state,
+                          publication.notification_id,
+                          publication.dedup_key AS publication_dedup_key,
+                          publication.envelope_sha256,
+                          publication.attempts AS publication_attempts,
+                          publication.last_error_code AS publication_error_code,
+                          publication.updated_at AS publication_updated_at
+                     FROM command_job_publications AS publication
+                     JOIN jobs ON jobs.job_id=publication.job_id
+                    WHERE publication.state='pending'
+                      AND jobs.status IN ('completed','failed','cancelled','timeout')
+                    ORDER BY publication.updated_at ASC, jobs.job_id ASC
+                    LIMIT ?""",
+                (max(1, min(int(limit), 100)),),
+            ).fetchall()
+            return [{str(key): value for key, value in dict(row).items()} for row in rows]
+
+    def list_staged_publications(self, *, limit: int = 100) -> list[dict[str, Any]]:
+        """Return staged rows whose main-queue terminal state needs reconciliation."""
+
+        with self._local:
+            rows = self._conn.execute(
+                """SELECT jobs.actor_id, jobs.tenant_id, jobs.conversation_id,
+                          jobs.source_row_id, jobs.status,
+                          publication.*
+                     FROM command_job_publications AS publication
+                     JOIN jobs ON jobs.job_id=publication.job_id
+                    WHERE publication.state='staged'
+                    ORDER BY publication.updated_at ASC, publication.job_id ASC
+                    LIMIT ?""",
+                (max(1, min(int(limit), 500)),),
+            ).fetchall()
+            return [{str(key): value for key, value in dict(row).items()} for row in rows]
+
+    def record_publication_attempt(self, job_id: str, error_code: str) -> None:
+        """Record a content-free failure and bound permanently broken retries."""
+
+        clean = str(error_code or "publication_failed")
+        if re.fullmatch(r"[a-z][a-z0-9_]{0,79}", clean) is None:
+            clean = "publication_failed"
+        with self.transaction():
+            cursor = self._conn.execute(
+                """UPDATE command_job_publications
+                      SET attempts=attempts+1,
+                          state=CASE WHEN attempts+1>=? THEN 'blocked' ELSE state END,
+                          last_error_code=?,updated_at=?
+                    WHERE job_id=? AND state='pending'""",
+                (_PUBLICATION_MAX_ATTEMPTS, clean, time.time(), str(job_id)),
+            )
+            if cursor.rowcount != 1:
+                raise CommandError("publication_state_changed")
+
+    def stage_publication(
+        self,
+        job_id: str,
+        *,
+        notification_id: str,
+        dedup_key: str,
+        envelope_sha256: str,
+    ) -> None:
+        """Bind the exact committed main-queue row to one terminal command."""
+
+        if (
+            not notification_id
+            or not dedup_key
+            or re.fullmatch(r"[0-9a-f]{64}", str(envelope_sha256 or "")) is None
+        ):
+            raise CommandError("publication_identity_invalid")
+        with self.transaction():
+            cursor = self._conn.execute(
+                """UPDATE command_job_publications
+                      SET state='staged',notification_id=?,dedup_key=?,envelope_sha256=?,
+                          last_error_code='',updated_at=?
+                    WHERE job_id=? AND state='pending'""",
+                (
+                    str(notification_id),
+                    str(dedup_key),
+                    str(envelope_sha256),
+                    time.time(),
+                    str(job_id),
+                ),
+            )
+            if cursor.rowcount != 1:
+                row = self._conn.execute(
+                    """SELECT state,notification_id,dedup_key,envelope_sha256
+                         FROM command_job_publications WHERE job_id=?""",
+                    (str(job_id),),
+                ).fetchone()
+                if row is None or not (
+                    str(row["state"]) == "staged"
+                    and str(row["notification_id"]) == str(notification_id)
+                    and str(row["dedup_key"]) == str(dedup_key)
+                    and str(row["envelope_sha256"]) == str(envelope_sha256)
+                ):
+                    raise CommandError("publication_state_changed")
+
+    def finish_publication(
+        self,
+        job_id: str,
+        *,
+        state: Literal["sent", "uncertain", "blocked"],
+    ) -> None:
+        """Mirror one proven terminal queue outcome into the command ledger."""
+
+        if state not in _PUBLICATION_STATES - {"pending", "staged"}:
+            raise CommandError("publication_state_invalid")
+        with self.transaction():
+            cursor = self._conn.execute(
+                """UPDATE command_job_publications SET state=?,updated_at=?
+                    WHERE job_id=? AND state='staged'""",
+                (state, time.time(), str(job_id)),
+            )
+            if cursor.rowcount != 1:
+                row = self._conn.execute(
+                    "SELECT state FROM command_job_publications WHERE job_id=?",
+                    (str(job_id),),
+                ).fetchone()
+                if row is None or str(row["state"]) != state:
+                    raise CommandError("publication_state_changed")
+
+    def reset_staged_publication(self, job_id: str, *, notification_id: str) -> None:
+        """Retry only after the main queue proves the prior carrier is gone."""
+
+        with self.transaction():
+            cursor = self._conn.execute(
+                """UPDATE command_job_publications
+                      SET state='pending',notification_id='',dedup_key='',envelope_sha256='',
+                          last_error_code='delivery_rejected',updated_at=?
+                    WHERE job_id=? AND state='staged' AND notification_id=?""",
+                (time.time(), str(job_id), str(notification_id)),
+            )
+            if cursor.rowcount != 1:
+                raise CommandError("publication_state_changed")
 
     @staticmethod
     def _validate_reference_scope(

@@ -75,7 +75,9 @@ from friday.server import create_app
 # product witness; it cannot delete an ordinary Inbox item.
 # 195 → 197: owner-only same-process document-map shadow observation and
 # atomic rollout-attestation consume; both are body-free control-plane routes.
-EXPECTED_OPERATIONS = 197
+# 197 → 198: bridge-only exact Engineer terminal-artifact download. Queue
+# projection remains content-free; bytes are freshly re-authorized per carrier.
+EXPECTED_OPERATIONS = 198
 # Areas that are mounted through include_router, i.e. exactly the ones app.routes
 # cannot see. Pinning their sizes catches a router that quietly stops being included.
 EXPECTED_BY_PREFIX = {

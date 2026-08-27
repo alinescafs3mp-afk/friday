@@ -6,6 +6,7 @@ import io
 import json
 import stat
 import zipfile
+from dataclasses import replace
 from typing import Any
 
 import pytest
@@ -44,8 +45,9 @@ def _receipt(
     *,
     job_id: str = "1" * 32,
     status: CommandStatus = CommandStatus.COMPLETED,
+    stdout: bytes = b"",
+    stderr: bytes = b"",
 ) -> CommandReceipt:
-    empty_digest = hashlib.sha256(b"").hexdigest()
     return CommandReceipt(
         job_id=job_id,
         status=status,
@@ -64,10 +66,10 @@ def _receipt(
         started_at=10.0,
         finished_at=11.0,
         executable=None,
-        stdout_sha256=empty_digest,
-        stderr_sha256=empty_digest,
-        stdout=b"",
-        stderr=b"",
+        stdout_sha256=hashlib.sha256(stdout).hexdigest(),
+        stderr_sha256=hashlib.sha256(stderr).hexdigest(),
+        stdout=stdout,
+        stderr=stderr,
         generated_files=files,
         error_code="",
         effect_boundary_crossed=True,
@@ -130,6 +132,33 @@ def test_command_output_archive_is_byte_identical_sorted_and_fixed() -> None:
     assert delivery_receipt["command_digest"] == receipt.command_digest
     assert delivery_receipt["command_receipt"]["receipt_mac"] == receipt.receipt_mac
     assert delivery_receipt["command_receipt"]["generated_file_count"] == 2
+
+
+def test_zero_output_archive_carries_bounded_stdout_and_receipt() -> None:
+    receipt = _receipt((), stdout=b"console result\n")
+    result = build_command_output_archive(receipt, ())
+
+    with zipfile.ZipFile(io.BytesIO(result.payload)) as archive:
+        assert archive.namelist() == ["MANIFEST.json", "RECEIPT.json", "stdout.bin"]
+        assert archive.read("stdout.bin") == b"console result\n"
+        manifest = _json_member(archive, "MANIFEST.json")
+    assert manifest["output_count"] == 0
+    assert manifest["evidence"] == [
+        {
+            "archive_mode": "0644",
+            "archive_path": "stdout.bin",
+            "sha256": hashlib.sha256(b"console result\n").hexdigest(),
+            "size_bytes": 15,
+            "truncated": False,
+        }
+    ]
+
+
+def test_archive_refuses_evidence_bytes_that_do_not_match_receipt_hashes() -> None:
+    receipt = _receipt((), stdout=b"trusted")
+    changed = replace(receipt, stdout=b"altered")
+    with pytest.raises(CommandOutputPublicationError, match="command_output_receipt_invalid"):
+        build_command_output_archive(changed, ())
 
 
 @pytest.mark.parametrize(

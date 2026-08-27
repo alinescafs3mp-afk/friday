@@ -8,6 +8,8 @@ before and nothing outside the package moved.
 from __future__ import annotations
 
 import copy
+import hashlib
+import hmac
 import re
 from contextlib import suppress
 from typing import TYPE_CHECKING
@@ -58,6 +60,7 @@ _ALBUM_MAX_ITEMS = 10
 _DELIVERY_UNCERTAINTY_NOTICE = (
     "доставка не подтверждена, не дублирую; повторите запрос если фрагмент не пришёл"
 )
+_ENGINEER_TERMINAL_NOTIFICATION_KIND = "engineer_command_terminal"
 _ARCHIVE_DOCUMENT_SUFFIXES = (".zip", ".rar", ".7z")
 _ARCHIVE_DOCUMENT_MIME_TYPES = frozenset(
     {
@@ -80,6 +83,255 @@ _PRESENTATION_PASSWORD_QUOTES = {
     "‘": "’",
     "„": "“",
 }
+
+
+def _notification_ack_states(payload: dict[str, Any]) -> dict[str, set[str]] | None:
+    """Parse proof-bearing ACK state ids; malformed evidence is no evidence."""
+
+    raw = payload.get("state_ids")
+    if not isinstance(raw, dict):
+        return None
+    states: dict[str, set[str]] = {}
+    seen: set[str] = set()
+    for status in (
+        "sent",
+        "failed",
+        "uncertain",
+        "pending",
+        "dismissed",
+        "missing",
+        "unconfirmed",
+    ):
+        values = raw.get(status)
+        if not isinstance(values, list) or any(not isinstance(value, str) or not value for value in values):
+            return None
+        current = set(values)
+        if seen.intersection(current):
+            return None
+        seen.update(current)
+        states[status] = current
+    return states
+
+
+def _engineer_terminal_envelope(
+    item: dict[str, Any],
+    *,
+    chat_id: int,
+    max_document_bytes: int,
+) -> dict[str, Any] | None:
+    """Validate and bind one content-free terminal artifact envelope."""
+
+    notification_id = item.get("id")
+    dedup_key = item.get("dedup_key")
+    caption = item.get("caption")
+    artifact = item.get("artifact")
+    if (
+        set(item) != {"id", "chat_id", "kind", "dedup_key", "caption", "artifact"}
+        or not isinstance(notification_id, str)
+        or re.fullmatch(r"[A-Za-z0-9_.:-]{1,128}", notification_id) is None
+        or item.get("kind") != _ENGINEER_TERMINAL_NOTIFICATION_KIND
+        or item.get("chat_id") != str(chat_id)
+        or not isinstance(dedup_key, str)
+        or not dedup_key
+        or len(dedup_key) > 512
+        or not dedup_key.isascii()
+        or any(ord(character) < 32 or ord(character) == 127 for character in dedup_key)
+        or not isinstance(caption, str)
+        or not caption
+        or split_for_telegram(caption, limit=1024) != [caption]
+        or not isinstance(artifact, dict)
+        or set(artifact) != {"filename", "mime_type", "size_bytes", "sha256", "path"}
+    ):
+        return None
+    filename = artifact.get("filename")
+    mime_type = artifact.get("mime_type")
+    size_bytes = artifact.get("size_bytes")
+    digest = artifact.get("sha256")
+    path = artifact.get("path")
+    if (
+        not isinstance(filename, str)
+        or not filename
+        or filename != filename.strip()
+        or len(filename) > 128
+        or "/" in filename
+        or "\\" in filename
+        or "\x00" in filename
+        or not isinstance(mime_type, str)
+        or re.fullmatch(r"[A-Za-z0-9!#$&^_.+-]+/[A-Za-z0-9!#$&^_.+-]+", mime_type) is None
+        or isinstance(size_bytes, bool)
+        or not isinstance(size_bytes, int)
+        or not 0 < size_bytes <= max(1, int(max_document_bytes))
+        or not isinstance(digest, str)
+        or re.fullmatch(r"[0-9a-f]{64}", digest) is None
+        or path != f"/api/notifications/{notification_id}/artifact"
+    ):
+        return None
+    identity = {
+        "artifact": {
+            "filename": filename,
+            "mime_type": mime_type,
+            "path": path,
+            "sha256": digest,
+            "size_bytes": size_bytes,
+        },
+        "caption": caption,
+        "chat_id": str(chat_id),
+        "dedup_key": dedup_key,
+        "kind": _ENGINEER_TERMINAL_NOTIFICATION_KIND,
+        "notification_id": notification_id,
+    }
+    canonical = json.dumps(identity, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    identity["fence_key"] = f"document:{hashlib.sha256(canonical.encode('utf-8')).hexdigest()}"
+    return identity
+
+
+async def _fetch_engineer_terminal_artifact(
+    bridge: Any,
+    backend: httpx.AsyncClient,
+    *,
+    signer_chat: str,
+    artifact: dict[str, Any],
+) -> tuple[str, bytes | None]:
+    """Fetch separately authorized bytes as ``ready``, ``failed`` or ``deferred``."""
+
+    path = str(artifact["path"])
+    timestamp = int(time.time())
+    nonce = uuid.uuid4().hex
+    signature = sign_bridge_request(
+        bridge.config.bridge_secret,
+        timestamp=timestamp,
+        method="GET",
+        path=path,
+        external_user_id=signer_chat,
+        chat_id=signer_chat,
+        nonce=nonce,
+        body=b"",
+    )
+    try:
+        response = await backend.request(
+            "GET",
+            f"{bridge._backend_url}{path}",
+            headers={
+                "X-Friday-Timestamp": str(timestamp),
+                "X-Friday-User": signer_chat,
+                "X-Friday-Chat": signer_chat,
+                "X-Friday-Nonce": nonce,
+                "X-Friday-Signature": signature,
+            },
+        )
+    except Exception:
+        return "deferred", None
+    if 400 <= int(response.status_code) < 500:
+        return "failed", None
+    if not 200 <= int(response.status_code) < 300:
+        return "deferred", None
+    content = bytes(response.content)
+    if len(content) != artifact["size_bytes"] or not hmac.compare_digest(
+        hashlib.sha256(content).hexdigest(),
+        artifact["sha256"],
+    ):
+        return "failed", None
+    return "ready", content
+
+
+def _telegram_document_outcome(response: httpx.Response) -> str:
+    """Classify Telegram proof: accepted, explicitly rejected, or ambiguous."""
+
+    try:
+        payload = response.json()
+    except (ValueError, TypeError, UnicodeError, json.JSONDecodeError):
+        return "uncertain"
+    if not isinstance(payload, dict):
+        return "uncertain"
+    status = int(response.status_code)
+    if 400 <= status < 500:
+        error_code = payload.get("error_code")
+        description = payload.get("description")
+        return (
+            "failed"
+            if payload.get("ok") is False
+            and isinstance(error_code, int)
+            and not isinstance(error_code, bool)
+            and error_code == status
+            and isinstance(description, str)
+            and bool(description)
+            else "uncertain"
+        )
+    if not 200 <= status < 300 or payload.get("ok") is not True:
+        return "uncertain"
+    result = payload.get("result")
+    message_id = result.get("message_id") if isinstance(result, dict) else None
+    if isinstance(message_id, bool) or not isinstance(message_id, int) or message_id <= 0:
+        return "uncertain"
+    return "sent"
+
+
+async def _deliver_engineer_terminal_document(
+    bridge: Any,
+    telegram: httpx.AsyncClient,
+    backend: httpx.AsyncClient,
+    *,
+    signer_chat: str,
+    envelope: dict[str, Any],
+) -> str:
+    """Deliver one captioned archive as sent/failed/uncertain/deferred."""
+
+    notification_id = str(envelope["notification_id"])
+    fence_key = str(envelope["fence_key"])
+    states = bridge._inbox.notification_delivery_part_states(notification_id)
+    if any(key.startswith("document:") and key != fence_key for key in states):
+        return "uncertain"
+    if states.get(fence_key) == "uncertain":
+        return "uncertain"
+    if states.get(fence_key) == "confirmed":
+        return "sent"
+
+    artifact = envelope["artifact"]
+    fetch_outcome, content = await _fetch_engineer_terminal_artifact(
+        bridge,
+        backend,
+        signer_chat=signer_chat,
+        artifact=artifact,
+    )
+    if fetch_outcome != "ready" or content is None:
+        return fetch_outcome
+    state = bridge._inbox.begin_notification_part_delivery(notification_id, fence_key)
+    if state != "armed":
+        return "sent" if state == "confirmed" else "uncertain"
+    try:
+        response = await telegram.post(
+            f"{bridge._api_url}/sendDocument",
+            data={"chat_id": str(envelope["chat_id"]), "caption": envelope["caption"]},
+            files={
+                "document": (
+                    artifact["filename"],
+                    content,
+                    artifact["mime_type"],
+                )
+            },
+        )
+    except httpx.ConnectError:
+        return (
+            "failed"
+            if bridge._inbox.reject_notification_part_delivery(notification_id, fence_key)
+            else "uncertain"
+        )
+    except Exception:
+        return "uncertain"
+    outcome = _telegram_document_outcome(response)
+    if outcome == "failed":
+        return (
+            "failed"
+            if bridge._inbox.reject_notification_part_delivery(notification_id, fence_key)
+            else "uncertain"
+        )
+    if outcome != "sent":
+        return "uncertain"
+    try:
+        confirmed = bridge._inbox.confirm_notification_part_delivery(notification_id, fence_key)
+    except Exception:
+        return "uncertain"
+    return "sent" if confirmed else "uncertain"
 
 
 class _AlbumPermanentError(PermanentUpdateError):
@@ -718,10 +970,37 @@ class TransportMixin(BridgeShared):
             signer_chat,
             signer_chat,
         )
+        raw_retired = data.get("retired")
+        if isinstance(raw_retired, list):
+            retired = [
+                value
+                for value in raw_retired[:100]
+                if isinstance(value, str) and value
+            ]
+            self._inbox.forget_notification_delivery_parts(retired)
         raw_items = data.get("items")
         items: list[Any] = raw_items if isinstance(raw_items, list) else []
-        sent: list[str] = []
+        terminal_outcomes = self._inbox.notification_delivery_outcomes(limit=100)
+        # A process may die after the pre-write fence (or even after its success
+        # confirmation) but before persisting the separate ACK outcome. Promote
+        # every such orphan to a durable outcome so a later revoke/discard that
+        # hides the backend row cannot strand the fence forever.
+        for notification_id, inferred in self._inbox.notification_delivery_orphan_outcomes(
+            limit=100
+        ).items():
+            self._inbox.remember_notification_delivery_outcome(notification_id, inferred)
+            terminal_outcomes[notification_id] = inferred
+        sent: list[str] = [
+            notification_id
+            for notification_id, outcome in terminal_outcomes.items()
+            if outcome == "sent"
+        ]
         failed: list[str] = []
+        uncertain: list[str] = [
+            notification_id
+            for notification_id, outcome in terminal_outcomes.items()
+            if outcome == "uncertain"
+        ]
         # Строки, которые уже ушли человеку, но чьё подтверждение до бэкенда не
         # доехало: он честно предлагает их снова, потому что для него они всё ещё
         # `pending`. Отправить их второй раз — и человек получит дубль пачки.
@@ -732,7 +1011,41 @@ class TransportMixin(BridgeShared):
             notif_id = str(item.get("id") or "")
             chat_raw = str(item.get("chat_id") or "")
             body = str(item.get("body") or "")
-            if not notif_id or not body:
+            kind = str(item.get("kind") or "")
+            if not notif_id or (kind != _ENGINEER_TERMINAL_NOTIFICATION_KIND and not body):
+                continue
+            if notif_id in terminal_outcomes:
+                # Reconcile only the exact envelope that reached Telegram. A
+                # backend row changing while its ACK response is lost must not
+                # let the old successful send bless new chat/caption/artifact
+                # bytes under the reused notification id.
+                try:
+                    outcome_chat_id = int(chat_raw)
+                except ValueError:
+                    outcome_chat_id = 0
+                outcome_envelope = (
+                    _engineer_terminal_envelope(
+                        item,
+                        chat_id=outcome_chat_id,
+                        max_document_bytes=self.config.max_document_bytes,
+                    )
+                    if kind == _ENGINEER_TERMINAL_NOTIFICATION_KIND and outcome_chat_id
+                    else None
+                )
+                outcome_states = self._inbox.notification_delivery_part_states(notif_id)
+                exact_fence = (
+                    str(outcome_envelope.get("fence_key") or "")
+                    if outcome_envelope is not None
+                    else ""
+                )
+                if not exact_fence or exact_fence not in outcome_states:
+                    self._inbox.remember_notification_delivery_outcome(notif_id, "uncertain")
+                    terminal_outcomes[notif_id] = "uncertain"
+                    sent = [value for value in sent if value != notif_id]
+                    if notif_id not in uncertain:
+                        uncertain.append(notif_id)
+                # Exact prior outcome or drift-downgraded uncertainty: ACK it,
+                # never send either envelope again.
                 continue
             if notif_id in already_delivered:
                 # Не доставка, а повтор подтверждения: сообщение у человека уже есть.
@@ -757,7 +1070,33 @@ class TransportMixin(BridgeShared):
             # идти за ним в другую команду, и половина смысла проактивности теряется.
             markup = None
             dedup_key = str(item.get("dedup_key") or "")
-            kind = str(item.get("kind") or "")
+            if kind == _ENGINEER_TERMINAL_NOTIFICATION_KIND:
+                envelope = _engineer_terminal_envelope(
+                    item,
+                    chat_id=chat_id,
+                    max_document_bytes=self.config.max_document_bytes,
+                )
+                if envelope is None:
+                    LOGGER.error("Invalid Engineer terminal notification carrier; refusing delivery")
+                    failed.append(notif_id)
+                else:
+                    outcome = await _deliver_engineer_terminal_document(
+                        self,
+                        telegram,
+                        backend,
+                        signer_chat=signer_chat,
+                        envelope=envelope,
+                    )
+                    if outcome == "sent":
+                        self._inbox.remember_notification_delivery_outcome(notif_id, "sent")
+                        sent.append(notif_id)
+                    elif outcome == "uncertain":
+                        self._inbox.remember_notification_delivery_outcome(notif_id, "uncertain")
+                        uncertain.append(notif_id)
+                    elif outcome == "failed":
+                        failed.append(notif_id)
+                await asyncio.sleep(0.05)
+                continue
             if kind == "approval" and dedup_key.startswith("approval:"):
                 approval_id = dedup_key.split(":", 1)[1]
                 if CALLBACK_TARGET_RE.fullmatch(approval_id):
@@ -798,8 +1137,22 @@ class TransportMixin(BridgeShared):
                 failed.append(notif_id)
             # Gentle per-chat pacing to stay within Telegram send limits.
             await asyncio.sleep(0.05)
-        if sent or failed:
-            await self._ack_outbound(backend, signer_chat, sent, failed)
+        if sent or failed or uncertain:
+            sent = list(dict.fromkeys(sent))
+            failed = list(dict.fromkeys(failed))
+            uncertain = list(dict.fromkeys(uncertain))
+            if uncertain:
+                await self._ack_outbound(
+                    backend,
+                    signer_chat,
+                    sent,
+                    failed,
+                    uncertain=uncertain,
+                )
+            else:
+                # Preserve the historical call seam for ordinary notification
+                # adapters; strict uncertainty is opt-in by kind only.
+                await self._ack_outbound(backend, signer_chat, sent, failed)
 
     async def _ack_outbound(
         self,
@@ -807,6 +1160,8 @@ class TransportMixin(BridgeShared):
         signer_chat: str,
         sent: list[str],
         failed: list[str],
+        *,
+        uncertain: list[str] | None = None,
     ) -> None:
         """Report the batch's outcome, retrying in place before giving up.
 
@@ -829,29 +1184,73 @@ class TransportMixin(BridgeShared):
         successful ack retires the local rows here — after that the backend is the
         one that remembers.
         """
+        uncertain = list(uncertain or [])
+        ack_payload: dict[str, Any] = {"sent": sent, "failed": failed}
+        if uncertain:
+            ack_payload["uncertain"] = uncertain
+        requested = set([*sent, *failed, *uncertain])
+        strict_requested = requested.intersection(self._inbox.notification_delivery_ids())
         last_error: Exception | None = None
-        for attempt in range(3):
+        # A failed Telegram send is a counted attempt. Reposting an ACK whose
+        # response was lost would count the same send twice, so failed batches
+        # retry only after the next drain performs another real Telegram try.
+        ack_attempts = 1 if failed else 3
+        for attempt in range(ack_attempts):
             try:
-                await self._backend_json(
+                response = await self._backend_json(
                     backend,
                     "POST",
                     "/api/notifications/ack",
-                    {"sent": sent, "failed": failed},
+                    ack_payload,
                     signer_chat,
                     signer_chat,
                 )
-                self._inbox.forget_delivered_notifications(sent)
+                states = _notification_ack_states(response)
+                terminal: set[str] = set()
+                if states is not None:
+                    terminal = set().union(
+                        states["sent"],
+                        states["failed"],
+                        states["uncertain"],
+                        states["dismissed"],
+                        states["missing"],
+                    )
+                if strict_requested:
+                    if states is None:
+                        raise RuntimeError("backend ACK carried no verifiable notification states")
+                    reported = set().union(*states.values())
+                    if strict_requested.difference(reported):
+                        raise RuntimeError("backend ACK omitted strict notification state")
+                    unresolved = strict_requested.intersection(states["unconfirmed"])
+                    invalid_pending = strict_requested.intersection([*sent, *uncertain]).intersection(
+                        states["pending"]
+                    )
+                    if unresolved or invalid_pending:
+                        raise RuntimeError("backend ACK did not prove strict terminal state")
+                if states is None:
+                    # Compatibility with an older backend for ordinary text
+                    # notifications only. Strict fences never trust echoed
+                    # counts or the absence of proof-bearing state ids.
+                    ordinary_sent = [value for value in sent if value not in strict_requested]
+                    self._inbox.forget_delivered_notifications(ordinary_sent)
+                else:
+                    self._inbox.forget_delivered_notifications(
+                        [value for value in sent if value in terminal]
+                    )
+                    self._inbox.forget_notification_delivery_parts(
+                        [value for value in requested if value in terminal]
+                    )
                 return
             except Exception as exc:  # noqa: PERF203 - the retry IS the point here
                 last_error = exc
-                if attempt < 2:
+                if attempt < ack_attempts - 1:
                     await asyncio.sleep(0.5 * (attempt + 1))
         # Loud, because it is still a real fault: the backend's queue is not
         # advancing. What it is NOT any more is user-visible duplication.
         LOGGER.error(
             "Outbound ack failed after retries: %d delivered notifications stay pending "
             "on the backend and will be re-acked, not re-sent (%s)",
-            len(sent),
+            len(strict_requested) or len(sent) + len(uncertain),
             type(last_error).__name__,
         )
 

@@ -185,8 +185,9 @@ def test_no_method_is_defined_twice_across_the_class_hierarchy() -> None:
 # deterministic rebuild/backfill, bounded reconciliation and coverage surface.
 # 417 -> 419: the runtime uses one active file-owner inventory and an atomic
 # owner-snapshot/CAS checkpoint instead of a blind shared runtime-kv overwrite.
-EXPECTED_MEMBER_COUNT = 419
+EXPECTED_MEMBER_COUNT = 421
 EXPECTED_SIGNATURES: dict[str, str] = {
+    "acknowledge_notifications": "(self, sent_ids: 'Sequence[str]' = (), failed_ids: 'Sequence[str]' = (), uncertain_ids: 'Sequence[str]' = (), *, max_attempts: 'int' = 5) -> 'dict[str, list[str]]'",
     "backfill_document_catalog": "(self, user_id: 'str', *, after_raw_object_id: 'str | None', limit: 'int' = 64) -> 'dict[str, Any]'",
     "checkpoint_document_catalog_worker_state": "(self, *, expected_value: 'str | None', value: 'str', tenant_ids: 'Sequence[str]') -> 'bool'",
     "document_catalog_coverage": "(self, user_id: 'str') -> 'dict[str, Any]'",
@@ -278,6 +279,7 @@ EXPECTED_SIGNATURES: dict[str, str] = {
     "delete_knowledge_embedding": "(self, knowledge_object_id: 'str') -> 'None'",
     "diagnostics": "(self) -> 'dict[str, Any]'",
     "discard_notifications": "(self, ids: 'Sequence[str]', *, reason: 'str') -> 'int'",
+    "discard_notifications_verified": "(self, ids: 'Sequence[str]', *, reason: 'str') -> 'list[str]'",
     "diff_knowledge_versions": "(self, ko_id: 'str', user_id: 'str', *, from_version: 'int | None' = None, to_version: 'int | None' = None) -> 'dict[str, Any] | None'",
     "enqueue_notification": "(self, user_id: 'str', chat_id: 'str', body: 'str', *, kind: 'str' = '', dedup_key: 'str' = '') -> 'bool'",
     "ensure_user": "(self, user_id: 'str', *, source: 'str' = 'local', external_id: 'str' = '', display_name: 'str' = '', username: 'str' = '', preset_key: 'str' = 'user', metadata: 'dict[str, Any] | None' = None) -> 'dict[str, Any]'",
@@ -394,7 +396,7 @@ EXPECTED_SIGNATURES: dict[str, str] = {
     "list_user_vectors_page": "(self, user_id: 'str', model: 'str', *, after: 'tuple[str, str] | None' = None, before: 'tuple[str, str] | None' = None, max_updated_at: 'str | None' = None, descending: 'bool' = False, limit: 'int' = 2048) -> 'list[tuple[str, str, bytes]]'",
     "list_users": "(self, *, limit: 'int' = 500, offset: 'int' = 0) -> 'list[dict[str, Any]]'",
     "log_audit": "(self, entry: 'AuditEntry') -> 'AuditEntry'",
-    "mark_notifications": "(self, sent_ids: 'Sequence[str]' = (), failed_ids: 'Sequence[str]' = (), *, max_attempts: 'int' = 5) -> 'None'",
+    "mark_notifications": "(self, sent_ids: 'Sequence[str]' = (), failed_ids: 'Sequence[str]' = (), uncertain_ids: 'Sequence[str]' = (), *, max_attempts: 'int' = 5) -> 'None'",
     "merge_entities": "(self, user_id: 'str', source_id: 'str', target_id: 'str', *, merged_by: 'str | None' = None) -> 'dict[str, Any]'",
     "unmerge_entities": "(self, user_id: 'str', merge_id: 'str', *, undone_by: 'str | None' = None) -> 'dict[str, Any]'",
     "optimize": "(self) -> 'None'",

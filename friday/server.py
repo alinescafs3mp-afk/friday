@@ -3471,24 +3471,33 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
         )
         command_confirmation_update_id = ""
         command_confirmation_body_hash = ""
+        command_delivery_chat_id = ""
         if (
             decision == "approve"
             and isinstance(pending_approval, Mapping)
             and str(pending_approval.get("tool") or "") in _ENGINEER_COMMAND_APPROVAL_TOOLS
         ):
             raw_update_id = body.get("telegram_update_id")
+            authenticated_chat_id = str(getattr(request.state, "bridge_chat_id", "") or "")
+            authenticated_sender_id = str(
+                getattr(request.state, "bridge_external_user_id", "") or ""
+            )
             if (
                 actor.source != "telegram-bridge"
                 or isinstance(raw_update_id, bool)
                 or not isinstance(raw_update_id, int)
                 or raw_update_id < 0
                 or raw_update_id > 9_999_999_999_999_999_999
+                or re.fullmatch(r"[1-9][0-9]{0,19}", authenticated_chat_id) is None
+                or authenticated_chat_id != authenticated_sender_id
+                or str(actor.identity_id or "") != authenticated_sender_id
             ):
                 raise HTTPException(
                     status_code=400,
                     detail="Engineer command approval requires an authenticated Telegram update",
                 )
             command_confirmation_update_id = str(raw_update_id)
+            command_delivery_chat_id = authenticated_chat_id
             command_confirmation_body_hash = hashlib.sha256(
                 json.dumps(
                     {
@@ -3537,11 +3546,19 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
                 response["host_job_closed"] = bool(closed_job_id)
                 response["host_job_id"] = closed_job_id
             return response
+        command_approval = str(decided.get("tool") or "") in _ENGINEER_COMMAND_APPROVAL_TOOLS
+        execute_options: dict[str, Any] = {"actor": actor}
+        if command_approval:
+            execute_options.update(
+                {
+                    "confirmation_update_id": command_confirmation_update_id,
+                    "confirmation_body_hash": command_confirmation_body_hash,
+                    "delivery_chat_id": command_delivery_chat_id,
+                }
+            )
         result = await request.app.state.kernel.execute_approved(
             str(approval_id),
-            actor=actor,
-            confirmation_update_id=command_confirmation_update_id,
-            confirmation_body_hash=command_confirmation_body_hash,
+            **execute_options,
         )
         response = {
             "approval": await run_blocking(

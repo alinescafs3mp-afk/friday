@@ -114,6 +114,18 @@ class _UpdateInbox:
                 delivery_key TEXT PRIMARY KEY,
                 delivered_at REAL NOT NULL
             );
+            CREATE TABLE IF NOT EXISTS notification_delivery_parts (
+                notification_id TEXT NOT NULL,
+                part_key TEXT NOT NULL,
+                state TEXT NOT NULL CHECK(state IN ('uncertain', 'confirmed')),
+                updated_at REAL NOT NULL,
+                PRIMARY KEY(notification_id, part_key)
+            );
+            CREATE TABLE IF NOT EXISTS notification_delivery_outcomes (
+                notification_id TEXT PRIMARY KEY,
+                outcome TEXT NOT NULL CHECK(outcome IN ('sent', 'uncertain')),
+                updated_at REAL NOT NULL
+            );
             CREATE TABLE IF NOT EXISTS edit_prompts (
                 prompt_message_id INTEGER PRIMARY KEY,
                 knowledge_id TEXT NOT NULL,
@@ -537,6 +549,160 @@ class _UpdateInbox:
             return
         self._conn.executemany(
             "DELETE FROM delivered_notifications WHERE notification_id=?",
+            [(value,) for value in cleaned],
+        )
+        self._conn.commit()
+
+    def notification_delivery_part_states(self, notification_id: str) -> dict[str, str]:
+        """Durable pre-write states for one strict outbound notification.
+
+        An ``uncertain`` row is deliberately stronger than a success cursor: it
+        is committed before the Telegram request starts, so a process death at
+        any later instruction can never cause the same part to be written again.
+        Only the narrow rejection paths delete it.
+        """
+
+        rows = self._conn.execute(
+            """SELECT part_key, state FROM notification_delivery_parts
+               WHERE notification_id=?""",
+            (str(notification_id),),
+        ).fetchall()
+        return {str(row["part_key"]): str(row["state"]) for row in rows}
+
+    def notification_delivery_ids(self) -> set[str]:
+        """Notification ids with strict local delivery state awaiting reconciliation."""
+
+        rows = self._conn.execute(
+            """SELECT notification_id FROM notification_delivery_parts
+               UNION SELECT notification_id FROM notification_delivery_outcomes"""
+        ).fetchall()
+        return {str(row["notification_id"]) for row in rows}
+
+    def notification_delivery_outcomes(self, *, limit: int = 100) -> dict[str, str]:
+        """Strict terminal outcomes still awaiting an exact backend ACK."""
+
+        rows = self._conn.execute(
+            """SELECT notification_id, outcome FROM notification_delivery_outcomes
+               ORDER BY updated_at ASC, notification_id ASC LIMIT ?""",
+            (max(1, min(int(limit), 100)),),
+        ).fetchall()
+        return {str(row["notification_id"]): str(row["outcome"]) for row in rows}
+
+    def notification_delivery_orphan_outcomes(self, *, limit: int = 100) -> dict[str, str]:
+        """Infer bounded ACK outcomes for fences whose post-send write was interrupted."""
+
+        rows = self._conn.execute(
+            """SELECT p.notification_id,
+                      CASE WHEN MIN(p.state)='confirmed' AND MAX(p.state)='confirmed'
+                           THEN 'sent' ELSE 'uncertain' END AS outcome
+                 FROM notification_delivery_parts AS p
+                 LEFT JOIN notification_delivery_outcomes AS o
+                   ON o.notification_id=p.notification_id
+                WHERE o.notification_id IS NULL
+                GROUP BY p.notification_id
+                ORDER BY MIN(p.updated_at) ASC, p.notification_id ASC
+                LIMIT ?""",
+            (max(1, min(int(limit), 100)),),
+        ).fetchall()
+        return {str(row["notification_id"]): str(row["outcome"]) for row in rows}
+
+    def remember_notification_delivery_outcome(self, notification_id: str, outcome: str) -> None:
+        """Persist a terminal local outcome before its fallible backend ACK."""
+
+        notification_id = str(notification_id or "").strip()
+        outcome = str(outcome or "").strip()
+        if not notification_id or outcome not in {"sent", "uncertain"}:
+            raise ValueError("invalid notification delivery outcome")
+        self._conn.execute(
+            """INSERT INTO notification_delivery_outcomes(
+                   notification_id, outcome, updated_at)
+               VALUES(?, ?, ?)
+               ON CONFLICT(notification_id) DO UPDATE SET
+                   outcome=CASE
+                       WHEN notification_delivery_outcomes.outcome='uncertain'
+                            OR excluded.outcome='uncertain' THEN 'uncertain'
+                       ELSE 'sent'
+                   END,
+                   updated_at=excluded.updated_at""",
+            (notification_id, outcome, time.time()),
+        )
+        self._conn.commit()
+        row = self._conn.execute(
+            """SELECT outcome FROM notification_delivery_outcomes
+               WHERE notification_id=?""",
+            (notification_id,),
+        ).fetchone()
+        expected = "uncertain" if row is not None and (
+            str(row["outcome"]) == "uncertain" or outcome == "uncertain"
+        ) else outcome
+        if row is None or str(row["outcome"]) != expected:
+            raise RuntimeError("notification delivery outcome changed")
+
+    def begin_notification_part_delivery(self, notification_id: str, part_key: str) -> str:
+        """Atomically arm a pre-write fence; only its creator receives ``armed``."""
+
+        notification_id = str(notification_id or "").strip()
+        part_key = str(part_key or "").strip()
+        if not notification_id or not part_key:
+            raise ValueError("notification delivery identity is incomplete")
+        cursor = self._conn.execute(
+            """INSERT OR IGNORE INTO notification_delivery_parts(
+                   notification_id, part_key, state, updated_at)
+               VALUES(?, ?, 'uncertain', ?)""",
+            (notification_id, part_key, time.time()),
+        )
+        self._conn.commit()
+        row = self._conn.execute(
+            """SELECT state FROM notification_delivery_parts
+               WHERE notification_id=? AND part_key=?""",
+            (notification_id, part_key),
+        ).fetchone()
+        if row is None:
+            raise RuntimeError("notification delivery fence could not be committed")
+        return "armed" if cursor.rowcount > 0 else str(row["state"])
+
+    def confirm_notification_part_delivery(self, notification_id: str, part_key: str) -> bool:
+        """Close an armed fence only after Telegram returned a successful response."""
+
+        notification_id = str(notification_id or "").strip()
+        part_key = str(part_key or "").strip()
+        self._conn.execute(
+            """UPDATE notification_delivery_parts
+               SET state='confirmed', updated_at=?
+               WHERE notification_id=? AND part_key=? AND state='uncertain'""",
+            (time.time(), notification_id, part_key),
+        )
+        self._conn.commit()
+        row = self._conn.execute(
+            """SELECT state FROM notification_delivery_parts
+               WHERE notification_id=? AND part_key=?""",
+            (notification_id, part_key),
+        ).fetchone()
+        return row is not None and str(row["state"]) == "confirmed"
+
+    def reject_notification_part_delivery(self, notification_id: str, part_key: str) -> bool:
+        """Disarm only after proven non-acceptance (connect failure or HTTP rejection)."""
+
+        cursor = self._conn.execute(
+            """DELETE FROM notification_delivery_parts
+               WHERE notification_id=? AND part_key=? AND state='uncertain'""",
+            (str(notification_id), str(part_key)),
+        )
+        self._conn.commit()
+        return cursor.rowcount > 0
+
+    def forget_notification_delivery_parts(self, notification_ids: list[str]) -> None:
+        """Retire local fences after the backend durably accepted their terminal ack."""
+
+        cleaned = [str(value) for value in notification_ids if str(value)]
+        if not cleaned:
+            return
+        self._conn.executemany(
+            "DELETE FROM notification_delivery_parts WHERE notification_id=?",
+            [(value,) for value in cleaned],
+        )
+        self._conn.executemany(
+            "DELETE FROM notification_delivery_outcomes WHERE notification_id=?",
             [(value,) for value in cleaned],
         )
         self._conn.commit()

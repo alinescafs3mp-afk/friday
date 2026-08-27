@@ -7,6 +7,7 @@ import hmac
 import json
 import math
 import os
+import re
 import secrets
 import threading
 import time
@@ -123,6 +124,44 @@ def _executable_json(resolved: ResolvedExecutable) -> str:
     )
 
 
+def _terminal_receipt_fields(
+    receipt: CommandReceipt,
+    *,
+    cleanup_pending: bool,
+) -> dict[str, object]:
+    generated_json = json.dumps(
+        [
+            {
+                "mode": item.mode,
+                "relative_path": item.relative_path,
+                "sha256": item.sha256,
+                "size_bytes": item.size_bytes,
+            }
+            for item in receipt.generated_files
+        ],
+        ensure_ascii=True,
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    return {
+        "cancelled": 1 if receipt.cancelled else 0,
+        "error_code": receipt.error_code,
+        "exit_code": receipt.exit_code,
+        "finished_at": receipt.finished_at,
+        "generated_files_json": generated_json,
+        "receipt_mac": receipt.receipt_mac,
+        "signal": receipt.signal,
+        "status": receipt.status.value,
+        "stderr_sha256": receipt.stderr_sha256,
+        "stdout_sha256": receipt.stdout_sha256,
+        "timed_out": 1 if receipt.timed_out else 0,
+        "truncated_stderr": 1 if receipt.truncated_stderr else 0,
+        "truncated_stdout": 1 if receipt.truncated_stdout else 0,
+        "effect_boundary_crossed": 1 if receipt.effect_boundary_crossed else 0,
+        "cleanup_pending": 1 if cleanup_pending else 0,
+    }
+
+
 class CommandKernel:
     def __init__(
         self,
@@ -229,7 +268,20 @@ class CommandKernel:
             broker=self._broker,
         )
 
-    def submit(self, request: CommandRequest, grant_token: str, *, actor_id: str) -> str:
+    def submit(
+        self,
+        request: CommandRequest,
+        grant_token: str,
+        *,
+        actor_id: str,
+        delivery_chat_id: str = "",
+    ) -> str:
+        delivery_chat_id = str(delivery_chat_id or "").strip()
+        if delivery_chat_id and (
+            re.fullmatch(r"[1-9][0-9]{0,19}", delivery_chat_id) is None
+            or int(delivery_chat_id) > 9_999_999_999_999_999_999
+        ):
+            raise CommandError("delivery_scope_invalid")
         grant = None
         held = None
         bwrap = None
@@ -239,6 +291,8 @@ class CommandKernel:
                 if existing is not None:
                     if existing["digest"] != request.digest:
                         raise CommandError("idempotency_conflict")
+                    if existing.get("delivery_chat_id", "") != delivery_chat_id:
+                        raise CommandError("delivery_scope_mismatch")
                     return existing["job_id"]
             grant = self.authority.parse(grant_token, request, actor_id=actor_id)
             # A revoked grant is dead before executable resolution or command
@@ -264,6 +318,8 @@ class CommandKernel:
                 if existing is not None:
                     if existing["digest"] != request.digest:
                         raise CommandError("idempotency_conflict")
+                    if existing.get("delivery_chat_id", "") != delivery_chat_id:
+                        raise CommandError("delivery_scope_mismatch")
                     return existing["job_id"]
                 self.authority.still_valid(grant)
                 self.store.consume_nonce(grant.nonce, exp=grant.expires_at, now=int(time.time()))
@@ -297,6 +353,7 @@ class CommandKernel:
                         "max_stderr_bytes": request.max_stderr_bytes,
                         "created_at": time.time(),
                         "executable_json": _executable_json(held.resolved),
+                        "delivery_chat_id": delivery_chat_id,
                     }
                 )
             spawned = SpawnedCommand(
@@ -323,21 +380,8 @@ class CommandKernel:
                     )
             except CommandError as exc:
                 spawned.abort()
-                with self.store.transaction():
-                    self.store.update_job(
-                        job_id,
-                        {
-                            "status": CommandStatus.FAILED.value
-                            if not spawned.effect_boundary_crossed
-                            else CommandStatus.UNKNOWN.value,
-                            "error_code": exc.code,
-                            "finished_at": time.time(),
-                            "effect_boundary_crossed": 1 if spawned.effect_boundary_crossed else 0,
-                            "systemd_unit": scope.unit if scope is not None else None,
-                            "cgroup_path": str(scope.cgroup) if scope is not None else None,
-                            "cleanup_pending": 0 if scope is None or spawned.tree_empty else 1,
-                        },
-                    )
+                if spawned.finished_at is None:
+                    spawned.finished_at = time.time()
                 receipt = self._receipt_from_spawned(
                     job_id,
                     request,
@@ -348,6 +392,18 @@ class CommandKernel:
                     error_code=exc.code,
                     status=CommandStatus.UNKNOWN if spawned.effect_boundary_crossed else CommandStatus.FAILED,
                 )
+                terminal_fields = _terminal_receipt_fields(
+                    receipt,
+                    cleanup_pending=scope is not None and not spawned.tree_empty,
+                )
+                terminal_fields.update(
+                    {
+                        "systemd_unit": scope.unit if scope is not None else None,
+                        "cgroup_path": str(scope.cgroup) if scope is not None else None,
+                    }
+                )
+                with self.store.transaction():
+                    self.store.update_job(job_id, terminal_fields)
                 self._receipts[job_id] = receipt
                 raise
             try:
@@ -754,38 +810,11 @@ class CommandKernel:
             status=status,
             generated=generated,
         )
-        generated_json = json.dumps(
-            [
-                {
-                    "mode": item.mode,
-                    "relative_path": item.relative_path,
-                    "sha256": item.sha256,
-                    "size_bytes": item.size_bytes,
-                }
-                for item in receipt.generated_files
-            ],
-            ensure_ascii=True,
-            sort_keys=True,
-            separators=(",", ":"),
-        )
         def _fields(value: CommandReceipt) -> dict[str, object]:
-            return {
-                "cancelled": 1 if value.cancelled else 0,
-                "error_code": value.error_code,
-                "exit_code": value.exit_code,
-                "finished_at": value.finished_at,
-                "generated_files_json": generated_json,
-                "receipt_mac": value.receipt_mac,
-                "signal": value.signal,
-                "status": value.status.value,
-                "stderr_sha256": value.stderr_sha256,
-                "stdout_sha256": value.stdout_sha256,
-                "timed_out": 1 if value.timed_out else 0,
-                "truncated_stderr": 1 if value.truncated_stderr else 0,
-                "truncated_stdout": 1 if value.truncated_stdout else 0,
-                "effect_boundary_crossed": 1 if value.effect_boundary_crossed else 0,
-                "cleanup_pending": 0 if spawned.tree_empty else 1,
-            }
+            return _terminal_receipt_fields(
+                value,
+                cleanup_pending=not spawned.tree_empty,
+            )
 
         try:
             with self.store.transaction():

@@ -344,6 +344,18 @@ class _IngressStorage:
             "payload": self.command_payload,
         }
 
+    def resolve_identity(self, source: str, external_id: str) -> str | None:
+        assert (source, external_id) == ("telegram", "5001")
+        return self.actor.own_id
+
+    def get_user(self, user_id: str):
+        assert user_id == self.actor.own_id
+        return {
+            "id": user_id,
+            "preset_key": "owner",
+            "metadata_json": json.dumps({"chat_id": "5001"}),
+        }
+
 
 class _FakeCommandKernel:
     def __init__(self, root: Path) -> None:
@@ -353,7 +365,8 @@ class _FakeCommandKernel:
         self.authority.bind_store(CommandJobStore(root))
         self.parsed = None
 
-    def submit(self, request, grant: str, *, actor_id: str) -> str:
+    def submit(self, request, grant: str, *, actor_id: str, delivery_chat_id: str = "") -> str:
+        assert delivery_chat_id == "5001"
         self.parsed = self.authority.parse(grant, request, actor_id=actor_id)
         return "1" * 32
 
@@ -648,7 +661,12 @@ def test_command_status_normalizes_corrupt_ledger_failures() -> None:
 
 
 def test_distinct_authenticated_callback_mints_one_bound_grant(tmp_path: Path) -> None:
-    actor = ActorContext(LEGACY_OWNER_USER_ID, "owner", "telegram-bridge")
+    actor = ActorContext(
+        LEGACY_OWNER_USER_ID,
+        "owner",
+        "telegram-bridge",
+        identity_id="5001",
+    )
     payload: dict[str, object] = {
         "argv": ["/usr/bin/true"],
         "timeout_sec": 10,
@@ -659,6 +677,10 @@ def test_distinct_authenticated_callback_mints_one_bound_grant(tmp_path: Path) -
     service = EngineerCommandService.__new__(EngineerCommandService)
     service.storage = _IngressStorage(actor, payload)
     service.kernel = _FakeCommandKernel(tmp_path / "ledger")
+    service.settings = SimpleNamespace(
+        telegram_effective_allowed_chat_ids={5001},
+        telegram_open_registration=False,
+    )
 
     result = service.execute(
         actor=actor,
@@ -670,6 +692,7 @@ def test_distinct_authenticated_callback_mints_one_bound_grant(tmp_path: Path) -
         _approval_id="apr_0123456789abcdef",
         _confirmation_update_id="101",
         _confirmation_body_hash=hashlib.sha256(b"signed callback body").hexdigest(),
+        _delivery_chat_id="5001",
     )
 
     assert result["ok"] is True

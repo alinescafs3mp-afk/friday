@@ -12,11 +12,12 @@ import stat
 import threading
 import time
 from collections.abc import Mapping
+from contextlib import suppress
 from pathlib import Path
 from typing import Any
 
 from friday.execution_kernel import ToolSpec
-from friday.organs import ServiceContext
+from friday.organs import ServiceContext, may_push_to, resolve_chat_id
 
 from .command import (
     CommandError,
@@ -36,6 +37,12 @@ from .command.publication import (
     CommandOutputArchive,
     CommandOutputPublicationError,
     build_command_output_archive,
+)
+from .publication import ExactGeneratedFilePublicationError, exact_generated_file_batch
+from .terminal_delivery import (
+    TerminalDeliveryError,
+    stage_terminal_archive,
+    terminal_notification_status,
 )
 
 _MESSAGE_ID = re.compile(r"msg_[0-9a-f]{16}")
@@ -131,6 +138,9 @@ class EngineerCommandService:
             trusted_path=trusted,
         )
         self.storage = ctx.storage
+        self.settings = ctx.settings
+        self.authorization = ctx.auth
+        self.files_root = Path(ctx.settings.files_dir)
         self.max_upload_bytes = int(ctx.settings.max_upload_bytes)
         self._archive_lock = threading.Lock()
         self._archive_cache: tuple[
@@ -138,6 +148,7 @@ class EngineerCommandService:
             CommandOutputArchive,
             dict[str, str],
         ] | None = None
+        self._publication_lock = threading.Lock()
 
     def _archive_for_receipt(
         self,
@@ -187,6 +198,7 @@ class EngineerCommandService:
         _approval_id: str,
         _confirmation_update_id: str,
         _confirmation_body_hash: str,
+        _delivery_chat_id: str = "",
     ) -> dict[str, Any]:
         if not actor.is_owner:
             return _refusal("authorization_denied")
@@ -208,6 +220,27 @@ class EngineerCommandService:
             or _source_update_id(source_row) != str(_telegram_update_id)
         ):
             return _refusal("owner_source_unavailable")
+        try:
+            linked_actor_id = self.storage.resolve_identity(
+                "telegram",
+                str(_delivery_chat_id or ""),
+            )
+        except ValueError:
+            return _refusal("authenticated_confirmation_required")
+        if (
+            actor.source != "telegram-bridge"
+            or not re.fullmatch(r"[1-9][0-9]{0,19}", str(_delivery_chat_id or ""))
+            or str(actor.identity_id or "") != str(_delivery_chat_id)
+            or linked_actor_id != actor.own_id
+            or resolve_chat_id(self.storage, actor.own_id) != str(_delivery_chat_id)
+            or not may_push_to(
+                self.settings,
+                self.storage,
+                actor.own_id,
+                str(_delivery_chat_id),
+            )
+        ):
+            return _refusal("authenticated_confirmation_required")
         approval = self.storage.get_action_approval(
             str(_approval_id), actor.user_id, person_id=actor.own_id
         )
@@ -267,7 +300,12 @@ class EngineerCommandService:
                 confirmation=confirmation,
                 ttl_sec=120,
             )
-            job_id = self.kernel.submit(request, grant, actor_id=actor.own_id)
+            job_id = self.kernel.submit(
+                request,
+                grant,
+                actor_id=actor.own_id,
+                delivery_chat_id=str(_delivery_chat_id),
+            )
             progress = self.kernel.progress(
                 job_id,
                 actor_id=actor.own_id,
@@ -409,6 +447,163 @@ class EngineerCommandService:
             return _refusal("corrupt_job_state")
         return {"ok": True, "cancel_requested": True, **progress.to_public_payload()}
 
+    def _fresh_terminal_actor(self, job: Mapping[str, Any]) -> Any | None:
+        """Rebuild exact owner authority immediately before outbound staging."""
+
+        actor_id = str(job.get("actor_id") or "")
+        tenant_id = str(job.get("tenant_id") or "")
+        chat_id = str(job.get("delivery_chat_id") or "")
+        if (
+            not actor_id
+            or not tenant_id
+            or re.fullmatch(r"[1-9][0-9]{0,19}", chat_id) is None
+            or self.authorization is None
+            or getattr(self.settings, "engineer_mode_enabled", False) is not True
+            or getattr(self.settings, "engineer_command_enabled", False) is not True
+        ):
+            return None
+        user = self.storage.get_user(actor_id)
+        if not isinstance(user, Mapping) or str(user.get("status") or "") != "active":
+            return None
+        try:
+            actor = self.authorization.actor_for_user(
+                actor_id,
+                source="engineer-terminal-worker",
+                identity_id=chat_id,
+            )
+            if (
+                not actor.is_owner
+                or actor.own_id != actor_id
+                or actor.user_id != tenant_id
+                or self.storage.resolve_identity("telegram", chat_id) != actor_id
+                or resolve_chat_id(self.storage, actor_id) != chat_id
+                or not may_push_to(self.settings, self.storage, actor_id, chat_id)
+            ):
+                return None
+            for capability in (
+                "engineer.use",
+                "engineer.command.manage",
+                "files.read",
+            ):
+                self.authorization.require(actor, capability)
+        except Exception:
+            return None
+        return actor
+
+    def _reconcile_staged_publications(self) -> int:
+        changed = 0
+        for publication in self.kernel.store.list_staged_publications(limit=100):
+            job_id = str(publication.get("job_id") or "")
+            notification_id = str(publication.get("notification_id") or "")
+            dedup_key = str(publication.get("dedup_key") or "")
+            envelope_sha256 = str(publication.get("envelope_sha256") or "")
+            state = terminal_notification_status(
+                self.storage,
+                notification_id,
+                dedup_key,
+                envelope_sha256,
+            )
+            try:
+                if state == "sent":
+                    self.kernel.store.finish_publication(job_id, state="sent")
+                    changed += 1
+                elif state == "uncertain":
+                    self.kernel.store.finish_publication(job_id, state="uncertain")
+                    changed += 1
+                elif state == "failed":
+                    self.kernel.store.finish_publication(job_id, state="blocked")
+                    changed += 1
+                elif state in {"missing", "invalid"}:
+                    self.kernel.store.finish_publication(job_id, state="uncertain")
+                    changed += 1
+            except CommandError:
+                continue
+        return changed
+
+    def publish_terminal_jobs(self, *, limit: int = 20) -> dict[str, int]:
+        """Stage terminal notices without a model turn and reconcile bridge ACKs."""
+
+        if not self._publication_lock.acquire(blocking=False):
+            return {"staged": 0, "reconciled": 0, "failed": 0}
+        staged = 0
+        failed = 0
+        try:
+            reconciled = self._reconcile_staged_publications()
+            for job in self.kernel.store.list_terminal_publication_candidates(limit=limit):
+                job_id = str(job.get("job_id") or "")
+                actor = self._fresh_terminal_actor(job)
+                if actor is None:
+                    with suppress(CommandError):
+                        self.kernel.store.record_publication_attempt(job_id, "authorization_denied")
+                    failed += 1
+                    continue
+                try:
+                    receipt, mac_version = self.kernel.terminal_receipt(
+                        job_id,
+                        actor_id=actor.own_id,
+                        conversation_id=str(job.get("conversation_id") or ""),
+                        timeout_sec=0.1,
+                    )
+                    if (
+                        mac_version < 2
+                        or receipt.status.value != str(job.get("status") or "")
+                        or receipt.status not in _PUBLISHABLE_TERMINAL
+                    ):
+                        raise TerminalDeliveryError("terminal_receipt_unpublishable")
+                    archive, attachment = self._archive_for_receipt(
+                        receipt,
+                        actor_id=actor.own_id,
+                        conversation_id=str(job.get("conversation_id") or ""),
+                    )
+                    batch = exact_generated_file_batch(
+                        [attachment],
+                        max_bytes=self.max_upload_bytes,
+                    )
+                    publication = stage_terminal_archive(
+                        self.storage,
+                        self.files_root,
+                        actor_id=actor.own_id,
+                        tenant_id=actor.user_id,
+                        conversation_id=str(job.get("conversation_id") or ""),
+                        source_message_id=str(job.get("source_row_id") or ""),
+                        delivery_chat_id=str(job.get("delivery_chat_id") or ""),
+                        job_id=job_id,
+                        status=receipt.status.value,
+                        receipt_mac=receipt.receipt_mac,
+                        attachment=attachment,
+                        batch=batch,
+                        max_bytes=self.max_upload_bytes,
+                    )
+                    if archive.sha256 != batch.files[0].content_sha256:
+                        raise TerminalDeliveryError("terminal_archive_identity_changed")
+                    self.kernel.store.stage_publication(
+                        job_id,
+                        notification_id=publication.notification_id,
+                        dedup_key=publication.dedup_key,
+                        envelope_sha256=publication.envelope_sha256,
+                    )
+                    staged += 1
+                except (
+                    CommandError,
+                    CommandOutputPublicationError,
+                    ExactGeneratedFilePublicationError,
+                    TerminalDeliveryError,
+                    KeyError,
+                    OSError,
+                    TypeError,
+                    ValueError,
+                    OverflowError,
+                    sqlite3.Error,
+                ) as exc:
+                    error_code = getattr(exc, "code", "terminal_publication_failed")
+                    with suppress(CommandError):
+                        self.kernel.store.record_publication_attempt(job_id, str(error_code))
+                    failed += 1
+            reconciled += self._reconcile_staged_publications()
+            return {"staged": staged, "reconciled": reconciled, "failed": failed}
+        finally:
+            self._publication_lock.release()
+
 
 def _refusal(code: str, *, effect_boundary_crossed: bool = False) -> dict[str, Any]:
     clean = str(code or "command_refused")
@@ -422,10 +617,14 @@ def _refusal(code: str, *, effect_boundary_crossed: bool = False) -> dict[str, A
     }
 
 
-def build_engineer_command_tools(ctx: ServiceContext) -> tuple[ToolSpec, ...]:
+def build_engineer_command_tools(
+    ctx: ServiceContext,
+    *,
+    service: EngineerCommandService | None = None,
+) -> tuple[ToolSpec, ...]:
     if not bool(getattr(ctx.settings, "engineer_command_enabled", False)):
         return ()
-    service = EngineerCommandService(ctx)
+    service = service or EngineerCommandService(ctx)
 
     async def run_exact(**arguments: Any) -> dict[str, Any]:
         return service.execute(**arguments)

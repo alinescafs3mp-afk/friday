@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Sequence
 from typing import TYPE_CHECKING
 
-from friday.organs import Organ, ServiceContext
+from friday.organs import Organ, OrganWorker, ServiceContext
 from friday.permissions import CapabilityDefinition
 
 from .authority import issue_target_ticket, verify_target_ticket
@@ -13,6 +14,8 @@ from .targets import PinnedTarget
 
 if TYPE_CHECKING:
     from friday.execution_kernel import ToolSpec
+
+    from .command_tools import EngineerCommandService
 
 ENGINEER_USE = CapabilityDefinition(
     "engineer.use",
@@ -77,6 +80,18 @@ class EngineerOrgan(Organ):
     name = "engineer"
     version = "1.0"
 
+    def __init__(self) -> None:
+        self._command_service: EngineerCommandService | None = None
+
+    def _service(self, ctx: ServiceContext) -> EngineerCommandService | None:
+        if not bool(getattr(ctx.settings, "engineer_command_enabled", False)):
+            return None
+        if self._command_service is None:
+            from .command_tools import EngineerCommandService
+
+            self._command_service = EngineerCommandService(ctx)
+        return self._command_service
+
     def capabilities(self) -> Sequence[CapabilityDefinition]:
         capabilities = [ENGINEER_USE, ENGINEER_ANALYZE, ENGINEER_BUILD, ENGINEER_PATCH, ENGINEER_AUDIT]
         return (*capabilities, ENGINEER_COMMAND_RUN, ENGINEER_COMMAND_MANAGE)
@@ -85,7 +100,29 @@ class EngineerOrgan(Organ):
         from .command_tools import build_engineer_command_tools
         from .tools import build_engineer_tools
 
-        return (*build_engineer_tools(ctx), *build_engineer_command_tools(ctx))
+        service = self._service(ctx)
+        return (
+            *build_engineer_tools(ctx),
+            *build_engineer_command_tools(ctx, service=service),
+        )
+
+    def workers(self, ctx: ServiceContext) -> Sequence[OrganWorker]:
+        service = self._service(ctx)
+        if service is None:
+            return ()
+
+        async def publish_terminal_jobs(_ctx: ServiceContext) -> None:
+            await asyncio.to_thread(service.publish_terminal_jobs)
+
+        return (
+            OrganWorker(
+                name="engineer_command_terminal_delivery",
+                run=publish_terminal_jobs,
+                interval_sec=5.0,
+                run_immediately=True,
+                timeout_sec=120.0,
+            ),
+        )
 
 
 __all__ = [
