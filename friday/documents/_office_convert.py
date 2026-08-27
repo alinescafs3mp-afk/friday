@@ -24,8 +24,11 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from friday.config import env as config_env
+from friday.work_budgets import size_scaled_budget_sec, stage_deadline
 
 _DEFAULT_CONVERSION_TIMEOUT_SEC = 45.0
+_CONVERSION_TIMEOUT_PER_MIB_SEC = 2.0
+_MAX_CONVERSION_TIMEOUT_SEC = 180.0
 _MAX_CONVERSION_INPUT_BYTES = 64 * 1024 * 1024
 _MAX_CONVERSION_OUTPUT_BYTES = 128 * 1024 * 1024
 _OFFICE_TEMP_PARENT = "/tmp"  # nosec B108 - fixed sandbox-wrapper contract
@@ -214,8 +217,14 @@ def convert_legacy_office(
         )
     if resolved is None:
         return OfficeConversionResult(target_format=target_format, error="libreoffice_unavailable")
-    common_deadline = (
-        float(deadline) if deadline is not None else time.monotonic() + _DEFAULT_CONVERSION_TIMEOUT_SEC
+    common_deadline = stage_deadline(
+        size_scaled_budget_sec(
+            size_bytes=len(content),
+            base_sec=_DEFAULT_CONVERSION_TIMEOUT_SEC,
+            seconds_per_mib=_CONVERSION_TIMEOUT_PER_MIB_SEC,
+            maximum_sec=_MAX_CONVERSION_TIMEOUT_SEC,
+        ),
+        parent_deadline=deadline,
     )
     if not math.isfinite(common_deadline) or common_deadline <= time.monotonic():
         return OfficeConversionResult(target_format=target_format, error="libreoffice_deadline_reached")

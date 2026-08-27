@@ -47,6 +47,7 @@ from friday.documents._office_structure import (
     build_xlsx_text_and_structure,
     validate_office_structure_index,
 )
+from friday.work_budgets import size_scaled_budget_sec, stage_deadline
 
 LOGGER = logging.getLogger(__name__)
 #: Чем заменяется собственный credential, найденный в тексте документа.
@@ -428,6 +429,9 @@ _MAX_7Z_HEADER_BYTES = 8 * 1024 * 1024
 _MAX_7Z_AES_CYCLES_POWER = 20
 _RAR_DICTIONARY_SWITCH = f"-mdx{_MAX_ARCHIVE_DICTIONARY_BYTES // (1024 * 1024)}m"
 _RAR_MEMBER_TIMEOUT_SEC = 20.0
+_ARCHIVE_PARSE_BASE_TIMEOUT_SEC = 60.0
+_ARCHIVE_PARSE_TIMEOUT_PER_MIB_SEC = 2.0
+_ARCHIVE_PARSE_MAX_TIMEOUT_SEC = 300.0
 
 # Дата САМОГО документа, взятая из провенанса файла, а не угаданная из текста.
 #
@@ -781,6 +785,30 @@ class DocumentExtractor:
             None if parse_budget_sec is None else max(0.1, float(parse_budget_sec))
         )
 
+    def _pdf_parse_deadline(self, parent_deadline: float | None) -> float | None:
+        """Give pypdf its own ceiling without shortening sibling parsers."""
+
+        if self.parse_budget_sec is None:
+            return parent_deadline
+        return stage_deadline(
+            self.parse_budget_sec,
+            parent_deadline=parent_deadline,
+        )
+
+    @staticmethod
+    def _archive_parse_deadline(content: bytes, parent_deadline: float | None) -> float:
+        """Bound one complete nested archive by admitted compressed size."""
+
+        return stage_deadline(
+            size_scaled_budget_sec(
+                size_bytes=len(content),
+                base_sec=_ARCHIVE_PARSE_BASE_TIMEOUT_SEC,
+                seconds_per_mib=_ARCHIVE_PARSE_TIMEOUT_PER_MIB_SEC,
+                maximum_sec=_ARCHIVE_PARSE_MAX_TIMEOUT_SEC,
+            ),
+            parent_deadline=parent_deadline,
+        )
+
     def extract(
         self,
         content: bytes,
@@ -802,11 +830,13 @@ class DocumentExtractor:
             previews=_MAX_ARCHIVE_PREVIEW_FILES,
             expanded_bytes=self.max_archive_uncompressed_bytes,
         )
-        # Один срок на весь приход, поставленный наверху и унесённый вглубь: архив
-        # из сотни PDF не должен получать по полному бюджету на каждый вложенный.
+        # A caller-owned parent deadline may bound every nested stage. Do not
+        # manufacture one generic deadline here: ``parse_budget_sec`` is the
+        # pypdf safety budget, while LibreOffice, RAR and visual OCR have their
+        # own measured ceilings. Applying the PDF's eight seconds to every
+        # format made the nominal 45-second Office and 20-second RAR budgets
+        # unreachable in production.
         deadline = _deadline
-        if deadline is None and self.parse_budget_sec is not None:
-            deadline = time.monotonic() + self.parse_budget_sec
         if len(content) > self.max_input_bytes:
             return DocumentResult(
                 "",
@@ -841,6 +871,10 @@ class DocumentExtractor:
                 # consumes the same upload-wide budget and deadline.  Only an
                 # explicit invalid-password result permits the next variant;
                 # limits, missing backends and corrupt archives fail closed.
+                # One archive-wide clock travels through every nested member.
+                # Unlike the old generic PDF clock, it scales with the admitted
+                # compressed workload and still has a finite outer ceiling.
+                deadline = self._archive_parse_deadline(content, deadline)
                 for candidate in password_candidates or (None,):
                     try:
                         result = self._extract_archive(
@@ -864,7 +898,10 @@ class DocumentExtractor:
             ):
                 result = self._extract_html(content)
             elif ext == ".pdf" or (not suffix_known and normalized_mime == "application/pdf"):
-                result = self._extract_pdf(content, deadline=deadline)
+                result = self._extract_pdf(
+                    content,
+                    deadline=self._pdf_parse_deadline(deadline),
+                )
             elif ooxml_format == "docx":
                 result = self._extract_docx(content)
             elif converted_office_format == "doc":
@@ -3131,7 +3168,10 @@ class DocumentExtractor:
             # `.wps` is shared by Writer and Calc import filters.  PDF is the
             # one bounded target both document services can export without
             # guessing a source family from attacker-controlled MIME data.
-            parsed = self._extract_pdf(converted.content, deadline=deadline)
+            parsed = self._extract_pdf(
+                converted.content,
+                deadline=self._pdf_parse_deadline(deadline),
+            )
         else:
             parser = {
                 "docx": self._extract_docx,
