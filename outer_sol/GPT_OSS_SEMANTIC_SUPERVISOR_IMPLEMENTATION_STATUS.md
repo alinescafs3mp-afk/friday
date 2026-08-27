@@ -1,13 +1,14 @@
 # GPT-OSS semantic supervisor implementation status
 
-- Updated: 2026-08-26
+- Updated: 2026-08-27
 - Architecture order:
   `outer_sol/GPT_OSS_SEMANTIC_SUPERVISOR_AND_POLICY_KERNEL_ARCHITECT_BRIEF.md`
 - Source phase: **P0–P5 implemented behind independent default-off gates; P6
   inventory currently has no eligible semantic heuristic to retire**.
-- Rollout phase: **default-off source candidate; production assist/canary
-  evidence is not accepted or committed**.
-- Durable source schema: **45**. This is not a deployed release identity.
+- Rollout phase: **discarded production shadow is live in `0.207.62`; assist and
+  canary evidence is not yet accepted**.
+- Durable source schema: **45**, deployed at
+  `d99a40f9f83205713366e45b3c753b3d4232cf12`.
 - Model roles: accepted optional GPT-OSS-20B is an untrusted planner/reviewer;
   primary Qwen 27B remains fallback, synthesis and publication owner.
 
@@ -73,7 +74,7 @@ Implemented surfaces:
 | `supervisor_offline_evaluation.py` | deterministic synthetic regression |
 
 Shadow policy is `gptoss20b-semantic-supervisor-v1`, SHA-256
-`9f0c1e8132200a3a4416448cd2de03a4736da5e4968536d8c9e518fd5e88051a`.
+`edea7fce6ae8d9bfcbe461a3f90d98bd9aab897ebe7712cdb23a2d77e8de780c`.
 It admits `MAX_STEPS=6`, `MAX_REVIEW_ROUNDS=0` and one or both closed shadow
 task classes. The scheduler overlay is lowest priority, uses the already
 accepted optional profile and has no execution consumer. Laptop absence,
@@ -174,9 +175,9 @@ There is no recursive planner/reviewer dialogue and no secondary publication.
 
 ## Promotion and rollback boundary
 
-Canonical ENV remains `MODE=off`, `PROMOTION_ENABLED=0`. Source support does
-not authorize live promotion. Shadow and promoted modes use independent
-policies, bounds and operator transitions.
+Canonical production ENV is now `MODE=shadow`, `PROMOTION_ENABLED=0`. Shadow
+is discarded observation only and does not authorize promotion. Promoted modes
+use independent policies, bounds and operator transitions.
 
 Assist/canary activation requires:
 

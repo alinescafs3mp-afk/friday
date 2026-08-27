@@ -12,17 +12,13 @@ the current production identity, completed packages, active work and next order.
   is code-staged only as provisional shadow/extract and is not accepted or live.
   The primary remains the sole final-publication, tool and effect authority.
   Every secondary miss preserves the exact primary-only path.
-- Deployed implementation head: `86d79fbed621fa3ade4ab06a57ec2dd82d2a09dc`
-- Live: Friday `0.207.61` / `86d79fbed621fa3ade4ab06a57ec2dd82d2a09dc`;
-  tree `41a46b4e63565e03dbd28c2c136ec14bbb371a4fd83c9cf734ed4fca15d7336f`;
-  wheel `3a32f2f78ea17a273df640bc2cb647f738bfaa5720ba3652ccf38b937e2a6849`.
-- Immediate predecessor: Friday `0.207.60` /
-  `2374497714068d8d18b4f3c70f5888809ca15e73`, tree
-  `2bec743058f9ce8c09a74e29bee0aa65b08614ac10a497bc485c6e72b18d0304`.
-- Schema-capable fallback: Friday `0.207.61rc0` /
-  `660f31386a57493b6e11503d3bfe5fec18ece27a`, tree
-  `4af2748e98c6f32064b5c8f779ef4b1b61a96daa8adda20a6bf72d72e57c3e24`,
-  wheel `1e6a8eeaa12f4dca603494ba3be5a982482e8ee92be714c5c07b6cb1bde5cc72`.
+- Deployed implementation head: `d99a40f9f83205713366e45b3c753b3d4232cf12`
+- Live: Friday `0.207.62` / `d99a40f9f83205713366e45b3c753b3d4232cf12`;
+  tree `ffbd26b27b89da06f8e0b2781eac9cf61d712e1f33945e0b67b97258ec02a967`;
+  wheel `051244dd2f7d50c94a941830e1ed005bc3e9a55ea6915fe5711efbc216318611`.
+- Immediate predecessor and schema-capable fallback: Friday `0.207.61` /
+  `86d79fbed621fa3ade4ab06a57ec2dd82d2a09dc`, tree
+  `41a46b4e63565e03dbd28c2c136ec14bbb371a4fd83c9cf734ed4fca15d7336f`.
 - Database schema: 45
 - Production state: immutable activation `clear`; backend and Telegram bridge
   active; trusted-CA HTTPS health `200`; SQLite integrity and FK checks clean.
@@ -117,6 +113,16 @@ the current production identity, completed packages, active work and next order.
   such as «Сканирую» or «Собираю сводку» can no longer masquerade as started
   work when no tool ran; the runtime performs one forced real command recovery
   and otherwise reports truthfully that nothing started.
+  `0.207.62` closes the measured durable-command feedback failures: the model
+  can no longer impose an arbitrary 300-second deadline through the public tool
+  schema, a running job ends the foreground turn instead of triggering repeated
+  status polling, provider failure recovers code-owned terminal truth, and
+  no-file jobs publish bounded stdout/stderr as text instead of an empty ZIP.
+  Progress reports the actual stage, elapsed time, output byte counts and a real
+  hard-deadline remainder when one exists; it never invents percentage or ETA.
+  The same immutable activation enables Semantic Supervisor in discarded
+  `shadow`: GPT-OSS is currently available, but has no tool, effect, execution
+  or publication authority and every miss preserves the primary-only path.
   The exact accepted secondary profile remains configured in bounded `assist`
   and is probed on
   demand; its exact post-cutover canary passed, while laptop absence preserves
@@ -137,23 +143,25 @@ the current production identity, completed packages, active work and next order.
   while the backlog converges. `0.207.52` repairs the canary wrapper's full
   Telegram carrier surface; signed Telegram requests no longer fail before the
   model/tool boundary. The current activation terminal receipt is
-  `9fa740e9bb5bcad77e4a4eb5262787a93c844a2097d48b8721b60469cacb2419`.
+  `d48eade5728f843ee0b44ec61801a6f41a0de40d573e9a98237a8b5500b47f76`.
 - Delivery constraints: no Docker for primary Friday release certification;
   companion plugin untouched; small commits and immutable wheel-only production
   releases. The optional laptop inference node is a separate Docker contour.
 
 ## Active objective
 
-The autonomous owner-only Engineer Mode objective is deployed in `0.207.57`.
-Its remaining boundary is identity and provenance, not semantic command policy:
+The autonomous owner-only Engineer Mode objective is deployed; `0.207.62`
+closes its immediate durable-command regression. Its permanent boundary is
+identity and provenance, not semantic command policy:
 fresh owner identity, current Telegram source/update/conversation binding and
 capability checks stay mandatory, while no guest, unsigned API turn, quoted
 message, document, web page or attachment may mint execution authority.
 
-The Semantic Supervisor source and schema-safe fallback are now deployed
-default-off. The active objective is to gather independent shadow evidence and
-promote it through shadow, limited assist and canary without changing primary
-ownership. After that,
+The Semantic Supervisor is now deployed in discarded `shadow`. The active
+objective is to gather independent joined evidence and promote it through
+limited assist and canary without changing primary ownership. In parallel, the
+next Engineer package adds one edited Telegram status surface for all long
+stages and bounded dynamic reasoning for planning/replanning. After that,
 execute the remaining work by product value and
 risk. The full canonical order and estimates are in
 `outer_sol/PROJECT_EXECUTION_BACKLOG_2026-08-27.md`. Docker and companion-plugin

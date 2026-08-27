@@ -86,6 +86,14 @@ attestation by widening only bounded SGLang observation budgets; same-epoch
 identity, exact-zero drain and fail-closed semantics remain intact. Production
 is `canary_ready` with `archive_read` and `file_read` live.
 
+`0.207.62` removes model-selected deadlines from the arbitrary-command schema,
+stops same-turn polling after durable admission, recovers terminal command truth
+across provider failures and returns no-file stdout/stderr as bounded Telegram
+text instead of an empty archive. Progress now exposes measured stage, elapsed
+time, output byte counts and only a real hard-deadline remainder. The remaining
+P1 follow-up is a reusable edited Telegram status surface plus selective
+reasoning for complex plan/replan turns; it does not reintroduce an approval rail.
+
 ### P2 — integrate and roll out Semantic Supervisor
 
 Goal: use GPT-OSS as a bounded semantic supervisor/policy kernel while the
@@ -114,6 +122,11 @@ primary remains the sole publisher, tool caller and effect owner.
 
 Estimate: 18–30 hours after P1, plus 3–6 hours if the staged laptop profile is
 certified first.
+
+Items 1–6 are deployed through `0.207.62`. The exact accepted profile
+`gptoss20b-2335df…` is retained for this rollout; production health proves
+`shadow` effective and the secondary currently available. Items 7–9 remain
+evidence-gated; shadow has no tool, effect, execution or publication authority.
 
 ### P3 — release stability and golden-journey admission
 
@@ -193,8 +206,8 @@ Estimate: 40–80 hours after the policy decision.
 ## First 24 clean-work hours
 
 1. Keep the deployed P0/P1 production paths green.
-2. Resolve the P2 profile identity and rebase/audit the Semantic Supervisor.
-3. Release P2 default-off, then advance only through evidence-backed shadow,
-   limited assist and canary stages.
+2. Collect and audit P2 joined shadow observations for the frozen accepted
+   profile; do not fabricate traffic.
+3. Advance only through evidence-backed limited assist and canary stages.
 4. Use remaining time on P3 release-blocking golden journeys; do not wait idly
    for owner-only physical checks.
