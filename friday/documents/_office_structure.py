@@ -14,6 +14,7 @@ import copy
 import hashlib
 import json
 import re
+import time
 import unicodedata
 import zipfile
 from bisect import bisect_left
@@ -56,6 +57,11 @@ _COVERAGE_REASONS = frozenset(_COVERAGE_REASON_ORDER)
 _STYLE_ROLES = frozenset({"body", "heading", "title", "list", "other"})
 _ROW_ROLES = frozenset({"header", "record", "empty", "footer", "unknown"})
 _VISIBILITIES = frozenset({"visible", "hidden", "very_hidden"})
+
+
+def _deadline_expired(deadline: float | None) -> bool:
+    return deadline is not None and time.monotonic() >= deadline
+
 
 _ROOT_KEYS = frozenset(
     {
@@ -660,6 +666,8 @@ def _positive_ooxml_int(value: Any) -> bool:
 def _docx_initial_reasons(
     document: Any,
     structurally_empty_paragraphs: set[Any] | None = None,
+    *,
+    deadline: float | None = None,
 ) -> set[str]:
     reasons: set[str] = set()
     body = document.element.body
@@ -667,11 +675,17 @@ def _docx_initial_reasons(
     neutral_paragraphs.update(structurally_empty_paragraphs or set())
     neutral_nodes = {node for paragraph in neutral_paragraphs for node in paragraph.iter()}
     for child in body.iterchildren():
+        if _deadline_expired(deadline):
+            reasons.add("text_budget")
+            return reasons
         if child in neutral_paragraphs:
             continue
         if _local_name(child.tag) not in {"p", "tbl", "sectPr"}:
             reasons.add("unsupported_body_content")
     for node in body.iter():
+        if _deadline_expired(deadline):
+            reasons.add("text_budget")
+            return reasons
         if node in neutral_nodes:
             continue
         local_name = _local_name(getattr(node, "tag", ""))
@@ -705,6 +719,9 @@ def _docx_initial_reasons(
 
     seen_parts: set[Any] = set()
     for section in document.sections:
+        if _deadline_expired(deadline):
+            reasons.add("text_budget")
+            return reasons
         for name in (
             "header",
             "first_page_header",
@@ -782,7 +799,11 @@ def _docx_textbox_text(stream: Any, *, limit: int) -> str:
     return " ".join(pieces)[:limit]
 
 
-def _docx_auxiliary_parts(content: bytes) -> tuple[list[tuple[str, str]], set[str]]:
+def _docx_auxiliary_parts(
+    content: bytes,
+    *,
+    deadline: float | None = None,
+) -> tuple[list[tuple[str, str]], set[str]]:
     """Служебный текст документа и то, что по-прежнему остаётся непрочитанным.
 
     Колонтитулы, сноски, примечания и надписи ПОМЕЧАЛИСЬ как утраченные и не
@@ -801,6 +822,9 @@ def _docx_auxiliary_parts(content: bytes) -> tuple[list[tuple[str, str]], set[st
         with zipfile.ZipFile(BytesIO(content)) as archive:
             names = sorted(archive.namelist())
             for name in names:
+                if _deadline_expired(deadline):
+                    remaining.add("text_budget")
+                    break
                 normalized = name.lstrip("/").casefold()
                 if normalized.startswith(
                     (
@@ -848,6 +872,8 @@ def _docx_auxiliary_parts(content: bytes) -> tuple[list[tuple[str, str]], set[st
 def _xlsx_package_reasons(
     content: bytes,
     sheet_paths: Sequence[str],
+    *,
+    deadline: float | None = None,
 ) -> tuple[set[str], dict[str, tuple[int, int]]]:
     """Fail closed on visible XLSX material absent from the cell-value text."""
 
@@ -857,26 +883,44 @@ def _xlsx_package_reasons(
     try:
         with zipfile.ZipFile(BytesIO(content)) as archive:
             for name in archive.namelist():
+                if _deadline_expired(deadline):
+                    reasons.add("text_budget")
+                    return reasons, actual_extents
                 normalized = name.lstrip("/").casefold()
                 if normalized.startswith(_XLSX_AUXILIARY_PART_PREFIXES):
                     reasons.add("unsupported_body_content")
                     break
                 if normalized == "xl/sharedstrings.xml":
                     with archive.open(name) as stream:
-                        for _, element in ElementTree.iterparse(stream, events=("end",)):
+                        for event_index, (_, element) in enumerate(
+                            ElementTree.iterparse(stream, events=("end",)),
+                            start=1,
+                        ):
+                            if event_index % 256 == 0 and _deadline_expired(deadline):
+                                reasons.add("text_budget")
+                                return reasons, actual_extents
                             if _local_name(element.tag) in {"rPh", "phoneticPr"}:
                                 reasons.add("unsupported_body_content")
                                 break
                             element.clear()
 
             for path in normalized_paths:
+                if _deadline_expired(deadline):
+                    reasons.add("text_budget")
+                    return reasons, actual_extents
                 dimension_bounds: tuple[int, int, int, int] | None = None
                 actual_bounds: list[int] | None = None
                 active_row: int | None = None
                 last_row = 0
                 last_cell = (0, 0)
                 with archive.open(path) as stream:
-                    for event, element in ElementTree.iterparse(stream, events=("start", "end")):
+                    for event_index, (event, element) in enumerate(
+                        ElementTree.iterparse(stream, events=("start", "end")),
+                        start=1,
+                    ):
+                        if event_index % 256 == 0 and _deadline_expired(deadline):
+                            reasons.add("text_budget")
+                            return reasons, actual_extents
                         local_name = _local_name(element.tag)
                         if event == "start":
                             if local_name == "row":
@@ -1490,6 +1534,7 @@ def build_docx_text_and_structure(
     *,
     max_text_chars: int,
     content: bytes | None = None,
+    deadline: float | None = None,
 ) -> tuple[str, dict[str, Any], bool]:
     """Return the byte-identical legacy DOCX text plus its bounded v1 index."""
 
@@ -1503,6 +1548,10 @@ def build_docx_text_and_structure(
     paragraph_ordinal = 0
 
     for paragraph in document.paragraphs:
+        if _deadline_expired(deadline):
+            reasons.add("text_budget")
+            text_stopped = True
+            break
         paragraph_element = paragraph._element
         if _docx_paragraph_is_structurally_empty(paragraph_element):
             structurally_empty_paragraphs.add(paragraph_element)
@@ -1569,6 +1618,10 @@ def build_docx_text_and_structure(
     indexed_cells = 0
     tables = document.tables if not text_stopped else ()
     for table in tables:
+        if _deadline_expired(deadline):
+            reasons.add("text_budget")
+            text_stopped = True
+            break
         table_ordinal += 1
         coverage["blocks_seen"] += 1
         block_id = f"t{table_ordinal:06d}"
@@ -1578,6 +1631,10 @@ def build_docx_text_and_structure(
         rows_out: list[dict[str, Any]] = []
         table_spans: list[list[int]] = []
         for source_row, row in enumerate(table.rows, start=1):
+            if _deadline_expired(deadline):
+                reasons.add("text_budget")
+                text_stopped = True
+                break
             coverage["rows_seen"] += 1
             cells = list(row.cells)
             values = [str(cell.text or "").strip() for cell in cells]
@@ -1657,7 +1714,13 @@ def build_docx_text_and_structure(
         # Completeness scans are intentionally after the legacy text projection.
         # They can only remove authority from a fully read document; they must
         # never force a bounded reader to traverse an otherwise ignored tail.
-        reasons.update(_docx_initial_reasons(document, structurally_empty_paragraphs))
+        reasons.update(
+            _docx_initial_reasons(
+                document,
+                structurally_empty_paragraphs,
+                deadline=deadline,
+            )
+        )
         if content is not None:
             # Колонтитулы, сноски, примечания и надписи ЧИТАЮТСЯ, а не только
             # помечаются утраченными: на бланках там стоят «Согласовано»,
@@ -1665,7 +1728,7 @@ def build_docx_text_and_structure(
             # уходит в тот же построитель, поэтому отпечаток индекса считается по
             # ПОЛНОМУ тексту: индекс, посчитанный по куску, был бы отброшен
             # проверкой молча.
-            auxiliary, remaining = _docx_auxiliary_parts(content)
+            auxiliary, remaining = _docx_auxiliary_parts(content, deadline=deadline)
             # Причина снимается ровно потому, что часть ПРОЧИТАНА. Если чтение
             # упёрлось в потолок, `remaining` вернёт `unsupported_body_content`, и
             # документ останется неполным — но уже по другой, честной причине.
@@ -1717,7 +1780,7 @@ def build_docx_text_and_structure(
         coverage=coverage,
         reasons=reasons,
     )
-    return text, index, "text_budget" in reasons or "row_budget" in reasons
+    return text, index, bool({"text_budget", "row_budget"} & reasons)
 
 
 def _column_letters(column: int) -> str:
@@ -1756,15 +1819,26 @@ def _merge_rectangles(
     content: bytes,
     sheet_paths: Sequence[str],
     reasons: set[str],
+    *,
+    deadline: float | None = None,
 ) -> dict[str, list[tuple[int, int, int, int]]]:
     normalized_paths = [str(path).lstrip("/") for path in sheet_paths]
     result: dict[str, list[tuple[int, int, int, int]]] = {path: [] for path in normalized_paths}
     try:
         with zipfile.ZipFile(BytesIO(content)) as archive:
             for path in normalized_paths:
+                if _deadline_expired(deadline):
+                    reasons.add("text_budget")
+                    return result
                 rectangles = result[path]
                 with archive.open(path) as stream:
-                    for _, element in ElementTree.iterparse(stream, events=("end",)):
+                    for event_index, (_, element) in enumerate(
+                        ElementTree.iterparse(stream, events=("end",)),
+                        start=1,
+                    ):
+                        if event_index % 256 == 0 and _deadline_expired(deadline):
+                            reasons.add("text_budget")
+                            return result
                         if _local_name(element.tag) != "mergeCell":
                             element.clear()
                             continue
@@ -1835,6 +1909,7 @@ def build_xlsx_text_and_structure(
     content: bytes,
     max_text_chars: int,
     max_rows: int,
+    deadline: float | None = None,
 ) -> tuple[str, dict[str, Any], bool, int]:
     """Return the byte-identical legacy XLSX text plus its bounded v1 index."""
 
@@ -1848,9 +1923,13 @@ def build_xlsx_text_and_structure(
     sheet_paths = [
         str(getattr(sheet, "_worksheet_path", "") or "").lstrip("/") for sheet in workbook.worksheets
     ]
-    package_reasons, actual_extents = _xlsx_package_reasons(content, sheet_paths)
+    package_reasons, actual_extents = _xlsx_package_reasons(
+        content,
+        sheet_paths,
+        deadline=deadline,
+    )
     reasons.update(package_reasons)
-    merge_ranges = _merge_rectangles(content, sheet_paths, reasons)
+    merge_ranges = _merge_rectangles(content, sheet_paths, reasons, deadline=deadline)
     formula_sheets = list(formula_workbook.worksheets) if formula_workbook is not None else []
     if formula_workbook is None or len(formula_sheets) != len(workbook.worksheets):
         reasons.add("formula_scan_unavailable")
@@ -1858,6 +1937,10 @@ def build_xlsx_text_and_structure(
     indexed_rows = 0
     indexed_cells = 0
     for sheet_index, sheet in enumerate(workbook.worksheets, start=1):
+        if _deadline_expired(deadline):
+            reasons.add("text_budget")
+            text_stopped = True
+            break
         coverage["blocks_seen"] += 1
         block_id = f"s{sheet_index:06d}"
         header = f"--- Sheet: {sheet.title} ---"
@@ -1935,6 +2018,10 @@ def build_xlsx_text_and_structure(
         )
 
         for source_row, data_row in enumerate(data_rows, start=1):
+            if _deadline_expired(deadline):
+                reasons.add("text_budget")
+                text_stopped = True
+                break
             legacy_rows_read += 1
             visited_cells += len(data_row)
             coverage["rows_seen"] += 1

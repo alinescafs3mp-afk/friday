@@ -98,6 +98,54 @@ async def test_transient_inspection_uses_the_same_nonrenewable_deadline(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("transient", "filename", "mime_type"),
+    (
+        (False, "bounded.txt", "text/plain"),
+        (False, "bounded.zip", "application/zip"),
+        (True, "bounded.docx", "application/vnd.openxmlformats-officedocument.wordprocessingml.document"),
+    ),
+)
+async def test_request_deadline_is_propagated_into_document_worker(
+    settings,
+    storage,
+    monkeypatch,
+    transient: bool,
+    filename: str,
+    mime_type: str,
+) -> None:
+    pipeline = IngestionPipeline(settings, storage, KnowledgeGraph(storage), None)
+    observed: list[float | None] = []
+
+    def capture_extract(*_args, **kwargs):
+        observed.append(kwargs.get("_deadline"))
+        return DocumentResult(text="x" * 200)
+
+    monkeypatch.setattr(pipeline._doc_extractor, "extract", capture_extract)  # noqa: SLF001
+    deadline = time.monotonic() + 10
+
+    if transient:
+        await pipeline.inspect_file_transient(
+            b"synthetic bytes",
+            filename=filename,
+            mime_type=mime_type,
+            turn_deadline=deadline,
+        )
+    else:
+        await pipeline.ingest_file(
+            "alice",
+            None,
+            b"synthetic bytes",
+            filename=filename,
+            mime_type=mime_type,
+            source_ref=f"propagated:{filename}",
+            turn_deadline=deadline,
+        )
+
+    assert observed == [deadline]
+
+
+@pytest.mark.asyncio
 async def test_expired_text_ingestion_fails_before_persistence(settings, storage) -> None:
     pipeline = IngestionPipeline(settings, storage, KnowledgeGraph(storage), None)
 

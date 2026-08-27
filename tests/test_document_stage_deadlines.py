@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import io
 import time
+import zipfile
 
 from friday.documents import DocumentExtractor, DocumentResult
 
@@ -122,3 +124,41 @@ def test_parent_deadline_bounds_archive_stage_without_extension() -> None:
 
     assert result.success is True
     assert observed == [parent]
+
+
+def test_expired_native_office_deadline_is_reported_explicitly() -> None:
+    from docx import Document
+
+    source = io.BytesIO()
+    document = Document()
+    document.add_paragraph("deadline-bound office text")
+    document.save(source)
+    extractor = DocumentExtractor(secret_values=(), parse_budget_sec=8)
+
+    result = extractor.extract(
+        source.getvalue(),
+        "bounded.docx",
+        _deadline=time.monotonic() - 1,
+    )
+
+    assert result.success is False
+    assert result.error == "document_parse_deadline"
+    assert result.metadata["parse_deadline_reached"] is True
+
+
+def test_archive_deadline_returns_truthful_partial_instead_of_generic_failure() -> None:
+    source = io.BytesIO()
+    with zipfile.ZipFile(source, "w") as archive:
+        archive.writestr("first.txt", "first")
+        archive.writestr("second.txt", "second")
+    extractor = DocumentExtractor(secret_values=(), parse_budget_sec=8)
+
+    result = extractor.extract(
+        source.getvalue(),
+        "bounded.zip",
+        _deadline=time.monotonic() - 1,
+    )
+
+    assert result.success is True
+    assert result.metadata["archive_budget_exhausted"] is True
+    assert result.metadata["parse_deadline_reached"] is True

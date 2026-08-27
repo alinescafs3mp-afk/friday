@@ -341,6 +341,11 @@ def convert_legacy_office(
                 chunks: list[bytes] = []
                 total = 0
                 while total <= output_limit:
+                    if time.monotonic() >= common_deadline:
+                        return OfficeConversionResult(
+                            target_format=target_format,
+                            error="libreoffice_deadline_reached",
+                        )
                     chunk = os.read(
                         converted_fd,
                         min(64 * 1024, output_limit + 1 - total),
@@ -355,6 +360,11 @@ def convert_legacy_office(
                         error="libreoffice_output_too_large",
                     )
                 converted_content = b"".join(chunks)
+                if time.monotonic() >= common_deadline:
+                    return OfficeConversionResult(
+                        target_format=target_format,
+                        error="libreoffice_deadline_reached",
+                    )
                 final_stat = os.fstat(converted_fd)
                 if (
                     final_stat.st_dev != converted_stat.st_dev

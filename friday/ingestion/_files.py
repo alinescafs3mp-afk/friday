@@ -1904,6 +1904,7 @@ class FilesMixin(PipelineShared):
                     filename,
                     mime_type,
                     archive_password=archive_password,
+                    _deadline=turn_deadline,
                 ),
                 turn_deadline,
             )
@@ -2144,6 +2145,7 @@ class FilesMixin(PipelineShared):
                     filename,
                     mime_type,
                     archive_password=archive_password,
+                    _deadline=turn_deadline,
                 ),
                 turn_deadline,
             )
@@ -2896,6 +2898,7 @@ class FilesMixin(PipelineShared):
                 safe_filename,
                 safe_mime_type,
                 archive_password=archive_password,
+                _deadline=turn_deadline,
             ),
             turn_deadline,
         )

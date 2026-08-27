@@ -603,6 +603,10 @@ class ArchiveExtractionError(ValueError):
     """An archive backend failed without exposing its untrusted diagnostics."""
 
 
+class ArchiveDeadlineReached(ArchiveExtractionError):
+    """A bounded archive/document stream exhausted its inherited deadline."""
+
+
 def _safe_archive_member_name(value: Any) -> str:
     """Validate an inert member name as if it could become a path later.
 
@@ -903,7 +907,7 @@ class DocumentExtractor:
                     deadline=self._pdf_parse_deadline(deadline),
                 )
             elif ooxml_format == "docx":
-                result = self._extract_docx(content)
+                result = self._extract_docx(content, deadline=deadline)
             elif converted_office_format == "doc":
                 result = self._extract_doc(content, deadline=deadline)
             elif ext == ".msg" or (not suffix_known and normalized_mime in _MSG_MIME_TYPES):
@@ -915,14 +919,19 @@ class DocumentExtractor:
                     deadline=deadline,
                 )
             elif ooxml_format == "xlsx":
-                result = self._extract_xlsx(content)
+                result = self._extract_xlsx(content, deadline=deadline)
             elif ooxml_format == "pptx":
-                result = self._extract_pptx(content)
+                result = self._extract_pptx(content, deadline=deadline)
             elif odf_format is not None:
                 # Таблица и презентация OpenDocument держат текст ровно там же,
                 # где документ, — в `content.xml`. Принят был только `.odt`, и
                 # это не решение, а недосмотр: у семьи форматов один разборщик.
-                result = self._extract_xml_zip_text(content, "content.xml", odf_format)
+                result = self._extract_xml_zip_text(
+                    content,
+                    "content.xml",
+                    odf_format,
+                    deadline=deadline,
+                )
             elif ext == ".epub" or (not suffix_known and normalized_mime == "application/epub+zip"):
                 result = self._extract_epub(content)
             elif ext in {".eml", ".mht", ".mhtml"} or (
@@ -960,6 +969,17 @@ class DocumentExtractor:
                 {"filename": safe_name, "format": (archive_kind or ext).lstrip(".")},
                 False,
                 "archive_backend_unavailable",
+            )
+        except ArchiveDeadlineReached:
+            result = DocumentResult(
+                "",
+                {
+                    "filename": safe_name,
+                    "format": (archive_kind or ext).lstrip("."),
+                    "parse_deadline_reached": True,
+                },
+                False,
+                "document_parse_deadline",
             )
         except ArchiveExtractionError:
             result = DocumentResult(
@@ -3023,7 +3043,7 @@ class DocumentExtractor:
         total = 0
         while True:
             if deadline is not None and time.monotonic() >= deadline:
-                raise ArchiveExtractionError("Archive member read exceeded its deadline")
+                raise ArchiveDeadlineReached("Archive member read exceeded its deadline")
             chunk = stream.read(min(64 * 1024, limit + 1 - total))
             if not chunk:
                 break
@@ -3034,18 +3054,34 @@ class DocumentExtractor:
         return b"".join(chunks)
 
     @staticmethod
-    def _read_stream_preview(stream: _BinaryReadable, limit: int) -> tuple[bytes, bool]:
+    def _read_stream_preview(
+        stream: _BinaryReadable,
+        limit: int,
+        *,
+        deadline: float | None = None,
+    ) -> tuple[bytes, bool]:
         chunks: list[bytes] = []
         total = 0
         while total < limit:
+            if deadline is not None and time.monotonic() >= deadline:
+                raise ArchiveDeadlineReached("Document preview exceeded its deadline")
             chunk = stream.read(min(64 * 1024, limit - total))
             if not chunk:
                 return b"".join(chunks), False
             chunks.append(chunk)
             total += len(chunk)
+        if deadline is not None and time.monotonic() >= deadline:
+            raise ArchiveDeadlineReached("Document preview exceeded its deadline")
         return b"".join(chunks), bool(stream.read(1))
 
-    def _extract_docx(self, content: bytes) -> DocumentResult:
+    def _extract_docx(
+        self,
+        content: bytes,
+        *,
+        deadline: float | None = None,
+    ) -> DocumentResult:
+        if deadline is not None and time.monotonic() >= deadline:
+            raise ArchiveDeadlineReached("DOCX parsing exceeded its deadline")
         normalized_content, main_type_normalized = self._normalized_ooxml_main_type(
             content,
             main_part=_WORD_MAIN_PART,
@@ -3056,10 +3092,13 @@ class DocumentExtractor:
             from docx import Document
 
             document = Document(io.BytesIO(normalized_content))
+            if deadline is not None and time.monotonic() >= deadline:
+                raise ArchiveDeadlineReached("DOCX loading exceeded its deadline")
             text, office_structure_index, extraction_truncated = build_docx_text_and_structure(
                 document,
                 max_text_chars=self.max_text_chars,
                 content=normalized_content,
+                deadline=deadline,
             )
             metadata: dict[str, Any] = {
                 "format": "docx",
@@ -3071,6 +3110,8 @@ class DocumentExtractor:
             if extraction_truncated:
                 metadata["extraction_truncated"] = True
                 metadata["text_truncated"] = True
+            if deadline is not None and time.monotonic() >= deadline:
+                metadata["parse_deadline_reached"] = True
             return DocumentResult(
                 text,
                 metadata,
@@ -3081,6 +3122,7 @@ class DocumentExtractor:
                 normalized_content,
                 "word/document.xml",
                 "docx",
+                deadline=deadline,
             )
 
     def _extract_doc(self, content: bytes, *, deadline: float | None = None) -> DocumentResult:
@@ -3132,6 +3174,8 @@ class DocumentExtractor:
                 False,
                 "unsupported_legacy_doc",
             )
+        if deadline is not None and time.monotonic() >= deadline:
+            raise ArchiveDeadlineReached("DOC parsing exceeded its deadline")
         return DocumentResult(text, metadata)
 
     def _extract_converted_office(
@@ -3163,6 +3207,7 @@ class DocumentExtractor:
                 converted.content,
                 "content.xml",
                 "odg",
+                deadline=deadline,
             )
         elif converted.target_format == "pdf":
             # `.wps` is shared by Writer and Calc import filters.  PDF is the
@@ -3173,19 +3218,19 @@ class DocumentExtractor:
                 deadline=self._pdf_parse_deadline(deadline),
             )
         else:
-            parser = {
-                "docx": self._extract_docx,
-                "xlsx": self._extract_xlsx,
-                "pptx": self._extract_pptx,
-            }.get(converted.target_format)
-            if parser is None:  # closed mapping invariant
+            if converted.target_format not in {"docx", "xlsx", "pptx"}:
                 return DocumentResult(
                     "",
                     conversion_metadata,
                     False,
                     "legacy_office_conversion_unsupported",
                 )
-            parsed = parser(converted.content)
+            parser = {
+                "docx": self._extract_docx,
+                "xlsx": self._extract_xlsx,
+                "pptx": self._extract_pptx,
+            }[converted.target_format]
+            parsed = parser(converted.content, deadline=deadline)
         return DocumentResult(
             parsed.text,
             {**parsed.metadata, **conversion_metadata},
@@ -3194,7 +3239,14 @@ class DocumentExtractor:
             parsed.office_structure_index,
         )
 
-    def _extract_xlsx(self, content: bytes) -> DocumentResult:
+    def _extract_xlsx(
+        self,
+        content: bytes,
+        *,
+        deadline: float | None = None,
+    ) -> DocumentResult:
+        if deadline is not None and time.monotonic() >= deadline:
+            raise ArchiveDeadlineReached("XLSX parsing exceeded its deadline")
         with zipfile.ZipFile(io.BytesIO(content)) as archive:
             self._validate_office_zip(archive)
         try:
@@ -3202,6 +3254,9 @@ class DocumentExtractor:
         except ImportError:
             return DocumentResult("", {"format": "xlsx"}, False, "openpyxl is not installed")
         workbook = load_workbook(io.BytesIO(content), read_only=True, data_only=True)
+        if deadline is not None and time.monotonic() >= deadline:
+            workbook.close()
+            raise ArchiveDeadlineReached("XLSX loading exceeded its deadline")
         # Formula expressions are not source text and never enter the index.  A
         # second read-only view exists solely to distinguish a genuinely empty
         # cell from a formula whose cached result is absent.  Failure of this
@@ -3219,6 +3274,7 @@ class DocumentExtractor:
                 content=content,
                 max_text_chars=self.max_text_chars,
                 max_rows=_MAX_TABULAR_ROWS,
+                deadline=deadline,
             )
         finally:
             workbook.close()
@@ -3232,6 +3288,8 @@ class DocumentExtractor:
         if extraction_truncated:
             metadata["extraction_truncated"] = True
             metadata["text_truncated"] = True
+        if deadline is not None and time.monotonic() >= deadline:
+            metadata["parse_deadline_reached"] = True
         return DocumentResult(
             text,
             metadata,
@@ -3312,7 +3370,14 @@ class DocumentExtractor:
             metadata["text_truncated"] = True
         return built, metadata, index
 
-    def _extract_pptx(self, content: bytes) -> DocumentResult:
+    def _extract_pptx(
+        self,
+        content: bytes,
+        *,
+        deadline: float | None = None,
+    ) -> DocumentResult:
+        if deadline is not None and time.monotonic() >= deadline:
+            raise ArchiveDeadlineReached("PPTX parsing exceeded its deadline")
         normalized_content, main_type_normalized = self._normalized_ooxml_main_type(
             content,
             main_part=_PRESENTATION_MAIN_PART,
@@ -3324,10 +3389,17 @@ class DocumentExtractor:
         except ImportError:
             return DocumentResult("", {"format": "pptx"}, False, "python-pptx is not installed")
         presentation = Presentation(io.BytesIO(normalized_content))
+        if deadline is not None and time.monotonic() >= deadline:
+            raise ArchiveDeadlineReached("PPTX loading exceeded its deadline")
         slides: list[str] = []
         used = 0
         extraction_truncated = False
+        deadline_reached = False
         for number, slide in enumerate(presentation.slides, 1):
+            if deadline is not None and time.monotonic() >= deadline:
+                extraction_truncated = True
+                deadline_reached = True
+                break
             text = [
                 shape.text.strip() for shape in slide.shapes if hasattr(shape, "text") and shape.text.strip()
             ]
@@ -3346,6 +3418,9 @@ class DocumentExtractor:
             metadata["main_content_type_normalized"] = True
         if extraction_truncated:
             metadata["extraction_truncated"] = True
+            metadata["text_truncated"] = True
+        if deadline_reached:
+            metadata["parse_deadline_reached"] = True
         return DocumentResult("\n\n".join(slides), metadata)
 
     def _extract_rtf(self, content: bytes) -> DocumentResult:
@@ -3472,7 +3547,16 @@ class DocumentExtractor:
             metadata["chapters_skipped"] = skipped
         return DocumentResult("\n\n".join(chapters), metadata)
 
-    def _extract_xml_zip_text(self, content: bytes, member_name: str, format_name: str) -> DocumentResult:
+    def _extract_xml_zip_text(
+        self,
+        content: bytes,
+        member_name: str,
+        format_name: str,
+        *,
+        deadline: float | None = None,
+    ) -> DocumentResult:
+        if deadline is not None and time.monotonic() >= deadline:
+            raise ArchiveDeadlineReached("Office XML parsing exceeded its deadline")
         with zipfile.ZipFile(io.BytesIO(content)) as archive:
             members = self._validate_office_zip(archive)
             names = {member.filename for member in members}
@@ -3484,7 +3568,13 @@ class DocumentExtractor:
                 raise ArchiveLimitError("Office document XML exceeds configured limit")
             parse_limit = min(member_limit, _MAX_STRUCTURED_PARSE_BYTES)
             with archive.open(info) as stream:
-                data, source_truncated = self._read_stream_preview(stream, parse_limit)
+                data, source_truncated = self._read_stream_preview(
+                    stream,
+                    parse_limit,
+                    deadline=deadline,
+                )
+        if deadline is not None and time.monotonic() >= deadline:
+            raise ArchiveDeadlineReached("Office XML parsing exceeded its deadline")
         metadata: dict[str, Any] = {"format": format_name}
         if source_truncated:
             metadata["source_truncated_for_parse"] = True
@@ -3756,12 +3846,14 @@ class DocumentExtractor:
 
             previewed = 0
             exhausted = False
+            deadline_reached = False
             for index, member, reader_member in ordered_files:
                 mandatory_validation = validation_index is not None and index == validation_index
                 if deadline is not None and time.monotonic() >= deadline:
                     if mandatory_validation:
-                        raise ArchiveExtractionError
+                        raise ArchiveDeadlineReached
                     exhausted = True
+                    deadline_reached = True
                     break
                 member_limit = self._archive_member_limit(budget)
                 if member.file_size > member_limit and not mandatory_validation:
@@ -3779,6 +3871,12 @@ class DocumentExtractor:
                 try:
                     with reader.open(reader_member, pwd=password_bytes) as stream:
                         data = self._read_stream_limited(stream, member_limit, deadline=deadline)
+                except ArchiveDeadlineReached:
+                    if mandatory_validation:
+                        raise
+                    exhausted = True
+                    deadline_reached = True
+                    break
                 except ArchiveLimitError:
                     raise
                 except (RuntimeError, zipfile.BadZipFile) as exc:
@@ -3790,14 +3888,19 @@ class DocumentExtractor:
                 except Exception as exc:
                     raise ArchiveExtractionError from exc
                 budget.spend_bytes(len(data))
-                preview, member_complete = self._member_preview(
-                    member.filename,
-                    data,
-                    depth,
-                    budget,
-                    deadline,
-                    password,
-                )
+                try:
+                    preview, member_complete = self._member_preview(
+                        member.filename,
+                        data,
+                        depth,
+                        budget,
+                        deadline,
+                        password,
+                    )
+                except ArchiveDeadlineReached:
+                    exhausted = True
+                    deadline_reached = True
+                    break
                 if not member_complete:
                     exhausted = True
                 if preview:
@@ -3814,6 +3917,8 @@ class DocumentExtractor:
             # двадцати четырёх, и ничто не отличало «прочитано всё» от «прочитана
             # часть».
             metadata["archive_budget_exhausted"] = True
+        if deadline_reached:
+            metadata["parse_deadline_reached"] = True
         return DocumentResult("\n".join(parts), metadata)
 
     def _extract_tar(
@@ -3835,9 +3940,11 @@ class DocumentExtractor:
             previews: list[str] = []
             previewed = 0
             exhausted = False
+            deadline_reached = False
             for member in archive:
                 if deadline is not None and time.monotonic() >= deadline:
                     exhausted = True
+                    deadline_reached = True
                     break
                 entry_count += 1
                 if entry_count > self.max_archive_entries:
@@ -3876,16 +3983,21 @@ class DocumentExtractor:
                     exhausted = True
                     break
                 previewed += 1  # decompressions, not successes — see _extract_zip
-                with stream:
-                    data = self._read_stream_limited(stream, member_limit, deadline=deadline)
-                preview, member_complete = self._member_preview(
-                    member.name,
-                    data,
-                    depth,
-                    budget,
-                    deadline,
-                    password,
-                )
+                try:
+                    with stream:
+                        data = self._read_stream_limited(stream, member_limit, deadline=deadline)
+                    preview, member_complete = self._member_preview(
+                        member.name,
+                        data,
+                        depth,
+                        budget,
+                        deadline,
+                        password,
+                    )
+                except ArchiveDeadlineReached:
+                    exhausted = True
+                    deadline_reached = True
+                    break
                 if not member_complete:
                     exhausted = True
                 if preview:
@@ -3900,6 +4012,8 @@ class DocumentExtractor:
             # Said out loud: the listing is partial, and a caller reading `files`
             # as "what the archive holds" would otherwise be quietly wrong.
             metadata["archive_budget_exhausted"] = True
+        if deadline_reached:
+            metadata["parse_deadline_reached"] = True
         return DocumentResult("\n".join(parts), metadata)
 
     @staticmethod
