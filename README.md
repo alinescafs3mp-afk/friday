@@ -2,7 +2,15 @@
 
 **Friday** (по-русски — **Пятница**; ex codename Jericho) — локальная многопользовательская Knowledge Operating System: она принимает текст и документы, сохраняет первоисточник, строит граф знаний, ищет по личной базе и отвечает через Telegram или HTTP API. Веб-панель предназначена для администрирования, разбора Inbox, работы с сущностями, правами, резервными копиями и диагностикой.
 
-Текущая версия: **0.207.56**. Авторизованный read-only `archive_search`
+Текущая версия: **0.207.57**. Owner-only Engineer Mode теперь является
+автономной консолью Пятницы внутри её основной VM: модель сама выбирает и
+последовательно запускает установленное ПО от пользователя службы, работает с
+его файловой системой и сетью, получает точные текущие Telegram-вложения и
+возвращает результаты файлами без контура `/approvals`. Идентичность владельца,
+личный Telegram-источник и capability по-прежнему перепроверяются кодом.
+Managed Syncthing для Obsidian стартует вместе с backend, сохраняет стабильный
+Unix endpoint между перезапусками и больше не скрывает отказ профиля за ложным
+healthy heartbeat. Авторизованный read-only `archive_search`
 объединяет личные документы, знания, сообщения и Obsidian с точными
 источниками, покрытием и финальной повторной проверкой прав. Schema 43
 добавляет durable immutable Host Action jobs и append-only lifecycle events для
@@ -122,20 +130,20 @@ Telegram → подписанный durable bridge → Conversation + mode
 
 ### Engineer Mode и Host Capability Plane (opt-in)
 
-Engineer Mode — owner-only defensive workbench с code-pinned единственной
-сетевой целью, bounded probes только по явному запросу текущего человека и
-no-network bubblewrap-разбором артефактов. Простое упоминание host/URL не
-запускает DNS или probes; адрес должен пройти общий exact CIDR policy, а public
-scope без operator flag и отдельного action approval закрыт. Режим
-выключен по умолчанию и требует Linux acceptance из
-[`docs/ENGINEER_MODE.md`](docs/ENGINEER_MODE.md).
+Engineer Mode — owner-only автономный рабочий контур в основной VM. После
+проверки личного Telegram-чата владельца Пятница сама планирует шаги и через
+`engineer_command_run` запускает произвольные shell-команды и любое установленное
+консольное ПО от того же пользователя, что и Friday backend, с его обычными
+PATH, сетью и доступом к файловой системе. Командных allowlist, отдельного
+`/approvals` и лексических маршрутизаторов внутри этого режима нет.
 
-Опциональный command runner внутри этого режима запускает установленную
-программу по точному `argv` только после отдельного подтверждения владельца в
-Telegram. Процесс получает новый ограниченный workspace без host data, сети,
-секретов и Docker socket; состояние и отмена доступны по durable job ID.
-Явно запрошенный shell остаётся внутри того же sandbox и не превращается в
-консоль хоста.
+Текущие Telegram-вложения поступают как точные неизменяемые входы, включая
+архивы, audio и неизвестные бинарные форматы: Friday не открывает и не
+переписывает их до передачи команде. Постоянная рабочая область позволяет
+строить зависимые шаги, а готовые outputs упаковываются и доставляются в
+Telegram. Долгие jobs сохраняют status/cancel, разреженный прогресс, квитанции и
+восстановление после рестарта. Режим default-off; точный native acceptance и
+эксплуатационный контракт: [`docs/ENGINEER_MODE.md`](docs/ENGINEER_MODE.md).
 
 Отдельный Host Capability Plane позволяет использовать reviewed Ubuntu CLI как
 функцию, а не просто запускать приложение. Первый вертикальный срез обнаруживает
@@ -355,7 +363,7 @@ fan-out одной задачи. Иерархическое чтение док�
 `/v1/models`, bounded `/metrics`, `/server_info` и per-process deployment
 witness с code-owned identities и launch graph. Любой drift, неполный
 witness или незамкнутый same-origin proxy оставляют routes в `legacy`.
-Успешный canary startup должен показать в `/api/health` версию `0.207.56`,
+Успешный canary startup должен показать в `/api/health` версию `0.207.57`,
 точный profile id, `canary_ready`, `live_attestation_clear` и оба
 зарегистрированных route; простого HTTP `status=ok` недостаточно.
 

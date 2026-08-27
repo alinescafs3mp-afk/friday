@@ -67,10 +67,27 @@ failed/error/skipped-тест в любой фазе делает гейт кр�
 - weather без явного города не идёт в web; diagnostics требует exact
   capability, а MCP status строится из code-owned projection.
 
-Для optional Engineer Mode и Host Capability Plane дополнительно:
+Для autonomous Engineer Mode дополнительно:
 
-- оба контура default-off; disabled/disconnected host agent не публикует tools
-  и не мешает обычному Friday;
+- контур default-off и доступен только installation owner в свежем личном
+  Telegram-чате; unsigned API, guest, quote, attachment и model output не могут
+  выдать command authority;
+- модель получает `engineer_command_run/status/cancel` без лексического
+  allowlist и `/approvals`, запускает произвольный Bash и установленное ПО от
+  пользователя Friday backend с его реальными PATH, filesystem и network;
+- exact current uploads и staged albums, включая archive/audio/unknown binary,
+  проходят opaque byte admission без parser/OCR/transcription; quoted, ambient,
+  foreign, duplicate и drifted carriers fail-closed;
+- два зависимых шага с повторяющимся native tool-call ID получают разные
+  code-owned identities; persistent workdir, output sealing, автоматическая
+  Telegram delivery, restart/status/cancel и sparse progress остаются рабочими;
+- backend shutdown закрывает admission, завершает или убивает live cgroups и
+  только затем освобождает command store/SQLite; acceptance выполняется native,
+  без Docker и без companion plugin.
+
+Для отдельного Host Capability Plane дополнительно:
+
+- disabled/disconnected host agent не публикует tools и не мешает обычному Friday;
 - host-control доступен только installation owner, actor/own_id перепроверяются
   перед execution, а package capability отделена от action/network rights;
 - `nmap` использует общий reviewed argv/parser contract, code-owned target
@@ -103,13 +120,6 @@ failed/error/skipped-тест в любой фазе делает гейт кр�
   [`deploy/host-control/README.md`](../deploy/host-control/README.md), сначала с
   flags `0`, затем на owner-controlled private target. Реальный APT/systemd
   smoke является deployment evidence и не подменяется unit-тестом.
-- Docker Engineer Mode на Ubuntu запускается только с enforcing-профилями из
-  [`deploy/engineer-mode/README.md`](../deploy/engineer-mode/README.md):
-  `cap_drop: ALL`, no-new-privileges и PID limit сохранены, `unconfined` и
-  `CAP_SYS_ADMIN` отсутствуют, выбранный seccomp — exact canonical shipped file,
-  а `verify-runtime.sh` доказывает live seccomp, AppArmor, exact 512-task cgroup
-  и реальный no-network bubblewrap smoke до включения flag. Worker наследует
-  этот cgroup и не ставит UID-wide `RLIMIT_NPROC` по неполному container `/proc`.
 - host installer получает только canonical release wheel, собранный release
   toolchain с `setuptools>=77`/`wheel>=0.45`, и SHA-256 из отдельного release
   manifest; Ubuntu target не строит source и ставит wheel с `--no-index`.
@@ -158,6 +168,11 @@ failed/error/skipped-тест в любой фазе делает гейт кр�
   lost update, а racing peer generation сохраняет обе стороны как conflict;
 - delivery отдельно доказывает local write, scan, live connection, exact remote
   availability и user-confirmed open; offline остаётся `delivery_pending`;
+- persisted Syncthing Unix endpoint не зависит от ambient backend `TMPDIR`, а
+  отсутствующий private runtime directory восстанавливается с mode `0700`;
+- reconcile выполняется сразу при backend startup, запускает ready profile и
+  после падения child восстанавливает новый PID; `failed > 0` публикует worker
+  error/degraded и только чистый следующий sweep возвращает health в `ok`;
 - immutable activation сохраняет SQLite/WAL, Telegram inbox и exact Obsidian
   root одним recovery set, а staged ENV1 публикуется только после verified
   backup и удаляется durable после успеха.
@@ -165,7 +180,7 @@ failed/error/skipped-тест в любой фазе делает гейт кр�
 Для optional GPT-OSS secondary brain начиная с 0.207.11 дополнительно:
 
 - release принимается и первый раз запускается без `FRIDAY_SECONDARY_LLM_*`:
-  health имеет `status=ok`, `version=0.207.56`, `secondary.mode=disabled`,
+  health имеет `status=ok`, `version=0.207.57`, `secondary.mode=disabled`,
   `secondary.state=disabled` и `secondary.available=false`;
 - `ACCEPTED_SECONDARY_RUNTIME_PROFILES` содержит ровно finalist
   `gptoss20b-2335df123cac7fc0e13e347cde1e1ffa8562daafcaf0fc76ade1a851d2b0ff1f`
@@ -269,7 +284,7 @@ failed/error/skipped-тест в любой фазе делает гейт кр�
 - post-context load допускает bounded convergence не более 2 секунд с шагом
   50 мс только для valid same-epoch busy; invalid/epoch/deadline fail-closed, а
   initial idle и post-cancellation quiet остаются строгими;
-- final startup health имеет `status=ok`, `version=0.207.56`, configured/installed
+- final startup health имеет `status=ok`, `version=0.207.57`, configured/installed
   `canary`, routes `[archive_read, file_read]`, точный `profile_id`,
   `verified_context_tokens=8192` и непустой public `attestation_sha256`;
 - синтетические 1- и 2-файловые UTF-8 smokes дают одну публикацию с точными
@@ -473,7 +488,8 @@ schema-33 DB/inbox snapshot. Начиная с `backend_start_attempted`, даж
 
 - Windows native path/permissions/service lifecycle;
 - Python 3.11 и 3.12;
-- Docker Compose startup/shutdown/upgrade;
+- Docker Compose startup/shutdown/upgrade — только для отдельно заявленного
+  Docker-контура; native primary Friday этим пунктом не сертифицируется;
 - NVIDIA driver/runtime, реальная загрузка Qwen и длительный inference;
 - OCR/vision quality на репрезентативных scans;
 - живой Telegram Bot API, callbacks, attachments, outage recovery;

@@ -1,3 +1,28 @@
+## 0.207.57 — 2026-08-27
+
+### Autonomous owner Engineer Mode and Obsidian restart recovery
+
+- An authenticated private owner Engineer conversation is now an autonomous
+  host-user workbench. The primary model can choose and chain arbitrary Bash
+  commands and installed console software with the Friday service user's real
+  filesystem, PATH and network access; no command allowlist, lexical router or
+  per-command `/approvals` round trip remains in this mode.
+- Exact current Telegram uploads are staged as immutable command inputs without
+  parsing, OCR, transcription or archive expansion. Single files and albums,
+  including archives, audio and unknown binaries, retain their authenticated
+  update anchor; ambient, quoted, foreign and drifted carriers still fail
+  closed.
+- Dependent steps use code-owned unique identities even when the model repeats
+  native tool-call IDs. Persistent work/output directories, durable jobs,
+  cancellation, sparse progress, signed result archives and automatic Telegram
+  delivery remain intact. Backend shutdown now fences new admissions and drains
+  or kills live command cgroups before releasing storage.
+- Managed Obsidian Syncthing no longer derives its persisted Unix endpoint from
+  the backend's ambient `TMPDIR`. Existing `/tmp/friday-syncthing-*` profiles
+  survive hardened-unit restarts, reconcile runs immediately at backend start,
+  and a failed profile makes worker health degraded until a clean sweep proves
+  recovery.
+
 ## 0.207.56 — 2026-08-27
 
 ### Sparse Engineer progress and bounded delivered-output retention
