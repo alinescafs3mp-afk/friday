@@ -1064,9 +1064,7 @@ def test_cancellation_budget_covers_attested_load_and_remote_drain() -> None:
         model_probe_module.LOAD_TIMEOUT_SEC + 1.0
     )
     assert model_probe_module.CANCELLATION_TIMEOUT_SEC >= (
-        model_probe_module.LOAD_TIMEOUT_SEC
-        + model_probe_module.REMOTE_QUEUE_DRAIN_MAX_MS / 1_000
-        + 1.0
+        model_probe_module.LOAD_TIMEOUT_SEC + model_probe_module.REMOTE_QUEUE_DRAIN_MAX_MS / 1_000 + 1.0
     )
 
 
