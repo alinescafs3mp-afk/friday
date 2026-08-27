@@ -26,6 +26,13 @@ from friday.interaction_control_plane.compare_current_file_web_work_graph_store 
     get_compare_current_file_web_work_graph_in_transaction,
     rebind_compare_current_file_web_work_graph_after_restart_in_transaction,
 )
+from friday.interaction_control_plane.engineer_work_item import (
+    EngineerWorkItemChannel,
+    create_engineer_work_item_in_transaction,
+)
+from friday.interaction_control_plane.engineer_work_item_schema import (
+    ENGINEER_WORK_ITEM_COMPLETION_CONTRACT_SHA256,
+)
 from friday.interaction_control_plane.work_item_schema import (
     _WORK_ITEM_SCHEMA_42,
     _WORK_ITEM_SCHEMA_44_EXTENSION,
@@ -46,7 +53,7 @@ def _sha256(value: str) -> str:
     return hashlib.sha256(value.encode("utf-8")).hexdigest()
 
 
-def _seed_bound_graph(storage: FridayStorage, label: str) -> CompareCurrentFileWebWorkGraph:
+def _build_bound_graph(storage: FridayStorage, label: str) -> CompareCurrentFileWebWorkGraph:
     owner = "local:schema45-owner"
     storage.ensure_user(owner, source="schema45-test")
     conversation = storage.create_conversation(owner, f"schema45 {label}")
@@ -90,6 +97,11 @@ def _seed_bound_graph(storage: FridayStorage, label: str) -> CompareCurrentFileW
         now="2026-08-26T10:00:00+00:00",
         expires_at="2026-08-26T22:00:00+00:00",
     )
+    return graph
+
+
+def _seed_bound_graph(storage: FridayStorage, label: str) -> CompareCurrentFileWebWorkGraph:
+    graph = _build_bound_graph(storage, label)
     with storage.transaction() as conn:
         return create_compare_current_file_web_work_graph_in_transaction(conn, graph)
 
@@ -120,6 +132,17 @@ def _downgrade_graph_projection_to_released_schema44(database: Path) -> None:
         conn.execute("BEGIN IMMEDIATE")
         # Build an actual released schema-44 image; the independent schema-46
         # EngineerWorkItem package must not leak through this test-only inverse.
+        engineer_triggers = tuple(
+            str(row[0])
+            for row in conn.execute(
+                """SELECT name FROM sqlite_master
+                    WHERE type='trigger' AND name LIKE 'trg_engineer_work_item_%'
+                    ORDER BY name"""
+            )
+        )
+        for trigger in engineer_triggers:
+            conn.execute(f'DROP TRIGGER "{trigger}"')  # nosec B608 - schema-owned test names
+        conn.execute("DROP TABLE engineer_work_item_command_fences")
         conn.execute("DROP TABLE engineer_work_item_steps")
         conn.execute("DROP TABLE engineer_work_items")
         schema42 = _canonical_schema_42_objects()
@@ -207,6 +230,26 @@ def test_schema45_exact_binding_is_durable_immutable_and_revision_cas(storage) -
             step_id=FILE_READ_STEP_ID,
             now="2026-08-26T10:00:02+00:00",
         )
+
+
+def test_engineer_open_scope_reciprocally_blocks_work_graph_admission(storage) -> None:
+    graph = _build_bound_graph(storage, "engineer-exclusive")
+    with storage.transaction() as conn:
+        create_engineer_work_item_in_transaction(
+            conn,
+            owner_id=graph.user_id,
+            tenant_id=graph.user_id,
+            conversation_id=graph.conversation_id,
+            channel=EngineerWorkItemChannel.TELEGRAM,
+            source_binding_sha256="a" * 64,
+            completion_contract_sha256=ENGINEER_WORK_ITEM_COMPLETION_CONTRACT_SHA256,
+            idempotency_key="ecmd-" + "b" * 64,
+            command_digest="c" * 64,
+            now="2026-08-26T10:00:00+00:00",
+            expires_at="2026-08-26T22:00:00+00:00",
+        )
+    with pytest.raises(CompareCurrentFileWebGraphConflictError), storage.transaction() as conn:
+        create_compare_current_file_web_work_graph_in_transaction(conn, graph)
 
 
 def test_schema45_restart_rebind_is_one_shot_atomic_and_predecessor_audited(storage) -> None:

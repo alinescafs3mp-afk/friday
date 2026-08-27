@@ -43,6 +43,7 @@ from friday.host_control.job_schema import (
 from friday.interaction_control_plane.engineer_work_item_schema import (
     ENGINEER_WORK_ITEM_SCHEMA,
     ENGINEER_WORK_ITEM_SCHEMA_VERSION,
+    register_engineer_work_item_connection_functions,
     validate_engineer_work_item_schema,
 )
 from friday.interaction_control_plane.failure_schema import (
@@ -2366,6 +2367,7 @@ class CoreMixin(StorageShared):
                 deterministic=True,
             )
             register_work_item_connection_functions(conn)
+            register_engineer_work_item_connection_functions(conn)
             register_document_catalog_connection_functions(conn)
             # Даты из документов извлечены и лежат в метаданных СЫРЫМИ строками — так,
             # как они написаны в бумаге. Замерено на архиве владельца: 3180 значений у

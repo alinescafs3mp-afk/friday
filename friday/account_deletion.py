@@ -72,6 +72,11 @@ class _Scope:
 # its append-only trigger correctly refuses ordinary DELETE.
 _DELETE_SCOPES: tuple[_Scope, ...] = (
     _Scope(
+        "engineer_work_item_command_fences",
+        "engineer_work_item_command_fences",
+        "owner_id=?",
+    ),
+    _Scope(
         "engineer_work_item_steps",
         "engineer_work_item_steps",
         "work_item_id IN (SELECT id FROM engineer_work_items WHERE owner_id=? OR tenant_id=?)",
@@ -207,6 +212,7 @@ _DELETE_SCOPES: tuple[_Scope, ...] = (
 
 _CANDIDATE_CASCADE_DELETE_KEYS = frozenset(
     {
+        "engineer_work_item_command_fences",
         "engineer_work_item_steps",
         "work_item_compare_current_file_web_restart_rebind_steps",
         "work_item_compare_current_file_web_restart_rebinds",
@@ -219,6 +225,11 @@ _CANDIDATE_CASCADE_DELETE_KEYS = frozenset(
         "work_item_archive_candidate_sets",
     }
 )
+
+# These immutable sidecars intentionally outlive their Engineer Work Item.  Their
+# only deletion authority is the owning ``users`` row's ON DELETE CASCADE, so the
+# exact-count proof has to be checked after that final parent deletion.
+_OWNER_CASCADE_DELETE_KEYS = frozenset({"engineer_work_item_command_fences"})
 
 _BLOCKING_GRAPH_SCOPES: tuple[_Scope, ...] = (
     _Scope("relations", "relations", "user_id=?"),
@@ -278,6 +289,7 @@ _KNOWN_USER_SCOPES = frozenset(
         ("host_action_jobs", "user_id"),
         ("host_action_jobs", "actor_own_id"),
         # Both identities are exact ownership axes of schema-46 Engineer work.
+        ("engineer_work_item_command_fences", "owner_id"),
         ("engineer_work_item_steps", "owner_id"),
         ("engineer_work_items", "owner_id"),
         ("engineer_work_items", "tenant_id"),
@@ -1582,8 +1594,9 @@ def delete_account(
             raise AccountDeletionConflict("Появился runtime-ключ неизвестного формата")
 
         # Candidate sidecars are deletion-immutable while their parent exists.
-        # Snapshot global counts so the parent Work Item cascade remains exactly
-        # accounted without opening a direct sidecar-delete bypass.
+        # Snapshot global counts so their parent cascades remain exactly accounted
+        # without opening a direct sidecar-delete bypass.  Most disappear with a
+        # Work Item below; durable command fences disappear only with ``users``.
         candidate_cascade_scopes = tuple(
             scope for scope in _DELETE_SCOPES if scope.key in _CANDIDATE_CASCADE_DELETE_KEYS
         )
@@ -1604,6 +1617,11 @@ def delete_account(
             if count:
                 deleted[scope.key] = count
         for scope in candidate_cascade_scopes:
+            if scope.key in _OWNER_CASCADE_DELETE_KEYS:
+                expected = candidate_cascade_counts[scope.key]
+                if expected:
+                    deleted[scope.key] = expected
+                continue
             expected = candidate_cascade_counts[scope.key]
             remaining = int(conn.execute(f'SELECT COUNT(*) FROM "{scope.table}"').fetchone()[0])
             if candidate_global_counts[scope.key] - remaining != expected:
@@ -1728,6 +1746,16 @@ def delete_account(
         user_cursor = conn.execute("DELETE FROM users WHERE id=? AND status='disabled'", (user_id,))
         if user_cursor.rowcount != 1:
             raise AccountDeletionConflict("Учётная запись изменилась во время удаления")
+        for scope in candidate_cascade_scopes:
+            if scope.key not in _OWNER_CASCADE_DELETE_KEYS:
+                continue
+            expected = candidate_cascade_counts[scope.key]
+            remaining = int(conn.execute(f'SELECT COUNT(*) FROM "{scope.table}"').fetchone()[0])
+            if (
+                candidate_global_counts[scope.key] - remaining != expected
+                or _count(conn, scope, user_id) != 0
+            ):
+                raise AccountDeletionConflict("Owner sidecar cascade changed during deletion")
         deleted["users"] = 1
 
     # Preflight permits only absent or empty per-account directories.  Removing an

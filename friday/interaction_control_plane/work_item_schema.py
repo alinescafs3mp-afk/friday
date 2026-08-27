@@ -3381,6 +3381,7 @@ def _schema_objects_for_tables(
         for row in conn.execute(
             f"""SELECT type,name,sql FROM sqlite_master
                   WHERE sql IS NOT NULL
+                    AND name NOT LIKE 'trg_engineer_work_item_%'
                     AND (name IN ({placeholders}) OR tbl_name IN ({placeholders}))
                   ORDER BY type,name""",  # nosec B608 - generated placeholders only
             (*tables, *tables),
@@ -3486,6 +3487,7 @@ def _related_schema_objects(conn: sqlite3.Connection) -> dict[tuple[str, str], s
         for row in conn.execute(
             """SELECT type,name,sql FROM sqlite_master
                   WHERE sql IS NOT NULL
+                    AND name NOT LIKE 'trg_engineer_work_item_%'
                     AND (name='work_items'
                          OR name LIKE 'work_item_%'
                          OR name IN ('uq_work_items_active_conversation',

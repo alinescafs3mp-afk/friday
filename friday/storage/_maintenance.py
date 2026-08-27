@@ -1185,6 +1185,17 @@ class MaintenanceMixin(StorageShared):
                     "SELECT * FROM engineer_work_items WHERE owner_id=?",
                     (user_id,),
                 ),
+                # Durable command fences contain only exact body-free identity
+                # hashes.  Export their raw rows: unlike the live Work Item they
+                # have no child material to reconstruct and intentionally survive
+                # retirement of that Work Item until account erasure.
+                "engineer_work_item_command_fences": (
+                    """SELECT owner_id,idempotency_key,work_item_id,expected_revision,
+                              step_ordinal,source_binding_sha256,command_digest,retired_at
+                         FROM engineer_work_item_command_fences
+                        WHERE owner_id=? ORDER BY retired_at,idempotency_key""",
+                    (user_id,),
+                ),
                 "work_items": ("SELECT * FROM work_items WHERE user_id=?", (user_id,)),
                 "conversations": ("SELECT * FROM conversations WHERE user_id=?", (user_id,)),
                 "messages": ("SELECT * FROM messages WHERE user_id=?", (user_id,)),

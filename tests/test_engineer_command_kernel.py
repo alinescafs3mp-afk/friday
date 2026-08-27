@@ -37,6 +37,7 @@ from friday.organs.engineer.command import (
     ResourceLimits,
     TrustedPathContract,
 )
+from friday.organs.engineer.command import kernel as command_kernel_module
 from friday.organs.engineer.command.boundary import MissingControllerBoundary, SystemdCgroupBoundary
 from friday.organs.engineer.command.contracts import MAX_TIMEOUT_SEC, sha256_bytes
 from friday.organs.engineer.command.inputs import command_input_descriptor, command_input_manifest
@@ -480,6 +481,82 @@ def test_idempotency_conflict_on_different_digest(tmp_path: Path) -> None:
     second_req = _argv("/usr/bin/false", key=key)
     with pytest.raises(CommandError, match="idempotency_conflict"):
         _submit(kernel, second_req)
+
+
+def test_committed_work_item_fence_wins_before_grant_parsing(tmp_path: Path) -> None:
+    kernel = _kernel(tmp_path)
+    request = _argv("/usr/bin/true", key="ecmd-" + "1" * 64)
+    try:
+        kernel.store.create_engineer_work_item_fence(
+            actor_id=ACTOR,
+            idempotency_key=request.idempotency_key,
+            work_item_id="ewi_" + "2" * 32,
+            expected_revision=1,
+            step_ordinal=1,
+            source_binding_sha256="3" * 64,
+            command_digest=request.digest,
+            created_at=123.5,
+        )
+        with pytest.raises(CommandError, match="idempotency_fenced"):
+            kernel.submit(request, "not-a-grant", actor_id=ACTOR)
+        assert kernel.store.lookup_idempotency(ACTOR, request.idempotency_key) is None
+    finally:
+        kernel.close()
+
+
+def test_in_flight_submit_is_fenced_between_both_admission_lookups(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    kernel = _kernel(tmp_path)
+    request = _argv("/usr/bin/true", key="ecmd-" + "4" * 64)
+    source = _attest(kernel.authority.source_authority, request)
+    confirmation = _confirm(kernel, source, request)
+    token = kernel.authority.issue(request, source=source, confirmation=confirmation)
+    between_lookups = threading.Event()
+    continue_submit = threading.Event()
+    original_resolve = command_kernel_module.resolve_request
+    result: dict[str, object] = {}
+
+    def _pause_between_lookups(*args, **kwargs):
+        between_lookups.set()
+        if not continue_submit.wait(timeout=5):
+            raise AssertionError("fence race test did not resume")
+        return original_resolve(*args, **kwargs)
+
+    def _submit_in_flight() -> None:
+        try:
+            result["job_id"] = kernel.submit(request, token, actor_id=ACTOR)
+        except BaseException as exc:  # test thread must return every failure to the parent
+            result["error"] = exc
+
+    monkeypatch.setattr(command_kernel_module, "resolve_request", _pause_between_lookups)
+    worker = threading.Thread(target=_submit_in_flight, name="fence-race-submit")
+    worker.start()
+    try:
+        assert between_lookups.wait(timeout=5)
+        kernel.store.create_engineer_work_item_fence(
+            actor_id=ACTOR,
+            idempotency_key=request.idempotency_key,
+            work_item_id="ewi_" + "5" * 32,
+            expected_revision=1,
+            step_ordinal=1,
+            source_binding_sha256="6" * 64,
+            command_digest=request.digest,
+            created_at=123.5,
+        )
+        continue_submit.set()
+        worker.join(timeout=5)
+        assert not worker.is_alive()
+        assert "job_id" not in result
+        error = result.get("error")
+        assert isinstance(error, CommandError)
+        assert error.code == "idempotency_fenced"
+        assert kernel.store.lookup_idempotency(ACTOR, request.idempotency_key) is None
+    finally:
+        continue_submit.set()
+        worker.join(timeout=5)
+        kernel.close()
 
 
 def test_restart_without_live_pid_is_unknown(tmp_path: Path) -> None:

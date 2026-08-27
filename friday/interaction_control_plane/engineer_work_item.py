@@ -20,18 +20,22 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from enum import StrEnum
 
+from friday.engineer_source_binding import (
+    ENGINEER_SOURCE_BINDING_SCHEMA,
+    canonical_engineer_source_binding_sha256,
+)
 from friday.interaction_control_plane.engineer_work_item_schema import (
     ENGINEER_WORK_ITEM_COMPLETION_CONTRACT_SHA256,
     ENGINEER_WORK_ITEM_MAX_REVISION,
     ENGINEER_WORK_ITEM_MAX_STEPS,
     ENGINEER_WORK_ITEM_MAX_TTL_SECONDS,
+    register_engineer_work_item_connection_functions,
 )
 from friday.interaction_control_plane.work_item_contract import canonical_work_item_instant
 from friday.user_ids import validate_user_id
 
 ENGINEER_WORK_ITEM_CONTRACT_SCHEMA = "friday.engineer-work-item.v1"
 ENGINEER_WORK_ITEM_STEP_SCHEMA = "friday.engineer-work-item-step.v1"
-ENGINEER_SOURCE_BINDING_SCHEMA = "friday.engineer-source-binding.v1"
 ENGINEER_JOB_BINDING_SCHEMA = "friday.engineer-job-binding.v1"
 ENGINEER_WORK_ITEM_DEFAULT_TTL_HOURS = 12
 ENGINEER_WORK_ITEM_RETENTION_DAYS = 30
@@ -42,6 +46,33 @@ _ITEM_ID_RE = re.compile(r"ewi_[0-9a-f]{32}")
 _IDEMPOTENCY_KEY_RE = re.compile(r"ecmd-[0-9a-f]{64}")
 _JOB_ID_RE = re.compile(r"[0-9a-f]{32}")
 _CONVERSATION_ID_RE = re.compile(r"conv_[0-9a-f]{16}")
+_DELIVERY_CHAT_ID_RE = re.compile(r"[1-9][0-9]{0,19}")
+_COMMAND_LEDGER_BINDING_KEYS = frozenset(
+    {
+        "job_id",
+        "actor_id",
+        "tenant_id",
+        "conversation_id",
+        "channel",
+        "source_row_id",
+        "source_hash",
+        "telegram_update_id",
+        "idempotency_key",
+        "command_digest",
+        "delivery_chat_id",
+    }
+)
+_COMMAND_FENCE_BINDING_KEYS = frozenset(
+    {
+        "actor_id",
+        "work_item_id",
+        "expected_revision",
+        "step_ordinal",
+        "source_binding_sha256",
+        "idempotency_key",
+        "command_digest",
+    }
+)
 
 
 class EngineerWorkItemContractError(ValueError):
@@ -88,6 +119,7 @@ class EngineerWorkItemTransition(StrEnum):
     COMMAND_UNKNOWN = "command_unknown"
     TERMINAL_OBSERVED = "terminal_observed"
     NEXT_STEP_STARTED = "next_step_started"
+    PREPARED_STEP_DISCARDED = "prepared_step_discarded"
     ANSWER_READY = "answer_ready"
     COMPLETED = "completed"
     FAILED = "failed"
@@ -110,9 +142,12 @@ def _identity(value: object, *, label: str) -> str:
     if not isinstance(value, str) or value != value.strip() or _contains_control(value):
         raise EngineerWorkItemAnchorError(f"{label} is not a canonical identity")
     try:
-        return validate_user_id(value)
+        identity = validate_user_id(value)
     except ValueError as exc:
         raise EngineerWorkItemAnchorError(f"{label} is not a canonical identity") from exc
+    if len(identity) > 128:
+        raise EngineerWorkItemAnchorError(f"{label} exceeds the command-authority limit")
+    return identity
 
 
 def _conversation_id(value: object) -> str:
@@ -163,6 +198,26 @@ def _job_id(value: object) -> str:
     return value
 
 
+def _expected_revision(value: object) -> int:
+    if (
+        not isinstance(value, int)
+        or isinstance(value, bool)
+        or not 1 <= value < ENGINEER_WORK_ITEM_MAX_REVISION
+    ):
+        raise EngineerWorkItemContractError("expected_revision is outside the closed limit")
+    return value
+
+
+def _delivery_chat_id(value: object) -> str:
+    if (
+        not isinstance(value, str)
+        or _DELIVERY_CHAT_ID_RE.fullmatch(value) is None
+        or int(value) > 9_999_999_999_999_999_999
+    ):
+        raise EngineerWorkItemAnchorError("delivery_chat_id is not an admitted Telegram scope")
+    return value
+
+
 def _stored_str(value: object, *, label: str) -> str:
     if not isinstance(value, str):
         raise EngineerWorkItemContractError(f"stored {label} is not text")
@@ -188,8 +243,9 @@ def engineer_source_binding_sha256(
     source_row_id: str,
     source_hash: str,
     telegram_update_id: str,
+    delivery_chat_id: str,
 ) -> str:
-    """Hash the exact authenticated carrier without persisting its raw identifiers."""
+    """Hash the exact authenticated ingress and Telegram delivery scope."""
 
     owner = _identity(owner_id, label="owner_id")
     tenant = _identity(tenant_id, label="tenant_id")
@@ -203,24 +259,189 @@ def engineer_source_binding_sha256(
         if not isinstance(value, str) or not value or _contains_control(value):
             raise EngineerWorkItemAnchorError(f"{label} is not a bounded source identity")
         try:
-            encoded_value = value.encode("utf-8", errors="strict")
+            value.encode("utf-8", errors="strict")
         except UnicodeEncodeError as exc:  # pragma: no cover - control guard normally catches surrogates
             raise EngineerWorkItemAnchorError(f"{label} is not a bounded source identity") from exc
-        if len(encoded_value) > 256:
+        if len(value) > 128:
             raise EngineerWorkItemAnchorError(f"{label} is not a bounded source identity")
     source_digest = _digest(source_hash, label="source_hash")
-    payload = {
-        "channel": channel.value,
-        "conversation_id": conversation,
-        "owner_id": owner,
-        "schema": ENGINEER_SOURCE_BINDING_SCHEMA,
-        "source_hash": source_digest,
-        "source_row_id": source_row_id,
-        "telegram_update_id": telegram_update_id,
-        "tenant_id": tenant,
-    }
-    serialized = json.dumps(payload, ensure_ascii=True, sort_keys=True, separators=(",", ":"))
-    return hashlib.sha256(serialized.encode("ascii")).hexdigest()
+    delivery = _delivery_chat_id(delivery_chat_id)
+    return canonical_engineer_source_binding_sha256(
+        owner_id=owner,
+        tenant_id=tenant,
+        conversation_id=conversation,
+        channel=channel.value,
+        source_row_id=source_row_id,
+        source_hash=source_digest,
+        telegram_update_id=telegram_update_id,
+        delivery_chat_id=delivery,
+    )
+
+
+@dataclass(frozen=True, slots=True)
+class _ObservedCommandLedgerBinding:
+    job_id: str
+    actor_id: str
+    tenant_id: str
+    conversation_id: str
+    channel: EngineerWorkItemChannel
+    source_binding_sha256: str
+    idempotency_key: str
+    command_digest: str
+    delivery_chat_id: str
+
+
+@dataclass(frozen=True, slots=True)
+class _ObservedCommandFenceBinding:
+    actor_id: str
+    work_item_id: str
+    expected_revision: int
+    step_ordinal: int
+    source_binding_sha256: str
+    idempotency_key: str
+    command_digest: str
+
+
+def _observed_command_fence_binding(
+    value: Mapping[str, object],
+) -> _ObservedCommandFenceBinding:
+    if not isinstance(value, Mapping) or frozenset(value) != _COMMAND_FENCE_BINDING_KEYS:
+        raise EngineerWorkItemContractError("command fence binding projection is not exact")
+    ordinal = value["step_ordinal"]
+    if (
+        not isinstance(ordinal, int)
+        or isinstance(ordinal, bool)
+        or not 1 <= ordinal <= ENGINEER_WORK_ITEM_MAX_STEPS
+    ):
+        raise EngineerWorkItemContractError("fenced step ordinal is outside the closed limit")
+    return _ObservedCommandFenceBinding(
+        actor_id=_identity(value["actor_id"], label="fence_actor_id"),
+        work_item_id=_item_id(value["work_item_id"]),
+        expected_revision=_expected_revision(value["expected_revision"]),
+        step_ordinal=ordinal,
+        source_binding_sha256=_digest(
+            value["source_binding_sha256"],
+            label="fence source_binding_sha256",
+        ),
+        idempotency_key=_idempotency_key(value["idempotency_key"]),
+        command_digest=_digest(value["command_digest"], label="fence command_digest"),
+    )
+
+
+def _lookup_retired_command_fence(
+    conn: sqlite3.Connection,
+    *,
+    owner_id: str,
+    idempotency_key: str,
+) -> _ObservedCommandFenceBinding | None:
+    row = conn.execute(
+        """SELECT owner_id AS actor_id,work_item_id,expected_revision,step_ordinal,
+                  source_binding_sha256,idempotency_key,command_digest
+             FROM engineer_work_item_command_fences
+            WHERE owner_id=? AND idempotency_key=?""",
+        (owner_id, idempotency_key),
+    ).fetchone()
+    return _observed_command_fence_binding(dict(row)) if row is not None else None
+
+
+def _retired_command_identity_exists(
+    conn: sqlite3.Connection,
+    *,
+    owner_id: str,
+    idempotency_key: str,
+    source_binding_sha256: str,
+) -> bool:
+    return (
+        conn.execute(
+            """SELECT 1 FROM engineer_work_item_command_fences
+                WHERE owner_id=?
+                  AND (idempotency_key=? OR source_binding_sha256=?)""",
+            (owner_id, idempotency_key, source_binding_sha256),
+        ).fetchone()
+        is not None
+    )
+
+
+def _persist_retired_command_fence(
+    conn: sqlite3.Connection,
+    *,
+    fence: _ObservedCommandFenceBinding,
+    retired_at: str,
+) -> None:
+    existing = _lookup_retired_command_fence(
+        conn,
+        owner_id=fence.actor_id,
+        idempotency_key=fence.idempotency_key,
+    )
+    if existing is not None:
+        if existing != fence:
+            raise EngineerWorkItemConflictError("command fence identity is already retired")
+        return
+    try:
+        conn.execute(
+            """INSERT INTO engineer_work_item_command_fences(
+                   owner_id,idempotency_key,work_item_id,expected_revision,step_ordinal,
+                   source_binding_sha256,command_digest,retired_at
+               ) VALUES(?,?,?,?,?,?,?,?)""",
+            (
+                fence.actor_id,
+                fence.idempotency_key,
+                fence.work_item_id,
+                fence.expected_revision,
+                fence.step_ordinal,
+                fence.source_binding_sha256,
+                fence.command_digest,
+                _instant(retired_at, label="retired_at"),
+            ),
+        )
+    except sqlite3.IntegrityError as exc:
+        raise EngineerWorkItemConflictError("command fence could not be retired exactly") from exc
+    stored = _lookup_retired_command_fence(
+        conn,
+        owner_id=fence.actor_id,
+        idempotency_key=fence.idempotency_key,
+    )
+    if stored != fence:  # pragma: no cover - insert/read-back invariant
+        raise EngineerWorkItemConflictError("retired command fence read-back changed identity")
+
+
+def _observed_command_ledger_binding(
+    value: Mapping[str, object],
+) -> _ObservedCommandLedgerBinding:
+    if not isinstance(value, Mapping) or frozenset(value) != _COMMAND_LEDGER_BINDING_KEYS:
+        raise EngineerWorkItemContractError("command ledger binding projection is not exact")
+    actor = _identity(value["actor_id"], label="ledger_actor_id")
+    tenant = _identity(value["tenant_id"], label="ledger_tenant_id")
+    conversation = _conversation_id(value["conversation_id"])
+    try:
+        channel = EngineerWorkItemChannel(_stored_str(value["channel"], label="ledger channel"))
+    except (TypeError, ValueError) as exc:
+        raise EngineerWorkItemAnchorError("ledger channel is not admitted") from exc
+    delivery = _delivery_chat_id(value["delivery_chat_id"])
+    source = engineer_source_binding_sha256(
+        owner_id=actor,
+        tenant_id=tenant,
+        conversation_id=conversation,
+        channel=channel,
+        source_row_id=_stored_str(value["source_row_id"], label="ledger source_row_id"),
+        source_hash=_stored_str(value["source_hash"], label="ledger source_hash"),
+        telegram_update_id=_stored_str(
+            value["telegram_update_id"],
+            label="ledger telegram_update_id",
+        ),
+        delivery_chat_id=delivery,
+    )
+    return _ObservedCommandLedgerBinding(
+        job_id=_job_id(value["job_id"]),
+        actor_id=actor,
+        tenant_id=tenant,
+        conversation_id=conversation,
+        channel=channel,
+        source_binding_sha256=source,
+        idempotency_key=_idempotency_key(value["idempotency_key"]),
+        command_digest=_digest(value["command_digest"], label="ledger command_digest"),
+        delivery_chat_id=delivery,
+    )
 
 
 def engineer_job_receipt_sha256(
@@ -229,6 +450,8 @@ def engineer_job_receipt_sha256(
     tenant_id: str,
     conversation_id: str,
     channel: EngineerWorkItemChannel,
+    source_binding_sha256: str,
+    delivery_chat_id: str,
     idempotency_key: str,
     command_digest: str,
     job_id: str,
@@ -240,6 +463,8 @@ def engineer_job_receipt_sha256(
     conversation = _conversation_id(conversation_id)
     if not isinstance(channel, EngineerWorkItemChannel):
         raise EngineerWorkItemAnchorError("channel is not admitted")
+    source = _digest(source_binding_sha256, label="source_binding_sha256")
+    delivery = _delivery_chat_id(delivery_chat_id)
     key = _idempotency_key(idempotency_key)
     command = _digest(command_digest, label="command_digest")
     job = _job_id(job_id)
@@ -247,10 +472,12 @@ def engineer_job_receipt_sha256(
         "channel": channel.value,
         "command_digest": command,
         "conversation_id": conversation,
+        "delivery_chat_id": delivery,
         "idempotency_key": key,
         "job_id": job,
         "owner_id": owner,
         "schema": ENGINEER_JOB_BINDING_SCHEMA,
+        "source_binding_sha256": source,
         "tenant_id": tenant,
     }
     serialized = json.dumps(payload, ensure_ascii=True, sort_keys=True, separators=(",", ":"))
@@ -262,6 +489,7 @@ class EngineerWorkItemStep:
     work_item_id: str
     owner_id: str
     ordinal: int
+    source_binding_sha256: str
     state: EngineerWorkItemStepState
     idempotency_key: str
     command_digest: str
@@ -281,6 +509,7 @@ class EngineerWorkItemStep:
             or not 1 <= self.ordinal <= ENGINEER_WORK_ITEM_MAX_STEPS
         ):
             raise EngineerWorkItemContractError("step ordinal is outside the closed limit")
+        _digest(self.source_binding_sha256, label="step.source_binding_sha256")
         if not isinstance(self.state, EngineerWorkItemStepState):
             raise EngineerWorkItemContractError("step state is not a closed enum")
         _idempotency_key(self.idempotency_key)
@@ -318,6 +547,7 @@ class EngineerWorkItemStep:
             "work_item_id",
             "owner_id",
             "ordinal",
+            "source_binding_sha256",
             "state",
             "idempotency_key",
             "command_digest",
@@ -338,6 +568,10 @@ class EngineerWorkItemStep:
             work_item_id=_stored_str(value["work_item_id"], label="step.work_item_id"),
             owner_id=_stored_str(value["owner_id"], label="step.owner_id"),
             ordinal=_stored_int(value["ordinal"], label="step.ordinal"),
+            source_binding_sha256=_stored_str(
+                value["source_binding_sha256"],
+                label="step.source_binding_sha256",
+            ),
             state=state,
             idempotency_key=_stored_str(value["idempotency_key"], label="step.idempotency_key"),
             command_digest=_stored_str(value["command_digest"], label="step.command_digest"),
@@ -365,6 +599,7 @@ class EngineerWorkItemStep:
             "work_item_id": self.work_item_id,
             "owner_id": self.owner_id,
             "ordinal": self.ordinal,
+            "source_binding_sha256": self.source_binding_sha256,
             "state": self.state.value,
             "idempotency_key": self.idempotency_key,
             "command_digest": self.command_digest,
@@ -454,7 +689,10 @@ class EngineerWorkItem:
             },
             EngineerWorkItemState.WAITING_FOR_CAPABILITY: {EngineerWorkItemTransition.COMMAND_ADMITTED},
             EngineerWorkItemState.UNCERTAIN: {EngineerWorkItemTransition.COMMAND_UNKNOWN},
-            EngineerWorkItemState.WAITING_FOR_INPUT: {EngineerWorkItemTransition.TERMINAL_OBSERVED},
+            EngineerWorkItemState.WAITING_FOR_INPUT: {
+                EngineerWorkItemTransition.TERMINAL_OBSERVED,
+                EngineerWorkItemTransition.PREPARED_STEP_DISCARDED,
+            },
             EngineerWorkItemState.READY_TO_ANSWER: {EngineerWorkItemTransition.ANSWER_READY},
             EngineerWorkItemState.COMPLETED: {EngineerWorkItemTransition.COMPLETED},
             EngineerWorkItemState.FAILED: {EngineerWorkItemTransition.FAILED},
@@ -471,6 +709,8 @@ class EngineerWorkItem:
             raise EngineerWorkItemContractError("step belongs to another work item")
         if any(step.owner_id != self.owner_id for step in self.steps):
             raise EngineerWorkItemContractError("step belongs to another owner")
+        if self.steps[0].source_binding_sha256 != self.source_binding_sha256:
+            raise EngineerWorkItemContractError("initial step does not match the work source binding")
         current_state = self.steps[-1].state
         admitted_current_states = {
             EngineerWorkItemState.ACTIVE: {EngineerWorkItemStepState.PREPARED},
@@ -611,6 +851,22 @@ def _scope(
     if not isinstance(channel, EngineerWorkItemChannel):
         raise EngineerWorkItemAnchorError("channel is not admitted")
     return identifier, owner, tenant, conversation, channel
+
+
+def _scope_is_live(conn: sqlite3.Connection, item: EngineerWorkItem) -> bool:
+    return (
+        conn.execute(
+            """SELECT 1
+                 FROM conversations AS conversation
+                 JOIN users AS owner ON owner.id=conversation.user_id
+                 JOIN users AS tenant ON tenant.id=?
+                WHERE conversation.id=? AND conversation.user_id=?
+                  AND conversation.is_archived=0
+                  AND owner.status='active' AND tenant.status='active'""",
+            (item.tenant_id, item.conversation_id, item.owner_id),
+        ).fetchone()
+        is not None
+    )
 
 
 @contextmanager
@@ -759,6 +1015,13 @@ def create_engineer_work_item_in_transaction(
         if loaded is None:  # pragma: no cover - same-query invariant
             raise EngineerWorkItemConflictError("idempotency replay lost its item")
         return loaded
+    if _retired_command_identity_exists(
+        conn,
+        owner_id=owner,
+        idempotency_key=key,
+        source_binding_sha256=source,
+    ):
+        raise EngineerWorkItemConflictError("command source or idempotency key is permanently fenced")
 
     with _mutation(conn):
         try:
@@ -784,14 +1047,19 @@ def create_engineer_work_item_in_transaction(
             )
             conn.execute(
                 """INSERT INTO engineer_work_item_steps(
-                       work_item_id,owner_id,ordinal,state,idempotency_key,command_digest,
+                       work_item_id,owner_id,ordinal,source_binding_sha256,
+                       state,idempotency_key,command_digest,
                        created_at,updated_at
-                   ) VALUES(?,?,1,'prepared',?,?,?,?)""",
-                (identifier, owner, key, command, timestamp, timestamp),
+                   ) VALUES(?,?,1,?,'prepared',?,?,?,?)""",
+                (identifier, owner, source, key, command, timestamp, timestamp),
             )
         except sqlite3.IntegrityError as exc:
             message = str(exc)
-            if "uq_engineer_work_items_open_scope" in message or "UNIQUE constraint failed" in message:
+            if (
+                "engineer_work_item_identity_collision" in message
+                or "uq_engineer_work_items_open_scope" in message
+                or "UNIQUE constraint failed" in message
+            ):
                 raise EngineerWorkItemConflictError(
                     "one open Engineer Work Item already owns the scope"
                 ) from exc
@@ -819,12 +1087,7 @@ def _required_item(
     channel: EngineerWorkItemChannel,
     expected_revision: int,
 ) -> EngineerWorkItem:
-    if (
-        not isinstance(expected_revision, int)
-        or isinstance(expected_revision, bool)
-        or not 1 <= expected_revision < ENGINEER_WORK_ITEM_MAX_REVISION
-    ):
-        raise EngineerWorkItemContractError("expected_revision is outside the closed limit")
+    expected_revision = _expected_revision(expected_revision)
     item = get_engineer_work_item_in_transaction(
         conn,
         work_item_id=work_item_id,
@@ -847,12 +1110,11 @@ def bind_engineer_command_receipts_in_transaction(
     conversation_id: str,
     channel: EngineerWorkItemChannel,
     expected_revision: int,
-    command_digest: str,
-    job_id: str,
+    ledger_binding: Mapping[str, object],
     now: str | None = None,
 ) -> EngineerWorkItem:
-    command = _digest(command_digest, label="command_digest")
-    exact_job_id = _job_id(job_id)
+    expected_revision = _expected_revision(expected_revision)
+    observed = _observed_command_ledger_binding(ledger_binding)
     current = get_engineer_work_item_in_transaction(
         conn,
         work_item_id=work_item_id,
@@ -863,20 +1125,32 @@ def bind_engineer_command_receipts_in_transaction(
     )
     if current is None:
         raise EngineerWorkItemConflictError("Engineer Work Item is unavailable")
+    if (
+        observed.actor_id != current.owner_id
+        or observed.tenant_id != current.tenant_id
+        or observed.conversation_id != current.conversation_id
+        or observed.channel is not current.channel
+        or observed.source_binding_sha256 != current.current_step.source_binding_sha256
+        or observed.idempotency_key != current.current_step.idempotency_key
+        or observed.command_digest != current.current_step.command_digest
+    ):
+        raise EngineerWorkItemConflictError("command ledger binding does not match prepared work")
     job = engineer_job_receipt_sha256(
-        owner_id=current.owner_id,
-        tenant_id=current.tenant_id,
-        conversation_id=current.conversation_id,
-        channel=current.channel,
-        idempotency_key=current.current_step.idempotency_key,
-        command_digest=command,
-        job_id=exact_job_id,
+        owner_id=observed.actor_id,
+        tenant_id=observed.tenant_id,
+        conversation_id=observed.conversation_id,
+        channel=observed.channel,
+        source_binding_sha256=observed.source_binding_sha256,
+        delivery_chat_id=observed.delivery_chat_id,
+        idempotency_key=observed.idempotency_key,
+        command_digest=observed.command_digest,
+        job_id=observed.job_id,
     )
     if (
         current is not None
         and current.revision == expected_revision + 1
         and current.state is EngineerWorkItemState.WAITING_FOR_CAPABILITY
-        and current.current_step.command_digest == command
+        and current.current_step.command_digest == observed.command_digest
         and current.current_step.job_receipt_sha256 == job
     ):
         return current
@@ -902,7 +1176,14 @@ def bind_engineer_command_receipts_in_transaction(
                       updated_at=?,admitted_at=?
                 WHERE work_item_id=? AND ordinal=? AND state='prepared'
                   AND command_digest=?""",
-            (job, timestamp, timestamp, item.id, item.step_ordinal, command),
+            (
+                job,
+                timestamp,
+                timestamp,
+                item.id,
+                item.step_ordinal,
+                observed.command_digest,
+            ),
         )
         updated = conn.execute(
             """UPDATE engineer_work_items
@@ -943,6 +1224,7 @@ def mark_engineer_command_unknown_in_transaction(
     expected_revision: int,
     now: str | None = None,
 ) -> EngineerWorkItem:
+    expected_revision = _expected_revision(expected_revision)
     current = get_engineer_work_item_in_transaction(
         conn,
         work_item_id=work_item_id,
@@ -1021,6 +1303,7 @@ def settle_engineer_terminal_receipt_in_transaction(
     this body-free main-DB store deliberately cannot copy or reinterpret it.
     """
 
+    expected_revision = _expected_revision(expected_revision)
     terminal = _digest(
         verified_terminal_receipt_sha256,
         label="verified_terminal_receipt_sha256",
@@ -1040,6 +1323,13 @@ def settle_engineer_terminal_receipt_in_transaction(
         and current.current_step.terminal_receipt_sha256 == terminal
     ):
         return current
+    if (
+        current is not None
+        and current.revision == expected_revision + 2
+        and current.state is EngineerWorkItemState.CANCELLED
+        and current.current_step.terminal_receipt_sha256 == terminal
+    ):
+        return current
     item = _required_item(
         conn,
         work_item_id=work_item_id,
@@ -1055,6 +1345,7 @@ def settle_engineer_terminal_receipt_in_transaction(
     }:
         raise EngineerWorkItemConflictError("terminal receipt cannot settle this state")
     timestamp = _now(now)
+    scope_live = _scope_is_live(conn, item)
     with _mutation(conn):
         step = conn.execute(
             """UPDATE engineer_work_item_steps
@@ -1088,6 +1379,28 @@ def settle_engineer_terminal_receipt_in_transaction(
         )
         if step.rowcount != 1 or updated.rowcount != 1:
             raise EngineerWorkItemConflictError("terminal reconciliation lost its CAS race")
+        if not scope_live:
+            retired = conn.execute(
+                """UPDATE engineer_work_items
+                      SET state='cancelled',revision=revision+1,transition='cancelled',
+                          updated_at=?,closed_at=?
+                    WHERE id=? AND owner_id=? AND tenant_id=? AND conversation_id=? AND channel=?
+                      AND state='waiting_for_input' AND revision=?""",
+                (
+                    timestamp,
+                    timestamp,
+                    item.id,
+                    item.owner_id,
+                    item.tenant_id,
+                    item.conversation_id,
+                    item.channel.value,
+                    expected_revision + 1,
+                ),
+            )
+            if retired.rowcount != 1:
+                raise EngineerWorkItemConflictError(
+                    "inactive-scope retirement lost its CAS race"
+                )
     return get_engineer_work_item_in_transaction(
         conn,
         work_item_id=item.id,
@@ -1107,10 +1420,13 @@ def start_next_engineer_step_in_transaction(
     conversation_id: str,
     channel: EngineerWorkItemChannel,
     expected_revision: int,
+    source_binding_sha256: str,
     idempotency_key: str,
     command_digest: str,
     now: str | None = None,
 ) -> EngineerWorkItem:
+    expected_revision = _expected_revision(expected_revision)
+    source = _digest(source_binding_sha256, label="source_binding_sha256")
     key = _idempotency_key(idempotency_key)
     command = _digest(command_digest, label="command_digest")
     current = get_engineer_work_item_in_transaction(
@@ -1122,7 +1438,14 @@ def start_next_engineer_step_in_transaction(
         channel=channel,
     )
     if current is not None:
-        existing = next((step for step in current.steps if step.idempotency_key == key), None)
+        existing = next(
+            (
+                step
+                for step in current.steps
+                if step.idempotency_key == key or step.source_binding_sha256 == source
+            ),
+            None,
+        )
         if existing is not None:
             if (
                 current.revision == expected_revision + 1
@@ -1130,10 +1453,20 @@ def start_next_engineer_step_in_transaction(
                 and current.transition is EngineerWorkItemTransition.NEXT_STEP_STARTED
                 and existing.ordinal == current.step_ordinal
                 and existing.ordinal >= 2
+                and existing.source_binding_sha256 == source
+                and existing.idempotency_key == key
                 and existing.command_digest == command
+                and _scope_is_live(conn, current)
             ):
                 return current
-            raise EngineerWorkItemConflictError("idempotency key is bound to another step")
+            raise EngineerWorkItemConflictError("command source or idempotency key is bound")
+    if _retired_command_identity_exists(
+        conn,
+        owner_id=_identity(owner_id, label="owner_id"),
+        idempotency_key=key,
+        source_binding_sha256=source,
+    ):
+        raise EngineerWorkItemConflictError("command source or idempotency key is permanently fenced")
     item = _required_item(
         conn,
         work_item_id=work_item_id,
@@ -1145,6 +1478,8 @@ def start_next_engineer_step_in_transaction(
     )
     if item.state is not EngineerWorkItemState.WAITING_FOR_INPUT:
         raise EngineerWorkItemConflictError("next step requires an observed terminal receipt")
+    if not _scope_is_live(conn, item):
+        raise EngineerWorkItemConflictError("inactive conversation cannot start another step")
     if item.step_ordinal >= ENGINEER_WORK_ITEM_MAX_STEPS:
         raise EngineerWorkItemConflictError("Engineer Work Item exhausted its step limit")
     timestamp = _now(now)
@@ -1175,10 +1510,20 @@ def start_next_engineer_step_in_transaction(
         try:
             conn.execute(
                 """INSERT INTO engineer_work_item_steps(
-                       work_item_id,owner_id,ordinal,state,idempotency_key,command_digest,
+                       work_item_id,owner_id,ordinal,source_binding_sha256,
+                       state,idempotency_key,command_digest,
                        created_at,updated_at
-                   ) VALUES(?,?,?,'prepared',?,?,?,?)""",
-                (item.id, item.owner_id, next_ordinal, key, command, timestamp, timestamp),
+                   ) VALUES(?,?,?,?,'prepared',?,?,?,?)""",
+                (
+                    item.id,
+                    item.owner_id,
+                    next_ordinal,
+                    source,
+                    key,
+                    command,
+                    timestamp,
+                    timestamp,
+                ),
             )
         except sqlite3.IntegrityError as exc:
             raise EngineerWorkItemConflictError("next-step idempotency key is already bound") from exc
@@ -1205,6 +1550,7 @@ def mark_engineer_work_item_ready_to_answer_in_transaction(
 ) -> EngineerWorkItem:
     """CAS an observed capability result through the code-owned completion gate."""
 
+    expected_revision = _expected_revision(expected_revision)
     current = get_engineer_work_item_in_transaction(
         conn,
         work_item_id=work_item_id,
@@ -1217,6 +1563,7 @@ def mark_engineer_work_item_ready_to_answer_in_transaction(
         current is not None
         and current.revision == expected_revision + 1
         and current.state is EngineerWorkItemState.READY_TO_ANSWER
+        and _scope_is_live(conn, current)
     ):
         return current
     item = _required_item(
@@ -1230,6 +1577,8 @@ def mark_engineer_work_item_ready_to_answer_in_transaction(
     )
     if item.state is not EngineerWorkItemState.WAITING_FOR_INPUT:
         raise EngineerWorkItemConflictError("completion gate requires an observed terminal receipt")
+    if not _scope_is_live(conn, item):
+        raise EngineerWorkItemConflictError("inactive conversation cannot pass the completion gate")
     timestamp = _now(now)
     if timestamp >= item.expires_at:
         raise EngineerWorkItemConflictError("Engineer Work Item expired before completion gate")
@@ -1289,6 +1638,7 @@ def close_engineer_work_item_in_transaction(
     }
     if terminal_state not in transitions:
         raise EngineerWorkItemContractError("terminal_state is not admitted")
+    expected_revision = _expected_revision(expected_revision)
     current = get_engineer_work_item_in_transaction(
         conn,
         work_item_id=work_item_id,
@@ -1318,6 +1668,8 @@ def close_engineer_work_item_in_transaction(
     )
     if item.state not in admitted_from:
         raise EngineerWorkItemConflictError("effect-bearing or uncertain work cannot close")
+    if terminal_state is EngineerWorkItemState.COMPLETED and not _scope_is_live(conn, item):
+        raise EngineerWorkItemConflictError("inactive scope cannot publish a completed answer")
     timestamp = _now(now)
     completed_at = timestamp if terminal_state is EngineerWorkItemState.COMPLETED else None
     with _mutation(conn):
@@ -1344,6 +1696,312 @@ def close_engineer_work_item_in_transaction(
         )
         if updated.rowcount != 1:
             raise EngineerWorkItemConflictError("terminal Work Item CAS lost its race")
+    return get_engineer_work_item_in_transaction(
+        conn,
+        work_item_id=item.id,
+        owner_id=item.owner_id,
+        tenant_id=item.tenant_id,
+        conversation_id=item.conversation_id,
+        channel=item.channel,
+    )  # type: ignore[return-value]
+
+
+def _fence_matches_current_step(
+    item: EngineerWorkItem,
+    fence: _ObservedCommandFenceBinding,
+) -> bool:
+    return (
+        fence.actor_id == item.owner_id
+        and fence.work_item_id == item.id
+        and fence.expected_revision == item.revision
+        and fence.step_ordinal == item.step_ordinal
+        and fence.source_binding_sha256 == item.current_step.source_binding_sha256
+        and fence.idempotency_key == item.current_step.idempotency_key
+        and fence.command_digest == item.current_step.command_digest
+    )
+
+
+def _fence_matches_initial_reservation(
+    item: EngineerWorkItem,
+    fence: _ObservedCommandFenceBinding,
+) -> bool:
+    """Match a first reservation even when main was restored behind its fence."""
+
+    return (
+        fence.actor_id == item.owner_id
+        and fence.expected_revision == item.revision == 1
+        and fence.step_ordinal == item.step_ordinal == 1
+        and fence.source_binding_sha256 == item.current_step.source_binding_sha256
+        and fence.idempotency_key == item.current_step.idempotency_key
+        and fence.command_digest == item.current_step.command_digest
+    )
+
+
+@contextmanager
+def _prepared_discard_authority(
+    conn: sqlite3.Connection,
+    *,
+    item: EngineerWorkItem,
+    fence: _ObservedCommandFenceBinding,
+) -> Iterator[None]:
+    expected_authority = (
+        item.id,
+        item.owner_id,
+        fence.idempotency_key,
+        fence.command_digest,
+    )
+
+    def _authorize_discard(
+        candidate_id: object,
+        candidate_owner: object,
+        candidate_key: object,
+        candidate_digest: object,
+    ) -> int:
+        return int(
+            (candidate_id, candidate_owner, candidate_key, candidate_digest)
+            == expected_authority
+        )
+
+    conn.create_function(
+        "friday_engineer_prepared_discard_authorized",
+        4,
+        _authorize_discard,
+    )
+    try:
+        yield
+    finally:
+        register_engineer_work_item_connection_functions(conn)
+
+
+def discard_unsubmitted_engineer_work_item_in_transaction(
+    conn: sqlite3.Connection,
+    *,
+    work_item_id: str,
+    owner_id: str,
+    tenant_id: str,
+    conversation_id: str,
+    channel: EngineerWorkItemChannel,
+    fence_binding: Mapping[str, object],
+) -> bool:
+    """Remove only an initial prepared reservation after a durable fence commit.
+
+    The caller MUST first durably commit and read back the exact immutable
+    command-ledger fence.  The fence closes both already-in-flight and future
+    admission for this owner/key.  Whole-item deletion is restricted to the
+    first never-admitted step, so no earlier effect truth can be erased.
+    """
+
+    fence = _observed_command_fence_binding(fence_binding)
+    identifier = _item_id(work_item_id)
+    if fence.actor_id != _identity(owner_id, label="owner_id"):
+        raise EngineerWorkItemConflictError("command fence belongs to another owner")
+    retired = _lookup_retired_command_fence(
+        conn,
+        owner_id=fence.actor_id,
+        idempotency_key=fence.idempotency_key,
+    )
+    if retired is not None and retired != fence:
+        raise EngineerWorkItemConflictError("command fence identity is already retired")
+    current = get_engineer_work_item_in_transaction(
+        conn,
+        work_item_id=identifier,
+        owner_id=owner_id,
+        tenant_id=tenant_id,
+        conversation_id=conversation_id,
+        channel=channel,
+    )
+    if current is None:
+        if retired == fence:
+            return False
+        raise EngineerWorkItemConflictError("discarded reservation has no durable main fence")
+    item = _required_item(
+        conn,
+        work_item_id=identifier,
+        owner_id=owner_id,
+        tenant_id=tenant_id,
+        conversation_id=conversation_id,
+        channel=channel,
+        expected_revision=fence.expected_revision,
+    )
+    if (
+        not _fence_matches_initial_reservation(item, fence)
+        or item.state is not EngineerWorkItemState.ACTIVE
+        or item.transition is not EngineerWorkItemTransition.CREATED
+        or item.revision != 1
+        or item.step_ordinal != 1
+        or len(item.steps) != 1
+        or item.current_step.state is not EngineerWorkItemStepState.PREPARED
+    ):
+        raise EngineerWorkItemConflictError(
+            "only the exact fenced initial reservation can be discarded"
+        )
+    with _prepared_discard_authority(conn, item=item, fence=fence), _mutation(conn):
+        _persist_retired_command_fence(
+            conn,
+            fence=fence,
+            retired_at=_now(None),
+        )
+        cursor = conn.execute(
+            """DELETE FROM engineer_work_items
+                     WHERE id=? AND owner_id=? AND tenant_id=? AND conversation_id=? AND channel=?
+                       AND state='active' AND transition='created'
+                       AND revision=1 AND step_ordinal=1
+                       AND EXISTS (
+                           SELECT 1 FROM engineer_work_item_steps AS step
+                            WHERE step.work_item_id=engineer_work_items.id
+                              AND step.ordinal=1 AND step.state='prepared'
+                              AND step.source_binding_sha256=?
+                              AND step.idempotency_key=? AND step.command_digest=?
+                       )""",
+            (
+                item.id,
+                item.owner_id,
+                item.tenant_id,
+                item.conversation_id,
+                item.channel.value,
+                fence.source_binding_sha256,
+                fence.idempotency_key,
+                fence.command_digest,
+            ),
+        )
+        if cursor.rowcount != 1:
+            raise EngineerWorkItemConflictError(
+                "prepared Engineer Work Item discard lost its CAS race"
+            )
+    return True
+
+
+def rollback_fenced_unsubmitted_engineer_step_in_transaction(
+    conn: sqlite3.Connection,
+    *,
+    work_item_id: str,
+    owner_id: str,
+    tenant_id: str,
+    conversation_id: str,
+    channel: EngineerWorkItemChannel,
+    fence_binding: Mapping[str, object],
+    now: str | None = None,
+) -> EngineerWorkItem:
+    """Retire a fenced later prepared step without erasing earlier receipts."""
+
+    fence = _observed_command_fence_binding(fence_binding)
+    if fence.work_item_id != _item_id(work_item_id) or fence.actor_id != _identity(
+        owner_id,
+        label="owner_id",
+    ):
+        raise EngineerWorkItemConflictError("command fence belongs to another Work Item")
+    retired = _lookup_retired_command_fence(
+        conn,
+        owner_id=fence.actor_id,
+        idempotency_key=fence.idempotency_key,
+    )
+    if retired is not None and retired != fence:
+        raise EngineerWorkItemConflictError("command fence identity is already retired")
+    current = get_engineer_work_item_in_transaction(
+        conn,
+        work_item_id=work_item_id,
+        owner_id=owner_id,
+        tenant_id=tenant_id,
+        conversation_id=conversation_id,
+        channel=channel,
+    )
+    if current is None:
+        raise EngineerWorkItemConflictError("Engineer Work Item is unavailable")
+    if (
+        current.id == fence.work_item_id
+        and current.owner_id == fence.actor_id
+        and current.revision == fence.expected_revision + 1
+        and current.step_ordinal == fence.step_ordinal - 1
+        and current.transition is EngineerWorkItemTransition.PREPARED_STEP_DISCARDED
+        and current.state is EngineerWorkItemState.WAITING_FOR_INPUT
+        and all(step.idempotency_key != fence.idempotency_key for step in current.steps)
+        and retired == fence
+    ):
+        return current
+    if (
+        current.id == fence.work_item_id
+        and current.owner_id == fence.actor_id
+        and current.revision == fence.expected_revision + 1
+        and current.step_ordinal == fence.step_ordinal - 1
+        and current.transition is EngineerWorkItemTransition.CANCELLED
+        and current.state is EngineerWorkItemState.CANCELLED
+        and all(step.idempotency_key != fence.idempotency_key for step in current.steps)
+        and retired == fence
+    ):
+        return current
+    item = _required_item(
+        conn,
+        work_item_id=work_item_id,
+        owner_id=owner_id,
+        tenant_id=tenant_id,
+        conversation_id=conversation_id,
+        channel=channel,
+        expected_revision=fence.expected_revision,
+    )
+    if (
+        not _fence_matches_current_step(item, fence)
+        or item.state is not EngineerWorkItemState.ACTIVE
+        or item.transition is not EngineerWorkItemTransition.NEXT_STEP_STARTED
+        or item.step_ordinal < 2
+        or item.current_step.state is not EngineerWorkItemStepState.PREPARED
+        or any(step.state is not EngineerWorkItemStepState.SETTLED for step in item.steps[:-1])
+    ):
+        raise EngineerWorkItemConflictError("only the exact fenced later step can be rolled back")
+    timestamp = _now(now)
+    scope_live = _scope_is_live(conn, item)
+    target_state = (
+        EngineerWorkItemState.WAITING_FOR_INPUT
+        if scope_live
+        else EngineerWorkItemState.CANCELLED
+    )
+    target_transition = (
+        EngineerWorkItemTransition.PREPARED_STEP_DISCARDED
+        if scope_live
+        else EngineerWorkItemTransition.CANCELLED
+    )
+    with _prepared_discard_authority(conn, item=item, fence=fence), _mutation(conn):
+        _persist_retired_command_fence(
+            conn,
+            fence=fence,
+            retired_at=timestamp,
+        )
+        updated = conn.execute(
+            """UPDATE engineer_work_items
+                      SET state=?,revision=revision+1,step_ordinal=step_ordinal-1,
+                          transition=?,updated_at=?,closed_at=?
+                    WHERE id=? AND owner_id=? AND tenant_id=? AND conversation_id=? AND channel=?
+                      AND state='active' AND transition='next_step_started'
+                      AND revision=? AND step_ordinal=?""",
+            (
+                target_state.value,
+                target_transition.value,
+                timestamp,
+                None if scope_live else timestamp,
+                item.id,
+                item.owner_id,
+                item.tenant_id,
+                item.conversation_id,
+                item.channel.value,
+                fence.expected_revision,
+                fence.step_ordinal,
+            ),
+        )
+        deleted = conn.execute(
+            """DELETE FROM engineer_work_item_steps
+                     WHERE work_item_id=? AND owner_id=? AND ordinal=?
+                       AND source_binding_sha256=? AND state='prepared'
+                       AND idempotency_key=? AND command_digest=?""",
+            (
+                item.id,
+                item.owner_id,
+                fence.step_ordinal,
+                fence.source_binding_sha256,
+                fence.idempotency_key,
+                fence.command_digest,
+            ),
+        )
+        if updated.rowcount != 1 or deleted.rowcount != 1:
+            raise EngineerWorkItemConflictError("prepared-step rollback lost its CAS race")
     return get_engineer_work_item_in_transaction(
         conn,
         work_item_id=item.id,
@@ -1470,6 +2128,7 @@ __all__ = [
     "close_engineer_work_item_in_transaction",
     "create_engineer_work_item_in_transaction",
     "delete_engineer_work_item_in_transaction",
+    "discard_unsubmitted_engineer_work_item_in_transaction",
     "engineer_source_binding_sha256",
     "engineer_job_receipt_sha256",
     "expire_due_engineer_work_items_in_transaction",
@@ -1479,6 +2138,7 @@ __all__ = [
     "mark_engineer_work_item_ready_to_answer_in_transaction",
     "new_engineer_work_item_id",
     "prune_engineer_work_items_in_transaction",
+    "rollback_fenced_unsubmitted_engineer_step_in_transaction",
     "settle_engineer_terminal_receipt_in_transaction",
     "start_next_engineer_step_in_transaction",
 ]

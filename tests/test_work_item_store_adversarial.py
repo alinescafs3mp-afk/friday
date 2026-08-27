@@ -10,6 +10,13 @@ from typing import Any
 
 import pytest
 
+from friday.interaction_control_plane.engineer_work_item import (
+    EngineerWorkItemChannel,
+    create_engineer_work_item_in_transaction,
+)
+from friday.interaction_control_plane.engineer_work_item_schema import (
+    ENGINEER_WORK_ITEM_COMPLETION_CONTRACT_SHA256,
+)
 from friday.interaction_control_plane.work_item_contract import (
     RecallConversationActiveFrame,
     RecallConversationWorkItem,
@@ -19,6 +26,7 @@ from friday.interaction_control_plane.work_item_contract import (
 )
 from friday.interaction_control_plane.work_item_store import (
     WorkItemAnchorError,
+    WorkItemConflictError,
     cancel_recall_conversation_work_item_in_transaction,
     cas_update_recall_conversation_constraints_in_transaction,
     create_recall_conversation_work_item_in_transaction,
@@ -121,6 +129,56 @@ def _create_work(storage: Any, user_id: str) -> tuple[RecallConversationWorkItem
             now=_NOW,
         )
     return item, assistant
+
+
+def test_engineer_work_item_reciprocally_blocks_ordinary_open_work(storage: Any) -> None:
+    user_id = "engineer-exclusive-owner"
+    storage.ensure_user(user_id, source="local")
+    conversation = storage.create_conversation(user_id, "Engineer exclusivity")
+    boundary = storage.store_message(
+        str(conversation["id"]),
+        user_id,
+        "user",
+        "Выполни многошаговую инженерную задачу",
+    )
+    frame = _frame()
+    assistant, plan, outcome_sha256 = _accepted_assistant(
+        storage,
+        user_id=user_id,
+        conversation_id=str(conversation["id"]),
+        boundary=boundary,
+        frame=frame,
+    )
+    with storage.transaction() as conn:
+        create_engineer_work_item_in_transaction(
+            conn,
+            owner_id=user_id,
+            tenant_id=user_id,
+            conversation_id=str(conversation["id"]),
+            channel=EngineerWorkItemChannel.TELEGRAM,
+            source_binding_sha256="a" * 64,
+            completion_contract_sha256=ENGINEER_WORK_ITEM_COMPLETION_CONTRACT_SHA256,
+            idempotency_key="ecmd-" + "b" * 64,
+            command_digest="c" * 64,
+            now=_NOW,
+            expires_at="2026-08-23T20:00:00+00:00",
+        )
+
+    with pytest.raises(WorkItemConflictError), storage.transaction() as conn:
+        create_recall_conversation_work_item_in_transaction(
+            conn,
+            user_id=user_id,
+            conversation_id=str(conversation["id"]),
+            timezone_name=frame.timezone_name,
+            since_utc=frame.since_utc,
+            until_utc=frame.until_utc,
+            role=RecallMessageRole.ANY,
+            anchor_user_message_id=str(boundary["id"]),
+            anchor_assistant_message_id=str(assistant["id"]),
+            accepted_plan_sha256=plan.canonical_sha256(),
+            accepted_outcome_sha256=outcome_sha256,
+            now=_NOW,
+        )
 
 
 def test_create_requires_exact_boundary_to_assistant_adjacency(storage: Any) -> None:

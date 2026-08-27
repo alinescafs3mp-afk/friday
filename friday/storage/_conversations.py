@@ -461,13 +461,10 @@ class ConversationsMixin(StorageShared):
             # Prepared work is also preserved: an external command could have
             # been admitted just before a cross-database crash.  No command is
             # replayed or contacted here.
-            exhausted_engineer_work_items = conn.execute(
-                """DELETE FROM engineer_work_items
-                    WHERE owner_id=? AND conversation_id=?
-                      AND state IN ('waiting_for_input','ready_to_answer')
-                      AND revision>=2147483647""",
-                (user_id, conversation_id),
-            )
+            # A revision-exhausted Engineer item still carries immutable command
+            # receipts. Preserve it for operator reconciliation instead of
+            # bypassing the schema's open-work deletion guard.
+            exhausted_engineer_work_items = 0
             cancelled_engineer_work_items = conn.execute(
                 """UPDATE engineer_work_items
                       SET state='cancelled',transition='cancelled',
@@ -490,7 +487,7 @@ class ConversationsMixin(StorageShared):
                     ("channel_sessions", sessions.rowcount),
                     ("interaction_failure_traces", failures.rowcount),
                     ("work_items", exhausted_work_items.rowcount),
-                    ("engineer_work_items", exhausted_engineer_work_items.rowcount),
+                    ("engineer_work_items", exhausted_engineer_work_items),
                 )
                 if count
             },

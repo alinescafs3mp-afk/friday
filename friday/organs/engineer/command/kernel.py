@@ -540,6 +540,12 @@ class CommandKernel:
         admitted = False
         try:
             with self.store.transaction():
+                fence = self.store.lookup_engineer_work_item_fence(
+                    actor_id,
+                    request.idempotency_key,
+                )
+                if fence is not None:
+                    raise CommandError("idempotency_fenced")
                 existing = self.store.lookup_idempotency(actor_id, request.idempotency_key)
                 if existing is not None:
                     if existing["digest"] != request.digest:
@@ -582,6 +588,12 @@ class CommandKernel:
                     conversation_id=grant.conversation_id,
                 )
             with self.store.transaction():
+                fence = self.store.lookup_engineer_work_item_fence(
+                    actor_id,
+                    request.idempotency_key,
+                )
+                if fence is not None:
+                    raise CommandError("idempotency_fenced")
                 existing = self.store.lookup_idempotency(actor_id, request.idempotency_key)
                 if existing is not None:
                     if existing["digest"] != request.digest:

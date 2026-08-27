@@ -28,12 +28,29 @@ def _schema_37_copy(tmp_path: Path) -> Path:
     return database
 
 
+def _drop_engineer_work_item_projection(conn: sqlite3.Connection) -> None:
+    trigger_names = tuple(
+        str(row[0])
+        for row in conn.execute(
+            """SELECT name FROM sqlite_master
+                WHERE type='trigger' AND name LIKE 'trg_engineer_work_item_%'
+                ORDER BY name"""
+        )
+    )
+    for trigger_name in trigger_names:
+        conn.execute(
+            f'DROP TRIGGER "{trigger_name}"'  # nosec B608 - schema-owned test names
+        )
+    conn.execute("DROP TABLE engineer_work_item_command_fences")
+    conn.execute("DROP TABLE engineer_work_item_steps")
+    conn.execute("DROP TABLE engineer_work_items")
+
+
 def _install_released_work_item_schema_38(conn: sqlite3.Connection) -> None:
     # This helper builds a genuine released schema-38 projection from a current
     # test database.  Schema 46's independent EngineerWorkItem package did not
     # exist in that release and must not survive the test-only downgrade.
-    conn.execute("DROP TABLE engineer_work_item_steps")
-    conn.execute("DROP TABLE engineer_work_items")
+    _drop_engineer_work_item_projection(conn)
     conn.execute("DROP TABLE work_item_compare_current_file_web_restart_rebind_steps")
     conn.execute("DROP TABLE work_item_compare_current_file_web_restart_rebinds")
     conn.execute("DROP TABLE work_item_compare_current_file_web_steps")
@@ -51,8 +68,7 @@ def _install_released_work_item_schema_38(conn: sqlite3.Connection) -> None:
 
 
 def _install_released_work_item_schema_39(conn: sqlite3.Connection) -> None:
-    conn.execute("DROP TABLE engineer_work_item_steps")
-    conn.execute("DROP TABLE engineer_work_items")
+    _drop_engineer_work_item_projection(conn)
     conn.execute("DROP TABLE work_item_compare_current_file_web_restart_rebind_steps")
     conn.execute("DROP TABLE work_item_compare_current_file_web_restart_rebinds")
     conn.execute("DROP TABLE work_item_compare_current_file_web_steps")
