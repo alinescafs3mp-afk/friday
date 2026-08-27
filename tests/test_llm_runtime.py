@@ -82,6 +82,92 @@ def test_qwen_payload_disables_model_thinking_and_has_one_system(settings):
     assert payload["messages"][0]["role"] == "system"
 
 
+@pytest.mark.asyncio
+async def test_first_explicit_reasoning_truncation_is_never_returned_as_content(
+    settings,
+    monkeypatch,
+) -> None:
+    payloads: list[dict] = []
+
+    class _Client:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            return False
+
+        async def post(self, url, **kwargs):
+            payloads.append(dict(kwargs["json"]))
+            return httpx.Response(
+                200,
+                request=httpx.Request("POST", url),
+                json={
+                    "choices": [
+                        {
+                            "message": {"content": "private reasoning, no public answer"},
+                            "finish_reason": "length",
+                        }
+                    ],
+                    "usage": {"prompt_tokens": 10, "completion_tokens": 4_096},
+                },
+            )
+
+    monkeypatch.setattr(httpx, "AsyncClient", lambda *args, **kwargs: _Client())
+    router = LLMRouter(replace(settings, llm_enabled=True))
+
+    result = await router.chat(
+        [{"role": "user", "content": "plan a complex operation"}],
+        enable_thinking=True,
+        max_tokens=4_096,
+        allow_retries=False,
+    )
+
+    assert payloads[0]["chat_template_kwargs"] == {"enable_thinking": True}
+    assert payloads[0]["max_tokens"] == 4_096
+    assert result["finish_reason"] == "length"
+    assert result["content"] == ""
+
+
+@pytest.mark.asyncio
+async def test_raw_reasoning_markup_latches_before_it_is_stripped(settings, monkeypatch) -> None:
+    responses = [
+        ("private notes</think>public answer", "stop"),
+        ("more private notes without a closing tag", "length"),
+    ]
+
+    class _Client:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            return False
+
+        async def post(self, url, **_kwargs):
+            content, finish_reason = responses.pop(0)
+            return httpx.Response(
+                200,
+                request=httpx.Request("POST", url),
+                json={
+                    "choices": [
+                        {
+                            "message": {"content": content},
+                            "finish_reason": finish_reason,
+                        }
+                    ],
+                    "usage": {"prompt_tokens": 10, "completion_tokens": 20},
+                },
+            )
+
+    monkeypatch.setattr(httpx, "AsyncClient", lambda *args, **kwargs: _Client())
+    router = LLMRouter(replace(settings, llm_enabled=True))
+
+    first = await router.chat([{"role": "user", "content": "first"}], allow_retries=False)
+    second = await router.chat([{"role": "user", "content": "second"}], allow_retries=False)
+
+    assert first["content"] == "public answer"
+    assert second["content"] == ""
+
+
 def test_full_context_route_refuses_the_prompt_instead_of_silently_truncating(settings) -> None:
     router = LLMRouter(replace(settings, llm_enabled=True))
     messages = [

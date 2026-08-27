@@ -863,9 +863,18 @@ class LLMRouter:
                     tool_calls = []
 
                 finish_reason = str(choice.get("finish_reason") or "stop")
+                thinking_markup_seen = "</think>" in content or "<think>" in content
                 if (self.settings.profile.suppress_model_thinking or enable_thinking is True) and content:
-                    content = self._strip_thinking(content, finish_reason, thinking_seen=self._thinking_seen)
-                if "</think>" in content or "<think>" in content:
+                    # An explicitly enabled reasoning call is itself sufficient
+                    # evidence that a length-truncated first response may be all
+                    # private thought.  Waiting until a previous response exposed
+                    # a tag leaked that first monologue as the answer.
+                    content = self._strip_thinking(
+                        content,
+                        finish_reason,
+                        thinking_seen=self._thinking_seen or enable_thinking is True,
+                    )
+                if thinking_markup_seen:
                     # Профиль всё-таки рассуждает вслух — значит обрыв по длине у
                     # него действительно может оставить один монолог.
                     self._thinking_seen = True
