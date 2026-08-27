@@ -12,8 +12,8 @@ the current production identity, completed packages, active work and next order.
   is code-staged only as provisional shadow/extract and is not accepted or live.
   The primary remains the sole final-publication, tool and effect authority.
   Every secondary miss preserves the exact primary-only path.
-- Deployed implementation head: `55662a6be8d0738fb1fdc71694f42ffbd863b4f5`
-- Live: Friday `0.207.54` / `55662a6be8d0738fb1fdc71694f42ffbd863b4f5`;
+- Deployed implementation head: `55662a6c387abf988a0fb09d543a0a1441094e7b`
+- Live: Friday `0.207.54` / `55662a6c387abf988a0fb09d543a0a1441094e7b`;
   tree `aa45e5d5e860d9146f280a1088b42f987df89e08931ca4c8fd99ae27c3b37ec7`;
   wheel `480c20e7ab9eb14880a8f316463b54761840b03a282499ca662e0bac0094d1d2`.
 - Immediate predecessor and schema-capable fallback: Friday `0.207.53` /
