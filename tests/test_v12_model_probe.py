@@ -716,7 +716,12 @@ async def test_context_requires_exact_edges_strict_json_and_measured_8k_usage(
         CancellationProbeResult("admission", _CANCELLATION_WITNESS, True, 100),
         CancellationProbeResult("submitted", "b" * 64, True, 100),
         CancellationProbeResult("submitted", _CANCELLATION_WITNESS, False, 100),
-        CancellationProbeResult("submitted", _CANCELLATION_WITNESS, True, 5_001),
+        CancellationProbeResult(
+            "submitted",
+            _CANCELLATION_WITNESS,
+            True,
+            model_probe_module.REMOTE_QUEUE_DRAIN_MAX_MS + 1,
+        ),
         CancellationProbeResult("submitted", _CANCELLATION_WITNESS, True, -1),
     ],
 )
@@ -1054,7 +1059,10 @@ def test_registered_profile_binds_the_exact_probe_suite_manifest() -> None:
 
 
 def test_cancellation_budget_covers_attested_load_and_remote_drain() -> None:
-    assert model_probe_module.LOAD_TIMEOUT_SEC >= 5.0
+    assert model_probe_module.LOAD_TIMEOUT_SEC >= 10.0
+    assert model_probe_module.POST_CONTEXT_IDLE_CONVERGENCE_TIMEOUT_SEC >= (
+        model_probe_module.LOAD_TIMEOUT_SEC + 1.0
+    )
     assert model_probe_module.CANCELLATION_TIMEOUT_SEC >= (
         model_probe_module.LOAD_TIMEOUT_SEC
         + model_probe_module.REMOTE_QUEUE_DRAIN_MAX_MS / 1_000

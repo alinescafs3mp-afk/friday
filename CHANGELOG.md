@@ -1,3 +1,13 @@
+## 0.207.60 — 2026-08-27
+
+### V12 post-context convergence stability
+
+- SGLang load observations and remote-cancellation drain now have realistic,
+  still-bounded budgets for the four-request attested witness while the engine
+  is busy. The same-epoch, exact-zero post-context convergence check gets a
+  twenty-second observation window; invalid samples, epoch drift and non-zero
+  load still fail closed.
+
 ## 0.207.59 — 2026-08-27
 
 ### V12 restart-attestation stability

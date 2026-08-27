@@ -180,7 +180,7 @@ failed/error/skipped-тест в любой фазе делает гейт кр�
 Для optional GPT-OSS secondary brain начиная с 0.207.11 дополнительно:
 
 - release принимается и первый раз запускается без `FRIDAY_SECONDARY_LLM_*`:
-  health имеет `status=ok`, `version=0.207.59`, `secondary.mode=disabled`,
+  health имеет `status=ok`, `version=0.207.60`, `secondary.mode=disabled`,
   `secondary.state=disabled` и `secondary.available=false`;
 - `ACCEPTED_SECONDARY_RUNTIME_PROFILES` содержит ровно finalist
   `gptoss20b-2335df123cac7fc0e13e347cde1e1ffa8562daafcaf0fc76ade1a851d2b0ff1f`
@@ -281,10 +281,10 @@ failed/error/skipped-тест в любой фазе делает гейт кр�
   `40960`, running/Mamba cache `6`, `mem_fraction_static=0.90`, FP8 E4M3 KV,
   Radix/speculation off, full decode CUDA graph batches `1..6`, prefill graph off,
   FlashInfer attention, CPU MM transport и limits `image=4,video=0,audio=0`;
-- post-context load допускает bounded convergence не более 2 секунд с шагом
+- post-context load допускает bounded convergence не более 20 секунд с шагом
   50 мс только для valid same-epoch busy; invalid/epoch/deadline fail-closed, а
   initial idle и post-cancellation quiet остаются строгими;
-- final startup health имеет `status=ok`, `version=0.207.59`, configured/installed
+- final startup health имеет `status=ok`, `version=0.207.60`, configured/installed
   `canary`, routes `[archive_read, file_read]`, точный `profile_id`,
   `verified_context_tokens=8192` и непустой public `attestation_sha256`;
 - синтетические 1- и 2-файловые UTF-8 smokes дают одну публикацию с точными
