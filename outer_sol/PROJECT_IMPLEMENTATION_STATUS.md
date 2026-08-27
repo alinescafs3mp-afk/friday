@@ -12,14 +12,15 @@ the current production identity, completed packages, active work and next order.
   is code-staged only as provisional shadow/extract and is not accepted or live.
   The primary remains the sole final-publication, tool and effect authority.
   Every secondary miss preserves the exact primary-only path.
-- Deployed implementation head: `c78b8ca2ac959efdbe06aa0fe81d87270bcd35c0`
-- Live: Friday `0.207.64` / `c78b8ca2ac959efdbe06aa0fe81d87270bcd35c0`;
-  tree `ed6939002d95770755c31c161a2b1eeae273beca0c06057cec7a01f39cfce7f9`;
-  wheel `967cf038c7baa64c3ba12061d4a282b49e7eaf92f344f501b20e91db9b819a90`.
-- Immediate predecessor and schema-capable fallback: Friday `0.207.63` /
-  `4da83e391b7f6d17cd2689e254ae0eee3dbd0d68`, tree
-  `c98905bdbe7b68bdb598e8b2f3b73d597918f6656e691ca84ef542617a9d30fc`.
-- Database schema: 45
+- Deployed implementation head: `b633ca7a1b3c8165c707c147b88112e58fca0379`
+- Live: Friday `0.207.65` / `b633ca7a1b3c8165c707c147b88112e58fca0379`;
+  tree `77fd335e5eb72b02084c5e3c22913040668f49aeb2bff8271346d5ef43610e6d`;
+  wheel `739721a070cdd0aa94ed0917e050031058a1eda58498a58f36fed646a3dd720b`.
+- Schema-capable fallback: Friday `0.207.65rc0` /
+  `a69362c32a2d4b438a548966aa6f79091126e2ee`, tree
+  `ffce960fcbfe12c30c6d0c5484123f2dbf4e58ac739849767b833408b2d9ab2f`.
+  Runtime predecessor is Friday `0.207.64` / `c78b8ca2ac959efdbe06aa0fe81d87270bcd35c0`.
+- Database schema: 46
 - Production state: immutable activation `clear`; backend and Telegram bridge
   active; trusted-CA HTTPS health `200`; SQLite integrity and FK checks clean.
   Owner-only Engineer Mode is enabled for exact private scope
@@ -135,6 +136,12 @@ the current production identity, completed packages, active work and next order.
   ZIP/RAR/7z cannot reach digest/source/hash dedup or persistence until password
   access is proved. An incomplete validation returns a body-free transient
   receipt, while deadlines after authenticated access remain truthful partials.
+  `0.207.65` deploys dormant body-free `EngineerWorkItem v1` authority and a
+  distinct schema-46 fallback. Exact owner/scope/source identities, CAS
+  revisions, prepared/admitted/unknown/settled steps and permanent command
+  fences survive restart and backup skew without storing prompts, argv, paths
+  or output. Runtime continuation remains disabled until the independent
+  command ledger receives its fail-closed lifecycle and source-slot gates.
   The current immutable activation keeps Semantic Supervisor in discarded
   `shadow`: it has no tool, effect, execution or publication authority and
   every miss preserves the primary-only path. The laptop endpoint, TLS, profile
@@ -162,7 +169,7 @@ the current production identity, completed packages, active work and next order.
   while the backlog converges. `0.207.52` repairs the canary wrapper's full
   Telegram carrier surface; signed Telegram requests no longer fail before the
   model/tool boundary. The current activation terminal receipt is
-  `11d740b80501646da68a666068d3fb75dfcee7d543a0c9b97cee503fee91a35b`.
+  `355220b947e76714cc4baa48fcdfabd41595587a3a837000002d1cfa4ed0ee9b`.
 - Delivery constraints: no Docker for primary Friday release certification;
   companion plugin untouched; small commits and immutable wheel-only production
   releases. The optional laptop inference node is a separate Docker contour.
@@ -177,12 +184,14 @@ fresh owner identity, current Telegram source/update/conversation binding and
 capability checks stay mandatory, while no guest, unsigned API turn, quoted
 message, document, web page or attachment may mint execution authority.
 
-The stage-aware document/archive package is deployed in `0.207.64`. The active
-package is now the smallest restart-safe Engineer multi-turn slice:
+The stage-aware document/archive package is deployed in `0.207.64`; the dormant
+EngineerWorkItem schema/reader is deployed in `0.207.65`. The active package is
+now the smallest safe runtime-activation slice:
 `EngineerWorkItem v1` persists only code-owned step/receipt identity and resumes
 an exact owner/conversation follow-up through `observe → replan → next step or
 final`; it never stores model reasoning or blindly replays an uncertain command.
-Release the dormant schema/reader first, then activation. In parallel, credit
+Activate it only after the external command ledger lifecycle is fail-closed. In
+parallel, credit
 only real eligible Semantic Supervisor shadow turns and promote through limited
 assist/canary without changing primary ownership. The full canonical order is in
 `outer_sol/PROJECT_EXECUTION_BACKLOG_2026-08-27.md`. Docker and companion-plugin

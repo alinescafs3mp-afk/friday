@@ -96,15 +96,17 @@ reasoning for complex plan/replan turns. Progress delivery is advisory and
 cannot duplicate task execution; execution/status/final phases remain
 no-thinking, and no approval rail was reintroduced.
 
-Remaining P1B is restart-safe continuation across messages. Implement one
+P1B foundation is deployed dormant in `0.207.65`; remaining work is restart-safe
+runtime continuation across messages. Activate one
 journey-specific `EngineerWorkItem v1`, not a generic WorkGraph: persist only
 owner/conversation/source identity, revision/state, code-owned step ordinal,
 idempotency key and command/terminal receipt digests. A fresh authenticated
 follow-up may inject the exact observed terminal receipt into one bounded
 `replan → next step or final` turn. Never persist prompt/CoT/argv/output/path,
 never blindly replay `RUNNING/UNKNOWN`, and publish completion atomically with
-the Work Item CAS. Release a dormant schema/reader first, then activation, before
-the P2 promotion work.
+the Work Item CAS. Before activation, make the independent command ledger
+fail-closed against loss/rollback and bind a code-owned source slot so dependent
+same-message commands remain possible without replay ambiguity.
 
 ### P2 — integrate and roll out Semantic Supervisor
 
@@ -225,8 +227,8 @@ Estimate: 40–80 hours after the policy decision.
 ## First 24 clean-work hours
 
 1. Keep the deployed P0/P1 production paths green.
-2. Release dormant `EngineerWorkItem v1` schema/reader, then its exact
-   owner-follow-up activation as a separate reversible package.
+2. Activate the deployed dormant `EngineerWorkItem v1` through the exact
+   owner-follow-up path as a separate reversible package.
 3. Collect and audit P2 joined shadow observations for the frozen accepted
    profile only from real eligible turns; do not fabricate traffic.
 4. Advance only through evidence-backed limited assist/canary stages, then use
