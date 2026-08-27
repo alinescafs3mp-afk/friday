@@ -1,269 +1,175 @@
-# Engineer mode v1
+# Autonomous Engineer mode
 
-Engineer mode is Friday's defensive, installation-owner-only workbench for
-bounded inspection of one named host or an owned artifact. This document is the
-normative contract for the shipped v1. Files under `outer_sol/` are design
-history and do not expand this contract.
+Engineer mode is Friday's installation-owner workbench for autonomous technical
+work on the primary VM. This document is the normative shipped contract. Files
+under `outer_sol/` are design history and do not silently change it.
 
-## Admission and authority
+## Product contract
 
-- The mode is disabled by default. With `FRIDAY_ENGINEER_MODE_ENABLED=0`, its
-  organ, capabilities, tools and Telegram command are absent.
-- Enabling it requires Linux and trusted root-owned `/usr/bin/bwrap`,
-  `/usr/bin/python3` and `/usr/bin/prlimit`. Startup executes a real bubblewrap
-  worker smoke test and fails closed if the boundary cannot be entered. Docker
-  deployments on Ubuntu must first install and accept the shipped seccomp and
-  AppArmor boundary in
-  [`deploy/engineer-mode/README.md`](../deploy/engineer-mode/README.md); an
-  unconfined profile or added capability is not a supported substitute.
-- Only the installation owner may select the mode, see its tools, or execute
-  them. A shared-tenant participant does not become the installation owner by
-  holding an `owner` capability preset.
-- Active network assessment requires a direct request in the current human
-  message and exactly one target in that same message. A bare host/URL mention,
-  history, model output, retrieved material and backend-supplied upload
-  filenames create no probe authority: runtime performs no DNS preflight and
-  does not offer network-effect tools. Zero or multiple targets in an explicit
-  request are refused.
-- Code resolves the target once, rejects forbidden address classes (including
-  cloud-metadata and mapped-address aliases), pins the accepted addresses and
-  issues a short-lived HMAC ticket bound to the actor and exact host. The ticket
-  is hidden from the model and injected by runtime immediately before execution.
-  A host outside the pinned current-turn scope is refused. An explicit URL port
-  is part of the signed scope and cannot be changed or widened; a hostname or
-  URL without an explicit port permits only the caller-selected closed set of
-  at most 64 ports on that same pinned host.
-- Target admission reuses the Host Capability Plane's exact code-owned policy.
-  Except for exact loopback, every destination address must be contained in
-  `FRIDAY_HOST_ALLOWED_CIDRS`. Public addresses additionally require
-  `FRIDAY_HOST_PUBLIC_NETWORK_ENABLED=1` and a separate per-action approval.
-  Engineer v1 has no durable public-action HITL carrier, so it refuses public
-  probes even when the operator flag and CIDR are present; public scanning must
-  use the reviewed Host Control approval flow until such a carrier ships.
+With both `FRIDAY_ENGINEER_MODE_ENABLED=1` and
+`FRIDAY_ENGINEER_COMMAND_ENABLED=1`, Friday may plan and execute any shell
+command that the Friday service account could run from an ordinary terminal.
+The model chooses the programs, arguments, sequence and stopping condition. The
+runtime does not use command, executable, argument, path, network-destination or
+file-operation allowlists and does not insert a `/approvals` step.
 
-## Shipped operations
+The retained authority boundary is the authenticated installation owner in the
+current private Telegram chat. The process then has exactly the service user's
+real operating-system permissions: no privilege escalation is added, but its
+normal environment, `PATH`, filesystem, credentials and network are not hidden
+from the command. If an executable is absent, Friday reports the exact program
+or package it needs instead of pretending that the task is impossible.
 
-After all current-turn intent, actor, exact-target and policy gates pass,
-network assessment is limited to bounded observations of the authorized target:
-DNS lookup, capped TCP connection attempts, service/banner observation, TLS
-metadata and shallow HTTP `HEAD` paths. A request may contain at most 64 unique
-ports and remains under the turn and tool deadlines. Connections use the pinned
-address while retaining the logical hostname for HTTP and TLS. Every report
-states whether active probes were sent. Engineer v1 does not generate or send
-exploit payloads, shells or automatic exploit chains.
+This freedom is local to autonomous Engineer mode. Dialogue, knowledge-work and
+research modes keep their existing authorization, privacy and side-effect
+contracts. Legacy bounded Engineer scanners, compiler and decompiler remain
+registered for compatibility when the autonomous command contour is disabled,
+but they are not offered to the model in the autonomous contour: the universal
+shell supersedes them.
 
-A direct light-exposure request for one exact private host, or an immediate
-deictic follow-up to its authenticated successful host scan, uses a hidden
-code-owned profile: pure TCP reachability over the fixed bounded port set,
-followed only for observed open ports by the shared nmap
-`-sT -sV --version-light` adapter. It reports reachable surfaces and service
-classes, never infers a CVE from a banner, and labels incomplete TCP or nmap
-coverage as partial. The follow-up receipt stores no address or remote content
-and is displaced by an unrelated turn.
+## Admission
 
-When Host Capability Plane is enabled, its `nmap` action reuses this release's
-same target normalization, fixed `/usr/bin/nmap` argv builder, version probe,
-bounded XML parser, evidence and coverage contract. The two entry points do not
-maintain competing scan semantics; Host Control additionally owns durable jobs
-and the separately approved package-install continuation.
+One `engineer_command_run` call is admitted only when all of these facts are
+fresh and exact:
 
-The production backend image includes the declared bounded toolset: `nmap`,
-`dig`, `host`, `file`, `strings`, `readelf`, `objdump`, and `openssl`. `capa`,
-`rabin2`, and `apkid` are honest optional adapters and are reported missing in
-the standard image; their output is never inferred or substituted.
+- the outer request came from Friday's Telegram bridge;
+- the linked Telegram identity and private delivery chat belong to the active
+  installation owner;
+- the current user row belongs to the same conversation and original Telegram
+  update;
+- Engineer mode and its command runner are enabled;
+- the current owner still has `engineer.use` and `engineer.command.run`.
 
-Artifact work accepts only a Raw file readable by the current owner. Static
-analysis and the closed patch operations run in a private bubblewrap workspace
-with no network, a read-only shipped runtime, resource limits and bounded input,
-result and output sizes. Parsing happens in the isolated worker, not in the
-backend process. Static findings never authorize mutation: the patch tool is
-absent unless the authenticated current human message directly requests a
-patched derivative, and runtime repeats that intent check immediately before
-execution. A patch produces a separately hashed derived attachment; it does not
-rewrite the source Raw object. Runtime starts at most one patch per turn,
-reserves its full declared deadline before entry, and persistence rejects a
-generated-file batch whose cumulative decoded bytes exceed the configured
-upload limit.
+Runtime injects the conversation, source-message, update and step identities.
+The model cannot provide or replace them. Distinct tool calls from one message
+receive distinct deterministic step identities; a replay of the same step is
+idempotent. Old pending Engineer command approvals and their pending Telegram
+buttons are made inert at startup. Direct API attempts and stale approval
+callbacks cannot become a second command-entry surface.
 
-### Bounded Java 21 compilation
+## Execution
 
-The only source compilation admitted by this contract is one exact, owned,
-UTF-8 Java source file into one deterministic library JAR. The authenticated
-current human message must directly request compilation and identify exactly
-one current Raw file whose safe ASCII basename ends in `.java`; an explicitly
-named source may select one exact match among separately authorized siblings.
-Source text, upload metadata, conversation history and model output cannot
-create that authority. Runtime rechecks the owner's `engineer.artifact.build`
-and `files.read` capabilities immediately before the hidden compiler tool enters.
+The model-facing start tool accepts:
 
-Compilation uses only the fixed owner-local Temurin JDK `21.0.12.1+1` tree at
-`/home/jericho/.jericho/tools/jdk-21.0.12.1+1`. The complete tree identity,
-owner, modes, links and launch-chain files are verified before the read-only
-bind and again inside the sandbox. PATH discovery, a system JDK, caller-supplied
-executables, flags, class paths, module paths, annotation processors, compiler
-plugins, dependency resolution and build scripts are not accepted. The worker
-invokes a code-owned `javac --release 21` argument vector with annotation
-processing and implicit source discovery disabled. It never invokes `java`,
-loads a compiled class or executes the submitted source or generated JAR.
+- `command`: an arbitrary Bash command string;
+- `timeout_sec`: an optional task deadline. Omitting it creates a job with no
+  Friday wall-clock deadline; it runs until completion, explicit cancellation,
+  an OS/service failure or an operator action.
 
-The compile profile accepts at most 1 MiB of source and emits at most 256 class
-files, 8 MiB of class bytes and a 16 MiB JAR. Class paths, names, magic and Java
-21 versions are checked before packaging. Packaging is code-owned and
-deterministic: entries are sorted, timestamps and modes are fixed, compression
-is not environment-dependent, and no manifest or `Main-Class` is added. The
-result explicitly records `sample_executed=false`, `network=none`, the source
-and output SHA-256 digests, the pinned toolchain identity, structural checks,
-and that runtime validation was not performed. Compiler diagnostics, source
-text, paths and parser-controlled stderr never cross the worker boundary.
+The command is executed by held `/usr/bin/bash` as the Friday service user. It
+may use shell syntax, pipelines, redirections, installed interpreters,
+compilers, decompilers, network tools, package clients available to that user,
+and binaries installed later by the operator. There is no synthetic command
+classifier and no wrapper-selected executable catalogue.
 
-Java compilation shares one non-blocking physical heavy-work lock with Ghidra,
-has fixed CPU, memory, file, descriptor and wall-time ceilings, and is limited
-to one entered compilation per turn after its complete deadline has been
-reserved. Its enclosing backend cgroup must additionally prove at most 512
-tasks, a finite 10--16 GiB aggregate memory ceiling and zero swap; the canonical
-native backend unit sets 512 tasks, 12 GiB and `MemorySwapMax=0`. Startup checks
-both the effective systemd properties and the live cgroup-v2 `memory.swap.max`
-leaf, while every compilation repeats the live no-swap check. The host-backed
-worker directory is never mounted RW: only the exact request and input files
-are read-only mounts, and only pre-created result and output carriers are
-writable under the per-file limit. A private 32 MiB compiler tmpfs holds all
-scratch state, and the validated 256-file/8 MiB class inventory plus 16 MiB JAR
-cap bounds the output that may cross the worker. A busy or preflight refusal
-records that work did not start;
-timeout or failure after the fixed-argv sandbox worker is spawned records that
-it did. Native service startup rejects an effective cgroup which differs from
-the declared aggregate limits. This compiler profile is certified only for the
-native production contour: the optional Docker Engineer profile neither ships
-the pinned owner-local JDK nor certifies compiler resource admission. The
-source Raw object remains byte-for-byte unchanged. A successful JAR, its bounded accepted-outcome receipt
-and the assistant message are committed through the existing person-owned
-generated-file path in one transaction, after final source identity and
-`files.read` reauthorization. Failure or revocation publishes neither JAR nor a
-success receipt. Friday never calls the artifact tested merely because it
-compiled; running and runtime testing remain with the operator elsewhere.
+Each job still receives a dedicated killable systemd cgroup. Its CPU, memory,
+swap and task ceilings are derived from all resources actually available to the
+service, not from the old small sandbox profile. These are lifecycle and
+resource-containment mechanics, not semantic policy. Stdout/stderr collection,
+Telegram upload size and generated-file inventory have finite transport bounds;
+they do not restrict what the command may do elsewhere on the VM.
 
-### Owner-confirmed installed-program execution
+## Files and iterative work
 
-`FRIDAY_ENGINEER_COMMAND_ENABLED=1` adds three owner-only capabilities to an
-already enabled Engineer installation: submit one exact argv, inspect its
-durable job, and request cancellation. The start tool is advertised only for an
-authenticated Telegram update. It stores no model-supplied authority fields;
-runtime injects the exact conversation/source row, and a distinct Telegram
-callback must approve the exact rendered argv before a process can start.
+The command environment publishes four absolute directories:
 
-Resolution uses a code-owned service-account PATH and admits only an executable
-whose owner, mode, inode and bytes can be held and sealed through spawn. Every
-job runs under a bounded transient user-systemd cgroup and fresh bubblewrap
-namespace with finite tasks, memory, CPU, time, stdout/stderr and output-tree
-budgets. It inherits no credentials or ambient environment and receives no
-host data, network, home, Docker socket or writable host path. There is no
-implicit or privileged host shell. If the owner explicitly asks for a shell,
-its executable and arguments are shown in the same approval and it remains
-inside this sandbox.
+- `FRIDAY_INPUT_DIR` — immutable copies of files uploaded with the exact current
+  Telegram message;
+- `FRIDAY_WORK_DIR` — persistent private workbench for this owner and
+  conversation, shared by later Engineer steps;
+- `FRIDAY_JOB_DIR` — ephemeral directory and evidence for this one job;
+- `FRIDAY_OUTPUT_DIR` — files to package and return to the owner's Telegram.
 
-The process starts in `/job`, may use `/job/workspace` and `/job/tmp`, and may
-place deliverables only below `/job/output`. Terminal status exposes bounded,
-sanitized stdout/stderr and a hashed generated-file inventory. Cancellation,
-timeout, crash reconciliation and leader exit apply to the complete cgroup;
-an unproved tree or receipt becomes `unknown`, never success.
+Current-message inputs are authorized, hashed, reauthorized immediately before
+spawn and materialized without following paths. Ambient, quoted and old
+conversation attachments do not silently enter a new command. The model is
+expected to enumerate `FRIDAY_INPUT_DIR` instead of guessing filenames.
 
-Every publishable terminal job also produces one deterministic ZIP without a
-second model turn. The archive always carries `MANIFEST.json` and
-`RECEIPT.json`; exact bounded `stdout.bin`, `stderr.bin` and files below
-`outputs/` are included when present. Admission binds the exact private chat
-that supplied the distinct approval. Account, Telegram identity, current chat
-routing, push policy and capabilities are rechecked immediately before staging
-and again before the bridge reads bytes. Revocation or identity drift therefore
-publishes nothing and never re-executes the command.
+`FRIDAY_WORK_DIR` survives normal job cleanup, so Friday can inspect, modify,
+compile and retest a project across several model/tool rounds. It is separated
+by tenant, actor and conversation. Results intended for Telegram must be copied
+below `FRIDAY_OUTPUT_DIR`; terminal delivery packages the verified tree with the
+command receipt, stdout and stderr. Large working trees may stay in the
+workbench while Friday returns a transport-sized archive or report.
 
-The bridge sends exactly one captioned document through a durable pre-write
-fence. A proven connection failure or Telegram 4xx rejection may retry. Any
-ambiguous outcome—timeout, malformed reply, server error or process death after
-arming the fence—is recorded as `uncertain` and is never resent automatically.
-The command ledger mirrors the exact queue identity and bounds permanent
-pre-staging failures.
+## Autonomous loop and other tools
 
-While a command is still running, Friday may send fact-only progress at 60,
-300, 900 and 1800 seconds. It emits only the highest newly due checkpoint and
-reports an elapsed lower bound plus exact stdout/stderr byte counts and output
-activity. Percent complete, ETA, model-inferred phase, argv and output content
-are never placed in this carrier. Each checkpoint is durable across restart and
-delivery retry, and account, owner identity, private chat routing and Engineer
-capabilities are reauthorized before both staging and bridge projection. A
-terminal archive retires any pending progress for that job in the same queue
-transaction; progress corruption cannot block terminal delivery.
+Engineer mode uses a short operational system prompt instead of the ordinary
+response-policy prompt. All tools already authorized for the owner remain
+available on equal terms, including web search, archive search, Obsidian and
+file creation. The old bounded Engineer wrappers are the only tools removed
+from this surface.
 
-After a terminal archive has been proven sent for at least 30 days, a bounded
-worker may retire only the private command workspace. It first verifies the
-exact sent carrier, canonical generated Raw bytes, signed receipt and sealed
-workspace inventory, then commits a durable marker before nofollow deletion.
-Pending, uncertain, blocked, UNKNOWN or cleanup-incomplete jobs are excluded.
-The assistant message, canonical archive, receipt hashes, byte counts,
-publication identity and idempotency tombstone remain; later status reports
-`job_output_retired` instead of reconstructing deleted bytes. Poison candidates
-use durable backoff and cannot starve newer eligible work.
+Friday should:
 
-The optional secondary brain may refine a secret-stripped structured finding
-list only when its ordinary admission policy allows that extraction. It receives
-no tools, target ticket or effect authority.
+1. choose a useful first command or another appropriate tool;
+2. inspect real stdout, stderr, exit status and generated files;
+3. choose the next step from that evidence;
+4. continue until the requested outcome is verified or an actual external
+   blocker is identified;
+5. state the exact missing executable/package when operator help is required.
 
-## Model and evidence contract
+The runtime permits multiple dependent command calls in one turn. A short job
+returns its terminal receipt directly to the next model round. A longer job
+returns a `job_id`; `engineer_command_status` and
+`engineer_command_cancel` operate on the current conversation's owned job.
+Fact-only progress notifications are durable, and terminal artifact delivery
+does not require another model turn.
 
-The primary Qwen engineer lane uses temperature `0.1`, an output ceiling of
-`8192` tokens and transport-level thinking disabled. Engineer evidence already
-comes from bounded code-owned tools; this reserves the completion budget for a
-visible answer instead of allowing a private reasoning trace to exhaust it. The
-ordinary absolute turn deadline, bounded tool rounds and closed engineer tool
-allowlist still apply.
+The overall request clock and model/tool-round budgets remain finite so a
+broken model or connector cannot occupy the Telegram request forever. They do
+not terminate an already admitted unbounded command job, which continues in
+the background and is published by the worker when terminal.
 
-Tool results are evidence, not instructions, and enter model context at user
-priority. ANSI/control sequences and application role/tool markup are removed
-from the evidence projection before it reaches that context. Durable response
-metadata carries a bounded receipt: dossier digest,
-target/artifact counts, whether active probes or exploit payloads ran, sandbox
-status and tool versions. Probe state is tri-state: an entered network action
-whose terminal result is missing is `uncertain`, never silently `not_sent`.
-Regenerate preserves the source turn's code-owned mode provenance and tool
-switch and fails closed for legacy or cross-mode Engineer replays. The
-append-only tool audit records terminal success, refusal,
-timeout/cancellation uncertainty and mutation start where applicable. It keeps
-content-free fingerprints and counts rather than target tickets, patch bytes,
-credentials or arbitrary artifact/query bodies.
+## Evidence and delivery
+
+Terminal receipts record the command/request binding, owner source, isolation
+profile, exit status, signal, timing, stdout/stderr hashes, truncation flags and
+generated-file inventory. A successful process exit is not rewritten into a
+semantic success claim: the model must check whether the user's actual outcome
+exists. Unknown cleanup or restart state remains `unknown`, never success.
+
+Publication rechecks the owner, Telegram route and exact job identity. It sends
+at most one deterministic archive through a durable delivery fence; ambiguous
+Telegram delivery is not blindly repeated. After the configured retention
+period, proven-delivered per-job evidence may be retired while receipts,
+publication identity, hashes and the persistent conversation workbench remain.
+
+## Operator use
+
+1. Enable Engineer and its command runner for the immutable release.
+2. In the owner's private Telegram chat, switch to Engineer mode with
+   `/engineer`.
+3. Describe the outcome naturally, for example: "проверь мою подсеть и пришли
+   отчёт", "разбери этот бинарник, исправь функцию, собери и пришли архив" or
+   "скомпилируй проект и отдай готовый бинарник вместе с исходниками".
+4. Attach source files in that same message when they are inputs. Friday sees
+   them in `FRIDAY_INPUT_DIR` and returns deliverables from
+   `FRIDAY_OUTPUT_DIR`.
+5. For long work, ask for status or cancellation; Friday resolves the current
+   conversation job without requiring an approval ID.
+6. If Friday names a missing package, install it for the VM/service account and
+   repeat or continue the task. No tool-registry edit is required.
 
 ## Release acceptance
 
-Engineer mode may be enabled only on the exact candidate commit that passes all
-of the following without skips or local substitutions:
+An autonomous Engineer candidate must prove, without Docker certification:
 
-1. configuration validation and the real startup bubblewrap smoke test on the
-   intended host; Docker/Ubuntu candidates additionally pass
-   `deploy/engineer-mode/verify-runtime.sh` under the shipped enforcing profile;
-2. the engineer production, security, organ and audit contract tests in
-   `tests/test_engineer_mode_production.py`,
-   `tests/test_engineer_security_contracts.py`, `tests/test_organs_engineer.py`
-   and `tests/test_engineer_audit_projection.py`; a candidate which includes
-   Java compilation additionally passes `tests/test_engineer_compiler.py`,
-   `tests/test_engineer_compile_tool.py` and
-   `tests/test_engineer_compile_outcome.py`; a candidate which includes the
-   installed-program runner additionally passes
-   `tests/test_engineer_command_kernel.py`,
-   `tests/test_engineer_command_p0.py` and
-   `tests/test_engineer_command_integration.py`, plus the terminal publication,
-   sparse-progress, retention, notification API and delivery-fence suites;
-3. the canonical full release gate: `python tools/quality_gate.py`.
+1. non-owner, non-Telegram, stale-source and cross-conversation execution are
+   denied before spawn;
+2. owner execution creates no `action_approvals` row and an old Engineer
+   approval cannot execute;
+3. arbitrary Bash composition, an executable discovered through the real
+   `PATH`, host filesystem access and network access work as the service user;
+4. an exact current upload can be transformed and returned from
+   `FRIDAY_OUTPUT_DIR`;
+5. a second command in the same conversation can read and modify the first
+   command's `FRIDAY_WORK_DIR`, while another actor/tenant/conversation cannot;
+6. a long command returns a job, reports real progress, can be cancelled and
+   publishes its terminal receipt/artifacts exactly once;
+7. web search, Obsidian and ordinary file tools remain callable in Engineer
+   mode; legacy response guards do not replace a valid tool result;
+8. focused command/runtime/delivery tests, Ruff, mypy and the compact native
+   release gate pass on the exact candidate.
 
-Keep `FRIDAY_ENGINEER_MODE_ENABLED=0` during rollout preparation. Enable it only
-after the accepted commit is installed on a compatible host, then verify that a
-non-owner is denied, an ambiguous target is refused, the sandbox smoke succeeds,
-and a benign owner-controlled fixture completes with an accurate receipt.
-
-## Explicit non-goals for v1
-
-The installed-program runner is not a host-equivalent console: it cannot read
-host data, inherit credentials, reach the network or Docker, or escape its
-bounded workspace. The mode also has no autonomous target discovery, multi-host assessment,
-exploit validation worker, persistence on a target, credential use, background
-scanning, arbitrary dependency builds, native compilation, Android rebuilds or
-artifact signing. Those ideas require a separate design, threat review and
-acceptance contract; their presence in a historical brief is not implementation
-or authorization.
+The companion plugin and Docker contour are outside this rollout.

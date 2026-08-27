@@ -1928,7 +1928,11 @@ def validate_settings(settings: FridaySettings, *, production: bool = False) -> 
         warnings.append("FRIDAY_API_TOKEN is shorter than 32 characters")
     if settings.telegram_bridge_secret and len(settings.telegram_bridge_secret) < 32:
         errors.append("FRIDAY_TELEGRAM_BRIDGE_SECRET must contain at least 32 characters")
-    if settings.engineer_mode_enabled:
+    # The legacy bounded Engineer tools execute inside bubblewrap.  The
+    # autonomous command contour deliberately executes as the real service
+    # user and does not depend on that old sandbox profile; requiring bwrap
+    # here would keep an unrelated legacy rail on the production path.
+    if settings.engineer_mode_enabled and not settings.engineer_command_enabled:
         bubblewrap = Path("/usr/bin/bwrap")
         try:
             bubblewrap_stat = bubblewrap.stat()

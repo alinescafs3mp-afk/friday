@@ -182,6 +182,29 @@ def test_enabled_engineer_registry_fails_closed_when_sandbox_smoke_fails(
         build_registry(replace(settings, engineer_mode_enabled=True))
 
 
+def test_autonomous_engineer_registry_does_not_depend_on_legacy_sandbox_smoke(
+    settings,
+    monkeypatch,
+) -> None:
+    from friday.organs import build_registry
+
+    monkeypatch.setattr(
+        sandbox,
+        "smoke_preflight",
+        lambda **_kwargs: {"ok": False, "reason": "legacy_sandbox_must_not_run"},
+    )
+
+    registry = build_registry(
+        replace(
+            settings,
+            engineer_mode_enabled=True,
+            engineer_command_enabled=True,
+        )
+    )
+
+    assert "engineer" in {organ.name for organ in registry.organs}
+
+
 def test_disabled_engineer_mode_endpoint_is_service_unavailable(settings) -> None:
     from friday.server import create_app
 

@@ -374,23 +374,22 @@ installation-local 256-bit HMAC key. Обычный SHA для коротког�
       bridge; публичный CA/cert установлен как trust anchor без private key.
 - [ ] HTTPS health/identity проверены без `-k`/`verify=False`.
 - [ ] `FRIDAY_WEB_ALLOW_PRIVATE_NETWORKS=0`.
-- [ ] `FRIDAY_ENGINEER_MODE_ENABLED=0`, пока точный candidate commit не прошёл
-      полный `python tools/quality_gate.py`, Engineer contract tests и реальный
-      startup smoke bubblewrap на целевом хосте.
-- [ ] При включённом Engineer mode `/engineer`, видимость и исполнение tools
-      доступны только владельцу установки (не shared-участнику с preset
-      `owner`), а простое упоминание host/URL не запускает DNS или probes.
-      Каждая сетевая операция требует явного активного запроса и единственной
-      цели из текущей человеческой реплики, её code-pinned адресов и допуска
-      exact `FRIDAY_HOST_ALLOWED_CIDRS`; public scope без operator flag и
-      отдельного per-action HITL всегда отклоняется. Явный URL-порт
-      остаётся точной частью подписанного scope, а цель без явного порта может
-      использовать не более 64 выбранных портов того же хоста. Потерянный
-      терминальный результат после входа в сетевой action фиксируется как
-      `uncertain`, а не как отсутствие probes.
-- [ ] На целевом хосте подтверждены no-network sandbox артефактов, отказ для
-      неоднозначной/запрещённой цели и отсутствие exploit payloads; пройден
-      rollout smoke из [`docs/ENGINEER_MODE.md`](ENGINEER_MODE.md).
+- [ ] `FRIDAY_ENGINEER_MODE_ENABLED=0` и
+      `FRIDAY_ENGINEER_COMMAND_ENABLED=0`, пока точный candidate commit не
+      прошёл focused native Engineer/runtime/delivery tests и compact release
+      gate на целевом хосте. Docker не является сертифицирующим контуром.
+- [ ] При включённом автономном Engineer mode выполнение доступно только
+      активному владельцу установки из его связанного личного Telegram-чата.
+      Non-owner, generic API, stale update/source, cross-conversation и старый
+      approval callback отклоняются до spawn; start не создаёт
+      `action_approvals`.
+- [ ] Benign native smoke подтвердил произвольный Bash от Friday service user,
+      реальный PATH/host filesystem/network, точные current-message inputs,
+      изолированный по owner/tenant/conversation persistent workbench и
+      однократную доставку `FRIDAY_OUTPUT_DIR`. Предел доверия после admission —
+      реальные права этого OS user: отдельной командной/path/network политики
+      у autonomous runner нет. Rollout smoke описан в
+      [`docs/ENGINEER_MODE.md`](ENGINEER_MODE.md).
 - [ ] Host Control и package install остаются `0`, пока exact candidate не прошёл
       host-control contract/deployment tests и Ubuntu smoke. При включении
       socket/key/job-root canonical, agent непривилегирован, broker policy

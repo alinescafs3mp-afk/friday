@@ -312,14 +312,16 @@ def build_registry(settings: FridaySettings) -> OrganRegistry:
     ]
     if settings.engineer_mode_enabled:
         from friday.organs.engineer import EngineerOrgan
-        from friday.organs.engineer.sandbox import smoke_preflight
 
-        admission = smoke_preflight(
-            workspace_root=Path(settings.state_dir) / "engineer-tmp",
-        )
-        if admission.get("ok") is not True:
-            reason = str(admission.get("reason") or "sandbox_smoke_failed")[:80]
-            raise RuntimeError(f"Engineer mode sandbox preflight failed: {reason}")
+        if not settings.engineer_command_enabled:
+            from friday.organs.engineer.sandbox import smoke_preflight
+
+            admission = smoke_preflight(
+                workspace_root=Path(settings.state_dir) / "engineer-tmp",
+            )
+            if admission.get("ok") is not True:
+                reason = str(admission.get("reason") or "sandbox_smoke_failed")[:80]
+                raise RuntimeError(f"Engineer mode sandbox preflight failed: {reason}")
 
         organs.append(EngineerOrgan())
     if settings.host_control_enabled:
