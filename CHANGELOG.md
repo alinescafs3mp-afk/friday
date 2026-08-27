@@ -1,3 +1,20 @@
+## 0.207.61 — 2026-08-27
+
+### Default-off Semantic Supervisor foundation
+
+- GPT-OSS can now participate as a bounded, untrusted planner/reviewer behind
+  an independently disabled-by-default contour. Code-owned policy, authority,
+  tools, effects and publication remain outside the model; the primary model
+  still owns the sole final answer and every effect.
+- SQLite schemas 44–45 add the fixed current-file/current-public-web WorkGraph,
+  exact ingress-request binding, restart/cancel/expiry state, bounded review
+  and web-only recovery, and one atomic primary publication receipt. Migration
+  cannot enable the route by itself.
+- Promotion remains evidence-gated through off → shadow → assist → canary. This
+  release contains no accepted promotion artifact and retires no legacy
+  heuristic. A distinct `0.207.61rc0` schema-45-capable rollback sibling is
+  required for the first production migration.
+
 ## 0.207.60 — 2026-08-27
 
 ### V12 post-context convergence stability
