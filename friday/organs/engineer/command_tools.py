@@ -107,6 +107,7 @@ def _source_metadata(row: Mapping[str, Any]) -> Mapping[str, Any] | None:
     if isinstance(raw, Mapping):
         return raw
     elif isinstance(raw, str) and len(raw) <= 16_384:
+
         def reject_duplicates(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
             result: dict[str, Any] = {}
             for key, value in pairs:
@@ -447,8 +448,7 @@ class EngineerCommandService:
         ):
             return _refusal("authenticated_owner_source_required")
         if timeout_sec is not None and (
-            type(timeout_sec) is not int
-            or not 1 <= timeout_sec <= _MAX_EXPLICIT_TIMEOUT_SEC
+            type(timeout_sec) is not int or not 1 <= timeout_sec <= _MAX_EXPLICIT_TIMEOUT_SEC
         ):
             return _refusal("invalid_request")
         if (

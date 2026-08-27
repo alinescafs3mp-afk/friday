@@ -360,11 +360,14 @@ def test_generic_api_cannot_admit_an_engineer_command_or_create_an_approval(
         assert requested.data is not None, requested.error
         assert requested.data["error_code"] == "authorization_denied"
         assert requested.data["approval_id"] == ""
-        assert app.state.storage.count_action_approvals(
-            actor.user_id,
-            status="pending",
-            person_id=actor.own_id,
-        ) == 0
+        assert (
+            app.state.storage.count_action_approvals(
+                actor.user_id,
+                status="pending",
+                person_id=actor.own_id,
+            )
+            == 0
+        )
         legacy = app.state.storage.create_action_approval(
             actor.user_id,
             tool="engineer_command_run",
@@ -377,9 +380,7 @@ def test_generic_api_cannot_admit_an_engineer_command_or_create_an_approval(
         direct = asyncio.run(app.state.kernel.execute_approved(legacy["id"], actor=actor))
         assert direct.success is False
         assert "прежнему контуру" in str(direct.error)
-        assert app.state.storage.get_action_approval(legacy["id"], actor.user_id)["status"] == (
-            "pending"
-        )
+        assert app.state.storage.get_action_approval(legacy["id"], actor.user_id)["status"] == ("pending")
 
         response = client.post(
             f"/api/approvals/{legacy['id']}/decide",
@@ -387,9 +388,7 @@ def test_generic_api_cannot_admit_an_engineer_command_or_create_an_approval(
             json={"decision": "approve"},
         )
         assert response.status_code == 409
-        assert app.state.storage.get_action_approval(legacy["id"], actor.user_id)["status"] == (
-            "pending"
-        )
+        assert app.state.storage.get_action_approval(legacy["id"], actor.user_id)["status"] == ("pending")
 
 
 def test_startup_retires_only_legacy_engineer_approval_rows_and_pushes(storage) -> None:
@@ -749,7 +748,7 @@ def test_exact_current_upload_is_reauthorized_and_passed_only_through_private_su
 
     result = service.execute(
         actor=actor,
-        command="sha256sum \"$FRIDAY_INPUT_DIR/01-input.bin\"",
+        command='sha256sum "$FRIDAY_INPUT_DIR/01-input.bin"',
         timeout_sec=10,
         _conversation_id="conv_owner",
         _source_message_id="msg_0123456789abcdef",
@@ -1199,16 +1198,18 @@ def test_distinct_code_owned_steps_admit_distinct_autonomous_shell_jobs() -> Non
     assert requests[0].idempotency_key != requests[1].idempotency_key
     assert requests[0].idempotency_key == requests[2].idempotency_key
     assert kernel.delivery_chat_ids == ["5001", "5001", "5001"]
-    assert service.authorization.required == [
-        "engineer.use",
-        "engineer.command.run",
-    ] * 3
+    assert (
+        service.authorization.required
+        == [
+            "engineer.use",
+            "engineer.command.run",
+        ]
+        * 3
+    )
     attestations = kernel.authority.source_authority.attestations
     assert all(item["telegram_update_id"] == "100" for item in attestations)
     assert all(item["isolation_profile"] is IsolationProfile.HOST_USER for item in attestations)
-    assert [item["idempotency_key"] for item in attestations] == [
-        item.idempotency_key for item in requests
-    ]
+    assert [item["idempotency_key"] for item in attestations] == [item.idempotency_key for item in requests]
 
 
 def test_model_cannot_supply_legacy_approval_or_argv_arguments() -> None:
