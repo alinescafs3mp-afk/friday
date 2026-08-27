@@ -69,9 +69,9 @@ def _source_fixture(
 
 def test_sealed_source_constants_are_internally_consistent() -> None:
     module = source_model_manifest
-    assert len(module.SOURCE_FILES) == module.SOURCE_FILE_COUNT == 14
+    assert len(module.SOURCE_FILES) == module.SOURCE_FILE_COUNT == 12
     assert sum(size for size, _digest in module.SOURCE_FILES.values()) == module.SOURCE_TOTAL_BYTES
-    assert module.SOURCE_TOTAL_BYTES == 13_789_264_674
+    assert module.SOURCE_TOTAL_BYTES == 13_789_257_124
 
 
 def test_manifest_and_full_snapshot_return_the_same_receipt(

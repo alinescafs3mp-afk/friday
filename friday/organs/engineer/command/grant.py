@@ -4,11 +4,12 @@ from __future__ import annotations
 
 import hmac
 import json
-import os
 import secrets
 import time
 from hashlib import sha256
 from typing import Any
+
+from friday.config import env as config_env
 
 from .confirm import OwnerConfirmationAuthority
 from .contracts import (
@@ -53,7 +54,7 @@ class CommandGrantAuthority:
 
     @classmethod
     def from_env(cls) -> CommandGrantAuthority:
-        raw = os.environ.get("FRIDAY_ENGINEER_COMMAND_GRANT_SECRET", "")
+        raw = config_env("FRIDAY_ENGINEER_COMMAND_GRANT_SECRET", "")
         if not raw:
             raise CommandError("grant_secret_missing")
         secret = raw.encode("utf-8") if isinstance(raw, str) else bytes(raw)
