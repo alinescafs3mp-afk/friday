@@ -183,6 +183,26 @@ arming the fence—is recorded as `uncertain` and is never resent automatically.
 The command ledger mirrors the exact queue identity and bounds permanent
 pre-staging failures.
 
+While a command is still running, Friday may send fact-only progress at 60,
+300, 900 and 1800 seconds. It emits only the highest newly due checkpoint and
+reports an elapsed lower bound plus exact stdout/stderr byte counts and output
+activity. Percent complete, ETA, model-inferred phase, argv and output content
+are never placed in this carrier. Each checkpoint is durable across restart and
+delivery retry, and account, owner identity, private chat routing and Engineer
+capabilities are reauthorized before both staging and bridge projection. A
+terminal archive retires any pending progress for that job in the same queue
+transaction; progress corruption cannot block terminal delivery.
+
+After a terminal archive has been proven sent for at least 30 days, a bounded
+worker may retire only the private command workspace. It first verifies the
+exact sent carrier, canonical generated Raw bytes, signed receipt and sealed
+workspace inventory, then commits a durable marker before nofollow deletion.
+Pending, uncertain, blocked, UNKNOWN or cleanup-incomplete jobs are excluded.
+The assistant message, canonical archive, receipt hashes, byte counts,
+publication identity and idempotency tombstone remain; later status reports
+`job_output_retired` instead of reconstructing deleted bytes. Poison candidates
+use durable backoff and cannot starve newer eligible work.
+
 The optional secondary brain may refine a secret-stripped structured finding
 list only when its ordinary admission policy allows that extraction. It receives
 no tools, target ticket or effect authority.
@@ -229,7 +249,7 @@ of the following without skips or local substitutions:
    `tests/test_engineer_command_kernel.py`,
    `tests/test_engineer_command_p0.py` and
    `tests/test_engineer_command_integration.py`, plus the terminal publication,
-   notification API and delivery-fence suites;
+   sparse-progress, retention, notification API and delivery-fence suites;
 3. the canonical full release gate: `python tools/quality_gate.py`.
 
 Keep `FRIDAY_ENGINEER_MODE_ENABLED=0` during rollout preparation. Enable it only

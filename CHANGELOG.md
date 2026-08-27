@@ -1,3 +1,26 @@
+## 0.207.56 — 2026-08-27
+
+### Sparse Engineer progress and bounded delivered-output retention
+
+- Long owner-confirmed commands now publish durable fact-only Telegram progress
+  at 60, 300, 900 and 1800 seconds without another model turn. Only the highest
+  newly due checkpoint is emitted; messages contain elapsed lower bound and
+  exact stdout/stderr byte counts, never invented percentages, phases or ETA.
+- Progress survives enqueue/CAS crashes, restart reconciliation and delivery
+  retries. Fresh owner, account, Telegram route and Engineer capabilities are
+  rechecked before staging and delivery; a terminal result atomically retires
+  any still-pending progress carrier without allowing corrupt progress state to
+  block the result archive.
+- Workspaces for terminal commands are removed only after at least 30 days and
+  exact proof that their deterministic archive was sent and remains available
+  as the canonical generated Raw object. Pending, uncertain, blocked, UNKNOWN
+  or cleanup-incomplete jobs are never collected; durable markers, nofollow
+  deletion and retry backoff make cleanup restart-safe and poison-row bounded.
+- Retired jobs keep truthful status, hashes, byte counts, publication and
+  idempotency tombstones while reporting `job_output_retired`. Canonical archive
+  bytes and their assistant message remain available under the ordinary file
+  lifecycle policy.
+
 ## 0.207.55 — 2026-08-27
 
 ### Automatic Engineer command result delivery

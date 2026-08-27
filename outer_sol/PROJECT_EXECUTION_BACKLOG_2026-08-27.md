@@ -59,9 +59,11 @@ family.
 
 Items 1–2 and their traversal/symlink/hardlink/race/tamper/legacy/UNKNOWN
 gates are deployed in `0.207.53`. Item 4 is deployed in `0.207.54` with durable
-exact-scope focus and fail-closed ambiguity handling. Delivery is currently
-triggered by an exact conversation-scoped status turn; items 3 and 5–8 remain
-the active P1 contour.
+exact-scope focus and fail-closed ambiguity handling. Item 3 and the workspace
+portion of item 5 are delivered in `0.207.56`: terminal publication is
+automatic, progress is durable and fact-only, and only old proven-sent
+workspaces are retired while canonical archives remain. Items 6–8 remain the
+active P1 contour.
 
 Estimate: first usable result-delivery slice 6–9 hours; complete P1 contour
 12–20 hours of clean work. The final physical approval-button smoke is
