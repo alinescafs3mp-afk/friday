@@ -110,10 +110,21 @@ the current production identity, completed packages, active work and next order.
 
 ## Active objective
 
-First close the remaining Engineer Mode production workflow: exact Telegram
-input grants and a deterministic command source/output bundle. Truthful sparse
-progress, bounded retention and automatic/status-triggered sealed delivery are
-live.
+Urgent P0 is now an owner-only autonomous Engineer Mode. In an authenticated
+private Telegram engineer conversation the primary model must choose and chain
+its own shell/program/file steps, run the software available to the Friday VM
+as the Friday service user, and use the VM filesystem and network without a
+per-command `/approvals` round trip. The non-model boundary remains strict:
+fresh owner identity, current Telegram source/update/conversation binding and
+capability checks are mandatory; no guest, unsigned API turn, quoted message,
+document, web page or attachment may mint execution authority. Existing
+durable jobs, cancellation, sparse progress, receipts and Telegram artifact
+delivery are retained. Current-message uploads are exposed as immutable job
+inputs, while outputs selected for Telegram delivery remain receipt-bound.
+This P0 supersedes the earlier exact-argv/isolated-workspace-only product course;
+the deployed `0.207.56` still has that predecessor behaviour until the new
+package is certified and activated.
+
 Next integrate and independently certify
 the Semantic Supervisor through default-off, shadow, limited assist and canary.
 After those two priorities, execute the remaining work by product value and

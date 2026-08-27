@@ -13,8 +13,10 @@ inputs; they do not override this priority list or prove production readiness.
 - Do not touch the Obsidian companion plugin without a separate owner request.
 - Preserve the primary-only path whenever the laptop or secondary runtime is
   unavailable.
-- Do not weaken guards or sandboxes to make acceptance pass. Remove only a
-  guard proven both harmful and redundant with a stronger code-owned boundary.
+- The owner-only autonomous Engineer Mode deliberately has no per-command HITL
+  or isolated-workspace policy rail. Its hard boundary is instead fresh owner
+  Telegram provenance and capability authorization; every other surface keeps
+  its existing controls.
 - Do not merge old feature branches wholesale. Re-audit and port only exact
   useful commits onto current `main`.
 
@@ -32,10 +34,12 @@ Status: deployed in `0.207.52`.
 
 ### P1 — make the current Engineer Mode a complete user workflow
 
-Goal: close `request → approval → run → progress → result files/archive` for
-installed console applications. This is battle-readiness of the already-live
-runner, not the later expansion to every compiler and reverse-engineering
-family.
+Goal: close `authenticated owner request → autonomous plan/tool loop → host-user
+run → progress → result files/archive` for arbitrary software installed in the
+Friday VM. No `/approvals` callback is part of this mode. Friday chooses and
+chains its own commands, sees their real output, may use the VM filesystem and
+network as the Friday service user, and keeps durable cancellation/progress and
+artifact delivery.
 
 1. Preserve truthful trusted-output refusal receipts and independently port the
    isolated fix from commit `81998fd29b38adcace8dbfe717a4d74bed4d32f3`.
@@ -48,9 +52,9 @@ family.
    actor/conversation binding; fail closed when more than one job is plausible.
 5. Add bounded retention that never removes pending, uncertain or unpublished
    output.
-6. Grant current Telegram files to a confirmed job as immutable read-only input
-   snapshots; bind every digest to the approval and re-authorize immediately
-   before execution.
+6. Grant exact current-message Telegram files to a job as immutable read-only
+   input snapshots; bind every digest to the request/receipt and re-authorize
+   immediately before execution.
 7. Wire the already-present bundle/publication seams to command, Java and patch
    flows so sources, binary/output and receipts arrive atomically.
 8. Gate traversal, symlink, hardlink, race, tamper, restart, duplicate callback,
@@ -62,8 +66,10 @@ gates are deployed in `0.207.53`. Item 4 is deployed in `0.207.54` with durable
 exact-scope focus and fail-closed ambiguity handling. Item 3 and the workspace
 portion of item 5 are delivered in `0.207.56`: terminal publication is
 automatic, progress is durable and fact-only, and only old proven-sent
-workspaces are retired while canonical archives remain. Items 6–8 remain the
-active P1 contour.
+workspaces are retired while canonical archives remain. The preceding
+owner-confirmed isolated command admission is now a deployed predecessor, not
+the target product contract. Autonomous owner-only host-user admission,
+iterative planning and items 6–8 are the active P1 contour.
 
 Estimate: first usable result-delivery slice 6–9 hours; complete P1 contour
 12–20 hours of clean work. The final physical approval-button smoke is
