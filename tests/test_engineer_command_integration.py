@@ -207,13 +207,8 @@ def test_autonomous_command_tool_has_no_hitl_and_keeps_runtime_authority_hidden(
     assert tool.parameters["required"] == ["command"]
     assert tool.parameters["additionalProperties"] is False
     properties = tool.parameters["properties"]
-    assert set(properties) == {"command", "timeout_sec"}
-    assert properties["timeout_sec"] == {
-        "type": "integer",
-        "minimum": 1,
-        "maximum": 2_147_483_647,
-    }
-    assert "default" not in properties["timeout_sec"]
+    assert set(properties) == {"command"}
+    assert "timeout_sec" not in properties
     assert "_step_id" not in properties
     assert "approval" not in str(tool.parameters).casefold()
     result = asyncio.run(

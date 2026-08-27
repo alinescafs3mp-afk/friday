@@ -66,6 +66,7 @@ from .terminal_delivery import (
     TerminalDeliveryError,
     parse_terminal_envelope,
     stage_terminal_archive,
+    stage_terminal_text,
     terminal_notification_status,
     verify_sent_terminal_notification_artifact,
 )
@@ -1001,6 +1002,8 @@ class EngineerCommandService:
                         stdout_bytes=progress.stdout_bytes,
                         stderr_bytes=progress.stderr_bytes,
                         output_activity=bool(progress.stdout_bytes or progress.stderr_bytes),
+                        elapsed_sec=max(checkpoint, int(moment - float(job["started_at"]))),
+                        timeout_sec=max(0, int(job.get("timeout_sec") or 0)),
                     )
                     if self.kernel.store.advance_progress_checkpoint(
                         job_id,
@@ -1078,7 +1081,7 @@ class EngineerCommandService:
             reconciled = self._reconcile_staged_publications()
             for job in self.kernel.store.list_terminal_publication_candidates(limit=limit):
                 job_id = str(job.get("job_id") or "")
-                actor = self._fresh_terminal_actor(job)
+                actor = self._fresh_progress_actor(job)
                 if actor is None:
                     with suppress(CommandError):
                         self.kernel.store.record_publication_attempt(job_id, "authorization_denied")
@@ -1098,12 +1101,26 @@ class EngineerCommandService:
                     ):
                         raise TerminalDeliveryError("terminal_receipt_unpublishable")
                     if not receipt.generated_files:
-                        # Terminal publication is artifact delivery, not a
-                        # second transport for stdout/stderr.  Close the ledger
-                        # before any archive bytes or queue carrier are built so
-                        # later worker passes cannot retry an empty ZIP.
+                        # A durable job must always close the loop for its owner.
+                        # Deliver bounded stdout/stderr as one text result; an
+                        # empty ZIP is still forbidden when no generated files
+                        # exist.  Queue staging precedes ledger suppression so a
+                        # crash can only replay the exact deduplicated carrier.
+                        stage_terminal_text(
+                            self.storage,
+                            actor_id=actor.own_id,
+                            tenant_id=actor.user_id,
+                            conversation_id=str(job.get("conversation_id") or ""),
+                            source_message_id=str(job.get("source_row_id") or ""),
+                            delivery_chat_id=str(job.get("delivery_chat_id") or ""),
+                            receipt=receipt,
+                        )
                         self.kernel.store.suppress_empty_publication(job_id)
+                        staged += 1
                         continue
+                    actor = self._fresh_terminal_actor(job)
+                    if actor is None:
+                        raise TerminalDeliveryError("terminal_authorization_changed")
                     archive, attachment = self._archive_for_receipt(
                         receipt,
                         actor_id=actor.own_id,
@@ -1465,9 +1482,10 @@ def build_engineer_command_tools(
             description=(
                 "Run one model-planned shell step as the Friday service user on its VM. "
                 "Use any installed command, the service user's filesystem and network needed for the "
-                "owner's task. Omit timeout_sec for a durable job that runs until completion, explicit "
-                "cancellation or an OS failure; set it only when the task itself needs a deadline. The "
-                "call waits briefly for a terminal receipt, then returns a job id for longer work. Put "
+                "owner's task. The durable job runs until completion, explicit cancellation or an OS "
+                "failure; when a command itself needs a deadline, use that program's native option or "
+                "the shell timeout utility deliberately. The call waits briefly for a terminal receipt, "
+                "then returns a job id for longer work. Put "
                 "files intended for Telegram delivery below the "
                 "absolute directory in FRIDAY_OUTPUT_DIR; job, scratch and immutable current-message "
                 "inputs are exposed as FRIDAY_JOB_DIR, FRIDAY_WORK_DIR and FRIDAY_INPUT_DIR."
@@ -1476,11 +1494,6 @@ def build_engineer_command_tools(
                 "type": "object",
                 "properties": {
                     "command": {"type": "string", "minLength": 1, "maxLength": 16_384},
-                    "timeout_sec": {
-                        "type": "integer",
-                        "minimum": 1,
-                        "maximum": _MAX_EXPLICIT_TIMEOUT_SEC,
-                    },
                 },
                 "required": ["command"],
                 "additionalProperties": False,

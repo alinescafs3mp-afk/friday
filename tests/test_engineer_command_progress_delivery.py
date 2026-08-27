@@ -209,8 +209,9 @@ def test_closed_checkpoints_freeze_first_sample_and_project_only_facts(storage) 
     )
     assert projection == {
         "body": (
-            f"Engineer-задача {'1' * 32} на момент проверки выполнялась не менее 60 с. "
-            "stdout: 17 байт; stderr: 3 байт; активность вывода: да."
+            f"⏳ Engineer-задача `{'1' * 32}` выполняется 1 мин 0 с. "
+            "Этап: выполняется команда. Получено вывода: stdout 17 Б, stderr 3 Б. "
+            "Жёсткий тайм-аут не задан."
         )
     }
     assert not any(token in projection["body"].lower() for token in ("%", "eta", "готовност", "argv"))
@@ -250,13 +251,47 @@ async def test_pending_reauthorizes_progress_and_files_read_is_not_required(sett
             "id": staged.notification_id,
             "chat_id": "5001",
             "body": (
-                f"Engineer-задача {'1' * 32} на момент проверки выполнялась не менее 60 с. "
-                "stdout: 17 байт; stderr: 3 байт; активность вывода: да."
+                f"⏳ Engineer-задача `{'1' * 32}` выполняется 1 мин 0 с. "
+                "Этап: выполняется команда. Получено вывода: stdout 17 Б, stderr 3 Б. "
+                "Жёсткий тайм-аут не задан."
             ),
             "kind": PROGRESS_NOTIFICATION_KIND,
             "dedup_key": staged.dedup_key,
         }
     ]
+
+
+def test_progress_reports_elapsed_and_deadline_without_inventing_eta(storage) -> None:
+    conversation_id = _scope(storage)
+    staged = stage_progress_notification(
+        storage,
+        actor_id=LEGACY_OWNER_USER_ID,
+        tenant_id=LEGACY_OWNER_USER_ID,
+        conversation_id=conversation_id,
+        delivery_chat_id="5001",
+        job_id="1" * 32,
+        checkpoint_sec=60,
+        stdout_bytes=22,
+        stderr_bytes=0,
+        output_activity=True,
+        elapsed_sec=75,
+        timeout_sec=300,
+    )
+    row = storage.execute(
+        "SELECT id,user_id,chat_id,kind,dedup_key,body,status FROM outbound_notifications WHERE id=?",
+        (staged.notification_id,),
+    ).fetchone()
+    assert row is not None
+    projection = progress_notification_projection(
+        storage,
+        dict(row),
+        tenant_id=LEGACY_OWNER_USER_ID,
+        actor_id=LEGACY_OWNER_USER_ID,
+    )
+    assert "выполняется 1 мин 15 с" in projection["body"]
+    assert "До заданного тайм-аута: около 3 мин 45 с" in projection["body"]
+    assert "готовност" not in projection["body"].lower()
+    assert "eta" not in projection["body"].lower()
 
 
 @pytest.mark.asyncio

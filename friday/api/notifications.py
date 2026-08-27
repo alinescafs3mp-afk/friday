@@ -26,9 +26,11 @@ from friday.organs.engineer.command.progress import (
 )
 from friday.organs.engineer.terminal_delivery import (
     TERMINAL_NOTIFICATION_KIND,
+    TERMINAL_TEXT_NOTIFICATION_KIND,
     TerminalDeliveryError,
     read_terminal_notification_artifact,
     terminal_notification_projection,
+    terminal_text_notification_projection,
 )
 from friday.permissions import AuthorizationError
 
@@ -67,7 +69,10 @@ def _terminal_delivery_actor(state: Any, row: Mapping[str, Any]) -> Any:
         )
         if not actor.is_owner or actor.own_id != actor_id or str(actor.identity_id or "") != chat_id:
             raise TerminalDeliveryError("terminal_authorization_changed")
-        for capability in ("engineer.use", "engineer.command.manage", "files.read"):
+        capabilities = ["engineer.use", "engineer.command.manage"]
+        if row.get("kind") == TERMINAL_NOTIFICATION_KIND:
+            capabilities.append("files.read")
+        for capability in capabilities:
             state.auth_service.require(actor, capability)
     except (AuthorizationError, ValueError) as exc:
         raise TerminalDeliveryError("terminal_authorization_changed") from exc
@@ -179,6 +184,25 @@ async def notifications_pending(
                 "dedup_key": row.get("dedup_key") or "",
                 "caption": projection["caption"],
                 "artifact": projection["artifact"],
+            }
+        elif row.get("kind") == TERMINAL_TEXT_NOTIFICATION_KIND:
+            try:
+                actor = _terminal_delivery_actor(request.app.state, row)
+                projection = terminal_text_notification_projection(
+                    storage,
+                    row,
+                    tenant_id=actor.user_id,
+                    actor_id=actor.own_id,
+                )
+            except TerminalDeliveryError:
+                invalid_terminal.append(str(row["id"]))
+                continue
+            item = {
+                "id": row["id"],
+                "chat_id": row["chat_id"],
+                "body": projection["body"],
+                "kind": TERMINAL_TEXT_NOTIFICATION_KIND,
+                "dedup_key": row.get("dedup_key") or "",
             }
         elif row.get("kind") == PROGRESS_NOTIFICATION_KIND:
             try:

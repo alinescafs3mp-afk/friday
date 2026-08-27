@@ -65,7 +65,11 @@ class RuntimeMixin(StorageShared):
             f"""SELECT n.id, n.user_id, n.chat_id, n.kind, n.dedup_key, n.body
                   FROM outbound_notifications n
                  WHERE n.status='pending' AND n.attempts < ?
-                   AND (n.kind IN ('engineer_command_terminal','engineer_command_progress')
+                   AND (n.kind IN (
+                            'engineer_command_terminal',
+                            'engineer_command_terminal_text',
+                            'engineer_command_progress'
+                        )
                         OR {_not_private_notification_dependency("n")})
                  ORDER BY n.created_at ASC LIMIT ?""",  # nosec B608
             (max(1, int(max_attempts)), max(1, min(int(limit), 100))),
@@ -228,17 +232,23 @@ class RuntimeMixin(StorageShared):
                        SET status='failed',
                            dedup_key=CASE WHEN kind IN (
                                               'engineer_command_terminal',
+                                              'engineer_command_terminal_text',
                                               'engineer_command_progress'
                                           )
                                           THEN dedup_key ELSE '' END,
                            kind=CASE
                                WHEN kind IN (
                                    'engineer_command_terminal',
+                                   'engineer_command_terminal_text',
                                    'engineer_command_progress'
                                )
                                THEN kind ELSE ? END
                        WHERE id=? AND status='pending'
-                         AND (kind IN ('engineer_command_terminal','engineer_command_progress')
+                         AND (kind IN (
+                                  'engineer_command_terminal',
+                                  'engineer_command_terminal_text',
+                                  'engineer_command_progress'
+                              )
                               OR {_not_private_notification_dependency("n")})""",  # nosec B608
                     (marker, notification_id),
                 )
@@ -285,10 +295,15 @@ class RuntimeMixin(StorageShared):
                            AND (status='pending'
                                 OR (kind IN (
                                         'engineer_command_terminal',
+                                        'engineer_command_terminal_text',
                                         'engineer_command_progress'
                                     ) AND status='failed'
                                     AND attempts < ?))
-                           AND (kind IN ('engineer_command_terminal','engineer_command_progress')
+                           AND (kind IN (
+                                    'engineer_command_terminal',
+                                    'engineer_command_terminal_text',
+                                    'engineer_command_progress'
+                                )
                                 OR {_not_private_notification_dependency("n")})""",  # nosec B608
                     (utc_now(), notif_id, attempt_cap),
                 )
@@ -303,11 +318,16 @@ class RuntimeMixin(StorageShared):
                                WHEN attempts + 1 >= ?
                                 AND kind NOT IN (
                                     'engineer_command_terminal',
+                                    'engineer_command_terminal_text',
                                     'engineer_command_progress'
                                 )
                                THEN '' ELSE dedup_key END
                        WHERE id=? AND status='pending'
-                         AND (kind IN ('engineer_command_terminal','engineer_command_progress')
+                         AND (kind IN (
+                                  'engineer_command_terminal',
+                                  'engineer_command_terminal_text',
+                                  'engineer_command_progress'
+                              )
                               OR {_not_private_notification_dependency("n")})""",  # nosec B608
                     (attempt_cap, attempt_cap, notif_id),
                 )
@@ -334,6 +354,7 @@ class RuntimeMixin(StorageShared):
                 status = str(row["status"] or "")
                 if str(row["kind"] or "") not in {
                     "engineer_command_terminal",
+                    "engineer_command_terminal_text",
                     "engineer_command_progress",
                 }:
                     visible = conn.execute(

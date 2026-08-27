@@ -2188,11 +2188,11 @@ _ENGINEER_COMMAND_PRIVATE_ARGUMENTS = frozenset(
     {"_conversation_id", "_source_message_id", "_telegram_update_id", "_step_id"}
 )
 _ENGINEER_OPERATIONAL_HISTORY_METADATA_KEYS = frozenset(
-    {"engineer_command_progress", "engineer_command_terminal"}
+    {"engineer_command_progress", "engineer_command_terminal", "engineer_command_terminal_text"}
 )
 _ENGINEER_RESERVED_TERMINAL_CLAIM = re.compile(
-    r"^Engineer-задание [0-9a-f]{8,64} "
-    r"(?:завершено|завершилось с ошибкой|отменено|остановлено по тайм-ауту)\."
+    r"^Engineer-зада(?:ние|ча) `?[0-9a-f]{8,64}`? "
+    r"(?:завершен[ао]|завершил(?:ась|ось) с ошибкой|отменен[ао]|остановлен[ао] по тайм-ауту)\."
     r"(?: Проверенный архив результата приложен\.)?(?:\s|$)"
 )
 _ENGINEER_RESERVED_TERMINAL_REPAIR = (
@@ -2235,8 +2235,8 @@ _ENGINEER_UNSTARTED_FUTURE_CLAIM = re.compile(
     re.IGNORECASE,
 )
 _ENGINEER_UNSTARTED_PROGRESS_REPAIR = (
-    "Предыдущий ответ заявил, что работа уже началась, но в этом ходе не было ни одного "
-    "вызова инструмента. Текст не запускает действие. Если запрос требует работы на машине, "
+    "Предыдущий ответ объявил начало или будущее выполнение работы, но в этом ходе не было "
+    "ни одного вызова инструмента. Текст не запускает действие. Если запрос требует работы на машине, "
     "вызови engineer_command_run прямо сейчас; если действие не требуется или отменено, ответь "
     "без утверждения о запущенной работе."
 )
@@ -2302,6 +2302,22 @@ def _engineer_command_provider_failure_result(data: Any) -> str:
     if not stdout and not stderr:
         parts.append("Команда не вернула текстового вывода.")
     return "\n\n".join(parts)
+
+
+def _engineer_command_in_progress_result(data: Any) -> str:
+    """Return one code-owned durable-job status instead of model polling."""
+
+    if not isinstance(data, Mapping) or data.get("ok") is not True:
+        return ""
+    status = str(data.get("status") or "").strip().casefold()
+    job_id = str(data.get("job_id") or "").strip()
+    if status not in {"planned", "admitted", "running"} or re.fullmatch(r"[0-9a-f]{32}", job_id) is None:
+        return ""
+    return (
+        "Engineer-команда действительно запущена и продолжает выполняться. "
+        f"Job: {job_id}. Повторно команда не запускалась; дальнейшее состояние "
+        "отслеживает фоновый контур прогресса."
+    )
 
 
 _ENGINEER_RECEIPT_BASE_TOOL_VERSIONS = {
@@ -36321,7 +36337,10 @@ MODE_GUIDANCE = {
         "подтверждения /approvals нет. После каждого быстрого шага изучай stdout, stderr и exit code, "
         "а следующий шаг выбирай по фактическому результату. Не объединяй зависимые проверки в "
         "параллельный пакет. Долгая команда становится durable job: честно сообщи job_id и используй "
-        "status/cancel, когда это нужно. Текущие Telegram-вложения находятся в $FRIDAY_INPUT_DIR, "
+        "status/cancel, когда это нужно. По умолчанию не задавай timeout_sec: без него durable job "
+        "работает до естественного завершения. Тайм-аут задавай только когда самой задаче действительно "
+        "нужен предел; не подменяй им оценку длительности большого файла, полного сканирования, сборки "
+        "или декомпиляции. Текущие Telegram-вложения находятся в $FRIDAY_INPUT_DIR, "
         "рабочие файлы создавай в $FRIDAY_WORK_DIR, а предназначенные владельцу результаты клади в "
         "$FRIDAY_OUTPUT_DIR — они будут доставлены через Telegram. Не заявляй об успехе без результата "
         "команды или проверяемого файла; исходники сохраняй, а существенные изменения и хэши указывай."
@@ -36342,9 +36361,15 @@ engineer_command_run запускает произвольную shell-кома�
 $FRIDAY_OUTPUT_DIR автоматически упаковывается и отправляется в Telegram. Если нужной программы нет,
 назови владельцу точный executable и пакет, который требуется установить.
 
+Объёмную или непредсказуемую работу выполняй стадийно: сначала дешёвый ограниченный шаг разведки,
+затем оцени его фактический результат и запускай только нужные зависимые углублённые шаги. Полный обход,
+сборку, тесты, сканирование или декомпиляцию оставляй отдельной durable job без угаданного дедлайна.
 После каждого шага изучай stdout, stderr, exit code и созданные файлы. Если цель не достигнута,
 выбирай следующий шаг; не останавливайся после одной команды. Долгие команды оставляй durable job и
-используй engineer_command_status/engineer_command_cancel. Не объявляй успех без фактического результата.
+используй engineer_command_status/engineer_command_cancel. По умолчанию опускай timeout_sec: тогда
+durable job не получает произвольного короткого дедлайна. Указывай его только когда предел является
+частью самой задачи; большие файлы, полный сетевой анализ, сборка и декомпиляция сами по себе требуют
+фонового выполнения, а не угаданного лимита в 300 секунд. Не объявляй успех без фактического результата.
 Отвечай на языке владельца, кратко и по делу; не показывай служебный протокол вызовов без необходимости.
 """
 
@@ -64982,6 +65007,32 @@ class AgentRuntime:
                             "output": canonical_tool_evidence or str(rendered),
                         }
                     )
+                if (
+                    autonomous_engineer
+                    and tool_result.success
+                    and call.name in {"engineer_command_run", "engineer_command_status"}
+                ):
+                    durable_progress = _engineer_command_in_progress_result(tool_result.data)
+                    if durable_progress:
+                        # A durable command owns its own progress worker.  Asking
+                        # the model to poll status in the same turn spent 21
+                        # generations on one live nmap job, then published only
+                        # another vague progress claim.  Return the observed
+                        # state once; terminal work remains queryable and file
+                        # results retain their independent delivery path.
+                        self._freeze_archive_search_ledger(context)
+                        return {
+                            "content": durable_progress,
+                            "_model_generated": False,
+                            "tools_used": tools_used,
+                            "web_query_notice": " ".join(web_notice),
+                            "knowledge_object_ids": tool_knowledge_ids,
+                            "tool_evidence": tool_evidence,
+                            "llm_failed": False,
+                            "voice_clip": voice_clip,
+                            "file_clips": file_clips,
+                            "_structural_file_count": structural_file_count,
+                        }
                 if forced_workspace_call and workspace_exact_content:
                     if tool_result.success and call.name == "workspace_create":
                         return {

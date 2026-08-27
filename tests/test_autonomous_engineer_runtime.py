@@ -7,7 +7,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from friday.agent_runtime import AgentContext, AgentRuntime
+from friday.agent_runtime import AUTONOMOUS_ENGINEER_SYSTEM_PROMPT, AgentContext, AgentRuntime
 from friday.execution_kernel import ToolResult
 from friday.permissions import LEGACY_OWNER_USER_ID, ActorContext
 
@@ -25,6 +25,13 @@ def _schema(name: str) -> dict[str, object]:
             },
         },
     }
+
+
+def test_autonomous_prompt_requires_staged_unbounded_long_work() -> None:
+    folded = AUTONOMOUS_ENGINEER_SYSTEM_PROMPT.casefold()
+    assert "выполняй стадийно" in folded
+    assert "durable job без угаданного дедлайна" in folded
+    assert "не останавливайся после одной команды" in folded
 
 
 class _AnswerModel:
@@ -326,6 +333,22 @@ class _StatusRecoveryCommandKernel(_CommandKernel):
                 "exit_code": 0,
                 "stdout": "verified scan output",
                 "stderr": "",
+            },
+        )
+
+
+class _RunningCommandKernel(_CommandKernel):
+    async def execute(self, name, arguments, *, actor):  # noqa: ANN001
+        self.executions.append((name, dict(arguments), actor))
+        return ToolResult(
+            name,
+            True,
+            data={
+                "ok": True,
+                "job_id": "2" * 32,
+                "status": "running",
+                "stdout_bytes": 22,
+                "stderr_bytes": 0,
             },
         )
 
@@ -658,6 +681,40 @@ async def test_command_result_survives_primary_provider_failure(
     assert response["llm_failed"] is True
     assert "проверенный сырой результат" in response["content"]
     assert "verified scan output" in response["content"]
+
+
+@pytest.mark.asyncio
+async def test_running_command_returns_durable_status_without_model_polling(
+    settings,
+    storage,
+    monkeypatch,
+) -> None:
+    actor = ActorContext(LEGACY_OWNER_USER_ID, "owner", "telegram-bridge")
+    storage.ensure_user(actor.own_id, preset_key="owner")
+    model = _CommandModel({"command": "nmap 192.168.1.35"})
+    kernel = _RunningCommandKernel()
+    runtime = AgentRuntime(
+        replace(settings, engineer_mode_enabled=True, engineer_command_enabled=True),
+        storage,
+        llm=model,  # type: ignore[arg-type]
+        kernel=kernel,  # type: ignore[arg-type]
+    )
+    monkeypatch.setattr(runtime, "_fresh_engineer_actor", lambda current, _capability: current)
+
+    response = await runtime._agentic_loop(  # noqa: SLF001
+        _context(),
+        "Найди уязвимости хоста.",
+        actor,
+        tools=[_schema("engineer_command_run"), _schema("engineer_command_status")],
+        attachments=None,
+    )
+
+    assert model.calls == 1
+    assert [entry[0] for entry in kernel.executions] == ["engineer_command_run"]
+    assert response["tools_used"] == ["engineer_command_run"]
+    assert response["llm_failed"] is False
+    assert "действительно запущена" in response["content"]
+    assert "2" * 32 in response["content"]
 
 
 @pytest.mark.asyncio

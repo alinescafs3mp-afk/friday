@@ -14,7 +14,8 @@ from friday.storage.models import new_id, utc_now
 from friday.user_ids import USER_ID_RE
 
 PROGRESS_NOTIFICATION_KIND = "engineer_command_progress"
-PROGRESS_ENVELOPE_SCHEMA = "friday.engineer-command-progress.v1"
+PROGRESS_ENVELOPE_SCHEMA = "friday.engineer-command-progress.v2"
+_LEGACY_PROGRESS_ENVELOPE_SCHEMA = "friday.engineer-command-progress.v1"
 PROGRESS_CHECKPOINTS_SEC = (60, 300, 900, 1800)
 
 _ENVELOPE_MAX_BYTES = 4 * 1024
@@ -83,7 +84,7 @@ def parse_progress_envelope(value: object) -> dict[str, Any]:
         raise ProgressDeliveryError("progress_envelope_invalid") from exc
     if not isinstance(parsed, dict) or _canonical_json(parsed) != value:
         raise ProgressDeliveryError("progress_envelope_noncanonical")
-    if set(parsed) != {
+    common_shape = {
         "actor_id",
         "checkpoint_sec",
         "conversation_id",
@@ -96,10 +97,17 @@ def parse_progress_envelope(value: object) -> dict[str, Any]:
         "stderr_bytes",
         "stdout_bytes",
         "tenant_id",
-    }:
+    }
+    schema = parsed.get("schema")
+    expected_shape = (
+        common_shape
+        if schema == _LEGACY_PROGRESS_ENVELOPE_SCHEMA
+        else common_shape | {"elapsed_sec", "remaining_sec", "stage", "timeout_sec"}
+    )
+    if set(parsed) != expected_shape:
         raise ProgressDeliveryError("progress_envelope_shape_invalid")
     if (
-        parsed.get("schema") != PROGRESS_ENVELOPE_SCHEMA
+        schema not in {PROGRESS_ENVELOPE_SCHEMA, _LEGACY_PROGRESS_ENVELOPE_SCHEMA}
         or parsed.get("status") != "running"
         or not isinstance(parsed.get("actor_id"), str)
         or USER_ID_RE.fullmatch(parsed["actor_id"]) is None
@@ -115,10 +123,48 @@ def parse_progress_envelope(value: object) -> dict[str, Any]:
         or not isinstance(parsed.get("output_activity"), bool)
     ):
         raise ProgressDeliveryError("progress_envelope_invalid")
+    if schema == PROGRESS_ENVELOPE_SCHEMA:
+        remaining_sec = parsed.get("remaining_sec")
+        if (
+            parsed.get("stage") != "command_running"
+            or not _valid_counter(parsed.get("elapsed_sec"))
+            or not _valid_counter(parsed.get("timeout_sec"))
+            or (remaining_sec is not None and not _valid_counter(remaining_sec))
+            or int(parsed["elapsed_sec"]) < int(parsed["checkpoint_sec"])
+            or (int(parsed["timeout_sec"]) == 0 and remaining_sec is not None)
+            or (
+                int(parsed["timeout_sec"]) > 0
+                and remaining_sec != max(0, int(parsed["timeout_sec"]) - int(parsed["elapsed_sec"]))
+            )
+        ):
+            raise ProgressDeliveryError("progress_envelope_invalid")
     return parsed
 
 
 def _progress_text(envelope: Mapping[str, Any]) -> str:
+    if envelope.get("schema") == PROGRESS_ENVELOPE_SCHEMA:
+        elapsed_sec = int(envelope["elapsed_sec"])
+        elapsed = f"{elapsed_sec // 60} мин {elapsed_sec % 60} с" if elapsed_sec >= 60 else f"{elapsed_sec} с"
+        timeout_sec = int(envelope["timeout_sec"])
+        if timeout_sec:
+            remaining_sec = int(envelope["remaining_sec"])
+            remaining = (
+                f"{remaining_sec // 60} мин {remaining_sec % 60} с"
+                if remaining_sec >= 60
+                else f"{remaining_sec} с"
+            )
+            deadline = f"До заданного тайм-аута: около {remaining}."
+        else:
+            deadline = "Жёсткий тайм-аут не задан."
+        output = (
+            f"Получено вывода: stdout {envelope['stdout_bytes']} Б, stderr {envelope['stderr_bytes']} Б."
+            if envelope["output_activity"]
+            else "Текстового вывода пока нет."
+        )
+        return (
+            f"⏳ Engineer-задача `{envelope['job_id']}` выполняется {elapsed}. "
+            f"Этап: выполняется команда. {output} {deadline}"
+        )
     activity = "да" if envelope["output_activity"] else "нет"
     return (
         f"Engineer-задача {envelope['job_id']} на момент проверки выполнялась не менее "
@@ -172,11 +218,17 @@ def stage_progress_notification(
     stdout_bytes: int,
     stderr_bytes: int,
     output_activity: bool,
+    elapsed_sec: int | None = None,
+    timeout_sec: int = 0,
 ) -> StagedProgressNotification:
     """Stage or prove the exact durable carrier before a producer checkpoint CAS."""
 
     dedup_key = progress_dedup_key(job_id, checkpoint_sec)
     # Validate caller values through the same parser that owns bridge projection.
+    elapsed = checkpoint_sec if elapsed_sec is None else elapsed_sec
+    if not _valid_counter(elapsed) or int(elapsed) < checkpoint_sec or not _valid_counter(timeout_sec):
+        raise ProgressDeliveryError("progress_envelope_invalid")
+    remaining_sec = None if timeout_sec == 0 else max(0, int(timeout_sec) - int(elapsed))
     probe = {
         "schema": PROGRESS_ENVELOPE_SCHEMA,
         "notification_id": "notif_" + "0" * 16,
@@ -190,6 +242,10 @@ def stage_progress_notification(
         "stdout_bytes": stdout_bytes,
         "stderr_bytes": stderr_bytes,
         "output_activity": output_activity,
+        "elapsed_sec": int(elapsed),
+        "remaining_sec": remaining_sec,
+        "stage": "command_running",
+        "timeout_sec": int(timeout_sec),
     }
     parse_progress_envelope(_canonical_json(probe))
 

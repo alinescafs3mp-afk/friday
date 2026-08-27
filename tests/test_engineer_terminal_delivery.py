@@ -2,12 +2,15 @@ from __future__ import annotations
 
 import base64
 import threading
+from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
 import pytest
+from starlette.requests import Request
 
+from friday.api.notifications import notifications_pending
 from friday.organs.engineer import EngineerOrgan
 from friday.organs.engineer.command import (
     CommandLane,
@@ -27,12 +30,16 @@ from friday.organs.engineer.command_tools import EngineerCommandService
 from friday.organs.engineer.publication import ExactGeneratedFileBatch, exact_generated_file_batch
 from friday.organs.engineer.terminal_delivery import (
     TERMINAL_NOTIFICATION_KIND,
+    TERMINAL_TEXT_NOTIFICATION_KIND,
     TerminalDeliveryError,
     parse_terminal_envelope,
+    parse_terminal_text_envelope,
     read_terminal_notification_artifact,
     stage_terminal_archive,
+    stage_terminal_text,
     terminal_notification_projection,
     terminal_notification_status,
+    terminal_text_notification_projection,
 )
 from friday.permissions import LEGACY_OWNER_USER_ID, AuthorizationService
 
@@ -379,6 +386,87 @@ def _worker_service(
     return service
 
 
+@pytest.mark.asyncio
+async def test_terminal_text_pending_does_not_require_file_read(settings, storage) -> None:
+    conversation_id, source_message_id = _main_scope(storage)
+    receipt = _receipt(b"", generated=False, stdout=b"scan complete\n")
+    staged = stage_terminal_text(
+        storage,
+        actor_id=LEGACY_OWNER_USER_ID,
+        tenant_id=LEGACY_OWNER_USER_ID,
+        conversation_id=conversation_id,
+        source_message_id=source_message_id,
+        delivery_chat_id="5001",
+        receipt=receipt,
+    )
+    authorization = AuthorizationService(storage)
+    for capability in EngineerOrgan().capabilities():
+        authorization.register_capability(capability)
+    authorization.deny_permission(LEGACY_OWNER_USER_ID, "files.read")
+    app = SimpleNamespace(
+        state=SimpleNamespace(
+            storage=storage,
+            settings=replace(settings, engineer_mode_enabled=True, engineer_command_enabled=True),
+            auth_service=authorization,
+        )
+    )
+    request = Request({"type": "http", "method": "GET", "path": "/", "app": app})
+    request.state.actor = SimpleNamespace(source="telegram-bridge")
+
+    pending = await notifications_pending(request, limit=20)
+
+    assert pending["items"] == [
+        {
+            "id": staged.notification_id,
+            "chat_id": "5001",
+            "body": terminal_text_notification_projection(
+                storage,
+                storage.list_pending_notifications()[0],
+                tenant_id=LEGACY_OWNER_USER_ID,
+                actor_id=LEGACY_OWNER_USER_ID,
+            )["body"],
+            "kind": TERMINAL_TEXT_NOTIFICATION_KIND,
+            "dedup_key": staged.dedup_key,
+        }
+    ]
+
+
+def test_terminal_text_reports_timeout_and_bounded_output(storage) -> None:
+    conversation_id, source_message_id = _main_scope(storage)
+    receipt = replace(
+        _receipt(b"", generated=False, stdout=(b"x" * 8_000)),
+        status=CommandStatus.TIMEOUT,
+        exit_code=None,
+        signal=15,
+        timed_out=True,
+        finished_at=310.0,
+    )
+    staged = stage_terminal_text(
+        storage,
+        actor_id=LEGACY_OWNER_USER_ID,
+        tenant_id=LEGACY_OWNER_USER_ID,
+        conversation_id=conversation_id,
+        source_message_id=source_message_id,
+        delivery_chat_id="5001",
+        receipt=receipt,
+    )
+    row = storage.execute(
+        "SELECT id,user_id,chat_id,kind,dedup_key,body,status FROM outbound_notifications WHERE id=?",
+        (staged.notification_id,),
+    ).fetchone()
+    assert row is not None
+    body = terminal_text_notification_projection(
+        storage,
+        dict(row),
+        tenant_id=LEGACY_OWNER_USER_ID,
+        actor_id=LEGACY_OWNER_USER_ID,
+    )["body"]
+    assert "остановлена по тайм-ауту" in body
+    assert "за 300 с" in body
+    assert "вывод сокращён" in body
+    assert len(body) <= 3_800
+
+
 def test_worker_stages_without_model_and_reconciles_sent(storage, tmp_path: Path) -> None:
     conversation_id, source_message_id = _main_scope(storage)
     command_store = CommandJobStore(tmp_path / "commands")
@@ -415,7 +503,7 @@ def test_worker_stages_without_model_and_reconciles_sent(storage, tmp_path: Path
 
 
 @pytest.mark.parametrize("status", [CommandStatus.COMPLETED, CommandStatus.FAILED])
-def test_worker_suppresses_zero_generated_outputs_without_archive_delivery(
+def test_worker_delivers_zero_generated_outputs_as_text_without_empty_archive(
     storage,
     tmp_path: Path,
     status: CommandStatus,
@@ -435,9 +523,20 @@ def test_worker_suppresses_zero_generated_outputs_without_archive_delivery(
         "zero-output publication must not build or read an archive"
     )
 
-    expected = {"staged": 0, "reconciled": 0, "failed": 0}
-    assert service.publish_terminal_jobs() == expected
-    assert storage.list_pending_notifications() == []
+    assert service.publish_terminal_jobs() == {"staged": 1, "reconciled": 0, "failed": 0}
+    queued = storage.list_pending_notifications()
+    assert len(queued) == 1 and queued[0]["kind"] == TERMINAL_TEXT_NOTIFICATION_KIND
+    assert "console result" not in str(queued[0]["body"])
+    envelope = parse_terminal_text_envelope(queued[0]["body"])
+    assert envelope["job_id"] == receipt.job_id
+    projection = terminal_text_notification_projection(
+        storage,
+        queued[0],
+        tenant_id=LEGACY_OWNER_USER_ID,
+        actor_id=LEGACY_OWNER_USER_ID,
+    )
+    assert "console result" in projection["body"]
+    assert ("завершена" if status is CommandStatus.COMPLETED else "с ошибкой") in projection["body"]
     publication = command_store._conn.execute(  # noqa: SLF001 - exact durable assertion
         """SELECT state,last_error_code,attempts,notification_id,dedup_key,envelope_sha256
              FROM command_job_publications WHERE job_id=?""",
@@ -452,8 +551,8 @@ def test_worker_suppresses_zero_generated_outputs_without_archive_delivery(
         "notification_id": "",
         "state": "blocked",
     }
-    assert service.publish_terminal_jobs() == expected
-    assert storage.list_pending_notifications() == []
+    assert service.publish_terminal_jobs() == {"staged": 0, "reconciled": 0, "failed": 0}
+    assert len(storage.list_pending_notifications()) == 1
     assert not (tmp_path / "files").exists()
     command_store.close()
 

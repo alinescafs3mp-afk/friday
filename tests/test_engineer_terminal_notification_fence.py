@@ -541,6 +541,34 @@ def test_verified_discard_keeps_strict_terminal_identity_for_reconciliation(stor
     }
 
 
+def test_terminal_text_keeps_identity_through_retry_and_retirement(storage):
+    storage.ensure_user("alice")
+    dedup_key = "engineer-terminal:text:" + "1" * 32 + ":" + "2" * 64
+    assert storage.enqueue_notification(
+        "alice",
+        "5001",
+        "{}",
+        kind="engineer_command_terminal_text",
+        dedup_key=dedup_key,
+    )
+    notification_id = storage.list_pending_notifications()[0]["id"]
+    assert storage.acknowledge_notifications(failed_ids=[notification_id])["pending"] == [notification_id]
+    assert storage.discard_notifications_verified(
+        [notification_id],
+        reason="chat_not_allowed",
+    ) == [notification_id]
+    row = storage.execute(
+        "SELECT status,kind,dedup_key FROM outbound_notifications WHERE id=?",
+        (notification_id,),
+    ).fetchone()
+    assert row is not None
+    assert dict(row) == {
+        "status": "failed",
+        "kind": "engineer_command_terminal_text",
+        "dedup_key": dedup_key,
+    }
+
+
 def _bridge_request(storage: Any, body: dict[str, Any] | None = None) -> Request:
     app = SimpleNamespace(state=SimpleNamespace(storage=storage, settings=object()))
     request = Request({"type": "http", "method": "POST", "path": "/", "app": app})

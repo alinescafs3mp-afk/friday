@@ -30,7 +30,10 @@ from friday.organs.engineer.command.kernel import _terminal_receipt_fields
 from friday.organs.engineer.command.store import CommandJobStore, atomic_write
 from friday.organs.engineer.command.workspace import JobWorkspace
 from friday.organs.engineer.command_tools import EngineerCommandService
-from friday.organs.engineer.terminal_delivery import parse_terminal_envelope
+from friday.organs.engineer.terminal_delivery import (
+    TERMINAL_TEXT_NOTIFICATION_KIND,
+    parse_terminal_envelope,
+)
 from friday.permissions import LEGACY_OWNER_USER_ID, AuthorizationService
 
 _JOB_ID = "3" * 32
@@ -301,12 +304,15 @@ def test_retention_uses_historical_artifact_size_not_current_upload_limit(
     service.kernel.close()
 
 
-def test_suppressed_no_output_job_is_retired_without_a_carrier(storage, tmp_path: Path) -> None:
+def test_text_delivered_no_file_job_retires_workspace_without_an_archive(storage, tmp_path: Path) -> None:
     service, receipt = _service(storage, tmp_path, generated_output=False)
     now = time.time()
     old = now - 31 * 24 * 60 * 60
 
-    assert service.publish_terminal_jobs() == {"staged": 0, "reconciled": 0, "failed": 0}
+    assert service.publish_terminal_jobs() == {"staged": 1, "reconciled": 0, "failed": 0}
+    queued = storage.list_pending_notifications()
+    assert len(queued) == 1 and queued[0]["kind"] == TERMINAL_TEXT_NOTIFICATION_KIND
+    storage.mark_notifications(sent_ids=[queued[0]["id"]])
     assert storage.list_pending_notifications() == []
     with service.kernel.store.transaction():
         service.kernel.store._conn.execute(  # noqa: SLF001 - exact aging fixture
