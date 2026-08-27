@@ -12,14 +12,14 @@ the current production identity, completed packages, active work and next order.
   is code-staged only as provisional shadow/extract and is not accepted or live.
   The primary remains the sole final-publication, tool and effect authority.
   Every secondary miss preserves the exact primary-only path.
-- Deployed implementation head: `f9e88471d69744263b5ed7d3d0ed6e8e9556de17`
-- Live: Friday `0.207.57` / `f9e88471d69744263b5ed7d3d0ed6e8e9556de17`;
-  tree `fd6f04b581b8ac5e8e8cc3945fddd2d38bc301530d080fbe26e453f51d8d3e92`;
-  wheel `d2f836dbe177d3d5d770c2913f90bd48b2ada021c88051082f86a7a49cf03ed5`.
-- Immediate predecessor and schema-capable fallback: Friday `0.207.56` /
-  `595467ef4c7ec3b49530c1f3c71f3fd947173eef`, tree
-  `da0fa77c0288138693a49baa95f340514c6b289b338b433ca6f1477adfdd7055`,
-  wheel `96488376b1151c9426cca5f379257ae35f9a0753bee1d72e49fe88263bc96141`.
+- Deployed implementation head: `2374497714068d8d18b4f3c70f5888809ca15e73`
+- Live: Friday `0.207.60` / `2374497714068d8d18b4f3c70f5888809ca15e73`;
+  tree `2bec743058f9ce8c09a74e29bee0aa65b08614ac10a497bc485c6e72b18d0304`;
+  wheel `f7e0194a533463f46939120356f7b30a1c8ed9ac9c573a06834c1d2a5461228c`.
+- Immediate predecessor and schema-capable fallback: Friday `0.207.59` /
+  `dbbf26f1db581aa2545326aa5c4527b2a6b4591e`, tree
+  `b36b9273fd04fd9d64c47bebf47bab36f70f12830679c8f555a36348ea81bb1c`,
+  wheel `32b190ab8941709fd5cea9f1051eaf25872fde1e6f956592fa2eb4f949a79646`.
 - Database schema: 43
 - Production state: immutable activation `clear`; backend and Telegram bridge
   active; trusted-CA HTTPS health `200`; SQLite integrity and FK checks clean.
@@ -95,6 +95,18 @@ the current production identity, completed packages, active work and next order.
   also restores managed Syncthing after service restart by using its stable
   persisted Unix-socket root; reconciliation runs immediately and reports a
   failed profile as failed worker health rather than false success.
+  `0.207.58` repairs the live autonomous loop: exact systemd duration parsing,
+  current Telegram-upload admission, one execution of an identical failed
+  step, code-owned terminal truth and publication only when a command actually
+  generated output files. A live PE smoke completed through the real command
+  kernel with a 300-second budget and correctly produced no empty archive.
+  `0.207.59`/`0.207.60` remove V12 restart false negatives without weakening
+  attestation: SGLang's four-surface load witness, cancellation drain and
+  exact-zero same-epoch convergence remain bounded and fail closed, but now use
+  live-measured timing budgets. Production is configured/installed `canary`,
+  routes `[archive_read, file_read]`, gate `canary_ready`, reason
+  `live_attestation_clear`, verified context 8192 and probe-suite SHA-256
+  `36999c084e580bf770e7cc584ec6b258c4f1af202f0527831f8f23047d8c583e`.
   The exact accepted secondary profile remains configured in bounded `assist`
   and is probed on
   demand; its exact post-cutover canary passed, while laptop absence preserves
@@ -115,7 +127,7 @@ the current production identity, completed packages, active work and next order.
   while the backlog converges. `0.207.52` repairs the canary wrapper's full
   Telegram carrier surface; signed Telegram requests no longer fail before the
   model/tool boundary. The current activation terminal receipt is
-  `0499480a8565a6ef9e677c384a951fde88eefdf19a771ff541ad6798a3dbbcbd`.
+  `47371dcef8cfeebea967c1ff22862b70063d385a6d3ceb2235132b555997c21e`.
 - Delivery constraints: no Docker for primary Friday release certification;
   companion plugin untouched; small commits and immutable wheel-only production
   releases. The optional laptop inference node is a separate Docker contour.
@@ -128,8 +140,9 @@ fresh owner identity, current Telegram source/update/conversation binding and
 capability checks stay mandatory, while no guest, unsigned API turn, quoted
 message, document, web page or attachment may mint execution authority.
 
-The active objective is now to integrate and independently certify the Semantic
-Supervisor through default-off, shadow, limited assist and canary. After that,
+The active objective is now to resume the preserved integration checkpoint and
+independently certify the Semantic Supervisor through default-off, shadow,
+limited assist and canary. After that,
 execute the remaining work by product value and
 risk. The full canonical order and estimates are in
 `outer_sol/PROJECT_EXECUTION_BACKLOG_2026-08-27.md`. Docker and companion-plugin
@@ -239,12 +252,12 @@ course, with these repository-specific constraints:
 
 ## In progress
 
-1. Add exact Telegram input grants and deterministic source/output bundling;
-   then run one compact live
-   approval/result/input smoke.
-2. Rebase and independently
-   gate the Semantic Supervisor, then roll it out default-off → shadow → limited
-   assist → canary.
+1. Rebase and independently gate the Semantic Supervisor, then roll it out
+   default-off → shadow → limited assist → canary. Resume the existing
+   conflict-resolution checkpoint; do not merge the stale handoff wholesale.
+2. Keep Engineer, documents/Office, web, Obsidian and Telegram golden journeys
+   release-blocking, with compact live smokes only where deterministic tests
+   cannot prove the production seam.
 3. Continue Interaction Control Plane, operational-memory, release-evidence and
    document/retrieval convergence in the order
    recorded by `PROJECT_EXECUTION_BACKLOG_2026-08-27.md`.
@@ -823,6 +836,12 @@ claims at this checkpoint.
 
 ## Current focused gate
 
+- `0.207.58`–`0.207.60`: 569 focused V12 regressions passed with 24 workers;
+  static checks and deterministic dual wheel build are clear. The immutable
+  activation is `clear`; both services are active and trusted-CA health is
+  `ok`/`0.207.60`. Live V12 health is `canary_ready` with exact registered
+  routes `[archive_read, file_read]`. The Engineer live PE smoke completed and
+  the no-output terminal path emitted no archive.
 - `0.207.57`: 471 focused Engineer/input/lifecycle/Obsidian regressions passed,
   followed by the complete native gate with 21,316 non-UI and 31 UI tests and
   zero skips. Two clean-source wheels reproduced byte-for-byte. Immutable

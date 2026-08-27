@@ -76,6 +76,16 @@ are deployed in `0.207.57`. The live signed owner smoke executed an installed
 command and returned exact stdout without an approval row. The P1 contour is
 closed; future Engineer expansion belongs to P7.
 
+Production regressions found after rollout are closed by `0.207.58`: composite
+systemd time budgets are parsed exactly, current Telegram uploads reach the
+autonomous service, an identical failed step executes once, model-authored fake
+terminal messages are rejected, and terminal delivery no longer creates empty
+archives. A real uploaded PE completed through the live command kernel with the
+requested 300-second timeout. `0.207.59`/`0.207.60` restore stable V12 restart
+attestation by widening only bounded SGLang observation budgets; same-epoch
+identity, exact-zero drain and fail-closed semantics remain intact. Production
+is `canary_ready` with `archive_read` and `file_read` live.
+
 ### P2 — integrate and roll out Semantic Supervisor
 
 Goal: use GPT-OSS as a bounded semantic supervisor/policy kernel while the
