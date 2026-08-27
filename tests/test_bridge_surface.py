@@ -448,6 +448,7 @@ EXPECTED_INBOX: dict[str, str] = {
     "mark_failure_many": "(self, update_ids: 'list[int]', error: 'str') -> 'bool'",
     "notification_delivery_part_states": "(self, notification_id: 'str') -> 'dict[str, str]'",
     "notification_delivery_ids": "(self) -> 'set[str]'",
+    "notification_delivery_outcome": "(self, notification_id: 'str') -> 'str | None'",
     "notification_delivery_orphan_outcomes": "(self, *, limit: 'int' = 100) -> 'dict[str, str]'",
     "notification_delivery_outcomes": "(self, *, limit: 'int' = 100) -> 'dict[str, str]'",
     "pending": "(self, *, now: 'float | None' = None, limit: 'int' = 20) -> 'list[dict[str, Any]]'",

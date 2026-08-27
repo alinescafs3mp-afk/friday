@@ -588,6 +588,16 @@ class _UpdateInbox:
         ).fetchall()
         return {str(row["notification_id"]): str(row["outcome"]) for row in rows}
 
+    def notification_delivery_outcome(self, notification_id: str) -> str | None:
+        """Return one exact strict outcome without relying on a bounded scan."""
+
+        row = self._conn.execute(
+            """SELECT outcome FROM notification_delivery_outcomes
+               WHERE notification_id=?""",
+            (str(notification_id),),
+        ).fetchone()
+        return str(row["outcome"]) if row is not None else None
+
     def notification_delivery_orphan_outcomes(self, *, limit: int = 100) -> dict[str, str]:
         """Infer bounded ACK outcomes for fences whose post-send write was interrupted."""
 

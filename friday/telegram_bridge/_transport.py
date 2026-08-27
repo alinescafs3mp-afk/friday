@@ -988,10 +988,26 @@ class TransportMixin(BridgeShared):
         # lost.  Its local fence is the only remaining evidence of sent versus
         # uncertain, so reconcile that evidence before cleanup.  Retired ids
         # without any strict local state are safe to discard immediately.
-        if retired:
-            self._inbox.forget_notification_delivery_parts(
-                [notification_id for notification_id in retired if notification_id not in terminal_outcomes]
-            )
+        retired_without_proof: list[str] = []
+        for notification_id in retired:
+            if notification_id in terminal_outcomes:
+                continue
+            exact_outcome = self._inbox.notification_delivery_outcome(notification_id)
+            if exact_outcome is None:
+                parts = self._inbox.notification_delivery_part_states(notification_id)
+                if parts:
+                    exact_outcome = (
+                        "sent" if all(state == "confirmed" for state in parts.values()) else "uncertain"
+                    )
+                    self._inbox.remember_notification_delivery_outcome(
+                        notification_id,
+                        exact_outcome,
+                    )
+            if exact_outcome is None:
+                retired_without_proof.append(notification_id)
+            else:
+                terminal_outcomes[notification_id] = exact_outcome
+        self._inbox.forget_notification_delivery_parts(retired_without_proof)
         sent: list[str] = [
             notification_id for notification_id, outcome in terminal_outcomes.items() if outcome == "sent"
         ]

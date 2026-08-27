@@ -422,6 +422,33 @@ async def test_lost_sent_ack_survives_later_authority_retirement(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_retired_fence_outside_bounded_orphan_scan_keeps_its_proof(tmp_path):
+    payload, item = b"PK\x03\x04archive", _terminal_item(b"PK\x03\x04archive")
+    bridge, backend = _bridge(tmp_path), _Backend(item, payload)
+    for index in range(100):
+        notification_id = f"notif_backlog_{index:03d}"
+        bridge._inbox.begin_notification_part_delivery(notification_id, "document:old")  # noqa: SLF001
+        assert bridge._inbox.confirm_notification_part_delivery(  # noqa: SLF001
+            notification_id,
+            "document:old",
+        )
+    bridge._inbox.begin_notification_part_delivery(item["id"], "document:newest")  # noqa: SLF001
+    assert bridge._inbox.confirm_notification_part_delivery(  # noqa: SLF001
+        item["id"],
+        "document:newest",
+    )
+    backend.status = "failed"
+    backend.retired = [item["id"]]
+    try:
+        await bridge._drain_outbound(_Telegram(), backend)  # noqa: SLF001
+        assert backend.status == "sent"
+        assert item["id"] not in bridge._inbox.notification_delivery_ids()  # noqa: SLF001
+        assert bridge._inbox.notification_delivery_ids() == set()  # noqa: SLF001
+    finally:
+        bridge._inbox.close()  # noqa: SLF001
+
+
+@pytest.mark.asyncio
 async def test_lost_retirement_response_still_bounds_orphan_fence_cleanup(tmp_path):
     payload, item = b"PK\x03\x04archive", _terminal_item(b"PK\x03\x04archive")
     bridge, backend = _bridge(tmp_path), _Backend(item, payload)
@@ -481,6 +508,8 @@ def test_storage_ack_reports_actual_retryable_terminal_and_missing_states(storag
     assert row is not None
     assert row["kind"] == "engineer_command_terminal"
     assert row["dedup_key"] == "engineer-terminal:job_1"
+    assert storage.acknowledge_notifications(sent_ids=[notification_id])["failed"] == [notification_id]
+    assert storage.acknowledge_notifications(uncertain_ids=[notification_id])["failed"] == [notification_id]
     missing = storage.acknowledge_notifications(sent_ids=["notif_missing"])
     assert missing["missing"] == ["notif_missing"]
 

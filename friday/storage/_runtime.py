@@ -277,10 +277,11 @@ class RuntimeMixin(StorageShared):
                     f"""UPDATE outbound_notifications AS n SET status='sent', sent_at=?
                          WHERE id=?
                            AND (status='pending'
-                                OR (kind='engineer_command_terminal' AND status='failed'))
+                                OR (kind='engineer_command_terminal' AND status='failed'
+                                    AND attempts < ?))
                            AND (kind='engineer_command_terminal'
                                 OR {_not_private_notification_dependency("n")})""",  # nosec B608
-                    (utc_now(), notif_id),
+                    (utc_now(), notif_id, attempt_cap),
                 )
             for notif_id in failed:
                 # A failed send stays pending for retry until the attempt cap;
@@ -306,9 +307,9 @@ class RuntimeMixin(StorageShared):
                     """UPDATE outbound_notifications AS n
                        SET status='uncertain', sent_at=?
                        WHERE id=? AND kind='engineer_command_terminal'
-                         AND status IN ('pending','failed')
+                         AND (status='pending' OR (status='failed' AND attempts < ?))
                        """,
-                    (utc_now(), notif_id),
+                    (utc_now(), notif_id, attempt_cap),
                 )
             for notif_id in requested:
                 row = conn.execute(
