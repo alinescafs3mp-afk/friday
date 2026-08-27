@@ -12,14 +12,14 @@ the current production identity, completed packages, active work and next order.
   is code-staged only as provisional shadow/extract and is not accepted or live.
   The primary remains the sole final-publication, tool and effect authority.
   Every secondary miss preserves the exact primary-only path.
-- Deployed implementation head: `a8ba3a5dc0894c9f726993dc9ce768e6260d1edd`
-- Live: Friday `0.207.52` / `a8ba3a5dc0894c9f726993dc9ce768e6260d1edd`;
-  tree `aa2af9c8366131454902c5a3f50fe1055e22b0fb5a0604a46e98dee4f89ae360`;
+- Deployed implementation head: `d5e5dec34f1803a4b836a1100d0bce97c04b9cf8`
+- Live: Friday `0.207.53` / `d5e5dec34f1803a4b836a1100d0bce97c04b9cf8`;
+  tree `a479364d65c22f9d4f136422ad1ab292c6180ffed86f139734623cbaed9097be`;
+  wheel `547b5f61333919d039972615f6093c0dfc91a354188339043b2ea2418c7c33fc`.
+- Immediate predecessor and schema-capable fallback: Friday `0.207.52` /
+  `a8ba3a5dc0894c9f726993dc9ce768e6260d1edd`, tree
+  `aa2af9c8366131454902c5a3f50fe1055e22b0fb5a0604a46e98dee4f89ae360`,
   wheel `e12d079386ad11e0dd93841f95e0a19ececdb274c4670f1e13e6fb13ff4f9a8e`.
-- Immediate predecessor and schema-capable fallback: Friday `0.207.51` /
-  `4b9b48adf1462cfc9af4f81c7158078ec3aab20a`, tree
-  `6a534f83cf030bb0beab856a4748abefcacca1b77f975c69ee2b0504451c8dd0`,
-  wheel `6f0a08312ac8dd5d815004027e442e19ba96d648477990d2e54557701dceb529`.
 - Database schema: 43
 - Production state: immutable activation `clear`; backend and Telegram bridge
   active; trusted-CA HTTPS health `200`; SQLite integrity and FK checks clean.
@@ -57,6 +57,13 @@ the current production identity, completed packages, active work and next order.
   and has truthful status/cancel plus bounded output evidence. The runner has
   no host-file, host-secret, Docker or network authority; network audits keep
   using their dedicated attested tools.
+  `0.207.53` adds exact sealed-output publication: every generated-file
+  descriptor is receipt-MAC-bound, bytes are revalidated against path, inode,
+  owner, mode, link count, size and SHA-256, and multiple outputs are packed in
+  a deterministic bounded ZIP with manifest and receipt. Status-triggered
+  Telegram delivery is conversation-scoped, re-authorized immediately before
+  persistence and never exposes binary bytes to the model transcript. Legacy,
+  stale, uncertain, raced or tampered carriers fail closed without publishing.
   The exact accepted secondary profile remains configured in bounded `assist`
   and is probed on
   demand; its exact post-cutover canary passed, while laptop absence preserves
@@ -77,16 +84,17 @@ the current production identity, completed packages, active work and next order.
   while the backlog converges. `0.207.52` repairs the canary wrapper's full
   Telegram carrier surface; signed Telegram requests no longer fail before the
   model/tool boundary. The current activation terminal receipt is
-  `4d3e162debd65864b2e1072f6a13f3ce726237e5b62bc79ed8d9fa83862e05aa`.
+  `1db961517d21ac55cfb5846010ca5d5238d37865c541742cff50f15defa12136`.
 - Delivery constraints: no Docker for primary Friday release certification;
   companion plugin untouched; small commits and immutable wheel-only production
   releases. The optional laptop inference node is a separate Docker contour.
 
 ## Active objective
 
-First close the already-live Engineer Mode into a complete production workflow:
-confirmed installed application, truthful progress/current-job control and
-exact Telegram file/archive delivery. Next integrate and independently certify
+First close the remaining Engineer Mode production workflow: automatic
+terminal delivery, truthful progress/current-job control, retention and exact
+Telegram input grants. Sealed status-triggered file/archive delivery is live.
+Next integrate and independently certify
 the Semantic Supervisor through default-off, shadow, limited assist and canary.
 After those two priorities, execute the remaining work by product value and
 risk. The full canonical order and estimates are in
@@ -117,7 +125,7 @@ accepted profile manifest hashes to
 `93ea5698b8b6a9bf8a7dc697ffe37d7353055aa16555188991747bba73d059e3` and
 its accepted physical-failure evidence hashes to
 `9dc72f80caed3320bd154cf1219a8bd6b1339142b690b00dd1cbe1fb05964006`.
-Live `0.207.52` admits exactly that accepted profile. The separate abliterated
+Live `0.207.53` admits exactly that accepted profile. The separate abliterated
 candidate remains provisional and is not admitted to assist:
 extraction, evidence-bound document mapping and complete current text/Office
 document reviews are in bounded `assist`. It grants no tools, effects,
@@ -197,10 +205,10 @@ course, with these repository-specific constraints:
 
 ## In progress
 
-1. Complete sealed Engineer command output publication, automatic terminal
-   delivery, current-job status/cancel and retention.
+1. Add automatic terminal delivery, natural current-job status/cancel and
+   bounded retention on top of the deployed sealed status delivery.
 2. Add exact Telegram input grants and wire deterministic bundle/publication
-   seams; then run the compact live approval/result smoke.
+   seams; then run one compact live approval/result smoke.
 3. Resolve the secondary profile dependency once, rebase and independently
    gate the Semantic Supervisor, then roll it out default-off → shadow → limited
    assist → canary.
