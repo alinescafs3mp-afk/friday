@@ -19,10 +19,6 @@ _MAX_SQLITE_INTEGER = (1 << 63) - 1
 _status_sleep = asyncio.sleep
 
 
-class TelegramTerminalStatusPending(RuntimeError):
-    """A visible running status still needs its durable terminal transition."""
-
-
 class TelegramStatusStage(str, Enum):
     """Closed, bridge-observable stages; never model-authored prose."""
 
@@ -494,7 +490,6 @@ class TelegramStatusMessageManager:
 __all__ = [
     "TelegramStatusMessageManager",
     "TelegramStatusStage",
-    "TelegramTerminalStatusPending",
     "render_chat_status",
     "render_engineer_status",
 ]

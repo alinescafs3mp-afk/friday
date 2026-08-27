@@ -260,6 +260,65 @@ async def test_proven_connect_rejection_disarms_initial_send_for_safe_retry(tmp_
         inbox.close()
 
 
+@pytest.mark.asyncio
+async def test_ambiguous_replacement_send_is_fenced_without_blind_retry(tmp_path) -> None:
+    inbox = _UpdateInbox(str(tmp_path / "telegram.sqlite3"))
+    calls: list[str] = []
+
+    def telegram(request: httpx.Request) -> httpx.Response:
+        method = request.url.path.rsplit("/", 1)[-1]
+        calls.append(method)
+        if calls == ["sendMessage"]:
+            return httpx.Response(200, json={"ok": True, "result": {"message_id": 611}})
+        if method == "editMessageText":
+            return httpx.Response(
+                400,
+                json={
+                    "ok": False,
+                    "error_code": 400,
+                    "description": "message to edit not found",
+                },
+            )
+        raise httpx.ReadTimeout("replacement response may be lost", request=request)
+
+    manager = _manager(inbox)
+    async with _client(telegram) as client:
+        assert await manager.publish(
+            client,
+            5001,
+            "chat:ambiguous-replacement",
+            1,
+            "⏳ Первый этап.",
+        ) == "sent"
+        assert await manager.publish(
+            client,
+            5001,
+            "chat:ambiguous-replacement",
+            2,
+            "⏳ Второй этап.",
+        ) == "uncertain"
+        assert await manager.publish(
+            client,
+            5001,
+            "chat:ambiguous-replacement",
+            3,
+            "✅ Готово.",
+            terminal=True,
+        ) == "uncertain"
+    try:
+        assert calls == ["sendMessage", "editMessageText", "sendMessage"]
+        assert inbox.telegram_status_send_fence(5001, "chat:ambiguous-replacement") == {
+            "revision": 2,
+        }
+        assert inbox.telegram_status_message(5001, "chat:ambiguous-replacement") == {
+            "message_id": 611,
+            "revision": 1,
+            "terminal": False,
+        }
+    finally:
+        inbox.close()
+
+
 def test_status_renderer_contains_only_closed_stage_and_exact_elapsed_time() -> None:
     prompt = "секретный пользовательский запрос"
     model_output = "ответ модели 87% готов, ETA 5 минут"

@@ -1022,44 +1022,6 @@ class _UpdateInbox:
         self._conn.commit()
         return dead_lettered
 
-    def defer_pending_many(
-        self,
-        update_ids: list[int],
-        error: str,
-        *,
-        delay_sec: float = 30.0,
-    ) -> bool:
-        """Retain an owned update group without consuming its finite retry budget."""
-
-        cleaned = list(dict.fromkeys(int(value) for value in update_ids))
-        delay = float(delay_sec)
-        if not cleaned or not 1.0 <= delay <= 3_600.0:
-            raise ValueError("invalid durable update deferral")
-        placeholders = ",".join("?" for _value in cleaned)
-        rows = self._conn.execute(
-            f"SELECT update_id FROM updates WHERE update_id IN ({placeholders}) AND status='pending'",  # nosec B608
-            cleaned,
-        ).fetchall()
-        if len(rows) != len(cleaned):
-            return False
-        deferred_at = time.time()
-        self._conn.executemany(
-            """UPDATE updates
-               SET last_attempt_at=?, last_error=?, next_attempt_at=?
-               WHERE update_id=? AND status='pending'""",
-            [
-                (
-                    deferred_at,
-                    str(error)[:500],
-                    deferred_at + delay,
-                    int(row["update_id"]),
-                )
-                for row in rows
-            ],
-        )
-        self._conn.commit()
-        return True
-
     def mark_failure_many(self, update_ids: list[int], error: str) -> bool:
         """Charge one failed owned album attempt to every durable part atomically."""
 

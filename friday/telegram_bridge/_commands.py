@@ -29,11 +29,7 @@ from friday.telegram_bridge._base import (
 )
 from friday.telegram_bridge._media import _reply_document_file_unique_id
 from friday.telegram_bridge._obsidian import obsidian_panel
-from friday.telegram_bridge._status import (
-    TelegramStatusStage,
-    TelegramTerminalStatusPending,
-    render_chat_status,
-)
+from friday.telegram_bridge._status import TelegramStatusStage, render_chat_status
 from friday.telegram_bridge._views import _TIMELINE_SHOWN
 
 
@@ -79,11 +75,9 @@ class _ChatProgressState:
     """One finite edit budget and revision stream shared by an entire turn."""
 
     __slots__ = (
-        "ambiguous",
         "next_notice",
         "operation_id",
         "pending",
-        "persisted",
         "received_bytes",
         "received_items",
         "revision",
@@ -120,8 +114,6 @@ class _ChatProgressState:
         self.revision = int(snapshot.get("revision") or 0) if snapshot is not None else 0
         self.started = snapshot is not None
         self.terminal = bool(snapshot.get("terminal")) if snapshot is not None else False
-        self.persisted = bool(snapshot is not None and snapshot.get("message_id"))
-        self.ambiguous = bool(snapshot is not None and snapshot.get("ambiguous") is True)
         self.pending: set[asyncio.Task[None]] = set()
         self.item_total = max(0, int(item_total))
         self.received_items = 0
@@ -172,27 +164,15 @@ def _queue_chat_progress(
                 reply_to_message_id=reply_to_message_id,
                 create=create,
             )
-            if outcome in {"sent", "edited", "replaced", "stale", "terminal"}:
-                state.persisted = True
-            elif outcome == "uncertain":
-                state.ambiguous = True
             if outcome in {"terminal"} or terminal and outcome in {"edited", "replaced", "sent"}:
                 state.terminal = True
-            if terminal and not state.terminal:
-                raise TelegramTerminalStatusPending("Telegram terminal status is not durable")
         except asyncio.CancelledError:
             raise
         except Exception as exc:
-            # Running checkpoints are advisory. A terminal transition for a
-            # known visible status is different: the cached answer makes the
-            # inbound update replay-safe, so retain it until the edit/CAS wins.
+            # Progress is advisory, including its terminal transition. Holding
+            # the durable inbound update here can replay backend/model or
+            # non-fenced answer side effects when terminal delivery fails.
             LOGGER.debug("Telegram progress status failed (%s)", type(exc).__name__)
-            if terminal:
-                if isinstance(exc, TelegramTerminalStatusPending):
-                    raise
-                raise TelegramTerminalStatusPending(
-                    "Telegram terminal status delivery failed"
-                ) from exc
 
     task = asyncio.create_task(deliver())
     state.pending.add(task)
@@ -256,21 +236,6 @@ async def _finish_chat_progress(
         await asyncio.gather(*pending, return_exceptions=True)
     if not state.started or state.terminal:
         return
-    if not state.persisted and not state.ambiguous:
-        try:
-            snapshot = bridge._status_messages.snapshot(chat_id, state.operation_id)
-        except Exception as exc:
-            LOGGER.debug("Telegram progress snapshot failed (%s)", type(exc).__name__)
-            snapshot = None
-        if snapshot is not None:
-            state.revision = max(state.revision, int(snapshot.get("revision") or 0))
-            state.persisted = bool(snapshot.get("message_id"))
-            state.ambiguous = bool(snapshot.get("ambiguous") is True)
-            state.terminal = bool(snapshot.get("terminal"))
-    if state.terminal or not state.persisted and not state.ambiguous:
-        # A proven failed checkpoint did not leave visible running text, so it
-        # must not hold an otherwise completed user turn hostage.
-        return
     task = _queue_chat_progress(
         bridge,
         telegram,
@@ -281,7 +246,7 @@ async def _finish_chat_progress(
         terminal=True,
     )
     if task is not None:
-        await task
+        await asyncio.gather(task, return_exceptions=True)
 
 
 async def _emit_chat_progress(

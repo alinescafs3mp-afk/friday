@@ -47,7 +47,6 @@ from friday.telegram_bridge._markup import to_telegram_html
 from friday.telegram_bridge._queue import _UpdateInbox
 from friday.telegram_bridge._status import (
     TelegramStatusMessageManager,
-    TelegramTerminalStatusPending,
     render_engineer_status,
 )
 
@@ -1605,18 +1604,6 @@ class TransportMixin(BridgeShared):
             # тратится. Иначе остановка моста съедала бы людям попытки.
             cancelled = True
             raise
-        except TelegramTerminalStatusPending as exc:
-            # The answer is already cached and its Telegram chunks are fenced,
-            # so replay performs only the missing terminal edit. Unlike an
-            # ordinary processing failure this state must not age into a dead
-            # letter that leaves a visible status eternally running.
-            LOGGER.warning("Telegram update retained for terminal status retry")
-            if not self._inbox.defer_pending_many(
-                owned_update_ids,
-                type(exc).__name__,
-                delay_sec=30.0,
-            ):
-                LOGGER.error("Telegram terminal status update could not be retained")
         except Exception as exc:
             LOGGER.warning("Telegram update deferred (%s)", type(exc).__name__)
             dead_lettered = self._inbox.mark_failure_many(owned_update_ids, type(exc).__name__)

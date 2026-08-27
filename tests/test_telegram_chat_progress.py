@@ -5,7 +5,6 @@ from __future__ import annotations
 import asyncio
 import base64
 import hashlib
-import time
 from typing import Any, cast
 
 import httpx
@@ -13,7 +12,6 @@ import pytest
 
 from friday.telegram_bridge import TelegramBridge, TelegramConfig
 from friday.telegram_bridge import _commands as commands
-from friday.telegram_bridge._status import TelegramTerminalStatusPending
 
 
 def _bridge(tmp_path) -> TelegramBridge:  # noqa: ANN001
@@ -223,18 +221,26 @@ async def test_progress_delivery_failure_never_fails_or_repeats_backend_turn(
 
 
 @pytest.mark.asyncio
-async def test_visible_running_status_keeps_turn_retryable_when_terminal_edit_fails(
+async def test_terminal_status_failure_never_replays_backend_answer_voice_or_files(
     tmp_path,
     monkeypatch,
 ) -> None:
     bridge = _bridge(tmp_path)
+    update = _update("Собери подробный ответ", update_id=8820)
+    assert bridge._inbox.store(update) is True  # noqa: SLF001
+    row = bridge._inbox.pending()[0]  # noqa: SLF001
+    backend_calls = 0
     final_messages: list[str] = []
+    voice_calls = 0
+    file_calls = 0
     terminal_attempts = 0
 
     async def immediate_progress_delay(_delay: float) -> None:
         return None
 
     async def backend_json(*_args: Any, **_kwargs: Any) -> dict[str, Any]:
+        nonlocal backend_calls
+        backend_calls += 1
         await asyncio.sleep(0)
         return {"message": "Итог уже доставлен", "message_format": "plain"}
 
@@ -248,28 +254,40 @@ async def test_visible_running_status_keeps_turn_retryable_when_terminal_edit_fa
     async def send(_client: object, _chat_id: int, text: str, **_kwargs: Any) -> None:
         final_messages.append(text)
 
+    async def voice(*_args: Any, **_kwargs: Any) -> None:
+        nonlocal voice_calls
+        voice_calls += 1
+
+    async def files(*_args: Any, **_kwargs: Any) -> None:
+        nonlocal file_calls
+        file_calls += 1
+
     monkeypatch.setattr(commands, "_progress_sleep", immediate_progress_delay)
     monkeypatch.setattr(bridge, "_backend_json", backend_json)
     monkeypatch.setattr(bridge, "_typing_loop", _never_typing)
     monkeypatch.setattr(bridge, "_send_message", send)
+    monkeypatch.setattr(bridge, "_deliver_voice_reply", voice)
+    monkeypatch.setattr(bridge, "_deliver_generated_files", files)
     monkeypatch.setattr(bridge._status_messages, "publish", publish)  # noqa: SLF001
     try:
-        with pytest.raises(TelegramTerminalStatusPending):
-            await bridge._process_update(  # noqa: SLF001
-                _client_stub(),
-                _client_stub(),
-                _update("Собери подробный ответ", update_id=8820),
-                cached_response=None,
-            )
+        await bridge._run_update(_client_stub(), _client_stub(), row)  # noqa: SLF001
+        retained = bridge._inbox._conn.execute(  # noqa: SLF001
+            "SELECT 1 FROM updates WHERE update_id=?",
+            (8820,),
+        ).fetchone()
     finally:
         bridge._inbox.close()  # noqa: SLF001
 
+    assert retained is None
+    assert backend_calls == 1
     assert final_messages == ["Итог уже доставлен"]
+    assert voice_calls == 1
+    assert file_calls == 1
     assert terminal_attempts == 1
 
 
 @pytest.mark.asyncio
-async def test_terminal_status_pending_defers_durable_update_without_dead_letter_budget(
+async def test_pre_cache_terminal_status_failure_cannot_retain_update(
     tmp_path,
     monkeypatch,
 ) -> None:
@@ -277,26 +295,98 @@ async def test_terminal_status_pending_defers_durable_update_without_dead_letter
     update = _update("Долгий запрос", update_id=8821)
     assert bridge._inbox.store(update) is True  # noqa: SLF001
     row = bridge._inbox.pending()[0]  # noqa: SLF001
+    terminal_attempts = 0
+
+    async def publish(*_args: Any, **kwargs: Any) -> str:
+        nonlocal terminal_attempts
+        if kwargs.get("terminal") is True:
+            terminal_attempts += 1
+            raise httpx.ReadTimeout("pre-cache terminal edit response lost")
+        return "sent"
 
     async def process(*_args: Any, **_kwargs: Any) -> None:
-        raise TelegramTerminalStatusPending("synthetic terminal retry")
+        state = commands._ChatProgressState("opaque", operation_id="chat:8821")  # noqa: SLF001
+        state.started = True
+        await commands._finish_chat_progress(  # noqa: SLF001
+            bridge,
+            _client_stub(),
+            5001,
+            91,
+            state,
+            commands.TelegramStatusStage.STOPPED,
+        )
 
     monkeypatch.setattr(bridge, "_process_update", process)
+    monkeypatch.setattr(bridge._status_messages, "publish", publish)  # noqa: SLF001
     try:
         await bridge._run_update(_client_stub(), _client_stub(), row)  # noqa: SLF001
         retained = bridge._inbox._conn.execute(  # noqa: SLF001
-            """SELECT attempts,status,last_error,next_attempt_at
-               FROM updates WHERE update_id=?""",
+            "SELECT 1 FROM updates WHERE update_id=?",
             (8821,),
         ).fetchone()
     finally:
         bridge._inbox.close()  # noqa: SLF001
 
-    assert retained is not None
-    assert dict(retained)["attempts"] == 0
-    assert dict(retained)["status"] == "pending"
-    assert dict(retained)["last_error"] == "TelegramTerminalStatusPending"
-    assert float(dict(retained)["next_attempt_at"]) > time.time()
+    assert retained is None
+    assert terminal_attempts == 1
+
+
+@pytest.mark.asyncio
+async def test_ambiguous_initial_status_fence_degrades_ui_without_blocking_chat(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    bridge = _bridge(tmp_path)
+    update = _update("Собери подробный ответ", update_id=8822)
+    assert bridge._inbox.store(update) is True  # noqa: SLF001
+    row = bridge._inbox.pending()[0]  # noqa: SLF001
+    status_calls: list[str] = []
+    status_attempted = asyncio.Event()
+    backend_calls = 0
+    final_messages: list[str] = []
+
+    async def immediate_progress_delay(_delay: float) -> None:
+        return None
+
+    def telegram_status(request: httpx.Request) -> httpx.Response:
+        status_calls.append(request.url.path.rsplit("/", 1)[-1])
+        status_attempted.set()
+        raise httpx.ReadTimeout("accepted response may be lost", request=request)
+
+    async def backend_json(*_args: Any, **_kwargs: Any) -> dict[str, Any]:
+        nonlocal backend_calls
+        backend_calls += 1
+        await status_attempted.wait()
+        return {"message": "Итог", "message_format": "plain"}
+
+    async def send(_client: object, _chat_id: int, text: str, **_kwargs: Any) -> None:
+        final_messages.append(text)
+
+    async def no_side_effect(*_args: Any, **_kwargs: Any) -> None:
+        return None
+
+    monkeypatch.setattr(commands, "_progress_sleep", immediate_progress_delay)
+    monkeypatch.setattr(bridge, "_backend_json", backend_json)
+    monkeypatch.setattr(bridge, "_typing_loop", _never_typing)
+    monkeypatch.setattr(bridge, "_send_message", send)
+    monkeypatch.setattr(bridge, "_deliver_voice_reply", no_side_effect)
+    monkeypatch.setattr(bridge, "_deliver_generated_files", no_side_effect)
+    async with httpx.AsyncClient(transport=httpx.MockTransport(telegram_status)) as telegram:
+        try:
+            await bridge._run_update(telegram, _client_stub(), row)  # noqa: SLF001
+            retained = bridge._inbox._conn.execute(  # noqa: SLF001
+                "SELECT 1 FROM updates WHERE update_id=?",
+                (8822,),
+            ).fetchone()
+            fence = bridge._inbox.telegram_status_send_fence(5001, "chat:8822")  # noqa: SLF001
+        finally:
+            bridge._inbox.close()  # noqa: SLF001
+
+    assert retained is None
+    assert fence == {"revision": 1}
+    assert status_calls == ["sendMessage"]
+    assert backend_calls == 1
+    assert final_messages == ["Итог"]
 
 
 @pytest.mark.asyncio

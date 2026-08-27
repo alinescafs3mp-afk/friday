@@ -443,9 +443,6 @@ EXPECTED_INBOX: dict[str, str] = {
     "confirm_notification_part_delivery": "(self, notification_id: 'str', part_key: 'str') -> 'bool'",
     "dead_letters": "(self, *, limit: 'int' = 100) -> 'list[dict[str, Any]]'",
     "delivered_notification_ids": "(self) -> 'set[str]'",
-    "defer_pending_many": (
-        "(self, update_ids: 'list[int]', error: 'str', *, delay_sec: 'float' = 30.0) -> 'bool'"
-    ),
     "forget_delivered_notifications": "(self, notification_ids: 'list[str]') -> 'None'",
     "forget_notification_delivery_parts": "(self, notification_ids: 'list[str]') -> 'None'",
     "generated_file_was_delivered": "(self, delivery_key: 'str') -> 'bool'",
