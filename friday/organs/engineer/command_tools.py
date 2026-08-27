@@ -1,9 +1,11 @@
-"""Owner-confirmed exact-argv tools for the isolated Engineer command kernel."""
+"""Owner-only autonomous host-user tools for the Engineer command kernel."""
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import hmac
+import inspect
 import json
 import math
 import os
@@ -19,6 +21,12 @@ from pathlib import Path
 from typing import Any
 
 from friday.execution_kernel import ToolSpec
+from friday.file_delivery import (
+    AuthorizedCurrentMessageUploadBatch,
+    FileRecordUnavailable,
+    authorize_current_message_upload_batch,
+    reauthorize_current_message_upload_batch,
+)
 from friday.organs import ServiceContext, may_push_to, resolve_chat_id
 
 from .command import (
@@ -34,6 +42,13 @@ from .command import (
     OwnerConfirmationAuthority,
     OwnerSourceAuthority,
     TrustedPathContract,
+)
+from .command.inputs import (
+    EMPTY_INPUT_MANIFEST,
+    MAX_INPUT_FILE_BYTES,
+    CommandInputManifest,
+    command_input_descriptor,
+    command_input_manifest,
 )
 from .command.progress import (
     PROGRESS_CHECKPOINTS_SEC,
@@ -58,6 +73,9 @@ from .terminal_delivery import (
 
 _MESSAGE_ID = re.compile(r"msg_[0-9a-f]{16}")
 _UPDATE_ID = re.compile(r"[0-9]{1,20}")
+_STEP_ID = re.compile(r"ecstep-[0-9a-f]{32}")
+_PRIVATE_CHAT_ID = re.compile(r"[1-9][0-9]{0,19}")
+_RAW_ID = re.compile(r"raw_[0-9a-f]{16}")
 _TERMINAL = frozenset(
     {
         CommandStatus.COMPLETED,
@@ -76,25 +94,60 @@ _UNCERTAIN_SUBMIT_ERRORS = frozenset(
     }
 )
 _DISPLAY_BYTES = 64 * 1024
+_AUTONOMOUS_GRANT_TTL_SEC = 120
+_DIRECT_WAIT_SEC = 15.0
+_MAX_EXPLICIT_TIMEOUT_SEC = 2_147_483_647
 _WORKSPACE_RETENTION_SEC = 30 * 24 * 60 * 60
 _WORKSPACE_RETENTION_BATCH_MAX = 20
 _PROGRESS_BATCH_MAX = 20
 
 
-def _source_update_id(row: Mapping[str, Any]) -> str:
+def _source_metadata(row: Mapping[str, Any]) -> Mapping[str, Any] | None:
     raw = row.get("metadata_json")
     if isinstance(raw, Mapping):
-        metadata = raw
+        return raw
     elif isinstance(raw, str) and len(raw) <= 16_384:
+        def reject_duplicates(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+            result: dict[str, Any] = {}
+            for key, value in pairs:
+                if key in result:
+                    raise ValueError("duplicate JSON key")
+                result[key] = value
+            return result
+
         try:
-            parsed = json.loads(raw)
+            parsed = json.loads(raw, object_pairs_hook=reject_duplicates)
         except (TypeError, ValueError):
-            return ""
-        metadata = parsed if isinstance(parsed, Mapping) else {}
-    else:
+            return None
+        return parsed if isinstance(parsed, Mapping) else None
+    return None
+
+
+def _source_update_id(row: Mapping[str, Any]) -> str:
+    metadata = _source_metadata(row)
+    if metadata is None:
         return ""
     value = metadata.get("telegram_update_id")
     return str(value) if isinstance(value, (str, int)) and not isinstance(value, bool) else ""
+
+
+def _source_uploaded_raw_ids(row: Mapping[str, Any]) -> tuple[str, ...] | None:
+    metadata = _source_metadata(row)
+    if metadata is None:
+        return None
+    if "conversation_uploaded_raw_ids" not in metadata:
+        return ()
+    uploaded = metadata.get("conversation_uploaded_raw_ids")
+    if not isinstance(uploaded, list):
+        return None
+    frozen = tuple(uploaded)
+    if (
+        len(frozen) > 12
+        or any(not isinstance(item, str) or _RAW_ID.fullmatch(item) is None for item in frozen)
+        or len(set(frozen)) != len(frozen)
+    ):
+        return None
+    return frozen
 
 
 def _read_private_key(path: Path) -> bytes:
@@ -121,8 +174,8 @@ def _derive(master: bytes, label: bytes) -> bytes:
     return hmac.new(master, b"friday-engineer-command-v1\x00" + label, hashlib.sha256).digest()
 
 
-def _idempotency_key(source_message_id: str, request: CommandRequest) -> str:
-    material = f"{source_message_id}\x00{request.digest}".encode("ascii")
+def _idempotency_key(source_message_id: str, step_id: str, request: CommandRequest) -> str:
+    material = f"{source_message_id}\x00{step_id}\x00{request.digest}".encode("ascii")
     return "ecmd-" + hashlib.sha256(material).hexdigest()
 
 
@@ -135,6 +188,126 @@ def _safe_output(payload: bytes) -> str:
         flags=re.IGNORECASE,
     )
     return "".join(character for character in text if character in "\n\r\t" or character.isprintable())
+
+
+def _issue_autonomous_grant(
+    authority: CommandGrantAuthority,
+    request: CommandRequest,
+    *,
+    source: Any,
+    now: int,
+) -> str:
+    """Use the narrow low-level autonomous delegation seam.
+
+    The service branch intentionally does not redefine low-level command
+    contracts.  ``delegate_autonomous`` and ``issue_autonomous`` land in the
+    host-user runner slice; keeping their temporary compatibility lookup here
+    makes that integration one isolated conflict instead of spreading it over
+    admission and publication code.
+    """
+
+    delegate = getattr(authority.source_authority, "delegate_autonomous", None)
+    issue = getattr(authority, "issue_autonomous", None)
+    if not callable(delegate) or not callable(issue):
+        raise CommandError("autonomous_grant_unavailable")
+    delegation = delegate(
+        source,
+        expires_at=now + _AUTONOMOUS_GRANT_TTL_SEC,
+    )
+    return str(
+        issue(
+            request,
+            source=source,
+            delegation=delegation,
+            ttl_sec=_AUTONOMOUS_GRANT_TTL_SEC,
+        )
+    )
+
+
+def _command_request(
+    *,
+    command: str,
+    timeout_sec: int | None,
+    idempotency_key: str,
+    input_manifest: CommandInputManifest,
+) -> CommandRequest:
+    """Construct the request through the anticipated manifest-bound seam."""
+
+    parameters = inspect.signature(CommandRequest).parameters
+    arguments: dict[str, Any] = {
+        "idempotency_key": idempotency_key,
+        "lane": CommandLane.SHELL,
+        "origin": CommandOrigin.MODEL,
+        "shell_command": command,
+        "timeout_sec": timeout_sec,
+    }
+    if "input_manifest" in parameters:
+        arguments["input_manifest"] = input_manifest
+    elif input_manifest.files:
+        raise CommandError("command_input_runtime_unavailable")
+    try:
+        return CommandRequest(**arguments)
+    except TypeError as exc:
+        if timeout_sec is None:
+            raise CommandError("unbounded_command_runtime_unavailable") from exc
+        raise CommandError("invalid_request") from exc
+
+
+def _input_manifest(batch: AuthorizedCurrentMessageUploadBatch) -> CommandInputManifest:
+    return command_input_manifest(
+        tuple(
+            command_input_descriptor(
+                position=position,
+                raw_id=identity.raw_id,
+                source_identity_sha256=identity.source_identity_sha256,
+                content_sha256=identity.content_sha256,
+                size_bytes=identity.size_bytes,
+                original_filename=identity.filename,
+                mime_type=identity.mime_type,
+            )
+            for position, identity in enumerate(batch.identity.files, start=1)
+        )
+    )
+
+
+def _submit_autonomous_request(
+    kernel: CommandKernel,
+    request: CommandRequest,
+    grant: str,
+    *,
+    actor_id: str,
+    delivery_chat_id: str,
+    input_manifest: CommandInputManifest,
+    input_batch: AuthorizedCurrentMessageUploadBatch | None,
+) -> str:
+    """Submit through one isolated private-input integration seam.
+
+    The input-contract slice will extend the low-level submit call with these
+    three code-owned arguments. Until then an empty manifest remains compatible,
+    while a real upload fails closed instead of starting without its bytes.
+    """
+
+    parameters = inspect.signature(kernel.submit).parameters
+    accepts_private_inputs = {
+        "input_batch_identity",
+        "input_files",
+        "input_manifest",
+    } <= set(parameters)
+    arguments: dict[str, Any] = {
+        "actor_id": actor_id,
+        "delivery_chat_id": delivery_chat_id,
+    }
+    if accepts_private_inputs:
+        arguments.update(
+            {
+                "input_batch_identity": input_batch.identity if input_batch is not None else None,
+                "input_files": input_batch.files if input_batch is not None else (),
+                "input_manifest": input_manifest,
+            }
+        )
+    elif input_manifest.files:
+        raise CommandError("command_input_runtime_unavailable")
+    return str(kernel.submit(request, grant, **arguments))
 
 
 class EngineerCommandService:
@@ -168,6 +341,43 @@ class EngineerCommandService:
         self._publication_lock = threading.Lock()
         self._progress_lock = threading.Lock()
         self._retention_lock = threading.Lock()
+        self._retire_legacy_command_approvals()
+
+    def _retire_legacy_command_approvals(self) -> None:
+        """Atomically make predecessor Engineer approval rows and pushes inert."""
+
+        now = datetime.now(UTC).isoformat()
+        marker = "undeliverable:engineer_autonomous_no_approval"
+        with self.storage.transaction() as conn:
+            pending = conn.execute(
+                """SELECT id,user_id,requested_by FROM action_approvals
+                     WHERE tool='engineer_command_run' AND status='pending'"""
+            ).fetchall()
+            for row in pending:
+                approval_id = str(row["id"] or "")
+                if re.fullmatch(r"apr_[0-9a-f]{16}", approval_id) is None:
+                    continue
+                changed = conn.execute(
+                    """UPDATE action_approvals
+                          SET status='rejected',decided_by='engineer-autonomous-migration',
+                              decided_at=?,updated_at=?
+                        WHERE id=? AND tool='engineer_command_run' AND status='pending'""",
+                    (now, now, approval_id),
+                )
+                if changed.rowcount != 1:
+                    continue
+                conn.execute(
+                    """UPDATE outbound_notifications
+                          SET status='failed',kind=?,dedup_key=''
+                        WHERE status='pending' AND kind='approval' AND dedup_key=?
+                          AND user_id IN (?,?)""",
+                    (
+                        marker,
+                        f"approval:{approval_id}",
+                        str(row["user_id"] or ""),
+                        str(row["requested_by"] or ""),
+                    ),
+                )
 
     def _archive_for_receipt(
         self,
@@ -209,131 +419,208 @@ class EngineerCommandService:
         self,
         *,
         actor: Any,
-        argv: list[str],
-        timeout_sec: int,
+        command: str,
         _conversation_id: str,
         _source_message_id: str,
         _telegram_update_id: str,
-        _approval_id: str,
-        _confirmation_update_id: str,
-        _confirmation_body_hash: str,
-        _delivery_chat_id: str = "",
+        _step_id: str,
+        timeout_sec: int | None = None,
     ) -> dict[str, Any]:
-        if not actor.is_owner:
+        """Admit one model-planned shell step from an exact current owner turn."""
+
+        conversation_id = str(_conversation_id or "").strip()
+        source_message_id = str(_source_message_id or "").strip()
+        telegram_update_id = str(_telegram_update_id or "").strip()
+        step_id = str(_step_id or "").strip()
+        chat_id = str(actor.identity_id or "").strip()
+        if (
+            not actor.is_owner
+            or actor.source != "telegram-bridge"
+            or _PRIVATE_CHAT_ID.fullmatch(chat_id) is None
+        ):
             return _refusal("authorization_denied")
         if (
-            _MESSAGE_ID.fullmatch(str(_source_message_id or "")) is None
-            or _UPDATE_ID.fullmatch(str(_telegram_update_id or "")) is None
-            or _UPDATE_ID.fullmatch(str(_confirmation_update_id or "")) is None
-            or str(_telegram_update_id) == str(_confirmation_update_id)
-            or not re.fullmatch(r"apr_[0-9a-f]{16}", str(_approval_id or ""))
-            or not re.fullmatch(r"[0-9a-f]{64}", str(_confirmation_body_hash or ""))
+            not conversation_id
+            or _MESSAGE_ID.fullmatch(source_message_id) is None
+            or _UPDATE_ID.fullmatch(telegram_update_id) is None
+            or _STEP_ID.fullmatch(step_id) is None
         ):
-            return _refusal("authenticated_confirmation_required")
-        source_row = self.storage.get_message(str(_source_message_id), actor.own_id)
+            return _refusal("authenticated_owner_source_required")
+        if timeout_sec is not None and (
+            type(timeout_sec) is not int
+            or not 1 <= timeout_sec <= _MAX_EXPLICIT_TIMEOUT_SEC
+        ):
+            return _refusal("invalid_request")
+        if (
+            self.authorization is None
+            or getattr(self.settings, "engineer_mode_enabled", False) is not True
+            or getattr(self.settings, "engineer_command_enabled", False) is not True
+        ):
+            return _refusal("authorization_denied")
+        user = self.storage.get_user(actor.own_id)
+        if not isinstance(user, Mapping) or str(user.get("status") or "") != "active":
+            return _refusal("authorization_denied")
+        try:
+            fresh_actor = self.authorization.actor_for_user(
+                actor.own_id,
+                source="engineer-command-service",
+                identity_id=chat_id,
+            )
+            linked_actor_id = self.storage.resolve_identity("telegram", chat_id)
+            if (
+                not fresh_actor.is_owner
+                or fresh_actor.own_id != actor.own_id
+                or fresh_actor.user_id != actor.user_id
+                or linked_actor_id != actor.own_id
+                or resolve_chat_id(self.storage, actor.own_id) != chat_id
+                or not may_push_to(self.settings, self.storage, actor.own_id, chat_id)
+            ):
+                return _refusal("authorization_denied")
+            self.authorization.require(fresh_actor, "engineer.use")
+            self.authorization.require(fresh_actor, "engineer.command.run")
+        except Exception:
+            return _refusal("authorization_denied")
+        source_row = self.storage.get_message(source_message_id, actor.own_id)
         if (
             not isinstance(source_row, Mapping)
-            or str(source_row.get("id") or "") != str(_source_message_id)
-            or str(source_row.get("conversation_id") or "") != str(_conversation_id)
+            or str(source_row.get("id") or "") != source_message_id
+            or str(source_row.get("conversation_id") or "") != conversation_id
             or str(source_row.get("role") or "") != "user"
-            or _source_update_id(source_row) != str(_telegram_update_id)
+            or _source_update_id(source_row) != telegram_update_id
         ):
             return _refusal("owner_source_unavailable")
+        uploaded_raw_ids = _source_uploaded_raw_ids(source_row)
+        if uploaded_raw_ids is None:
+            return _refusal("command_input_unavailable")
+        input_batch: AuthorizedCurrentMessageUploadBatch | None = None
+        input_manifest = EMPTY_INPUT_MANIFEST
         try:
-            linked_actor_id = self.storage.resolve_identity(
-                "telegram",
-                str(_delivery_chat_id or ""),
-            )
-        except ValueError:
-            return _refusal("authenticated_confirmation_required")
-        if (
-            actor.source != "telegram-bridge"
-            or not re.fullmatch(r"[1-9][0-9]{0,19}", str(_delivery_chat_id or ""))
-            or str(actor.identity_id or "") != str(_delivery_chat_id)
-            or linked_actor_id != actor.own_id
-            or resolve_chat_id(self.storage, actor.own_id) != str(_delivery_chat_id)
-            or not may_push_to(
-                self.settings,
-                self.storage,
-                actor.own_id,
-                str(_delivery_chat_id),
-            )
-        ):
-            return _refusal("authenticated_confirmation_required")
-        approval = self.storage.get_action_approval(str(_approval_id), actor.user_id, person_id=actor.own_id)
-        if (
-            not isinstance(approval, Mapping)
-            or str(approval.get("tool") or "") != "engineer_command_run"
-            or str(approval.get("status") or "") != "claimed"
-            or str(approval.get("requested_by") or "") != actor.own_id
-        ):
-            return _refusal("authenticated_confirmation_required")
-        try:
-            preliminary = CommandRequest(
-                lane=CommandLane.ARGV,
-                origin=CommandOrigin.OWNER_TURN,
-                argv=tuple(argv),
-                timeout_sec=int(timeout_sec),
+            if uploaded_raw_ids:
+                input_batch = authorize_current_message_upload_batch(
+                    self.storage,
+                    self.files_root,
+                    self.authorization,
+                    actor,
+                    conversation_id=conversation_id,
+                    source_message_id=source_message_id,
+                    telegram_update_id=telegram_update_id,
+                    uploaded_raw_ids=uploaded_raw_ids,
+                    max_bytes_per_file=MAX_INPUT_FILE_BYTES,
+                )
+                input_manifest = _input_manifest(input_batch)
+            preliminary = _command_request(
+                command=command,
+                timeout_sec=timeout_sec,
                 idempotency_key="pending",
+                input_manifest=input_manifest,
             )
-            request = CommandRequest(
-                lane=preliminary.lane,
-                origin=preliminary.origin,
-                argv=preliminary.argv,
+            request = _command_request(
+                command=command,
                 timeout_sec=preliminary.timeout_sec,
-                idempotency_key=_idempotency_key(str(_source_message_id), preliminary),
+                idempotency_key=_idempotency_key(source_message_id, step_id, preliminary),
+                input_manifest=input_manifest,
             )
+            if request.digest != preliminary.digest:
+                raise CommandError("command_digest_changed")
             source_text = str(source_row.get("content") or "")
             owner_source = self.kernel.authority.source_authority.attest(
                 actor_id=actor.own_id,
                 tenant_id=actor.user_id,
-                conversation_id=str(_conversation_id),
+                conversation_id=conversation_id,
                 channel="telegram",
-                source_row_id=str(_source_message_id),
+                source_row_id=source_message_id,
                 source_hash=hashlib.sha256(source_text.encode("utf-8")).hexdigest(),
-                telegram_update_id=str(_telegram_update_id),
-                isolation_profile=IsolationProfile.ISOLATED_WORKSPACE,
+                telegram_update_id=telegram_update_id,
+                isolation_profile=IsolationProfile.HOST_USER,
                 idempotency_key=request.idempotency_key,
             )
-            expires_at = int(time.time()) + 120
-            handle = self.kernel.authority.confirm_authority.ingest(
-                actor_id=actor.own_id,
-                tenant_id=actor.user_id,
-                conversation_id=str(_conversation_id),
-                channel="telegram",
-                confirmation_row_id=str(_approval_id),
-                confirmation_update_id=str(_confirmation_update_id),
-                command_digest=request.digest,
-                body_hash=str(_confirmation_body_hash),
-                expires_at=expires_at,
-            )
-            confirmation = self.kernel.authority.confirm_authority.seal(
-                handle,
-                command_digest=request.digest,
-            )
-            grant = self.kernel.authority.issue(
+            grant = _issue_autonomous_grant(
+                self.kernel.authority,
                 request,
                 source=owner_source,
-                confirmation=confirmation,
-                ttl_sec=120,
+                now=int(time.time()),
             )
-            job_id = self.kernel.submit(
+            spawn_input_batch = input_batch
+            if input_batch is not None:
+                spawn_input_batch = reauthorize_current_message_upload_batch(
+                    self.storage,
+                    self.files_root,
+                    self.authorization,
+                    actor,
+                    expected=input_batch.identity,
+                    max_bytes_per_file=MAX_INPUT_FILE_BYTES,
+                )
+                if _input_manifest(spawn_input_batch) != input_manifest:
+                    raise CommandError("command_input_identity_changed")
+            job_id = _submit_autonomous_request(
+                self.kernel,
                 request,
                 grant,
                 actor_id=actor.own_id,
-                delivery_chat_id=str(_delivery_chat_id),
+                delivery_chat_id=chat_id,
+                input_manifest=input_manifest,
+                input_batch=spawn_input_batch,
             )
+            try:
+                self.kernel.wait(
+                    job_id,
+                    actor_id=actor.own_id,
+                    conversation_id=conversation_id,
+                    timeout_sec=_DIRECT_WAIT_SEC,
+                )
+            except CommandError as exc:
+                if exc.code != "wait_timeout":
+                    raise
             progress = self.kernel.progress(
                 job_id,
                 actor_id=actor.own_id,
-                conversation_id=str(_conversation_id),
+                conversation_id=conversation_id,
+            )
+            if progress.status not in _TERMINAL:
+                return {"ok": True, **progress.to_public_payload()}
+            receipt, receipt_mac_version = self.kernel.terminal_receipt(
+                job_id,
+                actor_id=actor.own_id,
+                conversation_id=conversation_id,
+                timeout_sec=0.1,
             )
         except CommandError as exc:
             return _refusal(
                 exc.code,
                 effect_boundary_crossed=exc.code in _UNCERTAIN_SUBMIT_ERRORS,
             )
-        return {"ok": True, **progress.to_public_payload()}
+        except FileRecordUnavailable:
+            return _refusal("command_input_unavailable")
+        public_receipt = receipt.to_public_payload()
+        if receipt_mac_version < 2:
+            public_receipt.pop("generated_files_sha256", None)
+        public_receipt["mac_version"] = receipt_mac_version
+        public_receipt["generated_files_authenticated"] = receipt_mac_version >= 2
+        return {
+            "exit_code": receipt.exit_code,
+            "generated_files": (
+                [
+                    {
+                        "mode": item.mode,
+                        "relative_path": item.relative_path,
+                        "sha256": item.sha256,
+                        "size_bytes": item.size_bytes,
+                    }
+                    for item in receipt.generated_files
+                ]
+                if receipt_mac_version >= 2
+                else []
+            ),
+            "job_id": receipt.job_id,
+            "ok": True,
+            "receipt": public_receipt,
+            "signal": receipt.signal,
+            "status": receipt.status.value,
+            "stderr": _safe_output(receipt.stderr),
+            "stderr_display_truncated": len(receipt.stderr) > _DISPLAY_BYTES,
+            "stdout": _safe_output(receipt.stdout),
+            "stdout_display_truncated": len(receipt.stdout) > _DISPLAY_BYTES,
+        }
 
     def status(
         self,
@@ -1126,8 +1413,26 @@ def build_engineer_command_tools(
         return ()
     service = service or EngineerCommandService(ctx)
 
-    async def run_exact(**arguments: Any) -> dict[str, Any]:
-        return service.execute(**arguments)
+    async def run_command(
+        *,
+        actor: Any,
+        command: str,
+        _conversation_id: str,
+        _source_message_id: str,
+        _telegram_update_id: str,
+        _step_id: str,
+        timeout_sec: int | None = None,
+    ) -> dict[str, Any]:
+        return await asyncio.to_thread(
+            service.execute,
+            actor=actor,
+            command=command,
+            timeout_sec=timeout_sec,
+            _conversation_id=_conversation_id,
+            _source_message_id=_source_message_id,
+            _telegram_update_id=_telegram_update_id,
+            _step_id=_step_id,
+        )
 
     async def status_exact(
         *,
@@ -1162,33 +1467,32 @@ def build_engineer_command_tools(
         ToolSpec(
             name="engineer_command_run",
             description=(
-                "Prepare one exact installed-program argv for isolated execution. "
-                "The owner sees the exact argv and must confirm it before any process starts. "
-                "There is no implicit or privileged host shell; an explicitly requested shell remains "
-                "an exact confirmed argv inside the same sandbox. Host data, host network, inherited "
-                "credentials and the Docker socket are unavailable. "
-                "The program starts in /job; use /job/workspace for scratch data and write every "
-                "deliverable file below /job/output so Friday can inventory it."
+                "Run one model-planned shell step as the Friday service user on its VM. "
+                "Use any installed command, the service user's filesystem and network needed for the "
+                "owner's task. Omit timeout_sec for a durable job that runs until completion, explicit "
+                "cancellation or an OS failure; set it only when the task itself needs a deadline. The "
+                "call waits briefly for a terminal receipt, then returns a job id for longer work. Put "
+                "files intended for Telegram delivery below the "
+                "absolute directory in FRIDAY_OUTPUT_DIR; job, scratch and immutable current-message "
+                "inputs are exposed as FRIDAY_JOB_DIR, FRIDAY_WORK_DIR and FRIDAY_INPUT_DIR."
             ),
             parameters={
                 "type": "object",
                 "properties": {
-                    "argv": {
-                        "type": "array",
-                        "minItems": 1,
-                        "maxItems": 64,
-                        "items": {"type": "string", "minLength": 1, "maxLength": 512},
+                    "command": {"type": "string", "minLength": 1, "maxLength": 16_384},
+                    "timeout_sec": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": _MAX_EXPLICIT_TIMEOUT_SEC,
                     },
-                    "timeout_sec": {"type": "integer", "minimum": 1, "maximum": 3600},
                 },
-                "required": ["argv", "timeout_sec"],
+                "required": ["command"],
                 "additionalProperties": False,
             },
             security_id="engineer.command.run",
-            risk="high",
+            risk="mutate",
             timeout_sec=30.0,
-            handler=run_exact,
-            approval_predicate=lambda _arguments: True,
+            handler=run_command,
         ),
         ToolSpec(
             name="engineer_command_status",

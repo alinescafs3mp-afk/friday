@@ -3469,6 +3469,22 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
             actor.user_id,
             person_id=actor.own_id,
         )
+        if (
+            decision == "approve"
+            and isinstance(pending_approval, Mapping)
+            and str(pending_approval.get("tool") or "") in _ENGINEER_COMMAND_APPROVAL_TOOLS
+        ):
+            # Buttons issued by the predecessor, per-command-HITL Engineer
+            # contract are permanently inert.  Refuse before the pending row is
+            # transitioned to approved; execute_approved has a second guard for
+            # direct/internal callers.
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    "Эта старая заявка Engineer больше не исполняется. "
+                    "Повторите задачу в текущем Engineer-режиме."
+                ),
+            )
         command_confirmation_update_id = ""
         command_confirmation_body_hash = ""
         command_delivery_chat_id = ""

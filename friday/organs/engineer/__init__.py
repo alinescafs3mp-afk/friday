@@ -59,11 +59,10 @@ ENGINEER_AUDIT = CapabilityDefinition(
 )
 ENGINEER_COMMAND_RUN = CapabilityDefinition(
     "engineer.command.run",
-    "Run one exact owner-confirmed argv in the isolated Engineer workspace",
+    "Run autonomous model-planned shell commands as the Friday host user",
     "engineer",
     3,
     (),
-    default_requires_hitl=True,
     source="organ",
 )
 ENGINEER_COMMAND_MANAGE = CapabilityDefinition(

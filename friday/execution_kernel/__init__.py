@@ -4401,6 +4401,19 @@ class ExecutionKernel:
         if not record:
             return ToolResult("approval", False, error="Заявка не найдена")
         name = str(record.get("tool") or "")
+        if name == "engineer_command_run":
+            # Engineer command admission is owner-only and autonomous now.  An
+            # approval created by the predecessor contract must never become a
+            # second execution surface after deployment, even if a stale
+            # Telegram button or a direct internal caller reaches this method.
+            return ToolResult(
+                name,
+                False,
+                error=(
+                    "Эта заявка Engineer относится к прежнему контуру подтверждений и больше "
+                    "не исполняется. Повторите задачу в текущем Engineer-режиме."
+                ),
+            )
         tool = self._tools.get(name)
         if not tool or not tool.handler:
             return ToolResult(name or "approval", False, error="Инструмент недоступен")
