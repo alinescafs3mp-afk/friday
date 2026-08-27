@@ -12,13 +12,13 @@ the current production identity, completed packages, active work and next order.
   is code-staged only as provisional shadow/extract and is not accepted or live.
   The primary remains the sole final-publication, tool and effect authority.
   Every secondary miss preserves the exact primary-only path.
-- Deployed implementation head: `d99a40f9f83205713366e45b3c753b3d4232cf12`
-- Live: Friday `0.207.62` / `d99a40f9f83205713366e45b3c753b3d4232cf12`;
-  tree `ffbd26b27b89da06f8e0b2781eac9cf61d712e1f33945e0b67b97258ec02a967`;
-  wheel `051244dd2f7d50c94a941830e1ed005bc3e9a55ea6915fe5711efbc216318611`.
-- Immediate predecessor and schema-capable fallback: Friday `0.207.61` /
-  `86d79fbed621fa3ade4ab06a57ec2dd82d2a09dc`, tree
-  `41a46b4e63565e03dbd28c2c136ec14bbb371a4fd83c9cf734ed4fca15d7336f`.
+- Deployed implementation head: `4da83e391b7f6d17cd2689e254ae0eee3dbd0d68`
+- Live: Friday `0.207.63` / `4da83e391b7f6d17cd2689e254ae0eee3dbd0d68`;
+  tree `c98905bdbe7b68bdb598e8b2f3b73d597918f6656e691ca84ef542617a9d30fc`;
+  wheel `372eb65530a4033d1648cf16576172e3669b0a0f96984de597979c1c9bef0ea3`.
+- Immediate predecessor and schema-capable fallback: Friday `0.207.62` /
+  `d99a40f9f83205713366e45b3c753b3d4232cf12`, tree
+  `ffbd26b27b89da06f8e0b2781eac9cf61d712e1f33945e0b67b97258ec02a967`.
 - Database schema: 45
 - Production state: immutable activation `clear`; backend and Telegram bridge
   active; trusted-CA HTTPS health `200`; SQLite integrity and FK checks clean.
@@ -120,9 +120,20 @@ the current production identity, completed packages, active work and next order.
   no-file jobs publish bounded stdout/stderr as text instead of an empty ZIP.
   Progress reports the actual stage, elapsed time, output byte counts and a real
   hard-deadline remainder when one exists; it never invents percentage or ETA.
-  The same immutable activation enables Semantic Supervisor in discarded
-  `shadow`: GPT-OSS is currently available, but has no tool, effect, execution
-  or publication authority and every miss preserves the primary-only path.
+  `0.207.63` adds one durable edited Telegram status surface for ordinary long
+  turns and Engineer jobs. Checkpoints are coalesced, stage/elapsed/output
+  facts are truthful, terminal replacement is fenced against ambiguous sends,
+  and status transport failure can never replay the inbound task or suppress
+  its final result. Complex Engineer plan/replan phases now receive bounded
+  reasoning; execution, status and final publication remain no-thinking. A
+  plan-only request cannot cross the execution edge, while operational requests
+  retain the normal tool protocol and evidence-grounded completion path.
+  The current immutable activation keeps Semantic Supervisor in discarded
+  `shadow`: it has no tool, effect, execution or publication authority and
+  every miss preserves the primary-only path. The laptop endpoint was directly
+  reachable after deployment, but Friday health currently reports the optional
+  secondary runtime unavailable; no shadow observation has therefore been
+  credited yet.
   The exact accepted secondary profile remains configured in bounded `assist`
   and is probed on
   demand; its exact post-cutover canary passed, while laptop absence preserves
@@ -143,27 +154,27 @@ the current production identity, completed packages, active work and next order.
   while the backlog converges. `0.207.52` repairs the canary wrapper's full
   Telegram carrier surface; signed Telegram requests no longer fail before the
   model/tool boundary. The current activation terminal receipt is
-  `d48eade5728f843ee0b44ec61801a6f41a0de40d573e9a98237a8b5500b47f76`.
+  `ce5267ba9a202ae82c230279d759091cd0e42e6e8ed1626be47151a7b855c339`.
 - Delivery constraints: no Docker for primary Friday release certification;
   companion plugin untouched; small commits and immutable wheel-only production
   releases. The optional laptop inference node is a separate Docker contour.
 
 ## Active objective
 
-The autonomous owner-only Engineer Mode objective is deployed; `0.207.62`
-closes its immediate durable-command regression. Its permanent boundary is
+The autonomous owner-only Engineer Mode objective is deployed; `0.207.63`
+closes its immediate durable-command regression and adds truthful edited
+progress plus bounded dynamic reasoning. Its permanent boundary is
 identity and provenance, not semantic command policy:
 fresh owner identity, current Telegram source/update/conversation binding and
 capability checks stay mandatory, while no guest, unsigned API turn, quoted
 message, document, web page or attachment may mint execution authority.
 
-The Semantic Supervisor is now deployed in discarded `shadow`. The active
-objective is to gather independent joined evidence and promote it through
-limited assist and canary without changing primary ownership. In parallel, the
-next Engineer package adds one edited Telegram status surface for all long
-stages and bounded dynamic reasoning for planning/replanning. After that,
-execute the remaining work by product value and
-risk. The full canonical order and estimates are in
+The active package is the stage-aware document/archive budget hotfix; encrypted
+archive password validation must fail closed before any deduplication or
+persistence. After that, restore the optional secondary runtime path, gather
+independent joined Semantic Supervisor evidence and promote it through limited
+assist and canary without changing primary ownership. Then execute the remaining
+work by product value and risk. The full canonical order and estimates are in
 `outer_sol/PROJECT_EXECUTION_BACKLOG_2026-08-27.md`. Docker and companion-plugin
 work remain out of scope for primary Friday.
 
