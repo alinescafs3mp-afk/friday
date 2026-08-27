@@ -12,6 +12,8 @@ from friday.agent_runtime import (
     AgentContext,
     AgentRuntime,
     _engineer_initial_model_phase,
+    _engineer_planning_only_request,
+    _engineer_tool_result_requires_replan,
 )
 from friday.agent_runtime.llm import LLMRouter
 from friday.execution_kernel import ToolResult
@@ -46,8 +48,14 @@ def test_autonomous_prompt_requires_staged_unbounded_long_work() -> None:
     ("message", "expected"),
     [
         ("Как там статус фоновой задачи?", ("status", False)),
+        ("Готов ли план миграции?", ("status", False)),
+        ("Готова ли стратегия?", ("status", False)),
+        ("Какой прогресс по плану?", ("status", False)),
         ("Запусти uname -a.", ("execute", False)),
         ("Составь план миграции сервиса.", ("plan", True)),
+        ("Мне нужен пошаговый план миграции сервиса.", ("plan", True)),
+        ("Составь план остановки сервиса.", ("plan", True)),
+        ("Пошаговый план остановки сервиса.", ("plan", True)),
         ("Перепланируй следующие шаги после сбоя.", ("plan", True)),
         ("Проведи аудит и диагностику узла.", ("plan", True)),
     ],
@@ -57,6 +65,74 @@ def test_engineer_phase_classifier_separates_status_execution_and_planning(
     expected: tuple[str, bool],
 ) -> None:
     assert _engineer_initial_model_phase(message, None) == expected
+
+
+@pytest.mark.parametrize(
+    ("message", "expected"),
+    [
+        ("Составь план миграции сервиса.", True),
+        ("Сделай план миграции сервиса.", True),
+        ("Составь план остановки сервиса.", True),
+        ("Мне нужен план миграции сервиса.", True),
+        ("Нужен пошаговый план миграции.", True),
+        ("План миграции сервиса.", True),
+        ("Пошаговый план миграции сервиса.", True),
+        ("Стратегия миграции сервиса.", True),
+        ("План остановки сервиса.", True),
+        ("Пошаговый план остановки сервиса.", True),
+        ("Стратегия отмены фоновой задачи.", True),
+        ("Migration plan to stop the service.", True),
+        ("Распиши план миграции.", True),
+        ("Сформируй план миграции.", True),
+        ("Подскажи план миграции.", True),
+        ("Как лучше спланировать миграцию?", True),
+        ("Could you draft a migration plan?", True),
+        ("I need a migration plan.", True),
+        ("What is a good migration plan?", True),
+        ("Migration plan for the service.", True),
+        ("I need a plan, including how to execute it.", True),
+        ("I need a plan, and I will execute it myself.", True),
+        ("Составь план, как выполнить миграцию.", True),
+        ("Спланируй комплексный анализ неизвестного сервиса.", True),
+        ("Спланируй и выполни комплексный анализ сервиса.", False),
+        ("Составь план и затем аккуратно выполни его.", False),
+        ("Составь план, затем проверь сервис.", False),
+        ("Составь план миграции. Выполни его.", False),
+        ("Составь план миграции.\nПриступай к выполнению.", False),
+        ("Create a migration plan, then implement it.", False),
+        ("Plan migration. Execute it.", False),
+        ("Plan migration, then carry it out.", False),
+        ("Plan migration and carefully execute it.", False),
+        ("Проведи аудит и сначала составь план.", False),
+        ("Проанализируй существующий план миграции.", False),
+        ("Execute the migration plan.", False),
+        ("Отмени план миграции.", False),
+        ("Создай файл plan.txt.", False),
+        ("Как там статус плана?", False),
+        ("Готов ли план миграции?", False),
+        ("Готова ли стратегия?", False),
+        ("Какой прогресс по плану?", False),
+    ],
+)
+def test_engineer_planning_only_policy_separates_plan_artifact_from_execution(
+    message: str,
+    expected: bool,
+) -> None:
+    assert _engineer_planning_only_request(message) is expected
+
+
+def test_engineer_replan_signal_includes_semantic_failure_and_render_truncation() -> None:
+    semantic_failure = ToolResult(
+        "engineer_command_run",
+        True,
+        data={"ok": False, "error": "provider refused"},
+    )
+    large_result = ToolResult("engineer_command_run", True, data="x" * 13_000)
+
+    assert _engineer_tool_result_requires_replan(semantic_failure) is True
+    assert _engineer_tool_result_requires_replan(large_result) is False
+    large_result.to_llm_message()
+    assert _engineer_tool_result_requires_replan(large_result) is True
 
 
 class _AnswerModel:
@@ -314,6 +390,7 @@ class _PhaseScriptModel(LLMRouter):
                 "enable_thinking": enable_thinking,
                 "max_tokens": max_tokens,
                 "tools": offered_names,
+                "require_full_context": bool(_kwargs.get("require_full_context", False)),
             }
         )
         result = dict(self.script[len(self.call_controls) - 1])
@@ -434,6 +511,28 @@ class _SelectiveReplanKernel(_CommandKernel):
         if len(self.executions) == 2 and isinstance(result.data, dict):
             result.data["requires_follow_up"] = True
         return result
+
+
+class _FirstSemanticFailureThenSuccessKernel(_CommandKernel):
+    async def execute(self, name, arguments, *, actor):  # noqa: ANN001
+        self.executions.append((name, dict(arguments), actor))
+        if len(self.executions) == 1:
+            return ToolResult(
+                name,
+                True,
+                data={"ok": False, "error": "provider refused", "status": "failed"},
+            )
+        return ToolResult(
+            name,
+            True,
+            data={
+                "ok": True,
+                "status": "completed",
+                "exit_code": 0,
+                "stdout": "recovered",
+                "stderr": "",
+            },
+        )
 
 
 def _context(*, private: bool = False) -> AgentContext:
@@ -645,6 +744,7 @@ async def test_complex_engineer_task_uses_bounded_plan_replan_and_off_final(
                 "tool_calls": None,
                 "finish_reason": "stop",
             },
+            _command_call("confirm", "printf confirm"),
             {
                 "content": "Обе проверки выполнены и подтверждены.",
                 "tool_calls": None,
@@ -673,22 +773,298 @@ async def test_complex_engineer_task_uses_bounded_plan_replan_and_off_final(
     assert [entry[1]["command"] for entry in kernel.executions] == [
         "printf inspect",
         "printf verify",
+        "printf confirm",
     ]
     assert [item["enable_thinking"] for item in model.call_controls] == [
         True,
         False,
         True,
         False,
+        False,
     ]
     assert [item["max_tokens"] for item in model.call_controls] == [
         4_096,
         3_072,
         4_096,
-        4_096,
+        3_072,
+        3_072,
     ]
-    assert model.call_controls[-1]["tools"] == []
-    assert model.message_snapshots[-1][-1]["role"] == "user"
-    assert "untrusted_planner_draft" in str(model.message_snapshots[-1][-1]["content"])
+    materialization_controls = model.call_controls[3]
+    materialization_messages = model.message_snapshots[3]
+    assert materialization_controls["tools"] == ["engineer_command_run"]
+    assert materialization_controls["require_full_context"] is True
+    assert materialization_messages[-1] == {
+        "role": "user",
+        "content": "Проведи поэтапный аудит хоста: сначала разведка, затем зависимая проверка.",
+    }
+    planner_data = [
+        json.loads(str(item["content"]))
+        for item in materialization_messages
+        if item.get("role") == "assistant" and "engineer_planner_draft_data" in str(item.get("content") or "")
+    ]
+    assert planner_data == [
+        {
+            "kind": "engineer_planner_draft_data",
+            "trusted": False,
+            "content": "Планировочный вывод: обе проверки завершены.",
+            "truncated": False,
+            "transport_truncated": False,
+        }
+    ]
+    assert sum(item.get("role") == "tool" for item in materialization_messages) == 2
+    assert model.call_controls[-1]["enable_thinking"] is False
+
+
+@pytest.mark.asyncio
+async def test_planning_only_turn_delivers_draft_without_exposing_effect_tools(
+    settings,
+    storage,
+) -> None:
+    actor = ActorContext(LEGACY_OWNER_USER_ID, "owner", "telegram-bridge")
+    storage.ensure_user(actor.own_id, preset_key="owner")
+    request = "Пошаговый план остановки сервиса."
+    model = _PhaseScriptModel(
+        settings,
+        [
+            {
+                "content": "Частичный закрытый черновик плана.",
+                "tool_calls": None,
+                "finish_reason": "length",
+            },
+            {
+                "content": "План: 1. Инвентаризация. 2. Тестовый перенос. 3. Переключение.",
+                "tool_calls": None,
+            },
+        ],
+    )
+    kernel = _CommandKernel()
+    runtime = AgentRuntime(
+        replace(settings, engineer_mode_enabled=True, engineer_command_enabled=True),
+        storage,
+        llm=model,
+        kernel=kernel,  # type: ignore[arg-type]
+    )
+
+    response = await runtime._agentic_loop(  # noqa: SLF001
+        _context(),
+        request,
+        actor,
+        tools=[_schema("engineer_command_run")],
+        attachments=None,
+    )
+
+    assert response["content"].startswith("План:")
+    assert kernel.executions == []
+    assert [item["enable_thinking"] for item in model.call_controls] == [True, False]
+    assert [item["tools"] for item in model.call_controls] == [[], []]
+    assert model.call_controls[1]["require_full_context"] is True
+    assert model.message_snapshots[1][-1] == {"role": "user", "content": request}
+    draft_payload = next(
+        json.loads(str(item["content"]))
+        for item in model.message_snapshots[1]
+        if item.get("role") == "assistant" and "engineer_planner_draft_data" in str(item.get("content") or "")
+    )
+    assert draft_payload["content"] == "Частичный закрытый черновик плана."
+    assert draft_payload["transport_truncated"] is True
+
+
+@pytest.mark.asyncio
+async def test_planning_only_turn_rejects_hallucinated_tool_call_and_never_regains_tools(
+    settings,
+    storage,
+) -> None:
+    actor = ActorContext(LEGACY_OWNER_USER_ID, "owner", "telegram-bridge")
+    storage.ensure_user(actor.own_id, preset_key="owner")
+    model = _PhaseScriptModel(
+        settings,
+        [
+            {"content": "Черновик плана.", "tool_calls": None},
+            _command_call("forbidden-plan-effect", "printf forbidden"),
+        ],
+    )
+    kernel = _CommandKernel()
+    runtime = AgentRuntime(
+        replace(settings, engineer_mode_enabled=True, engineer_command_enabled=True),
+        storage,
+        llm=model,
+        kernel=kernel,  # type: ignore[arg-type]
+    )
+
+    response = await runtime._agentic_loop(  # noqa: SLF001
+        _context(),
+        "Сделай план миграции сервиса.",
+        actor,
+        tools=[_schema("engineer_command_run")],
+        attachments=None,
+    )
+
+    assert response["llm_failed"] is True
+    assert kernel.executions == []
+    assert len(model.call_controls) == 2
+    assert [item["tools"] for item in model.call_controls] == [[], []]
+
+
+@pytest.mark.asyncio
+async def test_planning_only_invalid_delivery_is_not_repaired_with_a_third_call(
+    settings,
+    storage,
+) -> None:
+    actor = ActorContext(LEGACY_OWNER_USER_ID, "owner", "telegram-bridge")
+    storage.ensure_user(actor.own_id, preset_key="owner")
+    model = _PhaseScriptModel(
+        settings,
+        [
+            {"content": "Черновик плана.", "tool_calls": None},
+            {"content": "Сейчас запущу миграцию.", "tool_calls": None},
+        ],
+    )
+    kernel = _CommandKernel()
+    runtime = AgentRuntime(
+        replace(settings, engineer_mode_enabled=True, engineer_command_enabled=True),
+        storage,
+        llm=model,
+        kernel=kernel,  # type: ignore[arg-type]
+    )
+
+    response = await runtime._agentic_loop(  # noqa: SLF001
+        _context(),
+        "Составь план миграции сервиса.",
+        actor,
+        tools=[_schema("engineer_command_run")],
+        attachments=None,
+    )
+
+    assert response["llm_failed"] is True
+    assert kernel.executions == []
+    assert len(model.call_controls) == 2
+    assert [item["tools"] for item in model.call_controls] == [[], []]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("materialized_content", ["Всё уже готово.", ""])
+async def test_operational_planner_prose_cannot_terminate_without_observable_step(
+    settings,
+    storage,
+    materialized_content: str,
+) -> None:
+    actor = ActorContext(LEGACY_OWNER_USER_ID, "owner", "telegram-bridge")
+    storage.ensure_user(actor.own_id, preset_key="owner")
+    model = _PhaseScriptModel(
+        settings,
+        [
+            {"content": "Сначала проверю сервис.", "tool_calls": None},
+            {"content": materialized_content, "tool_calls": None},
+        ],
+    )
+    kernel = _CommandKernel()
+    runtime = AgentRuntime(
+        replace(settings, engineer_mode_enabled=True, engineer_command_enabled=True),
+        storage,
+        llm=model,
+        kernel=kernel,  # type: ignore[arg-type]
+    )
+
+    response = await runtime._agentic_loop(  # noqa: SLF001
+        _context(),
+        "Проведи комплексный аудит сервиса.",
+        actor,
+        tools=[_schema("engineer_command_run")],
+        attachments=None,
+    )
+
+    assert response["llm_failed"] is True
+    assert response["_model_generated"] is False
+    assert "Всё уже готово" not in response["content"]
+    assert kernel.executions == []
+    assert len(model.call_controls) == 2
+    assert [item["enable_thinking"] for item in model.call_controls] == [True, False]
+
+
+@pytest.mark.asyncio
+async def test_operational_planner_materialization_requires_one_nearest_tool_call(
+    settings,
+    storage,
+) -> None:
+    actor = ActorContext(LEGACY_OWNER_USER_ID, "owner", "telegram-bridge")
+    storage.ensure_user(actor.own_id, preset_key="owner")
+    first_call = _command_call("first-materialized", "printf first")
+    second_call = _command_call("second-materialized", "printf second")
+    first_calls = first_call["tool_calls"]
+    second_calls = second_call["tool_calls"]
+    assert isinstance(first_calls, list)
+    assert isinstance(second_calls, list)
+    model = _PhaseScriptModel(
+        settings,
+        [
+            {"content": "Нужны две проверки.", "tool_calls": None},
+            {
+                "content": "",
+                "tool_calls": [*first_calls, *second_calls],
+                "finish_reason": "tool_calls",
+            },
+        ],
+    )
+    kernel = _CommandKernel()
+    runtime = AgentRuntime(
+        replace(settings, engineer_mode_enabled=True, engineer_command_enabled=True),
+        storage,
+        llm=model,
+        kernel=kernel,  # type: ignore[arg-type]
+    )
+
+    response = await runtime._agentic_loop(  # noqa: SLF001
+        _context(),
+        "Проведи комплексный аудит сервиса.",
+        actor,
+        tools=[_schema("engineer_command_run")],
+        attachments=None,
+    )
+
+    assert response["llm_failed"] is True
+    assert kernel.executions == []
+    assert len(model.call_controls) == 2
+
+
+@pytest.mark.asyncio
+async def test_simple_command_failure_gets_one_bounded_replan(
+    settings,
+    storage,
+    monkeypatch,
+) -> None:
+    actor = ActorContext(LEGACY_OWNER_USER_ID, "owner", "telegram-bridge")
+    storage.ensure_user(actor.own_id, preset_key="owner")
+    model = _PhaseScriptModel(
+        settings,
+        [
+            _command_call("simple-first", "printf first"),
+            _command_call("simple-replanned", "printf recovered"),
+            {"content": "Повторный шаг подтверждён.", "tool_calls": None},
+        ],
+    )
+    kernel = _FirstSemanticFailureThenSuccessKernel()
+    runtime = AgentRuntime(
+        replace(settings, engineer_mode_enabled=True, engineer_command_enabled=True),
+        storage,
+        llm=model,
+        kernel=kernel,  # type: ignore[arg-type]
+    )
+    monkeypatch.setattr(runtime, "_fresh_engineer_actor", lambda current, _capability: current)
+
+    response = await runtime._agentic_loop(  # noqa: SLF001
+        _context(),
+        "Запусти printf first.",
+        actor,
+        tools=[_schema("engineer_command_run")],
+        attachments=None,
+    )
+
+    assert response["content"] == "Повторный шаг подтверждён."
+    assert [item[1]["command"] for item in kernel.executions] == [
+        "printf first",
+        "printf recovered",
+    ]
+    assert [item["enable_thinking"] for item in model.call_controls] == [False, True, False]
+    assert [item["max_tokens"] for item in model.call_controls] == [3_072, 4_096, 3_072]
 
 
 @pytest.mark.asyncio
@@ -779,6 +1155,101 @@ async def test_engineer_status_keeps_thinking_off(
 
 
 @pytest.mark.asyncio
+async def test_failed_engineer_status_remains_on_closed_no_thinking_lane(
+    settings,
+    storage,
+    monkeypatch,
+) -> None:
+    actor = ActorContext(LEGACY_OWNER_USER_ID, "owner", "telegram-bridge")
+    storage.ensure_user(actor.own_id, preset_key="owner")
+    model = _PhaseScriptModel(
+        settings,
+        [
+            {
+                "content": "",
+                "tool_calls": [
+                    {
+                        "id": "failed-status",
+                        "function": {
+                            "name": "engineer_command_status",
+                            "arguments": "{}",
+                        },
+                    }
+                ],
+                "finish_reason": "tool_calls",
+            },
+            {"content": "Статус получить не удалось.", "tool_calls": None},
+        ],
+    )
+    kernel = _FirstSemanticFailureThenSuccessKernel()
+    runtime = AgentRuntime(
+        replace(settings, engineer_mode_enabled=True, engineer_command_enabled=True),
+        storage,
+        llm=model,
+        kernel=kernel,  # type: ignore[arg-type]
+    )
+    monkeypatch.setattr(runtime, "_fresh_engineer_actor", lambda current, _capability: current)
+
+    response = await runtime._agentic_loop(  # noqa: SLF001
+        _context(),
+        "Как там статус фоновой задачи?",
+        actor,
+        tools=[_schema("engineer_command_status")],
+        attachments=None,
+    )
+
+    assert response["content"] == "Статус получить не удалось."
+    assert [item["enable_thinking"] for item in model.call_controls] == [False, False]
+
+
+@pytest.mark.asyncio
+async def test_no_thinking_public_length_answer_preserves_complete_partial_text(
+    settings,
+    storage,
+    monkeypatch,
+) -> None:
+    actor = ActorContext(LEGACY_OWNER_USER_ID, "owner", "telegram-bridge")
+    storage.ensure_user(actor.own_id, preset_key="owner")
+    model = _PhaseScriptModel(
+        settings,
+        [
+            _command_call("length-public", "printf checked"),
+            {
+                "content": (
+                    "Проверка завершена и подтверждена фактическим результатом команды. "
+                    "Дополнительная часть оборвана"
+                ),
+                "tool_calls": None,
+                "finish_reason": "length",
+            },
+        ],
+    )
+    kernel = _CommandKernel()
+    runtime = AgentRuntime(
+        replace(settings, engineer_mode_enabled=True, engineer_command_enabled=True),
+        storage,
+        llm=model,
+        kernel=kernel,  # type: ignore[arg-type]
+    )
+    monkeypatch.setattr(runtime, "_fresh_engineer_actor", lambda current, _capability: current)
+
+    response = await runtime._agentic_loop(  # noqa: SLF001
+        _context(),
+        "Запусти printf checked.",
+        actor,
+        tools=[_schema("engineer_command_run")],
+        attachments=None,
+    )
+
+    assert response["content"].startswith(
+        "Проверка завершена и подтверждена фактическим результатом команды."
+    )
+    assert "Ответ сокращён до последнего завершённого предложения" in response["content"]
+    assert response["_model_output_truncated"] is True
+    assert [item["enable_thinking"] for item in model.call_controls] == [False, False]
+
+
+@pytest.mark.asyncio
 async def test_reasoning_exhaustion_gets_one_no_thinking_recovery(
     settings,
     storage,
@@ -811,7 +1282,7 @@ async def test_reasoning_exhaustion_gets_one_no_thinking_recovery(
 
     response = await runtime._agentic_loop(  # noqa: SLF001
         _context(),
-        "Спланируй комплексный анализ неизвестного сервиса.",
+        "Спланируй и выполни комплексный анализ неизвестного сервиса.",
         actor,
         tools=[_schema("engineer_command_run")],
         attachments=None,

@@ -874,9 +874,12 @@ class LLMRouter:
                         finish_reason,
                         thinking_seen=self._thinking_seen or enable_thinking is True,
                     )
-                if thinking_markup_seen:
-                    # Профиль всё-таки рассуждает вслух — значит обрыв по длине у
-                    # него действительно может оставить один монолог.
+                if thinking_markup_seen and enable_thinking is not True:
+                    # Only an unexpected leak proves that this router/profile may
+                    # expose thought when callers asked for an ordinary answer.
+                    # A deliberately enabled planning call is request-local and
+                    # must not make a later no-thinking length-limited answer look
+                    # like an unterminated private monologue.
                     self._thinking_seen = True
                 if reject_repeated_token_degeneration and detect_repeated_token_degeneration(content):
                     LOGGER.warning("LLM response rejected: repeated_token_degeneration")

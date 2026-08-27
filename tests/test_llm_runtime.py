@@ -129,6 +129,65 @@ async def test_first_explicit_reasoning_truncation_is_never_returned_as_content(
 
 
 @pytest.mark.asyncio
+async def test_explicit_tagged_plan_does_not_erase_later_no_thinking_length_answer(
+    settings,
+    monkeypatch,
+) -> None:
+    responses = [
+        ("private planning notes</think>planner draft", "stop"),
+        ("Public partial answer with a complete sentence. Remaining detail", "length"),
+    ]
+    payloads: list[dict] = []
+
+    class _Client:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            return False
+
+        async def post(self, url, **kwargs):
+            payloads.append(dict(kwargs["json"]))
+            content, finish_reason = responses.pop(0)
+            return httpx.Response(
+                200,
+                request=httpx.Request("POST", url),
+                json={
+                    "choices": [
+                        {
+                            "message": {"content": content},
+                            "finish_reason": finish_reason,
+                        }
+                    ],
+                    "usage": {"prompt_tokens": 10, "completion_tokens": 20},
+                },
+            )
+
+    monkeypatch.setattr(httpx, "AsyncClient", lambda *args, **kwargs: _Client())
+    router = LLMRouter(replace(settings, llm_enabled=True))
+
+    plan = await router.chat(
+        [{"role": "user", "content": "plan"}],
+        enable_thinking=True,
+        allow_retries=False,
+    )
+    public = await router.chat(
+        [{"role": "user", "content": "deliver"}],
+        enable_thinking=False,
+        allow_retries=False,
+    )
+
+    assert plan["content"] == "planner draft"
+    assert public["finish_reason"] == "length"
+    assert public["content"] == "Public partial answer with a complete sentence. Remaining detail"
+    assert [payload["chat_template_kwargs"] for payload in payloads] == [
+        {"enable_thinking": True},
+        {"enable_thinking": False},
+    ]
+    assert router._thinking_seen is False  # noqa: SLF001
+
+
+@pytest.mark.asyncio
 async def test_raw_reasoning_markup_latches_before_it_is_stripped(settings, monkeypatch) -> None:
     responses = [
         ("private notes</think>public answer", "stop"),
