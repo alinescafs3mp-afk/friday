@@ -21,7 +21,6 @@ import os
 import socket
 import stat
 import subprocess  # nosec B404 - fixed argv, no shell
-import tempfile
 import threading
 import time
 import urllib.parse
@@ -1213,8 +1212,17 @@ def _opaque_profile_id(value: object) -> str:
 
 
 def _derived_runtime_root(base_root: Path) -> Path:
+    # This pathname is part of the durable profile contract: ``api_endpoint`` is
+    # persisted and checked byte-for-byte on every restart.  The backend service
+    # deliberately owns a private TMPDIR which can change independently of an
+    # existing Obsidian profile (and is removed on every service stop), so using
+    # ``tempfile.gettempdir()`` here permanently stranded otherwise valid profiles
+    # after unit hardening.  Keep the short, local Unix-socket namespace stable;
+    # the installation digest prevents collisions and ``prepare_profile_directories``
+    # still enforces an owner-only 0700 directory.  ``/tmp`` also preserves the
+    # endpoint emitted by every profile created before this fix.
     installation_key = hashlib.sha256(os.fsencode(base_root.absolute())).hexdigest()[:16]
-    return Path(tempfile.gettempdir()) / f"friday-syncthing-{installation_key}"
+    return Path("/tmp") / f"friday-syncthing-{installation_key}"
 
 
 @dataclass(frozen=True, slots=True)

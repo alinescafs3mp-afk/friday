@@ -5,6 +5,7 @@ import os
 import socket
 import socketserver
 import subprocess
+import tempfile
 import threading
 from collections.abc import Mapping, Sequence
 from dataclasses import replace
@@ -508,6 +509,28 @@ def test_owner_identity_is_hashed_and_commands_are_key_free(tmp_path: Path) -> N
     assert "--no-restart" in serve
     assert "--no-upgrade" in serve
     assert not any("apikey" in argument.lower() or "secret" in argument for argument in generate + serve)
+
+
+def test_persisted_unix_endpoint_is_independent_of_ambient_tmpdir(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    base = tmp_path / "obs"
+    first_tmp = tmp_path / "first-process-tmp"
+    second_tmp = tmp_path / "second-process-tmp"
+    first_tmp.mkdir()
+    second_tmp.mkdir()
+    monkeypatch.setenv("TMPDIR", str(first_tmp))
+    monkeypatch.setattr(tempfile, "tempdir", None)
+    hardened_unit = ProfileSpec.for_owner(base, "actor-own-id")
+    monkeypatch.setenv("TMPDIR", str(second_tmp))
+    monkeypatch.setattr(tempfile, "tempdir", None)
+    restarted = ProfileSpec.for_owner(base, "actor-own-id")
+
+    assert hardened_unit.runtime_root == restarted.runtime_root
+    assert hardened_unit.gui_address == restarted.gui_address
+    assert hardened_unit.runtime_root.parent == Path("/tmp")
+    assert hardened_unit.gui_address.startswith("unix:///tmp/friday-syncthing-")
 
 
 def test_owner_and_profile_inputs_are_bounded(tmp_path: Path) -> None:

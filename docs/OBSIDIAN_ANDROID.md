@@ -58,6 +58,14 @@ endpoint. Global discovery и relays включены; сервер может �
 установить исходящее direct-соединение. Входящие Syncthing/GUI-порты
 публиковать не нужно.
 
+Syncthing запускается как managed child включённого `friday-backend.service`,
+отдельный systemd unit не требуется. Reconcile выполняется сразу при старте
+backend и затем с настроенным интервалом. Persisted Unix endpoint расположен в
+стабильном owner-private `/tmp/friday-syncthing-*` namespace и не зависит от
+ambient `TMPDIR` самого unit; отсутствующий каталог пересоздаётся с mode `0700`.
+Отказ хотя бы одного профиля переводит worker health в degraded/error до
+следующего полностью успешного sweep.
+
 Root должен принадлежать пользователю процесса и иметь mode `0700`.
 Friday не исправляет чужой существующий root молча: symlink, чужой owner,
 широкие permissions, системный/слишком широкий каталог и пересечение с

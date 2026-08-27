@@ -40,7 +40,21 @@ OBSIDIAN_WRITE = CapabilityDefinition(
 async def reconcile_obsidian(ctx: ServiceContext) -> Any:
     if ctx.obsidian is None:
         return {"checked": 0, "failed": 0}
-    return await ctx.obsidian.reconcile()
+    report = await ctx.obsidian.reconcile()
+    failures = report.get("failed") if isinstance(report, dict) else None
+    if type(failures) is not int or failures < 0:
+        raise ObsidianReconcileError("Obsidian reconcile returned an invalid failure count")
+    if failures:
+        # Tenant failures are isolated inside the runtime, but the worker itself
+        # must still be degraded.  Returning a report with ``failed > 0`` made the
+        # generic supervisor publish a false ``ok`` heartbeat forever, hiding a
+        # dead local Syncthing process from both health and recovery telemetry.
+        raise ObsidianReconcileError(f"{failures} Obsidian profile operation(s) failed")
+    return report
+
+
+class ObsidianReconcileError(RuntimeError):
+    """A complete tenant sweep that contained one or more isolated failures."""
 
 
 class ObsidianOrgan(Organ):
@@ -57,7 +71,10 @@ class ObsidianOrgan(Organ):
                 run=reconcile_obsidian,
                 interval_sec=float(ctx.settings.obsidian_reconcile_interval_sec),
                 enabled=bool(ctx.settings.obsidian_enabled and ctx.obsidian is not None),
-                run_immediately=False,
+                # Managed Syncthing is a child of the backend, not a standalone
+                # systemd service.  Bootstrap it on every backend start instead of
+                # waiting for a Telegram command or the first periodic interval.
+                run_immediately=True,
                 timeout_sec=120.0,
             ),
         )
@@ -78,5 +95,6 @@ __all__ = [
     "OBSIDIAN_READ",
     "OBSIDIAN_WRITE",
     "ObsidianOrgan",
+    "ObsidianReconcileError",
     "reconcile_obsidian",
 ]
