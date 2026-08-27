@@ -624,12 +624,30 @@ class CommandKernel:
                 raise CommandError("corrupt_job_state")
         else:
             workspace = JobWorkspace(self.store.job_dir(job_id))
-            stdout_bytes = (
-                workspace.stdout_path.stat().st_size if workspace.stdout_path.exists() else 0
-            )
-            stderr_bytes = (
-                workspace.stderr_path.stat().st_size if workspace.stderr_path.exists() else 0
-            )
+            try:
+                stdout_bytes = workspace.stdout_path.stat().st_size if workspace.stdout_path.exists() else 0
+                stderr_bytes = workspace.stderr_path.stat().st_size if workspace.stderr_path.exists() else 0
+            except OSError as exc:
+                refreshed = self.store.read_job(job_id)
+                if refreshed.get("workspace_retired_at") is None:
+                    raise CommandError("corrupt_job_state") from exc
+                job = refreshed
+                try:
+                    stdout_bytes = int(job.get("stdout_bytes") or 0)
+                    stderr_bytes = int(job.get("stderr_bytes") or 0)
+                except (TypeError, ValueError, OverflowError) as count_exc:
+                    raise CommandError("corrupt_job_state") from count_exc
+            else:
+                refreshed = self.store.read_job(job_id)
+                if refreshed.get("workspace_retired_at") is not None:
+                    job = refreshed
+                    try:
+                        stdout_bytes = int(job.get("stdout_bytes") or 0)
+                        stderr_bytes = int(job.get("stderr_bytes") or 0)
+                    except (TypeError, ValueError, OverflowError) as exc:
+                        raise CommandError("corrupt_job_state") from exc
+            if stdout_bytes < 0 or stderr_bytes < 0:
+                raise CommandError("corrupt_job_state")
         return CommandProgress(
             job_id=job_id,
             status=status,
@@ -757,10 +775,17 @@ class CommandKernel:
             CommandStatus.TIMEOUT,
         }:
             raise CommandError("job_output_unpublishable")
+        if self.store.read_job(job_id).get("workspace_retired_at") is not None:
+            raise CommandError("job_output_retired")
         workspace = JobWorkspace(self.store.job_dir(job_id))
-        generated = tuple(
-            (item, workspace.read_generated_file_verified(item)) for item in receipt.generated_files
-        )
+        try:
+            generated = tuple(
+                (item, workspace.read_generated_file_verified(item)) for item in receipt.generated_files
+            )
+        except CommandError:
+            if self.store.read_job(job_id).get("workspace_retired_at") is not None:
+                raise CommandError("job_output_retired") from None
+            raise
         # Repeat the private scope check after filesystem reads. Job ownership
         # is immutable, but a corrupt/replaced ledger must never be treated as
         # an already-authorized binary carrier.
@@ -1031,15 +1056,22 @@ class CommandKernel:
                     else b""
                 )
             except CommandError:
-                status = CommandStatus.UNKNOWN
-                stdout = b""
-                stderr = b""
-                with self.store.transaction():
-                    self.store.update_job(
-                        job_id,
-                        {"status": status.value, "error_code": "corrupt_evidence"},
-                    )
-                job = self.store.read_job(job_id)
+                refreshed = self.store.read_job(job_id)
+                if refreshed.get("workspace_retired_at") is not None:
+                    job = refreshed
+                    status = CommandStatus(str(job.get("status") or CommandStatus.UNKNOWN.value))
+                    stdout = b""
+                    stderr = b""
+                else:
+                    status = CommandStatus.UNKNOWN
+                    stdout = b""
+                    stderr = b""
+                    with self.store.transaction():
+                        self.store.update_job(
+                            job_id,
+                            {"status": status.value, "error_code": "corrupt_evidence"},
+                        )
+                    job = self.store.read_job(job_id)
         isolation = IsolationProfile(
             str(job.get("isolation_profile") or IsolationProfile.ISOLATED_WORKSPACE.value)
         )

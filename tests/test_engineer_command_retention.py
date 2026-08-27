@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import sqlite3
 import threading
 import time
@@ -187,8 +188,7 @@ def _age_sent_publication(service: EngineerCommandService, *, now: float) -> dic
             (old, _JOB_ID),
         )
     row = service.storage.execute(
-        "SELECT id,user_id,chat_id,kind,dedup_key,body,status,sent_at "
-        "FROM outbound_notifications WHERE id=?",
+        "SELECT id,user_id,chat_id,kind,dedup_key,body,status,sent_at FROM outbound_notifications WHERE id=?",
         (queued["id"],),
     ).fetchone()
     assert row is not None
@@ -227,10 +227,13 @@ def test_retention_removes_only_workspace_and_exact_sent_carrier(storage, tmp_pa
         "digest": receipt.command_digest,
         "delivery_chat_id": _CHAT_ID,
     }
-    assert storage.execute(
-        "SELECT 1 FROM outbound_notifications WHERE id=?",
-        (carrier["id"],),
-    ).fetchone() is None
+    assert (
+        storage.execute(
+            "SELECT 1 FROM outbound_notifications WHERE id=?",
+            (carrier["id"],),
+        ).fetchone()
+        is None
+    )
     assert storage.execute("SELECT 1 FROM raw_objects WHERE id=?", (raw_id,)).fetchone() is not None
     assert storage.get_message(assistant_id, LEGACY_OWNER_USER_ID) is not None
     progress = service.kernel.progress(
@@ -279,6 +282,95 @@ def test_retention_removes_only_workspace_and_exact_sent_carrier(storage, tmp_pa
     service.kernel.close()
 
 
+def test_retention_uses_historical_artifact_size_not_current_upload_limit(
+    storage,
+    tmp_path: Path,
+) -> None:
+    service, _receipt = _service(storage, tmp_path)
+    now = time.time()
+    _age_sent_publication(service, now=now)
+    service.max_upload_bytes = 1
+    assert service.retain_terminal_jobs(now=now) == {"retired": 1, "failed": 0, "ephemera": 0}
+    assert not service.kernel.store.job_dir(_JOB_ID).exists()
+    service.kernel.close()
+
+
+def test_receipt_reader_converges_when_retention_marker_wins_race(
+    storage,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    service, receipt = _service(storage, tmp_path)
+
+    def retired_during_read(_workspace, _name, **_kwargs):
+        with service.kernel.store.transaction():
+            service.kernel.store.update_job(
+                _JOB_ID,
+                {
+                    "workspace_retired_at": time.time(),
+                    "stdout_bytes": len(receipt.stdout),
+                    "stderr_bytes": len(receipt.stderr),
+                },
+            )
+        raise CommandError("workspace_unreadable")
+
+    monkeypatch.setattr(JobWorkspace, "read_evidence_verified", retired_during_read)
+    restored, version = service.kernel.terminal_receipt(
+        _JOB_ID,
+        actor_id=LEGACY_OWNER_USER_ID,
+        conversation_id=str(service.kernel.store.read_job(_JOB_ID)["conversation_id"]),
+    )
+    assert version == 2
+    assert restored.status is CommandStatus.COMPLETED
+    assert restored.stdout == restored.stderr == b""
+    assert service.kernel.store.read_job(_JOB_ID)["error_code"] == ""
+    service.kernel.close()
+
+
+def test_status_reports_retired_when_marker_wins_archive_race(
+    storage,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    service, receipt = _service(storage, tmp_path)
+    job = service.kernel.store.read_job(_JOB_ID)
+    conversation_id = str(job["conversation_id"])
+    actor = service.authorization.actor_for_user(
+        LEGACY_OWNER_USER_ID,
+        source="retention-race-test",
+        identity_id=_CHAT_ID,
+    )
+
+    def retired_before_archive(*_args, **_kwargs):
+        with service.kernel.store.transaction():
+            service.kernel.store.update_job(
+                _JOB_ID,
+                {
+                    "workspace_retired_at": time.time(),
+                    "stdout_bytes": len(receipt.stdout),
+                    "stderr_bytes": len(receipt.stderr),
+                },
+            )
+        raise CommandError("job_output_retired")
+
+    monkeypatch.setattr(service, "_archive_for_receipt", retired_before_archive)
+    result = service.status(
+        actor=actor,
+        job_id=_JOB_ID,
+        _conversation_id=conversation_id,
+    )
+    assert result["ok"] is True
+    assert result["output_retired"] is True
+    assert result["artifact_delivery"] == {
+        "available": False,
+        "error_code": "job_output_retired",
+    }
+    assert result["stdout"] == result["stderr"] == ""
+    assert "_attachment" not in result
+    assert service.kernel.store.read_job(_JOB_ID)["status"] == CommandStatus.COMPLETED.value
+    service.kernel.close()
+
+
 def test_retention_fails_closed_on_sent_body_drift(storage, tmp_path: Path) -> None:
     service, _receipt = _service(storage, tmp_path)
     now = time.time()
@@ -291,10 +383,13 @@ def test_retention_fails_closed_on_sent_body_drift(storage, tmp_path: Path) -> N
     assert service.retain_terminal_jobs(now=now) == {"retired": 0, "failed": 1, "ephemera": 0}
     assert service.kernel.store.read_job(_JOB_ID)["workspace_retired_at"] is None
     assert service.kernel.store.job_dir(_JOB_ID).is_dir()
-    assert storage.execute(
-        "SELECT 1 FROM outbound_notifications WHERE id=?",
-        (carrier["id"],),
-    ).fetchone() is not None
+    assert (
+        storage.execute(
+            "SELECT 1 FROM outbound_notifications WHERE id=?",
+            (carrier["id"],),
+        ).fetchone()
+        is not None
+    )
     service.kernel.close()
 
 
@@ -315,18 +410,28 @@ def test_retention_resumes_after_marker_before_workspace_delete(
     assert service.retain_terminal_jobs(now=now) == {"retired": 0, "failed": 1, "ephemera": 0}
     assert service.kernel.store.read_job(_JOB_ID)["workspace_retired_at"] is not None
     assert service.kernel.store.job_dir(_JOB_ID).is_dir()
-    assert storage.execute(
-        "SELECT 1 FROM outbound_notifications WHERE id=?",
-        (carrier["id"],),
-    ).fetchone() is not None
+    assert (
+        storage.execute(
+            "SELECT 1 FROM outbound_notifications WHERE id=?",
+            (carrier["id"],),
+        ).fetchone()
+        is not None
+    )
 
     monkeypatch.setattr(service.kernel, "retire_workspace", original)
-    assert service.retain_terminal_jobs(now=now) == {"retired": 1, "failed": 0, "ephemera": 0}
+    assert service.retain_terminal_jobs(now=now + 301.0) == {
+        "retired": 1,
+        "failed": 0,
+        "ephemera": 0,
+    }
     assert not service.kernel.store.job_dir(_JOB_ID).exists()
-    assert storage.execute(
-        "SELECT 1 FROM outbound_notifications WHERE id=?",
-        (carrier["id"],),
-    ).fetchone() is None
+    assert (
+        storage.execute(
+            "SELECT 1 FROM outbound_notifications WHERE id=?",
+            (carrier["id"],),
+        ).fetchone()
+        is None
+    )
     service.kernel.close()
 
 
@@ -344,6 +449,37 @@ def test_workspace_retirement_never_follows_symlink(tmp_path: Path) -> None:
     with pytest.raises(CommandError, match="workspace_retirement_refused"):
         workspace.retire()
     assert sentinel.read_bytes() == b"keep"
+
+
+def test_workspace_retirement_refuses_directory_swap(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    jobs = tmp_path / "jobs"
+    jobs.mkdir()
+    job = jobs / _JOB_ID
+    job.mkdir()
+    (job / "original").write_bytes(b"original")
+    replacement = jobs / "replacement"
+    replacement.mkdir()
+    (replacement / "sentinel").write_bytes(b"keep")
+    original_rename = os.rename
+
+    def swapped_rename(source, target, *, src_dir_fd=None, dst_dir_fd=None):
+        original_rename(source, "parked", src_dir_fd=src_dir_fd, dst_dir_fd=dst_dir_fd)
+        original_rename(
+            "replacement",
+            source,
+            src_dir_fd=src_dir_fd,
+            dst_dir_fd=dst_dir_fd,
+        )
+        original_rename(source, target, src_dir_fd=src_dir_fd, dst_dir_fd=dst_dir_fd)
+
+    monkeypatch.setattr("friday.organs.engineer.command.workspace.os.rename", swapped_rename)
+    with pytest.raises(CommandError, match="workspace_retirement_changed"):
+        JobWorkspace(job).retire()
+    assert (jobs / f".retired-{_JOB_ID}" / "sentinel").read_bytes() == b"keep"
+    assert (jobs / "parked" / "original").read_bytes() == b"original"
 
 
 def test_retention_candidates_are_strict_and_hard_bounded(tmp_path: Path) -> None:
@@ -386,15 +522,30 @@ def test_retention_candidates_are_strict_and_hard_bounded(tmp_path: Path) -> Non
         return job_id
 
     eligible = {
-        insert(index, status="completed", publication="sent", updated_at=1.0)
-        for index in range(1, 26)
+        insert(index, status="completed", publication="sent", updated_at=1.0) for index in range(1, 26)
     }
     insert(30, status="completed", publication="pending", updated_at=1.0)
     insert(31, status="unknown", publication="sent", updated_at=1.0)
     insert(32, status="completed", publication="sent", updated_at=3.0)
-    candidates = store.list_workspace_retention_candidates(cutoff=2.0, limit=1000)
+    candidates = store.list_workspace_retention_candidates(cutoff=2.0, now=2.0, limit=1000)
     assert len(candidates) == 20
     assert {str(candidate["job_id"]) for candidate in candidates} <= eligible
+    for candidate in candidates:
+        with store.transaction():
+            store.update_job(
+                str(candidate["job_id"]),
+                {"workspace_retired_at": 2.0},
+            )
+        store.record_workspace_retention_failure(
+            str(candidate["job_id"]),
+            error_code="terminal_artifact_changed",
+            failed_at=2.0,
+        )
+    remainder = store.list_workspace_retention_candidates(cutoff=2.0, now=3.0, limit=1000)
+    assert len(remainder) == 5
+    assert {str(candidate["job_id"]) for candidate in remainder} == eligible - {
+        str(candidate["job_id"]) for candidate in candidates
+    }
     store.close()
 
 
@@ -418,13 +569,31 @@ def test_private_store_migrates_retention_columns_and_prunes_only_ephemera(
     legacy = sqlite3.connect(str(db_path), isolation_level=None)
     for column in ("stdout_bytes", "stderr_bytes", "workspace_retired_at"):
         legacy.execute(f"ALTER TABLE jobs DROP COLUMN {column}")
-    legacy.execute("ALTER TABLE command_job_publications DROP COLUMN carrier_retired_at")
+    for column in (
+        "carrier_retired_at",
+        "retention_attempts",
+        "retention_next_attempt_at",
+        "retention_error_code",
+    ):
+        legacy.execute(f"ALTER TABLE command_job_publications DROP COLUMN {column}")
+    for column in (
+        "stage_attempts",
+        "stage_next_attempt_at",
+        "stage_error_code",
+        "retire_attempts",
+        "retire_next_attempt_at",
+        "retire_error_code",
+    ):
+        legacy.execute(f"ALTER TABLE command_job_progress DROP COLUMN {column}")
     legacy.close()
     store = CommandJobStore(tmp_path / "store")
     assert store.prune_expired_ephemera(now=2) == 2
-    assert store._conn.execute(  # noqa: SLF001
-        "SELECT 1 FROM confirmation_source_ledger WHERE source_key='source'"
-    ).fetchone() is not None
+    assert (
+        store._conn.execute(  # noqa: SLF001
+            "SELECT 1 FROM confirmation_source_ledger WHERE source_key='source'"
+        ).fetchone()
+        is not None
+    )
     columns = {row[1] for row in store._conn.execute("PRAGMA table_info(jobs)")}  # noqa: SLF001
     assert {"stdout_bytes", "stderr_bytes", "workspace_retired_at"} <= columns
     publication_columns = {
@@ -433,5 +602,24 @@ def test_private_store_migrates_retention_columns_and_prunes_only_ephemera(
             "PRAGMA table_info(command_job_publications)"
         )
     }
-    assert "carrier_retired_at" in publication_columns
+    assert {
+        "carrier_retired_at",
+        "retention_attempts",
+        "retention_next_attempt_at",
+        "retention_error_code",
+    } <= publication_columns
+    progress_columns = {
+        row[1]
+        for row in store._conn.execute(  # noqa: SLF001
+            "PRAGMA table_info(command_job_progress)"
+        )
+    }
+    assert {
+        "stage_attempts",
+        "stage_next_attempt_at",
+        "stage_error_code",
+        "retire_attempts",
+        "retire_next_attempt_at",
+        "retire_error_code",
+    } <= progress_columns
     store.close()

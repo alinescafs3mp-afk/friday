@@ -29,6 +29,12 @@ _PUBLICATION_STATES = frozenset({"pending", "staged", "sent", "uncertain", "bloc
 _PUBLICATION_MAX_ATTEMPTS = 5
 _RETENTION_BATCH_MAX = 20
 _EPHEMERAL_RETENTION_BATCH_MAX = 100
+_PROGRESS_BATCH_MAX = 20
+_PROGRESS_CHECKPOINTS = frozenset({0, 60, 300, 900, 1800})
+_PROGRESS_RETRY_BASE_SEC = 30
+_PROGRESS_RETRY_MAX_SEC = 30 * 60
+_RETENTION_RETRY_BASE_SEC = 5 * 60
+_RETENTION_RETRY_MAX_SEC = 7 * 24 * 60 * 60
 
 
 def _flock(fd: int, op: int) -> None:
@@ -314,23 +320,64 @@ class CommandJobStore:
                     attempts INTEGER NOT NULL DEFAULT 0 CHECK(attempts >= 0),
                     last_error_code TEXT NOT NULL DEFAULT '',
                     carrier_retired_at REAL,
+                    retention_attempts INTEGER NOT NULL DEFAULT 0 CHECK(retention_attempts >= 0),
+                    retention_next_attempt_at REAL,
+                    retention_error_code TEXT NOT NULL DEFAULT '',
                     created_at REAL NOT NULL,
                     updated_at REAL NOT NULL
                 );
                 CREATE INDEX IF NOT EXISTS idx_command_job_publications_state
                     ON command_job_publications(state, updated_at, job_id);
+                CREATE TABLE IF NOT EXISTS command_job_progress (
+                    job_id TEXT PRIMARY KEY REFERENCES jobs(job_id) ON DELETE RESTRICT,
+                    checkpoint_sec INTEGER NOT NULL DEFAULT 0
+                        CHECK(checkpoint_sec IN (0,60,300,900,1800)),
+                    retired_at REAL,
+                    stage_attempts INTEGER NOT NULL DEFAULT 0 CHECK(stage_attempts >= 0),
+                    stage_next_attempt_at REAL,
+                    stage_error_code TEXT NOT NULL DEFAULT '',
+                    retire_attempts INTEGER NOT NULL DEFAULT 0 CHECK(retire_attempts >= 0),
+                    retire_next_attempt_at REAL,
+                    retire_error_code TEXT NOT NULL DEFAULT ''
+                );
+                CREATE INDEX IF NOT EXISTS idx_command_job_progress_retired
+                    ON command_job_progress(retired_at, checkpoint_sec, job_id);
                 """
             )
             publication_columns = {
                 str(row[1])
-                for row in self._conn.execute(
-                    "PRAGMA table_info(command_job_publications)"
-                ).fetchall()
+                for row in self._conn.execute("PRAGMA table_info(command_job_publications)").fetchall()
             }
-            if "carrier_retired_at" not in publication_columns:
-                self._conn.execute(
-                    "ALTER TABLE command_job_publications ADD COLUMN carrier_retired_at REAL"
-                )
+            retention_publication_columns = (
+                ("carrier_retired_at", "REAL"),
+                ("retention_attempts", "INTEGER NOT NULL DEFAULT 0"),
+                ("retention_next_attempt_at", "REAL"),
+                ("retention_error_code", "TEXT NOT NULL DEFAULT ''"),
+            )
+            for name, declaration in retention_publication_columns:
+                if name not in publication_columns:
+                    self._conn.execute(
+                        f"ALTER TABLE command_job_publications ADD COLUMN {name} {declaration}"
+                    )
+            self._conn.execute(
+                """INSERT OR IGNORE INTO command_job_progress(job_id,checkpoint_sec)
+                   SELECT job_id,0 FROM command_job_publications"""
+            )
+            progress_columns = {
+                str(row[1])
+                for row in self._conn.execute("PRAGMA table_info(command_job_progress)").fetchall()
+            }
+            progress_retry_columns = (
+                ("stage_attempts", "INTEGER NOT NULL DEFAULT 0"),
+                ("stage_next_attempt_at", "REAL"),
+                ("stage_error_code", "TEXT NOT NULL DEFAULT ''"),
+                ("retire_attempts", "INTEGER NOT NULL DEFAULT 0"),
+                ("retire_next_attempt_at", "REAL"),
+                ("retire_error_code", "TEXT NOT NULL DEFAULT ''"),
+            )
+            for name, declaration in progress_retry_columns:
+                if name not in progress_columns:
+                    self._conn.execute(f"ALTER TABLE command_job_progress ADD COLUMN {name} {declaration}")
         # Pending confirmations created by a pre-ledger build cannot prove that
         # their immutable ingress row/update was minted only once. Invalidate
         # them on upgrade instead of silently widening authority.
@@ -514,8 +561,215 @@ class CommandJobStore:
                        VALUES(?,?,'pending',?,?)""",
                     (str(payload["job_id"]), delivery_chat_id, created_at, created_at),
                 )
+                self._conn.execute(
+                    "INSERT INTO command_job_progress(job_id,checkpoint_sec) VALUES(?,0)",
+                    (str(payload["job_id"]),),
+                )
         except sqlite3.IntegrityError as exc:
             raise CommandError("idempotency_conflict") from exc
+
+    def list_progress_publication_candidates(
+        self,
+        *,
+        now: float,
+        limit: int = _PROGRESS_BATCH_MAX,
+    ) -> list[dict[str, Any]]:
+        """Return only running jobs old enough for at least one sparse checkpoint."""
+
+        bounded = max(1, min(int(limit), _PROGRESS_BATCH_MAX))
+        with self._local:
+            rows = self._conn.execute(
+                """SELECT jobs.*, publication.delivery_chat_id,
+                          progress.checkpoint_sec AS progress_checkpoint_sec
+                     FROM command_job_progress AS progress
+                     JOIN jobs ON jobs.job_id=progress.job_id
+                     JOIN command_job_publications AS publication
+                       ON publication.job_id=jobs.job_id
+                    WHERE progress.retired_at IS NULL
+                      AND (progress.stage_next_attempt_at IS NULL
+                           OR progress.stage_next_attempt_at<=?)
+                      AND jobs.status='running'
+                      AND jobs.started_at IS NOT NULL
+                      AND (
+                          (progress.checkpoint_sec=0 AND jobs.started_at<=?-60)
+                          OR (progress.checkpoint_sec=60 AND jobs.started_at<=?-300)
+                          OR (progress.checkpoint_sec=300 AND jobs.started_at<=?-900)
+                          OR (progress.checkpoint_sec=900 AND jobs.started_at<=?-1800)
+                      )
+                    ORDER BY CASE WHEN progress.stage_attempts=0 THEN 0 ELSE 1 END,
+                             jobs.started_at ASC,jobs.job_id ASC
+                    LIMIT ?""",
+                (float(now), float(now), float(now), float(now), float(now), bounded),
+            ).fetchall()
+            return [{str(key): value for key, value in dict(row).items()} for row in rows]
+
+    def advance_progress_checkpoint(
+        self,
+        job_id: str,
+        *,
+        previous_checkpoint_sec: int,
+        checkpoint_sec: int,
+    ) -> bool:
+        """CAS one frozen main carrier into the private ledger while the job is running."""
+
+        if (
+            previous_checkpoint_sec not in _PROGRESS_CHECKPOINTS
+            or checkpoint_sec not in _PROGRESS_CHECKPOINTS - {0}
+            or checkpoint_sec <= previous_checkpoint_sec
+        ):
+            raise CommandError("progress_checkpoint_invalid")
+        with self.transaction():
+            cursor = self._conn.execute(
+                """UPDATE command_job_progress
+                      SET checkpoint_sec=?,stage_attempts=0,
+                          stage_next_attempt_at=NULL,stage_error_code=''
+                    WHERE job_id=? AND checkpoint_sec=? AND retired_at IS NULL
+                      AND EXISTS (
+                          SELECT 1 FROM jobs
+                           WHERE jobs.job_id=command_job_progress.job_id
+                             AND jobs.status='running'
+                      )""",
+                (int(checkpoint_sec), str(job_id), int(previous_checkpoint_sec)),
+            )
+            if cursor.rowcount == 1:
+                return True
+            row = self._conn.execute(
+                """SELECT progress.checkpoint_sec,progress.retired_at,jobs.status
+                     FROM command_job_progress AS progress
+                     JOIN jobs ON jobs.job_id=progress.job_id
+                    WHERE progress.job_id=?""",
+                (str(job_id),),
+            ).fetchone()
+            if row is None:
+                raise CommandError("progress_state_missing")
+            return (
+                row["retired_at"] is None
+                and str(row["status"]) == "running"
+                and int(row["checkpoint_sec"]) == checkpoint_sec
+            )
+
+    def list_progress_retirement_candidates(
+        self,
+        *,
+        now: float | None = None,
+        limit: int = _PROGRESS_BATCH_MAX,
+    ) -> list[dict[str, Any]]:
+        """Return terminal/unknown scopes whose pending progress must be retired."""
+
+        bounded = max(1, min(int(limit), _PROGRESS_BATCH_MAX))
+        moment = time.time() if now is None else float(now)
+        with self._local:
+            rows = self._conn.execute(
+                """SELECT jobs.actor_id,jobs.tenant_id,jobs.conversation_id,jobs.job_id,
+                          publication.delivery_chat_id
+                     FROM command_job_progress AS progress
+                     JOIN jobs ON jobs.job_id=progress.job_id
+                     JOIN command_job_publications AS publication
+                       ON publication.job_id=jobs.job_id
+                    WHERE progress.retired_at IS NULL
+                      AND (progress.retire_next_attempt_at IS NULL
+                           OR progress.retire_next_attempt_at<=?)
+                      AND jobs.status IN ('completed','failed','cancelled','timeout','unknown')
+                    ORDER BY CASE WHEN progress.retire_attempts=0 THEN 0 ELSE 1 END,
+                             jobs.finished_at ASC,jobs.job_id ASC
+                    LIMIT ?""",
+                (moment, bounded),
+            ).fetchall()
+            return [{str(key): value for key, value in dict(row).items()} for row in rows]
+
+    def finish_progress_retirement(self, job_id: str, *, retired_at: float) -> None:
+        """Durably stop reconsidering a non-running job after its main queue was swept."""
+
+        with self.transaction():
+            cursor = self._conn.execute(
+                """UPDATE command_job_progress SET retired_at=COALESCE(retired_at,?)
+                    WHERE job_id=? AND retired_at IS NULL
+                      AND EXISTS (
+                          SELECT 1 FROM jobs
+                           WHERE jobs.job_id=command_job_progress.job_id
+                             AND jobs.status IN (
+                                 'completed','failed','cancelled','timeout','unknown'
+                             )
+                      )""",
+                (float(retired_at), str(job_id)),
+            )
+            if cursor.rowcount == 1:
+                return
+            row = self._conn.execute(
+                "SELECT retired_at FROM command_job_progress WHERE job_id=?",
+                (str(job_id),),
+            ).fetchone()
+            if row is None or row["retired_at"] is None:
+                raise CommandError("progress_state_changed")
+
+    def _record_progress_failure(
+        self,
+        job_id: str,
+        *,
+        phase: Literal["stage", "retire"],
+        error_code: str,
+        failed_at: float,
+    ) -> None:
+        clean = str(error_code or "progress_failed")
+        if re.fullmatch(r"[a-z][a-z0-9_]{0,79}", clean) is None:
+            clean = "progress_failed"
+        if phase == "stage":
+            attempts_column = "stage_attempts"
+            next_column = "stage_next_attempt_at"
+            error_column = "stage_error_code"
+        else:
+            attempts_column = "retire_attempts"
+            next_column = "retire_next_attempt_at"
+            error_column = "retire_error_code"
+        with self.transaction():
+            row = self._conn.execute(
+                f"""SELECT {attempts_column} AS attempts FROM command_job_progress
+                     WHERE job_id=? AND retired_at IS NULL""",  # nosec B608 - fixed columns above
+                (str(job_id),),
+            ).fetchone()
+            if row is None:
+                raise CommandError("progress_state_changed")
+            attempts = int(row["attempts"] or 0) + 1
+            delay = min(
+                _PROGRESS_RETRY_MAX_SEC,
+                _PROGRESS_RETRY_BASE_SEC * (2 ** min(attempts - 1, 8)),
+            )
+            cursor = self._conn.execute(
+                f"""UPDATE command_job_progress
+                      SET {attempts_column}=?,{next_column}=?,{error_column}=?
+                    WHERE job_id=? AND retired_at IS NULL""",  # nosec B608 - fixed columns above
+                (attempts, float(failed_at) + delay, clean, str(job_id)),
+            )
+            if cursor.rowcount != 1:
+                raise CommandError("progress_state_changed")
+
+    def record_progress_publication_failure(
+        self,
+        job_id: str,
+        *,
+        error_code: str,
+        failed_at: float,
+    ) -> None:
+        self._record_progress_failure(
+            job_id,
+            phase="stage",
+            error_code=error_code,
+            failed_at=failed_at,
+        )
+
+    def record_progress_retirement_failure(
+        self,
+        job_id: str,
+        *,
+        error_code: str,
+        failed_at: float,
+    ) -> None:
+        self._record_progress_failure(
+            job_id,
+            phase="retire",
+            error_code=error_code,
+            failed_at=failed_at,
+        )
 
     def list_terminal_publication_candidates(self, *, limit: int = 20) -> list[dict[str, Any]]:
         """Return bounded publishable terminal jobs that still need staging."""
@@ -561,11 +815,13 @@ class CommandJobStore:
         self,
         *,
         cutoff: float,
+        now: float | None = None,
         limit: int = _RETENTION_BATCH_MAX,
     ) -> list[dict[str, Any]]:
         """Return only old, proven-sent terminal workspaces in a hard-bounded batch."""
 
         bounded = max(1, min(int(limit), _RETENTION_BATCH_MAX))
+        moment = time.time() if now is None else float(now)
         with self._local:
             rows = self._conn.execute(
                 """SELECT jobs.*, publication.delivery_chat_id,
@@ -578,14 +834,52 @@ class CommandJobStore:
                      JOIN jobs ON jobs.job_id=publication.job_id
                     WHERE publication.state='sent'
                       AND publication.carrier_retired_at IS NULL
+                      AND (publication.retention_next_attempt_at IS NULL
+                           OR publication.retention_next_attempt_at<=?)
                       AND publication.updated_at<=?
                       AND jobs.status IN ('completed','failed','cancelled','timeout')
                       AND jobs.cleanup_pending=0
-                    ORDER BY publication.updated_at ASC, jobs.job_id ASC
+                    ORDER BY CASE WHEN publication.retention_attempts=0 THEN 0 ELSE 1 END,
+                             publication.updated_at ASC,jobs.job_id ASC
                     LIMIT ?""",
-                (float(cutoff), bounded),
+                (moment, float(cutoff), bounded),
             ).fetchall()
             return [{str(key): value for key, value in dict(row).items()} for row in rows]
+
+    def record_workspace_retention_failure(
+        self,
+        job_id: str,
+        *,
+        error_code: str,
+        failed_at: float,
+    ) -> None:
+        """Back off one poison candidate so it cannot starve later eligible jobs."""
+
+        clean = str(error_code or "retention_failed")
+        if re.fullmatch(r"[a-z][a-z0-9_]{0,79}", clean) is None:
+            clean = "retention_failed"
+        with self.transaction():
+            row = self._conn.execute(
+                """SELECT retention_attempts FROM command_job_publications
+                    WHERE job_id=? AND carrier_retired_at IS NULL""",
+                (str(job_id),),
+            ).fetchone()
+            if row is None:
+                raise CommandError("retention_authority_changed")
+            attempts = int(row["retention_attempts"] or 0) + 1
+            delay = min(
+                _RETENTION_RETRY_MAX_SEC,
+                _RETENTION_RETRY_BASE_SEC * (2 ** min(attempts - 1, 8)),
+            )
+            cursor = self._conn.execute(
+                """UPDATE command_job_publications
+                      SET retention_attempts=?,retention_next_attempt_at=?,
+                          retention_error_code=?
+                    WHERE job_id=? AND carrier_retired_at IS NULL""",
+                (attempts, float(failed_at) + delay, clean, str(job_id)),
+            )
+            if cursor.rowcount != 1:
+                raise CommandError("retention_authority_changed")
 
     def mark_workspace_retirement(
         self,
@@ -650,8 +944,7 @@ class CommandJobStore:
                 if cursor.rowcount != 1:
                     raise CommandError("retention_authority_changed")
             elif (
-                int(row["stdout_bytes"] or 0) != stdout_bytes
-                or int(row["stderr_bytes"] or 0) != stderr_bytes
+                int(row["stdout_bytes"] or 0) != stdout_bytes or int(row["stderr_bytes"] or 0) != stderr_bytes
             ):
                 raise CommandError("retention_identity_changed")
         return self.read_job(job_id)

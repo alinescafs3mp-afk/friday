@@ -21,6 +21,10 @@ from friday.organs.engineer.command import (
     IsolationProfile,
 )
 from friday.organs.engineer.command.contracts import sha256_bytes
+from friday.organs.engineer.command.progress import (
+    PROGRESS_NOTIFICATION_KIND,
+    stage_progress_notification,
+)
 from friday.organs.engineer.command.store import CommandJobStore
 from friday.organs.engineer.command_tools import EngineerCommandService
 from friday.organs.engineer.publication import ExactGeneratedFileBatch, exact_generated_file_batch
@@ -165,6 +169,93 @@ def test_archive_stage_is_atomic_content_free_and_replay_exact(storage, tmp_path
         )
         == "invalid"
     )
+
+
+def test_terminal_stage_atomically_retires_pending_progress(storage, tmp_path: Path) -> None:
+    conversation_id, source_message_id = _main_scope(storage)
+    progress = stage_progress_notification(
+        storage,
+        actor_id=LEGACY_OWNER_USER_ID,
+        tenant_id=LEGACY_OWNER_USER_ID,
+        conversation_id=conversation_id,
+        delivery_chat_id="5001",
+        job_id="1" * 32,
+        checkpoint_sec=60,
+        stdout_bytes=7,
+        stderr_bytes=0,
+        output_activity=True,
+    )
+    attachment, batch = _archive_attachment()
+    terminal = stage_terminal_archive(
+        storage,
+        tmp_path / "files",
+        actor_id=LEGACY_OWNER_USER_ID,
+        tenant_id=LEGACY_OWNER_USER_ID,
+        conversation_id=conversation_id,
+        source_message_id=source_message_id,
+        delivery_chat_id="5001",
+        job_id="1" * 32,
+        status="completed",
+        receipt_mac="2" * 64,
+        attachment=attachment,
+        batch=batch,
+        max_bytes=1024 * 1024,
+    )
+    rows = {
+        str(row["id"]): dict(row)
+        for row in storage.execute("SELECT id,kind,status,dedup_key FROM outbound_notifications").fetchall()
+    }
+    assert rows[progress.notification_id] == {
+        "id": progress.notification_id,
+        "kind": PROGRESS_NOTIFICATION_KIND,
+        "status": "failed",
+        "dedup_key": progress.dedup_key,
+    }
+    assert rows[terminal.notification_id]["status"] == "pending"
+
+
+def test_corrupt_progress_never_blocks_terminal_stage(storage, tmp_path: Path) -> None:
+    conversation_id, source_message_id = _main_scope(storage)
+    progress = stage_progress_notification(
+        storage,
+        actor_id=LEGACY_OWNER_USER_ID,
+        tenant_id=LEGACY_OWNER_USER_ID,
+        conversation_id=conversation_id,
+        delivery_chat_id="5001",
+        job_id="1" * 32,
+        checkpoint_sec=60,
+        stdout_bytes=7,
+        stderr_bytes=0,
+        output_activity=True,
+    )
+    with storage.transaction() as conn:
+        conn.execute(
+            "UPDATE outbound_notifications SET body='{}' WHERE id=?",
+            (progress.notification_id,),
+        )
+    attachment, batch = _archive_attachment()
+    terminal = stage_terminal_archive(
+        storage,
+        tmp_path / "files",
+        actor_id=LEGACY_OWNER_USER_ID,
+        tenant_id=LEGACY_OWNER_USER_ID,
+        conversation_id=conversation_id,
+        source_message_id=source_message_id,
+        delivery_chat_id="5001",
+        job_id="1" * 32,
+        status="completed",
+        receipt_mac="2" * 64,
+        attachment=attachment,
+        batch=batch,
+        max_bytes=1024 * 1024,
+    )
+    assert terminal.status == "pending"
+    rows = {
+        str(row["id"]): dict(row)
+        for row in storage.execute("SELECT id,kind,status FROM outbound_notifications").fetchall()
+    }
+    assert rows[progress.notification_id]["status"] == "pending"
+    assert rows[terminal.notification_id]["status"] == "pending"
 
 
 def _receipt(

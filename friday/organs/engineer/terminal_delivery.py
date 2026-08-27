@@ -7,6 +7,7 @@ import hmac
 import json
 import re
 from collections.abc import Mapping
+from contextlib import suppress
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -23,6 +24,7 @@ from friday.generated_files import (
     generated_file_descriptor,
     generated_files_publication_transaction,
 )
+from friday.organs.engineer.command.progress import retire_pending_progress_notifications
 from friday.organs.engineer.publication import (
     ExactGeneratedFileBatch,
     ExactGeneratedFilePublicationError,
@@ -35,6 +37,7 @@ from friday.storage.models import new_id
 
 TERMINAL_NOTIFICATION_KIND = "engineer_command_terminal"
 TERMINAL_ENVELOPE_SCHEMA = "friday.engineer-command-terminal.v1"
+TERMINAL_ARTIFACT_MAX_BYTES = 36 * 1024 * 1024
 
 _JOB_ID = re.compile(r"[0-9a-f]{32}")
 _MESSAGE_ID = re.compile(r"msg_[0-9a-f]{16}")
@@ -65,6 +68,39 @@ class StagedTerminalNotification:
     dedup_key: str
     envelope_sha256: str
     status: str
+
+
+def _retire_progress_best_effort(
+    conn: Any,
+    *,
+    actor_id: str,
+    tenant_id: str,
+    conversation_id: str,
+    delivery_chat_id: str,
+    job_id: str,
+) -> None:
+    """Keep corrupt/stale progress state from ever blocking a terminal result."""
+
+    savepoint = "terminal_progress_retirement"
+    try:
+        conn.execute(f"SAVEPOINT {savepoint}")
+    except Exception:
+        return
+    try:
+        retire_pending_progress_notifications(
+            conn,
+            actor_id=actor_id,
+            tenant_id=tenant_id,
+            conversation_id=conversation_id,
+            delivery_chat_id=delivery_chat_id,
+            job_id=job_id,
+        )
+    except Exception:
+        with suppress(Exception):
+            conn.execute(f"ROLLBACK TO {savepoint}")
+    finally:
+        with suppress(Exception):
+            conn.execute(f"RELEASE {savepoint}")
 
 
 def _canonical_json(value: Mapping[str, Any]) -> str:
@@ -176,6 +212,7 @@ def parse_terminal_envelope(value: object) -> dict[str, Any]:
         or isinstance(size_bytes, bool)
         or not isinstance(size_bytes, int)
         or size_bytes <= 0
+        or size_bytes > TERMINAL_ARTIFACT_MAX_BYTES
         or _SHA256.fullmatch(str(artifact.get("sha256") or "")) is None
     ):
         raise TerminalDeliveryError("terminal_envelope_invalid")
@@ -276,7 +313,7 @@ def stage_terminal_archive(
     dedup_key = terminal_dedup_key(job_id, receipt_mac, has_artifact=True)
     existing = _existing_notification(storage, chat_id=delivery_chat_id, dedup_key=dedup_key)
     if existing is not None:
-        return _exact_existing_archive(
+        staged = _exact_existing_archive(
             storage,
             existing,
             actor_id=actor_id,
@@ -289,6 +326,16 @@ def stage_terminal_archive(
             receipt_mac=receipt_mac,
             expected_artifact=expected_artifact,
         )
+        with suppress(Exception), storage.transaction() as conn:
+            _retire_progress_best_effort(
+                conn,
+                actor_id=actor_id,
+                tenant_id=tenant_id,
+                conversation_id=conversation_id,
+                delivery_chat_id=delivery_chat_id,
+                job_id=job_id,
+            )
+        return staged
 
     notification_id = new_id("notif")
     caption = _safe_caption(job_id, status, has_artifact=True)
@@ -382,6 +429,14 @@ def stage_terminal_archive(
             )
             if cursor.rowcount != 1:
                 raise TerminalDeliveryError("terminal_notification_not_staged")
+            _retire_progress_best_effort(
+                conn,
+                actor_id=actor_id,
+                tenant_id=tenant_id,
+                conversation_id=conversation_id,
+                delivery_chat_id=delivery_chat_id,
+                job_id=job_id,
+            )
             visible = conn.execute(
                 """SELECT 1 FROM outbound_notifications AS n
                      WHERE n.id=? AND n.kind='engineer_command_terminal'
@@ -653,6 +708,7 @@ def verify_sent_terminal_notification_artifact(
 __all__ = [
     "StagedTerminalNotification",
     "TERMINAL_ENVELOPE_SCHEMA",
+    "TERMINAL_ARTIFACT_MAX_BYTES",
     "TERMINAL_NOTIFICATION_KIND",
     "TerminalDeliveryError",
     "parse_terminal_envelope",

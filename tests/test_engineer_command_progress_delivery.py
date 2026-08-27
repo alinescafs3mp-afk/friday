@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import json
+import threading
 from dataclasses import replace
+from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
@@ -10,6 +12,16 @@ from starlette.requests import Request
 
 from friday.api.notifications import notifications_pending
 from friday.organs.engineer import EngineerOrgan
+from friday.organs.engineer.command import (
+    CommandGrantAuthority,
+    CommandKernel,
+    CommandLane,
+    CommandOrigin,
+    CommandStatus,
+    IsolationProfile,
+    OwnerConfirmationAuthority,
+    OwnerSourceAuthority,
+)
 from friday.organs.engineer.command.progress import (
     PROGRESS_CHECKPOINTS_SEC,
     PROGRESS_NOTIFICATION_KIND,
@@ -20,6 +32,9 @@ from friday.organs.engineer.command.progress import (
     retire_pending_progress_notifications,
     stage_progress_notification,
 )
+from friday.organs.engineer.command.store import CommandJobStore, atomic_write
+from friday.organs.engineer.command.workspace import JobWorkspace
+from friday.organs.engineer.command_tools import EngineerCommandService
 from friday.permissions import LEGACY_OWNER_USER_ID, AuthorizationService
 
 
@@ -81,6 +96,81 @@ def _request(storage: Any, settings: Any, authorization: AuthorizationService) -
     request = Request({"type": "http", "method": "GET", "path": "/", "app": app})
     request.state.actor = SimpleNamespace(source="telegram-bridge")
     return request
+
+
+def _running_service(
+    storage: Any,
+    tmp_path: Path,
+    *,
+    started_at: float,
+) -> tuple[EngineerCommandService, str, AuthorizationService]:
+    conversation_id = _scope(storage)
+    authority = CommandGrantAuthority(
+        b"g" * 32,
+        OwnerSourceAuthority(b"s" * 32),
+        OwnerConfirmationAuthority(b"c" * 32),
+    )
+    kernel = CommandKernel(tmp_path / "commands", authority)
+    workspace = JobWorkspace(kernel.store.job_dir("1" * 32))
+    workspace.materialize()
+    atomic_write(workspace.stdout_path, b"working\n")
+    atomic_write(workspace.stderr_path, b"")
+    with kernel.store.transaction():
+        kernel.store.insert_job(
+            {
+                "job_id": "1" * 32,
+                "actor_id": LEGACY_OWNER_USER_ID,
+                "tenant_id": LEGACY_OWNER_USER_ID,
+                "conversation_id": conversation_id,
+                "channel": "telegram",
+                "source_row_id": "msg_" + "2" * 16,
+                "source_hash": "3" * 64,
+                "telegram_update_id": "100",
+                "isolation_profile": IsolationProfile.ISOLATED_WORKSPACE.value,
+                "host_user_authorized": False,
+                "idempotency_key": "progress-worker-test",
+                "command_digest": "4" * 64,
+                "argv_sha256": "5" * 64,
+                "lane": CommandLane.ARGV.value,
+                "origin": CommandOrigin.OWNER_TURN.value,
+                "status": CommandStatus.RUNNING.value,
+                "grant_nonce": "progress-nonce",
+                "timeout_sec": 3600,
+                "max_stdout_bytes": 1024,
+                "max_stderr_bytes": 1024,
+                "created_at": started_at - 1.0,
+                "executable_json": None,
+                "delivery_chat_id": "5001",
+            }
+        )
+        kernel.store.update_job("1" * 32, {"started_at": started_at})
+    with kernel._lock:  # noqa: SLF001 - faithful in-memory RUNNING fixture
+        kernel._live["1" * 32] = SimpleNamespace(  # noqa: SLF001
+            started_at=started_at,
+            stdout_bytes=8,
+            stderr_bytes=0,
+            output_activity=True,
+            isolation=IsolationProfile.ISOLATED_WORKSPACE,
+        )
+    authorization = _authority(storage)
+    service = EngineerCommandService.__new__(EngineerCommandService)
+    service.kernel = kernel
+    service.storage = storage
+    service.settings = SimpleNamespace(
+        engineer_mode_enabled=True,
+        engineer_command_enabled=True,
+        telegram_effective_allowed_chat_ids={5001},
+        telegram_open_registration=False,
+    )
+    service.authorization = authorization
+    service._progress_lock = threading.Lock()
+    return service, conversation_id, authorization
+
+
+def _close_running_service(service: EngineerCommandService) -> None:
+    with service.kernel._lock:  # noqa: SLF001 - fixture teardown
+        service.kernel._live.pop("1" * 32, None)  # noqa: SLF001
+    service.kernel.close()
 
 
 def test_closed_checkpoints_freeze_first_sample_and_project_only_facts(storage) -> None:
@@ -243,6 +333,189 @@ def test_progress_retry_cap_and_terminal_retirement_keep_dedup(storage) -> None:
     assert rows[second.notification_id]["status"] == "failed"
     assert rows[second.notification_id]["dedup_key"] == second.dedup_key
     assert rows[other.notification_id]["status"] == "pending"
+
+
+def test_progress_worker_emits_only_highest_newly_due_checkpoint(
+    storage,
+    tmp_path: Path,
+) -> None:
+    service, _conversation_id, authorization = _running_service(
+        storage,
+        tmp_path,
+        started_at=1_000.0,
+    )
+    authorization.deny_permission(LEGACY_OWNER_USER_ID, "files.read")
+    assert service.publish_progress_jobs(now=2_000.0) == {
+        "staged": 1,
+        "retired": 0,
+        "failed": 0,
+    }
+    assert service.publish_progress_jobs(now=2_000.0) == {
+        "staged": 0,
+        "retired": 0,
+        "failed": 0,
+    }
+    assert service.publish_progress_jobs(now=2_800.0) == {
+        "staged": 1,
+        "retired": 0,
+        "failed": 0,
+    }
+    rows = storage.execute(
+        "SELECT body FROM outbound_notifications WHERE kind=? ORDER BY created_at",
+        (PROGRESS_NOTIFICATION_KIND,),
+    ).fetchall()
+    envelopes = [parse_progress_envelope(row["body"]) for row in rows]
+    assert [item["checkpoint_sec"] for item in envelopes] == [900, 1800]
+    assert all(item["stdout_bytes"] == 8 and item["output_activity"] is True for item in envelopes)
+    state = service.kernel.store._conn.execute(  # noqa: SLF001 - exact checkpoint assertion
+        "SELECT checkpoint_sec,retired_at FROM command_job_progress WHERE job_id=?",
+        ("1" * 32,),
+    ).fetchone()
+    assert state is not None and dict(state) == {"checkpoint_sec": 1800, "retired_at": None}
+    _close_running_service(service)
+
+
+def test_progress_worker_recovers_enqueue_before_private_cas(
+    storage,
+    tmp_path: Path,
+) -> None:
+    service, conversation_id, _authorization = _running_service(
+        storage,
+        tmp_path,
+        started_at=1_000.0,
+    )
+    frozen = _stage(
+        storage,
+        conversation_id,
+        checkpoint_sec=60,
+        stdout_bytes=1,
+        stderr_bytes=2,
+    )
+    assert service.publish_progress_jobs(now=1_061.0) == {
+        "staged": 1,
+        "retired": 0,
+        "failed": 0,
+    }
+    row = storage.execute(
+        "SELECT body FROM outbound_notifications WHERE id=?",
+        (frozen.notification_id,),
+    ).fetchone()
+    assert row is not None
+    envelope = parse_progress_envelope(row["body"])
+    assert (envelope["stdout_bytes"], envelope["stderr_bytes"]) == (1, 2)
+    state = service.kernel.store._conn.execute(  # noqa: SLF001 - crash-window assertion
+        "SELECT checkpoint_sec FROM command_job_progress WHERE job_id=?",
+        ("1" * 32,),
+    ).fetchone()
+    assert state is not None and state["checkpoint_sec"] == 60
+    _close_running_service(service)
+
+
+def test_nonrunning_progress_is_retired_once_after_restart(storage, tmp_path: Path) -> None:
+    service, _conversation_id, _authorization = _running_service(
+        storage,
+        tmp_path,
+        started_at=1_000.0,
+    )
+    assert service.publish_progress_jobs(now=1_061.0)["staged"] == 1
+    with service.kernel.store.transaction():
+        service.kernel.store.update_job("1" * 32, {"status": CommandStatus.UNKNOWN.value})
+    assert service.publish_progress_jobs(now=1_062.0) == {
+        "staged": 0,
+        "retired": 1,
+        "failed": 0,
+    }
+    assert service.publish_progress_jobs(now=1_063.0) == {
+        "staged": 0,
+        "retired": 0,
+        "failed": 0,
+    }
+    row = storage.execute(
+        "SELECT status,dedup_key FROM outbound_notifications WHERE kind=?",
+        (PROGRESS_NOTIFICATION_KIND,),
+    ).fetchone()
+    assert row is not None
+    assert row["status"] == "failed" and row["dedup_key"].endswith(":60")
+    marker = service.kernel.store._conn.execute(  # noqa: SLF001 - restart marker assertion
+        "SELECT retired_at FROM command_job_progress WHERE job_id=?",
+        ("1" * 32,),
+    ).fetchone()
+    assert marker is not None and marker["retired_at"] is not None
+    _close_running_service(service)
+
+
+def test_progress_candidate_batches_cannot_be_starved(tmp_path: Path) -> None:
+    store = CommandJobStore(tmp_path / "fair-progress")
+    job_ids: list[str] = []
+    for index in range(1, 26):
+        job_id = f"{index:032x}"
+        job_ids.append(job_id)
+        with store.transaction():
+            store.insert_job(
+                {
+                    "job_id": job_id,
+                    "actor_id": f"actor-{index}",
+                    "tenant_id": "tenant",
+                    "conversation_id": f"conversation-{index}",
+                    "channel": "telegram",
+                    "source_row_id": f"source-{index}",
+                    "source_hash": "3" * 64,
+                    "telegram_update_id": str(index),
+                    "isolation_profile": IsolationProfile.ISOLATED_WORKSPACE.value,
+                    "host_user_authorized": False,
+                    "idempotency_key": f"progress-fair-{index}",
+                    "command_digest": "4" * 64,
+                    "argv_sha256": "5" * 64,
+                    "lane": CommandLane.ARGV.value,
+                    "origin": CommandOrigin.OWNER_TURN.value,
+                    "status": CommandStatus.RUNNING.value,
+                    "grant_nonce": f"nonce-{index}",
+                    "timeout_sec": 3600,
+                    "max_stdout_bytes": 1024,
+                    "max_stderr_bytes": 1024,
+                    "created_at": 1.0,
+                    "executable_json": None,
+                    "delivery_chat_id": str(index + 1),
+                }
+            )
+            store.update_job(job_id, {"started_at": 1.0})
+            if index <= 20:
+                store._conn.execute(  # noqa: SLF001 - due-window fixture
+                    "UPDATE command_job_progress SET checkpoint_sec=60 WHERE job_id=?",
+                    (job_id,),
+                )
+
+    due_tail = store.list_progress_publication_candidates(now=100.0, limit=20)
+    assert [str(row["job_id"]) for row in due_tail] == job_ids[20:]
+
+    with store.transaction():
+        store._conn.execute(  # noqa: SLF001 - poison-head fixture
+            "UPDATE command_job_progress SET checkpoint_sec=0"
+        )
+    poison_stage = store.list_progress_publication_candidates(now=100.0, limit=20)
+    assert [str(row["job_id"]) for row in poison_stage] == job_ids[:20]
+    for row in poison_stage:
+        store.record_progress_publication_failure(
+            str(row["job_id"]),
+            error_code="authorization_denied",
+            failed_at=100.0,
+        )
+    stage_tail = store.list_progress_publication_candidates(now=101.0, limit=20)
+    assert [str(row["job_id"]) for row in stage_tail] == job_ids[20:]
+
+    with store.transaction():
+        store._conn.execute("UPDATE jobs SET status='unknown'")  # noqa: SLF001
+    poison_retire = store.list_progress_retirement_candidates(now=100.0, limit=20)
+    assert [str(row["job_id"]) for row in poison_retire] == job_ids[:20]
+    for row in poison_retire:
+        store.record_progress_retirement_failure(
+            str(row["job_id"]),
+            error_code="progress_dedup_conflict",
+            failed_at=100.0,
+        )
+    retire_tail = store.list_progress_retirement_candidates(now=101.0, limit=20)
+    assert [str(row["job_id"]) for row in retire_tail] == job_ids[20:]
+    store.close()
 
 
 def test_ordinary_notification_retirement_semantics_are_unchanged(storage) -> None:

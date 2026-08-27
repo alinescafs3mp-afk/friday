@@ -70,13 +70,7 @@ class JobWorkspace:
         """Idempotently remove one already-authorized workspace without following links."""
 
         job_id = self.job_dir.name
-        if (
-            not job_id
-            or len(job_id) > 64
-            or job_id.startswith(".")
-            or "/" in job_id
-            or "\x00" in job_id
-        ):
+        if not job_id or len(job_id) > 64 or job_id.startswith(".") or "/" in job_id or "\x00" in job_id:
             raise CommandError("invalid_job_id")
         retired_name = f".retired-{job_id}"
         parent_fd = open_dir_nofollow(self.job_dir.parent)
@@ -94,6 +88,8 @@ class JobWorkspace:
                 except OSError as exc:
                     raise CommandError("workspace_retirement_failed") from exc
                 retired = self._entry_stat(parent_fd, retired_name)
+                if retired is None or not self._same_directory_identity(live, retired):
+                    raise CommandError("workspace_retirement_changed")
             if retired is None:
                 return
             if not stat.S_ISDIR(retired.st_mode):

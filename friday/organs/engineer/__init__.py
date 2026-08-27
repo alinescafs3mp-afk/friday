@@ -113,6 +113,7 @@ class EngineerOrgan(Organ):
 
         async def publish_terminal_jobs(_ctx: ServiceContext) -> None:
             await asyncio.to_thread(service.publish_terminal_jobs)
+            await asyncio.to_thread(service.publish_progress_jobs)
 
         async def retain_terminal_jobs(_ctx: ServiceContext) -> None:
             await asyncio.to_thread(service.retain_terminal_jobs)

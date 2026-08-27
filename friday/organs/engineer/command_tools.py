@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import hmac
 import json
+import math
 import os
 import re
 import sqlite3
@@ -34,6 +35,12 @@ from .command import (
     OwnerSourceAuthority,
     TrustedPathContract,
 )
+from .command.progress import (
+    PROGRESS_CHECKPOINTS_SEC,
+    ProgressDeliveryError,
+    retire_pending_progress_notifications,
+    stage_progress_notification,
+)
 from .command.publication import (
     CommandOutputArchive,
     CommandOutputPublicationError,
@@ -41,6 +48,7 @@ from .command.publication import (
 )
 from .publication import ExactGeneratedFilePublicationError, exact_generated_file_batch
 from .terminal_delivery import (
+    TERMINAL_ARTIFACT_MAX_BYTES,
     TerminalDeliveryError,
     parse_terminal_envelope,
     stage_terminal_archive,
@@ -70,6 +78,7 @@ _UNCERTAIN_SUBMIT_ERRORS = frozenset(
 _DISPLAY_BYTES = 64 * 1024
 _WORKSPACE_RETENTION_SEC = 30 * 24 * 60 * 60
 _WORKSPACE_RETENTION_BATCH_MAX = 20
+_PROGRESS_BATCH_MAX = 20
 
 
 def _source_update_id(row: Mapping[str, Any]) -> str:
@@ -157,6 +166,7 @@ class EngineerCommandService:
             | None
         ) = None
         self._publication_lock = threading.Lock()
+        self._progress_lock = threading.Lock()
         self._retention_lock = threading.Lock()
 
     def _archive_for_receipt(
@@ -353,6 +363,12 @@ class EngineerCommandService:
             )
             payload = {"ok": True, **progress.to_public_payload()}
             if progress.status in _PUBLISHABLE_TERMINAL:
+                receipt, receipt_mac_version = self.kernel.terminal_receipt(
+                    resolved_job_id,
+                    actor_id=actor.own_id,
+                    conversation_id=conversation_id,
+                    timeout_sec=0.1,
+                )
                 retired_probe = getattr(self.kernel, "output_retired", None)
                 retired = bool(
                     retired_probe(
@@ -362,12 +378,6 @@ class EngineerCommandService:
                     )
                     if callable(retired_probe)
                     else False
-                )
-                receipt, receipt_mac_version = self.kernel.terminal_receipt(
-                    resolved_job_id,
-                    actor_id=actor.own_id,
-                    conversation_id=conversation_id,
-                    timeout_sec=0.1,
                 )
                 public_receipt = receipt.to_public_payload()
                 if receipt_mac_version < 2:
@@ -409,19 +419,63 @@ class EngineerCommandService:
                             actor_id=actor.own_id,
                             conversation_id=conversation_id,
                         )
+                    except CommandError as exc:
+                        if exc.code != "job_output_retired":
+                            raise
+                        payload["output_retired"] = True
+                        payload["artifact_delivery"] = {
+                            "available": False,
+                            "error_code": "job_output_retired",
+                        }
                     except CommandOutputPublicationError as exc:
                         payload["artifact_delivery"] = {
                             "available": False,
                             "error_code": exc.code,
                         }
                     else:
-                        payload["artifact_delivery"] = {
-                            "available": True,
-                            "filename": archive.filename,
-                            "sha256": archive.sha256,
-                            "size_bytes": len(archive.payload),
-                        }
-                        payload["_attachment"] = attachment
+                        retired_after_read = bool(
+                            retired_probe(
+                                resolved_job_id,
+                                actor_id=actor.own_id,
+                                conversation_id=conversation_id,
+                            )
+                            if callable(retired_probe)
+                            else False
+                        )
+                        if retired_after_read:
+                            payload["output_retired"] = True
+                            payload["artifact_delivery"] = {
+                                "available": False,
+                                "error_code": "job_output_retired",
+                            }
+                        else:
+                            payload["artifact_delivery"] = {
+                                "available": True,
+                                "filename": archive.filename,
+                                "sha256": archive.sha256,
+                                "size_bytes": len(archive.payload),
+                            }
+                            payload["_attachment"] = attachment
+                final_retired = bool(
+                    retired_probe(
+                        resolved_job_id,
+                        actor_id=actor.own_id,
+                        conversation_id=conversation_id,
+                    )
+                    if callable(retired_probe)
+                    else False
+                )
+                if final_retired:
+                    payload["stdout"] = ""
+                    payload["stderr"] = ""
+                    payload["stdout_display_truncated"] = False
+                    payload["stderr_display_truncated"] = False
+                    payload["output_retired"] = True
+                    payload["artifact_delivery"] = {
+                        "available": False,
+                        "error_code": "job_output_retired",
+                    }
+                    payload.pop("_attachment", None)
             elif progress.status is CommandStatus.UNKNOWN:
                 # A stale RUNNING job can be reconciled to UNKNOWN without a
                 # trustworthy terminal receipt. Report only the scoped durable
@@ -510,6 +564,227 @@ class EngineerCommandService:
         except Exception:
             return None
         return actor
+
+    def _fresh_progress_actor(self, job: Mapping[str, Any]) -> Any | None:
+        """Rebuild current owner/chat authority without requiring file access."""
+
+        actor_id = str(job.get("actor_id") or "")
+        tenant_id = str(job.get("tenant_id") or "")
+        chat_id = str(job.get("delivery_chat_id") or "")
+        if (
+            not actor_id
+            or not tenant_id
+            or re.fullmatch(r"[1-9][0-9]{0,19}", chat_id) is None
+            or self.authorization is None
+            or getattr(self.settings, "engineer_mode_enabled", False) is not True
+            or getattr(self.settings, "engineer_command_enabled", False) is not True
+        ):
+            return None
+        user = self.storage.get_user(actor_id)
+        if not isinstance(user, Mapping) or str(user.get("status") or "") != "active":
+            return None
+        try:
+            actor = self.authorization.actor_for_user(
+                actor_id,
+                source="engineer-progress-worker",
+                identity_id=chat_id,
+            )
+            if (
+                not actor.is_owner
+                or actor.own_id != actor_id
+                or actor.user_id != tenant_id
+                or self.storage.resolve_identity("telegram", chat_id) != actor_id
+                or resolve_chat_id(self.storage, actor_id) != chat_id
+                or not may_push_to(self.settings, self.storage, actor_id, chat_id)
+            ):
+                return None
+            for capability in ("engineer.use", "engineer.command.manage"):
+                self.authorization.require(actor, capability)
+        except Exception:
+            return None
+        return actor
+
+    def _retire_progress_scope(self, job: Mapping[str, Any]) -> None:
+        with self.storage.transaction() as conn:
+            retire_pending_progress_notifications(
+                conn,
+                actor_id=str(job.get("actor_id") or ""),
+                tenant_id=str(job.get("tenant_id") or ""),
+                conversation_id=str(job.get("conversation_id") or ""),
+                delivery_chat_id=str(job.get("delivery_chat_id") or ""),
+                job_id=str(job.get("job_id") or ""),
+            )
+
+    def _reconcile_stale_progress(self, *, now: float, limit: int) -> tuple[int, int]:
+        retired = 0
+        failed = 0
+        for job in self.kernel.store.list_progress_retirement_candidates(now=now, limit=limit):
+            job_id = str(job.get("job_id") or "")
+            try:
+                self._retire_progress_scope(job)
+                self.kernel.store.finish_progress_retirement(
+                    job_id,
+                    retired_at=now,
+                )
+                retired += 1
+            except (
+                CommandError,
+                ProgressDeliveryError,
+                KeyError,
+                OSError,
+                TypeError,
+                ValueError,
+                OverflowError,
+                sqlite3.Error,
+            ) as exc:
+                with suppress(
+                    CommandError,
+                    TypeError,
+                    ValueError,
+                    OverflowError,
+                    sqlite3.Error,
+                ):
+                    self.kernel.store.record_progress_retirement_failure(
+                        job_id,
+                        error_code=str(getattr(exc, "code", "progress_retirement_failed")),
+                        failed_at=now,
+                    )
+                failed += 1
+        return retired, failed
+
+    @staticmethod
+    def _due_progress_checkpoint(
+        *,
+        now: float,
+        started_at: object,
+        previous_checkpoint_sec: object,
+    ) -> tuple[int, int] | None:
+        if (
+            isinstance(started_at, bool)
+            or not isinstance(started_at, (int, float))
+            or isinstance(previous_checkpoint_sec, bool)
+            or not isinstance(previous_checkpoint_sec, int)
+        ):
+            return None
+        started = float(started_at)
+        previous = previous_checkpoint_sec
+        if not math.isfinite(started) or previous not in {0, *PROGRESS_CHECKPOINTS_SEC} or now < started:
+            return None
+        due = [
+            checkpoint for checkpoint in PROGRESS_CHECKPOINTS_SEC if previous < checkpoint <= now - started
+        ]
+        return (previous, max(due)) if due else None
+
+    def publish_progress_jobs(
+        self,
+        *,
+        now: float | None = None,
+        limit: int = _PROGRESS_BATCH_MAX,
+    ) -> dict[str, int]:
+        """Stage sparse, fact-only progress independently of any model turn."""
+
+        lock = getattr(self, "_progress_lock", None)
+        if lock is None:
+            lock = threading.Lock()
+            self._progress_lock = lock
+        if not lock.acquire(blocking=False):
+            return {"staged": 0, "retired": 0, "failed": 0}
+        bounded = max(1, min(int(limit), _PROGRESS_BATCH_MAX))
+        moment = time.time() if now is None else float(now)
+        staged = 0
+        try:
+            retired, failed = self._reconcile_stale_progress(now=moment, limit=bounded)
+            for job in self.kernel.store.list_progress_publication_candidates(
+                now=moment,
+                limit=bounded,
+            ):
+                due = self._due_progress_checkpoint(
+                    now=moment,
+                    started_at=job.get("started_at"),
+                    previous_checkpoint_sec=job.get("progress_checkpoint_sec"),
+                )
+                if due is None:
+                    with suppress(CommandError, TypeError, ValueError, OverflowError, sqlite3.Error):
+                        self.kernel.store.record_progress_publication_failure(
+                            str(job.get("job_id") or ""),
+                            error_code="progress_checkpoint_invalid",
+                            failed_at=moment,
+                        )
+                    failed += 1
+                    continue
+                actor = self._fresh_progress_actor(job)
+                if actor is None:
+                    with suppress(CommandError, TypeError, ValueError, OverflowError, sqlite3.Error):
+                        self.kernel.store.record_progress_publication_failure(
+                            str(job.get("job_id") or ""),
+                            error_code="authorization_denied",
+                            failed_at=moment,
+                        )
+                    failed += 1
+                    continue
+                job_id = str(job.get("job_id") or "")
+                try:
+                    progress = self.kernel.progress(
+                        job_id,
+                        actor_id=actor.own_id,
+                        conversation_id=str(job.get("conversation_id") or ""),
+                    )
+                    if progress.status is not CommandStatus.RUNNING:
+                        self._retire_progress_scope(job)
+                        with suppress(CommandError):
+                            self.kernel.store.finish_progress_retirement(
+                                job_id,
+                                retired_at=moment,
+                            )
+                        retired += 1
+                        continue
+                    previous, checkpoint = due
+                    stage_progress_notification(
+                        self.storage,
+                        actor_id=actor.own_id,
+                        tenant_id=actor.user_id,
+                        conversation_id=str(job.get("conversation_id") or ""),
+                        delivery_chat_id=str(job.get("delivery_chat_id") or ""),
+                        job_id=job_id,
+                        checkpoint_sec=checkpoint,
+                        stdout_bytes=progress.stdout_bytes,
+                        stderr_bytes=progress.stderr_bytes,
+                        output_activity=bool(progress.stdout_bytes or progress.stderr_bytes),
+                    )
+                    if self.kernel.store.advance_progress_checkpoint(
+                        job_id,
+                        previous_checkpoint_sec=previous,
+                        checkpoint_sec=checkpoint,
+                    ):
+                        staged += 1
+                    else:
+                        self._retire_progress_scope(job)
+                except (
+                    CommandError,
+                    ProgressDeliveryError,
+                    KeyError,
+                    OSError,
+                    TypeError,
+                    ValueError,
+                    OverflowError,
+                    sqlite3.Error,
+                ) as exc:
+                    with suppress(
+                        CommandError,
+                        TypeError,
+                        ValueError,
+                        OverflowError,
+                        sqlite3.Error,
+                    ):
+                        self.kernel.store.record_progress_publication_failure(
+                            job_id,
+                            error_code=str(getattr(exc, "code", "progress_publication_failed")),
+                            failed_at=moment,
+                        )
+                    failed += 1
+            return {"staged": staged, "retired": retired, "failed": failed}
+        finally:
+            lock.release()
 
     def _reconcile_staged_publications(self) -> int:
         changed = 0
@@ -743,6 +1018,7 @@ class EngineerCommandService:
             )
             candidates = self.kernel.store.list_workspace_retention_candidates(
                 cutoff=cutoff,
+                now=moment,
                 limit=max(1, min(int(limit), _WORKSPACE_RETENTION_BATCH_MAX)),
             )
             for job in candidates:
@@ -757,39 +1033,27 @@ class EngineerCommandService:
                     if marker is None:
                         if row is None:
                             raise TerminalDeliveryError("terminal_notification_missing")
-                        stored = verify_sent_terminal_notification_artifact(
+                        envelope = parse_terminal_envelope(row.get("body"))
+                        artifact_size = int(envelope["artifact"]["size_bytes"])
+                        if artifact_size > TERMINAL_ARTIFACT_MAX_BYTES:
+                            raise TerminalDeliveryError("terminal_artifact_too_large")
+                        verify_sent_terminal_notification_artifact(
                             self.storage,
                             self.files_root,
                             row,
                             tenant_id=str(job.get("tenant_id") or ""),
                             actor_id=str(job.get("actor_id") or ""),
-                            max_bytes=self.max_upload_bytes,
+                            max_bytes=artifact_size,
                         )
-                        receipt, outputs = self.kernel.terminal_result_for_retention(
+                        receipt, _outputs = self.kernel.terminal_result_for_retention(
                             job_id,
                             actor_id=str(job.get("actor_id") or ""),
                             conversation_id=str(job.get("conversation_id") or ""),
                         )
-                        if (
-                            receipt.status.value != str(job.get("status") or "")
-                            or receipt.receipt_mac != str(job.get("receipt_mac") or "")
+                        if receipt.status.value != str(job.get("status") or "") or receipt.receipt_mac != str(
+                            job.get("receipt_mac") or ""
                         ):
                             raise TerminalDeliveryError("terminal_retention_identity_changed")
-                        archive = build_command_output_archive(
-                            receipt,
-                            outputs,
-                            max_archive_bytes=self.max_upload_bytes,
-                        )
-                        if (
-                            archive.filename != stored.filename
-                            or archive.mime_type != stored.mime_type
-                            or len(archive.payload) != len(stored.content)
-                            or not hmac.compare_digest(
-                                archive.sha256,
-                                hashlib.sha256(stored.content).hexdigest(),
-                            )
-                        ):
-                            raise TerminalDeliveryError("terminal_archive_identity_changed")
                         self.kernel.store.mark_workspace_retirement(
                             job_id,
                             notification_id=str(job.get("notification_id") or ""),
@@ -822,7 +1086,19 @@ class EngineerCommandService:
                     ValueError,
                     OverflowError,
                     sqlite3.Error,
-                ):
+                ) as exc:
+                    with suppress(
+                        CommandError,
+                        TypeError,
+                        ValueError,
+                        OverflowError,
+                        sqlite3.Error,
+                    ):
+                        self.kernel.store.record_workspace_retention_failure(
+                            job_id,
+                            error_code=str(getattr(exc, "code", "retention_failed")),
+                            failed_at=moment,
+                        )
                     failed += 1
             return {"retired": retired_count, "failed": failed, "ephemera": ephemera}
         finally:
