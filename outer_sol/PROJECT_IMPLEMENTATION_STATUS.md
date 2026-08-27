@@ -12,14 +12,14 @@ the current production identity, completed packages, active work and next order.
   is code-staged only as provisional shadow/extract and is not accepted or live.
   The primary remains the sole final-publication, tool and effect authority.
   Every secondary miss preserves the exact primary-only path.
-- Deployed implementation head: `55662a6c387abf988a0fb09d543a0a1441094e7b`
-- Live: Friday `0.207.54` / `55662a6c387abf988a0fb09d543a0a1441094e7b`;
-  tree `aa45e5d5e860d9146f280a1088b42f987df89e08931ca4c8fd99ae27c3b37ec7`;
+- Deployed implementation head: `1c340a2f174f4077ae9747ba5bfb9d54b0a4e727`
+- Live: Friday `0.207.55` / `1c340a2f174f4077ae9747ba5bfb9d54b0a4e727`;
+  tree `2fd06f15264628ab06396fb904dd4175cb86723422b79c303f7bd7efe4156fc1`;
+  wheel `0da4cbc467a26f7d6b5e52690d47457931ed05798bed9fb8f7944746dffd5c64`.
+- Immediate predecessor and schema-capable fallback: Friday `0.207.54` /
+  `55662a6c387abf988a0fb09d543a0a1441094e7b`, tree
+  `aa45e5d5e860d9146f280a1088b42f987df89e08931ca4c8fd99ae27c3b37ec7`,
   wheel `480c20e7ab9eb14880a8f316463b54761840b03a282499ca662e0bac0094d1d2`.
-- Immediate predecessor and schema-capable fallback: Friday `0.207.53` /
-  `d5e5dec34f1803a4b836a1100d0bce97c04b9cf8`, tree
-  `a479364d65c22f9d4f136422ad1ab292c6180ffed86f139734623cbaed9097be`,
-  wheel `547b5f61333919d039972615f6093c0dfc91a354188339043b2ea2418c7c33fc`.
 - Database schema: 43
 - Production state: immutable activation `clear`; backend and Telegram bridge
   active; trusted-CA HTTPS health `200`; SQLite integrity and FK checks clean.
@@ -69,6 +69,12 @@ the current production identity, completed packages, active work and next order.
   focus stop structurally instead of letting the model guess. UNKNOWN jobs are
   readable but cannot be cancelled, and cancellation intent is persisted before
   a live signal so registration races cannot lose it.
+  `0.207.55` automatically delivers every publishable terminal command as one
+  deterministic ZIP to the exact private Telegram chat that approved it. The
+  durable pre-write fence, fresh authority checks and exact ACK reconciliation
+  prevent duplicate publication across retries, restarts, revocation and
+  ambiguous transport outcomes; the archive always carries its signed receipt
+  and manifest even when the command produced no files.
   The exact accepted secondary profile remains configured in bounded `assist`
   and is probed on
   demand; its exact post-cutover canary passed, while laptop absence preserves
@@ -89,16 +95,16 @@ the current production identity, completed packages, active work and next order.
   while the backlog converges. `0.207.52` repairs the canary wrapper's full
   Telegram carrier surface; signed Telegram requests no longer fail before the
   model/tool boundary. The current activation terminal receipt is
-  `a37984dccdf6921bde64bc1527da0b730749a2c2713fe926f6ce675ee31c2122`.
+  `6a39a796ce4c53e52e1706ff35dd3d60703600464821d497bb28c23e2bfb68db`.
 - Delivery constraints: no Docker for primary Friday release certification;
   companion plugin untouched; small commits and immutable wheel-only production
   releases. The optional laptop inference node is a separate Docker contour.
 
 ## Active objective
 
-First close the remaining Engineer Mode production workflow: automatic
-terminal delivery, truthful sparse progress, retention and exact
-Telegram input grants. Sealed status-triggered file/archive delivery is live.
+First close the remaining Engineer Mode production workflow: truthful sparse
+progress, bounded retention and exact Telegram input grants. Automatic and
+status-triggered sealed file/archive delivery are live.
 Next integrate and independently certify
 the Semantic Supervisor through default-off, shadow, limited assist and canary.
 After those two priorities, execute the remaining work by product value and
@@ -130,7 +136,7 @@ accepted profile manifest hashes to
 `93ea5698b8b6a9bf8a7dc697ffe37d7353055aa16555188991747bba73d059e3` and
 its accepted physical-failure evidence hashes to
 `9dc72f80caed3320bd154cf1219a8bd6b1339142b690b00dd1cbe1fb05964006`.
-Live `0.207.54` admits exactly that accepted profile. The separate abliterated
+Live `0.207.55` admits exactly that accepted profile. The separate abliterated
 candidate remains provisional and is not admitted to assist:
 extraction, evidence-bound document mapping and complete current text/Office
 document reviews are in bounded `assist`. It grants no tools, effects,
@@ -210,10 +216,10 @@ course, with these repository-specific constraints:
 
 ## In progress
 
-1. Add automatic terminal delivery and bounded retention on top of the deployed
-   sealed status delivery and current-job control.
-2. Add exact Telegram input grants and wire deterministic bundle/publication
-   seams; then run one compact live approval/result smoke.
+1. Add truthful sparse terminal progress and bounded retention on top of the
+   deployed automatic delivery and current-job control.
+2. Add exact Telegram input grants; then run one compact live
+   approval/result/input smoke.
 3. Resolve the secondary profile dependency once, rebase and independently
    gate the Semantic Supervisor, then roll it out default-off → shadow → limited
    assist → canary.
@@ -221,6 +227,22 @@ course, with these repository-specific constraints:
    recorded by `PROJECT_EXECUTION_BACKLOG_2026-08-27.md`.
 
 ## Completed and deployed packages
+
+### Automatic Engineer terminal result delivery (`0.207.55`)
+
+- Every publishable terminal job now stages one deterministic ZIP without a
+  second model turn or manual status request. Admission binds the approving
+  owner conversation and private Telegram chat; staging and artifact reads
+  recheck account, identity, routing and capabilities against fresh state.
+- The bridge persists its delivery fence before the Telegram write. Only a
+  proven pre-write rejection can retry; an ambiguous write, lost ACK or crash
+  becomes terminal uncertainty. Exact sent/uncertain evidence survives bounded
+  queue scans and late retirement, while five proven rejections remain failed.
+- The canonical static gate, 21,204 non-UI tests and 31 UI tests passed without
+  skips. Two clean wheels were byte-identical with SHA-256
+  `0da4cbc467a26f7d6b5e52690d47457931ed05798bed9fb8f7944746dffd5c64`.
+  Immutable activation completed `clear` with terminal receipt
+  `6a39a796ce4c53e52e1706ff35dd3d60703600464821d497bb28c23e2bfb68db`.
 
 ### Body-free document-passage projection contract (`0.207.51`)
 
