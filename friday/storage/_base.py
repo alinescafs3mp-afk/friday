@@ -168,7 +168,10 @@ LOGGER = logging.getLogger("friday.storage")
 # 45 — immutable body-free ingress request binding for the assist WorkGraph.
 # Released schema-44 graphs migrate with an explicit unbound sentinel; no
 # request body, source reference or inferred replay identity is manufactured.
-SCHEMA_VERSION = 45
+# 46 — dormant journey-specific EngineerWorkItem v1.  Only exact owner/source
+# bindings, lifecycle state and opaque receipt digests persist; activation and
+# model-loop continuation remain a later, independently reversible package.
+SCHEMA_VERSION = 46
 
 #: Определение таблицы внешних источников отдельной константой: миграция схемы 29
 #: пересоздаёт её, чтобы ключом стала ПАРА `(user_id, name)`, и должна брать ровно

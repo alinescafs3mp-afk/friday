@@ -118,6 +118,10 @@ def _downgrade_graph_projection_to_released_schema44(database: Path) -> None:
         register_work_item_connection_functions(conn)
         conn.execute("PRAGMA foreign_keys=OFF")
         conn.execute("BEGIN IMMEDIATE")
+        # Build an actual released schema-44 image; the independent schema-46
+        # EngineerWorkItem package must not leak through this test-only inverse.
+        conn.execute("DROP TABLE engineer_work_item_steps")
+        conn.execute("DROP TABLE engineer_work_items")
         schema42 = _canonical_schema_42_objects()
         current = _canonical_work_item_schema_objects()
         current_extension = {key: value for key, value in current.items() if key not in schema42}
@@ -164,7 +168,7 @@ def _downgrade_graph_projection_to_released_schema44(database: Path) -> None:
 def test_schema45_exact_binding_is_durable_immutable_and_revision_cas(storage) -> None:
     graph = _seed_bound_graph(storage, "exact")
 
-    assert SCHEMA_VERSION == 45
+    assert SCHEMA_VERSION == 46
     assert COMPARE_CURRENT_FILE_WEB_WORK_GRAPH_SCHEMA.endswith(".v3")
     assert graph.has_exact_request_binding is True
     assert graph.payload()["anchor_request_binding_sha256"] == graph.anchor_request_binding_sha256
@@ -328,7 +332,7 @@ def test_released_schema44_graph_migrates_to_explicit_unbound_sentinel_and_reads
     migrated = FridayStorage(replace(configured, database_must_exist=True))
     try:
         assert (
-            migrated.execute("SELECT value FROM schema_meta WHERE key='schema_version'").fetchone()[0] == "45"
+            migrated.execute("SELECT value FROM schema_meta WHERE key='schema_version'").fetchone()[0] == "46"
         )
         with migrated.transaction() as conn:
             graph = get_compare_current_file_web_work_graph_in_transaction(

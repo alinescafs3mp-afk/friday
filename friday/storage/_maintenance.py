@@ -443,11 +443,15 @@ class MaintenanceMixin(StorageShared):
             "SELECT value FROM schema_meta WHERE key='schema_version'"
         ).fetchone()
         backup_schema_version = int(schema_row[0]) if schema_row else -1
+        from friday.interaction_control_plane.engineer_work_item_schema import (
+            validate_engineer_work_item_schema,
+        )
         from friday.interaction_control_plane.work_item_schema import (
             validate_work_item_schema,
         )
 
         validate_work_item_schema(backup_conn)
+        validate_engineer_work_item_schema(backup_conn)
         validate_document_catalog_schema(backup_conn)
         if _contains_secondary_product_witness(backup_conn):
             raise RuntimeError("Backup snapshot contains a transient secondary product witness")
@@ -701,11 +705,15 @@ class MaintenanceMixin(StorageShared):
                     database_schema_version = int(schema_row[0])
                     database_schema_supported = 0 <= database_schema_version <= SCHEMA_VERSION
                     if database_schema_version == SCHEMA_VERSION:
+                        from friday.interaction_control_plane.engineer_work_item_schema import (
+                            validate_engineer_work_item_schema,
+                        )
                         from friday.interaction_control_plane.work_item_schema import (
                             validate_work_item_schema,
                         )
 
                         validate_work_item_schema(conn)
+                        validate_engineer_work_item_schema(conn)
                         validate_document_catalog_schema(conn)
                 except (TypeError, ValueError):
                     database_error = "Database schema_version marker is invalid"
@@ -1171,6 +1179,10 @@ class MaintenanceMixin(StorageShared):
                     "SELECT * FROM work_item_compare_current_file_web_restart_rebind_steps "
                     "WHERE graph_id IN (SELECT id FROM "
                     "work_item_compare_current_file_web_graphs WHERE user_id=?)",
+                    (user_id,),
+                ),
+                "engineer_work_items": (
+                    "SELECT * FROM engineer_work_items WHERE owner_id=?",
                     (user_id,),
                 ),
                 "work_items": ("SELECT * FROM work_items WHERE user_id=?", (user_id,)),
@@ -1981,9 +1993,30 @@ class MaintenanceMixin(StorageShared):
             from friday.interaction_control_plane.compare_current_file_web_work_graph_store import (
                 get_compare_current_file_web_work_graph_in_transaction,
             )
+            from friday.interaction_control_plane.engineer_work_item import (
+                EngineerWorkItemChannel,
+                get_engineer_work_item_in_transaction,
+            )
             from friday.interaction_control_plane.work_item_store import (
                 get_recall_conversation_work_item_for_export_in_transaction,
             )
+
+            exported_engineer_work_items: list[dict[str, object]] = []
+            for row in rows_by_table["engineer_work_items"]:
+                try:
+                    item = get_engineer_work_item_in_transaction(
+                        conn,
+                        work_item_id=str(row.get("id") or ""),
+                        owner_id=user_id,
+                        tenant_id=str(row.get("tenant_id") or ""),
+                        conversation_id=str(row.get("conversation_id") or ""),
+                        channel=EngineerWorkItemChannel(str(row.get("channel") or "")),
+                    )
+                except (TypeError, ValueError):
+                    continue
+                if item is not None and item.conversation_id in conversation_ids:
+                    exported_engineer_work_items.append(item.to_payload())
+            rows_by_table["engineer_work_items"] = exported_engineer_work_items
 
             exported_work_items: list[dict[str, object]] = []
             for row in rows_by_table["work_items"]:

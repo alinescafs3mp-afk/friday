@@ -456,6 +456,29 @@ class ConversationsMixin(StorageShared):
                       AND revision<2147483647""",
                 (now, now, user_id, conversation_id),
             )
+            # Dormant schema-46 Engineer work follows the same conversation
+            # retirement boundary only after a terminal command receipt exists.
+            # Prepared work is also preserved: an external command could have
+            # been admitted just before a cross-database crash.  No command is
+            # replayed or contacted here.
+            exhausted_engineer_work_items = conn.execute(
+                """DELETE FROM engineer_work_items
+                    WHERE owner_id=? AND conversation_id=?
+                      AND state IN ('waiting_for_input','ready_to_answer')
+                      AND revision>=2147483647""",
+                (user_id, conversation_id),
+            )
+            cancelled_engineer_work_items = conn.execute(
+                """UPDATE engineer_work_items
+                      SET state='cancelled',transition='cancelled',
+                          revision=revision+1,
+                          updated_at=MAX(updated_at, ?),
+                          closed_at=MAX(updated_at, ?)
+                    WHERE owner_id=? AND conversation_id=?
+                      AND state IN ('waiting_for_input','ready_to_answer')
+                      AND revision<2147483647""",
+                (now, now, user_id, conversation_id),
+            )
         return {
             "existed": True,
             "conversation_id": conversation_id,
@@ -467,12 +490,18 @@ class ConversationsMixin(StorageShared):
                     ("channel_sessions", sessions.rowcount),
                     ("interaction_failure_traces", failures.rowcount),
                     ("work_items", exhausted_work_items.rowcount),
+                    ("engineer_work_items", exhausted_engineer_work_items.rowcount),
                 )
                 if count
             },
             "cancelled": {
                 **({"compare_current_file_web_graphs": retired_graphs} if retired_graphs else {}),
                 "work_items": max(0, int(cancelled_work_items.rowcount)),
+                **(
+                    {"engineer_work_items": max(0, int(cancelled_engineer_work_items.rowcount))}
+                    if cancelled_engineer_work_items.rowcount
+                    else {}
+                ),
             },
         }
 

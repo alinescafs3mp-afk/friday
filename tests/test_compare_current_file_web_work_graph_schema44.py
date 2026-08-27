@@ -355,7 +355,7 @@ def test_schema45_contract_is_fixed_body_free_dormant_and_transient_web_bound(st
     graph = _seed_graph(storage, "fixed-contract")
     file_step, web_step, synthesis = graph.steps
 
-    assert SCHEMA_VERSION == 45
+    assert SCHEMA_VERSION == 46
     assert (file_step.step_id, web_step.step_id, synthesis.step_id) == (
         FILE_READ_STEP_ID,
         WEB_READ_STEP_ID,
@@ -396,7 +396,7 @@ def test_released_schema43_migrates_to45_without_rewriting_old_data(settings, tm
     migrated = FridayStorage(replace(settings, database_path=database, database_must_exist=True))
     try:
         assert (
-            migrated.execute("SELECT value FROM schema_meta WHERE key='schema_version'").fetchone()[0] == "45"
+            migrated.execute("SELECT value FROM schema_meta WHERE key='schema_version'").fetchone()[0] == "46"
         )
         assert (
             migrated.execute("SELECT value FROM runtime_kv WHERE key='fixture:marker'").fetchone()[0]

@@ -493,7 +493,10 @@ failed/error/skipped-тест в любой фазе делает гейт кр�
 
 Проверить:
 
-- schema version = 45;
+- schema version = 46;
+- sealed fallback имеет `max_schema=46`; `0.207.64` с max schema 45 после
+  миграции не является допустимым fallback, а Engineer runtime activation
+  остаётся отдельным следующим release;
 - schema 43 → 44 атомарно добавляет exact dormant body-free
   `compare_current_file_with_current_web` WorkGraph: ровно два independent
   read-шага и один dependent primary-synthesis, immutable identities,

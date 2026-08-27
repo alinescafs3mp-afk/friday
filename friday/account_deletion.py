@@ -72,6 +72,16 @@ class _Scope:
 # its append-only trigger correctly refuses ordinary DELETE.
 _DELETE_SCOPES: tuple[_Scope, ...] = (
     _Scope(
+        "engineer_work_item_steps",
+        "engineer_work_item_steps",
+        "work_item_id IN (SELECT id FROM engineer_work_items WHERE owner_id=? OR tenant_id=?)",
+    ),
+    _Scope(
+        "engineer_work_items",
+        "engineer_work_items",
+        "owner_id=? OR tenant_id=?",
+    ),
+    _Scope(
         "work_item_compare_current_file_web_restart_rebind_steps",
         "work_item_compare_current_file_web_restart_rebind_steps",
         "graph_id IN (SELECT id FROM work_item_compare_current_file_web_graphs WHERE user_id=?)",
@@ -197,6 +207,7 @@ _DELETE_SCOPES: tuple[_Scope, ...] = (
 
 _CANDIDATE_CASCADE_DELETE_KEYS = frozenset(
     {
+        "engineer_work_item_steps",
         "work_item_compare_current_file_web_restart_rebind_steps",
         "work_item_compare_current_file_web_restart_rebinds",
         "work_item_compare_current_file_web_steps",
@@ -266,6 +277,10 @@ _KNOWN_USER_SCOPES = frozenset(
         # compound blocking scope above owns both axes.
         ("host_action_jobs", "user_id"),
         ("host_action_jobs", "actor_own_id"),
+        # Both identities are exact ownership axes of schema-46 Engineer work.
+        ("engineer_work_item_steps", "owner_id"),
+        ("engineer_work_items", "owner_id"),
+        ("engineer_work_items", "tenant_id"),
     }
 )
 
@@ -1235,8 +1250,14 @@ def _preflight(
            + (SELECT COUNT(*) FROM action_approvals
                WHERE user_id=? AND status IN ('claimed','uncertain'))
            + (SELECT COUNT(*) FROM request_idempotency
-               WHERE user_id=? AND state='pending') AS count""",
-        (user_id, user_id, user_id, user_id),
+               WHERE user_id=? AND state='pending')
+           + (SELECT COUNT(*) FROM engineer_work_items
+               WHERE (owner_id=? OR tenant_id=?)
+                 AND state IN (
+                     'active','waiting_for_capability','uncertain',
+                     'waiting_for_input','ready_to_answer'
+                 )) AS count""",
+        (user_id, user_id, user_id, user_id, user_id, user_id),
     ).fetchone()
     active_operations = int(active_row["count"] if active_row else 0)
     if active_operations:

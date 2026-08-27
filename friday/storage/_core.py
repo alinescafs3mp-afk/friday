@@ -40,6 +40,11 @@ from friday.host_control.job_schema import (
     HOST_CONTROL_SCHEMA_VERSION,
     validate_host_control_job_schema,
 )
+from friday.interaction_control_plane.engineer_work_item_schema import (
+    ENGINEER_WORK_ITEM_SCHEMA,
+    ENGINEER_WORK_ITEM_SCHEMA_VERSION,
+    validate_engineer_work_item_schema,
+)
 from friday.interaction_control_plane.failure_schema import (
     INTERACTION_FAILURE_SCHEMA,
     INTERACTION_FAILURE_SCHEMA_VERSION,
@@ -2559,6 +2564,13 @@ class CoreMixin(StorageShared):
                     conn,
                     required=parsed_version is not None and parsed_version >= 38,
                 )
+            if parsed_version is not None and parsed_version >= ENGINEER_WORK_ITEM_SCHEMA_VERSION:
+                validate_engineer_work_item_schema(conn)
+            else:
+                # A schema-45 database has no Engineer Work Item projection.  A
+                # partial interrupted schema-46 attempt is never completed over
+                # unknown DDL: it must be either wholly absent or exact.
+                validate_engineer_work_item_schema(conn, required=False)
             if parsed_version is not None and parsed_version >= DOCUMENT_CATALOG_SCHEMA_VERSION:
                 validate_document_catalog_schema(conn)
             else:
@@ -2577,6 +2589,7 @@ class CoreMixin(StorageShared):
             self._execute_statements(conn, INTERACTION_FAILURE_SCHEMA)
             self._execute_statements(conn, WORK_ITEM_SCHEMA)
             install_selected_evidence_promotion_reader_trigger(conn)
+            self._execute_statements(conn, ENGINEER_WORK_ITEM_SCHEMA)
             self._execute_statements(conn, HOST_CONTROL_JOB_SCHEMA)
             if not already_current:
                 self._migrate_legacy_schema(conn)
@@ -2602,6 +2615,7 @@ class CoreMixin(StorageShared):
             validate_obsidian_schema(conn)
             validate_interaction_failure_schema(conn)
             validate_work_item_schema(conn)
+            validate_engineer_work_item_schema(conn)
             validate_document_catalog_schema(conn)
             validate_host_control_job_schema(conn)
             _validate_private_material_cache(
