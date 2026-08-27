@@ -284,7 +284,7 @@ class EngineerCommandService:
         self,
         *,
         actor: Any,
-        job_id: str,
+        job_id: str | None = None,
         _conversation_id: str = "",
     ) -> dict[str, Any]:
         conversation_id = str(_conversation_id or "").strip()
@@ -293,15 +293,23 @@ class EngineerCommandService:
         if not conversation_id:
             return _refusal("conversation_required")
         try:
+            resolved_job_id = self.kernel.resolve_job_reference(
+                job_id,
+                actor_id=actor.own_id,
+                tenant_id=actor.user_id,
+                conversation_id=conversation_id,
+                channel="telegram",
+                operation="status",
+            )
             progress = self.kernel.progress(
-                str(job_id),
+                resolved_job_id,
                 actor_id=actor.own_id,
                 conversation_id=conversation_id,
             )
             payload = {"ok": True, **progress.to_public_payload()}
             if progress.status in _PUBLISHABLE_TERMINAL:
                 receipt, receipt_mac_version = self.kernel.terminal_receipt(
-                    str(job_id),
+                    resolved_job_id,
                     actor_id=actor.own_id,
                     conversation_id=conversation_id,
                     timeout_sec=0.1,
@@ -374,7 +382,7 @@ class EngineerCommandService:
         self,
         *,
         actor: Any,
-        job_id: str,
+        job_id: str | None = None,
         _conversation_id: str = "",
     ) -> dict[str, Any]:
         conversation_id = str(_conversation_id or "").strip()
@@ -383,13 +391,15 @@ class EngineerCommandService:
         if not conversation_id:
             return _refusal("conversation_required")
         try:
-            self.kernel.cancel(
-                str(job_id),
+            resolved_job_id = self.kernel.cancel_reference(
+                job_id,
                 actor_id=actor.own_id,
+                tenant_id=actor.user_id,
                 conversation_id=conversation_id,
+                channel="telegram",
             )
             progress = self.kernel.progress(
-                str(job_id),
+                resolved_job_id,
                 actor_id=actor.own_id,
                 conversation_id=conversation_id,
             )
@@ -423,7 +433,7 @@ def build_engineer_command_tools(ctx: ServiceContext) -> tuple[ToolSpec, ...]:
     async def status_exact(
         *,
         actor: Any,
-        job_id: str,
+        job_id: str | None = None,
         _conversation_id: str = "",
     ) -> dict[str, Any]:
         return service.status(
@@ -435,7 +445,7 @@ def build_engineer_command_tools(ctx: ServiceContext) -> tuple[ToolSpec, ...]:
     async def cancel_exact(
         *,
         actor: Any,
-        job_id: str,
+        job_id: str | None = None,
         _conversation_id: str = "",
     ) -> dict[str, Any]:
         return service.cancel(
@@ -447,7 +457,6 @@ def build_engineer_command_tools(ctx: ServiceContext) -> tuple[ToolSpec, ...]:
     job_parameters = {
         "type": "object",
         "properties": {"job_id": {"type": "string", "pattern": "^[0-9a-f]{32}$"}},
-        "required": ["job_id"],
         "additionalProperties": False,
     }
     return (
@@ -484,7 +493,11 @@ def build_engineer_command_tools(ctx: ServiceContext) -> tuple[ToolSpec, ...]:
         ),
         ToolSpec(
             name="engineer_command_status",
-            description="Read the real state and bounded stdout/stderr of an owned Engineer command job.",
+            description=(
+                "Read the real state and bounded stdout/stderr of an owned Engineer command job. "
+                "Omit job_id when the user asks about the current command in this conversation; "
+                "provide it only when the user explicitly identifies a job."
+            ),
             parameters=job_parameters,
             security_id="engineer.command.manage",
             risk="observe",
@@ -492,7 +505,10 @@ def build_engineer_command_tools(ctx: ServiceContext) -> tuple[ToolSpec, ...]:
         ),
         ToolSpec(
             name="engineer_command_cancel",
-            description="Request cancellation of one currently running owned Engineer command job.",
+            description=(
+                "Request cancellation of an owned Engineer command job. Omit job_id for the current "
+                "command in this conversation; provide it only when the user explicitly identifies a job."
+            ),
             parameters=job_parameters,
             security_id="engineer.command.manage",
             risk="mutate",

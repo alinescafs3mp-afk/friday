@@ -169,6 +169,86 @@ class _StatusKernel(ExecutionKernel):
         return ToolResult(name, True, data=data, attachment=self._attachment)
 
 
+class _CurrentStatusThenGuessModel(_StatusThenFinishModel):
+    def __init__(self) -> None:
+        super().__init__()
+        self.second_tool_round_seen = False
+
+    async def chat(
+        self,
+        messages: list[dict[str, Any]],
+        *,
+        tools: list[dict[str, Any]] | None = None,
+        **kwargs: Any,
+    ) -> dict[str, Any]:
+        names = {
+            str((item.get("function") or {}).get("name") or "")
+            for item in (tools or [])
+            if isinstance(item, dict)
+        }
+        if "engineer_command_status" in names and not self.status_requested:
+            self.status_requested = True
+            return {
+                "content": "",
+                "tool_calls": [
+                    {
+                        "id": "current-status-call",
+                        "type": "function",
+                        "function": {
+                            "name": "engineer_command_status",
+                            "arguments": "{}",
+                        },
+                    }
+                ],
+                "finish_reason": "tool_calls",
+                "_queue_wait_sec": 0.0,
+            }
+        if any(str(item.get("role") or "") == "tool" for item in messages):
+            self.second_tool_round_seen = True
+            return {
+                "content": "",
+                "tool_calls": [
+                    {
+                        "id": "guessed-status-call",
+                        "type": "function",
+                        "function": {
+                            "name": "engineer_command_status",
+                            "arguments": json.dumps({"job_id": _JOB_ID}),
+                        },
+                    }
+                ],
+                "finish_reason": "tool_calls",
+                "_queue_wait_sec": 0.0,
+            }
+        return await super().chat(messages, tools=tools, **kwargs)
+
+
+class _CurrentStatusRefusalKernel(_StatusKernel):
+    def __init__(self, *args: Any, refusal_code: str, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        self.refusal_code = refusal_code
+
+    async def execute(
+        self,
+        name: str,
+        arguments: dict[str, Any],
+        *,
+        actor: ActorContext | None = None,
+        execution_scope: str = "dialogue",
+    ) -> ToolResult:
+        del actor, execution_scope
+        assert name == "engineer_command_status"
+        assert "job_id" not in arguments
+        assert str(arguments.get("_conversation_id") or "").startswith("conv_")
+        self.status_execute_count += 1
+        return ToolResult(
+            name,
+            False,
+            data={"ok": False, "error_code": self.refusal_code, "status": "failed"},
+            error=f"Host control refused: {self.refusal_code}",
+        )
+
+
 def _document_carrier() -> dict[str, Any]:
     return {
         "kind": "document",
@@ -217,6 +297,51 @@ async def _chat(runtime: AgentRuntime, actor: ActorContext) -> dict[str, Any]:
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("error_code", "expected"),
+    [
+        ("current_job_not_found", "нет текущей Engineer-команды"),
+        ("current_job_ambiguous", "несколько незавершённых Engineer-команд"),
+        ("current_job_uncertain", "Состояние текущей Engineer-команды неизвестно"),
+    ],
+)
+async def test_current_job_resolution_refusal_is_structural_and_model_cannot_guess(
+    settings: Any,
+    storage: Any,
+    error_code: str,
+    expected: str,
+) -> None:
+    configured = replace(settings, engineer_mode_enabled=True, verify_answers=False)
+    storage.ensure_user(LEGACY_OWNER_USER_ID, preset_key="owner")
+    authorization = AuthorizationService(storage)
+    authorization.register_capability(ENGINEER_USE)
+    authorization.register_capability(ENGINEER_COMMAND_MANAGE)
+    kernel = _CurrentStatusRefusalKernel(
+        authorization,
+        configured,
+        storage,
+        status="running",
+        attachment=None,
+        refusal_code=error_code,
+    )
+    model = _CurrentStatusThenGuessModel()
+    runtime = AgentRuntime(configured, storage, llm=model, kernel=kernel)  # type: ignore[arg-type]
+    actor = authorization.actor_for_user(LEGACY_OWNER_USER_ID, source="synthetic-test")
+
+    response = await runtime.chat(
+        LEGACY_OWNER_USER_ID,
+        "Что происходит с текущей Engineer-командой?",
+        actor=actor,
+        enable_tools=True,
+        mode="engineer",
+    )
+
+    assert expected in response["message"]
+    assert kernel.status_execute_count == 1
+    assert model.second_tool_round_seen is False
+
+
+@pytest.mark.asyncio
 async def test_terminal_command_status_publishes_one_protected_generated_raw(
     settings: Any,
     storage: Any,
@@ -231,6 +356,7 @@ async def test_terminal_command_status_publishes_one_protected_generated_raw(
     response = await _chat(runtime, actor)
 
     assert model.status_requested is True
+    assert isinstance(runtime.kernel, _StatusKernel)
     assert runtime.kernel.seen_status_arguments["_conversation_id"] == response["conversation_id"]
     assert len(response["files"]) == 1
     published = response["files"][0]
@@ -304,6 +430,7 @@ async def test_command_status_is_the_only_executed_call_in_its_selected_batch(
 
     response = await _chat(runtime, actor)
 
+    assert isinstance(runtime.kernel, _StatusKernel)
     assert runtime.kernel.status_execute_count == 1
     assert len(response["files"]) == 1
     count = storage.execute(

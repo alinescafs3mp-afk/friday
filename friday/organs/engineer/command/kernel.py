@@ -12,6 +12,7 @@ import threading
 import time
 import weakref
 from pathlib import Path
+from typing import Literal
 
 from .boundary import ProvenScope, ResourceBoundary, SystemdCgroupBoundary
 from .contracts import (
@@ -380,6 +381,12 @@ class CommandKernel:
                 raise CommandError("unknown_after_spawn") from persist_exc
             with self._lock:
                 self._live[job_id] = spawned
+            # A current-job cancellation can linearize after durable admission
+            # but before this process becomes visible in ``_live``.  The
+            # resolver persists that intent first; consuming it after the live
+            # registration closes the otherwise lost-cancel window.
+            if self.store.cancel_intent_pending(job_id):
+                spawned.request_cancel()
             worker = threading.Thread(
                 target=self._reap,
                 args=(job_id, request, grant, held, bwrap, spawned),
@@ -426,6 +433,60 @@ class CommandKernel:
                 held.close()
             if bwrap is not None:
                 bwrap.close()
+
+    def resolve_job_reference(
+        self,
+        job_id: str | None,
+        *,
+        actor_id: str,
+        tenant_id: str,
+        conversation_id: str,
+        channel: str,
+        operation: Literal["status", "cancel"] = "status",
+    ) -> str:
+        """Resolve an explicit/current job under one exact durable scope.
+
+        ``operation='cancel'`` also commits the cancellation intent in the
+        same store transaction that selected the target.  Callers that need to
+        signal the process should use :meth:`cancel_reference`.
+        """
+
+        return self.store.resolve_job_reference(
+            job_id,
+            actor_id=actor_id,
+            tenant_id=tenant_id,
+            conversation_id=conversation_id,
+            channel=channel,
+            operation=operation,
+        )
+
+    def _signal_cancel(self, job_id: str) -> None:
+        with self._lock:
+            live = self._live.get(job_id)
+        if live is not None:
+            live.request_cancel()
+
+    def cancel_reference(
+        self,
+        job_id: str | None,
+        *,
+        actor_id: str,
+        tenant_id: str,
+        conversation_id: str,
+        channel: str,
+    ) -> str:
+        """Persist one exact/current cancellation intent, then signal it."""
+
+        resolved = self.resolve_job_reference(
+            job_id,
+            actor_id=actor_id,
+            tenant_id=tenant_id,
+            conversation_id=conversation_id,
+            channel=channel,
+            operation="cancel",
+        )
+        self._signal_cancel(resolved)
+        return resolved
 
     def progress(
         self,
@@ -506,12 +567,12 @@ class CommandKernel:
         actor_id: str,
         conversation_id: str | None = None,
     ) -> None:
-        self._require_actor(job_id, actor_id, conversation_id=conversation_id)
-        with self._lock:
-            live = self._live.get(job_id)
-        if live is None:
-            raise CommandError("job_not_running")
-        live.request_cancel()
+        self.store.persist_cancel_intent(
+            job_id,
+            actor_id=actor_id,
+            conversation_id=conversation_id,
+        )
+        self._signal_cancel(job_id)
 
     def wait(
         self,

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import secrets
 import sqlite3
 import threading
@@ -11,13 +12,19 @@ import time
 from collections.abc import Iterator
 from contextlib import contextmanager, suppress
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from .contracts import CommandError, canonical_json_bytes
 
 _LOCK_EX = 2
 _LOCK_NB = 4
 _LOCK_UN = 8
+_JOB_ID = re.compile(r"[0-9a-f]{32}")
+_KNOWN_JOB_STATUSES = frozenset(
+    {"planned", "admitted", "running", "completed", "failed", "cancelled", "timeout", "unknown"}
+)
+_UNRESOLVED_JOB_STATUSES = frozenset({"planned", "admitted", "running", "unknown"})
+_CANCELLABLE_JOB_STATUSES = frozenset({"planned", "admitted", "running"})
 
 
 def _flock(fd: int, op: int) -> None:
@@ -159,6 +166,7 @@ class CommandJobStore:
                 max_stderr_bytes INTEGER NOT NULL,
                 effect_boundary_crossed INTEGER NOT NULL DEFAULT 0,
                 cleanup_pending INTEGER NOT NULL DEFAULT 0,
+                cancel_requested_at REAL,
                 cancelled INTEGER NOT NULL DEFAULT 0,
                 timed_out INTEGER NOT NULL DEFAULT 0,
                 truncated_stdout INTEGER NOT NULL DEFAULT 0,
@@ -175,6 +183,45 @@ class CommandJobStore:
                 created_at REAL NOT NULL,
                 UNIQUE(actor_id, idempotency_key)
             );
+            CREATE TABLE IF NOT EXISTS command_job_focus (
+                actor_id TEXT NOT NULL,
+                tenant_id TEXT NOT NULL,
+                conversation_id TEXT NOT NULL,
+                channel TEXT NOT NULL,
+                job_id TEXT NOT NULL UNIQUE REFERENCES jobs(job_id) ON DELETE RESTRICT,
+                revision INTEGER NOT NULL CHECK(revision >= 1),
+                focused_at REAL NOT NULL,
+                focus_reason TEXT NOT NULL,
+                PRIMARY KEY(actor_id, tenant_id, conversation_id, channel)
+            );
+            CREATE TRIGGER IF NOT EXISTS command_job_focus_scope_insert
+            BEFORE INSERT ON command_job_focus
+            WHEN NOT EXISTS (
+                SELECT 1 FROM jobs
+                 WHERE jobs.job_id=NEW.job_id
+                   AND jobs.actor_id=NEW.actor_id
+                   AND jobs.tenant_id=NEW.tenant_id
+                   AND jobs.conversation_id=NEW.conversation_id
+                   AND jobs.channel=NEW.channel
+            )
+            BEGIN
+                SELECT RAISE(ABORT, 'command_job_focus_scope_mismatch');
+            END;
+            CREATE TRIGGER IF NOT EXISTS command_job_focus_scope_update
+            BEFORE UPDATE ON command_job_focus
+            WHEN NOT EXISTS (
+                SELECT 1 FROM jobs
+                 WHERE jobs.job_id=NEW.job_id
+                   AND jobs.actor_id=NEW.actor_id
+                   AND jobs.tenant_id=NEW.tenant_id
+                   AND jobs.conversation_id=NEW.conversation_id
+                   AND jobs.channel=NEW.channel
+            )
+            BEGIN
+                SELECT RAISE(ABORT, 'command_job_focus_scope_mismatch');
+            END;
+            CREATE INDEX IF NOT EXISTS idx_command_jobs_scope_status
+                ON jobs(actor_id, tenant_id, conversation_id, channel, status, job_id);
             CREATE TABLE IF NOT EXISTS grant_nonces (
                 nonce TEXT PRIMARY KEY,
                 kind TEXT NOT NULL,
@@ -208,6 +255,15 @@ class CommandJobStore:
                     """UPDATE jobs SET cleanup_pending=1
                        WHERE systemd_unit IS NOT NULL AND cgroup_path IS NOT NULL"""
                 )
+            except Exception:
+                self._conn.execute("ROLLBACK")
+                raise
+            else:
+                self._conn.execute("COMMIT")
+        if "cancel_requested_at" not in columns:
+            self._conn.execute("BEGIN IMMEDIATE")
+            try:
+                self._conn.execute("ALTER TABLE jobs ADD COLUMN cancel_requested_at REAL")
             except Exception:
                 self._conn.execute("ROLLBACK")
                 raise
@@ -369,8 +425,240 @@ class CommandJobStore:
                 f"INSERT INTO jobs({columns}) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 values,
             )
+            self._set_focus(
+                actor_id=str(payload["actor_id"]),
+                tenant_id=str(payload["tenant_id"]),
+                conversation_id=str(payload["conversation_id"]),
+                channel=str(payload["channel"]),
+                job_id=str(payload["job_id"]),
+                focused_at=float(payload["created_at"]),
+                reason="submit",
+            )
         except sqlite3.IntegrityError as exc:
             raise CommandError("idempotency_conflict") from exc
+
+    @staticmethod
+    def _validate_reference_scope(
+        *,
+        actor_id: str,
+        tenant_id: str,
+        conversation_id: str,
+        channel: str,
+    ) -> tuple[str, str, str, str]:
+        values = (actor_id, tenant_id, conversation_id, channel)
+        if any(not isinstance(value, str) or not value or "\x00" in value for value in values):
+            raise CommandError("invalid_job_scope")
+        if any(len(value) > 256 for value in values):
+            raise CommandError("invalid_job_scope")
+        return values
+
+    def _set_focus(
+        self,
+        *,
+        actor_id: str,
+        tenant_id: str,
+        conversation_id: str,
+        channel: str,
+        job_id: str,
+        focused_at: float,
+        reason: str,
+    ) -> None:
+        self._conn.execute(
+            """INSERT INTO command_job_focus(
+                   actor_id,tenant_id,conversation_id,channel,job_id,revision,focused_at,focus_reason)
+               VALUES(?,?,?,?,?,1,?,?)
+               ON CONFLICT(actor_id,tenant_id,conversation_id,channel) DO UPDATE SET
+                   job_id=excluded.job_id,
+                   revision=command_job_focus.revision+1,
+                   focused_at=excluded.focused_at,
+                   focus_reason=excluded.focus_reason""",
+            (
+                actor_id,
+                tenant_id,
+                conversation_id,
+                channel,
+                job_id,
+                float(focused_at),
+                str(reason),
+            ),
+        )
+
+    @staticmethod
+    def _checked_status(row: sqlite3.Row | dict[str, Any]) -> str:
+        status = str(row["status"] or "")
+        if status not in _KNOWN_JOB_STATUSES:
+            raise CommandError("corrupt_job_state")
+        return status
+
+    def _scope_row(
+        self,
+        job_id: str,
+        *,
+        actor_id: str,
+        tenant_id: str,
+        conversation_id: str,
+        channel: str,
+    ) -> sqlite3.Row:
+        row = self._conn.execute("SELECT * FROM jobs WHERE job_id=?", (job_id,)).fetchone()
+        if row is None:
+            raise CommandError("job_not_found")
+        if (
+            str(row["actor_id"] or "") != actor_id
+            or str(row["tenant_id"] or "") != tenant_id
+            or str(row["conversation_id"] or "") != conversation_id
+            or str(row["channel"] or "") != channel
+        ):
+            raise CommandError("job_scope_mismatch")
+        self._checked_status(row)
+        return row
+
+    def _persist_cancel_intent(self, row: sqlite3.Row, *, requested_at: float) -> None:
+        status = self._checked_status(row)
+        if status == "unknown":
+            raise CommandError("current_job_uncertain")
+        if status not in _CANCELLABLE_JOB_STATUSES:
+            raise CommandError("job_not_running")
+        cursor = self._conn.execute(
+            """UPDATE jobs
+                  SET cancel_requested_at=COALESCE(cancel_requested_at, ?)
+                WHERE job_id=? AND status IN ('planned','admitted','running')""",
+            (float(requested_at), str(row["job_id"])),
+        )
+        if cursor.rowcount != 1:
+            raise CommandError("job_not_running")
+
+    def resolve_job_reference(
+        self,
+        job_id: str | None,
+        *,
+        actor_id: str,
+        tenant_id: str,
+        conversation_id: str,
+        channel: str,
+        operation: Literal["status", "cancel"] = "status",
+        requested_at: float | None = None,
+    ) -> str:
+        """Resolve one explicit/current reference at an exact durable scope.
+
+        No timestamp is an authority signal.  Multiple unresolved jobs are
+        ambiguous even when one of them was inserted last.  For cancellation,
+        target selection and the durable intent share this transaction.
+        """
+
+        actor_id, tenant_id, conversation_id, channel = self._validate_reference_scope(
+            actor_id=actor_id,
+            tenant_id=tenant_id,
+            conversation_id=conversation_id,
+            channel=channel,
+        )
+        if operation not in {"status", "cancel"}:
+            raise CommandError("invalid_job_operation")
+        if job_id is not None and (
+            not isinstance(job_id, str) or _JOB_ID.fullmatch(job_id) is None
+        ):
+            raise CommandError("invalid_job_id")
+        moment = time.time() if requested_at is None else float(requested_at)
+        if not moment >= 0 or moment == float("inf") or moment != moment:
+            raise CommandError("invalid_job_time")
+
+        with self.transaction():
+            reason = f"explicit_{operation}" if job_id is not None else f"current_{operation}"
+            if job_id is not None:
+                selected = self._scope_row(
+                    job_id,
+                    actor_id=actor_id,
+                    tenant_id=tenant_id,
+                    conversation_id=conversation_id,
+                    channel=channel,
+                )
+            else:
+                unresolved = self._conn.execute(
+                    """SELECT * FROM jobs
+                        WHERE actor_id=? AND tenant_id=? AND conversation_id=? AND channel=?
+                          AND status IN ('planned','admitted','running','unknown')
+                        ORDER BY job_id LIMIT 2""",
+                    (actor_id, tenant_id, conversation_id, channel),
+                ).fetchall()
+                if len(unresolved) > 1:
+                    raise CommandError("current_job_ambiguous")
+                if unresolved:
+                    selected = unresolved[0]
+                else:
+                    focus = self._conn.execute(
+                        """SELECT jobs.* FROM command_job_focus AS focus
+                              LEFT JOIN jobs ON jobs.job_id=focus.job_id
+                             WHERE focus.actor_id=? AND focus.tenant_id=?
+                               AND focus.conversation_id=? AND focus.channel=?""",
+                        (actor_id, tenant_id, conversation_id, channel),
+                    ).fetchone()
+                    if focus is not None:
+                        selected = focus
+                        self._scope_row(
+                            str(selected["job_id"]),
+                            actor_id=actor_id,
+                            tenant_id=tenant_id,
+                            conversation_id=conversation_id,
+                            channel=channel,
+                        )
+                    else:
+                        legacy = self._conn.execute(
+                            """SELECT * FROM jobs
+                                WHERE actor_id=? AND tenant_id=? AND conversation_id=? AND channel=?
+                                ORDER BY job_id LIMIT 2""",
+                            (actor_id, tenant_id, conversation_id, channel),
+                        ).fetchall()
+                        if not legacy:
+                            raise CommandError("current_job_not_found")
+                        if len(legacy) > 1:
+                            raise CommandError("current_job_ambiguous")
+                        selected = legacy[0]
+                        reason = "legacy_unique"
+
+            selected_id = str(selected["job_id"])
+            self._checked_status(selected)
+            if operation == "cancel":
+                self._persist_cancel_intent(selected, requested_at=moment)
+            self._set_focus(
+                actor_id=actor_id,
+                tenant_id=tenant_id,
+                conversation_id=conversation_id,
+                channel=channel,
+                job_id=selected_id,
+                focused_at=moment,
+                reason=reason,
+            )
+            return selected_id
+
+    def persist_cancel_intent(
+        self,
+        job_id: str,
+        *,
+        actor_id: str,
+        conversation_id: str | None = None,
+        requested_at: float | None = None,
+    ) -> None:
+        """Persist an exact-id cancellation before the in-memory signal."""
+
+        if not isinstance(job_id, str) or _JOB_ID.fullmatch(job_id) is None:
+            raise CommandError("invalid_job_id")
+        moment = time.time() if requested_at is None else float(requested_at)
+        with self.transaction():
+            row = self._conn.execute("SELECT * FROM jobs WHERE job_id=?", (job_id,)).fetchone()
+            if row is None:
+                raise CommandError("job_not_found")
+            if str(row["actor_id"] or "") != actor_id:
+                raise CommandError("actor_mismatch")
+            if conversation_id is not None and str(row["conversation_id"] or "") != conversation_id:
+                raise CommandError("conversation_mismatch")
+            self._persist_cancel_intent(row, requested_at=moment)
+
+    def cancel_intent_pending(self, job_id: str) -> bool:
+        with self._local:
+            row = self._conn.execute(
+                "SELECT cancel_requested_at FROM jobs WHERE job_id=?",
+                (str(job_id),),
+            ).fetchone()
+            return row is not None and row["cancel_requested_at"] is not None
 
     def update_job(self, job_id: str, fields: dict[str, Any]) -> None:
         if not fields:

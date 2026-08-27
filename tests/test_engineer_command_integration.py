@@ -266,6 +266,24 @@ def test_command_management_refusals_are_kernel_failures(
     assert re.fullmatch(r"[a-z][a-z0-9_]{0,79}", str(result.data["error_code"]))
 
 
+@pytest.mark.parametrize("tool_name", ["engineer_command_status", "engineer_command_cancel"])
+def test_command_management_schema_resolves_the_current_conversation_job(
+    settings,
+    tmp_path: Path,
+    tool_name: str,
+) -> None:
+    from friday.server import create_app
+
+    app = create_app(_configured(settings, tmp_path))
+    actor = ActorContext(LEGACY_OWNER_USER_ID, "owner", "telegram-bridge")
+    with TestClient(app):
+        tool = app.state.kernel.get_tool(tool_name)
+        assert "required" not in tool.parameters
+        result = asyncio.run(tool.handler(actor=actor, _conversation_id="conv-owner"))
+    assert result["ok"] is False
+    assert result["error_code"] == "current_job_not_found"
+
+
 def test_generic_api_cannot_confirm_an_engineer_command(settings, tmp_path: Path) -> None:
     from friday.server import create_app
 
@@ -400,6 +418,23 @@ class _TerminalOutputKernel:
             receipt_mac="6" * 64,
         )
 
+    def resolve_job_reference(
+        self,
+        job_id: str | None,
+        *,
+        actor_id: str,
+        tenant_id: str,
+        conversation_id: str,
+        channel: str,
+        operation: str = "status",
+    ) -> str:
+        assert job_id in {None, self.receipt.job_id}
+        assert tenant_id == LEGACY_OWNER_USER_ID
+        assert channel == "telegram"
+        assert operation == "status"
+        self.calls.append(("resolve", actor_id, conversation_id))
+        return self.receipt.job_id
+
     def progress(
         self,
         job_id: str,
@@ -454,7 +489,6 @@ def test_terminal_status_builds_one_exact_private_delivery_archive() -> None:
 
     result = service.status(
         actor=actor,
-        job_id=kernel.receipt.job_id,
         _conversation_id="conv-owner",
     )
     repeated = service.status(
@@ -467,9 +501,11 @@ def test_terminal_status_builds_one_exact_private_delivery_archive() -> None:
     assert result["artifact_delivery"]["available"] is True
     assert repeated["_attachment"] == result["_attachment"]
     assert kernel.calls == [
+        ("resolve", actor.own_id, "conv-owner"),
         ("progress", actor.own_id, "conv-owner"),
         ("terminal_receipt", actor.own_id, "conv-owner"),
         ("terminal_result", actor.own_id, "conv-owner"),
+        ("resolve", actor.own_id, "conv-owner"),
         ("progress", actor.own_id, "conv-owner"),
         ("terminal_receipt", actor.own_id, "conv-owner"),
     ]
@@ -511,6 +547,9 @@ def test_unknown_after_restart_remains_honest_without_reading_a_receipt_or_outpu
     actor = ActorContext(LEGACY_OWNER_USER_ID, "owner", "telegram-bridge")
 
     class _UnknownKernel:
+        def resolve_job_reference(self, job_id: str | None, **_kwargs) -> str:  # noqa: ANN003
+            return str(job_id)
+
         def progress(
             self,
             job_id: str,
@@ -589,6 +628,7 @@ def test_command_status_normalizes_corrupt_ledger_failures() -> None:
     actor = ActorContext(LEGACY_OWNER_USER_ID, "owner", "telegram-bridge")
     service = EngineerCommandService.__new__(EngineerCommandService)
     service.kernel = SimpleNamespace(
+        resolve_job_reference=lambda *_args, **_kwargs: "2" * 32,
         progress=lambda *_args, **_kwargs: (_ for _ in ()).throw(ValueError("private corruption"))
     )
     service.max_upload_bytes = 4 * 1024 * 1024

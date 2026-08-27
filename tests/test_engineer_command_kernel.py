@@ -342,6 +342,49 @@ def test_idempotent_submit_returns_same_job(tmp_path: Path) -> None:
     assert second == first
 
 
+def test_idempotent_submit_does_not_refocus_an_older_job(tmp_path: Path) -> None:
+    kernel = _kernel(tmp_path)
+    first_request = _argv("/usr/bin/true", key=_key("focus-first"))
+    first = _submit(kernel, first_request)
+    _wait(kernel, first)
+    second_request = _argv("/usr/bin/true", key=_key("focus-second"))
+    second = _submit(kernel, second_request)
+    _wait(kernel, second)
+
+    assert kernel.resolve_job_reference(
+        None,
+        actor_id=ACTOR,
+        tenant_id="tenant-1",
+        conversation_id="conv-1",
+        channel="cli_test",
+    ) == second
+    assert kernel.submit(first_request, "not-a-grant", actor_id=ACTOR) == first
+    assert kernel.resolve_job_reference(
+        None,
+        actor_id=ACTOR,
+        tenant_id="tenant-1",
+        conversation_id="conv-1",
+        channel="cli_test",
+    ) == second
+
+
+def test_cancel_reference_persists_intent_before_signalling_live_job(tmp_path: Path) -> None:
+    kernel = _kernel(tmp_path)
+    request = _argv("/usr/bin/sleep", "20", key=_key("cancel-current"), timeout_sec=30)
+    job_id = _submit(kernel, request)
+
+    assert kernel.cancel_reference(
+        None,
+        actor_id=ACTOR,
+        tenant_id="tenant-1",
+        conversation_id="conv-1",
+        channel="cli_test",
+    ) == job_id
+    assert kernel.store.read_job(job_id)["cancel_requested_at"] is not None
+    receipt = _wait(kernel, job_id)
+    assert receipt.status is CommandStatus.CANCELLED
+
+
 def test_idempotency_conflict_on_different_digest(tmp_path: Path) -> None:
     kernel = _kernel(tmp_path)
     key = _key("conflict")

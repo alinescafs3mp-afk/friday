@@ -2173,6 +2173,17 @@ _ENGINEER_COMMAND_MANAGE_CONTEXT_TOOL_NAMES = frozenset(
 _ENGINEER_COMMAND_CONTEXT_TOOL_NAMES = (
     _ENGINEER_COMMAND_RUN_CONTEXT_TOOL_NAMES | _ENGINEER_COMMAND_MANAGE_CONTEXT_TOOL_NAMES
 )
+_ENGINEER_CURRENT_JOB_STRUCTURAL_REFUSALS = {
+    "current_job_ambiguous": (
+        "В этом чате несколько незавершённых Engineer-команд. Укажите точный job_id; "
+        "автоматически выбирать одну из них небезопасно."
+    ),
+    "current_job_not_found": "В этом чате нет текущей Engineer-команды.",
+    "current_job_uncertain": (
+        "Состояние текущей Engineer-команды неизвестно, поэтому отмена не отправлена. "
+        "Сначала запросите её статус или укажите точный job_id после ручной сверки."
+    ),
+}
 _ENGINEER_COMMAND_PRIVATE_ARGUMENTS = frozenset(
     {"_conversation_id", "_source_message_id", "_telegram_update_id"}
 )
@@ -64268,6 +64279,33 @@ class AgentRuntime:
                     _trace_tool_result_status(call.name, tool_result),
                 )
                 total_calls += 1
+                if (
+                    call.name in _ENGINEER_COMMAND_MANAGE_CONTEXT_TOOL_NAMES
+                    and isinstance(call.arguments, Mapping)
+                    and "job_id" not in call.arguments
+                    and not tool_result.success
+                    and isinstance(tool_result.data, Mapping)
+                ):
+                    current_job_error = str(tool_result.data.get("error_code") or "")
+                    current_job_refusal = _ENGINEER_CURRENT_JOB_STRUCTURAL_REFUSALS.get(
+                        current_job_error
+                    )
+                    if current_job_refusal:
+                        # Job selection is a durable code-owned decision.  Once
+                        # it reports zero/ambiguous/uncertain, the model may not
+                        # guess an id or choose a candidate in a later round of
+                        # the same authenticated turn.
+                        tools.clear()
+                        return {
+                            "content": current_job_refusal,
+                            "tools_used": tools_used,
+                            "web_query_notice": " ".join(web_notice),
+                            "knowledge_object_ids": tool_knowledge_ids,
+                            "tool_evidence": tool_evidence,
+                            "voice_clip": voice_clip,
+                            "file_clips": file_clips,
+                            "_structural_file_count": structural_file_count,
+                        }
                 if (
                     tool_result.success
                     and call.name == "engineer_command_status"
