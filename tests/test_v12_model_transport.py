@@ -9,6 +9,8 @@ from typing import Any
 import httpx
 import pytest
 
+import friday.model_probe as model_probe_module
+import friday.v12_model_transport as transport_module
 from friday.agent_runtime.llm import LLMRouter
 from friday.model_profiles import (
     ModelEffect,
@@ -40,6 +42,11 @@ def _router(settings, **changes: Any) -> LLMRouter:
     }
     configured = replace(settings, **values)
     return LLMRouter(configured)
+
+
+def test_metrics_connect_budget_does_not_undercut_load_witness() -> None:
+    assert transport_module._METRICS_CONNECT_TIMEOUT_SEC >= 10.0
+    assert transport_module._METRICS_CONNECT_TIMEOUT_SEC <= model_probe_module.LOAD_TIMEOUT_SEC
 
 
 @pytest.mark.asyncio

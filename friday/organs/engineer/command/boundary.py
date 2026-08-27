@@ -4,11 +4,13 @@ from __future__ import annotations
 
 import contextlib
 import os
+import re
 import stat
 import subprocess
 import threading
 import time
 from dataclasses import dataclass, field
+from decimal import Decimal, InvalidOperation
 from pathlib import Path
 
 from .contracts import (
@@ -570,29 +572,34 @@ def _parse_systemd_usec(raw: str) -> int:
     text = str(raw or "").strip().lower()
     if not text or text in {"infinity", "inf", "[not set]"}:
         raise CommandError("resource_boundary_unproven")
-    units = (
-        ("usec", 1),
-        ("us", 1),
-        ("msec", 1_000),
-        ("ms", 1_000),
-        ("sec", 1_000_000),
-        ("min", 60_000_000),
-        ("h", 3_600_000_000),
-        ("s", 1_000_000),
-    )
-    for suffix, multiplier in units:
-        if text.endswith(suffix):
-            number = text[: -len(suffix)]
-            if not number:
-                raise CommandError("resource_boundary_unproven")
-            try:
-                return int(float(number) * multiplier)
-            except ValueError as exc:
-                raise CommandError("resource_boundary_unproven") from exc
-    try:
+    if text.isdigit():
         return int(text)
-    except ValueError as exc:
+    multipliers = {
+        "usec": 1,
+        "us": 1,
+        "msec": 1_000,
+        "ms": 1_000,
+        "sec": 1_000_000,
+        "s": 1_000_000,
+        "min": 60_000_000,
+        "h": 3_600_000_000,
+    }
+    token = re.compile(r"(?P<number>[0-9]+(?:\.[0-9]+)?)\s*(?P<unit>usec|msec|sec|min|us|ms|h|s)")
+    total = Decimal(0)
+    end = 0
+    matched = False
+    try:
+        for match in token.finditer(text):
+            if text[end : match.start()].strip():
+                raise CommandError("resource_boundary_unproven")
+            matched = True
+            total += Decimal(match.group("number")) * multipliers[match.group("unit")]
+            end = match.end()
+    except (InvalidOperation, ValueError) as exc:
         raise CommandError("resource_boundary_unproven") from exc
+    if not matched or text[end:].strip() or total != total.to_integral_value():
+        raise CommandError("resource_boundary_unproven")
+    return int(total)
 
 
 def _prove_unit_contract(unit: str, *, runtime_sec: int | None) -> None:

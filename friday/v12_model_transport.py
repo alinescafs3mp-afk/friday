@@ -41,7 +41,11 @@ from friday.v12_model_runtime import (
 
 _MAX_TOOL_CALLS = 64
 _METRICS_CHUNK_BYTES = 8_192
-_METRICS_CONNECT_TIMEOUT_SEC = 2.0
+# The outer load ceiling still bounds the whole metrics fetch.  A
+# separate two-second TCP-connect ceiling made SGLang's live cancellation
+# witness fail intermittently while the engine was accepting the synthetic
+# request, even though the proxy recovered inside the outer bound.
+_METRICS_CONNECT_TIMEOUT_SEC = 10.0
 
 
 class V12ModelTransportFailure(StrEnum):

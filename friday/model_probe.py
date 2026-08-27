@@ -51,12 +51,27 @@ PLAN_CASE_TIMEOUT_SEC = 12.0
 SYNTHESIS_TIMEOUT_SEC = 60.0
 VERIFIER_TIMEOUT_SEC = 30.0
 CONTEXT_TIMEOUT_SEC = 60.0
-LOAD_TIMEOUT_SEC = 2.0
-CANCELLATION_TIMEOUT_SEC = 6.0
-REMOTE_QUEUE_DRAIN_MAX_MS = 5_000
+# One SGLang load sample is an exact four-request witness
+# (witness -> metrics -> server-info -> witness).  Two seconds was below the
+# observed idle tail and made a healthy runtime lose V12 during an otherwise
+# unrelated backend restart.  Keep the sample bounded, but leave enough room
+# for that complete attested observation even while SGLang drains a cancelled
+# generation through the same proxy.
+LOAD_TIMEOUT_SEC = 12.0
+# Cancellation owns one load sample before submission and a separately bounded
+# fifteen-second remote queue drain.  The outer deadline must cover the
+# baseline/acceptance/confirmation observations plus that drain rather than
+# racing the inner proof.
+CANCELLATION_TIMEOUT_SEC = 45.0
+REMOTE_QUEUE_DRAIN_MAX_MS = 15_000
 POST_CANCELLATION_QUIET_OBSERVATIONS = 2
 POST_CANCELLATION_QUIET_INTERVAL_SEC = 0.05
-POST_CONTEXT_IDLE_CONVERGENCE_TIMEOUT_SEC = 2.0
+# SGLang can report the just-finished 8K context request as active slightly
+# longer than one complete load-witness budget.  Convergence still
+# requires valid same-epoch samples and exact zero load; only the observation
+# window is widened so a healthy queue is not revoked at the old two-second
+# edge.
+POST_CONTEXT_IDLE_CONVERGENCE_TIMEOUT_SEC = 20.0
 POST_CONTEXT_IDLE_RETRY_INTERVAL_SEC = 0.05
 TASK_CANCELLATION_DRAIN_SEC = 0.05
 MAX_COMPLETION_CHARS = 65_536
