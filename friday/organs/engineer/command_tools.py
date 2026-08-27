@@ -143,11 +143,14 @@ class EngineerCommandService:
         self.files_root = Path(ctx.settings.files_dir)
         self.max_upload_bytes = int(ctx.settings.max_upload_bytes)
         self._archive_lock = threading.Lock()
-        self._archive_cache: tuple[
-            tuple[str, str],
-            CommandOutputArchive,
-            dict[str, str],
-        ] | None = None
+        self._archive_cache: (
+            tuple[
+                tuple[str, str],
+                CommandOutputArchive,
+                dict[str, str],
+            ]
+            | None
+        ) = None
         self._publication_lock = threading.Lock()
 
     def _archive_for_receipt(
@@ -241,9 +244,7 @@ class EngineerCommandService:
             )
         ):
             return _refusal("authenticated_confirmation_required")
-        approval = self.storage.get_action_approval(
-            str(_approval_id), actor.user_id, person_id=actor.own_id
-        )
+        approval = self.storage.get_action_approval(str(_approval_id), actor.user_id, person_id=actor.own_id)
         if (
             not isinstance(approval, Mapping)
             or str(approval.get("tool") or "") != "engineer_command_run"
@@ -357,9 +358,7 @@ class EngineerCommandService:
                     public_receipt.pop("generated_files_sha256", None)
                 payload["receipt"] = public_receipt
                 payload["receipt"]["mac_version"] = receipt_mac_version
-                payload["receipt"]["generated_files_authenticated"] = (
-                    receipt_mac_version >= 2
-                )
+                payload["receipt"]["generated_files_authenticated"] = receipt_mac_version >= 2
                 payload["stdout"] = _safe_output(receipt.stdout)
                 payload["stderr"] = _safe_output(receipt.stderr)
                 payload["stdout_display_truncated"] = len(receipt.stdout) > _DISPLAY_BYTES

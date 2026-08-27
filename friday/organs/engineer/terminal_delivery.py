@@ -246,7 +246,9 @@ def _exact_existing_archive(
         actor_id=actor_id,
     )
     digest = hashlib.sha256(str(row["body"]).encode("ascii")).hexdigest()
-    return StagedTerminalNotification(job_id, str(row["id"]), str(row["dedup_key"]), digest, str(row["status"]))
+    return StagedTerminalNotification(
+        job_id, str(row["id"]), str(row["dedup_key"]), digest, str(row["status"])
+    )
 
 
 def stage_terminal_archive(

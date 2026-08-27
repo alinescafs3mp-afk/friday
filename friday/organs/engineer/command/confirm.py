@@ -176,7 +176,9 @@ class OwnerConfirmationAuthority:
                 mac=mac,
             )
 
-    def verify(self, confirmation: OwnerConfirmation, *, source: OwnerSource, command_digest: str) -> OwnerConfirmation:
+    def verify(
+        self, confirmation: OwnerConfirmation, *, source: OwnerSource, command_digest: str
+    ) -> OwnerConfirmation:
         if not isinstance(confirmation, OwnerConfirmation):
             raise CommandError("destructive_confirmation_required")
         expected = _mac(self._secret, confirmation.identity_payload())

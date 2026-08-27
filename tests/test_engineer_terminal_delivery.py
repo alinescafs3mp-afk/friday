@@ -142,23 +142,29 @@ def test_archive_stage_is_atomic_content_free_and_replay_exact(storage, tmp_path
         max_bytes=1024 * 1024,
     )
     assert stored.content == b"PK\x03\x04sealed"
-    assert terminal_notification_status(
-        storage,
-        staged.notification_id,
-        staged.dedup_key,
-        staged.envelope_sha256,
-    ) == "pending"
+    assert (
+        terminal_notification_status(
+            storage,
+            staged.notification_id,
+            staged.dedup_key,
+            staged.envelope_sha256,
+        )
+        == "pending"
+    )
     with storage.transaction() as conn:
         conn.execute(
             "UPDATE outbound_notifications SET dedup_key='tampered' WHERE id=?",
             (staged.notification_id,),
         )
-    assert terminal_notification_status(
-        storage,
-        staged.notification_id,
-        staged.dedup_key,
-        staged.envelope_sha256,
-    ) == "invalid"
+    assert (
+        terminal_notification_status(
+            storage,
+            staged.notification_id,
+            staged.dedup_key,
+            staged.envelope_sha256,
+        )
+        == "invalid"
+    )
 
 
 def _receipt(

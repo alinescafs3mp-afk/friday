@@ -73,9 +73,7 @@ class _Backend:
 
     def _apply_ack(self, payload: dict[str, Any]) -> dict[str, list[str]]:
         requested = [
-            str(value)
-            for field in ("sent", "failed", "uncertain")
-            for value in (payload.get(field) or [])
+            str(value) for field in ("sent", "failed", "uncertain") for value in (payload.get(field) or [])
         ]
         notification_id = str(self.item["id"])
         if notification_id in (payload.get("sent") or []) and self.status == "pending":
@@ -174,9 +172,7 @@ async def test_terminal_notification_fetches_and_sends_one_exact_captioned_docum
     bridge, telegram, backend = _bridge(tmp_path), _Telegram(), _Backend(item, payload)
     try:
         await bridge._drain_outbound(telegram, backend)  # noqa: SLF001
-        assert telegram.documents == [
-            (item["caption"], "job_1.zip", payload, "application/zip")
-        ]
+        assert telegram.documents == [(item["caption"], "job_1.zip", payload, "application/zip")]
         assert backend.artifact_reads == 1
         assert backend.status == "sent"
         assert bridge._inbox.notification_delivery_ids() == set()  # noqa: SLF001

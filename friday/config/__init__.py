@@ -1958,8 +1958,8 @@ def validate_settings(settings: FridaySettings, *, production: bool = False) -> 
             except (OSError, RuntimeError):
                 errors.append(f"{label} must be pre-created")
                 continue
-            expected_kind = stat.S_ISDIR(path_stat.st_mode) if expect_directory else stat.S_ISREG(
-                path_stat.st_mode
+            expected_kind = (
+                stat.S_ISDIR(path_stat.st_mode) if expect_directory else stat.S_ISREG(path_stat.st_mode)
             )
             if (
                 not lexical.is_absolute()

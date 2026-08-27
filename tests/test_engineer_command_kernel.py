@@ -136,7 +136,9 @@ def _wait(kernel: CommandKernel, job_id: str):
     return kernel.wait(job_id, actor_id=ACTOR)
 
 
-def test_argv_echo_completes_without_inheriting_caller_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_argv_echo_completes_without_inheriting_caller_env(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     monkeypatch.setenv("FRIDAY_SHOULD_NOT_LEAK", "secret-value")
     kernel = _kernel(tmp_path)
     request = _argv("/usr/bin/env", key=_key("env"))
@@ -353,12 +355,15 @@ def test_idempotent_submit_preserves_exact_delivery_scope(tmp_path: Path) -> Non
     request = _argv("/usr/bin/true", key=_key("delivery-idem"))
     first = _submit(kernel, request, delivery_chat_id="5001")
     _wait(kernel, first)
-    assert kernel.submit(
-        request,
-        "not-a-grant",
-        actor_id=ACTOR,
-        delivery_chat_id="5001",
-    ) == first
+    assert (
+        kernel.submit(
+            request,
+            "not-a-grant",
+            actor_id=ACTOR,
+            delivery_chat_id="5001",
+        )
+        == first
+    )
     with pytest.raises(CommandError, match="delivery_scope_mismatch"):
         kernel.submit(
             request,
@@ -377,21 +382,27 @@ def test_idempotent_submit_does_not_refocus_an_older_job(tmp_path: Path) -> None
     second = _submit(kernel, second_request)
     _wait(kernel, second)
 
-    assert kernel.resolve_job_reference(
-        None,
-        actor_id=ACTOR,
-        tenant_id="tenant-1",
-        conversation_id="conv-1",
-        channel="cli_test",
-    ) == second
+    assert (
+        kernel.resolve_job_reference(
+            None,
+            actor_id=ACTOR,
+            tenant_id="tenant-1",
+            conversation_id="conv-1",
+            channel="cli_test",
+        )
+        == second
+    )
     assert kernel.submit(first_request, "not-a-grant", actor_id=ACTOR) == first
-    assert kernel.resolve_job_reference(
-        None,
-        actor_id=ACTOR,
-        tenant_id="tenant-1",
-        conversation_id="conv-1",
-        channel="cli_test",
-    ) == second
+    assert (
+        kernel.resolve_job_reference(
+            None,
+            actor_id=ACTOR,
+            tenant_id="tenant-1",
+            conversation_id="conv-1",
+            channel="cli_test",
+        )
+        == second
+    )
 
 
 def test_cancel_reference_persists_intent_before_signalling_live_job(tmp_path: Path) -> None:
@@ -399,13 +410,16 @@ def test_cancel_reference_persists_intent_before_signalling_live_job(tmp_path: P
     request = _argv("/usr/bin/sleep", "20", key=_key("cancel-current"), timeout_sec=30)
     job_id = _submit(kernel, request)
 
-    assert kernel.cancel_reference(
-        None,
-        actor_id=ACTOR,
-        tenant_id="tenant-1",
-        conversation_id="conv-1",
-        channel="cli_test",
-    ) == job_id
+    assert (
+        kernel.cancel_reference(
+            None,
+            actor_id=ACTOR,
+            tenant_id="tenant-1",
+            conversation_id="conv-1",
+            channel="cli_test",
+        )
+        == job_id
+    )
     assert kernel.store.read_job(job_id)["cancel_requested_at"] is not None
     receipt = _wait(kernel, job_id)
     assert receipt.status is CommandStatus.CANCELLED
@@ -596,7 +610,9 @@ def test_sudo_and_destructive_shell_need_confirmation(tmp_path: Path) -> None:
     sudo_path = Path("/usr/bin/sudo")
     if sudo_path.exists():
         request = _argv("/usr/bin/sudo", "-n", "true", key=_key("sudo"))
-        with pytest.raises(CommandError, match="setid_refused|destructive_confirmation_required|symlink_refused"):
+        with pytest.raises(
+            CommandError, match="setid_refused|destructive_confirmation_required|symlink_refused"
+        ):
             _submit(kernel, request, destructive=False)
     shell = _shell("sudo -n true", key=_key("sudo-shell"))
     with pytest.raises(CommandError, match="destructive_confirmation_required"):
@@ -1222,10 +1238,7 @@ def test_tmpfs_and_output_quota_kill(tmp_path: Path) -> None:
     many = _argv(
         "/usr/bin/python3",
         "-c",
-        "from pathlib import Path\n"
-        "p=Path('output')\n"
-        "for i in range(200):\n"
-        " (p/f'f{i}').write_text('n')\n",
+        "from pathlib import Path\np=Path('output')\nfor i in range(200):\n (p/f'f{i}').write_text('n')\n",
         key=_key("many-files"),
         timeout_sec=10,
     )

@@ -972,11 +972,7 @@ class TransportMixin(BridgeShared):
         )
         raw_retired = data.get("retired")
         if isinstance(raw_retired, list):
-            retired = [
-                value
-                for value in raw_retired[:100]
-                if isinstance(value, str) and value
-            ]
+            retired = [value for value in raw_retired[:100] if isinstance(value, str) and value]
             self._inbox.forget_notification_delivery_parts(retired)
         raw_items = data.get("items")
         items: list[Any] = raw_items if isinstance(raw_items, list) else []
@@ -985,15 +981,11 @@ class TransportMixin(BridgeShared):
         # confirmation) but before persisting the separate ACK outcome. Promote
         # every such orphan to a durable outcome so a later revoke/discard that
         # hides the backend row cannot strand the fence forever.
-        for notification_id, inferred in self._inbox.notification_delivery_orphan_outcomes(
-            limit=100
-        ).items():
+        for notification_id, inferred in self._inbox.notification_delivery_orphan_outcomes(limit=100).items():
             self._inbox.remember_notification_delivery_outcome(notification_id, inferred)
             terminal_outcomes[notification_id] = inferred
         sent: list[str] = [
-            notification_id
-            for notification_id, outcome in terminal_outcomes.items()
-            if outcome == "sent"
+            notification_id for notification_id, outcome in terminal_outcomes.items() if outcome == "sent"
         ]
         failed: list[str] = []
         uncertain: list[str] = [
@@ -1034,9 +1026,7 @@ class TransportMixin(BridgeShared):
                 )
                 outcome_states = self._inbox.notification_delivery_part_states(notif_id)
                 exact_fence = (
-                    str(outcome_envelope.get("fence_key") or "")
-                    if outcome_envelope is not None
-                    else ""
+                    str(outcome_envelope.get("fence_key") or "") if outcome_envelope is not None else ""
                 )
                 if not exact_fence or exact_fence not in outcome_states:
                     self._inbox.remember_notification_delivery_outcome(notif_id, "uncertain")
@@ -1234,9 +1224,7 @@ class TransportMixin(BridgeShared):
                     ordinary_sent = [value for value in sent if value not in strict_requested]
                     self._inbox.forget_delivered_notifications(ordinary_sent)
                 else:
-                    self._inbox.forget_delivered_notifications(
-                        [value for value in sent if value in terminal]
-                    )
+                    self._inbox.forget_delivered_notifications([value for value in sent if value in terminal])
                     self._inbox.forget_notification_delivery_parts(
                         [value for value in requested if value in terminal]
                     )

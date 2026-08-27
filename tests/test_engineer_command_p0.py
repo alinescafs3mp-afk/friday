@@ -124,6 +124,7 @@ def test_confirmation_ingress_row_and_update_are_each_one_shot_across_restart(tm
     store = CommandJobStore(root)
     authority = OwnerConfirmationAuthority(b"c" * 32, clock=lambda: 1_000)
     authority.bind_store(store)
+
     def _ingest(row: str, update: str) -> str:
         return authority.ingest(
             actor_id="owner",
@@ -388,8 +389,7 @@ def test_low_block_pipe_fd_is_duplicated_before_posix_spawn_actions(
     )
     gate_action = actions[gate_index]
     overwritten_before_gate = {
-        action[2] if action[0] == os.POSIX_SPAWN_DUP2 else action[1]
-        for action in actions[:gate_index]
+        action[2] if action[0] == os.POSIX_SPAWN_DUP2 else action[1] for action in actions[:gate_index]
     }
 
     assert (block_r, block_w) == (_ACTION_SOURCE_FD_MIN, 4)
@@ -506,7 +506,9 @@ def test_job_helper_enters_scope_before_spawn_and_releases_stopped_child(
     monkeypatch.setattr(signal, "pidfd_send_signal", _pidfd_signal)
     monkeypatch.setattr(spawn_helper_module, "_make_collision_free_block_pipe", lambda: (96, 97))
     monkeypatch.setattr(spawn_helper_module, "_move_cgroup", _move)
-    monkeypatch.setattr(spawn_helper_module, "_wait_child_stopped", lambda pid: events.append(("stopped", pid)))
+    monkeypatch.setattr(
+        spawn_helper_module, "_wait_child_stopped", lambda pid: events.append(("stopped", pid))
+    )
     monkeypatch.setattr(os, "posix_spawn", lambda *_args, **_kwargs: events.append(("spawn", 4321)) or 4321)
     monkeypatch.setattr(os, "pidfd_open", lambda *_args: 88)
     monkeypatch.setattr(os, "waitpid", lambda *_args: next(waits))

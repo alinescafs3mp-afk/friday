@@ -244,9 +244,7 @@ class CommandJobStore:
         if "cleanup_pending" not in columns:
             self._conn.execute("BEGIN IMMEDIATE")
             try:
-                self._conn.execute(
-                    "ALTER TABLE jobs ADD COLUMN cleanup_pending INTEGER NOT NULL DEFAULT 0"
-                )
+                self._conn.execute("ALTER TABLE jobs ADD COLUMN cleanup_pending INTEGER NOT NULL DEFAULT 0")
                 # Any pre-marker row with a durable unit identity may have an
                 # interrupted cleanup, including FAILED/COMPLETED rows written
                 # by older builds.  DDL and backfill commit atomically, so a
@@ -741,9 +739,7 @@ class CommandJobStore:
         )
         if operation not in {"status", "cancel"}:
             raise CommandError("invalid_job_operation")
-        if job_id is not None and (
-            not isinstance(job_id, str) or _JOB_ID.fullmatch(job_id) is None
-        ):
+        if job_id is not None and (not isinstance(job_id, str) or _JOB_ID.fullmatch(job_id) is None):
             raise CommandError("invalid_job_id")
         moment = time.time() if requested_at is None else float(requested_at)
         if not moment >= 0 or moment == float("inf") or moment != moment:

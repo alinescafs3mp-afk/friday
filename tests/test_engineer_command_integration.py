@@ -139,7 +139,9 @@ def test_command_tools_exist_only_when_the_private_kernel_is_configured(settings
 
     disabled = create_app(replace(settings, engineer_mode_enabled=True))
     with TestClient(disabled):
-        names = set(disabled.state.kernel.get_tool_names(ActorContext(LEGACY_OWNER_USER_ID, "owner", "api-token")))
+        names = set(
+            disabled.state.kernel.get_tool_names(ActorContext(LEGACY_OWNER_USER_ID, "owner", "api-token"))
+        )
         assert "engineer_command_run" not in names
 
     configured = create_app(_configured(settings, tmp_path))
@@ -191,10 +193,7 @@ async def test_command_start_schema_requires_authenticated_telegram_provenance(
         ],
         attachments=None,
     )
-    names = {
-        str((schema.get("function") or {}).get("name") or "")
-        for schema in model.schemas[0]
-    }
+    names = {str((schema.get("function") or {}).get("name") or "") for schema in model.schemas[0]}
     assert ("engineer_command_run" in names) is run_is_offered
     assert {"engineer_command_status", "engineer_command_cancel"} <= names
 
@@ -233,10 +232,7 @@ async def test_command_output_closes_web_egress_for_followup_round(
         attachments=None,
     )
     assert len(model.schemas) == 2
-    second_names = {
-        str((schema.get("function") or {}).get("name") or "")
-        for schema in model.schemas[1]
-    }
+    second_names = {str((schema.get("function") or {}).get("name") or "") for schema in model.schemas[1]}
     assert "engineer_command_status" in second_names
     assert "web_search" not in second_names
 
@@ -642,7 +638,7 @@ def test_command_status_normalizes_corrupt_ledger_failures() -> None:
     service = EngineerCommandService.__new__(EngineerCommandService)
     service.kernel = SimpleNamespace(
         resolve_job_reference=lambda *_args, **_kwargs: "2" * 32,
-        progress=lambda *_args, **_kwargs: (_ for _ in ()).throw(ValueError("private corruption"))
+        progress=lambda *_args, **_kwargs: (_ for _ in ()).throw(ValueError("private corruption")),
     )
     service.max_upload_bytes = 4 * 1024 * 1024
 

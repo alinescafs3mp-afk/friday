@@ -50156,11 +50156,7 @@ class AgentRuntime:
             **(user_metadata or {}),
             "tools_enabled": enable_tools is True,
             "interaction_mode": interaction_mode,
-            **(
-                {"telegram_update_id": trusted_telegram_update_id}
-                if trusted_telegram_update_id
-                else {}
-            ),
+            **({"telegram_update_id": trusted_telegram_update_id} if trusted_telegram_update_id else {}),
         }
         if not mark_request_effect_possible():
             raise RuntimeError("Request idempotency fence could not be committed before message storage")
@@ -57459,15 +57455,9 @@ class AgentRuntime:
                     response_files=response.get("file_clips"),
                 )
             )
-            engineer_command_publication_authorized = not (
-                engineer_command_publication_reauth_required
-            )
-            engineer_command_carrier_integrity_ok = not (
-                engineer_command_publication_reauth_required
-            )
-            engineer_command_fresh_authorized = not (
-                engineer_command_publication_reauth_required
-            )
+            engineer_command_publication_authorized = not (engineer_command_publication_reauth_required)
+            engineer_command_carrier_integrity_ok = not (engineer_command_publication_reauth_required)
+            engineer_command_fresh_authorized = not (engineer_command_publication_reauth_required)
             if engineer_command_publication_reauth_required:
                 expected_command_batch = context.engineer_command_generated_file_batch
                 observed_command_batch = None
@@ -57488,8 +57478,7 @@ class AgentRuntime:
                     self._fresh_engineer_actor(actor, "engineer.command.manage") is not None
                 )
                 engineer_command_publication_authorized = bool(
-                    engineer_command_carrier_integrity_ok
-                    and engineer_command_fresh_authorized
+                    engineer_command_carrier_integrity_ok and engineer_command_fresh_authorized
                 )
             publication_authorized = bool(
                 not publication_reauth_required
@@ -57545,8 +57534,7 @@ class AgentRuntime:
                 and not engineer_command_fresh_authorized
             )
             engineer_command_carrier_changed_before_publication = bool(
-                engineer_command_publication_reauth_required
-                and not engineer_command_carrier_integrity_ok
+                engineer_command_publication_reauth_required and not engineer_command_carrier_integrity_ok
             )
             if not publication_authorized:
                 LOGGER.warning("source-publication: authority changed before assistant commit")
@@ -62085,18 +62073,17 @@ class AgentRuntime:
             # Repeat the closed allowlist for direct adapters/tests which enter
             # this seam without the outer chat projection.
             tools[:] = _project_engineer_tool_schemas(tools, authority=turn_auth)
-            if re.fullmatch(
-                r"[0-9]{1,20}",
-                context.engineer_command_telegram_update_id,
-            ) is None:
+            if (
+                re.fullmatch(
+                    r"[0-9]{1,20}",
+                    context.engineer_command_telegram_update_id,
+                )
+                is None
+            ):
                 # Starting a command requires independently authenticated
                 # Telegram provenance.  Do not advertise a capability which
                 # this turn cannot carry across the execution boundary.
-                tools[:] = [
-                    tool
-                    for tool in tools
-                    if _engineer_tool_name(tool) != "engineer_command_run"
-                ]
+                tools[:] = [tool for tool in tools if _engineer_tool_name(tool) != "engineer_command_run"]
         else:
             # Direct callers do not get to bypass the mode-owned schema fence.
             tools[:] = [
@@ -63643,9 +63630,7 @@ class AgentRuntime:
                             ):
                                 carrier_allowed = False
                             else:
-                                call_arguments["_source_message_id"] = (
-                                    context.effect_root_user_message_id
-                                )
+                                call_arguments["_source_message_id"] = context.effect_root_user_message_id
                                 call_arguments["_telegram_update_id"] = (
                                     context.engineer_command_telegram_update_id
                                 )
@@ -64287,9 +64272,7 @@ class AgentRuntime:
                     and isinstance(tool_result.data, Mapping)
                 ):
                     current_job_error = str(tool_result.data.get("error_code") or "")
-                    current_job_refusal = _ENGINEER_CURRENT_JOB_STRUCTURAL_REFUSALS.get(
-                        current_job_error
-                    )
+                    current_job_refusal = _ENGINEER_CURRENT_JOB_STRUCTURAL_REFUSALS.get(current_job_error)
                     if current_job_refusal:
                         # Job selection is a durable code-owned decision.  Once
                         # it reports zero/ambiguous/uncertain, the model may not
@@ -64317,34 +64300,32 @@ class AgentRuntime:
                     attachment_kind = str(tool_result.attachment.get("kind") or "")
                     receipt_matches = bool(
                         isinstance(command_receipt, Mapping)
-                        and str(command_receipt.get("job_id") or "")
-                        == str(command_data.get("job_id") or "")
+                        and str(command_receipt.get("job_id") or "") == str(command_data.get("job_id") or "")
                         and str(command_receipt.get("status") or "") == command_status
                     )
-                    if command_status not in {
-                        "completed",
-                        "failed",
-                        "cancelled",
-                        "timeout",
-                    } or attachment_kind != "document" or not receipt_matches:
+                    if (
+                        command_status
+                        not in {
+                            "completed",
+                            "failed",
+                            "cancelled",
+                            "timeout",
+                        }
+                        or attachment_kind != "document"
+                        or not receipt_matches
+                    ):
                         # The attachment is an out-of-band privileged carrier;
                         # a malformed status envelope may still be shown as
                         # ordinary tool data, but its bytes never leave.
                         tool_result.attachment = None
                     else:
                         try:
-                            context.engineer_command_generated_file_batch = (
-                                exact_generated_file_batch(
-                                    [
-                                        *[
-                                            dict(item)
-                                            for item in file_clips
-                                            if isinstance(item, Mapping)
-                                        ],
-                                        dict(tool_result.attachment),
-                                    ],
-                                    max_bytes=self.settings.max_upload_bytes,
-                                )
+                            context.engineer_command_generated_file_batch = exact_generated_file_batch(
+                                [
+                                    *[dict(item) for item in file_clips if isinstance(item, Mapping)],
+                                    dict(tool_result.attachment),
+                                ],
+                                max_bytes=self.settings.max_upload_bytes,
                             )
                         except ExactGeneratedFilePublicationError:
                             tool_result.attachment = None

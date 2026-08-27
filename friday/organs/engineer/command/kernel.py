@@ -187,7 +187,9 @@ class CommandKernel:
         self._receipts: dict[str, CommandReceipt] = {}
         self._broker = SpawnBroker()
         self._finalizer = weakref.finalize(self, self._broker.close)
-        self._path_finalizer = weakref.finalize(self, _close_fds, tuple(root.dir_fd for root in self.path_roots))
+        self._path_finalizer = weakref.finalize(
+            self, _close_fds, tuple(root.dir_fd for root in self.path_roots)
+        )
         self._reconcile_stale()
 
     def close(self) -> None:
@@ -569,10 +571,7 @@ class CommandKernel:
         try:
             status = CommandStatus(str(job.get("status") or CommandStatus.UNKNOWN.value))
             isolation = IsolationProfile(
-                str(
-                    job.get("isolation_profile")
-                    or IsolationProfile.ISOLATED_WORKSPACE.value
-                )
+                str(job.get("isolation_profile") or IsolationProfile.ISOLATED_WORKSPACE.value)
             )
         except (TypeError, ValueError) as exc:
             raise CommandError("corrupt_job_state") from exc
@@ -732,8 +731,7 @@ class CommandKernel:
             raise CommandError("job_output_unpublishable")
         workspace = JobWorkspace(self.store.job_dir(job_id))
         generated = tuple(
-            (item, workspace.read_generated_file_verified(item))
-            for item in receipt.generated_files
+            (item, workspace.read_generated_file_verified(item)) for item in receipt.generated_files
         )
         # Repeat the private scope check after filesystem reads. Job ownership
         # is immutable, but a corrupt/replaced ledger must never be treated as
@@ -754,7 +752,9 @@ class CommandKernel:
         if conversation_id is not None and str(job.get("conversation_id") or "") != conversation_id:
             raise CommandError("conversation_mismatch")
 
-    def _reap(self, job_id: str, request: CommandRequest, grant, held, bwrap, spawned: SpawnedCommand) -> None:
+    def _reap(
+        self, job_id: str, request: CommandRequest, grant, held, bwrap, spawned: SpawnedCommand
+    ) -> None:
         error_code = ""
         status = CommandStatus.FAILED
         generated: tuple[GeneratedFile, ...] = ()
@@ -810,6 +810,7 @@ class CommandKernel:
             status=status,
             generated=generated,
         )
+
         def _fields(value: CommandReceipt) -> dict[str, object]:
             return _terminal_receipt_fields(
                 value,
@@ -958,7 +959,9 @@ class CommandKernel:
                     {"status": status.value, "error_code": "corrupt_evidence"},
                 )
             job = self.store.read_job(job_id)
-        isolation = IsolationProfile(str(job.get("isolation_profile") or IsolationProfile.ISOLATED_WORKSPACE.value))
+        isolation = IsolationProfile(
+            str(job.get("isolation_profile") or IsolationProfile.ISOLATED_WORKSPACE.value)
+        )
         receipt = CommandReceipt(
             job_id=job_id,
             status=status,

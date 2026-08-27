@@ -3479,9 +3479,7 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
         ):
             raw_update_id = body.get("telegram_update_id")
             authenticated_chat_id = str(getattr(request.state, "bridge_chat_id", "") or "")
-            authenticated_sender_id = str(
-                getattr(request.state, "bridge_external_user_id", "") or ""
-            )
+            authenticated_sender_id = str(getattr(request.state, "bridge_external_user_id", "") or "")
             if (
                 actor.source != "telegram-bridge"
                 or isinstance(raw_update_id, bool)

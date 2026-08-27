@@ -332,8 +332,18 @@ def build_command_output_archive(
             "truncated": truncated,
         }
         for archive_path, payload, digest, truncated in (
-            ("stdout.bin", checked_receipt.stdout, checked_receipt.stdout_sha256, checked_receipt.truncated_stdout),
-            ("stderr.bin", checked_receipt.stderr, checked_receipt.stderr_sha256, checked_receipt.truncated_stderr),
+            (
+                "stdout.bin",
+                checked_receipt.stdout,
+                checked_receipt.stdout_sha256,
+                checked_receipt.truncated_stdout,
+            ),
+            (
+                "stderr.bin",
+                checked_receipt.stderr,
+                checked_receipt.stderr_sha256,
+                checked_receipt.truncated_stderr,
+            ),
         )
         if payload
     ]

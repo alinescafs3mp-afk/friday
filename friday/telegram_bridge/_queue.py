@@ -632,9 +632,11 @@ class _UpdateInbox:
                WHERE notification_id=?""",
             (notification_id,),
         ).fetchone()
-        expected = "uncertain" if row is not None and (
-            str(row["outcome"]) == "uncertain" or outcome == "uncertain"
-        ) else outcome
+        expected = (
+            "uncertain"
+            if row is not None and (str(row["outcome"]) == "uncertain" or outcome == "uncertain")
+            else outcome
+        )
         if row is None or str(row["outcome"]) != expected:
             raise RuntimeError("notification delivery outcome changed")
 

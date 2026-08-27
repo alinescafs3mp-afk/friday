@@ -60,11 +60,7 @@ def _terminal_delivery_actor(state: Any, row: Mapping[str, Any]) -> Any:
             source="engineer-terminal-bridge",
             identity_id=chat_id,
         )
-        if (
-            not actor.is_owner
-            or actor.own_id != actor_id
-            or str(actor.identity_id or "") != chat_id
-        ):
+        if not actor.is_owner or actor.own_id != actor_id or str(actor.identity_id or "") != chat_id:
             raise TerminalDeliveryError("terminal_authorization_changed")
         for capability in ("engineer.use", "engineer.command.manage", "files.read"):
             state.auth_service.require(actor, capability)
@@ -166,9 +162,7 @@ async def notifications_pending(
     if invalid_terminal:
         retire_verified = getattr(storage, "discard_notifications_verified", None)
         if callable(retire_verified):
-            retired.extend(
-                retire_verified(invalid_terminal, reason="terminal_authorization_changed")
-            )
+            retired.extend(retire_verified(invalid_terminal, reason="terminal_authorization_changed"))
         else:
             storage.discard_notifications(
                 invalid_terminal,

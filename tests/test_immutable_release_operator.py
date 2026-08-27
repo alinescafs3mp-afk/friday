@@ -1952,11 +1952,7 @@ def test_engineer_command_enable_accepts_only_the_exact_runner_switch(
         ),
         (
             b"FRIDAY_ENGINEER_MODE_ENABLED=1\n",
-            (
-                b"FRIDAY_ENGINEER_MODE_ENABLED=1\n"
-                b"FRIDAY_PROFILE=changed\n"
-                b"FRIDAY_ENGINEER_COMMAND_ENABLED=1\n"
-            ),
+            (b"FRIDAY_ENGINEER_MODE_ENABLED=1\nFRIDAY_PROFILE=changed\nFRIDAY_ENGINEER_COMMAND_ENABLED=1\n"),
             "engineer_command_unrelated_environment_changed",
         ),
         (

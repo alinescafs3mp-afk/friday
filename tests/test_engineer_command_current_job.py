@@ -150,15 +150,18 @@ def test_cancel_selection_persists_one_idempotent_intent_before_return(tmp_path:
 
         assert _resolve(store, operation="cancel") == job_id
         assert store.read_job(job_id)["cancel_requested_at"] == 200.0
-        assert store.resolve_job_reference(
-            job_id,
-            actor_id=ACTOR,
-            tenant_id=TENANT,
-            conversation_id=CONVERSATION,
-            channel=CHANNEL,
-            operation="cancel",
-            requested_at=300.0,
-        ) == job_id
+        assert (
+            store.resolve_job_reference(
+                job_id,
+                actor_id=ACTOR,
+                tenant_id=TENANT,
+                conversation_id=CONVERSATION,
+                channel=CHANNEL,
+                operation="cancel",
+                requested_at=300.0,
+            )
+            == job_id
+        )
         assert store.read_job(job_id)["cancel_requested_at"] == 200.0
     finally:
         store.close()

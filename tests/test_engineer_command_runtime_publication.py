@@ -45,9 +45,7 @@ class _StatusThenFinishModel:
         has_tool_result = any(str(item.get("role") or "") == "tool" for item in messages)
         if has_tool_result:
             self.tool_result_messages.extend(
-                str(item.get("content") or "")
-                for item in messages
-                if str(item.get("role") or "") == "tool"
+                str(item.get("content") or "") for item in messages if str(item.get("role") or "") == "tool"
             )
         if "engineer_command_status" in names and not self.status_requested:
             self.status_requested = True
@@ -76,9 +74,7 @@ class _StatusThenFinishModel:
             }
 
         system_text = "\n".join(
-            str(item.get("content") or "")
-            for item in messages
-            if str(item.get("role") or "") == "system"
+            str(item.get("content") or "") for item in messages if str(item.get("role") or "") == "system"
         )
         if "Ответь одним словом: РАЗГОВОР или ЗАПРОС." in system_text:
             content = "ЗАПРОС"

@@ -177,9 +177,7 @@ def path_root_is_sensitive(path: str) -> bool:
     if normalized == "/":
         return True
     return any(
-        normalized == root
-        or normalized.startswith(root + "/")
-        or root.startswith(normalized + "/")
+        normalized == root or normalized.startswith(root + "/") or root.startswith(normalized + "/")
         for root in SENSITIVE_SANDBOX_PATH_ROOTS
     )
 
