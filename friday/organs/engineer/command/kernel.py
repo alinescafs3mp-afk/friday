@@ -41,6 +41,8 @@ from .spawn_helper import SpawnBroker
 from .store import CommandJobStore, decode_json_list
 from .workspace import JobWorkspace
 
+_RECEIPT_CACHE_MAX = 64
+
 
 def _close_fds(fds: tuple[int, ...]) -> None:
     for fd in fds:
@@ -153,7 +155,9 @@ def _terminal_receipt_fields(
         "signal": receipt.signal,
         "status": receipt.status.value,
         "stderr_sha256": receipt.stderr_sha256,
+        "stderr_bytes": len(receipt.stderr),
         "stdout_sha256": receipt.stdout_sha256,
+        "stdout_bytes": len(receipt.stdout),
         "timed_out": 1 if receipt.timed_out else 0,
         "truncated_stderr": 1 if receipt.truncated_stderr else 0,
         "truncated_stdout": 1 if receipt.truncated_stdout else 0,
@@ -191,6 +195,12 @@ class CommandKernel:
             self, _close_fds, tuple(root.dir_fd for root in self.path_roots)
         )
         self._reconcile_stale()
+
+    def _cache_receipt_locked(self, job_id: str, receipt: CommandReceipt) -> None:
+        self._receipts.pop(job_id, None)
+        self._receipts[job_id] = receipt
+        while len(self._receipts) > _RECEIPT_CACHE_MAX:
+            self._receipts.pop(next(iter(self._receipts)))
 
     def close(self) -> None:
         with self._lock:
@@ -406,7 +416,8 @@ class CommandKernel:
                 )
                 with self.store.transaction():
                     self.store.update_job(job_id, terminal_fields)
-                self._receipts[job_id] = receipt
+                with self._lock:
+                    self._cache_receipt_locked(job_id, receipt)
                 raise
             try:
                 with self.store.transaction():
@@ -481,7 +492,8 @@ class CommandKernel:
                     error_code="unknown_after_spawn",
                     status=CommandStatus.UNKNOWN,
                 )
-                self._receipts[job_id] = receipt
+                with self._lock:
+                    self._cache_receipt_locked(job_id, receipt)
                 raise CommandError("unknown_after_spawn") from exc
             held = None
             bwrap = None
@@ -602,9 +614,22 @@ class CommandKernel:
         ):
             raise CommandError("corrupt_job_state")
         elapsed = finished_value - started
-        workspace = JobWorkspace(self.store.job_dir(job_id))
-        stdout_bytes = workspace.stdout_path.stat().st_size if workspace.stdout_path.exists() else 0
-        stderr_bytes = workspace.stderr_path.stat().st_size if workspace.stderr_path.exists() else 0
+        if job.get("workspace_retired_at") is not None:
+            try:
+                stdout_bytes = int(job.get("stdout_bytes") or 0)
+                stderr_bytes = int(job.get("stderr_bytes") or 0)
+            except (TypeError, ValueError, OverflowError) as exc:
+                raise CommandError("corrupt_job_state") from exc
+            if stdout_bytes < 0 or stderr_bytes < 0:
+                raise CommandError("corrupt_job_state")
+        else:
+            workspace = JobWorkspace(self.store.job_dir(job_id))
+            stdout_bytes = (
+                workspace.stdout_path.stat().st_size if workspace.stdout_path.exists() else 0
+            )
+            stderr_bytes = (
+                workspace.stderr_path.stat().st_size if workspace.stderr_path.exists() else 0
+            )
         return CommandProgress(
             job_id=job_id,
             status=status,
@@ -714,6 +739,9 @@ class CommandKernel:
     ) -> tuple[CommandReceipt, tuple[tuple[GeneratedFile, bytes], ...]]:
         """Freeze one publishable receipt and its revalidated sealed bytes."""
 
+        if self.store.read_job(job_id).get("workspace_retired_at") is not None:
+            raise CommandError("job_output_retired")
+
         receipt, receipt_mac_version = self.terminal_receipt(
             job_id,
             actor_id=actor_id,
@@ -738,6 +766,55 @@ class CommandKernel:
         # an already-authorized binary carrier.
         self._require_actor(job_id, actor_id, conversation_id=conversation_id)
         return receipt, generated
+
+    def output_retired(
+        self,
+        job_id: str,
+        *,
+        actor_id: str,
+        conversation_id: str,
+    ) -> bool:
+        """Return the scoped durable output-retention state without opening paths."""
+
+        self._require_actor(job_id, actor_id, conversation_id=conversation_id)
+        return self.store.read_job(job_id).get("workspace_retired_at") is not None
+
+    def terminal_result_for_retention(
+        self,
+        job_id: str,
+        *,
+        actor_id: str,
+        conversation_id: str,
+    ) -> tuple[CommandReceipt, tuple[tuple[GeneratedFile, bytes], ...]]:
+        """Force a disk-backed terminal verification, bypassing any full-byte cache."""
+
+        job = self.store.read_job(job_id)
+        if job.get("workspace_retired_at") is not None:
+            raise CommandError("job_output_retired")
+        with self._lock:
+            worker = self._threads.get(job_id)
+            if job_id in self._live or worker is not None and worker.is_alive():
+                raise CommandError("job_running")
+            self._receipts.pop(job_id, None)
+        return self.terminal_result(
+            job_id,
+            actor_id=actor_id,
+            conversation_id=conversation_id,
+            timeout_sec=0.1,
+        )
+
+    def retire_workspace(self, job_id: str) -> None:
+        """Resume one marker-authorized nofollow workspace retirement."""
+
+        job = self.store.read_job(job_id)
+        if job.get("workspace_retired_at") is None:
+            raise CommandError("retention_marker_missing")
+        with self._lock:
+            worker = self._threads.get(job_id)
+            if job_id in self._live or worker is not None and worker.is_alive():
+                raise CommandError("job_running")
+            self._receipts.pop(job_id, None)
+        JobWorkspace(self.store.job_dir(job_id)).retire()
 
     def _require_actor(
         self,
@@ -841,7 +918,7 @@ class CommandKernel:
                 self.store.update_job(job_id, _fields(receipt))
         finally:
             with self._lock:
-                self._receipts[job_id] = receipt
+                self._cache_receipt_locked(job_id, receipt)
                 self._live.pop(job_id, None)
                 self._threads.pop(job_id, None)
 
@@ -927,38 +1004,42 @@ class CommandKernel:
                     {"status": status.value, "error_code": "unknown_after_restart"},
                 )
             job = self.store.read_job(job_id)
-        workspace = JobWorkspace(self.store.job_dir(job_id))
         stdout_sha = str(job.get("stdout_sha256") or "")
         stderr_sha = str(job.get("stderr_sha256") or "")
-        try:
-            stdout = (
-                workspace.read_evidence_verified(
-                    "stdout.bin",
-                    expected_sha256=stdout_sha,
-                    cap=int(job.get("max_stdout_bytes") or MAX_STDOUT_BYTES),
-                )
-                if stdout_sha
-                else b""
-            )
-            stderr = (
-                workspace.read_evidence_verified(
-                    "stderr.bin",
-                    expected_sha256=stderr_sha,
-                    cap=int(job.get("max_stderr_bytes") or MAX_STDERR_BYTES),
-                )
-                if stderr_sha
-                else b""
-            )
-        except CommandError:
-            status = CommandStatus.UNKNOWN
+        if job.get("workspace_retired_at") is not None:
             stdout = b""
             stderr = b""
-            with self.store.transaction():
-                self.store.update_job(
-                    job_id,
-                    {"status": status.value, "error_code": "corrupt_evidence"},
+        else:
+            workspace = JobWorkspace(self.store.job_dir(job_id))
+            try:
+                stdout = (
+                    workspace.read_evidence_verified(
+                        "stdout.bin",
+                        expected_sha256=stdout_sha,
+                        cap=int(job.get("max_stdout_bytes") or MAX_STDOUT_BYTES),
+                    )
+                    if stdout_sha
+                    else b""
                 )
-            job = self.store.read_job(job_id)
+                stderr = (
+                    workspace.read_evidence_verified(
+                        "stderr.bin",
+                        expected_sha256=stderr_sha,
+                        cap=int(job.get("max_stderr_bytes") or MAX_STDERR_BYTES),
+                    )
+                    if stderr_sha
+                    else b""
+                )
+            except CommandError:
+                status = CommandStatus.UNKNOWN
+                stdout = b""
+                stderr = b""
+                with self.store.transaction():
+                    self.store.update_job(
+                        job_id,
+                        {"status": status.value, "error_code": "corrupt_evidence"},
+                    )
+                job = self.store.read_job(job_id)
         isolation = IsolationProfile(
             str(job.get("isolation_profile") or IsolationProfile.ISOLATED_WORKSPACE.value)
         )

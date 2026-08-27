@@ -66,6 +66,133 @@ class JobWorkspace:
         atomic_write(self.stdout_path, b"")
         atomic_write(self.stderr_path, b"")
 
+    def retire(self) -> None:
+        """Idempotently remove one already-authorized workspace without following links."""
+
+        job_id = self.job_dir.name
+        if (
+            not job_id
+            or len(job_id) > 64
+            or job_id.startswith(".")
+            or "/" in job_id
+            or "\x00" in job_id
+        ):
+            raise CommandError("invalid_job_id")
+        retired_name = f".retired-{job_id}"
+        parent_fd = open_dir_nofollow(self.job_dir.parent)
+        try:
+            live = self._entry_stat(parent_fd, job_id)
+            retired = self._entry_stat(parent_fd, retired_name)
+            if live is not None and retired is not None:
+                raise CommandError("workspace_retirement_ambiguous")
+            if live is not None:
+                if not stat.S_ISDIR(live.st_mode):
+                    raise CommandError("workspace_retirement_refused")
+                try:
+                    os.rename(job_id, retired_name, src_dir_fd=parent_fd, dst_dir_fd=parent_fd)
+                    os.fsync(parent_fd)
+                except OSError as exc:
+                    raise CommandError("workspace_retirement_failed") from exc
+                retired = self._entry_stat(parent_fd, retired_name)
+            if retired is None:
+                return
+            if not stat.S_ISDIR(retired.st_mode):
+                raise CommandError("workspace_retirement_refused")
+            flags = (
+                os.O_RDONLY
+                | os.O_DIRECTORY
+                | getattr(os, "O_CLOEXEC", 0)
+                | getattr(os, "O_NOFOLLOW", 0)
+                | getattr(os, "O_NONBLOCK", 0)
+            )
+            try:
+                retired_fd = os.open(retired_name, flags, dir_fd=parent_fd)
+            except OSError as exc:
+                raise CommandError("workspace_retirement_failed") from exc
+            try:
+                opened = os.fstat(retired_fd)
+                if not self._same_file_identity(retired, opened):
+                    raise CommandError("workspace_retirement_changed")
+                self._retire_directory_contents(retired_fd, depth=0, remaining=[10_000])
+            finally:
+                os.close(retired_fd)
+            linked = self._entry_stat(parent_fd, retired_name)
+            if linked is None or not self._same_directory_identity(retired, linked):
+                raise CommandError("workspace_retirement_changed")
+            try:
+                os.rmdir(retired_name, dir_fd=parent_fd)
+                os.fsync(parent_fd)
+            except OSError as exc:
+                raise CommandError("workspace_retirement_failed") from exc
+        finally:
+            os.close(parent_fd)
+
+    @staticmethod
+    def _entry_stat(parent_fd: int, name: str) -> os.stat_result | None:
+        try:
+            return os.stat(name, dir_fd=parent_fd, follow_symlinks=False)
+        except FileNotFoundError:
+            return None
+        except OSError as exc:
+            raise CommandError("workspace_retirement_failed") from exc
+
+    @classmethod
+    def _retire_directory_contents(cls, dir_fd: int, *, depth: int, remaining: list[int]) -> None:
+        if depth > 64:
+            raise CommandError("workspace_retirement_refused")
+        flags = (
+            os.O_RDONLY
+            | os.O_DIRECTORY
+            | getattr(os, "O_CLOEXEC", 0)
+            | getattr(os, "O_NOFOLLOW", 0)
+            | getattr(os, "O_NONBLOCK", 0)
+        )
+        for name in _listdir_fd(dir_fd):
+            if remaining[0] <= 0:
+                raise CommandError("workspace_retirement_incomplete")
+            remaining[0] -= 1
+            if not name or name in {".", ".."} or "/" in name or "\x00" in name:
+                raise CommandError("workspace_retirement_refused")
+            before = cls._entry_stat(dir_fd, name)
+            if before is None:
+                raise CommandError("workspace_retirement_changed")
+            if stat.S_ISDIR(before.st_mode):
+                try:
+                    child_fd = os.open(name, flags, dir_fd=dir_fd)
+                except OSError as exc:
+                    raise CommandError("workspace_retirement_failed") from exc
+                try:
+                    opened = os.fstat(child_fd)
+                    if not cls._same_file_identity(before, opened):
+                        raise CommandError("workspace_retirement_changed")
+                    cls._retire_directory_contents(
+                        child_fd,
+                        depth=depth + 1,
+                        remaining=remaining,
+                    )
+                finally:
+                    os.close(child_fd)
+                linked = cls._entry_stat(dir_fd, name)
+                if linked is None or not cls._same_directory_identity(before, linked):
+                    raise CommandError("workspace_retirement_changed")
+                try:
+                    os.rmdir(name, dir_fd=dir_fd)
+                except OSError as exc:
+                    raise CommandError("workspace_retirement_failed") from exc
+            elif stat.S_ISREG(before.st_mode):
+                if before.st_nlink != 1:
+                    raise CommandError("workspace_retirement_refused")
+                try:
+                    os.unlink(name, dir_fd=dir_fd)
+                except OSError as exc:
+                    raise CommandError("workspace_retirement_failed") from exc
+            else:
+                raise CommandError("workspace_retirement_refused")
+        try:
+            os.fsync(dir_fd)
+        except OSError as exc:
+            raise CommandError("workspace_retirement_failed") from exc
+
     def env(self, *, path_value: str, isolated: bool) -> dict[str, str]:
         home = f"{SANDBOX_JOB}/workspace" if isolated else str(self.home)
         tmp = f"{SANDBOX_JOB}/tmp" if isolated else str(self.tmp)
@@ -279,6 +406,22 @@ class JobWorkspace:
             after.st_mtime_ns,
             after.st_ctime_ns,
             after.st_nlink,
+        )
+
+    @staticmethod
+    def _same_directory_identity(before: os.stat_result, after: os.stat_result) -> bool:
+        return (
+            before.st_dev,
+            before.st_ino,
+            before.st_mode,
+            before.st_uid,
+            before.st_gid,
+        ) == (
+            after.st_dev,
+            after.st_ino,
+            after.st_mode,
+            after.st_uid,
+            after.st_gid,
         )
 
     def open_evidence(self, name: str) -> int:

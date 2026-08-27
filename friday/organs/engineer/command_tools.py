@@ -13,6 +13,7 @@ import threading
 import time
 from collections.abc import Mapping
 from contextlib import suppress
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -41,8 +42,10 @@ from .command.publication import (
 from .publication import ExactGeneratedFilePublicationError, exact_generated_file_batch
 from .terminal_delivery import (
     TerminalDeliveryError,
+    parse_terminal_envelope,
     stage_terminal_archive,
     terminal_notification_status,
+    verify_sent_terminal_notification_artifact,
 )
 
 _MESSAGE_ID = re.compile(r"msg_[0-9a-f]{16}")
@@ -65,6 +68,8 @@ _UNCERTAIN_SUBMIT_ERRORS = frozenset(
     }
 )
 _DISPLAY_BYTES = 64 * 1024
+_WORKSPACE_RETENTION_SEC = 30 * 24 * 60 * 60
+_WORKSPACE_RETENTION_BATCH_MAX = 20
 
 
 def _source_update_id(row: Mapping[str, Any]) -> str:
@@ -152,6 +157,7 @@ class EngineerCommandService:
             | None
         ) = None
         self._publication_lock = threading.Lock()
+        self._retention_lock = threading.Lock()
 
     def _archive_for_receipt(
         self,
@@ -347,6 +353,16 @@ class EngineerCommandService:
             )
             payload = {"ok": True, **progress.to_public_payload()}
             if progress.status in _PUBLISHABLE_TERMINAL:
+                retired_probe = getattr(self.kernel, "output_retired", None)
+                retired = bool(
+                    retired_probe(
+                        resolved_job_id,
+                        actor_id=actor.own_id,
+                        conversation_id=conversation_id,
+                    )
+                    if callable(retired_probe)
+                    else False
+                )
                 receipt, receipt_mac_version = self.kernel.terminal_receipt(
                     resolved_job_id,
                     actor_id=actor.own_id,
@@ -379,6 +395,12 @@ class EngineerCommandService:
                     payload["artifact_delivery"] = {
                         "available": False,
                         "error_code": "legacy_output_receipt_unpublishable",
+                    }
+                elif retired:
+                    payload["output_retired"] = True
+                    payload["artifact_delivery"] = {
+                        "available": False,
+                        "error_code": "job_output_retired",
                     }
                 elif receipt.generated_files:
                     try:
@@ -602,6 +624,209 @@ class EngineerCommandService:
             return {"staged": staged, "reconciled": reconciled, "failed": failed}
         finally:
             self._publication_lock.release()
+
+    @staticmethod
+    def _sent_at_epoch(value: object) -> float:
+        if not isinstance(value, str) or not value:
+            raise TerminalDeliveryError("terminal_sent_time_invalid")
+        try:
+            moment = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        except ValueError as exc:
+            raise TerminalDeliveryError("terminal_sent_time_invalid") from exc
+        if moment.tzinfo is None:
+            raise TerminalDeliveryError("terminal_sent_time_invalid")
+        return moment.astimezone(UTC).timestamp()
+
+    def _exact_sent_retention_row(
+        self,
+        job: Mapping[str, Any],
+        *,
+        cutoff: float,
+        missing_after_marker: bool,
+    ) -> dict[str, Any] | None:
+        notification_id = str(job.get("notification_id") or "")
+        row = self.storage.execute(
+            """SELECT n.id,n.user_id,n.chat_id,n.kind,n.dedup_key,n.body,n.status,n.sent_at
+                  FROM outbound_notifications AS n WHERE n.id=?""",
+            (notification_id,),
+        ).fetchone()
+        if row is None:
+            if missing_after_marker:
+                return None
+            raise TerminalDeliveryError("terminal_notification_missing")
+        exact = dict(row)
+        body = str(exact.get("body") or "")
+        try:
+            body_sha256 = hashlib.sha256(body.encode("ascii")).hexdigest()
+        except UnicodeEncodeError as exc:
+            raise TerminalDeliveryError("terminal_envelope_invalid") from exc
+        envelope = parse_terminal_envelope(body)
+        if (
+            exact.get("status") != "sent"
+            or exact.get("kind") != "engineer_command_terminal"
+            or str(exact.get("id") or "") != notification_id
+            or str(exact.get("user_id") or "") != str(job.get("actor_id") or "")
+            or str(exact.get("chat_id") or "") != str(job.get("delivery_chat_id") or "")
+            or str(exact.get("dedup_key") or "") != str(job.get("publication_dedup_key") or "")
+            or not hmac.compare_digest(
+                body_sha256,
+                str(job.get("envelope_sha256") or ""),
+            )
+            or envelope.get("notification_id") != notification_id
+            or envelope.get("job_id") != str(job.get("job_id") or "")
+            or envelope.get("actor_id") != str(job.get("actor_id") or "")
+            or envelope.get("tenant_id") != str(job.get("tenant_id") or "")
+            or envelope.get("conversation_id") != str(job.get("conversation_id") or "")
+            or envelope.get("source_message_id") != str(job.get("source_row_id") or "")
+            or envelope.get("delivery_chat_id") != str(job.get("delivery_chat_id") or "")
+            or envelope.get("status") != str(job.get("status") or "")
+            or envelope.get("receipt_mac") != str(job.get("receipt_mac") or "")
+            or self._sent_at_epoch(exact.get("sent_at")) > float(cutoff)
+        ):
+            raise TerminalDeliveryError("terminal_retention_identity_changed")
+        return exact
+
+    def _delete_exact_sent_notification(self, row: Mapping[str, Any]) -> None:
+        with self.storage.transaction() as conn:
+            current = conn.execute(
+                """SELECT n.id,n.user_id,n.chat_id,n.kind,n.dedup_key,n.body,n.status,n.sent_at
+                      FROM outbound_notifications AS n WHERE n.id=?""",
+                (str(row.get("id") or ""),),
+            ).fetchone()
+            if current is None or dict(current) != dict(row):
+                raise TerminalDeliveryError("terminal_notification_changed")
+            cursor = conn.execute(
+                """DELETE FROM outbound_notifications
+                    WHERE id=? AND user_id=? AND chat_id=?
+                      AND kind='engineer_command_terminal' AND status='sent'
+                      AND dedup_key=? AND body=? AND sent_at IS ?""",
+                (
+                    str(row.get("id") or ""),
+                    str(row.get("user_id") or ""),
+                    str(row.get("chat_id") or ""),
+                    str(row.get("dedup_key") or ""),
+                    str(row.get("body") or ""),
+                    row.get("sent_at"),
+                ),
+            )
+            if cursor.rowcount != 1:
+                raise TerminalDeliveryError("terminal_notification_changed")
+
+    def _evict_archive_cache(self, job_id: str) -> None:
+        with self._archive_lock:
+            cached = self._archive_cache
+            if cached is not None and cached[0][0] == job_id:
+                self._archive_cache = None
+
+    def retain_terminal_jobs(
+        self,
+        *,
+        now: float | None = None,
+        limit: int = _WORKSPACE_RETENTION_BATCH_MAX,
+    ) -> dict[str, int]:
+        """Retire only verified old sent workspaces; preserve canonical delivered files."""
+
+        lock = getattr(self, "_retention_lock", None)
+        if lock is None:
+            lock = threading.Lock()
+            self._retention_lock = lock
+        if not lock.acquire(blocking=False):
+            return {"retired": 0, "failed": 0, "ephemera": 0}
+        moment = time.time() if now is None else float(now)
+        cutoff = moment - _WORKSPACE_RETENTION_SEC
+        retired_count = 0
+        failed = 0
+        try:
+            ephemera = self.kernel.store.prune_expired_ephemera(
+                now=int(moment),
+                limit=100,
+            )
+            candidates = self.kernel.store.list_workspace_retention_candidates(
+                cutoff=cutoff,
+                limit=max(1, min(int(limit), _WORKSPACE_RETENTION_BATCH_MAX)),
+            )
+            for job in candidates:
+                job_id = str(job.get("job_id") or "")
+                try:
+                    marker = job.get("workspace_retired_at")
+                    row = self._exact_sent_retention_row(
+                        job,
+                        cutoff=cutoff,
+                        missing_after_marker=marker is not None,
+                    )
+                    if marker is None:
+                        if row is None:
+                            raise TerminalDeliveryError("terminal_notification_missing")
+                        stored = verify_sent_terminal_notification_artifact(
+                            self.storage,
+                            self.files_root,
+                            row,
+                            tenant_id=str(job.get("tenant_id") or ""),
+                            actor_id=str(job.get("actor_id") or ""),
+                            max_bytes=self.max_upload_bytes,
+                        )
+                        receipt, outputs = self.kernel.terminal_result_for_retention(
+                            job_id,
+                            actor_id=str(job.get("actor_id") or ""),
+                            conversation_id=str(job.get("conversation_id") or ""),
+                        )
+                        if (
+                            receipt.status.value != str(job.get("status") or "")
+                            or receipt.receipt_mac != str(job.get("receipt_mac") or "")
+                        ):
+                            raise TerminalDeliveryError("terminal_retention_identity_changed")
+                        archive = build_command_output_archive(
+                            receipt,
+                            outputs,
+                            max_archive_bytes=self.max_upload_bytes,
+                        )
+                        if (
+                            archive.filename != stored.filename
+                            or archive.mime_type != stored.mime_type
+                            or len(archive.payload) != len(stored.content)
+                            or not hmac.compare_digest(
+                                archive.sha256,
+                                hashlib.sha256(stored.content).hexdigest(),
+                            )
+                        ):
+                            raise TerminalDeliveryError("terminal_archive_identity_changed")
+                        self.kernel.store.mark_workspace_retirement(
+                            job_id,
+                            notification_id=str(job.get("notification_id") or ""),
+                            dedup_key=str(job.get("publication_dedup_key") or ""),
+                            envelope_sha256=str(job.get("envelope_sha256") or ""),
+                            cutoff=cutoff,
+                            retired_at=moment,
+                            stdout_bytes=len(receipt.stdout),
+                            stderr_bytes=len(receipt.stderr),
+                        )
+                    self._evict_archive_cache(job_id)
+                    self.kernel.retire_workspace(job_id)
+                    if row is not None:
+                        self._delete_exact_sent_notification(row)
+                    self.kernel.store.finish_workspace_retirement(
+                        job_id,
+                        notification_id=str(job.get("notification_id") or ""),
+                        dedup_key=str(job.get("publication_dedup_key") or ""),
+                        envelope_sha256=str(job.get("envelope_sha256") or ""),
+                        retired_at=moment,
+                    )
+                    retired_count += 1
+                except (
+                    CommandError,
+                    CommandOutputPublicationError,
+                    TerminalDeliveryError,
+                    KeyError,
+                    OSError,
+                    TypeError,
+                    ValueError,
+                    OverflowError,
+                    sqlite3.Error,
+                ):
+                    failed += 1
+            return {"retired": retired_count, "failed": failed, "ephemera": ephemera}
+        finally:
+            lock.release()
 
 
 def _refusal(code: str, *, effect_boundary_crossed: bool = False) -> dict[str, Any]:

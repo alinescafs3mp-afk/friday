@@ -27,6 +27,8 @@ _UNRESOLVED_JOB_STATUSES = frozenset({"planned", "admitted", "running", "unknown
 _CANCELLABLE_JOB_STATUSES = frozenset({"planned", "admitted", "running"})
 _PUBLICATION_STATES = frozenset({"pending", "staged", "sent", "uncertain", "blocked"})
 _PUBLICATION_MAX_ATTEMPTS = 5
+_RETENTION_BATCH_MAX = 20
+_EPHEMERAL_RETENTION_BATCH_MAX = 100
 
 
 def _flock(fd: int, op: int) -> None:
@@ -179,9 +181,12 @@ class CommandJobStore:
                 finished_at REAL,
                 stdout_sha256 TEXT,
                 stderr_sha256 TEXT,
+                stdout_bytes INTEGER NOT NULL DEFAULT 0,
+                stderr_bytes INTEGER NOT NULL DEFAULT 0,
                 generated_files_json TEXT,
                 executable_json TEXT,
                 receipt_mac TEXT,
+                workspace_retired_at REAL,
                 created_at REAL NOT NULL,
                 UNIQUE(actor_id, idempotency_key)
             );
@@ -267,6 +272,24 @@ class CommandJobStore:
                 raise
             else:
                 self._conn.execute("COMMIT")
+        columns = {str(row[1]) for row in self._conn.execute("PRAGMA table_info(jobs)").fetchall()}
+        retention_columns = (
+            ("stdout_bytes", "INTEGER NOT NULL DEFAULT 0"),
+            ("stderr_bytes", "INTEGER NOT NULL DEFAULT 0"),
+            ("workspace_retired_at", "REAL"),
+        )
+        missing_retention = [item for item in retention_columns if item[0] not in columns]
+        if missing_retention:
+            self._conn.execute("BEGIN IMMEDIATE")
+            try:
+                for name, declaration in missing_retention:
+                    self._conn.execute(f"ALTER TABLE jobs ADD COLUMN {name} {declaration}")
+            except Exception:
+                self._conn.execute("ROLLBACK")
+                raise
+            else:
+                self._conn.execute("COMMIT")
+        columns = {str(row[1]) for row in self._conn.execute("PRAGMA table_info(jobs)").fetchall()}
         if {
             "actor_id",
             "tenant_id",
@@ -290,6 +313,7 @@ class CommandJobStore:
                     envelope_sha256 TEXT NOT NULL DEFAULT '',
                     attempts INTEGER NOT NULL DEFAULT 0 CHECK(attempts >= 0),
                     last_error_code TEXT NOT NULL DEFAULT '',
+                    carrier_retired_at REAL,
                     created_at REAL NOT NULL,
                     updated_at REAL NOT NULL
                 );
@@ -297,6 +321,16 @@ class CommandJobStore:
                     ON command_job_publications(state, updated_at, job_id);
                 """
             )
+            publication_columns = {
+                str(row[1])
+                for row in self._conn.execute(
+                    "PRAGMA table_info(command_job_publications)"
+                ).fetchall()
+            }
+            if "carrier_retired_at" not in publication_columns:
+                self._conn.execute(
+                    "ALTER TABLE command_job_publications ADD COLUMN carrier_retired_at REAL"
+                )
         # Pending confirmations created by a pre-ledger build cannot prove that
         # their immutable ingress row/update was minted only once. Invalidate
         # them on upgrade instead of silently widening authority.
@@ -522,6 +556,168 @@ class CommandJobStore:
                 (max(1, min(int(limit), 500)),),
             ).fetchall()
             return [{str(key): value for key, value in dict(row).items()} for row in rows]
+
+    def list_workspace_retention_candidates(
+        self,
+        *,
+        cutoff: float,
+        limit: int = _RETENTION_BATCH_MAX,
+    ) -> list[dict[str, Any]]:
+        """Return only old, proven-sent terminal workspaces in a hard-bounded batch."""
+
+        bounded = max(1, min(int(limit), _RETENTION_BATCH_MAX))
+        with self._local:
+            rows = self._conn.execute(
+                """SELECT jobs.*, publication.delivery_chat_id,
+                          publication.state AS publication_state,
+                          publication.notification_id,
+                          publication.dedup_key AS publication_dedup_key,
+                          publication.envelope_sha256,
+                          publication.updated_at AS publication_updated_at
+                     FROM command_job_publications AS publication
+                     JOIN jobs ON jobs.job_id=publication.job_id
+                    WHERE publication.state='sent'
+                      AND publication.carrier_retired_at IS NULL
+                      AND publication.updated_at<=?
+                      AND jobs.status IN ('completed','failed','cancelled','timeout')
+                      AND jobs.cleanup_pending=0
+                    ORDER BY publication.updated_at ASC, jobs.job_id ASC
+                    LIMIT ?""",
+                (float(cutoff), bounded),
+            ).fetchall()
+            return [{str(key): value for key, value in dict(row).items()} for row in rows]
+
+    def mark_workspace_retirement(
+        self,
+        job_id: str,
+        *,
+        notification_id: str,
+        dedup_key: str,
+        envelope_sha256: str,
+        cutoff: float,
+        retired_at: float,
+        stdout_bytes: int,
+        stderr_bytes: int,
+    ) -> dict[str, Any]:
+        """Persist the irreversible cleanup authority before touching the workspace."""
+
+        if (
+            not isinstance(stdout_bytes, int)
+            or isinstance(stdout_bytes, bool)
+            or stdout_bytes < 0
+            or not isinstance(stderr_bytes, int)
+            or isinstance(stderr_bytes, bool)
+            or stderr_bytes < 0
+        ):
+            raise CommandError("retention_identity_invalid")
+        with self.transaction():
+            row = self._conn.execute(
+                """SELECT jobs.workspace_retired_at,jobs.stdout_bytes,jobs.stderr_bytes
+                     FROM jobs
+                     JOIN command_job_publications AS publication
+                       ON publication.job_id=jobs.job_id
+                    WHERE jobs.job_id=?
+                      AND jobs.status IN ('completed','failed','cancelled','timeout')
+                      AND jobs.cleanup_pending=0
+                      AND publication.state='sent'
+                      AND publication.carrier_retired_at IS NULL
+                      AND publication.updated_at<=?
+                      AND publication.notification_id=?
+                      AND publication.dedup_key=?
+                      AND publication.envelope_sha256=?""",
+                (
+                    str(job_id),
+                    float(cutoff),
+                    str(notification_id),
+                    str(dedup_key),
+                    str(envelope_sha256),
+                ),
+            ).fetchone()
+            if row is None:
+                raise CommandError("retention_authority_changed")
+            if row["workspace_retired_at"] is None:
+                cursor = self._conn.execute(
+                    """UPDATE jobs
+                          SET workspace_retired_at=?,stdout_bytes=?,stderr_bytes=?
+                        WHERE job_id=? AND workspace_retired_at IS NULL""",
+                    (
+                        float(retired_at),
+                        int(stdout_bytes),
+                        int(stderr_bytes),
+                        str(job_id),
+                    ),
+                )
+                if cursor.rowcount != 1:
+                    raise CommandError("retention_authority_changed")
+            elif (
+                int(row["stdout_bytes"] or 0) != stdout_bytes
+                or int(row["stderr_bytes"] or 0) != stderr_bytes
+            ):
+                raise CommandError("retention_identity_changed")
+        return self.read_job(job_id)
+
+    def finish_workspace_retirement(
+        self,
+        job_id: str,
+        *,
+        notification_id: str,
+        dedup_key: str,
+        envelope_sha256: str,
+        retired_at: float,
+    ) -> None:
+        """Close the saga while preserving its publication/idempotency tombstone."""
+
+        with self.transaction():
+            cursor = self._conn.execute(
+                """UPDATE command_job_publications
+                      SET carrier_retired_at=COALESCE(carrier_retired_at, ?)
+                    WHERE job_id=? AND state='sent' AND carrier_retired_at IS NULL
+                      AND notification_id=? AND dedup_key=? AND envelope_sha256=?
+                      AND EXISTS (
+                          SELECT 1 FROM jobs WHERE jobs.job_id=command_job_publications.job_id
+                            AND jobs.workspace_retired_at IS NOT NULL
+                      )""",
+                (
+                    float(retired_at),
+                    str(job_id),
+                    str(notification_id),
+                    str(dedup_key),
+                    str(envelope_sha256),
+                ),
+            )
+            if cursor.rowcount == 1:
+                return
+            row = self._conn.execute(
+                """SELECT carrier_retired_at FROM command_job_publications
+                    WHERE job_id=? AND state='sent' AND notification_id=?
+                      AND dedup_key=? AND envelope_sha256=?""",
+                (str(job_id), str(notification_id), str(dedup_key), str(envelope_sha256)),
+            ).fetchone()
+            if row is None or row["carrier_retired_at"] is None:
+                raise CommandError("retention_authority_changed")
+
+    def prune_expired_ephemera(self, *, now: int, limit: int = 100) -> int:
+        """Bound short-lived authority rows; immutable source replay tombstones remain."""
+
+        bounded = max(1, min(int(limit), _EPHEMERAL_RETENTION_BATCH_MAX))
+        with self.transaction():
+            confirmations = self._conn.execute(
+                """DELETE FROM confirmation_events
+                    WHERE handle IN (
+                        SELECT handle FROM confirmation_events
+                         WHERE exp<=? ORDER BY exp,handle LIMIT ?
+                    )""",
+                (int(now), bounded),
+            ).rowcount
+            nonces = self._conn.execute(
+                """DELETE FROM grant_nonces
+                    WHERE nonce IN (
+                        SELECT nonce FROM grant_nonces
+                         WHERE exp<=? ORDER BY exp,nonce LIMIT ?
+                    )""",
+                (int(now), bounded),
+            ).rowcount
+        return max(0, int(confirmations)) + max(0, int(nonces))
 
     def record_publication_attempt(self, job_id: str, error_code: str) -> None:
         """Record a content-free failure and bound permanently broken retries."""

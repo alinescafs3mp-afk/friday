@@ -588,6 +588,68 @@ def read_terminal_notification_artifact(
     return stored
 
 
+def verify_sent_terminal_notification_artifact(
+    storage: Any,
+    files_root: Path,
+    row: Mapping[str, Any],
+    *,
+    tenant_id: str,
+    actor_id: str,
+    max_bytes: int,
+) -> AuthorizedFileBytes:
+    """Verify one exact sent carrier and its canonical Raw bytes for retention."""
+
+    if str(row.get("status") or "") != "sent":
+        raise TerminalDeliveryError("terminal_notification_not_sent")
+    projection = terminal_notification_projection(
+        storage,
+        row,
+        tenant_id=tenant_id,
+        actor_id=actor_id,
+    )
+    envelope = parse_terminal_envelope(row.get("body"))
+    descriptor = envelope["artifact"]
+    try:
+        stored = read_authorized_generated_file(
+            storage,
+            Path(files_root),
+            str(descriptor["raw_id"]),
+            tenant_id,
+            actor_id,
+            max_bytes=max_bytes,
+        )
+    except (FileRecordUnavailable, AuthorizedFileReadError) as exc:
+        raise TerminalDeliveryError("terminal_artifact_unavailable") from exc
+    if (
+        stored.filename != projection["artifact"]["filename"]
+        or stored.mime_type != projection["artifact"]["mime_type"]
+        or len(stored.content) != projection["artifact"]["size_bytes"]
+        or not hmac.compare_digest(
+            hashlib.sha256(stored.content).hexdigest(),
+            projection["artifact"]["sha256"],
+        )
+    ):
+        raise TerminalDeliveryError("terminal_artifact_changed")
+    current = storage.execute(
+        """SELECT n.id,n.user_id,n.chat_id,n.kind,n.dedup_key,n.body,n.status,n.sent_at
+              FROM outbound_notifications AS n
+             WHERE n.id=? AND n.status='sent'
+               AND n.kind='engineer_command_terminal'""",
+        (str(row.get("id") or ""),),
+    ).fetchone()
+    expected = {key: row.get(key) for key in dict(current)} if current is not None else None
+    if current is None or dict(current) != expected:
+        raise TerminalDeliveryError("terminal_notification_changed")
+    raw = storage.execute(
+        f"""SELECT 1 FROM raw_objects AS r WHERE r.id=? AND r.user_id=?
+               AND {_not_private_raw_dependency("r")}""",  # nosec B608
+        (str(descriptor["raw_id"]), actor_id),
+    ).fetchone()
+    if raw is None:
+        raise TerminalDeliveryError("terminal_artifact_unavailable")
+    return stored
+
+
 __all__ = [
     "StagedTerminalNotification",
     "TERMINAL_ENVELOPE_SCHEMA",
@@ -599,4 +661,5 @@ __all__ = [
     "terminal_dedup_key",
     "terminal_notification_projection",
     "terminal_notification_status",
+    "verify_sent_terminal_notification_artifact",
 ]

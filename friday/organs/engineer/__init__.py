@@ -114,6 +114,9 @@ class EngineerOrgan(Organ):
         async def publish_terminal_jobs(_ctx: ServiceContext) -> None:
             await asyncio.to_thread(service.publish_terminal_jobs)
 
+        async def retain_terminal_jobs(_ctx: ServiceContext) -> None:
+            await asyncio.to_thread(service.retain_terminal_jobs)
+
         return (
             OrganWorker(
                 name="engineer_command_terminal_delivery",
@@ -121,6 +124,13 @@ class EngineerOrgan(Organ):
                 interval_sec=5.0,
                 run_immediately=True,
                 timeout_sec=120.0,
+            ),
+            OrganWorker(
+                name="engineer_command_retention",
+                run=retain_terminal_jobs,
+                interval_sec=3600.0,
+                run_immediately=True,
+                timeout_sec=300.0,
             ),
         )
 
