@@ -12,14 +12,14 @@ the current production identity, completed packages, active work and next order.
   is code-staged only as provisional shadow/extract and is not accepted or live.
   The primary remains the sole final-publication, tool and effect authority.
   Every secondary miss preserves the exact primary-only path.
-- Deployed implementation head: `595467ef4c7ec3b49530c1f3c71f3fd947173eef`
-- Live: Friday `0.207.56` / `595467ef4c7ec3b49530c1f3c71f3fd947173eef`;
-  tree `da0fa77c0288138693a49baa95f340514c6b289b338b433ca6f1477adfdd7055`;
+- Deployed implementation head: `f9e88471d69744263b5ed7d3d0ed6e8e9556de17`
+- Live: Friday `0.207.57` / `f9e88471d69744263b5ed7d3d0ed6e8e9556de17`;
+  tree `fd6f04b581b8ac5e8e8cc3945fddd2d38bc301530d080fbe26e453f51d8d3e92`;
+  wheel `d2f836dbe177d3d5d770c2913f90bd48b2ada021c88051082f86a7a49cf03ed5`.
+- Immediate predecessor and schema-capable fallback: Friday `0.207.56` /
+  `595467ef4c7ec3b49530c1f3c71f3fd947173eef`, tree
+  `da0fa77c0288138693a49baa95f340514c6b289b338b433ca6f1477adfdd7055`,
   wheel `96488376b1151c9426cca5f379257ae35f9a0753bee1d72e49fe88263bc96141`.
-- Immediate predecessor and schema-capable fallback: Friday `0.207.55` /
-  `1c340a2f174f4077ae9747ba5bfb9d54b0a4e727`, tree
-  `2fd06f15264628ab06396fb904dd4175cb86723422b79c303f7bd7efe4156fc1`,
-  wheel `0da4cbc467a26f7d6b5e52690d47457931ed05798bed9fb8f7944746dffd5c64`.
 - Database schema: 43
 - Production state: immutable activation `clear`; backend and Telegram bridge
   active; trusted-CA HTTPS health `200`; SQLite integrity and FK checks clean.
@@ -83,6 +83,18 @@ the current production identity, completed packages, active work and next order.
   result. Sent terminal workspaces become eligible for no-follow retirement
   after 30 days; pending, staged, uncertain, blocked, unknown and unpublished
   evidence is preserved, as are immutable receipts and canonical archives.
+  `0.207.57` replaces the predecessor's per-command confirmation rail with an
+  owner-only autonomous Engineer workbench. In an authenticated private
+  Engineer conversation the primary can plan and chain arbitrary shell or
+  installed-program steps as the Friday service user, using the VM's real
+  filesystem, PATH and network without `/approvals`. Exact current Telegram
+  files, albums, archives and audio are exposed only as immutable job inputs;
+  output publication, cancellation, progress, receipts and retention remain
+  durable. Shutdown now closes admission, persists cancellation, signals all
+  job cgroups and joins reapers before dependent stores close. The same release
+  also restores managed Syncthing after service restart by using its stable
+  persisted Unix-socket root; reconciliation runs immediately and reports a
+  failed profile as failed worker health rather than false success.
   The exact accepted secondary profile remains configured in bounded `assist`
   and is probed on
   demand; its exact post-cutover canary passed, while laptop absence preserves
@@ -103,31 +115,22 @@ the current production identity, completed packages, active work and next order.
   while the backlog converges. `0.207.52` repairs the canary wrapper's full
   Telegram carrier surface; signed Telegram requests no longer fail before the
   model/tool boundary. The current activation terminal receipt is
-  `5e2187d2b536bf7cb1dd9aa1ad627e72d86d701b2a07c9f94ea013e41352cf9e`.
+  `0499480a8565a6ef9e677c384a951fde88eefdf19a771ff541ad6798a3dbbcbd`.
 - Delivery constraints: no Docker for primary Friday release certification;
   companion plugin untouched; small commits and immutable wheel-only production
   releases. The optional laptop inference node is a separate Docker contour.
 
 ## Active objective
 
-Urgent P0 is now an owner-only autonomous Engineer Mode. In an authenticated
-private Telegram engineer conversation the primary model must choose and chain
-its own shell/program/file steps, run the software available to the Friday VM
-as the Friday service user, and use the VM filesystem and network without a
-per-command `/approvals` round trip. The non-model boundary remains strict:
+The autonomous owner-only Engineer Mode objective is deployed in `0.207.57`.
+Its remaining boundary is identity and provenance, not semantic command policy:
 fresh owner identity, current Telegram source/update/conversation binding and
-capability checks are mandatory; no guest, unsigned API turn, quoted message,
-document, web page or attachment may mint execution authority. Existing
-durable jobs, cancellation, sparse progress, receipts and Telegram artifact
-delivery are retained. Current-message uploads are exposed as immutable job
-inputs, while outputs selected for Telegram delivery remain receipt-bound.
-This P0 supersedes the earlier exact-argv/isolated-workspace-only product course;
-the deployed `0.207.56` still has that predecessor behaviour until the new
-package is certified and activated.
+capability checks stay mandatory, while no guest, unsigned API turn, quoted
+message, document, web page or attachment may mint execution authority.
 
-Next integrate and independently certify
-the Semantic Supervisor through default-off, shadow, limited assist and canary.
-After those two priorities, execute the remaining work by product value and
+The active objective is now to integrate and independently certify the Semantic
+Supervisor through default-off, shadow, limited assist and canary. After that,
+execute the remaining work by product value and
 risk. The full canonical order and estimates are in
 `outer_sol/PROJECT_EXECUTION_BACKLOG_2026-08-27.md`. Docker and companion-plugin
 work remain out of scope for primary Friday.
@@ -820,24 +823,24 @@ claims at this checkpoint.
 
 ## Current focused gate
 
-- `0.207.56`: 30 focused progress/retention/terminal tests, 233 expanded
-  Engineer regressions and the two isolated notification queue-head tests
-  passed before the full canonical gate. The deterministic wheel, sealed tree,
-  trusted-CA health, schema-43 database and private command ledger are clean at
-  the exact live identity above.
-- The active focused gate is now exact current-message Telegram input grants.
-  The Semantic Supervisor follows this Engineer package and remains default-off
-  until its independent gate passes.
+- `0.207.57`: 471 focused Engineer/input/lifecycle/Obsidian regressions passed,
+  followed by the complete native gate with 21,316 non-UI and 31 UI tests and
+  zero skips. Two clean-source wheels reproduced byte-for-byte. Immutable
+  activation is `clear`; both services report active and trusted-CA health is
+  `ok`/`0.207.57`. A signed owner live turn invoked `engineer_command_run` and
+  returned exact stdout without creating an approval. Managed Syncthing v2.1.3
+  is running on the persisted Unix socket, the profile is `running`, and the
+  immediate reconcile worker is `ok`.
+- The active focused gate is the Semantic Supervisor integration; it remains
+  default-off until its independent gate passes.
 
 ## Next order
 
-1. Implement exact current-message Telegram input grants, sealed read-only
-   `/job/input` mounts and receipt-bound source/output bundles.
-2. Integrate the Semantic Supervisor on a schema-capable fallback and roll it
+1. Integrate the Semantic Supervisor on a schema-capable fallback and roll it
    out default-off → shadow → limited assist → canary.
-3. Continue Interaction Control Plane and operational memory, then document
+2. Continue Interaction Control Plane and operational memory, then document
    contour/retrieval convergence and V12 refinement by product value and risk.
-4. Docker and companion-plugin work are not part of this order.
+3. Docker and companion-plugin work are not part of this order.
 
 ## WIP source retention
 

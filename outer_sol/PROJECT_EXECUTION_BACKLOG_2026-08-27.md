@@ -34,6 +34,8 @@ Status: deployed in `0.207.52`.
 
 ### P1 — make the current Engineer Mode a complete user workflow
 
+Status: deployed in `0.207.57`.
+
 Goal: close `authenticated owner request → autonomous plan/tool loop → host-user
 run → progress → result files/archive` for arbitrary software installed in the
 Friday VM. No `/approvals` callback is part of this mode. Friday chooses and
@@ -69,11 +71,10 @@ automatic, progress is durable and fact-only, and only old proven-sent
 workspaces are retired while canonical archives remain. The preceding
 owner-confirmed isolated command admission is now a deployed predecessor, not
 the target product contract. Autonomous owner-only host-user admission,
-iterative planning and items 6–8 are the active P1 contour.
-
-Estimate: first usable result-delivery slice 6–9 hours; complete P1 contour
-12–20 hours of clean work. The final physical approval-button smoke is
-owner-bound but does not block all preceding work.
+iterative planning, current Telegram inputs, lifecycle closure and items 6–8
+are deployed in `0.207.57`. The live signed owner smoke executed an installed
+command and returned exact stdout without an approval row. The P1 contour is
+closed; future Engineer expansion belongs to P7.
 
 ### P2 — integrate and roll out Semantic Supervisor
 
@@ -181,10 +182,9 @@ Estimate: 40–80 hours after the policy decision.
 
 ## First 24 clean-work hours
 
-1. Keep the deployed P0 evidence and production path green.
-2. Extend the deployed P1 sealed status delivery with automatic terminal
-   notifications and retention as the next small release.
-3. Deliver P1 Telegram input grants plus bundle/publication wiring as the next
-   release if the first package remains green.
-4. Start P2 profile decision and Semantic Supervisor rebase/audit with the
-   remaining time; do not wait idly for owner-only physical checks.
+1. Keep the deployed P0/P1 production paths green.
+2. Resolve the P2 profile identity and rebase/audit the Semantic Supervisor.
+3. Release P2 default-off, then advance only through evidence-backed shadow,
+   limited assist and canary stages.
+4. Use remaining time on P3 release-blocking golden journeys; do not wait idly
+   for owner-only physical checks.
