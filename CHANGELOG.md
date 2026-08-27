@@ -1,3 +1,15 @@
+## 0.207.62 — 2026-08-27
+
+### Semantic Supervisor discarded shadow
+
+- Adds the distinct immutable carrier used for the exact `off` → `shadow`
+  configuration transition. Shadow proposals are advisory observations only:
+  they receive no tool, effect, storage or publication authority, and every
+  timeout, malformed response or laptop outage preserves the primary path.
+- Keeps the `0.207.61` Engineer false-progress repair and schema-45 runtime
+  unchanged. Assist and canary remain closed until the production evidence
+  window satisfies the independent promotion gate.
+
 ## 0.207.61 — 2026-08-27
 
 ### Default-off Semantic Supervisor foundation
