@@ -49,8 +49,12 @@ async def upload_file(
         metadata={"uploaded_via": "api", "uploaded_by": actor.own_id},
         **password_kwargs,
     )
-    if result.get("archive_password_required") or result.get("archive_password_invalid"):
-        # The password challenge did not create a Raw/file row.  In particular,
+    if (
+        result.get("archive_password_required")
+        or result.get("archive_password_invalid")
+        or result.get("password_validation_incomplete")
+    ):
+        # The password gate did not create a Raw/file row.  In particular,
         # do not create an audit entry whose target or metadata could imply that
         # an upload was persisted.
         return public_ingestion_receipt(result, file=True)

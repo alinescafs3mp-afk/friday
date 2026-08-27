@@ -187,6 +187,13 @@ _VISION_SUMMARY_LANGUAGES = {
 }
 _WHISPER_INFERENCE_LOCK = threading.Lock()
 _PDF_RENDER_SOURCE_RE = re.compile(r"^pdf-page-(\d+)-(?:render|image-\d+)$", re.IGNORECASE)
+_ARCHIVE_PASSWORD_GATE_ERRORS = frozenset(
+    {
+        "archive_password_required",
+        "archive_password_invalid",
+        "password_validation_incomplete",
+    }
+)
 _DOCUMENT_METADATA_STRING_FIELDS = (
     "title",
     "subject",
@@ -247,6 +254,20 @@ _DOCUMENT_METADATA_STRING_FIELDS = (
 
 class _WhisperInferenceBusy(RuntimeError):
     """Another physical CTranslate2 transcription is still running."""
+
+
+def _archive_password_gate_flags(error: Any) -> dict[str, bool] | None:
+    """Return the body-free state for an archive which cannot cross persistence."""
+
+    if error not in _ARCHIVE_PASSWORD_GATE_ERRORS:
+        return None
+    if error == "password_validation_incomplete":
+        return {"password_validation_incomplete": True}
+    password_invalid = error == "archive_password_invalid"
+    return {
+        "archive_password_required": not password_invalid,
+        "archive_password_invalid": password_invalid,
+    }
 
 
 def _transcribe_bytes_admitted(content: bytes, **kwargs: Any) -> Any:
@@ -1917,8 +1938,8 @@ class FilesMixin(PipelineShared):
                 ),
                 turn_deadline,
             )
-            if extraction.error in {"archive_password_required", "archive_password_invalid"}:
-                password_invalid = extraction.error == "archive_password_invalid"
+            password_gate = _archive_password_gate_flags(extraction.error)
+            if password_gate is not None:
                 return {
                     "promoted": False,
                     "queued_for_review": False,
@@ -1926,8 +1947,7 @@ class FilesMixin(PipelineShared):
                     "action": "transient",
                     "raw_object_id": None,
                     "extraction_success": False,
-                    "archive_password_required": not password_invalid,
-                    "archive_password_invalid": password_invalid,
+                    **password_gate,
                     "extraction": {"success": False},
                 }
         digest = hashlib.sha256(file_content).hexdigest()
@@ -2158,10 +2178,10 @@ class FilesMixin(PipelineShared):
                 ),
                 turn_deadline,
             )
-        if extraction.error in {"archive_password_required", "archive_password_invalid"}:
+        password_gate = _archive_password_gate_flags(extraction.error)
+        if password_gate is not None:
             # Defensive fallback for a nested encrypted archive reached through
             # a container suffix not covered by the eager dispatch above.
-            password_invalid = extraction.error == "archive_password_invalid"
             return {
                 "promoted": False,
                 "queued_for_review": False,
@@ -2169,8 +2189,7 @@ class FilesMixin(PipelineShared):
                 "action": "transient",
                 "raw_object_id": None,
                 "extraction_success": False,
-                "archive_password_required": not password_invalid,
-                "archive_password_invalid": password_invalid,
+                **password_gate,
                 "extraction": {"success": False},
             }
         # Пробелы — не текст. Разбор пустого .txt возвращает `success=True` и
@@ -2912,8 +2931,8 @@ class FilesMixin(PipelineShared):
             ),
             turn_deadline,
         )
-        if extraction.error in {"archive_password_required", "archive_password_invalid"}:
-            password_invalid = extraction.error == "archive_password_invalid"
+        password_gate = _archive_password_gate_flags(extraction.error)
+        if password_gate is not None:
             return {
                 "filename": safe_filename,
                 "mime_type": safe_mime_type,
@@ -2921,8 +2940,7 @@ class FilesMixin(PipelineShared):
                 "transient": True,
                 "persisted": False,
                 "extraction_success": False,
-                "archive_password_required": not password_invalid,
-                "archive_password_invalid": password_invalid,
+                **password_gate,
             }
         native_text = extraction.text if extraction.success else ""
         if not native_text.strip():

@@ -377,10 +377,14 @@ def _file_chat_warning_line(file_ingestion: Any) -> str:
 
     if not isinstance(file_ingestion, dict):
         return ""
-    if file_ingestion.get("archive_password_required") or file_ingestion.get("archive_password_invalid"):
+    if (
+        file_ingestion.get("archive_password_required")
+        or file_ingestion.get("archive_password_invalid")
+        or file_ingestion.get("password_validation_incomplete")
+    ):
         # The code-owned response already tells the person exactly what is
-        # needed.  A generic “text extraction failed” companion makes a normal
-        # locked archive sound corrupt and obscures the actionable prompt.
+        # needed.  A generic “text extraction failed” companion makes a locked
+        # or validation-incomplete archive sound corrupt and obscures the action.
         return ""
     if file_ingestion.get("voice_unrecognised"):
         return _VOICE_UNRECOGNISED_CHAT_WARNING

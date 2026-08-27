@@ -80,6 +80,7 @@ _INGESTION_SCORE_FIELDS = ("confidence", "promotion_score", "quality_score")
 _FILE_BOOL_FIELDS = (
     "archive_password_required",
     "archive_password_invalid",
+    "password_validation_incomplete",
     "voice_unrecognised",
     "voice_transcript_truncated",
     "extraction_success",

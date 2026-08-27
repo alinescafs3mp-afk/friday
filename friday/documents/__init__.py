@@ -626,6 +626,14 @@ class ArchiveDeadlineReached(ArchiveExtractionError):
     """A bounded archive/document stream exhausted its inherited deadline."""
 
 
+class ArchivePasswordValidationIncomplete(ArchiveExtractionError):
+    """An encrypted archive could not authenticate one member within its bounds."""
+
+    def __init__(self, *, deadline_reached: bool) -> None:
+        super().__init__("archive password validation incomplete")
+        self.deadline_reached = deadline_reached
+
+
 def _deadline_expired(deadline: float | None) -> bool:
     return deadline is not None and time.monotonic() >= deadline
 
@@ -994,6 +1002,20 @@ class DocumentExtractor:
                 {"filename": safe_name, "format": (archive_kind or ext).lstrip(".")},
                 False,
                 "archive_password_invalid",
+            )
+        except ArchivePasswordValidationIncomplete as exc:
+            validation_metadata: dict[str, Any] = {
+                "filename": safe_name,
+                "format": (archive_kind or ext).lstrip("."),
+                "password_validation_incomplete": True,
+            }
+            if exc.deadline_reached:
+                validation_metadata["parse_deadline_reached"] = True
+            result = DocumentResult(
+                "",
+                validation_metadata,
+                False,
+                "password_validation_incomplete",
             )
         except ArchiveBackendUnavailable:
             result = DocumentResult(
@@ -4009,6 +4031,10 @@ class DocumentExtractor:
             raise ArchivePasswordRequired
         if result.error == "archive_password_invalid":
             raise ArchivePasswordInvalid
+        if result.error == "password_validation_incomplete":
+            raise ArchivePasswordValidationIncomplete(
+                deadline_reached=result.metadata.get("parse_deadline_reached") is True,
+            )
         metadata = result.metadata or {}
         deadline_reached = bool(
             result.error == "document_parse_deadline" or metadata.get("parse_deadline_reached") is True
@@ -4122,7 +4148,7 @@ class DocumentExtractor:
                 mandatory_validation = validation_index is not None and index == validation_index
                 if deadline is not None and time.monotonic() >= deadline:
                     if mandatory_validation:
-                        raise ArchiveDeadlineReached
+                        raise ArchivePasswordValidationIncomplete(deadline_reached=True)
                     exhausted = True
                     deadline_reached = True
                     break
@@ -4135,20 +4161,22 @@ class DocumentExtractor:
                 # archive of binary blobs, say — never advanced the cap.
                 if not budget.take_preview():
                     if mandatory_validation:
-                        raise ArchiveLimitError("Archive preview budget cannot validate password")
+                        raise ArchivePasswordValidationIncomplete(deadline_reached=False)
                     exhausted = True
                     break
                 previewed += 1
                 try:
                     with reader.open(reader_member, pwd=password_bytes) as stream:
                         data = self._read_stream_limited(stream, member_limit, deadline=deadline)
-                except ArchiveDeadlineReached:
+                except ArchiveDeadlineReached as exc:
                     if mandatory_validation:
-                        raise
+                        raise ArchivePasswordValidationIncomplete(deadline_reached=True) from exc
                     exhausted = True
                     deadline_reached = True
                     break
-                except ArchiveLimitError:
+                except ArchiveLimitError as exc:
+                    if mandatory_validation:
+                        raise ArchivePasswordValidationIncomplete(deadline_reached=False) from exc
                     raise
                 except (RuntimeError, zipfile.BadZipFile) as exc:
                     if member.flag_bits & 0x1:
@@ -4511,7 +4539,7 @@ class DocumentExtractor:
                 mandatory_validation = validation_index is not None and index == validation_index
                 if deadline is not None and time.monotonic() >= deadline:
                     if mandatory_validation:
-                        raise ArchiveDeadlineReached("RAR password validation deadline reached")
+                        raise ArchivePasswordValidationIncomplete(deadline_reached=True)
                     exhausted = True
                     deadline_reached = True
                     break
@@ -4521,7 +4549,7 @@ class DocumentExtractor:
                     continue
                 if not budget.take_preview():
                     if mandatory_validation:
-                        raise ArchiveLimitError("Archive preview budget cannot validate password")
+                        raise ArchivePasswordValidationIncomplete(deadline_reached=False)
                     exhausted = True
                     break
                 previewed += 1  # decompressions, not successes — see _extract_zip
@@ -4535,6 +4563,22 @@ class DocumentExtractor:
                         deadline=deadline,
                     )
                     budget.spend_bytes(len(data))
+                except ArchiveDeadlineReached as exc:
+                    if mandatory_validation:
+                        raise ArchivePasswordValidationIncomplete(deadline_reached=True) from exc
+                    exhausted = True
+                    deadline_reached = True
+                    break
+                except ArchiveLimitError as exc:
+                    if mandatory_validation:
+                        raise ArchivePasswordValidationIncomplete(deadline_reached=False) from exc
+                    raise
+
+                # A successful decoder exit after reading the complete member is
+                # the password proof.  Deadlines while parsing that authenticated
+                # plaintext are ordinary truthful partial extraction, not an
+                # incomplete credential check.
+                try:
                     preview, member_complete, member_deadline_reached = self._member_preview(
                         member.filename,
                         data,
@@ -4544,8 +4588,6 @@ class DocumentExtractor:
                         password,
                     )
                 except ArchiveDeadlineReached:
-                    if mandatory_validation:
-                        raise
                     exhausted = True
                     deadline_reached = True
                     break
@@ -4820,7 +4862,7 @@ class DocumentExtractor:
                     mandatory_validation = validation_item is not None and item[1] == validation_item[1]
                     if deadline is not None and time.monotonic() >= deadline:
                         if mandatory_validation:
-                            raise ArchiveDeadlineReached("7z password validation deadline reached")
+                            raise ArchivePasswordValidationIncomplete(deadline_reached=True)
                         exhausted = True
                         deadline_reached = True
                         break
@@ -4836,7 +4878,7 @@ class DocumentExtractor:
                         continue
                     if not budget.take_preview():
                         if mandatory_validation:
-                            raise ArchiveLimitError("Archive preview budget cannot validate password")
+                            raise ArchivePasswordValidationIncomplete(deadline_reached=False)
                         exhausted = True
                         break
                     selected.append(item)
@@ -4849,9 +4891,9 @@ class DocumentExtractor:
                 # archive still needs a bounded decoder attempt if possible.
                 if encrypted and files and not selected:
                     if deadline is not None and time.monotonic() >= deadline:
-                        raise ArchiveDeadlineReached("7z password validation deadline reached")
+                        raise ArchivePasswordValidationIncomplete(deadline_reached=True)
                     if not budget.take_preview():
-                        raise ArchiveLimitError("Archive preview budget cannot validate password")
+                        raise ArchivePasswordValidationIncomplete(deadline_reached=False)
                     selected = [min(files, key=lambda item: (item[2], item[1]))]
                     exhausted = True
 
@@ -4859,7 +4901,7 @@ class DocumentExtractor:
                 decompressed_count = 0
                 if selected and _deadline_expired(deadline):
                     if validation_item is not None:
-                        raise ArchiveDeadlineReached("7z password validation deadline reached")
+                        raise ArchivePasswordValidationIncomplete(deadline_reached=True)
                     exhausted = True
                     deadline_reached = True
                 if selected and not deadline_reached:
@@ -4877,7 +4919,7 @@ class DocumentExtractor:
                         mandatory_validation = validation_item is not None and batch_index == 0
                         if _deadline_expired(deadline):
                             if mandatory_validation:
-                                raise ArchiveDeadlineReached("7z password validation deadline reached")
+                                raise ArchivePasswordValidationIncomplete(deadline_reached=True)
                             exhausted = True
                             deadline_reached = True
                             break
@@ -4892,12 +4934,16 @@ class DocumentExtractor:
                                 targets=[name for _entry, name, _size in batch],
                                 factory=factory,
                             )
-                        except ArchiveDeadlineReached:
+                        except ArchiveDeadlineReached as exc:
                             if mandatory_validation:
-                                raise
+                                raise ArchivePasswordValidationIncomplete(deadline_reached=True) from exc
                             exhausted = True
                             deadline_reached = True
                             break
+                        except ArchiveLimitError as exc:
+                            if mandatory_validation:
+                                raise ArchivePasswordValidationIncomplete(deadline_reached=False) from exc
+                            raise
                         if mandatory_validation:
                             password_validated = True
                         decompressed_count += len(batch)

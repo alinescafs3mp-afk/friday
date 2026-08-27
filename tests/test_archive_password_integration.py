@@ -13,6 +13,7 @@ import pyzipper
 
 from friday.agent_runtime import AgentRuntime
 from friday.archive_formats import archive_dispatch_kind
+from friday.documents import DocumentResult
 from friday.ingestion import IngestionPipeline
 from friday.knowledge_graph import KnowledgeGraph
 from friday.permissions import ActorContext
@@ -217,6 +218,85 @@ async def test_mime_only_archive_challenges_before_dedup_and_persists_exact_byte
 
 
 @pytest.mark.asyncio
+async def test_password_validation_deadline_cannot_replay_or_persist_archive(
+    settings,
+    storage,
+    monkeypatch,
+) -> None:
+    pipeline = IngestionPipeline(settings, storage, KnowledgeGraph(storage))
+    old_payload = _encrypted_zip()
+    old_receipt = await pipeline.ingest_file(
+        "alice",
+        None,
+        old_payload,
+        filename="protected.zip",
+        metadata={"uploaded_by": "alice"},
+        source_ref="successful-before-deadline",
+        archive_password=_PASSWORD,
+    )
+    old_raw_id = old_receipt["raw_object_id"]
+    old_files = {path for path in settings.files_dir.rglob("*") if path.is_file()}
+    old_counts = {
+        table: storage.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]  # nosec B608
+        for table in ("raw_objects", "inbox", "knowledge_objects")
+    }
+    assert old_files
+
+    def validation_deadline(*_args, **_kwargs) -> DocumentResult:
+        return DocumentResult(
+            "",
+            {
+                "password_validation_incomplete": True,
+                "parse_deadline_reached": True,
+            },
+            False,
+            "password_validation_incomplete",
+        )
+
+    def forbidden_dedup(*_args, **_kwargs):
+        raise AssertionError("password validation incomplete reached durable dedup")
+
+    monkeypatch.setattr(pipeline._doc_extractor, "extract", validation_deadline)  # noqa: SLF001
+    monkeypatch.setattr(storage, "find_raw_by_source_ref", forbidden_dedup)
+    monkeypatch.setattr(storage, "find_file_by_content_hash", forbidden_dedup)
+
+    replay_attempt = await pipeline.ingest_file(
+        "alice",
+        None,
+        old_payload,
+        filename="protected.zip",
+        metadata={"uploaded_by": "alice"},
+        source_ref="successful-before-deadline",
+        archive_password=_PASSWORD,
+    )
+    new_attempt = await pipeline.ingest_file(
+        "alice",
+        None,
+        _encrypted_zip(),
+        filename="new-protected.zip",
+        metadata={"uploaded_by": "alice"},
+        source_ref="new-after-deadline",
+        archive_password=_PASSWORD,
+    )
+    transient_attempt = await pipeline.inspect_file_transient(
+        _encrypted_zip(),
+        filename="transient-protected.zip",
+        archive_password=_PASSWORD,
+    )
+
+    for result in (replay_attempt, new_attempt, transient_attempt):
+        assert result["password_validation_incomplete"] is True
+        assert result["persisted"] is False
+        assert result.get("raw_object_id") is None
+        assert result["extraction_success"] is False
+    assert replay_attempt.get("idempotent_replay") is not True
+    assert storage.get_raw_object(old_raw_id, "alice") is not None
+    for table, old_count in old_counts.items():
+        assert storage.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0] == old_count  # nosec B608
+    assert {path for path in settings.files_dir.rglob("*") if path.is_file()} == old_files
+
+
+@pytest.mark.asyncio
 async def test_odf_metadata_is_persisted_and_has_header_only_transient_path(settings, storage) -> None:
     pipeline = IngestionPipeline(settings, storage, KnowledgeGraph(storage))
     payload = _metadata_odt()
@@ -304,6 +384,29 @@ def test_password_challenge_has_no_generic_extraction_failure_companion(tmp_path
         rendered = bridge._format_response_message(response)  # noqa: SLF001
         assert rendered == response["message"]
         assert "извлечь не удалось" not in rendered.casefold()
+    finally:
+        bridge._inbox.close()  # noqa: SLF001
+
+
+def test_password_validation_incomplete_has_no_generic_failure_or_pending_challenge(tmp_path) -> None:
+    bridge = _bridge(tmp_path)
+    try:
+        response = {
+            "message": "Проверка пароля не завершилась; архив не сохранён.",
+            "message_format": "plain",
+            "password_validation_incomplete": True,
+            "file_ingestion": {
+                "password_validation_incomplete": True,
+                "persisted": False,
+                "extraction_success": False,
+                "extraction": {"success": False},
+            },
+        }
+        rendered = bridge._format_response_message(response)  # noqa: SLF001
+
+        assert rendered == response["message"]
+        assert "извлечь не удалось" not in rendered.casefold()
+        assert bridge._inbox.archive_password_challenge(5001, 1001) is None  # noqa: SLF001
     finally:
         bridge._inbox.close()  # noqa: SLF001
 

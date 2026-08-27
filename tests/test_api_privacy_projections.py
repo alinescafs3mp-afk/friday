@@ -15,7 +15,7 @@ from friday.api.projections import (
 )
 from friday.permissions import LEGACY_OWNER_USER_ID
 from friday.raw_metadata import RAW_FILE_METADATA_MAX_BYTES
-from friday.server import create_app
+from friday.server import _archive_password_challenge, create_app
 from friday.storage.models import InboxItem, KnowledgeObject, RawObject, new_id
 from friday.telegram_bridge._callbacks import CallbacksMixin
 
@@ -35,6 +35,78 @@ class _SyntheticAuthorityStorage:
 
     def get_knowledge_object(self, _knowledge_id: str, _user_id: str):
         return None
+
+
+def test_password_validation_incomplete_is_a_body_free_public_file_state() -> None:
+    internal = {
+        "persisted": False,
+        "promoted": False,
+        "queued_for_review": False,
+        "raw_object_id": None,
+        "password_validation_incomplete": True,
+        "extraction_success": False,
+        "parser_error": "private decoder detail",
+        "text_preview": "private archive body",
+        "extraction": {"success": False, "error": "private decoder detail"},
+    }
+
+    receipt = public_ingestion_receipt(internal, file=True, include_resource_id=True)
+    assert receipt == {
+        "persisted": False,
+        "promoted": False,
+        "queued_for_review": False,
+        "password_validation_incomplete": True,
+        "extraction_success": False,
+        "extraction": {"success": False},
+    }
+
+    response = _archive_password_challenge(internal)
+    assert response is not None
+    assert response["password_validation_incomplete"] is True
+    assert response["archive_password_required"] is False
+    assert response["archive_password_invalid"] is False
+    assert response["message_format"] == "plain"
+
+
+def test_password_validation_incomplete_upload_has_no_resource_or_audit(settings) -> None:
+    app = create_app(settings)
+
+    async def incomplete_ingestion(*_args, **_kwargs):
+        return {
+            "persisted": False,
+            "promoted": False,
+            "queued_for_review": False,
+            "raw_object_id": None,
+            "password_validation_incomplete": True,
+            "extraction_success": False,
+            "extraction": {"success": False},
+        }
+
+    headers = {"Authorization": f"Bearer {settings.api_token}"}
+    with TestClient(app) as client:
+        app.state.ingestion.ingest_file = incomplete_ingestion
+        before = app.state.storage.execute(
+            "SELECT COUNT(*) FROM audit_log WHERE action='file.upload'"
+        ).fetchone()[0]
+        response = client.post(
+            "/api/files",
+            files={"file": ("protected.zip", b"synthetic archive", "application/zip")},
+            headers=headers,
+        )
+        after = app.state.storage.execute(
+            "SELECT COUNT(*) FROM audit_log WHERE action='file.upload'"
+        ).fetchone()[0]
+
+    assert response.status_code == 200, response.text
+    assert response.json() == {
+        "persisted": False,
+        "promoted": False,
+        "queued_for_review": False,
+        "password_validation_incomplete": True,
+        "extraction_success": False,
+        "extraction": {"success": False},
+    }
+    assert after == before
 
 
 def test_ingestion_receipts_are_allowlists_even_for_adversarial_internal_results() -> None:

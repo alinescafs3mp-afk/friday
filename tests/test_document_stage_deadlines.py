@@ -8,6 +8,7 @@ import pytest
 
 from friday.documents import (
     ArchiveDeadlineReached,
+    ArchivePasswordValidationIncomplete,
     DocumentExtractor,
     DocumentResult,
 )
@@ -361,7 +362,68 @@ def test_encrypted_7z_validation_deadline_fails_closed(monkeypatch) -> None:
     )
 
     assert result.success is False
-    assert result.error == "document_parse_deadline"
+    assert result.error == "password_validation_incomplete"
+    assert result.metadata["password_validation_incomplete"] is True
+    assert result.metadata["parse_deadline_reached"] is True
+
+
+def test_nested_encrypted_validation_deadline_propagates_to_outer_archive(monkeypatch) -> None:
+    import py7zr
+
+    inner = io.BytesIO()
+    with py7zr.SevenZipFile(inner, mode="w", password="correct-password") as archive:
+        archive.writestr(b"bounded", "note.txt")
+    outer = io.BytesIO()
+    with zipfile.ZipFile(outer, mode="w") as archive:
+        archive.writestr("nested.7z", inner.getvalue())
+
+    def deadline_write(*_args, **_kwargs):
+        raise ArchiveDeadlineReached("synthetic nested validation deadline")
+
+    monkeypatch.setattr("friday.documents._Bounded7zWriter.write", deadline_write)
+
+    result = DocumentExtractor(secret_values=()).extract(
+        outer.getvalue(),
+        "outer.zip",
+        archive_password="correct-password",
+    )
+
+    assert result.success is False
+    assert result.error == "password_validation_incomplete"
+    assert result.metadata["password_validation_incomplete"] is True
+    assert result.metadata["parse_deadline_reached"] is True
+
+
+def test_encrypted_zip_validation_deadline_is_distinct_from_plain_partial(monkeypatch) -> None:
+    import pyzipper
+
+    source = io.BytesIO()
+    with pyzipper.AESZipFile(
+        source,
+        mode="w",
+        compression=pyzipper.ZIP_DEFLATED,
+        encryption=pyzipper.WZ_AES,
+    ) as archive:
+        archive.setpassword(b"correct-password")
+        archive.writestr("note.txt", "bounded")
+
+    extractor = DocumentExtractor(secret_values=())
+    _silence_metadata(extractor)
+
+    def deadline_read(*_args, **_kwargs):
+        raise ArchiveDeadlineReached("synthetic validation deadline")
+
+    monkeypatch.setattr(extractor, "_read_stream_limited", deadline_read)
+
+    result = extractor.extract(
+        source.getvalue(),
+        "bounded.zip",
+        archive_password="correct-password",
+    )
+
+    assert result.success is False
+    assert result.error == "password_validation_incomplete"
+    assert result.metadata["password_validation_incomplete"] is True
     assert result.metadata["parse_deadline_reached"] is True
 
 
@@ -380,6 +442,95 @@ def test_expired_rar_member_deadline_does_not_spawn_decoder(monkeypatch) -> None
             limit=1_000,
             deadline=time.monotonic() - 1,
         )
+
+
+class _SyntheticRarMember:
+    filename = "note.txt"
+    file_size = 7
+
+    @staticmethod
+    def is_symlink() -> bool:
+        return False
+
+    @staticmethod
+    def isdir() -> bool:
+        return False
+
+    @staticmethod
+    def needs_password() -> bool:
+        return True
+
+
+class _SyntheticRarArchive:
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_args) -> None:
+        return None
+
+    @staticmethod
+    def needs_password() -> bool:
+        return True
+
+    @staticmethod
+    def setpassword(_password: str) -> None:
+        return None
+
+    @staticmethod
+    def infolist() -> list[_SyntheticRarMember]:
+        return [_SyntheticRarMember()]
+
+
+class _SyntheticArchiveBudget:
+    expanded_bytes = 1_000
+
+    @staticmethod
+    def take_preview() -> bool:
+        return True
+
+    @staticmethod
+    def spend_bytes(_amount: int) -> None:
+        return None
+
+
+def test_rar_deadline_is_incomplete_only_until_decoder_authenticates(monkeypatch) -> None:
+    extractor = DocumentExtractor(secret_values=())
+    rarfile = type("SyntheticRarfile", (), {"RarFile": lambda *_args: _SyntheticRarArchive()})
+    monkeypatch.setattr("friday.documents.shutil.which", lambda _name: "/synthetic/unrar")
+
+    def validation_deadline(*_args, **_kwargs):
+        raise ArchiveDeadlineReached("synthetic validation deadline")
+
+    monkeypatch.setattr(extractor, "_read_rar_member_with_tool", validation_deadline)
+    with pytest.raises(ArchivePasswordValidationIncomplete) as incomplete:
+        extractor._extract_rar_members(  # noqa: SLF001
+            rarfile,
+            b"synthetic-rar",
+            0,
+            _SyntheticArchiveBudget(),  # type: ignore[arg-type]
+            time.monotonic() + 10,
+            "correct-password",
+        )
+    assert incomplete.value.deadline_reached is True
+
+    monkeypatch.setattr(extractor, "_read_rar_member_with_tool", lambda *_args, **_kwargs: b"decoded")
+
+    def preview_deadline(*_args, **_kwargs):
+        raise ArchiveDeadlineReached("synthetic post-validation deadline")
+
+    monkeypatch.setattr(extractor, "_member_preview", preview_deadline)
+    partial = extractor._extract_rar_members(  # noqa: SLF001
+        rarfile,
+        b"synthetic-rar",
+        0,
+        _SyntheticArchiveBudget(),  # type: ignore[arg-type]
+        time.monotonic() + 10,
+        "correct-password",
+    )
+
+    assert partial.success is True
+    assert partial.metadata["parse_deadline_reached"] is True
+    assert partial.metadata["archive_budget_exhausted"] is True
 
 
 def test_libreoffice_deadline_uses_document_deadline_contract(monkeypatch) -> None:

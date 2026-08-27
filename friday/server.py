@@ -1360,23 +1360,31 @@ def _take_archive_password(body: dict[str, Any]) -> str | None:
 
 
 def _archive_password_challenge(file_ingestion: dict[str, Any]) -> dict[str, Any] | None:
+    """Return a code-owned response for every nonpersistent password gate state."""
+
     invalid = file_ingestion.get("archive_password_invalid") is True
     required = file_ingestion.get("archive_password_required") is True
-    if not (invalid or required):
+    incomplete = file_ingestion.get("password_validation_incomplete") is True
+    if not (invalid or required or incomplete):
         return None
-    message = (
-        "Пароль к архиву не подошёл. Пришлите «пароль: …» следующим сообщением."
-        if invalid
-        else (
+    if incomplete:
+        message = (
+            "Не удалось завершить проверку пароля к архиву в отведённое время. "
+            "Архив не сохранён; отправьте его ещё раз."
+        )
+    elif invalid:
+        message = "Пароль к архиву не подошёл. Пришлите «пароль: …» следующим сообщением."
+    else:
+        message = (
             "Архив защищён паролем. Пришлите «пароль: …» следующим сообщением "
             "или укажите «пароль: …» вместе с архивом."
         )
-    )
     return {
         "message": message,
         "message_format": "plain",
         "archive_password_required": required,
         "archive_password_invalid": invalid,
+        **({"password_validation_incomplete": True} if incomplete else {}),
         "file_ingestion": file_ingestion,
     }
 
