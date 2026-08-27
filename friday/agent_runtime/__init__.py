@@ -53624,7 +53624,7 @@ class AgentRuntime:
                 response["file_clips"] = [compile_attachment, *existing_files]
                 response["_structural_file_count"] = existing_structural_count + 1
 
-        if context.archive_search_isolated_turn:
+        if context.archive_search_isolated_turn and not autonomous_engineer:
             # Reassert the isolation fixed point after arbitrary model/adapter
             # callbacks.  Only the admitted archive evidence remains transient;
             # no ambient mutation may reappear in guards or durable metadata.
@@ -53797,7 +53797,8 @@ class AgentRuntime:
             self._tell_the_owner_the_model_is_silent(user_id)
         content = (response.get("content") or "").strip()
         direct_file_body_grounded = bool(
-            direct_attachment_exact_file_projection_turn
+            not autonomous_engineer
+            and direct_attachment_exact_file_projection_turn
             and not response.get("llm_failed")
             and _direct_file_body_is_literal_grounded(
                 clean_message,
@@ -53806,13 +53807,15 @@ class AgentRuntime:
             )
         )
         direct_file_body_recovery_required = bool(
-            direct_attachment_exact_file_projection_turn
+            not autonomous_engineer
+            and direct_attachment_exact_file_projection_turn
             and direct_attachment_exact_body is not None
             and not response.get("llm_failed")
             and not direct_file_body_grounded
         )
         direct_file_body_rejected = bool(
-            direct_attachment_exact_file_projection_turn
+            not autonomous_engineer
+            and direct_attachment_exact_file_projection_turn
             and not response.get("llm_failed")
             and not direct_file_body_grounded
         )
@@ -53834,7 +53837,8 @@ class AgentRuntime:
             response["_direct_file_body_rejected"] = True
         false_readable_attachment_refusal_replaced = False
         readable_attachment_refusal = bool(
-            self.llm.enabled
+            not autonomous_engineer
+            and self.llm.enabled
             and response.get("_model_generated") is True
             and not response.get("llm_failed")
             and attachment_coverage_complete
@@ -53937,11 +53941,12 @@ class AgentRuntime:
             false_readable_attachment_refusal_replaced = True
             LOGGER.warning("attachment: false readable-file refusal discarded")
         stale_conversational_replay_replaced = bool(
-            context.small_talk
+            not autonomous_engineer
+            and context.small_talk
             and _replays_latest_conversational_answer(content, context.conversation_history)
         )
         conversational_archive_fallback_replaced = bool(
-            context.small_talk and _is_conversational_archive_fallback(content)
+            not autonomous_engineer and context.small_talk and _is_conversational_archive_fallback(content)
         )
         if stale_conversational_replay_replaced or conversational_archive_fallback_replaced:
             # Retrieval is already suppressed on a conversational turn, but
@@ -53962,7 +53967,8 @@ class AgentRuntime:
             response["voice_clip"] = None
             response["knowledge_object_ids"] = []
         false_model_outage_replaced = bool(
-            self.llm.enabled
+            not autonomous_engineer
+            and self.llm.enabled
             and response.get("_model_generated") is True
             and not response.get("llm_failed")
             and not _ASKS_ABOUT_MODEL_OUTAGE.search(_classification_text(clean_message))
@@ -54000,7 +54006,8 @@ class AgentRuntime:
         attachment_web_reconciliation_changed = False
         attachment_web_unsupported_removed = False
         if (
-            attachment_evidence
+            not autonomous_engineer
+            and attachment_evidence
             and response.get("_office_exact_owned") is not True
             and response.get("_obsidian_owned") is not True
             and response.get("_advisory_vision_summary_owned") is not True
@@ -54035,7 +54042,9 @@ class AgentRuntime:
             attachment_evidence and _attachment_web_literals_are_grounded(content, attachment_web_targets)
         )
         dangerous_output_replaced = bool(
-            not dangerous_instruction_request and _contains_actionable_explosive_instructions(content)
+            not autonomous_engineer
+            and not dangerous_instruction_request
+            and _contains_actionable_explosive_instructions(content)
         )
         if dangerous_output_replaced:
             # The input boundary is intentionally narrow.  This independent
@@ -54055,7 +54064,8 @@ class AgentRuntime:
             or explicit_public_web_query
         )
         web_evidence_replaced = bool(
-            not dangerous_instruction_request
+            not autonomous_engineer
+            and not dangerous_instruction_request
             and not dangerous_output_replaced
             and not foreign_private_request
             and not private_web_search_blocked
@@ -54214,7 +54224,7 @@ class AgentRuntime:
         )
         web_attachment_source_owned = bool(attachment_expected_count or attachment_evidence)
         model_web_urls_removed = False
-        if web_evidence_used and not web_evidence_replaced:
+        if not autonomous_engineer and web_evidence_used and not web_evidence_replaced:
             content, model_web_urls_removed = _strip_model_authored_web_urls(
                 content,
                 requested_fact_targets=requested_web_fact_targets,
@@ -54246,7 +54256,8 @@ class AgentRuntime:
         )
         person_grounding_replaced = False
         if (
-            response.get("_obsidian_owned") is not True
+            not autonomous_engineer
+            and response.get("_obsidian_owned") is not True
             and (effective_topic.startswith("человек") or context.person_activity_resolution_failed)
             and not person_answer_has_evidence
         ):
@@ -54289,7 +54300,8 @@ class AgentRuntime:
         # не правится и не дополняется, а ЗАМЕНЯЕТСЯ: рядом с правдой ложь о
         # собственном устройстве читалась бы как разногласие двух источников.
         if (
-            response.get("_office_exact_owned") is not True
+            not autonomous_engineer
+            and response.get("_office_exact_owned") is not True
             and response.get("_obsidian_owned") is not True
             and _CALLS_ITSELF_SOMEONE_ELSE.search(content)
         ):
@@ -54309,7 +54321,8 @@ class AgentRuntime:
             _record_source_command_text(clean_message)
         )
         outside_deed_detected = bool(
-            response.get("_attachment_model_failure_owned") is not True
+            not autonomous_engineer
+            and response.get("_attachment_model_failure_owned") is not True
             and response.get("_attachment_guard_rejection_owned") is not True
             and response.get("_obsidian_owned") is not True
             and not (
@@ -54336,7 +54349,8 @@ class AgentRuntime:
             response["voice_clip"] = None
             response["knowledge_object_ids"] = []
         archive_status_applicable = bool(
-            response.get("_office_exact_owned") is not True
+            not autonomous_engineer
+            and response.get("_office_exact_owned") is not True
             and response.get("_obsidian_owned") is not True
             and context.answer_mode == "general_conversation"
             and not context.asked_for_an_archive
@@ -54650,7 +54664,8 @@ class AgentRuntime:
             if requested
         )
         if (
-            response.get("_office_exact_owned") is not True
+            not autonomous_engineer
+            and response.get("_office_exact_owned") is not True
             and response.get("_obsidian_owned") is not True
             and response.get("_attachment_model_failure_owned") is not True
             and response.get("_attachment_guard_rejection_owned") is not True
@@ -54690,7 +54705,8 @@ class AgentRuntime:
         # remove the refusal while durable metadata still claimed it survived.
         unverified_outside_confirmation_prefixed = False
         source_search_exhaustive_rejected = bool(
-            context.source_search_used
+            not autonomous_engineer
+            and context.source_search_used
             and context.source_search_page_capped
             and (_WEB_EXHAUSTIVE_CLAIM.search(content) or _SOURCE_SEARCH_EXHAUSTIVE_CLAIM.search(content))
         )
@@ -54706,7 +54722,8 @@ class AgentRuntime:
             response["knowledge_object_ids"] = []
             response["_source_search_exhaustive_rejected"] = True
         office_summary_downgraded = bool(
-            response.get("_office_exact_owned") is not True
+            not autonomous_engineer
+            and response.get("_office_exact_owned") is not True
             and response.get("_obsidian_owned") is not True
             and not synthetic_document_notice
             and not office_exact_request_detected(clean_message)
@@ -54763,7 +54780,8 @@ class AgentRuntime:
                 office_summary_claims_removed,
             )
         office_model_claim_rejected = bool(
-            response.get("_office_exact_owned") is not True
+            not autonomous_engineer
+            and response.get("_office_exact_owned") is not True
             and response.get("_obsidian_owned") is not True
             # A bare upload notice is backend-authored and means “summarise the
             # attached source”, never “prove an exact list/count”.  Complete
@@ -54856,7 +54874,8 @@ class AgentRuntime:
             # match the requested surface.
             shape_contract = None
         shape_repair_allowed = bool(
-            not foreign_private_request
+            not autonomous_engineer
+            and not foreign_private_request
             and not dangerous_instruction_request
             and not dangerous_output_replaced
             and not stale_conversational_replay_replaced
@@ -55056,7 +55075,8 @@ class AgentRuntime:
         # must never be rewritten by the model judge/repair pair.
         model_said = (
             ""
-            if response.get("_office_exact_owned") is True
+            if response.get("_autonomous_engineer_owned") is True
+            or response.get("_office_exact_owned") is True
             or response.get("_obsidian_owned") is True
             or response.get("_unreadable_attachment_owned") is True
             or response.get("_attachment_model_failure_owned") is True
@@ -55086,7 +55106,7 @@ class AgentRuntime:
         # Читается ПОСЛЕ цикла: к утверждению могли добавиться факты о том, что
         # цикл успел СДЕЛАТЬ, — поставленное напоминание, собранный архив.
         # Снимок `settled` для этого не годится, он снят до них.
-        spoken = context.structural_answer
+        spoken = "" if autonomous_engineer else context.structural_answer
         if spoken:
             # Утверждение стоит ПЕРВЫМ и дословно. Порядок здесь не про красоту:
             # человек читает сверху вниз и первую строку прочтёт наверняка, а
@@ -55330,7 +55350,8 @@ class AgentRuntime:
                 "issues": [],
             }
         if (
-            not foreign_private_request
+            not autonomous_engineer
+            and not foreign_private_request
             and response.get("_office_exact_owned") is not True
             and response.get("_workspace_create_owned") is not True
             and response.get("_obsidian_owned") is not True
@@ -55890,7 +55911,7 @@ class AgentRuntime:
                 content,
                 (context.knowledge_citations or {}).keys(),
             )
-        if web_evidence_used:
+        if web_evidence_used and not autonomous_engineer:
             spoken_prefix = f"{spoken}\n\n" if spoken else ""
             pre_file_model_content = (
                 content[len(spoken_prefix) :]
@@ -55937,7 +55958,7 @@ class AgentRuntime:
             response["voice_clip"] = None
             LOGGER.warning("credential-output: Friday API token removed before output carriers")
         archive_public_summary = _archive_search_public_summary(context.archive_prepared_searches)
-        if context.archive_search_used:
+        if context.archive_search_used and not autonomous_engineer:
             content, archive_absence_replaced, archive_public_summary = _archive_search_guarded_content(
                 context, content
             )
@@ -56120,7 +56141,7 @@ class AgentRuntime:
         # Список поданных источников передаётся сюда: без него номерная метка
         # неотличима от настоящей, и `[K1]` при нуле документов доезжала до
         # человека как ссылка на его собственный архив.
-        if response.get("_obsidian_owned") is not True:
+        if not autonomous_engineer and response.get("_obsidian_owned") is not True:
             content = _strip_invented_citations(content, (context.knowledge_citations or {}).keys())
 
         # Owned shape answers are checked again at the last mutation boundary.
@@ -56145,7 +56166,7 @@ class AgentRuntime:
             content = exact_text_shape_body
             response["voice_clip"] = None
 
-        if web_evidence_used:
+        if web_evidence_used and not autonomous_engineer:
             # ``spoken`` is a code-owned completed deed and may legitimately
             # contain a URL supplied by the user (for example a reminder
             # target).  Reconcile only the model-authored remainder.
