@@ -191,6 +191,45 @@ class _TerminalImitationThenCommandModel:
         return {"content": "Проверка выполнена: repaired.", "tool_calls": None, "finish_reason": "stop"}
 
 
+class _UnstartedProgressThenCommandModel:
+    enabled = True
+    total_budget_sec = 1.0
+
+    def __init__(self) -> None:
+        self.calls = 0
+        self.tool_choices: list[str | None] = []
+
+    async def chat(self, _messages, *, tools=None, tool_choice=None, **_kwargs):  # noqa: ANN001
+        self.calls += 1
+        self.tool_choices.append(tool_choice)
+        if self.calls == 1:
+            return {
+                "content": "Собираю сводку по файлу hui2.exe.",
+                "tool_calls": None,
+                "finish_reason": "stop",
+            }
+        if self.calls == 2:
+            assert tool_choice == "engineer_command_run"
+            return {
+                "content": "",
+                "tool_calls": [
+                    {
+                        "id": "forced-command-after-false-progress",
+                        "function": {
+                            "name": "engineer_command_run",
+                            "arguments": json.dumps({"command": "printf inspected"}),
+                        },
+                    }
+                ],
+                "finish_reason": "tool_calls",
+            }
+        return {
+            "content": "Файл проверен: inspected.",
+            "tool_calls": None,
+            "finish_reason": "stop",
+        }
+
+
 class _CommandKernel:
     def __init__(self) -> None:
         self.executions: list[tuple[str, dict[str, object], ActorContext]] = []
@@ -486,6 +525,37 @@ async def test_reserved_terminal_imitation_is_repaired_into_real_command(
     assert model.calls == 3
     assert [entry[1]["command"] for entry in kernel.executions] == ["printf repaired"]
     assert response["content"] == "Проверка выполнена: repaired."
+
+
+@pytest.mark.asyncio
+async def test_unstarted_engineer_progress_is_repaired_into_a_real_command(
+    settings,
+    storage,
+    monkeypatch,
+) -> None:
+    actor = ActorContext(LEGACY_OWNER_USER_ID, "owner", "telegram-bridge")
+    storage.ensure_user(actor.own_id, preset_key="owner")
+    model = _UnstartedProgressThenCommandModel()
+    kernel = _CommandKernel()
+    runtime = AgentRuntime(
+        replace(settings, engineer_mode_enabled=True, engineer_command_enabled=True),
+        storage,
+        llm=model,  # type: ignore[arg-type]
+        kernel=kernel,  # type: ignore[arg-type]
+    )
+    monkeypatch.setattr(runtime, "_fresh_engineer_actor", lambda current, _capability: current)
+
+    response = await runtime._agentic_loop(  # noqa: SLF001
+        _context(),
+        "Дай сводку по приложенному EXE.",
+        actor,
+        tools=[_schema("engineer_command_run")],
+        attachments=None,
+    )
+
+    assert model.tool_choices == [None, "engineer_command_run", None]
+    assert [entry[1]["command"] for entry in kernel.executions] == ["printf inspected"]
+    assert response["content"] == "Файл проверен: inspected."
 
 
 @pytest.mark.asyncio

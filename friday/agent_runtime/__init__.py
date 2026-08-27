@@ -2201,6 +2201,44 @@ _ENGINEER_RESERVED_TERMINAL_REPAIR = (
     "вызови engineer_command_run и опирайся только на его фактический результат; иначе ответь "
     "обычным текстом без утверждения о выполненном задании."
 )
+_ENGINEER_UNSTARTED_PROGRESS_CLAIM = re.compile(
+    r"^\W*(?:(?:да|ок(?:ей)?|принято|хорошо|понял(?:а)?|yes|ok(?:ay)?|sure)"
+    r"[\s,.:;—–-]+)?"
+    r"(?:(?:я|мы)\s+)?(?:(?:уже|сейчас|теперь|прямо\s+сейчас)\s+)?(?:"
+    r"(?:начина|запуска|выполня|сканир|просканир|проверя|анализир|исследу|"
+    r"разбира|декомпилиру|компилиру|собира|устанавлива|скачива|ищу|готовлю|"
+    r"созда|исправля|тестиру|подключа)\w*\b|"
+    r"(?:сканирован|провер|анализ|разбор|декомпиляц|компиляц|сборк|установк|"
+    r"загрузк|поиск|тест|команд|задач)\w*\s+"
+    r"(?:запущен\w*|начат\w*|выполняется|ид[её]т|в\s+процессе)\b|"
+    r"(?:i(?:'m|\s+am)|we(?:'re|\s+are))\s+"
+    r"(?:starting|running|scanning|checking|analysing|analyzing|building|"
+    r"compiling|decompiling|installing|testing|fixing)\b|"
+    r"(?:starting|running|scanning|checking|analysing|analyzing|building|"
+    r"compiling|decompiling|installing|testing|fixing)\b|"
+    r"(?:scan|check|analysis|build|compilation|decompilation|installation|"
+    r"test|command|task)\s+(?:has\s+)?(?:started|is\s+running|is\s+in\s+progress)\b"
+    r")",
+    re.IGNORECASE,
+)
+_ENGINEER_UNSTARTED_PROGRESS_REPAIR = (
+    "Предыдущий ответ заявил, что работа уже началась, но в этом ходе не было ни одного "
+    "вызова инструмента. Текст не запускает действие. Если запрос требует работы на машине, "
+    "вызови engineer_command_run прямо сейчас; если действие не требуется или отменено, ответь "
+    "без утверждения о запущенной работе."
+)
+
+
+def _engineer_claims_unstarted_progress(answer: str) -> bool:
+    """Reject a progress status which has no command/tool observation behind it."""
+
+    return any(
+        not clause.rstrip().endswith("?")
+        and _ENGINEER_UNSTARTED_PROGRESS_CLAIM.search(_classification_text(clause)) is not None
+        for clause in _model_authored_clauses(answer)
+    )
+
+
 _ENGINEER_RECEIPT_BASE_TOOL_VERSIONS = {
     "engineer_organ": "builtin-v1",
     "host_probe": "bounded-connect-v1",
@@ -63352,6 +63390,19 @@ class AgentRuntime:
                 "_workspace_create_owned": True,
             }
 
+        def engineer_command_start_failure() -> dict[str, Any]:
+            return {
+                "content": "Работа не запускалась: командный инструмент не принял вызов в этом ходе.",
+                "tools_used": tools_used,
+                "web_query_notice": " ".join(web_notice),
+                "knowledge_object_ids": tool_knowledge_ids,
+                "tool_evidence": tool_evidence,
+                "voice_clip": voice_clip,
+                "file_clips": file_clips,
+                "_structural_file_count": structural_file_count,
+                "llm_failed": True,
+            }
+
         if workspace_channel_requested and workspace_intent is None:
             return workspace_create_failure(
                 "Не удалось однозначно определить одно безопасное имя текстового файла "
@@ -63369,6 +63420,7 @@ class AgentRuntime:
             )
         total_calls = 0
         engineer_patch_started = False
+        engineer_progress_repair_pending = False
         last_failed_engineer_command_fingerprint = ""
         last_failed_engineer_command_error = "command_failed"
         max_tool_calls, max_tool_rounds = _MODE_TOOL_BUDGETS.get(
@@ -63419,12 +63471,20 @@ class AgentRuntime:
                 if isinstance(tool, Mapping)
             }
             forced_workspace_call = workspace_intent is not None
+            forced_engineer_progress_call = engineer_progress_repair_pending
+            engineer_progress_repair_pending = False
             try:
                 if forced_workspace_call:
                     result = await attachment_bounded_chat(
                         messages,
                         tools=tools,
                         tool_choice="workspace_create",
+                    )
+                elif forced_engineer_progress_call:
+                    result = await attachment_bounded_chat(
+                        messages,
+                        tools=tools,
+                        tool_choice="engineer_command_run",
                     )
                 elif archive_search_requested and not context.archive_search_used:
                     result = await attachment_bounded_chat(
@@ -63498,6 +63558,8 @@ class AgentRuntime:
                     "Не удалось создать файл во внешнем MCP outbox: текущий транспорт "
                     "не принял возможность workspace_create. Файл не создан."
                 )
+            if forced_engineer_progress_call and "engineer_command_run" not in offered_tool_names:
+                return engineer_command_start_failure()
 
             raw_native_calls = result.get("tool_calls")
             finish_reason = str(result.get("finish_reason") or "stop")
@@ -63519,6 +63581,8 @@ class AgentRuntime:
                             "Не удалось создать файл во внешнем MCP outbox: модель не "
                             "сформировала подтверждаемый вызов workspace_create. Файл не создан."
                         )
+                    if forced_engineer_progress_call:
+                        return engineer_command_start_failure()
                     # Разметка вызова снимается ЗДЕСЬ, а не раньше: до этой точки
                     # текст ещё может оказаться настоящим вызовом, который
                     # `tool_protocol` распознает и исполнит. Здесь он уже признан
@@ -63541,6 +63605,22 @@ class AgentRuntime:
                         # fabricate a job/archive instead of starting the task.
                         LOGGER.warning("Autonomous Engineer imitated a terminal notification; repairing")
                         messages.append({"role": "system", "content": _ENGINEER_RESERVED_TERMINAL_REPAIR})
+                        continue
+                    if (
+                        autonomous_engineer
+                        and total_calls == 0
+                        and _engineer_claims_unstarted_progress(clean_answer)
+                    ):
+                        if "engineer_command_run" not in offered_tool_names:
+                            LOGGER.warning(
+                                "Autonomous Engineer claimed progress without an executable command lane"
+                            )
+                            return engineer_command_start_failure()
+                        LOGGER.warning(
+                            "Autonomous Engineer claimed unstarted progress; forcing command repair"
+                        )
+                        engineer_progress_repair_pending = True
+                        messages.append({"role": "system", "content": _ENGINEER_UNSTARTED_PROGRESS_REPAIR})
                         continue
                     model_output_truncated = finish_reason == "length" and not context.deferred_web_file_body
                     if model_output_truncated:
