@@ -883,7 +883,10 @@ async def test_tool_enabled_attachment_bounds_first_and_final_model_calls_withou
             },
         }
     ]
-    cap = 0.08
+    # The canonical gate runs twelve workers.  An 80 ms wall-clock allowance
+    # could expire while a worker was merely descheduled, before the second
+    # await whose shared-deadline behaviour this test actually exercises.
+    cap = 0.5
     monkeypatch.setattr(agent_runtime_module, "_ATTACHMENT_GENERATION_TIMEOUT_SEC", cap)
     real_wait_for = asyncio.wait_for
     observed_timeouts: list[float] = []
@@ -1040,7 +1043,10 @@ async def test_attachment_remainder_and_semantic_reminder_share_one_primary_dead
 
     storage.ensure_user("alice", preset_key="owner")
     auth = AuthorizationService(storage)
-    cap = 0.08
+    # Leave enough wall-clock headroom for a descheduled xdist worker; the
+    # assertions below still prove that the second call receives only the
+    # remainder of the original, never-renewed deadline.
+    cap = 0.5
     observed_timeouts: list[float] = []
     real_wait_for = asyncio.wait_for
 
@@ -1142,7 +1148,9 @@ async def test_attachment_late_file_filler_uses_primary_remainder_without_file_e
 
     storage.ensure_user("alice", preset_key="owner")
     auth = AuthorizationService(storage)
-    cap = 0.08
+    # Keep this a real timeout test without making an 80 ms scheduler slice a
+    # correctness prerequisite under the twelve-worker canonical gate.
+    cap = 0.5
     observed_timeouts: list[float] = []
     real_wait_for = asyncio.wait_for
     context_holder: dict[str, AgentContext] = {}
