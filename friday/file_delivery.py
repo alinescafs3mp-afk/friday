@@ -26,20 +26,43 @@ import json
 import os
 import re
 import stat
-from collections.abc import Mapping
-from dataclasses import dataclass
+from collections.abc import Mapping, Sequence
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 from urllib.parse import quote
 
-from friday.source_identity import AuthorizedFileSnapshotToken, authorized_file_snapshot_token
-from friday.storage._privacy import _exact_uploader_raw_dependency, _not_private_raw_dependency
+from friday.permissions import ActorContext, AuthorizationService
+from friday.source_identity import (
+    AuthorizedFileSnapshotToken,
+    authorized_file_snapshot_token,
+    authorized_file_snapshot_token_is_process_owned,
+)
+from friday.storage._privacy import (
+    _exact_uploader_raw_dependency,
+    _not_private_knowledge_dependency,
+    _not_private_raw_dependency,
+    _not_private_raw_material_dependency,
+)
 
 _READ_CHUNK_BYTES = 1024 * 1024
 _MAX_STORED_PATH_CHARS = 16_384
 _MAX_DOWNLOAD_FILENAME_CHARS = 255
 _MIME_TYPE = re.compile(r"^[A-Za-z0-9!#$&^_.+-]+/[A-Za-z0-9!#$&^_.+-]+$")
 _HEX64 = re.compile(r"^[0-9a-fA-F]{64}$")
+_OPAQUE_ID = re.compile(r"^[^\x00-\x1f\x7f]{1,200}$")
+_TELEGRAM_UPDATE_ID = re.compile(r"^[0-9]{1,20}$")
+_MAX_CURRENT_MESSAGE_UPLOADS = 100
+_MESSAGE_SOURCE_IDENTITY_FIELDS = (
+    "id",
+    "conversation_id",
+    "user_id",
+    "role",
+    "content",
+    "metadata_json",
+    "reply_to",
+    "created_at",
+)
 
 LEGACY_UNREGISTERED = "legacy_unregistered"
 REGISTERED_VALID = "registered_valid"
@@ -76,6 +99,38 @@ class AuthorizedCurrentUpload:
 
     raw: Mapping[str, Any]
     file: AuthorizedFileBytes
+
+
+@dataclass(frozen=True, slots=True)
+class CurrentMessageUploadFileIdentity:
+    """Path-free identity of one exact current-message upload."""
+
+    raw_id: str
+    source_identity_sha256: str
+    content_sha256: str
+    size_bytes: int
+    filename: str
+    mime_type: str
+
+
+@dataclass(frozen=True, slots=True)
+class CurrentMessageUploadBatchIdentity:
+    """Durable values which any later execution must match exactly."""
+
+    source_message_id: str
+    conversation_id: str
+    source_message_identity_sha256: str
+    telegram_update_id: str
+    uploaded_raw_ids: tuple[str, ...]
+    files: tuple[CurrentMessageUploadFileIdentity, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class AuthorizedCurrentMessageUploadBatch:
+    """Exact immutable bytes and identities from one SQLite snapshot."""
+
+    identity: CurrentMessageUploadBatchIdentity
+    files: tuple[AuthorizedFileBytes, ...]
 
 
 @dataclass(frozen=True, slots=True)
@@ -278,6 +333,16 @@ def _current_upload_row(
     (or the exact durable user-message pointer minted from that upload).
     """
 
+    visible_knowledge = _not_private_knowledge_dependency("current_upload_knowledge")
+    not_quarantined = f"""(
+        {_not_private_raw_material_dependency("r")}
+        AND NOT EXISTS (
+            SELECT 1 FROM knowledge_objects current_upload_knowledge
+             WHERE current_upload_knowledge.raw_object_id=r.id
+               AND current_upload_knowledge.user_id=r.user_id
+               AND NOT ({visible_knowledge})
+        )
+    )"""
     return conn.execute(
         f"""SELECT r.id, r.user_id, r.source, r.source_ref, r.content_type,
                    r.received_at, r.content_hash, r.raw_content,
@@ -286,7 +351,8 @@ def _current_upload_row(
               FROM raw_objects r
              WHERE r.id=? AND r.user_id=? AND r.source='upload'
                AND r.content_type='file' AND r.deleted_at IS NULL
-               AND {_exact_uploader_raw_dependency("r")}""",  # nosec B608 - fixed predicate
+               AND {_exact_uploader_raw_dependency("r")}
+               AND {not_quarantined}""",  # nosec B608 - fixed predicates
         (str(raw_id), str(tenant_id), str(person_id)),
     ).fetchone()
 
@@ -419,6 +485,390 @@ def read_current_message_upload_file(
         if current is None or str(current["content_hash"] or "") != str(row["content_hash"] or ""):
             raise FileRecordUnavailable
         return stored
+
+
+def authorize_current_message_upload_batch(
+    storage: Any,
+    root: Path,
+    authorization: AuthorizationService,
+    actor: ActorContext,
+    *,
+    conversation_id: str,
+    source_message_id: str,
+    telegram_update_id: str,
+    uploaded_raw_ids: Sequence[str],
+    max_bytes_per_file: int | None = None,
+) -> AuthorizedCurrentMessageUploadBatch:
+    """Read only the exact uploads recorded on one current Telegram user row.
+
+    The durable user-message row, active principal, files.read decision, Raw
+    identities and registered bytes are all observed under one BEGIN IMMEDIATE
+    transaction. conversation_attachment_raw_ids is deliberately never an
+    authority: quoted, restored and ambient pointers cannot enter this batch.
+    """
+
+    with storage.transaction() as conn:
+        return authorize_current_message_upload_batch_in_transaction(
+            conn,
+            root,
+            authorization,
+            actor,
+            conversation_id=conversation_id,
+            source_message_id=source_message_id,
+            telegram_update_id=telegram_update_id,
+            uploaded_raw_ids=uploaded_raw_ids,
+            max_bytes_per_file=max_bytes_per_file,
+        )
+
+
+def authorize_current_message_upload_batch_in_transaction(
+    conn: Any,
+    root: Path,
+    authorization: AuthorizationService,
+    actor: ActorContext,
+    *,
+    conversation_id: str,
+    source_message_id: str,
+    telegram_update_id: str,
+    uploaded_raw_ids: Sequence[str],
+    max_bytes_per_file: int | None = None,
+) -> AuthorizedCurrentMessageUploadBatch:
+    """Transaction-scoped first read of an exact current-message upload batch."""
+
+    raw_ids = _freeze_current_upload_raw_ids(uploaded_raw_ids)
+    update_id = _canonical_telegram_update_id(telegram_update_id)
+    return _authorize_current_message_upload_batch_in_transaction(
+        conn,
+        root,
+        authorization,
+        actor,
+        conversation_id=_bounded_identity(conversation_id),
+        source_message_id=_bounded_identity(source_message_id),
+        telegram_update_id=update_id,
+        uploaded_raw_ids=raw_ids,
+        expected_identity=None,
+        max_bytes_per_file=max_bytes_per_file,
+    )
+
+
+def reauthorize_current_message_upload_batch(
+    storage: Any,
+    root: Path,
+    authorization: AuthorizationService,
+    actor: ActorContext,
+    *,
+    expected: CurrentMessageUploadBatchIdentity,
+    max_bytes_per_file: int | None = None,
+) -> AuthorizedCurrentMessageUploadBatch:
+    """Re-read a previously frozen batch and reject any identity drift."""
+
+    with storage.transaction() as conn:
+        return reauthorize_current_message_upload_batch_in_transaction(
+            conn,
+            root,
+            authorization,
+            actor,
+            expected=expected,
+            max_bytes_per_file=max_bytes_per_file,
+        )
+
+
+def reauthorize_current_message_upload_batch_in_transaction(
+    conn: Any,
+    root: Path,
+    authorization: AuthorizationService,
+    actor: ActorContext,
+    *,
+    expected: CurrentMessageUploadBatchIdentity,
+    max_bytes_per_file: int | None = None,
+) -> AuthorizedCurrentMessageUploadBatch:
+    """Transaction-scoped exact reauthorization for deferred execution."""
+
+    if type(expected) is not CurrentMessageUploadBatchIdentity:
+        raise FileRecordUnavailable
+    raw_ids = _freeze_current_upload_raw_ids(expected.uploaded_raw_ids)
+    if (
+        type(expected.files) is not tuple
+        or len(expected.files) != len(raw_ids)
+        or any(type(item) is not CurrentMessageUploadFileIdentity for item in expected.files)
+        or tuple(item.raw_id for item in expected.files) != raw_ids
+    ):
+        raise FileRecordUnavailable
+    return _authorize_current_message_upload_batch_in_transaction(
+        conn,
+        root,
+        authorization,
+        actor,
+        conversation_id=_bounded_identity(expected.conversation_id),
+        source_message_id=_bounded_identity(expected.source_message_id),
+        telegram_update_id=_canonical_telegram_update_id(expected.telegram_update_id),
+        uploaded_raw_ids=raw_ids,
+        expected_identity=expected,
+        max_bytes_per_file=max_bytes_per_file,
+    )
+
+
+def _authorize_current_message_upload_batch_in_transaction(
+    conn: Any,
+    root: Path,
+    authorization: AuthorizationService,
+    actor: ActorContext,
+    *,
+    conversation_id: str,
+    source_message_id: str,
+    telegram_update_id: str,
+    uploaded_raw_ids: tuple[str, ...],
+    expected_identity: CurrentMessageUploadBatchIdentity | None,
+    max_bytes_per_file: int | None,
+) -> AuthorizedCurrentMessageUploadBatch:
+    if not getattr(conn, "in_transaction", False):
+        raise FileRecordUnavailable
+    fresh_actor = _fresh_current_upload_actor(conn, authorization, actor)
+    source_row = _current_telegram_user_message(
+        conn,
+        tenant_id=fresh_actor.user_id,
+        conversation_id=conversation_id,
+        source_message_id=source_message_id,
+    )
+    source_identity, current_update, current_raw_ids = _current_upload_message_identity(source_row)
+    if current_update != telegram_update_id or current_raw_ids != uploaded_raw_ids:
+        raise FileRecordUnavailable
+    if expected_identity is not None and (
+        expected_identity.source_message_identity_sha256 != source_identity
+        or expected_identity.source_message_id != source_message_id
+        or expected_identity.conversation_id != conversation_id
+        or expected_identity.telegram_update_id != telegram_update_id
+        or expected_identity.uploaded_raw_ids != uploaded_raw_ids
+    ):
+        raise FileRecordUnavailable
+
+    files: list[AuthorizedFileBytes] = []
+    identities: list[CurrentMessageUploadFileIdentity] = []
+    raw_tokens: list[AuthorizedFileSnapshotToken] = []
+    for index, raw_id in enumerate(uploaded_raw_ids):
+        row = _current_upload_row(
+            conn,
+            raw_id=raw_id,
+            tenant_id=fresh_actor.user_id,
+            person_id=fresh_actor.own_id,
+        )
+        if row is None:
+            raise FileRecordUnavailable
+        stored = _read_authorized_row(row, root, max_bytes=max_bytes_per_file)
+        token = stored.snapshot_token
+        if token is None or not authorized_file_snapshot_token_is_process_owned(token):
+            raise FileRecordUnavailable
+        content_digest = hashlib.sha256(stored.content).hexdigest()
+        if not hmac.compare_digest(content_digest, token.content_sha256):
+            raise FileRecordUnavailable
+        identity = CurrentMessageUploadFileIdentity(
+            raw_id=raw_id,
+            source_identity_sha256=token.source.identity_sha256,
+            content_sha256=content_digest,
+            size_bytes=len(stored.content),
+            filename=stored.filename,
+            mime_type=stored.mime_type,
+        )
+        if expected_identity is not None and identity != expected_identity.files[index]:
+            raise FileRecordUnavailable
+        files.append(stored)
+        identities.append(identity)
+        raw_tokens.append(token)
+
+    # Recheck every authority after the last descriptor read. The SQLite writer
+    # boundary prevents an external commit in between; the second projection
+    # also rejects a same-connection mutation or a corrupted row adapter.
+    final_source = _current_telegram_user_message(
+        conn,
+        tenant_id=fresh_actor.user_id,
+        conversation_id=conversation_id,
+        source_message_id=source_message_id,
+    )
+    if _current_upload_message_identity(final_source) != (
+        source_identity,
+        telegram_update_id,
+        uploaded_raw_ids,
+    ):
+        raise FileRecordUnavailable
+    for raw_id, token in zip(uploaded_raw_ids, raw_tokens, strict=True):
+        current = _current_upload_row(
+            conn,
+            raw_id=raw_id,
+            tenant_id=fresh_actor.user_id,
+            person_id=fresh_actor.own_id,
+        )
+        if current is None:
+            raise FileRecordUnavailable
+        refreshed = authorized_file_snapshot_token(
+            dict(current),
+            content_sha256=token.content_sha256,
+        )
+        if (
+            not authorized_file_snapshot_token_is_process_owned(refreshed)
+            or refreshed != token
+        ):
+            raise FileRecordUnavailable
+    _fresh_current_upload_actor(conn, authorization, fresh_actor)
+
+    frozen_identities = tuple(identities)
+    batch_identity = CurrentMessageUploadBatchIdentity(
+        source_message_id=source_message_id,
+        conversation_id=conversation_id,
+        source_message_identity_sha256=source_identity,
+        telegram_update_id=telegram_update_id,
+        uploaded_raw_ids=uploaded_raw_ids,
+        files=frozen_identities,
+    )
+    if expected_identity is not None and batch_identity != expected_identity:
+        raise FileRecordUnavailable
+    return AuthorizedCurrentMessageUploadBatch(
+        identity=batch_identity,
+        files=tuple(files),
+    )
+
+
+def _fresh_current_upload_actor(
+    conn: Any,
+    authorization: AuthorizationService,
+    actor: ActorContext,
+) -> ActorContext:
+    if (
+        type(actor) is not ActorContext
+        or actor.source != "telegram-bridge"
+        or not _bounded_identity(actor.user_id)
+        or not _bounded_identity(actor.own_id)
+        or authorization.storage is None
+        or authorization.storage.conn is not conn
+    ):
+        raise FileRecordUnavailable
+    principal = conn.execute(
+        "SELECT preset_key, status FROM users WHERE id=?",
+        (actor.own_id,),
+    ).fetchone()
+    tenant = (
+        principal
+        if actor.user_id == actor.own_id
+        else conn.execute(
+            "SELECT status FROM users WHERE id=?",
+            (actor.user_id,),
+        ).fetchone()
+    )
+    if (
+        principal is None
+        or tenant is None
+        or str(principal["status"] or "") != "active"
+        or str(tenant["status"] or "") != "active"
+    ):
+        raise FileRecordUnavailable
+    fresh = replace(actor, preset_key=str(principal["preset_key"] or "guest"))
+    decision = authorization.authorize(fresh, "files.read")
+    if (
+        not decision.allowed
+        or decision.security_id != "files.read"
+        or decision.user_id != fresh.own_id
+        or decision.preset_key != fresh.preset_key
+    ):
+        raise FileRecordUnavailable
+    return fresh
+
+
+def _current_telegram_user_message(
+    conn: Any,
+    *,
+    tenant_id: str,
+    conversation_id: str,
+    source_message_id: str,
+) -> Any:
+    row = conn.execute(
+        """SELECT m.id, m.conversation_id, m.user_id, m.role, m.content,
+                  m.metadata_json, m.reply_to, m.created_at
+             FROM messages m
+             JOIN conversations c
+               ON c.id=m.conversation_id AND c.user_id=m.user_id
+            WHERE m.id=? AND m.conversation_id=? AND m.user_id=?
+              AND m.role='user'""",
+        (source_message_id, conversation_id, tenant_id),
+    ).fetchone()
+    if row is None:
+        raise FileRecordUnavailable
+    return row
+
+
+def _current_upload_message_identity(row: Any) -> tuple[str, str, tuple[str, ...]]:
+    if row is None:
+        raise FileRecordUnavailable
+    metadata = _strict_metadata_object(row["metadata_json"])
+    if metadata is None:
+        raise FileRecordUnavailable
+    update_id = metadata.get("telegram_update_id")
+    uploaded = metadata.get("conversation_uploaded_raw_ids")
+    try:
+        raw_ids = _freeze_current_upload_raw_ids(uploaded)
+        canonical_update = _canonical_telegram_update_id(update_id)
+    except FileRecordUnavailable:
+        raise
+    digest = hashlib.sha256()
+    for field_name in _MESSAGE_SOURCE_IDENTITY_FIELDS:
+        try:
+            value = row[field_name]
+        except (KeyError, IndexError, TypeError) as exc:
+            raise FileRecordUnavailable from exc
+        if value is None:
+            encoded = b"N"
+        elif isinstance(value, str):
+            encoded = b"S" + value.encode("utf-8", errors="surrogatepass")
+        else:
+            raise FileRecordUnavailable
+        name = field_name.encode("ascii")
+        digest.update(len(name).to_bytes(2, "big"))
+        digest.update(name)
+        digest.update(len(encoded).to_bytes(8, "big"))
+        digest.update(encoded)
+    return digest.hexdigest(), canonical_update, raw_ids
+
+
+def _strict_metadata_object(value: Any) -> dict[str, Any] | None:
+    if not isinstance(value, str) or len(value.encode("utf-8", errors="surrogatepass")) > 1_048_576:
+        return None
+
+    def reject_duplicates(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+        result: dict[str, Any] = {}
+        for key, item in pairs:
+            if key in result:
+                raise ValueError("duplicate JSON key")
+            result[key] = item
+        return result
+
+    try:
+        parsed = json.loads(value, object_pairs_hook=reject_duplicates)
+    except (UnicodeError, ValueError):
+        return None
+    return parsed if isinstance(parsed, dict) else None
+
+
+def _bounded_identity(value: Any) -> str:
+    if not isinstance(value, str) or _OPAQUE_ID.fullmatch(value) is None:
+        raise FileRecordUnavailable
+    return value
+
+
+def _canonical_telegram_update_id(value: Any) -> str:
+    if not isinstance(value, str) or _TELEGRAM_UPDATE_ID.fullmatch(value) is None:
+        raise FileRecordUnavailable
+    return value
+
+
+def _freeze_current_upload_raw_ids(value: Any) -> tuple[str, ...]:
+    if isinstance(value, (str, bytes, bytearray)) or not isinstance(value, Sequence):
+        raise FileRecordUnavailable
+    frozen = tuple(value)
+    if (
+        not 1 <= len(frozen) <= _MAX_CURRENT_MESSAGE_UPLOADS
+        or any(not isinstance(raw_id, str) or _OPAQUE_ID.fullmatch(raw_id) is None for raw_id in frozen)
+        or len(set(frozen)) != len(frozen)
+    ):
+        raise FileRecordUnavailable
+    return frozen
 
 
 def read_authorized_generated_file(
@@ -621,14 +1071,19 @@ def _read_regular_file(
 
 __all__ = [
     "AuthorizedCurrentUpload",
+    "AuthorizedCurrentMessageUploadBatch",
     "AuthorizedFileBytes",
     "AuthorizedFileReadError",
+    "CurrentMessageUploadBatchIdentity",
+    "CurrentMessageUploadFileIdentity",
     "FileRecordUnavailable",
     "FileRegistrationVerdict",
     "LEGACY_UNREGISTERED",
     "REGISTERED_INVALID",
     "REGISTERED_VALID",
     "attachment_content_disposition",
+    "authorize_current_message_upload_batch",
+    "authorize_current_message_upload_batch_in_transaction",
     "authorize_current_upload_file",
     "authorize_current_upload_file_in_transaction",
     "classify_file_registration",
@@ -636,5 +1091,7 @@ __all__ = [
     "read_authorized_file_in_transaction",
     "read_authorized_generated_file",
     "read_current_message_upload_file",
+    "reauthorize_current_message_upload_batch",
+    "reauthorize_current_message_upload_batch_in_transaction",
     "verify_registered_file_bytes",
 ]
