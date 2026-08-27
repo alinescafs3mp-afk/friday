@@ -167,10 +167,7 @@ class CommandInputDescriptor:
             raise CommandError("input_source_identity_invalid")
         if type(self.content_sha256) is not str or _SHA256.fullmatch(self.content_sha256) is None:
             raise CommandError("input_content_identity_invalid")
-        if (
-            type(self.size_bytes) is not int
-            or not 0 <= self.size_bytes <= MAX_INPUT_FILE_BYTES
-        ):
+        if type(self.size_bytes) is not int or not 0 <= self.size_bytes <= MAX_INPUT_FILE_BYTES:
             raise CommandError("input_file_size_invalid")
         if not _original_filename_is_canonical(self.original_filename):
             raise CommandError("input_filename_invalid")
@@ -181,11 +178,7 @@ class CommandInputDescriptor:
             or self.mime_type != self.mime_type.casefold()
         ):
             raise CommandError("input_mime_type_invalid")
-        path_match = (
-            _SANDBOX_PATH.fullmatch(self.sandbox_path)
-            if type(self.sandbox_path) is str
-            else None
-        )
+        path_match = _SANDBOX_PATH.fullmatch(self.sandbox_path) if type(self.sandbox_path) is str else None
         if path_match is None or "//" in self.sandbox_path:
             raise CommandError("input_sandbox_path_invalid")
         position = int(self.sandbox_path[len(SANDBOX_INPUT_ROOT) + 1 :].split("-", 1)[0])

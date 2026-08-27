@@ -55,10 +55,7 @@ def _assert_body_safe(value: object) -> None:
 
 
 def test_empty_manifest_has_one_exact_canonical_identity() -> None:
-    expected = (
-        b'{"files":[],"schema":"friday.engineer.command-input-manifest.v1",'
-        b'"total_size_bytes":0}'
-    )
+    expected = b'{"files":[],"schema":"friday.engineer.command-input-manifest.v1","total_size_bytes":0}'
 
     assert CommandInputManifest() == EMPTY_INPUT_MANIFEST
     assert EMPTY_INPUT_MANIFEST.canonical_bytes() == expected
@@ -138,8 +135,7 @@ def test_manifest_enforces_per_file_total_and_count_limits() -> None:
         _descriptor(1, 1, size_bytes=MAX_INPUT_FILE_BYTES + 1)
 
     over_total = tuple(
-        _descriptor(position, position, size_bytes=MAX_INPUT_FILE_BYTES)
-        for position in range(1, 4)
+        _descriptor(position, position, size_bytes=MAX_INPUT_FILE_BYTES) for position in range(1, 4)
     )
     with pytest.raises(CommandError, match="input_manifest_size_invalid"):
         command_input_manifest(over_total)

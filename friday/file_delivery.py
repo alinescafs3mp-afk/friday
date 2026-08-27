@@ -703,10 +703,7 @@ def _authorize_current_message_upload_batch_in_transaction(
             dict(current),
             content_sha256=token.content_sha256,
         )
-        if (
-            not authorized_file_snapshot_token_is_process_owned(refreshed)
-            or refreshed != token
-        ):
+        if not authorized_file_snapshot_token_is_process_owned(refreshed) or refreshed != token:
             raise FileRecordUnavailable
     _fresh_current_upload_actor(conn, authorization, fresh_actor)
 
