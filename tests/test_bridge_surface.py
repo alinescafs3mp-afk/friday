@@ -434,9 +434,7 @@ EXPECTED_INBOX: dict[str, str] = {
     "begin_answer_chunk_delivery": ("(self, update_id: 'int', count: 'int') -> 'tuple[int, int] | None'"),
     "begin_answer_delivery_uncertainty_notice": "(self, update_id: 'int') -> 'bool'",
     "begin_notification_part_delivery": "(self, notification_id: 'str', part_key: 'str') -> 'str'",
-    "begin_telegram_status_send": (
-        "(self, chat_id: 'int', operation_id: 'str', revision: 'int') -> 'str'"
-    ),
+    "begin_telegram_status_send": ("(self, chat_id: 'int', operation_id: 'str', revision: 'int') -> 'str'"),
     "clear_telegram_status_send_fence": (
         "(self, chat_id: 'int', operation_id: 'str', revision: 'int') -> 'bool'"
     ),
@@ -486,9 +484,7 @@ EXPECTED_INBOX: dict[str, str] = {
     "stats": "(self) -> 'dict[str, int]'",
     "store": "(self, update: 'dict[str, Any]') -> 'bool'",
     "telegram_status_message": "(self, chat_id: 'int', operation_id: 'str') -> 'dict[str, Any] | None'",
-    "telegram_status_send_fence": (
-        "(self, chat_id: 'int', operation_id: 'str') -> 'dict[str, int] | None'"
-    ),
+    "telegram_status_send_fence": ("(self, chat_id: 'int', operation_id: 'str') -> 'dict[str, int] | None'"),
     "record_telegram_status_message": (
         "(self, chat_id: 'int', operation_id: 'str', message_id: 'int', revision: 'int', "
         "terminal: 'bool', *, expected_revision: 'int | None') -> 'bool'"

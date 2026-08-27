@@ -427,16 +427,16 @@ async def test_terminal_text_pending_does_not_require_file_read(settings, storag
                 tenant_id=LEGACY_OWNER_USER_ID,
                 actor_id=LEGACY_OWNER_USER_ID,
             )["body"],
-                "kind": TERMINAL_TEXT_NOTIFICATION_KIND,
-                "dedup_key": staged.dedup_key,
-                "status_update": {
-                    "schema": "friday.telegram-status.v1",
-                    "operation_id": f"engineer:{'3' * 32}",
-                    "revision": (1 << 63) - 1,
-                    "terminal": True,
-                    "stage": "completed",
-                },
-            }
+            "kind": TERMINAL_TEXT_NOTIFICATION_KIND,
+            "dedup_key": staged.dedup_key,
+            "status_update": {
+                "schema": "friday.telegram-status.v1",
+                "operation_id": f"engineer:{'3' * 32}",
+                "revision": (1 << 63) - 1,
+                "terminal": True,
+                "stage": "completed",
+            },
+        }
     ]
 
 

@@ -258,22 +258,22 @@ async def test_pending_reauthorizes_progress_and_files_read_is_not_required(sett
                 "Этап: выполняется команда. Получено вывода: stdout 17 Б, stderr 3 Б. "
                 "Жёсткий тайм-аут не задан."
             ),
-                "kind": PROGRESS_NOTIFICATION_KIND,
-                "dedup_key": staged.dedup_key,
-                "status_update": {
-                    "schema": "friday.telegram-status.v1",
-                    "operation_id": f"engineer:{'1' * 32}",
-                    "revision": 60,
-                    "terminal": False,
-                    "stage": "command_running",
-                    "elapsed_sec": 60,
-                    "timeout_sec": 0,
-                    "remaining_sec": None,
-                    "stdout_bytes": 17,
-                    "stderr_bytes": 3,
-                    "output_activity": True,
-                },
-            }
+            "kind": PROGRESS_NOTIFICATION_KIND,
+            "dedup_key": staged.dedup_key,
+            "status_update": {
+                "schema": "friday.telegram-status.v1",
+                "operation_id": f"engineer:{'1' * 32}",
+                "revision": 60,
+                "terminal": False,
+                "stage": "command_running",
+                "elapsed_sec": 60,
+                "timeout_sec": 0,
+                "remaining_sec": None,
+                "stdout_bytes": 17,
+                "stderr_bytes": 3,
+                "output_activity": True,
+            },
+        }
     ]
 
 
