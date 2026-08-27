@@ -33,8 +33,10 @@ class _AnswerModel:
 
     def __init__(self) -> None:
         self.offered: list[str] = []
+        self.messages: list[dict[str, object]] = []
 
-    async def chat(self, _messages, *, tools=None, **_kwargs):  # noqa: ANN001
+    async def chat(self, messages, *, tools=None, **_kwargs):  # noqa: ANN001
+        self.messages = [dict(item) for item in messages]
         self.offered = [str((item.get("function") or {}).get("name") or "") for item in (tools or [])]
         return {
             "content": "Готово.",
@@ -69,6 +71,34 @@ class _CommandModel:
             }
         return {
             "content": "Команда выполнена.",
+            "tool_calls": None,
+            "finish_reason": "stop",
+        }
+
+
+class _NamedToolModel(_CommandModel):
+    def __init__(self, name: str, arguments: dict[str, object]) -> None:
+        super().__init__(arguments)
+        self.name = name
+
+    async def chat(self, _messages, *, tools=None, **_kwargs):  # noqa: ANN001
+        self.calls += 1
+        if self.calls == 1:
+            return {
+                "content": "",
+                "tool_calls": [
+                    {
+                        "id": "autonomous-tool-step",
+                        "function": {
+                            "name": self.name,
+                            "arguments": json.dumps(self.arguments),
+                        },
+                    }
+                ],
+                "finish_reason": "tool_calls",
+            }
+        return {
+            "content": "Готово.",
             "tool_calls": None,
             "finish_reason": "stop",
         }
@@ -137,6 +167,9 @@ async def test_autonomous_engineer_retains_actor_tools_and_retires_bounded_wrapp
             _schema("engineer_command_status"),
             _schema("memory_save"),
             _schema("web_search"),
+            _schema("archive_search"),
+            _schema("obsidian_create_note"),
+            _schema("make_file"),
             _schema("engineer_compile_java"),
             _schema("engineer_decompile_artifact"),
         ],
@@ -148,9 +181,17 @@ async def test_autonomous_engineer_retains_actor_tools_and_retires_bounded_wrapp
         "engineer_command_status",
         "memory_save",
         "web_search",
+        "archive_search",
+        "obsidian_create_note",
+        "make_file",
     } <= set(model.offered)
     assert "engineer_compile_java" not in model.offered
     assert "engineer_decompile_artifact" not in model.offered
+    system_text = "\n".join(
+        str(item.get("content") or "") for item in model.messages if item.get("role") == "system"
+    )
+    assert "автономный инженер владельца" in system_text
+    assert "НИКОГДА не приписывай ответ архиву" not in system_text
 
 
 @pytest.mark.asyncio
@@ -232,3 +273,43 @@ async def test_model_cannot_supply_an_engineer_step_identity(
     )
 
     assert kernel.executions == []
+
+
+@pytest.mark.asyncio
+async def test_autonomous_engineer_does_not_require_lexical_permission_for_actor_tool(
+    settings,
+    storage,
+) -> None:
+    actor = ActorContext(LEGACY_OWNER_USER_ID, "owner", "telegram-bridge")
+    storage.ensure_user(actor.own_id, preset_key="owner")
+    arguments: dict[str, object] = {
+        "kind": "txt",
+        "filename": "model-chosen.txt",
+        "content": "result",
+    }
+    model = _NamedToolModel("make_file", arguments)
+    kernel = _CommandKernel()
+    runtime = AgentRuntime(
+        replace(
+            settings,
+            engineer_mode_enabled=True,
+            engineer_command_enabled=True,
+        ),
+        storage,
+        llm=model,  # type: ignore[arg-type]
+        kernel=kernel,  # type: ignore[arg-type]
+    )
+
+    await runtime._agentic_loop(  # noqa: SLF001
+        _context(),
+        "Самостоятельно выбери нужные инструменты и доведи задачу до результата.",
+        actor,
+        tools=[_schema("make_file")],
+        attachments=None,
+    )
+
+    assert len(kernel.executions) == 1
+    name, actual_arguments, execution_actor = kernel.executions[0]
+    assert name == "make_file"
+    assert actual_arguments == arguments
+    assert execution_actor == actor

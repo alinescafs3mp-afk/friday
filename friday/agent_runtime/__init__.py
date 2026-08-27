@@ -36190,6 +36190,26 @@ MODE_GUIDANCE = {
     ),
 }
 
+AUTONOMOUS_ENGINEER_SYSTEM_PROMPT = """Ты — Friday (Пятница), автономный инженер владельца.
+
+Этот Engineer-ход уже аутентифицирован как личный Telegram-чат владельца. Самостоятельно планируй
+и выполняй задачу до готового проверенного результата или реального внешнего блокера. Все переданные
+схемы инструментов доступны на равных: сама выбирай их, сочетай и повторяй по фактическим результатам.
+
+engineer_command_run запускает произвольную shell-команду через /usr/bin/bash от пользователя службы
+в основной виртуальной машине, с его реальными PATH, сетью и правами файловой системы. У него нет
+/approvals, командных allowlist, ограничений путей или искусственного выбора программ со стороны
+обвязки. Текущие Telegram-файлы каждого шага лежат в $FRIDAY_INPUT_DIR; постоянная рабочая область
+этого разговора — $FRIDAY_WORK_DIR; готовые файлы для владельца клади в $FRIDAY_OUTPUT_DIR. Содержимое
+$FRIDAY_OUTPUT_DIR автоматически упаковывается и отправляется в Telegram. Если нужной программы нет,
+назови владельцу точный executable и пакет, который требуется установить.
+
+После каждого шага изучай stdout, stderr, exit code и созданные файлы. Если цель не достигнута,
+выбирай следующий шаг; не останавливайся после одной команды. Долгие команды оставляй durable job и
+используй engineer_command_status/engineer_command_cancel. Не объявляй успех без фактического результата.
+Отвечай на языке владельца, кратко и по делу; не показывай служебный протокол вызовов без необходимости.
+"""
+
 EMPTY_KB_GUIDANCE = """Личная база знаний пока пуста. Не делай вид, что знаешь личные факты пользователя. Предложи добавить заметку или файл; для общих актуальных фактов используй веб-поиск только при наличии разрешения."""
 SMALL_KB_GUIDANCE = """В личной базе только {count} объектов. Используй найденное, но явно отмечай, когда данных недостаточно."""
 
@@ -53736,7 +53756,8 @@ class AgentRuntime:
                     context.structural_answer = f"{context.structural_answer}\n\n{hierarchy_notice}".strip()
 
         if (
-            response.get("llm_failed")
+            not autonomous_engineer
+            and response.get("llm_failed")
             and synthetic_document_notice
             and advisory_body_count
             and (
@@ -53758,7 +53779,8 @@ class AgentRuntime:
             response["_advisory_attachment_literal_owned"] = True
             response["_attachment_model_failure_salvaged"] = True
         if (
-            response.get("llm_failed")
+            not autonomous_engineer
+            and response.get("llm_failed")
             and attachment_readable_count
             and response.get("_advisory_attachment_literal_owned") is not True
         ):
@@ -54207,9 +54229,13 @@ class AgentRuntime:
             else ()
         )
         passive_attachment_preamble_normalized = False
-        if read_only_attachment_review_scope and _read_only_attachment_preamble_is_grounded(
-            content,
-            passive_input_file_state_evidence,
+        if (
+            not autonomous_engineer
+            and read_only_attachment_review_scope
+            and _read_only_attachment_preamble_is_grounded(
+                content,
+                passive_input_file_state_evidence,
+            )
         ):
             content, passive_attachment_preamble_normalized = (
                 _normalize_passive_attachment_preparation_preamble(content)
@@ -55936,7 +55962,7 @@ class AgentRuntime:
                 response["voice_clip"] = None
                 verification = _unknown_verdict("web_source_reconciliation_changed_final_body")
                 verification_status = VERDICT_UNKNOWN
-        if web_evidence_used:
+        if web_evidence_used and not autonomous_engineer:
             # Agentic make_file/speak can run before the final source
             # reconciliation, completeness ceiling and verifier verdict.  Such
             # carriers are stale even when their visible chat sibling is later
@@ -55945,7 +55971,7 @@ class AgentRuntime:
             # accepted final body and its code-owned companions.
             response["file_clips"] = list(structural_file_clips)
             response["voice_clip"] = None
-        redacted_content = redact_friday_api_tokens(content)
+        redacted_content = content if autonomous_engineer else redact_friday_api_tokens(content)
         if redacted_content != content:
             # This boundary precedes every late output carrier.  Agentic files
             # and audio may already contain the rejected model bytes, so keep
@@ -55990,7 +56016,7 @@ class AgentRuntime:
         # formatting, Telegram and attachment-reading prompts are often labelled
         # ``файл`` by the broad arbiter even though the person never requested a
         # new file.  A late effect therefore needs its own lexical authority.
-        asked_for_a_file = file_create
+        asked_for_a_file = bool(file_create and not autonomous_engineer)
         late_file_source_authorized = True
         if (
             asked_for_a_file
@@ -56261,6 +56287,8 @@ class AgentRuntime:
         else:
             answer_grounded = None
         citation_notice = _citation_notice(citations, answer_grounded, inferred=attribution_inferred)
+        if autonomous_engineer:
+            citation_notice = ""
         # Считается по самому тексту ответа, а не по тому, что нашёл поиск: ответ,
         # собранный из прежних ходов, приходит с пометками «вне выборки» и без единой
         # живой ссылки — при этом поиск в текущем ходе мог не найти ничего и не поднять
@@ -56367,10 +56395,12 @@ class AgentRuntime:
             # ветку про СВОЙ архив, где эта сводка отвечает по существу.
             personal_background_offered=context.user_model_offered,
         )
+        if autonomous_engineer:
+            grounding_warning = ""
         # Idempotent assertion after citation/source cleanup.  The first pass is
         # intentionally before make_file/speak; no later text owner may
         # reintroduce a structurally valid Friday credential.
-        redacted_content = redact_friday_api_tokens(content)
+        redacted_content = content if autonomous_engineer else redact_friday_api_tokens(content)
         if redacted_content != content:
             content = redacted_content
             response["content"] = content
@@ -56378,7 +56408,7 @@ class AgentRuntime:
             response["voice_clip"] = None
             LOGGER.warning("credential-output: Friday API token removed at final assertion")
 
-        if obsidian_result_request is not None:
+        if obsidian_result_request is not None and not autonomous_engineer:
             result_note_missing_facets = _obsidian_result_note_missing_facets(
                 obsidian_result_request,
                 content,
@@ -56632,12 +56662,16 @@ class AgentRuntime:
         # private attachment text through those surfaces.
         durable_issues_value = durable_verification.get("issues")
         durable_issues = list(durable_issues_value) if isinstance(durable_issues_value, list) else []
-        verification_caution = _verification_caution(
-            verification_status,
-            durable_issues,
-            from_the_web=from_the_web,
+        verification_caution = (
+            ""
+            if autonomous_engineer
+            else _verification_caution(
+                verification_status,
+                durable_issues,
+                from_the_web=from_the_web,
+            )
         )
-        if web_evidence_status == "partial":
+        if not autonomous_engineer and web_evidence_status == "partial":
             partial_web_caution = (
                 "⚠️ Часть веб-источников не удалось получить; ответ опирается только "
                 "на перечисленные ниже источники."
@@ -56647,7 +56681,7 @@ class AgentRuntime:
                 if verification_caution and verification_caution != partial_web_caution
                 else partial_web_caution
             )
-        elif web_exhaustive_ceiling_applied and web_open_search_evidence:
+        elif not autonomous_engineer and web_exhaustive_ceiling_applied and web_open_search_evidence:
             open_search_caution = (
                 "⚠️ Веб-поиск показывает ограниченную выборку и не доказывает, "
                 "что в интернете нет других результатов."
@@ -57160,7 +57194,8 @@ class AgentRuntime:
         archive_candidate_offer_labels: tuple[str, ...] = ()
         archive_ledger_for_candidate_offer = context.archive_model_batch_ledger
         if (
-            archive_search_ledger_ready
+            not autonomous_engineer
+            and archive_search_ledger_ready
             and context.archive_search_used
             and type(archive_ledger_for_candidate_offer) is ArchiveModelBatchLedger
         ):
@@ -57850,7 +57885,7 @@ class AgentRuntime:
                         authority_allowed=obsidian_publication_authorized,
                         publication_allowed=publication_authorized,
                     )
-                    if publication_authorized:
+                    if publication_authorized and not autonomous_engineer:
                         content = (
                             "Не удалось подтвердить завершение операции Obsidian: "
                             "её итог остаётся неопределённым и требует сверки."
@@ -62205,7 +62240,9 @@ class AgentRuntime:
             not autonomous_engineer and self._archive_search_requested(context, message)
         )
         archive_search_corpora = (
-            _archive_search_code_owned_corpora(message) if archive_search_requested else ()
+            _archive_search_code_owned_corpora(message)
+            if archive_search_requested or autonomous_engineer
+            else ()
         )
         archive_search_competing = bool(
             archive_search_requested
@@ -62238,14 +62275,16 @@ class AgentRuntime:
                 if str((tool.get("function") or {}).get("name") or tool.get("name") or "")
                 == _ARCHIVE_SEARCH_TOOL_NAME
             ]
-        elif archive_search_was_offered:
+        elif archive_search_was_offered and not autonomous_engineer:
             tools[:] = [
                 tool
                 for tool in tools
                 if str((tool.get("function") or {}).get("name") or tool.get("name") or "")
                 != _ARCHIVE_SEARCH_TOOL_NAME
             ]
-        archive_search_current_turn_authorized = bool(archive_search_requested and archive_search_was_offered)
+        archive_search_current_turn_authorized = bool(
+            archive_search_was_offered and (archive_search_requested or autonomous_engineer)
+        )
         if archive_search_competing or (
             archive_search_requested and not archive_search_current_turn_authorized
         ):
@@ -62266,7 +62305,9 @@ class AgentRuntime:
                 "_archive_search_isolation_owned": True,
             }
 
-        if obsidian_intent is None:
+        if autonomous_engineer:
+            pass
+        elif obsidian_intent is None:
             # Owner-vault schemas are capabilities, not general suggestions.
             # They are exposed only when the current unquoted message itself
             # proves one Obsidian operation; history and source text cannot
@@ -63431,13 +63472,17 @@ class AgentRuntime:
                     None,
                 )
             )
-            engineer_command_status_batch_index = next(
-                (
-                    index
-                    for index, selected_call in enumerate(selected_calls)
-                    if selected_call.name == "engineer_command_status"
-                ),
-                None,
+            engineer_command_status_batch_index = (
+                None
+                if autonomous_engineer
+                else next(
+                    (
+                        index
+                        for index, selected_call in enumerate(selected_calls)
+                        if selected_call.name == "engineer_command_status"
+                    ),
+                    None,
+                )
             )
             forced_workspace_filename = (
                 workspace_intent.filename if forced_workspace_call and workspace_intent else ""
@@ -63809,7 +63854,11 @@ class AgentRuntime:
                         call_arguments = dict(model_arguments)
                         call_arguments.pop("artifact_ref", None)
                         call_arguments["raw_id"] = selected_artifact_raw_id
-                elif call.name == "make_file" and isinstance(call.arguments, Mapping):
+                elif (
+                    not autonomous_engineer
+                    and call.name == "make_file"
+                    and isinstance(call.arguments, Mapping)
+                ):
                     requested_kind = _file_kind_from_request(file_create_message)
                     requested_filename, requested_filename_supported = _requested_output_filename_stem(
                         file_create_message, kind=requested_kind
@@ -63838,7 +63887,7 @@ class AgentRuntime:
                 carrier_reminder_delivery_scheduled = _has_scheduled_reminder_delivery(
                     context.successful_reminders
                 )
-                if call.name in {"make_file", "speak"}:
+                if not autonomous_engineer and call.name in {"make_file", "speak"}:
                     carrier_allowed = carrier_allowed and (
                         call.name != "make_file"
                         or _carrier_projection_passes(
@@ -63876,7 +63925,11 @@ class AgentRuntime:
                             reminder_descriptors=carrier_reminder_descriptors,
                             reminder_delivery_scheduled=carrier_reminder_delivery_scheduled,
                         )
-                elif call.name == "collect_files" and isinstance(call.arguments, Mapping):
+                elif (
+                    not autonomous_engineer
+                    and call.name == "collect_files"
+                    and isinstance(call.arguments, Mapping)
+                ):
                     # `name` становится именем доставленного ZIP и потому такой
                     # же видимый model carrier, как filename у make_file.
                     proposed_name = str(call.arguments.get("name") or "")
@@ -64070,12 +64123,15 @@ class AgentRuntime:
                         # The sole remaining capability is a cursor-bound
                         # continuation.  Fresh searches, effects and outbound
                         # tools require a new user turn.
-                        tools[:] = [
-                            offered
-                            for offered in tools
-                            if str((offered.get("function") or {}).get("name") or offered.get("name") or "")
-                            == _ARCHIVE_SEARCH_TOOL_NAME
-                        ]
+                        if not autonomous_engineer:
+                            tools[:] = [
+                                offered
+                                for offered in tools
+                                if str(
+                                    (offered.get("function") or {}).get("name") or offered.get("name") or ""
+                                )
+                                == _ARCHIVE_SEARCH_TOOL_NAME
+                            ]
                 if call.name == _ARCHIVE_SEARCH_TOOL_NAME and not context.archive_search_used:
                     # Invocation/run binding can exist even when the handler or
                     # sealed carrier fails. Replay-close that empty ledger now,
@@ -64576,22 +64632,22 @@ class AgentRuntime:
                             "достигнута либо обнаружен реальный блокер, сформируй краткий итог. "
                         )
                         if autonomous_engineer
-                        else "Сформируй итоговый ответ на основе результатов. "
-                    )
-                    + (
-                        "Не копируй сырые данные и служебные структуры без необходимости. "
-                        # Замерено на живом: на вопрос про ключевую ставку поиск вернул
-                        # страницу ЦБ со значением 14,00% от 31.07.2026, а модель
-                        # ответила «21%, июль 2025» — из своей памяти, увереннно и
-                        # неверно. Найти правильный ответ и сказать неправильный хуже,
-                        # чем не найти, поэтому приоритет источника сказан прямо.
-                        "Числа, даты, имена и текущие состояния бери ИЗ результатов инструментов, "
-                        "а не из своей памяти: результат свежее и он относится к этому запросу. "
-                        "Если результат противоречит тому, что ты помнишь, верен результат. "
-                        "Если в результатах ответа нет — так и скажи, не подставляй известное тебе. "
-                        "Для сведений из интернета указывай источник ссылкой. "
-                        "В knowledge_work верни цельный структурированный результат, пригодный для "
-                        "последующей отправки в Inbox, но не утверждай, что он уже сохранён."
+                        else (
+                            "Сформируй итоговый ответ на основе результатов. "
+                            "Не копируй сырые данные и служебные структуры без необходимости. "
+                            # Замерено на живом: на вопрос про ключевую ставку поиск вернул
+                            # страницу ЦБ со значением 14,00% от 31.07.2026, а модель
+                            # ответила «21%, июль 2025» — из своей памяти, увереннно и
+                            # неверно. Найти правильный ответ и сказать неправильный хуже,
+                            # чем не найти, поэтому приоритет источника сказан прямо.
+                            "Числа, даты, имена и текущие состояния бери ИЗ результатов инструментов, "
+                            "а не из своей памяти: результат свежее и он относится к этому запросу. "
+                            "Если результат противоречит тому, что ты помнишь, верен результат. "
+                            "Если в результатах ответа нет — так и скажи, не подставляй известное тебе. "
+                            "Для сведений из интернета указывай источник ссылкой. "
+                            "В knowledge_work верни цельный структурированный результат, пригодный для "
+                            "последующей отправки в Inbox, но не утверждай, что он уже сохранён."
+                        )
                     ),
                 }
             )
@@ -70661,6 +70717,48 @@ class AgentRuntime:
         *,
         tool_enabled: bool,
     ) -> list[dict[str, Any]]:
+        autonomous_engineer = bool(
+            context.interaction_mode == "engineer"
+            and getattr(self.settings, "engineer_mode_enabled", False) is True
+            and getattr(self.settings, "engineer_command_enabled", False) is True
+        )
+        if autonomous_engineer:
+            messages: list[dict[str, Any]] = [
+                {
+                    "role": "system",
+                    "content": AUTONOMOUS_ENGINEER_SYSTEM_PROMPT + self._today_line(),
+                }
+            ]
+            for history_item in _history_within_budget(context.conversation_history):
+                role = history_item.get("role")
+                if role in {"user", "assistant"}:
+                    messages.append(
+                        {
+                            "role": role,
+                            "content": str(history_item.get("content") or ""),
+                        }
+                    )
+            if attachments:
+                messages.append(
+                    {
+                        "role": "user",
+                        "content": (
+                            "Текущие Telegram-вложения будут доступны внутри каждой shell-команды "
+                            "в $FRIDAY_INPUT_DIR. Сначала перечисли каталог и определи реальные имена; "
+                            "исходные подписи: "
+                            + json.dumps(
+                                [
+                                    str(item.get("filename") or item.get("name") or "file")[:260]
+                                    for item in attachments[:12]
+                                    if isinstance(item, Mapping)
+                                ],
+                                ensure_ascii=False,
+                            )
+                        ),
+                    }
+                )
+            messages.append({"role": "user", "content": message})
+            return messages
         if context.archive_search_isolated_turn:
             # Defense in depth for any future caller which bypasses the
             # agent-loop builder closure.  In particular, never reload account
