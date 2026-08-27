@@ -1,3 +1,18 @@
+## 0.207.54 — 2026-08-27
+
+### Conversation-scoped current Engineer command
+
+- Natural status and cancellation requests can now omit a command identifier.
+  Friday resolves the current job only inside the exact owner, tenant, Telegram
+  conversation and channel scope; explicit identifiers remain available.
+- Current-job focus is durable and deterministic. Multiple unfinished jobs are
+  reported as ambiguous instead of being guessed by timestamp or by the model,
+  and an idempotent submission replay cannot steal focus from newer work.
+- Cancellation target selection and intent persistence are atomic. UNKNOWN jobs
+  cannot be cancelled, and a registration race cannot lose a committed cancel
+  request. Zero, ambiguous and uncertain resolutions terminate structurally so
+  the model cannot invent a target later in the same turn.
+
 ## 0.207.53 — 2026-08-27
 
 ### Sealed Engineer command result delivery
