@@ -12,14 +12,14 @@ the current production identity, completed packages, active work and next order.
   is code-staged only as provisional shadow/extract and is not accepted or live.
   The primary remains the sole final-publication, tool and effect authority.
   Every secondary miss preserves the exact primary-only path.
-- Deployed implementation head: `1c340a2f174f4077ae9747ba5bfb9d54b0a4e727`
-- Live: Friday `0.207.55` / `1c340a2f174f4077ae9747ba5bfb9d54b0a4e727`;
-  tree `2fd06f15264628ab06396fb904dd4175cb86723422b79c303f7bd7efe4156fc1`;
+- Deployed implementation head: `595467ef4c7ec3b49530c1f3c71f3fd947173eef`
+- Live: Friday `0.207.56` / `595467ef4c7ec3b49530c1f3c71f3fd947173eef`;
+  tree `da0fa77c0288138693a49baa95f340514c6b289b338b433ca6f1477adfdd7055`;
+  wheel `96488376b1151c9426cca5f379257ae35f9a0753bee1d72e49fe88263bc96141`.
+- Immediate predecessor and schema-capable fallback: Friday `0.207.55` /
+  `1c340a2f174f4077ae9747ba5bfb9d54b0a4e727`, tree
+  `2fd06f15264628ab06396fb904dd4175cb86723422b79c303f7bd7efe4156fc1`,
   wheel `0da4cbc467a26f7d6b5e52690d47457931ed05798bed9fb8f7944746dffd5c64`.
-- Immediate predecessor and schema-capable fallback: Friday `0.207.54` /
-  `55662a6c387abf988a0fb09d543a0a1441094e7b`, tree
-  `aa45e5d5e860d9146f280a1088b42f987df89e08931ca4c8fd99ae27c3b37ec7`,
-  wheel `480c20e7ab9eb14880a8f316463b54761840b03a282499ca662e0bac0094d1d2`.
 - Database schema: 43
 - Production state: immutable activation `clear`; backend and Telegram bridge
   active; trusted-CA HTTPS health `200`; SQLite integrity and FK checks clean.
@@ -75,6 +75,14 @@ the current production identity, completed packages, active work and next order.
   prevent duplicate publication across retries, restarts, revocation and
   ambiguous transport outcomes; the archive always carries its signed receipt
   and manifest even when the command produced no files.
+  `0.207.56` adds durable fact-only progress at 60/300/900/1800 seconds and
+  emits only the highest newly due checkpoint, without percentages, ETA,
+  command text or output. Fresh owner/chat/capability checks and canonical
+  deduplication apply at production and delivery. Terminal publication retires
+  pending progress without allowing a corrupt progress row to block the final
+  result. Sent terminal workspaces become eligible for no-follow retirement
+  after 30 days; pending, staged, uncertain, blocked, unknown and unpublished
+  evidence is preserved, as are immutable receipts and canonical archives.
   The exact accepted secondary profile remains configured in bounded `assist`
   and is probed on
   demand; its exact post-cutover canary passed, while laptop absence preserves
@@ -95,16 +103,17 @@ the current production identity, completed packages, active work and next order.
   while the backlog converges. `0.207.52` repairs the canary wrapper's full
   Telegram carrier surface; signed Telegram requests no longer fail before the
   model/tool boundary. The current activation terminal receipt is
-  `6a39a796ce4c53e52e1706ff35dd3d60703600464821d497bb28c23e2bfb68db`.
+  `5e2187d2b536bf7cb1dd9aa1ad627e72d86d701b2a07c9f94ea013e41352cf9e`.
 - Delivery constraints: no Docker for primary Friday release certification;
   companion plugin untouched; small commits and immutable wheel-only production
   releases. The optional laptop inference node is a separate Docker contour.
 
 ## Active objective
 
-First close the remaining Engineer Mode production workflow: truthful sparse
-progress, bounded retention and exact Telegram input grants. Automatic and
-status-triggered sealed file/archive delivery are live.
+First close the remaining Engineer Mode production workflow: exact Telegram
+input grants and a deterministic command source/output bundle. Truthful sparse
+progress, bounded retention and automatic/status-triggered sealed delivery are
+live.
 Next integrate and independently certify
 the Semantic Supervisor through default-off, shadow, limited assist and canary.
 After those two priorities, execute the remaining work by product value and
@@ -136,7 +145,7 @@ accepted profile manifest hashes to
 `93ea5698b8b6a9bf8a7dc697ffe37d7353055aa16555188991747bba73d059e3` and
 its accepted physical-failure evidence hashes to
 `9dc72f80caed3320bd154cf1219a8bd6b1339142b690b00dd1cbe1fb05964006`.
-Live `0.207.55` admits exactly that accepted profile. The separate abliterated
+Live `0.207.56` admits exactly that accepted profile. The separate abliterated
 candidate remains provisional and is not admitted to assist:
 extraction, evidence-bound document mapping and complete current text/Office
 document reviews are in bounded `assist`. It grants no tools, effects,
@@ -216,17 +225,33 @@ course, with these repository-specific constraints:
 
 ## In progress
 
-1. Add truthful sparse terminal progress and bounded retention on top of the
-   deployed automatic delivery and current-job control.
-2. Add exact Telegram input grants; then run one compact live
+1. Add exact Telegram input grants and deterministic source/output bundling;
+   then run one compact live
    approval/result/input smoke.
-3. Resolve the secondary profile dependency once, rebase and independently
+2. Rebase and independently
    gate the Semantic Supervisor, then roll it out default-off → shadow → limited
    assist → canary.
-4. Continue release-evidence and document/retrieval convergence in the order
+3. Continue Interaction Control Plane, operational-memory, release-evidence and
+   document/retrieval convergence in the order
    recorded by `PROJECT_EXECUTION_BACKLOG_2026-08-27.md`.
 
 ## Completed and deployed packages
+
+### Sparse Engineer progress and bounded retention (`0.207.56`)
+
+- Long command jobs publish durable, conversation-scoped, fact-only progress
+  at sparse checkpoints. Retry/backoff is independent per job, stale rows are
+  reconciled after restart, poison rows cannot starve healthy work, and a
+  terminal outcome atomically supersedes pending progress.
+- Only fully sent terminal workspaces older than 30 days are retired. Exact
+  inode checks, no-follow traversal and durable retirement markers close
+  workspace replacement, symlink, hardlink and reader/cleanup races; status
+  retains truthful byte counts and hashes after retirement.
+- The canonical static gate, 21,230 non-UI tests and 31 UI tests passed without
+  skips. Two clean wheels were byte-identical with SHA-256
+  `96488376b1151c9426cca5f379257ae35f9a0753bee1d72e49fe88263bc96141`.
+  Immutable activation completed `clear` with terminal receipt
+  `5e2187d2b536bf7cb1dd9aa1ad627e72d86d701b2a07c9f94ea013e41352cf9e`.
 
 ### Automatic Engineer terminal result delivery (`0.207.55`)
 
@@ -784,26 +809,24 @@ claims at this checkpoint.
 
 ## Current focused gate
 
-- `0.207.49` deployed the rollback-compatible reader first; its wheel reproduced
-  byte-for-byte and activation completed `clear`.
-- `0.207.50`: 75 focused foundation/schema tests and 7 focused runtime tests
-  passed, including fallback-compatible promotion/reload; its wheel reproduced
-  byte-for-byte and activation completed `clear`.
-- `0.207.51`: 59 focused passage-projection tests passed after exact-source
-  revalidation was made mandatory; its wheel reproduced byte-for-byte and
-  activation completed `clear` at the exact live identity above.
-- Only these focused package gates are asserted here. The Semantic Supervisor
-  remains separately owned and on `HOLD`.
+- `0.207.56`: 30 focused progress/retention/terminal tests, 233 expanded
+  Engineer regressions and the two isolated notification queue-head tests
+  passed before the full canonical gate. The deterministic wheel, sealed tree,
+  trusted-CA health, schema-43 database and private command ledger are clean at
+  the exact live identity above.
+- The active focused gate is now exact current-message Telegram input grants.
+  The Semantic Supervisor follows this Engineer package and remains default-off
+  until its independent gate passes.
 
 ## Next order
 
-1. Deploy reader-first document-passage manifest and table capacity with its
-   schema-capable fallback before any writer is enabled.
-2. Activate the bounded passage writer and resumable backfill in a separate
-   package.
-3. Add typed dates, then embeddings, without widening the frozen V12 routes.
-4. Keep the separately owned Semantic Supervisor on `HOLD`. Docker and companion
-   work are not part of this order.
+1. Implement exact current-message Telegram input grants, sealed read-only
+   `/job/input` mounts and receipt-bound source/output bundles.
+2. Integrate the Semantic Supervisor on a schema-capable fallback and roll it
+   out default-off → shadow → limited assist → canary.
+3. Continue Interaction Control Plane and operational memory, then document
+   contour/retrieval convergence and V12 refinement by product value and risk.
+4. Docker and companion-plugin work are not part of this order.
 
 ## WIP source retention
 
