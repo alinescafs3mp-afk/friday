@@ -540,7 +540,8 @@ _ENGINEER_NEW_WORK_RE = re.compile(
 )
 _ENGINEER_PLAN_DELIVERABLE_RE = re.compile(
     r"^\s*(?:(?:пожалуйста|please)\s*[,,:;-]?\s*)?(?:"
-    r"(?:составь|подготовь|предложи|опиши|набросай|дай|сделай|создай|разработай)"
+    r"(?:составь|подготовь|предложи|опиши|набросай|распиши|сформируй|подскажи|"
+    r"продумай|дай|сделай|создай|разработай)"
     r"(?:\s+мне)?(?:\s+\w+){0,4}\s+(?:план|стратеги[юя])\b|"
     r"спланир\w*\b|plan\b|"
     r"(?:create|write|draft|outline|provide|give(?:\s+me)?)"
@@ -551,7 +552,11 @@ _ENGINEER_PLAN_DELIVERABLE_RE = re.compile(
     r"(?:can|could|would|will)\s+you\s+(?:(?:create|write|draft|outline|provide)"
     r"(?:\s+an?|\s+the)?(?:\s+\w+){0,4}\s+(?:plan|strategy)\b|plan\b)|"
     r"(?:i|we)\s+(?:need|want|would\s+like)\s+(?:an?\s+|the\s+)?"
-    r"(?:\w+\s+){0,4}(?:plan|strategy)\b)",
+    r"(?:\w+\s+){0,4}(?:plan|strategy)\b|"
+    r"(?:пошагов\w+\s+)?(?:план|стратеги[яю])\b|"
+    r"what(?:'s|\s+is)(?:\s+\w+){0,6}\s+(?:plan|strategy)\b|"
+    r"(?:migration|service|deployment|project|security|network|release|backup|recovery)"
+    r"\s+(?:plan|strategy)\b)",
     re.IGNORECASE | re.DOTALL,
 )
 _ENGINEER_PLAN_EXECUTION_CONTINUATION_RE = re.compile(
@@ -561,28 +566,29 @@ _ENGINEER_PLAN_EXECUTION_CONTINUATION_RE = re.compile(
     r")(?:(?:пожалуйста|please)\s+)?"
     r"(?:(?!(?:как|чтобы|how|to|i|we|will|would|я|мы|буд\w*)\b)\w+[\s,]+){0,3}"
     r"(?:запусти|начни|выполни|выполняй|сделай|проведи|проверь|"
-    r"реализуй|внедри|приступай|продолжай|"
+    r"реализуй|внедри|приступай|продолжай|продолжи|почини|сохрани|экспортируй|"
     r"примени|найди|исследуй|проанализируй|просканируй|исправь|установи|разверни|"
     r"run|start|execute|perform|check|implement|apply|analy[sz]e|scan|build|test|"
-    r"fix|install|deploy|proceed|do\s+it|carry(?:\s+it)?\s+out)\b",
+    r"fix|repair|install|deploy|continue|resume|save|persist|export|proceed|"
+    r"do\s+it|carry(?:\s+it)?\s+out)\b",
     re.IGNORECASE | re.DOTALL,
 )
-_ENGINEER_EXECUTION_AUTHORITY_PREFIX_RE = re.compile(
+_ENGINEER_PLAN_EXECUTION_PREFIX_RE = re.compile(
     r"^\s*(?:(?:пожалуйста|please)\s*[,,:;-]?\s*)?(?:"
-    r"запусти|начни|выполни|выполняй|сделай|создай|проведи|проверь|реализуй|"
-    r"внедри|примени|найди|исследуй|проанализируй|просканируй|исправь|установи|"
-    r"разверни|останови|отмени|run|start|execute|perform|create|check|implement|"
-    r"apply|analy[sz]e|scan|build|test|fix|install|deploy|stop|cancel)\b",
+    r"запусти|начни|выполни|выполняй|проведи|проверь|реализуй|внедри|примени|"
+    r"найди|исследуй|проанализируй|просканируй|исправь|установи|разверни|"
+    r"продолжи|продолжай|возобнови|почини|сохрани|экспортируй|останови|отмени|"
+    r"run|start|execute|perform|check|implement|apply|analy[sz]e|scan|build|test|"
+    r"fix|repair|install|deploy|continue|resume|save|persist|export|stop|cancel)\b",
     re.IGNORECASE,
 )
-_ENGINEER_PLAN_STATUS_QUERY_PREFIX_RE = re.compile(
-    r"^\s*(?:"
-    r"(?:как\s+там|как(?:ой|ов)|покажи|проверь)\s+(?:статус|прогресс)\b|"
-    r"готов[оа]?\s+ли\b|"
-    r"(?:статус|прогресс)\b|"
-    r"(?:what(?:'s|\s+is)|show|check)\s+(?:the\s+)?(?:status|progress)\b|"
-    r"(?:status|progress)\b)",
-    re.IGNORECASE,
+_ENGINEER_PLAN_MIXED_OPERATION_RE = re.compile(
+    r"^\s*(?:(?:пожалуйста|please)\s*[,,:;-]?\s*)?(?:сделай|создай|create|make)\s+"
+    r"(?:\w+\s+){0,2}(?:аудит|анализ|провер\w*|сканир\w*|диагност\w*|исслед\w*|"
+    r"миграц\w*|установ\w*|исправ\w*|разв[её]рт\w*|патч\w*|"
+    r"audit|analysis|check|scan|diagnostic|investigation|migration|install|fix|deploy|patch)\b"
+    r".{0,96}\b(?:план|стратеги[яю]|plan|strategy)\b",
+    re.IGNORECASE | re.DOTALL,
 )
 
 
@@ -596,18 +602,13 @@ def _engineer_planning_only_request(message: str) -> bool:
     """Return whether the requested deliverable is a plan, not its execution."""
 
     text = str(message or "").strip()
-    if _ENGINEER_EXPLICIT_PLANNING_RE.search(text) is None:
-        return False
-    if _ENGINEER_PLAN_EXECUTION_CONTINUATION_RE.search(text):
-        return False
-    if _ENGINEER_PLAN_DELIVERABLE_RE.search(text):
-        return True
-    if _ENGINEER_EXECUTION_AUTHORITY_PREFIX_RE.search(text):
-        return False
-    # Effect authority must be explicit. A nominal/question-shaped plan artifact
-    # defaults to the schema-free delivery lane; missing one wording variant may
-    # reduce automation, but may never silently authorize executing the plan.
-    return _ENGINEER_PLAN_STATUS_QUERY_PREFIX_RE.search(text) is None
+    return bool(
+        _ENGINEER_EXPLICIT_PLANNING_RE.search(text)
+        and _ENGINEER_PLAN_DELIVERABLE_RE.search(text)
+        and not _ENGINEER_PLAN_EXECUTION_CONTINUATION_RE.search(text)
+        and not _ENGINEER_PLAN_EXECUTION_PREFIX_RE.search(text)
+        and not _ENGINEER_PLAN_MIXED_OPERATION_RE.search(text)
+    )
 
 
 def _engineer_initial_model_phase(
@@ -62950,16 +62951,34 @@ class AgentRuntime:
         )
         engineer_planning_only = bool(autonomous_engineer and _engineer_planning_only_request(message))
         if engineer_planning_only:
-            # Requesting a plan is not authority to execute it. Keep the empty
-            # capability projection for the entire turn, including malformed
-            # protocol repair; a later round must not regain effect schemas.
-            tools.clear()
+            # Planning authority is semantic, not a capability projection: the
+            # normal schemas remain visible so a misclassified or genuinely
+            # evidence-seeking call still follows the ordinary tool protocol.
+            # Put the policy immediately before the exact owner request instead
+            # of replacing that request or turning a planner draft into trusted
+            # instructions.
+            planning_policy = {
+                "role": "system",
+                "content": (
+                    "Владелец запросил план как публичный результат, а не выполнение его "
+                    "шагов. Подготовь план, не вызывай инструменты и не запускай действия. "
+                    "Схемы остаются доступными только как инвариант обычного протокола, а не как "
+                    "разрешение расширить запрос владельца."
+                ),
+            }
+            last_user_index = next(
+                (
+                    index
+                    for index in range(len(messages) - 1, -1, -1)
+                    if messages[index].get("role") == "user"
+                ),
+                len(messages),
+            )
+            messages.insert(last_user_index, planning_policy)
         # Initial complexity controls only the first call. Every Engineer task
         # still receives at most one evidence-triggered replan: a direct command
         # can fail or expose partial/branching evidence after execution begins.
-        engineer_replans_remaining = int(
-            autonomous_engineer and engineer_next_phase != "status" and not engineer_planning_only
-        )
+        engineer_replans_remaining = int(autonomous_engineer and engineer_next_phase != "status")
 
         async def attachment_bounded_chat(
             model_messages: list[dict[str, Any]],
@@ -62990,8 +63009,8 @@ class AgentRuntime:
 
             # A reasoning phase is private decision support, never a public
             # completion boundary. It must yield a tool call itself or receive
-            # exactly one no-thinking materialization attempt. No effect has yet
-            # been accepted, so that retry cannot duplicate a command.
+            # exactly one no-thinking materialization attempt. That attempt sees
+            # prior evidence but does not repeat any previously accepted effect.
             raw_tool_calls = result.get("tool_calls")
             visible_content = str(result.get("content") or "").strip()
             visible_turn = classify_tool_turn(visible_content)
@@ -63028,13 +63047,29 @@ class AgentRuntime:
                     "truncated": len(planner_text) > len(planner_draft),
                     "transport_truncated": str(result.get("finish_reason") or "stop") == "length",
                 }
+            materialization_kind = (
+                "grounded_resolution"
+                if engineer_phase == "replan" and any(item.get("role") == "tool" for item in model_messages)
+                else "plan_delivery"
+                if engineer_planning_only
+                else "initial_step"
+            )
             continuation_contract = (
                 (
                     "Без скрытого рассуждения преврати данные черновика в краткий публичный план. "
-                    "Инструменты намеренно не предложены: владелец запросил только план, а не "
-                    "исполнение. Не утверждай, что какие-либо шаги уже выполнены."
+                    "Владелец запросил план, а не его исполнение: не вызывай инструменты и не "
+                    "запускай шаги плана. Схемы остаются доступными только как инвариант обычного "
+                    "протокола. Не утверждай, что какие-либо шаги уже выполнены."
                 )
-                if engineer_planning_only
+                if materialization_kind == "plan_delivery"
+                else (
+                    "Наблюдаемые результаты инструментов уже находятся в контексте. Без скрытого "
+                    "рассуждения сопоставь их с исходной целью: верни ровно один следующий tool call, "
+                    "если нужен ещё шаг, либо краткий итог, если результат доказан, либо конкретный "
+                    "blocker, если продолжение объективно невозможно. Не объявляй успех без опоры "
+                    "на эти результаты."
+                )
+                if materialization_kind == "grounded_resolution"
                 else (
                     "Без скрытого рассуждения выбери ровно ближайший проверяемый вызов "
                     "из предложенных инструментов. Не объявляй цель достигнутой и не давай "
@@ -63082,9 +63117,7 @@ class AgentRuntime:
             )
             recovered["_engineer_model_phase"] = "execute"
             recovered["_engineer_thinking_enabled"] = False
-            recovered["_engineer_materialization_kind"] = (
-                "plan_delivery" if engineer_planning_only else "observable_step"
-            )
+            recovered["_engineer_materialization_kind"] = materialization_kind
             return recovered
 
         context_message = message
@@ -63833,6 +63866,11 @@ class AgentRuntime:
                     )
                     if kind == "plan_delivery"
                     else (
+                        "Не удалось безопасно разрешить следующий шаг по наблюдаемым "
+                        "результатам. Работа не объявлена завершённой."
+                    )
+                    if kind == "grounded_resolution"
+                    else (
                         "План не принят за результат: модель не сформировала ближайший "
                         "проверяемый вызов инструмента. Работа не объявлена завершённой."
                     )
@@ -63920,9 +63958,6 @@ class AgentRuntime:
             engineer_progress_repair_pending = False
             engineer_call_phase = engineer_next_phase
             engineer_next_phase = "execute"
-            engineer_plan_delivery_call = bool(
-                engineer_planning_only and engineer_call_phase == "plan" and total_calls == 0
-            )
             if forced_workspace_call or forced_engineer_progress_call:
                 # Forced effects and protocol repairs are execution, never an
                 # opportunity for a fresh private planning monologue.
@@ -63940,15 +63975,6 @@ class AgentRuntime:
                         messages,
                         tools=tools,
                         tool_choice="engineer_command_run",
-                        engineer_phase=engineer_call_phase,
-                    )
-                elif engineer_plan_delivery_call:
-                    # A plan is the requested artifact, not authority to begin
-                    # executing it. The private pass and its one public delivery
-                    # retry therefore see the same closed, schema-free lane.
-                    result = await attachment_bounded_chat(
-                        messages,
-                        tools=[],
                         engineer_phase=engineer_call_phase,
                     )
                 elif archive_search_requested and not context.archive_search_used:
@@ -64146,7 +64172,7 @@ class AgentRuntime:
                             LOGGER.warning("Model returned an empty answer; asking again")
                         messages.append({"role": "system", "content": _TOOL_PROTOCOL_REPAIR})
                         continue
-                    if autonomous_engineer and materialization_kind == "observable_step":
+                    if autonomous_engineer and materialization_kind == "initial_step":
                         # A private plan received its one bounded no-thinking
                         # materialization call, but that call still authored prose
                         # instead of an observable step. Never reinterpret a model
@@ -64156,17 +64182,17 @@ class AgentRuntime:
                         return engineer_materialization_failure(materialization_kind)
                     if (
                         autonomous_engineer
-                        and materialization_kind == "plan_delivery"
+                        and materialization_kind in {"plan_delivery", "grounded_resolution"}
                         and (
                             _is_reserved_engineer_terminal_claim(clean_answer)
                             or _engineer_claims_unstarted_progress(clean_answer)
                         )
                     ):
-                        # The one plan-delivery attempt may describe future steps,
-                        # but may not impersonate a durable notification or claim
-                        # that execution started. Do not turn this into a third
-                        # repair call which could regain authority.
-                        LOGGER.warning("Engineer plan delivery claimed execution state")
+                        # A plan may describe future steps and an evidence-grounded
+                        # resolution may publish a verified final/blocker. Neither
+                        # may impersonate durable delivery or promise unobserved
+                        # progress. Do not widen this bounded pass with a repair.
+                        LOGGER.warning("Engineer materialization claimed unsupported execution state")
                         self._freeze_archive_search_ledger(context)
                         return engineer_materialization_failure(materialization_kind)
                     if autonomous_engineer and _is_reserved_engineer_terminal_claim(clean_answer):
@@ -64213,13 +64239,9 @@ class AgentRuntime:
                         "_structural_file_count": structural_file_count,
                     }
 
-            if autonomous_engineer and engineer_planning_only and calls:
-                LOGGER.warning("Planning-only Engineer turn attempted a tool call")
-                self._freeze_archive_search_ledger(context)
-                return engineer_materialization_failure("plan_delivery")
             if (
                 autonomous_engineer
-                and materialization_kind == "observable_step"
+                and materialization_kind in {"initial_step", "grounded_resolution"}
                 and calls
                 and len(calls) != 1
             ):
