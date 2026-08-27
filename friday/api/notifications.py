@@ -19,6 +19,11 @@ from friday.api.deps import _request_json, _require_bridge
 from friday.config import FridaySettings
 from friday.file_delivery import attachment_content_disposition
 from friday.organs import may_push_to, resolve_chat_id
+from friday.organs.engineer.command.progress import (
+    PROGRESS_NOTIFICATION_KIND,
+    ProgressDeliveryError,
+    progress_notification_projection,
+)
 from friday.organs.engineer.terminal_delivery import (
     TERMINAL_NOTIFICATION_KIND,
     TerminalDeliveryError,
@@ -69,6 +74,45 @@ def _terminal_delivery_actor(state: Any, row: Mapping[str, Any]) -> Any:
     return actor
 
 
+def _progress_delivery_actor(state: Any, row: Mapping[str, Any]) -> Any:
+    """Rebuild current owner authority for one sparse progress carrier."""
+
+    storage = state.storage
+    settings = state.settings
+    actor_id = str(row.get("user_id") or "")
+    chat_id = str(row.get("chat_id") or "")
+    user = storage.get_user(actor_id)
+    try:
+        linked_actor_id = storage.resolve_identity("telegram", chat_id)
+    except ValueError as exc:
+        raise ProgressDeliveryError("progress_authorization_changed") from exc
+    if (
+        not actor_id
+        or not chat_id
+        or not isinstance(user, Mapping)
+        or str(user.get("status") or "") != "active"
+        or getattr(settings, "engineer_mode_enabled", False) is not True
+        or getattr(settings, "engineer_command_enabled", False) is not True
+        or linked_actor_id != actor_id
+        or resolve_chat_id(storage, actor_id) != chat_id
+        or not may_push_to(settings, storage, actor_id, chat_id)
+    ):
+        raise ProgressDeliveryError("progress_authorization_changed")
+    try:
+        actor = state.auth_service.actor_for_user(
+            actor_id,
+            source="engineer-progress-bridge",
+            identity_id=chat_id,
+        )
+        if not actor.is_owner or actor.own_id != actor_id or str(actor.identity_id or "") != chat_id:
+            raise ProgressDeliveryError("progress_authorization_changed")
+        for capability in ("engineer.use", "engineer.command.manage"):
+            state.auth_service.require(actor, capability)
+    except (AuthorizationError, ValueError) as exc:
+        raise ProgressDeliveryError("progress_authorization_changed") from exc
+    return actor
+
+
 def _terminal_artifact_snapshot(state: Any, notification_id: str) -> Any:
     """Authorize and consume exact bytes under one SQLite writer snapshot."""
 
@@ -105,6 +149,7 @@ async def notifications_pending(
     items = []
     undeliverable: list[str] = []
     invalid_terminal: list[str] = []
+    invalid_progress: list[str] = []
     for row in storage.list_pending_notifications(limit=limit):
         # Defence in depth — но ТЕМ ЖЕ предикатом, что у органов, которые эту
         # строку поставили. Пока здесь стоял только статический список,
@@ -134,6 +179,25 @@ async def notifications_pending(
                 "dedup_key": row.get("dedup_key") or "",
                 "caption": projection["caption"],
                 "artifact": projection["artifact"],
+            }
+        elif row.get("kind") == PROGRESS_NOTIFICATION_KIND:
+            try:
+                actor = _progress_delivery_actor(request.app.state, row)
+                projection = progress_notification_projection(
+                    storage,
+                    row,
+                    tenant_id=actor.user_id,
+                    actor_id=actor.own_id,
+                )
+            except ProgressDeliveryError:
+                invalid_progress.append(str(row["id"]))
+                continue
+            item = {
+                "id": row["id"],
+                "chat_id": row["chat_id"],
+                "body": projection["body"],
+                "kind": PROGRESS_NOTIFICATION_KIND,
+                "dedup_key": row.get("dedup_key") or "",
             }
         else:
             item = {
@@ -167,6 +231,20 @@ async def notifications_pending(
             storage.discard_notifications(
                 invalid_terminal,
                 reason="terminal_authorization_changed",
+            )
+    if invalid_progress:
+        retire_verified = getattr(storage, "discard_notifications_verified", None)
+        if callable(retire_verified):
+            retired.extend(
+                retire_verified(
+                    invalid_progress,
+                    reason="progress_authorization_changed",
+                )
+            )
+        else:
+            storage.discard_notifications(
+                invalid_progress,
+                reason="progress_authorization_changed",
             )
     result: dict[str, Any] = {"items": items, "count": len(items)}
     if retired:

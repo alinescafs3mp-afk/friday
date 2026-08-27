@@ -65,7 +65,7 @@ class RuntimeMixin(StorageShared):
             f"""SELECT n.id, n.user_id, n.chat_id, n.kind, n.dedup_key, n.body
                   FROM outbound_notifications n
                  WHERE n.status='pending' AND n.attempts < ?
-                   AND (n.kind='engineer_command_terminal'
+                   AND (n.kind IN ('engineer_command_terminal','engineer_command_progress')
                         OR {_not_private_notification_dependency("n")})
                  ORDER BY n.created_at ASC LIMIT ?""",  # nosec B608
             (max(1, int(max_attempts)), max(1, min(int(limit), 100))),
@@ -208,8 +208,8 @@ class RuntimeMixin(StorageShared):
         The dedup key is released for the same reason it is released at the
         attempt cap: the row is gone, so the organ must be able to raise the
         matter again if the chat is ever re-allowed. Strict Engineer terminal
-        rows are the exception: their command reconciler needs the original
-        kind/key to observe ``failed`` and must never stage the artifact again.
+        and sparse-progress rows are the exception: their producer needs the
+        original kind/key and must never stage the same checkpoint again.
         """
         return len(self.discard_notifications_verified(ids, reason=reason))
 
@@ -226,13 +226,19 @@ class RuntimeMixin(StorageShared):
                 cursor = conn.execute(
                     f"""UPDATE outbound_notifications AS n
                        SET status='failed',
-                           dedup_key=CASE WHEN kind='engineer_command_terminal'
+                           dedup_key=CASE WHEN kind IN (
+                                              'engineer_command_terminal',
+                                              'engineer_command_progress'
+                                          )
                                           THEN dedup_key ELSE '' END,
                            kind=CASE
-                               WHEN kind='engineer_command_terminal'
+                               WHEN kind IN (
+                                   'engineer_command_terminal',
+                                   'engineer_command_progress'
+                               )
                                THEN kind ELSE ? END
                        WHERE id=? AND status='pending'
-                         AND (kind='engineer_command_terminal'
+                         AND (kind IN ('engineer_command_terminal','engineer_command_progress')
                               OR {_not_private_notification_dependency("n")})""",  # nosec B608
                     (marker, notification_id),
                 )
@@ -277,9 +283,12 @@ class RuntimeMixin(StorageShared):
                     f"""UPDATE outbound_notifications AS n SET status='sent', sent_at=?
                          WHERE id=?
                            AND (status='pending'
-                                OR (kind='engineer_command_terminal' AND status='failed'
+                                OR (kind IN (
+                                        'engineer_command_terminal',
+                                        'engineer_command_progress'
+                                    ) AND status='failed'
                                     AND attempts < ?))
-                           AND (kind='engineer_command_terminal'
+                           AND (kind IN ('engineer_command_terminal','engineer_command_progress')
                                 OR {_not_private_notification_dependency("n")})""",  # nosec B608
                     (utc_now(), notif_id, attempt_cap),
                 )
@@ -292,10 +301,13 @@ class RuntimeMixin(StorageShared):
                            status=CASE WHEN attempts + 1 >= ? THEN 'failed' ELSE 'pending' END,
                            dedup_key=CASE
                                WHEN attempts + 1 >= ?
-                                AND kind<>'engineer_command_terminal'
+                                AND kind NOT IN (
+                                    'engineer_command_terminal',
+                                    'engineer_command_progress'
+                                )
                                THEN '' ELSE dedup_key END
                        WHERE id=? AND status='pending'
-                         AND (kind='engineer_command_terminal'
+                         AND (kind IN ('engineer_command_terminal','engineer_command_progress')
                               OR {_not_private_notification_dependency("n")})""",  # nosec B608
                     (attempt_cap, attempt_cap, notif_id),
                 )
@@ -320,7 +332,10 @@ class RuntimeMixin(StorageShared):
                     states["missing"].append(notif_id)
                     continue
                 status = str(row["status"] or "")
-                if str(row["kind"] or "") != "engineer_command_terminal":
+                if str(row["kind"] or "") not in {
+                    "engineer_command_terminal",
+                    "engineer_command_progress",
+                }:
                     visible = conn.execute(
                         f"""SELECT 1 FROM outbound_notifications n
                              WHERE n.id=? AND {_not_private_notification_dependency("n")}""",  # nosec B608
