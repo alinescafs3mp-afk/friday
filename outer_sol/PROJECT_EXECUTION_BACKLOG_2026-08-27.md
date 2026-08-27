@@ -58,8 +58,10 @@ family.
    Telegram smoke.
 
 Items 1–2 and their traversal/symlink/hardlink/race/tamper/legacy/UNKNOWN
-gates are deployed in `0.207.53`. Delivery is currently triggered by an exact
-conversation-scoped status turn; items 3–8 remain the active P1 contour.
+gates are deployed in `0.207.53`. Item 4 is deployed in `0.207.54` with durable
+exact-scope focus and fail-closed ambiguity handling. Delivery is currently
+triggered by an exact conversation-scoped status turn; items 3 and 5–8 remain
+the active P1 contour.
 
 Estimate: first usable result-delivery slice 6–9 hours; complete P1 contour
 12–20 hours of clean work. The final physical approval-button smoke is
@@ -172,8 +174,8 @@ Estimate: 40–80 hours after the policy decision.
 ## First 24 clean-work hours
 
 1. Keep the deployed P0 evidence and production path green.
-2. Extend the deployed P1 sealed status delivery with current-job continuation,
-   automatic terminal notifications and retention as the next small release.
+2. Extend the deployed P1 sealed status delivery with automatic terminal
+   notifications and retention as the next small release.
 3. Deliver P1 Telegram input grants plus bundle/publication wiring as the next
    release if the first package remains green.
 4. Start P2 profile decision and Semantic Supervisor rebase/audit with the
