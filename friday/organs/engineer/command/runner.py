@@ -1,4 +1,4 @@
-"""Held-FD spawn inside a proven systemd/cgroup scope. host_user is not in-process."""
+"""Held-FD spawn inside a proven systemd/cgroup scope."""
 
 from __future__ import annotations
 
@@ -209,7 +209,7 @@ def _usage_walk(dir_fd: int, *, depth: int, dirs: int) -> tuple[int, int, int]:
 @dataclass
 class SpawnedCommand:
     workspace: JobWorkspace
-    timeout_sec: int
+    timeout_sec: int | None
     max_stdout_bytes: int
     max_stderr_bytes: int
     isolation: IsolationProfile
@@ -252,7 +252,14 @@ class SpawnedCommand:
         broker: SpawnBroker,
     ) -> None:
         if self.isolation is IsolationProfile.HOST_USER:
-            raise CommandError("host_user_requires_broker")
+            self._spawn_host(
+                held,
+                stdin=stdin,
+                env=env,
+                scope=scope,
+                broker=broker,
+            )
+            return
         if self.isolation is not IsolationProfile.ISOLATED_WORKSPACE:
             raise CommandError("invalid_isolation_profile")
         if bwrap is None:
@@ -347,6 +354,68 @@ class SpawnedCommand:
             with contextlib.suppress(OSError):
                 os.close(stdin_payload_fd)
 
+    def _spawn_host(
+        self,
+        held: HeldExecutable,
+        *,
+        stdin: bytes,
+        env: dict[str, str],
+        scope: ProvenScope,
+        broker: SpawnBroker,
+    ) -> None:
+        confirm_held(held)
+        if held.script_fd is not None or held.resolved.canonical_path != "/usr/bin/bash":
+            raise CommandError("bash_path_mismatch")
+        os.lseek(held.executable_fd, 0, os.SEEK_SET)
+        stdin_fd = sealed_payload_memfd(stdin, label="friday-host-stdin")
+        stdout_r, stdout_w = os.pipe()
+        stderr_r, stderr_w = os.pipe()
+        os.set_inheritable(stdout_w, True)
+        os.set_inheritable(stderr_w, True)
+        self._stdout_r = stdout_r
+        self._stdout_w = stdout_w
+        self._stderr_r = stderr_r
+        self._stderr_w = stderr_w
+        self.scope = scope
+        try:
+            self.started_at = time.time()
+            confirm_held(held)
+            started = broker.start_host_job(
+                argv=[held.resolved.canonical_path, *held.inner_rest],
+                env=env,
+                cwd=env["HOME"],
+                cgroup=str(scope.cgroup),
+                stdin_r=stdin_fd,
+                stdout_w=stdout_w,
+                stderr_w=stderr_w,
+                launcher_fd=held.executable_fd,
+            )
+            self.effect_boundary_crossed = True
+            self.pid = int(started.pid)
+            self.pid_starttime = (
+                started.starttime if started.starttime is not None else _pid_starttime(self.pid)
+            )
+            self.process = _SpawnedProcess(started.pid, started.pidfd, started.ctrl_fd)
+            self.pidfd = self.process.pidfd
+            os.set_blocking(started.ctrl_fd, False)
+            os.close(stdout_w)
+            os.close(stderr_w)
+            self._stdout_w = -1
+            self._stderr_w = -1
+        except CommandError:
+            self.abort()
+            raise
+        except Exception as exc:
+            self.abort()
+            self._close_pipes()
+            detail = str(exc)
+            if detail in {"resource_boundary_unproven", "spawn_helper_unavailable"}:
+                raise CommandError(detail) from exc
+            raise CommandError("spawn_failed") from exc
+        finally:
+            with contextlib.suppress(OSError):
+                os.close(stdin_fd)
+
     def abort(self) -> None:
         proc = self.process
         if proc is not None:
@@ -385,7 +454,7 @@ class SpawnedCommand:
         selector.register(self._stderr_r, selectors.EVENT_READ, "stderr")
         if proc.ctrl_fd >= 0:
             selector.register(proc.ctrl_fd, selectors.EVENT_READ, "exit")
-        deadline = time.monotonic() + self.timeout_sec
+        deadline = None if self.timeout_sec is None else time.monotonic() + self.timeout_sec
         timed_out = False
         cancelled = False
         reader_failed = False
@@ -433,7 +502,7 @@ class SpawnedCommand:
                 if not cancelled and self._cancel.is_set():
                     cancelled = True
                     _terminate_process(proc, self.scope)
-                elif not timed_out and time.monotonic() >= deadline:
+                elif not timed_out and deadline is not None and time.monotonic() >= deadline:
                     timed_out = True
                     _terminate_process(proc, self.scope)
                 try:

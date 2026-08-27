@@ -7,6 +7,7 @@ import os
 import re
 import secrets
 import sqlite3
+import stat
 import threading
 import time
 from collections.abc import Iterator
@@ -14,7 +15,7 @@ from contextlib import contextmanager, suppress
 from pathlib import Path
 from typing import Any, Literal
 
-from .contracts import CommandError, canonical_json_bytes
+from .contracts import CommandError, canonical_json_bytes, sha256_bytes
 
 _LOCK_EX = 2
 _LOCK_NB = 4
@@ -94,6 +95,14 @@ class CommandJobStore:
         self._jobs = self.root / "jobs"
         self._jobs.mkdir(parents=True, exist_ok=True)
         os.chmod(self._jobs, 0o700)
+        self._workbenches = self.root / "workbenches"
+        if self._workbenches.is_symlink():
+            raise CommandError("durable_write_failed")
+        self._workbenches.mkdir(parents=True, exist_ok=True)
+        workbenches_stat = self._workbenches.lstat()
+        if not stat.S_ISDIR(workbenches_stat.st_mode) or workbenches_stat.st_uid != os.geteuid():
+            raise CommandError("durable_write_failed")
+        os.chmod(self._workbenches, 0o700)
         self.db_path = self.root / "kernel.sqlite"
         lease_path = self.root / "kernel.lease"
         if self.db_path.is_symlink() or (self.root / "kernel.lock").is_symlink() or lease_path.is_symlink():
@@ -145,6 +154,43 @@ class CommandJobStore:
                 os.close(self._lease_fd)
                 os.close(self._lock_fd)
 
+    def workbench_dir(
+        self,
+        *,
+        actor_id: str,
+        tenant_id: str,
+        conversation_id: str,
+    ) -> Path:
+        """Return one durable owner/conversation workbench without exposing identifiers."""
+
+        identities = (actor_id, tenant_id, conversation_id)
+        if any(
+            type(value) is not str or not value or len(value) > 128 or "\x00" in value for value in identities
+        ):
+            raise CommandError("workbench_scope_invalid")
+        scope = {
+            "actor_id": actor_id,
+            "conversation_id": conversation_id,
+            "schema": "friday.engineer.host-workbench.v1",
+            "tenant_id": tenant_id,
+        }
+        workbench = self._workbenches / sha256_bytes(canonical_json_bytes(scope))
+        try:
+            workbench.mkdir(mode=0o700, exist_ok=True)
+            observed = workbench.lstat()
+            if (
+                not stat.S_ISDIR(observed.st_mode)
+                or stat.S_ISLNK(observed.st_mode)
+                or observed.st_uid != os.geteuid()
+            ):
+                raise CommandError("workbench_scope_unavailable")
+            os.chmod(workbench, 0o700, follow_symlinks=False)
+        except CommandError:
+            raise
+        except OSError as exc:
+            raise CommandError("workbench_scope_unavailable") from exc
+        return workbench
+
     def _init_schema(self) -> None:
         self._conn.executescript(
             """
@@ -161,6 +207,7 @@ class CommandJobStore:
                 host_user_authorized INTEGER NOT NULL,
                 idempotency_key TEXT NOT NULL,
                 command_digest TEXT NOT NULL,
+                input_manifest_sha256 TEXT NOT NULL DEFAULT '',
                 argv_sha256 TEXT NOT NULL,
                 lane TEXT NOT NULL,
                 origin TEXT NOT NULL,
@@ -273,6 +320,18 @@ class CommandJobStore:
             self._conn.execute("BEGIN IMMEDIATE")
             try:
                 self._conn.execute("ALTER TABLE jobs ADD COLUMN cancel_requested_at REAL")
+            except Exception:
+                self._conn.execute("ROLLBACK")
+                raise
+            else:
+                self._conn.execute("COMMIT")
+        columns = {str(row[1]) for row in self._conn.execute("PRAGMA table_info(jobs)").fetchall()}
+        if "input_manifest_sha256" not in columns:
+            self._conn.execute("BEGIN IMMEDIATE")
+            try:
+                self._conn.execute(
+                    "ALTER TABLE jobs ADD COLUMN input_manifest_sha256 TEXT NOT NULL DEFAULT ''"
+                )
             except Exception:
                 self._conn.execute("ROLLBACK")
                 raise
@@ -510,7 +569,7 @@ class CommandJobStore:
         columns = (
             "job_id,actor_id,tenant_id,conversation_id,channel,source_row_id,source_hash,"
             "telegram_update_id,isolation_profile,host_user_authorized,idempotency_key,"
-            "command_digest,argv_sha256,lane,origin,status,error_code,grant_nonce,"
+            "command_digest,input_manifest_sha256,argv_sha256,lane,origin,status,error_code,grant_nonce,"
             "timeout_sec,max_stdout_bytes,max_stderr_bytes,created_at,executable_json"
         )
         values = (
@@ -526,6 +585,7 @@ class CommandJobStore:
             1 if payload["host_user_authorized"] else 0,
             payload["idempotency_key"],
             payload["command_digest"],
+            payload.get("input_manifest_sha256") or "",
             payload["argv_sha256"],
             payload["lane"],
             payload["origin"],
@@ -540,7 +600,7 @@ class CommandJobStore:
         )
         try:
             self._conn.execute(
-                f"INSERT INTO jobs({columns}) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                f"INSERT INTO jobs({columns}) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 values,
             )
             self._set_focus(

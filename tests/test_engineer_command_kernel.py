@@ -4,15 +4,23 @@ from __future__ import annotations
 
 import json
 import os
+import pwd
 import secrets
+import shlex
 import shutil
 import sqlite3
 import stat
 import time
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
 
+from friday.file_delivery import (
+    AuthorizedFileBytes,
+    CurrentMessageUploadBatchIdentity,
+    CurrentMessageUploadFileIdentity,
+)
 from friday.organs.engineer.command import (
     CommandError,
     CommandGrantAuthority,
@@ -29,9 +37,11 @@ from friday.organs.engineer.command import (
     TrustedPathContract,
 )
 from friday.organs.engineer.command.boundary import MissingControllerBoundary, SystemdCgroupBoundary
-from friday.organs.engineer.command.contracts import sha256_bytes
+from friday.organs.engineer.command.contracts import MAX_TIMEOUT_SEC, sha256_bytes
+from friday.organs.engineer.command.inputs import command_input_descriptor, command_input_manifest
 from friday.organs.engineer.command.resolve import attest_trusted_path, resolve_held, resolve_named
 from friday.organs.engineer.command.spawn_helper import SpawnBroker
+from friday.source_identity import authorized_file_snapshot_token
 
 GRANT_SECRET = b"friday-engineer-command-kernel-tests-secret"
 SOURCE_SECRET = b"friday-engineer-owner-source-tests-secret"
@@ -57,6 +67,7 @@ def _key(name: str) -> str:
 
 
 def _argv(*argv: str, key: str, **kwargs) -> CommandRequest:
+    kwargs.setdefault("timeout_sec", 30)
     return CommandRequest(
         lane=CommandLane.ARGV,
         origin=CommandOrigin.OWNER_TURN,
@@ -67,9 +78,20 @@ def _argv(*argv: str, key: str, **kwargs) -> CommandRequest:
 
 
 def _shell(command: str, key: str, **kwargs) -> CommandRequest:
+    kwargs.setdefault("timeout_sec", 30)
     return CommandRequest(
         lane=CommandLane.SHELL,
         origin=CommandOrigin.OWNER_TURN,
+        shell_command=command,
+        idempotency_key=key,
+        **kwargs,
+    )
+
+
+def _host_shell(command: str, key: str, **kwargs) -> CommandRequest:
+    return CommandRequest(
+        lane=CommandLane.SHELL,
+        origin=CommandOrigin.MODEL,
         shell_command=command,
         idempotency_key=key,
         **kwargs,
@@ -130,6 +152,30 @@ def _submit(kernel: CommandKernel, request: CommandRequest, **kwargs) -> str:
         actor_id=actor_id,
         delivery_chat_id=delivery_chat_id,
     )
+
+
+def _submit_host(kernel: CommandKernel, request: CommandRequest, **kwargs) -> str:
+    source = kernel.authority.source_authority.attest(
+        actor_id=kwargs.pop("actor_id", ACTOR),
+        tenant_id=kwargs.pop("tenant_id", "tenant-1"),
+        conversation_id=kwargs.pop("conversation_id", "conv-1"),
+        channel="cli_test",
+        source_row_id=kwargs.pop("source_row_id", "row-1"),
+        source_hash=SOURCE_HASH,
+        telegram_update_id=kwargs.pop("telegram_update_id", "upd-1"),
+        isolation_profile=IsolationProfile.HOST_USER,
+        idempotency_key=request.idempotency_key,
+    )
+    delegation = kernel.authority.source_authority.delegate_autonomous(
+        source,
+        expires_at=int(time.time()) + 60,
+    )
+    token = kernel.authority.issue_autonomous(
+        request,
+        source=source,
+        delegation=delegation,
+    )
+    return kernel.submit(request, token, actor_id=source.actor_id, **kwargs)
 
 
 def _wait(kernel: CommandKernel, job_id: str):
@@ -792,29 +838,464 @@ def test_isolated_workspace_denies_host_files_and_network(tmp_path: Path) -> Non
     assert net_receipt.exit_code == 0
 
 
-def test_host_user_profile_requires_broker(tmp_path: Path) -> None:
-    kernel = _kernel(tmp_path)
-    request = _argv("/usr/bin/true", key=_key("host-user"))
-    with pytest.raises(CommandError, match="host_user_requires_broker"):
+def test_host_user_requires_explicit_autonomous_model_shell_delegation(tmp_path: Path) -> None:
+    def clock() -> int:
+        return 1_000
+
+    kernel = _kernel(tmp_path, clock=clock)
+    request = CommandRequest(
+        lane=CommandLane.SHELL,
+        origin=CommandOrigin.MODEL,
+        shell_command="true",
+        timeout_sec=None,
+        idempotency_key=_key("host-user"),
+    )
+    source = _attest(
+        kernel.authority.source_authority,
+        request,
+        isolation_profile=IsolationProfile.HOST_USER,
+    )
+    with pytest.raises(CommandError, match="autonomous_delegation_required"):
+        kernel.authority.issue(request, source=source)
+    delegation = kernel.authority.source_authority.delegate_autonomous(
+        source,
+        expires_at=1_060,
+    )
+    token = kernel.authority.issue_autonomous(
+        request,
+        source=source,
+        delegation=delegation,
+    )
+    grant = kernel.authority.parse(token, request, actor_id=ACTOR)
+    assert grant.isolation_profile is IsolationProfile.HOST_USER
+    assert grant.origin is CommandOrigin.MODEL
+    assert grant.lane is CommandLane.SHELL
+    assert grant.autonomous_delegated is True
+    assert grant.destructive_confirmed is False
+    assert grant.autonomous_delegation_nonce == delegation.nonce
+    assert grant.expires_at == 1_060
+
+
+def test_autonomous_delegation_rejects_forgery_and_exact_source_drift(tmp_path: Path) -> None:
+    def clock() -> int:
+        return 1_000
+
+    kernel = _kernel(tmp_path, clock=clock)
+    request = _host_shell("true", key=_key("delegation-integrity"))
+    source = _attest(
+        kernel.authority.source_authority,
+        request,
+        isolation_profile=IsolationProfile.HOST_USER,
+    )
+    delegation = kernel.authority.source_authority.delegate_autonomous(
+        source,
+        expires_at=1_060,
+    )
+    with pytest.raises(CommandError, match="invalid_autonomous_delegation"):
+        kernel.authority.issue_autonomous(
+            request,
+            source=source,
+            delegation=replace(delegation, mac="0" * 64),
+        )
+    for changed_source in (
         _attest(
             kernel.authority.source_authority,
             request,
             isolation_profile=IsolationProfile.HOST_USER,
+            source_hash="d" * 64,
+        ),
+        kernel.authority.source_authority.attest(
+            actor_id=source.actor_id,
+            tenant_id=source.tenant_id,
+            conversation_id=source.conversation_id,
+            channel=source.channel,
+            source_row_id="other-row",
+            source_hash=source.source_hash,
+            telegram_update_id=source.telegram_update_id,
+            isolation_profile=IsolationProfile.HOST_USER,
+            idempotency_key=source.idempotency_key,
+        ),
+        kernel.authority.source_authority.attest(
+            actor_id=source.actor_id,
+            tenant_id=source.tenant_id,
+            conversation_id=source.conversation_id,
+            channel=source.channel,
+            source_row_id=source.source_row_id,
+            source_hash=source.source_hash,
+            telegram_update_id=source.telegram_update_id,
+            isolation_profile=IsolationProfile.HOST_USER,
+            idempotency_key="different-idempotency",
+        ),
+    ):
+        with pytest.raises(CommandError, match="autonomous_delegation_source_mismatch"):
+            kernel.authority.issue_autonomous(
+                request,
+                source=changed_source,
+                delegation=delegation,
+            )
+    kernel.close()
+
+
+def test_autonomous_delegation_expiry_is_enforced_at_issue_and_later_use(tmp_path: Path) -> None:
+    now = [1_000]
+
+    def clock() -> int:
+        return now[0]
+
+    kernel = _kernel(tmp_path, clock=clock)
+    request = _host_shell("true", key=_key("delegation-expiry"))
+    source = _attest(
+        kernel.authority.source_authority,
+        request,
+        isolation_profile=IsolationProfile.HOST_USER,
+    )
+    expired = kernel.authority.source_authority.delegate_autonomous(source, expires_at=999)
+    with pytest.raises(CommandError, match="autonomous_delegation_expired"):
+        kernel.authority.issue_autonomous(request, source=source, delegation=expired)
+    delegation = kernel.authority.source_authority.delegate_autonomous(source, expires_at=1_060)
+    token = kernel.authority.issue_autonomous(request, source=source, delegation=delegation)
+    grant = kernel.authority.parse(token, request, actor_id=ACTOR)
+    now[0] = 1_061
+    with pytest.raises(CommandError, match="autonomous_delegation_expired"):
+        kernel.authority.still_valid(grant)
+    kernel.close()
+
+
+def test_autonomous_issue_is_closed_to_model_shell_host_user_shape(tmp_path: Path) -> None:
+    kernel = _kernel(tmp_path)
+    shell = _host_shell("true", key=_key("host-shape"))
+    source = _attest(
+        kernel.authority.source_authority,
+        shell,
+        isolation_profile=IsolationProfile.HOST_USER,
+    )
+    delegation = kernel.authority.source_authority.delegate_autonomous(
+        source,
+        expires_at=int(time.time()) + 60,
+    )
+    argv_request = CommandRequest(
+        lane=CommandLane.ARGV,
+        origin=CommandOrigin.MODEL,
+        argv=("/usr/bin/true",),
+        idempotency_key=shell.idempotency_key,
+    )
+    with pytest.raises(CommandError, match="host_user_shell_required"):
+        kernel.authority.issue_autonomous(
+            argv_request,
+            source=source,
+            delegation=delegation,
         )
-    with pytest.raises(TypeError):
-        kernel.authority.source_authority.attest(  # type: ignore[call-arg]
-            actor_id=ACTOR,
-            tenant_id="tenant-1",
-            conversation_id="conv-1",
-            channel="cli_test",
-            source_row_id="row-1",
-            source_hash=SOURCE_HASH,
-            telegram_update_id="upd-1",
-            isolation_profile=IsolationProfile.ISOLATED_WORKSPACE,
-            idempotency_key=request.idempotency_key,
-            host_user_authorized=True,
+    owner_shell = CommandRequest(
+        lane=CommandLane.SHELL,
+        origin=CommandOrigin.OWNER_TURN,
+        shell_command="true",
+        idempotency_key=shell.idempotency_key,
+    )
+    with pytest.raises(CommandError, match="autonomous_model_origin_required"):
+        kernel.authority.issue_autonomous(
+            owner_shell,
+            source=source,
+            delegation=delegation,
         )
-    assert not hasattr(kernel.authority.source_authority, "approve_destructive")
+    with pytest.raises(CommandError, match="autonomous_delegation_required"):
+        kernel.authority.issue(shell, source=source)
+    changed_request = _host_shell("printf changed", key="different-idempotency")
+    with pytest.raises(CommandError, match="autonomous_delegation_source_mismatch"):
+        kernel.authority.issue_autonomous(
+            changed_request,
+            source=kernel.authority.source_authority.attest(
+                actor_id=source.actor_id,
+                tenant_id=source.tenant_id,
+                conversation_id=source.conversation_id,
+                channel=source.channel,
+                source_row_id=source.source_row_id,
+                source_hash=source.source_hash,
+                telegram_update_id=source.telegram_update_id,
+                isolation_profile=IsolationProfile.HOST_USER,
+                idempotency_key=changed_request.idempotency_key,
+            ),
+            delegation=delegation,
+        )
+    kernel.close()
+
+
+def test_host_user_runs_direct_bash_with_host_environment_and_unbounded_timeout(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    host_bin = tmp_path / "host-bin"
+    host_bin.mkdir()
+    probe = host_bin / "friday-host-probe"
+    probe.write_text("#!/usr/bin/bash\nprintf host-path-ok", encoding="utf-8")
+    probe.chmod(0o755)
+    inherited_path = f"{host_bin}:{os.environ.get('PATH', '')}"
+    monkeypatch.setenv("PATH", inherited_path)
+    secret = tmp_path / "host-secret.txt"
+    secret.write_text("host-readable", encoding="utf-8")
+    service_home = pwd.getpwuid(os.geteuid()).pw_dir
+    network_namespace = os.readlink("/proc/self/ns/net")
+    kernel = _kernel(tmp_path)
+    command = "\n".join(
+        (
+            "set -eu",
+            f'test "$HOME" = {shlex.quote(service_home)}',
+            'test "$(pwd)" = "$HOME"',
+            f"test -r {shlex.quote(str(secret))}",
+            f'test "$(id -u)" = {os.geteuid()}',
+            f'test "$(readlink /proc/self/ns/net)" = {shlex.quote(network_namespace)}',
+            'test -d "$FRIDAY_JOB_DIR"',
+            'test -d "$FRIDAY_WORK_DIR"',
+            'test -d "$FRIDAY_INPUT_DIR"',
+            'test -d "$FRIDAY_OUTPUT_DIR"',
+            "friday-host-probe",
+            'printf host-output > "$FRIDAY_OUTPUT_DIR/result.txt"',
+        )
+    )
+    request = _host_shell(command, key=_key("host-direct"), timeout_sec=None)
+    receipt = _wait(kernel, _submit_host(kernel, request))
+    assert receipt.status is CommandStatus.COMPLETED
+    assert receipt.exit_code == 0
+    assert receipt.stdout == b"host-path-ok"
+    assert receipt.isolation_profile is IsolationProfile.HOST_USER
+    assert receipt.to_public_payload()["isolated"] is False
+    assert receipt.input_manifest_sha256 == request.input_manifest_sha256
+    assert receipt.generated_files[0].relative_path == "result.txt"
+    assert (kernel.store.job_dir(receipt.job_id) / "sealed" / "result.txt").read_bytes() == b"host-output"
+    job = kernel.store.read_job(receipt.job_id)
+    assert int(job["timeout_sec"]) == 0
+    assert int(job["host_user_authorized"]) == 1
+    kernel.close()
+
+
+def test_host_user_workbench_persists_across_steps_and_output_stays_per_job(
+    tmp_path: Path,
+) -> None:
+    kernel = _kernel(tmp_path)
+    first = _host_shell(
+        'printf first > "$FRIDAY_WORK_DIR/state.txt"',
+        key=_key("workbench-step-1"),
+    )
+    first_receipt = _wait(kernel, _submit_host(kernel, first))
+    assert first_receipt.status is CommandStatus.COMPLETED
+    assert first_receipt.generated_files == ()
+
+    second = _host_shell(
+        "printf -- '-second' >> \"$FRIDAY_WORK_DIR/state.txt\"; "
+        'cp "$FRIDAY_WORK_DIR/state.txt" "$FRIDAY_OUTPUT_DIR/final.txt"',
+        key=_key("workbench-step-2"),
+    )
+    second_receipt = _wait(kernel, _submit_host(kernel, second))
+    assert second_receipt.status is CommandStatus.COMPLETED
+    assert len(second_receipt.generated_files) == 1
+    assert (
+        kernel.store.job_dir(second_receipt.job_id) / "sealed" / "final.txt"
+    ).read_bytes() == b"first-second"
+    first_workbench = kernel.store.workbench_dir(
+        actor_id=ACTOR,
+        tenant_id="tenant-1",
+        conversation_id="conv-1",
+    )
+    other_workbench = kernel.store.workbench_dir(
+        actor_id=ACTOR,
+        tenant_id="tenant-1",
+        conversation_id="conv-other",
+    )
+    assert (first_workbench / "state.txt").read_bytes() == b"first-second"
+    assert first_workbench != other_workbench
+    assert not (other_workbench / "state.txt").exists()
+    kernel.close()
+
+
+def test_host_user_materializes_only_manifest_bound_reauthorized_inputs(tmp_path: Path) -> None:
+    content = b"private-current-upload"
+    content_digest = sha256_bytes(content)
+    raw_id = "raw_0000000000000001"
+    snapshot = authorized_file_snapshot_token(
+        {
+            "id": raw_id,
+            "source": "telegram_upload",
+            "source_ref": "file-1",
+            "content_type": "text/plain",
+            "received_at": "1",
+            "content_hash": content_digest,
+            "_raw_content": "",
+            "_raw_metadata": "{}",
+        },
+        content_sha256=content_digest,
+    )
+    assert snapshot is not None
+    identity_file = CurrentMessageUploadFileIdentity(
+        raw_id=raw_id,
+        source_identity_sha256=snapshot.source.identity_sha256,
+        content_sha256=content_digest,
+        size_bytes=len(content),
+        filename="owner file.txt",
+        mime_type="text/plain",
+    )
+    batch_identity = CurrentMessageUploadBatchIdentity(
+        source_message_id="row-1",
+        conversation_id="conv-1",
+        source_message_identity_sha256="f" * 64,
+        telegram_update_id="upd-1",
+        uploaded_raw_ids=(raw_id,),
+        files=(identity_file,),
+    )
+    authorized = AuthorizedFileBytes(
+        raw_id=raw_id,
+        filename=identity_file.filename,
+        mime_type=identity_file.mime_type,
+        content=content,
+        snapshot_token=snapshot,
+    )
+    manifest = command_input_manifest(
+        (
+            command_input_descriptor(
+                position=1,
+                raw_id=raw_id,
+                source_identity_sha256=identity_file.source_identity_sha256,
+                content_sha256=identity_file.content_sha256,
+                size_bytes=identity_file.size_bytes,
+                original_filename=identity_file.filename,
+                mime_type=identity_file.mime_type,
+            ),
+        )
+    )
+    kernel = _kernel(tmp_path)
+    request = _host_shell(
+        'cat "$FRIDAY_INPUT_DIR/01-owner-file.txt" > "$FRIDAY_OUTPUT_DIR/copied.txt"',
+        key=_key("host-input"),
+        input_manifest=manifest,
+    )
+    receipt = _wait(
+        kernel,
+        _submit_host(
+            kernel,
+            request,
+            input_manifest=manifest,
+            input_batch_identity=batch_identity,
+            input_files=(authorized,),
+        ),
+    )
+    assert receipt.status is CommandStatus.COMPLETED
+    assert receipt.input_manifest_sha256 == manifest.canonical_sha256()
+    assert receipt.to_public_payload()["input_manifest_sha256"] == manifest.canonical_sha256()
+    assert (kernel.store.job_dir(receipt.job_id) / "sealed" / "copied.txt").read_bytes() == content
+    materialized = kernel.store.job_dir(receipt.job_id) / "input" / "01-owner-file.txt"
+    assert materialized.read_bytes() == content
+    assert stat.S_IMODE(materialized.stat().st_mode) == 0o400
+    kernel.close()
+
+
+def test_host_user_rejects_private_input_byte_drift_before_admission(tmp_path: Path) -> None:
+    content = b"authorized"
+    raw_id = "raw_0000000000000002"
+    digest = sha256_bytes(content)
+    snapshot = authorized_file_snapshot_token(
+        {
+            "id": raw_id,
+            "source": "telegram_upload",
+            "source_ref": "file-2",
+            "content_type": "text/plain",
+            "received_at": "2",
+            "content_hash": digest,
+            "_raw_content": "",
+            "_raw_metadata": "{}",
+        },
+        content_sha256=digest,
+    )
+    assert snapshot is not None
+    identity_file = CurrentMessageUploadFileIdentity(
+        raw_id=raw_id,
+        source_identity_sha256=snapshot.source.identity_sha256,
+        content_sha256=digest,
+        size_bytes=len(content),
+        filename="input.txt",
+        mime_type="text/plain",
+    )
+    manifest = command_input_manifest(
+        (
+            command_input_descriptor(
+                position=1,
+                raw_id=raw_id,
+                source_identity_sha256=identity_file.source_identity_sha256,
+                content_sha256=digest,
+                size_bytes=len(content),
+                original_filename=identity_file.filename,
+                mime_type=identity_file.mime_type,
+            ),
+        )
+    )
+    request = _host_shell("true", key=_key("host-input-drift"), input_manifest=manifest)
+    identity = CurrentMessageUploadBatchIdentity(
+        source_message_id="row-1",
+        conversation_id="conv-1",
+        source_message_identity_sha256="e" * 64,
+        telegram_update_id="upd-1",
+        uploaded_raw_ids=(raw_id,),
+        files=(identity_file,),
+    )
+    changed = AuthorizedFileBytes(
+        raw_id=raw_id,
+        filename="input.txt",
+        mime_type="text/plain",
+        content=b"tampered!",
+        snapshot_token=snapshot,
+    )
+    kernel = _kernel(tmp_path)
+    with pytest.raises(CommandError, match="command_input_bytes_changed"):
+        _submit_host(
+            kernel,
+            request,
+            input_manifest=manifest,
+            input_batch_identity=identity,
+            input_files=(changed,),
+        )
+    assert kernel.store.lookup_idempotency(ACTOR, request.idempotency_key) is None
+    assert list((kernel.store.root / "jobs").iterdir()) == []
+    kernel.close()
+
+
+def test_unbounded_host_user_job_remains_cancellable(tmp_path: Path) -> None:
+    kernel = _kernel(tmp_path)
+    request = _host_shell(
+        "exec /usr/bin/sleep 30",
+        key=_key("host-cancel"),
+        timeout_sec=None,
+    )
+    job_id = _submit_host(kernel, request)
+    kernel.cancel(job_id, actor_id=ACTOR, conversation_id="conv-1")
+    receipt = kernel.wait(
+        job_id,
+        actor_id=ACTOR,
+        conversation_id="conv-1",
+        timeout_sec=10,
+    )
+    assert receipt.status is CommandStatus.CANCELLED
+    assert receipt.cancelled is True
+    assert receipt.timed_out is False
+    kernel.close()
+
+
+def test_unbounded_timeout_is_reserved_for_autonomous_host_user(tmp_path: Path) -> None:
+    kernel = _kernel(tmp_path)
+    request = _argv("/usr/bin/true", key=_key("isolated-unbounded"), timeout_sec=None)
+    source = _attest(kernel.authority.source_authority, request)
+    with pytest.raises(CommandError, match="isolated_timeout_required"):
+        kernel.authority.issue(request, source=source, confirmation=_confirm(kernel, source, request))
+
+
+def test_command_request_has_no_implicit_runtime_ceiling() -> None:
+    request = CommandRequest(
+        lane=CommandLane.SHELL,
+        origin=CommandOrigin.MODEL,
+        shell_command="true",
+        idempotency_key=_key("default-unbounded"),
+    )
+    assert request.timeout_sec is None
+    assert replace(request, timeout_sec=7 * 24 * 60 * 60).timeout_sec == 604_800
+    assert replace(request, timeout_sec=MAX_TIMEOUT_SEC).timeout_sec == 2**31 - 1
+    with pytest.raises(CommandError, match="invalid_request"):
+        replace(request, timeout_sec=MAX_TIMEOUT_SEC + 1)
 
 
 def test_leader_exit_does_not_leave_descendants(tmp_path: Path) -> None:

@@ -39,6 +39,68 @@ def _read_text_at(dir_fd: int, name: str) -> str | None:
         return None
 
 
+def _current_cgroup_dir() -> Path | None:
+    try:
+        raw = Path("/proc/self/cgroup").read_text(encoding="ascii")
+    except (OSError, UnicodeError):
+        return None
+    for line in raw.splitlines():
+        if not line.startswith("0::"):
+            continue
+        relative = line[3:]
+        if not relative.startswith("/") or ".." in relative.split("/"):
+            return None
+        candidate = Path("/sys/fs/cgroup") / relative.lstrip("/")
+        return candidate if candidate.is_dir() else None
+    return None
+
+
+def _finite_parent_limit(name: str, *, allow_zero: bool = False) -> int | None:
+    parent = _current_cgroup_dir()
+    if parent is None:
+        return None
+    raw = _read_text(parent / name)
+    if raw is None or raw == "max" or not raw.isdigit():
+        return None
+    value = int(raw)
+    return value if value > 0 or allow_zero and value == 0 else None
+
+
+def _physical_memory_bytes() -> int:
+    try:
+        pages = int(os.sysconf("SC_PHYS_PAGES"))
+        page_size = int(os.sysconf("SC_PAGE_SIZE"))
+        total = pages * page_size
+    except (OSError, TypeError, ValueError):
+        total = 1024**3
+    return max(256 * 1024**2, total)
+
+
+def host_user_resource_limits() -> ResourceLimits:
+    """Use all available CPUs and practical finite limits below the parent cgroup."""
+
+    physical = _physical_memory_bytes()
+    parent_memory = _finite_parent_limit("memory.max")
+    memory_max = physical if parent_memory is None else min(parent_memory, physical)
+    parent_swap = _finite_parent_limit("memory.swap.max", allow_zero=True)
+    memory_swap_max = physical if parent_swap is None else min(parent_swap, physical)
+    pid_max_raw = _read_text(Path("/proc/sys/kernel/pid_max"))
+    pid_max = int(pid_max_raw) if pid_max_raw and pid_max_raw.isdigit() else 65_536
+    practical_tasks = max(1024, min(pid_max, 65_536))
+    parent_tasks = _finite_parent_limit("pids.max")
+    tasks_max = practical_tasks if parent_tasks is None else min(parent_tasks, practical_tasks)
+    try:
+        cpu_count = len(os.sched_getaffinity(0))
+    except (AttributeError, OSError):
+        cpu_count = int(os.cpu_count() or 1)
+    return ResourceLimits(
+        tasks_max=max(1, tasks_max),
+        memory_max=max(1, memory_max),
+        memory_swap_max=max(0, memory_swap_max),
+        cpu_quota_percent=100 * max(1, cpu_count),
+    )
+
+
 def _open_cgroup_dir(cgroup: Path) -> int:
     try:
         return os.open(
@@ -184,7 +246,7 @@ class ProvenScope:
 class ResourceBoundary:
     """Allocates a killable, durable systemd scope with proven controllers."""
 
-    def allocate(self, job_id: str, limits: ResourceLimits, *, timeout_sec: int) -> ProvenScope:
+    def allocate(self, job_id: str, limits: ResourceLimits, *, timeout_sec: int | None) -> ProvenScope:
         raise CommandError("resource_boundary_unproven")
 
     def prove_pid(self, scope: ProvenScope, pid: int) -> None:
@@ -197,7 +259,7 @@ class ResourceBoundary:
         cgroup_path: str,
         limits: ResourceLimits,
         *,
-        timeout_sec: int,
+        timeout_sec: int | None,
     ) -> ProvenScope:
         """Re-attest persisted scope identity before any restart cleanup."""
         raise CommandError("resource_boundary_unproven")
@@ -218,7 +280,7 @@ class SystemdCgroupBoundary(ResourceBoundary):
         cgroup_path: str,
         limits: ResourceLimits,
         *,
-        timeout_sec: int,
+        timeout_sec: int | None,
     ) -> ProvenScope:
         if len(job_id) != 32 or not all(ch in "0123456789abcdef" for ch in job_id):
             raise CommandError("resource_boundary_unproven")
@@ -261,7 +323,9 @@ class SystemdCgroupBoundary(ResourceBoundary):
             expected_control = cgroup_path.removeprefix("/sys/fs/cgroup")
             if active not in {"active", "activating", "deactivating"} or control_group != expected_control:
                 raise CommandError("resource_boundary_unproven")
-            runtime = max(1, int(timeout_sec) + int(limits.runtime_grace_sec))
+            runtime = (
+                None if timeout_sec is None else max(1, int(timeout_sec) + int(limits.runtime_grace_sec))
+            )
             _prove_limits(cgroup, limits)
             _prove_unit_contract(unit, runtime_sec=runtime)
             return ProvenScope(job_id=job_id, unit=unit, cgroup=cgroup, limits=limits, cgroup_fd=fd)
@@ -269,13 +333,13 @@ class SystemdCgroupBoundary(ResourceBoundary):
             os.close(fd)
             raise
 
-    def allocate(self, job_id: str, limits: ResourceLimits, *, timeout_sec: int) -> ProvenScope:
+    def allocate(self, job_id: str, limits: ResourceLimits, *, timeout_sec: int | None) -> ProvenScope:
         if len(job_id) != 32 or not all(ch in "0123456789abcdef" for ch in job_id):
             raise CommandError("invalid_job_id")
         if not os.path.isfile(SYSTEMD_RUN_EXECUTABLE) or not os.path.isfile(SYSTEMCTL_EXECUTABLE):
             raise CommandError("resource_boundary_unproven")
         unit = f"friday-ecmd-{job_id}.service"
-        runtime = max(1, int(timeout_sec) + int(limits.runtime_grace_sec))
+        runtime = None if timeout_sec is None else max(1, int(timeout_sec) + int(limits.runtime_grace_sec))
         argv = [
             SYSTEMD_RUN_EXECUTABLE,
             "--user",
@@ -291,15 +355,16 @@ class SystemdCgroupBoundary(ResourceBoundary):
             "-p",
             f"CPUQuota={int(limits.cpu_quota_percent)}%",
             "-p",
-            f"RuntimeMaxSec={runtime}",
-            "-p",
             "KillMode=control-group",
             "-p",
             "Delegate=yes",
             "--",
             SLEEP_EXECUTABLE,
-            "9999",
+            "infinity",
         ]
+        if runtime is not None:
+            marker = argv.index("KillMode=control-group") - 1
+            argv[marker:marker] = ["-p", f"RuntimeMaxSec={runtime}"]
         try:
             completed = subprocess.run(  # noqa: S603 - closed argv, root-owned helpers
                 argv,
@@ -493,7 +558,7 @@ def _parse_systemd_usec(raw: str) -> int:
         raise CommandError("resource_boundary_unproven") from exc
 
 
-def _prove_unit_contract(unit: str, *, runtime_sec: int) -> None:
+def _prove_unit_contract(unit: str, *, runtime_sec: int | None) -> None:
     try:
         shown = subprocess.run(  # noqa: S603
             [
@@ -538,7 +603,10 @@ def _prove_unit_contract(unit: str, *, runtime_sec: int) -> None:
         raise CommandError("resource_boundary_unproven")
     if collect_mode != "inactive-or-failed":
         raise CommandError("resource_boundary_unproven")
-    if _parse_systemd_usec(runtime_raw) != int(runtime_sec) * 1_000_000:
+    if runtime_sec is None:
+        if runtime_raw.strip().lower() not in {"infinity", "inf", "[not set]"}:
+            raise CommandError("resource_boundary_unproven")
+    elif _parse_systemd_usec(runtime_raw) != int(runtime_sec) * 1_000_000:
         raise CommandError("resource_boundary_unproven")
 
 

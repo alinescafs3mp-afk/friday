@@ -1,4 +1,4 @@
-"""Native bwrap/cgroup boundary for isolated_workspace. host_user is not in-process."""
+"""Native bwrap construction for isolated_workspace and closed profile validation."""
 
 from __future__ import annotations
 
@@ -155,7 +155,5 @@ def bwrap_argv(
 
 
 def require_profile(profile: IsolationProfile) -> None:
-    if profile is IsolationProfile.HOST_USER:
-        raise CommandError("host_user_requires_broker")
-    if profile is not IsolationProfile.ISOLATED_WORKSPACE:
+    if profile not in {IsolationProfile.ISOLATED_WORKSPACE, IsolationProfile.HOST_USER}:
         raise CommandError("invalid_isolation_profile")

@@ -111,6 +111,9 @@ def _grant(request: CommandRequest, *, confirmed: bool = False) -> VerifiedComma
         argv_sha256=request.argv_sha256,
         lane=request.lane,
         origin=request.origin,
+        autonomous_delegated=False,
+        autonomous_delegation_nonce="",
+        autonomous_delegation_expires_at=0,
         destructive_confirmed=confirmed,
         confirmation_nonce="confirm" if confirmed else "",
         confirmation_expires_at=2**31 if confirmed else 0,
@@ -531,6 +534,70 @@ def test_job_helper_enters_scope_before_spawn_and_releases_stopped_child(
         ("signal", signal.SIGCONT),
         ("gate", "x"),
     ]
+
+
+def test_host_helper_gates_held_bash_on_stopped_pidfd_and_stable_cgroup(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    events: list[tuple[str, int | str]] = []
+    request = {
+        "argv": ["/usr/bin/bash", "--noprofile", "--norc", "-c", "true"],
+        "cgroup": "/sys/fs/cgroup/mock",
+        "cwd": "/home/service",
+        "env": {"HOME": "/home/service", "PATH": "/usr/bin:/bin"},
+        "mode": "host_user",
+    }
+
+    def _move(_cgroup: str, pid: int) -> None:
+        events.append(("move", pid))
+
+    def _ready(_payload: dict[str, object], pidfd: int | None = None) -> None:
+        events.append(("ready", int(pidfd or -1)))
+
+    def _read(fd: int, _size: int) -> bytes:
+        events.append(("go", fd))
+        return b"1"
+
+    def _signal(pidfd: int, sig: int) -> None:
+        events.append(("signal", sig))
+        assert pidfd == 88
+
+    monkeypatch.setattr(signal, "signal", lambda *_args: None)
+    monkeypatch.setattr(os, "getpid", lambda: 1234)
+    monkeypatch.setattr(os, "fork", lambda: events.append(("fork", 4321)) or 4321)
+    monkeypatch.setattr(spawn_helper_module, "_move_cgroup", _move)
+    monkeypatch.setattr(
+        spawn_helper_module,
+        "_wait_child_stopped",
+        lambda pid: events.append(("stopped", pid)),
+    )
+    monkeypatch.setattr(
+        os,
+        "pidfd_open",
+        lambda pid, _flags: events.append(("pidfd", pid)) or 88,
+    )
+    monkeypatch.setattr(spawn_helper_module, "_pid_starttime", lambda _pid: 999)
+    monkeypatch.setattr(spawn_helper_module, "_send_ready", _ready)
+    monkeypatch.setattr(os, "read", _read)
+    monkeypatch.setattr(signal, "pidfd_send_signal", _signal)
+    monkeypatch.setattr(os, "waitpid", lambda pid, _flags: (pid, 0))
+    monkeypatch.setattr(
+        spawn_helper_module,
+        "_send_json_fd",
+        lambda _fd, payload: events.append(("exit", int(payload["returncode"]))),
+    )
+    monkeypatch.setattr(os, "close", lambda _fd: None)
+
+    spawn_helper_module._host_job_main(request)
+
+    assert events.index(("move", 1234)) < events.index(("fork", 4321))
+    assert events.index(("fork", 4321)) < events.index(("stopped", 4321))
+    assert events.index(("stopped", 4321)) < events.index(("pidfd", 4321))
+    assert events.index(("pidfd", 4321)) < events.index(("move", 4321))
+    assert events.index(("move", 4321)) < events.index(("ready", 88))
+    assert events.index(("ready", 88)) < events.index(("go", spawn_helper_module.HELPER_GO))
+    assert events.index(("go", spawn_helper_module.HELPER_GO)) < events.index(("signal", signal.SIGCONT))
+    assert events[-1] == ("exit", 0)
 
 
 def test_failed_pidfd_resume_never_releases_bwrap_gate(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -1103,6 +1170,71 @@ def test_transient_scope_requests_collect_and_cleanup_is_bounded(
     assert scope.cgroup_fd is not None
     os.close(scope.cgroup_fd)
     scope.cgroup_fd = None
+
+
+def test_unbounded_scope_has_no_runtime_ceiling_and_infinite_keeper(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[tuple[str, ...]] = []
+    proven_runtime: list[int | None] = []
+
+    def _run(argv: list[str], **_kwargs: object) -> SimpleNamespace:
+        calls.append(tuple(argv))
+        return SimpleNamespace(returncode=0, stdout="", stderr=b"")
+
+    cgroup = tmp_path / "cgroup"
+    cgroup.mkdir()
+    monkeypatch.setattr(boundary_module.subprocess, "run", _run)
+    monkeypatch.setattr(boundary_module, "_wait_unit_cgroup", lambda _unit: cgroup)
+    monkeypatch.setattr(boundary_module, "_prove_limits", lambda _cgroup, _limits: None)
+    monkeypatch.setattr(
+        boundary_module,
+        "_prove_unit_contract",
+        lambda _unit, *, runtime_sec: proven_runtime.append(runtime_sec),
+    )
+    scope = SystemdCgroupBoundary().allocate(
+        "a" * 32,
+        ResourceLimits.default(),
+        timeout_sec=None,
+    )
+    launch = calls[0]
+    assert launch[-3:] == ("--", "/usr/bin/sleep", "infinity")
+    assert not any(item.startswith("RuntimeMaxSec=") for item in launch)
+    assert proven_runtime == [None]
+    assert scope.cgroup_fd is not None
+    os.close(scope.cgroup_fd)
+    scope.cgroup_fd = None
+
+
+def test_host_resource_limits_follow_parent_and_use_all_available_cpus(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    parent = {
+        "memory.max": 4 * 1024**3,
+        "memory.swap.max": 512 * 1024**2,
+        "pids.max": 4096,
+    }
+    monkeypatch.setattr(boundary_module, "_physical_memory_bytes", lambda: 8 * 1024**3)
+    monkeypatch.setattr(
+        boundary_module,
+        "_finite_parent_limit",
+        lambda name, **_kwargs: parent[name],
+    )
+    monkeypatch.setattr(
+        boundary_module,
+        "_read_text",
+        lambda path: "100000" if path == Path("/proc/sys/kernel/pid_max") else None,
+    )
+    monkeypatch.setattr(os, "sched_getaffinity", lambda _pid: frozenset(range(6)))
+
+    limits = boundary_module.host_user_resource_limits()
+
+    assert limits.memory_max == 4 * 1024**3
+    assert limits.memory_swap_max == 512 * 1024**2
+    assert limits.tasks_max == 4096
+    assert limits.cpu_quota_percent == 600
+    assert limits.output_bytes == boundary_module.ResourceLimits.default().output_bytes
 
 
 def test_scope_retains_attested_cgroup_fd_until_cleanup_retry_is_proven(

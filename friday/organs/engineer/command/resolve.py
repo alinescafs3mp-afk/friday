@@ -18,8 +18,10 @@ from .contracts import (
     SHELL_FLAG_PREFIX,
     CommandError,
     CommandLane,
+    CommandOrigin,
     CommandRequest,
     HeldExecutable,
+    IsolationProfile,
     PathRoot,
     ResolvedExecutable,
     TrustedPathContract,
@@ -468,6 +470,18 @@ def resolve_request(
     trusted_path: TrustedPathContract,
     path_roots: tuple[PathRoot, ...] | None = None,
 ) -> HeldExecutable:
+    if grant.isolation_profile is IsolationProfile.HOST_USER:
+        if not grant.autonomous_delegated:
+            raise CommandError("autonomous_delegation_required")
+        if request.lane is not CommandLane.SHELL:
+            raise CommandError("host_user_shell_required")
+        if request.origin is not CommandOrigin.MODEL:
+            raise CommandError("autonomous_model_origin_required")
+        held = resolve_host_bash()
+        held.inner_rest = (*SHELL_FLAG_PREFIX, request.shell_command or "")
+        return held
+    if grant.isolation_profile is not IsolationProfile.ISOLATED_WORKSPACE:
+        raise CommandError("invalid_isolation_profile")
     if request.lane is CommandLane.SHELL:
         held = resolve_held(BASH_EXECUTABLE, trusted_path=trusted_path, path_roots=path_roots)
         if Path(held.resolved.canonical_path).name != "bash":
@@ -501,6 +515,16 @@ def resolve_request(
 
 def resolve_bwrap() -> HeldExecutable:
     return resolve_root_helper(BWRAP_EXECUTABLE)
+
+
+def resolve_host_bash() -> HeldExecutable:
+    """Hold the original root-owned bash inode used by autonomous host jobs."""
+
+    held = resolve_root_helper(BASH_EXECUTABLE)
+    if held.resolved.canonical_path != BASH_EXECUTABLE:
+        held.close()
+        raise CommandError("bash_path_mismatch")
+    return held
 
 
 def _canonical_path_root(directory: str) -> str:

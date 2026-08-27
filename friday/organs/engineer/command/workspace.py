@@ -8,6 +8,7 @@ import hashlib
 import hmac
 import os
 import stat
+from collections.abc import Mapping
 from pathlib import Path
 
 from .contracts import (
@@ -52,6 +53,7 @@ class JobWorkspace:
     def __init__(self, job_dir: Path) -> None:
         self.job_dir = job_dir
         self.home = job_dir / "workspace"
+        self.input = job_dir / "input"
         self.tmp = job_dir / "tmp"
         self.output = job_dir / "output"
         self.evidence = job_dir / "evidence"
@@ -60,11 +62,61 @@ class JobWorkspace:
         self.stderr_path = self.evidence / "stderr.bin"
 
     def materialize(self) -> None:
-        for path in (self.home, self.tmp, self.output, self.evidence, self.sealed):
+        for path in (self.home, self.input, self.tmp, self.output, self.evidence, self.sealed):
             path.mkdir(parents=True, exist_ok=True)
             os.chmod(path, 0o700)
         atomic_write(self.stdout_path, b"")
         atomic_write(self.stderr_path, b"")
+
+    def materialize_inputs(self, files: tuple[tuple[str, bytes], ...]) -> None:
+        """Write a previously authorized immutable batch without following paths."""
+
+        if not files:
+            return
+        input_fd = open_dir_nofollow(self.input)
+        created: list[str] = []
+        flags = (
+            os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0)
+        )
+        try:
+            if _listdir_fd(input_fd):
+                raise CommandError("command_input_materialization_refused")
+            for name, content in files:
+                if (
+                    type(name) is not str
+                    or not name
+                    or name in {".", ".."}
+                    or "/" in name
+                    or "\x00" in name
+                    or type(content) is not bytes
+                ):
+                    raise CommandError("command_input_materialization_refused")
+                try:
+                    fd = os.open(name, flags, 0o400, dir_fd=input_fd)
+                except OSError as exc:
+                    raise CommandError("command_input_materialization_failed") from exc
+                created.append(name)
+                try:
+                    os.fchmod(fd, 0o400)
+                    view = memoryview(content)
+                    while view:
+                        written = os.write(fd, view)
+                        view = view[written:]
+                    os.fsync(fd)
+                except OSError as exc:
+                    raise CommandError("command_input_materialization_failed") from exc
+                finally:
+                    os.close(fd)
+            os.fsync(input_fd)
+        except Exception:
+            for name in created:
+                with contextlib.suppress(OSError):
+                    os.unlink(name, dir_fd=input_fd)
+            with contextlib.suppress(OSError):
+                os.fsync(input_fd)
+            raise
+        finally:
+            os.close(input_fd)
 
     def retire(self) -> None:
         """Idempotently remove one already-authorized workspace without following links."""
@@ -202,6 +254,37 @@ class JobWorkspace:
             "TMPDIR": tmp,
             "TZ": "UTC",
         }
+
+    def host_env(
+        self,
+        *,
+        base_env: Mapping[str, str],
+        service_home: Path,
+        work_dir: Path,
+    ) -> dict[str, str]:
+        """Expose the service user's host environment plus explicit job directories."""
+
+        home = str(service_home)
+        env: dict[str, str] = {}
+        for key, value in base_env.items():
+            if not isinstance(key, str) or not isinstance(value, str):
+                continue
+            if not key or "=" in key or "\x00" in key or "\x00" in value:
+                continue
+            env[key] = value
+        env.update(
+            {
+                "FRIDAY_INPUT_DIR": str(self.input),
+                "FRIDAY_JOB_DIR": str(self.job_dir),
+                "FRIDAY_OUTPUT_DIR": str(self.output),
+                "FRIDAY_WORK_DIR": str(work_dir),
+                "HOME": home,
+                "PATH": env.get("PATH") or os.defpath,
+                "PWD": home,
+                "TMPDIR": str(self.tmp),
+            }
+        )
+        return env
 
     def read_evidence_verified(self, name: str, *, expected_sha256: str, cap: int) -> bytes:
         if name not in {"stdout.bin", "stderr.bin"}:

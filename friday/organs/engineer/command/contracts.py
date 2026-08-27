@@ -6,10 +6,13 @@ import contextlib
 import hashlib
 import json
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import StrEnum
 from pathlib import Path
-from typing import Any, Literal
+from typing import TYPE_CHECKING, Any, Literal
+
+if TYPE_CHECKING:
+    from .inputs import CommandInputManifest
 
 SCHEMA = "friday.engineer.command.v4"
 BASH_EXECUTABLE = "/usr/bin/bash"
@@ -41,7 +44,7 @@ MAX_SHELL_CHARS = 16 * 1024
 MAX_STDIN_BYTES = 1 * 1024 * 1024
 MAX_STDOUT_BYTES = 2 * 1024 * 1024
 MAX_STDERR_BYTES = 256 * 1024
-MAX_TIMEOUT_SEC = 3600
+MAX_TIMEOUT_SEC = 2**31 - 1
 MAX_OUTPUT_FILES = 64
 MAX_OUTPUT_FILE_BYTES = 16 * 1024 * 1024
 MAX_OUTPUT_TREE_BYTES = 32 * 1024 * 1024
@@ -264,7 +267,12 @@ class ResourceLimits:
                 raise CommandError("invalid_resource_limits")
         if isinstance(self.memory_swap_max, bool) or self.memory_swap_max < 0:
             raise CommandError("invalid_resource_limits")
-        if isinstance(self.cpu_quota_percent, bool) or not 1 <= self.cpu_quota_percent <= 100:
+        cpu_ceiling = 100 * max(1, int(os.cpu_count() or 1))
+        if (
+            isinstance(self.cpu_quota_percent, bool)
+            or not isinstance(self.cpu_quota_percent, int)
+            or not 1 <= self.cpu_quota_percent <= cpu_ceiling
+        ):
             raise CommandError("invalid_resource_limits")
 
     @classmethod
@@ -300,6 +308,41 @@ class OwnerSource:
             "telegram_update_id": self.telegram_update_id,
             "tenant_id": self.tenant_id,
             "v": 4,
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class AutonomousDelegation:
+    """One exact current owner source delegated to the autonomous host shell."""
+
+    actor_id: str
+    tenant_id: str
+    conversation_id: str
+    channel: str
+    source_row_id: str
+    source_hash: str
+    telegram_update_id: str
+    idempotency_key: str
+    isolation_profile: IsolationProfile
+    expires_at: int
+    nonce: str
+    mac: str
+
+    def identity_payload(self) -> dict[str, Any]:
+        return {
+            "actor_id": self.actor_id,
+            "channel": self.channel,
+            "conversation_id": self.conversation_id,
+            "expires_at": self.expires_at,
+            "idempotency_key": self.idempotency_key,
+            "isolation_profile": self.isolation_profile.value,
+            "nonce": self.nonce,
+            "schema": "friday.engineer.autonomous-delegation.v1",
+            "source_hash": self.source_hash,
+            "source_row_id": self.source_row_id,
+            "telegram_update_id": self.telegram_update_id,
+            "tenant_id": self.tenant_id,
+            "v": 1,
         }
 
 
@@ -341,6 +384,13 @@ class DestructiveApproval:
     confirmation: OwnerConfirmation
 
 
+def _empty_input_manifest() -> CommandInputManifest:
+    # Kept lazy because inputs imports the canonical helpers from this module.
+    from .inputs import EMPTY_INPUT_MANIFEST
+
+    return EMPTY_INPUT_MANIFEST
+
+
 @dataclass(frozen=True, slots=True)
 class CommandRequest:
     lane: CommandLane
@@ -348,10 +398,11 @@ class CommandRequest:
     argv: tuple[str, ...] = ()
     shell_command: str | None = None
     stdin: bytes = b""
-    timeout_sec: int = 30
+    timeout_sec: int | None = None
     max_stdout_bytes: int = MAX_STDOUT_BYTES
     max_stderr_bytes: int = MAX_STDERR_BYTES
     idempotency_key: str = ""
+    input_manifest: CommandInputManifest = field(default_factory=_empty_input_manifest)
 
     def __post_init__(self) -> None:
         if self.lane is CommandLane.ARGV:
@@ -374,7 +425,11 @@ class CommandRequest:
                 raise CommandError("shell_overflow")
         else:
             raise CommandError("invalid_request")
-        if isinstance(self.timeout_sec, bool) or not 1 <= self.timeout_sec <= MAX_TIMEOUT_SEC:
+        if self.timeout_sec is not None and (
+            isinstance(self.timeout_sec, bool)
+            or not isinstance(self.timeout_sec, int)
+            or not 1 <= self.timeout_sec <= MAX_TIMEOUT_SEC
+        ):
             raise CommandError("invalid_request", detail="timeout")
         if isinstance(self.max_stdout_bytes, bool) or not 1 <= self.max_stdout_bytes <= 8 * 1024 * 1024:
             raise CommandError("invalid_request", detail="stdout")
@@ -387,6 +442,10 @@ class CommandRequest:
         key = self.idempotency_key
         if not isinstance(key, str) or not key or len(key) > 128 or "\x00" in key:
             raise CommandError("invalid_request", detail="idempotency_key")
+        from .inputs import CommandInputManifest
+
+        if type(self.input_manifest) is not CommandInputManifest:
+            raise CommandError("input_manifest_invalid")
 
     @property
     def digest(self) -> str:
@@ -398,6 +457,7 @@ class CommandRequest:
             "origin": self.origin.value,
             "schema": SCHEMA,
             "shell_command": self.shell_command,
+            "input_manifest_sha256": self.input_manifest.canonical_sha256(),
             "stdin_sha256": sha256_bytes(self.stdin),
             "timeout_sec": self.timeout_sec,
         }
@@ -408,6 +468,10 @@ class CommandRequest:
         if self.lane is CommandLane.SHELL:
             return framed_argv_digest((*SHELL_FLAG_PREFIX, self.shell_command or ""))
         return framed_argv_digest(self.argv)
+
+    @property
+    def input_manifest_sha256(self) -> str:
+        return self.input_manifest.canonical_sha256()
 
 
 @dataclass(frozen=True, slots=True)
@@ -425,6 +489,9 @@ class VerifiedCommandGrant:
     argv_sha256: str
     lane: CommandLane
     origin: CommandOrigin
+    autonomous_delegated: bool
+    autonomous_delegation_nonce: str
+    autonomous_delegation_expires_at: int
     destructive_confirmed: bool
     confirmation_nonce: str
     confirmation_expires_at: int
@@ -574,6 +641,7 @@ class CommandReceipt:
     receipt_mac: str
     shell_subcommands_attested: Literal[False] = False
     authorization_complete: Literal[False] = False
+    input_manifest_sha256: str = ""
 
     def to_public_payload(self) -> dict[str, Any]:
         payload = {
@@ -600,6 +668,8 @@ class CommandReceipt:
             "truncated_stderr": self.truncated_stderr,
             "truncated_stdout": self.truncated_stdout,
         }
+        if self.input_manifest_sha256:
+            payload["input_manifest_sha256"] = self.input_manifest_sha256
         if self.lane is CommandLane.SHELL:
             payload["shell_subcommands_attested"] = False
         return payload
@@ -648,6 +718,7 @@ __all__ = [
     "SCHEMA",
     "SENSITIVE_SANDBOX_PATH_ROOTS",
     "SHELL_FLAG_PREFIX",
+    "AutonomousDelegation",
     "CommandError",
     "CommandLane",
     "CommandOrigin",

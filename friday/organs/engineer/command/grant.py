@@ -17,6 +17,7 @@ from .contracts import (
     GRANT_TTL_MAX_SEC,
     MAX_GRANT_CHARS,
     SCHEMA,
+    AutonomousDelegation,
     CommandError,
     CommandLane,
     CommandOrigin,
@@ -73,8 +74,12 @@ class CommandGrantAuthority:
         ttl_sec: int = GRANT_TTL_DEFAULT_SEC,
     ) -> str:
         sealed = self.source_authority.verify(source)
+        if sealed.isolation_profile is not IsolationProfile.ISOLATED_WORKSPACE:
+            raise CommandError("autonomous_delegation_required")
         if request.origin is not CommandOrigin.OWNER_TURN:
             raise CommandError("owner_origin_required")
+        if request.timeout_sec is None:
+            raise CommandError("isolated_timeout_required")
         if request.idempotency_key != sealed.idempotency_key:
             raise CommandError("grant_idempotency_mismatch")
         if not isinstance(ttl_sec, int) or isinstance(ttl_sec, bool) or not 1 <= ttl_sec <= GRANT_TTL_MAX_SEC:
@@ -99,6 +104,10 @@ class CommandGrantAuthority:
         payload = {
             "actor_id": sealed.actor_id,
             "argv_sha256": request.argv_sha256,
+            "autonomous_delegated": False,
+            "autonomous_delegation_expires_at": 0,
+            "autonomous_delegation_mac": "",
+            "autonomous_delegation_nonce": "",
             "channel": sealed.channel,
             "command_digest": request.digest,
             "confirmation_expires_at": confirmation_expires_at,
@@ -109,6 +118,64 @@ class CommandGrantAuthority:
             "exp": exp,
             "iat": now,
             "idempotency_key": sealed.idempotency_key,
+            "input_manifest_sha256": request.input_manifest_sha256,
+            "isolation_profile": sealed.isolation_profile.value,
+            "lane": request.lane.value,
+            "nonce": secrets.token_hex(16),
+            "origin": request.origin.value,
+            "schema": SCHEMA,
+            "source_hash": sealed.source_hash,
+            "source_row_id": sealed.source_row_id,
+            "telegram_update_id": sealed.telegram_update_id,
+            "tenant_id": sealed.tenant_id,
+            "v": 4,
+        }
+        return self._encode(payload)
+
+    def issue_autonomous(
+        self,
+        request: CommandRequest,
+        *,
+        source: OwnerSource,
+        delegation: AutonomousDelegation,
+        ttl_sec: int = GRANT_TTL_DEFAULT_SEC,
+    ) -> str:
+        """Issue one no-confirmation model shell grant under explicit owner delegation."""
+
+        sealed = self.source_authority.verify(source)
+        delegated = self.source_authority.verify_autonomous(sealed, delegation)
+        if request.origin is not CommandOrigin.MODEL:
+            raise CommandError("autonomous_model_origin_required")
+        if request.lane is not CommandLane.SHELL:
+            raise CommandError("host_user_shell_required")
+        if sealed.isolation_profile is not IsolationProfile.HOST_USER:
+            raise CommandError("host_user_source_required")
+        if request.idempotency_key != sealed.idempotency_key:
+            raise CommandError("grant_idempotency_mismatch")
+        if not isinstance(ttl_sec, int) or isinstance(ttl_sec, bool) or not 1 <= ttl_sec <= GRANT_TTL_MAX_SEC:
+            raise CommandError("invalid_grant_ttl")
+        now = int(self._clock())
+        if delegated.expires_at <= now:
+            raise CommandError("autonomous_delegation_expired")
+        exp = min(now + ttl_sec, delegated.expires_at)
+        payload = {
+            "actor_id": sealed.actor_id,
+            "argv_sha256": request.argv_sha256,
+            "autonomous_delegated": True,
+            "autonomous_delegation_expires_at": delegated.expires_at,
+            "autonomous_delegation_mac": delegated.mac,
+            "autonomous_delegation_nonce": delegated.nonce,
+            "channel": sealed.channel,
+            "command_digest": request.digest,
+            "confirmation_expires_at": 0,
+            "confirmation_mac": "",
+            "confirmation_nonce": "",
+            "conversation_id": sealed.conversation_id,
+            "destructive_confirmed": False,
+            "exp": exp,
+            "iat": now,
+            "idempotency_key": sealed.idempotency_key,
+            "input_manifest_sha256": request.input_manifest_sha256,
             "isolation_profile": sealed.isolation_profile.value,
             "lane": request.lane.value,
             "nonce": secrets.token_hex(16),
@@ -146,20 +213,49 @@ class CommandGrantAuthority:
             raise CommandError("grant_lane_mismatch")
         if str(payload.get("idempotency_key") or "") != request.idempotency_key:
             raise CommandError("grant_idempotency_mismatch")
-        if request.origin is not CommandOrigin.OWNER_TURN:
-            raise CommandError("owner_origin_required")
-        if str(payload.get("origin") or "") != request.origin.value:
-            raise CommandError("owner_origin_required")
+        if not hmac.compare_digest(
+            str(payload.get("input_manifest_sha256") or ""),
+            request.input_manifest_sha256,
+        ):
+            raise CommandError("grant_input_manifest_mismatch")
         try:
             lane = CommandLane(str(payload.get("lane") or ""))
             origin = CommandOrigin(str(payload.get("origin") or ""))
             isolation = IsolationProfile(str(payload.get("isolation_profile") or ""))
         except ValueError as exc:
             raise CommandError("invalid_grant") from exc
-        if isolation is IsolationProfile.HOST_USER:
-            raise CommandError("host_user_requires_broker")
+        autonomous_delegated = bool(payload.get("autonomous_delegated"))
+        payload_origin = str(payload.get("origin") or "")
+        if autonomous_delegated:
+            if request.origin is not CommandOrigin.MODEL or payload_origin != CommandOrigin.MODEL.value:
+                raise CommandError("autonomous_model_origin_required")
+            if lane is not CommandLane.SHELL or request.lane is not CommandLane.SHELL:
+                raise CommandError("host_user_shell_required")
+            if isolation is not IsolationProfile.HOST_USER:
+                raise CommandError("host_user_source_required")
+            if bool(payload.get("destructive_confirmed")):
+                raise CommandError("invalid_grant")
+        else:
+            if (
+                request.origin is not CommandOrigin.OWNER_TURN
+                or payload_origin != CommandOrigin.OWNER_TURN.value
+            ):
+                raise CommandError("owner_origin_required")
+            if isolation is not IsolationProfile.ISOLATED_WORKSPACE:
+                raise CommandError("autonomous_delegation_required")
         exp = int(payload.get("exp") or 0)
         iat = int(payload.get("iat") or 0)
+        autonomous_delegation_expires_at = int(payload.get("autonomous_delegation_expires_at") or 0)
+        autonomous_delegation_nonce = str(payload.get("autonomous_delegation_nonce") or "")
+        if autonomous_delegated:
+            if (
+                autonomous_delegation_expires_at <= now
+                or not autonomous_delegation_nonce
+                or not str(payload.get("autonomous_delegation_mac") or "")
+            ):
+                raise CommandError("autonomous_delegation_expired")
+        elif autonomous_delegation_expires_at or autonomous_delegation_nonce:
+            raise CommandError("invalid_grant")
         confirmation_expires_at = int(payload.get("confirmation_expires_at") or 0)
         destructive_confirmed = bool(payload.get("destructive_confirmed"))
         if destructive_confirmed:
@@ -186,6 +282,9 @@ class CommandGrantAuthority:
             argv_sha256=str(payload["argv_sha256"]),
             lane=lane,
             origin=origin,
+            autonomous_delegated=autonomous_delegated,
+            autonomous_delegation_nonce=autonomous_delegation_nonce,
+            autonomous_delegation_expires_at=autonomous_delegation_expires_at,
             destructive_confirmed=destructive_confirmed,
             confirmation_nonce=str(payload.get("confirmation_nonce") or ""),
             confirmation_expires_at=confirmation_expires_at,
@@ -195,6 +294,8 @@ class CommandGrantAuthority:
 
     def still_valid(self, grant: VerifiedCommandGrant) -> None:
         now = int(self._clock())
+        if grant.autonomous_delegated and grant.autonomous_delegation_expires_at <= now:
+            raise CommandError("autonomous_delegation_expired")
         if grant.destructive_confirmed and grant.confirmation_expires_at <= now:
             raise CommandError("confirmation_expired")
         if grant.expires_at <= now:

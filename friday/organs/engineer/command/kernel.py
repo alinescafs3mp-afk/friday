@@ -7,6 +7,7 @@ import hmac
 import json
 import math
 import os
+import pwd
 import re
 import secrets
 import threading
@@ -15,7 +16,19 @@ import weakref
 from pathlib import Path
 from typing import Literal
 
-from .boundary import ProvenScope, ResourceBoundary, SystemdCgroupBoundary
+from friday.file_delivery import (
+    AuthorizedFileBytes,
+    CurrentMessageUploadBatchIdentity,
+    CurrentMessageUploadFileIdentity,
+)
+from friday.source_identity import authorized_file_snapshot_token_is_process_owned
+
+from .boundary import (
+    ProvenScope,
+    ResourceBoundary,
+    SystemdCgroupBoundary,
+    host_user_resource_limits,
+)
 from .contracts import (
     MAX_STDERR_BYTES,
     MAX_STDOUT_BYTES,
@@ -31,9 +44,11 @@ from .contracts import (
     ResolvedExecutable,
     ResourceLimits,
     TrustedPathContract,
+    VerifiedCommandGrant,
     sha256_bytes,
 )
 from .grant import CommandGrantAuthority
+from .inputs import CommandInputManifest, command_input_descriptor, command_input_manifest
 from .isolate import require_profile
 from .resolve import attest_trusted_path, resolve_bwrap, resolve_request
 from .runner import SpawnedCommand, _pid_starttime
@@ -42,6 +57,82 @@ from .store import CommandJobStore, decode_json_list
 from .workspace import JobWorkspace
 
 _RECEIPT_CACHE_MAX = 64
+
+
+def _validated_private_inputs(
+    request: CommandRequest,
+    grant: VerifiedCommandGrant,
+    *,
+    input_manifest: CommandInputManifest | None,
+    input_batch_identity: CurrentMessageUploadBatchIdentity | None,
+    input_files: tuple[AuthorizedFileBytes, ...],
+) -> tuple[tuple[str, bytes], ...]:
+    """Match process-owned private bytes to the exact manifest and owner source."""
+
+    manifest = request.input_manifest if input_manifest is None else input_manifest
+    if type(manifest) is not CommandInputManifest or manifest != request.input_manifest:
+        raise CommandError("command_input_manifest_mismatch")
+    if type(input_files) is not tuple or any(type(item) is not AuthorizedFileBytes for item in input_files):
+        raise CommandError("command_input_bytes_invalid")
+    if not manifest.files:
+        if input_batch_identity is not None or input_files:
+            raise CommandError("command_input_manifest_mismatch")
+        return ()
+    if grant.isolation_profile is not IsolationProfile.HOST_USER:
+        raise CommandError("command_input_profile_unsupported")
+    if type(input_batch_identity) is not CurrentMessageUploadBatchIdentity:
+        raise CommandError("command_input_authority_missing")
+    identity = input_batch_identity
+    if (
+        identity.conversation_id != grant.conversation_id
+        or identity.source_message_id != grant.source_row_id
+        or identity.telegram_update_id != grant.telegram_update_id
+        or type(identity.files) is not tuple
+        or any(type(item) is not CurrentMessageUploadFileIdentity for item in identity.files)
+        or identity.uploaded_raw_ids != tuple(item.raw_id for item in identity.files)
+        or len(identity.files) != len(input_files)
+    ):
+        raise CommandError("command_input_authority_mismatch")
+    expected_manifest = command_input_manifest(
+        tuple(
+            command_input_descriptor(
+                position=position,
+                raw_id=item.raw_id,
+                source_identity_sha256=item.source_identity_sha256,
+                content_sha256=item.content_sha256,
+                size_bytes=item.size_bytes,
+                original_filename=item.filename,
+                mime_type=item.mime_type,
+            )
+            for position, item in enumerate(identity.files, start=1)
+        )
+    )
+    if expected_manifest != manifest:
+        raise CommandError("command_input_manifest_mismatch")
+    materialized: list[tuple[str, bytes]] = []
+    for descriptor, expected, stored in zip(
+        manifest.files,
+        identity.files,
+        input_files,
+        strict=True,
+    ):
+        token = stored.snapshot_token
+        digest = sha256_bytes(stored.content)
+        if (
+            stored.raw_id != expected.raw_id
+            or stored.filename != expected.filename
+            or stored.mime_type != expected.mime_type
+            or len(stored.content) != expected.size_bytes
+            or not hmac.compare_digest(digest, expected.content_sha256)
+            or not authorized_file_snapshot_token_is_process_owned(token)
+            or token is None
+            or token.source.raw_id != expected.raw_id
+            or token.source.identity_sha256 != expected.source_identity_sha256
+            or not hmac.compare_digest(token.content_sha256, expected.content_sha256)
+        ):
+            raise CommandError("command_input_bytes_changed")
+        materialized.append((Path(descriptor.sandbox_path).name, stored.content))
+    return tuple(materialized)
 
 
 def _close_fds(fds: tuple[int, ...]) -> None:
@@ -183,6 +274,15 @@ class CommandKernel:
         self.trusted_path = trusted_path or TrustedPathContract.default()
         self.path_roots = attest_trusted_path(self.trusted_path)
         self.limits = limits or ResourceLimits.default()
+        self.host_limits = host_user_resource_limits()
+        self._host_environment = dict(os.environ)
+        try:
+            service_home = Path(pwd.getpwuid(os.geteuid()).pw_dir)
+        except (KeyError, OSError) as exc:
+            raise CommandError("host_service_home_unavailable") from exc
+        if not service_home.is_absolute() or not service_home.is_dir():
+            raise CommandError("host_service_home_unavailable")
+        self._service_home = service_home
         self.boundary = boundary if boundary is not None else SystemdCgroupBoundary()
         self._lock = threading.Lock()
         self._spawn_lock = threading.Lock()
@@ -216,14 +316,23 @@ class CommandKernel:
             unit = str(job.get("systemd_unit") or "")
             cgroup_path = str(job.get("cgroup_path") or "")
             cleanup_proven = False
+            try:
+                isolation = IsolationProfile(str(job.get("isolation_profile") or ""))
+            except ValueError:
+                isolation = IsolationProfile.ISOLATED_WORKSPACE
+            limits = self._limits_for_profile(isolation)
+            stored_timeout = int(job.get("timeout_sec") or 0)
+            timeout_sec = (
+                None if isolation is IsolationProfile.HOST_USER and stored_timeout == 0 else stored_timeout
+            )
             if unit and cgroup_path:
                 try:
                     scope = self.boundary.recover_scope(
                         job_id,
                         unit,
                         cgroup_path,
-                        self.limits,
-                        timeout_sec=int(job.get("timeout_sec") or 0),
+                        limits,
+                        timeout_sec=timeout_sec,
                     )
                 except CommandError:
                     scope = None
@@ -240,6 +349,13 @@ class CommandKernel:
                     },
                 )
 
+    def _limits_for_profile(self, profile: IsolationProfile) -> ResourceLimits:
+        if profile is IsolationProfile.HOST_USER:
+            return self.host_limits
+        if profile is IsolationProfile.ISOLATED_WORKSPACE:
+            return self.limits
+        raise CommandError("invalid_isolation_profile")
+
     def _spawn_in_durable_scope(
         self,
         job_id: str,
@@ -249,6 +365,8 @@ class CommandKernel:
         held,
         bwrap,
         scope: ProvenScope,
+        *,
+        work_dir: Path | None = None,
     ) -> None:
         """Persist the recoverable scope identity before the helper can release GO."""
         spawned.scope = scope
@@ -267,13 +385,23 @@ class CommandKernel:
             if isinstance(exc, CommandError):
                 raise
             raise CommandError("durable_write_failed") from exc
+        if getattr(spawned, "isolation", IsolationProfile.ISOLATED_WORKSPACE) is IsolationProfile.HOST_USER:
+            if work_dir is None:
+                raise CommandError("workbench_scope_unavailable")
+            spawn_env = workspace.host_env(
+                base_env=self._host_environment,
+                service_home=self._service_home,
+                work_dir=work_dir,
+            )
+        else:
+            spawn_env = workspace.env(
+                path_value=self.trusted_path.runtime_path,
+                isolated=True,
+            )
         spawned.spawn(
             held,
             stdin=request.stdin,
-            env=workspace.env(
-                path_value=self.trusted_path.runtime_path,
-                isolated=True,
-            ),
+            env=spawn_env,
             path_roots=self.path_roots,
             bwrap=bwrap,
             scope=scope,
@@ -287,6 +415,9 @@ class CommandKernel:
         *,
         actor_id: str,
         delivery_chat_id: str = "",
+        input_manifest: CommandInputManifest | None = None,
+        input_batch_identity: CurrentMessageUploadBatchIdentity | None = None,
+        input_files: tuple[AuthorizedFileBytes, ...] = (),
     ) -> str:
         delivery_chat_id = str(delivery_chat_id or "").strip()
         if delivery_chat_id and (
@@ -297,6 +428,9 @@ class CommandKernel:
         grant = None
         held = None
         bwrap = None
+        work_dir = None
+        workspace = None
+        admitted = False
         try:
             with self.store.transaction():
                 existing = self.store.lookup_idempotency(actor_id, request.idempotency_key)
@@ -312,19 +446,34 @@ class CommandKernel:
             # below to close revocation races during admission and spawn.
             self.authority.still_valid(grant)
             require_profile(grant.isolation_profile)
+            materialized_inputs = _validated_private_inputs(
+                request,
+                grant,
+                input_manifest=input_manifest,
+                input_batch_identity=input_batch_identity,
+                input_files=input_files,
+            )
             held = resolve_request(
                 request,
                 grant,
                 trusted_path=self.trusted_path,
                 path_roots=self.path_roots,
             )
-            bwrap = resolve_bwrap()
+            if grant.isolation_profile is IsolationProfile.ISOLATED_WORKSPACE:
+                bwrap = resolve_bwrap()
             job_id = secrets.token_hex(16)
             job_dir = self.store.job_dir(job_id)
             job_dir.mkdir(parents=True, exist_ok=True)
-            os.chmod(job_dir, 0o700)
             workspace = JobWorkspace(job_dir)
+            os.chmod(job_dir, 0o700)
             workspace.materialize()
+            workspace.materialize_inputs(materialized_inputs)
+            if grant.isolation_profile is IsolationProfile.HOST_USER:
+                work_dir = self.store.workbench_dir(
+                    actor_id=grant.actor_id,
+                    tenant_id=grant.tenant_id,
+                    conversation_id=grant.conversation_id,
+                )
             with self.store.transaction():
                 existing = self.store.lookup_idempotency(actor_id, request.idempotency_key)
                 if existing is not None:
@@ -341,6 +490,12 @@ class CommandKernel:
                         exp=grant.expires_at,
                         now=int(time.time()),
                     )
+                if grant.autonomous_delegation_nonce:
+                    self.store.consume_nonce(
+                        grant.autonomous_delegation_nonce,
+                        exp=grant.autonomous_delegation_expires_at,
+                        now=int(time.time()),
+                    )
                 self.store.insert_job(
                     {
                         "job_id": job_id,
@@ -352,15 +507,16 @@ class CommandKernel:
                         "source_hash": grant.source_hash,
                         "telegram_update_id": grant.telegram_update_id,
                         "isolation_profile": grant.isolation_profile.value,
-                        "host_user_authorized": False,
+                        "host_user_authorized": grant.autonomous_delegated,
                         "idempotency_key": grant.idempotency_key,
                         "command_digest": request.digest,
+                        "input_manifest_sha256": request.input_manifest_sha256,
                         "argv_sha256": request.argv_sha256,
                         "lane": request.lane.value,
                         "origin": request.origin.value,
                         "status": CommandStatus.ADMITTED.value,
                         "grant_nonce": grant.nonce,
-                        "timeout_sec": request.timeout_sec,
+                        "timeout_sec": 0 if request.timeout_sec is None else request.timeout_sec,
                         "max_stdout_bytes": request.max_stdout_bytes,
                         "max_stderr_bytes": request.max_stderr_bytes,
                         "created_at": time.time(),
@@ -368,19 +524,24 @@ class CommandKernel:
                         "delivery_chat_id": delivery_chat_id,
                     }
                 )
+            admitted = True
             spawned = SpawnedCommand(
                 workspace=workspace,
                 timeout_sec=request.timeout_sec,
                 max_stdout_bytes=request.max_stdout_bytes,
                 max_stderr_bytes=request.max_stderr_bytes,
                 isolation=grant.isolation_profile,
-                limits=self.limits,
+                limits=self._limits_for_profile(grant.isolation_profile),
             )
             scope = None
             try:
                 self.authority.still_valid(grant)
                 with self._spawn_lock:
-                    scope = self.boundary.allocate(job_id, self.limits, timeout_sec=request.timeout_sec)
+                    scope = self.boundary.allocate(
+                        job_id,
+                        spawned.limits,
+                        timeout_sec=request.timeout_sec,
+                    )
                     self._spawn_in_durable_scope(
                         job_id,
                         request,
@@ -389,6 +550,7 @@ class CommandKernel:
                         held,
                         bwrap,
                         scope,
+                        work_dir=work_dir,
                     )
             except CommandError as exc:
                 spawned.abort()
@@ -503,6 +665,8 @@ class CommandKernel:
                 held.close()
             if bwrap is not None:
                 bwrap.close()
+            if workspace is not None and not admitted:
+                workspace.retire()
 
     def resolve_job_reference(
         self,
@@ -681,15 +845,15 @@ class CommandKernel:
         conversation_id: str | None = None,
     ) -> CommandReceipt:
         self._require_actor(job_id, actor_id, conversation_id=conversation_id)
-        deadline = time.monotonic() + (float(timeout_sec) if timeout_sec is not None else 3600.0)
+        deadline = None if timeout_sec is None else time.monotonic() + float(timeout_sec)
         while True:
             with self._lock:
                 receipt = self._receipts.get(job_id)
                 worker = self._threads.get(job_id)
             if receipt is not None:
                 return receipt
-            remaining = deadline - time.monotonic()
-            if remaining <= 0:
+            remaining = None if deadline is None else deadline - time.monotonic()
+            if remaining is not None and remaining <= 0:
                 raise CommandError("wait_timeout")
             if worker is not None:
                 worker.join(timeout=remaining)
@@ -705,7 +869,7 @@ class CommandKernel:
                 raise CommandError("corrupt_job_state") from exc
             if status not in {CommandStatus.ADMITTED, CommandStatus.RUNNING, CommandStatus.PLANNED}:
                 return self._receipt_from_job(job_id)
-            time.sleep(min(0.02, max(0.0, remaining)))
+            time.sleep(0.02 if remaining is None else min(0.02, max(0.0, remaining)))
 
     def terminal_receipt(
         self,
@@ -987,6 +1151,7 @@ class CommandKernel:
             effect_boundary_crossed=spawned.effect_boundary_crossed,
             receipt_mac="",
             shell_subcommands_attested=False,
+            input_manifest_sha256=request.input_manifest_sha256,
         )
         mac = self.authority.sign_receipt(receipt.to_public_payload())
         return CommandReceipt(
@@ -1016,6 +1181,7 @@ class CommandKernel:
             effect_boundary_crossed=receipt.effect_boundary_crossed,
             receipt_mac=mac,
             shell_subcommands_attested=False,
+            input_manifest_sha256=receipt.input_manifest_sha256,
         )
 
     def _receipt_from_job(self, job_id: str) -> CommandReceipt:
@@ -1102,5 +1268,6 @@ class CommandKernel:
             effect_boundary_crossed=bool(job.get("effect_boundary_crossed")),
             receipt_mac=str(job.get("receipt_mac") or ""),
             shell_subcommands_attested=False,
+            input_manifest_sha256=str(job.get("input_manifest_sha256") or ""),
         )
         return receipt

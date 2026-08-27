@@ -1,15 +1,15 @@
-"""Isolated universal Engineer command-runner kernel.
+"""Universal Engineer command-runner kernel.
 
-This package executes argv or exact-owner shell under an explicit short-lived
-grant bound to an authenticated owner source. Inventory, PATH, model output,
-documents and the typed installed-tool registry cannot mint that source.
-Conversational wiring lives outside.
+This package executes isolated owner commands or explicitly delegated autonomous
+HOST_USER model shells under a short-lived grant bound to an authenticated owner
+source. Conversational wiring lives outside.
 """
 
 from __future__ import annotations
 
 from .confirm import OwnerConfirmationAuthority
 from .contracts import (
+    AutonomousDelegation,
     CommandError,
     CommandLane,
     CommandOrigin,
@@ -32,6 +32,7 @@ from .kernel import CommandKernel
 from .source import OwnerSourceAuthority
 
 __all__ = [
+    "AutonomousDelegation",
     "CommandError",
     "CommandGrantAuthority",
     "CommandKernel",

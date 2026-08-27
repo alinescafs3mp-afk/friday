@@ -1,4 +1,4 @@
-"""Out-of-process spawn broker. posix_spawn of bwrap never runs on a worker thread.
+"""Out-of-process spawn broker for isolated bwrap and direct host-user bash.
 
 Broker process stays single-threaded and execs a per-job helper. The helper is
 the parent of bwrap, waitpids it, and reports the exit status on a control
@@ -54,6 +54,7 @@ _MAX_PATH_ROOT_FDS = 16
 _ACK_TIMEOUT_SEC = 8.0
 _ACTION_SOURCE_FD_MIN = HELPER_PATH_ROOT_BASE + _MAX_PATH_ROOT_FDS
 _HELD_LAUNCHER_PATH = f"/proc/self/fd/{BWRAP_LAUNCHER_FD}"
+_HOST_HELD_LAUNCHER_PATH = f"/proc/self/fd/{HELPER_LAUNCHER}"
 _CGROUP_MOVE_TIMEOUT_SEC = 2.0
 _CGROUP_SAMPLE_SEC = 0.025
 _CGROUP_STABLE_SAMPLES = 5
@@ -336,10 +337,99 @@ def _bwrap_file_actions(*, block_r: int, has_script: bool, path_root_count: int)
     return actions
 
 
+def _host_child_exec(argv: list[str], env: dict[str, str], cwd: str) -> None:
+    """Stop before the direct held-bash exec; the pidfd parent owns release."""
+
+    try:
+        os.setsid()
+        os.dup2(HELPER_STDIN, 0)
+        os.dup2(HELPER_STDOUT, 1)
+        os.dup2(HELPER_STDERR, 2)
+        for fd in range(HELPER_STDIN, HELPER_LAUNCHER):
+            with contextlib.suppress(OSError):
+                os.close(fd)
+        os.kill(os.getpid(), signal.SIGSTOP)
+        os.chdir(cwd)
+        os.execve(_HOST_HELD_LAUNCHER_PATH, argv, env)
+    except BaseException:
+        os._exit(127)
+
+
+def _host_job_main(req: dict[str, Any]) -> None:
+    signal.signal(signal.SIGCHLD, signal.SIG_DFL)
+    argv = [str(item) for item in req["argv"]]
+    env = {str(k): str(v) for k, v in dict(req["env"]).items()}
+    cwd = str(req["cwd"])
+    cgroup = str(req["cgroup"])
+    if not argv or not cwd.startswith("/") or "\x00" in cwd:
+        raise SystemExit(1)
+    child_pid = 0
+    child_pidfd = -1
+    try:
+        try:
+            _move_cgroup(cgroup, os.getpid())
+        except Exception:
+            _send_ready({"error": "resource_boundary_unproven"})
+            raise SystemExit(1) from None
+        child_pid = os.fork()
+        if child_pid == 0:
+            _host_child_exec(argv, env, cwd)
+            raise AssertionError("unreachable")
+        try:
+            _wait_child_stopped(child_pid)
+            child_pidfd = os.pidfd_open(child_pid, 0)
+        except (OSError, RuntimeError) as exc:
+            if child_pid > 0:
+                with contextlib.suppress(OSError):
+                    os.kill(child_pid, signal.SIGKILL)
+                with contextlib.suppress(ChildProcessError):
+                    os.waitpid(child_pid, 0)
+            _send_ready({"error": "resource_boundary_unproven"})
+            raise SystemExit(1) from exc
+        try:
+            _move_cgroup(cgroup, child_pid)
+        except Exception:
+            _kill_pidfd(child_pidfd)
+            _send_ready({"error": "resource_boundary_unproven"})
+            raise SystemExit(1) from None
+        _send_ready(
+            {"pid": int(child_pid), "starttime": _pid_starttime(child_pid)},
+            child_pidfd,
+        )
+        os.close(HELPER_READY)
+        go = os.read(HELPER_GO, 1)
+        os.close(HELPER_GO)
+        if go != b"1":
+            _kill_pidfd(child_pidfd)
+            raise SystemExit(1)
+        signal.pidfd_send_signal(child_pidfd, signal.SIGCONT)
+        _, status = os.waitpid(child_pid, 0)
+        rc = int(os.waitstatus_to_exitcode(status))
+        _send_json_fd(HELPER_EXIT, {"returncode": rc})
+        os.close(HELPER_EXIT)
+    except SystemExit:
+        raise
+    except Exception:
+        if child_pidfd >= 0:
+            _kill_pidfd(child_pidfd)
+        with contextlib.suppress(OSError):
+            _send_ready({"error": "spawn_failed"})
+        with contextlib.suppress(OSError):
+            _send_json_fd(HELPER_EXIT, {"error": "spawn_failed"})
+        raise SystemExit(1) from None
+    finally:
+        if child_pidfd >= 0:
+            with contextlib.suppress(OSError):
+                os.close(child_pidfd)
+
+
 def _job_main() -> None:
     signal.signal(signal.SIGCHLD, signal.SIG_DFL)
     raw = sys.argv[2] if len(sys.argv) > 2 else ""
     req = json.loads(raw)
+    if str(req.get("mode") or "isolated") == "host_user":
+        _host_job_main(req)
+        return
     has_script = bool(req.get("has_script"))
     argv = [str(item) for item in req["argv"]]
     env = {str(k): str(v) for k, v in dict(req["env"]).items()}
@@ -455,7 +545,64 @@ def _clear_cloexec(fd: int) -> None:
     os.set_inheritable(fd, True)
 
 
+def _broker_spawn_host_helper(req: dict[str, Any], fds: list[int]) -> int:
+    if len(fds) != 7:
+        raise RuntimeError(f"fd count {len(fds)} != 7")
+    if any(fd >= HELPER_STDIN for fd in fds):
+        raise RuntimeError("received fd range overlaps helper destinations")
+    stdin_r, stdout_w, stderr_w, launcher_fd, ready_w, go_r, exit_w = fds
+    for fd in fds:
+        _clear_cloexec(fd)
+    helper = str(req.get("helper_path") or Path(__file__).resolve())
+    python = str(req.get("python_path") or sys.executable)
+    job_req = {
+        "argv": req["argv"],
+        "cgroup": req["cgroup"],
+        "cwd": req["cwd"],
+        "env": req["env"],
+        "mode": "host_user",
+    }
+    null_fd = os.open("/dev/null", os.O_RDWR | getattr(os, "O_CLOEXEC", 0))
+    try:
+        actions: list[tuple] = [
+            (os.POSIX_SPAWN_DUP2, null_fd, 0),
+            (os.POSIX_SPAWN_DUP2, null_fd, 1),
+            (os.POSIX_SPAWN_DUP2, null_fd, 2),
+            (os.POSIX_SPAWN_DUP2, stdin_r, HELPER_STDIN),
+            (os.POSIX_SPAWN_DUP2, stdout_w, HELPER_STDOUT),
+            (os.POSIX_SPAWN_DUP2, stderr_w, HELPER_STDERR),
+            (os.POSIX_SPAWN_DUP2, launcher_fd, HELPER_LAUNCHER),
+            (os.POSIX_SPAWN_DUP2, ready_w, HELPER_READY),
+            (os.POSIX_SPAWN_DUP2, go_r, HELPER_GO),
+            (os.POSIX_SPAWN_DUP2, exit_w, HELPER_EXIT),
+        ]
+        for source_fd in fds:
+            actions.append((os.POSIX_SPAWN_CLOSE, source_fd))
+        actions.append((os.POSIX_SPAWN_CLOSEFROM, HELPER_LAUNCHER + 1))
+        helper_env = {
+            "LANG": "C.UTF-8",
+            "LC_ALL": "C.UTF-8",
+            "PATH": os.environ.get("PATH", "/usr/bin:/bin"),
+            "PYTHONDONTWRITEBYTECODE": "1",
+        }
+        for key in ("PYTHONPATH", "PYTHONHOME", "VIRTUAL_ENV"):
+            if key in os.environ:
+                helper_env[key] = os.environ[key]
+        return int(
+            os.posix_spawn(
+                python,
+                [python, helper, "--job", json.dumps(job_req, separators=(",", ":"))],
+                helper_env,
+                file_actions=actions,
+            )
+        )
+    finally:
+        os.close(null_fd)
+
+
 def _broker_spawn_helper(req: dict[str, Any], fds: list[int]) -> int:
+    if str(req.get("mode") or "isolated") == "host_user":
+        return _broker_spawn_host_helper(req, fds)
     has_script = bool(req.get("has_script"))
     path_root_count = int(req.get("path_root_count") or 0)
     if not 0 <= path_root_count <= _MAX_PATH_ROOT_FDS:
@@ -638,6 +785,132 @@ class SpawnBroker:
                     self._proc.kill()
             with contextlib.suppress(OSError):
                 self._sock.close()
+
+    def start_host_job(
+        self,
+        *,
+        argv: list[str],
+        env: dict[str, str],
+        cwd: str,
+        cgroup: str,
+        stdin_r: int,
+        stdout_w: int,
+        stderr_w: int,
+        launcher_fd: int,
+    ) -> StartedJob:
+        """Start direct held bash, releasing it only after pidfd/cgroup admission."""
+
+        if self._closed or self._proc.poll() is not None:
+            raise RuntimeError("spawn_helper_unavailable")
+        ready_parent, ready_child = socket.socketpair(socket.AF_UNIX, socket.SOCK_STREAM)
+        ready_r = ready_parent.detach()
+        ready_w = ready_child.detach()
+        go_r, go_w = os.pipe()
+        exit_r, exit_w = os.pipe()
+        pidfd = -1
+        fds = [stdin_r, stdout_w, stderr_w, launcher_fd, ready_w, go_r, exit_w]
+        payload = {
+            "argv": argv,
+            "cgroup": cgroup,
+            "cwd": cwd,
+            "env": env,
+            "helper_path": str(Path(__file__).resolve()),
+            "mode": "host_user",
+            "python_path": sys.executable,
+        }
+        try:
+            with self._lock:
+                try:
+                    _send_fds_message(
+                        self._sock,
+                        json.dumps(payload, separators=(",", ":")).encode("utf-8"),
+                        fds,
+                    )
+                    ack_raw = _recv_socket_line(self._sock, timeout=_ACK_TIMEOUT_SEC)
+                except (EOFError, OSError, TimeoutError, ValueError) as exc:
+                    self._closed = True
+                    with contextlib.suppress(OSError):
+                        self._sock.close()
+                    with contextlib.suppress(Exception):
+                        self._proc.terminate()
+                        self._proc.wait(timeout=2)
+                    raise RuntimeError("spawn_helper_unavailable") from exc
+            os.close(ready_w)
+            ready_w = -1
+            os.close(go_r)
+            go_r = -1
+            os.close(exit_w)
+            exit_w = -1
+            ack = json.loads(ack_raw.decode("ascii"))
+            if not isinstance(ack, dict) or not ack.get("ok"):
+                raise RuntimeError(
+                    str(ack.get("error") or "spawn_failed")
+                    + ":"
+                    + str(ack.get("detail") or "")
+                    + ":"
+                    + str(ack.get("message") or "")
+                )
+            ready_sock = socket.socket(fileno=ready_r)
+            ready_r = -1
+            try:
+                ready_sock.settimeout(8.0)
+                ready_raw, ready_fds = _recv_fds_message(ready_sock)
+            finally:
+                ready_sock.close()
+            try:
+                started = json.loads(ready_raw.decode("ascii"))
+            except (ValueError, UnicodeError) as exc:
+                for received_fd in ready_fds:
+                    with contextlib.suppress(OSError):
+                        os.close(received_fd)
+                raise RuntimeError("spawn_failed") from exc
+            if not isinstance(started, dict):
+                for received_fd in ready_fds:
+                    with contextlib.suppress(OSError):
+                        os.close(received_fd)
+                raise RuntimeError("spawn_failed")
+            if started.get("error"):
+                for received_fd in ready_fds:
+                    with contextlib.suppress(OSError):
+                        os.close(received_fd)
+                os.write(go_w, b"0")
+                raise RuntimeError(str(started.get("error")))
+            pid = int(started["pid"])
+            starttime = started.get("starttime")
+            if len(ready_fds) != 1:
+                for received_fd in ready_fds:
+                    with contextlib.suppress(OSError):
+                        os.close(received_fd)
+                os.write(go_w, b"0")
+                raise RuntimeError("resource_boundary_unproven")
+            pidfd = int(ready_fds[0])
+            if _pidfd_identity(pidfd) != pid:
+                os.close(pidfd)
+                pidfd = -1
+                os.write(go_w, b"0")
+                raise RuntimeError("resource_boundary_unproven")
+            os.write(go_w, b"1")
+            os.close(go_w)
+            go_w = -1
+            return StartedJob(
+                pid=pid,
+                starttime=int(starttime) if starttime is not None else None,
+                pidfd=pidfd,
+                ctrl_fd=exit_r,
+            )
+        except Exception:
+            if pidfd >= 0:
+                with contextlib.suppress(OSError):
+                    os.close(pidfd)
+            if exit_r >= 0:
+                with contextlib.suppress(OSError):
+                    os.close(exit_r)
+            raise
+        finally:
+            for fd in (ready_r, ready_w, go_r, go_w, exit_w):
+                if fd >= 0:
+                    with contextlib.suppress(OSError):
+                        os.close(fd)
 
     def start_job(
         self,
