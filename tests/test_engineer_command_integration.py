@@ -84,6 +84,49 @@ class _StatusThenFinishModel(_SchemaSpy):
         }
 
 
+class _DependentHostCommandModel(_SchemaSpy):
+    def __init__(self) -> None:
+        super().__init__()
+        self.calls = 0
+        self.tool_messages: list[str] = []
+        self.commands = (
+            'printf first > "$FRIDAY_WORK_DIR/state.txt"',
+            (
+                "printf -- '-second' >> \"$FRIDAY_WORK_DIR/state.txt\"; "
+                'cp "$FRIDAY_WORK_DIR/state.txt" "$FRIDAY_OUTPUT_DIR/final.txt"; '
+                "printf vertical-ok"
+            ),
+        )
+
+    async def chat(self, messages, *, tools=None, **_kwargs):  # noqa: ANN001
+        self.calls += 1
+        self.schemas.append([dict(item) for item in (tools or [])])
+        self.tool_messages = [
+            str(item.get("content") or "") for item in messages if item.get("role") == "tool"
+        ]
+        if self.calls <= len(self.commands):
+            return {
+                "content": "",
+                "tool_calls": [
+                    {
+                        "id": f"dependent-host-step-{self.calls}",
+                        "function": {
+                            "name": "engineer_command_run",
+                            "arguments": json.dumps({"command": self.commands[self.calls - 1]}),
+                        },
+                    }
+                ],
+                "finish_reason": "tool_calls",
+                "_queue_wait_sec": 0.0,
+            }
+        return {
+            "content": "DEPENDENT-HOST-DONE",
+            "tool_calls": None,
+            "finish_reason": "stop",
+            "_queue_wait_sec": 0.0,
+        }
+
+
 class _StatusKernel:
     def get_tool(self, _name: str) -> SimpleNamespace:
         return SimpleNamespace(risk="observe", timeout_sec=10.0)
@@ -202,6 +245,98 @@ def test_command_tools_exist_only_when_the_private_kernel_is_configured(settings
             )
         )
         assert {"engineer_command_run", "engineer_command_status", "engineer_command_cancel"} <= names
+
+
+def test_real_owner_service_runs_dependent_host_shell_steps_without_approvals(
+    settings,
+    tmp_path: Path,
+) -> None:
+    """Exercise ExecutionKernel -> service -> HOST_USER runner on the native host."""
+
+    from friday.server import create_app
+
+    configured = replace(
+        _configured(settings, tmp_path),
+        telegram_allowed_chat_ids=[5001],
+        telegram_owner_chat_ids=[5001],
+    )
+    app = create_app(configured)
+    actor = ActorContext(
+        LEGACY_OWNER_USER_ID,
+        "owner",
+        "telegram-bridge",
+        identity_id="5001",
+    )
+    with TestClient(app):
+        app.state.storage.ensure_user(
+            actor.own_id,
+            preset_key="owner",
+            metadata={"chat_id": "5001"},
+        )
+        app.state.storage.link_identity("telegram", "5001", actor.own_id, linked_by=actor.own_id)
+        conversation = app.state.storage.create_conversation(
+            actor.user_id,
+            title="autonomous host vertical",
+            mode="engineer",
+        )
+        source = app.state.storage.store_message(
+            conversation["id"],
+            actor.user_id,
+            "user",
+            "Создай рабочий файл, измени его следующим шагом и верни результат.",
+            metadata={
+                "conversation_uploaded_raw_ids": [],
+                "telegram_update_id": "7001",
+            },
+        )
+        model = _DependentHostCommandModel()
+        runtime = AgentRuntime(
+            configured,
+            app.state.storage,
+            llm=model,  # type: ignore[arg-type]
+            kernel=app.state.kernel,
+        )
+        context = AgentContext(
+            conversation_id=conversation["id"],
+            user_id=actor.user_id,
+            person_id=actor.own_id,
+            interaction_mode="engineer",
+            source_search_lineage_user_message_id=source["id"],
+            effect_root_user_message_id=source["id"],
+            engineer_command_telegram_update_id="7001",
+        )
+        command_tools = [
+            schema
+            for schema in app.state.kernel.get_tool_definitions(actor, topic="")
+            if str((schema.get("function") or {}).get("name") or "") == "engineer_command_run"
+        ]
+        response = asyncio.run(
+            runtime._agentic_loop(  # noqa: SLF001
+                context,
+                "Создай рабочий файл, измени его следующим шагом и верни результат.",
+                actor,
+                command_tools,
+                attachments=None,
+            )
+        )
+
+        assert response["content"] == "DEPENDENT-HOST-DONE"
+        assert response["tools_used"] == ["engineer_command_run", "engineer_command_run"]
+        assert model.calls == 3
+        assert len(model.tool_messages) == 2
+        assert "vertical-ok" in model.tool_messages[-1]
+        assert '"isolated": false' in model.tool_messages[-1]
+        sealed_outputs = list(configured.engineer_command_store_dir.glob("jobs/*/sealed/final.txt"))
+        assert len(sealed_outputs) == 1
+        assert sealed_outputs[0].read_bytes() == b"first-second"
+        assert (
+            app.state.storage.count_action_approvals(
+                actor.user_id,
+                status="pending",
+                person_id=actor.own_id,
+            )
+            == 0
+        )
 
 
 @pytest.mark.asyncio

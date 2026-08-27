@@ -70723,7 +70723,7 @@ class AgentRuntime:
             and getattr(self.settings, "engineer_command_enabled", False) is True
         )
         if autonomous_engineer:
-            messages: list[dict[str, Any]] = [
+            engineer_messages: list[dict[str, Any]] = [
                 {
                     "role": "system",
                     "content": AUTONOMOUS_ENGINEER_SYSTEM_PROMPT + self._today_line(),
@@ -70732,14 +70732,14 @@ class AgentRuntime:
             for history_item in _history_within_budget(context.conversation_history):
                 role = history_item.get("role")
                 if role in {"user", "assistant"}:
-                    messages.append(
+                    engineer_messages.append(
                         {
                             "role": role,
                             "content": str(history_item.get("content") or ""),
                         }
                     )
             if attachments:
-                messages.append(
+                engineer_messages.append(
                     {
                         "role": "user",
                         "content": (
@@ -70757,8 +70757,8 @@ class AgentRuntime:
                         ),
                     }
                 )
-            messages.append({"role": "user", "content": message})
-            return messages
+            engineer_messages.append({"role": "user", "content": message})
+            return engineer_messages
         if context.archive_search_isolated_turn:
             # Defense in depth for any future caller which bypasses the
             # agent-loop builder closure.  In particular, never reload account
