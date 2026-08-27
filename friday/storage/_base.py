@@ -162,7 +162,13 @@ LOGGER = logging.getLogger("friday.storage")
 # receipts survive restart without persisting prompts, paths, titles or bodies.
 # 43 — durable immutable host-action plans, restart-safe lifecycle state and an
 # append-only event chain for the optional native host capability plane.
-SCHEMA_VERSION = 43
+# 44 — dormant journey-specific current-file/current-web WorkGraph.  The fixed
+# two-read/one-primary-synthesis topology and body-free CAS state ship without a
+# worker, adapter invocation, model execution or publication route.
+# 45 — immutable body-free ingress request binding for the assist WorkGraph.
+# Released schema-44 graphs migrate with an explicit unbound sentinel; no
+# request body, source reference or inferred replay identity is manufactured.
+SCHEMA_VERSION = 45
 
 #: Определение таблицы внешних источников отдельной константой: миграция схемы 29
 #: пересоздаёт её, чтобы ключом стала ПАРА `(user_id, name)`, и должна брать ровно

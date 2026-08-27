@@ -1157,6 +1157,22 @@ class MaintenanceMixin(StorageShared):
                     "SELECT * FROM knowledge_conflicts WHERE user_id=?",
                     (user_id,),
                 ),
+                "work_item_compare_current_file_web_graphs": (
+                    "SELECT * FROM work_item_compare_current_file_web_graphs WHERE user_id=?",
+                    (user_id,),
+                ),
+                "work_item_compare_current_file_web_restart_rebinds": (
+                    "SELECT * FROM work_item_compare_current_file_web_restart_rebinds "
+                    "WHERE graph_id IN (SELECT id FROM "
+                    "work_item_compare_current_file_web_graphs WHERE user_id=?)",
+                    (user_id,),
+                ),
+                "work_item_compare_current_file_web_restart_rebind_steps": (
+                    "SELECT * FROM work_item_compare_current_file_web_restart_rebind_steps "
+                    "WHERE graph_id IN (SELECT id FROM "
+                    "work_item_compare_current_file_web_graphs WHERE user_id=?)",
+                    (user_id,),
+                ),
                 "work_items": ("SELECT * FROM work_items WHERE user_id=?", (user_id,)),
                 "conversations": ("SELECT * FROM conversations WHERE user_id=?", (user_id,)),
                 "messages": ("SELECT * FROM messages WHERE user_id=?", (user_id,)),
@@ -1962,6 +1978,9 @@ class MaintenanceMixin(StorageShared):
             from friday.interaction_control_plane.compare_conversation_document_store import (
                 get_compare_conversation_with_document_work_item_for_export_in_transaction,
             )
+            from friday.interaction_control_plane.compare_current_file_web_work_graph_store import (
+                get_compare_current_file_web_work_graph_in_transaction,
+            )
             from friday.interaction_control_plane.work_item_store import (
                 get_recall_conversation_work_item_for_export_in_transaction,
             )
@@ -2018,6 +2037,36 @@ class MaintenanceMixin(StorageShared):
                 if item_payload is not None:
                     exported_work_items.append(item_payload)
             rows_by_table["work_items"] = exported_work_items
+            exported_graphs: list[dict[str, object]] = []
+            for row in rows_by_table["work_item_compare_current_file_web_graphs"]:
+                try:
+                    graph = get_compare_current_file_web_work_graph_in_transaction(
+                        conn,
+                        graph_id=str(row.get("id") or ""),
+                        user_id=user_id,
+                        conversation_id=str(row.get("conversation_id") or ""),
+                    )
+                except (TypeError, ValueError):
+                    continue
+                if (
+                    graph is not None
+                    and graph.conversation_id in conversation_ids
+                    and graph.current_file_raw_object_id in visible_raw_ids
+                ):
+                    exported_graphs.append(graph.payload())
+            rows_by_table["work_item_compare_current_file_web_graphs"] = exported_graphs
+            exported_graph_ids = {
+                str(row.get("id") or "") for row in exported_graphs if isinstance(row, dict)
+            }
+            for history_table in (
+                "work_item_compare_current_file_web_restart_rebinds",
+                "work_item_compare_current_file_web_restart_rebind_steps",
+            ):
+                rows_by_table[history_table] = [
+                    row
+                    for row in rows_by_table[history_table]
+                    if str(row.get("graph_id") or "") in exported_graph_ids
+                ]
             rows_by_table["channel_sessions"] = [
                 row
                 for row in rows_by_table["channel_sessions"]

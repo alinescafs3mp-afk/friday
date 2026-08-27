@@ -71,6 +71,7 @@ backend-клиентом.
 | `knowledge_graph` | сущности, связи, links к знаниям, graph context, duplicate suggestions, merge history и единая timeline событий/valid-time границ отношений |
 | `retrieval` | FTS, lexical similarity, persistent dense embeddings (corpus-wide recall), field/quality/graph/feedback/lifecycle ranking |
 | `agent_runtime` | диалог, сборка контекста, режим ответа, planning/tool calls, опциональная автопроверка обычных ответов (`passed`/`failed`/`unknown`/`skipped` + предупреждение; по умолчанию выключена, bare-upload всегда однопроходный), легенда источников `[K#]` и пометка неподкреплённых ответов, и ответ |
+| `orchestration/semantic_supervisor*` | default-off GPT-OSS proposal/review, code-owned Policy Kernel и один evidence-gated durable read-only journey; optional model не получает tools, effects или publication authority |
 | `executive` | миссии: планирование цели в ациклический план задач, фоновое пошаговое выполнение, управляемая автономия |
 | `memory` | Markdown-vault как локальное переносимое представление знаний |
 | `documents` | безопасное извлечение текста/метаданных и bounded visual assets; нераспознаваемые медиа (аудио/видео) хранятся как raw с провенансом |
@@ -104,6 +105,55 @@ backend-клиентом.
 8. Retrieval собирает tenant-scoped контекст из FTS/lexical/embeddings, предметных полей, качества, lifecycle, feedback и графа. В shared person-search это две независимые координаты: tenant задаёт место хранения, exact Raw `uploaded_by` — автора. Авторский предикат проверяется до caps FTS/LIKE, recent/date, whole- и chunk-vector SQL; tenant resident cache обходится. Общие graph/entities не имеют такого provenance и на этом пути не читаются. Reranker получает detached author-only rows и может менять только порядок/числовой score; canonical тело восстанавливается после него. Все uncached SQL и dense aggregation выполняются через blocking boundary, а passage span переносится в пользовательскую выдержку.
 9. Agent Runtime разделяет current conversation, personal knowledge, graph evidence и general reasoning, затем вызывает только разрешённые tools в рамках mode-specific budget. Research-результат не становится знанием, пока пользователь явно не отправит его в Inbox.
 10. Ответ, сообщения и tool audit сохраняются; bridge отправляет ответ и после успеха удаляет update из durable queue. Временные ошибки получают bounded backoff, исчерпанные — retained dead-letter.
+
+### Optional semantic supervisor
+
+Canonical source содержит две независимые default-off формы использования
+GPT-OSS. В `shadow` недоверенный proposal строится после успешного primary
+ответа, структурно проверяется и выбрасывается. В evidence-gated
+`assist|canary` только journey `current attachment + current public web` может
+пройти такой fixed pipeline:
+
+```text
+claimed request + deterministic ingress
+  -> secret-free SupervisorInput
+  -> untrusted SupervisorProposal
+  -> code-owned Policy Kernel + sealed ValidatedExecutionPlan
+  -> fixed schema-45 ICP WorkGraph
+  -> authorized current-file read || transient public-web read
+  -> at most one review and one admitted web recovery
+  -> attested primary synthesis
+  -> fresh authority/source checks
+  -> one atomic primary-owned publication
+```
+
+Exact replay, cancellation, pending ownership, ordinal/reply/mode and other
+deterministic lanes remain ahead of semantic sampling. WorkGraph admission is
+bound to the claimed request, actor, conversation, current Raw source/content,
+registry and fixed adapters. A different overlapping request remains an
+ordinary primary turn; root replay, explicit cancel and uncertainty suppress
+ingestion until their exact durable relation is rechecked. In a freshly
+accepted promoted runtime, startup reconstructs the personal principal and
+source, replans and CAS-rebinds the existing ACTIVE graph before continuing it;
+it never re-ingests or falls through to legacy. Unavailable or stale recovery
+material leaves the durable owner retained. Off/shadow or failed promoted
+composition uses the authorized terminal path, and expiry remains bounded.
+
+The laptop remains an optional inference endpoint: it owns neither backend nor
+storage, capability registry, effects or final publication. Missing/stale
+runtime, malformed output, policy drift or absent production evidence closes
+the supervisor without alternate-runtime replay.
+
+P5 is a separate default-off, maturity-gated post-commit observer. After the
+primary has durably completed an accepted Obsidian create/append outcome, its
+independent `effect_planning` lane may choose only `none|create|append`; the
+choice is compared with the completed outcome and discarded. It receives no
+argument, path, handle, authority or publication surface and cannot execute or
+replay the effect. P6 binds a code-reviewed retirement inventory to exact Git
+and AST identities; the current inventory contains no eligible semantic-only
+heuristic, so it authorizes no deletion. Its repository reader bounds Git
+output during capture, preflights blob/tree byte budgets and scans normalized
+AST one module at a time; only an aggregate body-free scan receipt survives.
 
 ### Файл
 

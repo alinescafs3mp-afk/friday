@@ -61,6 +61,15 @@ CURRENT_JOURNEYS = {
             "candidate_bound_fault_continuation_evidence_missing",
         ),
     ),
+    "current_file_web_comparison": (
+        "Current file and web comparison",
+        "UNVERIFIED",
+        (
+            "assist_promotion_evidence_missing",
+            "clean_release_artifact_missing",
+            "activation_rollback_evidence_missing",
+        ),
+    ),
 }
 ENVIRONMENT_BY_CLASS = {
     "deterministic contract": "deterministic_contract",
@@ -151,6 +160,15 @@ _PROOF_REFS_BY_JOURNEY_CLASS = {
     ),
     ("honest_degradation", "restart and recovery evidence"): (
         "tests/test_message_window_work_item_runtime.py::test_post_boundary_admission_race_returns_atomic_clarification_without_execution",
+    ),
+    ("current_file_web_comparison", "deterministic contract"): (
+        "tests/test_compare_current_file_web_work_graph_schema45.py::test_schema45_exact_binding_is_durable_immutable_and_revision_cas",
+    ),
+    ("current_file_web_comparison", "integration path"): (
+        "tests/test_supervisor_assist_controller.py::test_review_and_web_recovery_are_strictly_bounded",
+    ),
+    ("current_file_web_comparison", "restart and recovery evidence"): (
+        "tests/test_supervisor_assist_graph_adapter.py::test_terminal_cancel_and_startup_reconcile_publish_closed_receipts",
     ),
 }
 _CURRENT_SNAPSHOT_MISSING_CLASSES = (
@@ -355,8 +373,8 @@ def _registry_rows(markdown: str) -> tuple[JourneyRow, ...]:
     if following_heading >= 0:
         section = section[:following_heading]
     lines = [line for line in section.splitlines() if line.startswith("|")]
-    if len(lines) != 7:
-        raise RegistryValidationError("registry must have one header, one divider and five journeys")
+    if len(lines) != 8:
+        raise RegistryValidationError("registry must have one header, one divider and six journeys")
     header = tuple(cell.strip() for cell in lines[0].strip("|").split("|"))
     expected_header = (
         "Journey ID",
@@ -899,9 +917,12 @@ def test_canonical_golden_journey_registry_is_closed_current_and_privacy_safe(
     identity = _release_identity(markdown)
     rows = _registry_rows(markdown)
 
+    assert len(rows) == len(CURRENT_JOURNEYS) == 6
     assert tuple(row.journey_id for row in rows) == tuple(CURRENT_JOURNEYS)
     assert {row.journey_id: (row.journey, row.readiness, row.limitations) for row in rows} == CURRENT_JOURNEYS
     assert sum(row.readiness == "READY" for row in rows) == 0
+    assert sum(len(row.evidence) for row in rows) == 54
+    assert sum(row.evidence["physical device evidence"].state == "NOT_APPLICABLE" for row in rows) == 5
     for row in rows:
         assert tuple(row.evidence) == EVIDENCE_CLASSES
         _validate_applicability(row)

@@ -7,6 +7,7 @@ secrets, and the whole installation can be moved or backed up as one directory.
 from __future__ import annotations
 
 import ipaddress
+import math
 import os
 import platform
 import re
@@ -14,7 +15,7 @@ import stat
 import unicodedata
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, TypeVar, overload
+from typing import TYPE_CHECKING, Any, TypeVar, overload
 from urllib.parse import urlparse
 
 from friday.private_fs import ensure_private_directory
@@ -26,6 +27,11 @@ from friday.private_fs import ensure_private_directory
 _LEGACY_PREFIX = "JERICHO_"
 _PREFIX = "FRIDAY_"
 MEMORY_VAULT_MODES = ("disabled", "full_owner")
+
+if TYPE_CHECKING:
+    from friday.orchestration.supervisor_assist_activation import (
+        RawAssistPromotionActivationSettings,
+    )
 
 
 _Default = TypeVar("_Default")
@@ -64,6 +70,40 @@ def _bool_env(name: str, default: bool) -> bool:
     return value.strip().casefold() not in {"", "0", "false", "no", "off"}
 
 
+def _closed_exact_bool_env(name: str, default: bool) -> bool | None:
+    """Parse an activation bit without widening its canonical ENV vocabulary.
+
+    ``None`` is an intentional invalid sentinel consumed by the typed activation
+    loader.  It keeps a malformed independent promotion gate closed while still
+    distinguishing that state from an explicit canonical ``0``.
+    """
+
+    value = env(name)
+    if value is None:
+        return default
+    if value == "0":
+        return False
+    if value == "1":
+        return True
+    return None
+
+
+def _closed_digest_tuple_env(name: str) -> tuple[str, ...] | None:
+    """Parse one sorted, unique, comma-separated SHA-256 allowlist exactly."""
+
+    raw = env(name)
+    if raw is None or raw == "":
+        return ()
+    values = tuple(raw.split(","))
+    if (
+        not 1 <= len(values) <= 32
+        or any(re.fullmatch(r"[0-9a-f]{64}", value) is None for value in values)
+        or values != tuple(sorted(set(values)))
+    ):
+        return None
+    return values
+
+
 def _choice_env(name: str, default: str, allowed: tuple[str, ...]) -> str:
     """A setting whose values are a vocabulary, not a spectrum.
 
@@ -90,6 +130,13 @@ def _fail_closed_choice_env(name: str, default: str, allowed: tuple[str, ...]) -
     return value if value in allowed else default
 
 
+def _invalid_rollout_choice_env(name: str, default: str, allowed: tuple[str, ...]) -> str:
+    """Preserve an explicitly malformed rollout value as a closed sentinel."""
+
+    value = (env(name) or default).strip().casefold()
+    return value if value in allowed else "invalid"
+
+
 def _int_env(name: str, default: int, *, minimum: int | None = None) -> int:
     try:
         value = int(env(name, str(default)) or default)
@@ -104,6 +151,31 @@ def _float_env(name: str, default: float, *, minimum: float | None = None) -> fl
     except ValueError:
         value = default
     return max(minimum, value) if minimum is not None else value
+
+
+def _fail_closed_rollout_int_env(name: str, default: int, *, invalid: int) -> int:
+    """Parse a policy bound without turning malformed input into an admitted default."""
+
+    raw = env(name)
+    if raw is None:
+        return default
+    try:
+        return int(raw.strip())
+    except (TypeError, ValueError):
+        return invalid
+
+
+def _fail_closed_rollout_float_env(name: str, default: float, *, invalid: float) -> float:
+    """Preserve finite rollout bounds and map malformed/non-finite input to a closed sentinel."""
+
+    raw = env(name)
+    if raw is None:
+        return default
+    try:
+        value = float(raw.strip())
+    except (TypeError, ValueError):
+        return invalid
+    return value if math.isfinite(value) else invalid
 
 
 def _list_env(name: str, default: list[str] | None = None) -> list[str]:
@@ -665,6 +737,30 @@ class FridaySettings:
     # the already-live Inbox extraction remains in assist.  Unknown values are
     # normalized to disabled by the closed env parser.
     secondary_llm_document_map_mode: str
+    # Independent GPT-OSS semantic supervisor product policy.  Unknown values
+    # fail closed to off.  Assist/canary still require the separate evidence-
+    # bound promotion gate below; a mode label alone remains discarded shadow.
+    semantic_supervisor_mode: str
+    semantic_supervisor_tasks: tuple[str, ...]
+    semantic_supervisor_max_steps: int
+    semantic_supervisor_max_review_rounds: int
+    semantic_supervisor_timeout_sec: float
+    # Independent P2/P4 promotion admission.  The raw bindings stay available
+    # to the body-free activation loader; malformed exact fields use closed
+    # sentinels instead of being normalized into an apparently valid gate.
+    semantic_supervisor_promotion_enabled: bool | None
+    semantic_supervisor_promotion_evidence_file: str
+    semantic_supervisor_promotion_evidence_sha256: str
+    semantic_supervisor_promotion_latency_budget_file: str
+    semantic_supervisor_promotion_latency_budget_sha256: str
+    semantic_supervisor_promotion_source_revision_sha256: str
+    semantic_supervisor_promotion_registry_binding_sha256: str
+    semantic_supervisor_promotion_canary_actor_bindings: tuple[str, ...] | None
+    # P5 is a separate advisory-only workload.  It remains off unless a
+    # self-contained, exact-hash maturity artifact is accepted at composition.
+    semantic_supervisor_effect_mode: str
+    semantic_supervisor_effect_evidence_file: str
+    semantic_supervisor_effect_evidence_sha256: str
 
     embeddings_enabled: bool
     embeddings_base_url: str
@@ -1048,6 +1144,7 @@ class FridaySettings:
 
     @property
     def secondary_llm_configured(self) -> bool:
+        from friday import semantic_supervisor_policy
         from friday.secondary_brain.contracts import (
             SecondaryEndpointConfig,
             secondary_configuration_is_admissible,
@@ -1077,18 +1174,170 @@ class FridaySettings:
             profile_id=self.secondary_llm_profile,
             profile_manifest_sha256=profile.manifest_sha256 if profile is not None else "",
         )
-        return secondary_configuration_is_admissible(
+        generic_configuration_is_admissible = bool(
+            self.secondary_llm_workloads
+            and secondary_configuration_is_admissible(
+                endpoint,
+                primary_base_url=self.llm_base_url,
+                primary_model=self.llm_model,
+                primary_timeout_sec=self.llm_timeout_sec,
+                workload_names=self.secondary_llm_workloads,
+                mode=self.secondary_llm_mode,
+                allow_private_text=self.secondary_llm_allow_private_text,
+                document_map_mode=self.secondary_llm_document_map_mode,
+            )
+        )
+        base_workload_name = min(
+            (profile.allowed_workloads - {"document_map", "plan_candidate", "effect_planning"})
+            if profile is not None
+            else (),
+            default="",
+        )
+        base_configuration_is_admissible = secondary_configuration_is_admissible(
             endpoint,
             primary_base_url=self.llm_base_url,
             primary_model=self.llm_model,
             primary_timeout_sec=self.llm_timeout_sec,
-            workload_names=self.secondary_llm_workloads,
+            workload_names=(base_workload_name,),
             mode=self.secondary_llm_mode,
             allow_private_text=self.secondary_llm_allow_private_text,
-            document_map_mode=self.secondary_llm_document_map_mode,
+            document_map_mode="disabled",
+        )
+        supervisor_admission = semantic_supervisor_policy.evaluate_supervisor_policy_admission(
+            requested_mode=self.semantic_supervisor_mode,
+            task_allowlist=self.semantic_supervisor_tasks,
+            max_steps=self.semantic_supervisor_max_steps,
+            max_review_rounds=self.semantic_supervisor_max_review_rounds,
+            timeout_sec=self.semantic_supervisor_timeout_sec,
+            allow_private_text=self.secondary_llm_allow_private_text,
+            secondary_runtime_state="configured",
+            profile_admission=admission.kind.value if admission is not None else "",
+            runtime_profile_id=profile.profile_id if profile is not None else "",
+            runtime_profile_manifest_sha256=(profile.manifest_sha256 if profile is not None else ""),
+        )
+        effect_admission = semantic_supervisor_policy.evaluate_supervisor_effect_shadow_policy_admission(
+            requested_mode=self.semantic_supervisor_effect_mode,
+            allow_private_text=self.secondary_llm_allow_private_text,
+            secondary_runtime_state="configured",
+            profile_admission=admission.kind.value if admission is not None else "",
+            runtime_profile_id=profile.profile_id if profile is not None else "",
+            runtime_profile_manifest_sha256=(profile.manifest_sha256 if profile is not None else ""),
+        )
+        return bool(
+            admission is not None
+            and base_configuration_is_admissible
+            and (
+                generic_configuration_is_admissible
+                or supervisor_admission.workload_available
+                or effect_admission.workload_available
+            )
         )
 
     def public_dict(self) -> dict[str, object]:
+        actor_bindings = self.semantic_supervisor_promotion_canary_actor_bindings
+        evidence_file = self.semantic_supervisor_promotion_evidence_file
+        latency_budget_file = self.semantic_supervisor_promotion_latency_budget_file
+        evidence_path = Path(evidence_file)
+        latency_budget_path = Path(latency_budget_file)
+        effect_evidence_file = self.semantic_supervisor_effect_evidence_file
+        effect_evidence_path = Path(effect_evidence_file)
+        evidence_file_configured = bool(evidence_file)
+        evidence_path_valid = bool(
+            evidence_file_configured
+            and evidence_path.is_absolute()
+            and str(evidence_path) == evidence_file
+            and Path(os.path.abspath(evidence_path)) == evidence_path
+            and not any(character in evidence_file for character in "\x00\r\n")
+        )
+        evidence_sha256_configured = bool(
+            re.fullmatch(r"[0-9a-f]{64}", self.semantic_supervisor_promotion_evidence_sha256)
+        )
+        effect_evidence_file_configured = bool(effect_evidence_file)
+        effect_evidence_path_valid = bool(
+            effect_evidence_file_configured
+            and effect_evidence_path.is_absolute()
+            and str(effect_evidence_path) == effect_evidence_file
+            and Path(os.path.abspath(effect_evidence_path)) == effect_evidence_path
+            and not any(character in effect_evidence_file for character in "\x00\r\n")
+        )
+        effect_evidence_sha256_configured = bool(
+            re.fullmatch(r"[0-9a-f]{64}", self.semantic_supervisor_effect_evidence_sha256)
+        )
+        effect_shadow_settings_valid = bool(
+            (
+                self.semantic_supervisor_effect_mode == "off"
+                and not effect_evidence_file
+                and not self.semantic_supervisor_effect_evidence_sha256
+            )
+            or (
+                self.semantic_supervisor_effect_mode == "shadow"
+                and effect_evidence_path_valid
+                and effect_evidence_sha256_configured
+            )
+        )
+        latency_budget_file_configured = bool(latency_budget_file)
+        latency_budget_path_valid = bool(
+            latency_budget_file_configured
+            and latency_budget_path.is_absolute()
+            and str(latency_budget_path) == latency_budget_file
+            and Path(os.path.abspath(latency_budget_path)) == latency_budget_path
+            and not any(character in latency_budget_file for character in "\x00\r\n")
+        )
+        latency_budget_sha256_configured = bool(
+            re.fullmatch(
+                r"[0-9a-f]{64}",
+                self.semantic_supervisor_promotion_latency_budget_sha256,
+            )
+        )
+        source_revision_configured = bool(
+            re.fullmatch(
+                r"[0-9a-f]{64}",
+                self.semantic_supervisor_promotion_source_revision_sha256,
+            )
+        )
+        registry_binding_configured = bool(
+            re.fullmatch(
+                r"[0-9a-f]{64}",
+                self.semantic_supervisor_promotion_registry_binding_sha256,
+            )
+        )
+        actor_bindings_valid = bool(
+            isinstance(actor_bindings, tuple)
+            and len(actor_bindings) <= 32
+            and all(re.fullmatch(r"[0-9a-f]{64}", actor) for actor in actor_bindings)
+            and actor_bindings == tuple(sorted(set(actor_bindings)))
+        )
+        promotion_requested = self.semantic_supervisor_promotion_enabled is True
+        promotion_settings_valid = bool(
+            type(self.semantic_supervisor_promotion_enabled) is bool
+            and actor_bindings_valid
+            and (
+                (
+                    not promotion_requested
+                    and not evidence_file
+                    and not self.semantic_supervisor_promotion_evidence_sha256
+                    and not latency_budget_file
+                    and not self.semantic_supervisor_promotion_latency_budget_sha256
+                    and not self.semantic_supervisor_promotion_source_revision_sha256
+                    and not self.semantic_supervisor_promotion_registry_binding_sha256
+                    and not actor_bindings
+                )
+                or (
+                    self.semantic_supervisor_mode in {"assist", "canary"}
+                    and evidence_path_valid
+                    and evidence_sha256_configured
+                    and latency_budget_path_valid
+                    and latency_budget_sha256_configured
+                    and source_revision_configured
+                    and registry_binding_configured
+                    and (
+                        not actor_bindings
+                        if self.semantic_supervisor_mode == "assist"
+                        else bool(actor_bindings)
+                    )
+                )
+            )
+        )
         return {
             "home": str(self.home),
             "profile": profile_public_dict(self.profile),
@@ -1128,6 +1377,37 @@ class FridaySettings:
                 "allow_private_text": self.secondary_llm_allow_private_text,
                 "document_map_mode": self.secondary_llm_document_map_mode,
                 "workloads": list(self.secondary_llm_workloads),
+            },
+            "semantic_supervisor": {
+                "mode": self.semantic_supervisor_mode,
+                "tasks": list(self.semantic_supervisor_tasks),
+                "max_steps": self.semantic_supervisor_max_steps,
+                "max_review_rounds": self.semantic_supervisor_max_review_rounds,
+                "timeout_sec": self.semantic_supervisor_timeout_sec,
+                "promotion_config": {
+                    "operator_gate_enabled": promotion_requested,
+                    "raw_settings_valid": promotion_settings_valid,
+                    "evidence_file_configured": evidence_file_configured,
+                    "evidence_sha256_configured": evidence_sha256_configured,
+                    "latency_budget_file_configured": latency_budget_file_configured,
+                    "latency_budget_sha256_configured": (latency_budget_sha256_configured),
+                    "source_revision_configured": source_revision_configured,
+                    "registry_binding_configured": registry_binding_configured,
+                    "canary_actor_binding_count": (
+                        len(actor_bindings) if isinstance(actor_bindings, tuple) else 0
+                    ),
+                    "evidence_path_public": False,
+                    "latency_budget_path_public": False,
+                },
+                "promotion_admitted": False,
+                "effect_shadow_config": {
+                    "mode": self.semantic_supervisor_effect_mode,
+                    "raw_settings_valid": effect_shadow_settings_valid,
+                    "evidence_file_configured": effect_evidence_file_configured,
+                    "evidence_sha256_configured": effect_evidence_sha256_configured,
+                    "evidence_path_public": False,
+                    "maturity_accepted": False,
+                },
             },
             "orchestration": {
                 "mode": self.router_mode,
@@ -1233,6 +1513,27 @@ class FridaySettings:
                 "code_execution_enabled": self.code_execution_enabled,
             },
         }
+
+    def semantic_supervisor_promotion_activation_settings(
+        self,
+    ) -> RawAssistPromotionActivationSettings:
+        """Return the exact raw activation inputs without loading or accepting them."""
+
+        from friday.orchestration.supervisor_assist_activation import (
+            RawAssistPromotionActivationSettings,
+        )
+
+        return RawAssistPromotionActivationSettings(
+            enabled=self.semantic_supervisor_promotion_enabled,
+            requested_mode=self.semantic_supervisor_mode,
+            evidence_file=self.semantic_supervisor_promotion_evidence_file,
+            evidence_sha256=self.semantic_supervisor_promotion_evidence_sha256,
+            latency_budget_file=self.semantic_supervisor_promotion_latency_budget_file,
+            latency_budget_sha256=self.semantic_supervisor_promotion_latency_budget_sha256,
+            source_revision_sha256=self.semantic_supervisor_promotion_source_revision_sha256,
+            registry_binding_sha256=self.semantic_supervisor_promotion_registry_binding_sha256,
+            canary_actor_bindings=self.semantic_supervisor_promotion_canary_actor_bindings,
+        )
 
 
 def load_settings(profile_name: str | None = None) -> FridaySettings:
@@ -1415,6 +1716,73 @@ def load_settings(profile_name: str | None = None) -> FridaySettings:
             "FRIDAY_SECONDARY_LLM_DOCUMENT_MAP_MODE",
             "disabled",
             ("disabled", "shadow", "assist"),
+        ),
+        semantic_supervisor_mode=_fail_closed_choice_env(
+            "FRIDAY_SEMANTIC_SUPERVISOR_MODE",
+            "off",
+            ("off", "shadow", "assist", "canary"),
+        ),
+        semantic_supervisor_tasks=tuple(
+            item.casefold() for item in _list_env("FRIDAY_SEMANTIC_SUPERVISOR_TASKS") if item.strip()
+        ),
+        semantic_supervisor_max_steps=_fail_closed_rollout_int_env(
+            "FRIDAY_SEMANTIC_SUPERVISOR_MAX_STEPS",
+            6,
+            invalid=0,
+        ),
+        semantic_supervisor_max_review_rounds=_fail_closed_rollout_int_env(
+            "FRIDAY_SEMANTIC_SUPERVISOR_MAX_REVIEW_ROUNDS",
+            1,
+            invalid=-1,
+        ),
+        semantic_supervisor_timeout_sec=_fail_closed_rollout_float_env(
+            "FRIDAY_SEMANTIC_SUPERVISOR_TIMEOUT_SEC",
+            12.0,
+            invalid=0.0,
+        ),
+        semantic_supervisor_promotion_enabled=_closed_exact_bool_env(
+            "FRIDAY_SEMANTIC_SUPERVISOR_PROMOTION_ENABLED",
+            False,
+        ),
+        semantic_supervisor_promotion_evidence_file=env(
+            "FRIDAY_SEMANTIC_SUPERVISOR_PROMOTION_EVIDENCE_FILE",
+            "",
+        ),
+        semantic_supervisor_promotion_evidence_sha256=env(
+            "FRIDAY_SEMANTIC_SUPERVISOR_PROMOTION_EVIDENCE_SHA256",
+            "",
+        ),
+        semantic_supervisor_promotion_latency_budget_file=env(
+            "FRIDAY_SEMANTIC_SUPERVISOR_PROMOTION_LATENCY_BUDGET_FILE",
+            "",
+        ),
+        semantic_supervisor_promotion_latency_budget_sha256=env(
+            "FRIDAY_SEMANTIC_SUPERVISOR_PROMOTION_LATENCY_BUDGET_SHA256",
+            "",
+        ),
+        semantic_supervisor_promotion_source_revision_sha256=env(
+            "FRIDAY_SEMANTIC_SUPERVISOR_PROMOTION_SOURCE_REVISION_SHA256",
+            "",
+        ),
+        semantic_supervisor_promotion_registry_binding_sha256=env(
+            "FRIDAY_SEMANTIC_SUPERVISOR_PROMOTION_REGISTRY_BINDING_SHA256",
+            "",
+        ),
+        semantic_supervisor_promotion_canary_actor_bindings=_closed_digest_tuple_env(
+            "FRIDAY_SEMANTIC_SUPERVISOR_PROMOTION_CANARY_ACTOR_BINDINGS"
+        ),
+        semantic_supervisor_effect_mode=_invalid_rollout_choice_env(
+            "FRIDAY_SEMANTIC_SUPERVISOR_EFFECT_MODE",
+            "off",
+            ("off", "shadow"),
+        ),
+        semantic_supervisor_effect_evidence_file=env(
+            "FRIDAY_SEMANTIC_SUPERVISOR_EFFECT_EVIDENCE_FILE",
+            "",
+        ),
+        semantic_supervisor_effect_evidence_sha256=env(
+            "FRIDAY_SEMANTIC_SUPERVISOR_EFFECT_EVIDENCE_SHA256",
+            "",
         ),
         embeddings_enabled=_bool_env("FRIDAY_EMBEDDINGS_ENABLED", False),
         embeddings_base_url=env("FRIDAY_EMBEDDINGS_BASE_URL", llm_base_url).rstrip("/"),

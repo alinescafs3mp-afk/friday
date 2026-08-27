@@ -53,8 +53,10 @@ from friday.interaction_control_plane.work_item_schema import (
     _WORK_ITEM_TABLES,
     WORK_ITEM_SCHEMA,
     _execute_schema,
+    _selected_evidence_promotion_reader_from_42,
     install_selected_evidence_promotion_reader_trigger,
     upgrade_work_item_schema_to_42,
+    upgrade_work_item_schema_to_45,
     validate_work_item_schema,
 )
 from friday.interaction_control_plane.work_item_store import (
@@ -1560,7 +1562,7 @@ def test_restore_refuses_manifest_valid_backup_with_forged_candidate_receipt(sto
         )
 
 
-def test_promoted_selected_evidence_reader_survives_schema43_restart(
+def test_promoted_selected_evidence_reader_survives_schema45_restart(
     settings: Any,
     tmp_path: Path,
 ) -> None:
@@ -1596,7 +1598,7 @@ def test_promoted_selected_evidence_reader_survives_schema43_restart(
         assert completed.question.selected_ordinal == 2
         assert sum(statement.lstrip().upper().startswith("SAVEPOINT") for statement in statements) == 1
         assert (
-            initial.execute("SELECT value FROM schema_meta WHERE key='schema_version'").fetchone()[0] == "43"
+            initial.execute("SELECT value FROM schema_meta WHERE key='schema_version'").fetchone()[0] == "45"
         )
         with initial.transaction() as conn:
             loaded = get_current_recall_selected_archive_evidence_work_item_in_transaction(
@@ -1640,7 +1642,7 @@ def test_promoted_selected_evidence_reader_survives_schema43_restart(
             )
         assert restored == loaded
         assert (
-            reopened.execute("SELECT value FROM schema_meta WHERE key='schema_version'").fetchone()[0] == "43"
+            reopened.execute("SELECT value FROM schema_meta WHERE key='schema_version'").fetchone()[0] == "45"
         )
     finally:
         reopened.close()
@@ -1814,6 +1816,47 @@ def test_released_schema42_reader_is_accepted_without_trigger_rewrite(storage: A
     validate_work_item_schema(storage.conn)
 
 
+def test_promoted_schema42_reader_upgrades_to_schema45_without_trigger_rewrite() -> None:
+    conn = sqlite3.connect(":memory:")
+    try:
+        conn.execute("PRAGMA foreign_keys=ON")
+        conn.execute("CREATE TABLE users(id TEXT PRIMARY KEY)")
+        conn.execute("CREATE TABLE conversations(id TEXT PRIMARY KEY,user_id TEXT)")
+        conn.execute(
+            """CREATE TABLE messages(
+                   id TEXT PRIMARY KEY,user_id TEXT,conversation_id TEXT,role TEXT)"""
+        )
+        conn.execute("CREATE TABLE raw_objects(id TEXT PRIMARY KEY)")
+        _execute_schema(conn, _selected_evidence_promotion_reader_from_42())
+        trigger = "trg_work_item_selected_evidence_scope_insert"
+        before = conn.execute(
+            "SELECT sql FROM sqlite_master WHERE type='trigger' AND name=?",
+            (trigger,),
+        ).fetchone()[0]
+        conn.commit()
+
+        conn.execute("BEGIN")
+        upgrade_work_item_schema_to_45(conn, required=True)
+        conn.commit()
+
+        after = conn.execute(
+            "SELECT sql FROM sqlite_master WHERE type='trigger' AND name=?",
+            (trigger,),
+        ).fetchone()[0]
+        assert before == after
+        validate_work_item_schema(conn)
+        assert (
+            conn.execute(
+                """SELECT COUNT(*) FROM sqlite_master
+                   WHERE type='table'
+                     AND name='work_item_compare_current_file_web_graphs'"""
+            ).fetchone()[0]
+            == 1
+        )
+    finally:
+        conn.close()
+
+
 def test_selected_evidence_reader_installer_is_exact_and_idempotent(storage: Any) -> None:
     trigger = "trg_work_item_selected_evidence_scope_insert"
     with storage.transaction() as conn:
@@ -1885,7 +1928,7 @@ def test_selected_evidence_reader_installer_fails_before_altered_schema_mutation
         validate_work_item_schema(conn)
 
 
-def test_schema43_startup_installs_selected_evidence_promotion_reader(
+def test_schema45_startup_installs_selected_evidence_promotion_reader(
     settings: Any,
     tmp_path: Path,
 ) -> None:
@@ -1912,7 +1955,7 @@ def test_schema43_startup_installs_selected_evidence_promotion_reader(
         ).fetchone()[0]
         assert installed != released
         assert (
-            reopened.execute("SELECT value FROM schema_meta WHERE key='schema_version'").fetchone()[0] == "43"
+            reopened.execute("SELECT value FROM schema_meta WHERE key='schema_version'").fetchone()[0] == "45"
         )
         validate_work_item_schema(reopened.conn)
     finally:

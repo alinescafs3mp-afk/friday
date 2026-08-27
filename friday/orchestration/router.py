@@ -377,7 +377,7 @@ def _plan_applicable(
     return True
 
 
-def _current_attachment_references(
+def current_attachment_references(
     turn: TurnInput,
     snapshots: tuple[Mapping[str, Any], ...],
     tokens: tuple[CurrentTurnFileReferenceToken | None, ...],
@@ -752,6 +752,8 @@ class OrchestrationRouter:
             "telegram_update_id": telegram_update_id,
             "turn_deadline": turn_deadline,
         }
+        if telegram_update_id is not None:
+            legacy_kwargs["telegram_update_id"] = telegram_update_id
         carried_durable_admission: PendingDurableTurnAdmission | None = None
         if _pending_durable_admission is not None:
             person_id = actor.own_id if actor.shared_tenant else user_id
@@ -879,7 +881,7 @@ class OrchestrationRouter:
             quoted_attachment_reference=quoted_attachment_reference,
             reply_assistant_reference=reply_assistant_reference,
         )
-        attachment_references = _current_attachment_references(
+        attachment_references = current_attachment_references(
             turn,
             attachment_snapshots,
             attachment_tokens,

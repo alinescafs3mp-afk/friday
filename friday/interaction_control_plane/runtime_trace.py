@@ -49,6 +49,7 @@ def build_direct_trace(
     intent: IntentClass,
     playbook: PlaybookClass,
     capability_outcomes: tuple[tuple[CapabilityClass, OutcomeStatus], ...],
+    capability_attempts: tuple[int, ...] | None = None,
     continuation: ContinuationKind,
     completion: CompletionDecision,
     failure_stage: FailureStage,
@@ -79,6 +80,17 @@ def build_direct_trace(
         raw_identifier=conversation_identifier,
         namespace_key=namespace_key,
     )
+    if capability_attempts is None:
+        attempts = tuple(
+            0 if outcome is OutcomeStatus.NOT_STARTED else 1 for _, outcome in capability_outcomes
+        )
+    else:
+        if type(capability_attempts) is not tuple or len(capability_attempts) != len(capability_outcomes):
+            raise ValueError("capability attempts must align exactly with capability outcomes")
+        attempts = capability_attempts
+        for (_, outcome), attempt in zip(capability_outcomes, attempts, strict=True):
+            if (outcome is OutcomeStatus.NOT_STARTED) != (attempt == 0):
+                raise ValueError("capability attempts contradict the recorded outcome")
     steps = tuple(
         CapabilityStepTrace(
             step_digest=derive_trace_identifier(
@@ -88,10 +100,13 @@ def build_direct_trace(
             ),
             capability=capability,
             outcome=outcome,
-            attempts=0 if outcome is OutcomeStatus.NOT_STARTED else 1,
+            attempts=attempt,
             required=True,
         )
-        for ordinal, (capability, outcome) in enumerate(capability_outcomes, start=1)
+        for ordinal, ((capability, outcome), attempt) in enumerate(
+            zip(capability_outcomes, attempts, strict=True),
+            start=1,
+        )
     )
     return TurnTrace(
         turn_digest=turn_digest,
@@ -179,6 +194,7 @@ def build_work_trace(
     intent: IntentClass,
     playbook: PlaybookClass,
     capability_outcomes: tuple[tuple[CapabilityClass, OutcomeStatus], ...],
+    capability_attempts: tuple[int, ...] | None = None,
     continuation: ContinuationKind,
     completion: CompletionDecision,
     failure_stage: FailureStage,
@@ -208,6 +224,7 @@ def build_work_trace(
         intent=intent,
         playbook=playbook,
         capability_outcomes=capability_outcomes,
+        capability_attempts=capability_attempts,
         continuation=continuation,
         completion=completion,
         failure_stage=failure_stage,

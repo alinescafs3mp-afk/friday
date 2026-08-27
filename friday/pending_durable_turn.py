@@ -10,6 +10,7 @@ from enum import StrEnum
 from friday.file_evidence import current_turn_file_reference_of
 
 _WORK_ITEM_ID_RE = re.compile(r"work_[0-9a-f]{16}\Z")
+_WORK_GRAPH_ID_RE = re.compile(r"graph_[0-9a-f]{16}\Z")
 
 
 def pending_comparison_current_attachment_count(attachments: object) -> int:
@@ -30,12 +31,19 @@ class PendingDurableAdmissionState(StrEnum):
 
 @dataclass(frozen=True, slots=True)
 class PendingDurableTurnAdmission:
-    """Freeze one pre-ingestion ownership decision and optional Work Item CAS."""
+    """Freeze one pre-ingestion ownership decision and optional durable CAS.
+
+    Work Items and WorkGraphs deliberately occupy separate typed fields.  A
+    ``graph_*`` identifier can therefore never be mistaken for a legacy
+    ``work_*`` identifier by a continuation owner, even though both carry the
+    same bounded revision vocabulary.
+    """
 
     state: PendingDurableAdmissionState
     person_id: str
     conversation_id: str
     work_item_id: str | None = None
+    work_graph_id: str | None = None
     revision: int | None = None
 
     def __post_init__(self) -> None:
@@ -45,19 +53,23 @@ class PendingDurableTurnAdmission:
             raise ValueError("pending durable admission person scope is invalid")
         if not isinstance(self.conversation_id, str) or not 1 <= len(self.conversation_id) <= 200:
             raise ValueError("pending durable admission conversation scope is invalid")
-        bound = self.work_item_id is not None or self.revision is not None
+        identifiers = int(self.work_item_id is not None) + int(self.work_graph_id is not None)
+        bound = identifiers > 0 or self.revision is not None
         if self.state is PendingDurableAdmissionState.UNCERTAIN and bound:
-            raise ValueError("uncertain pending durable admission cannot carry a Work Item")
+            raise ValueError("uncertain pending durable admission cannot carry a durable binding")
         if not bound:
             return
         if (
-            not isinstance(self.work_item_id, str)
-            or _WORK_ITEM_ID_RE.fullmatch(self.work_item_id) is None
+            identifiers != 1
             or not isinstance(self.revision, int)
             or isinstance(self.revision, bool)
             or self.revision < 1
         ):
+            raise ValueError("pending durable admission binding is invalid")
+        if self.work_item_id is not None and _WORK_ITEM_ID_RE.fullmatch(self.work_item_id) is None:
             raise ValueError("pending durable admission Work Item binding is invalid")
+        if self.work_graph_id is not None and _WORK_GRAPH_ID_RE.fullmatch(self.work_graph_id) is None:
+            raise ValueError("pending durable admission WorkGraph binding is invalid")
 
     @classmethod
     def owned(
@@ -66,6 +78,7 @@ class PendingDurableTurnAdmission:
         person_id: str,
         conversation_id: str,
         work_item_id: str | None = None,
+        work_graph_id: str | None = None,
         revision: int | None = None,
     ) -> PendingDurableTurnAdmission:
         return cls(
@@ -73,6 +86,7 @@ class PendingDurableTurnAdmission:
             person_id,
             conversation_id,
             work_item_id,
+            work_graph_id,
             revision,
         )
 
@@ -91,7 +105,13 @@ class PendingDurableTurnAdmission:
 
     @property
     def is_bound(self) -> bool:
-        return self.work_item_id is not None
+        return self.work_item_id is not None or self.work_graph_id is not None
+
+    @property
+    def binding_id(self) -> str | None:
+        """Return the typed durable identifier without collapsing its fields."""
+
+        return self.work_item_id if self.work_item_id is not None else self.work_graph_id
 
     def matches_scope(self, *, person_id: str, conversation_id: str) -> bool:
         return self.person_id == person_id and self.conversation_id == conversation_id

@@ -22,9 +22,17 @@ from friday.config import FridaySettings
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 CONFIG_SOURCE = ROOT / "friday" / "config" / "__init__.py"
 
-# `data_dir` and `cache_dir` are consumed INSIDE the config module to derive other
-# paths, which is a real use. They promise no behaviour of their own.
-DERIVED_INSIDE_CONFIG = {"data_dir", "cache_dir"}
+# These fields are consumed INSIDE the config module. ``data_dir`` and
+# ``cache_dir`` derive other paths; the two latency fields are strictly validated
+# and forwarded by ``semantic_supervisor_promotion_activation_settings()``, whose
+# result is consumed by the server.  Excluding config source from the lexical scan
+# must not misclassify those real uses as inert knobs.
+CONSUMED_INSIDE_CONFIG = {
+    "data_dir",
+    "cache_dir",
+    "semantic_supervisor_promotion_latency_budget_file",
+    "semantic_supervisor_promotion_latency_budget_sha256",
+}
 
 
 def _fields_no_code_reads() -> set[str]:
@@ -35,7 +43,7 @@ def _fields_no_code_reads() -> set[str]:
             continue
         text = path.read_text(encoding="utf-8")
         seen |= {name for name in names if re.search(rf"\b{name}\b", text)}
-    return names - seen - DERIVED_INSIDE_CONFIG
+    return names - seen - CONSUMED_INSIDE_CONFIG
 
 
 def test_every_setting_is_read_by_something():

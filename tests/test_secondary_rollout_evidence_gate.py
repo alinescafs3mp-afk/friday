@@ -337,6 +337,11 @@ def test_gate_contract_matches_the_automatic_product_runner() -> None:
         sys.path.remove(str(RUNTIME))
         sys.path.remove(str(SCRIPTS))
     assert operator._SECONDARY_PRODUCT_STAGE_SCHEMA == live.PRODUCT_STAGE_SCHEMA  # noqa: SLF001
+    assert (  # noqa: SLF001
+        operator._SECONDARY_PRODUCT_DIAGNOSTICS_SCHEMA
+        == live.PRODUCT_DIAGNOSTICS_SCHEMA
+        == witness.SECONDARY_PRODUCT_DIAGNOSTICS_SCHEMA
+    )
     assert operator._SECONDARY_PRODUCT_RECEIPT_KEYS == live.PRODUCT_STAGE_KEYS  # noqa: SLF001
     assert operator._SECONDARY_PRODUCT_OPERATION_KEYS == live._PRODUCT_OPERATION_KEYS  # noqa: SLF001
     assert operator._SECONDARY_PRODUCT_DELTA_KEYS == live._PRODUCT_STAGE_DELTA_KEYS  # noqa: SLF001
@@ -373,6 +378,33 @@ def test_gate_contract_matches_the_automatic_product_runner() -> None:
 @pytest.mark.parametrize("stage", ["public-shadow", "private-shadow"])
 def test_exact_automatic_predecessor_receipt_is_accepted(tmp_path: Path, stage: str) -> None:
     _validate(tmp_path, _receipt(tmp_path, stage=stage), stage=stage)
+
+
+def test_release_gate_rejects_legacy_endpoint_counter_schema(tmp_path: Path) -> None:
+    legacy = _receipt(tmp_path, stage="private-shadow")
+    legacy["schema"] = "friday.secondary-product-stage-evidence.v2"
+
+    with pytest.raises(operator.ReleaseFailure, match="secondary_rollout_receipt_identity_mismatch"):
+        _validate(tmp_path, legacy, stage="private-shadow")
+
+
+def test_release_gate_rejects_impossible_two_request_private_sequence() -> None:
+    before = _snapshot(stage="private-shadow")
+    after = copy.deepcopy(before)
+    after["selected_total"] += 1
+    after["success_total"] += 1
+    after["endpoint_request_total"] += 2
+    after["endpoint_success_total"] += 2
+    after["workload"]["selected_total"] += 1
+    after["workload"]["success_total"] += 1
+    after["shadow"]["valid_total"] += 1
+
+    with pytest.raises(operator.ReleaseFailure, match="secondary_rollout_receipt_oracle_mismatch"):
+        operator._secondary_product_stage_deltas(  # noqa: SLF001
+            "private-shadow",
+            before,
+            after,
+        )
 
 
 def test_private_shadow_accepts_stale_healthy_before_and_requires_fresh_after(

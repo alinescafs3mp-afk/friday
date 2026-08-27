@@ -1183,7 +1183,6 @@ class CommandKernel:
             status=status,
             generated=generated,
         )
-
         def _fields(value: CommandReceipt) -> dict[str, object]:
             return _terminal_receipt_fields(
                 value,

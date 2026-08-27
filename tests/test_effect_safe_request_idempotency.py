@@ -20,7 +20,13 @@ import uuid
 import httpx
 import pytest
 
-from friday.execution_kernel import ToolSpec, mark_request_effect_possible, track_request_effects
+from friday.execution_kernel import (
+    ToolSpec,
+    mark_request_effect_possible,
+    rollback_staged_request_effect,
+    stage_request_effect_possible_in_transaction,
+    track_request_effects,
+)
 from friday.permissions import ActorContext
 from friday.security import sign_bridge_request
 
@@ -53,6 +59,55 @@ def _bridge_headers(settings, method: str, path: str, body: bytes) -> dict[str, 
             body=body,
         ),
     }
+
+
+def test_transaction_effect_fence_requires_the_exact_optional_request_binding() -> None:
+    calls: list[object] = []
+    connection = object()
+
+    def in_transaction(candidate: object) -> bool:
+        calls.append(candidate)
+        return True
+
+    assert (
+        stage_request_effect_possible_in_transaction(
+            connection,
+            expected_request_binding_sha256="a" * 64,
+        )
+        is False
+    )
+    with (
+        pytest.raises(ValueError, match="request effect binding"),
+        track_request_effects(
+            lambda: True,
+            request_binding_sha256="not-a-digest",
+        ),
+    ):
+        pass
+
+    with track_request_effects(
+        lambda: True,
+        before_effect_in_transaction=in_transaction,
+        request_binding_sha256="a" * 64,
+    ) as effects:
+        assert (
+            stage_request_effect_possible_in_transaction(
+                connection,
+                expected_request_binding_sha256="b" * 64,
+            )
+            is False
+        )
+        assert calls == []
+        assert (
+            stage_request_effect_possible_in_transaction(
+                connection,
+                expected_request_binding_sha256="a" * 64,
+            )
+            is True
+        )
+        assert calls == [connection]
+        assert effects.staged is True
+        rollback_staged_request_effect()
 
 
 @pytest.mark.asyncio

@@ -164,6 +164,15 @@ gateway publication recovery. После готовности LAN, Docker и exa
 listener. Только тогда допустим один restart этого gateway; несогласованные
 наблюдения закрывают recovery, а model container никогда не перезапускается.
 
+В owner diagnostics `endpoint_admission_total` считает занятые client permits,
+а `endpoint_request_total`/`endpoint_success_total` — созданные физические HTTP
+tasks и ответы с допустимым HTTP status. Поэтому cold product recovery имеет
+три admission, но exact endpoint delta `4/4`: profile manifest, `/models`,
+generation canary и product request. Новый контракт выпускает только
+`friday.secondary-product-diagnostics.v2` внутри
+`friday.secondary-product-stage-evidence.v3`; прежние v1/v2 receipts не
+считаются эквивалентными и отклоняются.
+
 После приёмки самого default-off релиза оператор может подготовить
 owner-private ENV1. Это не отдельный env-файл: скопируйте exact ENV0 вместе с
 завершающим newline и добавьте в его конец следующий canonical sorted/unquoted
@@ -253,6 +262,185 @@ activation с `secondary_shadow_disable`; privacy bit должен
 `DOCUMENT_MAP_MODE`, меняя только `ENABLED=1→0`.
 При unfinished activation не запускайте disable: продолжайте только через
 `recover-activation` в identity существующего journal.
+
+### GPT-OSS semantic supervisor: default-off shadow и evidence-gated assist
+
+Semantic supervisor использует уже принятый optional GPT-OSS-20B как
+недоверенный planner/reviewer. Ноутбук не становится backend, storage, tool
+kernel или publication owner. Primary Qwen 27B формирует единственный итоговый
+ответ, а code-owned Policy Kernel, permissions и durable graph сохраняют
+authority. Текущий source содержит P1 shadow и один P2–P4 journey, но canonical
+конфигурация остаётся `off`; production assist/canary нельзя считать принятым
+без нового live production-joined evidence.
+
+Закрытый P1–P4 ENV-блок состоит из 13 ключей; независимые три P5-ключа
+перечислены ниже:
+
+```dotenv
+FRIDAY_SEMANTIC_SUPERVISOR_MAX_REVIEW_ROUNDS=1
+FRIDAY_SEMANTIC_SUPERVISOR_MAX_STEPS=6
+FRIDAY_SEMANTIC_SUPERVISOR_MODE=off
+FRIDAY_SEMANTIC_SUPERVISOR_PROMOTION_CANARY_ACTOR_BINDINGS=
+FRIDAY_SEMANTIC_SUPERVISOR_PROMOTION_ENABLED=0
+FRIDAY_SEMANTIC_SUPERVISOR_PROMOTION_EVIDENCE_FILE=
+FRIDAY_SEMANTIC_SUPERVISOR_PROMOTION_EVIDENCE_SHA256=
+FRIDAY_SEMANTIC_SUPERVISOR_PROMOTION_LATENCY_BUDGET_FILE=
+FRIDAY_SEMANTIC_SUPERVISOR_PROMOTION_LATENCY_BUDGET_SHA256=
+FRIDAY_SEMANTIC_SUPERVISOR_PROMOTION_REGISTRY_BINDING_SHA256=
+FRIDAY_SEMANTIC_SUPERVISOR_PROMOTION_SOURCE_REVISION_SHA256=
+FRIDAY_SEMANTIC_SUPERVISOR_TASKS=
+FRIDAY_SEMANTIC_SUPERVISOR_TIMEOUT_SEC=12
+```
+
+Unknown mode, partial/unknown key set, invalid bound, policy/profile drift,
+missing evidence or scheduler failure closes the supervisor. Не добавляйте
+`plan_candidate` в `FRIDAY_SECONDARY_LLM_WORKLOADS`: это независимый
+code-owned overlay accepted secondary runtime.
+
+Shadow использует policy `gptoss20b-semantic-supervisor-v1`, SHA-256
+`9f0c1e8132200a3a4416448cd2de03a4736da5e4968536d8c9e518fd5e88051a`,
+`MAX_STEPS=6`, `MAX_REVIEW_ROUNDS=0` и одну либо обе task classes
+`compare_current_file_with_current_web`,
+`compare_archive_with_current_web`. Proposal вызывается после успешного primary
+и выбрасывается; laptop-off, timeout, saturation и malformed output не меняют
+primary path. Для synthetic regression используйте:
+
+```bash
+.venv/bin/python -I -B tools/evaluate_semantic_supervisor_offline.py \
+  --fixtures tests/fixtures/semantic_supervisor_offline_v1.json
+```
+
+Этот отчёт не является live promotion evidence.
+
+Assist/canary используют отдельный policy
+`gptoss20b-semantic-supervisor-v2`, SHA-256
+`534905cdaac794f485b43e25895761f1a3588ff8eabcc20527530d7f3bd4f96e`,
+ровно `MAX_STEPS=6`, `MAX_REVIEW_ROUNDS=1` и только
+`compare_current_file_with_current_web`. Обязательны:
+
+- `PROMOTION_ENABLED=1` и exact requested mode;
+- owner-private mode-0600 promotion evidence
+  `friday.supervisor-assist-promotion.v5` и его raw SHA-256;
+- accepted latency budget
+  `friday.semantic-supervisor-latency-budget-document.v1` и его SHA-256;
+- exact candidate source revision и capability-registry binding;
+- для canary — 1–32 sorted unique actor-binding SHA-256;
+- для assist — пустой actor allowlist;
+- minimum 20 joined observations, exact trace coverage, zero hidden owners,
+  duplicate capability/effect/publication и user-visible regressions;
+- baseline file/report, operator-attestation provenance; canary evidence также
+  ссылается на canonical digest установленного predecessor assist evidence.
+
+Создавайте evidence только pure producer-ом
+`tools/build_semantic_supervisor_promotion_evidence.py`: он проверяет
+canonical baseline, latency budget и typed operator attestation, создаёт новый
+файл без overwrite/symlink и печатает body-free receipt. Ручной JSON не является
+доказательством.
+
+Immutable operator допускает только exact reversible transitions:
+
+- `semantic_supervisor_shadow_enable` / `semantic_supervisor_shadow_disable`;
+- `semantic_supervisor_shadow_to_assist` / `semantic_supervisor_assist_to_shadow`;
+- `semantic_supervisor_assist_to_canary` / `semantic_supervisor_canary_to_assist`.
+
+Staged ENV должен быть owner-private regular file mode `0600` в `state_dir`, а
+прочие ENV и accepted secondary block — побайтно неизменными. Ручная правка
+live `.env.local` не является rollout или rollback. Shadow→assist требует
+readiness evidence; assist→canary — новый outcome evidence, exact predecessor
+chain и canary allowlist. Health и installed source seam проверяются до и после
+transition; выключенный ноутбук допустим, подмена source/evidence/policy — нет.
+
+Promoted journey распознаётся только при exact current-turn attachment, явном
+current-web query, dialogue mode, claimed idempotency request и разрешённых
+read-only capabilities. Admission связывает request binding, sealed plan,
+actor/conversation, current Raw source/content и fixed adapters:
+
+```text
+files.read -> friday.orchestration.file_read.V12FileReadHandler
+web.search.current -> web.compare.transient /
+                      TransientWebComparisonAdapter.research
+primary.synthesis -> attested primary model
+```
+
+Graph schema v2 хранится в DB schema 45. Он допускает две parallel read ветви,
+одну primary synthesis и не более одного review + одного code-admitted web
+recovery. Publication повторно проверяет authority/source и атомарно создаёт
+ровно один primary-owned assistant result и body-free receipts. Web evidence
+остаётся transient: legacy `web.research` и его capture/mutate contour здесь не
+используются.
+
+ACTIVE overlap классифицируется до ingestion как `ROOT_REPLAY`, `NEW_TURN`,
+`EXPLICIT_CANCEL` или `UNCERTAIN`. Только `NEW_TURN` разрешает ordinary
+ingestion/primary; replay, cancel и uncertainty остаются side-effect free до
+fresh exact graph check. Cancellation связывается с новым request-effect fence.
+При accepted promoted composition startup восстанавливает exact personal
+principal/current source, заново строит closed plan и CAS-rebind-ит прежний
+ACTIVE graph к новому процессу; повторной ingestion, legacy fallback и второй
+publication нет. Lost rebind acknowledgement сверяется с durable state.
+Недоступный или stale recovery surface оставляет graph владельцем и блокирует
+overlap. В `off|shadow` либо при failed promoted composition используется
+authorized terminalization до начала traffic. Expiry остаётся bounded worker
+path, а schema44 migration использует explicit unbound sentinel и никогда не
+выдумывает replay identity.
+
+Проверяйте body-free `/api/health.secondary.semantic_supervisor`, top-level
+`/api/health.semantic_supervisor` и owner diagnostics. Для promoted mode
+top-level status должен показывать exact requested/effective mode, fresh
+promotion admission, policy/profile/source/registry/evidence identities,
+durable graph counts и закрытые authority flags. Проекции не содержат body,
+prompt, query, path, actor/conversation ID или endpoint error text.
+
+P5 имеет отдельный default-off контур и не включается режимами P1–P4:
+
+```dotenv
+FRIDAY_SEMANTIC_SUPERVISOR_EFFECT_EVIDENCE_FILE=
+FRIDAY_SEMANTIC_SUPERVISOR_EFFECT_EVIDENCE_SHA256=
+FRIDAY_SEMANTIC_SUPERVISOR_EFFECT_MODE=off
+```
+
+`shadow` допускается только при `FRIDAY_SECONDARY_LLM_ALLOW_PRIVATE_TEXT=1`,
+accepted profile/policy, exact private mode-0400|0600 maturity artifact и совпадении
+его source revision + прежнего read-registry binding с установленным релизом,
+а также отдельного effect-registry binding с реально enabled и зарегистрированным
+Obsidian `create|append` контуром.
+Artifact строится подкомандой
+`tools/build_semantic_supervisor_promotion_evidence.py effect-maturity` из exact
+production baseline, финального CANARY promotion bundle и CANARY latency
+budget. Producer ничего не активирует и не перезаписывает существующий файл.
+До сборки `effect-maturity` тот же tool с подкомандой
+`effect-registry-binding` выдаёт body-free code-owned expected SHA; его передают
+как `--effect-registry-binding-sha256`. Backend независимо принимает этот SHA
+только после проверки фактических settings, AuthorizationService, ExecutionKernel,
+ObsidianRuntime и обоих зарегистрированных write tools.
+
+Rollout выполняется только immutable transitions
+`semantic_supervisor_effect_shadow_enable` и
+`semantic_supervisor_effect_shadow_disable`. Enable обязан проверить полный
+artifact до остановки сервиса; unrelated, primary, secondary и P1–P4 ENV bytes
+не меняются. Health gate связывает active runtime с configured evidence SHA,
+maturity facts, installed source revision, read registry binding и отдельным
+live effect registry binding. При rollback к
+legacy predecessor оператор использует его прежний health contract, а не ждёт
+несуществующую P5-проекцию.
+
+После durable accepted Obsidian outcome wrapper возвращает exact primary result
+и может только сравнить уже совершённый `create|append` с symbolic ответом
+`none|create|append` независимой lowest-priority lane. В persisted observation
+нет request text, raw digest, path, IDs или model body; выполнение, replay,
+compensation и publication всегда запрещены. Laptop-off, evidence/runtime
+ошибка или saturation только пропускают observation и не являются boot gate.
+Один accepted effect/outcome dispatch-ится не более раза за process lifetime:
+dedupe атомарно связывает оба digest до model call, а fixed non-rotating Bloom
+может дать только безопасный пропуск optional observation.
+
+P6 current inventory возвращает `NO_ELIGIBLE_CANDIDATE`: две поверхности —
+deterministic invariants, ещё две — mixed legacy. Source-only evidence и
+preimage rollback не могут выдать production deletion authority; никакой код
+или config не удаляется. До появления отдельно reviewed semantic-only candidate
+и trusted production+rollback evidence все четыре поверхности сохраняются.
+Repository scan читает Git output с жёстким лимитом, проверяет blob size до
+body load и последовательно освобождает AST каждого модуля; наружу выходит
+только bounded aggregate receipt без путей и source bodies.
 
 ## 2. Что проверяет doctor
 

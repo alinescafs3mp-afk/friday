@@ -11,7 +11,7 @@ import stat
 import subprocess
 import sys
 import venv
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, replace
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
@@ -20,6 +20,34 @@ import pytest
 
 import friday
 import tools.immutable_release_operator as operator
+from friday import semantic_supervisor_policy
+from friday.orchestration.capability_binding import expected_effect_capability_snapshot
+from friday.orchestration.supervisor_assist_promotion import AssistPromotionQualityBasis
+from friday.orchestration.supervisor_contracts import SupervisorMode, canonical_sha256
+from friday.orchestration.supervisor_effect_maturity import (
+    SUPERVISOR_READ_ONLY_MATURITY_POLICY_SHA256,
+    build_read_only_maturity_artifact,
+)
+from friday.orchestration.supervisor_production_baseline import (
+    SUPERVISOR_PRODUCT_WINDOW_SCHEMA,
+    SUPERVISOR_PRODUCTION_BASELINE_KIND,
+    SUPERVISOR_PRODUCTION_BASELINE_SCHEMA,
+)
+from friday.orchestration.supervisor_promotion_evidence_producer import (
+    SupervisorPromotionOperatorAttestation,
+    build_supervisor_assist_promotion_evidence,
+    build_supervisor_canary_promotion_evidence,
+    build_supervisor_promotion_bundle_payload,
+    canonical_json_file_bytes,
+    load_accepted_supervisor_production_baseline,
+    load_canonical_supervisor_latency_budget,
+)
+from friday.orchestration.supervisor_representative_window_attestation import (
+    REPRESENTATIVE_WINDOW_ATTESTATION_SCHEMA,
+    REPRESENTATIVE_WINDOW_AUTHORITY,
+    REPRESENTATIVE_WINDOW_ISSUE_RESPONSE_SCHEMA,
+    representative_window_sha256,
+)
 from friday.storage import SCHEMA_VERSION
 
 
@@ -282,6 +310,7 @@ class MemoryJournal:
         network_writer_uncertain: bool = False,
         writer_target: str = "",
         terminal_receipt_sha256: str = "",
+        staged_transition_validation_sha256: str = "",
     ) -> None:
         self.events.append(phase)
         self.state["phase"] = phase
@@ -296,6 +325,8 @@ class MemoryJournal:
         if writer_target:
             self.state["writer_target"] = writer_target
         self.state["terminal_receipt_sha256"] = terminal_receipt_sha256
+        if staged_transition_validation_sha256:
+            self.state["staged_transition_validation_sha256"] = staged_transition_validation_sha256
 
     def load(self):
         return dict(self.state)
@@ -2551,6 +2582,1083 @@ def _secondary_document_map_shadow_enabled_port(
     )
 
 
+def _secondary_document_map_assist_enabled_port(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    unrelated: bytes | None = None,
+) -> tuple[operator.SystemdActivationPort, bytes]:
+    shadow_port, shadow = _secondary_document_map_shadow_enabled_port(
+        tmp_path,
+        monkeypatch,
+        unrelated=unrelated,
+    )
+    assist = shadow.replace(
+        b"FRIDAY_SECONDARY_LLM_DOCUMENT_MAP_MODE=shadow\n",
+        b"FRIDAY_SECONDARY_LLM_DOCUMENT_MAP_MODE=assist\n",
+        1,
+    )
+    shadow_port.config.env_file.write_bytes(assist)
+    shadow_port.config.env_file.chmod(0o600)
+    return (
+        operator.SystemdActivationPort(
+            replace(
+                shadow_port.config,
+                env_file_sha256=hashlib.sha256(assist).hexdigest(),
+            )
+        ),
+        assist,
+    )
+
+
+def _semantic_supervisor_values(mode: str) -> dict[str, str]:
+    assert mode in {"off", "shadow"}
+    return {
+        "FRIDAY_SEMANTIC_SUPERVISOR_EFFECT_EVIDENCE_FILE": "",
+        "FRIDAY_SEMANTIC_SUPERVISOR_EFFECT_EVIDENCE_SHA256": "",
+        "FRIDAY_SEMANTIC_SUPERVISOR_EFFECT_MODE": "off",
+        "FRIDAY_SEMANTIC_SUPERVISOR_MAX_REVIEW_ROUNDS": "0" if mode == "shadow" else "1",
+        "FRIDAY_SEMANTIC_SUPERVISOR_MAX_STEPS": "6",
+        "FRIDAY_SEMANTIC_SUPERVISOR_MODE": mode,
+        "FRIDAY_SEMANTIC_SUPERVISOR_PROMOTION_CANARY_ACTOR_BINDINGS": "",
+        "FRIDAY_SEMANTIC_SUPERVISOR_PROMOTION_ENABLED": "0",
+        "FRIDAY_SEMANTIC_SUPERVISOR_PROMOTION_EVIDENCE_FILE": "",
+        "FRIDAY_SEMANTIC_SUPERVISOR_PROMOTION_EVIDENCE_SHA256": "",
+        "FRIDAY_SEMANTIC_SUPERVISOR_PROMOTION_LATENCY_BUDGET_FILE": "",
+        "FRIDAY_SEMANTIC_SUPERVISOR_PROMOTION_LATENCY_BUDGET_SHA256": "",
+        "FRIDAY_SEMANTIC_SUPERVISOR_PROMOTION_REGISTRY_BINDING_SHA256": "",
+        "FRIDAY_SEMANTIC_SUPERVISOR_PROMOTION_SOURCE_REVISION_SHA256": "",
+        "FRIDAY_SEMANTIC_SUPERVISOR_TASKS": (
+            "compare_archive_with_current_web,compare_current_file_with_current_web"
+            if mode == "shadow"
+            else ""
+        ),
+        "FRIDAY_SEMANTIC_SUPERVISOR_TIMEOUT_SEC": "12",
+    }
+
+
+def _semantic_supervisor_environment(current: bytes, *, mode: str) -> bytes:
+    secondary_values, nonsecondary, secondary = operator._secondary_environment_parts(  # noqa: SLF001
+        current
+    )
+    _current_values, unrelated, _current = operator._semantic_supervisor_environment_parts(  # noqa: SLF001
+        nonsecondary
+    )
+    semantic = b"".join(
+        f"{key}={value}\n".encode("ascii") for key, value in sorted(_semantic_supervisor_values(mode).items())
+    )
+    assert secondary == b"".join(
+        f"{key}={value}\n".encode("ascii") for key, value in sorted(secondary_values.items())
+    )
+    return unrelated + semantic + secondary
+
+
+def _semantic_effect_environment(
+    current: bytes,
+    *,
+    mode: str,
+    evidence_file: Path | None = None,
+) -> bytes:
+    assert mode in {"off", "shadow"}
+    secondary_values, nonsecondary, secondary = operator._secondary_environment_parts(  # noqa: SLF001
+        current
+    )
+    values, unrelated, _semantic = operator._semantic_supervisor_environment_parts(  # noqa: SLF001
+        nonsecondary
+    )
+    values.update(operator._SEMANTIC_EFFECT_OFF_EXACT_VALUES)  # noqa: SLF001
+    if mode == "shadow":
+        assert evidence_file is not None
+        evidence = evidence_file.read_bytes()
+        values.update(
+            {
+                "FRIDAY_SEMANTIC_SUPERVISOR_EFFECT_EVIDENCE_FILE": str(evidence_file),
+                "FRIDAY_SEMANTIC_SUPERVISOR_EFFECT_EVIDENCE_SHA256": hashlib.sha256(evidence).hexdigest(),
+                "FRIDAY_SEMANTIC_SUPERVISOR_EFFECT_MODE": "shadow",
+            }
+        )
+    semantic = operator._canonical_environment_values(values)  # noqa: SLF001
+    assert secondary == operator._canonical_environment_values(secondary_values)  # noqa: SLF001
+    return unrelated + semantic + secondary
+
+
+def _semantic_supervisor_legacy_environment(current: bytes, *, mode: str) -> bytes:
+    assert mode in {"off", "shadow"}
+    secondary_values, nonsecondary, secondary = operator._secondary_environment_parts(  # noqa: SLF001
+        current
+    )
+    _current_values, unrelated, _current = operator._semantic_supervisor_environment_parts(  # noqa: SLF001
+        nonsecondary
+    )
+    values = (
+        operator._SEMANTIC_SUPERVISOR_LEGACY_OFF_EXACT_VALUES  # noqa: SLF001
+        if mode == "off"
+        else operator._SEMANTIC_SUPERVISOR_LEGACY_SHADOW_EXACT_VALUES  # noqa: SLF001
+    )
+    semantic = b"".join(f"{key}={value}\n".encode() for key, value in sorted(values.items()))
+    assert secondary == b"".join(
+        f"{key}={value}\n".encode() for key, value in sorted(secondary_values.items())
+    )
+    return unrelated + semantic + secondary
+
+
+def _semantic_supervisor_pre_latency_environment(current: bytes, *, mode: str) -> bytes:
+    assert mode in {"off", "shadow"}
+    secondary_values, nonsecondary, secondary = operator._secondary_environment_parts(  # noqa: SLF001
+        current
+    )
+    _current_values, unrelated, _current = operator._semantic_supervisor_environment_parts(  # noqa: SLF001
+        nonsecondary
+    )
+    values = (
+        operator._SEMANTIC_SUPERVISOR_PRE_LATENCY_OFF_EXACT_VALUES  # noqa: SLF001
+        if mode == "off"
+        else operator._SEMANTIC_SUPERVISOR_PRE_LATENCY_SHADOW_EXACT_VALUES  # noqa: SLF001
+    )
+    semantic = b"".join(f"{key}={value}\n".encode() for key, value in sorted(values.items()))
+    assert secondary == b"".join(
+        f"{key}={value}\n".encode() for key, value in sorted(secondary_values.items())
+    )
+    return unrelated + semantic + secondary
+
+
+def _semantic_supervisor_promotion_baseline_raw(
+    *,
+    precursor: str,
+    canary_observations: int = 0,
+    canary_evidence_sha256: str | None = None,
+) -> bytes:
+    def metric(
+        stage: str,
+        *,
+        observations: int,
+        complete: int,
+        failures: dict[str, int],
+        latency_total: int,
+        latency_max: int,
+        window: str,
+    ) -> dict[str, object]:
+        completion_counts = (
+            {} if observations == 0 else {"complete": complete, "failed": observations - complete}
+        )
+        return {
+            "schema": SUPERVISOR_PRODUCT_WINDOW_SCHEMA,
+            "stage": stage,
+            "observation_count": observations,
+            "completion_counts": completion_counts,
+            "complete_count": complete,
+            "failure_class_counts": failures,
+            "latency_observation_count": observations,
+            "latency_total_ms": latency_total,
+            "latency_max_ms": latency_max,
+            "window_sha256": window * 64,
+        }
+
+    shadow = metric(
+        "shadow",
+        observations=20,
+        complete=8,
+        failures={"capability:source_unavailable": 5, "none:none": 15},
+        latency_total=20_000,
+        latency_max=1_500,
+        window="1",
+    )
+    assist = metric(
+        "assist",
+        observations=20,
+        complete=12,
+        failures={"none:none": 20},
+        latency_total=20_000,
+        latency_max=1_500,
+        window="4",
+    )
+    canary = metric(
+        "canary",
+        observations=canary_observations,
+        complete=canary_observations,
+        failures=({} if canary_observations == 0 else {"none:none": canary_observations}),
+        latency_total=canary_observations * 800,
+        latency_max=800 if canary_observations else 0,
+        window="5",
+    )
+    report: dict[str, object] = {
+        "schema": SUPERVISOR_PRODUCTION_BASELINE_SCHEMA,
+        "evidence": {
+            "kind": SUPERVISOR_PRODUCTION_BASELINE_KIND,
+            "body_free": True,
+            "production_acceptance": False,
+            "acceptance_authority": "operator_review_required",
+            "representative_window_attested": False,
+            "promotion_authority": False,
+        },
+        "sample": {
+            "limit": 100,
+            "turn_traces": 40,
+            "joined_supervisor_events": 20,
+            "promoted_product_events": 20 + canary_observations,
+            "malformed_turn_traces": 0,
+            "malformed_joined_events": 0,
+            "malformed_promoted_product_events": 0,
+            "duplicate_turn_trace_digests": 0,
+            "duplicate_shadow_product_events": 0,
+            "duplicate_promoted_product_events": 0,
+            "unmatched_shadow_product_events": 0,
+            "unmatched_promoted_product_events": 0,
+        },
+        "primary_baseline": {
+            "intent_counts": {"dialogue": 40},
+            "playbook_counts": {"dialogue": 40},
+            "completion_counts": {"complete": 20, "failed": 20},
+            "publication_counts": {"assistant_committed": 40},
+            "failure_counts": {"none:none": 40},
+            "authority_rechecked_count": 40,
+            "partial_coverage_count": 0,
+            "state_restored_count": 0,
+        },
+        "supervisor_join": {
+            "task_counts": {"compare_current_file_with_current_web": 20},
+            "skip_counts": {"none": 20},
+            "parse_counts": {"parsed": 20},
+            "policy_reason_counts": {"admitted": 20},
+            "planner_latency_bucket_counts": {"250_999ms": 20},
+            "actual_completion_counts": {"complete": 20},
+            "actual_publication_counts": {"assistant_committed": 20},
+            "actual_capability_outcome_counts": {},
+            "invoked_count": 20,
+            "admitted_count": 20,
+            "final_authority_rechecked_count": 20,
+            "state_restored_count": 0,
+            "retry_occurred_count": 0,
+        },
+        "product_windows": {
+            "shadow_readiness": {
+                "schema": SUPERVISOR_PRODUCT_WINDOW_SCHEMA,
+                "mode": "shadow",
+                "production_joined": True,
+                "actual_promoted_execution": False,
+                "quality_claim": "documented_baseline_failure_only",
+                "observation_count": 20,
+                "joined_trace_count": 20,
+                "baseline": shadow,
+                "readiness_observation_count": 20,
+                "call_rate_observation_count": 20,
+                "supervisor_invocation_count": 20,
+                "unnecessary_supervisor_invocation_count": 0,
+                "user_visible_observation_count": 20,
+                "user_visible_regression_count": 0,
+                "readiness_witness_sha256": "3" * 64,
+            },
+            "promoted_execution": {
+                "assist": {
+                    "schema": SUPERVISOR_PRODUCT_WINDOW_SCHEMA,
+                    "mode": "assist",
+                    "production_joined": True,
+                    "actual_promoted_execution": True,
+                    "observation_count": 20,
+                    "joined_trace_count": 20,
+                    "promotion_evidence_count": 1,
+                    "promotion_evidence_sha256": precursor,
+                    "promoted": assist,
+                    "call_rate_observation_count": 20,
+                    "supervisor_invocation_count": 20,
+                    "unnecessary_supervisor_invocation_count": 0,
+                    "user_visible_observation_count": 20,
+                    "user_visible_regression_count": 0,
+                    "product_window_sha256": "6" * 64,
+                },
+                "canary": {
+                    "schema": SUPERVISOR_PRODUCT_WINDOW_SCHEMA,
+                    "mode": "canary",
+                    "production_joined": True,
+                    "actual_promoted_execution": True,
+                    "observation_count": canary_observations,
+                    "joined_trace_count": canary_observations,
+                    "promotion_evidence_count": (1 if canary_evidence_sha256 is not None else 0),
+                    "promotion_evidence_sha256": canary_evidence_sha256,
+                    "promoted": canary,
+                    "call_rate_observation_count": canary_observations,
+                    "supervisor_invocation_count": canary_observations,
+                    "unnecessary_supervisor_invocation_count": 0,
+                    "user_visible_observation_count": canary_observations,
+                    "user_visible_regression_count": 0,
+                    "product_window_sha256": "7" * 64,
+                },
+            },
+        },
+    }
+    report["report_sha256"] = canonical_sha256(report)
+    return canonical_json_file_bytes(report)
+
+
+def _semantic_supervisor_promoted_values(
+    *,
+    mode: str,
+    evidence_file: Path,
+    source_sha256: str = "b" * 64,
+    registry_sha256: str = "c" * 64,
+    actors: tuple[str, ...] = (),
+    precursor_assist_evidence_sha256: str | None = None,
+    quality_basis: AssistPromotionQualityBasis = (AssistPromotionQualityBasis.COMPLETION_RATE_IMPROVEMENT),
+) -> dict[str, str]:
+    assert mode in {"assist", "canary"}
+    budget_file = evidence_file.with_name(f"{evidence_file.stem}-latency-budget.json")
+    budget_payload = {
+        "schema": "friday.semantic-supervisor-latency-budget-document.v1",
+        "budget_id": "current-file-web-user-visible-latency-v1",
+        "task_class": "compare_current_file_with_current_web",
+        "target_mode": mode,
+        "source_revision_sha256": source_sha256,
+        "latency_measurement": "committed_turn_trace.budget.latency_ms",
+        "maximum_user_visible_latency_ms": 2_500,
+    }
+    budget = canonical_json_file_bytes(budget_payload)
+    budget_file.write_bytes(budget)
+    budget_file.chmod(0o600)
+    budget_sha256 = hashlib.sha256(budget).hexdigest()
+    precursor = precursor_assist_evidence_sha256 or "d" * 64
+    baseline_raw = _semantic_supervisor_promotion_baseline_raw(precursor=precursor)
+    baseline = load_accepted_supervisor_production_baseline(
+        baseline_raw,
+        expected_file_sha256=hashlib.sha256(baseline_raw).hexdigest(),
+    )
+    accepted_budget = load_canonical_supervisor_latency_budget(
+        budget,
+        expected_file_sha256=budget_sha256,
+    )
+    target_mode = SupervisorMode(mode)
+    attestation = SupervisorPromotionOperatorAttestation(
+        target_mode=target_mode,
+        baseline_file_sha256=baseline.file_sha256,
+        baseline_report_sha256=baseline.report_sha256,
+        latency_budget_file_sha256=accepted_budget.document_sha256,
+        source_revision_sha256=source_sha256,
+        registry_binding_sha256=registry_sha256,
+        representative_window_attested=True,
+        primary_fallback_proven=True,
+        laptop_unavailable_fallback_proven=True,
+        final_authority_recheck_proven=True,
+        primary_publication_owner_proven=True,
+        zero_hidden_owners_attested=True,
+        zero_duplicate_capabilities_attested=True,
+        zero_duplicate_effects_attested=True,
+        zero_duplicate_publications_attested=True,
+        zero_false_completion_regressions_attested=True,
+        precursor_assist_promotion_evidence_sha256=(
+            precursor if target_mode is SupervisorMode.CANARY else None
+        ),
+        quality_basis=(quality_basis if target_mode is SupervisorMode.CANARY else None),
+    )
+    if target_mode is SupervisorMode.ASSIST:
+        promoted = build_supervisor_assist_promotion_evidence(
+            evidence_id="operator_assist_fixture",
+            baseline=baseline,
+            budget=accepted_budget,
+            attestation=attestation,
+            documented_failure_class_id="capability:source_unavailable",
+            documented_failure_class_sha256="2" * 64,
+        )
+    else:
+        promoted = build_supervisor_canary_promotion_evidence(
+            evidence_id="operator_canary_fixture",
+            baseline=baseline,
+            budget=accepted_budget,
+            attestation=attestation,
+            documented_failure_class_id=(
+                "capability:source_unavailable"
+                if quality_basis is AssistPromotionQualityBasis.DOCUMENTED_FAILURE_CLASS_REMOVAL
+                else None
+            ),
+            documented_failure_class_sha256=(
+                "e" * 64
+                if quality_basis is AssistPromotionQualityBasis.DOCUMENTED_FAILURE_CLASS_REMOVAL
+                else None
+            ),
+        )
+    lookup_token = "7" * 64
+    observed_mode = SupervisorMode.SHADOW if target_mode is SupervisorMode.ASSIST else SupervisorMode.ASSIST
+    representative_window_sha256_value = (
+        baseline.shadow_readiness.readiness_witness_sha256
+        if target_mode is SupervisorMode.ASSIST
+        else baseline.assist_execution.product_window_sha256
+    )
+    joined_trace_count = (
+        baseline.shadow_readiness.joined_trace_count
+        if target_mode is SupervisorMode.ASSIST
+        else baseline.assist_execution.joined_trace_count
+    )
+    server_attestation: dict[str, object] = {
+        "schema": REPRESENTATIVE_WINDOW_ATTESTATION_SCHEMA,
+        "attestation_id": "sswindow_" + "6" * 32,
+        "authority": REPRESENTATIVE_WINDOW_AUTHORITY,
+        "target_mode": mode,
+        "observed_mode": observed_mode.value,
+        "baseline_file_sha256": baseline.file_sha256,
+        "baseline_report_sha256": baseline.report_sha256,
+        "latency_budget_file_sha256": accepted_budget.document_sha256,
+        "latency_budget_document_sha256": accepted_budget.document_sha256,
+        "latency_budget_target_mode": mode,
+        "latency_budget_source_revision_sha256": source_sha256,
+        "maximum_user_visible_latency_ms": 2_500,
+        "precursor_assist_promotion_evidence_sha256": (
+            precursor if target_mode is SupervisorMode.CANARY else None
+        ),
+        "source_revision_sha256": source_sha256,
+        "registry_binding_sha256": registry_sha256,
+        "primary_pid": 100,
+        "primary_process_epoch_sha256": "5" * 64,
+        "primary_backend_version": "test",
+        "requested_mode": SupervisorMode.ASSIST.value,
+        "observed_release_commit": "4" * 40,
+        "observed_release_metadata_sha256": "3" * 64,
+        "observed_release_tree_sha256": "2" * 64,
+        "observed_registry_binding_sha256": registry_sha256,
+        "supervisor_policy_id": (semantic_supervisor_policy.SUPERVISOR_ASSIST_PRODUCT_POLICY_ID),
+        "supervisor_policy_sha256": (semantic_supervisor_policy.SUPERVISOR_ASSIST_PRODUCT_POLICY_SHA256),
+        "runtime_profile_id": semantic_supervisor_policy.SUPERVISOR_RUNTIME_PROFILE_ID,
+        "runtime_profile_manifest_sha256": (
+            semantic_supervisor_policy.SUPERVISOR_RUNTIME_PROFILE_MANIFEST_SHA256
+        ),
+        "observer_runner_sha256": "1" * 64,
+        "sample_limit": 100,
+        "turn_trace_count": 40,
+        "joined_trace_count": joined_trace_count,
+        "representative_window_sha256": representative_window_sha256_value,
+        "server_recomputed": True,
+        "representative_window_attested": True,
+        "synthetic_authority": False,
+        "lookup_token_sha256": hashlib.sha256(lookup_token.encode("ascii")).hexdigest(),
+        "state_version": 1,
+        "issued_at": 1_000,
+        "expires_at": 1_500,
+        "signature": "9" * 64,
+    }
+    representative_window_issue: dict[str, object] = {
+        "schema": REPRESENTATIVE_WINDOW_ISSUE_RESPONSE_SCHEMA,
+        "status": "unused",
+        "server_attestation": server_attestation,
+        "server_attestation_sha256": representative_window_sha256(server_attestation),
+        "attestation_lookup_token": lookup_token,
+        "lookup_token_sha256": server_attestation["lookup_token_sha256"],
+        "state_version": 1,
+    }
+    evidence = canonical_json_file_bytes(
+        build_supervisor_promotion_bundle_payload(
+            baseline_raw=baseline_raw,
+            budget=accepted_budget,
+            attestation=attestation,
+            representative_window_issue=representative_window_issue,
+            evidence=promoted,
+        )
+    )
+    evidence_file.write_bytes(evidence)
+    evidence_file.chmod(0o600)
+    return {
+        "FRIDAY_SEMANTIC_SUPERVISOR_EFFECT_EVIDENCE_FILE": "",
+        "FRIDAY_SEMANTIC_SUPERVISOR_EFFECT_EVIDENCE_SHA256": "",
+        "FRIDAY_SEMANTIC_SUPERVISOR_EFFECT_MODE": "off",
+        "FRIDAY_SEMANTIC_SUPERVISOR_MAX_REVIEW_ROUNDS": "1",
+        "FRIDAY_SEMANTIC_SUPERVISOR_MAX_STEPS": "6",
+        "FRIDAY_SEMANTIC_SUPERVISOR_MODE": mode,
+        "FRIDAY_SEMANTIC_SUPERVISOR_PROMOTION_CANARY_ACTOR_BINDINGS": ",".join(actors),
+        "FRIDAY_SEMANTIC_SUPERVISOR_PROMOTION_ENABLED": "1",
+        "FRIDAY_SEMANTIC_SUPERVISOR_PROMOTION_EVIDENCE_FILE": str(evidence_file),
+        "FRIDAY_SEMANTIC_SUPERVISOR_PROMOTION_EVIDENCE_SHA256": hashlib.sha256(evidence).hexdigest(),
+        "FRIDAY_SEMANTIC_SUPERVISOR_PROMOTION_LATENCY_BUDGET_FILE": str(budget_file),
+        "FRIDAY_SEMANTIC_SUPERVISOR_PROMOTION_LATENCY_BUDGET_SHA256": budget_sha256,
+        "FRIDAY_SEMANTIC_SUPERVISOR_PROMOTION_REGISTRY_BINDING_SHA256": registry_sha256,
+        "FRIDAY_SEMANTIC_SUPERVISOR_PROMOTION_SOURCE_REVISION_SHA256": source_sha256,
+        "FRIDAY_SEMANTIC_SUPERVISOR_TASKS": "compare_current_file_with_current_web",
+        "FRIDAY_SEMANTIC_SUPERVISOR_TIMEOUT_SEC": "12",
+    }
+
+
+def _semantic_supervisor_promoted_payload(
+    tmp_path: Path,
+    *,
+    mode: str,
+    quality_basis: AssistPromotionQualityBasis = (AssistPromotionQualityBasis.COMPLETION_RATE_IMPROVEMENT),
+) -> tuple[Path, dict[str, str], dict[str, object]]:
+    evidence_file = tmp_path / f"accepted-{mode}-evidence.json"
+    evidence_file.write_bytes(b"placeholder")
+    evidence_file.chmod(0o600)
+    values = _semantic_supervisor_promoted_values(
+        mode=mode,
+        evidence_file=evidence_file,
+        actors=(("d" * 64,) if mode == "canary" else ()),
+        quality_basis=quality_basis,
+    )
+    bundle = json.loads(evidence_file.read_text(encoding="ascii"))
+    assert isinstance(bundle, dict)
+    payload = bundle["promotion_evidence"]
+    assert isinstance(payload, dict)
+    return evidence_file, values, payload
+
+
+def _semantic_effect_maturity_file(
+    tmp_path: Path,
+    *,
+    stem: str = "effect-maturity",
+    effect_registry_sha256: str = operator._SEMANTIC_EFFECT_EXPECTED_REGISTRY_BINDING_SHA256,
+) -> Path:
+    bundle_file = tmp_path / f"{stem}-canary-bundle.json"
+    values = _semantic_supervisor_promoted_values(
+        mode="canary",
+        evidence_file=bundle_file,
+    )
+    bundle_raw = bundle_file.read_bytes()
+    bundle = json.loads(bundle_raw)
+    promotion_evidence = bundle["promotion_evidence"]
+    assert isinstance(promotion_evidence, dict)
+    mature_baseline_raw = _semantic_supervisor_promotion_baseline_raw(
+        precursor="d" * 64,
+        canary_observations=20,
+        canary_evidence_sha256=canonical_sha256(promotion_evidence),
+    )
+    budget_file = Path(values["FRIDAY_SEMANTIC_SUPERVISOR_PROMOTION_LATENCY_BUDGET_FILE"])
+    budget_raw = budget_file.read_bytes()
+    artifact = build_read_only_maturity_artifact(
+        production_baseline_raw=mature_baseline_raw,
+        expected_production_baseline_file_sha256=hashlib.sha256(mature_baseline_raw).hexdigest(),
+        canary_promotion_bundle_raw=bundle_raw,
+        expected_canary_promotion_bundle_file_sha256=hashlib.sha256(bundle_raw).hexdigest(),
+        canary_budget_raw=budget_raw,
+        expected_canary_budget_file_sha256=hashlib.sha256(budget_raw).hexdigest(),
+        expected_source_revision_sha256="b" * 64,
+        expected_registry_binding_sha256="c" * 64,
+        expected_effect_registry_binding_sha256=effect_registry_sha256,
+    )
+    evidence_file = tmp_path / f"{stem}.json"
+    evidence_file.write_bytes(artifact)
+    evidence_file.chmod(0o600)
+    return evidence_file
+
+
+def _semantic_supervisor_set_payload_path(
+    payload: dict[str, object],
+    path: tuple[str, ...],
+    value: object,
+) -> None:
+    current = payload
+    for key in path[:-1]:
+        child = current[key]
+        assert isinstance(child, dict)
+        current = child
+    current[path[-1]] = value
+
+
+def _semantic_supervisor_write_promoted_payload(
+    evidence_file: Path,
+    values: dict[str, str],
+    payload: dict[str, object],
+) -> None:
+    bundle = json.loads(evidence_file.read_text(encoding="ascii"))
+    assert isinstance(bundle, dict)
+    bundle["promotion_evidence"] = payload
+    raw = canonical_json_file_bytes(bundle)
+    evidence_file.write_bytes(raw)
+    evidence_file.chmod(0o600)
+    values["FRIDAY_SEMANTIC_SUPERVISOR_PROMOTION_EVIDENCE_SHA256"] = hashlib.sha256(raw).hexdigest()
+
+
+@pytest.mark.parametrize("artifact", ("evidence", "budget"))
+@pytest.mark.parametrize("mode", (0o500, 0o700))
+def test_semantic_supervisor_promoted_artifacts_use_exact_shared_file_modes(
+    tmp_path: Path,
+    artifact: str,
+    mode: int,
+) -> None:
+    evidence_file, values, _payload = _semantic_supervisor_promoted_payload(
+        tmp_path,
+        mode="assist",
+    )
+    target = (
+        evidence_file
+        if artifact == "evidence"
+        else Path(values["FRIDAY_SEMANTIC_SUPERVISOR_PROMOTION_LATENCY_BUDGET_FILE"])
+    )
+    target.chmod(mode)
+
+    with pytest.raises(operator.ReleaseFailure, match="promotion_mode_invalid"):
+        operator._validate_semantic_supervisor_promoted_values(  # noqa: SLF001
+            values,
+            mode="assist",
+            invalid_code="promotion_mode_invalid",
+        )
+
+
+def test_semantic_supervisor_standalone_forged_evidence_is_not_a_bundle(
+    tmp_path: Path,
+) -> None:
+    evidence_file, values, payload = _semantic_supervisor_promoted_payload(
+        tmp_path,
+        mode="assist",
+    )
+    forged = canonical_json_file_bytes(payload)
+    evidence_file.write_bytes(forged)
+    evidence_file.chmod(0o600)
+    values["FRIDAY_SEMANTIC_SUPERVISOR_PROMOTION_EVIDENCE_SHA256"] = hashlib.sha256(forged).hexdigest()
+
+    with pytest.raises(operator.ReleaseFailure, match="forged_evidence_invalid"):
+        operator._validate_semantic_supervisor_promoted_values(  # noqa: SLF001
+            values,
+            mode="assist",
+            invalid_code="forged_evidence_invalid",
+        )
+
+
+def test_semantic_supervisor_live_window_is_consumed_only_after_exact_source_rechecks(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    base, shadow = _semantic_supervisor_shadow_port(
+        tmp_path,
+        monkeypatch,
+        unrelated=b"FRIDAY_API_TOKEN=" + b"t" * 32 + b"\nFRIDAY_PROFILE=production\n",
+    )
+    evidence_file = tmp_path / "representative-window-assist.json"
+    target = _semantic_supervisor_promoted_environment(
+        shadow,
+        mode="assist",
+        evidence_file=evidence_file,
+        source_sha256="b" * 64,
+    )
+    staged, _target, staged_sha256 = _semantic_supervisor_stage(
+        base,
+        mode="assist",
+        target=target,
+    )
+    port = operator.SystemdActivationPort(
+        replace(
+            base.config,
+            next_env_file=staged,
+            next_env_file_sha256=staged_sha256,
+            staged_config_transition="semantic_supervisor_shadow_to_assist",
+        )
+    )
+    consumed: list[dict[str, object]] = []
+
+    def consume(request: Mapping[str, object], **_kwargs: object) -> None:
+        consumed.append(dict(request))
+
+    monkeypatch.setattr(
+        port,
+        "_consume_semantic_supervisor_representative_window_attestation",
+        consume,
+    )
+    wrong_candidate = replace(
+        _release(tmp_path, "window-wrong", schema=45, commit="a" * 40),
+        tree_manifest_sha256="f" * 64,
+    )
+    with pytest.raises(
+        operator.ReleaseFailure,
+        match="semantic_supervisor_candidate_source_identity_mismatch",
+    ):
+        port._validate_semantic_supervisor_representative_window_gate(  # noqa: SLF001
+            wrong_candidate
+        )
+    assert consumed == []
+
+    candidate = replace(wrong_candidate, tree_manifest_sha256="b" * 64)
+    port._validate_semantic_supervisor_representative_window_gate(candidate)  # noqa: SLF001
+    assert len(consumed) == 1
+    assert consumed[0]["source_revision_sha256"] == candidate.tree_manifest_sha256
+    assert consumed[0]["registry_binding_sha256"] == "c" * 64
+
+
+def test_semantic_supervisor_window_drift_after_consume_fails_before_quiesce(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    base, shadow = _semantic_supervisor_shadow_port(
+        tmp_path,
+        monkeypatch,
+        unrelated=b"FRIDAY_API_TOKEN=" + b"t" * 32 + b"\nFRIDAY_PROFILE=production\n",
+    )
+    evidence_file = tmp_path / "representative-window-drift.json"
+    target = _semantic_supervisor_promoted_environment(
+        shadow,
+        mode="assist",
+        evidence_file=evidence_file,
+        source_sha256="b" * 64,
+    )
+    staged, _target, staged_sha256 = _semantic_supervisor_stage(
+        base,
+        mode="assist",
+        target=target,
+    )
+    port = operator.SystemdActivationPort(
+        replace(
+            base.config,
+            next_env_file=staged,
+            next_env_file_sha256=staged_sha256,
+            staged_config_transition="semantic_supervisor_shadow_to_assist",
+        )
+    )
+
+    def consume(*_args: object, **_kwargs: object) -> None:
+        evidence_file.write_bytes(evidence_file.read_bytes() + b" ")
+
+    monkeypatch.setattr(
+        port,
+        "_consume_semantic_supervisor_representative_window_attestation",
+        consume,
+    )
+    candidate = replace(
+        _release(tmp_path, "window-drift", schema=45, commit="a" * 40),
+        tree_manifest_sha256="b" * 64,
+    )
+    with pytest.raises(
+        operator.ReleaseFailure,
+        match="semantic_supervisor_representative_window_identity_changed",
+    ):
+        port._validate_semantic_supervisor_representative_window_gate(candidate)  # noqa: SLF001
+
+
+def _semantic_supervisor_promoted_environment(
+    current: bytes,
+    *,
+    mode: str,
+    evidence_file: Path,
+    source_sha256: str = "b" * 64,
+    registry_sha256: str = "c" * 64,
+    actors: tuple[str, ...] = (),
+) -> bytes:
+    secondary_values, nonsecondary, secondary = operator._secondary_environment_parts(  # noqa: SLF001
+        current
+    )
+    current_values, unrelated, _current = operator._semantic_supervisor_environment_parts(  # noqa: SLF001
+        nonsecondary
+    )
+    precursor: str | None = None
+    if mode == "canary" and current_values.get("FRIDAY_SEMANTIC_SUPERVISOR_MODE") == "assist":
+        predecessor_path = Path(current_values["FRIDAY_SEMANTIC_SUPERVISOR_PROMOTION_EVIDENCE_FILE"])
+        predecessor_payload = json.loads(predecessor_path.read_text(encoding="ascii"))
+        assert isinstance(predecessor_payload, dict)
+        predecessor_evidence = predecessor_payload["promotion_evidence"]
+        assert isinstance(predecessor_evidence, dict)
+        precursor = hashlib.sha256(
+            operator._canonical_json(predecessor_evidence)  # noqa: SLF001
+        ).hexdigest()
+    values = _semantic_supervisor_promoted_values(
+        mode=mode,
+        evidence_file=evidence_file,
+        source_sha256=source_sha256,
+        registry_sha256=registry_sha256,
+        actors=actors,
+        precursor_assist_evidence_sha256=precursor,
+    )
+    semantic = b"".join(f"{key}={value}\n".encode("ascii") for key, value in sorted(values.items()))
+    assert secondary == b"".join(
+        f"{key}={value}\n".encode("ascii") for key, value in sorted(secondary_values.items())
+    )
+    return unrelated + semantic + secondary
+
+
+def _semantic_supervisor_off_port(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    unrelated: bytes | None = None,
+) -> tuple[operator.SystemdActivationPort, bytes]:
+    accepted_port, accepted = _secondary_document_map_assist_enabled_port(
+        tmp_path,
+        monkeypatch,
+        unrelated=unrelated,
+    )
+    off = _semantic_supervisor_environment(accepted, mode="off")
+    accepted_port.config.env_file.write_bytes(off)
+    accepted_port.config.env_file.chmod(0o600)
+    return (
+        operator.SystemdActivationPort(
+            replace(
+                accepted_port.config,
+                env_file_sha256=hashlib.sha256(off).hexdigest(),
+            )
+        ),
+        off,
+    )
+
+
+def _semantic_supervisor_shadow_port(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    unrelated: bytes | None = None,
+) -> tuple[operator.SystemdActivationPort, bytes]:
+    off_port, off = _semantic_supervisor_off_port(
+        tmp_path,
+        monkeypatch,
+        unrelated=unrelated,
+    )
+    shadow = _semantic_supervisor_environment(off, mode="shadow")
+    off_port.config.env_file.write_bytes(shadow)
+    off_port.config.env_file.chmod(0o600)
+    return (
+        operator.SystemdActivationPort(
+            replace(
+                off_port.config,
+                env_file_sha256=hashlib.sha256(shadow).hexdigest(),
+            )
+        ),
+        shadow,
+    )
+
+
+def _semantic_supervisor_stage(
+    base: operator.SystemdActivationPort,
+    *,
+    mode: str,
+    target: bytes | None = None,
+) -> tuple[Path, bytes, str]:
+    staged_target = target or _semantic_supervisor_environment(
+        base.config.env_file.read_bytes(),
+        mode=mode,
+    )
+    staged = base.config.state_dir / f"semantic-supervisor-{mode}.env"
+    staged.write_bytes(staged_target)
+    staged.chmod(0o600)
+    return staged, staged_target, hashlib.sha256(staged_target).hexdigest()
+
+
+def _semantic_supervisor_health_payload(mode: str) -> dict[str, object]:
+    assert mode in {"off", "shadow", "assist", "canary"}
+    installed = mode != "off"
+    effective_mode = "shadow" if installed else "off"
+    policy_id = (
+        operator._SEMANTIC_SUPERVISOR_ASSIST_POLICY_ID  # noqa: SLF001
+        if mode in {"assist", "canary"}
+        else operator._SEMANTIC_SUPERVISOR_SHADOW_POLICY_ID  # noqa: SLF001
+    )
+    policy_sha256 = (
+        operator._SEMANTIC_SUPERVISOR_ASSIST_POLICY_SHA256  # noqa: SLF001
+        if mode in {"assist", "canary"}
+        else operator._SEMANTIC_SUPERVISOR_SHADOW_POLICY_SHA256  # noqa: SLF001
+    )
+    if mode in {"assist", "canary"}:
+        semantic: dict[str, object] = {
+            "schema": "friday.semantic-supervisor-assist-controller-status.v1",
+            "installed": True,
+            "role": "durable_read_only_assist",
+            "requested_mode": mode,
+            "effective_mode": "off",
+            "promotion_admitted": False,
+            "max_review_rounds": 1,
+            "promotion_attempt_total": 0,
+            "promotion_evaluation_total": 0,
+            "promotion_admitted_total": 0,
+            "active_tasks": 0,
+            "retained_active_graphs": 0,
+            "fallback_total": 0,
+            "invoked_total": 0,
+            "publication_total": 0,
+            "terminal_publication_total": 0,
+            "event_success_total": 0,
+            "event_failure_total": 0,
+            "ordinary_event_success_total": 0,
+            "ordinary_event_failure_total": 0,
+            "ownership_uncertain_total": 0,
+            "fallback_reasons": {},
+            "runtime_owner": "durable_graph_after_admission",
+            "publication_owner": "primary",
+            "tools_allowed": False,
+            "effects_allowed": False,
+            "closed": False,
+            "scheduler": {
+                "state": "probing",
+                "available": False,
+                "workload": "plan_candidate",
+                "policy_id": policy_id,
+                "policy_sha256": policy_sha256,
+                "workload_available": True,
+                "runtime_available": False,
+                "closed_reason": "admitted",
+                "circuit_retry_after_sec": 0.0,
+            },
+        }
+    else:
+        semantic = {
+            "schema": "friday.semantic-supervisor-shadow-runtime.v1",
+            "installed": installed,
+            "role": "discarded_advisory_shadow",
+            "requested_mode": mode,
+            "effective_mode": effective_mode,
+            "promotion_admitted": False,
+            "runtime_owner": "unchanged",
+            "publication_owner": "primary",
+            "tools_allowed": False,
+            "effects_allowed": False,
+            "execution_allowed": False,
+        }
+        if installed:
+            semantic.update(
+                {
+                    "policy_id": policy_id,
+                    "policy_sha256": policy_sha256,
+                    "accepted_profile_id": operator._SECONDARY_FINALIST_PROFILE_ID,  # noqa: SLF001
+                    "max_pending": 4,
+                }
+            )
+    if mode in {"assist", "canary"}:
+        semantic["activation"] = {
+            "schema": "friday.supervisor-assist-activation-status.v1",
+            "configured": True,
+            "reason": "material_loaded_not_accepted",
+            "requested_mode": mode,
+            "source_revision_loaded": True,
+            "registry_binding_loaded": True,
+            "scheduler_projection_loaded": True,
+            "scheduler_runtime_available": False,
+            "evidence_loaded": True,
+            "evidence_authority": "production_joined",
+            "operator_gate_enabled": True,
+            "canary_actor_binding_count": 0 if mode == "assist" else 2,
+            "promotion_admitted": False,
+            "evidence_accepted": False,
+            "acceptance_authority": "none",
+            "body_free": True,
+        }
+    return {
+        "semantic_supervisor": semantic,
+        "secondary": {
+            "schema": "friday.optional-secondary-health.v1",
+            "role": "optional_advisory",
+            "enabled": True,
+            "configured": True,
+            "mode": "assist",
+            "state": "probing",
+            "available": False,
+            "semantic_supervisor": {
+                "workload": "plan_candidate",
+                "requested_mode": mode,
+                "effective_mode": effective_mode,
+                "policy_id": policy_id,
+                "policy_sha256": policy_sha256,
+                "workload_available": installed,
+                "runtime_available": False,
+                "closed_reason": "admitted" if installed else "mode_off",
+            },
+        },
+    }
+
+
+def test_semantic_supervisor_health_identity_requires_installed_closed_shadow_seam() -> None:
+    shadow = _semantic_supervisor_health_payload("shadow")
+    assert operator._semantic_supervisor_health_identity_matches(  # noqa: SLF001
+        shadow,
+        expected_mode="shadow",
+    )
+    for path, replacement in (
+        (("semantic_supervisor", "installed"), False),
+        (("semantic_supervisor", "accepted_profile_id"), "wrong-profile"),
+        (("secondary", "semantic_supervisor", "workload_available"), False),
+        (("secondary", "semantic_supervisor", "policy_sha256"), "0" * 64),
+    ):
+        mutated = json.loads(json.dumps(shadow))
+        target = mutated
+        for key in path[:-1]:
+            target = target[key]
+        target[path[-1]] = replacement
+        assert not operator._semantic_supervisor_health_identity_matches(  # noqa: SLF001
+            mutated,
+            expected_mode="shadow",
+        )
+
+    off = _semantic_supervisor_health_payload("off")
+    assert operator._semantic_supervisor_health_identity_matches(  # noqa: SLF001
+        off,
+        expected_mode="off",
+    )
+    off["semantic_supervisor"]["effective_mode"] = "shadow"  # type: ignore[index]
+    assert not operator._semantic_supervisor_health_identity_matches(  # noqa: SLF001
+        off,
+        expected_mode="off",
+    )
+
+
+@pytest.mark.parametrize("mode", ["assist", "canary"])
+def test_semantic_supervisor_promoted_health_binds_loaded_activation_material(mode: str) -> None:
+    payload = _semantic_supervisor_health_payload(mode)
+    assert operator._semantic_supervisor_health_identity_matches(  # noqa: SLF001
+        payload,
+        expected_mode=mode,
+    )
+    semantic = payload["semantic_supervisor"]
+    assert isinstance(semantic, dict)
+    activation = semantic["activation"]
+    assert isinstance(activation, dict)
+    mutations = (
+        ("configured", False),
+        ("requested_mode", "shadow"),
+        ("source_revision_loaded", False),
+        ("evidence_loaded", False),
+        ("evidence_authority", "self_reported"),
+        ("operator_gate_enabled", False),
+        ("promotion_admitted", True),
+        ("body_free", False),
+    )
+    for key, value in mutations:
+        mutated = json.loads(json.dumps(payload))
+        mutated["semantic_supervisor"]["activation"][key] = value
+        assert not operator._semantic_supervisor_health_identity_matches(  # noqa: SLF001
+            mutated,
+            expected_mode=mode,
+        )
+
+    wrong_count = json.loads(json.dumps(payload))
+    wrong_count["semantic_supervisor"]["activation"]["canary_actor_binding_count"] = (
+        1 if mode == "assist" else 0
+    )
+    assert not operator._semantic_supervisor_health_identity_matches(  # noqa: SLF001
+        wrong_count,
+        expected_mode=mode,
+    )
+
+    for key, value in (
+        ("schema", "friday.semantic-supervisor-shadow-runtime.v1"),
+        ("role", "discarded_advisory_shadow"),
+        ("max_review_rounds", 0),
+    ):
+        mutated = json.loads(json.dumps(payload))
+        mutated["semantic_supervisor"][key] = value
+        assert not operator._semantic_supervisor_health_identity_matches(  # noqa: SLF001
+            mutated,
+            expected_mode=mode,
+        )
+
+    for key in ("ordinary_event_success_total", "ordinary_event_failure_total"):
+        for invalid in (-1, True):
+            mutated = json.loads(json.dumps(payload))
+            mutated["semantic_supervisor"][key] = invalid
+            assert not operator._semantic_supervisor_health_identity_matches(  # noqa: SLF001
+                mutated,
+                expected_mode=mode,
+            )
+
+    discarded = json.loads(json.dumps(payload))
+    discarded["semantic_supervisor"] = {
+        "schema": "friday.semantic-supervisor-shadow-runtime.v1",
+        "installed": True,
+        "role": "discarded_advisory_shadow",
+        "requested_mode": mode,
+        "effective_mode": "shadow",
+        "promotion_admitted": False,
+        "policy_id": operator._SEMANTIC_SUPERVISOR_ASSIST_POLICY_ID,  # noqa: SLF001
+        "policy_sha256": operator._SEMANTIC_SUPERVISOR_ASSIST_POLICY_SHA256,  # noqa: SLF001
+        "accepted_profile_id": operator._SECONDARY_FINALIST_PROFILE_ID,  # noqa: SLF001
+        "runtime_owner": "unchanged",
+        "publication_owner": "primary",
+        "tools_allowed": False,
+        "effects_allowed": False,
+        "execution_allowed": False,
+        "max_pending": 4,
+        "activation": activation,
+    }
+    assert not operator._semantic_supervisor_health_identity_matches(  # noqa: SLF001
+        discarded,
+        expected_mode=mode,
+    )
+
+
 def _secondary_document_map_stage(
     base: operator.SystemdActivationPort,
     *,
@@ -2578,6 +3686,1880 @@ def _secondary_assist_to_disabled_stage(
     staged.write_bytes(disabled)
     staged.chmod(0o600)
     return staged, disabled, hashlib.sha256(disabled).hexdigest()
+
+
+def test_systemd_port_round_trips_exact_semantic_supervisor_shadow(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    unrelated = b"# byte-exact operator state\r\nFRIDAY_PROFILE=production\n"
+    base, off = _semantic_supervisor_off_port(
+        tmp_path,
+        monkeypatch,
+        unrelated=unrelated,
+    )
+    staged, shadow, shadow_sha256 = _semantic_supervisor_stage(base, mode="shadow")
+    enable_config = replace(
+        base.config,
+        next_env_file=staged,
+        next_env_file_sha256=shadow_sha256,
+        staged_config_transition="semantic_supervisor_shadow_enable",
+    )
+    assert operator._secondary_rollout_receipt_stage(enable_config) is None  # noqa: SLF001
+    port = operator.SystemdActivationPort(enable_config)
+    enable = (
+        "semantic_supervisor_shadow_enable",
+        base.config.env_file_sha256,
+        staged,
+        shadow_sha256,
+    )
+    port.validate_staged_config_transition(*enable)
+    port.select_predecessor_config_transition(*enable)
+    assert port.config.env_file.read_bytes() == off
+    port.activate_staged_config_transition(*enable)
+    port.activate_staged_config_transition(*enable)
+    assert port.config.env_file.read_bytes() == shadow
+    assert not staged.exists()
+
+    secondary_values, nonsecondary, secondary = operator._secondary_environment_parts(  # noqa: SLF001
+        shadow
+    )
+    semantic_values, preserved, semantic = operator._semantic_supervisor_environment_parts(  # noqa: SLF001
+        nonsecondary
+    )
+    assert semantic_values == _semantic_supervisor_values("shadow")
+    assert set(semantic_values) == {
+        "FRIDAY_SEMANTIC_SUPERVISOR_EFFECT_EVIDENCE_FILE",
+        "FRIDAY_SEMANTIC_SUPERVISOR_EFFECT_EVIDENCE_SHA256",
+        "FRIDAY_SEMANTIC_SUPERVISOR_EFFECT_MODE",
+        "FRIDAY_SEMANTIC_SUPERVISOR_MAX_REVIEW_ROUNDS",
+        "FRIDAY_SEMANTIC_SUPERVISOR_MAX_STEPS",
+        "FRIDAY_SEMANTIC_SUPERVISOR_MODE",
+        "FRIDAY_SEMANTIC_SUPERVISOR_PROMOTION_CANARY_ACTOR_BINDINGS",
+        "FRIDAY_SEMANTIC_SUPERVISOR_PROMOTION_ENABLED",
+        "FRIDAY_SEMANTIC_SUPERVISOR_PROMOTION_EVIDENCE_FILE",
+        "FRIDAY_SEMANTIC_SUPERVISOR_PROMOTION_EVIDENCE_SHA256",
+        "FRIDAY_SEMANTIC_SUPERVISOR_PROMOTION_LATENCY_BUDGET_FILE",
+        "FRIDAY_SEMANTIC_SUPERVISOR_PROMOTION_LATENCY_BUDGET_SHA256",
+        "FRIDAY_SEMANTIC_SUPERVISOR_PROMOTION_REGISTRY_BINDING_SHA256",
+        "FRIDAY_SEMANTIC_SUPERVISOR_PROMOTION_SOURCE_REVISION_SHA256",
+        "FRIDAY_SEMANTIC_SUPERVISOR_TASKS",
+        "FRIDAY_SEMANTIC_SUPERVISOR_TIMEOUT_SEC",
+    }
+    assert preserved == unrelated
+    assert semantic == b"".join(
+        f"{key}={value}\n".encode("ascii") for key, value in sorted(semantic_values.items())
+    )
+    off_secondary, _off_nonsecondary, off_secondary_bytes = operator._secondary_environment_parts(  # noqa: SLF001
+        off
+    )
+    assert secondary_values == off_secondary
+    assert secondary == off_secondary_bytes
+    assert secondary_values["FRIDAY_SECONDARY_LLM_ALLOW_PRIVATE_TEXT"] == "1"
+    assert secondary_values["FRIDAY_SECONDARY_LLM_MODE"] == "assist"
+    assert secondary_values["FRIDAY_SECONDARY_LLM_WORKLOADS"] == "document_map,extract"
+    assert secondary_values["FRIDAY_SECONDARY_LLM_DOCUMENT_MAP_MODE"] == "assist"
+
+    disabled_stage, disabled, disabled_sha256 = _semantic_supervisor_stage(port, mode="off")
+    disable_config = replace(
+        port.config,
+        next_env_file=disabled_stage,
+        next_env_file_sha256=disabled_sha256,
+        staged_config_transition="semantic_supervisor_shadow_disable",
+    )
+    assert operator._secondary_rollout_receipt_stage(disable_config) is None  # noqa: SLF001
+    disabling = operator.SystemdActivationPort(disable_config)
+    disable = (
+        "semantic_supervisor_shadow_disable",
+        port.config.env_file_sha256,
+        disabled_stage,
+        disabled_sha256,
+    )
+    disabling.validate_staged_config_transition(*disable)
+    disabling.activate_staged_config_transition(*disable)
+    disabling.activate_staged_config_transition(*disable)
+    assert disabled == off
+    assert disabling.config.env_file.read_bytes() == off
+    assert not disabled_stage.exists()
+
+
+def test_systemd_port_round_trips_exact_semantic_supervisor_assist_and_canary(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    base, shadow = _semantic_supervisor_shadow_port(tmp_path, monkeypatch)
+    assist_evidence = base.config.state_dir / "future-assist-promotion-evidence.json"
+    assist_evidence.write_bytes(b'{"fixture":"body-free-assist-evidence"}\n')
+    assist_evidence.chmod(0o600)
+    assist = _semantic_supervisor_promoted_environment(
+        shadow,
+        mode="assist",
+        evidence_file=assist_evidence,
+    )
+    staged, _target, assist_sha256 = _semantic_supervisor_stage(
+        base,
+        mode="assist",
+        target=assist,
+    )
+    promoting = operator.SystemdActivationPort(
+        replace(
+            base.config,
+            next_env_file=staged,
+            next_env_file_sha256=assist_sha256,
+            staged_config_transition="semantic_supervisor_shadow_to_assist",
+        )
+    )
+    descriptor = (
+        "semantic_supervisor_shadow_to_assist",
+        base.config.env_file_sha256,
+        staged,
+        assist_sha256,
+    )
+    assert promoting._expected_semantic_health_mode() == "shadow"  # noqa: SLF001
+    promoting.validate_staged_config_transition(*descriptor)
+    promoting.activate_staged_config_transition(*descriptor)
+    assert promoting.config.env_file.read_bytes() == assist
+    assert promoting._expected_semantic_health_mode() == "assist"  # noqa: SLF001
+
+    canary_evidence = base.config.state_dir / "future-canary-promotion-evidence.json"
+    canary_evidence.write_bytes(b'{"fixture":"body-free-canary-evidence"}\n')
+    canary_evidence.chmod(0o600)
+    canary = _semantic_supervisor_promoted_environment(
+        assist,
+        mode="canary",
+        evidence_file=canary_evidence,
+        actors=("d" * 64, "e" * 64),
+    )
+    staged_canary, _target, canary_sha256 = _semantic_supervisor_stage(
+        promoting,
+        mode="canary",
+        target=canary,
+    )
+    canary_port = operator.SystemdActivationPort(
+        replace(
+            promoting.config,
+            next_env_file=staged_canary,
+            next_env_file_sha256=canary_sha256,
+            staged_config_transition="semantic_supervisor_assist_to_canary",
+        )
+    )
+    canary_descriptor = (
+        "semantic_supervisor_assist_to_canary",
+        promoting.config.env_file_sha256,
+        staged_canary,
+        canary_sha256,
+    )
+    canary_port.validate_staged_config_transition(*canary_descriptor)
+    canary_port.activate_staged_config_transition(*canary_descriptor)
+    assert canary_port.config.env_file.read_bytes() == canary
+    assert canary_port._expected_semantic_health_mode() == "canary"  # noqa: SLF001
+
+    staged_assist, _target, rollback_assist_sha256 = _semantic_supervisor_stage(
+        canary_port,
+        mode="assist",
+        target=assist,
+    )
+    assist_port = operator.SystemdActivationPort(
+        replace(
+            canary_port.config,
+            next_env_file=staged_assist,
+            next_env_file_sha256=rollback_assist_sha256,
+            staged_config_transition="semantic_supervisor_canary_to_assist",
+        )
+    )
+    assist_descriptor = (
+        "semantic_supervisor_canary_to_assist",
+        canary_port.config.env_file_sha256,
+        staged_assist,
+        rollback_assist_sha256,
+    )
+    assist_port.validate_staged_config_transition(*assist_descriptor)
+    assist_port.activate_staged_config_transition(*assist_descriptor)
+    assert assist_port.config.env_file.read_bytes() == assist
+
+    staged_shadow, _target, rollback_shadow_sha256 = _semantic_supervisor_stage(
+        assist_port,
+        mode="shadow",
+        target=shadow,
+    )
+    shadow_port = operator.SystemdActivationPort(
+        replace(
+            assist_port.config,
+            next_env_file=staged_shadow,
+            next_env_file_sha256=rollback_shadow_sha256,
+            staged_config_transition="semantic_supervisor_assist_to_shadow",
+        )
+    )
+    shadow_descriptor = (
+        "semantic_supervisor_assist_to_shadow",
+        assist_port.config.env_file_sha256,
+        staged_shadow,
+        rollback_shadow_sha256,
+    )
+    shadow_port.validate_staged_config_transition(*shadow_descriptor)
+    shadow_port.activate_staged_config_transition(*shadow_descriptor)
+    assert shadow_port.config.env_file.read_bytes() == shadow
+    assert shadow_port._expected_semantic_health_mode() == "shadow"  # noqa: SLF001
+
+
+def test_assist_to_canary_binds_canonical_predecessor_evidence_digest(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _base, shadow = _semantic_supervisor_shadow_port(tmp_path, monkeypatch)
+    assist_evidence = tmp_path / "assist-provenance.json"
+    assist_evidence.write_bytes(b"placeholder")
+    assist_evidence.chmod(0o600)
+    assist = _semantic_supervisor_promoted_environment(
+        shadow,
+        mode="assist",
+        evidence_file=assist_evidence,
+    )
+    assist_raw = assist_evidence.read_bytes()
+    predecessor_bundle = json.loads(assist_raw)
+    assert isinstance(predecessor_bundle, dict)
+    predecessor_payload = predecessor_bundle["promotion_evidence"]
+    assert isinstance(predecessor_payload, dict)
+    predecessor_canonical_sha256 = hashlib.sha256(
+        operator._canonical_json(predecessor_payload)  # noqa: SLF001
+    ).hexdigest()
+    assert predecessor_canonical_sha256 != hashlib.sha256(assist_raw).hexdigest()
+
+    canary_evidence = tmp_path / "canary-provenance.json"
+    canary_evidence.write_bytes(b"placeholder")
+    canary_evidence.chmod(0o600)
+    canary = _semantic_supervisor_promoted_environment(
+        assist,
+        mode="canary",
+        evidence_file=canary_evidence,
+        actors=("d" * 64,),
+    )
+    canary_bundle = json.loads(canary_evidence.read_text(encoding="ascii"))
+    assert isinstance(canary_bundle, dict)
+    canary_payload = canary_bundle["promotion_evidence"]
+    assert isinstance(canary_payload, dict)
+    assert canary_payload["precursor_assist_promotion_evidence_sha256"] == (predecessor_canonical_sha256)
+    operator._validate_staged_environment_transition(  # noqa: SLF001
+        "semantic_supervisor_assist_to_canary",
+        assist,
+        canary,
+    )
+    with pytest.raises(operator.ReleaseFailure):
+        operator._validate_staged_environment_transition(  # noqa: SLF001
+            "semantic_supervisor_assist_to_canary",
+            None,
+            canary,
+        )
+
+    old_canary_file_sha256 = hashlib.sha256(canary_evidence.read_bytes()).hexdigest()
+    canary_payload["precursor_assist_promotion_evidence_sha256"] = "f" * 64
+    canary_bundle["promotion_evidence"] = canary_payload
+    corrupted_raw = canonical_json_file_bytes(canary_bundle)
+    canary_evidence.write_bytes(corrupted_raw)
+    corrupted_file_sha256 = hashlib.sha256(corrupted_raw).hexdigest()
+    corrupted = canary.replace(
+        f"FRIDAY_SEMANTIC_SUPERVISOR_PROMOTION_EVIDENCE_SHA256={old_canary_file_sha256}\n".encode(),
+        f"FRIDAY_SEMANTIC_SUPERVISOR_PROMOTION_EVIDENCE_SHA256={corrupted_file_sha256}\n".encode(),
+        1,
+    )
+    with pytest.raises(operator.ReleaseFailure):
+        operator._validate_staged_environment_transition(  # noqa: SLF001
+            "semantic_supervisor_assist_to_canary",
+            assist,
+            corrupted,
+        )
+
+
+@pytest.mark.parametrize(
+    ("source_sha256", "registry_sha256"),
+    (("f" * 64, "c" * 64), ("b" * 64, "e" * 64)),
+)
+def test_assist_to_canary_rejects_source_or_registry_drift(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    source_sha256: str,
+    registry_sha256: str,
+) -> None:
+    _base, shadow = _semantic_supervisor_shadow_port(tmp_path, monkeypatch)
+    assist_evidence = tmp_path / "identity-assist-bundle.json"
+    assist_evidence.write_bytes(b"placeholder")
+    assist_evidence.chmod(0o600)
+    assist = _semantic_supervisor_promoted_environment(
+        shadow,
+        mode="assist",
+        evidence_file=assist_evidence,
+    )
+    canary_evidence = tmp_path / "identity-canary-bundle.json"
+    canary_evidence.write_bytes(b"placeholder")
+    canary_evidence.chmod(0o600)
+    canary = _semantic_supervisor_promoted_environment(
+        assist,
+        mode="canary",
+        evidence_file=canary_evidence,
+        source_sha256=source_sha256,
+        registry_sha256=registry_sha256,
+        actors=("d" * 64,),
+    )
+
+    with pytest.raises(
+        operator.ReleaseFailure,
+        match="semantic_supervisor_promotion_identity_drift",
+    ):
+        operator._validate_staged_environment_transition(  # noqa: SLF001
+            "semantic_supervisor_assist_to_canary",
+            assist,
+            canary,
+        )
+
+
+@pytest.mark.parametrize(
+    ("phase", "staged_present"),
+    (
+        ("environment_swap_attempted", True),
+        ("environment_swap_attempted", False),
+        ("environment_active", False),
+    ),
+)
+def test_assist_to_canary_recovers_after_each_environment_swap_boundary(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    phase: str,
+    staged_present: bool,
+) -> None:
+    base, shadow = _semantic_supervisor_shadow_port(tmp_path, monkeypatch)
+    assist_evidence = tmp_path / "recovery-assist-bundle.json"
+    assist_evidence.write_bytes(b"placeholder")
+    assist_evidence.chmod(0o600)
+    assist = _semantic_supervisor_promoted_environment(
+        shadow,
+        mode="assist",
+        evidence_file=assist_evidence,
+    )
+    base.config.env_file.write_bytes(assist)
+    base.config.env_file.chmod(0o600)
+    assist_sha256 = hashlib.sha256(assist).hexdigest()
+    assist_port = operator.SystemdActivationPort(replace(base.config, env_file_sha256=assist_sha256))
+    canary_evidence = tmp_path / "recovery-canary-bundle.json"
+    canary_evidence.write_bytes(b"placeholder")
+    canary_evidence.chmod(0o600)
+    canary = _semantic_supervisor_promoted_environment(
+        assist,
+        mode="canary",
+        evidence_file=canary_evidence,
+        actors=("d" * 64,),
+    )
+    staged, _target, canary_sha256 = _semantic_supervisor_stage(
+        assist_port,
+        mode="canary",
+        target=canary,
+    )
+    descriptor = (
+        "semantic_supervisor_assist_to_canary",
+        assist_sha256,
+        staged,
+        canary_sha256,
+    )
+    prevalidated = operator.SystemdActivationPort(
+        replace(
+            assist_port.config,
+            next_env_file=staged,
+            next_env_file_sha256=canary_sha256,
+            staged_config_transition=descriptor[0],
+        )
+    )
+    prevalidated.validate_staged_config_transition(*descriptor)
+    validation_sha256 = operator._staged_transition_validation_sha256(  # noqa: SLF001
+        *descriptor
+    )
+
+    assist_port.config.env_file.write_bytes(canary)
+    assist_port.config.env_file.chmod(0o600)
+    if not staged_present:
+        staged.unlink()
+    state: dict[str, object] = {
+        "phase": phase,
+        "prebackup_config_transition": descriptor[0],
+        "predecessor_env_sha256": descriptor[1],
+        "next_env_file": str(descriptor[2]),
+        "next_env_file_sha256": descriptor[3],
+        "backup": {"durable": True},
+        "database_mutation_possible": False,
+        "writer_target": "",
+        "staged_transition_validation_sha256": validation_sha256,
+    }
+    recovery_config = operator._activation_recovery_systemd_config(  # noqa: SLF001
+        replace(assist_port.config, env_file_sha256=canary_sha256),
+        state,
+    )
+    replay = operator.SystemdActivationPort(recovery_config)
+    replay.activate_staged_config_transition(*descriptor)
+
+    assert replay.config.env_file.read_bytes() == canary
+    assert not staged.exists()
+
+
+def test_assist_to_canary_recovery_rejects_absent_or_forged_validation_receipt(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    base, shadow = _semantic_supervisor_shadow_port(tmp_path, monkeypatch)
+    assist_evidence = tmp_path / "receipt-assist-bundle.json"
+    assist_evidence.write_bytes(b"placeholder")
+    assist_evidence.chmod(0o600)
+    assist = _semantic_supervisor_promoted_environment(
+        shadow,
+        mode="assist",
+        evidence_file=assist_evidence,
+    )
+    base.config.env_file.write_bytes(assist)
+    base.config.env_file.chmod(0o600)
+    assist_sha256 = hashlib.sha256(assist).hexdigest()
+    canary_evidence = tmp_path / "receipt-canary-bundle.json"
+    canary_evidence.write_bytes(b"placeholder")
+    canary_evidence.chmod(0o600)
+    canary = _semantic_supervisor_promoted_environment(
+        assist,
+        mode="canary",
+        evidence_file=canary_evidence,
+        actors=("d" * 64,),
+    )
+    staged = base.config.state_dir / "receipt-canary.env"
+    staged.write_bytes(canary)
+    staged.chmod(0o600)
+    canary_sha256 = hashlib.sha256(canary).hexdigest()
+    base.config.env_file.write_bytes(canary)
+    state: dict[str, object] = {
+        "phase": "environment_swap_attempted",
+        "prebackup_config_transition": "semantic_supervisor_assist_to_canary",
+        "predecessor_env_sha256": assist_sha256,
+        "next_env_file": str(staged),
+        "next_env_file_sha256": canary_sha256,
+        "backup": {"durable": True},
+        "database_mutation_possible": False,
+        "writer_target": "",
+    }
+    current = replace(base.config, env_file_sha256=canary_sha256)
+
+    for invalid in (None, "f" * 64):
+        candidate = dict(state)
+        if invalid is not None:
+            candidate["staged_transition_validation_sha256"] = invalid
+        with pytest.raises(operator.ReleaseFailure, match="environment_file_changed"):
+            operator._activation_recovery_systemd_config(  # noqa: SLF001
+                current,
+                candidate,
+            )
+
+
+def test_assist_to_canary_persists_validation_before_first_writer_stop(
+    releases: Releases,
+) -> None:
+    transition = "semantic_supervisor_assist_to_canary"
+    predecessor_sha256 = "1" * 64
+    next_env_file = Path("/private-state/semantic-supervisor-canary.env")
+    next_sha256 = "2" * 64
+    journal = MemoryJournal(
+        prebackup_config_transition=transition,
+        predecessor_env_sha256=predecessor_sha256,
+        next_env_file=next_env_file,
+        next_env_file_sha256=next_sha256,
+    )
+    expected = operator._staged_transition_validation_sha256(  # noqa: SLF001
+        transition,
+        predecessor_sha256,
+        next_env_file,
+        next_sha256,
+    )
+
+    class ReceiptBoundaryPort(FakePort):
+        def stop_bridge(self) -> None:
+            assert journal.state["phase"] == "bridge_stop_attempted"
+            assert journal.state["staged_transition_validation_sha256"] == expected
+            super().stop_bridge()
+
+    receipt = operator.activate_release(
+        ReceiptBoundaryPort(staged_config_transition=transition),
+        journal,
+        candidate=releases.candidate,
+        previous=releases.previous,
+        schema_capable_fallback=releases.fallback,
+    )
+
+    assert receipt["status"] == "clear"
+    assert journal.state["staged_transition_validation_sha256"] == expected
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        "gate_disabled",
+        "review_round",
+        "task_widened",
+        "evidence_digest_mismatch",
+        "latency_budget_digest_mismatch",
+        "source_digest_noncanonical",
+        "assist_actor_present",
+        "unknown_key",
+        "legacy_key",
+        "duplicate_key",
+        "quoted_value",
+    ],
+)
+def test_semantic_supervisor_assist_rejects_noncanonical_or_drifted_environment(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    mutation: str,
+) -> None:
+    _base, shadow = _semantic_supervisor_shadow_port(tmp_path, monkeypatch)
+    evidence = tmp_path / "future-assist-evidence.json"
+    evidence.write_bytes(b'{"fixture":"assist-evidence"}\n')
+    evidence.chmod(0o600)
+    target = _semantic_supervisor_promoted_environment(
+        shadow,
+        mode="assist",
+        evidence_file=evidence,
+    )
+    target_values, _unrelated, _secondary = operator._semantic_supervisor_environment_parts(  # noqa: SLF001
+        operator._secondary_environment_parts(target)[1]  # noqa: SLF001
+    )
+    latency_budget_sha256 = target_values["FRIDAY_SEMANTIC_SUPERVISOR_PROMOTION_LATENCY_BUDGET_SHA256"]
+    replacements = {
+        "gate_disabled": (
+            b"FRIDAY_SEMANTIC_SUPERVISOR_PROMOTION_ENABLED=1\n",
+            b"FRIDAY_SEMANTIC_SUPERVISOR_PROMOTION_ENABLED=0\n",
+        ),
+        "review_round": (
+            b"FRIDAY_SEMANTIC_SUPERVISOR_MAX_REVIEW_ROUNDS=1\n",
+            b"FRIDAY_SEMANTIC_SUPERVISOR_MAX_REVIEW_ROUNDS=0\n",
+        ),
+        "task_widened": (
+            b"FRIDAY_SEMANTIC_SUPERVISOR_TASKS=compare_current_file_with_current_web\n",
+            b"FRIDAY_SEMANTIC_SUPERVISOR_TASKS="
+            b"compare_archive_with_current_web,compare_current_file_with_current_web\n",
+        ),
+        "evidence_digest_mismatch": (
+            b"FRIDAY_SEMANTIC_SUPERVISOR_PROMOTION_EVIDENCE_SHA256="
+            + hashlib.sha256(evidence.read_bytes()).hexdigest().encode()
+            + b"\n",
+            b"FRIDAY_SEMANTIC_SUPERVISOR_PROMOTION_EVIDENCE_SHA256=" + b"f" * 64 + b"\n",
+        ),
+        "latency_budget_digest_mismatch": (
+            b"FRIDAY_SEMANTIC_SUPERVISOR_PROMOTION_LATENCY_BUDGET_SHA256="
+            + latency_budget_sha256.encode()
+            + b"\n",
+            b"FRIDAY_SEMANTIC_SUPERVISOR_PROMOTION_LATENCY_BUDGET_SHA256=" + b"f" * 64 + b"\n",
+        ),
+        "source_digest_noncanonical": (
+            b"FRIDAY_SEMANTIC_SUPERVISOR_PROMOTION_SOURCE_REVISION_SHA256=" + b"b" * 64 + b"\n",
+            b"FRIDAY_SEMANTIC_SUPERVISOR_PROMOTION_SOURCE_REVISION_SHA256=" + b"B" * 64 + b"\n",
+        ),
+        "assist_actor_present": (
+            b"FRIDAY_SEMANTIC_SUPERVISOR_PROMOTION_CANARY_ACTOR_BINDINGS=\n",
+            b"FRIDAY_SEMANTIC_SUPERVISOR_PROMOTION_CANARY_ACTOR_BINDINGS=" + b"d" * 64 + b"\n",
+        ),
+        "unknown_key": (
+            b"FRIDAY_SEMANTIC_SUPERVISOR_TASKS=compare_current_file_with_current_web\n",
+            b"FRIDAY_SEMANTIC_SUPERVISOR_OWNER=primary\n"
+            b"FRIDAY_SEMANTIC_SUPERVISOR_TASKS=compare_current_file_with_current_web\n",
+        ),
+        "legacy_key": (
+            b"FRIDAY_SEMANTIC_SUPERVISOR_TASKS=compare_current_file_with_current_web\n",
+            b"JERICHO_SEMANTIC_SUPERVISOR_MODE=assist\n"
+            b"FRIDAY_SEMANTIC_SUPERVISOR_TASKS=compare_current_file_with_current_web\n",
+        ),
+        "duplicate_key": (
+            b"FRIDAY_SEMANTIC_SUPERVISOR_TASKS=compare_current_file_with_current_web\n",
+            b"FRIDAY_SEMANTIC_SUPERVISOR_MODE=assist\n"
+            b"FRIDAY_SEMANTIC_SUPERVISOR_TASKS=compare_current_file_with_current_web\n",
+        ),
+        "quoted_value": (
+            f"FRIDAY_SEMANTIC_SUPERVISOR_PROMOTION_EVIDENCE_FILE={evidence}\n".encode(),
+            f'FRIDAY_SEMANTIC_SUPERVISOR_PROMOTION_EVIDENCE_FILE="{evidence}"\n'.encode(),
+        ),
+    }
+    old, new = replacements[mutation]
+    mutated = target.replace(old, new, 1)
+    assert mutated != target
+    with pytest.raises(operator.ReleaseFailure):
+        operator._validate_staged_environment_transition(  # noqa: SLF001
+            "semantic_supervisor_shadow_to_assist",
+            shadow,
+            mutated,
+        )
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    (
+        "budget_extra_key",
+        "budget_target_mode",
+        "budget_source_revision",
+        "budget_value_not_bound_by_evidence",
+        "evidence_budget_digest",
+        "old_evidence_schema",
+    ),
+)
+def test_semantic_supervisor_operator_binds_exact_budget_document_to_evidence(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    mutation: str,
+) -> None:
+    _base, shadow = _semantic_supervisor_shadow_port(tmp_path, monkeypatch)
+    evidence_file = tmp_path / "accepted-assist-evidence.json"
+    evidence_file.write_bytes(b"placeholder")
+    evidence_file.chmod(0o600)
+    target = _semantic_supervisor_promoted_environment(
+        shadow,
+        mode="assist",
+        evidence_file=evidence_file,
+    )
+    _secondary_values, nonsecondary, _secondary = operator._secondary_environment_parts(  # noqa: SLF001
+        target
+    )
+    values, _unrelated, _semantic = operator._semantic_supervisor_environment_parts(  # noqa: SLF001
+        nonsecondary
+    )
+    budget_file = Path(values["FRIDAY_SEMANTIC_SUPERVISOR_PROMOTION_LATENCY_BUDGET_FILE"])
+    old_budget_sha = values["FRIDAY_SEMANTIC_SUPERVISOR_PROMOTION_LATENCY_BUDGET_SHA256"]
+    old_evidence_sha = values["FRIDAY_SEMANTIC_SUPERVISOR_PROMOTION_EVIDENCE_SHA256"]
+    budget_payload = json.loads(budget_file.read_text(encoding="ascii"))
+    evidence_bundle = json.loads(evidence_file.read_text(encoding="ascii"))
+    evidence_payload = evidence_bundle["promotion_evidence"]
+    assert isinstance(evidence_payload, dict)
+
+    if mutation == "budget_extra_key":
+        budget_payload["body"] = "not accepted"
+    elif mutation == "budget_target_mode":
+        budget_payload["target_mode"] = "canary"
+    elif mutation == "budget_source_revision":
+        budget_payload["source_revision_sha256"] = "f" * 64
+    elif mutation == "budget_value_not_bound_by_evidence":
+        budget_payload["maximum_user_visible_latency_ms"] = 2_400
+    elif mutation == "evidence_budget_digest":
+        evidence_payload["product_evidence"]["latency_budget_sha256"] = "f" * 64
+    else:
+        evidence_payload["schema"] = "friday.supervisor-assist-promotion.v4"
+
+    if mutation.startswith("budget_"):
+        budget_raw = json.dumps(
+            budget_payload,
+            ensure_ascii=True,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("ascii")
+        budget_file.write_bytes(budget_raw)
+        budget_file.chmod(0o600)
+        new_budget_sha = hashlib.sha256(budget_raw).hexdigest()
+        target = target.replace(
+            f"FRIDAY_SEMANTIC_SUPERVISOR_PROMOTION_LATENCY_BUDGET_SHA256={old_budget_sha}\n".encode(),
+            f"FRIDAY_SEMANTIC_SUPERVISOR_PROMOTION_LATENCY_BUDGET_SHA256={new_budget_sha}\n".encode(),
+            1,
+        )
+        if mutation == "budget_value_not_bound_by_evidence":
+            evidence_payload["product_evidence"]["latency_budget_sha256"] = new_budget_sha
+    if mutation in {
+        "budget_value_not_bound_by_evidence",
+        "evidence_budget_digest",
+        "old_evidence_schema",
+    }:
+        evidence_bundle["promotion_evidence"] = evidence_payload
+        evidence_raw = canonical_json_file_bytes(evidence_bundle)
+        evidence_file.write_bytes(evidence_raw)
+        evidence_file.chmod(0o600)
+        new_evidence_sha = hashlib.sha256(evidence_raw).hexdigest()
+        target = target.replace(
+            f"FRIDAY_SEMANTIC_SUPERVISOR_PROMOTION_EVIDENCE_SHA256={old_evidence_sha}\n".encode(),
+            f"FRIDAY_SEMANTIC_SUPERVISOR_PROMOTION_EVIDENCE_SHA256={new_evidence_sha}\n".encode(),
+            1,
+        )
+
+    with pytest.raises(operator.ReleaseFailure):
+        operator._validate_staged_environment_transition(  # noqa: SLF001
+            "semantic_supervisor_shadow_to_assist",
+            shadow,
+            target,
+        )
+
+
+@pytest.mark.parametrize(
+    ("mode", "path", "value"),
+    (
+        ("assist", ("authority",), "isolated_live_protocol"),
+        ("assist", ("observed_mode",), "assist"),
+        ("canary", ("observed_mode",), "shadow"),
+        ("assist", ("source_revision_sha256",), "f" * 64),
+        ("assist", ("registry_binding_sha256",), "f" * 64),
+        ("assist", ("baseline_file_sha256",), "F" * 64),
+        ("assist", ("baseline_report_sha256",), None),
+        ("assist", ("operator_attestation_sha256",), "short"),
+        ("assist", ("precursor_assist_promotion_evidence_sha256",), "d" * 64),
+        ("canary", ("precursor_assist_promotion_evidence_sha256",), None),
+        ("assist", ("promotion_policy_sha256",), "f" * 64),
+        ("assist", ("observed_policy_id",), "gptoss20b-semantic-supervisor-v2"),
+        ("canary", ("observed_policy_id",), "gptoss20b-semantic-supervisor-v1"),
+        ("assist", ("observed_policy_sha256",), "f" * 64),
+        ("assist", ("target_policy_id",), "gptoss20b-semantic-supervisor-v1"),
+        ("assist", ("target_policy_sha256",), "f" * 64),
+        ("assist", ("runtime_profile_id",), "wrong-profile"),
+        ("assist", ("runtime_profile_manifest_sha256",), "f" * 64),
+        ("assist", ("evidence_id",), "Not_Canonical"),
+        ("assist", ("max_steps",), 6.0),
+        ("assist", ("max_review_rounds",), True),
+        ("assist", ("observation_count",), 19),
+        ("assist", ("joined_trace_count",), 19),
+        ("assist", ("representative_window_attested",), False),
+        ("assist", ("primary_fallback_proven",), 1),
+        ("assist", ("laptop_unavailable_fallback_proven",), False),
+        ("assist", ("final_authority_recheck_proven",), False),
+        ("assist", ("primary_publication_owner_proven",), False),
+        ("assist", ("hidden_owner_count",), 1),
+        ("assist", ("hidden_owner_count",), -1),
+        ("assist", ("duplicate_capability_count",), True),
+        ("assist", ("duplicate_effect_count",), 1),
+        ("assist", ("duplicate_publication_count",), 1),
+        ("assist", ("false_completion_regression_count",), 1),
+        ("assist", ("product_evidence", "baseline_observation_count"), 19),
+        ("assist", ("product_evidence", "baseline_complete_count"), 21),
+        ("assist", ("product_evidence", "baseline_failure_class_count"), 0),
+        ("assist", ("product_evidence", "readiness_observation_count"), 19),
+        ("assist", ("product_evidence", "readiness_observation_count"), 21),
+        ("assist", ("product_evidence", "call_rate_observation_count"), 19),
+        ("assist", ("product_evidence", "user_visible_observation_count"), 19),
+        ("assist", ("product_evidence", "supervisor_invocation_count"), 21),
+        ("assist", ("product_evidence", "unnecessary_supervisor_invocation_count"), 1),
+        ("assist", ("product_evidence", "user_visible_regression_count"), 1),
+        ("assist", ("product_evidence", "latency_max_ms"), 2_501),
+        ("assist", ("product_evidence", "latency_total_ms"), 30_001),
+        ("assist", ("product_evidence", "documented_failure_class_id"), "none"),
+        ("assist", ("product_evidence", "documented_failure_class_id"), "Invalid"),
+        ("assist", ("product_evidence", "documented_failure_class_sha256"), "F" * 64),
+        ("assist", ("product_evidence", "baseline_observation_count"), True),
+        (
+            "assist",
+            ("product_evidence", "schema"),
+            "friday.supervisor-assist-outcome-evidence.v2",
+        ),
+        ("canary", ("product_evidence", "baseline_observation_count"), 19),
+        ("canary", ("product_evidence", "promoted_observation_count"), 19),
+        ("canary", ("product_evidence", "promoted_observation_count"), 21),
+        ("canary", ("product_evidence", "promoted_complete_count"), 8),
+        ("canary", ("product_evidence", "promoted_complete_count"), 21),
+        ("canary", ("product_evidence", "baseline_failure_class_count"), 21),
+        ("canary", ("product_evidence", "latency_observation_count"), 19),
+        ("canary", ("product_evidence", "call_rate_observation_count"), 19),
+        ("canary", ("product_evidence", "user_visible_observation_count"), 19),
+        ("canary", ("product_evidence", "unnecessary_supervisor_invocation_count"), 1),
+        ("canary", ("product_evidence", "user_visible_regression_count"), 1),
+        ("canary", ("product_evidence", "promoted_window_sha256"), "1" * 64),
+        ("canary", ("product_evidence", "latency_total_ms"), 30_001),
+    ),
+)
+def test_semantic_supervisor_operator_rejects_non_live_promotion_evidence(
+    tmp_path: Path,
+    mode: str,
+    path: tuple[str, ...],
+    value: object,
+) -> None:
+    evidence_file, values, payload = _semantic_supervisor_promoted_payload(
+        tmp_path,
+        mode=mode,
+    )
+    _semantic_supervisor_set_payload_path(payload, path, value)
+    _semantic_supervisor_write_promoted_payload(evidence_file, values, payload)
+
+    with pytest.raises(
+        operator.ReleaseFailure,
+        match="semantic_supervisor_live_evidence_invalid",
+    ):
+        operator._validate_semantic_supervisor_promoted_values(  # noqa: SLF001
+            values,
+            mode=mode,
+            invalid_code="semantic_supervisor_live_evidence_invalid",
+        )
+
+
+@pytest.mark.parametrize(
+    ("mutation", "value"),
+    (
+        ("baseline_failure_class_count", 0),
+        ("promoted_failure_class_count", 1),
+        ("documented_failure_class_sha256", None),
+        ("documented_failure_class_id", "none"),
+    ),
+)
+def test_semantic_supervisor_operator_requires_exact_failure_removal_claim(
+    tmp_path: Path,
+    mutation: str,
+    value: object,
+) -> None:
+    evidence_file, values, payload = _semantic_supervisor_promoted_payload(
+        tmp_path,
+        mode="canary",
+        quality_basis=AssistPromotionQualityBasis.DOCUMENTED_FAILURE_CLASS_REMOVAL,
+    )
+    product = payload["product_evidence"]
+    assert isinstance(product, dict)
+    product[mutation] = value
+    _semantic_supervisor_write_promoted_payload(evidence_file, values, payload)
+
+    with pytest.raises(operator.ReleaseFailure):
+        operator._validate_semantic_supervisor_promoted_values(  # noqa: SLF001
+            values,
+            mode="canary",
+            invalid_code="semantic_supervisor_failure_removal_invalid",
+        )
+
+
+def test_semantic_supervisor_operator_accepts_exact_failure_removal_claim(
+    tmp_path: Path,
+) -> None:
+    _evidence_file, values, _payload = _semantic_supervisor_promoted_payload(
+        tmp_path,
+        mode="canary",
+        quality_basis=AssistPromotionQualityBasis.DOCUMENTED_FAILURE_CLASS_REMOVAL,
+    )
+
+    operator._validate_semantic_supervisor_promoted_values(  # noqa: SLF001
+        values,
+        mode="canary",
+        invalid_code="semantic_supervisor_failure_removal_invalid",
+    )
+
+
+@pytest.mark.parametrize("location", ("outer", "product"))
+def test_semantic_supervisor_operator_rejects_unknown_evidence_keys(
+    tmp_path: Path,
+    location: str,
+) -> None:
+    evidence_file, values, payload = _semantic_supervisor_promoted_payload(
+        tmp_path,
+        mode="assist",
+    )
+    target = payload if location == "outer" else payload["product_evidence"]
+    assert isinstance(target, dict)
+    target["private_body"] = "forbidden"
+    _semantic_supervisor_write_promoted_payload(evidence_file, values, payload)
+
+    with pytest.raises(operator.ReleaseFailure):
+        operator._validate_semantic_supervisor_promoted_values(  # noqa: SLF001
+            values,
+            mode="assist",
+            invalid_code="semantic_supervisor_unknown_evidence_key",
+        )
+
+
+@pytest.mark.parametrize(
+    "raw",
+    (
+        b'{"schema":"first","schema":"second"}',
+        b'{"value":NaN}',
+    ),
+)
+def test_semantic_supervisor_closed_json_maps_adversarial_input_to_release_failure(
+    raw: bytes,
+) -> None:
+    with pytest.raises(operator.ReleaseFailure, match="semantic_supervisor_json_invalid"):
+        operator._semantic_supervisor_closed_json(  # noqa: SLF001
+            raw,
+            invalid_code="semantic_supervisor_json_invalid",
+        )
+
+
+def test_semantic_supervisor_closed_json_maps_recursion_to_release_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def recursion_error(*_args: object, **_kwargs: object) -> object:
+        raise RecursionError("bounded parser recursion")
+
+    monkeypatch.setattr(operator.json, "loads", recursion_error)
+    with pytest.raises(operator.ReleaseFailure, match="semantic_supervisor_json_invalid"):
+        operator._semantic_supervisor_closed_json(  # noqa: SLF001
+            b"{}",
+            invalid_code="semantic_supervisor_json_invalid",
+        )
+
+
+@pytest.mark.parametrize("actors", [(), ("e" * 64, "d" * 64), ("D" * 64,)])
+def test_semantic_supervisor_canary_requires_a_canonical_actor_allowlist(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    actors: tuple[str, ...],
+) -> None:
+    _base, shadow = _semantic_supervisor_shadow_port(tmp_path, monkeypatch)
+    assist_evidence = tmp_path / "future-assist-evidence.json"
+    assist_evidence.write_bytes(b'{"fixture":"assist"}\n')
+    assist_evidence.chmod(0o600)
+    assist = _semantic_supervisor_promoted_environment(
+        shadow,
+        mode="assist",
+        evidence_file=assist_evidence,
+    )
+    canary_evidence = tmp_path / "future-canary-evidence.json"
+    canary_evidence.write_bytes(b'{"fixture":"canary"}\n')
+    canary_evidence.chmod(0o600)
+    canary = _semantic_supervisor_promoted_environment(
+        assist,
+        mode="canary",
+        evidence_file=canary_evidence,
+        actors=actors,
+    )
+    with pytest.raises(operator.ReleaseFailure):
+        operator._validate_staged_environment_transition(  # noqa: SLF001
+            "semantic_supervisor_assist_to_canary",
+            assist,
+            canary,
+        )
+
+
+def test_semantic_supervisor_exact_legacy_p1_blocks_have_a_closed_upgrade_path(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    base, canonical_off = _semantic_supervisor_off_port(tmp_path, monkeypatch)
+    legacy_off = _semantic_supervisor_legacy_environment(canonical_off, mode="off")
+    canonical_shadow = _semantic_supervisor_environment(legacy_off, mode="shadow")
+    operator._validate_staged_environment_transition(  # noqa: SLF001
+        "semantic_supervisor_shadow_enable",
+        legacy_off,
+        canonical_shadow,
+    )
+
+    legacy_shadow = _semantic_supervisor_legacy_environment(canonical_shadow, mode="shadow")
+    evidence = tmp_path / "future-assist-evidence.json"
+    evidence.write_bytes(b'{"fixture":"assist"}\n')
+    evidence.chmod(0o600)
+    assist = _semantic_supervisor_promoted_environment(
+        legacy_shadow,
+        mode="assist",
+        evidence_file=evidence,
+    )
+    operator._validate_staged_environment_transition(  # noqa: SLF001
+        "semantic_supervisor_shadow_to_assist",
+        legacy_shadow,
+        assist,
+    )
+    operator._validate_staged_environment_transition(  # noqa: SLF001
+        "semantic_supervisor_shadow_disable",
+        legacy_shadow,
+        canonical_off,
+    )
+
+
+def test_semantic_supervisor_pre_latency_shadow_has_an_exact_upgrade_path(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    base, canonical_off = _semantic_supervisor_off_port(tmp_path, monkeypatch)
+    pre_latency_off = _semantic_supervisor_pre_latency_environment(canonical_off, mode="off")
+    canonical_shadow = _semantic_supervisor_environment(pre_latency_off, mode="shadow")
+    operator._validate_staged_environment_transition(  # noqa: SLF001
+        "semantic_supervisor_shadow_enable",
+        pre_latency_off,
+        canonical_shadow,
+    )
+
+    pre_latency_shadow = _semantic_supervisor_pre_latency_environment(
+        canonical_shadow,
+        mode="shadow",
+    )
+    evidence = tmp_path / "pre-latency-assist-evidence.json"
+    evidence.write_bytes(b"placeholder")
+    evidence.chmod(0o600)
+    assist = _semantic_supervisor_promoted_environment(
+        pre_latency_shadow,
+        mode="assist",
+        evidence_file=evidence,
+    )
+    operator._validate_staged_environment_transition(  # noqa: SLF001
+        "semantic_supervisor_shadow_to_assist",
+        pre_latency_shadow,
+        assist,
+    )
+    operator._validate_staged_environment_transition(  # noqa: SLF001
+        "semantic_supervisor_shadow_disable",
+        pre_latency_shadow,
+        canonical_off,
+    )
+
+
+def test_semantic_supervisor_enable_accepts_only_exact_legacy_implicit_off(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    unrelated = b"# legacy accepted release\r\nFRIDAY_PROFILE=production\n"
+    base, predecessor = _secondary_document_map_assist_enabled_port(
+        tmp_path,
+        monkeypatch,
+        unrelated=unrelated,
+    )
+    values, nonsecondary, _secondary = operator._secondary_environment_parts(  # noqa: SLF001
+        predecessor
+    )
+    semantic_values, preserved, semantic = operator._semantic_supervisor_environment_parts(  # noqa: SLF001
+        nonsecondary
+    )
+    assert semantic_values == {}
+    assert semantic == b""
+    assert preserved == unrelated
+    staged, shadow, shadow_sha256 = _semantic_supervisor_stage(base, mode="shadow")
+    config = replace(
+        base.config,
+        next_env_file=staged,
+        next_env_file_sha256=shadow_sha256,
+        staged_config_transition="semantic_supervisor_shadow_enable",
+    )
+    port = operator.SystemdActivationPort(config)
+    descriptor = (
+        "semantic_supervisor_shadow_enable",
+        base.config.env_file_sha256,
+        staged,
+        shadow_sha256,
+    )
+
+    assert port._expected_semantic_health_mode() == "off"  # noqa: SLF001
+    assert operator._semantic_supervisor_health_identity_matches(  # noqa: SLF001
+        _semantic_supervisor_health_payload("off"),
+        expected_mode="off",
+    )
+    port.validate_staged_config_transition(*descriptor)
+    port.select_predecessor_config_transition(*descriptor)
+    assert port.config.env_file.read_bytes() == predecessor
+    assert (
+        operator._canonical_environment_values(values)
+        == (  # noqa: SLF001
+            operator._secondary_environment_parts(predecessor)[2]  # noqa: SLF001
+        )
+    )
+
+    port.activate_staged_config_transition(*descriptor)
+    assert port.config.env_file.read_bytes() == shadow
+    assert port._expected_semantic_health_mode() == "shadow"  # noqa: SLF001
+
+
+def test_env_example_semantic_eof_rewrites_to_accepted_canonical_layout(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _base, accepted = _secondary_document_map_assist_enabled_port(tmp_path, monkeypatch)
+    accepted_values, _accepted_unrelated, _accepted_secondary = operator._secondary_environment_parts(
+        accepted
+    )  # noqa: SLF001
+    template = (Path(__file__).resolve().parents[1] / ".env.example").read_bytes()
+    _placeholder_values, template_nonsecondary, _placeholder_secondary = (
+        operator._secondary_environment_parts(template)  # noqa: SLF001
+    )
+    rewritten = operator._canonical_secondary_environment(  # noqa: SLF001
+        template_nonsecondary,
+        accepted_values,
+    )
+
+    unrelated, rewritten_secondary = operator._validate_semantic_supervisor_environment(  # noqa: SLF001
+        rewritten,
+        exact_values=operator._SEMANTIC_SUPERVISOR_OFF_EXACT_VALUES,  # noqa: SLF001
+        invalid_code="template_layout_invalid",
+    )
+    assert rewritten_secondary == accepted_values
+    assert rewritten == (
+        unrelated
+        + operator._canonical_environment_values(  # noqa: SLF001
+            operator._SEMANTIC_SUPERVISOR_OFF_EXACT_VALUES  # noqa: SLF001
+        )
+        + operator._canonical_environment_values(accepted_values)  # noqa: SLF001
+    )
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    ["partial", "unknown", "reordered_off", "secondary_drift"],
+)
+def test_semantic_supervisor_enable_rejects_inexact_legacy_predecessor(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    mutation: str,
+) -> None:
+    base, predecessor = _secondary_document_map_assist_enabled_port(tmp_path, monkeypatch)
+    target = _semantic_supervisor_environment(predecessor, mode="shadow")
+    _values, unrelated, secondary = operator._secondary_environment_parts(  # noqa: SLF001
+        predecessor
+    )
+    if mutation == "partial":
+        predecessor = unrelated + b"FRIDAY_SEMANTIC_SUPERVISOR_MODE=off\n" + secondary
+    elif mutation == "unknown":
+        predecessor = unrelated + b"FRIDAY_SEMANTIC_SUPERVISOR_OWNER=primary\n" + secondary
+    elif mutation == "reordered_off":
+        off = _semantic_supervisor_environment(predecessor, mode="off")
+        first = b"FRIDAY_SEMANTIC_SUPERVISOR_MAX_REVIEW_ROUNDS=1\n"
+        second = b"FRIDAY_SEMANTIC_SUPERVISOR_MAX_STEPS=6\n"
+        predecessor = off.replace(first + second, second + first, 1)
+    else:
+        assert mutation == "secondary_drift"
+        predecessor = predecessor.replace(
+            b"FRIDAY_SECONDARY_LLM_DOCUMENT_MAP_MODE=assist\n",
+            b"FRIDAY_SECONDARY_LLM_DOCUMENT_MAP_MODE=shadow\n",
+            1,
+        )
+
+    with pytest.raises(operator.ReleaseFailure):
+        operator._validate_staged_environment_transition(  # noqa: SLF001
+            "semantic_supervisor_shadow_enable",
+            predecessor,
+            target,
+        )
+
+
+def test_backend_acceptance_rejects_uninstalled_semantic_enable_candidate(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    base, _off = _semantic_supervisor_off_port(tmp_path, monkeypatch)
+    staged, _shadow, shadow_sha256 = _semantic_supervisor_stage(base, mode="shadow")
+    port = operator.SystemdActivationPort(
+        replace(
+            base.config,
+            next_env_file=staged,
+            next_env_file_sha256=shadow_sha256,
+            staged_config_transition="semantic_supervisor_shadow_enable",
+        )
+    )
+    transition = (
+        "semantic_supervisor_shadow_enable",
+        base.config.env_file_sha256,
+        staged,
+        shadow_sha256,
+    )
+    port.activate_staged_config_transition(*transition)
+    candidate = replace(
+        _release(tmp_path, "semantic-health-candidate", schema=42, commit="a" * 40),
+        memory_vault_mode_contract=operator.MEMORY_VAULT_MODE_CONTRACT,
+        obsidian_cutover_contract=operator.OBSIDIAN_CUTOVER_CONTRACT,
+    )
+    current_payload = {
+        "status": "ok",
+        "version": candidate.version,
+        "memory_vault": {
+            "mode": "disabled",
+            "body_free_mode": True,
+            "body_projection_enabled": False,
+        },
+        "obsidian": {
+            "mode": "disabled",
+            "root_sha256": operator._obsidian_root_sha256(port.config),  # noqa: SLF001
+        },
+        **_semantic_supervisor_health_payload("shadow"),
+    }
+    current_payload["semantic_supervisor"]["installed"] = False  # type: ignore[index]
+
+    class Response:
+        status = 200
+
+        def __enter__(self) -> Response:
+            return self
+
+        def __exit__(self, *_args: object) -> None:
+            return None
+
+        def geturl(self) -> str:
+            return port.config.health_url
+
+        def read(self, _limit: int) -> bytes:
+            return json.dumps(current_payload, separators=(",", ":")).encode("ascii")
+
+    class Opener:
+        def open(self, *_args: object, **_kwargs: object) -> Response:
+            return Response()
+
+    monkeypatch.setattr(operator.ssl, "create_default_context", lambda **_kwargs: SimpleNamespace())
+    monkeypatch.setattr(operator.urllib.request, "build_opener", lambda *_handlers: Opener())
+    monkeypatch.setattr(operator.time, "sleep", lambda _seconds: None)
+    monkeypatch.setattr(port, "_wait_process", lambda *_args: 1)
+    ticks = iter((0.0, 0.0, 421.0))
+    monkeypatch.setattr(operator.time, "monotonic", lambda: next(ticks))
+    with pytest.raises(operator.ReleaseFailure, match="backend_health_identity_timeout"):
+        port.accept_backend(candidate)
+
+    current_payload.clear()
+    current_payload.update(
+        {
+            "status": "ok",
+            "version": candidate.version,
+            "memory_vault": {
+                "mode": "disabled",
+                "body_free_mode": True,
+                "body_projection_enabled": False,
+            },
+            "obsidian": {
+                "mode": "disabled",
+                "root_sha256": operator._obsidian_root_sha256(port.config),  # noqa: SLF001
+            },
+            **_semantic_supervisor_health_payload("shadow"),
+        }
+    )
+    monkeypatch.setattr(operator.time, "monotonic", lambda: 0.0)
+    port.accept_backend(candidate)
+
+    rollback = replace(
+        _release(tmp_path, "semantic-health-rollback", schema=42, commit="b" * 40),
+        memory_vault_mode_contract=operator.MEMORY_VAULT_MODE_CONTRACT,
+        obsidian_cutover_contract=operator.OBSIDIAN_CUTOVER_CONTRACT,
+    )
+    current_payload["version"] = rollback.version
+    current_payload.pop("semantic_supervisor")
+    current_payload.pop("secondary")
+    ticks = iter((0.0, 0.0, 421.0))
+    monkeypatch.setattr(operator.time, "monotonic", lambda: next(ticks))
+    with pytest.raises(operator.ReleaseFailure, match="backend_health_identity_timeout"):
+        port.accept_backend(rollback)
+
+    current_payload.update(_semantic_supervisor_health_payload("shadow"))
+    monkeypatch.setattr(operator.time, "monotonic", lambda: 0.0)
+    port.accept_backend(rollback)
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        "assist_mode",
+        "one_task",
+        "reversed_tasks",
+        "max_steps",
+        "review_round",
+        "timeout_literal",
+        "authority_key",
+        "reordered",
+        "duplicate",
+        "unrelated",
+        "public_text",
+        "wrong_profile",
+        "api_key_drift",
+    ],
+)
+def test_systemd_port_rejects_nonexact_semantic_supervisor_shadow_target(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    mutation: str,
+) -> None:
+    base, off = _semantic_supervisor_off_port(tmp_path, monkeypatch)
+    target = _semantic_supervisor_environment(off, mode="shadow")
+    if mutation == "assist_mode":
+        target = target.replace(
+            b"FRIDAY_SEMANTIC_SUPERVISOR_MODE=shadow\n",
+            b"FRIDAY_SEMANTIC_SUPERVISOR_MODE=assist\n",
+        )
+    elif mutation == "one_task":
+        target = target.replace(
+            b"FRIDAY_SEMANTIC_SUPERVISOR_TASKS="
+            b"compare_archive_with_current_web,compare_current_file_with_current_web\n",
+            b"FRIDAY_SEMANTIC_SUPERVISOR_TASKS=compare_archive_with_current_web\n",
+        )
+    elif mutation == "reversed_tasks":
+        target = target.replace(
+            b"compare_archive_with_current_web,compare_current_file_with_current_web",
+            b"compare_current_file_with_current_web,compare_archive_with_current_web",
+        )
+    elif mutation == "max_steps":
+        target = target.replace(
+            b"FRIDAY_SEMANTIC_SUPERVISOR_MAX_STEPS=6\n",
+            b"FRIDAY_SEMANTIC_SUPERVISOR_MAX_STEPS=5\n",
+        )
+    elif mutation == "review_round":
+        target = target.replace(
+            b"FRIDAY_SEMANTIC_SUPERVISOR_MAX_REVIEW_ROUNDS=0\n",
+            b"FRIDAY_SEMANTIC_SUPERVISOR_MAX_REVIEW_ROUNDS=1\n",
+        )
+    elif mutation == "timeout_literal":
+        target = target.replace(
+            b"FRIDAY_SEMANTIC_SUPERVISOR_TIMEOUT_SEC=12\n",
+            b"FRIDAY_SEMANTIC_SUPERVISOR_TIMEOUT_SEC=12.0\n",
+        )
+    elif mutation == "authority_key":
+        target = target.replace(
+            b"FRIDAY_SECONDARY_LLM_ADMISSION_TIMEOUT_SEC=0.10\n",
+            b"FRIDAY_SEMANTIC_SUPERVISOR_PUBLICATION_ALLOWED=1\n"
+            b"FRIDAY_SECONDARY_LLM_ADMISSION_TIMEOUT_SEC=0.10\n",
+        )
+    elif mutation == "reordered":
+        first = b"FRIDAY_SEMANTIC_SUPERVISOR_MAX_REVIEW_ROUNDS=0\n"
+        second = b"FRIDAY_SEMANTIC_SUPERVISOR_MAX_STEPS=6\n"
+        target = target.replace(first + second, second + first)
+    elif mutation == "duplicate":
+        target = target.replace(
+            b"FRIDAY_SECONDARY_LLM_ADMISSION_TIMEOUT_SEC=0.10\n",
+            b"FRIDAY_SEMANTIC_SUPERVISOR_MODE=shadow\nFRIDAY_SECONDARY_LLM_ADMISSION_TIMEOUT_SEC=0.10\n",
+        )
+    elif mutation == "unrelated":
+        target = target.replace(b"FRIDAY_PROFILE=production\n", b"FRIDAY_PROFILE=staging\n")
+    elif mutation == "public_text":
+        target = target.replace(
+            b"FRIDAY_SECONDARY_LLM_ALLOW_PRIVATE_TEXT=1\n",
+            b"FRIDAY_SECONDARY_LLM_ALLOW_PRIVATE_TEXT=0\n",
+        )
+    elif mutation == "wrong_profile":
+        target = target.replace(
+            b"FRIDAY_SECONDARY_LLM_PROFILE="
+            b"gptoss20b-2335df123cac7fc0e13e347cde1e1ffa8562daafcaf0fc76ade1a851d2b0ff1f\n",
+            b"FRIDAY_SECONDARY_LLM_PROFILE=wrong\n",
+        )
+    else:
+        assert mutation == "api_key_drift"
+        target = target.replace(
+            b"FRIDAY_SECONDARY_LLM_API_KEY=" + b"a" * 64,
+            b"FRIDAY_SECONDARY_LLM_API_KEY=" + b"b" * 64,
+        )
+    staged, _target, target_sha256 = _semantic_supervisor_stage(
+        base,
+        mode="shadow",
+        target=target,
+    )
+
+    with pytest.raises(operator.ReleaseFailure):
+        operator.SystemdActivationPort(
+            replace(
+                base.config,
+                next_env_file=staged,
+                next_env_file_sha256=target_sha256,
+                staged_config_transition="semantic_supervisor_shadow_enable",
+            )
+        )
+    assert base.config.env_file.read_bytes() == off
+
+
+@pytest.mark.parametrize(
+    ("side", "mutation"),
+    [
+        ("predecessor", "mode"),
+        ("predecessor", "tasks"),
+        ("predecessor", "review"),
+        ("predecessor", "timeout"),
+        ("target", "mode"),
+        ("target", "tasks"),
+        ("target", "review"),
+        ("target", "timeout"),
+    ],
+)
+def test_semantic_supervisor_disable_requires_exact_shadow_to_exact_off(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    side: str,
+    mutation: str,
+) -> None:
+    base, shadow = _semantic_supervisor_shadow_port(tmp_path, monkeypatch)
+    off = _semantic_supervisor_environment(shadow, mode="off")
+    source, target = shadow, off
+    replacements = {
+        "mode": (
+            b"FRIDAY_SEMANTIC_SUPERVISOR_MODE=shadow\n"
+            if side == "predecessor"
+            else b"FRIDAY_SEMANTIC_SUPERVISOR_MODE=off\n",
+            b"FRIDAY_SEMANTIC_SUPERVISOR_MODE=canary\n",
+        ),
+        "tasks": (
+            b"FRIDAY_SEMANTIC_SUPERVISOR_TASKS="
+            + (
+                b"compare_archive_with_current_web,compare_current_file_with_current_web"
+                if side == "predecessor"
+                else b""
+            )
+            + b"\n",
+            b"FRIDAY_SEMANTIC_SUPERVISOR_TASKS=compare_current_file_with_current_web\n",
+        ),
+        "review": (
+            b"FRIDAY_SEMANTIC_SUPERVISOR_MAX_REVIEW_ROUNDS="
+            + (b"0" if side == "predecessor" else b"1")
+            + b"\n",
+            b"FRIDAY_SEMANTIC_SUPERVISOR_MAX_REVIEW_ROUNDS=9\n",
+        ),
+        "timeout": (
+            b"FRIDAY_SEMANTIC_SUPERVISOR_TIMEOUT_SEC=12\n",
+            b"FRIDAY_SEMANTIC_SUPERVISOR_TIMEOUT_SEC=12.0\n",
+        ),
+    }
+    old, new = replacements[mutation]
+    if side == "predecessor":
+        source = source.replace(old, new)
+    else:
+        target = target.replace(old, new)
+
+    with pytest.raises(operator.ReleaseFailure):
+        operator._validate_staged_environment_transition(  # noqa: SLF001
+            "semantic_supervisor_shadow_disable",
+            source,
+            target,
+        )
+
+
+def test_nonsemantic_transition_cannot_change_semantic_supervisor_block(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _base, off = _semantic_supervisor_off_port(tmp_path, monkeypatch)
+    shadow = _semantic_supervisor_environment(off, mode="shadow")
+
+    with pytest.raises(
+        operator.ReleaseFailure,
+        match="nonsemantic_transition_changed_semantic_supervisor_environment",
+    ):
+        operator._validate_staged_environment_transition(  # noqa: SLF001
+            "obsidian_enable",
+            off,
+            shadow,
+        )
+
+
+def test_semantic_effect_shadow_transition_is_exact_reversible_and_evidence_bound(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _base, off = _semantic_supervisor_off_port(tmp_path, monkeypatch)
+    evidence = _semantic_effect_maturity_file(tmp_path)
+    shadow = _semantic_effect_environment(
+        off,
+        mode="shadow",
+        evidence_file=evidence,
+    )
+
+    operator._validate_staged_environment_transition(  # noqa: SLF001
+        "semantic_supervisor_effect_shadow_enable",
+        off,
+        shadow,
+    )
+    disabled = _semantic_effect_environment(shadow, mode="off")
+    evidence.unlink()
+    operator._validate_staged_environment_transition(  # noqa: SLF001
+        "semantic_supervisor_effect_shadow_disable",
+        shadow,
+        disabled,
+    )
+    assert disabled == off
+
+
+def test_semantic_effect_shadow_preflight_rejects_unknown_effect_registry_before_stop(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _base, off = _semantic_supervisor_off_port(tmp_path, monkeypatch)
+    evidence = _semantic_effect_maturity_file(
+        tmp_path,
+        effect_registry_sha256="f" * 64,
+    )
+    shadow = _semantic_effect_environment(
+        off,
+        mode="shadow",
+        evidence_file=evidence,
+    )
+
+    with pytest.raises(
+        operator.ReleaseFailure,
+        match="semantic_effect_shadow_environment_invalid",
+    ):
+        operator._validate_staged_environment_transition(  # noqa: SLF001
+            "semantic_supervisor_effect_shadow_enable",
+            off,
+            shadow,
+        )
+
+
+def test_semantic_effect_shadow_enable_upgrades_exact_pre_effect_off_generation(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _base, current = _semantic_supervisor_off_port(tmp_path, monkeypatch)
+    _secondary_values, nonsecondary, secondary = operator._secondary_environment_parts(  # noqa: SLF001
+        current
+    )
+    _values, unrelated, _semantic = operator._semantic_supervisor_environment_parts(  # noqa: SLF001
+        nonsecondary
+    )
+    predecessor = (
+        unrelated
+        + operator._canonical_environment_values(  # noqa: SLF001
+            operator._SEMANTIC_SUPERVISOR_PRE_EFFECT_OFF_EXACT_VALUES  # noqa: SLF001
+        )
+        + secondary
+    )
+    evidence = _semantic_effect_maturity_file(tmp_path)
+    target = _semantic_effect_environment(
+        predecessor,
+        mode="shadow",
+        evidence_file=evidence,
+    )
+
+    operator._validate_staged_environment_transition(  # noqa: SLF001
+        "semantic_supervisor_effect_shadow_enable",
+        predecessor,
+        target,
+    )
+    _base.config.env_file.write_bytes(predecessor)
+    _base.config.env_file.chmod(0o600)
+    staged = _base.config.state_dir / "legacy-effect-shadow.env"
+    staged.write_bytes(target)
+    staged.chmod(0o600)
+    port = operator.SystemdActivationPort(
+        replace(
+            _base.config,
+            env_file_sha256=hashlib.sha256(predecessor).hexdigest(),
+            next_env_file=staged,
+            next_env_file_sha256=hashlib.sha256(target).hexdigest(),
+            staged_config_transition="semantic_supervisor_effect_shadow_enable",
+        )
+    )
+    assert port._expected_semantic_effect_health_mode() == ""  # noqa: SLF001
+
+
+def test_systemd_port_stages_semantic_effect_shadow_with_exact_health_modes(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    base, off = _semantic_supervisor_off_port(tmp_path, monkeypatch)
+    evidence = _semantic_effect_maturity_file(tmp_path)
+    shadow = _semantic_effect_environment(
+        off,
+        mode="shadow",
+        evidence_file=evidence,
+    )
+    staged = base.config.state_dir / "semantic-effect-shadow.env"
+    staged.write_bytes(shadow)
+    staged.chmod(0o600)
+    shadow_sha256 = hashlib.sha256(shadow).hexdigest()
+    port = operator.SystemdActivationPort(
+        replace(
+            base.config,
+            next_env_file=staged,
+            next_env_file_sha256=shadow_sha256,
+            staged_config_transition="semantic_supervisor_effect_shadow_enable",
+        )
+    )
+    descriptor = (
+        "semantic_supervisor_effect_shadow_enable",
+        base.config.env_file_sha256,
+        staged,
+        shadow_sha256,
+    )
+
+    assert port._expected_semantic_health_mode() == ""  # noqa: SLF001
+    assert port._expected_semantic_effect_health_mode() == "off"  # noqa: SLF001
+    assert port._expected_semantic_effect_health() == ("off", None)  # noqa: SLF001
+    port.validate_staged_config_transition(*descriptor)
+    port.activate_staged_config_transition(*descriptor)
+    assert port.config.env_file.read_bytes() == shadow
+    assert port._expected_semantic_effect_health_mode() == "shadow"  # noqa: SLF001
+    mode, identity = port._expected_semantic_effect_health()  # noqa: SLF001
+    artifact = json.loads(evidence.read_bytes())
+    assert mode == "shadow"
+    assert identity == operator._SemanticEffectMaturityIdentity(  # noqa: SLF001
+        evidence_sha256=hashlib.sha256(evidence.read_bytes()).hexdigest(),
+        maturity_facts_sha256=canonical_sha256(artifact["maturity"]),
+        source_revision_sha256="b" * 64,
+        registry_binding_sha256="c" * 64,
+        effect_registry_binding_sha256=(operator._SEMANTIC_EFFECT_EXPECTED_REGISTRY_BINDING_SHA256),
+    )
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        "missing_evidence",
+        "digest_mismatch",
+        "public_evidence",
+        "semantic_drift",
+        "secondary_drift",
+        "unrelated_drift",
+        "reordered",
+    ],
+)
+def test_semantic_effect_shadow_enable_rejects_every_unbound_change(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    mutation: str,
+) -> None:
+    _base, off = _semantic_supervisor_off_port(tmp_path, monkeypatch)
+    evidence = _semantic_effect_maturity_file(tmp_path)
+    evidence_sha256 = hashlib.sha256(evidence.read_bytes()).hexdigest()
+    target = _semantic_effect_environment(
+        off,
+        mode="shadow",
+        evidence_file=evidence,
+    )
+    if mutation == "missing_evidence":
+        evidence.unlink()
+    elif mutation == "digest_mismatch":
+        target = target.replace(
+            evidence_sha256.encode(),
+            b"f" * 64,
+            1,
+        )
+    elif mutation == "public_evidence":
+        evidence.chmod(0o644)
+    elif mutation == "semantic_drift":
+        target = target.replace(
+            b"FRIDAY_SEMANTIC_SUPERVISOR_MAX_STEPS=6\n",
+            b"FRIDAY_SEMANTIC_SUPERVISOR_MAX_STEPS=5\n",
+            1,
+        )
+    elif mutation == "secondary_drift":
+        target = target.replace(
+            b"FRIDAY_SECONDARY_LLM_DOCUMENT_MAP_MODE=assist\n",
+            b"FRIDAY_SECONDARY_LLM_DOCUMENT_MAP_MODE=shadow\n",
+            1,
+        )
+    elif mutation == "unrelated_drift":
+        target = target.replace(
+            b"FRIDAY_PROFILE=production\n",
+            b"FRIDAY_PROFILE=staging\n",
+            1,
+        )
+    else:
+        assert mutation == "reordered"
+        first = b"FRIDAY_SEMANTIC_SUPERVISOR_EFFECT_EVIDENCE_FILE=" + str(evidence).encode() + b"\n"
+        second = (
+            b"FRIDAY_SEMANTIC_SUPERVISOR_EFFECT_EVIDENCE_SHA256="
+            + hashlib.sha256(evidence.read_bytes()).hexdigest().encode()
+            + b"\n"
+        )
+        target = target.replace(first + second, second + first, 1)
+
+    with pytest.raises(operator.ReleaseFailure):
+        operator._validate_staged_environment_transition(  # noqa: SLF001
+            "semantic_supervisor_effect_shadow_enable",
+            off,
+            target,
+        )
+
+
+@pytest.mark.parametrize("mutation", ["schema", "facts", "noncanonical"])
+def test_semantic_effect_shadow_preflight_rebuilds_canonical_maturity(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    mutation: str,
+) -> None:
+    _base, off = _semantic_supervisor_off_port(tmp_path, monkeypatch)
+    evidence = _semantic_effect_maturity_file(tmp_path)
+    payload = json.loads(evidence.read_bytes())
+    if mutation == "schema":
+        payload["schema"] = "friday.semantic-supervisor-read-only-maturity-artifact.v0"
+    elif mutation == "facts":
+        payload["maturity"]["hidden_owner_count"] = 1
+    else:
+        assert mutation == "noncanonical"
+    if mutation != "noncanonical":
+        payload.pop("artifact_payload_sha256")
+        payload["artifact_payload_sha256"] = canonical_sha256(payload)
+        candidate = canonical_json_file_bytes(payload)
+    else:
+        candidate = json.dumps(payload, indent=2, sort_keys=True).encode("utf-8")
+    evidence.write_bytes(candidate)
+    evidence.chmod(0o600)
+    target = _semantic_effect_environment(
+        off,
+        mode="shadow",
+        evidence_file=evidence,
+    )
+
+    with pytest.raises(
+        operator.ReleaseFailure,
+        match="semantic_effect_shadow_environment_invalid",
+    ):
+        operator._validate_staged_environment_transition(  # noqa: SLF001
+            "semantic_supervisor_effect_shadow_enable",
+            off,
+            target,
+        )
+
+
+@pytest.mark.parametrize("mutation", ["incomplete", "failed"])
+def test_semantic_effect_shadow_preflight_rejects_noncomplete_canary_window(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    mutation: str,
+) -> None:
+    _base, off = _semantic_supervisor_off_port(tmp_path, monkeypatch)
+    evidence = _semantic_effect_maturity_file(tmp_path)
+    artifact = json.loads(evidence.read_bytes())
+    baseline = artifact["production_baseline"]
+    promoted = baseline["product_windows"]["promoted_execution"]["canary"]["promoted"]
+    if mutation == "incomplete":
+        promoted["complete_count"] = 19
+        promoted["completion_counts"] = {"complete": 19, "failed": 1}
+    else:
+        promoted["failure_class_counts"] = {
+            "capability:source_unavailable": 1,
+            "none:none": 19,
+        }
+    baseline.pop("report_sha256")
+    baseline["report_sha256"] = canonical_sha256(baseline)
+    baseline_raw = canonical_json_file_bytes(baseline)
+    artifact["maturity"]["production_baseline_file_sha256"] = hashlib.sha256(baseline_raw).hexdigest()
+    artifact["maturity"]["production_baseline_report_sha256"] = baseline["report_sha256"]
+    artifact.pop("artifact_payload_sha256")
+    artifact["artifact_payload_sha256"] = canonical_sha256(artifact)
+    evidence.write_bytes(canonical_json_file_bytes(artifact))
+    evidence.chmod(0o600)
+    target = _semantic_effect_environment(
+        off,
+        mode="shadow",
+        evidence_file=evidence,
+    )
+
+    with pytest.raises(
+        operator.ReleaseFailure,
+        match="semantic_effect_shadow_environment_invalid",
+    ):
+        operator._validate_staged_environment_transition(  # noqa: SLF001
+            "semantic_supervisor_effect_shadow_enable",
+            off,
+            target,
+        )
+
+
+def test_existing_transitions_cannot_smuggle_semantic_effect_activation(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _base, off = _semantic_supervisor_off_port(tmp_path, monkeypatch)
+    evidence = _semantic_effect_maturity_file(tmp_path)
+    effect_shadow = _semantic_effect_environment(
+        off,
+        mode="shadow",
+        evidence_file=evidence,
+    )
+    supervisor_shadow = _semantic_supervisor_environment(off, mode="shadow")
+    supervisor_and_effect_shadow = _semantic_effect_environment(
+        supervisor_shadow,
+        mode="shadow",
+        evidence_file=evidence,
+    )
+
+    with pytest.raises(operator.ReleaseFailure):
+        operator._validate_staged_environment_transition(  # noqa: SLF001
+            "semantic_supervisor_shadow_enable",
+            off,
+            supervisor_and_effect_shadow,
+        )
+    with pytest.raises(
+        operator.ReleaseFailure,
+        match="nonsemantic_transition_changed_semantic_supervisor_environment",
+    ):
+        operator._validate_staged_environment_transition(  # noqa: SLF001
+            "obsidian_enable",
+            off,
+            effect_shadow,
+        )
+    disabled = off.replace(
+        b"FRIDAY_SECONDARY_LLM_ENABLED=1\n",
+        b"FRIDAY_SECONDARY_LLM_ENABLED=0\n",
+        1,
+    )
+    effect_and_secondary = _semantic_effect_environment(
+        disabled,
+        mode="shadow",
+        evidence_file=evidence,
+    )
+    with pytest.raises(operator.ReleaseFailure):
+        operator._validate_staged_environment_transition(  # noqa: SLF001
+            "secondary_assist_to_disabled",
+            off,
+            effect_and_secondary,
+        )
+
+
+def test_semantic_effect_health_contract_is_exact_and_inert() -> None:
+    assert (  # noqa: SLF001
+        expected_effect_capability_snapshot().digest_hex()
+    ) == operator._SEMANTIC_EFFECT_EXPECTED_REGISTRY_BINDING_SHA256
+    assert operator._SEMANTIC_EFFECT_POLICY_ID == (  # noqa: SLF001
+        semantic_supervisor_policy.SUPERVISOR_EFFECT_SHADOW_POLICY_ID
+    )
+    assert operator._SEMANTIC_EFFECT_POLICY_SHA256 == (  # noqa: SLF001
+        semantic_supervisor_policy.SUPERVISOR_EFFECT_SHADOW_POLICY_SHA256
+    )
+    assert operator._SEMANTIC_EFFECT_MATURITY_POLICY_SHA256 == (  # noqa: SLF001
+        SUPERVISOR_READ_ONLY_MATURITY_POLICY_SHA256
+    )
+    identity = operator._SemanticEffectMaturityIdentity(  # noqa: SLF001
+        evidence_sha256="a" * 64,
+        maturity_facts_sha256="b" * 64,
+        source_revision_sha256="c" * 64,
+        registry_binding_sha256="d" * 64,
+        effect_registry_binding_sha256="f" * 64,
+    )
+    payload = {
+        "semantic_supervisor_effect": {
+            "schema": "friday.semantic-supervisor-effect-shadow-health.v1",
+            "installed": True,
+            "requested_mode": "shadow",
+            "effective_mode": "shadow",
+            "maturity_accepted": True,
+            "policy_id": semantic_supervisor_policy.SUPERVISOR_EFFECT_SHADOW_POLICY_ID,
+            "policy_sha256": (semantic_supervisor_policy.SUPERVISOR_EFFECT_SHADOW_POLICY_SHA256),
+            "evidence_sha256": identity.evidence_sha256,
+            "maturity_facts_sha256": identity.maturity_facts_sha256,
+            "source_revision_sha256": identity.source_revision_sha256,
+            "registry_binding_sha256": identity.registry_binding_sha256,
+            "effect_registry_binding_sha256": identity.effect_registry_binding_sha256,
+            "execution_authorized": False,
+            "publication_authorized": False,
+        }
+    }
+    assert operator._semantic_effect_health_identity_matches(  # noqa: SLF001
+        payload,
+        expected_mode="shadow",
+        expected_identity=identity,
+    )
+    for key, value in (
+        ("execution_authorized", True),
+        ("publication_authorized", True),
+        ("maturity_accepted", False),
+        ("effective_mode", "off"),
+        ("evidence_sha256", "e" * 64),
+        ("maturity_facts_sha256", "e" * 64),
+        ("source_revision_sha256", "e" * 64),
+        ("registry_binding_sha256", "e" * 64),
+        ("effect_registry_binding_sha256", "e" * 64),
+    ):
+        mutated = json.loads(json.dumps(payload))
+        mutated["semantic_supervisor_effect"][key] = value
+        assert not operator._semantic_effect_health_identity_matches(  # noqa: SLF001
+            mutated,
+            expected_mode="shadow",
+            expected_identity=identity,
+        )
+    payload["semantic_supervisor_effect"].update(
+        {
+            "installed": False,
+            "requested_mode": "off",
+            "effective_mode": "off",
+            "maturity_accepted": False,
+            "evidence_sha256": "",
+            "maturity_facts_sha256": "",
+            "source_revision_sha256": "",
+            "registry_binding_sha256": "",
+            "effect_registry_binding_sha256": "",
+        }
+    )
+    assert operator._semantic_effect_health_identity_matches(  # noqa: SLF001
+        payload,
+        expected_mode="off",
+    )
+
+
+def test_existing_secondary_disable_preserves_canonical_semantic_supervisor_off(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _base, off = _semantic_supervisor_off_port(tmp_path, monkeypatch)
+    disabled = off.replace(
+        b"FRIDAY_SECONDARY_LLM_ENABLED=1\n",
+        b"FRIDAY_SECONDARY_LLM_ENABLED=0\n",
+        1,
+    )
+
+    operator._validate_staged_environment_transition(  # noqa: SLF001
+        "secondary_assist_to_disabled",
+        off,
+        disabled,
+    )
+    assert operator._semantic_supervisor_environment_bytes(disabled) == (  # noqa: SLF001
+        operator._semantic_supervisor_environment_bytes(off)  # noqa: SLF001
+    )
 
 
 def _durable_postbackup_terminal(
@@ -2712,6 +5694,122 @@ def _secondary_staged_transition_case(
         target_sha256,
         operator._activation_target_config(staged_config),  # noqa: SLF001
     )
+
+
+def _semantic_supervisor_staged_transition_case(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    transition: str,
+    *,
+    legacy_implicit_off: bool = False,
+) -> tuple[operator.SystemdConfig, Path, bytes, str]:
+    if transition in {
+        "semantic_supervisor_effect_shadow_enable",
+        "semantic_supervisor_effect_shadow_disable",
+    }:
+        assert not legacy_implicit_off
+        base, off = _semantic_supervisor_off_port(tmp_path, monkeypatch)
+        evidence = _semantic_effect_maturity_file(tmp_path, stem=f"{transition}-maturity")
+        shadow = _semantic_effect_environment(
+            off,
+            mode="shadow",
+            evidence_file=evidence,
+        )
+        if transition == "semantic_supervisor_effect_shadow_enable":
+            target = shadow
+        else:
+            base.config.env_file.write_bytes(shadow)
+            base.config.env_file.chmod(0o600)
+            base = operator.SystemdActivationPort(
+                replace(
+                    base.config,
+                    env_file_sha256=hashlib.sha256(shadow).hexdigest(),
+                )
+            )
+            target = off
+        staged = base.config.state_dir / f"{transition}.env"
+        staged.write_bytes(target)
+        staged.chmod(0o600)
+        return base.config, staged, target, hashlib.sha256(target).hexdigest()
+    if transition == "semantic_supervisor_shadow_enable":
+        base, _predecessor = (
+            _secondary_document_map_assist_enabled_port(tmp_path, monkeypatch)
+            if legacy_implicit_off
+            else _semantic_supervisor_off_port(tmp_path, monkeypatch)
+        )
+        mode = "shadow"
+    else:
+        assert transition == "semantic_supervisor_shadow_disable"
+        assert not legacy_implicit_off
+        base, _predecessor = _semantic_supervisor_shadow_port(tmp_path, monkeypatch)
+        mode = "off"
+    staged, target, target_sha256 = _semantic_supervisor_stage(base, mode=mode)
+    return base.config, staged, target, target_sha256
+
+
+@pytest.mark.parametrize(
+    ("transition", "legacy_implicit_off"),
+    [
+        ("semantic_supervisor_shadow_enable", False),
+        ("semantic_supervisor_shadow_enable", True),
+        ("semantic_supervisor_shadow_disable", False),
+        ("semantic_supervisor_effect_shadow_enable", False),
+        ("semantic_supervisor_effect_shadow_disable", False),
+    ],
+)
+@pytest.mark.parametrize("interruption", ["before_replace", "after_replace", "after_unlink"])
+def test_systemd_port_replays_semantic_supervisor_transition_after_each_durable_boundary(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    transition: str,
+    legacy_implicit_off: bool,
+    interruption: str,
+) -> None:
+    current_config, staged, target, target_sha256 = _semantic_supervisor_staged_transition_case(
+        tmp_path,
+        monkeypatch,
+        transition,
+        legacy_implicit_off=legacy_implicit_off,
+    )
+    predecessor = current_config.env_file.read_bytes()
+    staged_config = replace(
+        current_config,
+        next_env_file=staged,
+        next_env_file_sha256=target_sha256,
+        staged_config_transition=transition,
+    )
+    descriptor = (transition, current_config.env_file_sha256, staged, target_sha256)
+    port = operator.SystemdActivationPort(staged_config)
+    durable_replace = operator._replace_private_durable  # noqa: SLF001
+    fsync_directory = operator._fsync_directory  # noqa: SLF001
+
+    def interrupt_replace(path: Path, value: bytes) -> None:
+        if interruption == "after_replace":
+            durable_replace(path, value)
+        raise RuntimeError("synthetic interruption")
+
+    def interrupt_after_unlink(path: Path) -> None:
+        if path == staged.parent and not staged.exists():
+            raise RuntimeError("synthetic interruption")
+        fsync_directory(path)
+
+    if interruption == "after_unlink":
+        monkeypatch.setattr(operator, "_fsync_directory", interrupt_after_unlink)
+    else:
+        monkeypatch.setattr(operator, "_replace_private_durable", interrupt_replace)
+    with pytest.raises(RuntimeError, match="synthetic interruption"):
+        port.activate_staged_config_transition(*descriptor)
+
+    assert current_config.env_file.read_bytes() == (
+        predecessor if interruption == "before_replace" else target
+    )
+    assert staged.exists() is (interruption != "after_unlink")
+    monkeypatch.setattr(operator, "_replace_private_durable", durable_replace)
+    monkeypatch.setattr(operator, "_fsync_directory", fsync_directory)
+    resumed = operator.SystemdActivationPort(staged_config)
+    resumed.activate_staged_config_transition(*descriptor)
+    assert current_config.env_file.read_bytes() == target
+    assert not staged.exists()
 
 
 def test_systemd_port_activates_exact_secondary_finalist_shadow_without_journaling_secret(
@@ -7299,6 +10397,117 @@ def test_secondary_shadow_terminal_transition_and_prebackup_recovery_are_exact(
     assert recovery_port.config.obsidian_mode == disabled.obsidian_mode
 
 
+def test_semantic_legacy_absence_terminal_handover_rolls_back_and_recovers_end_to_end(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    releases: Releases,
+) -> None:
+    base, predecessor = _secondary_document_map_assist_enabled_port(tmp_path, monkeypatch)
+    current_config = base.config
+    predecessor_sha256 = current_config.env_file_sha256
+    journal_path = current_config.state_dir / "immutable-release-activation.v1.json"
+    current = releases.fallback
+    prior = operator.DurableActivationJournal(
+        journal_path,
+        backup_root=current_config.backup_dir,
+        config_identity_sha256=operator._systemd_config_identity(current_config),  # noqa: SLF001
+        config_scope_sha256=operator._systemd_config_scope_identity(current_config),  # noqa: SLF001
+        config_retry_scope_sha256=operator._systemd_config_retry_scope_identity(  # noqa: SLF001
+            current_config
+        ),
+        obsidian_mode=current_config.obsidian_mode,
+        obsidian_root_sha256=operator._obsidian_root_sha256(current_config),  # noqa: SLF001
+    )
+    prior.begin(
+        candidate=current,
+        previous=releases.previous,
+        fallback=releases.candidate,
+    )
+
+    def make_terminal(core: dict[str, object]) -> None:
+        core["phase"] = "clear"
+        core["terminal_receipt_sha256"] = "b" * 64
+
+    _rewrite_signed_journal(journal_path, make_terminal)
+    staged, _shadow, target_sha256 = _semantic_supervisor_stage(base, mode="shadow")
+    staged_config = replace(
+        current_config,
+        next_env_file=staged,
+        next_env_file_sha256=target_sha256,
+        staged_config_transition="semantic_supervisor_shadow_enable",
+    )
+    target = operator._activation_target_config(staged_config)  # noqa: SLF001
+
+    def new_journal() -> operator.DurableActivationJournal:
+        return operator.DurableActivationJournal(
+            journal_path,
+            backup_root=target.backup_dir,
+            config_identity_sha256=operator._systemd_config_identity(target),  # noqa: SLF001
+            transition_config_identity_sha256=(
+                operator._activation_transition_predecessor_identity(  # noqa: SLF001
+                    target,
+                    predecessor_sha256,
+                    "semantic_supervisor_shadow_enable",
+                )
+            ),
+            config_scope_sha256=operator._systemd_config_scope_identity(target),  # noqa: SLF001
+            config_retry_scope_sha256=operator._systemd_config_retry_scope_identity(  # noqa: SLF001
+                target
+            ),
+            obsidian_mode=target.obsidian_mode,
+            obsidian_root_sha256=operator._obsidian_root_sha256(target),  # noqa: SLF001
+            predecessor_env_sha256=predecessor_sha256,
+            next_env_file=staged,
+            next_env_file_sha256=target_sha256,
+            staged_config_transition="semantic_supervisor_shadow_enable",
+        )
+
+    transition = new_journal()
+    failed_port = FakePort(
+        fail="backup_db_wal_inbox",
+        staged_config_transition="semantic_supervisor_shadow_enable",
+    )
+    failed_port.canonical_env_sha256 = predecessor_sha256
+    with pytest.raises(operator.ReleaseFailure, match="activation_failed_rolled_back"):
+        operator.activate_release(
+            failed_port,
+            transition,
+            candidate=releases.candidate,
+            previous=current,
+            schema_capable_fallback=current,
+        )
+    terminal = transition.load()
+    assert terminal["phase"] == "rolled_back"
+    assert terminal["backup"] is None
+    assert failed_port.canonical_env_sha256 == predecessor_sha256
+    assert current_config.env_file.read_bytes() == predecessor
+
+    retry_candidate = replace(
+        releases.candidate,
+        root=tmp_path / "semantic-retry-candidate",
+        commit="d" * 40,
+        tree_manifest_sha256="e" * 64,
+    )
+    retry = new_journal()
+    retry.begin(candidate=retry_candidate, previous=current, fallback=current)
+    retry.record("bridge_stop_attempted")
+    release_by_root = {release.root: release for release in (retry_candidate, current)}
+    monkeypatch.setattr(
+        operator,
+        "load_release_identity",
+        lambda root, *, expected_tree_sha256: release_by_root[Path(root)],
+    )
+    recovery_port = FakePort(staged_config_transition="semantic_supervisor_shadow_enable")
+    recovery_port.canonical_env_sha256 = predecessor_sha256
+    recovered = operator.recover_interrupted_activation(recovery_port, retry)
+    assert recovered["status"] == "recovered"
+    assert recovery_port.canonical_env_sha256 == predecessor_sha256
+    assert retry.load()["phase"] == "recovered"
+    replay = operator.recover_interrupted_activation(recovery_port, retry)
+    assert replay["status"] == "already_terminal"
+    assert replay["terminal_phase"] == "recovered"
+
+
 @pytest.mark.parametrize("private_shadow", [False, True])
 def test_secondary_shadow_disable_terminal_transition_recovery_and_replay_are_exact(
     tmp_path: Path,
@@ -7416,21 +10625,40 @@ def test_secondary_shadow_disable_terminal_transition_recovery_and_replay_are_ex
         "secondary_shadow_to_assist",
         "secondary_assist_to_disabled",
         "secondary_assist_enable_document_map_shadow",
+        "semantic_supervisor_shadow_enable",
+        "semantic_supervisor_shadow_disable",
+        "semantic_supervisor_effect_shadow_enable",
+        "semantic_supervisor_effect_shadow_disable",
     ],
 )
 @pytest.mark.parametrize("terminal_phase", ["rolled_back", "recovered"])
-def test_secondary_transition_accepts_exact_postbackup_terminal_current_release(
+def test_runtime_transition_accepts_exact_postbackup_terminal_current_release(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     releases: Releases,
     transition: str,
     terminal_phase: str,
 ) -> None:
-    current_config, staged, target_sha256, target = _secondary_staged_transition_case(
-        tmp_path,
-        monkeypatch,
-        transition,
-    )
+    if transition.startswith("semantic_supervisor_"):
+        current_config, staged, _target_bytes, target_sha256 = _semantic_supervisor_staged_transition_case(
+            tmp_path,
+            monkeypatch,
+            transition,
+        )
+        target = operator._activation_target_config(  # noqa: SLF001
+            replace(
+                current_config,
+                next_env_file=staged,
+                next_env_file_sha256=target_sha256,
+                staged_config_transition=transition,
+            )
+        )
+    else:
+        current_config, staged, target_sha256, target = _secondary_staged_transition_case(
+            tmp_path,
+            monkeypatch,
+            transition,
+        )
     prior, _backup = _durable_postbackup_terminal(
         current_config,
         candidate=releases.previous,

@@ -11,7 +11,7 @@ import uuid
 from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
 if TYPE_CHECKING:
     from friday.storage import FridayStorage
@@ -245,6 +245,13 @@ CORE_CAPABILITIES: tuple[CapabilityDefinition, ...] = (
     CapabilityDefinition("web.search", "Search the public web", "web", 1, ("admin", "moderator", "user")),
     CapabilityDefinition("web.fetch", "Fetch a public web page", "web", 1, ("admin", "moderator", "user")),
     CapabilityDefinition("web.research", "Run multi-source web research", "web", 2, ("admin", "moderator")),
+    CapabilityDefinition(
+        "web.compare.transient",
+        "Run a bounded transient public-web comparison read",
+        "web",
+        2,
+        (),
+    ),
     CapabilityDefinition("code.run", "Run code in the restricted subprocess executor", "execution", 4, ()),
     CapabilityDefinition(
         "missions.read", "Inspect owned missions", "executive", 0, ("admin", "moderator", "user")
@@ -672,6 +679,97 @@ class AuthorizationService:
             "default_deny",
             actor.preset_key,
         )
+
+    def authorize_in_transaction(
+        self,
+        conn: Any,
+        actor: ActorContext,
+        security_id: str,
+    ) -> AuthorizationDecision:
+        """Resolve preset and overrides from the caller's exact SQLite snapshot.
+
+        Publication gates already own a transaction containing their source and
+        message checks.  Re-entering ``FridayStorage`` from ``authorize`` would
+        read a different snapshot and would also trust the request-time preset.
+        This variant keeps the code-owned capability registry while resolving
+        every mutable account field through the supplied transaction.
+        """
+
+        decision_id = uuid.uuid4().hex[:16]
+        principal = str(actor.own_id or "").strip()
+        capability = self._capabilities.get(security_id)
+        if capability is None:
+            return AuthorizationDecision(
+                decision_id,
+                "deny",
+                security_id,
+                principal,
+                "unknown_capability",
+                None,
+            )
+        row = conn.execute(
+            "SELECT preset_key,status FROM users WHERE id=?",
+            (principal,),
+        ).fetchone()
+        if row is None or str(row["status"] or "") != "active":
+            return AuthorizationDecision(
+                decision_id,
+                "deny",
+                security_id,
+                principal,
+                "principal_not_active",
+                None,
+            )
+        preset_key = str(row["preset_key"] or DEFAULT_PRESET_KEY)
+        override = conn.execute(
+            """SELECT effect FROM user_permission_overrides
+                 WHERE user_id=? AND security_id=?""",
+            (principal, security_id),
+        ).fetchone()
+        override_effect = str(override["effect"] or "") if override is not None else ""
+        if override_effect in {"allow", "deny"}:
+            closed_effect: Literal["allow", "deny"] = "allow" if override_effect == "allow" else "deny"
+            return AuthorizationDecision(
+                decision_id,
+                closed_effect,
+                security_id,
+                principal,
+                f"explicit_{closed_effect}",
+                preset_key,
+            )
+        if preset_key in BUILTIN_PRESET_KEYS:
+            granted = security_id in self._builtin_grants(preset_key)
+        else:
+            granted = (
+                conn.execute(
+                    """SELECT 1
+                         FROM custom_presets preset
+                         JOIN preset_capabilities capability
+                           ON capability.preset_key=preset.preset_key
+                        WHERE preset.preset_key=? AND capability.security_id=?""",
+                    (preset_key, security_id),
+                ).fetchone()
+                is not None
+            )
+        return AuthorizationDecision(
+            decision_id,
+            "allow" if granted else "deny",
+            security_id,
+            principal,
+            "preset_grant" if granted else "default_deny",
+            preset_key,
+        )
+
+    def require_in_transaction(
+        self,
+        conn: Any,
+        actor: ActorContext,
+        security_id: str,
+    ) -> AuthorizationDecision:
+        decision = self.authorize_in_transaction(conn, actor, security_id)
+        if not decision.allowed:
+            raise AuthorizationError(f"Access denied for {security_id} ({decision.reason_code})")
+        return decision
 
     def require(self, actor: ActorContext, security_id: str) -> AuthorizationDecision:
         decision = self.authorize(actor, security_id)

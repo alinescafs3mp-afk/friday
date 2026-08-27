@@ -35,8 +35,8 @@ def _create(store: HostJobStore, *, digest: str = _DIGEST_A, idem: str = "reques
 
 
 def test_schema_43_installs_exact_durable_host_action_projection(storage) -> None:
-    assert SCHEMA_VERSION == 43
-    assert storage.execute("SELECT value FROM schema_meta WHERE key='schema_version'").fetchone()[0] == "43"
+    assert SCHEMA_VERSION == 45
+    assert storage.execute("SELECT value FROM schema_meta WHERE key='schema_version'").fetchone()[0] == "45"
     with storage.transaction() as conn:
         validate_host_control_job_schema(conn)
 

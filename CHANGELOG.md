@@ -109,7 +109,6 @@
 - A structural signature-parity guard and a signed `/api/chat` regression now
   prevent transport carriers from drifting between `AgentRuntime` and its
   orchestration wrapper.
-
 ## 0.207.51 — 2026-08-26
 
 ### V12 document-passage projection contract

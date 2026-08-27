@@ -726,6 +726,16 @@ class WorkersManager:
             run_immediately=True,
             timeout_sec=120,
         )
+        # Durable assist ownership outlives both a model endpoint and the rollout
+        # flag that admitted it.  Keep retirement in the unconditional core worker
+        # set so rollback cannot strand an active graph indefinitely.
+        self.supervisor.register(
+            "semantic_supervisor_graph_expiry",
+            self._semantic_supervisor_graph_expiry,
+            60.0,
+            run_immediately=True,
+            timeout_sec=30,
+        )
         self.supervisor.register(
             "knowledge_dedup",
             self._knowledge_dedup_all,
@@ -2127,6 +2137,37 @@ class WorkersManager:
                 unknown,
                 settled,
             )
+
+    def _expire_semantic_supervisor_graph_batch(self) -> int:
+        """Retire one bounded page only through fresh source/authority checks."""
+
+        # Lazy imports keep the worker package usable by the execution kernel:
+        # the assist adapter itself imports that kernel for request-effect
+        # staging, so importing the adapter at module load would form a cycle.
+        from friday.orchestration.supervisor_assist_graph_adapter import (
+            SupervisorAssistGraphAdapter,
+        )
+        from friday.orchestration.supervisor_assist_production import (
+            supervisor_assist_read_only_effect_gate,
+        )
+
+        batch = SupervisorAssistGraphAdapter(self.storage).expire_due(
+            lifecycle_check=supervisor_assist_read_only_effect_gate,
+            limit=100,
+        )
+        if batch.retained:
+            LOGGER.warning(
+                "Semantic supervisor graph expiry retained %d graph(s) after current boundary denial",
+                len(batch.retained),
+            )
+        return len(batch.retired)
+
+    async def _semantic_supervisor_graph_expiry(self) -> None:
+        """Close expired durable ownership without invoking or replaying capabilities."""
+
+        retired = await run_blocking(self._expire_semantic_supervisor_graph_batch)
+        if retired:
+            LOGGER.info("Semantic supervisor graph expiry: %d retired", retired)
 
     def _reconcile_uncertain_approvals(self) -> int:
         """Выяснить наблюдением, случилось ли то, чей исход остался неизвестным.

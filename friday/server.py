@@ -21,7 +21,7 @@ from contextlib import ExitStack, asynccontextmanager, suppress
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import Any, cast
+from typing import Any, Protocol, cast
 from urllib.parse import urlsplit
 
 from fastapi import FastAPI, HTTPException, Query, Request
@@ -124,7 +124,41 @@ from friday.orchestration import (
     build_orchestrated_agent,
 )
 from friday.orchestration.archive_read import V12ArchiveReadHandler
+from friday.orchestration.capability_binding import (
+    CapabilityBindingSnapshot,
+    operational_capability_snapshot,
+    operational_effect_capability_snapshot,
+)
 from friday.orchestration.file_read import V12FileReadHandler
+from friday.orchestration.semantic_supervisor_runtime import build_semantic_supervisor_runtime
+from friday.orchestration.supervisor_assist_activation import (
+    SUPERVISOR_ASSIST_ACTIVATION_STATUS_SCHEMA,
+    AssistPromotionActivationMaterial,
+    RawAssistPromotionActivationSettings,
+    load_assist_promotion_activation,
+)
+from friday.orchestration.supervisor_assist_composition import (
+    build_supervisor_assist_production_runtime,
+)
+from friday.orchestration.supervisor_assist_graph_adapter import (
+    AssistRestartBatch,
+    SupervisorAssistGraphAdapter,
+)
+from friday.orchestration.supervisor_assist_ingress import (
+    SupervisorAssistIngressBindingV1,
+    SupervisorAssistPendingDecision,
+)
+from friday.orchestration.supervisor_assist_production import (
+    SupervisorAssistAuthorityGate,
+    SupervisorAssistRestartActorResolver,
+    supervisor_assist_read_only_effect_gate,
+)
+from friday.orchestration.supervisor_contracts import SupervisorMode
+from friday.orchestration.supervisor_effect_intent_runtime import (
+    build_supervisor_effect_intent_runtime,
+    load_configured_supervisor_effect_maturity,
+    supervisor_effect_shadow_health_status,
+)
 from friday.organs import ServiceContext, build_registry, local_now, resolve_chat_id
 from friday.organs.obsidian.conversation import (
     obsidian_conversation_intent,
@@ -192,6 +226,11 @@ from friday.web_surfer import WebSurfer
 from friday.workers import IntervalTask, WorkersManager
 from friday.workers._blocking import current_activity, run_blocking, wait_until_idle
 
+
+class _AsyncClosableRuntime(Protocol):
+    async def close(self) -> None: ...
+
+
 _HOST_CONTROL_APPROVAL_TOOLS = frozenset({"host_action_execute", "software_install_execute"})
 _ENGINEER_COMMAND_APPROVAL_TOOLS = frozenset({"engineer_command_run"})
 _APPROVAL_RESULT_TOOLS = _HOST_CONTROL_APPROVAL_TOOLS | _ENGINEER_COMMAND_APPROVAL_TOOLS
@@ -207,6 +246,120 @@ def _trusted_telegram_update_id_from_source_ref(source_ref: str) -> str | None:
         return update_match.group(1)
     album_match = re.fullmatch(r"telegram-album-v2:([0-9]{1,20}):[0-9a-f]{64}", source_ref)
     return album_match.group(1) if album_match is not None else None
+
+
+def _closed_semantic_supervisor_activation_status(
+    *,
+    requested_mode: object = "off",
+    reason: str = "activation_material_unavailable",
+) -> dict[str, object]:
+    """Return the exact body-free fallback when optional material cannot load."""
+
+    mode = requested_mode if requested_mode in {"assist", "canary"} else "off"
+    return {
+        "schema": SUPERVISOR_ASSIST_ACTIVATION_STATUS_SCHEMA,
+        "configured": False,
+        "reason": reason,
+        "requested_mode": mode,
+        "source_revision_loaded": False,
+        "registry_binding_loaded": False,
+        "scheduler_projection_loaded": False,
+        "scheduler_runtime_available": False,
+        "evidence_loaded": False,
+        "evidence_authority": "none",
+        "operator_gate_enabled": False,
+        "canary_actor_binding_count": 0,
+        "promotion_admitted": False,
+        "evidence_accepted": False,
+        "acceptance_authority": "none",
+        "body_free": True,
+    }
+
+
+def _secondary_status_projection(runtime: object, method_name: str) -> Mapping[str, object]:
+    method = getattr(runtime, method_name, None)
+    if not callable(method):
+        return {}
+    try:
+        value = method()
+    except Exception:
+        return {}
+    return value if isinstance(value, Mapping) else {}
+
+
+def _load_semantic_supervisor_activation_material(
+    settings: FridaySettings,
+    secondary_brain: object,
+) -> tuple[AssistPromotionActivationMaterial | None, CapabilityBindingSnapshot | None]:
+    """Load optional immutable activation inputs without accepting promotion."""
+
+    raw_factory = getattr(settings, "semantic_supervisor_promotion_activation_settings", None)
+    try:
+        raw = raw_factory() if callable(raw_factory) else RawAssistPromotionActivationSettings()
+        if not isinstance(raw, RawAssistPromotionActivationSettings):
+            return None, None
+        bindings = operational_capability_snapshot()
+        material = load_assist_promotion_activation(
+            raw,
+            installed_release_root=Path(__file__).resolve(strict=True).parents[1],
+            scheduler_public_status=_secondary_status_projection(
+                secondary_brain,
+                "public_status",
+            ),
+            scheduler_diagnostics_status=_secondary_status_projection(
+                secondary_brain,
+                "diagnostics_status",
+            ),
+            binding_snapshot=bindings,
+        )
+    except Exception as exc:
+        LOGGER.warning(
+            "Semantic supervisor activation material unavailable (%s)",
+            type(exc).__name__,
+        )
+        return None, None
+    return material, bindings
+
+
+def _semantic_supervisor_health_status(
+    runtime: object,
+    settings: FridaySettings,
+    activation_material: AssistPromotionActivationMaterial | None,
+) -> dict[str, object]:
+    """Join the installed runtime and non-authorizing activation projection."""
+
+    status_method = getattr(runtime, "semantic_supervisor_status", None)
+    if callable(status_method):
+        try:
+            raw_status = status_method()
+        except Exception:
+            raw_status = None
+        status = dict(raw_status) if isinstance(raw_status, Mapping) else {}
+    else:
+        status = {}
+    if not status:
+        status = {
+            "schema": "friday.semantic-supervisor-shadow-runtime.v1",
+            "installed": False,
+            "role": "discarded_advisory_shadow",
+            "requested_mode": settings.semantic_supervisor_mode,
+            "effective_mode": "off",
+            "promotion_admitted": False,
+            "runtime_owner": "unchanged",
+            "publication_owner": "primary",
+            "tools_allowed": False,
+            "effects_allowed": False,
+            "execution_allowed": False,
+        }
+    activation = (
+        activation_material.public_status()
+        if isinstance(activation_material, AssistPromotionActivationMaterial)
+        else _closed_semantic_supervisor_activation_status(
+            requested_mode=settings.semantic_supervisor_mode,
+        )
+    )
+    status["activation"] = activation
+    return status
 
 
 def _host_result_text(value: object, maximum: int = 120) -> str:
@@ -897,6 +1050,64 @@ def _pending_durable_turn_admission_before_ingestion(
             person_id=person_id,
             conversation_id=str(conversation_id or ""),
         )
+
+
+def _supervisor_assist_pending_before_ingestion(
+    agent: Any,
+    *,
+    person_id: str,
+    message: str,
+    actor: ActorContext,
+    conversation_id: str,
+    ingress_binding: SupervisorAssistIngressBindingV1 | None,
+    current_attachment_count: int,
+) -> SupervisorAssistPendingDecision | bool:
+    """Classify one promoted graph without collapsing NEW into ownership."""
+
+    classifier = getattr(agent, "classify_supervisor_assist_pending", None)
+    if not callable(classifier):
+        return False
+    try:
+        result = classifier(
+            person_id,
+            message,
+            actor=actor,
+            conversation_id=conversation_id,
+            ingress_binding=ingress_binding,
+            current_attachment_count=current_attachment_count,
+        )
+        if inspect.isawaitable(result):
+            if inspect.iscoroutine(result):
+                result.close()
+            elif isinstance(result, asyncio.Future):
+                result.cancel()
+            return SupervisorAssistPendingDecision.uncertain(
+                person_id=person_id,
+                conversation_id=conversation_id,
+                current=ingress_binding,
+            )
+        current_sha256 = (
+            None
+            if type(ingress_binding) is not SupervisorAssistIngressBindingV1
+            else ingress_binding.canonical_sha256()
+        )
+        if result is False:
+            return False
+        if (
+            type(result) is SupervisorAssistPendingDecision
+            and result.person_id == person_id
+            and result.conversation_id == conversation_id
+            and result.current_request_binding_sha256 == current_sha256
+            and result.matches_message(message)
+        ):
+            return result
+    except Exception:
+        pass
+    return SupervisorAssistPendingDecision.uncertain(
+        person_id=person_id,
+        conversation_id=conversation_id,
+        current=ingress_binding,
+    )
 
 
 class RequestBodyTooLargeError(RuntimeError):
@@ -2286,8 +2497,41 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
                 storage,
                 shared_tenant=LEGACY_OWNER_USER_ID if settings.shared_archive else "",
             )
+            assist_graph_adapter = SupervisorAssistGraphAdapter(storage)
+            requested_supervisor_mode = SupervisorMode.fail_closed(settings.semantic_supervisor_mode)
+            promoted_restart_requested = requested_supervisor_mode in {
+                SupervisorMode.ASSIST,
+                SupervisorMode.CANARY,
+            }
+            assist_restart_batches: tuple[AssistRestartBatch, ...] = ()
+
+            async def retire_unrecoverable_restart_graphs() -> tuple[AssistRestartBatch, ...]:
+                # Off/shadow, or a failed promoted composition, cannot resume
+                # process-private control state.  Preserve the existing honest
+                # terminalization path before exposing an endpoint.
+                restart_authority = SupervisorAssistAuthorityGate(storage, auth_service)
+                return await asyncio.to_thread(
+                    assist_graph_adapter.reconcile_all_active_after_restart,
+                    actor_resolver=SupervisorAssistRestartActorResolver(auth_service),
+                    authority_check=restart_authority,
+                    effect_check=lambda _actor, boundary: supervisor_assist_read_only_effect_gate(boundary),
+                )
+
+            if not promoted_restart_requested:
+                try:
+                    assist_restart_batches = await retire_unrecoverable_restart_graphs()
+                except BaseException:
+                    storage.close()
+                    raise
             llm = LLMRouter(settings)
             secondary_brain = build_secondary_brain(settings)
+            (
+                semantic_supervisor_activation,
+                semantic_supervisor_binding_snapshot,
+            ) = _load_semantic_supervisor_activation_material(
+                settings,
+                secondary_brain,
+            )
             configured_router_mode = RouterMode.fail_closed(settings.router_mode)
             attempted_v12_runtime: AttestedV12ModelRuntime | None = None
             attested_v12_runtime: AttestedV12ModelRuntime | None = None
@@ -2311,6 +2555,20 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
                 else:
                     attested_v12_runtime = attempted_v12_runtime
                     v12_startup_reason = "live_attestation_clear"
+            elif (
+                isinstance(semantic_supervisor_activation, AssistPromotionActivationMaterial)
+                and semantic_supervisor_activation.configured
+                and semantic_supervisor_activation.requested_mode.value in {"assist", "canary"}
+            ):
+                # Promoted assist attests immediately before ownership, not at
+                # startup: the optional laptop must never become a boot gate.
+                try:
+                    attempted_v12_runtime = create_attested_v12_model_runtime(llm)
+                except Exception as exc:
+                    LOGGER.warning(
+                        "Semantic supervisor primary model adapter unavailable (%s)",
+                        type(exc).__name__,
+                    )
             embeddings = EmbeddingBackend(settings)
             # Переранжировщик подключается, только если настроен адрес И задана
             # глубина: два условия, потому что поднять службу и забыть включить шаг —
@@ -2376,12 +2634,51 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
                 for route, handler in available_route_handlers.items()
                 if route.value in enabled_route_values
             }
-            agent = build_orchestrated_agent(
+            orchestrated_agent = build_orchestrated_agent(
                 settings,
                 legacy_agent,
                 llm,
                 route_handlers=route_handlers,
                 attested_runtime=attested_v12_runtime,
+            )
+            try:
+                promoted_agent = build_supervisor_assist_production_runtime(
+                    settings=settings,
+                    primary=orchestrated_agent,
+                    storage=storage,
+                    authorization=auth_service,
+                    scheduler=secondary_brain,
+                    activation_material=semantic_supervisor_activation,
+                    graph_adapter=assist_graph_adapter,
+                    web=web_surfer,
+                    primary_model_runtime=attempted_v12_runtime,
+                )
+            except Exception as exc:
+                # Configuration and dependency faults retain the non-owning
+                # shadow/primary seam; the immutable health gate will reject
+                # a requested promotion because no controller is installed.
+                LOGGER.warning(
+                    "Semantic supervisor promoted runtime unavailable (%s)",
+                    type(exc).__name__,
+                )
+                promoted_agent = None
+            if promoted_agent is None and promoted_restart_requested:
+                try:
+                    assist_restart_batches = await retire_unrecoverable_restart_graphs()
+                except BaseException:
+                    storage.close()
+                    raise
+            agent = (
+                promoted_agent
+                if promoted_agent is not None
+                else build_semantic_supervisor_runtime(
+                    settings,
+                    orchestrated_agent,
+                    secondary_brain,
+                )
+            )
+            semantic_supervisor_runtime = (
+                cast(_AsyncClosableRuntime, agent) if agent is not orchestrated_agent else None
             )
             executive = ExecutiveService(settings, storage, auth_service, kernel, llm, ingestion)
             kernel.bind_executive(executive)
@@ -2448,6 +2745,61 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
             for tool in organs.tools(organ_ctx):
                 kernel.register(tool)
             kernel.assert_risk_declarations_agree()
+            # P5 observes only the final durable outcome of a capability that
+            # has actually been registered.  Load its exact current-release
+            # maturity witness and install the non-owning wrapper only after
+            # the first-party Obsidian organ's capability/tool contour and
+            # risk declarations have closed.  Later workspace MCP tools are
+            # deliberately outside this effect-registry identity.
+            effect_agent = agent
+            effect_shadow_activation_status = supervisor_effect_shadow_health_status(
+                None,
+                None,
+                settings,
+            )
+            if settings.semantic_supervisor_effect_mode == "shadow":
+                try:
+                    effect_read_binding_snapshot = operational_capability_snapshot()
+                    effect_binding_snapshot = operational_effect_capability_snapshot(
+                        settings=settings,
+                        kernel=kernel,
+                        authorization=auth_service,
+                        obsidian_runtime=obsidian_runtime,
+                    )
+                    (
+                        effect_maturity,
+                        effect_shadow_activation_status,
+                    ) = load_configured_supervisor_effect_maturity(
+                        settings,
+                        installed_release_root=Path(__file__).resolve(strict=True).parents[1],
+                        binding_snapshot=effect_read_binding_snapshot,
+                        effect_binding_snapshot=effect_binding_snapshot,
+                    )
+                    effect_agent = build_supervisor_effect_intent_runtime(
+                        settings,
+                        agent,
+                        secondary_brain,
+                        storage,
+                        effect_maturity,
+                    )
+                except Exception as exc:
+                    # This observer is optional by construction.  A registry,
+                    # evidence, or composition defect must close only the
+                    # observer and must never become an application boot gate.
+                    effect_agent = agent
+                    effect_shadow_activation_status = supervisor_effect_shadow_health_status(
+                        None,
+                        None,
+                        settings,
+                    )
+                    LOGGER.warning(
+                        "Semantic supervisor effect shadow unavailable (%s)",
+                        type(exc).__name__,
+                    )
+            semantic_supervisor_effect_runtime = (
+                cast(_AsyncClosableRuntime, effect_agent) if effect_agent is not agent else None
+            )
+            agent = effect_agent
             organ_workers = [
                 IntervalTask(
                     name=worker.name,
@@ -2475,6 +2827,19 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
             application.state.settings = settings
             application.state.storage = storage
             application.state.auth_service = auth_service
+            application.state.semantic_supervisor_restart_reconciliation = {
+                "retired": sum(
+                    len(batch.results)
+                    for batch in assist_restart_batches
+                    if type(batch) is AssistRestartBatch
+                ),
+                "retained": sum(
+                    len(batch.retained)
+                    for batch in assist_restart_batches
+                    if type(batch) is AssistRestartBatch
+                ),
+                "resume_scheduled": promoted_agent is not None,
+            }
             application.state.llm = llm
             application.state.secondary_brain = secondary_brain
             application.state.embeddings = embeddings
@@ -2484,6 +2849,12 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
             application.state.web_surfer = web_surfer
             application.state.kernel = kernel
             application.state.agent = agent
+            application.state.orchestration_agent = orchestrated_agent
+            application.state.semantic_supervisor_runtime = semantic_supervisor_runtime
+            application.state.semantic_supervisor_effect_runtime = semantic_supervisor_effect_runtime
+            application.state.semantic_supervisor_effect_activation = effect_shadow_activation_status
+            application.state.semantic_supervisor_activation = semantic_supervisor_activation
+            application.state.semantic_supervisor_binding_snapshot = semantic_supervisor_binding_snapshot
             application.state.v12_model_runtime = attempted_v12_runtime
             application.state.v12_startup_reason = v12_startup_reason
             application.state.v12_registered_routes = tuple(sorted(route.value for route in route_handlers))
@@ -2495,6 +2866,11 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
             application.state.organs = organs
             application.state.rate_limiter = SlidingWindowLimiter()
             secondary_brain.start()
+            if promoted_agent is not None:
+                # Scheduling is non-blocking.  The recovery controller performs
+                # fresh laptop/profile/policy/authority checks per graph and
+                # retains ownership when an optional dependency is unavailable.
+                promoted_agent.start_restart_recovery()
             if settings.mcp_enabled:
                 try:
                     mcp_manager = MCPClientManager([workspace_server_definition(settings)])
@@ -2506,6 +2882,15 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
                 except BaseException:
                     if mcp_manager is not None:
                         await mcp_manager.close()
+                    with suppress(Exception):
+                        if semantic_supervisor_effect_runtime is not None:
+                            await semantic_supervisor_effect_runtime.close()
+                    with suppress(Exception):
+                        if semantic_supervisor_runtime is not None:
+                            await semantic_supervisor_runtime.close()
+                    with suppress(Exception):
+                        if isinstance(orchestrated_agent, OrchestrationRouter):
+                            await orchestrated_agent.close()
                     with suppress(Exception):
                         await organs.close()
                     await secondary_brain.aclose()
@@ -2521,6 +2906,15 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
                 with suppress(Exception):
                     await workers.stop()
                 with suppress(Exception):
+                    if semantic_supervisor_effect_runtime is not None:
+                        await semantic_supervisor_effect_runtime.close()
+                with suppress(Exception):
+                    if semantic_supervisor_runtime is not None:
+                        await semantic_supervisor_runtime.close()
+                with suppress(Exception):
+                    if isinstance(orchestrated_agent, OrchestrationRouter):
+                        await orchestrated_agent.close()
+                with suppress(Exception):
                     await organs.close()
                 await secondary_brain.aclose()
                 if obsidian_runtime is not None:
@@ -2530,19 +2924,27 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
             try:
                 yield
             finally:
-                if isinstance(agent, OrchestrationRouter):
-                    await agent.close()
-                await workers.stop()
                 try:
-                    await organs.close()
-                except Exception as exc:  # noqa: BLE001 - shutdown must continue to storage close
-                    LOGGER.error("Organ shutdown failed (%s)", type(exc).__name__)
-                await secondary_brain.aclose()
-                if obsidian_runtime is not None:
-                    await obsidian_runtime.close()
-                await web_surfer.close()
-                if mcp_manager is not None:
-                    await mcp_manager.close()
+                    if semantic_supervisor_effect_runtime is not None:
+                        await semantic_supervisor_effect_runtime.close()
+                finally:
+                    try:
+                        if semantic_supervisor_runtime is not None:
+                            await semantic_supervisor_runtime.close()
+                    finally:
+                        if isinstance(orchestrated_agent, OrchestrationRouter):
+                            await orchestrated_agent.close()
+                        await workers.stop()
+                        try:
+                            await organs.close()
+                        except Exception as exc:  # noqa: BLE001 - shutdown must continue to storage close
+                            LOGGER.error("Organ shutdown failed (%s)", type(exc).__name__)
+                        await secondary_brain.aclose()
+                        if obsidian_runtime is not None:
+                            await obsidian_runtime.close()
+                        await web_surfer.close()
+                        if mcp_manager is not None:
+                            await mcp_manager.close()
                 # workers.stop() only cancels the asyncio tasks; a worker cancelled
                 # while awaiting asyncio.to_thread(storage.<db op>) leaves that call
                 # still running on the default executor thread.
@@ -2841,7 +3243,27 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
     @application.get("/api/health", tags=["system"])
     async def health(request: Request) -> dict[str, Any]:
         storage = getattr(request.app.state, "storage", None)
-        agent = getattr(request.app.state, "agent", None)
+        orchestrated_agent = getattr(request.app.state, "orchestration_agent", None)
+        semantic_supervisor_runtime = getattr(
+            request.app.state,
+            "semantic_supervisor_runtime",
+            None,
+        )
+        semantic_supervisor_activation = getattr(
+            request.app.state,
+            "semantic_supervisor_activation",
+            None,
+        )
+        semantic_supervisor_effect_runtime = getattr(
+            request.app.state,
+            "semantic_supervisor_effect_runtime",
+            None,
+        )
+        semantic_supervisor_effect_activation = getattr(
+            request.app.state,
+            "semantic_supervisor_effect_activation",
+            None,
+        )
         runtime = getattr(request.app.state, "v12_model_runtime", None)
         secondary_brain = getattr(request.app.state, "secondary_brain", None)
         gate_status = (
@@ -2874,6 +3296,27 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
                     "available": False,
                 }
             ),
+            "semantic_supervisor": _semantic_supervisor_health_status(
+                semantic_supervisor_runtime,
+                settings,
+                (
+                    semantic_supervisor_activation
+                    if isinstance(
+                        semantic_supervisor_activation,
+                        AssistPromotionActivationMaterial,
+                    )
+                    else None
+                ),
+            ),
+            "semantic_supervisor_effect": supervisor_effect_shadow_health_status(
+                semantic_supervisor_effect_runtime,
+                (
+                    semantic_supervisor_effect_activation
+                    if isinstance(semantic_supervisor_effect_activation, Mapping)
+                    else None
+                ),
+                settings,
+            ),
             "profile": settings.profile.name,
             "memory_vault": {
                 "mode": settings.memory_vault_mode,
@@ -2885,7 +3328,9 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
                 "schema": "friday.v12-orchestration-health.v1",
                 "configured_mode": settings.router_mode,
                 "installed_mode": (
-                    agent.mode.value if isinstance(agent, OrchestrationRouter) else RouterMode.LEGACY.value
+                    orchestrated_agent.mode.value
+                    if isinstance(orchestrated_agent, OrchestrationRouter)
+                    else RouterMode.LEGACY.value
                 ),
                 "registered_routes": list(getattr(request.app.state, "v12_registered_routes", ())),
                 "model_gate": gate_status,
@@ -3656,6 +4101,7 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
             body.get("force_knowledge"), field="force_knowledge", default=False
         )
         enable_tools = _parse_json_bool(body.get("enable_tools"), field="enable_tools", default=True)
+        explicit_mode_requested = body.get("mode") is not None
         try:
             requested_mode = (
                 normalize_conversation_mode(str(body["mode"])) if body.get("mode") is not None else None
@@ -3938,6 +4384,8 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
         # Claim the key atomically before any side effect. A plain lookup followed
         # by a later insert allows concurrent retries to invoke the agent twice.
         lease_token = ""
+        request_hash = ""
+        semantic_supervisor_ingress: SupervisorAssistIngressBindingV1 | None = None
         heartbeat: asyncio.Task[None] | None = None
         if source_ref:
             request_hash = _chat_request_fingerprint(
@@ -3985,6 +4433,12 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
                     headers={"Retry-After": "2"},
                 )
             lease_token = str(claim.get("lease_token") or "")
+            if claim.get("status") != "acquired" or not lease_token:
+                raise RuntimeError("Request idempotency claim returned an invalid state")
+            semantic_supervisor_ingress = SupervisorAssistIngressBindingV1.from_claimed_request(
+                source_ref=source_ref,
+                request_fingerprint_sha256=request_hash,
+            )
 
             async def renew_lease() -> None:
                 while True:
@@ -3998,6 +4452,8 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
         effect_stack = ExitStack()
         request_effects = None
         if source_ref and lease_token:
+            if semantic_supervisor_ingress is None:
+                raise RuntimeError("Claimed request has no semantic supervisor ingress binding")
             request_effects = effect_stack.enter_context(
                 track_request_effects(
                     functools.partial(
@@ -4013,6 +4469,7 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
                         request_key=source_ref,
                         lease_token=lease_token,
                     ),
+                    request_binding_sha256=semantic_supervisor_ingress.canonical_sha256(),
                 )
             )
 
@@ -5051,6 +5508,8 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
                 reply_assistant_reference = False
 
             pending_durable_intake_admission: PendingDurableTurnAdmission | bool = False
+            supervisor_assist_pending_decision: SupervisorAssistPendingDecision | None = None
+            pending_durable_intake_suppressed = False
             if (
                 not autonomous_engineer
                 and conversation_id is not None
@@ -5068,14 +5527,28 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
                 and requested_mode is None
                 and not turn_policy.handled
             ):
-                pending_durable_intake_admission = _pending_durable_turn_admission_before_ingestion(
+                assist_relation = _supervisor_assist_pending_before_ingestion(
                     state.agent,
                     person_id=actor.own_id,
                     message=message,
                     actor=actor,
                     conversation_id=conversation_id,
+                    ingress_binding=semantic_supervisor_ingress,
                     current_attachment_count=pending_comparison_attachment_count,
                 )
+                if type(assist_relation) is SupervisorAssistPendingDecision:
+                    supervisor_assist_pending_decision = assist_relation
+                    pending_durable_intake_suppressed = assist_relation.suppresses_ingestion
+                else:
+                    pending_durable_intake_admission = _pending_durable_turn_admission_before_ingestion(
+                        state.agent,
+                        person_id=actor.own_id,
+                        message=message,
+                        actor=actor,
+                        conversation_id=conversation_id,
+                        current_attachment_count=pending_comparison_attachment_count,
+                    )
+                    pending_durable_intake_suppressed = pending_durable_intake_admission is not False
 
             ingestion_result = None
             if autonomous_engineer:
@@ -5087,7 +5560,7 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
                     "reason": "owner Engineer turn bypasses dialogue knowledge ingestion",
                 }
             elif state.auth_service.authorize(actor, "knowledge.create").allowed:
-                if pending_durable_intake_admission is not False:
+                if pending_durable_intake_suppressed:
                     # Exact ownership and uncertainty both stay side-effect
                     # free until the router/runtime performs its own fresh
                     # owner+conversation+revision check.
@@ -5197,6 +5670,16 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
                         }
 
             with bind_failure_trace_scope(failure_scope):
+                semantic_supervisor_kwargs: dict[str, object] = {}
+                if getattr(state, "semantic_supervisor_runtime", None) is not None:
+                    semantic_supervisor_kwargs["_semantic_supervisor_explicit_mode_requested"] = (
+                        explicit_mode_requested
+                    )
+                if callable(getattr(state.agent, "classify_supervisor_assist_pending", None)):
+                    semantic_supervisor_kwargs.update(
+                        _semantic_supervisor_ingress_binding=semantic_supervisor_ingress,
+                        _semantic_supervisor_pending_decision=(supervisor_assist_pending_decision),
+                    )
                 result = await state.agent.chat(
                     actor.user_id,
                     message,
@@ -5231,6 +5714,7 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
                         )
                         else None
                     ),
+                    **semantic_supervisor_kwargs,
                 )
             if staged_duplicate_count:
                 duplicate_notice = (

@@ -40,6 +40,21 @@ def test_an_unset_setting_still_falls_back_to_its_default(monkeypatch):
     assert env("FRIDAY_API_PORT", "1234") == "1234"
 
 
+def test_engineer_authority_secrets_keep_legacy_environment_names(monkeypatch):
+    from friday.organs.engineer.command.grant import CommandGrantAuthority
+
+    names = (
+        "ENGINEER_COMMAND_GRANT_SECRET",
+        "ENGINEER_OWNER_SOURCE_SECRET",
+        "ENGINEER_OWNER_CONFIRM_SECRET",
+    )
+    for suffix in names:
+        monkeypatch.delenv(f"FRIDAY_{suffix}", raising=False)
+        monkeypatch.setenv(f"JERICHO_{suffix}", f"legacy-{suffix.casefold()}-secret-material")
+
+    assert isinstance(CommandGrantAuthority.from_env(), CommandGrantAuthority)
+
+
 def test_the_legacy_data_directory_is_used_while_it_exists(monkeypatch, tmp_path):
     """Каталог с данными молча не переезжает.
 

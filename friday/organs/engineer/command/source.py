@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 import hmac
-import os
 import secrets
 from hashlib import sha256
 from typing import Any
+
+from friday.config import env as config_env
 
 from .contracts import (
     ALLOWED_CHANNELS,
@@ -39,7 +40,7 @@ class OwnerSourceAuthority:
 
     @classmethod
     def from_env(cls, name: str = "FRIDAY_ENGINEER_OWNER_SOURCE_SECRET") -> OwnerSourceAuthority:
-        raw = os.environ.get(name, "")
+        raw = config_env(name, "")
         if not raw:
             raise CommandError("source_secret_missing")
         secret = raw.encode("utf-8") if isinstance(raw, str) else bytes(raw)

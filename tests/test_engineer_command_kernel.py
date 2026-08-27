@@ -710,7 +710,7 @@ def test_late_revoke_refuses_spawn(tmp_path: Path) -> None:
     kernel = _kernel(tmp_path)
     request = _argv("/usr/bin/true", key=_key("revoke"))
     source = _attest(kernel.authority.source_authority, request)
-    token = kernel.authority.issue(request, source=source)
+    token = kernel.authority.issue(request, source=source, confirmation=_confirm(kernel, source, request))
     kernel.authority.revoke(token)
     with pytest.raises(CommandError, match="grant_revoked"):
         kernel.submit(request, token, actor_id=ACTOR)

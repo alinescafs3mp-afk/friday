@@ -23,8 +23,6 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from friday.config import env as config_env
-
 # High numbers so posix_spawn DUP2 destinations do not clobber SCM_RIGHTS
 # source fds (which typically land at 3+ in the broker).
 HELPER_STDIN = 64
@@ -756,10 +754,9 @@ class SpawnBroker:
         os.set_inheritable(child_sock.fileno(), True)
         helper = str(Path(__file__).resolve())
         env = os.environ.copy()
-        env["FRIDAY_SPAWN_SOCKFD"] = str(child_sock.fileno())
         env["PYTHONDONTWRITEBYTECODE"] = "1"
         self._proc = subprocess.Popen(  # noqa: S603
-            [sys.executable, helper, "--broker"],
+            [sys.executable, helper, "--broker", str(child_sock.fileno())],
             stdin=subprocess.DEVNULL,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
@@ -1065,7 +1062,7 @@ def main() -> None:
     if len(sys.argv) > 1 and sys.argv[1] == "--job":
         _job_main()
         return
-    fd_raw = config_env("FRIDAY_SPAWN_SOCKFD", "")
+    fd_raw = sys.argv[2] if len(sys.argv) == 3 and sys.argv[1] == "--broker" else ""
     if not fd_raw.isdigit():
         raise SystemExit("spawn helper missing socket")
     sock = socket.socket(fileno=int(fd_raw))

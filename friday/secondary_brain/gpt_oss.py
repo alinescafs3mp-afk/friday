@@ -19,6 +19,7 @@ from .contracts import (
     SecondaryEndpointConfig,
     SecondaryFailure,
     SecondaryResult,
+    _decode_strict_json,
 )
 
 _MAX_RESPONSE_BYTES = 1_048_576
@@ -253,8 +254,8 @@ class GptOssProtocolAdapter:
         structured: JsonValue = None
         if request.require_structured_output:
             try:
-                parsed = json.loads(content)
-            except (TypeError, ValueError, json.JSONDecodeError):
+                parsed = _decode_strict_json(content)
+            except (TypeError, ValueError, UnicodeError):
                 raise ProtocolRejection(SecondaryFailure.MALFORMED_RESPONSE) from None
             structured = _immutable_json(parsed)
 

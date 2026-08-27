@@ -50,7 +50,7 @@ from friday.interaction_control_plane.work_item_schema import (
     WORK_ITEM_SCHEMA_VERSION,
     install_selected_evidence_promotion_reader_trigger,
     register_work_item_connection_functions,
-    upgrade_work_item_schema_to_42,
+    upgrade_work_item_schema_to_45,
     validate_work_item_schema,
 )
 from friday.private_fs import prepare_private_sqlite, restrict_sqlite_files
@@ -2551,10 +2551,11 @@ class CoreMixin(StorageShared):
             if parsed_version is not None and parsed_version >= WORK_ITEM_SCHEMA_VERSION:
                 validate_work_item_schema(conn)
             else:
-                # Schema 42 adds the dormant comparison reader projection.
-                # Authenticate exact released schema 38/39/40 DDL before rebuild;
-                # older databases may legitimately have no Work Item table.
-                upgrade_work_item_schema_to_42(
+                # Schema 45 extends the exact released schema-44 graph with one
+                # immutable body-free ingress binding. Older 38/39/40 projections
+                # still take the existing authenticated rebuild path before
+                # receiving the current fixed graph projection.
+                upgrade_work_item_schema_to_45(
                     conn,
                     required=parsed_version is not None and parsed_version >= 38,
                 )
