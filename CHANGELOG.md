@@ -1,3 +1,22 @@
+## 0.207.55 — 2026-08-27
+
+### Automatic Engineer command result delivery
+
+- A terminal owner-confirmed command now publishes one deterministic ZIP to
+  the exact private Telegram chat that approved it, without another model turn
+  or a manual status request. The archive always contains the signed receipt
+  and manifest, and includes exact stdout, stderr and generated outputs when
+  present.
+- The command ledger binds the delivery chat at admission and durably tracks
+  staging, acknowledgement, uncertainty and bounded failures. Account,
+  identity, chat routing and capabilities are rechecked before both staging and
+  byte delivery; revoked or drifted authority fails closed without re-running
+  the command.
+- Telegram delivery uses a durable pre-write fence. Proven rejection may retry;
+  a timeout, malformed response, server error or crash after the write boundary
+  becomes terminal uncertainty and cannot duplicate a possibly delivered
+  archive after restart.
+
 ## 0.207.54 — 2026-08-27
 
 ### Conversation-scoped current Engineer command

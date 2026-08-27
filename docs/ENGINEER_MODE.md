@@ -165,8 +165,23 @@ The process starts in `/job`, may use `/job/workspace` and `/job/tmp`, and may
 place deliverables only below `/job/output`. Terminal status exposes bounded,
 sanitized stdout/stderr and a hashed generated-file inventory. Cancellation,
 timeout, crash reconciliation and leader exit apply to the complete cgroup;
-an unproved tree or receipt becomes `unknown`, never success. This slice does
-not yet publish the output inventory as a Telegram archive.
+an unproved tree or receipt becomes `unknown`, never success.
+
+Every publishable terminal job also produces one deterministic ZIP without a
+second model turn. The archive always carries `MANIFEST.json` and
+`RECEIPT.json`; exact bounded `stdout.bin`, `stderr.bin` and files below
+`outputs/` are included when present. Admission binds the exact private chat
+that supplied the distinct approval. Account, Telegram identity, current chat
+routing, push policy and capabilities are rechecked immediately before staging
+and again before the bridge reads bytes. Revocation or identity drift therefore
+publishes nothing and never re-executes the command.
+
+The bridge sends exactly one captioned document through a durable pre-write
+fence. A proven connection failure or Telegram 4xx rejection may retry. Any
+ambiguous outcome—timeout, malformed reply, server error or process death after
+arming the fence—is recorded as `uncertain` and is never resent automatically.
+The command ledger mirrors the exact queue identity and bounds permanent
+pre-staging failures.
 
 The optional secondary brain may refine a secret-stripped structured finding
 list only when its ordinary admission policy allows that extraction. It receives
@@ -213,7 +228,8 @@ of the following without skips or local substitutions:
    installed-program runner additionally passes
    `tests/test_engineer_command_kernel.py`,
    `tests/test_engineer_command_p0.py` and
-   `tests/test_engineer_command_integration.py`;
+   `tests/test_engineer_command_integration.py`, plus the terminal publication,
+   notification API and delivery-fence suites;
 3. the canonical full release gate: `python tools/quality_gate.py`.
 
 Keep `FRIDAY_ENGINEER_MODE_ENABLED=0` during rollout preparation. Enable it only
