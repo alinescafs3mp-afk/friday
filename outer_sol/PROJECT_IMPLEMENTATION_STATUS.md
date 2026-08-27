@@ -12,15 +12,18 @@ the current production identity, completed packages, active work and next order.
   is code-staged only as provisional shadow/extract and is not accepted or live.
   The primary remains the sole final-publication, tool and effect authority.
   Every secondary miss preserves the exact primary-only path.
-- Deployed implementation head: `2374497714068d8d18b4f3c70f5888809ca15e73`
-- Live: Friday `0.207.60` / `2374497714068d8d18b4f3c70f5888809ca15e73`;
-  tree `2bec743058f9ce8c09a74e29bee0aa65b08614ac10a497bc485c6e72b18d0304`;
-  wheel `f7e0194a533463f46939120356f7b30a1c8ed9ac9c573a06834c1d2a5461228c`.
-- Immediate predecessor and schema-capable fallback: Friday `0.207.59` /
-  `dbbf26f1db581aa2545326aa5c4527b2a6b4591e`, tree
-  `b36b9273fd04fd9d64c47bebf47bab36f70f12830679c8f555a36348ea81bb1c`,
-  wheel `32b190ab8941709fd5cea9f1051eaf25872fde1e6f956592fa2eb4f949a79646`.
-- Database schema: 43
+- Deployed implementation head: `86d79fbed621fa3ade4ab06a57ec2dd82d2a09dc`
+- Live: Friday `0.207.61` / `86d79fbed621fa3ade4ab06a57ec2dd82d2a09dc`;
+  tree `41a46b4e63565e03dbd28c2c136ec14bbb371a4fd83c9cf734ed4fca15d7336f`;
+  wheel `3a32f2f78ea17a273df640bc2cb647f738bfaa5720ba3652ccf38b937e2a6849`.
+- Immediate predecessor: Friday `0.207.60` /
+  `2374497714068d8d18b4f3c70f5888809ca15e73`, tree
+  `2bec743058f9ce8c09a74e29bee0aa65b08614ac10a497bc485c6e72b18d0304`.
+- Schema-capable fallback: Friday `0.207.61rc0` /
+  `660f31386a57493b6e11503d3bfe5fec18ece27a`, tree
+  `4af2748e98c6f32064b5c8f779ef4b1b61a96daa8adda20a6bf72d72e57c3e24`,
+  wheel `1e6a8eeaa12f4dca603494ba3be5a982482e8ee92be714c5c07b6cb1bde5cc72`.
+- Database schema: 45
 - Production state: immutable activation `clear`; backend and Telegram bridge
   active; trusted-CA HTTPS health `200`; SQLite integrity and FK checks clean.
   Owner-only Engineer Mode is enabled for exact private scope
@@ -107,6 +110,13 @@ the current production identity, completed packages, active work and next order.
   routes `[archive_read, file_read]`, gate `canary_ready`, reason
   `live_attestation_clear`, verified context 8192 and probe-suite SHA-256
   `36999c084e580bf770e7cc584ec6b258c4f1af202f0527831f8f23047d8c583e`.
+  `0.207.61` deploys the independently integrated Semantic Supervisor source
+  behind an explicit default-off gate: the primary remains the sole publisher,
+  tool and effect owner, while shadow/assist/canary still require staged
+  evidence. It also repairs a measured autonomous-Engineer failure: model prose
+  such as «Сканирую» or «Собираю сводку» can no longer masquerade as started
+  work when no tool ran; the runtime performs one forced real command recovery
+  and otherwise reports truthfully that nothing started.
   The exact accepted secondary profile remains configured in bounded `assist`
   and is probed on
   demand; its exact post-cutover canary passed, while laptop absence preserves
@@ -127,7 +137,7 @@ the current production identity, completed packages, active work and next order.
   while the backlog converges. `0.207.52` repairs the canary wrapper's full
   Telegram carrier surface; signed Telegram requests no longer fail before the
   model/tool boundary. The current activation terminal receipt is
-  `47371dcef8cfeebea967c1ff22862b70063d385a6d3ceb2235132b555997c21e`.
+  `9fa740e9bb5bcad77e4a4eb5262787a93c844a2097d48b8721b60469cacb2419`.
 - Delivery constraints: no Docker for primary Friday release certification;
   companion plugin untouched; small commits and immutable wheel-only production
   releases. The optional laptop inference node is a separate Docker contour.
@@ -140,9 +150,10 @@ fresh owner identity, current Telegram source/update/conversation binding and
 capability checks stay mandatory, while no guest, unsigned API turn, quoted
 message, document, web page or attachment may mint execution authority.
 
-The active objective is now to resume the preserved integration checkpoint and
-independently certify the Semantic Supervisor through default-off, shadow,
-limited assist and canary. After that,
+The Semantic Supervisor source and schema-safe fallback are now deployed
+default-off. The active objective is to gather independent shadow evidence and
+promote it through shadow, limited assist and canary without changing primary
+ownership. After that,
 execute the remaining work by product value and
 risk. The full canonical order and estimates are in
 `outer_sol/PROJECT_EXECUTION_BACKLOG_2026-08-27.md`. Docker and companion-plugin
@@ -252,9 +263,8 @@ course, with these repository-specific constraints:
 
 ## In progress
 
-1. Rebase and independently gate the Semantic Supervisor, then roll it out
-   default-off → shadow → limited assist → canary. Resume the existing
-   conflict-resolution checkpoint; do not merge the stale handoff wholesale.
+1. Collect the Semantic Supervisor shadow evidence, then roll it out
+   shadow → limited assist → canary under the existing promotion gates.
 2. Keep Engineer, documents/Office, web, Obsidian and Telegram golden journeys
    release-blocking, with compact live smokes only where deterministic tests
    cannot prove the production seam.
@@ -837,6 +847,15 @@ claims at this checkpoint.
 
 ## Current focused gate
 
+- `0.207.61`: Semantic Supervisor P0-P5 source is deployed default-off on
+  schema 45 with a distinct schema-capable fallback. The canonical gate passed
+  22,416 non-UI tests plus 31 UI tests; the four initial non-UI failures were
+  reproduced as test-environment path/mode defects and their focused rerun was
+  clean. The post-fix Engineer suites add 48 passing tests. Both clean-source
+  wheels reproduced byte-for-byte. Immutable activation is `clear`, both
+  services are active, trusted-CA health is `ok`/`0.207.61`, and V12 remains
+  `canary_ready`. Semantic runtime/effects are explicitly `off`; primary
+  publication, tools and effects are unchanged.
 - `0.207.58`–`0.207.60`: 569 focused V12 regressions passed with 24 workers;
   static checks and deterministic dual wheel build are clear. The immutable
   activation is `clear`; both services are active and trusted-CA health is
@@ -851,13 +870,13 @@ claims at this checkpoint.
   returned exact stdout without creating an approval. Managed Syncthing v2.1.3
   is running on the persisted Unix socket, the profile is `running`, and the
   immediate reconcile worker is `ok`.
-- The active focused gate is the Semantic Supervisor integration; it remains
-  default-off until its independent gate passes.
+- The active focused gate is Semantic Supervisor shadow evidence and promotion;
+  assist/canary remain closed until the required production window passes.
 
 ## Next order
 
-1. Integrate the Semantic Supervisor on a schema-capable fallback and roll it
-   out default-off → shadow → limited assist → canary.
+1. Roll the deployed Semantic Supervisor from default-off through shadow,
+   evidence-backed limited assist and canary.
 2. Continue Interaction Control Plane and operational memory, then document
    contour/retrieval convergence and V12 refinement by product value and risk.
 3. Docker and companion-plugin work are not part of this order.
