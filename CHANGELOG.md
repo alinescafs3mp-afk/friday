@@ -1,3 +1,13 @@
+## 0.207.59 — 2026-08-27
+
+### V12 restart-attestation stability
+
+- The bounded SGLang load witness now has enough time to read its four exact
+  same-epoch surfaces under ordinary latency jitter. The cancellation probe's
+  outer budget explicitly covers that load witness plus the unchanged
+  five-second remote queue-drain proof, preventing healthy V12 from being
+  revoked during an unrelated backend restart.
+
 ## 0.207.58 — 2026-08-27
 
 ### Engineer execution-loop hotfix

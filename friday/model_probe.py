@@ -51,8 +51,16 @@ PLAN_CASE_TIMEOUT_SEC = 12.0
 SYNTHESIS_TIMEOUT_SEC = 60.0
 VERIFIER_TIMEOUT_SEC = 30.0
 CONTEXT_TIMEOUT_SEC = 60.0
-LOAD_TIMEOUT_SEC = 2.0
-CANCELLATION_TIMEOUT_SEC = 6.0
+# One SGLang load sample is an exact four-request witness
+# (witness -> metrics -> server-info -> witness).  Two seconds was below the
+# observed idle tail and made a healthy runtime lose V12 during an otherwise
+# unrelated backend restart.  Keep the sample bounded, but leave enough room
+# for that complete attested observation.
+LOAD_TIMEOUT_SEC = 5.0
+# Cancellation owns one load sample before submission and a separately bounded
+# five-second remote queue drain.  The outer deadline must cover both rather
+# than racing the inner proof at the six-second boundary.
+CANCELLATION_TIMEOUT_SEC = 12.0
 REMOTE_QUEUE_DRAIN_MAX_MS = 5_000
 POST_CANCELLATION_QUIET_OBSERVATIONS = 2
 POST_CANCELLATION_QUIET_INTERVAL_SEC = 0.05
