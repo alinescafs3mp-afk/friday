@@ -22,6 +22,8 @@ from friday.telegram_bridge._base import (
 
 _OUTBOUND_REPLY_CONTEXT_TTL_SEC = 30 * 24 * 3600.0
 _OUTBOUND_REPLY_CONTEXT_MAX_ROWS = 20_000
+_TELEGRAM_STATUS_TERMINAL_TTL_SEC = 7 * 24 * 3600.0
+_TELEGRAM_STATUS_RUNNING_TTL_SEC = 30 * 24 * 3600.0
 
 
 def _safe_backend_message_id(value: object) -> str:
@@ -149,6 +151,15 @@ class _UpdateInbox:
                 expires_at REAL NOT NULL,
                 PRIMARY KEY(chat_id, telegram_message_id)
             );
+            CREATE TABLE IF NOT EXISTS telegram_status_messages (
+                chat_id INTEGER NOT NULL,
+                operation_id TEXT NOT NULL,
+                message_id INTEGER NOT NULL,
+                revision INTEGER NOT NULL,
+                terminal INTEGER NOT NULL CHECK(terminal IN (0, 1)),
+                updated_at REAL NOT NULL,
+                PRIMARY KEY(chat_id, operation_id)
+            );
             """
         )
         restrict_sqlite_files(path)
@@ -218,6 +229,16 @@ class _UpdateInbox:
         self._conn.execute(
             "DELETE FROM outbound_reply_context WHERE expires_at < ?",
             (time.time(),),
+        )
+        status_now = time.time()
+        self._conn.execute(
+            """DELETE FROM telegram_status_messages
+               WHERE (terminal=1 AND updated_at < ?)
+                  OR (terminal=0 AND updated_at < ?)""",
+            (
+                status_now - _TELEGRAM_STATUS_TERMINAL_TTL_SEC,
+                status_now - _TELEGRAM_STATUS_RUNNING_TTL_SEC,
+            ),
         )
         self._conn.commit()
 
@@ -518,6 +539,93 @@ class _UpdateInbox:
         ).fetchone()
         self._conn.commit()
         return _safe_backend_message_id(row["backend_message_id"]) if row is not None else ""
+
+    def telegram_status_message(
+        self,
+        chat_id: int,
+        operation_id: str,
+    ) -> dict[str, Any] | None:
+        """Return only Telegram delivery coordinates, never status content."""
+
+        row = self._conn.execute(
+            """SELECT message_id, revision, terminal
+               FROM telegram_status_messages
+               WHERE chat_id=? AND operation_id=?""",
+            (int(chat_id), str(operation_id)),
+        ).fetchone()
+        if row is None:
+            return None
+        return {
+            "message_id": int(row["message_id"]),
+            "revision": int(row["revision"]),
+            "terminal": bool(row["terminal"]),
+        }
+
+    def record_telegram_status_message(
+        self,
+        chat_id: int,
+        operation_id: str,
+        message_id: int,
+        revision: int,
+        terminal: bool,
+        *,
+        expected_revision: int | None,
+    ) -> bool:
+        """CAS one status coordinate; a stored terminal state is absorbing."""
+
+        chat = int(chat_id)
+        operation = str(operation_id)
+        telegram_message_id = int(message_id)
+        current_revision = int(revision)
+        max_integer = (1 << 63) - 1
+        if (
+            not chat
+            or abs(chat) > max_integer
+            or not operation
+            or len(operation) > 128
+            or not operation.isascii()
+            or any(not (character.isalnum() or character in "._:-") for character in operation)
+            or telegram_message_id <= 0
+            or telegram_message_id > max_integer
+            or current_revision <= 0
+            or current_revision > max_integer
+            or type(terminal) is not bool
+        ):
+            raise ValueError("invalid Telegram status coordinate")
+        if expected_revision is None:
+            cursor = self._conn.execute(
+                """INSERT OR IGNORE INTO telegram_status_messages(
+                       chat_id, operation_id, message_id, revision, terminal, updated_at)
+                   VALUES(?, ?, ?, ?, ?, ?)""",
+                (
+                    chat,
+                    operation,
+                    telegram_message_id,
+                    current_revision,
+                    int(terminal),
+                    time.time(),
+                ),
+            )
+        else:
+            expected = int(expected_revision)
+            if expected <= 0 or expected > max_integer or current_revision <= expected:
+                raise ValueError("Telegram status revision is not monotonic")
+            cursor = self._conn.execute(
+                """UPDATE telegram_status_messages
+                   SET message_id=?, revision=?, terminal=?, updated_at=?
+                   WHERE chat_id=? AND operation_id=? AND revision=? AND terminal=0""",
+                (
+                    telegram_message_id,
+                    current_revision,
+                    int(terminal),
+                    time.time(),
+                    chat,
+                    operation,
+                    expected,
+                ),
+            )
+        self._conn.commit()
+        return cursor.rowcount > 0
 
     def remember_delivered_notification(self, notification_id: str) -> None:
         """Уведомление ушло человеку — записать это ТАМ, ГДЕ ЭТО ПРОИЗОШЛО.

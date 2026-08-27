@@ -413,7 +413,9 @@ async def test_terminal_text_pending_does_not_require_file_read(settings, storag
     request = Request({"type": "http", "method": "GET", "path": "/", "app": app})
     request.state.actor = SimpleNamespace(source="telegram-bridge")
 
-    pending = await notifications_pending(request, limit=20)
+    legacy = await notifications_pending(request, limit=20)
+    assert "status_update" not in legacy["items"][0]
+    pending = await notifications_pending(request, limit=20, status_messages=True)
 
     assert pending["items"] == [
         {
@@ -425,9 +427,16 @@ async def test_terminal_text_pending_does_not_require_file_read(settings, storag
                 tenant_id=LEGACY_OWNER_USER_ID,
                 actor_id=LEGACY_OWNER_USER_ID,
             )["body"],
-            "kind": TERMINAL_TEXT_NOTIFICATION_KIND,
-            "dedup_key": staged.dedup_key,
-        }
+                "kind": TERMINAL_TEXT_NOTIFICATION_KIND,
+                "dedup_key": staged.dedup_key,
+                "status_update": {
+                    "schema": "friday.telegram-status.v1",
+                    "operation_id": f"engineer:{'3' * 32}",
+                    "revision": (1 << 63) - 1,
+                    "terminal": True,
+                    "stage": "completed",
+                },
+            }
     ]
 
 

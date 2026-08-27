@@ -94,14 +94,38 @@ async def test_pending_projects_no_raw_handle_and_artifact_is_exact(settings, st
     staged, payload = _stage(storage, enabled)
     request = _request(storage, enabled, _authority(storage))
 
-    pending = await notifications_pending(request, limit=20)
+    legacy = await notifications_pending(request, limit=20)
+    assert set(legacy["items"][0]) == {
+        "id",
+        "chat_id",
+        "kind",
+        "dedup_key",
+        "caption",
+        "artifact",
+    }
+    pending = await notifications_pending(request, limit=20, status_messages=True)
     assert pending["count"] == 1
     item = pending["items"][0]
-    assert set(item) == {"id", "chat_id", "kind", "dedup_key", "caption", "artifact"}
+    assert set(item) == {
+        "id",
+        "chat_id",
+        "kind",
+        "dedup_key",
+        "caption",
+        "artifact",
+        "status_update",
+    }
     assert set(item["artifact"]) == {"filename", "mime_type", "size_bytes", "sha256", "path"}
     assert item["id"] == staged.notification_id
     assert item["kind"] == TERMINAL_NOTIFICATION_KIND
     assert item["artifact"]["sha256"] == hashlib.sha256(payload).hexdigest()
+    assert item["status_update"] == {
+        "schema": "friday.telegram-status.v1",
+        "operation_id": f"engineer:{'1' * 32}",
+        "revision": (1 << 63) - 1,
+        "terminal": True,
+        "stage": "completed",
+    }
     assert "raw_" not in json.dumps(item, sort_keys=True)
     assert "content_base64" not in json.dumps(item, sort_keys=True)
 

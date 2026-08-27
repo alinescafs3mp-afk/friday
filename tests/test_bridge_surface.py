@@ -479,6 +479,11 @@ EXPECTED_INBOX: dict[str, str] = {
     "set_offset": "(self, offset: 'int') -> 'None'",
     "stats": "(self) -> 'dict[str, int]'",
     "store": "(self, update: 'dict[str, Any]') -> 'bool'",
+    "telegram_status_message": "(self, chat_id: 'int', operation_id: 'str') -> 'dict[str, Any] | None'",
+    "record_telegram_status_message": (
+        "(self, chat_id: 'int', operation_id: 'str', message_id: 'int', revision: 'int', "
+        "terminal: 'bool', *, expected_revision: 'int | None') -> 'bool'"
+    ),
 }
 
 

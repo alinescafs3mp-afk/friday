@@ -391,6 +391,7 @@ class BridgeShared:
     _ENTITY_TYPE_CHOICES: Any
     _entity_type_markup: Callable[..., Any]
     _inbox: Any
+    _status_messages: Any
     _bot_username: str
     _may_message_chat: Callable[..., Any]
     _prepare_document: Callable[..., Any]

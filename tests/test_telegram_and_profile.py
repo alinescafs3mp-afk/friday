@@ -988,7 +988,7 @@ async def test_bridge_drains_outbound_queue_and_rechecks_allowlist(tmp_path):
     telegram = _FakeTelegramClient()
     backend = _FakeBackendClient(
         {
-            "/api/notifications/pending?limit=20": {
+            "/api/notifications/pending?limit=20&status_messages=1": {
                 "items": [
                     {"id": "n1", "chat_id": "5001", "body": "🔔 Напоминание: «Запуск» — сегодня."},
                     {"id": "n2", "chat_id": "999999", "body": "утечка не туда"},

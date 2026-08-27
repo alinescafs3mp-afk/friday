@@ -20,14 +20,18 @@ from friday.config import FridaySettings
 from friday.file_delivery import attachment_content_disposition
 from friday.organs import may_push_to, resolve_chat_id
 from friday.organs.engineer.command.progress import (
+    PROGRESS_ENVELOPE_SCHEMA,
     PROGRESS_NOTIFICATION_KIND,
     ProgressDeliveryError,
+    parse_progress_envelope,
     progress_notification_projection,
 )
 from friday.organs.engineer.terminal_delivery import (
     TERMINAL_NOTIFICATION_KIND,
     TERMINAL_TEXT_NOTIFICATION_KIND,
     TerminalDeliveryError,
+    parse_terminal_envelope,
+    parse_terminal_text_envelope,
     read_terminal_notification_artifact,
     terminal_notification_projection,
     terminal_text_notification_projection,
@@ -35,6 +39,45 @@ from friday.organs.engineer.terminal_delivery import (
 from friday.permissions import AuthorizationError
 
 router = APIRouter(prefix="/api/notifications", tags=["notifications"])
+
+_TELEGRAM_STATUS_SCHEMA = "friday.telegram-status.v1"
+_TERMINAL_STATUS_REVISION = (1 << 63) - 1
+
+
+def _progress_status_update(row: Mapping[str, Any]) -> dict[str, Any] | None:
+    """Expose validated facts, never the carrier/body, to a coalescing bridge."""
+
+    envelope = parse_progress_envelope(row.get("body"))
+    if envelope.get("schema") != PROGRESS_ENVELOPE_SCHEMA:
+        return None
+    return {
+        "schema": _TELEGRAM_STATUS_SCHEMA,
+        "operation_id": f"engineer:{envelope['job_id']}",
+        "revision": int(envelope["checkpoint_sec"]),
+        "terminal": False,
+        "stage": "command_running",
+        "elapsed_sec": int(envelope["elapsed_sec"]),
+        "timeout_sec": int(envelope["timeout_sec"]),
+        "remaining_sec": envelope["remaining_sec"],
+        "stdout_bytes": int(envelope["stdout_bytes"]),
+        "stderr_bytes": int(envelope["stderr_bytes"]),
+        "output_activity": bool(envelope["output_activity"]),
+    }
+
+
+def _terminal_status_update(row: Mapping[str, Any], *, text_only: bool) -> dict[str, Any]:
+    envelope = (
+        parse_terminal_text_envelope(row.get("body"))
+        if text_only
+        else parse_terminal_envelope(row.get("body"))
+    )
+    return {
+        "schema": _TELEGRAM_STATUS_SCHEMA,
+        "operation_id": f"engineer:{envelope['job_id']}",
+        "revision": _TERMINAL_STATUS_REVISION,
+        "terminal": True,
+        "stage": str(envelope["status"]),
+    }
 
 
 def _terminal_delivery_actor(state: Any, row: Mapping[str, Any]) -> Any:
@@ -147,6 +190,7 @@ def _terminal_artifact_snapshot(state: Any, notification_id: str) -> Any:
 async def notifications_pending(
     request: Request,
     limit: int = Query(20, ge=1, le=100),
+    status_messages: bool = Query(False),
 ) -> dict[str, Any]:
     _require_bridge(request)
     settings: FridaySettings = request.app.state.settings
@@ -185,6 +229,8 @@ async def notifications_pending(
                 "caption": projection["caption"],
                 "artifact": projection["artifact"],
             }
+            if status_messages is True:
+                item["status_update"] = _terminal_status_update(row, text_only=False)
         elif row.get("kind") == TERMINAL_TEXT_NOTIFICATION_KIND:
             try:
                 actor = _terminal_delivery_actor(request.app.state, row)
@@ -204,6 +250,8 @@ async def notifications_pending(
                 "kind": TERMINAL_TEXT_NOTIFICATION_KIND,
                 "dedup_key": row.get("dedup_key") or "",
             }
+            if status_messages is True:
+                item["status_update"] = _terminal_status_update(row, text_only=True)
         elif row.get("kind") == PROGRESS_NOTIFICATION_KIND:
             try:
                 actor = _progress_delivery_actor(request.app.state, row)
@@ -223,6 +271,10 @@ async def notifications_pending(
                 "kind": PROGRESS_NOTIFICATION_KIND,
                 "dedup_key": row.get("dedup_key") or "",
             }
+            if status_messages is True:
+                status_update = _progress_status_update(row)
+                if status_update is not None:
+                    item["status_update"] = status_update
         else:
             item = {
                 "id": row["id"],

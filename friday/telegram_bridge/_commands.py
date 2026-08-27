@@ -10,9 +10,9 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+import time
 from datetime import date, timedelta
 
-from friday.organs.engineer.targets import requests_artifact_compile, requests_artifact_decompile
 from friday.retrieval._keyboard import switched
 from friday.telegram_bridge._base import (
     BOT_COMMANDS,
@@ -29,6 +29,7 @@ from friday.telegram_bridge._base import (
 )
 from friday.telegram_bridge._media import _reply_document_file_unique_id
 from friday.telegram_bridge._obsidian import obsidian_panel
+from friday.telegram_bridge._status import TelegramStatusStage, render_chat_status
 from friday.telegram_bridge._views import _TIMELINE_SHOWN
 
 
@@ -63,55 +64,188 @@ _ALBUM_CACHE_MESSAGE_IDS = "_friday_album_message_ids"
 # clue whether a long backend turn is still owned. The bridge observes elapsed
 # request time, not a Ghidra phase event, so it must never invent completion
 # percentages or claim that a particular worker stage has been entered.
-_DECOMPILE_PROGRESS_SCHEDULE: tuple[tuple[float, str], ...] = (
-    (
-        12.0,
-        "⏳ Запрос на статический разбор ещё выполняется. Длительная фаза ограничена "
-        "четырьмя минутами; итог пришлю сразу после завершения.",
-    ),
-    (
-        75.0,
-        "⏳ Запрос на статический разбор всё ещё выполняется. Прошло около минуты; "
-        "продолжаю ждать ограниченный backend-ход.",
-    ),
-)
-_COMPILE_PROGRESS_SCHEDULE: tuple[tuple[float, str], ...] = (
-    (
-        12.0,
-        "⏳ Запрос на компиляцию ещё обрабатывается. Это уведомление отражает только "
-        "прошедшее время запроса; факт запуска javac подтвердит итоговый отчёт.",
-    ),
-    (
-        45.0,
-        "⏳ Запрос на компиляцию всё ещё обрабатывается. Продолжаю ждать ограниченный "
-        "backend-ход; итог пришлю после его завершения.",
-    ),
-)
-_GENERIC_PROGRESS_SCHEDULE: tuple[tuple[float, str], ...] = (
-    (
-        30.0,
-        "⏳ Запрос ещё выполняется. Продолжаю работу; итог пришлю сразу после завершения.",
-    ),
-)
+_PROGRESS_CANDIDATES_SEC = (12.0, 30.0, 60.0, 120.0, 300.0, 600.0)
 # A module seam keeps progress timing deterministic in focused async tests while
 # production still uses the normal event-loop clock.
 _progress_sleep = asyncio.sleep
+_progress_clock = time.monotonic
 
 
 class _ChatProgressState:
-    """One finite notification budget shared by every final call in a turn."""
+    """One finite edit budget and revision stream shared by an entire turn."""
 
-    __slots__ = ("next_notice", "schedule")
+    __slots__ = (
+        "next_notice",
+        "operation_id",
+        "pending",
+        "received_bytes",
+        "received_items",
+        "revision",
+        "schedule",
+        "stage",
+        "staged_bytes",
+        "staged_items",
+        "started",
+        "started_at",
+        "terminal",
+        "item_total",
+    )
 
-    def __init__(self, speech: str) -> None:
-        self.schedule = (
-            _DECOMPILE_PROGRESS_SCHEDULE
-            if requests_artifact_decompile(speech)
-            else _COMPILE_PROGRESS_SCHEDULE
-            if requests_artifact_compile(speech)
-            else _GENERIC_PROGRESS_SCHEDULE
-        )
+    def __init__(
+        self,
+        speech: str,
+        *,
+        operation_id: str = "chat:test",
+        snapshot: dict[str, Any] | None = None,
+        item_total: int = 0,
+        ceiling_sec: float = 780.0,
+    ) -> None:
+        del speech  # Timing is transport-owned; user/model words never choose status prose.
+        ceiling = max(30.0, float(ceiling_sec))
+        candidates = [value for value in _PROGRESS_CANDIDATES_SEC if value < ceiling]
+        final_checkpoint = ceiling - 30.0
+        if final_checkpoint > 12.0:
+            candidates.append(final_checkpoint)
+        self.schedule = tuple(sorted(set(candidates)))
         self.next_notice = 0
+        self.operation_id = operation_id
+        self.stage = TelegramStatusStage.RECEIVING_MEDIA
+        self.started_at = _progress_clock()
+        self.revision = int(snapshot.get("revision") or 0) if snapshot is not None else 0
+        self.started = snapshot is not None
+        self.terminal = bool(snapshot.get("terminal")) if snapshot is not None else False
+        self.pending: set[asyncio.Task[None]] = set()
+        self.item_total = max(0, int(item_total))
+        self.received_items = 0
+        self.received_bytes = 0
+        self.staged_items = 0
+        self.staged_bytes = 0
+
+
+def _queue_chat_progress(
+    bridge: BridgeShared,
+    telegram: httpx.AsyncClient,
+    chat_id: int,
+    reply_to_message_id: int | None,
+    state: _ChatProgressState,
+    *,
+    create: bool,
+    terminal: bool = False,
+) -> asyncio.Task[None] | None:
+    if state.terminal:
+        return None
+    state.revision += 1
+    revision = state.revision
+    stage = state.stage
+    elapsed = max(0.0, _progress_clock() - state.started_at)
+    status_text = render_chat_status(
+        stage,
+        elapsed,
+        item_total=state.item_total,
+        received_items=state.received_items,
+        received_bytes=state.received_bytes,
+        staged_items=state.staged_items,
+        staged_bytes=state.staged_bytes,
+    )
+    if create:
+        # Mark before the network await. A stage transition that happens while
+        # sendMessage is in flight must queue a later edit, not strand old text.
+        state.started = True
+
+    async def deliver() -> None:
+        try:
+            outcome = await bridge._status_messages.publish(
+                telegram,
+                chat_id,
+                state.operation_id,
+                revision,
+                status_text,
+                terminal=terminal,
+                reply_to_message_id=reply_to_message_id,
+                create=create,
+            )
+            if outcome in {"terminal"} or terminal and outcome in {"edited", "replaced", "sent"}:
+                state.terminal = True
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            # The status is advisory. Never fail or repeat the model turn, and
+            # never log a token-bearing Telegram URL or user/model content.
+            LOGGER.debug("Telegram progress status failed (%s)", type(exc).__name__)
+
+    task = asyncio.create_task(deliver())
+    state.pending.add(task)
+    task.add_done_callback(state.pending.discard)
+    return task
+
+
+def _set_chat_progress_stage(
+    bridge: BridgeShared,
+    telegram: httpx.AsyncClient,
+    chat_id: int,
+    reply_to_message_id: int | None,
+    state: _ChatProgressState,
+    stage: TelegramStatusStage,
+) -> None:
+    if state.stage is stage or state.terminal:
+        return
+    state.stage = stage
+    if state.started:
+        _queue_chat_progress(
+            bridge,
+            telegram,
+            chat_id,
+            reply_to_message_id,
+            state,
+            create=False,
+        )
+
+
+def _refresh_chat_progress(
+    bridge: BridgeShared,
+    telegram: httpx.AsyncClient,
+    chat_id: int,
+    reply_to_message_id: int | None,
+    state: _ChatProgressState,
+) -> None:
+    if state.started and not state.terminal:
+        _queue_chat_progress(
+            bridge,
+            telegram,
+            chat_id,
+            reply_to_message_id,
+            state,
+            create=False,
+        )
+
+
+async def _finish_chat_progress(
+    bridge: BridgeShared,
+    telegram: httpx.AsyncClient,
+    chat_id: int,
+    reply_to_message_id: int | None,
+    state: _ChatProgressState,
+    stage: TelegramStatusStage,
+) -> None:
+    if state.terminal:
+        return
+    state.stage = stage
+    pending = tuple(state.pending)
+    if pending:
+        await asyncio.gather(*pending, return_exceptions=True)
+    if not state.started or state.terminal:
+        return
+    task = _queue_chat_progress(
+        bridge,
+        telegram,
+        chat_id,
+        reply_to_message_id,
+        state,
+        create=False,
+        terminal=True,
+    )
+    if task is not None:
+        await asyncio.gather(task, return_exceptions=True)
 
 
 async def _emit_chat_progress(
@@ -121,28 +255,25 @@ async def _emit_chat_progress(
     reply_to_message_id: int | None,
     state: _ChatProgressState,
 ) -> None:
-    """Emit only the remaining best-effort checkpoints for one final call."""
+    """Spend finite checkpoints while editing one durable status message."""
 
-    previous_delay = 0.0
     for index in range(state.next_notice, len(state.schedule)):
-        delay, notice = state.schedule[index]
-        await _progress_sleep(max(0.0, delay - previous_delay))
-        previous_delay = delay
+        delay = state.schedule[index]
+        elapsed = max(0.0, _progress_clock() - state.started_at)
+        await _progress_sleep(max(0.0, delay - elapsed))
         # Spend the slot before attempting delivery: a Telegram outage must not
         # turn a bounded status channel into a retry loop or affect the request.
         state.next_notice = index + 1
-        try:
-            await bridge._send_message(
-                telegram,
-                chat_id,
-                notice,
-                text_format="plain",
-                reply_to_message_id=reply_to_message_id,
-            )
-        except asyncio.CancelledError:
-            raise
-        except Exception as exc:
-            LOGGER.debug("Telegram progress notice failed (%s)", type(exc).__name__)
+        task = _queue_chat_progress(
+            bridge,
+            telegram,
+            chat_id,
+            reply_to_message_id,
+            state,
+            create=True,
+        )
+        if task is not None:
+            await task
 
 
 async def _final_chat_request_with_progress(
@@ -155,31 +286,24 @@ async def _final_chat_request_with_progress(
     reply_to_message_id: int | None,
     state: _ChatProgressState,
 ) -> dict[str, Any]:
-    """Wrap one final /api/chat call without changing its request semantics."""
+    """Mark the exact backend-wait stage without changing request semantics."""
 
-    progress_task = asyncio.create_task(
-        _emit_chat_progress(
-            bridge,
-            telegram,
-            chat_id,
-            reply_to_message_id,
-            state,
-        )
+    _set_chat_progress_stage(
+        bridge,
+        telegram,
+        chat_id,
+        reply_to_message_id,
+        state,
+        TelegramStatusStage.BACKEND_WAIT,
     )
-    try:
-        return await bridge._backend_json(
-            backend,
-            "POST",
-            "/api/chat",
-            payload,
-            external_user_id,
-            str(chat_id),
-        )
-    finally:
-        # The notifier is completely stopped before the response/error leaves
-        # this helper, so a stale status cannot trail the final answer.
-        progress_task.cancel()
-        await asyncio.gather(progress_task, return_exceptions=True)
+    return await bridge._backend_json(
+        backend,
+        "POST",
+        "/api/chat",
+        payload,
+        external_user_id,
+        str(chat_id),
+    )
 
 
 def _telegram_item_receipt(document: dict[str, Any]) -> dict[str, Any] | None:
@@ -1651,6 +1775,35 @@ class CommandsMixin(BridgeShared):
                 return
             force_knowledge = True
 
+        status_operation_id = f"chat:{update_id}"
+        try:
+            status_snapshot = self._status_messages.snapshot(chat_id, status_operation_id)
+        except Exception as exc:
+            LOGGER.debug("Telegram progress snapshot failed (%s)", type(exc).__name__)
+            status_snapshot = None
+        progress_state = _ChatProgressState(
+            text,
+            operation_id=status_operation_id,
+            snapshot=status_snapshot,
+            item_total=sum(
+                1
+                for media_message in album_messages or [message]
+                if any(
+                    media_message.get(field)
+                    for field in (
+                        "document",
+                        "photo",
+                        "voice",
+                        "audio",
+                        "video",
+                        "video_note",
+                        "animation",
+                    )
+                )
+            ),
+            ceiling_sec=self.config.backend_timeout_sec,
+        )
+
         if cached_response is not None:
             response_to_send = cached_response
             if album_messages:
@@ -1661,6 +1814,14 @@ class CommandsMixin(BridgeShared):
                     )
                 response_to_send = dict(cached_response)
                 response_to_send.pop(_ALBUM_CACHE_MESSAGE_IDS, None)
+            _set_chat_progress_stage(
+                self,
+                telegram,
+                chat_id,
+                message.get("message_id"),
+                progress_state,
+                TelegramStatusStage.DELIVERING_RESULT,
+            )
             await self._send_message(
                 telegram,
                 chat_id,
@@ -1675,6 +1836,14 @@ class CommandsMixin(BridgeShared):
             )
             await self._deliver_voice_reply(telegram, chat_id, response_to_send)
             await self._deliver_generated_files(telegram, chat_id, response_to_send)
+            await _finish_chat_progress(
+                self,
+                telegram,
+                chat_id,
+                message.get("message_id"),
+                progress_state,
+                TelegramStatusStage.COMPLETE,
+            )
             return
 
         # Forwarded-message provenance travels with the ingested content.
@@ -1689,44 +1858,84 @@ class CommandsMixin(BridgeShared):
 
         prepared_documents: list[dict[str, Any]] = []
         album_skipped_message_ids: set[int] = set()
-        for media_message in album_messages or [message]:
-            media_message_id = media_message.get("message_id")
-            album_message_id = (
-                media_message_id
-                if isinstance(media_message_id, int) and not isinstance(media_message_id, bool)
-                else None
+        download_progress_task = asyncio.create_task(
+            _emit_chat_progress(
+                self,
+                telegram,
+                chat_id,
+                message.get("message_id"),
+                progress_state,
             )
-            if album_messages and album_message_id is None:
-                raise RuntimeError("Telegram album has invalid ordered message identity")
-            try:
-                prepared = await self._prepare_document(telegram, media_message, update)
-            except (MediaTooLargeError, PermanentUpdateError) as exc:
-                if album_messages:
-                    # One permanently invalid/oversized sibling is an explicit
-                    # terminal item, not authority to discard every valid row.
-                    # A single bounded warning is composed with the final album
-                    # response below; no second user-visible answer is sent.
-                    assert album_message_id is not None
-                    album_skipped_message_ids.add(album_message_id)
-                    continue
-                if isinstance(exc, MediaTooLargeError):
-                    await register_backend_user()
-                    await self._send_message(
+        )
+        try:
+            for media_message in album_messages or [message]:
+                media_message_id = media_message.get("message_id")
+                album_message_id = (
+                    media_message_id
+                    if isinstance(media_message_id, int) and not isinstance(media_message_id, bool)
+                    else None
+                )
+                if album_messages and album_message_id is None:
+                    raise RuntimeError("Telegram album has invalid ordered message identity")
+                try:
+                    prepared = await self._prepare_document(telegram, media_message, update)
+                except (MediaTooLargeError, PermanentUpdateError) as exc:
+                    if album_messages:
+                        # One permanently invalid/oversized sibling is an explicit
+                        # terminal item, not authority to discard every valid row.
+                        # A single bounded warning is composed with the final album
+                        # response below; no second user-visible answer is sent.
+                        assert album_message_id is not None
+                        album_skipped_message_ids.add(album_message_id)
+                        continue
+                    if isinstance(exc, MediaTooLargeError):
+                        await register_backend_user()
+                        await self._send_message(
+                            telegram,
+                            chat_id,
+                            str(exc)
+                            or "Файл слишком большой — Telegram-медиа превышает допустимый размер и не сохранено.",
+                        )
+                        await _finish_chat_progress(
+                            self,
+                            telegram,
+                            chat_id,
+                            message.get("message_id"),
+                            progress_state,
+                            TelegramStatusStage.STOPPED,
+                        )
+                        return
+                    await _finish_chat_progress(
+                        self,
                         telegram,
                         chat_id,
-                        str(exc)
-                        or "Файл слишком большой — Telegram-медиа превышает допустимый размер и не сохранено.",
+                        message.get("message_id"),
+                        progress_state,
+                        TelegramStatusStage.STOPPED,
                     )
-                    return
-                raise
-            if prepared is None:
-                if album_messages:
-                    assert album_message_id is not None
-                    album_skipped_message_ids.add(album_message_id)
-                continue
-            if isinstance(media_message_id, int) and not isinstance(media_message_id, bool):
-                prepared["telegram_message_id"] = media_message_id
-            prepared_documents.append(prepared)
+                    raise
+                if prepared is None:
+                    if album_messages:
+                        assert album_message_id is not None
+                        album_skipped_message_ids.add(album_message_id)
+                    continue
+                if isinstance(media_message_id, int) and not isinstance(media_message_id, bool):
+                    prepared["telegram_message_id"] = media_message_id
+                prepared_documents.append(prepared)
+                progress_state.received_items += 1
+                prepared_size = _prepared_document_size(prepared)
+                if prepared_size >= 0:
+                    progress_state.received_bytes += prepared_size
+                _refresh_chat_progress(
+                    self,
+                    telegram,
+                    chat_id,
+                    message.get("message_id"),
+                    progress_state,
+                )
+        finally:
+            download_progress_task.cancel()
+            await asyncio.gather(download_progress_task, return_exceptions=True)
         documents = prepared_documents if album_messages else []
         document = prepared_documents[0] if prepared_documents and not album_messages else None
 
@@ -1739,8 +1948,27 @@ class CommandsMixin(BridgeShared):
                     chat_id,
                     f"Пока не умею обрабатывать {label} — сообщение не сохранено.",
                 )
+            await _finish_chat_progress(
+                self,
+                telegram,
+                chat_id,
+                message.get("message_id"),
+                progress_state,
+                TelegramStatusStage.STOPPED,
+            )
             # Service/empty messages are acknowledged silently (no dead-letter).
             return
+
+        _set_chat_progress_stage(
+            self,
+            telegram,
+            chat_id,
+            message.get("message_id"),
+            progress_state,
+            TelegramStatusStage.STAGING_DOCUMENTS
+            if album_messages
+            else TelegramStatusStage.BACKEND_WAIT,
+        )
 
         payload: dict[str, Any] = {
             "message": text,
@@ -1802,7 +2030,15 @@ class CommandsMixin(BridgeShared):
         quoted = self._reply_quote(message)
         if quoted:
             payload["reply_to"] = quoted
-        progress_state = _ChatProgressState(text)
+        progress_task = asyncio.create_task(
+            _emit_chat_progress(
+                self,
+                telegram,
+                chat_id,
+                message.get("message_id"),
+                progress_state,
+            )
+        )
         typing_task = asyncio.create_task(self._typing_loop(telegram, chat_id))
         try:
             album_stage_receipts: list[dict[str, Any]] = []
@@ -1861,6 +2097,17 @@ class CommandsMixin(BridgeShared):
                         continue
                     ready_documents.append(staged_document)
                     album_stage_receipts.append({"telegram_item_receipt": actual})
+                    progress_state.staged_items += 1
+                    staged_size = _prepared_document_size(staged_document)
+                    if staged_size >= 0:
+                        progress_state.staged_bytes += staged_size
+                _refresh_chat_progress(
+                    self,
+                    telegram,
+                    chat_id,
+                    message.get("message_id"),
+                    progress_state,
+                )
 
             if album_messages:
                 # The backend bounds one document turn by total decoded bytes.
@@ -1919,6 +2166,16 @@ class CommandsMixin(BridgeShared):
                     message.get("message_id"),
                     progress_state,
                 )
+                if document is not None:
+                    progress_state.staged_items = progress_state.received_items
+                    progress_state.staged_bytes = progress_state.received_bytes
+                    _refresh_chat_progress(
+                        self,
+                        telegram,
+                        chat_id,
+                        message.get("message_id"),
+                        progress_state,
+                    )
             if album_messages:
                 response["file_ingestions"] = album_stage_receipts
                 if album_skipped_message_ids and ready_documents:
@@ -1931,6 +2188,22 @@ class CommandsMixin(BridgeShared):
             if response.get("reply_media_recovery_required") is True:
                 if document is not None or documents or not isinstance(replied_to, dict):
                     raise PermanentUpdateError("Backend requested invalid reply media recovery")
+                _set_chat_progress_stage(
+                    self,
+                    telegram,
+                    chat_id,
+                    message.get("message_id"),
+                    progress_state,
+                    TelegramStatusStage.RECEIVING_MEDIA,
+                )
+                progress_state.item_total += 1
+                _refresh_chat_progress(
+                    self,
+                    telegram,
+                    chat_id,
+                    message.get("message_id"),
+                    progress_state,
+                )
                 try:
                     recovered_document = await self._prepare_document(
                         telegram,
@@ -1945,9 +2218,28 @@ class CommandsMixin(BridgeShared):
                         str(exc)
                         or "Файл слишком большой — Telegram-медиа превышает допустимый размер и не сохранено.",
                     )
+                    await _finish_chat_progress(
+                        self,
+                        telegram,
+                        chat_id,
+                        message.get("message_id"),
+                        progress_state,
+                        TelegramStatusStage.STOPPED,
+                    )
                     return
                 if recovered_document is None:
                     raise PermanentUpdateError("Replied Telegram media is unavailable")
+                progress_state.received_items += 1
+                recovered_size = _prepared_document_size(recovered_document)
+                if recovered_size >= 0:
+                    progress_state.received_bytes += recovered_size
+                _refresh_chat_progress(
+                    self,
+                    telegram,
+                    chat_id,
+                    message.get("message_id"),
+                    progress_state,
+                )
                 payload["reply_document_recovery"] = recovered_document
                 response = await _final_chat_request_with_progress(
                     self,
@@ -1955,6 +2247,15 @@ class CommandsMixin(BridgeShared):
                     backend,
                     payload,
                     external_user_id,
+                    chat_id,
+                    message.get("message_id"),
+                    progress_state,
+                )
+                progress_state.staged_items = progress_state.received_items
+                progress_state.staged_bytes = progress_state.received_bytes
+                _refresh_chat_progress(
+                    self,
+                    telegram,
                     chat_id,
                     message.get("message_id"),
                     progress_state,
@@ -2006,6 +2307,14 @@ class CommandsMixin(BridgeShared):
                     int(item.get("message_id") or 0) for item in album_messages
                 ]
             self._inbox.cache_backend_response(int(update["update_id"]), response_to_cache)
+            _set_chat_progress_stage(
+                self,
+                telegram,
+                chat_id,
+                message.get("message_id"),
+                progress_state,
+                TelegramStatusStage.DELIVERING_RESULT,
+            )
         except PermanentUpdateError as exc:
             if album_messages and exc.status_code == 409:
                 # A 409 after a persistent backend seam is not proof that every
@@ -2013,10 +2322,19 @@ class CommandsMixin(BridgeShared):
                 # stable per-file source refs make already-received siblings
                 # replay-only while missing siblings continue.
                 raise RuntimeError("Telegram album backend state is not yet converged") from exc
+            await _finish_chat_progress(
+                self,
+                telegram,
+                chat_id,
+                message.get("message_id"),
+                progress_state,
+                TelegramStatusStage.STOPPED,
+            )
             raise
         finally:
+            progress_task.cancel()
             typing_task.cancel()
-            await asyncio.gather(typing_task, return_exceptions=True)
+            await asyncio.gather(progress_task, typing_task, return_exceptions=True)
         await self._send_message(
             telegram,
             chat_id,
@@ -2031,3 +2349,11 @@ class CommandsMixin(BridgeShared):
         )
         await self._deliver_voice_reply(telegram, chat_id, response)
         await self._deliver_generated_files(telegram, chat_id, response)
+        await _finish_chat_progress(
+            self,
+            telegram,
+            chat_id,
+            message.get("message_id"),
+            progress_state,
+            TelegramStatusStage.COMPLETE,
+        )

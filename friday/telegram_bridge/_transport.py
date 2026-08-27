@@ -45,6 +45,7 @@ from friday.telegram_bridge._base import (
 )
 from friday.telegram_bridge._markup import to_telegram_html
 from friday.telegram_bridge._queue import _UpdateInbox
+from friday.telegram_bridge._status import TelegramStatusMessageManager, render_engineer_status
 
 # Long polling normally returns within ``POLL_TIMEOUT`` and even a failed round
 # sleeps for no more than ``BACKOFF_MAX``.  A substantially larger silence means
@@ -61,6 +62,11 @@ _DELIVERY_UNCERTAINTY_NOTICE = (
     "доставка не подтверждена, не дублирую; повторите запрос если фрагмент не пришёл"
 )
 _ENGINEER_TERMINAL_NOTIFICATION_KIND = "engineer_command_terminal"
+_ENGINEER_TERMINAL_TEXT_NOTIFICATION_KIND = "engineer_command_terminal_text"
+_ENGINEER_PROGRESS_NOTIFICATION_KIND = "engineer_command_progress"
+_ENGINEER_STATUS_SCHEMA = "friday.telegram-status.v1"
+_ENGINEER_TERMINAL_REVISION = (1 << 63) - 1
+_ENGINEER_PROGRESS_REVISIONS = frozenset({60, 300, 900, 1800})
 _ARCHIVE_DOCUMENT_SUFFIXES = (".zip", ".rar", ".7z")
 _ARCHIVE_DOCUMENT_MIME_TYPES = frozenset(
     {
@@ -125,8 +131,9 @@ def _engineer_terminal_envelope(
     dedup_key = item.get("dedup_key")
     caption = item.get("caption")
     artifact = item.get("artifact")
+    item_shape = {"id", "chat_id", "kind", "dedup_key", "caption", "artifact"}
     if (
-        set(item) != {"id", "chat_id", "kind", "dedup_key", "caption", "artifact"}
+        set(item) not in {frozenset(item_shape), frozenset(item_shape | {"status_update"})}
         or not isinstance(notification_id, str)
         or re.fullmatch(r"[A-Za-z0-9_.:-]{1,128}", notification_id) is None
         or item.get("kind") != _ENGINEER_TERMINAL_NOTIFICATION_KIND
@@ -183,6 +190,116 @@ def _engineer_terminal_envelope(
     canonical = json.dumps(identity, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
     identity["fence_key"] = f"document:{hashlib.sha256(canonical.encode('utf-8')).hexdigest()}"
     return identity
+
+
+def _engineer_status_update(item: dict[str, Any], *, chat_id: int) -> dict[str, Any] | None:
+    """Validate content-free facts; never infer a status identity from prose."""
+
+    raw = item.get("status_update")
+    if raw is None:
+        return None
+    if not isinstance(raw, dict):
+        raise ValueError("Engineer status update is not an object")
+    operation_id = raw.get("operation_id")
+    if (
+        raw.get("schema") != _ENGINEER_STATUS_SCHEMA
+        or not isinstance(operation_id, str)
+        or re.fullmatch(r"engineer:[0-9a-f]{32}", operation_id) is None
+        or str(item.get("chat_id") or "") != str(chat_id)
+        or isinstance(raw.get("revision"), bool)
+        or not isinstance(raw.get("revision"), int)
+        or not isinstance(raw.get("terminal"), bool)
+    ):
+        raise ValueError("Engineer status update is invalid")
+    job_id = operation_id.removeprefix("engineer:")
+    kind = str(item.get("kind") or "")
+    dedup_key = str(item.get("dedup_key") or "")
+    if kind == _ENGINEER_PROGRESS_NOTIFICATION_KIND:
+        if (
+            set(raw)
+            != {
+                "schema",
+                "operation_id",
+                "revision",
+                "terminal",
+                "stage",
+                "elapsed_sec",
+                "timeout_sec",
+                "remaining_sec",
+                "stdout_bytes",
+                "stderr_bytes",
+                "output_activity",
+            }
+            or raw["terminal"] is not False
+            or raw.get("stage") != "command_running"
+            or raw["revision"] not in _ENGINEER_PROGRESS_REVISIONS
+            or dedup_key != f"engineer-progress:v1:{job_id}:{raw['revision']}"
+            or any(
+                isinstance(raw.get(field), bool)
+                or not isinstance(raw.get(field), int)
+                or int(raw[field]) < 0
+                for field in ("elapsed_sec", "timeout_sec", "stdout_bytes", "stderr_bytes")
+            )
+            or int(raw["elapsed_sec"]) < int(raw["revision"])
+            or not isinstance(raw.get("output_activity"), bool)
+        ):
+            raise ValueError("Engineer progress status update is invalid")
+        timeout_sec = int(raw["timeout_sec"])
+        remaining_sec = raw.get("remaining_sec")
+        if (
+            (timeout_sec == 0 and remaining_sec is not None)
+            or (
+                timeout_sec > 0
+                and (
+                    isinstance(remaining_sec, bool)
+                    or not isinstance(remaining_sec, int)
+                    or remaining_sec != max(0, timeout_sec - int(raw["elapsed_sec"]))
+                )
+            )
+        ):
+            raise ValueError("Engineer progress deadline is invalid")
+        return dict(raw)
+    if kind in {
+        _ENGINEER_TERMINAL_NOTIFICATION_KIND,
+        _ENGINEER_TERMINAL_TEXT_NOTIFICATION_KIND,
+    }:
+        lane = "archive" if kind == _ENGINEER_TERMINAL_NOTIFICATION_KIND else "text"
+        if (
+            set(raw) != {"schema", "operation_id", "revision", "terminal", "stage"}
+            or raw["terminal"] is not True
+            or raw["revision"] != _ENGINEER_TERMINAL_REVISION
+            or raw.get("stage") not in {"completed", "failed", "cancelled", "timeout"}
+            or re.fullmatch(
+                rf"engineer-terminal:{lane}:{job_id}:[0-9a-f]{{64}}",
+                dedup_key,
+            )
+            is None
+        ):
+            raise ValueError("Engineer terminal status update is invalid")
+        return dict(raw)
+    raise ValueError("Engineer status kind is invalid")
+
+
+async def _publish_engineer_status(
+    bridge: BridgeShared,
+    telegram: httpx.AsyncClient,
+    chat_id: int,
+    update: dict[str, Any],
+    *,
+    delivery_uncertain: bool = False,
+) -> None:
+    projected = dict(update)
+    if delivery_uncertain:
+        projected["stage"] = "delivery_uncertain"
+    await bridge._status_messages.publish(
+        telegram,
+        chat_id,
+        str(projected["operation_id"]),
+        int(projected["revision"]),
+        render_engineer_status(projected),
+        terminal=bool(projected["terminal"]),
+        create=True,
+    )
 
 
 async def _fetch_engineer_terminal_artifact(
@@ -458,6 +575,7 @@ class TransportMixin(BridgeShared):
         self._offset = 0
         self._api_url = f"{API_BASE}/bot{config.bot_token}"
         self._file_url = f"{API_BASE}/file/bot{config.bot_token}"
+        self._status_messages = TelegramStatusMessageManager(self._inbox, api_url=self._api_url)
         # The API URL CONTAINS the bot token, and httpx puts the URL in the text
         # of every HTTPStatusError. Those strings were stored verbatim on the
         # queue row and then surfaced by `jericho doctor`, `jericho status
@@ -965,7 +1083,7 @@ class TransportMixin(BridgeShared):
         data = await self._backend_json(
             backend,
             "GET",
-            "/api/notifications/pending?limit=20",
+            "/api/notifications/pending?limit=20&status_messages=1",
             None,
             signer_chat,
             signer_chat,
@@ -1058,11 +1176,56 @@ class TransportMixin(BridgeShared):
                     sent = [value for value in sent if value != notif_id]
                     if notif_id not in uncertain:
                         uncertain.append(notif_id)
+                if item.get("status_update") is not None and outcome_chat_id:
+                    try:
+                        outcome_status = _engineer_status_update(item, chat_id=outcome_chat_id)
+                        if outcome_status is not None:
+                            await _publish_engineer_status(
+                                self,
+                                telegram,
+                                outcome_chat_id,
+                                outcome_status,
+                                delivery_uncertain=terminal_outcomes[notif_id] == "uncertain",
+                            )
+                    except Exception as exc:
+                        # The artifact outcome is already durable, so do not send
+                        # it again and do not ACK it yet. The next drain retries
+                        # only this idempotent status edit.
+                        LOGGER.warning(
+                            "Engineer reconciled status delivery failed (%s)",
+                            type(exc).__name__,
+                        )
+                        sent = [value for value in sent if value != notif_id]
+                        uncertain = [value for value in uncertain if value != notif_id]
                 # Exact prior outcome or drift-downgraded uncertainty: ACK it,
                 # never send either envelope again.
                 continue
             if notif_id in already_delivered:
-                # Не доставка, а повтор подтверждения: сообщение у человека уже есть.
+                # Не доставка текста, а повтор подтверждения. A structured
+                # terminal status may have failed after that text arrived; retry
+                # only its idempotent edit before ACKing the body.
+                if item.get("status_update") is not None:
+                    try:
+                        delivered_chat_id = int(chat_raw)
+                        if not self._may_message_chat(delivered_chat_id):
+                            raise ValueError("chat no longer admitted")
+                        delivered_status = _engineer_status_update(
+                            item,
+                            chat_id=delivered_chat_id,
+                        )
+                        if delivered_status is not None and bool(delivered_status["terminal"]):
+                            await _publish_engineer_status(
+                                self,
+                                telegram,
+                                delivered_chat_id,
+                                delivered_status,
+                            )
+                    except Exception as exc:
+                        LOGGER.warning(
+                            "Engineer delivered status retry failed (%s)",
+                            type(exc).__name__,
+                        )
+                        continue
                 sent.append(notif_id)
                 continue
             # Deny-by-default re-check at the send edge: the bot token can reach
@@ -1078,6 +1241,22 @@ class TransportMixin(BridgeShared):
                 chat_id = candidate
             except ValueError:
                 failed.append(notif_id)
+                continue
+            try:
+                status_update = _engineer_status_update(item, chat_id=chat_id)
+            except ValueError:
+                LOGGER.error("Invalid Engineer status carrier; refusing delivery")
+                failed.append(notif_id)
+                continue
+            if kind == _ENGINEER_PROGRESS_NOTIFICATION_KIND and status_update is not None:
+                try:
+                    await _publish_engineer_status(self, telegram, chat_id, status_update)
+                    self._inbox.remember_delivered_notification(notif_id)
+                    sent.append(notif_id)
+                except Exception as exc:
+                    LOGGER.warning("Engineer progress status delivery failed (%s)", type(exc).__name__)
+                    failed.append(notif_id)
+                await asyncio.sleep(0.05)
                 continue
             # Заявка на подтверждение приходит с кнопками решения: уведомление,
             # которое лишь СООБЩАЕТ о необходимости решить, заставляет человека
@@ -1103,9 +1282,35 @@ class TransportMixin(BridgeShared):
                     )
                     if outcome == "sent":
                         self._inbox.remember_notification_delivery_outcome(notif_id, "sent")
+                        if status_update is not None:
+                            try:
+                                await _publish_engineer_status(self, telegram, chat_id, status_update)
+                            except Exception as exc:
+                                LOGGER.warning(
+                                    "Engineer terminal status delivery failed (%s)",
+                                    type(exc).__name__,
+                                )
+                                await asyncio.sleep(0.05)
+                                continue
                         sent.append(notif_id)
                     elif outcome == "uncertain":
                         self._inbox.remember_notification_delivery_outcome(notif_id, "uncertain")
+                        if status_update is not None:
+                            try:
+                                await _publish_engineer_status(
+                                    self,
+                                    telegram,
+                                    chat_id,
+                                    status_update,
+                                    delivery_uncertain=True,
+                                )
+                            except Exception as exc:
+                                LOGGER.warning(
+                                    "Engineer uncertain status delivery failed (%s)",
+                                    type(exc).__name__,
+                                )
+                                await asyncio.sleep(0.05)
+                                continue
                         uncertain.append(notif_id)
                     elif outcome == "failed":
                         failed.append(notif_id)
@@ -1145,6 +1350,16 @@ class TransportMixin(BridgeShared):
                 # Запись ДО добавления в список: список умрёт вместе с процессом,
                 # а человек сообщение уже получил.
                 self._inbox.remember_delivered_notification(notif_id)
+                if kind == _ENGINEER_TERMINAL_TEXT_NOTIFICATION_KIND and status_update is not None:
+                    try:
+                        await _publish_engineer_status(self, telegram, chat_id, status_update)
+                    except Exception as exc:
+                        LOGGER.warning(
+                            "Engineer terminal text status delivery failed (%s)",
+                            type(exc).__name__,
+                        )
+                        await asyncio.sleep(0.05)
+                        continue
                 sent.append(notif_id)
             except Exception as exc:
                 LOGGER.warning("Outbound notification delivery failed (%s)", type(exc).__name__)

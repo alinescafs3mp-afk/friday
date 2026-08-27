@@ -1,8 +1,10 @@
-"""Bounded Telegram progress for opaque, potentially long /api/chat turns."""
+"""Bounded Telegram progress for opaque, potentially long chat turns."""
 
 from __future__ import annotations
 
 import asyncio
+import base64
+import hashlib
 from typing import Any, cast
 
 import httpx
@@ -46,146 +48,94 @@ async def _never_typing(*_args: Any, **_kwargs: Any) -> None:
 
 
 @pytest.mark.asyncio
-async def test_decompile_turn_gets_two_elapsed_time_notices_without_fake_phase_or_percent(
+@pytest.mark.parametrize(
+    ("speech", "update_id", "checkpoint_count"),
+    [
+        ("Декомпилируй его.", 8801, 2),
+        ("Сборка Main.java в JAR", 8805, 2),
+        ("Проверь этот документ", 8802, 1),
+    ],
+)
+async def test_long_turn_uses_one_revision_stream_without_fake_phase_percent_or_eta(
     tmp_path,
     monkeypatch,
+    speech: str,
+    update_id: int,
+    checkpoint_count: int,
 ) -> None:
     bridge = _bridge(tmp_path)
-    sent: list[tuple[str, dict[str, Any]]] = []
-    backend_payloads: list[dict[str, Any]] = []
+    statuses: list[dict[str, Any]] = []
+    final_messages: list[str] = []
+    checkpoints_seen = asyncio.Event()
 
     async def immediate_progress_delay(_delay: float) -> None:
         return None
 
-    async def backend_json(
-        _client: object,
-        method: str,
-        path: str,
-        payload: dict[str, Any],
-        _user: str,
-        _chat: str,
-    ) -> dict[str, Any]:
-        assert method == "POST" and path == "/api/chat"
-        backend_payloads.append(dict(payload))
-        # Yield exactly once so the independently scheduled notifier owns the
-        # loop; its injected delay completes synchronously and deterministically.
-        await asyncio.sleep(0)
+    async def backend_json(*_args: Any, **_kwargs: Any) -> dict[str, Any]:
+        await checkpoints_seen.wait()
         return {"message": "Готово", "message_format": "plain"}
 
-    async def send(_client: object, _chat_id: int, text: str, **kwargs: Any) -> None:
-        sent.append((text, kwargs))
-
-    monkeypatch.setattr(commands, "_progress_sleep", immediate_progress_delay)
-    monkeypatch.setattr(bridge, "_backend_json", backend_json)
-    monkeypatch.setattr(bridge, "_typing_loop", _never_typing)
-    monkeypatch.setattr(bridge, "_send_message", send)
-    try:
-        await bridge._process_update(  # noqa: SLF001
-            _client_stub(),
-            _client_stub(),
-            _update("Декомпилируй его."),
-            cached_response=None,
+    async def publish(
+        _client: object,
+        chat_id: int,
+        operation_id: str,
+        revision: int,
+        text: str,
+        **kwargs: Any,
+    ) -> str:
+        statuses.append(
+            {
+                "chat_id": chat_id,
+                "operation_id": operation_id,
+                "revision": revision,
+                "text": text,
+                **kwargs,
+            }
         )
-    finally:
-        bridge._inbox.close()  # noqa: SLF001
-
-    assert len(backend_payloads) == 1
-    assert [item[0] for item in sent[-1:]] == ["Готово"]
-    progress = sent[:-1]
-    assert len(progress) == 2
-    assert "четырьмя минутами" in progress[0][0]
-    assert "прошло около минуты" in progress[1][0].casefold()
-    assert all("%" not in text and "готов" not in text.casefold() for text, _ in progress)
-    assert all(kwargs["text_format"] == "plain" for _text, kwargs in progress)
-    assert all(kwargs["reply_to_message_id"] == 91 for _text, kwargs in progress)
-
-
-@pytest.mark.asyncio
-async def test_compile_turn_progress_does_not_claim_javac_started_or_invent_percent(
-    tmp_path,
-    monkeypatch,
-) -> None:
-    bridge = _bridge(tmp_path)
-    sent: list[str] = []
-
-    async def immediate_progress_delay(_delay: float) -> None:
-        return None
-
-    async def backend_json(*_args: Any, **_kwargs: Any) -> dict[str, Any]:
-        await asyncio.sleep(0)
-        return {"message": "Терминальный итог", "message_format": "plain"}
+        if len([item for item in statuses if item["create"]]) == checkpoint_count:
+            checkpoints_seen.set()
+        return "sent" if len(statuses) == 1 else "edited"
 
     async def send(_client: object, _chat_id: int, text: str, **_kwargs: Any) -> None:
-        sent.append(text)
+        final_messages.append(text)
 
     monkeypatch.setattr(commands, "_progress_sleep", immediate_progress_delay)
     monkeypatch.setattr(bridge, "_backend_json", backend_json)
     monkeypatch.setattr(bridge, "_typing_loop", _never_typing)
     monkeypatch.setattr(bridge, "_send_message", send)
+    monkeypatch.setattr(bridge._status_messages, "publish", publish)  # noqa: SLF001
     try:
         await bridge._process_update(  # noqa: SLF001
             _client_stub(),
             _client_stub(),
-            _update("Сборка Main.java в JAR", update_id=8805),
+            _update(speech, update_id=update_id),
             cached_response=None,
         )
     finally:
         bridge._inbox.close()  # noqa: SLF001
 
-    assert sent[-1] == "Терминальный итог"
-    progress = sent[:-1]
-    assert len(progress) == 2
-    assert "факт запуска javac подтвердит итоговый отчёт" in progress[0]
-    assert "всё ещё обрабатывается" in progress[1]
-    assert all("%" not in text and "готов" not in text.casefold() for text in progress)
+    assert final_messages == ["Готово"]
+    assert len([item for item in statuses if item["create"]]) == checkpoint_count
+    assert {item["operation_id"] for item in statuses} == {f"chat:{update_id}"}
+    assert [item["revision"] for item in statuses] == list(range(1, len(statuses) + 1))
+    assert statuses[-1]["terminal"] is True
+    assert statuses[-1]["text"].startswith("✅")
+    assert all("%" not in item["text"] and "ETA" not in item["text"] for item in statuses)
+    assert all("javac" not in item["text"].casefold() for item in statuses)
+    assert all("четырьмя минутами" not in item["text"].casefold() for item in statuses)
+    assert all(speech not in item["text"] for item in statuses)
+    assert all(item["reply_to_message_id"] == 91 for item in statuses)
 
 
 @pytest.mark.asyncio
-async def test_opaque_chat_turn_gets_one_generic_notice_without_invented_percent(
-    tmp_path,
-    monkeypatch,
-) -> None:
-    bridge = _bridge(tmp_path)
-    sent: list[str] = []
-
-    async def immediate_progress_delay(_delay: float) -> None:
-        return None
-
-    async def backend_json(*_args: Any, **_kwargs: Any) -> dict[str, Any]:
-        await asyncio.sleep(0)
-        return {"message": "Итог", "message_format": "plain"}
-
-    async def send(_client: object, _chat_id: int, text: str, **_kwargs: Any) -> None:
-        sent.append(text)
-
-    monkeypatch.setattr(commands, "_progress_sleep", immediate_progress_delay)
-    monkeypatch.setattr(bridge, "_backend_json", backend_json)
-    monkeypatch.setattr(bridge, "_typing_loop", _never_typing)
-    monkeypatch.setattr(bridge, "_send_message", send)
-    try:
-        await bridge._process_update(  # noqa: SLF001
-            _client_stub(),
-            _client_stub(),
-            _update("Проверь этот документ", update_id=8802),
-            cached_response=None,
-        )
-    finally:
-        bridge._inbox.close()  # noqa: SLF001
-
-    assert sent[-1] == "Итог"
-    assert len(sent[:-1]) == 1
-    assert "ещё выполняется" in sent[0]
-    assert "%" not in sent[0]
-
-
-@pytest.mark.asyncio
-async def test_progress_is_cancelled_before_the_final_answer_can_proceed(
+async def test_progress_is_cancelled_before_fast_final_answer_and_does_not_create_status(
     tmp_path,
     monkeypatch,
 ) -> None:
     bridge = _bridge(tmp_path)
     progress_waiting = asyncio.Event()
     progress_cancelled = asyncio.Event()
+    statuses: list[str] = []
     sent: list[str] = []
 
     async def blocked_progress_delay(_delay: float) -> None:
@@ -199,6 +149,10 @@ async def test_progress_is_cancelled_before_the_final_answer_can_proceed(
         await progress_waiting.wait()
         return {"message": "Итог", "message_format": "plain"}
 
+    async def publish(*_args: Any, **_kwargs: Any) -> str:
+        statuses.append("unexpected")
+        return "sent"
+
     async def send(_client: object, _chat_id: int, text: str, **_kwargs: Any) -> None:
         if text == "Итог":
             assert progress_cancelled.is_set()
@@ -208,44 +162,50 @@ async def test_progress_is_cancelled_before_the_final_answer_can_proceed(
     monkeypatch.setattr(bridge, "_backend_json", backend_json)
     monkeypatch.setattr(bridge, "_typing_loop", _never_typing)
     monkeypatch.setattr(bridge, "_send_message", send)
+    monkeypatch.setattr(bridge._status_messages, "publish", publish)  # noqa: SLF001
     try:
         await bridge._process_update(  # noqa: SLF001
             _client_stub(),
             _client_stub(),
-            _update("Обычный долгий запрос", update_id=8803),
+            _update("Обычный быстрый запрос", update_id=8803),
             cached_response=None,
         )
-        await asyncio.sleep(0)
     finally:
         bridge._inbox.close()  # noqa: SLF001
 
     assert sent == ["Итог"]
+    assert statuses == []
 
 
 @pytest.mark.asyncio
-async def test_progress_delivery_failure_never_fails_the_backend_turn(
+async def test_progress_delivery_failure_never_fails_or_repeats_backend_turn(
     tmp_path,
     monkeypatch,
 ) -> None:
     bridge = _bridge(tmp_path)
+    backend_calls = 0
     final_messages: list[str] = []
 
     async def immediate_progress_delay(_delay: float) -> None:
         return None
 
     async def backend_json(*_args: Any, **_kwargs: Any) -> dict[str, Any]:
+        nonlocal backend_calls
+        backend_calls += 1
         await asyncio.sleep(0)
         return {"message": "Итог сохранён", "message_format": "plain"}
 
+    async def failed_publish(*_args: Any, **_kwargs: Any) -> str:
+        raise RuntimeError("synthetic Telegram outage")
+
     async def send(_client: object, _chat_id: int, text: str, **_kwargs: Any) -> None:
-        if text.startswith("⏳"):
-            raise RuntimeError("synthetic Telegram outage")
         final_messages.append(text)
 
     monkeypatch.setattr(commands, "_progress_sleep", immediate_progress_delay)
     monkeypatch.setattr(bridge, "_backend_json", backend_json)
     monkeypatch.setattr(bridge, "_typing_loop", _never_typing)
     monkeypatch.setattr(bridge, "_send_message", send)
+    monkeypatch.setattr(bridge._status_messages, "publish", failed_publish)  # noqa: SLF001
     try:
         await bridge._process_update(  # noqa: SLF001
             _client_stub(),
@@ -256,42 +216,42 @@ async def test_progress_delivery_failure_never_fails_the_backend_turn(
     finally:
         bridge._inbox.close()  # noqa: SLF001
 
+    assert backend_calls == 1
     assert final_messages == ["Итог сохранён"]
 
 
 @pytest.mark.asyncio
-async def test_recovery_calls_share_one_finite_decompile_notice_budget(
+async def test_restarted_notifier_shares_one_finite_decompile_checkpoint_budget(
     tmp_path,
     monkeypatch,
 ) -> None:
     bridge = _bridge(tmp_path)
-    sent: list[str] = []
-    backend_calls = 0
+    revisions: list[int] = []
+    delays: list[float] = []
 
-    async def immediate_progress_delay(_delay: float) -> None:
+    async def immediate_progress_delay(delay: float) -> None:
+        delays.append(delay)
         return None
 
-    async def backend_json(*_args: Any, **_kwargs: Any) -> dict[str, Any]:
-        nonlocal backend_calls
-        backend_calls += 1
-        await asyncio.sleep(0)
-        return {"message": "ok"}
-
-    async def send(_client: object, _chat_id: int, text: str, **_kwargs: Any) -> None:
-        sent.append(text)
+    async def publish(
+        _client: object,
+        _chat_id: int,
+        _operation_id: str,
+        revision: int,
+        _text: str,
+        **_kwargs: Any,
+    ) -> str:
+        revisions.append(revision)
+        return "sent" if len(revisions) == 1 else "edited"
 
     monkeypatch.setattr(commands, "_progress_sleep", immediate_progress_delay)
-    monkeypatch.setattr(bridge, "_backend_json", backend_json)
-    monkeypatch.setattr(bridge, "_send_message", send)
-    state = commands._ChatProgressState("Декомпилируй этот файл")
+    monkeypatch.setattr(bridge._status_messages, "publish", publish)  # noqa: SLF001
+    state = commands._ChatProgressState("Декомпилируй этот файл", operation_id="chat:991")
     try:
         for _ in range(2):
-            await commands._final_chat_request_with_progress(
+            await commands._emit_chat_progress(  # noqa: SLF001
                 bridge,
                 _client_stub(),
-                _client_stub(),
-                {"message": "Декомпилируй этот файл"},
-                "5001",
                 5001,
                 91,
                 state,
@@ -299,5 +259,145 @@ async def test_recovery_calls_share_one_finite_decompile_notice_budget(
     finally:
         bridge._inbox.close()  # noqa: SLF001
 
-    assert backend_calls == 2
-    assert len(sent) == 2
+    assert delays == pytest.approx(
+        [12.0, 30.0, 60.0, 120.0, 300.0, 600.0, 750.0],
+        abs=0.01,
+    )
+    assert revisions == list(range(1, 8))
+
+
+@pytest.mark.asyncio
+async def test_album_status_observes_download_staging_backend_and_delivery_in_order(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    bridge = _bridge(tmp_path)
+    first = _album_message(8810, 101, "photo-a", caption="private album prompt")
+    second = _album_message(8811, 102, "photo-b")
+    combined = dict(first)
+    combined["friday_media_group_messages"] = [first["message"], second["message"]]
+    statuses: list[dict[str, Any]] = []
+    receiving_seen = asyncio.Event()
+    staging_seen = asyncio.Event()
+    backend_seen = asyncio.Event()
+
+    async def immediate_progress_delay(_delay: float) -> None:
+        return None
+
+    async def publish(
+        _client: object,
+        _chat_id: int,
+        operation_id: str,
+        revision: int,
+        text: str,
+        **kwargs: Any,
+    ) -> str:
+        statuses.append({"operation_id": operation_id, "revision": revision, "text": text, **kwargs})
+        if "получаю вложения" in text:
+            receiving_seen.set()
+        if "передаю вложения" in text:
+            staging_seen.set()
+        if "ядро обрабатывает" in text:
+            backend_seen.set()
+        return "sent" if len(statuses) == 1 else "edited"
+
+    async def prepare(_telegram: object, message: dict[str, Any], _update_value: dict[str, Any]) -> dict[str, Any]:
+        await receiving_seen.wait()
+        photo = message["photo"][-1]
+        return {
+            "filename": f"{photo['file_id']}.jpg",
+            "mime_type": "image/jpeg",
+            "content_base64": base64.b64encode(photo["file_id"].encode()).decode(),
+            "source_ref": f"telegram-file:{photo['file_id']}",
+        }
+
+    async def backend_json(
+        _client: object,
+        _method: str,
+        _path: str,
+        payload: dict[str, Any],
+        _user: str,
+        _chat: str,
+    ) -> dict[str, Any]:
+        if payload.get("document_stage_only") is True:
+            await staging_seen.wait()
+            return {
+                "file_ingestions": [
+                    {
+                        "telegram_item_receipt": {
+                            "telegram_message_id": int(item["telegram_message_id"]),
+                            "source_ref_sha256": hashlib.sha256(
+                                str(item["source_ref"]).encode()
+                            ).hexdigest(),
+                        },
+                        "telegram_stage_ready": True,
+                    }
+                    for item in payload["documents"]
+                ]
+            }
+        await backend_seen.wait()
+        return {"message": "Готово", "message_format": "plain"}
+
+    async def send(*_args: Any, **_kwargs: Any) -> None:
+        return None
+
+    monkeypatch.setattr(commands, "_progress_sleep", immediate_progress_delay)
+    monkeypatch.setattr(bridge._status_messages, "publish", publish)  # noqa: SLF001
+    monkeypatch.setattr(bridge, "_prepare_document", prepare)
+    monkeypatch.setattr(bridge, "_backend_json", backend_json)
+    monkeypatch.setattr(bridge, "_typing_loop", _never_typing)
+    monkeypatch.setattr(bridge, "_send_message", send)
+    try:
+        await bridge._process_update(  # noqa: SLF001
+            _client_stub(),
+            _client_stub(),
+            combined,
+            cached_response=None,
+        )
+    finally:
+        bridge._inbox.close()  # noqa: SLF001
+
+    joined = "\n".join(item["text"] for item in statuses)
+    assert joined.index("получаю вложения") < joined.index("передаю вложения")
+    assert joined.index("передаю вложения") < joined.index("ядро обрабатывает")
+    assert joined.index("ядро обрабатывает") < joined.index("отправляю готовый результат")
+    assert statuses[-1]["terminal"] is True
+    assert {item["operation_id"] for item in statuses} == {"chat:8810"}
+    revisions = [item["revision"] for item in statuses]
+    assert revisions == sorted(set(revisions))
+    assert "private album prompt" not in joined
+    assert "Получено вложений: 2 из 2, 14 Б" in joined
+    assert "Принято ядром: 2 из 2, 14 Б" in joined
+
+
+def test_recurring_schedule_stays_strictly_below_configured_bridge_ceiling() -> None:
+    state = commands._ChatProgressState("opaque", ceiling_sec=300)
+
+    assert state.schedule == (12.0, 30.0, 60.0, 120.0, 270.0)
+
+
+def _album_message(
+    update_id: int,
+    message_id: int,
+    file_id: str,
+    *,
+    caption: str = "",
+) -> dict[str, Any]:
+    message: dict[str, Any] = {
+        "message_id": message_id,
+        "media_group_id": "progress-album",
+        "chat": {"id": 5001, "type": "private"},
+        "from": {"id": 5001, "first_name": "Owner"},
+        "photo": [
+            {
+                "file_id": file_id,
+                "file_unique_id": f"unique-{file_id}",
+                "file_size": 12,
+                "width": 10,
+                "height": 10,
+            }
+        ],
+    }
+    if caption:
+        message["caption"] = caption
+    return {"update_id": update_id, "message": message}
