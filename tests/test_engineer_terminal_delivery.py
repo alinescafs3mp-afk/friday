@@ -392,3 +392,53 @@ def test_notification_identity_drift_finishes_uncertain_without_requeue(
     assert state is not None and state["state"] == "uncertain"
     assert storage.execute("SELECT COUNT(*) FROM outbound_notifications").fetchone()[0] == 1
     command_store.close()
+
+
+def test_authority_retirement_is_uncertain_but_proven_rejection_cap_is_failed(
+    storage,
+    tmp_path: Path,
+) -> None:
+    conversation_id, source_message_id = _main_scope(storage)
+    attachment, batch = _archive_attachment()
+    staged = stage_terminal_archive(
+        storage,
+        tmp_path / "files",
+        actor_id=LEGACY_OWNER_USER_ID,
+        tenant_id=LEGACY_OWNER_USER_ID,
+        conversation_id=conversation_id,
+        source_message_id=source_message_id,
+        delivery_chat_id="5001",
+        job_id="1" * 32,
+        status="completed",
+        receipt_mac="2" * 64,
+        attachment=attachment,
+        batch=batch,
+        max_bytes=1024 * 1024,
+    )
+    storage.discard_notifications_verified(
+        [staged.notification_id],
+        reason="terminal_authorization_changed",
+    )
+    assert (
+        terminal_notification_status(
+            storage,
+            staged.notification_id,
+            staged.dedup_key,
+            staged.envelope_sha256,
+        )
+        == "uncertain"
+    )
+    with storage.transaction() as conn:
+        conn.execute(
+            "UPDATE outbound_notifications SET attempts=5 WHERE id=?",
+            (staged.notification_id,),
+        )
+    assert (
+        terminal_notification_status(
+            storage,
+            staged.notification_id,
+            staged.dedup_key,
+            staged.envelope_sha256,
+        )
+        == "failed"
+    )

@@ -46,6 +46,7 @@ _MIME_TYPE = re.compile(r"[A-Za-z0-9!#$&^_.+-]+/[A-Za-z0-9!#$&^_.+-]+")
 _TERMINAL_STATUSES = frozenset({"completed", "failed", "cancelled", "timeout"})
 _ENVELOPE_MAX_BYTES = 8 * 1024
 _CAPTION_MAX_CHARS = 900
+_TERMINAL_NOTIFICATION_MAX_ATTEMPTS = 5
 
 
 class TerminalDeliveryError(RuntimeError):
@@ -409,7 +410,7 @@ def terminal_notification_status(
     envelope_sha256: str,
 ) -> str:
     row = storage.execute(
-        "SELECT status,kind,dedup_key,body FROM outbound_notifications WHERE id=?",
+        "SELECT status,kind,dedup_key,body,attempts FROM outbound_notifications WHERE id=?",
         (str(notification_id),),
     ).fetchone()
     if row is None:
@@ -426,6 +427,11 @@ def terminal_notification_status(
     ):
         return "invalid"
     status = str(row["status"] or "")
+    # A strict row can be retired by a fresh authority check while a previously
+    # delivered archive's ACK is still in flight.  Unlike five proven Telegram
+    # rejections, that low-attempt `failed` state cannot prove non-delivery.
+    if status == "failed" and int(row["attempts"] or 0) < _TERMINAL_NOTIFICATION_MAX_ATTEMPTS:
+        return "uncertain"
     return status if status in {"pending", "sent", "uncertain", "failed"} else "invalid"
 
 

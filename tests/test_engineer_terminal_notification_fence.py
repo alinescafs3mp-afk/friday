@@ -76,9 +76,12 @@ class _Backend:
             str(value) for field in ("sent", "failed", "uncertain") for value in (payload.get(field) or [])
         ]
         notification_id = str(self.item["id"])
-        if notification_id in (payload.get("sent") or []) and self.status == "pending":
+        if notification_id in (payload.get("sent") or []) and self.status in {"pending", "failed"}:
             self.status = "sent"
-        if notification_id in (payload.get("uncertain") or []) and self.status == "pending":
+        if notification_id in (payload.get("uncertain") or []) and self.status in {
+            "pending",
+            "failed",
+        }:
             self.status = "uncertain"
         if notification_id in (payload.get("failed") or []) and self.status == "pending":
             self.failed_attempts += 1
@@ -392,6 +395,27 @@ async def test_verified_retirement_bounds_local_cleanup(tmp_path):
     backend.retired = [item["id"]]
     try:
         await bridge._drain_outbound(_Telegram(), backend)  # noqa: SLF001
+        assert backend.status == "uncertain"
+        assert bridge._inbox.notification_delivery_ids() == set()  # noqa: SLF001
+    finally:
+        bridge._inbox.close()  # noqa: SLF001
+
+
+@pytest.mark.asyncio
+async def test_lost_sent_ack_survives_later_authority_retirement(tmp_path):
+    payload, item = b"PK\x03\x04archive", _terminal_item(b"PK\x03\x04archive")
+    bridge, backend = _bridge(tmp_path), _Backend(item, payload)
+    fence_key = "document:exact-delivered-envelope"
+    bridge._inbox.begin_notification_part_delivery(item["id"], fence_key)  # noqa: SLF001
+    assert bridge._inbox.confirm_notification_part_delivery(item["id"], fence_key)  # noqa: SLF001
+    bridge._inbox.remember_notification_delivery_outcome(item["id"], "sent")  # noqa: SLF001
+    backend.status = "failed"
+    backend.retired = [item["id"]]
+    telegram = _Telegram()
+    try:
+        await bridge._drain_outbound(telegram, backend)  # noqa: SLF001
+        assert telegram.documents == []
+        assert backend.status == "sent"
         assert bridge._inbox.notification_delivery_ids() == set()  # noqa: SLF001
     finally:
         bridge._inbox.close()  # noqa: SLF001

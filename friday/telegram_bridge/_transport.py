@@ -971,9 +971,9 @@ class TransportMixin(BridgeShared):
             signer_chat,
         )
         raw_retired = data.get("retired")
+        retired: list[str] = []
         if isinstance(raw_retired, list):
             retired = [value for value in raw_retired[:100] if isinstance(value, str) and value]
-            self._inbox.forget_notification_delivery_parts(retired)
         raw_items = data.get("items")
         items: list[Any] = raw_items if isinstance(raw_items, list) else []
         terminal_outcomes = self._inbox.notification_delivery_outcomes(limit=100)
@@ -984,6 +984,14 @@ class TransportMixin(BridgeShared):
         for notification_id, inferred in self._inbox.notification_delivery_orphan_outcomes(limit=100).items():
             self._inbox.remember_notification_delivery_outcome(notification_id, inferred)
             terminal_outcomes[notification_id] = inferred
+        # A retirement can race a previously delivered document whose ACK was
+        # lost.  Its local fence is the only remaining evidence of sent versus
+        # uncertain, so reconcile that evidence before cleanup.  Retired ids
+        # without any strict local state are safe to discard immediately.
+        if retired:
+            self._inbox.forget_notification_delivery_parts(
+                [notification_id for notification_id in retired if notification_id not in terminal_outcomes]
+            )
         sent: list[str] = [
             notification_id for notification_id, outcome in terminal_outcomes.items() if outcome == "sent"
         ]

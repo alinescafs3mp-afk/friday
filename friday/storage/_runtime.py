@@ -275,7 +275,9 @@ class RuntimeMixin(StorageShared):
             for notif_id in sent:
                 conn.execute(
                     f"""UPDATE outbound_notifications AS n SET status='sent', sent_at=?
-                         WHERE id=? AND status='pending'
+                         WHERE id=?
+                           AND (status='pending'
+                                OR (kind='engineer_command_terminal' AND status='failed'))
                            AND (kind='engineer_command_terminal'
                                 OR {_not_private_notification_dependency("n")})""",  # nosec B608
                     (utc_now(), notif_id),
@@ -303,7 +305,8 @@ class RuntimeMixin(StorageShared):
                 conn.execute(
                     """UPDATE outbound_notifications AS n
                        SET status='uncertain', sent_at=?
-                       WHERE id=? AND kind='engineer_command_terminal' AND status='pending'
+                       WHERE id=? AND kind='engineer_command_terminal'
+                         AND status IN ('pending','failed')
                        """,
                     (utc_now(), notif_id),
                 )
