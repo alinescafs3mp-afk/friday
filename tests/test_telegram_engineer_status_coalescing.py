@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import hashlib
 from typing import Any
 
 import httpx
 import pytest
 
 from friday.telegram_bridge import TelegramBridge, TelegramConfig
+from friday.telegram_bridge import _transport as bridge_transport
 
 
 def _bridge(tmp_path) -> TelegramBridge:  # noqa: ANN001
@@ -181,3 +183,78 @@ async def test_delivered_no_file_result_retries_only_missing_terminal_status(
     assert final_messages == ["Engineer result with bounded stdout"]
     assert status_attempts == 2
     assert acknowledgements == [["notif_terminal_text_1"]]
+
+
+@pytest.mark.asyncio
+async def test_terminal_outcome_reconciliation_rechecks_chat_before_status_create(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    bridge = _bridge(tmp_path)
+    job_id = "c" * 32
+    payload = b"PK\x03\x04result"
+    notification_id = "notif_terminal_reconcile"
+    digest = hashlib.sha256(payload).hexdigest()
+    item = {
+        "id": notification_id,
+        "chat_id": "5001",
+        "kind": "engineer_command_terminal",
+        "dedup_key": f"engineer-terminal:archive:{job_id}:{digest}",
+        "caption": "Engineer result archive",
+        "artifact": {
+            "filename": "result.zip",
+            "mime_type": "application/zip",
+            "size_bytes": len(payload),
+            "sha256": digest,
+            "path": f"/api/notifications/{notification_id}/artifact",
+        },
+        "status_update": {
+            "schema": "friday.telegram-status.v1",
+            "operation_id": f"engineer:{job_id}",
+            "revision": (1 << 63) - 1,
+            "terminal": True,
+            "stage": "completed",
+        },
+    }
+    envelope = bridge_transport._engineer_terminal_envelope(  # noqa: SLF001
+        item,
+        chat_id=5001,
+        max_document_bytes=bridge.config.max_document_bytes,
+    )
+    assert envelope is not None
+    fence_key = str(envelope["fence_key"])
+    assert bridge._inbox.begin_notification_part_delivery(notification_id, fence_key) == "armed"  # noqa: SLF001
+    assert bridge._inbox.confirm_notification_part_delivery(notification_id, fence_key)  # noqa: SLF001
+    bridge._inbox.remember_notification_delivery_outcome(notification_id, "sent")  # noqa: SLF001
+    telegram_calls: list[str] = []
+    acknowledgements: list[tuple[list[str], list[str]]] = []
+
+    class Telegram:
+        async def post(self, url: str, **_kwargs: Any) -> httpx.Response:
+            telegram_calls.append(url.rsplit("/", 1)[-1])
+            return httpx.Response(200, request=httpx.Request("POST", url))
+
+    async def backend_json(*_args: Any, **_kwargs: Any) -> dict[str, Any]:
+        return {"items": [item], "count": 1}
+
+    async def ack(
+        _backend: object,
+        _signer: str,
+        sent: list[str],
+        failed: list[str],
+        **_kwargs: Any,
+    ) -> None:
+        acknowledgements.append((list(sent), list(failed)))
+
+    monkeypatch.setattr(bridge, "_backend_json", backend_json)
+    monkeypatch.setattr(bridge, "_ack_outbound", ack)
+    monkeypatch.setattr(bridge, "_may_message_chat", lambda _chat_id: False)
+    try:
+        await bridge._drain_outbound(Telegram(), object())  # type: ignore[arg-type]  # noqa: SLF001
+        outcomes = bridge._inbox.notification_delivery_outcomes()  # noqa: SLF001
+    finally:
+        bridge._inbox.close()  # noqa: SLF001
+
+    assert telegram_calls == []
+    assert acknowledgements == []
+    assert outcomes == {notification_id: "sent"}

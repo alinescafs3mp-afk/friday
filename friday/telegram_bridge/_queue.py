@@ -160,6 +160,13 @@ class _UpdateInbox:
                 updated_at REAL NOT NULL,
                 PRIMARY KEY(chat_id, operation_id)
             );
+            CREATE TABLE IF NOT EXISTS telegram_status_send_fences (
+                chat_id INTEGER NOT NULL,
+                operation_id TEXT NOT NULL,
+                revision INTEGER NOT NULL,
+                updated_at REAL NOT NULL,
+                PRIMARY KEY(chat_id, operation_id)
+            );
             """
         )
         restrict_sqlite_files(path)
@@ -239,6 +246,20 @@ class _UpdateInbox:
                 status_now - _TELEGRAM_STATUS_TERMINAL_TTL_SEC,
                 status_now - _TELEGRAM_STATUS_RUNNING_TTL_SEC,
             ),
+        )
+        # A process can stop after persisting the accepted Telegram message id
+        # but before removing its pre-send ambiguity fence.  The coordinate is
+        # stronger evidence: only those proven-complete fences may be retired.
+        # Unresolved fences deliberately have no TTL; expiring one would permit
+        # a blind duplicate after an old accepted response was lost.
+        self._conn.execute(
+            """DELETE FROM telegram_status_send_fences
+               WHERE EXISTS (
+                   SELECT 1 FROM telegram_status_messages AS messages
+                   WHERE messages.chat_id=telegram_status_send_fences.chat_id
+                     AND messages.operation_id=telegram_status_send_fences.operation_id
+                     AND messages.revision>=telegram_status_send_fences.revision
+               )"""
         )
         self._conn.commit()
 
@@ -560,6 +581,68 @@ class _UpdateInbox:
             "revision": int(row["revision"]),
             "terminal": bool(row["terminal"]),
         }
+
+    def telegram_status_send_fence(
+        self,
+        chat_id: int,
+        operation_id: str,
+    ) -> dict[str, int] | None:
+        """Return a content-free fence for a send whose outcome is not proven."""
+
+        row = self._conn.execute(
+            """SELECT revision FROM telegram_status_send_fences
+               WHERE chat_id=? AND operation_id=?""",
+            (int(chat_id), str(operation_id)),
+        ).fetchone()
+        return {"revision": int(row["revision"])} if row is not None else None
+
+    def begin_telegram_status_send(
+        self,
+        chat_id: int,
+        operation_id: str,
+        revision: int,
+    ) -> str:
+        """Arm one durable pre-send fence; only its creator may call Telegram."""
+
+        chat = int(chat_id)
+        operation = str(operation_id)
+        current_revision = int(revision)
+        max_integer = (1 << 63) - 1
+        if (
+            not chat
+            or abs(chat) > max_integer
+            or not operation
+            or len(operation) > 128
+            or not operation.isascii()
+            or any(not (character.isalnum() or character in "._:-") for character in operation)
+            or current_revision <= 0
+            or current_revision > max_integer
+        ):
+            raise ValueError("invalid Telegram status send fence")
+        cursor = self._conn.execute(
+            """INSERT OR IGNORE INTO telegram_status_send_fences(
+                   chat_id, operation_id, revision, updated_at)
+               VALUES(?, ?, ?, ?)""",
+            (chat, operation, current_revision, time.time()),
+        )
+        self._conn.commit()
+        return "armed" if cursor.rowcount > 0 else "uncertain"
+
+    def clear_telegram_status_send_fence(
+        self,
+        chat_id: int,
+        operation_id: str,
+        revision: int,
+    ) -> bool:
+        """Disarm only the exact send attempt after rejection or durable CAS."""
+
+        cursor = self._conn.execute(
+            """DELETE FROM telegram_status_send_fences
+               WHERE chat_id=? AND operation_id=? AND revision=?""",
+            (int(chat_id), str(operation_id), int(revision)),
+        )
+        self._conn.commit()
+        return cursor.rowcount > 0
 
     def record_telegram_status_message(
         self,
@@ -938,6 +1021,44 @@ class _UpdateInbox:
         )
         self._conn.commit()
         return dead_lettered
+
+    def defer_pending_many(
+        self,
+        update_ids: list[int],
+        error: str,
+        *,
+        delay_sec: float = 30.0,
+    ) -> bool:
+        """Retain an owned update group without consuming its finite retry budget."""
+
+        cleaned = list(dict.fromkeys(int(value) for value in update_ids))
+        delay = float(delay_sec)
+        if not cleaned or not 1.0 <= delay <= 3_600.0:
+            raise ValueError("invalid durable update deferral")
+        placeholders = ",".join("?" for _value in cleaned)
+        rows = self._conn.execute(
+            f"SELECT update_id FROM updates WHERE update_id IN ({placeholders}) AND status='pending'",  # nosec B608
+            cleaned,
+        ).fetchall()
+        if len(rows) != len(cleaned):
+            return False
+        deferred_at = time.time()
+        self._conn.executemany(
+            """UPDATE updates
+               SET last_attempt_at=?, last_error=?, next_attempt_at=?
+               WHERE update_id=? AND status='pending'""",
+            [
+                (
+                    deferred_at,
+                    str(error)[:500],
+                    deferred_at + delay,
+                    int(row["update_id"]),
+                )
+                for row in rows
+            ],
+        )
+        self._conn.commit()
+        return True
 
     def mark_failure_many(self, update_ids: list[int], error: str) -> bool:
         """Charge one failed owned album attempt to every durable part atomically."""

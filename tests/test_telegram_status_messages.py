@@ -135,7 +135,14 @@ async def test_edit_rejection_falls_back_to_new_message_and_replaces_persisted_i
         method = request.url.path.rsplit("/", 1)[-1]
         calls.append(method)
         if method == "editMessageText":
-            return httpx.Response(400, json={"ok": False, "description": "message to edit not found"})
+            return httpx.Response(
+                400,
+                json={
+                    "ok": False,
+                    "error_code": 400,
+                    "description": "message to edit not found",
+                },
+            )
         return httpx.Response(200, json={"ok": True, "result": {"message_id": next(send_ids)}})
 
     manager = _manager(inbox)
@@ -175,6 +182,78 @@ async def test_ambiguous_edit_failure_does_not_create_a_duplicate_status(tmp_pat
         assert inbox.telegram_status_message(5001, "job:uncertain") == {
             "message_id": 811,
             "revision": 1,
+            "terminal": False,
+        }
+    finally:
+        inbox.close()
+
+
+@pytest.mark.asyncio
+async def test_ambiguous_initial_send_is_fenced_across_restart_without_blind_retry(tmp_path) -> None:
+    db_path = tmp_path / "telegram.sqlite3"
+    calls: list[str] = []
+
+    def telegram(request: httpx.Request) -> httpx.Response:
+        calls.append(request.url.path.rsplit("/", 1)[-1])
+        raise httpx.ReadTimeout("accepted response may be lost", request=request)
+
+    inbox = _UpdateInbox(str(db_path))
+    async with _client(telegram) as client:
+        assert await _manager(inbox).publish(
+            client,
+            5001,
+            "chat:ambiguous-create",
+            1,
+            "⏳ Первый этап.",
+        ) == "uncertain"
+        assert _manager(inbox).snapshot(5001, "chat:ambiguous-create") == {
+            "revision": 1,
+            "terminal": False,
+            "ambiguous": True,
+        }
+    inbox.close()
+
+    reopened = _UpdateInbox(str(db_path))
+    async with _client(telegram) as client:
+        assert await _manager(reopened).publish(
+            client,
+            5001,
+            "chat:ambiguous-create",
+            2,
+            "⏳ Следующий этап.",
+        ) == "uncertain"
+    try:
+        assert calls == ["sendMessage"]
+        assert reopened.telegram_status_send_fence(5001, "chat:ambiguous-create") == {
+            "revision": 1,
+        }
+    finally:
+        reopened.close()
+
+
+@pytest.mark.asyncio
+async def test_proven_connect_rejection_disarms_initial_send_for_safe_retry(tmp_path) -> None:
+    inbox = _UpdateInbox(str(tmp_path / "telegram.sqlite3"))
+    calls = 0
+
+    def telegram(request: httpx.Request) -> httpx.Response:
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            raise httpx.ConnectError("not connected", request=request)
+        return httpx.Response(200, json={"ok": True, "result": {"message_id": 901}})
+
+    manager = _manager(inbox)
+    async with _client(telegram) as client:
+        with pytest.raises(httpx.ConnectError):
+            await manager.publish(client, 5001, "chat:retry-create", 1, "⏳ Первый этап.")
+        assert inbox.telegram_status_send_fence(5001, "chat:retry-create") is None
+        assert await manager.publish(client, 5001, "chat:retry-create", 2, "⏳ Второй этап.") == "sent"
+    try:
+        assert calls == 2
+        assert inbox.telegram_status_message(5001, "chat:retry-create") == {
+            "message_id": 901,
+            "revision": 2,
             "terminal": False,
         }
     finally:

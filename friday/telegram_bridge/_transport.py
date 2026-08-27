@@ -45,7 +45,11 @@ from friday.telegram_bridge._base import (
 )
 from friday.telegram_bridge._markup import to_telegram_html
 from friday.telegram_bridge._queue import _UpdateInbox
-from friday.telegram_bridge._status import TelegramStatusMessageManager, render_engineer_status
+from friday.telegram_bridge._status import (
+    TelegramStatusMessageManager,
+    TelegramTerminalStatusPending,
+    render_engineer_status,
+)
 
 # Long polling normally returns within ``POLL_TIMEOUT`` and even a failed round
 # sleeps for no more than ``BACKOFF_MAX``.  A substantially larger silence means
@@ -1177,6 +1181,14 @@ class TransportMixin(BridgeShared):
                     if notif_id not in uncertain:
                         uncertain.append(notif_id)
                 if item.get("status_update") is not None and outcome_chat_id:
+                    if not self._may_message_chat(outcome_chat_id):
+                        # The durable artifact outcome is not renewed authority
+                        # for a later status create/edit. Keep the exact outcome
+                        # for reconciliation if this chat is admitted again.
+                        LOGGER.warning("Engineer reconciled status chat is no longer admitted")
+                        sent = [value for value in sent if value != notif_id]
+                        uncertain = [value for value in uncertain if value != notif_id]
+                        continue
                     try:
                         outcome_status = _engineer_status_update(item, chat_id=outcome_chat_id)
                         if outcome_status is not None:
@@ -1593,6 +1605,18 @@ class TransportMixin(BridgeShared):
             # тратится. Иначе остановка моста съедала бы людям попытки.
             cancelled = True
             raise
+        except TelegramTerminalStatusPending as exc:
+            # The answer is already cached and its Telegram chunks are fenced,
+            # so replay performs only the missing terminal edit. Unlike an
+            # ordinary processing failure this state must not age into a dead
+            # letter that leaves a visible status eternally running.
+            LOGGER.warning("Telegram update retained for terminal status retry")
+            if not self._inbox.defer_pending_many(
+                owned_update_ids,
+                type(exc).__name__,
+                delay_sec=30.0,
+            ):
+                LOGGER.error("Telegram terminal status update could not be retained")
         except Exception as exc:
             LOGGER.warning("Telegram update deferred (%s)", type(exc).__name__)
             dead_lettered = self._inbox.mark_failure_many(owned_update_ids, type(exc).__name__)

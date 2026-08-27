@@ -19,6 +19,10 @@ _MAX_SQLITE_INTEGER = (1 << 63) - 1
 _status_sleep = asyncio.sleep
 
 
+class TelegramTerminalStatusPending(RuntimeError):
+    """A visible running status still needs its durable terminal transition."""
+
+
 class TelegramStatusStage(str, Enum):
     """Closed, bridge-observable stages; never model-authored prose."""
 
@@ -176,7 +180,17 @@ class TelegramStatusMessageManager:
     def snapshot(self, chat_id: int, operation_id: str) -> dict[str, Any] | None:
         chat = _validated_sqlite_integer(chat_id, positive=False)
         operation = _validated_operation_id(operation_id)
-        return self._inbox.telegram_status_message(chat, operation)
+        stored = self._inbox.telegram_status_message(chat, operation)
+        if stored is not None:
+            return stored
+        fence = self._inbox.telegram_status_send_fence(chat, operation)
+        if fence is None:
+            return None
+        return {
+            "revision": int(fence["revision"]),
+            "terminal": False,
+            "ambiguous": True,
+        }
 
     async def publish(
         self,
@@ -208,6 +222,22 @@ class TelegramStatusMessageManager:
             self._locks[key] = lock
         async with lock:
             stored = self._inbox.telegram_status_message(chat, operation)
+            fence = self._inbox.telegram_status_send_fence(chat, operation)
+            if fence is not None:
+                fence_revision = int(fence["revision"])
+                if stored is not None and int(stored["revision"]) >= fence_revision:
+                    # The accepted message coordinate won the crash race; this
+                    # is the only proof that permits removing an old send fence.
+                    self._inbox.clear_telegram_status_send_fence(
+                        chat,
+                        operation,
+                        fence_revision,
+                    )
+                else:
+                    # Telegram may have accepted a send whose response was lost.
+                    # Without its message_id neither retry nor replacement can
+                    # be made idempotent, so the ambiguity is absorbing.
+                    return "uncertain"
             if stored is not None:
                 stored_revision = int(stored["revision"])
                 if bool(stored["terminal"]):
@@ -230,21 +260,37 @@ class TelegramStatusMessageManager:
                         response.raise_for_status()
                 except asyncio.CancelledError:
                     raise
-                except (httpx.ReadTimeout, httpx.WriteError, httpx.RemoteProtocolError) as exc:
-                    # Acceptance is ambiguous. A replacement could leave two
-                    # visible statuses, so let the next monotonic revision retry
-                    # the same edit instead of guessing that Telegram rejected it.
+                except httpx.TransportError as exc:
+                    # A replacement after either a pre-accept transport failure
+                    # or an ambiguous one would leave the known status beside a
+                    # duplicate. The same idempotent edit remains retryable.
                     LOGGER.debug("Telegram status edit outcome uncertain (%s)", type(exc).__name__)
                     raise
-                except Exception as exc:
-                    # URLs contain the bot token. Log only the exception class.
-                    LOGGER.debug("Telegram status edit failed (%s); replacing", type(exc).__name__)
-                    message_id = await self._send(
+                except httpx.HTTPStatusError as exc:
+                    if not self._is_proven_rejection(exc.response):
+                        LOGGER.debug(
+                            "Telegram status edit outcome uncertain (%s)",
+                            type(exc).__name__,
+                        )
+                        raise
+                    # Only a structurally valid Telegram 4xx proves that the edit
+                    # was rejected and makes a replacement safe to attempt.
+                    LOGGER.debug("Telegram status edit was rejected; replacing")
+                    send_outcome, replacement_id = await self._fenced_send(
                         client,
                         chat,
+                        operation,
+                        current_revision,
                         status_text,
                         reply_to_message_id=reply_id,
                     )
+                    if send_outcome == "uncertain":
+                        return "uncertain"
+                    if replacement_id is None:
+                        raise RuntimeError(
+                            "accepted Telegram status send has no message id"
+                        ) from exc
+                    message_id = replacement_id
                     outcome = "replaced"
                 else:
                     outcome = "edited"
@@ -256,17 +302,37 @@ class TelegramStatusMessageManager:
                     bool(terminal),
                     expected_revision=stored_revision,
                 ):
-                    return self._outcome_after_cas_miss(chat, operation, current_revision)
+                    outcome_after_miss = self._outcome_after_cas_miss(
+                        chat,
+                        operation,
+                        current_revision,
+                    )
+                    self._inbox.clear_telegram_status_send_fence(
+                        chat,
+                        operation,
+                        current_revision,
+                    )
+                    return outcome_after_miss
+                self._inbox.clear_telegram_status_send_fence(
+                    chat,
+                    operation,
+                    current_revision,
+                )
                 return outcome
 
             if not create:
                 return "missing"
-            message_id = await self._send(
+            send_outcome, initial_message_id = await self._fenced_send(
                 client,
                 chat,
+                operation,
+                current_revision,
                 status_text,
                 reply_to_message_id=reply_id,
             )
+            if send_outcome == "uncertain" or initial_message_id is None:
+                return "uncertain"
+            message_id = initial_message_id
             if not self._inbox.record_telegram_status_message(
                 chat,
                 operation,
@@ -275,7 +341,22 @@ class TelegramStatusMessageManager:
                 bool(terminal),
                 expected_revision=None,
             ):
-                return self._outcome_after_cas_miss(chat, operation, current_revision)
+                outcome_after_miss = self._outcome_after_cas_miss(
+                    chat,
+                    operation,
+                    current_revision,
+                )
+                self._inbox.clear_telegram_status_send_fence(
+                    chat,
+                    operation,
+                    current_revision,
+                )
+                return outcome_after_miss
+            self._inbox.clear_telegram_status_send_fence(
+                chat,
+                operation,
+                current_revision,
+            )
             return "sent"
 
     def _outcome_after_cas_miss(self, chat_id: int, operation_id: str, revision: int) -> str:
@@ -311,6 +392,47 @@ class TelegramStatusMessageManager:
         message_id = result.get("message_id") if isinstance(result, dict) else None
         return _validated_sqlite_integer(message_id, positive=True)
 
+    async def _fenced_send(
+        self,
+        client: httpx.AsyncClient,
+        chat_id: int,
+        operation_id: str,
+        revision: int,
+        text: str,
+        *,
+        reply_to_message_id: int | None,
+    ) -> tuple[str, int | None]:
+        """Send only as creator of a durable ambiguity fence."""
+
+        state = self._inbox.begin_telegram_status_send(chat_id, operation_id, revision)
+        if state != "armed":
+            return "uncertain", None
+        try:
+            message_id = await self._send(
+                client,
+                chat_id,
+                text,
+                reply_to_message_id=reply_to_message_id,
+            )
+        except asyncio.CancelledError:
+            # Cancellation can race a completed Telegram write. Preserve the
+            # fence for the next process rather than guessing non-acceptance.
+            raise
+        except Exception as exc:
+            if self._send_was_proven_rejected(
+                exc
+            ) and self._inbox.clear_telegram_status_send_fence(
+                chat_id,
+                operation_id,
+                revision,
+            ):
+                raise
+            # URLs contain the bot token. Log only the exception class and turn
+            # the uncertain result into an absorbing, content-free local state.
+            LOGGER.debug("Telegram status send outcome uncertain (%s)", type(exc).__name__)
+            return "uncertain", None
+        return "accepted", message_id
+
     async def _post(
         self,
         client: httpx.AsyncClient,
@@ -344,10 +466,35 @@ class TelegramStatusMessageManager:
         description = body.get("description") if isinstance(body, dict) else None
         return isinstance(description, str) and "message is not modified" in description.casefold()
 
+    @staticmethod
+    def _is_proven_rejection(response: httpx.Response) -> bool:
+        if not 400 <= int(response.status_code) < 500:
+            return False
+        try:
+            body = response.json()
+        except (TypeError, ValueError):
+            return False
+        return bool(
+            isinstance(body, dict)
+            and body.get("ok") is False
+            and isinstance(body.get("error_code"), int)
+            and not isinstance(body.get("error_code"), bool)
+            and int(body["error_code"]) == int(response.status_code)
+            and isinstance(body.get("description"), str)
+            and bool(str(body["description"]).strip())
+        )
+
+    @classmethod
+    def _send_was_proven_rejected(cls, exc: Exception) -> bool:
+        if isinstance(exc, httpx.ConnectError):
+            return True
+        return isinstance(exc, httpx.HTTPStatusError) and cls._is_proven_rejection(exc.response)
+
 
 __all__ = [
     "TelegramStatusMessageManager",
     "TelegramStatusStage",
+    "TelegramTerminalStatusPending",
     "render_chat_status",
     "render_engineer_status",
 ]

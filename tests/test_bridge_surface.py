@@ -434,9 +434,18 @@ EXPECTED_INBOX: dict[str, str] = {
     "begin_answer_chunk_delivery": ("(self, update_id: 'int', count: 'int') -> 'tuple[int, int] | None'"),
     "begin_answer_delivery_uncertainty_notice": "(self, update_id: 'int') -> 'bool'",
     "begin_notification_part_delivery": "(self, notification_id: 'str', part_key: 'str') -> 'str'",
+    "begin_telegram_status_send": (
+        "(self, chat_id: 'int', operation_id: 'str', revision: 'int') -> 'str'"
+    ),
+    "clear_telegram_status_send_fence": (
+        "(self, chat_id: 'int', operation_id: 'str', revision: 'int') -> 'bool'"
+    ),
     "confirm_notification_part_delivery": "(self, notification_id: 'str', part_key: 'str') -> 'bool'",
     "dead_letters": "(self, *, limit: 'int' = 100) -> 'list[dict[str, Any]]'",
     "delivered_notification_ids": "(self) -> 'set[str]'",
+    "defer_pending_many": (
+        "(self, update_ids: 'list[int]', error: 'str', *, delay_sec: 'float' = 30.0) -> 'bool'"
+    ),
     "forget_delivered_notifications": "(self, notification_ids: 'list[str]') -> 'None'",
     "forget_notification_delivery_parts": "(self, notification_ids: 'list[str]') -> 'None'",
     "generated_file_was_delivered": "(self, delivery_key: 'str') -> 'bool'",
@@ -480,6 +489,9 @@ EXPECTED_INBOX: dict[str, str] = {
     "stats": "(self) -> 'dict[str, int]'",
     "store": "(self, update: 'dict[str, Any]') -> 'bool'",
     "telegram_status_message": "(self, chat_id: 'int', operation_id: 'str') -> 'dict[str, Any] | None'",
+    "telegram_status_send_fence": (
+        "(self, chat_id: 'int', operation_id: 'str') -> 'dict[str, int] | None'"
+    ),
     "record_telegram_status_message": (
         "(self, chat_id: 'int', operation_id: 'str', message_id: 'int', revision: 'int', "
         "terminal: 'bool', *, expected_revision: 'int | None') -> 'bool'"
