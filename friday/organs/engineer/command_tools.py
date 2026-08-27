@@ -5,7 +5,6 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import hmac
-import inspect
 import json
 import math
 import os
@@ -198,30 +197,17 @@ def _issue_autonomous_grant(
     source: Any,
     now: int,
 ) -> str:
-    """Use the narrow low-level autonomous delegation seam.
+    """Seal one exact current-owner delegation for the host-user request."""
 
-    The service branch intentionally does not redefine low-level command
-    contracts.  ``delegate_autonomous`` and ``issue_autonomous`` land in the
-    host-user runner slice; keeping their temporary compatibility lookup here
-    makes that integration one isolated conflict instead of spreading it over
-    admission and publication code.
-    """
-
-    delegate = getattr(authority.source_authority, "delegate_autonomous", None)
-    issue = getattr(authority, "issue_autonomous", None)
-    if not callable(delegate) or not callable(issue):
-        raise CommandError("autonomous_grant_unavailable")
-    delegation = delegate(
+    delegation = authority.source_authority.delegate_autonomous(
         source,
         expires_at=now + _AUTONOMOUS_GRANT_TTL_SEC,
     )
-    return str(
-        issue(
-            request,
-            source=source,
-            delegation=delegation,
-            ttl_sec=_AUTONOMOUS_GRANT_TTL_SEC,
-        )
+    return authority.issue_autonomous(
+        request,
+        source=source,
+        delegation=delegation,
+        ttl_sec=_AUTONOMOUS_GRANT_TTL_SEC,
     )
 
 
@@ -232,26 +218,16 @@ def _command_request(
     idempotency_key: str,
     input_manifest: CommandInputManifest,
 ) -> CommandRequest:
-    """Construct the request through the anticipated manifest-bound seam."""
+    """Construct the canonical manifest-bound host-user request."""
 
-    parameters = inspect.signature(CommandRequest).parameters
-    arguments: dict[str, Any] = {
-        "idempotency_key": idempotency_key,
-        "lane": CommandLane.SHELL,
-        "origin": CommandOrigin.MODEL,
-        "shell_command": command,
-        "timeout_sec": timeout_sec,
-    }
-    if "input_manifest" in parameters:
-        arguments["input_manifest"] = input_manifest
-    elif input_manifest.files:
-        raise CommandError("command_input_runtime_unavailable")
-    try:
-        return CommandRequest(**arguments)
-    except TypeError as exc:
-        if timeout_sec is None:
-            raise CommandError("unbounded_command_runtime_unavailable") from exc
-        raise CommandError("invalid_request") from exc
+    return CommandRequest(
+        idempotency_key=idempotency_key,
+        lane=CommandLane.SHELL,
+        origin=CommandOrigin.MODEL,
+        shell_command=command,
+        timeout_sec=timeout_sec,
+        input_manifest=input_manifest,
+    )
 
 
 def _input_manifest(batch: AuthorizedCurrentMessageUploadBatch) -> CommandInputManifest:
@@ -281,34 +257,17 @@ def _submit_autonomous_request(
     input_manifest: CommandInputManifest,
     input_batch: AuthorizedCurrentMessageUploadBatch | None,
 ) -> str:
-    """Submit through one isolated private-input integration seam.
+    """Submit one exact manifest and its process-owned current-upload bytes."""
 
-    The input-contract slice will extend the low-level submit call with these
-    three code-owned arguments. Until then an empty manifest remains compatible,
-    while a real upload fails closed instead of starting without its bytes.
-    """
-
-    parameters = inspect.signature(kernel.submit).parameters
-    accepts_private_inputs = {
-        "input_batch_identity",
-        "input_files",
-        "input_manifest",
-    } <= set(parameters)
-    arguments: dict[str, Any] = {
-        "actor_id": actor_id,
-        "delivery_chat_id": delivery_chat_id,
-    }
-    if accepts_private_inputs:
-        arguments.update(
-            {
-                "input_batch_identity": input_batch.identity if input_batch is not None else None,
-                "input_files": input_batch.files if input_batch is not None else (),
-                "input_manifest": input_manifest,
-            }
-        )
-    elif input_manifest.files:
-        raise CommandError("command_input_runtime_unavailable")
-    return str(kernel.submit(request, grant, **arguments))
+    return kernel.submit(
+        request,
+        grant,
+        actor_id=actor_id,
+        delivery_chat_id=delivery_chat_id,
+        input_batch_identity=input_batch.identity if input_batch is not None else None,
+        input_files=input_batch.files if input_batch is not None else (),
+        input_manifest=input_manifest,
+    )
 
 
 class EngineerCommandService:
@@ -343,6 +302,11 @@ class EngineerCommandService:
         self._progress_lock = threading.Lock()
         self._retention_lock = threading.Lock()
         self._retire_legacy_command_approvals()
+
+    def close(self, *, timeout_sec: float = 30.0) -> None:
+        """Drain live command jobs before the application releases storage."""
+
+        self.kernel.close(timeout_sec=timeout_sec)
 
     def _retire_legacy_command_approvals(self) -> None:
         """Atomically make predecessor Engineer approval rows and pushes inert."""

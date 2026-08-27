@@ -164,6 +164,43 @@ class ProvenScope:
     _tree_empty_proven: bool = False
     _cleanup_lock: threading.Lock = field(default_factory=threading.Lock, repr=False)
 
+    def request_kill(self) -> bool:
+        """Issue the cgroup kill without waiting for systemd collection.
+
+        Process shutdown must signal every live scope before it starts joining
+        reaper threads.  ``kill()`` also proves collection and can legitimately
+        spend several seconds in ``systemctl``; doing that serially would make
+        shutdown time grow with the number of jobs.  This method is the bounded
+        first phase.  Each reaper still runs the full proof and durable receipt
+        path after its process exits.
+        """
+
+        # A full cleanup which owns this lock always writes cgroup.kill before
+        # doing its slower collection proof.  Consequently a failed try-lock
+        # means the same kill is already being issued, while avoiding an fd-close
+        # race with that proof path.
+        if not self._cleanup_lock.acquire(blocking=False):
+            return True
+        try:
+            held_fd = self.cgroup_fd
+            if held_fd is None:
+                return self._tree_empty_proven
+            try:
+                kill_fd = os.open(
+                    "cgroup.kill",
+                    os.O_WRONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0),
+                    dir_fd=held_fd,
+                )
+                try:
+                    os.write(kill_fd, b"1")
+                finally:
+                    os.close(kill_fd)
+            except OSError:
+                return False
+            return True
+        finally:
+            self._cleanup_lock.release()
+
     def kill(self) -> bool:
         proven = self._kill_once()
         if proven:

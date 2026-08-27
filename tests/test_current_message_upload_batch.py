@@ -14,7 +14,7 @@ from friday.file_delivery import (
     read_current_message_upload_file,
     reauthorize_current_message_upload_batch,
 )
-from friday.permissions import ActorContext, AuthorizationService
+from friday.permissions import LEGACY_OWNER_USER_ID, ActorContext, AuthorizationService
 from friday.storage.models import Entity, EntityType, KnowledgeObject, RawObject, new_id
 
 
@@ -165,6 +165,70 @@ def test_batch_preserves_upload_order_and_never_admits_ambient_pointer(settings,
             source_message_id=source_message_id,
             raw_ids=[ambient, second, first],
         )
+
+
+def test_shared_tenant_message_is_owned_by_person_while_raw_stays_tenant_scoped(
+    settings,
+    storage,
+) -> None:
+    person_id = "shared-owner-person"
+    tenant_id = LEGACY_OWNER_USER_ID
+    storage.ensure_user(tenant_id, preset_key="owner")
+    storage.ensure_user(person_id, preset_key="admin")
+    authorization = AuthorizationService(storage, shared_tenant=tenant_id)
+    actor = authorization.actor_for_user(person_id, source="telegram-bridge", identity_id="5001")
+
+    body = b"SHARED-TENANT-CURRENT-UPLOAD"
+    digest = hashlib.sha256(body).hexdigest()
+    raw_id = new_id("raw")
+    relative = f"shared/current-message/{raw_id}.bin"
+    target = Path(settings.files_dir) / relative
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_bytes(body)
+    storage.store_raw_object(
+        RawObject(
+            id=raw_id,
+            user_id=tenant_id,
+            source="upload",
+            source_ref="telegram-update:77101",
+            raw_content="[engineer-input: opaque current upload]",
+            content_type="file",
+            content_hash=digest,
+            metadata_json={
+                "filename": "shared.bin",
+                "mime_type": "application/octet-stream",
+                "sha256": digest,
+                "size_bytes": len(body),
+                "stored_path": relative,
+                "uploaded_by": person_id,
+            },
+        )
+    )
+    conversation = storage.create_conversation(person_id, mode="engineer")
+    source = storage.store_message(
+        str(conversation["id"]),
+        person_id,
+        "user",
+        "process current upload",
+        metadata={
+            "telegram_update_id": "77101",
+            "conversation_uploaded_raw_ids": [raw_id],
+        },
+    )
+
+    captured = authorize_current_message_upload_batch(
+        storage,
+        Path(settings.files_dir),
+        authorization,
+        actor,
+        conversation_id=str(conversation["id"]),
+        source_message_id=str(source["id"]),
+        telegram_update_id="77101",
+        uploaded_raw_ids=[raw_id],
+    )
+
+    assert captured.identity.uploaded_raw_ids == (raw_id,)
+    assert [item.content for item in captured.files] == [body]
 
 
 @pytest.mark.parametrize("origin", ("reply_reference", "restored", "replay"))

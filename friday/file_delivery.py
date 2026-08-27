@@ -626,7 +626,7 @@ def _authorize_current_message_upload_batch_in_transaction(
     fresh_actor = _fresh_current_upload_actor(conn, authorization, actor)
     source_row = _current_telegram_user_message(
         conn,
-        tenant_id=fresh_actor.user_id,
+        person_id=fresh_actor.own_id,
         conversation_id=conversation_id,
         source_message_id=source_message_id,
     )
@@ -680,7 +680,7 @@ def _authorize_current_message_upload_batch_in_transaction(
     # also rejects a same-connection mutation or a corrupted row adapter.
     final_source = _current_telegram_user_message(
         conn,
-        tenant_id=fresh_actor.user_id,
+        person_id=fresh_actor.own_id,
         conversation_id=conversation_id,
         source_message_id=source_message_id,
     )
@@ -772,7 +772,7 @@ def _fresh_current_upload_actor(
 def _current_telegram_user_message(
     conn: Any,
     *,
-    tenant_id: str,
+    person_id: str,
     conversation_id: str,
     source_message_id: str,
 ) -> Any:
@@ -784,7 +784,7 @@ def _current_telegram_user_message(
                ON c.id=m.conversation_id AND c.user_id=m.user_id
             WHERE m.id=? AND m.conversation_id=? AND m.user_id=?
               AND m.role='user'""",
-        (source_message_id, conversation_id, tenant_id),
+        (source_message_id, conversation_id, person_id),
     ).fetchone()
     if row is None:
         raise FileRecordUnavailable

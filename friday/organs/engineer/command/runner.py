@@ -383,7 +383,7 @@ class SpawnedCommand:
             started = broker.start_host_job(
                 argv=[held.resolved.canonical_path, *held.inner_rest],
                 env=env,
-                cwd=env["HOME"],
+                cwd=env["FRIDAY_WORK_DIR"],
                 cgroup=str(scope.cgroup),
                 stdin_r=stdin_fd,
                 stdout_w=stdout_w,
@@ -434,6 +434,17 @@ class SpawnedCommand:
             _terminate_process(proc, self.scope)
         elif self.scope is not None:
             self.scope.kill()
+
+    def request_shutdown(self) -> None:
+        """Signal cancellation for process shutdown without serial cleanup waits."""
+
+        self._cancel.set()
+        proc = self.process
+        if proc is not None and proc.pidfd is not None:
+            with contextlib.suppress(OSError):
+                signal.pidfd_send_signal(proc.pidfd, signal.SIGTERM)
+        if self.scope is not None:
+            self.scope.request_kill()
 
     def wait(self) -> None:
         proc = self.process

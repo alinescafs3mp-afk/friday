@@ -134,6 +134,12 @@ class EngineerOrgan(Organ):
             ),
         )
 
+    async def close(self) -> None:
+        service = self._command_service
+        if service is None:
+            return
+        await asyncio.to_thread(service.close)
+
 
 __all__ = [
     "ENGINEER_ANALYZE",

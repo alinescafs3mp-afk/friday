@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import hashlib
 import io
 import json
 import re
@@ -22,6 +23,7 @@ from friday.file_delivery import (
     AuthorizedFileBytes,
     CurrentMessageUploadBatchIdentity,
     CurrentMessageUploadFileIdentity,
+    authorize_current_message_upload_batch,
 )
 from friday.organs import ServiceContext
 from friday.organs.engineer import ENGINEER_COMMAND_RUN, command_tools
@@ -39,6 +41,7 @@ from friday.organs.engineer.command.contracts import sha256_bytes
 from friday.organs.engineer.command_tools import EngineerCommandService, build_engineer_command_tools
 from friday.permissions import LEGACY_OWNER_USER_ID, ActorContext
 from friday.telegram_bridge import TelegramBridge, TelegramConfig
+from tests.test_api_vertical_slice import _bridge_request
 
 
 class _SchemaSpy:
@@ -245,6 +248,462 @@ def test_command_tools_exist_only_when_the_private_kernel_is_configured(settings
             )
         )
         assert {"engineer_command_run", "engineer_command_status", "engineer_command_cancel"} <= names
+
+
+def test_application_lifespan_closes_the_engineer_command_service(
+    settings,
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    from friday.server import create_app
+
+    app = create_app(_configured(settings, tmp_path))
+    closed: list[bool] = []
+    with TestClient(app):
+        original_close = app.state.organs.close
+
+        async def observed_close() -> None:
+            closed.append(True)
+            await original_close()
+
+        monkeypatch.setattr(app.state.organs, "close", observed_close)
+
+    assert closed == [True]
+
+
+def test_full_chat_autonomous_engineer_bypasses_dialogue_policy_and_forces_tools(
+    settings,
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    from friday.server import create_app
+
+    configured = replace(
+        _configured(settings, tmp_path),
+        telegram_allowed_chat_ids=[5001],
+        telegram_owner_chat_ids=[5001],
+        verify_answers=False,
+    )
+    app = create_app(configured)
+    captured: dict[str, object] = {}
+
+    async def capture(_user_id, _message, **kwargs):  # noqa: ANN001
+        captured.update(kwargs)
+        conversation = app.state.storage.create_conversation(
+            LEGACY_OWNER_USER_ID,
+            title="autonomous server contract",
+            mode="engineer",
+        )
+        return {
+            "conversation_id": conversation["id"],
+            "message": "MODEL-OWNED",
+            "context": {"interaction_mode": "engineer"},
+        }
+
+    async def forbidden_ingest_text(*_args, **_kwargs):
+        raise AssertionError("autonomous Engineer text reached dialogue ingestion")
+
+    with TestClient(app) as client:
+        monkeypatch.setattr(app.state.agent, "chat", capture)
+        monkeypatch.setattr(app.state.ingestion, "ingest_text", forbidden_ingest_text)
+        response = _bridge_request(
+            client,
+            configured,
+            "/api/chat",
+            {
+                "message": "Какие у тебя возможности?",
+                "mode": "engineer",
+                "enable_tools": False,
+                "source_ref": "telegram-update:91001",
+                "telegram_message_id": 601,
+                "telegram_user": {"id": 5001, "first_name": "Owner"},
+            },
+        )
+
+    assert response.status_code == 200, response.text
+    assert response.json()["message"] == "MODEL-OWNED"
+    assert captured["enable_tools"] is True
+    assert captured["mode"] == "engineer"
+    assert captured["turn_policy"] is None
+    assert captured["ingestion_result"] == {
+        "promoted": False,
+        "queued_for_review": False,
+        "action": "transient",
+        "category": "engineer_command",
+        "reason": "owner Engineer turn bypasses dialogue knowledge ingestion",
+    }
+
+
+@pytest.mark.parametrize(
+    ("message", "update_id"),
+    (
+        ("Проверь, доступен ли nmap, и используй его если нужен.", "91011"),
+        ("Просканируй мою локальную сеть и верни сетевой отчёт файлом.", "91012"),
+    ),
+)
+def test_full_chat_autonomous_network_requests_reach_the_model_tool_loop(
+    settings,
+    tmp_path: Path,
+    monkeypatch,
+    message: str,
+    update_id: str,
+) -> None:
+    from friday.server import create_app
+
+    configured = replace(
+        _configured(settings, tmp_path),
+        telegram_allowed_chat_ids=[5001],
+        telegram_owner_chat_ids=[5001],
+        verify_answers=False,
+    )
+    app = create_app(configured)
+    model = _SchemaSpy()
+
+    async def forbidden_autohunt(*_args, **_kwargs):
+        raise AssertionError("autonomous Engineer request reached legacy autohunt")
+
+    with TestClient(app) as client:
+        runtime = getattr(app.state.agent, "_legacy", app.state.agent)
+        monkeypatch.setattr(runtime, "llm", model)
+        monkeypatch.setattr(runtime, "_engineer_autohunt", forbidden_autohunt)
+        response = _bridge_request(
+            client,
+            configured,
+            "/api/chat",
+            {
+                "message": message,
+                "mode": "engineer",
+                "enable_tools": False,
+                "source_ref": f"telegram-update:{update_id}",
+                "telegram_message_id": int(update_id),
+                "telegram_user": {"id": 5001, "first_name": "Owner"},
+            },
+        )
+
+    assert response.status_code == 200, response.text
+    assert response.json()["message"] == "OK"
+    assert model.schemas
+    offered = {str((schema.get("function") or {}).get("name") or "") for schema in model.schemas[0]}
+    assert "engineer_command_run" in offered
+
+
+def test_full_chat_autonomous_engineer_skips_inventory_prefetch_and_preserves_literal_citations(
+    settings,
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    from friday.server import create_app
+
+    configured = replace(
+        _configured(settings, tmp_path),
+        telegram_allowed_chat_ids=[5001],
+        telegram_owner_chat_ids=[5001],
+        verify_answers=False,
+    )
+    app = create_app(configured)
+    model = _SchemaSpy()
+
+    async def literal_chat(_messages, *, tools=None, **_kwargs):  # noqa: ANN001
+        model.schemas.append([dict(item) for item in (tools or [])])
+        return {
+            "content": "Литеральная метка [K1] сохранена.",
+            "tool_calls": None,
+            "finish_reason": "stop",
+            "_queue_wait_sec": 0.0,
+        }
+
+    async def forbidden_inventory(*_args, **_kwargs):
+        raise AssertionError("autonomous Engineer reached legacy inventory prefetch")
+
+    with TestClient(app) as client:
+        runtime = getattr(app.state.agent, "_legacy", app.state.agent)
+        monkeypatch.setattr(runtime, "llm", model)
+        monkeypatch.setattr(model, "chat", literal_chat)
+        monkeypatch.setattr(runtime, "_prefetch_person_activity", forbidden_inventory)
+        response = _bridge_request(
+            client,
+            configured,
+            "/api/chat",
+            {
+                "message": "Проверь через консоль, что Иван присылал сегодня, и сохрани метку.",
+                "mode": "engineer",
+                "source_ref": "telegram-update:91013",
+                "telegram_message_id": 613,
+                "telegram_user": {"id": 5001, "first_name": "Owner"},
+            },
+        )
+
+    assert response.status_code == 200, response.text
+    assert response.json()["message"] == "Литеральная метка [K1] сохранена."
+    assert model.schemas
+
+
+def test_full_chat_autonomous_engineer_keeps_encrypted_archive_as_exact_current_input(
+    settings,
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    from friday.server import create_app
+
+    configured = replace(
+        _configured(settings, tmp_path),
+        telegram_allowed_chat_ids=[5001],
+        telegram_owner_chat_ids=[5001],
+        verify_answers=False,
+    )
+    app = create_app(configured)
+    payload = b"PK\x03\x04opaque-encrypted-archive-input\x00\xff"
+    model = _SchemaSpy()
+
+    def forbidden_extract(*_args, **_kwargs):
+        raise AssertionError("autonomous Engineer input reached a document/archive parser")
+
+    with TestClient(app) as client:
+        monkeypatch.setattr(app.state.ingestion._doc_extractor, "extract", forbidden_extract)  # noqa: SLF001
+        runtime = getattr(app.state.agent, "_legacy", app.state.agent)
+        monkeypatch.setattr(runtime, "llm", model)
+        response = _bridge_request(
+            client,
+            configured,
+            "/api/chat",
+            {
+                "message": "Проверь этот архив доступными консольными инструментами.",
+                "mode": "engineer",
+                "enable_tools": False,
+                "source_ref": "telegram-update:91002",
+                "telegram_message_id": 602,
+                "telegram_user": {"id": 5001, "first_name": "Owner"},
+                "document": {
+                    "filename": "locked.zip",
+                    "mime_type": "application/zip",
+                    "content_base64": base64.b64encode(payload).decode("ascii"),
+                    "source_ref": "telegram-update:91002",
+                    "telegram_message_id": 602,
+                    "file_unique_id": "locked-zip-unique",
+                },
+            },
+        )
+
+        assert response.status_code == 200, response.text
+        conversation_id = str(response.json()["conversation_id"])
+        rows = app.state.storage.get_conversation_messages(
+            conversation_id,
+            user_id=LEGACY_OWNER_USER_ID,
+            limit=8,
+        )
+        source = next(row for row in rows if row.get("role") == "user")
+        metadata = json.loads(str(source.get("metadata_json") or "{}"))
+        raw_ids = metadata["conversation_uploaded_raw_ids"]
+        actor = ActorContext(
+            LEGACY_OWNER_USER_ID,
+            "owner",
+            "telegram-bridge",
+            identity_id="5001",
+        )
+        batch = authorize_current_message_upload_batch(
+            app.state.storage,
+            Path(configured.files_dir),
+            app.state.auth_service,
+            actor,
+            conversation_id=conversation_id,
+            source_message_id=str(source["id"]),
+            telegram_update_id="91002",
+            uploaded_raw_ids=raw_ids,
+        )
+        raw = app.state.storage.get_raw_object(raw_ids[0], LEGACY_OWNER_USER_ID)
+        knowledge = app.state.storage.get_knowledge_by_raw(raw_ids[0], LEGACY_OWNER_USER_ID)
+        inbox = app.state.storage.find_inbox_by_raw(raw_ids[0], LEGACY_OWNER_USER_ID)
+
+    assert [item.content for item in batch.files] == [payload]
+    assert batch.files[0].filename == "locked.zip"
+    assert raw is not None
+    raw_metadata = json.loads(str(raw.get("metadata_json") or "{}"))
+    assert raw_metadata["opaque_engineer_input"] is True
+    assert knowledge is None
+    assert inbox is None
+    assert model.schemas, "the autonomous model did not receive the turn"
+    offered = {str((schema.get("function") or {}).get("name") or "") for schema in model.schemas[0]}
+    assert "engineer_command_run" in offered
+
+
+def test_full_chat_autonomous_engineer_keeps_audio_as_exact_command_input(
+    settings,
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    from friday.server import create_app
+
+    configured = replace(
+        _configured(settings, tmp_path),
+        telegram_allowed_chat_ids=[5001],
+        telegram_owner_chat_ids=[5001],
+        verify_answers=False,
+    )
+    app = create_app(configured)
+    payload = b"RIFF\x18\x00\x00\x00WAVEfmt exact-audio-input"
+    model = _SchemaSpy()
+
+    with TestClient(app) as client:
+        runtime = getattr(app.state.agent, "_legacy", app.state.agent)
+        monkeypatch.setattr(runtime, "llm", model)
+        response = _bridge_request(
+            client,
+            configured,
+            "/api/chat",
+            {
+                "message": "Проанализируй этот аудиофайл установленными программами.",
+                "mode": "engineer",
+                "source_ref": "telegram-update:91003",
+                "telegram_message_id": 603,
+                "telegram_user": {"id": 5001, "first_name": "Owner"},
+                "document": {
+                    "filename": "sample.wav",
+                    "mime_type": "audio/wav",
+                    "media_kind": "audio",
+                    "content_base64": base64.b64encode(payload).decode("ascii"),
+                    "source_ref": "telegram-update:91003",
+                    "telegram_message_id": 603,
+                    "file_unique_id": "sample-wav-unique",
+                },
+            },
+        )
+
+        assert response.status_code == 200, response.text
+        conversation_id = str(response.json()["conversation_id"])
+        rows = app.state.storage.get_conversation_messages(
+            conversation_id,
+            user_id=LEGACY_OWNER_USER_ID,
+            limit=8,
+        )
+        source = next(row for row in rows if row.get("role") == "user")
+        metadata = json.loads(str(source.get("metadata_json") or "{}"))
+        raw_ids = metadata["conversation_uploaded_raw_ids"]
+        batch = authorize_current_message_upload_batch(
+            app.state.storage,
+            Path(configured.files_dir),
+            app.state.auth_service,
+            ActorContext(
+                LEGACY_OWNER_USER_ID,
+                "owner",
+                "telegram-bridge",
+                identity_id="5001",
+            ),
+            conversation_id=conversation_id,
+            source_message_id=str(source["id"]),
+            telegram_update_id="91003",
+            uploaded_raw_ids=raw_ids,
+        )
+
+    assert [item.content for item in batch.files] == [payload]
+    assert [item.filename for item in batch.files] == ["sample.wav"]
+    assert model.schemas
+    offered = {str((schema.get("function") or {}).get("name") or "") for schema in model.schemas[0]}
+    assert "engineer_command_run" in offered
+
+
+def test_full_chat_staged_engineer_album_propagates_authenticated_anchor_to_command_lane(
+    settings,
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    from friday.server import create_app
+
+    configured = replace(
+        _configured(settings, tmp_path),
+        telegram_allowed_chat_ids=[5001],
+        telegram_owner_chat_ids=[5001],
+        verify_answers=False,
+    )
+    app = create_app(configured)
+    model = _SchemaSpy()
+    observed_update_ids: list[str | None] = []
+    stage_payload = {
+        "message": "",
+        "mode": "engineer",
+        "document_stage_only": True,
+        "telegram_user": {"id": 5001, "first_name": "Owner"},
+        "documents": [
+            {
+                "filename": f"input-{message_id}.bin",
+                "mime_type": "application/octet-stream",
+                "content_base64": base64.b64encode(f"opaque-{message_id}".encode()).decode(),
+                "source_ref": f"telegram-file:engineer-album-{message_id}",
+                "telegram_message_id": message_id,
+                "media_kind": "document",
+            }
+            for message_id in (701, 702)
+        ],
+    }
+    album_digest = hashlib.sha256(b"authenticated-engineer-album").hexdigest()
+    final_payload = {
+        "message": "Проверь оба файла консольными инструментами.",
+        "mode": "engineer",
+        "source_ref": f"telegram-album-v2:92001:{album_digest}",
+        "telegram_message_id": 701,
+        "telegram_user": {"id": 5001, "first_name": "Owner"},
+        "staged_document_message_ids": [701, 702],
+    }
+
+    with TestClient(app) as client:
+        runtime = getattr(app.state.agent, "_legacy", app.state.agent)
+        monkeypatch.setattr(runtime, "llm", model)
+        original_chat = app.state.agent.chat
+
+        async def capture_chat(*args, **kwargs):  # noqa: ANN002, ANN003
+            observed_update_ids.append(kwargs.get("telegram_update_id"))
+            return await original_chat(*args, **kwargs)
+
+        monkeypatch.setattr(app.state.agent, "chat", capture_chat)
+        stage = _bridge_request(client, configured, "/api/chat", stage_payload)
+        assert stage.status_code == 200, stage.text
+        assert [item["telegram_stage_ready"] for item in stage.json()["file_ingestions"]] == [True, True]
+
+        final = _bridge_request(client, configured, "/api/chat", final_payload)
+
+    assert final.status_code == 200, final.text
+    assert observed_update_ids == ["92001"]
+    assert model.schemas
+    offered = {str((schema.get("function") or {}).get("name") or "") for schema in model.schemas[0]}
+    assert "engineer_command_run" in offered
+
+
+def test_full_chat_malformed_album_source_cannot_authorize_engineer_command(
+    settings,
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    from friday.server import create_app
+
+    configured = replace(
+        _configured(settings, tmp_path),
+        telegram_allowed_chat_ids=[5001],
+        telegram_owner_chat_ids=[5001],
+        verify_answers=False,
+    )
+    app = create_app(configured)
+    model = _SchemaSpy()
+    with TestClient(app) as client:
+        runtime = getattr(app.state.agent, "_legacy", app.state.agent)
+        monkeypatch.setattr(runtime, "llm", model)
+        response = _bridge_request(
+            client,
+            configured,
+            "/api/chat",
+            {
+                "message": "Запусти диагностическую команду.",
+                "mode": "engineer",
+                # Album digests are canonical lowercase hex.  A signed but
+                # malformed source ref is still not command-run authority.
+                "source_ref": f"telegram-album-v2:92002:{'A' * 64}",
+                "telegram_message_id": 703,
+                "telegram_user": {"id": 5001, "first_name": "Owner"},
+            },
+        )
+
+    assert response.status_code == 200, response.text
+    assert model.schemas
+    offered = {str((schema.get("function") or {}).get("name") or "") for schema in model.schemas[0]}
+    assert "engineer_command_run" not in offered
 
 
 def test_real_owner_service_runs_dependent_host_shell_steps_without_approvals(
@@ -686,10 +1145,23 @@ class _FakeCommandKernel:
         self.requests: list[object] = []
         self.delivery_chat_ids: list[str] = []
 
-    def submit(self, request, grant: str, *, actor_id: str, delivery_chat_id: str = "") -> str:
+    def submit(
+        self,
+        request,
+        grant: str,
+        *,
+        actor_id: str,
+        delivery_chat_id: str = "",
+        input_manifest=None,
+        input_batch_identity=None,
+        input_files=(),
+    ) -> str:  # noqa: ANN001
         assert grant == "sealed-autonomous-grant"
         assert actor_id == LEGACY_OWNER_USER_ID
         assert delivery_chat_id == "5001"
+        assert input_manifest is not None and not input_manifest.files
+        assert input_batch_identity is None
+        assert input_files == ()
         self.requests.append(request)
         self.delivery_chat_ids.append(delivery_chat_id)
         return "1" * 32

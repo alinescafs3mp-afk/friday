@@ -3539,6 +3539,24 @@ class ExecutionKernel:
     def get_tool(self, name: str) -> ToolSpec | None:
         return self._tools.get(name)
 
+    def tool_is_approval_free(self, name: str) -> bool:
+        """Whether a model-visible tool can never enqueue a HITL approval.
+
+        Autonomous Engineer uses one canonical host-user command lane for
+        effects.  Legacy high-risk/internal host tools remain available in
+        ordinary dialogue, but are withheld from that mode so its advertised
+        surface cannot unexpectedly fall back to ``/approvals``.
+        """
+
+        tool = self._tools.get(str(name or ""))
+        if tool is None or not tool.model_visible or tool.handler is None:
+            return False
+        if tool.risk == "high" or tool.approval_predicate is not None:
+            return False
+        if tool.name in HIGH_RISK_TOOLS:
+            return False
+        return not self._capability_requires_person(tool.security_id)
+
     def get_tool_names(
         self,
         actor: ActorContext | None = None,

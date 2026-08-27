@@ -14,8 +14,8 @@ from types import SimpleNamespace
 import pytest
 from fastapi.testclient import TestClient
 
-from friday.organs import ServiceContext, build_registry
-from friday.organs.engineer import artifacts, hosts, hunt
+from friday.organs import Organ, OrganRegistry, ServiceContext, build_registry
+from friday.organs.engineer import EngineerOrgan, artifacts, hosts, hunt
 from friday.organs.engineer.advice import advise, unused
 from friday.permissions import LEGACY_OWNER_USER_ID, AuthorizationService
 from friday.storage import normalize_conversation_mode
@@ -484,3 +484,27 @@ async def test_telegram_engineer_command_sets_the_mode(tmp_path):
     assert mode_call["body"]["mode"] == "engineer"
     sent = [payload for url, payload in telegram.calls if str(url).endswith("/sendMessage")]
     assert any("Инженерный разбор" in str(item.get("text") or "") for item in sent)
+
+
+@pytest.mark.asyncio
+async def test_organ_registry_closes_engineer_owned_service_in_reverse_order() -> None:
+    events: list[str] = []
+
+    class ClosingOrgan(Organ):
+        def __init__(self, name: str) -> None:
+            self.name = name
+
+        async def close(self) -> None:
+            events.append(self.name)
+
+    class ClosingService:
+        def close(self) -> None:
+            events.append("engineer-service")
+
+    engineer = EngineerOrgan()
+    engineer._command_service = ClosingService()  # type: ignore[assignment]
+    registry = OrganRegistry([ClosingOrgan("first"), engineer, ClosingOrgan("last")])
+
+    await registry.close()
+
+    assert events == ["last", "engineer-service", "first"]

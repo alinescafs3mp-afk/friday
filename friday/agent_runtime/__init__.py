@@ -48214,17 +48214,6 @@ class AgentRuntime:
         )
         person_inventory_decomposition = _person_document_inventory_remainder(routing_message)
         file_turn = file_turn_authority(routing_message)
-        if archive_search_current_text:
-            # A supplied Raw carrier makes this a mixed-source turn and is
-            # rejected after the user row establishes the archive snapshot.
-            # Keep only its structural count until then: do not resolve ids,
-            # extractor bodies, restored files, OCR, or vision.
-            attachments = []
-        if archive_search_current_text and turn_policy is not None:
-            # Defense in depth for direct callers: a history-aware weather/meta
-            # policy cannot publish or open a sibling route ahead of the
-            # current-text private archive boundary.
-            turn_policy = TurnPolicyDecision(intent=TurnIntent.PASSTHROUGH)
         obsidian_effect_local_date = self._local_today()
         obsidian_intent = obsidian_conversation_intent(
             routing_message,
@@ -48292,6 +48281,28 @@ class AgentRuntime:
             )
         conversation_id = conversation["id"]
         interaction_mode = normalize_conversation_mode(str(conversation.get("mode") or "dialogue"))
+        autonomous_engineer = bool(
+            interaction_mode == "engineer"
+            and getattr(self.settings, "engineer_mode_enabled", False) is True
+            and getattr(self.settings, "engineer_command_enabled", False) is True
+        )
+        if interaction_mode == "engineer":
+            # Engineer has no Telegram per-turn tool opt-out.  Once the fresh
+            # owner boundary above admits the mode, a legacy caller hint cannot
+            # demote its shell/tool contour.
+            enable_tools = True
+        if autonomous_engineer:
+            # Dialogue-only lexical routes must not reinterpret the owner's
+            # command or discard exact current input carriers.
+            archive_search_current_text = False
+            turn_policy = None
+        else:
+            if archive_search_current_text:
+                # A supplied Raw carrier makes this a mixed-source turn and is
+                # rejected after the user row establishes the archive snapshot.
+                attachments = []
+            if archive_search_current_text and turn_policy is not None:
+                turn_policy = TurnPolicyDecision(intent=TurnIntent.PASSTHROUGH)
 
         # Capture prior history before persisting the current turn so the user
         # message appears exactly once in the prompt.
@@ -48352,7 +48363,7 @@ class AgentRuntime:
         admitted_archive_candidate: ArchiveCandidateSelectionWorkItem | None = None
         archive_candidate_is_displaced = False
         candidate_transaction = getattr(self.storage, "transaction", None)
-        if actor.own_id == person_id and callable(candidate_transaction):
+        if not autonomous_engineer and actor.own_id == person_id and callable(candidate_transaction):
             with read_only_storage_snapshot(self.storage) as candidate_conn:
                 admitted_archive_candidate = get_waiting_archive_candidate_selection_work_item_in_transaction(
                     candidate_conn,
@@ -48389,7 +48400,7 @@ class AgentRuntime:
 
         carried_admission = (
             _pending_durable_admission
-            if isinstance(_pending_durable_admission, PendingDurableTurnAdmission)
+            if not autonomous_engineer and isinstance(_pending_durable_admission, PendingDurableTurnAdmission)
             else None
         )
         carried_archive_evidence: RecallSelectedArchiveEvidenceWorkItem | None = None
@@ -48486,13 +48497,17 @@ class AgentRuntime:
                     person_id=person_id,
                     request=clean_message,
                 )
-        if _pending_durable_admission is not None and (
-            not archive_candidate_plain_surface
-            or not carried_scope_is_exact
-            or (admitted_archive_candidate is None and carried_archive_evidence is None)
-            or carried_admission is not None
-            and carried_admission.is_bound
-            and not carried_binding_is_current
+        if (
+            not autonomous_engineer
+            and _pending_durable_admission is not None
+            and (
+                not archive_candidate_plain_surface
+                or not carried_scope_is_exact
+                or (admitted_archive_candidate is None and carried_archive_evidence is None)
+                or carried_admission is not None
+                and carried_admission.is_bound
+                and not carried_binding_is_current
+            )
         ):
             if not mark_request_effect_possible():
                 raise RuntimeError("Request idempotency fence could not be committed before message storage")
@@ -48694,7 +48709,7 @@ class AgentRuntime:
                 and str(reply_parent.get("user_id") or "") == user_id
             ):
                 user_reply_parent_id = reply_assistant_message_id
-        if turn_policy is not None and turn_policy.public_response is not None:
+        if not autonomous_engineer and turn_policy is not None and turn_policy.public_response is not None:
             if not mark_request_effect_possible():
                 raise RuntimeError("Request idempotency fence could not be committed before message storage")
             stored_policy_user = self.storage.store_message(
@@ -48903,7 +48918,7 @@ class AgentRuntime:
         # arbiters or the model.  Keep only structural attachment facts on the
         # user row.  In particular, caller-supplied Raw Object ids are neither
         # trusted nor persisted without the normal authorization/ownership path.
-        if file_turn.proved("silence"):
+        if not autonomous_engineer and file_turn.proved("silence"):
             stop_private_context_lineage = bool(
                 inherited_private_context_lineage or supplied_attachment_count
             )
@@ -49227,18 +49242,48 @@ class AgentRuntime:
                 str(item.get("raw_object_id") or "").strip(): item for item in attachment_list
             }
             canonical_current: list[dict[str, Any]] = []
-            for raw_id in current_attachment_ids:
-                original = original_by_raw_id.get(raw_id)
-                uploaded_by = _resolved_telegram_reply_uploader(original) or person_id
-                owned = self._owned_file_attachment(
-                    raw_id,
-                    tenant_id=tenant_id,
-                    person_id=uploaded_by,
-                    direct_read_authority=_explicit_filename_direct_read_authority_of(original),
-                    historical_authority=_historical_direct_read_authority_of(original),
-                )
-                if owned is not None:
-                    canonical_current.append(_retain_historical_direct_read_authority(original, owned))
+            if autonomous_engineer:
+                # Engineer inputs are opaque executable bytes, not searchable
+                # documents.  The process-owned current-upload token was fully
+                # re-authorized above (including exact filename/MIME/bytes), so
+                # keep only a minimal prompt label and that private token.  A
+                # second pass through the generic document reader would
+                # incorrectly discard audio and other deliberately non-indexed
+                # office/binary formats before the command service can stage
+                # their exact bytes in FRIDAY_INPUT_DIR.
+                for raw_id in current_attachment_ids:
+                    original = original_by_raw_id.get(raw_id)
+                    if original is None or current_turn_file_reference_of(original) is None:
+                        continue
+                    canonical_current.append(
+                        _private_owned_attachment_copy(
+                            {
+                                "raw_object_id": raw_id,
+                                "filename": str(original.get("filename") or "file")[:260],
+                                "mime_type": str(original.get("mime_type") or "application/octet-stream")[
+                                    :260
+                                ],
+                                "persisted": True,
+                                "current_turn_only": True,
+                                "extraction_success": False,
+                                "verification_eligible": False,
+                            },
+                            source=original,
+                        )
+                    )
+            else:
+                for raw_id in current_attachment_ids:
+                    original = original_by_raw_id.get(raw_id)
+                    uploaded_by = _resolved_telegram_reply_uploader(original) or person_id
+                    owned = self._owned_file_attachment(
+                        raw_id,
+                        tenant_id=tenant_id,
+                        person_id=uploaded_by,
+                        direct_read_authority=_explicit_filename_direct_read_authority_of(original),
+                        historical_authority=_historical_direct_read_authority_of(original),
+                    )
+                    if owned is not None:
+                        canonical_current.append(_retain_historical_direct_read_authority(original, owned))
             if len(canonical_current) == supplied_attachment_count:
                 # The owned Raw object is the authority for bytes/identity.  A
                 # current extractor may additionally report a *more restrictive*
@@ -49895,7 +49940,8 @@ class AgentRuntime:
         promoted_temporal_update: MessageWindowTemporalUpdate | None = None
         promoted_continued_work_item: RecallConversationWorkItem | None = None
         promoted_temporal_reference_recognized = bool(
-            not archive_search_current_text
+            not autonomous_engineer
+            and not archive_search_current_text
             and person_inventory_followup is None
             and is_recall_conversation_temporal_followup_syntax(clean_message)
         )
@@ -50194,7 +50240,7 @@ class AgentRuntime:
             if re.fullmatch(r"msg_[0-9a-f]{16}", replay_root_id)
             else source_search_lineage_user_message_id
         )
-        if archive_evidence_followup_admitted:
+        if not autonomous_engineer and archive_evidence_followup_admitted:
             assert admitted_archive_evidence_work_item is not None
             if (
                 archive_evidence_followup_kind is ArchiveEvidenceFollowupKind.EXPLAIN
@@ -50219,7 +50265,7 @@ class AgentRuntime:
                 admitted_work_item=admitted_archive_evidence_work_item,
                 turn_started=turn_started,
             )
-        if promoted_message_window_continuation_admitted:
+        if not autonomous_engineer and promoted_message_window_continuation_admitted:
             assert promoted_temporal_update is not None
             assert promoted_continued_work_item is not None
             refreshed_continuation: RecallConversationWorkItem | None = None
@@ -50254,13 +50300,13 @@ class AgentRuntime:
                     turn_started=turn_started,
                     continued_work_item=refreshed_continuation,
                 )
-        if promoted_temporal_reference_recognized:
+        if not autonomous_engineer and promoted_temporal_reference_recognized:
             return self._message_window_continuation_clarification_response(
                 conversation_id=str(conversation_id),
                 person_id=person_id,
                 boundary_message_id=source_search_lineage_user_message_id,
             )
-        if promoted_message_window_initial_admitted:
+        if not autonomous_engineer and promoted_message_window_initial_admitted:
             assert locate_window is not None
             window_since, window_until, window_role = locate_window
             return await self._promoted_message_window_response(
@@ -50277,7 +50323,11 @@ class AgentRuntime:
                 turn_started=turn_started,
             )
         workspace_inbox_resolution = _WorkspaceInboxResolution()
-        if workspace_inbox_request is not None and not archive_search_current_text:
+        if (
+            not autonomous_engineer
+            and workspace_inbox_request is not None
+            and not archive_search_current_text
+        ):
             workspace_inbox_resolution = (
                 _WorkspaceInboxResolution(
                     answer=(
@@ -50360,7 +50410,8 @@ class AgentRuntime:
         verified_reply_attachment_uploaders: dict[str, str] = {}
         attachment_snapshot_changed_before_admission = False
         if (
-            not archive_search_current_text
+            not autonomous_engineer
+            and not archive_search_current_text
             and may_read_files
             and active_attachment_set
             and workspace_inbox_request is None
@@ -50456,7 +50507,8 @@ class AgentRuntime:
             document_metadata_requested and not document_metadata_owned
         )
         if (
-            not archive_search_current_text
+            not autonomous_engineer
+            and not archive_search_current_text
             and document_metadata_scope in {"both", "technical"}
             and may_read_files
             and active_attachment_set
@@ -50591,7 +50643,8 @@ class AgentRuntime:
                 ),
             )
             if (
-                not archive_search_current_text
+                not autonomous_engineer
+                and not archive_search_current_text
                 and may_read_files
                 and attachments
                 and workspace_inbox_request is None
@@ -51262,7 +51315,8 @@ class AgentRuntime:
             and not answer_with_voice
         )
         if (
-            not archive_search_current_text
+            not autonomous_engineer
+            and not archive_search_current_text
             and not quoted_file_command_is_data
             and obsidian_intent is None
             and not foreign_private_request
@@ -51361,7 +51415,24 @@ class AgentRuntime:
             and not answer_with_voice
             and not file_voice
         )
-        if archive_search_current_text:
+        if autonomous_engineer:
+            # Minimal autonomous context: exact current uploads have already
+            # been re-authorized and the user row now binds their Raw ids.  No
+            # dialogue retrieval, learning, arbiter or structural answer owns
+            # this turn before the model/tool loop.
+            attachments = list(attachment_list) if current_attachment_authorized else []
+            active_attachment_set = list(attachments)
+            context = AgentContext(
+                conversation_id=conversation_id,
+                user_id=tenant_id,
+                person_id=person_id,
+                conversation_history=prior_history,
+                ingestion=dict(ingestion_result or {}),
+                interaction_mode="engineer",
+                search_query=clean_message,
+                current_attachment_present=bool(current_attachment_ids),
+            )
+        elif archive_search_current_text:
             # The current text alone proved a generic read of the caller's
             # private store.  Construct this context without history-aware
             # arbiters, retrieval, graph expansion or learning: archive_search
@@ -51996,15 +52067,9 @@ class AgentRuntime:
         # assignment is deliberately based on the timestamp captured at method
         # entry, not on when routing/context preparation happened to finish.
         context.turn_deadline = turn_deadline
-        autonomous_engineer = bool(
-            interaction_mode == "engineer"
-            and enable_tools is True
-            and getattr(self.settings, "engineer_mode_enabled", False) is True
-            and getattr(self.settings, "engineer_command_enabled", False) is True
-        )
         network_report_requested = False
         nmap_capability_truth_requested = False
-        if interaction_mode == "engineer":
+        if interaction_mode == "engineer" and not autonomous_engineer:
             from friday.organs.engineer.targets import (
                 requests_network_report_export,
                 requests_nmap_capability_truth,
@@ -52795,7 +52860,10 @@ class AgentRuntime:
         inventory_preflight_tools_used: list[str] = []
         inventory_preflight_evidence: list[dict[str, str]] = []
         inventory_preflight_shape = bool(
-            not archive_search_requested_for_turn and not focused_attachment_turn and person_inventory_turn
+            not autonomous_engineer
+            and not archive_search_requested_for_turn
+            and not focused_attachment_turn
+            and person_inventory_turn
         )
         if inventory_preflight_shape:
             await self._prefetch_person_activity(
@@ -53084,7 +53152,8 @@ class AgentRuntime:
             # which already happened in the draft generation.
             visible_tools = []
         if (
-            full_source_prepass_required
+            not autonomous_engineer
+            and full_source_prepass_required
             and not archive_search_requested_for_turn
             and not quoted_file_command_is_data
             and not adjacent_overview_unresolved_terminal
@@ -55138,7 +55207,17 @@ class AgentRuntime:
             # человек читает сверху вниз и первую строку прочтёт наверняка, а
             # хвост длинного ответа — как получится.
             content = f"{spoken}\n\n{content}".strip() if content else spoken
-        content = content or "Не удалось сформировать ответ."
+        if not content:
+            if autonomous_engineer:
+                content = (
+                    "Результат подготовлен и приложен."
+                    if response.get("file_clips")
+                    else "Инженерный ход завершён; проверяемые результаты сохранены в квитанциях команд."
+                    if response.get("tools_used")
+                    else "Инженерный ход завершён без результата."
+                )
+            else:
+                content = "Не удалось сформировать ответ."
         # `synthetic_document_notice` означает, что текст сочинил backend вместо
         # человека («Загружен документ: отчёт.docx»), и просьбой о файле он не
         # является: слово «отчёт» в ЧУЖОМ имени файла запускало сборку документа
@@ -55932,7 +56011,7 @@ class AgentRuntime:
         # subsequently rewrite. Citation cleanup and web-source reconciliation
         # therefore run before the late builder (and remain idempotent at the
         # legacy last-hop checks below).
-        if response.get("_obsidian_owned") is not True:
+        if not autonomous_engineer and response.get("_obsidian_owned") is not True:
             content = _strip_invented_citations(
                 content,
                 (context.knowledge_citations or {}).keys(),
@@ -62162,12 +62241,23 @@ class AgentRuntime:
                 # Retire the bounded scan/compiler/decompiler wrappers from the
                 # autonomous surface.  They are policy-shaped subsets of what
                 # the host shell can already do and would steer the model back
-                # onto the old rails.  Ordinary actor tools stay available.
+                # onto the old rails.  Ordinary actor tools stay available only
+                # when their reviewed kernel metadata proves that they cannot
+                # enqueue a legacy HITL request: the host-user command lane is
+                # the canonical unrestricted effect path in this mode, and
+                # `/approvals` must never reappear through a sibling schema.
+                approval_free = getattr(self.kernel, "tool_is_approval_free", None)
                 tools[:] = [
                     tool
                     for tool in tools
-                    if _engineer_tool_name(tool) not in _ENGINEER_REGISTERED_TOOL_NAMES
-                    or _engineer_tool_name(tool) in _ENGINEER_COMMAND_CONTEXT_TOOL_NAMES
+                    if (
+                        _engineer_tool_name(tool) in _ENGINEER_COMMAND_CONTEXT_TOOL_NAMES
+                        or (
+                            _engineer_tool_name(tool) not in _ENGINEER_REGISTERED_TOOL_NAMES
+                            and callable(approval_free)
+                            and approval_free(_engineer_tool_name(tool)) is True
+                        )
+                    )
                 ]
             else:
                 # Compatibility path for installations which expose only the
@@ -63560,6 +63650,7 @@ class AgentRuntime:
                 }
             )
             round_results: list[tuple[str, str]] = []
+            batch_call_ordinal_base = total_calls
             carrier_archive_status_guarded = bool(not archive_search_current_turn_authorized)
             for selected_index, (call, openai_call) in enumerate(
                 zip(selected_calls, openai_calls, strict=True)
@@ -63784,9 +63875,17 @@ class AgentRuntime:
                             ):
                                 carrier_allowed = False
                             else:
-                                step_material = (source_message_id + "\x00" + str(openai_call["id"])).encode(
-                                    "utf-8"
-                                )
+                                # Native tool-call ids belong to the model/transport and are
+                                # allowed to repeat between rounds (several OpenAI-compatible
+                                # endpoints use ``call_0`` for every generation).  Bind a
+                                # code-owned absolute ordinal instead so two dependent commands
+                                # in one owner turn can never alias the same durable job.
+                                absolute_call_ordinal = batch_call_ordinal_base + selected_index + 1
+                                step_material = (
+                                    source_message_id
+                                    + "\x00engineer-command-step\x00"
+                                    + str(absolute_call_ordinal)
+                                ).encode("utf-8")
                                 call_arguments["_source_message_id"] = source_message_id
                                 call_arguments["_telegram_update_id"] = (
                                     context.engineer_command_telegram_update_id

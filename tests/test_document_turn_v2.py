@@ -233,6 +233,85 @@ async def test_bridge_sends_one_ordered_documents_payload_for_an_album(tmp_path,
 
 
 @pytest.mark.asyncio
+async def test_bridge_leaves_archive_album_admission_to_the_backend_mode(tmp_path, monkeypatch) -> None:
+    bridge = _bridge(tmp_path)
+
+    def update(update_id: int, message_id: int, filename: str, *, caption: str = "") -> dict[str, Any]:
+        message: dict[str, Any] = {
+            "message_id": message_id,
+            "media_group_id": "archive-album",
+            "chat": {"id": 5001, "type": "private"},
+            "from": {"id": 1001, "first_name": "Alice"},
+            "document": {
+                "file_id": f"file-{message_id}",
+                "file_unique_id": f"unique-{message_id}",
+                "file_name": filename,
+                "mime_type": "application/zip" if filename.endswith(".zip") else "text/plain",
+                "file_size": 32,
+            },
+        }
+        if caption:
+            message["caption"] = caption
+        return {"update_id": update_id, "message": message}
+
+    first = update(827, 81, "opaque.zip", caption="Проверь оба файла")
+    second = update(828, 82, "notes.txt")
+    combined = dict(first)
+    combined["friday_media_group_messages"] = [first["message"], second["message"]]
+    backend_calls: list[dict[str, Any]] = []
+
+    async def prepare(_telegram, message, _update):  # noqa: ANN001
+        document = message["document"]
+        return {
+            "filename": document["file_name"],
+            "mime_type": document["mime_type"],
+            "content_base64": base64.b64encode(document["file_name"].encode()).decode(),
+            "source_ref": f"telegram-file:{document['file_id']}",
+            "file_unique_id": document["file_unique_id"],
+            "media_kind": "document",
+        }
+
+    async def backend_json(_client, _method, path, payload, _user, _chat):  # noqa: ANN001
+        assert path == "/api/chat"
+        backend_calls.append(dict(payload))
+        if payload.get("document_stage_only") is True:
+            return {
+                "file_ingestions": [
+                    {
+                        "telegram_item_receipt": _telegram_item_receipt(
+                            int(item["telegram_message_id"]), str(item["source_ref"])
+                        ),
+                        "telegram_stage_ready": True,
+                    }
+                    for item in payload["documents"]
+                ]
+            }
+        return {"message": "Оба файла обработаны", "message_format": "plain"}
+
+    async def typing(*_args, **_kwargs):
+        await asyncio.Event().wait()
+
+    async def send(*_args, **_kwargs):
+        return None
+
+    monkeypatch.setattr(bridge, "_prepare_document", prepare)
+    monkeypatch.setattr(bridge, "_backend_json", backend_json)
+    monkeypatch.setattr(bridge, "_typing_loop", typing)
+    monkeypatch.setattr(bridge, "_send_message", send)
+    try:
+        await bridge._process_update(object(), object(), combined, cached_response=None)  # noqa: SLF001
+    finally:
+        bridge._inbox.close()  # noqa: SLF001
+
+    assert len(backend_calls) == 2
+    assert [item["filename"] for item in backend_calls[0]["documents"]] == [
+        "opaque.zip",
+        "notes.txt",
+    ]
+    assert backend_calls[1]["staged_document_message_ids"] == [81, 82]
+
+
+@pytest.mark.asyncio
 async def test_old_poisoned_anchor_cannot_replay_over_versioned_album_final(tmp_path, monkeypatch) -> None:
     bridge = _bridge(tmp_path)
     first = _album_update(102500242, 1842, "historical-a", caption="Разбери оба")
@@ -621,6 +700,50 @@ def test_backend_stages_exact_album_siblings_then_runs_one_alias_authorized_turn
     assert len(attachments) == 2
     assert all(set(item) == {"raw_object_id"} for item in attachments)
     assert len({item["raw_object_id"] for item in attachments}) == 2
+
+
+def test_ordinary_backend_still_rejects_archive_document_batches(settings) -> None:
+    from friday.server import create_app
+
+    app = create_app(settings)
+    payload = {
+        "message": "",
+        "mode": "dialogue",
+        "document_stage_only": True,
+        "telegram_user": {"id": 5001, "first_name": "Alice"},
+        "documents": [
+            {
+                "filename": "opaque.zip",
+                "mime_type": "application/zip",
+                "content_base64": base64.b64encode(b"PK\x03\x04opaque").decode(),
+                "source_ref": "telegram-file:ordinary-archive",
+                "telegram_message_id": 83,
+                "media_kind": "document",
+            },
+            {
+                "filename": "notes.txt",
+                "mime_type": "text/plain",
+                "content_base64": base64.b64encode(b"notes").decode(),
+                "source_ref": "telegram-file:ordinary-notes",
+                "telegram_message_id": 84,
+                "media_kind": "document",
+            },
+        ],
+    }
+    encoded = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
+    with TestClient(app) as client:
+        response = client.post(
+            "/api/chat",
+            content=encoded,
+            headers=_signed_bridge_headers(settings, encoded),
+        )
+        raw_count = app.state.storage.execute(
+            "SELECT COUNT(*) AS count FROM raw_objects WHERE content_type='file'"
+        ).fetchone()
+
+    assert response.status_code == 400, response.text
+    assert response.json()["detail"] == "Archives must be sent as separate turns"
+    assert int(raw_count["count"]) == 0
 
 
 def test_byte_duplicate_album_siblings_keep_ordered_proof_but_one_runtime_carrier(

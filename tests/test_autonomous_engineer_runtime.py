@@ -104,12 +104,50 @@ class _NamedToolModel(_CommandModel):
         }
 
 
+class _RepeatedNativeIdCommandModel:
+    enabled = True
+    total_budget_sec = 1.0
+
+    def __init__(self) -> None:
+        self.calls = 0
+
+    async def chat(self, _messages, *, tools=None, **_kwargs):  # noqa: ANN001
+        self.calls += 1
+        if self.calls <= 2:
+            return {
+                "content": "",
+                "tool_calls": [
+                    {
+                        # SGLang/OpenAI-compatible transports may restart ids on
+                        # every generation; this value deliberately repeats.
+                        "id": "call_0",
+                        "function": {
+                            "name": "engineer_command_run",
+                            "arguments": json.dumps({"command": f"printf step-{self.calls}"}),
+                        },
+                    }
+                ],
+                "finish_reason": "tool_calls",
+            }
+        return {"content": "Оба шага выполнены.", "tool_calls": None, "finish_reason": "stop"}
+
+
 class _CommandKernel:
     def __init__(self) -> None:
         self.executions: list[tuple[str, dict[str, object], ActorContext]] = []
 
     def get_tool(self, _name: str) -> SimpleNamespace:
         return SimpleNamespace(risk="high", timeout_sec=None)
+
+    @staticmethod
+    def tool_is_approval_free(name: str) -> bool:
+        return name not in {
+            "code_run",
+            "conflict_decide",
+            "entity_merge_decide",
+            "host_action_run",
+            "mission_compensation",
+        }
 
     async def execute(self, name, arguments, *, actor):  # noqa: ANN001
         self.executions.append((name, dict(arguments), actor))
@@ -156,6 +194,7 @@ async def test_autonomous_engineer_retains_actor_tools_and_retires_bounded_wrapp
         ),
         storage,
         llm=model,  # type: ignore[arg-type]
+        kernel=_CommandKernel(),  # type: ignore[arg-type]
     )
 
     await runtime._agentic_loop(  # noqa: SLF001
@@ -170,6 +209,11 @@ async def test_autonomous_engineer_retains_actor_tools_and_retires_bounded_wrapp
             _schema("archive_search"),
             _schema("obsidian_create_note"),
             _schema("make_file"),
+            _schema("code_run"),
+            _schema("conflict_decide"),
+            _schema("entity_merge_decide"),
+            _schema("host_action_run"),
+            _schema("mission_compensation"),
             _schema("engineer_compile_java"),
             _schema("engineer_decompile_artifact"),
         ],
@@ -187,11 +231,45 @@ async def test_autonomous_engineer_retains_actor_tools_and_retires_bounded_wrapp
     } <= set(model.offered)
     assert "engineer_compile_java" not in model.offered
     assert "engineer_decompile_artifact" not in model.offered
+    assert "code_run" not in model.offered
+    assert "conflict_decide" not in model.offered
+    assert "entity_merge_decide" not in model.offered
+    assert "host_action_run" not in model.offered
+    assert "mission_compensation" not in model.offered
     system_text = "\n".join(
         str(item.get("content") or "") for item in model.messages if item.get("role") == "system"
     )
     assert "автономный инженер владельца" in system_text
     assert "НИКОГДА не приписывай ответ архиву" not in system_text
+
+
+@pytest.mark.asyncio
+async def test_autonomous_engineer_cannot_fall_back_to_legacy_approval_tools(
+    settings,
+    storage,
+) -> None:
+    actor = ActorContext(LEGACY_OWNER_USER_ID, "owner", "telegram-bridge")
+    storage.ensure_user(actor.own_id, preset_key="owner")
+    model = _NamedToolModel(
+        "conflict_decide",
+        {"conflict_id": "conflict-model-invented", "decision": "keep_a"},
+    )
+    runtime = AgentRuntime(
+        replace(settings, engineer_mode_enabled=True, engineer_command_enabled=True),
+        storage,
+        llm=model,  # type: ignore[arg-type]
+    )
+
+    response = await runtime._agentic_loop(  # noqa: SLF001
+        _context(),
+        "Реши задачу автономно без подтверждений.",
+        actor,
+        tools=[_schema("conflict_decide"), _schema("engineer_command_run")],
+        attachments=None,
+    )
+
+    assert response["content"] == "Готово."
+    assert storage.count_action_approvals(actor.own_id) == 0
 
 
 @pytest.mark.asyncio
@@ -233,8 +311,48 @@ async def test_autonomous_command_uses_exact_current_message_and_code_owned_step
     assert arguments["_conversation_id"] == "conv-autonomous-engineer"
     assert arguments["_source_message_id"] == "msg_0123456789abcdef"
     assert arguments["_telegram_update_id"] == "123456"
-    digest = hashlib.sha256(b"msg_0123456789abcdef\x00live-command-step").hexdigest()[:32]
+    digest = hashlib.sha256(b"msg_0123456789abcdef\x00engineer-command-step\x001").hexdigest()[:32]
     assert arguments["_step_id"] == f"ecstep-{digest}"
+
+
+@pytest.mark.asyncio
+async def test_repeated_native_call_ids_get_distinct_code_owned_step_identities(
+    settings,
+    storage,
+    monkeypatch,
+) -> None:
+    actor = ActorContext(LEGACY_OWNER_USER_ID, "owner", "telegram-bridge")
+    storage.ensure_user(actor.own_id, preset_key="owner")
+    model = _RepeatedNativeIdCommandModel()
+    kernel = _CommandKernel()
+    runtime = AgentRuntime(
+        replace(settings, engineer_mode_enabled=True, engineer_command_enabled=True),
+        storage,
+        llm=model,  # type: ignore[arg-type]
+        kernel=kernel,  # type: ignore[arg-type]
+    )
+    monkeypatch.setattr(runtime, "_fresh_engineer_actor", lambda current, _capability: current)
+
+    response = await runtime._agentic_loop(  # noqa: SLF001
+        _context(),
+        "Выполни два зависимых шага.",
+        actor,
+        tools=[_schema("engineer_command_run")],
+        attachments=None,
+    )
+
+    assert response["content"] == "Оба шага выполнены."
+    assert [item[1]["command"] for item in kernel.executions] == ["printf step-1", "printf step-2"]
+    step_ids = [str(item[1]["_step_id"]) for item in kernel.executions]
+    assert len(set(step_ids)) == 2
+    expected = [
+        "ecstep-"
+        + hashlib.sha256(f"msg_0123456789abcdef\x00engineer-command-step\x00{ordinal}".encode()).hexdigest()[
+            :32
+        ]
+        for ordinal in (1, 2)
+    ]
+    assert step_ids == expected
 
 
 @pytest.mark.asyncio

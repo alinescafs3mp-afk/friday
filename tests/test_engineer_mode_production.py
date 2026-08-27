@@ -631,21 +631,22 @@ def test_owner_binary_reaches_engineer_dossier_and_model(settings, monkeypatch) 
     assert "kind: `pe`" in prompt
 
 
-def test_enable_tools_false_prevents_engineer_autohunt(settings, monkeypatch) -> None:
+def test_engineer_force_enables_tools_despite_legacy_false_hint(settings, monkeypatch) -> None:
     from friday.server import create_app
 
     configured = replace(settings, engineer_mode_enabled=True, verify_answers=False)
     model = _PromptSpy()
     app = create_app(configured)
 
-    async def forbidden_autohunt(*args, **kwargs):  # noqa: ANN002, ANN003
+    async def empty_autohunt(*args, **kwargs):  # noqa: ANN002, ANN003
         del args, kwargs
-        raise AssertionError("enable_tools=false still launched engineer autohunt")
+        return {}
 
     with TestClient(app) as client:
         runtime = getattr(app.state.agent, "_legacy", app.state.agent)
         monkeypatch.setattr(runtime, "llm", model)
-        monkeypatch.setattr(runtime, "_engineer_autohunt", forbidden_autohunt)
+        autohunt = AsyncMock(side_effect=empty_autohunt)
+        monkeypatch.setattr(runtime, "_engineer_autohunt", autohunt)
         response = client.post(
             "/api/chat",
             headers={"Authorization": f"Bearer {configured.api_token}"},
@@ -664,8 +665,9 @@ def test_enable_tools_false_prevents_engineer_autohunt(settings, monkeypatch) ->
 
     assert response.status_code == 200, response.text
     assert response.json()["message"] == "ENGINEER-MODEL-SAW-DOSSIER"
+    assert autohunt.await_count == 1
     user_row = next(item for item in rows if item.get("role") == "user")
-    assert json.loads(str(user_row.get("metadata_json") or "{}"))["tools_enabled"] is False
+    assert json.loads(str(user_row.get("metadata_json") or "{}"))["tools_enabled"] is True
 
 
 @pytest.mark.asyncio

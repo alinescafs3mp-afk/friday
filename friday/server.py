@@ -199,6 +199,16 @@ _HOST_JOB_ID = re.compile(r"hjob_[0-9a-f]{32}")
 _ENGINEER_COMMAND_JOB_ID = re.compile(r"[0-9a-f]{32}")
 
 
+def _trusted_telegram_update_id_from_source_ref(source_ref: str) -> str | None:
+    """Return the bridge-authenticated update anchor from an exact source ref."""
+
+    update_match = re.fullmatch(r"telegram-update:([0-9]{1,20})", source_ref)
+    if update_match is not None:
+        return update_match.group(1)
+    album_match = re.fullmatch(r"telegram-album-v2:([0-9]{1,20}):[0-9a-f]{64}", source_ref)
+    return album_match.group(1) if album_match is not None else None
+
+
 def _host_result_text(value: object, maximum: int = 120) -> str:
     """Return one bounded display token from already-untrusted host evidence."""
 
@@ -1180,6 +1190,8 @@ def _current_replay_needs_reinspection(
         return False
 
     metadata = bounded_raw_file_metadata(raw.get("metadata_json"))
+    if metadata.get("opaque_engineer_input") is True:
+        return False
     raw_text = str(raw.get("raw_content") or "")
     usable_text = bool(raw_text.strip()) and not _is_file_provenance_stub(raw_text)
 
@@ -2494,6 +2506,8 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
                 except BaseException:
                     if mcp_manager is not None:
                         await mcp_manager.close()
+                    with suppress(Exception):
+                        await organs.close()
                     await secondary_brain.aclose()
                     if obsidian_runtime is not None:
                         await obsidian_runtime.close()
@@ -2504,6 +2518,10 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
             except BaseException:
                 if mcp_manager is not None:
                     await mcp_manager.close()
+                with suppress(Exception):
+                    await workers.stop()
+                with suppress(Exception):
+                    await organs.close()
                 await secondary_brain.aclose()
                 if obsidian_runtime is not None:
                     await obsidian_runtime.close()
@@ -2515,6 +2533,10 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
                 if isinstance(agent, OrchestrationRouter):
                     await agent.close()
                 await workers.stop()
+                try:
+                    await organs.close()
+                except Exception as exc:  # noqa: BLE001 - shutdown must continue to storage close
+                    LOGGER.error("Organ shutdown failed (%s)", type(exc).__name__)
                 await secondary_brain.aclose()
                 if obsidian_runtime is not None:
                     await obsidian_runtime.close()
@@ -3859,22 +3881,11 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
             )
         trusted_telegram_update_id: str | None = None
         if actor.source == "telegram-bridge":
-            update_match = re.fullmatch(r"telegram-update:([0-9]{1,20})", source_ref)
-            if update_match is not None:
-                trusted_telegram_update_id = update_match.group(1)
+            trusted_telegram_update_id = _trusted_telegram_update_id_from_source_ref(source_ref)
         if not message and not incoming_documents and not staged_document_message_ids:
             raise HTTPException(status_code=400, detail="message or document is required")
         if len(message) > settings.max_extracted_text_chars:
             raise HTTPException(status_code=413, detail="Message is too long")
-        explicit_no_save = bool(
-            message
-            and "explicit_no_save"
-            in state.ingestion.assess_text(
-                message,
-                force_knowledge=force_knowledge,
-            ).penalties
-        )
-
         # Resolve the conversation before claiming an idempotency lease or
         # ingesting bytes. A caller can omit ``mode`` while continuing an
         # engineer conversation, and a Telegram channel session can restore the
@@ -3905,6 +3916,24 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
         if effective_mode == "engineer":
             actor = _require_fresh_engineer_chat_actor(state, actor)
             request.state.actor = actor
+            # Engineer is an owner-only autonomous tool contour.  Telegram has
+            # no per-turn opt-out contract, so a stale/lexical ``enable_tools``
+            # hint must not silently demote the turn back onto dialogue rails.
+            enable_tools = True
+        autonomous_engineer = bool(
+            effective_mode == "engineer"
+            and getattr(state.settings, "engineer_mode_enabled", False) is True
+            and getattr(state.settings, "engineer_command_enabled", False) is True
+        )
+        explicit_no_save = bool(
+            not autonomous_engineer
+            and message
+            and "explicit_no_save"
+            in state.ingestion.assess_text(
+                message,
+                force_knowledge=force_knowledge,
+            ).penalties
+        )
 
         # Claim the key atomically before any side effect. A plain lookup followed
         # by a later insert allows concurrent retries to invoke the agent twice.
@@ -4425,7 +4454,7 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
                         status_code=400,
                         detail="A no-save request must contain exactly one document",
                     )
-                if archive_password is not None:
+                if archive_password is not None and not autonomous_engineer:
                     raise HTTPException(
                         status_code=400,
                         detail="An archive password must target exactly one document",
@@ -4433,24 +4462,27 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
                 # Validate the *whole* declared set before the first file can
                 # persist.  A bad second item must not leave a successful first
                 # Raw behind while the overall turn is rejected.
-                for batch_document in document_batch:
-                    candidate_filename = str(batch_document.get("filename") or "telegram-file.bin")
-                    candidate_mime = str(batch_document.get("mime_type") or "application/octet-stream")
-                    candidate_kind = str(batch_document.get("media_kind") or "")
-                    if candidate_kind in {"audio", "voice"} or candidate_mime.casefold().startswith("audio/"):
-                        raise HTTPException(
-                            status_code=400,
-                            detail="Audio and voice files must be sent as separate turns",
-                        )
-                    if candidate_filename.casefold().endswith(
-                        _DOCUMENT_TURN_ARCHIVE_SUFFIXES
-                    ) or candidate_mime.split(";", 1)[0].strip().casefold() in (
-                        _DOCUMENT_TURN_ARCHIVE_MIME_TYPES
-                    ):
-                        raise HTTPException(
-                            status_code=400,
-                            detail="Archives must be sent as separate turns",
-                        )
+                if not autonomous_engineer:
+                    for batch_document in document_batch:
+                        candidate_filename = str(batch_document.get("filename") or "telegram-file.bin")
+                        candidate_mime = str(batch_document.get("mime_type") or "application/octet-stream")
+                        candidate_kind = str(batch_document.get("media_kind") or "")
+                        if candidate_kind in {"audio", "voice"} or candidate_mime.casefold().startswith(
+                            "audio/"
+                        ):
+                            raise HTTPException(
+                                status_code=400,
+                                detail="Audio and voice files must be sent as separate turns",
+                            )
+                        if candidate_filename.casefold().endswith(
+                            _DOCUMENT_TURN_ARCHIVE_SUFFIXES
+                        ) or candidate_mime.split(";", 1)[0].strip().casefold() in (
+                            _DOCUMENT_TURN_ARCHIVE_MIME_TYPES
+                        ):
+                            raise HTTPException(
+                                status_code=400,
+                                detail="Archives must be sent as separate turns",
+                            )
                 speaker = state.storage.get_user(actor.own_id) or {}
                 speaker_meta = _json_load(speaker.get("metadata_json"), {})
                 language_code = str((speaker_meta or {}).get("language_code") or "").strip()
@@ -4502,6 +4534,7 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
                                 "uploaded_by": actor.own_id,
                             },
                             source_ref=item_source_ref,
+                            opaque_exact_bytes_only=autonomous_engineer,
                             turn_deadline=_turn_deadline,
                         )
                     except SourceReferenceConflictError:
@@ -4530,7 +4563,7 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
                             **batch_ingestion,
                             "_telegram_item_receipt": telegram_item_receipt,
                         }
-                    if _archive_password_challenge(batch_ingestion) is not None:
+                    if not autonomous_engineer and _archive_password_challenge(batch_ingestion) is not None:
                         # Archives were rejected before the first persistent
                         # seam.  Reaching a challenge now means the declared
                         # type lied; never publish a partial multi-file turn.
@@ -4787,10 +4820,13 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
                         media_kind=media_kind,
                         metadata={**file_metadata, "uploaded_by": actor.own_id},
                         source_ref=str(document.get("source_ref") or source_ref or ""),
+                        opaque_exact_bytes_only=autonomous_engineer,
                         turn_deadline=_turn_deadline,
                         **archive_kwargs,
                     )
-                    password_challenge = _archive_password_challenge(file_ingestion)
+                    password_challenge = (
+                        None if autonomous_engineer else _archive_password_challenge(file_ingestion)
+                    )
                     if password_challenge is not None:
                         if source_ref and lease_token:
                             state.storage.idempotency_release(actor.own_id, source_ref, lease_token)
@@ -4937,7 +4973,8 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
 
             policy_history: list[dict[str, Any]] = []
             if (
-                conversation_id is not None
+                not autonomous_engineer
+                and conversation_id is not None
                 and state.storage.get_conversation(conversation_id, actor.own_id) is not None
             ):
                 policy_history = await run_blocking(
@@ -4946,26 +4983,34 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
                     user_id=actor.own_id,
                     limit=4,
                 )
-            archive_search_current_text = _archive_search_private_turn_requested(message)
-            policy_context = replace(
-                _turn_policy_context_from_history(policy_history),
-                current_attachment_present=any(
-                    isinstance(item, _OwnedAttachment) or is_trusted_office_attachment(item)
-                    for item in attachments
-                ),
+            archive_search_current_text = bool(
+                not autonomous_engineer and _archive_search_private_turn_requested(message)
             )
-            turn_policy: TurnPolicyDecision = decide_turn_policy(
-                message,
-                context=policy_context,
-                diagnostics=DiagnosticsAuthority(
-                    capability_allowed=state.auth_service.authorize(
-                        actor,
-                        ADMIN_DIAGNOSTICS_CAPABILITY,
-                    ).allowed
-                ),
-                integrations=_live_integration_projection(state.settings, state.mcp),
-                image_generation=_live_image_generation_projection(state.kernel, actor),
-            )
+            if autonomous_engineer:
+                # The authenticated owner/model owns intent selection here.  No
+                # dialogue meta/diagnostic classifier may answer early or remove
+                # exact current carriers before the autonomous runtime sees them.
+                turn_policy = TurnPolicyDecision(intent=TurnIntent.PASSTHROUGH)
+            else:
+                policy_context = replace(
+                    _turn_policy_context_from_history(policy_history),
+                    current_attachment_present=any(
+                        isinstance(item, _OwnedAttachment) or is_trusted_office_attachment(item)
+                        for item in attachments
+                    ),
+                )
+                turn_policy = decide_turn_policy(
+                    message,
+                    context=policy_context,
+                    diagnostics=DiagnosticsAuthority(
+                        capability_allowed=state.auth_service.authorize(
+                            actor,
+                            ADMIN_DIAGNOSTICS_CAPABILITY,
+                        ).allowed
+                    ),
+                    integrations=_live_integration_projection(state.settings, state.mcp),
+                    image_generation=_live_image_generation_projection(state.kernel, actor),
+                )
             if archive_search_current_text:
                 # Private-store current-text authority wins before any
                 # history-aware weather/meta policy can emit a public response,
@@ -5007,7 +5052,8 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
 
             pending_durable_intake_admission: PendingDurableTurnAdmission | bool = False
             if (
-                conversation_id is not None
+                not autonomous_engineer
+                and conversation_id is not None
                 and (
                     not pending_durable_original_attachment_surface
                     or pending_comparison_attachment_count == 1
@@ -5032,7 +5078,15 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
                 )
 
             ingestion_result = None
-            if state.auth_service.authorize(actor, "knowledge.create").allowed:
+            if autonomous_engineer:
+                ingestion_result = {
+                    "promoted": False,
+                    "queued_for_review": False,
+                    "action": "transient",
+                    "category": "engineer_command",
+                    "reason": "owner Engineer turn bypasses dialogue knowledge ingestion",
+                }
+            elif state.auth_service.authorize(actor, "knowledge.create").allowed:
                 if pending_durable_intake_admission is not False:
                     # Exact ownership and uncertainty both stay side-effect
                     # free until the router/runtime performs its own fresh

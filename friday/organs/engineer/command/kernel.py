@@ -57,6 +57,7 @@ from .store import CommandJobStore, decode_json_list
 from .workspace import JobWorkspace
 
 _RECEIPT_CACHE_MAX = 64
+_SHUTDOWN_TIMEOUT_SEC = 30.0
 
 
 def _validated_private_inputs(
@@ -285,6 +286,11 @@ class CommandKernel:
         self._service_home = service_home
         self.boundary = boundary if boundary is not None else SystemdCgroupBoundary()
         self._lock = threading.Lock()
+        self._admission_condition = threading.Condition()
+        self._active_submits = 0
+        self._close_lock = threading.Lock()
+        self._closing = threading.Event()
+        self._closed = threading.Event()
         self._spawn_lock = threading.Lock()
         self._live: dict[str, SpawnedCommand] = {}
         self._threads: dict[str, threading.Thread] = {}
@@ -302,13 +308,83 @@ class CommandKernel:
         while len(self._receipts) > _RECEIPT_CACHE_MAX:
             self._receipts.pop(next(iter(self._receipts)))
 
-    def close(self) -> None:
+    def close(self, *, timeout_sec: float = _SHUTDOWN_TIMEOUT_SEC) -> None:
+        """Cancel live jobs, drain their reapers and release process resources.
+
+        Host-user jobs may deliberately have no runtime deadline.  They must not
+        turn Python's non-daemon reaper threads into an unbounded application
+        shutdown.  Closing admission first gives this method a stable live set;
+        every cancellation intent is durable before all cgroups are signalled.
+        """
+
+        if isinstance(timeout_sec, bool) or not isinstance(timeout_sec, (int, float)):
+            raise CommandError("invalid_shutdown_timeout")
+        timeout = float(timeout_sec)
+        if not math.isfinite(timeout) or timeout <= 0:
+            raise CommandError("invalid_shutdown_timeout")
+        deadline = time.monotonic() + timeout
+        remaining = deadline - time.monotonic()
+        if remaining <= 0 or not self._close_lock.acquire(timeout=remaining):
+            raise CommandError("command_shutdown_timeout")
+        try:
+            if self._closed.is_set():
+                return
+            self._close_with_deadline(deadline)
+        finally:
+            self._close_lock.release()
+
+    def _close_with_deadline(self, deadline: float) -> None:
+        # Submits already admitted remain concurrent, but close fences later
+        # submissions and waits until every earlier one has either registered a
+        # reaper or failed before admission.  This keeps the live snapshot stable
+        # without serializing normal command throughput.
+        with self._admission_condition:
+            self._closing.set()
+            while self._active_submits:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise CommandError("command_shutdown_timeout")
+                self._admission_condition.wait(timeout=remaining)
+
         with self._lock:
-            if self._live or any(worker.is_alive() for worker in self._threads.values()):
-                raise CommandError("job_running")
+            live = tuple(self._live.items())
+        requested_at = time.time()
+        persist_failure: CommandError | None = None
+        for job_id, _spawned in live:
+            try:
+                job = self.store.read_job(job_id)
+                self.store.persist_cancel_intent(
+                    job_id,
+                    actor_id=str(job.get("actor_id") or ""),
+                    conversation_id=str(job.get("conversation_id") or ""),
+                    requested_at=requested_at,
+                )
+            except CommandError as exc:
+                if exc.code not in {"current_job_uncertain", "job_not_running", "job_not_found"}:
+                    persist_failure = persist_failure or exc
+
+        # Signal all scopes first.  Full systemd collection remains in the
+        # reapers and therefore proceeds concurrently instead of N times in a
+        # serial shutdown loop.
+        for _job_id, spawned in live:
+            spawned.request_shutdown()
+
+        while True:
+            with self._lock:
+                workers = tuple(worker for worker in self._threads.values() if worker.is_alive())
+            if not workers:
+                break
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise CommandError("command_shutdown_timeout")
+            workers[0].join(timeout=min(0.1, remaining))
+
         self._finalizer()
         self._path_finalizer()
         self._store_finalizer()
+        self._closed.set()
+        if persist_failure is not None:
+            raise CommandError("command_shutdown_persist_failed") from persist_failure
 
     def _reconcile_stale(self) -> None:
         for job in self.store.list_unreaped():
@@ -409,6 +485,37 @@ class CommandKernel:
         )
 
     def submit(
+        self,
+        request: CommandRequest,
+        grant_token: str,
+        *,
+        actor_id: str,
+        delivery_chat_id: str = "",
+        input_manifest: CommandInputManifest | None = None,
+        input_batch_identity: CurrentMessageUploadBatchIdentity | None = None,
+        input_files: tuple[AuthorizedFileBytes, ...] = (),
+    ) -> str:
+        with self._admission_condition:
+            if self._closing.is_set():
+                raise CommandError("command_kernel_closing")
+            self._active_submits += 1
+        try:
+            return self._submit(
+                request,
+                grant_token,
+                actor_id=actor_id,
+                delivery_chat_id=delivery_chat_id,
+                input_manifest=input_manifest,
+                input_batch_identity=input_batch_identity,
+                input_files=input_files,
+            )
+        finally:
+            with self._admission_condition:
+                self._active_submits -= 1
+                if self._active_submits == 0:
+                    self._admission_condition.notify_all()
+
+    def _submit(
         self,
         request: CommandRequest,
         grant_token: str,

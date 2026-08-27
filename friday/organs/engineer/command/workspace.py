@@ -280,7 +280,7 @@ class JobWorkspace:
                 "FRIDAY_WORK_DIR": str(work_dir),
                 "HOME": home,
                 "PATH": env.get("PATH") or os.defpath,
-                "PWD": home,
+                "PWD": str(work_dir),
                 "TMPDIR": str(self.tmp),
             }
         )

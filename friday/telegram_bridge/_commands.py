@@ -1698,10 +1698,6 @@ class CommandsMixin(BridgeShared):
             )
             if album_messages and album_message_id is None:
                 raise RuntimeError("Telegram album has invalid ordered message identity")
-            if album_messages and self._archive_document_descriptor(media_message) is not None:
-                assert album_message_id is not None
-                album_skipped_message_ids.add(album_message_id)
-                continue
             try:
                 prepared = await self._prepare_document(telegram, media_message, update)
             except (MediaTooLargeError, PermanentUpdateError) as exc:

@@ -1879,6 +1879,7 @@ class FilesMixin(PipelineShared):
         force_review: bool = False,
         archive_password: str | None = None,
         exact_byte_identity_only: bool = False,
+        opaque_exact_bytes_only: bool = False,
         turn_deadline: float | None = None,
     ) -> dict[str, Any]:
         _ensure_ingestion_budget(turn_deadline)
@@ -1895,7 +1896,7 @@ class FilesMixin(PipelineShared):
         # the eager parse to archive containers so ordinary duplicate documents
         # retain the inexpensive hash-first path.
         extraction = None
-        if archive_dispatch_kind(filename, mime_type) is not None:
+        if not opaque_exact_bytes_only and archive_dispatch_kind(filename, mime_type) is not None:
             extraction = await _await_with_turn_deadline(
                 asyncio.to_thread(
                     self._doc_extractor.extract,
@@ -1986,6 +1987,122 @@ class FilesMixin(PipelineShared):
 
         self.storage.ensure_user(user_id, source="upload")
         existing = find_existing_source()
+        if opaque_exact_bytes_only:
+            # Engineer uploads are executable inputs, not knowledge candidates.
+            # Persist the exact current bytes and provenance without opening,
+            # extracting, OCRing, transcribing or archive-walking them.  The
+            # command contour re-authorizes this Raw from the current user row
+            # before copying it into the process-owned workbench.
+            if existing:
+                existing = self._prepare_existing_file_for_replay(
+                    user_id,
+                    existing,
+                    file_content,
+                    digest,
+                    filename,
+                )
+                bind_transport_alias(str(existing.get("id") or ""))
+                return {
+                    **self._replay_file_source(user_id, existing),
+                    "persisted": True,
+                    "promoted": False,
+                    "queued_for_review": False,
+                }
+
+            target_path, staged_path = self._stage_file(user_id, file_content, digest, filename)
+            target_preexisted = target_path.exists()
+            raw_metadata = {
+                **supplied_metadata,
+                "filename": filename,
+                "mime_type": mime_type,
+                "sha256": digest,
+                "size_bytes": len(file_content),
+                "stored_path": _storage_relative(self.settings.files_dir, target_path),
+                "opaque_engineer_input": True,
+                "extraction_success": False,
+                "text_extraction_success": False,
+                "promotion_assessment": {
+                    "category": "command",
+                    "action": "transient",
+                    "reason": "opaque current Engineer input",
+                },
+            }
+            raw = RawObject(
+                id=new_id("raw"),
+                user_id=user_id,
+                source="upload",
+                source_ref=effective_source_ref,
+                raw_content="[engineer-input: opaque current upload]",
+                content_type="file",
+                content_hash=digest,
+                metadata_json=raw_metadata,
+            )
+            stored_path: Path | None = None
+            try:
+                with self.storage.transaction() as conn:
+                    existing = find_existing_source()
+                    if existing:
+                        existing = self._prepare_existing_file_for_replay(
+                            user_id,
+                            existing,
+                            file_content,
+                            digest,
+                            filename,
+                            conn=conn,
+                        )
+                        bind_transport_alias(str(existing.get("id") or ""))
+                        return {
+                            **self._replay_file_source(user_id, existing),
+                            "persisted": True,
+                            "promoted": False,
+                            "queued_for_review": False,
+                        }
+                    stored_path = self._commit_staged_file(target_path, staged_path, digest)
+                    staged_path = None
+                    try:
+                        raw = self.storage.store_raw_object(raw)
+                        bind_transport_alias(raw.id)
+                    except BaseException:
+                        if not target_preexisted:
+                            other_reference = conn.execute(
+                                """SELECT 1 FROM raw_objects
+                                   WHERE user_id=? AND content_type='file' AND content_hash=? AND id<>?
+                                   LIMIT 1""",
+                                (user_id, digest, raw.id),
+                            ).fetchone()
+                            if other_reference is None:
+                                target_path.unlink(missing_ok=True)
+                        raise
+            except BaseException:
+                if not target_preexisted and target_path.exists():
+                    try:
+                        with self.storage.transaction() as conn:
+                            referenced = conn.execute(
+                                """SELECT 1 FROM raw_objects
+                                   WHERE user_id=? AND content_type='file' AND content_hash=?
+                                   LIMIT 1""",
+                                (user_id, digest),
+                            ).fetchone()
+                            if referenced is None:
+                                target_path.unlink(missing_ok=True)
+                    except Exception as exc:
+                        LOGGER.error(
+                            "Could not reconcile opaque Engineer input after failed transaction (%s)",
+                            type(exc).__name__,
+                        )
+                raise
+            finally:
+                if staged_path is not None:
+                    staged_path.unlink(missing_ok=True)
+            if stored_path is None:  # pragma: no cover - defensive invariant
+                raise RuntimeError("Opaque Engineer input completed without a stored path")
+            return {
+                "persisted": True,
+                "promoted": False,
+                "queued_for_review": False,
+                "raw_object_id": raw.id,
+                "stored_path": str(stored_path),
+            }
         if not existing:
             # Запасной ключ — само содержимое. Он применялся только при пустом
             # `source_ref`, то есть из Telegram не применялся никогда: там ключ

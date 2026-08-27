@@ -10,6 +10,7 @@ import shlex
 import shutil
 import sqlite3
 import stat
+import threading
 import time
 from dataclasses import replace
 from pathlib import Path
@@ -1039,7 +1040,8 @@ def test_host_user_runs_direct_bash_with_host_environment_and_unbounded_timeout(
         (
             "set -eu",
             f'test "$HOME" = {shlex.quote(service_home)}',
-            'test "$(pwd)" = "$HOME"',
+            'test "$(pwd)" = "$FRIDAY_WORK_DIR"',
+            'test "$PWD" = "$FRIDAY_WORK_DIR"',
             f"test -r {shlex.quote(str(secret))}",
             f'test "$(id -u)" = {os.geteuid()}',
             f'test "$(readlink /proc/self/ns/net)" = {shlex.quote(network_namespace)}',
@@ -1072,7 +1074,7 @@ def test_host_user_workbench_persists_across_steps_and_output_stays_per_job(
 ) -> None:
     kernel = _kernel(tmp_path)
     first = _host_shell(
-        'printf first > "$FRIDAY_WORK_DIR/state.txt"',
+        'test "$(pwd)" = "$FRIDAY_WORK_DIR"; printf first > state.txt',
         key=_key("workbench-step-1"),
     )
     first_receipt = _wait(kernel, _submit_host(kernel, first))
@@ -1080,8 +1082,8 @@ def test_host_user_workbench_persists_across_steps_and_output_stays_per_job(
     assert first_receipt.generated_files == ()
 
     second = _host_shell(
-        "printf -- '-second' >> \"$FRIDAY_WORK_DIR/state.txt\"; "
-        'cp "$FRIDAY_WORK_DIR/state.txt" "$FRIDAY_OUTPUT_DIR/final.txt"',
+        'test "$(pwd)" = "$FRIDAY_WORK_DIR"; printf -- \'-second\' >> state.txt; '
+        'cp state.txt "$FRIDAY_OUTPUT_DIR/final.txt"',
         key=_key("workbench-step-2"),
     )
     second_receipt = _wait(kernel, _submit_host(kernel, second))
@@ -1274,6 +1276,136 @@ def test_unbounded_host_user_job_remains_cancellable(tmp_path: Path) -> None:
     assert receipt.cancelled is True
     assert receipt.timed_out is False
     kernel.close()
+
+
+def test_kernel_close_cancels_and_reaps_an_unbounded_host_job(tmp_path: Path) -> None:
+    kernel = _kernel(tmp_path)
+    request = _host_shell(
+        "exec /usr/bin/sleep 300",
+        key=_key("host-shutdown"),
+        timeout_sec=None,
+    )
+    job_id = _submit_host(kernel, request)
+    running = kernel.store.read_job(job_id)
+    cgroup = Path(str(running["cgroup_path"]))
+    broker = kernel._broker._proc
+    store_root = kernel.store.root
+
+    started = time.monotonic()
+    kernel.close(timeout_sec=30)
+    assert time.monotonic() - started < 30
+    assert broker.poll() is not None
+    assert not cgroup.exists()
+
+    # Acquiring the single-process store lease proves close released it; the
+    # restarted kernel then verifies the shutdown result is durable, not merely
+    # an in-memory cancellation flag.
+    restarted = CommandKernel(store_root, _authority())
+    receipt = restarted.wait(
+        job_id,
+        actor_id=ACTOR,
+        conversation_id="conv-1",
+        timeout_sec=0.1,
+    )
+    job = restarted.store.read_job(job_id)
+    assert receipt.status is CommandStatus.CANCELLED
+    assert receipt.cancelled is True
+    assert job["cancel_requested_at"] is not None
+    assert job["cleanup_pending"] == 0
+    restarted.close()
+
+
+def test_submit_crossing_close_is_admitted_then_cancelled_before_store_close(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    kernel = _kernel(tmp_path)
+    request = _host_shell(
+        "exec /usr/bin/sleep 300",
+        key=_key("submit-close-race"),
+        timeout_sec=None,
+    )
+    source = kernel.authority.source_authority.attest(
+        actor_id=ACTOR,
+        tenant_id="tenant-1",
+        conversation_id="conv-1",
+        channel="cli_test",
+        source_row_id="row-race",
+        source_hash=SOURCE_HASH,
+        telegram_update_id="upd-race",
+        isolation_profile=IsolationProfile.HOST_USER,
+        idempotency_key=request.idempotency_key,
+    )
+    delegation = kernel.authority.source_authority.delegate_autonomous(
+        source,
+        expires_at=int(time.time()) + 60,
+    )
+    grant = kernel.authority.issue_autonomous(request, source=source, delegation=delegation)
+    entered = threading.Event()
+    release = threading.Event()
+    submitted: list[str] = []
+    failures: list[BaseException] = []
+    original_submit = kernel._submit
+
+    def delayed_submit(*args, **kwargs):  # noqa: ANN002, ANN003, ANN202
+        entered.set()
+        if not release.wait(timeout=10):
+            raise RuntimeError("test_submit_release_timeout")
+        return original_submit(*args, **kwargs)
+
+    monkeypatch.setattr(kernel, "_submit", delayed_submit)
+
+    def submitter() -> None:
+        try:
+            submitted.append(kernel.submit(request, grant, actor_id=ACTOR))
+        except BaseException as exc:  # pragma: no cover - asserted below
+            failures.append(exc)
+
+    def closer() -> None:
+        try:
+            kernel.close(timeout_sec=30)
+        except BaseException as exc:  # pragma: no cover - asserted below
+            failures.append(exc)
+
+    submit_thread = threading.Thread(target=submitter)
+    close_thread = threading.Thread(target=closer)
+    submit_thread.start()
+    assert entered.wait(timeout=5)
+    close_thread.start()
+    assert kernel._closing.wait(timeout=5)
+    assert close_thread.is_alive()
+    with pytest.raises(CommandError, match="command_kernel_closing"):
+        kernel.submit(request, grant, actor_id=ACTOR)
+    release.set()
+    submit_thread.join(timeout=30)
+    close_thread.join(timeout=30)
+
+    assert not submit_thread.is_alive()
+    assert not close_thread.is_alive()
+    assert failures == []
+    assert len(submitted) == 1
+    store_root = kernel.store.root
+    restarted = CommandKernel(store_root, _authority())
+    receipt = restarted.wait(
+        submitted[0],
+        actor_id=ACTOR,
+        conversation_id="conv-1",
+        timeout_sec=0.1,
+    )
+    assert receipt.status is CommandStatus.CANCELLED
+    restarted.close()
+
+
+def test_kernel_close_is_idempotent_and_keeps_admission_closed(tmp_path: Path) -> None:
+    kernel = _kernel(tmp_path)
+    broker = kernel._broker._proc
+    kernel.close()
+    kernel.close()
+
+    assert broker.poll() is not None
+    request = _host_shell("true", key=_key("closed-submit"), timeout_sec=None)
+    with pytest.raises(CommandError, match="command_kernel_closing"):
+        kernel.submit(request, "unused", actor_id=ACTOR)
 
 
 def test_unbounded_timeout_is_reserved_for_autonomous_host_user(tmp_path: Path) -> None:

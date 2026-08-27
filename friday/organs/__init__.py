@@ -95,6 +95,9 @@ class Organ:
     def router(self) -> APIRouter | None:
         return None
 
+    async def close(self) -> None:
+        """Release organ-owned process resources during application shutdown."""
+
 
 class OrganRegistry:
     """Collects the enabled organs and exposes their aggregated contributions."""
@@ -131,6 +134,12 @@ class OrganRegistry:
             if router is not None:
                 collected.append(router)
         return collected
+
+    async def close(self) -> None:
+        """Close initialized organs in reverse registration order."""
+
+        for organ in reversed(self._organs):
+            await organ.close()
 
 
 def is_service_recipient(settings, chat_id: str) -> bool:

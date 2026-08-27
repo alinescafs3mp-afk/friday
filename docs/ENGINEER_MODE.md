@@ -95,10 +95,12 @@ workbench while Friday returns a transport-sized archive or report.
 ## Autonomous loop and other tools
 
 Engineer mode uses a short operational system prompt instead of the ordinary
-response-policy prompt. All tools already authorized for the owner remain
-available on equal terms, including web search, archive search, Obsidian and
-file creation. The old bounded Engineer wrappers are the only tools removed
-from this surface.
+response-policy prompt. Ordinary approval-free tools already authorized for the
+owner remain available on equal terms, including web search, archive search,
+Obsidian and file creation. Legacy approval-capable effect tools and the old
+bounded Engineer wrappers are not offered: the unrestricted host-user shell is
+the one effect lane, so an internal tool cannot quietly reintroduce
+`/approvals` or steer execution back onto a narrower wrapper.
 
 Friday should:
 
