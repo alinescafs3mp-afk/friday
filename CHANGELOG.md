@@ -1,3 +1,23 @@
+## 0.207.58 — 2026-08-27
+
+### Engineer execution-loop hotfix
+
+- Finite command timeouts now verify composite systemd durations such as
+  `5min 5s` exactly, so ordinary `timeout_sec=300` jobs no longer fail before
+  spawn with `resource_boundary_unproven`.
+- Opaque current Telegram uploads reach the command service's exact
+  owner/message/update/byte reauthorization instead of being rejected by the
+  generic parsed-document effect gate. EXE and other unknown binaries can now
+  be inspected through the autonomous shell path.
+- Terminal delivery sends an archive only when the command deliberately wrote
+  files to `FRIDAY_OUTPUT_DIR`. Console-only and failed steps no longer flood
+  Telegram with empty ZIPs; their no-carrier state and delayed workspace
+  retention remain durable and restart-safe.
+- Operational progress/result notifications are excluded from model dialogue
+  history. Model-authored imitations of the reserved Engineer completion
+  namespace are rejected and repaired, while a repeated identical failed
+  command is stopped after one real attempt instead of consuming all rounds.
+
 ## 0.207.57 — 2026-08-27
 
 ### Autonomous owner Engineer Mode and Obsidian restart recovery

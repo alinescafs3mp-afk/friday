@@ -1,10 +1,7 @@
 from __future__ import annotations
 
 import base64
-import io
-import json
 import threading
-import zipfile
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -263,6 +260,7 @@ def _receipt(
     *,
     generated: bool = True,
     stdout: bytes = b"",
+    status: CommandStatus = CommandStatus.COMPLETED,
 ) -> CommandReceipt:
     files = (
         (
@@ -278,7 +276,7 @@ def _receipt(
     )
     return CommandReceipt(
         job_id="3" * 32,
-        status=CommandStatus.COMPLETED,
+        status=status,
         lane=CommandLane.ARGV,
         origin=CommandOrigin.OWNER_TURN,
         isolation_profile=IsolationProfile.ISOLATED_WORKSPACE,
@@ -310,6 +308,7 @@ def _insert_terminal_job(
     *,
     conversation_id: str,
     source_message_id: str,
+    status: CommandStatus = CommandStatus.COMPLETED,
 ) -> None:
     with store.transaction():
         store.insert_job(
@@ -329,7 +328,7 @@ def _insert_terminal_job(
                 "argv_sha256": "5" * 64,
                 "lane": CommandLane.ARGV.value,
                 "origin": CommandOrigin.OWNER_TURN.value,
-                "status": CommandStatus.COMPLETED.value,
+                "status": status.value,
                 "grant_nonce": "nonce",
                 "timeout_sec": 30,
                 "max_stdout_bytes": 1024,
@@ -415,9 +414,11 @@ def test_worker_stages_without_model_and_reconciles_sent(storage, tmp_path: Path
     command_store.close()
 
 
-def test_worker_delivers_zero_generated_outputs_as_strict_receipt_archive(
+@pytest.mark.parametrize("status", [CommandStatus.COMPLETED, CommandStatus.FAILED])
+def test_worker_suppresses_zero_generated_outputs_without_archive_delivery(
     storage,
     tmp_path: Path,
+    status: CommandStatus,
 ) -> None:
     conversation_id, source_message_id = _main_scope(storage)
     command_store = CommandJobStore(tmp_path / "commands")
@@ -425,24 +426,35 @@ def test_worker_delivers_zero_generated_outputs_as_strict_receipt_archive(
         command_store,
         conversation_id=conversation_id,
         source_message_id=source_message_id,
+        status=status,
     )
     output = b"console result\n"
-    receipt = _receipt(b"", generated=False, stdout=output)
+    receipt = _receipt(b"", generated=False, stdout=output, status=status)
     service = _worker_service(storage, tmp_path, command_store, receipt, ())
-
-    assert service.publish_terminal_jobs() == {"staged": 1, "reconciled": 0, "failed": 0}
-    row = storage.list_pending_notifications()[0]
-    stored = read_terminal_notification_artifact(
-        storage,
-        tmp_path / "files",
-        {**row, "status": "pending"},
-        tenant_id=LEGACY_OWNER_USER_ID,
-        actor_id=LEGACY_OWNER_USER_ID,
-        max_bytes=4 * 1024 * 1024,
+    service.kernel.terminal_result = lambda *_args, **_kwargs: pytest.fail(  # type: ignore[method-assign]
+        "zero-output publication must not build or read an archive"
     )
-    with zipfile.ZipFile(io.BytesIO(stored.content)) as archive:
-        assert archive.read("stdout.bin") == output
-        assert json.loads(archive.read("MANIFEST.json"))["output_count"] == 0
+
+    expected = {"staged": 0, "reconciled": 0, "failed": 0}
+    assert service.publish_terminal_jobs() == expected
+    assert storage.list_pending_notifications() == []
+    publication = command_store._conn.execute(  # noqa: SLF001 - exact durable assertion
+        """SELECT state,last_error_code,attempts,notification_id,dedup_key,envelope_sha256
+             FROM command_job_publications WHERE job_id=?""",
+        (receipt.job_id,),
+    ).fetchone()
+    assert publication is not None
+    assert dict(publication) == {
+        "attempts": 0,
+        "dedup_key": "",
+        "envelope_sha256": "",
+        "last_error_code": "no_generated_files",
+        "notification_id": "",
+        "state": "blocked",
+    }
+    assert service.publish_terminal_jobs() == expected
+    assert storage.list_pending_notifications() == []
+    assert not (tmp_path / "files").exists()
     command_store.close()
 
 

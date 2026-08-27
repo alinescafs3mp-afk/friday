@@ -1097,6 +1097,13 @@ class EngineerCommandService:
                         or receipt.status not in _PUBLISHABLE_TERMINAL
                     ):
                         raise TerminalDeliveryError("terminal_receipt_unpublishable")
+                    if not receipt.generated_files:
+                        # Terminal publication is artifact delivery, not a
+                        # second transport for stdout/stderr.  Close the ledger
+                        # before any archive bytes or queue carrier are built so
+                        # later worker passes cannot retry an empty ZIP.
+                        self.kernel.store.suppress_empty_publication(job_id)
+                        continue
                     archive, attachment = self._archive_for_receipt(
                         receipt,
                         actor_id=actor.own_id,
@@ -1276,26 +1283,20 @@ class EngineerCommandService:
                 job_id = str(job.get("job_id") or "")
                 try:
                     marker = job.get("workspace_retired_at")
-                    row = self._exact_sent_retention_row(
-                        job,
-                        cutoff=cutoff,
-                        missing_after_marker=marker is not None,
+                    suppressed = bool(
+                        str(job.get("publication_state") or "") == "blocked"
+                        and str(job.get("publication_error_code") or "") == "no_generated_files"
+                    )
+                    row = (
+                        None
+                        if suppressed
+                        else self._exact_sent_retention_row(
+                            job,
+                            cutoff=cutoff,
+                            missing_after_marker=marker is not None,
+                        )
                     )
                     if marker is None:
-                        if row is None:
-                            raise TerminalDeliveryError("terminal_notification_missing")
-                        envelope = parse_terminal_envelope(row.get("body"))
-                        artifact_size = int(envelope["artifact"]["size_bytes"])
-                        if artifact_size > TERMINAL_ARTIFACT_MAX_BYTES:
-                            raise TerminalDeliveryError("terminal_artifact_too_large")
-                        verify_sent_terminal_notification_artifact(
-                            self.storage,
-                            self.files_root,
-                            row,
-                            tenant_id=str(job.get("tenant_id") or ""),
-                            actor_id=str(job.get("actor_id") or ""),
-                            max_bytes=artifact_size,
-                        )
                         receipt, _outputs = self.kernel.terminal_result_for_retention(
                             job_id,
                             actor_id=str(job.get("actor_id") or ""),
@@ -1305,27 +1306,58 @@ class EngineerCommandService:
                             job.get("receipt_mac") or ""
                         ):
                             raise TerminalDeliveryError("terminal_retention_identity_changed")
-                        self.kernel.store.mark_workspace_retirement(
-                            job_id,
-                            notification_id=str(job.get("notification_id") or ""),
-                            dedup_key=str(job.get("publication_dedup_key") or ""),
-                            envelope_sha256=str(job.get("envelope_sha256") or ""),
-                            cutoff=cutoff,
-                            retired_at=moment,
-                            stdout_bytes=len(receipt.stdout),
-                            stderr_bytes=len(receipt.stderr),
-                        )
+                        if suppressed:
+                            if receipt.generated_files or _outputs:
+                                raise TerminalDeliveryError("suppressed_artifact_identity_changed")
+                            self.kernel.store.mark_suppressed_workspace_retirement(
+                                job_id,
+                                cutoff=cutoff,
+                                retired_at=moment,
+                                stdout_bytes=len(receipt.stdout),
+                                stderr_bytes=len(receipt.stderr),
+                            )
+                        else:
+                            if row is None:
+                                raise TerminalDeliveryError("terminal_notification_missing")
+                            envelope = parse_terminal_envelope(row.get("body"))
+                            artifact_size = int(envelope["artifact"]["size_bytes"])
+                            if artifact_size > TERMINAL_ARTIFACT_MAX_BYTES:
+                                raise TerminalDeliveryError("terminal_artifact_too_large")
+                            verify_sent_terminal_notification_artifact(
+                                self.storage,
+                                self.files_root,
+                                row,
+                                tenant_id=str(job.get("tenant_id") or ""),
+                                actor_id=str(job.get("actor_id") or ""),
+                                max_bytes=artifact_size,
+                            )
+                            self.kernel.store.mark_workspace_retirement(
+                                job_id,
+                                notification_id=str(job.get("notification_id") or ""),
+                                dedup_key=str(job.get("publication_dedup_key") or ""),
+                                envelope_sha256=str(job.get("envelope_sha256") or ""),
+                                cutoff=cutoff,
+                                retired_at=moment,
+                                stdout_bytes=len(receipt.stdout),
+                                stderr_bytes=len(receipt.stderr),
+                            )
                     self._evict_archive_cache(job_id)
                     self.kernel.retire_workspace(job_id)
                     if row is not None:
                         self._delete_exact_sent_notification(row)
-                    self.kernel.store.finish_workspace_retirement(
-                        job_id,
-                        notification_id=str(job.get("notification_id") or ""),
-                        dedup_key=str(job.get("publication_dedup_key") or ""),
-                        envelope_sha256=str(job.get("envelope_sha256") or ""),
-                        retired_at=moment,
-                    )
+                    if suppressed:
+                        self.kernel.store.finish_suppressed_workspace_retirement(
+                            job_id,
+                            retired_at=moment,
+                        )
+                    else:
+                        self.kernel.store.finish_workspace_retirement(
+                            job_id,
+                            notification_id=str(job.get("notification_id") or ""),
+                            dedup_key=str(job.get("publication_dedup_key") or ""),
+                            envelope_sha256=str(job.get("envelope_sha256") or ""),
+                            retired_at=moment,
+                        )
                     retired_count += 1
                 except (
                     CommandError,

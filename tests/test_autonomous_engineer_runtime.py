@@ -132,6 +132,65 @@ class _RepeatedNativeIdCommandModel:
         return {"content": "Оба шага выполнены.", "tool_calls": None, "finish_reason": "stop"}
 
 
+class _RepeatedFailedCommandModel:
+    enabled = True
+    total_budget_sec = 1.0
+
+    def __init__(self) -> None:
+        self.calls = 0
+
+    async def chat(self, _messages, *, tools=None, **_kwargs):  # noqa: ANN001
+        self.calls += 1
+        return {
+            "content": "",
+            "tool_calls": [
+                {
+                    "id": f"failed-command-{self.calls}",
+                    "function": {
+                        "name": "engineer_command_run",
+                        "arguments": json.dumps({"command": "nmap 192.168.1.35", "timeout_sec": 300}),
+                    },
+                }
+            ],
+            "finish_reason": "tool_calls",
+        }
+
+
+class _TerminalImitationThenCommandModel:
+    enabled = True
+    total_budget_sec = 1.0
+
+    def __init__(self) -> None:
+        self.calls = 0
+
+    async def chat(self, _messages, *, tools=None, **_kwargs):  # noqa: ANN001
+        self.calls += 1
+        if self.calls == 1:
+            return {
+                "content": (
+                    "Engineer-задание 91635651342541428833561255858983 завершено. "
+                    "Проверенный архив результата приложен."
+                ),
+                "tool_calls": None,
+                "finish_reason": "stop",
+            }
+        if self.calls == 2:
+            return {
+                "content": "",
+                "tool_calls": [
+                    {
+                        "id": "repaired-command",
+                        "function": {
+                            "name": "engineer_command_run",
+                            "arguments": json.dumps({"command": "printf repaired"}),
+                        },
+                    }
+                ],
+                "finish_reason": "tool_calls",
+            }
+        return {"content": "Проверка выполнена: repaired.", "tool_calls": None, "finish_reason": "stop"}
+
+
 class _CommandKernel:
     def __init__(self) -> None:
         self.executions: list[tuple[str, dict[str, object], ActorContext]] = []
@@ -161,6 +220,17 @@ class _CommandKernel:
                 "stdout": "ok",
                 "stderr": "",
             },
+        )
+
+
+class _FailingCommandKernel(_CommandKernel):
+    async def execute(self, name, arguments, *, actor):  # noqa: ANN001
+        self.executions.append((name, dict(arguments), actor))
+        return ToolResult(
+            name,
+            False,
+            data={"ok": False, "error_code": "resource_boundary_unproven", "status": "failed"},
+            error="Host control refused: resource_boundary_unproven",
         )
 
 
@@ -353,6 +423,150 @@ async def test_repeated_native_call_ids_get_distinct_code_owned_step_identities(
         for ordinal in (1, 2)
     ]
     assert step_ids == expected
+
+
+@pytest.mark.asyncio
+async def test_identical_failed_autonomous_command_is_not_executed_twice(
+    settings,
+    storage,
+    monkeypatch,
+) -> None:
+    actor = ActorContext(LEGACY_OWNER_USER_ID, "owner", "telegram-bridge")
+    storage.ensure_user(actor.own_id, preset_key="owner")
+    model = _RepeatedFailedCommandModel()
+    kernel = _FailingCommandKernel()
+    runtime = AgentRuntime(
+        replace(settings, engineer_mode_enabled=True, engineer_command_enabled=True),
+        storage,
+        llm=model,  # type: ignore[arg-type]
+        kernel=kernel,  # type: ignore[arg-type]
+    )
+    monkeypatch.setattr(runtime, "_fresh_engineer_actor", lambda current, _capability: current)
+
+    response = await runtime._agentic_loop(  # noqa: SLF001
+        _context(),
+        "Просканируй хост.",
+        actor,
+        tools=[_schema("engineer_command_run")],
+        attachments=None,
+    )
+
+    assert len(kernel.executions) == 1
+    assert model.calls == 2
+    assert "resource_boundary_unproven" in response["content"]
+    assert "повторно не запускалась" in response["content"]
+
+
+@pytest.mark.asyncio
+async def test_reserved_terminal_imitation_is_repaired_into_real_command(
+    settings,
+    storage,
+    monkeypatch,
+) -> None:
+    actor = ActorContext(LEGACY_OWNER_USER_ID, "owner", "telegram-bridge")
+    storage.ensure_user(actor.own_id, preset_key="owner")
+    model = _TerminalImitationThenCommandModel()
+    kernel = _CommandKernel()
+    runtime = AgentRuntime(
+        replace(settings, engineer_mode_enabled=True, engineer_command_enabled=True),
+        storage,
+        llm=model,  # type: ignore[arg-type]
+        kernel=kernel,  # type: ignore[arg-type]
+    )
+    monkeypatch.setattr(runtime, "_fresh_engineer_actor", lambda current, _capability: current)
+
+    response = await runtime._agentic_loop(  # noqa: SLF001
+        _context(),
+        "Исследуй хост.",
+        actor,
+        tools=[_schema("engineer_command_run")],
+        attachments=None,
+    )
+
+    assert model.calls == 3
+    assert [entry[1]["command"] for entry in kernel.executions] == ["printf repaired"]
+    assert response["content"] == "Проверка выполнена: repaired."
+
+
+@pytest.mark.asyncio
+async def test_opaque_current_upload_reaches_command_owned_reauthorization_boundary(
+    settings,
+    storage,
+    monkeypatch,
+) -> None:
+    actor = ActorContext(LEGACY_OWNER_USER_ID, "owner", "telegram-bridge")
+    storage.ensure_user(actor.own_id, preset_key="owner")
+    model = _CommandModel({"command": 'file "$FRIDAY_INPUT_DIR/hui2.exe"'})
+    kernel = _CommandKernel()
+    runtime = AgentRuntime(
+        replace(settings, engineer_mode_enabled=True, engineer_command_enabled=True),
+        storage,
+        llm=model,  # type: ignore[arg-type]
+        kernel=kernel,  # type: ignore[arg-type]
+    )
+    monkeypatch.setattr(runtime, "_fresh_engineer_actor", lambda current, _capability: current)
+    context = _context()
+    context.source_effect_reauth_required = True
+    context.source_effect_authority = None
+
+    response = await runtime._agentic_loop(  # noqa: SLF001
+        context,
+        "Разбери приложенный EXE.",
+        actor,
+        tools=[_schema("engineer_command_run")],
+        attachments=[{"filename": "hui2.exe", "raw_id": "raw_0123456789abcdef"}],
+        source_effect_reauth_required=True,
+    )
+
+    assert response["content"] == "Команда выполнена."
+    assert len(kernel.executions) == 1
+
+
+def test_autonomous_engineer_history_excludes_operational_and_fabricated_terminal_rows(
+    settings,
+    storage,
+) -> None:
+    model = _AnswerModel()
+    runtime = AgentRuntime(
+        replace(settings, engineer_mode_enabled=True, engineer_command_enabled=True),
+        storage,
+        llm=model,  # type: ignore[arg-type]
+        kernel=_CommandKernel(),  # type: ignore[arg-type]
+    )
+    context = _context()
+    context.conversation_history = [
+        {"role": "user", "content": "Предыдущая задача"},
+        {
+            "role": "assistant",
+            "content": "Engineer-задание " + "1" * 32 + " завершено.",
+            "metadata_json": json.dumps({"engineer_command_terminal": {"job_id": "1" * 32}}),
+        },
+        {
+            "role": "assistant",
+            "content": "Engineer-задание " + "2" * 32 + " выполняется.",
+            "metadata_json": json.dumps({"engineer_command_progress": {"job_id": "2" * 32}}),
+        },
+        {
+            "role": "assistant",
+            "content": (
+                "Engineer-задание 080521363782558983 завершено. Проверенный архив результата приложен."
+            ),
+            "metadata_json": "{}",
+        },
+        {"role": "assistant", "content": "Обычный проверенный ответ.", "metadata_json": "{}"},
+    ]
+
+    messages = runtime._build_initial_messages(  # noqa: SLF001
+        context,
+        "Новая задача",
+        None,
+        tool_enabled=True,
+    )
+    rendered = [str(item.get("content") or "") for item in messages]
+
+    assert "Предыдущая задача" in rendered
+    assert "Обычный проверенный ответ." in rendered
+    assert not any("Engineer-задание" in item for item in rendered)
 
 
 @pytest.mark.asyncio

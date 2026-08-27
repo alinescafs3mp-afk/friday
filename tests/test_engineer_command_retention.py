@@ -69,7 +69,12 @@ def _scope(storage) -> tuple[str, str]:
     return str(conversation["id"]), str(source["id"])
 
 
-def _service(storage, tmp_path: Path) -> tuple[EngineerCommandService, CommandReceipt]:
+def _service(
+    storage,
+    tmp_path: Path,
+    *,
+    generated_output: bool = True,
+) -> tuple[EngineerCommandService, CommandReceipt]:
     conversation_id, source_message_id = _scope(storage)
     kernel = CommandKernel(tmp_path / "commands", _authority())
     workspace = JobWorkspace(kernel.store.job_dir(_JOB_ID))
@@ -85,7 +90,8 @@ def _service(storage, tmp_path: Path) -> tuple[EngineerCommandService, CommandRe
         sha256=sha256_bytes(output),
         mode=0o600,
     )
-    atomic_write(workspace.sealed / generated.relative_path, output, mode=0o400)
+    if generated_output:
+        atomic_write(workspace.sealed / generated.relative_path, output, mode=0o400)
     unsigned = CommandReceipt(
         job_id=_JOB_ID,
         status=CommandStatus.COMPLETED,
@@ -108,7 +114,7 @@ def _service(storage, tmp_path: Path) -> tuple[EngineerCommandService, CommandRe
         stderr_sha256=sha256_bytes(stderr),
         stdout=stdout,
         stderr=stderr,
-        generated_files=(generated,),
+        generated_files=(generated,) if generated_output else (),
         error_code="",
         effect_boundary_crossed=True,
         receipt_mac="",
@@ -292,6 +298,41 @@ def test_retention_uses_historical_artifact_size_not_current_upload_limit(
     service.max_upload_bytes = 1
     assert service.retain_terminal_jobs(now=now) == {"retired": 1, "failed": 0, "ephemera": 0}
     assert not service.kernel.store.job_dir(_JOB_ID).exists()
+    service.kernel.close()
+
+
+def test_suppressed_no_output_job_is_retired_without_a_carrier(storage, tmp_path: Path) -> None:
+    service, receipt = _service(storage, tmp_path, generated_output=False)
+    now = time.time()
+    old = now - 31 * 24 * 60 * 60
+
+    assert service.publish_terminal_jobs() == {"staged": 0, "reconciled": 0, "failed": 0}
+    assert storage.list_pending_notifications() == []
+    with service.kernel.store.transaction():
+        service.kernel.store._conn.execute(  # noqa: SLF001 - exact aging fixture
+            "UPDATE command_job_publications SET updated_at=? WHERE job_id=?",
+            (old, _JOB_ID),
+        )
+
+    assert service.retain_terminal_jobs(now=now) == {"retired": 1, "failed": 0, "ephemera": 0}
+    assert not service.kernel.store.job_dir(_JOB_ID).exists()
+    job = service.kernel.store.read_job(_JOB_ID)
+    assert job["workspace_retired_at"] is not None
+    assert (job["stdout_bytes"], job["stderr_bytes"]) == (
+        len(receipt.stdout),
+        len(receipt.stderr),
+    )
+    publication = service.kernel.store._conn.execute(  # noqa: SLF001
+        "SELECT state,last_error_code,carrier_retired_at FROM command_job_publications WHERE job_id=?",
+        (_JOB_ID,),
+    ).fetchone()
+    assert publication is not None
+    assert dict(publication) == {
+        "carrier_retired_at": now,
+        "last_error_code": "no_generated_files",
+        "state": "blocked",
+    }
+    assert storage.list_pending_notifications() == []
     service.kernel.close()
 
 

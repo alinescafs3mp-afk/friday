@@ -889,10 +889,13 @@ class CommandJobStore:
                           publication.notification_id,
                           publication.dedup_key AS publication_dedup_key,
                           publication.envelope_sha256,
+                          publication.last_error_code AS publication_error_code,
                           publication.updated_at AS publication_updated_at
                      FROM command_job_publications AS publication
                      JOIN jobs ON jobs.job_id=publication.job_id
-                    WHERE publication.state='sent'
+                    WHERE (publication.state='sent'
+                           OR (publication.state='blocked'
+                               AND publication.last_error_code='no_generated_files'))
                       AND publication.carrier_retired_at IS NULL
                       AND (publication.retention_next_attempt_at IS NULL
                            OR publication.retention_next_attempt_at<=?)
@@ -1009,6 +1012,63 @@ class CommandJobStore:
                 raise CommandError("retention_identity_changed")
         return self.read_job(job_id)
 
+    def mark_suppressed_workspace_retirement(
+        self,
+        job_id: str,
+        *,
+        cutoff: float,
+        retired_at: float,
+        stdout_bytes: int,
+        stderr_bytes: int,
+    ) -> dict[str, Any]:
+        """Persist cleanup authority for an intentionally carrier-free job."""
+
+        if (
+            not isinstance(stdout_bytes, int)
+            or isinstance(stdout_bytes, bool)
+            or stdout_bytes < 0
+            or not isinstance(stderr_bytes, int)
+            or isinstance(stderr_bytes, bool)
+            or stderr_bytes < 0
+        ):
+            raise CommandError("retention_identity_invalid")
+        with self.transaction():
+            row = self._conn.execute(
+                """SELECT jobs.workspace_retired_at,jobs.stdout_bytes,jobs.stderr_bytes
+                     FROM jobs
+                     JOIN command_job_publications AS publication
+                       ON publication.job_id=jobs.job_id
+                    WHERE jobs.job_id=?
+                      AND jobs.status IN ('completed','failed','cancelled','timeout')
+                      AND jobs.cleanup_pending=0
+                      AND publication.state='blocked'
+                      AND publication.last_error_code='no_generated_files'
+                      AND publication.carrier_retired_at IS NULL
+                      AND publication.updated_at<=?""",
+                (str(job_id), float(cutoff)),
+            ).fetchone()
+            if row is None:
+                raise CommandError("retention_authority_changed")
+            if row["workspace_retired_at"] is None:
+                cursor = self._conn.execute(
+                    """UPDATE jobs
+                          SET workspace_retired_at=?,stdout_bytes=?,stderr_bytes=?
+                        WHERE job_id=? AND workspace_retired_at IS NULL""",
+                    (
+                        float(retired_at),
+                        int(stdout_bytes),
+                        int(stderr_bytes),
+                        str(job_id),
+                    ),
+                )
+                if cursor.rowcount != 1:
+                    raise CommandError("retention_authority_changed")
+            elif (
+                int(row["stdout_bytes"] or 0) != stdout_bytes or int(row["stderr_bytes"] or 0) != stderr_bytes
+            ):
+                raise CommandError("retention_identity_changed")
+        return self.read_job(job_id)
+
     def finish_workspace_retirement(
         self,
         job_id: str,
@@ -1045,6 +1105,33 @@ class CommandJobStore:
                     WHERE job_id=? AND state='sent' AND notification_id=?
                       AND dedup_key=? AND envelope_sha256=?""",
                 (str(job_id), str(notification_id), str(dedup_key), str(envelope_sha256)),
+            ).fetchone()
+            if row is None or row["carrier_retired_at"] is None:
+                raise CommandError("retention_authority_changed")
+
+    def finish_suppressed_workspace_retirement(self, job_id: str, *, retired_at: float) -> None:
+        """Close cleanup while retaining the no-carrier idempotency tombstone."""
+
+        with self.transaction():
+            cursor = self._conn.execute(
+                """UPDATE command_job_publications
+                      SET carrier_retired_at=COALESCE(carrier_retired_at, ?)
+                    WHERE job_id=? AND state='blocked'
+                      AND last_error_code='no_generated_files'
+                      AND carrier_retired_at IS NULL
+                      AND EXISTS (
+                          SELECT 1 FROM jobs WHERE jobs.job_id=command_job_publications.job_id
+                            AND jobs.workspace_retired_at IS NOT NULL
+                      )""",
+                (float(retired_at), str(job_id)),
+            )
+            if cursor.rowcount == 1:
+                return
+            row = self._conn.execute(
+                """SELECT carrier_retired_at FROM command_job_publications
+                    WHERE job_id=? AND state='blocked'
+                      AND last_error_code='no_generated_files'""",
+                (str(job_id),),
             ).fetchone()
             if row is None or row["carrier_retired_at"] is None:
                 raise CommandError("retention_authority_changed")
@@ -1088,6 +1175,35 @@ class CommandJobStore:
                 (_PUBLICATION_MAX_ATTEMPTS, clean, time.time(), str(job_id)),
             )
             if cursor.rowcount != 1:
+                raise CommandError("publication_state_changed")
+
+    def suppress_empty_publication(self, job_id: str) -> None:
+        """Close a no-output publication without creating a delivery carrier.
+
+        ``blocked`` is the existing durable no-retry terminal state.  The
+        dedicated reason distinguishes an intentional no-artifact closure from
+        a delivery failure, while keeping older ledgers compatible with the
+        closed publication-state constraint.
+        """
+
+        reason = "no_generated_files"
+        with self.transaction():
+            cursor = self._conn.execute(
+                """UPDATE command_job_publications
+                      SET state='blocked',last_error_code=?,updated_at=?
+                    WHERE job_id=? AND state='pending'""",
+                (reason, time.time(), str(job_id)),
+            )
+            if cursor.rowcount == 1:
+                return
+            row = self._conn.execute(
+                """SELECT state,last_error_code FROM command_job_publications
+                    WHERE job_id=?""",
+                (str(job_id),),
+            ).fetchone()
+            if row is None or not (
+                str(row["state"] or "") == "blocked" and str(row["last_error_code"] or "") == reason
+            ):
                 raise CommandError("publication_state_changed")
 
     def stage_publication(

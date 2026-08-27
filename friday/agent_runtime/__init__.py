@@ -2187,6 +2187,20 @@ _ENGINEER_CURRENT_JOB_STRUCTURAL_REFUSALS = {
 _ENGINEER_COMMAND_PRIVATE_ARGUMENTS = frozenset(
     {"_conversation_id", "_source_message_id", "_telegram_update_id", "_step_id"}
 )
+_ENGINEER_OPERATIONAL_HISTORY_METADATA_KEYS = frozenset(
+    {"engineer_command_progress", "engineer_command_terminal"}
+)
+_ENGINEER_RESERVED_TERMINAL_CLAIM = re.compile(
+    r"^Engineer-задание [0-9a-f]{8,64} "
+    r"(?:завершено|завершилось с ошибкой|отменено|остановлено по тайм-ауту)\."
+    r"(?: Проверенный архив результата приложен\.)?(?:\s|$)"
+)
+_ENGINEER_RESERVED_TERMINAL_REPAIR = (
+    "Предыдущий текст имитировал служебное Engineer-уведомление и не является результатом. "
+    "Не создавай строки вида «Engineer-задание …». Если запрос требует работы на машине, "
+    "вызови engineer_command_run и опирайся только на его фактический результат; иначе ответь "
+    "обычным текстом без утверждения о выполненном задании."
+)
 _ENGINEER_RECEIPT_BASE_TOOL_VERSIONS = {
     "engineer_organ": "builtin-v1",
     "host_probe": "bounded-connect-v1",
@@ -27539,6 +27553,27 @@ def _history_within_budget(history: list[dict[str, Any]]) -> list[dict[str, Any]
         selected.append(item)
         spent += size
     return list(reversed(selected))
+
+
+def _is_reserved_engineer_terminal_claim(value: Any) -> bool:
+    """Recognise a response starting in the code-owned terminal namespace."""
+
+    return _ENGINEER_RESERVED_TERMINAL_CLAIM.match(" ".join(str(value or "").split())) is not None
+
+
+def _is_engineer_operational_history_item(item: Mapping[str, Any]) -> bool:
+    """Keep transport notifications out of the autonomous model dialogue."""
+
+    metadata = item.get("metadata")
+    if not isinstance(metadata, Mapping):
+        try:
+            parsed = json.loads(str(item.get("metadata_json") or "{}"))
+        except (TypeError, ValueError, RecursionError):
+            parsed = {}
+        metadata = parsed if isinstance(parsed, Mapping) else {}
+    if _ENGINEER_OPERATIONAL_HISTORY_METADATA_KEYS.intersection(str(key) for key in metadata):
+        return True
+    return bool(item.get("role") == "assistant" and _is_reserved_engineer_terminal_claim(item.get("content")))
 
 
 def _might_be_a_question(message: str) -> bool:
@@ -63334,6 +63369,8 @@ class AgentRuntime:
             )
         total_calls = 0
         engineer_patch_started = False
+        last_failed_engineer_command_fingerprint = ""
+        last_failed_engineer_command_error = "command_failed"
         max_tool_calls, max_tool_rounds = _MODE_TOOL_BUDGETS.get(
             context.interaction_mode,
             (_MAX_TOOL_CALLS, _MAX_TOOL_ROUNDS),
@@ -63496,6 +63533,14 @@ class AgentRuntime:
                         else:
                             LOGGER.warning("Model returned an empty answer; asking again")
                         messages.append({"role": "system", "content": _TOOL_PROTOCOL_REPAIR})
+                        continue
+                    if autonomous_engineer and _is_reserved_engineer_terminal_claim(clean_answer):
+                        # This namespace belongs to the durable delivery worker,
+                        # never to model prose.  In particular, a prior transport
+                        # notification must not teach an abliterated model to
+                        # fabricate a job/archive instead of starting the task.
+                        LOGGER.warning("Autonomous Engineer imitated a terminal notification; repairing")
+                        messages.append({"role": "system", "content": _ENGINEER_RESERVED_TERMINAL_REPAIR})
                         continue
                     model_output_truncated = finish_reason == "length" and not context.deferred_web_file_body
                     if model_output_truncated:
@@ -63773,6 +63818,8 @@ class AgentRuntime:
                 call_arguments: Any = call.arguments
                 carrier_allowed = True
                 engineer_pinned_target_for_call: Any = None
+                engineer_command_fingerprint = ""
+                engineer_repeat_blocked = False
                 if call.name == _ARCHIVE_SEARCH_TOOL_NAME:
                     model_arguments = call.arguments if isinstance(call.arguments, Mapping) else {}
                     continuation = str(model_arguments.get("continuation") or "").strip()
@@ -63893,6 +63940,23 @@ class AgentRuntime:
                                 call_arguments["_step_id"] = (
                                     "ecstep-" + hashlib.sha256(step_material).hexdigest()[:32]
                                 )
+                                command_value = model_arguments.get("command")
+                                timeout_value = model_arguments.get("timeout_sec")
+                                if isinstance(command_value, str) and (
+                                    timeout_value is None or type(timeout_value) is int
+                                ):
+                                    fingerprint_material = json.dumps(
+                                        {
+                                            "command": command_value,
+                                            "timeout_sec": timeout_value,
+                                        },
+                                        ensure_ascii=False,
+                                        sort_keys=True,
+                                        separators=(",", ":"),
+                                    ).encode("utf-8")
+                                    engineer_command_fingerprint = hashlib.sha256(
+                                        fingerprint_material
+                                    ).hexdigest()
                 elif call.name in _HOST_CONTROL_CONTEXT_TOOL_NAMES:
                     model_arguments = call.arguments if isinstance(call.arguments, Mapping) else {}
                     if (
@@ -64063,6 +64127,18 @@ class AgentRuntime:
                         tool_actor = fresh_engineer_actor
                 if (
                     tool_was_executed
+                    and call.name == "engineer_command_run"
+                    and engineer_command_fingerprint
+                    and engineer_command_fingerprint == last_failed_engineer_command_fingerprint
+                ):
+                    engineer_repeat_blocked = True
+                    tool_was_executed = False
+                    engineer_execution_refusal = (
+                        "Инструмент не запущен: одинаковая Engineer-команда уже получила "
+                        "тот же отказ в этом ходе"
+                    )
+                if (
+                    tool_was_executed
                     and call.name in _ENGINEER_HOST_TOOL_NAMES
                     and engineer_pinned_target_for_call is not None
                 ):
@@ -64124,15 +64200,22 @@ class AgentRuntime:
                 elif tool_was_executed:
                     declared_risk = str(getattr(tool_spec, "risk", "") or "")
                     disclosure_sensitive = call.name in _OUTBOUND_TOOL_NAMES
+                    # engineer_command_run independently re-authorizes the exact
+                    # current owner message/update/upload byte batch immediately
+                    # before submission.  Opaque EXE inputs intentionally lack
+                    # parsed-source authority, so the generic attachment gate
+                    # must not pre-empt that stricter command-owned boundary.
                     if (
-                        declared_risk != "observe" or disclosure_sensitive
-                    ) and not await self._source_derived_effect_can_start(
-                        actor=tool_actor,
-                        context=context,
-                        tool_name=call.name,
-                        authority=source_effect_authority,
-                        required=source_effect_reauth_required,
-                        disclosure_sensitive=disclosure_sensitive,
+                        (declared_risk != "observe" or disclosure_sensitive)
+                        and not (autonomous_engineer and call.name == "engineer_command_run")
+                        and not await self._source_derived_effect_can_start(
+                            actor=tool_actor,
+                            context=context,
+                            tool_name=call.name,
+                            authority=source_effect_authority,
+                            required=source_effect_reauth_required,
+                            disclosure_sensitive=disclosure_sensitive,
+                        )
                     ):
                         tool_result = ToolResult(
                             call.name,
@@ -64187,6 +64270,23 @@ class AgentRuntime:
                         False,
                         error="Инструмент не запущен: производный носитель отклонён выходным рубежом",
                     )
+                if (
+                    call.name == "engineer_command_run"
+                    and engineer_command_fingerprint
+                    and not engineer_repeat_blocked
+                ):
+                    if tool_result.success:
+                        last_failed_engineer_command_fingerprint = ""
+                        last_failed_engineer_command_error = "command_failed"
+                    else:
+                        last_failed_engineer_command_fingerprint = engineer_command_fingerprint
+                        failure_data = tool_result.data if isinstance(tool_result.data, Mapping) else {}
+                        candidate_error = str(failure_data.get("error_code") or "")
+                        last_failed_engineer_command_error = (
+                            candidate_error
+                            if re.fullmatch(r"[a-z][a-z0-9_]{0,79}", candidate_error)
+                            else "command_failed"
+                        )
                 if call.name in _ENGINEER_TOOL_CAPABILITIES and isinstance(
                     context.engineer_dossier,
                     dict,
@@ -64540,6 +64640,21 @@ class AgentRuntime:
                     _trace_tool_result_status(call.name, tool_result),
                 )
                 total_calls += 1
+                if engineer_repeat_blocked:
+                    return {
+                        "content": (
+                            "Повтор одинаковой Engineer-команды остановлен после неизменившегося "
+                            f"отказа ({last_failed_engineer_command_error}). Команда повторно не "
+                            "запускалась; нужен другой шаг или устранение причины."
+                        ),
+                        "tools_used": tools_used,
+                        "web_query_notice": " ".join(web_notice),
+                        "knowledge_object_ids": tool_knowledge_ids,
+                        "tool_evidence": tool_evidence,
+                        "voice_clip": voice_clip,
+                        "file_clips": file_clips,
+                        "_structural_file_count": structural_file_count,
+                    }
                 if (
                     call.name in _ENGINEER_COMMAND_MANAGE_CONTEXT_TOOL_NAMES
                     and isinstance(call.arguments, Mapping)
@@ -64775,6 +64890,9 @@ class AgentRuntime:
                 # «Попробую другой источник. <tool_call>{"name": "web_fetch"…}»
                 # прямо в чат — снаружи неотличимо от поломки.
                 clean = _strip_tool_call_markup(final_turn.text)
+                if clean and autonomous_engineer and _is_reserved_engineer_terminal_claim(clean):
+                    LOGGER.warning("Final Engineer synthesis imitated a terminal notification")
+                    clean = ""
                 if clean:
                     model_output_truncated = (
                         str(final.get("finish_reason") or "stop") == "length"
@@ -64839,6 +64957,9 @@ class AgentRuntime:
             attachments,
             timeout_sec=salvage_timeout,
         )
+        if autonomous_engineer and _is_reserved_engineer_terminal_claim(salvaged):
+            LOGGER.warning("Engineer salvage imitated a terminal notification")
+            salvaged = ""
         if salvaged:
             accepted_salvage = context.deferred_web_file_body or salvaged
             return {
@@ -70829,6 +70950,8 @@ class AgentRuntime:
                 }
             ]
             for history_item in _history_within_budget(context.conversation_history):
+                if _is_engineer_operational_history_item(history_item):
+                    continue
                 role = history_item.get("role")
                 if role in {"user", "assistant"}:
                     engineer_messages.append(
