@@ -470,10 +470,18 @@ def _plausible_document_date(value: str) -> str | None:
     return candidate
 
 
-def _office_document_date(content: bytes) -> str | None:
+def _office_document_date(
+    content: bytes,
+    *,
+    deadline: float | None = None,
+) -> str | None:
     """`dcterms:created` из docProps/core.xml; при отсутствии — `modified`."""
+    if _deadline_expired(deadline):
+        return None
     with suppress(Exception):
         with zipfile.ZipFile(io.BytesIO(content)) as archive:
+            if _deadline_expired(deadline):
+                return None
             if _OFFICE_CORE_PROPERTIES not in archive.namelist():
                 return None
             with archive.open(_OFFICE_CORE_PROPERTIES) as handle:
@@ -482,6 +490,8 @@ def _office_document_date(content: bytes) -> str | None:
                 raw = handle.read(64 * 1024).decode("utf-8", errors="replace")
         found: dict[str, str] = {}
         for match in _CORE_DATE_RE.finditer(raw):
+            if _deadline_expired(deadline):
+                return None
             found.setdefault(match.group(1).casefold(), match.group(2))
         for key in ("created", "modified"):
             candidate = _plausible_document_date(found.get(key, ""))
@@ -505,12 +515,21 @@ def _email_iso_date(raw: str) -> str:
     return ""
 
 
-def _pdf_document_date_from_bytes(content: bytes) -> str | None:
+def _pdf_document_date_from_bytes(
+    content: bytes,
+    *,
+    deadline: float | None = None,
+) -> str | None:
     """Дата PDF по байтам — работает и для скана без текстового слоя."""
+    if _deadline_expired(deadline):
+        return None
     with suppress(Exception):
         from pypdf import PdfReader
 
-        return _pdf_document_date(PdfReader(io.BytesIO(content), strict=False))
+        reader = PdfReader(io.BytesIO(content), strict=False)
+        if _deadline_expired(deadline):
+            return None
+        return _pdf_document_date(reader)
     return None
 
 
@@ -607,6 +626,21 @@ class ArchiveDeadlineReached(ArchiveExtractionError):
     """A bounded archive/document stream exhausted its inherited deadline."""
 
 
+def _deadline_expired(deadline: float | None) -> bool:
+    return deadline is not None and time.monotonic() >= deadline
+
+
+def _metadata_deadline_result(format_name: str) -> dict[str, Any]:
+    """Closed metadata projection for cooperative deadline exhaustion."""
+
+    return {
+        "format": format_name,
+        "metadata_parse_status": "partial",
+        "technical_metadata_incomplete": True,
+        "parse_deadline_reached": True,
+    }
+
+
 def _safe_archive_member_name(value: Any) -> str:
     """Validate an inert member name as if it could become a path later.
 
@@ -643,7 +677,7 @@ class _Bounded7zWriter:
 
     def write(self, data: bytes | bytearray) -> int:
         if self._factory.deadline is not None and time.monotonic() >= self._factory.deadline:
-            raise ArchiveExtractionError("7z extraction exceeded its deadline")
+            raise ArchiveDeadlineReached("7z extraction exceeded its deadline")
         start = self._buffer.tell()
         old_size = self._size
         new_size = max(self._size, start + len(data))
@@ -902,10 +936,8 @@ class DocumentExtractor:
             ):
                 result = self._extract_html(content)
             elif ext == ".pdf" or (not suffix_known and normalized_mime == "application/pdf"):
-                result = self._extract_pdf(
-                    content,
-                    deadline=self._pdf_parse_deadline(deadline),
-                )
+                deadline = self._pdf_parse_deadline(deadline)
+                result = self._extract_pdf(content, deadline=deadline)
             elif ooxml_format == "docx":
                 result = self._extract_docx(content, deadline=deadline)
             elif converted_office_format == "doc":
@@ -1003,7 +1035,51 @@ class DocumentExtractor:
         # uploads and later legacy hydration.  Merge its closed projection even
         # when body extraction failed (for example, a scan-only image): stored
         # properties do not depend on OCR/model availability.
-        native_metadata = self.extract_document_metadata(content, safe_name, detected_mime)
+        native_metadata: dict[str, Any] = {}
+        body_deadline_reached = bool(
+            result.error == "document_parse_deadline" or result.metadata.get("parse_deadline_reached") is True
+        )
+        if body_deadline_reached or _deadline_expired(deadline):
+            # The outer asyncio timeout cannot stop this worker.  Once its
+            # caller-owned clock is gone, do not start a second parser pass.
+            # Preserve a truthful loss bit even when the body happened to finish
+            # immediately before the boundary.
+            native_metadata["parse_deadline_reached"] = True
+            metadata_capable = bool(
+                ext in _OPENDOCUMENT_EXTENSIONS
+                or ext in _OOXML_EXTENSIONS
+                or ext in _EMAIL_METADATA_EXTENSIONS
+                or ext in _IMAGE_EXTENSIONS
+                or ext in {".pdf", ".epub"}
+                or (
+                    not suffix_known
+                    and (
+                        normalized_mime in _OPENDOCUMENT_MIME_TYPES
+                        or normalized_mime in _OOXML_MIME_TYPES
+                        or normalized_mime
+                        in {
+                            "application/pdf",
+                            "application/epub+zip",
+                            "message/rfc822",
+                            "multipart/related",
+                        }
+                        or (
+                            normalized_mime.startswith("image/")
+                            and normalized_mime not in _CONVERTED_OFFICE_MIME_FORMATS
+                        )
+                    )
+                )
+            )
+            if metadata_capable:
+                native_metadata["metadata_parse_status"] = "partial"
+                native_metadata["technical_metadata_incomplete"] = True
+        else:
+            native_metadata = self.extract_document_metadata(
+                content,
+                safe_name,
+                detected_mime,
+                deadline=deadline,
+            )
         if native_metadata:
             result = DocumentResult(
                 result.text,
@@ -1051,14 +1127,24 @@ class DocumentExtractor:
         # и файл незнакомого генератора всё равно несут дату, которую записал
         # редактор. На корпусе владельца 35 файлов не читаются вовсе — их место в
         # хронологии от этого не исчезает.
-        if "document_date" not in metadata:
+        if (
+            "document_date" not in metadata
+            and metadata.get("parse_deadline_reached") is not True
+            and not _deadline_expired(deadline)
+        ):
             own_date = (
-                _pdf_document_date_from_bytes(content)
+                _pdf_document_date_from_bytes(content, deadline=deadline)
                 if ext == ".pdf" or (not suffix_known and normalized_mime == "application/pdf")
-                else (_office_document_date(content) if ext in _OFFICE_DATE_EXTENSIONS else None)
+                else (
+                    _office_document_date(content, deadline=deadline)
+                    if ext in _OFFICE_DATE_EXTENSIONS
+                    else None
+                )
             )
             if own_date:
                 metadata["document_date"] = own_date
+            if _deadline_expired(deadline):
+                metadata["parse_deadline_reached"] = True
         office_structure_index = (
             validate_office_structure_index(result.office_structure_index, text)
             if result.office_structure_index is not None
@@ -1077,6 +1163,8 @@ class DocumentExtractor:
         content: bytes,
         filename: str,
         mime_type: str = "",
+        *,
+        deadline: float | None = None,
     ) -> dict[str, Any]:
         """Return a closed, header-only technical metadata projection.
 
@@ -1125,13 +1213,25 @@ class DocumentExtractor:
             parser = self._extract_image_metadata
         else:
             return {}
+        if _deadline_expired(deadline):
+            return _metadata_deadline_result(format_name)
         try:
-            metadata = parser(content)
+            metadata = parser(content, deadline=deadline)
+        except ArchiveDeadlineReached:
+            return _metadata_deadline_result(format_name)
         except Exception:  # noqa: BLE001 - optional metadata cannot break body extraction
             return {
                 "format": format_name,
                 "metadata_parse_status": "unreadable",
                 "technical_metadata_incomplete": True,
+            }
+        if _deadline_expired(deadline):
+            return {
+                "format": format_name,
+                **metadata,
+                "metadata_parse_status": "partial",
+                "technical_metadata_incomplete": True,
+                "parse_deadline_reached": True,
             }
         return {"format": format_name, **metadata}
 
@@ -1183,7 +1283,10 @@ class DocumentExtractor:
         member_name: str,
         *,
         max_bytes: int = _MAX_TECHNICAL_METADATA_XML_BYTES,
+        deadline: float | None = None,
     ) -> tuple[Any | None, str]:
+        if _deadline_expired(deadline):
+            raise ArchiveDeadlineReached("Metadata XML deadline reached")
         try:
             info = archive.getinfo(member_name)
         except KeyError:
@@ -1192,22 +1295,40 @@ class DocumentExtractor:
             return None, "too_large"
         try:
             with archive.open(info) as stream:
-                raw, truncated = self._read_stream_preview(stream, max_bytes)
+                raw, truncated = self._read_stream_preview(
+                    stream,
+                    max_bytes,
+                    deadline=deadline,
+                )
             if truncated:
                 return None, "unsafe_or_truncated"
+            if _deadline_expired(deadline):
+                raise ArchiveDeadlineReached("Metadata XML deadline reached")
             return self._metadata_xml_root(raw), "parsed"
+        except ArchiveDeadlineReached:
+            raise
         except (OSError, ValueError, zipfile.BadZipFile):
             return None, "unreadable"
 
-    def _extract_ooxml_metadata(self, content: bytes) -> dict[str, Any]:
+    def _extract_ooxml_metadata(
+        self,
+        content: bytes,
+        *,
+        deadline: float | None = None,
+    ) -> dict[str, Any]:
         """Read bounded OOXML core/app/custom properties without document body."""
 
+        if _deadline_expired(deadline):
+            raise ArchiveDeadlineReached("OOXML metadata deadline reached")
         with zipfile.ZipFile(io.BytesIO(content)) as archive:
             self._validate_office_zip(archive)
-            parts = {
-                name: self._read_metadata_xml_member(archive, name)
-                for name in ("docProps/core.xml", "docProps/app.xml", "docProps/custom.xml")
-            }
+            parts: dict[str, tuple[Any | None, str]] = {}
+            for name in ("docProps/core.xml", "docProps/app.xml", "docProps/custom.xml"):
+                parts[name] = self._read_metadata_xml_member(
+                    archive,
+                    name,
+                    deadline=deadline,
+                )
 
         metadata: dict[str, Any] = {}
         records: list[dict[str, str]] = []
@@ -1254,6 +1375,8 @@ class DocumentExtractor:
         }
         if core_root is not None:
             for element in list(core_root):
+                if _deadline_expired(deadline):
+                    raise ArchiveDeadlineReached("OOXML metadata deadline reached")
                 value, clipped = self._metadata_element_text(element, 4_000)
                 incomplete = incomplete or clipped
                 local_name = self._metadata_local_name(element.tag)
@@ -1299,6 +1422,8 @@ class DocumentExtractor:
         }
         if app_root is not None:
             for element in list(app_root):
+                if _deadline_expired(deadline):
+                    raise ArchiveDeadlineReached("OOXML metadata deadline reached")
                 value, clipped = self._metadata_element_text(element, 4_000)
                 incomplete = incomplete or clipped
                 local_name = self._metadata_local_name(element.tag)
@@ -1326,6 +1451,8 @@ class DocumentExtractor:
         custom_root, _custom_status = parts["docProps/custom.xml"]
         if custom_root is not None:
             for prop in list(custom_root):
+                if _deadline_expired(deadline):
+                    raise ArchiveDeadlineReached("OOXML metadata deadline reached")
                 if prop.tag != f"{{{_OOXML_CUSTOM_NS}}}property":
                     incomplete = True
                     continue
@@ -1363,12 +1490,21 @@ class DocumentExtractor:
             metadata["document_date"] = own_date
         return self._redact_metadata_value(metadata)
 
-    def _extract_pdf_metadata(self, content: bytes) -> dict[str, Any]:
+    def _extract_pdf_metadata(
+        self,
+        content: bytes,
+        *,
+        deadline: float | None = None,
+    ) -> dict[str, Any]:
         """Read PDF Info/XMP and stored signature-field facts, never validate."""
 
         from pypdf import PdfReader
 
+        if _deadline_expired(deadline):
+            raise ArchiveDeadlineReached("PDF metadata deadline reached")
         reader = PdfReader(io.BytesIO(content), strict=False)
+        if _deadline_expired(deadline):
+            raise ArchiveDeadlineReached("PDF metadata loading exceeded its deadline")
         if reader.is_encrypted:
             try:
                 if reader.decrypt("") == 0:
@@ -1381,6 +1517,8 @@ class DocumentExtractor:
                     "metadata_parse_status": "encrypted",
                     "technical_metadata_incomplete": True,
                 }
+            if _deadline_expired(deadline):
+                raise ArchiveDeadlineReached("PDF metadata loading exceeded its deadline")
 
         metadata: dict[str, Any] = {}
         records: list[dict[str, str]] = []
@@ -1419,6 +1557,8 @@ class DocumentExtractor:
         try:
             info: Any = reader.metadata or {}
             for key, raw_value in info.items():
+                if _deadline_expired(deadline):
+                    raise ArchiveDeadlineReached("PDF metadata deadline reached")
                 name = str(key or "").lstrip("/") or "property"
                 value = add_record("PDF Info", name, "string", raw_value)
                 mapped = info_map.get(str(key))
@@ -1430,6 +1570,8 @@ class DocumentExtractor:
                     metadata["keywords_total"] = len(keywords)
                     metadata["keywords_shown"] = min(len(keywords), 32)
                     incomplete = incomplete or len(keywords) > 32
+        except ArchiveDeadlineReached:
+            raise
         except Exception:
             incomplete = True
         header = str(getattr(reader, "pdf_header", "") or "")
@@ -1438,7 +1580,11 @@ class DocumentExtractor:
 
         root: Any = None
         try:
+            if _deadline_expired(deadline):
+                raise ArchiveDeadlineReached("PDF metadata deadline reached")
             root = reader.trailer["/Root"].get_object()
+        except ArchiveDeadlineReached:
+            raise
         except Exception:
             incomplete = True
 
@@ -1448,9 +1594,13 @@ class DocumentExtractor:
         # packet is reported partial rather than silently skipped.
         if root is not None:
             try:
+                if _deadline_expired(deadline):
+                    raise ArchiveDeadlineReached("PDF metadata deadline reached")
                 metadata_ref = root.get("/Metadata")
                 if metadata_ref is not None:
                     stream = metadata_ref.get_object()
+                    if _deadline_expired(deadline):
+                        raise ArchiveDeadlineReached("PDF metadata deadline reached")
                     filters = stream.get("/Filter")
                     raw_stream = bytes(getattr(stream, "_data", b""))
                     xmp_bytes: bytes | None = None
@@ -1490,7 +1640,11 @@ class DocumentExtractor:
                             incomplete = True
                     if xmp_bytes:
                         try:
+                            if _deadline_expired(deadline):
+                                raise ArchiveDeadlineReached("PDF metadata deadline reached")
                             xmp_root = self._metadata_xml_root(xmp_bytes)
+                        except ArchiveDeadlineReached:
+                            raise
                         except Exception:
                             incomplete = True
                         else:
@@ -1498,6 +1652,8 @@ class DocumentExtractor:
 
                             def walk_xmp(element: Any, path: tuple[str, ...] = ()) -> None:
                                 nonlocal scanned, incomplete
+                                if _deadline_expired(deadline):
+                                    raise ArchiveDeadlineReached("PDF metadata deadline reached")
                                 if scanned >= 256:
                                     incomplete = True
                                     return
@@ -1536,6 +1692,8 @@ class DocumentExtractor:
                                     walk_xmp(child, current)
 
                             walk_xmp(xmp_root)
+            except ArchiveDeadlineReached:
+                raise
             except Exception:
                 incomplete = True
 
@@ -1543,15 +1701,21 @@ class DocumentExtractor:
         signature_total = 0
         if root is not None:
             try:
+                if _deadline_expired(deadline):
+                    raise ArchiveDeadlineReached("PDF metadata deadline reached")
                 acroform_ref = root.get("/AcroForm")
                 if acroform_ref is not None:
                     acroform = acroform_ref.get_object()
+                    if _deadline_expired(deadline):
+                        raise ArchiveDeadlineReached("PDF metadata deadline reached")
                     stack: list[tuple[Any, str, Any, int]] = [
                         (field, "", None, 0) for field in list(acroform.get("/Fields") or [])
                     ]
                     seen: set[tuple[int, int] | int] = set()
                     scanned = 0
                     while stack:
+                        if _deadline_expired(deadline):
+                            raise ArchiveDeadlineReached("PDF metadata deadline reached")
                         field_ref, parent_name, inherited_type, depth = stack.pop()
                         if depth > 8 or scanned >= _MAX_PDF_FORM_FIELDS_SCANNED:
                             incomplete = True
@@ -1605,6 +1769,8 @@ class DocumentExtractor:
                                 incomplete = True
                         for child in list(field.get("/Kids") or []):
                             stack.append((child, field_name, field_type, depth + 1))
+            except ArchiveDeadlineReached:
+                raise
             except Exception:
                 incomplete = True
 
@@ -1621,6 +1787,8 @@ class DocumentExtractor:
             metadata["signature_validity"] = "not_checked"
         if records_total > len(records) or signature_total > len(signature_fields):
             incomplete = True
+        if _deadline_expired(deadline):
+            raise ArchiveDeadlineReached("PDF metadata deadline reached")
         own_date = _pdf_document_date(reader)
         if own_date:
             metadata["document_date"] = own_date
@@ -1631,15 +1799,24 @@ class DocumentExtractor:
             metadata["metadata_parse_status"] = "parsed" if records_total or signature_total else "absent"
         return self._redact_metadata_value(metadata)
 
-    def _extract_email_metadata(self, content: bytes) -> dict[str, Any]:
+    def _extract_email_metadata(
+        self,
+        content: bytes,
+        *,
+        deadline: float | None = None,
+    ) -> dict[str, Any]:
         """Project bounded RFC/MHTML headers only; MIME bodies stay unread."""
 
         from email import policy
         from email.parser import BytesParser
 
+        if _deadline_expired(deadline):
+            raise ArchiveDeadlineReached("Email metadata deadline reached")
         source = content[:_MAX_EMAIL_METADATA_BYTES]
         incomplete = len(content) > len(source)
         message = BytesParser(policy=policy.default).parsebytes(source, headersonly=True)
+        if _deadline_expired(deadline):
+            raise ArchiveDeadlineReached("Email metadata deadline reached")
         records: list[dict[str, str]] = []
         total = 0
         metadata: dict[str, Any] = {}
@@ -1659,6 +1836,8 @@ class DocumentExtractor:
             "content-language": "content_language",
         }
         for raw_name, raw_value in message.raw_items():
+            if _deadline_expired(deadline):
+                raise ArchiveDeadlineReached("Email metadata deadline reached")
             total += 1
             name, name_clipped = self._metadata_inert_text(raw_name, 120)
             value, value_clipped = self._metadata_inert_text(raw_value, 2_000)
@@ -1680,6 +1859,8 @@ class DocumentExtractor:
         # Common fields are decoded for display; the complete bounded raw
         # header ledger above remains available as stored technical evidence.
         for header_name, target in header_map.items():
+            if _deadline_expired(deadline):
+                raise ArchiveDeadlineReached("Email metadata deadline reached")
             decoded, clipped = self._metadata_inert_text(
                 str(message.get(header_name) or ""),
                 2_000,
@@ -1702,15 +1883,23 @@ class DocumentExtractor:
             metadata["metadata_parse_status"] = "parsed" if total else "absent"
         return self._redact_metadata_value(metadata)
 
-    def _extract_epub_metadata(self, content: bytes) -> dict[str, Any]:
+    def _extract_epub_metadata(
+        self,
+        content: bytes,
+        *,
+        deadline: float | None = None,
+    ) -> dict[str, Any]:
         """Read the package OPF metadata selected by EPUB container.xml."""
 
+        if _deadline_expired(deadline):
+            raise ArchiveDeadlineReached("EPUB metadata deadline reached")
         with zipfile.ZipFile(io.BytesIO(content)) as archive:
             self._validate_office_zip(archive)
             container, container_status = self._read_metadata_xml_member(
                 archive,
                 "META-INF/container.xml",
                 max_bytes=_MAX_EPUB_CONTAINER_BYTES,
+                deadline=deadline,
             )
             if container is None:
                 return {
@@ -1736,6 +1925,7 @@ class DocumentExtractor:
                 archive,
                 package_path,
                 max_bytes=_MAX_EPUB_PACKAGE_BYTES,
+                deadline=deadline,
             )
 
         if package is None:
@@ -1771,6 +1961,8 @@ class DocumentExtractor:
             "relation": "relation",
         }
         for element in list(metadata_element):
+            if _deadline_expired(deadline):
+                raise ArchiveDeadlineReached("EPUB metadata deadline reached")
             total += 1
             local_name = self._metadata_local_name(element.tag)
             value, clipped = self._metadata_element_text(element, 4_000)
@@ -1827,11 +2019,18 @@ class DocumentExtractor:
             metadata["metadata_parse_status"] = "parsed" if total else "absent"
         return self._redact_metadata_value(metadata)
 
-    def _extract_image_metadata(self, content: bytes) -> dict[str, Any]:
+    def _extract_image_metadata(
+        self,
+        content: bytes,
+        *,
+        deadline: float | None = None,
+    ) -> dict[str, Any]:
         """Read dimensions and a capped EXIF ledger without decoding pixels."""
 
         from PIL import ExifTags, Image
 
+        if _deadline_expired(deadline):
+            raise ArchiveDeadlineReached("Image metadata deadline reached")
         metadata: dict[str, Any] = {}
         records: list[dict[str, str]] = []
         total = 0
@@ -1855,6 +2054,8 @@ class DocumentExtractor:
             return self._metadata_inert_text(raw_value, 1_000)
 
         with Image.open(io.BytesIO(content)) as image:
+            if _deadline_expired(deadline):
+                raise ArchiveDeadlineReached("Image metadata deadline reached")
             width, height = image.size
             metadata.update(
                 {
@@ -1867,6 +2068,8 @@ class DocumentExtractor:
                 }
             )
             exif = image.getexif()
+            if _deadline_expired(deadline):
+                raise ArchiveDeadlineReached("Image metadata deadline reached")
             ledgers: list[tuple[str, Any]] = [("EXIF", exif)]
             for tag_id, prefix in ((0x8769, "EXIF sub-IFD"), (0x8825, "GPS IFD")):
                 with suppress(Exception):
@@ -1876,6 +2079,8 @@ class DocumentExtractor:
             seen: set[tuple[str, int]] = set()
             for source, ledger in ledgers:
                 for raw_tag, raw_value in ledger.items():
+                    if _deadline_expired(deadline):
+                        raise ArchiveDeadlineReached("Image metadata deadline reached")
                     tag = int(raw_tag)
                     identity = (source, tag)
                     if identity in seen:
@@ -1944,6 +2149,8 @@ class DocumentExtractor:
         self,
         archive: zipfile.ZipFile,
         members: Sequence[zipfile.ZipInfo],
+        *,
+        deadline: float | None = None,
     ) -> dict[str, Any]:
         """Describe stored ODF signature XML without validating a signature.
 
@@ -1974,17 +2181,25 @@ class DocumentExtractor:
         signatures = 0
         incomplete = len(all_candidates) > len(candidates)
         for name in candidates:
+            if _deadline_expired(deadline):
+                raise ArchiveDeadlineReached("ODF metadata deadline reached")
             info = archive.getinfo(name)
             if info.file_size > _MAX_ODF_SIGNATURE_BYTES:
                 incomplete = True
                 continue
             try:
                 with archive.open(info) as stream:
-                    raw, truncated = self._read_stream_preview(stream, _MAX_ODF_SIGNATURE_BYTES)
+                    raw, truncated = self._read_stream_preview(
+                        stream,
+                        _MAX_ODF_SIGNATURE_BYTES,
+                        deadline=deadline,
+                    )
                 if truncated:
                     incomplete = True
                     continue
                 root = self._metadata_xml_root(raw)
+            except ArchiveDeadlineReached:
+                raise
             except (KeyError, OSError, ValueError, zipfile.BadZipFile):
                 incomplete = True
                 continue
@@ -1992,6 +2207,8 @@ class DocumentExtractor:
                 incomplete = True
                 continue
             for signature in root.iter(f"{{{_XMLDSIG_NS}}}Signature"):
+                if _deadline_expired(deadline):
+                    raise ArchiveDeadlineReached("ODF metadata deadline reached")
                 signatures += 1
                 raw_signature_id = self._bounded_odf_value(signature.attrib.get("Id"), 10_000)
                 signature_id = raw_signature_id[:200]
@@ -2001,6 +2218,8 @@ class DocumentExtractor:
                     if signature_id not in signature_ids and len(signature_ids) < 16:
                         signature_ids.append(signature_id)
             for element in root.iter():
+                if _deadline_expired(deadline):
+                    raise ArchiveDeadlineReached("ODF metadata deadline reached")
                 local_name = element.tag.rsplit("}", 1)[-1]
                 if local_name == "X509SubjectName":
                     raw_value = self._bounded_odf_text(element, 10_000)
@@ -2057,11 +2276,22 @@ class DocumentExtractor:
             return {str(key): self._redact_metadata_value(item) for key, item in value.items()}
         return value
 
-    def _extract_opendocument_metadata(self, content: bytes) -> dict[str, Any]:
+    def _extract_opendocument_metadata(
+        self,
+        content: bytes,
+        *,
+        deadline: float | None = None,
+    ) -> dict[str, Any]:
+        if _deadline_expired(deadline):
+            raise ArchiveDeadlineReached("OpenDocument metadata deadline reached")
         with zipfile.ZipFile(io.BytesIO(content)) as archive:
             members = self._validate_office_zip(archive)
             names = {member.filename for member in members}
-            signature_metadata = self._extract_odf_signature_metadata(archive, members)
+            signature_metadata = self._extract_odf_signature_metadata(
+                archive,
+                members,
+                deadline=deadline,
+            )
             raw = b""
             truncated = False
             metadata_parse_status = "absent"
@@ -2069,7 +2299,11 @@ class DocumentExtractor:
                 info = archive.getinfo(_ODF_META_MEMBER)
                 if info.file_size <= _MAX_ODF_METADATA_BYTES:
                     with archive.open(info) as stream:
-                        raw, truncated = self._read_stream_preview(stream, _MAX_ODF_METADATA_BYTES)
+                        raw, truncated = self._read_stream_preview(
+                            stream,
+                            _MAX_ODF_METADATA_BYTES,
+                            deadline=deadline,
+                        )
                     metadata_parse_status = "read"
                 else:
                     metadata_parse_status = "too_large"
@@ -2085,7 +2319,11 @@ class DocumentExtractor:
                 "technical_metadata_incomplete": True,
             }
         try:
+            if _deadline_expired(deadline):
+                raise ArchiveDeadlineReached("OpenDocument metadata deadline reached")
             root = self._metadata_xml_root(raw)
+        except ArchiveDeadlineReached:
+            raise
         except ValueError:
             return {
                 **signature_metadata,
@@ -2126,6 +2364,8 @@ class DocumentExtractor:
             return cleaned[:limit]
 
         for element in list(office_meta):
+            if _deadline_expired(deadline):
+                raise ArchiveDeadlineReached("OpenDocument metadata deadline reached")
             string_spec = _ODF_STRING_TAGS.get(element.tag)
             if string_spec is not None and string_spec[0] not in metadata:
                 key, limit = string_spec
@@ -2957,6 +3197,7 @@ class DocumentExtractor:
         main_part: str,
         canonical_type: str,
         alias_types: frozenset[str],
+        deadline: float | None = None,
     ) -> tuple[bytes, bool]:
         """Normalize one allowlisted OOXML main type for strict Python readers.
 
@@ -2966,6 +3207,8 @@ class DocumentExtractor:
         other relationship or content-type declaration is inferred or changed.
         """
 
+        if _deadline_expired(deadline):
+            raise ArchiveDeadlineReached("OOXML normalization deadline reached")
         with zipfile.ZipFile(io.BytesIO(content)) as archive:
             members = self._validate_office_zip(archive)
             type_members = [member for member in members if member.filename == _CONTENT_TYPES_MEMBER]
@@ -2978,10 +3221,13 @@ class DocumentExtractor:
                 raw_types, truncated = self._read_stream_preview(
                     source,
                     _MAX_OOXML_CONTENT_TYPES_BYTES,
+                    deadline=deadline,
                 )
             if truncated:
                 raise ArchiveLimitError("OOXML content types member exceeds limit")
             root = self._metadata_xml_root(raw_types)
+            if _deadline_expired(deadline):
+                raise ArchiveDeadlineReached("OOXML normalization deadline reached")
             overrides = [
                 node
                 for node in root.iter()
@@ -3005,17 +3251,33 @@ class DocumentExtractor:
                 encoding="UTF-8",
                 xml_declaration=True,
             )
+            if _deadline_expired(deadline):
+                raise ArchiveDeadlineReached("OOXML normalization deadline reached")
             if len(normalized_types) > _MAX_OOXML_CONTENT_TYPES_BYTES:
                 raise ArchiveLimitError("normalized OOXML content types member exceeds limit")
             output = io.BytesIO()
             with zipfile.ZipFile(output, "w") as normalized:
                 normalized.comment = archive.comment
                 for member in members:
-                    payload = (
-                        normalized_types if member.filename == _CONTENT_TYPES_MEMBER else archive.read(member)
-                    )
+                    if _deadline_expired(deadline):
+                        raise ArchiveDeadlineReached("OOXML normalization deadline reached")
+                    if member.filename == _CONTENT_TYPES_MEMBER:
+                        payload = normalized_types
+                    else:
+                        with archive.open(member) as source:
+                            payload = self._read_stream_limited(
+                                source,
+                                max(0, int(member.file_size)),
+                                deadline=deadline,
+                            )
+                        if len(payload) != max(0, int(member.file_size)):
+                            raise ArchiveExtractionError("OOXML member length changed during normalization")
                     normalized.writestr(member, payload)
+                    if _deadline_expired(deadline):
+                        raise ArchiveDeadlineReached("OOXML normalization deadline reached")
         normalized_content = output.getvalue()
+        if _deadline_expired(deadline):
+            raise ArchiveDeadlineReached("OOXML normalization deadline reached")
         with zipfile.ZipFile(io.BytesIO(normalized_content)) as archive:
             self._validate_office_zip(archive)
         return normalized_content, True
@@ -3087,6 +3349,7 @@ class DocumentExtractor:
             main_part=_WORD_MAIN_PART,
             canonical_type=_WORD_CANONICAL_MAIN_TYPE,
             alias_types=_WORD_ALIAS_MAIN_TYPES,
+            deadline=deadline,
         )
         try:
             from docx import Document
@@ -3168,6 +3431,8 @@ class DocumentExtractor:
             converted = self._extract_converted_office(content, "doc", deadline=deadline)
             if converted.success:
                 return converted
+            if converted.metadata.get("parse_deadline_reached") is True:
+                return converted
             return DocumentResult(
                 "",
                 {"format": "doc", "conversion_error": converted.error},
@@ -3201,6 +3466,8 @@ class DocumentExtractor:
             "parser": "libreoffice",
         }
         if not converted.success:
+            if converted.error == "libreoffice_deadline_reached":
+                conversion_metadata["parse_deadline_reached"] = True
             return DocumentResult("", conversion_metadata, False, converted.error)
         if converted.target_format == "odg":
             parsed = self._extract_xml_zip_text(
@@ -3383,6 +3650,7 @@ class DocumentExtractor:
             main_part=_PRESENTATION_MAIN_PART,
             canonical_type=_PRESENTATION_CANONICAL_MAIN_TYPE,
             alias_types=_PRESENTATION_ALIAS_MAIN_TYPES,
+            deadline=deadline,
         )
         try:
             from pptx import Presentation
@@ -3725,7 +3993,7 @@ class DocumentExtractor:
         budget: _ArchiveBudget,
         deadline: float | None = None,
         password: str | None = None,
-    ) -> tuple[str, bool]:
+    ) -> tuple[str, bool, bool]:
         result = self.extract(
             data,
             name,
@@ -3741,9 +4009,12 @@ class DocumentExtractor:
             raise ArchivePasswordRequired
         if result.error == "archive_password_invalid":
             raise ArchivePasswordInvalid
-        if not result.success:
-            return "", False
         metadata = result.metadata or {}
+        deadline_reached = bool(
+            result.error == "document_parse_deadline" or metadata.get("parse_deadline_reached") is True
+        )
+        if not result.success:
+            return "", False, deadline_reached
         complete = not any(
             metadata.get(flag)
             for flag in (
@@ -3757,12 +4028,12 @@ class DocumentExtractor:
             )
         )
         if not result.text:
-            return "", complete
+            return "", complete, deadline_reached
         # A member is already bounded by the live per-upload expansion budget
         # and ``max_input_bytes`` before this recursive parse, and the outer
         # extractor applies its global text ceiling.  A second text slice here
         # would buy no safety: it would only hide a readable member's tail.
-        return f"\n--- {name} ---\n{result.text}", complete
+        return f"\n--- {name} ---\n{result.text}", complete, deadline_reached
 
     def _extract_zip(
         self,
@@ -3889,7 +4160,7 @@ class DocumentExtractor:
                     raise ArchiveExtractionError from exc
                 budget.spend_bytes(len(data))
                 try:
-                    preview, member_complete = self._member_preview(
+                    preview, member_complete, member_deadline_reached = self._member_preview(
                         member.filename,
                         data,
                         depth,
@@ -3905,6 +4176,10 @@ class DocumentExtractor:
                     exhausted = True
                 if preview:
                     parts.append(preview)
+                if member_deadline_reached:
+                    exhausted = True
+                    deadline_reached = True
+                    break
         metadata: dict[str, Any] = {
             "format": "zip",
             "files": len(indexed_files),
@@ -3986,7 +4261,7 @@ class DocumentExtractor:
                 try:
                     with stream:
                         data = self._read_stream_limited(stream, member_limit, deadline=deadline)
-                    preview, member_complete = self._member_preview(
+                    preview, member_complete, member_deadline_reached = self._member_preview(
                         member.name,
                         data,
                         depth,
@@ -4002,6 +4277,10 @@ class DocumentExtractor:
                     exhausted = True
                 if preview:
                     previews.append(preview)
+                if member_deadline_reached:
+                    exhausted = True
+                    deadline_reached = True
+                    break
             parts = [f"TAR archive: {file_count} files", *names, *previews]
         metadata: dict[str, Any] = {
             "format": ext.lstrip("."),
@@ -4039,6 +4318,8 @@ class DocumentExtractor:
             deadline if deadline is not None else math.inf,
             time.monotonic() + _RAR_MEMBER_TIMEOUT_SEC,
         )
+        if time.monotonic() >= effective_deadline:
+            raise ArchiveDeadlineReached("RAR member deadline reached")
         safe_member = _safe_archive_member_name(member_name)
         password_switch = "-p" if password is not None else "-p-"
         command = [
@@ -4081,7 +4362,7 @@ class DocumentExtractor:
                 while not eof:
                     remaining = effective_deadline - time.monotonic()
                     if remaining <= 0:
-                        raise ArchiveExtractionError
+                        raise ArchiveDeadlineReached("RAR member deadline reached")
                     events = selector.select(min(0.25, remaining))
                     if not events and process.poll() is None:
                         continue
@@ -4099,7 +4380,10 @@ class DocumentExtractor:
                     if process.poll() is not None and not events and not eof:
                         # One more pass observes either buffered bytes or EOF.
                         continue
-            return_code = process.wait(timeout=max(0.1, effective_deadline - time.monotonic()))
+            try:
+                return_code = process.wait(timeout=max(0.0, effective_deadline - time.monotonic()))
+            except subprocess.TimeoutExpired as exc:
+                raise ArchiveDeadlineReached("RAR member deadline reached") from exc
             if return_code == 11:
                 raise ArchivePasswordInvalid
             if return_code != 0:
@@ -4190,9 +4474,10 @@ class DocumentExtractor:
             ordered_files = indexed_files
             if encrypted:
                 encrypted_files = [item for item in indexed_files if item[1].needs_password()]
-                if encrypted_files:
+                validation_candidates = encrypted_files or indexed_files
+                if validation_candidates:
                     validation = min(
-                        encrypted_files,
+                        validation_candidates,
                         key=lambda item: (max(0, int(item[1].file_size)), item[0]),
                     )
                     validation_index = validation[0]
@@ -4221,12 +4506,14 @@ class DocumentExtractor:
 
             previewed = 0
             exhausted = False
+            deadline_reached = False
             for index, member in ordered_files:
                 mandatory_validation = validation_index is not None and index == validation_index
                 if deadline is not None and time.monotonic() >= deadline:
                     if mandatory_validation:
-                        raise ArchiveExtractionError
+                        raise ArchiveDeadlineReached("RAR password validation deadline reached")
                     exhausted = True
+                    deadline_reached = True
                     break
                 member_limit = self._archive_member_limit(budget)
                 if member.file_size > member_limit and not mandatory_validation:
@@ -4238,27 +4525,38 @@ class DocumentExtractor:
                     exhausted = True
                     break
                 previewed += 1  # decompressions, not successes — see _extract_zip
-                data = self._read_rar_member_with_tool(
-                    rar_source_path(),
-                    member.filename,
-                    tool=tool,
-                    password=password if encrypted else None,
-                    limit=member_limit,
-                    deadline=deadline,
-                )
-                budget.spend_bytes(len(data))
-                preview, member_complete = self._member_preview(
-                    member.filename,
-                    data,
-                    depth,
-                    budget,
-                    deadline,
-                    password,
-                )
+                try:
+                    data = self._read_rar_member_with_tool(
+                        rar_source_path(),
+                        member.filename,
+                        tool=tool,
+                        password=password if encrypted else None,
+                        limit=member_limit,
+                        deadline=deadline,
+                    )
+                    budget.spend_bytes(len(data))
+                    preview, member_complete, member_deadline_reached = self._member_preview(
+                        member.filename,
+                        data,
+                        depth,
+                        budget,
+                        deadline,
+                        password,
+                    )
+                except ArchiveDeadlineReached:
+                    if mandatory_validation:
+                        raise
+                    exhausted = True
+                    deadline_reached = True
+                    break
                 if not member_complete:
                     exhausted = True
                 if preview:
                     parts.append(preview)
+                if member_deadline_reached:
+                    exhausted = True
+                    deadline_reached = True
+                    break
         rar_metadata: dict[str, Any] = {
             "format": "rar",
             "files": len(indexed_files),
@@ -4267,14 +4565,23 @@ class DocumentExtractor:
         }
         if exhausted:
             rar_metadata["archive_budget_exhausted"] = True
+        if deadline_reached:
+            rar_metadata["parse_deadline_reached"] = True
         return DocumentResult("\n".join(parts), rar_metadata)
 
-    def _validate_7z_coder_folders(self, folders: Sequence[Any]) -> None:
+    def _validate_7z_coder_folders(
+        self,
+        folders: Sequence[Any],
+        *,
+        deadline: float | None = None,
+    ) -> None:
         """Reject 7z coder parameters that can demand unbounded RAM or CPU."""
 
         if len(folders) > self.max_archive_entries:
             raise ArchiveLimitError("7z folder count exceeds configured limit")
         for folder in folders:
+            if _deadline_expired(deadline):
+                raise ArchiveDeadlineReached("7z header deadline reached")
             coders = list(getattr(folder, "coders", ()) or ())
             if not coders or len(coders) > 4:
                 raise ArchiveExtractionError
@@ -4313,7 +4620,12 @@ class DocumentExtractor:
                 if dictionary_bytes > _MAX_ARCHIVE_DICTIONARY_BYTES:
                     raise ArchiveLimitError("7z dictionary exceeds configured limit")
 
-    def _preflight_7z_header(self, content: bytes) -> None:
+    def _preflight_7z_header(
+        self,
+        content: bytes,
+        *,
+        deadline: float | None = None,
+    ) -> None:
         """Inspect an encoded 7z header before py7zr constructs its decoders.
 
         Py7zr otherwise instantiates the encoded-header LZMA dictionary while
@@ -4326,6 +4638,8 @@ class DocumentExtractor:
         from py7zr.helpers import calculate_crc32
         from py7zr.properties import MAGIC_7Z, PROPERTY
 
+        if _deadline_expired(deadline):
+            raise ArchiveDeadlineReached("7z header deadline reached")
         source = io.BytesIO(content)
         if source.read(len(MAGIC_7Z)) != MAGIC_7Z:
             raise ArchiveExtractionError
@@ -4353,19 +4667,24 @@ class DocumentExtractor:
             raise ArchiveExtractionError
         streams = HeaderStreamsInfo.retrieve(header)
         folders = list(streams.unpackinfo.folders)
-        self._validate_7z_coder_folders(folders)
+        self._validate_7z_coder_folders(folders, deadline=deadline)
         expanded_header = sum(
             max(0, int(folder.unpacksizes[-1])) for folder in folders if getattr(folder, "unpacksizes", None)
         )
         if expanded_header > _MAX_7Z_HEADER_BYTES:
             raise ArchiveLimitError("Expanded 7z header exceeds configured limit")
 
-    def _validate_open_7z_coders(self, archive: Any) -> None:
+    def _validate_open_7z_coders(
+        self,
+        archive: Any,
+        *,
+        deadline: float | None = None,
+    ) -> None:
         streams = getattr(getattr(archive, "header", None), "main_streams", None)
         unpackinfo = getattr(streams, "unpackinfo", None)
         folders = list(getattr(unpackinfo, "folders", ()) or ())
         if folders:
-            self._validate_7z_coder_folders(folders)
+            self._validate_7z_coder_folders(folders, deadline=deadline)
 
     @staticmethod
     def _encrypted_7z_member_names(archive: Any) -> set[str]:
@@ -4403,8 +4722,10 @@ class DocumentExtractor:
         except ImportError as exc:  # pragma: no cover - required runtime dependency
             raise ArchiveBackendUnavailable from exc
 
+        if _deadline_expired(deadline):
+            raise ArchiveDeadlineReached("7z extraction deadline reached")
         try:
-            self._preflight_7z_header(content)
+            self._preflight_7z_header(content, deadline=deadline)
         except (ArchiveExtractionError, ArchiveLimitError):
             raise
         except Exception as exc:
@@ -4414,12 +4735,15 @@ class DocumentExtractor:
         # header from a generally corrupt file before a wrong password can make
         # py7zr fail with a codec-level TypeError/LZMAError.
         content_encrypted = False
+        password_validated = False
         try:
             with py7zr.SevenZipFile(io.BytesIO(content), mode="r") as probe:
-                self._validate_open_7z_coders(probe)
+                self._validate_open_7z_coders(probe, deadline=deadline)
                 encrypted = bool(probe.needs_password())
                 content_encrypted = encrypted
                 entries = probe.list()
+                if _deadline_expired(deadline):
+                    raise ArchiveDeadlineReached("7z catalog deadline reached")
         except py7zr.PasswordRequired:
             encrypted = True
             entries = []
@@ -4437,14 +4761,20 @@ class DocumentExtractor:
                 password=str(password) if password is not None else None,
                 max_extract_size=min(self.max_archive_uncompressed_bytes, budget.expanded_bytes),
             ) as archive:
-                self._validate_open_7z_coders(archive)
+                self._validate_open_7z_coders(archive, deadline=deadline)
                 entries = archive.list()
+                if _deadline_expired(deadline):
+                    raise ArchiveDeadlineReached("7z catalog deadline reached")
                 encrypted_member_names = self._encrypted_7z_member_names(archive)
                 if content_encrypted and not encrypted_member_names:
                     # The password-free probe observed data encryption, so an
                     # absent member mapping is parser ambiguity, not proof that
                     # the supplied password is valid.  Fail closed.
                     raise ArchiveExtractionError
+                if encrypted and not encrypted_member_names:
+                    # Opening/listing an encrypted header authenticates it;
+                    # there is no encrypted data member left to validate.
+                    password_validated = True
                 if len(entries) > self.max_archive_entries:
                     raise ArchiveLimitError("7z entry count exceeds configured limit")
                 names: list[str] = []
@@ -4452,6 +4782,8 @@ class DocumentExtractor:
                 seen_names: set[str] = set()
                 total = 0
                 for entry in entries:
+                    if _deadline_expired(deadline):
+                        raise ArchiveDeadlineReached("7z catalog deadline reached")
                     name = _safe_archive_member_name(getattr(entry, "filename", ""))
                     if name in seen_names:
                         raise ArchiveLimitError("Duplicate 7z member name")
@@ -4482,13 +4814,15 @@ class DocumentExtractor:
 
                 selected: list[tuple[Any, str, int]] = []
                 exhausted = False
+                deadline_reached = False
                 reserved_bytes = 0
                 for item in ordered_files:
                     mandatory_validation = validation_item is not None and item[1] == validation_item[1]
                     if deadline is not None and time.monotonic() >= deadline:
                         if mandatory_validation:
-                            raise ArchiveExtractionError
+                            raise ArchiveDeadlineReached("7z password validation deadline reached")
                         exhausted = True
+                        deadline_reached = True
                         break
                     member_limit = max(
                         0,
@@ -4515,44 +4849,87 @@ class DocumentExtractor:
                 # archive still needs a bounded decoder attempt if possible.
                 if encrypted and files and not selected:
                     if deadline is not None and time.monotonic() >= deadline:
-                        raise ArchiveExtractionError
+                        raise ArchiveDeadlineReached("7z password validation deadline reached")
                     if not budget.take_preview():
                         raise ArchiveLimitError("Archive preview budget cannot validate password")
                     selected = [min(files, key=lambda item: (item[2], item[1]))]
                     exhausted = True
 
                 previews: list[str] = []
-                if selected:
-                    extraction_limit = max(0, budget.expanded_bytes)
-                    factory = _Bounded7zFactory(
-                        member_limit=min(self.max_input_bytes, extraction_limit),
-                        total_limit=extraction_limit,
-                        deadline=deadline,
-                    )
-                    archive.extract(
-                        targets=[name for _entry, name, _size in selected],
-                        factory=factory,
-                    )
-                    for _entry, name, _size in selected:
-                        if deadline is not None and time.monotonic() >= deadline:
+                decompressed_count = 0
+                if selected and _deadline_expired(deadline):
+                    if validation_item is not None:
+                        raise ArchiveDeadlineReached("7z password validation deadline reached")
+                    exhausted = True
+                    deadline_reached = True
+                if selected and not deadline_reached:
+                    # Password validity must not be inferred from a catalogue.
+                    # Decode one encrypted member to EOF first.  Only that first
+                    # batch is fail-closed on a deadline; once it succeeds, a
+                    # later timeout is an ordinary truthful partial archive.
+                    batches: list[list[tuple[Any, str, int]]] = [selected]
+                    if validation_item is not None and selected[0][1] == validation_item[1]:
+                        remainder = selected[1:]
+                        batches = [[selected[0]]]
+                        if remainder:
+                            batches.append(remainder)
+                    for batch_index, batch in enumerate(batches):
+                        mandatory_validation = validation_item is not None and batch_index == 0
+                        if _deadline_expired(deadline):
+                            if mandatory_validation:
+                                raise ArchiveDeadlineReached("7z password validation deadline reached")
                             exhausted = True
+                            deadline_reached = True
                             break
-                        product = factory.get(name)
-                        product.seek(0)
-                        data = product.read()
-                        budget.spend_bytes(len(data))
-                        preview, member_complete = self._member_preview(
-                            name,
-                            data,
-                            depth,
-                            budget,
-                            deadline,
-                            password,
+                        extraction_limit = max(0, budget.expanded_bytes)
+                        factory = _Bounded7zFactory(
+                            member_limit=min(self.max_input_bytes, extraction_limit),
+                            total_limit=extraction_limit,
+                            deadline=deadline,
                         )
-                        if not member_complete:
+                        try:
+                            archive.extract(
+                                targets=[name for _entry, name, _size in batch],
+                                factory=factory,
+                            )
+                        except ArchiveDeadlineReached:
+                            if mandatory_validation:
+                                raise
                             exhausted = True
-                        if preview:
-                            previews.append(preview)
+                            deadline_reached = True
+                            break
+                        if mandatory_validation:
+                            password_validated = True
+                        decompressed_count += len(batch)
+                        for _entry, name, _size in batch:
+                            if _deadline_expired(deadline):
+                                exhausted = True
+                                deadline_reached = True
+                                break
+                            product = factory.get(name)
+                            product.seek(0)
+                            data = product.read()
+                            budget.spend_bytes(len(data))
+                            preview, member_complete, member_deadline_reached = self._member_preview(
+                                name,
+                                data,
+                                depth,
+                                budget,
+                                deadline,
+                                password,
+                            )
+                            if not member_complete:
+                                exhausted = True
+                            if preview:
+                                previews.append(preview)
+                            if member_deadline_reached:
+                                exhausted = True
+                                deadline_reached = True
+                                break
+                        if deadline_reached:
+                            break
+                        if batch_index + 1 < len(batches):
+                            archive.reset()
         except py7zr.DecompressionBombError as exc:
             raise ArchiveLimitError("7z extraction exceeds configured limit") from exc
         except ArchiveLimitError:
@@ -4560,11 +4937,11 @@ class DocumentExtractor:
         except (ArchiveExtractionError, ArchivePasswordRequired, ArchivePasswordInvalid):
             raise
         except Exception as exc:
-            if encrypted and password is not None:
+            if encrypted and password is not None and not password_validated:
                 raise ArchivePasswordInvalid from exc
             raise ArchiveExtractionError from exc
 
-        previewed = len(selected)
+        previewed = decompressed_count
         metadata: dict[str, Any] = {
             "format": "7z",
             "files": len(files),
@@ -4573,6 +4950,8 @@ class DocumentExtractor:
         }
         if exhausted:
             metadata["archive_budget_exhausted"] = True
+        if deadline_reached:
+            metadata["parse_deadline_reached"] = True
         return DocumentResult(
             "\n".join([f"7z archive: {len(files)} files", *names[:100], *previews]),
             metadata,

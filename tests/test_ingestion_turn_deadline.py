@@ -146,6 +146,43 @@ async def test_request_deadline_is_propagated_into_document_worker(
 
 
 @pytest.mark.asyncio
+async def test_request_deadline_is_propagated_into_metadata_only_worker(
+    settings,
+    storage,
+    monkeypatch,
+) -> None:
+    pipeline = IngestionPipeline(settings, storage, KnowledgeGraph(storage), None)
+    observed: list[float | None] = []
+
+    def capture_metadata(*_args, **kwargs):
+        observed.append(kwargs.get("deadline"))
+        return {
+            "format": "pdf",
+            "metadata_parse_status": "partial",
+            "technical_metadata_incomplete": True,
+            "parse_deadline_reached": True,
+        }
+
+    monkeypatch.setattr(  # noqa: SLF001
+        pipeline._doc_extractor,
+        "extract_document_metadata",
+        capture_metadata,
+    )
+    deadline = time.monotonic() + 10
+
+    result = await pipeline.inspect_file_transient(
+        b"%PDF-synthetic",
+        filename="bounded.pdf",
+        mime_type="application/pdf",
+        metadata_only=True,
+        turn_deadline=deadline,
+    )
+
+    assert observed == [deadline]
+    assert result["_document_metadata"]["parse_deadline_reached"] is True
+
+
+@pytest.mark.asyncio
 async def test_expired_text_ingestion_fails_before_persistence(settings, storage) -> None:
     pipeline = IngestionPipeline(settings, storage, KnowledgeGraph(storage), None)
 

@@ -245,6 +245,11 @@ def convert_legacy_office(
             source = root / f"source.{normalized_source}"
             source.write_bytes(content)
             source.chmod(0o600)
+            if time.monotonic() >= common_deadline:
+                return OfficeConversionResult(
+                    target_format=target_format,
+                    error="libreoffice_deadline_reached",
+                )
             environment = {
                 "HOME": str(root),
                 "LANG": "C.UTF-8",

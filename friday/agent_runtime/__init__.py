@@ -16504,6 +16504,7 @@ _SAFE_DOCUMENT_METADATA_COUNTS = (
     "signature_fields_shown",
 )
 _SAFE_DOCUMENT_METADATA_BOOLEANS = (
+    "parse_deadline_reached",
     "scale_crop",
     "links_up_to_date",
     "shared_document",
@@ -16689,6 +16690,7 @@ _SAFE_DOCUMENT_METADATA_LABELS = {
     "shared_document": "Общий документ",
     "hyperlinks_changed": "Гиперссылки изменены",
     "image_animated": "Анимированное изображение",
+    "parse_deadline_reached": "Срок чтения технических метаданных исчерпан",
     "stored_properties_total": "Сохранённые свойства, всего",
     "stored_properties_shown": "Сохранённые свойства, показано",
     "stored_properties": "Сохранённые свойства",
@@ -16702,6 +16704,7 @@ _SAFE_DOCUMENT_METADATA_ORDER = (
     "mime_type",
     "format",
     "metadata_parse_status",
+    "parse_deadline_reached",
     "size_bytes",
     "document_date",
     "title",
@@ -16899,6 +16902,10 @@ def _safe_document_metadata_projection(source: Mapping[str, Any]) -> dict[str, A
 
     for name in _SAFE_DOCUMENT_METADATA_BOOLEANS:
         value = source.get(name)
+        if name == "parse_deadline_reached":
+            if value is True:
+                projected[name] = True
+            continue
         if isinstance(value, bool):
             projected[name] = value
 

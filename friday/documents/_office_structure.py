@@ -754,11 +754,22 @@ _DOCX_AUXILIARY_LABELS = {
 }
 
 
-def _docx_part_visible_text(stream: Any, *, limit: int) -> str:
+def _docx_part_visible_text(
+    stream: Any,
+    *,
+    limit: int,
+    deadline: float | None = None,
+) -> tuple[str, bool]:
     """Видимый текст части OOXML — только настоящие `w:t`, без служебных полей."""
     pieces: list[str] = []
     used = 0
-    for _, element in ElementTree.iterparse(stream, events=("end",)):
+    deadline_reached = False
+    if _deadline_expired(deadline):
+        return "", True
+    for event_index, (_, element) in enumerate(ElementTree.iterparse(stream, events=("end",)), start=1):
+        if event_index % 256 == 0 and _deadline_expired(deadline):
+            deadline_reached = True
+            break
         if _local_name(element.tag) in {"t", "delText"}:
             value = str(element.text or "").strip()
             if value:
@@ -767,10 +778,15 @@ def _docx_part_visible_text(stream: Any, *, limit: int) -> str:
                 if used >= limit:
                     break
         element.clear()
-    return " ".join(pieces)[:limit]
+    return " ".join(pieces)[:limit], deadline_reached
 
 
-def _docx_textbox_text(stream: Any, *, limit: int) -> str:
+def _docx_textbox_text(
+    stream: Any,
+    *,
+    limit: int,
+    deadline: float | None = None,
+) -> tuple[str, bool]:
     """Текст надписей: он лежит в `w:txbxContent` внутри тела документа.
 
     `python-docx` его не отдаёт: `Paragraph.text` собирает только прямые прогоны
@@ -780,7 +796,16 @@ def _docx_textbox_text(stream: Any, *, limit: int) -> str:
     pieces: list[str] = []
     used = 0
     inside = 0
-    for event, element in ElementTree.iterparse(stream, events=("start", "end")):
+    deadline_reached = False
+    if _deadline_expired(deadline):
+        return "", True
+    for event_index, (event, element) in enumerate(
+        ElementTree.iterparse(stream, events=("start", "end")),
+        start=1,
+    ):
+        if event_index % 256 == 0 and _deadline_expired(deadline):
+            deadline_reached = True
+            break
         name = _local_name(element.tag)
         if name == "txbxContent":
             inside += 1 if event == "start" else -1
@@ -796,7 +821,7 @@ def _docx_textbox_text(stream: Any, *, limit: int) -> str:
                 used += len(value) + 1
                 if used >= limit:
                     break
-    return " ".join(pieces)[:limit]
+    return " ".join(pieces)[:limit], deadline_reached
 
 
 def _docx_auxiliary_parts(
@@ -848,18 +873,32 @@ def _docx_auxiliary_parts(
                     kind = "comment"
                 elif normalized == "word/document.xml":
                     with archive.open(name) as stream:
-                        value = _docx_textbox_text(stream, limit=budget)
+                        value, deadline_reached = _docx_textbox_text(
+                            stream,
+                            limit=budget,
+                            deadline=deadline,
+                        )
                     if value:
                         chunks.append((_DOCX_AUXILIARY_LABELS["textbox"], value))
                         budget -= len(value)
+                    if deadline_reached:
+                        remaining.add("text_budget")
+                        break
                     continue
                 else:
                     continue
                 with archive.open(name) as stream:
-                    value = _docx_part_visible_text(stream, limit=budget)
+                    value, deadline_reached = _docx_part_visible_text(
+                        stream,
+                        limit=budget,
+                        deadline=deadline,
+                    )
                 if value:
                     chunks.append((_DOCX_AUXILIARY_LABELS[kind], value))
                     budget -= len(value)
+                if deadline_reached:
+                    remaining.add("text_budget")
+                    break
     except (OSError, ValueError, zipfile.BadZipFile, ElementTree.ParseError):
         # Внешняя проверка ZIP владеет успехом разбора; здесь отказ закрытый:
         # не прочитали — значит документ неполон, и это сказано.

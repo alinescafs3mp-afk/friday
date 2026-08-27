@@ -339,6 +339,7 @@ _DOCUMENT_METADATA_COUNT_FIELDS = (
     "signature_fields_shown",
 )
 _DOCUMENT_METADATA_BOOLEAN_FIELDS = (
+    "parse_deadline_reached",
     "scale_crop",
     "links_up_to_date",
     "shared_document",
@@ -560,6 +561,14 @@ def _document_metadata_projection(value: Any) -> dict[str, Any]:
             technical_incomplete = technical_incomplete or item > 2_147_483_647
     for key in _DOCUMENT_METADATA_BOOLEAN_FIELDS:
         item = source.get(key)
+        if key == "parse_deadline_reached":
+            # Absence and False are the same complete-reading state.  Persisted
+            # upload receipts materialize False while a fresh extractor omits
+            # it; canonicalize both to absence so metadata-aware text dedup does
+            # not split identical documents solely on storage representation.
+            if item is True:
+                projected[key] = True
+            continue
         if isinstance(item, bool):
             projected[key] = item
     for key, field_limits in _DOCUMENT_METADATA_OBJECT_FIELDS.items():
@@ -2878,6 +2887,7 @@ class FilesMixin(PipelineShared):
                     file_content,
                     safe_filename,
                     safe_mime_type,
+                    deadline=turn_deadline,
                 ),
                 turn_deadline,
             )
