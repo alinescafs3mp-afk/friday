@@ -2221,6 +2221,19 @@ _ENGINEER_UNSTARTED_PROGRESS_CLAIM = re.compile(
     r")",
     re.IGNORECASE,
 )
+_ENGINEER_UNSTARTED_FUTURE_CLAIM = re.compile(
+    r"^\W*(?:(?:да|ок(?:ей)?|принято|хорошо|понял(?:а)?|yes|ok(?:ay)?|sure)"
+    r"[\s,.:;—–-]+)?(?:(?:я|мы)\s+)?(?:(?:уже|сейчас|теперь|прямо\s+сейчас)\s+)?(?:"
+    r"сделаю|выполню|запущу|проведу|подготовлю|обработаю|отправлю|переведу|"
+    r"модифицирую|локализую|перепишу|исправлю|обновлю|соберу|скомпилирую|"
+    r"декомпилирую|просканирую|проверю|проанализирую|исследую|установлю|"
+    r"скачаю|создам|упакую|распакую|выгружу|"
+    r"(?:i(?:'ll|\s+will)|we(?:'ll|\s+will))\s+"
+    r"(?:do|run|start|prepare|process|send|translate|modify|localize|rewrite|"
+    r"fix|update|build|compile|decompile|scan|check|analyze|investigate|install|"
+    r"download|create|pack|unpack|export))\b",
+    re.IGNORECASE,
+)
 _ENGINEER_UNSTARTED_PROGRESS_REPAIR = (
     "Предыдущий ответ заявил, что работа уже началась, но в этом ходе не было ни одного "
     "вызова инструмента. Текст не запускает действие. Если запрос требует работы на машине, "
@@ -2234,9 +2247,61 @@ def _engineer_claims_unstarted_progress(answer: str) -> bool:
 
     return any(
         not clause.rstrip().endswith("?")
-        and _ENGINEER_UNSTARTED_PROGRESS_CLAIM.search(_classification_text(clause)) is not None
+        and (
+            _ENGINEER_UNSTARTED_PROGRESS_CLAIM.search(_classification_text(clause)) is not None
+            or _ENGINEER_UNSTARTED_FUTURE_CLAIM.search(_classification_text(clause)) is not None
+        )
         for clause in _model_authored_clauses(answer)
     )
+
+
+def _engineer_command_provider_failure_result(data: Any) -> str:
+    """Render the current durable command when synthesis transport disappears."""
+
+    if not isinstance(data, Mapping) or data.get("ok") is not True:
+        return ""
+    status = str(data.get("status") or "").strip().casefold()
+    job_id = str(data.get("job_id") or "").strip()
+    if re.fullmatch(r"[0-9a-f]{32}", job_id) is None:
+        return ""
+    if status in {"planned", "admitted", "running"}:
+        return (
+            "Команда действительно запущена и продолжает выполняться. "
+            f"Основная модель отключилась до итогового ответа; Engineer job: {job_id}."
+        )
+    if status == "unknown":
+        return (
+            "Команда была запущена, но после отказа основной модели её итоговое состояние "
+            f"нельзя подтвердить. Повторно она не запускалась; Engineer job: {job_id}."
+        )
+    if status not in {"completed", "failed", "cancelled", "timeout"}:
+        return ""
+
+    exit_code = data.get("exit_code")
+    status_line = f"Статус: {status}"
+    if type(exit_code) is int:
+        status_line += f", код выхода: {exit_code}"
+    stdout = str(data.get("stdout") or "").replace("\x00", "�")
+    stderr = str(data.get("stderr") or "").replace("\x00", "�")
+    stdout_clipped = len(stdout) > 2_800
+    stderr_clipped = len(stderr) > 700
+    stdout = stdout[:2_800]
+    stderr = stderr[:700]
+    parts = [
+        "Основная модель отключилась перед итогом; возвращаю проверенный сырой результат команды.",
+        status_line + ".",
+    ]
+    if stdout:
+        parts.append("stdout:\n```text\n" + stdout.replace("```", "` ` `") + "\n```")
+        if stdout_clipped:
+            parts.append("stdout сокращён аварийным каналом ответа.")
+    if stderr:
+        parts.append("stderr:\n```text\n" + stderr.replace("```", "` ` `") + "\n```")
+        if stderr_clipped:
+            parts.append("stderr сокращён аварийным каналом ответа.")
+    if not stdout and not stderr:
+        parts.append("Команда не вернула текстового вывода.")
+    return "\n\n".join(parts)
 
 
 _ENGINEER_RECEIPT_BASE_TOOL_VERSIONS = {
@@ -63501,6 +63566,79 @@ class AgentRuntime:
                 LOGGER.error("LLM tool loop failed (%s)", type(exc).__name__)
                 if archive_search_requested and not context.archive_search_used:
                     return archive_source_free_failure()
+                if (
+                    autonomous_engineer
+                    and not context.archive_search_used
+                    and "engineer_command_run" in tools_used
+                    and "engineer_command_status" in nominal_offered_tool_names
+                    and context.conversation_id
+                ):
+                    status_actor = self._fresh_engineer_actor(
+                        actor,
+                        _ENGINEER_TOOL_CAPABILITIES["engineer_command_status"],
+                    )
+                    if status_actor is not None:
+                        try:
+                            status_result = await asyncio.wait_for(
+                                self.kernel.execute(
+                                    "engineer_command_status",
+                                    {"_conversation_id": context.conversation_id},
+                                    actor=status_actor,
+                                ),
+                                timeout=2.0,
+                            )
+                        except Exception as status_exc:  # noqa: BLE001 - preserve the original failure path
+                            LOGGER.warning(
+                                "Engineer status recovery failed (%s)",
+                                type(status_exc).__name__,
+                            )
+                        else:
+                            fallback = _engineer_command_provider_failure_result(status_result.data)
+                            if status_result.success and fallback:
+                                tools_used.append("engineer_command_status")
+                                rendered_status = status_result.to_llm_message()
+                                if rendered_status and len(tool_evidence) < _MAX_TOOL_EVIDENCE:
+                                    tool_evidence.append(
+                                        {
+                                            "tool": "engineer_command_status",
+                                            "output": str(rendered_status),
+                                        }
+                                    )
+                                if (
+                                    isinstance(status_result.attachment, Mapping)
+                                    and str(status_result.attachment.get("kind") or "") == "document"
+                                ):
+                                    try:
+                                        context.engineer_command_generated_file_batch = (
+                                            exact_generated_file_batch(
+                                                [
+                                                    *[
+                                                        dict(item)
+                                                        for item in file_clips
+                                                        if isinstance(item, Mapping)
+                                                    ],
+                                                    dict(status_result.attachment),
+                                                ],
+                                                max_bytes=self.settings.max_upload_bytes,
+                                            )
+                                        )
+                                    except ExactGeneratedFilePublicationError:
+                                        pass
+                                    else:
+                                        file_clips.append(status_result.attachment)
+                                self._freeze_archive_search_ledger(context)
+                                return {
+                                    "content": fallback,
+                                    "_model_generated": False,
+                                    "tools_used": tools_used,
+                                    "web_query_notice": " ".join(web_notice),
+                                    "knowledge_object_ids": tool_knowledge_ids,
+                                    "tool_evidence": tool_evidence,
+                                    "llm_failed": True,
+                                    "voice_clip": voice_clip,
+                                    "file_clips": file_clips,
+                                    "_structural_file_count": structural_file_count,
+                                }
                 self._freeze_archive_search_ledger(context)
                 return {
                     "content": self._offline_response(context, unreachable=self.llm.enabled, message=message),

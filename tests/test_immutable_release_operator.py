@@ -4736,6 +4736,25 @@ def test_semantic_supervisor_enable_accepts_only_exact_legacy_implicit_off(
     assert port._expected_semantic_health_mode() == "shadow"  # noqa: SLF001
 
 
+def test_semantic_supervisor_enable_canonicalizes_secondary_before_later_owner_settings(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _base, predecessor = _secondary_document_map_assist_enabled_port(tmp_path, monkeypatch)
+    predecessor += b"FRIDAY_ENGINEER_MODE_ENABLED=1\n\nFRIDAY_ENGINEER_COMMAND_ENABLED=1\n"
+    target = _semantic_supervisor_environment(predecessor, mode="shadow")
+
+    operator._validate_staged_environment_transition(  # noqa: SLF001
+        "semantic_supervisor_shadow_enable",
+        predecessor,
+        target,
+    )
+    _values, nonsecondary, secondary = operator._secondary_environment_parts(target)  # noqa: SLF001
+    assert target == nonsecondary + secondary
+    assert b"FRIDAY_ENGINEER_MODE_ENABLED=1\n" in nonsecondary
+    assert b"FRIDAY_ENGINEER_COMMAND_ENABLED=1\n" in nonsecondary
+
+
 def test_env_example_semantic_eof_rewrites_to_accepted_canonical_layout(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

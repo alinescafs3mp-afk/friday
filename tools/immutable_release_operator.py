@@ -4393,7 +4393,11 @@ def _validate_semantic_supervisor_shadow_enable_environment(
         invalid_code="semantic_supervisor_secondary_prerequisite_invalid",
     )
     canonical_secondary = _canonical_environment_values(secondary_values)
-    if secondary != canonical_secondary or predecessor != nonsecondary + canonical_secondary:
+    # Older accepted config transitions could append unrelated owner settings
+    # after the already-canonical secondary block.  The shadow target moves the
+    # block to its current canonical EOF position while the byte comparison
+    # below still proves that every unrelated setting is preserved exactly.
+    if secondary != canonical_secondary:
         raise ReleaseFailure("semantic_supervisor_secondary_prerequisite_invalid")
     values, predecessor_unrelated, supervisor = _semantic_supervisor_environment_parts(nonsecondary)
     canonical_supervisor = _canonical_environment_values(values)

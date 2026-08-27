@@ -195,8 +195,9 @@ class _UnstartedProgressThenCommandModel:
     enabled = True
     total_budget_sec = 1.0
 
-    def __init__(self) -> None:
+    def __init__(self, claim: str = "Собираю сводку по файлу hui2.exe.") -> None:
         self.calls = 0
+        self.claim = claim
         self.tool_choices: list[str | None] = []
 
     async def chat(self, _messages, *, tools=None, tool_choice=None, **_kwargs):  # noqa: ANN001
@@ -204,7 +205,7 @@ class _UnstartedProgressThenCommandModel:
         self.tool_choices.append(tool_choice)
         if self.calls == 1:
             return {
-                "content": "Собираю сводку по файлу hui2.exe.",
+                "content": self.claim,
                 "tool_calls": None,
                 "finish_reason": "stop",
             }
@@ -228,6 +229,32 @@ class _UnstartedProgressThenCommandModel:
             "tool_calls": None,
             "finish_reason": "stop",
         }
+
+
+class _CommandThenProviderFailureModel:
+    enabled = True
+    total_budget_sec = 1.0
+
+    def __init__(self) -> None:
+        self.calls = 0
+
+    async def chat(self, _messages, *, tools=None, **_kwargs):  # noqa: ANN001
+        self.calls += 1
+        if self.calls == 1:
+            return {
+                "content": "",
+                "tool_calls": [
+                    {
+                        "id": "command-before-provider-failure",
+                        "function": {
+                            "name": "engineer_command_run",
+                            "arguments": json.dumps({"command": "printf inspected"}),
+                        },
+                    }
+                ],
+                "finish_reason": "tool_calls",
+            }
+        raise ConnectionError("primary disappeared after command")
 
 
 class _CommandKernel:
@@ -270,6 +297,36 @@ class _FailingCommandKernel(_CommandKernel):
             False,
             data={"ok": False, "error_code": "resource_boundary_unproven", "status": "failed"},
             error="Host control refused: resource_boundary_unproven",
+        )
+
+
+class _StatusRecoveryCommandKernel(_CommandKernel):
+    async def execute(self, name, arguments, *, actor):  # noqa: ANN001
+        self.executions.append((name, dict(arguments), actor))
+        if name == "engineer_command_status":
+            return ToolResult(
+                name,
+                True,
+                data={
+                    "ok": True,
+                    "job_id": "1" * 32,
+                    "status": "completed",
+                    "exit_code": 0,
+                    "stdout": "verified scan output",
+                    "stderr": "",
+                },
+            )
+        return ToolResult(
+            name,
+            True,
+            data={
+                "ok": True,
+                "job_id": "1" * 32,
+                "status": "completed",
+                "exit_code": 0,
+                "stdout": "verified scan output",
+                "stderr": "",
+            },
         )
 
 
@@ -527,15 +584,23 @@ async def test_reserved_terminal_imitation_is_repaired_into_real_command(
     assert response["content"] == "Проверка выполнена: repaired."
 
 
+@pytest.mark.parametrize(
+    "claim",
+    [
+        "Собираю сводку по файлу hui2.exe.",
+        "Сделаю перевод интерфейса SpaceSniffer на русский.",
+    ],
+)
 @pytest.mark.asyncio
 async def test_unstarted_engineer_progress_is_repaired_into_a_real_command(
     settings,
     storage,
     monkeypatch,
+    claim: str,
 ) -> None:
     actor = ActorContext(LEGACY_OWNER_USER_ID, "owner", "telegram-bridge")
     storage.ensure_user(actor.own_id, preset_key="owner")
-    model = _UnstartedProgressThenCommandModel()
+    model = _UnstartedProgressThenCommandModel(claim)
     kernel = _CommandKernel()
     runtime = AgentRuntime(
         replace(settings, engineer_mode_enabled=True, engineer_command_enabled=True),
@@ -556,6 +621,43 @@ async def test_unstarted_engineer_progress_is_repaired_into_a_real_command(
     assert model.tool_choices == [None, "engineer_command_run", None]
     assert [entry[1]["command"] for entry in kernel.executions] == ["printf inspected"]
     assert response["content"] == "Файл проверен: inspected."
+
+
+@pytest.mark.asyncio
+async def test_command_result_survives_primary_provider_failure(
+    settings,
+    storage,
+    monkeypatch,
+) -> None:
+    actor = ActorContext(LEGACY_OWNER_USER_ID, "owner", "telegram-bridge")
+    storage.ensure_user(actor.own_id, preset_key="owner")
+    model = _CommandThenProviderFailureModel()
+    kernel = _StatusRecoveryCommandKernel()
+    runtime = AgentRuntime(
+        replace(settings, engineer_mode_enabled=True, engineer_command_enabled=True),
+        storage,
+        llm=model,  # type: ignore[arg-type]
+        kernel=kernel,  # type: ignore[arg-type]
+    )
+    monkeypatch.setattr(runtime, "_fresh_engineer_actor", lambda current, _capability: current)
+
+    response = await runtime._agentic_loop(  # noqa: SLF001
+        _context(),
+        "Просканируй хост и верни результат.",
+        actor,
+        tools=[_schema("engineer_command_run"), _schema("engineer_command_status")],
+        attachments=None,
+    )
+
+    assert model.calls == 2
+    assert [entry[0] for entry in kernel.executions] == [
+        "engineer_command_run",
+        "engineer_command_status",
+    ]
+    assert response["tools_used"] == ["engineer_command_run", "engineer_command_status"]
+    assert response["llm_failed"] is True
+    assert "проверенный сырой результат" in response["content"]
+    assert "verified scan output" in response["content"]
 
 
 @pytest.mark.asyncio
