@@ -12,13 +12,13 @@ the current production identity, completed packages, active work and next order.
   is code-staged only as provisional shadow/extract and is not accepted or live.
   The primary remains the sole final-publication, tool and effect authority.
   Every secondary miss preserves the exact primary-only path.
-- Deployed implementation head: `4da83e391b7f6d17cd2689e254ae0eee3dbd0d68`
-- Live: Friday `0.207.63` / `4da83e391b7f6d17cd2689e254ae0eee3dbd0d68`;
-  tree `c98905bdbe7b68bdb598e8b2f3b73d597918f6656e691ca84ef542617a9d30fc`;
-  wheel `372eb65530a4033d1648cf16576172e3669b0a0f96984de597979c1c9bef0ea3`.
-- Immediate predecessor and schema-capable fallback: Friday `0.207.62` /
-  `d99a40f9f83205713366e45b3c753b3d4232cf12`, tree
-  `ffbd26b27b89da06f8e0b2781eac9cf61d712e1f33945e0b67b97258ec02a967`.
+- Deployed implementation head: `c78b8ca2ac959efdbe06aa0fe81d87270bcd35c0`
+- Live: Friday `0.207.64` / `c78b8ca2ac959efdbe06aa0fe81d87270bcd35c0`;
+  tree `ed6939002d95770755c31c161a2b1eeae273beca0c06057cec7a01f39cfce7f9`;
+  wheel `967cf038c7baa64c3ba12061d4a282b49e7eaf92f344f501b20e91db9b819a90`.
+- Immediate predecessor and schema-capable fallback: Friday `0.207.63` /
+  `4da83e391b7f6d17cd2689e254ae0eee3dbd0d68`, tree
+  `c98905bdbe7b68bdb598e8b2f3b73d597918f6656e691ca84ef542617a9d30fc`.
 - Database schema: 45
 - Production state: immutable activation `clear`; backend and Telegram bridge
   active; trusted-CA HTTPS health `200`; SQLite integrity and FK checks clean.
@@ -128,12 +128,20 @@ the current production identity, completed packages, active work and next order.
   reasoning; execution, status and final publication remain no-thinking. A
   plan-only request cannot cross the execution edge, while operational requests
   retain the normal tool protocol and evidence-grounded completion path.
+  `0.207.64` gives document, Office and archive parsing one inherited,
+  size-aware stage budget instead of unrelated short clocks. Deadline state is
+  propagated through nested containers, metadata, conversion and structure
+  passes; completed plaintext work remains an honest partial result. Encrypted
+  ZIP/RAR/7z cannot reach digest/source/hash dedup or persistence until password
+  access is proved. An incomplete validation returns a body-free transient
+  receipt, while deadlines after authenticated access remain truthful partials.
   The current immutable activation keeps Semantic Supervisor in discarded
   `shadow`: it has no tool, effect, execution or publication authority and
-  every miss preserves the primary-only path. The laptop endpoint was directly
-  reachable after deployment, but Friday health currently reports the optional
-  secondary runtime unavailable; no shadow observation has therefore been
-  credited yet.
+  every miss preserves the primary-only path. The laptop endpoint, TLS, profile
+  and startup admission are healthy. Its `available` health bit is intentionally
+  freshness-scoped: it ages after 30 seconds without eligible work and refreshes
+  on the next eligible request; that is not a network outage. No eligible
+  Supervisor turn or credited shadow observation has occurred yet.
   The exact accepted secondary profile remains configured in bounded `assist`
   and is probed on
   demand; its exact post-cutover canary passed, while laptop absence preserves
@@ -154,7 +162,7 @@ the current production identity, completed packages, active work and next order.
   while the backlog converges. `0.207.52` repairs the canary wrapper's full
   Telegram carrier surface; signed Telegram requests no longer fail before the
   model/tool boundary. The current activation terminal receipt is
-  `ce5267ba9a202ae82c230279d759091cd0e42e6e8ed1626be47151a7b855c339`.
+  `11d740b80501646da68a666068d3fb75dfcee7d543a0c9b97cee503fee91a35b`.
 - Delivery constraints: no Docker for primary Friday release certification;
   companion plugin untouched; small commits and immutable wheel-only production
   releases. The optional laptop inference node is a separate Docker contour.
@@ -169,12 +177,14 @@ fresh owner identity, current Telegram source/update/conversation binding and
 capability checks stay mandatory, while no guest, unsigned API turn, quoted
 message, document, web page or attachment may mint execution authority.
 
-The active package is the stage-aware document/archive budget hotfix; encrypted
-archive password validation must fail closed before any deduplication or
-persistence. After that, restore the optional secondary runtime path, gather
-independent joined Semantic Supervisor evidence and promote it through limited
-assist and canary without changing primary ownership. Then execute the remaining
-work by product value and risk. The full canonical order and estimates are in
+The stage-aware document/archive package is deployed in `0.207.64`. The active
+package is now the smallest restart-safe Engineer multi-turn slice:
+`EngineerWorkItem v1` persists only code-owned step/receipt identity and resumes
+an exact owner/conversation follow-up through `observe → replan → next step or
+final`; it never stores model reasoning or blindly replays an uncertain command.
+Release the dormant schema/reader first, then activation. In parallel, credit
+only real eligible Semantic Supervisor shadow turns and promote through limited
+assist/canary without changing primary ownership. The full canonical order is in
 `outer_sol/PROJECT_EXECUTION_BACKLOG_2026-08-27.md`. Docker and companion-plugin
 work remain out of scope for primary Friday.
 

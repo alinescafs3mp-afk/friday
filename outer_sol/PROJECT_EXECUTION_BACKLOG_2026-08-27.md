@@ -96,6 +96,16 @@ reasoning for complex plan/replan turns. Progress delivery is advisory and
 cannot duplicate task execution; execution/status/final phases remain
 no-thinking, and no approval rail was reintroduced.
 
+Remaining P1B is restart-safe continuation across messages. Implement one
+journey-specific `EngineerWorkItem v1`, not a generic WorkGraph: persist only
+owner/conversation/source identity, revision/state, code-owned step ordinal,
+idempotency key and command/terminal receipt digests. A fresh authenticated
+follow-up may inject the exact observed terminal receipt into one bounded
+`replan → next step or final` turn. Never persist prompt/CoT/argv/output/path,
+never blindly replay `RUNNING/UNKNOWN`, and publish completion atomically with
+the Work Item CAS. Release a dormant schema/reader first, then activation, before
+the P2 promotion work.
+
 ### P2 — integrate and roll out Semantic Supervisor
 
 Goal: use GPT-OSS as a bounded semantic supervisor/policy kernel while the
@@ -140,6 +150,11 @@ has no tool, effect, execution or publication authority.
   evidence.
 - Salvage only reviewed pieces from `feature/package6-evidence-foundation`;
   never merge that stale incomplete candidate wholesale.
+
+The first document-budget slice is deployed in `0.207.64`: nested document,
+Office and archive stages share inherited size-aware deadlines; encrypted
+archive validation fails closed before dedup/persistence, while authenticated or
+plain work may return an honest partial result.
 
 Estimate: 8–16 hours.
 
@@ -210,9 +225,9 @@ Estimate: 40–80 hours after the policy decision.
 ## First 24 clean-work hours
 
 1. Keep the deployed P0/P1 production paths green.
-2. Release the reviewed stage-aware document/archive budget fix, with
-   password-validation timeout fail-closed before deduplication or persistence.
-3. Restore the optional secondary runtime path, then collect and audit P2 joined
-   shadow observations for the frozen accepted profile; do not fabricate traffic.
-4. Advance only through evidence-backed limited assist and canary stages, then
-   use remaining time on P3 release-blocking golden journeys.
+2. Release dormant `EngineerWorkItem v1` schema/reader, then its exact
+   owner-follow-up activation as a separate reversible package.
+3. Collect and audit P2 joined shadow observations for the frozen accepted
+   profile only from real eligible turns; do not fabricate traffic.
+4. Advance only through evidence-backed limited assist/canary stages, then use
+   remaining time on P3 release-blocking golden journeys.
