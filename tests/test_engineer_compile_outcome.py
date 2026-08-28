@@ -23,6 +23,7 @@ from friday.interaction_control_plane.legacy_trace import CapabilityStatus
 from friday.organs.engineer import ENGINEER_BUILD, ENGINEER_USE, compiler
 from friday.permissions import LEGACY_OWNER_USER_ID, ActorContext
 from friday.source_identity import authorized_file_snapshot_token
+from tests.test_api_vertical_slice import _bridge_request
 
 
 def _class_bytes() -> bytes:
@@ -508,7 +509,12 @@ def test_successful_compile_reply_receipt_and_jar_publish_atomically(
     from friday.server import create_app
 
     source = b"public class Main {}\n"
-    configured = replace(settings, engineer_mode_enabled=True, verify_answers=False)
+    configured = replace(
+        settings,
+        engineer_mode_enabled=True,
+        telegram_owner_chat_ids=[5001],
+        verify_answers=False,
+    )
     app = create_app(configured)
 
     async def completed_autohunt(_message, attachments, **_kwargs):  # noqa: ANN001
@@ -528,19 +534,22 @@ def test_successful_compile_reply_receipt_and_jar_publish_atomically(
     with TestClient(app) as client:
         runtime = getattr(app.state.agent, "_legacy", app.state.agent)
         monkeypatch.setattr(runtime, "_engineer_autohunt", completed_autohunt)
-        result = client.post(
+        result = _bridge_request(
+            client,
+            configured,
             "/api/chat",
-            headers={"Authorization": f"Bearer {configured.api_token}"},
-            json={
+            {
                 "message": "скомпилируй этот Java-файл",
                 "mode": "engineer",
                 "enable_tools": True,
-                "source_ref": "api-document:compile-atomic",
+                "source_ref": "telegram-update:93001",
+                "telegram_message_id": 93001,
+                "telegram_user": {"id": 5001, "first_name": "Owner"},
                 "document": {
                     "filename": "Main.java",
                     "mime_type": "text/x-java-source",
                     "content_base64": base64.b64encode(source).decode("ascii"),
-                    "source_ref": "api-document:compile-atomic",
+                    "source_ref": "telegram-update:93001",
                 },
             },
         )
@@ -576,7 +585,12 @@ def test_compile_persistence_failure_rolls_back_reply_receipt_and_file(
     from friday.server import create_app
 
     source = b"public class Main {}\n"
-    configured = replace(settings, engineer_mode_enabled=True, verify_answers=False)
+    configured = replace(
+        settings,
+        engineer_mode_enabled=True,
+        telegram_owner_chat_ids=[5001],
+        verify_answers=False,
+    )
     app = create_app(configured)
 
     async def completed_autohunt(_message, attachments, **_kwargs):  # noqa: ANN001
@@ -610,19 +624,22 @@ def test_compile_persistence_failure_rolls_back_reply_receipt_and_file(
     with TestClient(app, raise_server_exceptions=False) as client:
         runtime = getattr(app.state.agent, "_legacy", app.state.agent)
         monkeypatch.setattr(runtime, "_engineer_autohunt", completed_autohunt)
-        failed = client.post(
+        failed = _bridge_request(
+            client,
+            configured,
             "/api/chat",
-            headers={"Authorization": f"Bearer {configured.api_token}"},
-            json={
+            {
                 "message": "скомпилируй этот Java-файл",
                 "mode": "engineer",
                 "enable_tools": True,
-                "source_ref": f"api-document:compile-persist-failure:{failure}",
+                "source_ref": "telegram-update:93002",
+                "telegram_message_id": 93002,
+                "telegram_user": {"id": 5001, "first_name": "Owner"},
                 "document": {
                     "filename": "Main.java",
                     "mime_type": "text/x-java-source",
                     "content_base64": base64.b64encode(source).decode("ascii"),
-                    "source_ref": f"api-document:compile-persist-failure:{failure}",
+                    "source_ref": "telegram-update:93002",
                 },
             },
         )
@@ -660,7 +677,12 @@ def test_authority_revoked_after_compile_suppresses_jar_and_success_receipt(
     from friday.server import create_app
 
     source = b"public class Main {}\n"
-    configured = replace(settings, engineer_mode_enabled=True, verify_answers=False)
+    configured = replace(
+        settings,
+        engineer_mode_enabled=True,
+        telegram_owner_chat_ids=[5001],
+        verify_answers=False,
+    )
     app = create_app(configured)
 
     async def revoke_after_compile(_message, attachments, **_kwargs):  # noqa: ANN001
@@ -716,19 +738,22 @@ def test_authority_revoked_after_compile_suppresses_jar_and_success_receipt(
                 duplicate_jar,
             )
         monkeypatch.setattr(runtime, "_engineer_autohunt", revoke_after_compile)
-        result = client.post(
+        result = _bridge_request(
+            client,
+            configured,
             "/api/chat",
-            headers={"Authorization": f"Bearer {configured.api_token}"},
-            json={
+            {
                 "message": "скомпилируй этот Java-файл",
                 "mode": "engineer",
                 "enable_tools": True,
-                "source_ref": f"api-document:compile-late-deny:{capability}",
+                "source_ref": "telegram-update:93003",
+                "telegram_message_id": 93003,
+                "telegram_user": {"id": 5001, "first_name": "Owner"},
                 "document": {
                     "filename": "Main.java",
                     "mime_type": "text/x-java-source",
                     "content_base64": base64.b64encode(source).decode("ascii"),
-                    "source_ref": f"api-document:compile-late-deny:{capability}",
+                    "source_ref": "telegram-update:93003",
                 },
             },
         )

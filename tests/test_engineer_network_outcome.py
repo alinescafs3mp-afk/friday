@@ -21,6 +21,34 @@ from friday.agent_runtime import (
 from friday.interaction_control_plane.legacy_trace import CapabilityStatus
 from friday.organs.engineer.targets import target_source_sha256
 from friday.permissions import LEGACY_OWNER_USER_ID
+from tests.test_api_vertical_slice import _bridge_request
+
+_OWNER_TELEGRAM_ID = 5001
+
+
+def _private_owner_engineer_request(
+    client: TestClient,
+    settings: Any,
+    payload: dict[str, Any],
+    *,
+    update_id: int,
+):
+    return _bridge_request(
+        client,
+        settings,
+        "/api/chat",
+        {
+            **payload,
+            "source_ref": f"telegram-update:{update_id}",
+            "telegram_message_id": update_id,
+            "telegram_user": {
+                "id": _OWNER_TELEGRAM_ID,
+                "first_name": "Owner",
+            },
+        },
+        user=str(_OWNER_TELEGRAM_ID),
+        chat=str(_OWNER_TELEGRAM_ID),
+    )
 
 
 def _complete_dossier(request: str = "") -> dict[str, Any]:
@@ -277,6 +305,7 @@ def test_full_chat_never_publishes_model_denial_after_owned_network_action(
         settings,
         engineer_mode_enabled=True,
         host_allowed_cidrs=("192.168.1.0/24",),
+        telegram_owner_chat_ids=[_OWNER_TELEGRAM_ID],
         verify_answers=False,
     )
     app = create_app(configured)
@@ -289,15 +318,15 @@ def test_full_chat_never_publishes_model_denial_after_owned_network_action(
         runtime = getattr(app.state.agent, "_legacy", app.state.agent)
         monkeypatch.setattr(runtime, "llm", model)
         monkeypatch.setattr(runtime, "_engineer_autohunt", complete_autohunt)
-        response = client.post(
-            "/api/chat",
-            headers={"Authorization": f"Bearer {configured.api_token}"},
-            json={
+        response = _private_owner_engineer_request(
+            client,
+            configured,
+            {
                 "message": "теперь у тебя есть nmap, просканируй мою подсеть",
                 "mode": "engineer",
                 "enable_tools": True,
-                "source_ref": "api-chat:engineer-network-owned-outcome",
             },
+            update_id=93001,
         )
         rows = app.state.storage.get_conversation_messages(
             response.json()["conversation_id"],
@@ -333,6 +362,7 @@ def test_remainder_arbiter_cannot_reopen_the_settled_network_effect(
         settings,
         engineer_mode_enabled=True,
         host_allowed_cidrs=("192.168.1.0/24",),
+        telegram_owner_chat_ids=[_OWNER_TELEGRAM_ID],
         verify_answers=False,
     )
     app = create_app(configured)
@@ -345,15 +375,15 @@ def test_remainder_arbiter_cannot_reopen_the_settled_network_effect(
         runtime = getattr(app.state.agent, "_legacy", app.state.agent)
         monkeypatch.setattr(runtime, "llm", model)
         monkeypatch.setattr(runtime, "_engineer_autohunt", complete_autohunt)
-        response = client.post(
-            "/api/chat",
-            headers={"Authorization": f"Bearer {configured.api_token}"},
-            json={
+        response = _private_owner_engineer_request(
+            client,
+            configured,
+            {
                 "message": "теперь у тебя есть nmap, просканируй мою подсеть",
                 "mode": "engineer",
                 "enable_tools": True,
-                "source_ref": "api-chat:engineer-network-remainder-reopen",
             },
+            update_id=93002,
         )
 
     assert response.status_code == 200, response.text
@@ -380,6 +410,7 @@ def test_direct_network_report_is_code_owned_persisted_and_downloadable(
         settings,
         engineer_mode_enabled=True,
         host_allowed_cidrs=("192.168.1.0/24",),
+        telegram_owner_chat_ids=[_OWNER_TELEGRAM_ID],
         verify_answers=False,
     )
     app = create_app(configured)
@@ -392,15 +423,15 @@ def test_direct_network_report_is_code_owned_persisted_and_downloadable(
         runtime = getattr(app.state.agent, "_legacy", app.state.agent)
         monkeypatch.setattr(runtime, "llm", model)
         monkeypatch.setattr(runtime, "_engineer_autohunt", complete_autohunt)
-        response = client.post(
-            "/api/chat",
-            headers={"Authorization": f"Bearer {configured.api_token}"},
-            json={
+        response = _private_owner_engineer_request(
+            client,
+            configured,
+            {
                 "message": message,
                 "mode": "engineer",
                 "enable_tools": True,
-                "source_ref": "api-chat:engineer-network-report-json",
             },
+            update_id=93003,
         )
         body = response.json()
         rows = app.state.storage.get_conversation_messages(
@@ -448,6 +479,7 @@ def test_unbound_current_result_never_falls_back_to_a_model_generated_report(
         settings,
         engineer_mode_enabled=True,
         host_allowed_cidrs=("192.168.1.0/24",),
+        telegram_owner_chat_ids=[_OWNER_TELEGRAM_ID],
         verify_answers=False,
     )
     app = create_app(configured)
@@ -460,15 +492,15 @@ def test_unbound_current_result_never_falls_back_to_a_model_generated_report(
         runtime = getattr(app.state.agent, "_legacy", app.state.agent)
         monkeypatch.setattr(runtime, "llm", model)
         monkeypatch.setattr(runtime, "_engineer_autohunt", mismatched_autohunt)
-        response = client.post(
-            "/api/chat",
-            headers={"Authorization": f"Bearer {configured.api_token}"},
-            json={
+        response = _private_owner_engineer_request(
+            client,
+            configured,
+            {
                 "message": "Просканируй мою подсеть и пришли результат JSON-файлом",
                 "mode": "engineer",
                 "enable_tools": True,
-                "source_ref": "api-chat:engineer-network-report-unbound",
             },
+            update_id=93004,
         )
         rows = app.state.storage.get_conversation_messages(
             response.json()["conversation_id"],
@@ -499,6 +531,7 @@ def test_network_report_final_authorization_revocation_suppresses_data_and_file(
         settings,
         engineer_mode_enabled=True,
         host_allowed_cidrs=("192.168.1.0/24",),
+        telegram_owner_chat_ids=[_OWNER_TELEGRAM_ID],
         verify_answers=False,
     )
     app = create_app(configured)
@@ -516,15 +549,15 @@ def test_network_report_final_authorization_revocation_suppresses_data_and_file(
     with TestClient(app) as client:
         runtime = getattr(app.state.agent, "_legacy", app.state.agent)
         monkeypatch.setattr(runtime, "_engineer_autohunt", revoke_after_scan)
-        response = client.post(
-            "/api/chat",
-            headers={"Authorization": f"Bearer {configured.api_token}"},
-            json={
+        response = _private_owner_engineer_request(
+            client,
+            configured,
+            {
                 "message": message,
                 "mode": "engineer",
                 "enable_tools": True,
-                "source_ref": "api-chat:engineer-network-report-revoked",
             },
+            update_id=93005,
         )
         body = response.json()
         rows = app.state.storage.get_conversation_messages(
@@ -559,6 +592,7 @@ def test_sibling_attachment_publication_denial_scrubs_network_report_receipts(
         settings,
         engineer_mode_enabled=True,
         host_allowed_cidrs=("192.168.1.0/24",),
+        telegram_owner_chat_ids=[_OWNER_TELEGRAM_ID],
         verify_answers=False,
     )
     app = create_app(configured)
@@ -577,14 +611,13 @@ def test_sibling_attachment_publication_denial_scrubs_network_report_receipts(
     with TestClient(app) as client:
         runtime = getattr(app.state.agent, "_legacy", app.state.agent)
         monkeypatch.setattr(runtime, "_engineer_autohunt", revoke_attachment_read)
-        response = client.post(
-            "/api/chat",
-            headers={"Authorization": f"Bearer {configured.api_token}"},
-            json={
+        response = _private_owner_engineer_request(
+            client,
+            configured,
+            {
                 "message": message,
                 "mode": "engineer",
                 "enable_tools": True,
-                "source_ref": "api-document:network-report-sibling-denial",
                 "document": {
                     "filename": "context.txt",
                     "mime_type": "text/plain",
@@ -592,6 +625,7 @@ def test_sibling_attachment_publication_denial_scrubs_network_report_receipts(
                     "source_ref": "api-document:network-report-sibling-denial",
                 },
             },
+            update_id=93006,
         )
         body = response.json()
         rows = app.state.storage.get_conversation_messages(
@@ -628,6 +662,7 @@ def test_report_only_followup_never_replays_the_previous_scan_or_invents_a_file(
         settings,
         engineer_mode_enabled=True,
         host_allowed_cidrs=("192.168.1.0/24",),
+        telegram_owner_chat_ids=[_OWNER_TELEGRAM_ID],
         verify_answers=False,
     )
     app = create_app(configured)
@@ -650,26 +685,26 @@ def test_report_only_followup_never_replays_the_previous_scan_or_invents_a_file(
         runtime = getattr(app.state.agent, "_legacy", app.state.agent)
         monkeypatch.setattr(runtime, "llm", model)
         monkeypatch.setattr(runtime, "_engineer_autohunt", bounded_autohunt)
-        first = client.post(
-            "/api/chat",
-            headers={"Authorization": f"Bearer {configured.api_token}"},
-            json={
+        first = _private_owner_engineer_request(
+            client,
+            configured,
+            {
                 "message": "Просканируй мою подсеть",
                 "mode": "engineer",
                 "enable_tools": True,
-                "source_ref": "api-chat:engineer-network-before-report-followup",
             },
+            update_id=93007,
         )
-        followup = client.post(
-            "/api/chat",
-            headers={"Authorization": f"Bearer {configured.api_token}"},
-            json={
+        followup = _private_owner_engineer_request(
+            client,
+            configured,
+            {
                 "message": "Дай отчёт по сканированию файлом",
                 "conversation_id": first.json()["conversation_id"],
                 "mode": "engineer",
                 "enable_tools": followup_tools,
-                "source_ref": "api-chat:engineer-network-report-followup",
             },
+            update_id=93008,
         )
         generated_count = app.state.storage.execute(
             "SELECT COUNT(*) FROM raw_objects WHERE content_type='generated_file'"
@@ -695,6 +730,7 @@ def test_network_report_persistence_failure_rolls_back_reply_receipts_and_blob(
         settings,
         engineer_mode_enabled=True,
         host_allowed_cidrs=("192.168.1.0/24",),
+        telegram_owner_chat_ids=[_OWNER_TELEGRAM_ID],
         verify_answers=False,
     )
     app = create_app(configured)
@@ -707,15 +743,15 @@ def test_network_report_persistence_failure_rolls_back_reply_receipts_and_blob(
     with TestClient(app, raise_server_exceptions=False) as client:
         runtime = getattr(app.state.agent, "_legacy", app.state.agent)
         monkeypatch.setattr(runtime, "_engineer_autohunt", complete_autohunt)
-        response = client.post(
-            "/api/chat",
-            headers={"Authorization": f"Bearer {configured.api_token}"},
-            json={
+        response = _private_owner_engineer_request(
+            client,
+            configured,
+            {
                 "message": message,
                 "mode": "engineer",
                 "enable_tools": True,
-                "source_ref": "api-chat:engineer-network-report-persist-failure",
             },
+            update_id=93009,
         )
         generated_count = app.state.storage.execute(
             "SELECT COUNT(*) FROM raw_objects WHERE content_type='generated_file'"

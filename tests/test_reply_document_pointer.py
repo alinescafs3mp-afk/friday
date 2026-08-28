@@ -186,6 +186,7 @@ def _bridge_call(
     payload: dict | None = None,
     *,
     user: str = "5001",
+    chat: str = "5001",
 ):
     body = (
         json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode()
@@ -196,7 +197,7 @@ def _bridge_call(
         method,
         path,
         content=body or None,
-        headers=_signed_headers(settings.telegram_bridge_secret, method, path, body, user, "5001"),
+        headers=_signed_headers(settings.telegram_bridge_secret, method, path, body, user, chat),
     )
 
 
@@ -1930,6 +1931,7 @@ def test_deduplicated_current_telegram_java_compile_uses_fresh_alias_through_pub
     scoped = replace(
         settings,
         engineer_mode_enabled=True,
+        telegram_owner_chat_ids=[1001],
         verify_answers=False,
         shared_archive=True,
     )
@@ -2023,6 +2025,7 @@ def test_deduplicated_current_telegram_java_compile_uses_fresh_alias_through_pub
                 },
             },
             user="1001",
+            chat="1001",
         )
         assert first.status_code == 200, first.text
         monkeypatch.setattr(app.state.agent, "chat", canonical_chat)
@@ -2051,6 +2054,7 @@ def test_deduplicated_current_telegram_java_compile_uses_fresh_alias_through_pub
                 },
             },
             user="1001",
+            chat="1001",
         )
 
         old_raw = storage.resolve_owned_file_source_ref(

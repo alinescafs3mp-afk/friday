@@ -6,6 +6,7 @@ import base64
 import hashlib
 import json
 import time
+import uuid
 from dataclasses import replace
 from typing import Any
 from unittest.mock import AsyncMock
@@ -21,6 +22,39 @@ from friday.agent_runtime import (
 from friday.execution_kernel import ToolResult
 from friday.interaction_control_plane.legacy_trace import CapabilityStatus
 from friday.permissions import LEGACY_OWNER_USER_ID, ActorContext
+from friday.security import sign_bridge_request
+
+
+def _signed_owner_private_post(
+    client: TestClient,
+    settings: Any,
+    payload: dict[str, Any],
+):
+    path = "/api/chat"
+    body = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode()
+    timestamp = int(time.time())
+    nonce = uuid.uuid4().hex
+    return client.post(
+        path,
+        content=body,
+        headers={
+            "Content-Type": "application/json",
+            "X-Friday-Timestamp": str(timestamp),
+            "X-Friday-User": "5001",
+            "X-Friday-Chat": "5001",
+            "X-Friday-Nonce": nonce,
+            "X-Friday-Signature": sign_bridge_request(
+                settings.telegram_bridge_secret,
+                timestamp=timestamp,
+                method="POST",
+                path=path,
+                external_user_id="5001",
+                chat_id="5001",
+                nonce=nonce,
+                body=body,
+            ),
+        },
+    )
 
 
 def _complete_dossier() -> dict[str, Any]:
@@ -222,7 +256,12 @@ def test_exact_previous_attachment_is_decompiled_without_a_model_denial(
 ) -> None:
     from friday import server as server_module
 
-    configured = replace(settings, engineer_mode_enabled=True, verify_answers=False)
+    configured = replace(
+        settings,
+        engineer_mode_enabled=True,
+        telegram_owner_chat_ids=[5001],
+        verify_answers=False,
+    )
     app = server_module.create_app(configured)
     model = _InitialReviewModel()
     seen_raw_id = ""
@@ -257,14 +296,16 @@ def test_exact_previous_attachment_is_decompiled_without_a_model_denial(
         runtime = getattr(app.state.agent, "_legacy", app.state.agent)
         monkeypatch.setattr(runtime, "llm", model)
         monkeypatch.setattr(runtime, "_engineer_autohunt", decompile_autohunt)
-        uploaded = client.post(
-            "/api/chat",
-            headers={"Authorization": f"Bearer {configured.api_token}"},
-            json={
+        uploaded = _signed_owner_private_post(
+            client,
+            configured,
+            {
                 "message": "А про этот файл что скажешь?",
                 "mode": "engineer",
                 "enable_tools": True,
                 "source_ref": "api-document:decompile-lineage",
+                "telegram_message_id": 91001,
+                "telegram_user": {"id": 5001, "first_name": "Owner"},
                 "document": {
                     "filename": "sample.exe",
                     "mime_type": "application/octet-stream",
@@ -284,15 +325,17 @@ def test_exact_previous_attachment_is_decompiled_without_a_model_denial(
             "persist_generated_response_files",
             forbidden_second_persistence,
         )
-        result = client.post(
-            "/api/chat",
-            headers={"Authorization": f"Bearer {configured.api_token}"},
-            json={
+        result = _signed_owner_private_post(
+            client,
+            configured,
+            {
                 "message": "декомпилируй его",
                 "conversation_id": uploaded.json()["conversation_id"],
                 "mode": "engineer",
                 "enable_tools": True,
                 "source_ref": "api-chat:decompile-lineage-followup",
+                "telegram_message_id": 91002,
+                "telegram_user": {"id": 5001, "first_name": "Owner"},
             },
         )
         rows = app.state.storage.get_conversation_messages(
@@ -330,7 +373,12 @@ def test_files_read_deny_never_reintroduces_raw_upload_into_engineer_autohunt(
 ) -> None:
     from friday.server import create_app
 
-    configured = replace(settings, engineer_mode_enabled=True, verify_answers=False)
+    configured = replace(
+        settings,
+        engineer_mode_enabled=True,
+        telegram_owner_chat_ids=[5001],
+        verify_answers=False,
+    )
     app = create_app(configured)
     model = _InitialReviewModel()
     admitted_counts: list[int] = []
@@ -352,14 +400,16 @@ def test_files_read_deny_never_reintroduces_raw_upload_into_engineer_autohunt(
             "files.read",
             "deny",
         )
-        result = client.post(
-            "/api/chat",
-            headers={"Authorization": f"Bearer {configured.api_token}"},
-            json={
+        result = _signed_owner_private_post(
+            client,
+            configured,
+            {
                 "message": "декомпилируй этот файл",
                 "mode": "engineer",
                 "enable_tools": True,
                 "source_ref": "api-document:decompile-files-read-denied",
+                "telegram_message_id": 91003,
+                "telegram_user": {"id": 5001, "first_name": "Owner"},
                 "document": {
                     "filename": "denied.exe",
                     "mime_type": "application/octet-stream",
@@ -395,7 +445,12 @@ def test_report_persistence_failure_rolls_back_success_reply_receipt_and_file(
     from friday import generated_files
     from friday.server import create_app
 
-    configured = replace(settings, engineer_mode_enabled=True, verify_answers=False)
+    configured = replace(
+        settings,
+        engineer_mode_enabled=True,
+        telegram_owner_chat_ids=[5001],
+        verify_answers=False,
+    )
     app = create_app(configured)
 
     async def completed_autohunt(_message, attachments, **_kwargs):  # noqa: ANN001
@@ -410,14 +465,16 @@ def test_report_persistence_failure_rolls_back_success_reply_receipt_and_file(
     with TestClient(app, raise_server_exceptions=False) as client:
         runtime = getattr(app.state.agent, "_legacy", app.state.agent)
         monkeypatch.setattr(runtime, "_engineer_autohunt", completed_autohunt)
-        failed = client.post(
-            "/api/chat",
-            headers={"Authorization": f"Bearer {configured.api_token}"},
-            json={
+        failed = _signed_owner_private_post(
+            client,
+            configured,
+            {
                 "message": "декомпилируй этот файл",
                 "mode": "engineer",
                 "enable_tools": True,
                 "source_ref": "api-document:decompile-persist-failure",
+                "telegram_message_id": 91004,
+                "telegram_user": {"id": 5001, "first_name": "Owner"},
                 "document": {
                     "filename": "failure.exe",
                     "mime_type": "application/octet-stream",
@@ -446,7 +503,12 @@ def test_outer_publication_failure_removes_unreferenced_decompile_blob(
     import friday.agent_runtime as runtime_module
     from friday.server import create_app
 
-    configured = replace(settings, engineer_mode_enabled=True, verify_answers=False)
+    configured = replace(
+        settings,
+        engineer_mode_enabled=True,
+        telegram_owner_chat_ids=[5001],
+        verify_answers=False,
+    )
     app = create_app(configured)
 
     async def completed_autohunt(_message, attachments, **_kwargs):  # noqa: ANN001
@@ -463,14 +525,16 @@ def test_outer_publication_failure_removes_unreferenced_decompile_blob(
     with TestClient(app, raise_server_exceptions=False) as client:
         runtime = getattr(app.state.agent, "_legacy", app.state.agent)
         monkeypatch.setattr(runtime, "_engineer_autohunt", completed_autohunt)
-        failed = client.post(
-            "/api/chat",
-            headers={"Authorization": f"Bearer {configured.api_token}"},
-            json={
+        failed = _signed_owner_private_post(
+            client,
+            configured,
+            {
                 "message": "декомпилируй этот файл",
                 "mode": "engineer",
                 "enable_tools": True,
                 "source_ref": "api-document:decompile-outer-rollback",
+                "telegram_message_id": 91005,
+                "telegram_user": {"id": 5001, "first_name": "Owner"},
                 "document": {
                     "filename": "outer-failure.exe",
                     "mime_type": "application/octet-stream",
@@ -498,7 +562,12 @@ def test_files_read_revoked_after_ghidra_suppresses_report_and_success_receipt(
 ) -> None:
     from friday.server import create_app
 
-    configured = replace(settings, engineer_mode_enabled=True, verify_answers=False)
+    configured = replace(
+        settings,
+        engineer_mode_enabled=True,
+        telegram_owner_chat_ids=[5001],
+        verify_answers=False,
+    )
     app = create_app(configured)
 
     async def revoke_after_completed_autohunt(_message, attachments, **_kwargs):  # noqa: ANN001
@@ -517,14 +586,16 @@ def test_files_read_revoked_after_ghidra_suppresses_report_and_success_receipt(
     with TestClient(app) as client:
         runtime = getattr(app.state.agent, "_legacy", app.state.agent)
         monkeypatch.setattr(runtime, "_engineer_autohunt", revoke_after_completed_autohunt)
-        result = client.post(
-            "/api/chat",
-            headers={"Authorization": f"Bearer {configured.api_token}"},
-            json={
+        result = _signed_owner_private_post(
+            client,
+            configured,
+            {
                 "message": "декомпилируй этот файл",
                 "mode": "engineer",
                 "enable_tools": True,
                 "source_ref": "api-document:decompile-late-files-read-deny",
+                "telegram_message_id": 91006,
+                "telegram_user": {"id": 5001, "first_name": "Owner"},
                 "document": {
                     "filename": "revoked.exe",
                     "mime_type": "application/octet-stream",
