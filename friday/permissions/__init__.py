@@ -49,6 +49,22 @@ class ActorContext:
     #: — идентификатор API-токена или связанной телеграм-личности, — и переписка
     #: человека разъезжалась бы по токенам, которыми он входил.
     person_id: str = ""
+    #: Exact channel authenticated at the outer transport boundary.  For a
+    #: Telegram request ``identity_id`` names the sender while this field names
+    #: the signed chat; they are equal only in a private chat.  Keeping the two
+    #: identities distinct prevents a positive sender id from laundering an
+    #: allow-listed group into a private-only capability.
+    telegram_chat_id: str | None = None
+
+    @property
+    def is_private_telegram_chat(self) -> bool:
+        """Whether this actor came from the sender's exact signed private chat."""
+
+        sender = str(self.identity_id or "")
+        chat = str(self.telegram_chat_id or "")
+        return bool(
+            self.source == "telegram-bridge" and re.fullmatch(r"[1-9][0-9]{0,19}", sender) and chat == sender
+        )
 
     @property
     def is_owner(self) -> bool:

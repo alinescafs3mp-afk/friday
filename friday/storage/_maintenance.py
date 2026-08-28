@@ -144,9 +144,43 @@ class _RestoreRecoveryFile:
     sha256: str
     device: int
     inode: int
+    link_count: int
 
 
-_RestoreFileIdentity = tuple[int, int, int, int, int]
+_RestoreFileIdentity = tuple[int, int, int, int, int, int]
+_RestoreDirectoryIdentity = tuple[int, int, int, int, int]
+
+
+def _restore_file_identity_from_stat(observed: os.stat_result) -> _RestoreFileIdentity:
+    return (
+        int(observed.st_dev),
+        int(observed.st_ino),
+        int(observed.st_size),
+        int(observed.st_mtime_ns),
+        int(observed.st_ctime_ns),
+        int(observed.st_nlink),
+    )
+
+
+def _restore_directory_identity_from_stat(
+    observed: os.stat_result,
+    *,
+    error_message: str,
+) -> _RestoreDirectoryIdentity:
+    if (
+        not stat.S_ISDIR(observed.st_mode)
+        or stat.S_ISLNK(observed.st_mode)
+        or observed.st_uid != os.geteuid()
+        or observed.st_mode & 0o077
+    ):
+        raise RuntimeError(error_message)
+    return (
+        int(observed.st_dev),
+        int(observed.st_ino),
+        int(stat.S_IMODE(observed.st_mode)),
+        int(observed.st_uid),
+        int(observed.st_nlink),
+    )
 
 
 class _RestoreIntentCleanupDurabilityError(RuntimeError):
@@ -165,6 +199,8 @@ class _LoadedRestoreIntent:
     intent: dict[str, Any]
     intent_device: int
     intent_inode: int
+    intent_link_count: int
+    intent_identity: _RestoreFileIdentity
     intent_sha256: str
     recovery_path: Path
     recovery_device: int
@@ -176,61 +212,204 @@ def _strict_fsync_directory(path: Path) -> None:
     if os.name == "nt":
         return
     flags = os.O_RDONLY | os.O_DIRECTORY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0)
+    before = _restore_directory_identity_from_stat(
+        path.lstat(),
+        error_message="Restore durability directory changed",
+    )
     descriptor = os.open(str(path), flags)
     try:
+        opened = _restore_directory_identity_from_stat(
+            os.fstat(descriptor),
+            error_message="Restore durability directory changed",
+        )
+        lexical = _restore_directory_identity_from_stat(
+            path.lstat(),
+            error_message="Restore durability directory changed",
+        )
+        if not before == opened == lexical:
+            raise RuntimeError("Restore durability directory changed")
         os.fsync(descriptor)
+        if (
+            _restore_directory_identity_from_stat(
+                os.fstat(descriptor),
+                error_message="Restore durability directory changed",
+            )
+            != before
+            or _restore_directory_identity_from_stat(
+                path.lstat(),
+                error_message="Restore durability directory changed",
+            )
+            != before
+        ):
+            raise RuntimeError("Restore durability directory changed")
     finally:
         os.close(descriptor)
 
 
-def _strict_fsync_file(path: Path) -> None:
-    flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0)
-    descriptor = os.open(str(path), flags)
-    try:
-        observed = os.fstat(descriptor)
-        if not stat.S_ISREG(observed.st_mode) or observed.st_uid != os.geteuid():
-            raise RuntimeError("Restore durability path is not a private regular file")
-        os.fsync(descriptor)
-    finally:
-        os.close(descriptor)
-
-
-def _read_private_restore_file(path: Path, *, maximum: int) -> bytes:
-    flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0)
-    descriptor = os.open(str(path), flags)
+def _strict_fsync_file(
+    path: Path,
+    *,
+    expected_identity: _RestoreFileIdentity | None = None,
+) -> _RestoreFileIdentity:
+    descriptor, parent_descriptor, parent_identity, identity = _open_pinned_restore_file(
+        path,
+        error_message="Restore durability path changed",
+    )
     try:
         observed = os.fstat(descriptor)
         if (
             not stat.S_ISREG(observed.st_mode)
             or observed.st_uid != os.geteuid()
             or observed.st_mode & 0o077
+            or observed.st_nlink != 1
+            or (expected_identity is not None and identity != expected_identity)
+        ):
+            raise RuntimeError("Restore durability path is not a private regular file")
+        if (
+            _restore_identity_at(
+                parent_descriptor,
+                path.name,
+                error_message="Restore durability path changed",
+            )
+            != identity
+            or _validated_restore_file_identity(
+                os.fstat(descriptor),
+                error_message="Restore durability path changed",
+            )
+            != identity
+        ):
+            raise RuntimeError("Restore durability path changed")
+        _assert_restore_parent_identity(
+            path,
+            parent_descriptor,
+            parent_identity,
+            error_message="Restore durability parent changed",
+        )
+        os.fsync(descriptor)
+        final_identity = _validated_restore_file_identity(
+            os.fstat(descriptor),
+            error_message="Restore durability path changed while it was synced",
+        )
+        if (
+            final_identity != identity
+            or (expected_identity is not None and final_identity != expected_identity)
+            or _restore_identity_at(
+                parent_descriptor,
+                path.name,
+                error_message="Restore durability path changed while it was synced",
+            )
+            != identity
+        ):
+            raise RuntimeError("Restore durability path changed while it was synced")
+        _assert_restore_parent_identity(
+            path,
+            parent_descriptor,
+            parent_identity,
+            error_message="Restore durability parent changed",
+        )
+        return final_identity
+    finally:
+        try:
+            os.close(descriptor)
+        finally:
+            os.close(parent_descriptor)
+
+
+def _read_private_restore_file(
+    path: Path,
+    *,
+    maximum: int,
+    expected_identity: _RestoreFileIdentity | None = None,
+) -> bytes:
+    descriptor, parent_descriptor, parent_identity, identity = _open_pinned_restore_file(
+        path,
+        error_message="Restore private file changed while it was opened",
+    )
+    try:
+        observed = os.fstat(descriptor)
+        if (
+            not stat.S_ISREG(observed.st_mode)
+            or observed.st_uid != os.geteuid()
+            or observed.st_mode & 0o077
+            or observed.st_nlink != 1
             or observed.st_size <= 0
             or observed.st_size > maximum
+            or (expected_identity is not None and identity != expected_identity)
         ):
             raise RuntimeError("Restore private file is invalid")
         payload = os.read(descriptor, maximum + 1)
         if len(payload) > maximum or os.read(descriptor, 1):
             raise RuntimeError("Restore private file is invalid")
+        if (
+            _restore_file_identity_from_stat(os.fstat(descriptor)) != identity
+            or _restore_identity_at(
+                parent_descriptor,
+                path.name,
+                error_message="Restore private file changed while it was read",
+            )
+            != identity
+        ):
+            raise RuntimeError("Restore private file changed while it was read")
+        _assert_restore_parent_identity(
+            path,
+            parent_descriptor,
+            parent_identity,
+            error_message="Restore private file parent changed while it was read",
+        )
         return payload
     finally:
-        os.close(descriptor)
+        try:
+            os.close(descriptor)
+        finally:
+            os.close(parent_descriptor)
 
 
-def _sha256_private_restore_file(path: Path) -> str:
-    flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0)
-    descriptor = os.open(str(path), flags)
+def _sha256_private_restore_file(
+    path: Path,
+    *,
+    expected_identity: _RestoreFileIdentity | None = None,
+) -> str:
+    descriptor, parent_descriptor, parent_identity, identity = _open_pinned_restore_file(
+        path,
+        error_message="Restore private file changed while it was opened",
+    )
     digest = hashlib.sha256()
     try:
         observed = os.fstat(descriptor)
-        if not stat.S_ISREG(observed.st_mode) or observed.st_uid != os.geteuid() or observed.st_mode & 0o077:
+        if (
+            not stat.S_ISREG(observed.st_mode)
+            or observed.st_uid != os.geteuid()
+            or observed.st_mode & 0o077
+            or observed.st_nlink != 1
+            or (expected_identity is not None and identity != expected_identity)
+        ):
             raise RuntimeError("Restore private file is invalid")
         while True:
             chunk = os.read(descriptor, 1024 * 1024)
             if not chunk:
                 break
             digest.update(chunk)
+        if (
+            _restore_file_identity_from_stat(os.fstat(descriptor)) != identity
+            or _restore_identity_at(
+                parent_descriptor,
+                path.name,
+                error_message="Restore private file changed while it was read",
+            )
+            != identity
+        ):
+            raise RuntimeError("Restore private file changed while it was read")
+        _assert_restore_parent_identity(
+            path,
+            parent_descriptor,
+            parent_identity,
+            error_message="Restore private file parent changed while it was read",
+        )
     finally:
-        os.close(descriptor)
+        try:
+            os.close(descriptor)
+        finally:
+            os.close(parent_descriptor)
     return digest.hexdigest()
 
 
@@ -242,27 +421,47 @@ def _write_restore_intent(path: Path, payload: dict[str, Any]) -> None:
     if set(payload) != _RESTORE_INTENT_FIELDS:
         raise RuntimeError("Restore intent is incomplete")
     _write_json_atomic(path, payload)
+    _strict_fsync_file(path)
     _strict_fsync_directory(path.parent)
 
 
-def _remove_restore_intent(path: Path) -> None:
+def _remove_restore_intent(
+    path: Path,
+    expected_identity: _RestoreFileIdentity,
+) -> None:
     # ``missing_ok`` would turn an independently disappeared marker into a
     # successful commit/rollback acknowledgement.  Only an unlink of a marker
     # observed by lstat, followed by a durable directory sync and an lstat
     # ENOENT postcondition, is a completed cleanup.
-    if database_restore_intent_lstat(path) is None:
-        raise RuntimeError("Restore intent disappeared before cleanup")
-    path.unlink()
-    _strict_fsync_directory(path.parent)
-    if database_restore_intent_lstat(path) is not None:
-        raise RuntimeError("Restore intent remains after cleanup")
+    _unlink_pinned_restore_file(
+        path,
+        expected_identity,
+        label="Restore intent",
+        durable=True,
+    )
 
 
-def _finalize_restore_intent(path: Path, *, outcome: str) -> None:
+def _finalize_restore_intent(
+    path: Path,
+    *,
+    outcome: str,
+    expected_identity: _RestoreFileIdentity,
+    expected_generation: dict[Path, _RestoreFileIdentity | None] | None = None,
+) -> None:
     """Remove a marker without turning unlink-success/fsync-failure into a lie."""
 
+    if expected_generation is not None:
+        _assert_restore_generation(
+            expected_generation,
+            error_message="Restore generation changed before restore-intent cleanup",
+        )
     try:
-        _remove_restore_intent(path)
+        _remove_restore_intent(path, expected_identity)
+        if expected_generation is not None:
+            _assert_restore_generation(
+                expected_generation,
+                error_message="Restore generation changed during restore-intent cleanup",
+            )
     except BaseException as exc:
         # The data generation is already fsynced at this point.  Whether the
         # marker remains or its unlink reached the running namespace, cleanup
@@ -302,9 +501,12 @@ def _private_regular_files(paths: tuple[Path, ...]) -> tuple[Path, ...]:
             not stat.S_ISREG(observed.st_mode)
             or stat.S_ISLNK(observed.st_mode)
             or observed.st_uid != os.geteuid()
+            or observed.st_mode & 0o077
+            or observed.st_nlink != 1
         ):
             raise RuntimeError(
-                "Database path and SQLite sidecars must not be symlinks and must be private regular files"
+                "Database path and SQLite sidecars must not be symlinks or hardlinks "
+                "and must be private regular files"
             )
         present.append(path)
     return tuple(present)
@@ -349,18 +551,24 @@ def _load_restore_intent(
             or stat.S_ISLNK(observed_intent.st_mode)
             or observed_intent.st_uid != os.geteuid()
             or observed_intent.st_mode & 0o077
+            or observed_intent.st_nlink != 1
             or observed_intent.st_size <= 0
             or observed_intent.st_size > 32_768
         ):
             raise RuntimeError("Restore intent is invalid")
-        intent_payload = _read_private_restore_file(intent_path, maximum=32_768)
+        intent_identity = _restore_file_identity_from_stat(observed_intent)
+        intent_payload = _read_private_restore_file(
+            intent_path,
+            maximum=32_768,
+            expected_identity=intent_identity,
+        )
         observed_intent_after = intent_path.lstat()
         if (
-            int(observed_intent_after.st_dev) != int(observed_intent.st_dev)
-            or int(observed_intent_after.st_ino) != int(observed_intent.st_ino)
-            or int(observed_intent_after.st_size) != int(observed_intent.st_size)
-            or int(observed_intent_after.st_mtime_ns) != int(observed_intent.st_mtime_ns)
-            or int(observed_intent_after.st_ctime_ns) != int(observed_intent.st_ctime_ns)
+            _validated_restore_file_identity(
+                observed_intent_after,
+                error_message="Restore intent changed while it was read",
+            )
+            != intent_identity
         ):
             raise RuntimeError("Restore intent changed while it was read")
         intent = json.loads(
@@ -422,7 +630,12 @@ def _load_restore_intent(
         raise RuntimeError("Restore recovery path is invalid") from exc
     manifest_path = recovery_path / "recovery.json"
     try:
-        manifest_payload = _read_private_restore_file(manifest_path, maximum=65_536)
+        manifest_identity = _restore_regular_file_identity(manifest_path)
+        manifest_payload = _read_private_restore_file(
+            manifest_path,
+            maximum=65_536,
+            expected_identity=manifest_identity,
+        )
         if not hmac.compare_digest(
             hashlib.sha256(manifest_payload).hexdigest(),
             str(intent["recovery_manifest_sha256"]),
@@ -475,9 +688,13 @@ def _load_restore_intent(
             or stat.S_ISLNK(source_status.st_mode)
             or source_status.st_uid != os.geteuid()
             or source_status.st_mode & 0o077
+            or source_status.st_nlink != 1
             or source_status.st_size != item["size_bytes"]
             or not hmac.compare_digest(
-                _sha256_private_restore_file(source),
+                _sha256_private_restore_file(
+                    source,
+                    expected_identity=_restore_file_identity_from_stat(source_status),
+                ),
                 item["sha256"],
             )
         ):
@@ -488,6 +705,7 @@ def _load_restore_intent(
             sha256=str(item["sha256"]),
             device=int(source_status.st_dev),
             inode=int(source_status.st_ino),
+            link_count=int(source_status.st_nlink),
         )
     if set(recovery_files) != set(original_files):
         raise RuntimeError("Restore recovery set is incomplete")
@@ -495,6 +713,8 @@ def _load_restore_intent(
         intent=intent,
         intent_device=int(observed_intent.st_dev),
         intent_inode=int(observed_intent.st_ino),
+        intent_link_count=int(observed_intent.st_nlink),
+        intent_identity=intent_identity,
         intent_sha256=hashlib.sha256(intent_payload).hexdigest(),
         recovery_path=recovery_path,
         recovery_device=int(directory_status.st_dev),
@@ -515,6 +735,8 @@ def _reload_exact_restore_intent(
         observed.intent != expected.intent
         or observed.intent_device != expected.intent_device
         or observed.intent_inode != expected.intent_inode
+        or observed.intent_link_count != expected.intent_link_count
+        or observed.intent_identity != expected.intent_identity
         or not hmac.compare_digest(observed.intent_sha256, expected.intent_sha256)
         or observed.recovery_path != expected.recovery_path
         or observed.recovery_device != expected.recovery_device
@@ -546,20 +768,237 @@ def _restore_regular_file_identity(path: Path) -> _RestoreFileIdentity:
         observed = path.lstat()
     except OSError as exc:
         raise RuntimeError("Restore file identity changed") from exc
+    return _validated_restore_file_identity(
+        observed,
+        error_message="Restore file identity changed",
+    )
+
+
+def _validated_restore_file_identity(
+    observed: os.stat_result,
+    *,
+    error_message: str,
+) -> _RestoreFileIdentity:
     if (
         not stat.S_ISREG(observed.st_mode)
         or stat.S_ISLNK(observed.st_mode)
         or observed.st_uid != os.geteuid()
         or observed.st_mode & 0o077
+        or observed.st_nlink != 1
     ):
-        raise RuntimeError("Restore file identity changed")
-    return (
-        int(observed.st_dev),
-        int(observed.st_ino),
-        int(observed.st_size),
-        int(observed.st_mtime_ns),
-        int(observed.st_ctime_ns),
+        raise RuntimeError(error_message)
+    return _restore_file_identity_from_stat(observed)
+
+
+def _open_private_restore_parent(
+    path: Path,
+    *,
+    error_message: str,
+) -> tuple[int, _RestoreDirectoryIdentity]:
+    flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_CLOEXEC", 0)
+    flags |= getattr(os, "O_NOFOLLOW", 0)
+    try:
+        before = _restore_directory_identity_from_stat(
+            path.parent.lstat(),
+            error_message=error_message,
+        )
+        descriptor = os.open(str(path.parent), flags)
+    except OSError as exc:
+        raise RuntimeError(error_message) from exc
+    try:
+        opened = _restore_directory_identity_from_stat(
+            os.fstat(descriptor),
+            error_message=error_message,
+        )
+        after = _restore_directory_identity_from_stat(
+            path.parent.lstat(),
+            error_message=error_message,
+        )
+    except BaseException:
+        os.close(descriptor)
+        raise
+    if not before == opened == after:
+        os.close(descriptor)
+        raise RuntimeError(error_message)
+    return descriptor, opened
+
+
+def _assert_restore_parent_identity(
+    path: Path,
+    descriptor: int,
+    expected: _RestoreDirectoryIdentity,
+    *,
+    error_message: str,
+) -> None:
+    try:
+        lexical = _restore_directory_identity_from_stat(
+            path.parent.lstat(),
+            error_message=error_message,
+        )
+        opened = _restore_directory_identity_from_stat(
+            os.fstat(descriptor),
+            error_message=error_message,
+        )
+    except OSError as exc:
+        raise RuntimeError(error_message) from exc
+    if lexical != expected or opened != expected:
+        raise RuntimeError(error_message)
+
+
+def _restore_identity_at(
+    parent_descriptor: int,
+    name: str,
+    *,
+    error_message: str,
+) -> _RestoreFileIdentity | None:
+    try:
+        observed = os.stat(
+            name,
+            dir_fd=parent_descriptor,
+            follow_symlinks=False,
+        )
+    except FileNotFoundError:
+        return None
+    except OSError as exc:
+        raise RuntimeError(error_message) from exc
+    return _validated_restore_file_identity(observed, error_message=error_message)
+
+
+def _open_pinned_restore_file(
+    path: Path,
+    *,
+    error_message: str,
+) -> tuple[int, int, _RestoreDirectoryIdentity, _RestoreFileIdentity]:
+    """Open the lexical file through its verified, pinned parent directory."""
+
+    parent_descriptor, parent_identity = _open_private_restore_parent(
+        path,
+        error_message=error_message,
     )
+    descriptor = -1
+    try:
+        flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0)
+        try:
+            descriptor = os.open(
+                path.name,
+                flags,
+                dir_fd=parent_descriptor,
+            )
+        except OSError as exc:
+            raise RuntimeError(error_message) from exc
+        identity = _validated_restore_file_identity(
+            os.fstat(descriptor),
+            error_message=error_message,
+        )
+        if (
+            _restore_identity_at(
+                parent_descriptor,
+                path.name,
+                error_message=error_message,
+            )
+            != identity
+        ):
+            raise RuntimeError(error_message)
+        _assert_restore_parent_identity(
+            path,
+            parent_descriptor,
+            parent_identity,
+            error_message=error_message,
+        )
+        return descriptor, parent_descriptor, parent_identity, identity
+    except BaseException:
+        try:
+            if descriptor >= 0:
+                os.close(descriptor)
+        finally:
+            os.close(parent_descriptor)
+        raise
+
+
+def _unlink_pinned_restore_file(
+    path: Path,
+    expected_identity: _RestoreFileIdentity,
+    *,
+    label: str,
+    durable: bool,
+) -> None:
+    """Unlink exactly one opened single-link inode through its pinned parent."""
+
+    error_message = f"{label} changed before restore cleanup"
+    flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0)
+    try:
+        descriptor = os.open(str(path), flags)
+    except OSError as exc:
+        raise RuntimeError(error_message) from exc
+    parent_descriptor = -1
+    try:
+        parent_descriptor, parent_identity = _open_private_restore_parent(
+            path,
+            error_message=error_message,
+        )
+        before = _validated_restore_file_identity(
+            os.fstat(descriptor),
+            error_message=error_message,
+        )
+        if before != expected_identity:
+            raise RuntimeError(error_message)
+        if (
+            _restore_identity_at(
+                parent_descriptor,
+                path.name,
+                error_message=error_message,
+            )
+            != expected_identity
+            or _validated_restore_file_identity(
+                os.fstat(descriptor),
+                error_message=error_message,
+            )
+            != expected_identity
+        ):
+            raise RuntimeError(error_message)
+        _assert_restore_parent_identity(
+            path,
+            parent_descriptor,
+            parent_identity,
+            error_message=error_message,
+        )
+        os.unlink(path.name, dir_fd=parent_descriptor)
+        after = os.fstat(descriptor)
+        if (
+            not stat.S_ISREG(after.st_mode)
+            or after.st_uid != os.geteuid()
+            or after.st_mode & 0o077
+            or _restore_file_identity_from_stat(after)[:4] != expected_identity[:4]
+            or after.st_nlink != 0
+        ):
+            raise RuntimeError(error_message)
+        _assert_restore_parent_identity(
+            path,
+            parent_descriptor,
+            parent_identity,
+            error_message=error_message,
+        )
+        if durable:
+            os.fsync(parent_descriptor)
+        if (
+            _restore_identity_at(
+                parent_descriptor,
+                path.name,
+                error_message=error_message,
+            )
+            is not None
+        ):
+            raise RuntimeError(error_message)
+        _assert_restore_parent_identity(
+            path,
+            parent_descriptor,
+            parent_identity,
+            error_message=error_message,
+        )
+    finally:
+        if parent_descriptor >= 0:
+            os.close(parent_descriptor)
+        os.close(descriptor)
 
 
 def _optional_restore_file_identity(path: Path) -> _RestoreFileIdentity | None:
@@ -585,13 +1024,74 @@ def _assert_restore_path_identity(
         raise RuntimeError(f"{label} changed before restore mutation")
 
 
+def _assert_restore_generation(
+    expected: dict[Path, _RestoreFileIdentity | None],
+    *,
+    error_message: str,
+) -> None:
+    """Verify one complete active generation through a pinned parent directory."""
+
+    if not expected:
+        return
+    parents = {path.parent for path in expected}
+    if len(parents) != 1:
+        raise RuntimeError(error_message)
+    representative = next(iter(expected))
+    parent_descriptor, parent_identity = _open_private_restore_parent(
+        representative,
+        error_message=error_message,
+    )
+    try:
+        for path, identity in expected.items():
+            if (
+                path.parent != representative.parent
+                or _restore_identity_at(
+                    parent_descriptor,
+                    path.name,
+                    error_message=error_message,
+                )
+                != identity
+            ):
+                raise RuntimeError(error_message)
+        _assert_restore_parent_identity(
+            representative,
+            parent_descriptor,
+            parent_identity,
+            error_message=error_message,
+        )
+        for path, identity in expected.items():
+            if (
+                _restore_identity_at(
+                    parent_descriptor,
+                    path.name,
+                    error_message=error_message,
+                )
+                != identity
+            ):
+                raise RuntimeError(error_message)
+        _assert_restore_parent_identity(
+            representative,
+            parent_descriptor,
+            parent_identity,
+            error_message=error_message,
+        )
+    finally:
+        os.close(parent_descriptor)
+
+
 def _unlink_expected_restore_path(
     path: Path,
     expected: _RestoreFileIdentity | None,
 ) -> None:
-    _assert_restore_path_identity(path, expected, label="Active database path")
-    if expected is not None:
-        path.unlink()
+    if expected is None:
+        _assert_restore_path_identity(path, None, label="Active database path")
+        return
+    _unlink_pinned_restore_file(
+        path,
+        expected,
+        label="Active database path",
+        durable=False,
+    )
 
 
 def _replace_expected_restore_path(
@@ -601,14 +1101,176 @@ def _replace_expected_restore_path(
     prepared_identity: _RestoreFileIdentity,
     destination_identity: _RestoreFileIdentity | None,
 ) -> _RestoreFileIdentity:
-    _assert_restore_path_identity(prepared, prepared_identity, label="Restore staged copy")
-    _assert_restore_path_identity(destination, destination_identity, label="Active database path")
-    os.replace(prepared, destination)
-    observed = _restore_regular_file_identity(destination)
-    # rename may update ctime, but never the inode, length or content mtime.
-    if observed[:4] != prepared_identity[:4]:
-        raise RuntimeError("Restore staged copy changed before restore mutation")
-    return observed
+    prepared_error = "Restore staged copy changed before restore mutation"
+    destination_error = "Active database path changed before restore mutation"
+    flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0)
+    try:
+        descriptor = os.open(str(prepared), flags)
+    except OSError as exc:
+        raise RuntimeError(prepared_error) from exc
+    destination_descriptor = -1
+    source_parent = -1
+    destination_parent = -1
+    try:
+        source_parent, source_parent_identity = _open_private_restore_parent(
+            prepared,
+            error_message=prepared_error,
+        )
+        destination_parent, destination_parent_identity = _open_private_restore_parent(
+            destination,
+            error_message=destination_error,
+        )
+        if destination_identity is not None:
+            try:
+                destination_descriptor = os.open(
+                    destination.name,
+                    flags,
+                    dir_fd=destination_parent,
+                )
+            except OSError as exc:
+                raise RuntimeError(destination_error) from exc
+        if (
+            _validated_restore_file_identity(
+                os.fstat(descriptor),
+                error_message=prepared_error,
+            )
+            != prepared_identity
+            or _restore_identity_at(
+                source_parent,
+                prepared.name,
+                error_message=prepared_error,
+            )
+            != prepared_identity
+            or _restore_identity_at(
+                destination_parent,
+                destination.name,
+                error_message=destination_error,
+            )
+            != destination_identity
+            or (
+                destination_descriptor >= 0
+                and _validated_restore_file_identity(
+                    os.fstat(destination_descriptor),
+                    error_message=destination_error,
+                )
+                != destination_identity
+            )
+        ):
+            raise RuntimeError(prepared_error)
+        # Repeat both pathname bindings immediately before the atomic rename.
+        if (
+            _validated_restore_file_identity(
+                os.fstat(descriptor),
+                error_message=prepared_error,
+            )
+            != prepared_identity
+            or _restore_identity_at(
+                source_parent,
+                prepared.name,
+                error_message=prepared_error,
+            )
+            != prepared_identity
+            or _restore_identity_at(
+                destination_parent,
+                destination.name,
+                error_message=destination_error,
+            )
+            != destination_identity
+            or (
+                destination_descriptor >= 0
+                and _validated_restore_file_identity(
+                    os.fstat(destination_descriptor),
+                    error_message=destination_error,
+                )
+                != destination_identity
+            )
+        ):
+            raise RuntimeError(prepared_error)
+        _assert_restore_parent_identity(
+            prepared,
+            source_parent,
+            source_parent_identity,
+            error_message=prepared_error,
+        )
+        _assert_restore_parent_identity(
+            destination,
+            destination_parent,
+            destination_parent_identity,
+            error_message=destination_error,
+        )
+        os.replace(
+            prepared.name,
+            destination.name,
+            src_dir_fd=source_parent,
+            dst_dir_fd=destination_parent,
+        )
+        if destination_descriptor >= 0:
+            if destination_identity is None:
+                raise RuntimeError(destination_error)
+            displaced = os.fstat(destination_descriptor)
+            if (
+                not stat.S_ISREG(displaced.st_mode)
+                or displaced.st_uid != os.geteuid()
+                or displaced.st_mode & 0o077
+                or displaced.st_nlink != 0
+                or _restore_file_identity_from_stat(displaced)[:4] != destination_identity[:4]
+            ):
+                raise RuntimeError(destination_error)
+        _assert_restore_parent_identity(
+            prepared,
+            source_parent,
+            source_parent_identity,
+            error_message=prepared_error,
+        )
+        _assert_restore_parent_identity(
+            destination,
+            destination_parent,
+            destination_parent_identity,
+            error_message=destination_error,
+        )
+        after = _validated_restore_file_identity(
+            os.fstat(descriptor),
+            error_message=prepared_error,
+        )
+        observed = _restore_identity_at(
+            destination_parent,
+            destination.name,
+            error_message=prepared_error,
+        )
+        # rename may update ctime, but never the inode, length, content mtime or
+        # single-link invariant.  The source name must be gone from the pinned dir.
+        if (
+            after[:4] != prepared_identity[:4]
+            or observed != after
+            or _restore_identity_at(
+                source_parent,
+                prepared.name,
+                error_message=prepared_error,
+            )
+            is not None
+        ):
+            raise RuntimeError(prepared_error)
+        _assert_restore_parent_identity(
+            prepared,
+            source_parent,
+            source_parent_identity,
+            error_message=prepared_error,
+        )
+        _assert_restore_parent_identity(
+            destination,
+            destination_parent,
+            destination_parent_identity,
+            error_message=destination_error,
+        )
+        return after
+    finally:
+        if destination_descriptor >= 0:
+            os.close(destination_descriptor)
+        if destination_parent >= 0:
+            os.close(destination_parent)
+        if source_parent >= 0:
+            os.close(source_parent)
+        os.close(descriptor)
 
 
 def _verify_recovery_source(snapshot: _RestoreRecoveryFile) -> None:
@@ -616,6 +1278,7 @@ def _verify_recovery_source(snapshot: _RestoreRecoveryFile) -> None:
         observed = snapshot.path.lstat()
     except OSError as exc:
         raise RuntimeError("Restore recovery source changed") from exc
+    observed_identity = _restore_file_identity_from_stat(observed)
     if (
         not stat.S_ISREG(observed.st_mode)
         or stat.S_ISLNK(observed.st_mode)
@@ -623,9 +1286,14 @@ def _verify_recovery_source(snapshot: _RestoreRecoveryFile) -> None:
         or observed.st_mode & 0o077
         or int(observed.st_dev) != snapshot.device
         or int(observed.st_ino) != snapshot.inode
+        or int(observed.st_nlink) != snapshot.link_count
+        or observed.st_nlink != 1
         or int(observed.st_size) != snapshot.size_bytes
         or not hmac.compare_digest(
-            _sha256_private_restore_file(snapshot.path),
+            _sha256_private_restore_file(
+                snapshot.path,
+                expected_identity=observed_identity,
+            ),
             snapshot.sha256,
         )
     ):
@@ -639,16 +1307,26 @@ def _stage_verified_recovery_copy(
     """Copy one recovery member from a pinned no-follow descriptor."""
 
     ensure_private_directory(destination.parent)
-    source_flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0)
     source_descriptor = -1
+    source_parent_descriptor = -1
+    source_parent_identity: _RestoreDirectoryIdentity | None = None
+    source_identity: _RestoreFileIdentity | None = None
     target_descriptor = -1
     temporary: Path | None = None
     digest = hashlib.sha256()
     copied = 0
     try:
         try:
-            source_descriptor = os.open(str(snapshot.path), source_flags)
-        except OSError as exc:
+            (
+                source_descriptor,
+                source_parent_descriptor,
+                source_parent_identity,
+                source_identity,
+            ) = _open_pinned_restore_file(
+                snapshot.path,
+                error_message="Restore recovery source changed",
+            )
+        except (OSError, RuntimeError) as exc:
             raise RuntimeError("Restore recovery source changed") from exc
         source_status = os.fstat(source_descriptor)
         if (
@@ -657,6 +1335,8 @@ def _stage_verified_recovery_copy(
             or source_status.st_mode & 0o077
             or int(source_status.st_dev) != snapshot.device
             or int(source_status.st_ino) != snapshot.inode
+            or int(source_status.st_nlink) != snapshot.link_count
+            or source_status.st_nlink != 1
             or int(source_status.st_size) != snapshot.size_bytes
         ):
             raise RuntimeError("Restore recovery source changed")
@@ -681,24 +1361,60 @@ def _stage_verified_recovery_copy(
                 view = view[written:]
         final_source_status = os.fstat(source_descriptor)
         if (
-            (int(final_source_status.st_dev), int(final_source_status.st_ino))
+            not stat.S_ISREG(final_source_status.st_mode)
+            or final_source_status.st_uid != os.geteuid()
+            or final_source_status.st_mode & 0o077
+            or (int(final_source_status.st_dev), int(final_source_status.st_ino))
             != (snapshot.device, snapshot.inode)
+            or int(final_source_status.st_nlink) != snapshot.link_count
+            or final_source_status.st_nlink != 1
             or int(final_source_status.st_size) != snapshot.size_bytes
+            or _restore_file_identity_from_stat(final_source_status) != source_identity
             or copied != snapshot.size_bytes
             or not hmac.compare_digest(digest.hexdigest(), snapshot.sha256)
         ):
             raise RuntimeError("Restore recovery source changed")
+        if (
+            _restore_identity_at(
+                source_parent_descriptor,
+                snapshot.path.name,
+                error_message="Restore recovery source changed",
+            )
+            != source_identity
+        ):
+            raise RuntimeError("Restore recovery source changed")
+        if source_parent_identity is None:
+            raise RuntimeError("Restore recovery source changed")
+        _assert_restore_parent_identity(
+            snapshot.path,
+            source_parent_descriptor,
+            source_parent_identity,
+            error_message="Restore recovery source changed",
+        )
         os.fsync(target_descriptor)
+        target_status = os.fstat(target_descriptor)
+        if (
+            not stat.S_ISREG(target_status.st_mode)
+            or target_status.st_uid != os.geteuid()
+            or target_status.st_mode & 0o077
+            or target_status.st_nlink != 1
+            or int(target_status.st_size) != snapshot.size_bytes
+        ):
+            raise RuntimeError("Restore recovery staged copy is invalid")
         os.close(target_descriptor)
         target_descriptor = -1
         os.close(source_descriptor)
         source_descriptor = -1
+        os.close(source_parent_descriptor)
+        source_parent_descriptor = -1
         return temporary
     except BaseException:
         if target_descriptor >= 0:
             os.close(target_descriptor)
         if source_descriptor >= 0:
             os.close(source_descriptor)
+        if source_parent_descriptor >= 0:
+            os.close(source_parent_descriptor)
         if temporary is not None:
             temporary.unlink(missing_ok=True)
         raise
@@ -739,17 +1455,12 @@ def _verify_exact_restore_copy(
     copied = 0
     try:
         observed = os.fstat(descriptor)
-        descriptor_identity = (
-            int(observed.st_dev),
-            int(observed.st_ino),
-            int(observed.st_size),
-            int(observed.st_mtime_ns),
-            int(observed.st_ctime_ns),
-        )
+        descriptor_identity = _restore_file_identity_from_stat(observed)
         if (
             not stat.S_ISREG(observed.st_mode)
             or observed.st_uid != os.geteuid()
             or observed.st_mode & 0o077
+            or observed.st_nlink != 1
             or descriptor_identity != initial_identity
         ):
             raise RuntimeError(error_message)
@@ -760,13 +1471,7 @@ def _verify_exact_restore_copy(
             copied += len(chunk)
             digest.update(chunk)
         final = os.fstat(descriptor)
-        final_identity = (
-            int(final.st_dev),
-            int(final.st_ino),
-            int(final.st_size),
-            int(final.st_mtime_ns),
-            int(final.st_ctime_ns),
-        )
+        final_identity = _restore_file_identity_from_stat(final)
         if (
             final_identity != initial_identity
             or _restore_regular_file_identity(path) != initial_identity
@@ -838,6 +1543,7 @@ def _recover_interrupted_restore(
     database_path: Path,
     *,
     engineer_authority: Any | None = None,
+    expected_committed_generation: dict[Path, _RestoreFileIdentity | None] | None = None,
 ) -> str:
     """Finish an interrupted restore transaction under stopped process leases."""
 
@@ -867,7 +1573,12 @@ def _recover_interrupted_restore(
             authority_evidence,
             database_sha256=str(intent["target_sha256"]),
         )
-        _finalize_restore_intent(intent_path, outcome="committed")
+        _finalize_restore_intent(
+            intent_path,
+            outcome="committed",
+            expected_identity=loaded.intent_identity,
+            expected_generation=expected_committed_generation,
+        )
         if not intent["retain_recovery"]:
             _discard_restore_recovery(
                 loaded.recovery_path,
@@ -879,6 +1590,7 @@ def _recover_interrupted_restore(
     active_originals = _private_regular_files(active_paths)
     active_identities = {path: _restore_regular_file_identity(path) for path in active_originals}
     staged: dict[Path, tuple[Path, _RestoreRecoveryFile]] = {}
+    restored_identities: dict[Path, _RestoreFileIdentity] = {}
     try:
         for active_path in active_paths:
             source = loaded.recovery_files.get(active_path.name)
@@ -950,12 +1662,29 @@ def _recover_interrupted_restore(
                 prepared_identity=prepared_identity,
                 destination_identity=active_identities.get(original),
             )
-            if _verify_staged_recovery_copy(original, source) != replaced_identity:
+            verified_identity = _verify_staged_recovery_copy(original, source)
+            if verified_identity != replaced_identity:
                 raise RuntimeError("Restore recovery staged copy changed")
-        for original in staged:
-            _strict_fsync_file(original)
+            restored_identities[original] = verified_identity
+        if set(restored_identities) != set(staged):
+            raise RuntimeError("Restore recovery final generation is incomplete")
+        expected_generation = {
+            active_path: restored_identities.get(active_path) for active_path in active_paths
+        }
+        for original, identity in restored_identities.items():
+            if _strict_fsync_file(original, expected_identity=identity) != identity:
+                raise RuntimeError("Restore recovery final generation changed")
         _strict_fsync_directory(database_path.parent)
-        _finalize_restore_intent(intent_path, outcome="rolled_back")
+        _assert_restore_generation(
+            expected_generation,
+            error_message="Restore recovery final generation changed",
+        )
+        _finalize_restore_intent(
+            intent_path,
+            outcome="rolled_back",
+            expected_identity=loaded.intent_identity,
+            expected_generation=expected_generation,
+        )
         if not intent["retain_recovery"]:
             _discard_restore_recovery(
                 loaded.recovery_path,
@@ -1971,6 +2700,7 @@ class MaintenanceMixin(StorageShared):
         prepared_marker_written = False
         commit_marker_write_started = False
         committed_marker_written = False
+        committed_generation: dict[Path, _RestoreFileIdentity | None] | None = None
         result: dict[str, Any] | None = None
         restore_open_previous = self._begin_database_restore_open()
         try:
@@ -2014,7 +2744,13 @@ class MaintenanceMixin(StorageShared):
             # the partial temporary set is never treated as rollback authority.
             active_originals = _private_regular_files(active_paths)
             pre_intent_identities = {path: _restore_regular_file_identity(path) for path in active_originals}
-            pre_intent_digests = {path: _sha256_private_restore_file(path) for path in active_originals}
+            pre_intent_digests = {
+                path: _sha256_private_restore_file(
+                    path,
+                    expected_identity=pre_intent_identities[path],
+                )
+                for path in active_originals
+            }
             for active_path in active_originals:
                 pre_restore_stages[active_path] = _stage_private_copy(
                     active_path,
@@ -2032,7 +2768,10 @@ class MaintenanceMixin(StorageShared):
             if set(_private_regular_files(active_paths)) != set(active_originals) or any(
                 _restore_regular_file_identity(path) != pre_intent_identities[path]
                 or not hmac.compare_digest(
-                    _sha256_private_restore_file(path),
+                    _sha256_private_restore_file(
+                        path,
+                        expected_identity=pre_intent_identities[path],
+                    ),
                     pre_intent_digests[path],
                 )
                 for path in active_originals
@@ -2061,7 +2800,10 @@ class MaintenanceMixin(StorageShared):
             if set(_private_regular_files(active_paths)) != set(active_originals) or any(
                 _restore_regular_file_identity(path) != pre_intent_identities[path]
                 or not hmac.compare_digest(
-                    _sha256_private_restore_file(path),
+                    _sha256_private_restore_file(
+                        path,
+                        expected_identity=pre_intent_identities[path],
+                    ),
                     pre_intent_digests[path],
                 )
                 for path in active_originals
@@ -2187,17 +2929,22 @@ class MaintenanceMixin(StorageShared):
                 prepared_identity=mutation_staged_identity,
                 destination_identity=active_identities.get(database_path),
             )
-            if (
-                _verify_exact_restore_copy(
-                    database_path,
-                    size_bytes=int(verification["size_bytes"]),
-                    sha256=str(verification["sha256"]),
-                    error_message="Restored database changed during replacement",
-                )
-                != replaced_identity
-            ):
+            verified_target_identity = _verify_exact_restore_copy(
+                database_path,
+                size_bytes=int(verification["size_bytes"]),
+                sha256=str(verification["sha256"]),
+                error_message="Restored database changed during replacement",
+            )
+            if verified_target_identity != replaced_identity:
                 raise RuntimeError("Restored database changed during replacement")
-            _strict_fsync_file(database_path)
+            if (
+                _strict_fsync_file(
+                    database_path,
+                    expected_identity=verified_target_identity,
+                )
+                != verified_target_identity
+            ):
+                raise RuntimeError("Restored database changed before durability sync")
             _strict_fsync_directory(database_path.parent)
 
             # Opening performs only supported forward migrations.  Health must
@@ -2250,13 +2997,43 @@ class MaintenanceMixin(StorageShared):
             # post-restore mutation are durable.  A crash before this marker
             # rolls back; a crash after it keeps the restored generation.
             self.close()
-            for active_path in _private_regular_files(active_paths):
-                _strict_fsync_file(active_path)
+            committed_files = _private_regular_files(active_paths)
+            committed_file_identities = {
+                active_path: _restore_regular_file_identity(active_path) for active_path in committed_files
+            }
+            committed_database_identity = committed_file_identities.get(database_path)
+            if (
+                committed_database_identity is None
+                or committed_database_identity[:2] != replaced_identity[:2]
+            ):
+                raise RuntimeError("Restored database inode changed before commit")
+            committed_generation = {
+                active_path: committed_file_identities.get(active_path) for active_path in active_paths
+            }
+            for active_path, identity in committed_file_identities.items():
+                if _strict_fsync_file(active_path, expected_identity=identity) != identity:
+                    raise RuntimeError("Restored database generation changed before commit")
             _strict_fsync_directory(database_path.parent)
+            _assert_restore_generation(
+                committed_generation,
+                error_message="Restored database generation changed before commit",
+            )
             commit_marker_write_started = True
-            _write_restore_intent(intent_path, {**intent_payload, "phase": "committed"})
+            committed_intent_payload = {**intent_payload, "phase": "committed"}
+            _write_restore_intent(intent_path, committed_intent_payload)
             committed_marker_written = True
-            _finalize_restore_intent(intent_path, outcome="committed")
+            committed_intent = _load_restore_intent(
+                self.settings,
+                database_path,
+            )
+            if committed_intent.intent != committed_intent_payload:
+                raise RuntimeError("Restore intent changed after commit")
+            _finalize_restore_intent(
+                intent_path,
+                outcome="committed",
+                expected_identity=committed_intent.intent_identity,
+                expected_generation=committed_generation,
+            )
             if recovery_snapshot is None:
                 _discard_restore_recovery(
                     Path(str(recovery_bundle["path"])),
@@ -2281,6 +3058,7 @@ class MaintenanceMixin(StorageShared):
                         self.settings,
                         database_path,
                         engineer_authority=self._engineer_command_backup_authority,
+                        expected_committed_generation=committed_generation,
                     )
                 elif (
                     recovery_bundle is not None

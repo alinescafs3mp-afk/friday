@@ -1933,6 +1933,8 @@ def _require_fresh_engineer_chat_actor(state: Any, actor: ActorContext) -> Actor
 
     if getattr(state.settings, "engineer_mode_enabled", False) is not True:
         raise AuthorizationError("Engineer mode is disabled")
+    if not actor.is_private_telegram_chat:
+        raise AuthorizationError("Engineer mode requires the owner's private Telegram chat")
     fresh_actor = _fresh_chat_capability_actor(state, actor, "engineer.use")
     if not fresh_actor.is_owner:
         raise AuthorizationError("Engineer mode is available only to the installation owner")
@@ -2303,10 +2305,13 @@ async def _authenticate(request: Request) -> ActorContext:
             raise AuthenticationError("User account is disabled")
         request.state.bridge_chat_id = identity.chat_id
         request.state.bridge_external_user_id = identity.external_user_id
-        return state.auth_service.actor_for_user(
-            user_id,
-            source="telegram-bridge",
-            identity_id=identity.external_user_id,
+        return replace(
+            state.auth_service.actor_for_user(
+                user_id,
+                source="telegram-bridge",
+                identity_id=identity.external_user_id,
+            ),
+            telegram_chat_id=identity.chat_id,
         )
 
     if bearer:

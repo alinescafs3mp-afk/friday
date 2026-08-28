@@ -402,6 +402,108 @@ def test_full_chat_autonomous_engineer_bypasses_dialogue_policy_and_forces_tools
     }
 
 
+def test_http_engineer_requires_the_exact_signed_owner_private_chat(
+    settings,
+    tmp_path: Path,
+) -> None:
+    """An owner sender id must not turn an allow-listed group into a private chat."""
+
+    from friday.server import create_app
+
+    group_chat_id = -100123
+    configured = replace(
+        _configured(settings, tmp_path),
+        telegram_allowed_chat_ids=[group_chat_id, 5001],
+        telegram_owner_chat_ids=[5001],
+        verify_answers=False,
+    )
+    app = create_app(configured)
+    model = _DependentHostCommandModel()
+    with TestClient(app) as client:
+        app.state.storage.ensure_user(
+            LEGACY_OWNER_USER_ID,
+            preset_key="owner",
+            metadata={"chat_id": "5001"},
+        )
+        app.state.storage.link_identity(
+            "telegram",
+            "5001",
+            LEGACY_OWNER_USER_ID,
+            linked_by=LEGACY_OWNER_USER_ID,
+        )
+        runtime = getattr(app.state.agent, "_legacy", app.state.agent)
+        runtime.llm = model
+
+        group_mode = _bridge_request(
+            client,
+            configured,
+            "/api/conversations/channel/mode",
+            {
+                "channel": "telegram",
+                "channel_id": str(group_chat_id),
+                "mode": "engineer",
+                "telegram_user": {"id": 5001, "first_name": "Owner"},
+            },
+            user="5001",
+            chat=str(group_chat_id),
+        )
+        assert group_mode.status_code == 403, group_mode.text
+
+        group_turn = _bridge_request(
+            client,
+            configured,
+            "/api/chat",
+            {
+                "message": "Запусти printf из этой группы.",
+                "mode": "engineer",
+                "source_ref": "telegram-update:91000",
+                "telegram_message_id": 600,
+                "telegram_user": {"id": 5001, "first_name": "Owner"},
+            },
+            user="5001",
+            chat=str(group_chat_id),
+        )
+        assert group_turn.status_code == 403, group_turn.text
+        assert model.calls == 0
+
+        private_mode = _bridge_request(
+            client,
+            configured,
+            "/api/conversations/channel/mode",
+            {
+                "channel": "telegram",
+                "channel_id": "5001",
+                "mode": "engineer",
+                "telegram_user": {"id": 5001, "first_name": "Owner"},
+            },
+            user="5001",
+            chat="5001",
+        )
+        assert private_mode.status_code == 200, private_mode.text
+
+        private_turn = _bridge_request(
+            client,
+            configured,
+            "/api/chat",
+            {
+                "message": "Создай рабочий файл, измени его следующим шагом и верни результат.",
+                "source_ref": "telegram-update:91001",
+                "telegram_message_id": 601,
+                "telegram_user": {"id": 5001, "first_name": "Owner"},
+            },
+            user="5001",
+            chat="5001",
+        )
+
+    assert private_turn.status_code == 200, private_turn.text
+    assert private_turn.json()["message"] == "DEPENDENT-HOST-DONE"
+    assert private_turn.json()["tools_used"] == ["engineer_command_run", "engineer_command_run"]
+    assert model.calls == 3
+    sealed_outputs = list(configured.engineer_command_store_dir.glob("jobs/*/sealed/final.txt"))
+    assert len(sealed_outputs) == 1
+    assert sealed_outputs[0].read_bytes() == b"first-second"
+
+
 @pytest.mark.parametrize(
     ("message", "update_id"),
     (
@@ -567,6 +669,7 @@ def test_full_chat_autonomous_engineer_keeps_encrypted_archive_as_exact_current_
             "owner",
             "telegram-bridge",
             identity_id="5001",
+            telegram_chat_id="5001",
         )
         batch = authorize_current_message_upload_batch(
             app.state.storage,
@@ -655,6 +758,7 @@ def test_full_chat_autonomous_engineer_keeps_audio_as_exact_command_input(
                 "owner",
                 "telegram-bridge",
                 identity_id="5001",
+                telegram_chat_id="5001",
             ),
             conversation_id=conversation_id,
             source_message_id=str(source["id"]),
@@ -793,6 +897,7 @@ def test_real_owner_service_runs_dependent_host_shell_steps_without_approvals(
         "owner",
         "telegram-bridge",
         identity_id="5001",
+        telegram_chat_id="5001",
     )
     with TestClient(app):
         app.state.storage.ensure_user(
@@ -1410,6 +1515,7 @@ def test_exact_current_upload_is_reauthorized_and_passed_only_through_private_su
         "owner",
         "telegram-bridge",
         identity_id="5001",
+        telegram_chat_id="5001",
     )
     raw_id = "raw_0123456789abcdef"
     body = b"private current-message bytes"
@@ -1621,6 +1727,7 @@ def test_terminal_autonomous_step_returns_receipt_without_consuming_archive_deli
         "owner",
         "telegram-bridge",
         identity_id="5001",
+        telegram_chat_id="5001",
     )
     service = _direct_service(actor)
     kernel = _TerminalDirectKernel()
@@ -1931,6 +2038,7 @@ def test_distinct_code_owned_steps_admit_distinct_autonomous_shell_jobs() -> Non
         "owner",
         "telegram-bridge",
         identity_id="5001",
+        telegram_chat_id="5001",
     )
     service = _direct_service(actor)
 
@@ -1995,6 +2103,7 @@ def test_command_service_rejects_malformed_code_owned_step_identity(step_id: str
         "owner",
         "telegram-bridge",
         identity_id="5001",
+        telegram_chat_id="5001",
     )
     service = _direct_service(actor)
 
@@ -2018,12 +2127,43 @@ def test_command_service_rejects_malformed_code_owned_step_identity(step_id: str
     assert service.kernel.requests == []
 
 
+def test_command_service_rejects_owner_sender_from_group_transport() -> None:
+    actor = ActorContext(
+        LEGACY_OWNER_USER_ID,
+        "owner",
+        "telegram-bridge",
+        identity_id="5001",
+        telegram_chat_id="-100123",
+    )
+    service = _direct_service(actor)
+
+    result = service.execute(
+        actor=actor,
+        command="true",
+        timeout_sec=10,
+        _conversation_id="conv_0123456789abcdef",
+        _source_message_id="msg_0123456789abcdef",
+        _telegram_update_id="100",
+        _step_id="ecstep-" + "3" * 32,
+    )
+
+    assert result == {
+        "effect_boundary_crossed": False,
+        "error_code": "authorization_denied",
+        "ok": False,
+        "status": "failed",
+    }
+    assert service.kernel.authority.source_authority.attestations == []
+    assert service.kernel.requests == []
+
+
 def test_model_cannot_supply_legacy_approval_or_argv_arguments() -> None:
     actor = ActorContext(
         LEGACY_OWNER_USER_ID,
         "owner",
         "telegram-bridge",
         identity_id="5001",
+        telegram_chat_id="5001",
     )
     service = _direct_service(actor)
 
@@ -2048,6 +2188,7 @@ def test_source_row_must_bind_the_original_telegram_update() -> None:
         "owner",
         "telegram-bridge",
         identity_id="5001",
+        telegram_chat_id="5001",
     )
     service = _direct_service(actor, source_update_id="100")
     result = service.execute(
@@ -2071,6 +2212,7 @@ def test_autonomous_admission_rechecks_current_owner_authority(revocation: str) 
         "owner",
         "telegram-bridge",
         identity_id="5001",
+        telegram_chat_id="5001",
     )
     service = _direct_service(actor)
     if revocation == "inactive":

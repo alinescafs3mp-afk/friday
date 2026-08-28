@@ -407,7 +407,12 @@ def test_persisted_engineer_mode_is_forwarded_to_the_runtime(settings, monkeypat
 
     from friday.server import create_app
 
-    configured = replace(settings, engineer_mode_enabled=True, verify_answers=False)
+    configured = replace(
+        settings,
+        engineer_mode_enabled=True,
+        telegram_owner_chat_ids=[5001],
+        verify_answers=False,
+    )
     app = create_app(configured)
     with TestClient(app) as client:
         conversation = app.state.storage.create_conversation(
@@ -426,13 +431,16 @@ def test_persisted_engineer_mode_is_forwarded_to_the_runtime(settings, monkeypat
 
         chat = AsyncMock(side_effect=capture)
         monkeypatch.setattr(app.state.agent, "chat", chat)
-        response = client.post(
+        response = _bridge_request(
+            client,
+            configured,
             "/api/chat",
-            headers={"Authorization": f"Bearer {configured.api_token}"},
-            json={
+            {
                 "conversation_id": conversation["id"],
                 "message": "продолжи инженерный разбор",
                 "enable_tools": False,
+                "source_ref": "telegram-update:92001",
+                "telegram_user": {"id": 5001, "first_name": "Owner"},
             },
         )
 
@@ -443,7 +451,12 @@ def test_persisted_engineer_mode_is_forwarded_to_the_runtime(settings, monkeypat
 def test_regenerate_reauthorizes_a_persisted_engineer_conversation(settings, monkeypatch) -> None:
     from friday.server import create_app
 
-    configured = replace(settings, engineer_mode_enabled=True, verify_answers=False)
+    configured = replace(
+        settings,
+        engineer_mode_enabled=True,
+        telegram_owner_chat_ids=[5001],
+        verify_answers=False,
+    )
     app = create_app(configured)
     with TestClient(app) as client:
         conversation = app.state.storage.create_conversation(
@@ -464,10 +477,14 @@ def test_regenerate_reauthorizes_a_persisted_engineer_conversation(settings, mon
         )
         chat = AsyncMock()
         monkeypatch.setattr(app.state.agent, "chat", chat)
-        response = client.post(
+        response = _bridge_request(
+            client,
+            configured,
             "/api/me/regenerate",
-            headers={"Authorization": f"Bearer {configured.api_token}"},
-            json={"conversation_id": conversation["id"]},
+            {
+                "conversation_id": conversation["id"],
+                "telegram_user": {"id": 5001, "first_name": "Owner"},
+            },
         )
 
     assert response.status_code == 403, response.text
@@ -477,7 +494,12 @@ def test_regenerate_reauthorizes_a_persisted_engineer_conversation(settings, mon
 def test_regenerate_preserves_the_engineer_tool_switch(settings, monkeypatch) -> None:
     from friday.server import create_app
 
-    configured = replace(settings, engineer_mode_enabled=True, verify_answers=False)
+    configured = replace(
+        settings,
+        engineer_mode_enabled=True,
+        telegram_owner_chat_ids=[5001],
+        verify_answers=False,
+    )
     app = create_app(configured)
     with TestClient(app) as client:
         conversation = app.state.storage.create_conversation(
@@ -504,10 +526,14 @@ def test_regenerate_preserves_the_engineer_tool_switch(settings, monkeypatch) ->
 
         chat = AsyncMock(side_effect=replay)
         monkeypatch.setattr(app.state.agent, "chat", chat)
-        response = client.post(
+        response = _bridge_request(
+            client,
+            configured,
             "/api/me/regenerate",
-            headers={"Authorization": f"Bearer {configured.api_token}"},
-            json={"conversation_id": conversation["id"]},
+            {
+                "conversation_id": conversation["id"],
+                "telegram_user": {"id": 5001, "first_name": "Owner"},
+            },
         )
 
     assert response.status_code == 200, response.text
@@ -520,7 +546,12 @@ def test_legacy_engineer_regenerate_fails_closed_without_a_tool_marker(
 ) -> None:
     from friday.server import create_app
 
-    configured = replace(settings, engineer_mode_enabled=True, verify_answers=False)
+    configured = replace(
+        settings,
+        engineer_mode_enabled=True,
+        telegram_owner_chat_ids=[5001],
+        verify_answers=False,
+    )
     app = create_app(configured)
     with TestClient(app) as client:
         conversation = app.state.storage.create_conversation(
@@ -537,10 +568,14 @@ def test_legacy_engineer_regenerate_fails_closed_without_a_tool_marker(
 
         chat = AsyncMock()
         monkeypatch.setattr(app.state.agent, "chat", chat)
-        response = client.post(
+        response = _bridge_request(
+            client,
+            configured,
             "/api/me/regenerate",
-            headers={"Authorization": f"Bearer {configured.api_token}"},
-            json={"conversation_id": conversation["id"]},
+            {
+                "conversation_id": conversation["id"],
+                "telegram_user": {"id": 5001, "first_name": "Owner"},
+            },
         )
 
     assert response.status_code == 409, response.text
@@ -553,7 +588,12 @@ def test_dialogue_turn_cannot_be_regenerated_after_mode_pivot_to_engineer(
 ) -> None:
     from friday.server import create_app
 
-    configured = replace(settings, engineer_mode_enabled=True, verify_answers=False)
+    configured = replace(
+        settings,
+        engineer_mode_enabled=True,
+        telegram_owner_chat_ids=[5001],
+        verify_answers=False,
+    )
     app = create_app(configured)
     with TestClient(app) as client:
         conversation = app.state.storage.create_conversation(
@@ -575,10 +615,14 @@ def test_dialogue_turn_cannot_be_regenerated_after_mode_pivot_to_engineer(
         )
         chat = AsyncMock()
         monkeypatch.setattr(app.state.agent, "chat", chat)
-        response = client.post(
+        response = _bridge_request(
+            client,
+            configured,
             "/api/me/regenerate",
-            headers={"Authorization": f"Bearer {configured.api_token}"},
-            json={"conversation_id": conversation["id"]},
+            {
+                "conversation_id": conversation["id"],
+                "telegram_user": {"id": 5001, "first_name": "Owner"},
+            },
         )
 
     assert response.status_code == 409, response.text
@@ -590,7 +634,12 @@ def test_owner_binary_reaches_engineer_dossier_and_model(settings, monkeypatch) 
 
     from friday.server import create_app
 
-    configured = replace(settings, engineer_mode_enabled=True, verify_answers=False)
+    configured = replace(
+        settings,
+        engineer_mode_enabled=True,
+        telegram_owner_chat_ids=[5001],
+        verify_answers=False,
+    )
     content = _minimal_pe()
     model = _PromptSpy()
     app = create_app(configured)
@@ -605,14 +654,16 @@ def test_owner_binary_reaches_engineer_dossier_and_model(settings, monkeypatch) 
     with TestClient(app) as client:
         runtime = getattr(app.state.agent, "_legacy", app.state.agent)
         monkeypatch.setattr(runtime, "llm", model)
-        response = client.post(
+        response = _bridge_request(
+            client,
+            configured,
             "/api/chat",
-            headers={"Authorization": f"Bearer {configured.api_token}"},
-            json={
+            {
                 "message": "покажи статические признаки приложенного артефакта",
                 "mode": "engineer",
                 "enable_tools": True,
-                "source_ref": "api-document:engineer-production-contract",
+                "source_ref": "telegram-update:92002",
+                "telegram_user": {"id": 5001, "first_name": "Owner"},
                 "document": {
                     "filename": "router.example.com",
                     "mime_type": "application/vnd.microsoft.portable-executable",
@@ -634,7 +685,12 @@ def test_owner_binary_reaches_engineer_dossier_and_model(settings, monkeypatch) 
 def test_engineer_force_enables_tools_despite_legacy_false_hint(settings, monkeypatch) -> None:
     from friday.server import create_app
 
-    configured = replace(settings, engineer_mode_enabled=True, verify_answers=False)
+    configured = replace(
+        settings,
+        engineer_mode_enabled=True,
+        telegram_owner_chat_ids=[5001],
+        verify_answers=False,
+    )
     model = _PromptSpy()
     app = create_app(configured)
 
@@ -647,14 +703,16 @@ def test_engineer_force_enables_tools_despite_legacy_false_hint(settings, monkey
         monkeypatch.setattr(runtime, "llm", model)
         autohunt = AsyncMock(side_effect=empty_autohunt)
         monkeypatch.setattr(runtime, "_engineer_autohunt", autohunt)
-        response = client.post(
+        response = _bridge_request(
+            client,
+            configured,
             "/api/chat",
-            headers={"Authorization": f"Bearer {configured.api_token}"},
-            json={
+            {
                 "message": "режим включён, но инструменты на этом ходе выключены",
                 "mode": "engineer",
                 "enable_tools": False,
-                "source_ref": "api-chat:engineer-tools-disabled-contract",
+                "source_ref": "telegram-update:92003",
+                "telegram_user": {"id": 5001, "first_name": "Owner"},
             },
         )
         rows = app.state.storage.get_conversation_messages(

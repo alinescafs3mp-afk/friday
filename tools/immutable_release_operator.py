@@ -11336,18 +11336,825 @@ def _restore_exact_obsidian_backup(config: SystemdConfig, payload: _ExactBackupP
         raise ReleaseFailure("obsidian_restore_target_mismatch")
 
 
-def _remove_private_engineer_tree(path: Path, *, contained: bool = False) -> None:
-    status = path.lstat()
-    if stat.S_ISREG(status.st_mode) and not stat.S_ISLNK(status.st_mode):
-        _engineer_private_status(path, kind="file", contained=contained)
-        path.unlink()
-        _fsync_directory(path.parent)
+_EngineerDirectoryAncestry = tuple[tuple[str, int, int, int, int], ...]
+_EngineerFileIdentity = tuple[int, int, int, int, int, int, int, int]
+
+
+def _engineer_file_identity(observed: os.stat_result) -> _EngineerFileIdentity:
+    return (
+        int(observed.st_dev),
+        int(observed.st_ino),
+        int(observed.st_size),
+        int(observed.st_mtime_ns),
+        int(observed.st_ctime_ns),
+        int(observed.st_mode),
+        int(observed.st_uid),
+        int(observed.st_nlink),
+    )
+
+
+def _engineer_directory_record(path: Path, observed: os.stat_result) -> tuple[str, int, int, int, int]:
+    return (
+        str(path),
+        int(observed.st_dev),
+        int(observed.st_ino),
+        int(observed.st_uid),
+        stat.S_IMODE(observed.st_mode),
+    )
+
+
+def _walk_engineer_directory(
+    path: Path,
+    *,
+    contained: bool,
+    code: str,
+) -> tuple[int, _EngineerDirectoryAncestry]:
+    """Open one absolute directory a component at a time without following links."""
+
+    lexical = Path(os.path.abspath(path))
+    descriptor = -1
+    ancestry: list[tuple[str, int, int, int, int]] = []
+    flags = (
+        os.O_RDONLY
+        | getattr(os, "O_DIRECTORY", 0)
+        | getattr(os, "O_CLOEXEC", 0)
+        | getattr(os, "O_NOFOLLOW", 0)
+    )
+    try:
+        descriptor = os.open(os.sep, flags)
+        current_path = Path(os.sep)
+        opened = os.fstat(descriptor)
+        if not stat.S_ISDIR(opened.st_mode):
+            raise ReleaseFailure(code)
+        ancestry.append(_engineer_directory_record(current_path, opened))
+        for component in lexical.parts[1:]:
+            next_descriptor = os.open(component, flags, dir_fd=descriptor)
+            previous_descriptor = descriptor
+            descriptor = next_descriptor
+            os.close(previous_descriptor)
+            current_path /= component
+            opened = os.fstat(descriptor)
+            if not stat.S_ISDIR(opened.st_mode):
+                raise ReleaseFailure(code)
+            ancestry.append(_engineer_directory_record(current_path, opened))
+        final = ancestry[-1]
+        if final[3] != os.geteuid() or (not contained and final[4] & 0o077):
+            raise ReleaseFailure(code)
+        result = descriptor
+        descriptor = -1
+        return result, tuple(ancestry)
+    except ReleaseFailure:
+        raise
+    except OSError as exc:
+        raise ReleaseFailure(code) from exc
+    finally:
+        if descriptor >= 0:
+            os.close(descriptor)
+
+
+def _engineer_directory_ancestry(
+    path: Path,
+    *,
+    contained: bool,
+    code: str,
+) -> _EngineerDirectoryAncestry:
+    """Capture every directory inode used to resolve one absolute path."""
+
+    descriptor = -1
+    try:
+        descriptor, ancestry = _walk_engineer_directory(
+            path,
+            contained=contained,
+            code=code,
+        )
+        return ancestry
+    finally:
+        if descriptor >= 0:
+            os.close(descriptor)
+
+
+def _open_pinned_engineer_directory(
+    path: Path,
+    *,
+    contained: bool,
+    code: str,
+) -> tuple[int, _EngineerDirectoryAncestry]:
+    return _walk_engineer_directory(
+        path,
+        contained=contained,
+        code=code,
+    )
+
+
+def _require_pinned_engineer_directory(
+    path: Path,
+    descriptor: int,
+    ancestry: _EngineerDirectoryAncestry,
+    *,
+    contained: bool,
+    code: str,
+) -> None:
+    current_descriptor = -1
+    try:
+        current_descriptor, current = _walk_engineer_directory(
+            path,
+            contained=contained,
+            code=code,
+        )
+        opened = os.fstat(descriptor)
+    except OSError as exc:
+        raise ReleaseFailure(code) from exc
+    finally:
+        if current_descriptor >= 0:
+            os.close(current_descriptor)
+    if (
+        current != ancestry
+        or not stat.S_ISDIR(opened.st_mode)
+        or opened.st_uid != os.geteuid()
+        or (int(opened.st_dev), int(opened.st_ino)) != (ancestry[-1][1], ancestry[-1][2])
+    ):
+        raise ReleaseFailure(code)
+
+
+def _private_engineer_entry_status(
+    status: os.stat_result,
+    *,
+    kind: str,
+    contained: bool,
+    code: str,
+) -> None:
+    expected = stat.S_ISDIR(status.st_mode) if kind == "directory" else stat.S_ISREG(status.st_mode)
+    if (
+        not expected
+        or stat.S_ISLNK(status.st_mode)
+        or status.st_uid != os.geteuid()
+        or (not contained and status.st_mode & 0o077)
+        or (kind == "file" and status.st_nlink != 1)
+    ):
+        raise ReleaseFailure(code)
+
+
+def _optional_engineer_file_identity_at(
+    parent_descriptor: int,
+    name: str,
+    *,
+    code: str,
+) -> _EngineerFileIdentity | None:
+    try:
+        observed = os.stat(
+            name,
+            dir_fd=parent_descriptor,
+            follow_symlinks=False,
+        )
+    except FileNotFoundError:
+        return None
+    except OSError as exc:
+        raise ReleaseFailure(code) from exc
+    return _engineer_file_identity(observed)
+
+
+def _engineer_ancestry_with_final_status(
+    ancestry: _EngineerDirectoryAncestry,
+    path: Path,
+    observed: os.stat_result,
+) -> _EngineerDirectoryAncestry:
+    return (*ancestry[:-1], _engineer_directory_record(Path(os.path.abspath(path)), observed))
+
+
+def _open_engineer_child_directory_at(
+    *,
+    parent_path: Path,
+    parent_descriptor: int,
+    parent_ancestry: _EngineerDirectoryAncestry,
+    name: str,
+    contained: bool,
+    code: str,
+    create_mode: int | None = None,
+    expected_present: bool | None = None,
+) -> tuple[int, _EngineerDirectoryAncestry, bool]:
+    if not name or name in {".", ".."} or os.sep in name:
+        raise ReleaseFailure(code)
+    _require_pinned_engineer_directory(
+        parent_path,
+        parent_descriptor,
+        parent_ancestry,
+        contained=contained,
+        code=code,
+    )
+    created = False
+    try:
+        observed = os.stat(name, dir_fd=parent_descriptor, follow_symlinks=False)
+    except FileNotFoundError:
+        if expected_present is True:
+            raise ReleaseFailure(code) from None
+        if create_mode is None:
+            raise ReleaseFailure(code) from None
+        try:
+            os.mkdir(name, mode=create_mode, dir_fd=parent_descriptor)
+            created = True
+            observed = os.stat(name, dir_fd=parent_descriptor, follow_symlinks=False)
+        except OSError as exc:
+            raise ReleaseFailure(code) from exc
+    except OSError as exc:
+        raise ReleaseFailure(code) from exc
+    else:
+        if expected_present is False:
+            raise ReleaseFailure(code)
+    _private_engineer_entry_status(
+        observed,
+        kind="directory",
+        contained=contained,
+        code=code,
+    )
+    descriptor = -1
+    flags = (
+        os.O_RDONLY
+        | getattr(os, "O_DIRECTORY", 0)
+        | getattr(os, "O_CLOEXEC", 0)
+        | getattr(os, "O_NOFOLLOW", 0)
+    )
+    child_path = parent_path / name
+    try:
+        descriptor = os.open(name, flags, dir_fd=parent_descriptor)
+        opened = os.fstat(descriptor)
+        if (
+            not stat.S_ISDIR(opened.st_mode)
+            or opened.st_uid != os.geteuid()
+            or (int(opened.st_dev), int(opened.st_ino)) != (int(observed.st_dev), int(observed.st_ino))
+        ):
+            raise ReleaseFailure(code)
+        ancestry = (*parent_ancestry, _engineer_directory_record(child_path, opened))
+        _require_pinned_engineer_directory(
+            child_path,
+            descriptor,
+            ancestry,
+            contained=contained,
+            code=code,
+        )
+        if created:
+            _require_pinned_engineer_directory(
+                parent_path,
+                parent_descriptor,
+                parent_ancestry,
+                contained=contained,
+                code=code,
+            )
+            os.fsync(parent_descriptor)
+        result = descriptor
+        descriptor = -1
+        return result, ancestry, created
+    except ReleaseFailure:
+        raise
+    except OSError as exc:
+        raise ReleaseFailure(code) from exc
+    finally:
+        if descriptor >= 0:
+            os.close(descriptor)
+
+
+def _open_engineer_relative_directory_at(
+    *,
+    root_path: Path,
+    root_descriptor: int,
+    root_ancestry: _EngineerDirectoryAncestry,
+    relative_parts: tuple[str, ...],
+    code: str,
+    create: bool = False,
+) -> tuple[int, _EngineerDirectoryAncestry]:
+    descriptor = os.dup(root_descriptor)
+    ancestry = root_ancestry
+    current_path = root_path
+    try:
+        for name in relative_parts:
+            child_descriptor, child_ancestry, _created = _open_engineer_child_directory_at(
+                parent_path=current_path,
+                parent_descriptor=descriptor,
+                parent_ancestry=ancestry,
+                name=name,
+                contained=True,
+                code=code,
+                create_mode=(0o700 if create else None),
+            )
+            previous_descriptor = descriptor
+            descriptor = child_descriptor
+            os.close(previous_descriptor)
+            ancestry = child_ancestry
+            current_path /= name
+        result = descriptor
+        descriptor = -1
+        return result, ancestry
+    finally:
+        if descriptor >= 0:
+            os.close(descriptor)
+
+
+@dataclass
+class _PinnedEngineerRestoreContour:
+    data_parent_path: Path
+    data_parent_descriptor: int
+    data_parent_ancestry: _EngineerDirectoryAncestry | None
+    data_path: Path
+    data_identity: _EngineerFileIdentity | None
+    data_descriptor: int
+    data_ancestry: _EngineerDirectoryAncestry | None
+    store_path: Path
+    store_identity: _EngineerFileIdentity | None
+    store_descriptor: int
+    store_ancestry: _EngineerDirectoryAncestry | None
+    state_path: Path
+    state_identity: _EngineerFileIdentity | None
+    state_descriptor: int
+    state_ancestry: _EngineerDirectoryAncestry | None
+
+    def close(self) -> None:
+        for descriptor in (
+            self.store_descriptor,
+            self.data_descriptor,
+            self.state_descriptor,
+            self.data_parent_descriptor,
+        ):
+            if descriptor >= 0:
+                with suppress(OSError):
+                    os.close(descriptor)
+
+
+def _pin_engineer_restore_contour(config: SystemdConfig) -> _PinnedEngineerRestoreContour:
+    """Pin every directory namespace consulted by the live pre-mutation scan."""
+
+    store, _key, state = _engineer_artifact_paths(config)
+    data = store.parent
+    data_parent_descriptor = -1
+    data_descriptor = -1
+    store_descriptor = -1
+    state_descriptor = -1
+    try:
+        data_status = _engineer_contour_status(data)
+        data_identity = _engineer_file_identity(data_status) if data_status is not None else None
+        data_parent_ancestry: _EngineerDirectoryAncestry | None = None
+        data_ancestry: _EngineerDirectoryAncestry | None = None
+        store_identity: _EngineerFileIdentity | None = None
+        store_ancestry: _EngineerDirectoryAncestry | None = None
+        if data_identity is None:
+            data_parent_descriptor, data_parent_ancestry = _open_pinned_engineer_directory(
+                data.parent,
+                contained=False,
+                code="engineer_store_restore_path_drift",
+            )
+            if (
+                _optional_engineer_file_identity_at(
+                    data_parent_descriptor,
+                    data.name,
+                    code="engineer_store_restore_path_drift",
+                )
+                is not None
+            ):
+                raise ReleaseFailure("engineer_store_restore_path_drift")
+        else:
+            data_descriptor, data_ancestry = _open_pinned_engineer_directory(
+                data,
+                contained=False,
+                code="engineer_store_restore_path_drift",
+            )
+            if _engineer_file_identity(os.fstat(data_descriptor)) != data_identity:
+                raise ReleaseFailure("engineer_store_restore_path_drift")
+            store_identity = _optional_engineer_file_identity_at(
+                data_descriptor,
+                store.name,
+                code="engineer_store_restore_path_drift",
+            )
+            if store_identity is not None:
+                store_descriptor, store_ancestry, _created = _open_engineer_child_directory_at(
+                    parent_path=data,
+                    parent_descriptor=data_descriptor,
+                    parent_ancestry=data_ancestry,
+                    name=store.name,
+                    contained=False,
+                    code="engineer_store_restore_path_drift",
+                    expected_present=True,
+                )
+                if _engineer_file_identity(os.fstat(store_descriptor)) != store_identity:
+                    raise ReleaseFailure("engineer_store_restore_path_drift")
+
+        state_status = _engineer_contour_status(state)
+        state_identity = _engineer_file_identity(state_status) if state_status is not None else None
+        state_ancestry: _EngineerDirectoryAncestry | None = None
+        if state_identity is not None:
+            state_descriptor, state_ancestry = _open_pinned_engineer_directory(
+                state,
+                contained=False,
+                code="engineer_store_restore_path_drift",
+            )
+            if _engineer_file_identity(os.fstat(state_descriptor)) != state_identity:
+                raise ReleaseFailure("engineer_store_restore_path_drift")
+        result = _PinnedEngineerRestoreContour(
+            data_parent_path=data.parent,
+            data_parent_descriptor=data_parent_descriptor,
+            data_parent_ancestry=data_parent_ancestry,
+            data_path=data,
+            data_identity=data_identity,
+            data_descriptor=data_descriptor,
+            data_ancestry=data_ancestry,
+            store_path=store,
+            store_identity=store_identity,
+            store_descriptor=store_descriptor,
+            store_ancestry=store_ancestry,
+            state_path=state,
+            state_identity=state_identity,
+            state_descriptor=state_descriptor,
+            state_ancestry=state_ancestry,
+        )
+        data_parent_descriptor = -1
+        data_descriptor = -1
+        store_descriptor = -1
+        state_descriptor = -1
+        return result
+    finally:
+        for descriptor in (
+            store_descriptor,
+            data_descriptor,
+            state_descriptor,
+            data_parent_descriptor,
+        ):
+            if descriptor >= 0:
+                os.close(descriptor)
+
+
+def _require_engineer_restore_contour(
+    contour: _PinnedEngineerRestoreContour,
+) -> None:
+    """Prove that the path-based scan still names every pinned directory."""
+
+    code = "engineer_store_restore_path_drift"
+    if contour.data_descriptor < 0:
+        assert contour.data_parent_descriptor >= 0
+        assert contour.data_parent_ancestry is not None
+        _require_pinned_engineer_directory(
+            contour.data_parent_path,
+            contour.data_parent_descriptor,
+            contour.data_parent_ancestry,
+            contained=False,
+            code=code,
+        )
+        if (
+            _optional_engineer_file_identity_at(
+                contour.data_parent_descriptor,
+                contour.data_path.name,
+                code=code,
+            )
+            is not None
+        ):
+            raise ReleaseFailure(code)
+        current_store = None
+    else:
+        assert contour.data_ancestry is not None
+        if _engineer_file_identity(os.fstat(contour.data_descriptor)) != contour.data_identity:
+            raise ReleaseFailure(code)
+        _require_pinned_engineer_directory(
+            contour.data_path,
+            contour.data_descriptor,
+            contour.data_ancestry,
+            contained=False,
+            code=code,
+        )
+        current_store = _optional_engineer_file_identity_at(
+            contour.data_descriptor,
+            contour.store_path.name,
+            code=code,
+        )
+    if current_store != contour.store_identity:
+        raise ReleaseFailure(code)
+    if contour.store_descriptor >= 0:
+        assert contour.store_ancestry is not None
+        if _engineer_file_identity(os.fstat(contour.store_descriptor)) != contour.store_identity:
+            raise ReleaseFailure(code)
+        _require_pinned_engineer_directory(
+            contour.store_path,
+            contour.store_descriptor,
+            contour.store_ancestry,
+            contained=False,
+            code=code,
+        )
+
+    current_state_status = _engineer_contour_status(contour.state_path)
+    current_state = (
+        _engineer_file_identity(current_state_status) if current_state_status is not None else None
+    )
+    if current_state != contour.state_identity:
+        raise ReleaseFailure(code)
+    if contour.state_descriptor >= 0:
+        assert contour.state_ancestry is not None
+        if _engineer_file_identity(os.fstat(contour.state_descriptor)) != contour.state_identity:
+            raise ReleaseFailure(code)
+        _require_pinned_engineer_directory(
+            contour.state_path,
+            contour.state_descriptor,
+            contour.state_ancestry,
+            contained=False,
+            code=code,
+        )
+
+
+def _chmod_pinned_engineer_directory(
+    path: Path,
+    descriptor: int,
+    ancestry: _EngineerDirectoryAncestry,
+    *,
+    mode: int,
+    contained: bool,
+    code: str,
+) -> _EngineerDirectoryAncestry:
+    _require_pinned_engineer_directory(
+        path,
+        descriptor,
+        ancestry,
+        contained=contained,
+        code=code,
+    )
+    try:
+        os.fchmod(descriptor, mode)
+        os.fsync(descriptor)
+        observed = os.fstat(descriptor)
+    except OSError as exc:
+        raise ReleaseFailure(code) from exc
+    if (
+        not stat.S_ISDIR(observed.st_mode)
+        or observed.st_uid != os.geteuid()
+        or stat.S_IMODE(observed.st_mode) != mode
+    ):
+        raise ReleaseFailure(code)
+    updated = _engineer_ancestry_with_final_status(ancestry, path, observed)
+    _require_pinned_engineer_directory(
+        path,
+        descriptor,
+        updated,
+        contained=contained,
+        code=code,
+    )
+    return updated
+
+
+def _fsync_pinned_engineer_tree(
+    path: Path,
+    descriptor: int,
+    ancestry: _EngineerDirectoryAncestry,
+    *,
+    contained: bool,
+) -> None:
+    code = "engineer_store_restore_path_drift"
+    _require_pinned_engineer_directory(
+        path,
+        descriptor,
+        ancestry,
+        contained=contained,
+        code=code,
+    )
+    try:
+        children = sorted(os.listdir(descriptor))
+    except OSError as exc:
+        raise ReleaseFailure(code) from exc
+    for name in children:
+        try:
+            observed = os.stat(name, dir_fd=descriptor, follow_symlinks=False)
+        except OSError as exc:
+            raise ReleaseFailure(code) from exc
+        child_path = path / name
+        if stat.S_ISDIR(observed.st_mode) and not stat.S_ISLNK(observed.st_mode):
+            child_descriptor, child_ancestry, _created = _open_engineer_child_directory_at(
+                parent_path=path,
+                parent_descriptor=descriptor,
+                parent_ancestry=ancestry,
+                name=name,
+                contained=True,
+                code=code,
+            )
+            try:
+                _fsync_pinned_engineer_tree(
+                    child_path,
+                    child_descriptor,
+                    child_ancestry,
+                    contained=True,
+                )
+            finally:
+                os.close(child_descriptor)
+            continue
+        _private_engineer_entry_status(
+            observed,
+            kind="file",
+            contained=True,
+            code=code,
+        )
+        child_descriptor = -1
+        try:
+            child_descriptor = os.open(
+                name,
+                os.O_RDONLY
+                | getattr(os, "O_NONBLOCK", 0)
+                | getattr(os, "O_CLOEXEC", 0)
+                | getattr(os, "O_NOFOLLOW", 0),
+                dir_fd=descriptor,
+            )
+            opened = os.fstat(child_descriptor)
+            identity = _engineer_file_identity(observed)
+            if _engineer_file_identity(opened) != identity:
+                raise ReleaseFailure(code)
+            os.fsync(child_descriptor)
+            if (
+                _engineer_file_identity(os.fstat(child_descriptor)) != identity
+                or _optional_engineer_file_identity_at(
+                    descriptor,
+                    name,
+                    code=code,
+                )
+                != identity
+            ):
+                raise ReleaseFailure(code)
+        except ReleaseFailure:
+            raise
+        except OSError as exc:
+            raise ReleaseFailure(code) from exc
+        finally:
+            if child_descriptor >= 0:
+                os.close(child_descriptor)
+    _require_pinned_engineer_directory(
+        path,
+        descriptor,
+        ancestry,
+        contained=contained,
+        code=code,
+    )
+    try:
+        os.fsync(descriptor)
+    except OSError as exc:
+        raise ReleaseFailure(code) from exc
+    _require_pinned_engineer_directory(
+        path,
+        descriptor,
+        ancestry,
+        contained=contained,
+        code=code,
+    )
+
+
+def _remove_private_engineer_entry_at(
+    *,
+    parent_path: Path,
+    parent_descriptor: int,
+    parent_ancestry: _EngineerDirectoryAncestry,
+    name: str,
+    contained: bool,
+) -> None:
+    code = "engineer_store_restore_path_drift"
+    _require_pinned_engineer_directory(
+        parent_path,
+        parent_descriptor,
+        parent_ancestry,
+        contained=contained,
+        code=code,
+    )
+    try:
+        lexical = os.stat(
+            name,
+            dir_fd=parent_descriptor,
+            follow_symlinks=False,
+        )
+    except OSError as exc:
+        raise ReleaseFailure(code) from exc
+    path = parent_path / name
+    if stat.S_ISREG(lexical.st_mode) and not stat.S_ISLNK(lexical.st_mode):
+        _private_engineer_entry_status(
+            lexical,
+            kind="file",
+            contained=contained,
+            code=code,
+        )
+        descriptor = -1
+        try:
+            descriptor = os.open(
+                name,
+                os.O_RDONLY
+                | getattr(os, "O_NONBLOCK", 0)
+                | getattr(os, "O_CLOEXEC", 0)
+                | getattr(os, "O_NOFOLLOW", 0),
+                dir_fd=parent_descriptor,
+            )
+            opened = os.fstat(descriptor)
+            identity = (int(opened.st_dev), int(opened.st_ino))
+            if opened.st_nlink != 1 or identity != (
+                int(lexical.st_dev),
+                int(lexical.st_ino),
+            ):
+                raise ReleaseFailure(code)
+            _require_pinned_engineer_directory(
+                parent_path,
+                parent_descriptor,
+                parent_ancestry,
+                contained=contained,
+                code=code,
+            )
+            current = os.stat(name, dir_fd=parent_descriptor, follow_symlinks=False)
+            if current.st_nlink != 1 or identity != (
+                int(current.st_dev),
+                int(current.st_ino),
+            ):
+                raise ReleaseFailure(code)
+            os.unlink(name, dir_fd=parent_descriptor)
+            if os.fstat(descriptor).st_nlink != 0:
+                raise ReleaseFailure(code)
+            _require_pinned_engineer_directory(
+                parent_path,
+                parent_descriptor,
+                parent_ancestry,
+                contained=contained,
+                code=code,
+            )
+            os.fsync(parent_descriptor)
+        except ReleaseFailure:
+            raise
+        except OSError as exc:
+            raise ReleaseFailure(code) from exc
+        finally:
+            if descriptor >= 0:
+                os.close(descriptor)
         return
-    _engineer_private_status(path, kind="directory", contained=contained)
-    for child in sorted(path.iterdir(), key=lambda item: item.name, reverse=True):
-        _remove_private_engineer_tree(child, contained=True)
-    path.rmdir()
-    _fsync_directory(path.parent)
+    _private_engineer_entry_status(
+        lexical,
+        kind="directory",
+        contained=contained,
+        code=code,
+    )
+    child_descriptor = -1
+    try:
+        child_descriptor, child_ancestry = _open_pinned_engineer_directory(
+            path,
+            contained=contained,
+            code=code,
+        )
+        opened = os.fstat(child_descriptor)
+        identity = (int(opened.st_dev), int(opened.st_ino))
+        if identity != (int(lexical.st_dev), int(lexical.st_ino)):
+            raise ReleaseFailure(code)
+        for child_name in sorted(os.listdir(child_descriptor), reverse=True):
+            _remove_private_engineer_entry_at(
+                parent_path=path,
+                parent_descriptor=child_descriptor,
+                parent_ancestry=child_ancestry,
+                name=child_name,
+                contained=True,
+            )
+        _require_pinned_engineer_directory(
+            path,
+            child_descriptor,
+            child_ancestry,
+            contained=contained,
+            code=code,
+        )
+        if os.listdir(child_descriptor):
+            raise ReleaseFailure(code)
+        _require_pinned_engineer_directory(
+            parent_path,
+            parent_descriptor,
+            parent_ancestry,
+            contained=contained,
+            code=code,
+        )
+        current = os.stat(name, dir_fd=parent_descriptor, follow_symlinks=False)
+        if identity != (int(current.st_dev), int(current.st_ino)):
+            raise ReleaseFailure(code)
+        os.rmdir(name, dir_fd=parent_descriptor)
+        _require_pinned_engineer_directory(
+            parent_path,
+            parent_descriptor,
+            parent_ancestry,
+            contained=contained,
+            code=code,
+        )
+        os.fsync(parent_descriptor)
+    except ReleaseFailure:
+        raise
+    except OSError as exc:
+        raise ReleaseFailure(code) from exc
+    finally:
+        if child_descriptor >= 0:
+            os.close(child_descriptor)
+
+
+def _remove_private_engineer_tree(path: Path, *, contained: bool = False) -> None:
+    lexical = Path(os.path.abspath(path))
+    parent_descriptor, parent_ancestry = _open_pinned_engineer_directory(
+        lexical.parent,
+        contained=contained,
+        code="engineer_store_restore_path_drift",
+    )
+    try:
+        _remove_private_engineer_entry_at(
+            parent_path=lexical.parent,
+            parent_descriptor=parent_descriptor,
+            parent_ancestry=parent_ancestry,
+            name=lexical.name,
+            contained=contained,
+        )
+    finally:
+        os.close(parent_descriptor)
 
 
 def _engineer_restore_stage_path(target: Path, manifest_sha256: str) -> Path:
@@ -11392,9 +12199,65 @@ def _engineer_manifest_restore_stage_paths(
     return frozenset(targets)
 
 
-def _engineer_restore_staging_paths(config: SystemdConfig) -> tuple[Path, ...]:
+_EngineerRestoreStagingObservation = tuple[
+    Path,
+    _EngineerDirectoryAncestry,
+    _EngineerFileIdentity,
+]
+
+
+def _bind_engineer_restore_staging_observation(
+    path: Path,
+    observed: os.stat_result,
+    *,
+    contained: bool,
+) -> _EngineerRestoreStagingObservation:
+    parent_descriptor, parent_ancestry = _open_pinned_engineer_directory(
+        path.parent,
+        contained=contained,
+        code="engineer_restore_staging_changed",
+    )
+    try:
+        current = os.stat(
+            path.name,
+            dir_fd=parent_descriptor,
+            follow_symlinks=False,
+        )
+        identity = _engineer_file_identity(observed)
+        if _engineer_file_identity(current) != identity:
+            raise ReleaseFailure("engineer_restore_staging_changed")
+        _require_pinned_engineer_directory(
+            path.parent,
+            parent_descriptor,
+            parent_ancestry,
+            contained=contained,
+            code="engineer_restore_staging_changed",
+        )
+        return path, parent_ancestry, identity
+    except ReleaseFailure:
+        raise
+    except OSError as exc:
+        raise ReleaseFailure("engineer_restore_staging_changed") from exc
+    finally:
+        os.close(parent_descriptor)
+
+
+def _engineer_restore_staging_inventory(
+    config: SystemdConfig,
+) -> tuple[_EngineerRestoreStagingObservation, ...]:
     store, key, state = _engineer_artifact_paths(config)
-    candidates: set[Path] = set()
+    candidates: dict[Path, _EngineerRestoreStagingObservation] = {}
+
+    def observe(path: Path, observed: os.stat_result, *, contained: bool) -> None:
+        candidate = _bind_engineer_restore_staging_observation(
+            path,
+            observed,
+            contained=contained,
+        )
+        prior = candidates.setdefault(path, candidate)
+        if prior != candidate:
+            raise ReleaseFailure("engineer_restore_staging_changed")
+
     direct_directories = {key.parent, state}
     for directory in direct_directories:
         status = _engineer_contour_status(directory)
@@ -11411,11 +12274,15 @@ def _engineer_restore_staging_paths(config: SystemdConfig) -> tuple[Path, ...]:
             children = tuple(os.scandir(directory))
         except OSError as exc:
             raise ReleaseFailure("engineer_restore_staging_invalid") from exc
-        candidates.update(
-            Path(child.path)
-            for child in children
-            if _ENGINEER_RESTORE_STAGE_RE.fullmatch(child.name) is not None
-        )
+        for child in children:
+            if _ENGINEER_RESTORE_STAGE_RE.fullmatch(child.name) is None:
+                continue
+            path = Path(child.path)
+            try:
+                observed = path.lstat()
+            except OSError as exc:
+                raise ReleaseFailure("engineer_restore_staging_invalid") from exc
+            observe(path, observed, contained=False)
     if _engineer_path_present(store):
         pending = [store]
         while pending:
@@ -11436,7 +12303,7 @@ def _engineer_restore_staging_paths(config: SystemdConfig) -> tuple[Path, ...]:
                 except OSError as exc:
                     raise ReleaseFailure("engineer_restore_staging_invalid") from exc
                 if _ENGINEER_RESTORE_STAGE_RE.fullmatch(child.name) is not None:
-                    candidates.add(path)
+                    observe(path, status, contained=True)
                 elif stat.S_ISDIR(status.st_mode) and not stat.S_ISLNK(status.st_mode):
                     pending.append(path)
             after = parent.lstat()
@@ -11445,7 +12312,11 @@ def _engineer_restore_staging_paths(config: SystemdConfig) -> tuple[Path, ...]:
                 int(after.st_ino),
             ):
                 raise ReleaseFailure("engineer_restore_staging_invalid")
-    return tuple(sorted(candidates))
+    return tuple(candidates[path] for path in sorted(candidates))
+
+
+def _engineer_restore_staging_paths(config: SystemdConfig) -> tuple[Path, ...]:
+    return tuple(item[0] for item in _engineer_restore_staging_inventory(config))
 
 
 def _cleanup_engineer_restore_staging(
@@ -11461,54 +12332,119 @@ def _cleanup_engineer_restore_staging(
         manifest,
         manifest_sha256,
     )
-    observed = _engineer_restore_staging_paths(config)
+    inventory = _engineer_restore_staging_inventory(config)
+    observed = tuple(item[0] for item in inventory)
     if any(path not in expected for path in observed):
         raise ReleaseFailure("engineer_restore_staging_unbound")
-    opened: list[tuple[Path, int, tuple[int, int]]] = []
+    opened: list[
+        tuple[
+            Path,
+            int,
+            _EngineerFileIdentity,
+            int,
+            _EngineerDirectoryAncestry,
+        ]
+    ] = []
     try:
         # Validate the complete set before deleting anything.  A malformed
         # residue must leave every forensic byte intact.
-        for path in observed:
+        for path, expected_parent_ancestry, expected_identity in inventory:
             descriptor = -1
+            parent_descriptor = -1
             try:
+                parent_descriptor, parent_ancestry = _open_pinned_engineer_directory(
+                    path.parent,
+                    contained=path.is_relative_to(_engineer_artifact_paths(config)[0]),
+                    code="engineer_restore_staging_changed",
+                )
+                if parent_ancestry != expected_parent_ancestry:
+                    raise ReleaseFailure("engineer_restore_staging_changed")
                 descriptor = os.open(
-                    path,
-                    os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0),
+                    path.name,
+                    os.O_RDONLY
+                    | getattr(os, "O_NONBLOCK", 0)
+                    | getattr(os, "O_CLOEXEC", 0)
+                    | getattr(os, "O_NOFOLLOW", 0),
+                    dir_fd=parent_descriptor,
                 )
                 status = os.fstat(descriptor)
-                lexical = path.lstat()
-                identity = (int(status.st_dev), int(status.st_ino))
+                lexical = os.stat(
+                    path.name,
+                    dir_fd=parent_descriptor,
+                    follow_symlinks=False,
+                )
                 if (
                     not stat.S_ISREG(status.st_mode)
                     or status.st_uid != os.geteuid()
                     or status.st_nlink != 1
                     or stat.S_IMODE(status.st_mode) != 0o600
-                    or identity != (int(lexical.st_dev), int(lexical.st_ino))
+                    or _engineer_file_identity(status) != expected_identity
+                    or _engineer_file_identity(lexical) != expected_identity
                 ):
                     raise ReleaseFailure("engineer_restore_staging_invalid")
-                opened.append((path, descriptor, identity))
+                opened.append(
+                    (
+                        path,
+                        descriptor,
+                        expected_identity,
+                        parent_descriptor,
+                        parent_ancestry,
+                    )
+                )
                 descriptor = -1
+                parent_descriptor = -1
             finally:
                 if descriptor >= 0:
                     os.close(descriptor)
-        for path, descriptor, identity in opened:
+                if parent_descriptor >= 0:
+                    os.close(parent_descriptor)
+        store = _engineer_artifact_paths(config)[0]
+        for path, descriptor, identity, parent_descriptor, parent_ancestry in opened:
+            contained = path.is_relative_to(store)
             status = os.fstat(descriptor)
-            lexical = path.lstat()
+            _require_pinned_engineer_directory(
+                path.parent,
+                parent_descriptor,
+                parent_ancestry,
+                contained=contained,
+                code="engineer_restore_staging_changed",
+            )
+            lexical = os.stat(
+                path.name,
+                dir_fd=parent_descriptor,
+                follow_symlinks=False,
+            )
             if (
                 status.st_nlink != 1
-                or (int(status.st_dev), int(status.st_ino)) != identity
-                or (int(lexical.st_dev), int(lexical.st_ino)) != identity
+                or lexical.st_nlink != 1
+                or _engineer_file_identity(status) != identity
+                or _engineer_file_identity(lexical) != identity
             ):
                 raise ReleaseFailure("engineer_restore_staging_changed")
-            path.unlink()
-            _fsync_directory(path.parent)
+            os.unlink(path.name, dir_fd=parent_descriptor)
+            removed = os.fstat(descriptor)
+            if (
+                removed.st_nlink != 0
+                or _engineer_file_identity(removed)[:4] != identity[:4]
+                or _engineer_file_identity(removed)[5:7] != identity[5:7]
+            ):
+                raise ReleaseFailure("engineer_restore_staging_changed")
+            _require_pinned_engineer_directory(
+                path.parent,
+                parent_descriptor,
+                parent_ancestry,
+                contained=contained,
+                code="engineer_restore_staging_changed",
+            )
+            os.fsync(parent_descriptor)
     except ReleaseFailure:
         raise
     except OSError as exc:
         raise ReleaseFailure("engineer_restore_staging_invalid") from exc
     finally:
-        for _path, descriptor, _identity in opened:
+        for _path, descriptor, _identity, parent_descriptor, _ancestry in opened:
             os.close(descriptor)
+            os.close(parent_descriptor)
     if _engineer_restore_staging_paths(config):
         raise ReleaseFailure("engineer_restore_staging_residue")
 
@@ -11519,7 +12455,10 @@ def _assert_no_engineer_restore_staging(config: SystemdConfig) -> None:
         try:
             descriptor = os.open(
                 path,
-                os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0),
+                os.O_RDONLY
+                | getattr(os, "O_NONBLOCK", 0)
+                | getattr(os, "O_CLOEXEC", 0)
+                | getattr(os, "O_NOFOLLOW", 0),
             )
             status = os.fstat(descriptor)
             lexical = path.lstat()
@@ -11542,6 +12481,134 @@ def _assert_no_engineer_restore_staging(config: SystemdConfig) -> None:
         raise ReleaseFailure("engineer_restore_staging_residue")
 
 
+def _open_private_engineer_backup_source(
+    source: Path,
+) -> tuple[int, tuple[int, int, int, int, int]]:
+    lexical = _private_engineer_backup_file(source)
+    descriptor = -1
+    try:
+        descriptor = os.open(
+            lexical,
+            os.O_RDONLY
+            | getattr(os, "O_NONBLOCK", 0)
+            | getattr(os, "O_CLOEXEC", 0)
+            | getattr(os, "O_NOFOLLOW", 0),
+        )
+        opened = os.fstat(descriptor)
+        current = os.stat(lexical, follow_symlinks=False)
+        identity = (
+            int(opened.st_dev),
+            int(opened.st_ino),
+            int(opened.st_size),
+            int(opened.st_mtime_ns),
+            int(opened.st_ctime_ns),
+        )
+        if (
+            not stat.S_ISREG(opened.st_mode)
+            or opened.st_uid != os.geteuid()
+            or opened.st_nlink != 1
+            or opened.st_mode & 0o077
+            or identity
+            != (
+                int(current.st_dev),
+                int(current.st_ino),
+                int(current.st_size),
+                int(current.st_mtime_ns),
+                int(current.st_ctime_ns),
+            )
+        ):
+            raise ReleaseFailure("engineer_store_backup_file_changed")
+        return descriptor, identity
+    except ReleaseFailure:
+        if descriptor >= 0:
+            os.close(descriptor)
+        raise
+    except OSError as exc:
+        if descriptor >= 0:
+            os.close(descriptor)
+        raise ReleaseFailure("engineer_store_backup_file_changed") from exc
+
+
+def _require_private_engineer_backup_source(
+    source: Path,
+    descriptor: int,
+    identity: tuple[int, int, int, int, int],
+) -> None:
+    try:
+        opened = os.fstat(descriptor)
+        lexical = os.stat(source, follow_symlinks=False)
+    except OSError as exc:
+        raise ReleaseFailure("engineer_store_backup_file_changed") from exc
+    expected = (
+        int(opened.st_dev),
+        int(opened.st_ino),
+        int(opened.st_size),
+        int(opened.st_mtime_ns),
+        int(opened.st_ctime_ns),
+    )
+    current = (
+        int(lexical.st_dev),
+        int(lexical.st_ino),
+        int(lexical.st_size),
+        int(lexical.st_mtime_ns),
+        int(lexical.st_ctime_ns),
+    )
+    if opened.st_nlink != 1 or expected != identity or current != identity:
+        raise ReleaseFailure("engineer_store_backup_file_changed")
+
+
+def _copy_private_engineer_stage(
+    source: Path,
+    *,
+    parent_descriptor: int,
+    name: str,
+) -> int:
+    source_descriptor, source_identity = _open_private_engineer_backup_source(source)
+    descriptor = -1
+    try:
+        descriptor = os.open(
+            name,
+            os.O_RDWR | os.O_CREAT | os.O_EXCL | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0),
+            0o600,
+            dir_fd=parent_descriptor,
+        )
+        while chunk := os.read(source_descriptor, 1 << 20):
+            _write_all(descriptor, chunk)
+        os.fchmod(descriptor, 0o600)
+        os.fsync(descriptor)
+        _require_private_engineer_backup_source(
+            source,
+            source_descriptor,
+            source_identity,
+        )
+        copied = os.fstat(descriptor)
+        lexical = os.stat(
+            name,
+            dir_fd=parent_descriptor,
+            follow_symlinks=False,
+        )
+        if (
+            not stat.S_ISREG(copied.st_mode)
+            or copied.st_uid != os.geteuid()
+            or copied.st_nlink != 1
+            or stat.S_IMODE(copied.st_mode) != 0o600
+            or copied.st_size != source_identity[2]
+            or (int(copied.st_dev), int(copied.st_ino)) != (int(lexical.st_dev), int(lexical.st_ino))
+        ):
+            raise ReleaseFailure("engineer_store_restore_staging_invalid")
+        result = descriptor
+        descriptor = -1
+        return result
+    except ReleaseFailure:
+        raise
+    except OSError as exc:
+        raise ReleaseFailure("engineer_store_restore_staging_invalid") from exc
+    finally:
+        os.close(source_descriptor)
+        if descriptor >= 0:
+            os.close(descriptor)
+
+
 def _restore_private_engineer_file(
     source: Path,
     target: Path,
@@ -11550,33 +12617,72 @@ def _restore_private_engineer_file(
     staging_manifest_sha256: str,
     preserve_identity: tuple[int, int] | None = None,
     contained: bool = False,
+    pinned_parent: tuple[int, _EngineerDirectoryAncestry] | None = None,
 ) -> None:
     source = _private_engineer_backup_file(source)
-    if _engineer_path_present(target):
-        current = _engineer_private_status(target, kind="file", contained=contained)
-        if (
-            preserve_identity is not None
-            and (
-                int(current.st_dev),
-                int(current.st_ino),
+    target = Path(os.path.abspath(target))
+    if pinned_parent is None:
+        parent_descriptor, parent_ancestry = _open_pinned_engineer_directory(
+            target.parent,
+            contained=contained,
+            code="engineer_store_restore_path_drift",
+        )
+    else:
+        parent_descriptor = os.dup(pinned_parent[0])
+        parent_ancestry = pinned_parent[1]
+        try:
+            _require_pinned_engineer_directory(
+                target.parent,
+                parent_descriptor,
+                parent_ancestry,
+                contained=contained,
+                code="engineer_store_restore_path_drift",
             )
-            != preserve_identity
+        except BaseException:
+            os.close(parent_descriptor)
+            raise
+    descriptor = -1
+    source_descriptor = -1
+    displaced_descriptor = -1
+    try:
+        try:
+            current = os.stat(
+                target.name,
+                dir_fd=parent_descriptor,
+                follow_symlinks=False,
+            )
+        except FileNotFoundError:
+            current = None
+        except OSError as exc:
+            raise ReleaseFailure("engineer_store_restore_path_drift") from exc
+        if current is not None:
+            _private_engineer_entry_status(
+                current,
+                kind="file",
+                contained=contained,
+                code="engineer_store_restore_path_drift",
+            )
+        if preserve_identity is not None and (
+            current is None or (int(current.st_dev), int(current.st_ino)) != preserve_identity
         ):
             raise ReleaseFailure("engineer_store_database_identity_changed")
-    elif preserve_identity is not None:
-        raise ReleaseFailure("engineer_store_database_identity_changed")
-    target.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
-    os.chmod(target.parent, 0o700)
-    if preserve_identity is not None:
-        flags = os.O_WRONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0)
-        descriptor = os.open(target, flags)
-        source_descriptor = os.open(
-            source,
-            os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0),
-        )
-        try:
+
+        if preserve_identity is not None:
+            descriptor = os.open(
+                target.name,
+                os.O_WRONLY
+                | getattr(os, "O_NONBLOCK", 0)
+                | getattr(os, "O_CLOEXEC", 0)
+                | getattr(os, "O_NOFOLLOW", 0),
+                dir_fd=parent_descriptor,
+            )
+            source_descriptor, source_identity = _open_private_engineer_backup_source(source)
             before = os.fstat(descriptor)
-            lexical_before = os.stat(target, follow_symlinks=False)
+            lexical_before = os.stat(
+                target.name,
+                dir_fd=parent_descriptor,
+                follow_symlinks=False,
+            )
             if (
                 not stat.S_ISREG(before.st_mode)
                 or before.st_uid != os.geteuid()
@@ -11585,21 +12691,48 @@ def _restore_private_engineer_file(
                 or (int(lexical_before.st_dev), int(lexical_before.st_ino)) != preserve_identity
             ):
                 raise ReleaseFailure("engineer_store_database_identity_changed")
+            _require_pinned_engineer_directory(
+                target.parent,
+                parent_descriptor,
+                parent_ancestry,
+                contained=contained,
+                code="engineer_store_restore_path_drift",
+            )
             os.ftruncate(descriptor, 0)
             while chunk := os.read(source_descriptor, 1 << 20):
                 _write_all(descriptor, chunk)
+            _require_private_engineer_backup_source(
+                source,
+                source_descriptor,
+                source_identity,
+            )
             before_chmod = os.fstat(descriptor)
-            lexical_before_chmod = os.stat(target, follow_symlinks=False)
+            lexical_before_chmod = os.stat(
+                target.name,
+                dir_fd=parent_descriptor,
+                follow_symlinks=False,
+            )
             if (
                 before_chmod.st_nlink != 1
                 or (int(before_chmod.st_dev), int(before_chmod.st_ino)) != preserve_identity
                 or (int(lexical_before_chmod.st_dev), int(lexical_before_chmod.st_ino)) != preserve_identity
             ):
                 raise ReleaseFailure("engineer_store_database_identity_changed")
+            _require_pinned_engineer_directory(
+                target.parent,
+                parent_descriptor,
+                parent_ancestry,
+                contained=contained,
+                code="engineer_store_restore_path_drift",
+            )
             os.fchmod(descriptor, mode)
             os.fsync(descriptor)
             after = os.fstat(descriptor)
-            lexical_after = os.stat(target, follow_symlinks=False)
+            lexical_after = os.stat(
+                target.name,
+                dir_fd=parent_descriptor,
+                follow_symlinks=False,
+            )
             if (
                 after.st_nlink != 1
                 or stat.S_IMODE(after.st_mode) != mode
@@ -11607,39 +12740,116 @@ def _restore_private_engineer_file(
                 or (int(lexical_after.st_dev), int(lexical_after.st_ino)) != preserve_identity
             ):
                 raise ReleaseFailure("engineer_store_database_identity_changed")
-        finally:
-            os.close(source_descriptor)
-            os.close(descriptor)
-    else:
-        temporary = _engineer_restore_stage_path(target, staging_manifest_sha256)
-        if _engineer_path_present(temporary):
-            raise ReleaseFailure("engineer_store_restore_staging_exists")
-        descriptor = -1
-        try:
-            _copy_private(source, temporary)
-            descriptor = os.open(
-                temporary,
-                os.O_RDWR | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0),
+        else:
+            destination_identity: _EngineerFileIdentity | None = None
+            if current is not None:
+                displaced_descriptor = os.open(
+                    target.name,
+                    os.O_RDONLY
+                    | getattr(os, "O_NONBLOCK", 0)
+                    | getattr(os, "O_CLOEXEC", 0)
+                    | getattr(os, "O_NOFOLLOW", 0),
+                    dir_fd=parent_descriptor,
+                )
+                displaced = os.fstat(displaced_descriptor)
+                destination_identity = _engineer_file_identity(displaced)
+                if (
+                    displaced.st_nlink != 1
+                    or destination_identity != _engineer_file_identity(current)
+                    or _optional_engineer_file_identity_at(
+                        parent_descriptor,
+                        target.name,
+                        code="engineer_store_restore_target_changed",
+                    )
+                    != destination_identity
+                ):
+                    raise ReleaseFailure("engineer_store_restore_target_changed")
+            temporary = _engineer_restore_stage_path(target, staging_manifest_sha256)
+            try:
+                os.stat(
+                    temporary.name,
+                    dir_fd=parent_descriptor,
+                    follow_symlinks=False,
+                )
+            except FileNotFoundError:
+                pass
+            except OSError as exc:
+                raise ReleaseFailure("engineer_store_restore_staging_exists") from exc
+            else:
+                raise ReleaseFailure("engineer_store_restore_staging_exists")
+            descriptor = _copy_private_engineer_stage(
+                source,
+                parent_descriptor=parent_descriptor,
+                name=temporary.name,
             )
             before = os.fstat(descriptor)
-            lexical_before = os.stat(temporary, follow_symlinks=False)
             identity = (int(before.st_dev), int(before.st_ino))
-            if (
-                not stat.S_ISREG(before.st_mode)
-                or before.st_uid != os.geteuid()
-                or before.st_nlink != 1
-                or stat.S_IMODE(before.st_mode) != 0o600
-                or identity != (int(lexical_before.st_dev), int(lexical_before.st_ino))
+            lexical_before = os.stat(
+                temporary.name,
+                dir_fd=parent_descriptor,
+                follow_symlinks=False,
+            )
+            if before.st_nlink != 1 or identity != (
+                int(lexical_before.st_dev),
+                int(lexical_before.st_ino),
             ):
                 raise ReleaseFailure("engineer_store_restore_staging_invalid")
-            os.replace(temporary, target)
-            lexical_target = os.stat(target, follow_symlinks=False)
-            if identity != (int(lexical_target.st_dev), int(lexical_target.st_ino)):
+            _require_pinned_engineer_directory(
+                target.parent,
+                parent_descriptor,
+                parent_ancestry,
+                contained=contained,
+                code="engineer_store_restore_path_drift",
+            )
+            if _optional_engineer_file_identity_at(
+                parent_descriptor,
+                target.name,
+                code="engineer_store_restore_target_changed",
+            ) != destination_identity or (
+                displaced_descriptor >= 0
+                and _engineer_file_identity(os.fstat(displaced_descriptor)) != destination_identity
+            ):
                 raise ReleaseFailure("engineer_store_restore_target_changed")
+            os.replace(
+                temporary.name,
+                target.name,
+                src_dir_fd=parent_descriptor,
+                dst_dir_fd=parent_descriptor,
+            )
+            if displaced_descriptor >= 0:
+                assert destination_identity is not None
+                displaced_after = os.fstat(displaced_descriptor)
+                if (
+                    displaced_after.st_nlink != 0
+                    or _engineer_file_identity(displaced_after)[:4] != destination_identity[:4]
+                    or _engineer_file_identity(displaced_after)[5:7] != destination_identity[5:7]
+                ):
+                    raise ReleaseFailure("engineer_store_restore_target_changed")
+            lexical_target = os.stat(
+                target.name,
+                dir_fd=parent_descriptor,
+                follow_symlinks=False,
+            )
+            if lexical_target.st_nlink != 1 or identity != (
+                int(lexical_target.st_dev),
+                int(lexical_target.st_ino),
+            ):
+                raise ReleaseFailure("engineer_store_restore_target_changed")
+            _require_pinned_engineer_directory(
+                target.parent,
+                parent_descriptor,
+                parent_ancestry,
+                contained=contained,
+                code="engineer_store_restore_path_drift",
+            )
             os.fchmod(descriptor, mode)
             os.fsync(descriptor)
             after = os.fstat(descriptor)
-            lexical_after = os.stat(target, follow_symlinks=False)
+            lexical_after = os.stat(
+                target.name,
+                dir_fd=parent_descriptor,
+                follow_symlinks=False,
+            )
             if (
                 after.st_nlink != 1
                 or stat.S_IMODE(after.st_mode) != mode
@@ -11647,12 +12857,26 @@ def _restore_private_engineer_file(
                 or identity != (int(lexical_after.st_dev), int(lexical_after.st_ino))
             ):
                 raise ReleaseFailure("engineer_store_restore_target_changed")
-        finally:
-            if descriptor >= 0:
-                os.close(descriptor)
-            if _engineer_path_present(temporary):
-                _remove_private_engineer_tree(temporary)
-    _fsync_directory(target.parent)
+        _require_pinned_engineer_directory(
+            target.parent,
+            parent_descriptor,
+            parent_ancestry,
+            contained=contained,
+            code="engineer_store_restore_path_drift",
+        )
+        os.fsync(parent_descriptor)
+    except ReleaseFailure:
+        raise
+    except OSError as exc:
+        raise ReleaseFailure("engineer_store_restore_path_drift") from exc
+    finally:
+        if source_descriptor >= 0:
+            os.close(source_descriptor)
+        if displaced_descriptor >= 0:
+            os.close(displaced_descriptor)
+        if descriptor >= 0:
+            os.close(descriptor)
+        os.close(parent_descriptor)
 
 
 def _restore_ephemeral_engineer_file(
@@ -11661,35 +12885,37 @@ def _restore_ephemeral_engineer_file(
     mode: int,
     expected_present: bool,
     contained: bool,
+    pinned_parent: tuple[int, _EngineerDirectoryAncestry] | None = None,
 ) -> None:
     """Restore one empty lock/lease sidecar without opening it destructively."""
 
+    target = Path(os.path.abspath(target))
     parent = target.parent
     # Every ephemeral artifact is a direct child of the private store root.
     # ``contained`` only relaxes the artifact mode for SQLite's shared-memory
     # sidecar; it must never relax the store-root check.
-    parent_before = _engineer_private_status(parent, kind="directory")
-    parent_identity = (int(parent_before.st_dev), int(parent_before.st_ino))
-    parent_descriptor = -1
+    if pinned_parent is None:
+        parent_descriptor, parent_ancestry = _open_pinned_engineer_directory(
+            parent,
+            contained=False,
+            code="engineer_store_restore_path_drift",
+        )
+    else:
+        parent_descriptor = os.dup(pinned_parent[0])
+        parent_ancestry = pinned_parent[1]
+        try:
+            _require_pinned_engineer_directory(
+                parent,
+                parent_descriptor,
+                parent_ancestry,
+                contained=False,
+                code="engineer_store_restore_path_drift",
+            )
+        except BaseException:
+            os.close(parent_descriptor)
+            raise
     descriptor = -1
     try:
-        parent_descriptor = os.open(
-            parent,
-            os.O_RDONLY
-            | getattr(os, "O_DIRECTORY", 0)
-            | getattr(os, "O_CLOEXEC", 0)
-            | getattr(os, "O_NOFOLLOW", 0),
-        )
-        opened_parent = os.fstat(parent_descriptor)
-        lexical_parent = parent.lstat()
-        if (
-            not stat.S_ISDIR(opened_parent.st_mode)
-            or opened_parent.st_uid != os.geteuid()
-            or parent_identity != (int(opened_parent.st_dev), int(opened_parent.st_ino))
-            or parent_identity != (int(lexical_parent.st_dev), int(lexical_parent.st_ino))
-        ):
-            raise ReleaseFailure("engineer_store_restore_path_drift")
-
         expected_identity: tuple[int, int] | None = None
         if expected_present:
             expected = os.stat(
@@ -11705,7 +12931,12 @@ def _restore_ephemeral_engineer_file(
                 or (not contained and expected.st_mode & 0o077)
             ):
                 raise ReleaseFailure("engineer_store_restore_path_drift")
-            flags = os.O_RDWR | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0)
+            flags = (
+                os.O_RDWR
+                | getattr(os, "O_NONBLOCK", 0)
+                | getattr(os, "O_CLOEXEC", 0)
+                | getattr(os, "O_NOFOLLOW", 0)
+            )
             descriptor = os.open(target.name, flags, dir_fd=parent_descriptor)
         else:
             flags = (
@@ -11728,19 +12959,22 @@ def _restore_ephemeral_engineer_file(
                 dir_fd=parent_descriptor,
                 follow_symlinks=False,
             )
-            current_parent = os.fstat(parent_descriptor)
-            current_parent_path = parent.lstat()
             if (
                 not stat.S_ISREG(opened.st_mode)
                 or opened.st_uid != os.geteuid()
                 or opened.st_nlink != 1
                 or expected_identity != (int(opened.st_dev), int(opened.st_ino))
                 or expected_identity != (int(lexical.st_dev), int(lexical.st_ino))
-                or parent_identity != (int(current_parent.st_dev), int(current_parent.st_ino))
-                or parent_identity != (int(current_parent_path.st_dev), int(current_parent_path.st_ino))
                 or (expected_mode is not None and stat.S_IMODE(opened.st_mode) != expected_mode)
             ):
                 raise ReleaseFailure("engineer_store_restore_path_drift")
+            _require_pinned_engineer_directory(
+                parent,
+                parent_descriptor,
+                parent_ancestry,
+                contained=False,
+                code="engineer_store_restore_path_drift",
+            )
 
         # Validate once after open, once immediately before each destructive
         # descriptor operation, and once after persistence.  In particular,
@@ -11761,8 +12995,7 @@ def _restore_ephemeral_engineer_file(
     finally:
         if descriptor >= 0:
             os.close(descriptor)
-        if parent_descriptor >= 0:
-            os.close(parent_descriptor)
+        os.close(parent_descriptor)
 
 
 def _restore_exact_engineer_backup(
@@ -11778,14 +13011,53 @@ def _restore_exact_engineer_backup(
         manifest=manifest,
         manifest_sha256=descriptor.manifest_sha256,
     )
+    contour = _pin_engineer_restore_contour(config)
+    try:
+        # Keep the directory identities from immediately before the path-based
+        # inventory alive until every restore operation has completed.
+        live = _scan_engineer_artifacts(config, destination=None)
+        _require_engineer_restore_contour(contour)
+        return _restore_exact_engineer_backup_after_scan(
+            config,
+            payload,
+            descriptor=descriptor,
+            manifest=manifest,
+            live=live,
+            contour=contour,
+        )
+    finally:
+        contour.close()
+
+
+def _restore_exact_engineer_backup_after_scan(
+    config: SystemdConfig,
+    payload: _ExactBackupPayload,
+    *,
+    descriptor: _ExactEngineerBackup,
+    manifest: Mapping[str, Any],
+    live: Mapping[str, Any],
+    contour: _PinnedEngineerRestoreContour,
+) -> dict[str, Any] | None:
     # A symlink, special file, public mode or hardlink anywhere in the live
     # contour is an ownership ambiguity.  Refuse before mutating any byte.
-    live = _scan_engineer_artifacts(config, destination=None)
     store, key, state = _engineer_artifact_paths(config)
     recovery = payload.directory / "engineer-recovery"
     expected = {str(item["path"]): item for item in manifest["entries"]}
     current = {str(item["path"]): item for item in live["entries"]}
     expected_store = bool(manifest["store_present"])
+    expected_key = expected.get("key")
+    current_store_present = bool(live["store_present"])
+    lifecycle_names = tuple(
+        name
+        for name in _ENGINEER_LIFECYCLE_FILENAMES
+        if expected.get(f"state/{name}") is not None or current.get(f"state/{name}") is not None
+    )
+    if (
+        current_store_present != (contour.store_descriptor >= 0)
+        or (current.get("key") is not None and contour.data_descriptor < 0)
+        or (lifecycle_names and contour.state_descriptor < 0)
+    ):
+        raise ReleaseFailure("engineer_store_restore_path_drift")
     expected_database = expected.get("store/kernel.sqlite")
     if expected_database is not None:
         current_database = current.get("store/kernel.sqlite")
@@ -11797,104 +13069,285 @@ def _restore_exact_engineer_backup(
         ):
             raise ReleaseFailure("engineer_store_database_identity_changed")
 
-    if not expected_store:
-        if _engineer_path_present(store):
-            _remove_private_engineer_tree(store)
-    else:
-        store_item = expected.get("store")
-        if not isinstance(store_item, dict) or store_item.get("kind") != "directory":
-            raise ReleaseFailure("engineer_store_backup_manifest_invalid")
-        if _engineer_path_present(store):
-            _engineer_private_status(store, kind="directory")
+    data = store.parent
+    data_descriptor = -1
+    store_descriptor = -1
+    try:
+        if contour.data_descriptor < 0:
+            if expected_store or expected_key is not None:
+                assert contour.data_parent_descriptor >= 0
+                assert contour.data_parent_ancestry is not None
+                data_descriptor, data_ancestry, _created = _open_engineer_child_directory_at(
+                    parent_path=data.parent,
+                    parent_descriptor=contour.data_parent_descriptor,
+                    parent_ancestry=contour.data_parent_ancestry,
+                    name=data.name,
+                    contained=False,
+                    code="engineer_store_restore_path_drift",
+                    create_mode=0o700,
+                    expected_present=False,
+                )
         else:
-            store.mkdir(parents=True, mode=int(store_item["mode"]))
-        extra_paths = sorted(
-            (path for path in current if path.startswith("store/") and path not in expected),
-            key=lambda value: (len(PurePosixPath(value).parts), value),
-            reverse=True,
-        )
-        for path in extra_paths:
-            relative = _engineer_backup_relative(path)
-            target = store.joinpath(*relative.parts[1:])
-            if _engineer_path_present(target):
-                _remove_private_engineer_tree(target, contained=True)
-        expected_directories = sorted(
-            (
-                (path, item)
-                for path, item in expected.items()
-                if path.startswith("store/") and item["kind"] == "directory"
-            ),
-            key=lambda pair: (len(PurePosixPath(pair[0]).parts), pair[0]),
-        )
-        for path, item in expected_directories:
-            relative = _engineer_backup_relative(path)
-            target = store.joinpath(*relative.parts[1:])
-            observed = current.get(path)
-            if observed is not None and observed.get("kind") != "directory":
+            assert contour.data_ancestry is not None
+            data_descriptor = os.dup(contour.data_descriptor)
+            data_ancestry = contour.data_ancestry
+            _require_pinned_engineer_directory(
+                data,
+                data_descriptor,
+                data_ancestry,
+                contained=False,
+                code="engineer_store_restore_path_drift",
+            )
+
+        if not expected_store:
+            if current_store_present:
+                if data_descriptor < 0:
+                    raise ReleaseFailure("engineer_store_restore_path_drift")
+                _remove_private_engineer_entry_at(
+                    parent_path=data,
+                    parent_descriptor=data_descriptor,
+                    parent_ancestry=data_ancestry,
+                    name=store.name,
+                    contained=False,
+                )
+        else:
+            store_item = expected.get("store")
+            if not isinstance(store_item, dict) or store_item.get("kind") != "directory":
+                raise ReleaseFailure("engineer_store_backup_manifest_invalid")
+            if data_descriptor < 0:
                 raise ReleaseFailure("engineer_store_restore_path_drift")
-            target.mkdir(parents=True, exist_ok=True, mode=0o700)
-            os.chmod(target, int(item["mode"]))
-        for path, item in sorted(expected.items()):
-            if not path.startswith("store/") or item["kind"] == "directory":
-                continue
-            relative = _engineer_backup_relative(path)
-            target = store.joinpath(*relative.parts[1:])
-            observed = current.get(path)
-            if observed is not None and observed.get("kind") != item["kind"]:
+            if current_store_present:
+                assert contour.store_ancestry is not None
+                store_descriptor = os.dup(contour.store_descriptor)
+                store_ancestry = contour.store_ancestry
+                _require_pinned_engineer_directory(
+                    store,
+                    store_descriptor,
+                    store_ancestry,
+                    contained=False,
+                    code="engineer_store_restore_path_drift",
+                )
+            else:
+                store_descriptor, store_ancestry, _created = _open_engineer_child_directory_at(
+                    parent_path=data,
+                    parent_descriptor=data_descriptor,
+                    parent_ancestry=data_ancestry,
+                    name=store.name,
+                    contained=False,
+                    code="engineer_store_restore_path_drift",
+                    create_mode=0o700,
+                    expected_present=False,
+                )
+            extra_paths = sorted(
+                (path for path in current if path.startswith("store/") and path not in expected),
+                key=lambda value: (len(PurePosixPath(value).parts), value),
+                reverse=True,
+            )
+            for path in extra_paths:
+                relative = _engineer_backup_relative(path)
+                parent_parts = tuple(relative.parts[1:-1])
+                parent_path = store.joinpath(*parent_parts)
+                parent_descriptor, parent_ancestry = _open_engineer_relative_directory_at(
+                    root_path=store,
+                    root_descriptor=store_descriptor,
+                    root_ancestry=store_ancestry,
+                    relative_parts=parent_parts,
+                    code="engineer_store_restore_path_drift",
+                )
+                try:
+                    _remove_private_engineer_entry_at(
+                        parent_path=parent_path,
+                        parent_descriptor=parent_descriptor,
+                        parent_ancestry=parent_ancestry,
+                        name=relative.name,
+                        contained=True,
+                    )
+                finally:
+                    os.close(parent_descriptor)
+            expected_directories = sorted(
+                (
+                    (path, item)
+                    for path, item in expected.items()
+                    if path.startswith("store/") and item["kind"] == "directory"
+                ),
+                key=lambda pair: (len(PurePosixPath(pair[0]).parts), pair[0]),
+            )
+            for path, item in expected_directories:
+                relative = _engineer_backup_relative(path)
+                parent_parts = tuple(relative.parts[1:-1])
+                parent_path = store.joinpath(*parent_parts)
+                target = parent_path / relative.name
+                observed = current.get(path)
+                if observed is not None and observed.get("kind") != "directory":
+                    raise ReleaseFailure("engineer_store_restore_path_drift")
+                parent_descriptor, parent_ancestry = _open_engineer_relative_directory_at(
+                    root_path=store,
+                    root_descriptor=store_descriptor,
+                    root_ancestry=store_ancestry,
+                    relative_parts=parent_parts,
+                    code="engineer_store_restore_path_drift",
+                )
+                target_descriptor = -1
+                try:
+                    target_descriptor, target_ancestry, _created = _open_engineer_child_directory_at(
+                        parent_path=parent_path,
+                        parent_descriptor=parent_descriptor,
+                        parent_ancestry=parent_ancestry,
+                        name=relative.name,
+                        contained=True,
+                        code="engineer_store_restore_path_drift",
+                        create_mode=(None if observed is not None else 0o700),
+                        expected_present=observed is not None,
+                    )
+                    _chmod_pinned_engineer_directory(
+                        target,
+                        target_descriptor,
+                        target_ancestry,
+                        mode=int(item["mode"]),
+                        contained=True,
+                        code="engineer_store_restore_path_drift",
+                    )
+                finally:
+                    if target_descriptor >= 0:
+                        os.close(target_descriptor)
+                    os.close(parent_descriptor)
+            for path, item in sorted(expected.items()):
+                if not path.startswith("store/") or item["kind"] == "directory":
+                    continue
+                relative = _engineer_backup_relative(path)
+                parent_parts = tuple(relative.parts[1:-1])
+                parent_path = store.joinpath(*parent_parts)
+                target = parent_path / relative.name
+                observed = current.get(path)
+                if observed is not None and observed.get("kind") != item["kind"]:
+                    raise ReleaseFailure("engineer_store_restore_path_drift")
+                parent_descriptor, parent_ancestry = _open_engineer_relative_directory_at(
+                    root_path=store,
+                    root_descriptor=store_descriptor,
+                    root_ancestry=store_ancestry,
+                    relative_parts=parent_parts,
+                    code="engineer_store_restore_path_drift",
+                )
+                try:
+                    if item["kind"] == "ephemeral":
+                        _restore_ephemeral_engineer_file(
+                            target,
+                            mode=int(item["mode"]),
+                            expected_present=observed is not None,
+                            contained=relative.name == "kernel.sqlite-shm",
+                            pinned_parent=(parent_descriptor, parent_ancestry),
+                        )
+                        continue
+                    preserve_identity = (
+                        (int(item["device"]), int(item["inode"])) if path == "store/kernel.sqlite" else None
+                    )
+                    _restore_private_engineer_file(
+                        recovery.joinpath(*relative.parts),
+                        target,
+                        mode=int(item["mode"]),
+                        staging_manifest_sha256=descriptor.manifest_sha256,
+                        preserve_identity=preserve_identity,
+                        contained=True,
+                        pinned_parent=(parent_descriptor, parent_ancestry),
+                    )
+                finally:
+                    os.close(parent_descriptor)
+            store_ancestry = _chmod_pinned_engineer_directory(
+                store,
+                store_descriptor,
+                store_ancestry,
+                mode=int(store_item["mode"]),
+                contained=False,
+                code="engineer_store_restore_path_drift",
+            )
+            _fsync_pinned_engineer_tree(
+                store,
+                store_descriptor,
+                store_ancestry,
+                contained=False,
+            )
+    except BaseException:
+        if data_descriptor >= 0:
+            os.close(data_descriptor)
+            data_descriptor = -1
+        raise
+    finally:
+        if store_descriptor >= 0:
+            os.close(store_descriptor)
+
+    try:
+        if expected_key is None:
+            if current.get("key") is not None:
+                if data_descriptor < 0:
+                    raise ReleaseFailure("engineer_store_restore_path_drift")
+                _remove_private_engineer_entry_at(
+                    parent_path=key.parent,
+                    parent_descriptor=data_descriptor,
+                    parent_ancestry=data_ancestry,
+                    name=key.name,
+                    contained=False,
+                )
+        else:
+            if expected_key.get("kind") != "file":
+                raise ReleaseFailure("engineer_store_backup_manifest_invalid")
+            if data_descriptor < 0:
                 raise ReleaseFailure("engineer_store_restore_path_drift")
-            if item["kind"] == "ephemeral":
-                _restore_ephemeral_engineer_file(
+            _restore_private_engineer_file(
+                recovery / "key",
+                key,
+                mode=int(expected_key["mode"]),
+                staging_manifest_sha256=descriptor.manifest_sha256,
+                pinned_parent=(data_descriptor, data_ancestry),
+            )
+    finally:
+        if data_descriptor >= 0:
+            os.close(data_descriptor)
+    if lifecycle_names:
+        if contour.state_descriptor < 0 or contour.state_ancestry is None:
+            raise ReleaseFailure("engineer_store_restore_path_drift")
+        state_descriptor = os.dup(contour.state_descriptor)
+        state_ancestry = contour.state_ancestry
+        try:
+            _require_pinned_engineer_directory(
+                state,
+                state_descriptor,
+                state_ancestry,
+                contained=False,
+                code="engineer_store_restore_path_drift",
+            )
+            for name in lifecycle_names:
+                path = f"state/{name}"
+                target = state / name
+                item = expected.get(path)
+                if item is None:
+                    if current.get(path) is not None:
+                        _remove_private_engineer_entry_at(
+                            parent_path=state,
+                            parent_descriptor=state_descriptor,
+                            parent_ancestry=state_ancestry,
+                            name=name,
+                            contained=False,
+                        )
+                    continue
+                if item.get("kind") != "file":
+                    raise ReleaseFailure("engineer_store_backup_manifest_invalid")
+                _restore_private_engineer_file(
+                    recovery / "state" / name,
                     target,
                     mode=int(item["mode"]),
-                    expected_present=observed is not None,
-                    contained=relative.name == "kernel.sqlite-shm",
+                    staging_manifest_sha256=descriptor.manifest_sha256,
+                    pinned_parent=(state_descriptor, state_ancestry),
                 )
-                continue
-            preserve_identity = (
-                (int(item["device"]), int(item["inode"])) if path == "store/kernel.sqlite" else None
+            _require_pinned_engineer_directory(
+                state,
+                state_descriptor,
+                state_ancestry,
+                contained=False,
+                code="engineer_store_restore_path_drift",
             )
-            _restore_private_engineer_file(
-                recovery.joinpath(*relative.parts),
-                target,
-                mode=int(item["mode"]),
-                staging_manifest_sha256=descriptor.manifest_sha256,
-                preserve_identity=preserve_identity,
-                contained=True,
-            )
-        os.chmod(store, int(store_item["mode"]))
-        _fsync_tree(store)
-
-    expected_key = expected.get("key")
-    if expected_key is None:
-        if _engineer_path_present(key):
-            _remove_private_engineer_tree(key)
-    else:
-        if expected_key.get("kind") != "file":
-            raise ReleaseFailure("engineer_store_backup_manifest_invalid")
-        _restore_private_engineer_file(
-            recovery / "key",
-            key,
-            mode=int(expected_key["mode"]),
-            staging_manifest_sha256=descriptor.manifest_sha256,
-        )
-    for name in _ENGINEER_LIFECYCLE_FILENAMES:
-        path = f"state/{name}"
-        target = state / name
-        item = expected.get(path)
-        if item is None:
-            if _engineer_path_present(target):
-                _remove_private_engineer_tree(target)
-            continue
-        if item.get("kind") != "file":
-            raise ReleaseFailure("engineer_store_backup_manifest_invalid")
-        _restore_private_engineer_file(
-            recovery / "state" / name,
-            target,
-            mode=int(item["mode"]),
-            staging_manifest_sha256=descriptor.manifest_sha256,
-        )
-    if state.exists():
-        _fsync_directory(state)
+            os.fsync(state_descriptor)
+        finally:
+            os.close(state_descriptor)
     _verify_engineer_backup(payload.directory, descriptor)
     # The private backup was integrity-checked through a scratch SQLite copy.
     # Opening the restored WAL database here could checkpoint/delete sidecars

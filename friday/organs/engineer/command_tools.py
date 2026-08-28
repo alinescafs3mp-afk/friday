@@ -15,7 +15,7 @@ import threading
 import time
 from collections.abc import Iterator, Mapping
 from contextlib import contextmanager, suppress
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -472,10 +472,12 @@ class EngineerCommandService:
     def _fresh_owner_actor(self, actor: Any, capability: str) -> Any | None:
         """Rebuild the exact current Telegram owner authority for EWI runtime work."""
 
-        chat_id = str(getattr(actor, "identity_id", "") or "").strip()
+        sender_id = str(getattr(actor, "identity_id", "") or "").strip()
+        chat_id = str(getattr(actor, "telegram_chat_id", "") or "").strip()
         if (
             not getattr(actor, "is_owner", False)
-            or getattr(actor, "source", "") != "telegram-bridge"
+            or getattr(actor, "is_private_telegram_chat", False) is not True
+            or chat_id != sender_id
             or _PRIVATE_CHAT_ID.fullmatch(chat_id) is None
             or self.authorization is None
             or getattr(self.settings, "engineer_mode_enabled", False) is not True
@@ -489,8 +491,9 @@ class EngineerCommandService:
             fresh = self.authorization.actor_for_user(
                 actor.own_id,
                 source="engineer-command-service",
-                identity_id=chat_id,
+                identity_id=sender_id,
             )
+            fresh = replace(fresh, telegram_chat_id=chat_id)
             if (
                 not fresh.is_owner
                 or fresh.own_id != actor.own_id
@@ -832,8 +835,11 @@ class EngineerCommandService:
     ) -> EngineerCommandSourceSlot:
         """Recover one body-free source slot from authenticated local ingress rows."""
 
-        chat_id = str(getattr(actor, "identity_id", "") or "").strip()
-        if _PRIVATE_CHAT_ID.fullmatch(chat_id) is None:
+        chat_id = str(getattr(actor, "telegram_chat_id", "") or "").strip()
+        if (
+            getattr(actor, "is_private_telegram_chat", False) is not True
+            or _PRIVATE_CHAT_ID.fullmatch(chat_id) is None
+        ):
             raise EngineerWorkItemCoordinatorError("command_source_unavailable")
         rows = conn.execute(
             """SELECT id,content,metadata_json FROM messages
@@ -1164,10 +1170,10 @@ class EngineerCommandService:
         source_message_id = str(_source_message_id or "").strip()
         telegram_update_id = str(_telegram_update_id or "").strip()
         step_id = str(_step_id or "").strip()
-        chat_id = str(actor.identity_id or "").strip()
+        chat_id = str(getattr(actor, "telegram_chat_id", "") or "").strip()
         if (
             not actor.is_owner
-            or actor.source != "telegram-bridge"
+            or getattr(actor, "is_private_telegram_chat", False) is not True
             or _PRIVATE_CHAT_ID.fullmatch(chat_id) is None
         ):
             return _refusal("authorization_denied")

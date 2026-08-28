@@ -355,20 +355,19 @@ def test_engineer_tools_are_owner_only(settings):
         assert "engineer_analyze_artifact" not in user_tools
 
 
-def test_owner_can_enter_engineer_mode_and_a_guest_cannot(settings):
+def test_engineer_mode_cannot_be_entered_outside_the_owner_private_chat(settings):
     from friday.server import create_app
 
     settings = replace(settings, engineer_mode_enabled=True)
     app = create_app(settings)
     owner_headers = {"Authorization": f"Bearer {settings.api_token}"}
     with TestClient(app) as client:
-        allowed = client.post(
+        api_owner = client.post(
             "/api/conversations/channel/mode",
             headers=owner_headers,
             json={"channel": "api", "channel_id": "owner-desk", "mode": "engineer"},
         )
-        assert allowed.status_code == 200, allowed.text
-        assert allowed.json()["mode"] == "engineer"
+        assert api_owner.status_code == 403, api_owner.text
 
         from tests.test_api_vertical_slice import _bridge_json
 

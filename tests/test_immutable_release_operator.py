@@ -1802,11 +1802,450 @@ def test_engineer_restore_missing_ephemeral_uses_exclusive_nontruncating_create(
     monkeypatch.setattr(operator.os, "open", inspect_open)
     operator._restore_exact_sqlite_backup(config, backup)  # noqa: SLF001
 
-    assert len(observed_flags) == 1
-    assert observed_flags[0] & os.O_EXCL
-    assert not observed_flags[0] & os.O_TRUNC
+    mutating_flags = [flags for flags in observed_flags if flags & os.O_RDWR]
+    assert len(mutating_flags) == 1
+    assert mutating_flags[0] & os.O_EXCL
+    assert not mutating_flags[0] & os.O_TRUNC
     assert target.read_bytes() == b""
     assert stat.S_IMODE(target.stat().st_mode) == 0o600
+
+
+def test_engineer_exact_restore_ephemeral_rejects_real_store_swap_before_open(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config = _engineer_recovery_config(tmp_path)
+    root, _key, _lifecycle_key = _provision_test_engineer_store(config)
+    backup = operator._exact_sqlite_backup(config)  # noqa: SLF001
+    victim = tmp_path / "ephemeral-store-victim"
+    victim.mkdir(mode=0o700)
+    victim_target = victim / "kernel.lease"
+    victim_target.write_bytes(b"must-not-be-truncated")
+    victim_target.chmod(0o600)
+    moved = tmp_path / "engineer-store-before-ephemeral-swap"
+    original_restore = operator._restore_ephemeral_engineer_file  # noqa: SLF001
+    injected = False
+
+    def raced_restore(
+        target: Path,
+        *,
+        mode: int,
+        expected_present: bool,
+        contained: bool,
+        pinned_parent: tuple[int, operator._EngineerDirectoryAncestry] | None = None,  # noqa: SLF001
+    ) -> None:
+        nonlocal injected
+        if not injected:
+            root.rename(moved)
+            victim.rename(root)
+            injected = True
+        original_restore(
+            target,
+            mode=mode,
+            expected_present=expected_present,
+            contained=contained,
+            pinned_parent=pinned_parent,
+        )
+
+    monkeypatch.setattr(operator, "_restore_ephemeral_engineer_file", raced_restore)
+    with pytest.raises(operator.ReleaseFailure, match="engineer_store_restore_path_drift"):
+        operator._restore_exact_sqlite_backup(config, backup)  # noqa: SLF001
+
+    assert injected is True
+    assert (root / "kernel.lease").read_bytes() == b"must-not-be-truncated"
+
+
+def test_engineer_exact_restore_binds_store_seen_by_live_scan(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config = _engineer_recovery_config(tmp_path)
+    root, _key, _lifecycle_key = _provision_test_engineer_store(config)
+    backup = operator._exact_sqlite_backup(config)  # noqa: SLF001
+    victim = tmp_path / "post-scan-store-victim"
+    shutil.copytree(root, victim)
+    victim_result = victim / "jobs" / "job-a" / "private-result-do-not-log.txt"
+    victim_result.write_bytes(b"must-survive-post-scan-swap")
+    victim_result.chmod(0o600)
+    moved = tmp_path / "engineer-store-seen-by-scan"
+    original_scan = operator._scan_engineer_artifacts  # noqa: SLF001
+    injected = False
+
+    def raced_scan(
+        candidate_config: operator.SystemdConfig,
+        *,
+        destination: Path | None,
+    ) -> dict[str, object]:
+        nonlocal injected
+        observed = original_scan(candidate_config, destination=destination)
+        if destination is None and not injected:
+            root.rename(moved)
+            victim.rename(root)
+            injected = True
+        return observed
+
+    monkeypatch.setattr(operator, "_scan_engineer_artifacts", raced_scan)
+    with pytest.raises(operator.ReleaseFailure, match="engineer_store_restore_path_drift"):
+        operator._restore_exact_sqlite_backup(config, backup)  # noqa: SLF001
+
+    assert injected is True
+    assert (root / "jobs" / "job-a" / "private-result-do-not-log.txt").read_bytes() == (
+        b"must-survive-post-scan-swap"
+    )
+
+
+def test_engineer_staging_cleanup_opens_fifo_nonblocking(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config = _engineer_recovery_config(tmp_path)
+    root, _key, _lifecycle_key = _provision_test_engineer_store(config)
+    backup = operator._exact_sqlite_backup(config)  # noqa: SLF001
+    payload = backup.opaque
+    assert isinstance(payload, operator._ExactBackupPayload)  # noqa: SLF001
+    assert payload.engineer is not None
+    manifest = operator._verify_engineer_backup(  # noqa: SLF001
+        payload.directory,
+        payload.engineer,
+    )
+    target = root / "jobs" / "job-a" / "private-result-do-not-log.txt"
+    stage = operator._engineer_restore_stage_path(  # noqa: SLF001
+        target,
+        payload.engineer.manifest_sha256,
+    )
+    os.mkfifo(stage, mode=0o600)
+    original_open = operator.os.open
+    inspected = False
+
+    def inspect_open(
+        path: object,
+        flags: int,
+        mode: int = 0o777,
+        *,
+        dir_fd: int | None = None,
+    ) -> int:
+        nonlocal inspected
+        if path == stage.name and dir_fd is not None:
+            inspected = True
+            assert flags & os.O_NONBLOCK
+        return original_open(path, flags, mode, dir_fd=dir_fd)
+
+    monkeypatch.setattr(operator.os, "open", inspect_open)
+    with pytest.raises(operator.ReleaseFailure, match="engineer_restore_staging_invalid"):
+        operator._cleanup_engineer_restore_staging(  # noqa: SLF001
+            config,
+            manifest=manifest,
+            manifest_sha256=payload.engineer.manifest_sha256,
+        )
+
+    assert inspected is True
+
+
+@pytest.mark.parametrize("surface", ["key", "state", "nested_store"])
+def test_engineer_restore_publish_pins_every_parent_against_namespace_swap(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    surface: str,
+) -> None:
+    tmp_path.chmod(0o700)
+    source = tmp_path / "sealed-backup"
+    source.write_bytes(b"secret-backup")
+    source.chmod(0o600)
+    if surface == "key":
+        parent = tmp_path / "data"
+        contained = False
+        name = "engineer-command.key"
+    elif surface == "state":
+        parent = tmp_path / "state"
+        contained = False
+        name = "engineer-command-store.anchor.json"
+    else:
+        store = tmp_path / "store"
+        jobs = store / "jobs"
+        parent = jobs / "job-a"
+        contained = True
+        name = "result.bin"
+        parent.mkdir(parents=True, mode=0o700)
+        for directory in (store, jobs, parent):
+            directory.chmod(0o700)
+    parent.mkdir(mode=0o700, exist_ok=True)
+    parent.chmod(0o700)
+    target = parent / name
+    target.write_bytes(b"live-target")
+    target.chmod(0o600)
+    victim = tmp_path / f"victim-{surface}"
+    victim.mkdir(mode=0o700)
+    victim_target = victim / name
+    victim_target.write_bytes(b"must-survive")
+    victim_target.chmod(0o600)
+    moved = parent.with_name(f"{parent.name}-moved")
+    original_replace = operator.os.replace
+    injected = False
+
+    def raced_replace(
+        source_name: str,
+        destination_name: str,
+        *,
+        src_dir_fd: int | None = None,
+        dst_dir_fd: int | None = None,
+    ) -> None:
+        nonlocal injected
+        if not injected and destination_name == target.name and dst_dir_fd is not None:
+            injected = True
+            parent.rename(moved)
+            parent.symlink_to(victim, target_is_directory=True)
+        original_replace(
+            source_name,
+            destination_name,
+            src_dir_fd=src_dir_fd,
+            dst_dir_fd=dst_dir_fd,
+        )
+
+    monkeypatch.setattr(operator.os, "replace", raced_replace)
+    with pytest.raises(operator.ReleaseFailure, match="engineer_store_restore_path_drift"):
+        operator._restore_private_engineer_file(  # noqa: SLF001
+            source,
+            target,
+            mode=0o600,
+            staging_manifest_sha256="a" * 64,
+            contained=contained,
+        )
+
+    assert injected is True
+    assert victim_target.read_bytes() == b"must-survive"
+    assert target.resolve(strict=True) == victim_target.resolve(strict=True)
+
+
+def test_engineer_staging_cleanup_pins_parent_before_unlinkat(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config = _engineer_recovery_config(tmp_path)
+    root, _key, _lifecycle_key = _provision_test_engineer_store(config)
+    backup = operator._exact_sqlite_backup(config)  # noqa: SLF001
+    payload = backup.opaque
+    assert isinstance(payload, operator._ExactBackupPayload)  # noqa: SLF001
+    assert payload.engineer is not None
+    manifest = operator._verify_engineer_backup(  # noqa: SLF001
+        payload.directory,
+        payload.engineer,
+    )
+    parent = root / "jobs" / "job-a"
+    target = parent / "private-result-do-not-log.txt"
+    stage = operator._engineer_restore_stage_path(  # noqa: SLF001
+        target,
+        payload.engineer.manifest_sha256,
+    )
+    stage.write_bytes(b"authorized-crash-residue")
+    stage.chmod(0o600)
+    victim = tmp_path / "cleanup-victim"
+    victim.mkdir(mode=0o700)
+    victim_stage = victim / stage.name
+    victim_stage.write_bytes(b"must-survive")
+    victim_stage.chmod(0o600)
+    moved = parent.with_name("job-a-moved")
+    original_unlink = operator.os.unlink
+    injected = False
+
+    def raced_unlink(
+        path: str,
+        *,
+        dir_fd: int | None = None,
+    ) -> None:
+        nonlocal injected
+        if not injected and path == stage.name and dir_fd is not None:
+            injected = True
+            parent.rename(moved)
+            parent.symlink_to(victim, target_is_directory=True)
+        original_unlink(path, dir_fd=dir_fd)
+
+    monkeypatch.setattr(operator.os, "unlink", raced_unlink)
+    with pytest.raises(operator.ReleaseFailure, match="engineer_restore_staging_changed"):
+        operator._cleanup_engineer_restore_staging(  # noqa: SLF001
+            config,
+            manifest=manifest,
+            manifest_sha256=payload.engineer.manifest_sha256,
+        )
+
+    assert injected is True
+    assert victim_stage.read_bytes() == b"must-survive"
+
+
+def test_engineer_private_tree_removal_pins_parent_before_unlinkat(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    tmp_path.chmod(0o700)
+    parent = tmp_path / "private-parent"
+    parent.mkdir(mode=0o700)
+    target = parent / "obsolete.bin"
+    target.write_bytes(b"owned-obsolete")
+    target.chmod(0o600)
+    victim = tmp_path / "remove-victim"
+    victim.mkdir(mode=0o700)
+    victim_target = victim / target.name
+    victim_target.write_bytes(b"must-survive")
+    victim_target.chmod(0o600)
+    moved = parent.with_name("private-parent-moved")
+    original_unlink = operator.os.unlink
+    injected = False
+
+    def raced_unlink(
+        path: str,
+        *,
+        dir_fd: int | None = None,
+    ) -> None:
+        nonlocal injected
+        if not injected and path == target.name and dir_fd is not None:
+            injected = True
+            parent.rename(moved)
+            parent.symlink_to(victim, target_is_directory=True)
+        original_unlink(path, dir_fd=dir_fd)
+
+    monkeypatch.setattr(operator.os, "unlink", raced_unlink)
+    with pytest.raises(operator.ReleaseFailure, match="engineer_store_restore_path_drift"):
+        operator._remove_private_engineer_tree(target)  # noqa: SLF001
+
+    assert injected is True
+    assert victim_target.read_bytes() == b"must-survive"
+
+
+def test_engineer_restore_publish_rejects_late_displaced_target_hardlink(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    tmp_path.chmod(0o700)
+    source = tmp_path / "sealed-backup"
+    source.write_bytes(b"secret-backup")
+    source.chmod(0o600)
+    parent = tmp_path / "data"
+    parent.mkdir(mode=0o700)
+    target = parent / "engineer-command.key"
+    target.write_bytes(b"old-live-secret")
+    target.chmod(0o600)
+    alias = tmp_path / "late-old-secret-alias"
+    original_replace = operator.os.replace
+    injected = False
+
+    def raced_replace(
+        source_name: str,
+        destination_name: str,
+        *,
+        src_dir_fd: int | None = None,
+        dst_dir_fd: int | None = None,
+    ) -> None:
+        nonlocal injected
+        if not injected and destination_name == target.name and dst_dir_fd is not None:
+            os.link(target, alias)
+            injected = True
+        original_replace(
+            source_name,
+            destination_name,
+            src_dir_fd=src_dir_fd,
+            dst_dir_fd=dst_dir_fd,
+        )
+
+    monkeypatch.setattr(operator.os, "replace", raced_replace)
+    with pytest.raises(operator.ReleaseFailure, match="engineer_store_restore_target_changed"):
+        operator._restore_private_engineer_file(  # noqa: SLF001
+            source,
+            target,
+            mode=0o600,
+            staging_manifest_sha256="a" * 64,
+        )
+
+    assert injected is True
+    assert target.read_bytes() == b"secret-backup"
+    assert alias.read_bytes() == b"old-live-secret"
+    assert alias.stat().st_nlink == 1
+
+
+def test_engineer_staging_cleanup_binds_parent_seen_during_enumeration(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config = _engineer_recovery_config(tmp_path)
+    root, _key, _lifecycle_key = _provision_test_engineer_store(config)
+    backup = operator._exact_sqlite_backup(config)  # noqa: SLF001
+    payload = backup.opaque
+    assert isinstance(payload, operator._ExactBackupPayload)  # noqa: SLF001
+    assert payload.engineer is not None
+    manifest = operator._verify_engineer_backup(  # noqa: SLF001
+        payload.directory,
+        payload.engineer,
+    )
+    parent = root / "jobs" / "job-a"
+    target = parent / "private-result-do-not-log.txt"
+    stage = operator._engineer_restore_stage_path(  # noqa: SLF001
+        target,
+        payload.engineer.manifest_sha256,
+    )
+    stage.write_bytes(b"authorized-crash-residue")
+    stage.chmod(0o600)
+    victim = tmp_path / "cleanup-real-directory-victim"
+    victim.mkdir(mode=0o700)
+    victim_stage = victim / stage.name
+    victim_stage.write_bytes(b"must-survive")
+    victim_stage.chmod(0o600)
+    moved = tmp_path / "enumerated-parent-moved"
+    original_inventory = operator._engineer_restore_staging_inventory  # noqa: SLF001
+    injected = False
+
+    def raced_inventory(
+        candidate_config: operator.SystemdConfig,
+    ) -> tuple[operator._EngineerRestoreStagingObservation, ...]:  # noqa: SLF001
+        nonlocal injected
+        observed = original_inventory(candidate_config)
+        if not injected:
+            parent.rename(moved)
+            victim.rename(parent)
+            injected = True
+        return observed
+
+    monkeypatch.setattr(operator, "_engineer_restore_staging_inventory", raced_inventory)
+    with pytest.raises(operator.ReleaseFailure, match="engineer_restore_staging_changed"):
+        operator._cleanup_engineer_restore_staging(  # noqa: SLF001
+            config,
+            manifest=manifest,
+            manifest_sha256=payload.engineer.manifest_sha256,
+        )
+
+    assert injected is True
+    assert (parent / stage.name).read_bytes() == b"must-survive"
+    assert (moved / stage.name).read_bytes() == b"authorized-crash-residue"
+
+
+def test_engineer_exact_restore_directory_chmod_uses_pinned_inode(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config = _engineer_recovery_config(tmp_path)
+    root, _key, _lifecycle_key = _provision_test_engineer_store(config)
+    backup = operator._exact_sqlite_backup(config)  # noqa: SLF001
+    target = root / "jobs" / "job-a"
+    target_identity = (target.stat().st_dev, target.stat().st_ino)
+    victim = tmp_path / "directory-chmod-victim"
+    victim.mkdir(mode=0o711)
+    victim_mode = stat.S_IMODE(victim.stat().st_mode)
+    moved = tmp_path / "job-a-before-chmod-swap"
+    original_fchmod = operator.os.fchmod
+    injected = False
+
+    def raced_fchmod(descriptor: int, mode: int) -> None:
+        nonlocal injected
+        opened = os.fstat(descriptor)
+        if not injected and (opened.st_dev, opened.st_ino) == target_identity:
+            target.rename(moved)
+            victim.rename(target)
+            injected = True
+        original_fchmod(descriptor, mode)
+
+    monkeypatch.setattr(operator.os, "fchmod", raced_fchmod)
+    with pytest.raises(operator.ReleaseFailure, match="engineer_store_restore_path_drift"):
+        operator._restore_exact_sqlite_backup(config, backup)  # noqa: SLF001
+
+    assert injected is True
+    assert stat.S_IMODE(target.stat().st_mode) == victim_mode
 
 
 def test_durable_replace_path_swap_never_chmods_the_replacement_inode(

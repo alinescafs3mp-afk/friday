@@ -831,17 +831,17 @@ def test_target_replace_fault_uses_complete_durable_rollback_set(storage, monkey
     original_replace = storage_module.os.replace
     injected = False
 
-    def fail_target_replace(source, destination):  # noqa: ANN001, ANN202
+    def fail_target_replace(source, destination, *args, **kwargs):  # noqa: ANN001, ANN202
         nonlocal injected
         if (
             not injected
-            and Path(destination) == database_path
+            and Path(destination).name == database_path.name
             and ".restore-" in Path(source).name
             and (storage.settings.state_dir / "database-restore.intent.json").is_file()
         ):
             injected = True
             raise OSError("injected target replace failure")
-        return original_replace(source, destination)
+        return original_replace(source, destination, *args, **kwargs)
 
     monkeypatch.setattr(storage_module.os, "replace", fail_target_replace)
     with (
@@ -856,6 +856,47 @@ def test_target_replace_fault_uses_complete_durable_rollback_set(storage, monkey
     assert storage.diagnostics()["ok"] is True
 
 
+def test_target_replace_rejects_late_displaced_hardlink(storage, monkeypatch):
+    from friday.diagnostics.runtime_lease import ProcessLease
+    from friday.storage import _maintenance as storage_module
+
+    storage.ensure_user("before-late-displaced-hardlink")
+    created = storage.create_backup(label="late-displaced-hardlink")
+    storage.ensure_user("must-survive-late-displaced-hardlink")
+    database_path = storage.settings.database_path.absolute()
+    intent_path = storage.settings.state_dir / "database-restore.intent.json"
+    alias = database_path.with_name("late-displaced-database.alias")
+    original_replace = storage_module.os.replace
+    injected = False
+
+    def hardlink_displaced_target(source, destination, *args, **kwargs):  # noqa: ANN001, ANN202
+        nonlocal injected
+        if (
+            not injected
+            and kwargs.get("dst_dir_fd") is not None
+            and Path(destination).name == database_path.name
+            and ".restore-" in Path(source).name
+            and intent_path.is_file()
+        ):
+            os.link(database_path, alias)
+            injected = True
+        return original_replace(source, destination, *args, **kwargs)
+
+    monkeypatch.setattr(storage_module.os, "replace", hardlink_displaced_target)
+    with (
+        ProcessLease(storage.settings.state_dir / "backend.lock", protocol="friday.backend.v1"),
+        pytest.raises(RuntimeError, match="restored automatically"),
+    ):
+        storage.restore_backup(created["database"])
+
+    assert injected is True
+    assert alias.is_file() and alias.stat().st_nlink == 1
+    assert not os.path.samefile(alias, database_path)
+    assert not intent_path.exists()
+    assert storage.get_user("must-survive-late-displaced-hardlink") is not None
+    assert storage.diagnostics()["ok"] is True
+
+
 def test_committed_restore_marker_resumes_without_rewinding_target(storage, monkeypatch):
     from friday.diagnostics.runtime_lease import ProcessLease
     from friday.storage import _maintenance as storage_module
@@ -865,7 +906,7 @@ def test_committed_restore_marker_resumes_without_rewinding_target(storage, monk
     storage.ensure_user("absent-from-target")
     original_remove = storage_module._remove_restore_intent
 
-    def power_loss_before_marker_cleanup(_path):  # noqa: ANN001, ANN202
+    def power_loss_before_marker_cleanup(_path, _expected_identity):  # noqa: ANN001, ANN202
         raise OSError("injected power loss after committed marker")
 
     monkeypatch.setattr(
@@ -895,6 +936,86 @@ def test_committed_restore_marker_resumes_without_rewinding_target(storage, monk
     assert storage.get_user("absent-from-target") is None
 
 
+def test_restore_intent_read_stays_bound_to_lstat_parent_during_aba(storage, monkeypatch):
+    from friday.diagnostics.runtime_lease import ProcessLease
+    from friday.storage import _maintenance as storage_module
+
+    storage.ensure_user("present-in-intent-aba-target")
+    created = storage.create_backup(label="intent-parent-aba")
+    storage.ensure_user("absent-from-intent-aba-target")
+    original_remove = storage_module._remove_restore_intent
+
+    def preserve_committed_marker(_path, _expected_identity):  # noqa: ANN001, ANN202
+        raise OSError("injected power loss before committed marker cleanup")
+
+    monkeypatch.setattr(storage_module, "_remove_restore_intent", preserve_committed_marker)
+    with (
+        ProcessLease(storage.settings.state_dir / "backend.lock", protocol="friday.backend.v1"),
+        pytest.raises(RuntimeError, match="durable commit cleanup is pending"),
+    ):
+        storage.restore_backup(created["database"])
+
+    state_dir = storage.settings.state_dir
+    intent_path = state_dir / "database-restore.intent.json"
+    committed_payload = json.loads(intent_path.read_text(encoding="utf-8"))
+    assert committed_payload["phase"] == "committed"
+    storage.close()
+    monkeypatch.setattr(storage_module, "_remove_restore_intent", original_remove)
+
+    displaced_state_dir = state_dir.with_name(f"{state_dir.name}-aba-original")
+    decoy_state_dir = state_dir.with_name(f"{state_dir.name}-aba-decoy")
+    decoy_state_dir.mkdir(mode=0o700)
+    decoy_intent = decoy_state_dir / intent_path.name
+    decoy_payload = {**committed_payload, "phase": "prepared"}
+    decoy_intent.write_text(
+        json.dumps(decoy_payload, ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+    )
+    decoy_intent.chmod(0o600)
+
+    original_open = storage_module.os.open
+    injected = False
+
+    def open_intent_during_parent_aba(path, flags, mode=0o777, *, dir_fd=None):  # noqa: ANN001, ANN202
+        nonlocal injected
+        if not injected and Path(path).name == intent_path.name:
+            os.replace(state_dir, displaced_state_dir)
+            os.replace(decoy_state_dir, state_dir)
+            try:
+                descriptor = original_open(path, flags, mode, dir_fd=dir_fd)
+                injected = True
+                return descriptor
+            finally:
+                os.replace(state_dir, decoy_state_dir)
+                os.replace(displaced_state_dir, state_dir)
+        return original_open(path, flags, mode, dir_fd=dir_fd)
+
+    monkeypatch.setattr(storage_module.os, "open", open_intent_during_parent_aba)
+    loaded = storage_module._load_restore_intent(  # noqa: SLF001
+        storage.settings,
+        storage.settings.database_path.absolute(),
+    )
+
+    assert injected is True
+    assert loaded.intent == committed_payload
+    assert loaded.intent["phase"] == "committed"
+    assert json.loads(decoy_intent.read_text(encoding="utf-8")) == decoy_payload
+
+    monkeypatch.setattr(storage_module.os, "open", original_open)
+    decoy_intent.unlink()
+    decoy_state_dir.rmdir()
+    with ProcessLease(storage.settings.state_dir / "backend.lock", protocol="friday.backend.v1"):
+        assert (
+            storage_module._recover_interrupted_restore(  # noqa: SLF001
+                storage.settings,
+                storage.settings.database_path.absolute(),
+            )
+            == "committed"
+        )
+    assert storage.get_user("present-in-intent-aba-target") is not None
+    assert storage.get_user("absent-from-intent-aba-target") is None
+
+
 def test_commit_marker_unlink_then_fsync_failure_reports_committed_truthfully(
     storage,
     monkeypatch,
@@ -907,7 +1028,7 @@ def test_commit_marker_unlink_then_fsync_failure_reports_committed_truthfully(
     storage.ensure_user("absent-from-unlink-fsync-target")
     original_remove = storage_module._remove_restore_intent
 
-    def unlink_then_fail(path):  # noqa: ANN001, ANN202
+    def unlink_then_fail(path, _expected_identity):  # noqa: ANN001, ANN202
         path.unlink(missing_ok=True)
         raise OSError("injected directory fsync failure after intent unlink")
 
@@ -940,7 +1061,11 @@ def test_commit_marker_cleanup_noop_never_claims_success_or_rolls_back(
     storage.ensure_user("absent-from-noop-cleanup-target")
     original_remove = storage_module._remove_restore_intent
 
-    monkeypatch.setattr(storage_module, "_remove_restore_intent", lambda _path: None)
+    monkeypatch.setattr(
+        storage_module,
+        "_remove_restore_intent",
+        lambda _path, _expected_identity: None,
+    )
     with (
         ProcessLease(storage.settings.state_dir / "backend.lock", protocol="friday.backend.v1"),
         pytest.raises(RuntimeError, match="durable commit cleanup is pending") as captured,
@@ -964,6 +1089,56 @@ def test_commit_marker_cleanup_noop_never_claims_success_or_rolls_back(
     assert storage.get_user("absent-from-noop-cleanup-target") is None
 
 
+def test_commit_marker_hardlink_race_never_reports_cleanup_success(storage, monkeypatch):
+    from friday.diagnostics.runtime_lease import ProcessLease
+    from friday.storage import _maintenance as storage_module
+
+    storage.ensure_user("present-in-marker-hardlink-target")
+    created = storage.create_backup(label="marker-hardlink-race")
+    storage.ensure_user("absent-from-marker-hardlink-target")
+    intent_path = storage.settings.state_dir / "database-restore.intent.json"
+    alias = intent_path.with_name("database-restore.intent.alias")
+    original_unlink = storage_module.os.unlink
+    injected = False
+
+    def hardlink_immediately_before_unlink(path, *args, **kwargs):  # noqa: ANN001, ANN202
+        nonlocal injected
+        if not injected and kwargs.get("dir_fd") is not None and Path(path).name == intent_path.name:
+            os.link(intent_path, alias)
+            injected = True
+        return original_unlink(path, *args, **kwargs)
+
+    monkeypatch.setattr(storage_module.os, "unlink", hardlink_immediately_before_unlink)
+    with (
+        ProcessLease(storage.settings.state_dir / "backend.lock", protocol="friday.backend.v1"),
+        pytest.raises(
+            RuntimeError,
+            match="restore committed, but restore-intent cleanup durability is uncertain",
+        ) as captured,
+    ):
+        storage.restore_backup(created["database"])
+
+    assert injected is True
+    assert "previous database files were restored" not in str(captured.value)
+    assert not intent_path.exists()
+    assert alias.is_file() and alias.stat().st_nlink == 1
+
+    monkeypatch.setattr(storage_module.os, "unlink", original_unlink)
+    os.link(alias, intent_path)
+    alias.unlink()
+    storage.close()
+    with ProcessLease(storage.settings.state_dir / "backend.lock", protocol="friday.backend.v1"):
+        assert (
+            storage_module._recover_interrupted_restore(  # noqa: SLF001
+                storage.settings,
+                storage.settings.database_path.absolute(),
+            )
+            == "committed"
+        )
+    assert storage.get_user("present-in-marker-hardlink-target") is not None
+    assert storage.get_user("absent-from-marker-hardlink-target") is None
+
+
 def test_rollback_marker_unlink_then_fsync_failure_reports_rolled_back_truthfully(
     storage,
     monkeypatch,
@@ -980,7 +1155,7 @@ def test_rollback_marker_unlink_then_fsync_failure_reports_rolled_back_truthfull
     def fail_target_health():  # noqa: ANN202
         raise RuntimeError("injected target health failure")
 
-    def unlink_then_fail(path):  # noqa: ANN001, ANN202
+    def unlink_then_fail(path, _expected_identity):  # noqa: ANN001, ANN202
         path.unlink()
         raise OSError("injected directory fsync failure after rollback intent unlink")
 
@@ -1001,6 +1176,191 @@ def test_rollback_marker_unlink_then_fsync_failure_reports_rolled_back_truthfull
     monkeypatch.setattr(storage, "diagnostics", original_diagnostics)
     assert storage.get_user("must-return-after-rollback-cleanup-fault") is not None
     assert storage.diagnostics()["ok"] is True
+
+
+def test_late_target_hardlink_alias_blocks_restore_commit_and_keeps_recovery(
+    storage,
+    monkeypatch,
+):
+    from friday.diagnostics.runtime_lease import ProcessLease
+    from friday.storage import _maintenance as storage_module
+
+    storage.ensure_user("before-late-target-hardlink")
+    created = storage.create_backup(label="late-target-hardlink")
+    storage.ensure_user("must-return-after-target-hardlink")
+    database_path = storage.settings.database_path.absolute()
+    intent_path = storage.settings.state_dir / "database-restore.intent.json"
+    alias = database_path.with_name("late-target-hardlink.alias")
+    original_verify = storage_module._verify_exact_restore_copy
+    injected = False
+
+    def hardlink_after_target_verification(path, **kwargs):  # noqa: ANN001, ANN202
+        nonlocal injected
+        identity = original_verify(path, **kwargs)
+        if not injected and Path(path) == database_path and intent_path.is_file():
+            os.link(path, alias)
+            injected = True
+        return identity
+
+    monkeypatch.setattr(
+        storage_module,
+        "_verify_exact_restore_copy",
+        hardlink_after_target_verification,
+    )
+    with (
+        ProcessLease(storage.settings.state_dir / "backend.lock", protocol="friday.backend.v1"),
+        pytest.raises(RuntimeError, match="durable rollback is pending"),
+    ):
+        storage.restore_backup(created["database"])
+
+    assert injected is True
+    assert alias.is_file() and os.path.samefile(alias, database_path)
+    assert json.loads(intent_path.read_text(encoding="utf-8"))["phase"] == "prepared"
+
+    monkeypatch.setattr(storage_module, "_verify_exact_restore_copy", original_verify)
+    alias.unlink()
+    storage.close()
+    with ProcessLease(storage.settings.state_dir / "backend.lock", protocol="friday.backend.v1"):
+        assert (
+            storage_module._recover_interrupted_restore(  # noqa: SLF001
+                storage.settings,
+                database_path,
+            )
+            == "rolled_back"
+        )
+    assert storage.get_user("must-return-after-target-hardlink") is not None
+
+
+def test_late_recovery_hardlink_alias_blocks_rollback_completion(
+    storage,
+    monkeypatch,
+):
+    from friday.diagnostics.runtime_lease import ProcessLease
+    from friday.storage import _maintenance as storage_module
+
+    storage.ensure_user("before-late-recovery-hardlink")
+    created = storage.create_backup(label="late-recovery-hardlink")
+    storage.ensure_user("must-return-after-recovery-hardlink")
+    database_path = storage.settings.database_path.absolute()
+    intent_path = storage.settings.state_dir / "database-restore.intent.json"
+    alias = database_path.with_name("late-recovery-hardlink.alias")
+    original_diagnostics = storage.diagnostics
+    original_staged_verify = storage_module._verify_staged_recovery_copy
+    injected = False
+
+    def fail_target_health():  # noqa: ANN202
+        raise RuntimeError("injected target health failure before rollback")
+
+    def hardlink_after_recovery_verification(path, snapshot):  # noqa: ANN001, ANN202
+        nonlocal injected
+        identity = original_staged_verify(path, snapshot)
+        if not injected and Path(path) == database_path and intent_path.is_file():
+            os.link(path, alias)
+            injected = True
+        return identity
+
+    monkeypatch.setattr(storage, "diagnostics", fail_target_health)
+    monkeypatch.setattr(
+        storage_module,
+        "_verify_staged_recovery_copy",
+        hardlink_after_recovery_verification,
+    )
+    with (
+        ProcessLease(storage.settings.state_dir / "backend.lock", protocol="friday.backend.v1"),
+        pytest.raises(RuntimeError, match="durable rollback is pending"),
+    ):
+        storage.restore_backup(created["database"])
+
+    assert injected is True
+    assert alias.is_file() and os.path.samefile(alias, database_path)
+    assert json.loads(intent_path.read_text(encoding="utf-8"))["phase"] == "prepared"
+
+    monkeypatch.setattr(storage, "diagnostics", original_diagnostics)
+    monkeypatch.setattr(
+        storage_module,
+        "_verify_staged_recovery_copy",
+        original_staged_verify,
+    )
+    alias.unlink()
+    storage.close()
+    with ProcessLease(storage.settings.state_dir / "backend.lock", protocol="friday.backend.v1"):
+        assert (
+            storage_module._recover_interrupted_restore(  # noqa: SLF001
+                storage.settings,
+                database_path,
+            )
+            == "rolled_back"
+        )
+    assert storage.get_user("must-return-after-recovery-hardlink") is not None
+
+
+def test_late_recovery_single_link_replacement_blocks_rollback_completion(
+    storage,
+    monkeypatch,
+):
+    from friday.diagnostics.runtime_lease import ProcessLease
+    from friday.storage import _maintenance as storage_module
+
+    storage.ensure_user("before-late-recovery-replacement")
+    created = storage.create_backup(label="late-recovery-replacement")
+    storage.ensure_user("must-return-after-recovery-replacement")
+    database_path = storage.settings.database_path.absolute()
+    intent_path = storage.settings.state_dir / "database-restore.intent.json"
+    displaced = database_path.with_name("late-recovery-replacement.displaced")
+    original_diagnostics = storage.diagnostics
+    original_staged_verify = storage_module._verify_staged_recovery_copy
+    injected = False
+
+    def fail_target_health():  # noqa: ANN202
+        raise RuntimeError("injected target health failure before rollback")
+
+    def replace_after_recovery_verification(path, snapshot):  # noqa: ANN001, ANN202
+        nonlocal injected
+        identity = original_staged_verify(path, snapshot)
+        if not injected and Path(path) == database_path and intent_path.is_file():
+            verified_bytes = Path(path).read_bytes()
+            os.replace(path, displaced)
+            Path(path).write_bytes(verified_bytes)
+            Path(path).chmod(0o600)
+            injected = True
+        return identity
+
+    monkeypatch.setattr(storage, "diagnostics", fail_target_health)
+    monkeypatch.setattr(
+        storage_module,
+        "_verify_staged_recovery_copy",
+        replace_after_recovery_verification,
+    )
+    with (
+        ProcessLease(storage.settings.state_dir / "backend.lock", protocol="friday.backend.v1"),
+        pytest.raises(RuntimeError, match="durable rollback is pending"),
+    ):
+        storage.restore_backup(created["database"])
+
+    assert injected is True
+    assert database_path.is_file() and displaced.is_file()
+    assert database_path.read_bytes() == displaced.read_bytes()
+    assert not os.path.samefile(database_path, displaced)
+    assert database_path.stat().st_nlink == displaced.stat().st_nlink == 1
+    assert json.loads(intent_path.read_text(encoding="utf-8"))["phase"] == "prepared"
+
+    monkeypatch.setattr(storage, "diagnostics", original_diagnostics)
+    monkeypatch.setattr(
+        storage_module,
+        "_verify_staged_recovery_copy",
+        original_staged_verify,
+    )
+    displaced.unlink()
+    storage.close()
+    with ProcessLease(storage.settings.state_dir / "backend.lock", protocol="friday.backend.v1"):
+        assert (
+            storage_module._recover_interrupted_restore(  # noqa: SLF001
+                storage.settings,
+                database_path,
+            )
+            == "rolled_back"
+        )
+    assert storage.get_user("must-return-after-recovery-replacement") is not None
 
 
 def test_backup_verification_requires_exact_closed_scope(storage):

@@ -332,6 +332,7 @@ def seam(storage: Any) -> _Seam:
         "owner",
         "telegram-bridge",
         identity_id=CHAT_ID,
+        telegram_chat_id=CHAT_ID,
     )
     storage.ensure_user(actor.own_id, preset_key="owner", metadata={"chat_id": CHAT_ID})
     conversation = storage.create_conversation(actor.user_id, title="EWI command seam")

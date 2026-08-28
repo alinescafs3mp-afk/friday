@@ -206,6 +206,12 @@ async def set_channel_mode(request: Request) -> dict[str, Any]:
     if mode == "engineer":
         if not request.app.state.settings.engineer_mode_enabled:
             raise HTTPException(status_code=503, detail="Инженерный режим отключён")
+        if (
+            not actor.is_private_telegram_chat
+            or channel != "telegram"
+            or channel_id != str(actor.telegram_chat_id or "")
+        ):
+            raise AuthorizationError("Engineer mode requires the owner's private Telegram chat")
         if not actor.is_owner:
             raise AuthorizationError("Engineer mode is available only to the installation owner")
         _require(request, "engineer.use")
