@@ -14,29 +14,31 @@ either merged here or discarded before that source is removed.
 ## Current production identity
 
 - Branch: `main`
-- Deployed implementation head: `f93c0fcfae9a906210cd0594c20320866d99ecb7`
-- Live: Friday `0.207.67` / `f93c0fcfae9a906210cd0594c20320866d99ecb7`;
-  tree `1973acc092a8eab53a03e4adad1e725f351d5917aca01b0d46d1393cf8060d51`;
-  wheel `52cafcfbc17f1347690fda30fc534206d3f4cde973e5d132ae87bdf7cb4c859e`.
+- Deployed implementation head: `45fead9bcaed1bc8cd0112a4257f6080ce046535`
+- Live: Friday `0.207.68` / `45fead9bcaed1bc8cd0112a4257f6080ce046535`;
+  tree `dea711c8a1a438f327925d933b62153e9282317b95dac8e420f0c06ad827bb08`;
+  wheel `c060c11349c3de9a8eef93c7051d42e557b0c17c1ad79d13eca9eaf105030222`.
 - Schema-capable fallback and immediate runtime predecessor: Friday
-  `0.207.66rc0` / `a2da359298b7ea1ba216a566dc4ad2137ba599d3`;
-  tree `75775d98e0fa7a758392928d079c22316d68d72a8d48a9658c4a4ae22fc544a4`.
+  `0.207.67` / `f93c0fcfae9a906210cd0594c20320866d99ecb7`;
+  tree `1973acc092a8eab53a03e4adad1e725f351d5917aca01b0d46d1393cf8060d51`.
 - Database schema: 46
 - Production: immutable activation `clear`; backend and Telegram bridge active;
-  trusted-CA health `200`; V12 `canary_ready`; signed private-owner Engineer
-  smoke completed one installed command with an authenticated terminal receipt.
+  trusted-CA health `200`; V12 `canary_ready`; the S2 foundation is loaded from
+  the sealed wheel without changing current user-visible routing.
 - Secondary: accepted/live GPT-OSS profile `gptoss20b-2335df…`; bounded
-  document-map/current-document assist only. The primary remains sole tool,
-  effect and final-publication owner; secondary absence preserves primary-only
-  behavior.
+  document-map/current-document assist and `plan_candidate` Supervisor shadow
+  are installed. Supervisor promotion remains off with zero joined production
+  observations. The primary remains sole tool, effect and final-publication
+  owner; secondary absence preserves primary-only behavior.
 
 ## Active package
 
-Land S2 `AuthenticatedTurnContext` as the smallest shared turn contract over
-the existing `orchestration.contracts.TurnInput`. SolGoodman owns its new
-contract/test files; Mainline Owner owns review, integration and release after
-handoff. Do not create a parallel implementation or expand the released S1
-surface while that package is in flight.
+Complete S2 runtime adoption through the released `AuthenticatedTurnContext`
+foundation: issue exactly one context after ingress admission, preserve it
+through router/legacy/Engineer/V12 boundaries, derive `AgentContext` from it and
+give Supervisor only its bounded advisory projection. Keep direct legacy
+compatibility, schema 46 and all model-visible payloads unchanged; do not add a
+parallel DTO, store, scheduler or publisher.
 
 ## Operating rules
 
@@ -180,6 +182,8 @@ private-owner command smoke all cleared.
 
 ### S2 — one turn nervous system
 
+Status: foundation deployed in `0.207.68`; runtime propagation remains active.
+
 - Extend or wrap the existing `orchestration.contracts.TurnInput`; do not add a
   third unrelated DTO. Build one immutable authenticated turn contract after
   ingest/admission with actor, tenant, person, conversation, mode, turn ID,
@@ -191,6 +195,11 @@ private-owner command smoke all cleared.
   from zero.
 - Carry one turn ID through ingest, route, tools and final publication. Land the
   current small-model behavior first with no user-visible change.
+
+Foundation acceptance: 86 focused and 677 expanded contract tests; native gate
+23,108 Python plus 31 UI tests; static gate clear; three independent reviews
+accepted; two clean wheels were byte-identical; immutable activation and the
+schema-46 backup/fallback boundary cleared.
 
 Estimate: 3–7 clean-work days in small reversible packages after S1.
 
@@ -295,9 +304,9 @@ Estimate: 4–8 clean-work days after S2, released incrementally.
 
 1. Keep the deployed P0/P1 production paths green.
 2. Keep released `EngineerWorkItem v1` stable; do not expand its scope.
-3. Review and land the smallest existing-`TurnInput`-based S2 seam, including a
-   single turn ID and pending-work owner, before adding Supervisor behavior.
-4. Begin the bounded S3 advisor path only through that seam. Preserve the
+3. Finish the narrow runtime propagation of the released S2 seam, including one
+   turn ID, one pending-work owner and one primary publication authority.
+4. Begin the bounded S3 advisor path only through that context. Preserve the
    released exact-evidence verifier and reject mutable or self-declared proof.
 
 ## Canonical golden-journey/evidence registry
