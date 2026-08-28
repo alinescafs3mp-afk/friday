@@ -32,6 +32,7 @@ from friday.document_catalog.worker_state import (
     remove_document_catalog_worker_entry,
 )
 from friday.memory import MemoryVaultDeletionHandle, VaultProjectionBoundaryError
+from friday.organs.engineer.command.store import EngineerCommandAccountInventory
 from friday.permissions import LEGACY_OWNER_USER_ID
 from friday.storage._base import (
     account_deletion_eligibility_key,
@@ -1203,6 +1204,8 @@ _BLOCKER_MESSAGES = {
     "relation_history": "У аккаунта есть append-only история графа; её нельзя стирать обычным каскадом.",
     "chat_history": "У аккаунта есть неизменяемая история чата; действующая политика запрещает её стирать.",
     "host_action_history": "У аккаунта есть неизменяемая история Host Action; для неё ещё не определён отдельный безопасный каскад удаления.",
+    "engineer_command_history": "У аккаунта есть история Engineer-команд во внешнем операционном журнале; без согласованного каскада её нельзя объявить удалённой.",
+    "engineer_inventory_unavailable": "Авторитетный внешний журнал Engineer-команд недоступен для проверки; отсутствие истории подтвердить нельзя.",
     "private_quarantine": "Часть графа находится в неизменяемом приватном карантине.",
     "active_operations": "У аккаунта есть выполняющиеся операции; сначала завершите или отмените их.",
     "stored_files": "У аккаунта есть сохранённые файлы; требуется согласованное файловое удаление.",
@@ -1233,6 +1236,8 @@ def _preflight(
     user_id: str,
     *,
     quiescence_available: bool,
+    engineer_command_inventory: EngineerCommandAccountInventory | None,
+    engineer_command_inventory_required: bool,
 ) -> dict[str, Any]:
     row = conn.execute("SELECT * FROM users WHERE id=?", (user_id,)).fetchone()
     if row is None:
@@ -1373,6 +1378,64 @@ def _preflight(
     host_action_total = host_action_counts["host_action_jobs"] + host_action_counts["host_action_events"]
     if host_action_total:
         block("host_action_history", host_action_total)
+    exact_engineer_inventory = None
+    exact_engineer_inventory_payload: dict[str, str | int] | None = None
+    if isinstance(engineer_command_inventory, EngineerCommandAccountInventory):
+        try:
+            if engineer_command_inventory.user_id == user_id:
+                exact_engineer_inventory_payload = engineer_command_inventory.fingerprint_payload()
+        except (AttributeError, TypeError, ValueError):
+            pass
+        else:
+            if exact_engineer_inventory_payload is not None:
+                exact_engineer_inventory = engineer_command_inventory
+    engineer_inventory_expected = bool(
+        engineer_command_inventory_required or engineer_command_inventory is not None
+    )
+    if engineer_inventory_expected and exact_engineer_inventory is None:
+        block("engineer_inventory_unavailable")
+    engineer_inventory_payload: dict[str, Any] = {
+        "required": bool(engineer_command_inventory_required),
+        "available": exact_engineer_inventory is not None,
+    }
+    external_engineer_history = 0
+    if exact_engineer_inventory is not None and exact_engineer_inventory_payload is not None:
+        engineer_inventory_payload.update(exact_engineer_inventory_payload)
+        external_counts = {
+            "engineer_command_external_jobs": exact_engineer_inventory.jobs,
+            "engineer_command_external_source_slots": exact_engineer_inventory.source_slots,
+            "engineer_command_external_fences": exact_engineer_inventory.fences,
+            "engineer_command_external_unattributable_fences": (
+                exact_engineer_inventory.unattributable_fences
+            ),
+            "engineer_command_external_publications": exact_engineer_inventory.publications,
+            "engineer_command_external_output_jobs": exact_engineer_inventory.output_jobs,
+        }
+        counts.update({key: value for key, value in external_counts.items() if value})
+        if exact_engineer_inventory.has_history:
+            external_engineer_history = max(1, exact_engineer_inventory.retained_roots)
+    # Engineer command truth is split across this database and an independent,
+    # rollback-protected ledger.  Account deletion has no authority over that
+    # external ledger yet, so deleting only the Work Item/fence projection would
+    # manufacture a false erasure claim.  Count each Work Item once and add only
+    # detached retained fences (a normal live fence is already represented by
+    # its Work Item).
+    engineer_command_history = counts["engineer_work_items"]
+    detached_fence_row = conn.execute(
+        """SELECT COUNT(*) AS count
+             FROM engineer_work_item_command_fences fence
+            WHERE fence.owner_id=?
+              AND NOT EXISTS (
+                  SELECT 1 FROM engineer_work_items item
+                   WHERE item.id=fence.work_item_id
+                     AND (item.owner_id=? OR item.tenant_id=?)
+              )""",
+        (user_id, user_id, user_id),
+    ).fetchone()
+    engineer_command_history += int(detached_fence_row["count"] if detached_fence_row else 0)
+    engineer_command_history += external_engineer_history
+    if engineer_command_history:
+        block("engineer_command_history", engineer_command_history)
     if private_quarantine:
         block("private_quarantine", private_quarantine)
     if active_operations:
@@ -1475,6 +1538,7 @@ def _preflight(
         "external_history_recorded": external_history_recorded,
         "deletion_history_clean": deletion_history_clean,
         "quiescence_available": quiescence_available,
+        "engineer_command_inventory": engineer_inventory_payload,
     }
     fingerprint = hashlib.sha256(
         json.dumps(basis, ensure_ascii=True, sort_keys=True, separators=(",", ":")).encode("utf-8")
@@ -1500,6 +1564,7 @@ def _preflight(
         "cross_account_chat_derivatives": cross_account_chat_derivatives,
         "unknown_scopes": unknown_scopes,
         "document_catalog_worker_fingerprint": catalog_worker_fingerprint,
+        "engineer_command_inventory": engineer_inventory_payload,
     }
 
 
@@ -1508,6 +1573,8 @@ def preflight_account_deletion(
     user_id: str,
     *,
     quiescence_available: bool = False,
+    engineer_command_inventory: EngineerCommandAccountInventory | None = None,
+    engineer_command_inventory_required: bool = False,
 ) -> dict[str, Any]:
     """Return a content-free, race-detecting deletion plan."""
 
@@ -1516,6 +1583,8 @@ def preflight_account_deletion(
         storage,
         user_id,
         quiescence_available=quiescence_available,
+        engineer_command_inventory=engineer_command_inventory,
+        engineer_command_inventory_required=engineer_command_inventory_required,
     )
 
 
@@ -1555,6 +1624,8 @@ def delete_account(
     request_id: str = "",
     authorization_check: Callable[[], None] | None = None,
     quiescence_verified: bool = False,
+    engineer_command_inventory: EngineerCommandAccountInventory | None = None,
+    engineer_command_inventory_required: bool = False,
 ) -> dict[str, Any]:
     """Atomically erase one preflight-approved account and append its audit row."""
 
@@ -1568,6 +1639,8 @@ def delete_account(
             storage,
             user_id,
             quiescence_available=quiescence_verified,
+            engineer_command_inventory=engineer_command_inventory,
+            engineer_command_inventory_required=engineer_command_inventory_required,
         )
         if not report["ready"]:
             raise AccountDeletionBlocked(report)

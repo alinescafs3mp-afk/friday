@@ -59,8 +59,9 @@ def test_it_admits_what_it_leaves_behind(settings):
         response = client.post(
             "/api/admin/exports", json={}, headers={"Authorization": f"Bearer {settings.api_token}"}
         )
-        missing = " ".join(response.json()["not_included"]).casefold()
-        assert "файл" in missing and "вектор" in missing
+    missing = " ".join(response.json()["not_included"]).casefold()
+    assert "файл" in missing and "вектор" in missing
+    assert "engineer" in missing and "ledger" in missing
 
 
 def test_the_export_does_not_run_on_the_event_loop():

@@ -44,6 +44,11 @@ from friday.storage._maintenance import MaintenanceMixin
 from friday.storage._missions import MissionsMixin
 from friday.storage._obsidian import ObsidianMixin
 from friday.storage._oversight import OversightMixin
+from friday.storage._restore_barrier import (
+    assert_no_pending_database_restore,
+    database_restore_intent_lstat,
+    database_restore_intent_path,
+)
 from friday.storage._runtime import RuntimeMixin
 from friday.storage._vectors import VectorsMixin
 
@@ -130,7 +135,23 @@ class FridayStorage(
     )
 
 
-def init_storage(settings: FridaySettings) -> FridayStorage:
+def init_storage(
+    settings: FridaySettings,
+    *,
+    allow_pending_restore: bool = False,
+) -> FridayStorage:
+    restore_intent_present = (
+        database_restore_intent_lstat(database_restore_intent_path(settings.state_dir)) is not None
+    )
+    if restore_intent_present and not allow_pending_restore:
+        # Check before restrict_private_tree can chmod any live/recovery member.
+        # Only the stopped restore CLI opts into constructing a recovery handle.
+        assert_no_pending_database_restore(settings.state_dir)
+    if restore_intent_present:
+        # Recovery validates exact owner/mode/inode/hash itself.  Do not let the
+        # generic permissions repair mutate main or recovery metadata before the
+        # bound external authority has been rechecked.
+        return FridayStorage(settings)
     # Repair legacy nested material before any service can read or publish it.
     # The roots alone are not sufficient: copied installations and old umask-022
     # runs leave notes, originals, exports and rotated logs themselves at 0644.

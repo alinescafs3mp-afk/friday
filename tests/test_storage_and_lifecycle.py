@@ -123,6 +123,7 @@ def test_online_backup_and_manifest_are_verifiable(storage):
     assert result["scope"]["sqlite_database"] == "included"
     assert result["scope"]["raw_files"] == "external"
     assert result["scope"]["obsidian_profiles_and_vaults"] == "external"
+    assert result["scope"]["engineer_command_ledger"] == "external"
     verification = storage.verify_backup(result["database"])
     assert verification["ok"] is True
     assert verification["sha256"] == result["sha256"]
@@ -306,6 +307,7 @@ def test_verified_backup_restore_is_atomic_and_creates_safety_copy(storage):
     assert restored["scope"]["sqlite_database"] == "restored"
     assert restored["scope"]["raw_files"] == "unchanged"
     assert restored["scope"]["obsidian_profiles_and_vaults"] == "unchanged"
+    assert restored["scope"]["engineer_command_ledger"] == "unchanged"
     assert storage.get_user("before-restore") is not None
     assert storage.get_user("after-backup") is None
     safety = restored["safety_backup"]
@@ -373,6 +375,58 @@ def test_restore_refuses_symlink_database_path_before_safety_backup(storage):
         assert storage.diagnostics()["ok"] is True
 
 
+def test_restore_intent_symlink_blocks_database_creation(settings, tmp_path):
+    from friday.storage._restore_barrier import DatabaseRestorePendingError
+
+    state_dir = tmp_path / "restore-intent-symlink-state"
+    state_dir.mkdir(mode=0o700)
+    target = tmp_path / "foreign-restore-intent.json"
+    target.write_text("{}", encoding="utf-8")
+    (state_dir / "database-restore.intent.json").symlink_to(target)
+    configured = replace(
+        settings,
+        state_dir=state_dir,
+        database_path=state_dir / "must-not-be-created.sqlite3",
+        database_must_exist=False,
+    )
+    unopened = FridayStorage(configured)
+    try:
+        with pytest.raises(DatabaseRestorePendingError, match="recovery is pending"):
+            unopened.ensure_user("must-not-exist")
+    finally:
+        unopened.close()
+    assert not configured.database_path.exists()
+
+
+def test_ambiguous_restore_intent_lstat_blocks_database_creation(
+    settings,
+    tmp_path,
+    monkeypatch,
+):
+    from friday.storage import _restore_barrier as barrier
+
+    state_dir = tmp_path / "restore-intent-ambiguous-state"
+    state_dir.mkdir(mode=0o700)
+    configured = replace(
+        settings,
+        state_dir=state_dir,
+        database_path=state_dir / "must-not-be-created.sqlite3",
+        database_must_exist=False,
+    )
+
+    def ambiguous_lstat(_path):  # noqa: ANN001, ANN202
+        raise barrier.DatabaseRestorePendingError("injected ambiguous restore intent")
+
+    monkeypatch.setattr(barrier, "database_restore_intent_lstat", ambiguous_lstat)
+    unopened = FridayStorage(configured)
+    try:
+        with pytest.raises(barrier.DatabaseRestorePendingError, match="ambiguous"):
+            unopened.ensure_user("must-not-exist")
+    finally:
+        unopened.close()
+    assert not configured.database_path.exists()
+
+
 def test_restore_detects_backup_change_during_staging_and_rolls_back(storage, monkeypatch):
     # Patched where the name is LOOKED UP: restore lives in the maintenance mixin and
     # binds the helper at import time, so patching friday.storage would not reach it.
@@ -407,6 +461,566 @@ def test_restore_detects_backup_change_during_staging_and_rolls_back(storage, mo
     assert storage.get_user("stable-before-staging-race") is not None
     assert storage.get_user("active-after-backup") is not None
     assert storage.diagnostics()["ok"] is True
+
+
+def test_partial_pre_restore_staging_never_mutates_any_original(storage, monkeypatch):
+    from friday.diagnostics.runtime_lease import ProcessLease
+    from friday.storage import _maintenance as storage_module
+
+    storage.ensure_user("stable-before-partial-stage")
+    created = storage.create_backup(label="partial-stage")
+    storage.ensure_user("must-survive-partial-stage")
+    database_path = storage.settings.database_path.absolute()
+    wal_path = Path(f"{database_path}-wal")
+    active_paths = (database_path, wal_path, Path(f"{database_path}-shm"))
+    backup_path = Path(created["path"]).resolve()
+    original_stage = storage_module._stage_private_copy
+    originals: dict[Path, bytes] = {}
+    recovery_before = set(storage.settings.backups_dir.glob("recovery-*"))
+
+    def fail_after_first_original(source, destination):  # noqa: ANN001, ANN202
+        source_path = Path(source)
+        if source_path.resolve() == backup_path:
+            prepared = original_stage(source, destination)
+            wal_path.write_bytes(b"exact-sidecar-before-partial-staging")
+            wal_path.chmod(0o600)
+            originals.update({path: path.read_bytes() for path in active_paths if path.is_file()})
+            return prepared
+        if source_path == wal_path:
+            raise OSError("fault after the first rollback member")
+        return original_stage(source, destination)
+
+    monkeypatch.setattr(storage_module, "_stage_private_copy", fail_after_first_original)
+    with (
+        ProcessLease(storage.settings.state_dir / "backend.lock", protocol="friday.backend.v1"),
+        pytest.raises(RuntimeError, match="active database was left untouched"),
+    ):
+        storage.restore_backup(created["database"])
+
+    assert originals
+    assert {path: path.read_bytes() for path in active_paths if path.is_file()} == originals
+    assert not (storage.settings.state_dir / "database-restore.intent.json").exists()
+    assert set(storage.settings.backups_dir.glob("recovery-*")) == recovery_before
+    assert not list(database_path.parent.glob("*.restore-*.tmp"))
+    assert storage.get_user("must-survive-partial-stage") is not None
+
+
+def test_pre_intent_failure_discards_only_its_unreferenced_recovery_bundle(storage, monkeypatch):
+    from friday.diagnostics.runtime_lease import ProcessLease
+    from friday.storage import _maintenance as storage_module
+
+    storage.ensure_user("before-pre-intent-cleanup")
+    created = storage.create_backup(label="pre-intent-cleanup")
+    storage.ensure_user("must-survive-pre-intent-cleanup")
+    database_path = storage.settings.database_path.absolute()
+    active_paths = (
+        database_path,
+        Path(f"{database_path}-wal"),
+        Path(f"{database_path}-shm"),
+    )
+    originals = {path: path.read_bytes() for path in active_paths if path.is_file()}
+    recovery_before = set(storage.settings.backups_dir.glob("recovery-*"))
+
+    def fail_before_intent(_path, _payload):  # noqa: ANN001, ANN202
+        raise OSError("injected intent write failure")
+
+    monkeypatch.setattr(storage_module, "_write_restore_intent", fail_before_intent)
+    with (
+        ProcessLease(storage.settings.state_dir / "backend.lock", protocol="friday.backend.v1"),
+        pytest.raises(RuntimeError, match="active database was left untouched"),
+    ):
+        storage.restore_backup(created["database"])
+
+    assert {path: path.read_bytes() for path in active_paths if path.is_file()} == originals
+    assert not (storage.settings.state_dir / "database-restore.intent.json").exists()
+    assert set(storage.settings.backups_dir.glob("recovery-*")) == recovery_before
+    assert not list(database_path.parent.glob("*.restore-*.tmp"))
+    assert storage.get_user("must-survive-pre-intent-cleanup") is not None
+
+
+def test_durable_restore_intent_precedes_close_and_recovers_exact_bytes(storage, monkeypatch):
+    from friday.diagnostics.runtime_lease import ProcessLease
+
+    storage.ensure_user("before-close-boundary")
+    created = storage.create_backup(label="close-boundary")
+    storage.ensure_user("must-survive-close-boundary")
+    database_path = storage.settings.database_path.absolute()
+    active_paths = (
+        database_path,
+        Path(f"{database_path}-wal"),
+        Path(f"{database_path}-shm"),
+    )
+    originals = {path: path.read_bytes() for path in active_paths if path.is_file()}
+    recovery_before = set(storage.settings.backups_dir.glob("recovery-*"))
+    intent_path = storage.settings.state_dir / "database-restore.intent.json"
+    original_close = storage.close
+    close_calls = 0
+    intent_preceded_close = False
+
+    def fail_after_first_close(*, final=False):  # noqa: ANN001, ANN202
+        nonlocal close_calls, intent_preceded_close
+        close_calls += 1
+        original_close(final=final)
+        if close_calls == 1:
+            intent_preceded_close = intent_path.is_file()
+            raise OSError("injected failure after SQLite close")
+
+    monkeypatch.setattr(storage, "close", fail_after_first_close)
+    with (
+        ProcessLease(storage.settings.state_dir / "backend.lock", protocol="friday.backend.v1"),
+        pytest.raises(RuntimeError, match="exact previous database files were restored"),
+    ):
+        storage.restore_backup(created["database"])
+
+    assert intent_preceded_close is True
+    assert close_calls >= 2
+    assert {path: path.read_bytes() for path in active_paths if path.is_file()} == originals
+    assert not intent_path.exists()
+    assert set(storage.settings.backups_dir.glob("recovery-*")) == recovery_before
+    assert not list(database_path.parent.glob("*.restore-*.tmp"))
+    assert storage.get_user("must-survive-close-boundary") is not None
+
+
+def test_failed_rollback_keeps_durable_copies_and_next_attempt_resumes(storage, monkeypatch):
+    from fastapi.testclient import TestClient
+
+    from friday.diagnostics.runtime_lease import ProcessLease
+    from friday.server import create_app
+    from friday.storage import _maintenance as storage_module
+    from friday.storage import init_storage
+    from friday.storage._restore_barrier import DatabaseRestorePendingError
+
+    storage.ensure_user("before-durable-rollback")
+    created = storage.create_backup(label="durable-rollback")
+    storage.ensure_user("must-return-after-durable-rollback")
+    original_recovery_stage = storage_module._stage_verified_recovery_copy
+    original_diagnostics = storage.diagnostics
+
+    def fail_recovery_copy(_snapshot, _destination):  # noqa: ANN001, ANN202
+        raise OSError("injected rollback staging failure")
+
+    def fail_restored_health():  # noqa: ANN202
+        raise RuntimeError("injected post-replacement health failure")
+
+    monkeypatch.setattr(storage_module, "_stage_verified_recovery_copy", fail_recovery_copy)
+    monkeypatch.setattr(storage, "diagnostics", fail_restored_health)
+    with (
+        ProcessLease(storage.settings.state_dir / "backend.lock", protocol="friday.backend.v1"),
+        pytest.raises(RuntimeError, match="durable rollback is pending"),
+    ):
+        storage.restore_backup(created["database"])
+
+    intent_path = storage.settings.state_dir / "database-restore.intent.json"
+    intent = json.loads(intent_path.read_text(encoding="utf-8"))
+    recovery_path = Path(intent["recovery_path"])
+    assert intent["phase"] == "prepared"
+    assert recovery_path.is_dir()
+    assert (recovery_path / "recovery.json").is_file()
+    assert all((recovery_path / name).is_file() for name in intent["original_files"])
+
+    # A normal backend/storage restart must fail before SQLite can open, migrate,
+    # or create anything while the prepared marker exists.
+    protected_paths = [
+        intent_path,
+        recovery_path / "recovery.json",
+        *(recovery_path / name for name in intent["original_files"]),
+        *(
+            path
+            for path in (
+                storage.settings.database_path,
+                Path(f"{storage.settings.database_path}-wal"),
+                Path(f"{storage.settings.database_path}-shm"),
+            )
+            if path.is_file()
+        ),
+    ]
+    protected_before = {path: path.read_bytes() for path in protected_paths}
+    with pytest.raises(DatabaseRestorePendingError, match="recovery is pending"):
+        init_storage(storage.settings)
+    assert {path: path.read_bytes() for path in protected_paths} == protected_before
+    recovery_handle = init_storage(storage.settings, allow_pending_restore=True)
+    recovery_handle.close()
+    assert {path: path.read_bytes() for path in protected_paths} == protected_before
+    with (
+        pytest.raises(DatabaseRestorePendingError, match="recovery is pending"),
+        TestClient(create_app(storage.settings)),
+    ):
+        pass
+    assert {path: path.read_bytes() for path in protected_paths} == protected_before
+    restarted = FridayStorage(storage.settings)
+    try:
+        with pytest.raises(DatabaseRestorePendingError, match="recovery is pending"):
+            restarted.ensure_user("must-not-open-during-restore-recovery")
+    finally:
+        restarted.close()
+    assert {path: path.read_bytes() for path in protected_paths} == protected_before
+
+    # A recovery source that changes while being copied must not make the staged
+    # bytes authoritative or touch any active/recovery member.
+    def corrupt_recovery_stage(snapshot, destination):  # noqa: ANN001, ANN202
+        prepared = original_recovery_stage(snapshot, destination)
+        with prepared.open("ab") as handle:
+            handle.write(b"corrupt-staged-rollback")
+            handle.flush()
+            os.fsync(handle.fileno())
+        return prepared
+
+    monkeypatch.setattr(
+        storage_module,
+        "_stage_verified_recovery_copy",
+        corrupt_recovery_stage,
+    )
+    with (
+        ProcessLease(storage.settings.state_dir / "backend.lock", protocol="friday.backend.v1"),
+        pytest.raises(RuntimeError, match="staged copy is invalid"),
+    ):
+        storage_module._recover_interrupted_restore(  # noqa: SLF001
+            storage.settings,
+            storage.settings.database_path.absolute(),
+        )
+    assert {path: path.read_bytes() for path in protected_paths} == protected_before
+    assert not list(storage.settings.database_path.parent.glob("*.restore-*.tmp"))
+
+    recovery_source = recovery_path / str(intent["original_files"][0])
+    displaced_source = recovery_source.with_name(recovery_source.name + ".displaced")
+    drift_injected = False
+
+    def replace_recovery_source_with_symlink(snapshot, destination):  # noqa: ANN001, ANN202
+        nonlocal drift_injected
+        source_path = Path(snapshot.path)
+        if not drift_injected and source_path == recovery_source:
+            os.replace(recovery_source, displaced_source)
+            recovery_source.symlink_to(displaced_source.name)
+            drift_injected = True
+        return original_recovery_stage(snapshot, destination)
+
+    monkeypatch.setattr(
+        storage_module,
+        "_stage_verified_recovery_copy",
+        replace_recovery_source_with_symlink,
+    )
+    with (
+        ProcessLease(storage.settings.state_dir / "backend.lock", protocol="friday.backend.v1"),
+        pytest.raises(RuntimeError, match="recovery source changed"),
+    ):
+        storage_module._recover_interrupted_restore(  # noqa: SLF001
+            storage.settings,
+            storage.settings.database_path.absolute(),
+        )
+    assert drift_injected is True
+    assert recovery_source.is_symlink()
+    recovery_source.unlink()
+    os.replace(displaced_source, recovery_source)
+    assert {path: path.read_bytes() for path in protected_paths} == protected_before
+    assert not list(storage.settings.database_path.parent.glob("*.restore-*.tmp"))
+
+    # A pathname replacement after all copies were staged must still be caught
+    # before the first active unlink/replacement.  Identical bytes on a new inode
+    # do not preserve the durable recovery authority named by the marker.
+    original_staged_verify = storage_module._verify_staged_recovery_copy
+    displaced_after_stage = recovery_source.with_name(recovery_source.name + ".after-stage")
+    active_paths = [
+        path
+        for path in (
+            storage.settings.database_path,
+            Path(f"{storage.settings.database_path}-wal"),
+            Path(f"{storage.settings.database_path}-shm"),
+        )
+        if path.is_file()
+    ]
+    active_before_drift = {path: path.read_bytes() for path in active_paths}
+    after_stage_drift_injected = False
+
+    def replace_source_after_staged_verification(path, snapshot):  # noqa: ANN001, ANN202
+        nonlocal after_stage_drift_injected
+        identity = original_staged_verify(path, snapshot)
+        if not after_stage_drift_injected:
+            os.replace(recovery_source, displaced_after_stage)
+            recovery_source.write_bytes(displaced_after_stage.read_bytes())
+            recovery_source.chmod(0o600)
+            after_stage_drift_injected = True
+        return identity
+
+    monkeypatch.setattr(
+        storage_module,
+        "_verify_staged_recovery_copy",
+        replace_source_after_staged_verification,
+    )
+    with (
+        ProcessLease(storage.settings.state_dir / "backend.lock", protocol="friday.backend.v1"),
+        pytest.raises(RuntimeError, match="recovery source changed"),
+    ):
+        storage_module._recover_interrupted_restore(  # noqa: SLF001
+            storage.settings,
+            storage.settings.database_path.absolute(),
+        )
+    assert after_stage_drift_injected is True
+    assert {path: path.read_bytes() for path in active_paths} == active_before_drift
+    recovery_source.unlink()
+    os.replace(displaced_after_stage, recovery_source)
+    assert not list(storage.settings.database_path.parent.glob("*.restore-*.tmp"))
+
+    # Corruption after the intent/source revalidation but before mutation is
+    # caught by the final full hash pass, not by inode/size bookkeeping alone.
+    original_reload = storage_module._reload_exact_restore_intent
+    monkeypatch.setattr(
+        storage_module,
+        "_verify_staged_recovery_copy",
+        original_staged_verify,
+    )
+    late_stage_corruption_injected = False
+
+    def corrupt_stage_after_intent_reload(settings, database_path, expected):  # noqa: ANN001, ANN202
+        nonlocal late_stage_corruption_injected
+        observed = original_reload(settings, database_path, expected)
+        staged_paths = list(database_path.parent.glob("*.restore-*.tmp"))
+        assert staged_paths
+        with staged_paths[0].open("ab") as handle:
+            handle.write(b"late-staged-corruption")
+            handle.flush()
+            os.fsync(handle.fileno())
+        late_stage_corruption_injected = True
+        return observed
+
+    monkeypatch.setattr(
+        storage_module,
+        "_reload_exact_restore_intent",
+        corrupt_stage_after_intent_reload,
+    )
+    with (
+        ProcessLease(storage.settings.state_dir / "backend.lock", protocol="friday.backend.v1"),
+        pytest.raises(RuntimeError, match="staged copy is invalid"),
+    ):
+        storage_module._recover_interrupted_restore(  # noqa: SLF001
+            storage.settings,
+            storage.settings.database_path.absolute(),
+        )
+    assert late_stage_corruption_injected is True
+    assert {path: path.read_bytes() for path in active_paths} == active_before_drift
+    assert not list(storage.settings.database_path.parent.glob("*.restore-*.tmp"))
+    monkeypatch.setattr(storage_module, "_reload_exact_restore_intent", original_reload)
+
+    monkeypatch.setattr(
+        storage_module,
+        "_stage_verified_recovery_copy",
+        original_recovery_stage,
+    )
+    monkeypatch.setattr(storage, "diagnostics", original_diagnostics)
+    storage.close()
+    with ProcessLease(storage.settings.state_dir / "backend.lock", protocol="friday.backend.v1"):
+        assert (
+            storage_module._recover_interrupted_restore(  # noqa: SLF001
+                storage.settings,
+                storage.settings.database_path.absolute(),
+            )
+            == "rolled_back"
+        )
+    assert not intent_path.exists()
+    assert storage.get_user("must-return-after-durable-rollback") is not None
+    assert storage.diagnostics()["ok"] is True
+
+
+def test_target_replace_fault_uses_complete_durable_rollback_set(storage, monkeypatch):
+    from friday.diagnostics.runtime_lease import ProcessLease
+    from friday.storage import _maintenance as storage_module
+
+    storage.ensure_user("before-target-replace-fault")
+    created = storage.create_backup(label="target-replace-fault")
+    storage.ensure_user("must-survive-target-replace-fault")
+    database_path = storage.settings.database_path.absolute()
+    original_replace = storage_module.os.replace
+    injected = False
+
+    def fail_target_replace(source, destination):  # noqa: ANN001, ANN202
+        nonlocal injected
+        if (
+            not injected
+            and Path(destination) == database_path
+            and ".restore-" in Path(source).name
+            and (storage.settings.state_dir / "database-restore.intent.json").is_file()
+        ):
+            injected = True
+            raise OSError("injected target replace failure")
+        return original_replace(source, destination)
+
+    monkeypatch.setattr(storage_module.os, "replace", fail_target_replace)
+    with (
+        ProcessLease(storage.settings.state_dir / "backend.lock", protocol="friday.backend.v1"),
+        pytest.raises(RuntimeError, match="restored automatically"),
+    ):
+        storage.restore_backup(created["database"])
+
+    assert injected is True
+    assert not (storage.settings.state_dir / "database-restore.intent.json").exists()
+    assert storage.get_user("must-survive-target-replace-fault") is not None
+    assert storage.diagnostics()["ok"] is True
+
+
+def test_committed_restore_marker_resumes_without_rewinding_target(storage, monkeypatch):
+    from friday.diagnostics.runtime_lease import ProcessLease
+    from friday.storage import _maintenance as storage_module
+
+    storage.ensure_user("present-in-target")
+    created = storage.create_backup(label="committed-marker")
+    storage.ensure_user("absent-from-target")
+    original_remove = storage_module._remove_restore_intent
+
+    def power_loss_before_marker_cleanup(_path):  # noqa: ANN001, ANN202
+        raise OSError("injected power loss after committed marker")
+
+    monkeypatch.setattr(
+        storage_module,
+        "_remove_restore_intent",
+        power_loss_before_marker_cleanup,
+    )
+    with (
+        ProcessLease(storage.settings.state_dir / "backend.lock", protocol="friday.backend.v1"),
+        pytest.raises(RuntimeError, match="durable commit cleanup is pending"),
+    ):
+        storage.restore_backup(created["database"])
+
+    intent_path = storage.settings.state_dir / "database-restore.intent.json"
+    assert json.loads(intent_path.read_text(encoding="utf-8"))["phase"] == "committed"
+    monkeypatch.setattr(storage_module, "_remove_restore_intent", original_remove)
+    storage.close()
+    with ProcessLease(storage.settings.state_dir / "backend.lock", protocol="friday.backend.v1"):
+        assert (
+            storage_module._recover_interrupted_restore(  # noqa: SLF001
+                storage.settings,
+                storage.settings.database_path.absolute(),
+            )
+            == "committed"
+        )
+    assert storage.get_user("present-in-target") is not None
+    assert storage.get_user("absent-from-target") is None
+
+
+def test_commit_marker_unlink_then_fsync_failure_reports_committed_truthfully(
+    storage,
+    monkeypatch,
+):
+    from friday.diagnostics.runtime_lease import ProcessLease
+    from friday.storage import _maintenance as storage_module
+
+    storage.ensure_user("present-in-unlink-fsync-target")
+    created = storage.create_backup(label="unlink-fsync-commit")
+    storage.ensure_user("absent-from-unlink-fsync-target")
+    original_remove = storage_module._remove_restore_intent
+
+    def unlink_then_fail(path):  # noqa: ANN001, ANN202
+        path.unlink(missing_ok=True)
+        raise OSError("injected directory fsync failure after intent unlink")
+
+    monkeypatch.setattr(storage_module, "_remove_restore_intent", unlink_then_fail)
+    with (
+        ProcessLease(storage.settings.state_dir / "backend.lock", protocol="friday.backend.v1"),
+        pytest.raises(
+            RuntimeError,
+            match="restore committed, but restore-intent cleanup durability is uncertain",
+        ) as captured,
+    ):
+        storage.restore_backup(created["database"])
+
+    assert "previous database files were restored" not in str(captured.value)
+    assert not (storage.settings.state_dir / "database-restore.intent.json").exists()
+    monkeypatch.setattr(storage_module, "_remove_restore_intent", original_remove)
+    assert storage.get_user("present-in-unlink-fsync-target") is not None
+    assert storage.get_user("absent-from-unlink-fsync-target") is None
+
+
+def test_commit_marker_cleanup_noop_never_claims_success_or_rolls_back(
+    storage,
+    monkeypatch,
+):
+    from friday.diagnostics.runtime_lease import ProcessLease
+    from friday.storage import _maintenance as storage_module
+
+    storage.ensure_user("present-in-noop-cleanup-target")
+    created = storage.create_backup(label="noop-commit-cleanup")
+    storage.ensure_user("absent-from-noop-cleanup-target")
+    original_remove = storage_module._remove_restore_intent
+
+    monkeypatch.setattr(storage_module, "_remove_restore_intent", lambda _path: None)
+    with (
+        ProcessLease(storage.settings.state_dir / "backend.lock", protocol="friday.backend.v1"),
+        pytest.raises(RuntimeError, match="durable commit cleanup is pending") as captured,
+    ):
+        storage.restore_backup(created["database"])
+
+    intent_path = storage.settings.state_dir / "database-restore.intent.json"
+    assert "previous database files were restored" not in str(captured.value)
+    assert json.loads(intent_path.read_text(encoding="utf-8"))["phase"] == "committed"
+    monkeypatch.setattr(storage_module, "_remove_restore_intent", original_remove)
+    storage.close()
+    with ProcessLease(storage.settings.state_dir / "backend.lock", protocol="friday.backend.v1"):
+        assert (
+            storage_module._recover_interrupted_restore(  # noqa: SLF001
+                storage.settings,
+                storage.settings.database_path.absolute(),
+            )
+            == "committed"
+        )
+    assert storage.get_user("present-in-noop-cleanup-target") is not None
+    assert storage.get_user("absent-from-noop-cleanup-target") is None
+
+
+def test_rollback_marker_unlink_then_fsync_failure_reports_rolled_back_truthfully(
+    storage,
+    monkeypatch,
+):
+    from friday.diagnostics.runtime_lease import ProcessLease
+    from friday.storage import _maintenance as storage_module
+
+    storage.ensure_user("before-rollback-cleanup-fault")
+    created = storage.create_backup(label="rollback-cleanup-fault")
+    storage.ensure_user("must-return-after-rollback-cleanup-fault")
+    original_remove = storage_module._remove_restore_intent
+    original_diagnostics = storage.diagnostics
+
+    def fail_target_health():  # noqa: ANN202
+        raise RuntimeError("injected target health failure")
+
+    def unlink_then_fail(path):  # noqa: ANN001, ANN202
+        path.unlink()
+        raise OSError("injected directory fsync failure after rollback intent unlink")
+
+    monkeypatch.setattr(storage, "diagnostics", fail_target_health)
+    monkeypatch.setattr(storage_module, "_remove_restore_intent", unlink_then_fail)
+    with (
+        ProcessLease(storage.settings.state_dir / "backend.lock", protocol="friday.backend.v1"),
+        pytest.raises(
+            RuntimeError,
+            match="exact previous database files were restored.*cleanup durability is uncertain",
+        ) as captured,
+    ):
+        storage.restore_backup(created["database"])
+
+    assert "restore committed" not in str(captured.value).casefold()
+    assert not (storage.settings.state_dir / "database-restore.intent.json").exists()
+    monkeypatch.setattr(storage_module, "_remove_restore_intent", original_remove)
+    monkeypatch.setattr(storage, "diagnostics", original_diagnostics)
+    assert storage.get_user("must-return-after-rollback-cleanup-fault") is not None
+    assert storage.diagnostics()["ok"] is True
+
+
+def test_backup_verification_requires_exact_closed_scope(storage):
+    from friday.diagnostics.runtime_lease import ProcessLease
+
+    storage.ensure_user("scope-owner")
+    created = storage.create_backup(label="closed-scope")
+    manifest_path = Path(created["manifest_path"])
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["scope"]["engineer_command_ledger"] = "included"
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+
+    verification = storage.verify_backup(created["database"])
+    assert verification["manifest_scope_matches"] is False
+    assert verification["ok"] is False
+    with (
+        ProcessLease(storage.settings.state_dir / "backend.lock", protocol="friday.backend.v1"),
+        pytest.raises(RuntimeError, match="unverified backup"),
+    ):
+        storage.restore_backup(created["database"])
 
 
 def test_restore_recovers_over_corrupt_active_database_and_preserves_raw_snapshot(storage):

@@ -2254,8 +2254,9 @@ def _write_recovery_bundle(
             "reason_type": reason_type,
             "files": files,
             "note": (
-                "Exact pre-restore SQLite files preserved because a verified online "
-                "backup could not be created. Inspect manually before use."
+                "Exact pre-restore SQLite files preserved for crash-safe rollback. "
+                "This raw set is not a verified application backup; inspect manually "
+                "before any out-of-band use."
             ),
         }
         manifest_path = destination / "recovery.json"
@@ -2313,6 +2314,10 @@ class StorageShared:
     _init_lock: Any
     _local: Any
     _fts_available: bool
+    _engineer_command_backup_authority: Any | None
+    _engineer_command_backup_authority_lock: Any
+    _begin_database_restore_open: Callable[[], bool]
+    _end_database_restore_open: Callable[[bool], None]
     _BRIDGE_NONCE_PREFIX: str
     _MISSION_UPDATABLE: frozenset[str]
     _MISSION_TASK_UPDATABLE: frozenset[str]

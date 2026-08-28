@@ -96,10 +96,7 @@ def test_fence_commit_readback_replay_conflict_and_failed_commit(tmp_path: Path)
         assert store.lookup_engineer_work_item_fence(ACTOR, KEY) is None
         assert store.create_engineer_work_item_fence(**_fence(), created_at=123.5) == _projection()
         assert store.lookup_engineer_work_item_fence(ACTOR, KEY) == _projection()
-        assert (
-            store.lookup_engineer_work_item_fence_by_source(ACTOR, SOURCE_BINDING)
-            == _projection()
-        )
+        assert store.lookup_engineer_work_item_fence_by_source(ACTOR, SOURCE_BINDING) == _projection()
         assert store.lookup_engineer_work_item_fence_by_source("other-owner", SOURCE_BINDING) is None
 
         with sqlite3.connect(store.db_path) as connection:
@@ -346,7 +343,7 @@ def test_fence_and_job_identities_are_immutable_and_reciprocal(tmp_path: Path) -
             store.create_engineer_work_item_fence(
                 **_fence(idempotency_key=second_key),
                 created_at=123.5,
-        )
+            )
         for column, value in (("idempotency_key", "different"), ("source_hash", "b" * 64)):
             with (
                 pytest.raises(sqlite3.IntegrityError, match="command_job_identity_immutable"),
@@ -445,9 +442,7 @@ def test_pre_fence_store_is_upgraded_but_partial_or_tampered_schema_fails_closed
 
     connection = sqlite3.connect(root / "kernel.sqlite")
     try:
-        connection.execute(
-            "DROP TRIGGER trg_engineer_work_item_fence_publication_collision_guard"
-        )
+        connection.execute("DROP TRIGGER trg_engineer_work_item_fence_publication_collision_guard")
         connection.commit()
     finally:
         connection.close()

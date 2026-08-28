@@ -126,6 +126,7 @@ class _UpdateInbox:
             CREATE TABLE IF NOT EXISTS notification_delivery_outcomes (
                 notification_id TEXT PRIMARY KEY,
                 outcome TEXT NOT NULL CHECK(outcome IN ('sent', 'uncertain')),
+                status_reconciled INTEGER NOT NULL DEFAULT 0 CHECK(status_reconciled IN (0, 1)),
                 updated_at REAL NOT NULL
             );
             CREATE TABLE IF NOT EXISTS edit_prompts (
@@ -185,6 +186,16 @@ class _UpdateInbox:
         for name, definition in additions.items():
             if name not in columns:
                 self._conn.execute(f"ALTER TABLE updates ADD COLUMN {name} {definition}")
+        outcome_columns = {
+            str(row["name"])
+            for row in self._conn.execute("PRAGMA table_info(notification_delivery_outcomes)").fetchall()
+        }
+        if "status_reconciled" not in outcome_columns:
+            self._conn.execute(
+                """ALTER TABLE notification_delivery_outcomes
+                   ADD COLUMN status_reconciled INTEGER NOT NULL DEFAULT 0
+                   CHECK(status_reconciled IN (0, 1))"""
+            )
         # Old rows predate the FIFO partition. Backfill from their durable payload
         # before the index is created; malformed legacy JSON is isolated under its
         # own update id rather than sharing one empty key with every other chat.
@@ -779,6 +790,17 @@ class _UpdateInbox:
         ).fetchall()
         return {str(row["notification_id"]): str(row["outcome"]) for row in rows}
 
+    def notification_delivery_reconciled_outcomes(self, *, limit: int = 100) -> dict[str, str]:
+        """Outcomes whose separately delivered terminal status is also durable."""
+
+        rows = self._conn.execute(
+            """SELECT notification_id, outcome FROM notification_delivery_outcomes
+               WHERE status_reconciled=1
+               ORDER BY updated_at ASC, notification_id ASC LIMIT ?""",
+            (max(1, min(int(limit), 100)),),
+        ).fetchall()
+        return {str(row["notification_id"]): str(row["outcome"]) for row in rows}
+
     def notification_delivery_outcome(self, notification_id: str) -> str | None:
         """Return one exact strict outcome without relying on a bounded scan."""
 
@@ -816,9 +838,14 @@ class _UpdateInbox:
             raise ValueError("invalid notification delivery outcome")
         self._conn.execute(
             """INSERT INTO notification_delivery_outcomes(
-                   notification_id, outcome, updated_at)
-               VALUES(?, ?, ?)
+                   notification_id, outcome, status_reconciled, updated_at)
+               VALUES(?, ?, 0, ?)
                ON CONFLICT(notification_id) DO UPDATE SET
+                   status_reconciled=CASE
+                       WHEN notification_delivery_outcomes.outcome='sent'
+                            AND excluded.outcome='uncertain' THEN 0
+                       ELSE notification_delivery_outcomes.status_reconciled
+                   END,
                    outcome=CASE
                        WHEN notification_delivery_outcomes.outcome='uncertain'
                             OR excluded.outcome='uncertain' THEN 'uncertain'
@@ -840,6 +867,27 @@ class _UpdateInbox:
         )
         if row is None or str(row["outcome"]) != expected:
             raise RuntimeError("notification delivery outcome changed")
+
+    def confirm_notification_status_reconciled(self, notification_id: str) -> None:
+        """Prove the visible carrier's terminal status completed before ACK."""
+
+        notification_id = str(notification_id or "").strip()
+        if not notification_id:
+            raise ValueError("invalid notification delivery identity")
+        self._conn.execute(
+            """UPDATE notification_delivery_outcomes
+               SET status_reconciled=1, updated_at=?
+               WHERE notification_id=?""",
+            (time.time(), notification_id),
+        )
+        self._conn.commit()
+        row = self._conn.execute(
+            """SELECT status_reconciled FROM notification_delivery_outcomes
+               WHERE notification_id=?""",
+            (notification_id,),
+        ).fetchone()
+        if row is None or int(row["status_reconciled"]) != 1:
+            raise RuntimeError("notification status reconciliation was not persisted")
 
     def begin_notification_part_delivery(self, notification_id: str, part_key: str) -> str:
         """Atomically arm a pre-write fence; only its creator receives ``armed``."""

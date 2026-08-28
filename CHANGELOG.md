@@ -1,3 +1,24 @@
+## 0.207.66 — 2026-08-28
+
+### Restart-safe Engineer continuation
+
+- Activates body-free `EngineerWorkItem v1` for owner-only Telegram Engineer
+  conversations. A verified terminal command can continue through one bounded
+  `observe → replan → next command or final answer` loop after a new message or
+  restart without persisting prompts, reasoning, argv, paths or output bodies.
+- Gives every model tool call an exact source slot and makes the independent
+  command ledger fail closed on loss, replacement or rollback. Admission,
+  UNKNOWN and terminal receipt reconciliation never blindly replay a command.
+- Delivers terminal archives, bounded stdout/stderr and proactive UNKNOWN
+  notices through exact crash-safe Telegram carriers. Long-running progress is
+  retired on archive/terminal state, while the final result remains owed to the
+  authenticated originating chat.
+- Adds bounded Work Item expiry/retention and makes account deletion/export
+  honest about retained external Engineer history.
+- Binds SQLite backup/restore and immutable release rollback to the exact
+  authenticated Engineer ledger generation, quiescent delivery state and
+  complete stopped-service recovery set.
+
 ## 0.207.65 — 2026-08-27
 
 ### Dormant Engineer Work Item foundation

@@ -91,6 +91,11 @@ class EngineerOrgan(Organ):
             self._command_service = EngineerCommandService(ctx)
         return self._command_service
 
+    def command_service(self, ctx: ServiceContext) -> EngineerCommandService | None:
+        """Return the organ-owned singleton command service and store lease."""
+
+        return self._service(ctx)
+
     def capabilities(self) -> Sequence[CapabilityDefinition]:
         capabilities = [ENGINEER_USE, ENGINEER_ANALYZE, ENGINEER_BUILD, ENGINEER_PATCH, ENGINEER_AUDIT]
         return (*capabilities, ENGINEER_COMMAND_RUN, ENGINEER_COMMAND_MANAGE)
@@ -99,23 +104,28 @@ class EngineerOrgan(Organ):
         from .command_tools import build_engineer_command_tools
         from .tools import build_engineer_tools
 
-        service = self._service(ctx)
+        service = self.command_service(ctx)
         return (
             *build_engineer_tools(ctx),
             *build_engineer_command_tools(ctx, service=service),
         )
 
     def workers(self, ctx: ServiceContext) -> Sequence[OrganWorker]:
-        service = self._service(ctx)
+        # Keep this import out of the package import path.  The minimal
+        # bubblewrap worker imports ``friday.organs.engineer.sandbox_worker``
+        # with system Python and deliberately has no application dependencies.
+        from friday.workers._blocking import run_blocking
+
+        service = self.command_service(ctx)
         if service is None:
             return ()
 
         async def publish_terminal_jobs(_ctx: ServiceContext) -> None:
-            await asyncio.to_thread(service.publish_terminal_jobs)
-            await asyncio.to_thread(service.publish_progress_jobs)
+            await run_blocking(service.publish_terminal_jobs)
+            await run_blocking(service.publish_progress_jobs)
 
         async def retain_terminal_jobs(_ctx: ServiceContext) -> None:
-            await asyncio.to_thread(service.retain_terminal_jobs)
+            await run_blocking(service.retain_terminal_jobs)
 
         return (
             OrganWorker(

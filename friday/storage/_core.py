@@ -101,6 +101,7 @@ from friday.storage._privacy import (
     PRIVATE_MATERIAL_PERSISTENT_SCHEMA,
     PRIVATE_MATERIAL_RUNTIME_SCHEMA,
 )
+from friday.storage._restore_barrier import assert_no_pending_database_restore
 from friday.storage.models import RelationHistorySnapshotError, normalize_known_at
 
 
@@ -2238,9 +2239,40 @@ class CoreMixin(StorageShared):
         self._init_lock = threading.Lock()
         self._schema_ready = False
         self._fts_available = True
+        # Bound once by the organ-owned Engineer command-store singleton.  The
+        # storage layer never opens a second ledger owner behind the runtime's
+        # back: online backups observe the same authority that executes jobs.
+        self._engineer_command_backup_authority: Any | None = None
+        self._engineer_command_backup_authority_lock = threading.Lock()
         # Set by close(final=True). Distinct from a plain close(), which must stay
         # reopenable — restore_backup swaps the database file and then carries on.
         self._shut_down = False
+
+    def bind_engineer_command_backup_authority(self, authority: Any) -> None:
+        """Bind the singleton authenticated external-ledger backup observer."""
+
+        required = (
+            "attest_main_database_backup",
+            "backup_authority_snapshot",
+            "verify_main_database_backup_authority",
+        )
+        if authority is None or any(not callable(getattr(authority, name, None)) for name in required):
+            raise TypeError("Engineer command backup authority is invalid")
+        with self._engineer_command_backup_authority_lock:
+            current = self._engineer_command_backup_authority
+            if current is not None and current is not authority:
+                raise RuntimeError("Engineer command backup authority is already bound")
+            self._engineer_command_backup_authority = authority
+
+    def _begin_database_restore_open(self) -> bool:
+        """Authorize only this restore thread to reopen SQLite past its marker."""
+
+        previous = bool(getattr(self._local, "database_restore_open_authorized", False))
+        self._local.database_restore_open_authorized = True
+        return previous
+
+    def _end_database_restore_open(self, previous: bool) -> None:
+        self._local.database_restore_open_authorized = bool(previous)
 
     @property
     def conn(self) -> sqlite3.Connection:
@@ -2288,6 +2320,11 @@ class CoreMixin(StorageShared):
                 delay = min(delay * 1.8, 0.5)
 
     def _open_once(self) -> sqlite3.Connection:
+        if not bool(getattr(self._local, "database_restore_open_authorized", False)):
+            # This check precedes prepare_private_sqlite(), URI open, every PRAGMA,
+            # and schema migration.  A backend restart after restore-process death
+            # therefore cannot create or mutate a half-restored image.
+            assert_no_pending_database_restore(self.settings.state_dir)
         must_exist = bool(self.settings.database_must_exist)
         required_fingerprint: tuple[int, int] | None = None
         if must_exist:

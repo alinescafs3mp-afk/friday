@@ -15,6 +15,10 @@ if TYPE_CHECKING:
     from .inputs import CommandInputManifest
 
 SCHEMA = "friday.engineer.command.v4"
+OWNER_SOURCE_SCHEMA = "friday.engineer.owner-source.v2"
+AUTONOMOUS_DELEGATION_SCHEMA = "friday.engineer.autonomous-delegation.v2"
+COMMAND_GRANT_SCHEMA = "friday.engineer.command-grant.v5"
+COMMAND_GRANT_VERSION = 5
 BASH_EXECUTABLE = "/usr/bin/bash"
 SHELL_FLAG_PREFIX = ("--noprofile", "--norc", "-o", "pipefail", "-c")
 SANDBOX_COMMAND = "/run/friday/command"
@@ -289,6 +293,7 @@ class OwnerSource:
     conversation_id: str
     channel: str
     source_row_id: str
+    source_step_id: str
     source_hash: str
     telegram_update_id: str
     isolation_profile: IsolationProfile
@@ -302,12 +307,13 @@ class OwnerSource:
             "conversation_id": self.conversation_id,
             "idempotency_key": self.idempotency_key,
             "isolation_profile": self.isolation_profile.value,
-            "schema": SCHEMA,
+            "schema": OWNER_SOURCE_SCHEMA,
             "source_hash": self.source_hash,
             "source_row_id": self.source_row_id,
+            "source_step_id": self.source_step_id,
             "telegram_update_id": self.telegram_update_id,
             "tenant_id": self.tenant_id,
-            "v": 4,
+            "v": 2,
         }
 
 
@@ -320,6 +326,7 @@ class AutonomousDelegation:
     conversation_id: str
     channel: str
     source_row_id: str
+    source_step_id: str
     source_hash: str
     telegram_update_id: str
     idempotency_key: str
@@ -337,12 +344,13 @@ class AutonomousDelegation:
             "idempotency_key": self.idempotency_key,
             "isolation_profile": self.isolation_profile.value,
             "nonce": self.nonce,
-            "schema": "friday.engineer.autonomous-delegation.v1",
+            "schema": AUTONOMOUS_DELEGATION_SCHEMA,
             "source_hash": self.source_hash,
             "source_row_id": self.source_row_id,
+            "source_step_id": self.source_step_id,
             "telegram_update_id": self.telegram_update_id,
             "tenant_id": self.tenant_id,
-            "v": 1,
+            "v": 2,
         }
 
 
@@ -481,6 +489,7 @@ class VerifiedCommandGrant:
     conversation_id: str
     channel: str
     source_row_id: str
+    source_step_id: str
     source_hash: str
     telegram_update_id: str
     isolation_profile: IsolationProfile
@@ -677,6 +686,7 @@ class CommandReceipt:
 
 __all__ = [
     "ALLOWED_CHANNELS",
+    "AUTONOMOUS_DELEGATION_SCHEMA",
     "BASH_EXECUTABLE",
     "BWRAP_EXECUTABLE",
     "DEFAULT_TRUSTED_PATH",
@@ -715,6 +725,9 @@ __all__ = [
     "BWRAP_STDIN_PAYLOAD_FD",
     "BWRAP_PATH_ROOT_FD_BASE",
     "BWRAP_SCRIPT_FD",
+    "COMMAND_GRANT_SCHEMA",
+    "COMMAND_GRANT_VERSION",
+    "OWNER_SOURCE_SCHEMA",
     "SCHEMA",
     "SENSITIVE_SANDBOX_PATH_ROOTS",
     "SHELL_FLAG_PREFIX",

@@ -40,6 +40,7 @@ from friday.admin_api._deps import (
     validate_user_id,
 )
 from friday.diagnostics.runtime_lease import ProcessLease, RuntimeLeaseError
+from friday.organs.engineer.command.store import EngineerCommandAccountInventory
 from friday.oversight_scope import hierarchy_is_configured, may_oversee, supervisor_of
 from friday.people import resolve_person, unambiguous
 from friday.permissions import LEGACY_OWNER_USER_ID
@@ -59,6 +60,34 @@ def _has_capability(request: Request, capability: str) -> bool:
     if actor is None or service is None:
         return False
     return bool(service.authorize(actor, capability).allowed)
+
+
+def _engineer_command_deletion_inventory(
+    state: Any,
+    user_id: str,
+) -> tuple[EngineerCommandAccountInventory | None, bool]:
+    """Read the organ-owned ledger, or make its required authority explicitly absent."""
+
+    required = bool(
+        getattr(
+            state,
+            "engineer_command_account_inventory_required",
+            getattr(state.settings, "engineer_command_enabled", False),
+        )
+    )
+    if not required:
+        return None, False
+    provider = getattr(state, "engineer_command_account_inventory", None)
+    if not callable(provider):
+        return None, True
+    try:
+        observed = provider(user_id)
+    except Exception:  # noqa: BLE001 - every authority uncertainty is an explicit blocker
+        return None, True
+    return (
+        observed if isinstance(observed, EngineerCommandAccountInventory) else None,
+        True,
+    )
 
 
 def _redact_user_metadata(user: dict[str, Any]) -> dict[str, Any]:
@@ -214,10 +243,13 @@ async def user_deletion_preflight(user_id: str, request: Request) -> dict[str, A
             not state.settings.workers_enabled
             and getattr(request.app.state, "account_activity_gate", None) is not None
         )
+        engineer_inventory, engineer_inventory_required = _engineer_command_deletion_inventory(state, user_id)
         return preflight_account_deletion(
             state.storage,
             user_id,
             quiescence_available=maintenance_available,
+            engineer_command_inventory=engineer_inventory,
+            engineer_command_inventory_required=engineer_inventory_required,
         )
     except LookupError as exc:  # a concurrent delete between the two reads
         raise HTTPException(status_code=404, detail="Пользователь не найден") from exc
@@ -584,6 +616,7 @@ async def hard_delete_user(user_id: str, request: Request) -> dict[str, Any]:
             stranded = await wait_until_idle_async(30.0)
             if stranded:
                 raise AccountDrainTimeout("Blocking HTTP work did not drain")
+        engineer_inventory, engineer_inventory_required = _engineer_command_deletion_inventory(state, user_id)
         outcome = delete_account(
             state.storage,
             user_id,
@@ -593,6 +626,8 @@ async def hard_delete_user(user_id: str, request: Request) -> dict[str, Any]:
             request_id=getattr(request.state, "request_id", ""),
             authorization_check=reauthorize,
             quiescence_verified=maintenance_available,
+            engineer_command_inventory=engineer_inventory,
+            engineer_command_inventory_required=engineer_inventory_required,
         )
         if drain_lease is not None:
             await drain_lease.commit()

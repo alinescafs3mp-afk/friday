@@ -38,6 +38,10 @@ from friday.file_delivery import (
     read_authorized_file_in_transaction,
 )
 from friday.morphology import LEXICAL_MIN_STEM_INPUT, stem
+from friday.orchestration.engineer_work_item_coordinator import (
+    EngineerCommandLedgerObservation,
+    EngineerContinuationState,
+)
 from friday.orchestration.message_window_outcome import (
     LegacyMessageWindowPlan,
     MessageWindowStorageSnapshot,
@@ -1307,6 +1311,14 @@ class ToolResult:
     # coroutine boundary can be entered before the physical worker starts.
     # Removed from handler data below and never serialized or shown to a model.
     work_started: bool | None = None
+    # Body-free durable Engineer continuation truth.  This is a process-private
+    # carrier just like archive authority above: AgentRuntime may consume the
+    # exact typed value, while ``data``, model messages and public/API
+    # serialization never contain it.
+    engineer_work_item_continuation: EngineerContinuationState | None = None
+    # Exact owner/scope/status for an explicitly resolved historical command.
+    # Mutually exclusive with an open Work Item continuation and never public.
+    engineer_command_ledger_observation: EngineerCommandLedgerObservation | None = None
 
     def archive_model_visible_bytes(self) -> bytes:
         """Return the exact sealed archive bytes, or reject a copied envelope."""
@@ -3157,6 +3169,7 @@ _ENGINEER_TOOLS = frozenset(
         "engineer_command_run",
         "engineer_command_status",
         "engineer_command_cancel",
+        "engineer_work_item_resume",
     }
 )
 _ENGINEER_PATCH_OPERATION_KINDS = frozenset({"write_at", "replace_bytes", "zip_replace"})
@@ -3176,11 +3189,21 @@ _HOST_CONTROL_TOOLS = frozenset(
         "engineer_command_run",
         "engineer_command_status",
         "engineer_command_cancel",
+        "engineer_work_item_resume",
         "host_action_execute",
         "software_install_execute",
         "software_remove_execute",
     }
 )
+_ENGINEER_COMMAND_CONTINUATION_TOOLS = frozenset(
+    {
+        "engineer_command_run",
+        "engineer_command_status",
+        "engineer_command_cancel",
+        "engineer_work_item_resume",
+    }
+)
+_ENGINEER_COMMAND_LEDGER_OBSERVATION_TOOLS = frozenset({"engineer_command_status", "engineer_command_cancel"})
 _PERSON_DIRECTORY_LIMIT = 5000
 
 
@@ -3958,14 +3981,89 @@ class ExecutionKernel:
                 )
             attachment = None
             work_started: bool | None = None
+            engineer_work_item_continuation: EngineerContinuationState | None = None
+            engineer_command_ledger_observation: EngineerCommandLedgerObservation | None = None
             # A handler that produces a binary side artifact (currently only
             # `speak`) marks it with this key instead of returning it as part of
             # `data`, so it never reaches the model via `to_llm_message()`.
-            if isinstance(data, dict) and ("_attachment" in data or "_work_started" in data):
+            private_continuation_present = bool(
+                isinstance(data, Mapping) and "_engineer_work_item_continuation" in data
+            )
+            private_ledger_observation_present = bool(
+                isinstance(data, Mapping) and "_engineer_command_ledger_observation" in data
+            )
+            if isinstance(data, Mapping) and (
+                "_attachment" in data
+                or "_work_started" in data
+                or private_continuation_present
+                or private_ledger_observation_present
+            ):
                 data = dict(data)
                 attachment = data.pop("_attachment", None)
                 raw_work_started = data.pop("_work_started", None)
                 work_started = raw_work_started if type(raw_work_started) is bool else None
+                raw_continuation = data.pop("_engineer_work_item_continuation", None)
+                raw_ledger_observation = data.pop("_engineer_command_ledger_observation", None)
+                if private_continuation_present and private_ledger_observation_present:
+                    await self._audit(
+                        actor,
+                        name,
+                        False,
+                        "failed_after_start" if changes_data else "failed",
+                        details=details,
+                    )
+                    return ToolResult(
+                        name,
+                        False,
+                        error="Engineer command result has conflicting private authority",
+                        handler_entered=True,
+                        work_started=work_started,
+                    )
+                if private_continuation_present:
+                    if (
+                        name not in _ENGINEER_COMMAND_CONTINUATION_TOOLS
+                        or type(raw_continuation) is not EngineerContinuationState
+                    ):
+                        await self._audit(
+                            actor,
+                            name,
+                            False,
+                            "failed_after_start" if changes_data else "failed",
+                            details=details,
+                        )
+                        return ToolResult(
+                            name,
+                            False,
+                            error=(
+                                "Engineer command outcome failed private continuation validation; "
+                                "reconcile before retry."
+                                if changes_data
+                                else "Engineer command result failed private continuation validation."
+                            ),
+                            handler_entered=True,
+                            work_started=work_started,
+                        )
+                    engineer_work_item_continuation = raw_continuation
+                if private_ledger_observation_present:
+                    if (
+                        name not in _ENGINEER_COMMAND_LEDGER_OBSERVATION_TOOLS
+                        or type(raw_ledger_observation) is not EngineerCommandLedgerObservation
+                    ):
+                        await self._audit(
+                            actor,
+                            name,
+                            False,
+                            "failed_after_start" if changes_data else "failed",
+                            details=details,
+                        )
+                        return ToolResult(
+                            name,
+                            False,
+                            error="Engineer command result failed private ledger validation",
+                            handler_entered=True,
+                            work_started=work_started,
+                        )
+                    engineer_command_ledger_observation = raw_ledger_observation
             if deferred_engineer_start and (
                 physical_start is None or work_started is None or work_started is not physical_start.started
             ):
@@ -4064,6 +4162,8 @@ class ExecutionKernel:
                         )
                     ),
                     handler_entered=True,
+                    engineer_work_item_continuation=engineer_work_item_continuation,
+                    engineer_command_ledger_observation=engineer_command_ledger_observation,
                 )
             await self._audit(actor, name, True, "ok", details=details)
             return ToolResult(
@@ -4076,6 +4176,8 @@ class ExecutionKernel:
                 archive_exact_file_reader_owner_id=archive_exact_file_reader_owner_id,
                 handler_entered=True,
                 work_started=work_started,
+                engineer_work_item_continuation=engineer_work_item_continuation,
+                engineer_command_ledger_observation=engineer_command_ledger_observation,
             )
         except asyncio.CancelledError:
             # A request/turn cancellation can arrive after an observe handler

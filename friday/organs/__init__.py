@@ -136,10 +136,25 @@ class OrganRegistry:
         return collected
 
     async def close(self) -> None:
-        """Close initialized organs in reverse registration order."""
+        """Close every organ in reverse order, then re-raise the first failure.
 
+        Shutdown order is a resource-ordering contract: a later organ must not
+        prevent an earlier one from draining its own processes.  Re-raising the
+        first failure preserves the previous caller-visible exception semantics;
+        later failures are logged by exception class only so they are not lost.
+        """
+
+        first_failure: BaseException | None = None
         for organ in reversed(self._organs):
-            await organ.close()
+            try:
+                await organ.close()
+            except BaseException as exc:
+                if first_failure is None:
+                    first_failure = exc
+                else:
+                    LOGGER.error("Additional organ shutdown failed (%s)", type(exc).__name__)
+        if first_failure is not None:
+            raise first_failure
 
 
 def is_service_recipient(settings, chat_id: str) -> bool:

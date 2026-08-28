@@ -2,7 +2,7 @@
 
 **Friday** (по-русски — **Пятница**; ex codename Jericho) — локальная многопользовательская Knowledge Operating System: она принимает текст и документы, сохраняет первоисточник, строит граф знаний, ищет по личной базе и отвечает через Telegram или HTTP API. Веб-панель предназначена для администрирования, разбора Inbox, работы с сущностями, правами, резервными копиями и диагностикой.
 
-Текущая версия: **0.207.65**. Owner-only Engineer Mode теперь является
+Текущая версия: **0.207.66**. Owner-only Engineer Mode теперь является
 автономной консолью Пятницы внутри её основной VM: модель сама выбирает и
 последовательно запускает установленное ПО от пользователя службы, работает с
 его файловой системой и сетью, получает точные текущие Telegram-вложения и
@@ -21,13 +21,12 @@ binding к точному принятому ingress request; canonical schema-4
 мигрирует только после побайтной проверки своей DDL и получает явный unbound
 sentinel, а не выдуманную replay identity. Исполняющий route остаётся default-off
 и требует отдельной evidence-bound activation; одна миграция его не включает.
-Schema 46 добавляет dormant body-free `EngineerWorkItem v1`: exact scope,
-closed CAS state, opaque step keys и только command/job/terminal receipt digests.
-Миграция не включает continuation, model loop, worker или запуск команды.
-Первый immutable build с этим dormant store должен быть сохранён как отдельный
-max-schema-46 fallback: прежний `0.207.64` понимает только schema 45 и после
-публикации marker 46 откатом служить не может. Runtime activation выпускается
-только следующим независимым пакетом.
+Schema 46 `EngineerWorkItem v1` активирована: exact scope, closed CAS
+state, source slots и только command/job/terminal receipt digests дают
+restart-safe continuation `observe → replan → next step or final`. Prompts,
+reasoning, argv, paths и output bodies в Work Item не хранятся; RUNNING и
+UNKNOWN никогда не replay-ятся. Внешний command ledger защищён от
+потери/отката и привязан к backup/restore и immutable rollback.
 Явная отмена закрывает graph отдельным code-owned non-completion receipt. Schema 43
 добавляет durable immutable Host Action jobs и append-only lifecycle events для
 выключенного по умолчанию Host Capability Plane. Schema 42
@@ -336,7 +335,7 @@ VRAM обнаружился при старте, а не на первом по�
 2. Создайте новый sibling release только из wheel; установленный venv не правьте пофайлово.
 3. Дайте оператору остановить backend и Telegram bridge и сохранить проверенный согласованный снимок SQLite, WAL, Telegram inbox и exact Obsidian root.
 4. Выполните offline migration, переключите общий release anchor атомарно, примите backend и только затем запускайте bridge. При ошибке используйте exact rollback, а не повреждённый прежний каталог.
-5. Схема SQLite — **46**. Schema 31 один раз фиксирует `relation_history_complete_from`; schema 32 добавляет monotonic observed boundary и REPLACE/context guards; schema 33 — неизменяемые transport-id повторной загрузки; schema 34 — проверяемое имя, данное пользователем в конкретном сообщении; schema 35 — изолированные профили, vault, onboarding, журнал операций и конфликты Obsidian; schema 36 — стабильные note bindings, revision-aware index/link graph и expiring candidate/Active Frame state; schema 37 — ограниченное person-owned хранилище структурных ошибок до фиксации assistant-сообщения; schema 38 — короткоживущие owner-scoped `RecallConversation` Work Item и закрытый Active Frame, привязанные к точному принятому результату окна переписки; schema 39 — закрытые labels `RecallSelectedArchiveEvidence` и один body-free sidecar выбранного источника; schema 40 — immutable body-free набор archive-кандидатов и durable ordinal question; schema 41 — rebuildable body-free `document_catalog` с exact Raw revision/extraction binding и закрытыми explicit-incomplete состояниями; schema 42 — body-free Work Item/Active Frame и receipts активного restart-safe сравнения выбранных сообщений с точным документом через durable Q1/Q2; schema 43 — immutable host action plans, person-scoped idempotency, restart-safe unknown/reconcile state и append-only host events; schema 44 — body-free fixed WorkGraph с двумя параллельными reads, одним primary synthesis, CAS/restart, one-shot review recovery и exact full/terminal publication receipts; explicit cancellation и archive/expiry retirement публикуют deterministic non-completion assistant ровно один раз. Schema 45 после точной проверки canonical schema-44 DDL добавляет immutable `anchor_request_binding_sha256`: старые graphs получают явный unbound sentinel, а новые связываются только с exact code-owned ingress binding без сохранения request body или source ref. Schema 46 добавляет dormant body-free `EngineerWorkItem v1` с exact owner/tenant/conversation/channel/source binding, closed CAS lifecycle, code-owned ordinal, opaque idempotency key и только command/job/terminal receipt digests; runtime activation отсутствует. Миграция schema 35→36 сначала побайтно проверяет выпущенную Obsidian-схему и только затем атомарно расширяет operation contract; schema 37–46 отдельно проверяют свои точные DDL-проекции. Остальные авторитетные знания, Inbox и разговоры не переписываются; более новая неизвестная схема отклоняется без изменений.
+5. Схема SQLite — **46**. Schema 31 один раз фиксирует `relation_history_complete_from`; schema 32 добавляет monotonic observed boundary и REPLACE/context guards; schema 33 — неизменяемые transport-id повторной загрузки; schema 34 — проверяемое имя, данное пользователем в конкретном сообщении; schema 35 — изолированные профили, vault, onboarding, журнал операций и конфликты Obsidian; schema 36 — стабильные note bindings, revision-aware index/link graph и expiring candidate/Active Frame state; schema 37 — ограниченное person-owned хранилище структурных ошибок до фиксации assistant-сообщения; schema 38 — короткоживущие owner-scoped `RecallConversation` Work Item и закрытый Active Frame, привязанные к точному принятому результату окна переписки; schema 39 — закрытые labels `RecallSelectedArchiveEvidence` и один body-free sidecar выбранного источника; schema 40 — immutable body-free набор archive-кандидатов и durable ordinal question; schema 41 — rebuildable body-free `document_catalog` с exact Raw revision/extraction binding и закрытыми explicit-incomplete состояниями; schema 42 — body-free Work Item/Active Frame и receipts активного restart-safe сравнения выбранных сообщений с точным документом через durable Q1/Q2; schema 43 — immutable host action plans, person-scoped idempotency, restart-safe unknown/reconcile state и append-only host events; schema 44 — body-free fixed WorkGraph с двумя параллельными reads, одним primary synthesis, CAS/restart, one-shot review recovery и exact full/terminal publication receipts; explicit cancellation и archive/expiry retirement публикуют deterministic non-completion assistant ровно один раз. Schema 45 после точной проверки canonical schema-44 DDL добавляет immutable `anchor_request_binding_sha256`: старые graphs получают явный unbound sentinel, а новые связываются только с exact code-owned ingress binding без сохранения request body или source ref. Schema 46 добавляет body-free `EngineerWorkItem v1` с exact owner/tenant/conversation/channel/source binding, closed CAS lifecycle, code-owned ordinal, opaque idempotency key и только command/job/terminal receipt digests; runtime активирует restart-safe continuation без replay уже принятой или UNKNOWN-команды. Миграция schema 35→36 сначала побайтно проверяет выпущенную Obsidian-схему и только затем атомарно расширяет operation contract; schema 37–46 отдельно проверяют свои точные DDL-проекции. Остальные авторитетные знания, Inbox и разговоры не переписываются; более новая неизвестная схема отклоняется без изменений.
 
 Перед обновлением можно дополнительно выполнить
 `jericho backup --label before-upgrade` и `jericho verify-backup`. Это SQLite-only
@@ -432,6 +431,7 @@ jericho doctor [--check-llm]
 jericho backup [--label NAME]
 jericho verify-backup [FILENAME]
 jericho restore-backup [FILENAME] --yes
+jericho engineer-command-store-provision
 jericho export-user USER_ID
 jericho import PATH [--dry-run] [--user U] [--uploaded-by U] [--suffix .md] [--limit N]
 jericho events [--type TYPE] [--limit N] [--json]
@@ -461,6 +461,9 @@ jericho mint-token --user U --preset P [--ttl 90d]
 jericho revoke-token TOKEN_ID
 ```
 
+- **`engineer-command-store-provision`** — одноразово создаёт или обновляет
+  аутентифицированный журнал Engineer-команд. Backend и Telegram bridge должны
+  быть остановлены; обычный runtime этот журнал не создаёт и не «лечит» сам.
 - **`search-source`** — дословный поиск по ИСХОДНОМУ тексту загруженного материала, мимо ранжирования. Нужен, когда помнишь точную фразу из бумаги: 93% загруженных знаков живут только в первоисточнике, а Knowledge Object несёт сокращённую версию. Отклонённое во входящих сюда не входит — это решение, а не фильтр.
 - **`up`** — запуск бэкенда и моста под супервизором; **`tui`** — интерактивный лаунчер, самая уместная точка входа, если не хочется помнить команды; **`install-services`** — systemd-юниты, чтобы всё поднималось само.
 - **`reindex-embeddings`** — пометить вектора устаревшими, чтобы фоновый индексатор пересчитал их. Понадобится после смены модели эмбеддингов или правки разбиения на пассажи. Поиск при этом продолжает работать на прежних векторах: они не удаляются, а заменяются по мере пересчёта.

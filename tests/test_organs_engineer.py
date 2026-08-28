@@ -508,3 +508,44 @@ async def test_organ_registry_closes_engineer_owned_service_in_reverse_order() -
     await registry.close()
 
     assert events == ["last", "engineer-service", "first"]
+
+
+@pytest.mark.asyncio
+async def test_organ_registry_closes_every_organ_after_close_failures(caplog) -> None:
+    events: list[str] = []
+    first_failure = RuntimeError("private-first-detail")
+
+    class ClosingOrgan(Organ):
+        def __init__(self, name: str, failure: BaseException | None = None) -> None:
+            self.name = name
+            self._failure = failure
+
+        async def close(self) -> None:
+            events.append(self.name)
+            if self._failure is not None:
+                raise self._failure
+
+    class ClosingService:
+        def close(self) -> None:
+            events.append("engineer-service")
+
+    engineer = EngineerOrgan()
+    engineer._command_service = ClosingService()  # type: ignore[assignment]
+    registry = OrganRegistry(
+        [
+            ClosingOrgan("first", ValueError("private-second-detail")),
+            engineer,
+            ClosingOrgan("last", first_failure),
+        ]
+    )
+
+    with caplog.at_level("ERROR", logger="friday.organs"), pytest.raises(RuntimeError) as raised:
+        await registry.close()
+
+    assert raised.value is first_failure
+    assert events == ["last", "engineer-service", "first"]
+    assert [record.getMessage() for record in caplog.records] == [
+        "Additional organ shutdown failed (ValueError)"
+    ]
+    assert "private-first-detail" not in caplog.text
+    assert "private-second-detail" not in caplog.text

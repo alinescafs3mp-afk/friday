@@ -10,7 +10,7 @@ from typing import Any
 import pytest
 from starlette.requests import Request
 
-from friday.api.notifications import notifications_pending
+from friday.api.notifications import _claim_strict_notification, notifications_pending
 from friday.organs.engineer import EngineerOrgan
 from friday.organs.engineer.command import (
     CommandGrantAuthority,
@@ -35,6 +35,7 @@ from friday.organs.engineer.command.progress import (
 from friday.organs.engineer.command.store import CommandJobStore, atomic_write
 from friday.organs.engineer.command.workspace import JobWorkspace
 from friday.organs.engineer.command_tools import EngineerCommandService
+from friday.organs.engineer.terminal_delivery import TerminalDeliveryError
 from friday.permissions import LEGACY_OWNER_USER_ID, AuthorizationService
 
 
@@ -236,6 +237,21 @@ def test_progress_carrier_rejects_open_shape_checkpoint_and_scope_conflict(stora
         parse_progress_envelope(json.dumps(parsed))
 
 
+def test_archive_atomically_retires_progress_and_refuses_restage(storage) -> None:
+    conversation_id = _scope(storage)
+    staged = _stage(storage, conversation_id)
+
+    report = storage.delete_conversation(conversation_id, LEGACY_OWNER_USER_ID)
+    assert report["cancelled"]["engineer_progress_notifications"] == 1
+    row = storage.execute(
+        "SELECT status FROM outbound_notifications WHERE id=?",
+        (staged.notification_id,),
+    ).fetchone()
+    assert row is not None and row["status"] == "failed"
+    with pytest.raises(ProgressDeliveryError, match="progress_scope_inactive"):
+        _stage(storage, conversation_id)
+
+
 @pytest.mark.asyncio
 async def test_pending_reauthorizes_progress_and_files_read_is_not_required(settings, storage) -> None:
     enabled = replace(settings, engineer_mode_enabled=True, engineer_command_enabled=True)
@@ -253,28 +269,61 @@ async def test_pending_reauthorizes_progress_and_files_read_is_not_required(sett
         {
             "id": staged.notification_id,
             "chat_id": "5001",
-            "body": (
-                f"⏳ Engineer-задача `{'1' * 32}` выполняется 1 мин 0 с. "
-                "Этап: выполняется команда. Получено вывода: stdout 17 Б, stderr 3 Б. "
-                "Жёсткий тайм-аут не задан."
-            ),
             "kind": PROGRESS_NOTIFICATION_KIND,
             "dedup_key": staged.dedup_key,
-            "status_update": {
-                "schema": "friday.telegram-status.v1",
-                "operation_id": f"engineer:{'1' * 32}",
-                "revision": 60,
-                "terminal": False,
-                "stage": "command_running",
-                "elapsed_sec": 60,
-                "timeout_sec": 0,
-                "remaining_sec": None,
-                "stdout_bytes": 17,
-                "stderr_bytes": 3,
-                "output_activity": True,
-            },
         }
     ]
+    claimed = _claim_strict_notification(
+        request.app.state,
+        staged.notification_id,
+        pending["items"][0],
+        status_messages=True,
+    )
+    assert "выполняется 1 мин 0 с" in claimed["body"]
+    assert claimed["status_update"] == {
+        "schema": "friday.telegram-status.v1",
+        "operation_id": f"engineer:{'1' * 32}",
+        "revision": 60,
+        "terminal": False,
+        "stage": "command_running",
+        "elapsed_sec": 60,
+        "timeout_sec": 0,
+        "remaining_sec": None,
+        "stdout_bytes": 17,
+        "stderr_bytes": 3,
+        "output_activity": True,
+    }
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("revocation", ["identity", "manage", "account"])
+async def test_progress_claim_reauthorizes_after_pointer_listing(
+    settings,
+    storage,
+    revocation: str,
+) -> None:
+    enabled = replace(settings, engineer_mode_enabled=True, engineer_command_enabled=True)
+    conversation_id = _scope(storage)
+    staged = _stage(storage, conversation_id)
+    authorization = _authority(storage)
+    request = _request(storage, enabled, authorization)
+    pointer = (await notifications_pending(request, limit=20))["items"][0]
+
+    if revocation == "identity":
+        assert storage.unlink_identity("telegram", "5001")
+    elif revocation == "manage":
+        authorization.deny_permission(LEGACY_OWNER_USER_ID, "engineer.command.manage")
+    else:
+        with storage.transaction() as conn:
+            conn.execute("UPDATE users SET status='disabled' WHERE id=?", (LEGACY_OWNER_USER_ID,))
+
+    with pytest.raises(TerminalDeliveryError, match="terminal_authorization_changed"):
+        _claim_strict_notification(
+            request.app.state,
+            staged.notification_id,
+            pointer,
+            status_messages=True,
+        )
 
 
 def test_progress_reports_elapsed_and_deadline_without_inventing_eta(storage) -> None:
@@ -492,6 +541,37 @@ def test_nonrunning_progress_is_retired_once_after_restart(storage, tmp_path: Pa
         ("1" * 32,),
     ).fetchone()
     assert marker is not None and marker["retired_at"] is not None
+    _close_running_service(service)
+
+
+def test_running_progress_is_retired_without_publication_after_archive(
+    storage,
+    tmp_path: Path,
+) -> None:
+    service, conversation_id, _authorization = _running_service(
+        storage,
+        tmp_path,
+        started_at=1_000.0,
+    )
+    assert storage.archive_conversation(conversation_id, LEGACY_OWNER_USER_ID)
+    assert service.publish_progress_jobs(now=1_061.0) == {
+        "staged": 0,
+        "retired": 1,
+        "failed": 0,
+    }
+    assert (
+        storage.execute(
+            "SELECT COUNT(*) FROM outbound_notifications WHERE kind=?",
+            (PROGRESS_NOTIFICATION_KIND,),
+        ).fetchone()[0]
+        == 0
+    )
+    marker = service.kernel.store._conn.execute(  # noqa: SLF001 - exact retirement marker
+        "SELECT checkpoint_sec,retired_at FROM command_job_progress WHERE job_id=?",
+        ("1" * 32,),
+    ).fetchone()
+    assert marker is not None
+    assert marker["checkpoint_sec"] == 0 and marker["retired_at"] is not None
     _close_running_service(service)
 
 

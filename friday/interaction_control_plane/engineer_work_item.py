@@ -23,6 +23,7 @@ from enum import StrEnum
 from friday.engineer_source_binding import (
     ENGINEER_SOURCE_BINDING_SCHEMA,
     canonical_engineer_source_binding_sha256,
+    canonical_engineer_source_step_id,
 )
 from friday.interaction_control_plane.engineer_work_item_schema import (
     ENGINEER_WORK_ITEM_COMPLETION_CONTRACT_SHA256,
@@ -55,6 +56,7 @@ _COMMAND_LEDGER_BINDING_KEYS = frozenset(
         "conversation_id",
         "channel",
         "source_row_id",
+        "source_step_id",
         "source_hash",
         "telegram_update_id",
         "idempotency_key",
@@ -241,6 +243,7 @@ def engineer_source_binding_sha256(
     conversation_id: str,
     channel: EngineerWorkItemChannel,
     source_row_id: str,
+    source_step_id: str,
     source_hash: str,
     telegram_update_id: str,
     delivery_chat_id: str,
@@ -264,6 +267,10 @@ def engineer_source_binding_sha256(
             raise EngineerWorkItemAnchorError(f"{label} is not a bounded source identity") from exc
         if len(value) > 128:
             raise EngineerWorkItemAnchorError(f"{label} is not a bounded source identity")
+    try:
+        source_step = canonical_engineer_source_step_id(source_step_id)
+    except ValueError as exc:
+        raise EngineerWorkItemAnchorError("source_step_id is not a code-owned Engineer slot") from exc
     source_digest = _digest(source_hash, label="source_hash")
     delivery = _delivery_chat_id(delivery_chat_id)
     return canonical_engineer_source_binding_sha256(
@@ -272,6 +279,7 @@ def engineer_source_binding_sha256(
         conversation_id=conversation,
         channel=channel.value,
         source_row_id=source_row_id,
+        source_step_id=source_step,
         source_hash=source_digest,
         telegram_update_id=telegram_update_id,
         delivery_chat_id=delivery,
@@ -285,6 +293,7 @@ class _ObservedCommandLedgerBinding:
     tenant_id: str
     conversation_id: str
     channel: EngineerWorkItemChannel
+    source_step_id: str
     source_binding_sha256: str
     idempotency_key: str
     command_digest: str
@@ -424,6 +433,7 @@ def _observed_command_ledger_binding(
         conversation_id=conversation,
         channel=channel,
         source_row_id=_stored_str(value["source_row_id"], label="ledger source_row_id"),
+        source_step_id=_stored_str(value["source_step_id"], label="ledger source_step_id"),
         source_hash=_stored_str(value["source_hash"], label="ledger source_hash"),
         telegram_update_id=_stored_str(
             value["telegram_update_id"],
@@ -437,6 +447,7 @@ def _observed_command_ledger_binding(
         tenant_id=tenant,
         conversation_id=conversation,
         channel=channel,
+        source_step_id=_stored_str(value["source_step_id"], label="ledger source_step_id"),
         source_binding_sha256=source,
         idempotency_key=_idempotency_key(value["idempotency_key"]),
         command_digest=_digest(value["command_digest"], label="ledger command_digest"),
@@ -1398,9 +1409,7 @@ def settle_engineer_terminal_receipt_in_transaction(
                 ),
             )
             if retired.rowcount != 1:
-                raise EngineerWorkItemConflictError(
-                    "inactive-scope retirement lost its CAS race"
-                )
+                raise EngineerWorkItemConflictError("inactive-scope retirement lost its CAS race")
     return get_engineer_work_item_in_transaction(
         conn,
         work_item_id=item.id,
@@ -1551,6 +1560,7 @@ def mark_engineer_work_item_ready_to_answer_in_transaction(
     """CAS an observed capability result through the code-owned completion gate."""
 
     expected_revision = _expected_revision(expected_revision)
+    timestamp = _now(now)
     current = get_engineer_work_item_in_transaction(
         conn,
         work_item_id=work_item_id,
@@ -1563,9 +1573,11 @@ def mark_engineer_work_item_ready_to_answer_in_transaction(
         current is not None
         and current.revision == expected_revision + 1
         and current.state is EngineerWorkItemState.READY_TO_ANSWER
-        and _scope_is_live(conn, current)
     ):
-        return current
+        if timestamp >= current.expires_at:
+            raise EngineerWorkItemConflictError("Engineer Work Item expired before completion gate")
+        if _scope_is_live(conn, current):
+            return current
     item = _required_item(
         conn,
         work_item_id=work_item_id,
@@ -1579,7 +1591,6 @@ def mark_engineer_work_item_ready_to_answer_in_transaction(
         raise EngineerWorkItemConflictError("completion gate requires an observed terminal receipt")
     if not _scope_is_live(conn, item):
         raise EngineerWorkItemConflictError("inactive conversation cannot pass the completion gate")
-    timestamp = _now(now)
     if timestamp >= item.expires_at:
         raise EngineerWorkItemConflictError("Engineer Work Item expired before completion gate")
     with _mutation(conn):
@@ -1671,6 +1682,8 @@ def close_engineer_work_item_in_transaction(
     if terminal_state is EngineerWorkItemState.COMPLETED and not _scope_is_live(conn, item):
         raise EngineerWorkItemConflictError("inactive scope cannot publish a completed answer")
     timestamp = _now(now)
+    if terminal_state is EngineerWorkItemState.COMPLETED and timestamp >= item.expires_at:
+        raise EngineerWorkItemConflictError("Engineer Work Item expired before answer commit")
     completed_at = timestamp if terminal_state is EngineerWorkItemState.COMPLETED else None
     with _mutation(conn):
         updated = conn.execute(
@@ -1757,10 +1770,7 @@ def _prepared_discard_authority(
         candidate_key: object,
         candidate_digest: object,
     ) -> int:
-        return int(
-            (candidate_id, candidate_owner, candidate_key, candidate_digest)
-            == expected_authority
-        )
+        return int((candidate_id, candidate_owner, candidate_key, candidate_digest) == expected_authority)
 
     conn.create_function(
         "friday_engineer_prepared_discard_authorized",
@@ -1832,9 +1842,7 @@ def discard_unsubmitted_engineer_work_item_in_transaction(
         or len(item.steps) != 1
         or item.current_step.state is not EngineerWorkItemStepState.PREPARED
     ):
-        raise EngineerWorkItemConflictError(
-            "only the exact fenced initial reservation can be discarded"
-        )
+        raise EngineerWorkItemConflictError("only the exact fenced initial reservation can be discarded")
     with _prepared_discard_authority(conn, item=item, fence=fence), _mutation(conn):
         _persist_retired_command_fence(
             conn,
@@ -1865,9 +1873,7 @@ def discard_unsubmitted_engineer_work_item_in_transaction(
             ),
         )
         if cursor.rowcount != 1:
-            raise EngineerWorkItemConflictError(
-                "prepared Engineer Work Item discard lost its CAS race"
-            )
+            raise EngineerWorkItemConflictError("prepared Engineer Work Item discard lost its CAS race")
     return True
 
 
@@ -1949,11 +1955,7 @@ def rollback_fenced_unsubmitted_engineer_step_in_transaction(
         raise EngineerWorkItemConflictError("only the exact fenced later step can be rolled back")
     timestamp = _now(now)
     scope_live = _scope_is_live(conn, item)
-    target_state = (
-        EngineerWorkItemState.WAITING_FOR_INPUT
-        if scope_live
-        else EngineerWorkItemState.CANCELLED
-    )
+    target_state = EngineerWorkItemState.WAITING_FOR_INPUT if scope_live else EngineerWorkItemState.CANCELLED
     target_transition = (
         EngineerWorkItemTransition.PREPARED_STEP_DISCARDED
         if scope_live

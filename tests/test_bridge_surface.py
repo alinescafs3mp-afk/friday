@@ -439,6 +439,7 @@ EXPECTED_INBOX: dict[str, str] = {
         "(self, chat_id: 'int', operation_id: 'str', revision: 'int') -> 'bool'"
     ),
     "confirm_notification_part_delivery": "(self, notification_id: 'str', part_key: 'str') -> 'bool'",
+    "confirm_notification_status_reconciled": "(self, notification_id: 'str') -> 'None'",
     "dead_letters": "(self, *, limit: 'int' = 100) -> 'list[dict[str, Any]]'",
     "delivered_notification_ids": "(self) -> 'set[str]'",
     "forget_delivered_notifications": "(self, notification_ids: 'list[str]') -> 'None'",
@@ -455,6 +456,7 @@ EXPECTED_INBOX: dict[str, str] = {
     "notification_delivery_outcome": "(self, notification_id: 'str') -> 'str | None'",
     "notification_delivery_orphan_outcomes": "(self, *, limit: 'int' = 100) -> 'dict[str, str]'",
     "notification_delivery_outcomes": "(self, *, limit: 'int' = 100) -> 'dict[str, str]'",
+    "notification_delivery_reconciled_outcomes": "(self, *, limit: 'int' = 100) -> 'dict[str, str]'",
     "pending": "(self, *, now: 'float | None' = None, limit: 'int' = 20) -> 'list[dict[str, Any]]'",
     "record_answer_chunks_sent": "(self, update_id: 'int', count: 'int') -> 'None'",
     "record_uncertain_answer_chunk": "(self, update_id: 'int', count: 'int') -> 'None'",

@@ -8,6 +8,7 @@ from hashlib import sha256
 from typing import Any
 
 from friday.config import env as config_env
+from friday.engineer_source_binding import canonical_engineer_source_step_id
 
 from .contracts import (
     ALLOWED_CHANNELS,
@@ -28,6 +29,13 @@ def _as_token(value: Any, *, code: str, limit: int) -> str:
 
 def _mac(secret: bytes, payload: dict[str, Any]) -> str:
     return hmac.new(secret, canonical_json_bytes(payload), sha256).hexdigest()
+
+
+def _source_step_id(value: Any) -> str:
+    try:
+        return canonical_engineer_source_step_id(value)
+    except ValueError as exc:
+        raise CommandError("invalid_source_step") from exc
 
 
 class OwnerSourceAuthority:
@@ -54,6 +62,7 @@ class OwnerSourceAuthority:
         conversation_id: str,
         channel: str,
         source_row_id: str,
+        source_step_id: str,
         source_hash: str,
         telegram_update_id: str,
         isolation_profile: IsolationProfile,
@@ -78,6 +87,7 @@ class OwnerSourceAuthority:
             conversation_id=_as_token(conversation_id, code="invalid_conversation", limit=128),
             channel=channel_text,
             source_row_id=_as_token(source_row_id, code="invalid_source_row", limit=128),
+            source_step_id=_source_step_id(source_step_id),
             source_hash=source_hash_text,
             telegram_update_id=_as_token(telegram_update_id, code="invalid_telegram_update", limit=128),
             isolation_profile=isolation_profile,
@@ -91,6 +101,7 @@ class OwnerSourceAuthority:
             conversation_id=source.conversation_id,
             channel=source.channel,
             source_row_id=source.source_row_id,
+            source_step_id=source.source_step_id,
             source_hash=source.source_hash,
             telegram_update_id=source.telegram_update_id,
             isolation_profile=source.isolation_profile,
@@ -106,6 +117,7 @@ class OwnerSourceAuthority:
             raise CommandError("invalid_owner_source")
         if source.channel not in ALLOWED_CHANNELS:
             raise CommandError("invalid_channel")
+        _source_step_id(source.source_step_id)
         if source.isolation_profile not in {
             IsolationProfile.ISOLATED_WORKSPACE,
             IsolationProfile.HOST_USER,
@@ -132,6 +144,7 @@ class OwnerSourceAuthority:
             conversation_id=sealed.conversation_id,
             channel=sealed.channel,
             source_row_id=sealed.source_row_id,
+            source_step_id=sealed.source_step_id,
             source_hash=sealed.source_hash,
             telegram_update_id=sealed.telegram_update_id,
             idempotency_key=sealed.idempotency_key,
@@ -147,6 +160,7 @@ class OwnerSourceAuthority:
             conversation_id=delegation.conversation_id,
             channel=delegation.channel,
             source_row_id=delegation.source_row_id,
+            source_step_id=delegation.source_step_id,
             source_hash=delegation.source_hash,
             telegram_update_id=delegation.telegram_update_id,
             idempotency_key=delegation.idempotency_key,
@@ -173,6 +187,7 @@ class OwnerSourceAuthority:
             sealed.conversation_id,
             sealed.channel,
             sealed.source_row_id,
+            sealed.source_step_id,
             sealed.source_hash,
             sealed.telegram_update_id,
             sealed.idempotency_key,
@@ -184,6 +199,7 @@ class OwnerSourceAuthority:
             delegation.conversation_id,
             delegation.channel,
             delegation.source_row_id,
+            delegation.source_step_id,
             delegation.source_hash,
             delegation.telegram_update_id,
             delegation.idempotency_key,

@@ -332,21 +332,23 @@ class ConversationsMixin(StorageShared):
         return dict(row) if row else None
 
     def archive_conversation(self, conversation_id: str, user_id: str) -> bool:
-        with self.transaction() as conn:
-            cursor = conn.execute(
-                "UPDATE conversations SET is_archived=1, updated_at=? WHERE id=? AND user_id=?",
-                (utc_now(), conversation_id, user_id),
-            )
-        return cursor.rowcount > 0
+        """Archive through the same retirement boundary as every public route."""
+
+        return bool(self.delete_conversation(conversation_id, user_id).get("existed"))
 
     def set_conversation_archived(
         self, conversation_id: str, user_id: str, archived: bool
     ) -> dict[str, Any] | None:
         """Archive or unarchive a conversation; archived ones drop out of the default list."""
+        if archived:
+            report = self.delete_conversation(conversation_id, user_id)
+            if not report.get("existed"):
+                return None
+            return self.get_conversation(conversation_id, user_id)
         with self.transaction() as conn:
             conn.execute(
-                "UPDATE conversations SET is_archived=?, updated_at=? WHERE id=? AND user_id=?",
-                (1 if archived else 0, utc_now(), conversation_id, user_id),
+                "UPDATE conversations SET is_archived=0, updated_at=? WHERE id=? AND user_id=?",
+                (utc_now(), conversation_id, user_id),
             )
         return self.get_conversation(conversation_id, user_id)
 
@@ -407,6 +409,20 @@ class ConversationsMixin(StorageShared):
                 retired_graphs = 1
             sessions = conn.execute(
                 "DELETE FROM channel_sessions WHERE user_id=? AND conversation_id=?",
+                (user_id, conversation_id),
+            )
+            # Progress is meaningful only while its conversation is live.  The
+            # queue shares this transaction, so a concurrent progress producer
+            # either commits before us and is retired here, or observes the
+            # archived row and cannot stage.  Terminal carriers are deliberately
+            # not included: a command admitted before archival still owes its
+            # owner one verified terminal result.
+            retired_progress = conn.execute(
+                """UPDATE outbound_notifications
+                      SET status='failed'
+                    WHERE user_id=? AND kind='engineer_command_progress'
+                      AND status='pending' AND json_valid(body)=1
+                      AND json_extract(body,'$.conversation_id')=?""",
                 (user_id, conversation_id),
             )
             kept = conn.execute(
@@ -494,6 +510,11 @@ class ConversationsMixin(StorageShared):
             "cancelled": {
                 **({"compare_current_file_web_graphs": retired_graphs} if retired_graphs else {}),
                 "work_items": max(0, int(cancelled_work_items.rowcount)),
+                **(
+                    {"engineer_progress_notifications": max(0, int(retired_progress.rowcount))}
+                    if retired_progress.rowcount
+                    else {}
+                ),
                 **(
                     {"engineer_work_items": max(0, int(cancelled_engineer_work_items.rowcount))}
                     if cancelled_engineer_work_items.rowcount

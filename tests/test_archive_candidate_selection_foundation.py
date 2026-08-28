@@ -102,6 +102,25 @@ _TITLE_CANARY = "PRIVATE-TITLE-CANARY"
 _EXCERPT_CANARY = "PRIVATE-EXCERPT-CANARY"
 
 
+def _remove_post_schema40_engineer_work_items(conn: sqlite3.Connection) -> None:
+    """Strip schema-46 cross-scope guards from a synthetic schema-40 image."""
+
+    trigger_names = [
+        str(row[0])
+        for row in conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='trigger' AND name LIKE 'trg_engineer_work_item_%'"
+        )
+    ]
+    for name in trigger_names:
+        conn.execute(f'DROP TRIGGER "{name}"')  # nosec B608 - SQLite-owned names
+    for table in (
+        "engineer_work_item_command_fences",
+        "engineer_work_item_steps",
+        "engineer_work_items",
+    ):
+        conn.execute(f'DROP TABLE IF EXISTS "{table}"')  # nosec B608 - fixed identifiers
+
+
 def _sha(value: str) -> str:
     return hashlib.sha256(value.encode("utf-8")).hexdigest()
 
@@ -2107,6 +2126,7 @@ def test_rowful_exact_schema40_candidate_journey_migrates_without_rewrite(
 
     with sqlite3.connect(database) as conn:
         conn.execute("PRAGMA foreign_keys=OFF")
+        _remove_post_schema40_engineer_work_items(conn)
         for table in _WORK_ITEM_TABLES:
             conn.execute(f'DROP TABLE "{table}"')
         _execute_schema(conn, _WORK_ITEM_SCHEMA_40)

@@ -39,6 +39,8 @@ TERMINAL_NOTIFICATION_KIND = "engineer_command_terminal"
 TERMINAL_ENVELOPE_SCHEMA = "friday.engineer-command-terminal.v1"
 TERMINAL_TEXT_NOTIFICATION_KIND = "engineer_command_terminal_text"
 TERMINAL_TEXT_ENVELOPE_SCHEMA = "friday.engineer-command-terminal-text.v1"
+UNKNOWN_NOTIFICATION_KIND = "engineer_command_unknown"
+UNKNOWN_ENVELOPE_SCHEMA = "friday.engineer-command-unknown.v1"
 TERMINAL_ARTIFACT_MAX_BYTES = 36 * 1024 * 1024
 
 _JOB_ID = re.compile(r"[0-9a-f]{32}")
@@ -215,6 +217,24 @@ def terminal_dedup_key(job_id: str, receipt_mac: str, *, has_artifact: bool) -> 
     return f"engineer-terminal:{lane}:{job_id}:{receipt_mac}"
 
 
+def unknown_dedup_key(job_id: str, source_binding_sha256: str) -> str:
+    if _JOB_ID.fullmatch(job_id) is None or _SHA256.fullmatch(source_binding_sha256) is None:
+        raise TerminalDeliveryError("unknown_identity_invalid")
+    return f"engineer-unknown:v1:{job_id}:{source_binding_sha256}"
+
+
+def _safe_unknown_text(job_id: str) -> str:
+    if _JOB_ID.fullmatch(job_id) is None:
+        raise TerminalDeliveryError("unknown_identity_invalid")
+    return (
+        f"⚠️ Состояние Engineer-задачи `{job_id}` неизвестно. Нельзя честно подтвердить "
+        "ни успех, ни ошибку: после попытки запуска потеряно достоверное "
+        "подтверждение завершения. "
+        "Команда автоматически не запускалась повторно. Проверь её эффекты вручную перед "
+        "любым повтором."
+    )
+
+
 def parse_terminal_text_envelope(value: object) -> dict[str, Any]:
     """Parse an exact pointer to one stored code-owned terminal text result."""
 
@@ -259,6 +279,51 @@ def parse_terminal_text_envelope(value: object) -> dict[str, Any]:
         or parsed.get("status") not in _TERMINAL_STATUSES
     ):
         raise TerminalDeliveryError("terminal_text_envelope_invalid")
+    return parsed
+
+
+def parse_unknown_envelope(value: object) -> dict[str, Any]:
+    """Parse an exact pointer to one code-owned UNKNOWN notice."""
+
+    if not isinstance(value, str) or not value or len(value.encode("utf-8")) > _ENVELOPE_MAX_BYTES:
+        raise TerminalDeliveryError("unknown_envelope_invalid")
+    try:
+        parsed = json.loads(value)
+    except (TypeError, ValueError, RecursionError) as exc:
+        raise TerminalDeliveryError("unknown_envelope_invalid") from exc
+    if not isinstance(parsed, dict) or _canonical_json(parsed) != value:
+        raise TerminalDeliveryError("unknown_envelope_noncanonical")
+    if set(parsed) != {
+        "actor_id",
+        "assistant_message_id",
+        "conversation_id",
+        "delivery_chat_id",
+        "job_id",
+        "notification_id",
+        "schema",
+        "source_binding_sha256",
+        "source_message_id",
+        "tenant_id",
+        "text_sha256",
+    }:
+        raise TerminalDeliveryError("unknown_envelope_shape_invalid")
+    if (
+        parsed.get("schema") != UNKNOWN_ENVELOPE_SCHEMA
+        or not isinstance(parsed.get("actor_id"), str)
+        or not parsed["actor_id"]
+        or not isinstance(parsed.get("tenant_id"), str)
+        or not parsed["tenant_id"]
+        or not isinstance(parsed.get("conversation_id"), str)
+        or not parsed["conversation_id"]
+        or _MESSAGE_ID.fullmatch(str(parsed.get("source_message_id") or "")) is None
+        or _MESSAGE_ID.fullmatch(str(parsed.get("assistant_message_id") or "")) is None
+        or _NOTIFICATION_ID.fullmatch(str(parsed.get("notification_id") or "")) is None
+        or _JOB_ID.fullmatch(str(parsed.get("job_id") or "")) is None
+        or _SHA256.fullmatch(str(parsed.get("source_binding_sha256") or "")) is None
+        or _SHA256.fullmatch(str(parsed.get("text_sha256") or "")) is None
+        or _CHAT_ID.fullmatch(str(parsed.get("delivery_chat_id") or "")) is None
+    ):
+        raise TerminalDeliveryError("unknown_envelope_invalid")
     return parsed
 
 
@@ -366,6 +431,22 @@ def _existing_text_notification(
     return dict(row) if row is not None else None
 
 
+def _existing_unknown_notification(
+    storage: Any,
+    *,
+    chat_id: str,
+    dedup_key: str,
+) -> dict[str, Any] | None:
+    row = storage.execute(
+        """SELECT n.id,n.user_id,n.chat_id,n.kind,n.dedup_key,n.body,n.status
+              FROM outbound_notifications AS n
+             WHERE n.chat_id=? AND n.dedup_key=?
+               AND n.kind='engineer_command_unknown'""",
+        (str(chat_id), str(dedup_key)),
+    ).fetchone()
+    return dict(row) if row is not None else None
+
+
 def terminal_text_notification_projection(
     storage: Any,
     row: Mapping[str, Any],
@@ -430,6 +511,249 @@ def terminal_text_notification_projection(
     ):
         raise TerminalDeliveryError("terminal_text_message_changed")
     return {"body": content}
+
+
+def unknown_notification_projection(
+    storage: Any,
+    row: Mapping[str, Any],
+    *,
+    tenant_id: str,
+    actor_id: str,
+) -> dict[str, str]:
+    """Rebuild one honest UNKNOWN notice from its immutable message pointer."""
+
+    envelope = parse_unknown_envelope(row.get("body"))
+    expected_dedup_key = unknown_dedup_key(
+        envelope["job_id"],
+        envelope["source_binding_sha256"],
+    )
+    if (
+        row.get("kind") != UNKNOWN_NOTIFICATION_KIND
+        or row.get("status") not in {None, "pending", "sent", "uncertain", "failed"}
+        or str(row.get("id") or "") != envelope["notification_id"]
+        or str(row.get("user_id") or "") != actor_id
+        or str(row.get("chat_id") or "") != envelope["delivery_chat_id"]
+        or envelope["actor_id"] != actor_id
+        or envelope["tenant_id"] != tenant_id
+        or not hmac.compare_digest(str(row.get("dedup_key") or ""), expected_dedup_key)
+    ):
+        raise TerminalDeliveryError("unknown_scope_changed")
+    source = storage.get_message(str(envelope["source_message_id"]), actor_id)
+    if (
+        not isinstance(source, Mapping)
+        or str(source.get("conversation_id") or "") != envelope["conversation_id"]
+        or str(source.get("role") or "") != "user"
+    ):
+        raise TerminalDeliveryError("unknown_source_changed")
+    message = storage.get_message(str(envelope["assistant_message_id"]), actor_id)
+    content = str(message.get("content") or "") if isinstance(message, Mapping) else ""
+    if (
+        not isinstance(message, Mapping)
+        or str(message.get("conversation_id") or "") != envelope["conversation_id"]
+        or str(message.get("role") or "") != "assistant"
+        or str(message.get("reply_to") or "") != envelope["source_message_id"]
+        or content != _safe_unknown_text(envelope["job_id"])
+        or not hmac.compare_digest(
+            hashlib.sha256(content.encode("utf-8")).hexdigest(),
+            str(envelope["text_sha256"]),
+        )
+    ):
+        raise TerminalDeliveryError("unknown_message_changed")
+    try:
+        metadata = json.loads(str(message.get("metadata_json") or ""))
+    except (TypeError, ValueError, RecursionError) as exc:
+        raise TerminalDeliveryError("unknown_message_changed") from exc
+    unknown = metadata.get("engineer_command_unknown") if isinstance(metadata, Mapping) else None
+    if (
+        not isinstance(unknown, Mapping)
+        or unknown.get("schema") != UNKNOWN_ENVELOPE_SCHEMA
+        or unknown.get("notification_id") != envelope["notification_id"]
+        or unknown.get("job_id") != envelope["job_id"]
+        or unknown.get("source_binding_sha256") != envelope["source_binding_sha256"]
+        or unknown.get("delivery_chat_id") != envelope["delivery_chat_id"]
+        or unknown.get("source_message_id") != envelope["source_message_id"]
+        or unknown.get("text_sha256") != envelope["text_sha256"]
+    ):
+        raise TerminalDeliveryError("unknown_message_changed")
+    return {"body": content}
+
+
+def _exact_existing_unknown(
+    storage: Any,
+    row: Mapping[str, Any],
+    *,
+    actor_id: str,
+    tenant_id: str,
+    conversation_id: str,
+    source_message_id: str,
+    delivery_chat_id: str,
+    job_id: str,
+    source_binding_sha256: str,
+    text_sha256: str,
+) -> StagedTerminalNotification:
+    expected_dedup_key = unknown_dedup_key(job_id, source_binding_sha256)
+    envelope = parse_unknown_envelope(row.get("body"))
+    expected = {
+        "actor_id": actor_id,
+        "tenant_id": tenant_id,
+        "conversation_id": conversation_id,
+        "source_message_id": source_message_id,
+        "delivery_chat_id": delivery_chat_id,
+        "job_id": job_id,
+        "source_binding_sha256": source_binding_sha256,
+        "notification_id": str(row.get("id") or ""),
+        "text_sha256": text_sha256,
+    }
+    if (
+        row.get("kind") != UNKNOWN_NOTIFICATION_KIND
+        or row.get("user_id") != actor_id
+        or str(row.get("chat_id") or "") != delivery_chat_id
+        or not hmac.compare_digest(str(row.get("dedup_key") or ""), expected_dedup_key)
+        or any(envelope.get(key) != expected_value for key, expected_value in expected.items())
+    ):
+        raise TerminalDeliveryError("unknown_dedup_conflict")
+    unknown_notification_projection(
+        storage,
+        row,
+        tenant_id=tenant_id,
+        actor_id=actor_id,
+    )
+    body = str(row["body"])
+    return StagedTerminalNotification(
+        job_id,
+        str(row["id"]),
+        str(row["dedup_key"]),
+        hashlib.sha256(body.encode("ascii")).hexdigest(),
+        str(row["status"]),
+    )
+
+
+def stage_unknown_notification(
+    storage: Any,
+    *,
+    actor_id: str,
+    tenant_id: str,
+    conversation_id: str,
+    source_message_id: str,
+    delivery_chat_id: str,
+    job_id: str,
+    source_binding_sha256: str,
+) -> StagedTerminalNotification:
+    """Atomically freeze one code-owned UNKNOWN notice and queue pointer."""
+
+    text = _safe_unknown_text(job_id)
+    text_sha256 = hashlib.sha256(text.encode("utf-8")).hexdigest()
+    dedup_key = unknown_dedup_key(job_id, source_binding_sha256)
+    existing = _existing_unknown_notification(
+        storage,
+        chat_id=delivery_chat_id,
+        dedup_key=dedup_key,
+    )
+    if existing is not None:
+        staged = _exact_existing_unknown(
+            storage,
+            existing,
+            actor_id=actor_id,
+            tenant_id=tenant_id,
+            conversation_id=conversation_id,
+            source_message_id=source_message_id,
+            delivery_chat_id=delivery_chat_id,
+            job_id=job_id,
+            source_binding_sha256=source_binding_sha256,
+            text_sha256=text_sha256,
+        )
+        with suppress(Exception), storage.transaction() as conn:
+            _retire_progress_best_effort(
+                conn,
+                actor_id=actor_id,
+                tenant_id=tenant_id,
+                conversation_id=conversation_id,
+                delivery_chat_id=delivery_chat_id,
+                job_id=job_id,
+            )
+        return staged
+
+    notification_id = new_id("notif")
+    with storage.transaction() as conn:
+        raced = conn.execute(
+            "SELECT id FROM outbound_notifications WHERE chat_id=? AND dedup_key=?",
+            (delivery_chat_id, dedup_key),
+        ).fetchone()
+        if raced is not None:
+            raise TerminalDeliveryError("unknown_dedup_race")
+        source = conn.execute(
+            """SELECT id FROM messages
+                 WHERE id=? AND conversation_id=? AND user_id=? AND role='user'""",
+            (source_message_id, conversation_id, actor_id),
+        ).fetchone()
+        if source is None:
+            raise TerminalDeliveryError("unknown_source_unavailable")
+        unknown_metadata = {
+            "schema": UNKNOWN_ENVELOPE_SCHEMA,
+            "notification_id": notification_id,
+            "job_id": job_id,
+            "source_binding_sha256": source_binding_sha256,
+            "delivery_chat_id": delivery_chat_id,
+            "source_message_id": source_message_id,
+            "text_sha256": text_sha256,
+        }
+        assistant = store_message_in_transaction(
+            conn,
+            conversation_id,
+            actor_id,
+            "assistant",
+            text,
+            metadata={
+                "engineer_command_unknown": unknown_metadata,
+                "tools_used": ["engineer_command_run"],
+            },
+            reply_to=source_message_id,
+        )
+        envelope = {
+            "schema": UNKNOWN_ENVELOPE_SCHEMA,
+            "notification_id": notification_id,
+            "actor_id": actor_id,
+            "tenant_id": tenant_id,
+            "conversation_id": conversation_id,
+            "source_message_id": source_message_id,
+            "assistant_message_id": str(assistant.get("id") or ""),
+            "delivery_chat_id": delivery_chat_id,
+            "job_id": job_id,
+            "source_binding_sha256": source_binding_sha256,
+            "text_sha256": text_sha256,
+        }
+        body = _canonical_json(envelope)
+        parse_unknown_envelope(body)
+        cursor = conn.execute(
+            """INSERT INTO outbound_notifications(
+                   id,user_id,chat_id,kind,dedup_key,body,status,attempts,created_at)
+               VALUES(?,?,?,?,?,?,'pending',0,strftime('%Y-%m-%dT%H:%M:%SZ','now'))""",
+            (
+                notification_id,
+                actor_id,
+                delivery_chat_id,
+                UNKNOWN_NOTIFICATION_KIND,
+                dedup_key,
+                body,
+            ),
+        )
+        if cursor.rowcount != 1:
+            raise TerminalDeliveryError("unknown_notification_not_staged")
+        _retire_progress_best_effort(
+            conn,
+            actor_id=actor_id,
+            tenant_id=tenant_id,
+            conversation_id=conversation_id,
+            delivery_chat_id=delivery_chat_id,
+            job_id=job_id,
+        )
+    return StagedTerminalNotification(
+        job_id,
+        notification_id,
+        dedup_key,
+        hashlib.sha256(body.encode("ascii")).hexdigest(),
+        "pending",
+    )
 
 
 def _exact_existing_text(
@@ -864,9 +1188,39 @@ def terminal_notification_status(
         body_sha256 = hashlib.sha256(body.encode("ascii")).hexdigest()
     except UnicodeEncodeError:
         return "invalid"
+    exact_dedup_key = str(dedup_key)
+    try:
+        if exact_dedup_key.startswith("engineer-terminal:archive:"):
+            expected_kind = TERMINAL_NOTIFICATION_KIND
+            envelope = parse_terminal_envelope(body)
+            has_artifact = True
+        elif exact_dedup_key.startswith("engineer-terminal:text:"):
+            expected_kind = TERMINAL_TEXT_NOTIFICATION_KIND
+            envelope = parse_terminal_text_envelope(body)
+            has_artifact = False
+        elif exact_dedup_key.startswith("engineer-unknown:v1:"):
+            expected_kind = UNKNOWN_NOTIFICATION_KIND
+            envelope = parse_unknown_envelope(body)
+            rebuilt_dedup_key = unknown_dedup_key(
+                str(envelope["job_id"]),
+                str(envelope["source_binding_sha256"]),
+            )
+            has_artifact = None
+        else:
+            return "invalid"
+        if has_artifact is not None:
+            rebuilt_dedup_key = terminal_dedup_key(
+                str(envelope["job_id"]),
+                str(envelope["receipt_mac"]),
+                has_artifact=has_artifact,
+            )
+    except (KeyError, TerminalDeliveryError):
+        return "invalid"
     if (
-        str(row["kind"] or "") != TERMINAL_NOTIFICATION_KIND
-        or not hmac.compare_digest(str(row["dedup_key"] or ""), str(dedup_key))
+        str(row["kind"] or "") != expected_kind
+        or str(envelope.get("notification_id") or "") != str(notification_id)
+        or not hmac.compare_digest(str(row["dedup_key"] or ""), exact_dedup_key)
+        or not hmac.compare_digest(rebuilt_dedup_key, exact_dedup_key)
         or not hmac.compare_digest(body_sha256, str(envelope_sha256))
     ):
         return "invalid"
@@ -1101,15 +1455,21 @@ __all__ = [
     "TERMINAL_NOTIFICATION_KIND",
     "TERMINAL_TEXT_ENVELOPE_SCHEMA",
     "TERMINAL_TEXT_NOTIFICATION_KIND",
+    "UNKNOWN_ENVELOPE_SCHEMA",
+    "UNKNOWN_NOTIFICATION_KIND",
     "TerminalDeliveryError",
     "parse_terminal_envelope",
     "parse_terminal_text_envelope",
+    "parse_unknown_envelope",
     "read_terminal_notification_artifact",
     "stage_terminal_archive",
     "stage_terminal_text",
+    "stage_unknown_notification",
     "terminal_dedup_key",
     "terminal_notification_projection",
     "terminal_notification_status",
     "terminal_text_notification_projection",
+    "unknown_dedup_key",
+    "unknown_notification_projection",
     "verify_sent_terminal_notification_artifact",
 ]

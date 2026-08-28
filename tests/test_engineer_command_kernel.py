@@ -17,6 +17,10 @@ from pathlib import Path
 
 import pytest
 
+from friday.engineer_source_binding import (
+    canonical_engineer_source_binding_sha256,
+    legacy_engineer_source_binding_sha256,
+)
 from friday.file_delivery import (
     AuthorizedFileBytes,
     CurrentMessageUploadBatchIdentity,
@@ -39,7 +43,14 @@ from friday.organs.engineer.command import (
 )
 from friday.organs.engineer.command import kernel as command_kernel_module
 from friday.organs.engineer.command.boundary import MissingControllerBoundary, SystemdCgroupBoundary
-from friday.organs.engineer.command.contracts import MAX_TIMEOUT_SEC, sha256_bytes
+from friday.organs.engineer.command.contracts import (
+    AUTONOMOUS_DELEGATION_SCHEMA,
+    COMMAND_GRANT_SCHEMA,
+    COMMAND_GRANT_VERSION,
+    MAX_TIMEOUT_SEC,
+    OWNER_SOURCE_SCHEMA,
+    sha256_bytes,
+)
 from friday.organs.engineer.command.inputs import command_input_descriptor, command_input_manifest
 from friday.organs.engineer.command.resolve import attest_trusted_path, resolve_held, resolve_named
 from friday.organs.engineer.command.spawn_helper import SpawnBroker
@@ -50,6 +61,7 @@ SOURCE_SECRET = b"friday-engineer-owner-source-tests-secret"
 CONFIRM_SECRET = b"friday-engineer-owner-confirm-tests-secret"
 ACTOR = "owner-1"
 SOURCE_HASH = sha256_bytes(b"owner-turn-body")
+SOURCE_STEP_ID = "ecstep-" + "1" * 32
 
 
 def _authority(clock=None) -> CommandGrantAuthority:
@@ -107,6 +119,7 @@ def _attest(source_auth: OwnerSourceAuthority, request: CommandRequest, **kwargs
         conversation_id="conv-1",
         channel="cli_test",
         source_row_id="row-1",
+        source_step_id=kwargs.get("source_step_id", SOURCE_STEP_ID),
         source_hash=kwargs.get("source_hash", SOURCE_HASH),
         telegram_update_id="upd-1",
         isolation_profile=kwargs.get("isolation_profile", IsolationProfile.ISOLATED_WORKSPACE),
@@ -138,11 +151,16 @@ def _submit(kernel: CommandKernel, request: CommandRequest, **kwargs) -> str:
     kwargs.pop("host_user_authorized", None)
     actor_id = kwargs.pop("actor_id", ACTOR)
     delivery_chat_id = kwargs.pop("delivery_chat_id", "")
+    source_step_id = kwargs.pop(
+        "source_step_id",
+        "ecstep-" + sha256_bytes(request.idempotency_key.encode("utf-8"))[:32],
+    )
     source = _attest(
         source_auth,
         request,
         isolation_profile=isolation,
         actor_id=actor_id,
+        source_step_id=source_step_id,
     )
     confirmation = None
     if kwargs.pop("destructive", True):
@@ -157,12 +175,17 @@ def _submit(kernel: CommandKernel, request: CommandRequest, **kwargs) -> str:
 
 
 def _submit_host(kernel: CommandKernel, request: CommandRequest, **kwargs) -> str:
+    source_step_id = kwargs.pop(
+        "source_step_id",
+        "ecstep-" + sha256_bytes(request.idempotency_key.encode("utf-8"))[:32],
+    )
     source = kernel.authority.source_authority.attest(
         actor_id=kwargs.pop("actor_id", ACTOR),
         tenant_id=kwargs.pop("tenant_id", "tenant-1"),
         conversation_id=kwargs.pop("conversation_id", "conv-1"),
         channel="cli_test",
         source_row_id=kwargs.pop("source_row_id", "row-1"),
+        source_step_id=source_step_id,
         source_hash=SOURCE_HASH,
         telegram_update_id=kwargs.pop("telegram_update_id", "upd-1"),
         isolation_profile=IsolationProfile.HOST_USER,
@@ -394,7 +417,7 @@ def test_idempotent_submit_returns_same_job(tmp_path: Path) -> None:
     request = _argv("/usr/bin/true", key=key)
     first = _submit(kernel, request)
     _wait(kernel, first)
-    second = kernel.submit(request, "not-a-grant", actor_id=ACTOR)
+    second = _submit(kernel, request)
     assert second == first
 
 
@@ -403,22 +426,9 @@ def test_idempotent_submit_preserves_exact_delivery_scope(tmp_path: Path) -> Non
     request = _argv("/usr/bin/true", key=_key("delivery-idem"))
     first = _submit(kernel, request, delivery_chat_id="5001")
     _wait(kernel, first)
-    assert (
-        kernel.submit(
-            request,
-            "not-a-grant",
-            actor_id=ACTOR,
-            delivery_chat_id="5001",
-        )
-        == first
-    )
+    assert _submit(kernel, request, delivery_chat_id="5001") == first
     with pytest.raises(CommandError, match="delivery_scope_mismatch"):
-        kernel.submit(
-            request,
-            "not-a-grant",
-            actor_id=ACTOR,
-            delivery_chat_id="5002",
-        )
+        _submit(kernel, request, delivery_chat_id="5002")
 
 
 def test_idempotent_submit_does_not_refocus_an_older_job(tmp_path: Path) -> None:
@@ -440,7 +450,7 @@ def test_idempotent_submit_does_not_refocus_an_older_job(tmp_path: Path) -> None
         )
         == second
     )
-    assert kernel.submit(first_request, "not-a-grant", actor_id=ACTOR) == first
+    assert _submit(kernel, first_request) == first
     assert (
         kernel.resolve_job_reference(
             None,
@@ -556,6 +566,110 @@ def test_in_flight_submit_is_fenced_between_both_admission_lookups(
     finally:
         continue_submit.set()
         worker.join(timeout=5)
+        kernel.close()
+
+
+def test_in_flight_submit_is_fenced_by_same_source_with_a_different_key(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    kernel = _kernel(tmp_path)
+    request = _argv("/usr/bin/true", key="ecmd-" + "7" * 64)
+    source = _attest(
+        kernel.authority.source_authority,
+        request,
+        source_step_id="ecstep-" + "8" * 32,
+    )
+    confirmation = _confirm(kernel, source, request)
+    token = kernel.authority.issue(request, source=source, confirmation=confirmation)
+    source_values = {
+        "owner_id": source.actor_id,
+        "tenant_id": source.tenant_id,
+        "conversation_id": source.conversation_id,
+        "channel": source.channel,
+        "source_row_id": source.source_row_id,
+        "source_hash": source.source_hash,
+        "telegram_update_id": source.telegram_update_id,
+        "delivery_chat_id": "",
+    }
+    source_binding = canonical_engineer_source_binding_sha256(
+        **source_values,
+        source_step_id=source.source_step_id,
+    )
+    legacy_binding = legacy_engineer_source_binding_sha256(**source_values)
+    after_first_lookup = threading.Event()
+    continue_submit = threading.Event()
+    original_resolve = command_kernel_module.resolve_request
+    result: dict[str, object] = {}
+
+    def _pause_after_first_lookup(*args, **kwargs):
+        after_first_lookup.set()
+        if not continue_submit.wait(timeout=5):
+            raise AssertionError("source race test did not resume")
+        return original_resolve(*args, **kwargs)
+
+    def _submit_in_flight() -> None:
+        try:
+            result["job_id"] = kernel.submit(request, token, actor_id=ACTOR)
+        except BaseException as exc:  # return every thread failure to the parent
+            result["error"] = exc
+
+    monkeypatch.setattr(command_kernel_module, "resolve_request", _pause_after_first_lookup)
+    worker = threading.Thread(target=_submit_in_flight, name="source-slot-race-submit")
+    worker.start()
+    try:
+        assert after_first_lookup.wait(timeout=5)
+        kernel.store.create_engineer_work_item_fence(
+            actor_id=ACTOR,
+            idempotency_key="ecmd-" + "9" * 64,
+            work_item_id="ewi_" + "a" * 32,
+            expected_revision=1,
+            step_ordinal=1,
+            source_binding_sha256=source_binding,
+            legacy_source_binding_sha256=legacy_binding,
+            command_digest=request.digest,
+            created_at=123.5,
+        )
+        continue_submit.set()
+        worker.join(timeout=5)
+        assert not worker.is_alive()
+        assert "job_id" not in result
+        error = result.get("error")
+        assert isinstance(error, CommandError)
+        assert error.code == "idempotency_fenced"
+        assert kernel.store.lookup_idempotency(ACTOR, request.idempotency_key) is None
+    finally:
+        continue_submit.set()
+        worker.join(timeout=5)
+        kernel.close()
+
+
+def test_lifecycle_is_rechecked_immediately_before_boundary_allocation(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    kernel = _kernel(tmp_path)
+    request = _argv("/usr/bin/true", key=_key("pre-spawn-lifecycle"))
+    allocated = False
+
+    def _not_ready() -> None:
+        raise CommandError("command_store_lifecycle_unavailable")
+
+    def _allocate(*args, **kwargs):
+        nonlocal allocated
+        allocated = True
+        raise AssertionError("effect boundary was allocated before lifecycle readiness")
+
+    monkeypatch.setattr(kernel.store, "assert_lifecycle_ready", _not_ready)
+    monkeypatch.setattr(kernel.boundary, "allocate", _allocate)
+    try:
+        with pytest.raises(CommandError, match="command_store_lifecycle_unavailable"):
+            _submit(kernel, request)
+        assert allocated is False
+        binding = kernel.store.lookup_idempotency_binding(ACTOR, request.idempotency_key)
+        assert binding is not None
+        assert kernel.store.read_job(str(binding["job_id"]))["status"] == "failed"
+    finally:
         kernel.close()
 
 
@@ -676,6 +790,7 @@ def test_forged_owner_source_is_refused(tmp_path: Path) -> None:
         conversation_id="conv-1",
         channel="cli_test",
         source_row_id="row-1",
+        source_step_id=SOURCE_STEP_ID,
         source_hash=SOURCE_HASH,
         telegram_update_id="upd-1",
         isolation_profile=IsolationProfile.ISOLATED_WORKSPACE,
@@ -944,6 +1059,10 @@ def test_host_user_requires_explicit_autonomous_model_shell_delegation(tmp_path:
         source=source,
         delegation=delegation,
     )
+    assert source.identity_payload()["schema"] == OWNER_SOURCE_SCHEMA
+    assert delegation.identity_payload()["schema"] == AUTONOMOUS_DELEGATION_SCHEMA
+    assert kernel.authority.inspect(token)["schema"] == COMMAND_GRANT_SCHEMA
+    assert kernel.authority.inspect(token)["v"] == COMMAND_GRANT_VERSION
     grant = kernel.authority.parse(token, request, actor_id=ACTOR)
     assert grant.isolation_profile is IsolationProfile.HOST_USER
     assert grant.origin is CommandOrigin.MODEL
@@ -951,7 +1070,55 @@ def test_host_user_requires_explicit_autonomous_model_shell_delegation(tmp_path:
     assert grant.autonomous_delegated is True
     assert grant.destructive_confirmed is False
     assert grant.autonomous_delegation_nonce == delegation.nonce
+    assert grant.source_step_id == SOURCE_STEP_ID
     assert grant.expires_at == 1_060
+
+
+def test_source_step_is_closed_and_old_or_incomplete_grants_fail_closed(tmp_path: Path) -> None:
+    kernel = _kernel(tmp_path, clock=lambda: 1_000)
+    request = _host_shell("true", key=_key("source-step-contract"))
+    for malformed in (
+        "1" * 32,
+        "ecstep-" + "A" * 32,
+        "ecstep-" + "1" * 31,
+        " ecstep-" + "1" * 32,
+    ):
+        with pytest.raises(CommandError, match="invalid_source_step"):
+            _attest(
+                kernel.authority.source_authority,
+                request,
+                isolation_profile=IsolationProfile.HOST_USER,
+                source_step_id=malformed,
+            )
+
+    source = _attest(
+        kernel.authority.source_authority,
+        request,
+        isolation_profile=IsolationProfile.HOST_USER,
+    )
+    delegation = kernel.authority.source_authority.delegate_autonomous(source, expires_at=1_060)
+    token = kernel.authority.issue_autonomous(request, source=source, delegation=delegation)
+    payload = kernel.authority.inspect(token)
+
+    incomplete = dict(payload)
+    incomplete.pop("source_step_id")
+    with pytest.raises(CommandError, match="invalid_grant"):
+        kernel.authority.parse(
+            kernel.authority._encode(incomplete),  # noqa: SLF001 - signed malformed fixture
+            request,
+            actor_id=ACTOR,
+        )
+
+    legacy = dict(incomplete)
+    legacy["schema"] = "friday.engineer.command.v4"
+    legacy["v"] = 4
+    with pytest.raises(CommandError, match="invalid_grant"):
+        kernel.authority.parse(
+            kernel.authority._encode(legacy),  # noqa: SLF001 - signed legacy fixture
+            request,
+            actor_id=ACTOR,
+        )
+    kernel.close()
 
 
 def test_autonomous_delegation_rejects_forgery_and_exact_source_drift(tmp_path: Path) -> None:
@@ -988,6 +1155,7 @@ def test_autonomous_delegation_rejects_forgery_and_exact_source_drift(tmp_path: 
             conversation_id=source.conversation_id,
             channel=source.channel,
             source_row_id="other-row",
+            source_step_id=source.source_step_id,
             source_hash=source.source_hash,
             telegram_update_id=source.telegram_update_id,
             isolation_profile=IsolationProfile.HOST_USER,
@@ -999,6 +1167,19 @@ def test_autonomous_delegation_rejects_forgery_and_exact_source_drift(tmp_path: 
             conversation_id=source.conversation_id,
             channel=source.channel,
             source_row_id=source.source_row_id,
+            source_step_id="ecstep-" + "2" * 32,
+            source_hash=source.source_hash,
+            telegram_update_id=source.telegram_update_id,
+            isolation_profile=IsolationProfile.HOST_USER,
+            idempotency_key=source.idempotency_key,
+        ),
+        kernel.authority.source_authority.attest(
+            actor_id=source.actor_id,
+            tenant_id=source.tenant_id,
+            conversation_id=source.conversation_id,
+            channel=source.channel,
+            source_row_id=source.source_row_id,
+            source_step_id=source.source_step_id,
             source_hash=source.source_hash,
             telegram_update_id=source.telegram_update_id,
             isolation_profile=IsolationProfile.HOST_USER,
@@ -1087,6 +1268,7 @@ def test_autonomous_issue_is_closed_to_model_shell_host_user_shape(tmp_path: Pat
                 conversation_id=source.conversation_id,
                 channel=source.channel,
                 source_row_id=source.source_row_id,
+                source_step_id=source.source_step_id,
                 source_hash=source.source_hash,
                 telegram_update_id=source.telegram_update_id,
                 isolation_profile=IsolationProfile.HOST_USER,
@@ -1408,6 +1590,7 @@ def test_submit_crossing_close_is_admitted_then_cancelled_before_store_close(
         conversation_id="conv-1",
         channel="cli_test",
         source_row_id="row-race",
+        source_step_id=SOURCE_STEP_ID,
         source_hash=SOURCE_HASH,
         telegram_update_id="upd-race",
         isolation_profile=IsolationProfile.HOST_USER,

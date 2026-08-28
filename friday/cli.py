@@ -11,7 +11,7 @@ import pathlib
 import secrets
 import sys
 import tempfile
-from contextlib import suppress
+from contextlib import nullcontext, suppress
 from pathlib import Path
 from typing import Any
 
@@ -375,9 +375,14 @@ def _search_source(args: argparse.Namespace) -> int:
     from friday.config import ensure_runtime_dirs, load_settings
     from friday.permissions import LEGACY_OWNER_USER_ID
     from friday.storage import init_storage
+    from friday.storage._restore_barrier import (
+        database_restore_intent_lstat,
+        database_restore_intent_path,
+    )
 
     settings = load_settings()
-    ensure_runtime_dirs(settings)
+    if database_restore_intent_lstat(database_restore_intent_path(settings.state_dir)) is None:
+        ensure_runtime_dirs(settings)
     storage = init_storage(settings)
 
     try:
@@ -503,11 +508,25 @@ def _backup(args: argparse.Namespace) -> int:
 
     settings = load_settings()
     ensure_runtime_dirs(settings)
-    storage = init_storage(settings)
-    try:
-        result = storage.create_backup(label=args.label)
-    finally:
-        storage.close()
+    authority_context: Any = nullcontext(None)
+    from friday.organs.engineer.command.backup_authority import (
+        command_store_backup_authority_required,
+    )
+
+    if command_store_backup_authority_required(settings):
+        from friday.organs.engineer.command_tools import (
+            open_engineer_command_backup_authority,
+        )
+
+        authority_context = open_engineer_command_backup_authority(settings)
+    with authority_context as authority:
+        storage = init_storage(settings)
+        try:
+            if authority is not None:
+                storage.bind_engineer_command_backup_authority(authority)
+            result = storage.create_backup(label=args.label)
+        finally:
+            storage.close()
     mirror = mirror_backups(settings)
     _json_print({**result, "mirror": mirror})
     if not mirror.get("enabled"):
@@ -568,18 +587,32 @@ def _verify_backup(args: argparse.Namespace) -> int:
 
     settings = load_settings()
     ensure_runtime_dirs(settings)
-    storage = init_storage(settings)
-    try:
-        filename = args.filename
-        if not filename:
-            backups = storage.list_backups()
-            if not backups:
-                print("Резервных копий не найдено.", file=sys.stderr)
-                return 2
-            filename = str(backups[0]["database"])
-        result = storage.verify_backup(filename)
-    finally:
-        storage.close()
+    authority_context: Any = nullcontext(None)
+    from friday.organs.engineer.command.backup_authority import (
+        command_store_backup_authority_required,
+    )
+
+    if command_store_backup_authority_required(settings):
+        from friday.organs.engineer.command_tools import (
+            open_engineer_command_backup_authority,
+        )
+
+        authority_context = open_engineer_command_backup_authority(settings)
+    with authority_context as authority:
+        storage = init_storage(settings)
+        try:
+            if authority is not None:
+                storage.bind_engineer_command_backup_authority(authority)
+            filename = args.filename
+            if not filename:
+                backups = storage.list_backups()
+                if not backups:
+                    print("Резервных копий не найдено.", file=sys.stderr)
+                    return 2
+                filename = str(backups[0]["database"])
+            result = storage.verify_backup(filename)
+        finally:
+            storage.close()
     _json_print(result)
     return 0 if result.get("ok") else 1
 
@@ -597,26 +630,47 @@ def _restore_backup(args: argparse.Namespace) -> int:
 
     from friday.config import ensure_runtime_dirs, load_settings
     from friday.diagnostics.runtime_lease import ProcessLease
+    from friday.organs.engineer.command.backup_authority import (
+        command_store_backup_authority_required,
+    )
+    from friday.organs.engineer.command_tools import open_engineer_command_backup_authority
     from friday.storage import init_storage
+    from friday.storage._restore_barrier import (
+        database_restore_intent_lstat,
+        database_restore_intent_path,
+    )
 
     settings = load_settings()
-    ensure_runtime_dirs(settings)
+    # A pending marker owns every path in its recovery transaction.  Permission
+    # repair and directory creation are mutations too, so the recovery CLI must
+    # inspect the marker before doing either; init_storage's explicit recovery
+    # handle performs no generic repair while the marker is present.
+    if database_restore_intent_lstat(database_restore_intent_path(settings.state_dir)) is None:
+        ensure_runtime_dirs(settings)
     with ProcessLease(settings.state_dir / "backend.lock", protocol="friday.backend.v1"):
-        storage = init_storage(settings)
-        try:
-            filename = args.filename
-            if not filename:
-                backups = storage.list_backups()
-                if not backups:
-                    print("Резервных копий не найдено.", file=sys.stderr)
-                    return 2
-                filename = str(backups[0]["database"])
-            result = storage.restore_backup(
-                filename,
-                safety_label=f"pre-restore-{Path(filename).stem}",
-            )
-        finally:
-            storage.close()
+        authority_context: Any = (
+            open_engineer_command_backup_authority(settings, exclusive=True)
+            if command_store_backup_authority_required(settings)
+            else nullcontext(None)
+        )
+        with authority_context as authority:
+            storage = init_storage(settings, allow_pending_restore=True)
+            try:
+                if authority is not None:
+                    storage.bind_engineer_command_backup_authority(authority)
+                filename = args.filename
+                if not filename:
+                    backups = storage.list_backups()
+                    if not backups:
+                        print("Резервных копий не найдено.", file=sys.stderr)
+                        return 2
+                    filename = str(backups[0]["database"])
+                result = storage.restore_backup(
+                    filename,
+                    safety_label=f"pre-restore-{Path(filename).stem}",
+                )
+            finally:
+                storage.close()
     _json_print(result)
     print(
         "Важно: восстановлена только SQLite-база; raw files, memory vault, веса модели и "
@@ -2421,6 +2475,17 @@ def _revoke_token(args: argparse.Namespace) -> int:
     return 0
 
 
+def _engineer_command_store_provision(_args: argparse.Namespace) -> int:
+    """Provision the external command ledger while the backend is stopped."""
+
+    from friday.config import load_settings
+    from friday.organs.engineer.command_tools import provision_engineer_command_store
+
+    result = provision_engineer_command_store(load_settings())
+    _json_print(result)
+    return 0
+
+
 def _telegram_backend_url(settings: Any) -> str:
     """Private backend URL whose default follows the server's native TLS mode."""
 
@@ -2439,9 +2504,13 @@ def _run_telegram_bridge() -> int:
 
     from friday.config import load_settings, validate_settings
     from friday.private_fs import ensure_private_directory
+    from friday.storage._restore_barrier import assert_no_pending_database_restore
     from friday.telegram_bridge import TelegramBridge, TelegramConfig
 
     settings = load_settings()
+    # Repeat the startup barrier at the handler's first mutation: a restore may
+    # have acquired its backend boundary after the dispatcher preflight.
+    assert_no_pending_database_restore(settings.state_dir)
     inbox_db_path = (
         Path(
             config_env(
@@ -2541,14 +2610,26 @@ def _run_cli_handler(args: argparse.Namespace) -> int:
     """Run a CLI command, excluding every default/main-database mutator."""
 
     command = str(getattr(args, "command", "") or "")
-    if command in _CLI_COMMANDS_WITHOUT_ACCOUNT_DATA or command in _CLI_SERVICE_ROLE_COMMANDS:
+    if command in _CLI_COMMANDS_WITHOUT_ACCOUNT_DATA:
         return int(args.handler(args) or 0)
 
     from friday.config import ensure_runtime_dirs, load_settings
     from friday.diagnostics.runtime_lease import ProcessLease
 
     settings = load_settings()
-    ensure_runtime_dirs(settings)
+    from friday.storage._restore_barrier import (
+        assert_no_pending_database_restore,
+        database_restore_intent_lstat,
+        database_restore_intent_path,
+    )
+
+    if command != "restore-backup":
+        assert_no_pending_database_restore(settings.state_dir)
+        ensure_runtime_dirs(settings)
+    elif database_restore_intent_lstat(database_restore_intent_path(settings.state_dir)) is None:
+        ensure_runtime_dirs(settings)
+    if command in _CLI_SERVICE_ROLE_COMMANDS:
+        return int(args.handler(args) or 0)
     # Reads, exports and online backups may materialise a pre-deletion snapshot.
     # They can coexist with the ordinary backend, but never with account deletion.
     with ProcessLease(
@@ -2626,6 +2707,12 @@ def build_parser() -> argparse.ArgumentParser:
     verify = sub.add_parser("verify-backup", help="Verify one backup (or the newest one)")
     verify.add_argument("filename", nargs="?")
     verify.set_defaults(handler=_verify_backup)
+
+    engineer_store = sub.add_parser(
+        "engineer-command-store-provision",
+        help="Create or upgrade the Engineer command ledger while Friday is stopped",
+    )
+    engineer_store.set_defaults(handler=_engineer_command_store_provision)
 
     restore = sub.add_parser(
         "restore-backup",
@@ -2939,9 +3026,11 @@ def _up(args: argparse.Namespace) -> int:
 
     from friday.config import ensure_runtime_dirs, load_settings, validate_settings
     from friday.diagnostics.runtime_lease import inspect_process_lease
+    from friday.storage._restore_barrier import assert_no_pending_database_restore
     from friday.supervisor import ChildSpec, Supervisor
 
     settings = load_settings()
+    assert_no_pending_database_restore(settings.state_dir)
     ensure_runtime_dirs(settings)
     problems = validate_settings(settings, production=not settings.is_loopback_bind)
     errors = [item for item in problems if not item.startswith("warning:")]

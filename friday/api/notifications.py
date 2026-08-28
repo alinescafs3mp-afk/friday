@@ -29,12 +29,15 @@ from friday.organs.engineer.command.progress import (
 from friday.organs.engineer.terminal_delivery import (
     TERMINAL_NOTIFICATION_KIND,
     TERMINAL_TEXT_NOTIFICATION_KIND,
+    UNKNOWN_NOTIFICATION_KIND,
     TerminalDeliveryError,
     parse_terminal_envelope,
     parse_terminal_text_envelope,
+    parse_unknown_envelope,
     read_terminal_notification_artifact,
     terminal_notification_projection,
     terminal_text_notification_projection,
+    unknown_notification_projection,
 )
 from friday.permissions import AuthorizationError
 
@@ -77,6 +80,35 @@ def _terminal_status_update(row: Mapping[str, Any], *, text_only: bool) -> dict[
         "revision": _TERMINAL_STATUS_REVISION,
         "terminal": True,
         "stage": str(envelope["status"]),
+    }
+
+
+def _unknown_status_update(row: Mapping[str, Any]) -> dict[str, Any]:
+    envelope = parse_unknown_envelope(row.get("body"))
+    return {
+        "schema": _TELEGRAM_STATUS_SCHEMA,
+        "operation_id": f"engineer:{envelope['job_id']}",
+        "revision": _TERMINAL_STATUS_REVISION,
+        "terminal": True,
+        "stage": "unknown",
+    }
+
+
+_STRICT_CLAIM_KINDS = frozenset(
+    {
+        TERMINAL_TEXT_NOTIFICATION_KIND,
+        UNKNOWN_NOTIFICATION_KIND,
+        PROGRESS_NOTIFICATION_KIND,
+    }
+)
+
+
+def _strict_pointer(row: Mapping[str, Any]) -> dict[str, str]:
+    return {
+        "id": str(row.get("id") or ""),
+        "chat_id": str(row.get("chat_id") or ""),
+        "kind": str(row.get("kind") or ""),
+        "dedup_key": str(row.get("dedup_key") or ""),
     }
 
 
@@ -186,6 +218,74 @@ def _terminal_artifact_snapshot(state: Any, notification_id: str) -> Any:
         )
 
 
+def _claim_strict_notification(
+    state: Any,
+    notification_id: str,
+    expected: Mapping[str, Any],
+    *,
+    status_messages: bool,
+) -> dict[str, Any]:
+    """Reauthorize and project one exact pointer at the Telegram send edge."""
+
+    storage = state.storage
+    with storage.transaction() as conn:
+        row = conn.execute(
+            """SELECT n.id,n.user_id,n.chat_id,n.kind,n.dedup_key,n.body,n.status
+                  FROM outbound_notifications AS n
+                 WHERE n.id=? AND n.status='pending'""",
+            (str(notification_id),),
+        ).fetchone()
+        if row is None:
+            raise TerminalDeliveryError("terminal_notification_unavailable")
+        current = dict(row)
+        pointer = _strict_pointer(current)
+        if (
+            pointer["id"] != str(notification_id)
+            or pointer["kind"] not in _STRICT_CLAIM_KINDS
+            or any(str(expected.get(key) or "") != value for key, value in pointer.items())
+        ):
+            raise TerminalDeliveryError("terminal_claim_identity_changed")
+        if pointer["kind"] == PROGRESS_NOTIFICATION_KIND:
+            try:
+                actor = _progress_delivery_actor(state, current)
+                projection = progress_notification_projection(
+                    storage,
+                    current,
+                    tenant_id=actor.user_id,
+                    actor_id=actor.own_id,
+                )
+            except ProgressDeliveryError as exc:
+                raise TerminalDeliveryError("terminal_authorization_changed") from exc
+            item: dict[str, Any] = {**pointer, "body": projection["body"]}
+            if status_messages:
+                status = _progress_status_update(current)
+                if status is not None:
+                    item["status_update"] = status
+            return item
+        actor = _terminal_delivery_actor(state, current)
+        if pointer["kind"] == TERMINAL_TEXT_NOTIFICATION_KIND:
+            projection = terminal_text_notification_projection(
+                storage,
+                current,
+                tenant_id=actor.user_id,
+                actor_id=actor.own_id,
+            )
+            item = {**pointer, "body": projection["body"]}
+            if status_messages:
+                item["status_update"] = _terminal_status_update(current, text_only=True)
+            return item
+        projection = unknown_notification_projection(
+            storage,
+            current,
+            tenant_id=actor.user_id,
+            actor_id=actor.own_id,
+        )
+        item = {**pointer, "body": projection["body"]}
+        if status_messages:
+            item["status_update"] = _unknown_status_update(current)
+        return item
+
+
 @router.get("/pending", tags=["notifications"])
 async def notifications_pending(
     request: Request,
@@ -234,7 +334,7 @@ async def notifications_pending(
         elif row.get("kind") == TERMINAL_TEXT_NOTIFICATION_KIND:
             try:
                 actor = _terminal_delivery_actor(request.app.state, row)
-                projection = terminal_text_notification_projection(
+                terminal_text_notification_projection(
                     storage,
                     row,
                     tenant_id=actor.user_id,
@@ -243,19 +343,24 @@ async def notifications_pending(
             except TerminalDeliveryError:
                 invalid_terminal.append(str(row["id"]))
                 continue
-            item = {
-                "id": row["id"],
-                "chat_id": row["chat_id"],
-                "body": projection["body"],
-                "kind": TERMINAL_TEXT_NOTIFICATION_KIND,
-                "dedup_key": row.get("dedup_key") or "",
-            }
-            if status_messages is True:
-                item["status_update"] = _terminal_status_update(row, text_only=True)
+            item = _strict_pointer(row)
+        elif row.get("kind") == UNKNOWN_NOTIFICATION_KIND:
+            try:
+                actor = _terminal_delivery_actor(request.app.state, row)
+                unknown_notification_projection(
+                    storage,
+                    row,
+                    tenant_id=actor.user_id,
+                    actor_id=actor.own_id,
+                )
+            except TerminalDeliveryError:
+                invalid_terminal.append(str(row["id"]))
+                continue
+            item = _strict_pointer(row)
         elif row.get("kind") == PROGRESS_NOTIFICATION_KIND:
             try:
                 actor = _progress_delivery_actor(request.app.state, row)
-                projection = progress_notification_projection(
+                progress_notification_projection(
                     storage,
                     row,
                     tenant_id=actor.user_id,
@@ -264,17 +369,7 @@ async def notifications_pending(
             except ProgressDeliveryError:
                 invalid_progress.append(str(row["id"]))
                 continue
-            item = {
-                "id": row["id"],
-                "chat_id": row["chat_id"],
-                "body": projection["body"],
-                "kind": PROGRESS_NOTIFICATION_KIND,
-                "dedup_key": row.get("dedup_key") or "",
-            }
-            if status_messages is True:
-                status_update = _progress_status_update(row)
-                if status_update is not None:
-                    item["status_update"] = status_update
+            item = _strict_pointer(row)
         else:
             item = {
                 "id": row["id"],
@@ -329,6 +424,29 @@ async def notifications_pending(
         # ignore this additive field.
         result["retired"] = retired
     return result
+
+
+@router.post("/{notification_id}/claim", tags=["notifications"])
+async def notification_claim(notification_id: str, request: Request) -> dict[str, Any]:
+    """Return content only after an exact send-edge authority recheck."""
+
+    _require_bridge(request)
+    body = await _request_json(request)
+    if set(body) != {"id", "chat_id", "kind", "dedup_key", "status_messages"} or not isinstance(
+        body.get("status_messages"), bool
+    ):
+        raise HTTPException(status_code=404, detail="Уведомление не найдено")
+    try:
+        item = await run_in_threadpool(
+            _claim_strict_notification,
+            request.app.state,
+            notification_id,
+            body,
+            status_messages=bool(body["status_messages"]),
+        )
+    except TerminalDeliveryError:
+        raise HTTPException(status_code=404, detail="Уведомление не найдено") from None
+    return {"item": item}
 
 
 @router.get("/{notification_id}/artifact", tags=["notifications"])

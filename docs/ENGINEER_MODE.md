@@ -50,12 +50,11 @@ callbacks cannot become a second command-entry surface.
 
 ## Execution
 
-The model-facing start tool accepts:
-
-- `command`: an arbitrary Bash command string;
-- `timeout_sec`: an optional task deadline. Omitting it creates a job with no
-  Friday wall-clock deadline; it runs until completion, explicit cancellation,
-  an OS/service failure or an operator action.
+The model-facing start tool accepts one `command`: an arbitrary Bash command
+string. The job has no Friday wall-clock deadline and runs until completion,
+explicit cancellation, an OS/service failure or an operator action. When the
+task itself needs a deadline, the model can deliberately use the program's own
+option or the standard shell `timeout` utility.
 
 The command is executed by held `/usr/bin/bash` as the Friday service user. It
 may use shell syntax, pipelines, redirections, installed interpreters,

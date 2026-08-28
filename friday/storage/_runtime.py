@@ -68,6 +68,7 @@ class RuntimeMixin(StorageShared):
                    AND (n.kind IN (
                             'engineer_command_terminal',
                             'engineer_command_terminal_text',
+                            'engineer_command_unknown',
                             'engineer_command_progress'
                         )
                         OR {_not_private_notification_dependency("n")})
@@ -233,6 +234,7 @@ class RuntimeMixin(StorageShared):
                            dedup_key=CASE WHEN kind IN (
                                               'engineer_command_terminal',
                                               'engineer_command_terminal_text',
+                                              'engineer_command_unknown',
                                               'engineer_command_progress'
                                           )
                                           THEN dedup_key ELSE '' END,
@@ -240,6 +242,7 @@ class RuntimeMixin(StorageShared):
                                WHEN kind IN (
                                    'engineer_command_terminal',
                                    'engineer_command_terminal_text',
+                                   'engineer_command_unknown',
                                    'engineer_command_progress'
                                )
                                THEN kind ELSE ? END
@@ -247,6 +250,7 @@ class RuntimeMixin(StorageShared):
                          AND (kind IN (
                                   'engineer_command_terminal',
                                   'engineer_command_terminal_text',
+                                  'engineer_command_unknown',
                                   'engineer_command_progress'
                               )
                               OR {_not_private_notification_dependency("n")})""",  # nosec B608
@@ -296,12 +300,14 @@ class RuntimeMixin(StorageShared):
                                 OR (kind IN (
                                         'engineer_command_terminal',
                                         'engineer_command_terminal_text',
+                                        'engineer_command_unknown',
                                         'engineer_command_progress'
                                     ) AND status='failed'
                                     AND attempts < ?))
                            AND (kind IN (
                                     'engineer_command_terminal',
                                     'engineer_command_terminal_text',
+                                    'engineer_command_unknown',
                                     'engineer_command_progress'
                                 )
                                 OR {_not_private_notification_dependency("n")})""",  # nosec B608
@@ -319,6 +325,7 @@ class RuntimeMixin(StorageShared):
                                 AND kind NOT IN (
                                     'engineer_command_terminal',
                                     'engineer_command_terminal_text',
+                                    'engineer_command_unknown',
                                     'engineer_command_progress'
                                 )
                                THEN '' ELSE dedup_key END
@@ -326,6 +333,7 @@ class RuntimeMixin(StorageShared):
                          AND (kind IN (
                                   'engineer_command_terminal',
                                   'engineer_command_terminal_text',
+                                  'engineer_command_unknown',
                                   'engineer_command_progress'
                               )
                               OR {_not_private_notification_dependency("n")})""",  # nosec B608
@@ -338,7 +346,11 @@ class RuntimeMixin(StorageShared):
                 conn.execute(
                     """UPDATE outbound_notifications AS n
                        SET status='uncertain', sent_at=?
-                       WHERE id=? AND kind='engineer_command_terminal'
+                       WHERE id=? AND kind IN (
+                           'engineer_command_terminal',
+                           'engineer_command_terminal_text',
+                           'engineer_command_unknown'
+                       )
                          AND (status='pending' OR (status='failed' AND attempts < ?))
                        """,
                     (utc_now(), notif_id, attempt_cap),
@@ -355,6 +367,7 @@ class RuntimeMixin(StorageShared):
                 if str(row["kind"] or "") not in {
                     "engineer_command_terminal",
                     "engineer_command_terminal_text",
+                    "engineer_command_unknown",
                     "engineer_command_progress",
                 }:
                     visible = conn.execute(

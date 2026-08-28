@@ -28,6 +28,25 @@ FIXTURE = Path(__file__).parent / "fixtures" / "schemas" / "schema-31.sqlite3.gz
 LEGACY_GUARD = "relations_revision_ai"
 
 
+def _remove_post_schema32_engineer_work_items(conn: sqlite3.Connection) -> None:
+    """Remove the complete schema-46 projection from a synthetic predecessor."""
+
+    trigger_names = [
+        str(row[0])
+        for row in conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='trigger' AND name LIKE 'trg_engineer_work_item_%'"
+        )
+    ]
+    for name in trigger_names:
+        conn.execute(f'DROP TRIGGER "{name}"')  # nosec B608 - SQLite-owned names
+    for table in (
+        "engineer_work_item_command_fences",
+        "engineer_work_item_steps",
+        "engineer_work_items",
+    ):
+        conn.execute(f'DROP TABLE IF EXISTS "{table}"')  # nosec B608 - fixed identifiers
+
+
 def _unpack_schema_31(tmp_path: Path, name: str) -> Path:
     database = tmp_path / f"{name}.sqlite3"
     with gzip.open(FIXTURE, "rb") as source, database.open("wb") as destination:
@@ -50,6 +69,7 @@ def _make_schema_32(settings: Any, tmp_path: Path, name: str) -> Path:
     made.execute("SELECT 1")
     made.close(final=True)
     with sqlite3.connect(database) as predecessor:
+        _remove_post_schema32_engineer_work_items(predecessor)
         predecessor.execute("DROP TRIGGER document_catalog_raw_ai_seed")
         predecessor.execute("DROP TRIGGER document_catalog_raw_au_reconcile")
         predecessor.execute("DROP TRIGGER document_catalog_raw_au_extraction_state")

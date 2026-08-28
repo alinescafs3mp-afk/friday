@@ -10,6 +10,7 @@ from dataclasses import replace
 from pathlib import Path
 
 import pytest
+from fastapi.testclient import TestClient
 
 from friday.account_deletion import _mark_account_deletion_history_clean, preflight_account_deletion
 from friday.interaction_control_plane.engineer_work_item import (
@@ -44,6 +45,7 @@ from friday.interaction_control_plane.engineer_work_item_schema import (
 from friday.organs.engineer.command.contracts import CommandLane, CommandOrigin, CommandRequest
 from friday.organs.engineer.command.store import CommandJobStore
 from friday.organs.engineer.command_tools import _idempotency_key as runtime_command_idempotency_key
+from friday.permissions import LEGACY_OWNER_USER_ID
 from friday.storage import SCHEMA_VERSION, FridayStorage, UnsupportedSchemaVersionError
 
 OWNER = "engineer-owner"
@@ -53,6 +55,7 @@ LATER = "2026-08-27T10:00:01+00:00"
 EXPIRY = "2026-08-27T22:00:00+00:00"
 SOURCE = "a" * 64
 SOURCE_ROW_ID = "msg_engineer_source"
+SOURCE_STEP_ID = "ecstep-" + "1" * 32
 TELEGRAM_UPDATE_ID = "4242"
 DELIVERY_CHAT_ID = "123456789"
 COMPLETION = ENGINEER_WORK_ITEM_COMPLETION_CONTRACT_SHA256
@@ -78,12 +81,14 @@ def _source_binding(
     scope: dict[str, object],
     *,
     source_row_id: str = SOURCE_ROW_ID,
+    source_step_id: str = SOURCE_STEP_ID,
     source_hash: str = SOURCE,
     telegram_update_id: str = TELEGRAM_UPDATE_ID,
 ) -> str:
     return engineer_source_binding_sha256(
         **scope,
         source_row_id=source_row_id,
+        source_step_id=source_step_id,
         source_hash=source_hash,
         telegram_update_id=telegram_update_id,
         delivery_chat_id=DELIVERY_CHAT_ID,
@@ -97,6 +102,7 @@ def _ledger_binding(
     command_digest: str = COMMAND,
     job_id: str = JOB_ID,
     source_row_id: str = SOURCE_ROW_ID,
+    source_step_id: str = SOURCE_STEP_ID,
     source_hash: str = SOURCE,
     telegram_update_id: str = TELEGRAM_UPDATE_ID,
 ) -> dict[str, str]:
@@ -107,6 +113,7 @@ def _ledger_binding(
         "conversation_id": str(scope["conversation_id"]),
         "channel": str(scope["channel"].value),
         "source_row_id": source_row_id,
+        "source_step_id": source_step_id,
         "source_hash": source_hash,
         "telegram_update_id": telegram_update_id,
         "idempotency_key": str(item.current_step.idempotency_key),
@@ -163,6 +170,75 @@ def _settled(storage: FridayStorage) -> tuple[dict[str, object], object]:
             now=LATER,
         )
     return scope, settled
+
+
+def _route_archive_state(
+    storage: FridayStorage,
+    *,
+    target: str,
+) -> tuple[dict[str, object], object]:
+    owner_id = LEGACY_OWNER_USER_ID
+    storage.ensure_user(owner_id, source="api-token", preset_key="owner")
+    conversation = storage.create_conversation(owner_id, title=f"archive-{target}")
+    scope: dict[str, object] = {
+        "owner_id": owner_id,
+        "tenant_id": owner_id,
+        "conversation_id": str(conversation["id"]),
+        "channel": EngineerWorkItemChannel.TELEGRAM,
+    }
+    token = hashlib.sha256(f"{target}:{conversation['id']}".encode()).hexdigest()
+    with storage.transaction() as conn:
+        item = create_engineer_work_item_in_transaction(
+            conn,
+            **scope,
+            source_binding_sha256=_source_binding(scope),
+            completion_contract_sha256=COMPLETION,
+            idempotency_key="ecmd-" + token,
+            command_digest=COMMAND,
+            now=NOW,
+            expires_at=EXPIRY,
+        )
+        if target == "prepared":
+            return scope, item
+        item = bind_engineer_command_receipts_in_transaction(
+            conn,
+            **scope,
+            work_item_id=item.id,
+            expected_revision=item.revision,
+            ledger_binding=_ledger_binding(scope, item, job_id=token[:32]),
+            now=NOW,
+        )
+        if target == "admitted":
+            return scope, item
+        if target == "unknown":
+            item = mark_engineer_command_unknown_in_transaction(
+                conn,
+                **scope,
+                work_item_id=item.id,
+                expected_revision=item.revision,
+                now=LATER,
+            )
+            return scope, item
+        item = settle_engineer_terminal_receipt_in_transaction(
+            conn,
+            **scope,
+            work_item_id=item.id,
+            expected_revision=item.revision,
+            verified_terminal_receipt_sha256=TERMINAL,
+            now=LATER,
+        )
+        if target == "settled":
+            return scope, item
+        item = mark_engineer_work_item_ready_to_answer_in_transaction(
+            conn,
+            **scope,
+            work_item_id=item.id,
+            expected_revision=item.revision,
+            now=LATER,
+        )
+    if target != "ready":
+        raise AssertionError(f"unsupported route archive state: {target}")
+    return scope, item
 
 
 def _unpack_schema_45(tmp_path: Path) -> Path:
@@ -344,6 +420,7 @@ def test_closed_source_binding_never_persists_raw_carrier_values(storage) -> Non
     binding = engineer_source_binding_sha256(
         **scope,
         source_row_id=source_row_id,
+        source_step_id=SOURCE_STEP_ID,
         source_hash="f" * 64,
         telegram_update_id=update_id,
         delivery_chat_id=DELIVERY_CHAT_ID,
@@ -389,6 +466,7 @@ def test_source_binding_limits_match_command_authority(field: str, value: str) -
         "conversation_id": "conv_0123456789abcdef",
         "channel": EngineerWorkItemChannel.TELEGRAM,
         "source_row_id": SOURCE_ROW_ID,
+        "source_step_id": SOURCE_STEP_ID,
         "source_hash": SOURCE,
         "telegram_update_id": TELEGRAM_UPDATE_ID,
         "delivery_chat_id": DELIVERY_CHAT_ID,
@@ -585,10 +663,13 @@ def test_fenced_later_prepared_step_rolls_back_without_erasing_receipts(storage)
     )
     fence = _fence_binding(second)
 
-    with pytest.raises(
-        sqlite3.IntegrityError,
-        match="transition_invalid",
-    ), storage.transaction() as conn:
+    with (
+        pytest.raises(
+            sqlite3.IntegrityError,
+            match="transition_invalid",
+        ),
+        storage.transaction() as conn,
+    ):
         conn.execute(
             """UPDATE engineer_work_items
                   SET state='cancelled',transition='cancelled',revision=revision+1,
@@ -631,13 +712,16 @@ def test_fenced_later_prepared_step_rolls_back_without_erasing_receipts(storage)
             fence_binding=fence,
             now=LATER,
         )
-        assert rollback_fenced_unsubmitted_engineer_step_in_transaction(
-            conn,
-            **scope,
-            work_item_id=second.id,
-            fence_binding=fence,
-            now=LATER,
-        ) == rolled_back
+        assert (
+            rollback_fenced_unsubmitted_engineer_step_in_transaction(
+                conn,
+                **scope,
+                work_item_id=second.id,
+                fence_binding=fence,
+                now=LATER,
+            )
+            == rolled_back
+        )
     assert rolled_back.state is EngineerWorkItemState.WAITING_FOR_INPUT
     assert rolled_back.transition.value == "prepared_step_discarded"
     assert rolled_back.step_ordinal == 1
@@ -646,10 +730,13 @@ def test_fenced_later_prepared_step_rolls_back_without_erasing_receipts(storage)
         rolled_back.current_step.job_receipt_sha256,
         rolled_back.current_step.terminal_receipt_sha256,
     ) == first_receipts
-    with pytest.raises(
-        EngineerWorkItemConflictError,
-        match="permanently fenced",
-    ), storage.transaction() as conn:
+    with (
+        pytest.raises(
+            EngineerWorkItemConflictError,
+            match="permanently fenced",
+        ),
+        storage.transaction() as conn,
+    ):
         start_next_engineer_step_in_transaction(
             conn,
             **scope,
@@ -660,10 +747,13 @@ def test_fenced_later_prepared_step_rolls_back_without_erasing_receipts(storage)
             command_digest=str(fence["command_digest"]),
             now=LATER,
         )
-    with pytest.raises(
-        EngineerWorkItemConflictError,
-        match="permanently fenced",
-    ), storage.transaction() as conn:
+    with (
+        pytest.raises(
+            EngineerWorkItemConflictError,
+            match="permanently fenced",
+        ),
+        storage.transaction() as conn,
+    ):
         start_next_engineer_step_in_transaction(
             conn,
             **scope,
@@ -803,6 +893,7 @@ def test_one_open_item_per_exact_scope_and_receipt_drift_fail_closed(storage) ->
         ("tenant_id", "engineer-tenant-other"),
         ("conversation_id", "conv_ffffffffffffffff"),
         ("source_row_id", "msg_other_source"),
+        ("source_step_id", "ecstep-" + "2" * 32),
         ("source_hash", "b" * 64),
         ("telegram_update_id", "9999"),
         ("idempotency_key", "ecmd-" + "b" * 64),
@@ -827,11 +918,14 @@ def test_command_ledger_scope_drift_cannot_bind_prepared_work(
             ledger_binding=observed,
             now=NOW,
         )
-    assert get_engineer_work_item_in_transaction(
-        storage.conn,
-        **scope,
-        work_item_id=item.id,
-    ) == item
+    assert (
+        get_engineer_work_item_in_transaction(
+            storage.conn,
+            **scope,
+            work_item_id=item.id,
+        )
+        == item
+    )
 
 
 @pytest.mark.parametrize("mutation", ("missing", "extra", "empty_chat", "foreign_channel"))
@@ -849,9 +943,10 @@ def test_incomplete_or_unadmitted_command_ledger_projection_fails_closed(
         observed["delivery_chat_id"] = ""
     else:
         observed["channel"] = "web"
-    with pytest.raises(
-        (EngineerWorkItemContractError, EngineerWorkItemAnchorError)
-    ), storage.transaction() as conn:
+    with (
+        pytest.raises((EngineerWorkItemContractError, EngineerWorkItemAnchorError)),
+        storage.transaction() as conn,
+    ):
         bind_engineer_command_receipts_in_transaction(
             conn,
             **scope,
@@ -886,10 +981,13 @@ def test_direct_parent_delete_cannot_erase_effect_bearing_receipts(storage) -> N
             expected_revision=admitted.revision,
             now=LATER,
         )
-    with pytest.raises(
-        sqlite3.IntegrityError,
-        match="open_deletion_forbidden",
-    ), storage.transaction() as conn:
+    with (
+        pytest.raises(
+            sqlite3.IntegrityError,
+            match="open_deletion_forbidden",
+        ),
+        storage.transaction() as conn,
+    ):
         conn.execute("DELETE FROM engineer_work_items WHERE id=?", (item.id,))
     assert not storage.conn.in_transaction
     durable = get_engineer_work_item_in_transaction(
@@ -944,10 +1042,13 @@ def test_raw_transition_chain_cannot_hide_then_delete_unknown_receipt(storage) -
         (LATER, item.id),
     )
     storage.conn.executescript(ENGINEER_WORK_ITEM_SCHEMA)
-    with pytest.raises(
-        sqlite3.IntegrityError,
-        match="transition_invalid",
-    ), storage.transaction() as conn:
+    with (
+        pytest.raises(
+            sqlite3.IntegrityError,
+            match="transition_invalid",
+        ),
+        storage.transaction() as conn,
+    ):
         conn.execute(
             """UPDATE engineer_work_items
                   SET state='cancelled',transition='cancelled',revision=revision+1,
@@ -966,10 +1067,13 @@ def test_raw_transition_chain_cannot_hide_then_delete_unknown_receipt(storage) -
         (LATER, LATER, item.id),
     )
     storage.conn.executescript(ENGINEER_WORK_ITEM_SCHEMA)
-    with pytest.raises(
-        sqlite3.IntegrityError,
-        match="open_deletion_forbidden",
-    ), storage.transaction() as conn:
+    with (
+        pytest.raises(
+            sqlite3.IntegrityError,
+            match="open_deletion_forbidden",
+        ),
+        storage.transaction() as conn,
+    ):
         conn.execute("DELETE FROM engineer_work_items WHERE id=?", (unknown.id,))
 
 
@@ -991,30 +1095,39 @@ def test_insert_or_replace_cannot_erase_parent_or_step_receipt(storage) -> None:
             expected_revision=admitted.revision,
             now=LATER,
         )
-    with pytest.raises(
-        sqlite3.IntegrityError,
-        match="identity_collision",
-    ), storage.transaction() as conn:
+    with (
+        pytest.raises(
+            sqlite3.IntegrityError,
+            match="identity_collision",
+        ),
+        storage.transaction() as conn,
+    ):
         conn.execute(
             """INSERT OR REPLACE INTO engineer_work_items
                SELECT * FROM engineer_work_items WHERE id=?""",
             (item.id,),
         )
-    with pytest.raises(
-        sqlite3.IntegrityError,
-        match="step_scope_invalid",
-    ), storage.transaction() as conn:
+    with (
+        pytest.raises(
+            sqlite3.IntegrityError,
+            match="step_scope_invalid",
+        ),
+        storage.transaction() as conn,
+    ):
         conn.execute(
             """INSERT OR REPLACE INTO engineer_work_item_steps
                SELECT * FROM engineer_work_item_steps
                 WHERE work_item_id=? AND ordinal=1""",
             (item.id,),
         )
-    assert get_engineer_work_item_in_transaction(
-        storage.conn,
-        **scope,
-        work_item_id=item.id,
-    ) == unknown
+    assert (
+        get_engineer_work_item_in_transaction(
+            storage.conn,
+            **scope,
+            work_item_id=item.id,
+        )
+        == unknown
+    )
 
 
 def test_scope_requires_active_owner_tenant_and_unarchived_conversation(storage) -> None:
@@ -1146,6 +1259,7 @@ def test_restart_reconciles_actual_runtime_key_and_digest_without_argv(settings,
     source_binding = engineer_source_binding_sha256(
         **scope,
         source_row_id=source_message_id,
+        source_step_id=runtime_step_id,
         source_hash=SOURCE,
         telegram_update_id=TELEGRAM_UPDATE_ID,
         delivery_chat_id=DELIVERY_CHAT_ID,
@@ -1174,6 +1288,7 @@ def test_restart_reconciles_actual_runtime_key_and_digest_without_argv(settings,
             "conversation_id": conversation_id,
             "channel": "telegram",
             "source_row_id": source_message_id,
+            "source_step_id": runtime_step_id,
             "source_hash": SOURCE,
             "telegram_update_id": TELEGRAM_UPDATE_ID,
             "isolation_profile": "host_user",
@@ -1256,14 +1371,17 @@ def test_restart_reconciles_actual_runtime_key_and_digest_without_argv(settings,
             now="2026-08-28T00:00:01+00:00",
         )
         assert cancelled.state is EngineerWorkItemState.CANCELLED
-        assert settle_engineer_terminal_receipt_in_transaction(
-            conn,
-            **scope,
-            work_item_id=item.id,
-            expected_revision=admitted.revision,
-            verified_terminal_receipt_sha256=TERMINAL,
-            now="2026-08-28T00:00:01+00:00",
-        ) == cancelled
+        assert (
+            settle_engineer_terminal_receipt_in_transaction(
+                conn,
+                **scope,
+                work_item_id=item.id,
+                expected_revision=admitted.revision,
+                verified_terminal_receipt_sha256=TERMINAL,
+                now="2026-08-28T00:00:01+00:00",
+            )
+            == cancelled
+        )
         with pytest.raises(EngineerWorkItemConflictError):
             start_next_engineer_step_in_transaction(
                 conn,
@@ -1313,6 +1431,7 @@ def test_same_owner_key_from_foreign_command_scope_cannot_bind(settings, tmp_pat
             "conversation_id": "conv_ffffffffffffffff",
             "channel": "telegram",
             "source_row_id": SOURCE_ROW_ID,
+            "source_step_id": SOURCE_STEP_ID,
             "source_hash": SOURCE,
             "telegram_update_id": TELEGRAM_UPDATE_ID,
             "isolation_profile": "host_user",
@@ -1352,11 +1471,14 @@ def test_same_owner_key_from_foreign_command_scope_cannot_bind(settings, tmp_pat
                     ledger_binding=observed,
                     now=NOW,
                 )
-        assert get_engineer_work_item_in_transaction(
-            storage.conn,
-            **scope,
-            work_item_id=item.id,
-        ) == item
+        assert (
+            get_engineer_work_item_in_transaction(
+                storage.conn,
+                **scope,
+                work_item_id=item.id,
+            )
+            == item
+        )
     finally:
         command_store.close()
         storage.close()
@@ -1383,10 +1505,13 @@ def test_prepared_negative_ledger_lookup_can_be_discarded_without_a_scope_wedge(
             expires_at=EXPIRY,
         )
 
-    with pytest.raises(
-        sqlite3.IntegrityError,
-        match="open_deletion_forbidden",
-    ), storage.transaction() as conn:
+    with (
+        pytest.raises(
+            sqlite3.IntegrityError,
+            match="open_deletion_forbidden",
+        ),
+        storage.transaction() as conn,
+    ):
         conn.execute("DELETE FROM engineer_work_items WHERE id=?", (item.id,))
     assert not storage.conn.in_transaction
 
@@ -1428,25 +1553,34 @@ def test_prepared_negative_ledger_lookup_can_be_discarded_without_a_scope_wedge(
         )
         is None
     )
-    assert storage.conn.execute(
-        """SELECT COUNT(*) FROM engineer_work_item_command_fences
+    assert (
+        storage.conn.execute(
+            """SELECT COUNT(*) FROM engineer_work_item_command_fences
             WHERE owner_id=? AND idempotency_key=?""",
-        (OWNER, key),
-    ).fetchone()[0] == 1
-    with pytest.raises(
-        sqlite3.IntegrityError,
-        match="command_fence_invalid",
-    ), storage.transaction() as conn:
+            (OWNER, key),
+        ).fetchone()[0]
+        == 1
+    )
+    with (
+        pytest.raises(
+            sqlite3.IntegrityError,
+            match="command_fence_invalid",
+        ),
+        storage.transaction() as conn,
+    ):
         conn.execute(
             """INSERT OR REPLACE INTO engineer_work_item_command_fences
                SELECT * FROM engineer_work_item_command_fences
                 WHERE owner_id=? AND idempotency_key=?""",
             (OWNER, key),
         )
-    with pytest.raises(
-        EngineerWorkItemConflictError,
-        match="permanently fenced",
-    ), storage.transaction() as conn:
+    with (
+        pytest.raises(
+            EngineerWorkItemConflictError,
+            match="permanently fenced",
+        ),
+        storage.transaction() as conn,
+    ):
         create_engineer_work_item_in_transaction(
             conn,
             **scope,
@@ -1457,10 +1591,13 @@ def test_prepared_negative_ledger_lookup_can_be_discarded_without_a_scope_wedge(
             now=NOW,
             expires_at=EXPIRY,
         )
-    with pytest.raises(
-        EngineerWorkItemConflictError,
-        match="permanently fenced",
-    ), storage.transaction() as conn:
+    with (
+        pytest.raises(
+            EngineerWorkItemConflictError,
+            match="permanently fenced",
+        ),
+        storage.transaction() as conn,
+    ):
         create_engineer_work_item_in_transaction(
             conn,
             **scope,
@@ -1520,11 +1657,14 @@ def test_restored_main_discards_recreated_initial_item_against_historical_fence(
             work_item_id=recreated.id,
             fence_binding=historical_fence,
         )
-    assert get_engineer_work_item_in_transaction(
-        storage.conn,
-        **scope,
-        work_item_id=recreated.id,
-    ) is None
+    assert (
+        get_engineer_work_item_in_transaction(
+            storage.conn,
+            **scope,
+            work_item_id=recreated.id,
+        )
+        is None
+    )
     retired = storage.execute(
         """SELECT work_item_id,expected_revision,step_ordinal
              FROM engineer_work_item_command_fences
@@ -1579,21 +1719,27 @@ def test_historical_fence_cannot_alias_an_existing_live_parent(storage) -> None:
             expires_at=EXPIRY,
         )
     historical_fence = {**_fence_binding(recreated), "work_item_id": historical_id}
-    with pytest.raises(
-        EngineerWorkItemConflictError,
-        match="could not be retired exactly",
-    ), storage.transaction() as conn:
+    with (
+        pytest.raises(
+            EngineerWorkItemConflictError,
+            match="could not be retired exactly",
+        ),
+        storage.transaction() as conn,
+    ):
         discard_unsubmitted_engineer_work_item_in_transaction(
             conn,
             **recreated_scope,
             work_item_id=recreated.id,
             fence_binding=historical_fence,
         )
-    assert get_engineer_work_item_in_transaction(
-        storage.conn,
-        **recreated_scope,
-        work_item_id=recreated.id,
-    ) == recreated
+    assert (
+        get_engineer_work_item_in_transaction(
+            storage.conn,
+            **recreated_scope,
+            work_item_id=recreated.id,
+        )
+        == recreated
+    )
 
 
 def test_expiry_retention_and_delete_preserve_effect_bearing_work(storage) -> None:
@@ -1728,6 +1874,87 @@ def test_conversation_archive_never_calls_unknown_work_cancelled(storage) -> Non
     assert preserved == unknown
 
 
+@pytest.mark.parametrize(
+    ("target", "expected_state"),
+    [
+        ("prepared", EngineerWorkItemState.ACTIVE),
+        ("admitted", EngineerWorkItemState.WAITING_FOR_CAPABILITY),
+        ("unknown", EngineerWorkItemState.UNCERTAIN),
+        ("settled", EngineerWorkItemState.CANCELLED),
+        ("ready", EngineerWorkItemState.CANCELLED),
+    ],
+)
+def test_public_and_admin_archive_routes_share_engineer_retirement_matrix(
+    settings,
+    target: str,
+    expected_state: EngineerWorkItemState,
+) -> None:
+    from friday.server import create_app
+
+    app = create_app(settings)
+    headers = {"Authorization": f"Bearer {settings.api_token}"}
+    with TestClient(app) as client:
+        for surface in ("public", "admin"):
+            scope, before = _route_archive_state(app.state.storage, target=target)
+            conversation_id = str(scope["conversation_id"])
+            channel_id = f"archive-{surface}-{target}"
+            app.state.storage.set_channel_conversation(
+                LEGACY_OWNER_USER_ID,
+                "telegram",
+                channel_id,
+                conversation_id,
+            )
+            path = (
+                f"/api/conversations/{conversation_id}/archive"
+                if surface == "public"
+                else (f"/api/admin/conversations/{conversation_id}/archive?user_id={LEGACY_OWNER_USER_ID}")
+            )
+            response = client.post(path, json={"archived": True}, headers=headers)
+            assert response.status_code == 200, response.text
+            assert response.json()["conversation"]["is_archived"] == 1
+            assert (
+                app.state.storage.get_channel_session(
+                    LEGACY_OWNER_USER_ID,
+                    "telegram",
+                    channel_id,
+                )
+                is None
+            )
+            after = get_engineer_work_item_in_transaction(
+                app.state.storage.conn,
+                **scope,
+                work_item_id=before.id,
+            )
+            assert after is not None and after.state is expected_state
+            assert after.revision == before.revision + int(expected_state is EngineerWorkItemState.CANCELLED)
+
+
+def test_archived_admitted_work_settles_directly_to_cancelled(storage) -> None:
+    scope, item = _create(storage)
+    with storage.transaction() as conn:
+        admitted = bind_engineer_command_receipts_in_transaction(
+            conn,
+            **scope,
+            work_item_id=item.id,
+            expected_revision=item.revision,
+            ledger_binding=_ledger_binding(scope, item),
+            now=NOW,
+        )
+    assert storage.archive_conversation(str(scope["conversation_id"]), OWNER)
+    with storage.transaction() as conn:
+        settled = settle_engineer_terminal_receipt_in_transaction(
+            conn,
+            **scope,
+            work_item_id=item.id,
+            expected_revision=admitted.revision,
+            verified_terminal_receipt_sha256=TERMINAL,
+            now=LATER,
+        )
+    assert settled.state is EngineerWorkItemState.CANCELLED
+    assert settled.revision == admitted.revision + 2
+    assert settled.current_step.terminal_receipt_sha256 == TERMINAL
+
+
 def test_inactive_scope_cannot_publish_a_prepared_answer(storage) -> None:
     scope, item = _settled(storage)
     with storage.transaction() as conn:
@@ -1739,25 +1966,27 @@ def test_inactive_scope_cannot_publish_a_prepared_answer(storage) -> None:
             now=LATER,
         )
     assert storage.archive_conversation(str(scope["conversation_id"]), OWNER)
-    with storage.transaction() as conn:
-        with pytest.raises(EngineerWorkItemConflictError, match="inactive scope"):
-            close_engineer_work_item_in_transaction(
-                conn,
-                **scope,
-                work_item_id=item.id,
-                expected_revision=ready.revision,
-                terminal_state=EngineerWorkItemState.COMPLETED,
-                now=LATER,
-            )
-        cancelled = close_engineer_work_item_in_transaction(
+    cancelled = get_engineer_work_item_in_transaction(
+        storage.conn,
+        **scope,
+        work_item_id=item.id,
+    )
+    assert cancelled is not None and cancelled.state is EngineerWorkItemState.CANCELLED
+    with (
+        storage.transaction() as conn,
+        pytest.raises(
+            EngineerWorkItemConflictError,
+            match="revision|completed|terminal|current",
+        ),
+    ):
+        close_engineer_work_item_in_transaction(
             conn,
             **scope,
             work_item_id=item.id,
             expected_revision=ready.revision,
-            terminal_state=EngineerWorkItemState.CANCELLED,
+            terminal_state=EngineerWorkItemState.COMPLETED,
             now=LATER,
         )
-    assert cancelled.state is EngineerWorkItemState.CANCELLED
 
 
 def test_backup_export_and_account_preflight_are_schema46_closed(storage, tmp_path) -> None:
@@ -1875,7 +2104,10 @@ def test_account_purge_inventory_is_closed_and_keeps_neighbour(storage) -> None:
     assert plan["counts"]["engineer_work_item_steps"] == 1
     assert plan["counts"]["engineer_work_items"] == 1
     assert plan["unknown_scopes"] == []
-    assert {blocker["code"] for blocker in plan["blockers"]} == {"chat_history"}
+    assert {blocker["code"] for blocker in plan["blockers"]} == {
+        "chat_history",
+        "engineer_command_history",
+    }
     assert storage.get_user(target) is not None
     assert storage.get_user(neighbour) is not None
 
@@ -2164,6 +2396,37 @@ def test_expired_observed_result_cannot_pass_completion_gate(storage) -> None:
         assert expire_due_engineer_work_items_in_transaction(conn, now=EXPIRY) == 1
 
 
+def test_ready_replay_and_answer_commit_cannot_cross_expiry(storage) -> None:
+    scope, settled = _settled(storage)
+    with storage.transaction() as conn:
+        ready = mark_engineer_work_item_ready_to_answer_in_transaction(
+            conn,
+            **scope,
+            work_item_id=settled.id,
+            expected_revision=settled.revision,
+            now=LATER,
+        )
+    with storage.transaction() as conn:
+        with pytest.raises(EngineerWorkItemConflictError, match="expired"):
+            mark_engineer_work_item_ready_to_answer_in_transaction(
+                conn,
+                **scope,
+                work_item_id=settled.id,
+                expected_revision=settled.revision,
+                now=EXPIRY,
+            )
+        with pytest.raises(EngineerWorkItemConflictError, match="expired"):
+            close_engineer_work_item_in_transaction(
+                conn,
+                **scope,
+                work_item_id=ready.id,
+                expected_revision=ready.revision,
+                terminal_state=EngineerWorkItemState.COMPLETED,
+                now=EXPIRY,
+            )
+        assert expire_due_engineer_work_items_in_transaction(conn, now=EXPIRY) == 1
+
+
 def test_raw_progress_and_completion_cannot_bypass_scope_revocation(storage) -> None:
     scope, settled = _settled(storage)
     storage.update_user(OWNER, status="disabled")
@@ -2177,10 +2440,13 @@ def test_raw_progress_and_completion_cannot_bypass_scope_revocation(storage) -> 
                   transition='answer_ready',updated_at='2026-08-27T10:00:02+00:00'
             WHERE id=?""",
     ):
-        with pytest.raises(
-            sqlite3.IntegrityError,
-            match="engineer_work_item_transition_invalid",
-        ), storage.transaction() as conn:
+        with (
+            pytest.raises(
+                sqlite3.IntegrityError,
+                match="engineer_work_item_transition_invalid",
+            ),
+            storage.transaction() as conn,
+        ):
             conn.execute(statement, (settled.id,))
 
     storage.update_user(OWNER, status="active")
@@ -2193,10 +2459,13 @@ def test_raw_progress_and_completion_cannot_bypass_scope_revocation(storage) -> 
             now="2026-08-27T10:00:02+00:00",
         )
     storage.update_user(OWNER, status="disabled")
-    with pytest.raises(
-        sqlite3.IntegrityError,
-        match="engineer_work_item_transition_invalid",
-    ), storage.transaction() as conn:
+    with (
+        pytest.raises(
+            sqlite3.IntegrityError,
+            match="engineer_work_item_transition_invalid",
+        ),
+        storage.transaction() as conn,
+    ):
         conn.execute(
             """UPDATE engineer_work_items
                   SET state='completed',revision=revision+1,transition='completed',

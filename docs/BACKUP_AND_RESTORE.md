@@ -32,6 +32,13 @@ jericho verify-backup jericho-20260721T010203Z-before-upgrade.sqlite3
 
 Пригодной считается только пара, у которой совпадают безопасный путь, имя, размер, SHA-256 и schema version, а SQLite проходит `integrity_check` без foreign-key нарушений. Отсутствующий, повреждённый или чужой manifest делает backup непригодным для автоматического восстановления.
 
+Если Engineer command ledger когда-либо был создан, backup дополнительно требует
+его аутентифицированную неизменную identity `(store_id, authority_sequence)` и
+доказанное отсутствие незавершённых команд/доставок. Manifest HMAC-связывает эту
+identity с SHA-256 основной БД. Сам ledger в SQLite-копию не входит; старый,
+подменённый или откатившийся ledger, pending Telegram carrier и отключённый после
+провижининга feature flag закрывают backup/restore fail-closed.
+
 ### Снимок «до миграции» этой командой не снять
 
 `jericho backup` открывает хранилище, а **открытие мигрирует схему**. Копия, снятая перед обновлением, окажется уже в новой схеме — метка в имени файла солжёт. Наступал на это при переходе 16→17.
@@ -84,6 +91,8 @@ data/state/jericho.sqlite3
 - весь `FRIDAY_OBSIDIAN_ROOT` (профили Syncthing и Markdown-vault;
   `data/obsidian/` по умолчанию);
 - `data/state/telegram-inbox.sqlite3*`;
+- `FRIDAY_ENGINEER_COMMAND_STORE_DIR` (обычно `data/engineer-command/`),
+  `FRIDAY_ENGINEER_COMMAND_KEY_FILE` и lifecycle anchors в `data/state/`;
 - `.env`/`.env.local`;
 - model weights и container images.
 
@@ -126,6 +135,12 @@ jericho restore-backup --yes
 6. открывает восстановленную БД, применяет только поддерживаемые forward migrations и повторяет health checks;
 7. при любой ошибке автоматически возвращает точные исходные DB/WAL/SHM и проверяет восстановленное состояние.
 
+При наличии Engineer ledger команда также требует остановленный Telegram bridge,
+эксклюзивно открывает точный ledger и принимает только snapshot, чей keyed
+authority receipt всё ещё совпадает с ним. Незавершённая текущая terminal/progress/
+UNKNOWN delivery блокирует замену БД, чтобы восстановление не потеряло и не
+продублировало сообщение.
+
 Прямое копирование `.sqlite3` поверх работающей системы не является поддерживаемым способом восстановления.
 
 Каталоги `data/backups/recovery-*` — аварийные снимки исходных байтов, а не обычные подтверждённые backups. Они намеренно не выбираются командами `verify-backup`/`restore-backup` автоматически и нужны для forensic/recovery-разбора, когда активную БД уже нельзя корректно открыть.
@@ -163,6 +178,9 @@ data/files/
 data/memory-vault/               только known full_owner/legacy plaintext
 FRIDAY_OBSIDIAN_ROOT/            весь configured root, если Obsidian тестируется
 data/state/telegram-inbox.sqlite3*   если нужно сохранить pending/dead-letter updates
+FRIDAY_ENGINEER_COMMAND_STORE_DIR/   весь внешний Engineer ledger
+FRIDAY_ENGINEER_COMMAND_KEY_FILE     приватный ключ того же поколения
+data/state/engineer-command-store.*  lifecycle anchors того же поколения
 .env или .env.local                  только в отдельное зашифрованное хранилище
 ```
 
@@ -204,10 +222,15 @@ Get-ChildItem $target -Recurse -File | Get-FileHash -Algorithm SHA256 |
    owner и private permissions root. `data/memory-vault/` возвращайте только
    если snapshot и целевой `full_owner` были явно согласованы; legacy plaintext
    помещайте в offline review, а не в активный runtime автоматически.
-3. Верните secrets из зашифрованного хранилища.
-4. Поместите пару `.sqlite3 + manifest` в `data/backups/`.
-5. Запустите `jericho restore-backup <filename> --yes`.
-6. Выполните `jericho doctor`, затем product smoke через Admin/API/Telegram.
+3. Если Engineer ledger уже существовал, верните его каталог, приватный key и
+   все `engineer-command-store.*` lifecycle anchors строго из того же поколения.
+   Новый пустой ledger не заменяет утраченный. Для действительно новой установки
+   его один раз создаёт при остановленных сервисах
+   `jericho engineer-command-store-provision`.
+4. Верните остальные secrets из зашифрованного хранилища.
+5. Поместите пару `.sqlite3 + manifest` в `data/backups/`.
+6. Запустите `jericho restore-backup <filename> --yes`.
+7. Выполните `jericho doctor`, затем product smoke через Admin/API/Telegram.
 
 Не смешивайте БД из одного snapshot с files или Obsidian root из
 другого. Встроенной проверки согласованности SQLite и Obsidian root пока нет.

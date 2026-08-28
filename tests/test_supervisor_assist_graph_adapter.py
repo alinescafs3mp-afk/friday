@@ -181,6 +181,16 @@ def _seed_surface(storage, label: str) -> tuple[CurrentFileWebAssistSurface, dic
     return surface, projection
 
 
+def _inject_archived_scope_without_retirement(storage: Any, conversation_id: str, user_id: str) -> None:
+    """Create restart-skew that the canonical archive transaction prevents."""
+
+    with storage.transaction() as conn:
+        conn.execute(
+            "UPDATE conversations SET is_archived=1 WHERE id=? AND user_id=?",
+            (conversation_id, user_id),
+        )
+
+
 def _plan(surface: CurrentFileWebAssistSurface) -> ValidatedExecutionPlan:
     query = surface.turn.message.rsplit('"', 2)[1]
     policy = semantic_supervisor_policy.supervisor_product_policy_identity_for_mode("assist")
@@ -628,7 +638,11 @@ def test_mixed_authority_terminal_fails_closed_on_restart_drift_and_forgery(stor
         drift_surface,
         denied_kind=CompareCurrentFileWebStepKind.FILE_READ,
     )
-    storage.archive_conversation(drift_surface.conversation_id, drift_surface.actor.user_id)
+    _inject_archived_scope_without_retirement(
+        storage,
+        drift_surface.conversation_id,
+        drift_surface.actor.user_id,
+    )
     with pytest.raises(SupervisorAssistGraphAdapterError, match="live dialogue"):
         adapter.publish_terminal_after_mixed_authority_denial(
             AssistGraphCursor.from_graph(drift_graph),
@@ -944,7 +958,8 @@ def test_startup_recovery_rechecks_production_boundaries_and_does_not_mask_fault
     assert recovered.surface.attachment.raw_object_id == graphs["current"].current_file_raw_object_id
     authorization.deny_permission(surfaces["denied"].actor.user_id, "files.read")
     storage.update_user(surfaces["inactive"].actor.user_id, status="disabled")
-    storage.archive_conversation(
+    _inject_archived_scope_without_retirement(
+        storage,
         surfaces["archived"].conversation_id,
         surfaces["archived"].actor.user_id,
     )
@@ -1014,7 +1029,11 @@ def test_expiry_is_bounded_source_free_and_does_not_mask_lifecycle_faults(storag
     surface, _ = _seed_surface(storage, "expiry-production")
     graph = _admit(adapter, surface)
     storage.update_user(surface.actor.user_id, status="disabled")
-    storage.archive_conversation(surface.conversation_id, surface.actor.user_id)
+    _inject_archived_scope_without_retirement(
+        storage,
+        surface.conversation_id,
+        surface.actor.user_id,
+    )
     with storage.transaction() as conn:
         conn.execute(
             "UPDATE raw_objects SET content_hash=? WHERE id=? AND user_id=?",

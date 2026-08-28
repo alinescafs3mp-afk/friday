@@ -59,6 +59,8 @@ MEMORY_VAULT_MODE_CONTRACT = "v1"
 OBSIDIAN_MODES = ("disabled", "enabled")
 OBSIDIAN_CUTOVER_CONTRACT = "exact-root-v1"
 VENV_RELOCATION_CONTRACT = "absolute-final-v1"
+ENGINEER_COMMAND_LIFECYCLE_CONTRACT = "authenticated-external-ledger-v1"
+ENGINEER_COMMAND_LIFECYCLE_MIN_SCHEMA = 46
 RUNTIME_CONFIG_SCHEMA_V1 = "friday.immutable-release-runtime-config.v1"
 RUNTIME_CONFIG_SCHEMA_V2 = "friday.immutable-release-runtime-config.v2"
 RUNTIME_CONFIG_SCHEMA_V3 = "friday.immutable-release-runtime-config.v3"
@@ -88,6 +90,9 @@ MAX_EXACT_MANIFEST_BYTES = 64 << 20
 MAX_SHEBANG_BYTES = 255
 MAX_OBSIDIAN_BACKUP_ENTRIES = 100_000
 MAX_OBSIDIAN_BACKUP_BYTES = 16 << 30
+MAX_ENGINEER_BACKUP_ENTRIES = 200_000
+MAX_ENGINEER_BACKUP_BYTES = 64 << 30
+MAX_ENGINEER_CONTOUR_ENTRIES = 1_000_000
 _SMOKE_SCRATCH_ROOT = Path("/var/tmp/friday-immutable-smoke")
 _OBSIDIAN_ENABLE_TRANSITION = "obsidian_enable"
 _ENGINEER_MODE_ENABLE_TRANSITION = "engineer_mode_enable"
@@ -1499,6 +1504,18 @@ def _require_obsidian_cutover_contract(release: ReleaseIdentity, *, code: str) -
         raise ReleaseFailure(code)
 
 
+def _require_engineer_command_lifecycle_contract(
+    release: ReleaseIdentity,
+    *,
+    code: str,
+) -> None:
+    if (
+        release.max_schema < ENGINEER_COMMAND_LIFECYCLE_MIN_SCHEMA
+        or release.engineer_command_lifecycle_contract != ENGINEER_COMMAND_LIFECYCLE_CONTRACT
+    ):
+        raise ReleaseFailure(code)
+
+
 def _memory_vault_health_identity_matches(
     payload: Mapping[str, Any],
     release: ReleaseIdentity,
@@ -1782,16 +1799,24 @@ def _fsync_directory(path: Path) -> None:
         os.close(descriptor)
 
 
-def _write_private_durable(path: Path, value: bytes, *, final_mode: int) -> None:
+def _write_private_durable(
+    path: Path,
+    value: bytes,
+    *,
+    final_mode: int,
+) -> tuple[int, int]:
     descriptor = os.open(
         path,
         os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_CLOEXEC", 0),
         0o600,
     )
     try:
+        opened = os.fstat(descriptor)
+        identity = (int(opened.st_dev), int(opened.st_ino))
         _write_all(descriptor, value)
         os.fchmod(descriptor, final_mode)
         os.fsync(descriptor)
+        return identity
     finally:
         os.close(descriptor)
 
@@ -1804,13 +1829,37 @@ def _replace_private_durable(path: Path, value: bytes) -> None:
     if lexical.parent != parent or lexical.name in {"", ".", ".."}:
         raise ReleaseFailure("durable_state_path_invalid")
     temporary = parent / f".{lexical.name}.{os.getpid()}.{os.urandom(8).hex()}.new"
-    try:
-        _write_private_durable(temporary, value, final_mode=0o600)
-        os.replace(temporary, lexical)
-        os.chmod(lexical, 0o600)
-        _fsync_directory(parent)
-    finally:
-        temporary.unlink(missing_ok=True)
+    temporary_identity = _write_private_durable(temporary, value, final_mode=0o600)
+    before_replace = os.stat(temporary, follow_symlinks=False)
+    if (
+        not stat.S_ISREG(before_replace.st_mode)
+        or before_replace.st_uid != os.geteuid()
+        or before_replace.st_nlink != 1
+        or stat.S_IMODE(before_replace.st_mode) != 0o600
+        or temporary_identity != (int(before_replace.st_dev), int(before_replace.st_ino))
+    ):
+        # Do not unlink an identity-drifted path: a second pathname lookup
+        # would let a concurrent swap turn cleanup into deletion of another
+        # inode.  The private random residue is safer and is never published.
+        raise ReleaseFailure("durable_state_path_changed")
+    os.replace(temporary, lexical)
+    published = os.stat(lexical, follow_symlinks=False)
+    if (
+        not stat.S_ISREG(published.st_mode)
+        or published.st_uid != os.geteuid()
+        or published.st_nlink != 1
+        or stat.S_IMODE(published.st_mode) != 0o600
+        or temporary_identity != (int(published.st_dev), int(published.st_ino))
+    ):
+        raise ReleaseFailure("durable_state_path_changed")
+    _fsync_directory(parent)
+    durable = os.stat(lexical, follow_symlinks=False)
+    if (
+        durable.st_nlink != 1
+        or stat.S_IMODE(durable.st_mode) != 0o600
+        or temporary_identity != (int(durable.st_dev), int(durable.st_ino))
+    ):
+        raise ReleaseFailure("durable_state_path_changed")
 
 
 def _fsync_tree(root: Path) -> None:
@@ -5791,6 +5840,7 @@ class ReleaseIdentity:
     venv_relocation_contract: str = ""
     obsidian_cutover_contract: str = ""
     secondary_product_runner_sha256: str = ""
+    engineer_command_lifecycle_contract: str = ""
 
 
 @dataclass(frozen=True)
@@ -5800,6 +5850,7 @@ class DatabaseBackup:
     inbox_receipt_sha256: str
     opaque: Any = None
     obsidian_receipt_sha256: str = "0" * 64
+    engineer_receipt_sha256: str = "0" * 64
 
 
 @dataclass
@@ -5865,7 +5916,18 @@ class ActivationPort(Protocol):
         next_env_file_sha256: str,
     ) -> None: ...
 
-    def backup_database(self) -> DatabaseBackup: ...
+    def backup_database(self, release: ReleaseIdentity) -> DatabaseBackup: ...
+
+    def validate_engineer_recovery_contour(
+        self,
+        releases: Sequence[ReleaseIdentity],
+    ) -> None: ...
+
+    def engineer_store_lifecycle_required(self) -> bool: ...
+
+    def engineer_store_lifecycle_provisioned(self) -> bool: ...
+
+    def provision_engineer_store(self, release: ReleaseIdentity) -> None: ...
 
     def offline_migrate(self, release: ReleaseIdentity, backup: DatabaseBackup) -> None: ...
 
@@ -5885,7 +5947,7 @@ class ActivationPort(Protocol):
 
     def accept_bridge(self, release: ReleaseIdentity) -> None: ...
 
-    def restore_database(self, backup: DatabaseBackup) -> None: ...
+    def restore_database(self, backup: DatabaseBackup, release: ReleaseIdentity) -> None: ...
 
 
 class ActivationJournalPort(Protocol):
@@ -5928,6 +5990,8 @@ _JOURNAL_PHASES = frozenset(
         "environment_active",
         "migration_attempted",
         "alias_repair_attempted",
+        "provision_attempted",
+        "provision_committed",
         "candidate_anchor_attempted",
         "candidate_anchor_active",
         "backend_start_attempted",
@@ -5963,7 +6027,9 @@ _ACTIVATION_FORWARD: dict[str, frozenset[str]] = {
     "environment_swap_attempted": frozenset({"environment_active"}),
     "environment_active": frozenset({"migration_attempted"}),
     "migration_attempted": frozenset({"alias_repair_attempted"}),
-    "alias_repair_attempted": frozenset({"candidate_anchor_attempted"}),
+    "alias_repair_attempted": frozenset({"provision_attempted", "candidate_anchor_attempted"}),
+    "provision_attempted": frozenset({"provision_committed"}),
+    "provision_committed": frozenset({"candidate_anchor_attempted"}),
     "candidate_anchor_attempted": frozenset({"candidate_anchor_active"}),
     "candidate_anchor_active": frozenset({"backend_start_attempted"}),
     "backend_start_attempted": frozenset({"backend_accepted"}),
@@ -7113,6 +7179,7 @@ def build_release(spec: BuildSpec) -> ReleaseIdentity:
             "memory_vault_mode_contract": MEMORY_VAULT_MODE_CONTRACT,
             "obsidian_cutover_contract": OBSIDIAN_CUTOVER_CONTRACT,
             "venv_relocation_contract": VENV_RELOCATION_CONTRACT,
+            "engineer_command_lifecycle_contract": ENGINEER_COMMAND_LIFECYCLE_CONTRACT,
         }
         (artifacts / "immutable-release.json").write_bytes(_canonical_json(metadata) + b"\n")
         provisional = ReleaseIdentity(
@@ -7125,6 +7192,7 @@ def build_release(spec: BuildSpec) -> ReleaseIdentity:
             VENV_RELOCATION_CONTRACT,
             OBSIDIAN_CUTOVER_CONTRACT,
             product_runner_sha256,
+            ENGINEER_COMMAND_LIFECYCLE_CONTRACT,
         )
         installed_surface_smoke(provisional)
         _relocate_venv_generated_paths(staging, target)
@@ -7173,6 +7241,7 @@ def build_release(spec: BuildSpec) -> ReleaseIdentity:
             VENV_RELOCATION_CONTRACT,
             OBSIDIAN_CUTOVER_CONTRACT,
             product_runner_sha256,
+            ENGINEER_COMMAND_LIFECYCLE_CONTRACT,
         )
         verify_release_tree(release)
         installed_surface_smoke(release)
@@ -7284,6 +7353,7 @@ def activate_release(
     state = ActivationState()
     backup: DatabaseBackup | None = None
     alias_repair: Mapping[str, Any] = {}
+    provision_committed = False
     if candidate.root in {previous.root, schema_capable_fallback.root} or candidate.commit in {
         previous.commit,
         schema_capable_fallback.commit,
@@ -7313,6 +7383,25 @@ def activate_release(
         previous,
         code="previous_obsidian_cutover_contract_missing",
     )
+    port.validate_engineer_recovery_contour((candidate, previous, schema_capable_fallback))
+    engineer_lifecycle_required = port.engineer_store_lifecycle_required()
+    engineer_lifecycle_provisioned = port.engineer_store_lifecycle_provisioned()
+    if engineer_lifecycle_provisioned and not engineer_lifecycle_required:
+        raise ReleaseFailure("engineer_store_lifecycle_state_invalid")
+    if engineer_lifecycle_required:
+        _require_engineer_command_lifecycle_contract(
+            candidate,
+            code="candidate_engineer_lifecycle_contract_missing",
+        )
+        _require_engineer_command_lifecycle_contract(
+            schema_capable_fallback,
+            code="fallback_engineer_lifecycle_contract_missing",
+        )
+    if engineer_lifecycle_provisioned:
+        _require_engineer_command_lifecycle_contract(
+            previous,
+            code="previous_engineer_lifecycle_contract_missing",
+        )
     port.verify_release(candidate)
     # The predecessor is the currently live binary and must remain provable
     # against ENV0 while an authenticated ENV1 transition is only staged.
@@ -7352,12 +7441,17 @@ def activate_release(
         if not port.writer_leases_held():
             raise ReleaseFailure("writer_leases_not_held")
         journal.record("leases_acquired")
-        backup = port.backup_database()
+        backup = port.backup_database(candidate)
         if backup.schema_version > candidate.max_schema:
             raise ReleaseFailure("candidate_schema_too_old")
         _closed_hash(backup.receipt_sha256, "database_backup_invalid")
         _closed_hash(backup.inbox_receipt_sha256, "inbox_backup_invalid")
         _closed_hash(backup.obsidian_receipt_sha256, "obsidian_backup_invalid")
+        if engineer_lifecycle_required:
+            _closed_hash(
+                backup.engineer_receipt_sha256,
+                "engineer_store_backup_invalid",
+            )
         journal.record("backup_complete", backup=backup)
         if staged_transition is not None:
             journal.record("environment_swap_attempted", backup=backup)
@@ -7379,6 +7473,26 @@ def activate_release(
         alias_repair = _validated_alias_repair_receipt(port.repair_file_aliases(candidate, backup))
         if not port.writer_leases_held():
             raise ReleaseFailure("alias_repair_lost_writer_leases")
+        if engineer_lifecycle_required:
+            journal.record(
+                "provision_attempted",
+                backup=backup,
+                database_mutation_possible=True,
+            )
+            # Write-ahead one-way boundary: after this fsync, recovery may
+            # provision/retry with the capable fallback but may never restore
+            # the pre-lifecycle image or admit the predecessor.  Therefore no
+            # crash window exists between the first external-ledger mutation
+            # and the durable decision that makes that mutation irreversible.
+            journal.record(
+                "provision_committed",
+                backup=backup,
+                database_mutation_possible=True,
+            )
+            provision_committed = True
+            port.provision_engineer_store(candidate)
+            if not port.writer_leases_held():
+                raise ReleaseFailure("engineer_provision_lost_writer_leases")
         journal.record(
             "candidate_anchor_attempted",
             backup=backup,
@@ -7451,6 +7565,9 @@ def activate_release(
             "backup_receipt_sha256": backup.receipt_sha256,
             "inbox_backup_receipt_sha256": backup.inbox_receipt_sha256,
             "obsidian_backup_receipt_sha256": backup.obsidian_receipt_sha256,
+            "engineer_backup_receipt_sha256": (
+                backup.engineer_receipt_sha256 if engineer_lifecycle_required else ""
+            ),
             "database_schema_before": backup.schema_version,
             "alias_repair": dict(alias_repair),
             "runtime_policy": runtime_policy,
@@ -7468,6 +7585,9 @@ def activate_release(
         return {**receipt, "receipt_sha256": receipt_sha256}
     except BaseException as original:
         try:
+            durable_provision_committed = bool(
+                provision_committed or journal.load().get("engineer_provision_committed") is True
+            )
             journal.record(
                 "rollback_stop_attempted",
                 backup=backup,
@@ -7498,7 +7618,8 @@ def activate_release(
                     # an abrupt interruption.
                     port.activate_staged_config_transition(*staged_transition)
                 if (
-                    not state.candidate_backend_started
+                    not durable_provision_committed
+                    and not state.candidate_backend_started
                     and not state.candidate_bridge_started
                     and backup.schema_version <= previous.max_schema
                 ):
@@ -7509,7 +7630,7 @@ def activate_release(
                         backup=backup,
                         database_mutation_possible=True,
                     )
-                    port.restore_database(backup)
+                    port.restore_database(backup, candidate)
                     rollback = (
                         previous
                         if staged_transition is None
@@ -7520,6 +7641,13 @@ def activate_release(
                     # Once bridge admission can have written schema-34 state, never
                     # put a schema-33 binary over it.  No implicit lossy DB restore.
                     rollback = schema_capable_fallback
+                if durable_provision_committed:
+                    # The write-ahead lifecycle boundary may precede the first
+                    # provisioning byte.  Idempotently converge with the
+                    # independently verified fallback before starting it.
+                    port.provision_engineer_store(schema_capable_fallback)
+                    if not port.writer_leases_held():
+                        raise ReleaseFailure("rollback_engineer_provision_lost_writer_leases")
             journal.record(
                 "rollback_anchor_attempted",
                 backup=backup,
@@ -7623,6 +7751,12 @@ def recover_interrupted_activation(
         previous,
         code="recovery_previous_obsidian_cutover_contract_missing",
     )
+    port.validate_engineer_recovery_contour((candidate, previous, fallback))
+    if state.get("engineer_provision_committed") is not True and port.engineer_store_lifecycle_provisioned():
+        _require_engineer_command_lifecycle_contract(
+            previous,
+            code="recovery_previous_engineer_lifecycle_contract_missing",
+        )
     backup = journal.database_backup()
     staged_transition = _staged_config_transition(state)
     port.verify_release(candidate)
@@ -7636,7 +7770,17 @@ def recover_interrupted_activation(
     port.verify_units(candidate)
     network_uncertain = state.get("network_writer_uncertain") is True
     database_mutation_possible = state.get("database_mutation_possible") is True
+    provision_committed = state.get("engineer_provision_committed") is True
     writer_target = str(state.get("writer_target") or "")
+    if provision_committed:
+        _require_engineer_command_lifecycle_contract(
+            candidate,
+            code="recovery_candidate_engineer_lifecycle_contract_missing",
+        )
+        _require_engineer_command_lifecycle_contract(
+            fallback,
+            code="recovery_fallback_engineer_lifecycle_contract_missing",
+        )
     if (
         staged_transition is not None
         and backup is None
@@ -7665,7 +7809,17 @@ def recover_interrupted_activation(
             # recovery must converge ENV0/ENV1 to ENV1 before any writer start.
             port.activate_staged_config_transition(*staged_transition)
     target: ReleaseIdentity
-    if network_uncertain:
+    backup_restored = False
+    if provision_committed:
+        # The authenticated external ledger is now a production authority.
+        # Restoring its pre-lifecycle image or starting the predecessor would
+        # silently discard that authority, so recovery converges only to the
+        # distinct lifecycle-capable fallback.
+        port.provision_engineer_store(fallback)
+        if not port.writer_leases_held():
+            raise ReleaseFailure("recovery_engineer_provision_lost_writer_leases")
+        target = fallback
+    elif network_uncertain:
         # A previously started clean previous release may retain its exact DB.
         # Candidate/fallback writers require the schema-capable fallback.
         target = previous if writer_target == "previous" else fallback
@@ -7677,7 +7831,8 @@ def recover_interrupted_activation(
             backup=backup,
             database_mutation_possible=True,
         )
-        port.restore_database(backup)
+        port.restore_database(backup, candidate)
+        backup_restored = True
         target = previous
     else:
         target = previous
@@ -7727,8 +7882,9 @@ def recover_interrupted_activation(
         "schema": ACTIVATION_RECEIPT_SCHEMA,
         "status": "recovered",
         "recovered_tree_sha256": target.tree_manifest_sha256,
-        "backup_restored": bool(not network_uncertain and database_mutation_possible),
+        "backup_restored": backup_restored,
         "network_writer_uncertain": network_uncertain,
+        "engineer_provision_committed": provision_committed,
     }
     receipt_sha256 = _sha256_bytes(_canonical_json(receipt))
     journal.record(
@@ -8065,10 +8221,20 @@ class _ExactObsidianBackup:
 
 
 @dataclass(frozen=True)
+class _ExactEngineerBackup:
+    manifest_sha256: str
+    entry_count: int
+    total_bytes: int
+    store_present: bool
+    key_present: bool
+
+
+@dataclass(frozen=True)
 class _ExactBackupPayload:
     directory: Path
     files: tuple[tuple[str, str, int], ...]
     obsidian: _ExactObsidianBackup | None = None
+    engineer: _ExactEngineerBackup | None = None
 
 
 @dataclass(frozen=True)
@@ -8327,7 +8493,14 @@ class DurableActivationJournal:
             "next_env_file_sha256",
         }
         validation_expected = current_expected | {"staged_transition_validation_sha256"}
-        current_transition_expected = (current_expected, validation_expected)
+        engineer_current_expected = current_expected | {"engineer_provision_committed"}
+        engineer_validation_expected = validation_expected | {"engineer_provision_committed"}
+        validation_payload_sets = (validation_expected, engineer_validation_expected)
+        current_payload_sets = (current_expected, engineer_current_expected)
+        current_transition_expected = (
+            *current_payload_sets,
+            *validation_payload_sets,
+        )
         v3_expected = (
             v3_legacy_expected,
             v3_predecessor_expected,
@@ -8421,7 +8594,7 @@ class DurableActivationJournal:
                 )
             )
             or (
-                payload_keys == validation_expected
+                payload_keys in validation_payload_sets
                 and (
                     payload.get("prebackup_config_transition")
                     != _SEMANTIC_SUPERVISOR_ASSIST_TO_CANARY_TRANSITION
@@ -8436,10 +8609,48 @@ class DurableActivationJournal:
                 )
             )
             or (
-                payload_keys == current_expected
+                payload_keys in current_payload_sets
                 and payload.get("prebackup_config_transition")
                 == _SEMANTIC_SUPERVISOR_ASSIST_TO_CANARY_TRANSITION
                 and payload.get("phase") != "prepared"
+            )
+            or (
+                "engineer_provision_committed" in payload
+                and type(payload.get("engineer_provision_committed")) is not bool
+            )
+            or (
+                payload.get("phase") in {"provision_attempted", "provision_committed"}
+                and "engineer_provision_committed" not in payload
+            )
+            or (
+                payload.get("phase") == "provision_committed"
+                and payload.get("engineer_provision_committed") is not True
+            )
+            or (
+                payload.get("engineer_provision_committed") is True
+                and payload.get("phase")
+                not in {
+                    "provision_committed",
+                    "candidate_anchor_attempted",
+                    "candidate_anchor_active",
+                    "backend_start_attempted",
+                    "backend_accepted",
+                    "bridge_start_attempted",
+                    "bridge_accepted",
+                    "rollback_stop_attempted",
+                    "rollback_anchor_attempted",
+                    "rollback_backend_start_attempted",
+                    "rollback_backend_accepted",
+                    "rollback_bridge_start_attempted",
+                    "recovery_stop_attempted",
+                    "recovery_anchor_attempted",
+                    "recovery_backend_start_attempted",
+                    "recovery_backend_accepted",
+                    "recovery_bridge_start_attempted",
+                    "clear",
+                    "rolled_back",
+                    "recovered",
+                }
             )
             or (
                 payload.get("phase") in {"environment_swap_attempted", "environment_active"}
@@ -8756,6 +8967,7 @@ class DurableActivationJournal:
                 "backup": None,
                 "database_mutation_possible": False,
                 "network_writer_uncertain": False,
+                "engineer_provision_committed": False,
                 "terminal_receipt_sha256": "",
                 "writer_target": "",
             }
@@ -8764,10 +8976,17 @@ class DurableActivationJournal:
     @staticmethod
     def _backup_record(backup: DatabaseBackup) -> dict[str, Any]:
         payload = backup.opaque
-        if not isinstance(payload, _ExactBackupPayload) or payload.obsidian is None:
+        if (
+            not isinstance(payload, _ExactBackupPayload)
+            or payload.obsidian is None
+            or payload.engineer is None
+        ):
             raise ReleaseFailure("activation_journal_backup_invalid")
         obsidian = payload.obsidian
+        engineer = payload.engineer
         if backup.obsidian_receipt_sha256 != obsidian.manifest_sha256:
+            raise ReleaseFailure("activation_journal_backup_invalid")
+        if backup.engineer_receipt_sha256 != engineer.manifest_sha256:
             raise ReleaseFailure("activation_journal_backup_invalid")
         return {
             "directory": str(payload.directory),
@@ -8780,6 +8999,14 @@ class DurableActivationJournal:
                 "total_bytes": obsidian.total_bytes,
             },
             "obsidian_receipt_sha256": backup.obsidian_receipt_sha256,
+            "engineer": {
+                "entry_count": engineer.entry_count,
+                "key_present": engineer.key_present,
+                "manifest_sha256": engineer.manifest_sha256,
+                "store_present": engineer.store_present,
+                "total_bytes": engineer.total_bytes,
+            },
+            "engineer_receipt_sha256": backup.engineer_receipt_sha256,
             "receipt_sha256": backup.receipt_sha256,
             "schema_version": backup.schema_version,
         }
@@ -8839,6 +9066,8 @@ class DurableActivationJournal:
         state["network_writer_uncertain"] = bool(
             state["network_writer_uncertain"] or network_writer_uncertain
         )
+        if phase == "provision_committed":
+            state["engineer_provision_committed"] = True
         if writer_target:
             if writer_target not in {"candidate", "previous", "fallback"}:
                 raise ReleaseFailure("activation_journal_writer_target_invalid")
@@ -8877,12 +9106,19 @@ class DurableActivationJournal:
             "schema_version",
         }
         current_keys = legacy_keys | {"obsidian", "obsidian_receipt_sha256"}
+        engineer_keys = current_keys | {"engineer", "engineer_receipt_sha256"}
         if not isinstance(raw, dict) or frozenset(raw) not in {
             frozenset(legacy_keys),
             frozenset(current_keys),
+            frozenset(engineer_keys),
         }:
             raise ReleaseFailure("activation_journal_backup_invalid")
-        if state.get("config_identity_schema") == RUNTIME_CONFIG_SCHEMA_V3 and set(raw) != current_keys:
+        if "engineer_provision_committed" in state and set(raw) != engineer_keys:
+            raise ReleaseFailure("activation_journal_backup_engineer_required")
+        if state.get("config_identity_schema") == RUNTIME_CONFIG_SCHEMA_V3 and set(raw) not in (
+            current_keys,
+            engineer_keys,
+        ):
             raise ReleaseFailure("activation_journal_backup_obsidian_required")
         directory = _private_directory(Path(str(raw["directory"])))
         if directory.parent != self.backup_root or not directory.name.startswith("immutable-cutover-"):
@@ -8957,7 +9193,7 @@ class DurableActivationJournal:
             raise ReleaseFailure("activation_journal_backup_manifest_mismatch")
         obsidian: _ExactObsidianBackup | None = None
         obsidian_receipt = "0" * 64
-        if set(raw) == current_keys:
+        if set(raw) in (current_keys, engineer_keys):
             obsidian_raw = raw.get("obsidian")
             if not isinstance(obsidian_raw, dict) or set(obsidian_raw) != {
                 "file_count",
@@ -8993,11 +9229,55 @@ class DurableActivationJournal:
                 int(total_bytes),
             )
             _verify_obsidian_backup(directory, obsidian)
+        engineer: _ExactEngineerBackup | None = None
+        engineer_receipt = "0" * 64
+        if set(raw) == engineer_keys:
+            engineer_raw = raw.get("engineer")
+            if not isinstance(engineer_raw, dict) or set(engineer_raw) != {
+                "entry_count",
+                "key_present",
+                "manifest_sha256",
+                "store_present",
+                "total_bytes",
+            }:
+                raise ReleaseFailure("activation_journal_backup_invalid")
+            entry_count = engineer_raw.get("entry_count")
+            total_bytes = engineer_raw.get("total_bytes")
+            key_present = engineer_raw.get("key_present")
+            store_present = engineer_raw.get("store_present")
+            manifest_sha256 = _closed_hash(
+                str(engineer_raw.get("manifest_sha256") or ""),
+                "activation_journal_backup_invalid",
+            )
+            engineer_receipt = _closed_hash(
+                str(raw.get("engineer_receipt_sha256") or ""),
+                "activation_journal_backup_invalid",
+            )
+            if (
+                type(entry_count) is not int
+                or not 0 <= int(entry_count) <= MAX_ENGINEER_BACKUP_ENTRIES
+                or type(total_bytes) is not int
+                or not 0 <= int(total_bytes) <= MAX_ENGINEER_BACKUP_BYTES
+                or type(key_present) is not bool
+                or type(store_present) is not bool
+                or manifest_sha256 != engineer_receipt
+            ):
+                raise ReleaseFailure("activation_journal_backup_invalid")
+            engineer = _ExactEngineerBackup(
+                manifest_sha256=manifest_sha256,
+                entry_count=int(entry_count),
+                total_bytes=int(total_bytes),
+                store_present=bool(store_present),
+                key_present=bool(key_present),
+            )
+            _verify_engineer_backup(directory, engineer)
         expected_top_level = {name for name, _digest, _size in files} | {"manifest.json"}
         if obsidian is not None:
             expected_top_level.add("obsidian-manifest.json")
             if obsidian.present:
                 expected_top_level.add("obsidian-root")
+        if engineer is not None:
+            expected_top_level.update({"engineer-manifest.json", "engineer-recovery"})
         try:
             actual_top_level = {path.name for path in directory.iterdir()}
         except OSError as exc:
@@ -9009,11 +9289,22 @@ class DurableActivationJournal:
             receipt_sha256=database_receipt,
             inbox_receipt_sha256=inbox_receipt,
             obsidian_receipt_sha256=obsidian_receipt,
-            opaque=_ExactBackupPayload(directory, tuple(sorted(files)), obsidian),
+            engineer_receipt_sha256=engineer_receipt,
+            opaque=_ExactBackupPayload(
+                directory,
+                tuple(sorted(files)),
+                obsidian,
+                engineer,
+            ),
         )
 
 
-def _copy_private(source: Path, destination: Path) -> None:
+def _copy_private(
+    source: Path,
+    destination: Path,
+    *,
+    allow_contained_mode: bool = False,
+) -> None:
     source_flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0)
     destination_flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_CLOEXEC", 0)
     source_descriptor = os.open(source, source_flags)
@@ -9032,7 +9323,7 @@ def _copy_private(source: Path, destination: Path) -> None:
             not stat.S_ISREG(source_status.st_mode)
             or source_status.st_nlink != 1
             or source_status.st_uid != os.geteuid()
-            or stat.S_IMODE(source_status.st_mode) & 0o077
+            or (not allow_contained_mode and stat.S_IMODE(source_status.st_mode) & 0o077)
         ):
             raise ReleaseFailure("backup_source_invalid")
         with (
@@ -9633,8 +9924,915 @@ def _prepare_secondary_product_backup_boundary(config: SystemdConfig) -> None:
         raise ReleaseFailure("backup_secondary_product_wal_invalid")
 
 
-def _exact_sqlite_backup(config: SystemdConfig) -> DatabaseBackup:
+_ENGINEER_LIFECYCLE_FILENAMES = (
+    "engineer-command-store.anchor.json",
+    "engineer-command-store.bootstrap.json",
+    "engineer-command-store.pending.json",
+    "engineer-command-store.committed.json",
+)
+_ENGINEER_EPHEMERAL_FILENAMES = frozenset({"kernel.lock", "kernel.lease", "kernel.sqlite-shm"})
+_ENGINEER_BACKUP_SCHEMA = "friday.immutable-cutover-engineer-store.v1"
+_ENGINEER_BACKUP_AUTHORITY_SCHEMA = "friday.engineer-command-backup-authority.v1"
+_ENGINEER_RESTORE_STAGE_RE = re.compile(
+    r"\.engineer-restore-(?P<manifest>[0-9a-f]{64})-(?P<target>[0-9a-f]{16})\.stage"
+)
+
+
+def _engineer_path_present(path: Path) -> bool:
+    """Prove absence instead of turning an ambiguous stat failure into absence."""
+
+    try:
+        path.lstat()
+    except FileNotFoundError:
+        return False
+    except OSError as exc:
+        raise ReleaseFailure("engineer_store_artifact_invalid") from exc
+    return True
+
+
+def _engineer_artifact_paths(config: SystemdConfig) -> tuple[Path, Path, Path]:
+    data_dir = Path(os.path.abspath(config.friday_home / "data"))
+    store = data_dir / "engineer-command"
+    key = data_dir / "engineer-command.key"
+    state = Path(os.path.abspath(config.state_dir))
+    if (
+        not data_dir.is_absolute()
+        or not state.is_absolute()
+        or store.parent != data_dir
+        or key.parent != data_dir
+        or state == store
+        or state.is_relative_to(store)
+        or store.is_relative_to(state)
+    ):
+        raise ReleaseFailure("engineer_store_path_invalid")
+    return store, key, state
+
+
+def _engineer_paths_overlap(left: Path, right: Path) -> bool:
+    left = Path(os.path.abspath(left))
+    right = Path(os.path.abspath(right))
+    return left == right or left.is_relative_to(right) or right.is_relative_to(left)
+
+
+def _engineer_contour_status(path: Path) -> os.stat_result | None:
+    try:
+        return path.lstat()
+    except FileNotFoundError:
+        return None
+    except OSError as exc:
+        raise ReleaseFailure("engineer_recovery_contour_invalid") from exc
+
+
+def _engineer_contour_nodes(config: SystemdConfig) -> list[tuple[Path, os.stat_result]]:
+    store, key, state = _engineer_artifact_paths(config)
+    nodes: list[tuple[Path, os.stat_result]] = []
+    store_status = _engineer_contour_status(store)
+    if store_status is not None:
+        if (
+            not stat.S_ISDIR(store_status.st_mode)
+            or stat.S_ISLNK(store_status.st_mode)
+            or store_status.st_uid != os.geteuid()
+            or store_status.st_mode & 0o077
+        ):
+            raise ReleaseFailure("engineer_recovery_contour_invalid")
+        pending = [store]
+        while pending:
+            parent = pending.pop()
+            before = parent.lstat()
+            if (
+                not stat.S_ISDIR(before.st_mode)
+                or stat.S_ISLNK(before.st_mode)
+                or before.st_uid != os.geteuid()
+            ):
+                raise ReleaseFailure("engineer_recovery_contour_invalid")
+            nodes.append((parent, before))
+            try:
+                children = sorted(os.scandir(parent), key=lambda item: item.name)
+            except OSError as exc:
+                raise ReleaseFailure("engineer_recovery_contour_invalid") from exc
+            for child in children:
+                restore_staging = _ENGINEER_RESTORE_STAGE_RE.fullmatch(child.name) is not None
+                child_path = Path(child.path)
+                try:
+                    child_status = child_path.lstat()
+                except OSError as exc:
+                    raise ReleaseFailure("engineer_recovery_contour_invalid") from exc
+                if child_status.st_uid != os.geteuid() or stat.S_ISLNK(child_status.st_mode):
+                    raise ReleaseFailure("engineer_recovery_contour_invalid")
+                if stat.S_ISDIR(child_status.st_mode):
+                    pending.append(child_path)
+                elif not stat.S_ISREG(child_status.st_mode) or child_status.st_nlink != 1:
+                    raise ReleaseFailure("engineer_recovery_contour_invalid")
+                else:
+                    if restore_staging and stat.S_IMODE(child_status.st_mode) != 0o600:
+                        raise ReleaseFailure("engineer_restore_staging_invalid")
+                    nodes.append((child_path, child_status))
+                if len(nodes) + len(pending) > MAX_ENGINEER_BACKUP_ENTRIES:
+                    raise ReleaseFailure("engineer_recovery_contour_invalid")
+            after = parent.lstat()
+            if (
+                int(before.st_dev),
+                int(before.st_ino),
+                int(before.st_mtime_ns),
+                int(before.st_ctime_ns),
+            ) != (
+                int(after.st_dev),
+                int(after.st_ino),
+                int(after.st_mtime_ns),
+                int(after.st_ctime_ns),
+            ):
+                raise ReleaseFailure("engineer_recovery_contour_changed")
+    for path in (
+        key,
+        *(state / name for name in _ENGINEER_LIFECYCLE_FILENAMES),
+        state / ".engineer-command-store.test.key",
+    ):
+        status = _engineer_contour_status(path)
+        if status is None:
+            continue
+        if (
+            not stat.S_ISREG(status.st_mode)
+            or stat.S_ISLNK(status.st_mode)
+            or status.st_uid != os.geteuid()
+            or status.st_nlink != 1
+            or status.st_mode & 0o077
+        ):
+            raise ReleaseFailure("engineer_recovery_contour_invalid")
+        nodes.append((path, status))
+    known_paths = {path for path, _status in nodes}
+    for path in _engineer_restore_staging_paths(config):
+        if path in known_paths:
+            continue
+        status = path.lstat()
+        if (
+            not stat.S_ISREG(status.st_mode)
+            or stat.S_ISLNK(status.st_mode)
+            or status.st_uid != os.geteuid()
+            or status.st_nlink != 1
+            or stat.S_IMODE(status.st_mode) != 0o600
+        ):
+            raise ReleaseFailure("engineer_restore_staging_invalid")
+        nodes.append((path, status))
+    return nodes
+
+
+def _engineer_protected_tree_nodes(
+    root: Path,
+    *,
+    excluded: frozenset[Path] = frozenset(),
+) -> list[tuple[Path, os.stat_result]]:
+    """Inventory one recovery contour without following directory links.
+
+    A symlink contributes both its own inode and its resolved target inode.  The
+    latter closes a namespace escape where (for example) a backup or release
+    entry points at the Engineer store even though the lexical paths differ.
+    """
+
+    lexical_root = Path(os.path.abspath(root))
+    if lexical_root in excluded:
+        return []
+    root_status = _engineer_contour_status(lexical_root)
+    if root_status is None:
+        return []
+    nodes: list[tuple[Path, os.stat_result]] = []
+    pending = [lexical_root]
+    seen_paths: set[Path] = set()
+    while pending:
+        path = pending.pop()
+        if path in seen_paths or path in excluded:
+            continue
+        seen_paths.add(path)
+        try:
+            before = path.lstat()
+        except OSError as exc:
+            raise ReleaseFailure("engineer_recovery_contour_invalid") from exc
+        nodes.append((path, before))
+        if stat.S_ISLNK(before.st_mode):
+            try:
+                followed = path.stat()
+                after = path.lstat()
+            except OSError as exc:
+                raise ReleaseFailure("engineer_recovery_contour_invalid") from exc
+            if (int(before.st_dev), int(before.st_ino)) != (
+                int(after.st_dev),
+                int(after.st_ino),
+            ):
+                raise ReleaseFailure("engineer_recovery_contour_changed")
+            nodes.append((path, followed))
+            continue
+        if not stat.S_ISDIR(before.st_mode):
+            try:
+                after = path.lstat()
+            except OSError as exc:
+                raise ReleaseFailure("engineer_recovery_contour_invalid") from exc
+            if (int(before.st_dev), int(before.st_ino)) != (
+                int(after.st_dev),
+                int(after.st_ino),
+            ):
+                raise ReleaseFailure("engineer_recovery_contour_changed")
+            continue
+        try:
+            children = sorted(os.scandir(path), key=lambda item: item.name)
+        except OSError as exc:
+            raise ReleaseFailure("engineer_recovery_contour_invalid") from exc
+        pending.extend(Path(child.path) for child in reversed(children) if Path(child.path) not in excluded)
+        try:
+            after = path.lstat()
+        except OSError as exc:
+            raise ReleaseFailure("engineer_recovery_contour_invalid") from exc
+        if (
+            int(before.st_dev),
+            int(before.st_ino),
+            int(before.st_mtime_ns),
+            int(before.st_ctime_ns),
+        ) != (
+            int(after.st_dev),
+            int(after.st_ino),
+            int(after.st_mtime_ns),
+            int(after.st_ctime_ns),
+        ):
+            raise ReleaseFailure("engineer_recovery_contour_changed")
+        if len(nodes) + len(pending) > MAX_ENGINEER_CONTOUR_ENTRIES:
+            raise ReleaseFailure("engineer_recovery_contour_too_large")
+    return nodes
+
+
+def _validate_engineer_recovery_contour(
+    config: SystemdConfig,
+    release_roots: Sequence[Path],
+) -> None:
+    store, key, state = _engineer_artifact_paths(config)
+    database_paths = tuple(
+        Path(f"{database}{suffix}")
+        for database in (config.database, config.inbox_database)
+        for suffix in ("", "-wal", "-shm", "-journal", ".lock")
+    )
+    state_destinations = (
+        state / "immutable-release-activation.v1.json",
+        state / "immutable-release-operator.v1.lock",
+        state / "immutable-release-unit-install.v1.json",
+        state / "historical-album-recovery.v1.json",
+        state / "backend.lock",
+        state / "telegram-inbox.sqlite3.lock",
+        *(path for path in (config.next_env_file,) if path is not None),
+        *(path for path in (config.secondary_rollout_receipt,) if path is not None),
+    )
+    protected_common = tuple(
+        Path(os.path.abspath(path))
+        for path in (
+            config.backup_dir,
+            *database_paths,
+            *state_destinations,
+            config.env_file,
+            config.health_ca,
+            config.anchor,
+            _obsidian_root(config),
+            *config.alias_claim_manifests,
+            *release_roots,
+        )
+    )
+    lifecycle_paths = tuple(state / name for name in _ENGINEER_LIFECYCLE_FILENAMES)
+    engineer_namespace_roots = (
+        store,
+        key,
+        *lifecycle_paths,
+        state / ".engineer-command-store.test.key",
+        *_engineer_restore_staging_paths(config),
+    )
+    for engineer_path in (store, key):
+        for protected in (*protected_common, state):
+            if _engineer_paths_overlap(engineer_path, protected):
+                raise ReleaseFailure("engineer_recovery_contour_overlap")
+    for engineer_path in engineer_namespace_roots[2:]:
+        for protected in protected_common:
+            if _engineer_paths_overlap(engineer_path, protected):
+                raise ReleaseFailure("engineer_recovery_contour_overlap")
+    for protected in protected_common:
+        status = _engineer_contour_status(protected)
+        if status is None or not stat.S_ISLNK(status.st_mode):
+            continue
+        try:
+            resolved = protected.resolve(strict=True)
+        except OSError as exc:
+            raise ReleaseFailure("engineer_recovery_contour_invalid") from exc
+        if any(
+            _engineer_paths_overlap(engineer_path, resolved) for engineer_path in engineer_namespace_roots
+        ):
+            raise ReleaseFailure("engineer_recovery_contour_overlap")
+
+    engineer_nodes = _engineer_contour_nodes(config)
+    engineer_paths = frozenset(path for path, _status in engineer_nodes)
+    protected_nodes: list[tuple[Path, os.stat_result]] = []
+    for protected in protected_common:
+        protected_nodes.extend(_engineer_protected_tree_nodes(protected))
+    # Lifecycle evidence intentionally lives in state_dir.  Inventory the
+    # entire recovery namespace, excluding only the exact Engineer artifacts,
+    # so an alias to an otherwise-unlisted recovery residue is still caught.
+    protected_nodes.extend(
+        _engineer_protected_tree_nodes(
+            state,
+            excluded=engineer_paths,
+        )
+    )
+    protected_identities = {(int(status.st_dev), int(status.st_ino)) for _path, status in protected_nodes}
+    for path, status in engineer_nodes:
+        if (int(status.st_dev), int(status.st_ino)) in protected_identities:
+            raise ReleaseFailure("engineer_recovery_contour_inode_alias")
+        if path == key or path in lifecycle_paths:
+            continue
+        for protected in protected_common:
+            if _engineer_paths_overlap(path, protected):
+                raise ReleaseFailure("engineer_recovery_contour_overlap")
+
+
+def _engineer_environment_path_is_exact(raw: bytes, *, key: str, expected: Path) -> bool:
+    try:
+        text = raw.decode("utf-8", errors="strict")
+    except UnicodeError as exc:
+        raise ReleaseFailure("engineer_store_environment_invalid") from exc
+    observed: str | None = None
+    for line in text.splitlines():
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        if stripped.startswith("export "):
+            stripped = stripped[7:].strip()
+        candidate, separator, value = stripped.partition("=")
+        if candidate.strip() != key:
+            continue
+        if not separator or observed is not None:
+            raise ReleaseFailure("engineer_store_environment_invalid")
+        observed = value.strip()
+    return observed is None or observed == str(expected)
+
+
+def _engineer_backup_relative(value: str) -> PurePosixPath:
+    try:
+        relative = PurePosixPath(value)
+    except (TypeError, ValueError) as exc:
+        raise ReleaseFailure("engineer_store_backup_manifest_invalid") from exc
+    if (
+        not value
+        or relative.is_absolute()
+        or relative.as_posix() != value
+        or any(part in {"", ".", ".."} for part in relative.parts)
+        or any(character in value for character in "\x00\r\n")
+    ):
+        raise ReleaseFailure("engineer_store_backup_manifest_invalid")
+    return relative
+
+
+def _engineer_private_status(
+    path: Path,
+    *,
+    kind: str,
+    contained: bool = False,
+) -> os.stat_result:
+    try:
+        status = path.lstat()
+    except OSError as exc:
+        raise ReleaseFailure("engineer_store_artifact_invalid") from exc
+    expected = stat.S_ISDIR(status.st_mode) if kind == "directory" else stat.S_ISREG(status.st_mode)
+    if (
+        not expected
+        or stat.S_ISLNK(status.st_mode)
+        or status.st_uid != os.geteuid()
+        or (not contained and status.st_mode & 0o077)
+        or (kind == "file" and status.st_nlink != 1)
+    ):
+        raise ReleaseFailure("engineer_store_artifact_invalid")
+    return status
+
+
+def _engineer_file_entry(
+    *,
+    path: str,
+    source: Path,
+    destination: Path | None,
+    maximum_bytes: int,
+    require_mode: int | None = None,
+    include_identity: bool = False,
+    contained: bool = False,
+) -> dict[str, Any]:
+    before = _engineer_private_status(source, kind="file", contained=contained)
+    mode = stat.S_IMODE(before.st_mode)
+    if before.st_size > maximum_bytes or (require_mode is not None and mode != require_mode):
+        raise ReleaseFailure("engineer_store_artifact_invalid")
+    digest = _sha256_file(source)
+    if destination is not None:
+        destination.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+        os.chmod(destination.parent, 0o700)
+        _copy_private(
+            source,
+            destination,
+            allow_contained_mode=contained,
+        )
+        os.chmod(destination, 0o400)
+        if destination.stat().st_size != before.st_size or _sha256_file(destination) != digest:
+            raise ReleaseFailure("engineer_store_backup_copy_changed")
+    after = _engineer_private_status(source, kind="file", contained=contained)
+    identity = (
+        int(before.st_dev),
+        int(before.st_ino),
+        int(before.st_size),
+        int(before.st_mtime_ns),
+        int(before.st_ctime_ns),
+        int(before.st_mode),
+    )
+    after_identity = (
+        int(after.st_dev),
+        int(after.st_ino),
+        int(after.st_size),
+        int(after.st_mtime_ns),
+        int(after.st_ctime_ns),
+        int(after.st_mode),
+    )
+    if after_identity != identity or _sha256_file(source) != digest:
+        raise ReleaseFailure("engineer_store_backup_source_changed")
+    entry: dict[str, Any] = {
+        "kind": "file",
+        "mode": mode,
+        "path": path,
+        "sha256": digest,
+        "size": int(before.st_size),
+    }
+    if include_identity:
+        entry["device"] = int(before.st_dev)
+        entry["inode"] = int(before.st_ino)
+    return entry
+
+
+def _scan_engineer_artifacts(
+    config: SystemdConfig,
+    *,
+    destination: Path | None,
+) -> dict[str, Any]:
+    store, key, state = _engineer_artifact_paths(config)
+    entries: list[dict[str, Any]] = []
+    total_bytes = 0
+    store_present = _engineer_path_present(store)
+    key_present = _engineer_path_present(key)
+    test_key = state / ".engineer-command-store.test.key"
+    if _engineer_path_present(test_key):
+        raise ReleaseFailure("engineer_store_test_key_forbidden")
+    if key_present:
+        entry = _engineer_file_entry(
+            path="key",
+            source=key,
+            destination=(destination / "key" if destination is not None else None),
+            maximum_bytes=32,
+            require_mode=0o600,
+        )
+        if entry["size"] != 32:
+            raise ReleaseFailure("engineer_store_key_invalid")
+        entries.append(entry)
+        total_bytes += int(entry["size"])
+    for name in _ENGINEER_LIFECYCLE_FILENAMES:
+        source = state / name
+        if not _engineer_path_present(source):
+            continue
+        entry = _engineer_file_entry(
+            path=f"state/{name}",
+            source=source,
+            destination=(destination / "state" / name if destination is not None else None),
+            maximum_bytes=4_096,
+            require_mode=0o600,
+        )
+        entries.append(entry)
+        total_bytes += int(entry["size"])
+    if store_present:
+        store_status = _engineer_private_status(store, kind="directory")
+        entries.append({"kind": "directory", "mode": stat.S_IMODE(store_status.st_mode), "path": "store"})
+        if destination is not None:
+            (destination / "store").mkdir(mode=0o700)
+        pending: list[tuple[Path, PurePosixPath]] = [(store, PurePosixPath())]
+        while pending:
+            parent, relative_parent = pending.pop()
+            try:
+                children = sorted(os.scandir(parent), key=lambda item: item.name)
+            except OSError as exc:
+                raise ReleaseFailure("engineer_store_artifact_invalid") from exc
+            for child in children:
+                if _ENGINEER_RESTORE_STAGE_RE.fullmatch(child.name) is not None:
+                    raise ReleaseFailure("engineer_restore_staging_residue")
+                relative = relative_parent / child.name
+                relative_text = relative.as_posix()
+                _engineer_backup_relative(f"store/{relative_text}")
+                source = Path(child.path)
+                status = source.lstat()
+                if stat.S_ISDIR(status.st_mode) and not stat.S_ISLNK(status.st_mode):
+                    _engineer_private_status(source, kind="directory", contained=True)
+                    entries.append(
+                        {
+                            "kind": "directory",
+                            "mode": stat.S_IMODE(status.st_mode),
+                            "path": f"store/{relative_text}",
+                        }
+                    )
+                    if destination is not None:
+                        target = destination / "store" / relative
+                        target.mkdir(mode=0o700)
+                        os.chmod(target, 0o700)
+                    pending.append((source, relative))
+                    continue
+                if len(relative.parts) == 1 and relative.name in _ENGINEER_EPHEMERAL_FILENAMES:
+                    checked = _engineer_private_status(
+                        source,
+                        kind="file",
+                        contained=relative.name == "kernel.sqlite-shm",
+                    )
+                    entries.append(
+                        {
+                            "kind": "ephemeral",
+                            "mode": stat.S_IMODE(checked.st_mode),
+                            "path": f"store/{relative_text}",
+                        }
+                    )
+                    continue
+                entry = _engineer_file_entry(
+                    path=f"store/{relative_text}",
+                    source=source,
+                    destination=(destination / "store" / relative if destination is not None else None),
+                    maximum_bytes=MAX_ENGINEER_BACKUP_BYTES,
+                    include_identity=relative_text == "kernel.sqlite",
+                    contained=True,
+                )
+                entries.append(entry)
+                total_bytes += int(entry["size"])
+                if total_bytes > MAX_ENGINEER_BACKUP_BYTES:
+                    raise ReleaseFailure("engineer_store_backup_byte_bound_exceeded")
+                if len(entries) > MAX_ENGINEER_BACKUP_ENTRIES:
+                    raise ReleaseFailure("engineer_store_backup_entry_bound_exceeded")
+        if any(entry["path"].startswith("state/") for entry in entries) and not any(
+            entry["path"] == "store/kernel.sqlite" for entry in entries
+        ):
+            raise ReleaseFailure("engineer_store_lifecycle_without_database")
+    elif any(entry["path"].startswith("state/") for entry in entries):
+        raise ReleaseFailure("engineer_store_lifecycle_without_database")
+    if len(entries) > MAX_ENGINEER_BACKUP_ENTRIES:
+        raise ReleaseFailure("engineer_store_backup_entry_bound_exceeded")
+    entries.sort(key=lambda item: str(item["path"]))
+    return {
+        "schema": _ENGINEER_BACKUP_SCHEMA,
+        "store_present": store_present,
+        "key_present": key_present,
+        "entries": entries,
+        "entry_count": len(entries),
+        "total_bytes": total_bytes,
+    }
+
+
+def _copy_engineer_artifacts(
+    config: SystemdConfig,
+    directory: Path,
+) -> dict[str, Any]:
+    destination = directory / "engineer-recovery"
+    destination.mkdir(mode=0o700)
+    first = _scan_engineer_artifacts(config, destination=destination)
+    second = _scan_engineer_artifacts(config, destination=None)
+    if first != second:
+        raise ReleaseFailure("engineer_store_backup_source_changed")
+    _fsync_tree(destination)
+    return first
+
+
+def _seal_engineer_artifacts(
+    directory: Path,
+    manifest: Mapping[str, Any],
+    *,
+    authority_evidence: Mapping[str, Any] | None,
+) -> _ExactEngineerBackup:
+    sealed = {
+        **dict(manifest),
+        "engineer_command_ledger_authority": (
+            dict(authority_evidence) if authority_evidence is not None else None
+        ),
+    }
+    raw = _canonical_json(sealed) + b"\n"
+    _write_private_durable(directory / "engineer-manifest.json", raw, final_mode=0o400)
+    return _ExactEngineerBackup(
+        manifest_sha256=_sha256_bytes(raw),
+        entry_count=int(sealed["entry_count"]),
+        total_bytes=int(sealed["total_bytes"]),
+        store_present=bool(sealed["store_present"]),
+        key_present=bool(sealed["key_present"]),
+    )
+
+
+def _validated_engineer_authority_identity(value: object) -> tuple[str, int, bool]:
+    if (
+        not isinstance(value, (list, tuple))
+        or len(value) != 3
+        or type(value[0]) is not str
+        or re.fullmatch(r"[0-9a-f]{32}", value[0]) is None
+        or type(value[1]) is not int
+        or not 0 <= value[1] <= 9_223_372_036_854_775_806
+        or value[2] is not True
+    ):
+        raise ReleaseFailure("engineer_store_backup_authority_invalid")
+    return value[0], value[1], True
+
+
+def _validated_engineer_authority_evidence(
+    value: object,
+    *,
+    database_sha256: str | None = None,
+) -> dict[str, Any]:
+    if not isinstance(value, dict) or set(value) != {
+        "authority_sequence",
+        "database_sha256",
+        "mac",
+        "quiescent",
+        "schema",
+        "store_id",
+    }:
+        raise ReleaseFailure("engineer_store_backup_authority_invalid")
+    store_id = value.get("store_id")
+    sequence = value.get("authority_sequence")
+    digest = value.get("database_sha256")
+    mac = value.get("mac")
+    if (
+        value.get("schema") != _ENGINEER_BACKUP_AUTHORITY_SCHEMA
+        or value.get("quiescent") is not True
+        or type(store_id) is not str
+        or re.fullmatch(r"[0-9a-f]{32}", store_id) is None
+        or type(sequence) is not int
+        or not 0 <= sequence <= 9_223_372_036_854_775_806
+        or type(digest) is not str
+        or _HEX64.fullmatch(digest) is None
+        or type(mac) is not str
+        or _HEX64.fullmatch(mac) is None
+        or (database_sha256 is not None and digest != database_sha256)
+    ):
+        raise ReleaseFailure("engineer_store_backup_authority_invalid")
+    return dict(value)
+
+
+def _validated_engineer_authority_attestation(
+    value: object,
+    *,
+    expected: tuple[str, int, bool],
+    database_sha256: str,
+) -> dict[str, Any]:
+    if not isinstance(value, dict) or set(value) != {"after", "before", "evidence", "verified"}:
+        raise ReleaseFailure("engineer_store_backup_authority_invalid")
+    before = _validated_engineer_authority_identity(value.get("before"))
+    verified = _validated_engineer_authority_identity(value.get("verified"))
+    after = _validated_engineer_authority_identity(value.get("after"))
+    evidence = _validated_engineer_authority_evidence(
+        value.get("evidence"),
+        database_sha256=database_sha256,
+    )
+    evidence_identity = (
+        str(evidence["store_id"]),
+        int(evidence["authority_sequence"]),
+        True,
+    )
+    if before != expected or verified != expected or after != expected or evidence_identity != expected:
+        raise ReleaseFailure("engineer_store_backup_authority_changed")
+    return evidence
+
+
+def _validated_engineer_authority_verification(
+    value: object,
+    *,
+    evidence: Mapping[str, Any],
+) -> tuple[str, int, bool]:
+    if not isinstance(value, dict) or set(value) != {"after", "before", "verified"}:
+        raise ReleaseFailure("engineer_store_backup_authority_invalid")
+    expected = (
+        str(evidence["store_id"]),
+        int(evidence["authority_sequence"]),
+        True,
+    )
+    before = _validated_engineer_authority_identity(value.get("before"))
+    verified = _validated_engineer_authority_identity(value.get("verified"))
+    after = _validated_engineer_authority_identity(value.get("after"))
+    if before != expected or verified != expected or after != expected:
+        raise ReleaseFailure("engineer_store_backup_authority_changed")
+    return expected
+
+
+def _validated_engineer_manifest(
+    raw: bytes,
+    descriptor: _ExactEngineerBackup,
+) -> dict[str, Any]:
+    try:
+        payload = _unique_json(raw.decode("utf-8", errors="strict"))
+    except (UnicodeError, ValueError, json.JSONDecodeError) as exc:
+        raise ReleaseFailure("engineer_store_backup_manifest_invalid") from exc
+    if (
+        set(payload)
+        != {
+            "schema",
+            "store_present",
+            "key_present",
+            "entries",
+            "entry_count",
+            "total_bytes",
+            "engineer_command_ledger_authority",
+        }
+        or payload.get("schema") != _ENGINEER_BACKUP_SCHEMA
+        or type(payload.get("store_present")) is not bool
+        or type(payload.get("key_present")) is not bool
+        or type(payload.get("entry_count")) is not int
+        or type(payload.get("total_bytes")) is not int
+        or not isinstance(payload.get("entries"), list)
+        or payload.get("entry_count") != len(payload["entries"])
+        or not 0 <= int(payload["entry_count"]) <= MAX_ENGINEER_BACKUP_ENTRIES
+        or not 0 <= int(payload["total_bytes"]) <= MAX_ENGINEER_BACKUP_BYTES
+        or payload.get("store_present") != descriptor.store_present
+        or payload.get("key_present") != descriptor.key_present
+        or payload.get("entry_count") != descriptor.entry_count
+        or payload.get("total_bytes") != descriptor.total_bytes
+    ):
+        raise ReleaseFailure("engineer_store_backup_manifest_invalid")
+    authority = payload.get("engineer_command_ledger_authority")
+    if authority is not None:
+        _validated_engineer_authority_evidence(authority)
+    paths: set[str] = set()
+    total_bytes = 0
+    store_marker = False
+    key_marker = False
+    for item in payload["entries"]:
+        if not isinstance(item, dict):
+            raise ReleaseFailure("engineer_store_backup_manifest_invalid")
+        kind = item.get("kind")
+        expected_keys = (
+            {"kind", "mode", "path"}
+            if kind in {"directory", "ephemeral"}
+            else {"kind", "mode", "path", "sha256", "size"}
+        )
+        if kind == "file" and item.get("path") == "store/kernel.sqlite":
+            expected_keys |= {"device", "inode"}
+        path = str(item.get("path") or "")
+        private_mode_required = (
+            path in {"key", "store"}
+            or path.startswith("state/")
+            or path in {"store/kernel.lock", "store/kernel.lease"}
+        )
+        if (
+            kind not in {"directory", "ephemeral", "file"}
+            or set(item) != expected_keys
+            or type(item.get("mode")) is not int
+            or not 0 <= int(item["mode"]) <= 0o7777
+            or private_mode_required
+            and int(item["mode"]) & 0o077
+        ):
+            raise ReleaseFailure("engineer_store_backup_manifest_invalid")
+        _engineer_backup_relative(path)
+        if path in paths or path not in {"key", "store"} and not path.startswith(("state/", "store/")):
+            raise ReleaseFailure("engineer_store_backup_manifest_invalid")
+        if path == "key" and (kind != "file" or item.get("mode") != 0o600 or item.get("size") != 32):
+            raise ReleaseFailure("engineer_store_backup_manifest_invalid")
+        if path == "store" and kind != "directory":
+            raise ReleaseFailure("engineer_store_backup_manifest_invalid")
+        if path.startswith("state/") and (
+            path.removeprefix("state/") not in _ENGINEER_LIFECYCLE_FILENAMES
+            or kind != "file"
+            or item.get("mode") != 0o600
+            or type(item.get("size")) is not int
+            or not 0 <= item["size"] <= 4_096
+        ):
+            raise ReleaseFailure("engineer_store_backup_manifest_invalid")
+        if path.startswith("store/"):
+            store_relative = path.removeprefix("store/")
+            ephemeral = "/" not in store_relative and store_relative in _ENGINEER_EPHEMERAL_FILENAMES
+            if (kind == "ephemeral") != ephemeral:
+                raise ReleaseFailure("engineer_store_backup_manifest_invalid")
+        paths.add(path)
+        if path == "key":
+            key_marker = True
+        if path == "store":
+            store_marker = True
+        if kind == "file":
+            size = item.get("size")
+            _closed_hash(
+                str(item.get("sha256") or ""),
+                "engineer_store_backup_manifest_invalid",
+            )
+            if type(size) is not int or not 0 <= int(size) <= MAX_ENGINEER_BACKUP_BYTES:
+                raise ReleaseFailure("engineer_store_backup_manifest_invalid")
+            total_bytes += int(size)
+            if path == "store/kernel.sqlite" and (
+                type(item.get("device")) is not int
+                or type(item.get("inode")) is not int
+                or int(item["device"]) < 0
+                or int(item["inode"]) <= 0
+            ):
+                raise ReleaseFailure("engineer_store_backup_manifest_invalid")
+    if (
+        total_bytes != descriptor.total_bytes
+        or store_marker != descriptor.store_present
+        or key_marker != descriptor.key_present
+        or (not descriptor.store_present and any(path.startswith("store/") for path in paths))
+        or (any(path.startswith("state/") for path in paths) and "store/kernel.sqlite" not in paths)
+        or (authority is not None and "state/engineer-command-store.anchor.json" not in paths)
+    ):
+        raise ReleaseFailure("engineer_store_backup_manifest_invalid")
+    return payload
+
+
+def _private_engineer_backup_file(path: Path) -> Path:
+    lexical = Path(os.path.abspath(path))
+    try:
+        resolved = lexical.resolve(strict=True)
+        status = os.stat(lexical, follow_symlinks=False)
+    except OSError as exc:
+        raise ReleaseFailure("engineer_store_backup_file_invalid") from exc
+    if (
+        resolved != lexical
+        or not stat.S_ISREG(status.st_mode)
+        or stat.S_ISLNK(status.st_mode)
+        or status.st_uid != os.geteuid()
+        or status.st_nlink != 1
+        or status.st_mode & 0o077
+        or not 0 <= status.st_size <= MAX_ENGINEER_BACKUP_BYTES
+    ):
+        raise ReleaseFailure("engineer_store_backup_file_invalid")
+    return lexical
+
+
+def _verify_engineer_backup(
+    directory: Path,
+    descriptor: _ExactEngineerBackup,
+) -> dict[str, Any]:
+    manifest_path = _private_regular_file(
+        directory / "engineer-manifest.json",
+        maximum_bytes=MAX_EXACT_MANIFEST_BYTES,
+        code="engineer_store_backup_manifest_invalid",
+    )
+    raw = manifest_path.read_bytes()
+    if _sha256_bytes(raw) != descriptor.manifest_sha256:
+        raise ReleaseFailure("engineer_store_backup_manifest_changed")
+    manifest = _validated_engineer_manifest(raw, descriptor)
+    recovery = _private_directory(directory / "engineer-recovery")
+    expected_files: set[Path] = set()
+    expected_directories: set[Path] = {recovery}
+    for item in manifest["entries"]:
+        if item["kind"] == "ephemeral":
+            continue
+        relative = _engineer_backup_relative(str(item["path"]))
+        target = recovery.joinpath(*relative.parts)
+        if item["kind"] == "directory":
+            expected_directories.add(_private_directory(target))
+            continue
+        source = _private_engineer_backup_file(target)
+        if source.stat().st_size != item["size"] or _sha256_file(source) != item["sha256"]:
+            raise ReleaseFailure("engineer_store_backup_file_changed")
+        expected_files.add(source)
+        expected_directories.add(source.parent)
+    actual_files: set[Path] = set()
+    actual_directories: set[Path] = set()
+    for parent, directories, files in os.walk(recovery, followlinks=False):
+        parent_path = Path(parent)
+        actual_directories.add(_private_directory(parent_path))
+        for name in directories:
+            actual_directories.add(_private_directory(parent_path / name))
+        for name in files:
+            actual_files.add(_private_engineer_backup_file(parent_path / name))
+    if actual_files != expected_files or actual_directories != expected_directories:
+        raise ReleaseFailure("engineer_store_backup_manifest_mismatch")
+    by_path = {str(item["path"]): item for item in manifest["entries"]}
+    if "store/kernel.sqlite" in by_path:
+        scratch = Path(
+            tempfile.mkdtemp(
+                prefix=".engineer-store-verify-",
+                dir=directory.parent,
+            )
+        )
+        os.chmod(scratch, 0o700)
+        try:
+            for suffix in ("", "-wal"):
+                source = recovery / "store" / f"kernel.sqlite{suffix}"
+                if f"store/kernel.sqlite{suffix}" in by_path:
+                    _copy_private(source, scratch / source.name)
+            _sqlite_integrity(scratch / "kernel.sqlite", require_schema=False)
+        finally:
+            for child in scratch.iterdir():
+                with suppress(OSError):
+                    os.chmod(child, 0o600)
+                child.unlink(missing_ok=True)
+            scratch.rmdir()
+    return manifest
+
+
+def _exact_sqlite_backup(
+    config: SystemdConfig,
+    *,
+    require_engineer_authority: bool = False,
+    engineer_authority_snapshot: Callable[[], object] | None = None,
+    engineer_authority_attest: Callable[[str], object] | None = None,
+) -> DatabaseBackup:
+    _assert_no_engineer_restore_staging(config)
     _prepare_secondary_product_backup_boundary(config)
+    _store, _key, state = _engineer_artifact_paths(config)
+    lifecycle_present = _engineer_path_present(state / "engineer-command-store.anchor.json")
+    authority_before: tuple[str, int, bool] | None = None
+    if lifecycle_present and require_engineer_authority:
+        if engineer_authority_snapshot is None or engineer_authority_attest is None:
+            raise ReleaseFailure("engineer_store_backup_authority_required")
+        authority_before = _validated_engineer_authority_identity(engineer_authority_snapshot())
     backup_root = _private_directory(config.backup_dir, create=True)
     directory = Path(tempfile.mkdtemp(prefix="immutable-cutover-", dir=backup_root))
     os.chmod(directory, 0o700)
@@ -9661,6 +10859,21 @@ def _exact_sqlite_backup(config: SystemdConfig) -> DatabaseBackup:
         )
         _verify_sqlite_snapshot_copy(directory, label="inbox", require_schema=False)
         obsidian = _snapshot_obsidian_root(config, directory)
+        engineer_manifest = _copy_engineer_artifacts(config, directory)
+        database_sha256 = _sha256_file(directory / "database.sqlite3")
+        authority_evidence: dict[str, Any] | None = None
+        if authority_before is not None:
+            assert engineer_authority_attest is not None
+            authority_evidence = _validated_engineer_authority_attestation(
+                engineer_authority_attest(database_sha256),
+                expected=authority_before,
+                database_sha256=database_sha256,
+            )
+        engineer = _seal_engineer_artifacts(
+            directory,
+            engineer_manifest,
+            authority_evidence=authority_evidence,
+        )
         manifest: dict[str, Any] = {
             "schema": "friday.immutable-cutover-exact-backup.v1",
             "database_schema": schema_version,
@@ -9672,6 +10885,7 @@ def _exact_sqlite_backup(config: SystemdConfig) -> DatabaseBackup:
         _fsync_directory(directory)
         _fsync_directory(backup_root)
         _verify_obsidian_backup(directory, obsidian)
+        _verify_engineer_backup(directory, engineer)
         database_basis = [item for item in manifest["files"] if str(item["name"]).startswith("database")]
         inbox_basis = [item for item in manifest["files"] if str(item["name"]).startswith("inbox")]
         return DatabaseBackup(
@@ -9679,7 +10893,8 @@ def _exact_sqlite_backup(config: SystemdConfig) -> DatabaseBackup:
             receipt_sha256=_sha256_bytes(_canonical_json(database_basis)),
             inbox_receipt_sha256=_sha256_bytes(_canonical_json(inbox_basis)),
             obsidian_receipt_sha256=obsidian.manifest_sha256,
-            opaque=_ExactBackupPayload(directory, tuple(files), obsidian),
+            engineer_receipt_sha256=engineer.manifest_sha256,
+            opaque=_ExactBackupPayload(directory, tuple(files), obsidian, engineer),
         )
     except BaseException:
         # Keep a partial private directory for forensic inspection.  It is never
@@ -10121,7 +11336,587 @@ def _restore_exact_obsidian_backup(config: SystemdConfig, payload: _ExactBackupP
         raise ReleaseFailure("obsidian_restore_target_mismatch")
 
 
-def _restore_exact_sqlite_backup(config: SystemdConfig, backup: DatabaseBackup) -> None:
+def _remove_private_engineer_tree(path: Path, *, contained: bool = False) -> None:
+    status = path.lstat()
+    if stat.S_ISREG(status.st_mode) and not stat.S_ISLNK(status.st_mode):
+        _engineer_private_status(path, kind="file", contained=contained)
+        path.unlink()
+        _fsync_directory(path.parent)
+        return
+    _engineer_private_status(path, kind="directory", contained=contained)
+    for child in sorted(path.iterdir(), key=lambda item: item.name, reverse=True):
+        _remove_private_engineer_tree(child, contained=True)
+    path.rmdir()
+    _fsync_directory(path.parent)
+
+
+def _engineer_restore_stage_path(target: Path, manifest_sha256: str) -> Path:
+    token = _closed_hash(
+        manifest_sha256,
+        "engineer_restore_staging_manifest_invalid",
+    )
+    target_identity = _sha256_bytes(str(Path(os.path.abspath(target))).encode("utf-8"))[:16]
+    return target.parent / f".engineer-restore-{token}-{target_identity}.stage"
+
+
+def _engineer_manifest_restore_stage_paths(
+    config: SystemdConfig,
+    manifest: Mapping[str, Any],
+    manifest_sha256: str,
+) -> frozenset[Path]:
+    """Derive the only secret staging names authorized by one journaled backup."""
+
+    store, key, state = _engineer_artifact_paths(config)
+    targets: set[Path] = set()
+    entries = manifest.get("entries")
+    if not isinstance(entries, list):
+        raise ReleaseFailure("engineer_store_backup_manifest_invalid")
+    for item in entries:
+        if not isinstance(item, dict) or item.get("kind") != "file":
+            continue
+        relative = _engineer_backup_relative(str(item.get("path") or ""))
+        path = relative.as_posix()
+        if path == "store/kernel.sqlite":
+            # The database is restored in place to preserve the inode held by
+            # the external lifecycle authority, so it never has a stage file.
+            continue
+        if path == "key":
+            target = key
+        elif path.startswith("state/") and len(relative.parts) == 2:
+            target = state / relative.parts[1]
+        elif path.startswith("store/") and len(relative.parts) >= 2:
+            target = store.joinpath(*relative.parts[1:])
+        else:
+            raise ReleaseFailure("engineer_store_backup_manifest_invalid")
+        targets.add(_engineer_restore_stage_path(target, manifest_sha256))
+    return frozenset(targets)
+
+
+def _engineer_restore_staging_paths(config: SystemdConfig) -> tuple[Path, ...]:
+    store, key, state = _engineer_artifact_paths(config)
+    candidates: set[Path] = set()
+    direct_directories = {key.parent, state}
+    for directory in direct_directories:
+        status = _engineer_contour_status(directory)
+        if status is None:
+            continue
+        if (
+            not stat.S_ISDIR(status.st_mode)
+            or stat.S_ISLNK(status.st_mode)
+            or status.st_uid != os.geteuid()
+            or status.st_mode & 0o077
+        ):
+            raise ReleaseFailure("engineer_restore_staging_invalid")
+        try:
+            children = tuple(os.scandir(directory))
+        except OSError as exc:
+            raise ReleaseFailure("engineer_restore_staging_invalid") from exc
+        candidates.update(
+            Path(child.path)
+            for child in children
+            if _ENGINEER_RESTORE_STAGE_RE.fullmatch(child.name) is not None
+        )
+    if _engineer_path_present(store):
+        pending = [store]
+        while pending:
+            parent = pending.pop()
+            parent_status = _engineer_private_status(
+                parent,
+                kind="directory",
+                contained=parent != store,
+            )
+            try:
+                children = tuple(os.scandir(parent))
+            except OSError as exc:
+                raise ReleaseFailure("engineer_restore_staging_invalid") from exc
+            for child in children:
+                path = Path(child.path)
+                try:
+                    status = path.lstat()
+                except OSError as exc:
+                    raise ReleaseFailure("engineer_restore_staging_invalid") from exc
+                if _ENGINEER_RESTORE_STAGE_RE.fullmatch(child.name) is not None:
+                    candidates.add(path)
+                elif stat.S_ISDIR(status.st_mode) and not stat.S_ISLNK(status.st_mode):
+                    pending.append(path)
+            after = parent.lstat()
+            if (int(parent_status.st_dev), int(parent_status.st_ino)) != (
+                int(after.st_dev),
+                int(after.st_ino),
+            ):
+                raise ReleaseFailure("engineer_restore_staging_invalid")
+    return tuple(sorted(candidates))
+
+
+def _cleanup_engineer_restore_staging(
+    config: SystemdConfig,
+    *,
+    manifest: Mapping[str, Any],
+    manifest_sha256: str,
+) -> None:
+    """Remove only crash residue authorized by the journal-bound manifest."""
+
+    expected = _engineer_manifest_restore_stage_paths(
+        config,
+        manifest,
+        manifest_sha256,
+    )
+    observed = _engineer_restore_staging_paths(config)
+    if any(path not in expected for path in observed):
+        raise ReleaseFailure("engineer_restore_staging_unbound")
+    opened: list[tuple[Path, int, tuple[int, int]]] = []
+    try:
+        # Validate the complete set before deleting anything.  A malformed
+        # residue must leave every forensic byte intact.
+        for path in observed:
+            descriptor = -1
+            try:
+                descriptor = os.open(
+                    path,
+                    os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0),
+                )
+                status = os.fstat(descriptor)
+                lexical = path.lstat()
+                identity = (int(status.st_dev), int(status.st_ino))
+                if (
+                    not stat.S_ISREG(status.st_mode)
+                    or status.st_uid != os.geteuid()
+                    or status.st_nlink != 1
+                    or stat.S_IMODE(status.st_mode) != 0o600
+                    or identity != (int(lexical.st_dev), int(lexical.st_ino))
+                ):
+                    raise ReleaseFailure("engineer_restore_staging_invalid")
+                opened.append((path, descriptor, identity))
+                descriptor = -1
+            finally:
+                if descriptor >= 0:
+                    os.close(descriptor)
+        for path, descriptor, identity in opened:
+            status = os.fstat(descriptor)
+            lexical = path.lstat()
+            if (
+                status.st_nlink != 1
+                or (int(status.st_dev), int(status.st_ino)) != identity
+                or (int(lexical.st_dev), int(lexical.st_ino)) != identity
+            ):
+                raise ReleaseFailure("engineer_restore_staging_changed")
+            path.unlink()
+            _fsync_directory(path.parent)
+    except ReleaseFailure:
+        raise
+    except OSError as exc:
+        raise ReleaseFailure("engineer_restore_staging_invalid") from exc
+    finally:
+        for _path, descriptor, _identity in opened:
+            os.close(descriptor)
+    if _engineer_restore_staging_paths(config):
+        raise ReleaseFailure("engineer_restore_staging_residue")
+
+
+def _assert_no_engineer_restore_staging(config: SystemdConfig) -> None:
+    for path in _engineer_restore_staging_paths(config):
+        descriptor = -1
+        try:
+            descriptor = os.open(
+                path,
+                os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0),
+            )
+            status = os.fstat(descriptor)
+            lexical = path.lstat()
+            if (
+                not stat.S_ISREG(status.st_mode)
+                or status.st_uid != os.geteuid()
+                or status.st_nlink != 1
+                or stat.S_IMODE(status.st_mode) != 0o600
+                or (status.st_dev, status.st_ino) != (lexical.st_dev, lexical.st_ino)
+            ):
+                raise ReleaseFailure("engineer_restore_staging_invalid")
+        except ReleaseFailure:
+            raise
+        except OSError as exc:
+            raise ReleaseFailure("engineer_restore_staging_invalid") from exc
+        finally:
+            if descriptor >= 0:
+                os.close(descriptor)
+    if _engineer_restore_staging_paths(config):
+        raise ReleaseFailure("engineer_restore_staging_residue")
+
+
+def _restore_private_engineer_file(
+    source: Path,
+    target: Path,
+    *,
+    mode: int,
+    staging_manifest_sha256: str,
+    preserve_identity: tuple[int, int] | None = None,
+    contained: bool = False,
+) -> None:
+    source = _private_engineer_backup_file(source)
+    if _engineer_path_present(target):
+        current = _engineer_private_status(target, kind="file", contained=contained)
+        if (
+            preserve_identity is not None
+            and (
+                int(current.st_dev),
+                int(current.st_ino),
+            )
+            != preserve_identity
+        ):
+            raise ReleaseFailure("engineer_store_database_identity_changed")
+    elif preserve_identity is not None:
+        raise ReleaseFailure("engineer_store_database_identity_changed")
+    target.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    os.chmod(target.parent, 0o700)
+    if preserve_identity is not None:
+        flags = os.O_WRONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0)
+        descriptor = os.open(target, flags)
+        source_descriptor = os.open(
+            source,
+            os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0),
+        )
+        try:
+            before = os.fstat(descriptor)
+            lexical_before = os.stat(target, follow_symlinks=False)
+            if (
+                not stat.S_ISREG(before.st_mode)
+                or before.st_uid != os.geteuid()
+                or before.st_nlink != 1
+                or (int(before.st_dev), int(before.st_ino)) != preserve_identity
+                or (int(lexical_before.st_dev), int(lexical_before.st_ino)) != preserve_identity
+            ):
+                raise ReleaseFailure("engineer_store_database_identity_changed")
+            os.ftruncate(descriptor, 0)
+            while chunk := os.read(source_descriptor, 1 << 20):
+                _write_all(descriptor, chunk)
+            before_chmod = os.fstat(descriptor)
+            lexical_before_chmod = os.stat(target, follow_symlinks=False)
+            if (
+                before_chmod.st_nlink != 1
+                or (int(before_chmod.st_dev), int(before_chmod.st_ino)) != preserve_identity
+                or (int(lexical_before_chmod.st_dev), int(lexical_before_chmod.st_ino)) != preserve_identity
+            ):
+                raise ReleaseFailure("engineer_store_database_identity_changed")
+            os.fchmod(descriptor, mode)
+            os.fsync(descriptor)
+            after = os.fstat(descriptor)
+            lexical_after = os.stat(target, follow_symlinks=False)
+            if (
+                after.st_nlink != 1
+                or stat.S_IMODE(after.st_mode) != mode
+                or (int(after.st_dev), int(after.st_ino)) != preserve_identity
+                or (int(lexical_after.st_dev), int(lexical_after.st_ino)) != preserve_identity
+            ):
+                raise ReleaseFailure("engineer_store_database_identity_changed")
+        finally:
+            os.close(source_descriptor)
+            os.close(descriptor)
+    else:
+        temporary = _engineer_restore_stage_path(target, staging_manifest_sha256)
+        if _engineer_path_present(temporary):
+            raise ReleaseFailure("engineer_store_restore_staging_exists")
+        descriptor = -1
+        try:
+            _copy_private(source, temporary)
+            descriptor = os.open(
+                temporary,
+                os.O_RDWR | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0),
+            )
+            before = os.fstat(descriptor)
+            lexical_before = os.stat(temporary, follow_symlinks=False)
+            identity = (int(before.st_dev), int(before.st_ino))
+            if (
+                not stat.S_ISREG(before.st_mode)
+                or before.st_uid != os.geteuid()
+                or before.st_nlink != 1
+                or stat.S_IMODE(before.st_mode) != 0o600
+                or identity != (int(lexical_before.st_dev), int(lexical_before.st_ino))
+            ):
+                raise ReleaseFailure("engineer_store_restore_staging_invalid")
+            os.replace(temporary, target)
+            lexical_target = os.stat(target, follow_symlinks=False)
+            if identity != (int(lexical_target.st_dev), int(lexical_target.st_ino)):
+                raise ReleaseFailure("engineer_store_restore_target_changed")
+            os.fchmod(descriptor, mode)
+            os.fsync(descriptor)
+            after = os.fstat(descriptor)
+            lexical_after = os.stat(target, follow_symlinks=False)
+            if (
+                after.st_nlink != 1
+                or stat.S_IMODE(after.st_mode) != mode
+                or identity != (int(after.st_dev), int(after.st_ino))
+                or identity != (int(lexical_after.st_dev), int(lexical_after.st_ino))
+            ):
+                raise ReleaseFailure("engineer_store_restore_target_changed")
+        finally:
+            if descriptor >= 0:
+                os.close(descriptor)
+            if _engineer_path_present(temporary):
+                _remove_private_engineer_tree(temporary)
+    _fsync_directory(target.parent)
+
+
+def _restore_ephemeral_engineer_file(
+    target: Path,
+    *,
+    mode: int,
+    expected_present: bool,
+    contained: bool,
+) -> None:
+    """Restore one empty lock/lease sidecar without opening it destructively."""
+
+    parent = target.parent
+    # Every ephemeral artifact is a direct child of the private store root.
+    # ``contained`` only relaxes the artifact mode for SQLite's shared-memory
+    # sidecar; it must never relax the store-root check.
+    parent_before = _engineer_private_status(parent, kind="directory")
+    parent_identity = (int(parent_before.st_dev), int(parent_before.st_ino))
+    parent_descriptor = -1
+    descriptor = -1
+    try:
+        parent_descriptor = os.open(
+            parent,
+            os.O_RDONLY
+            | getattr(os, "O_DIRECTORY", 0)
+            | getattr(os, "O_CLOEXEC", 0)
+            | getattr(os, "O_NOFOLLOW", 0),
+        )
+        opened_parent = os.fstat(parent_descriptor)
+        lexical_parent = parent.lstat()
+        if (
+            not stat.S_ISDIR(opened_parent.st_mode)
+            or opened_parent.st_uid != os.geteuid()
+            or parent_identity != (int(opened_parent.st_dev), int(opened_parent.st_ino))
+            or parent_identity != (int(lexical_parent.st_dev), int(lexical_parent.st_ino))
+        ):
+            raise ReleaseFailure("engineer_store_restore_path_drift")
+
+        expected_identity: tuple[int, int] | None = None
+        if expected_present:
+            expected = os.stat(
+                target.name,
+                dir_fd=parent_descriptor,
+                follow_symlinks=False,
+            )
+            expected_identity = (int(expected.st_dev), int(expected.st_ino))
+            if (
+                not stat.S_ISREG(expected.st_mode)
+                or expected.st_uid != os.geteuid()
+                or expected.st_nlink != 1
+                or (not contained and expected.st_mode & 0o077)
+            ):
+                raise ReleaseFailure("engineer_store_restore_path_drift")
+            flags = os.O_RDWR | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0)
+            descriptor = os.open(target.name, flags, dir_fd=parent_descriptor)
+        else:
+            flags = (
+                os.O_RDWR
+                | os.O_CREAT
+                | os.O_EXCL
+                | getattr(os, "O_CLOEXEC", 0)
+                | getattr(os, "O_NOFOLLOW", 0)
+            )
+            descriptor = os.open(target.name, flags, 0o600, dir_fd=parent_descriptor)
+            created = os.fstat(descriptor)
+            expected_identity = (int(created.st_dev), int(created.st_ino))
+
+        assert expected_identity is not None
+
+        def require_identity(*, expected_mode: int | None = None) -> None:
+            opened = os.fstat(descriptor)
+            lexical = os.stat(
+                target.name,
+                dir_fd=parent_descriptor,
+                follow_symlinks=False,
+            )
+            current_parent = os.fstat(parent_descriptor)
+            current_parent_path = parent.lstat()
+            if (
+                not stat.S_ISREG(opened.st_mode)
+                or opened.st_uid != os.geteuid()
+                or opened.st_nlink != 1
+                or expected_identity != (int(opened.st_dev), int(opened.st_ino))
+                or expected_identity != (int(lexical.st_dev), int(lexical.st_ino))
+                or parent_identity != (int(current_parent.st_dev), int(current_parent.st_ino))
+                or parent_identity != (int(current_parent_path.st_dev), int(current_parent_path.st_ino))
+                or (expected_mode is not None and stat.S_IMODE(opened.st_mode) != expected_mode)
+            ):
+                raise ReleaseFailure("engineer_store_restore_path_drift")
+
+        # Validate once after open, once immediately before each destructive
+        # descriptor operation, and once after persistence.  In particular,
+        # O_TRUNC is never part of the open itself.
+        require_identity()
+        require_identity()
+        os.ftruncate(descriptor, 0)
+        require_identity()
+        os.fchmod(descriptor, mode)
+        os.fsync(descriptor)
+        require_identity(expected_mode=mode)
+        os.fsync(parent_descriptor)
+        require_identity(expected_mode=mode)
+    except ReleaseFailure:
+        raise
+    except OSError as exc:
+        raise ReleaseFailure("engineer_store_restore_path_drift") from exc
+    finally:
+        if descriptor >= 0:
+            os.close(descriptor)
+        if parent_descriptor >= 0:
+            os.close(parent_descriptor)
+
+
+def _restore_exact_engineer_backup(
+    config: SystemdConfig,
+    payload: _ExactBackupPayload,
+) -> dict[str, Any] | None:
+    descriptor = payload.engineer
+    if descriptor is None:
+        return None
+    manifest = _verify_engineer_backup(payload.directory, descriptor)
+    _cleanup_engineer_restore_staging(
+        config,
+        manifest=manifest,
+        manifest_sha256=descriptor.manifest_sha256,
+    )
+    # A symlink, special file, public mode or hardlink anywhere in the live
+    # contour is an ownership ambiguity.  Refuse before mutating any byte.
+    live = _scan_engineer_artifacts(config, destination=None)
+    store, key, state = _engineer_artifact_paths(config)
+    recovery = payload.directory / "engineer-recovery"
+    expected = {str(item["path"]): item for item in manifest["entries"]}
+    current = {str(item["path"]): item for item in live["entries"]}
+    expected_store = bool(manifest["store_present"])
+    expected_database = expected.get("store/kernel.sqlite")
+    if expected_database is not None:
+        current_database = current.get("store/kernel.sqlite")
+        if (
+            current_database is None
+            or current_database.get("kind") != "file"
+            or current_database.get("device") != expected_database.get("device")
+            or current_database.get("inode") != expected_database.get("inode")
+        ):
+            raise ReleaseFailure("engineer_store_database_identity_changed")
+
+    if not expected_store:
+        if _engineer_path_present(store):
+            _remove_private_engineer_tree(store)
+    else:
+        store_item = expected.get("store")
+        if not isinstance(store_item, dict) or store_item.get("kind") != "directory":
+            raise ReleaseFailure("engineer_store_backup_manifest_invalid")
+        if _engineer_path_present(store):
+            _engineer_private_status(store, kind="directory")
+        else:
+            store.mkdir(parents=True, mode=int(store_item["mode"]))
+        extra_paths = sorted(
+            (path for path in current if path.startswith("store/") and path not in expected),
+            key=lambda value: (len(PurePosixPath(value).parts), value),
+            reverse=True,
+        )
+        for path in extra_paths:
+            relative = _engineer_backup_relative(path)
+            target = store.joinpath(*relative.parts[1:])
+            if _engineer_path_present(target):
+                _remove_private_engineer_tree(target, contained=True)
+        expected_directories = sorted(
+            (
+                (path, item)
+                for path, item in expected.items()
+                if path.startswith("store/") and item["kind"] == "directory"
+            ),
+            key=lambda pair: (len(PurePosixPath(pair[0]).parts), pair[0]),
+        )
+        for path, item in expected_directories:
+            relative = _engineer_backup_relative(path)
+            target = store.joinpath(*relative.parts[1:])
+            observed = current.get(path)
+            if observed is not None and observed.get("kind") != "directory":
+                raise ReleaseFailure("engineer_store_restore_path_drift")
+            target.mkdir(parents=True, exist_ok=True, mode=0o700)
+            os.chmod(target, int(item["mode"]))
+        for path, item in sorted(expected.items()):
+            if not path.startswith("store/") or item["kind"] == "directory":
+                continue
+            relative = _engineer_backup_relative(path)
+            target = store.joinpath(*relative.parts[1:])
+            observed = current.get(path)
+            if observed is not None and observed.get("kind") != item["kind"]:
+                raise ReleaseFailure("engineer_store_restore_path_drift")
+            if item["kind"] == "ephemeral":
+                _restore_ephemeral_engineer_file(
+                    target,
+                    mode=int(item["mode"]),
+                    expected_present=observed is not None,
+                    contained=relative.name == "kernel.sqlite-shm",
+                )
+                continue
+            preserve_identity = (
+                (int(item["device"]), int(item["inode"])) if path == "store/kernel.sqlite" else None
+            )
+            _restore_private_engineer_file(
+                recovery.joinpath(*relative.parts),
+                target,
+                mode=int(item["mode"]),
+                staging_manifest_sha256=descriptor.manifest_sha256,
+                preserve_identity=preserve_identity,
+                contained=True,
+            )
+        os.chmod(store, int(store_item["mode"]))
+        _fsync_tree(store)
+
+    expected_key = expected.get("key")
+    if expected_key is None:
+        if _engineer_path_present(key):
+            _remove_private_engineer_tree(key)
+    else:
+        if expected_key.get("kind") != "file":
+            raise ReleaseFailure("engineer_store_backup_manifest_invalid")
+        _restore_private_engineer_file(
+            recovery / "key",
+            key,
+            mode=int(expected_key["mode"]),
+            staging_manifest_sha256=descriptor.manifest_sha256,
+        )
+    for name in _ENGINEER_LIFECYCLE_FILENAMES:
+        path = f"state/{name}"
+        target = state / name
+        item = expected.get(path)
+        if item is None:
+            if _engineer_path_present(target):
+                _remove_private_engineer_tree(target)
+            continue
+        if item.get("kind") != "file":
+            raise ReleaseFailure("engineer_store_backup_manifest_invalid")
+        _restore_private_engineer_file(
+            recovery / "state" / name,
+            target,
+            mode=int(item["mode"]),
+            staging_manifest_sha256=descriptor.manifest_sha256,
+        )
+    if state.exists():
+        _fsync_directory(state)
+    _verify_engineer_backup(payload.directory, descriptor)
+    # The private backup was integrity-checked through a scratch SQLite copy.
+    # Opening the restored WAL database here could checkpoint/delete sidecars
+    # and would destroy the exact stopped-services recovery image.
+    artifact_manifest = {
+        key: value for key, value in manifest.items() if key != "engineer_command_ledger_authority"
+    }
+    if _scan_engineer_artifacts(config, destination=None) != artifact_manifest:
+        raise ReleaseFailure("engineer_store_restore_mismatch")
+    if _engineer_restore_staging_paths(config):
+        raise ReleaseFailure("engineer_restore_staging_residue")
+    authority = manifest.get("engineer_command_ledger_authority")
+    return dict(authority) if isinstance(authority, dict) else None
+
+
+def _restore_exact_sqlite_backup(
+    config: SystemdConfig,
+    backup: DatabaseBackup,
+    *,
+    require_engineer_authority: bool = False,
+    engineer_authority_verify: Callable[[Mapping[str, Any], str], object] | None = None,
+) -> None:
     payload = backup.opaque
     if not isinstance(payload, _ExactBackupPayload):
         raise ReleaseFailure("backup_restore_identity_invalid")
@@ -10138,6 +11933,37 @@ def _restore_exact_sqlite_backup(config: SystemdConfig, backup: DatabaseBackup) 
         # Prove every component before mutating any live state.  The second
         # verification in the root restore closes drift during DB replacement.
         _verify_obsidian_backup(payload.directory, payload.obsidian)
+    engineer_manifest: dict[str, Any] | None = None
+    if payload.engineer is not None:
+        engineer_manifest = _verify_engineer_backup(payload.directory, payload.engineer)
+    authority_evidence = (
+        engineer_manifest.get("engineer_command_ledger_authority") if engineer_manifest is not None else None
+    )
+    lifecycle_backed_up = bool(
+        engineer_manifest is not None
+        and any(
+            item.get("path") == "state/engineer-command-store.anchor.json"
+            for item in engineer_manifest["entries"]
+        )
+    )
+    if require_engineer_authority and lifecycle_backed_up and not isinstance(authority_evidence, dict):
+        raise ReleaseFailure("engineer_store_backup_authority_required")
+    if isinstance(authority_evidence, dict) and engineer_authority_verify is None:
+        raise ReleaseFailure("engineer_store_backup_authority_required")
+    # Restore external authority first.  A later main-DB restore failure leaves
+    # all writers stopped and is safely replayable from the durable journal.
+    restored_authority = _restore_exact_engineer_backup(config, payload)
+    if restored_authority is not None:
+        assert engineer_authority_verify is not None
+        main_database_sha256 = _sha256_file(payload.directory / "database.sqlite3")
+        evidence = _validated_engineer_authority_evidence(
+            restored_authority,
+            database_sha256=main_database_sha256,
+        )
+        _validated_engineer_authority_verification(
+            engineer_authority_verify(evidence, main_database_sha256),
+            evidence=evidence,
+        )
     for label, destination in (("database", config.database), ("inbox", config.inbox_database)):
         _private_directory(destination.parent)
         for suffix in ("", "-wal", "-shm"):
@@ -11153,6 +12979,7 @@ class SystemdActivationPort:
             else ""
         )
         self._leases: list[Any] = []
+        self._engineer_locks: list[tuple[int, Path, tuple[int, int]]] = []
 
     def activation_policy_receipt(self) -> Mapping[str, str]:
         return {
@@ -11163,6 +12990,71 @@ class SystemdActivationPort:
             ),
             "memory_vault_mode": self.config.memory_vault_mode,
         }
+
+    def validate_engineer_recovery_contour(
+        self,
+        releases: Sequence[ReleaseIdentity],
+    ) -> None:
+        if len(releases) != 3:
+            raise ReleaseFailure("engineer_recovery_contour_invalid")
+        _validate_engineer_recovery_contour(
+            self.config,
+            tuple(release.root for release in releases),
+        )
+
+    def engineer_store_lifecycle_required(self) -> bool:
+        _target_config, environment_path, _target_digest, _current_digest = self._verification_environment(
+            use_predecessor_config=False
+        )
+        raw = _read_private_regular_file(
+            environment_path,
+            maximum_bytes=1 << 20,
+            code="environment_file_invalid",
+        )
+        lines, assignment = _engineer_command_environment_parts(
+            raw,
+            code="engineer_command_environment_invalid",
+        )
+        enabled = assignment is not None and lines[assignment] == _ENGINEER_COMMAND_ENV_ENABLED
+        store, key, state = _engineer_artifact_paths(self.config)
+        residue_presence = tuple(
+            _engineer_path_present(path)
+            for path in (
+                store,
+                key,
+                *(state / name for name in _ENGINEER_LIFECYCLE_FILENAMES),
+                state / ".engineer-command-store.test.key",
+            )
+        )
+        residue = any(residue_presence)
+        if not _engineer_environment_path_is_exact(
+            raw,
+            key="FRIDAY_ENGINEER_COMMAND_STORE_DIR",
+            expected=store,
+        ) or not _engineer_environment_path_is_exact(
+            raw,
+            key="FRIDAY_ENGINEER_COMMAND_KEY_FILE",
+            expected=key,
+        ):
+            raise ReleaseFailure("engineer_store_environment_invalid")
+        if not enabled and not residue:
+            return False
+        if _engineer_path_present(state / ".engineer-command-store.test.key"):
+            raise ReleaseFailure("engineer_store_test_key_forbidden")
+        _private_directory(store)
+        key_file = _private_regular_file(
+            key,
+            maximum_bytes=32,
+            code="engineer_store_key_invalid",
+        )
+        key_status = os.stat(key_file, follow_symlinks=False)
+        if key_status.st_size != 32 or stat.S_IMODE(key_status.st_mode) != 0o600:
+            raise ReleaseFailure("engineer_store_key_invalid")
+        return True
+
+    def engineer_store_lifecycle_provisioned(self) -> bool:
+        _store, _key, state = _engineer_artifact_paths(self.config)
+        return _engineer_path_present(state / "engineer-command-store.anchor.json")
 
     def _verify_environment_file(self) -> None:
         environment = _read_private_regular_file(
@@ -12531,6 +14423,185 @@ print(json.dumps({
             for unit in (self.config.backend_unit, self.config.bridge_unit)
         )
 
+    def _acquire_engineer_store_locks(self) -> None:
+        if self._engineer_locks:
+            return
+        store, _key, _state = _engineer_artifact_paths(self.config)
+        if not _engineer_path_present(store):
+            return
+        _engineer_private_status(store, kind="directory")
+        opened: list[tuple[int, Path, tuple[int, int]]] = []
+        flags = os.O_RDWR | os.O_CREAT | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0)
+        try:
+            for name in ("kernel.lease", "kernel.lock"):
+                path = store / name
+                descriptor = -1
+                try:
+                    descriptor = os.open(path, flags, 0o600)
+                    before = os.fstat(descriptor)
+                    lexical_before = os.stat(path, follow_symlinks=False)
+                    if (
+                        not stat.S_ISREG(before.st_mode)
+                        or before.st_uid != os.geteuid()
+                        or before.st_nlink != 1
+                        or before.st_mode & 0o077
+                        or (before.st_dev, before.st_ino) != (lexical_before.st_dev, lexical_before.st_ino)
+                    ):
+                        raise ReleaseFailure("engineer_store_lock_invalid")
+                    os.fchmod(descriptor, 0o600)
+                    status = os.fstat(descriptor)
+                    lexical = os.stat(path, follow_symlinks=False)
+                    if (
+                        not stat.S_ISREG(status.st_mode)
+                        or status.st_uid != os.geteuid()
+                        or status.st_nlink != 1
+                        or stat.S_IMODE(status.st_mode) != 0o600
+                        or (status.st_dev, status.st_ino) != (lexical.st_dev, lexical.st_ino)
+                        or (status.st_dev, status.st_ino) != (before.st_dev, before.st_ino)
+                    ):
+                        raise ReleaseFailure("engineer_store_lock_invalid")
+                    fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                except BaseException:
+                    if descriptor >= 0:
+                        with suppress(OSError):
+                            os.close(descriptor)
+                    raise
+                opened.append(
+                    (
+                        descriptor,
+                        path,
+                        (int(status.st_dev), int(status.st_ino)),
+                    )
+                )
+            self._engineer_locks = opened
+        except BaseException as exc:
+            for descriptor, _path, _identity in reversed(opened):
+                with suppress(OSError):
+                    fcntl.flock(descriptor, fcntl.LOCK_UN)
+                with suppress(OSError):
+                    os.close(descriptor)
+            if isinstance(exc, ReleaseFailure):
+                raise
+            raise ReleaseFailure("engineer_store_lock_invalid") from exc
+
+    def _release_engineer_store_locks(self) -> None:
+        for descriptor, _path, _identity in reversed(self._engineer_locks):
+            with suppress(OSError):
+                fcntl.flock(descriptor, fcntl.LOCK_UN)
+            os.close(descriptor)
+        self._engineer_locks = []
+
+    def _run_engineer_backup_authority(
+        self,
+        release: ReleaseIdentity,
+        *,
+        action: str,
+        database_sha256: str = "",
+        evidence: Mapping[str, Any] | None = None,
+    ) -> object:
+        if action not in {"snapshot", "attest", "verify"} or not self.writer_leases_held():
+            raise ReleaseFailure("engineer_store_backup_authority_unavailable")
+        _require_engineer_command_lifecycle_contract(
+            release,
+            code="engineer_store_backup_authority_release_incapable",
+        )
+        lock = next(
+            (item for item in self._engineer_locks if item[1].name == "kernel.lock"),
+            None,
+        )
+        if lock is None:
+            raise ReleaseFailure("engineer_store_backup_authority_unavailable")
+        descriptor, _lock_path, _identity = lock
+        store, key, state = _engineer_artifact_paths(self.config)
+        script = r"""
+import json,logging,pathlib,sys
+logging.disable(logging.CRITICAL)
+from friday.config import load_local_env_file,load_settings
+from friday.organs.engineer.command_tools import open_engineer_command_backup_authority
+load_local_env_file(); settings=load_settings()
+action=sys.argv[1]; home=pathlib.Path(sys.argv[2]); store=pathlib.Path(sys.argv[3]); key=pathlib.Path(sys.argv[4]); state=pathlib.Path(sys.argv[5]); digest=sys.argv[6]
+if pathlib.Path(settings.home).resolve(strict=True)!=home.resolve(strict=True) or pathlib.Path(settings.engineer_command_store_dir)!=store or pathlib.Path(settings.engineer_command_key_file)!=key or pathlib.Path(settings.state_dir)!=state:
+    raise RuntimeError('configuration mismatch')
+with open_engineer_command_backup_authority(settings,exclusive=False) as authority:
+    if action=='snapshot':
+        result={'snapshot':authority.backup_authority_snapshot()}
+    elif action=='attest':
+        before=authority.backup_authority_snapshot(); proof=authority.attest_main_database_backup(digest); verified=authority.verify_main_database_backup_authority(proof,digest); after=authority.backup_authority_snapshot(); result={'before':before,'evidence':proof,'verified':verified,'after':after}
+    elif action=='verify':
+        proof=json.loads(sys.stdin.buffer.read()); before=authority.backup_authority_snapshot(); verified=authority.verify_main_database_backup_authority(proof,digest); after=authority.backup_authority_snapshot(); result={'before':before,'verified':verified,'after':after}
+    else:
+        raise RuntimeError('action mismatch')
+print(json.dumps(result,sort_keys=True,separators=(',',':')))
+"""
+        child_environment = {
+            name: value
+            for name, value in os.environ.items()
+            if name in {"LANG", "LC_ALL", "SSL_CERT_DIR", "SSL_CERT_FILE", "XDG_RUNTIME_DIR"}
+        }
+        child_environment.update(
+            {
+                "FRIDAY_ENV_FILE": str(self.config.env_file),
+                "FRIDAY_HOME": str(self.config.friday_home),
+                "PYTHONDONTWRITEBYTECODE": "1",
+            }
+        )
+        result: subprocess.CompletedProcess[bytes] | None = None
+        failure: BaseException | None = None
+        try:
+            # Retain kernel.lease exclusively while lending kernel.lock to the
+            # read-only observer; no command runtime can enter this handoff.
+            fcntl.flock(descriptor, fcntl.LOCK_UN)
+            result = subprocess.run(  # noqa: S603
+                [
+                    str(release.root / "venv/bin/python"),
+                    "-I",
+                    "-B",
+                    "-c",
+                    script,
+                    action,
+                    str(self.config.friday_home),
+                    str(store),
+                    str(key),
+                    str(state),
+                    database_sha256,
+                ],
+                check=False,
+                capture_output=True,
+                input=(_canonical_json(dict(evidence)) if evidence is not None else b""),
+                env=child_environment,
+                timeout=300,
+            )
+        except (OSError, subprocess.SubprocessError) as exc:
+            failure = ReleaseFailure("engineer_store_backup_authority_unavailable")
+            failure.__cause__ = exc
+        finally:
+            try:
+                fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except OSError as exc:
+                if failure is None:
+                    failure = ReleaseFailure("engineer_store_backup_authority_lock_lost")
+                    failure.__cause__ = exc
+        if failure is not None:
+            raise failure
+        if (
+            result is None
+            or result.returncode != 0
+            or result.stderr
+            or not result.stdout.endswith(b"\n")
+            or len(result.stdout) > 8_192
+            or not self.writer_leases_held()
+        ):
+            raise ReleaseFailure("engineer_store_backup_authority_unavailable")
+        try:
+            parsed = _unique_json(result.stdout.decode("ascii", errors="strict"))
+        except (UnicodeError, ValueError, json.JSONDecodeError) as exc:
+            raise ReleaseFailure("engineer_store_backup_authority_unavailable") from exc
+        if action == "snapshot":
+            if set(parsed) != {"snapshot"}:
+                raise ReleaseFailure("engineer_store_backup_authority_unavailable")
+            return parsed["snapshot"]
+        return parsed
+
     def acquire_writer_leases(self) -> None:
         if self._leases:
             return
@@ -12553,9 +14624,12 @@ print(json.dumps({
                 ) or not process_owns_lease(lease.path, protocol=lease.protocol):
                     raise ReleaseFailure("writer_lease_identity_changed")
             self._leases = leases
+            self._acquire_engineer_store_locks()
         except BaseException:
+            self._release_engineer_store_locks()
             for lease in reversed(leases):
                 lease.release()
+            self._leases = []
             raise
 
     def writer_leases_held(self) -> bool:
@@ -12573,17 +14647,119 @@ print(json.dumps({
                 int(lexical.st_ino),
             ) or not process_owns_lease(lease.path, protocol=lease.protocol):
                 return False
+        store, _key, _state = _engineer_artifact_paths(self.config)
+        store_present = _engineer_path_present(store)
+        if store_present != bool(self._engineer_locks):
+            return False
+        for descriptor, path, identity in self._engineer_locks:
+            try:
+                status = os.fstat(descriptor)
+                lexical = os.stat(path, follow_symlinks=False)
+            except OSError:
+                return False
+            if (
+                (int(status.st_dev), int(status.st_ino)) != identity
+                or (int(lexical.st_dev), int(lexical.st_ino)) != identity
+                or not stat.S_ISREG(status.st_mode)
+                or status.st_uid != os.geteuid()
+                or status.st_nlink != 1
+                or stat.S_IMODE(status.st_mode) != 0o600
+            ):
+                return False
         return True
 
     def release_writer_leases(self) -> None:
+        self._release_engineer_store_locks()
         for lease in reversed(self._leases):
             lease.release()
         self._leases = []
 
-    def backup_database(self) -> DatabaseBackup:
+    def backup_database(self, release: ReleaseIdentity) -> DatabaseBackup:
         if not self.writer_leases_held():
             raise ReleaseFailure("backup_without_writer_leases")
-        return _exact_sqlite_backup(self.config)
+        return _exact_sqlite_backup(
+            self.config,
+            require_engineer_authority=True,
+            engineer_authority_snapshot=lambda: self._run_engineer_backup_authority(
+                release,
+                action="snapshot",
+            ),
+            engineer_authority_attest=lambda digest: self._run_engineer_backup_authority(
+                release,
+                action="attest",
+                database_sha256=digest,
+            ),
+        )
+
+    def provision_engineer_store(self, release: ReleaseIdentity) -> None:
+        if not self.writer_leases_held():
+            raise ReleaseFailure("engineer_provision_without_writer_leases")
+        _require_engineer_command_lifecycle_contract(
+            release,
+            code="engineer_provision_release_incapable",
+        )
+        store, key, state = _engineer_artifact_paths(self.config)
+        self._release_engineer_store_locks()
+        script = """
+import json, logging, pathlib, sys
+logging.disable(logging.CRITICAL)
+from friday.config import load_local_env_file, load_settings
+from friday.organs.engineer.command_tools import provision_engineer_command_store
+load_local_env_file(); settings=load_settings()
+assert pathlib.Path(settings.home).resolve(strict=True)==pathlib.Path(sys.argv[2]).resolve(strict=True)
+assert pathlib.Path(settings.engineer_command_store_dir)==pathlib.Path(sys.argv[3])
+assert pathlib.Path(settings.engineer_command_key_file)==pathlib.Path(sys.argv[4])
+assert pathlib.Path(settings.state_dir)==pathlib.Path(sys.argv[5])
+result=provision_engineer_command_store(settings)
+print(json.dumps(result,sort_keys=True,separators=(',',':')))
+"""
+        child_environment = {
+            key_name: value
+            for key_name, value in os.environ.items()
+            if key_name in {"LANG", "LC_ALL", "SSL_CERT_DIR", "SSL_CERT_FILE", "XDG_RUNTIME_DIR"}
+        }
+        child_environment.update(
+            {
+                "FRIDAY_ENV_FILE": str(self.config.env_file),
+                "FRIDAY_HOME": str(self.config.friday_home),
+                "PYTHONDONTWRITEBYTECODE": "1",
+            }
+        )
+        failure: BaseException | None = None
+        try:
+            result = subprocess.run(  # noqa: S603
+                [
+                    str(release.root / "venv/bin/python"),
+                    "-I",
+                    "-B",
+                    "-c",
+                    script,
+                    str(self.config.env_file),
+                    str(self.config.friday_home),
+                    str(store),
+                    str(key),
+                    str(state),
+                ],
+                check=False,
+                capture_output=True,
+                env=child_environment,
+                timeout=300,
+            )
+            if result.returncode != 0 or result.stderr or result.stdout != b'{"status":"provisioned"}\n':
+                raise ReleaseFailure("engineer_store_provision_failed")
+        except (OSError, subprocess.SubprocessError) as exc:
+            failure = ReleaseFailure("engineer_store_provision_failed")
+            failure.__cause__ = exc
+        except BaseException as exc:
+            failure = exc
+        finally:
+            try:
+                self._acquire_engineer_store_locks()
+            except BaseException as reacquire_error:
+                if failure is None:
+                    failure = reacquire_error
+        if failure is not None:
+            raise failure
 
     def offline_migrate(self, release: ReleaseIdentity, backup: DatabaseBackup) -> None:
         del backup
@@ -13116,10 +15292,29 @@ print(json.dumps({'schema':SCHEMA_VERSION,'status':'clear'},sort_keys=True,separ
         if stable_samples < 3:
             raise ReleaseFailure("bridge_lease_identity_not_stable")
 
-    def restore_database(self, backup: DatabaseBackup) -> None:
+    def restore_database(
+        self,
+        backup: DatabaseBackup,
+        release: ReleaseIdentity,
+    ) -> None:
         if not self.writer_leases_held():
             raise ReleaseFailure("restore_without_writer_leases")
-        _restore_exact_sqlite_backup(self.config, backup)
+        # Lock/lease artifacts are restored by in-place truncate, so their
+        # inode-bound flocks remain valid throughout the entire external-first
+        # recovery.  Never open a race window for another command kernel.
+        _restore_exact_sqlite_backup(
+            self.config,
+            backup,
+            require_engineer_authority=True,
+            engineer_authority_verify=lambda evidence, digest: self._run_engineer_backup_authority(
+                release,
+                action="verify",
+                database_sha256=digest,
+                evidence=evidence,
+            ),
+        )
+        if not self.writer_leases_held():
+            raise ReleaseFailure("restore_lost_writer_leases")
 
     def _historical_album_completion_snapshot(self) -> bool:
         """Return true only when the exact reset set durably left the queue."""
@@ -13420,6 +15615,7 @@ def load_release_identity(root: Path, *, expected_tree_sha256: str) -> ReleaseId
         "obsidian_cutover_contract",
         "secondary_product_runner_sha256",
         "venv_relocation_contract",
+        "engineer_command_lifecycle_contract",
     }
     memory_vault_mode_contract = (
         str(metadata.get("memory_vault_mode_contract") or "") if isinstance(metadata, dict) else ""
@@ -13432,6 +15628,9 @@ def load_release_identity(root: Path, *, expected_tree_sha256: str) -> ReleaseId
     )
     secondary_product_runner_sha256 = (
         str(metadata.get("secondary_product_runner_sha256") or "") if isinstance(metadata, dict) else ""
+    )
+    engineer_command_lifecycle_contract = (
+        str(metadata.get("engineer_command_lifecycle_contract") or "") if isinstance(metadata, dict) else ""
     )
     if (
         not isinstance(metadata, dict)
@@ -13448,6 +15647,10 @@ def load_release_identity(root: Path, *, expected_tree_sha256: str) -> ReleaseId
         or (
             ("obsidian_cutover_contract" in metadata_keys)
             != (obsidian_cutover_contract == OBSIDIAN_CUTOVER_CONTRACT)
+        )
+        or (
+            ("engineer_command_lifecycle_contract" in metadata_keys)
+            != (engineer_command_lifecycle_contract == ENGINEER_COMMAND_LIFECYCLE_CONTRACT)
         )
         or metadata.get("schema") != BUILD_RECEIPT_SCHEMA
         or _VERSION.fullmatch(str(metadata.get("version") or "")) is None
@@ -13530,6 +15733,7 @@ def load_release_identity(root: Path, *, expected_tree_sha256: str) -> ReleaseId
         venv_relocation_contract=venv_relocation_contract,
         obsidian_cutover_contract=obsidian_cutover_contract,
         secondary_product_runner_sha256=secondary_product_runner_sha256,
+        engineer_command_lifecycle_contract=engineer_command_lifecycle_contract,
     )
     verify_release_tree(release)
     return release
@@ -14252,6 +16456,8 @@ __all__ = [
     "ALBUM_RECOVERY_RECEIPT_SCHEMA",
     "BOOTSTRAP_WHEELS",
     "BUILD_RECEIPT_SCHEMA",
+    "ENGINEER_COMMAND_LIFECYCLE_CONTRACT",
+    "ENGINEER_COMMAND_LIFECYCLE_MIN_SCHEMA",
     "FORBIDDEN_ROLLBACK_COMMITS",
     "HISTORICAL_ALBUM_PLAN_SHA256",
     "HISTORICAL_ALBUM_UPDATE_IDS",

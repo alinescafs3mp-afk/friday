@@ -13,18 +13,43 @@ import sqlite3
 import stat
 import threading
 import time
-from collections.abc import Mapping
-from contextlib import suppress
-from datetime import UTC, datetime
+from collections.abc import Iterator, Mapping
+from contextlib import contextmanager, suppress
+from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
+from friday.engineer_source_binding import ENGINEER_SOURCE_MAX_CALL_ORDINAL
 from friday.execution_kernel import ToolSpec
 from friday.file_delivery import (
     AuthorizedCurrentMessageUploadBatch,
     FileRecordUnavailable,
     authorize_current_message_upload_batch,
     reauthorize_current_message_upload_batch,
+)
+from friday.interaction_control_plane.engineer_work_item import (
+    ENGINEER_WORK_ITEM_RETENTION_DAYS,
+    EngineerWorkItemChannel,
+    EngineerWorkItemConflictError,
+    EngineerWorkItemState,
+    EngineerWorkItemStepState,
+    expire_due_engineer_work_items_in_transaction,
+    get_current_engineer_work_item_in_transaction,
+    prune_engineer_work_items_in_transaction,
+)
+from friday.interaction_control_plane.engineer_work_item_schema import (
+    ENGINEER_WORK_ITEM_MAX_TTL_SECONDS,
+)
+from friday.orchestration.engineer_work_item_coordinator import (
+    EngineerAdmissionOutcome,
+    EngineerCommandLedgerDisposition,
+    EngineerCommandLedgerObservation,
+    EngineerCommandReservation,
+    EngineerCommandSourceSlot,
+    EngineerContinuationState,
+    EngineerWorkItemCoordinatorError,
+    EngineerWorkItemRuntimeCoordinator,
 )
 from friday.organs import ServiceContext, may_push_to, resolve_chat_id
 
@@ -42,6 +67,8 @@ from .command import (
     OwnerSourceAuthority,
     TrustedPathContract,
 )
+from .command.backup_authority import CommandStoreBackupAuthorityObserver
+from .command.contracts import canonical_json_bytes
 from .command.inputs import (
     EMPTY_INPUT_MANIFEST,
     MAX_INPUT_FILE_BYTES,
@@ -60,14 +87,20 @@ from .command.publication import (
     CommandOutputPublicationError,
     build_command_output_archive,
 )
+from .command.store import CommandJobStore, EngineerCommandAccountInventory
 from .publication import ExactGeneratedFilePublicationError, exact_generated_file_batch
 from .terminal_delivery import (
     TERMINAL_ARTIFACT_MAX_BYTES,
+    TERMINAL_NOTIFICATION_KIND,
+    TERMINAL_TEXT_NOTIFICATION_KIND,
     TerminalDeliveryError,
     parse_terminal_envelope,
+    parse_terminal_text_envelope,
     stage_terminal_archive,
     stage_terminal_text,
+    stage_unknown_notification,
     terminal_notification_status,
+    terminal_text_notification_projection,
     verify_sent_terminal_notification_artifact,
 )
 
@@ -97,9 +130,63 @@ _DISPLAY_BYTES = 64 * 1024
 _AUTONOMOUS_GRANT_TTL_SEC = 120
 _DIRECT_WAIT_SEC = 15.0
 _MAX_EXPLICIT_TIMEOUT_SEC = 2_147_483_647
-_WORKSPACE_RETENTION_SEC = 30 * 24 * 60 * 60
+_WORKSPACE_RETENTION_SEC = ENGINEER_WORK_ITEM_RETENTION_DAYS * 24 * 60 * 60
 _WORKSPACE_RETENTION_BATCH_MAX = 20
 _PROGRESS_BATCH_MAX = 20
+_ENGINEER_WORK_ITEM_CONTINUATION_CARRIER = "_engineer_work_item_continuation"
+_ENGINEER_COMMAND_LEDGER_OBSERVATION_CARRIER = "_engineer_command_ledger_observation"
+
+if not 0 < ENGINEER_WORK_ITEM_MAX_TTL_SECONDS < _WORKSPACE_RETENTION_SEC:
+    raise RuntimeError("Engineer Work Item TTL must be shorter than command-output retention")
+
+_PERMANENT_PUBLICATION_ERRORS = frozenset(
+    {
+        "command_output_archive_limit_invalid",
+        "command_output_archive_size_limit",
+        "command_output_count_invalid",
+        "command_output_digest_mismatch",
+        "command_output_inventory_invalid",
+        "command_output_inventory_mismatch",
+        "command_output_metadata_invalid",
+        "command_output_metadata_limit",
+        "command_output_path_invalid",
+        "command_output_receipt_changed",
+        "command_output_receipt_invalid",
+        "command_output_size_limit",
+        "command_output_size_mismatch",
+        "generated_batch_changed",
+        "generated_batch_count_invalid",
+        "generated_batch_filename_collision",
+        "generated_batch_persistence_invalid",
+        "generated_batch_size_invalid",
+        "generated_item_invalid",
+        "generated_item_shape_invalid",
+        "generated_item_size_invalid",
+        "terminal_archive_identity_changed",
+        "terminal_artifact_batch_invalid",
+        "terminal_artifact_replay_changed",
+        "terminal_caption_invalid",
+        "terminal_dedup_conflict",
+        "terminal_envelope_too_large",
+        "terminal_identity_invalid",
+        "terminal_receipt_unpublishable",
+        "terminal_text_dedup_conflict",
+        "terminal_text_invalid",
+        "terminal_text_output_invalid",
+        "terminal_time_invalid",
+        "unknown_dedup_conflict",
+        "unknown_identity_invalid",
+    }
+)
+
+
+@dataclass(frozen=True, slots=True)
+class EngineerCommandResumeObservation:
+    """Process-private exact observation used to resume one Engineer turn."""
+
+    continuation: EngineerContinuationState
+    payload: dict[str, Any]
+    attachment: dict[str, Any] | None = None
 
 
 def _source_metadata(row: Mapping[str, Any]) -> Mapping[str, Any] | None:
@@ -178,6 +265,25 @@ def _derive(master: bytes, label: bytes) -> bytes:
 def _idempotency_key(source_message_id: str, step_id: str, request: CommandRequest) -> str:
     material = f"{source_message_id}\x00{step_id}\x00{request.digest}".encode("ascii")
     return "ecmd-" + hashlib.sha256(material).hexdigest()
+
+
+def _verified_terminal_receipt_sha256(receipt: CommandReceipt, mac_version: int) -> str:
+    """Digest the verified, body-free terminal authority projected by the kernel."""
+
+    if mac_version not in {1, 2}:
+        raise CommandError("terminal_receipt_unpublishable")
+    public = receipt.to_public_payload()
+    if mac_version == 1:
+        public.pop("generated_files_sha256", None)
+    return hashlib.sha256(
+        canonical_json_bytes(
+            {
+                "mac_version": mac_version,
+                "receipt": public,
+                "schema": "friday.engineer-terminal-observation.v1",
+            }
+        )
+    ).hexdigest()
 
 
 def _safe_output(payload: bytes) -> str:
@@ -271,6 +377,51 @@ def _submit_autonomous_request(
     )
 
 
+def provision_engineer_command_store(settings: Any) -> dict[str, str]:
+    """Explicitly create or upgrade the authenticated Engineer command ledger."""
+
+    master = _read_private_key(Path(settings.engineer_command_key_file))
+    store = CommandJobStore.provision(
+        Path(settings.engineer_command_store_dir),
+        lifecycle_key=_derive(master, b"store-lifecycle"),
+        lifecycle_state_dir=Path(settings.state_dir),
+    )
+    try:
+        store.assert_lifecycle_ready()
+    finally:
+        store.close()
+    return {"status": "provisioned"}
+
+
+@contextmanager
+def open_engineer_command_backup_authority(
+    settings: Any,
+    *,
+    exclusive: bool = False,
+) -> Iterator[CommandJobStore | CommandStoreBackupAuthorityObserver]:
+    """Observe online backups or exclusively own the stopped ledger for restore."""
+
+    master = _read_private_key(Path(settings.engineer_command_key_file))
+    lifecycle_key = _derive(master, b"store-lifecycle")
+    authority = (
+        CommandJobStore.open_runtime(
+            Path(settings.engineer_command_store_dir),
+            lifecycle_key=lifecycle_key,
+            lifecycle_state_dir=Path(settings.state_dir),
+        )
+        if exclusive
+        else CommandStoreBackupAuthorityObserver(
+            Path(settings.engineer_command_store_dir),
+            lifecycle_key=lifecycle_key,
+            state_dir=Path(settings.state_dir),
+        )
+    )
+    try:
+        yield authority
+    finally:
+        authority.close()
+
+
 class EngineerCommandService:
     def __init__(self, ctx: ServiceContext) -> None:
         master = _read_private_key(Path(ctx.settings.engineer_command_key_file))
@@ -284,7 +435,11 @@ class EngineerCommandService:
             Path(ctx.settings.engineer_command_store_dir),
             authority,
             trusted_path=trusted,
+            lifecycle_mode="runtime",
+            lifecycle_key=_derive(master, b"store-lifecycle"),
+            lifecycle_state_dir=Path(ctx.settings.state_dir),
         )
+        self.work_items = EngineerWorkItemRuntimeCoordinator(self.kernel.store)
         self.storage = ctx.storage
         self.settings = ctx.settings
         self.authorization = ctx.auth
@@ -308,6 +463,617 @@ class EngineerCommandService:
         """Drain live command jobs before the application releases storage."""
 
         self.kernel.close(timeout_sec=timeout_sec)
+
+    def account_deletion_inventory(self, user_id: str) -> EngineerCommandAccountInventory:
+        """Return the singleton ledger's authenticated content-free actor snapshot."""
+
+        return self.kernel.store.account_deletion_inventory(user_id)
+
+    def _fresh_owner_actor(self, actor: Any, capability: str) -> Any | None:
+        """Rebuild the exact current Telegram owner authority for EWI runtime work."""
+
+        chat_id = str(getattr(actor, "identity_id", "") or "").strip()
+        if (
+            not getattr(actor, "is_owner", False)
+            or getattr(actor, "source", "") != "telegram-bridge"
+            or _PRIVATE_CHAT_ID.fullmatch(chat_id) is None
+            or self.authorization is None
+            or getattr(self.settings, "engineer_mode_enabled", False) is not True
+            or getattr(self.settings, "engineer_command_enabled", False) is not True
+        ):
+            return None
+        user = self.storage.get_user(actor.own_id)
+        if not isinstance(user, Mapping) or str(user.get("status") or "") != "active":
+            return None
+        try:
+            fresh = self.authorization.actor_for_user(
+                actor.own_id,
+                source="engineer-command-service",
+                identity_id=chat_id,
+            )
+            if (
+                not fresh.is_owner
+                or fresh.own_id != actor.own_id
+                or fresh.user_id != actor.user_id
+                or self.storage.resolve_identity("telegram", chat_id) != actor.own_id
+                or resolve_chat_id(self.storage, actor.own_id) != chat_id
+                or not may_push_to(self.settings, self.storage, actor.own_id, chat_id)
+            ):
+                return None
+            self.authorization.require(fresh, "engineer.use")
+            self.authorization.require(fresh, capability)
+        except Exception:
+            return None
+        return fresh
+
+    @staticmethod
+    def _continuation_payload(
+        payload: Mapping[str, Any],
+        continuation: EngineerContinuationState,
+    ) -> dict[str, Any]:
+        projected = dict(payload)
+        projected[_ENGINEER_WORK_ITEM_CONTINUATION_CARRIER] = continuation
+        return projected
+
+    @staticmethod
+    def _historical_observation_payload(
+        payload: Mapping[str, Any],
+        *,
+        actor: Any,
+        conversation_id: str,
+    ) -> dict[str, Any]:
+        """Bind one no-open-EWI status/cancel result to exact private ledger truth."""
+
+        projected = dict(payload)
+        observation = EngineerCommandLedgerObservation(
+            owner_id=str(actor.own_id),
+            tenant_id=str(actor.user_id),
+            conversation_id=conversation_id,
+            job_id=str(projected.get("job_id") or ""),
+            status=CommandStatus(str(projected.get("status") or "")),
+        )
+        projected[_ENGINEER_COMMAND_LEDGER_OBSERVATION_CARRIER] = observation
+        return projected
+
+    def _terminal_payload(
+        self,
+        receipt: CommandReceipt,
+        receipt_mac_version: int,
+        *,
+        actor_id: str,
+        conversation_id: str,
+        include_attachment: bool,
+    ) -> dict[str, Any]:
+        public_receipt = receipt.to_public_payload()
+        if receipt_mac_version < 2:
+            public_receipt.pop("generated_files_sha256", None)
+        public_receipt["mac_version"] = receipt_mac_version
+        public_receipt["generated_files_authenticated"] = receipt_mac_version >= 2
+        payload: dict[str, Any] = {
+            "exit_code": receipt.exit_code,
+            "generated_files": (
+                [
+                    {
+                        "mode": item.mode,
+                        "relative_path": item.relative_path,
+                        "sha256": item.sha256,
+                        "size_bytes": item.size_bytes,
+                    }
+                    for item in receipt.generated_files
+                ]
+                if receipt_mac_version >= 2
+                else []
+            ),
+            "job_id": receipt.job_id,
+            "ok": True,
+            "receipt": public_receipt,
+            "signal": receipt.signal,
+            "status": receipt.status.value,
+            "stderr": _safe_output(receipt.stderr),
+            "stderr_display_truncated": len(receipt.stderr) > _DISPLAY_BYTES,
+            "stdout": _safe_output(receipt.stdout),
+            "stdout_display_truncated": len(receipt.stdout) > _DISPLAY_BYTES,
+        }
+        retired_probe = getattr(self.kernel, "output_retired", None)
+
+        def output_is_retired() -> bool:
+            return bool(
+                retired_probe(
+                    receipt.job_id,
+                    actor_id=actor_id,
+                    conversation_id=conversation_id,
+                )
+                if callable(retired_probe)
+                else False
+            )
+
+        def scrub_retired_output() -> None:
+            payload.update(
+                {
+                    "artifact_delivery": {
+                        "available": False,
+                        "error_code": "job_output_retired",
+                    },
+                    "generated_files": [],
+                    "output_retired": True,
+                    "stderr": "",
+                    "stderr_display_truncated": False,
+                    "stdout": "",
+                    "stdout_display_truncated": False,
+                }
+            )
+
+        if output_is_retired():
+            scrub_retired_output()
+            return payload
+        if not include_attachment or not receipt.generated_files:
+            return payload
+        if receipt_mac_version < 2:
+            payload["artifact_delivery"] = {
+                "available": False,
+                "error_code": "legacy_output_receipt_unpublishable",
+            }
+            return payload
+        try:
+            archive, attachment = self._archive_for_receipt(
+                receipt,
+                actor_id=actor_id,
+                conversation_id=conversation_id,
+            )
+        except CommandError as exc:
+            if exc.code != "job_output_retired":
+                raise
+            payload["output_retired"] = True
+            payload["artifact_delivery"] = {
+                "available": False,
+                "error_code": "job_output_retired",
+            }
+        except CommandOutputPublicationError as exc:
+            payload["artifact_delivery"] = {"available": False, "error_code": exc.code}
+        else:
+            payload["artifact_delivery"] = {
+                "available": True,
+                "filename": archive.filename,
+                "sha256": archive.sha256,
+                "size_bytes": len(archive.payload),
+            }
+            payload["_attachment"] = attachment
+        if output_is_retired():
+            payload.pop("_attachment", None)
+            scrub_retired_output()
+        return payload
+
+    def _settled_replay(
+        self,
+        *,
+        actor: Any,
+        conversation_id: str,
+        job_id: str,
+        terminal_digest: str,
+    ) -> EngineerContinuationState:
+        with self.storage.transaction() as conn:
+            current = self.work_items.current_structural_state_in_transaction(
+                conn,
+                owner_id=actor.own_id,
+                tenant_id=actor.user_id,
+                conversation_id=conversation_id,
+                channel=EngineerWorkItemChannel.TELEGRAM,
+            )
+        if (
+            current is None
+            or current.command_job_id != job_id
+            or current.step_state is not EngineerWorkItemStepState.SETTLED
+            or current.terminal_receipt_sha256 != terminal_digest
+        ):
+            raise EngineerWorkItemCoordinatorError("engineer_work_item_race")
+        return current
+
+    def _observe_exact_job(
+        self,
+        continuation: EngineerContinuationState,
+        *,
+        actor: Any,
+        conversation_id: str,
+        include_attachment: bool,
+    ) -> dict[str, Any]:
+        job_id = continuation.command_job_id
+        if not job_id:
+            raise EngineerWorkItemCoordinatorError("command_admission_unproven")
+        progress = self.kernel.progress(
+            job_id,
+            actor_id=actor.own_id,
+            conversation_id=conversation_id,
+        )
+        if progress.status is CommandStatus.UNKNOWN:
+            try:
+                with self.storage.transaction() as conn:
+                    continuation = self.work_items.mark_unknown_in_transaction(
+                        conn,
+                        work_item_id=continuation.work_item_id,
+                        owner_id=actor.own_id,
+                        tenant_id=actor.user_id,
+                        conversation_id=conversation_id,
+                        channel=EngineerWorkItemChannel.TELEGRAM,
+                        expected_revision=continuation.revision,
+                    )
+            except EngineerWorkItemConflictError:
+                with self.storage.transaction() as conn:
+                    replay = self.work_items.current_structural_state_in_transaction(
+                        conn,
+                        owner_id=actor.own_id,
+                        tenant_id=actor.user_id,
+                        conversation_id=conversation_id,
+                        channel=EngineerWorkItemChannel.TELEGRAM,
+                    )
+                if (
+                    replay is None
+                    or replay.command_job_id != job_id
+                    or replay.step_state is not EngineerWorkItemStepState.UNKNOWN
+                ):
+                    raise
+                continuation = replay
+            return self._continuation_payload(
+                {"ok": True, **progress.to_public_payload()},
+                continuation,
+            )
+        if progress.status not in _PUBLISHABLE_TERMINAL:
+            with self.storage.transaction() as conn:
+                refreshed = self.work_items.current_structural_state_in_transaction(
+                    conn,
+                    owner_id=actor.own_id,
+                    tenant_id=actor.user_id,
+                    conversation_id=conversation_id,
+                    channel=EngineerWorkItemChannel.TELEGRAM,
+                )
+            if (
+                refreshed is None
+                or refreshed.work_item_id != continuation.work_item_id
+                or refreshed.revision != continuation.revision
+                or refreshed.command_job_id != job_id
+                or refreshed.step_state is not EngineerWorkItemStepState.ADMITTED
+                or refreshed.command_status is not progress.status
+            ):
+                raise EngineerWorkItemCoordinatorError("engineer_work_item_race")
+            continuation = refreshed
+            return self._continuation_payload(
+                {"ok": True, **progress.to_public_payload()},
+                continuation,
+            )
+        receipt, mac_version = self.kernel.terminal_receipt(
+            job_id,
+            actor_id=actor.own_id,
+            conversation_id=conversation_id,
+            timeout_sec=0.1,
+        )
+        terminal_digest = _verified_terminal_receipt_sha256(receipt, mac_version)
+        try:
+            with self.storage.transaction() as conn:
+                continuation = self.work_items.settle_verified_terminal_in_transaction(
+                    conn,
+                    work_item_id=continuation.work_item_id,
+                    owner_id=actor.own_id,
+                    tenant_id=actor.user_id,
+                    conversation_id=conversation_id,
+                    channel=EngineerWorkItemChannel.TELEGRAM,
+                    expected_revision=continuation.revision,
+                    verified_job_id=job_id,
+                    verified_terminal_receipt_sha256=terminal_digest,
+                )
+        except EngineerWorkItemConflictError:
+            continuation = self._settled_replay(
+                actor=actor,
+                conversation_id=conversation_id,
+                job_id=job_id,
+                terminal_digest=terminal_digest,
+            )
+        return self._continuation_payload(
+            self._terminal_payload(
+                receipt,
+                mac_version,
+                actor_id=actor.own_id,
+                conversation_id=conversation_id,
+                include_attachment=include_attachment,
+            ),
+            continuation,
+        )
+
+    def _reserve_command(
+        self,
+        reservation: EngineerCommandReservation,
+    ) -> EngineerAdmissionOutcome:
+        """Reserve only the current EWI step; a live non-terminal step owns the scope."""
+
+        source_binding = reservation.source.binding_sha256()
+        with self.storage.transaction() as conn:
+            expire_due_engineer_work_items_in_transaction(conn)
+            current = get_current_engineer_work_item_in_transaction(
+                conn,
+                owner_id=reservation.source.owner_id,
+                tenant_id=reservation.source.tenant_id,
+                conversation_id=reservation.source.conversation_id,
+                channel=reservation.source.channel,
+            )
+            if current is None:
+                return self.work_items.reserve_initial_in_transaction(
+                    conn,
+                    reservation=reservation,
+                )
+            if current.state is EngineerWorkItemState.WAITING_FOR_INPUT:
+                return self.work_items.reserve_next_in_transaction(
+                    conn,
+                    work_item_id=current.id,
+                    expected_revision=current.revision,
+                    reservation=reservation,
+                )
+            if (
+                current.current_step.source_binding_sha256 == source_binding
+                and current.current_step.idempotency_key == reservation.idempotency_key
+                and current.current_step.command_digest == reservation.command_digest
+            ):
+                return self.work_items.reconcile_admission_in_transaction(
+                    conn,
+                    work_item_id=current.id,
+                    owner_id=current.owner_id,
+                    tenant_id=current.tenant_id,
+                    conversation_id=current.conversation_id,
+                    channel=current.channel,
+                    expected_revision=current.revision,
+                    source=reservation.source,
+                )
+            raise EngineerWorkItemCoordinatorError("engineer_work_item_busy")
+
+    def _recover_prepared_source(
+        self,
+        conn: sqlite3.Connection,
+        *,
+        actor: Any,
+        conversation_id: str,
+        source_binding_sha256: str,
+    ) -> EngineerCommandSourceSlot:
+        """Recover one body-free source slot from authenticated local ingress rows."""
+
+        chat_id = str(getattr(actor, "identity_id", "") or "").strip()
+        if _PRIVATE_CHAT_ID.fullmatch(chat_id) is None:
+            raise EngineerWorkItemCoordinatorError("command_source_unavailable")
+        rows = conn.execute(
+            """SELECT id,content,metadata_json FROM messages
+                 WHERE user_id=? AND conversation_id=? AND role='user'
+                 ORDER BY rowid DESC""",
+            (actor.own_id, conversation_id),
+        )
+        matches: list[EngineerCommandSourceSlot] = []
+        for raw_row in rows:
+            row = dict(raw_row)
+            source_row_id = str(row.get("id") or "").strip()
+            telegram_update_id = _source_update_id(row)
+            if (
+                _MESSAGE_ID.fullmatch(source_row_id) is None
+                or _UPDATE_ID.fullmatch(telegram_update_id) is None
+            ):
+                continue
+            source_hash = hashlib.sha256(str(row.get("content") or "").encode("utf-8")).hexdigest()
+            for ordinal in range(1, ENGINEER_SOURCE_MAX_CALL_ORDINAL + 1):
+                step_material = (source_row_id + "\x00engineer-command-step\x00" + str(ordinal)).encode(
+                    "utf-8"
+                )
+                candidate = EngineerCommandSourceSlot(
+                    owner_id=actor.own_id,
+                    tenant_id=actor.user_id,
+                    conversation_id=conversation_id,
+                    channel=EngineerWorkItemChannel.TELEGRAM,
+                    source_row_id=source_row_id,
+                    source_step_id=("ecstep-" + hashlib.sha256(step_material).hexdigest()[:32]),
+                    source_hash=source_hash,
+                    telegram_update_id=telegram_update_id,
+                    delivery_chat_id=chat_id,
+                )
+                if candidate.binding_sha256() == source_binding_sha256:
+                    matches.append(candidate)
+        if len(matches) != 1:
+            raise EngineerWorkItemCoordinatorError("command_source_unavailable")
+        return matches[0]
+
+    def _reconcile_after_submit(
+        self,
+        reservation_outcome: EngineerAdmissionOutcome,
+        *,
+        actor: Any,
+        conversation_id: str,
+        source: EngineerCommandSourceSlot,
+        expected_job_id: str | None,
+        include_attachment: bool,
+    ) -> dict[str, Any] | None:
+        continuation = reservation_outcome.continuation
+        if continuation is None:
+            return None
+        with self.storage.transaction() as conn:
+            reconciled = self.work_items.reconcile_admission_in_transaction(
+                conn,
+                work_item_id=continuation.work_item_id,
+                owner_id=actor.own_id,
+                tenant_id=actor.user_id,
+                conversation_id=conversation_id,
+                channel=EngineerWorkItemChannel.TELEGRAM,
+                expected_revision=continuation.revision,
+                source=source,
+            )
+        if reconciled.disposition is EngineerCommandLedgerDisposition.FENCED:
+            if reconciled.continuation is None:
+                return None
+            return self._continuation_payload(
+                _refusal("idempotency_fenced"),
+                reconciled.continuation,
+            )
+        if reconciled.disposition is EngineerCommandLedgerDisposition.ABSENT:
+            if expected_job_id is not None:
+                raise EngineerWorkItemCoordinatorError("command_ledger_lost")
+            return None
+        exact = reconciled.continuation
+        if exact is None or exact.command_job_id is None:
+            raise EngineerWorkItemCoordinatorError("command_admission_unproven")
+        if expected_job_id is not None and exact.command_job_id != expected_job_id:
+            raise EngineerWorkItemCoordinatorError("command_ledger_inconsistent")
+        return self._observe_exact_job(
+            exact,
+            actor=actor,
+            conversation_id=conversation_id,
+            include_attachment=include_attachment,
+        )
+
+    def _retire_proven_unsubmitted(
+        self,
+        reservation_outcome: EngineerAdmissionOutcome,
+        *,
+        actor: Any,
+        conversation_id: str,
+        source: EngineerCommandSourceSlot,
+        error_code: str,
+        effect_boundary_crossed: bool,
+    ) -> dict[str, Any]:
+        continuation = reservation_outcome.continuation
+        if continuation is None:
+            return _refusal(error_code, effect_boundary_crossed=effect_boundary_crossed)
+        try:
+            observed = self._reconcile_after_submit(
+                reservation_outcome,
+                actor=actor,
+                conversation_id=conversation_id,
+                source=source,
+                expected_job_id=None,
+                include_attachment=False,
+            )
+            if observed is not None:
+                return observed
+            with self.storage.transaction() as conn:
+                retired = self.work_items.retire_proven_unsubmitted_in_transaction(
+                    conn,
+                    work_item_id=continuation.work_item_id,
+                    owner_id=actor.own_id,
+                    tenant_id=actor.user_id,
+                    conversation_id=conversation_id,
+                    channel=EngineerWorkItemChannel.TELEGRAM,
+                    expected_revision=continuation.revision,
+                    source=source,
+                )
+        except (CommandError, EngineerWorkItemConflictError, EngineerWorkItemCoordinatorError):
+            # A failed external observation never proves that submission did not
+            # occur. Leave PREPARED durable for the next exact reconciliation.
+            return _refusal(error_code, effect_boundary_crossed=effect_boundary_crossed)
+        payload = _refusal(error_code, effect_boundary_crossed=False)
+        if retired.continuation is not None:
+            return self._continuation_payload(payload, retired.continuation)
+        return payload
+
+    def resume_current(
+        self,
+        *,
+        actor: Any,
+        conversation_id: str,
+        cancel_requested: bool = False,
+    ) -> EngineerCommandResumeObservation | None:
+        """Observe one exact unfinished EWI on a fresh authenticated owner turn."""
+
+        conversation_id = str(conversation_id or "").strip()
+        capability = "engineer.command.manage"
+        if not conversation_id or self._fresh_owner_actor(actor, capability) is None:
+            return None
+        with self.storage.transaction() as conn:
+            expire_due_engineer_work_items_in_transaction(conn)
+            raw_current = get_current_engineer_work_item_in_transaction(
+                conn,
+                owner_id=actor.own_id,
+                tenant_id=actor.user_id,
+                conversation_id=conversation_id,
+                channel=EngineerWorkItemChannel.TELEGRAM,
+            )
+            if raw_current is None:
+                return None
+            current_source: EngineerCommandSourceSlot | None = None
+            try:
+                current = self.work_items.current_structural_state_in_transaction(
+                    conn,
+                    owner_id=actor.own_id,
+                    tenant_id=actor.user_id,
+                    conversation_id=conversation_id,
+                    channel=EngineerWorkItemChannel.TELEGRAM,
+                )
+            except EngineerWorkItemCoordinatorError as exc:
+                if (
+                    exc.code != "command_source_required"
+                    or raw_current.current_step.state is not EngineerWorkItemStepState.PREPARED
+                ):
+                    raise
+                current_source = self._recover_prepared_source(
+                    conn,
+                    actor=actor,
+                    conversation_id=conversation_id,
+                    source_binding_sha256=raw_current.current_step.source_binding_sha256,
+                )
+                current = self.work_items.current_structural_state_in_transaction(
+                    conn,
+                    owner_id=actor.own_id,
+                    tenant_id=actor.user_id,
+                    conversation_id=conversation_id,
+                    channel=EngineerWorkItemChannel.TELEGRAM,
+                    current_source=current_source,
+                )
+            assert current is not None
+            if (
+                current.step_state is EngineerWorkItemStepState.PREPARED
+                and current.ledger_disposition is EngineerCommandLedgerDisposition.ABSENT
+            ):
+                retired = self.work_items.retire_proven_unsubmitted_in_transaction(
+                    conn,
+                    work_item_id=current.work_item_id,
+                    owner_id=actor.own_id,
+                    tenant_id=actor.user_id,
+                    conversation_id=conversation_id,
+                    channel=EngineerWorkItemChannel.TELEGRAM,
+                    expected_revision=current.revision,
+                    source=current_source,
+                )
+                current = retired.continuation
+                if current is None:
+                    return None
+            elif current.step_state is EngineerWorkItemStepState.PREPARED:
+                reconciled = self.work_items.reconcile_admission_in_transaction(
+                    conn,
+                    work_item_id=current.work_item_id,
+                    owner_id=actor.own_id,
+                    tenant_id=actor.user_id,
+                    conversation_id=conversation_id,
+                    channel=EngineerWorkItemChannel.TELEGRAM,
+                    expected_revision=current.revision,
+                    source=current_source,
+                )
+                current = reconciled.continuation
+                if current is None:
+                    return None
+        if current.command_job_id is None:
+            raise EngineerWorkItemCoordinatorError("command_admission_unproven")
+        if cancel_requested and current.step_state is EngineerWorkItemStepState.ADMITTED:
+            self.kernel.cancel(
+                current.command_job_id,
+                actor_id=actor.own_id,
+                conversation_id=conversation_id,
+            )
+        payload = self._observe_exact_job(
+            current,
+            actor=actor,
+            conversation_id=conversation_id,
+            include_attachment=False,
+        )
+        if cancel_requested:
+            payload["cancel_requested"] = True
+        continuation = payload.pop(_ENGINEER_WORK_ITEM_CONTINUATION_CARRIER, None)
+        attachment = payload.pop("_attachment", None)
+        if type(continuation) is not EngineerContinuationState:
+            raise EngineerWorkItemCoordinatorError("engineer_continuation_invalid")
+        return EngineerCommandResumeObservation(
+            continuation=continuation,
+            payload=payload,
+            attachment=dict(attachment) if isinstance(attachment, Mapping) else None,
+        )
 
     def _retire_legacy_command_approvals(self) -> None:
         """Atomically make predecessor Engineer approval rows and pushes inert."""
@@ -416,34 +1182,7 @@ class EngineerCommandService:
             type(timeout_sec) is not int or not 1 <= timeout_sec <= _MAX_EXPLICIT_TIMEOUT_SEC
         ):
             return _refusal("invalid_request")
-        if (
-            self.authorization is None
-            or getattr(self.settings, "engineer_mode_enabled", False) is not True
-            or getattr(self.settings, "engineer_command_enabled", False) is not True
-        ):
-            return _refusal("authorization_denied")
-        user = self.storage.get_user(actor.own_id)
-        if not isinstance(user, Mapping) or str(user.get("status") or "") != "active":
-            return _refusal("authorization_denied")
-        try:
-            fresh_actor = self.authorization.actor_for_user(
-                actor.own_id,
-                source="engineer-command-service",
-                identity_id=chat_id,
-            )
-            linked_actor_id = self.storage.resolve_identity("telegram", chat_id)
-            if (
-                not fresh_actor.is_owner
-                or fresh_actor.own_id != actor.own_id
-                or fresh_actor.user_id != actor.user_id
-                or linked_actor_id != actor.own_id
-                or resolve_chat_id(self.storage, actor.own_id) != chat_id
-                or not may_push_to(self.settings, self.storage, actor.own_id, chat_id)
-            ):
-                return _refusal("authorization_denied")
-            self.authorization.require(fresh_actor, "engineer.use")
-            self.authorization.require(fresh_actor, "engineer.command.run")
-        except Exception:
+        if self._fresh_owner_actor(actor, "engineer.command.run") is None:
             return _refusal("authorization_denied")
         source_row = self.storage.get_message(source_message_id, actor.own_id)
         if (
@@ -459,6 +1198,10 @@ class EngineerCommandService:
             return _refusal("command_input_unavailable")
         input_batch: AuthorizedCurrentMessageUploadBatch | None = None
         input_manifest = EMPTY_INPUT_MANIFEST
+        reservation: EngineerCommandReservation | None = None
+        reservation_outcome: EngineerAdmissionOutcome | None = None
+        admitted_continuation: EngineerContinuationState | None = None
+        submitted_job_id: str | None = None
         try:
             if uploaded_raw_ids:
                 input_batch = authorize_current_message_upload_batch(
@@ -496,14 +1239,9 @@ class EngineerCommandService:
                 source_row_id=source_message_id,
                 source_hash=hashlib.sha256(source_text.encode("utf-8")).hexdigest(),
                 telegram_update_id=telegram_update_id,
+                source_step_id=step_id,
                 isolation_profile=IsolationProfile.HOST_USER,
                 idempotency_key=request.idempotency_key,
-            )
-            grant = _issue_autonomous_grant(
-                self.kernel.authority,
-                request,
-                source=owner_source,
-                now=int(time.time()),
             )
             spawn_input_batch = input_batch
             if input_batch is not None:
@@ -517,6 +1255,47 @@ class EngineerCommandService:
                 )
                 if _input_manifest(spawn_input_batch) != input_manifest:
                     raise CommandError("command_input_identity_changed")
+            reservation = EngineerCommandReservation(
+                source=EngineerCommandSourceSlot(
+                    owner_id=actor.own_id,
+                    tenant_id=actor.user_id,
+                    conversation_id=conversation_id,
+                    channel=EngineerWorkItemChannel.TELEGRAM,
+                    source_row_id=source_message_id,
+                    source_step_id=step_id,
+                    source_hash=owner_source.source_hash,
+                    telegram_update_id=telegram_update_id,
+                    delivery_chat_id=chat_id,
+                ),
+                idempotency_key=request.idempotency_key,
+                command_digest=request.digest,
+            )
+            reservation_outcome = self._reserve_command(reservation)
+            if reservation_outcome.disposition is EngineerCommandLedgerDisposition.EXACT:
+                continuation = reservation_outcome.continuation
+                if continuation is None:
+                    raise EngineerWorkItemCoordinatorError("command_admission_unproven")
+                admitted_continuation = continuation
+                return self._observe_exact_job(
+                    continuation,
+                    actor=actor,
+                    conversation_id=conversation_id,
+                    include_attachment=False,
+                )
+            if not reservation_outcome.can_submit:
+                payload = _refusal("idempotency_fenced")
+                if reservation_outcome.continuation is not None:
+                    return self._continuation_payload(payload, reservation_outcome.continuation)
+                return payload
+            reserved_continuation = reservation_outcome.continuation
+            if reserved_continuation is None:
+                raise EngineerWorkItemCoordinatorError("command_admission_unproven")
+            grant = _issue_autonomous_grant(
+                self.kernel.authority,
+                request,
+                source=owner_source,
+                now=int(time.time()),
+            )
             job_id = _submit_autonomous_request(
                 self.kernel,
                 request,
@@ -526,6 +1305,26 @@ class EngineerCommandService:
                 input_manifest=input_manifest,
                 input_batch=spawn_input_batch,
             )
+            submitted_job_id = job_id
+            with self.storage.transaction() as conn:
+                reconciled = self.work_items.reconcile_admission_in_transaction(
+                    conn,
+                    work_item_id=reserved_continuation.work_item_id,
+                    owner_id=actor.own_id,
+                    tenant_id=actor.user_id,
+                    conversation_id=conversation_id,
+                    channel=EngineerWorkItemChannel.TELEGRAM,
+                    expected_revision=reserved_continuation.revision,
+                    source=reservation.source,
+                )
+            continuation = reconciled.continuation
+            if (
+                reconciled.disposition is not EngineerCommandLedgerDisposition.EXACT
+                or continuation is None
+                or continuation.command_job_id != job_id
+            ):
+                raise EngineerWorkItemCoordinatorError("command_admission_unproven")
+            admitted_continuation = continuation
             try:
                 self.kernel.wait(
                     job_id,
@@ -536,56 +1335,75 @@ class EngineerCommandService:
             except CommandError as exc:
                 if exc.code != "wait_timeout":
                     raise
-            progress = self.kernel.progress(
-                job_id,
-                actor_id=actor.own_id,
+            return self._observe_exact_job(
+                continuation,
+                actor=actor,
                 conversation_id=conversation_id,
-            )
-            if progress.status not in _TERMINAL:
-                return {"ok": True, **progress.to_public_payload()}
-            receipt, receipt_mac_version = self.kernel.terminal_receipt(
-                job_id,
-                actor_id=actor.own_id,
-                conversation_id=conversation_id,
-                timeout_sec=0.1,
+                include_attachment=False,
             )
         except CommandError as exc:
+            if admitted_continuation is not None:
+                return self._continuation_payload(
+                    _refusal(exc.code, effect_boundary_crossed=True),
+                    admitted_continuation,
+                )
+            if submitted_job_id is not None or (
+                reservation_outcome is not None
+                and reservation_outcome.disposition is EngineerCommandLedgerDisposition.EXACT
+            ):
+                return _refusal(exc.code, effect_boundary_crossed=True)
+            if reservation_outcome is not None and reservation is not None:
+                return self._retire_proven_unsubmitted(
+                    reservation_outcome,
+                    actor=actor,
+                    conversation_id=conversation_id,
+                    source=reservation.source,
+                    error_code=exc.code,
+                    effect_boundary_crossed=exc.code in _UNCERTAIN_SUBMIT_ERRORS,
+                )
             return _refusal(
                 exc.code,
                 effect_boundary_crossed=exc.code in _UNCERTAIN_SUBMIT_ERRORS,
             )
         except FileRecordUnavailable:
+            if reservation_outcome is not None and reservation is not None:
+                return self._retire_proven_unsubmitted(
+                    reservation_outcome,
+                    actor=actor,
+                    conversation_id=conversation_id,
+                    source=reservation.source,
+                    error_code="command_input_unavailable",
+                    effect_boundary_crossed=False,
+                )
             return _refusal("command_input_unavailable")
-        public_receipt = receipt.to_public_payload()
-        if receipt_mac_version < 2:
-            public_receipt.pop("generated_files_sha256", None)
-        public_receipt["mac_version"] = receipt_mac_version
-        public_receipt["generated_files_authenticated"] = receipt_mac_version >= 2
-        return {
-            "exit_code": receipt.exit_code,
-            "generated_files": (
-                [
-                    {
-                        "mode": item.mode,
-                        "relative_path": item.relative_path,
-                        "sha256": item.sha256,
-                        "size_bytes": item.size_bytes,
-                    }
-                    for item in receipt.generated_files
-                ]
-                if receipt_mac_version >= 2
-                else []
-            ),
-            "job_id": receipt.job_id,
-            "ok": True,
-            "receipt": public_receipt,
-            "signal": receipt.signal,
-            "status": receipt.status.value,
-            "stderr": _safe_output(receipt.stderr),
-            "stderr_display_truncated": len(receipt.stderr) > _DISPLAY_BYTES,
-            "stdout": _safe_output(receipt.stdout),
-            "stdout_display_truncated": len(receipt.stdout) > _DISPLAY_BYTES,
-        }
+        except (EngineerWorkItemConflictError, EngineerWorkItemCoordinatorError) as exc:
+            code = str(getattr(exc, "code", "engineer_work_item_conflict"))
+            if admitted_continuation is not None:
+                return self._continuation_payload(
+                    _refusal(code, effect_boundary_crossed=True),
+                    admitted_continuation,
+                )
+            if submitted_job_id is not None and reservation_outcome is not None and reservation is not None:
+                try:
+                    observed = self._reconcile_after_submit(
+                        reservation_outcome,
+                        actor=actor,
+                        conversation_id=conversation_id,
+                        source=reservation.source,
+                        expected_job_id=submitted_job_id,
+                        include_attachment=False,
+                    )
+                except (
+                    CommandError,
+                    EngineerWorkItemConflictError,
+                    EngineerWorkItemCoordinatorError,
+                ):
+                    payload = _refusal(code, effect_boundary_crossed=True)
+                    payload.update({"job_id": submitted_job_id, "status": "unknown"})
+                    return payload
+                if observed is not None:
+                    return observed
+            return _refusal(code, effect_boundary_crossed=submitted_job_id is not None)
 
     def status(
         self,
@@ -600,6 +1418,43 @@ class EngineerCommandService:
         if not conversation_id:
             return _refusal("conversation_required")
         try:
+            if type(getattr(self, "work_items", None)) is EngineerWorkItemRuntimeCoordinator:
+                with self.storage.transaction() as conn:
+                    current = self.work_items.current_structural_state_in_transaction(
+                        conn,
+                        owner_id=actor.own_id,
+                        tenant_id=actor.user_id,
+                        conversation_id=conversation_id,
+                        channel=EngineerWorkItemChannel.TELEGRAM,
+                    )
+                    if current is not None and current.step_state is EngineerWorkItemStepState.PREPARED:
+                        reconciled = self.work_items.reconcile_admission_in_transaction(
+                            conn,
+                            work_item_id=current.work_item_id,
+                            owner_id=actor.own_id,
+                            tenant_id=actor.user_id,
+                            conversation_id=conversation_id,
+                            channel=EngineerWorkItemChannel.TELEGRAM,
+                            expected_revision=current.revision,
+                        )
+                        current = reconciled.continuation
+                if current is not None:
+                    if current.command_job_id is None:
+                        return self._continuation_payload(
+                            _refusal("command_admission_unproven"),
+                            current,
+                        )
+                    if job_id is not None and str(job_id) != current.command_job_id:
+                        return self._continuation_payload(
+                            _refusal("engineer_work_item_job_mismatch"),
+                            current,
+                        )
+                    return self._observe_exact_job(
+                        current,
+                        actor=actor,
+                        conversation_id=conversation_id,
+                        include_attachment=False,
+                    )
             resolved_job_id = self.kernel.resolve_job_reference(
                 job_id,
                 actor_id=actor.own_id,
@@ -737,9 +1592,15 @@ class EngineerCommandService:
                     "available": False,
                     "error_code": "job_output_unpublishable",
                 }
-            return payload
+            return self._historical_observation_payload(
+                payload,
+                actor=actor,
+                conversation_id=conversation_id,
+            )
         except CommandError as exc:
             return _refusal(exc.code)
+        except (EngineerWorkItemConflictError, EngineerWorkItemCoordinatorError) as exc:
+            return _refusal(str(getattr(exc, "code", "engineer_work_item_conflict")))
         except (KeyError, OSError, TypeError, ValueError, OverflowError, sqlite3.Error):
             return _refusal("corrupt_job_state")
 
@@ -756,6 +1617,51 @@ class EngineerCommandService:
         if not conversation_id:
             return _refusal("conversation_required")
         try:
+            if type(getattr(self, "work_items", None)) is EngineerWorkItemRuntimeCoordinator:
+                with self.storage.transaction() as conn:
+                    current = self.work_items.current_structural_state_in_transaction(
+                        conn,
+                        owner_id=actor.own_id,
+                        tenant_id=actor.user_id,
+                        conversation_id=conversation_id,
+                        channel=EngineerWorkItemChannel.TELEGRAM,
+                    )
+                    if current is not None and current.step_state is EngineerWorkItemStepState.PREPARED:
+                        reconciled = self.work_items.reconcile_admission_in_transaction(
+                            conn,
+                            work_item_id=current.work_item_id,
+                            owner_id=actor.own_id,
+                            tenant_id=actor.user_id,
+                            conversation_id=conversation_id,
+                            channel=EngineerWorkItemChannel.TELEGRAM,
+                            expected_revision=current.revision,
+                        )
+                        current = reconciled.continuation
+                if current is not None:
+                    if current.command_job_id is None:
+                        return self._continuation_payload(
+                            _refusal("command_admission_unproven"),
+                            current,
+                        )
+                    if job_id is not None and str(job_id) != current.command_job_id:
+                        return self._continuation_payload(
+                            _refusal("engineer_work_item_job_mismatch"),
+                            current,
+                        )
+                    if current.step_state is EngineerWorkItemStepState.ADMITTED:
+                        self.kernel.cancel(
+                            current.command_job_id,
+                            actor_id=actor.own_id,
+                            conversation_id=conversation_id,
+                        )
+                    payload = self._observe_exact_job(
+                        current,
+                        actor=actor,
+                        conversation_id=conversation_id,
+                        include_attachment=False,
+                    )
+                    payload["cancel_requested"] = True
+                    return payload
             resolved_job_id = self.kernel.cancel_reference(
                 job_id,
                 actor_id=actor.own_id,
@@ -770,9 +1676,15 @@ class EngineerCommandService:
             )
         except CommandError as exc:
             return _refusal(exc.code)
+        except (EngineerWorkItemConflictError, EngineerWorkItemCoordinatorError) as exc:
+            return _refusal(str(getattr(exc, "code", "engineer_work_item_conflict")))
         except (KeyError, OSError, TypeError, ValueError, OverflowError, sqlite3.Error):
             return _refusal("corrupt_job_state")
-        return {"ok": True, "cancel_requested": True, **progress.to_public_payload()}
+        return self._historical_observation_payload(
+            {"ok": True, "cancel_requested": True, **progress.to_public_payload()},
+            actor=actor,
+            conversation_id=conversation_id,
+        )
 
     def _fresh_terminal_actor(self, job: Mapping[str, Any]) -> Any | None:
         """Rebuild exact owner authority immediately before outbound staging."""
@@ -867,6 +1779,31 @@ class EngineerCommandService:
                 job_id=str(job.get("job_id") or ""),
             )
 
+    def _progress_scope_is_live(self, job: Mapping[str, Any]) -> bool:
+        row = self.storage.execute(
+            """SELECT 1 FROM conversations
+                 WHERE id=? AND user_id=? AND is_archived=0""",
+            (
+                str(job.get("conversation_id") or ""),
+                str(job.get("actor_id") or ""),
+            ),
+        ).fetchone()
+        return row is not None
+
+    def _finish_inactive_progress_scope(
+        self,
+        job: Mapping[str, Any],
+        *,
+        retired_at: float,
+    ) -> None:
+        self._retire_progress_scope(job)
+        self.kernel.store.retire_progress_for_inactive_scope(
+            str(job.get("job_id") or ""),
+            actor_id=str(job.get("actor_id") or ""),
+            conversation_id=str(job.get("conversation_id") or ""),
+            retired_at=retired_at,
+        )
+
     def _reconcile_stale_progress(self, *, now: float, limit: int) -> tuple[int, int]:
         retired = 0
         failed = 0
@@ -950,6 +1887,7 @@ class EngineerCommandService:
                 now=moment,
                 limit=bounded,
             ):
+                job_id = str(job.get("job_id") or "")
                 due = self._due_progress_checkpoint(
                     now=moment,
                     started_at=job.get("started_at"),
@@ -964,6 +1902,35 @@ class EngineerCommandService:
                         )
                     failed += 1
                     continue
+                try:
+                    if not self._progress_scope_is_live(job):
+                        self._finish_inactive_progress_scope(job, retired_at=moment)
+                        retired += 1
+                        continue
+                except (
+                    CommandError,
+                    ProgressDeliveryError,
+                    KeyError,
+                    OSError,
+                    TypeError,
+                    ValueError,
+                    OverflowError,
+                    sqlite3.Error,
+                ) as exc:
+                    with suppress(
+                        CommandError,
+                        TypeError,
+                        ValueError,
+                        OverflowError,
+                        sqlite3.Error,
+                    ):
+                        self.kernel.store.record_progress_publication_failure(
+                            job_id,
+                            error_code=str(getattr(exc, "code", "progress_retirement_failed")),
+                            failed_at=moment,
+                        )
+                    failed += 1
+                    continue
                 actor = self._fresh_progress_actor(job)
                 if actor is None:
                     with suppress(CommandError, TypeError, ValueError, OverflowError, sqlite3.Error):
@@ -974,7 +1941,6 @@ class EngineerCommandService:
                         )
                     failed += 1
                     continue
-                job_id = str(job.get("job_id") or "")
                 try:
                     progress = self.kernel.progress(
                         job_id,
@@ -1013,9 +1979,57 @@ class EngineerCommandService:
                         staged += 1
                     else:
                         self._retire_progress_scope(job)
+                except ProgressDeliveryError as exc:
+                    if exc.code == "progress_scope_inactive":
+                        try:
+                            self._finish_inactive_progress_scope(job, retired_at=moment)
+                        except (
+                            CommandError,
+                            ProgressDeliveryError,
+                            KeyError,
+                            OSError,
+                            TypeError,
+                            ValueError,
+                            OverflowError,
+                            sqlite3.Error,
+                        ) as retirement_exc:
+                            with suppress(
+                                CommandError,
+                                TypeError,
+                                ValueError,
+                                OverflowError,
+                                sqlite3.Error,
+                            ):
+                                self.kernel.store.record_progress_publication_failure(
+                                    job_id,
+                                    error_code=str(
+                                        getattr(
+                                            retirement_exc,
+                                            "code",
+                                            "progress_retirement_failed",
+                                        )
+                                    ),
+                                    failed_at=moment,
+                                )
+                            failed += 1
+                        else:
+                            retired += 1
+                        continue
+                    with suppress(
+                        CommandError,
+                        TypeError,
+                        ValueError,
+                        OverflowError,
+                        sqlite3.Error,
+                    ):
+                        self.kernel.store.record_progress_publication_failure(
+                            job_id,
+                            error_code=exc.code,
+                            failed_at=moment,
+                        )
+                    failed += 1
                 except (
                     CommandError,
-                    ProgressDeliveryError,
                     KeyError,
                     OSError,
                     TypeError,
@@ -1070,6 +2084,223 @@ class EngineerCommandService:
                 continue
         return changed
 
+    def _mark_unknown_work_item_for_publication(self, job: Mapping[str, Any]) -> None:
+        """Reconcile only the current exact source to UNKNOWN; never submit work."""
+
+        job_id = str(job.get("job_id") or "")
+        owner_id = str(job.get("actor_id") or "")
+        tenant_id = str(job.get("tenant_id") or "")
+        conversation_id = str(job.get("conversation_id") or "")
+        if str(job.get("status") or "") != CommandStatus.UNKNOWN.value:
+            raise TerminalDeliveryError("unknown_identity_invalid")
+        try:
+            channel = EngineerWorkItemChannel(str(job.get("channel") or ""))
+            source = EngineerCommandSourceSlot(
+                owner_id=owner_id,
+                tenant_id=tenant_id,
+                conversation_id=conversation_id,
+                channel=channel,
+                source_row_id=str(job.get("source_row_id") or ""),
+                source_step_id=str(job.get("source_step_id") or ""),
+                source_hash=str(job.get("source_hash") or ""),
+                telegram_update_id=str(job.get("telegram_update_id") or ""),
+                delivery_chat_id=str(job.get("delivery_chat_id") or ""),
+            )
+        except (TypeError, ValueError) as exc:
+            raise TerminalDeliveryError("unknown_identity_invalid") from exc
+        source_binding_sha256 = source.binding_sha256()
+        if not hmac.compare_digest(
+            source_binding_sha256,
+            str(job.get("source_binding_sha256") or ""),
+        ):
+            raise TerminalDeliveryError("unknown_identity_invalid")
+
+        def current_main_source_matches(conn: sqlite3.Connection) -> bool:
+            item = get_current_engineer_work_item_in_transaction(
+                conn,
+                owner_id=owner_id,
+                tenant_id=tenant_id,
+                conversation_id=conversation_id,
+                channel=channel,
+            )
+            return bool(
+                item is not None
+                and hmac.compare_digest(
+                    item.current_step.source_binding_sha256,
+                    source_binding_sha256,
+                )
+            )
+
+        def exact_current(current: EngineerContinuationState | None) -> bool:
+            return bool(
+                current is not None
+                and current.command_job_id == job_id
+                and current.command_status is CommandStatus.UNKNOWN
+            )
+
+        try:
+            with self.storage.transaction() as conn:
+                if not current_main_source_matches(conn):
+                    return
+                current = self.work_items.current_structural_state_in_transaction(
+                    conn,
+                    owner_id=owner_id,
+                    tenant_id=tenant_id,
+                    conversation_id=conversation_id,
+                    channel=channel,
+                    current_source=source,
+                )
+                if not exact_current(current):
+                    return
+                assert current is not None
+                if current.step_state in {
+                    EngineerWorkItemStepState.UNKNOWN,
+                    EngineerWorkItemStepState.SETTLED,
+                }:
+                    return
+                self.work_items.mark_unknown_in_transaction(
+                    conn,
+                    work_item_id=current.work_item_id,
+                    owner_id=owner_id,
+                    tenant_id=tenant_id,
+                    conversation_id=conversation_id,
+                    channel=channel,
+                    expected_revision=current.revision,
+                    source=source,
+                )
+                return
+        except (EngineerWorkItemConflictError, EngineerWorkItemCoordinatorError):
+            with self.storage.transaction() as conn:
+                if not current_main_source_matches(conn):
+                    return
+                replay = self.work_items.current_structural_state_in_transaction(
+                    conn,
+                    owner_id=owner_id,
+                    tenant_id=tenant_id,
+                    conversation_id=conversation_id,
+                    channel=channel,
+                    current_source=source,
+                )
+            if not exact_current(replay):
+                return
+            if replay is not None and replay.step_state is EngineerWorkItemStepState.UNKNOWN:
+                return
+            raise
+
+    def _settle_terminal_work_item_for_publication(
+        self,
+        job: Mapping[str, Any],
+        receipt: CommandReceipt,
+        mac_version: int,
+    ) -> None:
+        """Settle only the current EWI exactly bound to this immutable terminal job."""
+
+        job_id = str(job.get("job_id") or "")
+        owner_id = str(job.get("actor_id") or "")
+        tenant_id = str(job.get("tenant_id") or "")
+        conversation_id = str(job.get("conversation_id") or "")
+        try:
+            channel = EngineerWorkItemChannel(str(job.get("channel") or ""))
+            source = EngineerCommandSourceSlot(
+                owner_id=owner_id,
+                tenant_id=tenant_id,
+                conversation_id=conversation_id,
+                channel=channel,
+                source_row_id=str(job.get("source_row_id") or ""),
+                source_step_id=str(job.get("source_step_id") or ""),
+                source_hash=str(job.get("source_hash") or ""),
+                telegram_update_id=str(job.get("telegram_update_id") or ""),
+                delivery_chat_id=str(job.get("delivery_chat_id") or ""),
+            )
+        except (TypeError, ValueError):
+            # An unprojectable legacy/malformed source cannot prove ownership
+            # of any current EWI and therefore cannot suppress job delivery.
+            return
+        terminal_digest = _verified_terminal_receipt_sha256(receipt, mac_version)
+        source_binding_sha256 = source.binding_sha256()
+
+        def current_main_source_matches(conn: sqlite3.Connection) -> bool:
+            """Reject an unrelated replacement before source-aware ledger reads."""
+
+            item = get_current_engineer_work_item_in_transaction(
+                conn,
+                owner_id=owner_id,
+                tenant_id=tenant_id,
+                conversation_id=conversation_id,
+                channel=channel,
+            )
+            return bool(
+                item is not None
+                and hmac.compare_digest(
+                    item.current_step.source_binding_sha256,
+                    source_binding_sha256,
+                )
+            )
+
+        def exact_current(current: EngineerContinuationState | None) -> bool:
+            return bool(
+                current is not None
+                and current.command_job_id == job_id
+                and current.command_status is receipt.status
+            )
+
+        try:
+            with self.storage.transaction() as conn:
+                if not current_main_source_matches(conn):
+                    return
+                current = self.work_items.current_structural_state_in_transaction(
+                    conn,
+                    owner_id=owner_id,
+                    tenant_id=tenant_id,
+                    conversation_id=conversation_id,
+                    channel=channel,
+                    current_source=source,
+                )
+                # A terminal carrier belongs to the immutable command ledger,
+                # not to whichever Work Item happens to be current now.
+                if not exact_current(current):
+                    return
+                assert current is not None
+                if current.step_state is EngineerWorkItemStepState.SETTLED:
+                    # A conflicting main-ledger digest cannot suppress delivery.
+                    return
+                self.work_items.settle_verified_terminal_in_transaction(
+                    conn,
+                    work_item_id=current.work_item_id,
+                    owner_id=owner_id,
+                    tenant_id=tenant_id,
+                    conversation_id=conversation_id,
+                    channel=channel,
+                    expected_revision=current.revision,
+                    verified_job_id=job_id,
+                    verified_terminal_receipt_sha256=terminal_digest,
+                    source=source,
+                )
+                return
+        except (EngineerWorkItemConflictError, EngineerWorkItemCoordinatorError):
+            # Resolve the CAS window in a new transaction. A replacement/closed
+            # EWI never owns authority to hold back this exact command result.
+            with self.storage.transaction() as conn:
+                if not current_main_source_matches(conn):
+                    return
+                replay = self.work_items.current_structural_state_in_transaction(
+                    conn,
+                    owner_id=owner_id,
+                    tenant_id=tenant_id,
+                    conversation_id=conversation_id,
+                    channel=channel,
+                    current_source=source,
+                )
+            if not exact_current(replay):
+                return
+            if (
+                replay is not None
+                and replay.step_state is EngineerWorkItemStepState.SETTLED
+                and hmac.compare_digest(replay.terminal_receipt_sha256, terminal_digest)
+            ):
+                return
+            raise
+
     def publish_terminal_jobs(self, *, limit: int = 20) -> dict[str, int]:
         """Stage terminal notices without a model turn and reconcile bridge ACKs."""
 
@@ -1081,16 +2312,33 @@ class EngineerCommandService:
             reconciled = self._reconcile_staged_publications()
             for job in self.kernel.store.list_terminal_publication_candidates(limit=limit):
                 job_id = str(job.get("job_id") or "")
-                actor = self._fresh_progress_actor(job)
-                if actor is None:
-                    with suppress(CommandError):
-                        self.kernel.store.record_publication_attempt(job_id, "authorization_denied")
-                    failed += 1
-                    continue
                 try:
+                    if str(job.get("status") or "") == CommandStatus.UNKNOWN.value:
+                        self._mark_unknown_work_item_for_publication(job)
+                        actor = self._fresh_progress_actor(job)
+                        if actor is None:
+                            raise TerminalDeliveryError("terminal_authorization_changed")
+                        publication = stage_unknown_notification(
+                            self.storage,
+                            actor_id=actor.own_id,
+                            tenant_id=actor.user_id,
+                            conversation_id=str(job.get("conversation_id") or ""),
+                            source_message_id=str(job.get("source_row_id") or ""),
+                            delivery_chat_id=str(job.get("delivery_chat_id") or ""),
+                            job_id=job_id,
+                            source_binding_sha256=str(job.get("source_binding_sha256") or ""),
+                        )
+                        self.kernel.store.stage_publication(
+                            job_id,
+                            notification_id=publication.notification_id,
+                            dedup_key=publication.dedup_key,
+                            envelope_sha256=publication.envelope_sha256,
+                        )
+                        staged += 1
+                        continue
                     receipt, mac_version = self.kernel.terminal_receipt(
                         job_id,
-                        actor_id=actor.own_id,
+                        actor_id=str(job.get("actor_id") or ""),
                         conversation_id=str(job.get("conversation_id") or ""),
                         timeout_sec=0.1,
                     )
@@ -1100,13 +2348,17 @@ class EngineerCommandService:
                         or receipt.status not in _PUBLISHABLE_TERMINAL
                     ):
                         raise TerminalDeliveryError("terminal_receipt_unpublishable")
+                    self._settle_terminal_work_item_for_publication(job, receipt, mac_version)
+                    actor = self._fresh_progress_actor(job)
+                    if actor is None:
+                        raise TerminalDeliveryError("terminal_authorization_changed")
                     if not receipt.generated_files:
                         # A durable job must always close the loop for its owner.
                         # Deliver bounded stdout/stderr as one text result; an
                         # empty ZIP is still forbidden when no generated files
-                        # exist.  Queue staging precedes ledger suppression so a
-                        # crash can only replay the exact deduplicated carrier.
-                        stage_terminal_text(
+                        # exist. Queue staging precedes exact external-ledger
+                        # binding so a crash can only replay the same carrier.
+                        publication = stage_terminal_text(
                             self.storage,
                             actor_id=actor.own_id,
                             tenant_id=actor.user_id,
@@ -1115,7 +2367,12 @@ class EngineerCommandService:
                             delivery_chat_id=str(job.get("delivery_chat_id") or ""),
                             receipt=receipt,
                         )
-                        self.kernel.store.suppress_empty_publication(job_id)
+                        self.kernel.store.stage_publication(
+                            job_id,
+                            notification_id=publication.notification_id,
+                            dedup_key=publication.dedup_key,
+                            envelope_sha256=publication.envelope_sha256,
+                        )
                         staged += 1
                         continue
                     actor = self._fresh_terminal_actor(job)
@@ -1168,7 +2425,11 @@ class EngineerCommandService:
                 ) as exc:
                     error_code = getattr(exc, "code", "terminal_publication_failed")
                     with suppress(CommandError):
-                        self.kernel.store.record_publication_attempt(job_id, str(error_code))
+                        self.kernel.store.record_publication_attempt(
+                            job_id,
+                            str(error_code),
+                            permanent=str(error_code) in _PERMANENT_PUBLICATION_ERRORS,
+                        )
                     failed += 1
             reconciled += self._reconcile_staged_publications()
             return {"staged": staged, "reconciled": reconciled, "failed": failed}
@@ -1210,14 +2471,28 @@ class EngineerCommandService:
             body_sha256 = hashlib.sha256(body.encode("ascii")).hexdigest()
         except UnicodeEncodeError as exc:
             raise TerminalDeliveryError("terminal_envelope_invalid") from exc
-        envelope = parse_terminal_envelope(body)
+        publication_dedup_key = str(job.get("publication_dedup_key") or "")
+        if publication_dedup_key.startswith("engineer-terminal:archive:"):
+            expected_kind = TERMINAL_NOTIFICATION_KIND
+            envelope = parse_terminal_envelope(body)
+        elif publication_dedup_key.startswith("engineer-terminal:text:"):
+            expected_kind = TERMINAL_TEXT_NOTIFICATION_KIND
+            envelope = parse_terminal_text_envelope(body)
+            terminal_text_notification_projection(
+                self.storage,
+                exact,
+                tenant_id=str(job.get("tenant_id") or ""),
+                actor_id=str(job.get("actor_id") or ""),
+            )
+        else:
+            raise TerminalDeliveryError("terminal_retention_identity_changed")
         if (
             exact.get("status") != "sent"
-            or exact.get("kind") != "engineer_command_terminal"
+            or exact.get("kind") != expected_kind
             or str(exact.get("id") or "") != notification_id
             or str(exact.get("user_id") or "") != str(job.get("actor_id") or "")
             or str(exact.get("chat_id") or "") != str(job.get("delivery_chat_id") or "")
-            or str(exact.get("dedup_key") or "") != str(job.get("publication_dedup_key") or "")
+            or str(exact.get("dedup_key") or "") != publication_dedup_key
             or not hmac.compare_digest(
                 body_sha256,
                 str(job.get("envelope_sha256") or ""),
@@ -1237,6 +2512,9 @@ class EngineerCommandService:
         return exact
 
     def _delete_exact_sent_notification(self, row: Mapping[str, Any]) -> None:
+        kind = str(row.get("kind") or "")
+        if kind not in {TERMINAL_NOTIFICATION_KIND, TERMINAL_TEXT_NOTIFICATION_KIND}:
+            raise TerminalDeliveryError("terminal_notification_changed")
         with self.storage.transaction() as conn:
             current = conn.execute(
                 """SELECT n.id,n.user_id,n.chat_id,n.kind,n.dedup_key,n.body,n.status,n.sent_at
@@ -1248,12 +2526,13 @@ class EngineerCommandService:
             cursor = conn.execute(
                 """DELETE FROM outbound_notifications
                     WHERE id=? AND user_id=? AND chat_id=?
-                      AND kind='engineer_command_terminal' AND status='sent'
+                      AND kind=? AND status='sent'
                       AND dedup_key=? AND body=? AND sent_at IS ?""",
                 (
                     str(row.get("id") or ""),
                     str(row.get("user_id") or ""),
                     str(row.get("chat_id") or ""),
+                    kind,
                     str(row.get("dedup_key") or ""),
                     str(row.get("body") or ""),
                     row.get("sent_at"),
@@ -1261,6 +2540,17 @@ class EngineerCommandService:
             )
             if cursor.rowcount != 1:
                 raise TerminalDeliveryError("terminal_notification_changed")
+
+    def _assert_sent_retention_row_unchanged(self, row: Mapping[str, Any]) -> None:
+        """Re-read the exact carrier after every fallible retention verifier."""
+
+        fresh = self.storage.execute(
+            """SELECT n.id,n.user_id,n.chat_id,n.kind,n.dedup_key,n.body,n.status,n.sent_at
+                  FROM outbound_notifications AS n WHERE n.id=?""",
+            (str(row.get("id") or ""),),
+        ).fetchone()
+        if fresh is None or dict(fresh) != dict(row):
+            raise TerminalDeliveryError("terminal_notification_changed")
 
     def _evict_archive_cache(self, job_id: str) -> None:
         with self._archive_lock:
@@ -1291,6 +2581,18 @@ class EngineerCommandService:
                 now=int(moment),
                 limit=100,
             )
+            current_instant = datetime.fromtimestamp(moment, tz=UTC)
+            with self.storage.transaction() as conn:
+                expire_due_engineer_work_items_in_transaction(
+                    conn,
+                    now=current_instant.isoformat(timespec="seconds"),
+                )
+                prune_engineer_work_items_in_transaction(
+                    conn,
+                    before=(current_instant - timedelta(days=ENGINEER_WORK_ITEM_RETENTION_DAYS)).isoformat(
+                        timespec="seconds"
+                    ),
+                )
             candidates = self.kernel.store.list_workspace_retention_candidates(
                 cutoff=cutoff,
                 now=moment,
@@ -1300,18 +2602,10 @@ class EngineerCommandService:
                 job_id = str(job.get("job_id") or "")
                 try:
                     marker = job.get("workspace_retired_at")
-                    suppressed = bool(
-                        str(job.get("publication_state") or "") == "blocked"
-                        and str(job.get("publication_error_code") or "") == "no_generated_files"
-                    )
-                    row = (
-                        None
-                        if suppressed
-                        else self._exact_sent_retention_row(
-                            job,
-                            cutoff=cutoff,
-                            missing_after_marker=marker is not None,
-                        )
+                    row = self._exact_sent_retention_row(
+                        job,
+                        cutoff=cutoff,
+                        missing_after_marker=marker is not None,
                     )
                     if marker is None:
                         receipt, _outputs = self.kernel.terminal_result_for_retention(
@@ -1323,19 +2617,9 @@ class EngineerCommandService:
                             job.get("receipt_mac") or ""
                         ):
                             raise TerminalDeliveryError("terminal_retention_identity_changed")
-                        if suppressed:
-                            if receipt.generated_files or _outputs:
-                                raise TerminalDeliveryError("suppressed_artifact_identity_changed")
-                            self.kernel.store.mark_suppressed_workspace_retirement(
-                                job_id,
-                                cutoff=cutoff,
-                                retired_at=moment,
-                                stdout_bytes=len(receipt.stdout),
-                                stderr_bytes=len(receipt.stderr),
-                            )
-                        else:
-                            if row is None:
-                                raise TerminalDeliveryError("terminal_notification_missing")
+                        if row is None:
+                            raise TerminalDeliveryError("terminal_notification_missing")
+                        if str(row.get("kind") or "") == TERMINAL_NOTIFICATION_KIND:
                             envelope = parse_terminal_envelope(row.get("body"))
                             artifact_size = int(envelope["artifact"]["size_bytes"])
                             if artifact_size > TERMINAL_ARTIFACT_MAX_BYTES:
@@ -1348,33 +2632,32 @@ class EngineerCommandService:
                                 actor_id=str(job.get("actor_id") or ""),
                                 max_bytes=artifact_size,
                             )
-                            self.kernel.store.mark_workspace_retirement(
-                                job_id,
-                                notification_id=str(job.get("notification_id") or ""),
-                                dedup_key=str(job.get("publication_dedup_key") or ""),
-                                envelope_sha256=str(job.get("envelope_sha256") or ""),
-                                cutoff=cutoff,
-                                retired_at=moment,
-                                stdout_bytes=len(receipt.stdout),
-                                stderr_bytes=len(receipt.stderr),
-                            )
-                    self._evict_archive_cache(job_id)
-                    self.kernel.retire_workspace(job_id)
-                    if row is not None:
-                        self._delete_exact_sent_notification(row)
-                    if suppressed:
-                        self.kernel.store.finish_suppressed_workspace_retirement(
-                            job_id,
-                            retired_at=moment,
-                        )
-                    else:
-                        self.kernel.store.finish_workspace_retirement(
+                        else:
+                            if receipt.generated_files or _outputs:
+                                raise TerminalDeliveryError("terminal_text_artifact_identity_changed")
+                        self.kernel.store.mark_workspace_retirement(
                             job_id,
                             notification_id=str(job.get("notification_id") or ""),
                             dedup_key=str(job.get("publication_dedup_key") or ""),
                             envelope_sha256=str(job.get("envelope_sha256") or ""),
+                            cutoff=cutoff,
                             retired_at=moment,
+                            stdout_bytes=len(receipt.stdout),
+                            stderr_bytes=len(receipt.stderr),
                         )
+                    self._evict_archive_cache(job_id)
+                    if row is not None:
+                        self._assert_sent_retention_row_unchanged(row)
+                    self.kernel.retire_workspace(job_id)
+                    if row is not None:
+                        self._delete_exact_sent_notification(row)
+                    self.kernel.store.finish_workspace_retirement(
+                        job_id,
+                        notification_id=str(job.get("notification_id") or ""),
+                        dedup_key=str(job.get("publication_dedup_key") or ""),
+                        envelope_sha256=str(job.get("envelope_sha256") or ""),
+                        retired_at=moment,
+                    )
                     retired_count += 1
                 except (
                     CommandError,
@@ -1424,7 +2707,11 @@ def build_engineer_command_tools(
 ) -> tuple[ToolSpec, ...]:
     if not bool(getattr(ctx.settings, "engineer_command_enabled", False)):
         return ()
-    service = service or EngineerCommandService(ctx)
+    # The organ owns this service and its exclusive command-store lease.  An
+    # explicitly supplied instance must be reused even if a test double defines
+    # false-y truthiness; constructing a fallback here would open a second store.
+    if service is None:
+        service = EngineerCommandService(ctx)
 
     async def run_command(
         *,
@@ -1470,6 +2757,37 @@ def build_engineer_command_tools(
             job_id=job_id,
             _conversation_id=_conversation_id,
         )
+
+    async def resume_work_item(
+        *,
+        actor: Any,
+        _conversation_id: str,
+        _cancel_requested: bool = False,
+    ) -> dict[str, Any]:
+        """Resume only the current conversation's exact durable work item."""
+
+        observation = await asyncio.to_thread(
+            service.resume_current,
+            actor=actor,
+            conversation_id=_conversation_id,
+            cancel_requested=type(_cancel_requested) is bool and _cancel_requested,
+        )
+        if observation is None:
+            return {"active": False, "ok": True}
+        if (
+            type(observation) is not EngineerCommandResumeObservation
+            or type(observation.continuation) is not EngineerContinuationState
+            or type(observation.payload) is not dict
+            or "active" in observation.payload
+            or _ENGINEER_WORK_ITEM_CONTINUATION_CARRIER in observation.payload
+            or "_attachment" in observation.payload
+            or observation.attachment is not None
+        ):
+            raise EngineerWorkItemCoordinatorError("engineer_resume_observation_invalid")
+        payload = dict(observation.payload)
+        payload["active"] = True
+        payload[_ENGINEER_WORK_ITEM_CONTINUATION_CARRIER] = observation.continuation
+        return payload
 
     job_parameters = {
         "type": "object",
@@ -1526,7 +2844,25 @@ def build_engineer_command_tools(
             risk="mutate",
             handler=cancel_exact,
         ),
+        ToolSpec(
+            name="engineer_work_item_resume",
+            description="Resume the exact current Engineer work item (internal runtime seam).",
+            parameters={
+                "type": "object",
+                "properties": {},
+                "additionalProperties": False,
+            },
+            security_id="engineer.command.manage",
+            risk="mutate",
+            handler=resume_work_item,
+            model_visible=False,
+        ),
     )
 
 
-__all__ = ["EngineerCommandService", "build_engineer_command_tools"]
+__all__ = [
+    "EngineerCommandService",
+    "build_engineer_command_tools",
+    "open_engineer_command_backup_authority",
+    "provision_engineer_command_store",
+]

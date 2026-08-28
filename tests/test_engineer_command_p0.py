@@ -103,6 +103,7 @@ def _grant(request: CommandRequest, *, confirmed: bool = False) -> VerifiedComma
         conversation_id="conversation",
         channel="cli_test",
         source_row_id="row",
+        source_step_id="ecstep-" + "1" * 32,
         source_hash="b" * 64,
         telegram_update_id="update",
         isolation_profile=IsolationProfile.ISOLATED_WORKSPACE,
@@ -181,6 +182,7 @@ def test_store_lists_cleanup_pending_unknown_jobs_for_restart(tmp_path: Path) ->
                     "conversation_id": "conversation",
                     "channel": "cli_test",
                     "source_row_id": "row",
+                    "source_step_id": "ecstep-" + "1" * 32,
                     "source_hash": "b" * 64,
                     "telegram_update_id": "update",
                     "isolation_profile": IsolationProfile.ISOLATED_WORKSPACE.value,
@@ -1154,6 +1156,40 @@ def test_restart_keeps_cleanup_marker_until_scope_collection_is_proven(
     kernel._reconcile_stale()
 
     assert updates[-1]["cleanup_pending"] == pending
+
+
+def test_shutdown_never_signals_without_durable_cancel_intent() -> None:
+    events: list[str] = []
+    job_id = "f" * 32
+
+    class _Store:
+        @staticmethod
+        def read_job(_job_id: str) -> dict[str, str]:
+            return {"actor_id": "owner", "conversation_id": "conv"}
+
+        @staticmethod
+        def persist_cancel_intent(*_args: object, **_kwargs: object) -> None:
+            events.append("persist")
+            raise CommandError("durable_write_failed")
+
+    class _Spawned:
+        @staticmethod
+        def request_shutdown() -> None:
+            events.append("signal")
+
+    kernel = CommandKernel.__new__(CommandKernel)
+    kernel.store = _Store()  # type: ignore[assignment]
+    kernel._admission_condition = threading.Condition()  # noqa: SLF001
+    kernel._active_submits = 0  # noqa: SLF001
+    kernel._closing = threading.Event()  # noqa: SLF001
+    kernel._lock = threading.Lock()  # noqa: SLF001
+    kernel._live = {job_id: _Spawned()}  # type: ignore[assignment]  # noqa: SLF001
+
+    with pytest.raises(CommandError, match="command_shutdown_persist_failed"):
+        kernel._close_with_deadline(time.monotonic() + 1.0)  # noqa: SLF001
+
+    assert events == ["persist"]
+    assert kernel._closing.is_set() is False  # noqa: SLF001
 
 
 def test_transient_scope_requests_collect_and_cleanup_is_bounded(

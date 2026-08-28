@@ -86,10 +86,14 @@ class FakePort:
         backup_schema: int = 33,
         memory_vault_mode: str = "disabled",
         staged_config_transition: str = "obsidian_enable",
+        engineer_lifecycle_required: bool = False,
+        engineer_lifecycle_provisioned: bool = False,
     ) -> None:
         self.fail = fail
         self.memory_vault_mode = memory_vault_mode
         self.staged_config_transition = staged_config_transition
+        self.engineer_lifecycle_required = engineer_lifecycle_required
+        self.engineer_lifecycle_provisioned = engineer_lifecycle_provisioned
         self.failure_injected = False
         self.events: list[str] = []
         self.active: operator.ReleaseIdentity | None = None
@@ -119,6 +123,21 @@ class FakePort:
             ),
             "memory_vault_mode": self.memory_vault_mode,
         }
+
+    def engineer_store_lifecycle_required(self) -> bool:
+        return self.engineer_lifecycle_required
+
+    def validate_engineer_recovery_contour(
+        self,
+        releases: tuple[operator.ReleaseIdentity, ...],
+    ) -> None:
+        del releases
+
+    def engineer_store_lifecycle_provisioned(self) -> bool:
+        return self.engineer_lifecycle_provisioned
+
+    def provision_engineer_store(self, release: operator.ReleaseIdentity) -> None:
+        self._event(f"provision_engineer:{release.root.name}")
 
     def verify_release(
         self,
@@ -212,7 +231,8 @@ class FakePort:
         self.obsidian_mode = "disabled"
         self._event("select_predecessor_config")
 
-    def backup_database(self) -> operator.DatabaseBackup:
+    def backup_database(self, release: operator.ReleaseIdentity) -> operator.DatabaseBackup:
+        del release
         self._event("backup_db_wal_inbox")
         return self.backup
 
@@ -263,7 +283,12 @@ class FakePort:
     def accept_bridge(self, release: operator.ReleaseIdentity) -> None:
         self._event(f"accept_bridge:{release.root.name}")
 
-    def restore_database(self, backup: operator.DatabaseBackup) -> None:
+    def restore_database(
+        self,
+        backup: operator.DatabaseBackup,
+        release: operator.ReleaseIdentity,
+    ) -> None:
+        del release
         assert backup is self.backup
         self._event("restore_exact_db_wal_inbox")
 
@@ -294,6 +319,7 @@ class MemoryJournal:
             "backup": None,
             "database_mutation_possible": False,
             "network_writer_uncertain": False,
+            "engineer_provision_committed": False,
             "writer_target": "",
             "prebackup_config_transition": self.prebackup_config_transition,
             "predecessor_env_sha256": self.predecessor_env_sha256,
@@ -322,6 +348,8 @@ class MemoryJournal:
         self.state["network_writer_uncertain"] = bool(
             self.state.get("network_writer_uncertain") or network_writer_uncertain
         )
+        if phase == "provision_committed":
+            self.state["engineer_provision_committed"] = True
         if writer_target:
             self.state["writer_target"] = writer_target
         self.state["terminal_receipt_sha256"] = terminal_receipt_sha256
@@ -827,10 +855,10 @@ def test_obsidian_enable_activates_staged_env_only_after_verified_backup(
     )
 
     class BoundaryPort(FakePort):
-        def backup_database(self) -> operator.DatabaseBackup:
+        def backup_database(self, release: operator.ReleaseIdentity) -> operator.DatabaseBackup:
             assert self.canonical_env_sha256 == "1" * 64
             assert journal.state["phase"] == "leases_acquired"
-            return super().backup_database()
+            return super().backup_database(release)
 
         def offline_migrate(
             self,
@@ -1034,6 +1062,250 @@ def test_failure_after_bridge_start_never_runs_schema33_and_uses_schema34_fallba
     assert port.active is releases.fallback
 
 
+def _engineer_lifecycle_releases(releases: Releases) -> Releases:
+    capable = {
+        "max_schema": operator.ENGINEER_COMMAND_LIFECYCLE_MIN_SCHEMA,
+        "obsidian_cutover_contract": operator.OBSIDIAN_CUTOVER_CONTRACT,
+        "engineer_command_lifecycle_contract": operator.ENGINEER_COMMAND_LIFECYCLE_CONTRACT,
+    }
+    return Releases(
+        candidate=replace(releases.candidate, version="0.207.66", **capable),
+        previous=replace(
+            releases.previous,
+            version="0.207.65",
+            max_schema=operator.ENGINEER_COMMAND_LIFECYCLE_MIN_SCHEMA,
+            obsidian_cutover_contract=operator.OBSIDIAN_CUTOVER_CONTRACT,
+        ),
+        fallback=replace(releases.fallback, version="0.207.66rc0", **capable),
+    )
+
+
+@pytest.mark.parametrize(
+    ("role", "code"),
+    [
+        ("candidate", "candidate_engineer_lifecycle_contract_missing"),
+        ("fallback", "fallback_engineer_lifecycle_contract_missing"),
+    ],
+)
+def test_engineer_provision_requires_two_distinct_lifecycle_capable_artifacts_before_stop(
+    releases: Releases,
+    role: str,
+    code: str,
+) -> None:
+    capable = _engineer_lifecycle_releases(releases)
+    candidate = capable.candidate
+    fallback = capable.fallback
+    if role == "candidate":
+        candidate = replace(candidate, engineer_command_lifecycle_contract="")
+    else:
+        fallback = replace(fallback, engineer_command_lifecycle_contract="")
+    port = FakePort(engineer_lifecycle_required=True, backup_schema=46)
+    journal = MemoryJournal()
+    with pytest.raises(operator.ReleaseFailure, match=f"^{code}$"):
+        operator.activate_release(
+            port,
+            journal,
+            candidate=candidate,
+            previous=capable.previous,
+            schema_capable_fallback=fallback,
+        )
+    assert port.events == []
+    assert journal.events == []
+
+
+def test_preprovisioned_engineer_authority_rejects_pre_lifecycle_previous_before_stop(
+    releases: Releases,
+) -> None:
+    capable = _engineer_lifecycle_releases(releases)
+    port = FakePort(
+        engineer_lifecycle_required=True,
+        engineer_lifecycle_provisioned=True,
+        backup_schema=46,
+    )
+    journal = MemoryJournal()
+    with pytest.raises(
+        operator.ReleaseFailure,
+        match="previous_engineer_lifecycle_contract_missing",
+    ):
+        operator.activate_release(
+            port,
+            journal,
+            candidate=capable.candidate,
+            previous=capable.previous,
+            schema_capable_fallback=capable.fallback,
+        )
+    assert port.events == []
+    assert journal.events == []
+
+
+def test_engineer_recovery_contour_failure_occurs_before_journal_or_service_stop(
+    releases: Releases,
+) -> None:
+    class OverlapPort(FakePort):
+        def validate_engineer_recovery_contour(
+            self,
+            releases: tuple[operator.ReleaseIdentity, ...],
+        ) -> None:
+            del releases
+            self._event("validate_engineer_contour")
+            raise operator.ReleaseFailure("engineer_recovery_contour_overlap")
+
+    port = OverlapPort(engineer_lifecycle_required=True, backup_schema=46)
+    journal = MemoryJournal()
+    with pytest.raises(
+        operator.ReleaseFailure,
+        match="engineer_recovery_contour_overlap",
+    ):
+        operator.activate_release(
+            port,
+            journal,
+            candidate=releases.candidate,
+            previous=releases.previous,
+            schema_capable_fallback=releases.fallback,
+        )
+    assert port.events == ["validate_engineer_contour"]
+    assert journal.events == []
+
+
+def test_engineer_failure_before_write_ahead_boundary_restores_pre_lifecycle_set(
+    releases: Releases,
+) -> None:
+    capable = _engineer_lifecycle_releases(releases)
+
+    class PreBoundaryJournal(MemoryJournal):
+        def record(self, phase: str, **kwargs: object) -> None:
+            if phase == "provision_committed":
+                raise RuntimeError("synthetic failure before durable boundary")
+            super().record(phase, **kwargs)
+
+    port = FakePort(
+        engineer_lifecycle_required=True,
+        backup_schema=46,
+    )
+    journal = PreBoundaryJournal()
+    with pytest.raises(operator.ReleaseFailure, match="activation_failed_rolled_back"):
+        operator.activate_release(
+            port,
+            journal,
+            candidate=capable.candidate,
+            previous=capable.previous,
+            schema_capable_fallback=capable.fallback,
+        )
+    assert journal.events.index("provision_attempted") < journal.events.index("rollback_restore_attempted")
+    assert journal.state["engineer_provision_committed"] is False
+    assert "provision_engineer:candidate" not in port.events
+    assert "restore_exact_db_wal_inbox" in port.events
+    assert port.active is capable.previous
+
+
+def test_engineer_failure_during_provision_converges_with_capable_fallback(
+    releases: Releases,
+) -> None:
+    capable = _engineer_lifecycle_releases(releases)
+    port = FakePort(
+        fail="provision_engineer:candidate",
+        engineer_lifecycle_required=True,
+        backup_schema=46,
+    )
+    journal = MemoryJournal()
+    with pytest.raises(operator.ReleaseFailure, match="activation_failed_rolled_back"):
+        operator.activate_release(
+            port,
+            journal,
+            candidate=capable.candidate,
+            previous=capable.previous,
+            schema_capable_fallback=capable.fallback,
+        )
+    assert journal.state["engineer_provision_committed"] is True
+    assert "restore_exact_db_wal_inbox" not in port.events
+    assert "provision_engineer:schema34-fallback" in port.events
+    assert port.active is capable.fallback
+
+
+@pytest.mark.parametrize("failure_point", ["after_boundary", "anchor:candidate"])
+def test_durable_engineer_provision_boundary_never_starts_pre_lifecycle_previous(
+    releases: Releases,
+    failure_point: str,
+) -> None:
+    capable = _engineer_lifecycle_releases(releases)
+
+    class BoundaryJournal(MemoryJournal):
+        def record(self, phase: str, **kwargs: object) -> None:
+            super().record(phase, **kwargs)
+            if phase == "provision_committed" and failure_point == "after_boundary":
+                raise RuntimeError("crash after durable journal replace")
+
+    port = FakePort(
+        fail=("anchor:candidate" if failure_point == "anchor:candidate" else ""),
+        engineer_lifecycle_required=True,
+        backup_schema=46,
+    )
+    journal = BoundaryJournal()
+    with pytest.raises(operator.ReleaseFailure, match="activation_failed_rolled_back"):
+        operator.activate_release(
+            port,
+            journal,
+            candidate=capable.candidate,
+            previous=capable.previous,
+            schema_capable_fallback=capable.fallback,
+        )
+    assert journal.state["engineer_provision_committed"] is True
+    assert "restore_exact_db_wal_inbox" not in port.events
+    assert "anchor:clean-schema33" not in port.events
+    assert "provision_engineer:schema34-fallback" in port.events
+    assert port.active is capable.fallback
+
+
+@pytest.mark.parametrize(
+    ("phase", "committed", "expected_target", "restore_expected"),
+    [
+        ("provision_attempted", False, "previous", True),
+        ("provision_committed", True, "fallback", False),
+    ],
+)
+def test_interrupted_engineer_provision_recovers_across_exact_one_way_boundary(
+    releases: Releases,
+    phase: str,
+    committed: bool,
+    expected_target: str,
+    restore_expected: bool,
+) -> None:
+    capable = _engineer_lifecycle_releases(releases)
+    journal = MemoryJournal()
+    journal.begin(
+        candidate=capable.candidate,
+        previous=capable.previous,
+        fallback=capable.fallback,
+    )
+    for current in (
+        "bridge_stop_attempted",
+        "backend_stop_attempted",
+        "writers_quiesced",
+        "leases_acquired",
+        "backup_complete",
+        "migration_attempted",
+        "alias_repair_attempted",
+        phase,
+    ):
+        journal.record(
+            current,
+            backup=(FakePort(backup_schema=46).backup if current == "backup_complete" else None),
+            database_mutation_possible=current in {"migration_attempted", "alias_repair_attempted", phase},
+        )
+    assert journal.state["engineer_provision_committed"] is committed
+    port = FakePort(engineer_lifecycle_required=True, backup_schema=46)
+    stored_backup = journal.database_backup()
+    assert isinstance(stored_backup, operator.DatabaseBackup)
+    port.backup = stored_backup
+    receipt = operator.recover_interrupted_activation(port, journal)
+    expected = capable.previous if expected_target == "previous" else capable.fallback
+    assert port.active is expected
+    assert ("restore_exact_db_wal_inbox" in port.events) is restore_expected
+    assert ("provision_engineer:schema34-fallback" in port.events) is committed
+    assert receipt["engineer_provision_committed"] is committed
+    assert receipt["backup_restored"] is restore_expected
+
+
 def test_known_mutated_live_release_is_forbidden_as_rollback(
     tmp_path: Path,
     releases: Releases,
@@ -1154,6 +1426,583 @@ def test_exact_database_and_inbox_backup_restores_schema33_bytes_before_bridge(
             backup_root=config.backup_dir,
             config_identity_sha256=config_identity,
         ).database_backup()
+
+
+def _engineer_recovery_config(tmp_path: Path) -> operator.SystemdConfig:
+    tmp_path.chmod(0o700)
+    state = tmp_path / "state"
+    state.mkdir(mode=0o700)
+    database = tmp_path / "friday.sqlite3"
+    inbox = state / "telegram-inbox.sqlite3"
+    main = sqlite3.connect(database)
+    main.execute("CREATE TABLE schema_meta(key TEXT PRIMARY KEY,value TEXT NOT NULL)")
+    main.execute("INSERT INTO schema_meta VALUES('schema_version','46')")
+    main.execute("CREATE TABLE marker(value TEXT NOT NULL)")
+    main.execute("INSERT INTO marker VALUES('before')")
+    main.commit()
+    main.close()
+    incoming = sqlite3.connect(inbox)
+    incoming.execute("CREATE TABLE queue(value TEXT NOT NULL)")
+    incoming.execute("INSERT INTO queue VALUES('pending-before')")
+    incoming.commit()
+    incoming.close()
+    database.chmod(0o600)
+    inbox.chmod(0o600)
+    health_ca = tmp_path / "health-ca.pem"
+    health_ca.write_text("synthetic test CA", encoding="ascii")
+    health_ca.chmod(0o600)
+    return operator.SystemdConfig(
+        anchor=tmp_path / "anchor",
+        env_file=tmp_path / "env",
+        env_file_sha256="0" * 64,
+        friday_home=tmp_path,
+        unit_dir=tmp_path / "units",
+        database=database,
+        inbox_database=inbox,
+        backup_dir=tmp_path / "backups",
+        state_dir=state,
+        health_ca=health_ca,
+        health_ca_sha256=hashlib.sha256(health_ca.read_bytes()).hexdigest(),
+    )
+
+
+def _provision_test_engineer_store(
+    config: operator.SystemdConfig,
+) -> tuple[Path, Path, bytes]:
+    from friday.organs.engineer.command.store import CommandJobStore
+
+    root = config.friday_home / "data" / "engineer-command"
+    root.parent.mkdir(mode=0o700)
+    key = config.friday_home / "data" / "engineer-command.key"
+    key_bytes = b"k" * 32
+    key.write_bytes(key_bytes)
+    key.chmod(0o600)
+    lifecycle_key = b"l" * 32
+    store = CommandJobStore.provision(
+        root,
+        lifecycle_key=lifecycle_key,
+        lifecycle_state_dir=config.state_dir,
+    )
+    store.close()
+    job = root / "jobs" / "job-a"
+    job.mkdir(mode=0o700)
+    result = job / "private-result-do-not-log.txt"
+    result.write_bytes(b"sealed-result-before")
+    result.chmod(0o600)
+    workbench = root / "workbenches" / "scope-a"
+    workbench.mkdir(mode=0o700)
+    source = workbench / "source.bin"
+    source.write_bytes(b"source-before")
+    source.chmod(0o600)
+    return root, key, lifecycle_key
+
+
+@pytest.mark.parametrize(
+    "overlap",
+    [
+        "backup_inside_store",
+        "backup_ancestor_of_store",
+        "main_database_inside_store",
+        "inbox_inside_store",
+        "release_root_is_store",
+        "key_hardlinks_main_database",
+        "key_hardlinks_state_recovery",
+        "backup_nested_symlink_to_engineer_artifact",
+        "release_nested_symlink_to_engineer_artifact",
+        "main_wal_symlink_to_engineer_artifact",
+        "inbox_journal_symlink_to_engineer_artifact",
+        "backup_root_symlink_to_store",
+    ],
+)
+def test_engineer_recovery_contour_rejects_every_namespace_or_inode_overlap_pre_stop(
+    tmp_path: Path,
+    overlap: str,
+) -> None:
+    config = _engineer_recovery_config(tmp_path)
+    root, key, _lifecycle_key = _provision_test_engineer_store(config)
+    release_roots = (
+        tmp_path / "releases" / "candidate",
+        tmp_path / "releases" / "previous",
+        tmp_path / "releases" / "fallback",
+    )
+    if overlap == "backup_inside_store":
+        config = replace(config, backup_dir=root / "recursive-backups")
+    elif overlap == "backup_ancestor_of_store":
+        config = replace(config, backup_dir=root.parent)
+    elif overlap == "main_database_inside_store":
+        config = replace(config, database=root / "kernel.sqlite")
+    elif overlap == "inbox_inside_store":
+        config = replace(config, inbox_database=root / "inbox.sqlite3")
+    elif overlap == "release_root_is_store":
+        release_roots = (root, *release_roots[1:])
+    elif overlap == "key_hardlinks_main_database":
+        key.unlink()
+        os.link(config.database, key)
+    elif overlap == "key_hardlinks_state_recovery":
+        recovery = config.state_dir / "immutable-release-activation.v1.json"
+        recovery.write_bytes(b"private-recovery-state")
+        recovery.chmod(0o600)
+        key.unlink()
+        os.link(recovery, key)
+    elif overlap == "backup_nested_symlink_to_engineer_artifact":
+        config.backup_dir.mkdir(mode=0o700)
+        (config.backup_dir / "nested-secret-alias").symlink_to(
+            root / "jobs" / "job-a" / "private-result-do-not-log.txt"
+        )
+    elif overlap == "release_nested_symlink_to_engineer_artifact":
+        release_roots[0].mkdir(parents=True)
+        (release_roots[0] / "nested-secret-alias").symlink_to(
+            root / "jobs" / "job-a" / "private-result-do-not-log.txt"
+        )
+    elif overlap == "main_wal_symlink_to_engineer_artifact":
+        Path(f"{config.database}-wal").symlink_to(root / "jobs" / "job-a" / "private-result-do-not-log.txt")
+    elif overlap == "inbox_journal_symlink_to_engineer_artifact":
+        Path(f"{config.inbox_database}-journal").symlink_to(
+            root / "jobs" / "job-a" / "private-result-do-not-log.txt"
+        )
+    else:
+        config.backup_dir.symlink_to(root, target_is_directory=True)
+
+    with pytest.raises(
+        operator.ReleaseFailure,
+        match="engineer_recovery_contour_(overlap|invalid|inode_alias)",
+    ):
+        operator._validate_engineer_recovery_contour(  # noqa: SLF001
+            config,
+            release_roots,
+        )
+
+
+def test_engineer_recovery_set_restores_authenticated_store_in_place_without_secret_journal(
+    tmp_path: Path,
+) -> None:
+    from friday.organs.engineer.command.store import CommandJobStore
+
+    config = _engineer_recovery_config(tmp_path)
+    root, key, lifecycle_key = _provision_test_engineer_store(config)
+    database_inode = (root / "kernel.sqlite").stat().st_ino
+    anchor_before = (config.state_dir / "engineer-command-store.anchor.json").read_bytes()
+    result = root / "jobs" / "job-a" / "private-result-do-not-log.txt"
+    backup = operator._exact_sqlite_backup(config)  # noqa: SLF001
+
+    journal = operator.DurableActivationJournal(
+        config.state_dir / "immutable-release-activation.v1.json",
+        backup_root=config.backup_dir,
+        config_identity_sha256=operator._systemd_config_identity(config),  # noqa: SLF001
+    )
+    journal.begin(
+        candidate=_release(tmp_path, "engineer-journal-candidate", schema=46, commit="c" * 40),
+        previous=_release(tmp_path, "engineer-journal-previous", schema=46, commit="a" * 40),
+        fallback=_release(tmp_path, "engineer-journal-fallback", schema=46, commit="f" * 40),
+    )
+    for phase in (
+        "bridge_stop_attempted",
+        "backend_stop_attempted",
+        "writers_quiesced",
+        "leases_acquired",
+        "backup_complete",
+    ):
+        journal.record(phase, backup=backup if phase == "backup_complete" else None)
+    journal_bytes = journal.path.read_bytes()
+    assert b"private-result-do-not-log" not in journal_bytes
+    assert b"sealed-result-before" not in journal_bytes
+    assert b"k" * 32 not in journal_bytes
+
+    runtime = CommandJobStore.open_runtime(
+        root,
+        lifecycle_key=lifecycle_key,
+        lifecycle_state_dir=config.state_dir,
+    )
+    with runtime.transaction():
+        pass
+    runtime.close()
+    result.write_bytes(b"changed")
+    result.chmod(0o600)
+    extra = root / "jobs" / "job-a" / "extra.bin"
+    extra.write_bytes(b"extra")
+    extra.chmod(0o600)
+    key.write_bytes(b"z" * 32)
+    key.chmod(0o600)
+
+    operator._restore_exact_sqlite_backup(config, backup)  # noqa: SLF001
+
+    assert (root / "kernel.sqlite").stat().st_ino == database_inode
+    assert result.read_bytes() == b"sealed-result-before"
+    assert not extra.exists()
+    assert key.read_bytes() == b"k" * 32
+    assert (config.state_dir / "engineer-command-store.anchor.json").read_bytes() == anchor_before
+    assert (root / "kernel.lock").read_bytes() == b""
+    assert (root / "kernel.lease").read_bytes() == b""
+    reopened = CommandJobStore.open_runtime(
+        root,
+        lifecycle_key=lifecycle_key,
+        lifecycle_state_dir=config.state_dir,
+    )
+    reopened.assert_lifecycle_ready()
+    reopened.close()
+
+
+def test_engineer_recovery_set_covers_every_lifecycle_crash_artifact(
+    tmp_path: Path,
+) -> None:
+    config = _engineer_recovery_config(tmp_path)
+    _provision_test_engineer_store(config)
+    names = (
+        "engineer-command-store.anchor.json",
+        "engineer-command-store.bootstrap.json",
+        "engineer-command-store.pending.json",
+        "engineer-command-store.committed.json",
+    )
+    for position, name in enumerate(names, start=1):
+        path = config.state_dir / name
+        if name != "engineer-command-store.anchor.json":
+            path.write_bytes(f"private-crash-artifact-{position}".encode())
+            path.chmod(0o600)
+    before = {name: (config.state_dir / name).read_bytes() for name in names}
+    backup = operator._exact_sqlite_backup(config)  # noqa: SLF001
+    for position, name in enumerate(names):
+        path = config.state_dir / name
+        if position % 2:
+            path.unlink()
+        else:
+            path.write_bytes(b"drift")
+            path.chmod(0o600)
+
+    operator._restore_exact_sqlite_backup(config, backup)  # noqa: SLF001
+
+    assert {name: (config.state_dir / name).read_bytes() for name in names} == before
+
+
+def test_engineer_restore_replay_cleans_manifest_bound_secret_staging_exhaustively(
+    tmp_path: Path,
+) -> None:
+    config = _engineer_recovery_config(tmp_path)
+    root, key, _lifecycle_key = _provision_test_engineer_store(config)
+    result = root / "jobs" / "job-a" / "private-result-do-not-log.txt"
+    anchor = config.state_dir / "engineer-command-store.anchor.json"
+    backup = operator._exact_sqlite_backup(config)  # noqa: SLF001
+    payload = backup.opaque
+    assert isinstance(payload, operator._ExactBackupPayload)  # noqa: SLF001
+    assert payload.engineer is not None
+    token = payload.engineer.manifest_sha256
+    stages = (
+        operator._engineer_restore_stage_path(key, token),  # noqa: SLF001
+        operator._engineer_restore_stage_path(anchor, token),  # noqa: SLF001
+        operator._engineer_restore_stage_path(result, token),  # noqa: SLF001
+    )
+    assert stages[0] == operator._engineer_restore_stage_path(key, token)  # noqa: SLF001
+    assert stages[0] != operator._engineer_restore_stage_path(key, "e" * 64)  # noqa: SLF001
+    for position, stage in enumerate(stages, start=1):
+        stage.write_bytes(f"partial-secret-crash-{position}".encode())
+        stage.chmod(0o600)
+    key.write_bytes(b"z" * 32)
+    key.chmod(0o600)
+    result.write_bytes(b"changed-after-crash")
+    result.chmod(0o600)
+    anchor.write_bytes(b"changed-anchor")
+    anchor.chmod(0o600)
+
+    operator._restore_exact_sqlite_backup(config, backup)  # noqa: SLF001
+
+    assert key.read_bytes() == b"k" * 32
+    assert result.read_bytes() == b"sealed-result-before"
+    assert operator._engineer_restore_staging_paths(config) == ()  # noqa: SLF001
+    assert not any(stage.exists() or stage.is_symlink() for stage in stages)
+    for directory in (key.parent, config.state_dir, result.parent):
+        assert not any(
+            operator._ENGINEER_RESTORE_STAGE_RE.fullmatch(path.name)  # noqa: SLF001
+            for path in directory.iterdir()
+        )
+
+
+def test_engineer_restore_refuses_unbound_secret_stage_before_any_live_mutation(
+    tmp_path: Path,
+) -> None:
+    config = _engineer_recovery_config(tmp_path)
+    root, key, _lifecycle_key = _provision_test_engineer_store(config)
+    result = root / "jobs" / "job-a" / "private-result-do-not-log.txt"
+    backup = operator._exact_sqlite_backup(config)  # noqa: SLF001
+    unbound = operator._engineer_restore_stage_path(key, "f" * 64)  # noqa: SLF001
+    unbound.write_bytes(b"unbound-secret-residue")
+    unbound.chmod(0o600)
+    key.write_bytes(b"z" * 32)
+    key.chmod(0o600)
+    result.write_bytes(b"changed-after-backup")
+    result.chmod(0o600)
+
+    with pytest.raises(operator.ReleaseFailure, match="engineer_restore_staging_unbound"):
+        operator._restore_exact_sqlite_backup(config, backup)  # noqa: SLF001
+
+    assert key.read_bytes() == b"z" * 32
+    assert result.read_bytes() == b"changed-after-backup"
+    assert unbound.read_bytes() == b"unbound-secret-residue"
+
+
+def test_engineer_restore_ephemeral_race_rejects_hardlinked_replacement_before_truncate(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config = _engineer_recovery_config(tmp_path)
+    root, _key, _lifecycle_key = _provision_test_engineer_store(config)
+    backup = operator._exact_sqlite_backup(config)  # noqa: SLF001
+    target = root / "kernel.lease"
+    unrelated = tmp_path / "unrelated-private-file"
+    unrelated.write_bytes(b"must-not-be-truncated-or-repermissioned")
+    unrelated.chmod(0o640)
+    original_mode = stat.S_IMODE(unrelated.stat().st_mode)
+    original_open = operator.os.open
+    injected = False
+
+    def raced_open(
+        path: object,
+        flags: int,
+        mode: int = 0o777,
+        *,
+        dir_fd: int | None = None,
+    ) -> int:
+        nonlocal injected
+        if not injected and path == target.name and dir_fd is not None:
+            injected = True
+            target.unlink()
+            os.link(unrelated, target)
+        return original_open(path, flags, mode, dir_fd=dir_fd)
+
+    monkeypatch.setattr(operator.os, "open", raced_open)
+    with pytest.raises(operator.ReleaseFailure, match="engineer_store_restore_path_drift"):
+        operator._restore_exact_sqlite_backup(config, backup)  # noqa: SLF001
+
+    assert injected is True
+    assert unrelated.read_bytes() == b"must-not-be-truncated-or-repermissioned"
+    assert stat.S_IMODE(unrelated.stat().st_mode) == original_mode == 0o640
+
+
+def test_engineer_restore_missing_ephemeral_uses_exclusive_nontruncating_create(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config = _engineer_recovery_config(tmp_path)
+    root, _key, _lifecycle_key = _provision_test_engineer_store(config)
+    backup = operator._exact_sqlite_backup(config)  # noqa: SLF001
+    target = root / "kernel.lease"
+    target.unlink()
+    original_open = operator.os.open
+    observed_flags: list[int] = []
+
+    def inspect_open(
+        path: object,
+        flags: int,
+        mode: int = 0o777,
+        *,
+        dir_fd: int | None = None,
+    ) -> int:
+        if path == target.name and dir_fd is not None:
+            observed_flags.append(flags)
+        return original_open(path, flags, mode, dir_fd=dir_fd)
+
+    monkeypatch.setattr(operator.os, "open", inspect_open)
+    operator._restore_exact_sqlite_backup(config, backup)  # noqa: SLF001
+
+    assert len(observed_flags) == 1
+    assert observed_flags[0] & os.O_EXCL
+    assert not observed_flags[0] & os.O_TRUNC
+    assert target.read_bytes() == b""
+    assert stat.S_IMODE(target.stat().st_mode) == 0o600
+
+
+def test_durable_replace_path_swap_never_chmods_the_replacement_inode(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    parent = tmp_path / "private-state"
+    parent.mkdir(mode=0o700)
+    destination = parent / "state.json"
+    destination.write_bytes(b"old")
+    destination.chmod(0o600)
+    unrelated = parent / "unrelated"
+    unrelated.write_bytes(b"must-not-be-repermissioned")
+    unrelated.chmod(0o640)
+    published = parent / "published-before-race"
+    original_replace = operator.os.replace
+    injected = False
+
+    def raced_replace(source: object, target: object) -> None:
+        nonlocal injected
+        original_replace(source, target)
+        if not injected and Path(target) == destination:
+            injected = True
+            original_replace(destination, published)
+            os.link(unrelated, destination)
+
+    monkeypatch.setattr(operator.os, "replace", raced_replace)
+    with pytest.raises(operator.ReleaseFailure, match="durable_state_path_changed"):
+        operator._replace_private_durable(destination, b"new\n")  # noqa: SLF001
+
+    assert injected is True
+    assert unrelated.read_bytes() == b"must-not-be-repermissioned"
+    assert stat.S_IMODE(unrelated.stat().st_mode) == 0o640
+    assert published.read_bytes() == b"new\n"
+
+
+def test_exact_operator_backup_binds_existing_lifecycle_authority_and_reverifies_restore(
+    tmp_path: Path,
+) -> None:
+    from friday.organs.engineer.command_tools import (
+        open_engineer_command_backup_authority,
+        provision_engineer_command_store,
+    )
+
+    config = _engineer_recovery_config(tmp_path)
+    data = config.friday_home / "data"
+    data.mkdir(mode=0o700)
+    root = data / "engineer-command"
+    key = data / "engineer-command.key"
+    key.write_bytes(b"m" * 32)
+    key.chmod(0o600)
+    settings = SimpleNamespace(
+        engineer_command_enabled=True,
+        engineer_command_key_file=key,
+        engineer_command_store_dir=root,
+        state_dir=config.state_dir,
+    )
+    assert provision_engineer_command_store(settings) == {"status": "provisioned"}
+
+    with pytest.raises(operator.ReleaseFailure, match="engineer_store_backup_authority_required"):
+        operator._exact_sqlite_backup(  # noqa: SLF001
+            config,
+            require_engineer_authority=True,
+        )
+    unbound = operator._exact_sqlite_backup(config)  # noqa: SLF001
+    connection = sqlite3.connect(config.database)
+    connection.execute("UPDATE marker SET value='must-survive-unbound-refusal'")
+    connection.commit()
+    connection.close()
+    with pytest.raises(operator.ReleaseFailure, match="engineer_store_backup_authority_required"):
+        operator._restore_exact_sqlite_backup(  # noqa: SLF001
+            config,
+            unbound,
+            require_engineer_authority=True,
+            engineer_authority_verify=lambda _proof, _digest: None,
+        )
+    connection = sqlite3.connect(config.database)
+    assert connection.execute("SELECT value FROM marker").fetchone()[0] == ("must-survive-unbound-refusal")
+    connection.execute("UPDATE marker SET value='before'")
+    connection.commit()
+    connection.close()
+
+    def snapshot() -> object:
+        with open_engineer_command_backup_authority(settings) as authority:
+            return authority.backup_authority_snapshot()
+
+    def attest(digest: str) -> object:
+        with open_engineer_command_backup_authority(settings) as authority:
+            before = authority.backup_authority_snapshot()
+            evidence = authority.attest_main_database_backup(digest)
+            verified = authority.verify_main_database_backup_authority(evidence, digest)
+            after = authority.backup_authority_snapshot()
+            return {
+                "after": after,
+                "before": before,
+                "evidence": evidence,
+                "verified": verified,
+            }
+
+    backup = operator._exact_sqlite_backup(  # noqa: SLF001
+        config,
+        require_engineer_authority=True,
+        engineer_authority_snapshot=snapshot,
+        engineer_authority_attest=attest,
+    )
+    payload = backup.opaque
+    assert isinstance(payload, operator._ExactBackupPayload)  # noqa: SLF001
+    private_manifest = json.loads((payload.directory / "engineer-manifest.json").read_text(encoding="ascii"))
+    evidence = private_manifest["engineer_command_ledger_authority"]
+    assert evidence["quiescent"] is True
+    assert (
+        evidence["database_sha256"]
+        == hashlib.sha256((payload.directory / "database.sqlite3").read_bytes()).hexdigest()
+    )
+
+    anchor = config.state_dir / "engineer-command-store.anchor.json"
+    anchor.write_bytes(b"corrupt-live-anchor")
+    anchor.chmod(0o600)
+    connection = sqlite3.connect(config.database)
+    connection.execute("UPDATE marker SET value='changed-after-backup'")
+    connection.commit()
+    connection.close()
+
+    def verify(proof: Mapping[str, object], digest: str) -> object:
+        with open_engineer_command_backup_authority(settings) as authority:
+            before = authority.backup_authority_snapshot()
+            verified = authority.verify_main_database_backup_authority(proof, digest)
+            after = authority.backup_authority_snapshot()
+            return {"after": after, "before": before, "verified": verified}
+
+    operator._restore_exact_sqlite_backup(  # noqa: SLF001
+        config,
+        backup,
+        require_engineer_authority=True,
+        engineer_authority_verify=verify,
+    )
+    connection = sqlite3.connect(config.database)
+    try:
+        assert connection.execute("SELECT value FROM marker").fetchone()[0] == "before"
+    finally:
+        connection.close()
+
+
+@pytest.mark.parametrize("mutation", ["symlink", "fifo", "hardlink", "database_inode"])
+def test_engineer_restore_rejects_unsafe_live_path_or_database_identity_before_main_restore(
+    tmp_path: Path,
+    mutation: str,
+) -> None:
+    config = _engineer_recovery_config(tmp_path)
+    root, _key, _lifecycle_key = _provision_test_engineer_store(config)
+    backup = operator._exact_sqlite_backup(config)  # noqa: SLF001
+    connection = sqlite3.connect(config.database)
+    connection.execute("UPDATE marker SET value='must-survive-refusal'")
+    connection.commit()
+    connection.close()
+    target = root / "jobs" / "unsafe"
+    if mutation == "symlink":
+        target.symlink_to("/tmp")
+    elif mutation == "fifo":
+        os.mkfifo(target, 0o600)
+    elif mutation == "hardlink":
+        os.link(root / "jobs" / "job-a" / "private-result-do-not-log.txt", target)
+    else:
+        replacement = root / ".kernel.sqlite.replaced"
+        shutil.copy2(root / "kernel.sqlite", replacement)
+        replacement.chmod(0o600)
+        os.replace(replacement, root / "kernel.sqlite")
+    with pytest.raises(
+        operator.ReleaseFailure,
+        match="engineer_store_(artifact_invalid|database_identity_changed)",
+    ):
+        operator._restore_exact_sqlite_backup(config, backup)  # noqa: SLF001
+    connection = sqlite3.connect(config.database)
+    try:
+        assert connection.execute("SELECT value FROM marker").fetchone()[0] == "must-survive-refusal"
+    finally:
+        connection.close()
+
+
+def test_engineer_restore_rejects_partial_private_backup_before_live_mutation(
+    tmp_path: Path,
+) -> None:
+    config = _engineer_recovery_config(tmp_path)
+    root, key, _lifecycle_key = _provision_test_engineer_store(config)
+    backup = operator._exact_sqlite_backup(config)  # noqa: SLF001
+    payload = backup.opaque
+    assert isinstance(payload, operator._ExactBackupPayload)  # noqa: SLF001
+    (
+        payload.directory / "engineer-recovery" / "store" / "jobs" / "job-a" / "private-result-do-not-log.txt"
+    ).unlink()
+    key.write_bytes(b"q" * 32)
+    key.chmod(0o600)
+    with pytest.raises(operator.ReleaseFailure, match="engineer_store_backup"):
+        operator._restore_exact_sqlite_backup(config, backup)  # noqa: SLF001
+    assert key.read_bytes() == b"q" * 32
+    assert (root / "kernel.sqlite").is_file()
 
 
 def _obsidian_cutover_config(tmp_path: Path) -> operator.SystemdConfig:
@@ -1938,6 +2787,63 @@ def _engineer_command_enabled_environment(predecessor: bytes) -> bytes:
         assert predecessor.count(disabled) == 1
         return predecessor.replace(disabled, enabled, 1)
     return predecessor + (b"" if predecessor.endswith(b"\n") else b"\n") + enabled
+
+
+def test_systemd_engineer_lifecycle_preflight_binds_private_default_store_and_key(
+    tmp_path: Path,
+) -> None:
+    base = _systemd_test_port(tmp_path)
+    assert base.engineer_store_lifecycle_required() is False
+    store = base.config.friday_home / "data" / "engineer-command"
+    store.mkdir(mode=0o700)
+    key = base.config.friday_home / "data" / "engineer-command.key"
+    key.write_bytes(b"k" * 32)
+    key.chmod(0o600)
+    # Feature disablement is not deletion: valid dormant residue still makes
+    # the lifecycle cutover and capable fallback mandatory.
+    assert base.engineer_store_lifecycle_required() is True
+    enabled = _engineer_command_enabled_environment(base.config.env_file.read_bytes())
+    base.config.env_file.write_bytes(enabled)
+    base.config.env_file.chmod(0o600)
+    port = operator.SystemdActivationPort(
+        replace(
+            base.config,
+            env_file_sha256=hashlib.sha256(enabled).hexdigest(),
+        )
+    )
+    assert port.engineer_store_lifecycle_required() is True
+
+    drifted = enabled + b"FRIDAY_ENGINEER_COMMAND_STORE_DIR=/tmp/not-the-store\n"
+    base.config.env_file.write_bytes(drifted)
+    base.config.env_file.chmod(0o600)
+    drifted_port = operator.SystemdActivationPort(
+        replace(
+            base.config,
+            env_file_sha256=hashlib.sha256(drifted).hexdigest(),
+        )
+    )
+    with pytest.raises(operator.ReleaseFailure, match="engineer_store_environment_invalid"):
+        drifted_port.engineer_store_lifecycle_required()
+
+
+def test_engineer_lock_hardlink_is_rejected_before_chmod_of_unrelated_inode(
+    tmp_path: Path,
+) -> None:
+    port = _systemd_test_port(tmp_path)
+    store = port.config.friday_home / "data" / "engineer-command"
+    store.mkdir(mode=0o700)
+    unrelated = tmp_path / "unrelated-private-file"
+    unrelated.write_bytes(b"must-not-be-repermissioned")
+    unrelated.chmod(0o640)
+    os.link(unrelated, store / "kernel.lease")
+    mode_before = stat.S_IMODE(unrelated.stat().st_mode)
+
+    with pytest.raises(operator.ReleaseFailure, match="engineer_store_lock_invalid"):
+        port._acquire_engineer_store_locks()  # noqa: SLF001
+
+    assert stat.S_IMODE(unrelated.stat().st_mode) == mode_before == 0o640
+    assert unrelated.read_bytes() == b"must-not-be-repermissioned"
+    assert port._engineer_locks == []  # noqa: SLF001
 
 
 @pytest.mark.parametrize(
@@ -9602,6 +10508,7 @@ def test_activation_journal_config_identity_transition_is_terminal_and_exact(
         core.pop("predecessor_env_sha256")
         core.pop("next_env_file")
         core.pop("next_env_file_sha256")
+        core.pop("engineer_provision_committed")
         core["config_identity_sha256"] = legacy_identity
 
     _rewrite_signed_journal(legacy_terminal.path, convert_to_legacy_terminal)
@@ -9651,6 +10558,7 @@ def test_activation_journal_config_identity_transition_is_terminal_and_exact(
         core.pop("predecessor_env_sha256")
         core.pop("next_env_file")
         core.pop("next_env_file_sha256")
+        core.pop("engineer_provision_committed")
         core["config_identity_sha256"] = legacy_identity
 
     _rewrite_signed_journal(legacy_unfinished.path, convert_to_legacy_unfinished)
@@ -9683,6 +10591,7 @@ def test_activation_journal_config_identity_transition_is_terminal_and_exact(
         core.pop("predecessor_env_sha256")
         core.pop("next_env_file")
         core.pop("next_env_file_sha256")
+        core.pop("engineer_provision_committed")
         core["config_identity_sha256"] = operator._activation_legacy_config_identity(  # noqa: SLF001
             phase_a_config,
             "4" * 64,
@@ -10096,6 +11005,7 @@ def test_v2_journal_upgrade_then_exact_disabled_to_enabled_obsidian_transition(
         core.pop("predecessor_env_sha256")
         core.pop("next_env_file")
         core.pop("next_env_file_sha256")
+        core.pop("engineer_provision_committed")
 
     _rewrite_signed_journal(path, make_v2_terminal)
     bootstrap = operator.DurableActivationJournal(
@@ -11158,6 +12068,7 @@ def test_empty_two_field_v3_transition_shape_normalizes_to_no_transition(
     def make_two_field_v3(core: dict[str, object]) -> None:
         core.pop("next_env_file")
         core.pop("next_env_file_sha256")
+        core.pop("engineer_provision_committed")
 
     _rewrite_signed_journal(journal.path, make_two_field_v3)
     reopened = operator.DurableActivationJournal(

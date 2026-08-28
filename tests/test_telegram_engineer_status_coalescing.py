@@ -63,6 +63,23 @@ def _terminal_text(job_id: str) -> dict[str, Any]:
     }
 
 
+def _unknown(job_id: str) -> dict[str, Any]:
+    return {
+        "id": "notif_unknown_1",
+        "chat_id": "5001",
+        "body": "Engineer state is truthfully unknown",
+        "kind": "engineer_command_unknown",
+        "dedup_key": f"engineer-unknown:v1:{job_id}:{'8' * 64}",
+        "status_update": {
+            "schema": "friday.telegram-status.v1",
+            "operation_id": f"engineer:{job_id}",
+            "revision": (1 << 63) - 1,
+            "terminal": True,
+            "stage": "unknown",
+        },
+    }
+
+
 class _Telegram:
     def __init__(self, final_messages: list[str]) -> None:
         self.final_messages = final_messages
@@ -71,6 +88,8 @@ class _Telegram:
     async def post(self, url: str, **kwargs: Any) -> httpx.Response:
         method = url.rsplit("/", 1)[-1]
         payload = dict(kwargs.get("json") or {})
+        if method == "sendMessage" and payload.get("text") == "Engineer result with bounded stdout":
+            self.final_messages.append(str(payload["text"]))
         if method == "editMessageText" and payload["text"].startswith("✅"):
             assert self.final_messages == ["Engineer result with bounded stdout"]
         self.calls.append((method, payload))
@@ -90,11 +109,13 @@ async def test_progress_and_no_file_terminal_share_one_status_without_body_leaka
     acknowledgements: list[tuple[list[str], list[str]]] = []
     telegram = _Telegram(final_messages)
 
-    async def backend_json(*_args: Any, **_kwargs: Any) -> dict[str, Any]:
-        return {"items": items, "count": len(items)}
-
-    async def send_message(_client: object, _chat_id: int, text: str, **_kwargs: Any) -> None:
-        final_messages.append(text)
+    async def backend_json(*args: Any, **_kwargs: Any) -> dict[str, Any]:
+        path = str(args[2])
+        if path.endswith("/claim"):
+            notification_id = path.split("/")[-2]
+            return {"item": next(item for item in items if item["id"] == notification_id)}
+        pointers = [{key: item[key] for key in ("id", "chat_id", "kind", "dedup_key")} for item in items]
+        return {"items": pointers, "count": len(pointers)}
 
     async def ack(
         _backend: object,
@@ -106,7 +127,6 @@ async def test_progress_and_no_file_terminal_share_one_status_without_body_leaka
         acknowledgements.append((list(sent), list(failed)))
 
     monkeypatch.setattr(bridge, "_backend_json", backend_json)
-    monkeypatch.setattr(bridge, "_send_message", send_message)
     monkeypatch.setattr(bridge, "_ack_outbound", ack)
     try:
         await bridge._drain_outbound(telegram, object())  # type: ignore[arg-type]  # noqa: SLF001
@@ -114,17 +134,66 @@ async def test_progress_and_no_file_terminal_share_one_status_without_body_leaka
     finally:
         bridge._inbox.close()  # noqa: SLF001
 
-    assert [method for method, _payload in telegram.calls] == ["sendMessage", "editMessageText"]
+    assert [method for method, _payload in telegram.calls] == [
+        "sendMessage",
+        "sendMessage",
+        "editMessageText",
+    ]
     running = telegram.calls[0][1]["text"]
     assert "Контрольный замер: 1 мин 15 с" in running
     assert "stdout 2.0 КиБ" in running and "stderr 17 Б" in running
     assert "оставалось 3 мин 45 с" in running
     assert "99%" not in running and "secret model output" not in running
-    assert telegram.calls[1][1]["text"] == (
+    assert telegram.calls[1][1]["text"] == "Engineer result with bounded stdout"
+    assert telegram.calls[2][1]["text"] == (
         f"✅ Engineer-задача завершена. Результат отправлен.\nJob: {job_id}."
     )
     assert final_messages == ["Engineer result with bounded stdout"]
     assert acknowledgements == [(["notif_progress_1", "notif_terminal_text_1"], [])]
+    assert snapshot == {
+        "message_id": 701,
+        "revision": (1 << 63) - 1,
+        "terminal": True,
+    }
+
+
+@pytest.mark.asyncio
+async def test_unknown_terminally_replaces_the_prior_running_status(tmp_path, monkeypatch) -> None:
+    bridge = _bridge(tmp_path)
+    job_id = "d" * 32
+    items = [_progress(job_id), _unknown(job_id)]
+    telegram = _Telegram([])
+
+    async def backend_json(*args: Any, **_kwargs: Any) -> dict[str, Any]:
+        path = str(args[2])
+        if path.endswith("/claim"):
+            notification_id = path.split("/")[-2]
+            return {"item": next(item for item in items if item["id"] == notification_id)}
+        return {
+            "items": [{key: item[key] for key in ("id", "chat_id", "kind", "dedup_key")} for item in items],
+            "count": len(items),
+        }
+
+    async def ack(*_args: Any, **_kwargs: Any) -> None:
+        return None
+
+    monkeypatch.setattr(bridge, "_backend_json", backend_json)
+    monkeypatch.setattr(bridge, "_ack_outbound", ack)
+    try:
+        await bridge._drain_outbound(telegram, object())  # type: ignore[arg-type]  # noqa: SLF001
+        snapshot = bridge._inbox.telegram_status_message(5001, f"engineer:{job_id}")  # noqa: SLF001
+    finally:
+        bridge._inbox.close()  # noqa: SLF001
+
+    assert [method for method, _payload in telegram.calls] == [
+        "sendMessage",
+        "sendMessage",
+        "editMessageText",
+    ]
+    assert telegram.calls[1][1]["text"] == "Engineer state is truthfully unknown"
+    assert telegram.calls[2][1]["text"] == (
+        f"⚠️ Состояние Engineer-задачи неизвестно. Ни успех, ни ошибка не подтверждены.\nJob: {job_id}."
+    )
     assert snapshot == {
         "message_id": 701,
         "revision": (1 << 63) - 1,
@@ -146,8 +215,16 @@ async def test_delivered_no_file_result_retries_only_missing_terminal_status(
     class Telegram:
         async def post(self, url: str, **_kwargs: Any) -> httpx.Response:
             nonlocal status_attempts
-            status_attempts += 1
+            payload = dict(_kwargs.get("json") or {})
             request = httpx.Request("POST", url)
+            if payload.get("text") == "Engineer result with bounded stdout":
+                final_messages.append(str(payload["text"]))
+                return httpx.Response(
+                    200,
+                    json={"ok": True, "result": {"message_id": 701}},
+                    request=request,
+                )
+            status_attempts += 1
             if status_attempts == 1:
                 raise httpx.ConnectError("synthetic pre-accept failure", request=request)
             return httpx.Response(
@@ -156,11 +233,11 @@ async def test_delivered_no_file_result_retries_only_missing_terminal_status(
                 request=request,
             )
 
-    async def backend_json(*_args: Any, **_kwargs: Any) -> dict[str, Any]:
-        return {"items": [item], "count": 1}
-
-    async def send_message(_client: object, _chat_id: int, text: str, **_kwargs: Any) -> None:
-        final_messages.append(text)
+    async def backend_json(*args: Any, **_kwargs: Any) -> dict[str, Any]:
+        if str(args[2]).endswith("/claim"):
+            return {"item": item}
+        pointer = {key: item[key] for key in ("id", "chat_id", "kind", "dedup_key")}
+        return {"items": [pointer], "count": 1}
 
     async def ack(
         _backend: object,
@@ -172,7 +249,6 @@ async def test_delivered_no_file_result_retries_only_missing_terminal_status(
         acknowledgements.append(list(sent))
 
     monkeypatch.setattr(bridge, "_backend_json", backend_json)
-    monkeypatch.setattr(bridge, "_send_message", send_message)
     monkeypatch.setattr(bridge, "_ack_outbound", ack)
     try:
         await bridge._drain_outbound(Telegram(), object())  # type: ignore[arg-type]  # noqa: SLF001

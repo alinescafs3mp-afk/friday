@@ -250,6 +250,13 @@ def stage_progress_notification(
     parse_progress_envelope(_canonical_json(probe))
 
     with storage.transaction() as conn:
+        conversation = conn.execute(
+            """SELECT 1 FROM conversations
+                 WHERE id=? AND user_id=? AND is_archived=0""",
+            (conversation_id, actor_id),
+        ).fetchone()
+        if conversation is None:
+            raise ProgressDeliveryError("progress_scope_inactive")
         existing = conn.execute(
             """SELECT n.id,n.user_id,n.chat_id,n.kind,n.dedup_key,n.body,n.status
                   FROM outbound_notifications AS n
@@ -277,12 +284,6 @@ def stage_progress_notification(
                 status=str(row["status"]),
             )
 
-        conversation = conn.execute(
-            "SELECT 1 FROM conversations WHERE id=? AND user_id=?",
-            (conversation_id, actor_id),
-        ).fetchone()
-        if conversation is None:
-            raise ProgressDeliveryError("progress_conversation_unavailable")
         notification_id = new_id("notif")
         envelope = {**probe, "notification_id": notification_id}
         body = _canonical_json(envelope)
@@ -335,8 +336,8 @@ def progress_notification_projection(
     if row.get("status") not in {None, "pending"}:
         raise ProgressDeliveryError("progress_notification_unavailable")
     conversation = storage.get_conversation(str(envelope["conversation_id"]), actor_id)
-    if not isinstance(conversation, Mapping):
-        raise ProgressDeliveryError("progress_conversation_unavailable")
+    if not isinstance(conversation, Mapping) or int(conversation.get("is_archived") or 0) != 0:
+        raise ProgressDeliveryError("progress_scope_inactive")
     return {"body": _progress_text(envelope)}
 
 

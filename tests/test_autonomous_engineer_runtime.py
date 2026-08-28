@@ -1834,6 +1834,16 @@ def test_autonomous_engineer_history_excludes_operational_and_fabricated_termina
         },
         {
             "role": "assistant",
+            "content": "Состояние Engineer-задачи `" + "3" * 32 + "` неизвестно.",
+            "metadata_json": json.dumps({"engineer_command_unknown": {"job_id": "3" * 32}}),
+        },
+        {
+            "role": "assistant",
+            "content": "Состояние Engineer-задачи `" + "4" * 32 + "` неизвестно.",
+            "metadata_json": "{}",
+        },
+        {
+            "role": "assistant",
             "content": (
                 "Engineer-задание 080521363782558983 завершено. Проверенный архив результата приложен."
             ),
@@ -1853,6 +1863,7 @@ def test_autonomous_engineer_history_excludes_operational_and_fabricated_termina
     assert "Предыдущая задача" in rendered
     assert "Обычный проверенный ответ." in rendered
     assert not any("Engineer-задание" in item for item in rendered)
+    assert not any("Состояние Engineer-задачи" in item for item in rendered)
 
 
 @pytest.mark.asyncio

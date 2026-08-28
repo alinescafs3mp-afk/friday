@@ -10,13 +10,15 @@ from hashlib import sha256
 from typing import Any
 
 from friday.config import env as config_env
+from friday.engineer_source_binding import canonical_engineer_source_step_id
 
 from .confirm import OwnerConfirmationAuthority
 from .contracts import (
+    COMMAND_GRANT_SCHEMA,
+    COMMAND_GRANT_VERSION,
     GRANT_TTL_DEFAULT_SEC,
     GRANT_TTL_MAX_SEC,
     MAX_GRANT_CHARS,
-    SCHEMA,
     AutonomousDelegation,
     CommandError,
     CommandLane,
@@ -123,12 +125,13 @@ class CommandGrantAuthority:
             "lane": request.lane.value,
             "nonce": secrets.token_hex(16),
             "origin": request.origin.value,
-            "schema": SCHEMA,
+            "schema": COMMAND_GRANT_SCHEMA,
             "source_hash": sealed.source_hash,
             "source_row_id": sealed.source_row_id,
+            "source_step_id": sealed.source_step_id,
             "telegram_update_id": sealed.telegram_update_id,
             "tenant_id": sealed.tenant_id,
-            "v": 4,
+            "v": COMMAND_GRANT_VERSION,
         }
         return self._encode(payload)
 
@@ -180,12 +183,13 @@ class CommandGrantAuthority:
             "lane": request.lane.value,
             "nonce": secrets.token_hex(16),
             "origin": request.origin.value,
-            "schema": SCHEMA,
+            "schema": COMMAND_GRANT_SCHEMA,
             "source_hash": sealed.source_hash,
             "source_row_id": sealed.source_row_id,
+            "source_step_id": sealed.source_step_id,
             "telegram_update_id": sealed.telegram_update_id,
             "tenant_id": sealed.tenant_id,
-            "v": 4,
+            "v": COMMAND_GRANT_VERSION,
         }
         return self._encode(payload)
 
@@ -201,8 +205,12 @@ class CommandGrantAuthority:
     ) -> VerifiedCommandGrant:
         payload = self._decode(token)
         now = int(self._clock())
-        if payload.get("schema") != SCHEMA or payload.get("v") != 4:
+        if payload.get("schema") != COMMAND_GRANT_SCHEMA or payload.get("v") != COMMAND_GRANT_VERSION:
             raise CommandError("invalid_grant")
+        try:
+            source_step_id = canonical_engineer_source_step_id(payload.get("source_step_id"))
+        except ValueError as exc:
+            raise CommandError("invalid_grant") from exc
         if str(payload.get("actor_id") or "") != actor_id:
             raise CommandError("grant_actor_mismatch")
         if str(payload.get("command_digest") or "") != request.digest:
@@ -274,6 +282,7 @@ class CommandGrantAuthority:
             conversation_id=str(payload["conversation_id"]),
             channel=str(payload["channel"]),
             source_row_id=str(payload["source_row_id"]),
+            source_step_id=source_step_id,
             source_hash=str(payload["source_hash"]),
             telegram_update_id=str(payload["telegram_update_id"]),
             isolation_profile=isolation,

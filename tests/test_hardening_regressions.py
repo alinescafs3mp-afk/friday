@@ -342,6 +342,7 @@ def test_user_export_includes_versions_permissions_and_sessions(storage):
     export = storage.export_user("alice")
     payload = json.loads(Path(export["path"]).read_text(encoding="utf-8"))
     assert payload["format"] == "jericho-user-export-v3"
+    assert payload["scope"]["engineer_command_ledger"] == "external"
     assert len(payload["knowledge_object_versions"]) == 2
     assert payload["user_permission_overrides"][0]["security_id"] == "web.search"
     assert payload["channel_sessions"][0]["channel_id"] == "42"

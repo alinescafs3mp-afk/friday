@@ -2479,14 +2479,22 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
 
     @asynccontextmanager
     async def lifespan(application: FastAPI) -> AsyncIterator[None]:
+        from friday.storage._restore_barrier import assert_no_pending_database_restore
+
+        # Refuse before ensure_runtime_dirs/init_storage can chmod, create, open,
+        # or migrate any member of an interrupted restore transaction.
+        assert_no_pending_database_restore(settings.state_dir)
         ensure_runtime_dirs(settings)
         # SQLite protects individual transactions, but two full API runtimes
         # would still duplicate workers, scheduled backups, and side effects.
         # Keep one backend role per state directory and fail fast with useful
         # lock metadata instead of running a split-brain installation.
-        with ProcessLease(
-            settings.state_dir / "backend.lock",
-            protocol="friday.backend.v1",
+        with (
+            ProcessLease(
+                settings.state_dir / "backend.lock",
+                protocol="friday.backend.v1",
+            ),
+            ExitStack() as dormant_engineer_backup_authority_stack,
         ):
             storage = init_storage(settings)
             storage.ensure_user(
@@ -2752,6 +2760,68 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
             )
             for tool in organs.tools(organ_ctx):
                 kernel.register(tool)
+            engineer_command_account_inventory = None
+            from friday.organs.engineer.command.backup_authority import (
+                command_store_backup_authority_required,
+            )
+
+            command_store_root = Path(settings.engineer_command_store_dir)
+            command_store_state = Path(settings.state_dir)
+            command_store_evidence = (
+                command_store_root,
+                Path(settings.engineer_command_key_file),
+                command_store_root / "kernel.sqlite",
+                command_store_root / "kernel.lock",
+                command_store_root / "kernel.lease",
+                command_store_root / "jobs",
+                command_store_root / "workbenches",
+                command_store_state / "engineer-command-store.anchor.json",
+                command_store_state / "engineer-command-store.bootstrap.json",
+                command_store_state / "engineer-command-store.pending.json",
+                command_store_state / "engineer-command-store.committed.json",
+                command_store_state / ".engineer-command-store.test.key",
+            )
+            engineer_command_account_inventory_required = command_store_backup_authority_required(settings)
+            if not engineer_command_account_inventory_required:
+                for evidence_path in command_store_evidence:
+                    try:
+                        present = evidence_path.exists() or evidence_path.is_symlink()
+                    except OSError:
+                        present = True
+                    if present:
+                        engineer_command_account_inventory_required = True
+                        break
+            if settings.engineer_command_enabled:
+                from friday.organs.engineer import EngineerOrgan
+
+                engineer_organ = next(
+                    (organ for organ in organs.organs if isinstance(organ, EngineerOrgan)),
+                    None,
+                )
+                if engineer_organ is not None:
+                    engineer_command_service = engineer_organ.command_service(organ_ctx)
+                    if engineer_command_service is not None:
+                        storage.bind_engineer_command_backup_authority(engineer_command_service.kernel.store)
+                        engineer_command_account_inventory = (
+                            engineer_command_service.account_deletion_inventory
+                        )
+            elif engineer_command_account_inventory_required:
+                # Feature disablement is not deletion of the independent ledger.
+                # Keep its already-provisioned generation available only as the
+                # lock-coordinated read observer used by online backup.  The
+                # factory is runtime-only: it never creates directories, a key,
+                # SQLite, or lifecycle anchors, and validating one snapshot here
+                # makes partial/forged dormant residue a startup error instead of
+                # silently degrading scheduled backups forever.
+                from friday.organs.engineer.command_tools import (
+                    open_engineer_command_backup_authority,
+                )
+
+                dormant_backup_authority = dormant_engineer_backup_authority_stack.enter_context(
+                    open_engineer_command_backup_authority(settings)
+                )
+                dormant_backup_authority.backup_authority_snapshot()
+                storage.bind_engineer_command_backup_authority(dormant_backup_authority)
             kernel.assert_risk_declarations_agree()
             # P5 observes only the final durable outcome of a capability that
             # has actually been registered.  Load its exact current-release
@@ -2870,6 +2940,10 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
             application.state.memory_vault = memory_vault
             application.state.memory_vault_deletion = memory_vault_deletion
             application.state.obsidian_runtime = obsidian_runtime
+            application.state.engineer_command_account_inventory = engineer_command_account_inventory
+            application.state.engineer_command_account_inventory_required = (
+                engineer_command_account_inventory_required
+            )
             application.state.workers = workers
             application.state.organs = organs
             application.state.rate_limiter = SlidingWindowLimiter()
@@ -2943,6 +3017,24 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
                         if isinstance(orchestrated_agent, OrchestrationRouter):
                             await orchestrated_agent.close()
                         await workers.stop()
+                        # A cancelled worker await does not stop its executor
+                        # thread.  Drain every tracked physical call before an
+                        # organ closes the command ledger or another owned
+                        # service underneath that call.
+                        drain_budget = workers.max_timeout_sec + 30.0
+                        stranded = await asyncio.to_thread(wait_until_idle, drain_budget)
+                        while stranded:
+                            # Keep the backend lease and every dependency open
+                            # until the physical calls finish.  systemd may still
+                            # terminate a genuinely wedged process, but an orderly
+                            # shutdown must never release the lease or close a
+                            # ledger/database underneath a live executor thread.
+                            LOGGER.warning(
+                                "Shutdown is still draining blocking workers after %.0fs (%s)",
+                                drain_budget,
+                                stranded,
+                            )
+                            stranded = await asyncio.to_thread(wait_until_idle, drain_budget)
                         try:
                             await organs.close()
                         except Exception as exc:  # noqa: BLE001 - shutdown must continue to storage close
@@ -2953,26 +3045,6 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
                         await web_surfer.close()
                         if mcp_manager is not None:
                             await mcp_manager.close()
-                # workers.stop() only cancels the asyncio tasks; a worker cancelled
-                # while awaiting asyncio.to_thread(storage.<db op>) leaves that call
-                # still running on the default executor thread.
-                #
-                # The drain is bounded by the WORKERS' own budget, not by a constant.
-                # A flat 30 s was shorter than what a worker is allowed to hold a
-                # thread for — `knowledge_dedup` scans for up to 600 s inside a 900 s
-                # tick — so shutdown routinely gave up while the work was legitimately
-                # still running. And `storage.close()` does not cover it either: it
-                # takes the write lock, while the read path deliberately takes no lock
-                # at all, so a thread halfway through a SELECT is invisible to it.
-                drain_budget = workers.max_timeout_sec + 30.0
-                stranded = await asyncio.to_thread(wait_until_idle, drain_budget)
-                if stranded:
-                    LOGGER.warning(
-                        "Shutting down with %s still executing after %.0fs; "
-                        "their connections will be closed underneath them",
-                        stranded,
-                        drain_budget,
-                    )
                 with suppress(Exception):
                     # shutdown_default_executor's own timeout argument is 3.12+ and
                     # requires-python is >=3.11, hence wait_for.

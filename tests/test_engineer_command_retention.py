@@ -11,7 +11,13 @@ from types import SimpleNamespace
 
 import pytest
 
+from friday.interaction_control_plane.engineer_work_item import ENGINEER_WORK_ITEM_RETENTION_DAYS
+from friday.interaction_control_plane.engineer_work_item_schema import (
+    ENGINEER_WORK_ITEM_MAX_TTL_SECONDS,
+)
+from friday.orchestration.engineer_work_item_coordinator import EngineerWorkItemRuntimeCoordinator
 from friday.organs.engineer import EngineerOrgan
+from friday.organs.engineer import command_tools as command_tools_module
 from friday.organs.engineer.command import (
     CommandError,
     CommandGrantAuthority,
@@ -38,6 +44,12 @@ from friday.permissions import LEGACY_OWNER_USER_ID, AuthorizationService
 
 _JOB_ID = "3" * 32
 _CHAT_ID = "5001"
+
+
+def test_work_item_ttl_strictly_precedes_command_output_retention() -> None:
+    expected_retention = ENGINEER_WORK_ITEM_RETENTION_DAYS * 24 * 60 * 60
+    assert expected_retention == command_tools_module._WORKSPACE_RETENTION_SEC  # noqa: SLF001
+    assert 0 < ENGINEER_WORK_ITEM_MAX_TTL_SECONDS < expected_retention
 
 
 def _authority() -> CommandGrantAuthority:
@@ -162,6 +174,7 @@ def _service(
         authorization.register_capability(capability)
     service = EngineerCommandService.__new__(EngineerCommandService)
     service.kernel = kernel
+    service.work_items = EngineerWorkItemRuntimeCoordinator(kernel.store)
     service.storage = storage
     service.settings = SimpleNamespace(
         engineer_mode_enabled=True,
@@ -314,6 +327,13 @@ def test_text_delivered_no_file_job_retires_workspace_without_an_archive(storage
     assert len(queued) == 1 and queued[0]["kind"] == TERMINAL_TEXT_NOTIFICATION_KIND
     storage.mark_notifications(sent_ids=[queued[0]["id"]])
     assert storage.list_pending_notifications() == []
+    assert service.publish_terminal_jobs() == {"staged": 0, "reconciled": 1, "failed": 0}
+    sent_at = datetime.fromtimestamp(old, UTC).isoformat(timespec="seconds")
+    with storage.transaction() as conn:
+        conn.execute(
+            "UPDATE outbound_notifications SET sent_at=? WHERE id=?",
+            (sent_at, queued[0]["id"]),
+        )
     with service.kernel.store.transaction():
         service.kernel.store._conn.execute(  # noqa: SLF001 - exact aging fixture
             "UPDATE command_job_publications SET updated_at=? WHERE job_id=?",
@@ -335,10 +355,74 @@ def test_text_delivered_no_file_job_retires_workspace_without_an_archive(storage
     assert publication is not None
     assert dict(publication) == {
         "carrier_retired_at": now,
-        "last_error_code": "no_generated_files",
-        "state": "blocked",
+        "last_error_code": "",
+        "state": "sent",
     }
     assert storage.list_pending_notifications() == []
+    service.kernel.close()
+
+
+def test_pending_text_carrier_never_authorizes_workspace_retention(storage, tmp_path: Path) -> None:
+    service, _receipt = _service(storage, tmp_path, generated_output=False)
+    now = time.time()
+    old = now - 31 * 24 * 60 * 60
+    assert service.publish_terminal_jobs() == {"staged": 1, "reconciled": 0, "failed": 0}
+    with service.kernel.store.transaction():
+        service.kernel.store._conn.execute(  # noqa: SLF001 - exact aging fixture
+            "UPDATE command_job_publications SET updated_at=? WHERE job_id=?",
+            (old, _JOB_ID),
+        )
+
+    assert service.retain_terminal_jobs(now=now) == {"retired": 0, "failed": 0, "ephemera": 0}
+    assert service.kernel.store.job_dir(_JOB_ID).exists()
+    publication = service.kernel.store._conn.execute(  # noqa: SLF001
+        "SELECT state,carrier_retired_at FROM command_job_publications WHERE job_id=?",
+        (_JOB_ID,),
+    ).fetchone()
+    assert publication is not None and dict(publication) == {
+        "carrier_retired_at": None,
+        "state": "staged",
+    }
+    service.kernel.close()
+
+
+def test_retention_worker_runs_bounded_work_item_expiry_and_pruning(
+    storage,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    service, _receipt = _service(storage, tmp_path, generated_output=False)
+    moment = datetime(2026, 8, 27, 12, 0, tzinfo=UTC).timestamp()
+    observed: list[tuple[str, str, int]] = []
+
+    def expire(conn, *, now: str, limit: int = 100) -> int:
+        assert conn.in_transaction
+        observed.append(("expire", now, limit))
+        return 0
+
+    def prune(conn, *, before: str, limit: int = 100) -> int:
+        assert conn.in_transaction
+        observed.append(("prune", before, limit))
+        return 0
+
+    monkeypatch.setattr(
+        "friday.organs.engineer.command_tools.expire_due_engineer_work_items_in_transaction",
+        expire,
+    )
+    monkeypatch.setattr(
+        "friday.organs.engineer.command_tools.prune_engineer_work_items_in_transaction",
+        prune,
+    )
+
+    assert service.retain_terminal_jobs(now=moment) == {
+        "retired": 0,
+        "failed": 0,
+        "ephemera": 0,
+    }
+    assert observed == [
+        ("expire", "2026-08-27T12:00:00+00:00", 100),
+        ("prune", "2026-07-28T12:00:00+00:00", 100),
+    ]
     service.kernel.close()
 
 
@@ -437,6 +521,40 @@ def test_retention_fails_closed_on_sent_body_drift(storage, tmp_path: Path) -> N
         ).fetchone()
         is not None
     )
+    service.kernel.close()
+
+
+def test_retention_rechecks_sent_row_after_artifact_read_before_workspace_delete(
+    storage,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    service, _receipt = _service(storage, tmp_path)
+    now = time.time()
+    carrier = _age_sent_publication(service, now=now)
+    original = command_tools_module.verify_sent_terminal_notification_artifact
+
+    def race_after_read(*args, **kwargs):  # noqa: ANN002, ANN003, ANN202
+        result = original(*args, **kwargs)
+        with storage.transaction() as conn:
+            conn.execute(
+                "UPDATE outbound_notifications SET status='uncertain' WHERE id=?",
+                (carrier["id"],),
+            )
+        return result
+
+    monkeypatch.setattr(
+        command_tools_module,
+        "verify_sent_terminal_notification_artifact",
+        race_after_read,
+    )
+    assert service.retain_terminal_jobs(now=now) == {"retired": 0, "failed": 1, "ephemera": 0}
+    assert service.kernel.store.job_dir(_JOB_ID).is_dir()
+    row = storage.execute(
+        "SELECT status FROM outbound_notifications WHERE id=?",
+        (carrier["id"],),
+    ).fetchone()
+    assert row is not None and row["status"] == "uncertain"
     service.kernel.close()
 
 
@@ -617,6 +735,7 @@ def test_private_store_migrates_retention_columns_and_prunes_only_ephemera(
     for column in ("stdout_bytes", "stderr_bytes", "workspace_retired_at"):
         legacy.execute(f"ALTER TABLE jobs DROP COLUMN {column}")
     for column in (
+        "next_attempt_at",
         "carrier_retired_at",
         "retention_attempts",
         "retention_next_attempt_at",
@@ -650,6 +769,7 @@ def test_private_store_migrates_retention_columns_and_prunes_only_ephemera(
         )
     }
     assert {
+        "next_attempt_at",
         "carrier_retired_at",
         "retention_attempts",
         "retention_next_attempt_at",

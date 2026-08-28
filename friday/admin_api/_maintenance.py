@@ -148,7 +148,11 @@ async def create_export(request: Request) -> dict[str, Any]:
         # способом переехать, узнает правду в худший момент — когда Friday уже нет.
         "readable_by": "archival JSON; no importer exists in Friday or elsewhere",
         "to_move_your_data": move_options,
-        "not_included": ["оригиналы загруженных файлов", "векторы поиска"],
+        "not_included": [
+            "оригиналы загруженных файлов",
+            "векторы поиска",
+            "операционный ledger и результаты Engineer-команд",
+        ],
     }
 
 

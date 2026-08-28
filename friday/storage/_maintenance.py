@@ -7,8 +7,12 @@ signatures and bodies. Mixed back into that class, so ``self.execute`` and
 
 from __future__ import annotations
 
+import shutil
+import stat
+import tempfile
 import unicodedata
 import zlib
+from dataclasses import dataclass
 
 from friday.diagnostics.runtime_lease import ProcessLease, RuntimeLeaseError
 from friday.document_catalog.schema import (
@@ -34,7 +38,6 @@ from friday.storage._base import (
     Path,
     StorageShared,
     _chmod_private,
-    _fsync_directory,
     _json_load,
     _safe_filename,
     _sha256_file,
@@ -46,6 +49,7 @@ from friday.storage._base import (
     hmac,
     json,
     os,
+    re,
     sqlite3,
     utc_now,
 )
@@ -61,6 +65,28 @@ from friday.storage._privacy import (
     _not_private_reminder_entity,
     _private_entity_material_seeded_query,
 )
+from friday.storage._restore_barrier import (
+    database_restore_intent_lstat,
+    database_restore_intent_path,
+)
+
+
+def _engineer_command_backup_authority_required(settings: Any) -> bool:
+    """Load the Engineer package only after the storage package is initialized.
+
+    ``command.kernel`` depends on ``file_delivery``, which in turn imports the
+    assembled storage surface. Importing the Engineer package while storage
+    mixins are still being assembled therefore creates a real import cycle.
+    Backup operations run after startup and can safely resolve this dependency
+    lazily.
+    """
+
+    from friday.organs.engineer.command.backup_authority import (
+        command_store_backup_authority_required,
+    )
+
+    return command_store_backup_authority_required(settings)
+
 
 # Historical rows are an egress surface, not inert bookkeeping.  A corrupt or
 # hostile database must not make export spend unbounded memory proving that a
@@ -74,6 +100,929 @@ _EXPORT_CURRENT_FIELD_MAX_BYTES = 1_048_576
 _EXPORT_CURRENT_JSON_MAX_BYTES = 1_048_576
 _EXPORT_INBOX_JSON_MAX_BYTES = 8_192
 _EXPORT_INBOX_NOTES_MAX_CHARS = 4_000
+_ENGINEER_BACKUP_AUTHORITY_FIELDS = frozenset(
+    {
+        "authority_sequence",
+        "database_sha256",
+        "mac",
+        "quiescent",
+        "schema",
+        "store_id",
+    }
+)
+_BACKUP_SCOPE = {
+    "sqlite_database": "included",
+    "raw_files": "external",
+    "memory_vault": "external",
+    "obsidian_profiles_and_vaults": "external",
+    "engineer_command_ledger": "external",
+    "model_weights": "external",
+    "configuration_and_secrets": "external",
+}
+_RESTORE_INTENT_SCHEMA = "friday.database-restore-intent.v1"
+_RESTORE_INTENT_FIELDS = frozenset(
+    {
+        "created_at",
+        "database_path",
+        "engineer_command_ledger_authority",
+        "original_files",
+        "phase",
+        "recovery_manifest_sha256",
+        "recovery_path",
+        "retain_recovery",
+        "schema",
+        "target_database",
+        "target_sha256",
+    }
+)
+
+
+@dataclass(frozen=True, slots=True)
+class _RestoreRecoveryFile:
+    path: Path
+    size_bytes: int
+    sha256: str
+    device: int
+    inode: int
+
+
+_RestoreFileIdentity = tuple[int, int, int, int, int]
+
+
+class _RestoreIntentCleanupDurabilityError(RuntimeError):
+    """The data generation is known, but marker-unlink durability is not."""
+
+    def __init__(self, outcome: str, cause: BaseException) -> None:
+        self.outcome = outcome
+        super().__init__(
+            f"Database restore {outcome}, but restore-intent cleanup durability is uncertain: "
+            f"{type(cause).__name__}: {cause}"
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class _LoadedRestoreIntent:
+    intent: dict[str, Any]
+    intent_device: int
+    intent_inode: int
+    intent_sha256: str
+    recovery_path: Path
+    recovery_device: int
+    recovery_inode: int
+    recovery_files: dict[str, _RestoreRecoveryFile]
+
+
+def _strict_fsync_directory(path: Path) -> None:
+    if os.name == "nt":
+        return
+    flags = os.O_RDONLY | os.O_DIRECTORY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0)
+    descriptor = os.open(str(path), flags)
+    try:
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
+
+
+def _strict_fsync_file(path: Path) -> None:
+    flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0)
+    descriptor = os.open(str(path), flags)
+    try:
+        observed = os.fstat(descriptor)
+        if not stat.S_ISREG(observed.st_mode) or observed.st_uid != os.geteuid():
+            raise RuntimeError("Restore durability path is not a private regular file")
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
+
+
+def _read_private_restore_file(path: Path, *, maximum: int) -> bytes:
+    flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0)
+    descriptor = os.open(str(path), flags)
+    try:
+        observed = os.fstat(descriptor)
+        if (
+            not stat.S_ISREG(observed.st_mode)
+            or observed.st_uid != os.geteuid()
+            or observed.st_mode & 0o077
+            or observed.st_size <= 0
+            or observed.st_size > maximum
+        ):
+            raise RuntimeError("Restore private file is invalid")
+        payload = os.read(descriptor, maximum + 1)
+        if len(payload) > maximum or os.read(descriptor, 1):
+            raise RuntimeError("Restore private file is invalid")
+        return payload
+    finally:
+        os.close(descriptor)
+
+
+def _sha256_private_restore_file(path: Path) -> str:
+    flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0)
+    descriptor = os.open(str(path), flags)
+    digest = hashlib.sha256()
+    try:
+        observed = os.fstat(descriptor)
+        if not stat.S_ISREG(observed.st_mode) or observed.st_uid != os.geteuid() or observed.st_mode & 0o077:
+            raise RuntimeError("Restore private file is invalid")
+        while True:
+            chunk = os.read(descriptor, 1024 * 1024)
+            if not chunk:
+                break
+            digest.update(chunk)
+    finally:
+        os.close(descriptor)
+    return digest.hexdigest()
+
+
+def _restore_intent_path(settings: Any) -> Path:
+    return database_restore_intent_path(Path(settings.state_dir))
+
+
+def _write_restore_intent(path: Path, payload: dict[str, Any]) -> None:
+    if set(payload) != _RESTORE_INTENT_FIELDS:
+        raise RuntimeError("Restore intent is incomplete")
+    _write_json_atomic(path, payload)
+    _strict_fsync_directory(path.parent)
+
+
+def _remove_restore_intent(path: Path) -> None:
+    # ``missing_ok`` would turn an independently disappeared marker into a
+    # successful commit/rollback acknowledgement.  Only an unlink of a marker
+    # observed by lstat, followed by a durable directory sync and an lstat
+    # ENOENT postcondition, is a completed cleanup.
+    if database_restore_intent_lstat(path) is None:
+        raise RuntimeError("Restore intent disappeared before cleanup")
+    path.unlink()
+    _strict_fsync_directory(path.parent)
+    if database_restore_intent_lstat(path) is not None:
+        raise RuntimeError("Restore intent remains after cleanup")
+
+
+def _finalize_restore_intent(path: Path, *, outcome: str) -> None:
+    """Remove a marker without turning unlink-success/fsync-failure into a lie."""
+
+    try:
+        _remove_restore_intent(path)
+    except BaseException as exc:
+        # The data generation is already fsynced at this point.  Whether the
+        # marker remains or its unlink reached the running namespace, cleanup
+        # failed and the caller must report that known generation rather than
+        # infer a rollback from a second recovery attempt.
+        try:
+            database_restore_intent_lstat(path)
+        except BaseException as inspection_error:
+            raise _RestoreIntentCleanupDurabilityError(
+                outcome,
+                inspection_error,
+            ) from exc
+        raise _RestoreIntentCleanupDurabilityError(outcome, exc) from exc
+    try:
+        observed = database_restore_intent_lstat(path)
+    except BaseException as exc:
+        raise _RestoreIntentCleanupDurabilityError(outcome, exc) from exc
+    if observed is not None:
+        raise _RestoreIntentCleanupDurabilityError(
+            outcome,
+            RuntimeError("Restore intent remains after cleanup"),
+        )
+
+
+def _active_restore_paths(database_path: Path) -> tuple[Path, Path, Path]:
+    return database_path, Path(f"{database_path}-wal"), Path(f"{database_path}-shm")
+
+
+def _private_regular_files(paths: tuple[Path, ...]) -> tuple[Path, ...]:
+    present: list[Path] = []
+    for path in paths:
+        try:
+            observed = path.lstat()
+        except FileNotFoundError:
+            continue
+        if (
+            not stat.S_ISREG(observed.st_mode)
+            or stat.S_ISLNK(observed.st_mode)
+            or observed.st_uid != os.geteuid()
+        ):
+            raise RuntimeError(
+                "Database path and SQLite sidecars must not be symlinks and must be private regular files"
+            )
+        present.append(path)
+    return tuple(present)
+
+
+def _durable_recovery_bundle(
+    settings: Any,
+    snapshots: dict[Path, Path],
+    *,
+    label: str,
+    reason_type: str,
+) -> dict[str, Any]:
+    bundle = _write_recovery_bundle(
+        settings,
+        snapshots,
+        label=label,
+        reason_type=reason_type,
+    )
+    recovery_path = Path(str(bundle["path"]))
+    manifest_path = Path(str(bundle["manifest_path"]))
+    for item in bundle.get("files", []):
+        if not isinstance(item, dict) or type(item.get("name")) is not str:
+            raise RuntimeError("Restore recovery set is incomplete")
+        _strict_fsync_file(recovery_path / str(item["name"]))
+    _strict_fsync_file(manifest_path)
+    _strict_fsync_directory(recovery_path)
+    _strict_fsync_directory(recovery_path.parent)
+    return bundle
+
+
+def _load_restore_intent(
+    settings: Any,
+    database_path: Path,
+) -> _LoadedRestoreIntent:
+    intent_path = _restore_intent_path(settings)
+    try:
+        observed_intent = database_restore_intent_lstat(intent_path)
+        if observed_intent is None:
+            raise RuntimeError("Restore intent is missing")
+        if (
+            not stat.S_ISREG(observed_intent.st_mode)
+            or stat.S_ISLNK(observed_intent.st_mode)
+            or observed_intent.st_uid != os.geteuid()
+            or observed_intent.st_mode & 0o077
+            or observed_intent.st_size <= 0
+            or observed_intent.st_size > 32_768
+        ):
+            raise RuntimeError("Restore intent is invalid")
+        intent_payload = _read_private_restore_file(intent_path, maximum=32_768)
+        observed_intent_after = intent_path.lstat()
+        if (
+            int(observed_intent_after.st_dev) != int(observed_intent.st_dev)
+            or int(observed_intent_after.st_ino) != int(observed_intent.st_ino)
+            or int(observed_intent_after.st_size) != int(observed_intent.st_size)
+            or int(observed_intent_after.st_mtime_ns) != int(observed_intent.st_mtime_ns)
+            or int(observed_intent_after.st_ctime_ns) != int(observed_intent.st_ctime_ns)
+        ):
+            raise RuntimeError("Restore intent changed while it was read")
+        intent = json.loads(
+            intent_payload,
+            object_pairs_hook=_closed_json_object,
+        )
+    except (OSError, UnicodeError, json.JSONDecodeError, ValueError) as exc:
+        raise RuntimeError("Restore intent is invalid") from exc
+    if not isinstance(intent, dict) or set(intent) != _RESTORE_INTENT_FIELDS:
+        raise RuntimeError("Restore intent is invalid")
+    original_files = intent.get("original_files")
+    engineer_authority = intent.get("engineer_command_ledger_authority")
+    active_paths = _active_restore_paths(database_path)
+    active_names = {path.name for path in active_paths}
+    if (
+        intent.get("schema") != _RESTORE_INTENT_SCHEMA
+        or intent.get("phase") not in {"prepared", "committed"}
+        or type(intent.get("created_at")) is not str
+        or not str(intent.get("created_at"))
+        or intent.get("database_path") != str(database_path)
+        or type(intent.get("target_database")) is not str
+        or Path(str(intent.get("target_database"))).name != intent.get("target_database")
+        or type(intent.get("target_sha256")) is not str
+        or re.fullmatch(r"[0-9a-f]{64}", str(intent.get("target_sha256"))) is None
+        or type(intent.get("recovery_manifest_sha256")) is not str
+        or re.fullmatch(r"[0-9a-f]{64}", str(intent.get("recovery_manifest_sha256"))) is None
+        or type(intent.get("retain_recovery")) is not bool
+        or (
+            engineer_authority is not None
+            and (
+                not isinstance(engineer_authority, dict)
+                or set(engineer_authority) != _ENGINEER_BACKUP_AUTHORITY_FIELDS
+            )
+        )
+        or not isinstance(original_files, list)
+        or any(type(name) is not str or name not in active_names for name in original_files)
+        or len(original_files) != len(set(original_files))
+    ):
+        raise RuntimeError("Restore intent is invalid")
+
+    backups_dir = Path(settings.backups_dir).absolute()
+    recovery_path = Path(str(intent.get("recovery_path")))
+    if (
+        not recovery_path.is_absolute()
+        or recovery_path.parent != backups_dir
+        or not recovery_path.name.startswith("recovery-")
+    ):
+        raise RuntimeError("Restore recovery path is invalid")
+    try:
+        directory_status = recovery_path.lstat()
+        if (
+            not stat.S_ISDIR(directory_status.st_mode)
+            or stat.S_ISLNK(directory_status.st_mode)
+            or directory_status.st_uid != os.geteuid()
+            or directory_status.st_mode & 0o077
+        ):
+            raise RuntimeError("Restore recovery path is invalid")
+    except OSError as exc:
+        raise RuntimeError("Restore recovery path is invalid") from exc
+    manifest_path = recovery_path / "recovery.json"
+    try:
+        manifest_payload = _read_private_restore_file(manifest_path, maximum=65_536)
+        if not hmac.compare_digest(
+            hashlib.sha256(manifest_payload).hexdigest(),
+            str(intent["recovery_manifest_sha256"]),
+        ):
+            raise RuntimeError("Restore recovery manifest changed")
+        manifest = json.loads(
+            manifest_payload,
+            object_pairs_hook=_closed_json_object,
+        )
+    except (OSError, UnicodeError, json.JSONDecodeError, ValueError) as exc:
+        raise RuntimeError("Restore recovery manifest is invalid") from exc
+    expected_manifest_fields = {
+        "created_at",
+        "label",
+        "verified",
+        "restorable_by_automatic_command",
+        "reason_type",
+        "files",
+        "note",
+    }
+    if (
+        not isinstance(manifest, dict)
+        or set(manifest) != expected_manifest_fields
+        or manifest.get("verified") is not False
+        or manifest.get("restorable_by_automatic_command") is not False
+        or not isinstance(manifest.get("files"), list)
+    ):
+        raise RuntimeError("Restore recovery manifest is invalid")
+    recovery_files: dict[str, _RestoreRecoveryFile] = {}
+    for item in manifest["files"]:
+        if (
+            not isinstance(item, dict)
+            or set(item) != {"name", "sha256", "size_bytes"}
+            or type(item.get("name")) is not str
+            or item["name"] not in active_names
+            or item["name"] in recovery_files
+            or type(item.get("size_bytes")) is not int
+            or item["size_bytes"] < 0
+            or type(item.get("sha256")) is not str
+            or re.fullmatch(r"[0-9a-f]{64}", item["sha256"]) is None
+        ):
+            raise RuntimeError("Restore recovery manifest is invalid")
+        source = recovery_path / item["name"]
+        try:
+            source_status = source.lstat()
+        except OSError as exc:
+            raise RuntimeError("Restore recovery set is incomplete") from exc
+        if (
+            not stat.S_ISREG(source_status.st_mode)
+            or stat.S_ISLNK(source_status.st_mode)
+            or source_status.st_uid != os.geteuid()
+            or source_status.st_mode & 0o077
+            or source_status.st_size != item["size_bytes"]
+            or not hmac.compare_digest(
+                _sha256_private_restore_file(source),
+                item["sha256"],
+            )
+        ):
+            raise RuntimeError("Restore recovery set is invalid")
+        recovery_files[item["name"]] = _RestoreRecoveryFile(
+            path=source,
+            size_bytes=int(item["size_bytes"]),
+            sha256=str(item["sha256"]),
+            device=int(source_status.st_dev),
+            inode=int(source_status.st_ino),
+        )
+    if set(recovery_files) != set(original_files):
+        raise RuntimeError("Restore recovery set is incomplete")
+    return _LoadedRestoreIntent(
+        intent=intent,
+        intent_device=int(observed_intent.st_dev),
+        intent_inode=int(observed_intent.st_ino),
+        intent_sha256=hashlib.sha256(intent_payload).hexdigest(),
+        recovery_path=recovery_path,
+        recovery_device=int(directory_status.st_dev),
+        recovery_inode=int(directory_status.st_ino),
+        recovery_files=recovery_files,
+    )
+
+
+def _reload_exact_restore_intent(
+    settings: Any,
+    database_path: Path,
+    expected: _LoadedRestoreIntent,
+) -> _LoadedRestoreIntent:
+    """Revalidate every pathname-bound recovery authority before mutation."""
+
+    observed = _load_restore_intent(settings, database_path)
+    if (
+        observed.intent != expected.intent
+        or observed.intent_device != expected.intent_device
+        or observed.intent_inode != expected.intent_inode
+        or not hmac.compare_digest(observed.intent_sha256, expected.intent_sha256)
+        or observed.recovery_path != expected.recovery_path
+        or observed.recovery_device != expected.recovery_device
+        or observed.recovery_inode != expected.recovery_inode
+        or observed.recovery_files != expected.recovery_files
+    ):
+        raise RuntimeError("Restore intent or recovery authority changed")
+    return observed
+
+
+def _verify_recovery_directory(loaded: _LoadedRestoreIntent) -> None:
+    try:
+        observed = loaded.recovery_path.lstat()
+    except OSError as exc:
+        raise RuntimeError("Restore recovery path changed") from exc
+    if (
+        not stat.S_ISDIR(observed.st_mode)
+        or stat.S_ISLNK(observed.st_mode)
+        or observed.st_uid != os.geteuid()
+        or observed.st_mode & 0o077
+        or int(observed.st_dev) != loaded.recovery_device
+        or int(observed.st_ino) != loaded.recovery_inode
+    ):
+        raise RuntimeError("Restore recovery path changed")
+
+
+def _restore_regular_file_identity(path: Path) -> _RestoreFileIdentity:
+    try:
+        observed = path.lstat()
+    except OSError as exc:
+        raise RuntimeError("Restore file identity changed") from exc
+    if (
+        not stat.S_ISREG(observed.st_mode)
+        or stat.S_ISLNK(observed.st_mode)
+        or observed.st_uid != os.geteuid()
+        or observed.st_mode & 0o077
+    ):
+        raise RuntimeError("Restore file identity changed")
+    return (
+        int(observed.st_dev),
+        int(observed.st_ino),
+        int(observed.st_size),
+        int(observed.st_mtime_ns),
+        int(observed.st_ctime_ns),
+    )
+
+
+def _optional_restore_file_identity(path: Path) -> _RestoreFileIdentity | None:
+    try:
+        return _restore_regular_file_identity(path)
+    except RuntimeError as exc:
+        try:
+            path.lstat()
+        except FileNotFoundError:
+            return None
+        except OSError as inspection_error:
+            raise RuntimeError("Restore file identity is ambiguous") from inspection_error
+        raise exc
+
+
+def _assert_restore_path_identity(
+    path: Path,
+    expected: _RestoreFileIdentity | None,
+    *,
+    label: str,
+) -> None:
+    if _optional_restore_file_identity(path) != expected:
+        raise RuntimeError(f"{label} changed before restore mutation")
+
+
+def _unlink_expected_restore_path(
+    path: Path,
+    expected: _RestoreFileIdentity | None,
+) -> None:
+    _assert_restore_path_identity(path, expected, label="Active database path")
+    if expected is not None:
+        path.unlink()
+
+
+def _replace_expected_restore_path(
+    prepared: Path,
+    destination: Path,
+    *,
+    prepared_identity: _RestoreFileIdentity,
+    destination_identity: _RestoreFileIdentity | None,
+) -> _RestoreFileIdentity:
+    _assert_restore_path_identity(prepared, prepared_identity, label="Restore staged copy")
+    _assert_restore_path_identity(destination, destination_identity, label="Active database path")
+    os.replace(prepared, destination)
+    observed = _restore_regular_file_identity(destination)
+    # rename may update ctime, but never the inode, length or content mtime.
+    if observed[:4] != prepared_identity[:4]:
+        raise RuntimeError("Restore staged copy changed before restore mutation")
+    return observed
+
+
+def _verify_recovery_source(snapshot: _RestoreRecoveryFile) -> None:
+    try:
+        observed = snapshot.path.lstat()
+    except OSError as exc:
+        raise RuntimeError("Restore recovery source changed") from exc
+    if (
+        not stat.S_ISREG(observed.st_mode)
+        or stat.S_ISLNK(observed.st_mode)
+        or observed.st_uid != os.geteuid()
+        or observed.st_mode & 0o077
+        or int(observed.st_dev) != snapshot.device
+        or int(observed.st_ino) != snapshot.inode
+        or int(observed.st_size) != snapshot.size_bytes
+        or not hmac.compare_digest(
+            _sha256_private_restore_file(snapshot.path),
+            snapshot.sha256,
+        )
+    ):
+        raise RuntimeError("Restore recovery source changed")
+
+
+def _stage_verified_recovery_copy(
+    snapshot: _RestoreRecoveryFile,
+    destination: Path,
+) -> Path:
+    """Copy one recovery member from a pinned no-follow descriptor."""
+
+    ensure_private_directory(destination.parent)
+    source_flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0)
+    source_descriptor = -1
+    target_descriptor = -1
+    temporary: Path | None = None
+    digest = hashlib.sha256()
+    copied = 0
+    try:
+        try:
+            source_descriptor = os.open(str(snapshot.path), source_flags)
+        except OSError as exc:
+            raise RuntimeError("Restore recovery source changed") from exc
+        source_status = os.fstat(source_descriptor)
+        if (
+            not stat.S_ISREG(source_status.st_mode)
+            or source_status.st_uid != os.geteuid()
+            or source_status.st_mode & 0o077
+            or int(source_status.st_dev) != snapshot.device
+            or int(source_status.st_ino) != snapshot.inode
+            or int(source_status.st_size) != snapshot.size_bytes
+        ):
+            raise RuntimeError("Restore recovery source changed")
+        target_descriptor, temporary_name = tempfile.mkstemp(
+            prefix=f".{destination.name}.restore-",
+            suffix=".tmp",
+            dir=destination.parent,
+        )
+        temporary = Path(temporary_name)
+        os.fchmod(target_descriptor, 0o600)
+        while True:
+            chunk = os.read(source_descriptor, 1024 * 1024)
+            if not chunk:
+                break
+            digest.update(chunk)
+            copied += len(chunk)
+            view = memoryview(chunk)
+            while view:
+                written = os.write(target_descriptor, view)
+                if written <= 0:
+                    raise OSError("short restore recovery write")
+                view = view[written:]
+        final_source_status = os.fstat(source_descriptor)
+        if (
+            (int(final_source_status.st_dev), int(final_source_status.st_ino))
+            != (snapshot.device, snapshot.inode)
+            or int(final_source_status.st_size) != snapshot.size_bytes
+            or copied != snapshot.size_bytes
+            or not hmac.compare_digest(digest.hexdigest(), snapshot.sha256)
+        ):
+            raise RuntimeError("Restore recovery source changed")
+        os.fsync(target_descriptor)
+        os.close(target_descriptor)
+        target_descriptor = -1
+        os.close(source_descriptor)
+        source_descriptor = -1
+        return temporary
+    except BaseException:
+        if target_descriptor >= 0:
+            os.close(target_descriptor)
+        if source_descriptor >= 0:
+            os.close(source_descriptor)
+        if temporary is not None:
+            temporary.unlink(missing_ok=True)
+        raise
+
+
+def _verify_staged_recovery_copy(
+    path: Path,
+    snapshot: _RestoreRecoveryFile,
+) -> _RestoreFileIdentity:
+    return _verify_exact_restore_copy(
+        path,
+        size_bytes=snapshot.size_bytes,
+        sha256=snapshot.sha256,
+        error_message="Restore recovery staged copy is invalid",
+    )
+
+
+def _verify_exact_restore_copy(
+    path: Path,
+    *,
+    size_bytes: int,
+    sha256: str,
+    error_message: str,
+) -> _RestoreFileIdentity:
+    """Hash the inode still named by *path* and reject every identity drift."""
+
+    try:
+        initial_identity = _restore_regular_file_identity(path)
+        descriptor = os.open(
+            str(path),
+            os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0),
+        )
+    except OSError as exc:
+        raise RuntimeError(error_message) from exc
+    except RuntimeError as exc:
+        raise RuntimeError(error_message) from exc
+    digest = hashlib.sha256()
+    copied = 0
+    try:
+        observed = os.fstat(descriptor)
+        descriptor_identity = (
+            int(observed.st_dev),
+            int(observed.st_ino),
+            int(observed.st_size),
+            int(observed.st_mtime_ns),
+            int(observed.st_ctime_ns),
+        )
+        if (
+            not stat.S_ISREG(observed.st_mode)
+            or observed.st_uid != os.geteuid()
+            or observed.st_mode & 0o077
+            or descriptor_identity != initial_identity
+        ):
+            raise RuntimeError(error_message)
+        while True:
+            chunk = os.read(descriptor, 1024 * 1024)
+            if not chunk:
+                break
+            copied += len(chunk)
+            digest.update(chunk)
+        final = os.fstat(descriptor)
+        final_identity = (
+            int(final.st_dev),
+            int(final.st_ino),
+            int(final.st_size),
+            int(final.st_mtime_ns),
+            int(final.st_ctime_ns),
+        )
+        if (
+            final_identity != initial_identity
+            or _restore_regular_file_identity(path) != initial_identity
+            or copied != size_bytes
+            or not hmac.compare_digest(digest.hexdigest(), sha256)
+        ):
+            raise RuntimeError(error_message)
+        return initial_identity
+    finally:
+        os.close(descriptor)
+
+
+def _verify_restore_intent_authority(
+    settings: Any,
+    authority: Any | None,
+    evidence: object,
+    *,
+    database_sha256: str,
+) -> tuple[str, int, bool] | None:
+    required = _engineer_command_backup_authority_required(settings) or evidence is not None
+    if not required:
+        return None
+    if evidence is None:
+        raise RuntimeError("Restore intent Engineer authority evidence is missing")
+    if not isinstance(evidence, dict) or set(evidence) != _ENGINEER_BACKUP_AUTHORITY_FIELDS:
+        raise RuntimeError("Restore intent Engineer authority evidence is invalid")
+    if authority is None:
+        raise RuntimeError("Restore intent Engineer authority is unavailable")
+    try:
+        verified = authority.verify_main_database_backup_authority(
+            evidence,
+            database_sha256,
+        )
+    except Exception as exc:
+        raise RuntimeError("Restore intent Engineer authority changed") from exc
+    snapshot = _engineer_backup_snapshot(verified)
+    if (
+        snapshot[0] != evidence.get("store_id")
+        or snapshot[1] != evidence.get("authority_sequence")
+        or snapshot[2] is not evidence.get("quiescent")
+    ):
+        raise RuntimeError("Restore intent Engineer authority changed")
+    return snapshot
+
+
+def _discard_restore_recovery(
+    path: Path,
+    *,
+    expected_identity: tuple[int, int] | None = None,
+) -> None:
+    try:
+        if expected_identity is not None:
+            observed = path.lstat()
+            if (
+                not stat.S_ISDIR(observed.st_mode)
+                or stat.S_ISLNK(observed.st_mode)
+                or observed.st_uid != os.geteuid()
+                or (int(observed.st_dev), int(observed.st_ino)) != expected_identity
+            ):
+                raise OSError("restore recovery directory identity changed")
+        shutil.rmtree(path)
+        _strict_fsync_directory(path.parent)
+    except OSError as exc:
+        LOGGER.warning("Could not prune completed restore recovery set (%s)", type(exc).__name__)
+
+
+def _recover_interrupted_restore(
+    settings: Any,
+    database_path: Path,
+    *,
+    engineer_authority: Any | None = None,
+) -> str:
+    """Finish an interrupted restore transaction under stopped process leases."""
+
+    intent_path = _restore_intent_path(settings)
+    if database_restore_intent_lstat(intent_path) is None:
+        return "absent"
+    loaded = _load_restore_intent(settings, database_path)
+    intent = loaded.intent
+    authority_evidence = intent.get("engineer_command_ledger_authority")
+    # Refuse before even creating temporary staging files if the external ledger
+    # moved while this process was down.
+    _verify_restore_intent_authority(
+        settings,
+        engineer_authority,
+        authority_evidence,
+        database_sha256=str(intent["target_sha256"]),
+    )
+    if intent["phase"] == "committed":
+        # Committed means never rewind the new generation.  Recheck immediately
+        # before cleanup so an advanced external ledger cannot make an old marker
+        # silently disappear.
+        loaded = _reload_exact_restore_intent(settings, database_path, loaded)
+        authority_evidence = loaded.intent.get("engineer_command_ledger_authority")
+        _verify_restore_intent_authority(
+            settings,
+            engineer_authority,
+            authority_evidence,
+            database_sha256=str(intent["target_sha256"]),
+        )
+        _finalize_restore_intent(intent_path, outcome="committed")
+        if not intent["retain_recovery"]:
+            _discard_restore_recovery(
+                loaded.recovery_path,
+                expected_identity=(loaded.recovery_device, loaded.recovery_inode),
+            )
+        return "committed"
+
+    active_paths = _active_restore_paths(database_path)
+    active_originals = _private_regular_files(active_paths)
+    active_identities = {path: _restore_regular_file_identity(path) for path in active_originals}
+    staged: dict[Path, tuple[Path, _RestoreRecoveryFile]] = {}
+    try:
+        for active_path in active_paths:
+            source = loaded.recovery_files.get(active_path.name)
+            if source is not None:
+                _verify_recovery_source(source)
+                staged[active_path] = (
+                    _stage_verified_recovery_copy(source, active_path),
+                    source,
+                )
+        if set(staged) != {path for path in active_paths if path.name in loaded.recovery_files}:
+            raise RuntimeError("Restore recovery staging is incomplete")
+        _verify_recovery_directory(loaded)
+        for _prepared, source in staged.values():
+            _verify_recovery_source(source)
+        observed_active = _private_regular_files(active_paths)
+        if set(observed_active) != set(active_originals) or any(
+            _restore_regular_file_identity(path) != active_identities[path] for path in observed_active
+        ):
+            raise RuntimeError("Active database changed during restore recovery staging")
+        # The public restore path holds the exclusive ledger owner for this
+        # complete window.  Refusal therefore happens before active/recovery data
+        # mutation, while this final check also proves exact identity/quiescence.
+        _verify_restore_intent_authority(
+            settings,
+            engineer_authority,
+            authority_evidence,
+            database_sha256=str(intent["target_sha256"]),
+        )
+        # Hash the staged bytes (not merely their inode/size) after the final
+        # authority decision and immediately before the first active unlink or
+        # replacement.  Every later replacement rechecks identity and bytes.
+        staged_identities = {
+            prepared: _verify_staged_recovery_copy(prepared, source) for prepared, source in staged.values()
+        }
+        # The durable bundle is still the crash-recovery authority until the
+        # marker is removed.  Reject a directory/member pathname swap before
+        # touching the active generation, even though this attempt already has
+        # independently verified staged bytes.
+        _verify_recovery_directory(loaded)
+        for _prepared, source in staged.values():
+            _verify_recovery_source(source)
+        loaded = _reload_exact_restore_intent(settings, database_path, loaded)
+        authority_evidence = loaded.intent.get("engineer_command_ledger_authority")
+        _verify_restore_intent_authority(
+            settings,
+            engineer_authority,
+            authority_evidence,
+            database_sha256=str(intent["target_sha256"]),
+        )
+        for prepared, source in staged.values():
+            if _verify_staged_recovery_copy(prepared, source) != staged_identities[prepared]:
+                raise RuntimeError("Restore recovery staged copy changed")
+        for active_path in active_paths:
+            if active_path not in staged:
+                _unlink_expected_restore_path(
+                    active_path,
+                    active_identities.get(active_path),
+                )
+        for original, (prepared, source) in staged.items():
+            # A second full content proof closes in-place writes after the batch
+            # verification above.  os.replace never follows a final symlink, and
+            # no path-based chmod is performed after the replacement.
+            prepared_identity = _verify_staged_recovery_copy(prepared, source)
+            if prepared_identity != staged_identities[prepared]:
+                raise RuntimeError("Restore recovery staged copy changed")
+            replaced_identity = _replace_expected_restore_path(
+                prepared,
+                original,
+                prepared_identity=prepared_identity,
+                destination_identity=active_identities.get(original),
+            )
+            if _verify_staged_recovery_copy(original, source) != replaced_identity:
+                raise RuntimeError("Restore recovery staged copy changed")
+        for original in staged:
+            _strict_fsync_file(original)
+        _strict_fsync_directory(database_path.parent)
+        _finalize_restore_intent(intent_path, outcome="rolled_back")
+        if not intent["retain_recovery"]:
+            _discard_restore_recovery(
+                loaded.recovery_path,
+                expected_identity=(loaded.recovery_device, loaded.recovery_inode),
+            )
+        return "rolled_back"
+    finally:
+        for prepared, _source in staged.values():
+            prepared.unlink(missing_ok=True)
+
+
+def _closed_json_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+    result: dict[str, Any] = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError("duplicate JSON key")
+        result[key] = value
+    return result
+
+
+def _engineer_backup_snapshot(value: object) -> tuple[str, int, bool]:
+    if (
+        not isinstance(value, tuple)
+        or len(value) != 3
+        or type(value[0]) is not str
+        or re.fullmatch(r"[0-9a-f]{32}", value[0]) is None
+        or type(value[1]) is not int
+        or not 0 <= value[1] <= 9_223_372_036_854_775_806
+        or type(value[2]) is not bool
+    ):
+        raise RuntimeError("Engineer command backup authority returned an invalid snapshot")
+    if not value[2]:
+        raise RuntimeError("Backup is blocked by unresolved Engineer command state")
+    return value[0], value[1], True
+
+
+def _engineer_backup_evidence_identity(value: object) -> tuple[str, int, bool]:
+    if not isinstance(value, dict) or set(value) != _ENGINEER_BACKUP_AUTHORITY_FIELDS:
+        raise RuntimeError("Engineer command backup authority returned invalid evidence")
+    return _engineer_backup_snapshot(
+        (
+            value.get("store_id"),
+            value.get("authority_sequence"),
+            value.get("quiescent"),
+        )
+    )
+
+
+def _main_engineer_delivery_is_quiescent(connection: sqlite3.Connection) -> bool:
+    try:
+        row = connection.execute(
+            """SELECT EXISTS(
+                   SELECT 1 FROM outbound_notifications
+                    WHERE kind IN (
+                              'engineer_command_terminal',
+                              'engineer_command_terminal_text',
+                              'engineer_command_unknown',
+                              'engineer_command_progress'
+                          )
+                      AND status='pending'
+               )"""
+        ).fetchone()
+    except sqlite3.DatabaseError as exc:
+        raise RuntimeError("Engineer delivery quiescence is unavailable") from exc
+    if row is None or type(row[0]) is not int or row[0] not in {0, 1}:
+        raise RuntimeError("Engineer delivery quiescence is invalid")
+    return row[0] == 0
 
 
 def _contains_secondary_product_witness(conn: sqlite3.Connection) -> bool:
@@ -455,7 +1404,44 @@ class MaintenanceMixin(StorageShared):
         validate_document_catalog_schema(backup_conn)
         if _contains_secondary_product_witness(backup_conn):
             raise RuntimeError("Backup snapshot contains a transient secondary product witness")
+        if _engineer_command_backup_authority_required(
+            self.settings
+        ) and not _main_engineer_delivery_is_quiescent(backup_conn):
+            raise RuntimeError("Backup snapshot contains unresolved Engineer delivery")
         return integrity, foreign_key_violations, backup_schema_version
+
+    def _required_engineer_backup_authority(self) -> Any | None:
+        if not _engineer_command_backup_authority_required(self.settings):
+            return None
+        authority = self._engineer_command_backup_authority
+        if authority is None:
+            raise RuntimeError("Engineer command backup authority is unavailable")
+        return authority
+
+    def _verify_engineer_backup_authority(
+        self,
+        evidence: object,
+        *,
+        database_sha256: str,
+    ) -> tuple[str, int, bool] | None:
+        required = _engineer_command_backup_authority_required(self.settings)
+        if evidence is None and not required:
+            return None
+        if evidence is None:
+            raise RuntimeError("Engineer command backup authority evidence is missing")
+        if not isinstance(evidence, dict) or set(evidence) != _ENGINEER_BACKUP_AUTHORITY_FIELDS:
+            raise RuntimeError("Engineer command backup authority evidence is invalid")
+        authority = self._engineer_command_backup_authority
+        if authority is None:
+            raise RuntimeError("Engineer command backup authority is unavailable")
+        try:
+            verified = authority.verify_main_database_backup_authority(
+                evidence,
+                database_sha256,
+            )
+        except Exception as exc:
+            raise RuntimeError("Engineer command backup authority does not match") from exc
+        return _engineer_backup_snapshot(verified)
 
     def create_backup(self, *, label: str = "manual") -> dict[str, Any]:
         boundary = ProcessLease(
@@ -467,6 +1453,14 @@ class MaintenanceMixin(StorageShared):
         except (OSError, RuntimeLeaseError) as exc:
             raise RuntimeError("Backup is blocked by the secondary product witness boundary") from exc
         try:
+            authority = self._required_engineer_backup_authority()
+            authority_before = (
+                _engineer_backup_snapshot(authority.backup_authority_snapshot())
+                if authority is not None
+                else None
+            )
+            if authority is not None and not _main_engineer_delivery_is_quiescent(self.conn):
+                raise RuntimeError("Backup is blocked by unresolved Engineer delivery")
             # The lease is acquired before even creating a destination.  A committed
             # probe makes the source preflight fail, while a backup that got here first
             # prevents reserved ingest until the manifest is durable.  OS ownership
@@ -520,9 +1514,29 @@ class MaintenanceMixin(StorageShared):
                 raise RuntimeError(
                     f"Backup schema mismatch: database={backup_schema_version}, expected={SCHEMA_VERSION}"
                 )
+            if authority is not None and not _main_engineer_delivery_is_quiescent(self.conn):
+                destination.unlink(missing_ok=True)
+                raise RuntimeError("Backup is blocked by unresolved Engineer delivery")
 
             _chmod_private(destination)
             digest = _sha256_file(destination)
+            authority_evidence: dict[str, Any] | None = None
+            if authority is not None:
+                try:
+                    authority_after = _engineer_backup_snapshot(authority.backup_authority_snapshot())
+                    authority_evidence = authority.attest_main_database_backup(digest)
+                    authority_attested = _engineer_backup_evidence_identity(authority_evidence)
+                    authority_verified = _engineer_backup_snapshot(
+                        authority.verify_main_database_backup_authority(
+                            authority_evidence,
+                            digest,
+                        )
+                    )
+                    if not (authority_before == authority_after == authority_attested == authority_verified):
+                        raise RuntimeError("Engineer command authority changed during the database backup")
+                except BaseException:
+                    destination.unlink(missing_ok=True)
+                    raise
             manifest = {
                 "schema_version": backup_schema_version,
                 "created_at": utc_now(),
@@ -532,17 +1546,19 @@ class MaintenanceMixin(StorageShared):
                 "sha256": digest,
                 "integrity_check": integrity,
                 "foreign_key_violations": 0,
+                **(
+                    {"engineer_command_ledger_authority": authority_evidence}
+                    if authority_evidence is not None
+                    else {}
+                ),
                 # A database backup is transactionally consistent, but binary raw
                 # files and the Markdown vault deliberately remain separate so an
                 # operator cannot mistake this for a full installation backup.
-                "scope": {
-                    "sqlite_database": "included",
-                    "raw_files": "external",
-                    "memory_vault": "external",
-                    "obsidian_profiles_and_vaults": "external",
-                    "model_weights": "external",
-                    "configuration_and_secrets": "external",
-                },
+                # The Engineer command kernel owns an independent, monotonic
+                # authority ledger.  This closed scope is verified byte-for-
+                # meaning on restore; a manifest may not relabel the ordinary
+                # main-DB image as a complete effect backup.
+                "scope": dict(_BACKUP_SCOPE),
             }
             manifest_path = destination.with_suffix(".manifest.json")
             _write_json_atomic(manifest_path, manifest)
@@ -645,7 +1661,10 @@ class MaintenanceMixin(StorageShared):
             try:
                 if manifest_path.is_symlink():
                     continue
-                data = json.loads(manifest_path.read_text(encoding="utf-8"))
+                data = json.loads(
+                    manifest_path.read_text(encoding="utf-8"),
+                    object_pairs_hook=_closed_json_object,
+                )
                 if not isinstance(data, dict):
                     continue
                 database_name = str(data["database"])
@@ -730,12 +1749,20 @@ class MaintenanceMixin(StorageShared):
         manifest_size_matches: bool | None = None
         manifest_schema_supported: bool | None = None
         manifest_schema_matches_database: bool | None = None
+        manifest_scope_matches: bool | None = None
+        engineer_authority_matches: bool | None = None
+        engineer_command_store_id: str | None = None
+        engineer_command_authority_sequence: int | None = None
+        engineer_authority_required = _engineer_command_backup_authority_required(self.settings)
         manifest_present = manifest_path.is_file() and not manifest_path.is_symlink()
         if manifest_path.is_symlink():
             manifest_error = "Manifest symlinks are not allowed"
         elif manifest_present:
             try:
-                manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+                manifest = json.loads(
+                    manifest_path.read_text(encoding="utf-8"),
+                    object_pairs_hook=_closed_json_object,
+                )
                 if not isinstance(manifest, dict):
                     raise ValueError("Manifest root must be an object")
                 expected_digest = str(manifest.get("sha256") or "") or None
@@ -770,6 +1797,28 @@ class MaintenanceMixin(StorageShared):
                     validation_errors.append("schema_version is unsupported")
                 elif not manifest_schema_matches_database:
                     validation_errors.append("schema_version does not match the database")
+                manifest_scope_matches = manifest.get("scope") == _BACKUP_SCOPE
+                if not manifest_scope_matches:
+                    validation_errors.append("backup scope is missing or invalid")
+                authority_evidence = manifest.get("engineer_command_ledger_authority")
+                engineer_authority_required = engineer_authority_required or authority_evidence is not None
+                if engineer_authority_required:
+                    try:
+                        authority_identity = self._verify_engineer_backup_authority(
+                            authority_evidence,
+                            database_sha256=digest,
+                        )
+                        if authority_identity is None:
+                            raise RuntimeError("Engineer command backup authority evidence is missing")
+                        (
+                            engineer_command_store_id,
+                            engineer_command_authority_sequence,
+                            _authority_quiescent,
+                        ) = authority_identity
+                        engineer_authority_matches = True
+                    except RuntimeError as exc:
+                        engineer_authority_matches = False
+                        validation_errors.append(str(exc))
                 if validation_errors:
                     manifest_error = "; ".join(validation_errors)
             except (OSError, json.JSONDecodeError, ValueError) as exc:
@@ -792,6 +1841,10 @@ class MaintenanceMixin(StorageShared):
             "manifest_size_matches": manifest_size_matches,
             "manifest_schema_supported": manifest_schema_supported,
             "manifest_schema_matches_database": manifest_schema_matches_database,
+            "manifest_scope_matches": manifest_scope_matches,
+            "engineer_command_authority_matches": engineer_authority_matches,
+            "engineer_command_store_id": engineer_command_store_id,
+            "engineer_command_authority_sequence": engineer_command_authority_sequence,
             "manifest_error": manifest_error,
             "ok": (
                 integrity == "ok"
@@ -805,11 +1858,52 @@ class MaintenanceMixin(StorageShared):
                 and manifest_size_matches is True
                 and manifest_schema_supported is True
                 and manifest_schema_matches_database is True
+                and manifest_scope_matches is True
+                and (
+                    engineer_authority_matches is True
+                    if engineer_authority_required
+                    else engineer_authority_matches is None
+                )
             ),
         }
 
     def restore_backup(self, filename: str, *, safety_label: str = "pre-restore") -> dict[str, Any]:
         """Atomically restore a verified SQLite backup while Friday is stopped.
+
+        The Telegram bridge lease is held for the complete verification and
+        replacement window.  Merely observing that the bridge looks stopped is
+        racy: it could dequeue or ACK a terminal notification immediately after
+        the observation and make an older main database publish it again.
+        """
+
+        bridge_boundary = ProcessLease(
+            self.settings.state_dir / "telegram-inbox.sqlite3.lock",
+            protocol="friday.telegram-bridge.v1",
+        )
+        try:
+            bridge_boundary.acquire()
+        except (OSError, RuntimeLeaseError) as exc:
+            raise RuntimeError("Database restore requires the Telegram bridge to be stopped") from exc
+        try:
+            # Freeze every managed writer for the complete preflight/snapshot/
+            # replacement window.  In particular, the raw DB/WAL/SHM rollback
+            # set below must describe one byte-stable generation while live
+            # connections are still open.
+            with self._write_lock:
+                return self._restore_backup_with_stopped_bridge(
+                    filename,
+                    safety_label=safety_label,
+                )
+        finally:
+            bridge_boundary.release()
+
+    def _restore_backup_with_stopped_bridge(
+        self,
+        filename: str,
+        *,
+        safety_label: str,
+    ) -> dict[str, Any]:
+        """Restore under an already-held Telegram bridge process boundary.
 
         The current process must own the exclusive backend lease.  The exact
         active DB/WAL/SHM bytes are staged first for automatic rollback.  A
@@ -818,8 +1912,9 @@ class MaintenanceMixin(StorageShared):
         original files instead of making a destructive restore unavoidable.
 
         Only the SQLite knowledge database is restored.  Content-addressed
-        files, Markdown vault, Telegram queue, model weights and secrets remain
-        external, matching the backup manifest.
+        files, Markdown vault, Telegram queue, the monotonic Engineer command
+        ledger, model weights and secrets remain external, matching the backup
+        manifest.
         """
 
         from friday.diagnostics.runtime_lease import process_owns_lease
@@ -829,6 +1924,23 @@ class MaintenanceMixin(StorageShared):
             raise RuntimeError(
                 "Database restore requires the exclusive backend process lease; "
                 "stop Friday and use `jericho restore-backup ... --yes`"
+            )
+
+        database_path = self._db_path.absolute()
+        intent_path = _restore_intent_path(self.settings)
+        # A previous process may have died between durable intent and commit.
+        # Resolve that transaction before opening, verifying, or migrating the
+        # possibly half-replaced active image.  An ordinary restore with no
+        # marker deliberately keeps the connections open: closing the final WAL
+        # connection can checkpoint/delete sidecars and is itself an active-file
+        # mutation, so it may happen only after this restore has a durable exact
+        # recovery intent.
+        if database_restore_intent_lstat(intent_path) is not None:
+            self.close()
+            _recover_interrupted_restore(
+                self.settings,
+                database_path,
+                engineer_authority=self._engineer_command_backup_authority,
             )
 
         verification = self.verify_backup(filename)
@@ -843,58 +1955,250 @@ class MaintenanceMixin(StorageShared):
 
         backup_name = str(verification["database"])
         backup_path = (self.settings.backups_dir / backup_name).resolve()
-        database_path = self._db_path.absolute()
-        active_paths = [database_path, Path(f"{database_path}-wal"), Path(f"{database_path}-shm")]
-        if any(path.is_symlink() for path in active_paths):
-            raise RuntimeError("Database path and SQLite sidecars must not be symlinks during restore")
+        active_paths = _active_restore_paths(database_path)
+        _private_regular_files(active_paths)
 
-        # Stop using the active database before taking exact rollback copies.
-        self.close()
-        rollback_snapshots: dict[Path, Path] = {}
-        # Дошли ли мы до подмены активной базы. Без этого различения ветка отказа
-        # не могла отличить «нечего откатывать, потому что базы не было» от
-        # «нечего откатывать, потому что снимок не снялся» — и во втором случае
-        # удаляла живую базу, которой сбой ещё не коснулся.
-        replaced = False
         staged: Path | None = None
+        staged_identity: _RestoreFileIdentity | None = None
+        pre_restore_stages: dict[Path, Path] = {}
         safety_backup: dict[str, Any] | None = None
         recovery_snapshot: dict[str, Any] | None = None
+        recovery_bundle: dict[str, Any] | None = None
+        recovery_bundle_identity: tuple[int, int] | None = None
+        intent_payload: dict[str, Any] | None = None
+        loaded_prepared_intent: _LoadedRestoreIntent | None = None
+        restore_authority_evidence: dict[str, Any] | None = None
+        prepared_marker_written = False
+        commit_marker_write_started = False
+        committed_marker_written = False
+        result: dict[str, Any] | None = None
+        restore_open_previous = self._begin_database_restore_open()
         try:
-            for active_path in active_paths:
-                if active_path.is_file():
-                    rollback_snapshots[active_path] = _stage_private_copy(active_path, active_path)
+            manifest_path = backup_path.with_suffix(".manifest.json")
+            try:
+                restore_manifest = json.loads(
+                    manifest_path.read_text(encoding="utf-8"),
+                    object_pairs_hook=_closed_json_object,
+                )
+                if not isinstance(restore_manifest, dict):
+                    raise ValueError("Manifest root must be an object")
+                raw_restore_authority_evidence = restore_manifest.get("engineer_command_ledger_authority")
+                restore_authority = self._verify_engineer_backup_authority(
+                    raw_restore_authority_evidence,
+                    database_sha256=str(verification["sha256"]),
+                )
+                verified_authority = (
+                    str(verification.get("engineer_command_store_id") or ""),
+                    verification.get("engineer_command_authority_sequence"),
+                    True,
+                )
+                if restore_authority is not None and restore_authority != verified_authority:
+                    raise RuntimeError("Engineer command backup authority changed before restore")
+                if restore_authority is not None:
+                    if not isinstance(raw_restore_authority_evidence, dict):
+                        raise RuntimeError("Engineer command backup authority evidence is invalid")
+                    restore_authority_evidence = dict(raw_restore_authority_evidence)
+            except (OSError, json.JSONDecodeError, ValueError) as exc:
+                raise RuntimeError("Engineer command backup authority could not be revalidated") from exc
 
+            staged = _stage_private_copy(backup_path, database_path)
+            staged_identity = _verify_exact_restore_copy(
+                staged,
+                size_bytes=int(verification["size_bytes"]),
+                sha256=str(verification["sha256"]),
+                error_message="Backup changed while it was staged for restore",
+            )
+
+            # Build the *complete* rollback set before mutation.  A failure on
+            # the second or third copy leaves every original byte untouched;
+            # the partial temporary set is never treated as rollback authority.
+            active_originals = _private_regular_files(active_paths)
+            pre_intent_identities = {path: _restore_regular_file_identity(path) for path in active_originals}
+            pre_intent_digests = {path: _sha256_private_restore_file(path) for path in active_originals}
+            for active_path in active_originals:
+                pre_restore_stages[active_path] = _stage_private_copy(
+                    active_path,
+                    active_path,
+                )
+            if set(pre_restore_stages) != set(active_originals):
+                raise RuntimeError("Could not stage a complete restore rollback set")
+            for active_path, prepared in pre_restore_stages.items():
+                _verify_exact_restore_copy(
+                    prepared,
+                    size_bytes=pre_intent_identities[active_path][2],
+                    sha256=pre_intent_digests[active_path],
+                    error_message="Restore rollback stage does not match the active database",
+                )
+            if set(_private_regular_files(active_paths)) != set(active_originals) or any(
+                _restore_regular_file_identity(path) != pre_intent_identities[path]
+                or not hmac.compare_digest(
+                    _sha256_private_restore_file(path),
+                    pre_intent_digests[path],
+                )
+                for path in active_originals
+            ):
+                raise RuntimeError("Active database changed during restore staging")
+
+            recovery_bundle = _durable_recovery_bundle(
+                self.settings,
+                pre_restore_stages,
+                label=safety_label,
+                reason_type="RestoreTransaction",
+            )
+            recovery_path = Path(str(recovery_bundle["path"]))
+            recovery_status = recovery_path.lstat()
+            if (
+                not stat.S_ISDIR(recovery_status.st_mode)
+                or stat.S_ISLNK(recovery_status.st_mode)
+                or recovery_status.st_uid != os.geteuid()
+                or recovery_status.st_mode & 0o077
+            ):
+                raise RuntimeError("Restore recovery path changed before intent")
+            recovery_bundle_identity = (
+                int(recovery_status.st_dev),
+                int(recovery_status.st_ino),
+            )
+            if set(_private_regular_files(active_paths)) != set(active_originals) or any(
+                _restore_regular_file_identity(path) != pre_intent_identities[path]
+                or not hmac.compare_digest(
+                    _sha256_private_restore_file(path),
+                    pre_intent_digests[path],
+                )
+                for path in active_originals
+            ):
+                raise RuntimeError("Active database changed before restore intent")
+            for prepared in pre_restore_stages.values():
+                prepared.unlink(missing_ok=True)
+            pre_restore_stages.clear()
+            if active_originals:
+                recovery_snapshot = recovery_bundle
+
+            recovery_manifest = Path(str(recovery_bundle["manifest_path"]))
+            intent_payload = {
+                "created_at": utc_now(),
+                "database_path": str(database_path),
+                "engineer_command_ledger_authority": restore_authority_evidence,
+                "original_files": [path.name for path in active_originals],
+                "phase": "prepared",
+                "recovery_manifest_sha256": _sha256_private_restore_file(recovery_manifest),
+                "recovery_path": str(Path(str(recovery_bundle["path"])).absolute()),
+                "retain_recovery": recovery_snapshot is not None,
+                "schema": _RESTORE_INTENT_SCHEMA,
+                "target_database": backup_name,
+                "target_sha256": str(verification["sha256"]),
+            }
+            _write_restore_intent(intent_path, intent_payload)
+            prepared_marker_written = True
+            loaded_prepared_intent = _load_restore_intent(
+                self.settings,
+                database_path,
+            )
+            if loaded_prepared_intent.intent != intent_payload:
+                raise RuntimeError("Restore intent changed after preparation")
+
+            _verify_restore_intent_authority(
+                self.settings,
+                self._engineer_command_backup_authority,
+                restore_authority_evidence,
+                database_sha256=str(verification["sha256"]),
+            )
+
+            # The target image proves its own delivery state was quiescent, but
+            # replacing the current main DB can orphan a newer carrier.  This
+            # check may have to open SQLite and create/update WAL sidecars; run
+            # it only after the exact recovery intent is durable.  A failed
+            # safety backup is not a substitute for this proof.
+            if (
+                _engineer_command_backup_authority_required(self.settings)
+                and database_path.is_file()
+                and not _main_engineer_delivery_is_quiescent(self.conn)
+            ):
+                raise RuntimeError("Database restore is blocked by unresolved current Engineer delivery")
+
+            # create_backup() performs a PASSIVE WAL checkpoint.  That changes
+            # active DB bytes even when a later backup step fails, so it may run
+            # only after the exact raw bundle and prepared intent are durable.
+            # Any failure from here is handled by ordinary intent recovery.
             if database_path.is_file():
                 try:
                     safety_backup = self.create_backup(label=safety_label)
-                except BaseException as exc:
-                    self.close()
-                    if not rollback_snapshots:
-                        raise RuntimeError("Could not preserve the active database before restore") from exc
-                    recovery_snapshot = _write_recovery_bundle(
+                except BaseException:
+                    safety_backup = None
+                if safety_backup is not None and recovery_snapshot is not None:
+                    recovery_snapshot = None
+                    intent_payload = {**intent_payload, "retain_recovery": False}
+                    _write_restore_intent(intent_path, intent_payload)
+                    loaded_prepared_intent = _load_restore_intent(
                         self.settings,
-                        rollback_snapshots,
-                        label=safety_label,
-                        reason_type=type(exc).__name__,
+                        database_path,
                     )
-                finally:
-                    self.close()
+                    if loaded_prepared_intent.intent != intent_payload:
+                        raise RuntimeError("Restore intent changed after safety backup")
 
-            staged = _stage_private_copy(backup_path, database_path)
-            staged_size = staged.stat().st_size
-            staged_digest = _sha256_file(staged)
-            if staged_size != int(verification["size_bytes"]) or not hmac.compare_digest(
-                staged_digest,
-                str(verification["sha256"]),
-            ):
+            # Closing the last SQLite connection can checkpoint the WAL or
+            # remove sidecars.  It is now covered by a durable prepared intent.
+            self.close()
+            mutation_originals = _private_regular_files(active_paths)
+            active_identities = {path: _restore_regular_file_identity(path) for path in mutation_originals}
+
+            # Nothing after the durable prepared marker may trust the earlier
+            # pathname observations.  Re-hash the target stage and compare every
+            # active inode immediately before the first mutation.
+            final_staged_identity = _verify_exact_restore_copy(
+                staged,
+                size_bytes=int(verification["size_bytes"]),
+                sha256=str(verification["sha256"]),
+                error_message="Backup changed while it was staged for restore",
+            )
+            if final_staged_identity != staged_identity:
                 raise RuntimeError("Backup changed while it was staged for restore")
-
+            if loaded_prepared_intent is None:
+                raise RuntimeError("Restore intent was not validated")
+            loaded_prepared_intent = _reload_exact_restore_intent(
+                self.settings,
+                database_path,
+                loaded_prepared_intent,
+            )
+            restore_authority_evidence = loaded_prepared_intent.intent.get(
+                "engineer_command_ledger_authority"
+            )
+            _verify_restore_intent_authority(
+                self.settings,
+                self._engineer_command_backup_authority,
+                restore_authority_evidence,
+                database_sha256=str(verification["sha256"]),
+            )
+            mutation_staged_identity = _verify_exact_restore_copy(
+                staged,
+                size_bytes=int(verification["size_bytes"]),
+                sha256=str(verification["sha256"]),
+                error_message="Backup changed while it was staged for restore",
+            )
+            if mutation_staged_identity != final_staged_identity:
+                raise RuntimeError("Backup changed while it was staged for restore")
             for active_path in active_paths[1:]:
-                active_path.unlink(missing_ok=True)
-            os.replace(staged, database_path)
-            replaced = True
-            _chmod_private(database_path)
-            _fsync_directory(database_path.parent)
+                _unlink_expected_restore_path(
+                    active_path,
+                    active_identities.get(active_path),
+                )
+            replaced_identity = _replace_expected_restore_path(
+                staged,
+                database_path,
+                prepared_identity=mutation_staged_identity,
+                destination_identity=active_identities.get(database_path),
+            )
+            if (
+                _verify_exact_restore_copy(
+                    database_path,
+                    size_bytes=int(verification["size_bytes"]),
+                    sha256=str(verification["sha256"]),
+                    error_message="Restored database changed during replacement",
+                )
+                != replaced_identity
+            ):
+                raise RuntimeError("Restored database changed during replacement")
+            _strict_fsync_file(database_path)
+            _strict_fsync_directory(database_path.parent)
 
             # Opening performs only supported forward migrations.  Health must
             # pass before rollback snapshots are discarded.
@@ -919,7 +2223,7 @@ class MaintenanceMixin(StorageShared):
                     ),
                 )
                 invalidated_deletion_eligibility = max(0, int(eligibility_cursor.rowcount))
-            return {
+            result = {
                 "ok": True,
                 "restored_from": backup_name,
                 "restored_sha256": verification["sha256"],
@@ -934,6 +2238,7 @@ class MaintenanceMixin(StorageShared):
                     "memory_vault": "unchanged",
                     "obsidian_profiles_and_vaults": "unchanged",
                     "telegram_queue": "unchanged",
+                    "engineer_command_ledger": "unchanged",
                     "model_weights": "unchanged",
                     "configuration_and_secrets": "unchanged",
                 },
@@ -941,49 +2246,116 @@ class MaintenanceMixin(StorageShared):
                 "foreign_key_violations": len(health.get("foreign_key_violations") or []),
                 "invalidated_deletion_eligibility": invalidated_deletion_eligibility,
             }
-        except BaseException as restore_error:
+            # Commit the restore transaction only after SQLite health and the
+            # post-restore mutation are durable.  A crash before this marker
+            # rolls back; a crash after it keeps the restored generation.
             self.close()
+            for active_path in _private_regular_files(active_paths):
+                _strict_fsync_file(active_path)
+            _strict_fsync_directory(database_path.parent)
+            commit_marker_write_started = True
+            _write_restore_intent(intent_path, {**intent_payload, "phase": "committed"})
+            committed_marker_written = True
+            _finalize_restore_intent(intent_path, outcome="committed")
+            if recovery_snapshot is None:
+                _discard_restore_recovery(
+                    Path(str(recovery_bundle["path"])),
+                    expected_identity=recovery_bundle_identity,
+                )
+            return result
+        except BaseException as restore_error:
+            marker_status: os.stat_result | None = None
             rollback_error: BaseException | None = None
+            recovery_outcome = "absent"
+            observed_recovery_phase: str | None = None
             try:
-                # Удалять активные файлы можно ТОЛЬКО когда есть чем их заменить
-                # либо когда мы сами их и положили. Прежняя редакция делала это
-                # безусловно: ошибка на подготовке — нехватка места (restore
-                # требует тройного размера базы), EIO на умирающем диске,
-                # перемонтирование в read-only — уводила сюда ДО того, как снят
-                # откатный снимок, и живая база, WAL и SHM удалялись. Следующее
-                # обращение молча создавало пустую базу со схемой: Friday
-                # поднималась с нулевым архивом, а не с ошибкой, и повторный
-                # restore проходил — человек получал данные из копии и никогда не
-                # узнавал, что потерял всё записанное после неё.
-                if rollback_snapshots:
-                    for active_path in active_paths:
-                        active_path.unlink(missing_ok=True)
-                    for original, snapshot in rollback_snapshots.items():
-                        os.replace(snapshot, original)
-                        _chmod_private(original)
-                    _fsync_directory(database_path.parent)
-                elif replaced:
-                    # Базы раньше не было, но неудачная замена уже легла на место.
-                    for active_path in active_paths:
-                        active_path.unlink(missing_ok=True)
-                    _fsync_directory(database_path.parent)
+                marker_status = database_restore_intent_lstat(intent_path)
+                if marker_status is not None:
+                    # A close/checkpoint is safe only because this marker names
+                    # the durable exact pre-close generation used below.
+                    self.close()
+                    observed_recovery_phase = str(
+                        _load_restore_intent(self.settings, database_path).intent["phase"]
+                    )
+                    recovery_outcome = _recover_interrupted_restore(
+                        self.settings,
+                        database_path,
+                        engineer_authority=self._engineer_command_backup_authority,
+                    )
+                elif (
+                    recovery_bundle is not None
+                    and recovery_bundle_identity is not None
+                    and not prepared_marker_written
+                ):
+                    # Preparation failed before the durable mutation boundary.
+                    # Remove only this call's unreferenced recovery directory;
+                    # the active DB/WAL/SHM were never closed or changed.
+                    _discard_restore_recovery(
+                        Path(str(recovery_bundle["path"])),
+                        expected_identity=recovery_bundle_identity,
+                    )
             except BaseException as exc:
+                # The durable marker and recovery directory are deliberately
+                # retained.  A later stopped restore can resume from the same
+                # complete copies; never unlink the last surviving recovery.
                 rollback_error = exc
+            if (
+                committed_marker_written
+                or observed_recovery_phase == "committed"
+                or recovery_outcome == "committed"
+                or (
+                    isinstance(restore_error, _RestoreIntentCleanupDurabilityError)
+                    and restore_error.outcome == "committed"
+                )
+                or (
+                    isinstance(rollback_error, _RestoreIntentCleanupDurabilityError)
+                    and rollback_error.outcome == "committed"
+                )
+            ):
+                if rollback_error is not None:
+                    raise RuntimeError(
+                        "Database restore committed, but durable commit cleanup is pending: "
+                        f"cleanup={type(rollback_error).__name__}: {rollback_error}; "
+                        f"intent={intent_path}"
+                    ) from restore_error
+                if recovery_outcome == "committed" and result is not None:
+                    return {**result, "commit_cleanup_recovered": True}
+                raise RuntimeError(
+                    "Database restore committed, but restore-intent cleanup durability is "
+                    f"uncertain: cleanup={type(restore_error).__name__}: {restore_error}; "
+                    f"intent={intent_path}"
+                ) from restore_error
+            if (
+                isinstance(rollback_error, _RestoreIntentCleanupDurabilityError)
+                and rollback_error.outcome == "rolled_back"
+            ):
+                raise RuntimeError(
+                    "Database restore failed; the exact previous database files were restored, "
+                    "but restore-intent cleanup durability is uncertain: "
+                    f"cleanup={type(rollback_error).__name__}: {rollback_error}; "
+                    f"intent={intent_path}"
+                ) from restore_error
+            if commit_marker_write_started and rollback_error is not None:
+                raise RuntimeError(
+                    "Database restore reached its durable commit boundary, but the exact "
+                    "commit/rollback state is unreadable; recovery is pending: "
+                    f"recovery={type(rollback_error).__name__}: {rollback_error}; "
+                    f"intent={intent_path}"
+                ) from restore_error
             if rollback_error is not None:
                 raise RuntimeError(
-                    "Database restore failed and exact-file rollback also failed: "
+                    "Database restore failed and durable rollback is pending: "
                     f"restore={type(restore_error).__name__}: {restore_error}; "
-                    f"rollback={type(rollback_error).__name__}: {rollback_error}"
+                    f"rollback={type(rollback_error).__name__}: {rollback_error}; "
+                    f"intent={intent_path}"
                 ) from restore_error
-            if rollback_snapshots:
+            if recovery_outcome == "rolled_back":
                 recovery = "the exact previous database files were restored automatically"
-            elif replaced:
-                recovery = "the failed replacement was removed; no previous database existed"
-            elif database_path.is_file():
-                # Самое важное сообщение из трёх: восстановление не начиналось, и
-                # база на месте. Раньше здесь безусловно печаталось «no previous
-                # database existed» — прямая ложь ровно в тот момент, когда база
-                # была и только что была удалена этой же веткой.
+            elif prepared_marker_written:
+                recovery = (
+                    "the durable restore marker disappeared before recovery could certify either generation"
+                )
+            elif marker_status is None and database_path.is_file():
                 recovery = "the restore never started and the active database was left untouched"
             else:
                 recovery = "no database was present and none was created"
@@ -991,10 +2363,11 @@ class MaintenanceMixin(StorageShared):
                 f"Database restore failed; {recovery}: {type(restore_error).__name__}: {restore_error}"
             ) from restore_error
         finally:
+            self._end_database_restore_open(restore_open_previous)
             if staged is not None:
                 staged.unlink(missing_ok=True)
-            for snapshot in rollback_snapshots.values():
-                snapshot.unlink(missing_ok=True)
+            for prepared in pre_restore_stages.values():
+                prepared.unlink(missing_ok=True)
 
     def export_user(self, user_id: str) -> dict[str, Any]:
         # One SQLite snapshot is part of the privacy boundary.  Reading entities,
@@ -2176,6 +3549,13 @@ class MaintenanceMixin(StorageShared):
             payload: dict[str, Any] = {
                 "format": "jericho-user-export-v3",
                 "exported_at": utc_now(),
+                "scope": {
+                    "main_database_rows": "included",
+                    # Work Items below contain only opaque receipt digests.  The
+                    # authoritative command/job ledger and its output carriers
+                    # are intentionally a separate operational store.
+                    "engineer_command_ledger": "external",
+                },
                 "user": user,
                 **rows_by_table,
             }

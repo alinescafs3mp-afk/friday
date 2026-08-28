@@ -185,9 +185,20 @@ def test_no_method_is_defined_twice_across_the_class_hierarchy() -> None:
 # deterministic rebuild/backfill, bounded reconciliation and coverage surface.
 # 417 -> 419: the runtime uses one active file-owner inventory and an atomic
 # owner-snapshot/CAS checkpoint instead of a blind shared runtime-kv overwrite.
-EXPECTED_MEMBER_COUNT = 421
+# 421 → 425: the Engineer command-ledger backup boundary adds one explicit
+# singleton binding plus the private authority lookup, verification and
+# stopped-bridge restore implementation used by the public backup/restore API.
+# 425 → 427: restore recovery grants a thread-local SQLite-open exception only
+# to the stopped restore transaction; every ordinary thread remains marker-gated.
+EXPECTED_MEMBER_COUNT = 427
 EXPECTED_SIGNATURES: dict[str, str] = {
+    "_begin_database_restore_open": "(self) -> 'bool'",
+    "_end_database_restore_open": "(self, previous: 'bool') -> 'None'",
     "acknowledge_notifications": "(self, sent_ids: 'Sequence[str]' = (), failed_ids: 'Sequence[str]' = (), uncertain_ids: 'Sequence[str]' = (), *, max_attempts: 'int' = 5) -> 'dict[str, list[str]]'",
+    "bind_engineer_command_backup_authority": "(self, authority: 'Any') -> 'None'",
+    "_required_engineer_backup_authority": "(self) -> 'Any | None'",
+    "_verify_engineer_backup_authority": "(self, evidence: 'object', *, database_sha256: 'str') -> 'tuple[str, int, bool] | None'",
+    "_restore_backup_with_stopped_bridge": "(self, filename: 'str', *, safety_label: 'str') -> 'dict[str, Any]'",
     "backfill_document_catalog": "(self, user_id: 'str', *, after_raw_object_id: 'str | None', limit: 'int' = 64) -> 'dict[str, Any]'",
     "checkpoint_document_catalog_worker_state": "(self, *, expected_value: 'str | None', value: 'str', tenant_ids: 'Sequence[str]') -> 'bool'",
     "document_catalog_coverage": "(self, user_id: 'str') -> 'dict[str, Any]'",

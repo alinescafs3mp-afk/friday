@@ -643,6 +643,55 @@ def test_restore_cli_requires_explicit_confirmation(capsys):
     assert "--yes" in capsys.readouterr().err
 
 
+def test_restore_cli_does_not_repair_runtime_tree_before_pending_recovery(
+    settings,
+    monkeypatch,
+    capsys,
+):
+    import argparse
+
+    import friday.config
+    import friday.storage
+    from friday.cli import _restore_backup
+
+    marker = settings.state_dir / "database-restore.intent.json"
+    marker.write_text("{}\n", encoding="utf-8")
+    marker.chmod(0o600)
+    calls: list[bool] = []
+
+    class RecoveryStorage:
+        def restore_backup(self, filename, *, safety_label):  # noqa: ANN001, ANN202
+            assert filename == "target.sqlite3"
+            assert safety_label == "pre-restore-target"
+            return {"ok": True}
+
+        def close(self):  # noqa: ANN202
+            return None
+
+    def fail_runtime_repair(_settings):  # noqa: ANN001, ANN202
+        raise AssertionError("runtime tree mutated before pending restore recovery")
+
+    def recovery_handle(_settings, *, allow_pending_restore=False):  # noqa: ANN001, ANN202
+        calls.append(bool(allow_pending_restore))
+        return RecoveryStorage()
+
+    monkeypatch.setattr(friday.config, "load_settings", lambda: settings)
+    monkeypatch.setattr(friday.config, "ensure_runtime_dirs", fail_runtime_repair)
+    monkeypatch.setattr(friday.storage, "init_storage", recovery_handle)
+
+    assert (
+        _restore_backup(
+            argparse.Namespace(
+                yes=True,
+                filename="target.sqlite3",
+            )
+        )
+        == 0
+    )
+    assert calls == [True]
+    assert '"ok": true' in capsys.readouterr().out
+
+
 def test_init_refuses_to_replace_configuration_through_symlink(settings, tmp_path):
     import argparse
 

@@ -13,10 +13,24 @@ import threading
 import time
 from collections.abc import Iterator
 from contextlib import contextmanager, suppress
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Literal, Self
+
+from friday.engineer_source_binding import (
+    canonical_engineer_source_binding_sha256,
+    canonical_engineer_source_step_id,
+    legacy_engineer_source_binding_sha256,
+)
+from friday.user_ids import validate_user_id
 
 from .contracts import CommandError, canonical_json_bytes, sha256_bytes
+from .store_lifecycle import (
+    CommandStoreLifecycle,
+    CommandStoreOpenMode,
+    command_store_backup_is_quiescent,
+    validate_runtime_database,
+)
 
 _LOCK_EX = 2
 _LOCK_NB = 4
@@ -28,7 +42,9 @@ _KNOWN_JOB_STATUSES = frozenset(
 _UNRESOLVED_JOB_STATUSES = frozenset({"planned", "admitted", "running", "unknown"})
 _CANCELLABLE_JOB_STATUSES = frozenset({"planned", "admitted", "running"})
 _PUBLICATION_STATES = frozenset({"pending", "staged", "sent", "uncertain", "blocked"})
-_PUBLICATION_MAX_ATTEMPTS = 5
+_PUBLICATION_RETRY_BASE_SEC = 5
+_PUBLICATION_RETRY_MAX_SEC = 30 * 60
+_PUBLICATION_ATTEMPTS_MAX = 2_147_483_647
 _RETENTION_BATCH_MAX = 20
 _EPHEMERAL_RETENTION_BATCH_MAX = 100
 _PROGRESS_BATCH_MAX = 20
@@ -39,9 +55,325 @@ _RETENTION_RETRY_BASE_SEC = 5 * 60
 _RETENTION_RETRY_MAX_SEC = 7 * 24 * 60 * 60
 _ENGINEER_WORK_ITEM_ID_RE = re.compile(r"ewi_[0-9a-f]{32}")
 _ENGINEER_WORK_ITEM_IDEMPOTENCY_KEY_RE = re.compile(r"ecmd-[0-9a-f]{64}")
+_ENGINEER_SOURCE_STEP_ID_RE = re.compile(r"ecstep-[0-9a-f]{32}")
 _LOWER_SHA256_RE = re.compile(r"[0-9a-f]{64}")
 _ENGINEER_WORK_ITEM_MAX_REVISION = 2_147_483_647
 _ENGINEER_WORK_ITEM_MAX_STEPS = 4_096
+_HISTORICAL_SOURCE_STEP_SCHEMA = "friday.engineer-command-historical-source-step.v1"
+_ACCOUNT_INVENTORY_SCHEMA = "friday.engineer-command-account-inventory.v1"
+
+
+@dataclass(frozen=True, slots=True)
+class EngineerCommandAccountInventory:
+    """Content-free exact generation snapshot for permanent-account deletion."""
+
+    user_id: str
+    store_id: str
+    authority_sequence: int
+    jobs: int
+    source_slots: int
+    fences: int
+    unattributable_fences: int
+    publications: int
+    output_jobs: int
+
+    def __post_init__(self) -> None:
+        self._validate()
+
+    def _validate(self) -> None:
+        try:
+            canonical_user_id = validate_user_id(self.user_id)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("invalid Engineer command inventory user") from exc
+        counts = (
+            self.jobs,
+            self.source_slots,
+            self.fences,
+            self.unattributable_fences,
+            self.publications,
+            self.output_jobs,
+        )
+        if (
+            type(self.user_id) is not str
+            or canonical_user_id != self.user_id
+            or type(self.store_id) is not str
+            or _JOB_ID.fullmatch(self.store_id) is None
+            or type(self.authority_sequence) is not int
+            or not 0 <= self.authority_sequence <= 9_223_372_036_854_775_806
+            or any(type(value) is not int or value < 0 for value in counts)
+        ):
+            raise ValueError("invalid Engineer command inventory")
+
+    @property
+    def retained_roots(self) -> int:
+        """Count immutable job/fence roots without double-counting projections."""
+
+        return self.jobs + self.fences + self.unattributable_fences
+
+    @property
+    def has_history(self) -> bool:
+        return any(
+            value > 0
+            for value in (
+                self.jobs,
+                self.source_slots,
+                self.fences,
+                self.unattributable_fences,
+                self.publications,
+                self.output_jobs,
+            )
+        )
+
+    def fingerprint_payload(self) -> dict[str, str | int]:
+        """Closed body-free projection safe to bind into the deletion plan."""
+
+        self._validate()
+        return {
+            "schema": _ACCOUNT_INVENTORY_SCHEMA,
+            "user_id": self.user_id,
+            "store_id": self.store_id,
+            "authority_sequence": self.authority_sequence,
+            "jobs": self.jobs,
+            "source_slots": self.source_slots,
+            "fences": self.fences,
+            "unattributable_fences": self.unattributable_fences,
+            "publications": self.publications,
+            "output_jobs": self.output_jobs,
+        }
+
+
+def _historical_source_step_id(
+    *,
+    job_id: str,
+    actor_id: str,
+    idempotency_key: str,
+    command_digest: str,
+) -> str:
+    """Derive one stable v2 slot for a row created before source steps existed."""
+
+    if (
+        _JOB_ID.fullmatch(job_id) is None
+        or not actor_id
+        or len(actor_id) > 128
+        or not idempotency_key
+        or len(idempotency_key) > 128
+        or _LOWER_SHA256_RE.fullmatch(command_digest) is None
+    ):
+        raise CommandError("engineer_command_source_slot_migration_invalid")
+    digest = sha256_bytes(
+        canonical_json_bytes(
+            {
+                "actor_id": actor_id,
+                "command_digest": command_digest,
+                "idempotency_key": idempotency_key,
+                "job_id": job_id,
+                "schema": _HISTORICAL_SOURCE_STEP_SCHEMA,
+            }
+        )
+    )
+    return canonical_engineer_source_step_id(f"ecstep-{digest[:32]}")
+
+
+_ENGINEER_COMMAND_SOURCE_SLOT_TABLE_SQL = """
+CREATE TABLE IF NOT EXISTS engineer_command_source_slots (
+    actor_id TEXT NOT NULL,
+    source_binding_sha256 TEXT NOT NULL,
+    legacy_source_binding_sha256 TEXT,
+    idempotency_key TEXT NOT NULL,
+    command_digest TEXT NOT NULL,
+    target_kind TEXT NOT NULL,
+    job_id TEXT,
+    fence_actor_id TEXT,
+    fence_idempotency_key TEXT,
+    work_item_id TEXT,
+    expected_revision INTEGER,
+    step_ordinal INTEGER,
+    created_at REAL NOT NULL,
+    PRIMARY KEY(actor_id, source_binding_sha256),
+    UNIQUE(actor_id, idempotency_key),
+    UNIQUE(actor_id, legacy_source_binding_sha256),
+    UNIQUE(job_id),
+    UNIQUE(fence_actor_id, fence_idempotency_key),
+    FOREIGN KEY(job_id) REFERENCES jobs(job_id)
+        ON UPDATE RESTRICT ON DELETE RESTRICT DEFERRABLE INITIALLY DEFERRED,
+    FOREIGN KEY(fence_actor_id, fence_idempotency_key)
+        REFERENCES engineer_work_item_idempotency_fences(actor_id, idempotency_key)
+        ON UPDATE RESTRICT ON DELETE RESTRICT DEFERRABLE INITIALLY DEFERRED,
+    CHECK(typeof(actor_id)='text' AND length(actor_id) BETWEEN 1 AND 128
+          AND actor_id=trim(actor_id) AND instr(actor_id, char(0))=0),
+    CHECK(typeof(source_binding_sha256)='text' AND length(source_binding_sha256)=64
+          AND source_binding_sha256 NOT GLOB '*[^0-9a-f]*'),
+    CHECK(legacy_source_binding_sha256 IS NULL
+          OR (typeof(legacy_source_binding_sha256)='text'
+              AND length(legacy_source_binding_sha256)=64
+              AND legacy_source_binding_sha256 NOT GLOB '*[^0-9a-f]*')),
+    CHECK(typeof(idempotency_key)='text' AND length(idempotency_key) BETWEEN 1 AND 128
+          AND idempotency_key=trim(idempotency_key) AND instr(idempotency_key, char(0))=0),
+    CHECK(typeof(command_digest)='text' AND length(command_digest)=64
+          AND command_digest NOT GLOB '*[^0-9a-f]*'),
+    CHECK(target_kind IN ('job','engineer_work_item_fence')),
+    CHECK(
+        (target_kind='job'
+         AND typeof(job_id)='text' AND length(job_id)=32
+         AND job_id NOT GLOB '*[^0-9a-f]*'
+         AND fence_actor_id IS NULL AND fence_idempotency_key IS NULL
+         AND work_item_id IS NULL AND expected_revision IS NULL AND step_ordinal IS NULL)
+        OR
+        (target_kind='engineer_work_item_fence'
+         AND job_id IS NULL
+         AND fence_actor_id=actor_id AND fence_idempotency_key=idempotency_key
+         AND typeof(work_item_id)='text' AND length(work_item_id)=36
+         AND substr(work_item_id,1,4)='ewi_'
+         AND substr(work_item_id,5) NOT GLOB '*[^0-9a-f]*'
+         AND typeof(expected_revision)='integer'
+         AND expected_revision>=1 AND expected_revision<2147483647
+         AND typeof(step_ordinal)='integer' AND step_ordinal BETWEEN 1 AND 4096)
+    ),
+    CHECK(typeof(created_at)='real' AND created_at>=0 AND created_at<=253402300799)
+) WITHOUT ROWID;
+"""
+_ENGINEER_COMMAND_SOURCE_SLOT_INSERT_AUTHORITY_SQL = """
+CREATE TRIGGER IF NOT EXISTS trg_engineer_command_source_slot_insert_authority
+BEFORE INSERT ON engineer_command_source_slots
+WHEN friday_command_source_slot_authorized()<>1
+BEGIN
+    SELECT RAISE(ABORT, 'engineer_command_source_slot_unauthorized');
+END;
+"""
+_ENGINEER_COMMAND_SOURCE_SLOT_CROSS_COLLISION_SQL = """
+CREATE TRIGGER IF NOT EXISTS trg_engineer_command_source_slot_cross_collision
+BEFORE INSERT ON engineer_command_source_slots
+WHEN EXISTS (
+    SELECT 1 FROM engineer_command_source_slots AS slot
+     WHERE slot.actor_id=NEW.actor_id
+       AND (
+           slot.source_binding_sha256=NEW.legacy_source_binding_sha256
+           OR slot.legacy_source_binding_sha256=NEW.source_binding_sha256
+       )
+)
+BEGIN
+    SELECT RAISE(ABORT, 'engineer_command_source_slot_collision');
+END;
+"""
+_ENGINEER_COMMAND_SOURCE_SLOT_IMMUTABLE_UPDATE_SQL = """
+CREATE TRIGGER IF NOT EXISTS trg_engineer_command_source_slot_immutable_update
+BEFORE UPDATE ON engineer_command_source_slots
+BEGIN
+    SELECT RAISE(ABORT, 'engineer_command_source_slot_immutable');
+END;
+"""
+_ENGINEER_COMMAND_SOURCE_SLOT_IMMUTABLE_DELETE_SQL = """
+CREATE TRIGGER IF NOT EXISTS trg_engineer_command_source_slot_immutable_delete
+BEFORE DELETE ON engineer_command_source_slots
+BEGIN
+    SELECT RAISE(ABORT, 'engineer_command_source_slot_immutable');
+END;
+"""
+_ENGINEER_COMMAND_SOURCE_SLOT_JOB_INSERT_GUARD_SQL = """
+CREATE TRIGGER IF NOT EXISTS trg_engineer_command_source_slot_job_insert_guard
+BEFORE INSERT ON jobs
+WHEN NOT EXISTS (
+    SELECT 1 FROM engineer_command_source_slots AS slot
+     WHERE slot.target_kind='job'
+       AND slot.actor_id=NEW.actor_id
+       AND slot.source_binding_sha256=NEW.source_binding_sha256
+       AND slot.idempotency_key=NEW.idempotency_key
+       AND slot.command_digest=NEW.command_digest
+       AND slot.job_id=NEW.job_id
+)
+AND NOT EXISTS (
+    SELECT 1 FROM jobs
+     WHERE jobs.job_id=NEW.job_id
+        OR (jobs.actor_id=NEW.actor_id AND jobs.idempotency_key=NEW.idempotency_key)
+)
+AND NOT EXISTS (
+    SELECT 1 FROM engineer_work_item_idempotency_fences AS fence
+     WHERE fence.actor_id=NEW.actor_id AND fence.idempotency_key=NEW.idempotency_key
+)
+BEGIN
+    SELECT RAISE(ABORT, 'engineer_command_source_slot_missing');
+END;
+"""
+_ENGINEER_COMMAND_SOURCE_SLOT_FENCE_INSERT_GUARD_SQL = """
+CREATE TRIGGER IF NOT EXISTS trg_engineer_command_source_slot_fence_insert_guard
+BEFORE INSERT ON engineer_work_item_idempotency_fences
+WHEN typeof(NEW.expected_revision)='integer'
+ AND typeof(NEW.step_ordinal)='integer'
+ AND NOT EXISTS (
+    SELECT 1 FROM engineer_command_source_slots AS slot
+     WHERE slot.target_kind='engineer_work_item_fence'
+       AND slot.actor_id=NEW.actor_id
+       AND slot.source_binding_sha256=NEW.source_binding_sha256
+       AND slot.idempotency_key=NEW.idempotency_key
+       AND slot.command_digest=NEW.command_digest
+       AND slot.fence_actor_id=NEW.actor_id
+       AND slot.fence_idempotency_key=NEW.idempotency_key
+       AND slot.work_item_id=NEW.work_item_id
+       AND slot.expected_revision=NEW.expected_revision
+       AND slot.step_ordinal=NEW.step_ordinal
+)
+AND NOT EXISTS (
+    SELECT 1 FROM engineer_work_item_idempotency_fences AS fence
+     WHERE (fence.actor_id=NEW.actor_id AND fence.idempotency_key=NEW.idempotency_key)
+        OR (fence.actor_id=NEW.actor_id
+            AND fence.work_item_id=NEW.work_item_id
+            AND fence.expected_revision=NEW.expected_revision
+            AND fence.step_ordinal=NEW.step_ordinal)
+        OR (fence.actor_id=NEW.actor_id
+            AND fence.source_binding_sha256=NEW.source_binding_sha256)
+)
+BEGIN
+    SELECT RAISE(ABORT, 'engineer_command_source_slot_missing');
+END;
+"""
+_ENGINEER_COMMAND_SOURCE_SLOT_SCHEMA = "\n".join(
+    (
+        _ENGINEER_COMMAND_SOURCE_SLOT_TABLE_SQL,
+        _ENGINEER_COMMAND_SOURCE_SLOT_INSERT_AUTHORITY_SQL,
+        _ENGINEER_COMMAND_SOURCE_SLOT_CROSS_COLLISION_SQL,
+        _ENGINEER_COMMAND_SOURCE_SLOT_IMMUTABLE_UPDATE_SQL,
+        _ENGINEER_COMMAND_SOURCE_SLOT_IMMUTABLE_DELETE_SQL,
+        _ENGINEER_COMMAND_SOURCE_SLOT_JOB_INSERT_GUARD_SQL,
+        _ENGINEER_COMMAND_SOURCE_SLOT_FENCE_INSERT_GUARD_SQL,
+    )
+)
+_ENGINEER_COMMAND_SOURCE_SLOT_SCHEMA_OBJECTS = {
+    "engineer_command_source_slots": (
+        "table",
+        "engineer_command_source_slots",
+        _ENGINEER_COMMAND_SOURCE_SLOT_TABLE_SQL,
+    ),
+    "trg_engineer_command_source_slot_insert_authority": (
+        "trigger",
+        "engineer_command_source_slots",
+        _ENGINEER_COMMAND_SOURCE_SLOT_INSERT_AUTHORITY_SQL,
+    ),
+    "trg_engineer_command_source_slot_cross_collision": (
+        "trigger",
+        "engineer_command_source_slots",
+        _ENGINEER_COMMAND_SOURCE_SLOT_CROSS_COLLISION_SQL,
+    ),
+    "trg_engineer_command_source_slot_immutable_update": (
+        "trigger",
+        "engineer_command_source_slots",
+        _ENGINEER_COMMAND_SOURCE_SLOT_IMMUTABLE_UPDATE_SQL,
+    ),
+    "trg_engineer_command_source_slot_immutable_delete": (
+        "trigger",
+        "engineer_command_source_slots",
+        _ENGINEER_COMMAND_SOURCE_SLOT_IMMUTABLE_DELETE_SQL,
+    ),
+    "trg_engineer_command_source_slot_job_insert_guard": (
+        "trigger",
+        "jobs",
+        _ENGINEER_COMMAND_SOURCE_SLOT_JOB_INSERT_GUARD_SQL,
+    ),
+    "trg_engineer_command_source_slot_fence_insert_guard": (
+        "trigger",
+        "engineer_work_item_idempotency_fences",
+        _ENGINEER_COMMAND_SOURCE_SLOT_FENCE_INSERT_GUARD_SQL,
+    ),
+}
 
 _ENGINEER_WORK_ITEM_FENCE_TABLE_SQL = """
 CREATE TABLE IF NOT EXISTS engineer_work_item_idempotency_fences (
@@ -144,6 +476,48 @@ BEGIN
 END;
 """
 _ENGINEER_WORK_ITEM_FENCE_JOB_IDENTITY_IMMUTABLE_SQL = """
+CREATE TRIGGER IF NOT EXISTS trg_engineer_work_item_fence_job_identity_immutable
+BEFORE UPDATE OF job_id, actor_id, tenant_id, conversation_id, channel,
+                 source_row_id, source_step_id, source_binding_sha256,
+                 source_hash, telegram_update_id,
+                 idempotency_key, command_digest ON jobs
+WHEN NEW.job_id IS NOT OLD.job_id
+  OR NEW.actor_id IS NOT OLD.actor_id
+  OR NEW.tenant_id IS NOT OLD.tenant_id
+  OR NEW.conversation_id IS NOT OLD.conversation_id
+  OR NEW.channel IS NOT OLD.channel
+  OR NEW.source_row_id IS NOT OLD.source_row_id
+  OR NEW.source_step_id IS NOT OLD.source_step_id
+  OR NEW.source_binding_sha256 IS NOT OLD.source_binding_sha256
+  OR NEW.source_hash IS NOT OLD.source_hash
+  OR NEW.telegram_update_id IS NOT OLD.telegram_update_id
+  OR NEW.idempotency_key IS NOT OLD.idempotency_key
+  OR NEW.command_digest IS NOT OLD.command_digest
+BEGIN
+    SELECT RAISE(ABORT, 'command_job_identity_immutable');
+END;
+"""
+_SOURCE_STEP_ONLY_ENGINEER_WORK_ITEM_FENCE_JOB_IDENTITY_IMMUTABLE_SQL = """
+CREATE TRIGGER IF NOT EXISTS trg_engineer_work_item_fence_job_identity_immutable
+BEFORE UPDATE OF job_id, actor_id, tenant_id, conversation_id, channel,
+                 source_row_id, source_step_id, source_hash, telegram_update_id,
+                 idempotency_key, command_digest ON jobs
+WHEN NEW.job_id IS NOT OLD.job_id
+  OR NEW.actor_id IS NOT OLD.actor_id
+  OR NEW.tenant_id IS NOT OLD.tenant_id
+  OR NEW.conversation_id IS NOT OLD.conversation_id
+  OR NEW.channel IS NOT OLD.channel
+  OR NEW.source_row_id IS NOT OLD.source_row_id
+  OR NEW.source_step_id IS NOT OLD.source_step_id
+  OR NEW.source_hash IS NOT OLD.source_hash
+  OR NEW.telegram_update_id IS NOT OLD.telegram_update_id
+  OR NEW.idempotency_key IS NOT OLD.idempotency_key
+  OR NEW.command_digest IS NOT OLD.command_digest
+BEGIN
+    SELECT RAISE(ABORT, 'command_job_identity_immutable');
+END;
+"""
+_LEGACY_ENGINEER_WORK_ITEM_FENCE_JOB_IDENTITY_IMMUTABLE_SQL = """
 CREATE TRIGGER IF NOT EXISTS trg_engineer_work_item_fence_job_identity_immutable
 BEFORE UPDATE OF job_id, actor_id, tenant_id, conversation_id, channel,
                  source_row_id, source_hash, telegram_update_id,
@@ -355,10 +729,7 @@ def _engineer_work_item_fence_identity(
         or _ENGINEER_WORK_ITEM_IDEMPOTENCY_KEY_RE.fullmatch(idempotency_key) is None
     ):
         raise CommandError("idempotency_fence_identity_invalid")
-    if (
-        not isinstance(work_item_id, str)
-        or _ENGINEER_WORK_ITEM_ID_RE.fullmatch(work_item_id) is None
-    ):
+    if not isinstance(work_item_id, str) or _ENGINEER_WORK_ITEM_ID_RE.fullmatch(work_item_id) is None:
         raise CommandError("idempotency_fence_identity_invalid")
     if (
         not isinstance(expected_revision, int)
@@ -391,11 +762,7 @@ def _engineer_work_item_fence_identity(
 
 
 def _engineer_work_item_fence_key(actor_id: object, idempotency_key: object) -> tuple[str, str]:
-    if (
-        not isinstance(actor_id, str)
-        or not 1 <= len(actor_id) <= 128
-        or "\x00" in actor_id
-    ):
+    if not isinstance(actor_id, str) or not 1 <= len(actor_id) <= 128 or "\x00" in actor_id:
         raise CommandError("idempotency_fence_scope_invalid")
     if (
         not isinstance(idempotency_key, str)
@@ -466,25 +833,174 @@ def _engineer_work_item_fence_projection(row: sqlite3.Row) -> dict[str, str | in
     return projection
 
 
+def _engineer_command_source_slot_projection(
+    row: sqlite3.Row,
+) -> dict[str, str | int | None]:
+    try:
+        actor_id = row["actor_id"]
+        source_binding = row["source_binding_sha256"]
+        legacy_source_binding = row["legacy_source_binding_sha256"]
+        idempotency_key = row["idempotency_key"]
+        command_digest = row["command_digest"]
+        target_kind = row["target_kind"]
+        job_id = row["job_id"]
+        fence_actor_id = row["fence_actor_id"]
+        fence_idempotency_key = row["fence_idempotency_key"]
+        work_item_id = row["work_item_id"]
+        expected_revision = row["expected_revision"]
+        step_ordinal = row["step_ordinal"]
+        created_at = row["created_at"]
+        if (
+            type(actor_id) is not str
+            or actor_id != actor_id.strip()
+            or not 1 <= len(actor_id) <= 128
+            or "\x00" in actor_id
+            or type(source_binding) is not str
+            or _LOWER_SHA256_RE.fullmatch(source_binding) is None
+            or (
+                legacy_source_binding is not None
+                and (
+                    type(legacy_source_binding) is not str
+                    or _LOWER_SHA256_RE.fullmatch(legacy_source_binding) is None
+                )
+            )
+            or type(idempotency_key) is not str
+            or idempotency_key != idempotency_key.strip()
+            or not 1 <= len(idempotency_key) <= 128
+            or "\x00" in idempotency_key
+            or type(command_digest) is not str
+            or _LOWER_SHA256_RE.fullmatch(command_digest) is None
+            or type(created_at) is not float
+            or not math.isfinite(created_at)
+            or not 0 <= created_at <= 253_402_300_799
+        ):
+            raise ValueError("invalid source slot")
+        if target_kind == "job":
+            if (
+                type(job_id) is not str
+                or _JOB_ID.fullmatch(job_id) is None
+                or any(
+                    value is not None
+                    for value in (
+                        fence_actor_id,
+                        fence_idempotency_key,
+                        work_item_id,
+                        expected_revision,
+                        step_ordinal,
+                    )
+                )
+            ):
+                raise ValueError("invalid job source slot")
+        elif target_kind == "engineer_work_item_fence":
+            if (
+                job_id is not None
+                or fence_actor_id != actor_id
+                or fence_idempotency_key != idempotency_key
+                or type(work_item_id) is not str
+                or _ENGINEER_WORK_ITEM_ID_RE.fullmatch(work_item_id) is None
+                or type(expected_revision) is not int
+                or not 1 <= expected_revision < _ENGINEER_WORK_ITEM_MAX_REVISION
+                or type(step_ordinal) is not int
+                or not 1 <= step_ordinal <= _ENGINEER_WORK_ITEM_MAX_STEPS
+            ):
+                raise ValueError("invalid fence source slot")
+        else:
+            raise ValueError("invalid source slot target")
+    except (IndexError, KeyError, TypeError, ValueError, OverflowError) as exc:
+        raise CommandError("engineer_command_source_slot_corrupt") from exc
+    return {
+        "actor_id": actor_id,
+        "source_binding_sha256": source_binding,
+        "legacy_source_binding_sha256": legacy_source_binding,
+        "idempotency_key": idempotency_key,
+        "command_digest": command_digest,
+        "target_kind": target_kind,
+        "job_id": job_id,
+        "fence_actor_id": fence_actor_id,
+        "fence_idempotency_key": fence_idempotency_key,
+        "work_item_id": work_item_id,
+        "expected_revision": expected_revision,
+        "step_ordinal": step_ordinal,
+    }
+
+
+def validate_command_store_runtime_schema(connection: sqlite3.Connection) -> None:
+    """Run the complete immutable command-ledger schema proof read-only.
+
+    Backup observers cannot construct a second ``CommandJobStore`` because its
+    process lease is intentionally singleton.  Keeping this proof on an
+    already-open read-only connection lets both runtime open and online backup
+    authenticate the exact same tables, triggers, projections, and cross-row
+    invariants without a competing kernel or a storage import cycle.
+    """
+
+    CommandJobStore._validate_runtime_schema_connection(connection)
+
+
 class CommandJobStore:
     """SQLite authority ledger plus per-job workspace directories."""
 
-    def __init__(self, root: Path) -> None:
+    def __init__(
+        self,
+        root: Path,
+        *,
+        lifecycle_mode: CommandStoreOpenMode = "provision",
+        lifecycle_key: bytes | None = None,
+        lifecycle_state_dir: Path | None = None,
+    ) -> None:
+        if lifecycle_mode not in {"provision", "runtime"}:
+            raise CommandError("command_store_open_mode_invalid")
+        self._strict_runtime = lifecycle_mode == "runtime"
         self.root = Path(root)
-        self.root.mkdir(parents=True, exist_ok=True)
-        os.chmod(self.root, 0o700)
+        try:
+            if lifecycle_mode == "provision":
+                if self.root.is_symlink():
+                    raise CommandError("command_store_state_dir_invalid")
+                self.root.mkdir(parents=True, exist_ok=True, mode=0o700)
+            root_stat = self.root.lstat()
+            if (
+                not stat.S_ISDIR(root_stat.st_mode)
+                or stat.S_ISLNK(root_stat.st_mode)
+                or root_stat.st_uid != os.geteuid()
+                or (lifecycle_mode == "runtime" and root_stat.st_mode & 0o077)
+            ):
+                raise CommandError("command_store_state_dir_invalid")
+            if lifecycle_mode == "provision":
+                os.chmod(self.root, 0o700, follow_symlinks=False)
+        except CommandError:
+            raise
+        except OSError as exc:
+            raise CommandError("command_store_state_dir_invalid") from exc
         self._jobs = self.root / "jobs"
-        self._jobs.mkdir(parents=True, exist_ok=True)
-        os.chmod(self._jobs, 0o700)
         self._workbenches = self.root / "workbenches"
-        if self._workbenches.is_symlink():
-            raise CommandError("durable_write_failed")
-        self._workbenches.mkdir(parents=True, exist_ok=True)
-        workbenches_stat = self._workbenches.lstat()
-        if not stat.S_ISDIR(workbenches_stat.st_mode) or workbenches_stat.st_uid != os.geteuid():
-            raise CommandError("durable_write_failed")
-        os.chmod(self._workbenches, 0o700)
+        for private_dir in (self._jobs, self._workbenches):
+            try:
+                if lifecycle_mode == "provision":
+                    if private_dir.is_symlink():
+                        raise CommandError("durable_write_failed")
+                    private_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
+                    os.chmod(private_dir, 0o700, follow_symlinks=False)
+                private_stat = private_dir.lstat()
+                if (
+                    not stat.S_ISDIR(private_stat.st_mode)
+                    or stat.S_ISLNK(private_stat.st_mode)
+                    or private_stat.st_uid != os.geteuid()
+                    or (lifecycle_mode == "runtime" and private_stat.st_mode & 0o077)
+                ):
+                    raise CommandError("durable_write_failed")
+            except CommandError:
+                raise
+            except OSError as exc:
+                raise CommandError("durable_write_failed") from exc
         self.db_path = self.root / "kernel.sqlite"
+        self._lifecycle = CommandStoreLifecycle(
+            database_path=self.db_path,
+            state_dir=self.root if lifecycle_state_dir is None else Path(lifecycle_state_dir),
+            mode=lifecycle_mode,
+            key=lifecycle_key,
+        )
+        if lifecycle_mode == "runtime":
+            self._lifecycle.preflight_runtime_database()
         lease_path = self.root / "kernel.lease"
         if self.db_path.is_symlink() or (self.root / "kernel.lock").is_symlink() or lease_path.is_symlink():
             raise CommandError("durable_write_failed")
@@ -511,18 +1027,85 @@ class CommandJobStore:
             raise CommandError("command_kernel_already_active") from exc
         self._local = threading.RLock()
         self._closed = False
+        self._source_slot_authority_depth = 0
         self.fail_next_commit = 0
         try:
-            self._conn = sqlite3.connect(str(self.db_path), isolation_level=None, check_same_thread=False)
+            database_target = str(self.db_path)
+            database_uri = False
+            if lifecycle_mode == "runtime":
+                database_target = f"{self.db_path.resolve().as_uri()}?mode=rw"
+                database_uri = True
+            self._conn = sqlite3.connect(
+                database_target,
+                isolation_level=None,
+                check_same_thread=False,
+                uri=database_uri,
+            )
             self._conn.row_factory = sqlite3.Row
-            self._conn.execute("PRAGMA journal_mode=WAL")
-            self._conn.execute("PRAGMA synchronous=FULL")
-            self._conn.execute("PRAGMA foreign_keys=ON")
-            self._init_schema()
+            self._conn.create_function(
+                "friday_command_source_slot_authorized",
+                0,
+                lambda: 1 if self._source_slot_authority_depth > 0 else 0,
+            )
+            if lifecycle_mode == "provision":
+                legacy = self._lifecycle.preflight_provision(self._conn)
+                self._conn.execute("PRAGMA journal_mode=WAL")
+                self._conn.execute("PRAGMA synchronous=FULL")
+                self._conn.execute("PRAGMA foreign_keys=ON")
+                self._init_schema()
+                if lifecycle_key is not None:
+                    validate_runtime_database(self._conn)
+                    self._validate_runtime_schema()
+                self._lifecycle.finish_provision(self._conn, legacy=legacy)
+            else:
+                validate_runtime_database(self._conn)
+                if str(self._conn.execute("PRAGMA journal_mode").fetchone()[0]).lower() != "wal":
+                    raise CommandError("command_store_database_invalid")
+                self._conn.execute("PRAGMA synchronous=FULL")
+                self._conn.execute("PRAGMA foreign_keys=ON")
+                self._lifecycle.open_runtime(self._conn)
+                self._validate_runtime_schema()
+                self._lifecycle.assert_ready(self._conn)
         except Exception:
+            with suppress(Exception):
+                self._conn.close()
             os.close(self._lease_fd)
             os.close(self._lock_fd)
             raise
+
+    @classmethod
+    def provision(
+        cls,
+        root: Path,
+        *,
+        lifecycle_key: bytes | None = None,
+        lifecycle_state_dir: Path | None = None,
+    ) -> Self:
+        """Explicitly create/upgrade a store; the keyless form is test-safe only."""
+
+        return cls(
+            root,
+            lifecycle_mode="provision",
+            lifecycle_key=lifecycle_key,
+            lifecycle_state_dir=lifecycle_state_dir,
+        )
+
+    @classmethod
+    def open_runtime(
+        cls,
+        root: Path,
+        *,
+        lifecycle_key: bytes,
+        lifecycle_state_dir: Path | None = None,
+    ) -> Self:
+        """Open an exactly provisioned authority ledger without creating or healing it."""
+
+        return cls(
+            root,
+            lifecycle_mode="runtime",
+            lifecycle_key=lifecycle_key,
+            lifecycle_state_dir=lifecycle_state_dir,
+        )
 
     def close(self) -> None:
         with self._local:
@@ -534,6 +1117,146 @@ class CommandJobStore:
             finally:
                 os.close(self._lease_fd)
                 os.close(self._lock_fd)
+
+    def assert_lifecycle_ready(self) -> None:
+        """Fail closed immediately before an external effect such as spawning."""
+
+        with self._local:
+            _flock(self._lock_fd, _LOCK_EX)
+            try:
+                self._lifecycle.assert_ready(self._conn)
+            finally:
+                _flock(self._lock_fd, _LOCK_UN)
+
+    def backup_authority_snapshot(self) -> tuple[str, int, bool]:
+        """Return the exact authenticated ledger generation for backup fencing."""
+
+        with self._local:
+            _flock(self._lock_fd, _LOCK_EX)
+            try:
+                store_id, sequence = self._lifecycle.authenticated_identity(self._conn)
+                return store_id, sequence, command_store_backup_is_quiescent(self._conn)
+            finally:
+                _flock(self._lock_fd, _LOCK_UN)
+
+    def attest_main_database_backup(
+        self,
+        database_sha256: str,
+    ) -> dict[str, str | int | bool]:
+        """Authenticate one copied main-database image with ledger authority."""
+
+        with self._local:
+            _flock(self._lock_fd, _LOCK_EX)
+            try:
+                return self._lifecycle.attest_main_database_backup(
+                    self._conn,
+                    database_sha256=database_sha256,
+                )
+            finally:
+                _flock(self._lock_fd, _LOCK_UN)
+
+    def verify_main_database_backup_authority(
+        self,
+        evidence: object,
+        database_sha256: str,
+    ) -> tuple[str, int, bool]:
+        """Require a backup proof to match the still-current ledger generation."""
+
+        with self._local:
+            _flock(self._lock_fd, _LOCK_EX)
+            try:
+                store_id, sequence = self._lifecycle.verify_main_database_backup_authority(
+                    self._conn,
+                    evidence,
+                    database_sha256=database_sha256,
+                )
+                return store_id, sequence, True
+            finally:
+                _flock(self._lock_fd, _LOCK_UN)
+
+    def account_deletion_inventory(self, user_id: str) -> EngineerCommandAccountInventory:
+        """Inventory one account under the authenticated exclusive ledger lease.
+
+        Jobs are selected by actor *or tenant*: a delegated actor can leave
+        target-owned output while having a different actor id.  Source slots and
+        publications are counted explicitly for the deletion fingerprint even
+        though their validated foreign-key/invariant closure makes every one of
+        them subordinate to a retained job or fence root.
+        """
+
+        try:
+            subject = validate_user_id(user_id)
+        except ValueError as exc:
+            raise CommandError("command_store_account_inventory_scope_invalid") from exc
+        with self._local:
+            _flock(self._lock_fd, _LOCK_EX)
+            try:
+                store_id, authority_sequence = self._lifecycle.authenticated_identity(self._conn)
+                row = self._conn.execute(
+                    """SELECT
+                           (SELECT COUNT(*) FROM jobs
+                             WHERE actor_id=:user_id OR tenant_id=:user_id) AS jobs,
+                           (SELECT COUNT(*) FROM engineer_command_source_slots
+                             WHERE actor_id=:user_id) AS source_slots,
+                           (SELECT COUNT(*) FROM engineer_work_item_idempotency_fences
+                             WHERE actor_id=:user_id) AS fences,
+                           (SELECT COUNT(*) FROM engineer_work_item_idempotency_fences
+                             WHERE actor_id<>:user_id) AS unattributable_fences,
+                           (SELECT COUNT(*)
+                              FROM command_job_publications publication
+                              JOIN jobs ON jobs.job_id=publication.job_id
+                             WHERE jobs.actor_id=:user_id
+                                OR jobs.tenant_id=:user_id) AS publications,
+                           (SELECT COUNT(*) FROM jobs
+                             WHERE (actor_id=:user_id OR tenant_id=:user_id)
+                               AND (receipt_mac IS NOT NULL
+                                    OR stdout_sha256 IS NOT NULL
+                                    OR stderr_sha256 IS NOT NULL
+                                    OR generated_files_json IS NOT NULL
+                                    OR stdout_bytes<>0 OR stderr_bytes<>0
+                                    OR workspace_retired_at IS NOT NULL)) AS output_jobs""",
+                    {"user_id": subject},
+                ).fetchone()
+                if row is None:
+                    raise CommandError("command_store_account_inventory_unavailable")
+                counts = {
+                    name: row[name]
+                    for name in (
+                        "jobs",
+                        "source_slots",
+                        "fences",
+                        "unattributable_fences",
+                        "publications",
+                        "output_jobs",
+                    )
+                }
+                if any(type(value) is not int or value < 0 for value in counts.values()):
+                    raise CommandError("command_store_account_inventory_invalid")
+                return EngineerCommandAccountInventory(
+                    user_id=subject,
+                    store_id=store_id,
+                    authority_sequence=authority_sequence,
+                    jobs=counts["jobs"],
+                    source_slots=counts["source_slots"],
+                    fences=counts["fences"],
+                    unattributable_fences=counts["unattributable_fences"],
+                    publications=counts["publications"],
+                    output_jobs=counts["output_jobs"],
+                )
+            except CommandError:
+                raise
+            except sqlite3.DatabaseError as exc:
+                raise CommandError("command_store_account_inventory_unavailable") from exc
+            finally:
+                _flock(self._lock_fd, _LOCK_UN)
+
+    @contextmanager
+    def _source_slot_authority(self) -> Iterator[None]:
+        self._source_slot_authority_depth += 1
+        try:
+            yield
+        finally:
+            self._source_slot_authority_depth -= 1
 
     def workbench_dir(
         self,
@@ -573,6 +1296,7 @@ class CommandJobStore:
         return workbench
 
     def _init_schema(self) -> None:
+        self._upgrade_source_step_schema_for_provision()
         self._preflight_engineer_work_item_fence_schema()
         self._conn.executescript(
             """
@@ -583,6 +1307,8 @@ class CommandJobStore:
                 conversation_id TEXT NOT NULL,
                 channel TEXT NOT NULL,
                 source_row_id TEXT NOT NULL,
+                source_step_id TEXT NOT NULL,
+                source_binding_sha256 TEXT NOT NULL,
                 source_hash TEXT NOT NULL,
                 telegram_update_id TEXT NOT NULL,
                 isolation_profile TEXT NOT NULL,
@@ -681,6 +1407,28 @@ class CommandJobStore:
             """
         )
         columns = {str(row[1]) for row in self._conn.execute("PRAGMA table_info(jobs)").fetchall()}
+        if "source_step_id" not in columns:
+            self._conn.execute("BEGIN IMMEDIATE")
+            try:
+                self._conn.execute("ALTER TABLE jobs ADD COLUMN source_step_id TEXT NOT NULL DEFAULT ''")
+            except Exception:
+                self._conn.execute("ROLLBACK")
+                raise
+            else:
+                self._conn.execute("COMMIT")
+        columns = {str(row[1]) for row in self._conn.execute("PRAGMA table_info(jobs)").fetchall()}
+        if "source_binding_sha256" not in columns:
+            self._conn.execute("BEGIN IMMEDIATE")
+            try:
+                self._conn.execute(
+                    "ALTER TABLE jobs ADD COLUMN source_binding_sha256 TEXT NOT NULL DEFAULT ''"
+                )
+            except Exception:
+                self._conn.execute("ROLLBACK")
+                raise
+            else:
+                self._conn.execute("COMMIT")
+        columns = {str(row[1]) for row in self._conn.execute("PRAGMA table_info(jobs)").fetchall()}
         if "cleanup_pending" not in columns:
             self._conn.execute("BEGIN IMMEDIATE")
             try:
@@ -760,6 +1508,7 @@ class CommandJobStore:
                     envelope_sha256 TEXT NOT NULL DEFAULT '',
                     attempts INTEGER NOT NULL DEFAULT 0 CHECK(attempts >= 0),
                     last_error_code TEXT NOT NULL DEFAULT '',
+                    next_attempt_at REAL,
                     carrier_retired_at REAL,
                     retention_attempts INTEGER NOT NULL DEFAULT 0 CHECK(retention_attempts >= 0),
                     retention_next_attempt_at REAL,
@@ -790,6 +1539,7 @@ class CommandJobStore:
                 for row in self._conn.execute("PRAGMA table_info(command_job_publications)").fetchall()
             }
             retention_publication_columns = (
+                ("next_attempt_at", "REAL"),
                 ("carrier_retired_at", "REAL"),
                 ("retention_attempts", "INTEGER NOT NULL DEFAULT 0"),
                 ("retention_next_attempt_at", "REAL"),
@@ -829,26 +1579,187 @@ class CommandJobStore:
                    WHERE confirmation_source_ledger.handle=confirmation_events.handle
                )"""
         )
+        self._backfill_blank_job_source_bindings()
         self._init_engineer_work_item_fence_schema()
+        self._init_engineer_command_source_slot_schema()
+
+    def _upgrade_source_step_schema_for_provision(self) -> None:
+        """Atomically add source-slot columns to an exact pre-lifecycle ledger."""
+
+        columns = {str(row[1]) for row in self._conn.execute("PRAGMA table_info(jobs)")}
+        if not columns or {"source_step_id", "source_binding_sha256"}.issubset(columns):
+            return
+        objects = self._engineer_work_item_fence_schema_objects(self._conn)
+        if objects:
+            if set(objects) != set(_ENGINEER_WORK_ITEM_FENCE_SCHEMA_OBJECTS):
+                raise CommandError("idempotency_fence_schema_invalid")
+            for name, (
+                expected_type,
+                expected_table,
+                expected_sql,
+            ) in _ENGINEER_WORK_ITEM_FENCE_SCHEMA_OBJECTS.items():
+                row = objects[name]
+                if name == "trg_engineer_work_item_fence_job_identity_immutable":
+                    expected_sql = (
+                        _SOURCE_STEP_ONLY_ENGINEER_WORK_ITEM_FENCE_JOB_IDENTITY_IMMUTABLE_SQL
+                        if "source_step_id" in columns
+                        else _LEGACY_ENGINEER_WORK_ITEM_FENCE_JOB_IDENTITY_IMMUTABLE_SQL
+                    )
+                if (
+                    str(row["type"]) != expected_type
+                    or str(row["tbl_name"]) != expected_table
+                    or _canonical_schema_sql(str(row["sql"] or "")) != _canonical_schema_sql(expected_sql)
+                ):
+                    raise CommandError("idempotency_fence_schema_invalid")
+        try:
+            self._conn.execute("BEGIN IMMEDIATE")
+            if objects:
+                self._conn.execute("DROP TRIGGER trg_engineer_work_item_fence_job_identity_immutable")
+            if "source_step_id" not in columns:
+                self._conn.execute("ALTER TABLE jobs ADD COLUMN source_step_id TEXT NOT NULL DEFAULT ''")
+            if "source_binding_sha256" not in columns:
+                self._conn.execute(
+                    "ALTER TABLE jobs ADD COLUMN source_binding_sha256 TEXT NOT NULL DEFAULT ''"
+                )
+            self._backfill_blank_job_source_bindings(migrate_blank_source_steps=True)
+            if objects:
+                self._conn.execute(_ENGINEER_WORK_ITEM_FENCE_JOB_IDENTITY_IMMUTABLE_SQL)
+            self._conn.execute("COMMIT")
+        except Exception:
+            if self._conn.in_transaction:
+                self._conn.execute("ROLLBACK")
+            raise
+
+    def _backfill_blank_job_source_bindings(
+        self,
+        *,
+        migrate_blank_source_steps: bool = False,
+    ) -> None:
+        columns = {str(row[1]) for row in self._conn.execute("PRAGMA table_info(jobs)")}
+        required = {
+            "job_id",
+            "actor_id",
+            "tenant_id",
+            "conversation_id",
+            "channel",
+            "source_row_id",
+            "source_step_id",
+            "source_binding_sha256",
+            "source_hash",
+            "telegram_update_id",
+        }
+        publication_columns = {
+            str(row[1]) for row in self._conn.execute("PRAGMA table_info(command_job_publications)")
+        }
+        if not required.issubset(columns) or not {
+            "job_id",
+            "delivery_chat_id",
+        }.issubset(publication_columns):
+            return
+        predicate = (
+            "jobs.source_binding_sha256='' OR jobs.source_step_id=''"
+            if migrate_blank_source_steps
+            else "jobs.source_binding_sha256=''"
+        )
+        rows = self._conn.execute(
+            f"""SELECT jobs.job_id,jobs.actor_id,jobs.tenant_id,jobs.conversation_id,
+                      jobs.channel,jobs.source_row_id,jobs.source_step_id,jobs.source_hash,
+                      jobs.telegram_update_id,jobs.idempotency_key,jobs.command_digest,
+                      COALESCE(publication.delivery_chat_id,'') AS delivery_chat_id
+                 FROM jobs
+                 LEFT JOIN command_job_publications AS publication
+                   ON publication.job_id=jobs.job_id
+                WHERE {predicate}"""
+        ).fetchall()
+        for row in rows:
+            values = {
+                "owner_id": str(row["actor_id"]),
+                "tenant_id": str(row["tenant_id"]),
+                "conversation_id": str(row["conversation_id"]),
+                "channel": str(row["channel"]),
+                "source_row_id": str(row["source_row_id"]),
+                "source_hash": str(row["source_hash"]),
+                "telegram_update_id": str(row["telegram_update_id"]),
+                "delivery_chat_id": str(row["delivery_chat_id"]),
+            }
+            source_step_id = str(row["source_step_id"] or "")
+            try:
+                if not source_step_id:
+                    source_step_id = _historical_source_step_id(
+                        job_id=str(row["job_id"]),
+                        actor_id=str(row["actor_id"]),
+                        idempotency_key=str(row["idempotency_key"]),
+                        command_digest=str(row["command_digest"]),
+                    )
+                source_binding = canonical_engineer_source_binding_sha256(
+                    **values,
+                    source_step_id=canonical_engineer_source_step_id(source_step_id),
+                )
+            except (TypeError, ValueError) as exc:
+                raise CommandError("engineer_command_source_slot_migration_invalid") from exc
+            self._conn.execute(
+                "UPDATE jobs SET source_step_id=?,source_binding_sha256=? WHERE job_id=?",
+                (source_step_id, source_binding, str(row["job_id"])),
+            )
+
+    def _validate_runtime_schema(self) -> None:
+        validate_command_store_runtime_schema(self._conn)
+
+    @staticmethod
+    def _validate_runtime_schema_connection(connection: sqlite3.Connection) -> None:
+        required_tables = {
+            "jobs",
+            "command_job_focus",
+            "grant_nonces",
+            "confirmation_events",
+            "confirmation_source_ledger",
+            "command_job_publications",
+            "command_job_progress",
+            "engineer_work_item_idempotency_fences",
+            "engineer_command_source_slots",
+        }
+        try:
+            tables = {
+                str(row[0])
+                for row in connection.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()
+            }
+            if not required_tables.issubset(tables):
+                raise CommandError("command_store_schema_invalid")
+            publication_columns = {
+                str(row["name"]): row
+                for row in connection.execute("PRAGMA table_info(command_job_publications)")
+            }
+            retry_column = publication_columns.get("next_attempt_at")
+            if retry_column is None or (
+                str(retry_column["type"]).upper(),
+                int(retry_column["notnull"]),
+                int(retry_column["pk"]),
+            ) != ("REAL", 0, 0):
+                raise CommandError("command_store_schema_invalid")
+            CommandJobStore._validate_command_identity_base_schema(connection)
+            CommandJobStore._validate_engineer_work_item_fence_schema(connection)
+            CommandJobStore._validate_engineer_command_source_slot_schema(connection)
+        except CommandError:
+            raise
+        except sqlite3.DatabaseError as exc:
+            raise CommandError("command_store_schema_invalid") from exc
 
     def _preflight_engineer_work_item_fence_schema(self) -> None:
-        existing_objects = self._engineer_work_item_fence_schema_objects()
+        existing_objects = self._engineer_work_item_fence_schema_objects(self._conn)
         if not existing_objects:
             return
         try:
             if set(existing_objects) != set(_ENGINEER_WORK_ITEM_FENCE_SCHEMA_OBJECTS):
                 raise CommandError("idempotency_fence_schema_invalid")
-            self._validate_command_identity_base_schema()
-            self._validate_engineer_work_item_fence_schema()
+            self._validate_command_identity_base_schema(self._conn)
+            self._validate_engineer_work_item_fence_schema(self._conn)
         except CommandError:
             raise
         except sqlite3.DatabaseError as exc:
             raise CommandError("idempotency_fence_schema_invalid") from exc
 
     def _init_engineer_work_item_fence_schema(self) -> None:
-        job_columns = {
-            str(row[1]) for row in self._conn.execute("PRAGMA table_info(jobs)").fetchall()
-        }
+        job_columns = {str(row[1]) for row in self._conn.execute("PRAGMA table_info(jobs)").fetchall()}
         required_job_columns = {
             "job_id",
             "actor_id",
@@ -856,12 +1767,14 @@ class CommandJobStore:
             "conversation_id",
             "channel",
             "source_row_id",
+            "source_step_id",
+            "source_binding_sha256",
             "source_hash",
             "telegram_update_id",
             "idempotency_key",
             "command_digest",
         }
-        existing_objects = self._engineer_work_item_fence_schema_objects()
+        existing_objects = self._engineer_work_item_fence_schema_objects(self._conn)
         if not required_job_columns.issubset(job_columns):
             if existing_objects:
                 raise CommandError("idempotency_fence_schema_invalid")
@@ -874,31 +1787,28 @@ class CommandJobStore:
         }
         if not {"job_id", "delivery_chat_id"}.issubset(publication_columns):
             raise CommandError("idempotency_fence_schema_invalid")
-        self._validate_command_identity_base_schema()
+        self._validate_command_identity_base_schema(self._conn)
         try:
             if existing_objects:
                 # Never heal a partially removed immutable fence schema: doing
                 # so could conceal that a raw writer erased permanent truth.
-                self._validate_engineer_work_item_fence_schema()
+                self._validate_engineer_work_item_fence_schema(self._conn)
                 return
             try:
-                self._conn.executescript(
-                    f"BEGIN IMMEDIATE;\n{_ENGINEER_WORK_ITEM_FENCE_SCHEMA}\nCOMMIT;"
-                )
+                self._conn.executescript(f"BEGIN IMMEDIATE;\n{_ENGINEER_WORK_ITEM_FENCE_SCHEMA}\nCOMMIT;")
             except sqlite3.DatabaseError:
                 if self._conn.in_transaction:
                     self._conn.execute("ROLLBACK")
                 raise
-            self._validate_engineer_work_item_fence_schema()
+            self._validate_engineer_work_item_fence_schema(self._conn)
         except CommandError:
             raise
         except sqlite3.DatabaseError as exc:
             raise CommandError("idempotency_fence_schema_invalid") from exc
 
-    def _validate_command_identity_base_schema(self) -> None:
-        job_columns = {
-            str(row["name"]): row for row in self._conn.execute("PRAGMA table_info(jobs)")
-        }
+    @staticmethod
+    def _validate_command_identity_base_schema(connection: sqlite3.Connection) -> None:
+        job_columns = {str(row["name"]): row for row in connection.execute("PRAGMA table_info(jobs)")}
         expected_job_columns = {
             "job_id": ("TEXT", 0, 1),
             "actor_id": ("TEXT", 1, 0),
@@ -906,14 +1816,15 @@ class CommandJobStore:
             "conversation_id": ("TEXT", 1, 0),
             "channel": ("TEXT", 1, 0),
             "source_row_id": ("TEXT", 1, 0),
+            "source_step_id": ("TEXT", 1, 0),
+            "source_binding_sha256": ("TEXT", 1, 0),
             "source_hash": ("TEXT", 1, 0),
             "telegram_update_id": ("TEXT", 1, 0),
             "idempotency_key": ("TEXT", 1, 0),
             "command_digest": ("TEXT", 1, 0),
         }
         publication_columns = {
-            str(row["name"]): row
-            for row in self._conn.execute("PRAGMA table_info(command_job_publications)")
+            str(row["name"]): row for row in connection.execute("PRAGMA table_info(command_job_publications)")
         }
         expected_publication_columns = {
             "job_id": ("TEXT", 0, 1),
@@ -925,15 +1836,17 @@ class CommandJobStore:
         ):
             for name, identity in expected.items():
                 row = columns.get(name)
-                if row is None or (
-                    str(row["type"]).upper(),
-                    int(row["notnull"]),
-                    int(row["pk"]),
-                ) != identity:
+                if (
+                    row is None
+                    or (
+                        str(row["type"]).upper(),
+                        int(row["notnull"]),
+                        int(row["pk"]),
+                    )
+                    != identity
+                ):
                     raise CommandError("idempotency_fence_schema_invalid")
-        foreign_keys = self._conn.execute(
-            "PRAGMA foreign_key_list(command_job_publications)"
-        ).fetchall()
+        foreign_keys = connection.execute("PRAGMA foreign_key_list(command_job_publications)").fetchall()
         if not any(
             str(row["table"]) == "jobs"
             and str(row["from"]) == "job_id"
@@ -942,52 +1855,54 @@ class CommandJobStore:
             for row in foreign_keys
         ):
             raise CommandError("idempotency_fence_schema_invalid")
-        duplicate_job_identity = self._conn.execute(
+        duplicate_job_identity = connection.execute(
             """SELECT 1 FROM jobs
                 GROUP BY actor_id,idempotency_key HAVING count(*)>1 LIMIT 1"""
         ).fetchone()
         if duplicate_job_identity is not None:
             raise CommandError("idempotency_fence_schema_invalid")
 
-    def _engineer_work_item_fence_schema_objects(self) -> dict[str, sqlite3.Row]:
-        rows = self._conn.execute(
+    @staticmethod
+    def _engineer_work_item_fence_schema_objects(
+        connection: sqlite3.Connection,
+    ) -> dict[str, sqlite3.Row]:
+        rows = connection.execute(
             """SELECT type,name,tbl_name,sql
                  FROM sqlite_master
                 WHERE type IN ('table','trigger')
                   AND (
                       name='engineer_work_item_idempotency_fences'
                       OR name GLOB 'trg_engineer_work_item_fence_*'
-                      OR tbl_name='engineer_work_item_idempotency_fences'
-                      OR (type='trigger'
-                          AND tbl_name IN ('jobs','command_job_publications'))
                   )"""
         ).fetchall()
         return {str(row["name"]): row for row in rows}
 
-    def _validate_engineer_work_item_fence_schema(self) -> None:
-        observed_objects = self._engineer_work_item_fence_schema_objects()
+    @staticmethod
+    def _validate_engineer_work_item_fence_schema(connection: sqlite3.Connection) -> None:
+        observed_objects = CommandJobStore._engineer_work_item_fence_schema_objects(connection)
         if set(observed_objects) != set(_ENGINEER_WORK_ITEM_FENCE_SCHEMA_OBJECTS):
             raise CommandError("idempotency_fence_schema_invalid")
-        for name, (expected_type, expected_table, expected_sql) in (
-            _ENGINEER_WORK_ITEM_FENCE_SCHEMA_OBJECTS.items()
-        ):
+        for name, (
+            expected_type,
+            expected_table,
+            expected_sql,
+        ) in _ENGINEER_WORK_ITEM_FENCE_SCHEMA_OBJECTS.items():
             row = observed_objects.get(name)
             if (
                 row is None
                 or str(row["type"]) != expected_type
                 or str(row["tbl_name"]) != expected_table
-                or _canonical_schema_sql(str(row["sql"] or ""))
-                != _canonical_schema_sql(expected_sql)
+                or _canonical_schema_sql(str(row["sql"] or "")) != _canonical_schema_sql(expected_sql)
             ):
                 raise CommandError("idempotency_fence_schema_invalid")
-        fence_rows = self._conn.execute(
+        fence_rows = connection.execute(
             """SELECT actor_id,work_item_id,expected_revision,step_ordinal,
                       source_binding_sha256,idempotency_key,command_digest,created_at
                  FROM engineer_work_item_idempotency_fences"""
         )
         for fence_row in fence_rows:
             _engineer_work_item_fence_projection(fence_row)
-        collision = self._conn.execute(
+        collision = connection.execute(
             """SELECT 1
                  FROM engineer_work_item_idempotency_fences AS fence
                  JOIN jobs
@@ -998,23 +1913,367 @@ class CommandJobStore:
         if collision is not None:
             raise CommandError("idempotency_fence_schema_invalid")
 
+    @staticmethod
+    def _engineer_command_source_slot_schema_objects(
+        connection: sqlite3.Connection,
+    ) -> dict[str, sqlite3.Row]:
+        rows = connection.execute(
+            """SELECT type,name,tbl_name,sql
+                 FROM sqlite_master
+                WHERE type IN ('table','trigger')
+                  AND (
+                      name='engineer_command_source_slots'
+                      OR name GLOB 'trg_engineer_command_source_slot_*'
+                  )"""
+        ).fetchall()
+        return {str(row["name"]): row for row in rows}
+
+    def _init_engineer_command_source_slot_schema(self) -> None:
+        job_columns = {str(row[1]) for row in self._conn.execute("PRAGMA table_info(jobs)")}
+        if not {
+            "job_id",
+            "actor_id",
+            "source_step_id",
+            "source_binding_sha256",
+            "idempotency_key",
+            "command_digest",
+            "created_at",
+        }.issubset(job_columns):
+            if self._engineer_command_source_slot_schema_objects(self._conn):
+                raise CommandError("engineer_command_source_slot_schema_invalid")
+            return
+        if not self._engineer_work_item_fence_schema_objects(self._conn):
+            return
+        observed = self._engineer_command_source_slot_schema_objects(self._conn)
+        if observed:
+            missing_fence_guard = set(_ENGINEER_COMMAND_SOURCE_SLOT_SCHEMA_OBJECTS) - {
+                "trg_engineer_command_source_slot_fence_insert_guard"
+            }
+            if set(observed) == missing_fence_guard:
+                fence_slot = self._conn.execute(
+                    """SELECT 1 FROM engineer_command_source_slots
+                        WHERE target_kind='engineer_work_item_fence' LIMIT 1"""
+                ).fetchone()
+                if fence_slot is None:
+                    self._conn.execute(_ENGINEER_COMMAND_SOURCE_SLOT_FENCE_INSERT_GUARD_SQL)
+                    self._validate_engineer_command_source_slot_schema(self._conn)
+                    return
+            self._validate_engineer_command_source_slot_schema(self._conn)
+            return
+        try:
+            self._conn.execute("BEGIN IMMEDIATE")
+            self._conn.execute(_ENGINEER_COMMAND_SOURCE_SLOT_TABLE_SQL)
+            jobs = self._conn.execute(
+                """SELECT jobs.job_id,jobs.actor_id,jobs.tenant_id,
+                          jobs.conversation_id,jobs.channel,jobs.source_row_id,
+                          jobs.source_step_id,jobs.source_binding_sha256,
+                          jobs.source_hash,jobs.telegram_update_id,
+                          jobs.idempotency_key,jobs.command_digest,jobs.created_at,
+                          COALESCE(publication.delivery_chat_id,'') AS delivery_chat_id
+                     FROM jobs
+                     LEFT JOIN command_job_publications AS publication
+                       ON publication.job_id=jobs.job_id
+                    ORDER BY jobs.job_id"""
+            ).fetchall()
+            legacy_candidates: dict[str, str] = {}
+            legacy_counts: dict[tuple[str, str], int] = {}
+            for row in jobs:
+                job_id = str(row["job_id"])
+                actor_id = str(row["actor_id"])
+                source_step_id = canonical_engineer_source_step_id(str(row["source_step_id"] or ""))
+                if source_step_id != _historical_source_step_id(
+                    job_id=job_id,
+                    actor_id=actor_id,
+                    idempotency_key=str(row["idempotency_key"]),
+                    command_digest=str(row["command_digest"]),
+                ):
+                    continue
+                legacy_source = legacy_engineer_source_binding_sha256(
+                    owner_id=actor_id,
+                    tenant_id=str(row["tenant_id"]),
+                    conversation_id=str(row["conversation_id"]),
+                    channel=str(row["channel"]),
+                    source_row_id=str(row["source_row_id"]),
+                    source_hash=str(row["source_hash"]),
+                    telegram_update_id=str(row["telegram_update_id"]),
+                    delivery_chat_id=str(row["delivery_chat_id"]),
+                )
+                legacy_candidates[job_id] = legacy_source
+                key = (actor_id, legacy_source)
+                legacy_counts[key] = legacy_counts.get(key, 0) + 1
+            for row in jobs:
+                source_binding = str(row["source_binding_sha256"] or "")
+                if _LOWER_SHA256_RE.fullmatch(source_binding) is None:
+                    raise CommandError("engineer_command_source_slot_migration_invalid")
+                actor_id = str(row["actor_id"])
+                job_id = str(row["job_id"])
+                legacy_candidate = legacy_candidates.get(job_id)
+                stored_legacy_alias = (
+                    legacy_candidate
+                    if legacy_candidate is not None and legacy_counts.get((actor_id, legacy_candidate)) == 1
+                    else None
+                )
+                self._conn.execute(
+                    """INSERT INTO engineer_command_source_slots(
+                           actor_id,source_binding_sha256,legacy_source_binding_sha256,
+                           idempotency_key,command_digest,target_kind,job_id,created_at)
+                       VALUES(?,?,?,?,?,'job',?,?)""",
+                    (
+                        actor_id,
+                        source_binding,
+                        stored_legacy_alias,
+                        str(row["idempotency_key"]),
+                        str(row["command_digest"]),
+                        job_id,
+                        float(row["created_at"]),
+                    ),
+                )
+            fences = self._conn.execute(
+                """SELECT actor_id,idempotency_key,work_item_id,expected_revision,
+                          step_ordinal,source_binding_sha256,command_digest,created_at
+                     FROM engineer_work_item_idempotency_fences
+                    ORDER BY actor_id,idempotency_key"""
+            ).fetchall()
+            for row in fences:
+                self._conn.execute(
+                    """INSERT INTO engineer_command_source_slots(
+                           actor_id,source_binding_sha256,legacy_source_binding_sha256,
+                           idempotency_key,command_digest,target_kind,
+                           fence_actor_id,fence_idempotency_key,work_item_id,
+                           expected_revision,step_ordinal,created_at)
+                       VALUES(?,?,?, ?,?,'engineer_work_item_fence', ?,?,?,?,?,?)""",
+                    (
+                        str(row["actor_id"]),
+                        str(row["source_binding_sha256"]),
+                        str(row["source_binding_sha256"]),
+                        str(row["idempotency_key"]),
+                        str(row["command_digest"]),
+                        str(row["actor_id"]),
+                        str(row["idempotency_key"]),
+                        str(row["work_item_id"]),
+                        int(row["expected_revision"]),
+                        int(row["step_ordinal"]),
+                        float(row["created_at"]),
+                    ),
+                )
+            for sql in (
+                _ENGINEER_COMMAND_SOURCE_SLOT_INSERT_AUTHORITY_SQL,
+                _ENGINEER_COMMAND_SOURCE_SLOT_CROSS_COLLISION_SQL,
+                _ENGINEER_COMMAND_SOURCE_SLOT_IMMUTABLE_UPDATE_SQL,
+                _ENGINEER_COMMAND_SOURCE_SLOT_IMMUTABLE_DELETE_SQL,
+                _ENGINEER_COMMAND_SOURCE_SLOT_JOB_INSERT_GUARD_SQL,
+                _ENGINEER_COMMAND_SOURCE_SLOT_FENCE_INSERT_GUARD_SQL,
+            ):
+                self._conn.execute(sql)
+            self._conn.execute("COMMIT")
+        except Exception as exc:
+            if self._conn.in_transaction:
+                self._conn.execute("ROLLBACK")
+            if isinstance(exc, CommandError):
+                raise
+            raise CommandError("engineer_command_source_slot_migration_invalid") from exc
+        self._validate_engineer_command_source_slot_schema(self._conn)
+
+    @staticmethod
+    def _validate_engineer_command_source_slot_schema(connection: sqlite3.Connection) -> None:
+        observed = CommandJobStore._engineer_command_source_slot_schema_objects(connection)
+        if set(observed) != set(_ENGINEER_COMMAND_SOURCE_SLOT_SCHEMA_OBJECTS):
+            raise CommandError("engineer_command_source_slot_schema_invalid")
+        for name, (
+            expected_type,
+            expected_table,
+            expected_sql,
+        ) in _ENGINEER_COMMAND_SOURCE_SLOT_SCHEMA_OBJECTS.items():
+            row = observed[name]
+            if (
+                str(row["type"]) != expected_type
+                or str(row["tbl_name"]) != expected_table
+                or _canonical_schema_sql(str(row["sql"] or "")) != _canonical_schema_sql(expected_sql)
+            ):
+                raise CommandError("engineer_command_source_slot_schema_invalid")
+        slots = connection.execute(
+            """SELECT actor_id,source_binding_sha256,legacy_source_binding_sha256,
+                      idempotency_key,command_digest,target_kind,job_id,
+                      fence_actor_id,fence_idempotency_key,work_item_id,
+                      expected_revision,step_ordinal,created_at
+                 FROM engineer_command_source_slots"""
+        ).fetchall()
+        for slot in slots:
+            _engineer_command_source_slot_projection(slot)
+        job_sources = connection.execute(
+            """SELECT jobs.job_id,jobs.source_step_id,jobs.source_binding_sha256,jobs.actor_id,
+                      jobs.tenant_id,jobs.conversation_id,jobs.channel,jobs.source_row_id,
+                      jobs.source_hash,jobs.telegram_update_id,jobs.idempotency_key,
+                      jobs.command_digest,
+                      COALESCE(publication.delivery_chat_id,'') AS delivery_chat_id,
+                      slot.legacy_source_binding_sha256 AS stored_legacy_source_binding_sha256
+                 FROM jobs
+                 LEFT JOIN command_job_publications AS publication
+                   ON publication.job_id=jobs.job_id
+                 LEFT JOIN engineer_command_source_slots AS slot
+                   ON slot.target_kind='job' AND slot.job_id=jobs.job_id"""
+        ).fetchall()
+        legacy_candidates: dict[str, str] = {}
+        legacy_counts: dict[tuple[str, str], int] = {}
+        for job_source in job_sources:
+            values = {
+                "owner_id": str(job_source["actor_id"]),
+                "tenant_id": str(job_source["tenant_id"]),
+                "conversation_id": str(job_source["conversation_id"]),
+                "channel": str(job_source["channel"]),
+                "source_row_id": str(job_source["source_row_id"]),
+                "source_hash": str(job_source["source_hash"]),
+                "telegram_update_id": str(job_source["telegram_update_id"]),
+                "delivery_chat_id": str(job_source["delivery_chat_id"]),
+            }
+            source_step_id = str(job_source["source_step_id"] or "")
+            try:
+                if source_step_id:
+                    expected_binding = canonical_engineer_source_binding_sha256(
+                        **values,
+                        source_step_id=canonical_engineer_source_step_id(source_step_id),
+                    )
+                    historical = source_step_id == _historical_source_step_id(
+                        job_id=str(job_source["job_id"]),
+                        actor_id=str(job_source["actor_id"]),
+                        idempotency_key=str(job_source["idempotency_key"]),
+                        command_digest=str(job_source["command_digest"]),
+                    )
+                else:
+                    expected_binding = legacy_engineer_source_binding_sha256(**values)
+                    historical = True
+            except (TypeError, ValueError) as exc:
+                raise CommandError("engineer_command_source_slot_schema_invalid") from exc
+            if str(job_source["source_binding_sha256"]) != expected_binding:
+                raise CommandError("engineer_command_source_slot_schema_invalid")
+            if historical:
+                legacy_source = legacy_engineer_source_binding_sha256(**values)
+                job_id = str(job_source["job_id"])
+                actor_id = str(job_source["actor_id"])
+                legacy_candidates[job_id] = legacy_source
+                key = (actor_id, legacy_source)
+                legacy_counts[key] = legacy_counts.get(key, 0) + 1
+        for job_source in job_sources:
+            job_id = str(job_source["job_id"])
+            actor_id = str(job_source["actor_id"])
+            legacy_candidate = legacy_candidates.get(job_id)
+            expected_legacy = (
+                legacy_candidate
+                if legacy_candidate is not None and legacy_counts.get((actor_id, legacy_candidate)) == 1
+                else None
+            )
+            if job_source["stored_legacy_source_binding_sha256"] != expected_legacy:
+                raise CommandError("engineer_command_source_slot_schema_invalid")
+        broken = connection.execute(
+            """SELECT 1 FROM engineer_command_source_slots AS slot
+                WHERE (
+                    slot.target_kind='job' AND NOT EXISTS (
+                        SELECT 1 FROM jobs
+                         WHERE jobs.job_id=slot.job_id
+                           AND jobs.actor_id=slot.actor_id
+                           AND jobs.source_binding_sha256=slot.source_binding_sha256
+                           AND jobs.idempotency_key=slot.idempotency_key
+                           AND jobs.command_digest=slot.command_digest
+                    )
+                ) OR (
+                    slot.target_kind='engineer_work_item_fence' AND NOT EXISTS (
+                        SELECT 1 FROM engineer_work_item_idempotency_fences AS fence
+                         WHERE fence.actor_id=slot.fence_actor_id
+                           AND fence.idempotency_key=slot.fence_idempotency_key
+                           AND fence.source_binding_sha256=slot.source_binding_sha256
+                           AND fence.command_digest=slot.command_digest
+                           AND fence.work_item_id=slot.work_item_id
+                           AND fence.expected_revision=slot.expected_revision
+                           AND fence.step_ordinal=slot.step_ordinal
+                    )
+                )
+                LIMIT 1"""
+        ).fetchone()
+        orphan = connection.execute(
+            """SELECT 1 FROM jobs
+                WHERE NOT EXISTS (
+                    SELECT 1 FROM engineer_command_source_slots AS slot
+                     WHERE slot.target_kind='job'
+                       AND slot.job_id=jobs.job_id
+                       AND slot.actor_id=jobs.actor_id
+                       AND slot.source_binding_sha256=jobs.source_binding_sha256
+                       AND slot.idempotency_key=jobs.idempotency_key
+                       AND slot.command_digest=jobs.command_digest
+                )
+                UNION ALL
+               SELECT 1 FROM engineer_work_item_idempotency_fences AS fence
+                WHERE NOT EXISTS (
+                    SELECT 1 FROM engineer_command_source_slots AS slot
+                     WHERE slot.target_kind='engineer_work_item_fence'
+                       AND slot.actor_id=fence.actor_id
+                       AND slot.source_binding_sha256=fence.source_binding_sha256
+                       AND slot.idempotency_key=fence.idempotency_key
+                       AND slot.command_digest=fence.command_digest
+                       AND slot.work_item_id=fence.work_item_id
+                       AND slot.expected_revision=fence.expected_revision
+                       AND slot.step_ordinal=fence.step_ordinal
+                )
+                LIMIT 1"""
+        ).fetchone()
+        cross_collision = connection.execute(
+            """SELECT 1
+                 FROM engineer_command_source_slots AS left_slot
+                 JOIN engineer_command_source_slots AS right_slot
+                   ON right_slot.actor_id=left_slot.actor_id
+                  AND right_slot.source_binding_sha256<>left_slot.source_binding_sha256
+                  AND (
+                      right_slot.source_binding_sha256=left_slot.legacy_source_binding_sha256
+                      OR right_slot.legacy_source_binding_sha256=left_slot.source_binding_sha256
+                  )
+                LIMIT 1"""
+        ).fetchone()
+        if broken is not None or orphan is not None or cross_collision is not None:
+            raise CommandError("engineer_command_source_slot_schema_invalid")
+
     @contextmanager
     def transaction(self) -> Iterator[sqlite3.Connection]:
         self._local.acquire()
         _flock(self._lock_fd, _LOCK_EX)
+        sequence: int | None = None
+        committed = False
         try:
-            self._conn.execute("BEGIN IMMEDIATE")
+            self._lifecycle.assert_ready(self._conn)
+            sequence = self._lifecycle.begin_barrier(self._conn)
             try:
-                yield self._conn
-            except Exception:
-                self._conn.execute("ROLLBACK")
-                raise
-            else:
-                if self.fail_next_commit > 0:
-                    self.fail_next_commit -= 1
+                self._conn.execute("BEGIN IMMEDIATE")
+                try:
+                    yield self._conn
+                except BaseException:
                     self._conn.execute("ROLLBACK")
-                    raise CommandError("durable_write_failed")
-                self._conn.execute("COMMIT")
+                    self._lifecycle.abort_barrier(self._conn, sequence)
+                    raise
+                else:
+                    if self.fail_next_commit > 0:
+                        self.fail_next_commit -= 1
+                        self._conn.execute("ROLLBACK")
+                        self._lifecycle.abort_barrier(self._conn, sequence)
+                        raise CommandError("durable_write_failed")
+                    self._lifecycle.advance_in_transaction(self._conn, sequence)
+                    try:
+                        self._conn.execute("COMMIT")
+                        committed = True
+                    except BaseException:
+                        if self._conn.in_transaction:
+                            self._conn.execute("ROLLBACK")
+                        self._lifecycle.abort_barrier(self._conn, sequence)
+                        raise
+                    self._lifecycle.mark_committed(self._conn, sequence)
+                    self._lifecycle.finish_commit(self._conn, sequence)
+            except BaseException:
+                if self._conn.in_transaction:
+                    self._conn.execute("ROLLBACK")
+                if (
+                    not committed
+                    and sequence is not None
+                    and (self._lifecycle.pending_path.exists() or self._lifecycle.pending_path.is_symlink())
+                ):
+                    self._lifecycle.abort_barrier(self._conn, sequence)
+                raise
         finally:
             _flock(self._lock_fd, _LOCK_UN)
             self._local.release()
@@ -1085,6 +2344,149 @@ class CommandJobStore:
             except sqlite3.DatabaseError as exc:
                 raise CommandError("idempotency_fence_schema_invalid") from exc
 
+    def _lookup_engineer_command_source_slot(
+        self,
+        actor_id: str,
+        source_binding_sha256: str,
+        legacy_source_binding_sha256: str | None = None,
+    ) -> dict[str, str | int | None] | None:
+        values: list[str] = [actor_id, source_binding_sha256]
+        predicate = "actor_id=? AND source_binding_sha256=?"
+        if legacy_source_binding_sha256 is not None:
+            predicate = "actor_id=? AND (source_binding_sha256=? OR legacy_source_binding_sha256=?)"
+            values.append(legacy_source_binding_sha256)
+        rows = self._conn.execute(
+            f"""SELECT actor_id,source_binding_sha256,legacy_source_binding_sha256,
+                       idempotency_key,command_digest,target_kind,job_id,
+                       fence_actor_id,fence_idempotency_key,work_item_id,
+                       expected_revision,step_ordinal,created_at
+                  FROM engineer_command_source_slots WHERE {predicate}
+                 ORDER BY source_binding_sha256 LIMIT 2""",
+            values,
+        ).fetchall()
+        if not rows:
+            return None
+        if len(rows) != 1:
+            raise CommandError("engineer_command_source_slot_corrupt")
+        return _engineer_command_source_slot_projection(rows[0])
+
+    def lookup_engineer_command_source_slot(
+        self,
+        actor_id: str,
+        source_binding_sha256: str,
+        *,
+        legacy_source_binding_sha256: str | None = None,
+    ) -> dict[str, str | int | None] | None:
+        """Resolve v2 source authority, including one conservative legacy alias."""
+
+        actor, source_binding = _engineer_work_item_fence_source(
+            actor_id,
+            source_binding_sha256,
+        )
+        legacy_binding = None
+        if legacy_source_binding_sha256 is not None:
+            _, legacy_binding = _engineer_work_item_fence_source(
+                actor,
+                legacy_source_binding_sha256,
+            )
+        with self._local:
+            try:
+                return self._lookup_engineer_command_source_slot(
+                    actor,
+                    source_binding,
+                    legacy_binding,
+                )
+            except CommandError:
+                raise
+            except sqlite3.DatabaseError as exc:
+                raise CommandError("engineer_command_source_slot_schema_invalid") from exc
+
+    def lookup_engineer_command_source_slot_by_key(
+        self,
+        actor_id: str,
+        idempotency_key: str,
+    ) -> dict[str, str | int | None] | None:
+        actor, key = _engineer_work_item_fence_key(actor_id, idempotency_key)
+        with self._local:
+            try:
+                rows = self._conn.execute(
+                    """SELECT actor_id,source_binding_sha256,legacy_source_binding_sha256,
+                              idempotency_key,command_digest,target_kind,job_id,
+                              fence_actor_id,fence_idempotency_key,work_item_id,
+                              expected_revision,step_ordinal,created_at
+                         FROM engineer_command_source_slots
+                        WHERE actor_id=? AND idempotency_key=? LIMIT 2""",
+                    (actor, key),
+                ).fetchall()
+                if not rows:
+                    return None
+                if len(rows) != 1:
+                    raise CommandError("engineer_command_source_slot_corrupt")
+                return _engineer_command_source_slot_projection(rows[0])
+            except CommandError:
+                raise
+            except sqlite3.DatabaseError as exc:
+                raise CommandError("engineer_command_source_slot_schema_invalid") from exc
+
+    def _claim_engineer_command_source_slot(
+        self,
+        *,
+        actor_id: str,
+        source_binding_sha256: str,
+        legacy_lookup_sha256: str | None,
+        stored_legacy_alias_sha256: str | None,
+        idempotency_key: str,
+        command_digest: str,
+        target_kind: Literal["job", "engineer_work_item_fence"],
+        job_id: str | None,
+        work_item_id: str | None,
+        expected_revision: int | None,
+        step_ordinal: int | None,
+        created_at: float,
+    ) -> None:
+        existing_source = self._lookup_engineer_command_source_slot(
+            actor_id,
+            source_binding_sha256,
+            legacy_lookup_sha256,
+        )
+        existing_key = self.lookup_engineer_command_source_slot_by_key(
+            actor_id,
+            idempotency_key,
+        )
+        if existing_source is not None or existing_key is not None:
+            existing = existing_source or existing_key
+            if existing is not None and existing.get("target_kind") == "engineer_work_item_fence":
+                raise CommandError("idempotency_fenced")
+            raise CommandError("engineer_command_source_slot_conflict")
+        values = (
+            actor_id,
+            source_binding_sha256,
+            stored_legacy_alias_sha256,
+            idempotency_key,
+            command_digest,
+            target_kind,
+            job_id,
+            actor_id if target_kind == "engineer_work_item_fence" else None,
+            idempotency_key if target_kind == "engineer_work_item_fence" else None,
+            work_item_id,
+            expected_revision,
+            step_ordinal,
+            float(created_at),
+        )
+        try:
+            with self._source_slot_authority():
+                self._conn.execute(
+                    """INSERT INTO engineer_command_source_slots(
+                           actor_id,source_binding_sha256,legacy_source_binding_sha256,
+                           idempotency_key,command_digest,target_kind,job_id,
+                           fence_actor_id,fence_idempotency_key,work_item_id,
+                           expected_revision,step_ordinal,created_at)
+                       VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                    values,
+                )
+        except sqlite3.IntegrityError as exc:
+            raise CommandError("engineer_command_source_slot_conflict") from exc
+
     def create_engineer_work_item_fence(
         self,
         *,
@@ -1094,6 +2496,7 @@ class CommandJobStore:
         expected_revision: int,
         step_ordinal: int,
         source_binding_sha256: str,
+        legacy_source_binding_sha256: str | None = None,
         command_digest: str,
         created_at: float | None = None,
     ) -> dict[str, str | int]:
@@ -1114,6 +2517,14 @@ class CommandJobStore:
             command_digest=command_digest,
         )
         actor, key, item, revision, ordinal, source_binding, command = identity
+        legacy_source_binding = None
+        if legacy_source_binding_sha256 is not None:
+            _, legacy_source_binding = _engineer_work_item_fence_source(
+                actor,
+                legacy_source_binding_sha256,
+            )
+        elif self._strict_runtime:
+            raise CommandError("idempotency_fence_source_invalid")
         timestamp = time.time() if created_at is None else created_at
         if (
             isinstance(timestamp, bool)
@@ -1142,6 +2553,23 @@ class CommandJobStore:
                 observed = self._lookup_engineer_work_item_fence(actor, key)
                 if observed is None:
                     try:
+                        try:
+                            self._claim_engineer_command_source_slot(
+                                actor_id=actor,
+                                source_binding_sha256=source_binding,
+                                legacy_lookup_sha256=legacy_source_binding,
+                                stored_legacy_alias_sha256=None,
+                                idempotency_key=key,
+                                command_digest=command,
+                                target_kind="engineer_work_item_fence",
+                                job_id=None,
+                                work_item_id=item,
+                                expected_revision=revision,
+                                step_ordinal=ordinal,
+                                created_at=float(timestamp),
+                            )
+                        except CommandError as exc:
+                            raise CommandError("idempotency_fence_conflict") from exc
                         self._conn.execute(
                             """INSERT INTO engineer_work_item_idempotency_fences(
                                    actor_id,idempotency_key,work_item_id,expected_revision,
@@ -1163,6 +2591,19 @@ class CommandJobStore:
                             raise CommandError("idempotency_conflict") from exc
                         raise CommandError("idempotency_fence_conflict") from exc
                     observed = self._lookup_engineer_work_item_fence(actor, key)
+                slot = self._lookup_engineer_command_source_slot(actor, source_binding)
+                if slot is None or any(
+                    slot.get(name) != value
+                    for name, value in (
+                        ("target_kind", "engineer_work_item_fence"),
+                        ("idempotency_key", key),
+                        ("command_digest", command),
+                        ("work_item_id", item),
+                        ("expected_revision", revision),
+                        ("step_ordinal", ordinal),
+                    )
+                ):
+                    raise CommandError("idempotency_fence_conflict")
                 if observed != expected:
                     raise CommandError("idempotency_fence_conflict")
         except CommandError:
@@ -1191,18 +2632,19 @@ class CommandJobStore:
     def lookup_idempotency_binding(self, actor_id: str, key: str) -> dict[str, str] | None:
         """Return the exact body-free scope bound to an admitted idempotency key."""
 
-        row = self._conn.execute(
-            """SELECT jobs.job_id, jobs.actor_id, jobs.tenant_id,
-                      jobs.conversation_id, jobs.channel, jobs.source_row_id,
-                      jobs.source_hash, jobs.telegram_update_id,
-                      jobs.idempotency_key, jobs.command_digest,
-                      COALESCE(publication.delivery_chat_id, '') AS delivery_chat_id
-                 FROM jobs
-                 LEFT JOIN command_job_publications AS publication
-                   ON publication.job_id=jobs.job_id
-                WHERE jobs.actor_id=? AND jobs.idempotency_key=?""",
-            (actor_id, key),
-        ).fetchone()
+        with self._local:
+            row = self._conn.execute(
+                """SELECT jobs.job_id, jobs.actor_id, jobs.tenant_id,
+                          jobs.conversation_id, jobs.channel, jobs.source_row_id,
+                          jobs.source_step_id, jobs.source_hash, jobs.telegram_update_id,
+                          jobs.idempotency_key, jobs.command_digest,
+                          COALESCE(publication.delivery_chat_id, '') AS delivery_chat_id
+                     FROM jobs
+                     LEFT JOIN command_job_publications AS publication
+                       ON publication.job_id=jobs.job_id
+                    WHERE jobs.actor_id=? AND jobs.idempotency_key=?""",
+                (actor_id, key),
+            ).fetchone()
         if row is None:
             return None
         return {
@@ -1212,6 +2654,7 @@ class CommandJobStore:
             "conversation_id": str(row["conversation_id"]),
             "channel": str(row["channel"]),
             "source_row_id": str(row["source_row_id"]),
+            "source_step_id": str(row["source_step_id"]),
             "source_hash": str(row["source_hash"]),
             "telegram_update_id": str(row["telegram_update_id"]),
             "idempotency_key": str(row["idempotency_key"]),
@@ -1293,8 +2736,57 @@ class CommandJobStore:
         return {str(key): value for key, value in dict(row).items()}
 
     def insert_job(self, payload: dict[str, Any]) -> None:
+        if not self._conn.in_transaction:
+            # Keep the legacy provisioning/test helper safe while making the
+            # source-slot claim and job row one durable authority transition.
+            with self.transaction():
+                self.insert_job(payload)
+            return
+        source_step_id = payload.get("source_step_id") or ""
+        if (source_step_id or self._strict_runtime) and (
+            not isinstance(source_step_id, str)
+            or _ENGINEER_SOURCE_STEP_ID_RE.fullmatch(source_step_id) is None
+        ):
+            raise CommandError("invalid_job_source_step")
+        delivery_chat_id = str(payload.get("delivery_chat_id") or "")
+        source_values = {
+            "owner_id": payload.get("actor_id"),
+            "tenant_id": payload.get("tenant_id"),
+            "conversation_id": payload.get("conversation_id"),
+            "channel": payload.get("channel"),
+            "source_row_id": payload.get("source_row_id"),
+            "source_hash": payload.get("source_hash"),
+            "telegram_update_id": payload.get("telegram_update_id"),
+            "delivery_chat_id": delivery_chat_id,
+        }
+        if any(type(value) is not str for value in source_values.values()):
+            raise CommandError("invalid_job_source_binding")
+        try:
+            expected_source_binding = (
+                canonical_engineer_source_binding_sha256(
+                    **source_values,  # type: ignore[arg-type]
+                    source_step_id=canonical_engineer_source_step_id(source_step_id),
+                )
+                if source_step_id
+                else legacy_engineer_source_binding_sha256(
+                    **source_values,  # type: ignore[arg-type]
+                )
+            )
+        except (TypeError, ValueError) as exc:
+            raise CommandError("invalid_job_source_binding") from exc
+        supplied_source_binding = payload.get("source_binding_sha256") or ""
+        if self._strict_runtime and not supplied_source_binding:
+            raise CommandError("invalid_job_source_binding")
+        if supplied_source_binding and supplied_source_binding != expected_source_binding:
+            raise CommandError("invalid_job_source_binding")
+        source_binding = expected_source_binding
+        legacy_source_binding = legacy_engineer_source_binding_sha256(
+            **source_values,  # type: ignore[arg-type]
+        )
+        stored_legacy_alias = source_binding if not source_step_id else None
         columns = (
-            "job_id,actor_id,tenant_id,conversation_id,channel,source_row_id,source_hash,"
+            "job_id,actor_id,tenant_id,conversation_id,channel,source_row_id,source_step_id,"
+            "source_binding_sha256,source_hash,"
             "telegram_update_id,isolation_profile,host_user_authorized,idempotency_key,"
             "command_digest,input_manifest_sha256,argv_sha256,lane,origin,status,error_code,grant_nonce,"
             "timeout_sec,max_stdout_bytes,max_stderr_bytes,created_at,executable_json"
@@ -1306,6 +2798,8 @@ class CommandJobStore:
             payload["conversation_id"],
             payload["channel"],
             payload["source_row_id"],
+            source_step_id,
+            source_binding,
             payload["source_hash"],
             payload["telegram_update_id"],
             payload["isolation_profile"],
@@ -1326,8 +2820,22 @@ class CommandJobStore:
             payload.get("executable_json"),
         )
         try:
+            self._claim_engineer_command_source_slot(
+                actor_id=str(payload["actor_id"]),
+                source_binding_sha256=source_binding,
+                legacy_lookup_sha256=legacy_source_binding,
+                stored_legacy_alias_sha256=stored_legacy_alias,
+                idempotency_key=str(payload["idempotency_key"]),
+                command_digest=str(payload["command_digest"]),
+                target_kind="job",
+                job_id=str(payload["job_id"]),
+                work_item_id=None,
+                expected_revision=None,
+                step_ordinal=None,
+                created_at=float(payload["created_at"]),
+            )
             self._conn.execute(
-                f"INSERT INTO jobs({columns}) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                f"INSERT INTO jobs({columns}) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 values,
             )
             self._set_focus(
@@ -1339,7 +2847,6 @@ class CommandJobStore:
                 focused_at=float(payload["created_at"]),
                 reason="submit",
             )
-            delivery_chat_id = str(payload.get("delivery_chat_id") or "")
             if delivery_chat_id:
                 created_at = float(payload["created_at"])
                 self._conn.execute(
@@ -1491,6 +2998,72 @@ class CommandJobStore:
             if row is None or row["retired_at"] is None:
                 raise CommandError("progress_state_changed")
 
+    def retire_progress_for_inactive_scope(
+        self,
+        job_id: str,
+        *,
+        actor_id: str,
+        conversation_id: str,
+        retired_at: float,
+    ) -> None:
+        """Retire progress for an exact archived scope, even while its job runs.
+
+        Archival revokes the publication scope independently of process state.
+        The actor/conversation join prevents one stale archive worker from
+        retiring another scope, while exact replay of the first durable marker
+        remains idempotent.
+        """
+
+        if not isinstance(job_id, str) or _JOB_ID.fullmatch(job_id) is None:
+            raise CommandError("invalid_job_id")
+        if (
+            not isinstance(actor_id, str)
+            or not actor_id
+            or len(actor_id) > 256
+            or "\x00" in actor_id
+            or not isinstance(conversation_id, str)
+            or not conversation_id
+            or len(conversation_id) > 256
+            or "\x00" in conversation_id
+        ):
+            raise CommandError("progress_retirement_scope_invalid")
+        if (
+            isinstance(retired_at, bool)
+            or not isinstance(retired_at, (int, float))
+            or not math.isfinite(float(retired_at))
+            or not 0 <= float(retired_at) <= 253_402_300_799
+        ):
+            raise CommandError("progress_retirement_time_invalid")
+        moment = float(retired_at)
+        with self.transaction():
+            cursor = self._conn.execute(
+                """UPDATE command_job_progress SET retired_at=?
+                    WHERE job_id=? AND retired_at IS NULL
+                      AND EXISTS (
+                          SELECT 1 FROM jobs
+                           WHERE jobs.job_id=command_job_progress.job_id
+                             AND jobs.actor_id=?
+                             AND jobs.conversation_id=?
+                      )""",
+                (moment, job_id, actor_id, conversation_id),
+            )
+            if cursor.rowcount == 1:
+                return
+            row = self._conn.execute(
+                """SELECT progress.retired_at,jobs.actor_id,jobs.conversation_id
+                     FROM command_job_progress AS progress
+                     JOIN jobs ON jobs.job_id=progress.job_id
+                    WHERE progress.job_id=?""",
+                (job_id,),
+            ).fetchone()
+            if (
+                row is None
+                or str(row["actor_id"]) != actor_id
+                or str(row["conversation_id"]) != conversation_id
+                or row["retired_at"] is None
+            ):
+                raise CommandError("progress_state_changed")
+
     def _record_progress_failure(
         self,
         job_id: str,
@@ -1560,9 +3133,15 @@ class CommandJobStore:
             failed_at=failed_at,
         )
 
-    def list_terminal_publication_candidates(self, *, limit: int = 20) -> list[dict[str, Any]]:
-        """Return bounded publishable terminal jobs that still need staging."""
+    def list_terminal_publication_candidates(
+        self,
+        *,
+        now: float | None = None,
+        limit: int = 20,
+    ) -> list[dict[str, Any]]:
+        """Return bounded terminal/UNKNOWN jobs that still need one honest carrier."""
 
+        moment = time.time() if now is None else float(now)
         with self._local:
             rows = self._conn.execute(
                 """SELECT jobs.*, publication.delivery_chat_id,
@@ -1572,14 +3151,25 @@ class CommandJobStore:
                           publication.envelope_sha256,
                           publication.attempts AS publication_attempts,
                           publication.last_error_code AS publication_error_code,
+                          publication.next_attempt_at AS publication_next_attempt_at,
                           publication.updated_at AS publication_updated_at
                      FROM command_job_publications AS publication
                      JOIN jobs ON jobs.job_id=publication.job_id
-                    WHERE publication.state='pending'
-                      AND jobs.status IN ('completed','failed','cancelled','timeout')
+                    WHERE (
+                            (publication.state='pending'
+                             AND (publication.next_attempt_at IS NULL
+                                  OR publication.next_attempt_at<=?))
+                            OR (
+                                publication.state='blocked'
+                                AND publication.last_error_code='no_generated_files'
+                                AND publication.carrier_retired_at IS NULL
+                                AND jobs.workspace_retired_at IS NULL
+                            )
+                          )
+                      AND jobs.status IN ('completed','failed','cancelled','timeout','unknown')
                     ORDER BY publication.updated_at ASC, jobs.job_id ASC
                     LIMIT ?""",
-                (max(1, min(int(limit), 100)),),
+                (moment, max(1, min(int(limit), 100))),
             ).fetchall()
             return [{str(key): value for key, value in dict(row).items()} for row in rows]
 
@@ -1622,9 +3212,7 @@ class CommandJobStore:
                           publication.updated_at AS publication_updated_at
                      FROM command_job_publications AS publication
                      JOIN jobs ON jobs.job_id=publication.job_id
-                    WHERE (publication.state='sent'
-                           OR (publication.state='blocked'
-                               AND publication.last_error_code='no_generated_files'))
+                    WHERE publication.state='sent'
                       AND publication.carrier_retired_at IS NULL
                       AND (publication.retention_next_attempt_at IS NULL
                            OR publication.retention_next_attempt_at<=?)
@@ -1888,20 +3476,45 @@ class CommandJobStore:
             ).rowcount
         return max(0, int(confirmations)) + max(0, int(nonces))
 
-    def record_publication_attempt(self, job_id: str, error_code: str) -> None:
-        """Record a content-free failure and bound permanently broken retries."""
+    def record_publication_attempt(
+        self,
+        job_id: str,
+        error_code: str,
+        *,
+        failed_at: float | None = None,
+        permanent: bool = False,
+    ) -> None:
+        """Durably back off transient failures; block only a proven permanent one."""
 
         clean = str(error_code or "publication_failed")
         if re.fullmatch(r"[a-z][a-z0-9_]{0,79}", clean) is None:
             clean = "publication_failed"
+        if type(permanent) is not bool:
+            raise CommandError("publication_failure_invalid")
+        moment = time.time() if failed_at is None else float(failed_at)
+        if not math.isfinite(moment):
+            raise CommandError("publication_failure_invalid")
         with self.transaction():
+            row = self._conn.execute(
+                "SELECT attempts FROM command_job_publications WHERE job_id=? AND state='pending'",
+                (str(job_id),),
+            ).fetchone()
+            if row is None:
+                raise CommandError("publication_state_changed")
+            attempts = min(_PUBLICATION_ATTEMPTS_MAX, int(row["attempts"] or 0) + 1)
+            next_attempt_at = None
+            state = "blocked" if permanent else "pending"
+            if not permanent:
+                delay = min(
+                    _PUBLICATION_RETRY_MAX_SEC,
+                    _PUBLICATION_RETRY_BASE_SEC * (2 ** min(max(attempts - 1, 0), 30)),
+                )
+                next_attempt_at = moment + delay
             cursor = self._conn.execute(
                 """UPDATE command_job_publications
-                      SET attempts=attempts+1,
-                          state=CASE WHEN attempts+1>=? THEN 'blocked' ELSE state END,
-                          last_error_code=?,updated_at=?
+                      SET attempts=?,state=?,last_error_code=?,next_attempt_at=?,updated_at=?
                     WHERE job_id=? AND state='pending'""",
-                (_PUBLICATION_MAX_ATTEMPTS, clean, time.time(), str(job_id)),
+                (attempts, state, clean, next_attempt_at, moment, str(job_id)),
             )
             if cursor.rowcount != 1:
                 raise CommandError("publication_state_changed")
@@ -1919,7 +3532,7 @@ class CommandJobStore:
         with self.transaction():
             cursor = self._conn.execute(
                 """UPDATE command_job_publications
-                      SET state='blocked',last_error_code=?,updated_at=?
+                      SET state='blocked',last_error_code=?,next_attempt_at=NULL,updated_at=?
                     WHERE job_id=? AND state='pending'""",
                 (reason, time.time(), str(job_id)),
             )
@@ -1955,8 +3568,20 @@ class CommandJobStore:
             cursor = self._conn.execute(
                 """UPDATE command_job_publications
                       SET state='staged',notification_id=?,dedup_key=?,envelope_sha256=?,
-                          last_error_code='',updated_at=?
-                    WHERE job_id=? AND state='pending'""",
+                          last_error_code='',next_attempt_at=NULL,updated_at=?
+                    WHERE job_id=?
+                      AND (
+                          state='pending'
+                          OR (
+                              state='blocked' AND last_error_code='no_generated_files'
+                              AND carrier_retired_at IS NULL
+                              AND EXISTS (
+                                  SELECT 1 FROM jobs
+                                   WHERE jobs.job_id=command_job_publications.job_id
+                                     AND jobs.workspace_retired_at IS NULL
+                              )
+                          )
+                      )""",
                 (
                     str(notification_id),
                     str(dedup_key),
@@ -2010,7 +3635,7 @@ class CommandJobStore:
             cursor = self._conn.execute(
                 """UPDATE command_job_publications
                       SET state='pending',notification_id='',dedup_key='',envelope_sha256='',
-                          last_error_code='delivery_rejected',updated_at=?
+                          last_error_code='delivery_rejected',next_attempt_at=NULL,updated_at=?
                     WHERE job_id=? AND state='staged' AND notification_id=?""",
                 (time.time(), str(job_id), str(notification_id)),
             )

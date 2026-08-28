@@ -166,7 +166,22 @@ def test_a_restore_that_never_started_leaves_the_database_alone(storage, monkeyp
     storage.ensure_user("alice")
     backup = storage.create_backup(label="до-беды")
     database_path = Path(storage.settings.database_path)
-    before = database_path.read_bytes()
+    active_paths = (
+        database_path,
+        Path(f"{database_path}-wal"),
+        Path(f"{database_path}-shm"),
+    )
+    before = {path: path.read_bytes() for path in active_paths if path.is_file()}
+    recovery_before = set(storage.settings.backups_dir.glob("recovery-*"))
+    close_calls = 0
+    original_close = storage.close
+
+    def _unexpected_close(*, final=False):  # noqa: ANN001, ANN202
+        nonlocal close_calls
+        close_calls += 1
+        return original_close(final=final)
+
+    monkeypatch.setattr(storage, "close", _unexpected_close)
 
     def _no_space(source, target):  # noqa: ANN001, ARG001
         raise OSError(28, "No space left on device")
@@ -176,8 +191,12 @@ def test_a_restore_that_never_started_leaves_the_database_alone(storage, monkeyp
     with pytest.raises(RuntimeError) as failure:
         storage.restore_backup(Path(backup["path"]).name)
 
-    assert database_path.is_file(), "живая база удалена сорвавшимся восстановлением"
-    assert database_path.read_bytes() == before, "живая база подменена"
+    assert close_calls == 0, "preflight закрыл SQLite до durable restore intent"
+    assert {path: path.read_bytes() for path in active_paths if path.is_file()} == before, (
+        "DB/WAL/SHM изменились до начала restore"
+    )
+    assert set(storage.settings.backups_dir.glob("recovery-*")) == recovery_before
+    assert not list(database_path.parent.glob("*.restore-*.tmp"))
     message = str(failure.value)
     assert "no previous database existed" not in message, "сообщение лжёт о судьбе базы"
     assert "left untouched" in message

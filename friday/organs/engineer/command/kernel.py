@@ -16,6 +16,10 @@ import weakref
 from pathlib import Path
 from typing import Literal
 
+from friday.engineer_source_binding import (
+    canonical_engineer_source_binding_sha256,
+    legacy_engineer_source_binding_sha256,
+)
 from friday.file_delivery import (
     AuthorizedFileBytes,
     CurrentMessageUploadBatchIdentity,
@@ -54,10 +58,96 @@ from .resolve import attest_trusted_path, resolve_bwrap, resolve_request
 from .runner import SpawnedCommand, _pid_starttime
 from .spawn_helper import SpawnBroker
 from .store import CommandJobStore, decode_json_list
+from .store_lifecycle import CommandStoreOpenMode
 from .workspace import JobWorkspace
 
 _RECEIPT_CACHE_MAX = 64
 _SHUTDOWN_TIMEOUT_SEC = 30.0
+
+
+def _verified_source_bindings(
+    grant: VerifiedCommandGrant,
+    *,
+    delivery_chat_id: str,
+) -> tuple[str, str]:
+    values = {
+        "owner_id": grant.actor_id,
+        "tenant_id": grant.tenant_id,
+        "conversation_id": grant.conversation_id,
+        "channel": grant.channel,
+        "source_row_id": grant.source_row_id,
+        "source_hash": grant.source_hash,
+        "telegram_update_id": grant.telegram_update_id,
+        "delivery_chat_id": delivery_chat_id,
+    }
+    return (
+        canonical_engineer_source_binding_sha256(
+            **values,
+            source_step_id=grant.source_step_id,
+        ),
+        legacy_engineer_source_binding_sha256(**values),
+    )
+
+
+def _resolve_durable_source_replay(
+    store: CommandJobStore,
+    *,
+    grant: VerifiedCommandGrant,
+    request: CommandRequest,
+    delivery_chat_id: str,
+    source_binding_sha256: str,
+    legacy_source_binding_sha256: str,
+) -> str | None:
+    source_slot = store.lookup_engineer_command_source_slot(
+        grant.actor_id,
+        source_binding_sha256,
+        legacy_source_binding_sha256=legacy_source_binding_sha256,
+    )
+    key_slot = store.lookup_engineer_command_source_slot_by_key(
+        grant.actor_id,
+        request.idempotency_key,
+    )
+    if source_slot is None and key_slot is None:
+        if store.lookup_idempotency_binding(grant.actor_id, request.idempotency_key) is not None:
+            raise CommandError("engineer_command_source_slot_corrupt")
+        return None
+    slots = tuple(slot for slot in (source_slot, key_slot) if slot is not None)
+    if any(slot.get("target_kind") == "engineer_work_item_fence" for slot in slots):
+        raise CommandError("idempotency_fenced")
+    if key_slot is not None and key_slot.get("target_kind") == "job":
+        key_existing = store.lookup_idempotency_binding(
+            grant.actor_id,
+            request.idempotency_key,
+        )
+        if key_existing is None:
+            raise CommandError("engineer_command_source_slot_corrupt")
+        if key_existing.get("delivery_chat_id", "") != delivery_chat_id:
+            raise CommandError("delivery_scope_mismatch")
+    if source_slot is None or key_slot is None or source_slot != key_slot:
+        raise CommandError("idempotency_conflict")
+    if (
+        source_slot.get("target_kind") != "job"
+        or source_slot.get("idempotency_key") != request.idempotency_key
+        or source_slot.get("command_digest") != request.digest
+    ):
+        raise CommandError("idempotency_conflict")
+    existing = store.lookup_idempotency_binding(grant.actor_id, request.idempotency_key)
+    if (
+        existing is None
+        or existing.get("job_id") != source_slot.get("job_id")
+        or existing.get("command_digest") != request.digest
+    ):
+        raise CommandError("engineer_command_source_slot_corrupt")
+    if existing.get("delivery_chat_id", "") != delivery_chat_id:
+        raise CommandError("delivery_scope_mismatch")
+    if source_slot.get("source_binding_sha256") == source_binding_sha256 and (
+        existing.get("source_step_id") != grant.source_step_id
+    ):
+        raise CommandError("engineer_command_source_slot_corrupt")
+    job_id = existing.get("job_id")
+    if not isinstance(job_id, str) or re.fullmatch(r"[0-9a-f]{32}", job_id) is None:
+        raise CommandError("engineer_command_source_slot_corrupt")
+    return job_id
 
 
 def _validated_private_inputs(
@@ -267,8 +357,16 @@ class CommandKernel:
         trusted_path: TrustedPathContract | None = None,
         limits: ResourceLimits | None = None,
         boundary: ResourceBoundary | None = None,
+        lifecycle_mode: CommandStoreOpenMode = "provision",
+        lifecycle_key: bytes | None = None,
+        lifecycle_state_dir: Path | None = None,
     ) -> None:
-        self.store = CommandJobStore(Path(store_root))
+        self.store = CommandJobStore(
+            Path(store_root),
+            lifecycle_mode=lifecycle_mode,
+            lifecycle_key=lifecycle_key,
+            lifecycle_state_dir=lifecycle_state_dir,
+        )
         self._store_finalizer = weakref.finalize(self, self.store.close)
         self.authority = authority
         self.authority.bind_store(self.store)
@@ -349,8 +447,8 @@ class CommandKernel:
         with self._lock:
             live = tuple(self._live.items())
         requested_at = time.time()
-        persist_failure: CommandError | None = None
-        for job_id, _spawned in live:
+        signalable: list[SpawnedCommand] = []
+        for job_id, spawned in live:
             try:
                 job = self.store.read_job(job_id)
                 self.store.persist_cancel_intent(
@@ -359,14 +457,24 @@ class CommandKernel:
                     conversation_id=str(job.get("conversation_id") or ""),
                     requested_at=requested_at,
                 )
+                signalable.append(spawned)
             except CommandError as exc:
-                if exc.code not in {"current_job_uncertain", "job_not_running", "job_not_found"}:
-                    persist_failure = persist_failure or exc
+                if exc.code in {"current_job_uncertain", "job_not_running", "job_not_found"}:
+                    continue
+                self._closing.clear()
+                raise CommandError("command_shutdown_persist_failed") from exc
+            except BaseException:
+                # No process receives a signal unless every affected running scope has
+                # first acquired durable cancellation intent.  Clearing the admission
+                # fence makes an operator retry possible after storage recovers.
+                self._closing.clear()
+                raise
 
-        # Signal all scopes first.  Full systemd collection remains in the
+        # Signal only scopes whose cancellation intent is durably committed.
+        # Full systemd collection remains in the
         # reapers and therefore proceeds concurrently instead of N times in a
         # serial shutdown loop.
-        for _job_id, spawned in live:
+        for spawned in signalable:
             spawned.request_shutdown()
 
         while True:
@@ -383,8 +491,6 @@ class CommandKernel:
         self._path_finalizer()
         self._store_finalizer()
         self._closed.set()
-        if persist_failure is not None:
-            raise CommandError("command_shutdown_persist_failed") from persist_failure
 
     def _reconcile_stale(self) -> None:
         for job in self.store.list_unreaped():
@@ -546,19 +652,27 @@ class CommandKernel:
                 )
                 if fence is not None:
                     raise CommandError("idempotency_fenced")
-                existing = self.store.lookup_idempotency(actor_id, request.idempotency_key)
-                if existing is not None:
-                    if existing["digest"] != request.digest:
-                        raise CommandError("idempotency_conflict")
-                    if existing.get("delivery_chat_id", "") != delivery_chat_id:
-                        raise CommandError("delivery_scope_mismatch")
-                    return existing["job_id"]
             grant = self.authority.parse(grant_token, request, actor_id=actor_id)
+            source_binding, legacy_source_binding = _verified_source_bindings(
+                grant,
+                delivery_chat_id=delivery_chat_id,
+            )
             # A revoked grant is dead before executable resolution or command
             # classification.  Keep this check again at both effect boundaries
             # below to close revocation races during admission and spawn.
             self.authority.still_valid(grant)
             require_profile(grant.isolation_profile)
+            with self.store.transaction():
+                existing_job_id = _resolve_durable_source_replay(
+                    self.store,
+                    grant=grant,
+                    request=request,
+                    delivery_chat_id=delivery_chat_id,
+                    source_binding_sha256=source_binding,
+                    legacy_source_binding_sha256=legacy_source_binding,
+                )
+                if existing_job_id is not None:
+                    return existing_job_id
             materialized_inputs = _validated_private_inputs(
                 request,
                 grant,
@@ -588,19 +702,16 @@ class CommandKernel:
                     conversation_id=grant.conversation_id,
                 )
             with self.store.transaction():
-                fence = self.store.lookup_engineer_work_item_fence(
-                    actor_id,
-                    request.idempotency_key,
+                existing_job_id = _resolve_durable_source_replay(
+                    self.store,
+                    grant=grant,
+                    request=request,
+                    delivery_chat_id=delivery_chat_id,
+                    source_binding_sha256=source_binding,
+                    legacy_source_binding_sha256=legacy_source_binding,
                 )
-                if fence is not None:
-                    raise CommandError("idempotency_fenced")
-                existing = self.store.lookup_idempotency(actor_id, request.idempotency_key)
-                if existing is not None:
-                    if existing["digest"] != request.digest:
-                        raise CommandError("idempotency_conflict")
-                    if existing.get("delivery_chat_id", "") != delivery_chat_id:
-                        raise CommandError("delivery_scope_mismatch")
-                    return existing["job_id"]
+                if existing_job_id is not None:
+                    return existing_job_id
                 self.authority.still_valid(grant)
                 self.store.consume_nonce(grant.nonce, exp=grant.expires_at, now=int(time.time()))
                 if grant.confirmation_nonce:
@@ -623,6 +734,8 @@ class CommandKernel:
                         "conversation_id": grant.conversation_id,
                         "channel": grant.channel,
                         "source_row_id": grant.source_row_id,
+                        "source_step_id": grant.source_step_id,
+                        "source_binding_sha256": source_binding,
                         "source_hash": grant.source_hash,
                         "telegram_update_id": grant.telegram_update_id,
                         "isolation_profile": grant.isolation_profile.value,
@@ -656,6 +769,7 @@ class CommandKernel:
             try:
                 self.authority.still_valid(grant)
                 with self._spawn_lock:
+                    self.store.assert_lifecycle_ready()
                     scope = self.boundary.allocate(
                         job_id,
                         spawned.limits,

@@ -104,6 +104,7 @@ def render_engineer_status(update: dict[str, Any]) -> str:
             "failed": "❌ Engineer-задача завершилась с ошибкой. Итог отправлен.",
             "cancelled": "⏹ Engineer-задача отменена. Итог отправлен.",
             "timeout": "⏱ Engineer-задача остановлена по тайм-ауту. Итог отправлен.",
+            "unknown": "⚠️ Состояние Engineer-задачи неизвестно. Ни успех, ни ошибка не подтверждены.",
             "delivery_uncertain": ("⚠️ Engineer-задача завершена; доставка результата не подтверждена."),
         }[stage]
         return f"{terminal_text}\nJob: {job_id}."

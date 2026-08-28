@@ -7,6 +7,7 @@ import io
 import json
 import re
 import zipfile
+from contextlib import contextmanager
 from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
@@ -25,6 +26,17 @@ from friday.file_delivery import (
     CurrentMessageUploadFileIdentity,
     authorize_current_message_upload_batch,
 )
+from friday.interaction_control_plane.engineer_work_item import (
+    EngineerWorkItemChannel,
+    EngineerWorkItemState,
+    EngineerWorkItemStepState,
+    EngineerWorkItemTransition,
+)
+from friday.orchestration.engineer_work_item_coordinator import (
+    EngineerAdmissionOutcome,
+    EngineerCommandLedgerDisposition,
+    EngineerContinuationState,
+)
 from friday.organs import ServiceContext
 from friday.organs.engineer import ENGINEER_COMMAND_RUN, command_tools
 from friday.organs.engineer.command import (
@@ -38,7 +50,11 @@ from friday.organs.engineer.command import (
     IsolationProfile,
 )
 from friday.organs.engineer.command.contracts import sha256_bytes
-from friday.organs.engineer.command_tools import EngineerCommandService, build_engineer_command_tools
+from friday.organs.engineer.command_tools import (
+    EngineerCommandService,
+    build_engineer_command_tools,
+    provision_engineer_command_store,
+)
 from friday.permissions import LEGACY_OWNER_USER_ID, ActorContext
 from friday.telegram_bridge import TelegramBridge, TelegramConfig
 from tests.test_api_vertical_slice import _bridge_request
@@ -160,13 +176,15 @@ def _configured(settings, tmp_path: Path):
     key = tmp_path / "command.key"
     key.write_bytes(b"K" * 32)
     key.chmod(0o600)
-    return replace(
+    configured = replace(
         settings,
         engineer_mode_enabled=True,
         engineer_command_enabled=True,
         engineer_command_store_dir=store,
         engineer_command_key_file=key,
     )
+    provision_engineer_command_store(configured)
+    return configured
 
 
 def test_command_configuration_is_private_and_explicit(settings, tmp_path: Path) -> None:
@@ -215,7 +233,7 @@ def test_autonomous_command_tool_has_no_hitl_and_keeps_runtime_authority_hidden(
         tool.handler(
             actor="owner",
             command="printf autonomous",
-            _conversation_id="conv_owner",
+            _conversation_id="conv_0123456789abcdef",
             _source_message_id="msg_0123456789abcdef",
             _telegram_update_id="100",
             _step_id="ecstep-" + "a" * 32,
@@ -264,6 +282,61 @@ def test_application_lifespan_closes_the_engineer_command_service(
         monkeypatch.setattr(app.state.organs, "close", observed_close)
 
     assert closed == [True]
+
+
+def test_application_lifespan_drains_workers_before_closing_engineer_service(
+    settings,
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    import friday.server as server_module
+
+    order: list[str] = []
+
+    def observed_drain(_timeout: float) -> dict[str, int]:
+        order.append("worker-drain")
+        return {}
+
+    monkeypatch.setattr(server_module, "wait_until_idle", observed_drain)
+    app = server_module.create_app(_configured(settings, tmp_path))
+    with TestClient(app):
+        original_close = app.state.organs.close
+
+        async def observed_close() -> None:
+            order.append("organ-close")
+            await original_close()
+
+        monkeypatch.setattr(app.state.organs, "close", observed_close)
+
+    assert order == ["worker-drain", "organ-close"]
+
+
+def test_application_lifespan_keeps_services_open_until_physical_worker_drain(
+    settings,
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    import friday.server as server_module
+
+    order: list[str] = []
+    observations = iter(({"engineer_command_terminal_delivery": 1}, {}))
+
+    def observed_drain(_timeout: float) -> dict[str, int]:
+        order.append("worker-drain")
+        return next(observations)
+
+    monkeypatch.setattr(server_module, "wait_until_idle", observed_drain)
+    app = server_module.create_app(_configured(settings, tmp_path))
+    with TestClient(app):
+        original_close = app.state.organs.close
+
+        async def observed_close() -> None:
+            order.append("organ-close")
+            await original_close()
+
+        monkeypatch.setattr(app.state.organs, "close", observed_close)
+
+    assert order == ["worker-drain", "worker-drain", "organ-close"]
 
 
 def test_full_chat_autonomous_engineer_bypasses_dialogue_policy_and_forces_tools(
@@ -914,7 +987,7 @@ def test_command_management_schema_resolves_the_current_conversation_job(
     with TestClient(app):
         tool = app.state.kernel.get_tool(tool_name)
         assert "required" not in tool.parameters
-        result = asyncio.run(tool.handler(actor=actor, _conversation_id="conv-owner"))
+        result = asyncio.run(tool.handler(actor=actor, _conversation_id="conv_0123456789abcdef"))
     assert result["ok"] is False
     assert result["error_code"] == "current_job_not_found"
 
@@ -1057,7 +1130,7 @@ class _IngressStorage:
         assert person_id == self.actor.own_id
         return {
             "id": message_id,
-            "conversation_id": "conv_owner",
+            "conversation_id": "conv_0123456789abcdef",
             "role": "user",
             "content": "Запусти true",
             "metadata_json": json.dumps(
@@ -1080,6 +1153,92 @@ class _IngressStorage:
             "status": "active",
             "metadata_json": json.dumps({"chat_id": "5001"}),
         }
+
+    @contextmanager
+    def transaction(self):  # noqa: ANN201
+        yield object()
+
+
+class _DirectWorkItems:
+    """Minimal EWI seam for unit tests that isolate command/input mechanics."""
+
+    def __init__(self, service: EngineerCommandService) -> None:
+        self.service = service
+        self.current: EngineerContinuationState | None = None
+
+    def reserve(self, reservation) -> EngineerAdmissionOutcome:  # noqa: ANN001
+        self.current = EngineerContinuationState(
+            work_item_id="ewi_" + "1" * 32,
+            owner_id=reservation.source.owner_id,
+            tenant_id=reservation.source.tenant_id,
+            conversation_id=reservation.source.conversation_id,
+            channel=EngineerWorkItemChannel.TELEGRAM,
+            state=EngineerWorkItemState.ACTIVE,
+            transition=EngineerWorkItemTransition.CREATED,
+            revision=1,
+            step_ordinal=1,
+            step_state=EngineerWorkItemStepState.PREPARED,
+            source_binding_sha256=reservation.source.binding_sha256(),
+            idempotency_key=reservation.idempotency_key,
+            command_digest=reservation.command_digest,
+            job_receipt_sha256="",
+            terminal_receipt_sha256="",
+            ledger_disposition=EngineerCommandLedgerDisposition.ABSENT,
+            command_job_id=None,
+            command_status=None,
+        )
+        return EngineerAdmissionOutcome(
+            EngineerCommandLedgerDisposition.ABSENT,
+            self.current,
+        )
+
+    def reconcile_admission_in_transaction(self, _conn, **_scope) -> EngineerAdmissionOutcome:
+        assert self.current is not None
+        self.current = replace(
+            self.current,
+            state=EngineerWorkItemState.WAITING_FOR_CAPABILITY,
+            transition=EngineerWorkItemTransition.COMMAND_ADMITTED,
+            revision=2,
+            step_state=EngineerWorkItemStepState.ADMITTED,
+            job_receipt_sha256="2" * 64,
+            ledger_disposition=EngineerCommandLedgerDisposition.EXACT,
+            command_job_id="1" * 32,
+            command_status=CommandStatus.ADMITTED,
+        )
+        return EngineerAdmissionOutcome(
+            EngineerCommandLedgerDisposition.EXACT,
+            self.current,
+        )
+
+    def current_structural_state_in_transaction(self, _conn, **_scope):  # noqa: ANN201
+        assert self.current is not None
+        progress = self.service.kernel.progress(
+            str(self.current.command_job_id),
+            actor_id=self.current.owner_id,
+            conversation_id=self.current.conversation_id,
+        )
+        self.current = replace(self.current, command_status=progress.status)
+        return self.current
+
+    def settle_verified_terminal_in_transaction(
+        self,
+        _conn,
+        *,
+        verified_terminal_receipt_sha256: str,
+        **_scope,
+    ) -> EngineerContinuationState:
+        assert self.current is not None
+        status = getattr(getattr(self.service.kernel, "receipt", None), "status", None)
+        self.current = replace(
+            self.current,
+            state=EngineerWorkItemState.WAITING_FOR_INPUT,
+            transition=EngineerWorkItemTransition.TERMINAL_OBSERVED,
+            revision=self.current.revision + 1,
+            step_state=EngineerWorkItemStepState.SETTLED,
+            terminal_receipt_sha256=verified_terminal_receipt_sha256,
+            command_status=status or CommandStatus.COMPLETED,
+        )
+        return self.current
 
 
 class _FreshAuthorization:
@@ -1172,7 +1331,7 @@ class _FakeCommandKernel:
         assert (job_id, actor_id, conversation_id, timeout_sec) == (
             "1" * 32,
             LEGACY_OWNER_USER_ID,
-            "conv_owner",
+            "conv_0123456789abcdef",
             15.0,
         )
         raise CommandError("wait_timeout")
@@ -1186,7 +1345,7 @@ class _FakeCommandKernel:
     ) -> CommandProgress:
         assert job_id == "1" * 32
         assert actor_id == LEGACY_OWNER_USER_ID
-        assert conversation_id == "conv_owner"
+        assert conversation_id == "conv_0123456789abcdef"
         return CommandProgress(
             job_id=job_id,
             status=CommandStatus.RUNNING,
@@ -1211,6 +1370,8 @@ def _direct_service(actor: ActorContext, *, source_update_id: str = "100") -> En
     service.authorization = _FreshAuthorization(actor)
     service.files_root = Path("/not-read-without-uploads")
     service.max_upload_bytes = 4 * 1024 * 1024
+    service.work_items = _DirectWorkItems(service)
+    service._reserve_command = service.work_items.reserve  # type: ignore[method-assign]
     return service
 
 
@@ -1263,7 +1424,7 @@ def test_exact_current_upload_is_reauthorized_and_passed_only_through_private_su
     )
     batch_identity = CurrentMessageUploadBatchIdentity(
         source_message_id="msg_0123456789abcdef",
-        conversation_id="conv_owner",
+        conversation_id="conv_0123456789abcdef",
         source_message_identity_sha256="8" * 64,
         telegram_update_id="100",
         uploaded_raw_ids=(raw_id,),
@@ -1287,7 +1448,7 @@ def test_exact_current_upload_is_reauthorized_and_passed_only_through_private_su
     def authorize(*_args, **arguments):  # noqa: ANN002, ANN003, ANN201
         events.append("authorize")
         assert arguments == {
-            "conversation_id": "conv_owner",
+            "conversation_id": "conv_0123456789abcdef",
             "source_message_id": "msg_0123456789abcdef",
             "telegram_update_id": "100",
             "uploaded_raw_ids": (raw_id,),
@@ -1352,14 +1513,14 @@ def test_exact_current_upload_is_reauthorized_and_passed_only_through_private_su
         actor=actor,
         command='sha256sum "$FRIDAY_INPUT_DIR/01-input.bin"',
         timeout_sec=10,
-        _conversation_id="conv_owner",
+        _conversation_id="conv_0123456789abcdef",
         _source_message_id="msg_0123456789abcdef",
         _telegram_update_id="100",
         _step_id="ecstep-" + "5" * 32,
     )
 
     assert result["ok"] is True
-    assert events == ["authorize", "attest", "delegate", "issue", "reauthorize", "submit"]
+    assert events == ["authorize", "attest", "reauthorize", "delegate", "issue", "submit"]
     assert len(request_calls) == 2
     manifest = request_calls[-1]["input_manifest"]
     assert manifest.files[0].raw_id == raw_id
@@ -1421,7 +1582,7 @@ class _TerminalDirectKernel(_FakeCommandKernel):
         assert (job_id, actor_id, conversation_id) == (
             self.receipt.job_id,
             LEGACY_OWNER_USER_ID,
-            "conv_owner",
+            "conv_0123456789abcdef",
         )
         return CommandProgress(
             job_id=job_id,
@@ -1444,7 +1605,7 @@ class _TerminalDirectKernel(_FakeCommandKernel):
         assert (job_id, actor_id, conversation_id, timeout_sec) == (
             self.receipt.job_id,
             LEGACY_OWNER_USER_ID,
-            "conv_owner",
+            "conv_0123456789abcdef",
             0.1,
         )
         self.terminal_receipt_reads += 1
@@ -1469,7 +1630,7 @@ def test_terminal_autonomous_step_returns_receipt_without_consuming_archive_deli
         actor=actor,
         command="printf autonomous",
         timeout_sec=10,
-        _conversation_id="conv_owner",
+        _conversation_id="conv_0123456789abcdef",
         _source_message_id="msg_0123456789abcdef",
         _telegram_update_id="100",
         _step_id="ecstep-" + "4" * 32,
@@ -1606,25 +1767,25 @@ def test_terminal_status_builds_one_exact_private_delivery_archive() -> None:
 
     result = service.status(
         actor=actor,
-        _conversation_id="conv-owner",
+        _conversation_id="conv_0123456789abcdef",
     )
     repeated = service.status(
         actor=actor,
         job_id=kernel.receipt.job_id,
-        _conversation_id="conv-owner",
+        _conversation_id="conv_0123456789abcdef",
     )
 
     assert result["ok"] is True
     assert result["artifact_delivery"]["available"] is True
     assert repeated["_attachment"] == result["_attachment"]
     assert kernel.calls == [
-        ("resolve", actor.own_id, "conv-owner"),
-        ("progress", actor.own_id, "conv-owner"),
-        ("terminal_receipt", actor.own_id, "conv-owner"),
-        ("terminal_result", actor.own_id, "conv-owner"),
-        ("resolve", actor.own_id, "conv-owner"),
-        ("progress", actor.own_id, "conv-owner"),
-        ("terminal_receipt", actor.own_id, "conv-owner"),
+        ("resolve", actor.own_id, "conv_0123456789abcdef"),
+        ("progress", actor.own_id, "conv_0123456789abcdef"),
+        ("terminal_receipt", actor.own_id, "conv_0123456789abcdef"),
+        ("terminal_result", actor.own_id, "conv_0123456789abcdef"),
+        ("resolve", actor.own_id, "conv_0123456789abcdef"),
+        ("progress", actor.own_id, "conv_0123456789abcdef"),
+        ("terminal_receipt", actor.own_id, "conv_0123456789abcdef"),
     ]
     attachment = result.pop("_attachment")
     archive_bytes = base64.b64decode(attachment["content_base64"], validate=True)
@@ -1644,7 +1805,7 @@ def test_legacy_terminal_status_is_readable_without_publishing_outputs() -> None
     result = service.status(
         actor=actor,
         job_id=kernel.receipt.job_id,
-        _conversation_id="conv-owner",
+        _conversation_id="conv_0123456789abcdef",
     )
 
     assert result["ok"] is True
@@ -1694,7 +1855,7 @@ def test_unknown_after_restart_remains_honest_without_reading_a_receipt_or_outpu
     result = service.status(
         actor=actor,
         job_id="7" * 32,
-        _conversation_id="conv-owner",
+        _conversation_id="conv_0123456789abcdef",
     )
 
     assert result["ok"] is True
@@ -1710,7 +1871,7 @@ def test_unknown_after_restart_remains_honest_without_reading_a_receipt_or_outpu
     [
         (
             ActorContext("ordinary-user", "user", "telegram-bridge"),
-            "conv-owner",
+            "conv_0123456789abcdef",
             "authorization_denied",
         ),
         (
@@ -1753,7 +1914,7 @@ def test_command_status_normalizes_corrupt_ledger_failures() -> None:
     result = service.status(
         actor=actor,
         job_id="2" * 32,
-        _conversation_id="conv-owner",
+        _conversation_id="conv_0123456789abcdef",
     )
 
     assert result == {
@@ -1778,7 +1939,7 @@ def test_distinct_code_owned_steps_admit_distinct_autonomous_shell_jobs() -> Non
             actor=actor,
             command="printf autonomous",
             timeout_sec=10,
-            _conversation_id="conv_owner",
+            _conversation_id="conv_0123456789abcdef",
             _source_message_id="msg_0123456789abcdef",
             _telegram_update_id="100",
             _step_id=step_id,
@@ -1811,7 +1972,50 @@ def test_distinct_code_owned_steps_admit_distinct_autonomous_shell_jobs() -> Non
     attestations = kernel.authority.source_authority.attestations
     assert all(item["telegram_update_id"] == "100" for item in attestations)
     assert all(item["isolation_profile"] is IsolationProfile.HOST_USER for item in attestations)
+    assert [item["source_step_id"] for item in attestations] == [
+        "ecstep-" + "1" * 32,
+        "ecstep-" + "2" * 32,
+        "ecstep-" + "1" * 32,
+    ]
     assert [item["idempotency_key"] for item in attestations] == [item.idempotency_key for item in requests]
+
+
+@pytest.mark.parametrize(
+    "step_id",
+    (
+        "",
+        "ecstep-" + "a" * 31,
+        "ecstep-" + "A" * 32,
+        "ecstep-" + "a" * 32 + "0",
+    ),
+)
+def test_command_service_rejects_malformed_code_owned_step_identity(step_id: str) -> None:
+    actor = ActorContext(
+        LEGACY_OWNER_USER_ID,
+        "owner",
+        "telegram-bridge",
+        identity_id="5001",
+    )
+    service = _direct_service(actor)
+
+    result = service.execute(
+        actor=actor,
+        command="true",
+        timeout_sec=10,
+        _conversation_id="conv_0123456789abcdef",
+        _source_message_id="msg_0123456789abcdef",
+        _telegram_update_id="100",
+        _step_id=step_id,
+    )
+
+    assert result == {
+        "effect_boundary_crossed": False,
+        "error_code": "authenticated_owner_source_required",
+        "ok": False,
+        "status": "failed",
+    }
+    assert service.kernel.authority.source_authority.attestations == []
+    assert service.kernel.requests == []
 
 
 def test_model_cannot_supply_legacy_approval_or_argv_arguments() -> None:
@@ -1828,7 +2032,7 @@ def test_model_cannot_supply_legacy_approval_or_argv_arguments() -> None:
             actor=actor,
             command="true",
             argv=["/usr/bin/false"],
-            _conversation_id="conv_owner",
+            _conversation_id="conv_0123456789abcdef",
             _source_message_id="msg_0123456789abcdef",
             _telegram_update_id="100",
             _step_id="ecstep-" + "1" * 32,
@@ -1850,7 +2054,7 @@ def test_source_row_must_bind_the_original_telegram_update() -> None:
         actor=actor,
         command="/usr/bin/true",
         timeout_sec=10,
-        _conversation_id="conv_owner",
+        _conversation_id="conv_0123456789abcdef",
         _source_message_id="msg_0123456789abcdef",
         _telegram_update_id="999",
         _step_id="ecstep-" + "3" * 32,
@@ -1887,7 +2091,7 @@ def test_autonomous_admission_rechecks_current_owner_authority(revocation: str) 
         actor=actor,
         command="/usr/bin/true",
         timeout_sec=10,
-        _conversation_id="conv_owner",
+        _conversation_id="conv_0123456789abcdef",
         _source_message_id="msg_0123456789abcdef",
         _telegram_update_id="100",
         _step_id="ecstep-" + "6" * 32,
