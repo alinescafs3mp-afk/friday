@@ -26,7 +26,8 @@ import hashlib
 import hmac
 import json
 import re
-from collections.abc import Mapping
+import time
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field, fields, is_dataclass
 from enum import Enum, StrEnum
 from typing import Any
@@ -34,13 +35,11 @@ from typing import Any
 from friday.file_evidence import CurrentTurnFileReferenceToken, current_turn_file_reference_of
 from friday.model_input_hygiene import secondary_model_messages_are_secret_free
 from friday.orchestration.contracts import AttachmentDescriptor, RouterMode, TurnInput
-from friday.orchestration.supervisor_actor_binding import supervisor_canary_actor_binding_sha256
 from friday.pending_durable_turn import PendingDurableAdmissionState, PendingDurableTurnAdmission
 from friday.permissions import ActorContext
 from friday.source_identity import (
     AuthorizedFileSnapshotToken,
     authorized_file_snapshot_token_is_process_owned,
-    raw_source_identity_sha256,
 )
 from friday.turn_intent_policy import (
     AttachmentDisposition,
@@ -100,12 +99,19 @@ class TurnMode(StrEnum):
     ENGINEER = "engineer"
 
 
-_MODE_TOOL_BUDGET_CEILINGS: dict[TurnMode, tuple[int, int]] = {
-    TurnMode.DIALOGUE: (4, 2),
-    TurnMode.KNOWLEDGE_WORK: (8, 3),
-    TurnMode.RESEARCH: (12, 5),
-    TurnMode.ENGINEER: (48, 24),
-}
+_ACTOR_CONTEXT_FIELDS = (
+    "user_id",
+    "preset_key",
+    "source",
+    "identity_id",
+    "session_id",
+    "shared_tenant",
+    "person_id",
+    "telegram_chat_id",
+)
+_TELEGRAM_SENDER_RE = re.compile(r"[1-9][0-9]{0,19}\Z")
+_TELEGRAM_CHAT_RE = re.compile(r"-?[1-9][0-9]{0,19}\Z")
+_TELEGRAM_UPDATE_RE = re.compile(r"[1-9][0-9]{0,19}\Z")
 
 
 class AuthorizedSourceKind(StrEnum):
@@ -190,6 +196,68 @@ def _optional_text(value: object, *, label: str, maximum: int) -> str | None:
     except UnicodeEncodeError as exc:
         raise TurnContextError(f"{label} is invalid") from exc
     return value
+
+
+def _turn_actor_binding(namespace_key: bytes, actor: ActorContext) -> str:
+    """Bind every current actor field and fail closed when that contract grows."""
+
+    if type(actor) is not ActorContext or tuple(item.name for item in fields(ActorContext)) != (
+        _ACTOR_CONTEXT_FIELDS
+    ):
+        raise TurnContextError("authenticated actor projection is unsupported")
+    user_id = _opaque_id(actor.user_id, label="actor tenant identity")
+    preset_key = _opaque_id(actor.preset_key, label="actor preset")
+    source = _opaque_id(actor.source, label="actor authentication source")
+    identity_id = _optional_text(actor.identity_id, label="actor principal identity", maximum=512)
+    session_id = _optional_text(actor.session_id, label="actor session identity", maximum=512)
+    if type(actor.shared_tenant) is not bool or type(actor.person_id) is not str:
+        raise TurnContextError("authenticated actor projection is invalid")
+    if actor.shared_tenant:
+        person_id = _opaque_id(actor.person_id, label="actor person identity")
+    elif actor.person_id:
+        raise TurnContextError("non-shared actor cannot carry a separate person identity")
+    else:
+        person_id = ""
+    return _keyed_binding(
+        namespace_key,
+        b"friday/turn-context/actor/v1\0",
+        {
+            "schema": "friday.turn-context-actor.v1",
+            "user_id": user_id,
+            "preset_key": preset_key,
+            "source": source,
+            "identity_id": identity_id,
+            "session_id": session_id,
+            "shared_tenant": actor.shared_tenant,
+            "person_id": person_id,
+            "telegram_chat_id": actor.telegram_chat_id,
+        },
+    )
+
+
+def _validate_ingress_actor_relation(
+    *,
+    ingress_kind: IngressKind,
+    actor: ActorContext,
+    source_id: str,
+    update_id: str,
+) -> None:
+    if ingress_kind is IngressKind.TELEGRAM:
+        sender_id = actor.identity_id
+        chat_id = actor.telegram_chat_id
+        if (
+            actor.source != "telegram-bridge"
+            or type(sender_id) is not str
+            or _TELEGRAM_SENDER_RE.fullmatch(sender_id) is None
+            or type(chat_id) is not str
+            or _TELEGRAM_CHAT_RE.fullmatch(chat_id) is None
+            or source_id != chat_id
+            or _TELEGRAM_UPDATE_RE.fullmatch(update_id) is None
+        ):
+            raise TurnContextError("Telegram ingress does not match its authenticated actor")
+        return
+    if actor.source == "telegram-bridge" or actor.telegram_chat_id is not None:
+        raise TurnContextError("signed HTTP ingress cannot carry Telegram channel authority")
 
 
 def _reject_json_constant(_value: str) -> Any:
@@ -295,7 +363,7 @@ class AuthenticatedIngressAuthority:
     ingress_issued_token: str = field(repr=False)
     source_id: str = field(repr=False)
     update_id: str = field(repr=False)
-    request_effect_binding_sha256: str | None
+    request_effect_binding_sha256: str
     issuer_fingerprint_sha256: str
     accepted_ingress_binding_sha256: str
     actor_binding_sha256: str
@@ -323,12 +391,18 @@ class AuthenticatedIngressAuthority:
             ("source binding", self.source_binding_sha256),
             ("update binding", self.update_binding_sha256),
         ):
-            _digest(value, label=label, optional=label == "request effect binding")
+            _digest(value, label=label)
         _validate_seal(
             self._seal,
             kind="ingress authority",
             payload=self.payload(),
-            component_ids=(id(self.actor), id(self.conversation)),
+            component_ids=(
+                id(self.actor),
+                id(self.conversation),
+                id(self.ingress_issued_token),
+                id(self.source_id),
+                id(self.update_id),
+            ),
         )
 
     @property
@@ -399,25 +473,36 @@ class AuthorizedSourceIdentity:
     identity_sha256: str
     model_descriptor_sha256: str | None
     private_carrier: object = field(repr=False, compare=False)
+    model_descriptor: AttachmentDescriptor | None = field(repr=False, compare=False)
     _seal: _Seal = field(repr=False, compare=False)
 
     def __post_init__(self) -> None:
         if type(self.kind) is not AuthorizedSourceKind:
             raise TurnContextError("authorized source kind must be closed")
         if self.kind is AuthorizedSourceKind.ACCEPTED_INGRESS:
-            if self.ordinal is not None or self.model_descriptor_sha256 is not None:
+            if (
+                self.ordinal is not None
+                or self.model_descriptor_sha256 is not None
+                or self.model_descriptor is not None
+            ):
                 raise TurnContextError("accepted ingress source cannot carry attachment authority")
         elif type(self.ordinal) is not int or not 1 <= self.ordinal <= 16:
             raise TurnContextError("attachment source ordinal is invalid")
         else:
             _digest(self.model_descriptor_sha256, label="authorized source model descriptor")
+            if (
+                type(self.model_descriptor) is not AttachmentDescriptor
+                or self.model_descriptor.ordinal != self.ordinal
+                or self.model_descriptor_sha256 != _model_descriptor_sha256(self.model_descriptor)
+            ):
+                raise TurnContextError("authorized source model descriptor is stale")
         _digest(self.turn_authority_sha256, label="source turn authority")
         _digest(self.identity_sha256, label="authorized source identity")
         _validate_seal(
             self._seal,
             kind="authorized source",
             payload=self.payload(),
-            component_ids=(id(self.private_carrier),),
+            component_ids=(id(self.private_carrier), id(self.model_descriptor)),
         )
 
     def payload(self) -> dict[str, object]:
@@ -711,7 +796,7 @@ class PendingWorkAdmission:
 class EffectFence:
     turn_id: str
     context_authority_sha256: str
-    request_effect_binding_sha256: str | None
+    request_effect_binding_sha256: str
     effect_owner: EffectOwner
     final_publisher: FinalPublisher
     binding_sha256: str
@@ -721,7 +806,7 @@ class EffectFence:
         if type(self.turn_id) is not str or _TURN_ID_RE.fullmatch(self.turn_id) is None:
             raise TurnContextError("effect fence turn_id is invalid")
         _digest(self.context_authority_sha256, label="effect context authority")
-        _digest(self.request_effect_binding_sha256, label="request effect binding", optional=True)
+        _digest(self.request_effect_binding_sha256, label="request effect binding")
         if type(self.effect_owner) is not EffectOwner or type(self.final_publisher) is not FinalPublisher:
             raise TurnContextError("effect and publication owners must be primary")
         _digest(self.binding_sha256, label="effect fence binding")
@@ -1013,7 +1098,9 @@ def _validate_source_set(context: AuthenticatedTurnContext) -> None:
         item.ordinal: item for item in sources if item.kind is not AuthorizedSourceKind.ACCEPTED_INGRESS
     }
     if any(
-        sources_by_ordinal[descriptor.ordinal].model_descriptor_sha256 != _model_descriptor_sha256(descriptor)
+        sources_by_ordinal[descriptor.ordinal].model_descriptor is not descriptor
+        or sources_by_ordinal[descriptor.ordinal].model_descriptor_sha256
+        != _model_descriptor_sha256(descriptor)
         for descriptor in context.model_input.attachments
     ):
         raise TurnContextError("authorized attachment source differs from its TurnInput descriptor")
@@ -1047,13 +1134,9 @@ def _validate_context_structure(context: AuthenticatedTurnContext) -> None:
     ):
         raise TurnContextError("turn policy or inherited budget has an invalid type")
     resources = context.inherited_budget.resources
-    tool_call_ceiling, tool_round_ceiling = _MODE_TOOL_BUDGET_CEILINGS[context.authority.interaction_mode]
     if context.model_input.enable_tools:
-        if (
-            not 1 <= resources.max_tool_calls <= tool_call_ceiling
-            or not 1 <= resources.max_tool_rounds <= tool_round_ceiling
-        ):
-            raise TurnContextError("turn tool budget exceeds the admitted mode ceiling")
+        if resources.max_tool_calls == 0 or resources.max_tool_rounds == 0:
+            raise TurnContextError("tools-enabled turn requires a positive tool execution budget")
     elif resources.max_tool_calls != 0 or resources.max_tool_rounds != 0:
         raise TurnContextError("tools-disabled turn cannot carry a tool execution budget")
     if context.pending_work_admission is not None:
@@ -1084,10 +1167,6 @@ def _validate_context_structure(context: AuthenticatedTurnContext) -> None:
         != context.authority.request_effect_binding_sha256
     ):
         raise TurnContextError("effect fence is not bound to the full turn authority")
-    if (
-        context.model_input.enable_tools or context.pending_work_admission is not None
-    ) and context.authority.request_effect_binding_sha256 is None:
-        raise TurnContextError("effect-capable turn requires the admitted request effect binding")
 
 
 @dataclass(frozen=True, slots=True, repr=False)
@@ -1095,11 +1174,14 @@ class TurnContextIssuer:
     """Trusted pure issuer backed by the deployment's durable privacy key."""
 
     _namespace_key: bytes = field(repr=False, compare=False)
+    _monotonic_ns: Callable[[], int] = field(default=time.monotonic_ns, repr=False, compare=False)
     _namespace_fingerprint: str = field(init=False, repr=False, compare=False)
 
     def __post_init__(self) -> None:
         if type(self._namespace_key) is not bytes or len(self._namespace_key) != hashlib.sha256().digest_size:
             raise TurnContextError("turn context namespace key must be exactly 32 bytes")
+        if not callable(self._monotonic_ns):
+            raise TurnContextError("turn context monotonic clock is invalid")
         object.__setattr__(
             self,
             "_namespace_fingerprint",
@@ -1116,7 +1198,7 @@ class TurnContextIssuer:
         interaction_mode: TurnMode,
         source_id: str,
         update_id: str,
-        request_effect_binding_sha256: str | None,
+        request_effect_binding_sha256: str,
     ) -> AuthenticatedIngressAuthority:
         """Bind one supplied durable token; this function never invents it."""
 
@@ -1130,15 +1212,16 @@ class TurnContextIssuer:
         request_binding = _digest(
             request_effect_binding_sha256,
             label="request effect binding",
-            optional=True,
         )
-        try:
-            actor_binding = supervisor_canary_actor_binding_sha256(
-                actor,
-                namespace_key=self._namespace_key,
-            )
-        except (TypeError, ValueError) as exc:
-            raise TurnContextError("authenticated actor projection is invalid") from exc
+        if request_binding is None:  # pragma: no cover - non-optional digest contract
+            raise TurnContextError("request effect binding is required")
+        _validate_ingress_actor_relation(
+            ingress_kind=ingress_kind,
+            actor=actor,
+            source_id=source,
+            update_id=update,
+        )
+        actor_binding = _turn_actor_binding(self._namespace_key, actor)
         tenant_id = _opaque_id(actor.user_id, label="tenant identity")
         person_id = _opaque_id(actor.own_id, label="person identity")
         accepted_binding = _keyed_binding(
@@ -1196,7 +1279,7 @@ class TurnContextIssuer:
             _seal=self._seal(
                 kind="ingress authority",
                 payload=payload,
-                component_ids=(id(actor), id(conversation)),
+                component_ids=(id(actor), id(conversation), id(token), id(source), id(update)),
             ),
             **values,
         )
@@ -1251,6 +1334,7 @@ class TurnContextIssuer:
             authority=authority,
             kind=AuthorizedSourceKind.ACCEPTED_INGRESS,
             ordinal=None,
+            model_descriptor=None,
             model_descriptor_sha256=None,
             private_carrier=authority,
             private_payload=private_payload,
@@ -1260,17 +1344,22 @@ class TurnContextIssuer:
         self,
         *,
         authority: AuthenticatedIngressAuthority,
-        ordinal: int,
         carrier: object,
+        descriptor: AttachmentDescriptor,
     ) -> AuthorizedSourceIdentity:
         self._require_authority(authority)
-        ordinal = _bounded_int(ordinal, label="attachment source ordinal", minimum=1, maximum=16)
         token = current_turn_file_reference_of(carrier)
         if type(token) is not CurrentTurnFileReferenceToken:
             raise TurnContextError("current attachment source lacks a process-owned token")
-        if not isinstance(carrier, Mapping):
-            raise TurnContextError("current attachment source carrier is invalid")
-        descriptor_binding = _model_descriptor_sha256(AttachmentDescriptor.from_raw(carrier, ordinal=ordinal))
+        if type(descriptor) is not AttachmentDescriptor:
+            raise TurnContextError("current attachment source descriptor is invalid")
+        ordinal = _bounded_int(
+            descriptor.ordinal,
+            label="attachment source ordinal",
+            minimum=1,
+            maximum=16,
+        )
+        descriptor_binding = _model_descriptor_sha256(descriptor)
         private_payload = {
             "kind": AuthorizedSourceKind.CURRENT_ATTACHMENT.value,
             "turn_authority_sha256": authority.canonical_sha256(),
@@ -1285,6 +1374,7 @@ class TurnContextIssuer:
             authority=authority,
             kind=AuthorizedSourceKind.CURRENT_ATTACHMENT,
             ordinal=ordinal,
+            model_descriptor=descriptor,
             model_descriptor_sha256=descriptor_binding,
             private_carrier=token,
             private_payload=private_payload,
@@ -1294,24 +1384,21 @@ class TurnContextIssuer:
         self,
         *,
         authority: AuthenticatedIngressAuthority,
-        ordinal: int,
         token: AuthorizedFileSnapshotToken,
-        raw_source: Mapping[str, object],
+        descriptor: AttachmentDescriptor,
     ) -> AuthorizedSourceIdentity:
         self._require_authority(authority)
-        ordinal = _bounded_int(ordinal, label="attachment source ordinal", minimum=1, maximum=16)
         if not authorized_file_snapshot_token_is_process_owned(token):
             raise TurnContextError("registered file source lacks a process-owned token")
-        if (
-            not isinstance(raw_source, Mapping)
-            or str(raw_source.get("id") or "").strip() != token.source.raw_id
-            or not hmac.compare_digest(raw_source_identity_sha256(raw_source), token.source.identity_sha256)
-            or str(raw_source.get("content_hash") or "").strip().casefold() != token.content_sha256
-        ):
-            raise TurnContextError("registered file source differs from its process-owned snapshot")
-        descriptor_binding = _model_descriptor_sha256(
-            AttachmentDescriptor.from_raw(raw_source, ordinal=ordinal)
+        if type(descriptor) is not AttachmentDescriptor:
+            raise TurnContextError("registered file source descriptor is invalid")
+        ordinal = _bounded_int(
+            descriptor.ordinal,
+            label="attachment source ordinal",
+            minimum=1,
+            maximum=16,
         )
+        descriptor_binding = _model_descriptor_sha256(descriptor)
         private_payload = {
             "kind": AuthorizedSourceKind.REGISTERED_FILE.value,
             "turn_authority_sha256": authority.canonical_sha256(),
@@ -1325,6 +1412,7 @@ class TurnContextIssuer:
             authority=authority,
             kind=AuthorizedSourceKind.REGISTERED_FILE,
             ordinal=ordinal,
+            model_descriptor=descriptor,
             model_descriptor_sha256=descriptor_binding,
             private_carrier=token,
             private_payload=private_payload,
@@ -1406,7 +1494,6 @@ class TurnContextIssuer:
         turn_policy: TurnPolicy,
         inherited_budget: InheritedTurnBudget,
         pending_work_admission: PendingWorkAdmission | None,
-        now_monotonic_ns: int,
     ) -> AuthenticatedTurnContext:
         self._require_authority(authority)
         self._require_policy(turn_policy)
@@ -1417,12 +1504,7 @@ class TurnContextIssuer:
             self._require_source(authority, source)
         if pending_work_admission is not None:
             self._require_pending(authority, pending_work_admission)
-        now = _bounded_int(
-            now_monotonic_ns,
-            label="current monotonic instant",
-            minimum=1,
-            maximum=_MAX_MONOTONIC_NS,
-        )
+        now = self._current_monotonic_ns()
         if type(inherited_budget) is not InheritedTurnBudget:
             raise TurnContextError("inherited turn budget has an invalid type")
         remaining = inherited_budget.safety_deadline.monotonic_ns - now
@@ -1484,10 +1566,21 @@ class TurnContextIssuer:
                 component_ids=tuple(id(item) for item in components),
             ),
         )
-        return self.require_live_context(context, now_monotonic_ns=now)
+        return self.require_context(context)
 
     def require_context(self, context: AuthenticatedTurnContext) -> AuthenticatedTurnContext:
-        """Reject exact-looking contexts minted by any other namespace/key."""
+        """Authenticate a context and reject it at or after its safety deadline."""
+
+        admitted = self._require_authentic_context(context)
+        if admitted.inherited_budget.safety_deadline.monotonic_ns <= self._current_monotonic_ns():
+            raise TurnContextError("turn safety deadline has expired")
+        return admitted
+
+    def _require_authentic_context(
+        self,
+        context: AuthenticatedTurnContext,
+    ) -> AuthenticatedTurnContext:
+        """Integrity-only check kept private so consumers cannot skip liveness."""
 
         if (
             type(context) is not AuthenticatedTurnContext
@@ -1514,24 +1607,17 @@ class TurnContextIssuer:
             raise TurnContextError("effect fence binding is stale")
         return context
 
-    def require_live_context(
-        self,
-        context: AuthenticatedTurnContext,
-        *,
-        now_monotonic_ns: int,
-    ) -> AuthenticatedTurnContext:
-        """Authenticate a context and reject it once its parent deadline expires."""
-
-        admitted = self.require_context(context)
-        now = _bounded_int(
-            now_monotonic_ns,
+    def _current_monotonic_ns(self) -> int:
+        try:
+            now = self._monotonic_ns()
+        except Exception as exc:  # noqa: BLE001 - a failed trusted clock closes admission
+            raise TurnContextError("turn context monotonic clock failed") from exc
+        return _bounded_int(
+            now,
             label="current monotonic instant",
             minimum=1,
             maximum=_MAX_MONOTONIC_NS,
         )
-        if admitted.inherited_budget.safety_deadline.monotonic_ns <= now:
-            raise TurnContextError("turn safety deadline has expired")
-        return admitted
 
     def _issue_conversation_admission(
         self,
@@ -1580,6 +1666,7 @@ class TurnContextIssuer:
         authority: AuthenticatedIngressAuthority,
         kind: AuthorizedSourceKind,
         ordinal: int | None,
+        model_descriptor: AttachmentDescriptor | None,
         model_descriptor_sha256: str | None,
         private_carrier: object,
         private_payload: Mapping[str, object],
@@ -1604,10 +1691,11 @@ class TurnContextIssuer:
             identity_sha256=identity,
             model_descriptor_sha256=model_descriptor_sha256,
             private_carrier=private_carrier,
+            model_descriptor=model_descriptor,
             _seal=self._seal(
                 kind="authorized source",
                 payload=payload,
-                component_ids=(id(private_carrier),),
+                component_ids=(id(private_carrier), id(model_descriptor)),
                 private_binding_sha256=_sha256(private_payload),
             ),
         )
@@ -1617,7 +1705,7 @@ class TurnContextIssuer:
         *,
         identity: TurnIdentity,
         context_authority_sha256: str,
-        request_effect_binding_sha256: str | None,
+        request_effect_binding_sha256: str,
     ) -> EffectFence:
         material = {
             "schema": "friday.effect-fence-binding.v1",
@@ -1720,6 +1808,7 @@ class TurnContextIssuer:
                 authority=authority,
                 kind=source.kind,
                 ordinal=source.ordinal,
+                model_descriptor=source.model_descriptor,
                 model_descriptor_sha256=source.model_descriptor_sha256,
                 private_carrier=token,
                 private_payload=private_payload,
@@ -1745,6 +1834,7 @@ class TurnContextIssuer:
                 authority=authority,
                 kind=source.kind,
                 ordinal=source.ordinal,
+                model_descriptor=source.model_descriptor,
                 model_descriptor_sha256=source.model_descriptor_sha256,
                 private_carrier=token,
                 private_payload=private_payload,

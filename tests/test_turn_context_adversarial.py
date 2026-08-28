@@ -3,6 +3,7 @@ from __future__ import annotations
 import dataclasses
 import inspect
 import json
+from collections.abc import Callable
 from typing import Any
 
 import pytest
@@ -10,6 +11,7 @@ import pytest
 from friday.file_evidence import stamp_current_turn_file_reference
 from friday.orchestration.contracts import AttachmentDescriptor, RouterMode, TurnInput
 from friday.orchestration.turn_context import (
+    AuthenticatedIngressAuthority,
     AuthenticatedTurnContext,
     AuthorizedSourceIdentity,
     AuthorizedSourceKind,
@@ -35,6 +37,10 @@ _DEADLINE_NS = _NOW_NS + 120_000_000_000
 _CONVERSATION = "conv_0123456789abcdef"
 
 
+def _issuer(key: bytes = _KEY, *, now: int = _NOW_NS) -> TurnContextIssuer:
+    return TurnContextIssuer(key, _monotonic_ns=lambda: now)
+
+
 def _actor(
     user_id: str = "alice",
     *,
@@ -42,15 +48,19 @@ def _actor(
     session: str = "session-a",
     shared: bool = False,
     person: str = "",
+    source: str = "api-token",
+    identity_id: str | None = None,
+    telegram_chat_id: str | None = None,
 ) -> ActorContext:
     return ActorContext(
         user_id=user_id,
         preset_key=preset,
-        source="api-token",
-        identity_id=f"principal-{person or user_id}",
+        source=source,
+        identity_id=identity_id or f"principal-{person or user_id}",
         session_id=session,
         shared_tenant=shared,
         person_id=person,
+        telegram_chat_id=telegram_chat_id,
     )
 
 
@@ -85,14 +95,15 @@ def _raw_source(
     source_ref: str = "source-a",
     source_identity_material: str = "body-a",
     content_sha256: str = "a" * 64,
-    content_type: str = "text/plain",
+    content_type: str = "file",
+    mime_type: str = "text/plain",
 ) -> dict[str, object]:
     return {
         "id": raw_id,
         "source": "api",
         "source_ref": source_ref,
         "content_type": content_type,
-        "mime_type": content_type,
+        "mime_type": mime_type,
         "content": source_identity_material,
         "received_at": "2026-08-29T00:00:00Z",
         "content_hash": content_sha256,
@@ -128,10 +139,11 @@ def _authority(
     mode: TurnMode = TurnMode.DIALOGUE,
     source_id: str = "source-01",
     update_id: str = "update-01",
-    request_binding: str | None = "b" * 64,
-) -> object:
+    request_binding: str = "b" * 64,
+    ingress_kind: IngressKind = IngressKind.SIGNED_HTTP,
+) -> AuthenticatedIngressAuthority:
     return issuer.issue_ingress_authority(
-        ingress_kind=IngressKind.SIGNED_HTTP,
+        ingress_kind=ingress_kind,
         ingress_issued_token=token,
         actor=actor,
         conversation_id=conversation_id,
@@ -154,20 +166,27 @@ def _mint(
 ) -> tuple[TurnContextIssuer, AuthenticatedTurnContext]:
     from friday.orchestration.turn_context import AuthenticatedIngressAuthority
 
-    effective_issuer = issuer or TurnContextIssuer(_KEY)
+    effective_issuer = issuer or _issuer()
     effective_actor = actor or _actor()
     authority = _authority(effective_issuer, effective_actor, mode=mode)
     assert type(authority) is AuthenticatedIngressAuthority
     raw_source = _raw_source() if attachment else None
+    model_input = _input(
+        effective_actor,
+        message=message,
+        reply=reply,
+        mode=mode,
+        attachment=attachment,
+        attachment_raw=raw_source,
+    )
     sources = [effective_issuer.accepted_ingress_source(authority)]
     if attachment:
         assert raw_source is not None
         sources.append(
             effective_issuer.registered_file_source(
                 authority=authority,
-                ordinal=1,
                 token=_token(raw_source),
-                raw_source=raw_source,
+                descriptor=model_input.attachments[0],
             )
         )
     sources.sort(
@@ -193,19 +212,11 @@ def _mint(
     )
     context = effective_issuer.authenticate_turn(
         authority=authority,
-        model_input=_input(
-            effective_actor,
-            message=message,
-            reply=reply,
-            mode=mode,
-            attachment=attachment,
-            attachment_raw=raw_source,
-        ),
+        model_input=model_input,
         authorized_sources=tuple(sources),
         turn_policy=policy,
         inherited_budget=_budget(),
         pending_work_admission=pending_binding,
-        now_monotonic_ns=_NOW_NS,
     )
     return effective_issuer, context
 
@@ -238,7 +249,6 @@ def test_exact_actor_and_turn_input_types_are_required() -> None:
             turn_policy=context.turn_policy,
             inherited_budget=context.inherited_budget,
             pending_work_admission=None,
-            now_monotonic_ns=_NOW_NS,
         )
 
 
@@ -269,9 +279,26 @@ def test_dataclass_replace_cannot_drift_authenticated_components() -> None:
         dataclasses.replace(context, model_input_binding_sha256="0" * 64)
 
 
+@pytest.mark.parametrize(
+    "mutate",
+    [
+        lambda authority: dataclasses.replace(authority, ingress_issued_token="accepted-forged"),
+        lambda authority: dataclasses.replace(authority, source_id="source-forged"),
+        lambda authority: dataclasses.replace(authority, update_id="update-forged"),
+    ],
+)
+def test_private_ingress_ids_cannot_be_replaced_behind_their_public_bindings(
+    mutate: Callable[[AuthenticatedIngressAuthority], AuthenticatedIngressAuthority],
+) -> None:
+    _, context = _mint()
+
+    with pytest.raises(TurnContextError, match="not issued"):
+        mutate(context.authority)
+
+
 def test_trusted_issuer_rejects_a_self_consistent_rogue_context() -> None:
-    trusted = TurnContextIssuer(_KEY)
-    rogue = TurnContextIssuer(b"r" * 32)
+    trusted = _issuer()
+    rogue = _issuer(b"r" * 32)
     _, context = _mint(issuer=rogue)
 
     with pytest.raises(TurnContextError, match="another issuer"):
@@ -298,7 +325,6 @@ def test_message_reply_tools_and_attachment_drift_change_body_free_context_bindi
             resources=TurnResourceBudget(0, 0, 1, 8192),
         ),
         pending_work_admission=None,
-        now_monotonic_ns=_NOW_NS,
     )
 
     assert {item.turn_id for item in variants} == {baseline.turn_id}
@@ -323,7 +349,6 @@ def test_mode_and_attachment_cardinality_drift_are_rejected_not_reclassified() -
             turn_policy=context.turn_policy,
             inherited_budget=context.inherited_budget,
             pending_work_admission=None,
-            now_monotonic_ns=_NOW_NS,
         )
 
     added = dataclasses.replace(
@@ -338,7 +363,6 @@ def test_mode_and_attachment_cardinality_drift_are_rejected_not_reclassified() -
             turn_policy=context.turn_policy,
             inherited_budget=context.inherited_budget,
             pending_work_admission=None,
-            now_monotonic_ns=_NOW_NS,
         )
 
 
@@ -356,15 +380,94 @@ def test_owner_guest_session_and_shared_actor_authority_do_not_collide() -> None
     assert len({item.turn_id for item in contexts}) == len(contexts)
 
 
+def test_private_and_group_telegram_authorities_do_not_collide() -> None:
+    issuer = _issuer()
+    private_actor = _actor(
+        source="telegram-bridge",
+        identity_id="5001",
+        telegram_chat_id="5001",
+    )
+    group_actor = dataclasses.replace(private_actor, telegram_chat_id="-100123")
+    private = _authority(
+        issuer,
+        private_actor,
+        ingress_kind=IngressKind.TELEGRAM,
+        source_id="5001",
+        update_id="9001",
+    )
+    group = _authority(
+        issuer,
+        group_actor,
+        ingress_kind=IngressKind.TELEGRAM,
+        source_id="-100123",
+        update_id="9001",
+    )
+
+    assert private_actor.is_private_telegram_chat is True
+    assert group_actor.is_private_telegram_chat is False
+    assert private.actor_binding_sha256 != group.actor_binding_sha256
+    assert private.canonical_sha256() != group.canonical_sha256()
+
+
+@pytest.mark.parametrize(
+    ("ingress_kind", "actor", "source_id", "update_id"),
+    [
+        (IngressKind.TELEGRAM, _actor(), "5001", "9001"),
+        (
+            IngressKind.TELEGRAM,
+            _actor(source="telegram-bridge", identity_id="5001", telegram_chat_id="5001"),
+            "-100123",
+            "9001",
+        ),
+        (
+            IngressKind.TELEGRAM,
+            _actor(source="telegram-bridge", identity_id="sender", telegram_chat_id="5001"),
+            "5001",
+            "9001",
+        ),
+        (
+            IngressKind.TELEGRAM,
+            _actor(source="telegram-bridge", identity_id="5001", telegram_chat_id="5001"),
+            "5001",
+            "update-1",
+        ),
+        (
+            IngressKind.SIGNED_HTTP,
+            _actor(source="telegram-bridge", identity_id="5001", telegram_chat_id="5001"),
+            "5001",
+            "9001",
+        ),
+    ],
+)
+def test_ingress_transport_and_actor_must_match(
+    ingress_kind: IngressKind,
+    actor: ActorContext,
+    source_id: str,
+    update_id: str,
+) -> None:
+    issuer = _issuer()
+
+    with pytest.raises(TurnContextError, match="ingress|Telegram"):
+        _authority(
+            issuer,
+            actor,
+            ingress_kind=ingress_kind,
+            source_id=source_id,
+            update_id=update_id,
+        )
+
+
 def test_plain_string_and_lookalike_cannot_mint_source_authority() -> None:
-    issuer, context = _mint()
+    issuer, context = _mint(attachment=True)
+    descriptor = context.model_input.attachments[0]
+    descriptor_sha256 = context.authorized_sources[1].model_descriptor_sha256
+    assert descriptor_sha256 is not None
     assert not hasattr(issuer, "issue_authorized_source")
     with pytest.raises(TurnContextError, match="process-owned token"):
         issuer.registered_file_source(
             authority=context.authority,
-            ordinal=1,
             token=object(),  # type: ignore[arg-type]
-            raw_source=_raw_source(),
+            descriptor=descriptor,
         )
     with pytest.raises(TurnContextError, match="not issued"):
         AuthorizedSourceIdentity(
@@ -372,14 +475,15 @@ def test_plain_string_and_lookalike_cannot_mint_source_authority() -> None:
             ordinal=1,
             turn_authority_sha256=context.authority.canonical_sha256(),
             identity_sha256="0" * 64,
-            model_descriptor_sha256="1" * 64,
+            model_descriptor_sha256=descriptor_sha256,
             private_carrier="arbitrary caller string",
+            model_descriptor=descriptor,
             _seal=object(),  # type: ignore[arg-type]
         )
 
 
 def test_source_identity_binds_exact_raw_source_content_and_turn_scope() -> None:
-    issuer = TurnContextIssuer(_KEY)
+    issuer = _issuer()
     actor = _actor()
     first_authority = _authority(issuer, actor, token="accepted-01")
     second_authority = _authority(issuer, actor, token="accepted-02")
@@ -390,82 +494,126 @@ def test_source_identity_binds_exact_raw_source_content_and_turn_scope() -> None
     raw_a = _raw_source()
     raw_b = _raw_source(source_ref="source-b")
     raw_c = _raw_source(content_sha256="c" * 64)
+    descriptor_a = _input(actor, attachment=True, attachment_raw=raw_a).attachments[0]
+    descriptor_b = _input(actor, attachment=True, attachment_raw=raw_b).attachments[0]
+    descriptor_c = _input(actor, attachment=True, attachment_raw=raw_c).attachments[0]
     sources = (
         issuer.registered_file_source(
             authority=first_authority,
-            ordinal=1,
             token=_token(raw_a),
-            raw_source=raw_a,
+            descriptor=descriptor_a,
         ),
         issuer.registered_file_source(
             authority=first_authority,
-            ordinal=1,
             token=_token(raw_b),
-            raw_source=raw_b,
+            descriptor=descriptor_b,
         ),
         issuer.registered_file_source(
             authority=first_authority,
-            ordinal=1,
             token=_token(raw_c),
-            raw_source=raw_c,
+            descriptor=descriptor_c,
         ),
         issuer.registered_file_source(
             authority=second_authority,
-            ordinal=1,
             token=_token(raw_a),
-            raw_source=raw_a,
+            descriptor=descriptor_a,
         ),
     )
 
     assert len({item.identity_sha256 for item in sources}) == len(sources)
 
 
-def test_registered_source_rejects_snapshot_or_model_descriptor_substitution() -> None:
-    issuer = TurnContextIssuer(_KEY)
+def test_registered_source_binds_real_raw_snapshot_to_the_existing_model_descriptor() -> None:
+    issuer = _issuer()
     actor = _actor()
     authority = _authority(issuer, actor)
     from friday.orchestration.turn_context import AuthenticatedIngressAuthority
 
     assert type(authority) is AuthenticatedIngressAuthority
-    text_raw = _raw_source()
-    pdf_raw = _raw_source(
-        raw_id="raw_fedcba9876543210",
-        source_ref="source-pdf",
-        content_sha256="d" * 64,
-        content_type="application/pdf",
+    raw = _raw_source(content_sha256="d" * 64)
+    raw.pop("mime_type")
+    raw["_raw_metadata"] = json.dumps(
+        {"mime_type": "application/pdf", "size_bytes": 4321},
+        sort_keys=True,
     )
-    with pytest.raises(TurnContextError, match="process-owned snapshot"):
-        issuer.registered_file_source(
-            authority=authority,
-            ordinal=1,
-            token=_token(text_raw),
-            raw_source=pdf_raw,
-        )
-    wrong_source = issuer.registered_file_source(
+    carrier = {
+        "raw_object_id": raw["id"],
+        "mime_type": "application/pdf",
+        "size_bytes": 4321,
+        "transient_text": "EXTRACTED PDF BODY",
+        "persisted": True,
+        "current_turn_only": False,
+    }
+    model_input = TurnInput.from_chat(
+        message="review it",
+        actor=actor,
+        conversation_id=_CONVERSATION,
+        attachments=[carrier],
+        enable_tools=True,
+        synthetic_document_notice=False,
+        mode="dialogue",
+        reply_to=None,
+        quoted_attachment_reference=True,
+        reply_assistant_reference=False,
+    )
+    descriptor = model_input.attachments[0]
+    assert AttachmentDescriptor.from_raw(raw, ordinal=1).media_type == "binary"
+    assert descriptor.media_type == "pdf"
+    source = issuer.registered_file_source(
         authority=authority,
-        ordinal=1,
-        token=_token(pdf_raw),
-        raw_source=pdf_raw,
+        token=_token(raw),
+        descriptor=descriptor,
     )
     policy = issuer.issue_turn_policy(
         router_mode=RouterMode.V12,
         fallback_router_mode=RouterMode.LEGACY,
         decision=TurnPolicyDecision(intent=TurnIntent.PASSTHROUGH),
     )
-    with pytest.raises(TurnContextError, match="differs from its TurnInput descriptor"):
+    context = issuer.authenticate_turn(
+        authority=authority,
+        model_input=model_input,
+        authorized_sources=(issuer.accepted_ingress_source(authority), source),
+        turn_policy=policy,
+        inherited_budget=_budget(),
+        pending_work_admission=None,
+    )
+
+    assert context.authorized_sources[1].model_descriptor is descriptor
+    assert "EXTRACTED PDF BODY" not in context.canonical_bytes().decode("ascii")
+
+
+@pytest.mark.parametrize(
+    "substitute",
+    [
+        lambda item: dataclasses.replace(item),
+        lambda item: dataclasses.replace(item, ordinal=2, name="attachment-2"),
+        lambda item: dataclasses.replace(item, name="attachment-drift"),
+        lambda item: dataclasses.replace(item, media_type="office"),
+        lambda item: dataclasses.replace(item, size_bytes=9999),
+        lambda item: dataclasses.replace(item, extracted_text_available=False),
+    ],
+)
+def test_registered_source_rejects_equal_but_distinct_or_drifted_descriptor(
+    substitute: Callable[[AttachmentDescriptor], AttachmentDescriptor],
+) -> None:
+    issuer, context = _mint(attachment=True)
+    original = context.model_input.attachments[0]
+    substituted = substitute(original)
+    drifted_input = dataclasses.replace(context.model_input, attachments=(substituted,))
+
+    with pytest.raises(TurnContextError, match="descriptor|attachment identities"):
         issuer.authenticate_turn(
-            authority=authority,
-            model_input=_input(actor, attachment=True, attachment_raw=text_raw),
-            authorized_sources=(issuer.accepted_ingress_source(authority), wrong_source),
-            turn_policy=policy,
-            inherited_budget=_budget(),
+            authority=context.authority,
+            model_input=drifted_input,
+            authorized_sources=context.authorized_sources,
+            turn_policy=context.turn_policy,
+            inherited_budget=context.inherited_budget,
             pending_work_admission=None,
-            now_monotonic_ns=_NOW_NS,
         )
 
 
 def test_current_attachment_source_is_bound_to_the_exact_model_descriptor() -> None:
-    issuer = TurnContextIssuer(_KEY)
+    issuer = _issuer()
     actor = _actor()
     authority = _authority(issuer, actor)
     from friday.orchestration.turn_context import AuthenticatedIngressAuthority
@@ -487,7 +635,23 @@ def test_current_attachment_source_is_bound_to_the_exact_model_descriptor() -> N
         content="CURRENT_SOURCE_BODY",
     )
     stamp_current_turn_file_reference(carrier, raw)
-    source = issuer.current_attachment_source(authority=authority, ordinal=1, carrier=carrier)
+    model_input = TurnInput.from_chat(
+        message="read it",
+        actor=actor,
+        conversation_id=_CONVERSATION,
+        attachments=[carrier],
+        enable_tools=True,
+        synthetic_document_notice=False,
+        mode="dialogue",
+        reply_to=None,
+        quoted_attachment_reference=False,
+        reply_assistant_reference=False,
+    )
+    source = issuer.current_attachment_source(
+        authority=authority,
+        carrier=carrier,
+        descriptor=model_input.attachments[0],
+    )
     policy = issuer.issue_turn_policy(
         router_mode=RouterMode.V12,
         fallback_router_mode=RouterMode.LEGACY,
@@ -495,48 +659,26 @@ def test_current_attachment_source_is_bound_to_the_exact_model_descriptor() -> N
     )
     context = issuer.authenticate_turn(
         authority=authority,
-        model_input=TurnInput.from_chat(
-            message="read it",
-            actor=actor,
-            conversation_id=_CONVERSATION,
-            attachments=[carrier],
-            enable_tools=True,
-            synthetic_document_notice=False,
-            mode="dialogue",
-            reply_to=None,
-            quoted_attachment_reference=False,
-            reply_assistant_reference=False,
-        ),
+        model_input=model_input,
         authorized_sources=(issuer.accepted_ingress_source(authority), source),
         turn_policy=policy,
         inherited_budget=_budget(),
         pending_work_admission=None,
-        now_monotonic_ns=_NOW_NS,
     )
     assert context.authorized_sources[1].model_descriptor_sha256 is not None
 
-    drifted = _AttachmentCarrier(carrier)
-    drifted["mime_type"] = "application/pdf"
+    drifted = dataclasses.replace(
+        model_input,
+        attachments=(dataclasses.replace(model_input.attachments[0], media_type="pdf"),),
+    )
     with pytest.raises(TurnContextError, match="differs from its TurnInput descriptor"):
         issuer.authenticate_turn(
             authority=authority,
-            model_input=TurnInput.from_chat(
-                message="read it",
-                actor=actor,
-                conversation_id=_CONVERSATION,
-                attachments=[drifted],
-                enable_tools=True,
-                synthetic_document_notice=False,
-                mode="dialogue",
-                reply_to=None,
-                quoted_attachment_reference=False,
-                reply_assistant_reference=False,
-            ),
+            model_input=drifted,
             authorized_sources=context.authorized_sources,
             turn_policy=policy,
             inherited_budget=_budget(),
             pending_work_admission=None,
-            now_monotonic_ns=_NOW_NS,
         )
 
 
@@ -560,7 +702,6 @@ def test_source_from_one_turn_cannot_be_grafted_to_another_actor() -> None:
             turn_policy=bob_policy,
             inherited_budget=_budget(),
             pending_work_admission=None,
-            now_monotonic_ns=_NOW_NS,
         )
 
 
@@ -600,7 +741,7 @@ def test_pending_scope_owner_and_uncertainty_are_exact() -> None:
 
 
 def test_identical_pending_id_under_another_person_has_another_opaque_binding() -> None:
-    issuer = TurnContextIssuer(_KEY)
+    issuer = _issuer()
     alice_authority = _authority(issuer, _actor(), token="accepted-a")
     bob_authority = _authority(issuer, _actor("bob"), token="accepted-b")
     from friday.orchestration.turn_context import AuthenticatedIngressAuthority
@@ -648,7 +789,6 @@ def test_two_pending_owners_and_untyped_pending_sequence_are_rejected() -> None:
             turn_policy=context.turn_policy,
             inherited_budget=context.inherited_budget,
             pending_work_admission=(object(), object()),  # type: ignore[arg-type]
-            now_monotonic_ns=_NOW_NS,
         )
 
 
@@ -669,20 +809,19 @@ def test_pending_owner_cannot_coexist_with_v12_strategy() -> None:
             turn_policy=context.turn_policy,
             inherited_budget=context.inherited_budget,
             pending_work_admission=pending,
-            now_monotonic_ns=_NOW_NS,
         )
 
 
 @pytest.mark.parametrize(
-    ("deadline", "now"),
+    "deadline",
     [
-        (1, 1),
-        (_NOW_NS, _NOW_NS),
-        (_NOW_NS - 1, _NOW_NS),
-        (_NOW_NS + 3_600_000_000_001, _NOW_NS),
+        1,
+        _NOW_NS,
+        _NOW_NS - 1,
+        _NOW_NS + 3_600_000_000_001,
     ],
 )
-def test_expired_or_renewed_safety_deadline_is_rejected(deadline: int, now: int) -> None:
+def test_expired_or_renewed_safety_deadline_is_rejected(deadline: int) -> None:
     issuer, context = _mint()
     with pytest.raises(TurnContextError, match="expired or exceeds"):
         issuer.authenticate_turn(
@@ -692,43 +831,63 @@ def test_expired_or_renewed_safety_deadline_is_rejected(deadline: int, now: int)
             turn_policy=context.turn_policy,
             inherited_budget=_budget(deadline),
             pending_work_admission=None,
-            now_monotonic_ns=now,
         )
 
 
 def test_trusted_live_boundary_rejects_context_after_parent_deadline() -> None:
-    issuer, context = _mint()
+    now = [_NOW_NS]
+    issuer = TurnContextIssuer(_KEY, _monotonic_ns=lambda: now[0])
+    _, context = _mint(issuer=issuer)
 
-    assert issuer.require_live_context(context, now_monotonic_ns=_DEADLINE_NS - 1) is context
+    now[0] = _DEADLINE_NS - 1
     assert issuer.require_context(context) is context
+    now[0] = _DEADLINE_NS
     with pytest.raises(TurnContextError, match="deadline has expired"):
-        issuer.require_live_context(context, now_monotonic_ns=_DEADLINE_NS)
+        issuer.require_context(context)
 
 
-def test_tool_capability_requires_effect_binding_and_closed_mode_budget() -> None:
-    issuer = TurnContextIssuer(_KEY)
+def test_context_cannot_be_returned_when_deadline_expires_during_mint() -> None:
+    instants = iter((_NOW_NS, _DEADLINE_NS))
+    issuer = TurnContextIssuer(_KEY, _monotonic_ns=lambda: next(instants))
+
+    with pytest.raises(TurnContextError, match="deadline has expired"):
+        _mint(issuer=issuer)
+
+
+@pytest.mark.parametrize(
+    "clock",
+    [lambda: 0, lambda: "now", lambda: (_ for _ in ()).throw(RuntimeError("clock failed"))],
+)
+def test_live_boundary_fails_closed_when_the_trusted_clock_is_invalid(clock: Any) -> None:
+    _, context = _mint()
+    issuer = TurnContextIssuer(_KEY, _monotonic_ns=clock)
+
+    with pytest.raises(TurnContextError, match="monotonic"):
+        issuer.require_context(context)
+
+
+def test_every_turn_requires_effect_binding_and_no_tools_keeps_the_final_fence() -> None:
+    issuer = _issuer()
     actor = _actor()
-    authority = _authority(issuer, actor, request_binding=None)
-    from friday.orchestration.turn_context import AuthenticatedIngressAuthority
+    with pytest.raises(TurnContextError, match="request effect binding"):
+        issuer.issue_ingress_authority(
+            ingress_kind=IngressKind.SIGNED_HTTP,
+            ingress_issued_token="accepted-01",
+            actor=actor,
+            conversation_id=_CONVERSATION,
+            interaction_mode=TurnMode.DIALOGUE,
+            source_id="source-01",
+            update_id="update-01",
+            request_effect_binding_sha256=None,  # type: ignore[arg-type]
+        )
 
-    assert type(authority) is AuthenticatedIngressAuthority
+    authority = _authority(issuer, actor)
     policy = issuer.issue_turn_policy(
         router_mode=RouterMode.V12,
         fallback_router_mode=RouterMode.LEGACY,
         decision=TurnPolicyDecision(intent=TurnIntent.PASSTHROUGH),
     )
     sources = (issuer.accepted_ingress_source(authority),)
-    with pytest.raises(TurnContextError, match="requires the admitted request effect binding"):
-        issuer.authenticate_turn(
-            authority=authority,
-            model_input=_input(actor),
-            authorized_sources=sources,
-            turn_policy=policy,
-            inherited_budget=_budget(),
-            pending_work_admission=None,
-            now_monotonic_ns=_NOW_NS,
-        )
-
     tools_off = issuer.authenticate_turn(
         authority=authority,
         model_input=_input(actor, enable_tools=False),
@@ -739,25 +898,84 @@ def test_tool_capability_requires_effect_binding_and_closed_mode_budget() -> Non
             resources=TurnResourceBudget(0, 0, 1, 8192),
         ),
         pending_work_admission=None,
-        now_monotonic_ns=_NOW_NS,
     )
-    assert tools_off.effect_fence.request_effect_binding_sha256 is None
+    assert tools_off.effect_fence.request_effect_binding_sha256 == "b" * 64
+    assert tools_off.effect_fence.final_publisher.value == "primary"
 
-    bound_authority = _authority(issuer, actor)
-    assert type(bound_authority) is AuthenticatedIngressAuthority
-    with pytest.raises(TurnContextError, match="mode ceiling"):
+
+def test_turn_context_does_not_duplicate_mode_budget_policy() -> None:
+    issuer = _issuer()
+    actor = _actor()
+    authority = _authority(issuer, actor)
+    policy = issuer.issue_turn_policy(
+        router_mode=RouterMode.V12,
+        fallback_router_mode=RouterMode.LEGACY,
+        decision=TurnPolicyDecision(intent=TurnIntent.PASSTHROUGH),
+    )
+    context = issuer.authenticate_turn(
+        authority=authority,
+        model_input=_input(actor),
+        authorized_sources=(issuer.accepted_ingress_source(authority),),
+        turn_policy=policy,
+        inherited_budget=dataclasses.replace(
+            _budget(),
+            resources=TurnResourceBudget(5, 2, 1, 8192),
+        ),
+        pending_work_admission=None,
+    )
+
+    assert context.inherited_budget.resources.max_tool_calls == 5
+
+
+def test_tools_enabled_requires_positive_calls_and_rounds() -> None:
+    issuer, context = _mint()
+
+    with pytest.raises(TurnContextError, match="positive tool execution budget"):
         issuer.authenticate_turn(
-            authority=bound_authority,
-            model_input=_input(actor),
-            authorized_sources=(issuer.accepted_ingress_source(bound_authority),),
-            turn_policy=policy,
+            authority=context.authority,
+            model_input=context.model_input,
+            authorized_sources=context.authorized_sources,
+            turn_policy=context.turn_policy,
             inherited_budget=dataclasses.replace(
-                _budget(),
-                resources=TurnResourceBudget(5, 2, 1, 8192),
+                context.inherited_budget,
+                resources=TurnResourceBudget(0, 0, 1, 8192),
             ),
             pending_work_admission=None,
-            now_monotonic_ns=_NOW_NS,
         )
+
+
+def test_child_zero_tool_calls_collapse_rounds_and_rounds_bind_the_fence() -> None:
+    parent = _budget()
+    child = parent.derive_child(
+        safety_deadline_monotonic_ns=_DEADLINE_NS,
+        max_model_calls=4,
+        max_model_retries=1,
+        max_tool_calls=0,
+        max_tool_rounds=2,
+        max_advisory_calls=1,
+        max_output_tokens=8192,
+    )
+    assert child.resources.max_tool_calls == 0
+    assert child.resources.max_tool_rounds == 0
+
+    issuer, baseline = _mint()
+    changed = issuer.authenticate_turn(
+        authority=baseline.authority,
+        model_input=baseline.model_input,
+        authorized_sources=baseline.authorized_sources,
+        turn_policy=baseline.turn_policy,
+        inherited_budget=dataclasses.replace(
+            baseline.inherited_budget,
+            resources=dataclasses.replace(
+                baseline.inherited_budget.resources,
+                max_tool_rounds=3,
+            ),
+        ),
+        pending_work_admission=None,
+    )
+    assert changed.turn_id == baseline.turn_id
+    assert changed.context_authority_sha256 != baseline.context_authority_sha256
+    assert changed.effect_fence.binding_sha256 != baseline.effect_fence.binding_sha256
 
 
 @pytest.mark.parametrize(
@@ -768,6 +986,8 @@ def test_tool_capability_requires_effect_binding_and_closed_mode_budget() -> Non
         lambda: ModelAntiLoopBudget(True, 0),
         lambda: ModelAntiLoopBudget(2, 2),
         lambda: TurnResourceBudget(0, 0, 0, float("nan")),  # type: ignore[arg-type]
+        lambda: TurnResourceBudget(0, 1, 0, 1),
+        lambda: TurnResourceBudget(1, 0, 0, 1),
         lambda: TurnResourceBudget(4, 0, 0, 1),
         lambda: TurnResourceBudget(1, 2, 0, 1),
         lambda: InheritedTurnBudget(

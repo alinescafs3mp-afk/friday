@@ -35,6 +35,10 @@ _CONVERSATION_ID = "conv_0123456789abcdef"
 _REQUEST_BINDING = "1" * 64
 
 
+def _issuer(key: bytes = _KEY, *, now: int = _NOW_NS) -> TurnContextIssuer:
+    return TurnContextIssuer(key, _monotonic_ns=lambda: now)
+
+
 def _actor(
     *,
     tenant_id: str = "tenant-alice",
@@ -92,7 +96,7 @@ def _file_raw(
         "id": raw_id,
         "source": "api",
         "source_ref": source_ref,
-        "content_type": "application/pdf",
+        "content_type": "file",
         "mime_type": "application/pdf",
         "filename": "/srv/private/customer-plan.pdf",
         "size_bytes": 1234,
@@ -129,6 +133,7 @@ def _sources(
     authority: object,
     *,
     with_attachment: bool,
+    model_input: TurnInput,
     raw_source: dict[str, object] | None = None,
 ) -> tuple[AuthorizedSourceIdentity, ...]:
     from friday.orchestration.turn_context import AuthenticatedIngressAuthority
@@ -140,9 +145,8 @@ def _sources(
         values.append(
             issuer.registered_file_source(
                 authority=authority,
-                ordinal=1,
                 token=_file_token(source),
-                raw_source=source,
+                descriptor=model_input.attachments[0],
             )
         )
     return tuple(
@@ -167,7 +171,7 @@ def _context(
     ingress_token: str = "accepted-ingress-0001",
     source_id: str = "source-0001",
     update_id: str = "update-0001",
-    request_binding: str | None = _REQUEST_BINDING,
+    request_binding: str = _REQUEST_BINDING,
     message: str = "Составь краткий план.",
     reply: str = "Предыдущая безопасная цитата",
     enable_tools: bool = True,
@@ -175,7 +179,7 @@ def _context(
     decision: TurnPolicyDecision | None = None,
     pending: PendingDurableTurnAdmission | None = None,
 ) -> AuthenticatedTurnContext:
-    effective_issuer = issuer or TurnContextIssuer(_KEY)
+    effective_issuer = issuer or _issuer()
     effective_actor = actor or _actor()
     authority = effective_issuer.issue_ingress_authority(
         ingress_kind=IngressKind.SIGNED_HTTP,
@@ -227,12 +231,12 @@ def _context(
             effective_issuer,
             authority,
             with_attachment=with_attachment,
+            model_input=model_input,
             raw_source=raw_source,
         ),
         turn_policy=policy,
         inherited_budget=budget,
         pending_work_admission=pending_binding,
-        now_monotonic_ns=_NOW_NS,
     )
 
 
@@ -263,8 +267,8 @@ def test_context_is_immutable_and_composes_the_exact_existing_contracts() -> Non
 
 
 def test_same_accepted_ingress_is_restart_deterministic() -> None:
-    first = _context(issuer=TurnContextIssuer(_KEY))
-    restarted = _context(issuer=TurnContextIssuer(bytes(_KEY)))
+    first = _context(issuer=_issuer())
+    restarted = _context(issuer=_issuer(bytes(_KEY)))
 
     assert first.identity == restarted.identity
     assert first.turn_id == restarted.turn_id
@@ -532,8 +536,8 @@ def test_malformed_and_oversized_turn_identities_are_rejected(turn_id: str) -> N
 
 
 def test_trusted_consumption_boundary_rejects_another_issuer() -> None:
-    trusted = TurnContextIssuer(_KEY)
-    rogue = TurnContextIssuer(b"z" * 32)
+    trusted = _issuer()
+    rogue = _issuer(b"z" * 32)
     context = _context(issuer=rogue)
 
     assert rogue.require_context(context) is context
