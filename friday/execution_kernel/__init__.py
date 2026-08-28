@@ -48,6 +48,8 @@ from friday.orchestration.message_window_outcome import (
     _trusted_message_window_storage_authority,
     attest_message_window_storage_projection,
 )
+from friday.orchestration.turn_context import TurnContextError
+from friday.orchestration.turn_context_runtime import current_primary_authenticated_turn_context
 from friday.organs import local_now
 from friday.oversight_scope import hierarchy_is_configured, may_oversee
 from friday.people import resolve_person, unambiguous
@@ -1478,12 +1480,39 @@ class RequestEffects:
     request_binding_sha256: str | None = None
     possible: bool = False
     staged: bool = False
+    active: bool = True
 
 
 _REQUEST_EFFECTS: ContextVar[RequestEffects | None] = ContextVar(
     "jericho_request_effects",
     default=None,
 )
+
+_AUTHENTICATED_EFFECT_AUTHORITY_ERROR = "Authenticated turn effect authority is unavailable"
+
+
+def _verified_request_effects_at_primary_boundary() -> RequestEffects | None:
+    """Return request effects after validating the live primary turn authority.
+
+    A missing runtime context is the unchanged legacy path.  Once an
+    authenticated context is active, however, every effect-capable boundary --
+    including an observing tool -- must carry the exact request-effect binding
+    sealed into that context.  The check is intentionally read-only so a stale
+    or advisory-suspended turn is rejected before an audit, approval claim,
+    transaction callback, or tool handler can mutate anything.
+    """
+
+    context = current_primary_authenticated_turn_context()
+    effects = _REQUEST_EFFECTS.get()
+    if context is None:
+        return effects
+    if (
+        type(effects) is not RequestEffects
+        or effects.active is not True
+        or effects.request_binding_sha256 != context.effect_fence.request_effect_binding_sha256
+    ):
+        raise TurnContextError("authenticated turn request-effect binding is unavailable")
+    return effects
 
 
 @contextmanager
@@ -1510,11 +1539,15 @@ def track_request_effects(
     try:
         yield effects
     finally:
+        effects.active = False
         _REQUEST_EFFECTS.reset(token)
 
 
 def _mark_request_effect_possible() -> bool:
-    effects = _REQUEST_EFFECTS.get()
+    try:
+        effects = _verified_request_effects_at_primary_boundary()
+    except TurnContextError:
+        return False
     if effects is None:
         return True
     if effects.possible:
@@ -1553,12 +1586,15 @@ def stage_request_effect_possible_in_transaction(
     the legacy no-fence behavior.
     """
 
+    try:
+        effects = _verified_request_effects_at_primary_boundary()
+    except TurnContextError:
+        return False
     if expected_request_binding_sha256 is not None and (
         type(expected_request_binding_sha256) is not str
         or re.fullmatch(r"[0-9a-f]{64}", expected_request_binding_sha256) is None
     ):
         return False
-    effects = _REQUEST_EFFECTS.get()
     if expected_request_binding_sha256 is not None and (
         effects is None
         or effects.request_binding_sha256 is None
@@ -3827,6 +3863,10 @@ class ExecutionKernel:
         actor: ActorContext | None = None,
         execution_scope: str = "dialogue",
     ) -> ToolResult:
+        try:
+            _verified_request_effects_at_primary_boundary()
+        except TurnContextError:
+            return ToolResult(name, False, error=_AUTHENTICATED_EFFECT_AUTHORITY_ERROR)
         actor = actor or current_actor()
         details = self._audit_details(name, arguments)
         if self.authorization is None:
@@ -4539,6 +4579,10 @@ class ExecutionKernel:
         Права проверяются здесь ЗАНОВО: между решением человека и исполнением
         актор мог лишиться способности, и подтверждение не заменяет права.
         """
+        try:
+            _verified_request_effects_at_primary_boundary()
+        except TurnContextError:
+            return ToolResult("approval", False, error=_AUTHENTICATED_EFFECT_AUTHORITY_ERROR)
         actor = actor or current_actor()
         storage, _, _, _ = self._require_services()
         record = await run_blocking(storage.get_action_approval, approval_id, actor.user_id)
