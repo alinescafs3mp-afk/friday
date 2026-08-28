@@ -251,8 +251,9 @@ identity и Syncthing index. Во время immutable release cutover отде�
 До production-сертификации остаются ручные прогоны на физическом Android:
 one-phone copy/paste, folder permissions, exact alias and test-note order, background/offline
 delivery, backend restart, direct/relay observation и conflict preservation. Актуальный
-чеклист находится в
-[OBSIDIAN_IMPLEMENTATION_TRACKER.md](OBSIDIAN_IMPLEMENTATION_TRACKER.md).
+остаток и статус ведёт [единый backlog](../outer_sol/PROJECT_BACKLOG.md#p6--obsidian-physical-acceptance),
+а сценарии —
+[acceptance battery](../outer_sol/OBSIDIAN_INTEGRATION_ACCEPTANCE_BATTERY.md).
 
 P5–P9 остаются follow-up: stable note identity/link graph; semantic retrieval и
 operational memory; tasks/Bases/managed regions и ingestion bindings; optional Android companion;

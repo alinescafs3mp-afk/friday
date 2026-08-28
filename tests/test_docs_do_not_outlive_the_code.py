@@ -26,7 +26,7 @@ import tomllib
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 README = (ROOT / "README.md").read_text(encoding="utf-8")
 ARCHITECTURE = (ROOT / "docs" / "ARCHITECTURE.md").read_text(encoding="utf-8")
-SOL_GUIDANCE = (ROOT / "sol" / "SOL.md").read_text(encoding="utf-8")
+PROJECT_BACKLOG = (ROOT / "outer_sol" / "PROJECT_BACKLOG.md").read_text(encoding="utf-8")
 BACKUP_GUIDANCE = (ROOT / "docs" / "BACKUP_AND_RESTORE.md").read_text(encoding="utf-8")
 OPERATIONS = (ROOT / "docs" / "OPERATIONS.md").read_text(encoding="utf-8")
 RELEASE_CHECKLIST = (ROOT / "docs" / "RELEASE_CHECKLIST.md").read_text(encoding="utf-8")
@@ -122,15 +122,13 @@ def test_secondary_runbook_is_bound_to_the_only_accepted_finalist():
     assert "прямой ENV1→assist отклоняется" in section
 
 
-def test_sol_guidance_states_the_schema_the_code_opens():
-    """The assistant's mandatory startup rules must not pin a prehistoric schema."""
+def test_canonical_backlog_states_the_schema_the_code_opens():
+    """The only project status register must not pin a prehistoric schema."""
     from friday.storage._base import SCHEMA_VERSION
 
-    match = re.search(r"Схема базы — (\d+)-я версия", SOL_GUIDANCE)
-    assert match, "в обязательной памятке Sol больше нет проверяемой версии схемы"
-    assert int(match.group(1)) == SCHEMA_VERSION, (
-        f"Sol получает schema {match.group(1)}, а код открывает {SCHEMA_VERSION}"
-    )
+    match = re.search(r"- Database schema: (\d+)", PROJECT_BACKLOG)
+    assert match, "в едином backlog нет проверяемой версии схемы"
+    assert int(match.group(1)) == SCHEMA_VERSION
 
 
 def test_the_term_budget_in_the_docs_is_the_one_in_the_code():

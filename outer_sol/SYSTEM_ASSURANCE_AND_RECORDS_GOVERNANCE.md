@@ -1,10 +1,11 @@
 # Friday System Assurance and Records Governance Architecture
 
 > Document ID: FRIDAY-ARG-001  
-> Status: External architecture observation, draft v0.1  
+> Status: future architecture reference; no implementation authority; live
+> state and owner decisions are owned by [`PROJECT_BACKLOG.md`](PROJECT_BACKLOG.md)
 > Repository snapshot: `main`, Friday `0.205.0`, 20 August 2026  
 > Scope: information-flow governance, records authority, classification lifecycle, deployment assurance, key management, parser isolation, inference security, incident response, controlled export, archival portability, and architecture fitness.  
-> Related documents: [`MCP_ARCHITECTURE_OBSERVATION.md`](MCP_ARCHITECTURE_OBSERVATION.md), [`DOCUMENT_AND_MESSAGE_RETRIEVAL_AUDIT.md`](DOCUMENT_AND_MESSAGE_RETRIEVAL_AUDIT.md), and [`SENSITIVE_DOCUMENT_HANDLING_AND_SECURE_WORKBENCH.md`](SENSITIVE_DOCUMENT_HANDLING_AND_SECURE_WORKBENCH.md).
+> Related documents: [`PROJECT_BACKLOG.md`](PROJECT_BACKLOG.md), [`DOCUMENT_AND_MESSAGE_RETRIEVAL_AUDIT.md`](DOCUMENT_AND_MESSAGE_RETRIEVAL_AUDIT.md), and [`SENSITIVE_DOCUMENT_HANDLING_AND_SECURE_WORKBENCH.md`](SENSITIVE_DOCUMENT_HANDLING_AND_SECURE_WORKBENCH.md).
 
 ## Executive conclusion
 

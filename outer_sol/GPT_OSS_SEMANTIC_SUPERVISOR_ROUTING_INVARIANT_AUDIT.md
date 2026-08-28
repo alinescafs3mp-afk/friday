@@ -1,5 +1,8 @@
 # GPT-OSS semantic supervisor: routing and invariant audit
 
+This is an active code-bound invariant register, not a backlog. Current rollout
+state and priorities are owned only by [`PROJECT_BACKLOG.md`](PROJECT_BACKLOG.md).
+
 - Document ID: `FRIDAY-SUPERVISOR-AUDIT-001`
 - Date: 2026-08-26
 - Scope: repository source at the semantic-supervisor continuation branch

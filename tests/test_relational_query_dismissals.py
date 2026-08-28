@@ -97,11 +97,7 @@ def test_many_dismissed_matches_do_not_rescan_the_growing_full_prefix(monkeypatc
 
 def test_the_deidentified_s10b_result_is_self_consistent_and_passes_its_frozen_gate() -> None:
     path = (
-        Path(__file__).resolve().parents[1]
-        / "sol"
-        / "handoff"
-        / "s10"
-        / "relational_classifier_deidentified.json"
+        Path(__file__).resolve().parents[1] / "tests" / "fixtures" / "relational_classifier_deidentified.json"
     )
     assert path.stat().st_size <= 64 * 1024
     result = json.loads(path.read_text(encoding="utf-8"))

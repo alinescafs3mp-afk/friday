@@ -14,8 +14,9 @@ production по умолчанию остаётся `legacy`**.
 - внешний материал DeepSeek `V12_GAP_ANALYSIS_V2.md` (в рабочее дерево не
   включён), SHA-256
   `507a6121fc8e93b9606572f8c790834fe759aac8afe3d832f90968ffa463e920`;
-- `docs/NEW_ROUTER_MODEL_MIGRATION_PLAN.md` — существующий безопасный контракт
-  параллельного роутера.
+- исходный план параллельного роутера архивирован в Git;
+  актуальный порядок работ ведёт
+  [`outer_sol/PROJECT_BACKLOG.md`](../outer_sol/PROJECT_BACKLOG.md).
 
 ## 1. Продуктовый замысел
 

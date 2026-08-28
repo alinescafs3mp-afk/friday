@@ -752,7 +752,7 @@ async def test_tags_command_lists_tags_with_counts(tmp_path):
 @pytest.mark.asyncio
 async def test_profile_command_shows_the_object_view(tmp_path):
     """Спека v3 §6 «вид объекта», детерминированная Telegram-команда (не
-    зависит от того, решит ли модель позвать инструмент — см. TASKS.md #72).
+    зависит от того, решит ли модель позвать инструмент).
     """
     bridge = _media_bridge(tmp_path)
     telegram = _FakeTelegramClient()

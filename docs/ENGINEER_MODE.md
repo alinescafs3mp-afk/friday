@@ -1,8 +1,9 @@
 # Autonomous Engineer mode
 
 Engineer mode is Friday's installation-owner workbench for autonomous technical
-work on the primary VM. This document is the normative shipped contract. Files
-under `outer_sol/` are design history and do not silently change it.
+work on the primary VM. This document is the normative shipped contract.
+Architecture references under `outer_sol/` do not silently change it; current
+work and release state live only in `outer_sol/PROJECT_BACKLOG.md`.
 
 ## Product contract
 

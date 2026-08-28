@@ -1,6 +1,6 @@
 """Кэш ответа не превращает личный разговор в общий.
 
-Разбор Codex (`sol/HARDENING_FOR_OPUS.md`, §12.3). `POST /api/chat` заявляет и
+`POST /api/chat` заявляет и
 завершает ключ идемпотентности по `(actor.user_id, source_ref)`, а для API
 `source_ref` задаёт КЛИЕНТ. В общем архиве `actor.user_id` — арендатор, один на
 всех, поэтому два участника с одинаковым `source_ref` попадают в один namespace:

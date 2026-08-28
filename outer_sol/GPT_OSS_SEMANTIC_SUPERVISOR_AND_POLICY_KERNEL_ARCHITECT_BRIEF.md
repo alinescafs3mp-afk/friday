@@ -1,18 +1,16 @@
 # GPT-OSS Semantic Supervisor and Policy Kernel Architect Brief
 
 > Document ID: `FRIDAY-SUPERVISOR-001`  
-> Status: external architecture and implementation handoff, draft v0.1  
+> Status: active architecture reference; live state and order are owned by
+> [`PROJECT_BACKLOG.md`](PROJECT_BACKLOG.md)
 > Date: 26 August 2026  
 > Repository snapshot inspected: `main` at `59fc7b0718404e5408b1bbe11608f86eebc97e0d`  
 > Live production checkpoint at preparation time: Friday `0.207.33` / `ca3f1af0ce6f9cdcb4b9582fc670e5f6b6bfc72c`, schema 42  
 > Optional model node: accepted GPT-OSS-20B profile on `192.168.1.35`, SGLang 0.5.17, 4,096 total context tokens, 512 output tokens, concurrency one  
 > Related documents:
 > [`INTERACTION_CONTROL_PLANE_AND_OPERATIONAL_MEMORY.md`](INTERACTION_CONTROL_PLANE_AND_OPERATIONAL_MEMORY.md),
-> [`INTERACTION_CONTROL_PLANE_IMPLEMENTATION_STATUS.md`](INTERACTION_CONTROL_PLANE_IMPLEMENTATION_STATUS.md),
-> [`OPTIONAL_SECONDARY_BRAIN_SGLANG_GPT_OSS_20B_ARCHITECT_BRIEF.md`](OPTIONAL_SECONDARY_BRAIN_SGLANG_GPT_OSS_20B_ARCHITECT_BRIEF.md),
-> [`OPTIONAL_SECONDARY_BRAIN_IMPLEMENTATION_STATUS.md`](OPTIONAL_SECONDARY_BRAIN_IMPLEMENTATION_STATUS.md),
-> [`PROJECT_IMPLEMENTATION_STATUS.md`](PROJECT_IMPLEMENTATION_STATUS.md),
-> and [`V12_FURTHER_REFINEMENT_STATUS.md`](V12_FURTHER_REFINEMENT_STATUS.md).
+> [`PROJECT_BACKLOG.md`](PROJECT_BACKLOG.md), and the operational secondary-node
+> contract in [`deploy/secondary-brain/windows-sglang/README.md`](../deploy/secondary-brain/windows-sglang/README.md).
 
 ## Operator objective
 
@@ -1335,7 +1333,7 @@ weaken the current route contracts.
 16. Keep every release small, reversible and independently evidenced.
 
 The current active project order in
-[`PROJECT_IMPLEMENTATION_STATUS.md`](PROJECT_IMPLEMENTATION_STATUS.md) remains
+[`PROJECT_BACKLOG.md`](PROJECT_BACKLOG.md) remains
 authoritative. P0 and P1 may be built as isolated non-owning work. Do not silently
 preempt an active golden-journey package or widen the live release scope.
 

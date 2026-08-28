@@ -1151,7 +1151,7 @@ CREATE INDEX IF NOT EXISTS idx_approvals_pending_expiry
     ON action_approvals(status, expires_at);
 
 -- Ночная сводка о ПОВЕДЕНИИ системы за сутки. Заказ владельца 2026-08-04,
--- проект — `artifacts/compactor_design.md`.
+-- контракт — `docs/COMPACTOR.md`.
 --
 -- В таблице НЕТ НИ ОДНОЙ СТРОКИ, ВЫВЕДЕННОЙ ИЗ ПЕРЕПИСКИ, и это свойство схемы,
 -- а не фильтра. Инцидент хранится перечислимым кодом, человеческая формулировка

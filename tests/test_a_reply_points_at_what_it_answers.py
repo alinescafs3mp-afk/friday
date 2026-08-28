@@ -11,7 +11,6 @@
 ловили состязательным ревью на `_contextualize_query` и чинили проверкой
 `message`, а не `search_query`.
 
-Обязательные мутации перечислены в `sol/PROPOSALS.md` #49.
 """
 
 from __future__ import annotations

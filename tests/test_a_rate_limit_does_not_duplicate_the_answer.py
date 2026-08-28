@@ -9,7 +9,6 @@
 Telegram сам говорит, сколько ждать, в `parameters.retry_after`. Ждём столько и
 повторяем ТОТ ЖЕ кусок: доставка продолжается с места остановки.
 
-Обязательные мутации перечислены в `sol/PROPOSALS.md` #47.
 """
 
 from __future__ import annotations

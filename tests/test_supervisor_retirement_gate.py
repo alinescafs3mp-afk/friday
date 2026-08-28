@@ -176,7 +176,7 @@ def _semantic_predecessor_repository(
         "friday/orchestration/capability_manifest.py": "MANIFEST = ('read',)\n",
         "friday/orchestration/capability_binding.py": "BINDINGS = ('adapter',)\n",
         "outer_sol/GPT_OSS_SEMANTIC_SUPERVISOR_ROUTING_INVARIANT_AUDIT.md": "before\n",
-        "outer_sol/PROJECT_IMPLEMENTATION_STATUS.md": "before\n",
+        "outer_sol/PROJECT_BACKLOG.md": "before\n",
     }
     for relative_path, content in support.items():
         target = repository / relative_path
@@ -198,7 +198,7 @@ def _commit_semantic_deletion(
         "retirement candidate documented\n",
         encoding="utf-8",
     )
-    (repository / "outer_sol/PROJECT_IMPLEMENTATION_STATUS.md").write_text(
+    (repository / "outer_sol/PROJECT_BACKLOG.md").write_text(
         "retirement candidate recorded\n",
         encoding="utf-8",
     )

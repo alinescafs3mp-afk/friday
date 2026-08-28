@@ -608,12 +608,13 @@ P01/P02/P04/P08/P09/P10 **120/120**, после выпуска официаль�
 - [Архитектура](docs/ARCHITECTURE.md)
 - [V12 model-first: принятое направление и границы phase-1](docs/V12_MODEL_FIRST_ARCHITECTURE_DECISION.md)
 - [Миссии (executive)](docs/EXECUTIVE.md)
+- [Ночная структурная сводка](docs/COMPACTOR.md)
 - [Безопасность](docs/SECURITY.md)
 - [Жизненный цикл данных](docs/DATA_LIFECYCLE.md)
 - [Backup и восстановление](docs/BACKUP_AND_RESTORE.md)
 - [Эксплуатация и диагностика](docs/OPERATIONS.md)
 - [Obsidian на Android без подписки](docs/OBSIDIAN_ANDROID.md)
-- [Obsidian implementation tracker](docs/OBSIDIAN_IMPLEMENTATION_TRACKER.md)
+- [Единый backlog и статус проекта](outer_sol/PROJECT_BACKLOG.md)
 - [Release checklist](docs/RELEASE_CHECKLIST.md)
 - [История изменений](CHANGELOG.md)
 
@@ -621,7 +622,8 @@ P01/P02/P04/P08/P09/P10 **120/120**, после выпуска официаль�
 
 MIT — см. [LICENSE](LICENSE).
 
-Проект персональный: основную работу ведёт владелец вместе с двумя моделями-помощниками
-(их инструкции и предложения — в `sol/` и `grok/`). Issue приветствуются; PR принимаются,
+Проект персональный: основную работу ведёт владелец вместе с инженерными моделями.
+Актуальная работа ведётся только в [`outer_sol/PROJECT_BACKLOG.md`](outer_sol/PROJECT_BACKLOG.md).
+Issue приветствуются; PR принимаются,
 если проходят полный гейт из «Как проверяется работа» и не двигают замеренные пороги без
 нового замера с заранее объявленным критерием.

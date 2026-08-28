@@ -1,4 +1,4 @@
-"""Первый кусок спеки v3 (OPUS_INTEGRATED_SYSTEM_AUDIT_PROMPT.md §6): «вид объекта».
+"""Первый кусок спеки v3 §6: «вид объекта».
 
 Открыл сущность — видишь связанные документы, теги по ним, честный диапазон
 дат (даты ДОКУМЕНТОВ, не загрузки) и сколько связей ждёт проверки человеком,
@@ -319,7 +319,7 @@ def test_http_entity_profile_by_name_matches_the_agent_tool_shape(settings):
     """GET /api/kg/entity-profile?name=... — та же композиция (`kg.entity_profile`),
     что и агентский инструмент entity_lookup, но по HTTP и без участия модели.
     Основа для детерминированной команды /profile в Telegram, которая не зависит
-    от того, решит ли модель позвать инструмент (см. TASKS.md #72)."""
+    от того, решит ли модель позвать инструмент."""
     from fastapi.testclient import TestClient
 
     from friday.permissions import LEGACY_OWNER_USER_ID

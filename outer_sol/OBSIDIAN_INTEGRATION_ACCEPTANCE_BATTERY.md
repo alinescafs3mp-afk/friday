@@ -1,7 +1,8 @@
 # Friday Obsidian Integration Acceptance Battery
 
 > Document ID: FRIDAY-OBS-TEST-001  
-> Status: External acceptance specification, draft v0.1  
+> Status: active acceptance specification; results and remaining work are owned
+> by [`PROJECT_BACKLOG.md`](PROJECT_BACKLOG.md)
 > Repository snapshot: `main`, Friday `0.207.4`, 22 August 2026  
 > Architecture contract under test: [`FRIDAY-OBS-001 v0.4`](OBSIDIAN_INTEGRATION_ARCHITECTURE_AND_IMPLEMENTATION_PLAN.md)  
 > Primary scenario: one Android phone, Telegram as the Friday interface, free Obsidian, Syncthing-Fork, no Obsidian account, no Obsidian Sync, no desktop requirement, and no companion plugin for the core battery.

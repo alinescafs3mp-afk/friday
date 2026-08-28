@@ -1,9 +1,10 @@
 # Friday Sensitive Document Handling and Secure Workbench Architecture
 
-> Status: external security architecture observation  
+> Status: future security architecture reference; no implementation authority;
+> live state and owner decisions are owned by [`PROJECT_BACKLOG.md`](PROJECT_BACKLOG.md)
 > Repository snapshot: `main`, Friday `0.205.0`, 20 August 2026  
 > Scope: sensitive document ingestion, channel policy, derivative data labels, local processing, Telegram boundaries, Obsidian evaluation, and the minimum native Secure Friday Workbench.  
-> Related observations: [`MCP_ARCHITECTURE_OBSERVATION.md`](MCP_ARCHITECTURE_OBSERVATION.md) and [`DOCUMENT_AND_MESSAGE_RETRIEVAL_AUDIT.md`](DOCUMENT_AND_MESSAGE_RETRIEVAL_AUDIT.md).
+> Related references: [`PROJECT_BACKLOG.md`](PROJECT_BACKLOG.md), [`DOCUMENT_AND_MESSAGE_RETRIEVAL_AUDIT.md`](DOCUMENT_AND_MESSAGE_RETRIEVAL_AUDIT.md), and [`SYSTEM_ASSURANCE_AND_RECORDS_GOVERNANCE.md`](SYSTEM_ASSURANCE_AND_RECORDS_GOVERNANCE.md).
 
 ## Executive conclusion
 

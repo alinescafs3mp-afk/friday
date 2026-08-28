@@ -355,7 +355,7 @@ result = {{
     'guarded_reply': guarded_reply,
     'guard_allowed': guard_allowed,
     'snapshot_read_only': snapshot_read_only,
-    'host_candidate_hidden': not pathlib.Path({str(ROOT / "OPEN.md")!r}).exists(),
+    'host_candidate_hidden': not pathlib.Path({str(ROOT / "outer_sol/PROJECT_BACKLOG.md")!r}).exists(),
     'sys_hidden': not pathlib.Path('/sys').exists(),
 }}
 print(json.dumps(result, sort_keys=True))

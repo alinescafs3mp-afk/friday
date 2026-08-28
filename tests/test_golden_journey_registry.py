@@ -14,7 +14,7 @@ from typing import Any, NoReturn
 import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
-STATUS_PATH = ROOT / "outer_sol" / "PROJECT_IMPLEMENTATION_STATUS.md"
+STATUS_PATH = ROOT / "outer_sol" / "PROJECT_BACKLOG.md"
 
 READINESS_STATES = frozenset({"READY", "DEGRADED", "UNVERIFIED", "BLOCKED", "OUT_OF_SCOPE"})
 EVIDENCE_STATES = frozenset({"VERIFIED", "AVAILABLE", "MISSING", "STALE", "FAILED", "NOT_APPLICABLE"})
@@ -944,10 +944,7 @@ def test_canonical_golden_journey_registry_is_closed_current_and_privacy_safe(
         assert restart_proof in tuple(ref.label for ref in document.evidence[evidence_class].refs)
         assert restart_proof in _PROOF_REFS_BY_JOURNEY_CLASS[("document_recall_answer", evidence_class)]
 
-    detailed = (ROOT / "outer_sol" / "INTERACTION_CONTROL_PLANE_IMPLEMENTATION_STATUS.md").read_text(
-        encoding="utf-8"
-    )
-    assert "outer_sol/PROJECT_IMPLEMENTATION_STATUS.md" in detailed
+    assert "This is the project's only backlog" in markdown
 
     with pytest.raises(RegistryValidationError, match="limitation cell"):
         _registry_rows(markdown.replace("`semantic_recall_missing`", "`semantic_recall_missing` prose"))

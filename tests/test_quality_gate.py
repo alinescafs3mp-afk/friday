@@ -17,10 +17,10 @@ import pytest
 from tools import quality_gate
 
 CANONICAL_GATE_COMMAND = ".venv/bin/python tools/quality_gate.py"
-ASSISTANT_GATE_GUIDANCE = (
-    quality_gate.ROOT / "sol" / "SOL.md",
-    quality_gate.ROOT / "grok" / "GROK.md",
-    quality_gate.ROOT / "grok" / "NOTES.md",
+CANONICAL_GATE_GUIDANCE = (
+    quality_gate.ROOT / "README.md",
+    quality_gate.ROOT / "docs" / "LIVE_BATTERY_RUNBOOK.md",
+    quality_gate.ROOT / "docs" / "RELEASE_CHECKLIST.md",
 )
 
 
@@ -322,7 +322,7 @@ def test_eager_settings_import_derives_the_database_from_the_scratch_home(
         )
 
 
-def test_assistant_instructions_delegate_to_the_canonical_gate() -> None:
+def test_canonical_guidance_delegates_to_the_canonical_gate() -> None:
     copied_internal_commands = (
         ".venv/bin/ruff ",
         ".venv/bin/mypy ",
@@ -331,7 +331,7 @@ def test_assistant_instructions_delegate_to_the_canonical_gate() -> None:
         "node --check friday/",
     )
 
-    for path in ASSISTANT_GATE_GUIDANCE:
+    for path in CANONICAL_GATE_GUIDANCE:
         text = path.read_text(encoding="utf-8-sig")
         assert CANONICAL_GATE_COMMAND in text, (
             f"{path.relative_to(quality_gate.ROOT)} bypasses the canonical gate"

@@ -1,11 +1,12 @@
 # Friday Obsidian Integration Architecture and Implementation Plan
 
 > Document ID: FRIDAY-OBS-001  
-> Status: External architecture proposal, draft v0.4  
+> Status: active acceptance architecture; live state and order are owned by
+> [`PROJECT_BACKLOG.md`](PROJECT_BACKLOG.md)
 > Repository snapshot: `main`, Friday `0.206.0`, 21 August 2026  
 > Primary scenario: a free Android-only user, Telegram as the Friday interface, no Obsidian account requirement, no Obsidian Sync subscription, no desktop Obsidian requirement, one physical phone, and an always-on Friday host.  
 > Primary Android sync client: Syncthing-Fork.  
-> Related documents: [`INTERACTION_CONTROL_PLANE_AND_OPERATIONAL_MEMORY.md`](INTERACTION_CONTROL_PLANE_AND_OPERATIONAL_MEMORY.md), [`DOCUMENT_AND_MESSAGE_RETRIEVAL_AUDIT.md`](DOCUMENT_AND_MESSAGE_RETRIEVAL_AUDIT.md), [`MCP_ARCHITECTURE_OBSERVATION.md`](MCP_ARCHITECTURE_OBSERVATION.md), and [`SENSITIVE_DOCUMENT_HANDLING_AND_SECURE_WORKBENCH.md`](SENSITIVE_DOCUMENT_HANDLING_AND_SECURE_WORKBENCH.md).
+> Related documents: [`PROJECT_BACKLOG.md`](PROJECT_BACKLOG.md), [`INTERACTION_CONTROL_PLANE_AND_OPERATIONAL_MEMORY.md`](INTERACTION_CONTROL_PLANE_AND_OPERATIONAL_MEMORY.md), [`DOCUMENT_AND_MESSAGE_RETRIEVAL_AUDIT.md`](DOCUMENT_AND_MESSAGE_RETRIEVAL_AUDIT.md), and [`SENSITIVE_DOCUMENT_HANDLING_AND_SECURE_WORKBENCH.md`](SENSITIVE_DOCUMENT_HANDLING_AND_SECURE_WORKBENCH.md).
 
 ## Revision 0.4
 

@@ -1,6 +1,6 @@
 """Narrow product scenarios for SQLite ↔ disk file registration integrity.
 
-Three unique nodes only (see handoffs/grok-file-core/TASKS.md):
+Three unique nodes only:
 1. Successful ingest of a small TXT: Raw + disk + authorized read agree.
 2. Corrupted modern registration fails closed (no raw_content fallback here).
 3. Artificial failure between staged rename and DB commit leaves no ready file.

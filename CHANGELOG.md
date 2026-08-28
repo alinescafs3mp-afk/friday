@@ -1,3 +1,29 @@
+## 0.207.65 — 2026-08-27
+
+### Dormant Engineer Work Item foundation
+
+- Adds schema-46 body-free `EngineerWorkItem v1` identity, CAS state and receipt
+  fences without enabling runtime continuation.
+- Preserves a distinct schema-capable fallback before the activation package.
+
+## 0.207.64 — 2026-08-27
+
+### Inherited document and archive budgets
+
+- Gives nested document, Office and archive stages one size-aware deadline and
+  keeps authenticated completed work as an honest partial result.
+- Rejects encrypted archive validation before deduplication or persistence when
+  access cannot be proved.
+
+## 0.207.63 — 2026-08-27
+
+### Durable progress and bounded reasoning
+
+- Adds one edited Telegram status surface with truthful elapsed/stage/output
+  facts and no task replay on transport failure.
+- Enables bounded reasoning only for complex Engineer plan/replan phases while
+  execution, status and final publication remain no-thinking.
+
 ## 0.207.62 — 2026-08-27
 
 ### Semantic Supervisor discarded shadow

@@ -604,8 +604,8 @@ class ViewsMixin(BridgeShared):
         """Deterministic Telegram surface for the spec-v3 object view (§6):
         unlike asking the agent "расскажи про X", this always calls the same
         `GET /api/kg/entity-profile` regardless of whether the model would
-        have decided to use a tool for this phrasing (see TASKS.md #72 —
-        measured tool-call reliability under 5/5 for short factual asks)."""
+        have decided to use a tool for this phrasing; measured tool-call
+        reliability was below 5/5 for short factual asks."""
         clean = name.strip()
         if not clean:
             await self._send_message(telegram, chat_id, "Использование: /profile имя сущности")
@@ -825,8 +825,8 @@ class ViewsMixin(BridgeShared):
 
         На этот вопрос не отвечает карточка ни одного из объектов: он про ребро, а
         не про узел. В админке путь подсвечивался на картине с самого начала, а в
-        чате графа не было вовсе — при том что закон проекта (`sol/SOL.md` §1.6)
-        требует, чтобы новая возможность работала в чате в первую очередь.
+        чате графа не было вовсе, хотя Telegram — первичный интерфейс
+        продукта.
 
         Разделитель `=>` — тот же, что уже принят у `/entity_rename` и
         `/entity_alias`: второй язык разбора аргументов означал бы, что человеку

@@ -1,10 +1,11 @@
 # Friday Interaction Control Plane and Operational Memory Architecture
 
 > Document ID: FRIDAY-ICP-001  
-> Status: External architecture observation, draft v0.1  
+> Status: active architecture reference; live state and order are owned by
+> [`PROJECT_BACKLOG.md`](PROJECT_BACKLOG.md)
 > Repository snapshot: `main`, Friday `0.205.0`, 20 August 2026  
 > Scope: cross-capability coordination, persistent work state, continuation resolution, workflow composition, capability outcomes, completion semantics, failure recovery, V12 integration, and episode-level evaluation.  
-> Related documents: [`DOCUMENT_AND_MESSAGE_RETRIEVAL_AUDIT.md`](DOCUMENT_AND_MESSAGE_RETRIEVAL_AUDIT.md), [`MCP_ARCHITECTURE_OBSERVATION.md`](MCP_ARCHITECTURE_OBSERVATION.md), [`SENSITIVE_DOCUMENT_HANDLING_AND_SECURE_WORKBENCH.md`](SENSITIVE_DOCUMENT_HANDLING_AND_SECURE_WORKBENCH.md), and [`SYSTEM_ASSURANCE_AND_RECORDS_GOVERNANCE.md`](SYSTEM_ASSURANCE_AND_RECORDS_GOVERNANCE.md).
+> Related documents: [`PROJECT_BACKLOG.md`](PROJECT_BACKLOG.md), [`DOCUMENT_AND_MESSAGE_RETRIEVAL_AUDIT.md`](DOCUMENT_AND_MESSAGE_RETRIEVAL_AUDIT.md), [`SENSITIVE_DOCUMENT_HANDLING_AND_SECURE_WORKBENCH.md`](SENSITIVE_DOCUMENT_HANDLING_AND_SECURE_WORKBENCH.md), and [`SYSTEM_ASSURANCE_AND_RECORDS_GOVERNANCE.md`](SYSTEM_ASSURANCE_AND_RECORDS_GOVERNANCE.md).
 
 ## Executive conclusion
 

@@ -1,6 +1,7 @@
 # Friday Document and Message Retrieval Audit
 
-> Status: external architecture audit  
+> Status: active retrieval design reference; live tasks and state are owned by
+> [`PROJECT_BACKLOG.md`](PROJECT_BACKLOG.md)
 > Repository snapshot: `main`, Friday `0.205.0`, 20 August 2026  
 > Scope: document registration, tagging, date handling, document discovery, semantic retrieval, message-history search, and the expected impact of MCP, V12, and future 120B+ models.
 
@@ -965,7 +966,7 @@ The current problem is not that Friday lacks intelligence. It is that three libr
 
 - [`docs/DOCUMENT_CONTOUR_RELEASE_CRITERIA.md`](../docs/DOCUMENT_CONTOUR_RELEASE_CRITERIA.md)
 - [`docs/V12_MODEL_FIRST_ARCHITECTURE_DECISION.md`](../docs/V12_MODEL_FIRST_ARCHITECTURE_DECISION.md)
-- [`docs/NEW_ROUTER_MODEL_MIGRATION_PLAN.md`](../docs/NEW_ROUTER_MODEL_MIGRATION_PLAN.md)
+- [`docs/V12_MODEL_FIRST_ARCHITECTURE_DECISION.md`](../docs/V12_MODEL_FIRST_ARCHITECTURE_DECISION.md)
 - [`.env.example`](../.env.example)
 - [`friday/documents/`](../friday/documents/)
 - [`friday/ingestion/_files.py`](../friday/ingestion/_files.py)
