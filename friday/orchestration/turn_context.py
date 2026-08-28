@@ -254,7 +254,10 @@ class ConversationAdmission:
         if self.kind is ConversationScopeKind.NEW:
             if self.conversation_id is not None:
                 raise TurnContextError("new conversation admission cannot carry a conversation id")
-        elif type(self.conversation_id) is not str or _CONVERSATION_ID_RE.fullmatch(self.conversation_id) is None:
+        elif (
+            type(self.conversation_id) is not str
+            or _CONVERSATION_ID_RE.fullmatch(self.conversation_id) is None
+        ):
             raise TurnContextError("existing conversation admission requires a code-owned id")
         _digest(self.binding_sha256, label="conversation admission binding")
         _validate_seal(
@@ -890,13 +893,11 @@ class AuthenticatedTurnContext:
             allow_nan=False,
         )
         visible_messages = tuple(
-            {"role": "user", "content": value}
-            for value in (*_visible_strings(projection), visible)
+            {"role": "user", "content": value} for value in (*_visible_strings(projection), visible)
         )
-        if (
-            len(visible.encode("utf-8")) > _MAX_ADVISORY_UTF8_BYTES
-            or not secondary_model_messages_are_secret_free(visible_messages)
-        ):
+        if len(
+            visible.encode("utf-8")
+        ) > _MAX_ADVISORY_UTF8_BYTES or not secondary_model_messages_are_secret_free(visible_messages):
             raise TurnContextError("advisory turn projection is not safe for a secondary model")
         return projection
 
@@ -969,7 +970,10 @@ def _validate_source_set(context: AuthenticatedTurnContext) -> None:
 
 
 def _validate_context_structure(context: AuthenticatedTurnContext) -> None:
-    if type(context.identity) is not TurnIdentity or type(context.authority) is not AuthenticatedIngressAuthority:
+    if (
+        type(context.identity) is not TurnIdentity
+        or type(context.authority) is not AuthenticatedIngressAuthority
+    ):
         raise TurnContextError("turn identity or ingress authority has an invalid type")
     if context.identity != TurnIdentity.from_authority(context.authority):
         raise TurnContextError("turn identity is not bound to ingress authority")
@@ -987,7 +991,10 @@ def _validate_context_structure(context: AuthenticatedTurnContext) -> None:
     ):
         raise TurnContextError("TurnInput authority projection differs from authenticated actor")
     _validate_source_set(context)
-    if type(context.turn_policy) is not TurnPolicy or type(context.inherited_budget) is not InheritedTurnBudget:
+    if (
+        type(context.turn_policy) is not TurnPolicy
+        or type(context.inherited_budget) is not InheritedTurnBudget
+    ):
         raise TurnContextError("turn policy or inherited budget has an invalid type")
     if context.pending_work_admission is not None:
         if type(context.pending_work_admission) is not PendingWorkAdmission:
@@ -1147,7 +1154,9 @@ class TurnContextIssuer:
             "schema": TURN_POLICY_SCHEMA,
             "router_mode": router_mode.value if type(router_mode) is RouterMode else router_mode,
             "fallback_router_mode": (
-                fallback_router_mode.value if type(fallback_router_mode) is RouterMode else fallback_router_mode
+                fallback_router_mode.value
+                if type(fallback_router_mode) is RouterMode
+                else fallback_router_mode
             ),
             "decision_binding_sha256": decision_binding,
             "raw_message_reclassification": False,
@@ -1405,7 +1414,9 @@ class TurnContextIssuer:
         _validate_context_structure(context)
         self._require_authority(context.authority)
         self._require_policy(context.turn_policy)
-        if not hmac.compare_digest(self._model_input_binding(context.model_input), context.model_input_binding_sha256):
+        if not hmac.compare_digest(
+            self._model_input_binding(context.model_input), context.model_input_binding_sha256
+        ):
             raise TurnContextError("model input binding is stale")
         for source in context.authorized_sources:
             self._require_source(context.authority, source)
@@ -1516,7 +1527,11 @@ class TurnContextIssuer:
             b"friday/turn-context/effect-fence/v1\0",
             material,
         )
-        payload = {"schema": EFFECT_FENCE_SCHEMA, **{key: value for key, value in material.items() if key != "schema"}, "binding_sha256": binding}
+        payload = {
+            "schema": EFFECT_FENCE_SCHEMA,
+            **{key: value for key, value in material.items() if key != "schema"},
+            "binding_sha256": binding,
+        }
         return EffectFence(
             turn_id=identity.turn_id,
             context_authority_sha256=context_authority_sha256,
@@ -1556,7 +1571,10 @@ class TurnContextIssuer:
             raise TurnContextError("ingress authority binding is stale")
 
     def _require_policy(self, policy: TurnPolicy) -> None:
-        if type(policy) is not TurnPolicy or policy._seal.namespace_fingerprint != self._namespace_fingerprint:
+        if (
+            type(policy) is not TurnPolicy
+            or policy._seal.namespace_fingerprint != self._namespace_fingerprint
+        ):
             raise TurnContextError("turn policy belongs to another issuer")
         expected = self.issue_turn_policy(
             router_mode=policy.router_mode,
@@ -1601,7 +1619,9 @@ class TurnContextIssuer:
             )
         else:
             token = source.private_carrier
-            if type(token) is not AuthorizedFileSnapshotToken or not authorized_file_snapshot_token_is_process_owned(
+            if type(
+                token
+            ) is not AuthorizedFileSnapshotToken or not authorized_file_snapshot_token_is_process_owned(
                 token
             ):
                 raise TurnContextError("registered file source carrier is stale")

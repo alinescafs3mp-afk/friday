@@ -68,9 +68,7 @@ def _input(
         actor=actor,
         conversation_id=conversation_id,
         attachments=(
-            [{"mime_type": "text/plain", "content": "AUTHORIZED_SOURCE_BODY_CANARY"}]
-            if attachment
-            else []
+            [{"mime_type": "text/plain", "content": "AUTHORIZED_SOURCE_BODY_CANARY"}] if attachment else []
         ),
         enable_tools=enable_tools,
         synthetic_document_notice=False,
@@ -285,7 +283,9 @@ def test_message_reply_tools_and_attachment_drift_change_body_free_context_bindi
     )
 
     assert {item.turn_id for item in variants} == {baseline.turn_id}
-    assert len({baseline.context_authority_sha256, *(item.context_authority_sha256 for item in variants)}) == 5
+    assert (
+        len({baseline.context_authority_sha256, *(item.context_authority_sha256 for item in variants)}) == 5
+    )
     for context in variants:
         canonical = context.canonical_bytes().decode("ascii")
         assert context.model_input.message not in canonical
@@ -427,14 +427,20 @@ def test_pending_scope_owner_and_uncertainty_are_exact() -> None:
         person_id="alice",
         conversation_id=_CONVERSATION,
     )
-    assert issuer.bind_pending_work(
-        authority=context.authority,
-        admission=uncertain,
-    ).owner_kind is PendingOwnerKind.UNCERTAIN_FAIL_CLOSED
-    assert issuer.bind_pending_work(
-        authority=context.authority,
-        admission=unbound,
-    ).owner_kind is PendingOwnerKind.LEGACY_PENDING_RUNTIME
+    assert (
+        issuer.bind_pending_work(
+            authority=context.authority,
+            admission=uncertain,
+        ).owner_kind
+        is PendingOwnerKind.UNCERTAIN_FAIL_CLOSED
+    )
+    assert (
+        issuer.bind_pending_work(
+            authority=context.authority,
+            admission=unbound,
+        ).owner_kind
+        is PendingOwnerKind.LEGACY_PENDING_RUNTIME
+    )
 
 
 def test_identical_pending_id_under_another_person_has_another_opaque_binding() -> None:
