@@ -31,13 +31,19 @@ either merged here or discarded before that source is removed.
 
 ## Active package
 
-Activate restart-safe `EngineerWorkItem v1` continuation only after the external
-command ledger is fail-closed against loss/rollback and bound to code-owned
-source slots. The Work Item stores identity, state and receipt digests only; it
-never stores prompt, reasoning, argv, path or output bodies and never blindly
-replays `RUNNING`/`UNKNOWN`. This package requires a distinct schema-capable
-fallback, native full gate, immutable rollback rehearsal and one benign signed
-owner smoke before completion.
+Finish and release the already-developed restart-safe `EngineerWorkItem v1`
+continuation as the last journey-specific work store before the shared turn
+contract. The package is deliberately narrow: fail closed to `UNKNOWN` on
+command-ledger loss or rollback; bind code-owned source slots so dependent
+same-message commands remain distinct; inject one authenticated observed
+terminal receipt into one bounded `replan → next step or final` turn; publish
+completion atomically with the Work Item CAS. Never persist prompt, reasoning,
+argv, path or output bodies and never replay `RUNNING`/`UNKNOWN` blindly.
+
+Acceptance remains a distinct schema-capable fallback, native full gate,
+immutable rollback rehearsal and one benign signed owner smoke. After this
+package, no new parallel work store may be added until the shared `TurnContext`
+contract exists.
 
 ## Operating rules
 
@@ -47,6 +53,14 @@ owner smoke before completion.
 - Do not touch the Obsidian companion plugin without a separate owner request.
 - Preserve the primary-only path whenever the laptop or secondary runtime is
   unavailable.
+- Measure progress by complete recoverable user journeys, not by another
+  adapter, organ, evidence ceremony or store. One turn has one effect owner,
+  one final publisher, one inherited deadline and one authorized source set.
+- Secondary and Semantic Supervisor components are advisory. They may deepen
+  analysis or propose a plan, but never own tools, effects or publication.
+- Authorization, provenance, ingestion review, privacy, effect fencing,
+  citation/coverage, cancellation, honest `UNKNOWN` and one-publication are
+  product invariants; cognition profiles may never disable them.
 - The owner-only autonomous Engineer Mode deliberately has no per-command HITL
   or isolated-workspace policy rail. Its hard boundary is instead fresh owner
   Telegram provenance and capability authorization; every other surface keeps
@@ -108,7 +122,8 @@ the target product contract. Autonomous owner-only host-user admission,
 iterative planning, current Telegram inputs, lifecycle closure and items 6–8
 are deployed in `0.207.57`. The live signed owner smoke executed an installed
 command and returned exact stdout without an approval row. The P1 contour is
-closed; future Engineer expansion belongs to P7.
+closed; current continuation belongs only to S1 and further toolchain expansion
+is demand-driven.
 
 Production regressions found after rollout are closed by `0.207.58`: composite
 systemd time budgets are parsed exactly, current Telegram uploads reach the
@@ -142,131 +157,126 @@ the Work Item CAS. Before activation, make the independent command ledger
 fail-closed against loss/rollback and bind a code-owned source slot so dependent
 same-message commands remain possible without replay ambiguity.
 
-### P2 — integrate and roll out Semantic Supervisor
+### S0 — freeze the constructor
 
-Goal: use GPT-OSS as a bounded semantic supervisor/policy kernel while the
-primary remains the sole publisher, tool caller and effect owner.
+Status: active architectural ratchet.
 
-1. Resolve the profile dependency once: either promote and accept staged
-   abliterated profile `gptoss20b-d4c220…` before Supervisor certification, or
-   explicitly retain accepted `gptoss20b-2335df…` for the whole rollout. A
-   later profile switch invalidates profile-bound evidence.
-2. Rebase the clean source candidate from
-   `feature/semantic-supervisor-full-20260826` onto current `main`; do not trust
-   the revoked READY handoff.
-3. Correct policy/code identity drift and add an identity-consistency test.
-4. Independently review authority, ingress, privacy, schema, restart,
-   Engineer/secondary interaction and primary-once publication invariants.
-5. Run focused suites, static checks and the exact full gate from a clean
-   artifact; reproduce candidate and schema-capable fallback wheels.
-6. Release default-off, rehearse real rollback, then enable shadow.
-7. Collect at least 20 joined production observations and produce latency and
-   operator evidence.
-8. Promote only the proved current-file-plus-current-public-web journey to
-   limited assist, rehearse assist-to-shadow, then use a small canary chain.
-9. Keep P5 effect work shadow-only until the canary and Obsidian registry are
-   mature. P6 remains a no-op unless a heuristic is independently proved
-   harmful and redundant.
+- Do not start another journey-specific store, generic WorkGraph, Host Control
+  expansion, closed compiler catalog, MCP platform, sensitive-data plane,
+  Decision store, material-quarantine path or heuristic-retirement system.
+  Existing bug fixes remain allowed.
+- Keep the shipped Supervisor foundation and accepted
+  `gptoss20b-2335df…` profile; do not build a second release PKI, effect owner
+  or post-commit observer around them.
+- Replace the golden-journey validator's impossible unconditional trusted-root
+  rejection with exact-release machine evidence from named executable tests
+  and an authenticated owner Telegram smoke where an external edge exists.
+  A mutable or self-declared receipt is never `VERIFIED`.
+- Do not salvage stale feature branches wholesale.
 
-Estimate: 18–30 hours after P1, plus 3–6 hours if the staged laptop profile is
-certified first.
+### S1 — finish Engineer continuation
 
-Items 1–6 are deployed through `0.207.63`. The exact accepted profile
-`gptoss20b-2335df…` is retained for this rollout. Endpoint/TLS/profile/startup
-admission is healthy; the public availability bit is intentionally
-freshness-scoped and ages when no eligible turn occurs. Items 7–9 remain
-evidence-gated with zero credited production observations; shadow has no tool,
-effect, execution or publication authority.
+Status: active package; the implementation is already substantially complete.
 
-### P3 — release stability and golden-journey admission
+- Close ledger-loss/rollback, source-slot, restart, publication and backup/
+  restore invariants described in Active package.
+- Build and retain a distinct schema-capable fallback, run the native gate,
+  rehearse activation rollback and execute one benign signed owner smoke.
+- Do not add a generic graph, model-authored persistence or a new approval rail.
 
-- Make core Telegram, web, file/Office, Obsidian and reminder journeys
-  release-blocking.
-- Add exact clean-artifact, production-read-only, rollback and backup/restore
-  evidence.
-- Salvage only reviewed pieces from `feature/package6-evidence-foundation`;
-  never merge that stale incomplete candidate wholesale.
-- Bind document-contour release claims to a current machine-produced receipt;
-  old `pending` lock/status files are not evidence.
-- Re-evaluate the old synthetic parenthetical/unowned adverse predicate against
-  the current battery and port it only if it adds a unique regression.
+### S2 — one turn nervous system
 
-The first document-budget slice is deployed in `0.207.64`: nested document,
-Office and archive stages share inherited size-aware deadlines; encrypted
-archive validation fails closed before dedup/persistence, while authenticated or
-plain work may return an honest partial result.
+- Extend or wrap the existing `orchestration.contracts.TurnInput`; do not add a
+  third unrelated DTO. Build one immutable authenticated turn contract after
+  ingest/admission with actor, tenant, person, conversation, mode, turn ID,
+  inherited deadline/budgets, authorized source identities, turn policy,
+  effect fence and exactly one pending-work owner.
+- Router, legacy runtime, Engineer, secondary and Supervisor consume the same
+  contract. `AgentContext` is derived from it. Fallback may change strategy but
+  may not discard the plan/source identities or classify the raw message again
+  from zero.
+- Carry one turn ID through ingest, route, tools and final publication. Land the
+  current small-model behavior first with no user-visible change.
 
-Estimate: 8–16 hours.
+Estimate: 3–7 clean-work days in small reversible packages after S1.
 
-### P4 — finish document and conversation retrieval
+### S3 — bounded second hemisphere
 
-1. Reader-first document-passage manifest/table with schema-capable fallback.
-2. Bounded writer and restart-safe resumable backfill.
-3. Typed arrival/container/visible/mentioned dates with evidence spans and one
-   shared query parser.
-4. Full-corpus passage embeddings, revision incompatibility, resumable backfill,
-   measurable recall/reranking and honest `index_incomplete`.
-5. Conversation passages, adjacent context, typo/layout repair, typed dates and
-   unified archive coverage.
-6. Expose honest `embeddings_pending`/index coverage without adding an
-   unbounded per-query scan.
-7. Add filename/alias retrieval on the current schema; do not revive the old
-   `raw_fts.metadata_json` migration.
-8. Reconstruct a current measurable search-recall guarantee before changing
-   ranking; never port the old untracked test blindly.
-9. Close remaining format/date/truncation gaps only from a corpus-backed
-   acceptance case, including legacy Office/mail formats where support remains
-   incomplete.
+- Keep the primary as sole tool caller, effect owner and publisher. Secondary
+  and Semantic Supervisor receive the shared turn contract and return bounded
+  structured advice only; their absence is exactly the primary-only path.
+- Let joined shadow observations accumulate from real eligible traffic; target
+  20 for a useful sample, never fabricate traffic and never make the count a
+  product-availability gate.
+- Promote only the current-file-plus-current-public-web journey to bounded
+  assist after release-bound evidence, latency evidence and assist-to-shadow
+  rollback. Keep effect planning and heuristic retirement deferred.
 
-Estimate: 31–54 hours in separately reversible releases.
+Estimate: 8–16 hours after the minimal S2 seam.
 
-### P5 — complete operational memory and recovery
+### S4 — one search facade with passage memory
 
-- Extend typed outcomes to durable web research, document review and
-  internal/external comparison; keep generic WorkGraphs behind proved journeys.
-- Certify scheduled work for at-most-once delivery, restart/cancel/expiry and
-  uncertain-effect recovery.
-- Prove clean-home backup/restore for DB, files, inbox and Obsidian generation,
-  deterministic index rebuild, pending work/effects, ENOSPC, clock skew and
-  duplicate inbound delivery.
-- Re-measure human review queues and add bounded aging/observability; never
-  auto-accept conflicts or relations merely to reduce a count.
-- Complete the verified export-before-purge lifecycle step.
+1. Add reader-first `document_passages` with a schema-capable fallback, bounded
+   writer, restart-safe resumable backfill and honest `index_incomplete`.
+2. Make `archive_search` reach parity with document, promoted-knowledge,
+   bitemporal/graph and message semantics. Only after regression and shadow
+   recall measurements may `memory_search`, `source_search` and
+   `message_search` disappear from the dialogue model catalog; they remain
+   internal adapters.
+3. Add conversation passages and adjacent context as a separate reversible
+   release.
+4. Reconstruct a current measurable recall set before changing ranking or
+   embeddings. Close filename, alias, format, date and truncation holes only
+   from corpus-backed failures; do not revive `raw_fts.metadata_json`.
 
-Estimate: 22–44 hours.
+Estimate: 8–16 clean-work days across separately reversible releases.
 
-### P6 — Obsidian physical acceptance
+### S5 — measured cognition and installation budgets
 
-- One real Android onboarding, Android-origin edit/reingest, offline reconnect,
-  concurrent conflict and delivery-versus-open proof.
-- Server-side P0–P7 is already implemented. Companion remains excluded.
+- Extend the existing attested `V12ModelProfileSpec`/lease instead of creating a
+  competing environment-only model profile. Measured capabilities control
+  lexical routing aids, verifier policy, history, tool rounds/calls, prepared
+  evidence, native tools and context use.
+- Preserve a baseline equivalent to today's 27–35B behavior. More capable
+  leases may remove cognition crutches only after probes; authorization,
+  provenance, review, privacy, citation/coverage, effect fencing and
+  publication invariants never vary by model.
+- Separate safety deadlines from model anti-loop limits and installation
+  resource budgets. Every nested stage inherits the parent deadline.
+- Remove the artificial V12 8k ceiling where the exact runtime is attested for
+  40k; use `min(attested runtime, installation cap)` rather than a model-name
+  guess.
 
-Estimate: 1–3 owner-present hours plus any defects found.
+Estimate: 4–8 clean-work days after S2, released incrementally.
 
-### P7 — expand Engineer Mode after Semantic Supervisor
+### S6 — journey proof and recovery, not new organs
 
-- Closed compiler profiles: C/C++, then Go and Zig; each returns sources,
-  binary and receipt without executing the result.
-- Deeper APK/JVM/.NET/Mach-O analysis and indexed Ghidra output.
-- Semantic modify/rebuild/archive workflows with original preservation.
-- Durable search for reports/artifacts/receipts by hash, date and target.
-- Comprehensive single-host assessment. Exploit validation remains a separate
-  owner-confirmed security package against an explicitly safe target.
+- Keep core Telegram, web, file/Office, Obsidian, Engineer and reminder paths
+  release-blocking with named deterministic tests and exact-release evidence.
+- Audit scheduled work for at-most-once delivery, restart/cancel/expiry and
+  uncertain-effect recovery. Change the design only where a current journey is
+  actually broken.
+- Prove release-level clean-home backup/restore, deterministic index rebuild,
+  ENOSPC, clock skew and duplicate inbound behavior without duplicating generic
+  operator evidence into every journey row.
+- Re-measure review queues before adding bounded aging/observability. Keep
+  export-before-purge deferred until a real retention journey requires it.
+- Perform Obsidian Android round-trip, reconnect and conflict acceptance only
+  with the owner/device present; server-side work is otherwise complete and the
+  companion remains excluded.
 
-Estimate: 24–50 hours, incrementally.
+### Removed from the active queue
 
-### P8 — later architecture work
-
-- Minimal sensitive-data governance only after the owner chooses deployment,
-  classification and key-recovery policy.
-- Wider V12 route migration only after P4/P5 evidence; generic Active Frames,
-  WorkGraphs and Executive unification remain late work.
-- MCP/web edge generalization and document admin APIs follow core reliability.
-- Decide whether `Decision` becomes a first-class provenance record.
-- Design an owner-only, audited material-quarantine release path before any
-  destructive snapshot retirement.
-
-Estimate: 40–80 hours after the policy decision.
+- Supervisor effect observation and heuristic retirement, Package 6 trusted
+  attestation-root construction, closed compiler profiles, indexed Ghidra as a
+  product, generic Active Frames/WorkGraphs, Executive unification, Host
+  Capability growth, MCP generalization, sensitive-data/Decision stores and a
+  material-quarantine release path have no current end-to-end product gap.
+- Engineer's owner shell is the toolchain. Add an installed compiler, analyzer
+  or decomposer only when a real request proves it absent; do not rebuild an
+  allowlisted compiler zoo around arbitrary command execution.
+- Existing dormant code is not authority to resume these items. Re-entry needs
+  a current owner request or a corpus-backed broken journey.
 
 ## Explicitly deferred or closed
 
@@ -284,18 +294,19 @@ Estimate: 40–80 hours after the policy decision.
 - Rotate the external web-search credential at its provider, then update the
   single protected runtime secret. Local duplicate cleanup did not revoke the
   old value.
-- P6 physical Android acceptance requires the owner and device; all other work
+- S6 physical Android acceptance requires the owner and device; all other work
   proceeds independently.
 
 ## First 24 clean-work hours
 
 1. Keep the deployed P0/P1 production paths green.
-2. Activate the deployed dormant `EngineerWorkItem v1` through the exact
-   owner-follow-up path as a separate reversible package.
-3. Collect and audit P2 joined shadow observations for the frozen accepted
-   profile only from real eligible turns; do not fabricate traffic.
-4. Advance only through evidence-backed limited assist/canary stages, then use
-   remaining time on P3 release-blocking golden journeys.
+2. Finish, certify, release and smoke `EngineerWorkItem v1` as one reversible
+   package; do not expand its scope.
+3. Define and land the smallest existing-`TurnInput`-based S2 seam, including a
+   single turn ID and pending-work owner, before adding Supervisor behavior.
+4. Begin the bounded S3 advisor path only through that seam. In parallel,
+   replace the golden-registry trusted-root deadlock without accepting mutable
+   or self-declared evidence.
 
 ## Canonical golden-journey/evidence registry
 
@@ -310,12 +321,14 @@ journey-specific contract, executable test or runbook exists, not that the
 complete journey passed. Generic release, rollback and backup tests are not
 journey evidence.
 
-The grammar can represent `VERIFIED`, `FAILED` and `STALE`, but Package 1 has no
-trusted machine runner, signing key or attestation root. The validator therefore
-rejects every manifest-backed claim with
-`trusted_execution_attestation_unavailable`; a self-declared `PASSED` or
-`FAILED` receipt is not evidence. Package 6 must add a machine-produced trusted
-attestation before any of these states can be used.
+The grammar can represent `VERIFIED`, `FAILED` and `STALE`, but the current
+validator still unconditionally rejects every manifest-backed claim with
+`trusted_execution_attestation_unavailable`. That makes `READY`
+mathematically unreachable and is an S0 defect, not a reason to build Package 6.
+Replace the deadlock with a closed machine-produced receipt bound to the exact
+commit, tree, wheel, schema and named executable tests, plus an authenticated
+owner Telegram smoke where the journey crosses an external edge. A mutable,
+generic or self-declared `PASSED`/`FAILED` receipt remains non-evidence.
 
 The current validator performs structural preflight only. A manifest and its
 sanitized receipt must use their single deterministic privacy-safe paths derived
@@ -324,10 +337,12 @@ deployed source, tree, wheel and database schema, closed executable-test node ID
 and SHA-256 digests of Git-blob source bytes at the manifest source commit, never
 the mutable checkout. Closed allowlists forbid raw content, people,
 conversations, prompts, responses, runtime paths, tool arguments, test bodies and
-logs. `READY` requires every applicable class to be current `VERIFIED`. Obsidian
-remains `UNVERIFIED` without current physical Android evidence, unless current
-`FAILED` evidence makes it honestly `BLOCKED`. There are no decisive or `READY`
-claims at this checkpoint.
+logs. `READY` requires every applicable journey class to be current `VERIFIED`
+under that replacement rule; generic release/rollback/backup proof stays at
+release level instead of being copied into every row. Obsidian remains
+`UNVERIFIED` without current physical Android evidence, unless current `FAILED`
+evidence makes it honestly `BLOCKED`. There are no decisive or `READY` claims at
+this checkpoint.
 
 | Journey ID | Journey | Readiness | deterministic contract | integration path | clean artifact path | synthetic live path | production read-only observation | physical device evidence | restart and recovery evidence | rollback evidence | backup and restore evidence | Limitation codes |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|
