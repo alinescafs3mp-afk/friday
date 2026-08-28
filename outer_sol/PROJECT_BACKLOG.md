@@ -1,6 +1,6 @@
 # Friday: canonical project backlog
 
-Updated: 2026-08-28
+Updated: 2026-08-29
 
 This is the project's only backlog and mutable status register. It owns the
 current production identity, execution order, acceptance gaps and owner actions.
@@ -14,16 +14,17 @@ either merged here or discarded before that source is removed.
 ## Current production identity
 
 - Branch: `main`
-- Deployed implementation head: `b633ca7a1b3c8165c707c147b88112e58fca0379`
-- Live: Friday `0.207.65` / `b633ca7a1b3c8165c707c147b88112e58fca0379`;
-  tree `77fd335e5eb72b02084c5e3c22913040668f49aeb2bff8271346d5ef43610e6d`;
-  wheel `739721a070cdd0aa94ed0917e050031058a1eda58498a58f36fed646a3dd720b`.
-- Schema-capable fallback: Friday `0.207.65rc0` /
-  `a69362c32a2d4b438a548966aa6f79091126e2ee`; runtime predecessor Friday
-  `0.207.64` / `c78b8ca2ac959efdbe06aa0fe81d87270bcd35c0`.
+- Deployed implementation head: `f93c0fcfae9a906210cd0594c20320866d99ecb7`
+- Live: Friday `0.207.67` / `f93c0fcfae9a906210cd0594c20320866d99ecb7`;
+  tree `1973acc092a8eab53a03e4adad1e725f351d5917aca01b0d46d1393cf8060d51`;
+  wheel `52cafcfbc17f1347690fda30fc534206d3f4cde973e5d132ae87bdf7cb4c859e`.
+- Schema-capable fallback and immediate runtime predecessor: Friday
+  `0.207.66rc0` / `a2da359298b7ea1ba216a566dc4ad2137ba599d3`;
+  tree `75775d98e0fa7a758392928d079c22316d68d72a8d48a9658c4a4ae22fc544a4`.
 - Database schema: 46
 - Production: immutable activation `clear`; backend and Telegram bridge active;
-  trusted-CA health `200`; SQLite integrity and foreign keys clean.
+  trusted-CA health `200`; V12 `canary_ready`; signed private-owner Engineer
+  smoke completed one installed command with an authenticated terminal receipt.
 - Secondary: accepted/live GPT-OSS profile `gptoss20b-2335df…`; bounded
   document-map/current-document assist only. The primary remains sole tool,
   effect and final-publication owner; secondary absence preserves primary-only
@@ -31,19 +32,11 @@ either merged here or discarded before that source is removed.
 
 ## Active package
 
-Finish and release the already-developed restart-safe `EngineerWorkItem v1`
-continuation as the last journey-specific work store before the shared turn
-contract. The package is deliberately narrow: fail closed to `UNKNOWN` on
-command-ledger loss or rollback; bind code-owned source slots so dependent
-same-message commands remain distinct; inject one authenticated observed
-terminal receipt into one bounded `replan → next step or final` turn; publish
-completion atomically with the Work Item CAS. Never persist prompt, reasoning,
-argv, path or output bodies and never replay `RUNNING`/`UNKNOWN` blindly.
-
-Acceptance remains a distinct schema-capable fallback, native full gate,
-immutable rollback rehearsal and one benign signed owner smoke. After this
-package, no new parallel work store may be added until the shared `TurnContext`
-contract exists.
+Land S2 `AuthenticatedTurnContext` as the smallest shared turn contract over
+the existing `orchestration.contracts.TurnInput`. SolGoodman owns its new
+contract/test files; Mainline Owner owns review, integration and release after
+handoff. Do not create a parallel implementation or expand the released S1
+surface while that package is in flight.
 
 ## Operating rules
 
@@ -145,21 +138,18 @@ reasoning for complex plan/replan turns. Progress delivery is advisory and
 cannot duplicate task execution; execution/status/final phases remain
 no-thinking, and no approval rail was reintroduced.
 
-P1B foundation is deployed dormant in `0.207.65`; remaining work is restart-safe
-runtime continuation across messages. Activate one
-journey-specific `EngineerWorkItem v1`, not a generic WorkGraph: persist only
-owner/conversation/source identity, revision/state, code-owned step ordinal,
-idempotency key and command/terminal receipt digests. A fresh authenticated
-follow-up may inject the exact observed terminal receipt into one bounded
-`replan → next step or final` turn. Never persist prompt/CoT/argv/output/path,
-never blindly replay `RUNNING/UNKNOWN`, and publish completion atomically with
-the Work Item CAS. Before activation, make the independent command ledger
-fail-closed against loss/rollback and bind a code-owned source slot so dependent
-same-message commands remain possible without replay ambiguity.
+P1B `EngineerWorkItem v1` is live in `0.207.67`: restart-safe continuation,
+independent-ledger reconciliation, code-owned dependent-command source slots,
+exact Work Item/fence/job/terminal-receipt binding, bounded replan and atomic
+final Work Item CAS publication are active. Durable Work Items contain no
+prompt, CoT, argv, output or path bodies; `RUNNING`/`UNKNOWN` is never replayed
+blindly. Backup/restore and schema-capable fallback were admitted before the
+signed owner smoke.
 
 ### S0 — freeze the constructor
 
-Status: active architectural ratchet.
+Status: enforced architectural ratchet; exact-release evidence defect closed in
+`0.207.67`.
 
 - Do not start another journey-specific store, generic WorkGraph, Host Control
   expansion, closed compiler catalog, MCP platform, sensitive-data plane,
@@ -168,21 +158,25 @@ Status: active architectural ratchet.
 - Keep the shipped Supervisor foundation and accepted
   `gptoss20b-2335df…` profile; do not build a second release PKI, effect owner
   or post-commit observer around them.
-- Replace the golden-journey validator's impossible unconditional trusted-root
-  rejection with exact-release machine evidence from named executable tests
-  and an authenticated owner Telegram smoke where an external edge exists.
-  A mutable or self-declared receipt is never `VERIFIED`.
+- Keep the released exact-release validator bound to named executable tests and
+  an authenticated owner Telegram smoke where an external edge exists. A
+  mutable or self-declared receipt is never `VERIFIED`.
 - Do not salvage stale feature branches wholesale.
 
 ### S1 — finish Engineer continuation
 
-Status: active package; the implementation is already substantially complete.
+Status: deployed in `0.207.67`.
 
-- Close ledger-loss/rollback, source-slot, restart, publication and backup/
-  restore invariants described in Active package.
-- Build and retain a distinct schema-capable fallback, run the native gate,
-  rehearse activation rollback and execute one benign signed owner smoke.
+- Preserve the released ledger-loss/rollback, source-slot, restart,
+  publication and backup/restore invariants.
+- Retain the distinct schema-capable fallback and keep the focused/native gates
+  plus one benign signed owner smoke release-blocking.
 - Do not add a generic graph, model-authored persistence or a new approval rail.
+
+Acceptance: 1,652 focused tests; native gate 23,021 Python plus 31 UI tests;
+static gate clear; two independently built wheels were byte-identical; immutable
+activation, authenticated backup boundary, schema-capable fallback and signed
+private-owner command smoke all cleared.
 
 ### S2 — one turn nervous system
 
@@ -300,13 +294,11 @@ Estimate: 4–8 clean-work days after S2, released incrementally.
 ## First 24 clean-work hours
 
 1. Keep the deployed P0/P1 production paths green.
-2. Finish, certify, release and smoke `EngineerWorkItem v1` as one reversible
-   package; do not expand its scope.
-3. Define and land the smallest existing-`TurnInput`-based S2 seam, including a
+2. Keep released `EngineerWorkItem v1` stable; do not expand its scope.
+3. Review and land the smallest existing-`TurnInput`-based S2 seam, including a
    single turn ID and pending-work owner, before adding Supervisor behavior.
-4. Begin the bounded S3 advisor path only through that seam. In parallel,
-   replace the golden-registry trusted-root deadlock without accepting mutable
-   or self-declared evidence.
+4. Begin the bounded S3 advisor path only through that seam. Preserve the
+   released exact-evidence verifier and reject mutable or self-declared proof.
 
 ## Canonical golden-journey/evidence registry
 
@@ -321,28 +313,25 @@ journey-specific contract, executable test or runbook exists, not that the
 complete journey passed. Generic release, rollback and backup tests are not
 journey evidence.
 
-The grammar can represent `VERIFIED`, `FAILED` and `STALE`, but the current
-validator still unconditionally rejects every manifest-backed claim with
-`trusted_execution_attestation_unavailable`. That makes `READY`
-mathematically unreachable and is an S0 defect, not a reason to build Package 6.
-Replace the deadlock with a closed machine-produced receipt bound to the exact
-commit, tree, wheel, schema and named executable tests, plus an authenticated
-owner Telegram smoke where the journey crosses an external edge. A mutable,
-generic or self-declared `PASSED`/`FAILED` receipt remains non-evidence.
+The validator now admits only a closed machine-produced receipt bound to the
+exact commit, tree, wheel, schema and named executable tests, plus an
+authenticated owner Telegram smoke where the journey crosses an external edge.
+Public validation independently reruns the closed test inventory from the exact
+source commit and rejects forged or mutable `PASSED`/`FAILED` outcomes even when
+their surrounding manifest digests are recomputed.
 
-The current validator performs structural preflight only. A manifest and its
-sanitized receipt must use their single deterministic privacy-safe paths derived
-from journey, class, result and the full release identity. They bind the exact
-deployed source, tree, wheel and database schema, closed executable-test node IDs,
-and SHA-256 digests of Git-blob source bytes at the manifest source commit, never
-the mutable checkout. Closed allowlists forbid raw content, people,
-conversations, prompts, responses, runtime paths, tool arguments, test bodies and
-logs. `READY` requires every applicable journey class to be current `VERIFIED`
-under that replacement rule; generic release/rollback/backup proof stays at
-release level instead of being copied into every row. Obsidian remains
-`UNVERIFIED` without current physical Android evidence, unless current `FAILED`
-evidence makes it honestly `BLOCKED`. There are no decisive or `READY` claims at
-this checkpoint.
+A manifest and its sanitized receipt must use their single deterministic
+privacy-safe paths derived from journey, class, result and the full release
+identity. They bind the exact deployed source, tree, wheel and database schema,
+closed executable-test node IDs, independently observed outcomes and SHA-256
+digests of Git-blob source bytes at the manifest source commit, never the
+mutable checkout. Closed allowlists forbid raw content, people, conversations,
+prompts, responses, runtime paths, tool arguments, test bodies and logs. `READY`
+requires every applicable journey class to be current `VERIFIED`; generic
+release/rollback/backup proof stays at release level instead of being copied
+into every row. Obsidian remains `UNVERIFIED` without current physical Android
+evidence, unless current `FAILED` evidence makes it honestly `BLOCKED`. There
+are no decisive or `READY` claims at this checkpoint.
 
 | Journey ID | Journey | Readiness | deterministic contract | integration path | clean artifact path | synthetic live path | production read-only observation | physical device evidence | restart and recovery evidence | rollback evidence | backup and restore evidence | Limitation codes |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|
