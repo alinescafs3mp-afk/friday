@@ -14,6 +14,8 @@ import subprocess
 import sys
 import tempfile
 import xml.etree.ElementTree as ET
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path, PurePosixPath
@@ -29,6 +31,11 @@ from tools import quality_gate  # noqa: E402
 RECEIPT_SCHEMA = "friday.golden-journey-sanitized-receipt.v2"
 PRODUCER_PATH = "tools/exact_release_evidence.py"
 PYTEST_TIMEOUT_SECONDS = 900
+_PYTEST_BOOTSTRAP = (
+    "import pathlib,sys; "
+    "root=str(pathlib.Path(sys.argv.pop(1)).resolve(strict=True)); "
+    "sys.path.insert(0,root); import pytest; raise SystemExit(pytest.main(sys.argv[1:]))"
+)
 
 ENVIRONMENT_BY_CLASS = {
     "deterministic contract": "deterministic_contract",
@@ -216,6 +223,20 @@ _RECEIPT_FIELDS = frozenset(
 
 class ExactReleaseEvidenceError(ValueError):
     """One closed validation or production failure."""
+
+
+_EXECUTION_WITNESS_AUTHORITY = object()
+
+
+@dataclass(frozen=True, slots=True)
+class _ExecutionWitness:
+    """Process-local proof returned only by the closed pytest runner."""
+
+    outcomes: tuple[str, ...]
+    exit_code: int
+    collection_sha256: str
+    outcome_projection_sha256: str
+    authority: object
 
 
 @dataclass(frozen=True, slots=True)
@@ -509,13 +530,8 @@ def _require_exact_checkout(repo_root: Path, commit: str) -> None:
     _require_neutralized_ignored_files(repo_root)
 
 
-def _source_proofs(
-    repo_root: Path,
-    identity: ReleaseIdentity,
-    journey_id: str,
-    evidence_class: str,
-) -> tuple[str, list[dict[str, str]]]:
-    producer_blob = _exact_git_blob(repo_root, identity.source_commit, PRODUCER_PATH)
+def _require_running_producer(repo_root: Path, commit: str) -> None:
+    producer_blob = _exact_git_blob(repo_root, commit, PRODUCER_PATH)
     producer_path = repo_root / PRODUCER_PATH
     try:
         producer_bytes = producer_path.read_bytes()
@@ -525,6 +541,73 @@ def _source_proofs(
         raise ExactReleaseEvidenceError("producer_source_invalid") from exc
     if running_producer != repository_producer or producer_bytes != producer_blob:
         raise ExactReleaseEvidenceError("producer_source_invalid")
+
+
+@contextmanager
+def _validation_source_checkout(
+    repo_root: Path,
+    source_commit: str,
+) -> Iterator[tuple[Path, bool]]:
+    """Yield an exact source tree while keeping a later validator HEAD valid."""
+
+    root = _resolve_directory(repo_root, "repo_root_invalid")
+    try:
+        current_head = _git(root, "rev-parse", "--verify", "HEAD^{commit}").decode("ascii").strip()
+    except UnicodeError as exc:
+        raise ExactReleaseEvidenceError("git_identity_unavailable") from exc
+    if _COMMIT.fullmatch(current_head) is None:
+        raise ExactReleaseEvidenceError("git_identity_unavailable")
+    _require_exact_checkout(root, current_head)
+    _require_running_producer(root, current_head)
+    if current_head == source_commit:
+        yield root, True
+        return
+    if _COMMIT.fullmatch(source_commit) is None:
+        raise ExactReleaseEvidenceError("release_identity_invalid")
+
+    try:
+        with tempfile.TemporaryDirectory(prefix="friday-exact-source-") as temporary:
+            detached = Path(temporary) / "repository"
+            _git(
+                root,
+                "-c",
+                "core.hooksPath=/dev/null",
+                "clone",
+                "--quiet",
+                "--shared",
+                "--no-checkout",
+                "--",
+                str(root),
+                str(detached),
+            )
+            _git(
+                detached,
+                "-c",
+                "core.hooksPath=/dev/null",
+                "checkout",
+                "--quiet",
+                "--detach",
+                source_commit,
+            )
+            _require_exact_checkout(detached, source_commit)
+            yield detached, False
+    except (OSError, RuntimeError) as exc:
+        if isinstance(exc, ExactReleaseEvidenceError):
+            raise
+        raise ExactReleaseEvidenceError("source_checkout_unavailable") from exc
+
+
+def _source_proofs(
+    repo_root: Path,
+    identity: ReleaseIdentity,
+    journey_id: str,
+    evidence_class: str,
+    *,
+    require_running_producer: bool = True,
+) -> tuple[str, list[dict[str, str]]]:
+    producer_blob = _exact_git_blob(repo_root, identity.source_commit, PRODUCER_PATH)
+    if require_running_producer:
+        _require_running_producer(repo_root, identity.source_commit)
     proofs = []
     for test_ref in proof_refs(journey_id, evidence_class):
         source = _test_source(repo_root, identity.source_commit, test_ref)
@@ -577,20 +660,80 @@ def _pytest_outcomes(report_path: Path, expected: tuple[str, ...]) -> tuple[str,
     return tuple(outcomes[nodeid] for nodeid in expected)
 
 
+def _execution_witness(
+    outcomes: tuple[str, ...],
+    exit_code: int,
+    collection_sha256: str,
+    outcome_projection_sha256: str,
+) -> _ExecutionWitness:
+    if (
+        type(outcomes) is not tuple
+        or not outcomes
+        or any(outcome not in {"PASSED", "FAILED"} for outcome in outcomes)
+        or type(exit_code) is not int
+        or exit_code != (0 if all(outcome == "PASSED" for outcome in outcomes) else 1)
+        or type(collection_sha256) is not str
+        or type(outcome_projection_sha256) is not str
+        or _SHA256.fullmatch(collection_sha256) is None
+        or _SHA256.fullmatch(outcome_projection_sha256) is None
+    ):
+        raise ExactReleaseEvidenceError("pytest_execution_evidence_invalid")
+    return _ExecutionWitness(
+        outcomes,
+        exit_code,
+        collection_sha256,
+        outcome_projection_sha256,
+        _EXECUTION_WITNESS_AUTHORITY,
+    )
+
+
+def _require_execution_witness(value: object) -> _ExecutionWitness:
+    if type(value) is not _ExecutionWitness or value.authority is not _EXECUTION_WITNESS_AUTHORITY:
+        raise ExactReleaseEvidenceError("pytest_execution_evidence_invalid")
+    return _execution_witness(
+        value.outcomes,
+        value.exit_code,
+        value.collection_sha256,
+        value.outcome_projection_sha256,
+    )
+
+
+def _outcome_projection_sha256(nodeids: tuple[str, ...], outcomes: tuple[str, ...]) -> str:
+    """Hash the deterministic outcome projection derived from strict JUnit."""
+
+    return hashlib.sha256(
+        canonical_json_bytes(
+            {
+                "nodeids": list(nodeids),
+                "outcomes": list(outcomes),
+                "version": 1,
+            }
+        )
+    ).hexdigest()
+
+
 def _run_closed_pytest(
     repo_root: Path,
     identity: ReleaseIdentity,
     journey_id: str,
     evidence_class: str,
-) -> tuple[tuple[str, ...], int, str, str]:
+    *,
+    require_running_producer: bool = True,
+) -> _ExecutionWitness:
     nodeids = proof_refs(journey_id, evidence_class)
     _require_exact_checkout(repo_root, identity.source_commit)
-    _source_proofs(repo_root, identity, journey_id, evidence_class)
+    _source_proofs(
+        repo_root,
+        identity,
+        journey_id,
+        evidence_class,
+        require_running_producer=require_running_producer,
+    )
     run_error: BaseException | None = None
     result: subprocess.CompletedProcess[bytes] | None = None
     outcomes: tuple[str, ...] = ()
     collection_sha256 = ""
-    junit_sha256 = ""
+    outcome_projection_sha256 = ""
     try:
         with tempfile.TemporaryDirectory(prefix="friday-exact-evidence-") as temporary:
             scratch = Path(temporary)
@@ -607,8 +750,9 @@ def _run_closed_pytest(
                         "-I",
                         "-X",
                         f"pycache_prefix={python_cache}",
-                        "-m",
-                        "pytest",
+                        "-c",
+                        _PYTEST_BOOTSTRAP,
+                        str(repo_root),
                         "-q",
                         "-o",
                         "addopts=",
@@ -639,7 +783,7 @@ def _run_closed_pytest(
             try:
                 collected = quality_gate.collection_nodeids(collection)
                 collection_raw = collection.read_bytes()
-                report_raw = report.read_bytes()
+                report.read_bytes()
             except (OSError, RuntimeError, ValueError) as exc:
                 raise ExactReleaseEvidenceError("pytest_collection_invalid") from exc
             if collected != nodeids:
@@ -649,18 +793,29 @@ def _run_closed_pytest(
             if result.returncode != expected_code:
                 raise ExactReleaseEvidenceError("pytest_exit_invalid")
             collection_sha256 = hashlib.sha256(collection_raw).hexdigest()
-            junit_sha256 = hashlib.sha256(report_raw).hexdigest()
+            outcome_projection_sha256 = _outcome_projection_sha256(nodeids, outcomes)
     except (OSError, subprocess.SubprocessError, RuntimeError, ExactReleaseEvidenceError) as exc:
         run_error = exc
     finally:
         _require_exact_checkout(repo_root, identity.source_commit)
-        _source_proofs(repo_root, identity, journey_id, evidence_class)
+        _source_proofs(
+            repo_root,
+            identity,
+            journey_id,
+            evidence_class,
+            require_running_producer=require_running_producer,
+        )
     if run_error is not None:
         if isinstance(run_error, ExactReleaseEvidenceError):
             raise run_error
         raise ExactReleaseEvidenceError("pytest_execution_failed") from run_error
     assert result is not None
-    return outcomes, result.returncode, collection_sha256, junit_sha256
+    return _execution_witness(
+        outcomes,
+        result.returncode,
+        collection_sha256,
+        outcome_projection_sha256,
+    )
 
 
 def _canonical_utc_now() -> str:
@@ -681,21 +836,19 @@ def _produce_for_identity(
     owner_smoke_payload = _owner_smoke_payload(owner_smoke)
     root = _resolve_directory(repo_root, "repo_root_invalid")
     producer_sha256, proofs = _source_proofs(root, identity, journey_id, evidence_class)
-    outcomes, exit_code, collection_sha256, junit_sha256 = _run_closed_pytest(
-        root, identity, journey_id, evidence_class
-    )
-    for proof, outcome in zip(proofs, outcomes, strict=True):
+    witness = _run_closed_pytest(root, identity, journey_id, evidence_class)
+    for proof, outcome in zip(proofs, witness.outcomes, strict=True):
         proof["outcome"] = outcome
-    result = "VERIFIED" if all(outcome == "PASSED" for outcome in outcomes) else "FAILED"
+    result = "VERIFIED" if witness.exit_code == 0 else "FAILED"
     receipt = {
         "$schema": RECEIPT_SCHEMA,
         "check_ids": _check_ids(journey_id, evidence_class),
         "environment": ENVIRONMENT_BY_CLASS[evidence_class],
         "evidence_class": evidence_class,
         "execution": {
-            "collection_sha256": collection_sha256,
-            "exit_code": exit_code,
-            "junit_sha256": junit_sha256,
+            "collection_sha256": witness.collection_sha256,
+            "exit_code": witness.exit_code,
+            "outcome_projection_sha256": witness.outcome_projection_sha256,
             "producer_path": PRODUCER_PATH,
             "producer_source_sha256": producer_sha256,
             "runner": "pytest",
@@ -708,18 +861,19 @@ def _produce_for_identity(
         "result": result,
     }
     raw = canonical_json_bytes(receipt)
-    validate_receipt(
+    _validate_receipt(
         raw,
         expected_release=identity,
         expected_journey_id=journey_id,
         expected_evidence_class=evidence_class,
         repo_root=root,
         authenticated_owner_smoke=owner_smoke,
+        execution_witness=witness,
     )
     return raw
 
 
-def validate_receipt(
+def _validate_receipt(
     raw: bytes,
     *,
     expected_release: ReleaseIdentity,
@@ -727,6 +881,8 @@ def validate_receipt(
     expected_evidence_class: str,
     repo_root: Path,
     authenticated_owner_smoke: AuthenticatedOwnerSmokeBinding | None = None,
+    execution_witness: _ExecutionWitness | None = None,
+    require_running_producer: bool = True,
 ) -> dict[str, Any]:
     """Validate against external release and already-authenticated owner roots.
 
@@ -742,6 +898,7 @@ def validate_receipt(
         expected_release,
         expected_journey_id,
         expected_evidence_class,
+        require_running_producer=require_running_producer,
     )
     value = _load_canonical_receipt(raw)
     if set(value) != _RECEIPT_FIELDS:
@@ -772,7 +929,7 @@ def validate_receipt(
     execution_fields = {
         "collection_sha256",
         "exit_code",
-        "junit_sha256",
+        "outcome_projection_sha256",
         "producer_path",
         "producer_source_sha256",
         "runner",
@@ -785,7 +942,7 @@ def validate_receipt(
         or execution.get("producer_source_sha256") != expected_producer_sha256
         or execution.get("runner") != "pytest"
         or execution.get("collection_sha256") != hashlib.sha256(expected_collection).hexdigest()
-        or _SHA256.fullmatch(str(execution.get("junit_sha256") or "")) is None
+        or _SHA256.fullmatch(str(execution.get("outcome_projection_sha256") or "")) is None
         or type(execution.get("exit_code")) is not int
         or execution.get("exit_code") not in {0, 1}
     ):
@@ -814,6 +971,11 @@ def validate_receipt(
     derived_exit = 0 if derived_result == "VERIFIED" else 1
     if value.get("result") != derived_result or execution.get("exit_code") != derived_exit:
         raise ExactReleaseEvidenceError("result_not_machine_derived")
+    if execution.get("outcome_projection_sha256") != _outcome_projection_sha256(
+        refs,
+        tuple(outcomes),
+    ):
+        raise ExactReleaseEvidenceError("execution_evidence_mismatch")
 
     expected_smoke = _owner_smoke_payload(authenticated_owner_smoke)
     embedded_smoke = value.get("owner_smoke")
@@ -824,7 +986,54 @@ def validate_receipt(
         or set(embedded_smoke) != {"artifact_ref", "artifact_sha256", "authority", "schema"}
     ):
         raise ExactReleaseEvidenceError("owner_smoke_binding_invalid")
+
+    witness = (
+        _run_closed_pytest(
+            root,
+            expected_release,
+            expected_journey_id,
+            expected_evidence_class,
+            require_running_producer=require_running_producer,
+        )
+        if execution_witness is None
+        else execution_witness
+    )
+    witness = _require_execution_witness(witness)
+    if (
+        tuple(outcomes) != witness.outcomes
+        or execution.get("exit_code") != witness.exit_code
+        or execution.get("collection_sha256") != witness.collection_sha256
+        or execution.get("outcome_projection_sha256") != witness.outcome_projection_sha256
+        or witness.outcome_projection_sha256 != _outcome_projection_sha256(refs, witness.outcomes)
+    ):
+        raise ExactReleaseEvidenceError("execution_evidence_mismatch")
     return value
+
+
+def validate_receipt(
+    raw: bytes,
+    *,
+    expected_release: ReleaseIdentity,
+    expected_journey_id: str,
+    expected_evidence_class: str,
+    repo_root: Path,
+    authenticated_owner_smoke: AuthenticatedOwnerSmokeBinding | None = None,
+) -> dict[str, Any]:
+    """Validate structure, then independently rerun the exact closed inventory."""
+
+    with _validation_source_checkout(repo_root, expected_release.source_commit) as (
+        source_root,
+        require_running_producer,
+    ):
+        return _validate_receipt(
+            raw,
+            expected_release=expected_release,
+            expected_journey_id=expected_journey_id,
+            expected_evidence_class=expected_evidence_class,
+            repo_root=source_root,
+            authenticated_owner_smoke=authenticated_owner_smoke,
+            require_running_producer=require_running_producer,
+        )
 
 
 def _stable_file(path: Path, maximum_bytes: int) -> bytes:

@@ -97,11 +97,19 @@ def _produce(
         identity: evidence.ReleaseIdentity,
         journey_id: str,
         evidence_class: str,
-    ) -> tuple[tuple[str, ...], int, str, str]:
+        *,
+        require_running_producer: bool = True,
+    ) -> evidence._ExecutionWitness:  # noqa: SLF001 - exact internal producer witness
         assert repo_root == repository.root
         assert identity == repository.identity
         assert (journey_id, evidence_class) == (JOURNEY_ID, EVIDENCE_CLASS)
-        return outcomes, exit_code, _collection_sha256(repository.refs), "c" * 64
+        assert require_running_producer is True
+        return evidence._execution_witness(  # noqa: SLF001 - code-owned test boundary
+            outcomes,
+            exit_code,
+            _collection_sha256(repository.refs),
+            evidence._outcome_projection_sha256(repository.refs, outcomes),  # noqa: SLF001
+        )
 
     monkeypatch.setattr(evidence, "_run_closed_pytest", execute_closed_inventory)
     return evidence._produce_for_identity(
@@ -196,6 +204,7 @@ def test_public_api_and_cli_have_no_caller_supplied_outcome() -> None:
     forbidden = {"result", "outcome", "outcomes", "exit_code"}
     for function in (evidence._produce_for_identity, evidence.produce_receipt):
         assert forbidden.isdisjoint(inspect.signature(function).parameters)
+    assert "execution_witness" not in inspect.signature(evidence.validate_receipt).parameters
 
     arguments = [
         "run",
@@ -326,9 +335,9 @@ def test_strict_junit_rejects_incomplete_or_non_test_failure_reports(
 ) -> None:
     one = "tests/test_machine.py::test_one"
     two = "tests/test_machine.py::test_two"
-    expected = (one, two)
-    nodeids = expected
-    outcomes = ("passed", "passed")
+    expected: tuple[str, ...] = (one, two)
+    nodeids: tuple[str, ...] = expected
+    outcomes: tuple[str, ...] = ("passed", "passed")
     if case == "missing":
         nodeids, outcomes = (one,), ("passed",)
     elif case == "extra":
@@ -414,9 +423,13 @@ def test_closed_runner_uses_hermetic_plugins_and_exact_collection(
     monkeypatch.setattr(evidence.quality_gate, "_isolated_test_environment", isolated_environment)
     monkeypatch.setattr(evidence.subprocess, "run", run_pytest)
     monkeypatch.setattr(evidence, "_require_exact_checkout", lambda *_arguments: None)
-    monkeypatch.setattr(evidence, "_source_proofs", lambda *_arguments: ("0" * 64, []))
+    monkeypatch.setattr(
+        evidence,
+        "_source_proofs",
+        lambda *_arguments, **_keywords: ("0" * 64, []),
+    )
 
-    outcomes, exit_code, collection_sha256, junit_sha256 = evidence._run_closed_pytest(
+    witness = evidence._run_closed_pytest(
         tmp_path,
         identity,
         JOURNEY_ID,
@@ -433,8 +446,9 @@ def test_closed_runner_uses_hermetic_plugins_and_exact_collection(
         "-I",
         "-X",
         f"pycache_prefix={python_cache}",
-        "-m",
-        "pytest",
+        "-c",
+        evidence._PYTEST_BOOTSTRAP,  # noqa: SLF001 - exact code-first launcher
+        str(tmp_path),
         "-q",
         "-o",
         "addopts=",
@@ -453,6 +467,7 @@ def test_closed_runner_uses_hermetic_plugins_and_exact_collection(
     )
     dynamic_options = command[len(expected_prefix) : -len(refs)]
     assert command[: len(expected_prefix)] == expected_prefix
+    assert "sys.path.insert(0,root)" in evidence._PYTEST_BOOTSTRAP  # noqa: SLF001
     assert len(dynamic_options) == 3
     assert dynamic_options[0].startswith("--junitxml=")
     assert dynamic_options[1].startswith("--friday-collection-manifest=")
@@ -465,11 +480,14 @@ def test_closed_runner_uses_hermetic_plugins_and_exact_collection(
             "SENTINEL": "preserved",
         }
     ]
-    assert outcomes == ("PASSED",) * len(refs)
-    assert exit_code == 0
+    assert witness.outcomes == ("PASSED",) * len(refs)
+    assert witness.exit_code == 0
     expected_collection = evidence.canonical_json_bytes({"nodeids": list(refs), "version": 1})
-    assert collection_sha256 == hashlib.sha256(expected_collection).hexdigest()
-    assert len(junit_sha256) == 64
+    assert witness.collection_sha256 == hashlib.sha256(expected_collection).hexdigest()
+    assert witness.outcome_projection_sha256 == evidence._outcome_projection_sha256(  # noqa: SLF001
+        refs,
+        witness.outcomes,
+    )
 
     manifest_refs[0] = refs[:-1]
     with pytest.raises(evidence.ExactReleaseEvidenceError, match="^pytest_collection_invalid$"):
@@ -536,6 +554,96 @@ def test_validator_binds_all_four_exact_release_fields(
             expected_evidence_class=EVIDENCE_CLASS,
             repo_root=exact_repository.root,
         )
+
+
+def test_validator_reexecutes_and_rejects_failed_to_passed_projection_tamper(
+    exact_repository: ExactRepository,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    machine_outcomes = tuple(
+        "FAILED" if index == 0 else "PASSED" for index, _ref in enumerate(exact_repository.refs)
+    )
+    receipt = _payload(_produce(exact_repository, monkeypatch, outcomes=machine_outcomes))
+    execution = receipt["execution"]
+    proofs = receipt["proofs"]
+    assert isinstance(execution, dict)
+    assert isinstance(proofs, list)
+    failed_projection_sha256 = execution["outcome_projection_sha256"]
+
+    for proof in proofs:
+        assert isinstance(proof, dict)
+        proof["outcome"] = "PASSED"
+    receipt["result"] = "VERIFIED"
+    execution["exit_code"] = 0
+
+    for projection_sha256 in (
+        failed_projection_sha256,
+        evidence._outcome_projection_sha256(  # noqa: SLF001 - adversarial exact projection
+            exact_repository.refs,
+            ("PASSED",) * len(exact_repository.refs),
+        ),
+    ):
+        execution["outcome_projection_sha256"] = projection_sha256
+        with pytest.raises(evidence.ExactReleaseEvidenceError, match="^execution_evidence_mismatch$"):
+            evidence.validate_receipt(
+                _canonical(receipt),
+                expected_release=exact_repository.identity,
+                expected_journey_id=JOURNEY_ID,
+                expected_evidence_class=EVIDENCE_CLASS,
+                repo_root=exact_repository.root,
+            )
+
+
+def test_validator_reruns_receipt_source_from_detached_checkout_after_later_head(
+    exact_repository: ExactRepository,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    raw = _produce(exact_repository, monkeypatch)
+    later = exact_repository.root / "docs/later-validator.txt"
+    later.parent.mkdir()
+    later.write_text("validator-only later commit\n", encoding="utf-8")
+    _git(exact_repository.root, "add", later.relative_to(exact_repository.root).as_posix())
+    _git(exact_repository.root, "commit", "-q", "-m", "later validator")
+    later_head = _git(exact_repository.root, "rev-parse", "HEAD")
+    assert later_head != exact_repository.identity.source_commit
+    observed: list[tuple[Path, str, bool]] = []
+
+    def rerun_detached(
+        source_root: Path,
+        identity: evidence.ReleaseIdentity,
+        journey_id: str,
+        evidence_class: str,
+        *,
+        require_running_producer: bool = True,
+    ) -> evidence._ExecutionWitness:  # noqa: SLF001 - exact external witness
+        assert source_root != exact_repository.root
+        assert identity == exact_repository.identity
+        assert (journey_id, evidence_class) == (JOURNEY_ID, EVIDENCE_CLASS)
+        detached_head = _git(source_root, "rev-parse", "HEAD")
+        assert detached_head == exact_repository.identity.source_commit
+        assert not (source_root / "docs/later-validator.txt").exists()
+        observed.append((source_root, detached_head, require_running_producer))
+        outcomes = ("PASSED",) * len(exact_repository.refs)
+        return evidence._execution_witness(  # noqa: SLF001 - code-owned test boundary
+            outcomes,
+            0,
+            _collection_sha256(exact_repository.refs),
+            evidence._outcome_projection_sha256(exact_repository.refs, outcomes),  # noqa: SLF001
+        )
+
+    monkeypatch.setattr(evidence, "_run_closed_pytest", rerun_detached)
+    validated = evidence.validate_receipt(
+        raw,
+        expected_release=exact_repository.identity,
+        expected_journey_id=JOURNEY_ID,
+        expected_evidence_class=EVIDENCE_CLASS,
+        repo_root=exact_repository.root,
+    )
+
+    assert validated["result"] == "VERIFIED"
+    assert len(observed) == 1
+    assert observed[0][1:] == (exact_repository.identity.source_commit, False)
+    assert not observed[0][0].exists()
 
 
 @pytest.mark.parametrize(

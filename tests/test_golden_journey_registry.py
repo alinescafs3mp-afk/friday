@@ -936,13 +936,21 @@ def _machine_manifest(
         release: exact_evidence.ReleaseIdentity,
         selected_journey: str,
         selected_class: str,
-    ) -> tuple[tuple[str, ...], int, str, str]:
+        *,
+        require_running_producer: bool = True,
+    ) -> exact_evidence._ExecutionWitness:  # noqa: SLF001 - exact internal witness
         assert source_root == ROOT
         assert release == exact_identity
         assert (selected_journey, selected_class) == (journey_id, evidence_class)
+        assert require_running_producer is True
         collection = exact_evidence.canonical_json_bytes({"nodeids": list(refs), "version": 1})
         exit_code = 0 if result == "VERIFIED" else 1
-        return outcomes, exit_code, hashlib.sha256(collection).hexdigest(), "c" * 64
+        return exact_evidence._execution_witness(  # noqa: SLF001 - code-owned test boundary
+            outcomes,
+            exit_code,
+            hashlib.sha256(collection).hexdigest(),
+            exact_evidence._outcome_projection_sha256(refs, outcomes),  # noqa: SLF001
+        )
 
     monkeypatch.setattr(exact_evidence, "_run_closed_pytest", run_closed_inventory)
     raw = exact_evidence._produce_for_identity(
@@ -1284,6 +1292,68 @@ def test_canonical_golden_journey_registry_is_closed_current_and_privacy_safe(
         repo_root=failed_root,
         expected_result="FAILED",
     )
+
+    forged_root = tmp_path / "forged-machine-result"
+    forged_failed_manifest, _forged_failed_manifest_ref = _machine_manifest(
+        machine_identity,
+        forged_root,
+        monkeypatch,
+        result="FAILED",
+    )
+    forged_failed_observation = forged_failed_manifest["observation"]
+    assert isinstance(forged_failed_observation, dict)
+    forged_failed_receipt = forged_root / str(forged_failed_observation["artifact_ref"])
+    forged_payload = json.loads(forged_failed_receipt.read_bytes())
+    forged_proofs = forged_payload["proofs"]
+    forged_execution = forged_payload["execution"]
+    assert isinstance(forged_proofs, list) and isinstance(forged_execution, dict)
+    for proof in forged_proofs:
+        assert isinstance(proof, dict)
+        proof["outcome"] = "PASSED"
+    forged_payload["result"] = "VERIFIED"
+    forged_execution["exit_code"] = 0
+    forged_execution["outcome_projection_sha256"] = exact_evidence._outcome_projection_sha256(  # noqa: SLF001
+        exact_evidence.proof_refs(manifest_journey_id, manifest_evidence_class),
+        ("PASSED",) * len(forged_proofs),
+    )
+    forged_bytes = _canonical_json_bytes(forged_payload)
+    forged_verified_ref = _expected_artifact_ref(
+        manifest_journey_id,
+        manifest_evidence_class,
+        "VERIFIED",
+        machine_identity,
+    )
+    forged_verified_path = forged_root / forged_verified_ref
+    forged_verified_path.parent.mkdir(parents=True, exist_ok=True)
+    forged_verified_path.write_bytes(forged_bytes)
+    forged_manifest = {
+        **forged_failed_manifest,
+        "result": "VERIFIED",
+        "observation": {
+            **forged_failed_observation,
+            "artifact_ref": forged_verified_ref,
+            "artifact_sha256": hashlib.sha256(forged_bytes).hexdigest(),
+        },
+    }
+    forged_manifest_ref = _expected_manifest_ref(
+        manifest_journey_id,
+        manifest_evidence_class,
+        "VERIFIED",
+        machine_identity,
+    )
+    with pytest.raises(
+        RegistryValidationError,
+        match="exact machine-produced evidence: execution_evidence_mismatch",
+    ):
+        _validate_manifest_payload(
+            forged_manifest,
+            manifest_ref=forged_manifest_ref,
+            journey_id=manifest_journey_id,
+            evidence_class=manifest_evidence_class,
+            current=machine_identity,
+            require_current=True,
+            repo_root=forged_root,
+        )
 
     leaked_receipt_root = tmp_path / "leaked-receipt"
     leaked_observation = dict(machine_manifest["observation"])
