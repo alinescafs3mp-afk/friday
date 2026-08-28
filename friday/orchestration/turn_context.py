@@ -40,6 +40,7 @@ from friday.permissions import ActorContext
 from friday.source_identity import (
     AuthorizedFileSnapshotToken,
     authorized_file_snapshot_token_is_process_owned,
+    raw_source_identity_sha256,
 )
 from friday.turn_intent_policy import (
     AttachmentDisposition,
@@ -97,6 +98,14 @@ class TurnMode(StrEnum):
     KNOWLEDGE_WORK = "knowledge_work"
     RESEARCH = "research"
     ENGINEER = "engineer"
+
+
+_MODE_TOOL_BUDGET_CEILINGS: dict[TurnMode, tuple[int, int]] = {
+    TurnMode.DIALOGUE: (4, 2),
+    TurnMode.KNOWLEDGE_WORK: (8, 3),
+    TurnMode.RESEARCH: (12, 5),
+    TurnMode.ENGINEER: (48, 24),
+}
 
 
 class AuthorizedSourceKind(StrEnum):
@@ -388,6 +397,7 @@ class AuthorizedSourceIdentity:
     ordinal: int | None
     turn_authority_sha256: str
     identity_sha256: str
+    model_descriptor_sha256: str | None
     private_carrier: object = field(repr=False, compare=False)
     _seal: _Seal = field(repr=False, compare=False)
 
@@ -395,10 +405,12 @@ class AuthorizedSourceIdentity:
         if type(self.kind) is not AuthorizedSourceKind:
             raise TurnContextError("authorized source kind must be closed")
         if self.kind is AuthorizedSourceKind.ACCEPTED_INGRESS:
-            if self.ordinal is not None:
-                raise TurnContextError("accepted ingress source cannot carry an attachment ordinal")
+            if self.ordinal is not None or self.model_descriptor_sha256 is not None:
+                raise TurnContextError("accepted ingress source cannot carry attachment authority")
         elif type(self.ordinal) is not int or not 1 <= self.ordinal <= 16:
             raise TurnContextError("attachment source ordinal is invalid")
+        else:
+            _digest(self.model_descriptor_sha256, label="authorized source model descriptor")
         _digest(self.turn_authority_sha256, label="source turn authority")
         _digest(self.identity_sha256, label="authorized source identity")
         _validate_seal(
@@ -415,6 +427,7 @@ class AuthorizedSourceIdentity:
             "ordinal": self.ordinal,
             "turn_authority_sha256": self.turn_authority_sha256,
             "identity_sha256": self.identity_sha256,
+            "model_descriptor_sha256": self.model_descriptor_sha256,
         }
 
 
@@ -538,11 +551,15 @@ class ModelAntiLoopBudget:
 @dataclass(frozen=True, slots=True)
 class TurnResourceBudget:
     max_tool_calls: int
+    max_tool_rounds: int
     max_advisory_calls: int
     max_output_tokens: int
 
     def __post_init__(self) -> None:
-        _bounded_int(self.max_tool_calls, label="tool call limit", minimum=0, maximum=64)
+        calls = _bounded_int(self.max_tool_calls, label="tool call limit", minimum=0, maximum=64)
+        rounds = _bounded_int(self.max_tool_rounds, label="tool round limit", minimum=0, maximum=32)
+        if (calls == 0) is not (rounds == 0) or rounds > calls:
+            raise TurnContextError("tool call and round limits are inconsistent")
         _bounded_int(self.max_advisory_calls, label="advisory call limit", minimum=0, maximum=16)
         _bounded_int(self.max_output_tokens, label="output token limit", minimum=1, maximum=1_000_000)
 
@@ -570,6 +587,7 @@ class InheritedTurnBudget:
         max_model_calls: int,
         max_model_retries: int,
         max_tool_calls: int,
+        max_tool_rounds: int,
         max_advisory_calls: int,
         max_output_tokens: int,
     ) -> InheritedTurnBudget:
@@ -583,14 +601,31 @@ class InheritedTurnBudget:
             _bounded_int(max_model_retries, label="child model retry limit", minimum=0, maximum=16),
             calls - 1,
         )
+        tool_calls = min(
+            self.resources.max_tool_calls,
+            _bounded_int(max_tool_calls, label="child tool call limit", minimum=0, maximum=64),
+        )
+        requested_tool_rounds = _bounded_int(
+            max_tool_rounds,
+            label="child tool round limit",
+            minimum=0,
+            maximum=32,
+        )
+        tool_rounds = (
+            0
+            if tool_calls == 0
+            else min(
+                self.resources.max_tool_rounds,
+                requested_tool_rounds,
+                tool_calls,
+            )
+        )
         return InheritedTurnBudget(
             deadline,
             ModelAntiLoopBudget(calls, retries),
             TurnResourceBudget(
-                min(
-                    self.resources.max_tool_calls,
-                    _bounded_int(max_tool_calls, label="child tool call limit", minimum=0, maximum=64),
-                ),
+                tool_calls,
+                tool_rounds,
                 min(
                     self.resources.max_advisory_calls,
                     _bounded_int(
@@ -622,6 +657,7 @@ class InheritedTurnBudget:
             },
             "resources": {
                 "max_tool_calls": self.resources.max_tool_calls,
+                "max_tool_rounds": self.resources.max_tool_rounds,
                 "max_advisory_calls": self.resources.max_advisory_calls,
                 "max_output_tokens": self.resources.max_output_tokens,
             },
@@ -710,6 +746,12 @@ def _source_sort_key(source: AuthorizedSourceIdentity) -> tuple[int, int, str, s
         source.kind.value,
         source.identity_sha256,
     )
+
+
+def _model_descriptor_sha256(descriptor: AttachmentDescriptor) -> str:
+    if type(descriptor) is not AttachmentDescriptor:
+        raise TurnContextError("authorized source requires the exact attachment descriptor")
+    return _sha256(descriptor.model_payload())
 
 
 def _validate_model_input(model_input: TurnInput) -> None:
@@ -967,6 +1009,14 @@ def _validate_source_set(context: AuthenticatedTurnContext) -> None:
     )
     if source_ordinals != input_ordinals:
         raise TurnContextError("authorized attachment identities differ from TurnInput attachments")
+    sources_by_ordinal = {
+        item.ordinal: item for item in sources if item.kind is not AuthorizedSourceKind.ACCEPTED_INGRESS
+    }
+    if any(
+        sources_by_ordinal[descriptor.ordinal].model_descriptor_sha256 != _model_descriptor_sha256(descriptor)
+        for descriptor in context.model_input.attachments
+    ):
+        raise TurnContextError("authorized attachment source differs from its TurnInput descriptor")
 
 
 def _validate_context_structure(context: AuthenticatedTurnContext) -> None:
@@ -996,6 +1046,16 @@ def _validate_context_structure(context: AuthenticatedTurnContext) -> None:
         or type(context.inherited_budget) is not InheritedTurnBudget
     ):
         raise TurnContextError("turn policy or inherited budget has an invalid type")
+    resources = context.inherited_budget.resources
+    tool_call_ceiling, tool_round_ceiling = _MODE_TOOL_BUDGET_CEILINGS[context.authority.interaction_mode]
+    if context.model_input.enable_tools:
+        if (
+            not 1 <= resources.max_tool_calls <= tool_call_ceiling
+            or not 1 <= resources.max_tool_rounds <= tool_round_ceiling
+        ):
+            raise TurnContextError("turn tool budget exceeds the admitted mode ceiling")
+    elif resources.max_tool_calls != 0 or resources.max_tool_rounds != 0:
+        raise TurnContextError("tools-disabled turn cannot carry a tool execution budget")
     if context.pending_work_admission is not None:
         if type(context.pending_work_admission) is not PendingWorkAdmission:
             raise TurnContextError("pending work admission binding is invalid")
@@ -1024,6 +1084,10 @@ def _validate_context_structure(context: AuthenticatedTurnContext) -> None:
         != context.authority.request_effect_binding_sha256
     ):
         raise TurnContextError("effect fence is not bound to the full turn authority")
+    if (
+        context.model_input.enable_tools or context.pending_work_admission is not None
+    ) and context.authority.request_effect_binding_sha256 is None:
+        raise TurnContextError("effect-capable turn requires the admitted request effect binding")
 
 
 @dataclass(frozen=True, slots=True, repr=False)
@@ -1187,6 +1251,7 @@ class TurnContextIssuer:
             authority=authority,
             kind=AuthorizedSourceKind.ACCEPTED_INGRESS,
             ordinal=None,
+            model_descriptor_sha256=None,
             private_carrier=authority,
             private_payload=private_payload,
         )
@@ -1203,6 +1268,9 @@ class TurnContextIssuer:
         token = current_turn_file_reference_of(carrier)
         if type(token) is not CurrentTurnFileReferenceToken:
             raise TurnContextError("current attachment source lacks a process-owned token")
+        if not isinstance(carrier, Mapping):
+            raise TurnContextError("current attachment source carrier is invalid")
+        descriptor_binding = _model_descriptor_sha256(AttachmentDescriptor.from_raw(carrier, ordinal=ordinal))
         private_payload = {
             "kind": AuthorizedSourceKind.CURRENT_ATTACHMENT.value,
             "turn_authority_sha256": authority.canonical_sha256(),
@@ -1211,11 +1279,13 @@ class TurnContextIssuer:
             "source_identity_sha256": token.source_identity_sha256,
             "content_sha256": token.content_sha256,
             "reinspect_current_upload": token.reinspect_current_upload,
+            "model_descriptor_sha256": descriptor_binding,
         }
         return self._issue_source(
             authority=authority,
             kind=AuthorizedSourceKind.CURRENT_ATTACHMENT,
             ordinal=ordinal,
+            model_descriptor_sha256=descriptor_binding,
             private_carrier=token,
             private_payload=private_payload,
         )
@@ -1226,11 +1296,22 @@ class TurnContextIssuer:
         authority: AuthenticatedIngressAuthority,
         ordinal: int,
         token: AuthorizedFileSnapshotToken,
+        raw_source: Mapping[str, object],
     ) -> AuthorizedSourceIdentity:
         self._require_authority(authority)
         ordinal = _bounded_int(ordinal, label="attachment source ordinal", minimum=1, maximum=16)
         if not authorized_file_snapshot_token_is_process_owned(token):
             raise TurnContextError("registered file source lacks a process-owned token")
+        if (
+            not isinstance(raw_source, Mapping)
+            or str(raw_source.get("id") or "").strip() != token.source.raw_id
+            or not hmac.compare_digest(raw_source_identity_sha256(raw_source), token.source.identity_sha256)
+            or str(raw_source.get("content_hash") or "").strip().casefold() != token.content_sha256
+        ):
+            raise TurnContextError("registered file source differs from its process-owned snapshot")
+        descriptor_binding = _model_descriptor_sha256(
+            AttachmentDescriptor.from_raw(raw_source, ordinal=ordinal)
+        )
         private_payload = {
             "kind": AuthorizedSourceKind.REGISTERED_FILE.value,
             "turn_authority_sha256": authority.canonical_sha256(),
@@ -1238,11 +1319,13 @@ class TurnContextIssuer:
             "raw_id": token.source.raw_id,
             "source_identity_sha256": token.source.identity_sha256,
             "content_sha256": token.content_sha256,
+            "model_descriptor_sha256": descriptor_binding,
         }
         return self._issue_source(
             authority=authority,
             kind=AuthorizedSourceKind.REGISTERED_FILE,
             ordinal=ordinal,
+            model_descriptor_sha256=descriptor_binding,
             private_carrier=token,
             private_payload=private_payload,
         )
@@ -1401,7 +1484,7 @@ class TurnContextIssuer:
                 component_ids=tuple(id(item) for item in components),
             ),
         )
-        return self.require_context(context)
+        return self.require_live_context(context, now_monotonic_ns=now)
 
     def require_context(self, context: AuthenticatedTurnContext) -> AuthenticatedTurnContext:
         """Reject exact-looking contexts minted by any other namespace/key."""
@@ -1430,6 +1513,25 @@ class TurnContextIssuer:
         if expected_effect_fence.payload() != context.effect_fence.payload():
             raise TurnContextError("effect fence binding is stale")
         return context
+
+    def require_live_context(
+        self,
+        context: AuthenticatedTurnContext,
+        *,
+        now_monotonic_ns: int,
+    ) -> AuthenticatedTurnContext:
+        """Authenticate a context and reject it once its parent deadline expires."""
+
+        admitted = self.require_context(context)
+        now = _bounded_int(
+            now_monotonic_ns,
+            label="current monotonic instant",
+            minimum=1,
+            maximum=_MAX_MONOTONIC_NS,
+        )
+        if admitted.inherited_budget.safety_deadline.monotonic_ns <= now:
+            raise TurnContextError("turn safety deadline has expired")
+        return admitted
 
     def _issue_conversation_admission(
         self,
@@ -1478,6 +1580,7 @@ class TurnContextIssuer:
         authority: AuthenticatedIngressAuthority,
         kind: AuthorizedSourceKind,
         ordinal: int | None,
+        model_descriptor_sha256: str | None,
         private_carrier: object,
         private_payload: Mapping[str, object],
     ) -> AuthorizedSourceIdentity:
@@ -1492,12 +1595,14 @@ class TurnContextIssuer:
             "ordinal": ordinal,
             "turn_authority_sha256": authority.canonical_sha256(),
             "identity_sha256": identity,
+            "model_descriptor_sha256": model_descriptor_sha256,
         }
         return AuthorizedSourceIdentity(
             kind=kind,
             ordinal=ordinal,
             turn_authority_sha256=authority.canonical_sha256(),
             identity_sha256=identity,
+            model_descriptor_sha256=model_descriptor_sha256,
             private_carrier=private_carrier,
             _seal=self._seal(
                 kind="authorized source",
@@ -1609,11 +1714,13 @@ class TurnContextIssuer:
                 "source_identity_sha256": token.source_identity_sha256,
                 "content_sha256": token.content_sha256,
                 "reinspect_current_upload": token.reinspect_current_upload,
+                "model_descriptor_sha256": source.model_descriptor_sha256,
             }
             expected = self._issue_source(
                 authority=authority,
                 kind=source.kind,
                 ordinal=source.ordinal,
+                model_descriptor_sha256=source.model_descriptor_sha256,
                 private_carrier=token,
                 private_payload=private_payload,
             )
@@ -1625,10 +1732,22 @@ class TurnContextIssuer:
                 token
             ):
                 raise TurnContextError("registered file source carrier is stale")
-            expected = self.registered_file_source(
+            private_payload = {
+                "kind": AuthorizedSourceKind.REGISTERED_FILE.value,
+                "turn_authority_sha256": authority.canonical_sha256(),
+                "ordinal": source.ordinal,
+                "raw_id": token.source.raw_id,
+                "source_identity_sha256": token.source.identity_sha256,
+                "content_sha256": token.content_sha256,
+                "model_descriptor_sha256": source.model_descriptor_sha256,
+            }
+            expected = self._issue_source(
                 authority=authority,
-                ordinal=source.ordinal or 0,
-                token=token,
+                kind=source.kind,
+                ordinal=source.ordinal,
+                model_descriptor_sha256=source.model_descriptor_sha256,
+                private_carrier=token,
+                private_payload=private_payload,
             )
         if expected.payload() != source.payload():
             raise TurnContextError("authorized source binding is stale")

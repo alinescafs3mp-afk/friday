@@ -64,19 +64,9 @@ def _model_input(
     mode: TurnMode = TurnMode.DIALOGUE,
     enable_tools: bool = True,
     with_attachment: bool = True,
+    attachment_raw: dict[str, object] | None = None,
 ) -> TurnInput:
-    attachments = (
-        [
-            {
-                "filename": "/srv/private/customer-plan.pdf",
-                "mime_type": "application/pdf",
-                "size_bytes": 1234,
-                "transient_text": "PRIVATE SOURCE BODY",
-            }
-        ]
-        if with_attachment
-        else []
-    )
+    attachments = [attachment_raw or _file_raw()] if with_attachment else []
     return TurnInput.from_chat(
         message=message,
         actor=actor,
@@ -91,24 +81,32 @@ def _model_input(
     )
 
 
-def _file_token(
+def _file_raw(
     *,
     raw_id: str = "raw_0123456789abcdef",
     source_ref: str = "attachment-source-1",
     content_sha256: str = "2" * 64,
     body: str = "PRIVATE SOURCE BODY",
-) -> AuthorizedFileSnapshotToken:
-    raw = {
+) -> dict[str, object]:
+    return {
         "id": raw_id,
         "source": "api",
         "source_ref": source_ref,
         "content_type": "application/pdf",
+        "mime_type": "application/pdf",
+        "filename": "/srv/private/customer-plan.pdf",
+        "size_bytes": 1234,
+        "transient_text": body,
         "received_at": "2026-08-29T00:00:00Z",
         "content_hash": content_sha256,
         "_raw_content": body,
         "_raw_metadata": "{}",
     }
-    token = authorized_file_snapshot_token(raw, content_sha256=content_sha256)
+
+
+def _file_token(raw: dict[str, object] | None = None) -> AuthorizedFileSnapshotToken:
+    source = raw or _file_raw()
+    token = authorized_file_snapshot_token(source, content_sha256=str(source["content_hash"]))
     assert token is not None
     return token
 
@@ -118,7 +116,8 @@ def _budget() -> InheritedTurnBudget:
         safety_deadline=TurnSafetyDeadline(_DEADLINE_NS),
         model_anti_loop=ModelAntiLoopBudget(max_model_calls=4, max_model_retries=1),
         resources=TurnResourceBudget(
-            max_tool_calls=6,
+            max_tool_calls=4,
+            max_tool_rounds=2,
             max_advisory_calls=2,
             max_output_tokens=8192,
         ),
@@ -130,18 +129,20 @@ def _sources(
     authority: object,
     *,
     with_attachment: bool,
-    token: AuthorizedFileSnapshotToken | None = None,
+    raw_source: dict[str, object] | None = None,
 ) -> tuple[AuthorizedSourceIdentity, ...]:
     from friday.orchestration.turn_context import AuthenticatedIngressAuthority
 
     assert type(authority) is AuthenticatedIngressAuthority
     values = [issuer.accepted_ingress_source(authority)]
     if with_attachment:
+        source = raw_source or _file_raw()
         values.append(
             issuer.registered_file_source(
                 authority=authority,
                 ordinal=1,
-                token=token or _file_token(),
+                token=_file_token(source),
+                raw_source=source,
             )
         )
     return tuple(
@@ -202,24 +203,34 @@ def _context(
         fallback_router_mode=fallback,
         decision=decision or TurnPolicyDecision(intent=TurnIntent.PASSTHROUGH),
     )
+    raw_source = _file_raw() if with_attachment else None
+    model_input = _model_input(
+        effective_actor,
+        conversation_id=conversation_id,
+        message=message,
+        reply=reply,
+        mode=interaction_mode,
+        enable_tools=enable_tools,
+        with_attachment=with_attachment,
+        attachment_raw=raw_source,
+    )
+    budget = _budget()
+    if not enable_tools:
+        budget = dataclasses.replace(
+            budget,
+            resources=TurnResourceBudget(0, 0, 2, 8192),
+        )
     return effective_issuer.authenticate_turn(
         authority=authority,
-        model_input=_model_input(
-            effective_actor,
-            conversation_id=conversation_id,
-            message=message,
-            reply=reply,
-            mode=interaction_mode,
-            enable_tools=enable_tools,
-            with_attachment=with_attachment,
-        ),
+        model_input=model_input,
         authorized_sources=_sources(
             effective_issuer,
             authority,
             with_attachment=with_attachment,
+            raw_source=raw_source,
         ),
         turn_policy=policy,
-        inherited_budget=_budget(),
+        inherited_budget=budget,
         pending_work_admission=pending_binding,
         now_monotonic_ns=_NOW_NS,
     )
@@ -417,6 +428,7 @@ def test_budget_children_cannot_extend_parent_and_limits_stay_separate() -> None
         max_model_calls=64,
         max_model_retries=16,
         max_tool_calls=64,
+        max_tool_rounds=32,
         max_advisory_calls=16,
         max_output_tokens=1_000_000,
     )
@@ -502,7 +514,7 @@ def test_canonical_serialization_accepts_only_its_unique_exact_bytes() -> None:
 def test_canonical_serialization_rejects_nonfinite_and_float_numbers(invalid_number: bytes) -> None:
     context = _context()
     malformed = context.canonical_bytes().replace(
-        b'"max_tool_calls":6',
+        b'"max_tool_calls":4',
         b'"max_tool_calls":' + invalid_number,
     )
 
