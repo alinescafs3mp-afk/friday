@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import dataclasses
+import gc
 import hashlib
 import itertools
 import threading
@@ -165,7 +166,7 @@ def test_binding_keeps_exact_object_and_fences_nested_and_sequential_replay() ->
     ):
         pytest.fail("a primary root was admitted twice")
     with (
-        pytest.raises(TurnContextError, match="context changed"),
+        pytest.raises(TurnContextError, match="already admitted"),
         bind_authenticated_turn_context(issuer, canonical_clone),
     ):
         pytest.fail("a canonical-equal reissue bypassed the replay fence")
@@ -280,8 +281,14 @@ async def test_detached_task_is_revoked_after_root_exit_and_exception_restores_c
     issuer = _issuer(_namespace("detached-task"), now)
     context = _context(issuer, now_ns=now[0])
     release = asyncio.Event()
+    inherited = asyncio.Event()
+    copied_bindings: list[runtime_seam._BoundTurn] = []
 
     async def detached() -> AuthenticatedTurnContext:
+        copied = runtime_seam._BOUND_TURN.get()
+        assert type(copied) is runtime_seam._BoundTurn
+        copied_bindings.append(copied)
+        inherited.set()
         await release.wait()
         return require_current_authenticated_turn_context(context)
 
@@ -291,12 +298,16 @@ async def test_detached_task_is_revoked_after_root_exit_and_exception_restores_c
         bind_authenticated_turn_context(issuer, context),
     ):
         task = asyncio.create_task(detached())
+        await inherited.wait()
         with suspend_authenticated_turn_context():
             assert current_authenticated_turn_context() is None
         assert current_authenticated_turn_context() is context
         raise RuntimeError("primary failed")
 
     assert current_authenticated_turn_context() is None
+    assert len(copied_bindings) == 1
+    assert copied_bindings[0].context is None
+    assert copied_bindings[0].issuer is None
     release.set()
     with pytest.raises(TurnContextError, match="no longer active"):
         await task
@@ -379,6 +390,15 @@ async def test_entrypoint_propagates_ambient_context_and_preserves_legacy_path()
         ) -> None:
             return None
 
+    with pytest.raises(TypeError, match="defaulting to None"):
+
+        @authenticated_turn_entrypoint
+        async def unsafe_default(
+            *,
+            _authenticated_turn_context: AuthenticatedTurnContext | None = context,
+        ) -> None:
+            return None
+
 
 @pytest.mark.asyncio
 async def test_async_binding_spelling_rechecks_deadline() -> None:
@@ -396,6 +416,8 @@ async def test_async_binding_spelling_rechecks_deadline() -> None:
 def test_capacity_prunes_only_expired_inactive_fences(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(runtime_seam, "_EXECUTION_LEDGERS", {})
     monkeypatch.setattr(runtime_seam, "_MAX_EXECUTION_LEDGERS", 2)
+    runtime_now = [_BASE_NOW_NS + 70_000]
+    monkeypatch.setattr(runtime_seam, "_PROCESS_MONOTONIC_NS", lambda: runtime_now[0])
     first_now = [_BASE_NOW_NS + 70_000]
     second_now = [_BASE_NOW_NS + 70_000]
     third_now = [_BASE_NOW_NS + 70_000]
@@ -415,12 +437,13 @@ def test_capacity_prunes_only_expired_inactive_fences(monkeypatch: pytest.Monkey
         bind_authenticated_turn_context(third_issuer, third),
     ):
         pytest.fail("a live replay fence was evicted")
-    assert {ledger.context for ledger in runtime_seam._EXECUTION_LEDGERS.values()} == {
-        first,
-        second,
+    assert {ledger.context_sha256 for ledger in runtime_seam._EXECUTION_LEDGERS.values()} == {
+        first.canonical_sha256(),
+        second.canonical_sha256(),
     }
 
     first_now[0] += 10
+    runtime_now[0] += 10
     with (
         pytest.raises(TurnContextError, match="deadline"),
         bind_authenticated_turn_context(first_issuer, first),
@@ -428,10 +451,10 @@ def test_capacity_prunes_only_expired_inactive_fences(monkeypatch: pytest.Monkey
         pytest.fail("the exact expired context became replayable")
     with bind_authenticated_turn_context(third_issuer, third):
         pass
-    retained = tuple(ledger.context for ledger in runtime_seam._EXECUTION_LEDGERS.values())
-    assert first not in retained
-    assert second in retained
-    assert third in retained
+    retained = tuple(ledger.context_sha256 for ledger in runtime_seam._EXECUTION_LEDGERS.values())
+    assert first.canonical_sha256() not in retained
+    assert second.canonical_sha256() in retained
+    assert third.canonical_sha256() in retained
     assert len(retained) == 2
     with (
         pytest.raises(TurnContextError, match="deadline"),
@@ -445,6 +468,8 @@ def test_capacity_never_evicts_an_active_fence_even_after_deadline(
 ) -> None:
     monkeypatch.setattr(runtime_seam, "_EXECUTION_LEDGERS", {})
     monkeypatch.setattr(runtime_seam, "_MAX_EXECUTION_LEDGERS", 1)
+    runtime_now = [_BASE_NOW_NS + 80_000]
+    monkeypatch.setattr(runtime_seam, "_PROCESS_MONOTONIC_NS", lambda: runtime_now[0])
     active_now = [_BASE_NOW_NS + 80_000]
     other_now = [_BASE_NOW_NS + 80_000]
     active_issuer = _issuer(_namespace("active-at-capacity"), active_now)
@@ -468,6 +493,7 @@ def test_capacity_never_evicts_an_active_fence_even_after_deadline(
     thread.start()
     assert entered.wait(timeout=5)
     active_now[0] += 10
+    runtime_now[0] += 10
     try:
         with (
             pytest.raises(TurnContextError, match="capacity"),
@@ -476,7 +502,7 @@ def test_capacity_never_evicts_an_active_fence_even_after_deadline(
             pytest.fail("an active expired fence was evicted")
         only = tuple(runtime_seam._EXECUTION_LEDGERS.values())
         assert len(only) == 1
-        assert only[0].context is active
+        assert only[0].context_sha256 == active.canonical_sha256()
         assert only[0].active is True
     finally:
         release.set()
@@ -499,6 +525,7 @@ def test_failed_clock_and_wrong_issuer_do_not_prune_or_poison_ledger(
         return fixed_now
 
     issuer = _issuer(_namespace("failed-clock"), clock)
+    monkeypatch.setattr(runtime_seam, "_PROCESS_MONOTONIC_NS", clock)
     context = _context(issuer, now_ns=fixed_now)
     wrong = _issuer(_namespace("wrong-issuer"), [fixed_now])
 
@@ -511,6 +538,7 @@ def test_failed_clock_and_wrong_issuer_do_not_prune_or_poison_ledger(
 
     with bind_authenticated_turn_context(issuer, context):
         pass
+    monkeypatch.setattr(runtime_seam, "_PROCESS_MONOTONIC_NS", lambda: fixed_now)
     failing[0] = True
     other_now = [fixed_now]
     other_issuer = _issuer(_namespace("failed-clock-other"), other_now)
@@ -520,28 +548,74 @@ def test_failed_clock_and_wrong_issuer_do_not_prune_or_poison_ledger(
         bind_authenticated_turn_context(other_issuer, other),
     ):
         pytest.fail("a verifier failure evicted a replay fence")
-    assert tuple(runtime_seam._EXECUTION_LEDGERS.values())[0].context is context
+    assert tuple(runtime_seam._EXECUTION_LEDGERS.values())[0].context_sha256 == context.canonical_sha256()
 
 
-def test_integrity_failure_is_never_reclassified_as_expiry(
+def test_malformed_retired_clock_is_never_reclassified_as_expiry(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(runtime_seam, "_EXECUTION_LEDGERS", {})
     monkeypatch.setattr(runtime_seam, "_MAX_EXECUTION_LEDGERS", 1)
     now = [_BASE_NOW_NS + 100_000]
-    issuer = _issuer(_namespace("integrity-failure"), now)
+    issuer = _issuer(_namespace("malformed-clock"), now)
     context = _context(issuer, now_ns=now[0], deadline_delta_ns=10)
     with bind_authenticated_turn_context(issuer, context):
         pass
 
     now[0] += 10
-    object.__setattr__(context, "context_authority_sha256", "0" * 64)
+    retained = tuple(runtime_seam._EXECUTION_LEDGERS.values())[0]
+
+    def malformed_clock() -> int:
+        return "not-an-integer"  # type: ignore[return-value]
+
+    retained.monotonic_clock = malformed_clock
     other_now = [_BASE_NOW_NS + 100_000]
-    other_issuer = _issuer(_namespace("integrity-failure-other"), other_now)
+    other_issuer = _issuer(_namespace("malformed-clock-other"), other_now)
     other = _context(other_issuer, now_ns=other_now[0])
     with (
         pytest.raises(TurnContextError, match="capacity"),
         bind_authenticated_turn_context(other_issuer, other),
     ):
-        pytest.fail("an integrity failure was pruned as ordinary expiry")
-    assert tuple(runtime_seam._EXECUTION_LEDGERS.values())[0].context is context
+        pytest.fail("a malformed clock was pruned as ordinary expiry")
+    assert tuple(runtime_seam._EXECUTION_LEDGERS.values())[0] is retained
+
+
+def test_ledger_is_body_free_and_retired_binding_releases_authority(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(runtime_seam, "_EXECUTION_LEDGERS", {})
+    now = [_BASE_NOW_NS + 110_000]
+    namespace_key = _namespace("body-free-ledger")
+    issuer = _issuer(namespace_key, now)
+    context = _context(issuer, now_ns=now[0])
+
+    binding: runtime_seam._BoundTurn
+    with bind_authenticated_turn_context(issuer, context):
+        current = runtime_seam._BOUND_TURN.get()
+        assert type(current) is runtime_seam._BoundTurn
+        binding = current
+        ledger = binding.ledger
+        assert set(runtime_seam._TurnExecutionLedger.__slots__) == {
+            "active",
+            "advisory_calls",
+            "context_sha256",
+            "deadline_monotonic_ns",
+            "monotonic_clock",
+        }
+        assert not hasattr(ledger, "context")
+        assert not hasattr(ledger, "issuer")
+        assert context not in gc.get_referents(ledger)
+        assert issuer not in gc.get_referents(ledger)
+        assert context.authority.actor not in gc.get_referents(ledger)
+        assert ledger.monotonic_clock is runtime_seam._PROCESS_MONOTONIC_NS
+        assert ledger.monotonic_clock is not issuer._monotonic_ns
+
+    assert binding.active is False
+    assert binding.context is None
+    assert binding.issuer is None
+    assert binding.ledger.active is False
+    assert context not in gc.get_referents(binding.ledger)
+    assert issuer not in gc.get_referents(binding.ledger)
+    assert namespace_key not in gc.get_referents(binding.ledger)
+    assert context not in gc.get_referents(runtime_seam._EXECUTION_LEDGERS)
+    assert issuer not in gc.get_referents(runtime_seam._EXECUTION_LEDGERS)

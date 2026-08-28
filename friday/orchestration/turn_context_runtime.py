@@ -9,6 +9,7 @@ ledger remains the permanent replay authority across expiry and process restarts
 
 from __future__ import annotations
 
+import time
 from collections.abc import AsyncIterator, Awaitable, Callable, Iterator
 from contextlib import asynccontextmanager, contextmanager
 from contextvars import ContextVar
@@ -34,29 +35,31 @@ _R = TypeVar("_R")
 # (far above the serialized owner ingress) while keeping retention explicitly
 # bounded.  Ordinary five-minute turns get over 54 roots/second of headroom.
 _MAX_EXECUTION_LEDGERS = 16_384
+_MAX_MONOTONIC_NS = (1 << 63) - 1
+_PROCESS_MONOTONIC_NS: Callable[[], int] = time.monotonic_ns
 
 
 class _TurnExecutionLedger:
     __slots__ = (
         "active",
         "advisory_calls",
-        "context",
         "context_sha256",
-        "issuer",
+        "deadline_monotonic_ns",
+        "monotonic_clock",
     )
 
     def __init__(
         self,
         *,
-        issuer: TurnContextIssuer,
-        context: AuthenticatedTurnContext,
         context_sha256: str,
+        deadline_monotonic_ns: int,
+        monotonic_clock: Callable[[], int],
     ) -> None:
         self.active = True
         self.advisory_calls = 0
-        self.context = context
         self.context_sha256 = context_sha256
-        self.issuer = issuer
+        self.deadline_monotonic_ns = deadline_monotonic_ns
+        self.monotonic_clock = monotonic_clock
 
 
 class _BoundTurn:
@@ -70,8 +73,8 @@ class _BoundTurn:
         ledger: _TurnExecutionLedger,
     ) -> None:
         self.active = True
-        self.context = context
-        self.issuer = issuer
+        self.context: AuthenticatedTurnContext | None = context
+        self.issuer: TurnContextIssuer | None = issuer
         self.ledger = ledger
 
 
@@ -88,25 +91,26 @@ def _ledger_key(context: AuthenticatedTurnContext) -> tuple[str, str]:
     return (context.authority.issuer_fingerprint_sha256, context.turn_id)
 
 
+def _read_monotonic_ns(clock: Callable[[], int]) -> int:
+    try:
+        now = clock()
+    except Exception as exc:  # noqa: BLE001 - a failed trusted clock closes admission
+        raise TurnContextError("authenticated turn runtime monotonic clock failed") from exc
+    if type(now) is not int or not 1 <= now <= _MAX_MONOTONIC_NS:
+        raise TurnContextError("authenticated turn runtime monotonic clock is invalid")
+    return now
+
+
 def _ledger_is_expired(ledger: _TurnExecutionLedger) -> bool:
-    """Use the issuing verifier for expiry; every other failure stays fenced."""
+    """Retire a body-free fence only after its trusted clock proves expiry."""
 
     if ledger.active:
         return False
     try:
-        ledger.issuer.require_context(ledger.context)
-    except TurnContextError as exc:
-        if exc.args != ("turn safety deadline has expired",):
-            return False
-        # ``require_context`` also checks integrity.  Only an independently
-        # observed deadline expiry permits pruning; clock/integrity failures do
-        # not turn into replay-fence eviction.
-        try:
-            now = ledger.issuer._current_monotonic_ns()
-        except TurnContextError:
-            return False
-        return ledger.context.inherited_budget.safety_deadline.monotonic_ns <= now
-    return False
+        now = _read_monotonic_ns(ledger.monotonic_clock)
+    except TurnContextError:
+        return False
+    return ledger.deadline_monotonic_ns <= now
 
 
 def _prune_expired_ledgers_at_capacity() -> None:
@@ -128,17 +132,29 @@ def _reserve_root_ledger(
 ) -> _TurnExecutionLedger:
     key = _ledger_key(context)
     context_sha256 = context.canonical_sha256()
+    authenticated_deadline_ns = context.inherited_budget.safety_deadline.monotonic_ns
+    monotonic_clock = _PROCESS_MONOTONIC_NS
+    if not callable(monotonic_clock):
+        raise TurnContextError("authenticated turn runtime monotonic clock is invalid")
+    runtime_now_ns = _read_monotonic_ns(monotonic_clock)
+    authenticated_now_ns = issuer._current_monotonic_ns()
+    remaining_ns = authenticated_deadline_ns - authenticated_now_ns
+    if remaining_ns <= 0:
+        raise TurnContextError("turn safety deadline has expired")
+    if remaining_ns > _MAX_MONOTONIC_NS - runtime_now_ns:
+        raise TurnContextError("authenticated turn runtime deadline is invalid")
+    deadline_monotonic_ns = runtime_now_ns + remaining_ns
     with _EXECUTION_LEDGERS_LOCK:
         existing = _EXECUTION_LEDGERS.get(key)
         if existing is not None:
-            if existing.context is not context or existing.context_sha256 != context_sha256:
+            if existing.context_sha256 != context_sha256:
                 raise TurnContextError("authenticated turn runtime context changed after root admission")
             raise TurnContextError("authenticated turn runtime already admitted its primary root")
         _prune_expired_ledgers_at_capacity()
         ledger = _TurnExecutionLedger(
-            issuer=issuer,
-            context=context,
             context_sha256=context_sha256,
+            deadline_monotonic_ns=deadline_monotonic_ns,
+            monotonic_clock=monotonic_clock,
         )
         _EXECUTION_LEDGERS[key] = ledger
         return ledger
@@ -146,11 +162,23 @@ def _reserve_root_ledger(
 
 def _require_live_binding(binding: _BoundTurn) -> AuthenticatedTurnContext:
     with _EXECUTION_LEDGERS_LOCK:
-        if not binding.active or not binding.ledger.active:
+        context = binding.context
+        issuer = binding.issuer
+        if (
+            not binding.active
+            or not binding.ledger.active
+            or type(context) is not AuthenticatedTurnContext
+            or type(issuer) is not TurnContextIssuer
+        ):
             raise TurnContextError("authenticated turn runtime binding is no longer active")
-    admitted = binding.issuer.require_context(binding.context)
+    admitted = issuer.require_context(context)
     with _EXECUTION_LEDGERS_LOCK:
-        if not binding.active or not binding.ledger.active:
+        if (
+            not binding.active
+            or not binding.ledger.active
+            or binding.context is not context
+            or binding.issuer is not issuer
+        ):
             raise TurnContextError("authenticated turn runtime binding is no longer active")
     return admitted
 
@@ -186,6 +214,8 @@ def bind_authenticated_turn_context(
         with _EXECUTION_LEDGERS_LOCK:
             binding.active = False
             ledger.active = False
+            binding.context = None
+            binding.issuer = None
         _BOUND_TURN.reset(token)
 
 
@@ -288,9 +318,14 @@ def authenticated_turn_entrypoint(
     """Bind a private context keyword around one awaited primary entrypoint."""
 
     context_parameter = signature(method).parameters.get("_authenticated_turn_context")
-    if context_parameter is None or context_parameter.kind is not Parameter.KEYWORD_ONLY:
+    if (
+        context_parameter is None
+        or context_parameter.kind is not Parameter.KEYWORD_ONLY
+        or context_parameter.default is not None
+    ):
         raise TypeError(
-            "authenticated turn entrypoint requires a keyword-only _authenticated_turn_context parameter"
+            "authenticated turn entrypoint requires a keyword-only "
+            "_authenticated_turn_context parameter defaulting to None"
         )
 
     @wraps(method)
