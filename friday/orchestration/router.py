@@ -31,6 +31,12 @@ from friday.orchestration.file_read_contract import (
     file_read_plan_supports_attachment_count,
 )
 from friday.orchestration.planner import AttestedPlannerRuntime, PlannerModel, V12Planner
+from friday.orchestration.turn_context import AuthenticatedTurnContext, TurnContextError
+from friday.orchestration.turn_context_runtime import (
+    current_primary_authenticated_turn_context,
+    reserve_authenticated_advisory_call,
+    suspend_authenticated_turn_context,
+)
 from friday.pending_durable_turn import (
     PendingDurableAdmissionState,
     PendingDurableTurnAdmission,
@@ -101,6 +107,7 @@ class ChatRuntime(Protocol):
         telegram_update_id: str | None = None,
         turn_deadline: float | None = None,
         _pending_durable_admission: PendingDurableTurnAdmission | None = None,
+        _authenticated_turn_context: AuthenticatedTurnContext | None = None,
     ) -> dict[str, Any]: ...
 
 
@@ -406,6 +413,28 @@ def current_attachment_references(
     return tuple(references)
 
 
+def _require_authenticated_chat_scope(
+    context: AuthenticatedTurnContext,
+    *,
+    user_id: str,
+    message: str,
+    actor: ActorContext,
+    conversation_id: str | None,
+) -> TurnInput:
+    """Reject raw-call drift while retaining the one issued model projection."""
+
+    turn = context.model_input
+    if (
+        context.authority.actor is not actor
+        or context.authority.tenant_id != user_id
+        or context.authority.conversation_id != conversation_id
+        or turn.message_truncated
+        or turn.message != message
+    ):
+        raise TurnContextError("authenticated turn does not match the router call scope")
+    return turn
+
+
 class OrchestrationRouter:
     """Own exactly one user-visible runtime per request.
 
@@ -659,6 +688,7 @@ class OrchestrationRouter:
         *,
         turn_deadline: float | None,
         started: float,
+        authenticated_context: AuthenticatedTurnContext | None,
     ) -> None:
         if turn_deadline is not None and turn_deadline <= time.monotonic():
             self._observe(
@@ -676,10 +706,22 @@ class OrchestrationRouter:
                 selected_runtime="legacy",
             )
             return
-        task = asyncio.create_task(
-            self._complete_shadow_plan(turn, turn_deadline=turn_deadline, started=started),
-            name="friday-v12-shadow-plan",
-        )
+        if authenticated_context is not None:
+            try:
+                reserve_authenticated_advisory_call(authenticated_context)
+            except TurnContextError:
+                self._observe(
+                    started=started,
+                    status="shadow_dropped_advisory_budget",
+                    plan=None,
+                    selected_runtime="legacy",
+                )
+                return
+        with suspend_authenticated_turn_context():
+            task = asyncio.create_task(
+                self._complete_shadow_plan(turn, turn_deadline=turn_deadline, started=started),
+                name="friday-v12-shadow-plan",
+            )
         self._shadow_tasks.add(task)
         task.add_done_callback(self._shadow_done)
 
@@ -732,7 +774,22 @@ class OrchestrationRouter:
         telegram_update_id: str | None = None,
         turn_deadline: float | None = None,
         _pending_durable_admission: PendingDurableTurnAdmission | None = None,
+        _authenticated_turn_context: AuthenticatedTurnContext | None = None,
     ) -> dict[str, Any]:
+        authenticated_context = current_primary_authenticated_turn_context(
+            _authenticated_turn_context
+        )
+        authenticated_turn = (
+            _require_authenticated_chat_scope(
+                authenticated_context,
+                user_id=user_id,
+                message=message,
+                actor=actor,
+                conversation_id=conversation_id,
+            )
+            if authenticated_context is not None
+            else None
+        )
         legacy_kwargs = {
             "actor": actor,
             "conversation_id": conversation_id,
@@ -752,6 +809,8 @@ class OrchestrationRouter:
             "telegram_update_id": telegram_update_id,
             "turn_deadline": turn_deadline,
         }
+        if authenticated_context is not None:
+            legacy_kwargs["_authenticated_turn_context"] = authenticated_context
         if telegram_update_id is not None:
             legacy_kwargs["telegram_update_id"] = telegram_update_id
         carried_durable_admission: PendingDurableTurnAdmission | None = None
@@ -869,7 +928,7 @@ class OrchestrationRouter:
         attachment_carriers = tuple(item for item in (attachments or []) if isinstance(item, Mapping))
         attachment_tokens = tuple(current_turn_file_reference_of(item) for item in attachment_carriers)
         attachment_snapshots = tuple(dict(item) for item in attachment_carriers)
-        turn = TurnInput.from_chat(
+        turn = authenticated_turn or TurnInput.from_chat(
             message=message,
             actor=actor,
             conversation_id=conversation_id,
@@ -889,7 +948,12 @@ class OrchestrationRouter:
         if self.mode is RouterMode.SHADOW:
             _observe_legacy_capability_owner()
             result = await self._legacy.chat(user_id, message, **legacy_kwargs)
-            self._schedule_shadow_plan(turn, turn_deadline=turn_deadline, started=started)
+            self._schedule_shadow_plan(
+                turn,
+                turn_deadline=turn_deadline,
+                started=started,
+                authenticated_context=authenticated_context,
+            )
             return result
 
         legacy_reserve = max(30.0, self._planner_timeout_sec * 2.0)
