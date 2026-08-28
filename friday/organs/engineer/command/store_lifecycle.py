@@ -223,7 +223,13 @@ def _database_identity(path: Path) -> tuple[int, int]:
 
 
 def command_store_backup_is_quiescent(connection: sqlite3.Connection) -> bool:
-    """Prove no command/delivery saga can cross a main-database backup."""
+    """Prove no replayable command/delivery saga can cross a backup.
+
+    Publication uncertainty is an absorbing terminal result: delivery must not
+    be attempted again, and the exact ledger backup preserves that evidence.
+    Only work that can still advance, or publication state that still requires
+    reconciliation, prevents a quiescent snapshot.
+    """
 
     try:
         row = connection.execute(
@@ -233,11 +239,11 @@ def command_store_backup_is_quiescent(connection: sqlite3.Connection) -> bool:
                        OR (status='unknown' AND NOT EXISTS (
                                SELECT 1 FROM command_job_publications AS resolved
                                 WHERE resolved.job_id=jobs.job_id
-                                  AND resolved.state IN ('sent','blocked')
+                                  AND resolved.state IN ('sent','uncertain','blocked')
                            ))
                    UNION ALL
                    SELECT 1 FROM command_job_publications
-                    WHERE state IN ('pending','staged','uncertain')
+                    WHERE state IN ('pending','staged')
                        OR (state='blocked'
                            AND last_error_code='no_generated_files'
                            AND carrier_retired_at IS NULL)

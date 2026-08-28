@@ -14176,6 +14176,30 @@ def _verify_owned_static_file(path: Path, expected: bytes, *, code: str) -> None
         raise ReleaseFailure(code)
 
 
+def _runtime_settings_child_environment(
+    config: SystemdConfig,
+    *,
+    env_file: Path | None = None,
+) -> dict[str, str]:
+    """Bind an isolated settings child to the operator's exact live database."""
+
+    environment = {
+        name: value
+        for name, value in os.environ.items()
+        if name in {"LANG", "LC_ALL", "SSL_CERT_DIR", "SSL_CERT_FILE", "XDG_RUNTIME_DIR"}
+    }
+    environment.update(
+        {
+            "FRIDAY_ENV_FILE": str(config.env_file if env_file is None else env_file),
+            "FRIDAY_HOME": str(config.friday_home),
+            "FRIDAY_DATABASE_PATH": str(config.database),
+            "FRIDAY_DATABASE_MUST_EXIST": "1",
+            "PYTHONDONTWRITEBYTECODE": "1",
+        }
+    )
+    return environment
+
+
 class SystemdActivationPort:
     """Concrete Linux boundary; construction and methods are side-effect free until called."""
 
@@ -14781,18 +14805,9 @@ print(json.dumps({'memory_vault_mode':effective_memory_vault_mode,'obsidian_mode
             and verification_config.memory_vault_mode != "full_owner"
         ):
             raise ReleaseFailure("candidate_memory_vault_mode_contract_missing")
-        child_environment = {
-            key: value
-            for key, value in os.environ.items()
-            if key in {"LANG", "LC_ALL", "SSL_CERT_DIR", "SSL_CERT_FILE", "XDG_RUNTIME_DIR"}
-        }
-        child_environment.update(
-            {
-                "FRIDAY_ENV_FILE": str(verification_env_file),
-                "FRIDAY_HOME": str(verification_config.friday_home),
-                "FRIDAY_DATABASE_PATH": str(verification_config.database),
-                "FRIDAY_DATABASE_MUST_EXIST": "1",
-            }
+        child_environment = _runtime_settings_child_environment(
+            verification_config,
+            env_file=verification_env_file,
         )
         result = subprocess.run(  # noqa: S603
             [
@@ -15038,19 +15053,7 @@ print(json.dumps({
  'served_model_alias':settings.secondary_llm_model,
 },sort_keys=True,separators=(',',':')))
 """
-        child_environment = {
-            key: value
-            for key, value in os.environ.items()
-            if key in {"LANG", "LC_ALL", "SSL_CERT_DIR", "SSL_CERT_FILE", "XDG_RUNTIME_DIR"}
-        }
-        child_environment.update(
-            {
-                "FRIDAY_ENV_FILE": str(verification_config.env_file),
-                "FRIDAY_HOME": str(verification_config.friday_home),
-                "FRIDAY_DATABASE_PATH": str(verification_config.database),
-                "FRIDAY_DATABASE_MUST_EXIST": "1",
-            }
-        )
+        child_environment = _runtime_settings_child_environment(verification_config)
         try:
             result = subprocess.run(  # noqa: S603
                 [
@@ -15986,18 +15989,7 @@ with open_engineer_command_backup_authority(settings,exclusive=False) as authori
         raise RuntimeError('action mismatch')
 print(json.dumps(result,sort_keys=True,separators=(',',':')))
 """
-        child_environment = {
-            name: value
-            for name, value in os.environ.items()
-            if name in {"LANG", "LC_ALL", "SSL_CERT_DIR", "SSL_CERT_FILE", "XDG_RUNTIME_DIR"}
-        }
-        child_environment.update(
-            {
-                "FRIDAY_ENV_FILE": str(self.config.env_file),
-                "FRIDAY_HOME": str(self.config.friday_home),
-                "PYTHONDONTWRITEBYTECODE": "1",
-            }
-        )
+        child_environment = _runtime_settings_child_environment(self.config)
         result: subprocess.CompletedProcess[bytes] | None = None
         failure: BaseException | None = None
         try:
@@ -16166,18 +16158,7 @@ assert pathlib.Path(settings.state_dir)==pathlib.Path(sys.argv[5])
 result=provision_engineer_command_store(settings)
 print(json.dumps(result,sort_keys=True,separators=(',',':')))
 """
-        child_environment = {
-            key_name: value
-            for key_name, value in os.environ.items()
-            if key_name in {"LANG", "LC_ALL", "SSL_CERT_DIR", "SSL_CERT_FILE", "XDG_RUNTIME_DIR"}
-        }
-        child_environment.update(
-            {
-                "FRIDAY_ENV_FILE": str(self.config.env_file),
-                "FRIDAY_HOME": str(self.config.friday_home),
-                "PYTHONDONTWRITEBYTECODE": "1",
-            }
-        )
+        child_environment = _runtime_settings_child_environment(self.config)
         failure: BaseException | None = None
         try:
             result = subprocess.run(  # noqa: S603
@@ -16238,20 +16219,7 @@ try:
 finally: store.close(final=True)
 print(json.dumps({'schema':SCHEMA_VERSION,'status':'clear'},sort_keys=True,separators=(',',':')))
 """
-        child_environment = {
-            key: value
-            for key, value in os.environ.items()
-            if key in {"LANG", "LC_ALL", "SSL_CERT_DIR", "SSL_CERT_FILE", "XDG_RUNTIME_DIR"}
-        }
-        child_environment.update(
-            {
-                "FRIDAY_ENV_FILE": str(self.config.env_file),
-                "FRIDAY_HOME": str(self.config.friday_home),
-                "FRIDAY_DATABASE_PATH": str(self.config.database),
-                "FRIDAY_DATABASE_MUST_EXIST": "1",
-                "PYTHONDONTWRITEBYTECODE": "1",
-            }
-        )
+        child_environment = _runtime_settings_child_environment(self.config)
         result = subprocess.run(  # noqa: S603
             [
                 str(release.root / "venv/bin/python"),

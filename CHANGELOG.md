@@ -1,3 +1,13 @@
+## 0.207.67 — 2026-08-28
+
+### Engineer activation recovery
+
+- Treats an absorbing, non-replayable `uncertain` terminal delivery as durable
+  backup state instead of permanently blocking every later release cutover.
+- Binds immutable-release maintenance children to the operator's exact database
+  path, so a retired legacy SQLite filename cannot make lifecycle provisioning
+  select an ambiguous database.
+
 ## 0.207.66 — 2026-08-28
 
 ### Restart-safe Engineer continuation

@@ -170,6 +170,81 @@ def test_backup_is_refused_before_ack_and_in_the_ack_reconciliation_crash_window
         assert row is not None and row["status"] == "sent"
 
 
+def test_absorbing_uncertain_publication_allows_exact_authenticated_backup(
+    settings,
+    tmp_path,
+) -> None:
+    with _enabled_environment(settings, tmp_path) as (storage, authority):
+        storage.ensure_user("owner")
+        payload = _publication_job_payload()
+        payload["status"] = "unknown"
+        authority.insert_job(payload)
+        assert authority.backup_authority_snapshot()[2] is False
+
+        dedup_key = "engineer-terminal:uncertain-backup"
+        assert storage.enqueue_notification(
+            "owner",
+            "5001",
+            "terminal",
+            kind="engineer_command_terminal_text",
+            dedup_key=dedup_key,
+        )
+        notification_id = str(storage.list_pending_notifications()[0]["id"])
+        authority.stage_publication(
+            "2" * 32,
+            notification_id=notification_id,
+            dedup_key=dedup_key,
+            envelope_sha256="8" * 64,
+        )
+        assert authority.backup_authority_snapshot()[2] is False
+
+        storage.mark_notifications(uncertain_ids=[notification_id])
+        authority.finish_publication("2" * 32, state="uncertain")
+        expected_authority = authority.backup_authority_snapshot()
+        assert expected_authority[2] is True
+
+        backup = storage.create_backup(label="terminal-uncertain")
+        evidence = backup["engineer_command_ledger_authority"]
+        assert (
+            evidence["store_id"],
+            evidence["authority_sequence"],
+            evidence["quiescent"],
+        ) == expected_authority
+        assert storage.verify_backup(backup["database"])["engineer_command_authority_matches"] is True
+        publication = authority._conn.execute(  # noqa: SLF001 - exact backup witness
+            """SELECT state,notification_id,dedup_key,envelope_sha256
+                 FROM command_job_publications WHERE job_id=?""",
+            ("2" * 32,),
+        ).fetchone()
+        assert tuple(publication) == (
+            "uncertain",
+            notification_id,
+            dedup_key,
+            "8" * 64,
+        )
+
+
+@pytest.mark.parametrize("status", ("planned", "admitted", "running"))
+def test_terminal_publication_uncertainty_never_masks_unfinished_job(
+    settings,
+    tmp_path,
+    status: str,
+) -> None:
+    with _enabled_environment(settings, tmp_path) as (_storage, authority):
+        payload = _publication_job_payload()
+        payload["status"] = status
+        authority.insert_job(payload)
+        authority.stage_publication(
+            "2" * 32,
+            notification_id="notification-active-job",
+            dedup_key="engineer-terminal:active-job",
+            envelope_sha256="9" * 64,
+        )
+        authority.finish_publication("2" * 32, state="uncertain")
+
+        assert authority.backup_authority_snapshot()[2] is False
+
+
 def test_backup_before_terminal_ingress_cannot_orphan_new_ledger_result(settings, tmp_path) -> None:
     with _enabled_environment(settings, tmp_path) as (storage, authority):
         storage.ensure_user("owner")

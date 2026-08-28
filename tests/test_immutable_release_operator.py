@@ -3196,6 +3196,70 @@ def _systemd_test_port(tmp_path: Path) -> operator.SystemdActivationPort:
     )
 
 
+def test_engineer_settings_children_pin_exact_database_with_dual_legacy_names(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    port = _systemd_test_port(tmp_path)
+    legacy_database = port.config.state_dir / "jericho.sqlite3"
+    connection = sqlite3.connect(legacy_database)
+    connection.execute("CREATE TABLE legacy_marker(value TEXT)")
+    connection.commit()
+    connection.close()
+    legacy_database.chmod(0o600)
+    release = operator.ReleaseIdentity(
+        tmp_path / "engineer-capable-release",
+        "c" * 40,
+        "0.207.66",
+        "d" * 64,
+        operator.ENGINEER_COMMAND_LIFECYCLE_MIN_SCHEMA,
+        engineer_command_lifecycle_contract=operator.ENGINEER_COMMAND_LIFECYCLE_CONTRACT,
+    )
+    observed: list[dict[str, str]] = []
+
+    def run(command: list[str], **kwargs: object) -> subprocess.CompletedProcess[bytes]:
+        environment = kwargs.get("env")
+        assert isinstance(environment, dict)
+        observed.append(dict(environment))
+        stdout = (
+            b'{"status":"provisioned"}\n'
+            if "provision_engineer_command_store" in command[4]
+            else b'{"snapshot":{}}\n'
+        )
+        return subprocess.CompletedProcess(command, 0, stdout=stdout, stderr=b"")
+
+    monkeypatch.setenv("FRIDAY_DATABASE_PATH", str(legacy_database))
+    monkeypatch.setenv("FRIDAY_DATABASE_MUST_EXIST", "0")
+    monkeypatch.setenv("JERICHO_DATABASE_PATH", str(legacy_database))
+    monkeypatch.setattr(operator.subprocess, "run", run)
+    monkeypatch.setattr(port, "writer_leases_held", lambda: True)
+    monkeypatch.setattr(port, "_release_engineer_store_locks", lambda: None)
+    monkeypatch.setattr(port, "_acquire_engineer_store_locks", lambda: None)
+    monkeypatch.setattr(operator.fcntl, "flock", lambda *_args: None)
+
+    port.provision_engineer_store(release)
+    kernel_lock = port.config.state_dir / "kernel.lock"
+    with kernel_lock.open("w+b") as lock_stream:
+        port._engineer_locks = [  # noqa: SLF001
+            (lock_stream.fileno(), kernel_lock, (0, 0))
+        ]
+        assert (
+            port._run_engineer_backup_authority(  # noqa: SLF001
+                release,
+                action="snapshot",
+            )
+            == {}
+        )
+
+    assert len(observed) == 2
+    for environment in observed:
+        assert environment["FRIDAY_ENV_FILE"] == str(port.config.env_file)
+        assert environment["FRIDAY_HOME"] == str(port.config.friday_home)
+        assert environment["FRIDAY_DATABASE_PATH"] == str(port.config.database)
+        assert environment["FRIDAY_DATABASE_MUST_EXIST"] == "1"
+        assert "JERICHO_DATABASE_PATH" not in environment
+
+
 def _engineer_mode_enabled_environment(predecessor: bytes) -> bytes:
     replacements = (
         (b"FRIDAY_ENGINEER_MODE_ENABLED=0\n", b"FRIDAY_ENGINEER_MODE_ENABLED=1\n"),
