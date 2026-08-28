@@ -31,6 +31,12 @@ from friday.orchestration.supervisor_assist_surface import (
     prepare_current_file_web_assist_surface,
 )
 from friday.orchestration.supervisor_contracts import SupervisorMode
+from friday.orchestration.turn_context import (
+    AuthenticatedTurnContext,
+    PendingOwnerKind,
+)
+from friday.orchestration.turn_context_call_scope import require_authenticated_chat_call_scope
+from friday.orchestration.turn_context_runtime import current_primary_authenticated_turn_context
 from friday.pending_durable_turn import PendingDurableTurnAdmission
 from friday.permissions import ActorContext
 from friday.turn_intent_policy import TurnPolicyDecision
@@ -419,9 +425,39 @@ class SemanticSupervisorAssistRuntime:
         _semantic_supervisor_ingress_binding: SupervisorAssistIngressBindingV1 | None = None,
         _semantic_supervisor_pending_decision: SupervisorAssistPendingDecision | None = None,
         _semantic_supervisor_explicit_mode_requested: bool = False,
+        _authenticated_turn_context: AuthenticatedTurnContext | None = None,
     ) -> dict[str, Any]:
+        authenticated_context = current_primary_authenticated_turn_context(_authenticated_turn_context)
+        authenticated_scope = (
+            require_authenticated_chat_call_scope(
+                authenticated_context,
+                user_id=user_id,
+                message=message,
+                actor=actor,
+                conversation_id=conversation_id,
+                attachments=attachments,
+                enable_tools=enable_tools,
+                synthetic_document_notice=synthetic_document_notice,
+                replay_source_message_id=replay_source_message_id,
+                mode=mode,
+                answer_with_voice=answer_with_voice,
+                reply_to=reply_to,
+                quoted_attachment_reference=quoted_attachment_reference,
+                reply_assistant_reference=reply_assistant_reference,
+                reply_assistant_message_id=reply_assistant_message_id,
+                turn_policy=turn_policy,
+                telegram_update_id=telegram_update_id,
+                turn_deadline=turn_deadline,
+                pending_durable_admission=_pending_durable_admission,
+            )
+            if authenticated_context is not None
+            else None
+        )
         if self._closed:
             raise SupervisorAssistRuntimeError("assist runtime is closed")
+        effective_turn_deadline = (
+            authenticated_scope.deadline_monotonic if authenticated_scope is not None else turn_deadline
+        )
         legacy_kwargs: dict[str, Any] = {
             "actor": actor,
             "conversation_id": conversation_id,
@@ -439,11 +475,13 @@ class SemanticSupervisorAssistRuntime:
             "reply_assistant_reference": reply_assistant_reference,
             "reply_assistant_message_id": reply_assistant_message_id,
             "turn_policy": turn_policy,
-            "turn_deadline": turn_deadline,
+            "turn_deadline": effective_turn_deadline,
             "_pending_durable_admission": _pending_durable_admission,
         }
         if telegram_update_id is not None:
             legacy_kwargs["telegram_update_id"] = telegram_update_id
+        if authenticated_context is not None:
+            legacy_kwargs["_authenticated_turn_context"] = authenticated_context
         legacy_calls = 0
 
         async def legacy_primary() -> dict[str, Any]:
@@ -457,8 +495,28 @@ class SemanticSupervisorAssistRuntime:
             return response
 
         attachment_count = len(attachments) if isinstance(attachments, list) else 0
-        deadline = _future_deadline(self._settings, turn_deadline)
+        deadline = _future_deadline(self._settings, effective_turn_deadline)
         normalized = message.strip().casefold() if isinstance(message, str) else ""
+        authenticated_pending = (
+            authenticated_context.pending_work_admission if authenticated_context is not None else None
+        )
+        if authenticated_pending is not None and (
+            authenticated_pending.owner_kind is PendingOwnerKind.UNCERTAIN_FAIL_CLOSED
+        ):
+            raise SupervisorAssistRuntimeError("authenticated pending-work ownership is uncertain")
+        if authenticated_context is not None and authenticated_pending is None:
+            if _semantic_supervisor_pending_decision is not None:
+                raise SupervisorAssistRuntimeError("authenticated ordinary turn cannot acquire pending work")
+            response = await legacy_primary()
+            await self._observe_ordinary(response, actor)
+            return response
+        if (
+            authenticated_pending is not None
+            and authenticated_pending.owner_kind is not PendingOwnerKind.WORK_GRAPH
+        ):
+            response = await legacy_primary()
+            await self._observe_ordinary(response, actor)
+            return response
         active: SupervisorAssistPendingDecision | bool
         if _semantic_supervisor_pending_decision is not None:
             active = _semantic_supervisor_pending_decision
@@ -489,6 +547,11 @@ class SemanticSupervisorAssistRuntime:
             and active.relation is SupervisorAssistPendingRelation.UNCERTAIN
         ):
             raise SupervisorAssistRuntimeError("durable assist ownership is uncertain")
+        if authenticated_pending is not None and (
+            type(active) is not SupervisorAssistPendingDecision
+            or active.pending is not authenticated_pending.admission
+        ):
+            raise SupervisorAssistRuntimeError("authenticated assist pending-work binding drifted")
         scope = (
             AssistConversationScope(
                 user_id=actor.own_id,
@@ -541,7 +604,7 @@ class SemanticSupervisorAssistRuntime:
                 AssistPendingGraphDisposition.RETIRED,
             }:
                 raise SupervisorAssistRuntimeError("durable assist reconciliation is invalid")
-            if (
+            if authenticated_context is None and (
                 isinstance(legacy_kwargs.get("_pending_durable_admission"), PendingDurableTurnAdmission)
                 and legacy_kwargs["_pending_durable_admission"].work_graph_id is not None
             ):

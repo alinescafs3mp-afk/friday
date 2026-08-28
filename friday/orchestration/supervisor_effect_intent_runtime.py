@@ -57,6 +57,14 @@ from friday.orchestration.supervisor_effect_maturity import (
     load_accepted_read_only_maturity_witness,
 )
 from friday.orchestration.supervisor_trace_join import load_primary_trace_projection
+from friday.orchestration.turn_context import AuthenticatedTurnContext, TurnContextError
+from friday.orchestration.turn_context_call_scope import require_authenticated_chat_call_scope
+from friday.orchestration.turn_context_runtime import (
+    current_primary_authenticated_turn_context,
+    reserve_authenticated_advisory_call,
+    suspend_authenticated_turn_context,
+)
+from friday.permissions import ActorContext
 from friday.secondary_brain import ModelRequest, ModelWorkload, SecondaryAttempt, SecondaryResult
 
 SUPERVISOR_EFFECT_SHADOW_HEALTH_SCHEMA = "friday.semantic-supervisor-effect-shadow-health.v1"
@@ -810,6 +818,7 @@ class SupervisorEffectIntentShadowRuntime:
         message_id: str,
         conversation_id: str,
         projection: EffectIntentProjectionV2,
+        absolute_deadline_monotonic: float | None,
     ) -> None:
         try:
             row = self._storage.get_message(message_id, user_id)
@@ -849,11 +858,18 @@ class SupervisorEffectIntentShadowRuntime:
         selection: EffectIntentSelectionV2 | None = None
         selection_status = "model_unavailable"
         try:
+            now = time.monotonic()
+            deadline = now + _MODEL_BUDGET_SEC
+            if absolute_deadline_monotonic is not None:
+                deadline = min(deadline, absolute_deadline_monotonic)
+            if deadline <= now:
+                self._skip_counts["admission_became_stale"] += 1
+                return
             self._dispatch_total += 1
             selection = await select_supervisor_effect_intent(
                 self._scheduler,
                 projection=projection,
-                absolute_deadline_monotonic=time.monotonic() + _MODEL_BUDGET_SEC,
+                absolute_deadline_monotonic=deadline,
             )
             selection_status = "accepted"
         except asyncio.CancelledError:
@@ -886,6 +902,8 @@ class SupervisorEffectIntentShadowRuntime:
         message_id: object,
         conversation_id: object,
         projection: EffectIntentProjectionV2 | None,
+        authenticated_context: AuthenticatedTurnContext | None,
+        absolute_deadline_monotonic: float | None,
     ) -> None:
         if (
             self._closed
@@ -902,34 +920,94 @@ class SupervisorEffectIntentShadowRuntime:
         if len(self._tasks) >= _MAX_PENDING:
             self._skip_counts["capacity"] += 1
             return
-        task = asyncio.create_task(
-            self._observe(
-                user_id=user_id,
-                message_id=message_id,
-                conversation_id=conversation_id,
-                projection=projection,
-            ),
-            name="semantic-supervisor-effect-shadow",
-        )
+        if authenticated_context is not None:
+            try:
+                reserve_authenticated_advisory_call(authenticated_context)
+            except TurnContextError:
+                self._skip_counts["capacity"] += 1
+                return
+            with suspend_authenticated_turn_context():
+                task = asyncio.create_task(
+                    self._observe(
+                        user_id=user_id,
+                        message_id=message_id,
+                        conversation_id=conversation_id,
+                        projection=projection,
+                        absolute_deadline_monotonic=absolute_deadline_monotonic,
+                    ),
+                    name="semantic-supervisor-effect-shadow",
+                )
+                self._tasks.add(task)
+                task.add_done_callback(self._tasks.discard)
+            return
+        else:
+            task = asyncio.create_task(
+                self._observe(
+                    user_id=user_id,
+                    message_id=message_id,
+                    conversation_id=conversation_id,
+                    projection=projection,
+                    absolute_deadline_monotonic=None,
+                ),
+                name="semantic-supervisor-effect-shadow",
+            )
         self._tasks.add(task)
         task.add_done_callback(self._tasks.discard)
 
     async def chat(self, user_id: str, message: str, **kwargs: Any) -> dict[str, Any]:
         """Call primary exactly once; any later observation is non-owning."""
 
+        authenticated_context = current_primary_authenticated_turn_context(
+            cast(AuthenticatedTurnContext | None, kwargs.get("_authenticated_turn_context"))
+        )
+        authenticated_scope = (
+            require_authenticated_chat_call_scope(
+                authenticated_context,
+                user_id=user_id,
+                message=message,
+                actor=cast(ActorContext, kwargs.get("actor")),
+                conversation_id=kwargs.get("conversation_id"),
+                attachments=kwargs.get("attachments"),
+                enable_tools=kwargs.get("enable_tools", True),
+                synthetic_document_notice=kwargs.get("synthetic_document_notice", False),
+                replay_source_message_id=kwargs.get("replay_source_message_id"),
+                mode=kwargs.get("mode"),
+                answer_with_voice=kwargs.get("answer_with_voice", False),
+                reply_to=kwargs.get("reply_to"),
+                quoted_attachment_reference=kwargs.get("quoted_attachment_reference", False),
+                reply_assistant_reference=kwargs.get("reply_assistant_reference", False),
+                reply_assistant_message_id=kwargs.get("reply_assistant_message_id"),
+                turn_policy=kwargs.get("turn_policy"),
+                telegram_update_id=kwargs.get("telegram_update_id"),
+                turn_deadline=kwargs.get("turn_deadline"),
+                pending_durable_admission=kwargs.get("_pending_durable_admission"),
+            )
+            if authenticated_context is not None
+            else None
+        )
         projection: EffectIntentProjectionV2 | None = None
         if not self._closed and accepted_read_only_maturity_witness_is_current(self._maturity):
             try:
-                projection = prepare_effect_intent_projection_v2(message)
+                projection = prepare_effect_intent_projection_v2(
+                    authenticated_scope.model_input.message if authenticated_scope is not None else message
+                )
             except (EffectIntentError, TypeError, UnicodeError, ValueError):
                 self._skip_counts["projection_rejected"] += 1
-        result = await self._primary.chat(user_id, message, **kwargs)
+        primary_kwargs = kwargs
+        if authenticated_context is not None:
+            primary_kwargs = dict(kwargs)
+            primary_kwargs["_authenticated_turn_context"] = authenticated_context
+        result = await self._primary.chat(user_id, message, **primary_kwargs)
         if type(result) is dict:
             self._schedule(
                 user_id=user_id,
                 message_id=result.get("message_id"),
                 conversation_id=result.get("conversation_id"),
                 projection=projection,
+                authenticated_context=authenticated_context,
+                absolute_deadline_monotonic=(
+                    authenticated_scope.deadline_monotonic if authenticated_scope is not None else None
+                ),
             )
         else:
             self._skip_counts["primary_result_unavailable"] += 1
