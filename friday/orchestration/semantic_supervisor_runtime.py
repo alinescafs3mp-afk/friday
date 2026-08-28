@@ -49,6 +49,10 @@ from friday.orchestration.supervisor_trace_join import (
     persist_joined_supervisor_observation,
 )
 from friday.orchestration.turn_context import AuthenticatedTurnContext, TurnContextError
+from friday.orchestration.turn_context_call_scope import (
+    AuthenticatedChatCallScope,
+    require_authenticated_chat_call_scope,
+)
 from friday.orchestration.turn_context_runtime import (
     current_primary_authenticated_turn_context,
     reserve_authenticated_advisory_call,
@@ -206,28 +210,6 @@ def _primary_result_matches_conversation(
         return False
     actual = result.get("conversation_id")
     return type(actual) is str and actual == expected_conversation_id
-
-
-def _require_authenticated_chat_scope(
-    context: AuthenticatedTurnContext,
-    *,
-    user_id: str,
-    message: str,
-    actor: ActorContext,
-    conversation_id: str | None,
-) -> TurnInput:
-    """Reject call-scope drift without rebuilding the authenticated model input."""
-
-    turn = context.model_input
-    if (
-        context.authority.actor is not actor
-        or context.authority.tenant_id != user_id
-        or context.authority.conversation_id != conversation_id
-        or turn.message_truncated
-        or turn.message != message
-    ):
-        raise TurnContextError("authenticated turn does not match the supervisor call scope")
-    return turn
 
 
 def build_semantic_supervisor_runtime(
@@ -505,7 +487,7 @@ class SemanticSupervisorShadowRuntime:
         pending_durable_admission: object,
         dispatch_scope: str,
         dispatch_epoch: int,
-        authenticated_context: AuthenticatedTurnContext | None,
+        authenticated_scope: AuthenticatedChatCallScope | None,
     ) -> tuple[_PreparedShadow | None, SupervisorObservation | None]:
         if self._closed:
             return None, self._skipped(SupervisorSkipReason.SECONDARY_UNAVAILABLE)
@@ -524,7 +506,7 @@ class SemanticSupervisorShadowRuntime:
         if enable_tools is not True:
             return None, self._skipped(SupervisorSkipReason.EVIDENCE_UNAVAILABLE)
 
-        if authenticated_context is None:
+        if authenticated_scope is None:
             if attachments is not None and (
                 type(attachments) is not list
                 or any(not isinstance(item, Mapping) for item in attachments)
@@ -549,9 +531,9 @@ class SemanticSupervisorShadowRuntime:
             except Exception:
                 return None, self._skipped(SupervisorSkipReason.EVIDENCE_UNAVAILABLE)
         else:
-            turn = authenticated_context.model_input
+            turn = authenticated_scope.model_input
             attachment_snapshot = []
-        if turn.message != message:
+        if authenticated_scope is None and turn.message != message:
             # Pending/exact ownership must always be checked against the same
             # bytes the caller supplied. TurnInput deliberately bounds its
             # projection, so an oversized/truncated turn is not shadowable.
@@ -559,11 +541,11 @@ class SemanticSupervisorShadowRuntime:
 
         current_attachment_count = (
             pending_comparison_current_attachment_count(attachment_snapshot)
-            if authenticated_context is None
+            if authenticated_scope is None
             else len(turn.attachments)
         )
 
-        if authenticated_context is None:
+        if authenticated_scope is None:
             if not self._pending_is_exactly_ordinary(
                 user_id,
                 message,
@@ -573,7 +555,7 @@ class SemanticSupervisorShadowRuntime:
                 carried=pending_durable_admission,
             ):
                 return None, self._skipped(SupervisorSkipReason.EXACT_LANE, turn=turn)
-        elif authenticated_context.pending_work_admission is not None:
+        elif authenticated_scope.pending_work_bound:
             return None, self._skipped(SupervisorSkipReason.EXACT_LANE, turn=turn)
 
         eligibility = supervisor_eligibility(turn, self._settings)
@@ -582,7 +564,12 @@ class SemanticSupervisorShadowRuntime:
 
         started = time.monotonic()
         deadline = started + supervisor_timeout_sec(self._settings)
-        if turn_deadline is not None:
+        if authenticated_scope is not None:
+            deadline = min(
+                deadline,
+                authenticated_scope.deadline_monotonic_ns / 1_000_000_000,
+            )
+        elif turn_deadline is not None:
             if not isinstance(turn_deadline, (int, float)) or isinstance(turn_deadline, bool):
                 return None, self._skipped(SupervisorSkipReason.TIMEOUT, turn=turn)
             external_deadline = float(turn_deadline)
@@ -596,7 +583,7 @@ class SemanticSupervisorShadowRuntime:
             return None, self._skipped(SupervisorSkipReason.EVIDENCE_UNAVAILABLE, turn=turn)
 
         try:
-            if authenticated_context is None:
+            if authenticated_scope is None:
                 person_id = str(actor.own_id or "")
                 conversation_scope = str(conversation_id or "new-conversation")
                 if not 1 <= len(person_id) <= 512 or not 1 <= len(conversation_scope) <= 512:
@@ -608,8 +595,8 @@ class SemanticSupervisorShadowRuntime:
                     conversation_scope,
                 )
             else:
-                actor_binding = authenticated_context.authority.actor_binding_sha256
-                conversation_binding = authenticated_context.authority.conversation.binding_sha256
+                actor_binding = authenticated_scope.actor_binding_sha256
+                conversation_binding = authenticated_scope.conversation_binding_sha256
             context = shadow_policy_admission_context(
                 supervisor_input,
                 actor_binding_sha256=actor_binding,
@@ -639,11 +626,11 @@ class SemanticSupervisorShadowRuntime:
                 requested_mode=_closed_requested_mode(self._settings),
                 current_route=_current_route(self._primary),
                 accepted_profile_id=_accepted_profile_id(self._settings),
-                routing_user_id=user_id if authenticated_context is None else None,
-                actor=actor if authenticated_context is None else None,
-                conversation_id=conversation_id if authenticated_context is None else None,
+                routing_user_id=user_id if authenticated_scope is None else None,
+                actor=actor if authenticated_scope is None else None,
+                conversation_id=conversation_id if authenticated_scope is None else None,
                 current_attachment_count=(
-                    current_attachment_count if authenticated_context is None else 0
+                    current_attachment_count if authenticated_scope is None else 0
                 ),
                 dispatch_scope=dispatch_scope,
                 dispatch_epoch=dispatch_epoch,
@@ -904,10 +891,12 @@ class SemanticSupervisorShadowRuntime:
                 self._complete_shadow(job),
                 name="friday-semantic-supervisor-shadow",
             )
-        self._shadow_tasks.add(task)
-        self._shadow_task_scopes[task] = prepared.dispatch_scope
-        self._shadow_jobs[task] = job
-        task.add_done_callback(self._shadow_done)
+            self._shadow_tasks.add(task)
+            self._shadow_task_scopes[task] = prepared.dispatch_scope
+            self._shadow_jobs[task] = job
+            # add_done_callback captures its registration Context separately
+            # from the task.  It must remain inside the same suspension seam.
+            task.add_done_callback(self._shadow_done)
 
     def _finalize_shadow_task(self, task: asyncio.Task[None]) -> None:
         job = self._shadow_jobs.get(task)
@@ -1009,14 +998,36 @@ class SemanticSupervisorShadowRuntime:
         authenticated_context = current_primary_authenticated_turn_context(
             _authenticated_turn_context
         )
-        if authenticated_context is not None:
-            _require_authenticated_chat_scope(
+        authenticated_scope = (
+            require_authenticated_chat_call_scope(
                 authenticated_context,
                 user_id=user_id,
                 message=message,
                 actor=actor,
                 conversation_id=conversation_id,
+                attachments=attachments,
+                enable_tools=enable_tools,
+                synthetic_document_notice=synthetic_document_notice,
+                replay_source_message_id=replay_source_message_id,
+                mode=mode,
+                answer_with_voice=answer_with_voice,
+                reply_to=reply_to,
+                quoted_attachment_reference=quoted_attachment_reference,
+                reply_assistant_reference=reply_assistant_reference,
+                reply_assistant_message_id=reply_assistant_message_id,
+                turn_policy=turn_policy,
+                telegram_update_id=telegram_update_id,
+                turn_deadline=turn_deadline,
+                pending_durable_admission=_pending_durable_admission,
             )
+            if authenticated_context is not None
+            else None
+        )
+        effective_turn_deadline = (
+            authenticated_scope.deadline_monotonic
+            if authenticated_scope is not None
+            else turn_deadline
+        )
         dispatch_scope, dispatch_epoch = self._advance_dispatch_epoch(actor, conversation_id)
         if _semantic_supervisor_explicit_mode_requested is None:
             explicit_mode_requested = mode is not None
@@ -1043,11 +1054,11 @@ class SemanticSupervisorShadowRuntime:
                 reply_assistant_reference=reply_assistant_reference,
                 reply_assistant_message_id=reply_assistant_message_id,
                 turn_policy=turn_policy,
-                turn_deadline=turn_deadline,
+                turn_deadline=effective_turn_deadline,
                 pending_durable_admission=_pending_durable_admission,
                 dispatch_scope=dispatch_scope,
                 dispatch_epoch=dispatch_epoch,
-                authenticated_context=authenticated_context,
+                authenticated_scope=authenticated_scope,
             )
         except Exception:
             prepared = None
@@ -1069,7 +1080,7 @@ class SemanticSupervisorShadowRuntime:
             "quoted_attachment_reference": quoted_attachment_reference,
             "reply_assistant_reference": reply_assistant_reference,
             "reply_assistant_message_id": reply_assistant_message_id,
-            "turn_deadline": turn_deadline,
+            "turn_deadline": effective_turn_deadline,
         }
         if turn_policy is not None:
             primary_kwargs["turn_policy"] = turn_policy

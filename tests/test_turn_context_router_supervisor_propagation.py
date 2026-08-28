@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 import hashlib
 import itertools
 import time
@@ -10,9 +11,10 @@ from typing import Any, cast
 import pytest
 
 from friday import semantic_supervisor_policy
+from friday.file_evidence import stamp_current_turn_file_reference
 from friday.orchestration import semantic_supervisor_runtime as supervisor_runtime_module
 from friday.orchestration.contracts import RouterMode, TurnInput
-from friday.orchestration.router import OrchestrationRouter
+from friday.orchestration.router import OrchestrationRouter, _authenticated_attachment_references
 from friday.orchestration.semantic_supervisor_runtime import SemanticSupervisorShadowRuntime
 from friday.orchestration.turn_context import (
     AuthenticatedTurnContext,
@@ -25,12 +27,14 @@ from friday.orchestration.turn_context import (
     TurnResourceBudget,
     TurnSafetyDeadline,
 )
+from friday.orchestration.turn_context_call_scope import require_authenticated_chat_call_scope
 from friday.orchestration.turn_context_runtime import (
     bind_authenticated_turn_context,
     current_authenticated_turn_context,
     current_primary_authenticated_turn_context,
     suspend_authenticated_turn_context,
 )
+from friday.pending_durable_turn import PendingDurableTurnAdmission
 from friday.permissions import ActorContext
 from friday.secondary_brain import SecondaryAttempt, SecondaryFailure
 from friday.turn_intent_policy import TurnIntent, TurnPolicyDecision
@@ -45,6 +49,8 @@ def _authenticated_turn(
     router_mode: RouterMode = RouterMode.SHADOW,
     max_advisory_calls: int = 1,
     clock: list[int] | None = None,
+    telegram: bool = False,
+    pending: PendingDurableTurnAdmission | None = None,
 ) -> tuple[TurnContextIssuer, AuthenticatedTurnContext, ActorContext, list[int]]:
     serial = next(_SERIALS)
     now = clock or [time.monotonic_ns()]
@@ -52,21 +58,32 @@ def _authenticated_turn(
         hashlib.sha256(f"router-supervisor-{serial}".encode("ascii")).digest(),
         _monotonic_ns=lambda: now[0],
     )
-    actor = ActorContext(
-        user_id="owner",
-        preset_key="owner",
-        source="api-token",
-        identity_id="owner-principal",
-        session_id="owner-session",
+    actor = (
+        ActorContext(
+            user_id="owner",
+            preset_key="owner",
+            source="telegram-bridge",
+            identity_id="123456789",
+            session_id="owner-session",
+            telegram_chat_id="-100123456789",
+        )
+        if telegram
+        else ActorContext(
+            user_id="owner",
+            preset_key="owner",
+            source="api-token",
+            identity_id="owner-principal",
+            session_id="owner-session",
+        )
     )
     authority = issuer.issue_ingress_authority(
-        ingress_kind=IngressKind.SIGNED_HTTP,
+        ingress_kind=IngressKind.TELEGRAM if telegram else IngressKind.SIGNED_HTTP,
         ingress_issued_token=f"accepted-router-supervisor-{serial}",
         actor=actor,
         conversation_id=_CONVERSATION_ID,
         interaction_mode=TurnMode.DIALOGUE,
-        source_id="api-token",
-        update_id=f"update-router-supervisor-{serial}",
+        source_id=str(actor.telegram_chat_id) if telegram else "api-token",
+        update_id=str(serial) if telegram else f"update-router-supervisor-{serial}",
         request_effect_binding_sha256=hashlib.sha256(
             f"effects-router-supervisor-{serial}".encode("ascii")
         ).hexdigest(),
@@ -83,9 +100,12 @@ def _authenticated_turn(
         quoted_attachment_reference=False,
         reply_assistant_reference=False,
     )
+    effective_router_mode = RouterMode.LEGACY if pending is not None else router_mode
     policy = issuer.issue_turn_policy(
-        router_mode=router_mode,
-        fallback_router_mode=(None if router_mode is RouterMode.LEGACY else RouterMode.LEGACY),
+        router_mode=effective_router_mode,
+        fallback_router_mode=(
+            None if effective_router_mode is RouterMode.LEGACY else RouterMode.LEGACY
+        ),
         decision=TurnPolicyDecision(intent=TurnIntent.PASSTHROUGH),
     )
     context = issuer.authenticate_turn(
@@ -94,22 +114,129 @@ def _authenticated_turn(
         authorized_sources=(issuer.accepted_ingress_source(authority),),
         turn_policy=policy,
         inherited_budget=InheritedTurnBudget(
-            TurnSafetyDeadline(now[0] + 5_000_000_000),
+            TurnSafetyDeadline(now[0] + 120_000_000_000),
             ModelAntiLoopBudget(4, 1),
             TurnResourceBudget(4, 2, max_advisory_calls, 8_192),
         ),
-        pending_work_admission=None,
+        pending_work_admission=(
+            issuer.bind_pending_work(authority=authority, admission=pending)
+            if pending is not None
+            else None
+        ),
     )
     return issuer, context, actor, now
 
 
-def _chat_kwargs(actor: ActorContext) -> dict[str, Any]:
-    return {
+class _AttachmentCarrier(dict[str, Any]):
+    pass
+
+
+def _authenticated_attachment_turn() -> tuple[
+    TurnContextIssuer,
+    AuthenticatedTurnContext,
+    ActorContext,
+    _AttachmentCarrier,
+]:
+    serial = next(_SERIALS)
+    now = time.monotonic_ns()
+    issuer = TurnContextIssuer(
+        hashlib.sha256(f"router-attachment-{serial}".encode("ascii")).digest()
+    )
+    actor = ActorContext(
+        user_id="owner",
+        preset_key="owner",
+        source="api-token",
+        identity_id="owner-principal",
+    )
+    authority = issuer.issue_ingress_authority(
+        ingress_kind=IngressKind.SIGNED_HTTP,
+        ingress_issued_token=f"accepted-router-attachment-{serial}",
+        actor=actor,
+        conversation_id=_CONVERSATION_ID,
+        interaction_mode=TurnMode.DIALOGUE,
+        source_id="api-token",
+        update_id=f"update-router-attachment-{serial}",
+        request_effect_binding_sha256=hashlib.sha256(
+            f"effects-router-attachment-{serial}".encode("ascii")
+        ).hexdigest(),
+    )
+    raw_id = f"raw_{serial:016x}"
+    carrier = _AttachmentCarrier(
+        raw_object_id=raw_id,
+        mime_type="application/pdf",
+        size_bytes=321,
+        transient_text="bounded extracted text",
+        persisted=True,
+        current_turn_only=True,
+    )
+    stamp_current_turn_file_reference(
+        carrier,
+        {
+            "id": raw_id,
+            "source": "api",
+            "source_ref": f"current:{serial}",
+            "content_type": "application/pdf",
+            "received_at": "2026-08-29T00:00:00Z",
+            "content_hash": "a" * 64,
+            "raw_content": "bounded extracted text",
+            "metadata_json": "{}",
+        },
+    )
+    model_input = TurnInput.from_chat(
+        message="Прочитай приложенный файл.",
+        actor=actor,
+        conversation_id=_CONVERSATION_ID,
+        attachments=[carrier],
+        enable_tools=True,
+        synthetic_document_notice=False,
+        mode=TurnMode.DIALOGUE.value,
+        reply_to=None,
+        quoted_attachment_reference=False,
+        reply_assistant_reference=False,
+    )
+    source = issuer.current_attachment_source(
+        authority=authority,
+        carrier=carrier,
+        descriptor=model_input.attachments[0],
+    )
+    context = issuer.authenticate_turn(
+        authority=authority,
+        model_input=model_input,
+        authorized_sources=(issuer.accepted_ingress_source(authority), source),
+        turn_policy=issuer.issue_turn_policy(
+            router_mode=RouterMode.V12,
+            fallback_router_mode=RouterMode.LEGACY,
+            decision=TurnPolicyDecision(intent=TurnIntent.PASSTHROUGH),
+        ),
+        inherited_budget=InheritedTurnBudget(
+            TurnSafetyDeadline(now + 120_000_000_000),
+            ModelAntiLoopBudget(4, 1),
+            TurnResourceBudget(4, 2, 1, 8_192),
+        ),
+        pending_work_admission=None,
+    )
+    return issuer, context, actor, carrier
+
+
+def _chat_kwargs(
+    actor: ActorContext,
+    context: AuthenticatedTurnContext | None = None,
+) -> dict[str, Any]:
+    values: dict[str, Any] = {
         "actor": actor,
         "conversation_id": _CONVERSATION_ID,
         "attachments": None,
         "enable_tools": True,
     }
+    if context is not None:
+        values["turn_deadline"] = (
+            context.inherited_budget.safety_deadline.monotonic_ns / 1_000_000_000
+        )
+        if context.authority.ingress_kind is IngressKind.TELEGRAM:
+            values["telegram_update_id"] = context.authority.update_id
+        if context.pending_work_admission is not None:
+            values["_pending_durable_admission"] = context.pending_work_admission.admission
+    return values
 
 
 class _Primary:
@@ -172,27 +299,41 @@ def _supervisor_settings() -> SimpleNamespace:
 
 
 @pytest.mark.asyncio
-async def test_router_carries_exact_context_and_exact_model_input_into_shadow() -> None:
+async def test_router_carries_exact_context_and_exact_model_input_into_shadow(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     issuer, context, actor, _now = _authenticated_turn()
     primary = _Primary()
     planner = _Planner()
     router = OrchestrationRouter(cast(Any, primary), cast(Any, planner), mode=RouterMode.SHADOW)
+    callback_contexts: list[AuthenticatedTurnContext | None] = []
+    original_done = router._shadow_done
+
+    def observed_done(task: asyncio.Task[None]) -> None:
+        callback_contexts.append(current_authenticated_turn_context())
+        with pytest.raises(TurnContextError, match="primary authority"):
+            current_primary_authenticated_turn_context()
+        original_done(task)
+
+    monkeypatch.setattr(router, "_shadow_done", observed_done)
 
     with bind_authenticated_turn_context(issuer, context):
         result = await router.chat(
             "owner",
             _MESSAGE,
-            **_chat_kwargs(actor),
+            **_chat_kwargs(actor, context),
             _authenticated_turn_context=context,
         )
         assert current_primary_authenticated_turn_context(context) is context
     await router.drain_shadow()
+    await asyncio.sleep(0)
 
     assert result["message"] == "primary"
     assert primary.last_kwargs["_authenticated_turn_context"] is context
     assert planner.turns == [context.model_input]
     assert planner.turns[0] is context.model_input
     assert planner.detached_primary_closed is True
+    assert callback_contexts == [None]
 
 
 @pytest.mark.asyncio
@@ -206,7 +347,7 @@ async def test_router_fallback_carries_exact_context_without_rebuilding_turn() -
         result = await router.chat(
             "owner",
             _MESSAGE,
-            **_chat_kwargs(actor),
+            **_chat_kwargs(actor, context),
             _authenticated_turn_context=context,
         )
 
@@ -231,23 +372,23 @@ async def test_router_rejects_suspended_stale_and_identity_drift_before_primary(
         with suspend_authenticated_turn_context(), pytest.raises(
             TurnContextError, match="primary authority"
         ):
-            await router.chat("owner", _MESSAGE, **_chat_kwargs(actor))
+            await router.chat("owner", _MESSAGE, **_chat_kwargs(actor, context))
         with suspend_authenticated_turn_context(), pytest.raises(
             TurnContextError, match="primary authority"
         ):
-            await wrapper.chat("owner", _MESSAGE, **_chat_kwargs(actor))
+            await wrapper.chat("owner", _MESSAGE, **_chat_kwargs(actor, context))
         with pytest.raises(TurnContextError, match="identity drifted"):
             await router.chat(
                 "owner",
                 _MESSAGE,
-                **_chat_kwargs(actor),
+                **_chat_kwargs(actor, context),
                 _authenticated_turn_context=other,
             )
         with pytest.raises(TurnContextError, match="identity drifted"):
             await wrapper.chat(
                 "owner",
                 _MESSAGE,
-                **_chat_kwargs(actor),
+                **_chat_kwargs(actor, context),
                 _authenticated_turn_context=other,
             )
         now[0] = context.inherited_budget.safety_deadline.monotonic_ns
@@ -255,18 +396,223 @@ async def test_router_rejects_suspended_stale_and_identity_drift_before_primary(
             await router.chat(
                 "owner",
                 _MESSAGE,
-                **_chat_kwargs(actor),
+                **_chat_kwargs(actor, context),
                 _authenticated_turn_context=context,
             )
         with pytest.raises(TurnContextError, match="deadline"):
             await wrapper.chat(
                 "owner",
                 _MESSAGE,
-                **_chat_kwargs(actor),
+                **_chat_kwargs(actor, context),
                 _authenticated_turn_context=context,
             )
 
     assert primary.calls == 0
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "drift",
+    [
+        "actor",
+        "conversation_id",
+        "message",
+        "attachments",
+        "enable_tools",
+        "synthetic_document_notice",
+        "replay_source_message_id",
+        "mode",
+        "answer_with_voice",
+        "reply_to",
+        "quoted_attachment_reference",
+        "reply_assistant_reference",
+        "reply_assistant_message_id",
+        "turn_policy",
+        "telegram_update_id",
+        "turn_deadline",
+        "_pending_durable_admission",
+    ],
+)
+async def test_every_authenticated_raw_call_drift_fails_before_primary(drift: str) -> None:
+    issuer, context, actor, _now = _authenticated_turn()
+    primary = _Primary()
+    router = OrchestrationRouter(
+        cast(Any, primary),
+        cast(Any, _Planner()),
+        mode=RouterMode.SHADOW,
+    )
+    kwargs = _chat_kwargs(actor, context)
+    message = _MESSAGE
+    if drift == "actor":
+        kwargs[drift] = dataclasses.replace(actor)
+    elif drift == "conversation_id":
+        kwargs[drift] = "conv_1111111111111111"
+    elif drift == "message":
+        message = f"{_MESSAGE} drift"
+    elif drift == "attachments":
+        kwargs[drift] = [{}]
+    elif drift in {
+        "enable_tools",
+        "synthetic_document_notice",
+        "answer_with_voice",
+        "quoted_attachment_reference",
+        "reply_assistant_reference",
+    }:
+        kwargs[drift] = drift != "enable_tools"
+    elif drift == "mode":
+        kwargs[drift] = "research"
+    elif drift == "turn_policy":
+        kwargs[drift] = TurnPolicyDecision(intent=TurnIntent.META_CAPABILITIES)
+    elif drift == "turn_deadline":
+        kwargs[drift] = float(kwargs[drift]) + 1.0
+    elif drift == "_pending_durable_admission":
+        kwargs[drift] = PendingDurableTurnAdmission.owned(
+            person_id="owner",
+            conversation_id=_CONVERSATION_ID,
+        )
+    else:
+        kwargs[drift] = "drifted-identity"
+
+    with bind_authenticated_turn_context(issuer, context), pytest.raises(
+        TurnContextError, match="authenticated turn|signed HTTP"
+    ):
+        await router.chat(
+            "owner",
+            message,
+            **kwargs,
+            _authenticated_turn_context=context,
+        )
+
+    assert primary.calls == 0
+
+
+@pytest.mark.asyncio
+async def test_sealed_router_mode_controls_legacy_and_nonlegacy_mismatch_closes() -> None:
+    mismatch_issuer, mismatch, mismatch_actor, _now = _authenticated_turn(
+        router_mode=RouterMode.SHADOW
+    )
+    mismatch_primary = _Primary()
+    mismatch_router = OrchestrationRouter(
+        cast(Any, mismatch_primary),
+        cast(Any, _Planner()),
+        mode=RouterMode.V12,
+    )
+    with bind_authenticated_turn_context(mismatch_issuer, mismatch), pytest.raises(
+        TurnContextError, match="router mode"
+    ):
+        await mismatch_router.chat(
+            "owner",
+            _MESSAGE,
+            **_chat_kwargs(mismatch_actor, mismatch),
+            _authenticated_turn_context=mismatch,
+        )
+    assert mismatch_primary.calls == 0
+
+    pending = PendingDurableTurnAdmission.owned(
+        person_id="owner",
+        conversation_id=_CONVERSATION_ID,
+    )
+    issuer, context, actor, _now = _authenticated_turn(
+        router_mode=RouterMode.V12,
+        pending=pending,
+    )
+    primary = _Primary()
+    router = OrchestrationRouter(
+        cast(Any, primary),
+        cast(Any, _Planner()),
+        mode=RouterMode.V12,
+    )
+    kwargs = _chat_kwargs(actor, context)
+    with bind_authenticated_turn_context(issuer, context):
+        result = await router.chat(
+            "owner",
+            _MESSAGE,
+            **kwargs,
+            _authenticated_turn_context=context,
+        )
+        wrong = dict(kwargs)
+        wrong["_pending_durable_admission"] = dataclasses.replace(pending)
+        with pytest.raises(TurnContextError, match="pending-work"):
+            await router.chat(
+                "owner",
+                _MESSAGE,
+                **wrong,
+                _authenticated_turn_context=context,
+            )
+    assert result["message"] == "primary"
+    assert primary.last_kwargs["_pending_durable_admission"] is pending
+
+
+@pytest.mark.asyncio
+async def test_telegram_update_must_be_the_exact_authenticated_update() -> None:
+    issuer, context, actor, _now = _authenticated_turn(
+        router_mode=RouterMode.LEGACY,
+        telegram=True,
+    )
+    primary = _Primary()
+    router = OrchestrationRouter(
+        cast(Any, primary),
+        cast(Any, _Planner()),
+        mode=RouterMode.V12,
+    )
+    kwargs = _chat_kwargs(actor, context)
+    with bind_authenticated_turn_context(issuer, context):
+        await router.chat(
+            "owner",
+            _MESSAGE,
+            **kwargs,
+            _authenticated_turn_context=context,
+        )
+        wrong = dict(kwargs)
+        wrong["telegram_update_id"] = "999999999"
+        with pytest.raises(TurnContextError, match="Telegram update"):
+            await router.chat(
+                "owner",
+                _MESSAGE,
+                **wrong,
+                _authenticated_turn_context=context,
+            )
+    assert primary.calls == 1
+
+
+def test_v12_attachment_refs_use_exact_context_token_and_reject_equal_replacement() -> None:
+    issuer, context, actor, carrier = _authenticated_attachment_turn()
+    kwargs: dict[str, Any] = {
+        "user_id": "owner",
+        "message": context.model_input.message,
+        "actor": actor,
+        "conversation_id": _CONVERSATION_ID,
+        "attachments": [carrier],
+        "enable_tools": True,
+        "synthetic_document_notice": False,
+        "replay_source_message_id": None,
+        "mode": None,
+        "answer_with_voice": False,
+        "reply_to": None,
+        "quoted_attachment_reference": False,
+        "reply_assistant_reference": False,
+        "reply_assistant_message_id": None,
+        "turn_policy": None,
+        "telegram_update_id": None,
+        "turn_deadline": (
+            context.inherited_budget.safety_deadline.monotonic_ns / 1_000_000_000
+        ),
+        "pending_durable_admission": None,
+        "runtime_router_mode": RouterMode.V12,
+    }
+    with bind_authenticated_turn_context(issuer, context):
+        scope = require_authenticated_chat_call_scope(context, **kwargs)
+        references = _authenticated_attachment_references(scope)
+        token = context.authorized_sources[1].private_carrier
+        assert references[0].raw_object_id == token.raw_id
+        assert references[0].source_identity_sha256 == token.source_identity_sha256
+
+        replacement = dataclasses.replace(token)
+        clone = _AttachmentCarrier(carrier)
+        object.__setattr__(clone, "_current_turn_file_reference", replacement)
+        kwargs["attachments"] = [clone]
+        with pytest.raises(TurnContextError, match="attachment carrier"):
+            require_authenticated_chat_call_scope(context, **kwargs)
 
 
 @pytest.mark.asyncio
@@ -282,6 +628,16 @@ async def test_semantic_wrapper_uses_exact_turn_and_retains_no_authenticated_sco
         primary=cast(Any, primary),
         scheduler=cast(Any, scheduler),
     )
+    callback_contexts: list[AuthenticatedTurnContext | None] = []
+    original_done = wrapper._shadow_done
+
+    def observed_done(task: asyncio.Task[None]) -> None:
+        callback_contexts.append(current_authenticated_turn_context())
+        with pytest.raises(TurnContextError, match="primary authority"):
+            current_primary_authenticated_turn_context()
+        original_done(task)
+
+    monkeypatch.setattr(wrapper, "_shadow_done", observed_done)
     seen_turns: list[TurnInput] = []
     original = supervisor_runtime_module.build_supervisor_input
 
@@ -295,7 +651,7 @@ async def test_semantic_wrapper_uses_exact_turn_and_retains_no_authenticated_sco
         result = await wrapper.chat(
             "owner",
             _MESSAGE,
-            **_chat_kwargs(actor),
+            **_chat_kwargs(actor, context),
             _authenticated_turn_context=context,
         )
         while scheduler.calls == 0:
@@ -307,11 +663,13 @@ async def test_semantic_wrapper_uses_exact_turn_and_retains_no_authenticated_sco
         assert job.prepared.conversation_id is None
         gate.set()
         await wrapper.drain_shadow()
+        await asyncio.sleep(0)
 
     assert result["message"] == "primary"
     assert primary.last_kwargs["_authenticated_turn_context"] is context
     assert seen_turns and all(turn is context.model_input for turn in seen_turns)
     assert scheduler.detached_primary_closed is True
+    assert callback_contexts == [None]
 
 
 @pytest.mark.asyncio
@@ -331,7 +689,7 @@ async def test_router_and_semantic_wrapper_share_one_authenticated_advisory_slot
         result = await wrapper.chat(
             "owner",
             _MESSAGE,
-            **_chat_kwargs(actor),
+            **_chat_kwargs(actor, context),
             _authenticated_turn_context=context,
         )
         await router.drain_shadow()

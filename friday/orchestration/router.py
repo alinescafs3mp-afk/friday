@@ -32,6 +32,10 @@ from friday.orchestration.file_read_contract import (
 )
 from friday.orchestration.planner import AttestedPlannerRuntime, PlannerModel, V12Planner
 from friday.orchestration.turn_context import AuthenticatedTurnContext, TurnContextError
+from friday.orchestration.turn_context_call_scope import (
+    AuthenticatedChatCallScope,
+    require_authenticated_chat_call_scope,
+)
 from friday.orchestration.turn_context_runtime import (
     current_primary_authenticated_turn_context,
     reserve_authenticated_advisory_call,
@@ -413,26 +417,36 @@ def current_attachment_references(
     return tuple(references)
 
 
-def _require_authenticated_chat_scope(
-    context: AuthenticatedTurnContext,
-    *,
-    user_id: str,
-    message: str,
-    actor: ActorContext,
-    conversation_id: str | None,
-) -> TurnInput:
-    """Reject raw-call drift while retaining the one issued model projection."""
+def _authenticated_attachment_references(
+    scope: AuthenticatedChatCallScope,
+) -> tuple[ReadOnlyAttachmentReference, ...]:
+    """Project only exact context-owned current-upload tokens into V12 refs."""
 
-    turn = context.model_input
-    if (
-        context.authority.actor is not actor
-        or context.authority.tenant_id != user_id
-        or context.authority.conversation_id != conversation_id
-        or turn.message_truncated
-        or turn.message != message
+    references: list[ReadOnlyAttachmentReference] = []
+    for carrier, descriptor, source in zip(
+        scope.attachment_carriers,
+        scope.model_input.attachments,
+        scope.attachment_sources,
+        strict=True,
     ):
-        raise TurnContextError("authenticated turn does not match the router call scope")
-    return turn
+        token = source.private_carrier
+        if (
+            type(token) is not CurrentTurnFileReferenceToken
+            or current_turn_file_reference_of(carrier) is not token
+            or carrier.get("persisted") is not True
+            or carrier.get("current_turn_only") is not True
+        ):
+            raise TurnContextError("authenticated V12 attachment authority drifted")
+        references.append(
+            ReadOnlyAttachmentReference(
+                ordinal=descriptor.ordinal,
+                raw_object_id=token.raw_id,
+                source_identity_sha256=token.source_identity_sha256,
+                name=descriptor.name,
+                media_type=descriptor.media_type,
+            )
+        )
+    return tuple(references)
 
 
 class OrchestrationRouter:
@@ -539,9 +553,9 @@ class OrchestrationRouter:
             LOGGER.warning("v12 planner rejected; retaining legacy (%s)", type(exc).__name__)
             return None
 
-    def _actor_canary_eligible(self, actor: ActorContext) -> bool:
+    def _actor_canary_eligible(self, actor: ActorContext, *, mode: RouterMode) -> bool:
         return bool(
-            self.mode is RouterMode.V12
+            mode is RouterMode.V12
             or actor.own_id in self._canary_user_ids
             or (actor.is_owner and "owner" in self._canary_user_ids)
         )
@@ -722,8 +736,11 @@ class OrchestrationRouter:
                 self._complete_shadow_plan(turn, turn_deadline=turn_deadline, started=started),
                 name="friday-v12-shadow-plan",
             )
-        self._shadow_tasks.add(task)
-        task.add_done_callback(self._shadow_done)
+            self._shadow_tasks.add(task)
+            # asyncio captures the registration Context for callbacks too.
+            # Register under suspension so task teardown cannot regain the
+            # primary/effect authority that detached advisory work lacks.
+            task.add_done_callback(self._shadow_done)
 
     def _shadow_done(self, task: asyncio.Task[None]) -> None:
         self._shadow_tasks.discard(task)
@@ -779,16 +796,40 @@ class OrchestrationRouter:
         authenticated_context = current_primary_authenticated_turn_context(
             _authenticated_turn_context
         )
-        authenticated_turn = (
-            _require_authenticated_chat_scope(
+        authenticated_scope = (
+            require_authenticated_chat_call_scope(
                 authenticated_context,
                 user_id=user_id,
                 message=message,
                 actor=actor,
                 conversation_id=conversation_id,
+                attachments=attachments,
+                enable_tools=enable_tools,
+                synthetic_document_notice=synthetic_document_notice,
+                replay_source_message_id=replay_source_message_id,
+                mode=mode,
+                answer_with_voice=answer_with_voice,
+                reply_to=reply_to,
+                quoted_attachment_reference=quoted_attachment_reference,
+                reply_assistant_reference=reply_assistant_reference,
+                reply_assistant_message_id=reply_assistant_message_id,
+                turn_policy=turn_policy,
+                telegram_update_id=telegram_update_id,
+                turn_deadline=turn_deadline,
+                pending_durable_admission=_pending_durable_admission,
+                runtime_router_mode=self.mode,
             )
             if authenticated_context is not None
             else None
+        )
+        authenticated_turn = (
+            authenticated_scope.model_input if authenticated_scope is not None else None
+        )
+        routing_mode = authenticated_scope.router_mode if authenticated_scope is not None else self.mode
+        effective_turn_deadline = (
+            authenticated_scope.deadline_monotonic
+            if authenticated_scope is not None
+            else turn_deadline
         )
         legacy_kwargs = {
             "actor": actor,
@@ -807,14 +848,19 @@ class OrchestrationRouter:
             "reply_assistant_reference": reply_assistant_reference,
             "reply_assistant_message_id": reply_assistant_message_id,
             "telegram_update_id": telegram_update_id,
-            "turn_deadline": turn_deadline,
+            "turn_deadline": effective_turn_deadline,
         }
         if authenticated_context is not None:
             legacy_kwargs["_authenticated_turn_context"] = authenticated_context
         if telegram_update_id is not None:
             legacy_kwargs["telegram_update_id"] = telegram_update_id
-        carried_durable_admission: PendingDurableTurnAdmission | None = None
-        if _pending_durable_admission is not None:
+        carried_durable_admission: PendingDurableTurnAdmission | None = (
+            authenticated_context.pending_work_admission.admission
+            if authenticated_context is not None
+            and authenticated_context.pending_work_admission is not None
+            else None
+        )
+        if authenticated_context is None and _pending_durable_admission is not None:
             person_id = actor.own_id if actor.shared_tenant else user_id
             if _pending_durable_admission.matches_scope(
                 person_id=person_id,
@@ -824,6 +870,11 @@ class OrchestrationRouter:
                 legacy_kwargs["_pending_durable_admission"] = carried_durable_admission
         if turn_policy is not None:
             legacy_kwargs["turn_policy"] = turn_policy
+        if authenticated_context is not None and routing_mode is RouterMode.LEGACY:
+            if carried_durable_admission is not None:
+                legacy_kwargs["_pending_durable_admission"] = carried_durable_admission
+            _observe_legacy_capability_owner()
+            return await self._legacy.chat(user_id, message, **legacy_kwargs)
         if turn_policy is not None and turn_policy.handled:
             _observe_legacy_capability_owner()
             return await self._legacy.chat(user_id, message, **legacy_kwargs)
@@ -832,7 +883,7 @@ class OrchestrationRouter:
             # Owner workbench: never a V12 file/archive judge, never a shadow plan.
             _observe_legacy_capability_owner()
             return await self._legacy.chat(user_id, message, **legacy_kwargs)
-        if self.mode is RouterMode.LEGACY:
+        if routing_mode is RouterMode.LEGACY:
             _observe_legacy_capability_owner()
             return await self._legacy.chat(user_id, message, **legacy_kwargs)
 
@@ -842,23 +893,29 @@ class OrchestrationRouter:
         # scalar reply or one process-owned current upload for an existing
         # comparison q1. Reply/replay, voice, mode and policy surfaces remain
         # outside this optional compatibility boundary.
-        comparison_attachment_count = pending_comparison_current_attachment_count(attachments)
-        plain_durable_surface = bool(
-            (not attachments or comparison_attachment_count == 1)
-            and enable_tools is True
-            and ingestion_result is None
-            and synthetic_document_notice is False
-            and replay_source_message_id is None
-            and answer_with_voice is False
-            and reply_to is None
-            and quoted_attachment_reference is False
-            and reply_assistant_reference is False
-            and reply_assistant_message_id is None
-            and turn_policy is None
-            and mode is None
-        )
+        if authenticated_context is not None:
+            comparison_attachment_count = 0
+            plain_durable_surface = False
+        else:
+            comparison_attachment_count = pending_comparison_current_attachment_count(attachments)
+            plain_durable_surface = bool(
+                (not attachments or comparison_attachment_count == 1)
+                and enable_tools is True
+                and ingestion_result is None
+                and synthetic_document_notice is False
+                and replay_source_message_id is None
+                and answer_with_voice is False
+                and reply_to is None
+                and quoted_attachment_reference is False
+                and reply_assistant_reference is False
+                and reply_assistant_message_id is None
+                and turn_policy is None
+                and mode is None
+            )
         durable_receipt: PendingDurableTurnAdmission | bool | None
-        if _pending_durable_admission is not None:
+        if authenticated_context is not None:
+            durable_receipt = False
+        elif _pending_durable_admission is not None:
             durable_receipt = carried_durable_admission
         else:
             if plain_durable_surface:
@@ -904,7 +961,10 @@ class OrchestrationRouter:
             _observe_legacy_capability_owner()
             return await self._legacy.chat(user_id, message, **legacy_kwargs)
 
-        if self.mode is RouterMode.CANARY and not self._actor_canary_eligible(actor):
+        if routing_mode is RouterMode.CANARY and not self._actor_canary_eligible(
+            actor,
+            mode=routing_mode,
+        ):
             self._observe(
                 started=started,
                 status="actor_not_in_canary",
@@ -913,7 +973,7 @@ class OrchestrationRouter:
             )
             _observe_legacy_capability_owner()
             return await self._legacy.chat(user_id, message, **legacy_kwargs)
-        if self.mode in {RouterMode.CANARY, RouterMode.V12} and answer_with_voice:
+        if routing_mode in {RouterMode.CANARY, RouterMode.V12} and answer_with_voice:
             self._observe(
                 started=started,
                 status="voice_not_in_canary",
@@ -940,17 +1000,21 @@ class OrchestrationRouter:
             quoted_attachment_reference=quoted_attachment_reference,
             reply_assistant_reference=reply_assistant_reference,
         )
-        attachment_references = current_attachment_references(
-            turn,
-            attachment_snapshots,
-            attachment_tokens,
+        attachment_references = (
+            _authenticated_attachment_references(authenticated_scope)
+            if authenticated_scope is not None
+            else current_attachment_references(
+                turn,
+                attachment_snapshots,
+                attachment_tokens,
+            )
         )
-        if self.mode is RouterMode.SHADOW:
+        if routing_mode is RouterMode.SHADOW:
             _observe_legacy_capability_owner()
             result = await self._legacy.chat(user_id, message, **legacy_kwargs)
             self._schedule_shadow_plan(
                 turn,
-                turn_deadline=turn_deadline,
+                turn_deadline=effective_turn_deadline,
                 started=started,
                 authenticated_context=authenticated_context,
             )
@@ -962,8 +1026,8 @@ class OrchestrationRouter:
         # turn for a meaningful legacy fallback. Near the boundary we do not
         # sample at all; planning is optional, the proven runtime is not.
         if (
-            turn_deadline is not None
-            and turn_deadline - time.monotonic()
+            effective_turn_deadline is not None
+            and effective_turn_deadline - time.monotonic()
             <= self._planner_timeout_sec + preparation_budget + legacy_reserve
         ):
             self._observe(
@@ -976,7 +1040,7 @@ class OrchestrationRouter:
             return await self._legacy.chat(user_id, message, **legacy_kwargs)
 
         _observe_failure_stage(FailureStage.PLANNING)
-        plan = await self._try_plan(turn, turn_deadline=turn_deadline, attested=True)
+        plan = await self._try_plan(turn, turn_deadline=effective_turn_deadline, attested=True)
         handler = self._route_handlers.get(plan.route) if plan is not None else None
         eligible = bool(
             plan is not None
@@ -998,7 +1062,10 @@ class OrchestrationRouter:
                 plan=plan,
                 selected_runtime="legacy",
             )
-            if turn_deadline is not None and turn_deadline - time.monotonic() < legacy_reserve:
+            if (
+                effective_turn_deadline is not None
+                and effective_turn_deadline - time.monotonic() < legacy_reserve
+            ):
                 raise TimeoutError("legacy fallback reserve was exhausted during V12 planning")
             _observe_legacy_capability_owner()
             return await self._legacy.chat(user_id, message, **legacy_kwargs)
@@ -1006,7 +1073,7 @@ class OrchestrationRouter:
         assert handler is not None and plan is not None  # narrowed by the predicate above
         _observe_failure_route(plan.route.value)
         _observe_failure_stage(FailureStage.CAPABILITY)
-        handler_deadline = turn_deadline or (time.monotonic() + self._route_timeout_sec)
+        handler_deadline = effective_turn_deadline or (time.monotonic() + self._route_timeout_sec)
         remaining = handler_deadline - time.monotonic()
         if remaining <= 0:
             raise TimeoutError("V12 route deadline expired before handler admission")
@@ -1041,7 +1108,10 @@ class OrchestrationRouter:
                 plan=plan,
                 selected_runtime="legacy",
             )
-            if turn_deadline is not None and turn_deadline - time.monotonic() < legacy_reserve:
+            if (
+                effective_turn_deadline is not None
+                and effective_turn_deadline - time.monotonic() < legacy_reserve
+            ):
                 raise TimeoutError("legacy fallback reserve was exhausted during V12 admission") from exc
             _observe_legacy_capability_owner()
             return await self._legacy.chat(user_id, message, **legacy_kwargs)
@@ -1056,7 +1126,10 @@ class OrchestrationRouter:
                 plan=plan,
                 selected_runtime="legacy",
             )
-            if turn_deadline is not None and turn_deadline - time.monotonic() < legacy_reserve:
+            if (
+                effective_turn_deadline is not None
+                and effective_turn_deadline - time.monotonic() < legacy_reserve
+            ):
                 raise TimeoutError("legacy fallback reserve was exhausted during V12 admission")
             _observe_legacy_capability_owner()
             return await self._legacy.chat(user_id, message, **legacy_kwargs)
@@ -1075,7 +1148,10 @@ class OrchestrationRouter:
                 plan=plan,
                 selected_runtime="legacy",
             )
-            if turn_deadline is not None and turn_deadline - time.monotonic() < legacy_reserve:
+            if (
+                effective_turn_deadline is not None
+                and effective_turn_deadline - time.monotonic() < legacy_reserve
+            ):
                 raise TimeoutError(
                     "legacy fallback reserve was exhausted during V12 authority check"
                 ) from exc
@@ -1088,7 +1164,10 @@ class OrchestrationRouter:
                 plan=plan,
                 selected_runtime="legacy",
             )
-            if turn_deadline is not None and turn_deadline - time.monotonic() < legacy_reserve:
+            if (
+                effective_turn_deadline is not None
+                and effective_turn_deadline - time.monotonic() < legacy_reserve
+            ):
                 raise TimeoutError("legacy fallback reserve was exhausted during V12 authority check")
             _observe_legacy_capability_owner()
             return await self._legacy.chat(user_id, message, **legacy_kwargs)
