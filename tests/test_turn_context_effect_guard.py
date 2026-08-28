@@ -2,11 +2,13 @@ from __future__ import annotations
 
 import hashlib
 import itertools
+import threading
 from collections.abc import Callable
 from contextvars import copy_context
 
 import pytest
 
+import friday.execution_kernel as execution_kernel_module
 from friday.execution_kernel import (
     ExecutionKernel,
     ToolSpec,
@@ -34,6 +36,7 @@ from friday.orchestration.turn_context_runtime import (
     suspend_authenticated_turn_context,
 )
 from friday.permissions import ActorContext, AuthorizationError
+from friday.storage.models import AuditEntry
 from friday.turn_intent_policy import TurnIntent, TurnPolicyDecision
 
 _SERIALS = itertools.count(100_000)
@@ -50,7 +53,10 @@ class _AllowAll:
         return False
 
 
-def _authenticated_turn() -> tuple[
+def _authenticated_turn(
+    *,
+    clock_events: list[tuple[str, int]] | None = None,
+) -> tuple[
     TurnContextIssuer,
     AuthenticatedTurnContext,
     list[int],
@@ -58,9 +64,15 @@ def _authenticated_turn() -> tuple[
 ]:
     serial = next(_SERIALS)
     now = [_BASE_NOW_NS + serial]
+
+    def monotonic_ns() -> int:
+        if clock_events is not None:
+            clock_events.append(("clock", threading.get_ident()))
+        return now[0]
+
     issuer = TurnContextIssuer(
         hashlib.sha256(f"effect-guard-namespace-{serial}".encode("ascii")).digest(),
-        _monotonic_ns=lambda: now[0],
+        _monotonic_ns=monotonic_ns,
     )
     actor = ActorContext(
         user_id="owner",
@@ -400,6 +412,8 @@ def test_confirm_and_rollback_require_exact_live_staged_authority() -> None:
         return True
 
     digest = context.effect_fence.request_effect_binding_sha256
+    connection_a = object()
+    connection_b = object()
     with (
         track_request_effects(
             lambda: True,
@@ -411,8 +425,11 @@ def test_confirm_and_rollback_require_exact_live_staged_authority() -> None:
     ):
         confirm_staged_request_effect()
         assert original.possible is False
-        assert stage_request_effect_possible_in_transaction(object()) is True
+        assert stage_request_effect_possible_in_transaction(connection_a) is True
         assert original.staged is True
+        assert stage_request_effect_possible_in_transaction(connection_b) is False
+        confirm_staged_request_effect()
+        assert original.possible is False
 
         with track_request_effects(lambda: True, request_binding_sha256=digest) as replacement:
             replacement.staged = True
@@ -427,12 +444,31 @@ def test_confirm_and_rollback_require_exact_live_staged_authority() -> None:
             rollback_staged_request_effect()
         assert original.possible is False
         assert original.staged is True
+        assert stage_request_effect_possible_in_transaction(connection_a) is False
 
         confirm_staged_request_effect()
-        assert original.possible is True
+        assert original.possible is False
+        assert original.staged is True
+        rollback_staged_request_effect()
         assert original.staged is False
 
-    assert callback_calls == 1
+    confirm_issuer, confirm_context, _confirm_now, _confirm_actor = _authenticated_turn()
+    confirm_digest = confirm_context.effect_fence.request_effect_binding_sha256
+    with (
+        track_request_effects(
+            lambda: True,
+            before_effect_in_transaction=stage_callback,
+            request_binding_sha256=confirm_digest,
+        ) as confirm_effects,
+        bind_authenticated_turn_context(confirm_issuer, confirm_context),
+        bind_authenticated_request_effect_authority(confirm_effects),
+    ):
+        assert stage_request_effect_possible_in_transaction(object()) is True
+        confirm_staged_request_effect()
+        assert confirm_effects.possible is True
+        assert confirm_effects.staged is False
+
+    assert callback_calls == 2
 
 
 def test_inherited_request_effect_witness_is_revoked_when_its_scope_exits() -> None:
@@ -461,9 +497,73 @@ def test_inherited_request_effect_witness_is_revoked_when_its_scope_exits() -> N
 class _AuditSpyStorage:
     def __init__(self) -> None:
         self.audit_calls = 0
+        self.audit_entries: list[AuditEntry] = []
 
-    def log_audit(self, _entry: object) -> None:
+    def log_audit(self, entry: AuditEntry) -> None:
         self.audit_calls += 1
+        self.audit_entries.append(entry)
+
+
+def test_authenticated_audit_projection_is_exact_body_free_and_unspoofable() -> None:
+    issuer, context, _now, actor = _authenticated_turn()
+    storage = _AuditSpyStorage()
+    kernel = ExecutionKernel(_AllowAll())  # type: ignore[arg-type]
+    kernel.bind_services(storage, object(), object(), object())  # type: ignore[arg-type]
+
+    with (
+        track_request_effects(
+            lambda: True,
+            request_binding_sha256=context.effect_fence.request_effect_binding_sha256,
+        ) as effects,
+        bind_authenticated_turn_context(issuer, context),
+        bind_authenticated_request_effect_authority(effects),
+    ):
+        kernel._audit_now(  # noqa: SLF001
+            actor,
+            "guard_audit_projection",
+            True,
+            "ok",
+            details={
+                "turn_id": "spoofed-turn",
+                "context_authority_sha256": "a" * 64,
+                "request_effect_binding_sha256": "b" * 64,
+                "safe_count": 3,
+            },
+        )
+
+    assert storage.audit_calls == 1
+    assert storage.audit_entries[0].after_json == {
+        "success": True,
+        "reason": "ok",
+        "source": actor.source,
+        "turn_id": context.turn_id,
+        "context_authority_sha256": context.context_authority_sha256,
+        "request_effect_binding_sha256": (context.effect_fence.request_effect_binding_sha256),
+        "safe_count": 3,
+    }
+
+
+def test_legacy_audit_projection_bytes_are_unchanged() -> None:
+    actor = ActorContext(user_id="legacy-audit", preset_key="owner", source="test")
+    storage = _AuditSpyStorage()
+    kernel = ExecutionKernel(_AllowAll())  # type: ignore[arg-type]
+    kernel.bind_services(storage, object(), object(), object())  # type: ignore[arg-type]
+
+    kernel._audit_now(  # noqa: SLF001
+        actor,
+        "legacy_audit_projection",
+        False,
+        "legacy_reason",
+        details={"custom": "legacy-value"},
+    )
+
+    assert storage.audit_calls == 1
+    assert storage.audit_entries[0].after_json == {
+        "success": False,
+        "reason": "legacy_reason",
+        "source": "test",
+        "custom": "legacy-value",
+    }
 
 
 @pytest.mark.asyncio
@@ -637,6 +737,277 @@ async def test_expiry_during_approved_read_blocks_claim_audit_and_handler() -> N
 
 
 @pytest.mark.asyncio
+async def test_approval_reads_and_effects_revalidate_inside_the_worker_thread(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    events: list[tuple[str, int]] = []
+    issuer, context, _now, actor = _authenticated_turn(clock_events=events)
+    main_thread = threading.get_ident()
+
+    class _ApprovalWorkerStorage(_AuditSpyStorage):
+        def _guarded_worker_call(self, label: str) -> None:
+            worker = threading.get_ident()
+            assert worker != main_thread
+            assert events[-1] == ("clock", worker)
+            events.append((label, worker))
+
+        def summary_read(self) -> str:
+            self._guarded_worker_call("summary_read")
+            return "Exact guarded summary"
+
+        def create_action_approval(self, *_args: object, **_kwargs: object) -> dict[str, str]:
+            self._guarded_worker_call("approval_create")
+            return {
+                "id": "approval_guarded_worker",
+                "summary": "Exact guarded summary",
+            }
+
+        def notification_read(self) -> str:
+            self._guarded_worker_call("notification_read")
+            return "1001"
+
+        def notification_policy_read(self) -> bool:
+            self._guarded_worker_call("notification_policy_read")
+            return True
+
+        def enqueue_notification(self, *_args: object, **_kwargs: object) -> None:
+            self._guarded_worker_call("notification_enqueue")
+
+    storage = _ApprovalWorkerStorage()
+    kernel = ExecutionKernel(_AllowAll())  # type: ignore[arg-type]
+    kernel.settings = object()  # type: ignore[assignment]
+    kernel.bind_services(storage, object(), object(), object())  # type: ignore[arg-type]
+
+    def summary(
+        candidate_storage: _ApprovalWorkerStorage,
+        _user_id: str,
+        _name: str,
+        _arguments: dict[str, object],
+    ) -> str:
+        return candidate_storage.summary_read()
+
+    kernel._approval_summary = summary  # type: ignore[assignment]  # noqa: SLF001
+    monkeypatch.setattr(
+        "friday.organs.resolve_chat_id",
+        lambda candidate_storage, _user_id: candidate_storage.notification_read(),
+    )
+    monkeypatch.setattr(
+        "friday.organs.may_push_to",
+        lambda _settings, candidate_storage, _user_id, _chat_id: candidate_storage.notification_policy_read(),
+    )
+
+    async def never_called(*, actor: ActorContext) -> dict[str, bool]:
+        del actor
+        pytest.fail("an approval-gated handler ran")
+
+    kernel.register(
+        ToolSpec(
+            name="guard_worker_approval",
+            description="Exercise worker-thread approval boundaries.",
+            parameters={"type": "object", "properties": {}},
+            security_id="knowledge.read",
+            risk="high",
+            handler=never_called,
+            approval_predicate=lambda _arguments: True,
+            timeout_sec=1.0,
+        )
+    )
+
+    with (
+        track_request_effects(
+            lambda: True,
+            request_binding_sha256=context.effect_fence.request_effect_binding_sha256,
+        ) as effects,
+        bind_authenticated_turn_context(issuer, context),
+        bind_authenticated_request_effect_authority(effects),
+    ):
+        result = await kernel.execute("guard_worker_approval", {}, actor=actor)
+
+    assert result.success is False
+    assert result.data["status"] == "approval_required"
+    assert [label for label, _thread in events if label != "clock"] == [
+        "summary_read",
+        "approval_create",
+        "notification_read",
+        "notification_policy_read",
+        "notification_enqueue",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_resumability_read_revalidates_inside_the_worker_thread(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    events: list[tuple[str, int]] = []
+    issuer, context, _now, actor = _authenticated_turn(clock_events=events)
+    main_thread = threading.get_ident()
+    arguments: dict[str, object] = {
+        "job_id": "job_effect_guard",
+        "plan": {"kind": "inventory"},
+        "plan_digest": "c" * 64,
+    }
+
+    class _ResumabilityStorage(_AuditSpyStorage):
+        def get_action_approval(self, approval_id: str, _user_id: str) -> dict[str, object]:
+            return {
+                "id": approval_id,
+                "tool": "host_action_execute",
+                "status": "claimed",
+                "requested_by": actor.own_id,
+                "payload": arguments,
+            }
+
+        def claim_action_approval(self, *_args: object, **_kwargs: object) -> None:
+            return None
+
+    class _GuardedHostJobStore:
+        def __init__(self, _storage: object) -> None:
+            return None
+
+        def get(self, *_args: object, **_kwargs: object) -> None:
+            worker = threading.get_ident()
+            assert worker != main_thread
+            assert events[-1] == ("clock", worker)
+            events.append(("resumability_read", worker))
+            return None
+
+    async def never_called(*, actor: ActorContext, **_arguments: object) -> dict[str, bool]:
+        del actor, _arguments
+        pytest.fail("a non-resumable approved action ran")
+
+    monkeypatch.setattr("friday.host_control.jobs.HostJobStore", _GuardedHostJobStore)
+    storage = _ResumabilityStorage()
+    kernel = ExecutionKernel(_AllowAll())  # type: ignore[arg-type]
+    kernel.bind_services(storage, object(), object(), object())  # type: ignore[arg-type]
+    kernel.register(
+        ToolSpec(
+            name="host_action_execute",
+            description="Exercise worker-thread resumability guard.",
+            parameters={"type": "object", "properties": {}},
+            security_id="knowledge.read",
+            risk="high",
+            handler=never_called,
+            timeout_sec=1.0,
+        )
+    )
+
+    with (
+        track_request_effects(
+            lambda: True,
+            request_binding_sha256=context.effect_fence.request_effect_binding_sha256,
+        ) as effects,
+        bind_authenticated_turn_context(issuer, context),
+        bind_authenticated_request_effect_authority(effects),
+    ):
+        result = await kernel.execute_approved("approval-resumability", actor=actor)
+
+    assert result.success is False
+    assert "нельзя использовать" in str(result.error)
+    assert [label for label, _thread in events if label == "resumability_read"] == ["resumability_read"]
+
+
+@pytest.mark.asyncio
+async def test_expiry_after_approved_handler_blocks_postcondition_and_settlement(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    issuer, context, now, actor = _authenticated_turn()
+    verifier_calls = 0
+    finish_calls = 0
+    handler_calls = 0
+
+    class _PostconditionStorage(_AuditSpyStorage):
+        def get_action_approval(self, _approval_id: str, _user_id: str) -> dict[str, object]:
+            return {"tool": "guard_postcondition_race", "payload": {}}
+
+        def claim_action_approval(self, *_args: object, **_kwargs: object) -> dict[str, bool]:
+            return {"claimed": True}
+
+        def finish_action_approval(self, *_args: object, **_kwargs: object) -> None:
+            nonlocal finish_calls
+            finish_calls += 1
+
+    def verifier(
+        _storage: object,
+        _user_id: str,
+        _arguments: dict[str, object],
+    ) -> tuple[bool, str]:
+        nonlocal verifier_calls
+        verifier_calls += 1
+        return True, ""
+
+    async def handler(*, actor: ActorContext) -> dict[str, bool]:
+        nonlocal handler_calls
+        del actor
+        handler_calls += 1
+        now[0] = context.inherited_budget.safety_deadline.monotonic_ns + 1
+        return {"changed": True}
+
+    storage = _PostconditionStorage()
+    kernel = ExecutionKernel(_AllowAll())  # type: ignore[arg-type]
+    kernel.bind_services(storage, object(), object(), object())  # type: ignore[arg-type]
+    kernel.register(
+        ToolSpec(
+            name="guard_postcondition_race",
+            description="Expire authority before postcondition verification.",
+            parameters={"type": "object", "properties": {}},
+            security_id="knowledge.read",
+            risk="mutate",
+            handler=handler,
+        )
+    )
+    monkeypatch.setitem(
+        execution_kernel_module.POSTCONDITIONS,
+        "guard_postcondition_race",
+        verifier,
+    )
+
+    with (
+        track_request_effects(
+            lambda: True,
+            request_binding_sha256=context.effect_fence.request_effect_binding_sha256,
+        ) as effects,
+        bind_authenticated_turn_context(issuer, context),
+        bind_authenticated_request_effect_authority(effects),
+    ):
+        result = await kernel.execute_approved("approval-postcondition", actor=actor)
+
+    assert result.success is False
+    assert result.error == _AUTHORITY_ERROR
+    assert handler_calls == 1
+    assert verifier_calls == 0
+    assert finish_calls == 0
+    assert storage.audit_calls == 0
+
+
+@pytest.mark.asyncio
+async def test_legacy_unrelated_turn_context_error_is_not_translated() -> None:
+    actor = ActorContext(user_id="legacy-error", preset_key="owner", source="test")
+
+    class _UnrelatedTurnContextError(_AllowAll):
+        def require(self, _actor: ActorContext, _security_id: str) -> None:
+            raise TurnContextError("unrelated legacy contract failure")
+
+    async def handler(*, actor: ActorContext) -> dict[str, bool]:
+        del actor
+        return {"called": True}
+
+    kernel = ExecutionKernel(_UnrelatedTurnContextError())  # type: ignore[arg-type]
+    kernel.register(
+        ToolSpec(
+            name="legacy_unrelated_turn_context_error",
+            description="Legacy error translation probe.",
+            parameters={"type": "object", "properties": {}},
+            security_id="knowledge.read",
+            risk="observe",
+            handler=handler,
+        )
+    )
+
+    with pytest.raises(TurnContextError, match="unrelated legacy contract failure"):
+        await kernel.execute("legacy_unrelated_turn_context_error", {}, actor=actor)
+
+
+@pytest.mark.asyncio
 async def test_legacy_untracked_observe_and_mutate_behavior_is_unchanged() -> None:
     actor = ActorContext(user_id="legacy", preset_key="owner", source="test")
     observe_calls = 0
@@ -666,6 +1037,24 @@ async def test_legacy_untracked_observe_and_mutate_behavior_is_unchanged() -> No
     assert mutate_calls == 1
     assert mark_request_effect_possible() is True
     assert stage_request_effect_possible_in_transaction(object()) is True
+    legacy_stage_calls = 0
+
+    def legacy_stage(_connection: object) -> bool:
+        nonlocal legacy_stage_calls
+        legacy_stage_calls += 1
+        return True
+
+    with track_request_effects(
+        lambda: True,
+        before_effect_in_transaction=legacy_stage,
+    ) as legacy_staged_effects:
+        assert stage_request_effect_possible_in_transaction(object()) is True
+        # Historical un-authenticated callers used a boolean staged witness;
+        # exact connection identity is enforced only for authenticated turns.
+        assert stage_request_effect_possible_in_transaction(object()) is True
+        assert legacy_stage_calls == 1
+        rollback_staged_request_effect()
+        assert legacy_staged_effects.staged is False
     with track_request_effects(lambda: True) as legacy_effects:
         confirm_staged_request_effect()
         assert legacy_effects.possible is True
