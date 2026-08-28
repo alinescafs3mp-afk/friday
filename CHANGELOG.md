@@ -1,3 +1,16 @@
+## 0.207.68 — 2026-08-29
+
+### Authenticated turn context foundation
+
+- Adds immutable `AuthenticatedTurnContext v1` over the existing `TurnInput`
+  without changing its model-visible payload or current runtime behavior.
+- Binds ingress identity, authorized source identities, inherited budgets,
+  router policy, one pending-work owner and a primary-owned effect/publication
+  fence into one body-free authenticated contract.
+- Keeps uncertain work fail-closed and prevents fallback, secondary or
+  supervisor paths from reclassifying raw input, replaying effects or taking
+  final-publication authority.
+
 ## 0.207.67 — 2026-08-28
 
 ### Engineer activation recovery
