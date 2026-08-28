@@ -9,9 +9,11 @@ from dataclasses import dataclass, replace
 from datetime import datetime
 from functools import cache
 from pathlib import Path, PurePosixPath
-from typing import Any, NoReturn
+from typing import Any
 
 import pytest
+
+from tools import exact_release_evidence as exact_evidence
 
 ROOT = Path(__file__).resolve().parents[1]
 STATUS_PATH = ROOT / "outer_sol" / "PROJECT_BACKLOG.md"
@@ -97,7 +99,9 @@ _CHECK_ID_SUFFIXES_BY_CLASS = {
     "rollback evidence": ("activation_rollback",),
     "backup and restore evidence": ("clean_restore",),
 }
-_PROOF_REFS_BY_JOURNEY_CLASS = {
+# This v1 inventory exists only to prove that caller-declared outcomes remain
+# rejected.  Decisive v2 evidence uses exact_evidence.proof_refs exclusively.
+_LEGACY_SELF_DECLARED_PROOF_REFS_BY_JOURNEY_CLASS = {
     ("conversation_recall", "deterministic contract"): (
         "tests/test_message_window_runtime_integration.py::test_promoted_exact_window_is_deterministic_scoped_and_receipted",
     ),
@@ -198,22 +202,9 @@ _OBSERVATION_FIELDS = frozenset(
         "artifact_sha256",
     }
 )
-_RECEIPT_FIELDS = frozenset(
-    {
-        "$schema",
-        "journey_id",
-        "evidence_class",
-        "result",
-        "environment",
-        "observed_at_utc",
-        "check_ids",
-        "release",
-        "proofs",
-    }
-)
-_PROOF_FIELDS = frozenset({"runner", "test_ref", "test_source_sha256", "outcome"})
 _MANIFEST_SCHEMA = "friday.golden-journey-evidence.v1"
-_RECEIPT_SCHEMA = "friday.golden-journey-sanitized-receipt.v1"
+_RECEIPT_SCHEMA = exact_evidence.RECEIPT_SCHEMA
+_LEGACY_SELF_DECLARED_RECEIPT_SCHEMA = "friday.golden-journey-sanitized-receipt.v1"
 _SHA256 = re.compile(r"[0-9a-f]{64}")
 _CHECK_ID = re.compile(r"[a-z0-9][a-z0-9_.:-]{0,127}")
 _JOURNEY_ID = re.compile(r"[a-z][a-z0-9_]{1,63}")
@@ -324,6 +315,30 @@ def _exact_git_blob(source_commit: str, path_text: str) -> bytes:
     return blob.stdout
 
 
+@cache
+def _repository_head() -> str:
+    completed = subprocess.run(
+        ["git", "rev-parse", "--verify", "HEAD^{commit}"],
+        cwd=ROOT,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    head = completed.stdout.strip()
+    if completed.returncode != 0 or re.fullmatch(r"[0-9a-f]{40}", head) is None:
+        raise RegistryValidationError("repository evidence commit is unavailable")
+    return head
+
+
+def _require_committed_evidence(path_text: str, raw: bytes) -> None:
+    try:
+        committed = _exact_git_blob(_repository_head(), path_text)
+    except RegistryValidationError as exc:
+        raise RegistryValidationError("decisive evidence is not committed at exact HEAD") from exc
+    if raw != committed:
+        raise RegistryValidationError("decisive evidence differs from its exact HEAD blob")
+
+
 def _release_identity(markdown: str) -> ReleaseIdentity:
     commit = re.search(r"Deployed implementation head: `([0-9a-f]{40})`", markdown)
     live = re.search(
@@ -352,6 +367,8 @@ def _parse_claim(cell: str) -> EvidenceClaim:
 
 
 def _parse_limitations(cell: str) -> tuple[str, ...]:
+    if cell == "":
+        return ()
     limitations = tuple(re.findall(r"`([^`]+)`", cell))
     if (
         not limitations
@@ -484,7 +501,17 @@ def _exact_git_test_source(test_ref: str, *, source_commit: str) -> bytes:
     if test_ref.count("::") != 1:
         raise RegistryValidationError("proof reference is not one executable test node id")
     path_text, locator = test_ref.split("::", maxsplit=1)
-    if not path_text.startswith("tests/test_") or _TEST_NAME.fullmatch(locator) is None:
+    function_name, separator, parameter_id = locator.partition("[")
+    parameter_valid = not separator or (
+        locator.endswith("]")
+        and parameter_id
+        and not any(character in "\x00\r\n" for character in parameter_id)
+    )
+    if (
+        not path_text.startswith("tests/test_")
+        or _TEST_NAME.fullmatch(function_name) is None
+        or not parameter_valid
+    ):
         raise RegistryValidationError("proof reference is not a canonical pytest node id")
     raw = _exact_git_blob(source_commit, path_text)
     try:
@@ -495,7 +522,7 @@ def _exact_git_test_source(test_ref: str, *, source_commit: str) -> bytes:
     test_names = {
         node.name for node in module.body if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
     }
-    if locator not in test_names:
+    if function_name not in test_names:
         raise RegistryValidationError("proof node id is absent at the manifest source commit")
     return raw
 
@@ -565,14 +592,14 @@ def _validate_canonical_utc(value: object) -> None:
         raise RegistryValidationError("evidence time is not an offset-aware UTC instant")
 
 
-def _expected_executable_proofs(
+def _legacy_self_declared_proofs(
     *,
     journey_id: str,
     evidence_class: str,
     expected_result: str,
     manifest_identity: ReleaseIdentity,
 ) -> list[dict[str, str]]:
-    expected_refs = _PROOF_REFS_BY_JOURNEY_CLASS.get((journey_id, evidence_class), ())
+    expected_refs = _LEGACY_SELF_DECLARED_PROOF_REFS_BY_JOURNEY_CLASS.get((journey_id, evidence_class), ())
     if not expected_refs:
         raise RegistryValidationError("journey class has no closed executable proof inventory")
     if any(test_ref in _GENERIC_OPERATOR_REFS for test_ref in expected_refs):
@@ -593,29 +620,6 @@ def _expected_executable_proofs(
             }
         )
     return result
-
-
-def _validate_executable_proofs(
-    proofs: object,
-    *,
-    journey_id: str,
-    evidence_class: str,
-    expected_result: str,
-    manifest_identity: ReleaseIdentity,
-) -> list[dict[str, str]]:
-    expected = _expected_executable_proofs(
-        journey_id=journey_id,
-        evidence_class=evidence_class,
-        expected_result=expected_result,
-        manifest_identity=manifest_identity,
-    )
-    if (
-        type(proofs) is not list
-        or any(not isinstance(proof, dict) or frozenset(proof) != _PROOF_FIELDS for proof in proofs)
-        or proofs != expected
-    ):
-        raise RegistryValidationError("executable proof is not bound to exact test bytes and node id")
-    return expected
 
 
 def _validate_sanitized_receipt(
@@ -645,37 +649,33 @@ def _validate_sanitized_receipt(
         raise RegistryValidationError("sanitized receipt path is not the deterministic closed artifact_ref")
     artifact_path = _safe_repo_path(artifact_ref, root=repo_root)
     raw = artifact_path.read_bytes()
+    if repo_root.resolve() == ROOT.resolve():
+        _require_committed_evidence(artifact_ref, raw)
     if not raw or len(raw) > 65_536:
         raise RegistryValidationError("sanitized receipt exceeds its public size bound")
     if hashlib.sha256(raw).hexdigest() != observation.get("artifact_sha256"):
         raise RegistryValidationError("sanitized receipt digest does not match its actual bytes")
     try:
-        receipt = json.loads(raw, object_pairs_hook=_closed_json_object)
-    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
-        raise RegistryValidationError("sanitized receipt is not closed JSON") from exc
-    if raw != _canonical_json_bytes(receipt):
-        raise RegistryValidationError("sanitized receipt is not canonical JSON")
-    if not isinstance(receipt, dict) or frozenset(receipt) != _RECEIPT_FIELDS:
-        raise RegistryValidationError("sanitized receipt violates the privacy allowlist")
-    expected_proofs = _validate_executable_proofs(
-        receipt.get("proofs"),
-        journey_id=journey_id,
-        evidence_class=evidence_class,
-        expected_result=expected_result,
-        manifest_identity=manifest_identity,
-    )
-    expected_receipt = {
-        "$schema": artifact_schema,
-        "check_ids": _expected_check_ids(journey_id, evidence_class),
-        "environment": ENVIRONMENT_BY_CLASS[evidence_class],
-        "evidence_class": evidence_class,
-        "journey_id": journey_id,
-        "observed_at_utc": observation.get("observed_at_utc"),
-        "proofs": expected_proofs,
-        "release": _release_payload(manifest_identity),
-        "result": expected_result,
-    }
-    if receipt != expected_receipt:
+        receipt = exact_evidence.validate_receipt(
+            raw,
+            expected_release=exact_evidence.ReleaseIdentity(
+                source_commit=manifest_identity.source_commit,
+                tree_sha256=manifest_identity.tree_sha256,
+                wheel_sha256=manifest_identity.wheel_sha256,
+                database_schema=manifest_identity.database_schema,
+            ),
+            expected_journey_id=journey_id,
+            expected_evidence_class=evidence_class,
+            repo_root=ROOT,
+        )
+    except exact_evidence.ExactReleaseEvidenceError as exc:
+        raise RegistryValidationError(
+            f"sanitized receipt is not exact machine-produced evidence: {exc}"
+        ) from exc
+    if (
+        receipt.get("observed_at_utc") != observation.get("observed_at_utc")
+        or receipt.get("result") != expected_result
+    ):
         raise RegistryValidationError("sanitized receipt does not match the manifest's closed claim")
 
 
@@ -689,7 +689,7 @@ def _validate_manifest_payload(
     require_current: bool,
     repo_root: Path,
     expected_result: str = "VERIFIED",
-) -> NoReturn:
+) -> None:
     if (
         journey_id not in CURRENT_JOURNEYS
         or evidence_class not in EVIDENCE_CLASSES
@@ -751,7 +751,7 @@ def _validate_manifest_payload(
     )
     if require_current and manifest_identity != current:
         raise RegistryValidationError("manifest is not bound to the current exact release")
-    raise RegistryValidationError("trusted_execution_attestation_unavailable")
+    return None
 
 
 def _validate_claim(
@@ -781,6 +781,7 @@ def _validate_claim(
         if not label.startswith("evidence/golden_journeys/manifests/"):
             raise RegistryValidationError("decisive evidence must use the canonical manifest directory")
         raw = path.read_bytes()
+        _require_committed_evidence(label, raw)
         if not raw or len(raw) > 131_072:
             raise RegistryValidationError("evidence manifest exceeds its public size bound")
         try:
@@ -846,7 +847,7 @@ def _validate_readiness(row: JourneyRow) -> None:
         raise RegistryValidationError("Obsidian needs physical Android evidence or an honest BLOCKED state")
 
 
-def _write_fake_receipt(
+def _write_legacy_self_declared_receipt(
     repo_root: Path,
     *,
     journey_id: str,
@@ -858,13 +859,13 @@ def _write_fake_receipt(
     path = repo_root / artifact_ref
     path.parent.mkdir(parents=True, exist_ok=True)
     receipt = {
-        "$schema": _RECEIPT_SCHEMA,
+        "$schema": _LEGACY_SELF_DECLARED_RECEIPT_SCHEMA,
         "check_ids": _expected_check_ids(journey_id, evidence_class),
         "environment": ENVIRONMENT_BY_CLASS[evidence_class],
         "evidence_class": evidence_class,
         "journey_id": journey_id,
         "observed_at_utc": "2026-08-23T10:00:00Z",
-        "proofs": _expected_executable_proofs(
+        "proofs": _legacy_self_declared_proofs(
             journey_id=journey_id,
             evidence_class=evidence_class,
             expected_result=result,
@@ -878,7 +879,7 @@ def _write_fake_receipt(
     return artifact_ref, hashlib.sha256(raw).hexdigest()
 
 
-def _fake_manifest(
+def _legacy_self_declared_manifest(
     identity: ReleaseIdentity,
     repo_root: Path,
     *,
@@ -886,7 +887,7 @@ def _fake_manifest(
 ) -> dict[str, Any]:
     journey_id = "conversation_recall"
     evidence_class = "deterministic contract"
-    artifact_ref, artifact_sha256 = _write_fake_receipt(
+    artifact_ref, artifact_sha256 = _write_legacy_self_declared_receipt(
         repo_root,
         journey_id=journey_id,
         evidence_class=evidence_class,
@@ -899,7 +900,7 @@ def _fake_manifest(
         "journey_id": journey_id,
         "observation": {
             "artifact_ref": artifact_ref,
-            "artifact_schema": _RECEIPT_SCHEMA,
+            "artifact_schema": _LEGACY_SELF_DECLARED_RECEIPT_SCHEMA,
             "artifact_sha256": artifact_sha256,
             "check_ids": _expected_check_ids(journey_id, evidence_class),
             "environment": "deterministic_contract",
@@ -910,8 +911,76 @@ def _fake_manifest(
     }
 
 
+def _machine_manifest(
+    identity: ReleaseIdentity,
+    repo_root: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    result: str = "VERIFIED",
+) -> tuple[dict[str, Any], str]:
+    journey_id = "conversation_recall"
+    evidence_class = "deterministic contract"
+    exact_identity = exact_evidence.ReleaseIdentity(
+        source_commit=identity.source_commit,
+        tree_sha256=identity.tree_sha256,
+        wheel_sha256=identity.wheel_sha256,
+        database_schema=identity.database_schema,
+    )
+    refs = exact_evidence.proof_refs(journey_id, evidence_class)
+    outcomes = tuple(
+        "FAILED" if result == "FAILED" and index == 0 else "PASSED" for index, _ref in enumerate(refs)
+    )
+
+    def run_closed_inventory(
+        source_root: Path,
+        release: exact_evidence.ReleaseIdentity,
+        selected_journey: str,
+        selected_class: str,
+    ) -> tuple[tuple[str, ...], int, str, str]:
+        assert source_root == ROOT
+        assert release == exact_identity
+        assert (selected_journey, selected_class) == (journey_id, evidence_class)
+        collection = exact_evidence.canonical_json_bytes({"nodeids": list(refs), "version": 1})
+        exit_code = 0 if result == "VERIFIED" else 1
+        return outcomes, exit_code, hashlib.sha256(collection).hexdigest(), "c" * 64
+
+    monkeypatch.setattr(exact_evidence, "_run_closed_pytest", run_closed_inventory)
+    raw = exact_evidence._produce_for_identity(
+        repo_root=ROOT,
+        identity=exact_identity,
+        journey_id=journey_id,
+        evidence_class=evidence_class,
+    )
+    receipt = json.loads(raw)
+    assert isinstance(receipt, dict)
+    artifact_ref = _expected_artifact_ref(journey_id, evidence_class, result, identity)
+    artifact_path = repo_root / artifact_ref
+    artifact_path.parent.mkdir(parents=True, exist_ok=True)
+    artifact_path.write_bytes(raw)
+    manifest_ref = _expected_manifest_ref(journey_id, evidence_class, result, identity)
+    return (
+        {
+            "$schema": _MANIFEST_SCHEMA,
+            "evidence_class": evidence_class,
+            "journey_id": journey_id,
+            "observation": {
+                "artifact_ref": artifact_ref,
+                "artifact_schema": _RECEIPT_SCHEMA,
+                "artifact_sha256": hashlib.sha256(raw).hexdigest(),
+                "check_ids": _expected_check_ids(journey_id, evidence_class),
+                "environment": ENVIRONMENT_BY_CLASS[evidence_class],
+                "observed_at_utc": receipt["observed_at_utc"],
+            },
+            "release": _release_payload(identity),
+            "result": result,
+        },
+        manifest_ref,
+    )
+
+
 def test_canonical_golden_journey_registry_is_closed_current_and_privacy_safe(
     tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     markdown = STATUS_PATH.read_text(encoding="utf-8")
     identity = _release_identity(markdown)
@@ -942,7 +1011,7 @@ def test_canonical_golden_journey_registry_is_closed_current_and_privacy_safe(
     )
     for evidence_class in ("integration path", "restart and recovery evidence"):
         assert restart_proof in tuple(ref.label for ref in document.evidence[evidence_class].refs)
-        assert restart_proof in _PROOF_REFS_BY_JOURNEY_CLASS[("document_recall_answer", evidence_class)]
+        assert restart_proof in exact_evidence.proof_refs("document_recall_answer", evidence_class)
 
     assert "This is the project's only backlog" in markdown
 
@@ -955,6 +1024,22 @@ def test_canonical_golden_journey_registry_is_closed_current_and_privacy_safe(
     failed_evidence["deterministic contract"] = EvidenceClaim("FAILED", ())
     _validate_readiness(replace(obsidian, readiness="BLOCKED", evidence=failed_evidence))
     conversation = next(row for row in rows if row.journey_id == "conversation_recall")
+    assert _parse_limitations("") == ()
+    ready_evidence = {
+        evidence_class: EvidenceClaim(
+            "NOT_APPLICABLE" if evidence_class == "physical device evidence" else "VERIFIED",
+            (),
+        )
+        for evidence_class in EVIDENCE_CLASSES
+    }
+    ready_conversation = replace(
+        conversation,
+        readiness="READY",
+        evidence=ready_evidence,
+        limitations=(),
+    )
+    _validate_applicability(ready_conversation)
+    _validate_readiness(ready_conversation)
     future_evidence = dict(conversation.evidence)
     future_evidence["clean artifact path"] = EvidenceClaim("VERIFIED", ())
     _validate_applicability(replace(conversation, evidence=future_evidence))
@@ -999,7 +1084,7 @@ def test_canonical_golden_journey_registry_is_closed_current_and_privacy_safe(
 
     manifest_journey_id = "conversation_recall"
     manifest_evidence_class = "deterministic contract"
-    manifest_ref = _expected_manifest_ref(
+    release_manifest_ref = _expected_manifest_ref(
         manifest_journey_id,
         manifest_evidence_class,
         "VERIFIED",
@@ -1014,7 +1099,7 @@ def test_canonical_golden_journey_registry_is_closed_current_and_privacy_safe(
     assert (
         len(
             {
-                manifest_ref,
+                release_manifest_ref,
                 *(
                     _expected_manifest_ref(
                         manifest_journey_id,
@@ -1028,122 +1113,144 @@ def test_canonical_golden_journey_registry_is_closed_current_and_privacy_safe(
         )
         == 5
     )
-    fake_manifest = _fake_manifest(identity, tmp_path)
-    with pytest.raises(
-        RegistryValidationError,
-        match="^trusted_execution_attestation_unavailable$",
-    ):
+    machine_identity = ReleaseIdentity(
+        source_commit=_repository_head(),
+        tree_sha256="a" * 64,
+        wheel_sha256="b" * 64,
+        database_schema=identity.database_schema,
+    )
+    machine_root = tmp_path / "machine"
+    machine_manifest, machine_manifest_ref = _machine_manifest(machine_identity, machine_root, monkeypatch)
+    _validate_manifest_payload(
+        machine_manifest,
+        manifest_ref=machine_manifest_ref,
+        journey_id=manifest_journey_id,
+        evidence_class=manifest_evidence_class,
+        current=machine_identity,
+        require_current=True,
+        repo_root=machine_root,
+    )
+    with pytest.raises(RegistryValidationError, match="differs from its exact HEAD blob"):
+        _require_committed_evidence("tests/test_golden_journey_registry.py", b"mutable evidence")
+
+    legacy_root = tmp_path / "legacy-self-declared"
+    legacy_manifest = _legacy_self_declared_manifest(identity, legacy_root)
+    with pytest.raises(RegistryValidationError, match="canonical sanitized receipt"):
         _validate_manifest_payload(
-            fake_manifest,
-            manifest_ref=manifest_ref,
+            legacy_manifest,
+            manifest_ref=release_manifest_ref,
             journey_id=manifest_journey_id,
             evidence_class=manifest_evidence_class,
             current=identity,
             require_current=True,
-            repo_root=tmp_path,
+            repo_root=legacy_root,
         )
-    leaked = dict(fake_manifest)
+
+    leaked = dict(machine_manifest)
     leaked["raw_response"] = "forbidden"
     with pytest.raises(RegistryValidationError, match="privacy allowlist"):
         _validate_manifest_payload(
             leaked,
-            manifest_ref=manifest_ref,
+            manifest_ref=machine_manifest_ref,
             journey_id=manifest_journey_id,
             evidence_class=manifest_evidence_class,
-            current=identity,
+            current=machine_identity,
             require_current=True,
-            repo_root=tmp_path,
+            repo_root=machine_root,
         )
 
     with pytest.raises(RegistryValidationError, match="deterministic closed release-bound"):
         _validate_manifest_payload(
-            fake_manifest,
+            machine_manifest,
             manifest_ref="evidence/golden_journeys/manifests/arbitrary.json",
             journey_id=manifest_journey_id,
             evidence_class=manifest_evidence_class,
-            current=identity,
+            current=machine_identity,
             require_current=True,
-            repo_root=tmp_path,
+            repo_root=machine_root,
         )
 
-    stale_identity = replace(identity, wheel_sha256="b" * 64)
+    stale_identity = replace(machine_identity, wheel_sha256="d" * 64)
     stale_root = tmp_path / "stale-release"
-    wrong_release = _fake_manifest(stale_identity, stale_root)
-    stale_manifest_ref = _expected_manifest_ref(
-        journey_id=manifest_journey_id,
-        evidence_class=manifest_evidence_class,
-        result="VERIFIED",
-        identity=stale_identity,
-    )
+    wrong_release, stale_manifest_ref = _machine_manifest(stale_identity, stale_root, monkeypatch)
     with pytest.raises(RegistryValidationError, match="current exact release"):
         _validate_manifest_payload(
             wrong_release,
             manifest_ref=stale_manifest_ref,
             journey_id=manifest_journey_id,
             evidence_class=manifest_evidence_class,
-            current=identity,
+            current=machine_identity,
             require_current=True,
             repo_root=stale_root,
         )
 
-    wrong_journey_checks = _fake_manifest(identity, tmp_path)
-    wrong_journey_checks["observation"] = {
-        **wrong_journey_checks["observation"],
-        "check_ids": ["obsidian_write_sync.contract_suite"],
+    wrong_journey_checks = {
+        **machine_manifest,
+        "observation": {
+            **machine_manifest["observation"],
+            "check_ids": ["obsidian_write_sync.contract_suite"],
+        },
     }
     with pytest.raises(RegistryValidationError, match="exact journey class"):
         _validate_manifest_payload(
             wrong_journey_checks,
-            manifest_ref=manifest_ref,
+            manifest_ref=machine_manifest_ref,
             journey_id=manifest_journey_id,
             evidence_class=manifest_evidence_class,
-            current=identity,
+            current=machine_identity,
             require_current=True,
-            repo_root=tmp_path,
+            repo_root=machine_root,
         )
 
-    wrong_digest = _fake_manifest(identity, tmp_path)
-    wrong_digest["observation"] = {
-        **wrong_digest["observation"],
-        "artifact_sha256": "c" * 64,
+    wrong_digest = {
+        **machine_manifest,
+        "observation": {
+            **machine_manifest["observation"],
+            "artifact_sha256": "c" * 64,
+        },
     }
     with pytest.raises(RegistryValidationError, match="actual bytes"):
         _validate_manifest_payload(
             wrong_digest,
-            manifest_ref=manifest_ref,
+            manifest_ref=machine_manifest_ref,
             journey_id=manifest_journey_id,
             evidence_class=manifest_evidence_class,
-            current=identity,
+            current=machine_identity,
             require_current=True,
-            repo_root=tmp_path,
+            repo_root=machine_root,
         )
 
     arbitrary_root = tmp_path / "arbitrary-artifact"
-    arbitrary_manifest = _fake_manifest(identity, arbitrary_root)
-    arbitrary_observation = arbitrary_manifest["observation"]
-    canonical_receipt = arbitrary_root / str(arbitrary_observation["artifact_ref"])
+    arbitrary_observation = machine_manifest["observation"]
+    canonical_receipt = machine_root / str(arbitrary_observation["artifact_ref"])
     arbitrary_ref = "evidence/golden_journeys/receipts/arbitrary.json"
     arbitrary_path = arbitrary_root / arbitrary_ref
+    arbitrary_path.parent.mkdir(parents=True)
     arbitrary_path.write_bytes(canonical_receipt.read_bytes())
-    arbitrary_manifest["observation"] = {
-        **arbitrary_observation,
-        "artifact_ref": arbitrary_ref,
+    arbitrary_manifest = {
+        **machine_manifest,
+        "observation": {
+            **arbitrary_observation,
+            "artifact_ref": arbitrary_ref,
+        },
     }
     with pytest.raises(RegistryValidationError, match="deterministic closed artifact_ref"):
         _validate_manifest_payload(
             arbitrary_manifest,
-            manifest_ref=manifest_ref,
+            manifest_ref=machine_manifest_ref,
             journey_id=manifest_journey_id,
             evidence_class=manifest_evidence_class,
-            current=identity,
+            current=machine_identity,
             require_current=True,
             repo_root=arbitrary_root,
         )
 
     proof_tamper_root = tmp_path / "proof-tamper"
-    proof_tamper_manifest = _fake_manifest(identity, proof_tamper_root)
-    proof_observation = proof_tamper_manifest["observation"]
+    proof_observation = dict(machine_manifest["observation"])
+    proof_tamper_manifest = {**machine_manifest, "observation": proof_observation}
     proof_receipt_path = proof_tamper_root / str(proof_observation["artifact_ref"])
+    proof_receipt_path.parent.mkdir(parents=True)
+    proof_receipt_path.write_bytes(canonical_receipt.read_bytes())
     proof_receipt = json.loads(proof_receipt_path.read_bytes())
     proof_receipt["proofs"][0]["test_source_sha256"] = "d" * 64
     proof_receipt_bytes = _canonical_json_bytes(proof_receipt)
@@ -1152,44 +1259,38 @@ def test_canonical_golden_journey_registry_is_closed_current_and_privacy_safe(
         **proof_observation,
         "artifact_sha256": hashlib.sha256(proof_receipt_bytes).hexdigest(),
     }
-    with pytest.raises(RegistryValidationError, match="exact test bytes and node id"):
+    with pytest.raises(RegistryValidationError, match="exact machine-produced evidence: proofs_invalid"):
         _validate_manifest_payload(
             proof_tamper_manifest,
-            manifest_ref=manifest_ref,
+            manifest_ref=machine_manifest_ref,
             journey_id=manifest_journey_id,
             evidence_class=manifest_evidence_class,
-            current=identity,
+            current=machine_identity,
             require_current=True,
             repo_root=proof_tamper_root,
         )
 
     failed_root = tmp_path / "failed"
-    failed_manifest = _fake_manifest(identity, failed_root, result="FAILED")
-    failed_manifest_ref = _expected_manifest_ref(
-        manifest_journey_id,
-        manifest_evidence_class,
-        "FAILED",
-        identity,
+    failed_manifest, failed_manifest_ref = _machine_manifest(
+        machine_identity, failed_root, monkeypatch, result="FAILED"
     )
-    with pytest.raises(
-        RegistryValidationError,
-        match="^trusted_execution_attestation_unavailable$",
-    ):
-        _validate_manifest_payload(
-            failed_manifest,
-            manifest_ref=failed_manifest_ref,
-            journey_id=manifest_journey_id,
-            evidence_class=manifest_evidence_class,
-            current=identity,
-            require_current=True,
-            repo_root=failed_root,
-            expected_result="FAILED",
-        )
+    _validate_manifest_payload(
+        failed_manifest,
+        manifest_ref=failed_manifest_ref,
+        journey_id=manifest_journey_id,
+        evidence_class=manifest_evidence_class,
+        current=machine_identity,
+        require_current=True,
+        repo_root=failed_root,
+        expected_result="FAILED",
+    )
 
     leaked_receipt_root = tmp_path / "leaked-receipt"
-    leaked_receipt_manifest = _fake_manifest(identity, leaked_receipt_root)
-    leaked_observation = leaked_receipt_manifest["observation"]
+    leaked_observation = dict(machine_manifest["observation"])
+    leaked_receipt_manifest = {**machine_manifest, "observation": leaked_observation}
     leaked_receipt_path = leaked_receipt_root / str(leaked_observation["artifact_ref"])
+    leaked_receipt_path.parent.mkdir(parents=True)
+    leaked_receipt_path.write_bytes(canonical_receipt.read_bytes())
     leaked_receipt = json.loads(leaked_receipt_path.read_bytes())
     leaked_receipt["raw_content"] = "forbidden"
     leaked_receipt_bytes = _canonical_json_bytes(leaked_receipt)
@@ -1198,13 +1299,16 @@ def test_canonical_golden_journey_registry_is_closed_current_and_privacy_safe(
         **leaked_observation,
         "artifact_sha256": hashlib.sha256(leaked_receipt_bytes).hexdigest(),
     }
-    with pytest.raises(RegistryValidationError, match="privacy allowlist"):
+    with pytest.raises(
+        RegistryValidationError,
+        match="exact machine-produced evidence: receipt_fields_invalid",
+    ):
         _validate_manifest_payload(
             leaked_receipt_manifest,
-            manifest_ref=manifest_ref,
+            manifest_ref=machine_manifest_ref,
             journey_id=manifest_journey_id,
             evidence_class=manifest_evidence_class,
-            current=identity,
+            current=machine_identity,
             require_current=True,
             repo_root=leaked_receipt_root,
         )
