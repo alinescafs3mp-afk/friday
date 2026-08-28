@@ -14,6 +14,8 @@ from friday.interaction_control_plane.failure_store import (
     observe_owned_conversation,
     observe_owned_message_candidate,
 )
+from friday.orchestration.turn_context import TurnContextError
+from friday.orchestration.turn_context_runtime import current_primary_authenticated_turn_context
 from friday.storage._base import (
     Any,
     StorageShared,
@@ -30,6 +32,40 @@ from friday.storage._privacy import (
 )
 
 _MESSAGE_ID_RE = re.compile(r"msg_[0-9a-f]{16}")
+_AUTHENTICATED_TURN_PUBLICATION_METADATA_KEY = "authenticated_turn_publication"
+_AUTHENTICATED_TURN_PUBLICATION_SCHEMA = "friday.authenticated-turn-publication.v1"
+
+
+def _authenticated_turn_publication_metadata(
+    *,
+    conversation_id: str,
+    user_id: str,
+    role: str,
+    metadata: dict[str, Any] | None,
+) -> dict[str, Any] | None:
+    """Close one durable user/assistant publication over its live authority."""
+
+    context = current_primary_authenticated_turn_context()
+    if context is None:
+        return metadata
+    if (
+        context.authority.conversation_id != conversation_id
+        or context.authority.person_id != user_id
+    ):
+        raise TurnContextError("authenticated turn publication scope does not match admission")
+    if role not in {"user", "assistant"}:
+        return metadata
+    if metadata is not None and _AUTHENTICATED_TURN_PUBLICATION_METADATA_KEY in metadata:
+        raise TurnContextError("authenticated turn publication metadata is reserved")
+    closed_metadata = dict(metadata or {})
+    closed_metadata[_AUTHENTICATED_TURN_PUBLICATION_METADATA_KEY] = {
+        "schema": _AUTHENTICATED_TURN_PUBLICATION_SCHEMA,
+        "turn_id": context.turn_id,
+        "context_authority_sha256": context.context_authority_sha256,
+        "request_effect_binding_sha256": context.effect_fence.request_effect_binding_sha256,
+        "publication_role": role,
+    }
+    return closed_metadata
 
 
 def _validated_reply_parent(
@@ -91,6 +127,13 @@ def store_message_in_transaction(
 ) -> dict[str, Any]:
     """Store one message using a transaction owned by the caller."""
 
+    publication_metadata = _authenticated_turn_publication_metadata(
+        conversation_id=conversation_id,
+        user_id=user_id,
+        role=role,
+        metadata=metadata,
+    )
+
     conversation = conn.execute(
         "SELECT id FROM conversations WHERE id=? AND user_id=?",
         (conversation_id, user_id),
@@ -117,7 +160,7 @@ def store_message_in_transaction(
             user_id,
             role,
             content,
-            json.dumps(metadata or {}, ensure_ascii=False, sort_keys=True),
+            json.dumps(publication_metadata or {}, ensure_ascii=False, sort_keys=True),
             validated_reply_to,
             now,
         ),
