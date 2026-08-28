@@ -27,6 +27,7 @@ from contextlib import contextmanager, suppress
 from contextvars import ContextVar
 from dataclasses import dataclass, replace
 from datetime import UTC, date, datetime, time, timedelta
+from functools import wraps
 from pathlib import Path, PurePath
 from typing import TYPE_CHECKING, Any, cast
 from zoneinfo import ZoneInfo
@@ -48,7 +49,7 @@ from friday.orchestration.message_window_outcome import (
     _trusted_message_window_storage_authority,
     attest_message_window_storage_projection,
 )
-from friday.orchestration.turn_context import TurnContextError
+from friday.orchestration.turn_context import AuthenticatedTurnContext, TurnContextError
 from friday.orchestration.turn_context_runtime import current_primary_authenticated_turn_context
 from friday.organs import local_now
 from friday.oversight_scope import hierarchy_is_configured, may_oversee
@@ -1489,30 +1490,146 @@ _REQUEST_EFFECTS: ContextVar[RequestEffects | None] = ContextVar(
 )
 
 _AUTHENTICATED_EFFECT_AUTHORITY_ERROR = "Authenticated turn effect authority is unavailable"
+_EFFECT_BOUNDARY_UNSET = object()
+_LEGACY_EFFECT_BOUNDARY = object()
 
 
-def _verified_request_effects_at_primary_boundary() -> RequestEffects | None:
-    """Return request effects after validating the live primary turn authority.
+class _AuthenticatedRequestEffectAuthority:
+    __slots__ = ("active", "context", "effects", "request_binding_sha256")
+
+    def __init__(
+        self,
+        *,
+        context: AuthenticatedTurnContext,
+        effects: RequestEffects,
+        request_binding_sha256: str,
+    ) -> None:
+        self.active = True
+        self.context = context
+        self.effects = effects
+        self.request_binding_sha256 = request_binding_sha256
+
+
+_AUTHENTICATED_REQUEST_EFFECT_AUTHORITY: ContextVar[_AuthenticatedRequestEffectAuthority | None] = ContextVar(
+    "friday_authenticated_request_effect_authority",
+    default=None,
+)
+_EXPECTED_EFFECT_BOUNDARY: ContextVar[object] = ContextVar(
+    "friday_expected_authenticated_effect_boundary",
+    default=_EFFECT_BOUNDARY_UNSET,
+)
+
+
+@contextmanager
+def bind_authenticated_request_effect_authority(
+    effects: RequestEffects,
+) -> Iterator[RequestEffects]:
+    """Register the exact ingress-owned request witness for one live turn.
+
+    The surrounding order is deliberately strict: ``track_request_effects``
+    owns ``effects``, the authenticated turn runtime owns the exact context,
+    and only then may this scope join those two process-private identities.
+    Re-entering, even with an equal digest or the same objects, is rejected so
+    an inner request cannot replace the ingress witness.
+    """
+
+    context = current_primary_authenticated_turn_context()
+    if context is None:
+        raise TurnContextError("authenticated request-effect authority requires a live turn")
+    if _AUTHENTICATED_REQUEST_EFFECT_AUTHORITY.get() is not None:
+        raise TurnContextError("authenticated request-effect authority cannot be nested or replaced")
+    current_effects = _REQUEST_EFFECTS.get()
+    request_binding_sha256 = context.effect_fence.request_effect_binding_sha256
+    if (
+        type(effects) is not RequestEffects
+        or current_effects is not effects
+        or effects.active is not True
+        or effects.request_binding_sha256 != request_binding_sha256
+    ):
+        raise TurnContextError("authenticated request-effect authority identity is invalid")
+    authority = _AuthenticatedRequestEffectAuthority(
+        context=context,
+        effects=effects,
+        request_binding_sha256=request_binding_sha256,
+    )
+    token = _AUTHENTICATED_REQUEST_EFFECT_AUTHORITY.set(authority)
+    try:
+        yield effects
+    finally:
+        authority.active = False
+        _AUTHENTICATED_REQUEST_EFFECT_AUTHORITY.reset(token)
+
+
+def _verified_request_effects_at_primary_boundary(
+    expected: object = _EFFECT_BOUNDARY_UNSET,
+) -> object:
+    """Validate and return one exact live authority, or the legacy sentinel.
 
     A missing runtime context is the unchanged legacy path.  Once an
     authenticated context is active, however, every effect-capable boundary --
-    including an observing tool -- must carry the exact request-effect binding
-    sealed into that context.  The check is intentionally read-only so a stale
-    or advisory-suspended turn is rejected before an audit, approval claim,
-    transaction callback, or tool handler can mutate anything.
+    including an observing tool -- must carry the exact ingress-owned witness
+    registered against the exact context object.  The check is intentionally
+    read-only so stale, suspended, copied, or replaced authority is rejected
+    before an audit, approval claim, callback, or handler can mutate anything.
     """
 
     context = current_primary_authenticated_turn_context()
     effects = _REQUEST_EFFECTS.get()
+    authority = _AUTHENTICATED_REQUEST_EFFECT_AUTHORITY.get()
     if context is None:
-        return effects
-    if (
-        type(effects) is not RequestEffects
-        or effects.active is not True
-        or effects.request_binding_sha256 != context.effect_fence.request_effect_binding_sha256
-    ):
-        raise TurnContextError("authenticated turn request-effect binding is unavailable")
-    return effects
+        if authority is not None:
+            raise TurnContextError("authenticated request-effect authority escaped its turn")
+        boundary: object = _LEGACY_EFFECT_BOUNDARY
+    else:
+        request_binding_sha256 = context.effect_fence.request_effect_binding_sha256
+        if (
+            type(authority) is not _AuthenticatedRequestEffectAuthority
+            or authority.active is not True
+            or authority.context is not context
+            or type(effects) is not RequestEffects
+            or authority.effects is not effects
+            or effects.active is not True
+            or authority.request_binding_sha256 != request_binding_sha256
+            or effects.request_binding_sha256 != request_binding_sha256
+        ):
+            raise TurnContextError("authenticated turn request-effect identity is unavailable")
+        boundary = authority
+    if expected is not _EFFECT_BOUNDARY_UNSET and boundary is not expected:
+        raise TurnContextError("authenticated turn effect authority changed during execution")
+    return boundary
+
+
+def _revalidate_expected_effect_boundary() -> object:
+    expected = _EXPECTED_EFFECT_BOUNDARY.get()
+    if expected is _EFFECT_BOUNDARY_UNSET:
+        return _verified_request_effects_at_primary_boundary()
+    return _verified_request_effects_at_primary_boundary(expected)
+
+
+def _guard_authenticated_effect_entrypoint(
+    method: Callable[..., Awaitable[ToolResult]],
+) -> Callable[..., Awaitable[ToolResult]]:
+    """Capture one boundary identity and translate later drift fail-closed."""
+
+    @wraps(method)
+    async def guarded(self: Any, *args: Any, **kwargs: Any) -> ToolResult:
+        tool_name = (
+            str(args[0] if args else kwargs.get("name") or "") if method.__name__ == "execute" else "approval"
+        )
+        try:
+            expected = _verified_request_effects_at_primary_boundary()
+        except TurnContextError:
+            return ToolResult(tool_name, False, error=_AUTHENTICATED_EFFECT_AUTHORITY_ERROR)
+        token = _EXPECTED_EFFECT_BOUNDARY.set(expected)
+        try:
+            try:
+                return await method(self, *args, **kwargs)
+            except TurnContextError:
+                return ToolResult(tool_name, False, error=_AUTHENTICATED_EFFECT_AUTHORITY_ERROR)
+        finally:
+            _EXPECTED_EFFECT_BOUNDARY.reset(token)
+
+    return guarded
 
 
 @contextmanager
@@ -1545,14 +1662,19 @@ def track_request_effects(
 
 def _mark_request_effect_possible() -> bool:
     try:
-        effects = _verified_request_effects_at_primary_boundary()
+        boundary = _revalidate_expected_effect_boundary()
     except TurnContextError:
         return False
+    effects = _REQUEST_EFFECTS.get()
     if effects is None:
         return True
     if effects.possible:
         return True
     if not effects.before_effect():
+        return False
+    try:
+        _verified_request_effects_at_primary_boundary(boundary)
+    except TurnContextError:
         return False
     effects.possible = True
     return True
@@ -1587,9 +1709,10 @@ def stage_request_effect_possible_in_transaction(
     """
 
     try:
-        effects = _verified_request_effects_at_primary_boundary()
+        boundary = _revalidate_expected_effect_boundary()
     except TurnContextError:
         return False
+    effects = _REQUEST_EFFECTS.get()
     if expected_request_binding_sha256 is not None and (
         type(expected_request_binding_sha256) is not str
         or re.fullmatch(r"[0-9a-f]{64}", expected_request_binding_sha256) is None
@@ -1606,6 +1729,10 @@ def stage_request_effect_possible_in_transaction(
     callback = effects.before_effect_in_transaction
     if callback is None or not callback(conn):
         return False
+    try:
+        _verified_request_effects_at_primary_boundary(boundary)
+    except TurnContextError:
+        return False
     effects.staged = True
     return True
 
@@ -1613,8 +1740,16 @@ def stage_request_effect_possible_in_transaction(
 def confirm_staged_request_effect() -> None:
     """Publish the process-local witness only after the outer commit succeeds."""
 
+    try:
+        boundary = _revalidate_expected_effect_boundary()
+    except TurnContextError:
+        return
     effects = _REQUEST_EFFECTS.get()
-    if effects is not None:
+    if effects is not None and (boundary is _LEGACY_EFFECT_BOUNDARY or effects.staged is True):
+        try:
+            _verified_request_effects_at_primary_boundary(boundary)
+        except TurnContextError:
+            return
         effects.possible = True
         effects.staged = False
 
@@ -1622,8 +1757,20 @@ def confirm_staged_request_effect() -> None:
 def rollback_staged_request_effect() -> None:
     """Clear only an uncommitted connection-scoped fence after rollback."""
 
+    try:
+        boundary = _revalidate_expected_effect_boundary()
+    except TurnContextError:
+        return
     effects = _REQUEST_EFFECTS.get()
-    if effects is not None and not effects.possible:
+    if (
+        effects is not None
+        and not effects.possible
+        and (boundary is _LEGACY_EFFECT_BOUNDARY or effects.staged is True)
+    ):
+        try:
+            _verified_request_effects_at_primary_boundary(boundary)
+        except TurnContextError:
+            return
         effects.staged = False
 
 
@@ -3855,6 +4002,7 @@ class ExecutionKernel:
                 visible.append(tool)
         return visible
 
+    @_guard_authenticated_effect_entrypoint
     async def execute(
         self,
         name: str,
@@ -3863,10 +4011,6 @@ class ExecutionKernel:
         actor: ActorContext | None = None,
         execution_scope: str = "dialogue",
     ) -> ToolResult:
-        try:
-            _verified_request_effects_at_primary_boundary()
-        except TurnContextError:
-            return ToolResult(name, False, error=_AUTHENTICATED_EFFECT_AUTHORITY_ERROR)
         actor = actor or current_actor()
         details = self._audit_details(name, arguments)
         if self.authorization is None:
@@ -3999,6 +4143,7 @@ class ExecutionKernel:
                         details=details,
                     )
                 )
+        _revalidate_expected_effect_boundary()
         try:
             async with asyncio.timeout(timeout):
                 if physical_start is None:
@@ -4350,13 +4495,16 @@ class ExecutionKernel:
         неудачу, попробует ещё раз, и человек получит очередь одинаковых заявок.
         """
         storage, _, _, _ = self._require_services()
+        _revalidate_expected_effect_boundary()
         try:
+            summary = self._approval_summary(storage, actor.user_id, name, arguments)
+            _revalidate_expected_effect_boundary()
             approval = await run_blocking(
                 storage.create_action_approval,
                 actor.user_id,
                 tool=name,
                 payload=arguments,
-                summary=self._approval_summary(storage, actor.user_id, name, arguments),
+                summary=summary,
                 risk="high",
                 # Кто ПРОСИЛ — человек, а не способ входа. В `identity_id` лежит
                 # идентификатор токена или связанной телеграм-личности, и заявка
@@ -4364,6 +4512,8 @@ class ExecutionKernel:
                 # полю теперь держится личная граница списка и решения.
                 requested_by=actor.own_id,
             )
+        except TurnContextError:
+            raise
         except Exception as exc:  # noqa: BLE001 - отказ в заявке не должен выполнять действие
             LOGGER.warning(
                 "Could not create an approval request for %s (%s)",
@@ -4379,6 +4529,7 @@ class ExecutionKernel:
         await self._audit(
             actor, name, False, "approval_required", details={**details, "approval_id": approval["id"]}
         )
+        _revalidate_expected_effect_boundary()
         await run_blocking(self._notify_pending_approval, storage, actor, approval)
         return ToolResult(
             name,
@@ -4559,6 +4710,7 @@ class ExecutionKernel:
             )
         return f"Выполнить {name}"
 
+    @_guard_authenticated_effect_entrypoint
     async def execute_approved(
         self,
         approval_id: str,
@@ -4579,12 +4731,9 @@ class ExecutionKernel:
         Права проверяются здесь ЗАНОВО: между решением человека и исполнением
         актор мог лишиться способности, и подтверждение не заменяет права.
         """
-        try:
-            _verified_request_effects_at_primary_boundary()
-        except TurnContextError:
-            return ToolResult("approval", False, error=_AUTHENTICATED_EFFECT_AUTHORITY_ERROR)
         actor = actor or current_actor()
         storage, _, _, _ = self._require_services()
+        _revalidate_expected_effect_boundary()
         record = await run_blocking(storage.get_action_approval, approval_id, actor.user_id)
         if not record:
             return ToolResult("approval", False, error="Заявка не найдена")
@@ -4623,6 +4772,7 @@ class ExecutionKernel:
             return ToolResult(name, False, error="Authorization denied")
 
         arguments = dict(record.get("payload") or {})
+        _revalidate_expected_effect_boundary()
         claimed = await run_blocking(
             storage.claim_action_approval,
             approval_id,
@@ -4656,6 +4806,7 @@ class ExecutionKernel:
             if not re.fullmatch(r"[0-9]{1,20}", str(confirmation_update_id or "")) or not re.fullmatch(
                 r"[0-9a-f]{64}", str(confirmation_body_hash or "")
             ):
+                _revalidate_expected_effect_boundary()
                 await run_blocking(
                     storage.finish_action_approval,
                     approval_id,
@@ -4673,6 +4824,7 @@ class ExecutionKernel:
         timeout = tool.timeout_sec or 30
         if self.settings and tool.timeout_sec is None:
             timeout = max(1, self.settings.code_execution_timeout_sec if name == "code_run" else 30)
+        _revalidate_expected_effect_boundary()
         try:
             async with asyncio.timeout(timeout):
                 data = await tool.handler(actor=actor, **arguments)
@@ -4681,6 +4833,7 @@ class ExecutionKernel:
             # не отказ. Обработчик мог довести побочный эффект до конца ровно в тот
             # момент, когда его перестали ждать, поэтому заявка уходит в
             # `uncertain` (сверка человеком), а не в `failed` (можно повторить).
+            _revalidate_expected_effect_boundary()
             await run_blocking(
                 storage.mark_action_approval_uncertain,
                 approval_id,
@@ -4690,6 +4843,7 @@ class ExecutionKernel:
             await self._audit(actor, name, False, "timeout", details=details)
             return ToolResult(name, False, error="Tool execution timed out")
         except UncertainToolOutcome as exc:
+            _revalidate_expected_effect_boundary()
             await run_blocking(
                 storage.mark_action_approval_uncertain,
                 approval_id,
@@ -4707,6 +4861,7 @@ class ExecutionKernel:
             )
         except Exception as exc:  # noqa: BLE001 - исход обязан быть записан любым
             LOGGER.warning("Approved tool %s failed (%s)", name, type(exc).__name__)
+            _revalidate_expected_effect_boundary()
             await run_blocking(
                 storage.finish_action_approval,
                 approval_id,
@@ -4727,6 +4882,7 @@ class ExecutionKernel:
                 "job_id": str(data.get("job_id") or "")[:128],
                 "status": str(data.get("status") or "failed")[:32],
             }
+            _revalidate_expected_effect_boundary()
             if crossed:
                 await run_blocking(
                     storage.mark_action_approval_uncertain,
@@ -4771,6 +4927,7 @@ class ExecutionKernel:
                 # подтвердился — значит неизвестно, что именно случилось, и
                 # повторять это нельзя. Спека v3 §5: успешный вызов инструмента не
                 # доказывает успех задачи.
+                _revalidate_expected_effect_boundary()
                 await run_blocking(
                     storage.mark_action_approval_uncertain,
                     approval_id,
@@ -4789,6 +4946,7 @@ class ExecutionKernel:
                         f"{reason}. Исход неизвестен — проверьте вручную, не повторяйте."
                     ),
                 )
+        _revalidate_expected_effect_boundary()
         await run_blocking(
             storage.finish_action_approval,
             approval_id,
@@ -5110,6 +5268,7 @@ class ExecutionKernel:
         *,
         details: dict[str, Any] | None = None,
     ) -> None:
+        _revalidate_expected_effect_boundary()
         if not self.storage:
             return
         self.storage.log_audit(

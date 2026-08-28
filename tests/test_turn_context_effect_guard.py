@@ -10,7 +10,10 @@ import pytest
 from friday.execution_kernel import (
     ExecutionKernel,
     ToolSpec,
+    bind_authenticated_request_effect_authority,
+    confirm_staged_request_effect,
     mark_request_effect_possible,
+    rollback_staged_request_effect,
     stage_request_effect_possible_in_transaction,
     track_request_effects,
 )
@@ -20,6 +23,7 @@ from friday.orchestration.turn_context import (
     IngressKind,
     InheritedTurnBudget,
     ModelAntiLoopBudget,
+    TurnContextError,
     TurnContextIssuer,
     TurnMode,
     TurnResourceBudget,
@@ -29,7 +33,7 @@ from friday.orchestration.turn_context_runtime import (
     bind_authenticated_turn_context,
     suspend_authenticated_turn_context,
 )
-from friday.permissions import ActorContext
+from friday.permissions import ActorContext, AuthorizationError
 from friday.turn_intent_policy import TurnIntent, TurnPolicyDecision
 
 _SERIALS = itertools.count(100_000)
@@ -150,11 +154,12 @@ async def test_exact_live_request_effect_binding_allows_observing_handler() -> N
         return True
 
     with (
-        bind_authenticated_turn_context(issuer, context),
         track_request_effects(
             callback,
             request_binding_sha256=context.effect_fence.request_effect_binding_sha256,
-        ),
+        ) as effects,
+        bind_authenticated_turn_context(issuer, context),
+        bind_authenticated_request_effect_authority(effects),
     ):
         result = await kernel.execute("guard_exact_observe", {}, actor=actor)
 
@@ -182,11 +187,14 @@ async def test_missing_or_wrong_binding_has_zero_callback_and_handler_calls(trac
         return True
 
     kernel = _kernel_tool(risk="mutate", handler=mutate, name="guard_missing_mutate")
-    with bind_authenticated_turn_context(issuer, context):
-        if tracked:
-            with track_request_effects(callback, request_binding_sha256="f" * 64):
-                result = await kernel.execute("guard_missing_mutate", {}, actor=actor)
-        else:
+    if tracked:
+        with (
+            track_request_effects(callback, request_binding_sha256="f" * 64),
+            bind_authenticated_turn_context(issuer, context),
+        ):
+            result = await kernel.execute("guard_missing_mutate", {}, actor=actor)
+    else:
+        with bind_authenticated_turn_context(issuer, context):
             result = await kernel.execute("guard_missing_mutate", {}, actor=actor)
 
     assert result.success is False
@@ -208,14 +216,59 @@ async def test_observing_tool_is_guarded_by_request_effect_binding() -> None:
 
     kernel = _kernel_tool(risk="observe", handler=observe, name="guard_wrong_observe")
     with (
-        bind_authenticated_turn_context(issuer, context),
         track_request_effects(lambda: True, request_binding_sha256="e" * 64),
+        bind_authenticated_turn_context(issuer, context),
     ):
         result = await kernel.execute("guard_wrong_observe", {}, actor=actor)
 
     assert result.success is False
     assert result.error == _AUTHORITY_ERROR
     assert handler_calls == 0
+
+
+@pytest.mark.asyncio
+async def test_same_digest_nested_request_effect_replacement_is_rejected() -> None:
+    issuer, context, _now, actor = _authenticated_turn()
+    callback_calls = 0
+    handler_calls = 0
+
+    def callback() -> bool:
+        nonlocal callback_calls
+        callback_calls += 1
+        return True
+
+    async def mutate(*, actor: ActorContext) -> dict[str, bool]:
+        nonlocal handler_calls
+        del actor
+        handler_calls += 1
+        return {"changed": True}
+
+    kernel = _kernel_tool(risk="mutate", handler=mutate, name="guard_exact_identity")
+    digest = context.effect_fence.request_effect_binding_sha256
+    with (
+        track_request_effects(callback, request_binding_sha256=digest) as original,
+        bind_authenticated_turn_context(issuer, context),
+        bind_authenticated_request_effect_authority(original),
+    ):
+        with (
+            pytest.raises(TurnContextError, match="nested or replaced"),
+            bind_authenticated_request_effect_authority(original),
+        ):
+            pytest.fail("the exact authority was admitted twice")
+        with track_request_effects(callback, request_binding_sha256=digest) as replacement:
+            with (
+                pytest.raises(TurnContextError, match="nested or replaced"),
+                bind_authenticated_request_effect_authority(replacement),
+            ):
+                pytest.fail("an equal-digest witness replaced ingress authority")
+            refused = await kernel.execute("guard_exact_identity", {}, actor=actor)
+        accepted = await kernel.execute("guard_exact_identity", {}, actor=actor)
+
+    assert refused.success is False
+    assert refused.error == _AUTHORITY_ERROR
+    assert accepted.success is True
+    assert callback_calls == 1
+    assert handler_calls == 1
 
 
 @pytest.mark.asyncio
@@ -237,11 +290,12 @@ async def test_suspended_authority_has_zero_callback_handler_or_approval_storage
 
     kernel = _kernel_tool(risk="mutate", handler=mutate, name="guard_suspended_mutate")
     with (
-        bind_authenticated_turn_context(issuer, context),
         track_request_effects(
             callback,
             request_binding_sha256=context.effect_fence.request_effect_binding_sha256,
-        ),
+        ) as effects,
+        bind_authenticated_turn_context(issuer, context),
+        bind_authenticated_request_effect_authority(effects),
         suspend_authenticated_turn_context(),
     ):
         result = await kernel.execute("guard_suspended_mutate", {}, actor=actor)
@@ -261,8 +315,8 @@ async def test_approved_execution_requires_exact_live_request_effect_binding_bef
     kernel = ExecutionKernel(_AllowAll())  # type: ignore[arg-type]
 
     with (
-        bind_authenticated_turn_context(issuer, context),
         track_request_effects(lambda: True, request_binding_sha256="b" * 64),
+        bind_authenticated_turn_context(issuer, context),
     ):
         result = await kernel.execute_approved("approval-never-read", actor=actor)
 
@@ -283,11 +337,12 @@ async def test_stale_authority_is_rejected_before_handler() -> None:
 
     kernel = _kernel_tool(risk="observe", handler=observe, name="guard_stale_observe")
     with (
-        bind_authenticated_turn_context(issuer, context),
         track_request_effects(
             lambda: True,
             request_binding_sha256=context.effect_fence.request_effect_binding_sha256,
-        ),
+        ) as effects,
+        bind_authenticated_turn_context(issuer, context),
+        bind_authenticated_request_effect_authority(effects),
     ):
         now[0] = context.inherited_budget.safety_deadline.monotonic_ns + 1
         result = await kernel.execute("guard_stale_observe", {}, actor=actor)
@@ -306,26 +361,78 @@ def test_mark_and_stage_cannot_bypass_live_context_with_cached_flags_or_mismatch
         callback_calls += 1
         return True
 
-    with bind_authenticated_turn_context(issuer, context):
-        with track_request_effects(callback, request_binding_sha256="d" * 64) as effects:
-            effects.possible = True
-            effects.staged = True
-            assert mark_request_effect_possible() is False
-            assert stage_request_effect_possible_in_transaction(object()) is False
-        with track_request_effects(
+    with (
+        track_request_effects(callback, request_binding_sha256="d" * 64) as effects,
+        bind_authenticated_turn_context(issuer, context),
+    ):
+        effects.possible = True
+        effects.staged = True
+        assert mark_request_effect_possible() is False
+        assert stage_request_effect_possible_in_transaction(object()) is False
+    exact_issuer, exact_context, _exact_now, _exact_actor = _authenticated_turn()
+    with (
+        track_request_effects(
             lambda: True,
             before_effect_in_transaction=callback,
-            request_binding_sha256=context.effect_fence.request_effect_binding_sha256,
-        ):
-            assert (
-                stage_request_effect_possible_in_transaction(
-                    object(),
-                    expected_request_binding_sha256="c" * 64,
-                )
-                is False
+            request_binding_sha256=exact_context.effect_fence.request_effect_binding_sha256,
+        ) as effects,
+        bind_authenticated_turn_context(exact_issuer, exact_context),
+        bind_authenticated_request_effect_authority(effects),
+    ):
+        assert (
+            stage_request_effect_possible_in_transaction(
+                object(),
+                expected_request_binding_sha256="c" * 64,
             )
+            is False
+        )
 
     assert callback_calls == 0
+
+
+def test_confirm_and_rollback_require_exact_live_staged_authority() -> None:
+    issuer, context, _now, _actor = _authenticated_turn()
+    callback_calls = 0
+
+    def stage_callback(_connection: object) -> bool:
+        nonlocal callback_calls
+        callback_calls += 1
+        return True
+
+    digest = context.effect_fence.request_effect_binding_sha256
+    with (
+        track_request_effects(
+            lambda: True,
+            before_effect_in_transaction=stage_callback,
+            request_binding_sha256=digest,
+        ) as original,
+        bind_authenticated_turn_context(issuer, context),
+        bind_authenticated_request_effect_authority(original),
+    ):
+        confirm_staged_request_effect()
+        assert original.possible is False
+        assert stage_request_effect_possible_in_transaction(object()) is True
+        assert original.staged is True
+
+        with track_request_effects(lambda: True, request_binding_sha256=digest) as replacement:
+            replacement.staged = True
+            confirm_staged_request_effect()
+            rollback_staged_request_effect()
+            assert replacement.possible is False
+            assert replacement.staged is True
+            assert original.staged is True
+
+        with suspend_authenticated_turn_context():
+            confirm_staged_request_effect()
+            rollback_staged_request_effect()
+        assert original.possible is False
+        assert original.staged is True
+
+        confirm_staged_request_effect()
+        assert original.possible is True
+        assert original.staged is False
+
+    assert callback_calls == 1
 
 
 def test_inherited_request_effect_witness_is_revoked_when_its_scope_exits() -> None:
@@ -337,15 +444,196 @@ def test_inherited_request_effect_witness_is_revoked_when_its_scope_exits() -> N
         callback_calls += 1
         return True
 
-    with bind_authenticated_turn_context(issuer, context):
-        with track_request_effects(
+    with (
+        track_request_effects(
             callback,
             request_binding_sha256=context.effect_fence.request_effect_binding_sha256,
-        ):
+        ) as effects,
+        bind_authenticated_turn_context(issuer, context),
+    ):
+        with bind_authenticated_request_effect_authority(effects):
             inherited = copy_context()
         assert inherited.run(mark_request_effect_possible) is False
 
     assert callback_calls == 0
+
+
+class _AuditSpyStorage:
+    def __init__(self) -> None:
+        self.audit_calls = 0
+
+    def log_audit(self, _entry: object) -> None:
+        self.audit_calls += 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("deny", [False, True])
+async def test_expiry_during_authorization_has_zero_later_audit_callback_or_handler(
+    deny: bool,
+) -> None:
+    issuer, context, now, actor = _authenticated_turn()
+    callback_calls = 0
+    handler_calls = 0
+
+    class _ExpireDuringAuthorization(_AllowAll):
+        def require(self, _actor: ActorContext, _security_id: str) -> None:
+            now[0] = context.inherited_budget.safety_deadline.monotonic_ns + 1
+            if deny:
+                raise AuthorizationError("denied after authority expiry")
+
+    async def handler(*, actor: ActorContext) -> dict[str, bool]:
+        nonlocal handler_calls
+        del actor
+        handler_calls += 1
+        return {"called": True}
+
+    def callback() -> bool:
+        nonlocal callback_calls
+        callback_calls += 1
+        return True
+
+    storage = _AuditSpyStorage()
+    kernel = ExecutionKernel(_ExpireDuringAuthorization())  # type: ignore[arg-type]
+    kernel.bind_services(storage, object(), object(), object())  # type: ignore[arg-type]
+    tool_name = f"guard_authorization_expiry_{deny}"
+    kernel.register(
+        ToolSpec(
+            name=tool_name,
+            description="Expire authority during authorization.",
+            parameters={"type": "object", "properties": {}},
+            security_id="knowledge.read",
+            risk="observe" if deny else "mutate",
+            handler=handler,
+        )
+    )
+
+    with (
+        track_request_effects(
+            callback,
+            request_binding_sha256=context.effect_fence.request_effect_binding_sha256,
+        ) as effects,
+        bind_authenticated_turn_context(issuer, context),
+        bind_authenticated_request_effect_authority(effects),
+    ):
+        result = await kernel.execute(tool_name, {}, actor=actor)
+
+    assert result.success is False
+    assert result.error == _AUTHORITY_ERROR
+    assert storage.audit_calls == 0
+    assert callback_calls == 0
+    assert handler_calls == 0
+
+
+@pytest.mark.asyncio
+async def test_request_effect_revocation_during_authorization_blocks_read_handler() -> None:
+    issuer, context, _now, actor = _authenticated_turn()
+    handler_calls = 0
+
+    class _RevokeDuringAuthorization(_AllowAll):
+        effects: object | None = None
+
+        def require(self, _actor: ActorContext, _security_id: str) -> None:
+            assert self.effects is not None
+            self.effects.active = False  # type: ignore[attr-defined]
+
+    authorization = _RevokeDuringAuthorization()
+
+    async def observe(*, actor: ActorContext) -> dict[str, bool]:
+        nonlocal handler_calls
+        del actor
+        handler_calls += 1
+        return {"read": True}
+
+    kernel = ExecutionKernel(authorization)  # type: ignore[arg-type]
+    kernel.register(
+        ToolSpec(
+            name="guard_authorization_revocation",
+            description="Revoke request authority during authorization.",
+            parameters={"type": "object", "properties": {}},
+            security_id="knowledge.read",
+            risk="observe",
+            handler=observe,
+        )
+    )
+    with track_request_effects(
+        lambda: True,
+        request_binding_sha256=context.effect_fence.request_effect_binding_sha256,
+    ) as effects:
+        authorization.effects = effects
+        with (
+            bind_authenticated_turn_context(issuer, context),
+            bind_authenticated_request_effect_authority(effects),
+        ):
+            result = await kernel.execute("guard_authorization_revocation", {}, actor=actor)
+
+    assert result.success is False
+    assert result.error == _AUTHORITY_ERROR
+    assert handler_calls == 0
+
+
+@pytest.mark.asyncio
+async def test_expiry_during_approved_read_blocks_claim_audit_and_handler() -> None:
+    issuer, context, now, actor = _authenticated_turn()
+    handler_calls = 0
+    callback_calls = 0
+
+    class _ApprovalStorage(_AuditSpyStorage):
+        def __init__(self) -> None:
+            super().__init__()
+            self.read_calls = 0
+            self.claim_calls = 0
+
+        def get_action_approval(self, _approval_id: str, _user_id: str) -> dict[str, object]:
+            self.read_calls += 1
+            now[0] = context.inherited_budget.safety_deadline.monotonic_ns + 1
+            return {"tool": "guard_approved_race", "payload": {}}
+
+        def claim_action_approval(self, *_args: object, **_kwargs: object) -> dict[str, object]:
+            self.claim_calls += 1
+            return {"claimed": True}
+
+    async def handler(*, actor: ActorContext) -> dict[str, bool]:
+        nonlocal handler_calls
+        del actor
+        handler_calls += 1
+        return {"changed": True}
+
+    def callback() -> bool:
+        nonlocal callback_calls
+        callback_calls += 1
+        return True
+
+    storage = _ApprovalStorage()
+    kernel = ExecutionKernel(_AllowAll())  # type: ignore[arg-type]
+    kernel.bind_services(storage, object(), object(), object())  # type: ignore[arg-type]
+    kernel.register(
+        ToolSpec(
+            name="guard_approved_race",
+            description="Approved TOCTOU probe.",
+            parameters={"type": "object", "properties": {}},
+            security_id="knowledge.read",
+            risk="mutate",
+            handler=handler,
+        )
+    )
+
+    with (
+        track_request_effects(
+            callback,
+            request_binding_sha256=context.effect_fence.request_effect_binding_sha256,
+        ) as effects,
+        bind_authenticated_turn_context(issuer, context),
+        bind_authenticated_request_effect_authority(effects),
+    ):
+        result = await kernel.execute_approved("approval-race", actor=actor)
+
+    assert result.success is False
+    assert result.error == _AUTHORITY_ERROR
+    assert storage.read_calls == 1
+    assert storage.claim_calls == 0
+    assert storage.audit_calls == 0
+    assert callback_calls == 0
+    assert handler_calls == 0
 
 
 @pytest.mark.asyncio
@@ -378,3 +666,10 @@ async def test_legacy_untracked_observe_and_mutate_behavior_is_unchanged() -> No
     assert mutate_calls == 1
     assert mark_request_effect_possible() is True
     assert stage_request_effect_possible_in_transaction(object()) is True
+    with track_request_effects(lambda: True) as legacy_effects:
+        confirm_staged_request_effect()
+        assert legacy_effects.possible is True
+        legacy_effects.possible = False
+        legacy_effects.staged = True
+        rollback_staged_request_effect()
+        assert legacy_effects.staged is False
