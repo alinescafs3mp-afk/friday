@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import itertools
 import json
@@ -10,6 +11,7 @@ import pytest
 from friday.orchestration.contracts import RouterMode, TurnInput
 from friday.orchestration.turn_context import (
     AuthenticatedTurnContext,
+    FinalPublisher,
     IngressKind,
     InheritedTurnBudget,
     ModelAntiLoopBudget,
@@ -19,6 +21,7 @@ from friday.orchestration.turn_context import (
     TurnResourceBudget,
     TurnSafetyDeadline,
 )
+from friday.orchestration.turn_context_publication import bind_authenticated_turn_publication
 from friday.orchestration.turn_context_runtime import (
     bind_authenticated_turn_context,
     suspend_authenticated_turn_context,
@@ -51,9 +54,7 @@ def _authenticated_turn(
         identity_id=f"principal-{serial}",
         session_id=f"session-{serial}",
     )
-    request_binding = hashlib.sha256(
-        f"publication-guard-request-{serial}".encode("ascii")
-    ).hexdigest()
+    request_binding = hashlib.sha256(f"publication-guard-request-{serial}".encode("ascii")).hexdigest()
     authority = issuer.issue_ingress_authority(
         ingress_kind=IngressKind.SIGNED_HTTP,
         ingress_issued_token=f"accepted-publication-{serial}",
@@ -108,9 +109,7 @@ def _projection(context: AuthenticatedTurnContext, role: str) -> dict[str, str]:
 
 def _writes(statements: list[str]) -> list[str]:
     return [
-        statement
-        for statement in statements
-        if statement.lstrip().upper().startswith(("INSERT", "UPDATE"))
+        statement for statement in statements if statement.lstrip().upper().startswith(("INSERT", "UPDATE"))
     ]
 
 
@@ -126,7 +125,16 @@ def test_exact_user_and_assistant_publications_share_one_atomic_closed_turn(
     caller_metadata = {"carrier": {"ordinal": 1}}
     caller_snapshot = json.loads(json.dumps(caller_metadata))
 
-    with bind_authenticated_turn_context(issuer, context), storage.transaction() as conn:
+    with (
+        bind_authenticated_turn_context(issuer, context),
+        bind_authenticated_turn_publication(
+            context,
+            conversation_id=conversation_id,
+            person_id=user_id,
+            final_publisher=FinalPublisher.PRIMARY,
+        ),
+        storage.transaction() as conn,
+    ):
         user = store_message_in_transaction(
             conn,
             conversation_id,
@@ -185,9 +193,15 @@ def test_scope_mismatch_has_zero_insert_or_update(storage: Any, mismatch: str) -
     before = storage.conn.total_changes
     storage.conn.set_trace_callback(statements.append)
     try:
-        with bind_authenticated_turn_context(issuer, context), pytest.raises(
-            TurnContextError,
-            match="publication scope",
+        with (
+            bind_authenticated_turn_context(issuer, context),
+            bind_authenticated_turn_publication(
+                context,
+                conversation_id=admitted_id,
+                person_id=user_id,
+                final_publisher=FinalPublisher.PRIMARY,
+            ),
+            pytest.raises(TurnContextError, match="publication lease does not match"),
         ):
             store_message_in_transaction(
                 storage.conn,
@@ -215,7 +229,15 @@ def test_suspended_or_stale_authority_has_zero_database_writes(storage: Any, fai
     before = storage.conn.total_changes
     storage.conn.set_trace_callback(statements.append)
     try:
-        with bind_authenticated_turn_context(issuer, context):
+        with (
+            bind_authenticated_turn_context(issuer, context),
+            bind_authenticated_turn_publication(
+                context,
+                conversation_id=conversation_id,
+                person_id=user_id,
+                final_publisher=FinalPublisher.PRIMARY,
+            ),
+        ):
             if failure == "stale":
                 now[0] = context.inherited_budget.safety_deadline.monotonic_ns + 1
                 with pytest.raises(TurnContextError, match="deadline"):
@@ -227,9 +249,12 @@ def test_suspended_or_stale_authority_has_zero_database_writes(storage: Any, fai
                         "must not be stored",
                     )
             else:
-                with suspend_authenticated_turn_context(), pytest.raises(
-                    TurnContextError,
-                    match="primary authority",
+                with (
+                    suspend_authenticated_turn_context(),
+                    pytest.raises(
+                        TurnContextError,
+                        match="primary authority",
+                    ),
                 ):
                     store_message_in_transaction(
                         storage.conn,
@@ -256,9 +281,15 @@ def test_reserved_metadata_collision_fails_without_mutating_caller_or_database(s
     caller_snapshot = json.loads(json.dumps(caller_metadata))
     before = storage.conn.total_changes
 
-    with bind_authenticated_turn_context(issuer, context), pytest.raises(
-        TurnContextError,
-        match="metadata is reserved",
+    with (
+        bind_authenticated_turn_context(issuer, context),
+        bind_authenticated_turn_publication(
+            context,
+            conversation_id=conversation_id,
+            person_id=user_id,
+            final_publisher=FinalPublisher.PRIMARY,
+        ),
+        pytest.raises(TurnContextError, match="metadata is reserved"),
     ):
         store_message_in_transaction(
             storage.conn,
@@ -307,7 +338,16 @@ def test_live_non_conversation_role_keeps_legacy_metadata_bytes(storage: Any) ->
     )
     metadata = {"kind": "code-owned-system-event"}
 
-    with bind_authenticated_turn_context(issuer, context), storage.transaction() as conn:
+    with (
+        bind_authenticated_turn_context(issuer, context),
+        bind_authenticated_turn_publication(
+            context,
+            conversation_id=conversation_id,
+            person_id=user_id,
+            final_publisher=FinalPublisher.PRIMARY,
+        ),
+        storage.transaction() as conn,
+    ):
         stored = store_message_in_transaction(
             conn,
             conversation_id,
@@ -335,7 +375,16 @@ def test_scope_guard_runs_before_any_connection_statement(storage: Any) -> None:
     statements: list[str] = []
     storage.conn.set_trace_callback(statements.append)
     try:
-        with bind_authenticated_turn_context(issuer, context), pytest.raises(TurnContextError):
+        with (
+            bind_authenticated_turn_context(issuer, context),
+            bind_authenticated_turn_publication(
+                context,
+                conversation_id=conversation_id,
+                person_id=user_id,
+                final_publisher=FinalPublisher.PRIMARY,
+            ),
+            pytest.raises(TurnContextError),
+        ):
             store_message_in_transaction(
                 storage.conn,
                 "conv_ffffffffffffffff",
@@ -343,6 +392,260 @@ def test_scope_guard_runs_before_any_connection_statement(storage: Any) -> None:
                 "user",
                 "no statement",
             )
+    finally:
+        storage.conn.set_trace_callback(None)
+
+    assert statements == []
+
+
+def test_live_context_without_code_owned_lease_rejects_wrapper_before_sql(storage: Any) -> None:
+    user_id = "alice"
+    conversation_id = str(storage.create_conversation(user_id, "Lease required")["id"])
+    issuer, context, _now = _authenticated_turn(
+        conversation_id=conversation_id,
+        user_id=user_id,
+    )
+    statements: list[str] = []
+    storage.conn.set_trace_callback(statements.append)
+    try:
+        with (
+            bind_authenticated_turn_context(issuer, context),
+            pytest.raises(
+                TurnContextError,
+                match="publication lease is unavailable",
+            ),
+        ):
+            storage.store_message(
+                conversation_id,
+                user_id,
+                "assistant",
+                "ambient authority is insufficient",
+            )
+    finally:
+        storage.conn.set_trace_callback(None)
+
+    assert statements == []
+
+
+def test_publication_lease_cannot_be_nested_even_with_exact_ambient_context(storage: Any) -> None:
+    user_id = "alice"
+    conversation_id = str(storage.create_conversation(user_id, "No nested publisher")["id"])
+    issuer, context, _now = _authenticated_turn(
+        conversation_id=conversation_id,
+        user_id=user_id,
+    )
+
+    with (
+        bind_authenticated_turn_context(issuer, context),
+        bind_authenticated_turn_publication(
+            context,
+            conversation_id=conversation_id,
+            person_id=user_id,
+            final_publisher=FinalPublisher.PRIMARY,
+        ),
+        pytest.raises(TurnContextError, match="cannot be nested"),
+        bind_authenticated_turn_publication(
+            context,
+            conversation_id=conversation_id,
+            person_id=user_id,
+            final_publisher=FinalPublisher.PRIMARY,
+        ),
+    ):
+        pytest.fail("nested publisher replaced the code-owned lease")
+
+
+def test_retired_lease_cannot_be_rebound_inside_the_same_primary_turn(storage: Any) -> None:
+    user_id = "alice"
+    conversation_id = str(storage.create_conversation(user_id, "No sequential publisher")["id"])
+    issuer, context, _now = _authenticated_turn(
+        conversation_id=conversation_id,
+        user_id=user_id,
+    )
+
+    with bind_authenticated_turn_context(issuer, context):
+        with bind_authenticated_turn_publication(
+            context,
+            conversation_id=conversation_id,
+            person_id=user_id,
+            final_publisher=FinalPublisher.PRIMARY,
+        ):
+            pass
+        with (
+            pytest.raises(TurnContextError, match="already bound"),
+            bind_authenticated_turn_publication(
+                context,
+                conversation_id=conversation_id,
+                person_id=user_id,
+                final_publisher=FinalPublisher.PRIMARY,
+            ),
+        ):
+            pytest.fail("retired lease was rebound inside one primary turn")
+
+
+@pytest.mark.asyncio
+async def test_parallel_context_copies_share_one_process_publication_lease_fence(storage: Any) -> None:
+    user_id = "alice"
+    conversation_id = str(storage.create_conversation(user_id, "One parallel publisher")["id"])
+    issuer, context, _now = _authenticated_turn(
+        conversation_id=conversation_id,
+        user_id=user_id,
+    )
+    start = asyncio.Event()
+
+    async def contender() -> bool:
+        await start.wait()
+        try:
+            with bind_authenticated_turn_publication(
+                context,
+                conversation_id=conversation_id,
+                person_id=user_id,
+                final_publisher=FinalPublisher.PRIMARY,
+            ):
+                await asyncio.sleep(0)
+                return True
+        except TurnContextError:
+            return False
+
+    with bind_authenticated_turn_context(issuer, context):
+        tasks = [asyncio.create_task(contender()), asyncio.create_task(contender())]
+        start.set()
+        assert sorted(await asyncio.gather(*tasks)) == [False, True]
+
+
+def test_duplicate_user_and_assistant_slots_reject_in_wrapper_preflight_without_sql(
+    storage: Any,
+) -> None:
+    user_id = "alice"
+    conversation_id = str(storage.create_conversation(user_id, "One slot per role")["id"])
+    issuer, context, _now = _authenticated_turn(
+        conversation_id=conversation_id,
+        user_id=user_id,
+    )
+
+    with (
+        bind_authenticated_turn_context(issuer, context),
+        bind_authenticated_turn_publication(
+            context,
+            conversation_id=conversation_id,
+            person_id=user_id,
+            final_publisher=FinalPublisher.PRIMARY,
+        ),
+    ):
+        storage.store_message(conversation_id, user_id, "user", "first user")
+        storage.store_message(conversation_id, user_id, "assistant", "first assistant")
+        for role in ("user", "assistant"):
+            statements: list[str] = []
+            storage.conn.set_trace_callback(statements.append)
+            try:
+                with pytest.raises(TurnContextError, match="already reserved"):
+                    storage.store_message(
+                        conversation_id,
+                        user_id,
+                        role,
+                        f"duplicate {role}",
+                    )
+            finally:
+                storage.conn.set_trace_callback(None)
+            assert statements == []
+
+    assert storage.count_messages(conversation_id, user_id=user_id) == 2
+
+
+def test_deadline_flip_after_scope_select_has_no_message_insert(storage: Any) -> None:
+    user_id = "alice"
+    conversation_id = str(storage.create_conversation(user_id, "TOCTOU")["id"])
+    issuer, context, now = _authenticated_turn(
+        conversation_id=conversation_id,
+        user_id=user_id,
+    )
+    statements: list[str] = []
+    flipped = False
+
+    def trace(statement: str) -> None:
+        nonlocal flipped
+        statements.append(statement)
+        normalized = " ".join(statement.upper().split())
+        if not flipped and normalized.startswith("SELECT ID FROM CONVERSATIONS"):
+            flipped = True
+            now[0] = context.inherited_budget.safety_deadline.monotonic_ns + 1
+
+    storage.conn.set_trace_callback(trace)
+    try:
+        with (
+            bind_authenticated_turn_context(issuer, context),
+            bind_authenticated_turn_publication(
+                context,
+                conversation_id=conversation_id,
+                person_id=user_id,
+                final_publisher=FinalPublisher.PRIMARY,
+            ),
+            pytest.raises(TurnContextError, match="deadline"),
+            storage.transaction() as conn,
+        ):
+            store_message_in_transaction(
+                conn,
+                conversation_id,
+                user_id,
+                "assistant",
+                "must not cross stale authority",
+            )
+    finally:
+        storage.conn.set_trace_callback(None)
+
+    assert flipped is True
+    assert not any(statement.lstrip().upper().startswith("INSERT INTO MESSAGES") for statement in statements)
+    assert storage.count_messages(conversation_id, user_id=user_id) == 0
+
+
+@pytest.mark.parametrize("role", ["user", "assistant", "system"])
+def test_reserved_key_spoof_is_rejected_on_legacy_wrapper_for_every_role(
+    storage: Any,
+    role: str,
+) -> None:
+    user_id = "alice"
+    conversation_id = str(storage.create_conversation(user_id, "Reserved key")["id"])
+    metadata = {_PUBLICATION_KEY: {"publication_role": role}, "caller": {"keep": True}}
+    snapshot = json.loads(json.dumps(metadata))
+    statements: list[str] = []
+    storage.conn.set_trace_callback(statements.append)
+    try:
+        with pytest.raises(TurnContextError, match="metadata is reserved"):
+            storage.store_message(
+                conversation_id,
+                user_id,
+                role,
+                "spoof",
+                metadata,
+            )
+    finally:
+        storage.conn.set_trace_callback(None)
+
+    assert statements == []
+    assert metadata == snapshot
+
+
+def test_wrapper_scope_mismatch_fails_before_get_or_begin(storage: Any) -> None:
+    user_id = "alice"
+    conversation_id = str(storage.create_conversation(user_id, "Wrapper admitted")["id"])
+    other_id = str(storage.create_conversation(user_id, "Wrapper other")["id"])
+    issuer, context, _now = _authenticated_turn(
+        conversation_id=conversation_id,
+        user_id=user_id,
+    )
+    statements: list[str] = []
+    storage.conn.set_trace_callback(statements.append)
+    try:
+        with (
+            bind_authenticated_turn_context(issuer, context),
+            bind_authenticated_turn_publication(
+                context,
+                conversation_id=conversation_id,
+                person_id=user_id,
+                final_publisher=FinalPublisher.PRIMARY,
+            ),
+            pytest.raises(TurnContextError, match="lease does not match"),
+        ):
+            storage.store_message(other_id, user_id, "assistant", "wrong scope")
     finally:
         storage.conn.set_trace_callback(None)
 

@@ -15,7 +15,13 @@ from friday.interaction_control_plane.failure_store import (
     observe_owned_message_candidate,
 )
 from friday.orchestration.turn_context import TurnContextError
-from friday.orchestration.turn_context_runtime import current_primary_authenticated_turn_context
+from friday.orchestration.turn_context_publication import (
+    AUTHENTICATED_TURN_PUBLICATION_METADATA_KEY,
+    carry_authenticated_turn_publication_preflight,
+    consume_authenticated_turn_publication,
+    preflight_authenticated_turn_publication,
+    revalidate_authenticated_turn_publication,
+)
 from friday.storage._base import (
     Any,
     StorageShared,
@@ -32,39 +38,23 @@ from friday.storage._privacy import (
 )
 
 _MESSAGE_ID_RE = re.compile(r"msg_[0-9a-f]{16}")
-_AUTHENTICATED_TURN_PUBLICATION_METADATA_KEY = "authenticated_turn_publication"
-_AUTHENTICATED_TURN_PUBLICATION_SCHEMA = "friday.authenticated-turn-publication.v1"
 
 
-def _authenticated_turn_publication_metadata(
-    *,
-    conversation_id: str,
-    user_id: str,
-    role: str,
+def _reject_authenticated_turn_publication_collision(
     metadata: dict[str, Any] | None,
-) -> dict[str, Any] | None:
-    """Close one durable user/assistant publication over its live authority."""
-
-    context = current_primary_authenticated_turn_context()
-    if context is None:
-        return metadata
-    if (
-        context.authority.conversation_id != conversation_id
-        or context.authority.person_id != user_id
-    ):
-        raise TurnContextError("authenticated turn publication scope does not match admission")
-    if role not in {"user", "assistant"}:
-        return metadata
-    if metadata is not None and _AUTHENTICATED_TURN_PUBLICATION_METADATA_KEY in metadata:
+) -> None:
+    if metadata is not None and AUTHENTICATED_TURN_PUBLICATION_METADATA_KEY in metadata:
         raise TurnContextError("authenticated turn publication metadata is reserved")
+
+
+def _attach_authenticated_turn_publication(
+    metadata: dict[str, Any] | None,
+    projection: dict[str, str] | None,
+) -> dict[str, Any] | None:
+    if projection is None:
+        return metadata
     closed_metadata = dict(metadata or {})
-    closed_metadata[_AUTHENTICATED_TURN_PUBLICATION_METADATA_KEY] = {
-        "schema": _AUTHENTICATED_TURN_PUBLICATION_SCHEMA,
-        "turn_id": context.turn_id,
-        "context_authority_sha256": context.context_authority_sha256,
-        "request_effect_binding_sha256": context.effect_fence.request_effect_binding_sha256,
-        "publication_role": role,
-    }
+    closed_metadata[AUTHENTICATED_TURN_PUBLICATION_METADATA_KEY] = projection
     return closed_metadata
 
 
@@ -127,11 +117,11 @@ def store_message_in_transaction(
 ) -> dict[str, Any]:
     """Store one message using a transaction owned by the caller."""
 
-    publication_metadata = _authenticated_turn_publication_metadata(
+    _reject_authenticated_turn_publication_collision(metadata)
+    publication_reservation = consume_authenticated_turn_publication(
         conversation_id=conversation_id,
-        user_id=user_id,
+        person_id=user_id,
         role=role,
-        metadata=metadata,
     )
 
     conversation = conn.execute(
@@ -151,6 +141,16 @@ def store_message_in_transaction(
 
     message_id = new_id("msg")
     now = utc_now()
+    publication_projection = revalidate_authenticated_turn_publication(
+        publication_reservation,
+        conversation_id=conversation_id,
+        person_id=user_id,
+        role=role,
+    )
+    publication_metadata = _attach_authenticated_turn_publication(
+        metadata,
+        publication_projection,
+    )
     conn.execute(
         """INSERT INTO messages(id, conversation_id, user_id, role, content,
            metadata_json, reply_to, created_at) VALUES(?, ?, ?, ?, ?, ?, ?, ?)""",
@@ -600,18 +600,25 @@ class ConversationsMixin(StorageShared):
         metadata: dict[str, Any] | None = None,
         reply_to: str | None = None,
     ) -> dict[str, Any]:
-        if not self.get_conversation(conversation_id, user_id):
-            raise ValueError("Conversation does not belong to user")
-        with self.transaction() as conn:
-            return store_message_in_transaction(
-                conn,
-                conversation_id,
-                user_id,
-                role,
-                content,
-                metadata,
-                reply_to,
-            )
+        _reject_authenticated_turn_publication_collision(metadata)
+        publication_preflight = preflight_authenticated_turn_publication(
+            conversation_id=conversation_id,
+            person_id=user_id,
+            role=role,
+        )
+        with carry_authenticated_turn_publication_preflight(publication_preflight):
+            if not self.get_conversation(conversation_id, user_id):
+                raise ValueError("Conversation does not belong to user")
+            with self.transaction() as conn:
+                return store_message_in_transaction(
+                    conn,
+                    conversation_id,
+                    user_id,
+                    role,
+                    content,
+                    metadata,
+                    reply_to,
+                )
 
     def count_messages(self, conversation_id: str, *, user_id: str) -> int:
         """How many messages the conversation holds — both conditions from the listing."""
