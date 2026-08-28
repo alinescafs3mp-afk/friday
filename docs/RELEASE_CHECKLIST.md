@@ -180,7 +180,7 @@ failed/error/skipped-тест в любой фазе делает гейт кр�
 Для optional GPT-OSS secondary brain начиная с 0.207.11 дополнительно:
 
 - release принимается и первый раз запускается без `FRIDAY_SECONDARY_LLM_*`:
-  health имеет `status=ok`, `version=0.207.65`, `secondary.mode=disabled`,
+  health имеет `status=ok`, `version=0.207.66`, `secondary.mode=disabled`,
   `secondary.state=disabled` и `secondary.available=false`;
 - `ACCEPTED_SECONDARY_RUNTIME_PROFILES` содержит ровно finalist
   `gptoss20b-2335df123cac7fc0e13e347cde1e1ffa8562daafcaf0fc76ade1a851d2b0ff1f`
@@ -466,7 +466,7 @@ failed/error/skipped-тест в любой фазе делает гейт кр�
 - post-context load допускает bounded convergence не более 20 секунд с шагом
   50 мс только для valid same-epoch busy; invalid/epoch/deadline fail-closed, а
   initial idle и post-cancellation quiet остаются строгими;
-- final startup health имеет `status=ok`, `version=0.207.65`, configured/installed
+- final startup health имеет `status=ok`, `version=0.207.66`, configured/installed
   `canary`, routes `[archive_read, file_read]`, точный `profile_id`,
   `verified_context_tokens=8192` и непустой public `attestation_sha256`;
 - синтетические 1- и 2-файловые UTF-8 smokes дают одну публикацию с точными
@@ -494,9 +494,9 @@ failed/error/skipped-тест в любой фазе делает гейт кр�
 Проверить:
 
 - schema version = 46;
-- sealed fallback имеет `max_schema=46`; `0.207.64` с max schema 45 после
-  миграции не является допустимым fallback, а Engineer runtime activation
-  остаётся отдельным следующим release;
+- sealed fallback `0.207.66rc0` имеет `max_schema=46`; `0.207.64` с max schema
+  45 после миграции не является допустимым fallback, а `0.207.65` остаётся
+  точным dormant predecessor текущей Engineer runtime activation;
 - schema 43 → 44 атомарно добавляет exact dormant body-free
   `compare_current_file_with_current_web` WorkGraph: ровно два independent
   read-шага и один dependent primary-synthesis, immutable identities,
