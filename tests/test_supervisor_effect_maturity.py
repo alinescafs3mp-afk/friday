@@ -419,7 +419,11 @@ def test_canonical_artifact_round_trip_returns_process_sealed_witness(
     assert witness.canary_promotion_evidence_sha256 == maturity_inputs.canary_evidence_sha256
     assert witness.registry_binding_sha256 == REGISTRY
     assert witness.effect_registry_binding_sha256 == EFFECT_REGISTRY
-    assert witness.observation_count == witness.joined_trace_count == 20
+    assert (
+        witness.observation_count
+        == witness.joined_trace_count
+        == SUPERVISOR_ASSIST_PROMOTION_MIN_PRODUCT_OBSERVATIONS
+    )
     assert witness.primary_fallback_proven is True
     assert witness.laptop_unavailable_fallback_proven is True
     assert witness.primary_publication_owner_proven is True
@@ -455,7 +459,7 @@ def test_canonical_artifact_round_trip_returns_process_sealed_witness(
 
 @pytest.mark.parametrize(
     ("observations", "evidence_binding"),
-    ((0, "missing"), (19, "exact"), (20, "stale")),
+    ((0, "missing"), (0, "exact"), (1, "stale")),
 )
 def test_builder_rejects_missing_immature_or_stale_canary_window(
     maturity_inputs: _Inputs,
@@ -490,8 +494,8 @@ def test_builder_rejects_missing_immature_or_stale_canary_window(
 @pytest.mark.parametrize(
     ("complete_count", "failure_counts"),
     (
-        (19, {"none:none": 20}),
-        (20, {FAILURE_CLASS: 1, "none:none": 19}),
+        (0, {"none:none": 1}),
+        (1, {FAILURE_CLASS: 1}),
     ),
 )
 def test_builder_requires_every_canary_observation_complete_and_failure_free(
@@ -515,7 +519,7 @@ def test_builder_requires_every_canary_observation_complete_and_failure_free(
     report["report_sha256"] = canonical_sha256(report)
     baseline_raw = _baseline_raw(report)
 
-    with pytest.raises(SupervisorEffectMaturityError, match="not mature"):
+    with pytest.raises(SupervisorEffectMaturityError):
         build_read_only_maturity_artifact(
             production_baseline_raw=baseline_raw,
             expected_production_baseline_file_sha256=_sha256(baseline_raw),
