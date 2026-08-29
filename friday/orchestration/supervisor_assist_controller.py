@@ -125,6 +125,7 @@ from friday.orchestration.transient_web_comparison import (
     TransientWebComparisonEvidence,
     TransientWebEvidenceStatus,
 )
+from friday.orchestration.turn_context import TurnContextError
 from friday.pending_durable_turn import PendingDurableTurnAdmission
 from friday.permissions import ActorContext, AuthorizationError
 from friday.semantic_supervisor_policy import (
@@ -1567,10 +1568,15 @@ class SupervisorAssistController:
         kind = CompareCurrentFileWebStepKind.FILE_READ
         record.metrics.capability_calls += 1
         try:
-            evidence = await self._file_reader.prepare(
-                record.surface,
-                absolute_deadline=absolute_deadline,
+            evidence = await self._await_owned(
+                record,
+                self._file_reader.prepare(
+                    record.surface,
+                    absolute_deadline=absolute_deadline,
+                ),
             )
+        except TurnContextError:
+            raise
         except AuthorizationError:
             state = CompareCurrentFileWebStepState.DENIED
             return _ReadResult(
@@ -1654,13 +1660,18 @@ class SupervisorAssistController:
         kind = CompareCurrentFileWebStepKind.WEB_READ
         record.metrics.capability_calls += 1
         try:
-            evidence = await self._web_reader.research(
-                plan=record.surface.web_plan,
-                actor=record.surface.actor,
-                conversation_id=record.surface.conversation_id,
-                current_user_message=record.surface.turn.message,
-                absolute_deadline=absolute_deadline,
+            evidence = await self._await_owned(
+                record,
+                self._web_reader.research(
+                    plan=record.surface.web_plan,
+                    actor=record.surface.actor,
+                    conversation_id=record.surface.conversation_id,
+                    current_user_message=record.surface.turn.message,
+                    absolute_deadline=absolute_deadline,
+                ),
             )
+        except TurnContextError:
+            raise
         except AuthorizationError:
             state = CompareCurrentFileWebStepState.DENIED
             return _ReadResult(
@@ -1741,6 +1752,23 @@ class SupervisorAssistController:
         task.add_done_callback(record.children.discard)
         return task
 
+    @staticmethod
+    async def _await_owned(record: _OwnedRun, awaitable: Awaitable[Any]) -> Any:
+        """Revalidate the exact authenticated surface before using an awaited result."""
+
+        try:
+            return await awaitable
+        finally:
+            record.surface.require_current_authenticated_call_scope()
+
+    @staticmethod
+    def _raise_gathered_scope_drift(values: tuple[object, ...] | list[object]) -> None:
+        """Do not downgrade a child task's authority failure into interruption."""
+
+        for value in values:
+            if isinstance(value, TurnContextError):
+                raise value
+
     async def _review_web_recovery(
         self,
         record: _OwnedRun,
@@ -1798,17 +1826,21 @@ class SupervisorAssistController:
             )
 
         try:
-            admitted = await self._reviewer.review(
-                context,
-                absolute_deadline=absolute_deadline,
-                pre_dispatch_validator=review_still_current,
+            admitted = await self._await_owned(
+                record,
+                self._reviewer.review(
+                    context,
+                    absolute_deadline=absolute_deadline,
+                    pre_dispatch_validator=review_still_current,
+                ),
             )
         except asyncio.CancelledError:
+            raise
+        except TurnContextError:
             raise
         except Exception:
             record.metrics.accounting_complete = False
             return None
-        record.surface.require_current_authenticated_call_scope()
         if type(admitted) is not AdmittedSupervisorReview:
             record.metrics.accounting_complete = False
             return None
@@ -1859,6 +1891,7 @@ class SupervisorAssistController:
         expected_attempt = expected.attempt + 1
 
         def check(boundary: AssistCapabilityBoundary) -> bool:
+            record.surface.require_current_authenticated_call_scope()
             if self._closed or record.stop.is_set():
                 return False
             try:
@@ -1905,7 +1938,12 @@ class SupervisorAssistController:
             ):
                 return False
             try:
-                return downstream(boundary) is True
+                admitted = downstream(boundary) is True
+                if admitted:
+                    record.surface.require_current_authenticated_call_scope()
+                return admitted
+            except TurnContextError:
+                raise
             except Exception:
                 return False
 
@@ -1917,8 +1955,13 @@ class SupervisorAssistController:
         downstream: AssistBoundaryCheck[AssistPublicationBoundary],
         *,
         allow_interrupted: bool = False,
+        require_current_surface_scope: bool = False,
     ) -> AssistBoundaryCheck[AssistPublicationBoundary]:
         def check(boundary: AssistPublicationBoundary) -> bool:
+            # Retained/cancel/restart terminalization can run after the root call
+            # scope has ended; only the fresh owner publication opts into this.
+            if require_current_surface_scope:
+                record.surface.require_current_authenticated_call_scope()
             if self._closed or (record.shutdown_requested and not allow_interrupted):
                 return False
             try:
@@ -1945,7 +1988,12 @@ class SupervisorAssistController:
             ):
                 return False
             try:
-                return downstream(boundary) is True
+                admitted = downstream(boundary) is True
+                if admitted and require_current_surface_scope:
+                    record.surface.require_current_authenticated_call_scope()
+                return admitted
+            except TurnContextError:
+                raise
             except Exception:
                 return False
 
@@ -2117,6 +2165,7 @@ class SupervisorAssistController:
     ) -> bool:
         if record.stop.is_set():
             return False
+        record.surface.require_current_authenticated_call_scope()
         previous_revision = record.graph.revision
         previous = record.graph.step(
             next(
@@ -2141,6 +2190,8 @@ class SupervisorAssistController:
                     self._effect_check,
                 ),
             )
+        except TurnContextError:
+            raise
         except Exception:
             return False
         if type(claimed) is not AssistClaimedStep:
@@ -2161,6 +2212,7 @@ class SupervisorAssistController:
     async def _settle(self, record: _OwnedRun, result: _ReadResult) -> bool:
         if record.stop.is_set():
             return False
+        record.surface.require_current_authenticated_call_scope()
         settlement = AssistStepSettlement(
             kind=result.kind,
             state=result.state,
@@ -2318,6 +2370,7 @@ class SupervisorAssistController:
         async with record.mutation_lock:
             if record.stop.is_set() or record.committed_result is not None:
                 return record.committed_result
+            record.surface.require_current_authenticated_call_scope()
             try:
                 publication = self._graph_adapter.publish_comparison(
                     self._cursor(record),
@@ -2325,10 +2378,12 @@ class SupervisorAssistController:
                     authority_check=self._publication_check(
                         record,
                         self._authority_for(record.surface.actor),
+                        require_current_surface_scope=True,
                     ),
                     effect_check=self._publication_check(
                         record,
                         self._effect_check,
+                        require_current_surface_scope=True,
                     ),
                 )
                 result = self._committed_result(
@@ -2337,6 +2392,8 @@ class SupervisorAssistController:
                     outcome=SupervisorAssistOutcome.PUBLISHED,
                     include_file_citation=True,
                 )
+            except TurnContextError:
+                raise
             except Exception:
                 return None
         return await self._observe_committed(record, result)
@@ -2392,6 +2449,7 @@ class SupervisorAssistController:
         async with record.mutation_lock:
             if record.stop.is_set() or record.committed_result is not None:
                 return record.committed_result
+            record.surface.require_current_authenticated_call_scope()
             try:
                 publication = self._graph_adapter.publish_terminal(
                     self._cursor(record),
@@ -2399,10 +2457,12 @@ class SupervisorAssistController:
                     authority_check=self._publication_check(
                         record,
                         self._authority_for(record.surface.actor),
+                        require_current_surface_scope=True,
                     ),
                     effect_check=self._publication_check(
                         record,
                         self._effect_check,
+                        require_current_surface_scope=True,
                     ),
                 )
                 result = self._committed_result(
@@ -2411,6 +2471,8 @@ class SupervisorAssistController:
                     outcome=SupervisorAssistOutcome.TERMINAL,
                     include_file_citation=False,
                 )
+            except TurnContextError:
+                raise
             except Exception:
                 return None
         return await self._observe_committed(record, result)
@@ -2423,6 +2485,7 @@ class SupervisorAssistController:
         async with record.mutation_lock:
             if record.stop.is_set() or record.committed_result is not None:
                 return record.committed_result
+            record.surface.require_current_authenticated_call_scope()
             try:
                 publication = self._graph_adapter.publish_terminal_after_mixed_authority_denial(
                     self._cursor(record),
@@ -2430,10 +2493,12 @@ class SupervisorAssistController:
                     authority_check=self._publication_check(
                         record,
                         self._authority_for(record.surface.actor),
+                        require_current_surface_scope=True,
                     ),
                     effect_check=self._publication_check(
                         record,
                         self._effect_check,
+                        require_current_surface_scope=True,
                     ),
                 )
                 result = self._committed_result(
@@ -2442,6 +2507,8 @@ class SupervisorAssistController:
                     outcome=SupervisorAssistOutcome.TERMINAL,
                     include_file_citation=False,
                 )
+            except TurnContextError:
+                raise
             except Exception:
                 return None
         return await self._observe_committed(record, result)
@@ -2517,7 +2584,11 @@ class SupervisorAssistController:
                     CompareCurrentFileWebStepKind.WEB_READ,
                 )
             if not web_claimed:
-                file_value = await asyncio.gather(file_task, return_exceptions=True)
+                file_value = await self._await_owned(
+                    record,
+                    asyncio.gather(file_task, return_exceptions=True),
+                )
+                self._raise_gathered_scope_drift(file_value)
                 if not record.stop.is_set() and type(file_value[0]) is _ReadResult:
                     async with record.mutation_lock:
                         await self._settle(record, file_value[0])
@@ -2528,7 +2599,11 @@ class SupervisorAssistController:
                 record,
                 self._read_web(record, absolute_deadline=absolute_deadline),
             )
-            values = await asyncio.gather(file_task, web_task, return_exceptions=True)
+            values = await self._await_owned(
+                record,
+                asyncio.gather(file_task, web_task, return_exceptions=True),
+            )
+            self._raise_gathered_scope_drift(values)
             if record.stop.is_set():
                 return await self._stop_result(record)
             if type(values[0]) is not _ReadResult or type(values[1]) is not _ReadResult:
@@ -2558,7 +2633,7 @@ class SupervisorAssistController:
                     ),
                 )
                 try:
-                    recovery = await review_task
+                    recovery = await self._await_owned(record, review_task)
                 except asyncio.CancelledError:
                     return await self._stop_result(record)
                 if type(recovery) is AdmittedReadRecovery and not record.stop.is_set():
@@ -2580,7 +2655,7 @@ class SupervisorAssistController:
                         self._read_web(record, absolute_deadline=absolute_deadline),
                     )
                     try:
-                        retry_value = await retry_task
+                        retry_value = await self._await_owned(record, retry_task)
                     except asyncio.CancelledError:
                         return await self._stop_result(record)
                     if type(retry_value) is not _ReadResult:
@@ -2618,7 +2693,9 @@ class SupervisorAssistController:
                     ),
                 )
                 try:
-                    comparison = await synthesis_task
+                    comparison = await self._await_owned(record, synthesis_task)
+                except TurnContextError:
+                    raise
                 except CurrentFileWebComparisonError as exc:
                     record.metrics.model_calls += exc.model_calls
                     terminal = await self._publish_terminal(

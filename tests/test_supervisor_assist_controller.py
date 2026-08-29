@@ -4,7 +4,8 @@ import asyncio
 import hashlib
 import json
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
+from contextlib import ExitStack, contextmanager
 from dataclasses import replace
 from types import SimpleNamespace
 from typing import Any, NoReturn, cast
@@ -14,7 +15,10 @@ import pytest
 import friday.orchestration.transient_web_comparison as web_module
 from friday import semantic_supervisor_policy
 from friday.evidence_bundle import CitationBinding, EvidenceBundle, EvidencePart
-from friday.execution_kernel import track_request_effects
+from friday.execution_kernel import (
+    bind_authenticated_request_effect_authority,
+    track_request_effects,
+)
 from friday.file_evidence import (
     FileBodyKind,
     FileEvidenceSet,
@@ -42,7 +46,7 @@ from friday.orchestration.capability_binding import (
     CapabilityBindingSnapshot,
     operational_capability_snapshot,
 )
-from friday.orchestration.contracts import TurnInput
+from friday.orchestration.contracts import RouterMode, TurnInput
 from friday.orchestration.policy_kernel import PolicyAdmissionContext, admit_supervisor_proposal
 from friday.orchestration.router import ReadOnlyAttachmentReference
 from friday.orchestration.semantic_supervisor import (
@@ -81,6 +85,7 @@ from friday.orchestration.supervisor_assist_recovery import (
 )
 from friday.orchestration.supervisor_assist_surface import (
     CurrentFileWebAssistSurface,
+    prepare_authenticated_current_file_web_assist_surface,
     prepare_current_file_web_assist_surface,
 )
 from friday.orchestration.supervisor_contracts import (
@@ -114,7 +119,18 @@ from friday.orchestration.transient_web_comparison import (
     TransientWebComparisonEvidence,
     TransientWebEvidenceStatus,
 )
-from friday.orchestration.turn_context import TurnContextError
+from friday.orchestration.turn_context import (
+    AuthenticatedTurnContext,
+    FinalPublisher,
+    IngressKind,
+    TurnContextError,
+    TurnContextIssuer,
+    TurnMode,
+)
+from friday.orchestration.turn_context_call_scope import require_authenticated_chat_call_scope
+from friday.orchestration.turn_context_ingress import issue_authenticated_turn_context
+from friday.orchestration.turn_context_publication import bind_authenticated_turn_publication
+from friday.orchestration.turn_context_runtime import bind_authenticated_turn_context
 from friday.pending_durable_turn import PendingDurableTurnAdmission
 from friday.permissions import ActorContext, AuthorizationError, AuthorizationService
 from friday.source_identity import (
@@ -122,6 +138,7 @@ from friday.source_identity import (
     tenant_authorized_file_snapshot_token,
 )
 from friday.storage.models import RawObject
+from friday.turn_intent_policy import TurnIntent, TurnPolicyDecision
 
 _INGRESS_BINDING = SupervisorAssistIngressBindingV1.from_claimed_request(
     source_ref="assist-controller:test",
@@ -135,8 +152,8 @@ def _exact_request_effect_fence():
         lambda: True,
         before_effect_in_transaction=lambda _conn: True,
         request_binding_sha256=_INGRESS_BINDING.canonical_sha256(),
-    ):
-        yield
+    ) as effects:
+        yield effects
 
 
 def _pending_decision(
@@ -542,6 +559,128 @@ def _stored_surface(
     return surface, projection
 
 
+@contextmanager
+def _bound_authenticated_stored_surface(
+    storage: Any,
+    label: str,
+    effects: Any,
+) -> Iterator[
+    tuple[
+        CurrentFileWebAssistSurface,
+        dict[str, object],
+        list[dict[str, Any]],
+        dict[str, Any],
+        float,
+    ]
+]:
+    stored_surface, projection = _stored_surface(storage, label)
+    actor = stored_surface.actor
+    text = str(projection["_raw_content"])
+    carrier = _Carrier(
+        {
+            "raw_object_id": stored_surface.attachment.raw_object_id,
+            "persisted": True,
+            "current_turn_only": True,
+            "mime_type": "text/plain",
+            "size_bytes": len(text.encode()),
+            "transient_text": text,
+            "extraction_success": True,
+        }
+    )
+    stamp_current_turn_file_reference_for_tenant(
+        carrier,
+        {
+            "id": projection["id"],
+            "user_id": projection["user_id"],
+            "source": projection["source"],
+            "source_ref": projection["source_ref"],
+            "content_type": projection["content_type"],
+            "received_at": projection["received_at"],
+            "content_hash": projection["content_hash"],
+            "raw_content": projection["_raw_content"],
+            "metadata_json": projection["_raw_metadata"],
+        },
+        tenant_id=actor.user_id,
+    )
+    attachments: list[dict[str, Any]] = [carrier]
+    ingestion: dict[str, Any] = {
+        "promoted": False,
+        "queued_for_review": False,
+        "action": "transient",
+        "category": "web_request",
+        "reason": "explicit public web request",
+    }
+    deadline_ns = time.monotonic_ns() + 10_000_000_000
+    deadline = deadline_ns / 1_000_000_000
+    deadline_ns = int(deadline * 1_000_000_000)
+    issuer = TurnContextIssuer(hashlib.sha256(f"auth:{label}".encode()).digest())
+    context = issue_authenticated_turn_context(
+        issuer,
+        ingress_kind=IngressKind.SIGNED_HTTP,
+        ingress_issued_token=f"lease-{label}",
+        actor=actor,
+        conversation_id=stored_surface.conversation_id,
+        interaction_mode=TurnMode.DIALOGUE,
+        source_id=actor.source,
+        update_id=f"request-{label}",
+        request_effect_binding_sha256=_INGRESS_BINDING.canonical_sha256(),
+        message=stored_surface.turn.message,
+        enable_tools=True,
+        decision=TurnPolicyDecision(intent=TurnIntent.PASSTHROUGH),
+        router_mode=RouterMode.LEGACY,
+        deadline_monotonic_ns=deadline_ns,
+        max_output_tokens=2_048,
+        attachments=attachments,
+    )
+    assert type(context) is AuthenticatedTurnContext
+
+    with ExitStack() as stack:
+        stack.enter_context(bind_authenticated_turn_context(issuer, context))
+        scope = require_authenticated_chat_call_scope(
+            context,
+            user_id=actor.user_id,
+            message=stored_surface.turn.message,
+            actor=actor,
+            conversation_id=stored_surface.conversation_id,
+            attachments=attachments,
+            enable_tools=True,
+            synthetic_document_notice=False,
+            replay_source_message_id=None,
+            mode=None,
+            answer_with_voice=False,
+            reply_to=None,
+            quoted_attachment_reference=False,
+            reply_assistant_reference=False,
+            reply_assistant_message_id=None,
+            turn_policy=None,
+            telegram_update_id=None,
+            turn_deadline=deadline,
+            pending_durable_admission=None,
+            ingestion_result=ingestion,
+        )
+        surface = prepare_authenticated_current_file_web_assist_surface(
+            _settings(),
+            authenticated_context=context,
+            authenticated_scope=scope,
+            explicit_mode_requested=False,
+            ingress_binding=_INGRESS_BINDING,
+            conversation_is_dialogue=lambda person_id, conversation_id: (
+                person_id == actor.own_id and conversation_id == stored_surface.conversation_id
+            ),
+        )
+        assert type(surface) is CurrentFileWebAssistSurface
+        stack.enter_context(bind_authenticated_request_effect_authority(effects))
+        stack.enter_context(
+            bind_authenticated_turn_publication(
+                context,
+                conversation_id=stored_surface.conversation_id,
+                person_id=actor.own_id,
+                final_publisher=FinalPublisher.PRIMARY,
+            )
+        )
+        yield surface, projection, attachments, ingestion, deadline
+
+
 def _prepared_file(
     surface: CurrentFileWebAssistSurface,
     projection: dict[str, object],
@@ -748,6 +887,8 @@ class _CountingAdapter(SupervisorAssistGraphAdapter):
         self.commit_then_raise = commit_then_raise
         self.fail_claim_once = fail_claim_once
         self.admit_calls = 0
+        self.settle_calls = 0
+        self.review_recovery_calls = 0
         self.publish_calls = 0
         self.terminal_calls = 0
         self.mixed_terminal_calls = 0
@@ -768,6 +909,14 @@ class _CountingAdapter(SupervisorAssistGraphAdapter):
             self.fail_claim_once = False
             raise RuntimeError("injected claim failure")
         return super().claim(*args, **kwargs)
+
+    def settle(self, *args: Any, **kwargs: Any) -> CompareCurrentFileWebWorkGraph:
+        self.settle_calls += 1
+        return super().settle(*args, **kwargs)
+
+    def admit_review_recovery(self, *args: Any, **kwargs: Any) -> CompareCurrentFileWebWorkGraph:
+        self.review_recovery_calls += 1
+        return super().admit_review_recovery(*args, **kwargs)
 
     def publish_comparison(self, *args: Any, **kwargs: Any) -> AssistGraphPublication:
         self.publish_calls += 1
@@ -1011,6 +1160,140 @@ async def test_authenticated_scope_is_revalidated_after_await_and_immediately_be
     assert checks == fail_at
     assert adapter.admit_calls == 0
     assert legacy_calls == (0 if propagates else 1)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("mutating_reader", ["file", "web"])
+async def test_authenticated_carrier_drift_during_owned_read_cannot_settle_or_publish(
+    storage: Any,
+    _exact_request_effect_fence: Any,
+    mutating_reader: str,
+) -> None:
+    with _bound_authenticated_stored_surface(
+        storage,
+        f"owned-{mutating_reader}-drift",
+        _exact_request_effect_fence,
+    ) as (surface, projection, attachments, _ingestion, deadline):
+
+        class MutatingFileReader(_FileReader):
+            async def prepare(self, *args: Any, **kwargs: Any) -> PreparedFileEvidence:
+                evidence = await super().prepare(*args, **kwargs)
+                await asyncio.sleep(0)
+                attachments[0]["transient_text"] = "mutated authenticated file carrier"
+                return evidence
+
+        class MutatingWebReader(_WebReader):
+            async def research(self, **kwargs: Any) -> TransientWebComparisonEvidence:
+                evidence = await super().research(**kwargs)
+                await asyncio.sleep(0)
+                attachments[0]["transient_text"] = "mutated authenticated web carrier"
+                return evidence
+
+        file_reader = (
+            MutatingFileReader(_prepared_file(surface, projection))
+            if mutating_reader == "file"
+            else _FileReader(_prepared_file(surface, projection))
+        )
+        web_reader = (
+            MutatingWebReader(_web_evidence(surface))
+            if mutating_reader == "web"
+            else _WebReader(_web_evidence(surface))
+        )
+        adapter = _CountingAdapter(storage)
+        controller = _controller(
+            graph_adapter=adapter,
+            file_reader=file_reader,
+            web_reader=web_reader,
+        )
+        legacy_calls = 0
+
+        async def forbidden_legacy() -> dict[str, object]:
+            nonlocal legacy_calls
+            legacy_calls += 1
+            return {"message": "legacy must not run after ownership"}
+
+        with pytest.raises(TurnContextError, match="chat call scope drifted"):
+            await controller.execute(
+                surface,
+                legacy_primary=forbidden_legacy,
+                absolute_deadline=deadline,
+            )
+
+        graph = adapter.load_current(AssistConversationScope(surface.actor.user_id, surface.conversation_id))
+        rows = storage.execute(
+            "SELECT role FROM messages WHERE user_id=? AND conversation_id=? ORDER BY created_at,id",
+            (surface.actor.user_id, surface.conversation_id),
+        ).fetchall()
+
+        assert graph is not None and graph.state is CompareCurrentFileWebGraphState.ACTIVE
+        assert graph.step(FILE_READ_STEP_ID).state is CompareCurrentFileWebStepState.RUNNING
+        assert graph.step(WEB_READ_STEP_ID).state is CompareCurrentFileWebStepState.RUNNING
+        assert adapter.settle_calls == 0
+        assert adapter.publish_calls == adapter.terminal_calls == adapter.mixed_terminal_calls == 0
+        assert legacy_calls == 0
+        assert [str(row["role"]) for row in rows] == ["user"]
+
+
+@pytest.mark.asyncio
+async def test_authenticated_scope_drift_from_reviewer_is_not_downgraded_or_published(
+    storage: Any,
+    _exact_request_effect_fence: Any,
+) -> None:
+    with _bound_authenticated_stored_surface(
+        storage,
+        "owned-review-drift",
+        _exact_request_effect_fence,
+    ) as (surface, projection, _attachments, ingestion, deadline):
+        adapter = _CountingAdapter(storage)
+        reviewed_graphs: list[CompareCurrentFileWebWorkGraph] = []
+
+        class MutatingReviewer:
+            async def review(self, *_args: Any, **_kwargs: Any) -> None:
+                current = adapter.load_current(
+                    AssistConversationScope(surface.actor.user_id, surface.conversation_id)
+                )
+                assert current is not None
+                reviewed_graphs.append(current)
+                await asyncio.sleep(0)
+                ingestion["reason"] = "mutated during authenticated review"
+                surface.require_current_authenticated_call_scope()
+
+        controller = _controller(
+            graph_adapter=adapter,
+            file_reader=_FileReader(_prepared_file(surface, projection)),
+            web_reader=_WebReader(_web_evidence(surface, TransientWebEvidenceStatus.EMPTY)),
+            reviewer=MutatingReviewer(),
+            max_review_rounds=1,
+        )
+        legacy_calls = 0
+
+        async def forbidden_legacy() -> dict[str, object]:
+            nonlocal legacy_calls
+            legacy_calls += 1
+            return {"message": "legacy must not run after ownership"}
+
+        with pytest.raises(TurnContextError, match="chat call scope drifted"):
+            await controller.execute(
+                surface,
+                legacy_primary=forbidden_legacy,
+                absolute_deadline=deadline,
+            )
+
+        graph = adapter.load_current(AssistConversationScope(surface.actor.user_id, surface.conversation_id))
+        rows = storage.execute(
+            "SELECT role FROM messages WHERE user_id=? AND conversation_id=? ORDER BY created_at,id",
+            (surface.actor.user_id, surface.conversation_id),
+        ).fetchall()
+
+        assert len(reviewed_graphs) == 1
+        assert graph is not None and graph.state is CompareCurrentFileWebGraphState.ACTIVE
+        assert graph.revision == reviewed_graphs[0].revision
+        assert graph.canonical_sha256() == reviewed_graphs[0].canonical_sha256()
+        assert adapter.settle_calls == 2
+        assert adapter.review_recovery_calls == 0
+        assert adapter.publish_calls == adapter.terminal_calls == adapter.mixed_terminal_calls == 0
+        assert legacy_calls == 0
+        assert [str(row["role"]) for row in rows] == ["user"]
 
 
 def test_production_plan_authority_gate_rechecks_principal_and_exact_raw_source(storage: Any) -> None:
