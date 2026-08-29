@@ -102,11 +102,12 @@ def _real_admitted_scheduler(
     *,
     effect_mode: str,
 ) -> SecondaryBrainScheduler:
+    supervisor_policy = semantic_supervisor_policy.supervisor_product_policy_identity_for_mode(requested_mode)
     supervisor_admission = semantic_supervisor_policy.evaluate_supervisor_policy_admission(
         requested_mode=requested_mode.value,
         task_allowlist=(TaskClass.COMPARE_CURRENT_FILE_WITH_CURRENT_WEB.value,),
         max_steps=6,
-        max_review_rounds=1,
+        max_review_rounds=supervisor_policy.max_review_rounds,
         timeout_sec=12.0,
         allow_private_text=True,
         secondary_runtime_state="configured",
@@ -288,7 +289,14 @@ def _seed_assist(storage: _Storage, count: int = 20) -> None:
     storage.conn.commit()
 
 
-def _identity(*, requested_mode: SupervisorMode = SupervisorMode.ASSIST) -> dict[str, Any]:
+def _identity(
+    *,
+    requested_mode: SupervisorMode = SupervisorMode.SHADOW,
+    policy_mode: SupervisorMode | None = None,
+) -> dict[str, Any]:
+    policy = semantic_supervisor_policy.supervisor_product_policy_identity_for_mode(
+        policy_mode or requested_mode
+    )
     return {
         "primary_pid": 4123,
         "primary_process_epoch_sha256": "e" * 64,
@@ -298,13 +306,21 @@ def _identity(*, requested_mode: SupervisorMode = SupervisorMode.ASSIST) -> dict
         "observed_release_tree_sha256": OBSERVED_SOURCE,
         "observed_registry_binding_sha256": REGISTRY,
         "requested_mode": requested_mode.value,
-        "supervisor_policy_id": semantic_supervisor_policy.SUPERVISOR_ASSIST_PRODUCT_POLICY_ID,
-        "supervisor_policy_sha256": (semantic_supervisor_policy.SUPERVISOR_ASSIST_PRODUCT_POLICY_SHA256),
+        "supervisor_policy_id": policy.policy_id,
+        "supervisor_policy_sha256": policy.policy_sha256,
         "runtime_profile_id": semantic_supervisor_policy.SUPERVISOR_RUNTIME_PROFILE_ID,
         "runtime_profile_manifest_sha256": (
             semantic_supervisor_policy.SUPERVISOR_RUNTIME_PROFILE_MANIFEST_SHA256
         ),
     }
+
+
+def _predecessor_mode(target: SupervisorMode) -> SupervisorMode:
+    return SupervisorMode.SHADOW if target is SupervisorMode.ASSIST else SupervisorMode.ASSIST
+
+
+def _predecessor_identity(target: SupervisorMode) -> dict[str, Any]:
+    return _identity(requested_mode=_predecessor_mode(target))
 
 
 def _restart_identity(target: SupervisorMode) -> dict[str, Any]:
@@ -370,8 +386,9 @@ def test_real_scheduler_remains_valid_for_representative_window_identity(
     target: SupervisorMode,
     effect_mode: str,
 ) -> None:
-    scheduler = _real_admitted_scheduler(target, effect_mode=effect_mode)
-    configured = replace(settings, semantic_supervisor_mode=target.value)
+    predecessor = _predecessor_mode(target)
+    scheduler = _real_admitted_scheduler(predecessor, effect_mode=effect_mode)
+    configured = replace(settings, semantic_supervisor_mode=predecessor.value)
     monkeypatch.setattr(
         window_module,
         "_live_release_identity",
@@ -395,7 +412,10 @@ def test_real_scheduler_remains_valid_for_representative_window_identity(
     finally:
         asyncio.run(scheduler.aclose())
 
-    assert identity["requested_mode"] == target.value
+    expected_policy = semantic_supervisor_policy.supervisor_product_policy_identity_for_mode(predecessor)
+    assert identity["requested_mode"] == predecessor.value
+    assert identity["supervisor_policy_id"] == expected_policy.policy_id
+    assert identity["supervisor_policy_sha256"] == expected_policy.policy_sha256
     assert identity["observed_registry_binding_sha256"] == REGISTRY
 
 
@@ -411,7 +431,7 @@ def test_server_recomputes_consumes_and_restart_verifies_exact_window(target: Su
         storage,
         user_id="usr_owner",
         request_value=request,
-        current_server_identity=_identity(),
+        current_server_identity=_predecessor_identity(target),
         now=NOW,
     )
 
@@ -420,6 +440,7 @@ def test_server_recomputes_consumes_and_restart_verifies_exact_window(target: Su
     assert attestation["observed_mode"] == (
         SupervisorMode.SHADOW.value if target is SupervisorMode.ASSIST else SupervisorMode.ASSIST.value
     )
+    assert attestation["requested_mode"] == _predecessor_mode(target).value
     assert attestation["source_revision_sha256"] == SOURCE
     assert attestation["observed_release_tree_sha256"] == OBSERVED_SOURCE
     assert attestation["observer_runner_sha256"] == representative_window_observer_runner_sha256()
@@ -434,7 +455,7 @@ def test_server_recomputes_consumes_and_restart_verifies_exact_window(target: Su
         storage,
         user_id="usr_owner",
         request_value=consume_request,
-        current_server_identity=_identity(),
+        current_server_identity=_predecessor_identity(target),
         now=NOW + 1,
     )
     assert consumed["status"] == "consumed"
@@ -463,9 +484,39 @@ def test_server_recomputes_consumes_and_restart_verifies_exact_window(target: Su
         replace(accepted, source_revision_sha256="9" * 64)
 
 
+@pytest.mark.parametrize(
+    ("target", "requested_mode", "policy_mode"),
+    (
+        (SupervisorMode.ASSIST, SupervisorMode.SHADOW, SupervisorMode.ASSIST),
+        (SupervisorMode.CANARY, SupervisorMode.ASSIST, SupervisorMode.SHADOW),
+    ),
+)
+def test_server_rejects_mixed_predecessor_mode_and_policy_identity(
+    target: SupervisorMode,
+    requested_mode: SupervisorMode,
+    policy_mode: SupervisorMode,
+) -> None:
+    storage = _Storage()
+    _seed_shadow(storage)
+    if target is SupervisorMode.CANARY:
+        _seed_assist(storage)
+
+    with pytest.raises(RepresentativeWindowAttestationError, match="server identity"):
+        issue_representative_window_attestation(
+            storage,
+            user_id="usr_owner",
+            request_value=_issue_request(storage, target),
+            current_server_identity=_identity(
+                requested_mode=requested_mode,
+                policy_mode=policy_mode,
+            ),
+            now=NOW,
+        )
+
+
 def test_candidate_cannot_self_attest_synthetic_drift_or_wrong_bindings() -> None:
     storage = _Storage()
-    _seed_shadow(storage, count=19)
+    _seed_shadow(storage, count=0)
     request = _issue_request(storage, SupervisorMode.ASSIST)
     with pytest.raises(RepresentativeWindowAttestationError, match="complete population"):
         issue_representative_window_attestation(

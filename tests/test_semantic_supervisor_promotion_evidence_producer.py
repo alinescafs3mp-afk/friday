@@ -292,6 +292,7 @@ def _representative_window_issue(
 ) -> dict[str, Any]:
     lookup_token = "7" * 64
     observed_mode = SupervisorMode.SHADOW if mode is SupervisorMode.ASSIST else SupervisorMode.ASSIST
+    observed_policy = semantic_supervisor_policy.supervisor_product_policy_identity_for_mode(observed_mode)
     representative_window = (
         baseline.shadow_readiness.readiness_witness_sha256
         if mode is SupervisorMode.ASSIST
@@ -325,9 +326,9 @@ def _representative_window_issue(
         "observed_release_metadata_sha256": "3" * 64,
         "observed_release_tree_sha256": "2" * 64,
         "observed_registry_binding_sha256": REGISTRY,
-        "requested_mode": SupervisorMode.ASSIST.value,
-        "supervisor_policy_id": semantic_supervisor_policy.SUPERVISOR_ASSIST_PRODUCT_POLICY_ID,
-        "supervisor_policy_sha256": (semantic_supervisor_policy.SUPERVISOR_ASSIST_PRODUCT_POLICY_SHA256),
+        "requested_mode": observed_mode.value,
+        "supervisor_policy_id": observed_policy.policy_id,
+        "supervisor_policy_sha256": observed_policy.policy_sha256,
         "runtime_profile_id": semantic_supervisor_policy.SUPERVISOR_RUNTIME_PROFILE_ID,
         "runtime_profile_manifest_sha256": (
             semantic_supervisor_policy.SUPERVISOR_RUNTIME_PROFILE_MANIFEST_SHA256
@@ -409,6 +410,69 @@ def _assist_bundle() -> tuple[bytes, bytes, Any]:
         )
     )
     return bundle_raw, budget_raw, evidence
+
+
+@pytest.mark.parametrize(
+    ("mode", "wrong_policy_mode"),
+    (
+        (SupervisorMode.ASSIST, SupervisorMode.ASSIST),
+        (SupervisorMode.CANARY, SupervisorMode.SHADOW),
+    ),
+)
+def test_bundle_rejects_mixed_live_requested_mode_and_policy_identity(
+    mode: SupervisorMode,
+    wrong_policy_mode: SupervisorMode,
+) -> None:
+    baseline_raw = _baseline_raw()
+    baseline = _accepted_baseline()
+    _budget_raw, budget = _accepted_budget(mode)
+    precursor = PRECURSOR if mode is SupervisorMode.CANARY else None
+    attestation = _attestation(
+        mode,
+        baseline=baseline,
+        budget=budget,
+        basis=(
+            AssistPromotionQualityBasis.COMPLETION_RATE_IMPROVEMENT if mode is SupervisorMode.CANARY else None
+        ),
+        precursor=precursor,
+    )
+    evidence = (
+        build_supervisor_assist_promotion_evidence(
+            evidence_id="mixed_live_identity_assist",
+            baseline=baseline,
+            budget=budget,
+            attestation=attestation,
+            documented_failure_class_id=FAILURE_CLASS,
+            documented_failure_class_sha256=FAILURE_DIGEST,
+        )
+        if mode is SupervisorMode.ASSIST
+        else build_supervisor_canary_promotion_evidence(
+            evidence_id="mixed_live_identity_canary",
+            baseline=baseline,
+            budget=budget,
+            attestation=attestation,
+        )
+    )
+    issue = _representative_window_issue(
+        mode,
+        baseline=baseline,
+        budget=budget,
+        precursor=precursor,
+    )
+    server = issue["server_attestation"]
+    wrong_policy = semantic_supervisor_policy.supervisor_product_policy_identity_for_mode(wrong_policy_mode)
+    server["supervisor_policy_id"] = wrong_policy.policy_id
+    server["supervisor_policy_sha256"] = wrong_policy.policy_sha256
+    issue["server_attestation_sha256"] = representative_window_sha256(server)
+
+    with pytest.raises(SupervisorPromotionEvidenceProducerError, match="bind the promotion inputs"):
+        build_supervisor_promotion_bundle_payload(
+            baseline_raw=baseline_raw,
+            budget=budget,
+            attestation=attestation,
+            representative_window_issue=issue,
+            evidence=evidence,
+        )
 
 
 def test_assist_producer_uses_real_identities_and_is_activation_parseable() -> None:

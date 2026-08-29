@@ -1468,6 +1468,9 @@ def _accepted_representative_window_issue(
     expected_observed = (
         SupervisorMode.SHADOW if attestation.target_mode is SupervisorMode.ASSIST else SupervisorMode.ASSIST
     )
+    expected_policy = semantic_supervisor_policy.supervisor_product_policy_identity_for_mode(
+        expected_observed
+    )
     expected_window = (
         baseline.shadow_readiness.readiness_witness_sha256
         if attestation.target_mode is SupervisorMode.ASSIST
@@ -1510,7 +1513,7 @@ def _accepted_representative_window_issue(
         or server["state_version"] != 1
         or target_mode is not attestation.target_mode
         or observed_mode is not expected_observed
-        or server["requested_mode"] != SupervisorMode.ASSIST.value
+        or server["requested_mode"] != expected_observed.value
         or server["baseline_file_sha256"] != baseline.file_sha256
         or server["baseline_report_sha256"] != baseline.report_sha256
         or server["latency_budget_file_sha256"] != budget.document_sha256
@@ -1521,9 +1524,8 @@ def _accepted_representative_window_issue(
         or server["source_revision_sha256"] != attestation.source_revision_sha256
         or server["registry_binding_sha256"] != attestation.registry_binding_sha256
         or server["observed_registry_binding_sha256"] != attestation.registry_binding_sha256
-        or server["supervisor_policy_id"] != semantic_supervisor_policy.SUPERVISOR_ASSIST_PRODUCT_POLICY_ID
-        or server["supervisor_policy_sha256"]
-        != semantic_supervisor_policy.SUPERVISOR_ASSIST_PRODUCT_POLICY_SHA256
+        or server["supervisor_policy_id"] != expected_policy.policy_id
+        or server["supervisor_policy_sha256"] != expected_policy.policy_sha256
         or server["runtime_profile_id"] != semantic_supervisor_policy.SUPERVISOR_RUNTIME_PROFILE_ID
         or server["runtime_profile_manifest_sha256"]
         != semantic_supervisor_policy.SUPERVISOR_RUNTIME_PROFILE_MANIFEST_SHA256

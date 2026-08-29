@@ -3585,6 +3585,15 @@ def _validate_semantic_supervisor_representative_window_issue(
         invalid_code=invalid_code,
     )
     expected_observed_mode = "shadow" if mode == "assist" else "assist"
+    expected_requested_mode = expected_observed_mode
+    expected_policy_id = (
+        _SEMANTIC_SUPERVISOR_SHADOW_POLICY_ID if mode == "assist" else _SEMANTIC_SUPERVISOR_ASSIST_POLICY_ID
+    )
+    expected_policy_sha256 = (
+        _SEMANTIC_SUPERVISOR_SHADOW_POLICY_SHA256
+        if mode == "assist"
+        else _SEMANTIC_SUPERVISOR_ASSIST_POLICY_SHA256
+    )
     expected_window_sha256 = (
         shadow.get("readiness_witness_sha256") if mode == "assist" else assist.get("product_window_sha256")
     )
@@ -3627,7 +3636,7 @@ def _validate_semantic_supervisor_representative_window_issue(
         or attestation.get("authority") != _SEMANTIC_SUPERVISOR_REPRESENTATIVE_WINDOW_AUTHORITY
         or attestation.get("target_mode") != mode
         or attestation.get("observed_mode") != expected_observed_mode
-        or attestation.get("requested_mode") != "assist"
+        or attestation.get("requested_mode") != expected_requested_mode
         or attestation.get("baseline_file_sha256") != baseline_file_sha256
         or attestation.get("baseline_report_sha256") != baseline_report_sha256
         or attestation.get("latency_budget_file_sha256") != latency_budget_sha256
@@ -3638,8 +3647,8 @@ def _validate_semantic_supervisor_representative_window_issue(
         or attestation.get("source_revision_sha256") != source_sha256
         or attestation.get("registry_binding_sha256") != registry_sha256
         or attestation.get("observed_registry_binding_sha256") != registry_sha256
-        or attestation.get("supervisor_policy_id") != _SEMANTIC_SUPERVISOR_ASSIST_POLICY_ID
-        or attestation.get("supervisor_policy_sha256") != _SEMANTIC_SUPERVISOR_ASSIST_POLICY_SHA256
+        or attestation.get("supervisor_policy_id") != expected_policy_id
+        or attestation.get("supervisor_policy_sha256") != expected_policy_sha256
         or attestation.get("runtime_profile_id") != _SEMANTIC_SUPERVISOR_RUNTIME_PROFILE_ID
         or attestation.get("runtime_profile_manifest_sha256")
         != _SEMANTIC_SUPERVISOR_RUNTIME_PROFILE_MANIFEST_SHA256

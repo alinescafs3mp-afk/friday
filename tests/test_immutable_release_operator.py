@@ -4385,6 +4385,7 @@ def _semantic_supervisor_promoted_values(
         )
     lookup_token = "7" * 64
     observed_mode = SupervisorMode.SHADOW if target_mode is SupervisorMode.ASSIST else SupervisorMode.ASSIST
+    observed_policy = semantic_supervisor_policy.supervisor_product_policy_identity_for_mode(observed_mode)
     representative_window_sha256_value = (
         baseline.shadow_readiness.readiness_witness_sha256
         if target_mode is SupervisorMode.ASSIST
@@ -4416,13 +4417,13 @@ def _semantic_supervisor_promoted_values(
         "primary_pid": 100,
         "primary_process_epoch_sha256": "5" * 64,
         "primary_backend_version": "test",
-        "requested_mode": SupervisorMode.ASSIST.value,
+        "requested_mode": observed_mode.value,
         "observed_release_commit": "4" * 40,
         "observed_release_metadata_sha256": "3" * 64,
         "observed_release_tree_sha256": "2" * 64,
         "observed_registry_binding_sha256": registry_sha256,
-        "supervisor_policy_id": (semantic_supervisor_policy.SUPERVISOR_ASSIST_PRODUCT_POLICY_ID),
-        "supervisor_policy_sha256": (semantic_supervisor_policy.SUPERVISOR_ASSIST_PRODUCT_POLICY_SHA256),
+        "supervisor_policy_id": observed_policy.policy_id,
+        "supervisor_policy_sha256": observed_policy.policy_sha256,
         "runtime_profile_id": semantic_supervisor_policy.SUPERVISOR_RUNTIME_PROFILE_ID,
         "runtime_profile_manifest_sha256": (
             semantic_supervisor_policy.SUPERVISOR_RUNTIME_PROFILE_MANIFEST_SHA256
@@ -4516,6 +4517,78 @@ def test_semantic_supervisor_operator_uses_current_product_sample_policy() -> No
         SUPERVISOR_ASSIST_PROMOTION_POLICY_SHA256
     )
 
+
+@pytest.mark.parametrize(
+    ("mode", "expected_requested_mode", "expected_policy_id"),
+    (
+        ("assist", "shadow", operator._SEMANTIC_SUPERVISOR_SHADOW_POLICY_ID),  # noqa: SLF001
+        ("canary", "assist", operator._SEMANTIC_SUPERVISOR_ASSIST_POLICY_ID),  # noqa: SLF001
+    ),
+)
+def test_semantic_supervisor_operator_accepts_mode_bound_live_predecessor(
+    tmp_path: Path,
+    mode: str,
+    expected_requested_mode: str,
+    expected_policy_id: str,
+) -> None:
+    evidence_file, values, _payload = _semantic_supervisor_promoted_payload(
+        tmp_path,
+        mode=mode,
+    )
+    bundle = json.loads(evidence_file.read_text(encoding="ascii"))
+    server = bundle["representative_window_issue"]["server_attestation"]
+    assert server["requested_mode"] == expected_requested_mode
+    assert server["supervisor_policy_id"] == expected_policy_id
+
+    operator._validate_semantic_supervisor_promoted_values(  # noqa: SLF001
+        values,
+        mode=mode,
+        invalid_code="mode_bound_live_predecessor_invalid",
+    )
+
+
+@pytest.mark.parametrize(
+    ("mode", "wrong_policy_id", "wrong_policy_sha256"),
+    (
+        (
+            "assist",
+            operator._SEMANTIC_SUPERVISOR_ASSIST_POLICY_ID,  # noqa: SLF001
+            operator._SEMANTIC_SUPERVISOR_ASSIST_POLICY_SHA256,  # noqa: SLF001
+        ),
+        (
+            "canary",
+            operator._SEMANTIC_SUPERVISOR_SHADOW_POLICY_ID,  # noqa: SLF001
+            operator._SEMANTIC_SUPERVISOR_SHADOW_POLICY_SHA256,  # noqa: SLF001
+        ),
+    ),
+)
+def test_semantic_supervisor_operator_rejects_mixed_live_mode_policy_identity(
+    tmp_path: Path,
+    mode: str,
+    wrong_policy_id: str,
+    wrong_policy_sha256: str,
+) -> None:
+    evidence_file, values, _payload = _semantic_supervisor_promoted_payload(
+        tmp_path,
+        mode=mode,
+    )
+    bundle = json.loads(evidence_file.read_text(encoding="ascii"))
+    issue = bundle["representative_window_issue"]
+    server = issue["server_attestation"]
+    server["supervisor_policy_id"] = wrong_policy_id
+    server["supervisor_policy_sha256"] = wrong_policy_sha256
+    issue["server_attestation_sha256"] = representative_window_sha256(server)
+    raw = canonical_json_file_bytes(bundle)
+    evidence_file.write_bytes(raw)
+    evidence_file.chmod(0o600)
+    values["FRIDAY_SEMANTIC_SUPERVISOR_PROMOTION_EVIDENCE_SHA256"] = hashlib.sha256(raw).hexdigest()
+
+    with pytest.raises(operator.ReleaseFailure, match="mixed_live_identity_invalid"):
+        operator._validate_semantic_supervisor_promoted_values(  # noqa: SLF001
+            values,
+            mode=mode,
+            invalid_code="mixed_live_identity_invalid",
+        )
 
 def _semantic_effect_maturity_file(
     tmp_path: Path,

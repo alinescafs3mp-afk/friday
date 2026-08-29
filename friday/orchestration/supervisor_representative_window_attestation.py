@@ -452,12 +452,22 @@ def _unsigned_attestation(value: Mapping[str, Any]) -> dict[str, Any]:
     return result
 
 
+def _predecessor_mode_for_target(target_mode: SupervisorMode) -> SupervisorMode:
+    if target_mode is SupervisorMode.ASSIST:
+        return SupervisorMode.SHADOW
+    if target_mode is SupervisorMode.CANARY:
+        return SupervisorMode.ASSIST
+    raise RepresentativeWindowAttestationError("representative target mode is invalid")
+
+
 def _validate_server_identity(value: object) -> dict[str, Any]:
     identity = _exact_mapping(
         value,
         REPRESENTATIVE_WINDOW_SERVER_IDENTITY_KEYS,
         label="representative-window server identity",
     )
+    requested_mode = str(identity["requested_mode"])
+    expected_policy = semantic_supervisor_policy.supervisor_product_policy_identity_for_mode(requested_mode)
     if (
         type(identity["primary_pid"]) is not int
         or identity["primary_pid"] <= 0
@@ -465,6 +475,7 @@ def _validate_server_identity(value: object) -> dict[str, Any]:
         or _COMMIT_RE.fullmatch(str(identity["observed_release_commit"])) is None
         or identity["requested_mode"]
         not in {
+            SupervisorMode.SHADOW.value,
             SupervisorMode.ASSIST.value,
             SupervisorMode.CANARY.value,
         }
@@ -479,9 +490,8 @@ def _validate_server_identity(value: object) -> dict[str, Any]:
                 "runtime_profile_manifest_sha256",
             )
         )
-        or identity["supervisor_policy_id"] != semantic_supervisor_policy.SUPERVISOR_ASSIST_PRODUCT_POLICY_ID
-        or identity["supervisor_policy_sha256"]
-        != semantic_supervisor_policy.SUPERVISOR_ASSIST_PRODUCT_POLICY_SHA256
+        or identity["supervisor_policy_id"] != expected_policy.policy_id
+        or identity["supervisor_policy_sha256"] != expected_policy.policy_sha256
         or identity["runtime_profile_id"] != semantic_supervisor_policy.SUPERVISOR_RUNTIME_PROFILE_ID
         or identity["runtime_profile_manifest_sha256"]
         != semantic_supervisor_policy.SUPERVISOR_RUNTIME_PROFILE_MANIFEST_SHA256
@@ -496,10 +506,12 @@ def representative_window_current_server_identity(
     *,
     target_mode: SupervisorMode,
 ) -> dict[str, Any]:
-    """Re-attest the sealed live release and healthy shadow scheduler."""
+    """Re-attest the sealed live release and target's healthy predecessor."""
 
-    if target_mode not in {SupervisorMode.ASSIST, SupervisorMode.CANARY}:
-        raise RepresentativeWindowAttestationError("representative target mode is invalid")
+    predecessor_mode = _predecessor_mode_for_target(target_mode)
+    predecessor_policy = semantic_supervisor_policy.supervisor_product_policy_identity_for_mode(
+        predecessor_mode
+    )
 
     public_method = getattr(secondary, "public_status", None)
     diagnostics_method = getattr(secondary, "diagnostics_status", None)
@@ -551,12 +563,11 @@ def representative_window_current_server_identity(
             or public.get("state") != "healthy"
             or public.get("available") is not True
             or scheduler.get("workload") != "plan_candidate"
-            or requested_mode not in {SupervisorMode.ASSIST.value, SupervisorMode.CANARY.value}
-            or getattr(settings, "semantic_supervisor_mode", None) != requested_mode
+            or requested_mode != predecessor_mode.value
+            or getattr(settings, "semantic_supervisor_mode", None) != predecessor_mode.value
             or scheduler.get("effective_mode") != SupervisorMode.SHADOW.value
-            or scheduler.get("policy_id") != semantic_supervisor_policy.SUPERVISOR_ASSIST_PRODUCT_POLICY_ID
-            or scheduler.get("policy_sha256")
-            != semantic_supervisor_policy.SUPERVISOR_ASSIST_PRODUCT_POLICY_SHA256
+            or scheduler.get("policy_id") != predecessor_policy.policy_id
+            or scheduler.get("policy_sha256") != predecessor_policy.policy_sha256
             or scheduler.get("workload_available") is not True
             or scheduler.get("runtime_available") is not True
             or scheduler.get("closed_reason") != "admitted"
@@ -606,16 +617,33 @@ def _server_identity_matches(
         identity = _validate_server_identity(current)
     except RepresentativeWindowAttestationError:
         return False
-    if any(attestation.get(name) != identity.get(name) for name in _STABLE_SERVER_IDENTITY_KEYS):
-        return False
     if not after_restart:
         return all(
             attestation.get(name) == identity.get(name) for name in REPRESENTATIVE_WINDOW_SERVER_IDENTITY_KEYS
         )
+    try:
+        target_mode = SupervisorMode(attestation.get("target_mode"))
+        predecessor_mode = _predecessor_mode_for_target(target_mode)
+    except (TypeError, ValueError, RepresentativeWindowAttestationError):
+        return False
+    predecessor_policy = semantic_supervisor_policy.supervisor_product_policy_identity_for_mode(
+        predecessor_mode
+    )
+    target_policy = semantic_supervisor_policy.supervisor_product_policy_identity_for_mode(target_mode)
+    stable_keys = _STABLE_SERVER_IDENTITY_KEYS - {
+        "supervisor_policy_id",
+        "supervisor_policy_sha256",
+    }
     return bool(
-        attestation.get("source_revision_sha256") == identity.get("observed_release_tree_sha256")
+        all(attestation.get(name) == identity.get(name) for name in stable_keys)
+        and attestation.get("requested_mode") == predecessor_mode.value
+        and attestation.get("supervisor_policy_id") == predecessor_policy.policy_id
+        and attestation.get("supervisor_policy_sha256") == predecessor_policy.policy_sha256
+        and identity.get("supervisor_policy_id") == target_policy.policy_id
+        and identity.get("supervisor_policy_sha256") == target_policy.policy_sha256
+        and attestation.get("source_revision_sha256") == identity.get("observed_release_tree_sha256")
         and attestation.get("registry_binding_sha256") == identity.get("observed_registry_binding_sha256")
-        and identity.get("requested_mode") == attestation.get("target_mode")
+        and identity.get("requested_mode") == target_mode.value
     )
 
 
@@ -784,6 +812,7 @@ def validate_representative_window_attestation(
         expected_observed = (
             SupervisorMode.SHADOW if target_mode is SupervisorMode.ASSIST else SupervisorMode.ASSIST
         )
+        expected_predecessor = _predecessor_mode_for_target(target_mode)
         precursor = item["precursor_assist_promotion_evidence_sha256"]
         valid_time = (
             item["expires_at"] > now
@@ -798,7 +827,7 @@ def validate_representative_window_attestation(
             or item["authority"] != REPRESENTATIVE_WINDOW_AUTHORITY
             or target_mode not in {SupervisorMode.ASSIST, SupervisorMode.CANARY}
             or item["observed_mode"] != expected_observed.value
-            or item["requested_mode"] != SupervisorMode.ASSIST.value
+            or item["requested_mode"] != expected_predecessor.value
             or item["latency_budget_target_mode"] != target_mode.value
             or item["latency_budget_source_revision_sha256"] != item["source_revision_sha256"]
             or item["latency_budget_file_sha256"] != item["latency_budget_document_sha256"]
@@ -947,12 +976,13 @@ def issue_representative_window_attestation(
 
     if not validate_representative_window_issue_request(request_value):
         raise RepresentativeWindowAttestationError("issue request is invalid")
-    identity = _validate_server_identity(current_server_identity)
-    if identity["requested_mode"] != SupervisorMode.ASSIST.value:
-        raise RepresentativeWindowAttestationError(
-            "representative witness must be issued by the assist predecessor"
-        )
     target_mode = SupervisorMode(request_value["target_mode"])
+    predecessor_mode = _predecessor_mode_for_target(target_mode)
+    identity = _validate_server_identity(current_server_identity)
+    if identity["requested_mode"] != predecessor_mode.value:
+        raise RepresentativeWindowAttestationError(
+            "representative witness must be issued by the target predecessor"
+        )
     report = _strict_json(request_value["baseline"])
     baseline_raw = representative_window_canonical(report)
     if not hmac.compare_digest(
