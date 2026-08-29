@@ -564,6 +564,7 @@ def test_file_model_requirements_are_closed_process_singletons() -> None:
     one = _file_requirements(1)
     two = _file_requirements(2)
     measured = _file_requirements(1, 40_960)
+    measured_tiers = (8_192, 16_384, 24_576, 32_768, 40_960)
 
     assert _file_requirements(1) is one
     assert _file_requirements(2) is two
@@ -575,12 +576,15 @@ def test_file_model_requirements_are_closed_process_singletons() -> None:
     assert measured.canonical_sha256() != one.canonical_sha256()
     assert _attested_input_max_bytes(8_192) == 5_500
     assert _attested_input_max_bytes(40_960) == 27_500
+    for tier in measured_tiers:
+        assert _file_requirements(1, tier) is _file_requirements(1, tier)
+        assert _attested_input_max_bytes(tier) == (5_500 * tier) // 8_192
     assert one.max_tool_steps == one.max_tool_rounds == one.max_tool_calls == 0
     assert two.max_tool_steps == two.max_tool_rounds == two.max_tool_calls == 0
     for malformed in (True, 0, 3, 1.0, "1"):
         with pytest.raises(ValueError, match="closed lease projection"):
             _file_requirements(malformed)  # type: ignore[arg-type]
-    for malformed_context in (True, 0, 8_191, 16_384, 40_961, 8_192.0, "40960"):
+    for malformed_context in (True, 0, 8_191, 12_288, 40_961, 8_192.0, "40960"):
         with pytest.raises(ValueError, match="closed measured tiers"):
             _file_requirements(1, malformed_context)  # type: ignore[arg-type]
 
@@ -1960,7 +1964,7 @@ async def test_prepare_reserves_the_full_verifier_context_before_selection(setti
     preparation = await measured_handler.prepare(request, turn, plan)
 
     assert preparation is not None
-    assert preparation.private_payload.model_requirements is _file_requirements(1, 40_960)
+    assert preparation.private_payload.model_requirements is _file_requirements(1, 16_384)
     synthesis_messages = measured_handler._synthesis_messages(  # noqa: SLF001
         turn,
         plan,
@@ -2018,7 +2022,7 @@ async def test_measured_q38_selects_the_least_exact_context_and_legacy_stays_at_
 
     assert large_preparation is not None
     assert large_model.acquire_calls == 1
-    assert large_preparation.private_payload.model_requirements is _file_requirements(1, 40_960)
+    assert large_preparation.private_payload.model_requirements is _file_requirements(1, 24_576)
     synthesis_messages = large_handler._synthesis_messages(  # noqa: SLF001
         large_turn,
         large_plan,
@@ -2045,7 +2049,7 @@ async def test_measured_context_rejected_acquire_is_not_retried(settings, storag
 
     assert await handler.prepare(request, turn, plan) is None
     assert model.acquire_calls == 1
-    assert model.acquired_requirements == [_file_requirements(1, 40_960)]
+    assert model.acquired_requirements == [_file_requirements(1, 24_576)]
     assert model.calls == []
 
 

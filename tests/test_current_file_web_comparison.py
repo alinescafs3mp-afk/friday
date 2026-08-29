@@ -262,7 +262,13 @@ class _ComparisonModel:
     ) -> ModelProfileLease:
         self.acquire_calls += 1
         assert absolute_deadline > time.monotonic()
-        assert requirements.required_context_tokens in (8_192, 40_960)
+        assert requirements.required_context_tokens in (
+            8_192,
+            16_384,
+            24_576,
+            32_768,
+            40_960,
+        )
         assert requirements.prepared_evidence_items == 2
         assert requirements.max_tool_steps == 0
         assert requirements.max_tool_rounds == 0
@@ -646,7 +652,7 @@ async def test_q38_keeps_the_full_projection_that_q36_must_truncate() -> None:
     assert q36_result.requirements is current_file_web_model_requirements(8_192)
     assert CurrentFileWebPartialReason.LOCAL_CONTEXT_TRUNCATED not in q38_result.partial_reasons
     assert q38_result.status is CurrentFileWebComparisonStatus.COMPLETE
-    assert q38_result.requirements is current_file_web_model_requirements(40_960)
+    assert q38_result.requirements is current_file_web_model_requirements(32_768)
     q38_payload = json.loads(str(q38.calls[0][-1]["content"]))
     assert q38_payload["untrusted_evidence"]["file"]["locally_truncated"] is False
     assert all(
@@ -821,7 +827,7 @@ async def test_q38_downgraded_acquire_fails_once_without_reacquire() -> None:
         )
 
     assert captured.value.failure_reason is FailureReason.STALE_STATE
-    assert model.requirements is current_file_web_model_requirements(40_960)
+    assert model.requirements is current_file_web_model_requirements(32_768)
     assert model.acquire_calls == 1
     assert model.lease_checks == 0
     assert model.calls == []

@@ -539,7 +539,7 @@ async def test_conversation_comparison_adopts_q38_only_for_large_exact_payloads(
         absolute_deadline=time.monotonic() + 10,
     )
 
-    assert large.requirements is conversation_document_model_requirements(40_960)
+    assert large.requirements is conversation_document_model_requirements(24_576)
     assert q38.acquire_calls == 1
     assert len(q38.calls) == 2
     assert large.plan_sha256 != conversation_document_comparison_plan_sha256(

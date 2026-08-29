@@ -1482,10 +1482,12 @@ def _planner_lease(requirements: ModelRequirements, authority: object) -> ModelP
     ("available_context_tokens", "message", "expected_context_tokens"),
     [
         (40_960, "сравни два файла", 8_192),
-        (40_960, "Ж" * 5_000, 40_960),
+        (40_960, "Ж" * 5_000, 24_576),
+        (40_960, "Ж" * 12_000, 40_960),
+        (24_576, "Ж" * 5_000, 24_576),
         (8_192, "сравни два файла", 8_192),
     ],
-    ids=("q38-small", "q38-long", "q36-small"),
+    ids=("q38-small", "q38-medium", "q38-long", "installation-cap", "q36-small"),
 )
 async def test_attested_planner_acquires_once_at_the_smallest_exact_measured_tier(
     available_context_tokens: int,
