@@ -36,6 +36,13 @@ _VOICE_UNRECOGNISED_CHAT_WARNING = (
     "🎤 Голос не распознался — слов в записи не разобрала. "
     "Повторите текстом или наговорите ещё раз поближе к микрофону."
 )
+_CALLBACK_UNKNOWN_NOTICE = (
+    "Исход нажатия неизвестен; автоматически действие не повторяю. "
+    "Проверьте состояние и при необходимости нажмите кнопку снова."
+)
+_CALLBACK_UNKNOWN_TOAST = "Исход действия неизвестен"
+_VOICE_TRUNCATION_NOTICE = "Ответ длиннее, чем помещается в голосовое, — озвучено начало. Полный текст выше."
+_PROVEN_TELEGRAM_REJECTION_STATUS_CODES = frozenset({400, 401, 403, 404, 409, 413, 429})
 _LEGACY_NUMERIC_IPV4 = re.compile(
     r"(?:0x[0-9a-f]+|0[0-7]+|[0-9]+)(?:\.(?:0x[0-9a-f]+|0[0-7]+|[0-9]+)){0,3}",
     re.IGNORECASE,
@@ -63,6 +70,17 @@ _UNOWNED_AUTOLINK = re.compile(
     r")(?::\d{1,5})?(?:[/?#][^\s<>\[\]{}()]*)?(?![`\w])",
     re.IGNORECASE,
 )
+
+
+def _telegram_delivery_definitely_rejected(exc: BaseException) -> bool:
+    """Whether retrying an exact fenced part cannot duplicate a Telegram effect."""
+
+    if isinstance(exc, httpx.ConnectError):
+        return True
+    return (
+        isinstance(exc, httpx.HTTPStatusError)
+        and int(exc.response.status_code) in _PROVEN_TELEGRAM_REJECTION_STATUS_CODES
+    )
 
 
 def _neutralize_unowned_autolinks(text: str) -> str:
@@ -431,6 +449,43 @@ class CallbacksMixin(BridgeShared):
         parts = data.split(":", 2)
         clear_markup = False
         pressed_family = ""
+        claimed_effect_kind: str | None = None
+        backend_effect_observed = False
+        raw_backend_json = self._backend_json
+
+        async def update_backend_json(
+            backend_client: httpx.AsyncClient,
+            method: str,
+            path: str,
+            payload: dict[str, Any] | None,
+            actor_id: str,
+            actor_chat_id: str,
+        ) -> dict[str, Any]:
+            """Retry only a claimed callback whose backend received zero bytes."""
+
+            nonlocal backend_effect_observed, claimed_effect_kind
+            try:
+                response = await raw_backend_json(
+                    backend_client,
+                    method,
+                    path,
+                    payload,
+                    actor_id,
+                    actor_chat_id,
+                )
+            except httpx.ConnectError as exc:
+                if claimed_effect_kind is not None and not backend_effect_observed:
+                    if not self._inbox.release_update_effect_attempt(
+                        update_id,
+                        claimed_effect_kind,
+                    ):
+                        raise RuntimeError("Telegram callback effect witness could not be released") from exc
+                    claimed_effect_kind = None
+                raise
+            if method.upper() not in {"GET", "HEAD"}:
+                backend_effect_observed = True
+            return response
+
         try:
             if len(parts) != 3:
                 raise PermanentUpdateError("Unknown callback action")
@@ -438,6 +493,25 @@ class CallbacksMixin(BridgeShared):
             pressed_family = family
             if not CALLBACK_TARGET_RE.fullmatch(target_id):
                 raise PermanentUpdateError("Invalid callback target")
+            if update_id >= 0:
+                effect_claim = self._inbox.claim_update_effect_attempt(update_id, kind="callback")
+                if effect_claim == "already_attempted":
+                    await self._send_message(
+                        telegram,
+                        chat_id,
+                        _CALLBACK_UNKNOWN_NOTICE,
+                        resume_key=update_id,
+                    )
+                    await self._answer_callback(
+                        telegram,
+                        callback_id,
+                        _CALLBACK_UNKNOWN_TOAST,
+                        alert=True,
+                    )
+                    return
+                if effect_claim != "claimed":
+                    raise RuntimeError("Telegram callback effect claim returned an invalid state")
+                claimed_effect_kind = "callback"
             if family == "obs" and action in {"check", "select", "opened", "retry", "cancel"}:
                 # Onboarding exposes a private Device ID and mutates a profile.
                 # Bind it to the private chat owner before making the already
@@ -463,7 +537,7 @@ class CallbacksMixin(BridgeShared):
                         "cancel": "/api/obsidian/onboarding/cancel",
                     }[action]
                     payload = None
-                response = await self._backend_json(
+                response = await update_backend_json(
                     backend,
                     "POST",
                     path,
@@ -498,7 +572,7 @@ class CallbacksMixin(BridgeShared):
                     await self._answer_callback(telegram, callback_id, "Эта кнопка не для вас", alert=True)
                     return
                 status = "classified" if action == "promote" else "ignored"
-                await self._backend_json(
+                await update_backend_json(
                     backend,
                     "POST",
                     f"/api/inbox/{target_id}/classify",
@@ -518,7 +592,7 @@ class CallbacksMixin(BridgeShared):
                 document_id, _, raw_offset = target_id.rpartition(".")
                 if not document_id or not raw_offset.isdigit():
                     raise PermanentUpdateError("Invalid document offset")
-                document = await self._backend_json(
+                document = await update_backend_json(
                     backend,
                     "GET",
                     f"/api/knowledge/{document_id}",
@@ -543,7 +617,7 @@ class CallbacksMixin(BridgeShared):
                 # Читается СВОЙ арендатор тем же маршрутом, что и весь мост, поэтому
                 # чужое сюда не попадает: `/api/knowledge/{id}` гейтится правами
                 # действующего аккаунта.
-                document = await self._backend_json(
+                document = await update_backend_json(
                     backend,
                     "GET",
                     f"/api/knowledge/{target_id}",
@@ -591,7 +665,7 @@ class CallbacksMixin(BridgeShared):
                 # Право выдаёт backend, а не мост: `admin.users.manage` проверяется
                 # там же, где и всегда. Нажатие не владельца просто получит отказ,
                 # и он будет назван — `refusal_notice` уже различает «нет права».
-                await self._backend_json(
+                await update_backend_json(
                     backend,
                     "POST",
                     f"/api/admin/users/{target_id}/preset",
@@ -653,7 +727,7 @@ class CallbacksMixin(BridgeShared):
                         },
                     )
                 else:
-                    await self._backend_json(
+                    await update_backend_json(
                         backend,
                         "DELETE",
                         f"/api/knowledge/{target_id}",
@@ -685,7 +759,7 @@ class CallbacksMixin(BridgeShared):
                 if pressed_by != external_user_id:
                     await self._answer_callback(telegram, callback_id, "Эта кнопка не для вас", alert=True)
                     return
-                restored = await self._backend_json(
+                restored = await update_backend_json(
                     backend,
                     "POST",
                     f"/api/kg/entities/{entity_id}/restore",
@@ -717,7 +791,7 @@ class CallbacksMixin(BridgeShared):
                 allowed = {value for value, _ in self._ENTITY_TYPE_CHOICES}
                 if not entity_id or new_type not in allowed:
                     raise PermanentUpdateError("Unknown entity type")
-                updated = await self._backend_json(
+                updated = await update_backend_json(
                     backend,
                     "PATCH",
                     f"/api/kg/entities/{entity_id}",
@@ -779,7 +853,7 @@ class CallbacksMixin(BridgeShared):
                         alert=True,
                     )
                     return
-                await self._backend_json(
+                await update_backend_json(
                     backend,
                     "DELETE",
                     f"/api/kg/entities/{entity_id}",
@@ -822,7 +896,7 @@ class CallbacksMixin(BridgeShared):
                         alert=True,
                     )
                     return
-                returned = await self._backend_json(
+                returned = await update_backend_json(
                     backend,
                     "POST",
                     f"/api/kg/entities/{entity_id}/undelete",
@@ -843,7 +917,7 @@ class CallbacksMixin(BridgeShared):
             elif family == "apr" and action in {"yes", "no"}:
                 # Решение и исполнение — один запрос: между «человек согласился» и
                 # «действие случилось» не должно быть места, где всё замирает.
-                decided = await self._backend_json(
+                decided = await update_backend_json(
                     backend,
                     "POST",
                     f"/api/approvals/{target_id}/decide",
@@ -881,7 +955,7 @@ class CallbacksMixin(BridgeShared):
                     )
                 clear_markup = True
             elif family == "mon" and action == "stop":
-                await self._backend_json(
+                await update_backend_json(
                     backend,
                     "POST",
                     f"/api/me/monitors/{target_id}/stop",
@@ -902,7 +976,7 @@ class CallbacksMixin(BridgeShared):
                     feedback_type = "answer_usefulness"
                     score = 1.0 if action == "up" else -1.0
                     ack = "Спасибо, учту оценку"
-                await self._backend_json(
+                await update_backend_json(
                     backend,
                     "POST",
                     "/api/feedback",
@@ -922,7 +996,7 @@ class CallbacksMixin(BridgeShared):
                 # place; only usefulness votes retire the whole keyboard.
                 clear_markup = action != "search_off"
             elif family == "research" and action == "save":
-                result = await self._backend_json(
+                result = await update_backend_json(
                     backend,
                     "POST",
                     "/api/research/candidates",
@@ -937,7 +1011,7 @@ class CallbacksMixin(BridgeShared):
                 )
                 clear_markup = True
             elif family == "work" and action == "save":
-                result = await self._backend_json(
+                result = await update_backend_json(
                     backend,
                     "POST",
                     "/api/assistant/candidates",
@@ -953,7 +1027,7 @@ class CallbacksMixin(BridgeShared):
                 clear_markup = True
             elif family == "mission" and action in {"start", "stop"}:
                 endpoint = "start" if action == "start" else "stop"
-                await self._backend_json(
+                await update_backend_json(
                     backend,
                     "POST",
                     f"/api/missions/{target_id}/{endpoint}",
@@ -970,7 +1044,7 @@ class CallbacksMixin(BridgeShared):
             elif family == "ent" and action == "browse":
                 # Выбор из однофамильцев под /browse. Один вызов отдаёт и имя, и
                 # связанные записи — второй поход за знаниями не нужен.
-                data_entity = await self._backend_json(
+                data_entity = await update_backend_json(
                     backend,
                     "GET",
                     f"/api/kg/entities/{target_id}",
@@ -1003,7 +1077,7 @@ class CallbacksMixin(BridgeShared):
                 if not target_id or pressed_by != external_user_id:
                     await self._answer_callback(telegram, callback_id, "Эта кнопка не для вас", alert=True)
                     return
-                await self._backend_json(
+                await update_backend_json(
                     backend,
                     "POST",
                     f"/api/kg/resolutions/{target_id}/{action}",
@@ -1033,7 +1107,7 @@ class CallbacksMixin(BridgeShared):
                     )
                     return
                 status = "accepted" if action == "accept" else "rejected"
-                await self._backend_json(
+                await update_backend_json(
                     backend,
                     "POST",
                     f"/api/kg/relation-candidates/{quote(candidate_id, safe='')}/review",
@@ -1054,7 +1128,7 @@ class CallbacksMixin(BridgeShared):
                 if not target_id or pressed_by != external_user_id:
                     await self._answer_callback(telegram, callback_id, "Эта кнопка не для вас", alert=True)
                     return
-                await self._backend_json(
+                await update_backend_json(
                     backend,
                     "POST",
                     f"/api/kg/conflicts/{target_id}/decide",
@@ -1088,7 +1162,7 @@ class CallbacksMixin(BridgeShared):
                     await self._send_message(telegram, chat_id, "Удаление отменено.")
                     clear_markup = True
                 else:
-                    await self._backend_json(
+                    await update_backend_json(
                         backend,
                         "DELETE",
                         f"/api/conversations/{conv_ref}",
@@ -1108,7 +1182,7 @@ class CallbacksMixin(BridgeShared):
                 # G19: снять напоминание, не очищая dedup_key (делает backend).
                 # `target_id` — идентификатор СОБЫТИЯ: список строится по событиям,
                 # а не по очереди отправки, которую мост же и опустошает.
-                await self._backend_json(
+                await update_backend_json(
                     backend,
                     "POST",
                     f"/api/me/reminders/{target_id}/dismiss",
@@ -1383,44 +1457,124 @@ class CallbacksMixin(BridgeShared):
         telegram: httpx.AsyncClient,
         chat_id: int,
         response: dict[str, Any],
-    ) -> None:
+        *,
+        resume_key: int | None = None,
+        after_part: int = 0,
+    ) -> int:
         """Send the `speak` tool's clip (if this turn produced one) as a native
-        Telegram voice bubble, after the text reply. Best-effort: a delivery
-        failure here must not turn an otherwise-successful text answer into an
-        error for the user, so it is logged and swallowed, not raised.
+        Telegram voice bubble, after the text reply.
+
+        The legacy path remains best-effort.  A resumable update instead fences
+        every network part before I/O, so an ambiguous outcome is never replayed
+        blindly and later parts cannot overwrite its uncertainty witness.
         """
+        part = max(0, int(after_part))
         voice = response.get("voice")
         if not isinstance(voice, dict):
-            return
+            return part
         encoded = str(voice.get("audio_base64") or "")
         if not encoded:
-            return
+            return part
         try:
             audio_bytes = base64.b64decode(encoded, validate=True)
         except (ValueError, TypeError):
             LOGGER.warning("tts: response carried an unparsable voice attachment")
-            return
-        try:
-            await self._send_voice(telegram, chat_id, audio_bytes)
-        except Exception as exc:
-            LOGGER.warning("tts: sendVoice failed (%s)", type(exc).__name__)
-            return
+            return part
+
+        part += 1
+        if resume_key is None:
+            try:
+                await self._send_voice(telegram, chat_id, audio_bytes)
+            except Exception as exc:
+                LOGGER.warning("tts: sendVoice failed (%s)", type(exc).__name__)
+                return part
+        else:
+            already_sent = self._inbox.answer_chunks_sent(resume_key)
+            if already_sent >= part:
+                if already_sent == part and self._inbox.answer_delivery_uncertainty_pending(resume_key):
+                    raise RuntimeError("Telegram voice delivery remains uncertain")
+            else:
+                snapshot = self._inbox.begin_answer_chunk_delivery(resume_key, part)
+                if snapshot is None:
+                    raise RuntimeError("Telegram voice delivery fence could not be committed")
+                try:
+                    await self._send_voice(telegram, chat_id, audio_bytes)
+                except Exception as exc:
+                    LOGGER.warning("tts: sendVoice failed (%s)", type(exc).__name__)
+                    if _telegram_delivery_definitely_rejected(exc):
+                        previous_count, previous_uncertainty = snapshot
+                        if not self._inbox.reject_answer_chunk_delivery(
+                            resume_key,
+                            part,
+                            previous_count=previous_count,
+                            previous_uncertainty=previous_uncertainty,
+                        ):
+                            raise RuntimeError(
+                                "Telegram voice delivery fence could not be rolled back"
+                            ) from exc
+                    raise
+                if not self._inbox.confirm_answer_chunk_delivery(resume_key, part):
+                    raise RuntimeError("Telegram voice delivery fence could not be confirmed")
+
         if voice.get("truncated"):
             # Ответ не поместился в клип целиком. Молчать об этом нельзя: рядом
             # лежит полный текст, и человек должен знать, что услышал не всё.
-            with suppress(Exception):
-                await self._send_message(
-                    telegram,
-                    chat_id,
-                    "Ответ длиннее, чем помещается в голосовое, — озвучено начало. Полный текст выше.",
-                )
+            part += 1
+            if resume_key is None:
+                with suppress(Exception):
+                    await self._send_message(
+                        telegram,
+                        chat_id,
+                        _VOICE_TRUNCATION_NOTICE,
+                    )
+            else:
+                already_sent = self._inbox.answer_chunks_sent(resume_key)
+                if already_sent >= part:
+                    if already_sent == part and self._inbox.answer_delivery_uncertainty_pending(resume_key):
+                        raise RuntimeError("Telegram voice notice delivery remains uncertain")
+                else:
+                    snapshot = self._inbox.begin_answer_chunk_delivery(resume_key, part)
+                    if snapshot is None:
+                        raise RuntimeError("Telegram voice notice fence could not be committed")
+                    try:
+                        # This fixed plain notice is one Telegram chunk.  Send
+                        # it directly so every closed 4xx restores this outer
+                        # ordinal fence and is retried by the durable update.
+                        notice_response = await telegram.post(
+                            f"{self._api_url}/sendMessage",
+                            json={
+                                "chat_id": chat_id,
+                                "text": _VOICE_TRUNCATION_NOTICE,
+                                "disable_web_page_preview": True,
+                            },
+                        )
+                        notice_response.raise_for_status()
+                    except Exception as exc:
+                        if _telegram_delivery_definitely_rejected(exc):
+                            previous_count, previous_uncertainty = snapshot
+                            if not self._inbox.reject_answer_chunk_delivery(
+                                resume_key,
+                                part,
+                                previous_count=previous_count,
+                                previous_uncertainty=previous_uncertainty,
+                            ):
+                                raise RuntimeError(
+                                    "Telegram voice notice fence could not be rolled back"
+                                ) from exc
+                        raise
+                    if not self._inbox.confirm_answer_chunk_delivery(resume_key, part):
+                        raise RuntimeError("Telegram voice notice fence could not be confirmed")
+        return part
 
     async def _deliver_generated_files(
         self,
         telegram: httpx.AsyncClient,
         chat_id: int,
         response: dict[str, Any],
-    ) -> None:
+        *,
+        resume_key: int | None = None,
+        after_part: int = 0,
+    ) -> int:
         """Отправить файлы, собранные инструментом `make_file`, после текста.
 
         Требование владельца: «сделай отчёт» должно заканчиваться файлом. Файл
@@ -1431,9 +1585,10 @@ class CallbacksMixin(BridgeShared):
         checkpoint, а transient-сбой оставляет update в очереди. Повтор поэтому
         досылает этот файл, не дублируя уже доставленные документы.
         """
+        part = max(0, int(after_part))
         files = response.get("files")
         if not isinstance(files, list):
-            return
+            return part
         for item in files:
             if not isinstance(item, dict):
                 continue
@@ -1458,7 +1613,47 @@ class CallbacksMixin(BridgeShared):
             delivery_key = hashlib.sha256(
                 f"{int(chat_id)}:{artifact_id}".encode("utf-8", errors="strict")
             ).hexdigest()
-            if self._inbox.generated_file_was_delivered(delivery_key):
+            part += 1
+            was_delivered = self._inbox.generated_file_was_delivered(delivery_key)
+            if resume_key is None:
+                if was_delivered:
+                    continue
+                try:
+                    await self._send_document(
+                        telegram,
+                        chat_id,
+                        filename,
+                        payload,
+                        mime_type=str(item.get("mime_type") or "application/octet-stream"),
+                    )
+                except Exception as exc:
+                    LOGGER.warning("make_file: sendDocument не удался (%s)", type(exc).__name__)
+                    # Leave the durable update pending. The text reply has its own
+                    # chunk checkpoint and successful files are checkpointed below,
+                    # so retry resumes at this exact document instead of asking the
+                    # model to rebuild it or duplicating earlier documents.
+                    raise
+                self._inbox.remember_generated_file_delivery(delivery_key)
+                continue
+
+            already_sent = self._inbox.answer_chunks_sent(resume_key)
+            if already_sent >= part:
+                if already_sent == part and self._inbox.answer_delivery_uncertainty_pending(resume_key):
+                    raise RuntimeError("Telegram document delivery remains uncertain")
+                if not was_delivered:
+                    # The answer cursor is authoritative for this update; repair
+                    # the older cross-update marker without repeating the upload.
+                    self._inbox.remember_generated_file_delivery(delivery_key)
+                continue
+
+            snapshot = self._inbox.begin_answer_chunk_delivery(resume_key, part)
+            if snapshot is None:
+                raise RuntimeError("Telegram document delivery fence could not be committed")
+            if was_delivered:
+                # Cross-update proof already establishes delivery.  Consume this
+                # response's deterministic ordinal locally, with no network I/O.
+                if not self._inbox.confirm_answer_chunk_delivery(resume_key, part):
+                    raise RuntimeError("Telegram document marker fence could not be confirmed")
                 continue
             try:
                 await self._send_document(
@@ -1474,8 +1669,22 @@ class CallbacksMixin(BridgeShared):
                 # chunk checkpoint and successful files are checkpointed below,
                 # so retry resumes at this exact document instead of asking the
                 # model to rebuild it or duplicating earlier documents.
+                if _telegram_delivery_definitely_rejected(exc):
+                    previous_count, previous_uncertainty = snapshot
+                    if not self._inbox.reject_answer_chunk_delivery(
+                        resume_key,
+                        part,
+                        previous_count=previous_count,
+                        previous_uncertainty=previous_uncertainty,
+                    ):
+                        raise RuntimeError(
+                            "Telegram document delivery fence could not be rolled back"
+                        ) from exc
                 raise
+            if not self._inbox.confirm_answer_chunk_delivery(resume_key, part):
+                raise RuntimeError("Telegram document delivery fence could not be confirmed")
             self._inbox.remember_generated_file_delivery(delivery_key)
+        return part
 
     async def _answer_callback(
         self,

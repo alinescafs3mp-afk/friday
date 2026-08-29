@@ -6,6 +6,12 @@ only its address changed.
 
 from __future__ import annotations
 
+import hashlib
+from collections.abc import Callable
+from contextlib import suppress
+from functools import wraps
+from typing import TypeVar, cast
+
 from friday.private_fs import prepare_private_sqlite, restrict_sqlite_files
 from friday.telegram_bridge._base import (
     _EDIT_TARGET_MEMORY,
@@ -24,6 +30,64 @@ _OUTBOUND_REPLY_CONTEXT_TTL_SEC = 30 * 24 * 3600.0
 _OUTBOUND_REPLY_CONTEXT_MAX_ROWS = 20_000
 _TELEGRAM_STATUS_TERMINAL_TTL_SEC = 7 * 24 * 3600.0
 _TELEGRAM_STATUS_RUNNING_TTL_SEC = 30 * 24 * 3600.0
+_UPDATE_EFFECT_ATTEMPT_SCHEMA = "friday.telegram-update-effect-attempt.v1"
+_UPDATE_EFFECT_ATTEMPT_KINDS = frozenset(
+    {"callback", "command", "edited-message", "edit-reply", "local-reply"}
+)
+_DEAD_LETTER_NOTICE_PREFIX = "friday.telegram-dead-letter-notice.v1:"
+
+_F = TypeVar("_F", bound=Callable[..., Any])
+
+
+def _rollback_or_quarantine(connection: Any) -> None:
+    """Discard one failed SQLite mutation before another write can inherit it."""
+
+    try:
+        connection.rollback()
+    except BaseException:
+        # An I/O failure can make rollback itself unavailable.  A closed
+        # connection is noisy but safe: the process can no longer observe or
+        # accidentally commit tentative state and must recover by reopening.
+        with suppress(BaseException):
+            connection.close()
+
+
+def _rollback_failed_write(method: _F) -> _F:
+    """Make an existing execute/commit mutator fail back to proven state."""
+
+    @wraps(method)
+    def guarded(self: Any, *args: Any, **kwargs: Any) -> Any:
+        connection = self._conn
+        try:
+            # Old builds could leave a transaction open after SQLITE_FULL or
+            # SQLITE_IOERR.  Never let this write become the unrelated commit
+            # that publishes it.
+            if connection.in_transaction:
+                connection.rollback()
+            return method(self, *args, **kwargs)
+        except BaseException:
+            _rollback_or_quarantine(connection)
+            raise
+
+    return cast(_F, guarded)
+
+
+def _close_failed_initialization(method: _F) -> _F:
+    """Do not leave a partially opened/migrated inbox connection alive."""
+
+    @wraps(method)
+    def guarded(self: Any, *args: Any, **kwargs: Any) -> Any:
+        try:
+            return method(self, *args, **kwargs)
+        except BaseException:
+            connection = getattr(self, "_conn", None)
+            if connection is not None:
+                _rollback_or_quarantine(connection)
+                with suppress(BaseException):
+                    connection.close()
+            raise
+
+    return cast(_F, guarded)
 
 
 def _safe_backend_message_id(value: object) -> str:
@@ -31,6 +95,59 @@ def _safe_backend_message_id(value: object) -> str:
     if not candidate or len(candidate) > 128 or not candidate.isascii():
         return ""
     return candidate if all(char.isalnum() or char in "._:-" for char in candidate) else ""
+
+
+def _update_effect_attempt_witness(update_id: int, kind: str) -> str:
+    if (
+        isinstance(update_id, bool)
+        or not isinstance(update_id, int)
+        or not 0 <= update_id <= (2**63 - 1)
+        or kind not in _UPDATE_EFFECT_ATTEMPT_KINDS
+    ):
+        raise ValueError("Telegram update effect identity is invalid")
+    fingerprint = hashlib.sha256(
+        f"{_UPDATE_EFFECT_ATTEMPT_SCHEMA}:{update_id}:{kind}".encode("ascii", errors="strict")
+    ).hexdigest()
+    return json.dumps(
+        {
+            "fingerprint_sha256": fingerprint,
+            "kind": kind,
+            "schema": _UPDATE_EFFECT_ATTEMPT_SCHEMA,
+        },
+        ensure_ascii=True,
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+
+
+def _dead_letter_notice_marker(
+    error: str,
+    *,
+    permanent: bool,
+    resume_base: int,
+) -> str:
+    disposition = "permanent" if permanent else "exhausted"
+    safe_error = str(error).split(":", 1)[0][:128]
+    return f"{_DEAD_LETTER_NOTICE_PREFIX}{disposition}:{max(0, int(resume_base))}:{safe_error}"
+
+
+def _parse_dead_letter_notice_marker(value: object) -> tuple[bool, str, int] | None:
+    raw = str(value or "")
+    if not raw.startswith(_DEAD_LETTER_NOTICE_PREFIX):
+        return None
+    parts = raw[len(_DEAD_LETTER_NOTICE_PREFIX) :].split(":", 2)
+    if len(parts) != 3:
+        return None
+    disposition, raw_resume_base, error = parts
+    if disposition not in {"permanent", "exhausted"} or not error:
+        return None
+    try:
+        resume_base = int(raw_resume_base)
+    except ValueError:
+        return None
+    if resume_base < 0:
+        return None
+    return disposition == "permanent", error, resume_base
 
 
 def _ordering_key(update: dict[str, Any], update_id: int) -> str:
@@ -77,6 +194,7 @@ def _ordering_key(update: dict[str, Any], update_id: int) -> str:
 class _UpdateInbox:
     """SQLite queue: Telegram offsets advance only after an update is durable."""
 
+    @_close_failed_initialization
     def __init__(self, db_path: str) -> None:
         path = Path(db_path)
         prepare_private_sqlite(path)
@@ -281,10 +399,136 @@ class _UpdateInbox:
         row = self._conn.execute("SELECT value FROM state WHERE key='offset'").fetchone()
         return int(row["value"]) if row else 0
 
+    def update_requires_retry(self, update_id: int) -> bool:
+        """Whether one durable row can still consume its ephemeral ingress state."""
+
+        row = self._conn.execute(
+            """SELECT 1 FROM updates
+               WHERE update_id=? AND status='pending' AND attempts < ?
+                 AND last_error NOT LIKE ?""",
+            (int(update_id), MAX_ATTEMPTS, f"{_DEAD_LETTER_NOTICE_PREFIX}%"),
+        ).fetchone()
+        return row is not None
+
+    def pending_dead_letter_notice(
+        self,
+        update_ids: list[int],
+    ) -> tuple[bool, str, int] | None:
+        """Return one exact durable terminal-notice obligation for owned rows."""
+
+        cleaned = list(dict.fromkeys(int(value) for value in update_ids))
+        if not cleaned:
+            return None
+        placeholders = ",".join("?" for _value in cleaned)
+        rows = self._conn.execute(
+            f"""SELECT status, last_error FROM updates
+                WHERE update_id IN ({placeholders})""",  # nosec B608
+            cleaned,
+        ).fetchall()
+        if len(rows) != len(cleaned) or any(str(row["status"]) != "pending" for row in rows):
+            return None
+        obligations = {_parse_dead_letter_notice_marker(row["last_error"]) for row in rows}
+        if len(obligations) != 1:
+            raise RuntimeError("Telegram dead-letter notice ownership conflicts")
+        return obligations.pop()
+
+    @_rollback_failed_write
+    def prepare_dead_letter_notice_many(
+        self,
+        update_ids: list[int],
+        error: str,
+        *,
+        permanent: bool,
+    ) -> None:
+        """Persist terminal intent while the row remains restart-dispatchable."""
+
+        cleaned = list(dict.fromkeys(int(value) for value in update_ids))
+        if not cleaned:
+            raise ValueError("Telegram dead-letter notice has no owned updates")
+        anchor = self._conn.execute(
+            "SELECT chunks_sent FROM updates WHERE update_id=? AND status='pending'",
+            (cleaned[0],),
+        ).fetchone()
+        if anchor is None:
+            raise RuntimeError("Telegram dead-letter notice anchor is absent")
+        marker = _dead_letter_notice_marker(
+            error,
+            permanent=permanent,
+            resume_base=int(anchor["chunks_sent"]),
+        )
+        failed_at = time.time()
+        ready_at = failed_at + RETRY_DELAYS_SEC[0]
+        cursor = self._conn.executemany(
+            """UPDATE updates
+               SET status='pending', last_error=?, last_attempt_at=?,
+                   next_attempt_at=?, failed_at=NULL
+               WHERE update_id=? AND status='pending'""",
+            [(marker, failed_at, ready_at, update_id) for update_id in cleaned],
+        )
+        if cursor.rowcount != len(cleaned):
+            self._conn.rollback()
+            raise RuntimeError("Telegram dead-letter notice ownership changed")
+        self._conn.commit()
+
+    @_rollback_failed_write
+    def finish_dead_letter_notice_many(self, update_ids: list[int]) -> None:
+        """Absorb rows only after their resumable terminal notice completed."""
+
+        cleaned = list(dict.fromkeys(int(value) for value in update_ids))
+        obligation = self.pending_dead_letter_notice(cleaned)
+        if obligation is None:
+            raise RuntimeError("Telegram dead-letter notice obligation is absent")
+        permanent, error, _resume_base = obligation
+        failed_at = time.time()
+        placeholders = ",".join("?" for _value in cleaned)
+        cursor = self._conn.execute(
+            f"""UPDATE updates
+                SET status='dead_letter',
+                    attempts=CASE WHEN ? THEN attempts ELSE ? END,
+                    last_error=?, last_attempt_at=?, next_attempt_at=0, failed_at=?
+                WHERE update_id IN ({placeholders}) AND status='pending'""",  # nosec B608
+            (
+                int(permanent),
+                MAX_ATTEMPTS,
+                error[:500],
+                failed_at,
+                failed_at,
+                *cleaned,
+            ),
+        )
+        if cursor.rowcount != len(cleaned):
+            self._conn.rollback()
+            raise RuntimeError("Telegram dead-letter notice ownership changed")
+        self._conn.commit()
+
+    def update_effect_attempt_kind(self, update_id: int) -> str | None:
+        """Return a validated body-free effect witness, never a cached response."""
+
+        row = self._conn.execute(
+            "SELECT backend_response_json FROM updates WHERE update_id=?",
+            (int(update_id),),
+        ).fetchone()
+        raw = str(row["backend_response_json"] or "") if row is not None else ""
+        if not raw:
+            return None
+        try:
+            document = json.loads(raw)
+        except (json.JSONDecodeError, TypeError, ValueError):
+            return None
+        kind = document.get("kind") if isinstance(document, dict) else None
+        if not isinstance(kind, str) or kind not in _UPDATE_EFFECT_ATTEMPT_KINDS:
+            return None
+        return kind if raw == _update_effect_attempt_witness(int(update_id), kind) else None
+
+    @_rollback_failed_write
     def set_offset(self, offset: int) -> None:
         self._conn.execute(
             """INSERT INTO state(key, value) VALUES('offset', ?)
-               ON CONFLICT(key) DO UPDATE SET value=excluded.value""",
+               ON CONFLICT(key) DO UPDATE SET value=CASE
+                   WHEN CAST(state.value AS INTEGER) < CAST(excluded.value AS INTEGER)
+                   THEN excluded.value
+                   ELSE state.value
+               END""",
             (str(max(0, int(offset))),),
         )
         # Своя фиксация, а не чужая. Запись висела в открытой транзакции до
@@ -296,6 +540,112 @@ class _UpdateInbox:
         # которое ничего не ломает сегодня, ломает завтра.
         self._conn.commit()
 
+    @_rollback_failed_write
+    def admit_polled_update(self, update: dict[str, Any]) -> tuple[bool, int]:
+        """Atomically admit one Telegram update and advance durable poll authority.
+
+        A row without its matching offset can be processed and removed before a
+        restart, after which Telegram would redeliver the same id into an empty
+        queue.  Keeping both writes in this transaction also makes the durable
+        offset a tombstone for completed update ids without adding a table or a
+        schema field.
+        """
+
+        update_id = int(update.get("update_id", -1))
+        if update_id < 0:
+            raise ValueError("Telegram update has no valid identity")
+        # Serialize the tombstone recheck with admission.  A stale reader must
+        # never insert an update after another owner advanced the offset and
+        # removed its completed row.
+        self._conn.execute("BEGIN IMMEDIATE")
+        durable_offset = self.get_offset()
+        if update_id < durable_offset:
+            self._conn.rollback()
+            return False, durable_offset
+        cursor = self._conn.execute(
+            """INSERT OR IGNORE INTO updates(update_id, payload_json, created_at, ordering_key)
+               VALUES(?, ?, ?, ?)""",
+            (
+                update_id,
+                json.dumps(update, ensure_ascii=False, sort_keys=True),
+                time.time(),
+                _ordering_key(update, update_id),
+            ),
+        )
+        next_offset = max(durable_offset, update_id + 1)
+        self._conn.execute(
+            """INSERT INTO state(key, value) VALUES('offset', ?)
+               ON CONFLICT(key) DO UPDATE SET value=CASE
+                   WHEN CAST(state.value AS INTEGER) < CAST(excluded.value AS INTEGER)
+                   THEN excluded.value
+                   ELSE state.value
+               END""",
+            (str(next_offset),),
+        )
+        row = self._conn.execute("SELECT value FROM state WHERE key='offset'").fetchone()
+        next_offset = int(row["value"]) if row is not None else next_offset
+        self._conn.commit()
+        return cursor.rowcount > 0, next_offset
+
+    @_rollback_failed_write
+    def claim_update_effect_attempt(self, update_id: int, kind: str) -> str:
+        """Fence a non-replayable update effect before its first external byte.
+
+        The witness is an opaque digest-only envelope in the existing response
+        cache column.  A retry can therefore distinguish “never attempted” from
+        “outcome may already exist” without a schema or a second ownership lane.
+        """
+
+        witness = _update_effect_attempt_witness(update_id, kind)
+        exact_update_id = int(update_id)
+        cursor = self._conn.execute(
+            """UPDATE updates SET backend_response_json=?
+               WHERE update_id=? AND backend_response_json IS NULL""",
+            (witness, exact_update_id),
+        )
+        if cursor.rowcount == 1:
+            try:
+                self._conn.commit()
+            except BaseException:
+                # No external awaitable exists yet.  If COMMIT landed but its
+                # acknowledgement did not, remove only this exact witness so a
+                # proven pre-effect local failure remains retryable.
+                _rollback_or_quarantine(self._conn)
+                with suppress(BaseException):
+                    self._conn.execute(
+                        """UPDATE updates SET backend_response_json=NULL
+                           WHERE update_id=? AND backend_response_json=?""",
+                        (exact_update_id, witness),
+                    )
+                    self._conn.commit()
+                raise
+            return "claimed"
+
+        # A zero-row UPDATE still opened a write transaction.  Close it before
+        # reading the durable winner and before returning a normal replay state.
+        self._conn.rollback()
+        row = self._conn.execute(
+            "SELECT backend_response_json FROM updates WHERE update_id=?",
+            (exact_update_id,),
+        ).fetchone()
+        if row is not None and str(row["backend_response_json"] or "") == witness:
+            return "already_attempted"
+        raise RuntimeError("Telegram update effect witness conflicts with cached response")
+
+    @_rollback_failed_write
+    def release_update_effect_attempt(self, update_id: int, kind: str) -> bool:
+        """Release only this exact witness after proven zero-byte backend failure."""
+
+        witness = _update_effect_attempt_witness(update_id, kind)
+        cursor = self._conn.execute(
+            """UPDATE updates SET backend_response_json=NULL
+               WHERE update_id=? AND backend_response_json=?""",
+            (int(update_id), witness),
+        )
+        self._conn.commit()
+        return cursor.rowcount == 1
+
+    @_rollback_failed_write
     def remember_registered_chat(self, chat_id: int) -> None:
         """A private chat admitted through open registration, so later gate
         checks (callbacks, outbound push) recognise it without re-deriving
@@ -312,6 +662,7 @@ class _UpdateInbox:
         row = self._conn.execute("SELECT 1 FROM registered_chats WHERE chat_id=?", (int(chat_id),)).fetchone()
         return row is not None
 
+    @_rollback_failed_write
     def remember_edit_prompt(self, prompt_message_id: int, knowledge_id: str) -> None:
         """«Ответьте на ЭТО сообщение новым текстом» — запомнить, о какой записи речь.
 
@@ -340,6 +691,7 @@ class _UpdateInbox:
         )
         self._conn.commit()
 
+    @_rollback_failed_write
     def take_edit_prompt(self, prompt_message_id: int) -> str:
         """Забрать запись, к которой относится ответ, и снять приглашение.
 
@@ -359,6 +711,16 @@ class _UpdateInbox:
         self._conn.commit()
         return str(row["knowledge_id"])
 
+    def edit_prompt_target(self, prompt_message_id: int) -> str:
+        """Read one edit target without consuming it before the backend effect."""
+
+        row = self._conn.execute(
+            "SELECT knowledge_id FROM edit_prompts WHERE prompt_message_id=?",
+            (int(prompt_message_id),),
+        ).fetchone()
+        return str(row["knowledge_id"]) if row is not None else ""
+
+    @_rollback_failed_write
     def remember_archive_password_challenge(
         self,
         chat_id: int,
@@ -442,6 +804,7 @@ class _UpdateInbox:
         )
         self._conn.commit()
 
+    @_rollback_failed_write
     def archive_password_challenge(self, chat_id: int, user_id: int) -> dict[str, Any] | None:
         now = time.time()
         self._conn.execute(
@@ -497,6 +860,7 @@ class _UpdateInbox:
             )
         return result
 
+    @_rollback_failed_write
     def clear_archive_password_challenge(self, chat_id: int, user_id: int) -> None:
         self._conn.execute(
             "DELETE FROM pending_archive_passwords WHERE chat_id=? AND user_id=?",
@@ -504,6 +868,7 @@ class _UpdateInbox:
         )
         self._conn.commit()
 
+    @_rollback_failed_write
     def remember_outbound_reply_context(
         self,
         chat_id: int,
@@ -552,6 +917,7 @@ class _UpdateInbox:
         )
         self._conn.commit()
 
+    @_rollback_failed_write
     def outbound_reply_source_message_id(
         self,
         chat_id: int,
@@ -607,6 +973,7 @@ class _UpdateInbox:
         ).fetchone()
         return {"revision": int(row["revision"])} if row is not None else None
 
+    @_rollback_failed_write
     def begin_telegram_status_send(
         self,
         chat_id: int,
@@ -639,6 +1006,7 @@ class _UpdateInbox:
         self._conn.commit()
         return "armed" if cursor.rowcount > 0 else "uncertain"
 
+    @_rollback_failed_write
     def clear_telegram_status_send_fence(
         self,
         chat_id: int,
@@ -655,6 +1023,7 @@ class _UpdateInbox:
         self._conn.commit()
         return cursor.rowcount > 0
 
+    @_rollback_failed_write
     def record_telegram_status_message(
         self,
         chat_id: int,
@@ -721,6 +1090,7 @@ class _UpdateInbox:
         self._conn.commit()
         return cursor.rowcount > 0
 
+    @_rollback_failed_write
     def remember_delivered_notification(self, notification_id: str) -> None:
         """Уведомление ушло человеку — записать это ТАМ, ГДЕ ЭТО ПРОИЗОШЛО.
 
@@ -744,6 +1114,7 @@ class _UpdateInbox:
         rows = self._conn.execute("SELECT notification_id FROM delivered_notifications").fetchall()
         return {str(row["notification_id"]) for row in rows}
 
+    @_rollback_failed_write
     def forget_delivered_notifications(self, notification_ids: list[str]) -> None:
         """Подтверждение дошло — бэкенд помнит сам, локальная строка больше не нужна."""
         cleaned = [str(value) for value in notification_ids if str(value)]
@@ -829,6 +1200,7 @@ class _UpdateInbox:
         ).fetchall()
         return {str(row["notification_id"]): str(row["outcome"]) for row in rows}
 
+    @_rollback_failed_write
     def remember_notification_delivery_outcome(self, notification_id: str, outcome: str) -> None:
         """Persist a terminal local outcome before its fallible backend ACK."""
 
@@ -868,6 +1240,7 @@ class _UpdateInbox:
         if row is None or str(row["outcome"]) != expected:
             raise RuntimeError("notification delivery outcome changed")
 
+    @_rollback_failed_write
     def remember_notification_delivery_reconciled_outcome(
         self,
         notification_id: str,
@@ -912,6 +1285,7 @@ class _UpdateInbox:
         if row is None or str(row["outcome"]) != expected or int(row["status_reconciled"]) != 1:
             raise RuntimeError("reconciled notification delivery outcome changed")
 
+    @_rollback_failed_write
     def confirm_notification_status_reconciled(self, notification_id: str) -> None:
         """Prove the visible carrier's terminal status completed before ACK."""
 
@@ -933,6 +1307,7 @@ class _UpdateInbox:
         if row is None or int(row["status_reconciled"]) != 1:
             raise RuntimeError("notification status reconciliation was not persisted")
 
+    @_rollback_failed_write
     def begin_notification_part_delivery(self, notification_id: str, part_key: str) -> str:
         """Atomically arm a pre-write fence; only its creator receives ``armed``."""
 
@@ -956,6 +1331,7 @@ class _UpdateInbox:
             raise RuntimeError("notification delivery fence could not be committed")
         return "armed" if cursor.rowcount > 0 else str(row["state"])
 
+    @_rollback_failed_write
     def confirm_notification_part_delivery(self, notification_id: str, part_key: str) -> bool:
         """Close an armed fence only after Telegram returned a successful response."""
 
@@ -975,6 +1351,7 @@ class _UpdateInbox:
         ).fetchone()
         return row is not None and str(row["state"]) == "confirmed"
 
+    @_rollback_failed_write
     def reject_notification_part_delivery(self, notification_id: str, part_key: str) -> bool:
         """Disarm only after proven non-acceptance (connect failure or HTTP rejection)."""
 
@@ -986,6 +1363,7 @@ class _UpdateInbox:
         self._conn.commit()
         return cursor.rowcount > 0
 
+    @_rollback_failed_write
     def forget_notification_delivery_parts(self, notification_ids: list[str]) -> None:
         """Retire local fences after the backend durably accepted their terminal ack."""
 
@@ -1009,6 +1387,7 @@ class _UpdateInbox:
         ).fetchone()
         return row is not None
 
+    @_rollback_failed_write
     def remember_generated_file_delivery(self, delivery_key: str) -> None:
         """Checkpoint one successful sendDocument before the update can retry."""
 
@@ -1019,6 +1398,7 @@ class _UpdateInbox:
         )
         self._conn.commit()
 
+    @_rollback_failed_write
     def store(self, update: dict[str, Any]) -> bool:
         update_id = int(update.get("update_id", -1))
         if update_id < 0:
@@ -1085,9 +1465,10 @@ class _UpdateInbox:
         ).fetchall()
         return [dict(row) for row in rows]
 
+    @_rollback_failed_write
     def mark_failure(self, update_id: int, error: str) -> bool:
         row = self._conn.execute(
-            "SELECT attempts FROM updates WHERE update_id=?",
+            "SELECT attempts FROM updates WHERE update_id=? AND status='pending'",
             (update_id,),
         ).fetchone()
         if row is None:
@@ -1100,7 +1481,7 @@ class _UpdateInbox:
             """UPDATE updates
                SET attempts=?, last_attempt_at=?, last_error=?, status=?,
                    next_attempt_at=?, failed_at=?
-               WHERE update_id=?""",
+               WHERE update_id=? AND status='pending'""",
             (
                 attempts,
                 attempted_at,
@@ -1114,6 +1495,7 @@ class _UpdateInbox:
         self._conn.commit()
         return dead_lettered
 
+    @_rollback_failed_write
     def mark_failure_many(self, update_ids: list[int], error: str) -> bool:
         """Charge one failed owned album attempt to every durable part atomically."""
 
@@ -1122,7 +1504,8 @@ class _UpdateInbox:
             return False
         placeholders = ",".join("?" for _value in cleaned)
         rows = self._conn.execute(
-            f"SELECT update_id, attempts FROM updates WHERE update_id IN ({placeholders})",  # nosec B608
+            f"""SELECT update_id, attempts, chunks_sent FROM updates
+                WHERE update_id IN ({placeholders}) AND status='pending'""",  # nosec B608
             cleaned,
         ).fetchall()
         if len(rows) != len(cleaned):
@@ -1133,17 +1516,29 @@ class _UpdateInbox:
         attempted_at = time.time()
         group_attempts = max(int(row["attempts"]) for row in rows) + 1
         dead_lettered = group_attempts >= MAX_ATTEMPTS
+        chunks_by_update = {int(row["update_id"]): int(row["chunks_sent"]) for row in rows}
+        notice_resume_base = chunks_by_update[cleaned[0]]
         updates: list[tuple[int, float, str, str, float, float | None, int]] = []
         for row in rows:
             delay = RETRY_DELAYS_SEC[min(group_attempts - 1, len(RETRY_DELAYS_SEC) - 1)]
+            stored_attempts = MAX_ATTEMPTS - 1 if dead_lettered else group_attempts
+            stored_error = (
+                _dead_letter_notice_marker(
+                    error,
+                    permanent=False,
+                    resume_base=notice_resume_base,
+                )
+                if dead_lettered
+                else error[:500]
+            )
             updates.append(
                 (
-                    group_attempts,
+                    stored_attempts,
                     attempted_at,
-                    error[:500],
-                    "dead_letter" if dead_lettered else "pending",
-                    0 if dead_lettered else attempted_at + delay,
-                    attempted_at if dead_lettered else None,
+                    stored_error,
+                    "pending",
+                    attempted_at + delay,
+                    None,
                     int(row["update_id"]),
                 )
             )
@@ -1151,12 +1546,13 @@ class _UpdateInbox:
             """UPDATE updates
                SET attempts=?, last_attempt_at=?, last_error=?, status=?,
                    next_attempt_at=?, failed_at=?
-               WHERE update_id=?""",
+               WHERE update_id=? AND status='pending'""",
             updates,
         )
         self._conn.commit()
         return dead_lettered
 
+    @_rollback_failed_write
     def mark_dead_letter(self, update_id: int, error: str) -> None:
         failed_at = time.time()
         self._conn.execute(
@@ -1168,6 +1564,7 @@ class _UpdateInbox:
         )
         self._conn.commit()
 
+    @_rollback_failed_write
     def mark_dead_letter_many(self, update_ids: list[int], error: str) -> None:
         cleaned = list(dict.fromkeys(int(value) for value in update_ids))
         if not cleaned:
@@ -1212,6 +1609,7 @@ class _UpdateInbox:
         ).fetchone()
         return int(row["chunks_sent"]) if row else 0
 
+    @_rollback_failed_write
     def record_answer_chunks_sent(self, update_id: int, count: int) -> None:
         """Отметить кусок ушедшим — СРАЗУ, а не в конце отправки.
 
@@ -1225,6 +1623,7 @@ class _UpdateInbox:
         )
         self._conn.commit()
 
+    @_rollback_failed_write
     def begin_answer_chunk_delivery(self, update_id: int, count: int) -> tuple[int, int] | None:
         """Fence one chunk *before* its first network byte can be written.
 
@@ -1237,31 +1636,50 @@ class _UpdateInbox:
 
         exact_update_id = int(update_id)
         exact_count = max(0, int(count))
-        with self._conn:
-            row = self._conn.execute(
-                "SELECT chunks_sent, delivery_uncertainty FROM updates WHERE update_id=?",
-                (exact_update_id,),
-            ).fetchone()
-            if row is None:
-                return None
-            previous_count = int(row["chunks_sent"])
-            previous_uncertainty = int(row["delivery_uncertainty"])
-            if exact_count != previous_count + 1 or previous_uncertainty not in {0, 1, 2}:
-                return None
-            cursor = self._conn.execute(
-                """UPDATE updates SET chunks_sent=?, delivery_uncertainty=1
-                     WHERE update_id=? AND chunks_sent=? AND delivery_uncertainty=?""",
-                (
-                    exact_count,
+        row = self._conn.execute(
+            "SELECT chunks_sent, delivery_uncertainty FROM updates WHERE update_id=?",
+            (exact_update_id,),
+        ).fetchone()
+        if row is None:
+            return None
+        previous_count = int(row["chunks_sent"])
+        previous_uncertainty = int(row["delivery_uncertainty"])
+        if exact_count != previous_count + 1 or previous_uncertainty not in {0, 1, 2}:
+            return None
+        cursor = self._conn.execute(
+            """UPDATE updates SET chunks_sent=?, delivery_uncertainty=1
+                 WHERE update_id=? AND chunks_sent=? AND delivery_uncertainty=?""",
+            (
+                exact_count,
+                exact_update_id,
+                previous_count,
+                previous_uncertainty,
+            ),
+        )
+        if cursor.rowcount != 1:
+            # Even a zero-row UPDATE opens a deferred write transaction.  This
+            # is a normal compare-and-swap miss, so close it explicitly rather
+            # than waiting for another mutator's entry guard to clean it up.
+            self._conn.rollback()
+            return None
+        try:
+            self._conn.commit()
+        except BaseException:
+            # No Telegram awaitable exists yet.  Even when SQLite committed but
+            # lost the local success acknowledgement, restoring this exact CAS
+            # snapshot is safe and keeps a proven pre-effect failure retryable.
+            _rollback_or_quarantine(self._conn)
+            with suppress(BaseException):
+                self.reject_answer_chunk_delivery(
                     exact_update_id,
-                    previous_count,
-                    previous_uncertainty,
-                ),
-            )
-            if cursor.rowcount != 1:
-                return None
+                    exact_count,
+                    previous_count=previous_count,
+                    previous_uncertainty=previous_uncertainty,
+                )
+            raise
         return previous_count, previous_uncertainty
 
+    @_rollback_failed_write
     def reject_answer_chunk_delivery(
         self,
         update_id: int,
@@ -1290,6 +1708,7 @@ class _UpdateInbox:
         self._conn.commit()
         return cursor.rowcount == 1
 
+    @_rollback_failed_write
     def confirm_answer_chunk_delivery(self, update_id: int, count: int) -> bool:
         """Turn the exact pre-write fence into one confirmed delivered cursor."""
 
@@ -1302,6 +1721,7 @@ class _UpdateInbox:
         self._conn.commit()
         return cursor.rowcount == 1
 
+    @_rollback_failed_write
     def record_uncertain_answer_chunk(self, update_id: int, count: int) -> None:
         """Never resend a chunk whose Telegram acceptance is unknowable.
 
@@ -1325,6 +1745,7 @@ class _UpdateInbox:
         ).fetchone()
         return bool(row is not None and int(row["delivery_uncertainty"]) == 1)
 
+    @_rollback_failed_write
     def begin_answer_delivery_uncertainty_notice(self, update_id: int) -> bool:
         """Fence the warning before its network write, making it at-most-once."""
 
@@ -1333,9 +1754,18 @@ class _UpdateInbox:
                WHERE update_id=? AND delivery_uncertainty=1""",
             (int(update_id),),
         )
-        self._conn.commit()
+        try:
+            self._conn.commit()
+        except BaseException:
+            # As above, the warning has not reached the network yet.  Restore a
+            # commit whose return was ambiguous so restart may still send it.
+            _rollback_or_quarantine(self._conn)
+            with suppress(BaseException):
+                self.retry_answer_delivery_uncertainty_notice(update_id)
+            raise
         return cursor.rowcount == 1
 
+    @_rollback_failed_write
     def retry_answer_delivery_uncertainty_notice(self, update_id: int) -> None:
         """A pre-accept connection failure may retry the fenced warning."""
 
@@ -1346,6 +1776,7 @@ class _UpdateInbox:
         )
         self._conn.commit()
 
+    @_rollback_failed_write
     def cache_backend_response(self, update_id: int, response: dict[str, Any]) -> None:
         self._conn.execute(
             "UPDATE updates SET backend_response_json=? WHERE update_id=?",
@@ -1353,10 +1784,12 @@ class _UpdateInbox:
         )
         self._conn.commit()
 
+    @_rollback_failed_write
     def remove(self, update_id: int) -> None:
         self._conn.execute("DELETE FROM updates WHERE update_id=?", (update_id,))
         self._conn.commit()
 
+    @_rollback_failed_write
     def remove_many(self, update_ids: list[int]) -> None:
         cleaned = list(dict.fromkeys(int(value) for value in update_ids))
         if not cleaned:

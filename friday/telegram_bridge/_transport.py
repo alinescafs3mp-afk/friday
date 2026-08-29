@@ -11,6 +11,7 @@ import copy
 import hashlib
 import hmac
 import re
+import sqlite3
 from contextlib import suppress
 from typing import TYPE_CHECKING
 
@@ -61,9 +62,21 @@ _TRANSITION_JOURNAL_TIMEOUT_SEC = 5.0
 _ALBUM_SETTLE_SEC = 1.0
 _ALBUM_MAX_WAIT_SEC = 5.0
 _ALBUM_MAX_ITEMS = 10
+_LOCAL_STORAGE_FAILURE_BACKOFF_SEC = 5.0
+_PROVEN_TELEGRAM_REJECTION_STATUS_CODES = frozenset({400, 401, 403, 404, 409, 413, 429})
+_PERMANENT_DEAD_LETTER_NOTICE_REJECTION_STATUS_CODES = frozenset({400, 403, 404, 413})
 _DELIVERY_UNCERTAINTY_NOTICE = (
     "доставка не подтверждена, не дублирую; повторите запрос если фрагмент не пришёл"
 )
+
+
+async def _back_off_local_storage_failure(error: BaseException) -> None:
+    """Bound a retry without spending the accepted update's attempt budget."""
+
+    LOGGER.error("Telegram inbox storage unavailable (%s)", type(error).__name__)
+    await asyncio.sleep(_LOCAL_STORAGE_FAILURE_BACKOFF_SEC)
+
+
 _ENGINEER_TERMINAL_NOTIFICATION_KIND = "engineer_command_terminal"
 _ENGINEER_TERMINAL_TEXT_NOTIFICATION_KIND = "engineer_command_terminal_text"
 _ENGINEER_UNKNOWN_NOTIFICATION_KIND = "engineer_command_unknown"
@@ -1069,16 +1082,31 @@ class TransportMixin(BridgeShared):
             self._poll_heartbeat_at = time.monotonic()
             try:
                 await self._drain_inbox(telegram, backend)
+                # The durable watermark, not a prior process-local assignment,
+                # is Telegram acknowledgement authority.  Refreshing here also
+                # resolves an uncommon commit-return ambiguity before the next
+                # long poll can remotely acknowledge anything.
+                self._offset = self._inbox.get_offset()
                 updates = await self._get_updates(telegram)
                 self._poll_heartbeat_at = time.monotonic()
                 self._poll_success_at = self._poll_heartbeat_at
                 for update in updates:
+                    update_id = int(update.get("update_id") or -1)
+                    password_was_present = update_id in self._archive_passwords
+                    previous_password = self._archive_passwords.get(update_id)
                     safe_update = self._sanitize_update_before_store(update)
-                    stored = self._inbox.store(safe_update)
+                    stored, admitted_offset = self._inbox.admit_polled_update(safe_update)
                     if not stored:
-                        self._archive_passwords.pop(int(update.get("update_id") or -1), None)
-                    self._offset = max(self._offset, int(update["update_id"]) + 1)
-                    self._inbox.set_offset(self._offset)
+                        # Sanitising a duplicate page must not overwrite or
+                        # erase the first admitted update's ephemeral archive
+                        # password while its durable password-free row waits.
+                        if password_was_present and previous_password is not None:
+                            self._archive_passwords[update_id] = previous_password
+                        else:
+                            self._archive_passwords.pop(update_id, None)
+                    # Assign only after the row and watermark share one proven
+                    # SQLite commit.  A failed commit leaves this value old.
+                    self._offset = admitted_offset
                 if updates:
                     await self._drain_inbox(telegram, backend)
                 backoff = 1.0
@@ -1969,36 +1997,122 @@ class TransportMixin(BridgeShared):
         update: dict[str, Any] = {}
         owned_update_ids = [update_id]
         cancelled = False
+        storage_deferred = False
+        terminal_notice_deferred = False
+
+        async def defer_storage_failure(storage_error: sqlite3.Error) -> None:
+            """Back off without charging or immediately redispatching the row."""
+
+            nonlocal storage_deferred
+            storage_deferred = True
+            await _back_off_local_storage_failure(storage_error)
+
+        async def finish_pending_dead_letter_notice(
+            *,
+            permanent: bool,
+            resume_base: int,
+        ) -> bool:
+            """Resume one durable terminal notice, then absorb its owned rows."""
+
+            nonlocal terminal_notice_deferred
+            delivered = await self._notify_dead_letter(
+                telegram,
+                update,
+                permanent=permanent,
+                resume_key=update_id,
+                resume_base=resume_base,
+            )
+            if delivered is False:
+                terminal_notice_deferred = True
+                return False
+            self._inbox.finish_dead_letter_notice_many(owned_update_ids)
+            return True
+
         try:
             update = json.loads(row["payload_json"])
             update, album_rows = await self._collect_media_group(row, update)
             owned_update_ids = [int(item["update_id"]) for item in album_rows]
+            pending_notice = self._inbox.pending_dead_letter_notice(owned_update_ids)
+            if pending_notice is not None:
+                permanent, _error, resume_base = pending_notice
+                await finish_pending_dead_letter_notice(
+                    permanent=permanent,
+                    resume_base=resume_base,
+                )
+                return
             cached = json.loads(row["backend_response_json"]) if row.get("backend_response_json") else None
             await self._process_update(telegram, backend, update, cached_response=cached)
             self._inbox.remove_many(owned_update_ids)
         except PermanentUpdateError as exc:
-            owned_update_ids = list(dict.fromkeys(getattr(exc, "update_ids", owned_update_ids)))
-            LOGGER.warning("Quarantining invalid Telegram update (%s)", type(exc).__name__)
-            self._inbox.mark_dead_letter_many(owned_update_ids, type(exc).__name__)
-            # MediaTooLargeError already told the user; others left them in
-            # silence — a rejected message must never just vanish.
-            if not isinstance(exc, MediaTooLargeError):
-                await self._notify_dead_letter(telegram, update, permanent=True)
+            try:
+                owned_update_ids = list(dict.fromkeys(getattr(exc, "update_ids", owned_update_ids)))
+                LOGGER.warning("Quarantining invalid Telegram update (%s)", type(exc).__name__)
+                pending_notice = self._inbox.pending_dead_letter_notice(owned_update_ids)
+                if pending_notice is not None:
+                    permanent, _error, resume_base = pending_notice
+                    await finish_pending_dead_letter_notice(
+                        permanent=permanent,
+                        resume_base=resume_base,
+                    )
+                # MediaTooLargeError already told the user; others left them in
+                # silence — a rejected message must never just vanish.
+                elif isinstance(exc, MediaTooLargeError):
+                    self._inbox.mark_dead_letter_many(owned_update_ids, type(exc).__name__)
+                else:
+                    self._inbox.prepare_dead_letter_notice_many(
+                        owned_update_ids,
+                        type(exc).__name__,
+                        permanent=True,
+                    )
+                    pending_notice = self._inbox.pending_dead_letter_notice(owned_update_ids)
+                    if pending_notice is None:
+                        raise RuntimeError("Telegram dead-letter notice obligation was not persisted")
+                    _permanent, _error, resume_base = pending_notice
+                    await finish_pending_dead_letter_notice(
+                        permanent=True,
+                        resume_base=resume_base,
+                    )
+            except sqlite3.Error as storage_error:
+                await defer_storage_failure(storage_error)
         except asyncio.CancelledError:
             # Отмена — не отказ обновления: строка остаётся ожидающей, попытка не
             # тратится. Иначе остановка моста съедала бы людям попытки.
             cancelled = True
             raise
+        except sqlite3.Error as exc:
+            # FULL/IOERR/BUSY is not a user-update failure.  The durable row
+            # remains at its last proven state, so do not consume 288 content
+            # retries or immediately hot-loop the same chat.
+            await defer_storage_failure(exc)
         except Exception as exc:
             LOGGER.warning("Telegram update deferred (%s)", type(exc).__name__)
-            dead_lettered = self._inbox.mark_failure_many(owned_update_ids, type(exc).__name__)
-            if dead_lettered:
-                self._inbox.mark_dead_letter_many(owned_update_ids, type(exc).__name__)
-                LOGGER.error("Telegram update exhausted its retry budget")
-                await self._notify_dead_letter(telegram, update, permanent=False)
+            try:
+                dead_lettered = self._inbox.mark_failure_many(owned_update_ids, type(exc).__name__)
+                if dead_lettered:
+                    LOGGER.error("Telegram update exhausted its retry budget")
+                    pending_notice = self._inbox.pending_dead_letter_notice(owned_update_ids)
+                    if pending_notice is None:
+                        raise RuntimeError("Telegram dead-letter notice obligation was not persisted")
+                    _permanent, _error, resume_base = pending_notice
+                    await finish_pending_dead_letter_notice(
+                        permanent=False,
+                        resume_base=resume_base,
+                    )
+            except sqlite3.Error as storage_error:
+                await defer_storage_failure(storage_error)
         finally:
             for owned_update_id in owned_update_ids:
-                self._archive_passwords.pop(owned_update_id, None)
+                clear_ephemeral = not storage_deferred
+                if storage_deferred:
+                    try:
+                        clear_ephemeral = not self._inbox.update_requires_retry(owned_update_id)
+                    except sqlite3.Error:
+                        # A quarantined/unreadable connection cannot prove the
+                        # terminal state. Keep the bounded process-local secret;
+                        # supervisor restart drops it rather than guessing.
+                        clear_ephemeral = False
+                if clear_ephemeral:
+                    self._archive_passwords.pop(owned_update_id, None)
             # Чат освобождается ЗДЕСЬ, а не в чужом обходе: только эта задача
             # знает, что её работа кончилась, и только отсюда следующая строка
             # того же чата может уйти в работу немедленно.
@@ -2006,7 +2120,7 @@ class TransportMixin(BridgeShared):
             # После ОТМЕНЫ продолжения нет: отменяют при разборке, и очередь к
             # этому моменту может быть уже закрыта — раздача полезла бы в мёртвую
             # базу вместо того, чтобы дать процессу спокойно завершиться.
-            if not cancelled:
+            if not cancelled and not storage_deferred and not terminal_notice_deferred:
                 self._dispatch_ready_updates(telegram, backend)
 
     @staticmethod
@@ -2167,8 +2281,14 @@ class TransportMixin(BridgeShared):
         return chat_id in self.config.allowed_chat_ids or self._inbox.is_registered_chat(chat_id)
 
     async def _notify_dead_letter(
-        self, telegram: httpx.AsyncClient, update: dict[str, Any], *, permanent: bool
-    ) -> None:
+        self,
+        telegram: httpx.AsyncClient,
+        update: dict[str, Any],
+        *,
+        permanent: bool,
+        resume_key: int | None = None,
+        resume_base: int | None = None,
+    ) -> bool:
         """Tell the originating chat its message could not be processed, so a
         dead-lettered update is never pure silence. Deny-by-default, with the
         SAME predicate the outbound loop and the callback handler already use:
@@ -2180,7 +2300,7 @@ class TransportMixin(BridgeShared):
         why. Best-effort delivery."""
         chat_id = self._update_chat_id(update)
         if chat_id is None or not self._may_message_chat(chat_id):
-            return
+            return True
         # Нажатие кнопки — не «сообщение», и говорить о нём как о сообщении значит
         # оставить человека в неведении о судьбе именно РЕШЕНИЯ. «Кнопка не
         # сработала, решение не принято» отвечает на тот вопрос, который у него
@@ -2201,9 +2321,57 @@ class TransportMixin(BridgeShared):
                 "Попробуйте позже или переформулируйте."
             )
         try:
-            await self._send_message(telegram, chat_id, text)
+            if resume_key is None:
+                if resume_base is not None:
+                    raise ValueError("Telegram dead-letter notice resume identity is incomplete")
+                await self._send_message(telegram, chat_id, text)
+            else:
+                if resume_base is None or resume_base < 0:
+                    raise ValueError("Telegram dead-letter notice resume identity is incomplete")
+                current = self._inbox.answer_chunks_sent(resume_key)
+                if current == resume_base:
+                    payload = {
+                        "chat_id": chat_id,
+                        "text": text,
+                        "disable_web_page_preview": True,
+                    }
+                    response = await self._post_message_chunk(
+                        telegram,
+                        payload,
+                        text,
+                        resume_key=resume_key,
+                        chunk_number=resume_base + 1,
+                    )
+                    response.raise_for_status()
+                    if not self._inbox.confirm_answer_chunk_delivery(
+                        resume_key,
+                        resume_base + 1,
+                    ):
+                        raise RuntimeError("Telegram dead-letter notice fence could not be confirmed")
+                elif current == resume_base + 1:
+                    # The exact notice was already confirmed or remains
+                    # ambiguous. Reuse the existing uncertainty-warning path;
+                    # its ordinary chunk loop then skips the fenced notice.
+                    await self._send_message(telegram, chat_id, text, resume_key=resume_key)
+                else:
+                    raise RuntimeError("Telegram dead-letter notice cursor changed")
+        except httpx.HTTPStatusError as exc:
+            if int(exc.response.status_code) in _PERMANENT_DEAD_LETTER_NOTICE_REJECTION_STATUS_CODES:
+                LOGGER.warning(
+                    "dead-letter notice permanently rejected by Telegram (%d)",
+                    int(exc.response.status_code),
+                )
+                # Telegram proved non-acceptance and also proved this exact
+                # administrative notice cannot be delivered as constructed.
+                # Absorb the update so a blocked/deleted chat cannot hold every
+                # later message in its FIFO forever.
+                return True
+            LOGGER.warning("dead-letter notice failed (%s)", type(exc).__name__)
+            return False
         except Exception as exc:
             LOGGER.warning("dead-letter notice failed (%s)", type(exc).__name__)
+            return False
+        return True
 
     async def _backend_json(
         self,
@@ -2397,11 +2565,12 @@ class TransportMixin(BridgeShared):
                 # pre-accept failure remains retryable.
                 self._inbox.retry_answer_delivery_uncertainty_notice(resume_key)
                 raise
-            except httpx.HTTPStatusError:
-                # A concrete HTTP response is proof of rejection. Ambiguous
-                # transport errors (read/write/protocol/pool) deliberately do
-                # not enter this branch: the warning may already have arrived.
-                self._inbox.retry_answer_delivery_uncertainty_notice(resume_key)
+            except httpx.HTTPStatusError as exc:
+                # Only a closed client rejection proves that Telegram did not
+                # accept the warning.  A proxy/upstream 5xx can arrive after
+                # acceptance, so state=2 remains absorbing across restart.
+                if int(exc.response.status_code) in _PROVEN_TELEGRAM_REJECTION_STATUS_CODES:
+                    self._inbox.retry_answer_delivery_uncertainty_notice(resume_key)
                 raise
         plain_text = text_format == "plain"
         for index, chunk in enumerate(chunks):
@@ -2570,8 +2739,11 @@ class TransportMixin(BridgeShared):
                 payload["text"] = chunk
                 response, snapshot = await post_once()
             if response.status_code != 429 or attempt == self._RATE_LIMIT_RETRIES - 1:
-                if not 200 <= int(response.status_code) < 300:
-                    # The response itself is proof Telegram rejected this write.
+                if int(response.status_code) in _PROVEN_TELEGRAM_REJECTION_STATUS_CODES:
+                    # A closed client-error response proves Telegram rejected
+                    # this write.  A 5xx/redirect can be generated after an
+                    # upstream accepted it, so its pre-write fence stays
+                    # uncertain and restart never sends the text blindly.
                     reject_delivery(snapshot)
                 # A successful resumable response intentionally keeps the
                 # pre-write fence armed. `_send_message` confirms it only after

@@ -11,6 +11,7 @@ import hashlib
 import json
 import re
 import time
+from collections.abc import Awaitable
 from datetime import date, timedelta
 
 from friday.retrieval._keyboard import switched
@@ -26,6 +27,7 @@ from friday.telegram_bridge._base import (
     httpx,
     quote,
     refusal_notice,
+    split_for_telegram,
 )
 from friday.telegram_bridge._media import _reply_document_file_unique_id
 from friday.telegram_bridge._obsidian import obsidian_panel
@@ -58,6 +60,13 @@ def _response_text_format(response: dict[str, Any]) -> str:
 
 
 _ALBUM_CACHE_MESSAGE_IDS = "_friday_album_message_ids"
+_UPDATE_EFFECT_UNCERTAINTY_NOTICE = (
+    "Исход действия после сбоя не подтверждён; автоматически не повторяю, "
+    "чтобы не выполнить его дважды. Проверьте состояние и при необходимости повторите вручную."
+)
+_NONREPLAYABLE_COMMANDS = frozenset(
+    {f"/{name}" for name, _description in BOT_COMMANDS if name != "note"} | {"/start", "/engeneer"}
+)
 
 # These are deliberately sparse and finite. Telegram's typing indicator says
 # only that the bridge process is alive; after a minute it gives the person no
@@ -571,11 +580,14 @@ class CommandsMixin(BridgeShared):
     ) -> None:
         callback = update.get("callback_query")
         if isinstance(callback, dict):
+            callback_update_id = int(update.get("update_id") or -1)
+            if callback_update_id >= 0:
+                self._inbox.store(update)
             await self._process_callback_query(
                 telegram,
                 backend,
                 callback,
-                update_id=int(update.get("update_id") or -1),
+                update_id=callback_update_id,
             )
             return
 
@@ -601,11 +613,25 @@ class CommandsMixin(BridgeShared):
             # newcomer тоже правит свои сообщения, и молчание оставляло бы его с
             # текстом в чате, отличным от того, что лежит в архиве.
             if self._may_message_chat(edited_chat_id):
+                edited_update_id = int(update.get("update_id") or -1)
+                if edited_update_id < 0:
+                    raise PermanentUpdateError("Telegram update has no valid identity")
+                self._inbox.store(update)
+                claim = self._inbox.claim_update_effect_attempt(
+                    edited_update_id,
+                    "edited-message",
+                )
+                response_text = (
+                    _UPDATE_EFFECT_UNCERTAINTY_NOTICE
+                    if claim == "already_attempted"
+                    else "Правку сообщения я не подхватываю: сохранён исходный текст. "
+                    "Пришлите исправление новым сообщением (для заметок — /note)."
+                )
                 await self._send_message(
                     telegram,
                     edited_chat_id,
-                    "Правку сообщения я не подхватываю: сохранён исходный текст. "
-                    "Пришлите исправление новым сообщением (для заметок — /note).",
+                    response_text,
+                    resume_key=edited_update_id,
                 )
             return
 
@@ -650,11 +676,130 @@ class CommandsMixin(BridgeShared):
         # directly. ``store`` is INSERT-OR-IGNORE, so the worker-owned payload
         # and its retry state are never overwritten.
         self._inbox.store(update)
+        source_message_id = message.get("message_id")
+        claimed_effect_kind: str | None = None
+        backend_effect_observed = False
+        raw_backend_json = self._backend_json
+        raw_backend_text = self._backend_text
+
+        async def claim_update_effect(kind: str) -> bool:
+            nonlocal claimed_effect_kind
+            claim = self._inbox.claim_update_effect_attempt(update_id, kind)
+            if claim == "claimed":
+                claimed_effect_kind = kind
+                return True
+            if claim != "already_attempted":
+                raise RuntimeError("Telegram update effect claim returned an invalid state")
+            await self._send_message(
+                telegram,
+                chat_id,
+                _UPDATE_EFFECT_UNCERTAINTY_NOTICE,
+                resume_key=update_id,
+                reply_to_message_id=source_message_id,
+            )
+            return False
+
+        async def update_backend_json(
+            backend_client: httpx.AsyncClient,
+            method: str,
+            path: str,
+            payload: dict[str, Any] | None,
+            actor_id: str,
+            actor_chat_id: str,
+        ) -> dict[str, Any]:
+            """Retry only a claimed turn whose backend received zero bytes."""
+
+            nonlocal backend_effect_observed, claimed_effect_kind
+            try:
+                response = await raw_backend_json(
+                    backend_client,
+                    method,
+                    path,
+                    payload,
+                    actor_id,
+                    actor_chat_id,
+                )
+            except httpx.ConnectError as exc:
+                if claimed_effect_kind is not None and not backend_effect_observed:
+                    if not self._inbox.release_update_effect_attempt(
+                        update_id,
+                        claimed_effect_kind,
+                    ):
+                        raise RuntimeError("Telegram update effect witness could not be released") from exc
+                    claimed_effect_kind = None
+                raise
+            if method.upper() not in {"GET", "HEAD"}:
+                backend_effect_observed = True
+            return response
+
+        async def update_backend_text(
+            backend_client: httpx.AsyncClient,
+            method: str,
+            path: str,
+            payload: dict[str, Any] | None,
+            actor_id: str,
+            actor_chat_id: str,
+        ) -> str:
+            """Apply the same zero-byte classifier to the plain-text export."""
+
+            nonlocal backend_effect_observed, claimed_effect_kind
+            try:
+                response = await raw_backend_text(
+                    backend_client,
+                    method,
+                    path,
+                    payload,
+                    actor_id,
+                    actor_chat_id,
+                )
+            except httpx.ConnectError as exc:
+                if claimed_effect_kind is not None and not backend_effect_observed:
+                    if not self._inbox.release_update_effect_attempt(
+                        update_id,
+                        claimed_effect_kind,
+                    ):
+                        raise RuntimeError("Telegram update effect witness could not be released") from exc
+                    claimed_effect_kind = None
+                raise
+            if method.upper() not in {"GET", "HEAD"}:
+                backend_effect_observed = True
+            return response
+
+        async def update_backend_view(operation: Awaitable[Any]) -> Any:
+            """Classify backend-only ConnectError from legacy read-view helpers."""
+
+            nonlocal claimed_effect_kind
+            try:
+                return await operation
+            except httpx.ConnectError as exc:
+                request = getattr(exc, "_request", None)
+                backend_prefix = f"{self.config.backend_url.rstrip('/')}/"
+                if request is None or not str(request.url).startswith(backend_prefix):
+                    # The helper may be in its Telegram publication phase.  A
+                    # Telegram connection failure must keep the turn witness;
+                    # replaying the helper could duplicate earlier list parts.
+                    raise
+                if claimed_effect_kind is not None and not backend_effect_observed:
+                    if not self._inbox.release_update_effect_attempt(
+                        update_id,
+                        claimed_effect_kind,
+                    ):
+                        raise RuntimeError("Telegram update effect witness could not be released") from exc
+                    claimed_effect_kind = None
+                raise
+
+        existing_effect_kind = self._inbox.update_effect_attempt_kind(update_id)
+        if existing_effect_kind is not None:
+            await claim_update_effect(existing_effect_kind)
+            return
+
         archive_password = self._archive_passwords.get(update_id)
         pending_archive = self._inbox.archive_password_challenge(chat_id, int(external_user_id))
         password_followup = update.get("friday_archive_password_followup") is True
         if password_followup:
             if pending_archive is None:
+                if not await claim_update_effect("local-reply"):
+                    return
                 await self._send_message(
                     telegram,
                     chat_id,
@@ -665,6 +810,8 @@ class CommandsMixin(BridgeShared):
                 # The durable update is intentionally password-free.  A restart
                 # between intake and processing loses the ephemeral secret, so
                 # ask again instead of guessing or sending the redacted marker.
+                if not await claim_update_effect("local-reply"):
+                    return
                 await self._send_message(
                     telegram,
                     chat_id,
@@ -697,6 +844,8 @@ class CommandsMixin(BridgeShared):
             )
             and pending_archive is None
         ):
+            if not await claim_update_effect("local-reply"):
+                return
             await self._send_message(
                 telegram,
                 chat_id,
@@ -734,11 +883,15 @@ class CommandsMixin(BridgeShared):
         # «последнее действие». Ход при этом не идёт к модели вовсе: это правка,
         # а не вопрос.
         replied_to = message.get("reply_to_message")
+        edit_prompt_message_id = 0
         edit_target = ""
         if isinstance(replied_to, dict):
-            edit_target = self._inbox.take_edit_prompt(int(replied_to.get("message_id") or 0))
+            edit_prompt_message_id = int(replied_to.get("message_id") or 0)
+            edit_target = self._inbox.edit_prompt_target(edit_prompt_message_id)
         if edit_target and text:
-            await self._backend_json(
+            if not await claim_update_effect("edit-reply"):
+                return
+            await update_backend_json(
                 backend,
                 "PATCH",
                 f"/api/knowledge/{edit_target}",
@@ -746,6 +899,7 @@ class CommandsMixin(BridgeShared):
                 external_user_id,
                 str(chat_id),
             )
+            self._inbox.take_edit_prompt(edit_prompt_message_id)
             await self._send_message(
                 telegram,
                 chat_id,
@@ -771,7 +925,7 @@ class CommandsMixin(BridgeShared):
             # only for bridge-local or unsupported messages. The /api/me payload
             # is also the only place the bridge learns the account's preset, so
             # /start can tell a newcomer what they can (and cannot) do.
-            data = await self._backend_json(
+            data = await update_backend_json(
                 backend,
                 "GET",
                 "/api/me",
@@ -780,6 +934,13 @@ class CommandsMixin(BridgeShared):
                 str(chat_id),
             )
             return data if isinstance(data, dict) else {}
+
+        if (
+            cached_response is None
+            and command in _NONREPLAYABLE_COMMANDS
+            and not await claim_update_effect("command")
+        ):
+            return
 
         if command == "/start":
             me = await register_backend_user()
@@ -883,7 +1044,7 @@ class CommandsMixin(BridgeShared):
                 return
             # `start` is idempotent and doubles as resume: reopening /obsidian
             # always asks the backend for the durable current state.
-            response = await self._backend_json(
+            response = await update_backend_json(
                 backend,
                 "POST",
                 "/api/obsidian/onboarding/start",
@@ -921,7 +1082,7 @@ class CommandsMixin(BridgeShared):
                     "Укажите точное имя vault: /obsidian_alias Friday",
                 )
                 return
-            response = await self._backend_json(
+            response = await update_backend_json(
                 backend,
                 "POST",
                 "/api/obsidian/onboarding/vault-alias",
@@ -943,38 +1104,61 @@ class CommandsMixin(BridgeShared):
             )
             return
         if command == "/retry":
-            await register_backend_user()
-            typing_task = asyncio.create_task(self._typing_loop(telegram, chat_id))
-            try:
+            if cached_response is None:
+                await register_backend_user()
+                typing_task = asyncio.create_task(self._typing_loop(telegram, chat_id))
                 try:
-                    response = await self._backend_json(
-                        backend,
-                        "POST",
-                        "/api/me/regenerate",
-                        {"operation_id": f"telegram-update:{update_id}"},
-                        external_user_id,
-                        str(chat_id),
-                    )
-                except PermanentUpdateError:
-                    await self._send_message(
-                        telegram,
-                        chat_id,
-                        "Нечего повторять: в этом чате ещё не было вопроса. "
-                        "Задайте вопрос — и /retry сгенерирует ответ заново.",
-                    )
-                    return
-            finally:
-                typing_task.cancel()
-                await asyncio.gather(typing_task, return_exceptions=True)
+                    try:
+                        response = await update_backend_json(
+                            backend,
+                            "POST",
+                            "/api/me/regenerate",
+                            {"operation_id": f"telegram-update:{update_id}"},
+                            external_user_id,
+                            str(chat_id),
+                        )
+                    except PermanentUpdateError:
+                        await self._send_message(
+                            telegram,
+                            chat_id,
+                            "Нечего повторять: в этом чате ещё не было вопроса. "
+                            "Задайте вопрос — и /retry сгенерирует ответ заново.",
+                            resume_key=update_id,
+                        )
+                        return
+                finally:
+                    typing_task.cancel()
+                    await asyncio.gather(typing_task, return_exceptions=True)
+                # Replace the conservative command-attempt witness with the
+                # exact response before its first Telegram byte.  Restart can
+                # then resume text, voice and files through one ordinal cursor
+                # without regenerating or dropping a proven-retryable suffix.
+                self._inbox.cache_backend_response(update_id, response)
+            else:
+                response = cached_response
+            retry_text = self._format_response_message(response)
             await self._send_message(
                 telegram,
                 chat_id,
-                self._format_response_message(response),
+                retry_text,
                 reply_markup=self._response_reply_markup(response, external_user_id=external_user_id),
                 text_format=_response_text_format(response),
+                resume_key=update_id,
             )
-            await self._deliver_voice_reply(telegram, chat_id, response)
-            await self._deliver_generated_files(telegram, chat_id, response)
+            next_part = await self._deliver_voice_reply(
+                telegram,
+                chat_id,
+                response,
+                resume_key=update_id,
+                after_part=len(split_for_telegram(retry_text)),
+            )
+            await self._deliver_generated_files(
+                telegram,
+                chat_id,
+                response,
+                resume_key=update_id,
+                after_part=next_part,
+            )
             return
         if command == "/instructions":
             me = await register_backend_user()
@@ -993,7 +1177,7 @@ class CommandsMixin(BridgeShared):
                 )
                 return
             clean = "" if argument.casefold() in {"очистить", "сброс", "clear"} else argument
-            await self._backend_json(
+            await update_backend_json(
                 backend,
                 "PATCH",
                 "/api/me/instructions",
@@ -1023,7 +1207,7 @@ class CommandsMixin(BridgeShared):
                 )
                 return
             try:
-                data = await self._backend_json(
+                data = await update_backend_json(
                     backend,
                     "POST",
                     "/api/conversations/channel/mode",
@@ -1064,35 +1248,61 @@ class CommandsMixin(BridgeShared):
             )
             return
         if command == "/inbox":
-            await self._send_inbox(telegram, backend, chat_id, external_user_id, user)
+            await update_backend_view(self._send_inbox(telegram, backend, chat_id, external_user_id, user))
             return
         if command == "/conflicts":
-            await self._send_conflicts(telegram, backend, chat_id, external_user_id, user)
+            await update_backend_view(
+                self._send_conflicts(telegram, backend, chat_id, external_user_id, user)
+            )
             return
         if command == "/relations":
-            await self._send_relations(telegram, backend, chat_id, external_user_id, user)
+            await update_backend_view(
+                self._send_relations(telegram, backend, chat_id, external_user_id, user)
+            )
             return
         if command == "/merges":
-            await self._send_merges(telegram, backend, chat_id, external_user_id, user)
+            await update_backend_view(self._send_merges(telegram, backend, chat_id, external_user_id, user))
             return
         if command == "/reminders":
-            await self._send_reminders(telegram, backend, chat_id, external_user_id, user)
+            await update_backend_view(
+                self._send_reminders(telegram, backend, chat_id, external_user_id, user)
+            )
             return
         if command == "/tags":
-            await self._send_tags(telegram, backend, chat_id, external_user_id, user)
+            await update_backend_view(self._send_tags(telegram, backend, chat_id, external_user_id, user))
             return
         if command == "/compact":
-            await self._send_compacts(telegram, backend, chat_id, external_user_id, user)
+            await update_backend_view(self._send_compacts(telegram, backend, chat_id, external_user_id, user))
             return
         if command == "/browse":
             query = argument
-            await self._send_browse(telegram, backend, chat_id, external_user_id, user, query)
+            await update_backend_view(
+                self._send_browse(telegram, backend, chat_id, external_user_id, user, query)
+            )
             return
         if command == "/profile":
-            await self._send_entity_profile(telegram, backend, chat_id, external_user_id, user, argument)
+            await update_backend_view(
+                self._send_entity_profile(
+                    telegram,
+                    backend,
+                    chat_id,
+                    external_user_id,
+                    user,
+                    argument,
+                )
+            )
             return
         if command == "/graph":
-            await self._send_relation_path(telegram, backend, chat_id, external_user_id, user, argument)
+            await update_backend_view(
+                self._send_relation_path(
+                    telegram,
+                    backend,
+                    chat_id,
+                    external_user_id,
+                    user,
+                    argument,
+                )
+            )
             return
         if command == "/watch":
             # Монитор — сохранённый вопрос, за которым система следит сама
@@ -1107,7 +1317,7 @@ class CommandsMixin(BridgeShared):
                     "Список слежений: /watching",
                 )
                 return
-            created = await self._backend_json(
+            created = await update_backend_json(
                 backend,
                 "POST",
                 "/api/me/monitors",
@@ -1139,7 +1349,7 @@ class CommandsMixin(BridgeShared):
                     "Подтверждения показываю только в личной переписке — напишите мне туда.",
                 )
                 return
-            data = await self._backend_json(
+            data = await update_backend_json(
                 backend,
                 "GET",
                 "/api/me/approvals?status=pending",
@@ -1153,7 +1363,7 @@ class CommandsMixin(BridgeShared):
             # решения», и одна ожидающая заявка полностью скрывала то, про что
             # система сама не знает, чем кончилось. Спека v3: человек видит, «что
             # осталось неизвестным и как это исправить».
-            unknown = await self._backend_json(
+            unknown = await update_backend_json(
                 backend,
                 "GET",
                 "/api/me/approvals?status=uncertain",
@@ -1203,7 +1413,7 @@ class CommandsMixin(BridgeShared):
                 )
             return
         if command == "/watching":
-            data = await self._backend_json(
+            data = await update_backend_json(
                 backend,
                 "GET",
                 "/api/me/monitors",
@@ -1259,7 +1469,7 @@ class CommandsMixin(BridgeShared):
                 )
                 return
             try:
-                found = await self._backend_json(
+                found = await update_backend_json(
                     backend,
                     "GET",
                     f"/api/kg/entity-profile?name={quote(entity_name, safe='')}",
@@ -1286,7 +1496,7 @@ class CommandsMixin(BridgeShared):
             # и обещание надо держать: два разных человека под одним узлом это
             # порча данных, а слияние делается отдельным решением в /merges.
             try:
-                clash = await self._backend_json(
+                clash = await update_backend_json(
                     backend,
                     "GET",
                     f"/api/kg/entity-profile?name={quote(alias, safe='')}",
@@ -1340,7 +1550,7 @@ class CommandsMixin(BridgeShared):
                     telegram, chat_id, f"У объекта «{entity_name}» уже есть такой псевдоним."
                 )
                 return
-            await self._backend_json(
+            await update_backend_json(
                 backend,
                 "PATCH",
                 f"/api/kg/entities/{entity_id}",
@@ -1370,7 +1580,7 @@ class CommandsMixin(BridgeShared):
                 )
                 return
             try:
-                found = await self._backend_json(
+                found = await update_backend_json(
                     backend,
                     "GET",
                     f"/api/kg/entity-profile?name={quote(old_name, safe='')}",
@@ -1392,7 +1602,7 @@ class CommandsMixin(BridgeShared):
             if not entity_id:
                 await self._send_message(telegram, chat_id, f"Объект «{old_name}» не найден.")
                 return
-            renamed = await self._backend_json(
+            renamed = await update_backend_json(
                 backend,
                 "PATCH",
                 f"/api/kg/entities/{entity_id}",
@@ -1412,11 +1622,15 @@ class CommandsMixin(BridgeShared):
             return
         if command == "/search":
             query = argument
-            await self._send_search(telegram, backend, chat_id, external_user_id, user, query)
+            await update_backend_view(
+                self._send_search(telegram, backend, chat_id, external_user_id, user, query)
+            )
             return
         if command == "/history":
             query = argument
-            await self._send_history(telegram, backend, chat_id, external_user_id, user, query)
+            await update_backend_view(
+                self._send_history(telegram, backend, chat_id, external_user_id, user, query)
+            )
             return
         if command == "/timeline":
             # Хроника архива в чате. Стала возможна только теперь: до появления
@@ -1433,7 +1647,7 @@ class CommandsMixin(BridgeShared):
                 )
                 return
             since, until, label = period
-            documents = await self._backend_json(
+            timeline_documents = await update_backend_json(
                 backend,
                 "GET",
                 # Просим ровно столько, сколько покажем: «сколько всего за период»
@@ -1446,7 +1660,7 @@ class CommandsMixin(BridgeShared):
                 external_user_id,
                 str(chat_id),
             )
-            events = await self._backend_json(
+            events = await update_backend_json(
                 backend,
                 "GET",
                 f"/api/kg/timeline?start={since}&end={until}&limit={_TIMELINE_SHOWN}",
@@ -1457,8 +1671,8 @@ class CommandsMixin(BridgeShared):
             await self._send_message(
                 telegram,
                 chat_id,
-                self._format_timeline(label, documents, events),
-                reply_markup=self._timeline_reply_markup(documents),
+                self._format_timeline(label, timeline_documents, events),
+                reply_markup=self._timeline_reply_markup(timeline_documents),
             )
             return
         if command == "/source":
@@ -1468,7 +1682,7 @@ class CommandsMixin(BridgeShared):
             if not argument:
                 await self._send_message(telegram, chat_id, "Использование: /source <фраза из документа>")
                 return
-            found = await self._backend_json(
+            found = await update_backend_json(
                 backend,
                 "GET",
                 f"/api/knowledge/sources?q={quote(argument, safe='')}&limit=5",
@@ -1510,7 +1724,7 @@ class CommandsMixin(BridgeShared):
                 "channel_id": str(chat_id),
                 "telegram_user": user,
             }
-            await self._backend_json(
+            await update_backend_json(
                 backend,
                 "POST",
                 "/api/conversations/channel/reset",
@@ -1529,7 +1743,7 @@ class CommandsMixin(BridgeShared):
             # Backend builds the body (tenant + truncation notice); bridge only ships it.
             await register_backend_user()
             try:
-                text = await self._backend_text(
+                text = await update_backend_text(
                     backend,
                     "GET",
                     "/api/conversations/current/export",
@@ -1558,7 +1772,7 @@ class CommandsMixin(BridgeShared):
             # never called it. Sentinel `current` resolves to this chat's session.
             await register_backend_user()
             try:
-                data = await self._backend_json(
+                data = await update_backend_json(
                     backend,
                     "POST",
                     "/api/conversations/current/archive",
@@ -1630,7 +1844,7 @@ class CommandsMixin(BridgeShared):
                 )
                 return
             try:
-                data = await self._backend_json(
+                data = await update_backend_json(
                     backend,
                     "PATCH",
                     "/api/conversations/current",
@@ -1666,7 +1880,7 @@ class CommandsMixin(BridgeShared):
             # а чат при этом молчал, и человек не понимал, дошла ли команда.
             mission_typing = asyncio.create_task(self._typing_loop(telegram, chat_id))
             try:
-                created = await self._backend_json(
+                created = await update_backend_json(
                     backend,
                     "POST",
                     "/api/missions",
@@ -1686,11 +1900,11 @@ class CommandsMixin(BridgeShared):
             )
             return
         if command == "/missions":
-            await self._send_missions(telegram, backend, chat_id, external_user_id, user)
+            await update_backend_view(self._send_missions(telegram, backend, chat_id, external_user_id, user))
             return
         if command == "/why":
             try:
-                data = await self._backend_json(
+                data = await update_backend_json(
                     backend,
                     "GET",
                     "/api/conversations/channel/why",
@@ -1746,7 +1960,7 @@ class CommandsMixin(BridgeShared):
             await self._send_message(telegram, chat_id, "\n".join(lines))
             return
         if command == "/status":
-            data = await self._backend_json(
+            data = await update_backend_json(
                 backend,
                 "GET",
                 "/api/kg/stats",
@@ -1771,6 +1985,8 @@ class CommandsMixin(BridgeShared):
         if command == "/note":
             text = argument
             if not text:
+                if not await claim_update_effect("local-reply"):
+                    return
                 await register_backend_user()
                 await self._send_message(telegram, chat_id, "Использование: /note текст заметки")
                 return
@@ -1823,10 +2039,11 @@ class CommandsMixin(BridgeShared):
                 progress_state,
                 TelegramStatusStage.DELIVERING_RESULT,
             )
+            response_text = self._format_response_message(response_to_send)
             await self._send_message(
                 telegram,
                 chat_id,
-                self._format_response_message(response_to_send),
+                response_text,
                 reply_markup=self._response_reply_markup(response_to_send, external_user_id=external_user_id),
                 text_format=_response_text_format(response_to_send),
                 # Повтор после обрыва: куски, уже дошедшие до человека, не уходят
@@ -1835,8 +2052,20 @@ class CommandsMixin(BridgeShared):
                 reply_source_message_id=str(response_to_send.get("message_id") or ""),
                 reply_to_message_id=message.get("message_id"),
             )
-            await self._deliver_voice_reply(telegram, chat_id, response_to_send)
-            await self._deliver_generated_files(telegram, chat_id, response_to_send)
+            next_part = await self._deliver_voice_reply(
+                telegram,
+                chat_id,
+                response_to_send,
+                resume_key=update_id,
+                after_part=len(split_for_telegram(response_text)),
+            )
+            await self._deliver_generated_files(
+                telegram,
+                chat_id,
+                response_to_send,
+                resume_key=update_id,
+                after_part=next_part,
+            )
             await _finish_chat_progress(
                 self,
                 telegram,
@@ -1890,6 +2119,8 @@ class CommandsMixin(BridgeShared):
                         album_skipped_message_ids.add(album_message_id)
                         continue
                     if isinstance(exc, MediaTooLargeError):
+                        if not await claim_update_effect("local-reply"):
+                            return
                         await register_backend_user()
                         await self._send_message(
                             telegram,
@@ -1941,6 +2172,8 @@ class CommandsMixin(BridgeShared):
         document = prepared_documents[0] if prepared_documents and not album_messages else None
 
         if not album_messages and not text and not document and not documents:
+            if not await claim_update_effect("local-reply"):
+                return
             await register_backend_user()
             label = self._unsupported_label(message)
             if label:
@@ -2051,7 +2284,7 @@ class CommandsMixin(BridgeShared):
                     "telegram_user": user,
                 }
                 try:
-                    stage_response = await self._backend_json(
+                    stage_response = await update_backend_json(
                         backend,
                         "POST",
                         "/api/chat",
@@ -2210,6 +2443,8 @@ class CommandsMixin(BridgeShared):
                         {"update_id": replied_message_id or int(update["update_id"])},
                     )
                 except MediaTooLargeError as exc:
+                    if not await claim_update_effect("local-reply"):
+                        return
                     await register_backend_user()
                     await self._send_message(
                         telegram,
@@ -2334,10 +2569,11 @@ class CommandsMixin(BridgeShared):
             progress_task.cancel()
             typing_task.cancel()
             await asyncio.gather(progress_task, typing_task, return_exceptions=True)
+        response_text = self._format_response_message(response)
         await self._send_message(
             telegram,
             chat_id,
-            self._format_response_message(response),
+            response_text,
             reply_markup=self._response_reply_markup(response, external_user_id=external_user_id),
             text_format=_response_text_format(response),
             # Ответ уже в кеше строки очереди (строкой выше), поэтому повтор после
@@ -2346,8 +2582,20 @@ class CommandsMixin(BridgeShared):
             reply_source_message_id=str(response.get("message_id") or ""),
             reply_to_message_id=message.get("message_id"),
         )
-        await self._deliver_voice_reply(telegram, chat_id, response)
-        await self._deliver_generated_files(telegram, chat_id, response)
+        next_part = await self._deliver_voice_reply(
+            telegram,
+            chat_id,
+            response,
+            resume_key=update_id,
+            after_part=len(split_for_telegram(response_text)),
+        )
+        await self._deliver_generated_files(
+            telegram,
+            chat_id,
+            response,
+            resume_key=update_id,
+            after_part=next_part,
+        )
         await _finish_chat_progress(
             self,
             telegram,
