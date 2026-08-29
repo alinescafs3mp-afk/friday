@@ -24,7 +24,8 @@ either merged here or discarded before that source is removed.
 - Schema-capable fallback: Friday `0.207.73rc0` /
   `0ff75de8fad68f623d089ec7bc79e1d85d585bca`;
   tree `fa18f7b2f57ad2a6d8cba3ebc745fb51ce7ca95ae49738cb643f83192ed17db0`.
-- Database schema: 47
+- Database schema: 48 (candidate contract; live remains schema 47 until the
+  immutable 0.207.76 activation completes)
 - Production: immutable activation `clear`; backend and Telegram bridge active;
   trusted-CA health `200`; signed private-owner chat returned exact `OK`; V12
   `canary_ready`; complete S2 authenticated turn
@@ -47,14 +48,15 @@ either merged here or discarded before that source is removed.
 
 ## Active package
 
-Keep the released S3 path in shadow until its genuine production witness exists;
-then promote only the current-file-plus-current-public-web journey through the
-already released fail-closed activation gate. Repair the two S4 v2 topology
-gaps in a new passage revision with its own schema-capable fallback before
-search-facade parity work. In parallel, SolGoodman is closing the isolated S5
-measured-lease/adoption package; it remains unreleased pending review and the
-exact q38/SGLang live probe. S6 mission, reminder and Telegram recovery is live;
-the remaining physical Android acceptance still requires the owner/device.
+The S4 v3 passage/stored-locator candidate is sealed with a distinct
+schema-48-capable rc0 fallback and is in final release validation. Keep the
+released S3 path in shadow until its genuine production witness exists; then
+promote only the current-file-plus-current-public-web journey through the
+already released fail-closed activation gate. SolGoodman's isolated S5
+measured-lease/adoption package remains unreleased until its two publication
+freshness blockers and exact q38/SGLang live probe are closed. S6 mission,
+reminder and Telegram recovery is live; physical Android acceptance remains
+owner/device-bound.
 
 ## Operating rules
 

@@ -1,3 +1,18 @@
+## 0.207.76 — 2026-08-29
+
+### Exact stored document-passage locators
+
+- Advances only the rebuildable document-passage sidecar to schema 48 and a
+  document-only v3 span revision, removing contained/non-progress rows without
+  changing the shared embedding chunker.
+- Authenticates exact schema-47 DDL and data before an atomic passage-only
+  rebuild. Byte-identical CURRENT projections survive; changed topology returns
+  body-free to bounded `backfill_pending` and converges through the existing
+  restart-safe writer.
+- Mints stored locator identities only from authenticated current child rows.
+  Replay revalidates the exact source, child containment and digests; stale,
+  absent or forged sidecars preserve ranking and fall back to legacy evidence.
+
 ## 0.207.75 — 2026-08-29
 
 ### Durable scheduled work and Telegram ingress recovery

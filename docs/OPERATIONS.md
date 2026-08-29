@@ -694,6 +694,9 @@ identity. `rc0` отдельно не активируется. Для 46→47 �
 `0.207.72/schema46` previous → `0.207.73/schema47` candidate с
 `0.207.73rc0/schema47` fallback; использовать schema-46 release как fallback
 оператор обязан отклонить до остановки writers.
+Для 47→48 действует тот же контракт: `0.207.75/schema47` previous →
+`0.207.76/schema48` candidate с неактивированным
+`0.207.76rc0/schema48` fallback.
 
 0.206.4 использует SQLite schema 34; Obsidian-релиз 0.207.2 поднимает её до
 schema 35. Новое поле имени загрузки принадлежит
@@ -955,7 +958,7 @@ orchestration.model_gate.verified_context_tokens = 8192
 ```
 
 Во время probe `/api/health` ещё недоступен. Ждите до 420 секунд и дополнительно
-требуйте `status=ok` и `version=0.207.75`.
+требуйте `status=ok` и `version=0.207.76`.
 
 HTTP `status=ok` при `installed_mode=legacy` означает безопасную деградацию, но
 не успешный canary. В `canary`/`v12` Sentinel не реже раза в минуту

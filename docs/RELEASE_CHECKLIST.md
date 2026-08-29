@@ -180,7 +180,7 @@ failed/error/skipped-тест в любой фазе делает гейт кр�
 Для optional GPT-OSS secondary brain начиная с 0.207.11 дополнительно:
 
 - release принимается и первый раз запускается без `FRIDAY_SECONDARY_LLM_*`:
-  health имеет `status=ok`, `version=0.207.75`, `secondary.mode=disabled`,
+  health имеет `status=ok`, `version=0.207.76`, `secondary.mode=disabled`,
   `secondary.state=disabled` и `secondary.available=false`;
 - `ACCEPTED_SECONDARY_RUNTIME_PROFILES` содержит ровно finalist
   `gptoss20b-2335df123cac7fc0e13e347cde1e1ffa8562daafcaf0fc76ade1a851d2b0ff1f`
@@ -469,7 +469,7 @@ failed/error/skipped-тест в любой фазе делает гейт кр�
 - post-context load допускает bounded convergence не более 20 секунд с шагом
   50 мс только для valid same-epoch busy; invalid/epoch/deadline fail-closed, а
   initial idle и post-cancellation quiet остаются строгими;
-- final startup health имеет `status=ok`, `version=0.207.75`, configured/installed
+- final startup health имеет `status=ok`, `version=0.207.76`, configured/installed
   `canary`, routes `[archive_read, file_read]`, точный `profile_id`,
   `verified_context_tokens=8192` и непустой public `attestation_sha256`;
 - синтетические 1- и 2-файловые UTF-8 smokes дают одну публикацию с точными
@@ -496,13 +496,16 @@ failed/error/skipped-тест в любой фазе делает гейт кр�
 
 Проверить:
 
-- schema version = 47;
+- schema version = 48;
 - первый cutover 46→47 требует проверенный pre-migration recovery set и две
   distinct sealed schema-47 identities: stable `0.207.73` активируется с
   `0.207.72/schema46` как previous и неактивированным `0.207.73rc0/schema47`
   как fallback; rc0 и stable различаются только version identity. После clear
   sealed stable `0.207.73` становится schema-47-capable fallback для отдельного
   bounded passage writer release;
+- cutover 47→48 аналогично требует `0.207.76rc0/schema48` как
+  неактивированный schema-capable fallback; stable `0.207.76` отличается
+  только version identity, а previous остаётся `0.207.75/schema47`;
 - schema 43 → 44 атомарно добавляет exact dormant body-free
   `compare_current_file_with_current_web` WorkGraph: ровно два independent
   read-шага и один dependent primary-synthesis, immutable identities,
