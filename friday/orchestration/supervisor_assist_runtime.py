@@ -103,7 +103,7 @@ class _AssistController(Protocol):
         decision: SupervisorAssistPendingDecision,
         *,
         absolute_deadline: float,
-    ) -> AssistPendingGraphDisposition: ...
+    ) -> AssistPendingGraphDisposition | SupervisorAssistResult: ...
 
     async def close(self) -> None: ...
 
@@ -671,7 +671,7 @@ class SemanticSupervisorAssistRuntime:
             and scope is not None
         ):
             try:
-                disposition = await self._controller.reconcile_pending_before_legacy(
+                reconciliation = await self._controller.reconcile_pending_before_legacy(
                     scope,
                     active,
                     absolute_deadline=deadline,
@@ -686,9 +686,17 @@ class SemanticSupervisorAssistRuntime:
                     raise SupervisorAssistRuntimeError(
                         "authenticated assist call scope changed across reconciliation await"
                     )
-            if disposition is AssistPendingGraphDisposition.UNCERTAIN:
+            if type(reconciliation) is SupervisorAssistResult:
+                if (
+                    reconciliation.outcome is not SupervisorAssistOutcome.TERMINAL
+                    or type(reconciliation.response) is not dict
+                    or legacy_calls != 0
+                ):
+                    raise SupervisorAssistRuntimeError("durable assist reconciliation publication is invalid")
+                return reconciliation.response
+            if reconciliation is AssistPendingGraphDisposition.UNCERTAIN:
                 raise SupervisorAssistRuntimeError("durable assist reconciliation is uncertain")
-            if disposition not in {
+            if reconciliation not in {
                 AssistPendingGraphDisposition.LIVE_IN_PROCESS,
                 AssistPendingGraphDisposition.RETIRED,
             }:

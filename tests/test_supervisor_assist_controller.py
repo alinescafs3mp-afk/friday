@@ -27,6 +27,7 @@ from friday.file_evidence_reader import (
 )
 from friday.file_evidence_reader import FileEvidenceUnavailable, PreparedFileEvidence
 from friday.interaction_control_plane.compare_current_file_web_work_graph import (
+    COMPARE_CURRENT_FILE_WEB_RESTART_UNAVAILABLE_RESPONSE,
     FILE_READ_STEP_ID,
     WEB_READ_STEP_ID,
     CompareCurrentFileWebGraphOutcomeReason,
@@ -56,6 +57,7 @@ from friday.orchestration.supervisor_assist_controller import (
     AssistPendingGraphDisposition,
     SupervisorAssistController,
     SupervisorAssistOutcome,
+    SupervisorAssistResult,
 )
 from friday.orchestration.supervisor_assist_graph_adapter import (
     AssistCapabilityBoundary,
@@ -1759,7 +1761,10 @@ async def test_retained_owner_is_retired_before_an_overlapping_legacy_turn(stora
         absolute_deadline=time.monotonic() + 3,
     )
     assert interrupted.outcome is SupervisorAssistOutcome.INTERRUPTED
-    assert disposition is AssistPendingGraphDisposition.RETIRED
+    assert type(disposition) is SupervisorAssistResult
+    assert disposition.outcome is SupervisorAssistOutcome.TERMINAL
+    assert disposition.response is not None
+    assert disposition.response["message"] == COMPARE_CURRENT_FILE_WEB_RESTART_UNAVAILABLE_RESPONSE
     assert adapter.restart_calls == 1
     assert len(observed) == 1
     assert (

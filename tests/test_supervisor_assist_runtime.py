@@ -80,7 +80,9 @@ class _Controller:
         self.cancel_calls = 0
         self.cancel_result: SupervisorAssistResult | None = None
         self.reconcile_calls = 0
-        self.reconcile_disposition = AssistPendingGraphDisposition.LIVE_IN_PROCESS
+        self.reconcile_disposition: AssistPendingGraphDisposition | SupervisorAssistResult = (
+            AssistPendingGraphDisposition.LIVE_IN_PROCESS
+        )
         self.closed = 0
         self.surface: object = None
 
@@ -131,7 +133,7 @@ class _Controller:
         self,
         *_args: Any,
         **_kwargs: Any,
-    ) -> AssistPendingGraphDisposition:
+    ) -> AssistPendingGraphDisposition | SupervisorAssistResult:
         self.reconcile_calls += 1
         return self.reconcile_disposition
 
@@ -299,6 +301,36 @@ async def test_existing_graph_bypasses_new_planning_and_does_not_bind_legacy_wor
     assert primary.calls == 1
     assert primary.kwargs is not None
     assert primary.kwargs["_pending_durable_admission"] is None
+
+
+@pytest.mark.asyncio
+async def test_retained_graph_terminal_reconciliation_is_the_only_publication() -> None:
+    primary = _Primary({"message": "must not run"})
+    controller = _Controller()
+    controller.assist_pending = _assist_decision(SupervisorAssistPendingRelation.NEW_TURN)
+    terminal = {
+        "message": "previous graph was retired",
+        "conversation_id": _CONVERSATION,
+        "message_id": "msg_0123456789abcdef",
+    }
+    controller.reconcile_disposition = SupervisorAssistResult(
+        outcome=SupervisorAssistOutcome.TERMINAL,
+        response=terminal,
+    )
+    runtime = _runtime(primary, controller)
+
+    result = await runtime.chat(
+        _PERSON,
+        "новый независимый вопрос",
+        actor=_actor(),
+        conversation_id=_CONVERSATION,
+        _semantic_supervisor_ingress_binding=_NEW_INGRESS,
+        _semantic_supervisor_pending_decision=controller.assist_pending,  # type: ignore[arg-type]
+    )
+
+    assert result is terminal
+    assert controller.reconcile_calls == 1
+    assert controller.execute_calls == primary.calls == 0
 
 
 @pytest.mark.asyncio
