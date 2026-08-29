@@ -199,7 +199,7 @@ EXPECTED_SIGNATURES: dict[str, str] = {
     "_required_engineer_backup_authority": "(self) -> 'Any | None'",
     "_verify_engineer_backup_authority": "(self, evidence: 'object', *, database_sha256: 'str') -> 'tuple[str, int, bool] | None'",
     "_restore_backup_with_stopped_bridge": "(self, filename: 'str', *, safety_label: 'str') -> 'dict[str, Any]'",
-    "backfill_document_catalog": "(self, user_id: 'str', *, after_raw_object_id: 'str | None', limit: 'int' = 64) -> 'dict[str, Any]'",
+    "backfill_document_catalog": "(self, user_id: 'str', *, after_raw_object_id: 'str | None', limit: 'int' = 64, include_document_passages: 'bool' = False) -> 'dict[str, Any]'",
     "checkpoint_document_catalog_worker_state": "(self, *, expected_value: 'str | None', value: 'str', tenant_ids: 'Sequence[str]') -> 'bool'",
     "document_catalog_coverage": "(self, user_id: 'str') -> 'dict[str, Any]'",
     "get_document_catalog_entry": "(self, user_id: 'str', raw_object_id: 'str') -> 'dict[str, Any] | None'",
