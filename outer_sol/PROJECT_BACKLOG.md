@@ -14,17 +14,21 @@ either merged here or discarded before that source is removed.
 ## Current production identity
 
 - Branch: `main`
-- Deployed implementation head: `45fead9bcaed1bc8cd0112a4257f6080ce046535`
-- Live: Friday `0.207.68` / `45fead9bcaed1bc8cd0112a4257f6080ce046535`;
-  tree `dea711c8a1a438f327925d933b62153e9282317b95dac8e420f0c06ad827bb08`;
-  wheel `c060c11349c3de9a8eef93c7051d42e557b0c17c1ad79d13eca9eaf105030222`.
-- Schema-capable fallback and immediate runtime predecessor: Friday
-  `0.207.67` / `f93c0fcfae9a906210cd0594c20320866d99ecb7`;
+- Deployed implementation head: `77cdd72ada88040371f08b01c0d036f4d924c45e`
+- Live: Friday `0.207.69` / `77cdd72ada88040371f08b01c0d036f4d924c45e`;
+  tree `d9d353eb8d953d32219b60da37f8c1df3ecce5918116c3998bf295d2156130a6`;
+  wheel `5f185353d7c79fde2a88618025f945e9faaff6a73a2413dc9e4417ceb20b2379`.
+- Immediate runtime predecessor: Friday `0.207.68` /
+  `45fead9bcaed1bc8cd0112a4257f6080ce046535`; tree
+  `dea711c8a1a438f327925d933b62153e9282317b95dac8e420f0c06ad827bb08`.
+- Schema-capable fallback: Friday `0.207.67` /
+  `f93c0fcfae9a906210cd0594c20320866d99ecb7`;
   tree `1973acc092a8eab53a03e4adad1e725f351d5917aca01b0d46d1393cf8060d51`.
 - Database schema: 46
 - Production: immutable activation `clear`; backend and Telegram bridge active;
-  trusted-CA health `200`; V12 `canary_ready`; the S2 foundation is loaded from
-  the sealed wheel without changing current user-visible routing.
+  trusted-CA health `200`; V12 `canary_ready`; the S2 foundation and first
+  authenticated scalar-turn runtime slice are active without changing current
+  user-visible routing.
 - Secondary: accepted/live GPT-OSS profile `gptoss20b-2335df…`; bounded
   document-map/current-document assist and `plan_candidate` Supervisor shadow
   are installed. Supervisor promotion remains off with zero joined production
@@ -33,12 +37,15 @@ either merged here or discarded before that source is removed.
 
 ## Active package
 
-Complete S2 runtime adoption through the released `AuthenticatedTurnContext`
-foundation: issue exactly one context after ingress admission, preserve it
-through router/legacy/Engineer/V12 boundaries, derive `AgentContext` from it and
-give Supervisor only its bounded advisory projection. Keep direct legacy
-compatibility, schema 46 and all model-visible payloads unchanged; do not add a
-parallel DTO, store, scheduler or publisher.
+Complete the remaining S2 file/attachment/V12 adoption through the released
+`AuthenticatedTurnContext`: strict tenant-bound file authority, exact current
+and historical source revalidation and the remaining authenticated attachment
+ingress scenarios. Port only independently stronger pieces from the parallel S2
+handoff; keep the released retry, effect and publication ownership unchanged.
+
+In parallel, SolGoodman owns the isolated `S4-R0` retrieval-recall benchmark in
+new files only. It may be reviewed at a clean integration point but must not
+change main, schema, runtime routing or the S2 surface.
 
 ## Operating rules
 
@@ -62,6 +69,9 @@ parallel DTO, store, scheduler or publisher.
   its existing controls.
 - Do not merge old feature branches wholesale. Re-audit and port only exact
   useful commits onto current `main`.
+- Never overlap our full native/UI gate with SolGoodman's full gate. Check the
+  active gate processes first; while his gate owns the machine, continue useful
+  implementation, review or focused tests and wait for the full-gate slot.
 
 ## Priority order
 
@@ -182,7 +192,9 @@ private-owner command smoke all cleared.
 
 ### S2 — one turn nervous system
 
-Status: foundation deployed in `0.207.68`; runtime propagation remains active.
+Status: foundation deployed in `0.207.68`; the first narrow scalar runtime
+propagation slice is deployed in `0.207.69`; file/attachment/V12 completion
+remains active.
 
 - Extend or wrap the existing `orchestration.contracts.TurnInput`; do not add a
   third unrelated DTO. Build one immutable authenticated turn contract after
@@ -200,6 +212,15 @@ Foundation acceptance: 86 focused and 677 expanded contract tests; native gate
 23,108 Python plus 31 UI tests; static gate clear; three independent reviews
 accepted; two clean wheels were byte-identical; immutable activation and the
 schema-46 backup/fallback boundary cleared.
+
+First runtime-slice acceptance: 1,081 focused/related tests; independent review
+accepted 922 exact S2 tests; native gate 23,230 Python plus 31 UI tests; static
+gate clear; two wheels were byte-identical. Production activation created and
+verified one SQLite/inbox/Obsidian/Engineer recovery set, retained the distinct
+schema-46 fallback and reached a terminal `clear` receipt. Signed bridge-owner
+identity returned `200`; an isolated authenticated two-turn owner chat returned
+`200/200` on one conversation. Canonical rollback/restore paths passed the
+release gate; no destructive production rollback was manufactured.
 
 Estimate: 3–7 clean-work days in small reversible packages after S1.
 
@@ -304,10 +325,13 @@ Estimate: 4–8 clean-work days after S2, released incrementally.
 
 1. Keep the deployed P0/P1 production paths green.
 2. Keep released `EngineerWorkItem v1` stable; do not expand its scope.
-3. Finish the narrow runtime propagation of the released S2 seam, including one
-   turn ID, one pending-work owner and one primary publication authority.
-4. Begin the bounded S3 advisor path only through that context. Preserve the
-   released exact-evidence verifier and reject mutable or self-declared proof.
+3. Close the remaining S2 tenant/file/attachment/V12 propagation in small
+   packages without reopening released retry or publication ownership.
+4. Review the isolated S4-R0 retrieval-recall benchmark when SolGoodman hands it
+   off; it remains non-runtime until separately accepted.
+5. Begin the bounded S3 advisor path only through the shared context. Preserve
+   the released exact-evidence verifier and reject mutable or self-declared
+   proof.
 
 ## Canonical golden-journey/evidence registry
 
