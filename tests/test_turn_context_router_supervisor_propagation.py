@@ -17,6 +17,7 @@ from friday.agent_runtime import (
     AgentContext,
     AgentRuntime,
     _CurrentDocumentSecondaryMapPlan,
+    _project_pending_durable_admission_for_agent_leaf,
 )
 from friday.execution_kernel import (
     bind_authenticated_request_effect_authority,
@@ -321,7 +322,9 @@ def _scope_kwargs(
         "turn_policy": None,
         "telegram_update_id": None,
         "turn_deadline": _exact_deadline_float(context),
-        "pending_durable_admission": None,
+        "pending_durable_admission": (
+            context.pending_work_admission.admission if context.pending_work_admission is not None else None
+        ),
         "kg": kg,
         "hybrid_searcher": hybrid_searcher,
         "ingestion_result": ingestion_result,
@@ -748,6 +751,51 @@ async def test_sealed_router_mode_controls_legacy_and_nonlegacy_mismatch_closes(
             )
     assert result["message"] == "primary"
     assert primary.last_kwargs["_pending_durable_admission"] is pending
+
+
+@pytest.mark.parametrize("binding_kind", ("work_graph", "work_item"))
+def test_agent_leaf_projects_only_authenticated_work_graph_admission(
+    binding_kind: str,
+) -> None:
+    binding = (
+        {"work_graph_id": "graph_0123456789abcdef"}
+        if binding_kind == "work_graph"
+        else {"work_item_id": "work_0123456789abcdef"}
+    )
+    admission = PendingDurableTurnAdmission.owned(
+        person_id="owner",
+        conversation_id=_CONVERSATION_ID,
+        revision=3,
+        **binding,
+    )
+    issuer, context, actor, _now = _authenticated_turn(pending=admission)
+    kwargs = _scope_kwargs(actor, context, runtime_router_mode=RouterMode.LEGACY)
+
+    with bind_authenticated_turn_context(issuer, context):
+        scope = require_authenticated_chat_call_scope(context, **kwargs)
+        projected = _project_pending_durable_admission_for_agent_leaf(
+            authenticated_turn_context=context,
+            authenticated_call_scope=scope,
+            carried_admission=admission,
+        )
+        assert context.pending_work_admission is not None
+        assert context.pending_work_admission.admission is admission
+        with pytest.raises(TurnContextError, match="pending admission drifted"):
+            _project_pending_durable_admission_for_agent_leaf(
+                authenticated_turn_context=context,
+                authenticated_call_scope=scope,
+                carried_admission=dataclasses.replace(admission),
+            )
+
+    assert projected is (None if binding_kind == "work_graph" else admission)
+    assert (
+        _project_pending_durable_admission_for_agent_leaf(
+            authenticated_turn_context=None,
+            authenticated_call_scope=None,
+            carried_admission=admission,
+        )
+        is admission
+    )
 
 
 @pytest.mark.asyncio

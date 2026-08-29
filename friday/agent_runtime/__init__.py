@@ -357,10 +357,12 @@ from friday.orchestration.simple_public_news_outcome import (
 from friday.orchestration.turn_context import (
     AuthenticatedTurnContext,
     AuthorizedSourceKind,
+    PendingOwnerKind,
     TurnContextError,
 )
 from friday.orchestration.turn_context_call_scope import (
     UNSPECIFIED_CHAT_ADJUNCT,
+    AuthenticatedChatCallScope,
     require_authenticated_chat_call_scope,
     require_current_authenticated_chat_call_scope,
 )
@@ -802,6 +804,34 @@ def _turn_deadline_expired(turn_deadline: float | None) -> bool:
 
     remaining = _remaining_deadline_budget(turn_deadline)
     return remaining is not None and remaining <= 0
+
+
+def _project_pending_durable_admission_for_agent_leaf(
+    *,
+    authenticated_turn_context: AuthenticatedTurnContext | None,
+    authenticated_call_scope: AuthenticatedChatCallScope | None,
+    carried_admission: PendingDurableTurnAdmission | None,
+) -> PendingDurableTurnAdmission | None:
+    """Keep Supervisor WorkGraph ownership in the turn root, not legacy leaf routing."""
+
+    if authenticated_turn_context is None:
+        if authenticated_call_scope is not None:
+            raise TurnContextError("contextless AgentRuntime leaf carries an authenticated call scope")
+        return carried_admission
+    if type(authenticated_call_scope) is not AuthenticatedChatCallScope:
+        raise TurnContextError("authenticated AgentRuntime leaf lost its exact call scope")
+    if (
+        require_current_authenticated_chat_call_scope(authenticated_turn_context)
+        is not authenticated_call_scope
+    ):
+        raise TurnContextError("authenticated AgentRuntime leaf call scope drifted")
+    pending = authenticated_turn_context.pending_work_admission
+    expected = pending.admission if pending is not None else None
+    if carried_admission is not expected:
+        raise TurnContextError("authenticated AgentRuntime leaf pending admission drifted")
+    if pending is not None and pending.owner_kind is PendingOwnerKind.WORK_GRAPH:
+        return None
+    return carried_admission
 
 
 def _accepts_keyword(function: Any, keyword: str) -> bool:
@@ -49106,6 +49136,7 @@ class AgentRuntime:
     ) -> dict[str, Any]:
         turn_started = time.monotonic()
         authenticated_turn_context = current_primary_authenticated_turn_context(_authenticated_turn_context)
+        authenticated_call_scope: AuthenticatedChatCallScope | None = None
         if authenticated_turn_context is not None:
             authenticated_call_scope = require_authenticated_chat_call_scope(
                 authenticated_turn_context,
@@ -49141,6 +49172,11 @@ class AgentRuntime:
                 hybrid_searcher = None
             if ingestion_result is UNSPECIFIED_CHAT_ADJUNCT:
                 ingestion_result = None
+        _pending_durable_admission = _project_pending_durable_admission_for_agent_leaf(
+            authenticated_turn_context=authenticated_turn_context,
+            authenticated_call_scope=authenticated_call_scope,
+            carried_admission=_pending_durable_admission,
+        )
         if turn_deadline is None:
             # Production runtimes always own settings, but a few deliberately
             # tiny adapters call the structural early-return routes through an
