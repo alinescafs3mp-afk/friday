@@ -14,17 +14,17 @@ either merged here or discarded before that source is removed.
 ## Current production identity
 
 - Branch: `main`
-- Deployed implementation head: `160ee46c3cea823673fc4b7ffce0303a944d1c90`
-- Live: Friday `0.207.72` / `160ee46c3cea823673fc4b7ffce0303a944d1c90`;
-  tree `fd95b4a50a75c549c6b335303ee7ca401d60ea60efb6c9e18ebcf567ccbbb609`;
-  wheel `421df18c9c27bede1d9d18cbcfaa6165d3e53e4f13d17762b6e92d7f812ae2a3`.
-- Immediate runtime predecessor: Friday `0.207.71` /
-  `8f1dab58b75cd02c2594c6fc26d48e95370be44b`; tree
-  `71138c2c145050a6f22e2daaaec8e773cef33a87ec1de2aba391d73f3be4434b`.
-- Schema-capable fallback: Friday `0.207.67` /
-  `f93c0fcfae9a906210cd0594c20320866d99ecb7`;
-  tree `1973acc092a8eab53a03e4adad1e725f351d5917aca01b0d46d1393cf8060d51`.
-- Database schema: 47 (release candidate; production remains 46 until activation)
+- Deployed implementation head: `723c4cbbeff5648ca196d4a5b0a7654cfa3d164d`
+- Live: Friday `0.207.73` / `723c4cbbeff5648ca196d4a5b0a7654cfa3d164d`;
+  tree `e939b8adaed520f4baaabcae774bea018af489a07ecac7310c94c4a92112d8ad`;
+  wheel `9e84367bccecb7f3144aae9efe954097951a66b2df2d8d9b87c2e9adc175ba3c`.
+- Immediate runtime predecessor: Friday `0.207.72` /
+  `160ee46c3cea823673fc4b7ffce0303a944d1c90`; tree
+  `fd95b4a50a75c549c6b335303ee7ca401d60ea60efb6c9e18ebcf567ccbbb609`.
+- Schema-capable fallback: Friday `0.207.73rc0` /
+  `0ff75de8fad68f623d089ec7bc79e1d85d585bca`;
+  tree `fa18f7b2f57ad2a6d8cba3ebc745fb51ce7ca95ae49738cb643f83192ed17db0`.
+- Database schema: 47
 - Production: immutable activation `clear`; backend and Telegram bridge active;
   trusted-CA health `200`; V12 `canary_ready`; complete S2 authenticated turn
   authority is active across scalar, file, attachment and V12 paths without
@@ -37,16 +37,19 @@ either merged here or discarded before that source is removed.
   release-bound witness; no traffic is fabricated to cross that gate. The
   primary remains sole tool, effect and final-publication owner; secondary
   absence preserves primary-only behavior.
+- The reader-first body-free passage sidecar is live: all 1,991 current file
+  sources have explicit incomplete coverage, no passage body is duplicated and
+  the not-yet-released writer has published zero child rows.
 
 ## Active package
 
 Keep the released S3 path in shadow until its genuine production witness exists;
 then promote only the current-file-plus-current-public-web journey through the
-already released fail-closed activation gate. Continue S4 with the reader-first
-`document_passages` storage/backfill slice; the measured R0 benchmark and R1
-corpus-backed lexical repair are already live. In parallel, SolGoodman owns the
-isolated S6 reminder/mission at-most-once recovery package and may not change
-schema, main or the S2/S3/S4 authority surfaces.
+already released fail-closed activation gate. Continue S4 with the bounded,
+restart-safe writer/backfill over the now-live reader-first schema; keep it a
+separate reversible release. In parallel, SolGoodman is closing the two rejected
+S6 R0 at-most-once review defects before completing the isolated Telegram-ingress
+ENOSPC package; he may not change schema, main or the S2/S3/S4 authority surfaces.
 
 ## Operating rules
 
@@ -262,7 +265,8 @@ Remaining promotion work is observation-bound, not implementation-bound.
 ### S4 — one search facade with passage memory
 
 Status: R0 measured recall and R1 corpus-backed lexical gap closure deployed in
-`0.207.72`; passage storage/backfill remains next.
+`0.207.72`; the reader-first schema/coverage contract is deployed in `0.207.73`.
+The bounded writer and restart-safe backfill remain next.
 
 1. Add reader-first `document_passages` with a schema-capable fallback, bounded
    writer, restart-safe resumable backfill and honest `index_incomplete`.
@@ -287,6 +291,18 @@ plus 31 UI tests with zero skips; static checks, two-run benchmark identity and
 two byte-identical wheels cleared. Immutable activation retained schema 46 and
 the distinct fallback, produced a verified recovery set and ended `clear`;
 signed private-owner identity returned `200`.
+
+R2a acceptance: the schema/reader, archive, lifecycle and migration suites
+passed 399, 899, 323 and 142 tests respectively; the exact final native gate
+passed 23,540 Python plus 31 UI tests with zero skips and static checks clear.
+Independent schema/lifecycle and reader reviews were clean; readiness over
+100k/500k stored child rows measured 0.158/0.516 ms median without rechunking.
+Two wheels per sealed sibling were byte-identical. A production-copy 46→47
+migration preserved all 4,475 Raw identities, created 1,991 explicit-incomplete
+parents and zero children, reopened identically under both stable and rc0, and
+passed integrity/FK checks. Immutable activation retained the distinct
+schema-47 rc0 fallback, produced verified SQLite/inbox/Obsidian/Engineer recovery
+receipts and ended `clear`; the signed private-owner smoke returned exact `OK`.
 
 Estimate: 8–16 clean-work days across separately reversible releases.
 
@@ -362,8 +378,8 @@ Estimate: 4–8 clean-work days after S2, released incrementally.
 2. Keep released `EngineerWorkItem v1` stable; do not expand its scope.
 3. Keep the released bounded S3 advisor in shadow until a genuine eligible turn
    creates its exact production witness; do not fabricate activation evidence.
-4. Build the reader-first S4 passage-storage/backfill slice after the deployed
-   measured R0/R1 baseline; keep each schema step separately reversible.
+4. Build the bounded S4 passage writer and restart-safe backfill over the live
+   reader-first schema; keep the writer activation separately reversible.
 5. Preserve the released exact-evidence verifier and reject mutable or
    self-declared proof while real joined Supervisor observations accumulate.
 
