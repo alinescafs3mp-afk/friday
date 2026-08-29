@@ -55,6 +55,7 @@ from friday.orchestration.current_file_web_comparison import (
     compare_current_file_with_web,
     current_file_web_comparison_is_process_owned,
     current_file_web_comparison_lease_is_current,
+    current_file_web_comparison_process_lease_is_current,
     current_file_web_model_budget,
     current_file_web_model_requirements,
     current_file_web_request_is_admitted,
@@ -73,6 +74,7 @@ from friday.orchestration.supervisor_assist_graph_adapter import (
     AssistCancellation,
     AssistCapabilityBoundary,
     AssistClaimedStep,
+    AssistComparisonLeaseCheck,
     AssistComparisonPublication,
     AssistConversationScope,
     AssistGraphAdmission,
@@ -291,6 +293,12 @@ class AssistPrimaryModel(Protocol):
         absolute_deadline: float,
     ) -> bool: ...
 
+    def lease_is_process_current(
+        self,
+        lease: object,
+        requirements: ModelRequirements,
+    ) -> bool: ...
+
     async def complete(
         self,
         lease: object,
@@ -397,6 +405,7 @@ class SupervisorAssistGraphPort(Protocol):
         publication: AssistComparisonPublication,
         *,
         authority_check: AssistBoundaryCheck[AssistPublicationBoundary],
+        lease_check: AssistComparisonLeaseCheck,
         effect_check: AssistBoundaryCheck[AssistPublicationBoundary],
     ) -> AssistGraphPublication: ...
 
@@ -2448,7 +2457,7 @@ class SupervisorAssistController:
             if record.stop.is_set() or record.committed_result is not None:
                 return record.committed_result
             try:
-                lease_check = self._spawn_child(
+                lease_task = self._spawn_child(
                     record,
                     current_file_web_comparison_lease_is_current(
                         self._primary_model,
@@ -2456,7 +2465,7 @@ class SupervisorAssistController:
                         absolute_deadline=absolute_deadline,
                     ),
                 )
-                lease_current = await self._await_owned(record, lease_check)
+                lease_current = await self._await_owned(record, lease_task)
                 if (
                     lease_current is not True
                     or record.stop.is_set()
@@ -2464,6 +2473,27 @@ class SupervisorAssistController:
                 ):
                     return record.committed_result
                 record.surface.require_current_authenticated_call_scope()
+
+                def final_lease_check(candidate: CurrentFileWebComparison, /) -> bool:
+                    if (
+                        candidate is not comparison
+                        or record.stop.is_set()
+                        or _exact_future_deadline(absolute_deadline) is None
+                    ):
+                        return False
+                    record.surface.require_current_authenticated_call_scope()
+                    if not current_file_web_comparison_process_lease_is_current(
+                        self._primary_model,
+                        candidate,
+                    ):
+                        return False
+                    record.surface.require_current_authenticated_call_scope()
+                    return bool(
+                        candidate is comparison
+                        and not record.stop.is_set()
+                        and _exact_future_deadline(absolute_deadline) is not None
+                    )
+
                 publication = self._graph_adapter.publish_comparison(
                     self._cursor(record),
                     request,
@@ -2472,6 +2502,7 @@ class SupervisorAssistController:
                         self._authority_for(record.surface.actor),
                         require_current_surface_scope=True,
                     ),
+                    lease_check=final_lease_check,
                     effect_check=self._publication_check(
                         record,
                         self._effect_check,

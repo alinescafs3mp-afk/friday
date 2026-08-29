@@ -1703,6 +1703,26 @@ class AttestedV12ModelRuntime:
             absolute_deadline=absolute_deadline,
         )
 
+    def lease_is_process_current(
+        self,
+        lease: object,
+        requirements: ModelRequirements,
+    ) -> bool:
+        """Synchronously recheck the exact local gate generation.
+
+        Remote epoch freshness is sampled by :meth:`lease_is_current` before a
+        synchronous publication section. This non-I/O check then closes local
+        revoke/re-attestation races without yielding inside that transaction.
+        """
+
+        if type(lease) is not ModelProfileLease or type(requirements) is not ModelRequirements:
+            return False
+        return self._gate.validate_lease(
+            lease,
+            requirements,
+            process_epoch_sha256=lease.process_epoch_sha256,
+        )
+
     async def checked_chat(
         self,
         lease: object,

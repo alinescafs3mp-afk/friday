@@ -213,6 +213,7 @@ class _Model:
         self.lease: ModelProfileLease | None = None
         self.lease_current = True
         self.lease_checks = 0
+        self.process_lease_checks = 0
 
     async def acquire_lease(
         self,
@@ -248,6 +249,19 @@ class _Model:
     ) -> bool:
         assert absolute_deadline > time.monotonic()
         self.lease_checks += 1
+        return bool(
+            self.lease_current
+            and lease is self.lease
+            and self.lease is not None
+            and self.lease.requirements_sha256 == requirements.canonical_sha256()
+        )
+
+    def lease_is_process_current(
+        self,
+        lease: object,
+        requirements: ModelRequirements,
+    ) -> bool:
+        self.process_lease_checks += 1
         return bool(
             self.lease_current
             and lease is self.lease
@@ -1567,6 +1581,211 @@ async def test_epoch_loss_after_synthesis_never_reacquires_or_publishes(settings
 
     assert model.lease is original_lease
     assert len(model.calls) == 1
+    assert storage.count_messages(str(conversation["id"]), user_id="alice") == 0
+
+
+@pytest.mark.asyncio
+async def test_epoch_loss_after_final_reauth_rolls_back_before_effect_or_messages(
+    settings,
+    storage,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import friday.orchestration.file_read as file_read_module
+
+    conversation = storage.create_conversation("alice")
+    reference = _register(storage, settings, text="FINAL-LEASE-SOURCE", filename="final.txt")
+    model = _Model("Источник прочитан. [A1]")
+    handler = _handler(storage, settings, model)
+    request, turn, plan = _request(reference, conversation_id=str(conversation["id"]))
+    preparation = await handler.prepare(request, turn, plan)
+    assert preparation is not None
+    original_lease = model.lease
+    original_reauthorize = file_read_module.reauthorize_prepared_file_evidence_in_transaction
+    original_current = model.lease_is_current
+    original_process_current = model.lease_is_process_current
+    original_stage = file_read_module.stage_request_effect_possible_in_transaction
+    publication_conn: sqlite3.Connection | None = None
+    reauthorization_completed = False
+    remote_check_transactions: list[bool] = []
+    process_check_transactions: list[bool] = []
+    effect_stage_calls = 0
+
+    def revoke_after_reauthorization(*args: Any, **kwargs: Any) -> bool:
+        nonlocal publication_conn, reauthorization_completed
+        accepted = original_reauthorize(*args, **kwargs)
+        assert accepted is True
+        publication_conn = args[0]
+        reauthorization_completed = True
+        model.lease_current = False
+        return accepted
+
+    async def observe_current(
+        lease: object,
+        requirements: ModelRequirements,
+        *,
+        absolute_deadline: float,
+    ) -> bool:
+        if len(model.calls) == 2:
+            remote_check_transactions.append(bool(storage.conn.in_transaction))
+        return await original_current(
+            lease,
+            requirements,
+            absolute_deadline=absolute_deadline,
+        )
+
+    def observe_process_current(
+        lease: object,
+        requirements: ModelRequirements,
+    ) -> bool:
+        assert reauthorization_completed and publication_conn is not None
+        process_check_transactions.append(publication_conn.in_transaction)
+        return original_process_current(lease, requirements)
+
+    def observe_stage(*args: Any, **kwargs: Any) -> bool:
+        nonlocal effect_stage_calls
+        effect_stage_calls += 1
+        return original_stage(*args, **kwargs)
+
+    monkeypatch.setattr(
+        file_read_module,
+        "reauthorize_prepared_file_evidence_in_transaction",
+        revoke_after_reauthorization,
+    )
+    monkeypatch.setattr(model, "lease_is_current", observe_current)
+    monkeypatch.setattr(model, "lease_is_process_current", observe_process_current)
+    monkeypatch.setattr(file_read_module, "stage_request_effect_possible_in_transaction", observe_stage)
+
+    with pytest.raises(V12FileReadError, match="authority changed before publication"):
+        await handler.handle(request, turn, plan, preparation)
+
+    assert remote_check_transactions == [False]
+    assert process_check_transactions == [True]
+    assert publication_conn is not None and publication_conn.in_transaction is False
+    assert effect_stage_calls == 0
+    assert len(model.calls) == 2
+    assert model.lease is original_lease
+    assert storage.count_messages(str(conversation["id"]), user_id="alice") == 0
+
+
+@pytest.mark.asyncio
+async def test_process_epoch_loss_before_file_commit_rolls_back_staged_publication(
+    settings,
+    storage,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import friday.orchestration.file_read as file_read_module
+
+    conversation = storage.create_conversation("alice")
+    reference = _register(storage, settings, text="COMMIT-LEASE-SOURCE", filename="commit.txt")
+    model = _Model("Источник прочитан. [A1]")
+    handler = _handler(storage, settings, model)
+    request, turn, plan = _request(reference, conversation_id=str(conversation["id"]))
+    preparation = await handler.prepare(request, turn, plan)
+    assert preparation is not None
+    original_process_current = model.lease_is_process_current
+    original_stage = file_read_module.stage_request_effect_possible_in_transaction
+    process_check_transactions: list[bool] = []
+    effect_stage_calls = 0
+
+    def revoke_before_commit(
+        lease: object,
+        requirements: ModelRequirements,
+    ) -> bool:
+        process_check_transactions.append(bool(storage.conn.in_transaction))
+        if len(process_check_transactions) == 2:
+            model.lease_current = False
+        return original_process_current(lease, requirements)
+
+    def observe_stage(*args: Any, **kwargs: Any) -> bool:
+        nonlocal effect_stage_calls
+        effect_stage_calls += 1
+        return original_stage(*args, **kwargs)
+
+    monkeypatch.setattr(model, "lease_is_process_current", revoke_before_commit)
+    monkeypatch.setattr(file_read_module, "stage_request_effect_possible_in_transaction", observe_stage)
+
+    with pytest.raises(V12FileReadError, match="authority changed before transaction commit"):
+        await handler.handle(request, turn, plan, preparation)
+
+    assert process_check_transactions == [True, True]
+    assert storage.conn.in_transaction is False
+    assert effect_stage_calls == 1
+    assert len(model.calls) == 2
+    assert storage.count_messages(str(conversation["id"]), user_id="alice") == 0
+
+
+@pytest.mark.asyncio
+async def test_cancellation_during_final_remote_lease_check_precedes_transaction(
+    settings,
+    storage,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import friday.orchestration.file_read as file_read_module
+
+    conversation = storage.create_conversation("alice")
+    reference = _register(storage, settings, text="CANCEL-LEASE-SOURCE", filename="cancel.txt")
+    model = _Model("Источник прочитан. [A1]")
+    handler = _handler(storage, settings, model)
+    request, turn, plan = _request(reference, conversation_id=str(conversation["id"]))
+    preparation = await handler.prepare(request, turn, plan)
+    assert preparation is not None
+    original_reauthorize = file_read_module.reauthorize_prepared_file_evidence_in_transaction
+    original_current = model.lease_is_current
+    original_stage = file_read_module.stage_request_effect_possible_in_transaction
+    final_check_started = asyncio.Event()
+    reauthorization_calls = 0
+    effect_stage_calls = 0
+
+    def mark_reauthorization(*args: Any, **kwargs: Any) -> bool:
+        nonlocal reauthorization_calls
+        reauthorization_calls += 1
+        return original_reauthorize(*args, **kwargs)
+
+    async def block_final_current(
+        lease: object,
+        requirements: ModelRequirements,
+        *,
+        absolute_deadline: float,
+    ) -> bool:
+        if len(model.calls) == 2:
+            assert storage.conn.in_transaction is False
+            final_check_started.set()
+            await asyncio.Future()
+        return await original_current(
+            lease,
+            requirements,
+            absolute_deadline=absolute_deadline,
+        )
+
+    def observe_stage(*args: Any, **kwargs: Any) -> bool:
+        nonlocal effect_stage_calls
+        effect_stage_calls += 1
+        return original_stage(*args, **kwargs)
+
+    monkeypatch.setattr(
+        file_read_module,
+        "reauthorize_prepared_file_evidence_in_transaction",
+        mark_reauthorization,
+    )
+    monkeypatch.setattr(model, "lease_is_current", block_final_current)
+    monkeypatch.setattr(file_read_module, "stage_request_effect_possible_in_transaction", observe_stage)
+
+    task = asyncio.create_task(handler.handle(request, turn, plan, preparation))
+    await asyncio.wait_for(final_check_started.wait(), timeout=1.0)
+    isolation_key = "test:s5:file-publication-split-phase"
+    storage.kv_set(isolation_key, "committed outside publication")
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+    assert storage.conn.in_transaction is False
+    assert reauthorization_calls == 0
+    assert effect_stage_calls == 0
+    assert model.process_lease_checks == 0
+    assert len(model.calls) == 2
+    assert storage.kv_get(isolation_key) == "committed outside publication"
+    assert storage.count_messages(str(conversation["id"]), user_id="alice") == 0
+    await asyncio.sleep(0)
     assert storage.count_messages(str(conversation["id"]), user_id="alice") == 0
 
 

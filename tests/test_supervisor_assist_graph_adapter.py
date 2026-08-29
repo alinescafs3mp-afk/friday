@@ -817,6 +817,10 @@ def test_comparison_settlement_trace_assistant_receipt_and_closure_are_atomic(st
     assert token is not None
     comparison = _comparison(graph.accepted_plan_sha256, file_sha256, web.canonical_sha256())
     cursor = AssistGraphCursor.from_graph(graph)
+
+    def unexpected_lease(_comparison: CurrentFileWebComparison) -> bool:
+        raise AssertionError("invalid snapshot must fail before model lease validation")
+
     for unscoped in (legacy_token, foreign_token, wrong_owner_token):
         with pytest.raises(
             SupervisorAssistGraphAdapterError,
@@ -826,16 +830,90 @@ def test_comparison_settlement_trace_assistant_receipt_and_closure_are_atomic(st
                 cursor,
                 AssistComparisonPublication(unscoped, comparison, web, _trace()),
                 authority_check=lambda boundary: boundary.actor is surface.actor,
+                lease_check=unexpected_lease,
                 effect_check=lambda boundary: boundary.actor is surface.actor,
             )
         assert adapter.load(cursor) == graph
+
+    lease_checks: list[bool] = []
+    authority_checks: list[bool] = []
+    effect_calls = 0
+
+    def deny_lease(candidate: CurrentFileWebComparison) -> bool:
+        assert candidate is comparison
+        lease_checks.append(bool(storage.conn.in_transaction))
+        return False
+
+    def count_effect(_boundary: object) -> bool:
+        nonlocal effect_calls
+        effect_calls += 1
+        return True
+
+    def allow_authority(boundary: object) -> bool:
+        authority_checks.append(bool(storage.conn.in_transaction))
+        return getattr(boundary, "actor", None) is surface.actor
+
+    with pytest.raises(
+        SupervisorAssistGraphAdapterError,
+        match="comparison model lease is no longer current",
+    ):
+        adapter.publish_comparison(
+            cursor,
+            AssistComparisonPublication(token, comparison, web, _trace()),
+            authority_check=allow_authority,
+            lease_check=deny_lease,
+            effect_check=count_effect,
+        )
+    assert lease_checks == [True]
+    assert authority_checks == [True]
+    assert effect_calls == 0
+    assert storage.conn.in_transaction is False
+    assert adapter.load(cursor) == graph
+
+    revocation_checks = 0
+
+    def revoke_before_commit(candidate: CurrentFileWebComparison) -> bool:
+        nonlocal revocation_checks
+        assert candidate is comparison
+        revocation_checks += 1
+        lease_checks.append(bool(storage.conn.in_transaction))
+        return revocation_checks == 1
+
+    with pytest.raises(
+        SupervisorAssistGraphAdapterError,
+        match="comparison model lease changed before transaction commit",
+    ):
+        adapter.publish_comparison(
+            cursor,
+            AssistComparisonPublication(token, comparison, web, _trace()),
+            authority_check=lambda boundary: boundary.actor is surface.actor,
+            lease_check=revoke_before_commit,
+            effect_check=count_effect,
+        )
+    assert revocation_checks == 2
+    assert effect_calls == 1
+    assert storage.conn.in_transaction is False
+    assert adapter.load(cursor) == graph
+    assistant_count = storage.execute(
+        "SELECT COUNT(*) FROM messages WHERE conversation_id=? AND role='assistant'",
+        (surface.conversation_id,),
+    ).fetchone()[0]
+    assert assistant_count == 0
+
+    def allow_lease(candidate: CurrentFileWebComparison) -> bool:
+        assert candidate is comparison
+        lease_checks.append(bool(storage.conn.in_transaction))
+        return True
+
     published = adapter.publish_comparison(
         cursor,
         AssistComparisonPublication(token, comparison, web, _trace()),
         authority_check=lambda boundary: boundary.actor is surface.actor,
+        lease_check=allow_lease,
         effect_check=lambda boundary: boundary.actor is surface.actor,
     )
 
+    assert lease_checks == [True, True, True, True, True]
     assert published.graph.state is CompareCurrentFileWebGraphState.COMPLETED
     assert published.graph.publication_receipt_sha256 == published.execution_receipt_sha256
     row = storage.execute(

@@ -349,6 +349,12 @@ class _Primary:
         self.deadlines: list[float] = []
         self.block_current_at: int | None = None
         self.current_started = asyncio.Event()
+        self.lease_transaction_probe: Callable[[], bool] | None = None
+        self.lease_transaction_states: list[bool] = []
+        self.process_lease_checks = 0
+        self.process_lease_current = True
+        self.process_lease_transaction_states: list[bool] = []
+        self.revoke_process_after_async_check: int | None = None
         self.requirements: ModelRequirements | None = None
         self.lease: ModelProfileLease | None = None
 
@@ -398,11 +404,27 @@ class _Primary:
         assert lease is self.lease and requirements is self.requirements
         self.deadlines.append(absolute_deadline)
         self.lease_checks += 1
+        if self.lease_transaction_probe is not None:
+            self.lease_transaction_states.append(self.lease_transaction_probe())
         if self.block_current_at == self.lease_checks:
             self.current_started.set()
             await asyncio.Event().wait()
         index = min(self.lease_checks - 1, len(self.currentness) - 1)
-        return self.currentness[index] is True
+        current = self.currentness[index] is True
+        if self.revoke_process_after_async_check == self.lease_checks:
+            self.process_lease_current = False
+        return current
+
+    def lease_is_process_current(
+        self,
+        lease: object,
+        requirements: ModelRequirements,
+    ) -> bool:
+        assert lease is self.lease and requirements is self.requirements
+        self.process_lease_checks += 1
+        if self.lease_transaction_probe is not None:
+            self.process_lease_transaction_states.append(self.lease_transaction_probe())
+        return self.process_lease_current
 
     async def complete(
         self,
@@ -1474,7 +1496,9 @@ async def test_primary_epoch_loss_at_publication_retains_owner_without_partial_r
     storage: Any,
 ) -> None:
     surface, projection = _stored_surface(storage, "publication-epoch-loss")
-    primary = _Primary(currentness=(True, True, True, False))
+    primary = _Primary()
+    primary.revoke_process_after_async_check = 4
+    primary.lease_transaction_probe = lambda: bool(storage.conn.in_transaction)
     adapter = _CountingAdapter(storage)
     controller = _controller(
         primary=primary,
@@ -1499,10 +1523,20 @@ async def test_primary_epoch_loss_at_publication_retains_owner_without_partial_r
     assert result.response is None
     assert result.pending_admission is not None
     assert primary.lease_checks == 4 and len(primary.calls) == 2
-    assert adapter.publish_calls == adapter.terminal_calls == adapter.cancel_calls == 0
+    assert primary.acquire_calls == 1
+    assert primary.lease_transaction_states == [False, False, False, False]
+    assert primary.process_lease_checks == 1
+    assert primary.process_lease_transaction_states == [True]
+    assert adapter.publish_calls == 1
+    assert adapter.terminal_calls == adapter.cancel_calls == 0
     assert legacy_calls == 0
     current = adapter.load_current(AssistConversationScope(surface.actor.user_id, surface.conversation_id))
     assert current is not None and current.state is CompareCurrentFileWebGraphState.ACTIVE
+    roles = storage.execute(
+        "SELECT role FROM messages WHERE user_id=? AND conversation_id=? ORDER BY created_at,id",
+        (surface.actor.user_id, surface.conversation_id),
+    ).fetchall()
+    assert [str(row["role"]) for row in roles] == ["user"]
 
 
 @pytest.mark.asyncio
@@ -1512,6 +1546,7 @@ async def test_cancellation_drains_final_lease_revalidation_before_publication(
     surface, projection = _stored_surface(storage, "cancel-final-lease-check")
     primary = _Primary()
     primary.block_current_at = 4
+    primary.lease_transaction_probe = lambda: bool(storage.conn.in_transaction)
     adapter = _CountingAdapter(storage)
     controller = _controller(
         primary=primary,
@@ -1531,6 +1566,8 @@ async def test_cancellation_drains_final_lease_revalidation_before_publication(
         )
     )
     await asyncio.wait_for(primary.current_started.wait(), timeout=3)
+    isolation_key = f"test:s5:supervisor-split-phase:{surface.actor.user_id}"
+    storage.kv_set(isolation_key, "committed outside publication")
     pending = controller.pending_durable_turn_admission(
         surface.actor.user_id,
         "cancel",
@@ -1550,8 +1587,19 @@ async def test_cancellation_drains_final_lease_revalidation_before_publication(
     assert completed.outcome is SupervisorAssistOutcome.CANCELLED
     assert completed.response is None
     assert primary.lease_checks == 4 and len(primary.calls) == 2
+    assert primary.acquire_calls == 1
+    assert primary.lease_transaction_states == [False, False, False, False]
+    assert primary.process_lease_checks == 0
+    assert primary.process_lease_transaction_states == []
+    assert storage.kv_get(isolation_key) == "committed outside publication"
     assert adapter.cancel_calls == 1
-    assert adapter.publish_calls == adapter.terminal_calls == 0
+    assert adapter.publish_calls == 0
+    assert adapter.terminal_calls == 0
+    assistant_count = storage.execute(
+        "SELECT COUNT(*) FROM messages WHERE user_id=? AND conversation_id=? AND role='assistant'",
+        (surface.actor.user_id, surface.conversation_id),
+    ).fetchone()[0]
+    assert assistant_count == 1
 
 
 @pytest.mark.asyncio

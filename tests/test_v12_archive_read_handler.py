@@ -245,6 +245,17 @@ class _Model:
             and self.lease.requirements_sha256 == requirements.canonical_sha256()
         )
 
+    def lease_is_process_current(
+        self,
+        lease: object,
+        requirements: ModelRequirements,
+    ) -> bool:
+        return bool(
+            lease is self.lease
+            and self.lease is not None
+            and self.lease.requirements_sha256 == requirements.canonical_sha256()
+        )
+
     async def complete(
         self,
         lease: object,

@@ -864,6 +864,7 @@ async def test_acquire_validate_and_complete_recheck_epoch_without_auto_reacquir
         requirements,
         absolute_deadline=deadline,
     )
+    assert runtime.lease_is_process_current(lease, requirements)
 
     result = await runtime.complete(
         lease,
@@ -881,6 +882,7 @@ async def test_acquire_validate_and_complete_recheck_epoch_without_auto_reacquir
     assert len(metrics.calls) == 4  # acquire, validate, pre-call, post-call
 
     runtime._gate.revoke()  # noqa: SLF001
+    assert not runtime.lease_is_process_current(lease, requirements)
     assert await runtime.acquire(requirements, absolute_deadline=deadline) is None
     with pytest.raises(V12ModelRuntimeError) as caught:
         await runtime.checked_chat(

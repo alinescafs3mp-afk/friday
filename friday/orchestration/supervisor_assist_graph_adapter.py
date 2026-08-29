@@ -172,6 +172,12 @@ class AssistBoundaryCheck(Protocol[_BoundaryT]):
     def __call__(self, boundary: _BoundaryT, /) -> bool: ...
 
 
+class AssistComparisonLeaseCheck(Protocol):
+    """An exact non-I/O lease check called inside the publication transaction."""
+
+    def __call__(self, comparison: CurrentFileWebComparison, /) -> bool: ...
+
+
 class AssistRestartActorResolver(Protocol):
     """Reconstruct one current account principal without restoring request identity."""
 
@@ -1187,10 +1193,13 @@ class SupervisorAssistGraphAdapter:
         publication: AssistComparisonPublication,
         *,
         authority_check: AssistBoundaryCheck[AssistPublicationBoundary],
+        lease_check: AssistComparisonLeaseCheck,
         effect_check: AssistBoundaryCheck[AssistPublicationBoundary],
     ) -> AssistGraphPublication:
         if type(cursor) is not AssistGraphCursor or type(publication) is not AssistComparisonPublication:
             raise TypeError("assist comparison publication requires typed inputs")
+        if not callable(lease_check):
+            raise TypeError("assist comparison publication requires a lease check")
 
         def operation(conn: Any) -> AssistGraphPublication:
             graph = self._active(conn, cursor)
@@ -1265,6 +1274,8 @@ class SupervisorAssistGraphAdapter:
                 comparison=comparison,
             )
             _require(authority_check, boundary, label="publication authority")
+            if lease_check(comparison) is not True:
+                raise SupervisorAssistGraphAdapterError("comparison model lease is no longer current")
             _require(effect_check, boundary, label="publication effect")
             self._stage(conn)
             settled = settle_compare_current_file_web_step_in_transaction(
@@ -1349,7 +1360,7 @@ class SupervisorAssistGraphAdapter:
                     receipt=terminal_receipt,
                 )
                 receipt_sha256 = terminal_receipt.canonical_sha256()
-            return AssistGraphPublication(
+            result = AssistGraphPublication(
                 graph=closed,
                 assistant_message_id=message_id,
                 content=comparison.answer,
@@ -1357,6 +1368,11 @@ class SupervisorAssistGraphAdapter:
                 primary_trace_sha256=trace_sha256,
                 execution_receipt_sha256=receipt_sha256,
             )
+            if lease_check(comparison) is not True:
+                raise SupervisorAssistGraphAdapterError(
+                    "comparison model lease changed before transaction commit"
+                )
+            return result
 
         result = self._write(operation)
         self._actors.pop(result.graph.id, None)
@@ -1952,6 +1968,7 @@ __all__ = [
     "AssistCancellation",
     "AssistCapabilityBoundary",
     "AssistClaimedStep",
+    "AssistComparisonLeaseCheck",
     "AssistComparisonPublication",
     "AssistConversationScope",
     "AssistExpiryBatch",

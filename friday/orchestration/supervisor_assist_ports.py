@@ -84,6 +84,12 @@ class PrimaryModelRuntime(Protocol):
         absolute_deadline: float,
     ) -> bool: ...
 
+    def lease_is_process_current(
+        self,
+        lease: object,
+        requirements: ModelRequirements,
+    ) -> bool: ...
+
     async def complete(
         self,
         lease: object,
@@ -413,6 +419,19 @@ class AttestedPrimaryModel:
         except TimeoutError:
             return False
         return _future_deadline(deadline) is not None and current is True
+
+    def lease_is_process_current(
+        self,
+        lease: object,
+        requirements: ModelRequirements,
+    ) -> bool:
+        if not _lease_matches_requirements(lease, requirements):
+            return False
+        try:
+            current = self.runtime.lease_is_process_current(lease, requirements)
+        except Exception:
+            return False
+        return current is True and _lease_matches_requirements(lease, requirements)
 
     async def complete(
         self,

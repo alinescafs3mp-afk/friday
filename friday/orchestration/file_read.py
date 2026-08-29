@@ -351,6 +351,12 @@ class _AttestedFileModel(Protocol):
         absolute_deadline: float,
     ) -> bool: ...
 
+    def lease_is_process_current(
+        self,
+        lease: object,
+        requirements: ModelRequirements,
+    ) -> bool: ...
+
     async def complete(
         self,
         lease: object,
@@ -455,6 +461,22 @@ async def _lease_is_current_before_deadline(
         timeout=remaining,
     )
     return type(current) is bool and current
+
+
+def _lease_is_process_current(
+    model: _AttestedFileModel,
+    lease: object,
+    requirements: ModelRequirements,
+) -> bool:
+    """Recheck one exact lease against the non-I/O process gate."""
+
+    if type(lease) is not ModelProfileLease or not _model_lease_matches_requirements(lease, requirements):
+        return False
+    try:
+        current = model.lease_is_process_current(lease, requirements)
+    except Exception:
+        return False
+    return current is True and _model_lease_matches_requirements(lease, requirements)
 
 
 def _messages_fit_attested_context(messages: list[dict[str, str]]) -> bool:
@@ -1011,6 +1033,12 @@ class V12FileReadHandler:
                 expected=authenticated_context,
             )
             _require_deadline(deadline, stage="before transaction commit")
+            if not _lease_is_process_current(
+                self._model,
+                prepared.model_lease,
+                prepared.model_requirements,
+            ):
+                raise V12FileReadError("file model authority changed before transaction commit")
             if not model_visible_text_is_secret_free(answer):
                 raise V12FileReadError("publication output requires a secret projection")
 
@@ -1076,6 +1104,19 @@ class V12FileReadHandler:
                     and interaction_mode != authenticated_context.authority.interaction_mode.value
                 ):
                     raise V12FileReadError("authenticated conversation mode changed before publication")
+                _require_v12_turn_context(
+                    request,
+                    turn,
+                    expected=authenticated_context,
+                )
+                if not _lease_is_process_current(
+                    self._model,
+                    prepared.model_lease,
+                    prepared.model_requirements,
+                ):
+                    raise V12FileReadError("file model authority changed before publication")
+                _require_deadline(deadline, stage="after final process lease recheck")
+                _require_prepared_file_turn_bound(prepared)
                 _require_v12_turn_context(
                     request,
                     turn,
@@ -1330,17 +1371,17 @@ class V12FileReadHandler:
             absolute_deadline=deadline,
         ):
             raise V12FileReadError("file model authority changed before publication")
+        _require_deadline(deadline, stage="after final remote lease recheck")
         _require_prepared_file_turn_bound(prepared)
         _require_v12_turn_context(
             request,
             turn,
             expected=authenticated_context,
         )
-        # Publication is deliberately one short, synchronous SQLite critical
-        # section.  Once the effect fence is crossed, task cancellation must
-        # not detach a worker thread that can commit after the router reports a
-        # timeout.  Canary sources are bounded to two small exact-text bodies,
-        # so the final byte revalidation remains a bounded local operation.
+        # Remote epoch freshness is sampled immediately before publication;
+        # the synchronous transaction then rechecks the same lease against the
+        # process gate after source/conversation reauthorization. It never
+        # yields while owning SQLite state or after crossing the effect fence.
         conversation_id, message_id, interaction_mode, outcome = self._publish_sync(
             request,
             turn,

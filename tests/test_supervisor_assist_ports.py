@@ -553,6 +553,7 @@ class _LeasedPrimary(_Primary):
         self.current: object = True
         self.acquire_calls = 0
         self.current_calls = 0
+        self.process_current_calls = 0
         self.complete_calls = 0
         self.hang_on: set[str] = set()
 
@@ -583,6 +584,15 @@ class _LeasedPrimary(_Primary):
         assert absolute_deadline > time.monotonic()
         self.current_calls += 1
         await self._maybe_hang("current")
+        return self.current
+
+    def lease_is_process_current(
+        self,
+        lease: object,
+        requirements: ModelRequirements,
+    ) -> object:
+        assert lease is self.lease and requirements is self.requirements
+        self.process_current_calls += 1
         return self.current
 
     async def complete(
@@ -636,6 +646,7 @@ async def test_primary_port_binds_every_v2_lease_field_without_retry() -> None:
         runtime.requirements,
         absolute_deadline=deadline,
     )
+    assert model.lease_is_process_current(lease, runtime.requirements)
     assert await model.complete(
         lease,
         runtime.requirements,
@@ -644,7 +655,12 @@ async def test_primary_port_binds_every_v2_lease_field_without_retry() -> None:
         priority="foreground",
         absolute_deadline=deadline,
     ) == {"content": "ok", "finish_reason": "stop", "tool_calls": None}
-    assert (runtime.acquire_calls, runtime.current_calls, runtime.complete_calls) == (1, 1, 1)
+    assert (
+        runtime.acquire_calls,
+        runtime.current_calls,
+        runtime.process_current_calls,
+        runtime.complete_calls,
+    ) == (1, 1, 1, 1)
 
     runtime.lease = replace(runtime.lease, max_tool_calls=1)
     assert (
@@ -671,6 +687,7 @@ async def test_primary_port_closes_expiry_epoch_loss_and_non_boolean_currentness
         runtime.requirements,
         absolute_deadline=deadline,
     )
+    assert not model.lease_is_process_current(lease, runtime.requirements)
     runtime.current = False  # exact runtime epoch/process revocation projection
     assert not await model.lease_is_current(
         lease,

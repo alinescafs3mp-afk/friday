@@ -50,6 +50,7 @@ from friday.orchestration.file_read import (
     _AttestedFileModel,
     _file_requirements,
     _lease_is_current_before_deadline,
+    _lease_is_process_current,
     _messages_fit_attested_context,
     _model_lease_matches_requirements,
     _two_call_read_model_output_limits,
@@ -1310,6 +1311,24 @@ async def current_file_web_comparison_lease_is_current(
     )
 
 
+def current_file_web_comparison_process_lease_is_current(
+    model: _AttestedFileModel,
+    comparison: CurrentFileWebComparison,
+) -> bool:
+    """Recheck the carried lease against the synchronous process gate."""
+
+    if not current_file_web_comparison_is_process_owned(comparison):
+        raise TypeError("current-file/web comparison is invalid")
+    parent_context = _current_parent_context(comparison._parent_context)
+    current = _lease_is_process_current(
+        model,
+        comparison.lease,
+        comparison.requirements,
+    )
+    _current_parent_context(parent_context)
+    return current and current_file_web_comparison_is_process_owned(comparison)
+
+
 __all__ = [
     "CURRENT_FILE_WEB_COMPARISON_BINDING_SCHEMA",
     "CURRENT_FILE_WEB_COMPARISON_EVIDENCE_SCHEMA",
@@ -1322,6 +1341,7 @@ __all__ = [
     "current_file_web_comparison_binding_sha256",
     "current_file_web_comparison_is_process_owned",
     "current_file_web_comparison_lease_is_current",
+    "current_file_web_comparison_process_lease_is_current",
     "current_file_web_model_budget",
     "current_file_web_model_requirements",
     "current_file_web_request_is_admitted",
