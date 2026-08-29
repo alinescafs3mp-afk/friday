@@ -359,3 +359,19 @@ def test_supported_identity_projection_failure_is_visible_and_keeps_pending(
     assert _parent(storage, raw.id)["projection_status"] == "incomplete"
     assert _parent(storage, raw.id)["incomplete_reason"] == "backfill_pending"
     assert _children(storage, raw.id) == ()
+
+
+def test_released_v2_nonprogress_topology_remains_explicit_incomplete(
+    storage: FridayStorage,
+) -> None:
+    body = "Prelude sentence. " + ("x" * 1_400)
+    raw = _file(storage, "raw_passage_v2_nonprogress", body=body)
+
+    report = _backfill(storage, limit=1)
+
+    assert report["examined"] == report["passage_processed"] == 1
+    assert report["passage_changed"] == 0
+    assert _parent(storage, raw.id)["projection_status"] == "incomplete"
+    assert _parent(storage, raw.id)["incomplete_reason"] == "backfill_pending"
+    assert _children(storage, raw.id) == ()
+    validate_document_passage_schema(storage.conn)

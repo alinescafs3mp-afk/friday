@@ -239,6 +239,8 @@ def _document_passage_processed(report: Any, *, maximum: int) -> int:
     changed = report.get("passage_changed")
     if type(processed) is not int or type(changed) is not int or not 0 <= changed <= processed <= maximum:
         raise ValueError("document passage phase report is out of bounds")
+    if changed < processed:
+        LOGGER.warning("Document passage projection deferred: count=%d", processed - changed)
     return processed
 
 

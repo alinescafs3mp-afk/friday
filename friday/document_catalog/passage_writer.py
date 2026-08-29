@@ -15,11 +15,15 @@ from typing import Any
 
 from friday.document_catalog.passage_projection import (
     DOCUMENT_PASSAGE_INDEX_REVISION,
+    DOCUMENT_PASSAGE_MAX_CHARS,
+    DOCUMENT_PASSAGE_MAX_COUNT,
+    DOCUMENT_PASSAGE_OVERLAP_CHARS,
     DocumentPassageProjection,
     DocumentPassageProjectionStatus,
 )
 from friday.document_catalog.passage_schema import document_passage_set_sha256
 from friday.document_catalog.schema import deterministic_document_extraction_state
+from friday.retrieval import chunk_spans
 from friday.retrieval._contract_utils import RetrievalContractError, bounded_text
 
 _HEX64 = re.compile(r"^[0-9a-f]{64}$")
@@ -63,6 +67,21 @@ def _passage_rows(projection: DocumentPassageProjection) -> tuple[tuple[int, int
             passage.content_sha256,
         )
         for passage in projection.passages
+    )
+
+
+def _released_v2_topology_is_unpublishable(extracted_text: str) -> bool:
+    """Recognize the released v2 short-boundary defect without hiding other failures."""
+
+    spans = chunk_spans(
+        extracted_text,
+        max_chars=DOCUMENT_PASSAGE_MAX_CHARS,
+        overlap_chars=DOCUMENT_PASSAGE_OVERLAP_CHARS,
+        max_chunks=DOCUMENT_PASSAGE_MAX_COUNT,
+    )
+    return any(
+        start <= previous_start or start > previous_end or end <= previous_end
+        for (previous_start, previous_end), (start, end) in zip(spans, spans[1:], strict=False)
     )
 
 
@@ -177,6 +196,12 @@ def publish_document_passages_in_transaction(
         # Schema 47 already admits historical arbitrary SQL TEXT identities in
         # explicit-incomplete state, but its released validator never admitted
         # them as CURRENT. Preserve that fallback-compatible boundary.
+        return 0
+    # The deployed schema-47 fallback carries the same v2 chunk contract. Two
+    # legacy sparse-text shapes make that released chunker emit a contained
+    # span. Keep only those rows explicitly incomplete until a new revision can
+    # repair them; all unrelated projection failures remain visible.
+    if _released_v2_topology_is_unpublishable(raw_content):
         return 0
     projection = DocumentPassageProjection.from_complete_text(
         raw_object_id=raw_object_id,
