@@ -105,6 +105,7 @@ _CONVERSATION_ID_RE = re.compile(r"conv_[0-9a-f]{16}\Z")
 _RAW_ID_RE = re.compile(r"raw_[0-9a-f]{16}\Z")
 _SHA256_RE = re.compile(r"[0-9a-f]{64}\Z")
 _INTERACTION_MODES = frozenset({"dialogue", "knowledge_work", "research", "engineer"})
+_PREPARED_FILE_ROUTES = frozenset({RouteClass.FILE_READ, RouteClass.ARCHIVE_READ})
 LOGGER = logging.getLogger(__name__)
 
 
@@ -140,7 +141,7 @@ class _PreparedFileTurn:
             self._process_authority is not _PROCESS_AUTHORITY
             or not prepared_file_evidence_is_process_owned(self.evidence)
             or type(self.turn_plan) is not TurnPlan
-            or self.turn_plan.route is not RouteClass.FILE_READ
+            or self.turn_plan.route not in _PREPARED_FILE_ROUTES
             or type(self.turn_plan_sha256) is not str
             or _SHA256_RE.fullmatch(self.turn_plan_sha256) is None
             or not hmac.compare_digest(
