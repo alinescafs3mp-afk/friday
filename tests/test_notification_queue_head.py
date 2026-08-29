@@ -60,17 +60,19 @@ def test_a_de_allowlisted_chat_does_not_block_the_queue(settings):
         # whose backlog was still queued.
         for index in range(20):
             assert storage.enqueue_notification(
-                "alice", "999999", f"старое {index}", kind="reminder", dedup_key=f"old:{index}"
+                "alice", "999999", f"старое {index}", kind="reflection", dedup_key=f"old:{index}"
             )
         assert storage.enqueue_notification(
-            "alice", "5001", "напоминание", kind="reminder", dedup_key="live:1"
+            "alice", "5001", "напоминание", kind="reflection", dedup_key="live:1"
         )
 
         first = _pending(client, tuned)
         # The first drain is allowed to return nothing — the window was full of
         # dead rows — but it must have retired them.
         second = _pending(client, tuned)
-        assert second["count"] == 1, f"the live reminder is still unreachable (first drain: {first['count']})"
+        assert second["count"] == 1, (
+            f"the live notification is still unreachable (first drain: {first['count']})"
+        )
         assert second["items"][0]["body"] == "напоминание"
 
         rows = {row["id"]: row for row in storage.execute("SELECT * FROM outbound_notifications")}
