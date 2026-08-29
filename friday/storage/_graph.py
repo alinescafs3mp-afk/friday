@@ -310,6 +310,103 @@ def _bounded_visible_timeline_event_rows(
     return [dict(row) for row in rows]
 
 
+_ReminderEventCursor = tuple[str, str, str]
+
+
+def _bounded_visible_reminder_event_page(
+    storage: StorageShared,
+    shared_user_id: str,
+    person_id: str,
+    *,
+    start: str,
+    end: str,
+    after: _ReminderEventCursor | None = None,
+    limit: int = 200,
+) -> tuple[list[dict[str, Any]], _ReminderEventCursor | None, bool]:
+    """One private reminder-scan page with an internal deterministic cursor.
+
+    The generic timeline projection intentionally keeps its historical one-page
+    contract: it backs user-facing views whose limit is part of their response.
+    A periodic reminder scan has a different obligation.  Stopping at that
+    projection's default 200 rows lets 200 not-yet-due events at the head hide a
+    due event forever, because every scan starts from the same head.
+
+    This helper repeats the exact person/shared/private-owner admission of
+    ``_bounded_visible_timeline_event_rows`` but exposes keyset continuation only
+    to the reminder organ.  The raw ordering values never enter a public result;
+    the name is projected with the same bound as before.
+    """
+
+    clauses = [
+        "e.entity_type='event'",
+        "e.canonical=1",
+        "e.deleted_at IS NULL",
+        _not_disallowed_private_material_for_person("e", "?"),
+        "((e.user_id=? AND COALESCE(t.source,'') NOT LIKE 'reminder:%' "
+        "AND NOT EXISTS (SELECT 1 FROM private_entity_owners shared_private "
+        "WHERE shared_private.entity_id=e.id)) "
+        "OR (COALESCE(t.source,'')=? AND e.user_id IN (?,?) "
+        "AND EXISTS (SELECT 1 FROM private_entity_owners private_owner "
+        "WHERE private_owner.entity_id=e.id AND private_owner.person_id=?)))",
+        "t.occurred_at>=?",
+        "t.occurred_at<=?",
+    ]
+    reminder_source = f"reminder:{person_id}"
+    params: list[Any] = [
+        person_id,
+        shared_user_id,
+        reminder_source,
+        person_id,
+        shared_user_id,
+        person_id,
+        str(start),
+        str(end),
+    ]
+    if after is not None:
+        occurred_at, name, entity_id = (str(value) for value in after)
+        clauses.append(
+            "(t.occurred_at>? OR "
+            "(t.occurred_at=? AND e.name COLLATE NOCASE>?) OR "
+            "(t.occurred_at=? AND e.name COLLATE NOCASE=? AND e.id>?))"
+        )
+        params.extend([occurred_at, occurred_at, name, occurred_at, name, entity_id])
+
+    bounded_limit = max(1, min(int(limit), 2_000))
+    params.append(bounded_limit + 1)
+    fetched = storage.execute(
+        f"""SELECT substr(e.id,1,160) AS entity_id,
+                   substr(e.name,1,240) AS name,
+                   substr(e.entity_type,1,80) AS entity_type,
+                   substr(e.description,1,500) AS description,
+                   substr(t.occurred_at,1,64) AS occurred_at,
+                   substr(t.occurred_end,1,64) AS occurred_end,
+                   substr(COALESCE(t.precision,''),1,40) AS precision,
+                   substr(COALESCE(t.source,''),1,256) AS source,
+                   substr(COALESCE(t.updated_at,''),1,64) AS updated_at,
+                   t.occurred_at AS _cursor_occurred_at,
+                   e.name AS _cursor_name,
+                   e.id AS _cursor_entity_id
+              FROM entity_time t
+              JOIN entities e ON e.id=t.entity_id AND e.user_id=t.user_id
+             WHERE {" AND ".join(clauses)}
+             ORDER BY t.occurred_at, e.name COLLATE NOCASE, e.id LIMIT ?""",  # nosec B608
+        tuple(params),
+    ).fetchall()
+    has_more = len(fetched) > bounded_limit
+    page_rows = fetched[:bounded_limit]
+    items: list[dict[str, Any]] = []
+    cursor: _ReminderEventCursor | None = None
+    for row in page_rows:
+        item = dict(row)
+        cursor = (
+            str(item.pop("_cursor_occurred_at") or ""),
+            str(item.pop("_cursor_name") or ""),
+            str(item.pop("_cursor_entity_id") or ""),
+        )
+        items.append(item)
+    return items, cursor, has_more
+
+
 def _count_visible_timeline_events(
     storage: StorageShared,
     shared_user_id: str,

@@ -24,9 +24,12 @@ from friday.organs import (
     resolve_chat_id,
 )
 from friday.reminder_schedule import reminder_is_due, reminder_when_text
-from friday.storage._graph import _bounded_visible_timeline_event_rows
+from friday.storage._graph import _bounded_visible_reminder_event_page
 
 LOGGER = logging.getLogger(__name__)
+
+_REMINDER_SCAN_PAGE_SIZE = 200
+_REMINDER_SCAN_MAX_PAGES = 10
 
 
 def _format_reminder(event: dict, today) -> str:
@@ -84,26 +87,43 @@ async def scan_reminders(ctx: ServiceContext) -> None:
         if not may_push_to(settings, ctx.storage, user_id, chat_id):
             continue
         tenant = archive_tenant(settings, user_id)
-        for event in _bounded_visible_timeline_event_rows(
-            ctx.storage,
-            tenant,
-            user_id,
-            start=start,
-            end=end,
-        ):
-            if not _belongs_to(event, person=user_id, tenant=tenant):
-                continue
-            if not reminder_is_due(event, now, lead_days=settings.reminders_lead_days):
-                continue
-            dedup_key = f"reminder:{event.get('entity_id')}:{event.get('occurred_at')}"
-            if ctx.storage.enqueue_notification(
+        after = None
+        for _page_number in range(_REMINDER_SCAN_MAX_PAGES):
+            events, after, has_more = _bounded_visible_reminder_event_page(
+                ctx.storage,
+                tenant,
                 user_id,
-                chat_id,
-                _format_reminder(event, today),
-                kind="reminder",
-                dedup_key=dedup_key,
-            ):
-                enqueued += 1
+                start=start,
+                end=end,
+                after=after,
+                limit=_REMINDER_SCAN_PAGE_SIZE,
+            )
+            for event in events:
+                if not _belongs_to(event, person=user_id, tenant=tenant):
+                    continue
+                if not reminder_is_due(event, now, lead_days=settings.reminders_lead_days):
+                    continue
+                dedup_key = f"reminder:{event.get('entity_id')}:{event.get('occurred_at')}"
+                if ctx.storage.enqueue_notification(
+                    user_id,
+                    chat_id,
+                    _format_reminder(event, today),
+                    kind="reminder",
+                    dedup_key=dedup_key,
+                ):
+                    enqueued += 1
+            if not has_more:
+                break
+            if after is None:
+                # Defensive fail-closed guard: a page that claims continuation
+                # without a cursor must not restart from the head forever.
+                LOGGER.error("Reminder scan page omitted its continuation cursor")
+                break
+        else:
+            # Body-free operational fact only.  The next normal scan starts from
+            # the head again; the fixed cap protects the service from a corrupt or
+            # unexpectedly huge seven-day event window without logging identities.
+            LOGGER.warning("Reminder scan reached its bounded page cap")
     if enqueued:
         LOGGER.info("Reminders organ queued %d event reminder(s)", enqueued)
 
