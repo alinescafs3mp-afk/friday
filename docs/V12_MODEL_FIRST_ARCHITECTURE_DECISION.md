@@ -3,7 +3,8 @@
 Статус: **архитектурное направление принято владельцем; release 0.205.0
 сохраняет безопасный shadow и узкие opt-in FILE_READ/ARCHIVE_READ routes,
 добавляя exact Qwen3.8/SGLang V12.14 attestation и owner-visible degradation;
-production по умолчанию остаётся `legacy`**.
+production по умолчанию остаётся `legacy`; release 0.207.77 добавляет
+measured-context adoption с отдельной live-приёмкой exact runtime**.
 
 Дата решения: 2026-08-17.
 
@@ -225,10 +226,13 @@ Release 0.205.0 добавляет отдельный exact profile
 `qwen38-27b-nvfp4-sglang:dispatcher:v12.14`. Он не наследует доверие
 по имени `dispatcher`: model revision, SGLang build, graph-only launch,
 per-process deployment witness и свежий behavioral probe проверяются
-независимо. Authority остаётся той же: 1–2 prepared evidence,
-8192-token V12 context, ноль model-owned tool steps, read-only effect и
-обязательный verifier. Qwen3.6/V12.13 profile остаётся зарегистрированным
-для точной совместимости, а не как неявный fallback нового profile.
+независимо. Authority остаётся той же: 1–2 prepared evidence, ноль model-owned
+tool steps, read-only effect и обязательный verifier. В кандидате 0.207.77
+контекст q38 больше не приколочен к baseline: exact live-attested capacity
+ограничена 40960, а journey выбирает минимально достаточный tier из
+`8192/16384/24576/32768/40960`. Qwen3.6/V12.13 остаётся на 8192 и
+зарегистрирован для точной совместимости, а не как неявный fallback нового
+profile.
 
 ## 10. Работа V12 на текущей 27B-модели
 
@@ -244,6 +248,16 @@ reported version: 0.0.0.dev0+qwen38.27b.g561c8f3
 launch: context/total=40960, running/mamba=6, FP8 E4M3 KV
 graphs: decode=full batches 1..6, prefill=disabled; radix/speculation=disabled
 ```
+
+Measured capacity — не подсказка по имени модели. Она равна минимуму exact
+profile cap, installation cap и текущей typed live attestation; до attestation
+и после revocation равна нулю. Synthesis и независимый verifier заранее
+проверяются с worst-case reserve, затем один requirements digest связывает
+plan/binding, lease и принятый process-owned результат. Lease не
+переиздаётся: reject, timeout, epoch drift и потеря capacity завершают этот
+V12-путь fail-closed без повторного model dispatch. Малые входы сохраняют
+baseline tier, а current-file/web использует полную проекцию только когда она
+помещается в выбранный attested tier.
 
 V12 должна запускаться на ней сначала в `shadow`, затем в
 ограниченном `canary`. Это полезно по двум причинам:

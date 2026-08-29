@@ -1,3 +1,25 @@
+## 0.207.77 — 2026-08-29
+
+### Live-attested V12 context adoption
+
+- Projects the Qwen3.8 gate's effective context only from the exact live
+  attestation, installation cap and code-owned profile, capped at 40960 tokens;
+  an absent, rejected or revoked attestation exposes no capacity. The legacy
+  and Qwen3.6 baseline remains 8192 tokens.
+- Selects the least sufficient closed lease tier from
+  `8192/16384/24576/32768/40960` for prepared file, archive and comparison
+  journeys, including the worst-case independent-verifier input reserve.
+  Small inputs therefore retain the baseline lease while larger admitted
+  evidence can use the measured Qwen3.8 capacity.
+- Carries the exact requirements digest and context tier through the model
+  lease, plan/binding and process-owned result. Lease acquisition is one-shot:
+  rejection, drift, timeout or capacity loss fails closed without reacquiring
+  under a different tier or replaying a model call.
+- Lets current-file/web comparison retain its full evidence projection when
+  the measured tier fits it; the 8192-token path keeps the existing explicit
+  `LOCAL_CONTEXT_TRUNCATED` disclosure. SQLite remains schema 48 and the
+  intended immutable fallback is stable `0.207.76/schema48`.
+
 ## 0.207.76 — 2026-08-29
 
 ### Exact stored document-passage locators
@@ -1422,9 +1444,11 @@ Obsidian Android остаётся opt-in beta до физической приё
 `qwen38-27b-nvfp4-sglang:dispatcher:v12.14` для
 `a2genesis/Qwen3.8-27B-NVFP4` revision
 `bfd9b31207712e0850eec9da32261e8c5ee16af7` на закреплённом SGLang
-image/source. Профиль не расширяет полномочия V12.13: всё так же
-допускаются только `file_read`/`archive_read`, два prepared evidence,
-8K model context, read-only effect и обязательный verifier.
+image/source. В этом историческом выпуске профиль не расширял полномочия
+V12.13: допускались только `file_read`/`archive_read`, два prepared evidence,
+минимальный profile context tier, read-only effect и обязательный verifier.
+Фиксированный context ceiling позднее заменён measured tiers кандидата
+0.207.77; это не переписывает authority старого release.
 
 SGLang adapter разделяет model alias и provenance. Перед выдачей
 lease он exact-сверяет inventory, bounded SGLang metrics с полным

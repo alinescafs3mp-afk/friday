@@ -2,8 +2,9 @@
 
 **Friday** (по-русски — **Пятница**; ex codename Jericho) — локальная многопользовательская Knowledge Operating System: она принимает текст и документы, сохраняет первоисточник, строит граф знаний, ищет по личной базе и отвечает через Telegram или HTTP API. Веб-панель предназначена для администрирования, разбора Inbox, работы с сущностями, правами, резервными копиями и диагностикой.
 
-Текущая версия: **0.207.76**. Owner-only Engineer Mode теперь является
-автономной консолью Пятницы внутри её основной VM: модель сама выбирает и
+Текущая версия: **0.207.77**; immutable fallback — **0.207.76**. Owner-only
+Engineer Mode теперь является автономной консолью Пятницы внутри её основной
+VM: модель сама выбирает и
 последовательно запускает установленное ПО от пользователя службы, работает с
 его файловой системой и сетью, получает точные текущие Telegram-вложения и
 возвращает результаты файлами без контура `/approvals`. Идентичность владельца,
@@ -61,6 +62,14 @@ graph-only SGLang deployment; всё неподдержанное остаётс
 final synthesis по-прежнему принадлежит primary, а любой сбой даёт тот же primary-only путь.
 Assist открывается только точным v2 policy и одноразовым live-shadow receipt;
 secondary не получает tools, effects или права прямой публикации.
+
+Кандидат 0.207.77 использует фактическую live-attested ёмкость Qwen3.8 до
+40960 токенов и выбирает минимально достаточный закрытый lease-tier из
+`8192/16384/24576/32768/40960`; короткие запросы остаются на 8192, как и
+legacy/Qwen3.6. Exact tier и requirements digest связывают план, lease и
+принятый результат. Acquire выполняется один раз: drift, отказ или потеря
+аттестации закрывают V12-путь без повторного запроса lease. Worst-case ввод
+независимого verifier учитывается до model dispatch.
 
 ```text
 Telegram → подписанный durable bridge → Conversation + mode
@@ -361,6 +370,7 @@ VRAM обнаружился при старте, а не на первом по�
 | runtime image | `lmsysorg/sglang@sha256:506525a5907ea22c9d445afb7c03603959b912de034d86915cf17da814f1a124` |
 | runtime source / reported version | `c4271c3fe1262fc2adbd162c33b25de5255251c5` / `0.0.0.dev0+qwen38.27b.g561c8f3` |
 | max model length | `40960` |
+| live-attested journey tiers | `8192,16384,24576,32768,40960` |
 | static memory / total tokens | `0.90` / `40960` |
 | KV cache dtype | `fp8_e4m3` |
 | max running requests / Mamba cache | `6` / `6` |
@@ -384,9 +394,10 @@ fan-out одной задачи. Иерархическое чтение док�
 `/v1/models`, bounded `/metrics`, `/server_info` и per-process deployment
 witness с code-owned identities и launch graph. Любой drift, неполный
 witness или незамкнутый same-origin proxy оставляют routes в `legacy`.
-Успешный canary startup должен показать в `/api/health` версию `0.207.62`,
-точный profile id, `canary_ready`, `live_attestation_clear` и оба
-зарегистрированных route; простого HTTP `status=ok` недостаточно.
+Приёмка 0.207.77 должна показать в `/api/health` его точную версию,
+profile id, `canary_ready`, `live_attestation_clear`,
+`verified_context_tokens=40960` и оба зарегистрированных route; простого HTTP
+`status=ok` недостаточно.
 
 ## Telegram
 

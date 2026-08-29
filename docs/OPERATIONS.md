@@ -697,6 +697,8 @@ identity. `rc0` отдельно не активируется. Для 46→47 �
 Для 47→48 действует тот же контракт: `0.207.75/schema47` previous →
 `0.207.76/schema48` candidate с неактивированным
 `0.207.76rc0/schema48` fallback.
+`0.207.77/schema48` миграции не выполняет: его stable previous и immutable
+fallback — один exact `0.207.76/schema48`.
 
 0.206.4 использует SQLite schema 34; Obsidian-релиз 0.207.2 поднимает её до
 schema 35. Новое поле имени загрузки принадлежит
@@ -954,11 +956,19 @@ orchestration.registered_routes = [archive_read, file_read]
 orchestration.model_gate.profile_id = qwen38-27b-nvfp4-sglang:dispatcher:v12.15
 orchestration.model_gate.status = canary_ready
 orchestration.model_gate.reason_code = live_attestation_clear
-orchestration.model_gate.verified_context_tokens = 8192
+orchestration.model_gate.verified_context_tokens = 40960
 ```
 
+При таком exact q38 witness runtime выбирает минимально достаточный tier из
+`8192/16384/24576/32768/40960`; Qwen3.6 и объекты без нового capacity API
+остаются на 8192. Размер считается отдельно для каждого model-вызова, включая
+worst-case JSON expansion полного разрешённого ответа внутри verifier input.
+Requirements digest и tier переносятся без подмены через plan/binding, lease и
+process-owned result. Acquire одноразовый: отказ, timeout, drift либо отзыв
+attestation не разрешают повторный acquire на меньшем или новом tier.
+
 Во время probe `/api/health` ещё недоступен. Ждите до 420 секунд и дополнительно
-требуйте `status=ok` и `version=0.207.76`.
+требуйте `status=ok` и `version=0.207.77`.
 
 HTTP `status=ok` при `installed_mode=legacy` означает безопасную деградацию, но
 не успешный canary. В `canary`/`v12` Sentinel не реже раза в минуту

@@ -180,7 +180,7 @@ failed/error/skipped-тест в любой фазе делает гейт кр�
 Для optional GPT-OSS secondary brain начиная с 0.207.11 дополнительно:
 
 - release принимается и первый раз запускается без `FRIDAY_SECONDARY_LLM_*`:
-  health имеет `status=ok`, `version=0.207.76`, `secondary.mode=disabled`,
+  health имеет `status=ok`, `version=0.207.77`, `secondary.mode=disabled`,
   `secondary.state=disabled` и `secondary.available=false`;
 - `ACCEPTED_SECONDARY_RUNTIME_PROFILES` содержит ровно finalist
   `gptoss20b-2335df123cac7fc0e13e347cde1e1ffa8562daafcaf0fc76ade1a851d2b0ff1f`
@@ -469,9 +469,20 @@ failed/error/skipped-тест в любой фазе делает гейт кр�
 - post-context load допускает bounded convergence не более 20 секунд с шагом
   50 мс только для valid same-epoch busy; invalid/epoch/deadline fail-closed, а
   initial idle и post-cancellation quiet остаются строгими;
-- final startup health имеет `status=ok`, `version=0.207.76`, configured/installed
+- final startup health имеет `status=ok`, `version=0.207.77`, configured/installed
   `canary`, routes `[archive_read, file_read]`, точный `profile_id`,
-  `verified_context_tokens=8192` и непустой public `attestation_sha256`;
+  `verified_context_tokens=40960` и непустой public `attestation_sha256`;
+- q38 выбирает только минимально достаточный closed tier из
+  `8192/16384/24576/32768/40960`, тогда как legacy/Qwen3.6 сохраняет 8192;
+  small-input smoke получает 8192, а вход больше baseline либо worst-case
+  verifier reserve получает ровно первый достаточный attested tier;
+- acquire каждого exact requirements выполняется один раз: reject, timeout,
+  stale lease, process-epoch drift и capacity loss не вызывают reacquire/retry;
+  tier и requirements digest должны совпадать в lease, plan/binding и принятом
+  process-owned result, а swap отклоняется до публикации;
+- current-file/web smoke на q38 сохраняет полную проекцию, если она помещается
+  в attested tier; тот же вход на 8192 остаётся честным
+  `LOCAL_CONTEXT_TRUNCATED` без скрытого расширения authority;
 - синтетические 1- и 2-файловые UTF-8 smokes дают одну публикацию с точными
   citations, без повторного legacy-вызова после выбора V12;
 - `archive_read` допускает только self-owned prior exact UTF-8: уникальное точное
@@ -506,6 +517,8 @@ failed/error/skipped-тест в любой фазе делает гейт кр�
 - cutover 47→48 аналогично требует `0.207.76rc0/schema48` как
   неактивированный schema-capable fallback; stable `0.207.76` отличается
   только version identity, а previous остаётся `0.207.75/schema47`;
+- `0.207.77/schema48` не меняет DDL и принимает exact stable
+  `0.207.76/schema48` одновременно как previous и immutable fallback;
 - schema 43 → 44 атомарно добавляет exact dormant body-free
   `compare_current_file_with_current_web` WorkGraph: ровно два independent
   read-шага и один dependent primary-synthesis, immutable identities,
