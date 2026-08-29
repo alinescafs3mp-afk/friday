@@ -269,6 +269,9 @@ async def test_effect_shadow_uses_shared_slot_context_deadline_and_detached_auth
         storage=storage,
         maturity_witness=witness,  # type: ignore[arg-type]
     )
+    kg = object()
+    hybrid = object()
+    ingestion = {"promoted": False, "category": "web_request"}
 
     with bind_authenticated_turn_context(issuer, context):
         with pytest.raises(TurnContextError, match="message drifted"):
@@ -283,6 +286,9 @@ async def test_effect_shadow_uses_shared_slot_context_deadline_and_detached_auth
             "owner",
             _MESSAGE,
             **_chat_kwargs(actor, deadline),
+            kg=kg,
+            hybrid_searcher=hybrid,
+            ingestion_result=ingestion,
             _authenticated_turn_context=context,
         )
         for _ in range(20):
@@ -295,6 +301,9 @@ async def test_effect_shadow_uses_shared_slot_context_deadline_and_detached_auth
 
     assert response is primary.response
     assert primary.kwargs["_authenticated_turn_context"] is context
+    assert primary.kwargs["kg"] is kg
+    assert primary.kwargs["hybrid_searcher"] is hybrid
+    assert primary.kwargs["ingestion_result"] is ingestion
     assert selected_deadlines[0] <= context.inherited_budget.safety_deadline.monotonic_ns / 1e9
     await wrapper.close()
 
@@ -432,17 +441,26 @@ async def test_authenticated_ordinary_assist_turn_cannot_mint_pending_work() -> 
     primary.expected_context = context
     controller = _AssistController()
     runtime = _assist_runtime(primary, controller)
+    kg = object()
+    hybrid = object()
+    ingestion = {"promoted": False, "category": "web_request"}
 
     with bind_authenticated_turn_context(issuer, context):
         response = await runtime.chat(
             "owner",
             _MESSAGE,
             **_chat_kwargs(actor, deadline),
+            kg=kg,
+            hybrid_searcher=hybrid,
+            ingestion_result=ingestion,
             _authenticated_turn_context=context,
         )
 
     assert response is primary.response
     assert primary.kwargs["_authenticated_turn_context"] is context
+    assert primary.kwargs["kg"] is kg
+    assert primary.kwargs["hybrid_searcher"] is hybrid
+    assert primary.kwargs["ingestion_result"] is ingestion
     assert controller.classify_calls == controller.execute_calls == 0
 
 

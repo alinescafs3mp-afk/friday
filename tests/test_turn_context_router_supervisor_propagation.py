@@ -10,14 +10,21 @@ from typing import Any, cast
 
 import pytest
 
+from friday import execution_kernel as execution_kernel_module
 from friday import semantic_supervisor_policy
+from friday.execution_kernel import (
+    bind_authenticated_request_effect_authority,
+    track_request_effects,
+)
 from friday.file_evidence import stamp_current_turn_file_reference
 from friday.orchestration import semantic_supervisor_runtime as supervisor_runtime_module
+from friday.orchestration import turn_context_publication as publication_module
 from friday.orchestration.contracts import RouterMode, TurnInput
 from friday.orchestration.router import OrchestrationRouter, _authenticated_attachment_references
 from friday.orchestration.semantic_supervisor_runtime import SemanticSupervisorShadowRuntime
 from friday.orchestration.turn_context import (
     AuthenticatedTurnContext,
+    FinalPublisher,
     IngressKind,
     InheritedTurnBudget,
     ModelAntiLoopBudget,
@@ -28,6 +35,7 @@ from friday.orchestration.turn_context import (
     TurnSafetyDeadline,
 )
 from friday.orchestration.turn_context_call_scope import require_authenticated_chat_call_scope
+from friday.orchestration.turn_context_publication import bind_authenticated_turn_publication
 from friday.orchestration.turn_context_runtime import (
     bind_authenticated_turn_context,
     current_authenticated_turn_context,
@@ -103,9 +111,7 @@ def _authenticated_turn(
     effective_router_mode = RouterMode.LEGACY if pending is not None else router_mode
     policy = issuer.issue_turn_policy(
         router_mode=effective_router_mode,
-        fallback_router_mode=(
-            None if effective_router_mode is RouterMode.LEGACY else RouterMode.LEGACY
-        ),
+        fallback_router_mode=(None if effective_router_mode is RouterMode.LEGACY else RouterMode.LEGACY),
         decision=TurnPolicyDecision(intent=TurnIntent.PASSTHROUGH),
     )
     context = issuer.authenticate_turn(
@@ -119,9 +125,7 @@ def _authenticated_turn(
             TurnResourceBudget(4, 2, max_advisory_calls, 8_192),
         ),
         pending_work_admission=(
-            issuer.bind_pending_work(authority=authority, admission=pending)
-            if pending is not None
-            else None
+            issuer.bind_pending_work(authority=authority, admission=pending) if pending is not None else None
         ),
     )
     return issuer, context, actor, now
@@ -139,9 +143,7 @@ def _authenticated_attachment_turn() -> tuple[
 ]:
     serial = next(_SERIALS)
     now = time.monotonic_ns()
-    issuer = TurnContextIssuer(
-        hashlib.sha256(f"router-attachment-{serial}".encode("ascii")).digest()
-    )
+    issuer = TurnContextIssuer(hashlib.sha256(f"router-attachment-{serial}".encode("ascii")).digest())
     actor = ActorContext(
         user_id="owner",
         preset_key="owner",
@@ -162,12 +164,28 @@ def _authenticated_attachment_turn() -> tuple[
     )
     raw_id = f"raw_{serial:016x}"
     carrier = _AttachmentCarrier(
+        filename="report.pdf",
         raw_object_id=raw_id,
+        knowledge_object_id=None,
         mime_type="application/pdf",
         size_bytes=321,
         transient_text="bounded extracted text",
+        extraction_success=True,
+        extraction_error="",
+        text_truncated=False,
+        advisory_only=False,
+        verification_eligible=True,
+        parse_deadline_reached=False,
+        parse_pages_read=1,
+        parse_pages_truncated=False,
+        parse_total_pages=1,
+        archive_truncated=False,
+        source_truncated_for_parse=False,
         persisted=True,
         current_turn_only=True,
+        # Future server-owned attestation objects may be non-JSON.  They are
+        # identity-bound, while every model-visible body field above is hashed.
+        process_marker=object(),
     )
     stamp_current_turn_file_reference(
         carrier,
@@ -229,14 +247,48 @@ def _chat_kwargs(
         "enable_tools": True,
     }
     if context is not None:
-        values["turn_deadline"] = (
-            context.inherited_budget.safety_deadline.monotonic_ns / 1_000_000_000
-        )
+        values["turn_deadline"] = context.inherited_budget.safety_deadline.monotonic_ns / 1_000_000_000
         if context.authority.ingress_kind is IngressKind.TELEGRAM:
             values["telegram_update_id"] = context.authority.update_id
         if context.pending_work_admission is not None:
             values["_pending_durable_admission"] = context.pending_work_admission.admission
     return values
+
+
+def _scope_kwargs(
+    actor: ActorContext,
+    context: AuthenticatedTurnContext,
+    *,
+    attachments: list[dict[str, Any]] | None = None,
+    kg: Any = None,
+    hybrid_searcher: Any = None,
+    ingestion_result: dict[str, Any] | None = None,
+    runtime_router_mode: RouterMode | None = None,
+) -> dict[str, Any]:
+    return {
+        "user_id": "owner",
+        "message": context.model_input.message,
+        "actor": actor,
+        "conversation_id": _CONVERSATION_ID,
+        "attachments": attachments,
+        "enable_tools": True,
+        "synthetic_document_notice": False,
+        "replay_source_message_id": None,
+        "mode": None,
+        "answer_with_voice": False,
+        "reply_to": None,
+        "quoted_attachment_reference": False,
+        "reply_assistant_reference": False,
+        "reply_assistant_message_id": None,
+        "turn_policy": None,
+        "telegram_update_id": None,
+        "turn_deadline": (context.inherited_budget.safety_deadline.monotonic_ns / 1_000_000_000),
+        "pending_durable_admission": None,
+        "kg": kg,
+        "hybrid_searcher": hybrid_searcher,
+        "ingestion_result": ingestion_result,
+        "runtime_router_mode": runtime_router_mode,
+    }
 
 
 class _Primary:
@@ -369,13 +421,9 @@ async def test_router_rejects_suspended_stale_and_identity_drift_before_primary(
     )
 
     with bind_authenticated_turn_context(issuer, context):
-        with suspend_authenticated_turn_context(), pytest.raises(
-            TurnContextError, match="primary authority"
-        ):
+        with suspend_authenticated_turn_context(), pytest.raises(TurnContextError, match="primary authority"):
             await router.chat("owner", _MESSAGE, **_chat_kwargs(actor, context))
-        with suspend_authenticated_turn_context(), pytest.raises(
-            TurnContextError, match="primary authority"
-        ):
+        with suspend_authenticated_turn_context(), pytest.raises(TurnContextError, match="primary authority"):
             await wrapper.chat("owner", _MESSAGE, **_chat_kwargs(actor, context))
         with pytest.raises(TurnContextError, match="identity drifted"):
             await router.chat(
@@ -473,8 +521,9 @@ async def test_every_authenticated_raw_call_drift_fails_before_primary(drift: st
     else:
         kwargs[drift] = "drifted-identity"
 
-    with bind_authenticated_turn_context(issuer, context), pytest.raises(
-        TurnContextError, match="authenticated turn|signed HTTP"
+    with (
+        bind_authenticated_turn_context(issuer, context),
+        pytest.raises(TurnContextError, match="authenticated turn|signed HTTP"),
     ):
         await router.chat(
             "owner",
@@ -488,17 +537,16 @@ async def test_every_authenticated_raw_call_drift_fails_before_primary(drift: st
 
 @pytest.mark.asyncio
 async def test_sealed_router_mode_controls_legacy_and_nonlegacy_mismatch_closes() -> None:
-    mismatch_issuer, mismatch, mismatch_actor, _now = _authenticated_turn(
-        router_mode=RouterMode.SHADOW
-    )
+    mismatch_issuer, mismatch, mismatch_actor, _now = _authenticated_turn(router_mode=RouterMode.SHADOW)
     mismatch_primary = _Primary()
     mismatch_router = OrchestrationRouter(
         cast(Any, mismatch_primary),
         cast(Any, _Planner()),
         mode=RouterMode.V12,
     )
-    with bind_authenticated_turn_context(mismatch_issuer, mismatch), pytest.raises(
-        TurnContextError, match="router mode"
+    with (
+        bind_authenticated_turn_context(mismatch_issuer, mismatch),
+        pytest.raises(TurnContextError, match="router mode"),
     ):
         await mismatch_router.chat(
             "owner",
@@ -594,9 +642,7 @@ def test_v12_attachment_refs_use_exact_context_token_and_reject_equal_replacemen
         "reply_assistant_message_id": None,
         "turn_policy": None,
         "telegram_update_id": None,
-        "turn_deadline": (
-            context.inherited_budget.safety_deadline.monotonic_ns / 1_000_000_000
-        ),
+        "turn_deadline": (context.inherited_budget.safety_deadline.monotonic_ns / 1_000_000_000),
         "pending_durable_admission": None,
         "runtime_router_mode": RouterMode.V12,
     }
@@ -613,6 +659,166 @@ def test_v12_attachment_refs_use_exact_context_token_and_reject_equal_replacemen
         kwargs["attachments"] = [clone]
         with pytest.raises(TurnContextError, match="attachment carrier"):
             require_authenticated_chat_call_scope(context, **kwargs)
+
+
+def test_authenticated_attachment_seal_rejects_same_token_clone_and_body_mutation() -> None:
+    issuer, context, actor, carrier = _authenticated_attachment_turn()
+    kwargs = _scope_kwargs(
+        actor,
+        context,
+        attachments=[carrier],
+        runtime_router_mode=RouterMode.V12,
+    )
+    with bind_authenticated_turn_context(issuer, context):
+        scope = require_authenticated_chat_call_scope(context, **kwargs)
+        token = context.authorized_sources[1].private_carrier
+
+        clone = _AttachmentCarrier(carrier)
+        object.__setattr__(clone, "_current_turn_file_reference", token)
+        kwargs["attachments"] = [clone]
+        with pytest.raises(TurnContextError, match="chat call scope drifted"):
+            require_authenticated_chat_call_scope(context, **kwargs)
+
+        kwargs["attachments"] = [carrier]
+        carrier["transient_text"] = "mutated after initial validation"
+        with pytest.raises(TurnContextError, match="chat call scope drifted"):
+            require_authenticated_chat_call_scope(context, **kwargs)
+
+        assert scope.attachment_carriers[0] is carrier
+
+
+@pytest.mark.asyncio
+async def test_router_revalidates_attachment_body_after_planner_await_before_fallback() -> None:
+    issuer, context, actor, carrier = _authenticated_attachment_turn()
+    primary = _Primary()
+
+    class MutatingPlanner:
+        async def plan_attested(self, _turn: TurnInput, **_kwargs: Any) -> None:
+            carrier["transient_text"] = "mutated by detached code"
+            return None
+
+        async def plan(self, turn: TurnInput, **kwargs: Any) -> None:
+            return await self.plan_attested(turn, **kwargs)
+
+    router = OrchestrationRouter(
+        cast(Any, primary),
+        cast(Any, MutatingPlanner()),
+        mode=RouterMode.V12,
+    )
+    kwargs = _chat_kwargs(actor, context)
+    kwargs["attachments"] = [carrier]
+    with (
+        bind_authenticated_turn_context(issuer, context),
+        pytest.raises(
+            TurnContextError,
+            match="chat call scope drifted",
+        ),
+    ):
+        await router.chat(
+            "owner",
+            context.model_input.message,
+            **kwargs,
+            _authenticated_turn_context=context,
+        )
+    assert primary.calls == 0
+
+
+@pytest.mark.asyncio
+async def test_authenticated_service_and_ingestion_adjuncts_are_exact_and_immutable() -> None:
+    issuer, context, actor, _now = _authenticated_turn(router_mode=RouterMode.LEGACY)
+    primary = _Primary()
+    router = OrchestrationRouter(
+        cast(Any, primary),
+        cast(Any, _Planner()),
+        mode=RouterMode.V12,
+    )
+    kg = object()
+    hybrid = object()
+    ingestion = {
+        "promoted": False,
+        "queued_for_review": False,
+        "action": "transient",
+        "category": "web_request",
+        "reason": "code-owned command",
+    }
+    with bind_authenticated_turn_context(issuer, context):
+        result = await router.chat(
+            "owner",
+            _MESSAGE,
+            **_chat_kwargs(actor, context),
+            kg=kg,
+            hybrid_searcher=hybrid,
+            ingestion_result=ingestion,
+            _authenticated_turn_context=context,
+        )
+        assert result["message"] == "primary"
+        assert primary.last_kwargs["kg"] is kg
+        assert primary.last_kwargs["hybrid_searcher"] is hybrid
+        assert primary.last_kwargs["ingestion_result"] is ingestion
+
+        with pytest.raises(TurnContextError, match="chat call scope drifted"):
+            await router.chat(
+                "owner",
+                _MESSAGE,
+                **_chat_kwargs(actor, context),
+                kg=object(),
+                hybrid_searcher=hybrid,
+                ingestion_result=ingestion,
+                _authenticated_turn_context=context,
+            )
+        with pytest.raises(TurnContextError, match="chat call scope drifted"):
+            await router.chat(
+                "owner",
+                _MESSAGE,
+                **_chat_kwargs(actor, context),
+                kg=kg,
+                hybrid_searcher=hybrid,
+                ingestion_result=dict(ingestion),
+                _authenticated_turn_context=context,
+            )
+        ingestion["reason"] = "mutated body"
+        with pytest.raises(TurnContextError, match="chat call scope drifted"):
+            await router.chat(
+                "owner",
+                _MESSAGE,
+                **_chat_kwargs(actor, context),
+                kg=kg,
+                hybrid_searcher=hybrid,
+                ingestion_result=ingestion,
+                _authenticated_turn_context=context,
+            )
+
+    assert primary.calls == 1
+
+
+def test_outer_omission_does_not_bind_adjuncts_before_exact_inner_runtime() -> None:
+    issuer, context, actor, _now = _authenticated_turn()
+    omitted = _scope_kwargs(actor, context)
+    del omitted["kg"], omitted["hybrid_searcher"], omitted["ingestion_result"]
+    kg = object()
+    hybrid = object()
+    ingestion = {"promoted": False, "reason": "transient"}
+
+    with bind_authenticated_turn_context(issuer, context):
+        outer = require_authenticated_chat_call_scope(context, **omitted)
+        assert outer.knowledge_graph is None
+        assert outer.hybrid_searcher is None
+        assert outer.ingestion_result is None
+
+        inner = require_authenticated_chat_call_scope(
+            context,
+            **_scope_kwargs(
+                actor,
+                context,
+                kg=kg,
+                hybrid_searcher=hybrid,
+                ingestion_result=ingestion,
+            ),
+        )
+        assert inner is outer
+        assert inner.knowledge_graph is kg
+        assert inner.hybrid_searcher is hybrid
+        assert inner.ingestion_result is ingestion
 
 
 @pytest.mark.asyncio
@@ -703,12 +909,117 @@ async def test_router_and_semantic_wrapper_share_one_authenticated_advisory_slot
 
 
 @pytest.mark.asyncio
+async def test_router_and_semantic_detached_tasks_and_callbacks_inherit_no_authority(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    issuer, context, actor, _now = _authenticated_turn(max_advisory_calls=2)
+    snapshots: list[tuple[object, object, object, object, object, object]] = []
+
+    def snapshot() -> tuple[object, object, object, object, object, object]:
+        return (
+            execution_kernel_module._REQUEST_EFFECTS.get(),
+            execution_kernel_module._AUTHENTICATED_REQUEST_EFFECT_AUTHORITY.get(),
+            execution_kernel_module._EXPECTED_EFFECT_BOUNDARY.get(),
+            execution_kernel_module._PHYSICAL_TOOL_START.get(),
+            publication_module._PUBLICATION_LEASE.get(),
+            publication_module._CARRIED_PREFLIGHT.get(),
+        )
+
+    class ProbePlanner(_Planner):
+        async def plan(self, turn: TurnInput, **kwargs: Any) -> None:
+            snapshots.append(snapshot())
+            return await super().plan(turn, **kwargs)
+
+    class ProbeScheduler(_Scheduler):
+        async def evaluate_shadow(self, request: Any, **kwargs: Any) -> SecondaryAttempt:
+            snapshots.append(snapshot())
+            return await super().evaluate_shadow(request, **kwargs)
+
+    primary = _Primary()
+    router = OrchestrationRouter(
+        cast(Any, primary),
+        cast(Any, ProbePlanner()),
+        mode=RouterMode.SHADOW,
+    )
+    wrapper = SemanticSupervisorShadowRuntime(
+        settings=_supervisor_settings(),
+        primary=cast(Any, router),
+        scheduler=cast(Any, ProbeScheduler()),
+    )
+    router_done = router._shadow_done
+    supervisor_done = wrapper._shadow_done
+
+    def probe_router_done(task: asyncio.Task[None]) -> None:
+        snapshots.append(snapshot())
+        router_done(task)
+
+    def probe_supervisor_done(task: asyncio.Task[None]) -> None:
+        snapshots.append(snapshot())
+        supervisor_done(task)
+
+    monkeypatch.setattr(router, "_shadow_done", probe_router_done)
+    monkeypatch.setattr(wrapper, "_shadow_done", probe_supervisor_done)
+
+    primary_marker = object()
+    expected_token = execution_kernel_module._EXPECTED_EFFECT_BOUNDARY.set(primary_marker)
+    physical_token = execution_kernel_module._PHYSICAL_TOOL_START.set(primary_marker)
+    preflight_token = publication_module._CARRIED_PREFLIGHT.set(primary_marker)
+    try:
+        with (
+            track_request_effects(
+                lambda: True,
+                request_binding_sha256=context.effect_fence.request_effect_binding_sha256,
+            ) as effects,
+            bind_authenticated_turn_context(issuer, context),
+            bind_authenticated_request_effect_authority(effects),
+            bind_authenticated_turn_publication(
+                context,
+                conversation_id=_CONVERSATION_ID,
+                person_id=actor.own_id,
+                final_publisher=FinalPublisher.PRIMARY,
+            ),
+        ):
+            await wrapper.chat(
+                "owner",
+                _MESSAGE,
+                **_chat_kwargs(actor, context),
+                _authenticated_turn_context=context,
+            )
+            await router.drain_shadow()
+            await wrapper.drain_shadow()
+            await asyncio.sleep(0)
+
+            # The awaited primary task retains the exact live authorities.
+            assert execution_kernel_module._REQUEST_EFFECTS.get() is effects
+            assert execution_kernel_module._EXPECTED_EFFECT_BOUNDARY.get() is primary_marker
+            assert execution_kernel_module._PHYSICAL_TOOL_START.get() is primary_marker
+            assert publication_module._PUBLICATION_LEASE.get() is not None
+            assert publication_module._CARRIED_PREFLIGHT.get() is primary_marker
+    finally:
+        publication_module._CARRIED_PREFLIGHT.reset(preflight_token)
+        execution_kernel_module._PHYSICAL_TOOL_START.reset(physical_token)
+        execution_kernel_module._EXPECTED_EFFECT_BOUNDARY.reset(expected_token)
+
+    assert len(snapshots) == 4
+    assert all(
+        snapshot
+        == (
+            None,
+            None,
+            execution_kernel_module._EFFECT_BOUNDARY_UNSET,
+            None,
+            None,
+            None,
+        )
+        for snapshot in snapshots
+    )
+
+
+@pytest.mark.asyncio
 async def test_no_context_preserves_private_kwarg_absence_for_both_wrappers() -> None:
     actor = ActorContext(user_id="owner", preset_key="owner", source="api-token")
     router_primary = _Primary()
-    router = OrchestrationRouter(
-        cast(Any, router_primary), cast(Any, _Planner()), mode=RouterMode.LEGACY
-    )
+    router = OrchestrationRouter(cast(Any, router_primary), cast(Any, _Planner()), mode=RouterMode.LEGACY)
 
     await router.chat("owner", _MESSAGE, **_chat_kwargs(actor))
     assert "_authenticated_turn_context" not in router_primary.last_kwargs

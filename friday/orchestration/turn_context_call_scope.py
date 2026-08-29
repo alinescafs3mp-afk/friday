@@ -7,10 +7,12 @@ never derives a replacement model input or policy from them.
 
 from __future__ import annotations
 
+import hashlib
 import math
 from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Any
+from threading import Lock
+from typing import Any, cast
 
 from friday.file_evidence import current_turn_file_reference_of
 from friday.orchestration.contracts import AttachmentDescriptor, RouterMode, TurnInput
@@ -22,9 +24,90 @@ from friday.orchestration.turn_context import (
     TurnContextError,
     TurnMode,
 )
+from friday.orchestration.turn_context_runtime import (
+    bind_or_get_authenticated_chat_call_scope,
+    current_authenticated_chat_call_scope,
+)
 from friday.pending_durable_turn import PendingDurableTurnAdmission
 from friday.permissions import ActorContext
 from friday.turn_intent_policy import TurnPolicyDecision
+
+_UNSPECIFIED_ADJUNCT = object()
+_MAX_PROJECTION_NODES = 200_000
+_MAX_PROJECTION_DEPTH = 64
+
+
+class _AuthenticatedCallAdjunctSeal:
+    """Late-bind exact service adjuncts without trusting an outer omission."""
+
+    __slots__ = ("_hybrid", "_ingestion", "_ingestion_sha256", "_kg", "_lock")
+
+    def __init__(self) -> None:
+        self._kg: object = _UNSPECIFIED_ADJUNCT
+        self._hybrid: object = _UNSPECIFIED_ADJUNCT
+        self._ingestion: object = _UNSPECIFIED_ADJUNCT
+        self._ingestion_sha256 = ""
+        self._lock = Lock()
+
+    def bind_or_validate(
+        self,
+        *,
+        kg: object,
+        hybrid_searcher: object,
+        ingestion_result: object,
+    ) -> None:
+        with self._lock:
+            if self._ingestion is not _UNSPECIFIED_ADJUNCT:
+                current_sha256 = _process_local_projection_sha256(
+                    self._ingestion,
+                    label="ingestion result",
+                )
+                if current_sha256 != self._ingestion_sha256:
+                    raise TurnContextError("authenticated turn chat call scope drifted")
+            if kg is not _UNSPECIFIED_ADJUNCT:
+                if self._kg is _UNSPECIFIED_ADJUNCT:
+                    self._kg = kg
+                elif self._kg is not kg:
+                    raise TurnContextError("authenticated turn chat call scope drifted")
+            if hybrid_searcher is not _UNSPECIFIED_ADJUNCT:
+                if self._hybrid is _UNSPECIFIED_ADJUNCT:
+                    self._hybrid = hybrid_searcher
+                elif self._hybrid is not hybrid_searcher:
+                    raise TurnContextError("authenticated turn chat call scope drifted")
+            if ingestion_result is not _UNSPECIFIED_ADJUNCT:
+                if ingestion_result is not None and type(ingestion_result) is not dict:
+                    raise TurnContextError("authenticated turn ingestion result is invalid")
+                ingestion_sha256 = _process_local_projection_sha256(
+                    ingestion_result,
+                    label="ingestion result",
+                )
+                if self._ingestion is _UNSPECIFIED_ADJUNCT:
+                    self._ingestion = ingestion_result
+                    self._ingestion_sha256 = ingestion_sha256
+                elif self._ingestion is not ingestion_result or self._ingestion_sha256 != ingestion_sha256:
+                    raise TurnContextError("authenticated turn chat call scope drifted")
+
+    @property
+    def knowledge_graph(self) -> Any:
+        with self._lock:
+            return None if self._kg is _UNSPECIFIED_ADJUNCT else self._kg
+
+    @property
+    def hybrid_searcher(self) -> Any:
+        with self._lock:
+            return None if self._hybrid is _UNSPECIFIED_ADJUNCT else self._hybrid
+
+    @property
+    def ingestion_result(self) -> dict[str, Any] | None:
+        with self._lock:
+            if self._ingestion is _UNSPECIFIED_ADJUNCT or self._ingestion is None:
+                return None
+            return cast(dict[str, Any], self._ingestion)
+
+    @property
+    def ingestion_result_sha256(self) -> str:
+        with self._lock:
+            return self._ingestion_sha256
 
 
 @dataclass(frozen=True, slots=True)
@@ -33,13 +116,129 @@ class AuthenticatedChatCallScope:
 
     model_input: TurnInput
     attachment_carriers: tuple[Mapping[str, Any], ...]
+    attachment_carrier_sha256: tuple[str, ...]
     attachment_sources: tuple[AuthorizedSourceIdentity, ...]
+    _adjuncts: _AuthenticatedCallAdjunctSeal
     deadline_monotonic: float
     deadline_monotonic_ns: int
     router_mode: RouterMode
     actor_binding_sha256: str
     conversation_binding_sha256: str
     pending_work_bound: bool
+
+    @property
+    def knowledge_graph(self) -> Any:
+        return self._adjuncts.knowledge_graph
+
+    @property
+    def hybrid_searcher(self) -> Any:
+        return self._adjuncts.hybrid_searcher
+
+    @property
+    def ingestion_result(self) -> dict[str, Any] | None:
+        return self._adjuncts.ingestion_result
+
+    @property
+    def ingestion_result_sha256(self) -> str:
+        return self._adjuncts.ingestion_result_sha256
+
+
+def _process_local_projection_sha256(value: object, *, label: str) -> str:
+    """Hash one exact transient JSON-like shape without retaining its body."""
+
+    digest = hashlib.sha256()
+    active: set[int] = set()
+    nodes = 0
+
+    def add(raw: bytes) -> None:
+        digest.update(len(raw).to_bytes(8, "big"))
+        digest.update(raw)
+
+    def walk(item: object, depth: int) -> None:
+        nonlocal nodes
+        nodes += 1
+        if nodes > _MAX_PROJECTION_NODES or depth > _MAX_PROJECTION_DEPTH:
+            raise TurnContextError(f"authenticated turn {label} projection is too large")
+        if item is None:
+            add(b"none")
+            return
+        if type(item) is bool:
+            add(b"bool:true" if item else b"bool:false")
+            return
+        if type(item) is int:
+            add(b"int")
+            add(str(item).encode("ascii"))
+            return
+        if type(item) is float:
+            if not math.isfinite(item):
+                raise TurnContextError(f"authenticated turn {label} contains a non-finite number")
+            add(b"float")
+            add(item.hex().encode("ascii"))
+            return
+        if type(item) is str:
+            try:
+                encoded = item.encode("utf-8", errors="strict")
+            except UnicodeEncodeError as exc:
+                raise TurnContextError(f"authenticated turn {label} contains invalid UTF-8 text") from exc
+            add(b"str")
+            add(encoded)
+            return
+        if type(item) is bytes:
+            add(b"bytes")
+            add(item)
+            return
+        if isinstance(item, Mapping):
+            identity = id(item)
+            if identity in active:
+                raise TurnContextError(f"authenticated turn {label} contains a cycle")
+            try:
+                keys = tuple(item.keys())
+            except Exception as exc:
+                raise TurnContextError(f"authenticated turn {label} mapping is not readable") from exc
+            if any(type(key) is not str for key in keys):
+                raise TurnContextError(f"authenticated turn {label} keys must be strings")
+            active.add(identity)
+            try:
+                add(b"mapping")
+                add(str(len(keys)).encode("ascii"))
+                for key in sorted(keys):
+                    walk(key, depth + 1)
+                    try:
+                        child = item[key]
+                    except Exception as exc:
+                        raise TurnContextError(
+                            f"authenticated turn {label} mapping changed while projected"
+                        ) from exc
+                    walk(child, depth + 1)
+                if tuple(item.keys()) != keys:
+                    raise TurnContextError(f"authenticated turn {label} mapping changed while projected")
+            finally:
+                active.remove(identity)
+            return
+        if type(item) in {list, tuple}:
+            sequence = cast(list[object] | tuple[object, ...], item)
+            identity = id(item)
+            if identity in active:
+                raise TurnContextError(f"authenticated turn {label} contains a cycle")
+            active.add(identity)
+            try:
+                add(b"list" if type(item) is list else b"tuple")
+                add(str(len(sequence)).encode("ascii"))
+                for child in sequence:
+                    walk(child, depth + 1)
+            finally:
+                active.remove(identity)
+            return
+        # Process-owned carrier markers and attestation objects are not model
+        # bodies.  Bind their exact in-process identity while all strings,
+        # bytes, mappings, and sequences (the model-visible surface) remain
+        # content-hashed above.
+        add(b"opaque-process-object")
+        add(f"{type(item).__module__}.{type(item).__qualname__}".encode())
+        add(str(id(item)).encode("ascii"))
+
+    walk(value, 0)
+    return digest.hexdigest()
 
 
 def _normalized_text(value: str | None) -> str:
@@ -49,7 +248,11 @@ def _normalized_text(value: str | None) -> str:
 def _attachment_scope(
     context: AuthenticatedTurnContext,
     attachments: list[dict[str, Any]] | None,
-) -> tuple[tuple[Mapping[str, Any], ...], tuple[AuthorizedSourceIdentity, ...]]:
+) -> tuple[
+    tuple[Mapping[str, Any], ...],
+    tuple[str, ...],
+    tuple[AuthorizedSourceIdentity, ...],
+]:
     if attachments is None:
         carriers: tuple[Mapping[str, Any], ...] = ()
     elif type(attachments) is list and all(isinstance(item, Mapping) for item in attachments):
@@ -69,6 +272,7 @@ def _attachment_scope(
         raise TurnContextError("authenticated turn attachment source set drifted")
 
     ordered_sources: list[AuthorizedSourceIdentity] = []
+    carrier_sha256: list[str] = []
     for ordinal, (carrier, descriptor) in enumerate(
         zip(carriers, turn.attachments, strict=True),
         start=1,
@@ -87,8 +291,9 @@ def _attachment_scope(
             or current_turn_file_reference_of(carrier) is not source.private_carrier
         ):
             raise TurnContextError("authenticated turn attachment carrier drifted")
+        carrier_sha256.append(_process_local_projection_sha256(carrier, label=f"attachment {ordinal}"))
         ordered_sources.append(source)
-    return carriers, tuple(ordered_sources)
+    return carriers, tuple(carrier_sha256), tuple(ordered_sources)
 
 
 def require_authenticated_chat_call_scope(
@@ -112,6 +317,9 @@ def require_authenticated_chat_call_scope(
     telegram_update_id: str | None,
     turn_deadline: float | None,
     pending_durable_admission: PendingDurableTurnAdmission | None,
+    kg: Any = _UNSPECIFIED_ADJUNCT,
+    hybrid_searcher: Any = _UNSPECIFIED_ADJUNCT,
+    ingestion_result: dict[str, Any] | None | object = _UNSPECIFIED_ADJUNCT,
     runtime_router_mode: RouterMode | None = None,
 ) -> AuthenticatedChatCallScope:
     """Require every authority-relevant compatibility argument to be exact."""
@@ -128,7 +336,7 @@ def require_authenticated_chat_call_scope(
     ):
         raise TurnContextError("authenticated turn actor or conversation scope drifted")
 
-    carriers, attachment_sources = _attachment_scope(context, attachments)
+    carriers, carrier_sha256, attachment_sources = _attachment_scope(context, attachments)
     if type(message) is not str or turn.message_truncated:
         raise TurnContextError("authenticated turn message is not exact")
     expected_message = (
@@ -164,9 +372,7 @@ def require_authenticated_chat_call_scope(
     if turn_policy is not expected_policy:
         raise TurnContextError("authenticated turn policy carrier drifted")
     expected_pending = (
-        context.pending_work_admission.admission
-        if context.pending_work_admission is not None
-        else None
+        context.pending_work_admission.admission if context.pending_work_admission is not None else None
     )
     if pending_durable_admission is not expected_pending:
         raise TurnContextError("authenticated turn pending-work carrier drifted")
@@ -181,8 +387,7 @@ def require_authenticated_chat_call_scope(
         not isinstance(turn_deadline, (int, float))
         or isinstance(turn_deadline, bool)
         or not math.isfinite(float(turn_deadline))
-        or int(float(turn_deadline) * 1_000_000_000)
-        != context.inherited_budget.safety_deadline.monotonic_ns
+        or int(float(turn_deadline) * 1_000_000_000) != context.inherited_budget.safety_deadline.monotonic_ns
     ):
         raise TurnContextError("authenticated turn deadline drifted")
     sealed_router_mode = context.turn_policy.router_mode
@@ -193,10 +398,15 @@ def require_authenticated_chat_call_scope(
     ):
         raise TurnContextError("authenticated turn router mode drifted")
 
-    return AuthenticatedChatCallScope(
+    existing = current_authenticated_chat_call_scope(context)
+    if existing is not None and type(existing) is not AuthenticatedChatCallScope:
+        raise TurnContextError("authenticated turn chat call scope identity is invalid")
+    candidate = AuthenticatedChatCallScope(
         model_input=turn,
         attachment_carriers=carriers,
+        attachment_carrier_sha256=carrier_sha256,
         attachment_sources=attachment_sources,
+        _adjuncts=_AuthenticatedCallAdjunctSeal(),
         deadline_monotonic=float(turn_deadline),
         deadline_monotonic_ns=context.inherited_budget.safety_deadline.monotonic_ns,
         router_mode=sealed_router_mode,
@@ -204,6 +414,44 @@ def require_authenticated_chat_call_scope(
         conversation_binding_sha256=authority.conversation.binding_sha256,
         pending_work_bound=context.pending_work_admission is not None,
     )
+    sealed = bind_or_get_authenticated_chat_call_scope(context, candidate)
+    if type(sealed) is not AuthenticatedChatCallScope:
+        raise TurnContextError("authenticated turn chat call scope identity is invalid")
+    if (
+        sealed.model_input is not candidate.model_input
+        or len(sealed.attachment_carriers) != len(candidate.attachment_carriers)
+        or any(
+            left is not right
+            for left, right in zip(
+                sealed.attachment_carriers,
+                candidate.attachment_carriers,
+                strict=True,
+            )
+        )
+        or sealed.attachment_carrier_sha256 != candidate.attachment_carrier_sha256
+        or len(sealed.attachment_sources) != len(candidate.attachment_sources)
+        or any(
+            left is not right
+            for left, right in zip(
+                sealed.attachment_sources,
+                candidate.attachment_sources,
+                strict=True,
+            )
+        )
+        or sealed.deadline_monotonic != candidate.deadline_monotonic
+        or sealed.deadline_monotonic_ns != candidate.deadline_monotonic_ns
+        or sealed.router_mode is not candidate.router_mode
+        or sealed.actor_binding_sha256 != candidate.actor_binding_sha256
+        or sealed.conversation_binding_sha256 != candidate.conversation_binding_sha256
+        or sealed.pending_work_bound is not candidate.pending_work_bound
+    ):
+        raise TurnContextError("authenticated turn chat call scope drifted")
+    sealed._adjuncts.bind_or_validate(  # noqa: SLF001 - same-module private seal
+        kg=kg,
+        hybrid_searcher=hybrid_searcher,
+        ingestion_result=ingestion_result,
+    )
+    return sealed
 
 
 __all__ = ["AuthenticatedChatCallScope", "require_authenticated_chat_call_scope"]

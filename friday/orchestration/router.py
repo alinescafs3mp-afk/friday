@@ -32,6 +32,7 @@ from friday.orchestration.file_read_contract import (
 )
 from friday.orchestration.planner import AttestedPlannerRuntime, PlannerModel, V12Planner
 from friday.orchestration.turn_context import AuthenticatedTurnContext, TurnContextError
+from friday.orchestration.turn_context_advisory import suspend_authenticated_advisory_authority
 from friday.orchestration.turn_context_call_scope import (
     AuthenticatedChatCallScope,
     require_authenticated_chat_call_scope,
@@ -39,7 +40,6 @@ from friday.orchestration.turn_context_call_scope import (
 from friday.orchestration.turn_context_runtime import (
     current_primary_authenticated_turn_context,
     reserve_authenticated_advisory_call,
-    suspend_authenticated_turn_context,
 )
 from friday.pending_durable_turn import (
     PendingDurableAdmissionState,
@@ -731,7 +731,7 @@ class OrchestrationRouter:
                     selected_runtime="legacy",
                 )
                 return
-        with suspend_authenticated_turn_context():
+        with suspend_authenticated_advisory_authority():
             task = asyncio.create_task(
                 self._complete_shadow_plan(turn, turn_deadline=turn_deadline, started=started),
                 name="friday-v12-shadow-plan",
@@ -793,9 +793,7 @@ class OrchestrationRouter:
         _pending_durable_admission: PendingDurableTurnAdmission | None = None,
         _authenticated_turn_context: AuthenticatedTurnContext | None = None,
     ) -> dict[str, Any]:
-        authenticated_context = current_primary_authenticated_turn_context(
-            _authenticated_turn_context
-        )
+        authenticated_context = current_primary_authenticated_turn_context(_authenticated_turn_context)
         authenticated_scope = (
             require_authenticated_chat_call_scope(
                 authenticated_context,
@@ -817,28 +815,31 @@ class OrchestrationRouter:
                 telegram_update_id=telegram_update_id,
                 turn_deadline=turn_deadline,
                 pending_durable_admission=_pending_durable_admission,
+                kg=kg,
+                hybrid_searcher=hybrid_searcher,
+                ingestion_result=ingestion_result,
                 runtime_router_mode=self.mode,
             )
             if authenticated_context is not None
             else None
         )
-        authenticated_turn = (
-            authenticated_scope.model_input if authenticated_scope is not None else None
-        )
+        authenticated_turn = authenticated_scope.model_input if authenticated_scope is not None else None
         routing_mode = authenticated_scope.router_mode if authenticated_scope is not None else self.mode
         effective_turn_deadline = (
-            authenticated_scope.deadline_monotonic
-            if authenticated_scope is not None
-            else turn_deadline
+            authenticated_scope.deadline_monotonic if authenticated_scope is not None else turn_deadline
         )
         legacy_kwargs = {
             "actor": actor,
             "conversation_id": conversation_id,
             "attachments": attachments,
             "enable_tools": enable_tools,
-            "kg": kg,
-            "hybrid_searcher": hybrid_searcher,
-            "ingestion_result": ingestion_result,
+            "kg": (authenticated_scope.knowledge_graph if authenticated_scope is not None else kg),
+            "hybrid_searcher": (
+                authenticated_scope.hybrid_searcher if authenticated_scope is not None else hybrid_searcher
+            ),
+            "ingestion_result": (
+                authenticated_scope.ingestion_result if authenticated_scope is not None else ingestion_result
+            ),
             "synthetic_document_notice": synthetic_document_notice,
             "replay_source_message_id": replay_source_message_id,
             "mode": mode,
@@ -856,8 +857,7 @@ class OrchestrationRouter:
             legacy_kwargs["telegram_update_id"] = telegram_update_id
         carried_durable_admission: PendingDurableTurnAdmission | None = (
             authenticated_context.pending_work_admission.admission
-            if authenticated_context is not None
-            and authenticated_context.pending_work_admission is not None
+            if authenticated_context is not None and authenticated_context.pending_work_admission is not None
             else None
         )
         if authenticated_context is None and _pending_durable_admission is not None:
@@ -870,22 +870,56 @@ class OrchestrationRouter:
                 legacy_kwargs["_pending_durable_admission"] = carried_durable_admission
         if turn_policy is not None:
             legacy_kwargs["turn_policy"] = turn_policy
+
+        async def call_legacy() -> dict[str, Any]:
+            # Recheck body-bearing carriers and transient ingestion immediately
+            # adjacent to the nested primary entrypoint.  A planner await or a
+            # sibling task cannot mutate them after initial validation and have
+            # those bytes silently accepted by legacy.
+            if authenticated_context is not None:
+                require_authenticated_chat_call_scope(
+                    authenticated_context,
+                    user_id=user_id,
+                    message=message,
+                    actor=actor,
+                    conversation_id=conversation_id,
+                    attachments=attachments,
+                    enable_tools=enable_tools,
+                    synthetic_document_notice=synthetic_document_notice,
+                    replay_source_message_id=replay_source_message_id,
+                    mode=mode,
+                    answer_with_voice=answer_with_voice,
+                    reply_to=reply_to,
+                    quoted_attachment_reference=quoted_attachment_reference,
+                    reply_assistant_reference=reply_assistant_reference,
+                    reply_assistant_message_id=reply_assistant_message_id,
+                    turn_policy=turn_policy,
+                    telegram_update_id=telegram_update_id,
+                    turn_deadline=effective_turn_deadline,
+                    pending_durable_admission=_pending_durable_admission,
+                    kg=kg,
+                    hybrid_searcher=hybrid_searcher,
+                    ingestion_result=ingestion_result,
+                    runtime_router_mode=self.mode,
+                )
+            return await self._legacy.chat(user_id, message, **legacy_kwargs)
+
         if authenticated_context is not None and routing_mode is RouterMode.LEGACY:
             if carried_durable_admission is not None:
                 legacy_kwargs["_pending_durable_admission"] = carried_durable_admission
             _observe_legacy_capability_owner()
-            return await self._legacy.chat(user_id, message, **legacy_kwargs)
+            return await call_legacy()
         if turn_policy is not None and turn_policy.handled:
             _observe_legacy_capability_owner()
-            return await self._legacy.chat(user_id, message, **legacy_kwargs)
+            return await call_legacy()
         requested_mode = str(mode or "").strip().casefold().replace("-", "_")
         if requested_mode in {"engineer", "engeneer"}:
             # Owner workbench: never a V12 file/archive judge, never a shadow plan.
             _observe_legacy_capability_owner()
-            return await self._legacy.chat(user_id, message, **legacy_kwargs)
+            return await call_legacy()
         if routing_mode is RouterMode.LEGACY:
             _observe_legacy_capability_owner()
-            return await self._legacy.chat(user_id, message, **legacy_kwargs)
+            return await call_legacy()
 
         started = time.monotonic()
         # A durable code-owned question remains legacy-owned even while V12 is
@@ -959,7 +993,7 @@ class OrchestrationRouter:
                 selected_runtime="legacy",
             )
             _observe_legacy_capability_owner()
-            return await self._legacy.chat(user_id, message, **legacy_kwargs)
+            return await call_legacy()
 
         if routing_mode is RouterMode.CANARY and not self._actor_canary_eligible(
             actor,
@@ -972,7 +1006,7 @@ class OrchestrationRouter:
                 selected_runtime="legacy",
             )
             _observe_legacy_capability_owner()
-            return await self._legacy.chat(user_id, message, **legacy_kwargs)
+            return await call_legacy()
         if routing_mode in {RouterMode.CANARY, RouterMode.V12} and answer_with_voice:
             self._observe(
                 started=started,
@@ -981,7 +1015,7 @@ class OrchestrationRouter:
                 selected_runtime="legacy",
             )
             _observe_legacy_capability_owner()
-            return await self._legacy.chat(user_id, message, **legacy_kwargs)
+            return await call_legacy()
 
         # Capture the scalar attachment state before the first await. The
         # planner and evidence admission must refer to the same Raw Objects.
@@ -1011,7 +1045,7 @@ class OrchestrationRouter:
         )
         if routing_mode is RouterMode.SHADOW:
             _observe_legacy_capability_owner()
-            result = await self._legacy.chat(user_id, message, **legacy_kwargs)
+            result = await call_legacy()
             self._schedule_shadow_plan(
                 turn,
                 turn_deadline=effective_turn_deadline,
@@ -1037,7 +1071,7 @@ class OrchestrationRouter:
                 selected_runtime="legacy",
             )
             _observe_legacy_capability_owner()
-            return await self._legacy.chat(user_id, message, **legacy_kwargs)
+            return await call_legacy()
 
         _observe_failure_stage(FailureStage.PLANNING)
         plan = await self._try_plan(turn, turn_deadline=effective_turn_deadline, attested=True)
@@ -1068,7 +1102,7 @@ class OrchestrationRouter:
             ):
                 raise TimeoutError("legacy fallback reserve was exhausted during V12 planning")
             _observe_legacy_capability_owner()
-            return await self._legacy.chat(user_id, message, **legacy_kwargs)
+            return await call_legacy()
 
         assert handler is not None and plan is not None  # narrowed by the predicate above
         _observe_failure_route(plan.route.value)
@@ -1114,7 +1148,7 @@ class OrchestrationRouter:
             ):
                 raise TimeoutError("legacy fallback reserve was exhausted during V12 admission") from exc
             _observe_legacy_capability_owner()
-            return await self._legacy.chat(user_id, message, **legacy_kwargs)
+            return await call_legacy()
         if (
             not isinstance(preparation, ReadOnlyRoutePreparation)
             or preparation.route is not plan.route
@@ -1132,7 +1166,7 @@ class OrchestrationRouter:
             ):
                 raise TimeoutError("legacy fallback reserve was exhausted during V12 admission")
             _observe_legacy_capability_owner()
-            return await self._legacy.chat(user_id, message, **legacy_kwargs)
+            return await call_legacy()
 
         try:
             current = await asyncio.wait_for(
@@ -1156,7 +1190,7 @@ class OrchestrationRouter:
                     "legacy fallback reserve was exhausted during V12 authority check"
                 ) from exc
             _observe_legacy_capability_owner()
-            return await self._legacy.chat(user_id, message, **legacy_kwargs)
+            return await call_legacy()
         if current is not True:
             self._observe(
                 started=started,
@@ -1170,7 +1204,7 @@ class OrchestrationRouter:
             ):
                 raise TimeoutError("legacy fallback reserve was exhausted during V12 authority check")
             _observe_legacy_capability_owner()
-            return await self._legacy.chat(user_id, message, **legacy_kwargs)
+            return await call_legacy()
 
         self._observe(started=started, status="selected", plan=plan, selected_runtime="v12")
         # Never catch-and-retry after effect-free preparation succeeds. Exactly

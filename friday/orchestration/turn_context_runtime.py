@@ -63,7 +63,7 @@ class _TurnExecutionLedger:
 
 
 class _BoundTurn:
-    __slots__ = ("active", "context", "issuer", "ledger")
+    __slots__ = ("active", "chat_call_scope", "context", "issuer", "ledger")
 
     def __init__(
         self,
@@ -73,6 +73,12 @@ class _BoundTurn:
         ledger: _TurnExecutionLedger,
     ) -> None:
         self.active = True
+        # One opaque, process-local chat-call seal may be attached by the
+        # transport/runtime propagation layer.  Keeping it on the exact root
+        # binding gives nested wrappers one shared identity without putting
+        # raw service handles or attachment bodies in AuthenticatedTurnContext
+        # (or anywhere durable).  It is revoked with the root below.
+        self.chat_call_scope: object | None = None
         self.context: AuthenticatedTurnContext | None = context
         self.issuer: TurnContextIssuer | None = issuer
         self.ledger = ledger
@@ -214,6 +220,7 @@ def bind_authenticated_turn_context(
         with _EXECUTION_LEDGERS_LOCK:
             binding.active = False
             ledger.active = False
+            binding.chat_call_scope = None
             binding.context = None
             binding.issuer = None
         _BOUND_TURN.reset(token)
@@ -294,6 +301,54 @@ def reserve_authenticated_advisory_call(
             raise TurnContextError("authenticated turn advisory budget is exhausted")
         current.ledger.advisory_calls += 1
         return current.ledger.advisory_calls
+
+
+def bind_or_get_authenticated_chat_call_scope(
+    expected: AuthenticatedTurnContext,
+    candidate: object,
+) -> object:
+    """Seal one opaque raw-call projection on the exact live primary root.
+
+    The first code-owned runtime wrapper binds ``candidate``.  Every nested
+    wrapper receives the exact same object and must compare its own raw
+    arguments against it.  The object is process-local and revoked when the
+    primary root exits; advisory-only tasks cannot read it while the turn
+    authority is suspended.
+    """
+
+    if candidate is None:
+        raise TurnContextError("authenticated turn chat call scope is invalid")
+    current = _BOUND_TURN.get()
+    if type(current) is not _BoundTurn:
+        raise TurnContextError("authenticated turn chat call scope has no primary authority")
+    admitted = _require_live_binding(current)
+    if admitted is not expected:
+        raise TurnContextError("authenticated turn runtime context identity drifted")
+    with _EXECUTION_LEDGERS_LOCK:
+        if not current.active or not current.ledger.active:
+            raise TurnContextError("authenticated turn runtime binding is no longer active")
+        sealed = current.chat_call_scope
+        if sealed is None:
+            current.chat_call_scope = candidate
+            return candidate
+        return sealed
+
+
+def current_authenticated_chat_call_scope(
+    expected: AuthenticatedTurnContext,
+) -> object | None:
+    """Return the root's process-local raw-call seal, if one was bound."""
+
+    current = _BOUND_TURN.get()
+    if type(current) is not _BoundTurn:
+        raise TurnContextError("authenticated turn chat call scope has no primary authority")
+    admitted = _require_live_binding(current)
+    if admitted is not expected:
+        raise TurnContextError("authenticated turn runtime context identity drifted")
+    with _EXECUTION_LEDGERS_LOCK:
+        if not current.active or not current.ledger.active:
+            raise TurnContextError("authenticated turn runtime binding is no longer active")
+        return current.chat_call_scope
 
 
 @contextmanager

@@ -984,6 +984,9 @@ class SupervisorEffectIntentShadowRuntime:
                 telegram_update_id=kwargs.get("telegram_update_id"),
                 turn_deadline=kwargs.get("turn_deadline"),
                 pending_durable_admission=kwargs.get("_pending_durable_admission"),
+                kg=kwargs.get("kg"),
+                hybrid_searcher=kwargs.get("hybrid_searcher"),
+                ingestion_result=kwargs.get("ingestion_result"),
             )
             if authenticated_context is not None
             else None
@@ -998,8 +1001,12 @@ class SupervisorEffectIntentShadowRuntime:
                 self._skip_counts["projection_rejected"] += 1
         primary_kwargs = kwargs
         if authenticated_context is not None:
+            assert authenticated_scope is not None
             primary_kwargs = dict(kwargs)
             primary_kwargs["_authenticated_turn_context"] = authenticated_context
+            primary_kwargs["kg"] = authenticated_scope.knowledge_graph
+            primary_kwargs["hybrid_searcher"] = authenticated_scope.hybrid_searcher
+            primary_kwargs["ingestion_result"] = authenticated_scope.ingestion_result
         result = await self._primary.chat(user_id, message, **primary_kwargs)
         if type(result) is dict:
             self._schedule(

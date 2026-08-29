@@ -449,6 +449,9 @@ class SemanticSupervisorAssistRuntime:
                 telegram_update_id=telegram_update_id,
                 turn_deadline=turn_deadline,
                 pending_durable_admission=_pending_durable_admission,
+                kg=kg,
+                hybrid_searcher=hybrid_searcher,
+                ingestion_result=ingestion_result,
             )
             if authenticated_context is not None
             else None
@@ -463,9 +466,13 @@ class SemanticSupervisorAssistRuntime:
             "conversation_id": conversation_id,
             "attachments": attachments,
             "enable_tools": enable_tools,
-            "kg": kg,
-            "hybrid_searcher": hybrid_searcher,
-            "ingestion_result": ingestion_result,
+            "kg": (authenticated_scope.knowledge_graph if authenticated_scope is not None else kg),
+            "hybrid_searcher": (
+                authenticated_scope.hybrid_searcher if authenticated_scope is not None else hybrid_searcher
+            ),
+            "ingestion_result": (
+                authenticated_scope.ingestion_result if authenticated_scope is not None else ingestion_result
+            ),
             "synthetic_document_notice": synthetic_document_notice,
             "replay_source_message_id": replay_source_message_id,
             "mode": mode,
@@ -623,7 +630,9 @@ class SemanticSupervisorAssistRuntime:
             conversation_id=conversation_id,
             attachments=attachments,
             enable_tools=enable_tools,
-            ingestion_result=ingestion_result,
+            ingestion_result=(
+                authenticated_scope.ingestion_result if authenticated_scope is not None else ingestion_result
+            ),
             synthetic_document_notice=synthetic_document_notice,
             replay_source_message_id=replay_source_message_id,
             mode=mode,

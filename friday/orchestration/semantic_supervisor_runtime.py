@@ -49,6 +49,7 @@ from friday.orchestration.supervisor_trace_join import (
     persist_joined_supervisor_observation,
 )
 from friday.orchestration.turn_context import AuthenticatedTurnContext, TurnContextError
+from friday.orchestration.turn_context_advisory import suspend_authenticated_advisory_authority
 from friday.orchestration.turn_context_call_scope import (
     AuthenticatedChatCallScope,
     require_authenticated_chat_call_scope,
@@ -56,7 +57,6 @@ from friday.orchestration.turn_context_call_scope import (
 from friday.orchestration.turn_context_runtime import (
     current_primary_authenticated_turn_context,
     reserve_authenticated_advisory_call,
-    suspend_authenticated_turn_context,
 )
 from friday.pending_durable_turn import (
     PendingDurableTurnAdmission,
@@ -508,8 +508,7 @@ class SemanticSupervisorShadowRuntime:
 
         if authenticated_scope is None:
             if attachments is not None and (
-                type(attachments) is not list
-                or any(not isinstance(item, Mapping) for item in attachments)
+                type(attachments) is not list or any(not isinstance(item, Mapping) for item in attachments)
             ):
                 return None, self._skipped(SupervisorSkipReason.EVIDENCE_UNAVAILABLE)
             try:
@@ -629,9 +628,7 @@ class SemanticSupervisorShadowRuntime:
                 routing_user_id=user_id if authenticated_scope is None else None,
                 actor=actor if authenticated_scope is None else None,
                 conversation_id=conversation_id if authenticated_scope is None else None,
-                current_attachment_count=(
-                    current_attachment_count if authenticated_scope is None else 0
-                ),
+                current_attachment_count=(current_attachment_count if authenticated_scope is None else 0),
                 dispatch_scope=dispatch_scope,
                 dispatch_epoch=dispatch_epoch,
             ),
@@ -886,7 +883,7 @@ class SemanticSupervisorShadowRuntime:
                 )
                 return
         job = _ShadowJob(prepared=prepared, primary_trace=primary_trace)
-        with suspend_authenticated_turn_context():
+        with suspend_authenticated_advisory_authority():
             task = asyncio.create_task(
                 self._complete_shadow(job),
                 name="friday-semantic-supervisor-shadow",
@@ -995,9 +992,7 @@ class SemanticSupervisorShadowRuntime:
         _semantic_supervisor_explicit_mode_requested: bool | None = None,
         _authenticated_turn_context: AuthenticatedTurnContext | None = None,
     ) -> dict[str, Any]:
-        authenticated_context = current_primary_authenticated_turn_context(
-            _authenticated_turn_context
-        )
+        authenticated_context = current_primary_authenticated_turn_context(_authenticated_turn_context)
         authenticated_scope = (
             require_authenticated_chat_call_scope(
                 authenticated_context,
@@ -1019,14 +1014,15 @@ class SemanticSupervisorShadowRuntime:
                 telegram_update_id=telegram_update_id,
                 turn_deadline=turn_deadline,
                 pending_durable_admission=_pending_durable_admission,
+                kg=kg,
+                hybrid_searcher=hybrid_searcher,
+                ingestion_result=ingestion_result,
             )
             if authenticated_context is not None
             else None
         )
         effective_turn_deadline = (
-            authenticated_scope.deadline_monotonic
-            if authenticated_scope is not None
-            else turn_deadline
+            authenticated_scope.deadline_monotonic if authenticated_scope is not None else turn_deadline
         )
         dispatch_scope, dispatch_epoch = self._advance_dispatch_epoch(actor, conversation_id)
         if _semantic_supervisor_explicit_mode_requested is None:
@@ -1069,9 +1065,13 @@ class SemanticSupervisorShadowRuntime:
             "conversation_id": conversation_id,
             "attachments": attachments,
             "enable_tools": enable_tools,
-            "kg": kg,
-            "hybrid_searcher": hybrid_searcher,
-            "ingestion_result": ingestion_result,
+            "kg": (authenticated_scope.knowledge_graph if authenticated_scope is not None else kg),
+            "hybrid_searcher": (
+                authenticated_scope.hybrid_searcher if authenticated_scope is not None else hybrid_searcher
+            ),
+            "ingestion_result": (
+                authenticated_scope.ingestion_result if authenticated_scope is not None else ingestion_result
+            ),
             "synthetic_document_notice": synthetic_document_notice,
             "replay_source_message_id": replay_source_message_id,
             "mode": mode,
@@ -1090,6 +1090,33 @@ class SemanticSupervisorShadowRuntime:
             primary_kwargs["_pending_durable_admission"] = _pending_durable_admission
         if authenticated_context is not None:
             primary_kwargs["_authenticated_turn_context"] = authenticated_context
+            # Close mutation/replacement between initial preparation and the
+            # nested primary boundary.  No body-bearing projection survives in
+            # the detached semantic job.
+            require_authenticated_chat_call_scope(
+                authenticated_context,
+                user_id=user_id,
+                message=message,
+                actor=actor,
+                conversation_id=conversation_id,
+                attachments=attachments,
+                enable_tools=enable_tools,
+                synthetic_document_notice=synthetic_document_notice,
+                replay_source_message_id=replay_source_message_id,
+                mode=mode,
+                answer_with_voice=answer_with_voice,
+                reply_to=reply_to,
+                quoted_attachment_reference=quoted_attachment_reference,
+                reply_assistant_reference=reply_assistant_reference,
+                reply_assistant_message_id=reply_assistant_message_id,
+                turn_policy=turn_policy,
+                telegram_update_id=telegram_update_id,
+                turn_deadline=effective_turn_deadline,
+                pending_durable_admission=_pending_durable_admission,
+                kg=kg,
+                hybrid_searcher=hybrid_searcher,
+                ingestion_result=ingestion_result,
+            )
         primary_result = await self._primary.chat(user_id, message, **primary_kwargs)
         # The primary response object is sacrosanct even if task creation or
         # structural observation unexpectedly fails.

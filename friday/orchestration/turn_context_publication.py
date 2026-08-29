@@ -83,6 +83,19 @@ _CARRIED_PREFLIGHT: ContextVar[_PublicationReservation | object | None] = Contex
 _PUBLICATION_LEASE_FENCES: dict[tuple[str, str], _PublicationLease] = {}
 
 
+@contextmanager
+def suspend_authenticated_turn_publication_for_advisory() -> Iterator[None]:
+    """Prevent detached advisory tasks/callbacks from inheriting publication."""
+
+    lease_token = _PUBLICATION_LEASE.set(None)
+    preflight_token = _CARRIED_PREFLIGHT.set(None)
+    try:
+        yield
+    finally:
+        _CARRIED_PREFLIGHT.reset(preflight_token)
+        _PUBLICATION_LEASE.reset(lease_token)
+
+
 def _publication_monotonic_ns() -> int:
     try:
         now = _PUBLICATION_MONOTONIC_NS()

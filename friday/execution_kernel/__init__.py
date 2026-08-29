@@ -1534,6 +1534,31 @@ _EXPECTED_EFFECT_BOUNDARY: ContextVar[object] = ContextVar(
 
 
 @contextmanager
+def suspend_request_effect_authority_for_advisory() -> Iterator[None]:
+    """Strip every request/tool effect capability from detached advisory work.
+
+    ``asyncio`` copies all ContextVars when a task is created and copies the
+    registration context of callbacks independently.  Clearing only the turn
+    context therefore leaves the mutable idempotency witness, authenticated
+    effect lease, expected boundary, and physical-start witness reachable.
+    This narrow process-local suspension changes no legacy bytes or durable
+    state and restores the primary task's exact values on exit.
+    """
+
+    physical_token = _PHYSICAL_TOOL_START.set(None)
+    effects_token = _REQUEST_EFFECTS.set(None)
+    authority_token = _AUTHENTICATED_REQUEST_EFFECT_AUTHORITY.set(None)
+    boundary_token = _EXPECTED_EFFECT_BOUNDARY.set(_EFFECT_BOUNDARY_UNSET)
+    try:
+        yield
+    finally:
+        _EXPECTED_EFFECT_BOUNDARY.reset(boundary_token)
+        _AUTHENTICATED_REQUEST_EFFECT_AUTHORITY.reset(authority_token)
+        _REQUEST_EFFECTS.reset(effects_token)
+        _PHYSICAL_TOOL_START.reset(physical_token)
+
+
+@contextmanager
 def bind_authenticated_request_effect_authority(
     effects: RequestEffects,
 ) -> Iterator[RequestEffects]:
