@@ -12,6 +12,7 @@ import inspect
 import ipaddress
 import json
 import logging
+import math
 import re
 import secrets
 import time
@@ -82,7 +83,12 @@ from friday.config import (
 from friday.diagnostics import collect_diagnostics
 from friday.diagnostics.runtime_lease import ProcessLease
 from friday.documents import office_document_candidate
-from friday.execution_kernel import ExecutionKernel, mark_request_effect_possible, track_request_effects
+from friday.execution_kernel import (
+    ExecutionKernel,
+    bind_authenticated_request_effect_authority,
+    mark_request_effect_possible,
+    track_request_effects,
+)
 from friday.executive import ExecutiveService
 from friday.executive.api import admin_router as missions_admin_router
 from friday.executive.api import router as missions_router
@@ -109,6 +115,7 @@ from friday.interaction_control_plane.failure_store import (
     bind_failure_trace_scope,
     record_precommit_failure,
 )
+from friday.interaction_control_plane.runtime_trace import load_trace_namespace_key
 from friday.knowledge_graph import KnowledgeGraph, normalize_event_date
 from friday.mcp_runtime import MCPClientManager
 from friday.mcp_runtime.tools import bind_workspace_mcp_tools, workspace_server_definition
@@ -159,6 +166,16 @@ from friday.orchestration.supervisor_effect_intent_runtime import (
     load_configured_supervisor_effect_maturity,
     supervisor_effect_shadow_health_status,
 )
+from friday.orchestration.turn_context import (
+    FinalPublisher,
+    IngressKind,
+    TurnContextError,
+    TurnContextIssuer,
+    TurnMode,
+)
+from friday.orchestration.turn_context_ingress import issue_authenticated_scalar_turn_context
+from friday.orchestration.turn_context_publication import bind_authenticated_turn_publication
+from friday.orchestration.turn_context_runtime import bind_authenticated_turn_context
 from friday.organs import ServiceContext, build_registry, local_now, resolve_chat_id
 from friday.organs.obsidian.conversation import (
     obsidian_conversation_intent,
@@ -246,6 +263,29 @@ def _trusted_telegram_update_id_from_source_ref(source_ref: str) -> str | None:
         return update_match.group(1)
     album_match = re.fullmatch(r"telegram-album-v2:([0-9]{1,20}):[0-9a-f]{64}", source_ref)
     return album_match.group(1) if album_match is not None else None
+
+
+def _turn_context_opaque_id_eligible(value: object) -> bool:
+    """Mirror the released context's closed opaque-ID envelope without raising."""
+
+    if type(value) is not str or not value or value != value.strip():
+        return False
+    try:
+        encoded = value.encode("utf-8", errors="strict")
+    except UnicodeEncodeError:
+        return False
+    return len(encoded) <= 512 and all(ord(char) >= 32 and ord(char) != 127 for char in value)
+
+
+def _turn_context_budget_eligible(*, deadline: object, max_output_tokens: object) -> bool:
+    """Keep unsupported live settings on their byte-compatible legacy path."""
+
+    if type(max_output_tokens) is not int or not 1 <= max_output_tokens <= 1_000_000:
+        return False
+    if not isinstance(deadline, (int, float)) or isinstance(deadline, bool):
+        return False
+    horizon = float(deadline) - time.monotonic()
+    return math.isfinite(horizon) and 0 < horizon <= 3_600.0
 
 
 def _closed_semantic_supervisor_activation_status(
@@ -2502,6 +2542,7 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
             ExitStack() as dormant_engineer_backup_authority_stack,
         ):
             storage = init_storage(settings)
+            turn_context_issuer = TurnContextIssuer(load_trace_namespace_key(storage.conn))
             storage.ensure_user(
                 LEGACY_OWNER_USER_ID,
                 source="api-token",
@@ -2909,6 +2950,7 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
 
             application.state.settings = settings
             application.state.storage = storage
+            application.state.turn_context_issuer = turn_context_issuer
             application.state.auth_service = auth_service
             application.state.semantic_supervisor_restart_reconciliation = {
                 "retired": sum(
@@ -5635,6 +5677,110 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
                     )
                     pending_durable_intake_suppressed = pending_durable_intake_admission is not False
 
+            authenticated_turn_context = None
+            scalar_turn_context_eligible = bool(
+                source_ref
+                and lease_token
+                and semantic_supervisor_ingress is not None
+                and persisted_conversation is not None
+                and conversation_id is not None
+                and re.fullmatch(r"conv_[0-9a-f]{16}", conversation_id) is not None
+                and len(message) <= 16_000
+                and effective_mode == TurnMode.DIALOGUE.value
+                and requested_mode is None
+                and not autonomous_engineer
+                and not explicit_no_save
+                and not pending_durable_original_attachment_surface
+                and not pending_durable_original_reply_surface
+                and not forward_meta
+                and not synthetic_document_notice
+                and not spoken_question
+                and not turn_policy.handled
+                and pending_durable_intake_admission is False
+                and supervisor_assist_pending_decision is None
+                and _turn_context_budget_eligible(
+                    deadline=_turn_deadline,
+                    max_output_tokens=state.settings.llm_max_tokens,
+                )
+                and (actor.source != "telegram-bridge" or trusted_telegram_update_id is not None)
+                and (
+                    actor.source == "telegram-bridge"
+                    or (
+                        _turn_context_opaque_id_eligible(actor.source)
+                        and _turn_context_opaque_id_eligible(source_ref)
+                    )
+                )
+            )
+            if scalar_turn_context_eligible:
+                if request_effects is None or conversation_id is None or semantic_supervisor_ingress is None:
+                    raise RuntimeError("Authenticated turn admission lost its exact authority")
+                authenticated_conversation_id = conversation_id
+                authenticated_ingress = semantic_supervisor_ingress
+                ingress_kind = (
+                    IngressKind.TELEGRAM if actor.source == "telegram-bridge" else IngressKind.SIGNED_HTTP
+                )
+                ingress_source_id = (
+                    str(actor.telegram_chat_id or "")
+                    if ingress_kind is IngressKind.TELEGRAM
+                    else actor.source
+                )
+                ingress_update_id = (
+                    str(trusted_telegram_update_id or "")
+                    if ingress_kind is IngressKind.TELEGRAM
+                    else source_ref
+                )
+                runtime_router_mode = getattr(
+                    state.orchestration_agent,
+                    "mode",
+                    RouterMode.LEGACY,
+                )
+                if type(runtime_router_mode) is not RouterMode:
+                    runtime_router_mode = RouterMode.LEGACY
+                try:
+                    authenticated_turn_context = issue_authenticated_scalar_turn_context(
+                        state.turn_context_issuer,
+                        ingress_kind=ingress_kind,
+                        # The atomic durable lease identifies this execution
+                        # attempt. A provably pre-effect retry receives a new lease
+                        # and therefore a new root, while completed/uncertain keys
+                        # replay before any context can be issued.
+                        ingress_issued_token=lease_token,
+                        actor=actor,
+                        conversation_id=authenticated_conversation_id,
+                        interaction_mode=TurnMode.DIALOGUE,
+                        source_id=ingress_source_id,
+                        update_id=ingress_update_id,
+                        request_effect_binding_sha256=authenticated_ingress.canonical_sha256(),
+                        message=message,
+                        enable_tools=enable_tools,
+                        decision=turn_policy,
+                        router_mode=runtime_router_mode,
+                        deadline_monotonic_ns=int(_turn_deadline * 1_000_000_000),
+                        max_output_tokens=state.settings.llm_max_tokens,
+                    )
+                except TurnContextError:
+                    # This opt-in propagation slice must not make an input or a
+                    # supported legacy configuration newly fatal.  No context
+                    # or effect authority has been bound at this point.
+                    authenticated_turn_context = None
+                if authenticated_turn_context is not None:
+                    effect_stack.enter_context(
+                        bind_authenticated_turn_context(
+                            state.turn_context_issuer,
+                            authenticated_turn_context,
+                        )
+                    )
+                    effect_stack.enter_context(bind_authenticated_request_effect_authority(request_effects))
+                    effect_stack.enter_context(
+                        bind_authenticated_turn_publication(
+                            authenticated_turn_context,
+                            conversation_id=authenticated_conversation_id,
+                            person_id=actor.own_id,
+                            final_publisher=FinalPublisher.PRIMARY,
+                        )
+                    )
+                    failure_scope.turn_identifier = authenticated_turn_context.turn_id
+
             ingestion_result = None
             if autonomous_engineer:
                 ingestion_result = {
@@ -5737,6 +5883,7 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
                                 **({"forward": forward_meta} if forward_meta else {}),
                             },
                             turn_deadline=_turn_deadline,
+                            _authenticated_turn_context=authenticated_turn_context,
                         )
                     except PrivateMaterialQuarantineError:
                         # Карантин приватного материала — штатный отказ, а не сбой.
@@ -5799,6 +5946,7 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
                         )
                         else None
                     ),
+                    _authenticated_turn_context=authenticated_turn_context,
                     **semantic_supervisor_kwargs,
                 )
             if staged_duplicate_count:

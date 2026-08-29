@@ -7,7 +7,9 @@ exactly as before and no call site moved.
 
 from __future__ import annotations
 
+import re
 import time
+from contextlib import contextmanager
 
 from friday.ingestion._base import (
     Any,
@@ -19,6 +21,54 @@ from friday.ingestion._base import (
     hashlib,
     new_id,
 )
+from friday.orchestration.turn_context import AuthenticatedTurnContext, IngressKind, TurnContextError
+from friday.orchestration.turn_context_runtime import current_primary_authenticated_turn_context
+
+AUTHENTICATED_TURN_INGESTION_METADATA_KEY = "authenticated_turn_ingestion"
+AUTHENTICATED_TURN_INGESTION_SCHEMA = "friday.authenticated-turn-ingestion.v1"
+
+
+def _authenticated_turn_ingestion_metadata(
+    metadata: dict[str, Any] | None,
+    *,
+    context: AuthenticatedTurnContext | None,
+    user_id: str,
+    content: str,
+    source: str,
+    source_ref: str,
+) -> dict[str, Any] | None:
+    if metadata is not None and AUTHENTICATED_TURN_INGESTION_METADATA_KEY in metadata:
+        raise TurnContextError("authenticated turn ingestion metadata is reserved")
+    if context is None:
+        return metadata
+    if context.authority.tenant_id != user_id:
+        raise TurnContextError("authenticated turn ingestion tenant drifted")
+    ingress_source = "telegram" if context.authority.ingress_kind is IngressKind.TELEGRAM else "api"
+    ingress_reference_matches = (
+        source_ref == context.authority.update_id
+        if context.authority.ingress_kind is IngressKind.SIGNED_HTTP
+        else source_ref == f"telegram-update:{context.authority.update_id}"
+        or re.fullmatch(
+            rf"telegram-album-v2:{re.escape(context.authority.update_id)}:[0-9a-f]{{64}}",
+            source_ref,
+        )
+        is not None
+    )
+    accepted_ingress = bool(
+        source == ingress_source and content == context.model_input.message and ingress_reference_matches
+    )
+    if source == ingress_source and not accepted_ingress:
+        raise TurnContextError("authenticated turn ingestion source identity drifted")
+    relation = "accepted_ingress" if accepted_ingress else "derived_effect"
+    closed = dict(metadata or {})
+    closed[AUTHENTICATED_TURN_INGESTION_METADATA_KEY] = {
+        "schema": AUTHENTICATED_TURN_INGESTION_SCHEMA,
+        "turn_id": context.turn_id,
+        "context_authority_sha256": context.context_authority_sha256,
+        "request_effect_binding_sha256": context.effect_fence.request_effect_binding_sha256,
+        "relation": relation,
+    }
+    return closed
 
 
 class CaptureMixin(PipelineShared):
@@ -57,7 +107,27 @@ class CaptureMixin(PipelineShared):
         force_review: bool = False,
         metadata: dict[str, Any] | None = None,
         turn_deadline: float | None = None,
+        _authenticated_turn_context: AuthenticatedTurnContext | None = None,
     ) -> dict[str, Any]:
+        authenticated_context = current_primary_authenticated_turn_context(_authenticated_turn_context)
+        if authenticated_context is not None:
+            sealed_deadline = (
+                authenticated_context.inherited_budget.safety_deadline.monotonic_ns / 1_000_000_000
+            )
+            if (
+                turn_deadline is not None
+                and int(turn_deadline * 1_000_000_000)
+                != authenticated_context.inherited_budget.safety_deadline.monotonic_ns
+            ):
+                raise TurnContextError("authenticated turn ingestion deadline drifted")
+            turn_deadline = sealed_deadline
+
+        def require_authenticated_commit_authority() -> None:
+            if authenticated_context is not None:
+                current_primary_authenticated_turn_context(authenticated_context)
+            if turn_deadline is not None and time.monotonic() >= turn_deadline:
+                raise TimeoutError("request deadline expired before text ingestion commit")
+
         if turn_deadline is not None and time.monotonic() >= turn_deadline:
             raise TimeoutError("request deadline expired before text ingestion")
         content = (content or "").strip()
@@ -65,9 +135,18 @@ class CaptureMixin(PipelineShared):
             raise ValueError("content is required")
         if len(content) > self.settings.max_extracted_text_chars:
             raise ValueError("text exceeds FRIDAY_MAX_EXTRACTED_TEXT_CHARS")
+        metadata = _authenticated_turn_ingestion_metadata(
+            metadata,
+            context=authenticated_context,
+            user_id=user_id,
+            content=content,
+            source=source,
+            source_ref=source_ref,
+        )
 
         content_hash = hashlib.sha256(content.encode("utf-8")).hexdigest()
-        self.storage.ensure_user(user_id, source=source)
+        if authenticated_context is None:
+            self.storage.ensure_user(user_id, source=source)
         existing_raw = (
             self.storage.find_raw_by_source_ref(user_id, source, source_ref) if source_ref else None
         )
@@ -79,6 +158,7 @@ class CaptureMixin(PipelineShared):
                 ).hexdigest()
             if existing_hash != content_hash:
                 raise IdempotencyConflictError("source_ref is already bound to different text content")
+            require_authenticated_commit_authority()
             return self._replay_text_source(user_id, existing_raw)
 
         assessment = self.assess_text(content, force_knowledge=force_knowledge)
@@ -87,6 +167,7 @@ class CaptureMixin(PipelineShared):
             # Explicitly private/transient text remains in the conversation layer
             # only. Do not create Raw Object, Inbox, Knowledge Object, entity
             # suggestions, or enrichment traces that would defeat the request.
+            require_authenticated_commit_authority()
             return {
                 "promoted": False,
                 "queued_for_review": False,
@@ -129,9 +210,23 @@ class CaptureMixin(PipelineShared):
         # form one logical ingestion unit. Holding a SQLite IMMEDIATE transaction
         # across the unit prevents another process from observing a half-promoted
         # Raw Object and removes the source_ref check-then-insert race.
-        if turn_deadline is not None and time.monotonic() >= turn_deadline:
-            raise TimeoutError("request deadline expired before text ingestion commit")
-        with self.storage.transaction():
+        require_authenticated_commit_authority()
+
+        @contextmanager
+        def authenticated_ingestion_transaction():
+            with self.storage.transaction() as conn:
+                yield conn
+                # This runs for every normal exit, including a return from any
+                # branch below, while the complete ingestion unit is still
+                # rollback-able and immediately before its outer commit path.
+                require_authenticated_commit_authority()
+
+        transaction = (
+            authenticated_ingestion_transaction()
+            if authenticated_context is not None
+            else self.storage.transaction()
+        )
+        with transaction:
             existing_raw = (
                 self.storage.find_raw_by_source_ref(user_id, source, source_ref) if source_ref else None
             )

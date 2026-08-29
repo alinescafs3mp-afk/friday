@@ -354,6 +354,9 @@ from friday.orchestration.simple_public_news_outcome import (
     simple_public_news_source_ledger_identity,
     simple_public_news_topic_mismatch_is_empty,
 )
+from friday.orchestration.turn_context import AuthenticatedTurnContext, TurnContextError
+from friday.orchestration.turn_context_call_scope import require_authenticated_chat_call_scope
+from friday.orchestration.turn_context_runtime import current_primary_authenticated_turn_context
 from friday.organs.engineer.command.contracts import CommandStatus
 from friday.organs.engineer.publication import (
     ExactGeneratedFileBatch,
@@ -36920,6 +36923,11 @@ def _is_mineable_eval_query(query: str) -> bool:
 class AgentContext:
     conversation_id: str
     user_id: str
+    _authenticated_turn_context: AuthenticatedTurnContext | None = field(
+        default=None,
+        repr=False,
+        compare=False,
+    )
     knowledge_hits: list[dict[str, Any]] = field(default_factory=list)
     entity_hits: list[dict[str, Any]] = field(default_factory=list)
     conversation_history: list[dict[str, Any]] = field(default_factory=list)
@@ -48996,8 +49004,35 @@ class AgentRuntime:
         telegram_update_id: str | None = None,
         turn_deadline: float | None = None,
         _pending_durable_admission: PendingDurableTurnAdmission | None = None,
+        _authenticated_turn_context: AuthenticatedTurnContext | None = None,
     ) -> dict[str, Any]:
         turn_started = time.monotonic()
+        authenticated_turn_context = current_primary_authenticated_turn_context(_authenticated_turn_context)
+        if authenticated_turn_context is not None:
+            require_authenticated_chat_call_scope(
+                authenticated_turn_context,
+                user_id=user_id,
+                message=message,
+                actor=actor,
+                conversation_id=conversation_id,
+                attachments=attachments,
+                enable_tools=enable_tools,
+                synthetic_document_notice=synthetic_document_notice,
+                replay_source_message_id=replay_source_message_id,
+                mode=mode,
+                answer_with_voice=answer_with_voice,
+                reply_to=reply_to,
+                quoted_attachment_reference=quoted_attachment_reference,
+                reply_assistant_reference=reply_assistant_reference,
+                reply_assistant_message_id=reply_assistant_message_id,
+                turn_policy=turn_policy,
+                telegram_update_id=telegram_update_id,
+                turn_deadline=turn_deadline,
+                pending_durable_admission=_pending_durable_admission,
+                kg=kg,
+                hybrid_searcher=hybrid_searcher,
+                ingestion_result=ingestion_result,
+            )
         if turn_deadline is None:
             # Production runtimes always own settings, but a few deliberately
             # tiny adapters call the structural early-return routes through an
@@ -49146,12 +49181,32 @@ class AgentRuntime:
         # boundary matters when /api/chat omits ``mode`` and resumes an existing
         # engineer conversation.  Re-reading also updates the actor used for
         # tool visibility later in this turn.
-        if requested_mode == "engineer":
-            actor = self._require_fresh_engineer_mode_actor(actor)
-        effective_mode_before_persistence = requested_mode or persisted_mode
-        if effective_mode_before_persistence == "engineer":
-            actor = self._require_fresh_engineer_mode_actor(actor)
-        if not conversation:
+        sealed_interaction_mode = (
+            authenticated_turn_context.authority.interaction_mode.value
+            if authenticated_turn_context is not None
+            else None
+        )
+        if authenticated_turn_context is not None:
+            # Admission sealed one existing conversation and its mode before
+            # any durable/model effect.  A concurrent row mutation must not
+            # upgrade this turn's tool authority or redirect publication.
+            if (
+                conversation is None
+                or str(conversation.get("id") or "") != authenticated_turn_context.authority.conversation_id
+                or persisted_mode != sealed_interaction_mode
+            ):
+                raise TurnContextError("authenticated turn conversation authority drifted")
+            interaction_mode = sealed_interaction_mode
+            enable_tools = authenticated_turn_context.model_input.enable_tools
+            if interaction_mode == "engineer":
+                self._require_fresh_engineer_mode_actor(actor)
+        else:
+            if requested_mode == "engineer":
+                actor = self._require_fresh_engineer_mode_actor(actor)
+            effective_mode_before_persistence = requested_mode or persisted_mode
+            if effective_mode_before_persistence == "engineer":
+                actor = self._require_fresh_engineer_mode_actor(actor)
+        if authenticated_turn_context is None and not conversation:
             if not mark_request_effect_possible():
                 raise RuntimeError(
                     "Request idempotency fence could not be committed before conversation creation"
@@ -49161,7 +49216,12 @@ class AgentRuntime:
                 title=clean_message[:80],
                 mode=requested_mode or "dialogue",
             )
-        elif requested_mode and requested_mode != conversation.get("mode"):
+        elif (
+            authenticated_turn_context is None
+            and conversation is not None
+            and requested_mode
+            and requested_mode != conversation.get("mode")
+        ):
             if not mark_request_effect_possible():
                 raise RuntimeError(
                     "Request idempotency fence could not be committed before conversation update"
@@ -49174,14 +49234,17 @@ class AgentRuntime:
                 )
                 or conversation
             )
+        if conversation is None:
+            raise TurnContextError("authenticated turn conversation authority is unavailable")
         conversation_id = conversation["id"]
-        interaction_mode = normalize_conversation_mode(str(conversation.get("mode") or "dialogue"))
+        if authenticated_turn_context is None:
+            interaction_mode = normalize_conversation_mode(str(conversation.get("mode") or "dialogue"))
         autonomous_engineer = bool(
             interaction_mode == "engineer"
             and getattr(self.settings, "engineer_mode_enabled", False) is True
             and getattr(self.settings, "engineer_command_enabled", False) is True
         )
-        if interaction_mode == "engineer":
+        if interaction_mode == "engineer" and authenticated_turn_context is None:
             # Engineer has no Telegram per-turn tool opt-out.  Once the fresh
             # owner boundary above admits the mode, a legacy caller hint cannot
             # demote its shell/tool contour.
@@ -52962,6 +53025,7 @@ class AgentRuntime:
         # assignment is deliberately based on the timestamp captured at method
         # entry, not on when routing/context preparation happened to finish.
         context.turn_deadline = turn_deadline
+        context._authenticated_turn_context = authenticated_turn_context
         network_report_requested = False
         nmap_capability_truth_requested = False
         if interaction_mode == "engineer" and not autonomous_engineer:
@@ -54866,6 +54930,7 @@ class AgentRuntime:
                 attachment_primary_deadline=context.attachment_primary_deadline,
                 attachment_hierarchy_bundle=context.attachment_hierarchy_bundle,
                 attachment_hierarchy_complete=context.attachment_hierarchy_complete,
+                _authenticated_turn_context=context._authenticated_turn_context,
             )
             retried = await self._generate_response(
                 retry_context,
