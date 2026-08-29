@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 import inspect
-from dataclasses import replace
+import math
+from dataclasses import FrozenInstanceError, replace
 from typing import Any
 
 import pytest
@@ -9,6 +10,7 @@ import pytest
 import friday.model_profiles as model_profiles_module
 from friday.model_profiles import (
     QWEN36_27B_V12_PROFILE,
+    QWEN38_27B_SGLANG_V12_PROFILE,
     V12_MODEL_PROFILES,
     ModelCapability,
     ModelEffect,
@@ -17,6 +19,7 @@ from friday.model_profiles import (
     ModelRequirements,
     V12LiveAttestation,
     V12ModelGate,
+    V12ModelProfileSpec,
     v12_model_profile_for,
 )
 
@@ -24,8 +27,10 @@ _ENDPOINT_BINDING = "a" * 64
 _PROCESS_EPOCH_SHA256 = "c" * 64
 
 
-def _attestation(**changes: Any) -> V12LiveAttestation:
-    profile = QWEN36_27B_V12_PROFILE
+def _attestation(
+    profile: V12ModelProfileSpec = QWEN36_27B_V12_PROFILE,
+    **changes: Any,
+) -> V12LiveAttestation:
     value = V12LiveAttestation(
         profile_id=profile.profile_id,
         planner_contract_sha256=profile.planner_contract_sha256,
@@ -36,6 +41,8 @@ def _attestation(**changes: Any) -> V12LiveAttestation:
         verified_context_tokens=profile.minimum_context_tokens,
         max_prepared_evidence_items=profile.max_prepared_evidence_items,
         max_tool_steps=profile.max_tool_steps,
+        max_tool_rounds=profile.max_tool_rounds,
+        max_tool_calls=profile.max_tool_calls,
         allowed_effects=profile.allowed_effects,
         verifier_required=True,
     )
@@ -63,7 +70,11 @@ def _requirements(**changes: Any) -> ModelRequirements:
 
 
 def _ready_gate() -> V12ModelGate:
-    gate = V12ModelGate(QWEN36_27B_V12_PROFILE, endpoint_binding_sha256=_ENDPOINT_BINDING)
+    gate = V12ModelGate(
+        QWEN36_27B_V12_PROFILE,
+        endpoint_binding_sha256=_ENDPOINT_BINDING,
+        installation_context_tokens=8_192,
+    )
     assert gate.install_live(_attestation()) is True
     return gate
 
@@ -77,6 +88,8 @@ def test_current_profile_is_exact_code_owned_read_only_candidate() -> None:
     assert profile.max_prepared_evidence_items == 2
     assert profile.minimum_context_tokens == profile.max_context_tokens == 8192
     assert profile.max_tool_steps == 0
+    assert profile.max_tool_rounds == 0
+    assert profile.max_tool_calls == 0
     assert profile.allowed_effects == frozenset({ModelEffect.READ})
     assert profile.verifier_required is True
     assert ModelCapability.RAW_VISION not in profile.allowed_capabilities
@@ -86,13 +99,18 @@ def test_current_profile_is_exact_code_owned_read_only_candidate() -> None:
 
 
 def test_gate_starts_as_shadow_candidate_without_canary_authority() -> None:
-    gate = V12ModelGate(QWEN36_27B_V12_PROFILE, endpoint_binding_sha256=_ENDPOINT_BINDING)
+    gate = V12ModelGate(
+        QWEN36_27B_V12_PROFILE,
+        endpoint_binding_sha256=_ENDPOINT_BINDING,
+        installation_context_tokens=8_192,
+    )
 
     assert gate.shadow_allowed() is True
     assert gate.lease(_requirements(), process_epoch_sha256=_PROCESS_EPOCH_SHA256) is None
     assert gate.public_status() == {
-        "schema": "friday.v12-model-profile.v1",
+        "schema": "friday.v12-model-profile.v2",
         "profile_id": QWEN36_27B_V12_PROFILE.profile_id,
+        "profile_sha256": QWEN36_27B_V12_PROFILE.canonical_sha256(),
         "status": "shadow_candidate",
         "reason_code": "awaiting_live_attestation",
         "planner_contract_sha256": QWEN36_27B_V12_PROFILE.planner_contract_sha256,
@@ -100,8 +118,12 @@ def test_gate_starts_as_shadow_candidate_without_canary_authority() -> None:
         "attestation_sha256": "",
         "capabilities": [],
         "verified_context_tokens": 0,
+        "installation_context_tokens": 8_192,
+        "effective_context_tokens": 0,
         "max_prepared_evidence_items": 0,
         "max_tool_steps": 0,
+        "max_tool_rounds": 0,
+        "max_tool_calls": 0,
         "allowed_effects": [],
         "verifier_required": True,
     }
@@ -121,9 +143,12 @@ def test_valid_live_attestation_issues_an_exact_least_privilege_lease() -> None:
     assert lease.capabilities == requirements.capabilities
     assert lease.required_context_tokens == 4096
     assert lease.prepared_evidence_items == 1
+    assert lease.max_tool_rounds == 0
+    assert lease.max_tool_calls == 0
     assert lease.effect is ModelEffect.READ
     assert lease.requirements_sha256 == requirements.canonical_sha256()
     assert len(lease.attestation_sha256) == 64
+    assert len(lease.canonical_sha256()) == 64
     assert gate.public_status()["status"] == "canary_ready"
     assert gate.public_status()["reason_code"] == "live_attestation_clear"
     assert (
@@ -183,6 +208,46 @@ def test_lease_is_live_authority_not_a_stale_bearer_snapshot() -> None:
     )
 
 
+def test_private_lease_fields_cannot_forge_authority_beyond_the_effective_bound() -> None:
+    gate = _ready_gate()
+    requirements = _requirements()
+    lease = gate.lease(requirements, process_epoch_sha256=_PROCESS_EPOCH_SHA256)
+    assert lease is not None
+
+    over_context = replace(requirements, required_context_tokens=8_193)
+    forged_context_lease = replace(
+        lease,
+        required_context_tokens=over_context.required_context_tokens,
+        requirements_sha256=over_context.canonical_sha256(),
+    )
+    assert (
+        gate.validate_lease(
+            forged_context_lease,
+            over_context,
+            process_epoch_sha256=_PROCESS_EPOCH_SHA256,
+        )
+        is False
+    )
+
+    over_capability = replace(
+        requirements,
+        capabilities=frozenset({*requirements.capabilities, ModelCapability.RAW_VISION}),
+    )
+    forged_capability_lease = replace(
+        lease,
+        capabilities=over_capability.capabilities,
+        requirements_sha256=over_capability.canonical_sha256(),
+    )
+    assert (
+        gate.validate_lease(
+            forged_capability_lease,
+            over_capability,
+            process_epoch_sha256=_PROCESS_EPOCH_SHA256,
+        )
+        is False
+    )
+
+
 @pytest.mark.parametrize(
     "requirements",
     [
@@ -229,7 +294,11 @@ def test_lease_denies_every_requirement_outside_the_attested_subset(
 def test_live_install_rejects_unpinned_or_overbroad_claims(
     attestation: V12LiveAttestation,
 ) -> None:
-    gate = V12ModelGate(QWEN36_27B_V12_PROFILE, endpoint_binding_sha256=_ENDPOINT_BINDING)
+    gate = V12ModelGate(
+        QWEN36_27B_V12_PROFILE,
+        endpoint_binding_sha256=_ENDPOINT_BINDING,
+        installation_context_tokens=8_192,
+    )
 
     assert gate.install_live(attestation) is False
     assert gate.lease(_requirements(), process_epoch_sha256=_PROCESS_EPOCH_SHA256) is None
@@ -304,11 +373,192 @@ def test_gate_and_contract_inputs_are_strictly_typed_and_immutable() -> None:
     with pytest.raises(ValueError, match="non-negative"):
         ModelRequirements(capabilities=frozenset(), required_context_tokens=True)  # type: ignore[arg-type]
     with pytest.raises(ValueError, match="lowercase SHA-256"):
-        V12ModelGate(QWEN36_27B_V12_PROFILE, endpoint_binding_sha256="not-a-digest")
+        V12ModelGate(
+            QWEN36_27B_V12_PROFILE,
+            endpoint_binding_sha256="not-a-digest",
+            installation_context_tokens=8_192,
+        )
     with pytest.raises(ValueError, match="attestation hashes"):
         replace(_attestation(), process_epoch_sha256="C" * 64)
     with pytest.raises(ValueError, match="registered code-owned"):
-        V12ModelGate(replace(QWEN36_27B_V12_PROFILE), endpoint_binding_sha256=_ENDPOINT_BINDING)
+        V12ModelGate(
+            replace(QWEN36_27B_V12_PROFILE),
+            endpoint_binding_sha256=_ENDPOINT_BINDING,
+            installation_context_tokens=8_192,
+        )
+
+
+@pytest.mark.parametrize("installation_cap", [True, 8_191, math.nan, 1 << 63])
+def test_installation_context_cap_is_strict_and_cannot_overflow(
+    installation_cap: object,
+) -> None:
+    with pytest.raises(ValueError, match="installation context cap"):
+        V12ModelGate(
+            QWEN36_27B_V12_PROFILE,
+            endpoint_binding_sha256=_ENDPOINT_BINDING,
+            installation_context_tokens=installation_cap,  # type: ignore[arg-type]
+        )
+
+
+@pytest.mark.parametrize(
+    ("attested_tokens", "installed_tokens", "requested_tokens", "leased"),
+    [
+        (40_960, 40_960, 40_960, True),
+        (40_960, 24_576, 24_576, True),
+        (40_960, 24_576, 24_577, False),
+        (24_576, 40_960, 24_576, True),
+        (24_576, 40_960, 24_577, False),
+        (40_960, 65_536, 40_960, True),
+        (40_960, 65_536, 40_961, False),
+    ],
+)
+def test_qwen38_lease_uses_exact_minimum_of_profile_live_and_installation_caps(
+    attested_tokens: int,
+    installed_tokens: int,
+    requested_tokens: int,
+    leased: bool,
+) -> None:
+    profile = QWEN38_27B_SGLANG_V12_PROFILE
+    gate = V12ModelGate(
+        profile,
+        endpoint_binding_sha256=_ENDPOINT_BINDING,
+        installation_context_tokens=installed_tokens,
+    )
+    assert gate.install_live(_attestation(profile, verified_context_tokens=attested_tokens)) is True
+
+    requirements = _requirements(required_context_tokens=requested_tokens)
+    lease = gate.lease(requirements, process_epoch_sha256=_PROCESS_EPOCH_SHA256)
+
+    assert (lease is not None) is leased
+    status = gate.public_status()
+    assert status["verified_context_tokens"] == attested_tokens
+    assert status["installation_context_tokens"] == installed_tokens
+    assert status["effective_context_tokens"] == min(
+        profile.max_context_tokens,
+        attested_tokens,
+        installed_tokens,
+    )
+
+
+def test_qwen36_remains_exactly_bounded_to_8192_despite_larger_installation() -> None:
+    profile = QWEN36_27B_V12_PROFILE
+    gate = V12ModelGate(
+        profile,
+        endpoint_binding_sha256=_ENDPOINT_BINDING,
+        installation_context_tokens=40_960,
+    )
+    assert gate.install_live(_attestation(profile)) is True
+
+    assert (
+        gate.lease(
+            _requirements(required_context_tokens=8_192),
+            process_epoch_sha256=_PROCESS_EPOCH_SHA256,
+        )
+        is not None
+    )
+    assert (
+        gate.lease(
+            _requirements(required_context_tokens=8_193),
+            process_epoch_sha256=_PROCESS_EPOCH_SHA256,
+        )
+        is None
+    )
+    assert gate.public_status()["effective_context_tokens"] == 8_192
+
+
+def test_measured_budget_contracts_are_immutable_and_all_digests_drift() -> None:
+    profile = QWEN38_27B_SGLANG_V12_PROFILE
+    attestation = _attestation(profile, verified_context_tokens=40_960)
+    requirements = _requirements(required_context_tokens=40_960)
+    gate = V12ModelGate(
+        profile,
+        endpoint_binding_sha256=_ENDPOINT_BINDING,
+        installation_context_tokens=40_960,
+    )
+    assert gate.install_live(attestation) is True
+    lease = gate.lease(requirements, process_epoch_sha256=_PROCESS_EPOCH_SHA256)
+    assert lease is not None
+
+    with pytest.raises(FrozenInstanceError):
+        attestation.verified_context_tokens = 8_192  # type: ignore[misc]
+    assert (
+        profile.canonical_sha256()
+        != replace(
+            profile,
+            max_context_tokens=32_768,
+        ).canonical_sha256()
+    )
+    assert (
+        attestation.canonical_sha256()
+        != replace(
+            attestation,
+            verified_context_tokens=32_768,
+        ).canonical_sha256()
+    )
+    assert (
+        attestation.public_sha256()
+        != replace(
+            attestation,
+            max_tool_calls=1,
+        ).public_sha256()
+    )
+    assert (
+        requirements.canonical_sha256()
+        != replace(
+            requirements,
+            max_tool_rounds=1,
+        ).canonical_sha256()
+    )
+    assert (
+        lease.canonical_sha256()
+        != replace(
+            lease,
+            max_tool_calls=1,
+        ).canonical_sha256()
+    )
+
+
+@pytest.mark.parametrize("invalid", [True, -1, math.nan, 1 << 63])
+def test_measured_numeric_contracts_reject_bool_nan_negative_and_overflow(
+    invalid: object,
+) -> None:
+    gate = _ready_gate()
+    lease = gate.lease(_requirements(), process_epoch_sha256=_PROCESS_EPOCH_SHA256)
+    assert lease is not None
+
+    with pytest.raises(ValueError, match="required context tokens"):
+        replace(_requirements(), required_context_tokens=invalid)  # type: ignore[arg-type]
+    with pytest.raises(ValueError, match="max tool calls"):
+        replace(_requirements(), max_tool_calls=invalid)  # type: ignore[arg-type]
+    with pytest.raises(ValueError, match="verified context tokens"):
+        replace(_attestation(), verified_context_tokens=invalid)  # type: ignore[arg-type]
+    with pytest.raises(ValueError, match="attested max tool rounds"):
+        replace(_attestation(), max_tool_rounds=invalid)  # type: ignore[arg-type]
+    with pytest.raises(ValueError, match="cover the minimum context tier"):
+        replace(QWEN38_27B_SGLANG_V12_PROFILE, max_context_tokens=invalid)  # type: ignore[arg-type]
+    with pytest.raises(ValueError, match="max tool calls"):
+        replace(QWEN38_27B_SGLANG_V12_PROFILE, max_tool_calls=invalid)  # type: ignore[arg-type]
+    with pytest.raises(ValueError, match="leased context tokens"):
+        replace(lease, required_context_tokens=invalid)  # type: ignore[arg-type]
+
+
+def test_unmeasured_tool_rounds_and_calls_cannot_enter_a_lease() -> None:
+    gate = _ready_gate()
+
+    assert (
+        gate.lease(
+            _requirements(max_tool_rounds=1),
+            process_epoch_sha256=_PROCESS_EPOCH_SHA256,
+        )
+        is None
+    )
+    assert (
+        gate.lease(
+            _requirements(max_tool_calls=1),
+            process_epoch_sha256=_PROCESS_EPOCH_SHA256,
+        )
+        is None
+    )
 
 
 def test_profile_authority_has_no_environment_file_or_network_loader() -> None:

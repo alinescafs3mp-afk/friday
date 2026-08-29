@@ -23,13 +23,14 @@ from enum import StrEnum
 from types import MappingProxyType
 from typing import Any
 
-V12_MODEL_PROFILE_SCHEMA = "friday.v12-model-profile.v1"
-V12_MODEL_ATTESTATION_SCHEMA = "friday.v12-model-attestation.v1"
-V12_MODEL_LEASE_SCHEMA = "friday.v12-model-lease.v1"
+V12_MODEL_PROFILE_SCHEMA = "friday.v12-model-profile.v2"
+V12_MODEL_ATTESTATION_SCHEMA = "friday.v12-model-attestation.v2"
+V12_MODEL_LEASE_SCHEMA = "friday.v12-model-lease.v2"
 V12_TURN_PLAN_SCHEMA = "friday.turn-plan.v1"
 
 _SAFE_ID = re.compile(r"[a-z0-9][a-z0-9_.:-]{0,127}")
 _SHA256 = re.compile(r"[0-9a-f]{64}")
+_MAX_MODEL_BUDGET = (1 << 63) - 1
 
 
 def _canonical_sha256(value: Mapping[str, Any]) -> str:
@@ -52,11 +53,11 @@ def _valid_sha256(value: object) -> bool:
 
 
 def _valid_nonnegative_int(value: object) -> bool:
-    return isinstance(value, int) and not isinstance(value, bool) and value >= 0
+    return isinstance(value, int) and not isinstance(value, bool) and 0 <= value <= _MAX_MODEL_BUDGET
 
 
 def _valid_positive_int(value: object) -> bool:
-    return isinstance(value, int) and not isinstance(value, bool) and value > 0
+    return isinstance(value, int) and not isinstance(value, bool) and 0 < value <= _MAX_MODEL_BUDGET
 
 
 class ModelCapability(StrEnum):
@@ -109,6 +110,8 @@ class ModelRequirements:
     required_context_tokens: int = 0
     prepared_evidence_items: int = 0
     max_tool_steps: int = 0
+    max_tool_rounds: int = 0
+    max_tool_calls: int = 0
     effect: ModelEffect = ModelEffect.READ
     verifier_required: bool = True
 
@@ -123,6 +126,10 @@ class ModelRequirements:
             raise ValueError("prepared evidence items must be a non-negative integer")
         if not _valid_nonnegative_int(self.max_tool_steps):
             raise ValueError("max tool steps must be a non-negative integer")
+        if not _valid_nonnegative_int(self.max_tool_rounds):
+            raise ValueError("max tool rounds must be a non-negative integer")
+        if not _valid_nonnegative_int(self.max_tool_calls):
+            raise ValueError("max tool calls must be a non-negative integer")
         if not isinstance(self.effect, ModelEffect):
             raise ValueError("model requirement effect must be a ModelEffect")
         if not isinstance(self.verifier_required, bool):
@@ -133,6 +140,8 @@ class ModelRequirements:
             {
                 "capabilities": sorted(item.value for item in self.capabilities),
                 "effect": self.effect.value,
+                "max_tool_calls": self.max_tool_calls,
+                "max_tool_rounds": self.max_tool_rounds,
                 "max_tool_steps": self.max_tool_steps,
                 "prepared_evidence_items": self.prepared_evidence_items,
                 "required_context_tokens": self.required_context_tokens,
@@ -156,6 +165,8 @@ class V12ModelProfileSpec:
     max_context_tokens: int
     max_prepared_evidence_items: int
     max_tool_steps: int
+    max_tool_rounds: int
+    max_tool_calls: int
     allowed_effects: frozenset[ModelEffect]
     verifier_required: bool
 
@@ -190,6 +201,10 @@ class V12ModelProfileSpec:
             raise ValueError("max prepared evidence items must be a positive integer")
         if not _valid_nonnegative_int(self.max_tool_steps):
             raise ValueError("max tool steps must be a non-negative integer")
+        if not _valid_nonnegative_int(self.max_tool_rounds):
+            raise ValueError("max tool rounds must be a non-negative integer")
+        if not _valid_nonnegative_int(self.max_tool_calls):
+            raise ValueError("max tool calls must be a non-negative integer")
         if not isinstance(self.allowed_effects, frozenset) or any(
             not isinstance(item, ModelEffect) for item in self.allowed_effects
         ):
@@ -199,12 +214,36 @@ class V12ModelProfileSpec:
         if not isinstance(self.verifier_required, bool):
             raise ValueError("verifier_required must be boolean")
 
+    def canonical_sha256(self) -> str:
+        """Hash the complete sanitized, code-owned capability ceiling."""
+
+        return _canonical_sha256(
+            {
+                "allowed_capabilities": sorted(item.value for item in self.allowed_capabilities),
+                "allowed_effects": sorted(item.value for item in self.allowed_effects),
+                "max_context_tokens": self.max_context_tokens,
+                "max_prepared_evidence_items": self.max_prepared_evidence_items,
+                "max_tool_calls": self.max_tool_calls,
+                "max_tool_rounds": self.max_tool_rounds,
+                "max_tool_steps": self.max_tool_steps,
+                "minimum_context_tokens": self.minimum_context_tokens,
+                "planner_contract_sha256": self.planner_contract_sha256,
+                "probe_suite_sha256": self.probe_suite_sha256,
+                "profile_id": self.profile_id,
+                "required_capabilities": sorted(item.value for item in self.required_capabilities),
+                "runtime_profile_name": self.runtime_profile_name,
+                "schema": V12_MODEL_PROFILE_SCHEMA,
+                "served_model_alias": self.served_model_alias,
+                "verifier_required": self.verifier_required,
+            }
+        )
+
 
 @dataclass(frozen=True, slots=True)
 class V12LiveAttestation:
     """Sanitized, process-bound result produced by the future live probe.
 
-    The endpoint binding and vLLM process epoch are intentionally hidden from
+    The endpoint binding and model-process epoch are intentionally hidden from
     repr/public status.  Raw prompts, responses, URLs and credentials do not
     belong in this object at all.
     """
@@ -220,6 +259,8 @@ class V12LiveAttestation:
     max_tool_steps: int
     allowed_effects: frozenset[ModelEffect]
     verifier_required: bool
+    max_tool_rounds: int = 0
+    max_tool_calls: int = 0
 
     def __post_init__(self) -> None:
         if not isinstance(self.profile_id, str) or _SAFE_ID.fullmatch(self.profile_id) is None:
@@ -242,6 +283,10 @@ class V12LiveAttestation:
             raise ValueError("attested prepared evidence limit must be a positive integer")
         if not _valid_nonnegative_int(self.max_tool_steps):
             raise ValueError("attested max tool steps must be a non-negative integer")
+        if not _valid_nonnegative_int(self.max_tool_rounds):
+            raise ValueError("attested max tool rounds must be a non-negative integer")
+        if not _valid_nonnegative_int(self.max_tool_calls):
+            raise ValueError("attested max tool calls must be a non-negative integer")
         if not isinstance(self.allowed_effects, frozenset) or any(
             not isinstance(item, ModelEffect) for item in self.allowed_effects
         ):
@@ -256,6 +301,8 @@ class V12LiveAttestation:
                 "capabilities": sorted(item.value for item in self.capabilities),
                 "endpoint_binding_sha256": self.endpoint_binding_sha256,
                 "max_prepared_evidence_items": self.max_prepared_evidence_items,
+                "max_tool_calls": self.max_tool_calls,
+                "max_tool_rounds": self.max_tool_rounds,
                 "max_tool_steps": self.max_tool_steps,
                 "planner_contract_sha256": self.planner_contract_sha256,
                 "probe_suite_sha256": self.probe_suite_sha256,
@@ -275,6 +322,8 @@ class V12LiveAttestation:
                 "allowed_effects": sorted(item.value for item in self.allowed_effects),
                 "capabilities": sorted(item.value for item in self.capabilities),
                 "max_prepared_evidence_items": self.max_prepared_evidence_items,
+                "max_tool_calls": self.max_tool_calls,
+                "max_tool_rounds": self.max_tool_rounds,
                 "max_tool_steps": self.max_tool_steps,
                 "planner_contract_sha256": self.planner_contract_sha256,
                 "probe_suite_sha256": self.probe_suite_sha256,
@@ -303,6 +352,8 @@ class ModelProfileLease:
     _gate_authority: object = field(repr=False, compare=False)
     _gate_generation: int = field(repr=False, compare=False)
     schema: str = V12_MODEL_LEASE_SCHEMA
+    max_tool_rounds: int = 0
+    max_tool_calls: int = 0
 
     def __post_init__(self) -> None:
         if not isinstance(self.profile_id, str) or _SAFE_ID.fullmatch(self.profile_id) is None:
@@ -319,6 +370,10 @@ class ModelProfileLease:
             raise ValueError("leased prepared evidence items must be a non-negative integer")
         if not _valid_nonnegative_int(self.max_tool_steps):
             raise ValueError("leased max tool steps must be a non-negative integer")
+        if not _valid_nonnegative_int(self.max_tool_rounds):
+            raise ValueError("leased max tool rounds must be a non-negative integer")
+        if not _valid_nonnegative_int(self.max_tool_calls):
+            raise ValueError("leased max tool calls must be a non-negative integer")
         if not isinstance(self.effect, ModelEffect) or not isinstance(self.verifier_required, bool):
             raise ValueError("lease authority fields have invalid types")
         if not _valid_sha256(self.process_epoch_sha256):
@@ -328,11 +383,39 @@ class ModelProfileLease:
         if not _valid_positive_int(self._gate_generation):
             raise ValueError("invalid model lease generation")
 
+    def canonical_sha256(self) -> str:
+        """Hash the sanitized leased subset and its private epoch digest."""
+
+        return _canonical_sha256(
+            {
+                "attestation_sha256": self.attestation_sha256,
+                "capabilities": sorted(item.value for item in self.capabilities),
+                "effect": self.effect.value,
+                "gate_generation": self._gate_generation,
+                "max_tool_calls": self.max_tool_calls,
+                "max_tool_rounds": self.max_tool_rounds,
+                "max_tool_steps": self.max_tool_steps,
+                "prepared_evidence_items": self.prepared_evidence_items,
+                "process_epoch_sha256": self.process_epoch_sha256,
+                "profile_id": self.profile_id,
+                "required_context_tokens": self.required_context_tokens,
+                "requirements_sha256": self.requirements_sha256,
+                "schema": self.schema,
+                "verifier_required": self.verifier_required,
+            }
+        )
+
 
 class V12ModelGate:
     """Process-local, fail-closed admission gate for canary/V12 handlers."""
 
-    def __init__(self, spec: V12ModelProfileSpec, *, endpoint_binding_sha256: str) -> None:
+    def __init__(
+        self,
+        spec: V12ModelProfileSpec,
+        *,
+        endpoint_binding_sha256: str,
+        installation_context_tokens: int,
+    ) -> None:
         if not isinstance(spec, V12ModelProfileSpec):
             raise TypeError("V12ModelGate requires a code-owned model profile")
         registered = V12_MODEL_PROFILES.get((spec.runtime_profile_name, spec.served_model_alias))
@@ -340,8 +423,14 @@ class V12ModelGate:
             raise ValueError("V12ModelGate profile is not the registered code-owned object")
         if not _valid_sha256(endpoint_binding_sha256):
             raise ValueError("endpoint binding must be a lowercase SHA-256 value")
+        if (
+            not _valid_positive_int(installation_context_tokens)
+            or installation_context_tokens < spec.minimum_context_tokens
+        ):
+            raise ValueError("installation context cap must cover the minimum context tier")
         self._spec = spec
         self._endpoint_binding_sha256 = endpoint_binding_sha256
+        self._installation_context_tokens = installation_context_tokens
         self._attestation: V12LiveAttestation | None = None
         self._authority = object()
         self._generation = 0
@@ -369,7 +458,9 @@ class V12ModelGate:
 
         Any rejected replacement also clears a prior grant.  Retaining an old
         capability set after a failed re-attestation would make the gate fail
-        open precisely when the endpoint changed.
+        open precisely when the endpoint changed.  A context value within the
+        profile range represents a completed probe at a lower measured tier;
+        a partially completed suite never receives this typed contract.
         """
 
         with self._lock:
@@ -389,6 +480,8 @@ class V12ModelGate:
                 and 0 < attestation.max_prepared_evidence_items <= self._spec.max_prepared_evidence_items
                 and attestation.max_prepared_evidence_items == self._spec.max_prepared_evidence_items
                 and attestation.max_tool_steps <= self._spec.max_tool_steps
+                and attestation.max_tool_rounds <= self._spec.max_tool_rounds
+                and attestation.max_tool_calls <= self._spec.max_tool_calls
                 and attestation.allowed_effects == self._spec.allowed_effects
                 and (not self._spec.verifier_required or attestation.verifier_required)
             )
@@ -430,9 +523,16 @@ class V12ModelGate:
                 return None
             permitted = bool(
                 requirements.capabilities <= attestation.capabilities
-                and requirements.required_context_tokens <= attestation.verified_context_tokens
+                and requirements.required_context_tokens
+                <= min(
+                    self._spec.max_context_tokens,
+                    attestation.verified_context_tokens,
+                    self._installation_context_tokens,
+                )
                 and requirements.prepared_evidence_items <= attestation.max_prepared_evidence_items
                 and requirements.max_tool_steps <= attestation.max_tool_steps
+                and requirements.max_tool_rounds <= attestation.max_tool_rounds
+                and requirements.max_tool_calls <= attestation.max_tool_calls
                 and requirements.effect in attestation.allowed_effects
                 and (not attestation.verifier_required or requirements.verifier_required)
             )
@@ -446,6 +546,8 @@ class V12ModelGate:
                 required_context_tokens=requirements.required_context_tokens,
                 prepared_evidence_items=requirements.prepared_evidence_items,
                 max_tool_steps=requirements.max_tool_steps,
+                max_tool_rounds=requirements.max_tool_rounds,
+                max_tool_calls=requirements.max_tool_calls,
                 effect=requirements.effect,
                 verifier_required=requirements.verifier_required,
                 process_epoch_sha256=attestation.process_epoch_sha256,
@@ -474,6 +576,11 @@ class V12ModelGate:
             if process_epoch_sha256 != attestation.process_epoch_sha256:
                 self._reject_locked(ModelGateReason.EPOCH_CHANGED)
                 return False
+            effective_context_tokens = min(
+                self._spec.max_context_tokens,
+                attestation.verified_context_tokens,
+                self._installation_context_tokens,
+            )
             return bool(
                 lease._gate_authority is self._authority
                 and lease._gate_generation == self._generation
@@ -481,11 +588,21 @@ class V12ModelGate:
                 and lease.attestation_sha256 == attestation.canonical_sha256()
                 and lease.requirements_sha256 == requirements.canonical_sha256()
                 and lease.capabilities == requirements.capabilities
+                and lease.capabilities <= attestation.capabilities
                 and lease.required_context_tokens == requirements.required_context_tokens
+                and lease.required_context_tokens <= effective_context_tokens
                 and lease.prepared_evidence_items == requirements.prepared_evidence_items
+                and lease.prepared_evidence_items <= attestation.max_prepared_evidence_items
                 and lease.max_tool_steps == requirements.max_tool_steps
+                and lease.max_tool_steps <= attestation.max_tool_steps
+                and lease.max_tool_rounds == requirements.max_tool_rounds
+                and lease.max_tool_rounds <= attestation.max_tool_rounds
+                and lease.max_tool_calls == requirements.max_tool_calls
+                and lease.max_tool_calls <= attestation.max_tool_calls
                 and lease.effect is requirements.effect
+                and lease.effect in attestation.allowed_effects
                 and lease.verifier_required is requirements.verifier_required
+                and (not attestation.verifier_required or lease.verifier_required)
                 and lease.process_epoch_sha256 == attestation.process_epoch_sha256
             )
 
@@ -494,9 +611,19 @@ class V12ModelGate:
 
         with self._lock:
             attestation = self._attestation
+            effective_context_tokens = (
+                min(
+                    self._spec.max_context_tokens,
+                    attestation.verified_context_tokens,
+                    self._installation_context_tokens,
+                )
+                if attestation is not None
+                else 0
+            )
             return {
                 "schema": V12_MODEL_PROFILE_SCHEMA,
                 "profile_id": self._spec.profile_id,
+                "profile_sha256": self._spec.canonical_sha256(),
                 "status": self._status.value,
                 "reason_code": self._reason.value,
                 "planner_contract_sha256": self._spec.planner_contract_sha256,
@@ -508,16 +635,22 @@ class V12ModelGate:
                 "verified_context_tokens": (
                     attestation.verified_context_tokens if attestation is not None else 0
                 ),
+                "installation_context_tokens": self._installation_context_tokens,
+                "effective_context_tokens": effective_context_tokens,
                 "max_prepared_evidence_items": (
                     attestation.max_prepared_evidence_items if attestation is not None else 0
                 ),
                 "max_tool_steps": attestation.max_tool_steps if attestation is not None else 0,
+                "max_tool_rounds": attestation.max_tool_rounds if attestation is not None else 0,
+                "max_tool_calls": attestation.max_tool_calls if attestation is not None else 0,
                 "allowed_effects": (
                     sorted(item.value for item in attestation.allowed_effects)
                     if attestation is not None
                     else []
                 ),
-                "verifier_required": self._spec.verifier_required,
+                "verifier_required": (
+                    attestation.verifier_required if attestation is not None else self._spec.verifier_required
+                ),
             }
 
 
@@ -538,7 +671,7 @@ _QWEN36_27B_PLANNER_CONTRACT_SHA256 = _version_sha256(
 # semantics—not merely a list of case names.  Keeping the digest here avoids a
 # model_profiles -> orchestration/model_probe import cycle; the probe refuses a
 # profile if its independently recomputed manifest differs by one byte.
-_QWEN36_27B_PROBE_SUITE_SHA256 = "36999c084e580bf770e7cc584ec6b258c4f1af202f0527831f8f23047d8c583e"
+_QWEN36_27B_PROBE_SUITE_SHA256 = "21ef376f6e84e75074be25bde33779f758d95157850a9e0cf997bb09738eb836"
 
 QWEN36_27B_V12_PROFILE = V12ModelProfileSpec(
     profile_id="qwen36-27b-nvfp4-nvidia:dispatcher:v12.13",
@@ -568,6 +701,8 @@ QWEN36_27B_V12_PROFILE = V12ModelProfileSpec(
     max_context_tokens=8192,
     max_prepared_evidence_items=2,
     max_tool_steps=0,
+    max_tool_rounds=0,
+    max_tool_calls=0,
     allowed_effects=frozenset({ModelEffect.READ}),
     verifier_required=True,
 )
@@ -584,10 +719,15 @@ QWEN38_27B_SGLANG_V12_PROFILE = V12ModelProfileSpec(
     probe_suite_sha256=_QWEN36_27B_PROBE_SUITE_SHA256,
     allowed_capabilities=QWEN36_27B_V12_PROFILE.allowed_capabilities,
     required_capabilities=QWEN36_27B_V12_PROFILE.required_capabilities,
+    # The 8K tier remains the fail-closed baseline.  This larger ceiling is
+    # inert until the exact q38/SGLang probe installs a same-epoch measured
+    # attestation and the installation cap independently covers the request.
     minimum_context_tokens=QWEN36_27B_V12_PROFILE.minimum_context_tokens,
-    max_context_tokens=QWEN36_27B_V12_PROFILE.max_context_tokens,
+    max_context_tokens=40_960,
     max_prepared_evidence_items=QWEN36_27B_V12_PROFILE.max_prepared_evidence_items,
     max_tool_steps=QWEN36_27B_V12_PROFILE.max_tool_steps,
+    max_tool_rounds=QWEN36_27B_V12_PROFILE.max_tool_rounds,
+    max_tool_calls=QWEN36_27B_V12_PROFILE.max_tool_calls,
     allowed_effects=QWEN36_27B_V12_PROFILE.allowed_effects,
     verifier_required=QWEN36_27B_V12_PROFILE.verifier_required,
 )

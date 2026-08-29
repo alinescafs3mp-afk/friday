@@ -149,14 +149,25 @@ def test_qwen38_v12_profile_is_exact_registered_v12_15_with_v12_13_authority() -
         }
     )
     assert profile.required_capabilities == profile.allowed_capabilities
-    assert profile.minimum_context_tokens == profile.max_context_tokens == 8_192
+    assert profile.minimum_context_tokens == 8_192
+    assert profile.max_context_tokens == 40_960
     assert profile.max_prepared_evidence_items == 2
     assert profile.max_tool_steps == 0
+    assert profile.max_tool_rounds == 0
+    assert profile.max_tool_calls == 0
     assert profile.allowed_effects == frozenset({ModelEffect.READ})
     assert profile.verifier_required is True
     assert ModelCapability.RAW_VISION not in profile.allowed_capabilities
     assert ModelCapability.NATIVE_TOOL_CALLS not in profile.allowed_capabilities
 
-    V12ModelGate(profile, endpoint_binding_sha256="a" * 64)
+    V12ModelGate(
+        profile,
+        endpoint_binding_sha256="a" * 64,
+        installation_context_tokens=40_960,
+    )
     with pytest.raises(ValueError, match="registered code-owned"):
-        V12ModelGate(replace(profile), endpoint_binding_sha256="a" * 64)
+        V12ModelGate(
+            replace(profile),
+            endpoint_binding_sha256="a" * 64,
+            installation_context_tokens=40_960,
+        )

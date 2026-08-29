@@ -23,6 +23,8 @@ from functools import partial
 from typing import Any, Protocol, TypeVar, cast
 
 from friday.model_profiles import (
+    QWEN36_27B_V12_PROFILE,
+    QWEN38_27B_SGLANG_V12_PROFILE,
     ModelCapability,
     ModelEffect,
     V12LiveAttestation,
@@ -66,7 +68,7 @@ CANCELLATION_TIMEOUT_SEC = 45.0
 REMOTE_QUEUE_DRAIN_MAX_MS = 15_000
 POST_CANCELLATION_QUIET_OBSERVATIONS = 2
 POST_CANCELLATION_QUIET_INTERVAL_SEC = 0.05
-# SGLang can report the just-finished 8K context request as active slightly
+# SGLang can report a just-finished measured context request as active slightly
 # longer than one complete load-witness budget.  Convergence still
 # requires valid same-epoch samples and exact zero load; only the observation
 # window is widened so a healthy queue is not revoked at the old two-second
@@ -75,6 +77,19 @@ POST_CONTEXT_IDLE_CONVERGENCE_TIMEOUT_SEC = 20.0
 POST_CONTEXT_IDLE_RETRY_INTERVAL_SEC = 0.05
 TASK_CANCELLATION_DRAIN_SEC = 0.05
 MAX_COMPLETION_CHARS = 65_536
+
+# The production router reserves these two closed slices when it admits a
+# full-context probe.  A measured 40,448-token prompt which also completes under
+# the 256-token output allowance therefore exercises the exact 40,960-token
+# installation budget.  The live SGLang load witness independently binds that
+# observation to a server-info/deployment witness declaring the same capacity.
+CONTEXT_OUTPUT_RESERVE_TOKENS = 256
+CONTEXT_SAFETY_RESERVE_TOKENS = 256
+QWEN38_VERIFIED_CONTEXT_TOKENS = 40_960
+QWEN38_MINIMUM_PROMPT_TOKENS = (
+    QWEN38_VERIFIED_CONTEXT_TOKENS - CONTEXT_OUTPUT_RESERVE_TOKENS - CONTEXT_SAFETY_RESERVE_TOKENS
+)
+MAX_REPORTED_CONTEXT_PROMPT_TOKENS = QWEN38_VERIFIED_CONTEXT_TOKENS
 
 _SHA256 = re.compile(r"[0-9a-f]{64}")
 _T = TypeVar("_T")
@@ -433,22 +448,48 @@ _VERIFIER_EXPECTED: Mapping[str, Mapping[str, object]] = {
     },
 }
 
-_CONTEXT_START = "CTX-НАЧАЛО-7F31"
-_CONTEXT_END = "CTX-КОНЕЦ-91D4"
-_CONTEXT_FILLER = " ".join(f"unit-{index:05d}" for index in range(1_175))
-CONTEXT_PROBE = ContextProbeRequest(
-    case_id="context_8k_edges",
-    prompt=(
-        f"Запомни крайние маркеры. Начальный маркер: {_CONTEXT_START}.\n"
-        f"Синтетическое наполнение: {_CONTEXT_FILLER}\n"
-        f"Конечный маркер: {_CONTEXT_END}.\n"
+
+def _context_prompt(*, start_marker: str, end_marker: str, filler_units: int) -> str:
+    filler = " ".join(f"unit-{index:05d}" for index in range(filler_units))
+    return (
+        f"Запомни крайние маркеры. Начальный маркер: {start_marker}.\n"
+        f"Синтетическое наполнение: {filler}\n"
+        f"Конечный маркер: {end_marker}.\n"
         "Верни строго JSON с ключами начало и конец и точными маркерами."
         " Ответ должен быть одним JSON-объектом без Markdown, без блоков кода и без любого "
         "текста до или после объекта."
+    )
+
+
+_CONTEXT_START = "CTX-НАЧАЛО-7F31"
+_CONTEXT_END = "CTX-КОНЕЦ-91D4"
+CONTEXT_PROBE = ContextProbeRequest(
+    case_id="context_8k_edges",
+    prompt=_context_prompt(
+        start_marker=_CONTEXT_START,
+        end_marker=_CONTEXT_END,
+        filler_units=1_175,
     ),
     start_marker=_CONTEXT_START,
     end_marker=_CONTEXT_END,
     minimum_prompt_tokens=8_192,
+)
+
+_QWEN38_CONTEXT_START = "CTX40-НАЧАЛО-2A67"
+_QWEN38_CONTEXT_END = "CTX40-КОНЕЦ-8C53"
+QWEN38_CONTEXT_PROBE = ContextProbeRequest(
+    case_id="context_40960_edges",
+    prompt=_context_prompt(
+        start_marker=_QWEN38_CONTEXT_START,
+        end_marker=_QWEN38_CONTEXT_END,
+        # The current 8K witness uses 1,175 equal-width synthetic units.  Five
+        # times that body reaches the exact q38 operational tier without a raw
+        # fixture; the server-reported prompt usage remains the authority.
+        filler_units=5_875,
+    ),
+    start_marker=_QWEN38_CONTEXT_START,
+    end_marker=_QWEN38_CONTEXT_END,
+    minimum_prompt_tokens=QWEN38_MINIMUM_PROMPT_TOKENS,
 )
 
 CANCELLATION_PROBE = CancellationProbeRequest(
@@ -503,6 +544,16 @@ def _turn_manifest(value: TurnInput) -> Mapping[str, object]:
     }
 
 
+def _context_request_manifest(value: ContextProbeRequest) -> Mapping[str, object]:
+    return {
+        "case_id": value.case_id,
+        "prompt": value.prompt,
+        "start_marker": value.start_marker,
+        "end_marker": value.end_marker,
+        "minimum_prompt_tokens": value.minimum_prompt_tokens,
+    }
+
+
 def _cancellation_request_witness_sha256(request: CancellationProbeRequest) -> str:
     """Bind a transport acceptance witness to the exact synthetic request.
 
@@ -526,7 +577,7 @@ def _probe_suite_manifest() -> Mapping[str, object]:
     """Return the complete, code-owned semantics covered by the suite hash."""
 
     return {
-        "schema": "friday.qwen36-27b-v12-probe-suite.v4",
+        "schema": "friday.qwen-v12-probe-suite.v5",
         "completion_contract": {
             "max_chars": MAX_COMPLETION_CHARS,
             "finish_reason": "stop",
@@ -607,14 +658,24 @@ def _probe_suite_manifest() -> Mapping[str, object]:
             ],
         },
         "context": {
-            "request": {
-                "case_id": CONTEXT_PROBE.case_id,
-                "prompt": CONTEXT_PROBE.prompt,
-                "start_marker": CONTEXT_PROBE.start_marker,
-                "end_marker": CONTEXT_PROBE.end_marker,
-                "minimum_prompt_tokens": CONTEXT_PROBE.minimum_prompt_tokens,
+            "requests": {
+                "baseline_8192": _context_request_manifest(CONTEXT_PROBE),
+                "qwen38_sglang_40960": _context_request_manifest(QWEN38_CONTEXT_PROBE),
             },
-            "validator": "strict-json-exact-edges-measured-prompt-tokens.v1",
+            "selection": {
+                QWEN36_27B_V12_PROFILE.profile_id: "baseline_8192",
+                QWEN38_27B_SGLANG_V12_PROFILE.profile_id: "qwen38_sglang_40960",
+            },
+            "measurement": {
+                "derivation": "min(profile_max,prompt_tokens+output_reserve+safety_reserve)",
+                "maximum_reported_prompt_tokens": MAX_REPORTED_CONTEXT_PROMPT_TOKENS,
+                "qwen38": {
+                    "output_reserve_tokens": CONTEXT_OUTPUT_RESERVE_TOKENS,
+                    "safety_reserve_tokens": CONTEXT_SAFETY_RESERVE_TOKENS,
+                    "verified_context_tokens": QWEN38_VERIFIED_CONTEXT_TOKENS,
+                },
+            },
+            "validator": "strict-json-exact-edges-bounded-measured-prompt-tokens.v2",
         },
         "cancellation": {
             "request": {
@@ -643,9 +704,14 @@ def _probe_suite_manifest() -> Mapping[str, object]:
             },
         },
         "attested_limits": {
-            "context_tokens": 8_192,
+            "context_tokens": {
+                QWEN36_27B_V12_PROFILE.profile_id: 8_192,
+                QWEN38_27B_SGLANG_V12_PROFILE.profile_id: QWEN38_VERIFIED_CONTEXT_TOKENS,
+            },
             "prepared_evidence_items": 2,
             "tool_steps": 0,
+            "tool_rounds": 0,
+            "tool_calls": 0,
             "effects": [ModelEffect.READ.value],
             "verifier_required_after_all_cases": True,
         },
@@ -654,6 +720,17 @@ def _probe_suite_manifest() -> Mapping[str, object]:
 
 def _probe_suite_sha256() -> str:
     return _canonical_sha256(_probe_suite_manifest())
+
+
+def _context_probe_for(profile: V12ModelProfileSpec) -> tuple[ContextProbeRequest, int]:
+    if profile is QWEN36_27B_V12_PROFILE:
+        return CONTEXT_PROBE, 0
+    if profile is QWEN38_27B_SGLANG_V12_PROFILE:
+        return (
+            QWEN38_CONTEXT_PROBE,
+            CONTEXT_OUTPUT_RESERVE_TOKENS + CONTEXT_SAFETY_RESERVE_TOKENS,
+        )
+    raise ModelProbeError(ModelProbeFailure.PROFILE_REJECTED)
 
 
 def _validate_profile(profile: object, endpoint_binding_sha256: object) -> V12ModelProfileSpec:
@@ -675,13 +752,23 @@ def _validate_profile(profile: object, endpoint_binding_sha256: object) -> V12Mo
             ModelCapability.REMOTE_CANCELLATION,
         }
     )
+    expected_context_max = (
+        8_192
+        if profile is QWEN36_27B_V12_PROFILE
+        else QWEN38_VERIFIED_CONTEXT_TOKENS
+        if profile is QWEN38_27B_SGLANG_V12_PROFILE
+        else None
+    )
     if not (
         profile.probe_suite_sha256 == _probe_suite_sha256()
         and profile.required_capabilities == expected_capabilities
         and profile.allowed_capabilities == expected_capabilities
-        and profile.minimum_context_tokens == profile.max_context_tokens == 8_192
+        and profile.minimum_context_tokens == 8_192
+        and profile.max_context_tokens == expected_context_max
         and profile.max_prepared_evidence_items == 2
         and profile.max_tool_steps == 0
+        and profile.max_tool_rounds == 0
+        and profile.max_tool_calls == 0
         and profile.allowed_effects == frozenset({ModelEffect.READ})
         and profile.verifier_required
     ):
@@ -870,18 +957,19 @@ def _evaluate_verifier(case: VerifierProbeRequest, response: object) -> None:
         raise ModelProbeError(ModelProbeFailure.VERIFIER_INVALID)
 
 
-def _evaluate_context(response: object) -> None:
+def _evaluate_context(request: ContextProbeRequest, response: object) -> int:
     content = _completion_content(response, failure=ModelProbeFailure.CONTEXT_INVALID)
     assert isinstance(response, ProbeCompletion)
     if (
         not isinstance(response.prompt_tokens, int)
         or isinstance(response.prompt_tokens, bool)
-        or response.prompt_tokens < CONTEXT_PROBE.minimum_prompt_tokens
+        or not request.minimum_prompt_tokens <= response.prompt_tokens <= MAX_REPORTED_CONTEXT_PROMPT_TOKENS
     ):
         raise ModelProbeError(ModelProbeFailure.CONTEXT_INVALID)
     value = _strict_json_object(content, failure=ModelProbeFailure.CONTEXT_INVALID)
-    if value != {"начало": CONTEXT_PROBE.start_marker, "конец": CONTEXT_PROBE.end_marker}:
+    if value != {"начало": request.start_marker, "конец": request.end_marker}:
         raise ModelProbeError(ModelProbeFailure.CONTEXT_INVALID)
+    return response.prompt_tokens
 
 
 def _load_sample(value: object) -> ModelLoadSample:
@@ -1005,6 +1093,7 @@ async def run_v12_live_probe(
     """Run the all-or-nothing synthetic suite under one absolute deadline."""
 
     profile = _validate_profile(profile, endpoint_binding_sha256)
+    context_probe, context_reserve_tokens = _context_probe_for(profile)
     _remaining(absolute_deadline, LOAD_TIMEOUT_SEC)
 
     first = _load_sample(
@@ -1063,12 +1152,18 @@ async def run_v12_live_probe(
     verifier_probes_clear = True
 
     context = await _bounded_call(
-        lambda: client.complete_context(CONTEXT_PROBE, absolute_deadline=absolute_deadline),
+        lambda: client.complete_context(context_probe, absolute_deadline=absolute_deadline),
         deadline=absolute_deadline,
         ceiling=CONTEXT_TIMEOUT_SEC,
         failure=ModelProbeFailure.CONTEXT_CALL_FAILED,
     )
-    _evaluate_context(context)
+    measured_prompt_tokens = _evaluate_context(context_probe, context)
+    verified_context_tokens = min(
+        profile.max_context_tokens,
+        measured_prompt_tokens + context_reserve_tokens,
+    )
+    if verified_context_tokens != profile.max_context_tokens:
+        raise ModelProbeError(ModelProbeFailure.CONTEXT_INVALID)
 
     await _await_post_context_idle(
         client,
@@ -1106,9 +1201,11 @@ async def run_v12_live_probe(
             endpoint_binding_sha256=endpoint_binding_sha256,
             process_epoch_sha256=first.process_epoch_sha256,
             capabilities=profile.required_capabilities,
-            verified_context_tokens=profile.minimum_context_tokens,
+            verified_context_tokens=verified_context_tokens,
             max_prepared_evidence_items=profile.max_prepared_evidence_items,
             max_tool_steps=profile.max_tool_steps,
+            max_tool_rounds=profile.max_tool_rounds,
+            max_tool_calls=profile.max_tool_calls,
             allowed_effects=profile.allowed_effects,
             verifier_required=profile.verifier_required and verifier_probes_clear,
         )
@@ -1128,6 +1225,7 @@ __all__ = [
     "PLAN_PROBE_CASES",
     "PlanProbeCase",
     "ProbeCompletion",
+    "QWEN38_CONTEXT_PROBE",
     "SYNTHESIS_PROBE",
     "SYNTHESIS_PROBES",
     "SynthesisProbeRequest",

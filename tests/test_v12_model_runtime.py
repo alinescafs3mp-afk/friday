@@ -10,9 +10,13 @@ from typing import Any
 
 import pytest
 
+import friday.agent_runtime.llm as llm_module
 from friday.agent_runtime.llm import LLMRouter
+from friday.config import PROFILES
 from friday.model_probe import (
+    CONTEXT_OUTPUT_RESERVE_TOKENS,
     CONTEXT_PROBE,
+    CONTEXT_SAFETY_RESERVE_TOKENS,
     PLAN_PROBE_CASES,
     POST_CONTEXT_IDLE_RETRY_INTERVAL_SEC,
     SYNTHESIS_PROBE,
@@ -22,6 +26,7 @@ from friday.model_probe import (
 )
 from friday.model_profiles import (
     QWEN36_27B_V12_PROFILE,
+    QWEN38_27B_SGLANG_V12_PROFILE,
     ModelCapability,
     ModelEffect,
     ModelRequirements,
@@ -307,6 +312,8 @@ def _install_attestation(runtime: AttestedV12ModelRuntime, *, epoch: str = _EPOC
         verified_context_tokens=profile.minimum_context_tokens,
         max_prepared_evidence_items=profile.max_prepared_evidence_items,
         max_tool_steps=profile.max_tool_steps,
+        max_tool_rounds=profile.max_tool_rounds,
+        max_tool_calls=profile.max_tool_calls,
         allowed_effects=profile.allowed_effects,
         verifier_required=True,
     )
@@ -416,17 +423,89 @@ def test_runtime_requires_exact_router_profile_and_same_bound_transports(setting
         )
 
 
+@pytest.mark.parametrize("invalid_cap", [True, 0, 1 << 63], ids=("bool", "zero", "overflow"))
+def test_runtime_rejects_malformed_installation_context_caps(
+    settings,
+    monkeypatch,
+    invalid_cap: object,
+) -> None:
+    profile = QWEN36_27B_V12_PROFILE
+    installed = replace(
+        PROFILES[profile.runtime_profile_name],
+        max_model_len=invalid_cap,  # type: ignore[arg-type]
+    )
+    monkeypatch.setitem(PROFILES, profile.runtime_profile_name, installed)
+    router = _router(settings, profile=installed)
+
+    with pytest.raises(V12ModelRuntimeError) as caught:
+        AttestedV12ModelRuntime(
+            router,
+            _CompletionTransport(router),
+            _MetricsTransport(router),
+            profile=profile,
+        )
+
+    assert caught.value.code is V12ModelRuntimeFailure.COMPOSITION_REJECTED
+
+
+@pytest.mark.parametrize(
+    "invalid_cap",
+    [True, 0, float("nan"), 1 << 63],
+    ids=("bool", "zero", "nonfinite", "overflow"),
+)
+def test_runtime_rejects_malformed_sglang_total_token_caps(
+    settings,
+    monkeypatch,
+    invalid_cap: object,
+) -> None:
+    profile = QWEN38_27B_SGLANG_V12_PROFILE
+    installed = PROFILES[profile.runtime_profile_name]
+    launch = installed.sglang_extra_args
+    assert launch is not None
+    installed = replace(
+        installed,
+        sglang_extra_args=replace(
+            launch,
+            max_total_tokens=invalid_cap,  # type: ignore[arg-type]
+        ),
+    )
+    monkeypatch.setitem(PROFILES, profile.runtime_profile_name, installed)
+    router = _router(settings, profile=installed)
+
+    with pytest.raises(V12ModelRuntimeError) as caught:
+        AttestedV12ModelRuntime(
+            router,
+            _CompletionTransport(router),
+            _MetricsTransport(router),
+            profile=profile,
+        )
+
+    assert caught.value.code in {
+        V12ModelRuntimeFailure.COMPOSITION_REJECTED,
+        V12ModelRuntimeFailure.SETTINGS_REJECTED,
+    }
+
+
 def test_private_endpoint_binding_covers_auth_settings_and_never_appears_in_repr(settings) -> None:
     first = _router(settings)
     same = _router(settings)
     changed = _router(settings, llm_api_key="another-private-key")
+    changed_installation = _router(
+        settings,
+        profile=replace(settings.profile, max_model_len=settings.profile.max_model_len - 1),
+    )
 
     first_binding = _derive_endpoint_binding(first, QWEN36_27B_V12_PROFILE)
     same_binding = _derive_endpoint_binding(same, QWEN36_27B_V12_PROFILE)
     changed_binding = _derive_endpoint_binding(changed, QWEN36_27B_V12_PROFILE)
+    changed_installation_binding = _derive_endpoint_binding(
+        changed_installation,
+        QWEN36_27B_V12_PROFILE,
+    )
 
     assert first_binding == same_binding
     assert first_binding != changed_binding
+    assert first_binding != changed_installation_binding
     runtime = AttestedV12ModelRuntime(
         first,
         _CompletionTransport(first),
@@ -435,6 +514,93 @@ def test_private_endpoint_binding_covers_auth_settings_and_never_appears_in_repr
     rendered = repr(runtime) + repr(runtime._seal)  # noqa: SLF001
     assert "private-runtime-key" not in rendered
     assert first_binding not in rendered
+
+
+def test_measured_probe_reserves_match_the_exact_router_admission_contract() -> None:
+    assert getattr(llm_module, "_CONTEXT_SAFETY_TOKENS", None) == CONTEXT_SAFETY_RESERVE_TOKENS
+
+
+@pytest.mark.parametrize(
+    "limiting_cap",
+    ["max_model_len", "max_total_tokens"],
+    ids=("runtime-profile", "sglang-launch"),
+)
+def test_runtime_threads_the_strictest_installation_cap_into_the_measured_gate(
+    settings,
+    monkeypatch,
+    limiting_cap: str,
+) -> None:
+    profile = QWEN38_27B_SGLANG_V12_PROFILE
+    installed = PROFILES[profile.runtime_profile_name]
+    launch = installed.sglang_extra_args
+    assert launch is not None
+    if limiting_cap == "max_model_len":
+        installed = replace(installed, max_model_len=32_768)
+    else:
+        installed = replace(
+            installed,
+            sglang_extra_args=replace(launch, max_total_tokens=32_768),
+        )
+    monkeypatch.setitem(PROFILES, profile.runtime_profile_name, installed)
+    router = LLMRouter(
+        replace(
+            settings,
+            profile=installed,
+            llm_enabled=True,
+            llm_model=profile.served_model_alias,
+            llm_api_key="private-runtime-key",
+        )
+    )
+    runtime = AttestedV12ModelRuntime(
+        router,
+        _CompletionTransport(router),
+        _MetricsTransport(router),
+        profile=profile,
+    )
+    attestation = V12LiveAttestation(
+        profile_id=profile.profile_id,
+        planner_contract_sha256=profile.planner_contract_sha256,
+        probe_suite_sha256=profile.probe_suite_sha256,
+        endpoint_binding_sha256=runtime._seal.endpoint_binding_sha256,  # noqa: SLF001
+        process_epoch_sha256=_EPOCH_SHA256,
+        capabilities=profile.required_capabilities,
+        verified_context_tokens=40_960,
+        max_prepared_evidence_items=profile.max_prepared_evidence_items,
+        max_tool_steps=profile.max_tool_steps,
+        max_tool_rounds=profile.max_tool_rounds,
+        max_tool_calls=profile.max_tool_calls,
+        allowed_effects=profile.allowed_effects,
+        verifier_required=profile.verifier_required,
+    )
+    assert runtime._gate.install_live(attestation) is True  # noqa: SLF001
+
+    requirements = ModelRequirements(
+        capabilities=profile.required_capabilities,
+        required_context_tokens=32_768,
+        prepared_evidence_items=profile.max_prepared_evidence_items,
+        max_tool_steps=profile.max_tool_steps,
+        max_tool_rounds=profile.max_tool_rounds,
+        max_tool_calls=profile.max_tool_calls,
+        effect=ModelEffect.READ,
+        verifier_required=True,
+    )
+    assert (
+        runtime._gate.lease(  # noqa: SLF001
+            requirements,
+            process_epoch_sha256=_EPOCH_SHA256,
+        )
+        is not None
+    )
+    assert (
+        runtime._gate.lease(  # noqa: SLF001
+            replace(requirements, required_context_tokens=32_769),
+            process_epoch_sha256=_EPOCH_SHA256,
+        )
+        is None
+    )
+    assert runtime.public_status()["installation_context_tokens"] == 32_768
+    assert runtime.public_status()["verified_context_tokens"] == 40_960
+    assert runtime.public_status()["effective_context_tokens"] == 32_768
 
 
 @pytest.mark.asyncio
@@ -584,6 +750,11 @@ async def test_runtime_can_install_only_the_complete_live_probe_result(settings)
     assert attestation.process_epoch_sha256 == _EPOCH_SHA256
     assert runtime.public_status()["status"] == "canary_ready"
     assert len(completion.calls) == len(PLAN_PROBE_CASES) + 7
+    assert [
+        call["max_tokens"]
+        for call in completion.calls
+        if call["messages"] == [{"role": "user", "content": CONTEXT_PROBE.prompt}]
+    ] == [CONTEXT_OUTPUT_RESERVE_TOKENS]
     assert completion.pending.cancel_calls == 1
     assert [
         (_parse_metrics(body, served_model_alias="dispatcher").running) for body in metrics.returned_bodies
@@ -720,6 +891,43 @@ async def test_acquire_validate_and_complete_recheck_epoch_without_auto_reacquir
             absolute_deadline=deadline,
         )
     assert caught.value.code is V12ModelRuntimeFailure.LEASE_REJECTED
+
+
+@pytest.mark.asyncio
+async def test_checked_completion_cannot_exceed_the_exact_leased_context(settings) -> None:
+    runtime, completion, metrics = _runtime(settings)
+    _install_attestation(runtime)
+    messages = [{"role": "user", "content": "synthetic"}]
+    max_tokens = 300
+    required_context_tokens = (
+        runtime._seal.router.estimate_messages_tokens(messages)  # noqa: SLF001
+        + max_tokens
+        + CONTEXT_SAFETY_RESERVE_TOKENS
+        - 1
+    )
+    requirements = replace(
+        _requirements(),
+        required_context_tokens=required_context_tokens,
+    )
+    lease = runtime._gate.lease(  # noqa: SLF001
+        requirements,
+        process_epoch_sha256=_EPOCH_SHA256,
+    )
+    assert lease is not None
+
+    with pytest.raises(V12ModelRuntimeError) as caught:
+        await runtime.complete(
+            lease,
+            requirements,
+            messages,
+            max_tokens=max_tokens,
+            priority="foreground",
+            absolute_deadline=time.monotonic() + 2,
+        )
+
+    assert caught.value.code is V12ModelRuntimeFailure.COMPLETION_INVALID
+    assert completion.calls == []
+    assert len(metrics.calls) == 1
 
 
 @pytest.mark.asyncio

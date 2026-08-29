@@ -34,6 +34,8 @@ from friday.config import PROFILES, FridaySettings, RuntimeProfile
 from friday.model_input_hygiene import model_messages_are_secret_free
 from friday.model_probe import (
     CANCELLATION_TIMEOUT_SEC,
+    CONTEXT_OUTPUT_RESERVE_TOKENS,
+    CONTEXT_SAFETY_RESERVE_TOKENS,
     LOAD_TIMEOUT_SEC,
     MAX_COMPLETION_CHARS,
     CancellationProbeRequest,
@@ -71,6 +73,7 @@ MAX_SERVER_INFO_BYTES = 65_536
 MAX_DEPLOYMENT_WITNESS_BYTES = 8_192
 MAX_METRICS_LINE_CHARS = 4_096
 MAX_METRIC_COUNT = 1_000_000
+_MAX_INSTALLATION_CONTEXT_TOKENS = (1 << 63) - 1
 CANCELLATION_POLL_INTERVAL_SEC = 0.01
 CANCELLATION_STABLE_ZERO_OBSERVATIONS = 2
 CANCELLATION_STABLE_ZERO_INTERVAL_SEC = 0.05
@@ -371,6 +374,8 @@ def _profile_manifest(profile: V12ModelProfileSpec) -> Mapping[str, Any]:
         "allowed_effects": sorted(item.value for item in profile.allowed_effects),
         "max_context_tokens": profile.max_context_tokens,
         "max_prepared_evidence_items": profile.max_prepared_evidence_items,
+        "max_tool_calls": profile.max_tool_calls,
+        "max_tool_rounds": profile.max_tool_rounds,
         "max_tool_steps": profile.max_tool_steps,
         "minimum_context_tokens": profile.minimum_context_tokens,
         "planner_contract_sha256": profile.planner_contract_sha256,
@@ -450,7 +455,7 @@ class _RuntimeSeal:
             or self.router.settings.profile is not PROFILES.get(self.profile.runtime_profile_name)
             or self.router.model != self.profile.served_model_alias
             or self.router.enabled is not True
-            or self.router.settings.profile.max_model_len < self.profile.max_context_tokens
+            or _installation_context_tokens(self.router, self.profile) < self.profile.minimum_context_tokens
             or _derive_endpoint_binding(self.router, self.profile) != self.endpoint_binding_sha256
         ):
             raise _runtime_error(V12ModelRuntimeFailure.COMPOSITION_REJECTED)
@@ -503,6 +508,32 @@ def _metrics_adapter_for(profile: V12ModelProfileSpec) -> _MetricsAdapter:
     ):
         return _MetricsAdapter.SGLANG_QWEN38
     raise _runtime_error(V12ModelRuntimeFailure.COMPOSITION_REJECTED)
+
+
+def _installation_context_tokens(
+    router: LLMRouter,
+    profile: V12ModelProfileSpec,
+) -> int:
+    """Return the strictest code-owned launch cap for the exact endpoint."""
+
+    runtime_profile = router.settings.profile
+    caps: list[object] = [runtime_profile.max_model_len]
+    if _metrics_adapter_for(profile) is _MetricsAdapter.SGLANG_QWEN38:
+        launch = runtime_profile.sglang_extra_args
+        if launch is None:
+            raise _runtime_error(V12ModelRuntimeFailure.COMPOSITION_REJECTED)
+        caps.append(launch.max_total_tokens)
+    validated: list[int] = []
+    for value in caps:
+        if (
+            isinstance(value, bool)
+            or not isinstance(value, int)
+            or value <= 0
+            or value > _MAX_INSTALLATION_CONTEXT_TOKENS
+        ):
+            raise _runtime_error(V12ModelRuntimeFailure.COMPOSITION_REJECTED)
+        validated.append(value)
+    return min(validated)
 
 
 def _parse_metrics(body: object, *, served_model_alias: str) -> ModelLoadSample:
@@ -1018,7 +1049,7 @@ def _valid_projection(value: object, *, expected_alias: str) -> V12ServedComplet
 
 def _validate_attested_chat_input(
     router: LLMRouter,
-    profile: V12ModelProfileSpec,
+    leased_context_tokens: int,
     messages: object,
     max_tokens: object,
 ) -> None:
@@ -1028,6 +1059,9 @@ def _validate_attested_chat_input(
         or isinstance(max_tokens, bool)
         or not isinstance(max_tokens, int)
         or max_tokens <= 0
+        or isinstance(leased_context_tokens, bool)
+        or not isinstance(leased_context_tokens, int)
+        or leased_context_tokens <= 0
     ):
         raise _runtime_error(V12ModelRuntimeFailure.COMPLETION_INVALID)
     try:
@@ -1043,7 +1077,8 @@ def _validate_attested_chat_input(
     if (
         len(encoded) > MAX_ATTESTED_CHAT_INPUT_UTF8_BYTES
         or not model_messages_are_secret_free(messages)
-        or router.estimate_messages_tokens(messages) + max_tokens + 256 > profile.max_context_tokens
+        or router.estimate_messages_tokens(messages) + max_tokens + CONTEXT_SAFETY_RESERVE_TOKENS
+        > leased_context_tokens
     ):
         raise _runtime_error(V12ModelRuntimeFailure.COMPLETION_INVALID)
 
@@ -1325,7 +1360,7 @@ class V12ProductionProbeClient(V12ModelProbeClient):
         try:
             return await self._prompt_completion(
                 request.prompt,
-                max_tokens=256,
+                max_tokens=CONTEXT_OUTPUT_RESERVE_TOKENS,
                 absolute_deadline=absolute_deadline,
             )
         except asyncio.CancelledError:
@@ -1528,7 +1563,14 @@ class AttestedV12ModelRuntime:
             metrics_transport,
             sleeper=sleeper,
         )
-        self._gate = V12ModelGate(profile, endpoint_binding_sha256=binding)
+        try:
+            self._gate = V12ModelGate(
+                profile,
+                endpoint_binding_sha256=binding,
+                installation_context_tokens=_installation_context_tokens(router, profile),
+            )
+        except (TypeError, ValueError):
+            raise _runtime_error(V12ModelRuntimeFailure.COMPOSITION_REJECTED) from None
         self._attestation_lock = asyncio.Lock()
 
     @property
@@ -1655,7 +1697,7 @@ class AttestedV12ModelRuntime:
             raise _runtime_error(V12ModelRuntimeFailure.LEASE_REJECTED)
         _validate_attested_chat_input(
             self._seal.router,
-            self._seal.profile,
+            requirements.required_context_tokens,
             messages,
             max_tokens,
         )

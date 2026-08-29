@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import inspect
 import json
 import time
@@ -15,6 +16,7 @@ from friday.model_probe import (
     CANCELLATION_PROBE,
     CONTEXT_PROBE,
     PLAN_PROBE_CASES,
+    QWEN38_CONTEXT_PROBE,
     SYNTHESIS_PROBE,
     SYNTHESIS_PROBES,
     VERIFIER_PROBES,
@@ -32,6 +34,7 @@ from friday.model_probe import (
 )
 from friday.model_profiles import (
     QWEN36_27B_V12_PROFILE,
+    QWEN38_27B_SGLANG_V12_PROFILE,
     ModelCapability,
     ModelEffect,
     V12LiveAttestation,
@@ -263,6 +266,19 @@ async def _run(client: _Client, *, deadline: float | None = None) -> V12LiveAtte
     )
 
 
+async def _run_qwen38(
+    client: _Client,
+    *,
+    deadline: float | None = None,
+) -> V12LiveAttestation:
+    return await run_v12_live_probe(
+        QWEN38_27B_SGLANG_V12_PROFILE,
+        client,
+        endpoint_binding_sha256=_BINDING,
+        absolute_deadline=deadline if deadline is not None else time.monotonic() + 10,
+    )
+
+
 @pytest.mark.asyncio
 async def test_clear_suite_returns_only_the_sanitized_read_only_attestation() -> None:
     client = _Client()
@@ -302,6 +318,72 @@ async def test_clear_suite_returns_only_the_sanitized_read_only_attestation() ->
     )
     assert _BINDING not in repr(report)
     assert _EPOCH_SHA256 not in repr(report)
+
+
+@pytest.mark.asyncio
+async def test_exact_qwen38_sglang_pair_measures_the_40960_context_tier() -> None:
+    client = _Client()
+    client.context = ProbeCompletion(
+        content=json.dumps(
+            {
+                "начало": QWEN38_CONTEXT_PROBE.start_marker,
+                "конец": QWEN38_CONTEXT_PROBE.end_marker,
+            },
+            ensure_ascii=False,
+            separators=(",", ":"),
+        ),
+        finish_reason="stop",
+        tool_calls=(),
+        prompt_tokens=model_probe_module.QWEN38_MINIMUM_PROMPT_TOKENS,
+    )
+
+    report = await _run_qwen38(client)
+
+    assert report.profile_id == QWEN38_27B_SGLANG_V12_PROFILE.profile_id
+    assert report.verified_context_tokens == 40_960
+    assert [request for request in client.requests if isinstance(request, ContextProbeRequest)] == [
+        QWEN38_CONTEXT_PROBE
+    ]
+    assert (
+        QWEN38_CONTEXT_PROBE.minimum_prompt_tokens
+        + model_probe_module.CONTEXT_OUTPUT_RESERVE_TOKENS
+        + model_probe_module.CONTEXT_SAFETY_RESERVE_TOKENS
+        == 40_960
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "prompt_tokens",
+    [
+        model_probe_module.QWEN38_MINIMUM_PROMPT_TOKENS - 1,
+        model_probe_module.MAX_REPORTED_CONTEXT_PROMPT_TOKENS + 1,
+        True,
+        float("nan"),
+    ],
+)
+async def test_qwen38_context_measurement_rejects_short_overflow_bool_and_non_finite_usage(
+    prompt_tokens: Any,
+) -> None:
+    client = _Client()
+    client.context = ProbeCompletion(
+        content=json.dumps(
+            {
+                "начало": QWEN38_CONTEXT_PROBE.start_marker,
+                "конец": QWEN38_CONTEXT_PROBE.end_marker,
+            },
+            ensure_ascii=False,
+            separators=(",", ":"),
+        ),
+        finish_reason="stop",
+        tool_calls=(),
+        prompt_tokens=prompt_tokens,
+    )
+
+    with pytest.raises(ModelProbeError) as raised:
+        await _run_qwen38(client)
+
+    assert raised.value.code is ModelProbeFailure.CONTEXT_INVALID
 
 
 @pytest.mark.asyncio
@@ -1035,6 +1117,7 @@ def test_requests_and_responses_hide_every_prompt_and_model_controlled_string_fr
         *SYNTHESIS_PROBES,
         *VERIFIER_PROBES,
         CONTEXT_PROBE,
+        QWEN38_CONTEXT_PROBE,
         CANCELLATION_PROBE,
         response,
     )
@@ -1043,19 +1126,31 @@ def test_requests_and_responses_hide_every_prompt_and_model_controlled_string_fr
     assert "Обобщи приложенный" not in rendered
     assert "СЕВЕР-42" not in rendered
     assert CONTEXT_PROBE.start_marker not in rendered
+    assert QWEN38_CONTEXT_PROBE.start_marker not in rendered
     assert "натуральные числа" not in rendered
     assert "PRIVATE" not in rendered
 
 
 def test_context_prompt_requires_one_bare_json_object_without_surrounding_text() -> None:
-    assert CONTEXT_PROBE.prompt.endswith(
+    suffix = (
         " Ответ должен быть одним JSON-объектом без Markdown, без блоков кода и без любого "
         "текста до или после объекта."
+    )
+    assert CONTEXT_PROBE.prompt.endswith(suffix)
+    assert QWEN38_CONTEXT_PROBE.prompt.endswith(suffix)
+
+
+def test_qwen36_context_request_remains_byte_and_budget_compatible() -> None:
+    assert CONTEXT_PROBE.case_id == "context_8k_edges"
+    assert CONTEXT_PROBE.minimum_prompt_tokens == 8_192
+    assert hashlib.sha256(CONTEXT_PROBE.prompt.encode("utf-8")).hexdigest() == (
+        "e69b7ae858a8a6694b8ec1a61e3ddff5c998fe523b579d833dc5ccf8be7d417a"
     )
 
 
 def test_registered_profile_binds_the_exact_probe_suite_manifest() -> None:
     assert model_probe_module._probe_suite_sha256() == QWEN36_27B_V12_PROFILE.probe_suite_sha256
+    assert model_probe_module._probe_suite_sha256() == (QWEN38_27B_SGLANG_V12_PROFILE.probe_suite_sha256)
 
 
 def test_cancellation_budget_covers_attested_load_and_remote_drain() -> None:
@@ -1087,6 +1182,8 @@ def test_probe_module_has_no_environment_file_or_network_implementation() -> Non
         "cancellation_contract",
         "idle_convergence_timeout",
         "idle_convergence_interval",
+        "qwen38_context_prompt",
+        "context_reserve",
     ],
 )
 def test_suite_hash_commits_to_prompts_validators_cases_timeouts_and_cancellation(
@@ -1136,11 +1233,26 @@ def test_suite_hash_commits_to_prompts_validators_cases_timeouts_and_cancellatio
             "POST_CONTEXT_IDLE_CONVERGENCE_TIMEOUT_SEC",
             model_probe_module.POST_CONTEXT_IDLE_CONVERGENCE_TIMEOUT_SEC + 1,
         )
-    else:
+    elif mutation == "idle_convergence_interval":
         monkeypatch.setattr(
             model_probe_module,
             "POST_CONTEXT_IDLE_RETRY_INTERVAL_SEC",
             model_probe_module.POST_CONTEXT_IDLE_RETRY_INTERVAL_SEC + 0.01,
+        )
+    elif mutation == "qwen38_context_prompt":
+        monkeypatch.setattr(
+            model_probe_module,
+            "QWEN38_CONTEXT_PROBE",
+            replace(
+                QWEN38_CONTEXT_PROBE,
+                prompt=f"{QWEN38_CONTEXT_PROBE.prompt} changed",
+            ),
+        )
+    else:
+        monkeypatch.setattr(
+            model_probe_module,
+            "CONTEXT_OUTPUT_RESERVE_TOKENS",
+            model_probe_module.CONTEXT_OUTPUT_RESERVE_TOKENS + 1,
         )
 
     assert model_probe_module._probe_suite_sha256() != baseline
