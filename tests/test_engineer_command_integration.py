@@ -2280,6 +2280,7 @@ async def test_bridge_binds_outer_update_to_approval_callback(tmp_path: Path) ->
         "data": "apr:yes:apr_0123456789abcdef",
     }
     try:
+        bridge._inbox.store({"update_id": 777, "callback_query": callback})  # noqa: SLF001
         await bridge._process_callback_query(  # noqa: SLF001
             _TelegramOK(),
             backend,

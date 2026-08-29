@@ -354,7 +354,10 @@ EXPECTED_BRIDGE: dict[str, str] = {
     "_log_loop_failure": "(self, loop_name: 'str', error: 'BaseException') -> 'None'",
     "_media_group_id": "(update: 'dict[str, Any]') -> 'str'",
     "_notify_backend_recovered": "(self, telegram: 'httpx.AsyncClient') -> 'None'",
-    "_notify_dead_letter": "(self, telegram: 'httpx.AsyncClient', update: 'dict[str, Any]', *, permanent: 'bool') -> 'None'",
+    "_notify_dead_letter": (
+        "(self, telegram: 'httpx.AsyncClient', update: 'dict[str, Any]', *, permanent: 'bool', "
+        "resume_key: 'int | None' = None, resume_base: 'int | None' = None) -> 'bool'"
+    ),
     "_outbound_loop": "(self, telegram: 'httpx.AsyncClient', backend: 'httpx.AsyncClient') -> 'None'",
     "_poll_loop": "(self, telegram: 'httpx.AsyncClient', backend: 'httpx.AsyncClient') -> 'None'",
     "_poll_watchdog": "(self) -> 'None'",
@@ -401,8 +404,8 @@ EXPECTED_BRIDGE: dict[str, str] = {
     "_send_message_returning_id": "(self, client: 'httpx.AsyncClient', chat_id: 'int', text: 'str') -> 'int'",
     "_send_document": "(self, client: 'httpx.AsyncClient', chat_id: 'int', filename: 'str', content_bytes: 'bytes', *, caption: 'str' = '', mime_type: 'str' = 'text/plain; charset=utf-8') -> 'None'",
     "_send_voice": "(self, client: 'httpx.AsyncClient', chat_id: 'int', audio_bytes: 'bytes') -> 'None'",
-    "_deliver_generated_files": "(self, telegram: 'httpx.AsyncClient', chat_id: 'int', response: 'dict[str, Any]') -> 'None'",
-    "_deliver_voice_reply": "(self, telegram: 'httpx.AsyncClient', chat_id: 'int', response: 'dict[str, Any]') -> 'None'",
+    "_deliver_generated_files": "(self, telegram: 'httpx.AsyncClient', chat_id: 'int', response: 'dict[str, Any]', *, resume_key: 'int | None' = None, after_part: 'int' = 0) -> 'int'",
+    "_deliver_voice_reply": "(self, telegram: 'httpx.AsyncClient', chat_id: 'int', response: 'dict[str, Any]', *, resume_key: 'int | None' = None, after_part: 'int' = 0) -> 'int'",
     "_send_message": (
         "(self, client: 'httpx.AsyncClient', chat_id: 'int', text: 'str', *, "
         "reply_markup: 'dict[str, Any] | None' = None, resume_key: 'int | None' = None, "
@@ -425,8 +428,10 @@ EXPECTED_BRIDGE: dict[str, str] = {
     "stop": "(self) -> 'None'",
 }
 EXPECTED_INBOX: dict[str, str] = {
+    "admit_polled_update": "(self, update: 'dict[str, Any]') -> 'tuple[bool, int]'",
     "archive_password_challenge": "(self, chat_id: 'int', user_id: 'int') -> 'dict[str, Any] | None'",
     "cache_backend_response": "(self, update_id: 'int', response: 'dict[str, Any]') -> 'None'",
+    "claim_update_effect_attempt": "(self, update_id: 'int', kind: 'str') -> 'str'",
     "close": "(self) -> 'None'",
     "contiguous_pending_rows": "(self, ordering_key: 'str', anchor_update_id: 'int', *, limit: 'int') -> 'list[dict[str, Any]]'",
     "answer_chunks_sent": "(self, update_id: 'int') -> 'int'",
@@ -442,6 +447,7 @@ EXPECTED_INBOX: dict[str, str] = {
     "confirm_notification_status_reconciled": "(self, notification_id: 'str') -> 'None'",
     "dead_letters": "(self, *, limit: 'int' = 100) -> 'list[dict[str, Any]]'",
     "delivered_notification_ids": "(self) -> 'set[str]'",
+    "edit_prompt_target": "(self, prompt_message_id: 'int') -> 'str'",
     "forget_delivered_notifications": "(self, notification_ids: 'list[str]') -> 'None'",
     "forget_notification_delivery_parts": "(self, notification_ids: 'list[str]') -> 'None'",
     "generated_file_was_delivered": "(self, delivery_key: 'str') -> 'bool'",
@@ -460,6 +466,7 @@ EXPECTED_INBOX: dict[str, str] = {
     "pending": "(self, *, now: 'float | None' = None, limit: 'int' = 20) -> 'list[dict[str, Any]]'",
     "record_answer_chunks_sent": "(self, update_id: 'int', count: 'int') -> 'None'",
     "record_uncertain_answer_chunk": "(self, update_id: 'int', count: 'int') -> 'None'",
+    "release_update_effect_attempt": "(self, update_id: 'int', kind: 'str') -> 'bool'",
     "confirm_answer_chunk_delivery": "(self, update_id: 'int', count: 'int') -> 'bool'",
     "remember_edit_prompt": "(self, prompt_message_id: 'int', knowledge_id: 'str') -> 'None'",
     "remember_archive_password_challenge": "(self, chat_id: 'int', user_id: 'int', document: 'dict[str, Any]', *, safe_query: 'str' = '', original_message_id: 'int' = 0, ttl_sec: 'float' = 3600.0) -> 'None'",
@@ -494,6 +501,13 @@ EXPECTED_INBOX: dict[str, str] = {
         "(self, chat_id: 'int', operation_id: 'str', message_id: 'int', revision: 'int', "
         "terminal: 'bool', *, expected_revision: 'int | None') -> 'bool'"
     ),
+    "update_requires_retry": "(self, update_id: 'int') -> 'bool'",
+    "update_effect_attempt_kind": "(self, update_id: 'int') -> 'str | None'",
+    "pending_dead_letter_notice": ("(self, update_ids: 'list[int]') -> 'tuple[bool, str, int] | None'"),
+    "prepare_dead_letter_notice_many": (
+        "(self, update_ids: 'list[int]', error: 'str', *, permanent: 'bool') -> 'None'"
+    ),
+    "finish_dead_letter_notice_many": "(self, update_ids: 'list[int]') -> 'None'",
 }
 
 

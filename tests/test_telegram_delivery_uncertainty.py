@@ -84,7 +84,7 @@ class _ConcreteRejectTelegram(_Telegram):
         if not url.endswith("/sendMessage"):
             return httpx.Response(200, json={"ok": True, "result": {}}, request=request)
         self.send_attempts += 1
-        return httpx.Response(503, json={"ok": False}, request=request)
+        return httpx.Response(400, json={"ok": False}, request=request)
 
 
 class _AcceptedNoticeTransportFailure(_Telegram):
