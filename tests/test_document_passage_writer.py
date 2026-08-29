@@ -1,4 +1,4 @@
-"""Focused acceptance for the bounded schema-47 document-passage writer."""
+"""Focused acceptance for the bounded schema-48 document-passage writer."""
 
 from __future__ import annotations
 

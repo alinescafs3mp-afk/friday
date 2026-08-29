@@ -2008,7 +2008,7 @@ def test_backup_export_and_account_preflight_are_schema46_closed(storage, tmp_pa
             now=LATER,
         )
     backup = storage.create_backup(label="engineer-work-item")
-    assert backup["schema_version"] == 47
+    assert backup["schema_version"] == 48
     assert storage.verify_backup(str(backup["database"]))["ok"] is True
 
     exported = storage.export_user(OWNER)

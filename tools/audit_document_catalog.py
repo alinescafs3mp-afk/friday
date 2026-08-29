@@ -2,7 +2,7 @@
 """Secret-free, read-only audit of document discoverability in an offline DB copy.
 
 The auditor recognizes Friday's exact, body-free ``document_catalog`` and
-schema-47 document-passage sidecars.  A missing or look-alike table remains
+schema-48 document-passage sidecars.  A missing or look-alike table remains
 ``not_available``/``unsupported``; it is never guessed into coverage.  Current,
 explicitly incomplete, missing and stale source-bound rows are counted
 separately, while later embedding and typed-date projections continue to report
@@ -321,7 +321,7 @@ def _document_catalog_schema_fingerprint(conn: sqlite3.Connection) -> str | None
 
 
 def _document_passage_schema_fingerprint(conn: sqlite3.Connection) -> str | None:
-    """Delegate exact recognition to the shipped schema-47 validator."""
+    """Delegate exact recognition to the shipped schema-48 validator."""
 
     try:
         schema_module = importlib.import_module("friday.document_catalog.passage_schema")

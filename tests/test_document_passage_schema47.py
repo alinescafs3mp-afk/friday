@@ -36,6 +36,7 @@ from friday.document_catalog.passage_schema import (
     _register_released_document_passage_v2_connection_functions,
     _released_v2_projection,
     _validate_released_document_passage_schema_v2,
+    document_passage_rows_match_current_projection,
     document_passage_schema_fingerprint,
     document_passage_set_sha256,
     register_document_passage_connection_functions,
@@ -226,9 +227,6 @@ def _released_passage_database_snapshot(database: Path) -> tuple[object, ...]:
                 conn.execute(
                     """SELECT type,name,tbl_name,sql FROM sqlite_master
                          WHERE sql IS NOT NULL
-                           AND (name LIKE 'document_passage%'
-                                OR tbl_name LIKE 'document_passage%'
-                                OR name LIKE 'idx_document_passage_%')
                          ORDER BY type,name"""
                 )
             ),
@@ -446,6 +444,69 @@ def test_current_spans_are_exact_and_data_tamper_fails_closed(storage: FridaySto
     storage.conn.rollback()
 
 
+def test_public_v3_row_authenticator_rechecks_body_digest_and_exact_carrier_shape(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    body = "Prelude sentence. " + ("x" * 1_400)
+    projection = DocumentPassageProjection.from_complete_text(
+        raw_object_id="raw_passage_authenticator",
+        source_version=1,
+        source_content_sha256="a" * 64,
+        extracted_text=body,
+    )
+    digest = projection.extracted_text_sha256
+    rows = tuple(
+        (item.chunk_index, item.start_char, item.end_char, item.content_sha256)
+        for item in projection.passages
+    )
+    assert digest is not None
+
+    cache_key = f"{DOCUMENT_PASSAGE_INDEX_REVISION}\0{digest}"
+    with passage_schema_module._PASSAGE_ROWS_CACHE_LOCK:
+        passage_schema_module._PASSAGE_ROWS_CACHE.pop(cache_key, None)
+    original_builder = DocumentPassageProjection.from_complete_text
+    rebuilds: list[str] = []
+
+    def counted_builder(_cls, **kwargs):
+        rebuilds.append(str(kwargs["raw_object_id"]))
+        return original_builder(**kwargs)
+
+    monkeypatch.setattr(
+        DocumentPassageProjection,
+        "from_complete_text",
+        classmethod(counted_builder),
+    )
+
+    assert document_passage_rows_match_current_projection(body, digest, rows) is True
+    assert rebuilds == ["raw_0000000000000000"]
+    assert document_passage_rows_match_current_projection(body, digest, rows) is True
+    assert rebuilds == ["raw_0000000000000000"]
+    alternate_rows = ((rows[0][0], rows[0][1], rows[0][2], "b" * 64), *rows[1:])
+    assert document_passage_rows_match_current_projection(body, digest, alternate_rows) is False
+    assert rebuilds == ["raw_0000000000000000"]
+    # The successful call warmed the revision-keyed cache. A different body
+    # still must re-hash and fail before that cached topology can be reused.
+    assert document_passage_rows_match_current_projection(body + "!", digest, rows) is False
+    assert document_passage_rows_match_current_projection(body, "b" * 64, rows) is False
+    assert document_passage_rows_match_current_projection(body, digest, list(rows)) is False
+    assert (
+        document_passage_rows_match_current_projection(
+            body,
+            digest,
+            (list(rows[0]), *rows[1:]),
+        )
+        is False
+    )
+    assert (
+        document_passage_rows_match_current_projection(
+            body,
+            digest,
+            ((True, *rows[0][1:]), *rows[1:]),
+        )
+        is False
+    )
+
+
 def test_tracked_schema_47_fixture_matches_frozen_v2_ddl_and_data(tmp_path: Path) -> None:
     database = _unpack_schema_47(tmp_path, "schema47-frozen-v2.sqlite3")
     with sqlite3.connect(database) as released:
@@ -589,6 +650,42 @@ def test_marker_47_with_mixed_v2_v3_ddl_fails_closed_without_mutation(
     finally:
         broken.close(final=True)
     assert _released_passage_database_snapshot(database) == before
+
+
+def test_marker_47_external_passage_dependency_fails_before_rename_without_mutation(
+    settings,
+    tmp_path: Path,
+) -> None:
+    database = _unpack_schema_47(tmp_path, "schema47-external-passage-dependency.sqlite3")
+    with sqlite3.connect(database) as rogue:
+        rogue.execute(
+            """CREATE TRIGGER rogue_raw_passage_dependency
+               AFTER UPDATE OF source_ref ON raw_objects
+               BEGIN
+                   SELECT EXISTS(
+                       SELECT 1 FROM document_passages passage
+                        WHERE passage.raw_object_id=NEW.id
+                   );
+               END"""
+        )
+        rogue.commit()
+    before = _released_passage_database_snapshot(database)
+
+    broken = FridayStorage(replace(settings, database_path=database, database_must_exist=True))
+    try:
+        with pytest.raises(sqlite3.DatabaseError, match="external dependency"):
+            broken.execute("SELECT 1").fetchone()
+    finally:
+        broken.close(final=True)
+
+    assert _released_passage_database_snapshot(database) == before
+    with sqlite3.connect(database) as unchanged:
+        trigger_sql = unchanged.execute(
+            "SELECT sql FROM sqlite_master WHERE name='rogue_raw_passage_dependency'"
+        ).fetchone()
+        assert trigger_sql is not None
+        assert "document_passages" in str(trigger_sql[0])
+        assert "schema47" not in str(trigger_sql[0])
 
 
 def test_marker_47_with_exact_v3_is_rejected_as_marker_rollback(

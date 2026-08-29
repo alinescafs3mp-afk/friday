@@ -30,6 +30,10 @@ _PassageRows = tuple[tuple[int, int, int, str], ...]
 _PASSAGE_ROWS_CACHE_LIMIT = 32
 _PASSAGE_ROWS_CACHE: OrderedDict[str, _PassageRows] = OrderedDict()
 _PASSAGE_ROWS_CACHE_LOCK = threading.Lock()
+_PASSAGE_TABLE_REFERENCE_RE = re.compile(
+    r"(?<![0-9A-Za-z_])(?:document_passage_projections|document_passages)(?![0-9A-Za-z_])",
+    re.IGNORECASE,
+)
 
 _BACKFILL_PENDING = "backfill_pending"
 _EXTRACTION_FAILED = "extraction_failed"
@@ -591,6 +595,48 @@ def _passage_rows(
     return rows
 
 
+def document_passage_rows_match_current_projection(
+    raw_content: object,
+    extracted_digest: object,
+    rows: object,
+) -> bool:
+    """Authenticate canonical stored rows against the exact current v3 body.
+
+    The body digest is recomputed even on a cache hit.  This keeps callers from
+    using a digest-keyed cached topology with different source text, while the
+    exact tuple checks prevent list/tuple subclasses, booleans, or other
+    equality-compatible carrier shapes from crossing the schema seam.
+    """
+
+    try:
+        digest = _valid_digest(extracted_digest)
+        if (
+            type(raw_content) is not str
+            or digest is None
+            or _exact_text_sha256(raw_content) != digest
+            or type(rows) is not tuple
+            or not 1 <= len(rows) <= DOCUMENT_PASSAGE_MAX_COUNT
+        ):
+            return False
+        for expected_index, row in enumerate(rows):
+            if type(row) is not tuple or len(row) != 4:
+                return False
+            chunk_index, start_char, end_char, content_digest = row
+            if (
+                type(chunk_index) is not int
+                or chunk_index != expected_index
+                or type(start_char) is not int
+                or type(end_char) is not int
+                or not 0 <= start_char < end_char <= 1_000_000_000
+                or _valid_digest(content_digest) is None
+            ):
+                return False
+        expected = _passage_rows(raw_content, digest)
+        return expected is not None and rows == expected
+    except (TypeError, ValueError, UnicodeError):
+        return False
+
+
 def _span_valid(
     raw_content: object,
     extracted_digest: object,
@@ -831,6 +877,34 @@ def _schema_objects(conn: sqlite3.Connection) -> dict[tuple[str, str], str]:
     }
 
 
+def _validate_no_external_document_passage_dependencies(
+    conn: sqlite3.Connection,
+    *,
+    canonical_objects: dict[tuple[str, str], str],
+    schema_version: int,
+) -> None:
+    """Reject SQL objects outside the sidecar that depend on its tables.
+
+    SQLite rewrites references in arbitrary triggers/views when a table is
+    renamed.  The schema-47 rebuild therefore must prove that every object
+    referring to either passage table is one of the exact authenticated owned
+    objects before the first ``ALTER TABLE`` executes.
+    """
+
+    for kind, name, sql in conn.execute(
+        """SELECT type,name,sql FROM sqlite_master
+             WHERE sql IS NOT NULL
+             ORDER BY type,name"""
+    ):
+        key = (str(kind), str(name))
+        if key in canonical_objects:
+            continue
+        if _PASSAGE_TABLE_REFERENCE_RE.search(str(sql)) is not None:
+            raise sqlite3.DatabaseError(
+                f"Schema {schema_version} document passage external dependency is unexpected"
+            )
+
+
 def _schema_fingerprint(objects: dict[tuple[str, str], str]) -> str:
     material = "\n".join(f"{kind}\0{name}\0{sql}" for (kind, name), sql in sorted(objects.items()))
     return hashlib.sha256(material.encode("utf-8", errors="strict")).hexdigest()
@@ -1013,6 +1087,11 @@ def validate_document_passage_schema(
         return
     if installed != _canonical_document_passage_schema_objects():
         raise sqlite3.DatabaseError("Schema 48 document passage DDL is incomplete or altered")
+    _validate_no_external_document_passage_dependencies(
+        conn,
+        canonical_objects=_canonical_document_passage_schema_objects(),
+        schema_version=48,
+    )
     _validate_document_passage_shape(conn, schema_version=48)
     if validate_data:
         _validate_document_passage_data(conn, schema_version=48)
@@ -1033,6 +1112,11 @@ def _validate_released_document_passage_schema_v2(
         return
     if installed != _canonical_released_document_passage_schema_v2_objects():
         raise sqlite3.DatabaseError("Schema 47 document passage DDL is incomplete or altered")
+    _validate_no_external_document_passage_dependencies(
+        conn,
+        canonical_objects=_canonical_released_document_passage_schema_v2_objects(),
+        schema_version=47,
+    )
     _validate_document_passage_shape(conn, schema_version=47)
     if not validate_data:
         return
@@ -1224,6 +1308,7 @@ __all__ = [
     "DOCUMENT_PASSAGE_SCHEMA",
     "DOCUMENT_PASSAGE_SCHEMA_VERSION",
     "document_passage_schema_fingerprint",
+    "document_passage_rows_match_current_projection",
     "document_passage_set_sha256",
     "install_document_passage_schema",
     "register_document_passage_connection_functions",
