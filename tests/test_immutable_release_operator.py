@@ -4503,6 +4503,20 @@ def _semantic_supervisor_promoted_payload(
     return evidence_file, values, payload
 
 
+def test_semantic_supervisor_operator_uses_current_product_sample_policy() -> None:
+    from friday.orchestration.supervisor_assist_promotion import (
+        SUPERVISOR_ASSIST_PROMOTION_MIN_PRODUCT_OBSERVATIONS,
+        SUPERVISOR_ASSIST_PROMOTION_POLICY_SHA256,
+    )
+
+    assert operator._SEMANTIC_SUPERVISOR_MIN_PRODUCT_OBSERVATIONS == (  # noqa: SLF001
+        SUPERVISOR_ASSIST_PROMOTION_MIN_PRODUCT_OBSERVATIONS
+    )
+    assert operator._SEMANTIC_SUPERVISOR_PROMOTION_POLICY_SHA256 == (  # noqa: SLF001
+        SUPERVISOR_ASSIST_PROMOTION_POLICY_SHA256
+    )
+
+
 def _semantic_effect_maturity_file(
     tmp_path: Path,
     *,

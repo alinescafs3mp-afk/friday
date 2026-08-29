@@ -900,7 +900,7 @@ _SEMANTIC_SUPERVISOR_PRODUCT_WINDOW_SCHEMA = "friday.semantic-supervisor-product
 _SEMANTIC_SUPERVISOR_READINESS_EVIDENCE_SCHEMA = "friday.supervisor-assist-readiness-evidence.v2"
 _SEMANTIC_SUPERVISOR_OUTCOME_EVIDENCE_SCHEMA = "friday.supervisor-assist-outcome-evidence.v2"
 _SEMANTIC_SUPERVISOR_PROMOTION_POLICY_SHA256 = (
-    "496b65744334196de8e53499b6edbe2bc8c75333411a8871ddba5384ec20f8c1"
+    "dd9878b5d547af53f950ccba8dccb9afc56d084157a48bc7394f90b9dd2b91c5"
 )
 _SEMANTIC_SUPERVISOR_RUNTIME_PROFILE_ID = (
     "gptoss20b-2335df123cac7fc0e13e347cde1e1ffa8562daafcaf0fc76ade1a851d2b0ff1f"
@@ -942,7 +942,7 @@ _SEMANTIC_EFFECT_POLICY_SHA256 = hashlib.sha256(
         allow_nan=False,
     ).encode("utf-8")
 ).hexdigest()
-_SEMANTIC_SUPERVISOR_MIN_PRODUCT_OBSERVATIONS = 20
+_SEMANTIC_SUPERVISOR_MIN_PRODUCT_OBSERVATIONS = 1
 _SEMANTIC_SUPERVISOR_MAX_UNNECESSARY_CALL_RATE_BPS = 0
 _SEMANTIC_EFFECT_MATURITY_ARTIFACT_SCHEMA = "friday.semantic-supervisor-read-only-maturity-artifact.v1"
 _SEMANTIC_EFFECT_MATURITY_FACTS_SCHEMA = "friday.semantic-supervisor-read-only-maturity-facts.v1"
