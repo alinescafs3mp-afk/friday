@@ -20,8 +20,9 @@ Node 22.23.2, NumPy 2.5.1, Playwright 1.61.0, установленный Chromiu
 1228 и официальный бинарник UnRAR 7.20. Затем полный запуск идёт тремя фазами:
 `static` (Ruff, mypy, Bandit HIGH и `node --check`), `tests` (не-браузерный
 pytest) и `ui` (Playwright). UI-модули отделены от общего pytest, чтобы их
-process-wide серверы не пересекались; по умолчанию им выделяется 12 workers —
-по одному на модуль (`--ui-workers 1` задаёт настоящий serial `-n 0`). JUnit
+process-wide серверы не пересекались; по умолчанию браузерная фаза идёт
+последовательно (`--ui-workers 1`, настоящий serial `-n 0`). Явный override
+может выделить до 12 workers — по одному на модуль. JUnit
 обеих pytest-фаз сверяется по точным nodeid с полной коллекцией, и любой
 failed/error/skipped-тест в любой фазе делает гейт красным. Параметры
 `--phase static`, `--phase tests` и `--phase ui` предназначены только для локальной

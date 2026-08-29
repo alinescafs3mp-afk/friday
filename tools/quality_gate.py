@@ -1131,9 +1131,10 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--ui-workers",
         type=_positive_workers,
-        default=len(UI_TEST_MODULES),
+        default=1,
         help=(
-            f"UI workers; use 1 for a serial browser run (default: {len(UI_TEST_MODULES)}, one per UI module)"
+            "UI workers (default: 1, a serial browser run); "
+            f"explicit overrides may use at most {len(UI_TEST_MODULES)} (one per UI module)"
         ),
     )
     parser.add_argument(

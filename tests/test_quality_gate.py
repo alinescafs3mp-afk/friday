@@ -414,6 +414,20 @@ def test_ui_tests_use_one_loadscope_worker_per_module() -> None:
     assert f"{quality_gate._COLLECTION_OPTION}=collection.json" in command.argv
 
 
+def test_ui_worker_default_is_true_serial() -> None:
+    args = quality_gate.build_parser().parse_args([])
+
+    assert args.ui_workers == 1
+    command = quality_gate.ui_command(
+        report_path="report.xml",
+        collection_path="collection.json",
+        workers=args.ui_workers,
+        python="python",
+    )
+    assert command.argv[12:14] == ("-n", "0")
+    assert "--dist=loadscope" not in command.argv
+
+
 def test_ui_tests_have_a_serial_fallback() -> None:
     command = quality_gate.ui_command(
         report_path="report.xml",
