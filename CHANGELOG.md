@@ -17,6 +17,9 @@
 - Makes one genuine joined production observation sufficient for promotion
   readiness while retaining 20 as the useful operating target, and seals
   assist/canary evidence to the exact live predecessor mode and policy.
+- Revalidates the exact consumed representative-window witness from durable
+  owner storage on promoted restart; missing or mismatched evidence fails
+  closed while an optional offline secondary remains a primary-only fallback.
 
 ## 0.207.70 — 2026-08-29
 
