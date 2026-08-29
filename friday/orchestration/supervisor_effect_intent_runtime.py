@@ -57,7 +57,7 @@ from friday.orchestration.supervisor_effect_maturity import (
     load_accepted_read_only_maturity_witness,
 )
 from friday.orchestration.supervisor_trace_join import load_primary_trace_projection
-from friday.orchestration.turn_context import AuthenticatedTurnContext, TurnContextError
+from friday.orchestration.turn_context import AuthenticatedTurnContext
 from friday.orchestration.turn_context_call_scope import require_authenticated_chat_call_scope
 from friday.orchestration.turn_context_runtime import (
     current_primary_authenticated_turn_context,
@@ -920,39 +920,42 @@ class SupervisorEffectIntentShadowRuntime:
         if len(self._tasks) >= _MAX_PENDING:
             self._skip_counts["capacity"] += 1
             return
-        if authenticated_context is not None:
-            try:
+        observation = self._observe(
+            user_id=user_id,
+            message_id=message_id,
+            conversation_id=conversation_id,
+            projection=projection,
+            absolute_deadline_monotonic=(
+                absolute_deadline_monotonic if authenticated_context is not None else None
+            ),
+        )
+        task: asyncio.Task[None] | None = None
+        try:
+            if authenticated_context is not None:
                 reserve_authenticated_advisory_call(authenticated_context)
-            except TurnContextError:
-                self._skip_counts["capacity"] += 1
-                return
             with suspend_authenticated_turn_context():
                 task = asyncio.create_task(
-                    self._observe(
-                        user_id=user_id,
-                        message_id=message_id,
-                        conversation_id=conversation_id,
-                        projection=projection,
-                        absolute_deadline_monotonic=absolute_deadline_monotonic,
-                    ),
+                    observation,
                     name="semantic-supervisor-effect-shadow",
                 )
                 self._tasks.add(task)
                 task.add_done_callback(self._tasks.discard)
-            return
-        else:
-            task = asyncio.create_task(
-                self._observe(
-                    user_id=user_id,
-                    message_id=message_id,
-                    conversation_id=conversation_id,
-                    projection=projection,
-                    absolute_deadline_monotonic=None,
-                ),
-                name="semantic-supervisor-effect-shadow",
-            )
-        self._tasks.add(task)
-        task.add_done_callback(self._tasks.discard)
+        except Exception:
+            # This observer is optional and runs only after a successful
+            # primary response.  In particular, the authenticated deadline
+            # can expire after the shared slot is reserved but before the
+            # suspension seam admits task creation.  Scheduling failure must
+            # therefore remain a closed observation skip, never replace the
+            # already-successful primary response.
+            if task is None:
+                observation.close()
+            else:
+                task.cancel()
+                self._tasks.discard(task)
+                if task.done() and not task.cancelled():
+                    with suppress(Exception):
+                        task.exception()
+            self._skip_counts["capacity"] += 1
 
     async def chat(self, user_id: str, message: str, **kwargs: Any) -> dict[str, Any]:
         """Call primary exactly once; any later observation is non-owning."""

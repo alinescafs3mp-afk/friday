@@ -77,6 +77,7 @@ def _turn(
     *,
     pending: PendingDurableTurnAdmission | None = None,
     max_advisory_calls: int = 1,
+    monotonic_clock: list[int] | None = None,
 ) -> tuple[TurnContextIssuer, AuthenticatedTurnContext, ActorContext, float]:
     actor = ActorContext(
         user_id="owner",
@@ -85,7 +86,10 @@ def _turn(
         identity_id="owner-principal",
         session_id=f"session-{label}",
     )
-    issuer = TurnContextIssuer(hashlib.sha256(label.encode("ascii")).digest())
+    issuer = TurnContextIssuer(
+        hashlib.sha256(label.encode("ascii")).digest(),
+        _monotonic_ns=((lambda: monotonic_clock[0]) if monotonic_clock is not None else time.monotonic_ns),
+    )
     deadline = time.monotonic() + 2.0
     deadline_ns = int(deadline * 1_000_000_000)
     deadline = deadline_ns / 1_000_000_000
@@ -292,6 +296,77 @@ async def test_effect_shadow_uses_shared_slot_context_deadline_and_detached_auth
     assert response is primary.response
     assert primary.kwargs["_authenticated_turn_context"] is context
     assert selected_deadlines[0] <= context.inherited_budget.safety_deadline.monotonic_ns / 1e9
+    await wrapper.close()
+
+
+@pytest.mark.asyncio
+async def test_effect_shadow_deadline_flip_after_reservation_cannot_replace_primary(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import friday.orchestration.supervisor_effect_intent_runtime as module
+
+    clock = [time.monotonic_ns()]
+    issuer, context, actor, deadline = _turn("outer-effect-deadline-flip", monotonic_clock=clock)
+    primary = _Primary(
+        {
+            "conversation_id": _CONVERSATION,
+            "message_id": "message-1",
+            "message": "primary",
+        }
+    )
+    primary.expected_context = context
+    witness = SimpleNamespace(
+        artifact_file_sha256="1" * 64,
+        maturity_facts_sha256="2" * 64,
+        source_revision_sha256="3" * 64,
+        registry_binding_sha256="4" * 64,
+        effect_registry_binding_sha256="5" * 64,
+    )
+    monkeypatch.setattr(
+        module, "accepted_read_only_maturity_witness_is_current", lambda value: value is witness
+    )
+    selected = False
+
+    async def forbidden_select(_scheduler: object, **_kwargs: Any) -> EffectIntentSelectionV2:
+        nonlocal selected
+        selected = True
+        raise AssertionError("expired optional observer must not start")
+
+    monkeypatch.setattr(module, "select_supervisor_effect_intent", forbidden_select)
+    original_reserve = module.reserve_authenticated_advisory_call
+
+    def reserve_then_expire(expected: AuthenticatedTurnContext | None = None) -> int:
+        reserved = original_reserve(expected)
+        clock[0] = context.inherited_budget.safety_deadline.monotonic_ns
+        return reserved
+
+    monkeypatch.setattr(module, "reserve_authenticated_advisory_call", reserve_then_expire)
+    wrapper = SupervisorEffectIntentShadowRuntime(
+        settings=SimpleNamespace(
+            semantic_supervisor_effect_mode="shadow",
+            semantic_supervisor_effect_evidence_sha256="1" * 64,
+        ),
+        primary=primary,
+        scheduler=_EffectScheduler(),  # type: ignore[arg-type]
+        storage=_EffectStorage(),
+        maturity_witness=witness,  # type: ignore[arg-type]
+    )
+
+    with bind_authenticated_turn_context(issuer, context):
+        response = await wrapper.chat(
+            "owner",
+            _MESSAGE,
+            **_chat_kwargs(actor, deadline),
+            _authenticated_turn_context=context,
+        )
+
+    await asyncio.sleep(0)
+    assert response is primary.response
+    assert primary.calls == 1
+    assert primary.kwargs["_authenticated_turn_context"] is context
+    assert selected is False
+    assert not wrapper._tasks  # noqa: SLF001
+    assert wrapper._skip_counts["capacity"] == 1  # noqa: SLF001
     await wrapper.close()
 
 
