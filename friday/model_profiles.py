@@ -692,7 +692,7 @@ _QWEN36_27B_PLANNER_CONTRACT_SHA256 = _version_sha256(
 # semantics—not merely a list of case names.  Keeping the digest here avoids a
 # model_profiles -> orchestration/model_probe import cycle; the probe refuses a
 # profile if its independently recomputed manifest differs by one byte.
-_QWEN36_27B_PROBE_SUITE_SHA256 = "21ef376f6e84e75074be25bde33779f758d95157850a9e0cf997bb09738eb836"
+_QWEN36_27B_PROBE_SUITE_SHA256 = "84870f819a21c25dcd4d81770ab11eb9383b2c8d33d1228f60de3cd88d769774"
 
 QWEN36_27B_V12_PROFILE = V12ModelProfileSpec(
     profile_id="qwen36-27b-nvfp4-nvidia:dispatcher:v12.13",

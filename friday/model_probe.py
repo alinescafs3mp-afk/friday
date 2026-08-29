@@ -482,10 +482,11 @@ QWEN38_CONTEXT_PROBE = ContextProbeRequest(
     prompt=_context_prompt(
         start_marker=_QWEN38_CONTEXT_START,
         end_marker=_QWEN38_CONTEXT_END,
-        # The current 8K witness uses 1,175 equal-width synthetic units.  Five
-        # times that body reaches the exact q38 operational tier without a raw
-        # fixture; the server-reported prompt usage remains the authority.
-        filler_units=5_875,
+        # The pinned q38 tokenizer measures each equal-width unit as seven
+        # prompt tokens.  Together with the fixed chat-template/prompt framing,
+        # 5,762 units produce the exact 40,448-token input witness, leaving the
+        # closed 256-token output and 256-token safety reserves below.
+        filler_units=5_762,
     ),
     start_marker=_QWEN38_CONTEXT_START,
     end_marker=_QWEN38_CONTEXT_END,

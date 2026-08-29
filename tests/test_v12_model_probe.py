@@ -1148,6 +1148,14 @@ def test_qwen36_context_request_remains_byte_and_budget_compatible() -> None:
     )
 
 
+def test_qwen38_context_request_remains_exact_tokenizer_witness() -> None:
+    assert QWEN38_CONTEXT_PROBE.case_id == "context_40960_edges"
+    assert QWEN38_CONTEXT_PROBE.minimum_prompt_tokens == 40_448
+    assert hashlib.sha256(QWEN38_CONTEXT_PROBE.prompt.encode("utf-8")).hexdigest() == (
+        "4202fe98bc752d3a8c37745189977d750d6c47935c47038aee1f96b25c13e42c"
+    )
+
+
 def test_registered_profile_binds_the_exact_probe_suite_manifest() -> None:
     assert model_probe_module._probe_suite_sha256() == QWEN36_27B_V12_PROFILE.probe_suite_sha256
     assert model_probe_module._probe_suite_sha256() == (QWEN38_27B_SGLANG_V12_PROFILE.probe_suite_sha256)
