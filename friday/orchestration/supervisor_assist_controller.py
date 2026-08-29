@@ -2703,10 +2703,7 @@ class SupervisorAssistController:
                 await asyncio.gather(*record.children, return_exceptions=True)
             return await self._stop_result(record)
 
-    async def _reconcile_retained(
-        self,
-        record: _OwnedRun,
-    ) -> SupervisorAssistResult | bool:
+    async def _reconcile_retained(self, record: _OwnedRun) -> bool:
         scope = (record.graph.user_id, record.graph.conversation_id)
         try:
             current = self._graph_adapter.load_current(
@@ -2773,7 +2770,7 @@ class SupervisorAssistController:
         await self._observe_committed(record, result)
         self._retained_by_scope.pop(scope, None)
         self._known_durable_active_scopes.discard(scope)
-        return result
+        return True
 
     async def reconcile_pending_before_legacy(
         self,
@@ -2781,7 +2778,7 @@ class SupervisorAssistController:
         decision: SupervisorAssistPendingDecision,
         *,
         absolute_deadline: float,
-    ) -> AssistPendingGraphDisposition | SupervisorAssistResult:
+    ) -> AssistPendingGraphDisposition:
         """Retire same-process interrupted work before an overlapping legacy turn."""
 
         pending = decision.pending if type(decision) is SupervisorAssistPendingDecision else None
@@ -2829,12 +2826,9 @@ class SupervisorAssistController:
                 or retained.pending != pending
             ):
                 return AssistPendingGraphDisposition.UNCERTAIN
-            reconciled = await self._reconcile_retained(retained)
-            if type(reconciled) is SupervisorAssistResult:
-                return reconciled
             return (
                 AssistPendingGraphDisposition.RETIRED
-                if reconciled is True
+                if await self._reconcile_retained(retained)
                 else AssistPendingGraphDisposition.UNCERTAIN
             )
 
