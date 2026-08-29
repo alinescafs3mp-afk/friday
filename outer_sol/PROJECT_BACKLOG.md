@@ -14,13 +14,13 @@ either merged here or discarded before that source is removed.
 ## Current production identity
 
 - Branch: `main`
-- Deployed implementation head: `5ad0bcb4ee4b3fe3d5d33de6fd03cad6c888f2f2`
-- Live: Friday `0.207.70` / `5ad0bcb4ee4b3fe3d5d33de6fd03cad6c888f2f2`;
-  tree `a2791bd27bfbe2b2beddaad33fe110a43db8e02e102eb6b32dc5536c97ff1144`;
-  wheel `ea8120e3f5bc8ec17a29ed248528605c454908b8835e7cc5fbeae4fa076bd781`.
-- Immediate runtime predecessor: Friday `0.207.69` /
-  `77cdd72ada88040371f08b01c0d036f4d924c45e`; tree
-  `d9d353eb8d953d32219b60da37f8c1df3ecce5918116c3998bf295d2156130a6`.
+- Deployed implementation head: `8f1dab58b75cd02c2594c6fc26d48e95370be44b`
+- Live: Friday `0.207.71` / `8f1dab58b75cd02c2594c6fc26d48e95370be44b`;
+  tree `71138c2c145050a6f22e2daaaec8e773cef33a87ec1de2aba391d73f3be4434b`;
+  wheel `981f65ba311bf24ce94be6f8190b219811470ea1b6705693befd734dabed96cf`.
+- Immediate runtime predecessor: Friday `0.207.70` /
+  `5ad0bcb4ee4b3fe3d5d33de6fd03cad6c888f2f2`; tree
+  `a2791bd27bfbe2b2beddaad33fe110a43db8e02e102eb6b32dc5536c97ff1144`.
 - Schema-capable fallback: Friday `0.207.67` /
   `f93c0fcfae9a906210cd0594c20320866d99ecb7`;
   tree `1973acc092a8eab53a03e4adad1e725f351d5917aca01b0d46d1393cf8060d51`.
@@ -28,25 +28,24 @@ either merged here or discarded before that source is removed.
 - Production: immutable activation `clear`; backend and Telegram bridge active;
   trusted-CA health `200`; V12 `canary_ready`; complete S2 authenticated turn
   authority is active across scalar, file, attachment and V12 paths without
-  changing current user-visible routing.
+  changing current user-visible routing. The S3 bounded-advisor code and its
+  storage-backed restart verifier are live.
 - Secondary: accepted/live GPT-OSS profile `gptoss20b-2335df…`; bounded
   document-map/current-document assist and `plan_candidate` Supervisor shadow
-  are installed. Supervisor promotion remains off; the current body-free live
-  window has three joined observations but zero eligible comparison turns. The
+  are installed. Supervisor promotion remains honestly off until a genuine
+  eligible current-file-plus-public-web observation produces the exact consumed
+  release-bound witness; no traffic is fabricated to cross that gate. The
   primary remains sole tool, effect and final-publication owner; secondary
   absence preserves primary-only behavior.
 
 ## Active package
 
-Begin the bounded S3 advisor path through the released shared turn contract.
-Promote only the current-file-plus-current-public-web journey, and only after
-release-bound correctness, latency and rollback evidence; preserve the primary
-as sole tool/effect/publication owner and preserve exact primary-only fallback.
-
-In parallel, SolGoodman owns the isolated `S4-R0` retrieval-recall benchmark in
-its benchmark package plus one body-free existing-search origin predicate. It
-may be reviewed at a clean integration point but must not change main, schema,
-runtime routing or the S2 surface.
+Keep the released S3 path in shadow until its genuine production witness exists;
+then promote only the current-file-plus-current-public-web journey through the
+already released fail-closed activation gate. Meanwhile integrate the accepted
+isolated `S4-R0` retrieval-recall benchmark and `S4-R1` corpus-backed lexical
+ranking repair as the next small reversible package. They do not change schema,
+runtime routing or the S2/S3 authority surfaces.
 
 ## Operating rules
 
@@ -235,6 +234,9 @@ attachment traffic was inserted into the live owner conversation.
 
 ### S3 — bounded second hemisphere
 
+Status: readiness and authenticated bounded-advisor path deployed in `0.207.71`;
+promotion remains evidence-gated in shadow.
+
 - Keep the primary as sole tool caller, effect owner and publisher. Secondary
   and Semantic Supervisor receive the shared turn contract and return bounded
   structured advice only; their absence is exactly the primary-only path.
@@ -245,7 +247,16 @@ attachment traffic was inserted into the live owner conversation.
   assist after release-bound evidence, latency evidence and assist-to-shadow
   rollback. Keep effect planning and heuristic retirement deferred.
 
-Estimate: 8–16 hours after the minimal S2 seam.
+Acceptance: focused authenticated-turn/advisory regressions passed; the native
+gate passed 23,350 Python plus 31 UI tests with zero skips; static checks were
+clear and two clean wheels were byte-identical. Immutable activation retained
+schema 46 and the distinct schema-capable fallback, created verified
+SQLite/inbox/Obsidian/Engineer recovery receipts and ended `clear`; signed
+private-owner identity returned `200`. A real consumed representative-window
+witness is still absent, so assist correctly remains off instead of trusting a
+file, prompt claim or fabricated observation.
+
+Remaining promotion work is observation-bound, not implementation-bound.
 
 ### S4 — one search facade with passage memory
 
@@ -334,10 +345,10 @@ Estimate: 4–8 clean-work days after S2, released incrementally.
 
 1. Keep the deployed P0/P1 production paths green.
 2. Keep released `EngineerWorkItem v1` stable; do not expand its scope.
-3. Begin the bounded S3 advisor path through the complete shared turn contract;
-   do not reopen released retry, source or publication ownership.
-4. Review the isolated S4-R0 retrieval-recall benchmark when SolGoodman hands it
-   off; it remains non-runtime until separately accepted.
+3. Keep the released bounded S3 advisor in shadow until a genuine eligible turn
+   creates its exact production witness; do not fabricate activation evidence.
+4. Integrate the independently accepted S4-R0/R1 retrieval package as the next
+   small non-schema release.
 5. Preserve the released exact-evidence verifier and reject mutable or
    self-declared proof while real joined Supervisor observations accumulate.
 
