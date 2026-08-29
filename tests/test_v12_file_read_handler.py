@@ -53,6 +53,9 @@ from friday.orchestration.file_read import (
     V12FileReadHandler,
     _call_model_once,
     _file_requirements,
+    _lease_is_current_before_deadline,
+    _two_call_read_model_output_limits,
+    _within_parent_deadline,
 )
 from friday.orchestration.turn_context import (
     AuthenticatedTurnContext,
@@ -226,6 +229,8 @@ class _Model:
             required_context_tokens=requirements.required_context_tokens,
             prepared_evidence_items=requirements.prepared_evidence_items,
             max_tool_steps=requirements.max_tool_steps,
+            max_tool_rounds=requirements.max_tool_rounds,
+            max_tool_calls=requirements.max_tool_calls,
             effect=requirements.effect,
             verifier_required=requirements.verifier_required,
             process_epoch_sha256="b" * 64,
@@ -350,6 +355,8 @@ def _authenticated_current_file_context(
     token: str,
     request_binding: str = "c" * 64,
     deadline_ns: int | None = None,
+    max_model_calls: int = 4,
+    max_output_tokens: int = 4096,
 ) -> tuple[
     TurnContextIssuer,
     AuthenticatedTurnContext,
@@ -426,8 +433,8 @@ def _authenticated_current_file_context(
         turn_policy=policy,
         inherited_budget=InheritedTurnBudget(
             TurnSafetyDeadline(deadline_ns or (time.monotonic_ns() + 30_000_000_000)),
-            ModelAntiLoopBudget(4, 1),
-            TurnResourceBudget(4, 2, 1, 4096),
+            ModelAntiLoopBudget(max_model_calls, min(1, max_model_calls - 1)),
+            TurnResourceBudget(4, 2, 1, max_output_tokens),
         ),
         pending_work_admission=None,
     )
@@ -503,6 +510,21 @@ async def _leased_model_call(model: _Model) -> tuple[ModelRequirements, ModelPro
     return requirements, lease
 
 
+def test_file_model_requirements_are_closed_process_singletons() -> None:
+    one = _file_requirements(1)
+    two = _file_requirements(2)
+
+    assert _file_requirements(1) is one
+    assert _file_requirements(2) is two
+    assert one.prepared_evidence_items == 1
+    assert two.prepared_evidence_items == 2
+    assert one.max_tool_steps == one.max_tool_rounds == one.max_tool_calls == 0
+    assert two.max_tool_steps == two.max_tool_rounds == two.max_tool_calls == 0
+    for malformed in (True, 0, 3, 1.0, "1"):
+        with pytest.raises(ValueError, match="closed lease projection"):
+            _file_requirements(malformed)  # type: ignore[arg-type]
+
+
 @pytest.mark.asyncio
 async def test_call_model_once_does_not_signal_dispatch_for_pre_dispatch_rejection() -> None:
     model = _Model("unused")
@@ -567,6 +589,153 @@ async def test_call_model_once_signals_dispatch_exactly_once() -> None:
     assert response["content"] == "accepted"
     assert dispatches == ["dispatch"]
     assert len(model.calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_call_model_once_rejects_v2_lease_drift_before_dispatch() -> None:
+    model = _Model("unused")
+    requirements, lease = await _leased_model_call(model)
+    drifted = replace(lease, max_tool_calls=1)
+    dispatches: list[str] = []
+
+    with pytest.raises(V12FileReadError, match="authority changed before model call"):
+        await _call_model_once(
+            model,
+            drifted,
+            requirements,
+            [{"role": "user", "content": "safe"}],
+            max_tokens=16,
+            deadline=time.monotonic() + 10,
+            priority="foreground",
+            on_dispatch=lambda: dispatches.append("dispatch"),
+        )
+    cloned_requirements = replace(requirements)
+    assert cloned_requirements == requirements
+    assert cloned_requirements is not requirements
+    with pytest.raises(V12FileReadError, match="authority changed before model call"):
+        await _call_model_once(
+            model,
+            lease,
+            cloned_requirements,
+            [{"role": "user", "content": "safe"}],
+            max_tokens=16,
+            deadline=time.monotonic() + 10,
+            priority="foreground",
+            on_dispatch=lambda: dispatches.append("dispatch"),
+        )
+
+    assert dispatches == []
+    assert model.calls == []
+
+
+@pytest.mark.asyncio
+async def test_call_model_once_rejects_non_boolean_lease_verdict() -> None:
+    class _CoercingModel(_Model):
+        async def lease_is_current(self, *_args: Any, **_kwargs: Any) -> Any:
+            return 1
+
+    model = _CoercingModel("unused")
+    requirements, lease = await _leased_model_call(model)
+
+    with pytest.raises(V12FileReadError, match="authority changed before model call"):
+        await _call_model_once(
+            model,
+            lease,
+            requirements,
+            [{"role": "user", "content": "safe"}],
+            max_tokens=16,
+            deadline=time.monotonic() + 10,
+            priority="foreground",
+        )
+
+    assert model.calls == []
+
+
+@pytest.mark.asyncio
+async def test_lease_check_is_deadline_bounded_and_call_cancellation_propagates() -> None:
+    class _BlockingModel(_Model):
+        def __init__(self) -> None:
+            super().__init__("unused")
+            self.started = asyncio.Event()
+
+        async def complete(self, *_args: Any, **_kwargs: Any) -> dict[str, Any]:
+            self.started.set()
+            await asyncio.Event().wait()
+            raise AssertionError("unreachable")
+
+    class _BlockingLeaseModel(_Model):
+        async def lease_is_current(self, *_args: Any, **_kwargs: Any) -> bool:
+            await asyncio.Event().wait()
+            return True
+
+    deadline_model = _BlockingLeaseModel("unused")
+    requirements, lease = await _leased_model_call(deadline_model)
+    started = time.monotonic()
+    with pytest.raises(TimeoutError):
+        await _lease_is_current_before_deadline(
+            deadline_model,
+            lease,
+            requirements,
+            absolute_deadline=started + 0.01,
+        )
+    assert time.monotonic() - started < 1
+
+    model = _BlockingModel()
+    requirements, lease = await _leased_model_call(model)
+    task = asyncio.create_task(
+        _call_model_once(
+            model,
+            lease,
+            requirements,
+            [{"role": "user", "content": "safe"}],
+            max_tokens=16,
+            deadline=time.monotonic() + 10,
+            priority="foreground",
+        )
+    )
+    await asyncio.wait_for(model.started.wait(), timeout=1)
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+
+@pytest.mark.parametrize(
+    "deadline",
+    [True, float("nan"), float("inf"), -float("inf")],
+    ids=("bool", "nan", "positive-infinity", "negative-infinity"),
+)
+def test_file_read_rejects_malformed_deadlines_before_parent_clamping(deadline: object) -> None:
+    with pytest.raises((TypeError, ValueError)):
+        _within_parent_deadline(deadline, None)  # type: ignore[arg-type]
+
+
+def test_file_read_rejects_nonfuture_deadline_before_parent_clamping() -> None:
+    with pytest.raises(TimeoutError):
+        _within_parent_deadline(time.monotonic() - 1, None)
+
+
+@pytest.mark.asyncio
+async def test_prepared_file_context_repr_contains_no_body_or_private_path(settings, storage) -> None:
+    body = "REPR-BODY-CANARY-7421"
+    filename = "repr-private-path-canary.txt"
+    reference = _register(storage, settings, text=body, filename=filename)
+    handler = _handler(storage, settings, _Model("Источник прочитан. [A1]"))
+    request, turn, plan = _request(reference, conversation_id=None)
+
+    context = await handler._prepare_context(  # noqa: SLF001
+        request,
+        turn,
+        plan,
+        time.monotonic() + 1,
+    )
+    preparation = await handler.prepare(request, turn, plan)
+    assert context is not None
+    assert preparation is not None
+
+    for value in (body, filename, reference.raw_object_id):
+        assert value not in repr(context)
+        assert value not in repr(preparation.private_payload)
+        assert value not in repr(preparation)
 
 
 @pytest.mark.asyncio
@@ -684,6 +853,80 @@ async def test_authenticated_current_file_route_keeps_exact_context_and_effect_o
     assert effects.possible is True
     assert effects.staged is False
     assert storage.count_messages(str(conversation["id"]), user_id="alice") == 2
+
+
+@pytest.mark.asyncio
+async def test_authenticated_file_route_narrows_parent_output_and_tool_budget(
+    settings: Any,
+    storage: Any,
+) -> None:
+    conversation = storage.create_conversation("alice", mode="dialogue")
+    reference = _register(storage, settings, text="Budget source.", filename="budget.txt")
+    model = _Model("Источник прочитан. [A1]")
+    handler = _handler(storage, settings, model)
+    request, _legacy_turn, plan = _request(reference, conversation_id=str(conversation["id"]))
+    issuer, context, request, turn, carrier = _authenticated_current_file_context(
+        storage,
+        request,
+        reference,
+        token="authenticated-file-budget",
+        max_output_tokens=128,
+    )
+    assert _two_call_read_model_output_limits(
+        context,
+        synthesis_max_tokens=512,
+        verifier_max_tokens=256,
+    ) == (128, 128)
+
+    with (
+        track_request_effects(
+            lambda: True,
+            before_effect_in_transaction=lambda _conn: True,
+            request_binding_sha256=context.effect_fence.request_effect_binding_sha256,
+        ) as effects,
+        bind_authenticated_turn_context(issuer, context),
+        bind_authenticated_request_effect_authority(effects),
+        bind_authenticated_turn_publication(
+            context,
+            conversation_id=str(conversation["id"]),
+            person_id="alice",
+            final_publisher=context.effect_fence.final_publisher,
+        ),
+    ):
+        _seal_authenticated_file_call_scope(context, request, turn, carrier)
+        preparation = await handler.prepare(request, turn, plan)
+        assert preparation is not None
+        result = await handler.handle(request, turn, plan, preparation)
+
+    assert result.verified is True
+    assert [call["max_tokens"] for call in model.calls] == [128, 128]
+    requirements = preparation.private_payload.model_requirements
+    assert requirements.max_tool_steps == 0
+    assert requirements.max_tool_rounds == 0
+    assert requirements.max_tool_calls == 0
+
+
+@pytest.mark.asyncio
+async def test_authenticated_file_route_refuses_insufficient_model_call_ceiling(
+    settings: Any,
+    storage: Any,
+) -> None:
+    conversation = storage.create_conversation("alice", mode="dialogue")
+    reference = _register(storage, settings, text="Budget source.", filename="budget.txt")
+    handler = _handler(storage, settings, _Model("unused"))
+    request, _legacy_turn, plan = _request(reference, conversation_id=str(conversation["id"]))
+    issuer, context, request, turn, carrier = _authenticated_current_file_context(
+        storage,
+        request,
+        reference,
+        token="authenticated-file-call-budget",
+        max_model_calls=1,
+    )
+
+    with bind_authenticated_turn_context(issuer, context):
+        _seal_authenticated_file_call_scope(context, request, turn, carrier)
+        with pytest.raises(V12FileReadError, match="no file model-call budget"):
+            await handler.prepare(request, turn, plan)
 
 
 @pytest.mark.asyncio
@@ -1271,11 +1514,36 @@ async def test_stale_file_model_lease_is_rejected_before_selection_or_publicatio
     model.lease_current = False
 
     assert await handler.preparation_is_current(request, turn, plan, preparation) is False
-    with pytest.raises(V12FileReadError, match="authority changed before synthesis"):
+    with pytest.raises(V12FileReadError, match="authority changed before model call"):
         await handler.handle(request, turn, plan, preparation)
 
     assert model.calls == []
     assert storage.count_messages(str(conversation["id"]), user_id="alice") == 0
+
+
+@pytest.mark.asyncio
+async def test_prepared_file_turn_stored_seal_rejects_exact_lease_transplant(
+    settings,
+    storage,
+) -> None:
+    conversation = storage.create_conversation("alice")
+    reference = _register(storage, settings, text="SEALED-SOURCE", filename="sealed.txt")
+    model = _Model("Источник прочитан. [A1]")
+    handler = _handler(storage, settings, model)
+    request, turn, plan = _request(reference, conversation_id=str(conversation["id"]))
+    preparation = await handler.prepare(request, turn, plan)
+    assert preparation is not None
+    prepared = preparation.private_payload
+    original_lease = prepared.model_lease
+    replacement = await model.acquire_lease(
+        prepared.model_requirements,
+        absolute_deadline=time.monotonic() + 1,
+    )
+    assert type(replacement) is ModelProfileLease
+    assert replacement is not original_lease
+
+    with pytest.raises(ValueError, match="not process-owned"):
+        replace(prepared, model_lease=replacement)
 
 
 @pytest.mark.asyncio
@@ -1294,7 +1562,7 @@ async def test_epoch_loss_after_synthesis_never_reacquires_or_publishes(settings
     assert preparation is not None
     original_lease = model.lease
 
-    with pytest.raises(RuntimeError, match="stale test lease"):
+    with pytest.raises(V12FileReadError, match="authority changed before model call"):
         await handler.handle(request, turn, plan, preparation)
 
     assert model.lease is original_lease

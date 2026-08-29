@@ -2,9 +2,10 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import time
 from collections.abc import Callable
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from typing import Any, TypedDict
 
 import pytest
@@ -32,6 +33,14 @@ from friday.orchestration.conversation_document_comparison import (
     conversation_document_comparison_lease_is_current,
     conversation_document_comparison_plan_sha256,
     conversation_document_model_evidence_identity,
+    conversation_document_model_requirements,
+)
+from friday.orchestration.turn_context import (
+    InheritedTurnBudget,
+    ModelAntiLoopBudget,
+    TurnContextError,
+    TurnResourceBudget,
+    TurnSafetyDeadline,
 )
 from friday.retrieval.archive_evidence_replay import (
     ArchiveEvidenceReplayCoverageGrade,
@@ -66,6 +75,39 @@ class _DurableEvidenceDigests(TypedDict):
     message_evidence_sha256: str
     document_evidence_sha256: str
     evidence_bundle_sha256: str
+
+
+@dataclass(frozen=True)
+class _ParentContext:
+    inherited_budget: InheritedTurnBudget
+
+    def canonical_sha256(self) -> str:
+        return hashlib.sha256(repr(self.inherited_budget).encode("utf-8")).hexdigest()
+
+
+def _install_parent_context(
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    max_model_calls: int = 2,
+    max_output_tokens: int = 768,
+) -> tuple[_ParentContext, float]:
+    deadline = time.monotonic() + 10
+    parent = _ParentContext(
+        InheritedTurnBudget(
+            TurnSafetyDeadline(int(deadline * 1_000_000_000)),
+            ModelAntiLoopBudget(max_model_calls, 0),
+            TurnResourceBudget(0, 0, 0, max_output_tokens),
+        )
+    )
+
+    def current(expected: object = None) -> _ParentContext:
+        if expected is not None and expected is not parent:
+            raise TurnContextError("test parent identity drifted")
+        return parent
+
+    monkeypatch.setattr(comparison_module, "AuthenticatedTurnContext", _ParentContext)
+    monkeypatch.setattr(comparison_module, "current_primary_authenticated_turn_context", current)
+    return parent, deadline
 
 
 def _durable_evidence_digests(
@@ -250,6 +292,11 @@ class _ComparisonModel:
         verifier_tool_call: bool = False,
         verifier_finish_reason: str = "stop",
         lease_current: bool = True,
+        lease_states: tuple[bool, ...] | None = None,
+        leased_context_tokens: int | None = None,
+        requirements_sha256: str | None = None,
+        leased_tool_rounds: int = 0,
+        leased_tool_calls: int = 0,
         after_verifier: Callable[[], None] | None = None,
     ) -> None:
         self.answer = answer
@@ -257,10 +304,16 @@ class _ComparisonModel:
         self.synthesis_tool_call = synthesis_tool_call
         self.verifier_tool_call = verifier_tool_call
         self.verifier_finish_reason = verifier_finish_reason
-        self.current = lease_current
+        self.lease_states = lease_states or (lease_current,)
+        self.leased_context_tokens = leased_context_tokens
+        self.requirements_sha256 = requirements_sha256
+        self.leased_tool_rounds = leased_tool_rounds
+        self.leased_tool_calls = leased_tool_calls
+        self.lease_checks = 0
         self.after_verifier = after_verifier
         self.lease: ModelProfileLease | None = None
         self.calls: list[list[dict[str, Any]]] = []
+        self.call_kwargs: list[dict[str, Any]] = []
         self.requirements: ModelRequirements | None = None
         self.verifier_answer = ""
 
@@ -273,16 +326,24 @@ class _ComparisonModel:
         assert absolute_deadline > time.monotonic()
         assert requirements.prepared_evidence_items == 2
         assert requirements.max_tool_steps == 0
+        assert requirements.max_tool_rounds == 0
+        assert requirements.max_tool_calls == 0
         assert requirements.verifier_required is True
         self.requirements = requirements
         self.lease = ModelProfileLease(
             profile_id="conversation-document-test:dispatcher",
             attestation_sha256="a" * 64,
-            requirements_sha256=requirements.canonical_sha256(),
+            requirements_sha256=self.requirements_sha256 or requirements.canonical_sha256(),
             capabilities=requirements.capabilities,
-            required_context_tokens=requirements.required_context_tokens,
+            required_context_tokens=(
+                requirements.required_context_tokens
+                if self.leased_context_tokens is None
+                else self.leased_context_tokens
+            ),
             prepared_evidence_items=requirements.prepared_evidence_items,
             max_tool_steps=requirements.max_tool_steps,
+            max_tool_rounds=self.leased_tool_rounds,
+            max_tool_calls=self.leased_tool_calls,
             effect=requirements.effect,
             verifier_required=requirements.verifier_required,
             process_epoch_sha256="b" * 64,
@@ -298,8 +359,10 @@ class _ComparisonModel:
         *,
         absolute_deadline: float,
     ) -> bool:
+        index = self.lease_checks
+        self.lease_checks += 1
         return bool(
-            self.current
+            self.lease_states[min(index, len(self.lease_states) - 1)]
             and absolute_deadline > time.monotonic()
             and lease is self.lease
             and requirements is self.requirements
@@ -318,6 +381,7 @@ class _ComparisonModel:
         assert kwargs["temperature"] == 0.0
         assert "tools" not in kwargs
         self.calls.append(messages)
+        self.call_kwargs.append(kwargs)
         if len(self.calls) == 1:
             payload = json.loads(str(messages[-1]["content"]))
             assert payload["evidence"]["messages"]["fragments"] == [
@@ -384,6 +448,11 @@ async def test_exact_two_source_comparison_uses_two_tools_disabled_calls_and_rec
     assert comparison.message_evidence_sha256 == durable_digests["message_evidence_sha256"]
     assert comparison.document_evidence_sha256 == durable_digests["document_evidence_sha256"]
     assert comparison.evidence_bundle_sha256 == durable_digests["evidence_bundle_sha256"]
+    assert comparison.requirements is conversation_document_model_requirements()
+    assert comparison.requirements.max_tool_steps == 0
+    assert comparison.requirements.max_tool_rounds == 0
+    assert comparison.requirements.max_tool_calls == 0
+    assert model.lease_checks == 3
     assert conversation_document_model_evidence_identity(
         replay,
         selected,
@@ -398,6 +467,7 @@ async def test_exact_two_source_comparison_uses_two_tools_disabled_calls_and_rec
         comparison,
         absolute_deadline=time.monotonic() + 10,
     )
+    assert model.lease_checks == 4
 
 
 @pytest.mark.asyncio
@@ -502,6 +572,135 @@ async def test_stale_lease_and_message_snapshot_are_rejected_before_model_dispat
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("lease_states", "expected_calls", "expected_checks"),
+    (
+        ((False,), 0, 1),
+        ((True, False), 1, 2),
+        ((True, True, False), 2, 3),
+    ),
+)
+async def test_lease_revocation_before_each_call_or_result_fails_closed(
+    lease_states: tuple[bool, ...],
+    expected_calls: int,
+    expected_checks: int,
+) -> None:
+    replay, selected = _message_evidence()
+    model = _ComparisonModel(lease_states=lease_states)
+    with pytest.raises(ConversationDocumentComparisonError) as captured:
+        await compare_conversation_with_document(
+            model,
+            request="Сопоставь выбранные сообщения с этим документом",
+            message_replay=replay,
+            selected_message_evidence=selected,
+            prepared_document=_prepared_document(),
+            **_durable_evidence_digests(selected),
+            absolute_deadline=time.monotonic() + 10,
+        )
+    assert captured.value.failure_reason is FailureReason.STALE_STATE
+    assert len(model.calls) == expected_calls
+    assert model.lease_checks == expected_checks
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "lease_kwargs",
+    (
+        {"leased_context_tokens": 4_096},
+        {"requirements_sha256": "c" * 64},
+        {"leased_tool_rounds": 1, "leased_tool_calls": 1},
+    ),
+)
+async def test_downgraded_or_drifted_lease_is_rejected_before_model_call(
+    lease_kwargs: dict[str, object],
+) -> None:
+    replay, selected = _message_evidence()
+    model = _ComparisonModel(**lease_kwargs)  # type: ignore[arg-type]
+    with pytest.raises(ConversationDocumentComparisonError) as captured:
+        await compare_conversation_with_document(
+            model,
+            request="Сопоставь выбранные сообщения с этим документом",
+            message_replay=replay,
+            selected_message_evidence=selected,
+            prepared_document=_prepared_document(),
+            **_durable_evidence_digests(selected),
+            absolute_deadline=time.monotonic() + 10,
+        )
+    assert captured.value.failure_reason is FailureReason.STALE_STATE
+    assert model.lease_checks == 0
+    assert model.calls == []
+
+
+@pytest.mark.asyncio
+async def test_publication_recheck_rejects_restart_after_result_seal() -> None:
+    replay, selected = _message_evidence()
+    model = _ComparisonModel(lease_states=(True, True, True, False))
+    comparison = await compare_conversation_with_document(
+        model,
+        request="Сопоставь выбранные сообщения с этим документом",
+        message_replay=replay,
+        selected_message_evidence=selected,
+        prepared_document=_prepared_document(),
+        **_durable_evidence_digests(selected),
+        absolute_deadline=time.monotonic() + 10,
+    )
+
+    assert not await conversation_document_comparison_lease_is_current(
+        model,
+        comparison,
+        absolute_deadline=time.monotonic() + 10,
+    )
+    assert model.lease_checks == 4
+
+
+@pytest.mark.asyncio
+async def test_authenticated_parent_narrows_output_deadline_and_zero_tools(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    replay, selected = _message_evidence()
+    _parent, parent_deadline = _install_parent_context(
+        monkeypatch,
+        max_output_tokens=384,
+    )
+    model = _ComparisonModel()
+    comparison = await compare_conversation_with_document(
+        model,
+        request="Сопоставь выбранные сообщения с этим документом",
+        message_replay=replay,
+        selected_message_evidence=selected,
+        prepared_document=_prepared_document(),
+        **_durable_evidence_digests(selected),
+        absolute_deadline=parent_deadline + 30,
+    )
+
+    assert [item["max_tokens"] for item in model.call_kwargs] == [384, 256]
+    assert all(float(item["absolute_deadline"]) <= parent_deadline for item in model.call_kwargs)
+    assert comparison.requirements.max_tool_rounds == comparison.requirements.max_tool_calls == 0
+
+
+@pytest.mark.asyncio
+async def test_authenticated_parent_with_one_model_call_refuses_before_lease(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    replay, selected = _message_evidence()
+    _install_parent_context(monkeypatch, max_model_calls=1)
+    model = _ComparisonModel()
+    with pytest.raises(ConversationDocumentComparisonError) as captured:
+        await compare_conversation_with_document(
+            model,
+            request="Сопоставь выбранные сообщения с этим документом",
+            message_replay=replay,
+            selected_message_evidence=selected,
+            prepared_document=_prepared_document(),
+            **_durable_evidence_digests(selected),
+            absolute_deadline=time.monotonic() + 10,
+        )
+    assert captured.value.failure_reason is FailureReason.BUDGET_EXHAUSTED
+    assert model.lease is None
+    assert model.calls == []
+
+
+@pytest.mark.asyncio
 async def test_verifier_max_answer_is_reserved_before_model_dispatch() -> None:
     replay, selected = _message_evidence()
     model = _ComparisonModel()
@@ -580,6 +779,19 @@ def test_plan_binds_each_durable_evidence_digest() -> None:
     changed_bundle = durable.copy()
     changed_bundle["evidence_bundle_sha256"] = "c" * 64
     assert baseline != _comparison_plan_sha256(changed_bundle)
+
+
+def test_plan_binds_the_exact_v2_requirements_digest(monkeypatch: pytest.MonkeyPatch) -> None:
+    _replay, selected = _message_evidence()
+    durable = _durable_evidence_digests(selected)
+    baseline = _comparison_plan_sha256(durable)
+    requirements = conversation_document_model_requirements()
+    monkeypatch.setattr(
+        comparison_module,
+        "conversation_document_model_requirements",
+        lambda: replace(requirements, max_tool_calls=1),
+    )
+    assert _comparison_plan_sha256(durable) != baseline
 
 
 @pytest.mark.asyncio
@@ -674,3 +886,54 @@ async def test_accepted_value_revalidates_answer_contract_on_construction() -> N
             comparison,
             absolute_deadline=time.monotonic() + 10,
         )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("invalid_deadline", [math.nan, math.inf, -math.inf, True])
+async def test_nonfinite_or_boolean_deadline_is_rejected_before_model_use(
+    invalid_deadline: object,
+) -> None:
+    replay, selected = _message_evidence()
+    model = _ComparisonModel()
+
+    with pytest.raises(ConversationDocumentComparisonError, match="deadline is exhausted"):
+        await compare_conversation_with_document(
+            model,
+            request="Сопоставь выбранные сообщения с этим документом",
+            message_replay=replay,
+            selected_message_evidence=selected,
+            prepared_document=_prepared_document(),
+            **_durable_evidence_digests(selected),
+            absolute_deadline=invalid_deadline,  # type: ignore[arg-type]
+        )
+
+    assert model.calls == []
+    assert model.lease_checks == 0
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("invalid_deadline", [math.nan, math.inf, -math.inf, True])
+async def test_publication_recheck_rejects_nonfinite_or_boolean_deadline(
+    invalid_deadline: object,
+) -> None:
+    replay, selected = _message_evidence()
+    model = _ComparisonModel()
+    comparison = await compare_conversation_with_document(
+        model,
+        request="Сопоставь выбранные сообщения с этим документом",
+        message_replay=replay,
+        selected_message_evidence=selected,
+        prepared_document=_prepared_document(),
+        **_durable_evidence_digests(selected),
+        absolute_deadline=time.monotonic() + 10,
+    )
+    checks_before_publication = model.lease_checks
+
+    with pytest.raises(ConversationDocumentComparisonError, match="deadline is exhausted"):
+        await conversation_document_comparison_lease_is_current(
+            model,
+            comparison,
+            absolute_deadline=invalid_deadline,  # type: ignore[arg-type]
+        )
+
+    assert model.lease_checks == checks_before_publication

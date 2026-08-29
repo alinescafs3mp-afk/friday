@@ -8,9 +8,12 @@ under one read-only V12 lease. It never searches, persists or publishes.
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
+import hmac
 import json
 import re
+import secrets
 import time
 import unicodedata
 from dataclasses import dataclass, field
@@ -28,13 +31,20 @@ from friday.orchestration.file_read import (
     _AttestedFileModel,
     _call_model_once,
     _file_requirements,
+    _lease_is_current_before_deadline,
     _messages_fit_attested_context,
+    _model_lease_matches_requirements,
+    _two_call_read_model_output_limits,
+    _V12ModelLeaseUnavailable,
+    _within_parent_deadline,
 )
 from friday.orchestration.file_read_contract import (
     V12_FILE_VERIFIER_SYSTEM,
     build_file_verifier_prompt,
     require_file_verifier_clear,
 )
+from friday.orchestration.turn_context import AuthenticatedTurnContext, TurnContextError
+from friday.orchestration.turn_context_runtime import current_primary_authenticated_turn_context
 from friday.retrieval.archive_evidence_replay import (
     ArchiveEvidenceReplayCoverageGrade,
     ArchiveEvidenceReplayResult,
@@ -52,6 +62,9 @@ _MAX_REQUEST_UTF8_BYTES = 512
 _MAX_ANSWER_JSON_UTF8_BYTES = 2_048
 _MAX_SYNTHESIS_TOKENS = 512
 _PUBLICATION_RESERVE_SEC = 2.0
+_SELECTED_ARCHIVE_REQUIREMENTS = _file_requirements(1)
+_SELECTED_ARCHIVE_EXPLANATION_AUTHORITY = object()
+_SELECTED_ARCHIVE_EXPLANATION_BINDING_KEY = secrets.token_bytes(32)
 
 _SYNTHESIS_SYSTEM = """\
 Ты — Пятница. Объясни запрос человека только по ранее выбранным фрагментам архива.
@@ -90,6 +103,37 @@ class SelectedArchiveExplanationError(RuntimeError):
             verification_outcome if type(verification_outcome) is OutcomeStatus else OutcomeStatus.FAILED
         )
         super().__init__(message)
+
+
+def _require_selected_archive_turn_context(
+    expected: AuthenticatedTurnContext | None,
+) -> AuthenticatedTurnContext | None:
+    try:
+        current = current_primary_authenticated_turn_context(expected)
+    except TurnContextError:
+        raise SelectedArchiveExplanationError(
+            "authenticated explanation context is unavailable",
+            failure_stage=FailureStage.STATE_LOSS,
+            failure_reason=FailureReason.STALE_STATE,
+        ) from None
+    if current is not expected:
+        raise SelectedArchiveExplanationError(
+            "authenticated explanation context changed",
+            failure_stage=FailureStage.STATE_LOSS,
+            failure_reason=FailureReason.STALE_STATE,
+        )
+    return current
+
+
+def _current_selected_archive_turn_context() -> AuthenticatedTurnContext | None:
+    try:
+        return current_primary_authenticated_turn_context()
+    except TurnContextError:
+        raise SelectedArchiveExplanationError(
+            "authenticated explanation context is unavailable",
+            failure_stage=FailureStage.STATE_LOSS,
+            failure_reason=FailureReason.STALE_STATE,
+        ) from None
 
 
 def _explanation_plan() -> TurnPlan:
@@ -262,6 +306,13 @@ class SelectedArchiveExplanation:
     coverage_grade: ArchiveEvidenceReplayCoverageGrade
     lease: ModelProfileLease = field(repr=False, compare=False)
     requirements: ModelRequirements = field(repr=False, compare=False)
+    _binding_sha256: str = field(repr=False, compare=False)
+    _process_authority: object = field(repr=False, compare=False)
+    _parent_context: AuthenticatedTurnContext | None = field(
+        default=None,
+        repr=False,
+        compare=False,
+    )
 
     def __post_init__(self) -> None:
         if type(self.answer) is not str:
@@ -283,9 +334,131 @@ class SelectedArchiveExplanation:
             or detected != expected_labels
             or type(self.coverage_grade) is not ArchiveEvidenceReplayCoverageGrade
             or type(self.lease) is not ModelProfileLease
-            or type(self.requirements) is not ModelRequirements
+            or self.requirements is not _SELECTED_ARCHIVE_REQUIREMENTS
+            or not _model_lease_matches_requirements(self.lease, self.requirements)
+            or type(self._binding_sha256) is not str
+            or _DIGEST_RE.fullmatch(self._binding_sha256) is None
+            or (
+                self._parent_context is not None
+                and type(self._parent_context) is not AuthenticatedTurnContext
+            )
         ):
             raise SelectedArchiveExplanationError("accepted explanation is invalid")
+        binding = _selected_archive_explanation_binding_sha256(self)
+        if binding is None or not hmac.compare_digest(self._binding_sha256, binding):
+            raise SelectedArchiveExplanationError("accepted explanation is invalid")
+
+
+def _selected_archive_explanation_process_seal(
+    *,
+    answer: str,
+    plan_sha256: str,
+    evidence_identity_sha256: str,
+    selected_evidence_sha256: str,
+    citation_labels: tuple[str, ...],
+    coverage_grade: ArchiveEvidenceReplayCoverageGrade,
+    lease: ModelProfileLease,
+    requirements: ModelRequirements,
+    context: AuthenticatedTurnContext | None,
+) -> str:
+    answer_sha256 = hashlib.sha256(answer.encode("utf-8", errors="strict")).hexdigest()
+    citation_labels_sha256 = hashlib.sha256(_canonical_json(citation_labels).encode("ascii")).hexdigest()
+    parts = (
+        answer_sha256,
+        plan_sha256,
+        evidence_identity_sha256,
+        selected_evidence_sha256,
+        citation_labels_sha256,
+        coverage_grade.value,
+        str(id(lease)),
+        lease.schema,
+        lease.profile_id,
+        lease.attestation_sha256,
+        lease.requirements_sha256,
+        lease.process_epoch_sha256,
+        str(lease._gate_generation),
+        str(id(lease._gate_authority)),
+        str(id(requirements)),
+        requirements.canonical_sha256(),
+        str(id(context)) if context is not None else "<legacy-context>",
+        context.canonical_sha256() if context is not None else "<legacy-context>",
+    )
+    digest = hmac.new(
+        _SELECTED_ARCHIVE_EXPLANATION_BINDING_KEY,
+        b"friday/selected-archive-explanation/v1\0",
+        hashlib.sha256,
+    )
+    for part in parts:
+        if type(part) is not str:
+            raise TypeError("selected archive explanation seal material is invalid")
+        encoded = part.encode("utf-8", errors="strict")
+        digest.update(len(encoded).to_bytes(8, "big"))
+        digest.update(encoded)
+    return digest.hexdigest()
+
+
+def _selected_archive_explanation_binding_sha256(
+    explanation: object,
+) -> str | None:
+    if type(explanation) is not SelectedArchiveExplanation:
+        return None
+    try:
+        expected_labels = tuple(f"A1.{index}" for index in range(1, len(explanation.citation_labels) + 1))
+        accepted_answer = _validate_synthesis_answer(explanation.answer, expected_labels)
+        context = explanation._parent_context
+        lease = explanation.lease
+        requirements = explanation.requirements
+        if (
+            explanation._process_authority is not _SELECTED_ARCHIVE_EXPLANATION_AUTHORITY
+            or accepted_answer != explanation.answer
+            or any(
+                _DIGEST_RE.fullmatch(value) is None
+                for value in (
+                    explanation.plan_sha256,
+                    explanation.evidence_identity_sha256,
+                    explanation.selected_evidence_sha256,
+                )
+            )
+            or not 1 <= len(explanation.citation_labels) <= 8
+            or explanation.citation_labels != expected_labels
+            or type(explanation.coverage_grade) is not ArchiveEvidenceReplayCoverageGrade
+            or type(lease) is not ModelProfileLease
+            or requirements is not _SELECTED_ARCHIVE_REQUIREMENTS
+            or not _model_lease_matches_requirements(lease, requirements)
+            or (context is not None and type(context) is not AuthenticatedTurnContext)
+        ):
+            return None
+        return _selected_archive_explanation_process_seal(
+            answer=explanation.answer,
+            plan_sha256=explanation.plan_sha256,
+            evidence_identity_sha256=explanation.evidence_identity_sha256,
+            selected_evidence_sha256=explanation.selected_evidence_sha256,
+            citation_labels=explanation.citation_labels,
+            coverage_grade=explanation.coverage_grade,
+            lease=lease,
+            requirements=requirements,
+            context=context,
+        )
+    except (
+        AttributeError,
+        SelectedArchiveExplanationError,
+        TypeError,
+        UnicodeEncodeError,
+        ValueError,
+    ):
+        return None
+
+
+def _selected_archive_explanation_is_bound(explanation: object) -> bool:
+    if type(explanation) is not SelectedArchiveExplanation:
+        return False
+    expected = _selected_archive_explanation_binding_sha256(explanation)
+    return bool(
+        expected is not None
+        and type(explanation._binding_sha256) is str
+        and _DIGEST_RE.fullmatch(explanation._binding_sha256) is not None
+        and hmac.compare_digest(explanation._binding_sha256, expected)
+    )
 
 
 def selected_archive_explanation_evidence_identity(
@@ -323,7 +496,40 @@ async def explain_selected_archive_evidence(
         or type(selected_evidence) is not ArchiveSearchSelectedEvidence
     ):
         raise SelectedArchiveExplanationError("explanation request is invalid")
-    if absolute_deadline - time.monotonic() <= _PUBLICATION_RESERVE_SEC:
+    authenticated_context = _current_selected_archive_turn_context()
+    try:
+        deadline = _within_parent_deadline(absolute_deadline, authenticated_context)
+    except TimeoutError:
+        raise SelectedArchiveExplanationError(
+            "explanation deadline is exhausted",
+            failure_stage=FailureStage.SYNTHESIS_CONTRADICTION,
+            failure_reason=FailureReason.TIMEOUT,
+        ) from None
+    except (TypeError, ValueError):
+        raise SelectedArchiveExplanationError(
+            "explanation deadline is invalid",
+            failure_stage=FailureStage.CAPABILITY,
+            failure_reason=FailureReason.INVALID_CONTRACT,
+        ) from None
+    try:
+        synthesis_max_tokens, verifier_max_tokens = _two_call_read_model_output_limits(
+            authenticated_context,
+            synthesis_max_tokens=_MAX_SYNTHESIS_TOKENS,
+            verifier_max_tokens=256,
+        )
+    except V12FileReadError:
+        raise SelectedArchiveExplanationError(
+            "authenticated explanation budget is exhausted",
+            failure_stage=FailureStage.CAPABILITY,
+            failure_reason=FailureReason.BUDGET_EXHAUSTED,
+        ) from None
+    except (TypeError, ValueError):
+        raise SelectedArchiveExplanationError(
+            "authenticated explanation budget is invalid",
+            failure_stage=FailureStage.CAPABILITY,
+            failure_reason=FailureReason.INVALID_CONTRACT,
+        ) from None
+    if deadline - time.monotonic() <= _PUBLICATION_RESERVE_SEC:
         raise SelectedArchiveExplanationError(
             "explanation deadline is exhausted",
             failure_stage=FailureStage.SYNTHESIS_CONTRADICTION,
@@ -356,7 +562,7 @@ async def explain_selected_archive_evidence(
     ):
         raise SelectedArchiveExplanationError("selected evidence exceeds the attested context")
 
-    requirements = _file_requirements(1)
+    requirements = _SELECTED_ARCHIVE_REQUIREMENTS
     model_calls = 0
 
     def record_dispatch() -> None:
@@ -364,9 +570,16 @@ async def explain_selected_archive_evidence(
         model_calls += 1
 
     try:
-        lease = await model.acquire_lease(
-            requirements,
-            absolute_deadline=absolute_deadline - _PUBLICATION_RESERVE_SEC,
+        lease_deadline = deadline - _PUBLICATION_RESERVE_SEC
+        lease_remaining = lease_deadline - time.monotonic()
+        if lease_remaining <= 0:
+            raise TimeoutError("attested explanation lease deadline is exhausted")
+        lease = await asyncio.wait_for(
+            model.acquire_lease(
+                requirements,
+                absolute_deadline=lease_deadline,
+            ),
+            timeout=lease_remaining,
         )
     except TimeoutError:
         raise SelectedArchiveExplanationError(
@@ -388,32 +601,7 @@ async def explain_selected_archive_evidence(
             failure_stage=FailureStage.STATE_LOSS,
             failure_reason=FailureReason.STALE_STATE,
         )
-    try:
-        lease_current = await model.lease_is_current(
-            lease,
-            requirements,
-            absolute_deadline=absolute_deadline - _PUBLICATION_RESERVE_SEC,
-        )
-    except TimeoutError:
-        raise SelectedArchiveExplanationError(
-            "attested explanation lease check timed out",
-            failure_stage=FailureStage.SYNTHESIS_CONTRADICTION,
-            failure_reason=FailureReason.TIMEOUT,
-            synthesis_outcome=OutcomeStatus.UNAVAILABLE,
-        ) from None
-    except Exception:
-        raise SelectedArchiveExplanationError(
-            "attested explanation lease check failed",
-            failure_stage=FailureStage.SYNTHESIS_CONTRADICTION,
-            failure_reason=FailureReason.PROVIDER_FAILURE,
-            synthesis_outcome=OutcomeStatus.UNAVAILABLE,
-        ) from None
-    if not lease_current:
-        raise SelectedArchiveExplanationError(
-            "attested explanation lease is stale",
-            failure_stage=FailureStage.STATE_LOSS,
-            failure_reason=FailureReason.STALE_STATE,
-        )
+    _require_selected_archive_turn_context(authenticated_context)
 
     try:
         synthesis = await _call_model_once(
@@ -421,8 +609,8 @@ async def explain_selected_archive_evidence(
             lease,
             requirements,
             synthesis_messages,
-            max_tokens=_MAX_SYNTHESIS_TOKENS,
-            deadline=absolute_deadline,
+            max_tokens=synthesis_max_tokens,
+            deadline=deadline,
             priority="foreground",
             on_dispatch=record_dispatch,
         )
@@ -432,6 +620,14 @@ async def explain_selected_archive_evidence(
             model_calls=model_calls,
             failure_stage=FailureStage.SYNTHESIS_CONTRADICTION,
             failure_reason=FailureReason.TIMEOUT,
+            synthesis_outcome=OutcomeStatus.UNAVAILABLE,
+        ) from None
+    except _V12ModelLeaseUnavailable:
+        raise SelectedArchiveExplanationError(
+            "archive explanation lease changed before synthesis",
+            model_calls=model_calls,
+            failure_stage=FailureStage.STATE_LOSS,
+            failure_reason=FailureReason.STALE_STATE,
             synthesis_outcome=OutcomeStatus.UNAVAILABLE,
         ) from None
     except V12FileReadError:
@@ -450,6 +646,7 @@ async def explain_selected_archive_evidence(
             failure_reason=FailureReason.PROVIDER_FAILURE,
             synthesis_outcome=OutcomeStatus.UNAVAILABLE,
         ) from None
+    _require_selected_archive_turn_context(authenticated_context)
     try:
         answer = _validate_synthesis_answer(synthesis["content"], citation_labels)
     except (KeyError, TypeError, ValueError):
@@ -471,8 +668,8 @@ async def explain_selected_archive_evidence(
             lease,
             requirements,
             verifier_messages,
-            max_tokens=256,
-            deadline=absolute_deadline,
+            max_tokens=verifier_max_tokens,
+            deadline=deadline,
             priority="foreground",
             on_dispatch=record_dispatch,
         )
@@ -482,6 +679,15 @@ async def explain_selected_archive_evidence(
             model_calls=model_calls,
             failure_stage=FailureStage.COMPLETION,
             failure_reason=FailureReason.TIMEOUT,
+            synthesis_outcome=OutcomeStatus.SUCCEEDED,
+            verification_outcome=OutcomeStatus.UNAVAILABLE,
+        ) from None
+    except _V12ModelLeaseUnavailable:
+        raise SelectedArchiveExplanationError(
+            "archive explanation lease changed before verification",
+            model_calls=model_calls,
+            failure_stage=FailureStage.STATE_LOSS,
+            failure_reason=FailureReason.STALE_STATE,
             synthesis_outcome=OutcomeStatus.SUCCEEDED,
             verification_outcome=OutcomeStatus.UNAVAILABLE,
         ) from None
@@ -503,6 +709,7 @@ async def explain_selected_archive_evidence(
             synthesis_outcome=OutcomeStatus.SUCCEEDED,
             verification_outcome=OutcomeStatus.UNAVAILABLE,
         ) from None
+    _require_selected_archive_turn_context(authenticated_context)
     try:
         require_file_verifier_clear(verification["content"], citation_labels)
     except (KeyError, TypeError, ValueError):
@@ -535,6 +742,17 @@ async def explain_selected_archive_evidence(
             synthesis_outcome=OutcomeStatus.SUCCEEDED,
             verification_outcome=OutcomeStatus.SUCCEEDED,
         )
+    binding_sha256 = _selected_archive_explanation_process_seal(
+        answer=answer,
+        plan_sha256=plan_sha256,
+        evidence_identity_sha256=evidence_identity_sha256,
+        selected_evidence_sha256=selected_evidence_sha256,
+        citation_labels=citation_labels,
+        coverage_grade=replay.coverage_grade,
+        lease=lease,
+        requirements=requirements,
+        context=authenticated_context,
+    )
     return SelectedArchiveExplanation(
         answer=answer,
         plan_sha256=plan_sha256,
@@ -544,6 +762,9 @@ async def explain_selected_archive_evidence(
         coverage_grade=replay.coverage_grade,
         lease=lease,
         requirements=requirements,
+        _binding_sha256=binding_sha256,
+        _process_authority=_SELECTED_ARCHIVE_EXPLANATION_AUTHORITY,
+        _parent_context=authenticated_context,
     )
 
 
@@ -557,15 +778,36 @@ async def selected_archive_explanation_lease_is_current(
 
     if type(explanation) is not SelectedArchiveExplanation:
         raise TypeError("selected archive explanation is invalid")
-    if absolute_deadline - time.monotonic() <= _PUBLICATION_RESERVE_SEC:
-        raise TimeoutError("archive explanation has no lease-check budget")
-    return bool(
-        await model.lease_is_current(
-            explanation.lease,
-            explanation.requirements,
-            absolute_deadline=absolute_deadline - _PUBLICATION_RESERVE_SEC,
+    if not _selected_archive_explanation_is_bound(explanation):
+        return False
+    try:
+        authenticated_context = _require_selected_archive_turn_context(
+            explanation._parent_context,
         )
+        _two_call_read_model_output_limits(
+            authenticated_context,
+            synthesis_max_tokens=_MAX_SYNTHESIS_TOKENS,
+            verifier_max_tokens=256,
+        )
+    except (SelectedArchiveExplanationError, TypeError, ValueError, V12FileReadError):
+        return False
+    try:
+        deadline = _within_parent_deadline(absolute_deadline, authenticated_context)
+    except (TypeError, ValueError):
+        return False
+    if deadline - time.monotonic() <= _PUBLICATION_RESERVE_SEC:
+        raise TimeoutError("archive explanation has no lease-check budget")
+    current = await _lease_is_current_before_deadline(
+        model,
+        explanation.lease,
+        explanation.requirements,
+        absolute_deadline=deadline - _PUBLICATION_RESERVE_SEC,
     )
+    try:
+        _require_selected_archive_turn_context(explanation._parent_context)
+    except SelectedArchiveExplanationError:
+        return False
+    return type(current) is bool and current and _selected_archive_explanation_is_bound(explanation)
 
 
 __all__ = [

@@ -46,9 +46,13 @@ from friday.model_input_hygiene import (
 from friday.model_profiles import ModelProfileLease, ModelRequirements
 from friday.orchestration.file_read import (
     _MAX_ATTESTED_INPUT_UTF8_BYTES,
+    V12FileReadError,
     _AttestedFileModel,
     _file_requirements,
+    _lease_is_current_before_deadline,
     _messages_fit_attested_context,
+    _model_lease_matches_requirements,
+    _two_call_read_model_output_limits,
 )
 from friday.orchestration.file_read_contract import (
     V12_FILE_VERIFIER_SYSTEM,
@@ -59,8 +63,10 @@ from friday.orchestration.transient_web_comparison import (
     TransientWebComparisonEvidence,
     TransientWebEvidenceStatus,
 )
+from friday.orchestration.turn_context import AuthenticatedTurnContext, TurnContextError
+from friday.orchestration.turn_context_runtime import current_primary_authenticated_turn_context
 
-CURRENT_FILE_WEB_COMPARISON_BINDING_SCHEMA = "friday.current-file-web-comparison-binding.v1"
+CURRENT_FILE_WEB_COMPARISON_BINDING_SCHEMA = "friday.current-file-web-comparison-binding.v2"
 CURRENT_FILE_WEB_COMPARISON_EVIDENCE_SCHEMA = "friday.current-file-web-comparison-evidence.v1"
 CURRENT_FILE_WEB_COMPARISON_RESULT_SCHEMA = "friday.current-file-web-comparison-result.private.v1"
 
@@ -74,6 +80,7 @@ _MAX_REQUEST_UTF8_BYTES = 768
 _MAX_ANSWER_JSON_UTF8_BYTES = 1_328
 _MAX_SYNTHESIS_TOKENS = 768
 _MAX_VERIFIER_TOKENS = 256
+_CURRENT_FILE_WEB_MODEL_BUDGET = (2, _MAX_SYNTHESIS_TOKENS)
 _PROCESS_AUTHORITY = object()
 _PROCESS_SEAL_KEY = secrets.token_bytes(32)
 _AwaitedT = TypeVar("_AwaitedT")
@@ -153,7 +160,34 @@ class CurrentFileWebComparisonError(RuntimeError):
         super().__init__(message)
 
 
+def current_file_web_model_requirements() -> ModelRequirements:
+    """Return this journey's one immutable measured-lease projection."""
+
+    return _file_requirements(2)
+
+
+def current_file_web_model_budget() -> tuple[int, int]:
+    """Return exact model-call count and maximum output tokens per call."""
+
+    return _CURRENT_FILE_WEB_MODEL_BUDGET
+
+
+def _lease_matches_requirements(
+    lease: object,
+    requirements: ModelRequirements,
+) -> bool:
+    return bool(
+        type(lease) is ModelProfileLease
+        and requirements is current_file_web_model_requirements()
+        and _model_lease_matches_requirements(lease, requirements)
+    )
+
+
 class _ModelResponseError(ValueError):
+    pass
+
+
+class _ModelLeaseUnavailable(RuntimeError):
     pass
 
 
@@ -225,6 +259,28 @@ def _require_deadline(value: object) -> float:
             failure_reason=FailureReason.TIMEOUT,
         )
     return float(value)
+
+
+def _current_parent_context(
+    expected: AuthenticatedTurnContext | None,
+) -> AuthenticatedTurnContext | None:
+    current = current_primary_authenticated_turn_context(expected)
+    if current is not expected:
+        raise TurnContextError("current-file/web parent authority drifted")
+    return current
+
+
+def _within_parent_deadline(
+    deadline: float,
+    context: AuthenticatedTurnContext | None,
+) -> float:
+    if context is None:
+        return deadline
+    parent = math.nextafter(
+        context.inherited_budget.safety_deadline.monotonic_ns / 1_000_000_000,
+        -math.inf,
+    )
+    return min(deadline, parent)
 
 
 def _remaining(deadline: float) -> float:
@@ -346,9 +402,13 @@ def current_file_web_comparison_binding_sha256(
             "accepted_plan_sha256": accepted_plan_sha256,
             "effect": "read",
             "max_model_calls": 2,
+            "max_output_tokens": _MAX_SYNTHESIS_TOKENS,
+            "max_tool_calls": 0,
+            "max_tool_rounds": 0,
             "max_tool_steps": 0,
             "model_evidence_sha256": model_evidence_sha256,
             "partial_reasons": [item.value for item in partial_reasons],
+            "requirements_sha256": current_file_web_model_requirements().canonical_sha256(),
             "schema": CURRENT_FILE_WEB_COMPARISON_BINDING_SCHEMA,
             "source_evidence_sha256": source_evidence_sha256,
             "status": status.value,
@@ -688,13 +748,18 @@ def _process_seal(
     *,
     lease: ModelProfileLease,
     requirements: ModelRequirements,
+    parent_context: AuthenticatedTurnContext | None = None,
 ) -> str:
     material = _canonical_json(
         {
             "identity": identity_payload,
             "lease_object_id": id(lease),
+            "parent_context_object_id": (id(parent_context) if parent_context is not None else None),
+            "parent_context_sha256": (
+                parent_context.canonical_sha256() if parent_context is not None else None
+            ),
             "requirements_sha256": requirements.canonical_sha256(),
-            "schema": "friday.current-file-web-comparison-process-seal.v1",
+            "schema": "friday.current-file-web-comparison-process-seal.v2",
         }
     ).encode("ascii")
     return hmac.new(_PROCESS_SEAL_KEY, material, hashlib.sha256).hexdigest()
@@ -719,6 +784,11 @@ class CurrentFileWebComparison:
     requirements: ModelRequirements = field(repr=False, compare=False)
     _process_seal_sha256: str = field(repr=False, compare=False)
     _process_authority: object = field(repr=False, compare=False)
+    _parent_context: AuthenticatedTurnContext | None = field(
+        default=None,
+        repr=False,
+        compare=False,
+    )
 
     def __post_init__(self) -> None:
         self._require_process_owned()
@@ -753,14 +823,12 @@ class CurrentFileWebComparison:
             or self.model_calls != 2
             or type(self.lease) is not ModelProfileLease
             or type(self.requirements) is not ModelRequirements
-            or self.requirements != _file_requirements(2)
-            or self.lease.requirements_sha256 != self.requirements.canonical_sha256()
-            or self.lease.capabilities != self.requirements.capabilities
-            or self.lease.required_context_tokens != self.requirements.required_context_tokens
-            or self.lease.prepared_evidence_items != self.requirements.prepared_evidence_items
-            or self.lease.max_tool_steps != 0
-            or self.lease.effect is not self.requirements.effect
-            or self.lease.verifier_required is not True
+            or self.requirements is not current_file_web_model_requirements()
+            or not _lease_matches_requirements(self.lease, self.requirements)
+            or (
+                self._parent_context is not None
+                and type(self._parent_context) is not AuthenticatedTurnContext
+            )
         ):
             raise CurrentFileWebComparisonError("accepted comparison is invalid")
         for label, value in (
@@ -794,7 +862,12 @@ class CurrentFileWebComparison:
             raise CurrentFileWebComparisonError("accepted comparison binding is invalid")
         if not hmac.compare_digest(
             self._process_seal_sha256,
-            _process_seal(self.identity_payload(), lease=self.lease, requirements=self.requirements),
+            _process_seal(
+                self.identity_payload(),
+                lease=self.lease,
+                requirements=self.requirements,
+                parent_context=self._parent_context,
+            ),
         ):
             raise CurrentFileWebComparisonError("accepted comparison seal is invalid")
 
@@ -825,10 +898,19 @@ async def _call_model_once(
     *,
     max_tokens: int,
     deadline: float,
+    parent_context: AuthenticatedTurnContext | None,
     on_dispatch: Callable[[], None],
 ) -> dict[str, Any]:
     if not secondary_model_messages_are_secret_free(messages) or not _messages_fit_attested_context(messages):
         raise _ModelResponseError("model input is outside the accepted context")
+    if not await _lease_is_current(
+        model,
+        lease,
+        requirements,
+        deadline=deadline,
+        parent_context=parent_context,
+    ):
+        raise _ModelLeaseUnavailable("comparison model authority changed before dispatch")
     on_dispatch()
     response = await _await_with_deadline(
         lambda: model.complete(
@@ -857,18 +939,19 @@ async def _lease_is_current(
     requirements: ModelRequirements,
     *,
     deadline: float,
+    parent_context: AuthenticatedTurnContext | None,
 ) -> bool:
-    value = await _await_with_deadline(
-        lambda: model.lease_is_current(
-            lease,
-            requirements,
-            absolute_deadline=deadline,
-        ),
-        deadline,
+    _current_parent_context(parent_context)
+    if type(lease) is not ModelProfileLease or not _lease_matches_requirements(lease, requirements):
+        return False
+    value = await _lease_is_current_before_deadline(
+        model,
+        lease,
+        requirements,
+        absolute_deadline=deadline,
     )
-    if type(value) is not bool:
-        raise _ModelResponseError("lease check returned a non-boolean value")
-    return value
+    _current_parent_context(parent_context)
+    return value and _lease_matches_requirements(lease, requirements)
 
 
 async def compare_current_file_with_web(
@@ -883,6 +966,26 @@ async def compare_current_file_with_web(
     """Make at most two model calls over one exact file and sourced web evidence."""
 
     deadline = _require_deadline(absolute_deadline)
+    try:
+        parent_context = current_primary_authenticated_turn_context()
+        deadline = _require_deadline(_within_parent_deadline(deadline, parent_context))
+        synthesis_max_tokens, verifier_max_tokens = _two_call_read_model_output_limits(
+            parent_context,
+            synthesis_max_tokens=_MAX_SYNTHESIS_TOKENS,
+            verifier_max_tokens=_MAX_VERIFIER_TOKENS,
+        )
+    except TurnContextError:
+        raise CurrentFileWebComparisonError(
+            "comparison parent authority is unavailable",
+            failure_stage=FailureStage.STATE_LOSS,
+            failure_reason=FailureReason.STALE_STATE,
+        ) from None
+    except V12FileReadError:
+        raise CurrentFileWebComparisonError(
+            "comparison exceeds the inherited model budget",
+            failure_stage=FailureStage.CAPABILITY,
+            failure_reason=FailureReason.BUDGET_EXHAUSTED,
+        ) from None
     request = _require_request(request)
     accepted_plan_sha256 = _require_digest(
         accepted_plan_sha256,
@@ -924,7 +1027,7 @@ async def compare_current_file_with_web(
         labels=labels,
         partial_reasons=partial_reasons,
     )
-    requirements = _file_requirements(2)
+    requirements = current_file_web_model_requirements()
     model_calls = 0
 
     def record_dispatch() -> None:
@@ -950,48 +1053,21 @@ async def compare_current_file_with_web(
             failure_reason=FailureReason.PROVIDER_FAILURE,
             synthesis_outcome=OutcomeStatus.UNAVAILABLE,
         ) from None
-    if type(lease) is not ModelProfileLease:
+    if type(lease) is not ModelProfileLease or not _lease_matches_requirements(lease, requirements):
         raise CurrentFileWebComparisonError(
             "comparison lease is invalid",
             failure_stage=FailureStage.STATE_LOSS,
             failure_reason=FailureReason.STALE_STATE,
         )
     try:
-        current = await _lease_is_current(
-            model,
-            lease,
-            requirements,
-            deadline=deadline,
-        )
-    except TimeoutError:
-        raise CurrentFileWebComparisonError(
-            "comparison lease check timed out",
-            failure_stage=FailureStage.SYNTHESIS_CONTRADICTION,
-            failure_reason=FailureReason.TIMEOUT,
-            synthesis_outcome=OutcomeStatus.UNAVAILABLE,
-        ) from None
-    except Exception:
-        raise CurrentFileWebComparisonError(
-            "comparison lease check failed",
-            failure_stage=FailureStage.SYNTHESIS_CONTRADICTION,
-            failure_reason=FailureReason.PROVIDER_FAILURE,
-            synthesis_outcome=OutcomeStatus.UNAVAILABLE,
-        ) from None
-    if not current:
-        raise CurrentFileWebComparisonError(
-            "comparison lease is stale before synthesis",
-            failure_stage=FailureStage.STATE_LOSS,
-            failure_reason=FailureReason.STALE_STATE,
-        )
-
-    try:
         synthesis = await _call_model_once(
             model,
             lease,
             requirements,
             synthesis_messages,
-            max_tokens=_MAX_SYNTHESIS_TOKENS,
+            max_tokens=synthesis_max_tokens,
             deadline=deadline,
+            parent_context=parent_context,
             on_dispatch=record_dispatch,
         )
     except TimeoutError:
@@ -1000,6 +1076,22 @@ async def compare_current_file_with_web(
             model_calls=model_calls,
             failure_stage=FailureStage.SYNTHESIS_CONTRADICTION,
             failure_reason=FailureReason.TIMEOUT,
+            synthesis_outcome=OutcomeStatus.UNAVAILABLE,
+        ) from None
+    except TurnContextError:
+        raise CurrentFileWebComparisonError(
+            "comparison parent authority changed before synthesis",
+            model_calls=model_calls,
+            failure_stage=FailureStage.STATE_LOSS,
+            failure_reason=FailureReason.STALE_STATE,
+            synthesis_outcome=OutcomeStatus.UNAVAILABLE,
+        ) from None
+    except _ModelLeaseUnavailable:
+        raise CurrentFileWebComparisonError(
+            "comparison lease is stale before synthesis",
+            model_calls=model_calls,
+            failure_stage=FailureStage.STATE_LOSS,
+            failure_reason=FailureReason.STALE_STATE,
             synthesis_outcome=OutcomeStatus.UNAVAILABLE,
         ) from None
     except _ModelResponseError:
@@ -1040,14 +1132,20 @@ async def compare_current_file_with_web(
                 synthesis_outcome=OutcomeStatus.FAILED,
             ) from None
 
+    verifier_messages = _verifier_messages(
+        request=request,
+        evidence=evidence,
+        answer=answer,
+    )
     try:
         verification = await _call_model_once(
             model,
             lease,
             requirements,
-            _verifier_messages(request=request, evidence=evidence, answer=answer),
-            max_tokens=_MAX_VERIFIER_TOKENS,
+            verifier_messages,
+            max_tokens=verifier_max_tokens,
             deadline=deadline,
+            parent_context=parent_context,
             on_dispatch=record_dispatch,
         )
     except TimeoutError:
@@ -1056,6 +1154,24 @@ async def compare_current_file_with_web(
             model_calls=model_calls,
             failure_stage=FailureStage.COMPLETION,
             failure_reason=FailureReason.TIMEOUT,
+            synthesis_outcome=OutcomeStatus.SUCCEEDED,
+            verification_outcome=OutcomeStatus.UNAVAILABLE,
+        ) from None
+    except TurnContextError:
+        raise CurrentFileWebComparisonError(
+            "comparison parent authority changed before verification",
+            model_calls=model_calls,
+            failure_stage=FailureStage.STATE_LOSS,
+            failure_reason=FailureReason.STALE_STATE,
+            synthesis_outcome=OutcomeStatus.SUCCEEDED,
+            verification_outcome=OutcomeStatus.UNAVAILABLE,
+        ) from None
+    except _ModelLeaseUnavailable:
+        raise CurrentFileWebComparisonError(
+            "comparison lease is stale before verification",
+            model_calls=model_calls,
+            failure_stage=FailureStage.STATE_LOSS,
+            failure_reason=FailureReason.STALE_STATE,
             synthesis_outcome=OutcomeStatus.SUCCEEDED,
             verification_outcome=OutcomeStatus.UNAVAILABLE,
         ) from None
@@ -1095,6 +1211,7 @@ async def compare_current_file_with_web(
             lease,
             requirements,
             deadline=deadline,
+            parent_context=parent_context,
         )
     except TimeoutError:
         raise CurrentFileWebComparisonError(
@@ -1102,6 +1219,15 @@ async def compare_current_file_with_web(
             model_calls=model_calls,
             failure_stage=FailureStage.STATE_LOSS,
             failure_reason=FailureReason.TIMEOUT,
+            synthesis_outcome=OutcomeStatus.SUCCEEDED,
+            verification_outcome=OutcomeStatus.SUCCEEDED,
+        ) from None
+    except TurnContextError:
+        raise CurrentFileWebComparisonError(
+            "comparison parent authority changed before result sealing",
+            model_calls=model_calls,
+            failure_stage=FailureStage.STATE_LOSS,
+            failure_reason=FailureReason.STALE_STATE,
             synthesis_outcome=OutcomeStatus.SUCCEEDED,
             verification_outcome=OutcomeStatus.SUCCEEDED,
         ) from None
@@ -1137,7 +1263,12 @@ async def compare_current_file_with_web(
         citation_labels=labels,
         model_calls=model_calls,
     )
-    seal = _process_seal(identity, lease=lease, requirements=requirements)
+    seal = _process_seal(
+        identity,
+        lease=lease,
+        requirements=requirements,
+        parent_context=parent_context,
+    )
     return CurrentFileWebComparison(
         answer=answer,
         status=status,
@@ -1154,6 +1285,28 @@ async def compare_current_file_with_web(
         requirements=requirements,
         _process_seal_sha256=seal,
         _process_authority=_PROCESS_AUTHORITY,
+        _parent_context=parent_context,
+    )
+
+
+async def current_file_web_comparison_lease_is_current(
+    model: _AttestedFileModel,
+    comparison: CurrentFileWebComparison,
+    *,
+    absolute_deadline: float,
+) -> bool:
+    """Recheck the exact carried lease at the final publication boundary."""
+
+    if not current_file_web_comparison_is_process_owned(comparison):
+        raise TypeError("current-file/web comparison is invalid")
+    parent_context = _current_parent_context(comparison._parent_context)
+    deadline = _require_deadline(_within_parent_deadline(absolute_deadline, parent_context))
+    return await _lease_is_current(
+        model,
+        comparison.lease,
+        comparison.requirements,
+        deadline=deadline,
+        parent_context=parent_context,
     )
 
 
@@ -1168,6 +1321,9 @@ __all__ = [
     "compare_current_file_with_web",
     "current_file_web_comparison_binding_sha256",
     "current_file_web_comparison_is_process_owned",
+    "current_file_web_comparison_lease_is_current",
+    "current_file_web_model_budget",
+    "current_file_web_model_requirements",
     "current_file_web_request_is_admitted",
     "current_file_web_source_evidence_identity",
 ]

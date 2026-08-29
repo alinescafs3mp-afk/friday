@@ -354,6 +354,8 @@ class _SelectedArchiveExplanationModel:
             required_context_tokens=requirements.required_context_tokens,
             prepared_evidence_items=requirements.prepared_evidence_items,
             max_tool_steps=requirements.max_tool_steps,
+            max_tool_rounds=requirements.max_tool_rounds,
+            max_tool_calls=requirements.max_tool_calls,
             effect=requirements.effect,
             verifier_required=requirements.verifier_required,
             process_epoch_sha256="b" * 64,
@@ -370,9 +372,9 @@ class _SelectedArchiveExplanationModel:
         absolute_deadline: float,
     ) -> bool:
         self.lease_checks += 1
-        if self.lease_checks == 2 and self.final_lease_error == "timeout":
+        if self.lease_checks == 3 and self.final_lease_error == "timeout":
             raise TimeoutError("test final lease timeout")
-        if self.lease_checks == 2 and self.final_lease_error == "provider":
+        if self.lease_checks == 3 and self.final_lease_error == "provider":
             raise RuntimeError("test final lease provider failure")
         return bool(
             absolute_deadline > 0
@@ -392,6 +394,8 @@ class _SelectedArchiveExplanationModel:
         assert lease is self.lease
         assert self.lease is not None
         assert self.lease.requirements_sha256 == requirements.canonical_sha256()
+        assert requirements.max_tool_rounds == 0
+        assert requirements.max_tool_calls == 0
         self.calls.append(messages)
         if len(self.calls) == 1:
             synthesis = json.loads(str(messages[-1]["content"]))
@@ -3625,18 +3629,28 @@ async def test_selected_archive_explain_verifier_failure_falls_back_to_exact_rep
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("lease_valid_checks", "expected_calls", "expected_checks", "verification_outcome"),
+    ((1, 1, 2, "unavailable"), (2, 2, 3, "succeeded")),
+)
 async def test_selected_archive_explain_lease_drift_falls_back_before_publication(
     settings: Any,
     storage: Any,
     monkeypatch: pytest.MonkeyPatch,
+    lease_valid_checks: int,
+    expected_calls: int,
+    expected_checks: int,
+    verification_outcome: str,
 ) -> None:
     _raw_id, initial, _created = await _create_durable_selected_archive_work(
         settings,
         storage,
         monkeypatch,
-        suffix="-v12-explain-lease-drift",
+        suffix=f"-v12-explain-lease-drift-{lease_valid_checks}",
     )
-    explanation_model = _SelectedArchiveExplanationModel(lease_valid_checks=1)
+    explanation_model = _SelectedArchiveExplanationModel(
+        lease_valid_checks=lease_valid_checks,
+    )
     ordinary_model = _DirectAnswerModel()
     runtime, kernel, actor, _model, web, _contexts = await _runtime(
         settings,
@@ -3662,8 +3676,8 @@ async def test_selected_archive_explain_lease_drift_falls_back_before_publicatio
     finally:
         await web.close()
 
-    assert len(explanation_model.calls) == 2
-    assert explanation_model.lease_checks == 2
+    assert len(explanation_model.calls) == expected_calls
+    assert explanation_model.lease_checks == expected_checks
     assert response["message"].startswith("Не удалось сформировать проверенное объяснение")
     assert response["context"]["selected_archive_evidence_explanation"] == "fallback_exact_replay"
     assert ordinary_model.calls == 0
@@ -3676,14 +3690,190 @@ async def test_selected_archive_explain_lease_drift_falls_back_before_publicatio
     trace = metadata["interaction_trace"]
     assert trace["failure_stage"] == "state_loss"
     assert trace["failure_reason"] == "stale_state"
-    assert trace["budget"]["model_calls"] == 2
+    assert trace["budget"]["model_calls"] == expected_calls
     assert trace["completion"] == "partial"
     assert trace["partial_coverage"] is True
     assert {step["capability"]: step["outcome"] for step in trace["steps"]} == {
         "document_retrieval": "partial",
         "model_synthesis": "succeeded",
-        "verification": "succeeded",
+        "verification": verification_outcome,
     }
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("mutation", ["answer", "lease-transplant"])
+async def test_selected_archive_explanation_process_binding_rejects_mutation(
+    settings: Any,
+    storage: Any,
+    monkeypatch: pytest.MonkeyPatch,
+    mutation: str,
+) -> None:
+    _raw_id, initial, _created = await _create_durable_selected_archive_work(
+        settings,
+        storage,
+        monkeypatch,
+        suffix=f"-v12-explain-process-binding-{mutation}",
+    )
+    explanation_model = _SelectedArchiveExplanationModel()
+    ordinary_model = _DirectAnswerModel()
+    runtime, kernel, actor, _model, web, _contexts = await _runtime(
+        settings,
+        storage,
+        monkeypatch,
+        model_override=ordinary_model,
+    )
+    runtime.settings = replace(
+        runtime.settings,
+        router_mode="v12",
+        router_canary_routes=("archive_read",),
+    )
+    runtime._selected_archive_model = explanation_model
+    original_check = agent_runtime_module.selected_archive_explanation_lease_is_current
+
+    async def mutate_before_publication(
+        model: Any,
+        explanation: Any,
+        *,
+        absolute_deadline: float,
+    ) -> bool:
+        if mutation == "answer":
+            replacement_answer = "Подменённый после проверки ответ [A1.1]."
+            with pytest.raises(RuntimeError, match="accepted explanation is invalid"):
+                replace(explanation, answer=replacement_answer)
+            object.__setattr__(
+                explanation,
+                "answer",
+                replacement_answer,
+            )
+        else:
+            replacement = await model.acquire_lease(
+                explanation.requirements,
+                absolute_deadline=absolute_deadline,
+            )
+            assert type(replacement) is ModelProfileLease
+            with pytest.raises(RuntimeError, match="accepted explanation is invalid"):
+                replace(explanation, lease=replacement)
+            object.__setattr__(explanation, "lease", replacement)
+        return await original_check(
+            model,
+            explanation,
+            absolute_deadline=absolute_deadline,
+        )
+
+    monkeypatch.setattr(
+        agent_runtime_module,
+        "selected_archive_explanation_lease_is_current",
+        mutate_before_publication,
+    )
+    try:
+        response = await runtime.chat(
+            _OWNER,
+            "Что в нём сказано?",
+            actor=actor,
+            conversation_id=str(initial["conversation_id"]),
+            enable_tools=True,
+            answer_with_voice=False,
+        )
+    finally:
+        await web.close()
+
+    assert len(explanation_model.calls) == 2
+    assert explanation_model.lease_checks == 2
+    assert response["context"]["selected_archive_evidence_explanation"] == "fallback_exact_replay"
+    assert "Подменённый после проверки" not in response["message"]
+    assert ordinary_model.calls == 0
+    assert kernel.calls == []
+
+
+@pytest.mark.asyncio
+async def test_selected_archive_epoch_loss_after_final_reauth_uses_exact_replay_without_stale_row(
+    settings: Any,
+    storage: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _raw_id, initial, _created = await _create_durable_selected_archive_work(
+        settings,
+        storage,
+        monkeypatch,
+        suffix="-v12-explain-late-epoch-loss",
+    )
+    explanation_model = _SelectedArchiveExplanationModel()
+    ordinary_model = _DirectAnswerModel()
+    runtime, kernel, actor, _model, web, _contexts = await _runtime(
+        settings,
+        storage,
+        monkeypatch,
+        model_override=ordinary_model,
+    )
+    runtime.settings = replace(
+        runtime.settings,
+        router_mode="v12",
+        router_canary_routes=("archive_read",),
+    )
+    runtime._selected_archive_model = explanation_model
+    original_replay = runtime._replay_selected_archive_evidence_in_transaction  # noqa: SLF001
+    reauth_calls = 0
+    lease_checks = 0
+
+    def observe_reauth(*args: Any, **kwargs: Any) -> Any:
+        nonlocal reauth_calls
+        reauth_calls += 1
+        return original_replay(*args, **kwargs)
+
+    async def reject_restarted_lease(
+        _model: Any,
+        _explanation: Any,
+        *,
+        absolute_deadline: float,
+    ) -> bool:
+        nonlocal lease_checks
+        lease_checks += 1
+        assert absolute_deadline > agent_runtime_module.time.monotonic()
+        assert reauth_calls == 2
+        assert storage.conn.in_transaction
+        return False
+
+    monkeypatch.setattr(
+        runtime,
+        "_replay_selected_archive_evidence_in_transaction",
+        observe_reauth,
+    )
+    monkeypatch.setattr(
+        agent_runtime_module,
+        "selected_archive_explanation_lease_is_current",
+        reject_restarted_lease,
+    )
+    try:
+        response = await runtime.chat(
+            _OWNER,
+            "Что в нём сказано?",
+            actor=actor,
+            conversation_id=str(initial["conversation_id"]),
+            enable_tools=True,
+            answer_with_voice=False,
+        )
+    finally:
+        await web.close()
+
+    assert lease_checks == 1
+    assert explanation_model.lease_checks == 2
+    assert len(explanation_model.calls) == 2
+    assert response["context"]["selected_archive_evidence_explanation"] == "fallback_exact_replay"
+    assert explanation_model.answer not in response["message"]
+    assert ordinary_model.calls == 0
+    assert kernel.calls == []
+    contents = tuple(
+        str(row["content"])
+        for row in storage.execute(
+            "SELECT content FROM messages WHERE user_id=? AND conversation_id=? ORDER BY rowid",
+            (_OWNER, str(initial["conversation_id"])),
+        ).fetchall()
+    )
+    assert explanation_model.answer not in contents
+    stored = storage.get_message(str(response["message_id"]), _OWNER)
+    assert stored is not None
+    receipt = load_accepted_archive_recall_outcome_receipt(stored["metadata_json"])
+    assert receipt.outcome.lane is ArchiveRecallLane.SELECTED_EVIDENCE_REPLAY
 
 
 @pytest.mark.asyncio
@@ -3788,7 +3978,7 @@ async def test_selected_archive_explain_final_lease_failure_is_not_reported_as_d
         await web.close()
 
     assert len(explanation_model.calls) == 2
-    assert explanation_model.lease_checks == 2
+    assert explanation_model.lease_checks == 3
     assert response["context"]["selected_archive_evidence_explanation"] == "fallback_exact_replay"
     assert ordinary_model.calls == 0
     assert kernel.calls == []

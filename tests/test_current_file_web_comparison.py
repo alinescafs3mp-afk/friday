@@ -5,11 +5,12 @@ import hashlib
 import inspect
 import json
 import time
-from dataclasses import fields, replace
+from dataclasses import dataclass, fields, replace
 from typing import Any
 
 import pytest
 
+import friday.orchestration.current_file_web_comparison as comparison_module
 import friday.orchestration.transient_web_comparison as web_module
 from friday.evidence_bundle import CitationBinding, EvidenceBundle, EvidencePart
 from friday.file_evidence import FileBodyKind, FileEvidenceSet, FileEvidenceView, FileRegistrationKind
@@ -27,6 +28,9 @@ from friday.orchestration.current_file_web_comparison import (
     compare_current_file_with_web,
     current_file_web_comparison_binding_sha256,
     current_file_web_comparison_is_process_owned,
+    current_file_web_comparison_lease_is_current,
+    current_file_web_model_budget,
+    current_file_web_model_requirements,
     current_file_web_request_is_admitted,
     current_file_web_source_evidence_identity,
 )
@@ -34,6 +38,13 @@ from friday.orchestration.transient_web_comparison import (
     TransientWebComparisonEvidence,
     TransientWebEvidenceStatus,
     seal_explicit_public_web_query,
+)
+from friday.orchestration.turn_context import (
+    InheritedTurnBudget,
+    ModelAntiLoopBudget,
+    TurnContextError,
+    TurnResourceBudget,
+    TurnSafetyDeadline,
 )
 from friday.permissions import ActorContext
 from friday.source_identity import tenant_authorized_file_snapshot_token
@@ -44,6 +55,40 @@ _DEFAULT_ANSWER = (
     "Файл сообщает локальный факт [F1]. Первый источник даёт текущий контекст [W1]. "
     "Второй источник подтверждает изменение [W2]. Третий источник задаёт границу [W3]."
 )
+
+
+@dataclass(frozen=True)
+class _ParentContext:
+    inherited_budget: InheritedTurnBudget
+
+    def canonical_sha256(self) -> str:
+        return hashlib.sha256(repr(self.inherited_budget).encode("utf-8")).hexdigest()
+
+
+def _install_parent_context(
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    max_model_calls: int = 2,
+    max_output_tokens: int = 768,
+    deadline_seconds: float = 10.0,
+) -> tuple[_ParentContext, float]:
+    deadline = time.monotonic() + deadline_seconds
+    parent = _ParentContext(
+        InheritedTurnBudget(
+            TurnSafetyDeadline(int(deadline * 1_000_000_000)),
+            ModelAntiLoopBudget(max_model_calls, 0),
+            TurnResourceBudget(0, 0, 0, max_output_tokens),
+        )
+    )
+
+    def current(expected: object = None) -> _ParentContext:
+        if expected is not None and expected is not parent:
+            raise TurnContextError("test parent identity drifted")
+        return parent
+
+    monkeypatch.setattr(comparison_module, "AuthenticatedTurnContext", _ParentContext)
+    monkeypatch.setattr(comparison_module, "current_primary_authenticated_turn_context", current)
+    return parent, deadline
 
 
 def _prepared_file(
@@ -181,12 +226,20 @@ class _ComparisonModel:
         effectful_call: int | None = None,
         hanging_call: int | None = None,
         lease_states: tuple[bool, ...] = (True, True),
+        leased_context_tokens: int | None = None,
+        requirements_sha256: str | None = None,
+        leased_tool_rounds: int = 0,
+        leased_tool_calls: int = 0,
     ) -> None:
         self.answer = answer
         self.verifier_supported = verifier_supported
         self.effectful_call = effectful_call
         self.hanging_call = hanging_call
         self.lease_states = lease_states
+        self.leased_context_tokens = leased_context_tokens
+        self.requirements_sha256 = requirements_sha256
+        self.leased_tool_rounds = leased_tool_rounds
+        self.leased_tool_calls = leased_tool_calls
         self.acquire_calls = 0
         self.lease_checks = 0
         self.calls: list[list[dict[str, Any]]] = []
@@ -207,16 +260,24 @@ class _ComparisonModel:
         assert requirements.required_context_tokens == 8_192
         assert requirements.prepared_evidence_items == 2
         assert requirements.max_tool_steps == 0
+        assert requirements.max_tool_rounds == 0
+        assert requirements.max_tool_calls == 0
         assert requirements.verifier_required is True
         self.requirements = requirements
         self.lease = ModelProfileLease(
             profile_id="current-file-web-test:dispatcher",
             attestation_sha256="a" * 64,
-            requirements_sha256=requirements.canonical_sha256(),
+            requirements_sha256=self.requirements_sha256 or requirements.canonical_sha256(),
             capabilities=requirements.capabilities,
-            required_context_tokens=requirements.required_context_tokens,
+            required_context_tokens=(
+                requirements.required_context_tokens
+                if self.leased_context_tokens is None
+                else self.leased_context_tokens
+            ),
             prepared_evidence_items=requirements.prepared_evidence_items,
             max_tool_steps=requirements.max_tool_steps,
+            max_tool_rounds=self.leased_tool_rounds,
+            max_tool_calls=self.leased_tool_calls,
             effect=requirements.effect,
             verifier_required=requirements.verifier_required,
             process_epoch_sha256="b" * 64,
@@ -345,11 +406,21 @@ async def test_complete_comparison_is_two_call_tools_disabled_and_body_free() ->
     assert result.citation_labels == ("F1", "W1", "W2", "W3")
     assert result.model_calls == len(model.calls) == 2
     assert model.acquire_calls == 1
-    assert model.lease_checks == 2
+    assert model.lease_checks == 3
     assert all("tools" not in kwargs for kwargs in model.call_kwargs)
+    assert result.requirements is current_file_web_model_requirements()
     assert result.requirements.required_context_tokens == 8_192
     assert result.requirements.prepared_evidence_items == 2
     assert result.requirements.max_tool_steps == 0
+    assert result.requirements.max_tool_rounds == 0
+    assert result.requirements.max_tool_calls == 0
+    assert current_file_web_model_budget() == (2, 768)
+    assert await current_file_web_comparison_lease_is_current(
+        model,
+        result,
+        absolute_deadline=time.monotonic() + 10,
+    )
+    assert model.lease_checks == 4
     assert current_file_web_comparison_is_process_owned(result)
     file_sha256, web_sha256, source_sha256 = current_file_web_source_evidence_identity(prepared, web)
     assert (result.file_evidence_sha256, result.web_evidence_sha256) == (
@@ -623,7 +694,11 @@ async def test_empty_and_unavailable_produce_honest_file_only_partial_synthesis(
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("lease_states", "expected_calls", "expected_checks"),
-    (((False,), 0, 1), ((True, False), 2, 2)),
+    (
+        ((False,), 0, 1),
+        ((True, False), 1, 2),
+        ((True, True, False), 2, 3),
+    ),
 )
 async def test_lease_staleness_before_or_after_calls_never_returns_a_result(
     lease_states: tuple[bool, ...],
@@ -643,6 +718,97 @@ async def test_lease_staleness_before_or_after_calls_never_returns_a_result(
     assert captured.value.failure_reason is FailureReason.STALE_STATE
     assert captured.value.model_calls == len(model.calls) == expected_calls
     assert model.lease_checks == expected_checks
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "lease_kwargs",
+    (
+        {"leased_context_tokens": 4_096},
+        {"requirements_sha256": "c" * 64},
+        {"leased_tool_rounds": 1, "leased_tool_calls": 1},
+    ),
+)
+async def test_downgraded_or_drifted_exact_lease_is_rejected_before_dispatch(
+    lease_kwargs: dict[str, object],
+) -> None:
+    model = _ComparisonModel(**lease_kwargs)  # type: ignore[arg-type]
+    with pytest.raises(CurrentFileWebComparisonError) as captured:
+        await compare_current_file_with_web(
+            model,
+            request=_REQUEST,
+            accepted_plan_sha256=_PLAN_SHA256,
+            prepared_file=_prepared_file(),
+            web_evidence=_full_web(),
+            absolute_deadline=time.monotonic() + 10,
+        )
+    assert captured.value.failure_reason is FailureReason.STALE_STATE
+    assert model.acquire_calls == 1
+    assert model.lease_checks == 0
+    assert model.calls == []
+
+
+@pytest.mark.asyncio
+async def test_publication_recheck_rejects_restart_after_result_was_sealed() -> None:
+    model = _ComparisonModel(lease_states=(True, True, True, False))
+    result = await compare_current_file_with_web(
+        model,
+        request=_REQUEST,
+        accepted_plan_sha256=_PLAN_SHA256,
+        prepared_file=_prepared_file(),
+        web_evidence=_full_web(),
+        absolute_deadline=time.monotonic() + 10,
+    )
+
+    assert not await current_file_web_comparison_lease_is_current(
+        model,
+        result,
+        absolute_deadline=time.monotonic() + 10,
+    )
+    assert model.lease_checks == 4
+
+
+@pytest.mark.asyncio
+async def test_authenticated_parent_narrows_output_and_keeps_zero_tool_authority(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _parent, parent_deadline = _install_parent_context(
+        monkeypatch,
+        max_output_tokens=384,
+    )
+    model = _ComparisonModel()
+    result = await compare_current_file_with_web(
+        model,
+        request=_REQUEST,
+        accepted_plan_sha256=_PLAN_SHA256,
+        prepared_file=_prepared_file(),
+        web_evidence=_full_web(),
+        absolute_deadline=parent_deadline + 30,
+    )
+
+    assert [item["max_tokens"] for item in model.call_kwargs] == [384, 256]
+    assert all(float(item["absolute_deadline"]) <= parent_deadline for item in model.call_kwargs)
+    assert result.requirements.max_tool_rounds == result.requirements.max_tool_calls == 0
+
+
+@pytest.mark.asyncio
+async def test_authenticated_parent_with_one_model_call_refuses_before_lease(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _install_parent_context(monkeypatch, max_model_calls=1)
+    model = _ComparisonModel()
+    with pytest.raises(CurrentFileWebComparisonError) as captured:
+        await compare_current_file_with_web(
+            model,
+            request=_REQUEST,
+            accepted_plan_sha256=_PLAN_SHA256,
+            prepared_file=_prepared_file(),
+            web_evidence=_full_web(),
+            absolute_deadline=time.monotonic() + 10,
+        )
+    assert captured.value.failure_reason is FailureReason.BUDGET_EXHAUSTED
+    assert model.acquire_calls == 0
+    assert model.calls == []
 
 
 @pytest.mark.asyncio
@@ -722,6 +888,32 @@ async def test_result_seal_and_plan_binding_reject_tampering() -> None:
         replace(result, accepted_plan_sha256="8" * 64)
     with pytest.raises(CurrentFileWebComparisonError):
         replace(result, answer=result.answer.replace("локальный", "подменённый"))
+
+
+def test_binding_binds_the_exact_v2_requirements_digest(monkeypatch: pytest.MonkeyPatch) -> None:
+    baseline = current_file_web_comparison_binding_sha256(
+        accepted_plan_sha256=_PLAN_SHA256,
+        source_evidence_sha256="a" * 64,
+        model_evidence_sha256="b" * 64,
+        status=CurrentFileWebComparisonStatus.COMPLETE,
+        partial_reasons=(),
+    )
+    requirements = current_file_web_model_requirements()
+    monkeypatch.setattr(
+        comparison_module,
+        "current_file_web_model_requirements",
+        lambda: replace(requirements, max_tool_calls=1),
+    )
+    assert (
+        current_file_web_comparison_binding_sha256(
+            accepted_plan_sha256=_PLAN_SHA256,
+            source_evidence_sha256="a" * 64,
+            model_evidence_sha256="b" * 64,
+            status=CurrentFileWebComparisonStatus.COMPLETE,
+            partial_reasons=(),
+        )
+        != baseline
+    )
 
 
 def test_public_api_has_no_effect_storage_tool_or_publication_handle() -> None:

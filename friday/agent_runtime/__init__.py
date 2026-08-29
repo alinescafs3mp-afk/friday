@@ -38586,39 +38586,6 @@ class AgentRuntime:
                 evidence_bundle_sha256=bundle_digest,
                 absolute_deadline=deadline,
             )
-            try:
-                lease_current = await conversation_document_comparison_lease_is_current(
-                    model,
-                    comparison,
-                    absolute_deadline=deadline,
-                )
-            except TimeoutError:
-                raise ConversationDocumentComparisonError(
-                    "comparison lease recheck timed out",
-                    model_calls=2,
-                    failure_stage=FailureStage.STATE_LOSS,
-                    failure_reason=FailureReason.TIMEOUT,
-                    synthesis_outcome=OutcomeStatus.SUCCEEDED,
-                    verification_outcome=OutcomeStatus.SUCCEEDED,
-                ) from None
-            except Exception:
-                raise ConversationDocumentComparisonError(
-                    "comparison lease recheck failed",
-                    model_calls=2,
-                    failure_stage=FailureStage.STATE_LOSS,
-                    failure_reason=FailureReason.PROVIDER_FAILURE,
-                    synthesis_outcome=OutcomeStatus.SUCCEEDED,
-                    verification_outcome=OutcomeStatus.SUCCEEDED,
-                ) from None
-            if not lease_current:
-                raise ConversationDocumentComparisonError(
-                    "comparison lease became stale",
-                    model_calls=2,
-                    failure_stage=FailureStage.STATE_LOSS,
-                    failure_reason=FailureReason.STALE_STATE,
-                    synthesis_outcome=OutcomeStatus.SUCCEEDED,
-                    verification_outcome=OutcomeStatus.SUCCEEDED,
-                )
         except WorkItemConflictError:
             raise
         except ConversationDocumentComparisonError as exc:
@@ -38694,8 +38661,6 @@ class AgentRuntime:
         try:
             if time.monotonic() >= deadline:
                 raise TimeoutError("comparison deadline expired before final publication")
-            if not mark_request_effect_possible():
-                raise RuntimeError("request fence failed before comparison publication")
             with self.storage.transaction() as conn:
                 if time.monotonic() >= deadline:
                     raise TimeoutError("comparison deadline expired before final transaction")
@@ -38803,6 +38768,43 @@ class AgentRuntime:
                 )
                 if time.monotonic() >= deadline:
                     raise TimeoutError("comparison deadline expired before assistant publication")
+                try:
+                    lease_current = await conversation_document_comparison_lease_is_current(
+                        model,
+                        comparison,
+                        absolute_deadline=deadline,
+                    )
+                except TimeoutError:
+                    raise ConversationDocumentComparisonError(
+                        "comparison lease recheck timed out",
+                        model_calls=2,
+                        failure_stage=FailureStage.STATE_LOSS,
+                        failure_reason=FailureReason.TIMEOUT,
+                        synthesis_outcome=OutcomeStatus.SUCCEEDED,
+                        verification_outcome=OutcomeStatus.SUCCEEDED,
+                    ) from None
+                except Exception:
+                    raise ConversationDocumentComparisonError(
+                        "comparison lease recheck failed",
+                        model_calls=2,
+                        failure_stage=FailureStage.STATE_LOSS,
+                        failure_reason=FailureReason.PROVIDER_FAILURE,
+                        synthesis_outcome=OutcomeStatus.SUCCEEDED,
+                        verification_outcome=OutcomeStatus.SUCCEEDED,
+                    ) from None
+                if not lease_current:
+                    raise ConversationDocumentComparisonError(
+                        "comparison lease became stale",
+                        model_calls=2,
+                        failure_stage=FailureStage.STATE_LOSS,
+                        failure_reason=FailureReason.STALE_STATE,
+                        synthesis_outcome=OutcomeStatus.SUCCEEDED,
+                        verification_outcome=OutcomeStatus.SUCCEEDED,
+                    )
+                if time.monotonic() >= deadline:
+                    raise TimeoutError("comparison deadline expired after lease recheck")
+                if not mark_request_effect_possible():
+                    raise RuntimeError("request fence failed before comparison publication")
                 assistant = store_message_in_transaction(
                     conn,
                     conversation_id,
@@ -38867,10 +38869,18 @@ class AgentRuntime:
                     (CapabilityClass.VERIFICATION, OutcomeStatus.SUCCEEDED),
                 ),
                 failure_stage=(
-                    FailureStage.PUBLICATION if isinstance(exc, TimeoutError) else FailureStage.STATE_LOSS
+                    exc.failure_stage
+                    if isinstance(exc, ConversationDocumentComparisonError)
+                    else FailureStage.PUBLICATION
+                    if isinstance(exc, TimeoutError)
+                    else FailureStage.STATE_LOSS
                 ),
                 failure_reason=(
-                    FailureReason.TIMEOUT if isinstance(exc, TimeoutError) else FailureReason.STALE_STATE
+                    exc.failure_reason
+                    if isinstance(exc, ConversationDocumentComparisonError)
+                    else FailureReason.TIMEOUT
+                    if isinstance(exc, TimeoutError)
+                    else FailureReason.STALE_STATE
                 ),
                 model_calls=2,
                 turn_started=turn_started,
@@ -44145,70 +44155,9 @@ class AgentRuntime:
                 explanation_synthesis_outcome=exc.synthesis_outcome,
                 explanation_verification_outcome=exc.verification_outcome,
             )
-        try:
-            explanation_lease_is_current = await selected_archive_explanation_lease_is_current(
-                model,
-                explanation,
-                absolute_deadline=deadline,
-            )
-        except TimeoutError:
-            if deadline - time.monotonic() <= _SELECTED_ARCHIVE_PUBLICATION_RESERVE_SEC:
-                raise
-            return self._selected_archive_evidence_replay_response(
-                actor=actor,
-                conversation_id=conversation_id,
-                person_id=person_id,
-                request=request,
-                boundary_message_id=boundary_message_id,
-                admitted_work_item=admitted_work_item,
-                turn_started=turn_started,
-                explanation_unavailable=True,
-                prior_model_calls=2,
-                publication_deadline=deadline,
-                explanation_failure_stage=FailureStage.STATE_LOSS,
-                explanation_failure_reason=FailureReason.TIMEOUT,
-                explanation_synthesis_outcome=OutcomeStatus.SUCCEEDED,
-                explanation_verification_outcome=OutcomeStatus.SUCCEEDED,
-            )
-        except Exception:
-            return self._selected_archive_evidence_replay_response(
-                actor=actor,
-                conversation_id=conversation_id,
-                person_id=person_id,
-                request=request,
-                boundary_message_id=boundary_message_id,
-                admitted_work_item=admitted_work_item,
-                turn_started=turn_started,
-                explanation_unavailable=True,
-                prior_model_calls=2,
-                publication_deadline=deadline,
-                explanation_failure_stage=FailureStage.STATE_LOSS,
-                explanation_failure_reason=FailureReason.PROVIDER_FAILURE,
-                explanation_synthesis_outcome=OutcomeStatus.SUCCEEDED,
-                explanation_verification_outcome=OutcomeStatus.SUCCEEDED,
-            )
-        if not explanation_lease_is_current:
-            if deadline - time.monotonic() <= _SELECTED_ARCHIVE_PUBLICATION_RESERVE_SEC:
-                raise TimeoutError("archive explanation deadline expired before publication")
-            return self._selected_archive_evidence_replay_response(
-                actor=actor,
-                conversation_id=conversation_id,
-                person_id=person_id,
-                request=request,
-                boundary_message_id=boundary_message_id,
-                admitted_work_item=admitted_work_item,
-                turn_started=turn_started,
-                explanation_unavailable=True,
-                prior_model_calls=2,
-                publication_deadline=deadline,
-                explanation_failure_stage=FailureStage.STATE_LOSS,
-                explanation_failure_reason=FailureReason.STALE_STATE,
-                explanation_synthesis_outcome=OutcomeStatus.SUCCEEDED,
-                explanation_verification_outcome=OutcomeStatus.SUCCEEDED,
-            )
-
         if deadline - time.monotonic() <= _SELECTED_ARCHIVE_PUBLICATION_RESERVE_SEC:
             raise TimeoutError("archive explanation deadline expired before publication")
+        late_lease_failure_reason: FailureReason | None = None
         with self.storage.transaction() as publication_conn:
             if time.monotonic() >= deadline:
                 raise TimeoutError("archive explanation deadline expired before transaction")
@@ -44368,39 +44317,77 @@ class AgentRuntime:
                 raise RuntimeError("archive explanation Work Item trace could not be stored")
             if time.monotonic() >= deadline:
                 raise TimeoutError("archive explanation deadline expired before message")
-            assistant_message = store_message_in_transaction(
-                publication_conn,
-                conversation_id,
-                person_id,
-                "assistant",
-                content,
-                metadata=assistant_metadata,
-                reply_to=boundary_message_id,
-            )
-            if assistant_message.get("content") != content:
-                raise ValueError("archive explanation durability reread changed content")
-            stored_receipt = load_accepted_archive_recall_outcome_receipt(
-                assistant_message.get("metadata_json"),
-                expected_outcome=outcome,
-            )
-            mutation = (
-                accept_recall_selected_archive_evidence_replay_in_transaction
-                if exact
-                else suspend_recall_selected_archive_evidence_replay_in_transaction
-            )
-            mutation(
-                publication_conn,
-                work_item_id=current.id,
-                user_id=person_id,
+            if exact:
+                try:
+                    explanation_lease_is_current = await selected_archive_explanation_lease_is_current(
+                        model,
+                        explanation,
+                        absolute_deadline=deadline,
+                    )
+                except TimeoutError:
+                    if deadline - time.monotonic() <= _SELECTED_ARCHIVE_PUBLICATION_RESERVE_SEC:
+                        raise
+                    late_lease_failure_reason = FailureReason.TIMEOUT
+                except Exception:
+                    late_lease_failure_reason = FailureReason.PROVIDER_FAILURE
+                else:
+                    if not explanation_lease_is_current:
+                        if deadline - time.monotonic() <= _SELECTED_ARCHIVE_PUBLICATION_RESERVE_SEC:
+                            raise TimeoutError("archive explanation deadline expired before publication")
+                        late_lease_failure_reason = FailureReason.STALE_STATE
+            if late_lease_failure_reason is None:
+                if time.monotonic() >= deadline:
+                    raise TimeoutError("archive explanation deadline expired after lease recheck")
+                assistant_message = store_message_in_transaction(
+                    publication_conn,
+                    conversation_id,
+                    person_id,
+                    "assistant",
+                    content,
+                    metadata=assistant_metadata,
+                    reply_to=boundary_message_id,
+                )
+                if assistant_message.get("content") != content:
+                    raise ValueError("archive explanation durability reread changed content")
+                stored_receipt = load_accepted_archive_recall_outcome_receipt(
+                    assistant_message.get("metadata_json"),
+                    expected_outcome=outcome,
+                )
+                mutation = (
+                    accept_recall_selected_archive_evidence_replay_in_transaction
+                    if exact
+                    else suspend_recall_selected_archive_evidence_replay_in_transaction
+                )
+                mutation(
+                    publication_conn,
+                    work_item_id=current.id,
+                    user_id=person_id,
+                    conversation_id=conversation_id,
+                    expected_revision=current.revision,
+                    new_boundary_user_message_id=boundary_message_id,
+                    new_assistant_message_id=str(assistant_message["id"]),
+                    new_accepted_plan_sha256=outcome.plan_sha256,
+                    new_accepted_outcome_sha256=stored_receipt.outcome_sha256,
+                )
+                if time.monotonic() >= deadline:
+                    raise TimeoutError("archive explanation deadline expired before commit")
+        if late_lease_failure_reason is not None:
+            return self._selected_archive_evidence_replay_response(
+                actor=actor,
                 conversation_id=conversation_id,
-                expected_revision=current.revision,
-                new_boundary_user_message_id=boundary_message_id,
-                new_assistant_message_id=str(assistant_message["id"]),
-                new_accepted_plan_sha256=outcome.plan_sha256,
-                new_accepted_outcome_sha256=stored_receipt.outcome_sha256,
+                person_id=person_id,
+                request=request,
+                boundary_message_id=boundary_message_id,
+                admitted_work_item=admitted_work_item,
+                turn_started=turn_started,
+                explanation_unavailable=True,
+                prior_model_calls=2,
+                publication_deadline=deadline,
+                explanation_failure_stage=FailureStage.STATE_LOSS,
+                explanation_failure_reason=late_lease_failure_reason,
+                explanation_synthesis_outcome=OutcomeStatus.SUCCEEDED,
+                explanation_verification_outcome=OutcomeStatus.SUCCEEDED,
             )
-            if time.monotonic() >= deadline:
-                raise TimeoutError("archive explanation deadline expired before commit")
 
         citation_labels = outcome.used_citation_labels if exact else ()
         return {

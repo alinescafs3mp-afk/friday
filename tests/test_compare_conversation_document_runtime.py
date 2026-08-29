@@ -1060,6 +1060,94 @@ async def test_exact_q2_ordinal_reauthorizes_and_completes_comparison(
 
 
 @pytest.mark.asyncio
+async def test_comparison_epoch_loss_after_final_reauth_rolls_back_model_publication(
+    settings: Any,
+    storage: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    owner = "compare-late-epoch-loss-owner"
+    conversation, q2, actor, _raws = await _open_duplicate_filename_q2(
+        settings,
+        storage,
+        owner=owner,
+    )
+    replay = _exact_replay(q2)
+    model = _ComparisonModel()
+    runtime = AgentRuntime(settings, storage, selected_archive_model=model)
+    reauth_calls = 0
+    read_only_checked = False
+    lease_checks = 0
+    original_read_only_check = runtime._comparison_answer_is_read_only  # noqa: SLF001
+
+    def replay_current(*_args: Any, **_kwargs: Any) -> Any:
+        nonlocal reauth_calls
+        reauth_calls += 1
+        return replay
+
+    def observe_read_only(answer: str, prepared: Any) -> bool:
+        nonlocal read_only_checked
+        accepted = original_read_only_check(answer, prepared)
+        read_only_checked = True
+        return accepted
+
+    async def reject_restarted_lease(
+        _model: Any,
+        _comparison: Any,
+        *,
+        absolute_deadline: float,
+    ) -> bool:
+        nonlocal lease_checks
+        lease_checks += 1
+        assert absolute_deadline > agent_runtime_module.time.monotonic()
+        assert read_only_checked
+        assert reauth_calls == 2
+        assert storage.conn.in_transaction
+        return False
+
+    monkeypatch.setattr(runtime, "_comparison_replay_in_transaction", replay_current)
+    monkeypatch.setattr(runtime, "_comparison_answer_is_read_only", observe_read_only)
+    monkeypatch.setattr(
+        agent_runtime_module,
+        "conversation_document_comparison_lease_is_current",
+        reject_restarted_lease,
+    )
+    monkeypatch.setattr(
+        comparison_module,
+        "archive_selected_evidence_snapshot_sha256",
+        lambda *_args, **_kwargs: q2.selected_message_evidence.source_snapshot_sha256,
+    )
+
+    result = await runtime.chat(
+        owner,
+        "2",
+        actor=actor,
+        conversation_id=conversation["id"],
+    )
+
+    assert lease_checks == 1
+    assert model.lease_checks == 3
+    assert result["verified"] is False
+    assert result["context"]["compare_conversation_with_document"] == "suspended"
+    contents = tuple(
+        str(row["content"])
+        for row in storage.execute(
+            "SELECT content FROM messages WHERE user_id=? AND conversation_id=? ORDER BY rowid",
+            (owner, conversation["id"]),
+        ).fetchall()
+    )
+    assert model.answer not in contents
+    with storage.transaction() as conn:
+        suspended = get_compare_conversation_with_document_work_item_in_transaction(
+            conn,
+            work_item_id=q2.id,
+            user_id=owner,
+            conversation_id=conversation["id"],
+        )
+    assert suspended is not None
+    assert suspended.state is WorkState.SUSPENDED
+
+
+@pytest.mark.asyncio
 async def test_duplicate_historical_api_uploads_without_alias_reach_q2_and_bind_only_selection(
     settings: Any,
     storage: Any,

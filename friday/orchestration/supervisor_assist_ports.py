@@ -9,11 +9,13 @@ cross a separate atomic ownership boundary before executing an admitted plan.
 from __future__ import annotations
 
 import asyncio
+import math
+import time
 from collections.abc import Callable, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Protocol
 
-from friday.model_profiles import ModelProfileLease, ModelRequirements
+from friday.model_profiles import V12_MODEL_LEASE_SCHEMA, ModelProfileLease, ModelRequirements
 from friday.orchestration.capability_binding import CapabilityBindingSnapshot
 from friday.orchestration.policy_kernel import PolicyAdmissionContext
 from friday.orchestration.semantic_supervisor import (
@@ -117,6 +119,49 @@ def _guarded(guard: Callable[[], bool] | None) -> Callable[[], bool] | None:
             return False
 
     return evaluate
+
+
+def _future_deadline(value: object) -> float | None:
+    if (
+        isinstance(value, bool)
+        or not isinstance(value, int | float)
+        or not math.isfinite(float(value))
+        or float(value) <= time.monotonic()
+    ):
+        return None
+    return float(value)
+
+
+def _remaining(deadline: float) -> float:
+    remaining = deadline - time.monotonic()
+    if remaining <= 0:
+        raise TimeoutError("primary model deadline expired")
+    return remaining
+
+
+def _lease_matches_requirements(
+    lease: object,
+    requirements: object,
+) -> bool:
+    """Prove the complete v2 leased subset without widening runtime authority."""
+
+    if type(lease) is not ModelProfileLease or type(requirements) is not ModelRequirements:
+        return False
+    try:
+        return bool(
+            lease.schema == V12_MODEL_LEASE_SCHEMA
+            and lease.requirements_sha256 == requirements.canonical_sha256()
+            and lease.capabilities == requirements.capabilities
+            and lease.required_context_tokens == requirements.required_context_tokens
+            and lease.prepared_evidence_items == requirements.prepared_evidence_items
+            and lease.max_tool_steps == requirements.max_tool_steps
+            and lease.max_tool_rounds == requirements.max_tool_rounds
+            and lease.max_tool_calls == requirements.max_tool_calls
+            and lease.effect is requirements.effect
+            and lease.verifier_required is requirements.verifier_required
+        )
+    except Exception:
+        return False
 
 
 def _authenticated_advisory_scope(
@@ -301,17 +346,25 @@ class SchedulerAssistReviewer:
 class AttestedPrimaryModel:
     """Require an explicit live attestation before the ownership commit."""
 
-    runtime: PrimaryModelRuntime
+    runtime: PrimaryModelRuntime = field(repr=False)
 
     async def prepare_primary_model(self, *, absolute_deadline: float) -> bool:
+        deadline = _future_deadline(absolute_deadline)
+        if deadline is None:
+            return False
         try:
-            await self.runtime.attest(absolute_deadline=absolute_deadline)
+            async with asyncio.timeout(_remaining(deadline)):
+                await self.runtime.attest(absolute_deadline=deadline)
             status = self.runtime.public_status()
         except asyncio.CancelledError:
             raise
         except Exception:
             return False
-        return isinstance(status, Mapping) and status.get("status") == "canary_ready"
+        return bool(
+            _future_deadline(deadline) is not None
+            and isinstance(status, Mapping)
+            and status.get("status") == "canary_ready"
+        )
 
     async def acquire_lease(
         self,
@@ -319,9 +372,23 @@ class AttestedPrimaryModel:
         *,
         absolute_deadline: float,
     ) -> ModelProfileLease | None:
-        return await self.runtime.acquire_lease(
-            requirements,
-            absolute_deadline=absolute_deadline,
+        deadline = _future_deadline(absolute_deadline)
+        if type(requirements) is not ModelRequirements or deadline is None:
+            return None
+        try:
+            async with asyncio.timeout(_remaining(deadline)):
+                lease = await self.runtime.acquire_lease(
+                    requirements,
+                    absolute_deadline=deadline,
+                )
+        except asyncio.CancelledError:
+            raise
+        except TimeoutError:
+            return None
+        return (
+            lease
+            if _future_deadline(deadline) is not None and _lease_matches_requirements(lease, requirements)
+            else None
         )
 
     async def lease_is_current(
@@ -331,11 +398,21 @@ class AttestedPrimaryModel:
         *,
         absolute_deadline: float,
     ) -> bool:
-        return await self.runtime.lease_is_current(
-            lease,
-            requirements,
-            absolute_deadline=absolute_deadline,
-        )
+        deadline = _future_deadline(absolute_deadline)
+        if deadline is None or not _lease_matches_requirements(lease, requirements):
+            return False
+        try:
+            async with asyncio.timeout(_remaining(deadline)):
+                current = await self.runtime.lease_is_current(
+                    lease,
+                    requirements,
+                    absolute_deadline=deadline,
+                )
+        except asyncio.CancelledError:
+            raise
+        except TimeoutError:
+            return False
+        return _future_deadline(deadline) is not None and current is True
 
     async def complete(
         self,
@@ -348,15 +425,22 @@ class AttestedPrimaryModel:
         absolute_deadline: float,
         temperature: float | None = 0.0,
     ) -> dict[str, Any]:
-        return await self.runtime.complete(
-            lease,
-            requirements,
-            messages,
-            max_tokens=max_tokens,
-            priority=priority,
-            absolute_deadline=absolute_deadline,
-            temperature=temperature,
-        )
+        deadline = _future_deadline(absolute_deadline)
+        if deadline is None or not _lease_matches_requirements(lease, requirements):
+            raise RuntimeError("primary model lease is invalid")
+        async with asyncio.timeout(_remaining(deadline)):
+            response = await self.runtime.complete(
+                lease,
+                requirements,
+                messages,
+                max_tokens=max_tokens,
+                priority=priority,
+                absolute_deadline=deadline,
+                temperature=temperature,
+            )
+        if _future_deadline(deadline) is None:
+            raise TimeoutError("primary model deadline expired")
+        return response
 
 
 __all__ = [

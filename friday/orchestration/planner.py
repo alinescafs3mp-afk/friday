@@ -4,8 +4,9 @@ from __future__ import annotations
 
 import asyncio
 import json
+import math
 import time
-from typing import Any, Literal, Protocol
+from typing import Any, Literal, Protocol, cast
 
 from friday.model_input_hygiene import model_messages_are_secret_free
 from friday.model_profiles import (
@@ -15,6 +16,8 @@ from friday.model_profiles import (
     ModelRequirements,
 )
 from friday.orchestration.contracts import TURN_PLAN_SCHEMA, TurnInput, TurnPlan
+from friday.orchestration.turn_context import AuthenticatedTurnContext, TurnContextError
+from friday.orchestration.turn_context_runtime import current_primary_authenticated_turn_context
 
 _PLANNER_SYSTEM_PROMPT = f"""\
 You are Friday's semantic turn planner. Return exactly one JSON object and no prose.
@@ -54,12 +57,41 @@ _PLANNER_REQUIREMENTS = ModelRequirements(
     required_context_tokens=8_192,
     prepared_evidence_items=0,
     max_tool_steps=0,
+    max_tool_rounds=0,
+    max_tool_calls=0,
     effect=ModelEffect.READ,
     # The first promoted route has an independent verifier.  Requiring that
     # capability at planning time prevents a planner-only attestation from
     # selecting a route that the same live generation cannot verify.
     verifier_required=True,
 )
+
+
+def _planner_lease_matches_requirements(lease: object) -> bool:
+    if not isinstance(lease, ModelProfileLease) or type(lease) is not ModelProfileLease:
+        return False
+    return bool(
+        lease.requirements_sha256 == _PLANNER_REQUIREMENTS.canonical_sha256()
+        and lease.capabilities == _PLANNER_REQUIREMENTS.capabilities
+        and lease.required_context_tokens == _PLANNER_REQUIREMENTS.required_context_tokens
+        and lease.prepared_evidence_items == _PLANNER_REQUIREMENTS.prepared_evidence_items
+        and lease.max_tool_steps == _PLANNER_REQUIREMENTS.max_tool_steps
+        and lease.max_tool_rounds == _PLANNER_REQUIREMENTS.max_tool_rounds
+        and lease.max_tool_calls == _PLANNER_REQUIREMENTS.max_tool_calls
+        and lease.effect is _PLANNER_REQUIREMENTS.effect
+        and lease.verifier_required is _PLANNER_REQUIREMENTS.verifier_required
+    )
+
+
+def _planner_future_deadline(deadline: object, *, stage: str) -> float:
+    if type(deadline) not in (int, float):
+        raise TypeError(f"turn planning deadline is invalid {stage}")
+    value = float(cast("int | float", deadline))
+    if not math.isfinite(value):
+        raise ValueError(f"turn planning deadline is invalid {stage}")
+    if value <= time.monotonic():
+        raise TimeoutError(f"turn planning deadline has expired {stage}")
+    return value
 
 
 class PlannerModel(Protocol):
@@ -95,6 +127,14 @@ class AttestedPlannerRuntime(Protocol):
         absolute_deadline: float,
     ) -> ModelProfileLease | None: ...
 
+    async def lease_is_current(
+        self,
+        lease: object,
+        requirements: ModelRequirements,
+        *,
+        absolute_deadline: float,
+    ) -> bool: ...
+
     async def complete(
         self,
         lease: ModelProfileLease,
@@ -105,6 +145,74 @@ class AttestedPlannerRuntime(Protocol):
         priority: Literal["foreground", "background"],
         absolute_deadline: float,
     ) -> dict[str, Any]: ...
+
+
+async def _planner_lease_is_current_before_deadline(
+    runtime: AttestedPlannerRuntime,
+    lease: object,
+    *,
+    absolute_deadline: float,
+) -> bool:
+    deadline = _planner_future_deadline(absolute_deadline, stage="before lease check")
+    remaining = deadline - time.monotonic()
+    if not _planner_lease_matches_requirements(lease):
+        return False
+    current = await asyncio.wait_for(
+        runtime.lease_is_current(
+            lease,
+            _PLANNER_REQUIREMENTS,
+            absolute_deadline=deadline,
+        ),
+        timeout=remaining,
+    )
+    return type(current) is bool and current
+
+
+def _planner_turn_context(
+    turn: TurnInput,
+    expected: AuthenticatedTurnContext | None,
+) -> AuthenticatedTurnContext | None:
+    try:
+        current = current_primary_authenticated_turn_context(expected)
+    except TurnContextError:
+        raise RuntimeError("authenticated planner context is unavailable") from None
+    if current is not expected or (current is not None and current.model_input is not turn):
+        raise RuntimeError("authenticated planner context changed")
+    return current
+
+
+def _planner_inherited_limits(
+    context: AuthenticatedTurnContext | None,
+    *,
+    deadline: float,
+) -> tuple[float, int]:
+    deadline = _planner_future_deadline(deadline, stage="before inherited parent clamp")
+    if context is None:
+        return deadline, 512
+    parent = context.inherited_budget
+    parent_deadline = _planner_future_deadline(
+        math.nextafter(
+            parent.safety_deadline.monotonic_ns / 1_000_000_000,
+            -math.inf,
+        ),
+        stage="at inherited parent clamp",
+    )
+    deadline = _planner_future_deadline(
+        min(deadline, parent_deadline),
+        stage="after inherited parent clamp",
+    )
+    child = parent.derive_child(
+        safety_deadline_monotonic_ns=parent.safety_deadline.monotonic_ns,
+        max_model_calls=1,
+        max_model_retries=0,
+        max_tool_calls=0,
+        max_tool_rounds=0,
+        max_advisory_calls=0,
+        max_output_tokens=512,
+    )
+    if child.resources.max_tool_calls != 0 or child.resources.max_tool_rounds != 0:
+        raise RuntimeError("planner gained inherited tool authority")
+    return deadline, min(512, child.resources.max_output_tokens)
 
 
 class V12Planner:
@@ -122,12 +230,17 @@ class V12Planner:
         self._timeout_sec = max(1.0, min(float(timeout_sec), 60.0))
 
     def _deadline(self, turn_deadline: float | None) -> float:
-        deadline = time.monotonic() + self._timeout_sec
+        deadline = _planner_future_deadline(
+            time.monotonic() + self._timeout_sec,
+            stage="before local clamp",
+        )
         if turn_deadline is not None:
-            deadline = min(deadline, turn_deadline)
-        if deadline <= time.monotonic():
-            raise TimeoutError("turn planning deadline has expired")
-        return deadline
+            inherited = _planner_future_deadline(
+                turn_deadline,
+                stage="before local clamp",
+            )
+            deadline = min(deadline, inherited)
+        return _planner_future_deadline(deadline, stage="after local clamp")
 
     @staticmethod
     def _messages(turn: TurnInput) -> list[dict[str, Any]]:
@@ -206,25 +319,58 @@ class V12Planner:
         """Plan only through a current, code-owned live-model authority."""
 
         deadline = self._deadline(turn_deadline)
+        try:
+            context = current_primary_authenticated_turn_context()
+        except TurnContextError:
+            raise RuntimeError("authenticated planner context is unavailable") from None
+        _planner_turn_context(turn, context)
+        deadline, max_tokens = _planner_inherited_limits(context, deadline=deadline)
+        if deadline <= time.monotonic():
+            raise TimeoutError("turn planning deadline has expired")
         messages = self._messages(turn)
         runtime = self._attested_runtime
         if runtime is None:
             raise RuntimeError("attested V12 planner runtime is unavailable")
-        lease = await runtime.acquire_lease(
-            _PLANNER_REQUIREMENTS,
-            absolute_deadline=deadline,
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise TimeoutError("turn planning deadline has expired before lease acquisition")
+        lease = await asyncio.wait_for(
+            runtime.acquire_lease(
+                _PLANNER_REQUIREMENTS,
+                absolute_deadline=deadline,
+            ),
+            timeout=remaining,
         )
         if type(lease) is not ModelProfileLease:
             raise RuntimeError("attested V12 planner lease is unavailable")
+        _planner_turn_context(turn, context)
+        if not await _planner_lease_is_current_before_deadline(
+            runtime,
+            lease,
+            absolute_deadline=deadline,
+        ):
+            raise RuntimeError("attested V12 planner lease changed before planning")
+        _planner_turn_context(turn, context)
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise TimeoutError("turn planning deadline has expired before dispatch")
         response = await asyncio.wait_for(
             runtime.complete(
                 lease,
                 _PLANNER_REQUIREMENTS,
                 messages,
-                max_tokens=512,
+                max_tokens=max_tokens,
                 priority="background",
                 absolute_deadline=deadline,
             ),
-            timeout=max(0.001, deadline - time.monotonic()),
+            timeout=remaining,
         )
+        _planner_turn_context(turn, context)
+        if not await _planner_lease_is_current_before_deadline(
+            runtime,
+            lease,
+            absolute_deadline=deadline,
+        ):
+            raise RuntimeError("attested V12 planner lease changed after planning")
+        _planner_turn_context(turn, context)
         return self._plan_from_response(response)

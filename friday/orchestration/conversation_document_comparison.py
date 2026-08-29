@@ -9,9 +9,11 @@ searches, persists, publishes or widens authority.
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import hmac
 import json
+import math
 import re
 import secrets
 import time
@@ -39,13 +41,19 @@ from friday.orchestration.file_read import (
     _AttestedFileModel,
     _call_model_once,
     _file_requirements,
+    _lease_is_current_before_deadline,
     _messages_fit_attested_context,
+    _model_lease_matches_requirements,
+    _two_call_read_model_output_limits,
+    _V12ModelLeaseUnavailable,
 )
 from friday.orchestration.file_read_contract import (
     V12_FILE_VERIFIER_SYSTEM,
     build_file_verifier_prompt,
     require_file_verifier_clear,
 )
+from friday.orchestration.turn_context import AuthenticatedTurnContext, TurnContextError
+from friday.orchestration.turn_context_runtime import current_primary_authenticated_turn_context
 from friday.retrieval.archive_evidence_replay import (
     ArchiveEvidenceReplayCoverageGrade,
     ArchiveEvidenceReplayResult,
@@ -57,7 +65,7 @@ from friday.retrieval.archive_evidence_snapshot import (
 )
 from friday.retrieval.archive_search_contract import ArchiveSearchCorpus
 
-CONVERSATION_DOCUMENT_COMPARISON_PLAN_SCHEMA = "friday.conversation-document-comparison-plan.v2"
+CONVERSATION_DOCUMENT_COMPARISON_PLAN_SCHEMA = "friday.conversation-document-comparison-plan.v3"
 CONVERSATION_DOCUMENT_COMPARISON_EVIDENCE_SCHEMA = "friday.conversation-document-comparison-evidence.v1"
 
 _DIGEST_RE = re.compile(r"[0-9a-f]{64}\Z")
@@ -114,6 +122,81 @@ class ConversationDocumentComparisonError(RuntimeError):
             verification_outcome if type(verification_outcome) is OutcomeStatus else OutcomeStatus.FAILED
         )
         super().__init__(message)
+
+
+def conversation_document_model_requirements() -> ModelRequirements:
+    """Return this journey's one immutable measured-lease projection."""
+
+    return _file_requirements(2)
+
+
+def _lease_matches_requirements(
+    lease: object,
+    requirements: ModelRequirements,
+) -> bool:
+    return bool(
+        type(lease) is ModelProfileLease
+        and requirements is conversation_document_model_requirements()
+        and _model_lease_matches_requirements(lease, requirements)
+    )
+
+
+def _current_parent_context(
+    expected: AuthenticatedTurnContext | None,
+) -> AuthenticatedTurnContext | None:
+    current = current_primary_authenticated_turn_context(expected)
+    if current is not expected:
+        raise TurnContextError("conversation/document parent authority drifted")
+    return current
+
+
+def _require_deadline(value: object) -> float:
+    if (
+        isinstance(value, bool)
+        or not isinstance(value, int | float)
+        or not math.isfinite(float(value))
+        or float(value) <= time.monotonic()
+    ):
+        raise ConversationDocumentComparisonError(
+            "comparison deadline is exhausted",
+            failure_stage=FailureStage.SYNTHESIS_CONTRADICTION,
+            failure_reason=FailureReason.TIMEOUT,
+        )
+    return float(value)
+
+
+def _within_parent_deadline(
+    deadline: float,
+    context: AuthenticatedTurnContext | None,
+) -> float:
+    if context is None:
+        return deadline
+    parent = math.nextafter(
+        context.inherited_budget.safety_deadline.monotonic_ns / 1_000_000_000,
+        -math.inf,
+    )
+    return min(deadline, parent)
+
+
+async def _exact_lease_is_current(
+    model: _AttestedFileModel,
+    lease: ModelProfileLease,
+    requirements: ModelRequirements,
+    *,
+    deadline: float,
+    parent_context: AuthenticatedTurnContext | None,
+) -> bool:
+    _current_parent_context(parent_context)
+    if type(lease) is not ModelProfileLease or not _lease_matches_requirements(lease, requirements):
+        return False
+    current = await _lease_is_current_before_deadline(
+        model,
+        lease,
+        requirements,
+        absolute_deadline=deadline,
+    )
+    _current_parent_context(parent_context)
+    return current and _lease_matches_requirements(lease, requirements)
 
 
 def _canonical_json(value: object) -> str:
@@ -297,12 +380,17 @@ def conversation_document_comparison_plan_sha256(
                 "document_model_evidence_sha256": document_model_evidence_sha256,
                 "effect": "read",
                 "evidence_bundle_sha256": evidence_bundle_sha256,
+                "max_model_calls": 2,
+                "max_output_tokens": _MAX_SYNTHESIS_TOKENS,
+                "max_tool_calls": 0,
+                "max_tool_rounds": 0,
                 "message_evidence_sha256": message_evidence_sha256,
                 "model_evidence_sha256": model_evidence_sha256,
                 "max_tool_steps": 0,
                 "message_model_evidence_sha256": message_model_evidence_sha256,
                 "objective": "compare_exact_message_evidence_with_one_document",
                 "request_sha256": hashlib.sha256(request_bytes).hexdigest(),
+                "requirements_sha256": conversation_document_model_requirements().canonical_sha256(),
                 "schema": CONVERSATION_DOCUMENT_COMPARISON_PLAN_SCHEMA,
                 "verifier_required": True,
             }
@@ -422,6 +510,7 @@ def _comparison_process_seal(
     message_coverage_grade: ArchiveEvidenceReplayCoverageGrade,
     lease: ModelProfileLease,
     requirements: ModelRequirements,
+    parent_context: AuthenticatedTurnContext | None,
 ) -> str:
     payload = _canonical_json(
         {
@@ -435,9 +524,13 @@ def _comparison_process_seal(
             "message_evidence_sha256": message_evidence_sha256,
             "message_model_evidence_sha256": message_model_evidence_sha256,
             "model_evidence_sha256": model_evidence_sha256,
+            "parent_context_object_id": (id(parent_context) if parent_context is not None else None),
+            "parent_context_sha256": (
+                parent_context.canonical_sha256() if parent_context is not None else None
+            ),
             "plan_sha256": plan_sha256,
             "requirements_sha256": requirements.canonical_sha256(),
-            "schema": "friday.conversation-document-comparison-process-seal.v1",
+            "schema": "friday.conversation-document-comparison-process-seal.v2",
         }
     ).encode("ascii")
     return hmac.new(_PROCESS_SEAL_KEY, payload, hashlib.sha256).hexdigest()
@@ -461,6 +554,11 @@ class ConversationDocumentComparison:
     requirements: ModelRequirements = field(repr=False, compare=False)
     _process_seal_sha256: str = field(repr=False, compare=False)
     _process_authority: object = field(repr=False, compare=False)
+    _parent_context: AuthenticatedTurnContext | None = field(
+        default=None,
+        repr=False,
+        compare=False,
+    )
 
     def __post_init__(self) -> None:
         self._require_process_owned()
@@ -491,14 +589,12 @@ class ConversationDocumentComparison:
             or type(self.message_coverage_grade) is not ArchiveEvidenceReplayCoverageGrade
             or type(self.lease) is not ModelProfileLease
             or type(self.requirements) is not ModelRequirements
-            or self.requirements != _file_requirements(2)
-            or self.lease.requirements_sha256 != self.requirements.canonical_sha256()
-            or self.lease.capabilities != self.requirements.capabilities
-            or self.lease.required_context_tokens != self.requirements.required_context_tokens
-            or self.lease.prepared_evidence_items != self.requirements.prepared_evidence_items
-            or self.lease.max_tool_steps != self.requirements.max_tool_steps
-            or self.lease.effect is not self.requirements.effect
-            or self.lease.verifier_required is not self.requirements.verifier_required
+            or self.requirements is not conversation_document_model_requirements()
+            or not _lease_matches_requirements(self.lease, self.requirements)
+            or (
+                self._parent_context is not None
+                and type(self._parent_context) is not AuthenticatedTurnContext
+            )
         ):
             raise ConversationDocumentComparisonError("accepted comparison is invalid")
         try:
@@ -528,6 +624,7 @@ class ConversationDocumentComparison:
                 message_coverage_grade=self.message_coverage_grade,
                 lease=self.lease,
                 requirements=self.requirements,
+                parent_context=self._parent_context,
             ),
         ):
             raise ConversationDocumentComparisonError("accepted comparison seal is invalid")
@@ -559,7 +656,29 @@ async def compare_conversation_with_document(
 ) -> ConversationDocumentComparison:
     """Synthesize and independently verify one exact two-source comparison."""
 
-    if absolute_deadline - time.monotonic() <= _PUBLICATION_RESERVE_SEC:
+    try:
+        parent_context = current_primary_authenticated_turn_context()
+        deadline = _require_deadline(
+            _within_parent_deadline(_require_deadline(absolute_deadline), parent_context)
+        )
+        synthesis_max_tokens, verifier_max_tokens = _two_call_read_model_output_limits(
+            parent_context,
+            synthesis_max_tokens=_MAX_SYNTHESIS_TOKENS,
+            verifier_max_tokens=256,
+        )
+    except TurnContextError:
+        raise ConversationDocumentComparisonError(
+            "comparison parent authority is unavailable",
+            failure_stage=FailureStage.STATE_LOSS,
+            failure_reason=FailureReason.STALE_STATE,
+        ) from None
+    except V12FileReadError:
+        raise ConversationDocumentComparisonError(
+            "comparison exceeds the inherited model budget",
+            failure_stage=FailureStage.CAPABILITY,
+            failure_reason=FailureReason.BUDGET_EXHAUSTED,
+        ) from None
+    if deadline - time.monotonic() <= _PUBLICATION_RESERVE_SEC:
         raise ConversationDocumentComparisonError(
             "comparison deadline is exhausted",
             failure_stage=FailureStage.SYNTHESIS_CONTRADICTION,
@@ -616,7 +735,7 @@ async def compare_conversation_with_document(
     ):
         raise ConversationDocumentComparisonError("comparison evidence exceeds the attested context")
 
-    requirements = _file_requirements(2)
+    requirements = conversation_document_model_requirements()
     model_calls = 0
 
     def record_dispatch() -> None:
@@ -624,9 +743,16 @@ async def compare_conversation_with_document(
         model_calls += 1
 
     try:
-        lease = await model.acquire_lease(
-            requirements,
-            absolute_deadline=absolute_deadline - _PUBLICATION_RESERVE_SEC,
+        lease_deadline = deadline - _PUBLICATION_RESERVE_SEC
+        lease_remaining = lease_deadline - time.monotonic()
+        if lease_remaining <= 0:
+            raise TimeoutError("comparison lease deadline expired")
+        lease = await asyncio.wait_for(
+            model.acquire_lease(
+                requirements,
+                absolute_deadline=lease_deadline,
+            ),
+            timeout=lease_remaining,
         )
     except TimeoutError:
         raise ConversationDocumentComparisonError(
@@ -642,47 +768,21 @@ async def compare_conversation_with_document(
             failure_reason=FailureReason.PROVIDER_FAILURE,
             synthesis_outcome=OutcomeStatus.UNAVAILABLE,
         ) from None
-    if type(lease) is not ModelProfileLease:
+    if type(lease) is not ModelProfileLease or not _lease_matches_requirements(lease, requirements):
         raise ConversationDocumentComparisonError(
             "comparison lease is unavailable",
             failure_stage=FailureStage.STATE_LOSS,
             failure_reason=FailureReason.STALE_STATE,
         )
     try:
-        lease_current = await model.lease_is_current(
-            lease,
-            requirements,
-            absolute_deadline=absolute_deadline - _PUBLICATION_RESERVE_SEC,
-        )
-    except TimeoutError:
-        raise ConversationDocumentComparisonError(
-            "comparison lease check timed out",
-            failure_stage=FailureStage.SYNTHESIS_CONTRADICTION,
-            failure_reason=FailureReason.TIMEOUT,
-            synthesis_outcome=OutcomeStatus.UNAVAILABLE,
-        ) from None
-    except Exception:
-        raise ConversationDocumentComparisonError(
-            "comparison lease check failed",
-            failure_stage=FailureStage.SYNTHESIS_CONTRADICTION,
-            failure_reason=FailureReason.PROVIDER_FAILURE,
-            synthesis_outcome=OutcomeStatus.UNAVAILABLE,
-        ) from None
-    if not lease_current:
-        raise ConversationDocumentComparisonError(
-            "comparison lease is stale",
-            failure_stage=FailureStage.STATE_LOSS,
-            failure_reason=FailureReason.STALE_STATE,
-        )
-
-    try:
+        _current_parent_context(parent_context)
         synthesis = await _call_model_once(
             model,
             lease,
             requirements,
             synthesis_messages,
-            max_tokens=_MAX_SYNTHESIS_TOKENS,
-            deadline=absolute_deadline,
+            max_tokens=synthesis_max_tokens,
+            deadline=deadline,
             priority="foreground",
             on_dispatch=record_dispatch,
         )
@@ -692,6 +792,22 @@ async def compare_conversation_with_document(
             model_calls=model_calls,
             failure_stage=FailureStage.SYNTHESIS_CONTRADICTION,
             failure_reason=FailureReason.TIMEOUT,
+            synthesis_outcome=OutcomeStatus.UNAVAILABLE,
+        ) from None
+    except TurnContextError:
+        raise ConversationDocumentComparisonError(
+            "comparison parent authority changed before synthesis",
+            model_calls=model_calls,
+            failure_stage=FailureStage.STATE_LOSS,
+            failure_reason=FailureReason.STALE_STATE,
+            synthesis_outcome=OutcomeStatus.UNAVAILABLE,
+        ) from None
+    except _V12ModelLeaseUnavailable:
+        raise ConversationDocumentComparisonError(
+            "comparison lease is stale before synthesis",
+            model_calls=model_calls,
+            failure_stage=FailureStage.STATE_LOSS,
+            failure_reason=FailureReason.STALE_STATE,
             synthesis_outcome=OutcomeStatus.UNAVAILABLE,
         ) from None
     except V12FileReadError:
@@ -736,14 +852,20 @@ async def compare_conversation_with_document(
                 synthesis_outcome=OutcomeStatus.FAILED,
             ) from None
 
+    verifier_messages = _verifier_messages(
+        request=request,
+        evidence=evidence,
+        answer=answer,
+    )
     try:
+        _current_parent_context(parent_context)
         verification = await _call_model_once(
             model,
             lease,
             requirements,
-            _verifier_messages(request=request, evidence=evidence, answer=answer),
-            max_tokens=256,
-            deadline=absolute_deadline,
+            verifier_messages,
+            max_tokens=verifier_max_tokens,
+            deadline=deadline,
             priority="foreground",
             on_dispatch=record_dispatch,
         )
@@ -753,6 +875,24 @@ async def compare_conversation_with_document(
             model_calls=model_calls,
             failure_stage=FailureStage.COMPLETION,
             failure_reason=FailureReason.TIMEOUT,
+            synthesis_outcome=OutcomeStatus.SUCCEEDED,
+            verification_outcome=OutcomeStatus.UNAVAILABLE,
+        ) from None
+    except TurnContextError:
+        raise ConversationDocumentComparisonError(
+            "comparison parent authority changed before verification",
+            model_calls=model_calls,
+            failure_stage=FailureStage.STATE_LOSS,
+            failure_reason=FailureReason.STALE_STATE,
+            synthesis_outcome=OutcomeStatus.SUCCEEDED,
+            verification_outcome=OutcomeStatus.UNAVAILABLE,
+        ) from None
+    except _V12ModelLeaseUnavailable:
+        raise ConversationDocumentComparisonError(
+            "comparison lease is stale before verification",
+            model_calls=model_calls,
+            failure_stage=FailureStage.STATE_LOSS,
+            failure_reason=FailureReason.STALE_STATE,
             synthesis_outcome=OutcomeStatus.SUCCEEDED,
             verification_outcome=OutcomeStatus.UNAVAILABLE,
         ) from None
@@ -793,6 +933,50 @@ async def compare_conversation_with_document(
             synthesis_outcome=OutcomeStatus.SUCCEEDED,
             verification_outcome=OutcomeStatus.SUCCEEDED,
         )
+    try:
+        lease_current = await _exact_lease_is_current(
+            model,
+            lease,
+            requirements,
+            deadline=deadline - _PUBLICATION_RESERVE_SEC,
+            parent_context=parent_context,
+        )
+    except TimeoutError:
+        raise ConversationDocumentComparisonError(
+            "comparison final lease check timed out",
+            model_calls=model_calls,
+            failure_stage=FailureStage.STATE_LOSS,
+            failure_reason=FailureReason.TIMEOUT,
+            synthesis_outcome=OutcomeStatus.SUCCEEDED,
+            verification_outcome=OutcomeStatus.SUCCEEDED,
+        ) from None
+    except TurnContextError:
+        raise ConversationDocumentComparisonError(
+            "comparison parent authority changed before result sealing",
+            model_calls=model_calls,
+            failure_stage=FailureStage.STATE_LOSS,
+            failure_reason=FailureReason.STALE_STATE,
+            synthesis_outcome=OutcomeStatus.SUCCEEDED,
+            verification_outcome=OutcomeStatus.SUCCEEDED,
+        ) from None
+    except Exception:
+        raise ConversationDocumentComparisonError(
+            "comparison final lease check failed",
+            model_calls=model_calls,
+            failure_stage=FailureStage.STATE_LOSS,
+            failure_reason=FailureReason.PROVIDER_FAILURE,
+            synthesis_outcome=OutcomeStatus.SUCCEEDED,
+            verification_outcome=OutcomeStatus.SUCCEEDED,
+        ) from None
+    if not lease_current:
+        raise ConversationDocumentComparisonError(
+            "comparison lease drifted after verification",
+            model_calls=model_calls,
+            failure_stage=FailureStage.STATE_LOSS,
+            failure_reason=FailureReason.STALE_STATE,
+            synthesis_outcome=OutcomeStatus.SUCCEEDED,
+            verification_outcome=OutcomeStatus.SUCCEEDED,
+        )
     process_seal_sha256 = _comparison_process_seal(
         answer=answer,
         plan_sha256=plan_sha256,
@@ -806,6 +990,7 @@ async def compare_conversation_with_document(
         message_coverage_grade=message_replay.coverage_grade,
         lease=lease,
         requirements=requirements,
+        parent_context=parent_context,
     )
     return ConversationDocumentComparison(
         answer=answer,
@@ -822,6 +1007,7 @@ async def compare_conversation_with_document(
         requirements=requirements,
         _process_seal_sha256=process_seal_sha256,
         _process_authority=_PROCESS_AUTHORITY,
+        _parent_context=parent_context,
     )
 
 
@@ -835,14 +1021,18 @@ async def conversation_document_comparison_lease_is_current(
 
     if not conversation_document_comparison_is_process_owned(comparison):
         raise TypeError("conversation/document comparison is invalid")
-    if absolute_deadline - time.monotonic() <= _PUBLICATION_RESERVE_SEC:
+    parent_context = _current_parent_context(comparison._parent_context)
+    deadline = _require_deadline(
+        _within_parent_deadline(_require_deadline(absolute_deadline), parent_context)
+    )
+    if deadline - time.monotonic() <= _PUBLICATION_RESERVE_SEC:
         raise TimeoutError("conversation/document comparison has no lease-check budget")
-    return bool(
-        await model.lease_is_current(
-            comparison.lease,
-            comparison.requirements,
-            absolute_deadline=absolute_deadline - _PUBLICATION_RESERVE_SEC,
-        )
+    return await _exact_lease_is_current(
+        model,
+        comparison.lease,
+        comparison.requirements,
+        deadline=deadline - _PUBLICATION_RESERVE_SEC,
+        parent_context=parent_context,
     )
 
 
@@ -856,4 +1046,5 @@ __all__ = [
     "conversation_document_model_evidence_identity",
     "conversation_document_comparison_lease_is_current",
     "conversation_document_comparison_plan_sha256",
+    "conversation_document_model_requirements",
 ]

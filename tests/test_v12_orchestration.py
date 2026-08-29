@@ -29,11 +29,22 @@ from friday.orchestration import (
 )
 from friday.orchestration.capability_outcome import CapabilityOutcome, CapabilityOutcomeStatus
 from friday.orchestration.file_read_contract import file_read_plan_supports_attachment_count
-from friday.orchestration.planner import V12Planner
+from friday.orchestration.planner import (
+    _PLANNER_REQUIREMENTS,
+    V12Planner,
+    _planner_inherited_limits,
+    _planner_lease_is_current_before_deadline,
+)
 from friday.orchestration.router import (
     ReadOnlyRoutePreparation,
     ReadOnlyRouteRequest,
     ReadOnlyRouteResult,
+)
+from friday.orchestration.turn_context import (
+    InheritedTurnBudget,
+    ModelAntiLoopBudget,
+    TurnResourceBudget,
+    TurnSafetyDeadline,
 )
 from friday.permissions import ActorContext
 
@@ -1455,12 +1466,36 @@ def _planner_lease(requirements: ModelRequirements, authority: object) -> ModelP
         required_context_tokens=requirements.required_context_tokens,
         prepared_evidence_items=requirements.prepared_evidence_items,
         max_tool_steps=requirements.max_tool_steps,
+        max_tool_rounds=requirements.max_tool_rounds,
+        max_tool_calls=requirements.max_tool_calls,
         effect=requirements.effect,
         verifier_required=requirements.verifier_required,
         process_epoch_sha256="b" * 64,
         _gate_authority=authority,
         _gate_generation=1,
     )
+
+
+def test_attested_planner_narrows_parent_deadline_output_and_tool_authority() -> None:
+    parent_deadline_ns = time.monotonic_ns() + 10_000_000_000
+    context = SimpleNamespace(
+        inherited_budget=InheritedTurnBudget(
+            TurnSafetyDeadline(parent_deadline_ns),
+            ModelAntiLoopBudget(4, 1),
+            TurnResourceBudget(4, 2, 1, 128),
+        )
+    )
+
+    deadline, max_tokens = _planner_inherited_limits(  # type: ignore[arg-type]
+        context,
+        deadline=time.monotonic() + 60,
+    )
+
+    assert deadline < parent_deadline_ns / 1_000_000_000
+    assert max_tokens == 128
+    assert _PLANNER_REQUIREMENTS.max_tool_steps == 0
+    assert _PLANNER_REQUIREMENTS.max_tool_rounds == 0
+    assert _PLANNER_REQUIREMENTS.max_tool_calls == 0
 
 
 @pytest.mark.asyncio
@@ -1475,6 +1510,7 @@ async def test_attested_planner_never_uses_the_raw_shadow_model() -> None:
     class _AttestedRuntime:
         def __init__(self) -> None:
             self.calls = 0
+            self.lease_checks = 0
             self.lease: ModelProfileLease | None = None
 
         async def acquire_lease(
@@ -1486,6 +1522,19 @@ async def test_attested_planner_never_uses_the_raw_shadow_model() -> None:
             assert absolute_deadline > time.monotonic()
             self.lease = _planner_lease(requirements, self)
             return self.lease
+
+        async def lease_is_current(
+            self,
+            lease: object,
+            requirements: ModelRequirements,
+            *,
+            absolute_deadline: float,
+        ) -> bool:
+            assert absolute_deadline > time.monotonic()
+            assert requirements.max_tool_rounds == 0
+            assert requirements.max_tool_calls == 0
+            self.lease_checks += 1
+            return lease is self.lease
 
         async def complete(
             self,
@@ -1526,7 +1575,132 @@ async def test_attested_planner_never_uses_the_raw_shadow_model() -> None:
 
     assert plan.route is RouteClass.FILE_READ
     assert runtime.calls == 1
+    assert runtime.lease_checks == 2
     assert raw.calls == 0
+
+
+@pytest.mark.asyncio
+async def test_attested_planner_rejects_revocation_after_completion() -> None:
+    class _RawModel:
+        async def chat(self, *_args: Any, **_kwargs: Any) -> dict[str, Any]:
+            raise AssertionError("raw model must stay unused")
+
+    class _Runtime:
+        def __init__(self) -> None:
+            self.current = True
+            self.lease: ModelProfileLease | None = None
+
+        async def acquire_lease(
+            self,
+            requirements: ModelRequirements,
+            *,
+            absolute_deadline: float,
+        ) -> ModelProfileLease:
+            self.lease = _planner_lease(requirements, self)
+            return self.lease
+
+        async def lease_is_current(
+            self,
+            lease: object,
+            requirements: ModelRequirements,
+            *,
+            absolute_deadline: float,
+        ) -> bool:
+            return bool(self.current and lease is self.lease and absolute_deadline > time.monotonic())
+
+        async def complete(self, *_args: Any, **_kwargs: Any) -> dict[str, Any]:
+            self.current = False
+            return {
+                "content": json.dumps(_plan_payload(), ensure_ascii=False),
+                "finish_reason": "stop",
+                "tool_calls": [],
+            }
+
+    runtime = _Runtime()
+    planner = V12Planner(_RawModel(), timeout_sec=5, attested_runtime=runtime)
+    turn = TurnInput.from_chat(
+        message="сравни два файла",
+        actor=SimpleNamespace(is_owner=True, shared_tenant=False),
+        conversation_id=None,
+        attachments=_chat_kwargs()["attachments"],
+        enable_tools=True,
+        synthetic_document_notice=False,
+        mode="dialogue",
+        reply_to=None,
+        quoted_attachment_reference=False,
+        reply_assistant_reference=False,
+    )
+
+    with pytest.raises(RuntimeError, match="changed after planning"):
+        await planner.plan_attested(turn)
+
+
+@pytest.mark.asyncio
+async def test_attested_planner_lease_check_cannot_outlive_deadline() -> None:
+    class _Runtime:
+        async def lease_is_current(self, *_args: Any, **_kwargs: Any) -> bool:
+            await asyncio.sleep(60)
+            return True
+
+    lease = _planner_lease(_PLANNER_REQUIREMENTS, object())
+    started = time.monotonic()
+    with pytest.raises(TimeoutError):
+        await _planner_lease_is_current_before_deadline(
+            _Runtime(),
+            lease,
+            absolute_deadline=started + 0.01,
+        )
+    assert time.monotonic() - started < 1
+
+
+@pytest.mark.asyncio
+async def test_attested_planner_lease_acquisition_cannot_outlive_deadline() -> None:
+    class _RawModel:
+        async def chat(self, *_args: Any, **_kwargs: Any) -> dict[str, Any]:
+            raise AssertionError("raw model must stay unused")
+
+    class _Runtime:
+        async def acquire_lease(self, *_args: Any, **_kwargs: Any) -> ModelProfileLease:
+            await asyncio.sleep(60)
+            raise AssertionError("hanging lease acquisition completed")
+
+    planner = V12Planner(_RawModel(), timeout_sec=5, attested_runtime=_Runtime())
+    turn = TurnInput.from_chat(
+        message="сравни два файла",
+        actor=SimpleNamespace(is_owner=True, shared_tenant=False),
+        conversation_id=None,
+        attachments=_chat_kwargs()["attachments"],
+        enable_tools=True,
+        synthetic_document_notice=False,
+        mode="dialogue",
+        reply_to=None,
+        quoted_attachment_reference=False,
+        reply_assistant_reference=False,
+    )
+
+    started = time.monotonic()
+    with pytest.raises(TimeoutError):
+        await planner.plan_attested(turn, turn_deadline=started + 0.01)
+    assert time.monotonic() - started < 1
+
+
+@pytest.mark.parametrize(
+    "deadline",
+    [True, float("nan"), float("inf"), -float("inf")],
+    ids=("bool", "nan", "positive-infinity", "negative-infinity"),
+)
+def test_planner_rejects_malformed_deadlines_before_clamping(deadline: object) -> None:
+    planner = V12Planner(SimpleNamespace(), timeout_sec=5)
+
+    with pytest.raises((TypeError, ValueError)):
+        planner._deadline(deadline)  # type: ignore[arg-type]  # noqa: SLF001
+
+
+def test_planner_rejects_nonfuture_deadline_before_clamping() -> None:
+    planner = V12Planner(SimpleNamespace(), timeout_sec=5)
+
+    with pytest.raises(TimeoutError):
+        planner._deadline(time.monotonic() - 1)  # noqa: SLF001
 
 
 @pytest.mark.asyncio

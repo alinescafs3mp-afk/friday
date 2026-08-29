@@ -99,6 +99,7 @@ _PREPARATION_BUDGET_SEC = 4.5
 _PUBLICATION_RESERVE_SEC = 2.0
 _MAX_ATTESTED_INPUT_UTF8_BYTES = 5_500
 _MAX_TRACE_LATENCY_MS = 86_400_000
+_TWO_CALL_READ_MODEL_CALLS = 2
 _UNSET_TURN_CONTEXT = object()
 _PREPARED_TURN_BINDING_KEY = secrets.token_bytes(32)
 _CONVERSATION_ID_RE = re.compile(r"conv_[0-9a-f]{16}\Z")
@@ -113,16 +114,20 @@ class V12FileReadError(RuntimeError):
     """A selected V12 file turn could not be safely published."""
 
 
-@dataclass(frozen=True, slots=True)
+class _V12ModelLeaseUnavailable(V12FileReadError):
+    """The exact measured lease was lost before a bounded model call."""
+
+
+@dataclass(frozen=True, slots=True, repr=False)
 class _PreparedFileContext:
-    evidence: PreparedFileEvidence
+    evidence: PreparedFileEvidence = field(repr=False)
     conversation_id: str | None
     interaction_mode: str
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True, slots=True, repr=False)
 class _PreparedFileTurn:
-    evidence: PreparedFileEvidence
+    evidence: PreparedFileEvidence = field(repr=False)
     turn_plan: TurnPlan = field(repr=False, compare=False)
     turn_plan_sha256: str
     conversation_id: str | None
@@ -134,7 +139,7 @@ class _PreparedFileTurn:
         compare=False,
     )
     _process_authority: object = field(repr=False, compare=False)
-    _binding_sha256: str = field(init=False, repr=False, compare=False)
+    _binding_sha256: str = field(repr=False, compare=False)
 
     def __post_init__(self) -> None:
         if (
@@ -166,21 +171,28 @@ class _PreparedFileTurn:
             )
             or not _model_lease_matches_requirements(self.model_lease, self.model_requirements)
             or not _prepared_file_turn_matches_context(self)
+            or type(self._binding_sha256) is not str
+            or _SHA256_RE.fullmatch(self._binding_sha256) is None
         ):
             raise ValueError("prepared V12 file turn is not process-owned")
         binding = _prepared_file_turn_binding_sha256(self)
-        if binding is None:
+        if binding is None or not hmac.compare_digest(self._binding_sha256, binding):
             raise ValueError("prepared V12 file turn is not process-owned")
-        object.__setattr__(self, "_binding_sha256", binding)
 
 
 def _model_lease_matches_requirements(
-    lease: ModelProfileLease,
+    lease: object,
     requirements: ModelRequirements,
 ) -> bool:
+    try:
+        expected_requirements = _file_requirements(requirements.prepared_evidence_items)
+    except (AttributeError, TypeError, ValueError):
+        return False
+    if not isinstance(lease, ModelProfileLease) or type(lease) is not ModelProfileLease:
+        return False
     return bool(
-        type(lease) is ModelProfileLease
-        and type(requirements) is ModelRequirements
+        type(requirements) is ModelRequirements
+        and requirements is expected_requirements
         and type(lease.requirements_sha256) is str
         and _SHA256_RE.fullmatch(lease.requirements_sha256) is not None
         and hmac.compare_digest(lease.requirements_sha256, requirements.canonical_sha256())
@@ -188,6 +200,8 @@ def _model_lease_matches_requirements(
         and lease.required_context_tokens == requirements.required_context_tokens
         and lease.prepared_evidence_items == requirements.prepared_evidence_items
         and lease.max_tool_steps == requirements.max_tool_steps
+        and lease.max_tool_rounds == requirements.max_tool_rounds
+        and lease.max_tool_calls == requirements.max_tool_calls
         and lease.effect is requirements.effect
         and lease.verifier_required is requirements.verifier_required
     )
@@ -226,29 +240,26 @@ def _prepared_file_turn_matches_context(prepared: _PreparedFileTurn) -> bool:
     )
 
 
-def _prepared_file_turn_binding_sha256(prepared: object) -> str | None:
-    if type(prepared) is not _PreparedFileTurn:
-        return None
+def _prepared_file_turn_process_seal(
+    *,
+    evidence: PreparedFileEvidence,
+    turn_plan: TurnPlan,
+    turn_plan_sha256: str,
+    conversation_id: str | None,
+    interaction_mode: str,
+    lease: ModelProfileLease,
+    requirements: ModelRequirements,
+    context: AuthenticatedTurnContext | None,
+) -> str | None:
     try:
-        lease = prepared.model_lease
-        requirements = prepared.model_requirements
-        context = prepared.authenticated_turn_context
-        if (
-            prepared._process_authority is not _PROCESS_AUTHORITY
-            or not prepared_file_evidence_is_process_owned(prepared.evidence)
-            or not _model_lease_matches_requirements(lease, requirements)
-            or not _prepared_file_turn_matches_context(prepared)
-        ):
-            return None
         parts = (
-            str(id(prepared)),
-            str(id(prepared.evidence)),
-            prepared.evidence.identity_sha256,
-            str(id(prepared.turn_plan)),
-            prepared.turn_plan_sha256,
-            prepared.turn_plan.canonical_sha256(),
-            prepared.conversation_id or "<new-conversation>",
-            prepared.interaction_mode,
+            str(id(evidence)),
+            evidence.identity_sha256,
+            str(id(turn_plan)),
+            turn_plan_sha256,
+            turn_plan.canonical_sha256(),
+            conversation_id or "<new-conversation>",
+            interaction_mode,
             str(id(lease)),
             lease.schema,
             lease.profile_id,
@@ -274,6 +285,34 @@ def _prepared_file_turn_binding_sha256(prepared: object) -> str | None:
             digest.update(len(encoded).to_bytes(8, "big"))
             digest.update(encoded)
         return digest.hexdigest()
+    except (AttributeError, TypeError, UnicodeEncodeError, ValueError):
+        return None
+
+
+def _prepared_file_turn_binding_sha256(prepared: object) -> str | None:
+    if type(prepared) is not _PreparedFileTurn:
+        return None
+    try:
+        lease = prepared.model_lease
+        requirements = prepared.model_requirements
+        context = prepared.authenticated_turn_context
+        if (
+            prepared._process_authority is not _PROCESS_AUTHORITY
+            or not prepared_file_evidence_is_process_owned(prepared.evidence)
+            or not _model_lease_matches_requirements(lease, requirements)
+            or not _prepared_file_turn_matches_context(prepared)
+        ):
+            return None
+        return _prepared_file_turn_process_seal(
+            evidence=prepared.evidence,
+            turn_plan=prepared.turn_plan,
+            turn_plan_sha256=prepared.turn_plan_sha256,
+            conversation_id=prepared.conversation_id,
+            interaction_mode=prepared.interaction_mode,
+            lease=lease,
+            requirements=requirements,
+            context=context,
+        )
     except (AttributeError, TypeError, UnicodeEncodeError, ValueError):
         return None
 
@@ -325,8 +364,8 @@ class _AttestedFileModel(Protocol):
     ) -> dict[str, Any]: ...
 
 
-def _file_requirements(evidence_items: int) -> ModelRequirements:
-    return ModelRequirements(
+_FILE_REQUIREMENTS_BY_EVIDENCE_COUNT = tuple(
+    ModelRequirements(
         capabilities=frozenset(
             {
                 ModelCapability.PREPARED_EVIDENCE_2,
@@ -337,9 +376,85 @@ def _file_requirements(evidence_items: int) -> ModelRequirements:
         required_context_tokens=8_192,
         prepared_evidence_items=evidence_items,
         max_tool_steps=0,
+        max_tool_rounds=0,
+        max_tool_calls=0,
         effect=ModelEffect.READ,
         verifier_required=True,
     )
+    for evidence_items in range(1, _MAX_CANARY_FILES + 1)
+)
+
+
+def _file_requirements(evidence_items: int) -> ModelRequirements:
+    """Return one exact process-wide lease projection for one/two evidence items."""
+
+    if type(evidence_items) is not int or not 1 <= evidence_items <= _MAX_CANARY_FILES:
+        raise ValueError("file model evidence count is outside the closed lease projection")
+    return _FILE_REQUIREMENTS_BY_EVIDENCE_COUNT[evidence_items - 1]
+
+
+def _two_call_read_model_output_limits(
+    context: AuthenticatedTurnContext | None,
+    *,
+    synthesis_max_tokens: int,
+    verifier_max_tokens: int,
+) -> tuple[int, int]:
+    """Intersect fixed model-call bounds with the authenticated parent budget."""
+
+    if (
+        type(synthesis_max_tokens) is not int
+        or type(verifier_max_tokens) is not int
+        or synthesis_max_tokens <= 0
+        or verifier_max_tokens <= 0
+    ):
+        raise ValueError("read-model output limits must be positive integers")
+    if context is None:
+        return synthesis_max_tokens, verifier_max_tokens
+    parent = context.inherited_budget
+    child = parent.derive_child(
+        safety_deadline_monotonic_ns=parent.safety_deadline.monotonic_ns,
+        max_model_calls=_TWO_CALL_READ_MODEL_CALLS,
+        max_model_retries=0,
+        max_tool_calls=0,
+        max_tool_rounds=0,
+        max_advisory_calls=0,
+        max_output_tokens=max(synthesis_max_tokens, verifier_max_tokens),
+    )
+    if child.model_anti_loop.max_model_calls < _TWO_CALL_READ_MODEL_CALLS:
+        raise V12FileReadError("authenticated turn has no file model-call budget")
+    if child.resources.max_tool_calls != 0 or child.resources.max_tool_rounds != 0:
+        raise V12FileReadError("file model journey gained tool authority")
+    return (
+        min(synthesis_max_tokens, child.resources.max_output_tokens),
+        min(verifier_max_tokens, child.resources.max_output_tokens),
+    )
+
+
+async def _lease_is_current_before_deadline(
+    model: _AttestedFileModel,
+    lease: object,
+    requirements: ModelRequirements,
+    *,
+    absolute_deadline: float,
+) -> bool:
+    """Physically bound one exact lease recheck to the inherited deadline."""
+
+    deadline = _validated_future_deadline(
+        absolute_deadline,
+        stage="before model lease check",
+    )
+    remaining = deadline - time.monotonic()
+    if not _model_lease_matches_requirements(lease, requirements):
+        return False
+    current = await asyncio.wait_for(
+        model.lease_is_current(
+            lease,
+            requirements,
+            absolute_deadline=deadline,
+        ),
+        timeout=remaining,
+    )
+    return type(current) is bool and current
 
 
 def _messages_fit_attested_context(messages: list[dict[str, str]]) -> bool:
@@ -349,9 +464,24 @@ def _messages_fit_attested_context(messages: list[dict[str, str]]) -> bool:
     )
 
 
-def _require_deadline(deadline: float, *, stage: str, reserve: float = 0.0) -> None:
-    if deadline - time.monotonic() <= reserve:
+def _validated_future_deadline(
+    deadline: object,
+    *,
+    stage: str,
+    reserve: float = 0.0,
+) -> float:
+    if type(deadline) not in (int, float):
+        raise TypeError(f"V12 publication deadline is invalid {stage}")
+    value = float(cast("int | float", deadline))
+    if not math.isfinite(value):
+        raise ValueError(f"V12 publication deadline is invalid {stage}")
+    if value - time.monotonic() <= reserve:
         raise TimeoutError(f"V12 publication deadline expired {stage}")
+    return value
+
+
+def _require_deadline(deadline: float, *, stage: str, reserve: float = 0.0) -> None:
+    _validated_future_deadline(deadline, stage=stage, reserve=reserve)
 
 
 def _authenticated_file_references_match(
@@ -443,13 +573,23 @@ def _within_parent_deadline(
     deadline: float,
     context: AuthenticatedTurnContext | None,
 ) -> float:
-    if context is None:
-        return deadline
-    parent = math.nextafter(
-        context.inherited_budget.safety_deadline.monotonic_ns / 1_000_000_000,
-        -math.inf,
+    candidate = _validated_future_deadline(
+        deadline,
+        stage="before inherited parent clamp",
     )
-    return min(deadline, parent)
+    if context is None:
+        return candidate
+    parent = _validated_future_deadline(
+        math.nextafter(
+            context.inherited_budget.safety_deadline.monotonic_ns / 1_000_000_000,
+            -math.inf,
+        ),
+        stage="at inherited parent clamp",
+    )
+    return _validated_future_deadline(
+        min(candidate, parent),
+        stage="after inherited parent clamp",
+    )
 
 
 async def _call_model_once(
@@ -467,8 +607,23 @@ async def _call_model_once(
         raise V12FileReadError("model payload requires a secret projection")
     if not _messages_fit_attested_context(messages):
         raise V12FileReadError("model payload exceeds the attested context tier")
+    try:
+        deadline = _validated_future_deadline(deadline, stage="before model call")
+    except TimeoutError:
+        raise TimeoutError("V12 file route has no model budget") from None
     remaining = deadline - time.monotonic()
     if remaining <= _PUBLICATION_RESERVE_SEC:
+        raise TimeoutError("V12 file route has no model budget")
+    model_deadline = deadline - _PUBLICATION_RESERVE_SEC
+    if not await _lease_is_current_before_deadline(
+        model,
+        lease,
+        requirements,
+        absolute_deadline=model_deadline,
+    ):
+        raise _V12ModelLeaseUnavailable("file model authority changed before model call")
+    call_remaining = model_deadline - time.monotonic()
+    if call_remaining <= 0:
         raise TimeoutError("V12 file route has no model budget")
 
     async def dispatch() -> dict[str, Any]:
@@ -480,13 +635,13 @@ async def _call_model_once(
             messages,
             max_tokens=max_tokens,
             priority=priority,
-            absolute_deadline=deadline - _PUBLICATION_RESERVE_SEC,
+            absolute_deadline=model_deadline,
             temperature=0.0,
         )
 
     response = await asyncio.wait_for(
         dispatch(),
-        timeout=max(0.001, remaining - _PUBLICATION_RESERVE_SEC),
+        timeout=call_remaining,
     )
     if not isinstance(response, dict):
         raise V12FileReadError("model returned a non-object response")
@@ -575,13 +730,22 @@ class V12FileReadHandler:
         authenticated_context = _require_v12_turn_context(request, turn)
         preparation_deadline = time.monotonic() + _PREPARATION_BUDGET_SEC
         if request.turn_deadline is not None:
-            preparation_deadline = min(preparation_deadline, request.turn_deadline)
+            request_deadline = _validated_future_deadline(
+                request.turn_deadline,
+                stage="before preparation clamp",
+            )
+            preparation_deadline = min(preparation_deadline, request_deadline)
         preparation_deadline = _within_parent_deadline(
             preparation_deadline,
             authenticated_context,
         )
         if authenticated_context is not None:
             _require_deadline(preparation_deadline, stage="before preparation")
+        _two_call_read_model_output_limits(
+            authenticated_context,
+            synthesis_max_tokens=_SYNTHESIS_MAX_TOKENS,
+            verifier_max_tokens=256,
+        )
         prepared = await self._prepare_context(
             request,
             turn,
@@ -617,9 +781,15 @@ class V12FileReadHandler:
         ):
             return None
         requirements = _file_requirements(len(prepared.evidence.bundle.parts))
-        lease = await self._model.acquire_lease(
-            requirements,
-            absolute_deadline=preparation_deadline,
+        lease_remaining = preparation_deadline - time.monotonic()
+        if lease_remaining <= 0:
+            raise TimeoutError("V12 publication deadline expired before lease acquisition")
+        lease = await asyncio.wait_for(
+            self._model.acquire_lease(
+                requirements,
+                absolute_deadline=preparation_deadline,
+            ),
+            timeout=lease_remaining,
         )
         if not hmac.compare_digest(plan_sha256, plan.canonical_sha256()):
             raise V12FileReadError("turn plan changed during preparation")
@@ -630,6 +800,18 @@ class V12FileReadHandler:
         )
         if type(lease) is not ModelProfileLease:
             return None
+        binding_sha256 = _prepared_file_turn_process_seal(
+            evidence=prepared.evidence,
+            turn_plan=plan,
+            turn_plan_sha256=plan_sha256,
+            conversation_id=prepared.conversation_id,
+            interaction_mode=prepared.interaction_mode,
+            lease=lease,
+            requirements=requirements,
+            context=authenticated_context,
+        )
+        if binding_sha256 is None:
+            raise V12FileReadError("file preparation authority cannot be sealed")
         attested = _PreparedFileTurn(
             evidence=prepared.evidence,
             turn_plan=plan,
@@ -640,6 +822,7 @@ class V12FileReadHandler:
             model_requirements=requirements,
             authenticated_turn_context=authenticated_context,
             _process_authority=_PROCESS_AUTHORITY,
+            _binding_sha256=binding_sha256,
         )
         return ReadOnlyRoutePreparation(
             route=self.route,
@@ -684,11 +867,16 @@ class V12FileReadHandler:
             turn,
             expected=prepared.authenticated_turn_context,
         )
-        deadline = request.turn_deadline or (time.monotonic() + _PREPARATION_BUDGET_SEC)
+        deadline = (
+            request.turn_deadline
+            if request.turn_deadline is not None
+            else time.monotonic() + _PREPARATION_BUDGET_SEC
+        )
         deadline = _within_parent_deadline(deadline, authenticated_context)
         if authenticated_context is not None:
             _require_deadline(deadline, stage="before preparation authority check")
-        current = await self._model.lease_is_current(
+        current = await _lease_is_current_before_deadline(
+            self._model,
             prepared.model_lease,
             prepared.model_requirements,
             absolute_deadline=deadline,
@@ -718,13 +906,14 @@ class V12FileReadHandler:
         requirements: ModelRequirements,
         *,
         deadline: float,
+        max_tokens: int = _SYNTHESIS_MAX_TOKENS,
     ) -> str:
         response = await _call_model_once(
             self._model,
             lease,
             requirements,
             self._synthesis_messages(turn, plan, bundle),
-            max_tokens=_SYNTHESIS_MAX_TOKENS,
+            max_tokens=max_tokens,
             deadline=deadline,
             priority="foreground",
         )
@@ -753,13 +942,14 @@ class V12FileReadHandler:
         requirements: ModelRequirements,
         *,
         deadline: float,
+        max_tokens: int = 256,
     ) -> None:
         response = await _call_model_once(
             self._model,
             lease,
             requirements,
             self._verifier_messages(turn, bundle, answer),
-            max_tokens=256,
+            max_tokens=max_tokens,
             deadline=deadline,
             priority="foreground",
         )
@@ -1088,16 +1278,15 @@ class V12FileReadHandler:
         )
         trace_started_at = trace_start_candidate if router_trace_scope else handler_started_at
         trace_planner_model_calls = request.planner_model_calls_lower_bound if router_trace_scope else 0
-        deadline = request.turn_deadline or (time.monotonic() + 60.0)
+        deadline = request.turn_deadline if request.turn_deadline is not None else time.monotonic() + 60.0
         deadline = _within_parent_deadline(deadline, authenticated_context)
         if authenticated_context is not None:
             _require_deadline(deadline, stage="before handler execution")
-        if not await self._model.lease_is_current(
-            prepared.model_lease,
-            prepared.model_requirements,
-            absolute_deadline=deadline,
-        ):
-            raise V12FileReadError("file model authority changed before synthesis")
+        synthesis_max_tokens, verifier_max_tokens = _two_call_read_model_output_limits(
+            authenticated_context,
+            synthesis_max_tokens=_SYNTHESIS_MAX_TOKENS,
+            verifier_max_tokens=256,
+        )
         _require_prepared_file_turn_bound(prepared)
         _require_v12_turn_context(
             request,
@@ -1111,6 +1300,7 @@ class V12FileReadHandler:
             prepared.model_lease,
             prepared.model_requirements,
             deadline=deadline,
+            max_tokens=synthesis_max_tokens,
         )
         _require_prepared_file_turn_bound(prepared)
         _require_v12_turn_context(
@@ -1125,6 +1315,7 @@ class V12FileReadHandler:
             prepared.model_lease,
             prepared.model_requirements,
             deadline=deadline,
+            max_tokens=verifier_max_tokens,
         )
         _require_prepared_file_turn_bound(prepared)
         _require_v12_turn_context(
@@ -1132,7 +1323,8 @@ class V12FileReadHandler:
             turn,
             expected=authenticated_context,
         )
-        if not await self._model.lease_is_current(
+        if not await _lease_is_current_before_deadline(
+            self._model,
             prepared.model_lease,
             prepared.model_requirements,
             absolute_deadline=deadline,

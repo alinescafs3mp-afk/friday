@@ -39,7 +39,12 @@ from friday.interaction_control_plane.compare_current_file_web_work_graph import
     CompareCurrentFileWebWorkGraph,
 )
 from friday.interaction_control_plane.turn_trace import CountAccounting
-from friday.model_profiles import ModelProfileLease, ModelRequirements
+from friday.model_profiles import (
+    ModelCapability,
+    ModelEffect,
+    ModelProfileLease,
+    ModelRequirements,
+)
 from friday.orchestration.capability_binding import (
     CapabilityBindingSnapshot,
     operational_capability_snapshot,
@@ -49,6 +54,9 @@ from friday.orchestration.current_file_web_comparison import (
     CurrentFileWebComparisonError,
     compare_current_file_with_web,
     current_file_web_comparison_is_process_owned,
+    current_file_web_comparison_lease_is_current,
+    current_file_web_model_budget,
+    current_file_web_model_requirements,
     current_file_web_request_is_admitted,
 )
 from friday.orchestration.execution_plan import ValidatedExecutionPlan
@@ -126,6 +134,8 @@ from friday.orchestration.transient_web_comparison import (
     TransientWebEvidenceStatus,
 )
 from friday.orchestration.turn_context import TurnContextError
+from friday.orchestration.turn_context_call_scope import AuthenticatedChatCallScope
+from friday.orchestration.turn_context_runtime import current_primary_authenticated_turn_context
 from friday.pending_durable_turn import PendingDurableTurnAdmission
 from friday.permissions import ActorContext, AuthorizationError
 from friday.semantic_supervisor_policy import (
@@ -459,6 +469,7 @@ class _ProspectiveAdmission:
     decision: AssistPromotionDecision = field(repr=False)
     binding_snapshot: CapabilityBindingSnapshot = field(repr=False)
     canary_actor_binding_sha256: str | None
+    absolute_deadline: float = field(repr=False)
 
 
 @dataclass(slots=True)
@@ -509,6 +520,65 @@ def _exact_future_deadline(value: object) -> float | None:
     ):
         return None
     return float(value)
+
+
+def _bounded_primary_journey_deadline(
+    surface: CurrentFileWebAssistSurface,
+    requested_deadline: float,
+) -> float | None:
+    """Intersect the code-owned primary journey with one authenticated root."""
+
+    scope = surface.require_current_authenticated_call_scope()
+    deadline = _exact_future_deadline(requested_deadline)
+    requirements = current_file_web_model_requirements()
+    model_calls, max_output_tokens = current_file_web_model_budget()
+    if (
+        deadline is None
+        or type(requirements) is not ModelRequirements
+        or type(model_calls) is not int
+        or model_calls <= 0
+        or type(max_output_tokens) is not int
+        or max_output_tokens <= 0
+        or requirements.max_tool_steps != 0
+        or requirements.max_tool_rounds != 0
+        or requirements.max_tool_calls != 0
+        or ModelCapability.NATIVE_TOOL_CALLS in requirements.capabilities
+        or requirements.effect is not ModelEffect.READ
+        or requirements.verifier_required is not True
+    ):
+        return None
+    if scope is None:
+        return deadline
+    if type(scope) is not AuthenticatedChatCallScope:
+        return None
+    context = current_primary_authenticated_turn_context()
+    if context is None or context.model_input is not surface.turn:
+        return None
+    bounded_deadline = _exact_future_deadline(min(deadline, scope.conservative_deadline_monotonic))
+    if bounded_deadline is None:
+        return None
+    try:
+        child = context.inherited_budget.derive_child(
+            safety_deadline_monotonic_ns=scope.deadline_monotonic_ns,
+            max_model_calls=model_calls,
+            max_model_retries=0,
+            max_tool_calls=requirements.max_tool_calls,
+            max_tool_rounds=requirements.max_tool_rounds,
+            max_advisory_calls=0,
+            max_output_tokens=max_output_tokens,
+        )
+    except (TypeError, ValueError, TurnContextError):
+        return None
+    return (
+        bounded_deadline
+        if child.model_anti_loop.max_model_calls == model_calls
+        and child.model_anti_loop.max_model_retries == 0
+        and child.resources.max_tool_calls == 0
+        and child.resources.max_tool_rounds == 0
+        and 0 < child.resources.max_output_tokens <= max_output_tokens
+        and child.safety_deadline.monotonic_ns <= scope.deadline_monotonic_ns
+        else None
+    )
 
 
 def _read_outcome_sha256(
@@ -1081,7 +1151,10 @@ class SupervisorAssistController:
             if attempt.interrupted or self._closed:
                 self._retain_restart_scope(scope)
                 return
-            result = await self._run_owned(record, absolute_deadline=deadline)
+            result = await self._run_owned(
+                record,
+                absolute_deadline=prospective.absolute_deadline,
+            )
             if result.outcome in {
                 SupervisorAssistOutcome.PUBLISHED,
                 SupervisorAssistOutcome.TERMINAL,
@@ -1239,7 +1312,9 @@ class SupervisorAssistController:
             or self._closed
         ):
             return None
-        surface.require_current_authenticated_call_scope()
+        deadline = _bounded_primary_journey_deadline(surface, absolute_deadline)
+        if deadline is None:
+            return None
         requested_mode = SupervisorMode.fail_closed(
             getattr(self._settings, "semantic_supervisor_mode", SupervisorMode.OFF.value)
         )
@@ -1303,7 +1378,7 @@ class SupervisorAssistController:
                     or boundary.policy_sha256 != SUPERVISOR_ASSIST_PRODUCT_POLICY_SHA256
                     or boundary.budget_sha256 != supervisor_input.budgets.canonical_sha256()
                     or boundary.capability_bindings_sha256 != snapshot.digest_hex()
-                    or boundary.turn_deadline_monotonic_ns != int(absolute_deadline * 1_000_000_000)
+                    or boundary.turn_deadline_monotonic_ns != int(deadline * 1_000_000_000)
                 ):
                     return PlanAuthorityDecision.rejected(PlanAuthorityReason.INVALID_BOUNDARY)
                 try:
@@ -1321,7 +1396,7 @@ class SupervisorAssistController:
                 conversation_binding_sha256=conversation_binding_sha256,
                 authority_scope=PlanAuthorityScope.ASSIST_EXECUTION,
                 source_bindings=(source_binding,),
-                turn_deadline_monotonic_ns=int(absolute_deadline * 1_000_000_000),
+                turn_deadline_monotonic_ns=int(deadline * 1_000_000_000),
                 authority_attestor=cast(PlanAuthorityAttestor, attest),
                 capability_bindings=snapshot,
             )
@@ -1346,7 +1421,7 @@ class SupervisorAssistController:
         parsed = await self._planner.propose(
             supervisor_input,
             context,
-            absolute_deadline=absolute_deadline,
+            absolute_deadline=deadline,
             pre_dispatch_validator=planning_still_current,
         )
         surface.require_current_authenticated_call_scope()
@@ -1378,7 +1453,7 @@ class SupervisorAssistController:
         ):
             return None
         primary_ready = await self._primary_model.prepare_primary_model(
-            absolute_deadline=absolute_deadline,
+            absolute_deadline=deadline,
         )
         surface.require_current_authenticated_call_scope()
         if primary_ready is not True:
@@ -1402,6 +1477,7 @@ class SupervisorAssistController:
             decision=final_decision,
             binding_snapshot=fresh,
             canary_actor_binding_sha256=canary_binding,
+            absolute_deadline=deadline,
         )
 
     def _admit_or_recover(
@@ -2351,6 +2427,7 @@ class SupervisorAssistController:
         prepared_file: PreparedFileEvidence,
         web_evidence: TransientWebComparisonEvidence,
         comparison: CurrentFileWebComparison,
+        absolute_deadline: float,
     ) -> SupervisorAssistResult | None:
         if (
             not current_file_web_comparison_is_process_owned(comparison)
@@ -2370,8 +2447,23 @@ class SupervisorAssistController:
         async with record.mutation_lock:
             if record.stop.is_set() or record.committed_result is not None:
                 return record.committed_result
-            record.surface.require_current_authenticated_call_scope()
             try:
+                lease_check = self._spawn_child(
+                    record,
+                    current_file_web_comparison_lease_is_current(
+                        self._primary_model,
+                        comparison,
+                        absolute_deadline=absolute_deadline,
+                    ),
+                )
+                lease_current = await self._await_owned(record, lease_check)
+                if (
+                    lease_current is not True
+                    or record.stop.is_set()
+                    or _exact_future_deadline(absolute_deadline) is None
+                ):
+                    return record.committed_result
+                record.surface.require_current_authenticated_call_scope()
                 publication = self._graph_adapter.publish_comparison(
                     self._cursor(record),
                     request,
@@ -2392,6 +2484,10 @@ class SupervisorAssistController:
                     outcome=SupervisorAssistOutcome.PUBLISHED,
                     include_file_citation=True,
                 )
+            except asyncio.CancelledError:
+                if record.stop.is_set():
+                    return record.committed_result
+                raise
             except TurnContextError:
                 raise
             except Exception:
@@ -2725,6 +2821,7 @@ class SupervisorAssistController:
                     prepared_file=prepared_file,
                     web_evidence=web_evidence,
                     comparison=comparison,
+                    absolute_deadline=absolute_deadline,
                 )
                 return published or await self._stop_result(record)
 
@@ -3003,7 +3100,7 @@ class SupervisorAssistController:
                 prospective = None
             if prospective is None:
                 return await self._legacy(legacy_primary, reason="promotion_not_admitted")
-            if _exact_future_deadline(deadline) is None:
+            if _exact_future_deadline(prospective.absolute_deadline) is None:
                 return await self._legacy(legacy_primary, reason="deadline_exhausted")
             admitted_surface.require_current_authenticated_call_scope()
             attempt = self._admit_or_recover(prospective)
@@ -3041,7 +3138,10 @@ class SupervisorAssistController:
                     pending_admission=record.pending,
                     promotion_decision=record.decision,
                 )
-            return await self._run_owned(record, absolute_deadline=deadline)
+            return await self._run_owned(
+                record,
+                absolute_deadline=prospective.absolute_deadline,
+            )
         finally:
             if record is not None:
                 self._unregister_owned(record)

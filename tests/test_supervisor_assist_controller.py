@@ -334,17 +334,27 @@ class _Planner:
 
 
 class _Primary:
-    def __init__(self, readiness: tuple[bool, ...] = (True,)) -> None:
+    def __init__(
+        self,
+        readiness: tuple[bool, ...] = (True,),
+        *,
+        currentness: tuple[object, ...] = (True,),
+    ) -> None:
         self.readiness = readiness
+        self.currentness = currentness
         self.prepare_calls = 0
         self.acquire_calls = 0
         self.lease_checks = 0
         self.calls: list[list[dict[str, Any]]] = []
+        self.deadlines: list[float] = []
+        self.block_current_at: int | None = None
+        self.current_started = asyncio.Event()
         self.requirements: ModelRequirements | None = None
         self.lease: ModelProfileLease | None = None
 
     async def prepare_primary_model(self, *, absolute_deadline: float) -> bool:
         assert absolute_deadline > time.monotonic()
+        self.deadlines.append(absolute_deadline)
         index = min(self.prepare_calls, len(self.readiness) - 1)
         self.prepare_calls += 1
         return self.readiness[index]
@@ -356,6 +366,7 @@ class _Primary:
         absolute_deadline: float,
     ) -> ModelProfileLease:
         assert absolute_deadline > time.monotonic()
+        self.deadlines.append(absolute_deadline)
         self.acquire_calls += 1
         self.requirements = requirements
         self.lease = ModelProfileLease(
@@ -366,6 +377,8 @@ class _Primary:
             required_context_tokens=requirements.required_context_tokens,
             prepared_evidence_items=requirements.prepared_evidence_items,
             max_tool_steps=requirements.max_tool_steps,
+            max_tool_rounds=requirements.max_tool_rounds,
+            max_tool_calls=requirements.max_tool_calls,
             effect=requirements.effect,
             verifier_required=requirements.verifier_required,
             process_epoch_sha256="b" * 64,
@@ -383,8 +396,13 @@ class _Primary:
     ) -> bool:
         assert absolute_deadline > time.monotonic()
         assert lease is self.lease and requirements is self.requirements
+        self.deadlines.append(absolute_deadline)
         self.lease_checks += 1
-        return True
+        if self.block_current_at == self.lease_checks:
+            self.current_started.set()
+            await asyncio.Event().wait()
+        index = min(self.lease_checks - 1, len(self.currentness) - 1)
+        return self.currentness[index] is True
 
     async def complete(
         self,
@@ -400,6 +418,7 @@ class _Primary:
         assert lease is self.lease and requirements is self.requirements
         assert max_tokens and priority == "foreground" and temperature == 0.0
         assert absolute_deadline > time.monotonic()
+        self.deadlines.append(absolute_deadline)
         self.calls.append(messages)
         if len(self.calls) == 1:
             payload = json.loads(str(messages[-1]["content"]))
@@ -1448,6 +1467,131 @@ async def test_primary_readiness_recovers_on_the_next_turn(storage: Any) -> None
     assert legacy_calls == 1
     assert primary.prepare_calls == 2
     assert adapter.admit_calls == adapter.publish_calls == 1
+
+
+@pytest.mark.asyncio
+async def test_primary_epoch_loss_at_publication_retains_owner_without_partial_result(
+    storage: Any,
+) -> None:
+    surface, projection = _stored_surface(storage, "publication-epoch-loss")
+    primary = _Primary(currentness=(True, True, True, False))
+    adapter = _CountingAdapter(storage)
+    controller = _controller(
+        primary=primary,
+        graph_adapter=adapter,
+        file_reader=_FileReader(_prepared_file(surface, projection)),
+        web_reader=_WebReader(_web_evidence(surface)),
+    )
+    legacy_calls = 0
+
+    async def forbidden_legacy() -> dict[str, object]:
+        nonlocal legacy_calls
+        legacy_calls += 1
+        return {"message": "legacy must not run after ownership"}
+
+    result = await controller.execute(
+        surface,
+        legacy_primary=forbidden_legacy,
+        absolute_deadline=time.monotonic() + 4,
+    )
+
+    assert result.outcome is SupervisorAssistOutcome.INTERRUPTED
+    assert result.response is None
+    assert result.pending_admission is not None
+    assert primary.lease_checks == 4 and len(primary.calls) == 2
+    assert adapter.publish_calls == adapter.terminal_calls == adapter.cancel_calls == 0
+    assert legacy_calls == 0
+    current = adapter.load_current(AssistConversationScope(surface.actor.user_id, surface.conversation_id))
+    assert current is not None and current.state is CompareCurrentFileWebGraphState.ACTIVE
+
+
+@pytest.mark.asyncio
+async def test_cancellation_drains_final_lease_revalidation_before_publication(
+    storage: Any,
+) -> None:
+    surface, projection = _stored_surface(storage, "cancel-final-lease-check")
+    primary = _Primary()
+    primary.block_current_at = 4
+    adapter = _CountingAdapter(storage)
+    controller = _controller(
+        primary=primary,
+        graph_adapter=adapter,
+        file_reader=_FileReader(_prepared_file(surface, projection)),
+        web_reader=_WebReader(_web_evidence(surface)),
+    )
+
+    async def forbidden_legacy() -> dict[str, object]:
+        raise AssertionError("legacy must not run after ownership")
+
+    task = asyncio.create_task(
+        controller.execute(
+            surface,
+            legacy_primary=forbidden_legacy,
+            absolute_deadline=time.monotonic() + 5,
+        )
+    )
+    await asyncio.wait_for(primary.current_started.wait(), timeout=3)
+    pending = controller.pending_durable_turn_admission(
+        surface.actor.user_id,
+        "cancel",
+        actor=surface.actor,
+        conversation_id=surface.conversation_id,
+    )
+    assert type(pending) is PendingDurableTurnAdmission
+
+    cancelled = await _cancel_pending(
+        controller,
+        AssistConversationScope(surface.actor.user_id, surface.conversation_id),
+        pending,
+    )
+    completed = await asyncio.wait_for(task, timeout=3)
+
+    assert cancelled is not None and cancelled.outcome is SupervisorAssistOutcome.CANCELLED
+    assert completed.outcome is SupervisorAssistOutcome.CANCELLED
+    assert completed.response is None
+    assert primary.lease_checks == 4 and len(primary.calls) == 2
+    assert adapter.cancel_calls == 1
+    assert adapter.publish_calls == adapter.terminal_calls == 0
+
+
+@pytest.mark.asyncio
+async def test_authenticated_primary_journey_narrows_deadline_and_has_zero_tool_authority(
+    storage: Any,
+    _exact_request_effect_fence: Any,
+) -> None:
+    with _bound_authenticated_stored_surface(
+        storage,
+        "bounded-primary-journey",
+        _exact_request_effect_fence,
+    ) as (surface, projection, _attachments, _ingestion, parent_deadline):
+        primary = _Primary()
+        controller = _controller(
+            primary=primary,
+            graph_adapter=_CountingAdapter(storage),
+            file_reader=_FileReader(_prepared_file(surface, projection)),
+            web_reader=_WebReader(_web_evidence(surface)),
+        )
+
+        async def forbidden_legacy() -> dict[str, object]:
+            raise AssertionError("authenticated journey must remain admitted")
+
+        result = await controller.execute(
+            surface,
+            legacy_primary=forbidden_legacy,
+            absolute_deadline=parent_deadline + 30,
+        )
+
+        assert result.outcome is SupervisorAssistOutcome.PUBLISHED
+        assert primary.deadlines and all(value < parent_deadline for value in primary.deadlines)
+        requirements = primary.requirements
+        assert requirements is not None
+        assert (
+            requirements.max_tool_steps,
+            requirements.max_tool_rounds,
+            requirements.max_tool_calls,
+        ) == (0, 0, 0)
+        assert primary.lease is not None
+        assert primary.lease.requirements_sha256 == requirements.canonical_sha256()
 
 
 @pytest.mark.asyncio

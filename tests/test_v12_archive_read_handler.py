@@ -221,6 +221,8 @@ class _Model:
             required_context_tokens=requirements.required_context_tokens,
             prepared_evidence_items=requirements.prepared_evidence_items,
             max_tool_steps=requirements.max_tool_steps,
+            max_tool_rounds=requirements.max_tool_rounds,
+            max_tool_calls=requirements.max_tool_calls,
             effect=requirements.effect,
             verifier_required=requirements.verifier_required,
             process_epoch_sha256="b" * 64,

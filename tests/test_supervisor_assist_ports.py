@@ -5,6 +5,7 @@ import hashlib
 import math
 import time
 from contextlib import ExitStack
+from dataclasses import replace
 from types import SimpleNamespace
 from typing import Any, cast
 
@@ -15,6 +16,12 @@ from friday import execution_kernel as execution_kernel_module
 from friday.execution_kernel import (
     bind_authenticated_request_effect_authority,
     track_request_effects,
+)
+from friday.model_profiles import (
+    ModelCapability,
+    ModelEffect,
+    ModelProfileLease,
+    ModelRequirements,
 )
 from friday.orchestration import turn_context_publication as publication_module
 from friday.orchestration.capability_binding import operational_capability_snapshot
@@ -504,6 +511,99 @@ class _Primary:
         return {"status": self.status}
 
 
+def _primary_requirements() -> ModelRequirements:
+    return ModelRequirements(
+        capabilities=frozenset(
+            {
+                ModelCapability.CONTEXT_8K,
+                ModelCapability.PREPARED_EVIDENCE_2,
+                ModelCapability.REMOTE_CANCELLATION,
+            }
+        ),
+        required_context_tokens=8_192,
+        prepared_evidence_items=2,
+        max_tool_steps=0,
+        max_tool_rounds=0,
+        max_tool_calls=0,
+        effect=ModelEffect.READ,
+        verifier_required=True,
+    )
+
+
+class _LeasedPrimary(_Primary):
+    def __init__(self) -> None:
+        super().__init__()
+        self.requirements = _primary_requirements()
+        self.lease = ModelProfileLease(
+            profile_id="assist-ports-test:primary",
+            attestation_sha256="a" * 64,
+            requirements_sha256=self.requirements.canonical_sha256(),
+            capabilities=self.requirements.capabilities,
+            required_context_tokens=self.requirements.required_context_tokens,
+            prepared_evidence_items=self.requirements.prepared_evidence_items,
+            max_tool_steps=self.requirements.max_tool_steps,
+            max_tool_rounds=self.requirements.max_tool_rounds,
+            max_tool_calls=self.requirements.max_tool_calls,
+            effect=self.requirements.effect,
+            verifier_required=self.requirements.verifier_required,
+            process_epoch_sha256="b" * 64,
+            _gate_authority=self,
+            _gate_generation=1,
+        )
+        self.current: object = True
+        self.acquire_calls = 0
+        self.current_calls = 0
+        self.complete_calls = 0
+        self.hang_on: set[str] = set()
+
+    async def _maybe_hang(self, operation: str) -> None:
+        if operation in self.hang_on:
+            await asyncio.Event().wait()
+
+    async def acquire_lease(
+        self,
+        requirements: ModelRequirements,
+        *,
+        absolute_deadline: float,
+    ) -> ModelProfileLease:
+        assert requirements is self.requirements
+        assert absolute_deadline > time.monotonic()
+        self.acquire_calls += 1
+        await self._maybe_hang("acquire")
+        return self.lease
+
+    async def lease_is_current(
+        self,
+        lease: object,
+        requirements: ModelRequirements,
+        *,
+        absolute_deadline: float,
+    ) -> object:
+        assert lease is self.lease and requirements is self.requirements
+        assert absolute_deadline > time.monotonic()
+        self.current_calls += 1
+        await self._maybe_hang("current")
+        return self.current
+
+    async def complete(
+        self,
+        lease: object,
+        requirements: ModelRequirements,
+        messages: list[dict[str, Any]],
+        *,
+        max_tokens: int | None,
+        priority: str,
+        absolute_deadline: float,
+        temperature: float | None = 0.0,
+    ) -> dict[str, Any]:
+        del messages, max_tokens, priority, temperature
+        assert lease is self.lease and requirements is self.requirements
+        assert absolute_deadline > time.monotonic()
+        self.complete_calls += 1
+        await self._maybe_hang("complete")
+        return {"content": "ok", "finish_reason": "stop", "tool_calls": None}
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("status", "fail", "expected"),
@@ -520,6 +620,147 @@ async def test_primary_preparation_requires_explicit_clear_attestation(
     )
     assert prepared is expected
     assert runtime.attest_calls == 1
+
+
+@pytest.mark.asyncio
+async def test_primary_port_binds_every_v2_lease_field_without_retry() -> None:
+    runtime = _LeasedPrimary()
+    model = ports.AttestedPrimaryModel(cast(Any, runtime))
+    deadline = time.monotonic() + 5
+    assert repr(model) == "AttestedPrimaryModel()"
+
+    lease = await model.acquire_lease(runtime.requirements, absolute_deadline=deadline)
+    assert lease is runtime.lease
+    assert await model.lease_is_current(
+        lease,
+        runtime.requirements,
+        absolute_deadline=deadline,
+    )
+    assert await model.complete(
+        lease,
+        runtime.requirements,
+        [],
+        max_tokens=1,
+        priority="foreground",
+        absolute_deadline=deadline,
+    ) == {"content": "ok", "finish_reason": "stop", "tool_calls": None}
+    assert (runtime.acquire_calls, runtime.current_calls, runtime.complete_calls) == (1, 1, 1)
+
+    runtime.lease = replace(runtime.lease, max_tool_calls=1)
+    assert (
+        await model.acquire_lease(
+            runtime.requirements,
+            absolute_deadline=time.monotonic() + 5,
+        )
+        is None
+    )
+    assert runtime.acquire_calls == 2
+
+
+@pytest.mark.asyncio
+async def test_primary_port_closes_expiry_epoch_loss_and_non_boolean_currentness() -> None:
+    runtime = _LeasedPrimary()
+    model = ports.AttestedPrimaryModel(cast(Any, runtime))
+    deadline = time.monotonic() + 5
+    lease = await model.acquire_lease(runtime.requirements, absolute_deadline=deadline)
+    assert lease is runtime.lease
+
+    runtime.current = 1
+    assert not await model.lease_is_current(
+        lease,
+        runtime.requirements,
+        absolute_deadline=deadline,
+    )
+    runtime.current = False  # exact runtime epoch/process revocation projection
+    assert not await model.lease_is_current(
+        lease,
+        runtime.requirements,
+        absolute_deadline=deadline,
+    )
+    checked = runtime.current_calls
+    assert not await model.lease_is_current(
+        lease,
+        runtime.requirements,
+        absolute_deadline=time.monotonic() - 1,
+    )
+    assert runtime.current_calls == checked
+
+
+@pytest.mark.asyncio
+async def test_primary_port_bounds_hostile_waits_and_preserves_cancellation() -> None:
+    runtime = _LeasedPrimary()
+    model = ports.AttestedPrimaryModel(cast(Any, runtime))
+
+    runtime.hang_on.add("acquire")
+    assert (
+        await model.acquire_lease(
+            runtime.requirements,
+            absolute_deadline=time.monotonic() + 0.01,
+        )
+        is None
+    )
+    runtime.hang_on.clear()
+    lease = await model.acquire_lease(
+        runtime.requirements,
+        absolute_deadline=time.monotonic() + 5,
+    )
+    assert lease is runtime.lease
+
+    runtime.hang_on.add("current")
+    assert not await model.lease_is_current(
+        lease,
+        runtime.requirements,
+        absolute_deadline=time.monotonic() + 0.01,
+    )
+    runtime.hang_on = {"complete"}
+    with pytest.raises(TimeoutError):
+        await model.complete(
+            lease,
+            runtime.requirements,
+            [],
+            max_tokens=1,
+            priority="foreground",
+            absolute_deadline=time.monotonic() + 0.01,
+        )
+
+    task = asyncio.create_task(
+        model.complete(
+            lease,
+            runtime.requirements,
+            [],
+            max_tokens=1,
+            priority="foreground",
+            absolute_deadline=time.monotonic() + 5,
+        )
+    )
+    await asyncio.sleep(0)
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+
+@pytest.mark.asyncio
+async def test_secondary_absence_is_a_bounded_none_without_primary_authority(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(ports, "build_supervisor_request", lambda *_args, **_kwargs: _request())
+    monkeypatch.setattr(ports, "build_supervisor_review_request", lambda *_args, **_kwargs: _request())
+
+    assert (
+        await ports.SchedulerAssistPlanner(cast(Any, object())).propose(
+            cast(Any, object()),
+            cast(Any, object()),
+            absolute_deadline=time.monotonic() + 5,
+        )
+        is None
+    )
+    assert (
+        await ports.SchedulerAssistReviewer(cast(Any, object())).review(
+            cast(Any, object()),
+            absolute_deadline=time.monotonic() + 5,
+        )
+        is None
+    )
 
 
 def test_default_off_activation_never_creates_a_promoted_decision() -> None:
