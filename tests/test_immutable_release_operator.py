@@ -22,7 +22,10 @@ import friday
 import tools.immutable_release_operator as operator
 from friday import semantic_supervisor_policy
 from friday.orchestration.capability_binding import expected_effect_capability_snapshot
-from friday.orchestration.supervisor_assist_promotion import AssistPromotionQualityBasis
+from friday.orchestration.supervisor_assist_promotion import (
+    SUPERVISOR_ASSIST_PROMOTION_MIN_PRODUCT_OBSERVATIONS,
+    AssistPromotionQualityBasis,
+)
 from friday.orchestration.supervisor_contracts import SupervisorMode, canonical_sha256
 from friday.orchestration.supervisor_effect_maturity import (
     SUPERVISOR_READ_ONLY_MATURITY_POLICY_SHA256,
@@ -4590,6 +4593,7 @@ def test_semantic_supervisor_operator_rejects_mixed_live_mode_policy_identity(
             invalid_code="mixed_live_identity_invalid",
         )
 
+
 def _semantic_effect_maturity_file(
     tmp_path: Path,
     *,
@@ -4607,7 +4611,7 @@ def _semantic_effect_maturity_file(
     assert isinstance(promotion_evidence, dict)
     mature_baseline_raw = _semantic_supervisor_promotion_baseline_raw(
         precursor="d" * 64,
-        canary_observations=20,
+        canary_observations=SUPERVISOR_ASSIST_PROMOTION_MIN_PRODUCT_OBSERVATIONS,
         canary_evidence_sha256=canonical_sha256(promotion_evidence),
     )
     budget_file = Path(values["FRIDAY_SEMANTIC_SUPERVISOR_PROMOTION_LATENCY_BUDGET_FILE"])
