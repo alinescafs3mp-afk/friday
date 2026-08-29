@@ -403,14 +403,14 @@ def test_newer_or_tampered_schema_fails_closed(settings, tmp_path) -> None:
     initial.ensure_user(OWNER)
     initial.close()
     with sqlite3.connect(database) as forged:
-        forged.execute("UPDATE schema_meta SET value='48' WHERE key='schema_version'")
+        forged.execute("UPDATE schema_meta SET value='49' WHERE key='schema_version'")
         forged.commit()
     future = FridayStorage(replace(settings, database_path=database, database_must_exist=False))
     with pytest.raises(UnsupportedSchemaVersionError):
         future.execute("SELECT 1").fetchone()
     future.close()
     with sqlite3.connect(database) as probe:
-        assert probe.execute("SELECT value FROM schema_meta WHERE key='schema_version'").fetchone() == ("48",)
+        assert probe.execute("SELECT value FROM schema_meta WHERE key='schema_version'").fetchone() == ("49",)
 
 
 def test_closed_source_binding_never_persists_raw_carrier_values(storage) -> None:
