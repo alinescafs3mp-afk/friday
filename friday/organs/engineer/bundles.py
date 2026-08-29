@@ -29,6 +29,7 @@ from friday.file_delivery import (
 from friday.permissions import ActorContext, AuthorizationService
 from friday.source_identity import (
     AuthorizedFileSnapshotToken,
+    authorized_file_snapshot_token_authorizes_scope,
     authorized_file_snapshot_token_is_process_owned,
 )
 
@@ -299,7 +300,11 @@ def reauthorize_bundle_sources_in_transaction(
             type(lineage) is not BundleSourceLineage
             or lineage._authority is not _AUTHORITY
             or lineage.raw_id in seen
-            or not authorized_file_snapshot_token_is_process_owned(lineage.snapshot_token)
+            or not authorized_file_snapshot_token_authorizes_scope(
+                lineage.snapshot_token,
+                tenant_id=tenant_id,
+                storage_owner_id=tenant_id,
+            )
         ):
             raise EngineerArtifactBundleError("source_lineage_invalid")
         seen.add(lineage.raw_id)
@@ -318,7 +323,11 @@ def reauthorize_bundle_sources_in_transaction(
         content = bytes(stored.content)
         digest = _digest(content)
         if (
-            not authorized_file_snapshot_token_is_process_owned(token)
+            not authorized_file_snapshot_token_authorizes_scope(
+                token,
+                tenant_id=tenant_id,
+                storage_owner_id=tenant_id,
+            )
             or token != lineage.snapshot_token
             or stored.raw_id != lineage.raw_id
             or digest != lineage.content_sha256

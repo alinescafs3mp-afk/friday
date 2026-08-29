@@ -28,7 +28,7 @@ from friday.agent_runtime import (
 from friday.execution_kernel import ToolResult, ToolSpec
 from friday.permissions import ActorContext
 from friday.server import create_app
-from friday.source_identity import authorized_file_snapshot_token, raw_source_identity_sha256
+from friday.source_identity import raw_source_identity_sha256, tenant_authorized_file_snapshot_token
 
 
 class _DisabledModel:
@@ -1018,6 +1018,7 @@ async def test_legacy_file_inspection_receives_and_obeys_the_same_turn_deadline(
     def raw_projection(raw_id: str) -> dict[str, str]:
         return {
             "id": raw_id,
+            "user_id": "alice",
             "source": "upload",
             "source_ref": f"deadline:{raw_id}",
             "content_type": "file",
@@ -1044,9 +1045,11 @@ async def test_legacy_file_inspection_receives_and_obeys_the_same_turn_deadline(
     def authorized(*args, **_kwargs):  # noqa: ANN002, ANN003
         del _kwargs
         raw_id = str(args[2])
-        token = authorized_file_snapshot_token(
+        token = tenant_authorized_file_snapshot_token(
             raw_projection(raw_id),
             content_sha256=body_sha256,
+            tenant_id="alice",
+            storage_owner_id="alice",
         )
         assert token is not None
         return SimpleNamespace(
@@ -1062,7 +1065,7 @@ async def test_legacy_file_inspection_receives_and_obeys_the_same_turn_deadline(
         "read_authorized_file",
         authorized,
     )
-    items = [canonical("raw_inspect_one"), canonical("raw_inspect_two")]
+    items = [canonical("raw_1111111111111111"), canonical("raw_2222222222222222")]
     deadline = time.monotonic() + 0.03
     if operation == "verify":
         result = await runtime._verify_registered_file_attachments(  # noqa: SLF001

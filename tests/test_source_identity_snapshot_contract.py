@@ -14,12 +14,14 @@ from friday.agent_runtime import (
     _OWNED_SAFE_DOCUMENT_METADATA,
     _RAW_SOURCE_IDENTITY_KEY,
     AgentRuntime,
+    _authorized_file_snapshot_for_parser,
     _OwnedAttachment,
 )
 from friday.source_identity import (
     authorized_file_snapshot_token,
     raw_source_identity_sha256,
     source_search_page_snapshots,
+    tenant_authorized_file_snapshot_token,
 )
 from tests.test_attachment_publication_reauthorization import (
     _SOURCE_CANARY as _ATTACHMENT_SOURCE_CANARY,
@@ -80,18 +82,56 @@ def _successful_parser_result(text: str) -> dict[str, Any]:
     }
 
 
+@pytest.mark.parametrize("binding", ("unbound", "foreign_tenant"))
+def test_parser_admission_rejects_non_tenant_snapshot_authority(binding: str) -> None:
+    body = b"tenant-bound parser bytes"
+    content_sha256 = hashlib.sha256(body).hexdigest()
+    raw = {
+        "id": "raw_fedcba9876543210",
+        "user_id": "foreign-tenant" if binding == "foreign_tenant" else "alice",
+        "source": "upload",
+        "source_ref": "parser-tenant-regression",
+        "content_type": "file",
+        "received_at": "2026-08-29T00:00:00+00:00",
+        "content_hash": content_sha256,
+        "_raw_content": "private body",
+        "_raw_metadata": "{}",
+    }
+    token = (
+        authorized_file_snapshot_token(raw, content_sha256=content_sha256)
+        if binding == "unbound"
+        else tenant_authorized_file_snapshot_token(
+            raw,
+            content_sha256=content_sha256,
+            tenant_id="foreign-tenant",
+            storage_owner_id="foreign-tenant",
+        )
+    )
+    assert token is not None
+
+    assert (
+        _authorized_file_snapshot_for_parser(
+            SimpleNamespace(content=body, snapshot_token=token),
+            raw_id=str(raw["id"]),
+            tenant_id="alice",
+        )
+        is None
+    )
+
+
 @pytest.mark.asyncio
 async def test_metadata_parser_rejects_old_header_after_same_id_identity_change(
     settings: Any,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    raw_id = "raw_metadata_snapshot_race"
+    raw_id = "raw_0123456789abcdef"
     body = b"legacy metadata bytes"
     content_sha256 = hashlib.sha256(body).hexdigest()
 
     def raw_projection(marker: str) -> dict[str, str]:
         return {
             "id": raw_id,
+            "user_id": "alice",
             "source": "upload",
             "source_ref": "metadata-snapshot-race",
             "content_type": "file",
@@ -131,7 +171,12 @@ async def test_metadata_parser_rejects_old_header_after_same_id_identity_change(
             }
         }
 
-    token = authorized_file_snapshot_token(before, content_sha256=content_sha256)
+    token = tenant_authorized_file_snapshot_token(
+        before,
+        content_sha256=content_sha256,
+        tenant_id="alice",
+        storage_owner_id="alice",
+    )
     assert token is not None
     runtime = AgentRuntime.__new__(AgentRuntime)
     runtime.storage = object()

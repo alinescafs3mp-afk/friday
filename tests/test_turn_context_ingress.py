@@ -4,8 +4,13 @@ import hashlib
 
 import pytest
 
+from friday.file_evidence import (
+    stamp_current_turn_file_reference,
+    stamp_current_turn_file_reference_for_tenant,
+)
 from friday.orchestration.contracts import RouterMode
 from friday.orchestration.turn_context import (
+    AuthorizedSourceKind,
     ConversationScopeKind,
     IngressKind,
     PendingOwnerKind,
@@ -13,13 +18,24 @@ from friday.orchestration.turn_context import (
     TurnContextIssuer,
     TurnMode,
 )
-from friday.orchestration.turn_context_ingress import issue_authenticated_scalar_turn_context
+from friday.orchestration.turn_context_ingress import (
+    issue_authenticated_scalar_turn_context,
+    issue_authenticated_turn_context,
+)
 from friday.pending_durable_turn import PendingDurableTurnAdmission
 from friday.permissions import ActorContext
 from friday.turn_intent_policy import TurnIntent, TurnPolicyDecision
 
 _NOW_NS = 50_000_000_000_000
 _CONVERSATION_ID = "conv_0123456789abcdef"
+
+
+class _Carrier(dict[str, object]):
+    pass
+
+
+class _StringLookalike(str):
+    pass
 
 
 def _issuer(label: str, now: list[int]) -> TurnContextIssuer:
@@ -31,6 +47,70 @@ def _issuer(label: str, now: list[int]) -> TurnContextIssuer:
 
 def _effect(label: str) -> str:
     return hashlib.sha256(label.encode("ascii")).hexdigest()
+
+
+def _current_carrier(
+    ordinal: int,
+    *,
+    tenant_id: str = "owner",
+    raw_id: str | None = None,
+    legacy: bool = False,
+) -> dict[str, object]:
+    resolved_raw_id = raw_id or f"raw_{ordinal:016x}"
+    raw = {
+        "id": resolved_raw_id,
+        "user_id": tenant_id,
+        "source": "upload",
+        "source_ref": f"telegram-file:{ordinal}",
+        "content_type": "file",
+        "received_at": "2026-08-29T00:00:00Z",
+        "content_hash": f"{ordinal % 16:x}" * 64,
+        "raw_content": f"body-{ordinal}",
+        "metadata_json": "{}",
+    }
+    carrier: dict[str, object] = _Carrier(
+        {
+            "raw_object_id": resolved_raw_id,
+            "filename": f"file-{ordinal}.txt",
+            "mime_type": "text/plain",
+            "transient_text": f"body-{ordinal}",
+            "extraction_success": True,
+            "persisted": True,
+            "current_turn_only": True,
+        }
+    )
+    if legacy:
+        stamp_current_turn_file_reference(carrier, raw)
+    else:
+        stamp_current_turn_file_reference_for_tenant(carrier, raw, tenant_id=tenant_id)
+    return carrier
+
+
+def _issue_upload_turn(
+    issuer: TurnContextIssuer,
+    actor: ActorContext,
+    attachments: list[dict[str, object]],
+    *,
+    now: int,
+):
+    return issue_authenticated_turn_context(
+        issuer,
+        ingress_kind=IngressKind.SIGNED_HTTP,
+        ingress_issued_token=f"request-upload-{len(attachments)}-{now}",
+        actor=actor,
+        conversation_id=_CONVERSATION_ID,
+        interaction_mode=TurnMode.DIALOGUE,
+        source_id=actor.source,
+        update_id=f"request-upload-{len(attachments)}-{now}",
+        request_effect_binding_sha256=_effect(f"upload-{len(attachments)}-{now}"),
+        message="Разбери приложенные файлы.",
+        enable_tools=True,
+        decision=TurnPolicyDecision(intent=TurnIntent.PASSTHROUGH),
+        router_mode=RouterMode.V12,
+        deadline_monotonic_ns=now + 2_000_000_000,
+        max_output_tokens=4096,
+        attachments=attachments,
+    )
 
 
 def test_signed_http_scalar_context_is_one_exact_closed_turn() -> None:
@@ -78,6 +158,37 @@ def test_signed_http_scalar_context_is_one_exact_closed_turn() -> None:
     assert context.inherited_budget.resources.max_output_tokens == 4096
     assert len(context.authorized_sources) == 1
     assert context.authorized_sources[0].private_carrier is context.authority
+
+
+@pytest.mark.parametrize(
+    "conversation_id",
+    (None, "", "conv_FFFFFFFFFFFFFFFF", _StringLookalike(_CONVERSATION_ID)),
+)
+def test_authenticated_ingress_never_mints_new_or_coercible_conversation_scope(
+    conversation_id: object,
+) -> None:
+    now = [_NOW_NS + 5_000]
+    issuer = _issuer("exact-conversation", now)
+    actor = ActorContext(user_id="owner", preset_key="owner", source="api-token")
+
+    with pytest.raises(TurnContextError, match="exact existing conversation"):
+        issue_authenticated_turn_context(
+            issuer,
+            ingress_kind=IngressKind.SIGNED_HTTP,
+            ingress_issued_token="request-source-invalid-conversation",
+            actor=actor,
+            conversation_id=conversation_id,  # type: ignore[arg-type]
+            interaction_mode=TurnMode.DIALOGUE,
+            source_id=actor.source,
+            update_id="request-source-invalid-conversation",
+            request_effect_binding_sha256=_effect("invalid-conversation-effect"),
+            message="Проверь",
+            enable_tools=True,
+            decision=TurnPolicyDecision(intent=TurnIntent.PASSTHROUGH),
+            router_mode=RouterMode.LEGACY,
+            deadline_monotonic_ns=now[0] + 1_000_000_000,
+            max_output_tokens=2048,
+        )
 
 
 def test_telegram_scalar_context_uses_authenticated_chat_and_update() -> None:
@@ -193,3 +304,49 @@ def test_scalar_context_never_mints_a_fresh_or_overlong_deadline() -> None:
             deadline_monotonic_ns=now[0] + 1_000_000_000,
             max_output_tokens=2048,
         )
+
+
+@pytest.mark.parametrize("count", (1, 10))
+def test_current_upload_context_binds_one_ordered_same_tenant_source_per_descriptor(count: int) -> None:
+    now = _NOW_NS + 40_000 + count
+    clock = [now]
+    issuer = _issuer(f"upload-{count}", clock)
+    actor = ActorContext(user_id="owner", preset_key="owner", source="api-token")
+    carriers = [_current_carrier(ordinal) for ordinal in range(1, count + 1)]
+
+    context = _issue_upload_turn(issuer, actor, carriers, now=now)
+
+    assert issuer.require_context(context) is context
+    assert context.model_input.attachments_truncated is False
+    assert len(context.model_input.attachments) == count
+    assert [source.kind for source in context.authorized_sources] == [
+        AuthorizedSourceKind.ACCEPTED_INGRESS,
+        *([AuthorizedSourceKind.CURRENT_ATTACHMENT] * count),
+    ]
+    for ordinal, source in enumerate(context.authorized_sources[1:], start=1):
+        assert source.ordinal == ordinal
+        assert source.model_descriptor is context.model_input.attachments[ordinal - 1]
+        assert source.private_carrier.tenant_id == actor.user_id
+
+
+@pytest.mark.parametrize(
+    "carriers",
+    (
+        [_current_carrier(1, tenant_id="bob")],
+        [_current_carrier(1, legacy=True)],
+        [
+            _current_carrier(1, raw_id="raw_00000000000000aa"),
+            _current_carrier(2, raw_id="raw_00000000000000aa"),
+        ],
+        [_current_carrier(ordinal) for ordinal in range(1, 12)],
+    ),
+)
+def test_current_upload_context_rejects_foreign_legacy_duplicate_and_overbound_sources(
+    carriers: list[dict[str, object]],
+) -> None:
+    now = _NOW_NS + 50_000 + len(carriers)
+    issuer = _issuer(f"rejected-upload-{len(carriers)}", [now])
+    actor = ActorContext(user_id="owner", preset_key="owner", source="api-token")
+
+    with pytest.raises(TurnContextError):
+        _issue_upload_turn(issuer, actor, carriers, now=now)

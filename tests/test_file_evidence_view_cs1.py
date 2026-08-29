@@ -47,7 +47,7 @@ from friday.agent_runtime._office_attachments import (
 from friday.documents import DocumentExtractor
 from friday.execution_kernel import ExecutionKernel
 from friday.permissions import ActorContext, AuthorizationService
-from friday.source_identity import authorized_file_snapshot_token, raw_source_identity_sha256
+from friday.source_identity import raw_source_identity_sha256, tenant_authorized_file_snapshot_token
 from friday.storage.models import RawObject, new_id
 
 
@@ -908,11 +908,12 @@ def test_file_evidence_set_is_sole_file_state_authority(monkeypatch, settings, s
     assert _file_evidence_view_of(historical).body_kind == FileBodyKind.PROJECTED
     assert _file_evidence_view_of(historical).projection_empty_no_match is True
 
-    metadata_raw_id = "raw_metadatametadatametadatametada01"
+    metadata_raw_id = "raw_0123456789abcdef"
     metadata_bytes = b"abc"
     metadata_sha256 = hashlib.sha256(metadata_bytes).hexdigest()
     metadata_raw_projection = {
         "id": metadata_raw_id,
+        "user_id": "tenant-test",
         "source": "upload",
         "source_ref": "cs2:legacy-metadata",
         "content_type": "file",
@@ -922,9 +923,11 @@ def test_file_evidence_set_is_sole_file_state_authority(monkeypatch, settings, s
         "_raw_metadata": "{}",
     }
     metadata_identity = raw_source_identity_sha256(metadata_raw_projection)
-    metadata_snapshot_token = authorized_file_snapshot_token(
+    metadata_snapshot_token = tenant_authorized_file_snapshot_token(
         metadata_raw_projection,
         content_sha256=metadata_sha256,
+        tenant_id="tenant-test",
+        storage_owner_id="tenant-test",
     )
     assert metadata_snapshot_token is not None
 

@@ -540,7 +540,10 @@ class SemanticSupervisorShadowRuntime:
             return None, self._skipped(SupervisorSkipReason.EVIDENCE_UNAVAILABLE, turn=turn)
 
         current_attachment_count = (
-            pending_comparison_current_attachment_count(attachment_snapshot)
+            pending_comparison_current_attachment_count(
+                attachments,
+                tenant_id=actor.user_id,
+            )
             if authenticated_scope is None
             else len(turn.attachments)
         )

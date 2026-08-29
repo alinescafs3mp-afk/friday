@@ -37,7 +37,7 @@ from friday.raw_metadata import bounded_raw_file_metadata
 from friday.secret_hygiene import named_secrets
 from friday.source_identity import (
     AuthorizedFileSnapshotToken,
-    authorized_file_snapshot_token_is_process_owned,
+    authorized_file_snapshot_token_authorizes_scope,
     raw_source_identity_sha256,
 )
 from friday.storage._core import guarded_storage_transaction
@@ -599,7 +599,14 @@ class PreparedFileEvidence:
             or len(set(self.raw_ids)) != len(self.raw_ids)
         ):
             raise ValueError("prepared file evidence has invalid cardinality")
-        if any(not authorized_file_snapshot_token_is_process_owned(token) for token in self.snapshot_tokens):
+        if any(
+            not authorized_file_snapshot_token_authorizes_scope(
+                token,
+                tenant_id=self.tenant_id,
+                storage_owner_id=self.tenant_id,
+            )
+            for token in self.snapshot_tokens
+        ):
             raise ValueError("prepared file evidence has an unowned source token")
         if self.historical_selection is not None and (
             type(self.historical_selection) is not HistoricalFileSelectionToken
@@ -668,7 +675,14 @@ def prepared_file_evidence_is_process_owned(value: Any) -> bool:
         and value._process_authority is _PROCESS_AUTHORITY
         and value._identity_sha256 == expected_identity
         and _prepared_bindings_valid(value)
-        and all(authorized_file_snapshot_token_is_process_owned(token) for token in value.snapshot_tokens)
+        and all(
+            authorized_file_snapshot_token_authorizes_scope(
+                token,
+                tenant_id=value.tenant_id,
+                storage_owner_id=value.tenant_id,
+            )
+            for token in value.snapshot_tokens
+        )
     )
 
 
@@ -997,7 +1011,11 @@ def _prepare_registered_file_evidence(
             require_budget()
             if (
                 type(token) is not AuthorizedFileSnapshotToken
-                or not authorized_file_snapshot_token_is_process_owned(token)
+                or not authorized_file_snapshot_token_authorizes_scope(
+                    token,
+                    tenant_id=tenant_id,
+                    storage_owner_id=tenant_id,
+                )
                 or token.source.raw_id != reference.raw_object_id
                 or not hmac.compare_digest(token.source.identity_sha256, requested_identity)
             ):
@@ -1222,7 +1240,11 @@ def reauthorize_prepared_file_evidence_in_transaction(
             token = current.snapshot_token
             if (
                 type(token) is not AuthorizedFileSnapshotToken
-                or not authorized_file_snapshot_token_is_process_owned(token)
+                or not authorized_file_snapshot_token_authorizes_scope(
+                    token,
+                    tenant_id=prepared.tenant_id,
+                    storage_owner_id=prepared.tenant_id,
+                )
                 or token.source.raw_id != original.source.raw_id
                 or not hmac.compare_digest(token.source.identity_sha256, original.source.identity_sha256)
                 or not hmac.compare_digest(token.content_sha256, original.content_sha256)

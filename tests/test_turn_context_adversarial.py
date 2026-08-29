@@ -8,7 +8,7 @@ from typing import Any
 
 import pytest
 
-from friday.file_evidence import stamp_current_turn_file_reference
+from friday.file_evidence import stamp_current_turn_file_reference_for_tenant
 from friday.orchestration.contracts import AttachmentDescriptor, RouterMode, TurnInput
 from friday.orchestration.turn_context import (
     AuthenticatedIngressAuthority,
@@ -28,7 +28,10 @@ from friday.orchestration.turn_context import (
 )
 from friday.pending_durable_turn import PendingDurableTurnAdmission
 from friday.permissions import ActorContext
-from friday.source_identity import AuthorizedFileSnapshotToken, authorized_file_snapshot_token
+from friday.source_identity import (
+    AuthorizedFileSnapshotToken,
+    tenant_authorized_file_snapshot_token,
+)
 from friday.turn_intent_policy import TurnIntent, TurnPolicyDecision
 
 _KEY = b"authenticated-turn-context-key!!"
@@ -97,9 +100,11 @@ def _raw_source(
     content_sha256: str = "a" * 64,
     content_type: str = "file",
     mime_type: str = "text/plain",
+    tenant_id: str = "alice",
 ) -> dict[str, object]:
     return {
         "id": raw_id,
+        "user_id": tenant_id,
         "source": "api",
         "source_ref": source_ref,
         "content_type": content_type,
@@ -114,9 +119,11 @@ def _raw_source(
 
 def _token(raw: dict[str, object] | None = None) -> AuthorizedFileSnapshotToken:
     source = raw or _raw_source()
-    token = authorized_file_snapshot_token(
+    token = tenant_authorized_file_snapshot_token(
         source,
         content_sha256=str(source["content_hash"]),
+        tenant_id=source["user_id"],
+        storage_owner_id=source["user_id"],
     )
     assert token is not None
     return token
@@ -170,7 +177,7 @@ def _mint(
     effective_actor = actor or _actor()
     authority = _authority(effective_issuer, effective_actor, mode=mode)
     assert type(authority) is AuthenticatedIngressAuthority
-    raw_source = _raw_source() if attachment else None
+    raw_source = _raw_source(tenant_id=effective_actor.user_id) if attachment else None
     model_input = _input(
         effective_actor,
         message=message,
@@ -482,6 +489,32 @@ def test_plain_string_and_lookalike_cannot_mint_source_authority() -> None:
         )
 
 
+def test_registered_source_rejects_another_person_in_the_same_tenant() -> None:
+    issuer = _issuer()
+    actor = _actor("shared", shared=True, person="alice")
+    authority = _authority(issuer, actor)
+    bob_raw = _raw_source(tenant_id="bob")
+    bob_token = tenant_authorized_file_snapshot_token(
+        bob_raw,
+        content_sha256=str(bob_raw["content_hash"]),
+        tenant_id="shared",
+        storage_owner_id="bob",
+    )
+    assert bob_token is not None
+    descriptor = _input(
+        actor,
+        attachment=True,
+        attachment_raw=bob_raw,
+    ).attachments[0]
+
+    with pytest.raises(TurnContextError, match="process-owned token"):
+        issuer.registered_file_source(
+            authority=authority,
+            token=bob_token,
+            descriptor=descriptor,
+        )
+
+
 def test_source_identity_binds_exact_raw_source_content_and_turn_scope() -> None:
     issuer = _issuer()
     actor = _actor()
@@ -621,6 +654,7 @@ def test_current_attachment_source_is_bound_to_the_exact_model_descriptor() -> N
     assert type(authority) is AuthenticatedIngressAuthority
     raw = {
         "id": "raw_0123456789abcdef",
+        "user_id": actor.user_id,
         "source": "api",
         "source_ref": "current-source",
         "content_type": "text/plain",
@@ -634,7 +668,7 @@ def test_current_attachment_source_is_bound_to_the_exact_model_descriptor() -> N
         mime_type="text/plain",
         content="CURRENT_SOURCE_BODY",
     )
-    stamp_current_turn_file_reference(carrier, raw)
+    stamp_current_turn_file_reference_for_tenant(carrier, raw, tenant_id=actor.user_id)
     model_input = TurnInput.from_chat(
         message="read it",
         actor=actor,

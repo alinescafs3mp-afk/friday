@@ -54,7 +54,7 @@ from friday.organs.engineer.command.contracts import (
 from friday.organs.engineer.command.inputs import command_input_descriptor, command_input_manifest
 from friday.organs.engineer.command.resolve import attest_trusted_path, resolve_held, resolve_named
 from friday.organs.engineer.command.spawn_helper import SpawnBroker
-from friday.source_identity import authorized_file_snapshot_token
+from friday.source_identity import tenant_authorized_file_snapshot_token
 
 GRANT_SECRET = b"friday-engineer-command-kernel-tests-secret"
 SOURCE_SECRET = b"friday-engineer-owner-source-tests-secret"
@@ -1371,9 +1371,10 @@ def test_host_user_materializes_only_manifest_bound_reauthorized_inputs(tmp_path
     content = b"private-current-upload"
     content_digest = sha256_bytes(content)
     raw_id = "raw_0000000000000001"
-    snapshot = authorized_file_snapshot_token(
+    snapshot = tenant_authorized_file_snapshot_token(
         {
             "id": raw_id,
+            "user_id": "tenant-1",
             "source": "telegram_upload",
             "source_ref": "file-1",
             "content_type": "text/plain",
@@ -1383,6 +1384,8 @@ def test_host_user_materializes_only_manifest_bound_reauthorized_inputs(tmp_path
             "_raw_metadata": "{}",
         },
         content_sha256=content_digest,
+        tenant_id="tenant-1",
+        storage_owner_id="tenant-1",
     )
     assert snapshot is not None
     identity_file = CurrentMessageUploadFileIdentity(
@@ -1447,13 +1450,27 @@ def test_host_user_materializes_only_manifest_bound_reauthorized_inputs(tmp_path
     kernel.close()
 
 
-def test_host_user_rejects_private_input_byte_drift_before_admission(tmp_path: Path) -> None:
+@pytest.mark.parametrize(
+    ("stored_content", "token_tenant_id", "token_storage_owner_id"),
+    (
+        (b"tampered!", "tenant-1", "tenant-1"),
+        (b"authorized", "other-tenant", "tenant-1"),
+        (b"authorized", "tenant-1", "other-storage-owner"),
+    ),
+)
+def test_host_user_rejects_private_input_byte_or_scope_drift_before_admission(
+    tmp_path: Path,
+    stored_content: bytes,
+    token_tenant_id: str,
+    token_storage_owner_id: str,
+) -> None:
     content = b"authorized"
     raw_id = "raw_0000000000000002"
     digest = sha256_bytes(content)
-    snapshot = authorized_file_snapshot_token(
+    snapshot = tenant_authorized_file_snapshot_token(
         {
             "id": raw_id,
+            "user_id": "tenant-1",
             "source": "telegram_upload",
             "source_ref": "file-2",
             "content_type": "text/plain",
@@ -1463,6 +1480,8 @@ def test_host_user_rejects_private_input_byte_drift_before_admission(tmp_path: P
             "_raw_metadata": "{}",
         },
         content_sha256=digest,
+        tenant_id="tenant-1",
+        storage_owner_id="tenant-1",
     )
     assert snapshot is not None
     identity_file = CurrentMessageUploadFileIdentity(
@@ -1499,8 +1518,12 @@ def test_host_user_rejects_private_input_byte_drift_before_admission(tmp_path: P
         raw_id=raw_id,
         filename="input.txt",
         mime_type="text/plain",
-        content=b"tampered!",
-        snapshot_token=snapshot,
+        content=stored_content,
+        snapshot_token=replace(
+            snapshot,
+            tenant_id=token_tenant_id,
+            storage_owner_id=token_storage_owner_id,
+        ),
     )
     kernel = _kernel(tmp_path)
     with pytest.raises(CommandError, match="command_input_bytes_changed"):

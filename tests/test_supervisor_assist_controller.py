@@ -20,7 +20,7 @@ from friday.file_evidence import (
     FileEvidenceSet,
     FileEvidenceView,
     FileRegistrationKind,
-    stamp_current_turn_file_reference,
+    stamp_current_turn_file_reference_for_tenant,
 )
 from friday.file_evidence_reader import (
     _PROCESS_AUTHORITY as _FILE_EVIDENCE_AUTHORITY,  # noqa: PLC2701
@@ -117,8 +117,8 @@ from friday.orchestration.transient_web_comparison import (
 from friday.pending_durable_turn import PendingDurableTurnAdmission
 from friday.permissions import ActorContext, AuthorizationError, AuthorizationService
 from friday.source_identity import (
-    authorized_file_snapshot_token,
     raw_source_identity_sha256,
+    tenant_authorized_file_snapshot_token,
 )
 from friday.storage.models import RawObject
 
@@ -421,10 +421,11 @@ def _surface(*, actor: ActorContext | None = None) -> CurrentFileWebAssistSurfac
             "extraction_success": True,
         }
     )
-    stamp_current_turn_file_reference(
+    stamp_current_turn_file_reference_for_tenant(
         carrier,
         {
             "id": raw_id,
+            "user_id": actor.user_id,
             "source": "upload",
             "source_ref": "sha256:" + "1" * 64,
             "content_type": "text/plain",
@@ -433,6 +434,7 @@ def _surface(*, actor: ActorContext | None = None) -> CurrentFileWebAssistSurfac
             "raw_content": "private body",
             "metadata_json": "{}",
         },
+        tenant_id=actor.user_id,
     )
     surface = prepare_current_file_web_assist_surface(
         _settings(),
@@ -487,7 +489,7 @@ def _stored_surface(
     )
     storage.store_raw_object(raw)
     row = storage.execute(
-        """SELECT id,source,source_ref,content_type,received_at,content_hash,
+        """SELECT id,user_id,source,source_ref,content_type,received_at,content_hash,
                   raw_content AS _raw_content,metadata_json AS _raw_metadata
              FROM raw_objects WHERE id=? AND user_id=?""",
         (raw_id, user_id),
@@ -544,9 +546,11 @@ def _prepared_file(
     projection: dict[str, object],
 ) -> PreparedFileEvidence:
     text = str(projection["_raw_content"])
-    token = authorized_file_snapshot_token(
+    token = tenant_authorized_file_snapshot_token(
         projection,
         content_sha256=surface.attachment_content_sha256,
+        tenant_id=surface.actor.user_id,
+        storage_owner_id=surface.actor.user_id,
     )
     assert token is not None
     view = FileEvidenceView(

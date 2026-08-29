@@ -59,7 +59,7 @@ from friday.retrieval.contracts import (
     SourceRepresentation,
     SourceRevision,
 )
-from friday.source_identity import authorized_file_snapshot_token
+from friday.source_identity import tenant_authorized_file_snapshot_token
 
 
 class _DurableEvidenceDigests(TypedDict):
@@ -184,6 +184,7 @@ def _prepared_document(
     content_sha256 = hashlib.sha256(text.encode("utf-8")).hexdigest()
     raw = {
         "id": raw_id,
+        "user_id": "tenant-main",
         "source": "upload",
         "source_ref": "telegram-file:test",
         "content_type": "file",
@@ -192,7 +193,12 @@ def _prepared_document(
         "_raw_content": text,
         "_raw_metadata": '{"filename":"decision.txt"}',
     }
-    token = authorized_file_snapshot_token(raw, content_sha256=content_sha256)
+    token = tenant_authorized_file_snapshot_token(
+        raw,
+        content_sha256=content_sha256,
+        tenant_id="tenant-main",
+        storage_owner_id="tenant-main",
+    )
     assert token is not None
     view = FileEvidenceView(
         raw_id=raw_id,

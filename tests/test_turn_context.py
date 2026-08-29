@@ -25,7 +25,10 @@ from friday.orchestration.turn_context import (
 )
 from friday.pending_durable_turn import PendingDurableTurnAdmission
 from friday.permissions import ActorContext
-from friday.source_identity import AuthorizedFileSnapshotToken, authorized_file_snapshot_token
+from friday.source_identity import (
+    AuthorizedFileSnapshotToken,
+    tenant_authorized_file_snapshot_token,
+)
 from friday.turn_intent_policy import TurnIntent, TurnPolicyDecision
 
 _KEY = bytes(range(32))
@@ -91,9 +94,11 @@ def _file_raw(
     source_ref: str = "attachment-source-1",
     content_sha256: str = "2" * 64,
     body: str = "PRIVATE SOURCE BODY",
+    tenant_id: str = "tenant-alice",
 ) -> dict[str, object]:
     return {
         "id": raw_id,
+        "user_id": tenant_id,
         "source": "api",
         "source_ref": source_ref,
         "content_type": "file",
@@ -110,7 +115,12 @@ def _file_raw(
 
 def _file_token(raw: dict[str, object] | None = None) -> AuthorizedFileSnapshotToken:
     source = raw or _file_raw()
-    token = authorized_file_snapshot_token(source, content_sha256=str(source["content_hash"]))
+    token = tenant_authorized_file_snapshot_token(
+        source,
+        content_sha256=str(source["content_hash"]),
+        tenant_id=source["user_id"],
+        storage_owner_id=source["user_id"],
+    )
     assert token is not None
     return token
 
@@ -207,7 +217,7 @@ def _context(
         fallback_router_mode=fallback,
         decision=decision or TurnPolicyDecision(intent=TurnIntent.PASSTHROUGH),
     )
-    raw_source = _file_raw() if with_attachment else None
+    raw_source = _file_raw(tenant_id=effective_actor.user_id) if with_attachment else None
     model_input = _model_input(
         effective_actor,
         conversation_id=conversation_id,

@@ -3,20 +3,27 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import hmac
 import json
 import logging
 import math
 import re
+import secrets
 import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Any, Literal, Protocol
+from typing import Any, Literal, Protocol, cast
 
 from friday.evidence_bundle import EvidenceBundle
 from friday.execution_kernel import (
     confirm_staged_request_effect,
     rollback_staged_request_effect,
     stage_request_effect_possible_in_transaction,
+)
+from friday.file_evidence import (
+    CurrentTurnFileReferenceToken,
+    current_turn_file_reference_token_authorizes_tenant,
 )
 from friday.file_evidence_reader import (
     FileEvidenceUnavailable,
@@ -65,10 +72,17 @@ from friday.orchestration.file_read_contract import (
     validate_file_synthesis_answer,
 )
 from friday.orchestration.router import (
+    ReadOnlyAttachmentReference,
     ReadOnlyRoutePreparation,
     ReadOnlyRouteRequest,
     ReadOnlyRouteResult,
 )
+from friday.orchestration.turn_context import (
+    AuthenticatedTurnContext,
+    AuthorizedSourceKind,
+)
+from friday.orchestration.turn_context_call_scope import require_current_authenticated_chat_call_scope
+from friday.orchestration.turn_context_runtime import current_primary_authenticated_turn_context
 from friday.permissions import AuthorizationService
 from friday.storage import normalize_conversation_mode
 from friday.storage._conversations import (
@@ -85,6 +99,12 @@ _PREPARATION_BUDGET_SEC = 4.5
 _PUBLICATION_RESERVE_SEC = 2.0
 _MAX_ATTESTED_INPUT_UTF8_BYTES = 5_500
 _MAX_TRACE_LATENCY_MS = 86_400_000
+_UNSET_TURN_CONTEXT = object()
+_PREPARED_TURN_BINDING_KEY = secrets.token_bytes(32)
+_CONVERSATION_ID_RE = re.compile(r"conv_[0-9a-f]{16}\Z")
+_RAW_ID_RE = re.compile(r"raw_[0-9a-f]{16}\Z")
+_SHA256_RE = re.compile(r"[0-9a-f]{64}\Z")
+_INTERACTION_MODES = frozenset({"dialogue", "knowledge_work", "research", "engineer"})
 LOGGER = logging.getLogger(__name__)
 
 
@@ -102,21 +122,177 @@ class _PreparedFileContext:
 @dataclass(frozen=True, slots=True)
 class _PreparedFileTurn:
     evidence: PreparedFileEvidence
+    turn_plan: TurnPlan = field(repr=False, compare=False)
+    turn_plan_sha256: str
     conversation_id: str | None
     interaction_mode: str
     model_lease: ModelProfileLease = field(repr=False, compare=False)
     model_requirements: ModelRequirements = field(repr=False)
+    authenticated_turn_context: AuthenticatedTurnContext | None = field(
+        repr=False,
+        compare=False,
+    )
     _process_authority: object = field(repr=False, compare=False)
+    _binding_sha256: str = field(init=False, repr=False, compare=False)
 
     def __post_init__(self) -> None:
         if (
             self._process_authority is not _PROCESS_AUTHORITY
             or not prepared_file_evidence_is_process_owned(self.evidence)
+            or type(self.turn_plan) is not TurnPlan
+            or self.turn_plan.route is not RouteClass.FILE_READ
+            or type(self.turn_plan_sha256) is not str
+            or _SHA256_RE.fullmatch(self.turn_plan_sha256) is None
+            or not hmac.compare_digest(
+                self.turn_plan_sha256,
+                self.turn_plan.canonical_sha256(),
+            )
             or type(self.model_lease) is not ModelProfileLease
-            or not isinstance(self.model_requirements, ModelRequirements)
+            or type(self.model_requirements) is not ModelRequirements
             or self.model_requirements.prepared_evidence_items != len(self.evidence.bundle.parts)
+            or (
+                self.conversation_id is not None
+                and (
+                    type(self.conversation_id) is not str
+                    or _CONVERSATION_ID_RE.fullmatch(self.conversation_id) is None
+                )
+            )
+            or type(self.interaction_mode) is not str
+            or self.interaction_mode not in _INTERACTION_MODES
+            or (
+                self.authenticated_turn_context is not None
+                and type(self.authenticated_turn_context) is not AuthenticatedTurnContext
+            )
+            or not _model_lease_matches_requirements(self.model_lease, self.model_requirements)
+            or not _prepared_file_turn_matches_context(self)
         ):
             raise ValueError("prepared V12 file turn is not process-owned")
+        binding = _prepared_file_turn_binding_sha256(self)
+        if binding is None:
+            raise ValueError("prepared V12 file turn is not process-owned")
+        object.__setattr__(self, "_binding_sha256", binding)
+
+
+def _model_lease_matches_requirements(
+    lease: ModelProfileLease,
+    requirements: ModelRequirements,
+) -> bool:
+    return bool(
+        type(lease) is ModelProfileLease
+        and type(requirements) is ModelRequirements
+        and type(lease.requirements_sha256) is str
+        and _SHA256_RE.fullmatch(lease.requirements_sha256) is not None
+        and hmac.compare_digest(lease.requirements_sha256, requirements.canonical_sha256())
+        and lease.capabilities == requirements.capabilities
+        and lease.required_context_tokens == requirements.required_context_tokens
+        and lease.prepared_evidence_items == requirements.prepared_evidence_items
+        and lease.max_tool_steps == requirements.max_tool_steps
+        and lease.effect is requirements.effect
+        and lease.verifier_required is requirements.verifier_required
+    )
+
+
+def _prepared_file_turn_matches_context(prepared: _PreparedFileTurn) -> bool:
+    context = prepared.authenticated_turn_context
+    if context is None:
+        return True
+    conversation_id = context.authority.conversation_id
+    current_sources = tuple(
+        source
+        for source in context.authorized_sources
+        if source.kind is AuthorizedSourceKind.CURRENT_ATTACHMENT
+    )
+    if (
+        type(conversation_id) is not str
+        or _CONVERSATION_ID_RE.fullmatch(conversation_id) is None
+        or prepared.conversation_id != conversation_id
+        or prepared.interaction_mode != context.authority.interaction_mode.value
+        or prepared.evidence.tenant_id != context.authority.tenant_id
+        or prepared.evidence.person_id != context.authority.person_id
+        or len(current_sources) != len(prepared.evidence.snapshot_tokens)
+    ):
+        return False
+    return all(
+        type(source.private_carrier) is CurrentTurnFileReferenceToken
+        and source.private_carrier.raw_id == token.source.raw_id
+        and source.private_carrier.source_identity_sha256 == token.source.identity_sha256
+        and source.private_carrier.content_sha256 == token.content_sha256
+        for source, token in zip(
+            current_sources,
+            prepared.evidence.snapshot_tokens,
+            strict=True,
+        )
+    )
+
+
+def _prepared_file_turn_binding_sha256(prepared: object) -> str | None:
+    if type(prepared) is not _PreparedFileTurn:
+        return None
+    try:
+        lease = prepared.model_lease
+        requirements = prepared.model_requirements
+        context = prepared.authenticated_turn_context
+        if (
+            prepared._process_authority is not _PROCESS_AUTHORITY
+            or not prepared_file_evidence_is_process_owned(prepared.evidence)
+            or not _model_lease_matches_requirements(lease, requirements)
+            or not _prepared_file_turn_matches_context(prepared)
+        ):
+            return None
+        parts = (
+            str(id(prepared)),
+            str(id(prepared.evidence)),
+            prepared.evidence.identity_sha256,
+            str(id(prepared.turn_plan)),
+            prepared.turn_plan_sha256,
+            prepared.turn_plan.canonical_sha256(),
+            prepared.conversation_id or "<new-conversation>",
+            prepared.interaction_mode,
+            str(id(lease)),
+            lease.schema,
+            lease.profile_id,
+            lease.attestation_sha256,
+            lease.requirements_sha256,
+            lease.process_epoch_sha256,
+            str(lease._gate_generation),
+            str(id(lease._gate_authority)),
+            str(id(requirements)),
+            requirements.canonical_sha256(),
+            str(id(context)) if context is not None else "<legacy-context>",
+            context.canonical_sha256() if context is not None else "<legacy-context>",
+        )
+        digest = hmac.new(
+            _PREPARED_TURN_BINDING_KEY,
+            b"friday/prepared-v12-file-turn/v1\0",
+            hashlib.sha256,
+        )
+        for part in parts:
+            if type(part) is not str:
+                return None
+            encoded = part.encode("utf-8", errors="strict")
+            digest.update(len(encoded).to_bytes(8, "big"))
+            digest.update(encoded)
+        return digest.hexdigest()
+    except (AttributeError, TypeError, UnicodeEncodeError, ValueError):
+        return None
+
+
+def _prepared_file_turn_is_bound(prepared: object) -> bool:
+    if type(prepared) is not _PreparedFileTurn:
+        return False
+    expected = _prepared_file_turn_binding_sha256(prepared)
+    return bool(
+        expected is not None
+        and type(prepared._binding_sha256) is str
+        and _SHA256_RE.fullmatch(prepared._binding_sha256) is not None
+        and hmac.compare_digest(prepared._binding_sha256, expected)
+    )
+
+
+def _require_prepared_file_turn_bound(prepared: object) -> _PreparedFileTurn:
+    if not _prepared_file_turn_is_bound(prepared):
+        raise V12FileReadError("file preparation authority drifted")
+    return cast(_PreparedFileTurn, prepared)
 
 
 class _AttestedFileModel(Protocol):
@@ -175,6 +351,104 @@ def _messages_fit_attested_context(messages: list[dict[str, str]]) -> bool:
 def _require_deadline(deadline: float, *, stage: str, reserve: float = 0.0) -> None:
     if deadline - time.monotonic() <= reserve:
         raise TimeoutError(f"V12 publication deadline expired {stage}")
+
+
+def _authenticated_file_references_match(
+    context: AuthenticatedTurnContext,
+    references: tuple[ReadOnlyAttachmentReference, ...],
+) -> bool:
+    sources = tuple(
+        source
+        for source in context.authorized_sources
+        if source.kind is not AuthorizedSourceKind.ACCEPTED_INGRESS
+    )
+    if len(sources) != len(references):
+        return False
+    for source, reference in zip(sources, references, strict=True):
+        descriptor = source.model_descriptor
+        token = source.private_carrier
+        if (
+            source.kind is not AuthorizedSourceKind.CURRENT_ATTACHMENT
+            or type(reference) is not ReadOnlyAttachmentReference
+            or type(reference.ordinal) is not int
+            or not 1 <= reference.ordinal <= _MAX_CANARY_FILES
+            or type(reference.raw_object_id) is not str
+            or _RAW_ID_RE.fullmatch(reference.raw_object_id) is None
+            or type(reference.source_identity_sha256) is not str
+            or _SHA256_RE.fullmatch(reference.source_identity_sha256) is None
+            or type(reference.name) is not str
+            or type(reference.media_type) is not str
+            or type(token) is not CurrentTurnFileReferenceToken
+            or not current_turn_file_reference_token_authorizes_tenant(
+                token,
+                tenant_id=context.authority.tenant_id,
+            )
+            or descriptor is None
+            or source.ordinal != reference.ordinal
+            or descriptor.ordinal != reference.ordinal
+            or type(descriptor.name) is not str
+            or descriptor.name != reference.name
+            or type(descriptor.media_type) is not str
+            or descriptor.media_type != reference.media_type
+            or not hmac.compare_digest(token.raw_id, reference.raw_object_id)
+            or not hmac.compare_digest(
+                token.source_identity_sha256,
+                reference.source_identity_sha256,
+            )
+        ):
+            return False
+    return True
+
+
+def _require_v12_turn_context(
+    request: ReadOnlyRouteRequest,
+    turn: TurnInput,
+    *,
+    expected: AuthenticatedTurnContext | None | object = _UNSET_TURN_CONTEXT,
+) -> AuthenticatedTurnContext | None:
+    """Revalidate the exact ambient primary context without weakening legacy calls."""
+
+    context = current_primary_authenticated_turn_context()
+    if expected is not _UNSET_TURN_CONTEXT and context is not expected:
+        raise V12FileReadError("authenticated file-turn context identity drifted")
+    if context is not None and (
+        context.model_input is not turn
+        or context.authority.actor is not request.actor
+        or type(request.user_id) is not str
+        or context.authority.tenant_id != request.user_id
+        or type(request.conversation_id) is not str
+        or _CONVERSATION_ID_RE.fullmatch(request.conversation_id) is None
+        or type(context.authority.conversation_id) is not str
+        or not hmac.compare_digest(
+            context.authority.conversation_id,
+            request.conversation_id,
+        )
+        or request.conversation_mode != turn.conversation_mode
+        or request.synthetic_document_notice is not turn.synthetic_document_notice
+        or request.reply_to != turn.reply_quote
+        or request.quoted_attachment_reference is not turn.quoted_attachment_reference
+        or request.reply_assistant_reference is not turn.reply_assistant_reference
+        or request.replay_source_message_id is not None
+        or request.reply_assistant_message_id is not None
+        or not _authenticated_file_references_match(context, request.attachments)
+    ):
+        raise V12FileReadError("authenticated file-turn inputs drifted")
+    if context is not None:
+        require_current_authenticated_chat_call_scope(context)
+    return context
+
+
+def _within_parent_deadline(
+    deadline: float,
+    context: AuthenticatedTurnContext | None,
+) -> float:
+    if context is None:
+        return deadline
+    parent = math.nextafter(
+        context.inherited_budget.safety_deadline.monotonic_ns / 1_000_000_000,
+        -math.inf,
+    )
+    return min(deadline, parent)
 
 
 async def _call_model_once(
@@ -294,14 +568,31 @@ class V12FileReadHandler:
         turn: TurnInput,
         plan: TurnPlan,
     ) -> ReadOnlyRoutePreparation | None:
+        if type(plan) is not TurnPlan or plan.route is not self.route:
+            return None
+        plan_sha256 = plan.canonical_sha256()
+        authenticated_context = _require_v12_turn_context(request, turn)
         preparation_deadline = time.monotonic() + _PREPARATION_BUDGET_SEC
         if request.turn_deadline is not None:
             preparation_deadline = min(preparation_deadline, request.turn_deadline)
+        preparation_deadline = _within_parent_deadline(
+            preparation_deadline,
+            authenticated_context,
+        )
+        if authenticated_context is not None:
+            _require_deadline(preparation_deadline, stage="before preparation")
         prepared = await self._prepare_context(
             request,
             turn,
             plan,
             preparation_deadline,
+        )
+        if not hmac.compare_digest(plan_sha256, plan.canonical_sha256()):
+            raise V12FileReadError("turn plan changed during preparation")
+        _require_v12_turn_context(
+            request,
+            turn,
+            expected=authenticated_context,
         )
         if prepared is None:
             return None
@@ -329,19 +620,29 @@ class V12FileReadHandler:
             requirements,
             absolute_deadline=preparation_deadline,
         )
+        if not hmac.compare_digest(plan_sha256, plan.canonical_sha256()):
+            raise V12FileReadError("turn plan changed during preparation")
+        _require_v12_turn_context(
+            request,
+            turn,
+            expected=authenticated_context,
+        )
         if type(lease) is not ModelProfileLease:
             return None
         attested = _PreparedFileTurn(
             evidence=prepared.evidence,
+            turn_plan=plan,
+            turn_plan_sha256=plan_sha256,
             conversation_id=prepared.conversation_id,
             interaction_mode=prepared.interaction_mode,
             model_lease=lease,
             model_requirements=requirements,
+            authenticated_turn_context=authenticated_context,
             _process_authority=_PROCESS_AUTHORITY,
         )
         return ReadOnlyRoutePreparation(
             route=self.route,
-            plan_sha256=plan.canonical_sha256(),
+            plan_sha256=plan_sha256,
             evidence_identity_sha256=attested.evidence.identity_sha256,
             private_payload=attested,
         )
@@ -354,12 +655,14 @@ class V12FileReadHandler:
         prepared = preparation.private_payload
         if (
             type(prepared) is not _PreparedFileTurn
-            or prepared._process_authority is not _PROCESS_AUTHORITY
+            or not _prepared_file_turn_is_bound(prepared)
             or not prepared_file_evidence_is_process_owned(prepared.evidence)
             or type(prepared.model_lease) is not ModelProfileLease
+            or prepared.turn_plan is not plan
+            or not hmac.compare_digest(prepared.turn_plan_sha256, plan.canonical_sha256())
             or plan.route is not self.route
             or preparation.route is not self.route
-            or preparation.plan_sha256 != plan.canonical_sha256()
+            or preparation.plan_sha256 != prepared.turn_plan_sha256
             or preparation.evidence_identity_sha256 != prepared.evidence.identity_sha256
         ):
             return None
@@ -372,16 +675,30 @@ class V12FileReadHandler:
         plan: TurnPlan,
         preparation: ReadOnlyRoutePreparation,
     ) -> bool:
-        del turn
         prepared = self._prepared_matches(plan, preparation)
         if prepared is None:
             return False
+        authenticated_context = _require_v12_turn_context(
+            request,
+            turn,
+            expected=prepared.authenticated_turn_context,
+        )
         deadline = request.turn_deadline or (time.monotonic() + _PREPARATION_BUDGET_SEC)
-        return await self._model.lease_is_current(
+        deadline = _within_parent_deadline(deadline, authenticated_context)
+        if authenticated_context is not None:
+            _require_deadline(deadline, stage="before preparation authority check")
+        current = await self._model.lease_is_current(
             prepared.model_lease,
             prepared.model_requirements,
             absolute_deadline=deadline,
         )
+        _require_prepared_file_turn_bound(prepared)
+        _require_v12_turn_context(
+            request,
+            turn,
+            expected=authenticated_context,
+        )
+        return current
 
     @staticmethod
     def _synthesis_messages(
@@ -479,6 +796,12 @@ class V12FileReadHandler:
         trace_started_at: float,
         trace_planner_model_calls: int,
     ) -> tuple[str, str, str, CapabilityOutcome]:
+        _require_prepared_file_turn_bound(prepared)
+        authenticated_context = _require_v12_turn_context(
+            request,
+            turn,
+            expected=prepared.authenticated_turn_context,
+        )
         _require_deadline(
             deadline,
             stage="before effect ownership",
@@ -487,8 +810,15 @@ class V12FileReadHandler:
         if not model_visible_text_is_secret_free(answer):
             raise V12FileReadError("publication output requires a secret projection")
         evidence = prepared.evidence
+        plan_sha256 = prepared.turn_plan_sha256
 
         def before_commit() -> None:
+            _require_prepared_file_turn_bound(prepared)
+            _require_v12_turn_context(
+                request,
+                turn,
+                expected=authenticated_context,
+            )
             _require_deadline(deadline, stage="before transaction commit")
             if not model_visible_text_is_secret_free(answer):
                 raise V12FileReadError("publication output requires a secret projection")
@@ -504,6 +834,7 @@ class V12FileReadHandler:
                 after_commit=confirm_staged_request_effect,
                 after_rollback=rollback_staged_request_effect,
             ) as conn:
+                _require_prepared_file_turn_bound(prepared)
                 if not reauthorize_prepared_file_evidence_in_transaction(
                     conn,
                     self._authorization,
@@ -515,14 +846,20 @@ class V12FileReadHandler:
                 ):
                     raise V12FileReadError("file authority changed before publication")
                 _require_deadline(deadline, stage="during final reauthorization")
+                _require_prepared_file_turn_bound(prepared)
+                _require_v12_turn_context(
+                    request,
+                    turn,
+                    expected=authenticated_context,
+                )
                 if not model_visible_text_is_secret_free(answer):
                     raise V12FileReadError("publication output requires a secret projection")
-                if not stage_request_effect_possible_in_transaction(conn):
-                    raise V12FileReadError("request effect fence could not be committed")
-
+                _require_prepared_file_turn_bound(prepared)
                 conversation_id = prepared.conversation_id
                 interaction_mode = prepared.interaction_mode
                 if conversation_id is None:
+                    if authenticated_context is not None:
+                        raise V12FileReadError("authenticated file turn cannot create a conversation")
                     conversation = create_conversation_in_transaction(
                         conn,
                         request.actor.own_id,
@@ -537,9 +874,32 @@ class V12FileReadHandler:
                     ).fetchone()
                     if conversation_row is None:
                         raise V12FileReadError("conversation authority changed before publication")
-                    interaction_mode = normalize_conversation_mode(
+                    current_interaction_mode = normalize_conversation_mode(
                         str(conversation_row["mode"] or "dialogue")
                     )
+                    if current_interaction_mode != prepared.interaction_mode:
+                        raise V12FileReadError("conversation mode changed before publication")
+                    interaction_mode = current_interaction_mode
+                if (
+                    authenticated_context is not None
+                    and interaction_mode != authenticated_context.authority.interaction_mode.value
+                ):
+                    raise V12FileReadError("authenticated conversation mode changed before publication")
+                _require_v12_turn_context(
+                    request,
+                    turn,
+                    expected=authenticated_context,
+                )
+                expected_effect_binding = (
+                    authenticated_context.effect_fence.request_effect_binding_sha256
+                    if authenticated_context is not None
+                    else None
+                )
+                if not stage_request_effect_possible_in_transaction(
+                    conn,
+                    expected_request_binding_sha256=expected_effect_binding,
+                ):
+                    raise V12FileReadError("request effect fence could not be committed")
 
                 # Both source and conversation authority are now current in the
                 # same transaction that will own the two durable message rows.
@@ -548,7 +908,7 @@ class V12FileReadHandler:
                     require_complete_read_only_publication(
                         outcome,
                         expected_route=self.route,
-                        expected_plan_sha256=plan.canonical_sha256(),
+                        expected_plan_sha256=plan_sha256,
                         expected_evidence_identity_sha256=evidence.identity_sha256,
                         expected_citation_labels=evidence.bundle.citation_labels,
                         answer=answer,
@@ -558,11 +918,11 @@ class V12FileReadHandler:
                 except CapabilityOutcomeError:
                     raise V12FileReadError("completion gate rejected publication") from None
 
-                route_mode = f"v12_{plan.route.value}"
+                route_mode = f"v12_{self.route.value}"
                 user_metadata = {
                     "answer_mode": f"{route_mode}_request",
                     "private_context_lineage": True,
-                    "v12_plan_sha256": plan.canonical_sha256(),
+                    "v12_plan_sha256": plan_sha256,
                 }
                 if evidence.historical_selection is None:
                     user_metadata["conversation_uploaded_raw_ids"] = list(evidence.raw_ids)
@@ -572,6 +932,12 @@ class V12FileReadHandler:
                         raw_id: evidence.person_id for raw_id in evidence.raw_ids
                     }
                 _require_deadline(deadline, stage="before durable messages")
+                _require_prepared_file_turn_bound(prepared)
+                _require_v12_turn_context(
+                    request,
+                    turn,
+                    expected=authenticated_context,
+                )
                 user_message = store_message_in_transaction(
                     conn,
                     conversation_id,
@@ -603,7 +969,7 @@ class V12FileReadHandler:
                     "knowledge_citations": {},
                     "private_context_lineage": True,
                     "tools_used": [],
-                    "v12_plan_sha256": plan.canonical_sha256(),
+                    "v12_plan_sha256": plan_sha256,
                     "verification": {"status": "verified", "score": 1.0, "issues": []},
                     "verification_status": "verified",
                     "verified": True,
@@ -674,6 +1040,12 @@ class V12FileReadHandler:
                         "accepted capability outcome receipt was not stored durably"
                     ) from None
                 _require_deadline(deadline, stage="before transaction commit")
+                _require_prepared_file_turn_bound(prepared)
+                _require_v12_turn_context(
+                    request,
+                    turn,
+                    expected=authenticated_context,
+                )
                 publication = (conversation_id, message_id, interaction_mode, outcome)
         except BaseException:
             raise
@@ -690,6 +1062,11 @@ class V12FileReadHandler:
         prepared = self._prepared_matches(plan, preparation)
         if prepared is None:
             raise V12FileReadError("file preparation authority is invalid")
+        authenticated_context = _require_v12_turn_context(
+            request,
+            turn,
+            expected=prepared.authenticated_turn_context,
+        )
         handler_started_at = time.monotonic()
         raw_orchestration_started_at = request.orchestration_started_at
         try:
@@ -711,12 +1088,21 @@ class V12FileReadHandler:
         trace_started_at = trace_start_candidate if router_trace_scope else handler_started_at
         trace_planner_model_calls = request.planner_model_calls_lower_bound if router_trace_scope else 0
         deadline = request.turn_deadline or (time.monotonic() + 60.0)
+        deadline = _within_parent_deadline(deadline, authenticated_context)
+        if authenticated_context is not None:
+            _require_deadline(deadline, stage="before handler execution")
         if not await self._model.lease_is_current(
             prepared.model_lease,
             prepared.model_requirements,
             absolute_deadline=deadline,
         ):
             raise V12FileReadError("file model authority changed before synthesis")
+        _require_prepared_file_turn_bound(prepared)
+        _require_v12_turn_context(
+            request,
+            turn,
+            expected=authenticated_context,
+        )
         answer = await self._synthesize(
             turn,
             plan,
@@ -724,6 +1110,12 @@ class V12FileReadHandler:
             prepared.model_lease,
             prepared.model_requirements,
             deadline=deadline,
+        )
+        _require_prepared_file_turn_bound(prepared)
+        _require_v12_turn_context(
+            request,
+            turn,
+            expected=authenticated_context,
         )
         await self._verify(
             turn,
@@ -733,12 +1125,24 @@ class V12FileReadHandler:
             prepared.model_requirements,
             deadline=deadline,
         )
+        _require_prepared_file_turn_bound(prepared)
+        _require_v12_turn_context(
+            request,
+            turn,
+            expected=authenticated_context,
+        )
         if not await self._model.lease_is_current(
             prepared.model_lease,
             prepared.model_requirements,
             absolute_deadline=deadline,
         ):
             raise V12FileReadError("file model authority changed before publication")
+        _require_prepared_file_turn_bound(prepared)
+        _require_v12_turn_context(
+            request,
+            turn,
+            expected=authenticated_context,
+        )
         # Publication is deliberately one short, synchronous SQLite critical
         # section.  Once the effect fence is crossed, task cancellation must
         # not detach a worker thread that can commit after the router reports a
@@ -754,6 +1158,7 @@ class V12FileReadHandler:
             trace_started_at=trace_started_at,
             trace_planner_model_calls=trace_planner_model_calls,
         )
+        _require_prepared_file_turn_bound(prepared)
         return ReadOnlyRouteResult(
             message=answer,
             conversation_id=conversation_id,

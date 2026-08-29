@@ -26,7 +26,7 @@ from test_conversation_document_comparison import (  # noqa: PLC2701
 import friday.agent_runtime as agent_runtime_module
 import friday.orchestration.conversation_document_comparison as comparison_module
 from friday.agent_runtime import AgentRuntime
-from friday.file_evidence import stamp_current_turn_file_reference
+from friday.file_evidence import stamp_current_turn_file_reference_for_tenant
 from friday.interaction_control_plane.archive_evidence_work_item_store import (
     create_recall_selected_archive_evidence_work_item_in_transaction,
     get_recall_selected_archive_evidence_work_item_in_transaction,
@@ -293,8 +293,10 @@ async def test_active_comparison_restarts_without_an_intervening_ordinary_row(
         class Carrier(dict[str, Any]):
             pass
 
-        carrier = Carrier(raw_object_id=raw.id, filename=filename, mime_type="text/plain")
-        stamp_current_turn_file_reference(carrier, raw.to_row())
+        carrier = Carrier(raw_object_id=str(raw.id), filename=filename, mime_type="text/plain")
+        current_raw = storage.get_raw_object(str(raw.id), owner)
+        assert current_raw is not None
+        stamp_current_turn_file_reference_for_tenant(carrier, current_raw, tenant_id=owner)
         attachments = [carrier]
     actor = AuthorizationService(storage).actor_for_user(owner, source="comparison-runtime-test")
     first_runtime = AgentRuntime(settings, storage, selected_archive_model=_ComparisonModel())
@@ -532,8 +534,10 @@ async def test_synthetic_bare_upload_answers_waiting_q1_in_runtime(
     class Carrier(dict[str, Any]):
         pass
 
-    carrier = Carrier(raw_object_id=raw.id, filename="bare-upload.txt", mime_type="text/plain")
-    stamp_current_turn_file_reference(carrier, raw.to_row())
+    carrier = Carrier(raw_object_id=str(raw.id), filename="bare-upload.txt", mime_type="text/plain")
+    current_raw = storage.get_raw_object(str(raw.id), owner)
+    assert current_raw is not None
+    stamp_current_turn_file_reference_for_tenant(carrier, current_raw, tenant_id=owner)
     actor = AuthorizationService(storage).actor_for_user(owner, source="comparison-runtime-test")
     runtime = AgentRuntime(settings, storage, selected_archive_model=_ComparisonModel())
     captured: list[Any] = []
@@ -1423,11 +1427,13 @@ async def test_q2_does_not_intercept_attachment_surfaces(
             pass
 
         carrier = Carrier(
-            raw_object_id=raws[0].id,
+            raw_object_id=str(raws[0].id),
             filename="duplicate-decision.txt",
             mime_type="text/plain",
         )
-        stamp_current_turn_file_reference(carrier, raws[0].to_row())
+        current_raw = storage.get_raw_object(str(raws[0].id), owner)
+        assert current_raw is not None
+        stamp_current_turn_file_reference_for_tenant(carrier, current_raw, tenant_id=owner)
         attachments = [carrier]
         durable_surface = True
     else:

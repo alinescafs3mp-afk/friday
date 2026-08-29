@@ -37,6 +37,7 @@ from friday.orchestration.turn_context_call_scope import (
     UNSPECIFIED_CHAT_ADJUNCT,
     AuthenticatedChatCallScope,
     require_authenticated_chat_call_scope,
+    require_current_authenticated_chat_call_scope,
 )
 from friday.orchestration.turn_context_runtime import (
     current_primary_authenticated_turn_context,
@@ -935,7 +936,10 @@ class OrchestrationRouter:
             comparison_attachment_count = 0
             plain_durable_surface = False
         else:
-            comparison_attachment_count = pending_comparison_current_attachment_count(attachments)
+            comparison_attachment_count = pending_comparison_current_attachment_count(
+                attachments,
+                tenant_id=actor.user_id,
+            )
             plain_durable_surface = bool(
                 (not attachments or comparison_attachment_count == 1)
                 and enable_tools is True
@@ -1079,6 +1083,8 @@ class OrchestrationRouter:
 
         _observe_failure_stage(FailureStage.PLANNING)
         plan = await self._try_plan(turn, turn_deadline=effective_turn_deadline, attested=True)
+        if authenticated_context is not None:
+            require_current_authenticated_chat_call_scope(authenticated_context)
         handler = self._route_handlers.get(plan.route) if plan is not None else None
         eligible = bool(
             plan is not None

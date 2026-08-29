@@ -8,7 +8,10 @@ from typing import Any
 import pytest
 
 from friday import semantic_supervisor_policy
-from friday.file_evidence import stamp_current_turn_file_reference
+from friday.file_evidence import (
+    stamp_current_turn_file_reference,
+    stamp_current_turn_file_reference_for_tenant,
+)
 from friday.orchestration.capability_binding import operational_capability_snapshot
 from friday.orchestration.policy_kernel import PolicyAdmissionContext, admit_supervisor_proposal
 from friday.orchestration.semantic_supervisor import build_supervisor_input
@@ -54,7 +57,7 @@ def _message(query: str = "актуальные публичные правил�
     return f"Сравни текущий файл с текущими данными в интернете.\nПубличный веб-запрос: «{query}»"
 
 
-def _attachment() -> _Carrier:
+def _attachment(*, tenant_id: str = "local:alice", tenant_bound: bool = True) -> _Carrier:
     raw_id = "raw_1234567890abcdef"
     carrier = _Carrier(
         raw_object_id=raw_id,
@@ -66,6 +69,7 @@ def _attachment() -> _Carrier:
     )
     raw = {
         "id": raw_id,
+        "user_id": tenant_id,
         "source": "upload",
         "source_ref": "sha256:" + "1" * 64,
         "content_type": "text/plain",
@@ -74,7 +78,14 @@ def _attachment() -> _Carrier:
         "raw_content": "private body",
         "metadata_json": "{}",
     }
-    stamp_current_turn_file_reference(carrier, raw)
+    if tenant_bound:
+        stamp_current_turn_file_reference_for_tenant(
+            carrier,
+            raw,
+            tenant_id=tenant_id,
+        )
+    else:
+        stamp_current_turn_file_reference(carrier, raw)
     return carrier
 
 
@@ -272,6 +283,23 @@ def test_surface_rejects_unstamped_historical_or_non_dialogue_inputs() -> None:
     )
 
 
+def test_surface_requires_current_file_token_for_the_exact_actor_tenant() -> None:
+    assert (
+        prepare_current_file_web_assist_surface(
+            _settings(),
+            **_surface_kwargs(attachments=[_attachment(tenant_bound=False)]),
+        )
+        is None
+    )
+    assert (
+        prepare_current_file_web_assist_surface(
+            _settings(),
+            **_surface_kwargs(attachments=[_attachment(tenant_id="local:eve")]),
+        )
+        is None
+    )
+
+
 def test_surface_keeps_tenant_and_conversation_owner_exact() -> None:
     foreign_person = ActorContext(
         "local:tenant",
@@ -305,6 +333,7 @@ def test_surface_keeps_tenant_and_conversation_owner_exact() -> None:
             **_surface_kwargs(
                 user_id=archive_owner.user_id,
                 actor=archive_owner,
+                attachments=[_attachment(tenant_id=archive_owner.user_id)],
                 conversation_is_dialogue=lambda person_id, _conversation_id: person_id == "local:tenant",
             ),
         ),

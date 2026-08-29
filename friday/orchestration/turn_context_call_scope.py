@@ -8,13 +8,16 @@ never derives a replacement model input or policy from them.
 from __future__ import annotations
 
 import hashlib
+import hmac
 import math
+import re
+import secrets
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from threading import Lock
 from typing import Any, cast
 
-from friday.file_evidence import current_turn_file_reference_of
+from friday.file_evidence import current_turn_file_reference_for_tenant
 from friday.orchestration.contracts import AttachmentDescriptor, RouterMode, TurnInput
 from friday.orchestration.turn_context import (
     AuthenticatedTurnContext,
@@ -27,6 +30,7 @@ from friday.orchestration.turn_context import (
 from friday.orchestration.turn_context_runtime import (
     bind_or_get_authenticated_chat_call_scope,
     current_authenticated_chat_call_scope,
+    current_primary_authenticated_turn_context,
 )
 from friday.pending_durable_turn import PendingDurableTurnAdmission
 from friday.permissions import ActorContext
@@ -35,6 +39,9 @@ from friday.turn_intent_policy import TurnPolicyDecision
 UNSPECIFIED_CHAT_ADJUNCT = object()
 _MAX_PROJECTION_NODES = 200_000
 _MAX_PROJECTION_DEPTH = 64
+_CALL_SCOPE_BINDING_KEY = secrets.token_bytes(32)
+_CONVERSATION_ID_RE = re.compile(r"conv_[0-9a-f]{16}\Z")
+_DIGEST_RE = re.compile(r"[0-9a-f]{64}\Z")
 
 
 class _AuthenticatedCallAdjunctSeal:
@@ -145,6 +152,13 @@ class AuthenticatedChatCallScope:
     actor_binding_sha256: str
     conversation_binding_sha256: str
     pending_work_bound: bool
+    _binding_sha256: str = field(init=False, repr=False, compare=False)
+
+    def __post_init__(self) -> None:
+        binding = _chat_call_scope_binding_sha256(self)
+        if binding is None:
+            raise TurnContextError("authenticated turn chat call scope is invalid")
+        object.__setattr__(self, "_binding_sha256", binding)
 
     @property
     def knowledge_graph(self) -> Any:
@@ -166,6 +180,76 @@ class AuthenticatedChatCallScope:
         """Project bound service adjuncts without turning omission into ``None``."""
 
         return self._adjuncts.exact_forwarding_kwargs()
+
+
+def _chat_call_scope_binding_sha256(value: object) -> str | None:
+    """Bind every immutable raw-call field and exact carrier identity."""
+
+    if type(value) is not AuthenticatedChatCallScope:
+        return None
+    if (
+        type(value.model_input) is not TurnInput
+        or type(value.attachment_carriers) is not tuple
+        or any(not isinstance(item, Mapping) for item in value.attachment_carriers)
+        or type(value.attachment_carrier_sha256) is not tuple
+        or len(value.attachment_carriers) != len(value.attachment_carrier_sha256)
+        or any(type(item) is not str or _DIGEST_RE.fullmatch(item) is None for item in value.attachment_carrier_sha256)
+        or type(value.attachment_sources) is not tuple
+        or len(value.attachment_carriers) != len(value.attachment_sources)
+        or any(type(item) is not AuthorizedSourceIdentity for item in value.attachment_sources)
+        or type(value._adjuncts) is not _AuthenticatedCallAdjunctSeal
+        or type(value.deadline_monotonic) is not float
+        or not math.isfinite(value.deadline_monotonic)
+        or type(value.deadline_monotonic_ns) is not int
+        or value.deadline_monotonic_ns <= 0
+        or type(value.router_mode) is not RouterMode
+        or type(value.actor_binding_sha256) is not str
+        or _DIGEST_RE.fullmatch(value.actor_binding_sha256) is None
+        or type(value.conversation_binding_sha256) is not str
+        or _DIGEST_RE.fullmatch(value.conversation_binding_sha256) is None
+        or type(value.pending_work_bound) is not bool
+    ):
+        return None
+    parts = (
+        str(id(value)),
+        str(id(value.model_input)),
+        *(str(id(item)) for item in value.attachment_carriers),
+        *value.attachment_carrier_sha256,
+        *(str(id(item)) for item in value.attachment_sources),
+        *(item.identity_sha256 for item in value.attachment_sources),
+        str(id(value._adjuncts)),
+        value.deadline_monotonic.hex(),
+        str(value.deadline_monotonic_ns),
+        value.router_mode.value,
+        value.actor_binding_sha256,
+        value.conversation_binding_sha256,
+        "1" if value.pending_work_bound else "0",
+    )
+    digest = hmac.new(_CALL_SCOPE_BINDING_KEY, b"friday/authenticated-chat-call-scope/v1\0", hashlib.sha256)
+    try:
+        for part in parts:
+            if type(part) is not str:
+                return None
+            encoded = part.encode("utf-8", errors="strict")
+            digest.update(len(encoded).to_bytes(8, "big"))
+            digest.update(encoded)
+    except (AttributeError, UnicodeEncodeError):
+        return None
+    return digest.hexdigest()
+
+
+def _require_chat_call_scope_binding(value: object) -> AuthenticatedChatCallScope:
+    if type(value) is not AuthenticatedChatCallScope:
+        raise TurnContextError("authenticated turn chat call scope identity is invalid")
+    expected = _chat_call_scope_binding_sha256(value)
+    if (
+        expected is None
+        or type(value._binding_sha256) is not str
+        or _DIGEST_RE.fullmatch(value._binding_sha256) is None
+        or not hmac.compare_digest(value._binding_sha256, expected)
+    ):
+        raise TurnContextError("authenticated turn chat call scope drifted")
+    return value
 
 
 def _process_local_projection_sha256(value: object, *, label: str) -> str:
@@ -313,7 +397,11 @@ def _attachment_scope(
         # reply sources need a future typed call carrier and are closed here.
         if (
             source.kind is not AuthorizedSourceKind.CURRENT_ATTACHMENT
-            or current_turn_file_reference_of(carrier) is not source.private_carrier
+            or current_turn_file_reference_for_tenant(
+                carrier,
+                tenant_id=context.authority.tenant_id,
+            )
+            is not source.private_carrier
         ):
             raise TurnContextError("authenticated turn attachment carrier drifted")
         carrier_sha256.append(_process_local_projection_sha256(carrier, label=f"attachment {ordinal}"))
@@ -353,11 +441,16 @@ def require_authenticated_chat_call_scope(
         raise TurnContextError("authenticated chat call has an invalid context")
     turn = context.model_input
     authority = context.authority
+    authority_conversation_id = authority.conversation_id
     if (
         authority.actor is not actor
         or type(user_id) is not str
         or authority.tenant_id != user_id
-        or authority.conversation_id != conversation_id
+        or type(authority_conversation_id) is not str
+        or _CONVERSATION_ID_RE.fullmatch(authority_conversation_id) is None
+        or type(conversation_id) is not str
+        or _CONVERSATION_ID_RE.fullmatch(conversation_id) is None
+        or not hmac.compare_digest(authority_conversation_id, conversation_id)
     ):
         raise TurnContextError("authenticated turn actor or conversation scope drifted")
 
@@ -383,14 +476,16 @@ def require_authenticated_chat_call_scope(
         or turn.reply_assistant_reference is not reply_assistant_reference
     ):
         raise TurnContextError("authenticated turn surface flags drifted")
-    if turn.reply_quote_truncated or turn.reply_quote != _normalized_text(reply_to):
+    if reply_to is not None or turn.reply_quote_truncated or turn.reply_quote:
         raise TurnContextError("authenticated turn reply scope drifted")
     if replay_source_message_id is not None or reply_assistant_message_id is not None:
         raise TurnContextError("authenticated turn carries an unbound replay or reply identity")
     if type(answer_with_voice) is not bool or answer_with_voice:
         raise TurnContextError("authenticated turn carries unbound voice delivery")
 
-    raw_mode = _normalized_text(mode or TurnMode.DIALOGUE.value).casefold()
+    if mode is not None:
+        raise TurnContextError("authenticated turn carries an explicit mode override")
+    raw_mode = TurnMode.DIALOGUE.value
     if len(raw_mode) > 40 or raw_mode != turn.conversation_mode:
         raise TurnContextError("authenticated turn interaction mode drifted")
     expected_policy = context.turn_policy.decision if context.turn_policy.decision.handled else None
@@ -424,8 +519,8 @@ def require_authenticated_chat_call_scope(
         raise TurnContextError("authenticated turn router mode drifted")
 
     existing = current_authenticated_chat_call_scope(context)
-    if existing is not None and type(existing) is not AuthenticatedChatCallScope:
-        raise TurnContextError("authenticated turn chat call scope identity is invalid")
+    if existing is not None:
+        _require_chat_call_scope_binding(existing)
     candidate = AuthenticatedChatCallScope(
         model_input=turn,
         attachment_carriers=carriers,
@@ -440,8 +535,7 @@ def require_authenticated_chat_call_scope(
         pending_work_bound=context.pending_work_admission is not None,
     )
     sealed = bind_or_get_authenticated_chat_call_scope(context, candidate)
-    if type(sealed) is not AuthenticatedChatCallScope:
-        raise TurnContextError("authenticated turn chat call scope identity is invalid")
+    sealed = _require_chat_call_scope_binding(sealed)
     if (
         sealed.model_input is not candidate.model_input
         or len(sealed.attachment_carriers) != len(candidate.attachment_carriers)
@@ -476,11 +570,56 @@ def require_authenticated_chat_call_scope(
         hybrid_searcher=hybrid_searcher,
         ingestion_result=ingestion_result,
     )
+    _require_chat_call_scope_binding(sealed)
     return sealed
+
+
+def require_current_authenticated_chat_call_scope(
+    context: AuthenticatedTurnContext,
+) -> AuthenticatedChatCallScope:
+    """Revalidate one already-sealed raw call before or after an awaited seam."""
+
+    admitted = current_primary_authenticated_turn_context(context)
+    if admitted is not context:
+        raise TurnContextError("authenticated turn chat call scope has no primary authority")
+    scope = current_authenticated_chat_call_scope(context)
+    if scope is None:
+        raise TurnContextError("authenticated turn chat call scope is unavailable")
+    scope = _require_chat_call_scope_binding(scope)
+    attachment_list = cast(list[dict[str, Any]], list(scope.attachment_carriers))
+    carriers, carrier_sha256, sources = _attachment_scope(context, attachment_list)
+    if (
+        scope.model_input is not context.model_input
+        or len(carriers) != len(scope.attachment_carriers)
+        or any(
+            current is not sealed
+            for current, sealed in zip(carriers, scope.attachment_carriers, strict=True)
+        )
+        or carrier_sha256 != scope.attachment_carrier_sha256
+        or len(sources) != len(scope.attachment_sources)
+        or any(
+            current is not sealed
+            for current, sealed in zip(sources, scope.attachment_sources, strict=True)
+        )
+        or scope.deadline_monotonic_ns
+        != context.inherited_budget.safety_deadline.monotonic_ns
+        or int(scope.deadline_monotonic * 1_000_000_000) != scope.deadline_monotonic_ns
+        or scope.router_mode is not context.turn_policy.router_mode
+        or scope.actor_binding_sha256 != context.authority.actor_binding_sha256
+        or scope.conversation_binding_sha256 != context.authority.conversation.binding_sha256
+        or scope.pending_work_bound is not (context.pending_work_admission is not None)
+    ):
+        raise TurnContextError("authenticated turn chat call scope drifted")
+    scope.exact_service_kwargs()
+    _require_chat_call_scope_binding(scope)
+    if current_primary_authenticated_turn_context(context) is not context:
+        raise TurnContextError("authenticated turn chat call scope has no primary authority")
+    return scope
 
 
 __all__ = [
     "AuthenticatedChatCallScope",
     "UNSPECIFIED_CHAT_ADJUNCT",
     "require_authenticated_chat_call_scope",
+    "require_current_authenticated_chat_call_scope",
 ]

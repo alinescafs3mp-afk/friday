@@ -85,7 +85,11 @@ from friday.orchestration.transient_web_comparison import (
     seal_explicit_public_web_query,
 )
 from friday.permissions import ActorContext, AuthorizationService
-from friday.source_identity import authorized_file_snapshot_token, raw_source_identity_sha256
+from friday.source_identity import (
+    authorized_file_snapshot_token,
+    raw_source_identity_sha256,
+    tenant_authorized_file_snapshot_token,
+)
 from friday.storage.models import RawObject
 
 
@@ -134,7 +138,7 @@ def _seed_surface(storage, label: str) -> tuple[CurrentFileWebAssistSurface, dic
     )
     storage.store_raw_object(raw)
     row = storage.execute(
-        """SELECT id,source,source_ref,content_type,received_at,content_hash,
+        """SELECT id,user_id,source,source_ref,content_type,received_at,content_hash,
                   raw_content AS _raw_content,metadata_json AS _raw_metadata
              FROM raw_objects WHERE id=? AND user_id=?""",
         (raw_id, user_id),
@@ -783,14 +787,50 @@ def test_comparison_settlement_trace_assistant_receipt_and_closure_are_atomic(st
         web.canonical_sha256(),
     )
     graph = _claim(adapter, graph, surface, CompareCurrentFileWebStepKind.PRIMARY_SYNTHESIS)
-    token = authorized_file_snapshot_token(
+    legacy_token = authorized_file_snapshot_token(
         projection,
         content_sha256=surface.attachment_content_sha256,
     )
+    assert legacy_token is not None
+    foreign_token = tenant_authorized_file_snapshot_token(
+        projection,
+        content_sha256=surface.attachment_content_sha256,
+        tenant_id="assist-foreign",
+        storage_owner_id=surface.actor.user_id,
+    )
+    assert foreign_token is not None
+    wrong_owner_projection = dict(projection)
+    wrong_owner_projection["user_id"] = "assist-other-owner"
+    wrong_owner_token = tenant_authorized_file_snapshot_token(
+        wrong_owner_projection,
+        content_sha256=surface.attachment_content_sha256,
+        tenant_id=surface.actor.user_id,
+        storage_owner_id="assist-other-owner",
+    )
+    assert wrong_owner_token is not None
+    token = tenant_authorized_file_snapshot_token(
+        projection,
+        content_sha256=surface.attachment_content_sha256,
+        tenant_id=surface.actor.user_id,
+        storage_owner_id=surface.actor.user_id,
+    )
     assert token is not None
     comparison = _comparison(graph.accepted_plan_sha256, file_sha256, web.canonical_sha256())
+    cursor = AssistGraphCursor.from_graph(graph)
+    for unscoped in (legacy_token, foreign_token, wrong_owner_token):
+        with pytest.raises(
+            SupervisorAssistGraphAdapterError,
+            match="final current-file snapshot changed",
+        ):
+            adapter.publish_comparison(
+                cursor,
+                AssistComparisonPublication(unscoped, comparison, web, _trace()),
+                authority_check=lambda boundary: boundary.actor is surface.actor,
+                effect_check=lambda boundary: boundary.actor is surface.actor,
+            )
+        assert adapter.load(cursor) == graph
     published = adapter.publish_comparison(
-        AssistGraphCursor.from_graph(graph),
+        cursor,
         AssistComparisonPublication(token, comparison, web, _trace()),
         authority_check=lambda boundary: boundary.actor is surface.actor,
         effect_check=lambda boundary: boundary.actor is surface.actor,

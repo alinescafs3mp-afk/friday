@@ -21,7 +21,7 @@ from friday.file_delivery import (
 )
 from friday.organs import ServiceContext
 from friday.permissions import ActorContext
-from friday.source_identity import authorized_file_snapshot_token_is_process_owned
+from friday.source_identity import authorized_file_snapshot_token_authorizes_scope
 from friday.storage._intake import resolve_owned_file_exact_raw_filename_direct_read
 from friday.workers._blocking import run_blocking
 
@@ -163,7 +163,11 @@ def _reauthorize_owned_compile_alias(
         not _RAW_ID.fullmatch(str(raw_id or ""))
         or not isinstance(expected_filename, str)
         or admitted_snapshot is None
-        or not authorized_file_snapshot_token_is_process_owned(admitted_snapshot)
+        or not authorized_file_snapshot_token_authorizes_scope(
+            admitted_snapshot,
+            tenant_id=actor.user_id,
+            storage_owner_id=actor.user_id,
+        )
     ):
         return None
     settings = ctx.settings
@@ -193,7 +197,11 @@ def _reauthorize_owned_compile_alias(
     if (
         current.raw_id != raw_id
         or current_snapshot is None
-        or not authorized_file_snapshot_token_is_process_owned(current_snapshot)
+        or not authorized_file_snapshot_token_authorizes_scope(
+            current_snapshot,
+            tenant_id=actor.user_id,
+            storage_owner_id=actor.user_id,
+        )
         or current_snapshot.source.raw_id != raw_id
         or not hmac.compare_digest(current_snapshot.content_sha256, digest)
         or not hmac.compare_digest(
@@ -790,7 +798,11 @@ def build_engineer_tools(ctx: ServiceContext) -> tuple[ToolSpec, ...]:
             or stored.raw_id != raw_id
             or not hmac.compare_digest(source_digest, expected_sha256)
             or snapshot is None
-            or not authorized_file_snapshot_token_is_process_owned(snapshot)
+            or not authorized_file_snapshot_token_authorizes_scope(
+                snapshot,
+                tenant_id=actor.user_id,
+                storage_owner_id=actor.user_id,
+            )
             or snapshot.source.raw_id != raw_id
             or not hmac.compare_digest(snapshot.content_sha256, expected_sha256)
         ):

@@ -98,7 +98,10 @@ from friday.file_delivery import (
     authorize_current_upload_file,
     read_authorized_file,
 )
-from friday.file_evidence import stamp_current_turn_file_reference
+from friday.file_evidence import (
+    current_turn_file_reference_for_tenant,
+    stamp_current_turn_file_reference_for_tenant,
+)
 from friday.generated_files import (
     persist_generated_response_files,
     validate_generated_files_persistence_attestation,
@@ -173,7 +176,8 @@ from friday.orchestration.turn_context import (
     TurnContextIssuer,
     TurnMode,
 )
-from friday.orchestration.turn_context_ingress import issue_authenticated_scalar_turn_context
+from friday.orchestration.turn_context_call_scope import require_authenticated_chat_call_scope
+from friday.orchestration.turn_context_ingress import issue_authenticated_turn_context
 from friday.orchestration.turn_context_publication import bind_authenticated_turn_publication
 from friday.orchestration.turn_context_runtime import bind_authenticated_turn_context
 from friday.organs import ServiceContext, build_registry, local_now, resolve_chat_id
@@ -286,6 +290,34 @@ def _turn_context_budget_eligible(*, deadline: object, max_output_tokens: object
         return False
     horizon = float(deadline) - time.monotonic()
     return math.isfinite(horizon) and 0 < horizon <= 3_600.0
+
+
+def _authenticated_current_uploads_eligible(
+    attachments: object,
+    *,
+    tenant_id: object,
+) -> bool:
+    """Admit only an exact, bounded set of same-tenant current-upload carriers."""
+
+    if (
+        type(attachments) is not list
+        or not 1 <= len(attachments) <= _DOCUMENT_TURN_MAX_FILES
+        or type(tenant_id) is not str
+    ):
+        return False
+    raw_ids: list[str] = []
+    for carrier in attachments:
+        if not isinstance(carrier, Mapping):
+            return False
+        token = current_turn_file_reference_for_tenant(carrier, tenant_id=tenant_id)
+        if (
+            token is None
+            or carrier.get("persisted") is not True
+            or carrier.get("current_turn_only") is not True
+        ):
+            return False
+        raw_ids.append(token.raw_id)
+    return len(set(raw_ids)) == len(raw_ids)
 
 
 def _closed_semantic_supervisor_activation_status(
@@ -1747,17 +1779,15 @@ def _current_turn_file_attachment(
     )
     if office_index is not None:
         attachment[OFFICE_STRUCTURE_KEY] = office_index
-        carrier = stamp_current_turn_file_reference(
-            trusted_office_attachment(attachment),
-            raw or {},
-            reinspect_current_upload=reinspect_current_upload,
-        )
+        carrier = trusted_office_attachment(attachment)
     else:
-        carrier = stamp_current_turn_file_reference(
-            _OwnedAttachment(attachment),
-            raw or {},
-            reinspect_current_upload=reinspect_current_upload,
-        )
+        carrier = _OwnedAttachment(attachment)
+    carrier = stamp_current_turn_file_reference_for_tenant(
+        carrier,
+        raw or {},
+        tenant_id=tenant_id,
+        reinspect_current_upload=reinspect_current_upload,
+    )
     if storage is not None and tenant_id and uploaded_by:
         carrier = _bind_storage_owned_exact_filename_direct_read(
             storage,
@@ -5620,7 +5650,10 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
             pending_durable_original_attachment_surface = bool(
                 attachments or incoming_documents or staged_document_message_ids or file_already_ingested
             )
-            pending_comparison_attachment_count = pending_comparison_current_attachment_count(attachments)
+            pending_comparison_attachment_count = pending_comparison_current_attachment_count(
+                attachments,
+                tenant_id=actor.user_id,
+            )
             pending_durable_original_reply_surface = bool(
                 str(body.get("reply_to") or "").strip()
                 or reply_assistant_pointer_present
@@ -5633,6 +5666,18 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
                 attachments = []
                 quoted_attachment_reference = False
                 reply_assistant_reference = False
+            authenticated_current_upload_surface = bool(
+                incoming_documents
+                and not staged_document_message_ids
+                and len(attachments) == len(incoming_documents)
+            )
+            authenticated_current_upload_turn = bool(
+                authenticated_current_upload_surface
+                and _authenticated_current_uploads_eligible(
+                    attachments,
+                    tenant_id=actor.user_id,
+                )
+            )
 
             pending_durable_intake_admission: PendingDurableTurnAdmission | bool = False
             supervisor_assist_pending_decision: SupervisorAssistPendingDecision | None = None
@@ -5651,7 +5696,7 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
                 and not forward_meta
                 and (not synthetic_document_notice or pending_comparison_attachment_count == 1)
                 and not spoken_question
-                and requested_mode is None
+                and not explicit_mode_requested
                 and not turn_policy.handled
             ):
                 assist_relation = _supervisor_assist_pending_before_ingestion(
@@ -5678,7 +5723,7 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
                     pending_durable_intake_suppressed = pending_durable_intake_admission is not False
 
             authenticated_turn_context = None
-            scalar_turn_context_eligible = bool(
+            authenticated_turn_context_base_eligible = bool(
                 source_ref
                 and lease_token
                 and semantic_supervisor_ingress is not None
@@ -5687,10 +5732,9 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
                 and re.fullmatch(r"conv_[0-9a-f]{16}", conversation_id) is not None
                 and len(message) <= 16_000
                 and effective_mode == TurnMode.DIALOGUE.value
-                and requested_mode is None
+                and not explicit_mode_requested
                 and not autonomous_engineer
                 and not explicit_no_save
-                and not pending_durable_original_attachment_surface
                 and not pending_durable_original_reply_surface
                 and not forward_meta
                 and not synthetic_document_notice
@@ -5711,7 +5755,17 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
                     )
                 )
             )
-            if scalar_turn_context_eligible:
+            if (
+                authenticated_turn_context_base_eligible
+                and authenticated_current_upload_surface
+                and not authenticated_current_upload_turn
+            ):
+                raise RuntimeError("Current upload lost its exact tenant/source authority")
+            authenticated_turn_context_eligible = bool(
+                authenticated_turn_context_base_eligible
+                and (not pending_durable_original_attachment_surface or authenticated_current_upload_turn)
+            )
+            if authenticated_turn_context_eligible:
                 if request_effects is None or conversation_id is None or semantic_supervisor_ingress is None:
                     raise RuntimeError("Authenticated turn admission lost its exact authority")
                 authenticated_conversation_id = conversation_id
@@ -5737,7 +5791,7 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
                 if type(runtime_router_mode) is not RouterMode:
                     runtime_router_mode = RouterMode.LEGACY
                 try:
-                    authenticated_turn_context = issue_authenticated_scalar_turn_context(
+                    authenticated_turn_context = issue_authenticated_turn_context(
                         state.turn_context_issuer,
                         ingress_kind=ingress_kind,
                         # The atomic durable lease identifies this execution
@@ -5757,11 +5811,14 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
                         router_mode=runtime_router_mode,
                         deadline_monotonic_ns=int(_turn_deadline * 1_000_000_000),
                         max_output_tokens=state.settings.llm_max_tokens,
+                        attachments=attachments,
                     )
                 except TurnContextError:
                     # This opt-in propagation slice must not make an input or a
                     # supported legacy configuration newly fatal.  No context
                     # or effect authority has been bound at this point.
+                    if authenticated_current_upload_surface:
+                        raise
                     authenticated_turn_context = None
                 if authenticated_turn_context is not None:
                     effect_stack.enter_context(
@@ -5780,6 +5837,30 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
                         )
                     )
                     failure_scope.turn_identifier = authenticated_turn_context.turn_id
+                    require_authenticated_chat_call_scope(
+                        authenticated_turn_context,
+                        user_id=actor.user_id,
+                        message=message,
+                        actor=actor,
+                        conversation_id=authenticated_conversation_id,
+                        attachments=attachments,
+                        enable_tools=enable_tools,
+                        synthetic_document_notice=synthetic_document_notice,
+                        replay_source_message_id=None,
+                        mode=requested_mode if explicit_mode_requested else None,
+                        answer_with_voice=spoken_question,
+                        reply_to=str(body.get("reply_to") or "").strip() or None,
+                        quoted_attachment_reference=quoted_attachment_reference,
+                        reply_assistant_reference=reply_assistant_reference,
+                        reply_assistant_message_id=reply_source_message_id or None,
+                        turn_policy=None,
+                        telegram_update_id=trusted_telegram_update_id,
+                        turn_deadline=_turn_deadline,
+                        pending_durable_admission=None,
+                        kg=state.kg,
+                        hybrid_searcher=state.hybrid_searcher,
+                        runtime_router_mode=runtime_router_mode,
+                    )
 
             ingestion_result = None
             if autonomous_engineer:
@@ -5923,7 +6004,13 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
                     hybrid_searcher=state.hybrid_searcher,
                     ingestion_result=ingestion_result,
                     synthetic_document_notice=synthetic_document_notice,
-                    mode=effective_mode if effective_mode == "engineer" else requested_mode,
+                    mode=(
+                        effective_mode
+                        if effective_mode == "engineer"
+                        else None
+                        if authenticated_turn_context is not None
+                        else requested_mode
+                    ),
                     answer_with_voice=spoken_question,
                     # На что человек показал репликой. Едет ОТДЕЛЬНЫМ полем до самой
                     # сборки контекста: приклеенная к тексту хода цитата попала бы и в

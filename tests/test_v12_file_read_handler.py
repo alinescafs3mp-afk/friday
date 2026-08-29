@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import math
 import os
 import sqlite3
 import threading
@@ -14,8 +15,12 @@ from typing import Any
 
 import pytest
 
-from friday.execution_kernel import track_request_effects
-from friday.file_evidence import stamp_current_turn_file_reference
+from friday.execution_kernel import bind_authenticated_request_effect_authority, track_request_effects
+from friday.file_evidence import (
+    current_turn_file_reference_for_tenant,
+    stamp_current_turn_file_reference,
+    stamp_current_turn_file_reference_for_tenant,
+)
 from friday.interaction_control_plane import (
     CapabilityClass,
     CompletionDecision,
@@ -42,15 +47,43 @@ from friday.orchestration.capability_outcome import (
     attach_accepted_capability_outcome_receipt,
     load_accepted_capability_outcome_receipt,
 )
+from friday.orchestration.contracts import RouterMode
 from friday.orchestration.file_read import (
     V12FileReadError,
     V12FileReadHandler,
     _call_model_once,
     _file_requirements,
 )
+from friday.orchestration.turn_context import (
+    AuthenticatedTurnContext,
+    IngressKind,
+    InheritedTurnBudget,
+    ModelAntiLoopBudget,
+    TurnContextError,
+    TurnContextIssuer,
+    TurnMode,
+    TurnResourceBudget,
+    TurnSafetyDeadline,
+)
+from friday.orchestration.turn_context_call_scope import require_authenticated_chat_call_scope
+from friday.orchestration.turn_context_publication import bind_authenticated_turn_publication
+from friday.orchestration.turn_context_runtime import (
+    bind_authenticated_turn_context,
+    suspend_authenticated_turn_context,
+)
 from friday.permissions import ActorContext, AuthorizationService
 from friday.source_identity import raw_source_identity_sha256
 from friday.storage.models import RawObject, new_id
+from friday.turn_intent_policy import TurnIntent, TurnPolicyDecision
+
+
+class _CurrentCarrier(dict[str, object]):
+    pass
+
+
+class _EqualStringLookalike(str):
+    def __eq__(self, _other: object) -> bool:
+        return True
 
 
 def _actor() -> ActorContext:
@@ -309,6 +342,157 @@ def _handler(storage: Any, settings: Any, model: _Model) -> V12FileReadHandler:
     )
 
 
+def _authenticated_current_file_context(
+    storage: Any,
+    request: ReadOnlyRouteRequest,
+    reference: ReadOnlyAttachmentReference,
+    *,
+    token: str,
+    request_binding: str = "c" * 64,
+    deadline_ns: int | None = None,
+) -> tuple[
+    TurnContextIssuer,
+    AuthenticatedTurnContext,
+    ReadOnlyRouteRequest,
+    TurnInput,
+    dict[str, object],
+]:
+    issuer = TurnContextIssuer(b"s2-v12-file-boundary-test-key!!!")
+    authority = issuer.issue_ingress_authority(
+        ingress_kind=IngressKind.SIGNED_HTTP,
+        ingress_issued_token=token,
+        actor=request.actor,
+        conversation_id=request.conversation_id,
+        interaction_mode=TurnMode.DIALOGUE,
+        source_id=f"source-{token}",
+        update_id=f"update-{token}",
+        request_effect_binding_sha256=request_binding,
+    )
+    row = storage.execute(
+        """SELECT id, user_id, source, source_ref, content_type, received_at,
+                  content_hash, raw_content, raw_content AS _raw_content,
+                  metadata_json, metadata_json AS _raw_metadata
+             FROM raw_objects WHERE id=? AND user_id=?""",
+        (reference.raw_object_id, request.actor.user_id),
+    ).fetchone()
+    assert row is not None
+    carrier: dict[str, object] = _CurrentCarrier(
+        {
+            "filename": reference.name,
+            "mime_type": reference.media_type,
+            "raw_object_id": str(row["id"]),
+            "transient_text": "available",
+            "extraction_success": True,
+            "persisted": True,
+            "current_turn_only": True,
+        }
+    )
+    stamp_current_turn_file_reference_for_tenant(
+        carrier,
+        dict(row),
+        tenant_id=request.actor.user_id,
+    )
+    current_token = current_turn_file_reference_for_tenant(
+        carrier,
+        tenant_id=request.actor.user_id,
+    )
+    assert current_token is not None
+    turn = TurnInput.from_chat(
+        message="Что сказано в документе?",
+        actor=request.actor,
+        conversation_id=request.conversation_id,
+        attachments=[carrier],
+        enable_tools=True,
+        synthetic_document_notice=False,
+        mode="dialogue",
+        reply_to=None,
+        quoted_attachment_reference=False,
+        reply_assistant_reference=False,
+    )
+    source = issuer.current_attachment_source(
+        authority=authority,
+        carrier=carrier,
+        descriptor=turn.attachments[0],
+    )
+    policy = issuer.issue_turn_policy(
+        router_mode=RouterMode.V12,
+        fallback_router_mode=RouterMode.LEGACY,
+        decision=TurnPolicyDecision(intent=TurnIntent.PASSTHROUGH),
+    )
+    context = issuer.authenticate_turn(
+        authority=authority,
+        model_input=turn,
+        authorized_sources=(issuer.accepted_ingress_source(authority), source),
+        turn_policy=policy,
+        inherited_budget=InheritedTurnBudget(
+            TurnSafetyDeadline(deadline_ns or (time.monotonic_ns() + 30_000_000_000)),
+            ModelAntiLoopBudget(4, 1),
+            TurnResourceBudget(4, 2, 1, 4096),
+        ),
+        pending_work_admission=None,
+    )
+    descriptor = turn.attachments[0]
+    bound_request = replace(
+        request,
+        attachments=(
+            ReadOnlyAttachmentReference(
+                ordinal=descriptor.ordinal,
+                raw_object_id=current_token.raw_id,
+                source_identity_sha256=current_token.source_identity_sha256,
+                name=descriptor.name,
+                media_type=descriptor.media_type,
+            ),
+        ),
+        conversation_mode=turn.conversation_mode,
+        reply_to=turn.reply_quote,
+        synthetic_document_notice=turn.synthetic_document_notice,
+        quoted_attachment_reference=turn.quoted_attachment_reference,
+        reply_assistant_reference=turn.reply_assistant_reference,
+    )
+    return issuer, context, bound_request, turn, carrier
+
+
+def _seal_authenticated_file_call_scope(
+    context: AuthenticatedTurnContext,
+    request: ReadOnlyRouteRequest,
+    turn: TurnInput,
+    carrier: dict[str, object],
+) -> None:
+    require_authenticated_chat_call_scope(
+        context,
+        user_id=request.user_id,
+        message=turn.message,
+        actor=request.actor,
+        conversation_id=request.conversation_id,
+        attachments=[carrier],
+        enable_tools=turn.enable_tools,
+        synthetic_document_notice=turn.synthetic_document_notice,
+        replay_source_message_id=None,
+        mode=None,
+        answer_with_voice=False,
+        reply_to=None,
+        quoted_attachment_reference=turn.quoted_attachment_reference,
+        reply_assistant_reference=turn.reply_assistant_reference,
+        reply_assistant_message_id=None,
+        turn_policy=None,
+        telegram_update_id=None,
+        turn_deadline=_exact_deadline_float(context),
+        pending_durable_admission=None,
+        runtime_router_mode=RouterMode.V12,
+    )
+
+
+def _exact_deadline_float(context: AuthenticatedTurnContext) -> float:
+    target = context.inherited_budget.safety_deadline.monotonic_ns
+    candidate = target / 1_000_000_000
+    for _ in range(4):
+        observed = int(candidate * 1_000_000_000)
+        if observed == target:
+            return candidate
+        candidate = math.nextafter(candidate, math.inf if observed < target else -math.inf)
+    raise AssertionError("test deadline cannot be represented by the raw float carrier")
+
+
 async def _leased_model_call(model: _Model) -> tuple[ModelRequirements, ModelProfileLease]:
     requirements = _file_requirements(1)
     lease = await model.acquire_lease(
@@ -449,6 +633,398 @@ async def test_file_handler_synthesizes_verifies_and_atomically_publishes(settin
         "В договоре указано 18 августа. [A1]",
     ):
         assert private_value not in serialized_trace
+
+
+@pytest.mark.asyncio
+async def test_authenticated_current_file_route_keeps_exact_context_and_effect_owner(
+    settings: Any,
+    storage: Any,
+) -> None:
+    conversation = storage.create_conversation("alice", mode="dialogue")
+    reference = _register(
+        storage,
+        settings,
+        text="Authenticated current source.",
+        filename="authenticated.txt",
+    )
+    model = _Model("Источник прочитан. [A1]")
+    handler = _handler(storage, settings, model)
+    request, _legacy_turn, plan = _request(reference, conversation_id=str(conversation["id"]))
+    issuer, context, request, turn, carrier = _authenticated_current_file_context(
+        storage,
+        request,
+        reference,
+        token="authenticated-file-success",
+    )
+    staged: list[object] = []
+
+    with (
+        track_request_effects(
+            lambda: True,
+            before_effect_in_transaction=lambda conn: staged.append(conn) is None,
+            request_binding_sha256=context.effect_fence.request_effect_binding_sha256,
+        ) as effects,
+        bind_authenticated_turn_context(issuer, context),
+        bind_authenticated_request_effect_authority(effects),
+        bind_authenticated_turn_publication(
+            context,
+            conversation_id=str(conversation["id"]),
+            person_id="alice",
+            final_publisher=context.effect_fence.final_publisher,
+        ),
+    ):
+        _seal_authenticated_file_call_scope(context, request, turn, carrier)
+        preparation = await handler.prepare(request, turn, plan)
+        assert preparation is not None
+        assert await handler.preparation_is_current(request, turn, plan, preparation) is True
+        result = await handler.handle(request, turn, plan, preparation)
+
+    assert result.message == "Источник прочитан. [A1]"
+    assert len(staged) == 1
+    assert effects.possible is True
+    assert effects.staged is False
+    assert storage.count_messages(str(conversation["id"]), user_id="alice") == 2
+
+
+@pytest.mark.asyncio
+async def test_authenticated_current_file_route_rejects_drift_and_suspended_context(
+    settings: Any,
+    storage: Any,
+) -> None:
+    conversation = storage.create_conversation("alice", mode="dialogue")
+    reference = _register(storage, settings, text="Private source.", filename="private.txt")
+    model = _Model("Источник прочитан. [A1]")
+    handler = _handler(storage, settings, model)
+    request, _legacy_turn, plan = _request(reference, conversation_id=str(conversation["id"]))
+    issuer, context, request, turn, carrier = _authenticated_current_file_context(
+        storage,
+        request,
+        reference,
+        token="authenticated-file-reject",
+    )
+
+    with bind_authenticated_turn_context(issuer, context):
+        _seal_authenticated_file_call_scope(context, request, turn, carrier)
+        preparation = await handler.prepare(request, turn, plan)
+        assert preparation is not None
+        drifted = replace(
+            request.attachments[0],
+            raw_object_id="raw_fedcba9876543210",
+            source_identity_sha256="e" * 64,
+        )
+        with pytest.raises(V12FileReadError, match="inputs drifted"):
+            await handler.preparation_is_current(
+                replace(request, attachments=(drifted,)),
+                turn,
+                plan,
+                preparation,
+            )
+        with (
+            suspend_authenticated_turn_context(),
+            pytest.raises(TurnContextError, match="primary authority"),
+        ):
+            await handler.preparation_is_current(request, turn, plan, preparation)
+
+    assert storage.count_messages(str(conversation["id"]), user_id="alice") == 0
+
+
+@pytest.mark.asyncio
+async def test_authenticated_file_preparation_clamps_to_parent_deadline(
+    settings: Any,
+    storage: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    conversation = storage.create_conversation("alice", mode="dialogue")
+    reference = _register(storage, settings, text="Deadline source.", filename="deadline.txt")
+    model = _Model("Источник прочитан. [A1]")
+    handler = _handler(storage, settings, model)
+    request, _legacy_turn, plan = _request(reference, conversation_id=str(conversation["id"]))
+    parent_deadline_ns = time.monotonic_ns() + 3_000_000_000
+    request = replace(request, turn_deadline=time.monotonic() + 120.0)
+    issuer, context, request, turn, carrier = _authenticated_current_file_context(
+        storage,
+        request,
+        reference,
+        token="authenticated-file-deadline",
+        deadline_ns=parent_deadline_ns,
+    )
+    observed: list[float] = []
+    original_prepare = handler._prepare_context
+
+    async def capture_deadline(
+        candidate_request: ReadOnlyRouteRequest,
+        candidate_turn: TurnInput,
+        candidate_plan: TurnPlan,
+        absolute_deadline: float,
+    ) -> Any:
+        observed.append(absolute_deadline)
+        return await original_prepare(
+            candidate_request,
+            candidate_turn,
+            candidate_plan,
+            absolute_deadline,
+        )
+
+    monkeypatch.setattr(handler, "_prepare_context", capture_deadline)
+    with bind_authenticated_turn_context(issuer, context):
+        _seal_authenticated_file_call_scope(context, request, turn, carrier)
+        preparation = await handler.prepare(request, turn, plan)
+
+    assert preparation is not None
+    assert len(observed) == 1
+    assert observed[0] < parent_deadline_ns / 1_000_000_000
+
+
+@pytest.mark.asyncio
+async def test_authenticated_file_route_detects_source_mutation_after_model_await(
+    settings: Any,
+    storage: Any,
+) -> None:
+    conversation = storage.create_conversation("alice", mode="dialogue")
+    reference = _register(storage, settings, text="Mutation source.", filename="mutation.txt")
+    request, _legacy_turn, plan = _request(reference, conversation_id=str(conversation["id"]))
+    issuer, context, request, turn, carrier = _authenticated_current_file_context(
+        storage,
+        request,
+        reference,
+        token="authenticated-file-mutation",
+    )
+    source_token = context.authorized_sources[1].private_carrier
+    model = _Model(
+        "Источник прочитан. [A1]",
+        mutate=lambda: object.__setattr__(source_token, "content_sha256", "d" * 64),
+    )
+    handler = _handler(storage, settings, model)
+
+    with (
+        track_request_effects(
+            lambda: True,
+            before_effect_in_transaction=lambda _conn: True,
+            request_binding_sha256=context.effect_fence.request_effect_binding_sha256,
+        ) as effects,
+        bind_authenticated_turn_context(issuer, context),
+        bind_authenticated_request_effect_authority(effects),
+    ):
+        _seal_authenticated_file_call_scope(context, request, turn, carrier)
+        preparation = await handler.prepare(request, turn, plan)
+        assert preparation is not None
+        with pytest.raises(V12FileReadError, match="file preparation authority drifted"):
+            await handler.handle(request, turn, plan, preparation)
+
+    assert effects.possible is False
+    assert storage.count_messages(str(conversation["id"]), user_id="alice") == 0
+
+
+@pytest.mark.asyncio
+async def test_authenticated_file_route_rejects_conversation_mode_change_after_model_await(
+    settings: Any,
+    storage: Any,
+) -> None:
+    conversation = storage.create_conversation("alice", mode="dialogue")
+    conversation_id = str(conversation["id"])
+    reference = _register(storage, settings, text="Mode source.", filename="mode.txt")
+    request, _legacy_turn, plan = _request(reference, conversation_id=conversation_id)
+    issuer, context, request, turn, carrier = _authenticated_current_file_context(
+        storage,
+        request,
+        reference,
+        token="authenticated-file-mode-change",
+    )
+    model = _Model(
+        "Источник прочитан. [A1]",
+        mutate=lambda: storage.set_conversation_mode(conversation_id, "alice", "research"),
+    )
+    handler = _handler(storage, settings, model)
+    staged: list[object] = []
+
+    with (
+        track_request_effects(
+            lambda: True,
+            before_effect_in_transaction=lambda conn: staged.append(conn) is None,
+            request_binding_sha256=context.effect_fence.request_effect_binding_sha256,
+        ) as effects,
+        bind_authenticated_turn_context(issuer, context),
+        bind_authenticated_request_effect_authority(effects),
+    ):
+        _seal_authenticated_file_call_scope(context, request, turn, carrier)
+        preparation = await handler.prepare(request, turn, plan)
+        assert preparation is not None
+        with pytest.raises(V12FileReadError, match="conversation mode changed before publication"):
+            await handler.handle(request, turn, plan, preparation)
+
+    assert staged == []
+    assert effects.possible is False
+    assert storage.count_messages(conversation_id, user_id="alice") == 0
+
+
+@pytest.mark.asyncio
+async def test_authenticated_file_route_detects_plan_mutation_after_model_await(
+    settings: Any,
+    storage: Any,
+) -> None:
+    conversation = storage.create_conversation("alice", mode="dialogue")
+    reference = _register(storage, settings, text="Pinned plan.", filename="plan.txt")
+    request, _legacy_turn, plan = _request(reference, conversation_id=str(conversation["id"]))
+    issuer, context, request, turn, carrier = _authenticated_current_file_context(
+        storage,
+        request,
+        reference,
+        token="authenticated-plan-mutation",
+    )
+    original_reason = plan.reason_code
+    model = _Model(
+        "Источник прочитан. [A1]",
+        mutate=lambda: object.__setattr__(plan, "reason_code", "mutated_plan"),
+    )
+    handler = _handler(storage, settings, model)
+
+    with (
+        track_request_effects(
+            lambda: True,
+            before_effect_in_transaction=lambda _conn: True,
+            request_binding_sha256=context.effect_fence.request_effect_binding_sha256,
+        ) as effects,
+        bind_authenticated_turn_context(issuer, context),
+        bind_authenticated_request_effect_authority(effects),
+    ):
+        _seal_authenticated_file_call_scope(context, request, turn, carrier)
+        preparation = await handler.prepare(request, turn, plan)
+        assert preparation is not None
+        try:
+            with pytest.raises(V12FileReadError, match="file preparation authority drifted"):
+                await handler.handle(request, turn, plan, preparation)
+        finally:
+            object.__setattr__(plan, "reason_code", original_reason)
+
+    assert effects.possible is False
+    assert storage.count_messages(str(conversation["id"]), user_id="alice") == 0
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("field", "value"),
+    (
+        ("ordinal", True),
+        ("raw_object_id", _EqualStringLookalike("raw_ffffffffffffffff")),
+        ("source_identity_sha256", _EqualStringLookalike("f" * 64)),
+        ("name", _EqualStringLookalike("other.txt")),
+        ("media_type", _EqualStringLookalike("application/octet-stream")),
+    ),
+)
+async def test_authenticated_file_route_rejects_coercible_reference_fields(
+    settings: Any,
+    storage: Any,
+    field: str,
+    value: object,
+) -> None:
+    conversation = storage.create_conversation("alice", mode="dialogue")
+    reference = _register(storage, settings, text="Exact reference.", filename="exact.txt")
+    request, _legacy_turn, plan = _request(reference, conversation_id=str(conversation["id"]))
+    issuer, context, request, turn, carrier = _authenticated_current_file_context(
+        storage,
+        request,
+        reference,
+        token=f"authenticated-reference-{field}",
+    )
+    mutated = replace(request.attachments[0], **{field: value})
+    request = replace(request, attachments=(mutated,))
+    handler = _handler(storage, settings, _Model("Источник прочитан. [A1]"))
+
+    with bind_authenticated_turn_context(issuer, context):
+        _seal_authenticated_file_call_scope(context, request, turn, carrier)
+        with pytest.raises(V12FileReadError, match="inputs drifted"):
+            await handler.prepare(request, turn, plan)
+
+
+@pytest.mark.asyncio
+async def test_authenticated_file_preparation_rejects_evidence_and_conversation_substitution(
+    settings: Any,
+    storage: Any,
+) -> None:
+    first_conversation = storage.create_conversation("alice", mode="dialogue")
+    second_conversation = storage.create_conversation("alice", mode="dialogue")
+    first_reference = _register(storage, settings, text="First source.", filename="first.txt")
+    second_reference = _register(
+        storage,
+        settings,
+        text="Second source.",
+        filename="second.txt",
+    )
+    first_request, _legacy_turn, plan = _request(
+        first_reference,
+        conversation_id=str(first_conversation["id"]),
+    )
+    second_request, second_turn, second_plan = _request(
+        second_reference,
+        conversation_id=str(second_conversation["id"]),
+    )
+    handler = _handler(storage, settings, _Model("Источник прочитан. [A1]"))
+    second_preparation = await handler.prepare(second_request, second_turn, second_plan)
+    assert second_preparation is not None
+    issuer, context, first_request, first_turn, carrier = _authenticated_current_file_context(
+        storage,
+        first_request,
+        first_reference,
+        token="authenticated-preparation-substitution",
+    )
+
+    with bind_authenticated_turn_context(issuer, context):
+        _seal_authenticated_file_call_scope(context, first_request, first_turn, carrier)
+        first_preparation = await handler.prepare(first_request, first_turn, plan)
+        assert first_preparation is not None
+        first_payload = first_preparation.private_payload
+        second_payload = second_preparation.private_payload
+        object.__setattr__(first_payload, "evidence", second_payload.evidence)
+        object.__setattr__(
+            first_payload,
+            "conversation_id",
+            str(second_conversation["id"]),
+        )
+        object.__setattr__(
+            first_preparation,
+            "evidence_identity_sha256",
+            second_payload.evidence.identity_sha256,
+        )
+        with pytest.raises(V12FileReadError, match="preparation authority is invalid"):
+            await handler.handle(first_request, first_turn, plan, first_preparation)
+
+
+@pytest.mark.asyncio
+async def test_authenticated_file_route_rechecks_prepared_authority_after_model_await(
+    settings: Any,
+    storage: Any,
+) -> None:
+    conversation = storage.create_conversation("alice", mode="dialogue")
+    reference = _register(storage, settings, text="Await source.", filename="await.txt")
+    request, _legacy_turn, plan = _request(reference, conversation_id=str(conversation["id"]))
+    issuer, context, request, turn, carrier = _authenticated_current_file_context(
+        storage,
+        request,
+        reference,
+        token="authenticated-prepared-await-mutation",
+    )
+    model = _Model("Источник прочитан. [A1]")
+    handler = _handler(storage, settings, model)
+
+    with (
+        track_request_effects(
+            lambda: True,
+            before_effect_in_transaction=lambda _conn: True,
+            request_binding_sha256=context.effect_fence.request_effect_binding_sha256,
+        ) as effects,
+        bind_authenticated_turn_context(issuer, context),
+        bind_authenticated_request_effect_authority(effects),
+    ):
+        _seal_authenticated_file_call_scope(context, request, turn, carrier)
+        preparation = await handler.prepare(request, turn, plan)
+        assert preparation is not None
+        evidence = preparation.private_payload.evidence
+        model.mutate = lambda: object.__setattr__(evidence, "person_id", "mallory")
+        with pytest.raises(V12FileReadError, match="preparation authority drifted"):
+            await handler.handle(request, turn, plan, preparation)
+
+    assert effects.possible is False
+    assert storage.count_messages(str(conversation["id"]), user_id="alice") == 0
 
 
 @pytest.mark.asyncio

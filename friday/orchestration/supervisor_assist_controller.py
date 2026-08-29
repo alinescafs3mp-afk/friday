@@ -132,7 +132,7 @@ from friday.semantic_supervisor_policy import (
     SUPERVISOR_ASSIST_PRODUCT_POLICY_SHA256,
     SUPERVISOR_RUNTIME_PROFILE_MANIFEST_SHA256,
 )
-from friday.source_identity import authorized_file_snapshot_token_is_process_owned
+from friday.source_identity import authorized_file_snapshot_token_authorizes_scope
 
 SUPERVISOR_ASSIST_CONTROLLER_STATUS_SCHEMA = "friday.semantic-supervisor-assist-controller-status.v1"
 SUPERVISOR_ASSIST_RESTART_STATUS_SCHEMA = "friday.semantic-supervisor-assist-restart-status.v1"
@@ -543,7 +543,11 @@ def _file_evidence_matches_surface(
         return False
     token = prepared.snapshot_tokens[0]
     return bool(
-        authorized_file_snapshot_token_is_process_owned(token)
+        authorized_file_snapshot_token_authorizes_scope(
+            token,
+            tenant_id=surface.actor.user_id,
+            storage_owner_id=surface.actor.user_id,
+        )
         and token.source.raw_id == surface.attachment.raw_object_id
         and token.source.identity_sha256 == surface.attachment.source_identity_sha256
         and token.content_sha256 == surface.attachment_content_sha256

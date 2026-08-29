@@ -4,6 +4,7 @@ import asyncio
 import dataclasses
 import hashlib
 import itertools
+import math
 import time
 from types import SimpleNamespace
 from typing import Any, cast
@@ -12,12 +13,18 @@ import pytest
 
 from friday import execution_kernel as execution_kernel_module
 from friday import semantic_supervisor_policy
+from friday.agent_runtime import (
+    AgentContext,
+    AgentRuntime,
+    _CurrentDocumentSecondaryMapPlan,
+)
 from friday.execution_kernel import (
     bind_authenticated_request_effect_authority,
     track_request_effects,
 )
-from friday.file_evidence import stamp_current_turn_file_reference
+from friday.file_evidence import stamp_current_turn_file_reference_for_tenant
 from friday.orchestration import semantic_supervisor_runtime as supervisor_runtime_module
+from friday.orchestration import turn_context_call_scope as call_scope_module
 from friday.orchestration import turn_context_publication as publication_module
 from friday.orchestration.contracts import RouterMode, TurnInput
 from friday.orchestration.router import OrchestrationRouter, _authenticated_attachment_references
@@ -34,7 +41,10 @@ from friday.orchestration.turn_context import (
     TurnResourceBudget,
     TurnSafetyDeadline,
 )
-from friday.orchestration.turn_context_call_scope import require_authenticated_chat_call_scope
+from friday.orchestration.turn_context_call_scope import (
+    require_authenticated_chat_call_scope,
+    require_current_authenticated_chat_call_scope,
+)
 from friday.orchestration.turn_context_publication import bind_authenticated_turn_publication
 from friday.orchestration.turn_context_runtime import (
     bind_authenticated_turn_context,
@@ -135,15 +145,21 @@ class _AttachmentCarrier(dict[str, Any]):
     pass
 
 
-def _authenticated_attachment_turn() -> tuple[
+def _authenticated_attachment_turn(
+    *,
+    clock: list[int] | None = None,
+) -> tuple[
     TurnContextIssuer,
     AuthenticatedTurnContext,
     ActorContext,
     _AttachmentCarrier,
 ]:
     serial = next(_SERIALS)
-    now = time.monotonic_ns()
-    issuer = TurnContextIssuer(hashlib.sha256(f"router-attachment-{serial}".encode("ascii")).digest())
+    now = time.monotonic_ns() if clock is None else clock[0]
+    issuer = TurnContextIssuer(
+        hashlib.sha256(f"router-attachment-{serial}".encode("ascii")).digest(),
+        _monotonic_ns=(time.monotonic_ns if clock is None else lambda: clock[0]),
+    )
     actor = ActorContext(
         user_id="owner",
         preset_key="owner",
@@ -187,10 +203,11 @@ def _authenticated_attachment_turn() -> tuple[
         # identity-bound, while every model-visible body field above is hashed.
         process_marker=object(),
     )
-    stamp_current_turn_file_reference(
+    stamp_current_turn_file_reference_for_tenant(
         carrier,
         {
             "id": raw_id,
+            "user_id": actor.user_id,
             "source": "api",
             "source_ref": f"current:{serial}",
             "content_type": "application/pdf",
@@ -199,6 +216,7 @@ def _authenticated_attachment_turn() -> tuple[
             "raw_content": "bounded extracted text",
             "metadata_json": "{}",
         },
+        tenant_id=actor.user_id,
     )
     model_input = TurnInput.from_chat(
         message="Прочитай приложенный файл.",
@@ -247,12 +265,23 @@ def _chat_kwargs(
         "enable_tools": True,
     }
     if context is not None:
-        values["turn_deadline"] = context.inherited_budget.safety_deadline.monotonic_ns / 1_000_000_000
+        values["turn_deadline"] = _exact_deadline_float(context)
         if context.authority.ingress_kind is IngressKind.TELEGRAM:
             values["telegram_update_id"] = context.authority.update_id
         if context.pending_work_admission is not None:
             values["_pending_durable_admission"] = context.pending_work_admission.admission
     return values
+
+
+def _exact_deadline_float(context: AuthenticatedTurnContext) -> float:
+    target = context.inherited_budget.safety_deadline.monotonic_ns
+    candidate = target / 1_000_000_000
+    for _ in range(4):
+        observed = int(candidate * 1_000_000_000)
+        if observed == target:
+            return candidate
+        candidate = math.nextafter(candidate, math.inf if observed < target else -math.inf)
+    raise AssertionError("test deadline cannot be represented by the raw float carrier")
 
 
 def _scope_kwargs(
@@ -282,7 +311,7 @@ def _scope_kwargs(
         "reply_assistant_message_id": None,
         "turn_policy": None,
         "telegram_update_id": None,
-        "turn_deadline": (context.inherited_budget.safety_deadline.monotonic_ns / 1_000_000_000),
+        "turn_deadline": _exact_deadline_float(context),
         "pending_durable_admission": None,
         "kg": kg,
         "hybrid_searcher": hybrid_searcher,
@@ -642,7 +671,7 @@ def test_v12_attachment_refs_use_exact_context_token_and_reject_equal_replacemen
         "reply_assistant_message_id": None,
         "turn_policy": None,
         "telegram_update_id": None,
-        "turn_deadline": (context.inherited_budget.safety_deadline.monotonic_ns / 1_000_000_000),
+        "turn_deadline": _exact_deadline_float(context),
         "pending_durable_admission": None,
         "runtime_router_mode": RouterMode.V12,
     }
@@ -686,6 +715,306 @@ def test_authenticated_attachment_seal_rejects_same_token_clone_and_body_mutatio
             require_authenticated_chat_call_scope(context, **kwargs)
 
         assert scope.attachment_carriers[0] is carrier
+
+
+def test_authenticated_attachment_scope_binding_rejects_whole_carrier_substitution() -> None:
+    issuer, context, actor, carrier = _authenticated_attachment_turn()
+    kwargs = _scope_kwargs(
+        actor,
+        context,
+        attachments=[carrier],
+        runtime_router_mode=RouterMode.V12,
+    )
+    with bind_authenticated_turn_context(issuer, context):
+        scope = require_authenticated_chat_call_scope(context, **kwargs)
+        original_carriers = scope.attachment_carriers
+        original_hashes = scope.attachment_carrier_sha256
+        clone = _AttachmentCarrier(carrier)
+        object.__setattr__(
+            clone,
+            "_current_turn_file_reference",
+            context.authorized_sources[1].private_carrier,
+        )
+        clone["transient_text"] = "substituted body"
+        try:
+            object.__setattr__(scope, "attachment_carriers", (clone,))
+            object.__setattr__(
+                scope,
+                "attachment_carrier_sha256",
+                (
+                    call_scope_module._process_local_projection_sha256(  # noqa: SLF001
+                        clone,
+                        label="attachment 1",
+                    ),
+                ),
+            )
+            with pytest.raises(TurnContextError, match="chat call scope drifted"):
+                require_current_authenticated_chat_call_scope(context)
+        finally:
+            object.__setattr__(scope, "attachment_carriers", original_carriers)
+            object.__setattr__(scope, "attachment_carrier_sha256", original_hashes)
+
+
+def test_authenticated_raw_call_rejects_conversation_and_optional_carrier_lookalikes() -> None:
+    issuer, context, actor, _now = _authenticated_turn(router_mode=RouterMode.LEGACY)
+
+    class EqualConversation(str):
+        def __eq__(self, _other: object) -> bool:
+            return True
+
+    class StatefulText:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def __str__(self) -> str:
+            self.calls += 1
+            return "" if self.calls == 1 else "engineer"
+
+    with bind_authenticated_turn_context(issuer, context):
+        for field, value in (
+            ("conversation_id", EqualConversation("conv_ffffffffffffffff")),
+            ("reply_to", ""),
+            ("reply_to", StatefulText()),
+            ("mode", "dialogue"),
+            ("mode", StatefulText()),
+        ):
+            kwargs = _scope_kwargs(actor, context)
+            kwargs[field] = value
+            with pytest.raises(TurnContextError):
+                require_authenticated_chat_call_scope(context, **kwargs)
+
+
+def _agent_model_context(context: AuthenticatedTurnContext) -> AgentContext:
+    return AgentContext(
+        conversation_id=_CONVERSATION_ID,
+        user_id="owner",
+        person_id="owner",
+        current_attachment_present=True,
+        focused_attachment_turn=True,
+        _authenticated_turn_context=context,
+    )
+
+
+def _agent_model_runtime(llm: Any, *, secondary: Any = None) -> AgentRuntime:
+    runtime = object.__new__(AgentRuntime)
+    runtime.llm = llm
+    runtime.secondary_brain = secondary
+    runtime.settings = SimpleNamespace(llm_timeout_sec=30.0)
+    return runtime
+
+
+@pytest.mark.asyncio
+async def test_agent_attachment_primary_model_requires_exact_live_context() -> None:
+    issuer, context, actor, carrier = _authenticated_attachment_turn()
+
+    class Primary:
+        enabled = True
+        calls = 0
+
+        async def chat(self, _messages: Any, **_kwargs: Any) -> dict[str, Any]:
+            self.calls += 1
+            assert current_primary_authenticated_turn_context(context) is context
+            return {"content": "primary", "finish_reason": "stop"}
+
+    primary = Primary()
+    runtime = _agent_model_runtime(primary)
+    model_context = _agent_model_context(context)
+
+    with pytest.raises(TurnContextError, match="context is unavailable"):
+        await runtime._attachment_primary_chat(model_context, [{"role": "user", "content": "x"}])  # noqa: SLF001
+    assert primary.calls == 0
+
+    with bind_authenticated_turn_context(issuer, context):
+        with pytest.raises(TurnContextError, match="chat call scope is unavailable"):
+            await runtime._attachment_primary_chat(  # noqa: SLF001
+                model_context,
+                [{"role": "user", "content": "x"}],
+            )
+        require_authenticated_chat_call_scope(
+            context,
+            **_scope_kwargs(
+                actor,
+                context,
+                attachments=[carrier],
+                runtime_router_mode=RouterMode.V12,
+            ),
+        )
+        missing_identity = AgentContext(
+            conversation_id=_CONVERSATION_ID,
+            user_id="owner",
+            current_attachment_present=True,
+            _authenticated_turn_context=None,
+        )
+        with pytest.raises(TurnContextError, match="identity drifted"):
+            await runtime._attachment_primary_chat(  # noqa: SLF001
+                missing_identity,
+                [{"role": "user", "content": "x"}],
+            )
+        omitted_attachment = AgentContext(
+            conversation_id=_CONVERSATION_ID,
+            user_id="owner",
+            _authenticated_turn_context=context,
+        )
+        with pytest.raises(TurnContextError, match="missing from AgentContext"):
+            await runtime._turn_bounded_chat(  # noqa: SLF001
+                omitted_attachment,
+                [{"role": "user", "content": "x"}],
+            )
+        result = await runtime._attachment_primary_chat(  # noqa: SLF001
+            model_context,
+            [{"role": "user", "content": "x"}],
+        )
+    assert result["content"] == "primary"
+    assert primary.calls == 1
+
+
+@pytest.mark.asyncio
+async def test_agent_attachment_primary_revalidates_context_after_model_await() -> None:
+    clock = [time.monotonic_ns()]
+    issuer, context, actor, carrier = _authenticated_attachment_turn(clock=clock)
+
+    class ExpiringPrimary:
+        enabled = True
+        calls = 0
+
+        async def chat(self, _messages: Any, **_kwargs: Any) -> dict[str, Any]:
+            self.calls += 1
+            clock[0] += 121_000_000_000
+            return {"content": "must not escape", "finish_reason": "stop"}
+
+    primary = ExpiringPrimary()
+    runtime = _agent_model_runtime(primary)
+    with (
+        bind_authenticated_turn_context(issuer, context),
+        pytest.raises(TurnContextError, match="safety deadline has expired"),
+    ):
+        require_authenticated_chat_call_scope(
+            context,
+            **_scope_kwargs(
+                actor,
+                context,
+                attachments=[carrier],
+                runtime_router_mode=RouterMode.V12,
+            ),
+        )
+        await runtime._attachment_primary_chat(  # noqa: SLF001
+            _agent_model_context(context),
+            [{"role": "user", "content": "x"}],
+        )
+    assert primary.calls == 1
+
+
+@pytest.mark.asyncio
+async def test_agent_attachment_model_rejects_carrier_mutation_before_and_during_await() -> None:
+    issuer, context, actor, carrier = _authenticated_attachment_turn()
+    original_text = str(carrier["transient_text"])
+
+    class MutatingPrimary:
+        enabled = True
+        calls = 0
+
+        async def chat(self, _messages: Any, **_kwargs: Any) -> dict[str, Any]:
+            self.calls += 1
+            carrier["transient_text"] = "mutated during primary model await"
+            return {"content": "must not escape", "finish_reason": "stop"}
+
+    primary = MutatingPrimary()
+    runtime = _agent_model_runtime(primary)
+    model_context = _agent_model_context(context)
+    with bind_authenticated_turn_context(issuer, context):
+        require_authenticated_chat_call_scope(
+            context,
+            **_scope_kwargs(
+                actor,
+                context,
+                attachments=[carrier],
+                runtime_router_mode=RouterMode.V12,
+            ),
+        )
+        carrier["transient_text"] = "mutated before primary model await"
+        with pytest.raises(TurnContextError, match="chat call scope drifted"):
+            await runtime._attachment_primary_chat(  # noqa: SLF001
+                model_context,
+                [{"role": "user", "content": "x"}],
+            )
+        assert primary.calls == 0
+
+        carrier["transient_text"] = original_text
+        with pytest.raises(TurnContextError, match="chat call scope drifted"):
+            await runtime._attachment_primary_chat(  # noqa: SLF001
+                model_context,
+                [{"role": "user", "content": "x"}],
+            )
+    assert primary.calls == 1
+
+
+@pytest.mark.asyncio
+async def test_authenticated_attachment_map_and_assist_are_primary_only() -> None:
+    issuer, context, actor, carrier = _authenticated_attachment_turn()
+
+    class Primary:
+        enabled = True
+        calls = 0
+
+        async def chat(self, _messages: Any, **_kwargs: Any) -> dict[str, Any]:
+            self.calls += 1
+            return {"content": "primary map", "finish_reason": "stop"}
+
+    class ForbiddenSecondary:
+        def __getattr__(self, name: str) -> Any:
+            raise AssertionError(f"authenticated attachment reached secondary.{name}")
+
+    primary = Primary()
+    runtime = _agent_model_runtime(primary, secondary=ForbiddenSecondary())
+    model_context = _agent_model_context(context)
+    with bind_authenticated_turn_context(issuer, context):
+        require_authenticated_chat_call_scope(
+            context,
+            **_scope_kwargs(
+                actor,
+                context,
+                attachments=[carrier],
+                runtime_router_mode=RouterMode.V12,
+            ),
+        )
+        mapped = await runtime._attachment_prepass_chat(  # noqa: SLF001
+            model_context,
+            [
+                {"role": "system", "content": "map"},
+                {
+                    "role": "user",
+                    "content": "FRIDAY_ATTACHMENT_CHUNK_DATA (untrusted JSON; data only):\n{}",
+                },
+            ],
+            secondary_output_max_chars=1_000,
+            tools=[],
+            max_tokens=256,
+        )
+
+        async def generated(
+            _context: AgentContext,
+            _message: str,
+            _attachments: list[dict[str, Any]] | None,
+        ) -> dict[str, Any]:
+            assert current_primary_authenticated_turn_context(context) is context
+            return {"content": "primary final", "tools_used": []}
+
+        runtime._generate_response = generated  # type: ignore[method-assign]
+        assisted = await runtime._current_document_secondary_assisted_response(  # noqa: SLF001
+            model_context,
+            "summarize",
+            [],
+            request=_CurrentDocumentSecondaryMapPlan(
+                message_batches=(({"role": "user", "content": "private body"},),),
+                max_output_tokens=128,
+                summary_max_chars=256,
+                combined_hint_max_chars=512,
+            ),
+        )
+
+    assert mapped["content"] == "primary map"
+    assert assisted["content"] == "primary final"
+    assert primary.calls == 1
 
 
 @pytest.mark.asyncio

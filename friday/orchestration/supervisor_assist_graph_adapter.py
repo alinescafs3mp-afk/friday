@@ -95,6 +95,7 @@ from friday.orchestration.transient_web_comparison import (
 from friday.permissions import ActorContext
 from friday.source_identity import (
     AuthorizedFileSnapshotToken,
+    authorized_file_snapshot_token_authorizes_scope,
     authorized_file_snapshot_token_is_process_owned,
     raw_source_identity_sha256,
 )
@@ -427,6 +428,8 @@ class AssistComparisonPublication:
     trace: AssistTraceInput
 
     def __post_init__(self) -> None:
+        # Construction proves process provenance only.  Exact tenant authority
+        # is checked against the active durable graph inside publication.
         if (
             not authorized_file_snapshot_token_is_process_owned(self.current_file_snapshot)
             or not current_file_web_comparison_is_process_owned(self.comparison)
@@ -1225,7 +1228,12 @@ class SupervisorAssistGraphAdapter:
                 raise SupervisorAssistGraphAdapterError("comparison source binding changed")
             token = publication.current_file_snapshot
             if (
-                token.source.raw_id != graph.current_file_raw_object_id
+                not authorized_file_snapshot_token_authorizes_scope(
+                    token,
+                    tenant_id=graph.user_id,
+                    storage_owner_id=graph.user_id,
+                )
+                or token.source.raw_id != graph.current_file_raw_object_id
                 or token.source.identity_sha256 != graph.current_file_source_identity_sha256
                 or token.content_sha256 != graph.current_file_content_sha256
             ):

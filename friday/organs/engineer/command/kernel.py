@@ -25,7 +25,7 @@ from friday.file_delivery import (
     CurrentMessageUploadBatchIdentity,
     CurrentMessageUploadFileIdentity,
 )
-from friday.source_identity import authorized_file_snapshot_token_is_process_owned
+from friday.source_identity import authorized_file_snapshot_token_authorizes_scope
 
 from .boundary import (
     ProvenScope,
@@ -215,7 +215,11 @@ def _validated_private_inputs(
             or stored.mime_type != expected.mime_type
             or len(stored.content) != expected.size_bytes
             or not hmac.compare_digest(digest, expected.content_sha256)
-            or not authorized_file_snapshot_token_is_process_owned(token)
+            or not authorized_file_snapshot_token_authorizes_scope(
+                token,
+                tenant_id=grant.tenant_id,
+                storage_owner_id=grant.tenant_id,
+            )
             or token is None
             or token.source.raw_id != expected.raw_id
             or token.source.identity_sha256 != expected.source_identity_sha256

@@ -8,17 +8,20 @@ authority from a public dictionary or read a source by itself.
 from __future__ import annotations
 
 import hashlib
+import hmac
 import json
 import re
+import secrets
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any
+from typing import Any, cast
 
-from friday.source_identity import raw_source_identity_sha256
+from friday.source_identity import canonical_tenant_id, raw_source_identity_sha256
 
 MAX_FILE_EVIDENCE_ITEMS = 12
 _PROCESS_AUTHORITY = object()
+_TOKEN_BINDING_KEY = secrets.token_bytes(32)
 _CURRENT_TURN_REFERENCE_ATTR = "_current_turn_file_reference"
 
 
@@ -31,18 +34,58 @@ class CurrentTurnFileReferenceToken:
     content_sha256: str
     _process_authority: object = field(repr=False, compare=False)
     reinspect_current_upload: bool = False
+    tenant_id: str | None = field(default=None, repr=False)
+    _binding_sha256: str | None = field(default=None, repr=False, compare=False)
 
 
-def stamp_current_turn_file_reference(
+def _current_reference_binding_sha256(
+    *,
+    raw_id: str,
+    source_identity_sha256: str,
+    content_sha256: str,
+    tenant_id: str,
+    reinspect_current_upload: bool,
+) -> str | None:
+    if (
+        type(raw_id) is not str
+        or type(source_identity_sha256) is not str
+        or type(content_sha256) is not str
+        or type(tenant_id) is not str
+        or type(reinspect_current_upload) is not bool
+    ):
+        return None
+    digest = hmac.new(_TOKEN_BINDING_KEY, b"friday/current-turn-file-reference/v1\0", hashlib.sha256)
+    for value in (raw_id, source_identity_sha256, content_sha256, tenant_id):
+        try:
+            encoded = value.encode("utf-8", errors="strict")
+        except UnicodeEncodeError:
+            return None
+        digest.update(len(encoded).to_bytes(8, "big"))
+        digest.update(encoded)
+    digest.update(b"\x01" if reinspect_current_upload else b"\x00")
+    return digest.hexdigest()
+
+
+def _stamp_current_turn_file_reference(
     carrier: Any,
     raw: Mapping[str, Any],
     *,
-    reinspect_current_upload: bool = False,
+    reinspect_current_upload: bool,
+    tenant_id: str | None,
 ) -> Any:
-    """Attach a private source pin to one server-owned mapping carrier."""
-
-    raw_id = str(raw.get("id") or "").strip()
+    raw_id_value = raw.get("id")
+    digest_value = raw.get("content_hash")
+    if tenant_id is not None and (type(raw_id_value) is not str or type(digest_value) is not str):
+        return carrier
+    if tenant_id is None:
+        raw_id = str(raw_id_value or "").strip()
+        content_sha256 = str(digest_value or "").strip().casefold()
+    else:
+        raw_id = cast(str, raw_id_value)
+        content_sha256 = cast(str, digest_value)
     if re.fullmatch(r"raw_[0-9a-f]{16}", raw_id) is None:
+        return carrier
+    if re.fullmatch(r"[0-9a-f]{64}", content_sha256) is None:
         return carrier
     projection = {
         "id": raw_id,
@@ -54,18 +97,68 @@ def stamp_current_turn_file_reference(
         "_raw_content": raw.get("raw_content"),
         "_raw_metadata": raw.get("metadata_json"),
     }
+    source_identity_sha256 = raw_source_identity_sha256(projection)
+    binding_sha256 = (
+        _current_reference_binding_sha256(
+            raw_id=raw_id,
+            source_identity_sha256=source_identity_sha256,
+            content_sha256=content_sha256,
+            tenant_id=tenant_id,
+            reinspect_current_upload=reinspect_current_upload is True,
+        )
+        if tenant_id is not None
+        else None
+    )
     token = CurrentTurnFileReferenceToken(
         raw_id=raw_id,
-        source_identity_sha256=raw_source_identity_sha256(projection),
-        content_sha256=str(raw.get("content_hash") or "").strip().casefold(),
+        source_identity_sha256=source_identity_sha256,
+        content_sha256=content_sha256,
         _process_authority=_PROCESS_AUTHORITY,
         reinspect_current_upload=reinspect_current_upload is True,
+        tenant_id=tenant_id,
+        _binding_sha256=binding_sha256,
     )
     try:
         object.__setattr__(carrier, _CURRENT_TURN_REFERENCE_ATTR, token)
     except (AttributeError, TypeError):
         return carrier
     return carrier
+
+
+def stamp_current_turn_file_reference(
+    carrier: Any,
+    raw: Mapping[str, Any],
+    *,
+    reinspect_current_upload: bool = False,
+) -> Any:
+    """Attach a private source pin to one server-owned mapping carrier."""
+
+    return _stamp_current_turn_file_reference(
+        carrier,
+        raw,
+        reinspect_current_upload=reinspect_current_upload,
+        tenant_id=None,
+    )
+
+
+def stamp_current_turn_file_reference_for_tenant(
+    carrier: Any,
+    raw: Mapping[str, Any],
+    *,
+    tenant_id: str,
+    reinspect_current_upload: bool = False,
+) -> Any:
+    """Attach a token only when the Raw row belongs to the exact tenant."""
+
+    tenant = canonical_tenant_id(tenant_id)
+    if tenant is None or canonical_tenant_id(raw.get("user_id")) != tenant:
+        return carrier
+    return _stamp_current_turn_file_reference(
+        carrier,
+        raw,
+        reinspect_current_upload=reinspect_current_upload,
+        tenant_id=tenant,
+    )
 
 
 def current_turn_file_reference_of(carrier: Any) -> CurrentTurnFileReferenceToken | None:
@@ -75,11 +168,87 @@ def current_turn_file_reference_of(carrier: Any) -> CurrentTurnFileReferenceToke
     if (
         type(token) is not CurrentTurnFileReferenceToken
         or token._process_authority is not _PROCESS_AUTHORITY
+        or type(token.raw_id) is not str
+        or re.fullmatch(r"raw_[0-9a-f]{16}", token.raw_id) is None
+        or type(token.source_identity_sha256) is not str
+        or re.fullmatch(r"[0-9a-f]{64}", token.source_identity_sha256) is None
+        or type(token.content_sha256) is not str
         or str(carrier.get("raw_object_id") or "") != token.raw_id
         or re.fullmatch(r"[0-9a-f]{64}", token.content_sha256) is None
+        or type(token.reinspect_current_upload) is not bool
+        or (
+            token.tenant_id is None
+            and token._binding_sha256 is not None
+        )
+        or (
+            token.tenant_id is not None
+            and not current_turn_file_reference_token_authorizes_tenant(
+                token,
+                tenant_id=token.tenant_id,
+            )
+        )
     ):
         return None
     return token
+
+
+def current_turn_file_reference_for_tenant(
+    carrier: Any,
+    *,
+    tenant_id: str,
+) -> CurrentTurnFileReferenceToken | None:
+    """Return only a current-turn token explicitly bound to this tenant."""
+
+    raw_id = carrier.get("raw_object_id") if isinstance(carrier, Mapping) else None
+    token = getattr(carrier, _CURRENT_TURN_REFERENCE_ATTR, None)
+    return (
+        token
+        if type(raw_id) is str
+        and type(token) is CurrentTurnFileReferenceToken
+        and raw_id == token.raw_id
+        and current_turn_file_reference_token_authorizes_tenant(token, tenant_id=tenant_id)
+        else None
+    )
+
+
+def current_turn_file_reference_token_authorizes_tenant(
+    value: Any,
+    *,
+    tenant_id: str,
+) -> bool:
+    """Require a process-owned current-turn token bound to this exact tenant."""
+
+    tenant = canonical_tenant_id(tenant_id)
+    expected_binding = (
+        _current_reference_binding_sha256(
+            raw_id=value.raw_id,
+            source_identity_sha256=value.source_identity_sha256,
+            content_sha256=value.content_sha256,
+            tenant_id=value.tenant_id,
+            reinspect_current_upload=value.reinspect_current_upload,
+        )
+        if type(value) is CurrentTurnFileReferenceToken
+        and type(value.tenant_id) is str
+        else None
+    )
+    return bool(
+        type(value) is CurrentTurnFileReferenceToken
+        and value._process_authority is _PROCESS_AUTHORITY
+        and tenant is not None
+        and type(value.tenant_id) is str
+        and value.tenant_id == tenant
+        and type(value.raw_id) is str
+        and re.fullmatch(r"raw_[0-9a-f]{16}", value.raw_id) is not None
+        and type(value.source_identity_sha256) is str
+        and re.fullmatch(r"[0-9a-f]{64}", value.source_identity_sha256) is not None
+        and type(value.content_sha256) is str
+        and re.fullmatch(r"[0-9a-f]{64}", value.content_sha256) is not None
+        and type(value.reinspect_current_upload) is bool
+        and type(value._binding_sha256) is str
+        and re.fullmatch(r"[0-9a-f]{64}", value._binding_sha256) is not None
+        and expected_binding is not None
+        and hmac.compare_digest(value._binding_sha256, expected_binding)
+    )
 
 
 def retain_current_turn_file_reference(source: Any, carrier: Any) -> Any:
@@ -218,7 +387,10 @@ __all__ = [
     "FileEvidenceView",
     "FileRegistrationKind",
     "MAX_FILE_EVIDENCE_ITEMS",
+    "current_turn_file_reference_for_tenant",
     "current_turn_file_reference_of",
+    "current_turn_file_reference_token_authorizes_tenant",
     "retain_current_turn_file_reference",
     "stamp_current_turn_file_reference",
+    "stamp_current_turn_file_reference_for_tenant",
 ]

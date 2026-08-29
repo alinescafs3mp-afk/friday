@@ -35,8 +35,8 @@ from urllib.parse import quote
 from friday.permissions import ActorContext, AuthorizationService
 from friday.source_identity import (
     AuthorizedFileSnapshotToken,
-    authorized_file_snapshot_token,
-    authorized_file_snapshot_token_is_process_owned,
+    authorized_file_snapshot_token_authorizes_scope,
+    tenant_authorized_file_snapshot_token,
 )
 from friday.storage._privacy import (
     _exact_uploader_raw_dependency,
@@ -302,7 +302,13 @@ def read_authorized_file_in_transaction(
     if row is None:
         raise FileRecordUnavailable
 
-    stored = _read_authorized_row(row, root, max_bytes=max_bytes)
+    stored = _read_authorized_row(
+        row,
+        root,
+        tenant_id=user_id,
+        storage_owner_id=user_id,
+        max_bytes=max_bytes,
+    )
 
     # Same IMMEDIATE writer lock already serializes quarantine, but re-check the
     # authorization predicate after the bytes leave the descriptor so a row that
@@ -410,7 +416,13 @@ def authorize_current_upload_file_in_transaction(
     )
     if row is None or not hmac.compare_digest(str(row["content_hash"] or "").casefold(), digest):
         raise FileRecordUnavailable
-    stored = _read_authorized_row(row, root, max_bytes=max_bytes)
+    stored = _read_authorized_row(
+        row,
+        root,
+        tenant_id=tenant_id,
+        storage_owner_id=tenant_id,
+        max_bytes=max_bytes,
+    )
     if not hmac.compare_digest(hashlib.sha256(stored.content).hexdigest(), digest):
         raise FileRecordUnavailable
     current = _current_upload_row(
@@ -475,7 +487,13 @@ def read_current_message_upload_file(
         )
         if row is None:
             raise FileRecordUnavailable
-        stored = _read_authorized_row(row, root, max_bytes=max_bytes)
+        stored = _read_authorized_row(
+            row,
+            root,
+            tenant_id=tenant_id,
+            storage_owner_id=tenant_id,
+            max_bytes=max_bytes,
+        )
         current = _current_upload_row(
             conn,
             raw_id=raw_id,
@@ -654,9 +672,19 @@ def _authorize_current_message_upload_batch_in_transaction(
         )
         if row is None:
             raise FileRecordUnavailable
-        stored = _read_authorized_row(row, root, max_bytes=max_bytes_per_file)
+        stored = _read_authorized_row(
+            row,
+            root,
+            tenant_id=fresh_actor.user_id,
+            storage_owner_id=fresh_actor.user_id,
+            max_bytes=max_bytes_per_file,
+        )
         token = stored.snapshot_token
-        if token is None or not authorized_file_snapshot_token_is_process_owned(token):
+        if token is None or not authorized_file_snapshot_token_authorizes_scope(
+            token,
+            tenant_id=fresh_actor.user_id,
+            storage_owner_id=fresh_actor.user_id,
+        ):
             raise FileRecordUnavailable
         content_digest = hashlib.sha256(stored.content).hexdigest()
         if not hmac.compare_digest(content_digest, token.content_sha256):
@@ -699,11 +727,20 @@ def _authorize_current_message_upload_batch_in_transaction(
         )
         if current is None:
             raise FileRecordUnavailable
-        refreshed = authorized_file_snapshot_token(
+        refreshed = tenant_authorized_file_snapshot_token(
             dict(current),
             content_sha256=token.content_sha256,
+            tenant_id=fresh_actor.user_id,
+            storage_owner_id=fresh_actor.user_id,
         )
-        if not authorized_file_snapshot_token_is_process_owned(refreshed) or refreshed != token:
+        if (
+            not authorized_file_snapshot_token_authorizes_scope(
+                refreshed,
+                tenant_id=fresh_actor.user_id,
+                storage_owner_id=fresh_actor.user_id,
+            )
+            or refreshed != token
+        ):
             raise FileRecordUnavailable
     _fresh_current_upload_actor(conn, authorization, fresh_actor)
 
@@ -886,7 +923,9 @@ def read_authorized_generated_file(
 
     with storage.transaction() as conn:
         row = conn.execute(
-            f"""SELECT r.id, r.user_id, r.source_ref, r.metadata_json, r.content_hash
+            f"""SELECT r.id, r.user_id, r.source, r.source_ref, r.content_type,
+                       r.received_at, r.content_hash, r.raw_content AS _raw_content,
+                       r.metadata_json, r.metadata_json AS _raw_metadata
                   FROM raw_objects r
                  WHERE r.id=? AND r.user_id=? AND r.content_type='generated_file'
                    AND r.deleted_at IS NULL
@@ -903,7 +942,13 @@ def read_authorized_generated_file(
         expected_digest = str(metadata.get("sha256") or "")
         if not expected_digest or not hmac.compare_digest(str(row["content_hash"] or ""), expected_digest):
             raise FileRecordUnavailable
-        stored = _read_authorized_row(row, root, max_bytes=max_bytes)
+        stored = _read_authorized_row(
+            row,
+            root,
+            tenant_id=tenant_id,
+            storage_owner_id=person_id,
+            max_bytes=max_bytes,
+        )
         expected_size = metadata.get("size_bytes")
         if (
             isinstance(expected_size, bool)
@@ -919,6 +964,8 @@ def _read_authorized_row(
     row: Any,
     root: Path,
     *,
+    tenant_id: str,
+    storage_owner_id: str,
     max_bytes: int | None,
 ) -> AuthorizedFileBytes:
     metadata = _metadata_object(row["metadata_json"])
@@ -972,9 +1019,11 @@ def _read_authorized_row(
         filename=filename,
         mime_type=mime_type,
         content=content,
-        snapshot_token=authorized_file_snapshot_token(
+        snapshot_token=tenant_authorized_file_snapshot_token(
             dict(row),
             content_sha256=expected_digest,
+            tenant_id=tenant_id,
+            storage_owner_id=storage_owner_id,
         ),
     )
 

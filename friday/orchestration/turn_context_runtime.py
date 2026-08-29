@@ -9,10 +9,14 @@ ledger remains the permanent replay authority across expiry and process restarts
 
 from __future__ import annotations
 
+import hashlib
+import hmac
+import secrets
 import time
 from collections.abc import AsyncIterator, Awaitable, Callable, Iterator
 from contextlib import asynccontextmanager, contextmanager
 from contextvars import ContextVar
+from dataclasses import fields, is_dataclass
 from functools import wraps
 from inspect import Parameter, signature
 from threading import Lock
@@ -36,7 +40,9 @@ _R = TypeVar("_R")
 # bounded.  Ordinary five-minute turns get over 54 roots/second of headroom.
 _MAX_EXECUTION_LEDGERS = 16_384
 _MAX_MONOTONIC_NS = (1 << 63) - 1
+_MAX_COMPONENT_IDENTITY_NODES = 4_096
 _PROCESS_MONOTONIC_NS: Callable[[], int] = time.monotonic_ns
+_PROCESS_COMPONENT_IDENTITY_KEY = secrets.token_bytes(hashlib.sha256().digest_size)
 
 
 class _TurnExecutionLedger:
@@ -45,6 +51,7 @@ class _TurnExecutionLedger:
         "advisory_calls",
         "context_sha256",
         "deadline_monotonic_ns",
+        "ledger_key",
         "monotonic_clock",
     )
 
@@ -53,22 +60,32 @@ class _TurnExecutionLedger:
         *,
         context_sha256: str,
         deadline_monotonic_ns: int,
+        ledger_key: tuple[str, str],
         monotonic_clock: Callable[[], int],
     ) -> None:
         self.active = True
         self.advisory_calls = 0
         self.context_sha256 = context_sha256
         self.deadline_monotonic_ns = deadline_monotonic_ns
+        self.ledger_key = ledger_key
         self.monotonic_clock = monotonic_clock
 
 
 class _BoundTurn:
-    __slots__ = ("active", "chat_call_scope", "context", "issuer", "ledger")
+    __slots__ = (
+        "active",
+        "chat_call_scope",
+        "context",
+        "context_component_identity_sha256",
+        "issuer",
+        "ledger",
+    )
 
     def __init__(
         self,
         *,
         context: AuthenticatedTurnContext,
+        context_component_identity_sha256: str,
         issuer: TurnContextIssuer,
         ledger: _TurnExecutionLedger,
     ) -> None:
@@ -80,6 +97,7 @@ class _BoundTurn:
         # (or anywhere durable).  It is revoked with the root below.
         self.chat_call_scope: object | None = None
         self.context: AuthenticatedTurnContext | None = context
+        self.context_component_identity_sha256 = context_component_identity_sha256
         self.issuer: TurnContextIssuer | None = issuer
         self.ledger = ledger
 
@@ -95,6 +113,58 @@ _EXECUTION_LEDGERS_LOCK = Lock()
 
 def _ledger_key(context: AuthenticatedTurnContext) -> tuple[str, str]:
     return (context.authority.issuer_fingerprint_sha256, context.turn_id)
+
+
+def _context_component_identity_sha256(context: AuthenticatedTurnContext) -> str:
+    """Bind the exact in-process component graph without retaining its bodies."""
+
+    digest = hmac.new(
+        _PROCESS_COMPONENT_IDENTITY_KEY,
+        b"friday/authenticated-turn-runtime/component-identity/v1\0",
+        hashlib.sha256,
+    )
+    stack: list[tuple[int, object]] = [(0, context)]
+    seen: set[int] = set()
+    nodes = 0
+    try:
+        while stack:
+            edge, value = stack.pop()
+            nodes += 1
+            if nodes > _MAX_COMPONENT_IDENTITY_NODES:
+                raise TurnContextError("authenticated turn component graph is too large")
+            value_id = id(value)
+            digest.update(edge.to_bytes(8, "big", signed=False))
+            digest.update(id(type(value)).to_bytes(16, "big", signed=False))
+            digest.update(value_id.to_bytes(16, "big", signed=False))
+            if value_id in seen:
+                digest.update(b"R")
+                continue
+            seen.add(value_id)
+
+            children: tuple[object, ...]
+            if is_dataclass(value) and not isinstance(value, type):
+                children = tuple(getattr(value, item.name) for item in fields(value))
+                digest.update(b"D")
+            elif type(value) is tuple:
+                children = value
+                digest.update(b"T")
+            elif type(value) is frozenset:
+                children = tuple(sorted(value, key=lambda item: (id(type(item)), id(item))))
+                digest.update(b"F")
+            elif type(value) is dict:
+                pairs = tuple(sorted(value.items(), key=lambda item: (id(item[0]), id(item[1]))))
+                children = tuple(component for pair in pairs for component in pair)
+                digest.update(b"M")
+            else:
+                digest.update(b"L")
+                continue
+            digest.update(len(children).to_bytes(8, "big", signed=False))
+            stack.extend(reversed(tuple(enumerate(children, start=1))))
+    except TurnContextError:
+        raise
+    except (AttributeError, OverflowError, TypeError, ValueError) as exc:
+        raise TurnContextError("authenticated turn component identity is invalid") from exc
+    return digest.hexdigest()
 
 
 def _read_monotonic_ns(clock: Callable[[], int]) -> int:
@@ -160,6 +230,7 @@ def _reserve_root_ledger(
         ledger = _TurnExecutionLedger(
             context_sha256=context_sha256,
             deadline_monotonic_ns=deadline_monotonic_ns,
+            ledger_key=key,
             monotonic_clock=monotonic_clock,
         )
         _EXECUTION_LEDGERS[key] = ledger
@@ -170,22 +241,51 @@ def _require_live_binding(binding: _BoundTurn) -> AuthenticatedTurnContext:
     with _EXECUTION_LEDGERS_LOCK:
         context = binding.context
         issuer = binding.issuer
+        ledger = binding.ledger
         if (
             not binding.active
-            or not binding.ledger.active
+            or not ledger.active
             or type(context) is not AuthenticatedTurnContext
             or type(issuer) is not TurnContextIssuer
+            or _EXECUTION_LEDGERS.get(ledger.ledger_key) is not ledger
         ):
             raise TurnContextError("authenticated turn runtime binding is no longer active")
+    component_identity_sha256 = _context_component_identity_sha256(context)
+    bound_component_identity_sha256 = binding.context_component_identity_sha256
+    if (
+        type(bound_component_identity_sha256) is not str
+        or len(bound_component_identity_sha256) != 64
+        or any(
+            char not in "0123456789abcdef"
+            for char in bound_component_identity_sha256
+        )
+        or not hmac.compare_digest(
+            component_identity_sha256,
+            bound_component_identity_sha256,
+        )
+    ):
+        raise TurnContextError("authenticated turn runtime component identity changed after root admission")
     admitted = issuer.require_context(context)
+    current_key = _ledger_key(admitted)
+    current_sha256 = admitted.canonical_sha256()
+    current_component_identity_sha256 = _context_component_identity_sha256(admitted)
     with _EXECUTION_LEDGERS_LOCK:
         if (
             not binding.active
-            or not binding.ledger.active
+            or not ledger.active
             or binding.context is not context
             or binding.issuer is not issuer
+            or binding.ledger is not ledger
+            or _EXECUTION_LEDGERS.get(ledger.ledger_key) is not ledger
+            or current_key != ledger.ledger_key
+            or current_sha256 != ledger.context_sha256
+            or binding.context_component_identity_sha256 != bound_component_identity_sha256
+            or not hmac.compare_digest(
+                current_component_identity_sha256,
+                bound_component_identity_sha256,
+            )
         ):
-            raise TurnContextError("authenticated turn runtime binding is no longer active")
+            raise TurnContextError("authenticated turn runtime context changed after root admission")
     return admitted
 
 
@@ -211,8 +311,14 @@ def bind_authenticated_turn_context(
     if current is not None:
         raise TurnContextError("authenticated turn runtime binding is invalid")
 
+    component_identity_sha256 = _context_component_identity_sha256(admitted)
     ledger = _reserve_root_ledger(issuer, admitted)
-    binding = _BoundTurn(context=admitted, issuer=issuer, ledger=ledger)
+    binding = _BoundTurn(
+        context=admitted,
+        context_component_identity_sha256=component_identity_sha256,
+        issuer=issuer,
+        ledger=ledger,
+    )
     token = _BOUND_TURN.set(binding)
     try:
         yield admitted
@@ -222,6 +328,7 @@ def bind_authenticated_turn_context(
             ledger.active = False
             binding.chat_call_scope = None
             binding.context = None
+            binding.context_component_identity_sha256 = ""
             binding.issuer = None
         _BOUND_TURN.reset(token)
 

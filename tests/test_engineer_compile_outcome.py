@@ -22,7 +22,7 @@ from friday.execution_kernel import ToolResult
 from friday.interaction_control_plane.legacy_trace import CapabilityStatus
 from friday.organs.engineer import ENGINEER_BUILD, ENGINEER_USE, compiler
 from friday.permissions import LEGACY_OWNER_USER_ID, ActorContext
-from friday.source_identity import authorized_file_snapshot_token
+from friday.source_identity import tenant_authorized_file_snapshot_token
 from tests.test_api_vertical_slice import _bridge_request
 
 
@@ -50,9 +50,16 @@ def _source_binding(
     )
 
 
-def _authorized_source_bytes(raw_id: str, filename: str, source: bytes) -> SimpleNamespace:
+def _authorized_source_bytes(
+    raw_id: str,
+    filename: str,
+    source: bytes,
+    *,
+    tenant_id: str = LEGACY_OWNER_USER_ID,
+) -> SimpleNamespace:
     raw = {
         "id": raw_id,
+        "user_id": tenant_id,
         "source": "upload",
         "source_ref": f"test:{raw_id}",
         "content_type": "file",
@@ -61,9 +68,11 @@ def _authorized_source_bytes(raw_id: str, filename: str, source: bytes) -> Simpl
         "_raw_content": "",
         "_raw_metadata": "{}",
     }
-    token = authorized_file_snapshot_token(
+    token = tenant_authorized_file_snapshot_token(
         raw,
         content_sha256=hashlib.sha256(source).hexdigest(),
+        tenant_id=tenant_id,
+        storage_owner_id=tenant_id,
     )
     assert token is not None
     return SimpleNamespace(

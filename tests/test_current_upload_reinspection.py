@@ -214,6 +214,8 @@ def test_healthy_duplicate_does_not_request_current_upload_reinspection(storage)
             "extraction": {"success": True, "text_success": True, "chars": 500},
         },
         raw=stored,
+        tenant_id="alice",
+        uploaded_by="alice",
     )
 
     token = current_turn_file_reference_of(attachment)
@@ -232,6 +234,7 @@ def test_exact_empty_text_duplicate_is_not_reparsed() -> None:
         },
         raw={
             "id": raw_id,
+            "user_id": "alice",
             "source": "upload",
             "source_ref": "telegram-file:empty",
             "content_type": "file",
@@ -247,6 +250,8 @@ def test_exact_empty_text_duplicate_is_not_reparsed() -> None:
                 "extraction_chars": 0,
             },
         },
+        tenant_id="alice",
+        uploaded_by="alice",
     )
 
     token = current_turn_file_reference_of(attachment)
@@ -265,6 +270,7 @@ def test_failed_duplicate_requests_current_upload_reinspection() -> None:
         },
         raw={
             "id": raw_id,
+            "user_id": "alice",
             "source": "upload",
             "source_ref": "telegram-file:failed",
             "content_type": "file",
@@ -280,6 +286,8 @@ def test_failed_duplicate_requests_current_upload_reinspection() -> None:
                 "extraction_chars": 0,
             },
         },
+        tenant_id="alice",
+        uploaded_by="alice",
     )
 
     token = current_turn_file_reference_of(attachment)
@@ -309,6 +317,7 @@ def test_sparse_legacy_office_duplicate_requests_current_upload_reinspection(
         },
         raw={
             "id": raw_id,
+            "user_id": "alice",
             "source": "upload",
             "source_ref": "telegram-file:sparse-office",
             "content_type": "file",
@@ -324,6 +333,8 @@ def test_sparse_legacy_office_duplicate_requests_current_upload_reinspection(
                 "extraction_chars": 12,
             },
         },
+        tenant_id="alice",
+        uploaded_by="alice",
     )
 
     token = current_turn_file_reference_of(attachment)

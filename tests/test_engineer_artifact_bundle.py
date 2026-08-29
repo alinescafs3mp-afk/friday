@@ -343,6 +343,46 @@ def test_source_reauthorization_rejects_revocation_and_changed_lineage(settings,
         )
 
 
+@pytest.mark.parametrize(
+    ("tenant_id", "storage_owner_id"),
+    (
+        ("other-tenant", LEGACY_OWNER_USER_ID),
+        (LEGACY_OWNER_USER_ID, "other-storage-owner"),
+    ),
+)
+def test_source_reauthorization_rejects_lineage_outside_exact_storage_scope(
+    settings,
+    storage,
+    tenant_id: str,
+    storage_owner_id: str,
+) -> None:
+    storage.ensure_user(LEGACY_OWNER_USER_ID, preset_key="owner")
+    raw_id = _store_file(settings, storage, filename="Main.java", body=b"class Main {}")
+    lineage = _source_lineage(settings, storage, raw_id)
+    wrong_scope = replace(
+        lineage,
+        snapshot_token=replace(
+            lineage.snapshot_token,
+            tenant_id=tenant_id,
+            storage_owner_id=storage_owner_id,
+        ),
+    )
+
+    with (
+        storage.transaction() as conn,
+        pytest.raises(EngineerArtifactBundleError, match="source_lineage_invalid"),
+    ):
+        reauthorize_bundle_sources_in_transaction(
+            conn,
+            files_root=settings.files_dir,
+            authorization=AuthorizationService(storage),
+            actor=ActorContext(LEGACY_OWNER_USER_ID, "owner", "test"),
+            tenant_id=LEGACY_OWNER_USER_ID,
+            lineages=(wrong_scope,),
+            max_bytes=1024 * 1024,
+        )
+
+
 def test_exact_multi_output_publication_persists_order_bytes_and_attestation(settings, storage) -> None:
     storage.ensure_user(LEGACY_OWNER_USER_ID, preset_key="owner")
     raw_id = _store_file(settings, storage, filename="Main.java", body=b"class Main {}")

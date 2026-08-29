@@ -7,13 +7,17 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from enum import StrEnum
 
-from friday.file_evidence import current_turn_file_reference_of
+from friday.file_evidence import current_turn_file_reference_for_tenant
 
 _WORK_ITEM_ID_RE = re.compile(r"work_[0-9a-f]{16}\Z")
 _WORK_GRAPH_ID_RE = re.compile(r"graph_[0-9a-f]{16}\Z")
 
 
-def pending_comparison_current_attachment_count(attachments: object) -> int:
+def pending_comparison_current_attachment_count(
+    attachments: object,
+    *,
+    tenant_id: str,
+) -> int:
     """Recognize the one process-owned current-upload surface, and nothing else."""
 
     if type(attachments) is not list or len(attachments) != 1:
@@ -21,7 +25,7 @@ def pending_comparison_current_attachment_count(attachments: object) -> int:
     carrier = attachments[0]
     if not isinstance(carrier, Mapping):
         return 0
-    return int(current_turn_file_reference_of(carrier) is not None)
+    return int(current_turn_file_reference_for_tenant(carrier, tenant_id=tenant_id) is not None)
 
 
 class PendingDurableAdmissionState(StrEnum):

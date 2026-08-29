@@ -32,14 +32,18 @@ from dataclasses import dataclass, field, fields, is_dataclass
 from enum import Enum, StrEnum
 from typing import Any
 
-from friday.file_evidence import CurrentTurnFileReferenceToken, current_turn_file_reference_of
+from friday.file_evidence import (
+    CurrentTurnFileReferenceToken,
+    current_turn_file_reference_for_tenant,
+    current_turn_file_reference_token_authorizes_tenant,
+)
 from friday.model_input_hygiene import secondary_model_messages_are_secret_free
 from friday.orchestration.contracts import AttachmentDescriptor, RouterMode, TurnInput
 from friday.pending_durable_turn import PendingDurableAdmissionState, PendingDurableTurnAdmission
 from friday.permissions import ActorContext
 from friday.source_identity import (
     AuthorizedFileSnapshotToken,
-    authorized_file_snapshot_token_is_process_owned,
+    authorized_file_snapshot_token_authorizes_scope,
 )
 from friday.turn_intent_policy import (
     AttachmentDisposition,
@@ -1348,7 +1352,10 @@ class TurnContextIssuer:
         descriptor: AttachmentDescriptor,
     ) -> AuthorizedSourceIdentity:
         self._require_authority(authority)
-        token = current_turn_file_reference_of(carrier)
+        token = current_turn_file_reference_for_tenant(
+            carrier,
+            tenant_id=authority.tenant_id,
+        )
         if type(token) is not CurrentTurnFileReferenceToken:
             raise TurnContextError("current attachment source lacks a process-owned token")
         if type(descriptor) is not AttachmentDescriptor:
@@ -1363,6 +1370,7 @@ class TurnContextIssuer:
         private_payload = {
             "kind": AuthorizedSourceKind.CURRENT_ATTACHMENT.value,
             "turn_authority_sha256": authority.canonical_sha256(),
+            "tenant_binding_sha256": authority.tenant_binding_sha256,
             "ordinal": ordinal,
             "raw_id": token.raw_id,
             "source_identity_sha256": token.source_identity_sha256,
@@ -1388,7 +1396,11 @@ class TurnContextIssuer:
         descriptor: AttachmentDescriptor,
     ) -> AuthorizedSourceIdentity:
         self._require_authority(authority)
-        if not authorized_file_snapshot_token_is_process_owned(token):
+        if not authorized_file_snapshot_token_authorizes_scope(
+            token,
+            tenant_id=authority.tenant_id,
+            storage_owner_id=authority.tenant_id,
+        ):
             raise TurnContextError("registered file source lacks a process-owned token")
         if type(descriptor) is not AttachmentDescriptor:
             raise TurnContextError("registered file source descriptor is invalid")
@@ -1402,6 +1414,12 @@ class TurnContextIssuer:
         private_payload = {
             "kind": AuthorizedSourceKind.REGISTERED_FILE.value,
             "turn_authority_sha256": authority.canonical_sha256(),
+            "tenant_binding_sha256": authority.tenant_binding_sha256,
+            "storage_owner_binding_sha256": _keyed_binding(
+                self._namespace_key,
+                b"friday/turn-context/storage-owner/v1\0",
+                token.storage_owner_id,
+            ),
             "ordinal": ordinal,
             "raw_id": token.source.raw_id,
             "source_identity_sha256": token.source.identity_sha256,
@@ -1792,11 +1810,17 @@ class TurnContextIssuer:
             expected = self.accepted_ingress_source(authority)
         elif source.kind is AuthorizedSourceKind.CURRENT_ATTACHMENT:
             token = source.private_carrier
-            if type(token) is not CurrentTurnFileReferenceToken:
+            if type(token) is not CurrentTurnFileReferenceToken or not (
+                current_turn_file_reference_token_authorizes_tenant(
+                    token,
+                    tenant_id=authority.tenant_id,
+                )
+            ):
                 raise TurnContextError("current attachment source carrier is stale")
             private_payload = {
                 "kind": AuthorizedSourceKind.CURRENT_ATTACHMENT.value,
                 "turn_authority_sha256": authority.canonical_sha256(),
+                "tenant_binding_sha256": authority.tenant_binding_sha256,
                 "ordinal": source.ordinal,
                 "raw_id": token.raw_id,
                 "source_identity_sha256": token.source_identity_sha256,
@@ -1815,15 +1839,23 @@ class TurnContextIssuer:
             )
         else:
             token = source.private_carrier
-            if type(
-                token
-            ) is not AuthorizedFileSnapshotToken or not authorized_file_snapshot_token_is_process_owned(
-                token
+            if type(token) is not AuthorizedFileSnapshotToken or not (
+                authorized_file_snapshot_token_authorizes_scope(
+                    token,
+                    tenant_id=authority.tenant_id,
+                    storage_owner_id=authority.tenant_id,
+                )
             ):
                 raise TurnContextError("registered file source carrier is stale")
             private_payload = {
                 "kind": AuthorizedSourceKind.REGISTERED_FILE.value,
                 "turn_authority_sha256": authority.canonical_sha256(),
+                "tenant_binding_sha256": authority.tenant_binding_sha256,
+                "storage_owner_binding_sha256": _keyed_binding(
+                    self._namespace_key,
+                    b"friday/turn-context/storage-owner/v1\0",
+                    token.storage_owner_id,
+                ),
                 "ordinal": source.ordinal,
                 "raw_id": token.source.raw_id,
                 "source_identity_sha256": token.source.identity_sha256,

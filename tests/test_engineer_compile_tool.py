@@ -22,7 +22,7 @@ from friday.organs.engineer.targets import (
     requests_artifact_compile,
 )
 from friday.permissions import LEGACY_OWNER_USER_ID, ActorContext, AuthorizationService
-from friday.source_identity import authorized_file_snapshot_token
+from friday.source_identity import tenant_authorized_file_snapshot_token
 
 
 def _class_bytes() -> bytes:
@@ -74,9 +74,13 @@ def _stored_source(
     *,
     raw_id: str = "raw_0123456789abcdef",
     filename: str = "Main.java",
+    tenant_id: str = LEGACY_OWNER_USER_ID,
+    storage_owner_id: str | None = None,
 ) -> SimpleNamespace:
+    owner_id = tenant_id if storage_owner_id is None else storage_owner_id
     raw = {
         "id": raw_id,
+        "user_id": owner_id,
         "source": "upload",
         "source_ref": "test:compile",
         "content_type": "file",
@@ -85,9 +89,11 @@ def _stored_source(
         "_raw_content": "",
         "_raw_metadata": "{}",
     }
-    snapshot_token = authorized_file_snapshot_token(
+    snapshot_token = tenant_authorized_file_snapshot_token(
         raw,
         content_sha256=hashlib.sha256(source).hexdigest(),
+        tenant_id=tenant_id,
+        storage_owner_id=owner_id,
     )
     assert snapshot_token is not None
     return SimpleNamespace(
@@ -748,6 +754,61 @@ async def test_compile_tool_rechecks_code_owned_source_identity_before_spawn(
         raw_id="raw_0123456789abcdef",
         expected_filename=expected_filename,
         expected_sha256=expected_sha256 or hashlib.sha256(source).hexdigest(),
+    )
+
+    assert result == {
+        "ok": False,
+        "status": "unavailable",
+        "error": "source_identity_changed",
+        "_work_started": False,
+    }
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("tenant_id", "storage_owner_id"),
+    (
+        ("other-tenant", "other-tenant"),
+        (LEGACY_OWNER_USER_ID, "other-storage-owner"),
+    ),
+)
+async def test_compile_tool_rejects_source_snapshot_outside_actor_scope_before_spawn(
+    settings,
+    storage,
+    monkeypatch: pytest.MonkeyPatch,
+    tenant_id: str,
+    storage_owner_id: str,
+) -> None:
+    source = b"class Main {}"
+    monkeypatch.setattr(
+        engineer_tools,
+        "_read_owned",
+        lambda *_args: _stored_source(
+            source,
+            tenant_id=tenant_id,
+            storage_owner_id=storage_owner_id,
+        ),
+    )
+
+    def forbidden_spawn(*_args, **_kwargs):
+        raise AssertionError("sandbox must not start for a source outside actor scope")
+
+    monkeypatch.setattr(engineer_tools.sandbox, "compile_java_artifact", forbidden_spawn)
+    ctx = ServiceContext(
+        settings=settings,
+        storage=storage,
+        kg=None,
+        ingestion=SimpleNamespace(secondary_brain=None),
+        llm=None,
+    )
+    spec = {tool.name: tool for tool in engineer_tools.build_engineer_tools(ctx)}["engineer_compile_java"]
+    assert spec.handler is not None
+
+    result = await spec.handler(
+        actor=ActorContext(LEGACY_OWNER_USER_ID, "owner", "test"),
+        raw_id="raw_0123456789abcdef",
+        expected_filename="Main.java",
+        expected_sha256=hashlib.sha256(source).hexdigest(),
     )
 
     assert result == {

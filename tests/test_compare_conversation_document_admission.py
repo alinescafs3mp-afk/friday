@@ -12,7 +12,7 @@ from fastapi.testclient import TestClient
 
 import friday.agent_runtime as agent_runtime_module
 from friday.agent_runtime import AgentRuntime
-from friday.file_evidence import stamp_current_turn_file_reference
+from friday.file_evidence import stamp_current_turn_file_reference_for_tenant
 from friday.interaction_control_plane.compare_conversation_document import (
     DocumentReferenceQuestionKind,
     DocumentReferenceQuestionState,
@@ -221,6 +221,7 @@ def _current_attachment(raw_id: str) -> _Carrier:
     carrier = _Carrier(raw_object_id=raw_id)
     raw = {
         "id": raw_id,
+        "user_id": _OWNER,
         "source": "upload",
         "source_ref": f"api-document:{raw_id}",
         "content_type": "file",
@@ -229,7 +230,7 @@ def _current_attachment(raw_id: str) -> _Carrier:
         "raw_content": "PRIVATE-CURRENT-BODY",
         "metadata_json": {"uploaded_by": _OWNER},
     }
-    return stamp_current_turn_file_reference(carrier, raw)
+    return stamp_current_turn_file_reference_for_tenant(carrier, raw, tenant_id=_OWNER)
 
 
 class _LegacySpy:

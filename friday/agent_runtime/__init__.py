@@ -112,7 +112,7 @@ from friday.file_evidence import (
     FileEvidenceSet,
     FileEvidenceView,
     FileRegistrationKind,
-    current_turn_file_reference_of,
+    current_turn_file_reference_for_tenant,
     retain_current_turn_file_reference,
 )
 from friday.file_evidence_reader import (
@@ -354,12 +354,20 @@ from friday.orchestration.simple_public_news_outcome import (
     simple_public_news_source_ledger_identity,
     simple_public_news_topic_mismatch_is_empty,
 )
-from friday.orchestration.turn_context import AuthenticatedTurnContext, TurnContextError
+from friday.orchestration.turn_context import (
+    AuthenticatedTurnContext,
+    AuthorizedSourceKind,
+    TurnContextError,
+)
 from friday.orchestration.turn_context_call_scope import (
     UNSPECIFIED_CHAT_ADJUNCT,
     require_authenticated_chat_call_scope,
+    require_current_authenticated_chat_call_scope,
 )
-from friday.orchestration.turn_context_runtime import current_primary_authenticated_turn_context
+from friday.orchestration.turn_context_runtime import (
+    current_authenticated_turn_context,
+    current_primary_authenticated_turn_context,
+)
 from friday.organs.engineer.command.contracts import CommandStatus
 from friday.organs.engineer.publication import (
     ExactGeneratedFileBatch,
@@ -418,7 +426,7 @@ from friday.retrieval.identity_contract import AuthorityScope, CanonicalObjectKi
 from friday.source_identity import (
     AuthorizedFileSnapshotToken,
     RawSourceSnapshot,
-    authorized_file_snapshot_token_is_process_owned,
+    authorized_file_snapshot_token_authorizes_scope,
     source_search_page_snapshots,
 )
 from friday.source_identity import (
@@ -1536,6 +1544,7 @@ def _authorized_file_snapshot_for_parser(
     authorized: Any,
     *,
     raw_id: str,
+    tenant_id: str,
 ) -> AuthorizedFileSnapshotToken | None:
     """Validate the process-owned token against the exact parser bytes."""
 
@@ -1544,7 +1553,11 @@ def _authorized_file_snapshot_for_parser(
     if (
         not isinstance(content, bytes)
         or not isinstance(snapshot_token, AuthorizedFileSnapshotToken)
-        or not authorized_file_snapshot_token_is_process_owned(snapshot_token)
+        or not authorized_file_snapshot_token_authorizes_scope(
+            snapshot_token,
+            tenant_id=tenant_id,
+            storage_owner_id=tenant_id,
+        )
         or snapshot_token.source.raw_id != raw_id
         or not re.fullmatch(r"[0-9a-f]{64}", snapshot_token.source.identity_sha256)
         or not re.fullmatch(r"[0-9a-f]{64}", snapshot_token.content_sha256)
@@ -36922,12 +36935,64 @@ def _is_mineable_eval_query(query: str) -> bool:
     return "\n" not in query and 8 <= len(query) <= 500
 
 
+def _current_attachment_model_authority(
+    expected: AuthenticatedTurnContext | None = None,
+) -> AuthenticatedTurnContext | None:
+    """Return the exact live authority only for an authenticated current file.
+
+    The primary model may read a current attachment, but every model await must
+    stay inside the same live root.  Advisory models deliberately receive no
+    such authority: a bounded advisory source projection is a separate future
+    contract, not something inferred from a private prompt body.
+    """
+
+    admitted = current_primary_authenticated_turn_context(expected)
+    if admitted is None:
+        return None
+    return (
+        admitted
+        if any(source.kind is AuthorizedSourceKind.CURRENT_ATTACHMENT for source in admitted.authorized_sources)
+        else None
+    )
+
+
+def _revalidate_current_attachment_model_scope(
+    expected: AuthenticatedTurnContext | None = None,
+) -> AuthenticatedTurnContext | None:
+    """Re-run the code-owned raw-call seal over every current-file carrier."""
+
+    admitted = _current_attachment_model_authority(expected)
+    if admitted is None:
+        return None
+    require_current_authenticated_chat_call_scope(admitted)
+    return admitted
+
+
+def _agent_attachment_model_authority(context: AgentContext | None) -> AuthenticatedTurnContext | None:
+    """Relate an ``AgentContext`` to its exact authenticated file authority."""
+
+    expected = context._authenticated_turn_context if context is not None else None
+    admitted = _revalidate_current_attachment_model_scope(expected)
+    if admitted is not None and (context is None or not context.current_attachment_present):
+        raise TurnContextError("authenticated current attachment is missing from AgentContext")
+    if admitted is not None and expected is not admitted:
+        raise TurnContextError("AgentContext authenticated attachment identity drifted")
+    if (
+        admitted is None
+        and expected is not None
+        and context is not None
+        and context.current_attachment_present
+    ):
+        raise TurnContextError("AgentContext attachment lacks authenticated current source authority")
+    return admitted
+
+
 @dataclass
 class AgentContext:
     conversation_id: str
     user_id: str
     _authenticated_turn_context: AuthenticatedTurnContext | None = field(
-        default=None,
+        default_factory=current_authenticated_turn_context,
         repr=False,
         compare=False,
     )
@@ -39280,7 +39345,14 @@ class AgentRuntime:
                     media_type=str(item.get("mime_type") or item.get("media_type") or "binary"),
                 )
                 for index, item in enumerate((attachments or []), start=1)
-                if isinstance(item, Mapping) and (token := current_turn_file_reference_of(item)) is not None
+                if isinstance(item, Mapping)
+                and (
+                    token := current_turn_file_reference_for_tenant(
+                        item,
+                        tenant_id=actor.user_id,
+                    )
+                )
+                is not None
             )
             try:
                 if len(current_references) == 1 and len(attachments or []) == 1:
@@ -40087,7 +40159,11 @@ class AgentRuntime:
             if (
                 stored.raw_id != raw_id
                 or snapshot is None
-                or not authorized_file_snapshot_token_is_process_owned(snapshot)
+                or not authorized_file_snapshot_token_authorizes_scope(
+                    snapshot,
+                    tenant_id=fresh_actor.user_id,
+                    storage_owner_id=fresh_actor.user_id,
+                )
                 or snapshot.source.raw_id != raw_id
                 or not hmac.compare_digest(snapshot.content_sha256, content_sha256)
             ):
@@ -41251,7 +41327,10 @@ class AgentRuntime:
                 direct_read_authority=direct_authority,
                 historical_authority=historical_authority,
             )
-            current_upload_token = current_turn_file_reference_of(item)
+            current_upload_token = current_turn_file_reference_for_tenant(
+                item,
+                tenant_id=tenant_id,
+            )
             if current is None and current_upload_token is not None:
                 try:
                     current_upload = authorize_current_upload_file_in_transaction(
@@ -41914,7 +41993,11 @@ class AgentRuntime:
             or len(stored.content) != outcome.source_size_bytes
             or not hmac.compare_digest(source_sha256, outcome.source_sha256)
             or snapshot is None
-            or not authorized_file_snapshot_token_is_process_owned(snapshot)
+            or not authorized_file_snapshot_token_authorizes_scope(
+                snapshot,
+                tenant_id=tenant_id,
+                storage_owner_id=tenant_id,
+            )
             or snapshot.source.raw_id != outcome.source_raw_id
             or not hmac.compare_digest(snapshot.content_sha256, outcome.source_sha256)
             or not hmac.compare_digest(
@@ -45710,6 +45793,7 @@ class AgentRuntime:
                 snapshot_token = _authorized_file_snapshot_for_parser(
                     authorized,
                     raw_id=raw_id,
+                    tenant_id=tenant_id,
                 )
                 if snapshot_token is None:
                     hydrated.append(item)
@@ -45906,6 +45990,8 @@ class AgentRuntime:
                     )
                 )
                 answer, clipped = self._attachment_hierarchy_text(result, max_chars=16_000)
+            except TurnContextError:
+                raise
             except Exception as exc:  # noqa: BLE001 - details are advisory, coverage records failure
                 LOGGER.warning("Document detail extraction failed (%s)", type(exc).__name__)
                 return (), False
@@ -46087,7 +46173,10 @@ class AgentRuntime:
             attachment_uploader = _resolved_telegram_reply_uploader(item) or person_id
             direct_read_authority = _explicit_filename_direct_read_authority_of(item)
             historical_authority = _historical_direct_read_authority_of(item)
-            current_upload_token = current_turn_file_reference_of(item)
+            current_upload_token = current_turn_file_reference_for_tenant(
+                item,
+                tenant_id=tenant_id,
+            )
             current_upload_authorized = None
             canonical = self._owned_file_attachment(
                 raw_id,
@@ -46190,6 +46279,7 @@ class AgentRuntime:
             snapshot_token = _authorized_file_snapshot_for_parser(
                 authorized,
                 raw_id=raw_id,
+                tenant_id=tenant_id,
             )
             if snapshot_token is None:
                 hydrated.append(unavailable(canonical))
@@ -46546,7 +46636,10 @@ class AgentRuntime:
                 # token can still authorize one exact durable message pointer;
                 # later readers must cross that message binding plus the same
                 # registered-byte/tenant/uploader checks again.
-                token = current_turn_file_reference_of(item)
+                token = current_turn_file_reference_for_tenant(
+                    item,
+                    tenant_id=tenant_id,
+                )
                 if token is not None:
                     try:
                         current_upload = authorize_current_upload_file(
@@ -49121,7 +49214,10 @@ class AgentRuntime:
         for supplied in attachments or []:
             if not isinstance(supplied, Mapping):
                 continue
-            token = current_turn_file_reference_of(supplied)
+            token = current_turn_file_reference_for_tenant(
+                supplied,
+                tenant_id=actor.user_id,
+            )
             if token is not None and token.reinspect_current_upload:
                 current_upload_reinspection_pins[token.raw_id] = token.source_identity_sha256
         if turn_policy is not None and not isinstance(turn_policy, TurnPolicyDecision):
@@ -49282,7 +49378,10 @@ class AgentRuntime:
             user_id=user_id,
             limit=20,
         )
-        comparison_attachment_count = pending_comparison_current_attachment_count(attachments)
+        comparison_attachment_count = pending_comparison_current_attachment_count(
+            attachments,
+            tenant_id=tenant_id,
+        )
         comparison_durable_surface = bool(
             (not attachments or comparison_attachment_count == 1)
             and enable_tools is True
@@ -50224,7 +50323,14 @@ class AgentRuntime:
                 # their exact bytes in FRIDAY_INPUT_DIR.
                 for raw_id in current_attachment_ids:
                     original = original_by_raw_id.get(raw_id)
-                    if original is None or current_turn_file_reference_of(original) is None:
+                    if (
+                        original is None
+                        or current_turn_file_reference_for_tenant(
+                            original,
+                            tenant_id=tenant_id,
+                        )
+                        is None
+                    ):
                         continue
                     canonical_current.append(
                         _private_owned_attachment_copy(
@@ -53038,7 +53144,8 @@ class AgentRuntime:
         # assignment is deliberately based on the timestamp captured at method
         # entry, not on when routing/context preparation happened to finish.
         context.turn_deadline = turn_deadline
-        context._authenticated_turn_context = authenticated_turn_context
+        if context._authenticated_turn_context is not authenticated_turn_context:
+            raise TurnContextError("AgentContext was constructed outside its authenticated turn")
         network_report_requested = False
         nmap_capability_truth_requested = False
         if interaction_mode == "engineer" and not autonomous_engineer:
@@ -54248,7 +54355,8 @@ class AgentRuntime:
         )
         current_document_secondary_request: _CurrentDocumentSecondaryMapPlan | None = None
         if (
-            current_document_secondary_task in {"summary", "analysis", "comparison"}
+            authenticated_turn_context is None
+            and current_document_secondary_task in {"summary", "analysis", "comparison"}
             and (synthetic_document_notice or pure_file_read_turn)
             and supplied_attachment_count > 0
             and supplied_attachment_count == attachment_expected_count
@@ -60062,6 +60170,8 @@ class AgentRuntime:
                 max_tokens=self.settings.cognition_max_tokens,
                 priority="foreground",
             )
+        except TurnContextError:
+            raise
         except Exception as exc:  # noqa: BLE001 — отказ арбитра это обычный путь, не поломка
             LOGGER.info("Office intent arbiter failed (%s)", type(exc).__name__)
             return ""
@@ -61563,18 +61673,23 @@ class AgentRuntime:
     ) -> dict[str, Any]:
         """Run one model await without crossing an absolute monotonic deadline."""
 
+        authenticated_attachment = _revalidate_current_attachment_model_scope()
         remaining = _remaining_deadline_budget(deadline)
-        if remaining is None:
-            return await self.llm.chat(messages, **kwargs)
-        if remaining <= 0:
-            raise TimeoutError("turn model budget exhausted")
-        if getattr(self.llm, "supports_absolute_deadline", False) is True:
-            # The real router owns semaphore admission, retries and HTTP.  Give
-            # that owner the absolute request clock so it can fail before a
-            # POST or bound a submitted read precisely.  Legacy/test adapters
-            # keep the outer wait below and need not accept the new keyword.
-            return await self.llm.chat(messages, absolute_deadline=deadline, **kwargs)
-        return await asyncio.wait_for(self.llm.chat(messages, **kwargs), timeout=remaining)
+        try:
+            if remaining is None:
+                return await self.llm.chat(messages, **kwargs)
+            if remaining <= 0:
+                raise TimeoutError("turn model budget exhausted")
+            if getattr(self.llm, "supports_absolute_deadline", False) is True:
+                # The real router owns semaphore admission, retries and HTTP.  Give
+                # that owner the absolute request clock so it can fail before a
+                # POST or bound a submitted read precisely.  Legacy/test adapters
+                # keep the outer wait below and need not accept the new keyword.
+                return await self.llm.chat(messages, absolute_deadline=deadline, **kwargs)
+            return await asyncio.wait_for(self.llm.chat(messages, **kwargs), timeout=remaining)
+        finally:
+            if authenticated_attachment is not None:
+                _revalidate_current_attachment_model_scope(authenticated_attachment)
 
     async def _turn_bounded_chat(
         self,
@@ -61584,6 +61699,7 @@ class AgentRuntime:
     ) -> dict[str, Any]:
         """Run one model await without crossing the request's absolute deadline."""
 
+        authenticated_attachment = _agent_attachment_model_authority(context)
         if context is not None and context.interaction_mode == "engineer" and isinstance(self.llm, LLMRouter):
             # Keep the engineer profile local to the primary Qwen lane. Explicit
             # narrower classifier/output limits still win, while ordinary modes
@@ -61597,11 +61713,15 @@ class AgentRuntime:
             kwargs.setdefault("temperature", 0.1)
             kwargs.setdefault("max_tokens", 8_192)
             kwargs.setdefault("enable_thinking", False)
-        return await self._deadline_bounded_chat(
-            context.turn_deadline if context is not None else None,
-            messages,
-            **kwargs,
-        )
+        try:
+            return await self._deadline_bounded_chat(
+                context.turn_deadline if context is not None else None,
+                messages,
+                **kwargs,
+            )
+        finally:
+            if authenticated_attachment is not None:
+                _agent_attachment_model_authority(context)
 
     async def _attachment_primary_chat(
         self,
@@ -61611,6 +61731,7 @@ class AgentRuntime:
     ) -> dict[str, Any]:
         """Run one model await inside the attachment turn's shared primary budget."""
 
+        authenticated_attachment = _agent_attachment_model_authority(context)
         deadline = self._ensure_attachment_primary_deadline(context) if context is not None else None
         if context is not None and context.interaction_mode == "engineer" and isinstance(self.llm, LLMRouter):
             kwargs.setdefault("temperature", 0.1)
@@ -61637,7 +61758,24 @@ class AgentRuntime:
             if deadline is not None or (context is not None and context.turn_deadline is not None)
             else None
         )
-        return await self._deadline_bounded_chat(effective_deadline, messages, **kwargs)
+        try:
+            return await self._deadline_bounded_chat(effective_deadline, messages, **kwargs)
+        finally:
+            if authenticated_attachment is not None:
+                _agent_attachment_model_authority(context)
+
+    async def _context_model_chat(
+        self,
+        context: AgentContext,
+        messages: list[dict[str, Any]],
+        **kwargs: Any,
+    ) -> dict[str, Any]:
+        """Route every context-owned model await through its exact file seam."""
+
+        authenticated_attachment = _agent_attachment_model_authority(context)
+        if context.current_attachment_present or authenticated_attachment is not None:
+            return await self._attachment_primary_chat(context, messages, **kwargs)
+        return await self._turn_bounded_chat(context, messages, **kwargs)
 
     async def _attachment_prepass_chat(
         self,
@@ -61650,6 +61788,7 @@ class AgentRuntime:
     ) -> dict[str, Any]:
         """Run one map/reduce await without spending the answer-stage budget."""
 
+        authenticated_attachment = _agent_attachment_model_authority(context)
         deadline = self._ensure_attachment_prepass_deadline(context)
         effective_deadline = min(item for item in (deadline, context.turn_deadline) if item is not None)
         if call_timeout_sec is not None:
@@ -61662,6 +61801,14 @@ class AgentRuntime:
 
         async def primary_call() -> dict[str, Any]:
             return await self._deadline_bounded_chat(effective_deadline, messages, **kwargs)
+
+        if authenticated_attachment is not None:
+            # A current upload remains primary-only until an advisory contract
+            # can bind a bounded source projection independently of this body.
+            try:
+                return await primary_call()
+            finally:
+                _agent_attachment_model_authority(context)
 
         secondary = self.secondary_brain
         tools = kwargs.get("tools")
@@ -62105,6 +62252,11 @@ class AgentRuntime:
             # Keep this exact call as the sole laptop-off/reject/timeout path.
             return await self._generate_response(context, message, attachments)
 
+        if _agent_attachment_model_authority(context) is not None:
+            # Authenticated upload bytes have no bounded advisory projection in
+            # v1, so an already-built/stale assist plan still fails to primary.
+            return await primary_call()
+
         secondary = self.secondary_brain
         if secondary is None:
             return await primary_call()
@@ -62376,6 +62528,8 @@ class AgentRuntime:
                             result,
                             max_chars=_ATTACHMENT_MAP_REDUCE_OUTPUT_CHARS,
                         )
+                    except TurnContextError:
+                        raise
                     except Exception as exc:  # noqa: BLE001 - a missing group is a closed partial result
                         LOGGER.warning("Attachment hierarchy reduction failed (%s)", type(exc).__name__)
                 if not summary:
@@ -62617,6 +62771,8 @@ class AgentRuntime:
                     result,
                     max_chars=_ATTACHMENT_MAP_OUTPUT_CHARS,
                 )
+            except TurnContextError:
+                raise
             except Exception as exc:  # noqa: BLE001 - continue to report exact partial coverage
                 LOGGER.warning("Attachment hierarchy map failed (%s)", type(exc).__name__)
                 map_failed.set()
@@ -62806,6 +62962,8 @@ class AgentRuntime:
             model_output_truncated = str(final_result.get("finish_reason") or "stop") == "length"
             if content and model_output_truncated:
                 content = _finish_length_limited_answer(content)
+        except TurnContextError:
+            raise
         except Exception as exc:  # noqa: BLE001 - ordinary readable-file failure boundary handles it
             LOGGER.warning("Attachment hierarchy final synthesis failed (%s)", type(exc).__name__)
             content = ""
@@ -64216,7 +64374,7 @@ class AgentRuntime:
                     # adapters keep their established call signature.
                     news_model_kwargs["allow_retries"] = False
                 synthesis = await asyncio.wait_for(
-                    self.llm.chat(messages, **news_model_kwargs),
+                    self._context_model_chat(context, messages, **news_model_kwargs),
                     timeout=news_timeout,
                 )
                 raw = str(synthesis.get("content") or "") if isinstance(synthesis, Mapping) else ""
@@ -64246,6 +64404,8 @@ class AgentRuntime:
                 )
                 clean = ""
                 accepted = False
+            except TurnContextError:
+                raise
             except Exception as exc:  # noqa: BLE001 - accepted sources survive model failure
                 LOGGER.warning("simple public-news synthesis failed (%s)", type(exc).__name__)
                 clean = ""
@@ -67065,6 +67225,8 @@ class AgentRuntime:
                 temperature=0.0,
                 max_tokens=CLASSIFIER_MAX_TOKENS,
             )
+        except TurnContextError:
+            raise
         except Exception as exc:  # noqa: BLE001 — распознавание намерения не должно ронять ход
             LOGGER.warning("Standing-rule check failed (%s)", type(exc).__name__)
             return "", "", "", None
@@ -67145,6 +67307,8 @@ class AgentRuntime:
                 priority="foreground",
                 max_tokens=CLASSIFIER_MAX_TOKENS,
             )
+        except TurnContextError:
+            raise
         except Exception as exc:  # noqa: BLE001 — разбор остатка не должен ронять ход
             LOGGER.warning("remainder: разбор не удался (%s)", type(exc).__name__)
             return None
@@ -67980,6 +68144,8 @@ class AgentRuntime:
                     priority="foreground",
                     max_tokens=CLASSIFIER_MAX_TOKENS,
                 )
+            except TurnContextError:
+                raise
             except Exception as exc:  # noqa: BLE001 — разбор не должен ронять ход
                 LOGGER.warning("reminder-prefetch: разбор не удался (%s)", type(exc).__name__)
                 return False
@@ -68493,6 +68659,8 @@ class AgentRuntime:
                     # Иначе документ, собранный вторым заходом, получал имя по
                     # реплике из чата: «Собираю отчёт по документам которые
                     # появились в архиве в июле 2026 года.docx».
+            except TurnContextError:
+                raise
             except Exception as exc:  # noqa: BLE001 — упаковка не должна ронять готовый ответ
                 LOGGER.warning("Could not obtain document content (%s)", type(exc).__name__)
         if not blocks:
@@ -70162,6 +70330,8 @@ class AgentRuntime:
                 temperature=0.0,
                 max_tokens=CLASSIFIER_MAX_TOKENS,
             )
+        except TurnContextError:
+            raise
         except Exception as exc:  # noqa: BLE001 — классификатор не роняет ход
             LOGGER.warning("Archive count intent check failed (%s)", type(exc).__name__)
             return None
@@ -70220,6 +70390,8 @@ class AgentRuntime:
                 temperature=0.0,
                 max_tokens=CLASSIFIER_MAX_TOKENS,
             )
+        except TurnContextError:
+            raise
         except Exception as exc:  # noqa: BLE001 — классификатор не роняет ход
             LOGGER.warning("Tag inventory intent check failed (%s)", type(exc).__name__)
             return False
@@ -70545,6 +70717,8 @@ class AgentRuntime:
                 tools=[],
                 max_tokens=CLASSIFIER_MAX_TOKENS,
             )
+        except TurnContextError:
+            raise
         except Exception as exc:  # noqa: BLE001 — распознавание намерения не должно ронять ход
             LOGGER.warning("Intent check failed (%s)", type(exc).__name__)
             return False
@@ -70614,6 +70788,8 @@ class AgentRuntime:
                 temperature=0.0,
                 max_tokens=CLASSIFIER_MAX_TOKENS,
             )
+        except TurnContextError:
+            raise
         except Exception as exc:  # noqa: BLE001 — распознавание не роняет ход
             LOGGER.warning("Time intent check failed (%s)", type(exc).__name__)
             return None
@@ -71537,6 +71713,8 @@ class AgentRuntime:
                 tools=[],
                 max_tokens=CLASSIFIER_MAX_TOKENS,
             )
+        except TurnContextError:
+            raise
         except Exception as exc:  # noqa: BLE001 — распознавание намерения не должно ронять ход
             LOGGER.warning("Small-talk check failed (%s)", type(exc).__name__)
             return False
@@ -71624,7 +71802,8 @@ class AgentRuntime:
         if not self.llm.enabled:
             return "", None
         try:
-            answer = await self.llm.chat(
+            answer = await self._deadline_bounded_chat(
+                None,
                 [
                     {
                         "role": "system",
@@ -71851,6 +72030,8 @@ class AgentRuntime:
                 temperature=0.0,
                 max_tokens=CLASSIFIER_MAX_TOKENS,
             )
+        except TurnContextError:
+            raise
         except Exception as exc:  # noqa: BLE001 — распознавание намерения не должно ронять ход
             LOGGER.warning("Web intent check failed (%s)", type(exc).__name__)
             return "", None
@@ -73449,19 +73630,19 @@ class AgentRuntime:
             },
         ]
         try:
-            result = await asyncio.wait_for(
-                self.llm.chat(
-                    messages,
-                    tools=[],
-                    temperature=0.0,
-                    max_tokens=_OUTSIDE_DEED_RECOVERY_MAX_TOKENS,
-                    priority="foreground",
-                ),
-                timeout=timeout_sec,
+            result = await self._deadline_bounded_chat(
+                time.monotonic() + timeout_sec,
+                messages,
+                tools=[],
+                temperature=0.0,
+                max_tokens=_OUTSIDE_DEED_RECOVERY_MAX_TOKENS,
+                priority="foreground",
             )
         except TimeoutError:
             LOGGER.info("outside-confirmation recovery: short deadline expired")
             return ""
+        except TurnContextError:
+            raise
         except Exception as exc:  # noqa: BLE001 - deterministic refusal is the fallback
             LOGGER.info("outside-confirmation recovery failed (%s)", type(exc).__name__)
             return ""
@@ -73505,19 +73686,19 @@ class AgentRuntime:
             },
         ]
         try:
-            result = await asyncio.wait_for(
-                self.llm.chat(
-                    messages,
-                    tools=[],
-                    temperature=0.0,
-                    max_tokens=_OUTSIDE_DEED_RECOVERY_MAX_TOKENS,
-                    priority="foreground",
-                ),
-                timeout=timeout_sec,
+            result = await self._deadline_bounded_chat(
+                time.monotonic() + timeout_sec,
+                messages,
+                tools=[],
+                temperature=0.0,
+                max_tokens=_OUTSIDE_DEED_RECOVERY_MAX_TOKENS,
+                priority="foreground",
             )
         except TimeoutError:
             LOGGER.info("outside-deed recovery: short deadline expired")
             return ""
+        except TurnContextError:
+            raise
         except Exception as exc:  # noqa: BLE001 - deterministic refusal is the fallback
             LOGGER.info("outside-deed recovery failed (%s)", type(exc).__name__)
             return ""
@@ -73608,19 +73789,19 @@ class AgentRuntime:
             },
         ]
         try:
-            result = await asyncio.wait_for(
-                self.llm.chat(
-                    messages,
-                    tools=[],
-                    temperature=0.0,
-                    max_tokens=_TEXT_SHAPE_REGEN_MAX_TOKENS,
-                    priority="foreground",
-                ),
-                timeout=timeout_sec,
+            result = await self._deadline_bounded_chat(
+                time.monotonic() + timeout_sec,
+                messages,
+                tools=[],
+                temperature=0.0,
+                max_tokens=_TEXT_SHAPE_REGEN_MAX_TOKENS,
+                priority="foreground",
             )
         except TimeoutError:
             LOGGER.info("text-shape regeneration: short deadline expired")
             return "", "call"
+        except TurnContextError:
+            raise
         except Exception as exc:  # noqa: BLE001 - the original draft is the fallback
             LOGGER.info("text-shape regeneration failed (%s)", type(exc).__name__)
             return "", "call"
@@ -73684,6 +73865,8 @@ class AgentRuntime:
                         "_model_output_truncated": model_output_truncated,
                     }
                 LOGGER.warning("LLM returned an empty answer")
+            except TurnContextError:
+                raise
             except Exception as exc:
                 LOGGER.error("LLM unavailable (%s)", type(exc).__name__)
         # `unreachable` — только когда модель ВКЛЮЧЕНА и всё же не ответила.
@@ -73913,12 +74096,14 @@ class AgentRuntime:
             return ""
         try:
             clean = self._build_initial_messages(context, message, attachments, tool_enabled=False)
-            salvage_call = self.llm.chat(clean, tools=[])
+            salvage_call = self._context_model_chat(context, clean, tools=[])
             result = (
                 await asyncio.wait_for(salvage_call, timeout=timeout_sec)
                 if timeout_sec is not None
                 else await salvage_call
             )
+        except TurnContextError:
+            raise
         except Exception as exc:  # noqa: BLE001 — последняя ступень, падать здесь нечем
             LOGGER.warning("Tool-free salvage failed (%s)", type(exc).__name__)
             return ""
@@ -74051,12 +74236,18 @@ class AgentRuntime:
                 # The bounded route owns exactly one repair generation.  A
                 # transport-level retry would silently turn that into two.
                 repair_model_kwargs["allow_retries"] = False
-            repair_call = self.llm.chat(repair_messages, **repair_model_kwargs)
+            repair_call = self._context_model_chat(
+                context,
+                repair_messages,
+                **repair_model_kwargs,
+            )
             fixed = (
                 await asyncio.wait_for(repair_call, timeout=repair_timeout)
                 if repair_timeout is not None
                 else await repair_call
             )
+        except TurnContextError:
+            raise
         except Exception as exc:  # noqa: BLE001 — неудачная починка не должна ронять ответ
             LOGGER.warning("Repair pass failed (%s)", type(exc).__name__)
             return ""
@@ -74222,7 +74413,11 @@ class AgentRuntime:
                 verification_model_kwargs["tools"] = []
                 if isinstance(self.llm, LLMRouter):
                     verification_model_kwargs["allow_retries"] = False
-            verification_call = self.llm.chat(messages, **verification_model_kwargs)
+            verification_call = self._context_model_chat(
+                context,
+                messages,
+                **verification_model_kwargs,
+            )
             result = (
                 await asyncio.wait_for(
                     verification_call,
@@ -74231,6 +74426,8 @@ class AgentRuntime:
                 if verification_timeout is not None
                 else await verification_call
             )
+        except TurnContextError:
+            raise
         except Exception as exc:
             LOGGER.warning("answer verification failed to run (%s)", type(exc).__name__)
             return _unknown_verdict("verifier unavailable")

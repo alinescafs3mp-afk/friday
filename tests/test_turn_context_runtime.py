@@ -177,6 +177,31 @@ def test_binding_keeps_exact_object_and_fences_nested_and_sequential_replay() ->
         pytest.fail("a changed same-turn context bypassed the replay fence")
 
 
+def test_live_binding_pins_original_context_against_whole_component_substitution(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(runtime_seam, "_EXECUTION_LEDGERS", {})
+    now = [_BASE_NOW_NS + 5_000]
+    issuer = _issuer(_namespace("whole-context-substitution"), now)
+    original = _context(issuer, now_ns=now[0], serial=4242)
+    replacement = _context(issuer, now_ns=now[0], serial=4242)
+    assert replacement.canonical_bytes() == original.canonical_bytes()
+    assert replacement.authority is not original.authority
+    field_names = tuple(field.name for field in dataclasses.fields(AuthenticatedTurnContext))
+    original_values = tuple(getattr(original, name) for name in field_names)
+
+    with bind_authenticated_turn_context(issuer, original):
+        try:
+            for name in field_names:
+                object.__setattr__(original, name, getattr(replacement, name))
+            with pytest.raises(TurnContextError, match="component identity changed"):
+                current_primary_authenticated_turn_context(original)
+        finally:
+            for name, value in zip(field_names, original_values, strict=True):
+                object.__setattr__(original, name, value)
+        assert current_primary_authenticated_turn_context(original) is original
+
+
 @pytest.mark.asyncio
 async def test_equivalent_issuers_share_one_concurrent_and_sequential_root_fence() -> None:
     now = [_BASE_NOW_NS + 10_000]
@@ -600,6 +625,7 @@ def test_ledger_is_body_free_and_retired_binding_releases_authority(
             "advisory_calls",
             "context_sha256",
             "deadline_monotonic_ns",
+            "ledger_key",
             "monotonic_clock",
         }
         assert not hasattr(ledger, "context")
@@ -612,6 +638,7 @@ def test_ledger_is_body_free_and_retired_binding_releases_authority(
 
     assert binding.active is False
     assert binding.context is None
+    assert binding.context_component_identity_sha256 == ""
     assert binding.issuer is None
     assert binding.ledger.active is False
     assert context not in gc.get_referents(binding.ledger)

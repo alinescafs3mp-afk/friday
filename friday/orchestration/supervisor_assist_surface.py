@@ -9,7 +9,10 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from typing import Any
 
-from friday.file_evidence import CurrentTurnFileReferenceToken, current_turn_file_reference_of
+from friday.file_evidence import (
+    CurrentTurnFileReferenceToken,
+    current_turn_file_reference_for_tenant,
+)
 from friday.interaction_control_plane.compare_current_file_web_work_graph import (
     CompareCurrentFileWebGraphError,
     CompareCurrentFileWebPlanStepBinding,
@@ -145,7 +148,10 @@ def prepare_current_file_web_assist_surface(
         return None
 
     carrier = attachments[0]
-    token = current_turn_file_reference_of(carrier)
+    token = current_turn_file_reference_for_tenant(
+        carrier,
+        tenant_id=actor.user_id,
+    )
     if type(token) is not CurrentTurnFileReferenceToken:
         return None
     snapshot = dict(carrier)
