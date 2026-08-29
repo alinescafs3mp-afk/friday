@@ -14,13 +14,13 @@ either merged here or discarded before that source is removed.
 ## Current production identity
 
 - Branch: `main`
-- Deployed implementation head: `723c4cbbeff5648ca196d4a5b0a7654cfa3d164d`
-- Live: Friday `0.207.73` / `723c4cbbeff5648ca196d4a5b0a7654cfa3d164d`;
-  tree `e939b8adaed520f4baaabcae774bea018af489a07ecac7310c94c4a92112d8ad`;
-  wheel `9e84367bccecb7f3144aae9efe954097951a66b2df2d8d9b87c2e9adc175ba3c`.
-- Immediate runtime predecessor: Friday `0.207.72` /
-  `160ee46c3cea823673fc4b7ffce0303a944d1c90`; tree
-  `fd95b4a50a75c549c6b335303ee7ca401d60ea60efb6c9e18ebcf567ccbbb609`.
+- Deployed implementation head: `89f65ef105d501a3d7a540edef829a159d062d42`
+- Live: Friday `0.207.74` / `89f65ef105d501a3d7a540edef829a159d062d42`;
+  tree `54e0b543f7818d4d845954f4d81d642a56ac744383242aa30ca6200598b3d982`;
+  wheel `2b04deab0296e23975206d43d9fcb9a6e7f779080d593118e94f9418cb67d7cb`.
+- Immediate runtime predecessor: Friday `0.207.73` /
+  `723c4cbbeff5648ca196d4a5b0a7654cfa3d164d`; tree
+  `e939b8adaed520f4baaabcae774bea018af489a07ecac7310c94c4a92112d8ad`.
 - Schema-capable fallback: Friday `0.207.73rc0` /
   `0ff75de8fad68f623d089ec7bc79e1d85d585bca`;
   tree `fa18f7b2f57ad2a6d8cba3ebc745fb51ce7ca95ae49738cb643f83192ed17db0`.
@@ -37,19 +37,23 @@ either merged here or discarded before that source is removed.
   release-bound witness; no traffic is fabricated to cross that gate. The
   primary remains sole tool, effect and final-publication owner; secondary
   absence preserves primary-only behavior.
-- The reader-first body-free passage sidecar is live: all 1,991 current file
-  sources have explicit incomplete coverage, no passage body is duplicated and
-  the not-yet-released writer has published zero child rows.
+- The reader-first body-free passage writer/backfill is live and converging. Its
+  first coherent production audit accounted for all 1,882 eligible authorized
+  sources as 181 current plus 1,701 explicit-incomplete parents, with 1,686
+  body-free child rows and zero missing or stale parents. Two sparse-text sources
+  remain explicitly pending because their released v2 chunk topology is invalid;
+  no document body is duplicated in the sidecar.
 
 ## Active package
 
 Keep the released S3 path in shadow until its genuine production witness exists;
 then promote only the current-file-plus-current-public-web journey through the
-already released fail-closed activation gate. Continue S4 with the bounded,
-restart-safe writer/backfill over the now-live reader-first schema; keep it a
-separate reversible release. In parallel, SolGoodman is closing the two rejected
-S6 R0 at-most-once review defects before completing the isolated Telegram-ingress
-ENOSPC package; he may not change schema, main or the S2/S3/S4 authority surfaces.
+already released fail-closed activation gate. Let the released S4 writer finish
+its bounded convergence, then repair the two v2 topology gaps in a new passage
+revision with its own schema-capable fallback before search-facade parity work.
+In parallel, SolGoodman is correcting the rejected S6 R0 at-most-once review
+defects before his retracted R1 package may be reconsidered; he may not change
+schema, main or the S2/S3/S4 authority surfaces.
 
 ## Operating rules
 
@@ -266,7 +270,8 @@ Remaining promotion work is observation-bound, not implementation-bound.
 
 Status: R0 measured recall and R1 corpus-backed lexical gap closure deployed in
 `0.207.72`; the reader-first schema/coverage contract is deployed in `0.207.73`.
-The bounded writer and restart-safe backfill remain next.
+The bounded writer and restart-safe backfill are deployed in `0.207.74` and are
+converging in production.
 
 1. Add reader-first `document_passages` with a schema-capable fallback, bounded
    writer, restart-safe resumable backfill and honest `index_incomplete`.
@@ -303,6 +308,17 @@ parents and zero children, reopened identically under both stable and rc0, and
 passed integrity/FK checks. Immutable activation retained the distinct
 schema-47 rc0 fallback, produced verified SQLite/inbox/Obsidian/Engineer recovery
 receipts and ended `clear`; the signed private-owner smoke returned exact `OK`.
+
+R2b acceptance: focused writer/backfill coverage passed 333 tests and three
+independent reviews were clean. The final native gate passed 23,564 Python plus
+31 UI tests with zero skips; static checks were clear and two sealed wheels were
+byte-identical. Production-copy acceptance proved restart continuation every
+three pages, idempotent replay, backup/restore identity, fallback reopen and an
+honest zero-missing/zero-stale audit. Immutable activation produced verified
+SQLite/inbox/Obsidian/Engineer recovery receipts and ended `clear`; trusted-CA
+health reported `0.207.74`/`ok`, and the signed private-owner Telegram smoke
+returned exact `OK`. The two detected sparse-text topology failures remain
+explicitly incomplete rather than being falsely marked current.
 
 Estimate: 8–16 clean-work days across separately reversible releases.
 
@@ -378,8 +394,9 @@ Estimate: 4–8 clean-work days after S2, released incrementally.
 2. Keep released `EngineerWorkItem v1` stable; do not expand its scope.
 3. Keep the released bounded S3 advisor in shadow until a genuine eligible turn
    creates its exact production witness; do not fabricate activation evidence.
-4. Build the bounded S4 passage writer and restart-safe backfill over the live
-   reader-first schema; keep the writer activation separately reversible.
+4. Let the released bounded S4 writer converge; repair the two v2 topology gaps
+   in a new passage revision with a distinct schema-capable fallback, then move
+   to measured search-facade parity.
 5. Preserve the released exact-evidence verifier and reject mutable or
    self-declared proof while real joined Supervisor observations accumulate.
 
