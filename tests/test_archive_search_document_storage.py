@@ -482,6 +482,271 @@ def test_foreign_corpus_cannot_change_authorized_membership_or_lane_ranks(storag
     assert tuple(item.matches[0].rank for item in after.candidates) == (1, 2)
 
 
+def test_body_matched_filename_terms_break_a_capped_tie_without_bypassing_the_cap(
+    storage,
+) -> None:
+    target, _ = _seed(
+        storage,
+        1200,
+        filename="nebula-budget.md",
+        body="Orchid nebula budget reconciliation uses a reserve ledger.",
+        received_at="2026-01-12T09:00:00+00:00",
+        inbox_status=InboxStatus.CLASSIFIED,
+    )
+    for index in (*range(13, 26), *range(1, 13)):
+        _seed(
+            storage,
+            1200 + index,
+            filename="nebula-only.txt" if index == 1 else f"decoy-{index:02d}.txt",
+            body=f"Nebula budget decoy {index:02d} contains no relevant evidence.",
+            received_at=f"2026-06-{index:02d}T10:00:00+00:00",
+            inbox_status=InboxStatus.CLASSIFIED,
+        )
+    request = _request(
+        corpora=(ArchiveSearchCorpus.DOCUMENTS,),
+        query="nebula budget",
+    )
+
+    first = _search(
+        storage,
+        request=request,
+        corpus=ArchiveSearchCorpus.DOCUMENTS,
+        lane=SearchLane.LEXICAL,
+    )
+    second = _search(
+        storage,
+        request=request,
+        corpus=ArchiveSearchCorpus.DOCUMENTS,
+        lane=SearchLane.LEXICAL,
+    )
+    permuted = _search(
+        storage,
+        request=_request(
+            corpora=(ArchiveSearchCorpus.DOCUMENTS,),
+            query="budget nebula",
+        ),
+        corpus=ArchiveSearchCorpus.DOCUMENTS,
+        lane=SearchLane.LEXICAL,
+    )
+
+    assert (first.total, first.examined, first.matched, first.returned) == (26, 26, 26, 20)
+    assert first.has_more is True
+    assert first.candidates[0].resolved_source.source_ref.canonical_object_id == target
+    assert tuple(item.resolved_source.source_ref.canonical_object_id for item in first.candidates) == tuple(
+        item.resolved_source.source_ref.canonical_object_id for item in second.candidates
+    )
+    assert tuple(item.resolved_source.source_ref.canonical_object_id for item in first.candidates) == tuple(
+        item.resolved_source.source_ref.canonical_object_id for item in permuted.candidates
+    )
+    coverage = _coverage(first, request)
+    assert coverage.states == (
+        CoverageState.BACKFILL_PENDING,
+        CoverageState.CAPPED,
+        CoverageState.PARTIAL,
+    )
+    assert coverage.next_cursor_available is False
+    assert coverage.absence_decision().value == "evidence_found"
+
+
+def test_filename_terms_never_create_lexical_evidence_or_cross_authority_scope(
+    storage,
+) -> None:
+    filename_only, _ = _seed(
+        storage,
+        1230,
+        filename="nebula-budget.md",
+        body="Unrelated owner body.",
+        inbox_status=InboxStatus.CLASSIFIED,
+    )
+    owner_match, _ = _seed(
+        storage,
+        1231,
+        filename="owner-document.txt",
+        body="Owner nebula budget evidence.",
+        inbox_status=InboxStatus.CLASSIFIED,
+    )
+    _seed(
+        storage,
+        1232,
+        tenant=FOREIGN_TENANT,
+        owner=OTHER_OWNER,
+        filename="nebula-budget.md",
+        body="Foreign nebula budget evidence.",
+        inbox_status=InboxStatus.CLASSIFIED,
+    )
+    _seed(
+        storage,
+        1233,
+        owner=OTHER_OWNER,
+        filename="nebula-budget.md",
+        body="Other principal nebula budget evidence.",
+        inbox_status=InboxStatus.CLASSIFIED,
+    )
+    _seed(
+        storage,
+        1234,
+        filename="nebula-budget.md",
+        body="Ignored nebula budget evidence.",
+        inbox_status=InboxStatus.IGNORED,
+    )
+    request = _request(
+        corpora=(ArchiveSearchCorpus.DOCUMENTS,),
+        query="nebula budget",
+    )
+
+    page = _search(
+        storage,
+        request=request,
+        corpus=ArchiveSearchCorpus.DOCUMENTS,
+        lane=SearchLane.LEXICAL,
+    )
+
+    source_ids = tuple(item.resolved_source.source_ref.canonical_object_id for item in page.candidates)
+    assert source_ids == (owner_match,)
+    assert filename_only not in source_ids
+    assert (page.total, page.examined, page.matched, page.returned) == (2, 2, 1, 1)
+
+
+def test_duplicate_filename_metadata_cannot_win_a_lexical_format_tie(storage) -> None:
+    malformed, _ = _seed(
+        storage,
+        1240,
+        filename="placeholder.pdf",
+        body="Nebula budget malformed metadata evidence.",
+        received_at="2026-01-01T00:00:00+00:00",
+        inbox_status=InboxStatus.CLASSIFIED,
+    )
+    clean, _ = _seed(
+        storage,
+        1241,
+        filename="clean-document.pdf",
+        body="Nebula budget clean evidence.",
+        received_at="2026-02-01T00:00:00+00:00",
+        inbox_status=InboxStatus.CLASSIFIED,
+    )
+    duplicate_metadata = (
+        '{"filename":"nebula-budget.md","filename":"ignored.pdf",'
+        f'"mime_type":"application/pdf","media_kind":"document","uploaded_by":"{OWNER}"}}'
+    )
+    with storage.transaction() as conn:
+        conn.execute(
+            "UPDATE raw_objects SET metadata_json=? WHERE id=?",
+            (duplicate_metadata, malformed),
+        )
+    request = _request(
+        corpora=(ArchiveSearchCorpus.DOCUMENTS,),
+        query="nebula budget",
+    )
+
+    page = _search(
+        storage,
+        request=request,
+        corpus=ArchiveSearchCorpus.DOCUMENTS,
+        lane=SearchLane.LEXICAL,
+    )
+
+    assert page.candidates[0].resolved_source.source_ref.canonical_object_id == clean
+    assert page.candidates[1].resolved_source.source_ref.canonical_object_id == malformed
+    coverage = _coverage(page, request)
+    assert CoverageState.BACKFILL_PENDING in coverage.states
+    assert CoverageState.PARTIAL in coverage.states
+    assert coverage.absence_decision().value == "evidence_found"
+
+
+@pytest.mark.parametrize(
+    "unsafe_filename",
+    (
+        " nebula-budget.md",
+        "nebula-budget.md\nprivate",
+        "nebula-budget.md\x00private",
+        "n" * 261,
+        7,
+    ),
+    ids=("leading-space", "newline", "nul", "oversized", "wrong-type"),
+)
+def test_unsafe_filename_cannot_win_a_lexical_format_tie(
+    storage,
+    unsafe_filename: object,
+) -> None:
+    unsafe, _ = _seed(
+        storage,
+        1250,
+        filename="placeholder.pdf",
+        body="Nebula budget unsafe filename evidence.",
+        received_at="2026-01-01T00:00:00+00:00",
+        inbox_status=InboxStatus.CLASSIFIED,
+    )
+    clean, _ = _seed(
+        storage,
+        1251,
+        filename="clean-document.pdf",
+        body="Nebula budget clean filename evidence.",
+        received_at="2026-02-01T00:00:00+00:00",
+        inbox_status=InboxStatus.CLASSIFIED,
+    )
+    metadata = json.dumps(
+        {
+            "filename": unsafe_filename,
+            "media_kind": "document",
+            "mime_type": "application/pdf",
+            "uploaded_by": OWNER,
+        }
+    )
+    with storage.transaction() as conn:
+        conn.execute(
+            "UPDATE raw_objects SET metadata_json=? WHERE id=?",
+            (metadata, unsafe),
+        )
+    request = _request(
+        corpora=(ArchiveSearchCorpus.DOCUMENTS,),
+        query="nebula budget",
+    )
+
+    page = _search(
+        storage,
+        request=request,
+        corpus=ArchiveSearchCorpus.DOCUMENTS,
+        lane=SearchLane.LEXICAL,
+    )
+
+    assert tuple(item.resolved_source.source_ref.canonical_object_id for item in page.candidates) == (
+        clean,
+        unsafe,
+    )
+    coverage = _coverage(page, request)
+    assert CoverageState.BACKFILL_PENDING in coverage.states
+    assert CoverageState.PARTIAL in coverage.states
+
+
+def test_filename_boost_sql_requires_a_nonempty_canonical_lexical_term(storage) -> None:
+    _seed(
+        storage,
+        1260,
+        filename="---",
+        body="---",
+        inbox_status=InboxStatus.CLASSIFIED,
+    )
+    request = _request(
+        corpora=(ArchiveSearchCorpus.DOCUMENTS,),
+        query="---",
+    )
+
+    sql, _parameters = archive_document_storage._lexical_sql(  # noqa: SLF001
+        ArchiveSearchCorpus.DOCUMENTS,
+        request,
+        derivative_available=False,
+    )
+    assert "WHEN EXISTS (SELECT 1 FROM lexical_needles)" in sql
+    page = _search(
+        storage,
+        request=request,
+        corpus=ArchiveSearchCorpus.DOCUMENTS,
+        lane=SearchLane.LEXICAL,
+    )
+    assert page.matched == page.returned == 0
+    assert page.candidates == ()
+
+
 def test_catalog_navigation_is_body_free_stably_ordered_and_honestly_capped(storage) -> None:
     raw_exact, _ = _seed(
         storage,

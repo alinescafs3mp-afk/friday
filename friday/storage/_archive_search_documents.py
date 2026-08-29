@@ -1437,6 +1437,19 @@ def _lexical_sql(
         # pending until a lifecycle-filtered archive derivative exists.
         derivative_expression = "0"
         folded_fields = ("friday_archive_fold(s.passage_body)",)
+        # Filename affinity only orders rows already admitted by the body-only
+        # direct_match below.  Invalid metadata contributes the empty string,
+        # and every canonical lexical needle must be present before a boost.
+        safe_filename = (
+            f"CASE WHEN {_catalog_metadata_valid('s')} THEN {_filename_expression('s')} ELSE '' END"
+        )
+        filename_score = f"""CASE
+            WHEN EXISTS (SELECT 1 FROM lexical_needles)
+             AND NOT EXISTS (
+                 SELECT 1 FROM lexical_needles n
+                  WHERE instr(friday_archive_fold({safe_filename}),
+                              friday_archive_fold(n.value))=0
+             ) THEN 0 ELSE 1 END"""
         score = """CASE WHEN instr(
             friday_archive_fold(s.passage_body),
             friday_archive_fold(?)
@@ -1454,6 +1467,7 @@ def _lexical_sql(
             "friday_archive_fold(COALESCE(s.knowledge_summary,''))",
             "friday_archive_fold(COALESCE(s.knowledge_tags_json,''))",
         )
+        filename_score = "1"
         score = """CASE
             WHEN instr(friday_archive_fold(COALESCE(s.knowledge_title,'')),
                        friday_archive_fold(?))>0 THEN 0
@@ -1485,7 +1499,7 @@ def _lexical_sql(
         ),
         scanned_sources AS MATERIALIZED (
             SELECT s.*, s.raw_id AS source_id,
-                   {score} AS score,
+                   {filename_score} AS filename_score, {score} AS score,
                    '' AS sort_text,
                    CASE WHEN {direct_match} THEN 1 ELSE 0 END AS direct_match,
                    CASE WHEN {derivative_expression} THEN 1 ELSE 0 END AS derivative_match
@@ -1502,7 +1516,8 @@ def _lexical_sql(
                 SELECT m.*,
                        ROW_NUMBER() OVER (
                            PARTITION BY m.raw_id
-                           ORDER BY {source_choice_order}m.score ASC, m.sort_time DESC,
+                           ORDER BY {source_choice_order}m.filename_score ASC,
+                                    m.score ASC, m.sort_time DESC,
                                     COALESCE(m.knowledge_id,'') ASC
                        ) AS source_choice
                   FROM matched_sources m
@@ -1511,7 +1526,7 @@ def _lexical_sql(
         ranked AS MATERIALIZED (
             SELECT m.*,
                    ROW_NUMBER() OVER (
-                       ORDER BY m.score ASC, m.sort_text ASC,
+                       ORDER BY m.filename_score ASC, m.score ASC, m.sort_text ASC,
                                 m.sort_time DESC, m.source_id ASC
                    ) AS lane_rank
               FROM source_choices m
@@ -1522,7 +1537,8 @@ def _lexical_sql(
         ),
         page AS MATERIALIZED (
             SELECT * FROM ranked
-             ORDER BY score ASC, sort_text ASC, sort_time DESC, source_id ASC
+             ORDER BY filename_score ASC, score ASC, sort_text ASC,
+                      sort_time DESC, source_id ASC
              LIMIT ?
         )
         {_page_select()}"""
