@@ -908,11 +908,20 @@ class SupervisorEffectIntentShadowRuntime:
         authenticated_context: AuthenticatedTurnContext | None,
         absolute_deadline_monotonic: float | None,
     ) -> None:
+        durable_user_id = user_id
+        if authenticated_context is not None:
+            if conversation_id != authenticated_context.authority.conversation_id:
+                self._skip_counts["input_unavailable"] += 1
+                return
+            # Conversation messages remain person-owned in a shared tenant.
+            # The tenant selects the archive/runtime scope; it is never the
+            # storage ownership key for the assistant message receipt.
+            durable_user_id = authenticated_context.authority.person_id
         if (
             self._closed
             or type(projection) is not EffectIntentProjectionV2
-            or type(user_id) is not str
-            or not 1 <= len(user_id) <= 200
+            or type(durable_user_id) is not str
+            or not 1 <= len(durable_user_id) <= 200
             or type(message_id) is not str
             or not 1 <= len(message_id) <= 200
             or type(conversation_id) is not str
@@ -924,7 +933,7 @@ class SupervisorEffectIntentShadowRuntime:
             self._skip_counts["capacity"] += 1
             return
         observation = self._observe(
-            user_id=user_id,
+            user_id=durable_user_id,
             message_id=message_id,
             conversation_id=conversation_id,
             projection=projection,

@@ -87,13 +87,16 @@ def _turn(
     pending: PendingDurableTurnAdmission | None = None,
     max_advisory_calls: int = 1,
     monotonic_clock: list[int] | None = None,
+    shared_tenant: bool = False,
 ) -> tuple[TurnContextIssuer, AuthenticatedTurnContext, ActorContext, float]:
     actor = ActorContext(
-        user_id="owner",
+        user_id="shared-tenant" if shared_tenant else "owner",
         preset_key="owner",
         source="api-token",
         identity_id="owner-principal",
         session_id=f"session-{label}",
+        shared_tenant=shared_tenant,
+        person_id="person-alice" if shared_tenant else "",
     )
     issuer = TurnContextIssuer(
         hashlib.sha256(label.encode("ascii")).digest(),
@@ -162,12 +165,14 @@ class _Primary:
     def __init__(self, response: dict[str, Any]) -> None:
         self.response = response
         self.calls = 0
+        self.user_ids: list[str] = []
         self.kwargs: dict[str, Any] = {}
         self.expected_context: AuthenticatedTurnContext | None = None
 
     async def chat(self, user_id: str, message: str, **kwargs: Any) -> dict[str, Any]:
-        del user_id, message
+        del message
         self.calls += 1
+        self.user_ids.append(user_id)
         self.kwargs = kwargs
         if self.expected_context is not None:
             assert current_primary_authenticated_turn_context(self.expected_context) is self.expected_context
@@ -181,12 +186,12 @@ class _EffectScheduler:
 
 
 class _EffectStorage:
-    def __init__(self) -> None:
+    def __init__(self, *, user_id: str = "owner", effect_id_sha256: str = "7" * 64) -> None:
         metadata: dict[str, Any] = {}
         attach_accepted_effect_outcome_receipt(
             metadata,
             EffectOutcomeV1(
-                effect_id_sha256="7" * 64,
+                effect_id_sha256=effect_id_sha256,
                 work_item_sha256="8" * 64,
                 capability=EffectCapability.OBSIDIAN_NOTE_MUTATION,
                 action=EffectAction.CREATE,
@@ -210,15 +215,18 @@ class _EffectStorage:
         )
         self.row = {
             "id": "message-1",
-            "user_id": "owner",
+            "user_id": user_id,
             "conversation_id": _CONVERSATION,
             "role": "assistant",
             "metadata_json": json.dumps(metadata),
         }
         self.events: list[dict[str, Any]] = []
+        self.lookups: list[tuple[str, str]] = []
 
     def get_message(self, message_id: str, user_id: str) -> dict[str, Any] | None:
-        return dict(self.row) if (message_id, user_id) == ("message-1", "owner") else None
+        self.lookups.append((message_id, user_id))
+        expected = (str(self.row["id"]), str(self.row["user_id"]))
+        return dict(self.row) if (message_id, user_id) == expected else None
 
     def record_event(self, _event_type: str, payload: dict[str, Any] | None = None) -> str:
         assert payload is not None
@@ -350,6 +358,78 @@ async def test_effect_shadow_uses_shared_slot_context_deadline_and_detached_auth
     assert primary.kwargs["hybrid_searcher"] is hybrid
     assert primary.kwargs["ingestion_result"] is ingestion
     assert selected_deadlines[0] <= context.inherited_budget.safety_deadline.monotonic_ns / 1e9
+    await wrapper.close()
+
+
+@pytest.mark.asyncio
+async def test_effect_shadow_reads_person_owned_receipt_in_shared_tenant(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import friday.orchestration.supervisor_effect_intent_runtime as module
+
+    issuer, context, actor, deadline = _turn(
+        "outer-effect-shared-tenant",
+        shared_tenant=True,
+    )
+    primary = _Primary(
+        {
+            "conversation_id": _CONVERSATION,
+            "message_id": "message-1",
+            "message": "primary",
+        }
+    )
+    witness = SimpleNamespace(
+        artifact_file_sha256="1" * 64,
+        maturity_facts_sha256="2" * 64,
+        source_revision_sha256="3" * 64,
+        registry_binding_sha256="4" * 64,
+        effect_registry_binding_sha256="5" * 64,
+    )
+    monkeypatch.setattr(
+        module,
+        "accepted_read_only_maturity_witness_is_current",
+        lambda value: value is witness,
+    )
+
+    async def select(_scheduler: object, **kwargs: Any) -> EffectIntentSelectionV2:
+        projection = kwargs["projection"]
+        return EffectIntentSelectionV2(
+            capability=EffectIntentCapabilitySelection.OBSIDIAN_NOTE_MUTATION,
+            action=EffectIntentActionSelection.CREATE,
+            manifest_digest=SUPERVISOR_EFFECT_SYMBOL_MANIFEST_SHA256,
+            projection_digest=projection.projection_digest,
+        )
+
+    monkeypatch.setattr(module, "select_supervisor_effect_intent", select)
+    storage = _EffectStorage(user_id=actor.own_id, effect_id_sha256="6" * 64)
+    wrapper = SupervisorEffectIntentShadowRuntime(
+        settings=SimpleNamespace(
+            semantic_supervisor_effect_mode="shadow",
+            semantic_supervisor_effect_evidence_sha256="1" * 64,
+        ),
+        primary=primary,
+        scheduler=_EffectScheduler(),  # type: ignore[arg-type]
+        storage=storage,
+        maturity_witness=witness,  # type: ignore[arg-type]
+    )
+
+    with bind_authenticated_turn_context(issuer, context):
+        response = await wrapper.chat(
+            context.authority.tenant_id,
+            _MESSAGE,
+            **_chat_kwargs(actor, deadline),
+            _authenticated_turn_context=context,
+        )
+    for _ in range(20):
+        if not wrapper.semantic_supervisor_effect_status()["pending"]:
+            break
+        await asyncio.sleep(0)
+
+    assert response is primary.response
+    assert primary.calls == 1
+    assert primary.user_ids == [context.authority.tenant_id]
+    assert storage.lookups == [("message-1", actor.own_id)]
+    assert len(storage.events) == 1
     await wrapper.close()
 
 
