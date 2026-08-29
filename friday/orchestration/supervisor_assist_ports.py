@@ -128,7 +128,7 @@ def _authenticated_advisory_scope(
     if context is None:
         return None, None, absolute_deadline
     scope = require_current_authenticated_chat_call_scope(context)
-    return context, scope, min(absolute_deadline, scope.deadline_monotonic)
+    return context, scope, min(absolute_deadline, scope.conservative_deadline_monotonic)
 
 
 def _revalidate_authenticated_advisory_scope(

@@ -798,6 +798,22 @@ def test_agent_leaf_projects_only_authenticated_work_graph_admission(
     )
 
 
+def test_authenticated_scope_projects_float_deadline_below_integer_parent() -> None:
+    parent_deadline_ns = 16_809_353_055_389
+    raw_float_carrier = 16_809.35305539
+    issuer, context, actor, _now = _authenticated_turn(clock=[parent_deadline_ns - 120_000_000_000])
+    kwargs = _scope_kwargs(actor, context)
+    kwargs["turn_deadline"] = raw_float_carrier
+
+    with bind_authenticated_turn_context(issuer, context):
+        scope = require_authenticated_chat_call_scope(context, **kwargs)
+
+    parent_float = parent_deadline_ns / 1_000_000_000
+    assert scope.deadline_monotonic == raw_float_carrier
+    assert scope.deadline_monotonic > parent_float
+    assert scope.conservative_deadline_monotonic < parent_float
+
+
 @pytest.mark.asyncio
 async def test_telegram_update_must_be_the_exact_authenticated_update() -> None:
     issuer, context, actor, _now = _authenticated_turn(

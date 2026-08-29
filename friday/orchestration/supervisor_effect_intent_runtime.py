@@ -1054,7 +1054,9 @@ class SupervisorEffectIntentShadowRuntime:
                 projection=projection,
                 authenticated_context=authenticated_context,
                 absolute_deadline_monotonic=(
-                    authenticated_scope.deadline_monotonic if authenticated_scope is not None else None
+                    authenticated_scope.conservative_deadline_monotonic
+                    if authenticated_scope is not None
+                    else None
                 ),
             )
         else:

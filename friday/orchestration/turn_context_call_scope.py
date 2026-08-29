@@ -176,6 +176,13 @@ class AuthenticatedChatCallScope:
     def ingestion_result_sha256(self) -> str:
         return self._adjuncts.ingestion_result_sha256
 
+    @property
+    def conservative_deadline_monotonic(self) -> float:
+        """Project the integer parent deadline without rounding past it."""
+
+        parent = self.deadline_monotonic_ns / 1_000_000_000
+        return min(self.deadline_monotonic, math.nextafter(parent, -math.inf))
+
     def exact_service_kwargs(self) -> dict[str, Any]:
         """Project bound service adjuncts without turning omission into ``None``."""
 

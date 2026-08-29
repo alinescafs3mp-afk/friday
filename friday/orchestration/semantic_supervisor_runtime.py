@@ -568,10 +568,7 @@ class SemanticSupervisorShadowRuntime:
         started = time.monotonic()
         deadline = started + supervisor_timeout_sec(self._settings)
         if authenticated_scope is not None:
-            deadline = min(
-                deadline,
-                authenticated_scope.deadline_monotonic_ns / 1_000_000_000,
-            )
+            deadline = min(deadline, authenticated_scope.conservative_deadline_monotonic)
         elif turn_deadline is not None:
             if not isinstance(turn_deadline, (int, float)) or isinstance(turn_deadline, bool):
                 return None, self._skipped(SupervisorSkipReason.TIMEOUT, turn=turn)

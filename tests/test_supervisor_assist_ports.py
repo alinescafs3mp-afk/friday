@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import math
 import time
 from contextlib import ExitStack
 from types import SimpleNamespace
@@ -395,8 +396,12 @@ async def test_authenticated_planner_and_reviewer_share_slots_deadline_and_suspe
 
         assert proposed is parsed
         assert admitted_review is reviewed
-        assert planner_scheduler.deadlines == [deadline]
-        assert reviewer_scheduler.deadlines == [deadline]
+        conservative_deadline = math.nextafter(
+            context.inherited_budget.safety_deadline.monotonic_ns / 1_000_000_000,
+            -math.inf,
+        )
+        assert planner_scheduler.deadlines == [conservative_deadline]
+        assert reviewer_scheduler.deadlines == [conservative_deadline]
         assert current_primary_authenticated_turn_context(context) is context
         assert execution_kernel_module._REQUEST_EFFECTS.get() is effects
         assert publication_module._PUBLICATION_LEASE.get() is not None
