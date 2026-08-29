@@ -210,7 +210,10 @@ APPROVAL_TENANT_WITH_A_SEPARATE_PERSON = {
 # tenant; uploader/person identity is bound separately by the witness proof.
 # 300 → 306: the body-free DocumentCatalog read/upsert/rebuild/backfill/
 # reconcile/coverage surface is partitioned by the Raw Object tenant.
-EXPECTED_USER_ID_METHODS = 306
+# 306 → 309: claim_mission_task, cancel_mission_and_tasks and
+# normalize_future_mission_task_start fence the existing shared-tenant mission
+# surface; the human proposer remains separately bound by created_by.
+EXPECTED_USER_ID_METHODS = 309
 
 
 def _methods_taking_user_id() -> set[str]:

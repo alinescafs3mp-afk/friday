@@ -2356,10 +2356,11 @@ class TransportMixin(BridgeShared):
                 else:
                     raise RuntimeError("Telegram dead-letter notice cursor changed")
         except httpx.HTTPStatusError as exc:
-            if int(exc.response.status_code) in _PERMANENT_DEAD_LETTER_NOTICE_REJECTION_STATUS_CODES:
+            status_code = int(exc.response.status_code)
+            if status_code in _PERMANENT_DEAD_LETTER_NOTICE_REJECTION_STATUS_CODES:
                 LOGGER.warning(
                     "dead-letter notice permanently rejected by Telegram (%d)",
-                    int(exc.response.status_code),
+                    status_code,
                 )
                 # Telegram proved non-acceptance and also proved this exact
                 # administrative notice cannot be delivered as constructed.

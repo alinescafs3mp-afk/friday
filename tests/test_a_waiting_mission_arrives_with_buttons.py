@@ -14,6 +14,7 @@
 
 from __future__ import annotations
 
+import httpx
 import pytest
 
 from friday.telegram_bridge._transport import TransportMixin, _LazyUpdateInbox
@@ -49,11 +50,28 @@ class _Bridge(TransportMixin):
 
     async def _backend_json(self, backend, method, path, payload, user, chat):  # noqa: ANN001, ARG002
         if "notifications/pending" in path:
-            return {"items": self._items}
+            return {
+                "items": [
+                    (
+                        {key: item[key] for key in ("id", "chat_id", "kind", "dedup_key")}
+                        if item.get("kind") == "reminder"
+                        else item
+                    )
+                    for item in self._items
+                ]
+            }
+        if path.endswith("/claim"):
+            notification_id = path.removesuffix("/claim").rsplit("/", 1)[-1]
+            item = next((candidate for candidate in self._items if candidate["id"] == notification_id), None)
+            return {"item": item}
         return {}
 
     async def _send_message(self, telegram, chat_id, text, reply_markup=None, **kwargs):  # noqa: ANN001, ARG002
         self.sent.append((chat_id, text, reply_markup))
+
+    async def _post_message_chunk(self, telegram, payload, chunk, **kwargs):  # noqa: ANN001, ARG002
+        self.sent.append((int(payload["chat_id"]), chunk, None))
+        return httpx.Response(200, json={"ok": True, "result": {"message_id": 1}})
 
     async def _ack_outbound(self, backend, signer_chat, sent, failed):  # noqa: ANN001, ARG002
         return None

@@ -537,11 +537,12 @@ def test_the_bridge_tells_the_person_the_clip_was_cut():
     """Мутация: убрать ветку `voice.get("truncated")` — тест краснеет."""
     import inspect
 
-    from friday.telegram_bridge._callbacks import CallbacksMixin
+    from friday.telegram_bridge._callbacks import _VOICE_TRUNCATION_NOTICE, CallbacksMixin
 
     source = inspect.getsource(CallbacksMixin._deliver_voice_reply)  # noqa: SLF001
     assert 'voice.get("truncated")' in source, "об обрыве человеку не говорят"
-    assert "озвучено начало" in source
+    assert "_VOICE_TRUNCATION_NOTICE" in source
+    assert "озвучено начало" in _VOICE_TRUNCATION_NOTICE
 
 
 @pytest.mark.asyncio
