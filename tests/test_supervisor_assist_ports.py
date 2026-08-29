@@ -499,6 +499,8 @@ class _Primary:
         self.status = status
         self.fail = fail
         self.attest_calls = 0
+        self.context_tokens: object = 8_192
+        self.context_failure = False
 
     async def attest(self, *, absolute_deadline: float) -> object:
         assert absolute_deadline > time.monotonic()
@@ -509,6 +511,11 @@ class _Primary:
 
     def public_status(self) -> dict[str, object]:
         return {"status": self.status}
+
+    def available_context_tokens(self) -> int:
+        if self.context_failure:
+            raise RuntimeError("private provider detail")
+        return cast(int, self.context_tokens)
 
 
 def _primary_requirements() -> ModelRequirements:
@@ -630,6 +637,24 @@ async def test_primary_preparation_requires_explicit_clear_attestation(
     )
     assert prepared is expected
     assert runtime.attest_calls == 1
+
+
+@pytest.mark.parametrize(
+    ("projected", "expected"),
+    [(40_960, 40_960), (0, 0), (-1, 0), (True, 0), (1 << 63, 0)],
+)
+def test_primary_port_projects_only_strict_context_capacity(
+    projected: object,
+    expected: int,
+) -> None:
+    runtime = _Primary()
+    runtime.context_tokens = projected
+    model = ports.AttestedPrimaryModel(cast(Any, runtime))
+
+    assert model.available_context_tokens() == expected
+
+    runtime.context_failure = True
+    assert model.available_context_tokens() == 0
 
 
 @pytest.mark.asyncio

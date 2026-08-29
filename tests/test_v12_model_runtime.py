@@ -33,6 +33,7 @@ from friday.model_profiles import (
     V12LiveAttestation,
 )
 from friday.v12_model_runtime import (
+    MAX_ATTESTED_CHAT_INPUT_UTF8_BYTES,
     MAX_METRICS_BYTES,
     MAX_MODEL_INVENTORY_BYTES,
     AttestedV12ModelRuntime,
@@ -603,6 +604,25 @@ def test_runtime_threads_the_strictest_installation_cap_into_the_measured_gate(
     assert runtime.public_status()["effective_context_tokens"] == 32_768
 
 
+def test_runtime_projects_only_strict_live_context_capacity(settings, monkeypatch) -> None:
+    runtime, _completion, _metrics_transport = _runtime(settings)
+
+    assert runtime.available_context_tokens() == 0
+    _install_attestation(runtime)
+    assert runtime.available_context_tokens() == 8_192
+    runtime._gate.revoke()  # noqa: SLF001
+    assert runtime.available_context_tokens() == 0
+
+    monkeypatch.setattr(runtime._gate, "available_context_tokens", lambda: True)  # noqa: SLF001
+    assert runtime.available_context_tokens() == 0
+
+    def fail() -> int:
+        raise RuntimeError("private provider detail")
+
+    monkeypatch.setattr(runtime._gate, "available_context_tokens", fail)  # noqa: SLF001
+    assert runtime.available_context_tokens() == 0
+
+
 @pytest.mark.asyncio
 async def test_probe_client_uses_real_planner_and_rejects_a_changed_served_alias(settings) -> None:
     case = PLAN_PROBE_CASES[0]
@@ -930,6 +950,121 @@ async def test_checked_completion_cannot_exceed_the_exact_leased_context(setting
     assert caught.value.code is V12ModelRuntimeFailure.COMPLETION_INVALID
     assert completion.calls == []
     assert len(metrics.calls) == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("excess_prompt_tokens", "accepted"),
+    [(0, True), (1, False)],
+)
+async def test_q38_long_input_requires_40k_lease_and_keeps_authoritative_token_bound(
+    settings,
+    monkeypatch,
+    excess_prompt_tokens: int,
+    accepted: bool,
+) -> None:
+    profile = QWEN38_27B_SGLANG_V12_PROFILE
+    installed = PROFILES[profile.runtime_profile_name]
+    router = _router(settings, profile=installed)
+    max_tokens = 128
+    measured_prompt_tokens = 40_960 - max_tokens - CONTEXT_SAFETY_RESERVE_TOKENS + excess_prompt_tokens
+    completion = _CompletionTransport(
+        router,
+        [
+            V12ServedCompletion(
+                content="clear",
+                finish_reason="stop",
+                tool_calls=(),
+                prompt_tokens=measured_prompt_tokens,
+                served_model_alias=profile.served_model_alias,
+            )
+        ],
+    )
+    runtime = AttestedV12ModelRuntime(
+        router,
+        completion,
+        _MetricsTransport(router),
+        profile=profile,
+    )
+    attestation = V12LiveAttestation(
+        profile_id=profile.profile_id,
+        planner_contract_sha256=profile.planner_contract_sha256,
+        probe_suite_sha256=profile.probe_suite_sha256,
+        endpoint_binding_sha256=runtime._seal.endpoint_binding_sha256,  # noqa: SLF001
+        process_epoch_sha256=_EPOCH_SHA256,
+        capabilities=profile.required_capabilities,
+        verified_context_tokens=40_960,
+        max_prepared_evidence_items=profile.max_prepared_evidence_items,
+        max_tool_steps=profile.max_tool_steps,
+        max_tool_rounds=profile.max_tool_rounds,
+        max_tool_calls=profile.max_tool_calls,
+        allowed_effects=profile.allowed_effects,
+        verifier_required=profile.verifier_required,
+    )
+    assert runtime._gate.install_live(attestation) is True  # noqa: SLF001
+
+    async def current_epoch(*, absolute_deadline: float) -> str:
+        assert absolute_deadline > time.monotonic()
+        return _EPOCH_SHA256
+
+    monkeypatch.setattr(runtime, "_current_epoch", current_epoch)
+    messages = [{"role": "user", "content": "Ж" * 3_000}]
+    encoded = json.dumps(
+        messages,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    assert len(encoded) > MAX_ATTESTED_CHAT_INPUT_UTF8_BYTES
+    assert len(encoded) <= MAX_ATTESTED_CHAT_INPUT_UTF8_BYTES * 5
+    assert router.estimate_messages_tokens(messages) + max_tokens + CONTEXT_SAFETY_RESERVE_TOKENS < 8_192
+
+    requirements_8k = _requirements()
+    lease_8k = runtime._gate.lease(  # noqa: SLF001
+        requirements_8k,
+        process_epoch_sha256=_EPOCH_SHA256,
+    )
+    assert lease_8k is not None
+    with pytest.raises(V12ModelRuntimeError) as caught:
+        await runtime.complete(
+            lease_8k,
+            requirements_8k,
+            messages,
+            max_tokens=max_tokens,
+            priority="foreground",
+            absolute_deadline=time.monotonic() + 2,
+        )
+    assert caught.value.code is V12ModelRuntimeFailure.COMPLETION_INVALID
+    assert completion.calls == []
+
+    requirements_40k = replace(requirements_8k, required_context_tokens=40_960)
+    lease_40k = runtime._gate.lease(  # noqa: SLF001
+        requirements_40k,
+        process_epoch_sha256=_EPOCH_SHA256,
+    )
+    assert lease_40k is not None
+    if accepted:
+        result = await runtime.complete(
+            lease_40k,
+            requirements_40k,
+            messages,
+            max_tokens=max_tokens,
+            priority="foreground",
+            absolute_deadline=time.monotonic() + 2,
+        )
+        assert result["usage"] == {"prompt_tokens": measured_prompt_tokens}
+    else:
+        with pytest.raises(V12ModelRuntimeError) as caught:
+            await runtime.complete(
+                lease_40k,
+                requirements_40k,
+                messages,
+                max_tokens=max_tokens,
+                priority="foreground",
+                absolute_deadline=time.monotonic() + 2,
+            )
+        assert caught.value.code is V12ModelRuntimeFailure.COMPLETION_INVALID
+    assert len(completion.calls) == 1
 
 
 @pytest.mark.asyncio

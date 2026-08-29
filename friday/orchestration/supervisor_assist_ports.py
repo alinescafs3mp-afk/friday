@@ -69,6 +69,8 @@ class PrimaryModelRuntime(Protocol):
 
     def public_status(self) -> Mapping[str, object]: ...
 
+    def available_context_tokens(self) -> int: ...
+
     async def acquire_lease(
         self,
         requirements: ModelRequirements,
@@ -353,6 +355,15 @@ class AttestedPrimaryModel:
     """Require an explicit live attestation before the ownership commit."""
 
     runtime: PrimaryModelRuntime = field(repr=False)
+
+    def available_context_tokens(self) -> int:
+        """Project only a strict, currently attested context-token count."""
+
+        try:
+            value = self.runtime.available_context_tokens()
+        except Exception:
+            return 0
+        return value if type(value) is int and 0 < value < (1 << 63) else 0
 
     async def prepare_primary_model(self, *, absolute_deadline: float) -> bool:
         deadline = _future_deadline(absolute_deadline)

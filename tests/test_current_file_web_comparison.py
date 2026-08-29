@@ -230,6 +230,7 @@ class _ComparisonModel:
         requirements_sha256: str | None = None,
         leased_tool_rounds: int = 0,
         leased_tool_calls: int = 0,
+        available_context_tokens: int = 8_192,
     ) -> None:
         self.answer = answer
         self.verifier_supported = verifier_supported
@@ -240,6 +241,7 @@ class _ComparisonModel:
         self.requirements_sha256 = requirements_sha256
         self.leased_tool_rounds = leased_tool_rounds
         self.leased_tool_calls = leased_tool_calls
+        self._available_context_tokens = available_context_tokens
         self.acquire_calls = 0
         self.lease_checks = 0
         self.calls: list[list[dict[str, Any]]] = []
@@ -249,6 +251,9 @@ class _ComparisonModel:
         self.dispatched = asyncio.Event()
         self.verifier_answer = ""
 
+    def available_context_tokens(self) -> int:
+        return self._available_context_tokens
+
     async def acquire_lease(
         self,
         requirements: ModelRequirements,
@@ -257,7 +262,7 @@ class _ComparisonModel:
     ) -> ModelProfileLease:
         self.acquire_calls += 1
         assert absolute_deadline > time.monotonic()
-        assert requirements.required_context_tokens == 8_192
+        assert requirements.required_context_tokens in (8_192, 40_960)
         assert requirements.prepared_evidence_items == 2
         assert requirements.max_tool_steps == 0
         assert requirements.max_tool_rounds == 0
@@ -614,6 +619,56 @@ async def test_local_context_projection_is_partial_and_disclosed_by_code() -> No
 
 
 @pytest.mark.asyncio
+async def test_q38_keeps_the_full_projection_that_q36_must_truncate() -> None:
+    prepared = _prepared_file(text="Файл. " * 300)
+    web = _web_evidence(*(("Публичный факт. " * 120,) * 3))
+    q36 = _ComparisonModel(available_context_tokens=8_192)
+    q38 = _ComparisonModel(available_context_tokens=40_960)
+
+    q36_result = await compare_current_file_with_web(
+        q36,
+        request=_REQUEST,
+        accepted_plan_sha256=_PLAN_SHA256,
+        prepared_file=prepared,
+        web_evidence=web,
+        absolute_deadline=time.monotonic() + 10,
+    )
+    q38_result = await compare_current_file_with_web(
+        q38,
+        request=_REQUEST,
+        accepted_plan_sha256=_PLAN_SHA256,
+        prepared_file=prepared,
+        web_evidence=web,
+        absolute_deadline=time.monotonic() + 10,
+    )
+
+    assert q36_result.partial_reasons == (CurrentFileWebPartialReason.LOCAL_CONTEXT_TRUNCATED,)
+    assert q36_result.requirements is current_file_web_model_requirements(8_192)
+    assert CurrentFileWebPartialReason.LOCAL_CONTEXT_TRUNCATED not in q38_result.partial_reasons
+    assert q38_result.status is CurrentFileWebComparisonStatus.COMPLETE
+    assert q38_result.requirements is current_file_web_model_requirements(40_960)
+    q38_payload = json.loads(str(q38.calls[0][-1]["content"]))
+    assert q38_payload["untrusted_evidence"]["file"]["locally_truncated"] is False
+    assert all(
+        item["locally_truncated"] is False for item in q38_payload["untrusted_evidence"]["web"]["sources"]
+    )
+    swapped_binding = current_file_web_comparison_binding_sha256(
+        accepted_plan_sha256=q38_result.accepted_plan_sha256,
+        source_evidence_sha256=q38_result.source_evidence_sha256,
+        model_evidence_sha256=q38_result.model_evidence_sha256,
+        status=q38_result.status,
+        partial_reasons=q38_result.partial_reasons,
+        requirements=current_file_web_model_requirements(8_192),
+    )
+    assert swapped_binding != q38_result.binding_sha256
+    with pytest.raises(CurrentFileWebComparisonError):
+        replace(
+            q38_result,
+            requirements=current_file_web_model_requirements(8_192),
+        )
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("prepared", "web", "reason", "notice"),
     (
@@ -743,6 +798,30 @@ async def test_downgraded_or_drifted_exact_lease_is_rejected_before_dispatch(
             absolute_deadline=time.monotonic() + 10,
         )
     assert captured.value.failure_reason is FailureReason.STALE_STATE
+    assert model.acquire_calls == 1
+    assert model.lease_checks == 0
+    assert model.calls == []
+
+
+@pytest.mark.asyncio
+async def test_q38_downgraded_acquire_fails_once_without_reacquire() -> None:
+    model = _ComparisonModel(
+        available_context_tokens=40_960,
+        leased_context_tokens=8_192,
+    )
+
+    with pytest.raises(CurrentFileWebComparisonError) as captured:
+        await compare_current_file_with_web(
+            model,
+            request=_REQUEST,
+            accepted_plan_sha256=_PLAN_SHA256,
+            prepared_file=_prepared_file(text="Файл. " * 300),
+            web_evidence=_web_evidence(*(("Публичный факт. " * 120,) * 3)),
+            absolute_deadline=time.monotonic() + 10,
+        )
+
+    assert captured.value.failure_reason is FailureReason.STALE_STATE
+    assert model.requirements is current_file_web_model_requirements(40_960)
     assert model.acquire_calls == 1
     assert model.lease_checks == 0
     assert model.calls == []

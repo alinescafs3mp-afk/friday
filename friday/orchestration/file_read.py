@@ -98,6 +98,9 @@ _SYNTHESIS_MAX_TOKENS = 512
 _PREPARATION_BUDGET_SEC = 4.5
 _PUBLICATION_RESERVE_SEC = 2.0
 _MAX_ATTESTED_INPUT_UTF8_BYTES = 5_500
+_BASE_CONTEXT_TOKENS = 8_192
+_MAX_MEASURED_CONTEXT_TOKENS = 40_960
+_CONTEXT_TOKEN_TIERS = (8_192, 40_960)
 _MAX_TRACE_LATENCY_MS = 86_400_000
 _TWO_CALL_READ_MODEL_CALLS = 2
 _UNSET_TURN_CONTEXT = object()
@@ -185,7 +188,10 @@ def _model_lease_matches_requirements(
     requirements: ModelRequirements,
 ) -> bool:
     try:
-        expected_requirements = _file_requirements(requirements.prepared_evidence_items)
+        expected_requirements = _file_requirements(
+            requirements.prepared_evidence_items,
+            requirements.required_context_tokens,
+        )
     except (AttributeError, TypeError, ValueError):
         return False
     if not isinstance(lease, ModelProfileLease) or type(lease) is not ModelProfileLease:
@@ -336,6 +342,8 @@ def _require_prepared_file_turn_bound(prepared: object) -> _PreparedFileTurn:
 
 
 class _AttestedFileModel(Protocol):
+    def available_context_tokens(self) -> int: ...
+
     async def acquire_lease(
         self,
         requirements: ModelRequirements,
@@ -370,33 +378,95 @@ class _AttestedFileModel(Protocol):
     ) -> dict[str, Any]: ...
 
 
-_FILE_REQUIREMENTS_BY_EVIDENCE_COUNT = tuple(
-    ModelRequirements(
-        capabilities=frozenset(
-            {
-                ModelCapability.PREPARED_EVIDENCE_2,
-                ModelCapability.CONTEXT_8K,
-                ModelCapability.REMOTE_CANCELLATION,
-            }
-        ),
-        required_context_tokens=8_192,
-        prepared_evidence_items=evidence_items,
-        max_tool_steps=0,
-        max_tool_rounds=0,
-        max_tool_calls=0,
-        effect=ModelEffect.READ,
-        verifier_required=True,
+_FILE_REQUIREMENTS_BY_CONTEXT_AND_EVIDENCE = tuple(
+    tuple(
+        ModelRequirements(
+            capabilities=frozenset(
+                {
+                    ModelCapability.PREPARED_EVIDENCE_2,
+                    ModelCapability.CONTEXT_8K,
+                    ModelCapability.REMOTE_CANCELLATION,
+                }
+            ),
+            required_context_tokens=context_tokens,
+            prepared_evidence_items=evidence_items,
+            max_tool_steps=0,
+            max_tool_rounds=0,
+            max_tool_calls=0,
+            effect=ModelEffect.READ,
+            verifier_required=True,
+        )
+        for evidence_items in range(1, _MAX_CANARY_FILES + 1)
     )
-    for evidence_items in range(1, _MAX_CANARY_FILES + 1)
+    for context_tokens in _CONTEXT_TOKEN_TIERS
 )
 
 
-def _file_requirements(evidence_items: int) -> ModelRequirements:
-    """Return one exact process-wide lease projection for one/two evidence items."""
+def _file_requirements(
+    evidence_items: int,
+    required_context_tokens: int = _BASE_CONTEXT_TOKENS,
+) -> ModelRequirements:
+    """Return one exact process-wide lease projection for evidence and context tier."""
 
     if type(evidence_items) is not int or not 1 <= evidence_items <= _MAX_CANARY_FILES:
         raise ValueError("file model evidence count is outside the closed lease projection")
-    return _FILE_REQUIREMENTS_BY_EVIDENCE_COUNT[evidence_items - 1]
+    if type(required_context_tokens) is not int or required_context_tokens not in _CONTEXT_TOKEN_TIERS:
+        raise ValueError("file model context is outside the closed measured tiers")
+    context_index = _CONTEXT_TOKEN_TIERS.index(required_context_tokens)
+    return _FILE_REQUIREMENTS_BY_CONTEXT_AND_EVIDENCE[context_index][evidence_items - 1]
+
+
+def _attested_input_max_bytes(required_context_tokens: int) -> int:
+    if type(required_context_tokens) is not int or required_context_tokens not in _CONTEXT_TOKEN_TIERS:
+        return 0
+    return (_MAX_ATTESTED_INPUT_UTF8_BYTES * required_context_tokens) // _BASE_CONTEXT_TOKENS
+
+
+def _model_available_context_tokens(model: object) -> int:
+    """Read only the code-owned current capacity; legacy test doubles stay at baseline."""
+
+    method = getattr(model, "available_context_tokens", None)
+    if not callable(method):
+        return _BASE_CONTEXT_TOKENS
+    try:
+        value = method()
+    except Exception:
+        return 0
+    if type(value) is not int or value < _BASE_CONTEXT_TOKENS:
+        return 0
+    return min(value, _MAX_MEASURED_CONTEXT_TOKENS)
+
+
+def _model_available_context_tier(model: object) -> int:
+    available = _model_available_context_tokens(model)
+    return max(
+        (tier for tier in _CONTEXT_TOKEN_TIERS if tier <= available),
+        default=0,
+    )
+
+
+def _file_requirements_for_input_bytes(
+    model: object,
+    evidence_items: int,
+    *required_input_bytes: int,
+    available_context_tokens: int | None = None,
+) -> ModelRequirements | None:
+    """Choose the least measured context tier that fits every bounded model call."""
+
+    if not required_input_bytes or any(type(value) is not int or value < 0 for value in required_input_bytes):
+        return None
+    available = (
+        _model_available_context_tier(model) if available_context_tokens is None else available_context_tokens
+    )
+    if type(available) is not int or available not in _CONTEXT_TOKEN_TIERS:
+        return None
+    required = max(required_input_bytes)
+    for context_tokens in _CONTEXT_TOKEN_TIERS:
+        if context_tokens > available:
+            break
+        if required <= _attested_input_max_bytes(context_tokens):
+            return _file_requirements(evidence_items, context_tokens)
+    return None
 
 
 def _two_call_read_model_output_limits(
@@ -479,11 +549,13 @@ def _lease_is_process_current(
     return current is True and _model_lease_matches_requirements(lease, requirements)
 
 
-def _messages_fit_attested_context(messages: list[dict[str, str]]) -> bool:
-    return (
-        len(json.dumps(messages, ensure_ascii=False, separators=(",", ":")).encode("utf-8"))
-        <= _MAX_ATTESTED_INPUT_UTF8_BYTES
-    )
+def _messages_fit_attested_context(
+    messages: list[dict[str, str]],
+    required_context_tokens: int = _BASE_CONTEXT_TOKENS,
+) -> bool:
+    return len(
+        json.dumps(messages, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+    ) <= _attested_input_max_bytes(required_context_tokens)
 
 
 def _validated_future_deadline(
@@ -627,7 +699,7 @@ async def _call_model_once(
 ) -> dict[str, Any]:
     if not model_messages_are_secret_free(messages):
         raise V12FileReadError("model payload requires a secret projection")
-    if not _messages_fit_attested_context(messages):
+    if not _messages_fit_attested_context(messages, requirements.required_context_tokens):
         raise V12FileReadError("model payload exceeds the attested context tier")
     try:
         deadline = _validated_future_deadline(deadline, stage="before model call")
@@ -795,14 +867,26 @@ class V12FileReadHandler:
             # every admitted answer can reach the verifier without truncation.
             + 2 * (_MAX_ANSWER_JSON_UTF8_BYTES - empty_answer_bytes)
         )
-        if not (
-            model_messages_are_secret_free(synthesis_messages)
-            and _messages_fit_attested_context(synthesis_messages)
-            and model_messages_are_secret_free(verifier_messages)
-            and reserved_verifier_bytes <= _MAX_ATTESTED_INPUT_UTF8_BYTES
+        synthesis_input_bytes = len(
+            json.dumps(synthesis_messages, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+        )
+        requirements = _file_requirements_for_input_bytes(
+            self._model,
+            len(prepared.evidence.bundle.parts),
+            synthesis_input_bytes,
+            reserved_verifier_bytes,
+        )
+        if (
+            requirements is None
+            or not model_messages_are_secret_free(synthesis_messages)
+            or not _messages_fit_attested_context(
+                synthesis_messages,
+                requirements.required_context_tokens,
+            )
+            or not model_messages_are_secret_free(verifier_messages)
+            or reserved_verifier_bytes > _attested_input_max_bytes(requirements.required_context_tokens)
         ):
             return None
-        requirements = _file_requirements(len(prepared.evidence.bundle.parts))
         lease_remaining = preparation_deadline - time.monotonic()
         if lease_remaining <= 0:
             raise TimeoutError("V12 publication deadline expired before lease acquisition")

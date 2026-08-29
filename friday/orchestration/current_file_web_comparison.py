@@ -45,13 +45,15 @@ from friday.model_input_hygiene import (
 )
 from friday.model_profiles import ModelProfileLease, ModelRequirements
 from friday.orchestration.file_read import (
-    _MAX_ATTESTED_INPUT_UTF8_BYTES,
     V12FileReadError,
+    _attested_input_max_bytes,
     _AttestedFileModel,
     _file_requirements,
+    _file_requirements_for_input_bytes,
     _lease_is_current_before_deadline,
     _lease_is_process_current,
     _messages_fit_attested_context,
+    _model_available_context_tier,
     _model_lease_matches_requirements,
     _two_call_read_model_output_limits,
 )
@@ -161,10 +163,12 @@ class CurrentFileWebComparisonError(RuntimeError):
         super().__init__(message)
 
 
-def current_file_web_model_requirements() -> ModelRequirements:
-    """Return this journey's one immutable measured-lease projection."""
+def current_file_web_model_requirements(
+    required_context_tokens: int = 8_192,
+) -> ModelRequirements:
+    """Return this journey's exact immutable measured-lease projection."""
 
-    return _file_requirements(2)
+    return _file_requirements(2, required_context_tokens)
 
 
 def current_file_web_model_budget() -> tuple[int, int]:
@@ -179,7 +183,8 @@ def _lease_matches_requirements(
 ) -> bool:
     return bool(
         type(lease) is ModelProfileLease
-        and requirements is current_file_web_model_requirements()
+        and type(requirements) is ModelRequirements
+        and requirements.prepared_evidence_items == 2
         and _model_lease_matches_requirements(lease, requirements)
     )
 
@@ -389,6 +394,7 @@ def current_file_web_comparison_binding_sha256(
     model_evidence_sha256: str,
     status: CurrentFileWebComparisonStatus,
     partial_reasons: tuple[CurrentFileWebPartialReason, ...],
+    requirements: ModelRequirements | None = None,
 ) -> str:
     """Bind the accepted controller plan to exact body-free evidence identities."""
 
@@ -398,6 +404,9 @@ def current_file_web_comparison_binding_sha256(
     if type(status) is not CurrentFileWebComparisonStatus:
         raise CurrentFileWebComparisonError("comparison status is invalid")
     _require_partial_reasons(partial_reasons, status=status)
+    effective_requirements = requirements or current_file_web_model_requirements()
+    if type(effective_requirements) is not ModelRequirements:
+        raise CurrentFileWebComparisonError("comparison requirements are invalid")
     return _canonical_sha256(
         {
             "accepted_plan_sha256": accepted_plan_sha256,
@@ -409,7 +418,7 @@ def current_file_web_comparison_binding_sha256(
             "max_tool_steps": 0,
             "model_evidence_sha256": model_evidence_sha256,
             "partial_reasons": [item.value for item in partial_reasons],
-            "requirements_sha256": current_file_web_model_requirements().canonical_sha256(),
+            "requirements_sha256": effective_requirements.canonical_sha256(),
             "schema": CURRENT_FILE_WEB_COMPARISON_BINDING_SCHEMA,
             "source_evidence_sha256": source_evidence_sha256,
             "status": status.value,
@@ -592,6 +601,7 @@ def _projection_fits(
     evidence: dict[str, object],
     labels: tuple[str, ...],
     partial_reasons: tuple[CurrentFileWebPartialReason, ...],
+    required_context_tokens: int = 8_192,
 ) -> bool:
     synthesis = _synthesis_messages(
         request=request,
@@ -607,9 +617,9 @@ def _projection_fits(
     return bool(
         model_messages_are_secret_free(synthesis)
         and model_messages_are_secret_free(verifier)
-        and _messages_fit_attested_context(synthesis)
-        and _messages_fit_attested_context(verifier)
-        and reserved_verifier_bytes <= _MAX_ATTESTED_INPUT_UTF8_BYTES
+        and _messages_fit_attested_context(synthesis, required_context_tokens)
+        and _messages_fit_attested_context(verifier, required_context_tokens)
+        and reserved_verifier_bytes <= _attested_input_max_bytes(required_context_tokens)
     )
 
 
@@ -642,6 +652,7 @@ def _fit_projection(
     web_source: dict[str, object],
     labels: tuple[str, ...],
     base_reasons: tuple[CurrentFileWebPartialReason, ...],
+    available_context_tokens: int = 8_192,
 ) -> tuple[dict[str, object], tuple[CurrentFileWebPartialReason, ...]]:
     full, _ = _bounded_projection(file_source, web_source, character_cap=None)
     if _projection_fits(
@@ -649,6 +660,7 @@ def _fit_projection(
         evidence=full,
         labels=labels,
         partial_reasons=base_reasons,
+        required_context_tokens=available_context_tokens,
     ):
         return full, base_reasons
 
@@ -675,6 +687,7 @@ def _fit_projection(
             evidence=candidate,
             labels=labels,
             partial_reasons=local_reasons,
+            required_context_tokens=available_context_tokens,
         ):
             best = candidate
             lower = middle + 1
@@ -682,7 +695,7 @@ def _fit_projection(
             upper = middle - 1
     if best is None:
         raise CurrentFileWebComparisonError(
-            "comparison evidence exceeds the accepted 8K context",
+            "comparison evidence exceeds the available measured context",
             failure_stage=FailureStage.CAPABILITY,
             failure_reason=FailureReason.BUDGET_EXHAUSTED,
         )
@@ -824,7 +837,6 @@ class CurrentFileWebComparison:
             or self.model_calls != 2
             or type(self.lease) is not ModelProfileLease
             or type(self.requirements) is not ModelRequirements
-            or self.requirements is not current_file_web_model_requirements()
             or not _lease_matches_requirements(self.lease, self.requirements)
             or (
                 self._parent_context is not None
@@ -858,6 +870,7 @@ class CurrentFileWebComparison:
             model_evidence_sha256=self.model_evidence_sha256,
             status=self.status,
             partial_reasons=self.partial_reasons,
+            requirements=self.requirements,
         )
         if not hmac.compare_digest(self.binding_sha256, expected_binding):
             raise CurrentFileWebComparisonError("accepted comparison binding is invalid")
@@ -902,7 +915,10 @@ async def _call_model_once(
     parent_context: AuthenticatedTurnContext | None,
     on_dispatch: Callable[[], None],
 ) -> dict[str, Any]:
-    if not secondary_model_messages_are_secret_free(messages) or not _messages_fit_attested_context(messages):
+    if not secondary_model_messages_are_secret_free(messages) or not _messages_fit_attested_context(
+        messages,
+        requirements.required_context_tokens,
+    ):
         raise _ModelResponseError("model input is outside the accepted context")
     if not await _lease_is_current(
         model,
@@ -1004,31 +1020,72 @@ async def compare_current_file_with_web(
     _require_source_hygiene(request, file_source, web_source)
     labels = _citation_labels(web_evidence)
     base_reasons = _base_partial_reasons(file_full=file_full, web_evidence=web_evidence)
+    available_context_tokens = _model_available_context_tier(model)
+    if available_context_tokens == 0:
+        raise CurrentFileWebComparisonError(
+            "comparison model capacity is unavailable",
+            failure_stage=FailureStage.CAPABILITY,
+            failure_reason=FailureReason.PROVIDER_FAILURE,
+        )
     evidence, partial_reasons = _fit_projection(
         request=request,
         file_source=file_source,
         web_source=web_source,
         labels=labels,
         base_reasons=base_reasons,
+        available_context_tokens=available_context_tokens,
     )
     status = (
         CurrentFileWebComparisonStatus.PARTIAL if partial_reasons else CurrentFileWebComparisonStatus.COMPLETE
     )
     model_evidence_sha256 = _canonical_sha256(evidence)
-    binding_sha256 = current_file_web_comparison_binding_sha256(
-        accepted_plan_sha256=accepted_plan_sha256,
-        source_evidence_sha256=source_sha256,
-        model_evidence_sha256=model_evidence_sha256,
-        status=status,
-        partial_reasons=partial_reasons,
-    )
     synthesis_messages = _synthesis_messages(
         request=request,
         evidence=evidence,
         labels=labels,
         partial_reasons=partial_reasons,
     )
-    requirements = current_file_web_model_requirements()
+    empty_verifier_messages = _verifier_messages(
+        request=request,
+        evidence=evidence,
+        answer="",
+    )
+    empty_answer_bytes = len(json.dumps("", ensure_ascii=False).encode("utf-8"))
+    synthesis_input_bytes = len(
+        json.dumps(
+            synthesis_messages,
+            ensure_ascii=False,
+            separators=(",", ":"),
+        ).encode("utf-8")
+    )
+    reserved_verifier_bytes = len(
+        json.dumps(
+            empty_verifier_messages,
+            ensure_ascii=False,
+            separators=(",", ":"),
+        ).encode("utf-8")
+    ) + 2 * (_MAX_ANSWER_JSON_UTF8_BYTES - empty_answer_bytes)
+    requirements = _file_requirements_for_input_bytes(
+        model,
+        2,
+        synthesis_input_bytes,
+        reserved_verifier_bytes,
+        available_context_tokens=available_context_tokens,
+    )
+    if requirements is None:
+        raise CurrentFileWebComparisonError(
+            "comparison evidence exceeds the available measured context",
+            failure_stage=FailureStage.CAPABILITY,
+            failure_reason=FailureReason.BUDGET_EXHAUSTED,
+        )
+    binding_sha256 = current_file_web_comparison_binding_sha256(
+        accepted_plan_sha256=accepted_plan_sha256,
+        source_evidence_sha256=source_sha256,
+        model_evidence_sha256=model_evidence_sha256,
+        status=status,
+        partial_reasons=partial_reasons,
+        requirements=requirements,
+    )
     model_calls = 0
 
     def record_dispatch() -> None:

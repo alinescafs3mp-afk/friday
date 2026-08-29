@@ -94,8 +94,11 @@ from friday.execution_kernel import (
     _web_research_collision_topic_query,
     _web_research_source_matches_topic,
     complete_person_matches,
+    confirm_staged_request_effect,
     mark_request_effect_possible,
     resolvable_person_matches,
+    rollback_staged_request_effect,
+    stage_request_effect_possible_in_transaction,
 )
 from friday.file_delivery import (
     LEGACY_UNREGISTERED,
@@ -284,6 +287,7 @@ from friday.orchestration.conversation_document_comparison import (
     compare_conversation_with_document,
     conversation_document_comparison_is_process_owned,
     conversation_document_comparison_lease_is_current,
+    conversation_document_comparison_process_lease_is_current,
     conversation_document_model_evidence_identity,
 )
 from friday.orchestration.effect_outcome import (
@@ -323,6 +327,7 @@ from friday.orchestration.selected_archive_explanation import (
     explain_selected_archive_evidence,
     selected_archive_explanation_evidence_identity,
     selected_archive_explanation_lease_is_current,
+    selected_archive_explanation_process_lease_is_current,
 )
 from friday.orchestration.simple_public_news_outcome import (
     SIMPLE_PUBLIC_NEWS_ENVELOPE_FALLBACK as _SIMPLE_PUBLIC_NEWS_ENVELOPE_FALLBACK,
@@ -441,7 +446,7 @@ from friday.storage._conversations import (
     select_promoted_current_conversation_window_in_transaction,
     store_message_in_transaction,
 )
-from friday.storage._core import iso_date, read_only_storage_snapshot
+from friday.storage._core import guarded_storage_transaction, iso_date, read_only_storage_snapshot
 from friday.storage._intake import (
     resolve_explicit_file_citation_sources,
     resolve_owned_file_exact_filename_direct_read,
@@ -38662,7 +38667,65 @@ class AgentRuntime:
         try:
             if time.monotonic() >= deadline:
                 raise TimeoutError("comparison deadline expired before final publication")
-            with self.storage.transaction() as conn:
+            try:
+                lease_current = await conversation_document_comparison_lease_is_current(
+                    model,
+                    comparison,
+                    absolute_deadline=deadline,
+                )
+            except TimeoutError:
+                raise ConversationDocumentComparisonError(
+                    "comparison lease recheck timed out",
+                    model_calls=2,
+                    failure_stage=FailureStage.STATE_LOSS,
+                    failure_reason=FailureReason.TIMEOUT,
+                    synthesis_outcome=OutcomeStatus.SUCCEEDED,
+                    verification_outcome=OutcomeStatus.SUCCEEDED,
+                ) from None
+            except Exception:
+                raise ConversationDocumentComparisonError(
+                    "comparison lease recheck failed",
+                    model_calls=2,
+                    failure_stage=FailureStage.STATE_LOSS,
+                    failure_reason=FailureReason.PROVIDER_FAILURE,
+                    synthesis_outcome=OutcomeStatus.SUCCEEDED,
+                    verification_outcome=OutcomeStatus.SUCCEEDED,
+                ) from None
+            if not lease_current:
+                raise ConversationDocumentComparisonError(
+                    "comparison lease became stale",
+                    model_calls=2,
+                    failure_stage=FailureStage.STATE_LOSS,
+                    failure_reason=FailureReason.STALE_STATE,
+                    synthesis_outcome=OutcomeStatus.SUCCEEDED,
+                    verification_outcome=OutcomeStatus.SUCCEEDED,
+                )
+            if time.monotonic() >= deadline:
+                raise TimeoutError("comparison deadline expired after lease recheck")
+
+            def before_comparison_commit() -> None:
+                if time.monotonic() >= deadline:
+                    raise TimeoutError("comparison deadline expired at publication commit")
+                if not conversation_document_comparison_process_lease_is_current(
+                    model,
+                    comparison,
+                ):
+                    raise ConversationDocumentComparisonError(
+                        "comparison process lease changed at commit",
+                        model_calls=2,
+                        failure_stage=FailureStage.STATE_LOSS,
+                        failure_reason=FailureReason.STALE_STATE,
+                        synthesis_outcome=OutcomeStatus.SUCCEEDED,
+                        verification_outcome=OutcomeStatus.SUCCEEDED,
+                    )
+
+            with guarded_storage_transaction(
+                self.storage,
+                before_commit=before_comparison_commit,
+                lock_timeout_sec=max(0.0, deadline - time.monotonic()),
+                after_commit=confirm_staged_request_effect,
+                after_rollback=rollback_staged_request_effect,
+            ) as conn:
                 if time.monotonic() >= deadline:
                     raise TimeoutError("comparison deadline expired before final transaction")
                 current = get_current_compare_conversation_with_document_work_item_in_transaction(
@@ -38769,33 +38832,12 @@ class AgentRuntime:
                 )
                 if time.monotonic() >= deadline:
                     raise TimeoutError("comparison deadline expired before assistant publication")
-                try:
-                    lease_current = await conversation_document_comparison_lease_is_current(
-                        model,
-                        comparison,
-                        absolute_deadline=deadline,
-                    )
-                except TimeoutError:
+                if not conversation_document_comparison_process_lease_is_current(
+                    model,
+                    comparison,
+                ):
                     raise ConversationDocumentComparisonError(
-                        "comparison lease recheck timed out",
-                        model_calls=2,
-                        failure_stage=FailureStage.STATE_LOSS,
-                        failure_reason=FailureReason.TIMEOUT,
-                        synthesis_outcome=OutcomeStatus.SUCCEEDED,
-                        verification_outcome=OutcomeStatus.SUCCEEDED,
-                    ) from None
-                except Exception:
-                    raise ConversationDocumentComparisonError(
-                        "comparison lease recheck failed",
-                        model_calls=2,
-                        failure_stage=FailureStage.STATE_LOSS,
-                        failure_reason=FailureReason.PROVIDER_FAILURE,
-                        synthesis_outcome=OutcomeStatus.SUCCEEDED,
-                        verification_outcome=OutcomeStatus.SUCCEEDED,
-                    ) from None
-                if not lease_current:
-                    raise ConversationDocumentComparisonError(
-                        "comparison lease became stale",
+                        "comparison process lease became stale",
                         model_calls=2,
                         failure_stage=FailureStage.STATE_LOSS,
                         failure_reason=FailureReason.STALE_STATE,
@@ -38804,7 +38846,7 @@ class AgentRuntime:
                     )
                 if time.monotonic() >= deadline:
                     raise TimeoutError("comparison deadline expired after lease recheck")
-                if not mark_request_effect_possible():
+                if not stage_request_effect_possible_in_transaction(conn):
                     raise RuntimeError("request fence failed before comparison publication")
                 assistant = store_message_in_transaction(
                     conn,
@@ -44159,13 +44201,65 @@ class AgentRuntime:
         if deadline - time.monotonic() <= _SELECTED_ARCHIVE_PUBLICATION_RESERVE_SEC:
             raise TimeoutError("archive explanation deadline expired before publication")
 
+        late_lease_failure_reason: FailureReason | None = None
+        try:
+            explanation_lease_is_current = await selected_archive_explanation_lease_is_current(
+                model,
+                explanation,
+                absolute_deadline=deadline,
+            )
+        except TimeoutError:
+            if deadline - time.monotonic() <= _SELECTED_ARCHIVE_PUBLICATION_RESERVE_SEC:
+                raise
+            late_lease_failure_reason = FailureReason.TIMEOUT
+        except Exception:
+            late_lease_failure_reason = FailureReason.PROVIDER_FAILURE
+        else:
+            if not explanation_lease_is_current:
+                if deadline - time.monotonic() <= _SELECTED_ARCHIVE_PUBLICATION_RESERVE_SEC:
+                    raise TimeoutError("archive explanation deadline expired before publication")
+                late_lease_failure_reason = FailureReason.STALE_STATE
+        if late_lease_failure_reason is not None:
+            return self._selected_archive_evidence_replay_response(
+                actor=actor,
+                conversation_id=conversation_id,
+                person_id=person_id,
+                request=request,
+                boundary_message_id=boundary_message_id,
+                admitted_work_item=admitted_work_item,
+                turn_started=turn_started,
+                explanation_unavailable=True,
+                prior_model_calls=2,
+                publication_deadline=deadline,
+                explanation_failure_stage=FailureStage.STATE_LOSS,
+                explanation_failure_reason=late_lease_failure_reason,
+                explanation_synthesis_outcome=OutcomeStatus.SUCCEEDED,
+                explanation_verification_outcome=OutcomeStatus.SUCCEEDED,
+            )
+
         class _SelectedArchiveLeasePublicationRollback(RuntimeError):
             pass
 
-        late_lease_failure_reason: FailureReason | None = None
+        publication_uses_explanation = False
+
+        def before_archive_explanation_commit() -> None:
+            nonlocal late_lease_failure_reason
+            if time.monotonic() >= deadline:
+                raise TimeoutError("archive explanation deadline expired at commit")
+            if publication_uses_explanation and not selected_archive_explanation_process_lease_is_current(
+                model,
+                explanation,
+            ):
+                late_lease_failure_reason = FailureReason.STALE_STATE
+                raise _SelectedArchiveLeasePublicationRollback
+
         with (
             suppress(_SelectedArchiveLeasePublicationRollback),
-            self.storage.transaction() as publication_conn,
+            guarded_storage_transaction(
+                self.storage,
+                before_commit=before_archive_explanation_commit,
+                lock_timeout_sec=max(0.0, deadline - time.monotonic()),
+            ) as publication_conn,
         ):
             if time.monotonic() >= deadline:
                 raise TimeoutError("archive explanation deadline expired before transaction")
@@ -44188,6 +44282,7 @@ class AgentRuntime:
             )
             exact = final_replay.status is ArchiveEvidenceReplayStatus.EXACT
             if exact:
+                publication_uses_explanation = True
                 final_selected_sha256 = hashlib.sha256(
                     final_selected.to_private_json().encode("ascii")
                 ).hexdigest()
@@ -44325,24 +44420,11 @@ class AgentRuntime:
                 raise RuntimeError("archive explanation Work Item trace could not be stored")
             if time.monotonic() >= deadline:
                 raise TimeoutError("archive explanation deadline expired before message")
-            if exact:
-                try:
-                    explanation_lease_is_current = await selected_archive_explanation_lease_is_current(
-                        model,
-                        explanation,
-                        absolute_deadline=deadline,
-                    )
-                except TimeoutError:
-                    if deadline - time.monotonic() <= _SELECTED_ARCHIVE_PUBLICATION_RESERVE_SEC:
-                        raise
-                    late_lease_failure_reason = FailureReason.TIMEOUT
-                except Exception:
-                    late_lease_failure_reason = FailureReason.PROVIDER_FAILURE
-                else:
-                    if not explanation_lease_is_current:
-                        if deadline - time.monotonic() <= _SELECTED_ARCHIVE_PUBLICATION_RESERVE_SEC:
-                            raise TimeoutError("archive explanation deadline expired before publication")
-                        late_lease_failure_reason = FailureReason.STALE_STATE
+            if exact and not selected_archive_explanation_process_lease_is_current(
+                model,
+                explanation,
+            ):
+                late_lease_failure_reason = FailureReason.STALE_STATE
             if late_lease_failure_reason is None:
                 if time.monotonic() >= deadline:
                     raise TimeoutError("archive explanation deadline expired after lease recheck")

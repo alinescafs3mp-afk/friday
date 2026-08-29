@@ -36,12 +36,14 @@ from friday.interaction_control_plane.turn_trace import (
 from friday.model_input_hygiene import model_messages_are_secret_free, model_visible_text_is_secret_free
 from friday.model_profiles import ModelProfileLease, ModelRequirements
 from friday.orchestration.file_read import (
-    _MAX_ATTESTED_INPUT_UTF8_BYTES,
     V12FileReadError,
+    _attested_input_max_bytes,
     _AttestedFileModel,
     _call_model_once,
     _file_requirements,
+    _file_requirements_for_input_bytes,
     _lease_is_current_before_deadline,
+    _lease_is_process_current,
     _messages_fit_attested_context,
     _model_lease_matches_requirements,
     _two_call_read_model_output_limits,
@@ -124,10 +126,12 @@ class ConversationDocumentComparisonError(RuntimeError):
         super().__init__(message)
 
 
-def conversation_document_model_requirements() -> ModelRequirements:
-    """Return this journey's one immutable measured-lease projection."""
+def conversation_document_model_requirements(
+    required_context_tokens: int = 8_192,
+) -> ModelRequirements:
+    """Return this journey's exact immutable measured-lease projection."""
 
-    return _file_requirements(2)
+    return _file_requirements(2, required_context_tokens)
 
 
 def _lease_matches_requirements(
@@ -136,7 +140,8 @@ def _lease_matches_requirements(
 ) -> bool:
     return bool(
         type(lease) is ModelProfileLease
-        and requirements is conversation_document_model_requirements()
+        and type(requirements) is ModelRequirements
+        and requirements.prepared_evidence_items == 2
         and _model_lease_matches_requirements(lease, requirements)
     )
 
@@ -349,6 +354,7 @@ def conversation_document_comparison_plan_sha256(
     message_model_evidence_sha256: str,
     document_model_evidence_sha256: str,
     model_evidence_sha256: str,
+    requirements: ModelRequirements | None = None,
 ) -> str:
     """Bind the code-owned two-source plan without widening TurnPlan v1."""
 
@@ -373,6 +379,9 @@ def conversation_document_comparison_plan_sha256(
         )
     ):
         raise ConversationDocumentComparisonError("comparison plan is invalid")
+    effective_requirements = requirements or conversation_document_model_requirements()
+    if type(effective_requirements) is not ModelRequirements:
+        raise ConversationDocumentComparisonError("comparison requirements are invalid")
     return hashlib.sha256(
         _canonical_json(
             {
@@ -390,7 +399,7 @@ def conversation_document_comparison_plan_sha256(
                 "message_model_evidence_sha256": message_model_evidence_sha256,
                 "objective": "compare_exact_message_evidence_with_one_document",
                 "request_sha256": hashlib.sha256(request_bytes).hexdigest(),
-                "requirements_sha256": conversation_document_model_requirements().canonical_sha256(),
+                "requirements_sha256": effective_requirements.canonical_sha256(),
                 "schema": CONVERSATION_DOCUMENT_COMPARISON_PLAN_SCHEMA,
                 "verifier_required": True,
             }
@@ -589,7 +598,6 @@ class ConversationDocumentComparison:
             or type(self.message_coverage_grade) is not ArchiveEvidenceReplayCoverageGrade
             or type(self.lease) is not ModelProfileLease
             or type(self.requirements) is not ModelRequirements
-            or self.requirements is not conversation_document_model_requirements()
             or not _lease_matches_requirements(self.lease, self.requirements)
             or (
                 self._parent_context is not None
@@ -697,15 +705,6 @@ async def compare_conversation_with_document(
             raise ConversationDocumentComparisonError(
                 "durable selected message evidence changed before comparison"
             )
-        plan_sha256 = conversation_document_comparison_plan_sha256(
-            request=request,
-            message_evidence_sha256=message_evidence_sha256,
-            document_evidence_sha256=document_evidence_sha256,
-            evidence_bundle_sha256=evidence_bundle_sha256,
-            message_model_evidence_sha256=message_identity,
-            document_model_evidence_sha256=document_identity,
-            model_evidence_sha256=bundle_identity,
-        )
         synthesis_messages = _synthesis_messages(request=request, evidence=evidence)
         verifier_messages = _verifier_messages(
             request=request,
@@ -726,16 +725,44 @@ async def compare_conversation_with_document(
             separators=(",", ":"),
         ).encode("utf-8")
     ) + 2 * (_MAX_ANSWER_JSON_UTF8_BYTES - empty_answer_bytes)
-    if not (
-        model_messages_are_secret_free(synthesis_messages)
-        and _messages_fit_attested_context(synthesis_messages)
-        and model_messages_are_secret_free(verifier_messages)
-        and _messages_fit_attested_context(verifier_messages)
-        and reserved_verifier_bytes <= _MAX_ATTESTED_INPUT_UTF8_BYTES
+    synthesis_input_bytes = len(
+        json.dumps(
+            synthesis_messages,
+            ensure_ascii=False,
+            separators=(",", ":"),
+        ).encode("utf-8")
+    )
+    requirements = _file_requirements_for_input_bytes(
+        model,
+        2,
+        synthesis_input_bytes,
+        reserved_verifier_bytes,
+    )
+    if (
+        requirements is None
+        or not model_messages_are_secret_free(synthesis_messages)
+        or not _messages_fit_attested_context(
+            synthesis_messages,
+            requirements.required_context_tokens,
+        )
+        or not model_messages_are_secret_free(verifier_messages)
+        or not _messages_fit_attested_context(
+            verifier_messages,
+            requirements.required_context_tokens,
+        )
+        or reserved_verifier_bytes > _attested_input_max_bytes(requirements.required_context_tokens)
     ):
         raise ConversationDocumentComparisonError("comparison evidence exceeds the attested context")
-
-    requirements = conversation_document_model_requirements()
+    plan_sha256 = conversation_document_comparison_plan_sha256(
+        request=request,
+        message_evidence_sha256=message_evidence_sha256,
+        document_evidence_sha256=document_evidence_sha256,
+        evidence_bundle_sha256=evidence_bundle_sha256,
+        message_model_evidence_sha256=message_identity,
+        document_model_evidence_sha256=document_identity,
+        model_evidence_sha256=bundle_identity,
+        requirements=requirements,
+    )
     model_calls = 0
 
     def record_dispatch() -> None:
@@ -1036,6 +1063,30 @@ async def conversation_document_comparison_lease_is_current(
     )
 
 
+def conversation_document_comparison_process_lease_is_current(
+    model: _AttestedFileModel,
+    comparison: ConversationDocumentComparison,
+) -> bool:
+    """Recheck the carried lease against the synchronous process gate."""
+
+    if not conversation_document_comparison_is_process_owned(comparison):
+        raise TypeError("conversation/document comparison is invalid")
+    try:
+        parent_context = _current_parent_context(comparison._parent_context)
+    except TurnContextError:
+        return False
+    current = _lease_is_process_current(
+        model,
+        comparison.lease,
+        comparison.requirements,
+    )
+    try:
+        _current_parent_context(parent_context)
+    except TurnContextError:
+        return False
+    return current and conversation_document_comparison_is_process_owned(comparison)
+
+
 __all__ = [
     "CONVERSATION_DOCUMENT_COMPARISON_EVIDENCE_SCHEMA",
     "CONVERSATION_DOCUMENT_COMPARISON_PLAN_SCHEMA",
@@ -1045,6 +1096,7 @@ __all__ = [
     "conversation_document_comparison_is_process_owned",
     "conversation_document_model_evidence_identity",
     "conversation_document_comparison_lease_is_current",
+    "conversation_document_comparison_process_lease_is_current",
     "conversation_document_comparison_plan_sha256",
     "conversation_document_model_requirements",
 ]

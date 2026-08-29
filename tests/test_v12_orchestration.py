@@ -34,6 +34,7 @@ from friday.orchestration.planner import (
     V12Planner,
     _planner_inherited_limits,
     _planner_lease_is_current_before_deadline,
+    _planner_requirements,
 )
 from friday.orchestration.router import (
     ReadOnlyRoutePreparation,
@@ -1474,6 +1475,174 @@ def _planner_lease(requirements: ModelRequirements, authority: object) -> ModelP
         _gate_authority=authority,
         _gate_generation=1,
     )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("available_context_tokens", "message", "expected_context_tokens"),
+    [
+        (40_960, "сравни два файла", 8_192),
+        (40_960, "Ж" * 5_000, 40_960),
+        (8_192, "сравни два файла", 8_192),
+    ],
+    ids=("q38-small", "q38-long", "q36-small"),
+)
+async def test_attested_planner_acquires_once_at_the_smallest_exact_measured_tier(
+    available_context_tokens: int,
+    message: str,
+    expected_context_tokens: int,
+) -> None:
+    class _RawModel:
+        async def chat(self, *_args: Any, **_kwargs: Any) -> dict[str, Any]:
+            raise AssertionError("attested planner touched the raw model")
+
+    class _Runtime:
+        def __init__(self) -> None:
+            self.acquire_calls: list[ModelRequirements] = []
+            self.complete_calls: list[ModelRequirements] = []
+            self.lease: ModelProfileLease | None = None
+
+        def available_context_tokens(self) -> int:
+            return available_context_tokens
+
+        async def acquire_lease(
+            self,
+            requirements: ModelRequirements,
+            *,
+            absolute_deadline: float,
+        ) -> ModelProfileLease:
+            assert absolute_deadline > time.monotonic()
+            self.acquire_calls.append(requirements)
+            self.lease = _planner_lease(requirements, self)
+            return self.lease
+
+        async def lease_is_current(
+            self,
+            lease: object,
+            requirements: ModelRequirements,
+            *,
+            absolute_deadline: float,
+        ) -> bool:
+            return bool(
+                absolute_deadline > time.monotonic()
+                and lease is self.lease
+                and requirements is _planner_requirements(expected_context_tokens)
+            )
+
+        async def complete(
+            self,
+            lease: ModelProfileLease,
+            requirements: ModelRequirements,
+            messages: list[dict[str, Any]],
+            **_kwargs: Any,
+        ) -> dict[str, Any]:
+            assert lease is self.lease
+            assert messages == V12Planner._messages(  # noqa: SLF001
+                turn,
+                expected_context_tokens,
+            )
+            self.complete_calls.append(requirements)
+            return {
+                "content": json.dumps(_plan_payload(), ensure_ascii=False),
+                "finish_reason": "stop",
+                "tool_calls": [],
+            }
+
+    turn = TurnInput.from_chat(
+        message=message,
+        actor=SimpleNamespace(is_owner=True, shared_tenant=False),
+        conversation_id=None,
+        attachments=_chat_kwargs()["attachments"],
+        enable_tools=True,
+        synthetic_document_notice=False,
+        mode="dialogue",
+        reply_to=None,
+        quoted_attachment_reference=False,
+        reply_assistant_reference=False,
+    )
+    runtime = _Runtime()
+
+    plan = await V12Planner(
+        _RawModel(),
+        timeout_sec=5,
+        attested_runtime=runtime,
+    ).plan_attested(turn)
+
+    assert plan.route is RouteClass.FILE_READ
+    assert runtime.acquire_calls == [_planner_requirements(expected_context_tokens)]
+    assert runtime.complete_calls == [_planner_requirements(expected_context_tokens)]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("capacity_mode", "message", "expected_context_tokens"),
+    [
+        ("legacy", "сравни два файла", 8_192),
+        ("unavailable", "сравни два файла", None),
+        ("q36", "Ж" * 5_000, None),
+    ],
+    ids=("legacy-baseline", "unavailable-fail-closed", "q36-long-fail-closed"),
+)
+async def test_attested_planner_legacy_baseline_and_unavailable_capacity_fail_closed(
+    capacity_mode: str,
+    message: str,
+    expected_context_tokens: int | None,
+) -> None:
+    class _RawModel:
+        async def chat(self, *_args: Any, **_kwargs: Any) -> dict[str, Any]:
+            raise AssertionError("attested planner touched the raw model")
+
+    class _LegacyRuntime:
+        def __init__(self) -> None:
+            self.acquire_calls: list[ModelRequirements] = []
+            self.lease: ModelProfileLease | None = None
+
+        async def acquire_lease(
+            self,
+            requirements: ModelRequirements,
+            *,
+            absolute_deadline: float,
+        ) -> ModelProfileLease:
+            self.acquire_calls.append(requirements)
+            self.lease = _planner_lease(requirements, self)
+            return self.lease
+
+        async def lease_is_current(self, lease: object, *_args: Any, **_kwargs: Any) -> bool:
+            return lease is self.lease
+
+        async def complete(self, *_args: Any, **_kwargs: Any) -> dict[str, Any]:
+            return {
+                "content": json.dumps(_plan_payload(), ensure_ascii=False),
+                "finish_reason": "stop",
+                "tool_calls": [],
+            }
+
+    class _MeasuredRuntime(_LegacyRuntime):
+        def available_context_tokens(self) -> int:
+            return 0 if capacity_mode == "unavailable" else 8_192
+
+    turn = TurnInput.from_chat(
+        message=message,
+        actor=SimpleNamespace(is_owner=True, shared_tenant=False),
+        conversation_id=None,
+        attachments=_chat_kwargs()["attachments"],
+        enable_tools=True,
+        synthetic_document_notice=False,
+        mode="dialogue",
+        reply_to=None,
+        quoted_attachment_reference=False,
+        reply_assistant_reference=False,
+    )
+    runtime = _LegacyRuntime() if capacity_mode == "legacy" else _MeasuredRuntime()
+    planner = V12Planner(_RawModel(), timeout_sec=5, attested_runtime=runtime)
+
+    if expected_context_tokens is None:
+        with pytest.raises(ValueError, match="available measured context"):
+            await planner.plan_attested(turn)
+        assert runtime.acquire_calls == []
+    else:
+        await planner.plan_attested(turn)
+        assert runtime.acquire_calls == [_planner_requirements(expected_context_tokens)]
 
 
 def test_attested_planner_narrows_parent_deadline_output_and_tool_authority() -> None:

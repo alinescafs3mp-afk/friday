@@ -49,11 +49,14 @@ from friday.orchestration.capability_outcome import (
 )
 from friday.orchestration.contracts import RouterMode
 from friday.orchestration.file_read import (
+    _MAX_ANSWER_JSON_UTF8_BYTES,
     V12FileReadError,
     V12FileReadHandler,
+    _attested_input_max_bytes,
     _call_model_once,
     _file_requirements,
     _lease_is_current_before_deadline,
+    _messages_fit_attested_context,
     _two_call_read_model_output_limits,
     _within_parent_deadline,
 )
@@ -308,6 +311,39 @@ class _Model:
         }
 
 
+class _MeasuredContextModel(_Model):
+    def __init__(
+        self,
+        synthesis: str,
+        *,
+        available_context_tokens: int,
+        reject_acquire: bool = False,
+    ) -> None:
+        super().__init__(synthesis)
+        self._available_context_tokens = available_context_tokens
+        self.reject_acquire = reject_acquire
+        self.acquire_calls = 0
+        self.acquired_requirements: list[ModelRequirements] = []
+
+    def available_context_tokens(self) -> int:
+        return self._available_context_tokens
+
+    async def acquire_lease(
+        self,
+        requirements: ModelRequirements,
+        *,
+        absolute_deadline: float,
+    ) -> ModelProfileLease | None:
+        self.acquire_calls += 1
+        self.acquired_requirements.append(requirements)
+        if self.reject_acquire:
+            return None
+        return await super().acquire_lease(
+            requirements,
+            absolute_deadline=absolute_deadline,
+        )
+
+
 def _request(
     reference: ReadOnlyAttachmentReference | tuple[ReadOnlyAttachmentReference, ...],
     *,
@@ -527,16 +563,26 @@ async def _leased_model_call(model: _Model) -> tuple[ModelRequirements, ModelPro
 def test_file_model_requirements_are_closed_process_singletons() -> None:
     one = _file_requirements(1)
     two = _file_requirements(2)
+    measured = _file_requirements(1, 40_960)
 
     assert _file_requirements(1) is one
     assert _file_requirements(2) is two
+    assert _file_requirements(1, 40_960) is measured
     assert one.prepared_evidence_items == 1
     assert two.prepared_evidence_items == 2
+    assert one.required_context_tokens == 8_192
+    assert measured.required_context_tokens == 40_960
+    assert measured.canonical_sha256() != one.canonical_sha256()
+    assert _attested_input_max_bytes(8_192) == 5_500
+    assert _attested_input_max_bytes(40_960) == 27_500
     assert one.max_tool_steps == one.max_tool_rounds == one.max_tool_calls == 0
     assert two.max_tool_steps == two.max_tool_rounds == two.max_tool_calls == 0
     for malformed in (True, 0, 3, 1.0, "1"):
         with pytest.raises(ValueError, match="closed lease projection"):
             _file_requirements(malformed)  # type: ignore[arg-type]
+    for malformed_context in (True, 0, 8_191, 16_384, 40_961, 8_192.0, "40960"):
+        with pytest.raises(ValueError, match="closed measured tiers"):
+            _file_requirements(1, malformed_context)  # type: ignore[arg-type]
 
 
 @pytest.mark.asyncio
@@ -1901,10 +1947,106 @@ async def test_two_file_handler_requires_both_sources_in_answer_and_verifier(set
 @pytest.mark.asyncio
 async def test_prepare_reserves_the_full_verifier_context_before_selection(settings, storage) -> None:
     reference = _register(storage, settings, text="X" * 3_500, filename="large.txt")
-    handler = _handler(storage, settings, _Model("Ответ. [A1]"))
+    legacy_handler = _handler(storage, settings, _Model("Ответ. [A1]"))
+    request, turn, plan = _request(reference, conversation_id=None)
+
+    assert await legacy_handler.prepare(request, turn, plan) is None
+
+    measured_model = _MeasuredContextModel(
+        "Ответ. [A1]",
+        available_context_tokens=40_960,
+    )
+    measured_handler = _handler(storage, settings, measured_model)
+    preparation = await measured_handler.prepare(request, turn, plan)
+
+    assert preparation is not None
+    assert preparation.private_payload.model_requirements is _file_requirements(1, 40_960)
+    synthesis_messages = measured_handler._synthesis_messages(  # noqa: SLF001
+        turn,
+        plan,
+        preparation.private_payload.evidence.bundle,
+    )
+    empty_verifier_messages = measured_handler._verifier_messages(  # noqa: SLF001
+        turn,
+        preparation.private_payload.evidence.bundle,
+        "",
+    )
+    serialized_empty_verifier_bytes = len(
+        json.dumps(
+            empty_verifier_messages,
+            ensure_ascii=False,
+            separators=(",", ":"),
+        ).encode("utf-8")
+    )
+    empty_answer_bytes = len(json.dumps("", ensure_ascii=False).encode("utf-8"))
+    reserved_verifier_bytes = serialized_empty_verifier_bytes + 2 * (
+        _MAX_ANSWER_JSON_UTF8_BYTES - empty_answer_bytes
+    )
+    assert _messages_fit_attested_context(synthesis_messages, 8_192)
+    assert serialized_empty_verifier_bytes <= _attested_input_max_bytes(8_192)
+    assert reserved_verifier_bytes > _attested_input_max_bytes(8_192)
+
+
+@pytest.mark.asyncio
+async def test_measured_q38_selects_the_least_exact_context_and_legacy_stays_at_8k(
+    settings,
+    storage,
+) -> None:
+    small_reference = _register(storage, settings, text="Короткий источник.", filename="small.txt")
+    small_model = _MeasuredContextModel(
+        "Источник прочитан. [A1]",
+        available_context_tokens=40_960,
+    )
+    small_handler = _handler(storage, settings, small_model)
+    small_request, small_turn, small_plan = _request(small_reference, conversation_id=None)
+
+    small_preparation = await small_handler.prepare(small_request, small_turn, small_plan)
+
+    assert small_preparation is not None
+    assert small_model.acquire_calls == 1
+    assert small_preparation.private_payload.model_requirements is _file_requirements(1, 8_192)
+
+    large_reference = _register(storage, settings, text="L" * 6_000, filename="large-measured.txt")
+    large_model = _MeasuredContextModel(
+        "Источник прочитан. [A1]",
+        available_context_tokens=40_960,
+    )
+    large_handler = _handler(storage, settings, large_model)
+    large_request, large_turn, large_plan = _request(large_reference, conversation_id=None)
+
+    large_preparation = await large_handler.prepare(large_request, large_turn, large_plan)
+
+    assert large_preparation is not None
+    assert large_model.acquire_calls == 1
+    assert large_preparation.private_payload.model_requirements is _file_requirements(1, 40_960)
+    synthesis_messages = large_handler._synthesis_messages(  # noqa: SLF001
+        large_turn,
+        large_plan,
+        large_preparation.private_payload.evidence.bundle,
+    )
+    assert not _messages_fit_attested_context(synthesis_messages, 8_192)
+    assert _messages_fit_attested_context(synthesis_messages, 40_960)
+
+    legacy_handler = _handler(storage, settings, _Model("Источник прочитан. [A1]"))
+    legacy_request, legacy_turn, legacy_plan = _request(large_reference, conversation_id=None)
+    assert await legacy_handler.prepare(legacy_request, legacy_turn, legacy_plan) is None
+
+
+@pytest.mark.asyncio
+async def test_measured_context_rejected_acquire_is_not_retried(settings, storage) -> None:
+    reference = _register(storage, settings, text="R" * 6_000, filename="rejected.txt")
+    model = _MeasuredContextModel(
+        "Источник прочитан. [A1]",
+        available_context_tokens=40_960,
+        reject_acquire=True,
+    )
+    handler = _handler(storage, settings, model)
     request, turn, plan = _request(reference, conversation_id=None)
 
     assert await handler.prepare(request, turn, plan) is None
+    assert model.acquire_calls == 1
+    assert model.acquired_requirements == [_file_requirements(1, 40_960)]
+    assert model.calls == []
 
 
 @pytest.mark.asyncio

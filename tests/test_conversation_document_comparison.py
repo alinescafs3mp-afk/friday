@@ -298,6 +298,8 @@ class _ComparisonModel:
         leased_tool_rounds: int = 0,
         leased_tool_calls: int = 0,
         after_verifier: Callable[[], None] | None = None,
+        available_context_tokens: int | None = None,
+        expected_message_text: str = "В переписке решили оставить точный режим CUDA graphs.",
     ) -> None:
         self.answer = answer
         self.verifier_supported = verifier_supported
@@ -310,12 +312,21 @@ class _ComparisonModel:
         self.leased_tool_rounds = leased_tool_rounds
         self.leased_tool_calls = leased_tool_calls
         self.lease_checks = 0
+        self.process_lease_checks = 0
         self.after_verifier = after_verifier
+        self._available_context_tokens = available_context_tokens
+        self.expected_message_text = expected_message_text
+        self.acquire_calls = 0
         self.lease: ModelProfileLease | None = None
         self.calls: list[list[dict[str, Any]]] = []
         self.call_kwargs: list[dict[str, Any]] = []
         self.requirements: ModelRequirements | None = None
         self.verifier_answer = ""
+
+    def available_context_tokens(self) -> int:
+        if self._available_context_tokens is None:
+            return 8_192
+        return self._available_context_tokens
 
     async def acquire_lease(
         self,
@@ -323,6 +334,7 @@ class _ComparisonModel:
         *,
         absolute_deadline: float,
     ) -> ModelProfileLease:
+        self.acquire_calls += 1
         assert absolute_deadline > time.monotonic()
         assert requirements.prepared_evidence_items == 2
         assert requirements.max_tool_steps == 0
@@ -368,6 +380,19 @@ class _ComparisonModel:
             and requirements is self.requirements
         )
 
+    def lease_is_process_current(
+        self,
+        lease: object,
+        requirements: ModelRequirements,
+    ) -> bool:
+        self.process_lease_checks += 1
+        return bool(
+            lease is self.lease
+            and requirements is self.requirements
+            and self.lease is not None
+            and self.lease.requirements_sha256 == requirements.canonical_sha256()
+        )
+
     async def complete(
         self,
         lease: object,
@@ -387,7 +412,7 @@ class _ComparisonModel:
             assert payload["evidence"]["messages"]["fragments"] == [
                 {
                     "label": "M1.1",
-                    "text": "В переписке решили оставить точный режим CUDA graphs.",
+                    "text": self.expected_message_text,
                 }
             ]
             assert payload["evidence"]["document"]["label"] == "D1"
@@ -468,6 +493,70 @@ async def test_exact_two_source_comparison_uses_two_tools_disabled_calls_and_rec
         absolute_deadline=time.monotonic() + 10,
     )
     assert model.lease_checks == 4
+
+
+@pytest.mark.asyncio
+async def test_conversation_comparison_adopts_q38_only_for_large_exact_payloads() -> None:
+    replay, selected = _message_evidence()
+    durable = _durable_evidence_digests(selected)
+    small_q38 = _ComparisonModel(available_context_tokens=40_960)
+
+    small = await compare_conversation_with_document(
+        small_q38,
+        request="Сопоставь выбранные сообщения с этим документом",
+        message_replay=replay,
+        selected_message_evidence=selected,
+        prepared_document=_prepared_document(),
+        **durable,
+        absolute_deadline=time.monotonic() + 10,
+    )
+
+    assert small.requirements is conversation_document_model_requirements(8_192)
+    assert small_q38.acquire_calls == 1
+
+    large_document = _prepared_document(text="D" * 6_000)
+    q36 = _ComparisonModel(available_context_tokens=8_192)
+    with pytest.raises(ConversationDocumentComparisonError, match="attested context"):
+        await compare_conversation_with_document(
+            q36,
+            request="Сопоставь выбранные сообщения с этим документом",
+            message_replay=replay,
+            selected_message_evidence=selected,
+            prepared_document=large_document,
+            **durable,
+            absolute_deadline=time.monotonic() + 10,
+        )
+    assert q36.acquire_calls == 0
+
+    q38 = _ComparisonModel(available_context_tokens=40_960)
+    large = await compare_conversation_with_document(
+        q38,
+        request="Сопоставь выбранные сообщения с этим документом",
+        message_replay=replay,
+        selected_message_evidence=selected,
+        prepared_document=large_document,
+        **durable,
+        absolute_deadline=time.monotonic() + 10,
+    )
+
+    assert large.requirements is conversation_document_model_requirements(40_960)
+    assert q38.acquire_calls == 1
+    assert len(q38.calls) == 2
+    assert large.plan_sha256 != conversation_document_comparison_plan_sha256(
+        request="Сопоставь выбранные сообщения с этим документом",
+        message_evidence_sha256=large.message_evidence_sha256,
+        document_evidence_sha256=large.document_evidence_sha256,
+        evidence_bundle_sha256=large.evidence_bundle_sha256,
+        message_model_evidence_sha256=large.message_model_evidence_sha256,
+        document_model_evidence_sha256=large.document_model_evidence_sha256,
+        model_evidence_sha256=large.model_evidence_sha256,
+        requirements=conversation_document_model_requirements(8_192),
+    )
+    with pytest.raises(ConversationDocumentComparisonError):
+        replace(
+            large,
+            requirements=conversation_document_model_requirements(8_192),
+        )
 
 
 @pytest.mark.asyncio

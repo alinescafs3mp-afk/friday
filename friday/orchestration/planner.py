@@ -43,43 +43,65 @@ and request attached_files evidence. For earlier stored files, choose archive_re
 For current external information, choose web_read and web evidence. Never invent a tool or source.
 """
 _MAX_ATTESTED_INPUT_UTF8_BYTES = 5_500
+_BASE_CONTEXT_TOKENS = 8_192
+_MAX_MEASURED_CONTEXT_TOKENS = 40_960
+_CONTEXT_TOKEN_TIERS = (_BASE_CONTEXT_TOKENS, _MAX_MEASURED_CONTEXT_TOKENS)
 _EXACT_JSON_FENCE_PREFIX = "```json\n"
 _EXACT_JSON_FENCE_SUFFIX = "\n```"
-_PLANNER_REQUIREMENTS = ModelRequirements(
-    capabilities=frozenset(
-        {
-            ModelCapability.TURN_PLAN_V1,
-            ModelCapability.RU_PLANNING,
-            ModelCapability.CONTEXT_8K,
-            ModelCapability.REMOTE_CANCELLATION,
-        }
-    ),
-    required_context_tokens=8_192,
-    prepared_evidence_items=0,
-    max_tool_steps=0,
-    max_tool_rounds=0,
-    max_tool_calls=0,
-    effect=ModelEffect.READ,
-    # The first promoted route has an independent verifier.  Requiring that
-    # capability at planning time prevents a planner-only attestation from
-    # selecting a route that the same live generation cannot verify.
-    verifier_required=True,
+_PLANNER_REQUIREMENTS_BY_CONTEXT = tuple(
+    ModelRequirements(
+        capabilities=frozenset(
+            {
+                ModelCapability.TURN_PLAN_V1,
+                ModelCapability.RU_PLANNING,
+                ModelCapability.CONTEXT_8K,
+                ModelCapability.REMOTE_CANCELLATION,
+            }
+        ),
+        required_context_tokens=context_tokens,
+        prepared_evidence_items=0,
+        max_tool_steps=0,
+        max_tool_rounds=0,
+        max_tool_calls=0,
+        effect=ModelEffect.READ,
+        # Promoted routes require the same generation to support verification.
+        verifier_required=True,
+    )
+    for context_tokens in _CONTEXT_TOKEN_TIERS
 )
 
 
-def _planner_lease_matches_requirements(lease: object) -> bool:
+def _planner_requirements(required_context_tokens: int = _BASE_CONTEXT_TOKENS) -> ModelRequirements:
+    if type(required_context_tokens) is not int or required_context_tokens not in _CONTEXT_TOKEN_TIERS:
+        raise ValueError("planner context is outside the closed measured tiers")
+    return _PLANNER_REQUIREMENTS_BY_CONTEXT[_CONTEXT_TOKEN_TIERS.index(required_context_tokens)]
+
+
+_PLANNER_REQUIREMENTS = _planner_requirements()
+
+
+def _planner_lease_matches_requirements(
+    lease: object,
+    requirements: ModelRequirements,
+) -> bool:
     if not isinstance(lease, ModelProfileLease) or type(lease) is not ModelProfileLease:
         return False
+    try:
+        expected_requirements = _planner_requirements(requirements.required_context_tokens)
+    except (AttributeError, TypeError, ValueError):
+        return False
     return bool(
-        lease.requirements_sha256 == _PLANNER_REQUIREMENTS.canonical_sha256()
-        and lease.capabilities == _PLANNER_REQUIREMENTS.capabilities
-        and lease.required_context_tokens == _PLANNER_REQUIREMENTS.required_context_tokens
-        and lease.prepared_evidence_items == _PLANNER_REQUIREMENTS.prepared_evidence_items
-        and lease.max_tool_steps == _PLANNER_REQUIREMENTS.max_tool_steps
-        and lease.max_tool_rounds == _PLANNER_REQUIREMENTS.max_tool_rounds
-        and lease.max_tool_calls == _PLANNER_REQUIREMENTS.max_tool_calls
-        and lease.effect is _PLANNER_REQUIREMENTS.effect
-        and lease.verifier_required is _PLANNER_REQUIREMENTS.verifier_required
+        type(requirements) is ModelRequirements
+        and requirements is expected_requirements
+        and lease.requirements_sha256 == requirements.canonical_sha256()
+        and lease.capabilities == requirements.capabilities
+        and lease.required_context_tokens == requirements.required_context_tokens
+        and lease.prepared_evidence_items == requirements.prepared_evidence_items
+        and lease.max_tool_steps == requirements.max_tool_steps
+        and lease.max_tool_rounds == requirements.max_tool_rounds
+        and lease.max_tool_calls == requirements.max_tool_calls
+        and lease.effect is requirements.effect
+        and lease.verifier_required is requirements.verifier_required
     )
 
 
@@ -120,6 +142,8 @@ class AttestedPlannerRuntime(Protocol):
     one live-generation lease through this interface.
     """
 
+    def available_context_tokens(self) -> int: ...
+
     async def acquire_lease(
         self,
         requirements: ModelRequirements,
@@ -150,22 +174,23 @@ class AttestedPlannerRuntime(Protocol):
 async def _planner_lease_is_current_before_deadline(
     runtime: AttestedPlannerRuntime,
     lease: object,
+    requirements: ModelRequirements = _PLANNER_REQUIREMENTS,
     *,
     absolute_deadline: float,
 ) -> bool:
     deadline = _planner_future_deadline(absolute_deadline, stage="before lease check")
     remaining = deadline - time.monotonic()
-    if not _planner_lease_matches_requirements(lease):
+    if not _planner_lease_matches_requirements(lease, requirements):
         return False
     current = await asyncio.wait_for(
         runtime.lease_is_current(
             lease,
-            _PLANNER_REQUIREMENTS,
+            requirements,
             absolute_deadline=deadline,
         ),
         timeout=remaining,
     )
-    return type(current) is bool and current
+    return type(current) is bool and current and _planner_lease_matches_requirements(lease, requirements)
 
 
 def _planner_turn_context(
@@ -243,7 +268,12 @@ class V12Planner:
         return _planner_future_deadline(deadline, stage="after local clamp")
 
     @staticmethod
-    def _messages(turn: TurnInput) -> list[dict[str, Any]]:
+    def _messages(
+        turn: TurnInput,
+        required_context_tokens: int = _BASE_CONTEXT_TOKENS,
+    ) -> list[dict[str, Any]]:
+        if required_context_tokens not in _CONTEXT_TOKEN_TIERS:
+            raise ValueError("planner context is outside the closed measured tiers")
         messages: list[dict[str, Any]] = [
             {"role": "system", "content": _PLANNER_SYSTEM_PROMPT},
             {
@@ -256,13 +286,36 @@ class V12Planner:
                 ),
             },
         ]
-        if len(json.dumps(messages, ensure_ascii=False, separators=(",", ":")).encode("utf-8")) > (
-            _MAX_ATTESTED_INPUT_UTF8_BYTES
-        ):
+        input_limit = (_MAX_ATTESTED_INPUT_UTF8_BYTES * required_context_tokens) // _BASE_CONTEXT_TOKENS
+        if len(json.dumps(messages, ensure_ascii=False, separators=(",", ":")).encode("utf-8")) > input_limit:
             raise ValueError("planner input exceeds the attested context tier")
         if not model_messages_are_secret_free(messages):
             raise ValueError("planner input requires a secret projection")
         return messages
+
+    @staticmethod
+    def _attested_requirements(
+        runtime: AttestedPlannerRuntime,
+        turn: TurnInput,
+    ) -> tuple[list[dict[str, Any]], ModelRequirements]:
+        method = getattr(runtime, "available_context_tokens", None)
+        if not callable(method):
+            available = _BASE_CONTEXT_TOKENS
+        else:
+            try:
+                value = method()
+            except Exception:
+                value = 0
+            available = value if type(value) is int else 0
+        for context_tokens in _CONTEXT_TOKEN_TIERS:
+            if context_tokens > available:
+                break
+            try:
+                messages = V12Planner._messages(turn, context_tokens)
+            except ValueError:
+                continue
+            return messages, _planner_requirements(context_tokens)
+        raise ValueError("planner input exceeds the available measured context")
 
     @staticmethod
     def _plan_from_response(response: object) -> TurnPlan:
@@ -327,16 +380,16 @@ class V12Planner:
         deadline, max_tokens = _planner_inherited_limits(context, deadline=deadline)
         if deadline <= time.monotonic():
             raise TimeoutError("turn planning deadline has expired")
-        messages = self._messages(turn)
         runtime = self._attested_runtime
         if runtime is None:
             raise RuntimeError("attested V12 planner runtime is unavailable")
+        messages, requirements = self._attested_requirements(runtime, turn)
         remaining = deadline - time.monotonic()
         if remaining <= 0:
             raise TimeoutError("turn planning deadline has expired before lease acquisition")
         lease = await asyncio.wait_for(
             runtime.acquire_lease(
-                _PLANNER_REQUIREMENTS,
+                requirements,
                 absolute_deadline=deadline,
             ),
             timeout=remaining,
@@ -347,6 +400,7 @@ class V12Planner:
         if not await _planner_lease_is_current_before_deadline(
             runtime,
             lease,
+            requirements,
             absolute_deadline=deadline,
         ):
             raise RuntimeError("attested V12 planner lease changed before planning")
@@ -357,7 +411,7 @@ class V12Planner:
         response = await asyncio.wait_for(
             runtime.complete(
                 lease,
-                _PLANNER_REQUIREMENTS,
+                requirements,
                 messages,
                 max_tokens=max_tokens,
                 priority="background",
@@ -369,6 +423,7 @@ class V12Planner:
         if not await _planner_lease_is_current_before_deadline(
             runtime,
             lease,
+            requirements,
             absolute_deadline=deadline,
         ):
             raise RuntimeError("attested V12 planner lease changed after planning")

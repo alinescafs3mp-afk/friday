@@ -79,6 +79,8 @@ CANCELLATION_STABLE_ZERO_OBSERVATIONS = 2
 CANCELLATION_STABLE_ZERO_INTERVAL_SEC = 0.05
 LOCAL_CANCELLATION_DRAIN_SEC = 0.05
 MAX_ATTESTED_CHAT_INPUT_UTF8_BYTES = 5_500
+BASE_ATTESTED_CHAT_CONTEXT_TOKENS = 8_192
+MAX_MEASURED_CHAT_CONTEXT_TOKENS = 40_960
 
 _PROCESS_PRIVATE_SALT = secrets.token_bytes(32)
 _PROCESS_SALT_PID = os.getpid()
@@ -1074,8 +1076,15 @@ def _validate_attested_chat_input(
         ).encode("utf-8", errors="strict")
     except (TypeError, ValueError, UnicodeError):
         raise _runtime_error(V12ModelRuntimeFailure.COMPLETION_INVALID) from None
+    measured_context_tokens = min(
+        leased_context_tokens,
+        MAX_MEASURED_CHAT_CONTEXT_TOKENS,
+    )
+    attested_input_limit = (
+        MAX_ATTESTED_CHAT_INPUT_UTF8_BYTES * measured_context_tokens
+    ) // BASE_ATTESTED_CHAT_CONTEXT_TOKENS
     if (
-        len(encoded) > MAX_ATTESTED_CHAT_INPUT_UTF8_BYTES
+        len(encoded) > attested_input_limit
         or not model_messages_are_secret_free(messages)
         or router.estimate_messages_tokens(messages) + max_tokens + CONTEXT_SAFETY_RESERVE_TOKENS
         > leased_context_tokens
@@ -1609,6 +1618,15 @@ class AttestedV12ModelRuntime:
 
     def public_status(self) -> dict[str, object]:
         return self._gate.public_status()
+
+    def available_context_tokens(self) -> int:
+        """Return the exact live gate capacity, or zero on uncertainty."""
+
+        try:
+            value = self._gate.available_context_tokens()
+        except Exception:
+            return 0
+        return value if type(value) is int and 0 < value < (1 << 63) else 0
 
     async def attest(self, *, absolute_deadline: float) -> V12LiveAttestation:
         acquired = False

@@ -28,10 +28,13 @@ from friday.orchestration.archive_recall_outcome import (
 from friday.orchestration.contracts import TurnPlan
 from friday.orchestration.file_read import (
     V12FileReadError,
+    _attested_input_max_bytes,
     _AttestedFileModel,
     _call_model_once,
     _file_requirements,
+    _file_requirements_for_input_bytes,
     _lease_is_current_before_deadline,
+    _lease_is_process_current,
     _messages_fit_attested_context,
     _model_lease_matches_requirements,
     _two_call_read_model_output_limits,
@@ -62,7 +65,6 @@ _MAX_REQUEST_UTF8_BYTES = 512
 _MAX_ANSWER_JSON_UTF8_BYTES = 2_048
 _MAX_SYNTHESIS_TOKENS = 512
 _PUBLICATION_RESERVE_SEC = 2.0
-_SELECTED_ARCHIVE_REQUIREMENTS = _file_requirements(1)
 _SELECTED_ARCHIVE_EXPLANATION_AUTHORITY = object()
 _SELECTED_ARCHIVE_EXPLANATION_BINDING_KEY = secrets.token_bytes(32)
 
@@ -103,6 +105,14 @@ class SelectedArchiveExplanationError(RuntimeError):
             verification_outcome if type(verification_outcome) is OutcomeStatus else OutcomeStatus.FAILED
         )
         super().__init__(message)
+
+
+def selected_archive_model_requirements(
+    required_context_tokens: int = 8_192,
+) -> ModelRequirements:
+    """Return the exact measured lease projection for this read-only journey."""
+
+    return _file_requirements(1, required_context_tokens)
 
 
 def _require_selected_archive_turn_context(
@@ -334,7 +344,8 @@ class SelectedArchiveExplanation:
             or detected != expected_labels
             or type(self.coverage_grade) is not ArchiveEvidenceReplayCoverageGrade
             or type(self.lease) is not ModelProfileLease
-            or self.requirements is not _SELECTED_ARCHIVE_REQUIREMENTS
+            or type(self.requirements) is not ModelRequirements
+            or self.requirements.prepared_evidence_items != 1
             or not _model_lease_matches_requirements(self.lease, self.requirements)
             or type(self._binding_sha256) is not str
             or _DIGEST_RE.fullmatch(self._binding_sha256) is None
@@ -423,7 +434,8 @@ def _selected_archive_explanation_binding_sha256(
             or explanation.citation_labels != expected_labels
             or type(explanation.coverage_grade) is not ArchiveEvidenceReplayCoverageGrade
             or type(lease) is not ModelProfileLease
-            or requirements is not _SELECTED_ARCHIVE_REQUIREMENTS
+            or type(requirements) is not ModelRequirements
+            or requirements.prepared_evidence_items != 1
             or not _model_lease_matches_requirements(lease, requirements)
             or (context is not None and type(context) is not AuthenticatedTurnContext)
         ):
@@ -556,13 +568,40 @@ async def explain_selected_archive_evidence(
         raise
     except (TypeError, ValueError, UnicodeError):
         raise SelectedArchiveExplanationError("selected evidence cannot enter the attested context") from None
-    if not (
-        _messages_fit_attested_context(synthesis_messages)
-        and _messages_fit_attested_context(empty_verifier_messages)
+    empty_answer_bytes = len(json.dumps("", ensure_ascii=False).encode("utf-8"))
+    synthesis_input_bytes = len(
+        json.dumps(
+            synthesis_messages,
+            ensure_ascii=False,
+            separators=(",", ":"),
+        ).encode("utf-8")
+    )
+    reserved_verifier_bytes = len(
+        json.dumps(
+            empty_verifier_messages,
+            ensure_ascii=False,
+            separators=(",", ":"),
+        ).encode("utf-8")
+    ) + 2 * (_MAX_ANSWER_JSON_UTF8_BYTES - empty_answer_bytes)
+    requirements = _file_requirements_for_input_bytes(
+        model,
+        1,
+        synthesis_input_bytes,
+        reserved_verifier_bytes,
+    )
+    if (
+        requirements is None
+        or not _messages_fit_attested_context(
+            synthesis_messages,
+            requirements.required_context_tokens,
+        )
+        or not _messages_fit_attested_context(
+            empty_verifier_messages,
+            requirements.required_context_tokens,
+        )
+        or reserved_verifier_bytes > _attested_input_max_bytes(requirements.required_context_tokens)
     ):
         raise SelectedArchiveExplanationError("selected evidence exceeds the attested context")
-
-    requirements = _SELECTED_ARCHIVE_REQUIREMENTS
     model_calls = 0
 
     def record_dispatch() -> None:
@@ -810,6 +849,34 @@ async def selected_archive_explanation_lease_is_current(
     return type(current) is bool and current and _selected_archive_explanation_is_bound(explanation)
 
 
+def selected_archive_explanation_process_lease_is_current(
+    model: _AttestedFileModel,
+    explanation: SelectedArchiveExplanation,
+) -> bool:
+    """Recheck the carried lease against the synchronous process gate."""
+
+    if type(explanation) is not SelectedArchiveExplanation:
+        raise TypeError("selected archive explanation is invalid")
+    if not _selected_archive_explanation_is_bound(explanation):
+        return False
+    try:
+        authenticated_context = _require_selected_archive_turn_context(
+            explanation._parent_context,
+        )
+    except SelectedArchiveExplanationError:
+        return False
+    current = _lease_is_process_current(
+        model,
+        explanation.lease,
+        explanation.requirements,
+    )
+    try:
+        _require_selected_archive_turn_context(authenticated_context)
+    except SelectedArchiveExplanationError:
+        return False
+    return current and _selected_archive_explanation_is_bound(explanation)
+
+
 __all__ = [
     "SELECTED_ARCHIVE_EXPLANATION_PLAN_SCHEMA",
     "SelectedArchiveExplanation",
@@ -817,4 +884,5 @@ __all__ = [
     "explain_selected_archive_evidence",
     "selected_archive_explanation_evidence_identity",
     "selected_archive_explanation_lease_is_current",
+    "selected_archive_explanation_process_lease_is_current",
 ]

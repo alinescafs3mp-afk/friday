@@ -129,6 +129,25 @@ def test_gate_starts_as_shadow_candidate_without_canary_authority() -> None:
     }
 
 
+def test_available_context_is_exact_live_minimum_and_fails_closed() -> None:
+    profile = QWEN38_27B_SGLANG_V12_PROFILE
+    gate = V12ModelGate(
+        profile,
+        endpoint_binding_sha256=_ENDPOINT_BINDING,
+        installation_context_tokens=24_576,
+    )
+
+    assert gate.available_context_tokens() == 0
+    assert gate.install_live(_attestation(profile, verified_context_tokens=40_960)) is True
+    assert gate.available_context_tokens() == 24_576
+
+    gate._installation_context_tokens = True  # type: ignore[assignment]  # noqa: SLF001
+    assert gate.available_context_tokens() == 0
+    gate._installation_context_tokens = 24_576  # noqa: SLF001
+    gate.revoke()
+    assert gate.available_context_tokens() == 0
+
+
 def test_valid_live_attestation_issues_an_exact_least_privilege_lease() -> None:
     gate = _ready_gate()
     requirements = _requirements(

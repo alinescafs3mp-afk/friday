@@ -335,6 +335,7 @@ class _SelectedArchiveExplanationModel:
         self.lease_valid_checks = lease_valid_checks
         self.final_lease_error = final_lease_error
         self.lease_checks = 0
+        self.process_lease_checks = 0
         self.calls: list[list[dict[str, Any]]] = []
         self.lease: ModelProfileLease | None = None
         self.citation_labels: tuple[str, ...] = ()
@@ -383,6 +384,18 @@ class _SelectedArchiveExplanationModel:
             and self.lease is not None
             and self.lease.requirements_sha256 == requirements.canonical_sha256()
             and (self.lease_valid_checks is None or self.lease_checks <= self.lease_valid_checks)
+        )
+
+    def lease_is_process_current(
+        self,
+        lease: object,
+        requirements: ModelRequirements,
+    ) -> bool:
+        self.process_lease_checks += 1
+        return bool(
+            lease is self.lease
+            and self.lease is not None
+            and self.lease.requirements_sha256 == requirements.canonical_sha256()
         )
 
     async def complete(
@@ -3816,6 +3829,7 @@ async def test_selected_archive_epoch_loss_after_final_reauth_uses_exact_replay_
     original_transaction = storage.transaction
     reauth_calls = 0
     lease_checks = 0
+    process_lease_checks = 0
     rollback_exceptions: list[str] = []
 
     @contextmanager
@@ -3832,7 +3846,7 @@ async def test_selected_archive_epoch_loss_after_final_reauth_uses_exact_replay_
         reauth_calls += 1
         return original_replay(*args, **kwargs)
 
-    async def reject_restarted_lease(
+    async def observe_remote_lease(
         _model: Any,
         _explanation: Any,
         *,
@@ -3841,9 +3855,19 @@ async def test_selected_archive_epoch_loss_after_final_reauth_uses_exact_replay_
         nonlocal lease_checks
         lease_checks += 1
         assert absolute_deadline > agent_runtime_module.time.monotonic()
+        assert reauth_calls == 1
+        assert not storage.conn.in_transaction
+        return True
+
+    def reject_restarted_process_lease(
+        _model: Any,
+        _explanation: Any,
+    ) -> bool:
+        nonlocal process_lease_checks
+        process_lease_checks += 1
         assert reauth_calls == 2
         assert storage.conn.in_transaction
-        return False
+        return process_lease_checks == 1
 
     monkeypatch.setattr(
         runtime,
@@ -3853,7 +3877,12 @@ async def test_selected_archive_epoch_loss_after_final_reauth_uses_exact_replay_
     monkeypatch.setattr(
         agent_runtime_module,
         "selected_archive_explanation_lease_is_current",
-        reject_restarted_lease,
+        observe_remote_lease,
+    )
+    monkeypatch.setattr(
+        agent_runtime_module,
+        "selected_archive_explanation_process_lease_is_current",
+        reject_restarted_process_lease,
     )
     monkeypatch.setattr(storage, "transaction", observe_transaction_rollback)
     try:
@@ -3869,6 +3898,7 @@ async def test_selected_archive_epoch_loss_after_final_reauth_uses_exact_replay_
         await web.close()
 
     assert lease_checks == 1
+    assert process_lease_checks == 2
     assert rollback_exceptions == ["_SelectedArchiveLeasePublicationRollback"]
     assert explanation_model.lease_checks == 2
     assert len(explanation_model.calls) == 2

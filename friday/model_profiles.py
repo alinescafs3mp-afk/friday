@@ -447,6 +447,27 @@ class V12ModelGate:
 
         return True
 
+    def available_context_tokens(self) -> int:
+        """Return only the currently attested effective context capacity.
+
+        This is a process-local, privacy-safe projection: it exposes no
+        endpoint, epoch, prompt, or response material and fails closed before
+        live attestation and after every revocation.
+        """
+
+        with self._lock:
+            attestation = self._attestation
+            if self._status is not ModelGateStatus.CANARY_READY or attestation is None:
+                return 0
+            values = (
+                self._spec.max_context_tokens,
+                attestation.verified_context_tokens,
+                self._installation_context_tokens,
+            )
+            if any(not _valid_positive_int(value) for value in values):
+                return 0
+            return min(values)
+
     def _reject_locked(self, reason: ModelGateReason) -> None:
         self._generation += 1
         self._attestation = None

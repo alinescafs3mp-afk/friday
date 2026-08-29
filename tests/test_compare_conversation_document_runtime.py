@@ -346,8 +346,8 @@ async def test_active_comparison_restarts_without_an_intervening_ordinary_row(
     fence_calls: list[str] = []
     monkeypatch.setattr(
         agent_runtime_module,
-        "mark_request_effect_possible",
-        lambda: not fence_calls.append("publication"),
+        "stage_request_effect_possible_in_transaction",
+        lambda _conn, **_kwargs: not fence_calls.append("publication"),
     )
     arbitrary = await restarted._conversation_document_comparison_state_first_response(  # noqa: SLF001
         actor=actor,
@@ -1077,6 +1077,10 @@ async def test_comparison_epoch_loss_after_final_reauth_rolls_back_model_publica
     reauth_calls = 0
     read_only_checked = False
     lease_checks = 0
+    process_lease_checks = 0
+    staged_fences = 0
+    confirmed_fences = 0
+    rolled_back_fences = 0
     original_read_only_check = runtime._comparison_answer_is_read_only  # noqa: SLF001
 
     def replay_current(*_args: Any, **_kwargs: Any) -> Any:
@@ -1090,7 +1094,7 @@ async def test_comparison_epoch_loss_after_final_reauth_rolls_back_model_publica
         read_only_checked = True
         return accepted
 
-    async def reject_restarted_lease(
+    async def observe_remote_lease(
         _model: Any,
         _comparison: Any,
         *,
@@ -1100,17 +1104,55 @@ async def test_comparison_epoch_loss_after_final_reauth_rolls_back_model_publica
         lease_checks += 1
         assert absolute_deadline > agent_runtime_module.time.monotonic()
         assert read_only_checked
+        assert reauth_calls == 1
+        assert not storage.conn.in_transaction
+        return True
+
+    def reject_restarted_process_lease(
+        _model: Any,
+        _comparison: Any,
+    ) -> bool:
+        nonlocal process_lease_checks
+        process_lease_checks += 1
+        assert read_only_checked
         assert reauth_calls == 2
         assert storage.conn.in_transaction
-        return False
+        return process_lease_checks == 1
+
+    def stage_fence(conn: Any, **_kwargs: Any) -> bool:
+        nonlocal staged_fences
+        staged_fences += 1
+        assert conn is storage.conn
+        assert storage.conn.in_transaction
+        return True
+
+    def confirm_fence() -> None:
+        nonlocal confirmed_fences
+        confirmed_fences += 1
+
+    def rollback_fence() -> None:
+        nonlocal rolled_back_fences
+        rolled_back_fences += 1
 
     monkeypatch.setattr(runtime, "_comparison_replay_in_transaction", replay_current)
     monkeypatch.setattr(runtime, "_comparison_answer_is_read_only", observe_read_only)
     monkeypatch.setattr(
         agent_runtime_module,
         "conversation_document_comparison_lease_is_current",
-        reject_restarted_lease,
+        observe_remote_lease,
     )
+    monkeypatch.setattr(
+        agent_runtime_module,
+        "conversation_document_comparison_process_lease_is_current",
+        reject_restarted_process_lease,
+    )
+    monkeypatch.setattr(
+        agent_runtime_module,
+        "stage_request_effect_possible_in_transaction",
+        stage_fence,
+    )
+    monkeypatch.setattr(agent_runtime_module, "confirm_staged_request_effect", confirm_fence)
+    monkeypatch.setattr(agent_runtime_module, "rollback_staged_request_effect", rollback_fence)
     monkeypatch.setattr(
         comparison_module,
         "archive_selected_evidence_snapshot_sha256",
@@ -1125,6 +1167,10 @@ async def test_comparison_epoch_loss_after_final_reauth_rolls_back_model_publica
     )
 
     assert lease_checks == 1
+    assert process_lease_checks == 2
+    assert staged_fences == 1
+    assert confirmed_fences == 0
+    assert rolled_back_fences == 1
     assert model.lease_checks == 3
     assert result["verified"] is False
     assert result["context"]["compare_conversation_with_document"] == "suspended"

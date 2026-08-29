@@ -276,6 +276,8 @@ class AssistReviewer(Protocol):
 
 
 class AssistPrimaryModel(Protocol):
+    def available_context_tokens(self) -> int: ...
+
     async def prepare_primary_model(self, *, absolute_deadline: float) -> bool: ...
 
     async def acquire_lease(
