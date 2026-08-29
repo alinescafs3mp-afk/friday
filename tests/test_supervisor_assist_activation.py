@@ -870,9 +870,7 @@ def _representative_window_predecessor_identity(
     *,
     registry_sha256: str,
 ) -> dict[str, object]:
-    policy = semantic_supervisor_policy.supervisor_product_policy_identity_for_mode(
-        SupervisorMode.SHADOW
-    )
+    policy = semantic_supervisor_policy.supervisor_product_policy_identity_for_mode(SupervisorMode.SHADOW)
     return {
         "primary_pid": 100,
         "primary_process_epoch_sha256": "5" * 64,
@@ -904,9 +902,7 @@ def _representative_window_consume_request(
         "baseline_file_sha256": attestation["baseline_file_sha256"],
         "baseline_report_sha256": attestation["baseline_report_sha256"],
         "latency_budget_file_sha256": attestation["latency_budget_file_sha256"],
-        "latency_budget_document_sha256": attestation[
-            "latency_budget_document_sha256"
-        ],
+        "latency_budget_document_sha256": attestation["latency_budget_document_sha256"],
         "source_revision_sha256": attestation["source_revision_sha256"],
         "registry_binding_sha256": attestation["registry_binding_sha256"],
         "observer_runner_sha256": attestation["observer_runner_sha256"],
@@ -1039,9 +1035,7 @@ def test_real_server_loader_requires_exact_consumed_representative_window(
         lambda *, verify_tree: {
             "predecessor_release_commit": "a" * 40,
             "predecessor_release_metadata_sha256": "b" * 64,
-            "predecessor_release_tree_manifest_sha256": (
-                source if current_identity_matches else "e" * 64
-            ),
+            "predecessor_release_tree_manifest_sha256": (source if current_identity_matches else "e" * 64),
         },
     )
 
