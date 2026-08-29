@@ -2,7 +2,7 @@
 
 **Friday** (по-русски — **Пятница**; ex codename Jericho) — локальная многопользовательская Knowledge Operating System: она принимает текст и документы, сохраняет первоисточник, строит граф знаний, ищет по личной базе и отвечает через Telegram или HTTP API. Веб-панель предназначена для администрирования, разбора Inbox, работы с сущностями, правами, резервными копиями и диагностикой.
 
-Текущая версия: **0.207.73**. Owner-only Engineer Mode теперь является
+Текущая версия: **0.207.74**. Owner-only Engineer Mode теперь является
 автономной консолью Пятницы внутри её основной VM: модель сама выбирает и
 последовательно запускает установленное ПО от пользователя службы, работает с
 его файловой системой и сетью, получает точные текущие Telegram-вложения и
@@ -24,9 +24,10 @@ sentinel, а не выдуманную replay identity. Исполняющий r
 Schema 46 `EngineerWorkItem v1` активирована: exact scope, closed CAS
 state, source slots и только command/job/terminal receipt digests дают
 restart-safe continuation `observe → replan → next step or final`. Schema 47
-добавляет reader-first body-free passage sidecar: существующие документы
-получают только честный `backfill_pending`, а отдельный bounded writer будет
-активирован следующим обратимым релизом. Prompts,
+добавляет reader-first body-free passage sidecar и bounded restart-safe writer:
+совместимые документы получают точные source-bound spans атомарно, а
+неподдерживаемые legacy-топологии остаются честным `backfill_pending` до новой
+ревизии chunk-контракта. Prompts,
 reasoning, argv, paths и output bodies в Work Item не хранятся; RUNNING и
 UNKNOWN никогда не replay-ятся. Внешний command ledger защищён от
 потери/отката и привязан к backup/restore и immutable rollback.

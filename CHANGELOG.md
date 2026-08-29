@@ -1,3 +1,17 @@
+## 0.207.74 — 2026-08-29
+
+### Bounded document-passage backfill
+
+- Activates the schema-47 body-free passage writer inside the existing bounded,
+  caller-checkpointed Document Catalog worker. Parent CAS and exact child spans
+  publish in one transaction and resume safely after process restart.
+- Makes archive-search coverage distinguish current, capped, pending and
+  unavailable passage state without rechunking published evidence or leaking
+  source bodies into the sidecar or audit report.
+- Keeps the schema-capable `0.207.73rc0` fallback valid: two observed legacy
+  sparse-text shapes that violate the released v2 span topology stay explicit
+  `backfill_pending` until a new revision can rebuild them safely.
+
 ## 0.207.73 — 2026-08-29
 
 ### Reader-first document passages
