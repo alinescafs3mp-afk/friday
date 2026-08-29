@@ -260,6 +260,32 @@ def test_future_joined_fixture_can_admit_assist_but_grants_no_turn_authority() -
     }
 
 
+def test_one_genuine_joined_turn_can_open_bounded_assist_experiment() -> None:
+    candidate = _candidate()
+    product = _readiness_product(
+        baseline_observation_count=1,
+        baseline_complete_count=0,
+        baseline_failure_class_count=1,
+        readiness_observation_count=1,
+        latency_total_ms=1_000,
+        latency_max_ms=1_000,
+        call_rate_observation_count=1,
+        supervisor_invocation_count=1,
+        user_visible_observation_count=1,
+    )
+    evidence = _evidence(
+        candidate,
+        observation_count=1,
+        joined_trace_count=1,
+        product_evidence=product,
+    )
+
+    decision = admit_supervisor_assist_promotion(candidate, evidence, _gate(candidate, evidence))
+
+    assert decision.promotion_admitted is True
+    assert decision.reason is AssistPromotionReason.ADMITTED
+
+
 @pytest.mark.parametrize(
     ("mode", "reason"),
     [

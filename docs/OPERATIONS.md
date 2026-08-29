@@ -326,8 +326,10 @@ Assist/canary используют отдельный policy
 - exact candidate source revision и capability-registry binding;
 - для canary — 1–32 sorted unique actor-binding SHA-256;
 - для assist — пустой actor allowlist;
-- minimum 20 joined observations, exact trace coverage, zero hidden owners,
-  duplicate capability/effect/publication и user-visible regressions;
+- minimum one genuine joined observation, exact trace coverage, zero hidden
+  owners, duplicate capability/effect/publication и user-visible regressions;
+  20 observations remain the useful operating target, not an availability
+  gate, and synthetic traffic is never promotion evidence;
 - baseline file/report, operator-attestation provenance; canary evidence также
   ссылается на canonical digest установленного predecessor assist evidence.
 
