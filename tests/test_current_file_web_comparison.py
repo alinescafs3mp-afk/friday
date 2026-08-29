@@ -36,7 +36,7 @@ from friday.orchestration.transient_web_comparison import (
     seal_explicit_public_web_query,
 )
 from friday.permissions import ActorContext
-from friday.source_identity import authorized_file_snapshot_token
+from friday.source_identity import tenant_authorized_file_snapshot_token
 
 _PLAN_SHA256 = "9" * 64
 _REQUEST = "Сопоставь текущий файл с текущими публичными данными"
@@ -55,6 +55,7 @@ def _prepared_file(
     content_sha256 = hashlib.sha256(text.encode("utf-8")).hexdigest()
     raw = {
         "id": raw_id,
+        "user_id": "tenant-main",
         "source": "upload",
         "source_ref": "telegram-file:current",
         "content_type": "file",
@@ -63,7 +64,12 @@ def _prepared_file(
         "_raw_content": text,
         "_raw_metadata": '{"filename":"current.txt"}',
     }
-    token = authorized_file_snapshot_token(raw, content_sha256=content_sha256)
+    token = tenant_authorized_file_snapshot_token(
+        raw,
+        content_sha256=content_sha256,
+        tenant_id="tenant-main",
+        storage_owner_id="tenant-main",
+    )
     assert token is not None
     view = FileEvidenceView(
         raw_id=raw_id,
