@@ -219,6 +219,45 @@ def _report() -> dict[str, Any]:
     return report
 
 
+def _one_joined_shadow_report() -> dict[str, Any]:
+    report = _report()
+    shadow = report["product_windows"]["shadow_readiness"]
+    metrics = shadow["baseline"]
+    report["sample"]["joined_supervisor_events"] = 1
+    report["supervisor_join"].update(
+        task_counts={"compare_current_file_with_current_web": 1},
+        skip_counts={"none": 1},
+        parse_counts={"parsed": 1},
+        policy_reason_counts={"admitted": 1},
+        planner_latency_bucket_counts={"250_999ms": 1},
+        actual_completion_counts={"failed": 1},
+        actual_publication_counts={"assistant_committed": 1},
+        invoked_count=1,
+        admitted_count=1,
+        final_authority_rechecked_count=1,
+    )
+    shadow.update(
+        observation_count=1,
+        joined_trace_count=1,
+        readiness_observation_count=1,
+        call_rate_observation_count=1,
+        supervisor_invocation_count=1,
+        user_visible_observation_count=1,
+    )
+    metrics.update(
+        observation_count=1,
+        completion_counts={"failed": 1},
+        complete_count=0,
+        failure_class_counts={FAILURE_CLASS: 1},
+        latency_observation_count=1,
+        latency_total_ms=1_000,
+        latency_max_ms=1_000,
+    )
+    report.pop("report_sha256", None)
+    report["report_sha256"] = canonical_sha256(report)
+    return report
+
+
 def _baseline_raw(report: dict[str, Any] | None = None) -> bytes:
     return canonical_json_file_bytes(report or _report())
 
@@ -410,6 +449,29 @@ def _assist_bundle() -> tuple[bytes, bytes, Any]:
         )
     )
     return bundle_raw, budget_raw, evidence
+
+
+def test_assist_producer_accepts_one_genuine_joined_failure_observation() -> None:
+    baseline = _accepted_baseline(_one_joined_shadow_report())
+    _budget_raw, budget = _accepted_budget(SupervisorMode.ASSIST)
+    attestation = _attestation(
+        SupervisorMode.ASSIST,
+        baseline=baseline,
+        budget=budget,
+    )
+
+    evidence = build_supervisor_assist_promotion_evidence(
+        evidence_id="one_joined_assist_window",
+        baseline=baseline,
+        budget=budget,
+        attestation=attestation,
+        documented_failure_class_id=FAILURE_CLASS,
+        documented_failure_class_sha256=FAILURE_DIGEST,
+    )
+
+    assert evidence.observation_count == 1
+    assert evidence.joined_trace_count == 1
+    assert evidence.product_evidence.baseline_failure_class_count == 1
 
 
 @pytest.mark.parametrize(
