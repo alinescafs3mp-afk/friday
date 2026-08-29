@@ -1195,6 +1195,14 @@ def test_internal_document_materialization_can_exceed_public_request_limit(stora
 
     assert request.limit == 1
     assert page.returned == len(page.candidates) == 3
+    with pytest.raises(ArchiveDocumentStorageError, match="page limit"):
+        _search(
+            storage,
+            request=request,
+            corpus=ArchiveSearchCorpus.DOCUMENTS,
+            lane=SearchLane.LEXICAL,
+            limit=21,
+        )
 
 
 def test_review_and_lifecycle_filters_are_applied_to_the_authorized_total(storage) -> None:

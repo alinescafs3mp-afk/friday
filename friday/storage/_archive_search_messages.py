@@ -22,7 +22,10 @@ from dataclasses import InitVar, dataclass, field
 from datetime import UTC, datetime, timedelta
 from typing import Any, NoReturn, SupportsIndex, TypeAlias
 
-from friday.retrieval.archive_search_contract import ConversationScope
+from friday.retrieval.archive_search_contract import (
+    MAX_ARCHIVE_MATERIALIZED_CANDIDATES,
+    ConversationScope,
+)
 from friday.retrieval.contracts import (
     AuthorityScope,
     CanonicalObjectKind,
@@ -49,7 +52,10 @@ _FACTORY = object()
 _PROCESS_KEY = secrets.token_bytes(32)
 _MAX_QUERY_BYTES = 4_000
 _MAX_QUERY_CHARS = 1_000
-_MAX_RESULTS = 20
+_MAX_PUBLIC_RESULTS = 20
+_MAX_RESULTS = MAX_ARCHIVE_MATERIALIZED_CANDIDATES
+_MAX_MATCHES_PER_CONVERSATION = 8
+_MAX_HITS = _MAX_RESULTS
 _MAX_NEIGHBORS = 3
 
 
@@ -407,6 +413,7 @@ class ArchiveMessageReplaySource(_ProcessPrivate):
 @dataclass(frozen=True, slots=True, repr=False)
 class ArchiveMessageHit(_ProcessPrivate):
     match_rank: int
+    source_rank: int
     lexical_score: float
     message: ArchiveMessageRow
     context: tuple[ArchiveMessageContextRow, ...]
@@ -416,7 +423,8 @@ class ArchiveMessageHit(_ProcessPrivate):
     def __post_init__(self, _factory: object) -> None:
         if (
             _factory is not _FACTORY
-            or not 1 <= self.match_rank <= _MAX_RESULTS
+            or not 1 <= self.match_rank <= _MAX_HITS
+            or not 1 <= self.source_rank <= _MAX_RESULTS
             or not math.isfinite(self.lexical_score)
             or type(self.message) is not ArchiveMessageRow
             or type(self.context) is not tuple
@@ -431,13 +439,13 @@ class ArchiveMessageHit(_ProcessPrivate):
     def __repr__(self) -> str:
         return (
             f"ArchiveMessageHit(match_rank={self.match_rank}, "
-            f"context_count={len(self.context)}, private=True)"
+            f"source_rank={self.source_rank}, context_count={len(self.context)}, private=True)"
         )
 
 
 @dataclass(frozen=True, slots=True, repr=False)
 class ArchiveMessageSearchPage(_ProcessPrivate):
-    """Private page; ``examined`` is eligible corpus size and ``total`` matched size."""
+    """Private source page; ``examined`` counts rows and ``total`` matched conversations."""
 
     principal_id: str
     query: str
@@ -498,6 +506,9 @@ class ArchiveMessageSearchPage(_ProcessPrivate):
             or any(item.ledger not in self.ledgers for item in self.hits)
             or {item.conversation_id for item in self.ledgers}
             != {item.message.conversation_id for item in self.hits}
+            or {item.source_rank for item in self.hits} != set(range(1, len(self.ledgers) + 1))
+            or len({(item.source_rank, item.message.conversation_id) for item in self.hits})
+            != len(self.ledgers)
             or any(item.boundary_identity_sha256 != self.boundary_identity_sha256 for item in self.ledgers)
             or any(
                 item.message.principal_id != self.principal_id
@@ -544,11 +555,12 @@ class ArchiveMessageSearchPage(_ProcessPrivate):
             or self.lexical_index_build != str(SCHEMA_VERSION)
             or isinstance(self.total, bool)
             or isinstance(self.examined, bool)
-            or self.total < len(self.hits)
+            or self.total < len(self.ledgers)
             or self.examined < self.total
+            or len(self.ledgers) > self.limit
             or len(self.hits) > self.limit
             or type(self.has_more) is not bool
-            or self.has_more is not (self.total > len(self.hits))
+            or self.has_more is not (self.total > len(self.ledgers))
             or (
                 self.boundary_identity_sha256 is not None
                 and _SHA256.fullmatch(self.boundary_identity_sha256) is None
@@ -559,7 +571,7 @@ class ArchiveMessageSearchPage(_ProcessPrivate):
 
     @property
     def returned(self) -> int:
-        return len(self.hits)
+        return len(self.ledgers)
 
     def __repr__(self) -> str:
         return (
@@ -631,6 +643,7 @@ def _page_seal(page: ArchiveMessageSearchPage) -> bytes:
                 "ledger": ledger(hit.ledger),
                 "lexical_score": hit.lexical_score,
                 "match_rank": hit.match_rank,
+                "source_rank": hit.source_rank,
                 "message": row(hit.message),
             }
             for hit in page.hits
@@ -659,7 +672,7 @@ def _page_seal(page: ArchiveMessageSearchPage) -> bytes:
         raise ArchiveMessageStorageError("message page evidence is invalid") from None
     return hmac.new(
         _PROCESS_KEY,
-        b"friday/archive-message-storage-page/v1\0" + encoded,
+        b"friday/archive-message-storage-page/v2\0" + encoded,
         hashlib.sha256,
     ).digest()
 
@@ -1164,11 +1177,13 @@ def select_authorized_archive_message_replay_source_in_transaction(
         raise ArchiveMessageStorageError("message replay selection is unavailable") from None
 
 
-def _select_authorized_archive_message_page_in_transaction(
+def _select_authorized_archive_message_page_once_in_transaction(
     conn: sqlite3.Connection,
     *,
     principal_id: str,
     query: str,
+    effective_query: str,
+    require_all_terms: bool,
     scope: ArchiveMessageScope = ArchiveMessageScope.ALL,
     conversation_id: str | None = None,
     boundary_user_message_id: str | None = None,
@@ -1235,7 +1250,7 @@ def _select_authorized_archive_message_page_in_transaction(
         include_archived=include_archived,
     )
 
-    match_queries = _match_queries(normalized_query)
+    match_queries = _match_queries(_query(effective_query))
     local_score = " + ".join(
         f"""CASE WHEN EXISTS (
                          SELECT 1
@@ -1245,6 +1260,7 @@ def _select_authorized_archive_message_page_in_transaction(
                      ) THEN 1 ELSE 0 END"""
         for index, _query_value in enumerate(match_queries)
     )
+    lexical_filter = f"lexical_score={-len(match_queries)}" if require_all_terms else "lexical_score<0"
 
     cursor = conn.execute(
         f"""WITH owned_conversations AS MATERIALIZED (
@@ -1304,22 +1320,49 @@ def _select_authorized_archive_message_page_in_transaction(
                      FROM eligible
                ),
                lexical AS MATERIALIZED (
-                   SELECT * FROM scored WHERE lexical_score<0
+                   SELECT * FROM scored WHERE {lexical_filter}
                ),
-               ranked AS MATERIALIZED (
+               source_hits AS MATERIALIZED (
                    SELECT lexical.*,
                           ROW_NUMBER() OVER (
+                              PARTITION BY conversation_id
                               ORDER BY lexical_score ASC,
                                        julianday(created_at) DESC, message_rowid DESC
-                          ) AS match_rank
+                          ) AS source_hit_rank
                      FROM lexical
                ),
+               source_heads AS MATERIALIZED (
+                   SELECT * FROM source_hits WHERE source_hit_rank=1
+               ),
+               ranked_sources AS MATERIALIZED (
+                   SELECT source_heads.conversation_id,
+                          ROW_NUMBER() OVER (
+                              ORDER BY lexical_score ASC,
+                                       julianday(created_at) DESC, message_rowid DESC,
+                                       conversation_id ASC
+                          ) AS source_rank
+                     FROM source_heads
+               ),
+               page_sources AS MATERIALIZED (
+                   SELECT * FROM ranked_sources WHERE source_rank<=?
+               ),
+               ranked_page_hits AS MATERIALIZED (
+                   SELECT source_hits.*,
+                          page_sources.source_rank,
+                          ROW_NUMBER() OVER (
+                              ORDER BY source_hits.source_hit_rank ASC,
+                                       page_sources.source_rank ASC
+                          ) AS match_rank
+                     FROM source_hits
+                     JOIN page_sources USING(conversation_id)
+                    WHERE source_hits.source_hit_rank<=?
+               ),
                page AS MATERIALIZED (
-                   SELECT * FROM ranked WHERE match_rank<=?
+                   SELECT * FROM ranked_page_hits WHERE match_rank<=?
                ),
                statistics AS MATERIALIZED (
                    SELECT (SELECT COUNT(*) FROM eligible) AS examined,
-                          (SELECT COUNT(*) FROM ranked) AS total,
+                          (SELECT COUNT(*) FROM ranked_sources) AS total,
                           (SELECT COUNT(*)
                              FROM owned_conversations
                             WHERE typeof(is_archived)!='integer'
@@ -1330,6 +1373,7 @@ def _select_authorized_archive_message_page_in_transaction(
                ),
                expanded AS MATERIALIZED (
                    SELECT page.match_rank,
+                          page.source_rank,
                           page.lexical_score,
                           page.message_rowid AS hit_rowid,
                           page.id AS hit_id,
@@ -1384,6 +1428,8 @@ def _select_authorized_archive_message_page_in_transaction(
             include_user,
             include_assistant,
             *match_queries,
+            page_size,
+            _MAX_MATCHES_PER_CONVERSATION,
             page_size,
             before,
             after,
@@ -1453,6 +1499,7 @@ def _select_authorized_archive_message_page_in_transaction(
         hits.append(
             ArchiveMessageHit(
                 match_rank=rank,
+                source_rank=int(rows[0]["source_rank"]),
                 lexical_score=score,
                 message=hit_context.row,
                 context=contexts,
@@ -1478,10 +1525,133 @@ def _select_authorized_archive_message_page_in_transaction(
         lexical_index_build=lexical_index_build,
         total=total,
         examined=examined,
-        has_more=total > len(hits),
+        has_more=total > len(ledgers),
         boundary_identity_sha256=boundary_digest,
         _factory=_FACTORY,
     )
+
+
+def _select_authorized_archive_message_page_in_transaction(
+    conn: sqlite3.Connection,
+    *,
+    principal_id: str,
+    query: str,
+    scope: ArchiveMessageScope = ArchiveMessageScope.ALL,
+    conversation_id: str | None = None,
+    boundary_user_message_id: str | None = None,
+    roles: Iterable[MessageRole] = (MessageRole.ASSISTANT, MessageRole.USER),
+    lifecycle_states: Iterable[LifecycleState] = (
+        LifecycleState.ACTIVE,
+        LifecycleState.ARCHIVED,
+    ),
+    since: str | None = None,
+    until: str | None = None,
+    limit: int = 20,
+    context_before: int = 0,
+    context_after: int = 0,
+) -> ArchiveMessageSearchPage | None:
+    """Retry an empty authorized lexical result under the switched layout.
+
+    The first page is authoritative: any original-query hit preserves its
+    membership and rank.  A layout retry is earned only by an empty result
+    after principal and boundary filtering, and every repaired term is then
+    required, matching its closed conjunction rule.  Relevance ordering remains
+    independently measured.  The returned page remains bound to the normalized
+    original query.
+    """
+
+    page = _select_authorized_archive_message_page_once_in_transaction(
+        conn,
+        principal_id=principal_id,
+        query=query,
+        effective_query=query,
+        require_all_terms=False,
+        scope=scope,
+        conversation_id=conversation_id,
+        boundary_user_message_id=boundary_user_message_id,
+        roles=roles,
+        lifecycle_states=lifecycle_states,
+        since=since,
+        until=until,
+        limit=limit,
+        context_before=context_before,
+        context_after=context_after,
+    )
+    if page is None or page.total:
+        return page
+
+    from friday.retrieval._keyboard import looks_mistyped, switched
+
+    repaired_query = switched(page.query) if looks_mistyped(page.query) else page.query
+    if repaired_query == page.query:
+        return page
+    return _select_authorized_archive_message_page_once_in_transaction(
+        conn,
+        principal_id=principal_id,
+        query=page.query,
+        effective_query=repaired_query,
+        require_all_terms=True,
+        scope=page.scope,
+        conversation_id=page.conversation_id,
+        boundary_user_message_id=page.boundary_user_message_id,
+        roles=page.roles,
+        lifecycle_states=page.lifecycle_states,
+        since=page.since,
+        until=page.until,
+        limit=page.limit,
+        context_before=page.context_before,
+        context_after=page.context_after,
+    )
+
+
+def _materialize_authorized_archive_message_page_in_transaction(
+    conn: sqlite3.Connection,
+    *,
+    principal_id: str,
+    query: str,
+    scope: ArchiveMessageScope = ArchiveMessageScope.ALL,
+    conversation_id: str | None = None,
+    boundary_user_message_id: str | None = None,
+    roles: Iterable[MessageRole] = (MessageRole.ASSISTANT, MessageRole.USER),
+    lifecycle_states: Iterable[LifecycleState] = (
+        LifecycleState.ACTIVE,
+        LifecycleState.ARCHIVED,
+    ),
+    since: str | None = None,
+    until: str | None = None,
+    limit: int,
+    context_before: int = 0,
+    context_after: int = 0,
+) -> ArchiveMessageSearchPage | None:
+    """Collect one bounded process-private source tail for the archive facade."""
+
+    if type(conn) is not sqlite3.Connection or not conn.in_transaction:
+        raise RuntimeError("archive message selector requires a caller-owned transaction")
+    try:
+        return _select_authorized_archive_message_page_in_transaction(
+            conn,
+            principal_id=principal_id,
+            query=query,
+            scope=scope,
+            conversation_id=conversation_id,
+            boundary_user_message_id=boundary_user_message_id,
+            roles=roles,
+            lifecycle_states=lifecycle_states,
+            since=since,
+            until=until,
+            limit=_bounded_integer(
+                limit,
+                label="message result limit",
+                low=1,
+                high=_MAX_RESULTS,
+            ),
+            context_before=context_before,
+            context_after=context_after,
+        )
+    except ArchiveMessageStorageError:
+        raise
+    except Exception:
+        raise ArchiveMessageStorageError("archive message selection is unavailable") from None
 
 
 def select_authorized_archive_message_page_in_transaction(
@@ -1503,7 +1673,7 @@ def select_authorized_archive_message_page_in_transaction(
     context_before: int = 0,
     context_after: int = 0,
 ) -> ArchiveMessageSearchPage | None:
-    """Select one authorized lexical page in the caller's transaction.
+    """Select one authorized lexical page through the released twenty-source seam.
 
     ``None`` is reserved for a missing/foreign accepted-turn boundary.  Both
     scopes require that owned current user row: ``current`` admits only older
@@ -1538,7 +1708,12 @@ def select_authorized_archive_message_page_in_transaction(
             lifecycle_states=lifecycle_states,
             since=since,
             until=until,
-            limit=limit,
+            limit=_bounded_integer(
+                limit,
+                label="message result limit",
+                low=1,
+                high=_MAX_PUBLIC_RESULTS,
+            ),
             context_before=context_before,
             context_after=context_after,
         )

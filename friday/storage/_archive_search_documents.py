@@ -22,6 +22,7 @@ from typing import Any, Final, NoReturn, SupportsIndex
 
 from friday.raw_metadata import RAW_FILE_METADATA_MAX_BYTES
 from friday.retrieval.archive_search_contract import (
+    MAX_ARCHIVE_MATERIALIZED_CANDIDATES,
     ArchiveEvidenceAuthority,
     ArchiveMatchChannel,
     ArchiveMatchRank,
@@ -74,6 +75,7 @@ from friday.storage._privacy import (
 )
 
 MAX_ARCHIVE_DOCUMENT_RESULTS: Final = 20
+_MAX_ARCHIVE_DOCUMENT_MATERIALIZED_RESULTS: Final = MAX_ARCHIVE_MATERIALIZED_CANDIDATES
 # Compatibility export for non-sidecar document producers and the Knowledge
 # lane.  Only a verified current document-passage child uses the distinct v2
 # identity imported above.
@@ -247,8 +249,16 @@ def _snapshot(value: object) -> str:
     return value
 
 
-def _limit(value: object) -> int:
-    if type(value) is not int or not 1 <= value <= MAX_ARCHIVE_DOCUMENT_RESULTS:
+def _limit(value: object, *, maximum: int = MAX_ARCHIVE_DOCUMENT_RESULTS) -> int:
+    if (
+        maximum
+        not in {
+            MAX_ARCHIVE_DOCUMENT_RESULTS,
+            _MAX_ARCHIVE_DOCUMENT_MATERIALIZED_RESULTS,
+        }
+        or type(value) is not int
+        or not 1 <= value <= maximum
+    ):
         raise _fail("archive document page limit is invalid")
     return value
 
@@ -2728,7 +2738,7 @@ def select_authorized_archive_document_replay_source_in_transaction(
         raise _fail("archive document replay selection is unavailable") from None
 
 
-def search_archive_document_lane(
+def _search_archive_document_lane(
     conn: sqlite3.Connection,
     *,
     tenant_id: str,
@@ -2740,6 +2750,7 @@ def search_archive_document_lane(
     snapshot_discriminator: str,
     snapshot_current: bool,
     limit: int | None = None,
+    maximum_results: int = MAX_ARCHIVE_DOCUMENT_RESULTS,
 ) -> ArchiveDocumentLanePage:
     """Search one authorized document/Knowledge lane in one SQLite snapshot.
 
@@ -2768,7 +2779,7 @@ def search_archive_document_lane(
     tenant = _actor(tenant_id)
     owner = _actor(owner_id)
     snapshot = _snapshot(snapshot_discriminator)
-    page_limit = _limit(request.limit if limit is None else limit)
+    page_limit = _limit(request.limit if limit is None else limit, maximum=maximum_results)
     target = (_SEARCH_CORPUS[corpus], lane)
     if (
         type(execution_binding) is not SearchExecutionBinding
@@ -2982,6 +2993,66 @@ def search_archive_document_lane(
         tenant_id=tenant,
         owner_id=owner,
         snapshot_discriminator=snapshot,
+    )
+
+
+def search_archive_document_lane(
+    conn: sqlite3.Connection,
+    *,
+    tenant_id: str,
+    owner_id: str,
+    request: ArchiveSearchRequest,
+    corpus: ArchiveSearchCorpus,
+    lane: SearchLane,
+    execution_binding: SearchExecutionBinding,
+    snapshot_discriminator: str,
+    snapshot_current: bool,
+    limit: int | None = None,
+) -> ArchiveDocumentLanePage:
+    """Search one lane through the released twenty-result storage seam."""
+
+    return _search_archive_document_lane(
+        conn,
+        tenant_id=tenant_id,
+        owner_id=owner_id,
+        request=request,
+        corpus=corpus,
+        lane=lane,
+        execution_binding=execution_binding,
+        snapshot_discriminator=snapshot_discriminator,
+        snapshot_current=snapshot_current,
+        limit=limit,
+        maximum_results=MAX_ARCHIVE_DOCUMENT_RESULTS,
+    )
+
+
+def _materialize_archive_document_lane(
+    conn: sqlite3.Connection,
+    *,
+    tenant_id: str,
+    owner_id: str,
+    request: ArchiveSearchRequest,
+    corpus: ArchiveSearchCorpus,
+    lane: SearchLane,
+    execution_binding: SearchExecutionBinding,
+    snapshot_discriminator: str,
+    snapshot_current: bool,
+    limit: int,
+) -> ArchiveDocumentLanePage:
+    """Collect one bounded process-private lane tail for the archive facade."""
+
+    return _search_archive_document_lane(
+        conn,
+        tenant_id=tenant_id,
+        owner_id=owner_id,
+        request=request,
+        corpus=corpus,
+        lane=lane,
+        execution_binding=execution_binding,
+        snapshot_discriminator=snapshot_discriminator,
+        snapshot_current=snapshot_current,
+        limit=limit,
+        maximum_results=_MAX_ARCHIVE_DOCUMENT_MATERIALIZED_RESULTS,
     )
 
 

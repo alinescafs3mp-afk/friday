@@ -18,6 +18,7 @@ from datetime import UTC, datetime, timedelta
 from typing import NoReturn, SupportsIndex, cast
 
 from friday.retrieval.archive_search_contract import (
+    MAX_ARCHIVE_MATERIALIZED_CANDIDATES,
     ArchiveEvidenceAuthority,
     ArchiveMatchChannel,
     ArchiveMatchRank,
@@ -381,7 +382,7 @@ class ArchiveMessageLaneProjection(_ProcessPrivate):
             or self.matched_at_least > self.examined
             or type(self.backend_capped) is not bool
             or type(self.applied_limit) is not int
-            or not 1 <= self.applied_limit <= 20
+            or not 1 <= self.applied_limit <= MAX_ARCHIVE_MATERIALIZED_CANDIDATES
             or type(self.index_state) is not CatalogIndexState
             or type(self._request_identity) is not str
             or type(self._actor_handle) is not str
@@ -600,13 +601,17 @@ def project_archive_message_page(
             grouped: dict[str, list[ArchiveMessageHit]] = defaultdict(list)
             for hit in page.hits:
                 grouped[hit.message.conversation_id].append(hit)
+            if any(len({item.source_rank for item in values}) != 1 for values in grouped.values()):
+                raise ArchiveMessageAdapterError("archive message source ranks drifted")
             ordered = sorted(
                 grouped.values(),
                 key=lambda values: (
-                    min(item.match_rank for item in values),
+                    values[0].source_rank,
                     values[0].message.conversation_id,
                 ),
             )
+            if tuple(values[0].source_rank for values in ordered) != tuple(range(1, len(ordered) + 1)):
+                raise ArchiveMessageAdapterError("archive message source ranks drifted")
             all_candidates = tuple(
                 _candidate(
                     principal,

@@ -20,6 +20,7 @@ from typing import NoReturn, SupportsIndex, cast
 from friday.permissions import ActorContext, AuthorizationDecision, AuthorizationService
 from friday.retrieval.archive_search_authority import (
     ARCHIVE_AUTHORITY_MAX_CANDIDATES,
+    ARCHIVE_AUTHORITY_MAX_CONTINUATION_TAIL,
     ArchiveModelBatchLedger,
     ArchiveSearchAuthorityPhase,
     ArchiveSearchCandidateReauthorization,
@@ -40,6 +41,7 @@ from friday.retrieval.archive_search_authority import (
     authorize_archive_search_resumed_before_model as _authorize_resumed_before_model,
 )
 from friday.retrieval.archive_search_contract import (
+    MAX_ARCHIVE_MATERIALIZED_CANDIDATES,
     ArchiveSearchCandidate,
     ArchiveSearchCorpus,
     ArchiveSearchPage,
@@ -73,10 +75,14 @@ from friday.retrieval.contracts import (
     SearchExecutionBinding,
     SearchLane,
 )
-from friday.storage._archive_search_documents import search_archive_document_lane
+from friday.storage._archive_search_documents import (
+    _materialize_archive_document_lane as search_archive_document_lane,
+)
 from friday.storage._archive_search_messages import (
     ArchiveMessageScope,
-    select_authorized_archive_message_page_in_transaction,
+)
+from friday.storage._archive_search_messages import (
+    _materialize_authorized_archive_message_page_in_transaction as select_authorized_archive_message_page_in_transaction,
 )
 from friday.storage._archive_search_obsidian import (
     ArchiveObsidianExactFileReader,
@@ -88,7 +94,6 @@ from friday.storage._archive_search_obsidian import (
 _PROCESS_KEY = secrets.token_bytes(32)
 _PROCESS_AUTHORITY = object()
 _INTERNAL_LANE_LIMIT = ARCHIVE_AUTHORITY_MAX_CANDIDATES
-
 _DOCUMENT_CORPUS = {
     SearchCorpus.RAW_DOCUMENTS: ArchiveSearchCorpus.DOCUMENTS,
     SearchCorpus.KNOWLEDGE: ArchiveSearchCorpus.KNOWLEDGE,
@@ -121,6 +126,39 @@ class ArchiveSearchServiceError(RuntimeError):
 
 def _fail() -> ArchiveSearchServiceError:
     return ArchiveSearchServiceError("archive search service is unavailable")
+
+
+def _materialized_lane_limit(request: ArchiveSearchRequest) -> int:
+    """Fair-share the bounded tail across lanes that can actually extend it."""
+
+    targets = canonical_archive_search_targets(request)
+    extended_target_count = sum(
+        (
+            corpus in _DOCUMENT_CORPUS
+            and lane in _DOCUMENT_LANES
+            or corpus is SearchCorpus.CONVERSATION
+            and lane is SearchLane.MESSAGE_HISTORY
+        )
+        for corpus, lane in targets
+    )
+    fixed_target_count = sum(
+        corpus is SearchCorpus.OBSIDIAN and lane in _OBSIDIAN_LANES for corpus, lane in targets
+    )
+    if extended_target_count < 1:
+        raise _fail()
+    # The public byte envelope may shrink a requested head, but a successful
+    # non-empty federation always fits at least one candidate.  Reserving only
+    # that guaranteed head keeps every remaining candidate within the frozen
+    # continuation bound even when fewer than ``request.limit`` fit publicly.
+    available_budget = (
+        1 + ARCHIVE_AUTHORITY_MAX_CONTINUATION_TAIL - fixed_target_count * ARCHIVE_AUTHORITY_MAX_CANDIDATES
+    )
+    if available_budget < request.limit * extended_target_count:
+        raise _fail()
+    return min(
+        MAX_ARCHIVE_MATERIALIZED_CANDIDATES,
+        available_budget // extended_target_count,
+    )
 
 
 def _canonical_bytes(value: object) -> bytes:
@@ -859,7 +897,7 @@ def _collect_document_target(
         execution_binding=run.execution_binding,
         snapshot_discriminator=recipe.snapshot_discriminator,
         snapshot_current=True,
-        limit=_INTERNAL_LANE_LIMIT,
+        limit=_materialized_lane_limit(recipe.request),
     )
     if not page.available and not page.authority_rechecked:
         return (), _permission_filtered(target, run.execution_binding)
@@ -892,7 +930,7 @@ def _collect_message_target(
         lifecycle_states=cast(tuple[LifecycleState, ...], controls["lifecycle_states"]),
         since=cast(str | None, controls["since"]),
         until=cast(str | None, controls["until"]),
-        limit=_INTERNAL_LANE_LIMIT,
+        limit=_materialized_lane_limit(recipe.request),
         context_before=cast(int, controls["context_before"]),
         context_after=cast(int, controls["context_after"]),
     )

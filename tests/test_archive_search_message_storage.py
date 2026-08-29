@@ -159,6 +159,17 @@ def _all(conn: sqlite3.Connection, **overrides: object) -> ArchiveMessageSearchP
     return select_authorized_archive_message_page_in_transaction(conn, **values)  # type: ignore[arg-type]
 
 
+def test_public_selector_preserves_the_released_twenty_source_limit() -> None:
+    with (
+        _database() as conn,
+        pytest.raises(
+            ArchiveMessageStorageError,
+            match="message result limit",
+        ),
+    ):
+        _all(conn, limit=21)
+
+
 def test_current_scope_authorizes_before_recall_and_returns_exact_bounded_context() -> None:
     with _database() as conn:
         _insert(conn, 10, content="first private row", created_at="2026-08-23T08:10:00+00:00")

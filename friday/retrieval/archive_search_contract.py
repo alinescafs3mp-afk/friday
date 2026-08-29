@@ -54,6 +54,10 @@ MAX_DISPLAY_CHARS: Final = 260
 MAX_EXCERPT_CHARS: Final = 2_000
 MAX_PASSAGES_PER_CANDIDATE: Final = 8
 MAX_CONTINUATION_CHARS: Final = 512
+# The largest existing legacy source-adapter candidate page.  This is an
+# internal materialization ceiling, not a model-visible page limit;
+# ArchiveSearchRequest.limit remains closed at twenty.
+MAX_ARCHIVE_MATERIALIZED_CANDIDATES: Final = 100
 _MAX_TEMPORAL_CONSTRAINTS = 8
 _MAX_TEMPORAL_FACTS = 32
 _MAX_PRIVATE_REQUEST_BYTES = 32_768

@@ -17,11 +17,11 @@ from dataclasses import fields, is_dataclass
 from typing import NoReturn, SupportsIndex, cast
 
 from friday.retrieval.archive_search_authority import (
-    ARCHIVE_AUTHORITY_MAX_CANDIDATES,
     ARCHIVE_AUTHORITY_MAX_CONTINUATION_TAIL,
     canonical_archive_search_targets,
 )
 from friday.retrieval.archive_search_contract import (
+    MAX_ARCHIVE_MATERIALIZED_CANDIDATES,
     ArchiveEvidenceAuthority,
     ArchiveMatchChannel,
     ArchiveMatchRank,
@@ -732,7 +732,7 @@ def federate_archive_search(
         ] = {}
         for target in expected_targets:
             raw_candidates = candidates_by_target[target]
-            if type(raw_candidates) is not tuple or len(raw_candidates) > ARCHIVE_AUTHORITY_MAX_CANDIDATES:
+            if type(raw_candidates) is not tuple or len(raw_candidates) > MAX_ARCHIVE_MATERIALIZED_CANDIDATES:
                 raise _fail()
             candidates = tuple(_freeze_candidate(item) for item in raw_candidates)
             lane_coverage = frozen_coverage[coverage_targets.index(target)]

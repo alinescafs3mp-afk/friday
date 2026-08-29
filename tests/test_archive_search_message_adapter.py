@@ -648,7 +648,7 @@ def test_internal_message_materialization_can_exceed_public_request_limit() -> N
 
 
 def test_backend_cap_has_no_cursor_until_a_real_tail_exists() -> None:
-    request = _request(limit=1)
+    request = _request(scope=ConversationScope.ALL, limit=1)
     with _database() as conn:
         page = _page(conn, request)
         assert page is not None and page.has_more
