@@ -1,3 +1,23 @@
+## 0.207.71 — 2026-08-29
+
+### Bounded Supervisor readiness
+
+- Binds the promoted current-file-plus-public-web path to the exact shared
+  authenticated turn, source carrier, request-effect fence and inherited
+  deadline; unsupported or contextless turns remain primary-only.
+- Gives planner and reviewer one shared bounded advisory budget with primary
+  authority suspended during laptop calls, while primary remains the sole
+  tool, effect and publication owner.
+- Reconciles a retained predecessor before a distinct successor receives turn,
+  effect or publication authority; a live predecessor remains independent and
+  cannot be published under successor metadata.
+- Revalidates the exact authenticated surface after every owned await and at
+  claim, settlement and fresh publication boundaries, so carrier/scope drift
+  cannot be downgraded to fallback or a terminal answer.
+- Makes one genuine joined production observation sufficient for promotion
+  readiness while retaining 20 as the useful operating target, and seals
+  assist/canary evidence to the exact live predecessor mode and policy.
+
 ## 0.207.70 — 2026-08-29
 
 ### Authenticated attachment turn authority
