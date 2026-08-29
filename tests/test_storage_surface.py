@@ -190,7 +190,9 @@ def test_no_method_is_defined_twice_across_the_class_hierarchy() -> None:
 # stopped-bridge restore implementation used by the public backup/restore API.
 # 425 → 427: restore recovery grants a thread-local SQLite-open exception only
 # to the stopped restore transaction; every ordinary thread remains marker-gated.
-EXPECTED_MEMBER_COUNT = 427
+# 427 → 430: scheduled-work recovery adds exact mission claim/cancel/skew seams;
+# no schema or second scheduler is introduced.
+EXPECTED_MEMBER_COUNT = 430
 EXPECTED_SIGNATURES: dict[str, str] = {
     "_begin_database_restore_open": "(self) -> 'bool'",
     "_end_database_restore_open": "(self, previous: 'bool') -> 'None'",
@@ -251,8 +253,10 @@ EXPECTED_SIGNATURES: dict[str, str] = {
     "add_eval_case": "(self, user_id: 'str', query: 'str', expected_ids: 'Sequence[str]', *, note: 'str' = '', source: 'str' = 'manual') -> 'dict[str, Any]'",
     "archive_conversation": "(self, conversation_id: 'str', user_id: 'str') -> 'bool'",
     "claim_bridge_nonce": "(self, nonce: 'str') -> 'bool'",
+    "claim_mission_task": "(self, task_id: 'str', user_id: 'str', *, mission_id: 'str', expected_attempt: 'int') -> 'bool'",
     "claim_inbox_promotion": "(self, inbox_id: 'str', user_id: 'str', knowledge_object_id: 'str') -> 'bool'",
     "clear_channel_conversation": "(self, user_id: 'str', channel: 'str', channel_id: 'str') -> 'bool'",
+    "cancel_mission_and_tasks": "(self, mission_id: 'str', user_id: 'str') -> 'bool'",
     "close": "(self, *, final: 'bool' = False) -> 'None'",
     "commit": "(self) -> 'None'",
     "conflict_pair_key": "(knowledge_a_id: 'str', knowledge_b_id: 'str') -> 'str'",
@@ -411,6 +415,7 @@ EXPECTED_SIGNATURES: dict[str, str] = {
     "merge_entities": "(self, user_id: 'str', source_id: 'str', target_id: 'str', *, merged_by: 'str | None' = None) -> 'dict[str, Any]'",
     "unmerge_entities": "(self, user_id: 'str', merge_id: 'str', *, undone_by: 'str | None' = None) -> 'dict[str, Any]'",
     "optimize": "(self) -> 'None'",
+    "normalize_future_mission_task_start": "(self, task_id: 'str', user_id: 'str') -> 'bool'",
     "people_whose_name_starts_with": "(self, user_id: 'str', stems: 'Sequence[str]', *, limit: 'int' = 5) -> 'list[str]'",
     "prune_bridge_nonces": "(self, *, max_age_sec: 'int') -> 'int'",
     "prune_eval_cases": "(self, user_id: 'str', *, cap: 'int' = 200) -> 'dict[str, int]'",
@@ -457,7 +462,7 @@ EXPECTED_SIGNATURES: dict[str, str] = {
     "update_knowledge_fields": "(self, ko_id: 'str', user_id: 'str', **fields: 'Any') -> 'dict[str, Any] | None'",
     "update_knowledge_object": "(self, obj: 'KnowledgeObject') -> 'KnowledgeObject'",
     "update_mission_fields": "(self, mission_id: 'str', user_id: 'str', **fields: 'Any') -> 'bool'",
-    "update_mission_task_fields": "(self, task_id: 'str', user_id: 'str', **fields: 'Any') -> 'bool'",
+    "update_mission_task_fields": "(self, task_id: 'str', user_id: 'str', *, expected_statuses: 'Sequence[str] | None' = None, expected_attempt: 'int | None' = None, require_live_parent: 'bool' = False, **fields: 'Any') -> 'bool'",
     "update_user": "(self, user_id: 'str', **fields: 'Any') -> 'dict[str, Any] | None'",
     "upsert_custom_preset": "(self, preset_key: 'str', name: 'str', capabilities: 'set[str]', *, description: 'str' = '', created_by: 'str') -> 'dict[str, Any]'",
     "upsert_feedback_eval_case": "(self, user_id: 'str', query: 'str', expected_ids: 'Sequence[str]') -> 'bool'",

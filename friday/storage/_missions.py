@@ -107,10 +107,18 @@ class MissionsMixin(StorageShared):
         status: MissionStatus | str,
     ) -> dict[str, Any] | None:
         """Attach a task plan to a mission atomically and record its size."""
+        task_ids = [str(task.id) for task in tasks]
+        task_seqs = [int(task.seq) for task in tasks]
+        if any(task.mission_id != mission_id or task.user_id != user_id for task in tasks):
+            raise ValueError("mission plan task ownership does not match its mission")
+        if len(task_ids) != len(set(task_ids)) or len(task_seqs) != len(set(task_seqs)):
+            raise ValueError("mission plan task identities must be unique")
         now = utc_now()
         with self.transaction() as conn:
             owned = conn.execute(
-                "SELECT id FROM missions WHERE id=? AND user_id=?",
+                """SELECT id FROM missions
+                    WHERE id=? AND user_id=?
+                      AND status NOT IN ('completed','failed','cancelled')""",
                 (mission_id, user_id),
             ).fetchone()
             if owned is None:
@@ -227,29 +235,259 @@ class MissionsMixin(StorageShared):
         updates = {key: value for key, value in fields.items() if key in self._MISSION_UPDATABLE}
         if not updates:
             return False
+        if "status" in updates:
+            updates["status"] = enum_value(updates["status"])
         assignments = ", ".join(f"{column}=?" for column in updates)
         params = [*updates.values(), utc_now(), mission_id, user_id]
+        # Terminal mission states are immutable.  Every service-side check is a
+        # snapshot and can race cancellation or another finalizer; the durable
+        # writer is the only place where the first terminal decision can win.
+        terminal_fence = (
+            " AND status NOT IN ('completed','failed','cancelled')" if "status" in updates else ""
+        )
         with self.transaction() as conn:
             cursor = conn.execute(
                 f"UPDATE missions SET {assignments}, version=version+1, updated_at=? "  # nosec B608
-                "WHERE id=? AND user_id=?",
+                f"WHERE id=? AND user_id=?{terminal_fence}",  # nosec B608
                 tuple(params),
             )
         return cursor.rowcount > 0
 
-    def update_mission_task_fields(self, task_id: str, user_id: str, **fields: Any) -> bool:
+    def update_mission_task_fields(
+        self,
+        task_id: str,
+        user_id: str,
+        *,
+        expected_statuses: Sequence[str] | None = None,
+        expected_attempt: int | None = None,
+        require_live_parent: bool = False,
+        **fields: Any,
+    ) -> bool:
         updates = {key: value for key, value in fields.items() if key in self._MISSION_TASK_UPDATABLE}
         if not updates:
             return False
+        if expected_attempt is not None and (
+            isinstance(expected_attempt, bool)
+            or not isinstance(expected_attempt, int)
+            or expected_attempt < 0
+        ):
+            return False
+        if "status" in updates:
+            updates["status"] = enum_value(updates["status"])
         assignments = ", ".join(f"{column}=?" for column in updates)
-        params = [*updates.values(), utc_now(), task_id, user_id]
+        params: list[Any] = [*updates.values(), utc_now(), task_id, user_id]
+        requested_status = str(updates.get("status") or "")
+        # A task which cancellation/finalization already closed must not be
+        # reopened by a stale runner, reaper or reconciliation snapshot.
+        fences = ["status NOT IN ('done','failed','skipped','compensated')"]
+        expected_values = () if expected_statuses is None else expected_statuses
+        if isinstance(expected_values, (str, bytes)):
+            return False
+        expected = tuple(dict.fromkeys(enum_value(value) for value in expected_values if enum_value(value)))
+        if expected:
+            placeholders = ",".join("?" for _ in expected)
+            fences.append(f"status IN ({placeholders})")
+            params.extend(expected)
+        if expected_attempt is not None:
+            fences.append("attempts=?")
+            params.append(expected_attempt)
+        if require_live_parent:
+            fences.append(
+                "EXISTS (SELECT 1 FROM missions m "
+                "WHERE m.id=mission_tasks.mission_id "
+                "AND m.user_id=mission_tasks.user_id "
+                "AND m.status IN ('ready','running') "
+                "AND (m.deadline_at IS NULL OR trim(m.deadline_at)='' "
+                "OR (julianday(m.deadline_at) IS NOT NULL "
+                "AND julianday(m.deadline_at)>julianday('now'))))"
+            )
+        if requested_status == "running":
+            fences.append("status='pending'")
+            fences.append(
+                "EXISTS (SELECT 1 FROM missions m "
+                "WHERE m.id=mission_tasks.mission_id "
+                "AND m.user_id=mission_tasks.user_id "
+                "AND m.status IN ('ready','running') "
+                "AND (m.deadline_at IS NULL OR trim(m.deadline_at)='' "
+                "OR (julianday(m.deadline_at) IS NOT NULL "
+                "AND julianday(m.deadline_at)>julianday('now'))) "
+                "AND (m.budget_seconds<=0 OR m.spent_seconds<m.budget_seconds) "
+                "AND (m.budget_tool_calls<=0 OR m.spent_tool_calls<m.budget_tool_calls) "
+                "AND (m.budget_retries<=0 OR m.spent_retries<m.budget_retries))"
+            )
+        elif requested_status == "pending":
+            verified_effect_clear = (
+                updates.get("side_effect") == 0
+                and str(updates.get("checkpoint_json") or "").strip() == "{}"
+                and str(updates.get("compensation") or "") == ""
+            )
+            if verified_effect_clear:
+                # Only reconciliation may clear an unknown effect and reopen
+                # it.  Bind the proof to the exact UNCERTAIN generation and a
+                # still-runnable parent; malformed shorthand fails closed.
+                if expected != ("uncertain",) or expected_attempt is None or not require_live_parent:
+                    return False
+                fences.append("status='uncertain'")
+            else:
+                # A stale reaper snapshot must not return a task to PENDING
+                # after its live owner durably checkpointed an effect under the
+                # same attempt.  The predicate is evaluated by the writer CAS.
+                fences.extend(
+                    (
+                        "status='running'",
+                        "side_effect=0",
+                        "trim(COALESCE(checkpoint_json,'')) IN ('','{}')",
+                    )
+                )
+        elif requested_status == "compensated":
+            # A previously offered human-resolution action can arrive after a
+            # verifier already proved no effect and reopened the task.  That
+            # stale approval must not close a new execution attempt.
+            fences.append("status='uncertain'")
+        checkpoint_value = str(updates.get("checkpoint_json") or "").strip()
+        guarded_effect = bool(updates.get("side_effect")) or checkpoint_value not in {"", "{}"}
+        if guarded_effect:
+            # The checkpoint is the linearization point before a possible
+            # external effect.  Cancellation/expiry which won first rejects it.
+            fences.append("status='running'")
+            fences.append(
+                "EXISTS (SELECT 1 FROM missions m "
+                "WHERE m.id=mission_tasks.mission_id "
+                "AND m.user_id=mission_tasks.user_id "
+                "AND m.status IN ('ready','running') "
+                "AND (m.deadline_at IS NULL OR trim(m.deadline_at)='' "
+                "OR (julianday(m.deadline_at) IS NOT NULL "
+                "AND julianday(m.deadline_at)>julianday('now'))))"
+            )
+        where_fence = "" if not fences else " AND " + " AND ".join(f"({item})" for item in fences)
         with self.transaction() as conn:
             cursor = conn.execute(
                 f"UPDATE mission_tasks SET {assignments}, updated_at=? "  # nosec B608
-                "WHERE id=? AND user_id=?",
+                f"WHERE id=? AND user_id=?{where_fence}",  # nosec B608
                 tuple(params),
             )
         return cursor.rowcount > 0
+
+    def claim_mission_task(
+        self,
+        task_id: str,
+        user_id: str,
+        *,
+        mission_id: str,
+        expected_attempt: int,
+    ) -> bool:
+        """Atomically acquire one runnable task and account for its attempt.
+
+        The claim and attempt counter share one SQLite writer transaction.  A
+        duplicate worker, stale mission snapshot, cancellation, expired parent
+        or exhausted durable budget therefore loses before model/tool work.
+        """
+
+        if (
+            not isinstance(task_id, str)
+            or not task_id
+            or task_id != task_id.strip()
+            or not isinstance(user_id, str)
+            or not user_id
+            or user_id != user_id.strip()
+            or not isinstance(mission_id, str)
+            or not mission_id
+            or mission_id != mission_id.strip()
+            or isinstance(expected_attempt, bool)
+            or not isinstance(expected_attempt, int)
+            or expected_attempt < 0
+        ):
+            return False
+        now = utc_now()
+        with self.transaction() as conn:
+            candidate = conn.execute(
+                """SELECT t.attempts, t.mission_id
+                     FROM mission_tasks t
+                     JOIN missions m ON m.id=t.mission_id AND m.user_id=t.user_id
+                    WHERE t.id=? AND t.user_id=? AND t.mission_id=?
+                      AND t.status='pending' AND t.attempts=?
+                      AND m.status IN ('ready','running')
+                      AND (m.deadline_at IS NULL OR trim(m.deadline_at)=''
+                           OR (julianday(m.deadline_at) IS NOT NULL
+                               AND julianday(m.deadline_at)>julianday('now')))
+                      AND (m.budget_seconds<=0 OR m.spent_seconds<m.budget_seconds)
+                      AND (m.budget_tool_calls<=0 OR m.spent_tool_calls<m.budget_tool_calls)
+                      AND (m.budget_retries<=0 OR m.spent_retries<m.budget_retries)""",
+                (task_id, user_id, mission_id, expected_attempt),
+            ).fetchone()
+            if candidate is None:
+                return False
+            prior_attempts = max(0, int(candidate["attempts"] or 0))
+            claimed = conn.execute(
+                """UPDATE mission_tasks
+                      SET status='running', attempts=attempts+1,
+                          started_at=?, updated_at=?
+                    WHERE id=? AND user_id=? AND mission_id=?
+                      AND status='pending' AND attempts=?""",
+                (now, now, task_id, user_id, mission_id, expected_attempt),
+            )
+            if claimed.rowcount != 1:
+                return False
+            if prior_attempts > 0:
+                conn.execute(
+                    """UPDATE missions
+                          SET spent_retries=spent_retries+1,
+                              version=version+1, updated_at=?
+                        WHERE id=? AND user_id=?
+                          AND status IN ('ready','running')""",
+                    (now, str(candidate["mission_id"]), user_id),
+                )
+        return True
+
+    def cancel_mission_and_tasks(self, mission_id: str, user_id: str) -> bool:
+        """Atomically stop a mission without erasing an already-unknown effect."""
+
+        now = utc_now()
+        with self.transaction() as conn:
+            cancelled = conn.execute(
+                """UPDATE missions
+                      SET status='cancelled', completed_at=?,
+                          version=version+1, updated_at=?
+                    WHERE id=? AND user_id=?
+                      AND status NOT IN ('completed','failed','cancelled')""",
+                (now, now, mission_id, user_id),
+            )
+            if cancelled.rowcount != 1:
+                return False
+            conn.execute(
+                """UPDATE mission_tasks
+                      SET status=CASE
+                              WHEN status='uncertain'
+                                OR (status='running' AND side_effect<>0)
+                              THEN 'uncertain' ELSE 'skipped' END,
+                          error=CASE
+                              WHEN status='running' AND side_effect<>0
+                              THEN 'миссия остановлена: исход начатого побочного эффекта неизвестен'
+                              ELSE error END,
+                          completed_at=CASE
+                              WHEN status='uncertain'
+                                OR (status='running' AND side_effect<>0)
+                              THEN completed_at ELSE ? END,
+                          updated_at=?
+                    WHERE mission_id=? AND user_id=?
+                      AND status IN ('pending','running','uncertain')""",
+                (now, now, mission_id, user_id),
+            )
+        return True
+
+    def normalize_future_mission_task_start(self, task_id: str, user_id: str) -> bool:
+        """Bound a skewed RUNNING timestamp without revoking its current owner."""
+
+        now = utc_now()
+        with self.transaction() as conn:
+            cursor = conn.execute(
+                """UPDATE mission_tasks
+                      SET started_at=?, updated_at=?
+                    WHERE id=? AND user_id=? AND status='running'
+                      AND julianday(started_at)>julianday(?)""",
+                (now, now, task_id, user_id, now),
+            )
+        return cursor.rowcount == 1
 
     def add_mission_spend(
         self,

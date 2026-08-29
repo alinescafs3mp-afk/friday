@@ -288,6 +288,11 @@ class ExecutiveService:
             plan_summary=plan_title or f"{len(tasks)} задач(и)",
             status=status,
         )
+        if persisted is None:
+            # Cancellation can win while the planner is awaited.  Its terminal
+            # row is authoritative: do not publish/audit the discarded plan as
+            # newly admitted work.
+            return self.get_mission_view(mission_id, user_id) or {}
         self._audit(
             user_id,
             "mission.create",
@@ -424,8 +429,13 @@ class ExecutiveService:
             return self.get_mission_view(mission_id, user_id)
         if status in {MissionStatus.RUNNING.value, MissionStatus.READY.value}:
             return self.get_mission_view(mission_id, user_id)
-        self.storage.update_mission_fields(mission_id, user_id, status=MissionStatus.READY.value, error="")
-        self._audit(user_id, "mission.start", mission_id)
+        if self.storage.update_mission_fields(
+            mission_id,
+            user_id,
+            status=MissionStatus.READY.value,
+            error="",
+        ):
+            self._audit(user_id, "mission.start", mission_id)
         return self.get_mission_view(mission_id, user_id)
 
     async def cancel_mission(
@@ -442,16 +452,8 @@ class ExecutiveService:
             return None
         if mission["status"] in {item.value for item in MISSION_TERMINAL_STATUSES}:
             return self.get_mission_view(mission_id, user_id)
-        now = utc_now()
-        self.storage.update_mission_fields(
-            mission_id, user_id, status=MissionStatus.CANCELLED.value, completed_at=now
-        )
-        for task in self.storage.get_mission_tasks(mission_id, user_id):
-            if task["status"] not in {item.value for item in TASK_TERMINAL_STATUSES}:
-                self.storage.update_mission_task_fields(
-                    task["id"], user_id, status=TaskStatus.SKIPPED.value, completed_at=now
-                )
-        self._audit(user_id, "mission.cancel", mission_id)
+        if self.storage.cancel_mission_and_tasks(mission_id, user_id):
+            self._audit(user_id, "mission.cancel", mission_id)
         return self.get_mission_view(mission_id, user_id)
 
     # ---- Views ----
@@ -547,9 +549,11 @@ class ExecutiveService:
                 continue
             if happened:
                 LOGGER.info("Reconciled mission task: the effect did happen")
-                self.storage.update_mission_task_fields(
+                changed = self.storage.update_mission_task_fields(
                     task["id"],
                     mission["user_id"],
+                    expected_statuses=(TaskStatus.UNCERTAIN.value,),
+                    expected_attempt=int(task.get("attempts") or 0),
                     status=TaskStatus.DONE.value,
                     error="",
                     result=f"сверено с состоянием: действие выполнено ({detail})"[:2000],
@@ -557,16 +561,22 @@ class ExecutiveService:
                 )
             else:
                 LOGGER.info("Reconciled mission task: the effect did not happen")
-                self.storage.update_mission_task_fields(
+                changed = self.storage.update_mission_task_fields(
                     task["id"],
                     mission["user_id"],
+                    expected_statuses=(TaskStatus.UNCERTAIN.value,),
+                    expected_attempt=int(task.get("attempts") or 0),
+                    require_live_parent=True,
                     status=TaskStatus.PENDING.value,
                     error=f"сверено с состоянием: действие не выполнено ({detail}); шаг можно повторить"[
                         :2000
                     ],
                     started_at="",
+                    side_effect=0,
+                    checkpoint_json="{}",
+                    compensation="",
                 )
-            reconciled += 1
+            reconciled += int(changed)
         return reconciled
 
     def _offer_compensation(self, mission: dict[str, Any], task: dict[str, Any]) -> None:
@@ -635,12 +645,11 @@ class ExecutiveService:
             try:
                 moment = datetime.fromisoformat(deadline)
             except ValueError:
-                moment = None
-            if moment is not None:
-                if moment.tzinfo is None:
-                    moment = moment.replace(tzinfo=UTC)
-                if datetime.now(UTC) >= moment:
-                    return f"истёк срок миссии ({deadline})"
+                return "срок миссии повреждён и не может быть проверен"
+            if moment.tzinfo is None:
+                moment = moment.replace(tzinfo=UTC)
+            if datetime.now(UTC) >= moment:
+                return f"истёк срок миссии ({deadline})"
         checks = (
             ("budget_seconds", "spent_seconds", "время", "с"),
             ("budget_tool_calls", "spent_tool_calls", "вызовы инструментов", ""),
@@ -669,7 +678,8 @@ class ExecutiveService:
         route is idempotent on ``mission:<id>:task:<seq>``.
         """
         reclaimed = 0
-        cutoff = datetime.now(UTC) - timedelta(seconds=_STALE_RUNNING_SECONDS)
+        now = datetime.now(UTC)
+        cutoff = now - timedelta(seconds=_STALE_RUNNING_SECONDS)
         for task in self.storage.get_mission_tasks(mission["id"], mission["user_id"]):
             if task.get("status") != TaskStatus.RUNNING.value:
                 continue
@@ -680,6 +690,13 @@ class ExecutiveService:
                 began = None
             if began is not None and began.tzinfo is None:
                 began = began.replace(tzinfo=UTC)
+            if began is not None and began > now:
+                # A wall-clock correction must not make a RUNNING row immortal.
+                # Normalize the timestamp but leave its current owner intact for
+                # one ordinary stale window; reclaiming immediately could start a
+                # second worker while the first is still alive.
+                self.storage.normalize_future_mission_task_start(task["id"], mission["user_id"])
+                continue
             if began is not None and began > cutoff:
                 continue
             if int(task.get("side_effect") or 0):
@@ -689,20 +706,28 @@ class ExecutiveService:
                 # Слепой повтор здесь означал бы второе письмо, второе слияние,
                 # второй перевод — то, что откатить уже нельзя.
                 LOGGER.warning("Mission step with a side effect was interrupted; marking uncertain")
-                self.storage.update_mission_task_fields(
+                changed = self.storage.update_mission_task_fields(
                     task["id"],
                     mission["user_id"],
+                    expected_statuses=(TaskStatus.RUNNING.value,),
+                    expected_attempt=int(task.get("attempts") or 0),
                     status=TaskStatus.UNCERTAIN.value,
                     error="исполнение прервано: неизвестно, случился ли побочный эффект",
                 )
-                self._offer_compensation(mission, task)
-                reclaimed += 1
+                if changed:
+                    self._offer_compensation(mission, task)
+                    reclaimed += 1
                 continue
             LOGGER.warning("Mission task stuck in running — returning it to pending")
-            self.storage.update_mission_task_fields(
-                task["id"], mission["user_id"], status=TaskStatus.PENDING.value, started_at=""
+            changed = self.storage.update_mission_task_fields(
+                task["id"],
+                mission["user_id"],
+                expected_statuses=(TaskStatus.RUNNING.value,),
+                expected_attempt=int(task.get("attempts") or 0),
+                status=TaskStatus.PENDING.value,
+                started_at="",
             )
-            reclaimed += 1
+            reclaimed += int(changed)
         return reclaimed
 
     async def _advance_mission(self, mission: dict[str, Any]) -> bool:
@@ -763,14 +788,17 @@ class ExecutiveService:
                 # with no completed_at, no audit row and nothing to notice it. A
                 # failing step is an ordinary path here — the model being briefly
                 # unavailable raises `MissionStepUnavailable`.
-                self.storage.update_mission_task_fields(
+                changed = self.storage.update_mission_task_fields(
                     task["id"],
                     user_id,
+                    expected_statuses=(TaskStatus.PENDING.value,),
+                    expected_attempt=int(task.get("attempts") or 0),
                     status=TaskStatus.SKIPPED.value,
                     error="upstream task failed",
                     completed_at=utc_now(),
                 )
-                task["status"] = TaskStatus.SKIPPED.value
+                if changed:
+                    task["status"] = TaskStatus.SKIPPED.value
                 continue
             if all(dep and dep["status"] == TaskStatus.DONE.value for dep in dep_states):
                 return task
@@ -784,9 +812,24 @@ class ExecutiveService:
     ) -> None:
         user_id = mission["user_id"]
         task_id = task["id"]
-        self.storage.update_mission_task_fields(
-            task_id, user_id, status=TaskStatus.RUNNING.value, started_at=utc_now()
-        )
+        # Selection is only a snapshot.  The durable PENDING -> RUNNING claim is
+        # the execution boundary: duplicate workers, cancellation and expiry
+        # must lose here before model or tool work starts.
+        if not self.storage.claim_mission_task(
+            task_id,
+            user_id,
+            mission_id=str(mission["id"]),
+            expected_attempt=int(task.get("attempts") or 0),
+        ):
+            LOGGER.info("Mission task claim lost; stale runner is stopping")
+            return
+        current_tasks = self.storage.get_mission_tasks(mission["id"], user_id)
+        claimed = next((row for row in current_tasks if row["id"] == task_id), None)
+        if claimed is None or claimed["status"] != TaskStatus.RUNNING.value:
+            return
+        task = claimed
+        claim_attempt = int(task.get("attempts") or 0)
+        by_seq = {**by_seq, int(task["seq"]): task}
         # Шаг исполняется под ТЕМ, КТО ЗАВЁЛ МИССИЮ, а не под арендатором.
         #
         # Найдено ревью 2026-08-04. В общем архиве `mission["user_id"]` — общий
@@ -798,27 +841,46 @@ class ExecutiveService:
         # несёт человека в хвосте, `worker:` не несёт никого, имя канала человеком
         # не является. Где человека определить нечем — остаётся арендатор: у
         # воркерных миссий это и есть верный ответ, они идут от имени архива.
-        actor = self.auth_service.actor_for_user(
-            self._person_behind(str(mission.get("created_by") or ""), user_id),
-            source="executive",
-        )
-        upstream = self._upstream_context(task, by_seq)
-        # Попытка засчитывается ДО работы: если процесс умрёт в середине шага,
-        # счётчик уже увеличен, и после перезапуска бюджет повторов не обнулится.
-        self.storage.bump_mission_task_attempt(task_id, user_id)
         began = time.monotonic()
         try:
+            actor = self.auth_service.actor_for_user(
+                self._person_behind(str(mission.get("created_by") or ""), user_id),
+                source="executive",
+            )
+            upstream = self._upstream_context(task, by_seq)
             text, tools_used = await self._execute_task(mission, task, upstream, actor)
         except MissionStepUnavailable as exc:
             # Named separately from a crash so the operator can tell "the model was
             # down" from "the step is broken" without opening the logs.
             LOGGER.warning("Mission task could not run (%s)", type(exc).__name__)
-            self.storage.add_mission_spend(
-                mission["id"], user_id, seconds=time.monotonic() - began, retries=1
+            self.storage.add_mission_spend(mission["id"], user_id, seconds=time.monotonic() - began)
+            durable = next(
+                (
+                    row
+                    for row in self.storage.get_mission_tasks(mission["id"], user_id)
+                    if row["id"] == task_id
+                ),
+                None,
             )
+            if durable is None or durable["status"] != TaskStatus.RUNNING.value:
+                return
+            if int(durable.get("side_effect") or 0):
+                changed = self.storage.update_mission_task_fields(
+                    task_id,
+                    user_id,
+                    expected_statuses=(TaskStatus.RUNNING.value,),
+                    expected_attempt=claim_attempt,
+                    status=TaskStatus.UNCERTAIN.value,
+                    error="исполнение прервано: неизвестно, случился ли побочный эффект",
+                )
+                if changed:
+                    self._offer_compensation(mission, durable)
+                return
             self.storage.update_mission_task_fields(
                 task_id,
                 user_id,
+                expected_statuses=(TaskStatus.RUNNING.value,),
+                expected_attempt=claim_attempt,
                 status=TaskStatus.FAILED.value,
                 error=f"step unavailable: {exc}",
                 completed_at=utc_now(),
@@ -826,12 +888,34 @@ class ExecutiveService:
             return
         except Exception as exc:
             LOGGER.error("Mission task execution failed (%s)", type(exc).__name__)
-            self.storage.add_mission_spend(
-                mission["id"], user_id, seconds=time.monotonic() - began, retries=1
+            self.storage.add_mission_spend(mission["id"], user_id, seconds=time.monotonic() - began)
+            durable = next(
+                (
+                    row
+                    for row in self.storage.get_mission_tasks(mission["id"], user_id)
+                    if row["id"] == task_id
+                ),
+                None,
             )
+            if durable is None or durable["status"] != TaskStatus.RUNNING.value:
+                return
+            if int(durable.get("side_effect") or 0):
+                changed = self.storage.update_mission_task_fields(
+                    task_id,
+                    user_id,
+                    expected_statuses=(TaskStatus.RUNNING.value,),
+                    expected_attempt=claim_attempt,
+                    status=TaskStatus.UNCERTAIN.value,
+                    error="исполнение прервано: неизвестно, случился ли побочный эффект",
+                )
+                if changed:
+                    self._offer_compensation(mission, durable)
+                return
             self.storage.update_mission_task_fields(
                 task_id,
                 user_id,
+                expected_statuses=(TaskStatus.RUNNING.value,),
+                expected_attempt=claim_attempt,
                 status=TaskStatus.FAILED.value,
                 error="task execution failed; see secure logs",
                 completed_at=utc_now(),
@@ -852,13 +936,39 @@ class ExecutiveService:
             # column, so the marker IS the record: the second interruption in a
             # row fails the step, which the skip cascade then propagates and
             # `_finalize` can act on.
-            previous_error = str(task.get("error") or "")
+            durable = next(
+                (
+                    row
+                    for row in self.storage.get_mission_tasks(mission["id"], user_id)
+                    if row["id"] == task_id
+                ),
+                None,
+            )
+            if durable is None or durable["status"] != TaskStatus.RUNNING.value:
+                raise
+            if int(durable.get("side_effect") or 0):
+                LOGGER.warning("Interrupted mission side effect is uncertain")
+                with suppress(Exception):
+                    changed = self.storage.update_mission_task_fields(
+                        task_id,
+                        user_id,
+                        expected_statuses=(TaskStatus.RUNNING.value,),
+                        expected_attempt=claim_attempt,
+                        status=TaskStatus.UNCERTAIN.value,
+                        error="исполнение прервано: неизвестно, случился ли побочный эффект",
+                    )
+                    if changed:
+                        self._offer_compensation(mission, durable)
+                raise
+            previous_error = str(durable.get("error") or "")
             if previous_error.startswith(_INTERRUPTED_MARKER):
                 LOGGER.warning("Mission task interrupted twice, failing it")
                 with suppress(Exception):
                     self.storage.update_mission_task_fields(
                         task_id,
                         user_id,
+                        expected_statuses=(TaskStatus.RUNNING.value,),
+                        expected_attempt=claim_attempt,
                         status=TaskStatus.FAILED.value,
                         error=f"{_INTERRUPTED_MARKER}: does not fit the tick budget",
                         completed_at=utc_now(),
@@ -869,6 +979,8 @@ class ExecutiveService:
                 self.storage.update_mission_task_fields(
                     task_id,
                     user_id,
+                    expected_statuses=(TaskStatus.RUNNING.value,),
+                    expected_attempt=claim_attempt,
                     status=TaskStatus.PENDING.value,
                     started_at="",
                     error=_INTERRUPTED_MARKER,
@@ -881,13 +993,30 @@ class ExecutiveService:
         # Inbox AFTER the stop, flipped its own SKIPPED back to DONE, and
         # `_finalize` then flipped the mission's CANCELLED to COMPLETED. Stop has
         # to mean stop; the work that was already done is simply dropped.
+        durable = next(
+            (row for row in self.storage.get_mission_tasks(mission["id"], user_id) if row["id"] == task_id),
+            None,
+        )
+        if (
+            durable is None
+            or durable["status"] != TaskStatus.RUNNING.value
+            or int(durable.get("attempts") or 0) != claim_attempt
+        ):
+            LOGGER.info("Mission task execution ownership changed; discarding its stale result")
+            return
         current = self.storage.get_mission(mission["id"], user_id)
         if current and current["status"] in {item.value for item in MISSION_TERMINAL_STATUSES}:
             LOGGER.info("Mission ended while a step was running; discarding its result")
             return
 
-        inbox_id: str | None = None
         text = text.strip()[:_MAX_RESULT_CHARS]
+        publishes = task["kind"] == TaskKind.PRODUCE.value and bool(text)
+        if not self._admit_task_result(mission, durable, claim_attempt, publishes=publishes):
+            LOGGER.info("Mission result admission lost; discarding its stale result")
+            self._retire_unadmitted_task_result(mission, task_id, claim_attempt)
+            return
+
+        inbox_id: str | None = None
         if task["kind"] == TaskKind.PRODUCE.value and text:
             inbox_id = await self._route_to_inbox(mission, task, text)
         self.storage.add_mission_spend(
@@ -899,11 +1028,100 @@ class ExecutiveService:
         self.storage.update_mission_task_fields(
             task_id,
             user_id,
+            expected_statuses=(TaskStatus.RUNNING.value,),
+            expected_attempt=claim_attempt,
             status=TaskStatus.DONE.value,
             result=text,
             inbox_id=inbox_id,
             tools_used_json=json.dumps(tools_used, ensure_ascii=False),
             completed_at=utc_now(),
+        )
+
+    def _admit_task_result(
+        self,
+        mission: dict[str, Any],
+        task: dict[str, Any],
+        attempt: int,
+        *,
+        publishes: bool,
+    ) -> bool:
+        """Linearize result settlement against parent cancellation and expiry."""
+
+        # Rewriting the same body-free error is intentional: the conditional
+        # UPDATE and its updated_at are the durable admission point.  Do not
+        # replace a real tool checkpoint here.  Inbox publication already has a
+        # deterministic source_ref and is therefore safe to recover idempotently.
+        fields: dict[str, Any] = {"error": str(task.get("error") or "")}
+        if publishes:
+            # Admission of a final Inbox publication is itself durable effect
+            # ownership.  Do not replace an earlier tool checkpoint: if cancel
+            # wins after this point, the task must remain UNCERTAIN and retain
+            # the strongest available evidence rather than become SKIPPED.
+            fields["side_effect"] = 1
+        return self.storage.update_mission_task_fields(
+            str(task["id"]),
+            str(mission["user_id"]),
+            expected_statuses=(TaskStatus.RUNNING.value,),
+            expected_attempt=attempt,
+            require_live_parent=True,
+            **fields,
+        )
+
+    def _retire_unadmitted_task_result(
+        self,
+        mission: dict[str, Any],
+        task_id: str,
+        attempt: int,
+    ) -> None:
+        """Release the exact runner when its parent stopped before admission."""
+
+        user_id = str(mission["user_id"])
+        durable = next(
+            (
+                row
+                for row in self.storage.get_mission_tasks(str(mission["id"]), user_id)
+                if row["id"] == task_id
+            ),
+            None,
+        )
+        if (
+            durable is None
+            or durable["status"] != TaskStatus.RUNNING.value
+            or int(durable.get("attempts") or 0) != attempt
+        ):
+            return
+
+        parent = self.storage.get_mission(str(mission["id"]), user_id)
+        verdict = self._budget_verdict(parent) if parent is not None else "mission parent is missing"
+        if parent is not None and verdict:
+            self.storage.update_mission_fields(
+                str(mission["id"]),
+                user_id,
+                status=MissionStatus.BLOCKED.value,
+                error=verdict,
+            )
+
+        if int(durable.get("side_effect") or 0):
+            changed = self.storage.update_mission_task_fields(
+                task_id,
+                user_id,
+                expected_statuses=(TaskStatus.RUNNING.value,),
+                expected_attempt=attempt,
+                status=TaskStatus.UNCERTAIN.value,
+                error=verdict or "mission parent stopped before effect settlement",
+            )
+            if changed:
+                self._offer_compensation(parent or mission, durable)
+            return
+
+        self.storage.update_mission_task_fields(
+            task_id,
+            user_id,
+            expected_statuses=(TaskStatus.RUNNING.value,),
+            expected_attempt=attempt,
+            status=TaskStatus.PENDING.value,
+            started_at="",
+            error=verdict or "mission parent stopped before result settlement",
         )
 
     async def _route_to_inbox(
@@ -1069,9 +1287,11 @@ class ExecutiveService:
                 # мал и меняется редко; ошибка в нём — лишняя осторожность, а
                 # ошибка в списке пишущих — второй эффект.
                 if call.name not in _READ_ONLY_STEP_TOOLS and task is not None and mission is not None:
-                    self.storage.update_mission_task_fields(
+                    checkpointed = self.storage.update_mission_task_fields(
                         str(task["id"]),
                         str(mission["user_id"]),
+                        expected_statuses=(TaskStatus.RUNNING.value,),
+                        expected_attempt=int(task.get("attempts") or 0),
                         side_effect=1,
                         checkpoint_json=json.dumps(
                             {"tool": call.name, "arguments": call.arguments},
@@ -1091,6 +1311,8 @@ class ExecutiveService:
                         # описание и состоит.
                         compensation=_compensation_for(call.name, call.arguments),
                     )
+                    if not checkpointed:
+                        raise MissionStepUnavailable("mission task effect ownership changed before execution")
                 tool_result = await self.kernel.execute(
                     call.name,
                     call.arguments,
@@ -1174,14 +1396,15 @@ class ExecutiveService:
             failed = any(task["status"] == TaskStatus.FAILED.value for task in tasks)
             succeeded = produced if has_produce else (bool(done) and not failed)
             status = MissionStatus.COMPLETED if succeeded else MissionStatus.FAILED
-            self.storage.update_mission_fields(
+            finished = self.storage.update_mission_fields(
                 mission_id,
                 user_id,
                 status=status.value,
                 done_count=done,
                 completed_at=utc_now(),
             )
-            self._audit(user_id, "mission.finish", mission_id, after={"status": status.value})
+            if finished:
+                self._audit(user_id, "mission.finish", mission_id, after={"status": status.value})
         else:
             self.storage.update_mission_fields(mission_id, user_id, done_count=done)
 
