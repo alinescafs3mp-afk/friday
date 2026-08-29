@@ -355,7 +355,10 @@ from friday.orchestration.simple_public_news_outcome import (
     simple_public_news_topic_mismatch_is_empty,
 )
 from friday.orchestration.turn_context import AuthenticatedTurnContext, TurnContextError
-from friday.orchestration.turn_context_call_scope import require_authenticated_chat_call_scope
+from friday.orchestration.turn_context_call_scope import (
+    UNSPECIFIED_CHAT_ADJUNCT,
+    require_authenticated_chat_call_scope,
+)
 from friday.orchestration.turn_context_runtime import current_primary_authenticated_turn_context
 from friday.organs.engineer.command.contracts import CommandStatus
 from friday.organs.engineer.publication import (
@@ -48989,9 +48992,9 @@ class AgentRuntime:
         conversation_id: str | None = None,
         attachments: list[dict[str, Any]] | None = None,
         enable_tools: bool = True,
-        kg: Any = None,
-        hybrid_searcher: Any = None,
-        ingestion_result: dict[str, Any] | None = None,
+        kg: Any = UNSPECIFIED_CHAT_ADJUNCT,
+        hybrid_searcher: Any = UNSPECIFIED_CHAT_ADJUNCT,
+        ingestion_result: Any = UNSPECIFIED_CHAT_ADJUNCT,
         synthetic_document_notice: bool = False,
         replay_source_message_id: str | None = None,
         mode: str | None = None,
@@ -49009,7 +49012,7 @@ class AgentRuntime:
         turn_started = time.monotonic()
         authenticated_turn_context = current_primary_authenticated_turn_context(_authenticated_turn_context)
         if authenticated_turn_context is not None:
-            require_authenticated_chat_call_scope(
+            authenticated_call_scope = require_authenticated_chat_call_scope(
                 authenticated_turn_context,
                 user_id=user_id,
                 message=message,
@@ -49033,6 +49036,16 @@ class AgentRuntime:
                 hybrid_searcher=hybrid_searcher,
                 ingestion_result=ingestion_result,
             )
+            kg = authenticated_call_scope.knowledge_graph
+            hybrid_searcher = authenticated_call_scope.hybrid_searcher
+            ingestion_result = authenticated_call_scope.ingestion_result
+        else:
+            if kg is UNSPECIFIED_CHAT_ADJUNCT:
+                kg = None
+            if hybrid_searcher is UNSPECIFIED_CHAT_ADJUNCT:
+                hybrid_searcher = None
+            if ingestion_result is UNSPECIFIED_CHAT_ADJUNCT:
+                ingestion_result = None
         if turn_deadline is None:
             # Production runtimes always own settings, but a few deliberately
             # tiny adapters call the structural early-return routes through an
