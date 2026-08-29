@@ -1,3 +1,17 @@
+## 0.207.69 — 2026-08-29
+
+### Authenticated turn runtime propagation
+
+- Activates the first narrow, user-visible-neutral `AuthenticatedTurnContext`
+  path for claimed existing scalar turns and carries one exact turn identity
+  through ingestion, routing, legacy runtime, effects and atomic publication.
+- Seals actor, conversation mode, tool authority, transient services, deadline,
+  source and pending-work carriers across every wrapper and awaited boundary;
+  drift and inherited observer authority fail closed before primary execution.
+- Keeps unsupported inputs and configurations on the unchanged legacy path,
+  gives safe pre-effect retries a new lease-derived turn root, rolls back
+  ingestion on lost authority and persists only body-free join metadata.
+
 ## 0.207.68 — 2026-08-29
 
 ### Authenticated turn context foundation
