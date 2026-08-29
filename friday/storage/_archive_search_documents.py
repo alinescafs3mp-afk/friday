@@ -529,6 +529,8 @@ def _page_seal_material(page: ArchiveDocumentLanePage) -> bytes:
         "candidates": candidate_digests,
         "corpus": page.corpus.value,
         "derivative_current": page.derivative_current,
+        "derivative_backfill_pending": page.derivative_backfill_pending,
+        "derivative_unavailable": page.derivative_unavailable,
         "examined": page.examined,
         "has_more": page.has_more,
         "lane": page.lane.value,
@@ -554,6 +556,8 @@ class ArchiveDocumentLanePage:
     has_more: bool
     available: bool
     derivative_current: bool | None
+    derivative_backfill_pending: bool | None
+    derivative_unavailable: bool | None
     catalog_projection_current: bool | None
     authority_scope_complete: bool
     authority_rechecked: bool
@@ -597,15 +601,39 @@ class ArchiveDocumentLanePage:
             or type(self.snapshot_current) is not bool
             or (self.derivative_current is not None and type(self.derivative_current) is not bool)
             or (
+                self.derivative_backfill_pending is not None
+                and type(self.derivative_backfill_pending) is not bool
+            )
+            or (self.derivative_unavailable is not None and type(self.derivative_unavailable) is not bool)
+            or (
                 self.catalog_projection_current is not None
                 and type(self.catalog_projection_current) is not bool
             )
         ):
             raise _fail("archive document page is inconsistent")
-        if self.lane is SearchLane.CATALOG and self.derivative_current is not None:
+        if self.lane is SearchLane.CATALOG and any(
+            item is not None
+            for item in (
+                self.derivative_current,
+                self.derivative_backfill_pending,
+                self.derivative_unavailable,
+            )
+        ):
             raise _fail("archive catalog page cannot claim derivative health")
-        if self.lane is SearchLane.LEXICAL and type(self.derivative_current) is not bool:
-            raise _fail("archive lexical page requires derivative health")
+        if self.lane is SearchLane.LEXICAL:
+            if any(
+                type(item) is not bool
+                for item in (
+                    self.derivative_current,
+                    self.derivative_backfill_pending,
+                    self.derivative_unavailable,
+                )
+            ):
+                raise _fail("archive lexical page requires derivative health")
+            if self.derivative_current is (
+                bool(self.derivative_backfill_pending) or bool(self.derivative_unavailable)
+            ):
+                raise _fail("archive lexical derivative health is inconsistent")
         document_catalog_page = (
             self.corpus is ArchiveSearchCorpus.DOCUMENTS and self.lane is SearchLane.CATALOG
         )
@@ -720,10 +748,14 @@ class ArchiveDocumentLanePage:
             if (
                 not self.authority_scope_complete
                 or (self.total is not None and self.examined < self.total)
-                or (self.lane is SearchLane.LEXICAL and self.derivative_current is not True)
                 or self.catalog_projection_current is False
             ):
                 incomplete.add(CoverageState.BACKFILL_PENDING)
+            if self.lane is SearchLane.LEXICAL:
+                if self.derivative_backfill_pending:
+                    incomplete.add(CoverageState.BACKFILL_PENDING)
+                if self.derivative_unavailable:
+                    incomplete.add(CoverageState.UNAVAILABLE)
             if self.has_more:
                 incomplete.add(CoverageState.CAPPED)
             states = (
@@ -758,6 +790,8 @@ def _new_page(
     has_more: bool,
     available: bool,
     derivative_current: bool | None,
+    derivative_backfill_pending: bool | None,
+    derivative_unavailable: bool | None,
     catalog_projection_current: bool | None,
     authority_scope_complete: bool,
     authority_rechecked: bool,
@@ -795,6 +829,8 @@ def _new_page(
         ("has_more", has_more),
         ("available", available),
         ("derivative_current", derivative_current),
+        ("derivative_backfill_pending", derivative_backfill_pending),
+        ("derivative_unavailable", derivative_unavailable),
         ("catalog_projection_current", catalog_projection_current),
         ("authority_scope_complete", authority_scope_complete),
         ("authority_rechecked", authority_rechecked),
@@ -839,6 +875,8 @@ def _unavailable_page(
         has_more=False,
         available=False,
         derivative_current=False if lane is SearchLane.LEXICAL else None,
+        derivative_backfill_pending=False if lane is SearchLane.LEXICAL else None,
+        derivative_unavailable=True if lane is SearchLane.LEXICAL else None,
         catalog_projection_current=None,
         authority_scope_complete=False,
         authority_rechecked=authority_rechecked,
@@ -1358,13 +1396,13 @@ def _document_passage_current_expression(
         AND {source}.content_hash NOT GLOB '*[^0-9a-f]*'
         AND {projection}.source_content_sha256 IS {source}.content_hash
         AND typeof({source}.passage_body)='text'
-        AND length({source}.passage_body)>0
+        AND friday_exact_text_char_count({source}.passage_body)>0
         AND typeof({projection}.extracted_text_sha256)='text'
         AND length({projection}.extracted_text_sha256)=64
         AND {projection}.extracted_text_sha256 NOT GLOB '*[^0-9a-f]*'
         AND {projection}.extracted_text_sha256=friday_exact_text_sha256({source}.passage_body)
         AND typeof({projection}.source_char_count)='integer'
-        AND {projection}.source_char_count=length({source}.passage_body)
+        AND {projection}.source_char_count=friday_exact_text_char_count({source}.passage_body)
         AND typeof({projection}.passage_set_sha256)='text'
         AND length({projection}.passage_set_sha256)=64
         AND {projection}.passage_set_sha256 NOT GLOB '*[^0-9a-f]*'
@@ -1396,6 +1434,25 @@ def _document_passage_current_expression(
     )"""
 
 
+def _document_passage_backfill_expression(
+    projection_alias: str = "dp",
+    *,
+    source_alias: str = "s",
+) -> str:
+    """Classify only repairable/missing source-bound passage coverage."""
+
+    projection = projection_alias
+    source = source_alias
+    return f"""(
+        {projection}.raw_object_id IS NULL
+        OR {projection}.source_version IS NOT {source}.raw_version
+        OR {projection}.source_content_sha256 IS NOT {source}.content_hash
+        OR {projection}.passage_index_revision<>'{_DOCUMENT_PASSAGE_INDEX_REVISION}'
+        OR ({projection}.projection_status='incomplete'
+            AND {projection}.incomplete_reason IN ('backfill_pending','source_changed'))
+    )"""
+
+
 def _passage_projection_cte(
     corpus: ArchiveSearchCorpus,
     *,
@@ -1403,20 +1460,33 @@ def _passage_projection_cte(
 ) -> str:
     if corpus is not ArchiveSearchCorpus.DOCUMENTS:
         return """passage_projection_sources AS MATERIALIZED (
-            SELECT s.*, 1 AS passage_projection_current
+            SELECT s.*, 1 AS passage_projection_current,
+                   0 AS passage_projection_backfill_pending,
+                   0 AS passage_projection_unavailable
               FROM authorized_sources s
         )"""
     if not document_passage_available:
         return """passage_projection_sources AS MATERIALIZED (
-            SELECT s.*, 0 AS passage_projection_current
+            SELECT s.*, 0 AS passage_projection_current,
+                   0 AS passage_projection_backfill_pending,
+                   1 AS passage_projection_unavailable
               FROM authorized_sources s
         )"""
     current = _document_passage_current_expression("dp", source_alias="s")
-    return f"""passage_projection_sources AS MATERIALIZED (
-        SELECT s.*, CASE WHEN {current} THEN 1 ELSE 0 END AS passage_projection_current
+    backfill = _document_passage_backfill_expression("dp", source_alias="s")
+    return f"""passage_projection_joined AS MATERIALIZED (
+        SELECT s.*, CASE WHEN {current} THEN 1 ELSE 0 END AS passage_projection_current,
+               CASE WHEN {backfill} THEN 1 ELSE 0 END AS passage_projection_backfill_pending
           FROM authorized_sources s
           LEFT JOIN document_passage_projections dp
             ON dp.raw_object_id=s.raw_id
+    ),
+    passage_projection_sources AS MATERIALIZED (
+        SELECT joined.*,
+               CASE WHEN joined.passage_projection_current=0
+                          AND joined.passage_projection_backfill_pending=0
+                    THEN 1 ELSE 0 END AS passage_projection_unavailable
+          FROM passage_projection_joined joined
     )"""
 
 
@@ -1489,7 +1559,7 @@ def _select_rows(
 
 def _summary(
     rows: list[dict[str, Any]],
-) -> tuple[int, int, int, int, int, list[dict[str, Any]]]:
+) -> tuple[int, int, int, int, int, int, int, list[dict[str, Any]]]:
     if not rows:
         raise _fail("archive document storage summary is unavailable")
     try:
@@ -1500,6 +1570,8 @@ def _summary(
                 "examined",
                 "matched",
                 "derivative_mismatches",
+                "derivative_backfills",
+                "derivative_unavailable",
                 "authority_backfill",
             )
         )
@@ -1507,27 +1579,59 @@ def _summary(
         raise _fail("archive document storage summary is invalid") from None
     if any(type(item) is not int for item in values):
         raise _fail("archive document storage summary is invalid")
-    total, examined, matched, derivative_mismatches, authority_backfill = values
+    (
+        total,
+        examined,
+        matched,
+        derivative_mismatches,
+        derivative_backfills,
+        derivative_unavailable,
+        authority_backfill,
+    ) = values
     hits = [item for item in rows if item.get("source_id") is not None]
     if (
-        min(total, examined, matched, derivative_mismatches, authority_backfill) < 0
+        min(
+            total,
+            examined,
+            matched,
+            derivative_mismatches,
+            derivative_backfills,
+            derivative_unavailable,
+            authority_backfill,
+        )
+        < 0
         or examined > total
         or matched > examined
+        or derivative_mismatches > examined
+        or derivative_backfills > derivative_mismatches
+        or derivative_unavailable > derivative_mismatches
         or authority_backfill not in {0, 1}
     ):
         raise _fail("archive document storage summary is invalid")
-    return total, examined, matched, derivative_mismatches, authority_backfill, hits
+    return (
+        total,
+        examined,
+        matched,
+        derivative_mismatches,
+        derivative_backfills,
+        derivative_unavailable,
+        authority_backfill,
+        hits,
+    )
 
 
 def _page_select() -> str:
     return """SELECT totals.total, totals.examined, totals.matched,
-                     totals.derivative_mismatches, totals.authority_backfill,
+                     totals.derivative_mismatches, totals.derivative_backfills,
+                     totals.derivative_unavailable, totals.authority_backfill,
                      page.*
                 FROM (
                     SELECT (SELECT COUNT(DISTINCT raw_id) FROM eligible_sources) AS total,
                            (SELECT COUNT(DISTINCT raw_id) FROM indexed_sources) AS examined,
                            (SELECT COUNT(*) FROM ranked) AS matched,
                            (SELECT value FROM derivative_mismatches) AS derivative_mismatches,
+                           (SELECT value FROM derivative_backfills) AS derivative_backfills,
+                           (SELECT value FROM derivative_unavailable) AS derivative_unavailable,
                            CASE WHEN (SELECT value FROM authority_backfill)=1
                                       OR (SELECT value FROM lane_backfill)=1
                                 THEN 1 ELSE 0 END AS authority_backfill
@@ -1557,6 +1661,8 @@ def _lexical_sql(
         # membership or the released legacy PassageRef identity.
         derivative_expression = "0"
         derivative_mismatch_expression = "passage_projection_current<>1"
+        derivative_backfill_expression = "passage_projection_backfill_pending=1"
+        derivative_unavailable_expression = "passage_projection_unavailable=1"
         folded_fields = ("friday_archive_fold(s.passage_body)",)
         # Filename affinity only orders rows already admitted by the body-only
         # direct_match below.  Invalid metadata contributes the empty string,
@@ -1583,6 +1689,8 @@ def _lexical_sql(
             else "0"
         )
         derivative_mismatch_expression = "direct_match<>derivative_match"
+        derivative_backfill_expression = derivative_mismatch_expression
+        derivative_unavailable_expression = "0"
         folded_fields = (
             "friday_archive_fold(s.passage_body)",
             "friday_archive_fold(COALESCE(s.knowledge_title,''))",
@@ -1657,6 +1765,14 @@ def _lexical_sql(
         derivative_mismatches(value) AS MATERIALIZED (
             SELECT COUNT(*) FROM scanned_sources
              WHERE {derivative_mismatch_expression}
+        ),
+        derivative_backfills(value) AS MATERIALIZED (
+            SELECT COUNT(*) FROM scanned_sources
+             WHERE {derivative_backfill_expression}
+        ),
+        derivative_unavailable(value) AS MATERIALIZED (
+            SELECT COUNT(*) FROM scanned_sources
+             WHERE {derivative_unavailable_expression}
         ),
         page AS MATERIALIZED (
             SELECT * FROM ranked
@@ -1823,6 +1939,8 @@ def _catalog_sql(
             SELECT COUNT(*) FROM catalog_projection_sources
              WHERE catalog_projection_current<>1
         ),
+        derivative_backfills(value) AS MATERIALIZED (SELECT 0),
+        derivative_unavailable(value) AS MATERIALIZED (SELECT 0),
         page AS MATERIALIZED (
             SELECT * FROM ranked
              ORDER BY score ASC, sort_text ASC, sort_time DESC, source_id ASC
@@ -2431,6 +2549,8 @@ def search_archive_document_lane(
         examined,
         matched,
         derivative_mismatches,
+        derivative_backfills,
+        derivative_unavailable,
         authority_backfill,
         hits,
     ) = _summary(rows)
@@ -2463,6 +2583,20 @@ def search_archive_document_lane(
         available=True,
         derivative_current=(
             derivative_available and derivative_mismatches == 0 if lane is SearchLane.LEXICAL else None
+        ),
+        derivative_backfill_pending=(
+            (not derivative_available or derivative_backfills > 0)
+            if lane is SearchLane.LEXICAL and corpus is not ArchiveSearchCorpus.DOCUMENTS
+            else derivative_backfills > 0
+            if lane is SearchLane.LEXICAL
+            else None
+        ),
+        derivative_unavailable=(
+            (not derivative_available or derivative_unavailable > 0)
+            if lane is SearchLane.LEXICAL and corpus is ArchiveSearchCorpus.DOCUMENTS
+            else False
+            if lane is SearchLane.LEXICAL
+            else None
         ),
         catalog_projection_current=(
             document_catalog_available and derivative_mismatches == 0

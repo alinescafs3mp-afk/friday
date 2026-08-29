@@ -395,6 +395,14 @@ def _exact_text_sha256(value: Any) -> str:
     return hashlib.sha256(value.encode("utf-8", errors="strict")).hexdigest()
 
 
+def _exact_text_char_count(value: Any) -> int:
+    """Count Python codepoints without SQLite TEXT's embedded-NUL truncation."""
+
+    if type(value) is not str:
+        raise ValueError("DocumentCatalog extracted text must be TEXT")
+    return len(value)
+
+
 def deterministic_document_extraction_state(raw_content: Any, metadata_json: Any) -> str:
     """Classify extraction readiness without guessing or parsing SQL-side JSON."""
 
@@ -568,6 +576,12 @@ def register_document_catalog_connection_functions(conn: sqlite3.Connection) -> 
         "friday_exact_text_sha256",
         1,
         _exact_text_sha256,
+        deterministic=True,
+    )
+    conn.create_function(
+        "friday_exact_text_char_count",
+        1,
+        _exact_text_char_count,
         deterministic=True,
     )
     conn.create_function(

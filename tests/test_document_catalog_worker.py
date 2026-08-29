@@ -163,6 +163,7 @@ class _CatalogStorage:
         *,
         after_raw_object_id: str | None,
         limit: int,
+        include_document_passages: bool = False,
     ) -> dict[str, object]:
         self._thread()
         if user_id in self.backfill_fail:
@@ -172,6 +173,8 @@ class _CatalogStorage:
         return {
             "examined": limit,
             "processed": limit,
+            "passage_processed": 0,
+            "passage_changed": 0,
             "has_more": False,
             "next_after_raw_object_id": None,
             "body": self.secret,
@@ -221,6 +224,7 @@ class _KeysetCatalogStorage(_CatalogStorage):
         *,
         after_raw_object_id: str | None,
         limit: int,
+        include_document_passages: bool = False,
     ) -> dict[str, object]:
         assert user_id == "alice"
         self._thread()
@@ -233,6 +237,8 @@ class _KeysetCatalogStorage(_CatalogStorage):
         return {
             "examined": len(page),
             "processed": processed,
+            "passage_processed": 0,
+            "passage_changed": 0,
             "has_more": has_more,
             "next_after_raw_object_id": page[-1] if has_more and page else None,
         }
@@ -261,6 +267,8 @@ class _SkewedCatalogStorage(_CatalogStorage):
         return {
             "examined": examined,
             "processed": examined,
+            "passage_processed": 0,
+            "passage_changed": 0,
             "has_more": has_more,
             "next_after_raw_object_id": str(end - 1) if has_more and examined else None,
         }
@@ -280,6 +288,7 @@ class _SkewedCatalogStorage(_CatalogStorage):
         *,
         after_raw_object_id: str | None,
         limit: int,
+        include_document_passages: bool = False,
     ) -> dict[str, object]:
         return self._phase_page("backfill", user_id, after_raw_object_id, limit)
 
@@ -313,11 +322,13 @@ class _RecordingCatalogStorage:
         *,
         after_raw_object_id: str | None,
         limit: int,
+        include_document_passages: bool = False,
     ) -> dict[str, object]:
         report = self.storage.backfill_document_catalog(
             user_id,
             after_raw_object_id=after_raw_object_id,
             limit=limit,
+            include_document_passages=include_document_passages,
         )
         self.reports.append(("backfill", user_id, limit, int(report["examined"])))
         return report
@@ -571,12 +582,14 @@ async def test_persistent_phase_failure_does_not_starve_its_healthy_sibling(sett
             *,
             after_raw_object_id: str | None,
             limit: int,
+            include_document_passages: bool = False,
         ) -> dict[str, object]:
             if user_id != broken:
                 return super().backfill_document_catalog(
                     user_id,
                     after_raw_object_id=after_raw_object_id,
                     limit=limit,
+                    include_document_passages=include_document_passages,
                 )
             self._thread()
             next_cursor = f"healthy-backfill-{len(self.calls)}"
@@ -584,6 +597,8 @@ async def test_persistent_phase_failure_does_not_starve_its_healthy_sibling(sett
             return {
                 "examined": 1,
                 "processed": 1,
+                "passage_processed": 0,
+                "passage_changed": 0,
                 "has_more": True,
                 "next_after_raw_object_id": next_cursor,
             }
@@ -689,9 +704,12 @@ async def test_current_prefix_pending_tail_converges_across_restart_keysets(sett
     tail = raw_ids[-1]
     storage = _KeysetCatalogStorage(raw_ids, retryable={tail})
 
+    calls_by_tick: list[tuple[tuple[str, str, str | None, int, int], ...]] = []
     for _ in range(12):
         writes_before = len(storage.kv_writes)
+        calls_before = len(storage.calls)
         await _manager(settings, storage)._document_catalog_reconcile_all()  # noqa: SLF001
+        calls_by_tick.append(tuple(storage.calls[calls_before:]))
         assert len(storage.kv_writes) - writes_before <= 1
         if not storage.retryable:
             break
@@ -703,11 +721,10 @@ async def test_current_prefix_pending_tail_converges_across_restart_keysets(sett
     assert any(cursor is not None for cursor in backfill_cursors[1:])
     tenant_state = _state(storage).tenants[_tenant_key("alice")]
     assert tenant_state == DocumentCatalogTenantState()
-    for tick_start in range(0, len(storage.calls), 2):
-        assert (
-            sum(used for *_prefix, used in storage.calls[tick_start : tick_start + 2])
-            <= _DOCUMENT_CATALOG_TICK_LIMIT
-        )
+    assert all(
+        sum(used for *_prefix, used in tick_calls) <= _DOCUMENT_CATALOG_TICK_LIMIT
+        for tick_calls in calls_by_tick
+    )
 
 
 @pytest.mark.asyncio
@@ -890,6 +907,38 @@ async def test_out_of_bounds_phase_report_fails_without_advancing_that_cursor(se
     assert all(
         limit <= _DOCUMENT_CATALOG_TICK_LIMIT for _phase, _user, _cursor, limit, _used in storage.calls
     )
+
+
+@pytest.mark.asyncio
+async def test_out_of_bounds_passage_report_fails_without_advancing_backfill_cursor(settings) -> None:
+    class _OverspendingPassageStorage(_CatalogStorage):
+        def backfill_document_catalog(
+            self,
+            user_id: str,
+            *,
+            after_raw_object_id: str | None,
+            limit: int,
+            include_document_passages: bool = False,
+        ) -> dict[str, object]:
+            assert include_document_passages is True
+            self.calls.append(("backfill", user_id, after_raw_object_id, limit, 1))
+            return {
+                "examined": 1,
+                "processed": 0,
+                "passage_processed": 2,
+                "passage_changed": 1,
+                "has_more": True,
+                "next_after_raw_object_id": "must-not-commit",
+            }
+
+    storage = _OverspendingPassageStorage(["alice"], reconcile_used=0)
+
+    with pytest.raises(WorkerBatchError):
+        await _manager(settings, storage)._document_catalog_reconcile_all()  # noqa: SLF001
+
+    tenant_state = _state(storage).tenants[_tenant_key("alice")]
+    assert tenant_state.backfill is None
+    assert tenant_state.backfill_failed is True
 
 
 def test_account_deletion_owns_only_its_hashed_worker_checkpoint(storage) -> None:

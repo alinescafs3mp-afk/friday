@@ -230,6 +230,18 @@ def _document_catalog_processed(report: Any, *, maximum: int) -> int:
     return processed
 
 
+def _document_passage_processed(report: Any, *, maximum: int) -> int:
+    """Authenticate the optional passage sub-work before advancing its cursor."""
+
+    if not isinstance(report, dict):
+        raise ValueError("document passage phase report is invalid")
+    processed = report.get("passage_processed")
+    changed = report.get("passage_changed")
+    if type(processed) is not int or type(changed) is not int or not 0 <= changed <= processed <= maximum:
+        raise ValueError("document passage phase report is out of bounds")
+    return processed
+
+
 class WorkerBatchError(RuntimeError):
     """One task completed its tenant sweep with isolated failures."""
 
@@ -1075,9 +1087,7 @@ class WorkersManager:
                     "reconcile": tenant_state.reconcile,
                     "backfill": tenant_state.backfill,
                 },
-                backfill_only=bool(
-                    forced_phase == "backfill" or (forced_phase is None and share == 1 and visit_round % 2)
-                ),
+                backfill_only=bool(forced_phase == "backfill" or (forced_phase is None and visit_round % 2)),
             )
             reports_by_user[user_id] = report
             record_report(user_id, report)
@@ -1210,6 +1220,7 @@ class WorkersManager:
                     user_id,
                     after_raw_object_id=phase_cursors["backfill"],
                     limit=limit,
+                    include_document_passages=True,
                 )
                 _spent, has_more, next_cursor = _document_catalog_phase_page(
                     reserved_backfill,
@@ -1217,6 +1228,7 @@ class WorkersManager:
                     limit=limit,
                 )
                 backfilled = _document_catalog_processed(reserved_backfill, maximum=_spent)
+                _document_passage_processed(reserved_backfill, maximum=_spent)
                 phase_updates["backfill"] = next_cursor
                 backfill_has_more = int(has_more)
                 successful_phases.add("backfill")
@@ -1323,6 +1335,7 @@ class WorkersManager:
                     user_id,
                     after_raw_object_id=phase_cursors["backfill"],
                     limit=backfill_limit,
+                    include_document_passages=True,
                 )
                 backfill_spent, has_more, next_cursor = _document_catalog_phase_page(
                     backfill,
@@ -1330,6 +1343,7 @@ class WorkersManager:
                     limit=backfill_limit,
                 )
                 backfilled = _document_catalog_processed(backfill, maximum=backfill_spent)
+                _document_passage_processed(backfill, maximum=backfill_spent)
                 phase_updates["backfill"] = next_cursor
                 backfill_has_more = int(has_more)
                 successful_phases.add("backfill")

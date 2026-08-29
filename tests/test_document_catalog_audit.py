@@ -8,9 +8,15 @@ import json
 import os
 import sqlite3
 from pathlib import Path
+from typing import Any
 
 import pytest
 
+from friday.document_catalog.passage_projection import DocumentPassageProjection
+from friday.document_catalog.passage_schema import (
+    document_passage_schema_fingerprint,
+    document_passage_set_sha256,
+)
 from friday.storage import SCHEMA_VERSION, FridayStorage
 from friday.storage.models import RawObject
 from tools.audit_document_catalog import (
@@ -202,6 +208,16 @@ def _add_counterfeit_catalog(conn: sqlite3.Connection) -> None:
     conn.commit()
 
 
+def _add_counterfeit_passages(conn: sqlite3.Connection) -> None:
+    conn.executescript(
+        """
+        CREATE TABLE document_passage_projections(raw_object_id TEXT PRIMARY KEY);
+        CREATE TABLE document_passages(opaque_future_shape TEXT);
+        """
+    )
+    conn.commit()
+
+
 def _resign(report: dict[str, object]) -> dict[str, object]:
     mutated = copy.deepcopy(report)
     mutated.pop("report_sha256", None)
@@ -215,7 +231,7 @@ def _audit_path(
     tenant: str = "alice",
     uploader: str | None = "bob",
     max_rows: int = 100_000,
-) -> dict[str, object]:
+) -> dict[str, Any]:
     os.chmod(path, 0o600)
     conn = open_offline_database(path)
     try:
@@ -235,8 +251,8 @@ def _exact_receipt(body: str, *, truncated: bool = False) -> dict[str, object]:
         "extraction_receipt_version": 1,
         "extraction_success": True,
         "extraction_error": "",
-        "text_extraction_success": True,
-        "text_sha256": hashlib.sha256(normalized.encode()).hexdigest(),
+        "text_extraction_success": bool(body.strip()),
+        "text_sha256": hashlib.sha256(normalized.encode()).hexdigest() if normalized else "",
         "extraction_chars": len(body),
         "text_truncated": truncated,
         "archive_truncated": False,
@@ -255,17 +271,54 @@ def _exact_receipt(body: str, *, truncated: bool = False) -> dict[str, object]:
     }
 
 
-def test_real_schema_41_backup_reports_current_and_explicit_incomplete_rows(
+def _publish_current_passages(storage: FridayStorage, raw: RawObject) -> int:
+    projection = DocumentPassageProjection.from_complete_text(
+        raw_object_id=raw.id,
+        source_version=raw.version,
+        source_content_sha256=raw.content_hash,
+        extracted_text=raw.raw_content,
+    )
+    rows = tuple(
+        (item.chunk_index, item.start_char, item.end_char, item.content_sha256)
+        for item in projection.passages
+    )
+    with storage.transaction() as conn:
+        conn.execute(
+            """UPDATE document_passage_projections
+                  SET extracted_text_sha256=?,source_char_count=?,passage_set_sha256=?,
+                      projection_status='current',incomplete_reason=NULL,
+                      passage_count=?,projected_at='2026-08-29T12:00:00Z'
+                WHERE raw_object_id=?""",
+            (
+                projection.extracted_text_sha256,
+                projection.source_char_count,
+                document_passage_set_sha256(rows),
+                len(rows),
+                raw.id,
+            ),
+        )
+        conn.executemany(
+            """INSERT INTO document_passages(
+                   raw_object_id,chunk_index,start_char,end_char,content_sha256
+               ) VALUES(?,?,?,?,?)""",
+            ((raw.id, *row) for row in rows),
+        )
+    return len(rows)
+
+
+def test_real_schema_47_backup_reports_current_and_closed_explicit_incomplete_rows(
     storage: FridayStorage,
 ) -> None:
     storage.ensure_user("alice")
     current_body = "# Exact audit title\nComplete extracted body"
     partial_body = "Partial extracted body"
+    stored: dict[str, RawObject] = {}
     for raw_id, body, truncated in (
         ("audit-catalog-current", current_body, False),
         ("audit-catalog-incomplete", partial_body, True),
+        ("audit-catalog-empty", "", False),
     ):
-        storage.store_raw_object(
+        stored[raw_id] = storage.store_raw_object(
             RawObject(
                 id=raw_id,
                 user_id="alice",
@@ -283,17 +336,207 @@ def test_real_schema_41_backup_reports_current_and_explicit_incomplete_rows(
                 content_hash=hashlib.sha256(f"source:{raw_id}".encode()).hexdigest(),
             )
         )
+    current_passages = _publish_current_passages(storage, stored["audit-catalog-current"])
 
     backup = storage.create_backup(label="catalog-audit-exact-schema")
     report = _audit_path(Path(str(backup["path"])), tenant="alice", uploader=None)
 
     assert report["projections"]["document_catalog"]["status"] == "available"
+    assert report["projections"]["document_passages"]["status"] == "available"
+    assert report["projections"]["document_passages"][
+        "revision_sha256"
+    ] == document_passage_schema_fingerprint(storage.conn)
     assert report["counts"]["registered_authorized_live_text_bearing_files"] == 2
+    assert report["counts"]["files_without_extracted_text"] == 1
     assert report["counts"]["catalogued_files"] == 2
     assert report["counts"]["files_with_semantic_title"] == 1
     assert report["counts"]["files_with_incomplete_catalog"] == 1
     assert report["incomplete_reasons"]["catalog_row_incomplete"] == 1
+    assert report["counts"]["files_with_passages"] == 1
+    assert report["counts"]["files_with_index_incomplete_reason"] == 2
+    assert report["passage_index"] == {
+        "eligible_authorized_files": 3,
+        "current": 1,
+        "explicit_incomplete": 2,
+        "missing": 0,
+        "stale": 0,
+        "child_rows": current_passages,
+        "incomplete_reasons": {
+            "backfill_pending": 0,
+            "extraction_failed": 0,
+            "extraction_incomplete": 1,
+            "no_text": 1,
+            "unsupported_content": 0,
+            "source_unavailable": 0,
+            "source_changed": 0,
+        },
+        "coverage_complete": True,
+        "index_complete": False,
+    }
     assert report["completeness"]["catalog_complete"] is False
+    assert report["completeness"]["passage_coverage_complete"] is True
+    assert report["completeness"]["passage_index_complete"] is False
+    validate_report(report)
+
+
+def test_exact_passage_audit_reports_missing_and_tampered_children_as_stale(
+    storage: FridayStorage,
+) -> None:
+    storage.ensure_user("alice")
+    raws: list[RawObject] = []
+    for raw_id, body in (
+        ("audit-passage-stale", f"{SECRET} " + ("bounded passage. " * 120)),
+        ("audit-passage-missing", f"{SECRET} exact second passage"),
+    ):
+        raw = storage.store_raw_object(
+            RawObject(
+                id=raw_id,
+                user_id="alice",
+                source="upload",
+                source_ref=f"audit:{raw_id}",
+                raw_content=body,
+                content_type="file",
+                metadata_json={
+                    **_exact_receipt(body),
+                    "filename": f"{raw_id}.pdf",
+                    "mime_type": "application/pdf",
+                    "media_kind": "document",
+                    "uploaded_by": "alice",
+                },
+                content_hash=hashlib.sha256(f"source:{raw_id}".encode()).hexdigest(),
+            )
+        )
+        _publish_current_passages(storage, raw)
+        raws.append(raw)
+
+    backup = Path(str(storage.create_backup(label="catalog-audit-passage-tamper")["path"]))
+    tamper = sqlite3.connect(backup)
+    tamper.execute(
+        "DELETE FROM document_passages WHERE raw_object_id=? AND chunk_index=0",
+        (raws[0].id,),
+    )
+    tamper.execute("DELETE FROM document_passages WHERE raw_object_id=?", (raws[1].id,))
+    tamper.execute("DELETE FROM document_passage_projections WHERE raw_object_id=?", (raws[1].id,))
+    tamper.commit()
+    tamper.close()
+
+    report = _audit_path(backup, tenant="alice", uploader=None)
+    assert report["projections"]["document_passages"]["status"] == "available"
+    assert report["passage_index"]["current"] == 0
+    assert report["passage_index"]["explicit_incomplete"] == 0
+    assert report["passage_index"]["missing"] == 1
+    assert report["passage_index"]["stale"] == 1
+    assert report["passage_index"]["child_rows"] == 0
+    assert report["incomplete_reasons"]["passage_row_missing"] == 1
+    assert report["incomplete_reasons"]["passage_row_stale"] == 1
+    assert report["passage_index"]["coverage_complete"] is False
+    assert report["passage_index"]["index_complete"] is False
+    assert SECRET not in json.dumps(report, ensure_ascii=False)
+    validate_report(report)
+
+
+def test_passage_audit_uses_exact_python_text_presence_for_nul_and_unicode_space(
+    storage: FridayStorage,
+) -> None:
+    storage.ensure_user("alice")
+    nul_body = "\x00Needle after NUL"
+    whitespace_body = "\u2003"
+    nul_raw = storage.store_raw_object(
+        RawObject(
+            id="audit-passage-nul",
+            user_id="alice",
+            source="upload",
+            source_ref="audit:passage-nul",
+            raw_content=nul_body,
+            content_type="file",
+            metadata_json={
+                **_exact_receipt(nul_body),
+                "filename": "nul.pdf",
+                "mime_type": "application/pdf",
+                "media_kind": "document",
+                "uploaded_by": "alice",
+            },
+            content_hash=hashlib.sha256(b"audit-passage-nul").hexdigest(),
+        )
+    )
+    storage.store_raw_object(
+        RawObject(
+            id="audit-passage-unicode-space",
+            user_id="alice",
+            source="upload",
+            source_ref="audit:passage-unicode-space",
+            raw_content=whitespace_body,
+            content_type="file",
+            metadata_json={
+                **_exact_receipt(whitespace_body),
+                "filename": "space.pdf",
+                "mime_type": "application/pdf",
+                "media_kind": "document",
+                "uploaded_by": "alice",
+            },
+            content_hash=hashlib.sha256(b"audit-passage-unicode-space").hexdigest(),
+        )
+    )
+    _publish_current_passages(storage, nul_raw)
+
+    backup = Path(str(storage.create_backup(label="catalog-audit-exact-text-presence")["path"]))
+    report = _audit_path(backup, tenant="alice", uploader=None)
+
+    assert report["counts"]["registered_authorized_live_text_bearing_files"] == 1
+    assert report["counts"]["files_without_extracted_text"] == 1
+    assert report["passage_index"]["current"] == 1
+    assert report["passage_index"]["explicit_incomplete"] == 1
+    assert report["passage_index"]["incomplete_reasons"]["no_text"] == 1
+    validate_report(report)
+
+
+def test_passage_audit_rejects_incomplete_parent_that_carries_evidence(
+    storage: FridayStorage,
+) -> None:
+    storage.ensure_user("alice")
+    body = "Incomplete extracted body"
+    raw = storage.store_raw_object(
+        RawObject(
+            id="audit-passage-incomplete-tamper",
+            user_id="alice",
+            source="upload",
+            source_ref="audit:passage-incomplete-tamper",
+            raw_content=body,
+            content_type="file",
+            metadata_json={
+                **_exact_receipt(body, truncated=True),
+                "filename": "incomplete.pdf",
+                "mime_type": "application/pdf",
+                "media_kind": "document",
+                "uploaded_by": "alice",
+            },
+            content_hash=hashlib.sha256(b"audit-passage-incomplete-tamper").hexdigest(),
+        )
+    )
+    backup = Path(str(storage.create_backup(label="catalog-audit-incomplete-tamper")["path"]))
+    tamper = sqlite3.connect(backup)
+    tamper.create_function(
+        "friday_document_passage_projection_valid",
+        14,
+        lambda *_args: 1,
+        deterministic=True,
+    )
+    tamper.execute("PRAGMA ignore_check_constraints=ON")
+    tamper.execute(
+        """UPDATE document_passage_projections
+              SET extracted_text_sha256=?,source_char_count=1,passage_count=64
+            WHERE raw_object_id=?""",
+        ("f" * 64, raw.id),
+    )
+    tamper.commit()
+    tamper.close()
+
+    report = _audit_path(backup, tenant="alice", uploader=None)
+
+    assert report["passage_index"]["current"] == 0
+    assert report["passage_index"]["explicit_incomplete"] == 0
+    assert report["passage_index"]["stale"] == 1
+    assert report["passage_index"]["coverage_complete"] is False
     validate_report(report)
 
 
@@ -331,12 +574,35 @@ def test_counts_authority_lifecycle_lexical_and_future_gaps_without_secrets(tmp_
     assert report["projections"]["lexical_source_index"]["status"] == "available"
     assert report["projections"]["document_catalog"]["status"] == "not_available"
     assert report["incomplete_reasons"]["catalog_projection_not_available"] == 2
+    assert report["incomplete_reasons"]["passage_projection_not_available"] == 3
     assert report["incomplete_reasons"]["pending_semantic_projection_not_available"] == 1
+    assert report["passage_index"] == {
+        "eligible_authorized_files": 3,
+        "current": 0,
+        "explicit_incomplete": 0,
+        "missing": 0,
+        "stale": 0,
+        "child_rows": 0,
+        "incomplete_reasons": {
+            reason: 0
+            for reason in (
+                "backfill_pending",
+                "extraction_failed",
+                "extraction_incomplete",
+                "no_text",
+                "unsupported_content",
+                "source_unavailable",
+                "source_changed",
+            )
+        },
+        "coverage_complete": False,
+        "index_complete": False,
+    }
     assert report["completeness"]["status"] == "incomplete"
     validate_report(report)
 
     serialized = json.dumps(report, ensure_ascii=False)
-    for forbidden in (SECRET, "eligible", "empty-ocr", str(tmp_path)):
+    for forbidden in (SECRET, '"eligible"', "empty-ocr", str(tmp_path)):
         assert forbidden not in serialized
 
 
@@ -415,6 +681,24 @@ def test_counterfeit_catalog_shape_is_unsupported_not_coverage(tmp_path: Path) -
     assert report["counts"]["catalogued_files"] == 0
     assert report["incomplete_reasons"]["catalog_projection_not_available"] == 2
     assert report["completeness"]["catalog_complete"] is False
+    validate_report(report)
+
+
+def test_counterfeit_passage_shape_is_unsupported_not_coverage(tmp_path: Path) -> None:
+    path = tmp_path / "synthetic.sqlite3"
+    conn = _make_database(path)
+    _seed_scope(conn)
+    _add_counterfeit_passages(conn)
+    conn.close()
+
+    report = _audit_path(path)
+    assert report["projections"]["document_passages"]["status"] == "unsupported"
+    assert len(report["projections"]["document_passages"]["revision_sha256"]) == 64
+    assert report["counts"]["files_with_passages"] == 0
+    assert report["counts"]["files_with_index_incomplete_reason"] == 3
+    assert report["incomplete_reasons"]["passage_projection_not_available"] == 3
+    assert report["passage_index"]["eligible_authorized_files"] == 3
+    assert report["passage_index"]["coverage_complete"] is False
     validate_report(report)
 
 
@@ -503,6 +787,10 @@ def test_scope_fingerprint_binds_private_source_revision_material(tmp_path: Path
         lambda r: r["counts"].__setitem__("files_with_incomplete_catalog", 1),
         lambda r: r["incomplete_reasons"].__setitem__("catalog_row_missing", 1),
         lambda r: r["incomplete_reasons"].__setitem__("passage_projection_not_available", 0),
+        lambda r: r["passage_index"].__setitem__("current", 1),
+        lambda r: r["passage_index"].__setitem__("explicit_incomplete", 1),
+        lambda r: r["passage_index"]["incomplete_reasons"].__setitem__("no_text", 1),
+        lambda r: r["passage_index"].__setitem__("coverage_complete", True),
         lambda r: r["completeness"].__setitem__("status", "complete"),
         lambda r: r["completeness"].__setitem__("uncapped", False),
         lambda r: r["excluded_by_policy"].__setitem__("private_authority", 0),

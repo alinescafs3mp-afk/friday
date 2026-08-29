@@ -391,7 +391,7 @@ def test_lexical_lanes_authorize_before_counts_and_return_exact_revision_passage
 
     assert (documents.total, documents.examined, documents.matched, documents.returned) == (2, 2, 2, 2)
     assert documents.derivative_current is False
-    assert CoverageState.BACKFILL_PENDING in _coverage(documents, request).states
+    assert CoverageState.UNAVAILABLE in _coverage(documents, request).states
     assert documents.has_more is False and documents.available is True
     states = {item.review_state: item for item in documents.candidates}
     assert set(states) == {ArchiveReviewState.CONFIRMED, ArchiveReviewState.PENDING}
@@ -540,9 +540,9 @@ def test_body_matched_filename_terms_break_a_capped_tie_without_bypassing_the_ca
     )
     coverage = _coverage(first, request)
     assert coverage.states == (
-        CoverageState.BACKFILL_PENDING,
         CoverageState.CAPPED,
         CoverageState.PARTIAL,
+        CoverageState.UNAVAILABLE,
     )
     assert coverage.next_cursor_available is False
     assert coverage.absence_decision().value == "evidence_found"
@@ -714,7 +714,7 @@ def test_unsafe_filename_cannot_win_a_lexical_format_tie(
         unsafe,
     )
     coverage = _coverage(page, request)
-    assert CoverageState.BACKFILL_PENDING in coverage.states
+    assert CoverageState.UNAVAILABLE in coverage.states
     assert CoverageState.PARTIAL in coverage.states
 
 
@@ -2069,10 +2069,7 @@ def test_missing_fts_uses_authorized_exact_fallback_and_never_loses_evidence(sto
     assert page.available is True
     assert (page.total, page.examined, page.matched, page.returned) == (1, 1, 1, 1)
     coverage = _coverage(page, request)
-    assert coverage.states == (
-        CoverageState.BACKFILL_PENDING,
-        CoverageState.PARTIAL,
-    )
+    assert coverage.states == (CoverageState.PARTIAL, CoverageState.UNAVAILABLE)
     assert page.derivative_current is False
     assert coverage.absence_decision().value == "evidence_found"
 
@@ -2105,7 +2102,7 @@ def test_diacritic_fold_matches_fts_and_keeps_coverage_honest(storage) -> None:
         assert "Café" in page.candidates[0].passages[0].excerpt
         assert _coverage(page, request).absence_decision().value == "evidence_found"
     assert documents.derivative_current is False
-    assert CoverageState.BACKFILL_PENDING in _coverage(documents, request).states
+    assert CoverageState.UNAVAILABLE in _coverage(documents, request).states
     assert knowledge.derivative_current is True
 
 

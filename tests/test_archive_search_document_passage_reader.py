@@ -51,6 +51,7 @@ def _seed(
     tenant: str = TENANT,
     uploader: str = OWNER,
     status: InboxStatus = InboxStatus.CLASSIFIED,
+    extraction_metadata: dict[str, object] | None = None,
 ) -> str:
     storage.ensure_user(tenant)
     storage.ensure_user(uploader)
@@ -63,14 +64,18 @@ def _seed(
             source_ref=f"passage-reader:{number}",
             raw_content=body,
             content_type="file",
-            metadata_json={
-                "filename": f"passage-{number}.pdf",
-                "media_kind": "document",
-                "mime_type": "application/pdf",
-                "uploaded_by": uploader,
-                "extraction_success": True,
-                "text_extraction_success": True,
-            },
+            metadata_json=(
+                {
+                    "filename": f"passage-{number}.pdf",
+                    "media_kind": "document",
+                    "mime_type": "application/pdf",
+                    "uploaded_by": uploader,
+                    "extraction_success": True,
+                    "text_extraction_success": True,
+                }
+                if extraction_metadata is None
+                else extraction_metadata
+            ),
             content_hash=hashlib.sha256(f"source-{number}".encode()).hexdigest(),
             received_at=f"2026-08-29T10:{number % 60:02d}:00+00:00",
             created_at=f"2026-08-29T10:{number % 60:02d}:00+00:00",
@@ -242,12 +247,14 @@ def test_current_projection_changes_only_coverage_not_legacy_candidate(storage) 
     raw_id = _seed(storage, 1, body="Exact Needle passage body")
     request = _request()
     before, before_coverage = _search(storage, request)
+    before_miss, before_miss_coverage = _search(storage, _request("Absent phrase"))
     before_candidate = before.candidates[0].to_private_json()
     before_passage = before.candidates[0].passages[0].passage_ref
 
     _project_current(storage, raw_id)
     changes = storage.conn.total_changes
     after, after_coverage = _search(storage, request)
+    after_miss, after_miss_coverage = _search(storage, _request("Absent phrase"))
 
     assert storage.conn.total_changes == changes
     assert after.candidates[0].to_private_json() == before_candidate
@@ -256,6 +263,10 @@ def test_current_projection_changes_only_coverage_not_legacy_candidate(storage) 
     assert before_coverage.states == (CoverageState.BACKFILL_PENDING, CoverageState.PARTIAL)
     assert after.derivative_current is True
     assert after_coverage.states == (CoverageState.COMPLETE,)
+    assert before_miss.matched == after_miss.matched == 0
+    assert before_miss_coverage.absence_decision().value == "not_established"
+    assert after_miss_coverage.states == (CoverageState.COMPLETE,)
+    assert after_miss_coverage.absence_decision().value == "authorized_absence_confirmed"
 
 
 def test_missing_projection_keeps_hits_but_never_confirms_a_miss(storage) -> None:
@@ -319,7 +330,11 @@ def test_stale_incomplete_or_short_projection_is_partial_fallback(
     assert page.matched == page.returned == 1
     assert page.candidates[0].passages[0].excerpt == "Needle exact fallback"
     assert page.derivative_current is False
-    assert coverage.states == (CoverageState.BACKFILL_PENDING, CoverageState.PARTIAL)
+    assert coverage.states == (
+        (CoverageState.PARTIAL, CoverageState.UNAVAILABLE)
+        if drift == "child_count"
+        else (CoverageState.BACKFILL_PENDING, CoverageState.PARTIAL)
+    )
 
 
 def test_foreign_and_ignored_projection_gaps_do_not_degrade_owner_coverage(
@@ -370,7 +385,7 @@ def test_tampered_child_set_keeps_legacy_hit_but_fails_readiness_closed(storage)
 
     assert page.matched == page.returned == 1
     assert page.derivative_current is False
-    assert coverage.states == (CoverageState.BACKFILL_PENDING, CoverageState.PARTIAL)
+    assert coverage.states == (CoverageState.PARTIAL, CoverageState.UNAVAILABLE)
 
 
 def test_current_reader_never_rechunks_source_per_child(storage, monkeypatch) -> None:
@@ -392,5 +407,126 @@ def test_current_reader_never_rechunks_source_per_child(storage, monkeypatch) ->
     page, coverage = _search(storage, _request())
 
     assert calls == 0
+    assert page.derivative_current is True
+    assert coverage.states == (CoverageState.COMPLETE,)
+
+
+def test_terminal_incomplete_source_is_unavailable_and_never_confirms_a_miss(storage) -> None:
+    current = _seed(storage, 10, body="Needle current evidence")
+    _seed(
+        storage,
+        11,
+        body="Different terminal evidence",
+        extraction_metadata={
+            "filename": "passage-11.pdf",
+            "media_kind": "document",
+            "mime_type": "application/pdf",
+            "uploaded_by": OWNER,
+            "extraction_success": False,
+            "text_extraction_success": False,
+            "extraction_error": "terminal",
+        },
+    )
+    _project_current(storage, current)
+
+    hit, hit_coverage = _search(storage, _request())
+    miss, miss_coverage = _search(storage, _request("Absent phrase"))
+
+    assert hit.matched == hit.returned == 1
+    assert hit.derivative_unavailable is True
+    assert hit_coverage.states == (CoverageState.PARTIAL, CoverageState.UNAVAILABLE)
+    assert miss.matched == miss.returned == 0
+    assert miss_coverage.states == (CoverageState.PARTIAL, CoverageState.UNAVAILABLE)
+    assert miss_coverage.absence_decision().value == "not_established"
+
+
+def test_source_change_is_pending_until_bounded_writer_republishes(storage) -> None:
+    raw_id = _seed(storage, 12, body="Needle original evidence")
+    initial = storage.backfill_document_catalog(
+        TENANT,
+        after_raw_object_id=None,
+        limit=1,
+        include_document_passages=True,
+    )
+    assert initial["passage_changed"] == 1
+    assert _search(storage, _request())[1].states == (CoverageState.COMPLETE,)
+
+    with storage.transaction() as conn:
+        conn.execute("DELETE FROM document_passages WHERE raw_object_id=?", (raw_id,))
+        conn.execute(
+            """UPDATE document_passage_projections
+                  SET extracted_text_sha256=NULL,source_char_count=NULL,
+                      passage_set_sha256=NULL,projection_status='incomplete',
+                      incomplete_reason='source_changed',passage_count=0
+                WHERE raw_object_id=?""",
+            (raw_id,),
+        )
+
+    pending, pending_coverage = _search(storage, _request())
+    assert pending.matched == pending.returned == 1
+    assert pending_coverage.states == (CoverageState.BACKFILL_PENDING, CoverageState.PARTIAL)
+    repaired = storage.backfill_document_catalog(
+        TENANT,
+        after_raw_object_id=None,
+        limit=1,
+        include_document_passages=True,
+    )
+    assert repaired["passage_processed"] == repaired["passage_changed"] == 1
+    current, current_coverage = _search(storage, _request())
+    assert current.matched == current.returned == 1
+    assert current.derivative_current is True
+    assert current_coverage.states == (CoverageState.COMPLETE,)
+
+
+def test_all_current_capped_lane_reports_only_capped_partial(storage) -> None:
+    for number in range(20, 41):
+        raw_id = _seed(storage, number, body=f"Needle capped evidence {number}")
+        _project_current(storage, raw_id)
+
+    page, coverage = _search(storage, _request())
+
+    assert page.total == page.examined == page.matched == 21
+    assert page.returned == 20 and page.has_more is True
+    assert page.derivative_current is True
+    assert coverage.states == (CoverageState.CAPPED, CoverageState.PARTIAL)
+    assert coverage.next_cursor_available is False
+
+
+def test_exact_64_span_tail_remains_current_and_searchable(storage) -> None:
+    body = ("bounded section. " * 5_200) + "NeedleTailToken"
+    raw_id = _seed(storage, 50, body=body)
+    _project_current(storage, raw_id)
+
+    parent = storage.execute(
+        "SELECT passage_count,source_char_count FROM document_passage_projections WHERE raw_object_id=?",
+        (raw_id,),
+    ).fetchone()
+    tail = storage.execute(
+        """SELECT chunk_index,end_char FROM document_passages
+            WHERE raw_object_id=? ORDER BY chunk_index DESC LIMIT 1""",
+        (raw_id,),
+    ).fetchone()
+    page, coverage = _search(storage, _request("NeedleTailToken"))
+
+    assert parent is not None and tuple(parent) == (64, len(body))
+    assert tail is not None and tuple(tail) == (63, len(body))
+    assert page.matched == page.returned == 1
+    assert page.derivative_current is True
+    assert coverage.states == (CoverageState.COMPLETE,)
+
+
+def test_embedded_nul_uses_exact_python_character_count_for_readiness(storage) -> None:
+    body = "Needle\x00Unicode café tail"
+    raw_id = _seed(storage, 51, body=body)
+    _project_current(storage, raw_id)
+
+    parent = storage.execute(
+        "SELECT source_char_count FROM document_passage_projections WHERE raw_object_id=?",
+        (raw_id,),
+    ).fetchone()
+    page, coverage = _search(storage, _request())
+
+    assert parent is not None and int(parent[0]) == len(body)
+    assert page.matched == page.returned == 1
     assert page.derivative_current is True
     assert coverage.states == (CoverageState.COMPLETE,)

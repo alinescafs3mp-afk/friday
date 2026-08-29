@@ -1,11 +1,12 @@
 #!/usr/bin/env python
 """Secret-free, read-only audit of document discoverability in an offline DB copy.
 
-The auditor recognizes only Friday's exact, body-free ``document_catalog``
-sidecar.  A missing or look-alike table remains ``not_available``/``unsupported``;
-it is never guessed into coverage.  Current, explicitly incomplete, missing and
-stale source-bound rows are counted separately, while later passage, embedding
-and typed-date projections continue to report honest gaps.
+The auditor recognizes Friday's exact, body-free ``document_catalog`` and
+schema-47 document-passage sidecars.  A missing or look-alike table remains
+``not_available``/``unsupported``; it is never guessed into coverage.  Current,
+explicitly incomplete, missing and stale source-bound rows are counted
+separately, while later embedding and typed-date projections continue to report
+honest gaps.
 
 Only an explicitly named, private, quiescent SQLite copy is accepted.  There is
 no settings-derived/default database path and no mutation/fix mode.  Output is
@@ -49,7 +50,7 @@ from friday.storage._privacy import (  # noqa: E402
     _not_private_raw_dependency,
 )
 
-REPORT_SCHEMA = "friday.document-catalog-audit.v2"
+REPORT_SCHEMA = "friday.document-catalog-audit.v3"
 DEFAULT_MAX_ROWS = 100_000
 HARD_MAX_ROWS = 1_000_000
 HEX64 = re.compile(r"^[0-9a-f]{64}$")
@@ -88,6 +89,9 @@ INCOMPLETE_KEYS = (
     "semantic_title_projection_not_available",
     "semantic_title_missing",
     "passage_projection_not_available",
+    "passage_row_missing",
+    "passage_row_stale",
+    "passage_row_incomplete",
     "embedding_projection_not_available",
     "typed_date_projection_not_available",
     "pending_semantic_projection_not_available",
@@ -108,7 +112,6 @@ PROJECTION_KEYS = (
 FUTURE_TABLES = {
     "document_catalog": ("document_catalog",),
     "semantic_title": ("document_catalog",),
-    "document_passages": ("document_passages",),
     "document_embeddings": ("document_embeddings",),
     "typed_dates": ("document_temporal_facts",),
     "pending_semantic_index": ("document_catalog", "document_embeddings"),
@@ -125,6 +128,11 @@ CATALOG_INCOMPLETE_REASONS = (
     "source_unavailable",
     "source_changed",
 )
+PASSAGE_INCOMPLETE_REASONS = CATALOG_INCOMPLETE_REASONS
+PASSAGE_PROJECTION_TABLES = (
+    "document_passage_projections",
+    "document_passages",
+)
 
 
 class ContractError(RuntimeError):
@@ -139,6 +147,12 @@ class _OfflineConnection(sqlite3.Connection):
 
 def _canonical_json(value: Any) -> bytes:
     return json.dumps(value, ensure_ascii=True, sort_keys=True, separators=(",", ":")).encode()
+
+
+def _exact_text_present(value: Any) -> int:
+    """Mirror the Python extraction contract without SQLite NUL truncation."""
+
+    return int(type(value) is str and bool(value.strip()))
 
 
 def _sha256(value: bytes) -> str:
@@ -306,6 +320,18 @@ def _document_catalog_schema_fingerprint(conn: sqlite3.Connection) -> str | None
     return str(digest) if HEX64.fullmatch(str(digest)) else None
 
 
+def _document_passage_schema_fingerprint(conn: sqlite3.Connection) -> str | None:
+    """Delegate exact recognition to the shipped schema-47 validator."""
+
+    try:
+        schema_module = importlib.import_module("friday.document_catalog.passage_schema")
+        schema_module.register_document_passage_connection_functions(conn)
+        digest = schema_module.document_passage_schema_fingerprint(conn)
+    except (AttributeError, ImportError, RuntimeError, TypeError, ValueError, sqlite3.Error):
+        return None
+    return str(digest) if HEX64.fullmatch(str(digest)) else None
+
+
 def _required_schema(conn: sqlite3.Connection) -> int:
     required = {
         "schema_meta",
@@ -419,6 +445,24 @@ def _projection_report(conn: sqlite3.Connection) -> dict[str, dict[str, Any]]:
                 else None
             ),
         }
+    passage_present = any(_table_sql(conn, table) is not None for table in PASSAGE_PROJECTION_TABLES)
+    passage_fingerprint = _document_passage_schema_fingerprint(conn) if passage_present else None
+    projections["document_passages"] = {
+        "status": (
+            "available"
+            if passage_fingerprint is not None
+            else "unsupported"
+            if passage_present
+            else "not_available"
+        ),
+        "revision_sha256": (
+            passage_fingerprint
+            if passage_fingerprint is not None
+            else _schema_hash(conn, PASSAGE_PROJECTION_TABLES)
+            if passage_present
+            else None
+        ),
+    }
     return {key: projections[key] for key in PROJECTION_KEYS}
 
 
@@ -439,6 +483,12 @@ def audit_document_catalog(
     exact_uploader = _identity(uploader, label="uploader id") if uploader is not None else None
     cap = _bounded_rows(max_rows)
     schema_version = _required_schema(conn)
+    conn.create_function(
+        "friday_audit_exact_text_present",
+        1,
+        _exact_text_present,
+        deterministic=True,
+    )
 
     tenant_row = conn.execute("SELECT status FROM users WHERE id=?", (tenant,)).fetchone()
     if tenant_row is None or str(tenant_row[0]) != "active":
@@ -566,6 +616,60 @@ def audit_document_catalog(
         """
     )
     catalog_join = "LEFT JOIN document_catalog c ON c.raw_object_id=r.id" if catalog_available else ""
+    passage_available = projections["document_passages"]["status"] == "available"
+    passage_projection = (
+        """
+               p.raw_object_id IS NOT NULL AS has_passage_projection,
+               p.source_content_sha256 AS passage_source_material,
+               p.extracted_text_sha256 AS passage_text_material,
+               p.source_char_count AS passage_char_count_material,
+               p.passage_set_sha256 AS passage_set_material,
+               p.passage_index_revision AS passage_revision_material,
+               p.projection_status AS passage_status_material,
+               p.incomplete_reason AS passage_reason_material,
+               p.passage_count AS passage_count_material,
+               p.projected_at AS passage_time_material,
+               (p.raw_object_id IS NOT NULL
+                AND friday_document_passage_projection_valid(
+                    r.id,r.version,r.content_hash,r.raw_content,r.metadata_json,
+                    p.source_version,p.source_content_sha256,
+                    p.extracted_text_sha256,p.source_char_count,
+                    p.passage_set_sha256,p.passage_index_revision,
+                    p.projection_status,p.incomplete_reason,p.passage_count)=1
+                AND typeof(p.projected_at)='text'
+                AND length(p.projected_at)=20
+                AND strftime('%Y-%m-%dT%H:%M:%SZ',p.projected_at)=p.projected_at)
+                   AS passage_parent_valid,
+               (SELECT COUNT(*) FROM document_passages child
+                 WHERE child.raw_object_id=p.raw_object_id) AS passage_child_count,
+               COALESCE((
+                   SELECT friday_document_passage_set_sha256(
+                              child.chunk_index,child.start_char,
+                              child.end_char,child.content_sha256)
+                     FROM document_passages child
+                    WHERE child.raw_object_id=p.raw_object_id
+               ),'') AS passage_child_set_material
+        """
+        if passage_available
+        else """
+               0 AS has_passage_projection,
+               NULL AS passage_source_material,
+               NULL AS passage_text_material,
+               NULL AS passage_char_count_material,
+               NULL AS passage_set_material,
+               NULL AS passage_revision_material,
+               NULL AS passage_status_material,
+               NULL AS passage_reason_material,
+               NULL AS passage_count_material,
+               NULL AS passage_time_material,
+               0 AS passage_parent_valid,
+               0 AS passage_child_count,
+               NULL AS passage_child_set_material
+        """
+    )
+    passage_join = (
+        "LEFT JOIN document_passage_projections p ON p.raw_object_id=r.id" if passage_available else ""
+    )
     uploader_expression = _exact_uploader_raw_dependency("r") if exact_uploader else "1"
     query = f"""WITH current_inbox AS MATERIALIZED (
         SELECT inbox_id,raw_object_id,status FROM (
@@ -589,13 +693,15 @@ def audit_document_catalog(
                ({_not_private_raw_dependency("r")}) AS is_public,
                ({_not_audio_document("r")}) AS is_document,
                ({uploader_expression}) AS uploader_allowed,
-               (typeof(r.raw_content)='text' AND length(trim(r.raw_content))>0) AS has_text,
+               friday_audit_exact_text_present(r.raw_content)=1 AS has_text,
                (ci.status='pending') AS is_pending,
                ({lexical_expression}) AS has_lexical_row,
-               {catalog_projection}
+               {catalog_projection},
+               {passage_projection}
           FROM raw_objects r
           LEFT JOIN current_inbox ci ON ci.raw_object_id=r.id
           {catalog_join}
+          {passage_join}
          WHERE r.user_id=? AND r.content_type='file'
          ORDER BY r.rowid
     """  # nosec B608 - every interpolated fragment is a code-owned SQL predicate
@@ -611,6 +717,13 @@ def audit_document_catalog(
     catalog_stale = 0
     catalog_incomplete = 0
     semantic_titles = 0
+    passage_current = 0
+    passage_explicit_incomplete = 0
+    passage_missing = 0
+    passage_stale = 0
+    passage_child_rows = 0
+    passage_text_current = 0
+    passage_incomplete_reasons: Counter[str] = Counter()
     fingerprint = hashlib.sha256()
     # A hard VM-step fuse complements the row cap for malformed/adversarial copies.
     conn.set_progress_handler(lambda: 1, max(250_000, (row_count + 1) * 25_000))
@@ -663,6 +776,45 @@ def audit_document_catalog(
                 else:
                     catalog_state = "stale"
                     catalog_stale += 1
+            row_passage_eligible = state in {"registered", "extracted_text_unavailable"}
+            passage_state = "excluded"
+            if row_passage_eligible:
+                if not passage_available:
+                    passage_state = "not_available"
+                elif not bool(row["has_passage_projection"]):
+                    passage_state = "missing"
+                    passage_missing += 1
+                elif not bool(row["passage_parent_valid"]):
+                    passage_state = "stale"
+                    passage_stale += 1
+                elif str(row["passage_status_material"] or "") == "current":
+                    child_count = int(row["passage_child_count"] or 0)
+                    if child_count == int(row["passage_count_material"] or 0) and str(
+                        row["passage_child_set_material"] or ""
+                    ) == str(row["passage_set_material"] or ""):
+                        passage_state = "current"
+                        passage_current += 1
+                        passage_child_rows += child_count
+                        passage_text_current += int(state == "registered")
+                    else:
+                        passage_state = "stale"
+                        passage_stale += 1
+                elif (
+                    str(row["passage_status_material"] or "") == "incomplete"
+                    and row["passage_text_material"] is None
+                    and row["passage_char_count_material"] is None
+                    and row["passage_set_material"] is None
+                    and type(row["passage_count_material"]) is int
+                    and int(row["passage_count_material"]) == 0
+                    and int(row["passage_child_count"] or 0) == 0
+                    and str(row["passage_reason_material"] or "") in PASSAGE_INCOMPLETE_REASONS
+                ):
+                    passage_state = "incomplete"
+                    passage_explicit_incomplete += 1
+                    passage_incomplete_reasons[str(row["passage_reason_material"])] += 1
+                else:
+                    passage_state = "stale"
+                    passage_stale += 1
             # IDs never leave the hash state. Include the classification so policy
             # or lifecycle mutations change the snapshot fingerprint.
             fingerprint.update(
@@ -682,6 +834,18 @@ def audit_document_catalog(
                         str(row["catalog_reason_material"] or ""),
                         str(row["catalog_time_material"] or ""),
                         str(row["catalog_title_material"] or ""),
+                        passage_state,
+                        str(row["passage_source_material"] or "") if row_passage_eligible else "",
+                        str(row["passage_text_material"] or "") if row_passage_eligible else "",
+                        str(row["passage_char_count_material"] or "") if row_passage_eligible else "",
+                        str(row["passage_set_material"] or "") if row_passage_eligible else "",
+                        str(row["passage_revision_material"] or "") if row_passage_eligible else "",
+                        str(row["passage_status_material"] or "") if row_passage_eligible else "",
+                        str(row["passage_reason_material"] or "") if row_passage_eligible else "",
+                        str(row["passage_count_material"] or "") if row_passage_eligible else "",
+                        str(row["passage_time_material"] or "") if row_passage_eligible else "",
+                        str(row["passage_child_count"] or "") if row_passage_eligible else "",
+                        str(row["passage_child_set_material"] or "") if row_passage_eligible else "",
                     ]
                 )
             )
@@ -694,10 +858,20 @@ def audit_document_catalog(
     finally:
         conn.set_progress_handler(None, 0)
 
+    passage_eligible = registered + without_text
+    passage_coverage_complete = bool(
+        passage_available
+        and passage_current + passage_explicit_incomplete == passage_eligible
+        and passage_missing == 0
+        and passage_stale == 0
+    )
+    passage_index_complete = bool(
+        passage_coverage_complete and passage_text_current == registered and passage_current == registered
+    )
     future_missing = {
         "catalog_projection_not_available": 0 if catalog_available else registered,
         "semantic_title_projection_not_available": 0 if catalog_available else registered,
-        "passage_projection_not_available": registered,
+        "passage_projection_not_available": 0 if passage_available else passage_eligible,
         "embedding_projection_not_available": registered,
         "typed_date_projection_not_available": registered,
         "pending_semantic_projection_not_available": pending,
@@ -711,6 +885,9 @@ def audit_document_catalog(
         "lexical_projection_not_available": 0 if lexical_available else registered,
         "lexical_row_missing": registered - lexical if lexical_available else 0,
         "semantic_title_missing": registered - semantic_titles if catalog_available else 0,
+        "passage_row_missing": passage_missing,
+        "passage_row_stale": passage_stale,
+        "passage_row_incomplete": passage_explicit_incomplete,
         "extracted_text_unavailable": without_text,
     }
     incomplete = {key: int(incomplete[key]) for key in INCOMPLETE_KEYS}
@@ -722,13 +899,13 @@ def audit_document_catalog(
         "catalogued_files": catalogued,
         "lexically_searchable_files": lexical,
         "files_with_semantic_title": semantic_titles,
-        "files_with_passages": 0,
+        "files_with_passages": passage_current,
         "files_with_current_embeddings": 0,
         "files_with_typed_dates": 0,
         "pending_files_with_semantic_index": 0,
         "files_with_stale_enrichment_revision": catalog_stale,
         "files_with_incomplete_catalog": catalog_incomplete,
-        "files_with_index_incomplete_reason": registered + without_text,
+        "files_with_index_incomplete_reason": passage_eligible - passage_current,
         "files_excluded_by_policy": policy_total,
         "files_without_extracted_text": without_text,
     }
@@ -756,6 +933,8 @@ def audit_document_catalog(
                     "raw_fts",
                     "raw_fts_docsize",
                     "document_catalog",
+                    "document_passage_projections",
+                    "document_passages",
                     "private_entity_material_cache_state",
                     "private_entity_material_derivative_state",
                     "private_entity_material_derivative_cache",
@@ -765,6 +944,20 @@ def audit_document_catalog(
         "projections": projections,
         "counts": {key: int(counts[key]) for key in COUNT_KEYS},
         "incomplete_reasons": incomplete,
+        "passage_index": {
+            "eligible_authorized_files": passage_eligible,
+            "current": passage_current,
+            "explicit_incomplete": passage_explicit_incomplete,
+            "missing": passage_missing,
+            "stale": passage_stale,
+            "child_rows": passage_child_rows,
+            "incomplete_reasons": {
+                reason: int(passage_incomplete_reasons.get(reason, 0))
+                for reason in PASSAGE_INCOMPLETE_REASONS
+            },
+            "coverage_complete": passage_coverage_complete,
+            "index_complete": passage_index_complete,
+        },
         "excluded_by_policy": {key: int(excluded.get(key, 0)) for key in EXCLUSION_KEYS},
         "completeness": {
             "status": "incomplete",
@@ -775,6 +968,8 @@ def audit_document_catalog(
             ),
             "lexical_complete": bool(lexical_available and lexical == registered),
             "semantic_complete": bool(catalog_available and semantic_titles == registered),
+            "passage_coverage_complete": passage_coverage_complete,
+            "passage_index_complete": passage_index_complete,
             "typed_dates_complete": False,
         },
         "scope_fingerprint_sha256": fingerprint.hexdigest(),
@@ -798,7 +993,7 @@ def _counts(value: Any, expected: tuple[str, ...], *, label: str) -> dict[str, i
 
 
 def validate_report(report: dict[str, Any]) -> None:
-    """Validate exact v2 shape and reject internally coherent-looking lies."""
+    """Validate exact v3 shape and reject internally coherent-looking lies."""
 
     top = _exact_keys(
         report,
@@ -811,6 +1006,7 @@ def validate_report(report: dict[str, Any]) -> None:
             "projections",
             "counts",
             "incomplete_reasons",
+            "passage_index",
             "excluded_by_policy",
             "completeness",
             "scope_fingerprint_sha256",
@@ -862,9 +1058,9 @@ def validate_report(report: dict[str, Any]) -> None:
         and projections["enrichment_revision"]["status"] == "available"
     ):
         raise ContractError("catalog projection availability is inconsistent")
-    # Later projection shapes remain intentionally unsupported by this release.
+    passage_available = projections["document_passages"]["status"] == "available"
+    # Remaining later projection shapes remain intentionally unsupported.
     metric_for_projection = {
-        "document_passages": "files_with_passages",
         "document_embeddings": "files_with_current_embeddings",
         "typed_dates": "files_with_typed_dates",
         "pending_semantic_index": "pending_files_with_semantic_index",
@@ -875,12 +1071,14 @@ def validate_report(report: dict[str, Any]) -> None:
     excluded = _counts(top["excluded_by_policy"], EXCLUSION_KEYS, label="policy exclusion")
     registered = counts["registered_authorized_live_text_bearing_files"]
     pending = counts["pending_registered_files"]
+    passage_eligible = registered + counts["files_without_extracted_text"]
     bounded_metrics = (
         "catalogued_files",
         "lexically_searchable_files",
         "files_with_semantic_title",
         "files_with_stale_enrichment_revision",
         "files_with_incomplete_catalog",
+        "files_with_passages",
     )
     if pending > registered or any(counts[key] > registered for key in bounded_metrics):
         raise ContractError("coverage exceeds the registered scope")
@@ -892,7 +1090,7 @@ def validate_report(report: dict[str, Any]) -> None:
         raise ContractError("scoped row partition is inconsistent")
     for projection_name, metric in metric_for_projection.items():
         if projections[projection_name]["status"] == "available":
-            raise ContractError("v2 cannot claim an unimplemented later projection")
+            raise ContractError("v3 cannot claim an unimplemented later projection")
         if counts[metric] != 0:
             raise ContractError("unavailable projection has nonzero coverage")
     if not catalog_available and (
@@ -917,7 +1115,10 @@ def validate_report(report: dict[str, Any]) -> None:
         "semantic_title_missing": (
             registered - counts["files_with_semantic_title"] if catalog_available else 0
         ),
-        "passage_projection_not_available": registered,
+        "passage_projection_not_available": 0 if passage_available else passage_eligible,
+        "passage_row_missing": reasons["passage_row_missing"] if passage_available else 0,
+        "passage_row_stale": reasons["passage_row_stale"] if passage_available else 0,
+        "passage_row_incomplete": reasons["passage_row_incomplete"] if passage_available else 0,
         "embedding_projection_not_available": registered,
         "typed_date_projection_not_available": registered,
         "pending_semantic_projection_not_available": pending,
@@ -936,8 +1137,89 @@ def validate_report(report: dict[str, Any]) -> None:
         raise ContractError("incomplete catalog rows exceed catalog coverage")
     if reasons != {key: expected_reasons[key] for key in INCOMPLETE_KEYS}:
         raise ContractError("incomplete reason accounting is inconsistent")
-    if counts["files_with_index_incomplete_reason"] != (registered + counts["files_without_extracted_text"]):
-        raise ContractError("projection and extraction gaps must have explicit incomplete reasons")
+    passage = _exact_keys(
+        top["passage_index"],
+        (
+            "eligible_authorized_files",
+            "current",
+            "explicit_incomplete",
+            "missing",
+            "stale",
+            "child_rows",
+            "incomplete_reasons",
+            "coverage_complete",
+            "index_complete",
+        ),
+        label="passage index",
+    )
+    passage_counts = _counts(
+        {
+            key: passage[key]
+            for key in (
+                "eligible_authorized_files",
+                "current",
+                "explicit_incomplete",
+                "missing",
+                "stale",
+                "child_rows",
+            )
+        },
+        (
+            "eligible_authorized_files",
+            "current",
+            "explicit_incomplete",
+            "missing",
+            "stale",
+            "child_rows",
+        ),
+        label="passage index",
+    )
+    passage_reason_counts = _counts(
+        passage["incomplete_reasons"],
+        PASSAGE_INCOMPLETE_REASONS,
+        label="passage incomplete reason",
+    )
+    if type(passage["coverage_complete"]) is not bool or type(passage["index_complete"]) is not bool:
+        raise ContractError("invalid passage completeness flags")
+    if passage_counts["eligible_authorized_files"] != passage_eligible:
+        raise ContractError("passage scope is inconsistent")
+    passage_state_total = sum(
+        passage_counts[key] for key in ("current", "explicit_incomplete", "missing", "stale")
+    )
+    if passage_available:
+        if passage_state_total != passage_eligible:
+            raise ContractError("passage state partition is inconsistent")
+        if not (passage_counts["current"] <= passage_counts["child_rows"] <= passage_counts["current"] * 64):
+            raise ContractError("passage child count is inconsistent")
+    elif passage_state_total != 0 or passage_counts["child_rows"] != 0:
+        raise ContractError("unavailable passage projection has nonzero coverage")
+    if sum(passage_reason_counts.values()) != passage_counts["explicit_incomplete"]:
+        raise ContractError("passage incomplete reasons do not form a closed partition")
+    if counts["files_with_passages"] != passage_counts["current"]:
+        raise ContractError("passage coverage count is inconsistent")
+    if counts["files_with_index_incomplete_reason"] != (
+        passage_counts["eligible_authorized_files"] - passage_counts["current"]
+    ):
+        raise ContractError("passage incomplete count is inconsistent")
+    if reasons["passage_row_missing"] != passage_counts["missing"]:
+        raise ContractError("passage missing count is inconsistent")
+    if reasons["passage_row_stale"] != passage_counts["stale"]:
+        raise ContractError("passage stale count is inconsistent")
+    if reasons["passage_row_incomplete"] != passage_counts["explicit_incomplete"]:
+        raise ContractError("passage incomplete reason count is inconsistent")
+    expected_passage_coverage_complete = bool(
+        passage_available
+        and passage_counts["current"] + passage_counts["explicit_incomplete"] == passage_eligible
+        and passage_counts["missing"] == 0
+        and passage_counts["stale"] == 0
+    )
+    expected_passage_index_complete = bool(
+        expected_passage_coverage_complete and passage_counts["current"] == registered
+    )
+    if passage["coverage_complete"] != expected_passage_coverage_complete:
+        raise ContractError("false passage coverage completeness claim")
+    if passage["index_complete"] != expected_passage_index_complete:
+        raise ContractError("false passage index completeness claim")
 
     completeness = _exact_keys(
         top["completeness"],
@@ -948,6 +1230,8 @@ def validate_report(report: dict[str, Any]) -> None:
             "catalog_complete",
             "lexical_complete",
             "semantic_complete",
+            "passage_coverage_complete",
+            "passage_index_complete",
             "typed_dates_complete",
         ),
         label="completeness",
@@ -969,6 +1253,8 @@ def validate_report(report: dict[str, Any]) -> None:
         "catalog_complete": expected_catalog_complete,
         "lexical_complete": expected_lexical_complete,
         "semantic_complete": expected_semantic_complete,
+        "passage_coverage_complete": expected_passage_coverage_complete,
+        "passage_index_complete": expected_passage_index_complete,
         "typed_dates_complete": False,
     }:
         raise ContractError("false or inconsistent completeness claim")

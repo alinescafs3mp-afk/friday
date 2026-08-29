@@ -39,6 +39,26 @@ DOCUMENT_CATALOG_MAX_WORK_ITEMS = 256
 DOCUMENT_CATALOG_RAW_TEXT_WORK_BUDGET_BYTES = 8 * 1024 * 1024
 
 
+def _document_passage_retryable_sql() -> str:
+    # ``passage_projection`` imports the public retrieval package, which imports
+    # the assembled storage surface.  Resolve the writer only after storage has
+    # finished importing so the storage-independent projection stays cycle-free.
+    from friday.document_catalog.passage_writer import document_passage_retryable_sql
+
+    return document_passage_retryable_sql("source", "passage")
+
+
+def _publish_document_passages_in_transaction(
+    conn: sqlite3.Connection,
+    raw: sqlite3.Row,
+    *,
+    projected_at: str,
+) -> int:
+    from friday.document_catalog.passage_writer import publish_document_passages_in_transaction
+
+    return publish_document_passages_in_transaction(conn, raw, projected_at=projected_at)
+
+
 def _canonical_timestamp(value: str | None) -> str:
     text = utc_now() if value is None else str(value).strip()
     if _RFC3339.fullmatch(text) is None:
@@ -517,21 +537,28 @@ class DocumentCatalogMixin(StorageShared):
         *,
         after_raw_object_id: str | None,
         limit: int = DOCUMENT_CATALOG_DEFAULT_WORK_ITEMS,
+        include_document_passages: bool = False,
     ) -> dict[str, Any]:
         """Converge retryable rows in one bounded, caller-checkpointed Raw page."""
 
         owner = validate_user_id(user_id)
         bounded = _bounded_limit(limit)
+        if type(include_document_passages) is not bool:
+            raise ValueError("include_document_passages must be an exact boolean")
         cursor = _bounded_cursor(after_raw_object_id)
         cursor_predicate = "" if cursor is None else "AND source.id>?"
         cursor_params: tuple[object, ...] = () if cursor is None else (cursor,)
         now = _canonical_timestamp(None)
         source_binding = document_catalog_source_binding_sql()
+        passage_retryable_predicate = _document_passage_retryable_sql()
         reason_counts: Counter[str] = Counter()
         changed = 0
+        passage_changed = 0
+        passage_processed = 0
         current = 0
         consumed_bytes = 0
-        processed_ids: list[str] = []
+        catalog_processed_ids: list[str] = []
+        work_ids: list[str] = []
         examined_ids: list[str] = []
         stopped_for_budget = False
         with self.transaction() as conn:
@@ -544,10 +571,15 @@ class DocumentCatalogMixin(StorageShared):
                                       AND catalog.incomplete_reason IN (
                                           'backfill_pending','source_changed'
                                       ))
-                                THEN 1 ELSE 0 END AS retryable
+                                THEN 1 ELSE 0 END AS catalog_retryable,
+                           CASE WHEN {int(include_document_passages)}=1
+                                      AND {passage_retryable_predicate}
+                                THEN 1 ELSE 0 END AS passage_retryable
                       FROM raw_objects AS source
                            INDEXED BY idx_document_catalog_source_owner_id
                       LEFT JOIN document_catalog catalog ON catalog.raw_object_id=source.id
+                      LEFT JOIN document_passage_projections passage
+                             ON passage.raw_object_id=source.id
                      WHERE source.user_id=? AND source.content_type='file'
                        AND source.deleted_at IS NULL {cursor_predicate}
                      ORDER BY source.id LIMIT ?""",  # nosec B608 - canonical fixed predicate
@@ -555,7 +587,9 @@ class DocumentCatalogMixin(StorageShared):
             )
             for descriptor in descriptors[:bounded]:
                 raw_id = _exact_raw_object_id(descriptor["id"])
-                if not bool(descriptor["retryable"]):
+                catalog_retryable = bool(descriptor["catalog_retryable"])
+                passage_is_retryable = bool(descriptor["passage_retryable"])
+                if not catalog_retryable and not passage_is_retryable:
                     examined_ids.append(raw_id)
                     continue
                 raw_text_bytes = _raw_projection_size(conn, owner=owner, raw_object_id=raw_id)
@@ -563,7 +597,7 @@ class DocumentCatalogMixin(StorageShared):
                     examined_ids.append(raw_id)
                     continue
                 if not _fits_raw_text_budget(
-                    processed=len(processed_ids),
+                    processed=len(work_ids),
                     consumed=consumed_bytes,
                     next_size=raw_text_bytes,
                 ):
@@ -576,30 +610,41 @@ class DocumentCatalogMixin(StorageShared):
                 raw_status, raw_reason, extracted_text = _deterministic_projection(raw)
                 status = DocumentCatalogStatus(raw_status)
                 reason = DocumentCatalogIncompleteReason(raw_reason) if raw_reason is not None else None
-                changed += _write_projection(
-                    conn,
-                    raw,
-                    status=status,
-                    reason=reason,
-                    extracted_text=extracted_text,
-                    enriched_at=now,
-                )
-                if status is DocumentCatalogStatus.CURRENT:
-                    current += 1
-                else:
-                    assert reason is not None
-                    reason_counts[reason.value] += 1
-                processed_ids.append(raw_id)
+                if catalog_retryable:
+                    changed += _write_projection(
+                        conn,
+                        raw,
+                        status=status,
+                        reason=reason,
+                        extracted_text=extracted_text,
+                        enriched_at=now,
+                    )
+                    if status is DocumentCatalogStatus.CURRENT:
+                        current += 1
+                    else:
+                        assert reason is not None
+                        reason_counts[reason.value] += 1
+                    catalog_processed_ids.append(raw_id)
+                if passage_is_retryable:
+                    passage_changed += _publish_document_passages_in_transaction(
+                        conn,
+                        raw,
+                        projected_at=now,
+                    )
+                    passage_processed += 1
+                work_ids.append(raw_id)
                 examined_ids.append(raw_id)
                 consumed_bytes += raw_text_bytes
                 del extracted_text, raw
             has_more = len(descriptors) > len(examined_ids)
         return {
             "examined": len(examined_ids),
-            "processed": len(processed_ids),
+            "processed": len(catalog_processed_ids),
             "changed": changed,
+            "passage_processed": passage_processed,
+            "passage_changed": passage_changed,
             "current": current,
-            "explicit_incomplete": len(processed_ids) - current,
+            "explicit_incomplete": len(catalog_processed_ids) - current,
             "incomplete_reasons": {
                 reason: int(reason_counts.get(reason, 0)) for reason in DOCUMENT_CATALOG_INCOMPLETE_REASONS
             },
