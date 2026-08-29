@@ -22,9 +22,12 @@ from contextlib import contextmanager
 from contextvars import ContextVar
 from datetime import UTC, datetime
 from pathlib import PurePath
-from typing import Any
+from typing import TYPE_CHECKING, Any, cast
 
 from friday.id_provenance import is_marked_generated_id
+
+if TYPE_CHECKING:
+    from friday.orchestration.turn_context import AuthenticatedTurnContext
 
 _MAX_FIELDS = 96
 _MAX_LIST_ITEMS = 64
@@ -44,6 +47,14 @@ _SERVER_REQUEST_ID_RE = re.compile(r"^[0-9a-f]{24}$")
 _CLIENT_REQUEST_ID_RE = re.compile(r"^[A-Za-z0-9._-]{1,64}$")
 _GENERATED_ID_RE = re.compile(r"^(?P<prefix>[a-z][a-z0-9_]{0,31})_[0-9a-f]{16}$")
 _HMAC_KEY_RE = re.compile(r"^[0-9a-f]{64}$")
+_AUTHENTICATED_TURN_ID_RE = re.compile(r"^turn_[0-9a-f]{64}$")
+_AUTHENTICATED_TURN_AUDIT_KEYS = (
+    "turn_id",
+    "context_authority_sha256",
+    "request_effect_binding_sha256",
+)
+_AUTHENTICATED_TURN_AUDIT_KEY_SET = frozenset(_AUTHENTICATED_TURN_AUDIT_KEYS)
+_AUTHENTICATED_TURN_AUDIT_SEAL = object()
 
 
 class _ServerAuditRequestId(str):
@@ -56,6 +67,22 @@ class _ValidatedClientAuditRequestId(str):
 
 class _ObservedAuditIp(str):
     """In-process marker for an IP observed as the request's ASGI peer."""
+
+
+class _AuthenticatedTurnAuditPayload(dict[str, Any]):
+    """Ephemeral process-owned carrier for one exact body-free turn join."""
+
+    __slots__ = ("_projection", "_seal")
+
+    def __init__(
+        self,
+        payload: Mapping[str, Any],
+        *,
+        projection: tuple[str, str, str],
+    ) -> None:
+        super().__init__(payload)
+        self._projection = projection
+        self._seal = _AUTHENTICATED_TURN_AUDIT_SEAL
 
 
 _AUDIT_REQUEST_ID: ContextVar[str] = ContextVar("friday_audit_request_id", default="")
@@ -907,6 +934,41 @@ def decode_audit_privacy_key(value: object) -> bytes:
     return bytes.fromhex(text)
 
 
+def attach_authenticated_turn_audit_projection(
+    payload: Mapping[str, Any],
+    *,
+    context: AuthenticatedTurnContext,
+) -> dict[str, Any]:
+    """Attach the exact live turn join using an unforgeable process marker.
+
+    The three values are opaque, body-free identities, so unlike content
+    fingerprints they must remain exact in the durable row.  Equal-looking
+    caller strings are not evidence: only the live primary turn may mint this
+    carrier, and the storage sanitizer revalidates that authority before
+    preserving it.
+    """
+
+    from friday.orchestration.turn_context_runtime import (
+        current_primary_authenticated_turn_context,
+    )
+
+    admitted = current_primary_authenticated_turn_context(context)
+    if admitted is None:  # The explicit expected context makes this unreachable.
+        raise ValueError("authenticated turn audit authority is unavailable")
+    projection = (
+        admitted.turn_id,
+        admitted.context_authority_sha256,
+        admitted.effect_fence.request_effect_binding_sha256,
+    )
+    projected_payload = dict(payload)
+    # Code-owned values win over any model/caller-controlled detail keys.  A
+    # copied plain mapping loses the private marker and is rejected at storage.
+    for key in _AUTHENTICATED_TURN_AUDIT_KEYS:
+        projected_payload.pop(key, None)
+    projected_payload.update(zip(_AUTHENTICATED_TURN_AUDIT_KEYS, projection, strict=True))
+    return _AuthenticatedTurnAuditPayload(projected_payload, projection=projection)
+
+
 def _is_generated_id(
     value: object,
     prefixes: frozenset[str],
@@ -1229,6 +1291,72 @@ def _safe_sequence(
     return None, count
 
 
+def _validated_authenticated_turn_audit_projection(
+    payload: Mapping[Any, Any],
+    *,
+    depth: int,
+) -> dict[str, str] | None:
+    present = _AUTHENTICATED_TURN_AUDIT_KEY_SET.intersection(payload.keys())
+    is_marked = type(payload) is _AuthenticatedTurnAuditPayload
+    if not present:
+        if is_marked:
+            raise ValueError("authenticated turn audit projection is malformed")
+        return None
+    if depth != 0 or not is_marked:
+        raise ValueError("authenticated turn audit projection is reserved")
+    if present != _AUTHENTICATED_TURN_AUDIT_KEY_SET:
+        raise ValueError("authenticated turn audit projection is incomplete")
+    marked_payload = cast("_AuthenticatedTurnAuditPayload", payload)
+    if marked_payload._seal is not _AUTHENTICATED_TURN_AUDIT_SEAL:  # noqa: SLF001
+        raise ValueError("authenticated turn audit projection is untrusted")
+
+    projection = marked_payload._projection  # noqa: SLF001
+    if (
+        type(projection) is not tuple
+        or len(projection) != len(_AUTHENTICATED_TURN_AUDIT_KEYS)
+        or any(type(value) is not str for value in projection)
+    ):
+        raise ValueError("authenticated turn audit projection is malformed")
+    turn_id, context_authority_sha256, request_effect_binding_sha256 = projection
+    if (
+        _AUTHENTICATED_TURN_ID_RE.fullmatch(turn_id) is None
+        or _SHA256_RE.fullmatch(context_authority_sha256) is None
+        or _SHA256_RE.fullmatch(request_effect_binding_sha256) is None
+    ):
+        raise ValueError("authenticated turn audit projection is malformed")
+    actual = tuple(payload.get(key) for key in _AUTHENTICATED_TURN_AUDIT_KEYS)
+    if any(type(value) is not str for value in actual):
+        raise ValueError("authenticated turn audit projection is malformed")
+    actual_turn_id, actual_context_sha256, actual_effect_sha256 = cast(
+        "tuple[str, str, str]",
+        actual,
+    )
+    if (
+        _AUTHENTICATED_TURN_ID_RE.fullmatch(actual_turn_id) is None
+        or _SHA256_RE.fullmatch(actual_context_sha256) is None
+        or _SHA256_RE.fullmatch(actual_effect_sha256) is None
+    ):
+        raise ValueError("authenticated turn audit projection is malformed")
+    if actual != projection:
+        raise ValueError("authenticated turn audit projection changed after minting")
+
+    from friday.orchestration.turn_context_runtime import (
+        current_primary_authenticated_turn_context,
+    )
+
+    current = current_primary_authenticated_turn_context()
+    if current is None:
+        raise ValueError("authenticated turn audit authority is unavailable")
+    expected = (
+        current.turn_id,
+        current.context_authority_sha256,
+        current.effect_fence.request_effect_binding_sha256,
+    )
+    if projection != expected:
+        raise ValueError("authenticated turn audit projection does not match the live turn")
+    return dict(zip(_AUTHENTICATED_TURN_AUDIT_KEYS, projection, strict=True))
+
+
 def _sanitize_mapping(
     payload: Mapping[Any, Any],
     *,
@@ -1237,11 +1365,12 @@ def _sanitize_mapping(
     user_exists: Callable[[str], bool] | None,
     id_exists: Callable[[str, frozenset[str]], bool] | None,
 ) -> dict[str, Any]:
-    out: dict[str, Any] = {}
+    authenticated_turn = _validated_authenticated_turn_audit_projection(payload, depth=depth)
+    out: dict[str, Any] = dict(authenticated_turn or {})
     hidden_fields = 0
     hidden_chars = 0
     hidden_items = 0
-    items = list(payload.items())
+    items = [item for item in payload.items() if item[0] not in _AUTHENTICATED_TURN_AUDIT_KEY_SET]
     for raw_key, value in items[:_MAX_FIELDS]:
         if not isinstance(raw_key, str) or not _FIELD_NAME_RE.fullmatch(raw_key):
             hidden_fields += 1
@@ -1425,6 +1554,7 @@ def sanitize_audit_payload(
 
 
 __all__ = [
+    "attach_authenticated_turn_audit_projection",
     "bind_audit_request_id",
     "current_audit_request_id",
     "decode_audit_privacy_key",

@@ -33,6 +33,7 @@ from pathlib import Path, PurePath
 from typing import TYPE_CHECKING, Any, cast
 from zoneinfo import ZoneInfo
 
+from friday.audit_privacy import attach_authenticated_turn_audit_projection
 from friday.failures import safe_failure_text
 from friday.file_delivery import (
     AuthorizedFileReadError,
@@ -5463,12 +5464,9 @@ class ExecutionKernel:
             # even an internal caller cannot spoof the exact authenticated turn
             # carried by the execution boundary.  The projection is body-free:
             # no prompt, arguments, paths, output, or source content is durable.
-            after_json.update(
-                {
-                    "turn_id": context.turn_id,
-                    "context_authority_sha256": context.context_authority_sha256,
-                    "request_effect_binding_sha256": (context.effect_fence.request_effect_binding_sha256),
-                }
+            after_json = attach_authenticated_turn_audit_projection(
+                after_json,
+                context=context,
             )
         # The check immediately adjacent to the write closes the tiny window
         # spent constructing the body-free projection above.

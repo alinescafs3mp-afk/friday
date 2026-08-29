@@ -2,13 +2,16 @@ from __future__ import annotations
 
 import hashlib
 import itertools
+import json
 import threading
 from collections.abc import Callable
 from contextvars import copy_context
+from typing import Any
 
 import pytest
 
 import friday.execution_kernel as execution_kernel_module
+from friday.audit_privacy import attach_authenticated_turn_audit_projection
 from friday.execution_kernel import (
     ExecutionKernel,
     ToolSpec,
@@ -36,7 +39,7 @@ from friday.orchestration.turn_context_runtime import (
     suspend_authenticated_turn_context,
 )
 from friday.permissions import ActorContext, AuthorizationError
-from friday.storage.models import AuditEntry
+from friday.storage.models import AuditEntry, new_id
 from friday.turn_intent_policy import TurnIntent, TurnPolicyDecision
 
 _SERIALS = itertools.count(100_000)
@@ -541,6 +544,121 @@ def test_authenticated_audit_projection_is_exact_body_free_and_unspoofable() -> 
         "request_effect_binding_sha256": (context.effect_fence.request_effect_binding_sha256),
         "safe_count": 3,
     }
+
+
+def test_authenticated_audit_projection_survives_real_storage_boundary(storage: Any) -> None:
+    issuer, context, _now, actor = _authenticated_turn()
+    storage.ensure_user(actor.own_id)
+    kernel = ExecutionKernel(_AllowAll())  # type: ignore[arg-type]
+    kernel.bind_services(storage, object(), object(), object())  # type: ignore[arg-type]
+    private = "AUTHENTICATED-AUDIT-BODY-MUST-NOT-SURVIVE"
+
+    with (
+        track_request_effects(
+            lambda: True,
+            request_binding_sha256=context.effect_fence.request_effect_binding_sha256,
+        ) as effects,
+        bind_authenticated_turn_context(issuer, context),
+        bind_authenticated_request_effect_authority(effects),
+    ):
+        kernel._audit_now(  # noqa: SLF001
+            actor,
+            "code_run",
+            True,
+            "ok",
+            details={
+                "turn_id": "turn_" + "0" * 64,
+                "context_authority_sha256": "a" * 64,
+                "request_effect_binding_sha256": "b" * 64,
+                "prompt": private,
+            },
+        )
+
+    row = storage.execute("SELECT after_json FROM audit_log ORDER BY rowid DESC LIMIT 1").fetchone()
+    assert row is not None
+    encoded = str(row["after_json"])
+    durable = json.loads(encoded)
+    assert durable["turn_id"] == context.turn_id
+    assert durable["context_authority_sha256"] == context.context_authority_sha256
+    assert durable["request_effect_binding_sha256"] == context.effect_fence.request_effect_binding_sha256
+    assert private not in encoded
+    assert "prompt" not in durable
+
+
+@pytest.mark.parametrize(
+    "projection",
+    [
+        {
+            "turn_id": "turn_" + "1" * 64,
+            "context_authority_sha256": "2" * 64,
+            "request_effect_binding_sha256": "3" * 64,
+        },
+        {"turn_id": "turn_" + "1" * 64},
+    ],
+)
+def test_real_storage_rejects_unmarked_authenticated_audit_projection(
+    storage: Any,
+    projection: dict[str, str],
+) -> None:
+    storage.ensure_user("owner")
+    with pytest.raises(ValueError, match="authenticated turn audit projection is reserved"):
+        storage.log_audit(
+            AuditEntry(
+                id=new_id("audit"),
+                user_id="owner",
+                action="tool.invoke",
+                target_type="tool",
+                target_id="code_run",
+                after_json=projection,
+            )
+        )
+    assert storage.execute("SELECT COUNT(*) FROM audit_log").fetchone()[0] == 0
+
+
+def test_real_storage_rejects_marked_incomplete_or_malformed_audit_projection(storage: Any) -> None:
+    issuer, context, _now, actor = _authenticated_turn()
+    storage.ensure_user(actor.own_id)
+    with bind_authenticated_turn_context(issuer, context):
+        incomplete = attach_authenticated_turn_audit_projection(
+            {"success": True},
+            context=context,
+        )
+        incomplete.pop("request_effect_binding_sha256")
+        with pytest.raises(
+            ValueError,
+            match="authenticated turn audit projection is incomplete",
+        ):
+            storage.log_audit(
+                AuditEntry(
+                    id=new_id("audit"),
+                    user_id=actor.own_id,
+                    action="tool.invoke",
+                    target_type="tool",
+                    target_id="code_run",
+                    after_json=incomplete,
+                )
+            )
+
+        malformed = attach_authenticated_turn_audit_projection(
+            {"success": True},
+            context=context,
+        )
+        malformed["context_authority_sha256"] = "malformed"
+        with pytest.raises(
+            ValueError,
+            match="authenticated turn audit projection is malformed",
+        ):
+            storage.log_audit(
+                AuditEntry(
+                    id=new_id("audit"),
+                    user_id=actor.own_id,
+                    action="tool.invoke",
+                    target_type="tool",
+                    target_id="code_run",
+                    after_json=malformed,
+                )
+            )
+    assert storage.execute("SELECT COUNT(*) FROM audit_log").fetchone()[0] == 0
 
 
 def test_legacy_audit_projection_bytes_are_unchanged() -> None:
