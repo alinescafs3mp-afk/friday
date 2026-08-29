@@ -18,6 +18,7 @@ import unicodedata
 import urllib.parse
 from collections import Counter
 from collections.abc import Awaitable, Callable, Mapping, Sequence
+from contextlib import suppress
 from dataclasses import dataclass, field, replace
 from datetime import UTC, date, datetime, timedelta
 from datetime import time as datetime_time
@@ -44157,8 +44158,15 @@ class AgentRuntime:
             )
         if deadline - time.monotonic() <= _SELECTED_ARCHIVE_PUBLICATION_RESERVE_SEC:
             raise TimeoutError("archive explanation deadline expired before publication")
+
+        class _SelectedArchiveLeasePublicationRollback(RuntimeError):
+            pass
+
         late_lease_failure_reason: FailureReason | None = None
-        with self.storage.transaction() as publication_conn:
+        with (
+            suppress(_SelectedArchiveLeasePublicationRollback),
+            self.storage.transaction() as publication_conn,
+        ):
             if time.monotonic() >= deadline:
                 raise TimeoutError("archive explanation deadline expired before transaction")
             current = get_current_recall_selected_archive_evidence_work_item_in_transaction(
@@ -44371,6 +44379,8 @@ class AgentRuntime:
                 )
                 if time.monotonic() >= deadline:
                     raise TimeoutError("archive explanation deadline expired before commit")
+            if late_lease_failure_reason is not None:
+                raise _SelectedArchiveLeasePublicationRollback
         if late_lease_failure_reason is not None:
             return self._selected_archive_evidence_replay_response(
                 actor=actor,

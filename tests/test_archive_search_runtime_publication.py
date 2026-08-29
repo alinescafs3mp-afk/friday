@@ -9,6 +9,7 @@ import subprocess
 import sys
 import unicodedata
 from collections.abc import Callable
+from contextlib import contextmanager
 from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
@@ -3812,8 +3813,19 @@ async def test_selected_archive_epoch_loss_after_final_reauth_uses_exact_replay_
     )
     runtime._selected_archive_model = explanation_model
     original_replay = runtime._replay_selected_archive_evidence_in_transaction  # noqa: SLF001
+    original_transaction = storage.transaction
     reauth_calls = 0
     lease_checks = 0
+    rollback_exceptions: list[str] = []
+
+    @contextmanager
+    def observe_transaction_rollback():
+        try:
+            with original_transaction() as conn:
+                yield conn
+        except BaseException as exc:
+            rollback_exceptions.append(type(exc).__name__)
+            raise
 
     def observe_reauth(*args: Any, **kwargs: Any) -> Any:
         nonlocal reauth_calls
@@ -3843,6 +3855,7 @@ async def test_selected_archive_epoch_loss_after_final_reauth_uses_exact_replay_
         "selected_archive_explanation_lease_is_current",
         reject_restarted_lease,
     )
+    monkeypatch.setattr(storage, "transaction", observe_transaction_rollback)
     try:
         response = await runtime.chat(
             _OWNER,
@@ -3856,6 +3869,7 @@ async def test_selected_archive_epoch_loss_after_final_reauth_uses_exact_replay_
         await web.close()
 
     assert lease_checks == 1
+    assert rollback_exceptions == ["_SelectedArchiveLeasePublicationRollback"]
     assert explanation_model.lease_checks == 2
     assert len(explanation_model.calls) == 2
     assert response["context"]["selected_archive_evidence_explanation"] == "fallback_exact_replay"
