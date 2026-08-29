@@ -441,7 +441,7 @@ class RuntimeMixin(StorageShared):
                 conn.execute(
                     f"""UPDATE outbound_notifications AS n SET status='sent', sent_at=?
                          WHERE id=?
-                           AND (status='pending'
+                           AND ((status='pending' AND kind<>'reminder')
                                 OR (kind='reminder' AND status='uncertain')
                                 OR (kind IN (
                                         'engineer_command_terminal',
@@ -478,7 +478,7 @@ class RuntimeMixin(StorageShared):
                                 )
                                THEN '' ELSE dedup_key END
                        WHERE id=?
-                         AND (status='pending'
+                         AND ((status='pending' AND kind<>'reminder')
                               OR (kind='reminder' AND status='uncertain'))
                          AND (kind IN (
                                   'engineer_command_terminal',
@@ -507,8 +507,7 @@ class RuntimeMixin(StorageShared):
                               )
                                AND (status='pending'
                                     OR (status='failed' AND attempts < ?)))
-                              OR (kind='reminder'
-                                  AND status IN ('pending', 'uncertain')))
+                              OR (kind='reminder' AND status='uncertain'))
                        """,
                     (utc_now(), notif_id, attempt_cap),
                 )

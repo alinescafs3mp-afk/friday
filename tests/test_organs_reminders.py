@@ -53,12 +53,14 @@ def _seed_event(storage, user_id: str, name: str, occurred_at: str) -> str:
 
 def test_notification_queue_enqueue_dedup_and_lifecycle(storage):
     storage.ensure_user("alice")
-    assert storage.enqueue_notification("alice", "42", "первое", kind="reminder", dedup_key="k1") is True
+    # Generic queue lifecycle is intentionally exercised with a non-reminder:
+    # reminders have a mandatory due/authority claim before any ACK settlement.
+    assert storage.enqueue_notification("alice", "42", "первое", kind="chronicle", dedup_key="k1") is True
     # Same dedup_key is idempotent.
     assert (
-        storage.enqueue_notification("alice", "42", "первое again", kind="reminder", dedup_key="k1") is False
+        storage.enqueue_notification("alice", "42", "первое again", kind="chronicle", dedup_key="k1") is False
     )
-    assert storage.enqueue_notification("alice", "42", "второе", kind="reminder", dedup_key="k2") is True
+    assert storage.enqueue_notification("alice", "42", "второе", kind="chronicle", dedup_key="k2") is True
 
     pending = storage.list_pending_notifications()
     ids = {n["id"] for n in pending}

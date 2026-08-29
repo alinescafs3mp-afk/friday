@@ -325,8 +325,8 @@ def test_the_list_survives_the_bridge_draining_the_queue(settings):
         event = graph.create_entity(user_id, "Совещание по поверке", EntityType.EVENT)
         graph.set_event_time(user_id, event["id"], _today_iso(1))
 
-        # Мост забрал очередь и отчитался об отправке — ровно то, что он делает
-        # каждые пятнадцать секунд.
+        # Мост забрал очередь, атомарно заявил точное напоминание на send edge и
+        # лишь затем отчитался об отправке — ровно текущий durable путь.
         storage.enqueue_notification(
             user_id,
             "5001",
@@ -335,6 +335,15 @@ def test_the_list_survives_the_bridge_draining_the_queue(settings):
             dedup_key=f"reminder:{event['id']}:{_today_iso(1)}",
         )
         queued = storage.list_pending_reminders(user_id)
+        for row in queued:
+            claimed = storage.claim_reminder_notification(
+                row["id"],
+                expected_chat_id=row["chat_id"],
+                expected_dedup_key=row["dedup_key"],
+                now=datetime.now().astimezone(),
+                lead_days=tuned.reminders_lead_days,
+            )
+            assert claimed is not None
         storage.mark_notifications(sent_ids=[row["id"] for row in queued])
         assert storage.list_pending_reminders(user_id) == [], "очередь должна быть пуста"
 

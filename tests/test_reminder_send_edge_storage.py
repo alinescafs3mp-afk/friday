@@ -320,6 +320,37 @@ def test_private_owner_drift_retires_without_returning_body(storage) -> None:
     assert (retired["status"], retired["dedup_key"]) == ("failed", pointer["dedup_key"])
 
 
+@pytest.mark.parametrize("outcome", ["sent", "failed", "uncertain"])
+def test_pending_reminder_cannot_be_settled_without_send_edge_claim(storage, outcome: str) -> None:
+    pointer = _queued_reminder(storage, occurred_at=NOW.date().isoformat())
+
+    states = storage.acknowledge_notifications(**{f"{outcome}_ids": [pointer["id"]]})
+
+    assert states["pending"] == [pointer["id"]]
+    durable = storage.execute(
+        "SELECT status, attempts, sent_at FROM outbound_notifications WHERE id=?",
+        (pointer["id"],),
+    ).fetchone()
+    assert (durable["status"], durable["attempts"], durable["sent_at"]) == ("pending", 0, None)
+
+
+@pytest.mark.parametrize("outcome", ["sent", "failed"])
+def test_ordinary_pending_notification_ack_behavior_is_unchanged(storage, outcome: str) -> None:
+    storage.ensure_user("alice")
+    assert storage.enqueue_notification("alice", "5001", "ordinary notification")
+    notification_id = storage.list_pending_notifications()[0]["id"]
+
+    states = storage.acknowledge_notifications(**{f"{outcome}_ids": [notification_id]})
+
+    expected = "sent" if outcome == "sent" else "pending"
+    assert states[expected] == [notification_id]
+    durable = storage.execute(
+        "SELECT status, attempts FROM outbound_notifications WHERE id=?",
+        (notification_id,),
+    ).fetchone()
+    assert (durable["status"], durable["attempts"]) == (expected, int(outcome == "failed"))
+
+
 def test_sent_ack_settles_a_claimed_reminder(storage) -> None:
     pointer = _queued_reminder(storage, occurred_at=NOW.date().isoformat())
     assert _claim(storage, pointer) is not None
