@@ -509,9 +509,7 @@ def _representative_window_current_server_identity_for_mode(
 ) -> dict[str, Any]:
     """Re-attest one exact scheduler mode against the sealed live release."""
 
-    expected_policy = semantic_supervisor_policy.supervisor_product_policy_identity_for_mode(
-        requested_mode
-    )
+    expected_policy = semantic_supervisor_policy.supervisor_product_policy_identity_for_mode(requested_mode)
 
     public_method = getattr(secondary, "public_status", None)
     diagnostics_method = getattr(secondary, "diagnostics_status", None)
