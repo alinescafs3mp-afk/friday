@@ -38,6 +38,10 @@ from friday.retrieval.archive_search_contract import (
     ArchiveSearchRequest,
     ConversationScope,
 )
+from friday.retrieval.archive_search_document_locator import (
+    DOCUMENT_STORED_PASSAGE_INDEX_VERSION,
+    LEGACY_DOCUMENT_PASSAGE_INDEX_VERSION,
+)
 from friday.retrieval.archive_search_message_adapter import (
     archive_message_storage_controls,
     project_archive_message_page,
@@ -106,7 +110,11 @@ def _binding(
     )
 
 
-def _seed_document_source(storage) -> tuple[str, str, str]:  # type: ignore[no-untyped-def]
+def _seed_document_source(  # type: ignore[no-untyped-def]
+    storage,
+    *,
+    passage_ready: bool = False,
+) -> tuple[str, str, str]:
     storage.ensure_user(TENANT)
     storage.ensure_user(PRINCIPAL)
     conversation = storage.create_conversation(PRINCIPAL, "Replay origin")
@@ -131,6 +139,14 @@ def _seed_document_source(storage) -> tuple[str, str, str]:  # type: ignore[no-u
                 "media_kind": "document",
                 "mime_type": "application/pdf",
                 "uploaded_by": PRINCIPAL,
+                **(
+                    {
+                        "extraction_success": True,
+                        "text_extraction_success": True,
+                    }
+                    if passage_ready
+                    else {}
+                ),
             },
             content_hash=hashlib.sha256(b"replay-source-v1").hexdigest(),
             received_at="2026-08-24T08:00:00+00:00",
@@ -261,6 +277,105 @@ def test_document_and_knowledge_exact_replay_preserves_partial_grade_and_private
         )
         assert tampered.status is ArchiveEvidenceReplayStatus.DRIFTED
         assert tampered.excerpts == ()
+    finally:
+        conn.rollback()
+
+
+def test_document_v2_replay_requires_stored_child_while_legacy_survives_its_loss(storage) -> None:
+    raw_id, _knowledge_id, boundary_id = _seed_document_source(storage, passage_ready=True)
+    backfill = storage.backfill_document_catalog(
+        TENANT,
+        after_raw_object_id=None,
+        limit=1,
+        include_document_passages=True,
+    )
+    assert backfill["passage_changed"] == 1
+    corpus = ArchiveSearchCorpus.DOCUMENTS
+    request = ArchiveSearchRequest.create(query="needle", corpora=(corpus,), limit=1)
+    binding = _binding(
+        request,
+        (SearchCorpus.RAW_DOCUMENTS, SearchLane.LEXICAL),
+        snapshot="replay-stored-passage",
+    )
+    conn = storage.conn
+    authorization = AuthorizationService(storage)
+    conn.execute("BEGIN")
+    try:
+        page = search_archive_document_lane(
+            conn,
+            tenant_id=TENANT,
+            owner_id=PRINCIPAL,
+            request=request,
+            corpus=corpus,
+            lane=SearchLane.LEXICAL,
+            execution_binding=binding,
+            snapshot_discriminator="replay-stored-passage",
+            snapshot_current=True,
+        )
+        candidate = page.candidates[0]
+        stored_ref = candidate.passages[0].passage_ref
+        excerpt = candidate.passages[0].excerpt
+        assert stored_ref.passage_index_version == DOCUMENT_STORED_PASSAGE_INDEX_VERSION
+        stored_result = replay_archive_evidence_in_transaction(
+            conn,
+            authorization=authorization,
+            actor=_actor(),
+            tenant_id=TENANT,
+            principal_id=PRINCIPAL,
+            origin_boundary_user_message_id=boundary_id,
+            corpus=corpus,
+            source_ref=candidate.resolved_source.source_ref,
+            passage_refs=(stored_ref,),
+            expected_source_snapshot_sha256=_selected_snapshot(candidate),
+            expected_coverage_grade=ArchiveEvidenceReplayCoverageGrade.COMPLETE,
+        )
+        assert stored_result.status is ArchiveEvidenceReplayStatus.EXACT
+
+        legacy_ref = dataclasses.replace(
+            stored_ref,
+            locator=TextSpanLocator(
+                chunk_index=0,
+                start_char=stored_ref.locator.start_char,  # type: ignore[union-attr]
+                end_char=stored_ref.locator.end_char,  # type: ignore[union-attr]
+            ),
+            passage_index_version=LEGACY_DOCUMENT_PASSAGE_INDEX_VERSION,
+        )
+        legacy_snapshot = archive_selected_evidence_snapshot_sha256(
+            candidate.resolved_source,
+            (legacy_ref,),
+            (excerpt,),
+        )
+        conn.execute("DELETE FROM document_passages WHERE raw_object_id=?", (raw_id,))
+
+        drifted = replay_archive_evidence_in_transaction(
+            conn,
+            authorization=authorization,
+            actor=_actor(),
+            tenant_id=TENANT,
+            principal_id=PRINCIPAL,
+            origin_boundary_user_message_id=boundary_id,
+            corpus=corpus,
+            source_ref=candidate.resolved_source.source_ref,
+            passage_refs=(stored_ref,),
+            expected_source_snapshot_sha256=_selected_snapshot(candidate),
+            expected_coverage_grade=ArchiveEvidenceReplayCoverageGrade.COMPLETE,
+        )
+        assert drifted.status is ArchiveEvidenceReplayStatus.DRIFTED
+        legacy = replay_archive_evidence_in_transaction(
+            conn,
+            authorization=authorization,
+            actor=_actor(),
+            tenant_id=TENANT,
+            principal_id=PRINCIPAL,
+            origin_boundary_user_message_id=boundary_id,
+            corpus=corpus,
+            source_ref=candidate.resolved_source.source_ref,
+            passage_refs=(legacy_ref,),
+            expected_source_snapshot_sha256=legacy_snapshot,
+            expected_coverage_grade=ArchiveEvidenceReplayCoverageGrade.COMPLETE,
+        )
+        assert legacy.status is ArchiveEvidenceReplayStatus.EXACT
+        assert legacy.excerpts[0].text == excerpt
     finally:
         conn.rollback()
 

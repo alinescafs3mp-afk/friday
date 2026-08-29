@@ -23,6 +23,10 @@ from friday.retrieval.archive_evidence_snapshot import (
     archive_selected_evidence_snapshot_sha256,
 )
 from friday.retrieval.archive_search_contract import ArchiveSearchCorpus
+from friday.retrieval.archive_search_document_locator import (
+    DOCUMENT_STORED_PASSAGE_INDEX_VERSION,
+    LEGACY_DOCUMENT_PASSAGE_INDEX_VERSION,
+)
 from friday.retrieval.archive_search_message_adapter import MESSAGE_PASSAGE_INDEX_VERSION
 from friday.retrieval.contracts import (
     AuthorityScope,
@@ -38,7 +42,6 @@ from friday.retrieval.contracts import (
     TextSpanLocator,
 )
 from friday.storage._archive_search_documents import (
-    PASSAGE_INDEX_VERSION,
     ArchiveDocumentReplaySource,
     ArchiveDocumentStorageError,
     select_authorized_archive_document_replay_source_in_transaction,
@@ -416,6 +419,7 @@ def _validate_source_and_passages(
         or len(identities) != len(set(identities))
         or len(locator_identities) != len(set(locator_identities))
         or len({item.source_revision for item in passage_refs}) != 1
+        or len({item.passage_index_version for item in passage_refs}) != 1
     ):
         raise _fail("archive replay passages are not canonical")
 
@@ -449,6 +453,16 @@ def _validate_source_and_passages(
             if corpus is ArchiveSearchCorpus.DOCUMENTS
             else RevisionKind.KNOWLEDGE_VERSION
         )
+        valid_passage_versions = (
+            frozenset(
+                {
+                    LEGACY_DOCUMENT_PASSAGE_INDEX_VERSION,
+                    DOCUMENT_STORED_PASSAGE_INDEX_VERSION,
+                }
+            )
+            if corpus is ArchiveSearchCorpus.DOCUMENTS
+            else frozenset({LEGACY_DOCUMENT_PASSAGE_INDEX_VERSION})
+        )
         valid = (
             source_ref.source_kind in source_kinds
             and source_ref.authority_scope is AuthorityScope.TENANT_PRINCIPAL
@@ -457,7 +471,7 @@ def _validate_source_and_passages(
             and source_ref.canonical_object_kind is CanonicalObjectKind.RAW_OBJECT
             and all(
                 type(item.locator) is TextSpanLocator
-                and item.passage_index_version == PASSAGE_INDEX_VERSION
+                and item.passage_index_version in valid_passage_versions
                 and item.source_revision.kind is expected_revision
                 and item.source_revision.representation.kind is expected_representation
                 for item in passage_refs
@@ -595,12 +609,24 @@ def _document_texts(
         if type(locator) is not TextSpanLocator:
             return None
         if (
-            locator.chunk_index != 0
-            or locator.end_char > len(replay.body)
+            locator.end_char > len(replay.body)
             or locator.end_char - locator.start_char > _MAX_DOCUMENT_EXCERPT_CHARS
         ):
             return None
-        text = replay.body[locator.start_char : locator.end_char]
+        text: str | None
+        if passage_ref.passage_index_version == LEGACY_DOCUMENT_PASSAGE_INDEX_VERSION:
+            if locator.chunk_index != 0:
+                return None
+            text = replay.body[locator.start_char : locator.end_char]
+        elif (
+            passage_ref.passage_index_version == DOCUMENT_STORED_PASSAGE_INDEX_VERSION
+            and replay.corpus is ArchiveSearchCorpus.DOCUMENTS
+        ):
+            text = replay.stored_passage_text(locator)
+            if text is None:
+                return None
+        else:
+            return None
         if (
             not text
             or text != text.strip()

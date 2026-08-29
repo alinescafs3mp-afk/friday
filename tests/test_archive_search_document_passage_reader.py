@@ -23,6 +23,10 @@ from friday.retrieval.archive_search_contract import (
     ArchiveSearchRequest,
     ReviewScope,
 )
+from friday.retrieval.archive_search_document_locator import (
+    DOCUMENT_STORED_PASSAGE_INDEX_VERSION,
+    LEGACY_DOCUMENT_PASSAGE_INDEX_VERSION,
+)
 from friday.retrieval.contracts import (
     AuthorityScope,
     CoverageState,
@@ -30,7 +34,10 @@ from friday.retrieval.contracts import (
     SearchExecutionBinding,
     SearchLane,
 )
-from friday.storage._archive_search_documents import search_archive_document_lane
+from friday.storage._archive_search_documents import (
+    PASSAGE_INDEX_VERSION,
+    search_archive_document_lane,
+)
 from friday.storage.models import InboxItem, InboxStatus, RawObject
 
 TENANT = "passage-reader-tenant"
@@ -207,11 +214,15 @@ def _project_current(storage: Any, raw_id: str) -> None:
 
 
 def test_projection_contract_can_import_before_storage_reader_without_a_cycle() -> None:
+    assert PASSAGE_INDEX_VERSION == LEGACY_DOCUMENT_PASSAGE_INDEX_VERSION
     probe = """
 import friday.document_catalog.passage_projection as projection
 import friday.storage._archive_search_documents as reader
 assert projection.DOCUMENT_PASSAGE_INDEX_REVISION
 assert reader.PASSAGE_INDEX_VERSION == 'archive-storage-char-v1'
+assert reader.DOCUMENT_STORED_PASSAGE_INDEX_VERSION == (
+    'archive-storage-char-v2:document-chunk-spans-v3'
+)
 """
     completed = subprocess.run(  # noqa: S603 - fixed interpreter and local import probe
         [sys.executable, "-c", probe],
@@ -227,6 +238,7 @@ def test_reader_contract_requires_exact_schema_fingerprint_and_policy(storage, m
     real_import = archive_documents.importlib.import_module
     schema = SimpleNamespace(
         DOCUMENT_PASSAGE_INDEX_REVISION=DOCUMENT_PASSAGE_INDEX_REVISION,
+        document_passage_set_sha256=document_passage_set_sha256,
         document_passage_schema_fingerprint=lambda _conn: "a" * 64,
     )
 
@@ -243,12 +255,12 @@ def test_reader_contract_requires_exact_schema_fingerprint_and_policy(storage, m
     assert archive_documents._document_passage_contract(storage.conn) is False  # noqa: SLF001
 
 
-def test_current_projection_changes_only_coverage_not_legacy_candidate(storage) -> None:
+def test_current_projection_changes_only_passage_identity_and_coverage(storage) -> None:
     raw_id = _seed(storage, 1, body="Exact Needle passage body")
     request = _request()
     before, before_coverage = _search(storage, request)
     before_miss, before_miss_coverage = _search(storage, _request("Absent phrase"))
-    before_candidate = before.candidates[0].to_private_json()
+    before_candidate = before.candidates[0]
     before_passage = before.candidates[0].passages[0].passage_ref
 
     _project_current(storage, raw_id)
@@ -257,8 +269,17 @@ def test_current_projection_changes_only_coverage_not_legacy_candidate(storage) 
     after_miss, after_miss_coverage = _search(storage, _request("Absent phrase"))
 
     assert storage.conn.total_changes == changes
-    assert after.candidates[0].to_private_json() == before_candidate
-    assert after.candidates[0].passages[0].passage_ref == before_passage
+    after_candidate = after.candidates[0]
+    after_passage = after_candidate.passages[0].passage_ref
+    assert after_candidate.resolved_source == before_candidate.resolved_source
+    assert after_candidate.matches == before_candidate.matches
+    assert after_candidate.review_state is before_candidate.review_state
+    assert after_candidate.lifecycle_state is before_candidate.lifecycle_state
+    assert after_candidate.evidence_authority is before_candidate.evidence_authority
+    assert after_candidate.passages[0].excerpt == before_candidate.passages[0].excerpt
+    assert before_passage.passage_index_version == LEGACY_DOCUMENT_PASSAGE_INDEX_VERSION
+    assert after_passage.passage_index_version == DOCUMENT_STORED_PASSAGE_INDEX_VERSION
+    assert after_passage != before_passage
     assert before.derivative_current is False
     assert before_coverage.states == (CoverageState.BACKFILL_PENDING, CoverageState.PARTIAL)
     assert after.derivative_current is True
@@ -267,6 +288,98 @@ def test_current_projection_changes_only_coverage_not_legacy_candidate(storage) 
     assert before_miss_coverage.absence_decision().value == "not_established"
     assert after_miss_coverage.states == (CoverageState.COMPLETE,)
     assert after_miss_coverage.absence_decision().value == "authorized_absence_confirmed"
+
+
+def test_current_children_do_not_change_candidate_membership_or_lane_rank(storage) -> None:
+    raw_ids = (
+        _seed(storage, 63, body="Needle first ranked evidence"),
+        _seed(storage, 64, body="Needle second ranked evidence"),
+    )
+    request = _request()
+    before, _before_coverage = _search(storage, request)
+
+    for raw_id in reversed(raw_ids):
+        _project_current(storage, raw_id)
+    after, after_coverage = _search(storage, request)
+
+    def identity_and_rank(page):  # type: ignore[no-untyped-def]
+        return tuple(
+            (candidate.resolved_source.source_ref.canonical_object_id, candidate.matches)
+            for candidate in page.candidates
+        )
+
+    assert identity_and_rank(after) == identity_and_rank(before)
+    assert (after.total, after.examined, after.matched, after.returned) == (
+        before.total,
+        before.examined,
+        before.matched,
+        before.returned,
+    )
+    assert all(
+        candidate.passages[0].passage_ref.passage_index_version == DOCUMENT_STORED_PASSAGE_INDEX_VERSION
+        for candidate in after.candidates
+    )
+    assert after_coverage.states == (CoverageState.COMPLETE,)
+
+
+def test_current_projection_uses_lowest_stored_child_containing_exact_match(storage) -> None:
+    marker = "NeedleOverlap"
+    body = ("a" * 1_050) + marker + ("b" * 2_000)
+    raw_id = _seed(storage, 60, body=body)
+    _project_current(storage, raw_id)
+
+    rows = storage.execute(
+        """SELECT chunk_index,start_char,end_char
+             FROM document_passages
+            WHERE raw_object_id=? ORDER BY chunk_index""",
+        (raw_id,),
+    )
+    match_start = body.index(marker)
+    match_end = match_start + len(marker)
+    containing = [
+        tuple(row)
+        for row in rows
+        if int(row["start_char"]) <= match_start < match_end <= int(row["end_char"])
+    ]
+    assert len(containing) >= 2
+
+    page, coverage = _search(storage, _request(marker))
+    passage = page.candidates[0].passages[0]
+    locator = passage.passage_ref.locator
+    selected = containing[0]
+
+    assert passage.passage_ref.passage_index_version == DOCUMENT_STORED_PASSAGE_INDEX_VERSION
+    assert locator.chunk_index == selected[0]  # type: ignore[union-attr]
+    assert selected[1] <= locator.start_char <= match_start  # type: ignore[union-attr]
+    assert match_end <= locator.end_char <= selected[2]  # type: ignore[union-attr]
+    assert body[locator.start_char : locator.end_char] == passage.excerpt  # type: ignore[union-attr]
+    assert coverage.states == (CoverageState.COMPLETE,)
+
+
+def test_match_crossing_every_stored_child_keeps_legacy_locator(storage) -> None:
+    marker = "Q" * 600
+    body = ("a" * 700) + marker + ("b" * 1_800)
+    raw_id = _seed(storage, 61, body=body)
+    _project_current(storage, raw_id)
+    match_start = body.index(marker)
+    match_end = match_start + len(marker)
+    rows = storage.execute(
+        """SELECT start_char,end_char FROM document_passages
+            WHERE raw_object_id=? ORDER BY chunk_index""",
+        (raw_id,),
+    )
+    assert not any(int(row["start_char"]) <= match_start < match_end <= int(row["end_char"]) for row in rows)
+
+    page, coverage = _search(storage, _request(marker))
+
+    assert page.matched == page.returned == 1
+    assert (
+        page.candidates[0].passages[0].passage_ref.passage_index_version
+        == LEGACY_DOCUMENT_PASSAGE_INDEX_VERSION
+    )
+    assert page.candidates[0].passages[0].passage_ref.locator.chunk_index == 0  # type: ignore[union-attr]
+    assert page.derivative_current is True
+    assert coverage.states == (CoverageState.COMPLETE,)
 
 
 def test_missing_projection_keeps_hits_but_never_confirms_a_miss(storage) -> None:
@@ -284,6 +397,10 @@ def test_missing_projection_keeps_hits_but_never_confirms_a_miss(storage) -> Non
 
     assert hit.matched == hit.returned == 1
     assert hit.candidates[0].passages[0].excerpt == "Needle remains usable"
+    assert (
+        hit.candidates[0].passages[0].passage_ref.passage_index_version
+        == DOCUMENT_STORED_PASSAGE_INDEX_VERSION
+    )
     assert hit_coverage.states == (CoverageState.BACKFILL_PENDING, CoverageState.PARTIAL)
     assert hit_coverage.absence_decision().value == "evidence_found"
     assert miss.matched == miss.returned == 0
@@ -329,6 +446,10 @@ def test_stale_incomplete_or_short_projection_is_partial_fallback(
 
     assert page.matched == page.returned == 1
     assert page.candidates[0].passages[0].excerpt == "Needle exact fallback"
+    assert (
+        page.candidates[0].passages[0].passage_ref.passage_index_version
+        == LEGACY_DOCUMENT_PASSAGE_INDEX_VERSION
+    )
     assert page.derivative_current is False
     assert coverage.states == (
         (CoverageState.PARTIAL, CoverageState.UNAVAILABLE)
@@ -385,6 +506,60 @@ def test_tampered_child_set_keeps_legacy_hit_but_fails_readiness_closed(storage)
 
     assert page.matched == page.returned == 1
     assert page.derivative_current is False
+    assert (
+        page.candidates[0].passages[0].passage_ref.passage_index_version
+        == LEGACY_DOCUMENT_PASSAGE_INDEX_VERSION
+    )
+    assert coverage.states == (CoverageState.PARTIAL, CoverageState.UNAVAILABLE)
+
+
+def test_forged_consistent_child_set_cannot_mint_a_stored_locator(storage) -> None:
+    raw_id = _seed(storage, 62, body="Needle " + ("alpha beta gamma. " * 100))
+    _project_current(storage, raw_id)
+    with storage.transaction() as conn:
+        conn.create_function(
+            "friday_document_passage_span_valid",
+            6,
+            lambda *_args: 1,
+            deterministic=True,
+        )
+        conn.create_function(
+            "friday_document_passage_projection_valid",
+            14,
+            lambda *_args: 1,
+            deterministic=True,
+        )
+        conn.execute(
+            """UPDATE document_passages
+                  SET content_sha256=?
+                WHERE raw_object_id=? AND chunk_index=0""",
+            ("f" * 64, raw_id),
+        )
+        forged_rows = tuple(
+            (int(row[0]), int(row[1]), int(row[2]), str(row[3]))
+            for row in conn.execute(
+                """SELECT chunk_index,start_char,end_char,content_sha256
+                     FROM document_passages
+                    WHERE raw_object_id=? ORDER BY chunk_index""",
+                (raw_id,),
+            )
+        )
+        conn.execute(
+            """UPDATE document_passage_projections
+                  SET passage_set_sha256=? WHERE raw_object_id=?""",
+            (document_passage_set_sha256(forged_rows), raw_id),
+        )
+        register_document_passage_connection_functions(conn)
+
+    page, coverage = _search(storage, _request())
+
+    assert page.matched == page.returned == 1
+    assert page.derivative_current is False
+    assert page.derivative_unavailable is True
+    assert (
+        page.candidates[0].passages[0].passage_ref.passage_index_version
+        == LEGACY_DOCUMENT_PASSAGE_INDEX_VERSION
+    )
     assert coverage.states == (CoverageState.PARTIAL, CoverageState.UNAVAILABLE)
 
 
@@ -408,6 +583,10 @@ def test_current_reader_never_rechunks_source_per_child(storage, monkeypatch) ->
 
     assert calls == 0
     assert page.derivative_current is True
+    assert (
+        page.candidates[0].passages[0].passage_ref.passage_index_version
+        == DOCUMENT_STORED_PASSAGE_INDEX_VERSION
+    )
     assert coverage.states == (CoverageState.COMPLETE,)
 
 
@@ -511,6 +690,11 @@ def test_exact_64_span_tail_remains_current_and_searchable(storage) -> None:
     assert parent is not None and tuple(parent) == (64, len(body))
     assert tail is not None and tuple(tail) == (63, len(body))
     assert page.matched == page.returned == 1
+    assert (
+        page.candidates[0].passages[0].passage_ref.passage_index_version
+        == DOCUMENT_STORED_PASSAGE_INDEX_VERSION
+    )
+    assert page.candidates[0].passages[0].passage_ref.locator.chunk_index == 63  # type: ignore[union-attr]
     assert page.derivative_current is True
     assert coverage.states == (CoverageState.COMPLETE,)
 

@@ -13,6 +13,9 @@ from friday.interaction_control_plane.selected_archive_evidence import (
     canonical_passage_refs_json,
     parse_canonical_passage_refs,
 )
+from friday.retrieval.archive_search_document_locator import (
+    DOCUMENT_STORED_PASSAGE_INDEX_VERSION,
+)
 from friday.retrieval.archive_search_message_adapter import MESSAGE_PASSAGE_INDEX_VERSION
 from friday.retrieval.contracts import (
     AuthorityScope,
@@ -201,6 +204,42 @@ def test_selected_evidence_rejects_unreplayable_authority_and_index_version() ->
         replace(
             evidence,
             passage_refs=(replace(evidence.passage_refs[0], passage_index_version="raw-char-v1"),),
+        )
+
+
+def test_selected_evidence_dual_reads_document_v2_but_keeps_knowledge_legacy() -> None:
+    document = _document_evidence(corpus=SelectedArchiveCorpus.DOCUMENTS)
+    current_passage = replace(
+        document.passage_refs[0],
+        locator=TextSpanLocator(chunk_index=3, start_char=1_050, end_char=1_300),
+        passage_index_version=DOCUMENT_STORED_PASSAGE_INDEX_VERSION,
+    )
+    current = replace(document, passage_refs=(current_passage,))
+
+    assert SelectedArchiveEvidence.from_storage_row(current.to_storage_payload()) == current
+    mixed = tuple(
+        sorted(
+            (document.passage_refs[0], current_passage),
+            key=lambda item: item.to_private_json(),
+        )
+    )
+    with pytest.raises(SelectedArchiveEvidenceError, match="replay matrix"):
+        replace(document, passage_refs=mixed)
+
+    knowledge = _document_evidence(corpus=SelectedArchiveCorpus.KNOWLEDGE)
+    with pytest.raises(SelectedArchiveEvidenceError, match="replay matrix"):
+        replace(
+            knowledge,
+            passage_refs=(
+                replace(
+                    knowledge.passage_refs[0],
+                    passage_index_version=DOCUMENT_STORED_PASSAGE_INDEX_VERSION,
+                    embedding=replace(
+                        knowledge.passage_refs[0].embedding,
+                        chunk_scheme=DOCUMENT_STORED_PASSAGE_INDEX_VERSION,
+                    ),
+                ),
+            ),
         )
 
 

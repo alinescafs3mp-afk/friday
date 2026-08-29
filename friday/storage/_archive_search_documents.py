@@ -15,6 +15,7 @@ import re
 import secrets
 import sqlite3
 import unicodedata
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any, Final, NoReturn, SupportsIndex
@@ -31,6 +32,10 @@ from friday.retrieval.archive_search_contract import (
     ArchiveSearchRequest,
     ArchiveTemporalConstraint,
     ReviewScope,
+)
+from friday.retrieval.archive_search_document_locator import (
+    DOCUMENT_STORED_PASSAGE_INDEX_VERSION,
+    LEGACY_DOCUMENT_PASSAGE_INDEX_VERSION,
 )
 from friday.retrieval.contracts import (
     AuthorityScope,
@@ -69,12 +74,10 @@ from friday.storage._privacy import (
 )
 
 MAX_ARCHIVE_DOCUMENT_RESULTS: Final = 20
-PASSAGE_INDEX_VERSION: Final = "archive-storage-char-v1"
-# Keep this optional reader policy closed locally.  Importing the projection or
-# schema contract here would re-enter storage through ``friday.retrieval`` while
-# this module is still importing.  The late contract probe below authenticates
-# the schema and requires this exact revision before sidecar SQL is selected.
-_DOCUMENT_PASSAGE_INDEX_REVISION: Final = "document-char-v1:chunk-spans-v2:1200:200:64"
+# Compatibility export for non-sidecar document producers and the Knowledge
+# lane.  Only a verified current document-passage child uses the distinct v2
+# identity imported above.
+PASSAGE_INDEX_VERSION: Final = LEGACY_DOCUMENT_PASSAGE_INDEX_VERSION
 _DOCUMENT_PASSAGE_MAX_COUNT: Final = 64
 _MAX_ACTOR_BYTES = 200
 _MAX_SNAPSHOT_BYTES = 256
@@ -84,6 +87,7 @@ _KO_ID = re.compile(r"ko_[A-Za-z0-9_-]{8,120}\Z")
 _INBOX_ID = re.compile(r"inbox_[0-9a-f]{16}\Z")
 _MESSAGE_ID = re.compile(r"msg_[0-9a-f]{16}\Z")
 _SHA256 = re.compile(r"[0-9a-f]{64}\Z")
+_PASSAGE_REVISION = re.compile(r"[A-Za-z0-9][A-Za-z0-9:._-]{0,119}\Z")
 _SUPPORTED_CORPORA = frozenset({ArchiveSearchCorpus.DOCUMENTS, ArchiveSearchCorpus.KNOWLEDGE})
 _SUPPORTED_LANES = frozenset({SearchLane.CATALOG, SearchLane.LEXICAL})
 _SEARCH_CORPUS = {
@@ -119,20 +123,39 @@ class ArchiveDocumentStorageError(RuntimeError):
     """Body-free failure at the read-only document storage seam."""
 
 
+_PassageRows = tuple[tuple[int, int, int, str], ...]
+
+
+@dataclass(frozen=True, slots=True)
+class _DocumentPassageContract:
+    index_revision: str
+    set_sha256: Callable[[_PassageRows], str]
+
+
+@dataclass(frozen=True, slots=True)
+class _StoredDocumentPassage:
+    chunk_index: int
+    start_char: int
+    end_char: int
+    content_sha256: str
+
+
 class ArchiveDocumentReplaySource:
     """Exact authorized body and source snapshot for durable evidence replay."""
 
-    __slots__ = ("body", "corpus", "resolved_source")
+    __slots__ = ("_stored_passages", "body", "corpus", "resolved_source")
 
     corpus: ArchiveSearchCorpus
     resolved_source: ResolvedSource
     body: str
+    _stored_passages: tuple[_StoredDocumentPassage, ...] | None
 
     def __init__(
         self,
         corpus: ArchiveSearchCorpus,
         resolved_source: ResolvedSource,
         body: str,
+        stored_passages: tuple[_StoredDocumentPassage, ...] | None,
         *,
         _factory: object = None,
     ) -> None:
@@ -141,6 +164,15 @@ class ArchiveDocumentReplaySource:
             or corpus not in _SUPPORTED_CORPORA
             or type(resolved_source) is not ResolvedSource
             or type(body) is not str
+            or (
+                stored_passages is not None
+                and (
+                    type(stored_passages) is not tuple
+                    or not stored_passages
+                    or any(type(item) is not _StoredDocumentPassage for item in stored_passages)
+                )
+            )
+            or (corpus is ArchiveSearchCorpus.KNOWLEDGE and stored_passages is not None)
         ):
             raise _fail("archive document replay source is invalid")
         try:
@@ -150,6 +182,7 @@ class ArchiveDocumentReplaySource:
         object.__setattr__(self, "corpus", corpus)
         object.__setattr__(self, "resolved_source", resolved_source)
         object.__setattr__(self, "body", body)
+        object.__setattr__(self, "_stored_passages", stored_passages)
 
     def __setattr__(self, _name: str, _value: object) -> NoReturn:
         raise TypeError("archive document replay source is immutable")
@@ -165,6 +198,22 @@ class ArchiveDocumentReplaySource:
 
     def __reduce_ex__(self, _protocol: SupportsIndex) -> NoReturn:
         raise _fail("archive document replay source cannot be serialized")
+
+    def stored_passage_text(self, locator: TextSpanLocator) -> str | None:
+        """Resolve one v2 locator only through its exact persisted child."""
+
+        if type(locator) is not TextSpanLocator or self._stored_passages is None:
+            return None
+        passage = next(
+            (item for item in self._stored_passages if item.chunk_index == locator.chunk_index),
+            None,
+        )
+        if (
+            passage is None
+            or not passage.start_char <= locator.start_char < locator.end_char <= passage.end_char
+        ):
+            return None
+        return self.body[locator.start_char : locator.end_char]
 
 
 def _fail(message: str) -> ArchiveDocumentStorageError:
@@ -265,7 +314,9 @@ def _document_catalog_contract(conn: sqlite3.Connection) -> tuple[bool, int]:
     return True, enrichment_revision
 
 
-def _document_passage_contract(conn: sqlite3.Connection) -> bool:
+def _load_document_passage_contract(
+    conn: sqlite3.Connection,
+) -> _DocumentPassageContract | None:
     """Authenticate the optional reader-first passage sidecar.
 
     A schema-46 database legitimately has no passage projection.  Missing,
@@ -275,16 +326,30 @@ def _document_passage_contract(conn: sqlite3.Connection) -> bool:
 
     try:
         schema = importlib.import_module("friday.document_catalog.passage_schema")
+        projection = importlib.import_module("friday.document_catalog.passage_projection")
         fingerprint_reader = schema.document_passage_schema_fingerprint
         index_revision = schema.DOCUMENT_PASSAGE_INDEX_REVISION
+        projection_revision = projection.DOCUMENT_PASSAGE_INDEX_REVISION
+        set_sha256 = schema.document_passage_set_sha256
         fingerprint = fingerprint_reader(conn)
     except (ImportError, AttributeError, TypeError, RuntimeError, ValueError, sqlite3.Error):
-        return False
-    return bool(
-        index_revision == _DOCUMENT_PASSAGE_INDEX_REVISION
-        and type(fingerprint) is str
-        and _SHA256.fullmatch(fingerprint) is not None
-    )
+        return None
+    if (
+        type(index_revision) is not str
+        or _PASSAGE_REVISION.fullmatch(index_revision) is None
+        or index_revision != projection_revision
+        or not callable(set_sha256)
+        or type(fingerprint) is not str
+        or _SHA256.fullmatch(fingerprint) is None
+    ):
+        return None
+    return _DocumentPassageContract(index_revision, set_sha256)
+
+
+def _document_passage_contract(conn: sqlite3.Connection) -> bool:
+    """Compatibility probe used by focused reader contract tests."""
+
+    return _load_document_passage_contract(conn) is not None
 
 
 def _ensure_archive_search_fold(conn: sqlite3.Connection) -> None:
@@ -1375,17 +1440,20 @@ def _document_passage_current_expression(
     projection_alias: str = "dp",
     *,
     source_alias: str = "s",
+    index_revision: str,
 ) -> str:
     """Exact source-bound readiness predicate for the reader-first sidecar.
 
     Passage rows grant no authority and are deliberately joined only after
-    ``authorized_sources``.  The reader does not consume their locators yet;
-    it merely proves that the complete code-owned projection exists before a
-    DOCUMENTS lexical lane may claim complete index coverage.
+    ``authorized_sources``.  This proves that the complete code-owned
+    projection exists before a DOCUMENTS lexical lane may claim complete index
+    coverage or mint a locator from one of its persisted child rows.
     """
 
     projection = projection_alias
     source = source_alias
+    if type(index_revision) is not str or _PASSAGE_REVISION.fullmatch(index_revision) is None:
+        raise _fail("archive document passage revision is invalid")
     return f"""(
         {projection}.raw_object_id IS {source}.raw_id
         AND typeof({source}.raw_version)='integer'
@@ -1406,7 +1474,7 @@ def _document_passage_current_expression(
         AND typeof({projection}.passage_set_sha256)='text'
         AND length({projection}.passage_set_sha256)=64
         AND {projection}.passage_set_sha256 NOT GLOB '*[^0-9a-f]*'
-        AND {projection}.passage_index_revision='{_DOCUMENT_PASSAGE_INDEX_REVISION}'
+        AND {projection}.passage_index_revision='{index_revision}'
         AND {projection}.projection_status='current'
         AND {projection}.incomplete_reason IS NULL
         AND typeof({projection}.passage_count)='integer'
@@ -1438,16 +1506,19 @@ def _document_passage_backfill_expression(
     projection_alias: str = "dp",
     *,
     source_alias: str = "s",
+    index_revision: str,
 ) -> str:
     """Classify only repairable/missing source-bound passage coverage."""
 
     projection = projection_alias
     source = source_alias
+    if type(index_revision) is not str or _PASSAGE_REVISION.fullmatch(index_revision) is None:
+        raise _fail("archive document passage revision is invalid")
     return f"""(
         {projection}.raw_object_id IS NULL
         OR {projection}.source_version IS NOT {source}.raw_version
         OR {projection}.source_content_sha256 IS NOT {source}.content_hash
-        OR {projection}.passage_index_revision<>'{_DOCUMENT_PASSAGE_INDEX_REVISION}'
+        OR {projection}.passage_index_revision<>'{index_revision}'
         OR ({projection}.projection_status='incomplete'
             AND {projection}.incomplete_reason IN ('backfill_pending','source_changed'))
     )"""
@@ -1457,6 +1528,7 @@ def _passage_projection_cte(
     corpus: ArchiveSearchCorpus,
     *,
     document_passage_available: bool,
+    document_passage_revision: str | None,
 ) -> str:
     if corpus is not ArchiveSearchCorpus.DOCUMENTS:
         return """passage_projection_sources AS MATERIALIZED (
@@ -1465,15 +1537,23 @@ def _passage_projection_cte(
                    0 AS passage_projection_unavailable
               FROM authorized_sources s
         )"""
-    if not document_passage_available:
+    if not document_passage_available or document_passage_revision is None:
         return """passage_projection_sources AS MATERIALIZED (
             SELECT s.*, 0 AS passage_projection_current,
                    0 AS passage_projection_backfill_pending,
                    1 AS passage_projection_unavailable
               FROM authorized_sources s
         )"""
-    current = _document_passage_current_expression("dp", source_alias="s")
-    backfill = _document_passage_backfill_expression("dp", source_alias="s")
+    current = _document_passage_current_expression(
+        "dp",
+        source_alias="s",
+        index_revision=document_passage_revision,
+    )
+    backfill = _document_passage_backfill_expression(
+        "dp",
+        source_alias="s",
+        index_revision=document_passage_revision,
+    )
     return f"""passage_projection_joined AS MATERIALIZED (
         SELECT s.*, CASE WHEN {current} THEN 1 ELSE 0 END AS passage_projection_current,
                CASE WHEN {backfill} THEN 1 ELSE 0 END AS passage_projection_backfill_pending
@@ -1555,6 +1635,145 @@ def _select_rows(
         return [_row(cursor, item) for item in cursor.fetchall()]
     except sqlite3.Error:
         raise _fail("archive document storage read is unavailable") from None
+
+
+def _select_current_document_passages(
+    conn: sqlite3.Connection,
+    source: dict[str, Any],
+    contract: _DocumentPassageContract,
+) -> tuple[_StoredDocumentPassage, ...] | None:
+    """Read and authenticate one current child set without rechunking text."""
+
+    raw_object_id = source.get("raw_id")
+    source_version = source.get("raw_version")
+    source_digest = source.get("content_hash")
+    body = source.get("passage_body")
+    if (
+        type(raw_object_id) is not str
+        or _RAW_ID.fullmatch(raw_object_id) is None
+        or type(source_version) is not int
+        or source_version < 1
+        or type(source_digest) is not str
+        or _SHA256.fullmatch(source_digest) is None
+        or type(body) is not str
+        or not body
+    ):
+        return None
+    try:
+        body_digest = hashlib.sha256(body.encode("utf-8", errors="strict")).hexdigest()
+    except UnicodeEncodeError:
+        return None
+    rows = _select_rows(
+        conn,
+        """SELECT projection.raw_object_id AS projection_raw_object_id,
+                      projection.source_version AS projection_source_version,
+                      projection.source_content_sha256 AS projection_source_content_sha256,
+                      projection.extracted_text_sha256 AS projection_extracted_text_sha256,
+                      projection.source_char_count AS projection_source_char_count,
+                      projection.passage_set_sha256 AS projection_passage_set_sha256,
+                      projection.passage_index_revision AS projection_passage_index_revision,
+                      projection.projection_status AS projection_status,
+                      projection.incomplete_reason AS projection_incomplete_reason,
+                      projection.passage_count AS projection_passage_count,
+                      passage.chunk_index AS passage_chunk_index,
+                      passage.start_char AS passage_start_char,
+                      passage.end_char AS passage_end_char,
+                      passage.content_sha256 AS passage_content_sha256
+                 FROM document_passage_projections projection
+                 JOIN document_passages passage
+                   ON passage.raw_object_id=projection.raw_object_id
+                WHERE projection.raw_object_id=?
+                ORDER BY passage.chunk_index""",
+        (raw_object_id,),
+    )
+    if not rows:
+        return None
+    parent = rows[0]
+    passage_count = parent.get("projection_passage_count")
+    if (
+        parent.get("projection_raw_object_id") != raw_object_id
+        or parent.get("projection_source_version") != source_version
+        or parent.get("projection_source_content_sha256") != source_digest
+        or parent.get("projection_extracted_text_sha256") != body_digest
+        or parent.get("projection_source_char_count") != len(body)
+        or parent.get("projection_passage_index_revision") != contract.index_revision
+        or parent.get("projection_status") != "current"
+        or parent.get("projection_incomplete_reason") is not None
+        or type(passage_count) is not int
+        or passage_count != len(rows)
+        or not 1 <= passage_count <= _DOCUMENT_PASSAGE_MAX_COUNT
+        or type(parent.get("projection_passage_set_sha256")) is not str
+        or _SHA256.fullmatch(str(parent["projection_passage_set_sha256"])) is None
+    ):
+        return None
+    parent_keys = (
+        "projection_raw_object_id",
+        "projection_source_version",
+        "projection_source_content_sha256",
+        "projection_extracted_text_sha256",
+        "projection_source_char_count",
+        "projection_passage_set_sha256",
+        "projection_passage_index_revision",
+        "projection_status",
+        "projection_incomplete_reason",
+        "projection_passage_count",
+    )
+    passages: list[_StoredDocumentPassage] = []
+    digest_rows: list[tuple[int, int, int, str]] = []
+    previous: _StoredDocumentPassage | None = None
+    for expected_index, row in enumerate(rows):
+        if any(row.get(key) != parent.get(key) for key in parent_keys):
+            return None
+        chunk_index = row.get("passage_chunk_index")
+        start_char = row.get("passage_start_char")
+        end_char = row.get("passage_end_char")
+        content_digest = row.get("passage_content_sha256")
+        if (
+            type(chunk_index) is not int
+            or chunk_index != expected_index
+            or type(start_char) is not int
+            or type(end_char) is not int
+            or not 0 <= start_char < end_char <= len(body)
+            or type(content_digest) is not str
+            or _SHA256.fullmatch(content_digest) is None
+        ):
+            return None
+        passage = _StoredDocumentPassage(
+            chunk_index,
+            start_char,
+            end_char,
+            content_digest,
+        )
+        if previous is not None and (
+            passage.start_char <= previous.start_char
+            or passage.start_char > previous.end_char
+            or passage.end_char <= previous.end_char
+        ):
+            return None
+        try:
+            exact_digest = hashlib.sha256(
+                body[start_char:end_char].encode("utf-8", errors="strict")
+            ).hexdigest()
+        except UnicodeEncodeError:
+            return None
+        if not hmac.compare_digest(exact_digest, content_digest):
+            return None
+        passages.append(passage)
+        digest_rows.append((chunk_index, start_char, end_char, content_digest))
+        previous = passage
+    if passages[0].start_char != 0 or passages[-1].end_char != len(body):
+        return None
+    try:
+        set_digest = contract.set_sha256(tuple(digest_rows))
+    except (TypeError, ValueError, UnicodeError, OverflowError):
+        return None
+    if (
+        type(set_digest) is not str
+        or _SHA256.fullmatch(set_digest) is None
+        or not hmac.compare_digest(set_digest, str(parent["projection_passage_set_sha256"]))
+    ):
+        return None
+    return tuple(passages)
 
 
 def _summary(
@@ -1646,19 +1865,21 @@ def _lexical_sql(
     request: ArchiveSearchRequest,
     *,
     derivative_available: bool,
+    document_passage_revision: str | None = None,
 ) -> tuple[str, tuple[object, ...]]:
     source_cte, scope_parameters = _source_cte(corpus, request, include_body=True)
     passage_projection_cte = _passage_projection_cte(
         corpus,
         document_passage_available=derivative_available,
+        document_passage_revision=document_passage_revision,
     )
     folded_fields: tuple[str, ...]
     if corpus is ArchiveSearchCorpus.DOCUMENTS:
         # The global raw-object index intentionally contains rejected rows and
         # therefore cannot be consulted by this archive facade.  The authorized
-        # body scan below remains authoritative.  The reader-first passage
-        # sidecar changes only coverage readiness; it does not change candidate
-        # membership or the released legacy PassageRef identity.
+        # body scan below remains authoritative.  The passage sidecar may
+        # provide evidence identity after ranking, but cannot admit, remove or
+        # reorder a candidate.
         derivative_expression = "0"
         derivative_mismatch_expression = "passage_projection_current<>1"
         derivative_backfill_expression = "passage_projection_backfill_pending=1"
@@ -1989,16 +2210,23 @@ def _exact_span(body: str, query: str) -> tuple[int, int] | None:
     return None
 
 
-def _excerpt(body: object, query: str) -> tuple[str, int, int] | None:
-    if type(body) is not str or not body:
-        return None
-    match = _exact_span(body, query)
-    if match is None:
-        return None
+def _excerpt_for_match(
+    body: str,
+    match: tuple[int, int],
+    *,
+    lower_bound: int,
+    upper_bound: int,
+    allow_oversized_match: bool,
+) -> tuple[str, int, int] | None:
     match_start, match_end = match
-    start = max(0, match_start - _MAX_EXCERPT_CHARS // 2)
-    end = min(len(body), start + _MAX_EXCERPT_CHARS)
-    start = max(0, end - _MAX_EXCERPT_CHARS)
+    if not 0 <= lower_bound <= match_start < match_end <= upper_bound <= len(body) or (
+        not allow_oversized_match and match_end - match_start > _MAX_EXCERPT_CHARS
+    ):
+        return None
+    budget = min(_MAX_EXCERPT_CHARS, upper_bound - lower_bound)
+    start = max(lower_bound, match_start - budget // 2)
+    end = min(upper_bound, start + budget)
+    start = max(lower_bound, end - budget)
     for index in range(start, match_start):
         if unicodedata.category(body[index]).startswith("C"):
             start = index + 1
@@ -2019,9 +2247,61 @@ def _excerpt(body: object, query: str) -> tuple[str, int, int] | None:
     ):
         text = body[match_start:match_end]
         start, end = match_start, match_end
-    if not text or text != text.strip() or any(unicodedata.category(char).startswith("C") for char in text):
+    if (
+        not text
+        or text != text.strip()
+        or (not allow_oversized_match and len(text) > _MAX_EXCERPT_CHARS)
+        or any(unicodedata.category(char).startswith("C") for char in text)
+    ):
         return None
     return text, start, end
+
+
+def _excerpt(body: object, query: str) -> tuple[str, int, int] | None:
+    if type(body) is not str or not body:
+        return None
+    match = _exact_span(body, query)
+    if match is None:
+        return None
+    return _excerpt_for_match(
+        body,
+        match,
+        lower_bound=0,
+        upper_bound=len(body),
+        allow_oversized_match=True,
+    )
+
+
+def _stored_document_excerpt(
+    body: object,
+    query: str,
+    passages: tuple[_StoredDocumentPassage, ...] | None,
+) -> tuple[str, int, int, int] | None:
+    """Choose the lowest persisted child containing the whole exact match."""
+
+    if type(body) is not str or not body or passages is None:
+        return None
+    match = _exact_span(body, query)
+    if match is None:
+        return None
+    match_start, match_end = match
+    passage = next(
+        (item for item in passages if item.start_char <= match_start < match_end <= item.end_char),
+        None,
+    )
+    if passage is None:
+        return None
+    excerpt = _excerpt_for_match(
+        body,
+        match,
+        lower_bound=passage.start_char,
+        upper_bound=passage.end_char,
+        allow_oversized_match=False,
+    )
+    if excerpt is None:
+        return None
+    text, start, end = excerpt
+    return text, start, end, passage.chunk_index
 
 
 def _closed_lifecycle(value: object, *, label: str) -> LifecycleState:
@@ -2189,6 +2469,7 @@ def _candidate(
     request: ArchiveSearchRequest,
     tenant_id: str,
     owner_id: str,
+    document_passages: tuple[_StoredDocumentPassage, ...] | None = None,
 ) -> ArchiveSearchCandidate:
     resolved, passage_revision, raw_revision, knowledge_revision = _resolved_source(
         row,
@@ -2220,14 +2501,33 @@ def _candidate(
             and row.get("inbox_status") == LifecycleState.PENDING.value
         )
     ):
-        excerpt = _excerpt(row.get("passage_body"), request.query)
+        stored_excerpt = (
+            _stored_document_excerpt(
+                row.get("passage_body"),
+                request.query,
+                document_passages,
+            )
+            if corpus is ArchiveSearchCorpus.DOCUMENTS
+            else None
+        )
+        excerpt = (
+            (stored_excerpt[0], stored_excerpt[1], stored_excerpt[2])
+            if stored_excerpt is not None
+            else _excerpt(row.get("passage_body"), request.query)
+        )
         if excerpt is not None:
             text, start, end = excerpt
+            chunk_index = stored_excerpt[3] if stored_excerpt is not None else 0
+            passage_index_version = (
+                DOCUMENT_STORED_PASSAGE_INDEX_VERSION
+                if stored_excerpt is not None
+                else LEGACY_DOCUMENT_PASSAGE_INDEX_VERSION
+            )
             passage_ref = PassageRef.from_resolved_source(
                 resolved,
                 source_revision=passage_revision,
-                locator=TextSpanLocator(chunk_index=0, start_char=start, end_char=end),
-                passage_index_version=PASSAGE_INDEX_VERSION,
+                locator=TextSpanLocator(chunk_index=chunk_index, start_char=start, end_char=end),
+                passage_index_version=passage_index_version,
                 embedding=EmbeddingIdentity.unindexed(EmbeddingCompatibility.NOT_APPLICABLE),
             )
             passages = (ArchiveSearchPassage(passage_ref, text),)
@@ -2354,10 +2654,26 @@ def _select_authorized_archive_document_replay_source_in_transaction(
         body = rows[0].get("passage_body")
         if type(body) is not str:
             raise _fail("archive document replay body is unavailable")
+        stored_passages: tuple[_StoredDocumentPassage, ...] | None = None
+        if corpus is ArchiveSearchCorpus.DOCUMENTS:
+            passage_contract = _load_document_passage_contract(conn)
+            if passage_contract is not None:
+                try:
+                    stored_passages = _select_current_document_passages(
+                        conn,
+                        rows[0],
+                        passage_contract,
+                    )
+                except ArchiveDocumentStorageError:
+                    # A sidecar read can never make a legacy v1 selection less
+                    # replayable.  A v2 caller will observe the missing exact
+                    # child and close as drifted below the storage seam.
+                    stored_passages = None
         return ArchiveDocumentReplaySource(
             corpus=corpus,
             resolved_source=resolved,
             body=body,
+            stored_passages=stored_passages,
             _factory=_REPLAY_FACTORY,
         )
     except ArchiveDocumentStorageError:
@@ -2481,6 +2797,7 @@ def search_archive_document_lane(
 
     document_catalog_available = False
     document_catalog_enrichment_revision = 0
+    document_passage_contract: _DocumentPassageContract | None = None
     if corpus is ArchiveSearchCorpus.DOCUMENTS and lane is SearchLane.CATALOG:
         (
             document_catalog_available,
@@ -2502,15 +2819,18 @@ def search_archive_document_lane(
                 snapshot_current=snapshot_current,
                 authority_rechecked=True,
             )
-        derivative_available = (
-            _document_passage_contract(conn)
-            if corpus is ArchiveSearchCorpus.DOCUMENTS
-            else _table_exists(conn, "knowledge_fts")
-        )
+        if corpus is ArchiveSearchCorpus.DOCUMENTS:
+            document_passage_contract = _load_document_passage_contract(conn)
+            derivative_available = document_passage_contract is not None
+        else:
+            derivative_available = _table_exists(conn, "knowledge_fts")
         sql, lane_parameters = _lexical_sql(
             corpus,
             request,
             derivative_available=derivative_available,
+            document_passage_revision=(
+                document_passage_contract.index_revision if document_passage_contract is not None else None
+            ),
         )
     else:
         derivative_available = False
@@ -2533,6 +2853,7 @@ def search_archive_document_lane(
         if lane is not SearchLane.LEXICAL or not derivative_available:
             raise
         derivative_available = False
+        document_passage_contract = None
         sql, lane_parameters = _lexical_sql(
             corpus,
             request,
@@ -2555,6 +2876,37 @@ def search_archive_document_lane(
         hits,
     ) = _summary(rows)
     visible_hits = hits[:page_limit]
+    document_passages: dict[str, tuple[_StoredDocumentPassage, ...]] = {}
+    invalid_current_passages = 0
+    if (
+        corpus is ArchiveSearchCorpus.DOCUMENTS
+        and lane is SearchLane.LEXICAL
+        and document_passage_contract is not None
+    ):
+        try:
+            for item in visible_hits:
+                if item.get("passage_projection_current") != 1:
+                    continue
+                raw_object_id = item.get("raw_id")
+                passages = _select_current_document_passages(
+                    conn,
+                    item,
+                    document_passage_contract,
+                )
+                if type(raw_object_id) is str and passages is not None:
+                    document_passages[raw_object_id] = passages
+                else:
+                    invalid_current_passages += 1
+        except ArchiveDocumentStorageError:
+            # Keep the released body scan and ordering available when the
+            # optional child read itself is unavailable.  Coverage and locator
+            # identity both close to the legacy fallback.
+            document_passages.clear()
+            invalid_current_passages = sum(
+                item.get("passage_projection_current") == 1 for item in visible_hits
+            )
+    derivative_mismatches += invalid_current_passages
+    derivative_unavailable += invalid_current_passages
     try:
         candidates = tuple(
             _candidate(
@@ -2564,6 +2916,7 @@ def search_archive_document_lane(
                 request=request,
                 tenant_id=tenant,
                 owner_id=owner,
+                document_passages=document_passages.get(str(item.get("raw_id"))),
             )
             for item in visible_hits
         )
@@ -2618,6 +2971,7 @@ __all__ = [
     "ArchiveDocumentLanePage",
     "ArchiveDocumentReplaySource",
     "ArchiveDocumentStorageError",
+    "DOCUMENT_STORED_PASSAGE_INDEX_VERSION",
     "MAX_ARCHIVE_DOCUMENT_RESULTS",
     "PASSAGE_INDEX_VERSION",
     "select_authorized_archive_document_replay_source_in_transaction",

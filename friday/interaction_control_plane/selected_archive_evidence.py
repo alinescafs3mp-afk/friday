@@ -16,6 +16,10 @@ from enum import StrEnum
 from typing import Any
 
 from friday.retrieval._contract_utils import RetrievalContractError
+from friday.retrieval.archive_search_document_locator import (
+    DOCUMENT_STORED_PASSAGE_INDEX_VERSION,
+    LEGACY_DOCUMENT_PASSAGE_INDEX_VERSION,
+)
 from friday.retrieval.identity_contract import (
     AuthorityScope,
     RepresentationKind,
@@ -33,7 +37,6 @@ WORK_ITEM_SELECTED_PASSAGE_MAX_COUNT = 8
 _DIGEST_RE = re.compile(r"[0-9a-f]{64}\Z")
 _MESSAGE_ID_RE = re.compile(r"msg_[0-9a-f]{16}\Z")
 _WORK_ITEM_ID_RE = re.compile(r"work_[0-9a-f]{16}\Z")
-_DOCUMENT_PASSAGE_INDEX_VERSION = "archive-storage-char-v1"
 _MESSAGE_PASSAGE_INDEX_VERSION = "archive-message-window-v1"
 
 
@@ -175,11 +178,16 @@ class SelectedArchiveEvidence:
         expected_locator = (
             MessageWindowLocator if self.corpus is SelectedArchiveCorpus.MESSAGES else TextSpanLocator
         )
-        expected_passage_index = (
-            _MESSAGE_PASSAGE_INDEX_VERSION
-            if self.corpus is SelectedArchiveCorpus.MESSAGES
-            else _DOCUMENT_PASSAGE_INDEX_VERSION
-        )
+        expected_passage_indexes = {
+            SelectedArchiveCorpus.DOCUMENTS: frozenset(
+                {
+                    LEGACY_DOCUMENT_PASSAGE_INDEX_VERSION,
+                    DOCUMENT_STORED_PASSAGE_INDEX_VERSION,
+                }
+            ),
+            SelectedArchiveCorpus.KNOWLEDGE: frozenset({LEGACY_DOCUMENT_PASSAGE_INDEX_VERSION}),
+            SelectedArchiveCorpus.MESSAGES: frozenset({_MESSAGE_PASSAGE_INDEX_VERSION}),
+        }[self.corpus]
         if (
             self.source_ref.source_kind not in expected_source_kinds
             or self.source_ref.authority_scope is not expected_authority
@@ -187,9 +195,10 @@ class SelectedArchiveEvidence:
                 item.source_revision.representation.kind is not expected_representation
                 or item.source_revision.kind is not expected_revision
                 or type(item.locator) is not expected_locator
-                or item.passage_index_version != expected_passage_index
+                or item.passage_index_version not in expected_passage_indexes
                 for item in passages
             )
+            or len({item.passage_index_version for item in passages}) != 1
         ):
             raise SelectedArchiveEvidenceError("corpus, source and passage replay matrix disagree")
         if len({item.source_revision for item in passages}) != 1:
