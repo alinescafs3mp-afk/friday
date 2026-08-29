@@ -931,6 +931,117 @@ async def test_checked_completion_cannot_exceed_the_exact_leased_context(setting
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("excess_prompt_tokens", "accepted"),
+    [(0, True), (1, False)],
+)
+async def test_checked_completion_closes_the_lease_with_authoritative_prompt_usage(
+    settings,
+    excess_prompt_tokens: int,
+    accepted: bool,
+) -> None:
+    messages = [{"role": "user", "content": "synthetic"}]
+    max_tokens = 128
+    requirements = _requirements()
+    measured_prompt_tokens = (
+        requirements.required_context_tokens
+        - max_tokens
+        - CONTEXT_SAFETY_RESERVE_TOKENS
+        + excess_prompt_tokens
+    )
+    runtime, completion, metrics = _runtime(
+        settings,
+        completions=[
+            V12ServedCompletion(
+                content="clear",
+                finish_reason="stop",
+                tool_calls=(),
+                prompt_tokens=measured_prompt_tokens,
+                served_model_alias="dispatcher",
+            )
+        ],
+    )
+    _install_attestation(runtime)
+    assert (
+        runtime._seal.router.estimate_messages_tokens(messages)  # noqa: SLF001
+        + max_tokens
+        + CONTEXT_SAFETY_RESERVE_TOKENS
+        < requirements.required_context_tokens
+    )
+    lease = runtime._gate.lease(  # noqa: SLF001
+        requirements,
+        process_epoch_sha256=_EPOCH_SHA256,
+    )
+    assert lease is not None
+
+    if accepted:
+        result = await runtime.checked_chat(
+            lease,
+            requirements,
+            messages,
+            max_tokens=max_tokens,
+            absolute_deadline=time.monotonic() + 2,
+        )
+        assert result["usage"] == {"prompt_tokens": measured_prompt_tokens}
+    else:
+        with pytest.raises(V12ModelRuntimeError) as caught:
+            await runtime.checked_chat(
+                lease,
+                requirements,
+                messages,
+                max_tokens=max_tokens,
+                absolute_deadline=time.monotonic() + 2,
+            )
+        assert caught.value.code is V12ModelRuntimeFailure.COMPLETION_INVALID
+
+    assert len(completion.calls) == 1
+    assert len(metrics.calls) == 2
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "measured_prompt_tokens",
+    [None, True, -1, float("nan"), float("inf")],
+)
+async def test_checked_completion_rejects_malformed_authoritative_prompt_usage(
+    settings,
+    measured_prompt_tokens: Any,
+) -> None:
+    runtime, completion, metrics = _runtime(
+        settings,
+        completions=[
+            V12ServedCompletion(
+                content="clear",
+                finish_reason="stop",
+                tool_calls=(),
+                prompt_tokens=measured_prompt_tokens,
+                served_model_alias="dispatcher",
+            )
+        ],
+    )
+    _install_attestation(runtime)
+    requirements = _requirements()
+    lease = runtime._gate.lease(  # noqa: SLF001
+        requirements,
+        process_epoch_sha256=_EPOCH_SHA256,
+    )
+    assert lease is not None
+
+    with pytest.raises(V12ModelRuntimeError) as caught:
+        await runtime.checked_chat(
+            lease,
+            requirements,
+            [{"role": "user", "content": "synthetic"}],
+            max_tokens=128,
+            absolute_deadline=time.monotonic() + 2,
+        )
+
+    assert caught.value.code is V12ModelRuntimeFailure.COMPLETION_INVALID
+    assert len(completion.calls) == 1
+    assert len(metrics.calls) == 2
+
+
+@pytest.mark.asyncio
 async def test_checked_completion_revokes_on_epoch_drift_even_after_a_model_response(settings) -> None:
     runtime, _completion, _metrics_transport = _runtime(
         settings,

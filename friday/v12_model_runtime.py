@@ -1083,6 +1083,32 @@ def _validate_attested_chat_input(
         raise _runtime_error(V12ModelRuntimeFailure.COMPLETION_INVALID)
 
 
+def _authoritative_usage_fits_lease(
+    projection: object,
+    lease: object,
+    requirements: object,
+    max_tokens: object,
+) -> bool:
+    """Close the measured context bound with post-transport token usage."""
+
+    if (
+        type(projection) is not V12ServedCompletion
+        or type(lease) is not ModelProfileLease
+        or type(requirements) is not ModelRequirements
+        or not isinstance(projection.prompt_tokens, int)
+        or isinstance(projection.prompt_tokens, bool)
+        or projection.prompt_tokens < 0
+        or not isinstance(max_tokens, int)
+        or isinstance(max_tokens, bool)
+        or max_tokens <= 0
+        or lease.required_context_tokens != requirements.required_context_tokens
+    ):
+        return False
+    return bool(
+        projection.prompt_tokens + max_tokens + CONTEXT_SAFETY_RESERVE_TOKENS <= lease.required_context_tokens
+    )
+
+
 class _PlannerBridge:
     def __init__(self, client: V12ProductionProbeClient) -> None:
         self._client = client
@@ -1733,12 +1759,13 @@ class AttestedV12ModelRuntime:
             self._gate.revoke(ModelGateReason.EPOCH_CHANGED)
             raise _runtime_error(V12ModelRuntimeFailure.EPOCH_CHANGED)
         if call_error is not None:
-            if (
-                isinstance(call_error, V12ModelRuntimeError)
-                and call_error.code is V12ModelRuntimeFailure.SERVED_ALIAS_REJECTED
-            ):
-                self._gate.revoke(ModelGateReason.ATTESTATION_REJECTED)
-                raise _runtime_error(V12ModelRuntimeFailure.SERVED_ALIAS_REJECTED) from None
+            if isinstance(call_error, V12ModelRuntimeError) and call_error.code in {
+                V12ModelRuntimeFailure.SERVED_ALIAS_REJECTED,
+                V12ModelRuntimeFailure.COMPLETION_INVALID,
+            }:
+                if call_error.code is V12ModelRuntimeFailure.SERVED_ALIAS_REJECTED:
+                    self._gate.revoke(ModelGateReason.ATTESTATION_REJECTED)
+                raise _runtime_error(call_error.code) from None
             raise _runtime_error(V12ModelRuntimeFailure.MODEL_CALL_FAILED) from None
         if (
             projection is None
@@ -1748,6 +1775,12 @@ class AttestedV12ModelRuntime:
                 lease,
                 requirements,
                 process_epoch_sha256=after_epoch,
+            )
+            or not _authoritative_usage_fits_lease(
+                projection,
+                lease,
+                requirements,
+                max_tokens,
             )
         ):
             raise _runtime_error(V12ModelRuntimeFailure.COMPLETION_INVALID)
