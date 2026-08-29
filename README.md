@@ -2,7 +2,7 @@
 
 **Friday** (по-русски — **Пятница**; ex codename Jericho) — локальная многопользовательская Knowledge Operating System: она принимает текст и документы, сохраняет первоисточник, строит граф знаний, ищет по личной базе и отвечает через Telegram или HTTP API. Веб-панель предназначена для администрирования, разбора Inbox, работы с сущностями, правами, резервными копиями и диагностикой.
 
-Текущая версия: **0.207.77**; immutable fallback — **0.207.76**. Owner-only
+Текущая версия: **0.207.78**; immutable fallback — **0.207.77**. Owner-only
 Engineer Mode теперь является автономной консолью Пятницы внутри её основной
 VM: модель сама выбирает и
 последовательно запускает установленное ПО от пользователя службы, работает с
@@ -13,7 +13,10 @@ Managed Syncthing для Obsidian стартует вместе с backend, со
 Unix endpoint между перезапусками и больше не скрывает отказ профиля за ложным
 healthy heartbeat. Авторизованный read-only `archive_search`
 объединяет личные документы, знания, сообщения и Obsidian с точными
-источниками, покрытием и финальной повторной проверкой прав. Schema 44
+источниками, покрытием и финальной повторной проверкой прав. Его внутренний
+bounded tail теперь сохраняет разрешённые источники за первой страницей, а
+сообщения сначала распределяют места между разными беседами и только потом
+добавляют соседние совпадения из той же беседы. Schema 44
 добавила fixed WorkGraph ровно для сравнения текущего файла с текущим вебом:
 два body-free read-шага, primary synthesis и CAS/restart state, один
 review-admitted web recovery, exact full/terminal publication receipts и
@@ -63,7 +66,7 @@ final synthesis по-прежнему принадлежит primary, а люб�
 Assist открывается только точным v2 policy и одноразовым live-shadow receipt;
 secondary не получает tools, effects или права прямой публикации.
 
-Кандидат 0.207.77 использует фактическую live-attested ёмкость Qwen3.8 до
+Начиная с 0.207.77 используется фактическая live-attested ёмкость Qwen3.8 до
 40960 токенов и выбирает минимально достаточный закрытый lease-tier из
 `8192/16384/24576/32768/40960`; короткие запросы остаются на 8192, как и
 legacy/Qwen3.6. Exact tier и requirements digest связывают план, lease и
@@ -394,7 +397,7 @@ fan-out одной задачи. Иерархическое чтение док�
 `/v1/models`, bounded `/metrics`, `/server_info` и per-process deployment
 witness с code-owned identities и launch graph. Любой drift, неполный
 witness или незамкнутый same-origin proxy оставляют routes в `legacy`.
-Приёмка 0.207.77 должна показать в `/api/health` его точную версию,
+Приёмка 0.207.78 должна показать в `/api/health` его точную версию,
 profile id, `canary_ready`, `live_attestation_clear`,
 `verified_context_tokens=40960` и оба зарегистрированных route; простого HTTP
 `status=ok` недостаточно.

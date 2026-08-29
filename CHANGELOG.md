@@ -1,3 +1,20 @@
+## 0.207.78 — 2026-08-29
+
+### Measured archive-search facade parity
+
+- Preserves the released twenty-result storage seams while the private
+  `archive_search` facade materializes a fair, bounded candidate tail for real
+  continuation instead of losing authorized rank-21+ sources.
+- Ranks and pages distinct authorized conversation sources before bounded
+  same-conversation hits, preventing one chat from crowding every other chat
+  out of the archive page. An empty authorized message result receives the
+  existing one-shot keyboard-layout repair; an original hit remains final.
+- Keeps final publication reauthorization, coverage, source identities,
+  passage locators and cursor sealing unchanged. The body-free parity battery
+  reaches exact membership on all six corpus probes and leaves the one measured
+  legacy/archive ordering difference explicitly partial. SQLite remains schema
+  48; exact `0.207.77/schema48` is both predecessor and immutable fallback.
+
 ## 0.207.77 — 2026-08-29
 
 ### Live-attested V12 context adoption

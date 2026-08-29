@@ -699,6 +699,8 @@ identity. `rc0` отдельно не активируется. Для 46→47 �
 `0.207.76rc0/schema48` fallback.
 `0.207.77/schema48` миграции не выполняет: его stable previous и immutable
 fallback — один exact `0.207.76/schema48`.
+`0.207.78/schema48` также не меняет DDL: exact `0.207.77/schema48` служит и
+stable previous, и immutable fallback.
 
 0.206.4 использует SQLite schema 34; Obsidian-релиз 0.207.2 поднимает её до
 schema 35. Новое поле имени загрузки принадлежит
@@ -968,7 +970,7 @@ process-owned result. Acquire одноразовый: отказ, timeout, drift
 attestation не разрешают повторный acquire на меньшем или новом tier.
 
 Во время probe `/api/health` ещё недоступен. Ждите до 420 секунд и дополнительно
-требуйте `status=ok` и `version=0.207.77`.
+требуйте `status=ok` и `version=0.207.78`.
 
 HTTP `status=ok` при `installed_mode=legacy` означает безопасную деградацию, но
 не успешный canary. В `canary`/`v12` Sentinel не реже раза в минуту
