@@ -489,7 +489,7 @@ def _projection_anchors(
                           mapped.anchor_content_sha256,
                           mapped.anchor_locator_sha256,
                           mapped.conversation_prefix_sha256,
-                          mapped.source_rowid,
+                          mapped.source_rowid AS rowid,
                           CASE WHEN mapped.source_ordinal<>mapped.anchor_ordinal
                                  OR friday_conversation_passage_anchor_valid(
                                         source.id,source.conversation_id,
@@ -525,7 +525,7 @@ def _projection_anchors(
                           anchor_content_sha256,anchor_locator_sha256,
                           conversation_prefix_sha256
                      FROM validated_children
-                    ORDER BY anchor_ordinal ASC
+                    ORDER BY anchor_ordinal ASC, rowid ASC
                     LIMIT ? OFFSET ?
                )
                SELECT proof.child_count,proof.invalid_child_count,page.*

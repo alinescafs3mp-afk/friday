@@ -21,7 +21,8 @@ either merged here or discarded before that source is removed.
 - Immediate runtime predecessor and schema-capable fallback: Friday `0.207.77` /
   `827520f706f908f9d7b5c46f81b5e94f5e91a160`; tree
   `29d715f307043d97c989ef7ddf2e986965b68e7c012b0bfef3a8681557f84880`.
-- Database schema: 48.
+- Database schema: 49 for this release candidate; deployed production remains
+  schema 48 until immutable activation completes.
 - Production: immutable activation `clear`; backend and Telegram bridge active;
   trusted-CA health `200`; signed private-owner chat returned exact `OK`; V12
   `canary_ready` with verified, installation and effective context all exactly
@@ -43,9 +44,9 @@ either merged here or discarded before that source is removed.
 
 ## Active package
 
-S4-R3 measured search-facade parity is live; S4-R4 conversation passages are in
-isolated implementation, split into a reader-first schema-49 release and a
-later bounded writer/activation release. Keep the released S3 path in shadow
+S4-R3 measured search-facade parity is live; S4-R4a reader-first conversation
+passages are accepted as the schema-49 release candidate, while R4b remains the
+separate bounded writer/activation release. Keep the released S3 path in shadow
 until its genuine production witness exists; then promote only the
 current-file-plus-current-public-web journey through the already released
 fail-closed activation gate. S5 measured cognition and exact 40k lease adoption
@@ -270,7 +271,8 @@ Status: R0 measured recall and R1 corpus-backed lexical gap closure deployed in
 The bounded writer and restart-safe backfill are deployed in `0.207.74` and are
 converging in production. R2c v3 passage topology and authenticated stored
 locators are deployed in `0.207.76`. R3 measured search-facade parity is
-deployed in `0.207.78`; R4 conversation passages are the active isolated package.
+deployed in `0.207.78`; R4a is the accepted schema-49 release candidate and R4b
+is the active isolated writer/activation package.
 
 1. Add reader-first `document_passages` with a schema-capable fallback, bounded
    writer, restart-safe resumable backfill and honest `index_incomplete`.

@@ -1,3 +1,21 @@
+## 0.207.79 — 2026-08-29
+
+### Reader-first conversation passages
+
+- Adds schema 49 with one immutable body-free projection per conversation and
+  exact admission-order anchors per message. Existing conversations migrate
+  only to explicit `backfill_pending`; this release does not activate a writer
+  or a new productive search lane.
+- Authenticates the full accepted conversation prefix before returning a
+  bounded Turn-safe projection. Owner scope, message identity, prefix and set
+  proofs fail closed under INSERT, UPDATE and REPLACE conflicts.
+- Gives conversation FTS an independent receipt and recovery transaction while
+  preserving the released message-history fallback. Export, account deletion,
+  backup/restore and no-FTS recovery cover the sidecar without storing message
+  bodies or exposing internal row identities.
+- Uses never-activated `0.207.79rc0/schema49` as the schema-capable fallback;
+  exact `0.207.78/schema48` remains the pre-migration predecessor.
+
 ## 0.207.78 — 2026-08-29
 
 ### Measured archive-search facade parity
