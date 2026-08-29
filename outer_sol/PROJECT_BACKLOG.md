@@ -14,15 +14,17 @@ either merged here or discarded before that source is removed.
 ## Current production identity
 
 - Branch: `main`
-- Deployed implementation head: `84828b31eb4b7b1ea7103c04d7ee9148fe379ce9`.
-- Live: Friday `0.207.78` / `84828b31eb4b7b1ea7103c04d7ee9148fe379ce9`;
-  tree `fe30568b01fe39aea6ad24069b8fb9813fc889654faed2561ff83946cad5a621`;
-  wheel `316ecb106ad20968ddb438e4a0bebb76231b03a50cc1f2d2fa3ee5d2f7ff1990`.
-- Immediate runtime predecessor and schema-capable fallback: Friday `0.207.77` /
-  `827520f706f908f9d7b5c46f81b5e94f5e91a160`; tree
-  `29d715f307043d97c989ef7ddf2e986965b68e7c012b0bfef3a8681557f84880`.
-- Database schema: 49 for this release candidate; deployed production remains
-  schema 48 until immutable activation completes.
+- Deployed implementation head: `117c56a37d798552d70fb25671aa9a4b407f3f87`.
+- Live: Friday `0.207.79` / `117c56a37d798552d70fb25671aa9a4b407f3f87`;
+  tree `85f14b507396b6b6d2841da901e8a9e7f0adce11299a2339dc0a62e19d17a610`;
+  wheel `bf4b30222955ee87aeb5edf4c38423e62ee70f0170cc61e9544c9f33578b61e5`.
+- Immediate runtime predecessor: Friday `0.207.78` /
+  `84828b31eb4b7b1ea7103c04d7ee9148fe379ce9`; tree
+  `fe30568b01fe39aea6ad24069b8fb9813fc889654faed2561ff83946cad5a621`.
+  Distinct schema-capable fallback: Friday `0.207.79rc0` /
+  `c49709352c811240fc3072079b2407a07161cc82`; tree
+  `c019830b2a04fc2c118f12fe2821701e800b9d30a96a9db49ef2a32304e32d73`.
+- Database schema: 49.
 - Production: immutable activation `clear`; backend and Telegram bridge active;
   trusted-CA health `200`; signed private-owner chat returned exact `OK`; V12
   `canary_ready` with verified, installation and effective context all exactly
@@ -41,12 +43,16 @@ either merged here or discarded before that source is removed.
   current parents and 16,359 child passages, with no pending v3 backfill. The two
   formerly invalid sparse-text v2 sources were repaired by the released v3
   topology; no document body is duplicated in the sidecar.
+- The reader-first body-free conversation-passage contour is live: all 1,407
+  conversations have one projection marked incomplete for `backfill_pending`,
+  with zero child passages and zero logical FTS rows until the separate R4b
+  writer activation.
 
 ## Active package
 
-S4-R3 measured search-facade parity is live; S4-R4a reader-first conversation
-passages are accepted as the schema-49 release candidate, while R4b remains the
-separate bounded writer/activation release. Keep the released S3 path in shadow
+S4-R3 measured search-facade parity and S4-R4a reader-first conversation
+passages are live; R4b remains the separate bounded writer/activation release.
+Keep the released S3 path in shadow
 until its genuine production witness exists; then promote only the
 current-file-plus-current-public-web journey through the already released
 fail-closed activation gate. S5 measured cognition and exact 40k lease adoption
@@ -271,8 +277,8 @@ Status: R0 measured recall and R1 corpus-backed lexical gap closure deployed in
 The bounded writer and restart-safe backfill are deployed in `0.207.74` and are
 converging in production. R2c v3 passage topology and authenticated stored
 locators are deployed in `0.207.76`. R3 measured search-facade parity is
-deployed in `0.207.78`; R4a is the accepted schema-49 release candidate and R4b
-is the active isolated writer/activation package.
+deployed in `0.207.78`; R4a reader-first conversation passages are deployed in
+`0.207.79`, and R4b is the active isolated writer/activation package.
 
 1. Add reader-first `document_passages` with a schema-capable fallback, bounded
    writer, restart-safe resumable backfill and honest `index_incomplete`.
@@ -346,6 +352,18 @@ checks were clear and two wheels were byte-identical. The operator-independent
 schema-48 backup verified; immutable activation ended `clear` with exact
 `0.207.77` as predecessor/fallback. Trusted-CA health reports `0.207.78`/`ok`,
 V12 is `canary_ready`, and the signed private-owner smoke returned exact `OK`.
+
+R4a acceptance: schema, lifecycle, reader, privacy and performance reviews were
+clean. The exact native gate passed 24,013 Python plus 31 UI tests with zero
+skips; static checks were clear. Stable and rc0 were each built twice as
+byte-identical wheels. Production-copy acceptance passed 17/17 checks: the
+48→49 migration preserved all 1,407 conversation identities, created one
+body-free `backfill_pending` projection per conversation and zero child/FTS
+rows; stable and the distinct rc0 reopened schema 49, while `0.207.78` rejected
+it without changing bytes. Backup/restore preserved the exact sidecar and FTS
+receipt. Immutable activation produced verified SQLite/inbox/Obsidian/Engineer
+recovery receipts and ended `clear`; trusted-CA health reports
+`0.207.79`/`ok`, and the signed private-owner smoke returned exact `OK`.
 
 Estimate: 6–12 clean-work days across the remaining separately reversible releases.
 
@@ -448,9 +466,8 @@ schema 47 and clean integrity/FK checks. Trusted-CA health reported
 2. Keep released `EngineerWorkItem v1` stable; do not expand its scope.
 3. Keep the released bounded S3 advisor in shadow until a genuine eligible turn
    creates its exact production witness; do not fabricate activation evidence.
-4. Release S4-R4a as a reader-first schema-49 conversation-passage sidecar with
-   a distinct never-activated schema-capable fallback; enable its bounded writer
-   and lexical lane only in the later R4b release.
+4. Keep released S4-R4a stable; integrate R4b as the separate bounded writer,
+   restart-safe backfill and lexical-lane activation release.
 5. Keep the released S5 measured-lease contract green; extend cognition only
    through another measured, reversible journey release.
 6. Preserve the released exact-evidence verifier and reject mutable or
