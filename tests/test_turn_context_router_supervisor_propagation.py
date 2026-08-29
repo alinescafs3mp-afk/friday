@@ -29,6 +29,13 @@ from friday.orchestration import turn_context_publication as publication_module
 from friday.orchestration.contracts import RouterMode, TurnInput
 from friday.orchestration.router import OrchestrationRouter, _authenticated_attachment_references
 from friday.orchestration.semantic_supervisor_runtime import SemanticSupervisorShadowRuntime
+from friday.orchestration.supervisor_assist_controller import (
+    SupervisorAssistOutcome,
+    SupervisorAssistResult,
+)
+from friday.orchestration.supervisor_assist_ingress import SupervisorAssistIngressBindingV1
+from friday.orchestration.supervisor_assist_runtime import SemanticSupervisorAssistRuntime
+from friday.orchestration.supervisor_assist_surface import CurrentFileWebAssistSurface
 from friday.orchestration.turn_context import (
     AuthenticatedTurnContext,
     FinalPublisher,
@@ -42,6 +49,7 @@ from friday.orchestration.turn_context import (
     TurnSafetyDeadline,
 )
 from friday.orchestration.turn_context_call_scope import (
+    AuthenticatedChatCallScope,
     require_authenticated_chat_call_scope,
     require_current_authenticated_chat_call_scope,
 )
@@ -148,6 +156,7 @@ class _AttachmentCarrier(dict[str, Any]):
 def _authenticated_attachment_turn(
     *,
     clock: list[int] | None = None,
+    message: str = "Прочитай приложенный файл.",
 ) -> tuple[
     TurnContextIssuer,
     AuthenticatedTurnContext,
@@ -219,7 +228,7 @@ def _authenticated_attachment_turn(
         tenant_id=actor.user_id,
     )
     model_input = TurnInput.from_chat(
-        message="Прочитай приложенный файл.",
+        message=message,
         actor=actor,
         conversation_id=_CONVERSATION_ID,
         attachments=[carrier],
@@ -377,6 +386,127 @@ def _supervisor_settings() -> SimpleNamespace:
         semantic_supervisor_timeout_sec=12.0,
         secondary_llm_profile=semantic_supervisor_policy.SUPERVISOR_RUNTIME_PROFILE_ID,
     )
+
+
+@pytest.mark.asyncio
+async def test_exact_authenticated_current_file_web_turn_reaches_assist_controller_once(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import friday.orchestration.supervisor_assist_surface as assist_surface_module
+
+    message = "Сравни приложенный файл с актуальными правилами в интернете."
+    issuer, context, actor, carrier = _authenticated_attachment_turn(message=message)
+    ingress = SupervisorAssistIngressBindingV1.from_claimed_request(
+        source_ref="authenticated-current-file-web",
+        request_fingerprint_sha256="e" * 64,
+    )
+    surface = object.__new__(CurrentFileWebAssistSurface)
+    constructor_calls = 0
+
+    def prepare_authenticated_surface(
+        _settings: object,
+        *,
+        authenticated_context: AuthenticatedTurnContext,
+        authenticated_scope: AuthenticatedChatCallScope,
+        ingress_binding: SupervisorAssistIngressBindingV1 | None,
+        explicit_mode_requested: bool,
+        conversation_is_dialogue: Any,
+    ) -> CurrentFileWebAssistSurface:
+        nonlocal constructor_calls
+        constructor_calls += 1
+        assert authenticated_context is expected_context
+        assert authenticated_scope is require_current_authenticated_chat_call_scope(authenticated_context)
+        assert authenticated_scope.attachment_carriers == (carrier,)
+        assert ingress_binding is ingress
+        assert explicit_mode_requested is False
+        assert conversation_is_dialogue(actor.own_id, _CONVERSATION_ID) is True
+        return surface
+
+    monkeypatch.setattr(
+        assist_surface_module,
+        "prepare_authenticated_current_file_web_assist_surface",
+        prepare_authenticated_surface,
+        raising=False,
+    )
+
+    class Controller:
+        def __init__(self) -> None:
+            self.classify_calls = 0
+            self.execute_calls = 0
+
+        def pending_durable_turn_admission(self, *_args: Any, **_kwargs: Any) -> bool:
+            return False
+
+        def classify_supervisor_assist_pending(self, *_args: Any, **_kwargs: Any) -> bool:
+            self.classify_calls += 1
+            return False
+
+        async def execute(
+            self,
+            admitted_surface: object,
+            *,
+            legacy_primary: Any,
+            absolute_deadline: float,
+        ) -> SupervisorAssistResult:
+            del legacy_primary
+            assert admitted_surface is surface
+            assert absolute_deadline > 0
+            self.execute_calls += 1
+            return SupervisorAssistResult(
+                outcome=SupervisorAssistOutcome.PUBLISHED,
+                response={"conversation_id": _CONVERSATION_ID, "message": "promoted"},
+            )
+
+        async def cancel_active(self, *_args: Any, **_kwargs: Any) -> None:
+            return None
+
+        async def reconcile_pending_before_legacy(self, *_args: Any, **_kwargs: Any) -> None:
+            return None
+
+        async def close(self) -> None:
+            return None
+
+    expected_context = context
+    primary = _Primary()
+    controller = Controller()
+    runtime = SemanticSupervisorAssistRuntime(
+        settings=SimpleNamespace(
+            semantic_supervisor_mode="assist",
+            semantic_supervisor_timeout_sec=12.0,
+        ),
+        primary=primary,
+        controller=cast(Any, controller),
+        conversation_is_dialogue=lambda person, conversation: (
+            person == actor.own_id and conversation == _CONVERSATION_ID
+        ),
+    )
+    ingestion = {
+        "promoted": False,
+        "queued_for_review": False,
+        "action": "transient",
+        "category": "web_request",
+        "reason": "explicit current public web request",
+    }
+
+    with bind_authenticated_turn_context(issuer, context):
+        response = await runtime.chat(
+            actor.user_id,
+            message,
+            actor=actor,
+            conversation_id=_CONVERSATION_ID,
+            attachments=[carrier],
+            enable_tools=True,
+            ingestion_result=ingestion,
+            turn_deadline=_exact_deadline_float(context),
+            _semantic_supervisor_ingress_binding=ingress,
+            _authenticated_turn_context=context,
+        )
+
+    assert response["message"] == "promoted"
+    assert constructor_calls == 1
+    assert controller.classify_calls == 1
+    assert controller.execute_calls == 1
+    assert primary.calls == 0
 
 
 @pytest.mark.asyncio

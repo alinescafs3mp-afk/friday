@@ -5681,6 +5681,7 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
 
             pending_durable_intake_admission: PendingDurableTurnAdmission | bool = False
             supervisor_assist_pending_decision: SupervisorAssistPendingDecision | None = None
+            supervisor_assist_pending_admission: PendingDurableTurnAdmission | None = None
             pending_durable_intake_suppressed = False
             if (
                 not autonomous_engineer
@@ -5710,6 +5711,8 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
                 )
                 if type(assist_relation) is SupervisorAssistPendingDecision:
                     supervisor_assist_pending_decision = assist_relation
+                    if type(assist_relation.pending) is PendingDurableTurnAdmission:
+                        supervisor_assist_pending_admission = assist_relation.pending
                     pending_durable_intake_suppressed = assist_relation.suppresses_ingestion
                 else:
                     pending_durable_intake_admission = _pending_durable_turn_admission_before_ingestion(
@@ -5741,7 +5744,10 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
                 and not spoken_question
                 and not turn_policy.handled
                 and pending_durable_intake_admission is False
-                and supervisor_assist_pending_decision is None
+                and (
+                    supervisor_assist_pending_decision is None
+                    or supervisor_assist_pending_admission is not None
+                )
                 and _turn_context_budget_eligible(
                     deadline=_turn_deadline,
                     max_output_tokens=state.settings.llm_max_tokens,
@@ -5812,12 +5818,16 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
                         deadline_monotonic_ns=int(_turn_deadline * 1_000_000_000),
                         max_output_tokens=state.settings.llm_max_tokens,
                         attachments=attachments,
+                        pending_admission=supervisor_assist_pending_admission,
                     )
                 except TurnContextError:
                     # This opt-in propagation slice must not make an input or a
                     # supported legacy configuration newly fatal.  No context
                     # or effect authority has been bound at this point.
-                    if authenticated_current_upload_surface:
+                    if (
+                        authenticated_current_upload_surface
+                        or supervisor_assist_pending_admission is not None
+                    ):
                         raise
                     authenticated_turn_context = None
                 if authenticated_turn_context is not None:
@@ -5856,7 +5866,7 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
                         turn_policy=None,
                         telegram_update_id=trusted_telegram_update_id,
                         turn_deadline=_turn_deadline,
-                        pending_durable_admission=None,
+                        pending_durable_admission=supervisor_assist_pending_admission,
                         kg=state.kg,
                         hybrid_searcher=state.hybrid_searcher,
                         runtime_router_mode=runtime_router_mode,
@@ -6026,7 +6036,9 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
                     telegram_update_id=trusted_telegram_update_id,
                     turn_deadline=_turn_deadline,
                     _pending_durable_admission=(
-                        pending_durable_intake_admission
+                        supervisor_assist_pending_admission
+                        if authenticated_turn_context is not None
+                        else pending_durable_intake_admission
                         if isinstance(
                             pending_durable_intake_admission,
                             PendingDurableTurnAdmission,

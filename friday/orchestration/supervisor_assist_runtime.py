@@ -15,6 +15,7 @@ import time
 from collections.abc import Awaitable, Callable, Mapping
 from typing import Any, Protocol
 
+from friday.orchestration import supervisor_assist_surface as supervisor_assist_surface_module
 from friday.orchestration.supervisor_assist_controller import (
     AssistPendingGraphDisposition,
     SupervisorAssistOutcome,
@@ -26,10 +27,7 @@ from friday.orchestration.supervisor_assist_ingress import (
     SupervisorAssistPendingDecision,
     SupervisorAssistPendingRelation,
 )
-from friday.orchestration.supervisor_assist_surface import (
-    CurrentFileWebAssistSurface,
-    prepare_current_file_web_assist_surface,
-)
+from friday.orchestration.supervisor_assist_surface import CurrentFileWebAssistSurface
 from friday.orchestration.supervisor_contracts import SupervisorMode
 from friday.orchestration.turn_context import (
     AuthenticatedTurnContext,
@@ -38,6 +36,7 @@ from friday.orchestration.turn_context import (
 from friday.orchestration.turn_context_call_scope import (
     UNSPECIFIED_CHAT_ADJUNCT,
     require_authenticated_chat_call_scope,
+    require_current_authenticated_chat_call_scope,
 )
 from friday.orchestration.turn_context_runtime import current_primary_authenticated_turn_context
 from friday.pending_durable_turn import PendingDurableTurnAdmission
@@ -532,6 +531,12 @@ class SemanticSupervisorAssistRuntime:
                 )
                 legacy_kwargs.update(revalidated_scope.exact_service_kwargs())
             response = await self._primary.chat(user_id, message, **legacy_kwargs)
+            if authenticated_context is not None:
+                current_scope = require_current_authenticated_chat_call_scope(authenticated_context)
+                if current_scope is not authenticated_scope:
+                    raise SupervisorAssistRuntimeError(
+                        "authenticated assist call scope changed across primary await"
+                    )
             if type(response) is not dict:
                 raise SupervisorAssistRuntimeError("legacy primary returned an invalid response")
             return response
@@ -546,12 +551,36 @@ class SemanticSupervisorAssistRuntime:
             authenticated_pending.owner_kind is PendingOwnerKind.UNCERTAIN_FAIL_CLOSED
         ):
             raise SupervisorAssistRuntimeError("authenticated pending-work ownership is uncertain")
+        fresh_surface: CurrentFileWebAssistSurface | None = None
         if authenticated_context is not None and authenticated_pending is None:
             if _semantic_supervisor_pending_decision is not None:
                 raise SupervisorAssistRuntimeError("authenticated ordinary turn cannot acquire pending work")
-            response = await legacy_primary()
-            await self._observe_ordinary(response, actor)
-            return response
+            authenticated_surface_constructor = getattr(
+                supervisor_assist_surface_module,
+                "prepare_authenticated_current_file_web_assist_surface",
+                None,
+            )
+            if (
+                callable(authenticated_surface_constructor)
+                and type(_semantic_supervisor_ingress_binding) is SupervisorAssistIngressBindingV1
+            ):
+                candidate = authenticated_surface_constructor(
+                    self._settings,
+                    authenticated_context=authenticated_context,
+                    authenticated_scope=authenticated_scope,
+                    ingress_binding=_semantic_supervisor_ingress_binding,
+                    explicit_mode_requested=_semantic_supervisor_explicit_mode_requested,
+                    conversation_is_dialogue=self._conversation_is_dialogue,
+                )
+                if candidate is not None and type(candidate) is not CurrentFileWebAssistSurface:
+                    raise SupervisorAssistRuntimeError(
+                        "authenticated assist surface constructor returned an invalid result"
+                    )
+                fresh_surface = candidate
+            if fresh_surface is None:
+                response = await legacy_primary()
+                await self._observe_ordinary(response, actor)
+                return response
         if (
             authenticated_pending is not None
             and authenticated_pending.owner_kind is not PendingOwnerKind.WORK_GRAPH
@@ -589,6 +618,12 @@ class SemanticSupervisorAssistRuntime:
             and active.relation is SupervisorAssistPendingRelation.UNCERTAIN
         ):
             raise SupervisorAssistRuntimeError("durable assist ownership is uncertain")
+        if (
+            authenticated_context is not None
+            and authenticated_pending is None
+            and type(active) is SupervisorAssistPendingDecision
+        ):
+            raise SupervisorAssistRuntimeError("authenticated ordinary turn cannot acquire pending work")
         if authenticated_pending is not None and (
             type(active) is not SupervisorAssistPendingDecision
             or active.pending is not authenticated_pending.admission
@@ -620,6 +655,12 @@ class SemanticSupervisorAssistRuntime:
                 user_message=normalized,
                 absolute_deadline=deadline,
             )
+            if authenticated_context is not None:
+                current_scope = require_current_authenticated_chat_call_scope(authenticated_context)
+                if current_scope is not authenticated_scope:
+                    raise SupervisorAssistRuntimeError(
+                        "authenticated assist call scope changed across cancellation await"
+                    )
             if cancelled is None or type(cancelled.response) is not dict:
                 raise SupervisorAssistRuntimeError("active assist cancellation is uncertain")
             return cancelled.response
@@ -639,6 +680,12 @@ class SemanticSupervisorAssistRuntime:
                 raise
             except Exception as exc:
                 raise SupervisorAssistRuntimeError("durable assist reconciliation is uncertain") from exc
+            if authenticated_context is not None:
+                current_scope = require_current_authenticated_chat_call_scope(authenticated_context)
+                if current_scope is not authenticated_scope:
+                    raise SupervisorAssistRuntimeError(
+                        "authenticated assist call scope changed across reconciliation await"
+                    )
             if disposition is AssistPendingGraphDisposition.UNCERTAIN:
                 raise SupervisorAssistRuntimeError("durable assist reconciliation is uncertain")
             if disposition not in {
@@ -657,34 +704,22 @@ class SemanticSupervisorAssistRuntime:
             await self._observe_ordinary(response, actor)
             return response
 
-        surface = prepare_current_file_web_assist_surface(
-            self._settings,
-            user_id=user_id,
-            message=message,
-            actor=actor,
-            conversation_id=conversation_id,
-            attachments=attachments,
-            enable_tools=enable_tools,
-            ingestion_result=effective_ingestion_result,
-            synthetic_document_notice=synthetic_document_notice,
-            replay_source_message_id=replay_source_message_id,
-            mode=mode,
-            explicit_mode_requested=_semantic_supervisor_explicit_mode_requested,
-            answer_with_voice=answer_with_voice,
-            reply_to=reply_to,
-            quoted_attachment_reference=quoted_attachment_reference,
-            reply_assistant_reference=reply_assistant_reference,
-            reply_assistant_message_id=reply_assistant_message_id,
-            turn_policy=turn_policy,
-            pending_durable_admission=_pending_durable_admission,
-            ingress_binding=_semantic_supervisor_ingress_binding,
-            conversation_is_dialogue=self._conversation_is_dialogue,
-        )
+        if authenticated_context is None:
+            response = await legacy_primary()
+            await self._observe_ordinary(response, actor)
+            return response
+        if fresh_surface is None:
+            raise SupervisorAssistRuntimeError("authenticated assist surface was lost before execution")
         result = await self._controller.execute(
-            surface,
+            fresh_surface,
             legacy_primary=legacy_primary,
             absolute_deadline=deadline,
         )
+        current_scope = require_current_authenticated_chat_call_scope(authenticated_context)
+        if current_scope is not authenticated_scope:
+            raise SupervisorAssistRuntimeError(
+                "authenticated assist call scope changed across controller await"
+            )
         if type(result) is not SupervisorAssistResult:
             raise SupervisorAssistRuntimeError("assist controller returned an invalid result")
         if result.outcome is SupervisorAssistOutcome.LEGACY:

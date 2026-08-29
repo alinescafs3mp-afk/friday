@@ -13,6 +13,10 @@ from friday.orchestration.supervisor_assist_ingress import (
     SupervisorAssistPendingDecision,
     SupervisorAssistPendingRelation,
 )
+from friday.orchestration.turn_context import AuthenticatedTurnContext
+from friday.orchestration.turn_context_call_scope import (
+    require_current_authenticated_chat_call_scope,
+)
 from friday.pending_durable_turn import PendingDurableTurnAdmission
 from friday.permissions import LEGACY_OWNER_USER_ID
 
@@ -45,9 +49,9 @@ def _pending(
     )
 
 
-def _result() -> dict[str, Any]:
+def _result(conversation_id: str = _CONVERSATION_ID) -> dict[str, Any]:
     return {
-        "conversation_id": _CONVERSATION_ID,
+        "conversation_id": conversation_id,
         "message_id": "msg_0123456789abcdef",
         "message": "assist ingress boundary response",
         "message_format": "plain",
@@ -66,9 +70,11 @@ def test_active_new_turn_ingests_once_and_exact_replay_never_reaches_agent(
 
     app = create_app(settings)
     headers = {"Authorization": f"Bearer {settings.api_token}"}
+    conversation_id = _CONVERSATION_ID
     classifier_calls: list[SupervisorAssistIngressBindingV1] = []
     ingest_calls: list[str] = []
     agent_calls: list[dict[str, Any]] = []
+    pending_admission = _pending()
 
     def classify(
         person_id: str,
@@ -79,12 +85,12 @@ def test_active_new_turn_ingests_once_and_exact_replay_never_reaches_agent(
         **_kwargs: Any,
     ) -> SupervisorAssistPendingDecision:
         assert person_id == LEGACY_OWNER_USER_ID
-        assert conversation_id == _CONVERSATION_ID
+        assert conversation_id == expected_conversation_id
         assert type(ingress_binding) is SupervisorAssistIngressBindingV1
         classifier_calls.append(ingress_binding)
         return SupervisorAssistPendingDecision.for_graph(
             relation=SupervisorAssistPendingRelation.NEW_TURN,
-            pending=_pending(),
+            pending=pending_admission,
             root_request_binding_sha256=_binding("active-root").canonical_sha256(),
             current=ingress_binding,
         )
@@ -100,15 +106,31 @@ def test_active_new_turn_ingests_once_and_exact_replay_never_reaches_agent(
         }
 
     async def chat(_user_id: str, _message: str, **kwargs: Any) -> dict[str, Any]:
+        context = kwargs["_authenticated_turn_context"]
+        assert type(context) is AuthenticatedTurnContext
+        assert context.pending_work_admission is not None
+        assert context.pending_work_admission.admission is pending_admission
+        assert kwargs["_pending_durable_admission"] is pending_admission
+        scope = require_current_authenticated_chat_call_scope(context)
+        assert scope.pending_work_bound is True
         agent_calls.append(kwargs)
-        return _result()
+        return _result(expected_conversation_id)
 
-    payload = {
-        "message": "Новая независимая реплика",
-        "conversation_id": _CONVERSATION_ID,
-        "source_ref": "api-assist:new-turn-once",
-    }
+    expected_conversation_id = conversation_id
+
     with TestClient(app) as client:
+        expected_conversation_id = str(
+            app.state.storage.create_conversation(
+                LEGACY_OWNER_USER_ID,
+                title="assist ingress new turn",
+            )["id"]
+        )
+        pending_admission = _pending(conversation_id=expected_conversation_id)
+        payload = {
+            "message": "Новая независимая реплика",
+            "conversation_id": expected_conversation_id,
+            "source_ref": "api-assist:new-turn-once",
+        }
         monkeypatch.setattr(
             app.state.agent,
             "classify_supervisor_assist_pending",
@@ -132,7 +154,7 @@ def test_active_new_turn_ingests_once_and_exact_replay_never_reaches_agent(
     assert carried_binding is classifier_calls[0]
     assert type(carried_decision) is SupervisorAssistPendingDecision
     assert carried_decision.relation is SupervisorAssistPendingRelation.NEW_TURN
-    assert carried_decision.pending == _pending()
+    assert carried_decision.pending is pending_admission
     assert carried_decision.current_request_binding_sha256 == carried_binding.canonical_sha256()
     assert agent_calls[0]["ingestion_result"]["action"] == "queued"
 
@@ -154,8 +176,10 @@ def test_non_new_assist_relation_suppresses_ingestion(
 
     app = create_app(settings)
     headers = {"Authorization": f"Bearer {settings.api_token}"}
+    conversation_id = _CONVERSATION_ID
     decisions: list[SupervisorAssistPendingDecision] = []
     agent_calls: list[dict[str, Any]] = []
+    pending_admission = _pending()
 
     def classify(
         _person_id: str,
@@ -167,7 +191,7 @@ def test_non_new_assist_relation_suppresses_ingestion(
         if relation is SupervisorAssistPendingRelation.UNCERTAIN:
             decision = SupervisorAssistPendingDecision.uncertain(
                 person_id=LEGACY_OWNER_USER_ID,
-                conversation_id=_CONVERSATION_ID,
+                conversation_id=conversation_id,
                 current=ingress_binding,
             )
         else:
@@ -178,7 +202,7 @@ def test_non_new_assist_relation_suppresses_ingestion(
             )
             decision = SupervisorAssistPendingDecision.for_graph(
                 relation=relation,
-                pending=_pending(),
+                pending=pending_admission,
                 root_request_binding_sha256=root_binding.canonical_sha256(),
                 current=ingress_binding,
             )
@@ -189,10 +213,28 @@ def test_non_new_assist_relation_suppresses_ingestion(
         raise AssertionError(f"{relation.value} reached ingest_text")
 
     async def chat(_user_id: str, _message: str, **kwargs: Any) -> dict[str, Any]:
+        context = kwargs["_authenticated_turn_context"]
+        if relation is SupervisorAssistPendingRelation.UNCERTAIN:
+            assert context is None
+            assert kwargs["_pending_durable_admission"] is None
+        else:
+            assert type(context) is AuthenticatedTurnContext
+            assert context.pending_work_admission is not None
+            assert context.pending_work_admission.admission is pending_admission
+            assert kwargs["_pending_durable_admission"] is pending_admission
+            scope = require_current_authenticated_chat_call_scope(context)
+            assert scope.pending_work_bound is True
         agent_calls.append(kwargs)
-        return _result()
+        return _result(conversation_id)
 
     with TestClient(app) as client:
+        conversation_id = str(
+            app.state.storage.create_conversation(
+                LEGACY_OWNER_USER_ID,
+                title=f"assist ingress {relation.value}",
+            )["id"]
+        )
+        pending_admission = _pending(conversation_id=conversation_id)
         monkeypatch.setattr(
             app.state.agent,
             "classify_supervisor_assist_pending",
@@ -205,7 +247,7 @@ def test_non_new_assist_relation_suppresses_ingestion(
             "/api/chat",
             json={
                 "message": "cancel" if relation is SupervisorAssistPendingRelation.EXPLICIT_CANCEL else "x",
-                "conversation_id": _CONVERSATION_ID,
+                "conversation_id": conversation_id,
                 "source_ref": f"api-assist:suppress:{relation.value}",
             },
             headers=headers,

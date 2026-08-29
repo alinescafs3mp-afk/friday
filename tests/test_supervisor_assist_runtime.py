@@ -169,12 +169,7 @@ def _runtime(
 
 
 @pytest.mark.asyncio
-async def test_ordinary_turn_calls_primary_once_and_observes_only_after_commit(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    import friday.orchestration.supervisor_assist_runtime as module
-
-    monkeypatch.setattr(module, "prepare_current_file_web_assist_surface", lambda *_a, **_k: None)
+async def test_ordinary_turn_calls_primary_once_and_observes_only_after_commit() -> None:
     response = {
         "message": "legacy",
         "conversation_id": _CONVERSATION,
@@ -199,7 +194,7 @@ async def test_ordinary_turn_calls_primary_once_and_observes_only_after_commit(
 
     assert actual is response
     assert primary.calls == 1
-    assert controller.execute_calls == 1
+    assert controller.execute_calls == 0
     assert controller.surface is None
     assert primary.kwargs is not None
     assert primary.kwargs["telegram_update_id"] == "update-0123456789"
@@ -208,16 +203,19 @@ async def test_ordinary_turn_calls_primary_once_and_observes_only_after_commit(
 
 
 @pytest.mark.asyncio
-async def test_promoted_response_never_crosses_legacy_or_ordinary_observer(
+async def test_contextless_fresh_candidate_stays_primary_only(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     import friday.orchestration.supervisor_assist_runtime as module
 
-    surface = object()
+    def forbidden_surface(*_args: Any, **_kwargs: Any) -> None:
+        raise AssertionError("contextless request reached authenticated surface admission")
+
     monkeypatch.setattr(
-        module,
-        "prepare_current_file_web_assist_surface",
-        lambda *_a, **_k: surface,
+        module.supervisor_assist_surface_module,
+        "prepare_authenticated_current_file_web_assist_surface",
+        forbidden_surface,
+        raising=False,
     )
     primary = _Primary({"message": "must not run"})
     controller = _Controller()
@@ -244,10 +242,11 @@ async def test_promoted_response_never_crosses_legacy_or_ordinary_observer(
         },
     )
 
-    assert result["message"] == "promoted"
-    assert controller.surface is surface
-    assert primary.calls == 0
-    assert observed == 0
+    assert result["message"] == "must not run"
+    assert controller.surface is None
+    assert controller.execute_calls == 0
+    assert primary.calls == 1
+    assert observed == 1
 
 
 @pytest.mark.asyncio
@@ -267,7 +266,12 @@ async def test_existing_graph_bypasses_new_planning_and_does_not_bind_legacy_wor
     def forbidden_surface(*_args: Any, **_kwargs: Any) -> None:
         raise AssertionError("surface recognition must stay behind durable ownership")
 
-    monkeypatch.setattr(module, "prepare_current_file_web_assist_surface", forbidden_surface)
+    monkeypatch.setattr(
+        module.supervisor_assist_surface_module,
+        "prepare_authenticated_current_file_web_assist_surface",
+        forbidden_surface,
+        raising=False,
+    )
     primary = _Primary(
         {
             "message": "ordinary overlap",
@@ -434,7 +438,12 @@ async def test_uncertain_graph_never_falls_through_and_observer_failure_is_non_a
 ) -> None:
     import friday.orchestration.supervisor_assist_runtime as module
 
-    monkeypatch.setattr(module, "prepare_current_file_web_assist_surface", lambda *_a, **_k: None)
+    monkeypatch.setattr(
+        module.supervisor_assist_surface_module,
+        "prepare_authenticated_current_file_web_assist_surface",
+        lambda *_a, **_k: None,
+        raising=False,
+    )
     primary = _Primary(
         {
             "message": "legacy",
