@@ -484,7 +484,11 @@ def test_promotion_settings_without_loaded_material_remain_discarded_shadow(
     scheduler = _AdmittedShadowScheduler()
     activation_loads = 0
 
-    def unavailable_activation(_settings: Any, _scheduler: Any) -> tuple[None, None]:
+    def unavailable_activation(
+        _settings: Any,
+        _scheduler: Any,
+        _storage: Any,
+    ) -> tuple[None, None]:
         nonlocal activation_loads
         activation_loads += 1
         return None, None
@@ -597,7 +601,7 @@ def test_promoted_server_schedules_restart_recovery_and_keeps_model_attestation_
     monkeypatch.setattr(
         server,
         "_load_semantic_supervisor_activation_material",
-        lambda _settings, _scheduler: (material, None),
+        lambda _settings, _scheduler, _storage: (material, None),
     )
     monkeypatch.setattr(server, "create_attested_v12_model_runtime", lambda _llm: model)
 

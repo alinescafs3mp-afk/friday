@@ -171,6 +171,11 @@ from friday.orchestration.supervisor_effect_intent_runtime import (
     load_configured_supervisor_effect_maturity,
     supervisor_effect_shadow_health_status,
 )
+from friday.orchestration.supervisor_representative_window_attestation import (
+    AcceptedRepresentativeWindowAttestation,
+    representative_window_target_server_identity_after_restart,
+    verify_persisted_consumed_representative_window_issue,
+)
 from friday.orchestration.turn_context import (
     FinalPublisher,
     IngressKind,
@@ -364,6 +369,7 @@ def _secondary_status_projection(runtime: object, method_name: str) -> Mapping[s
 def _load_semantic_supervisor_activation_material(
     settings: FridaySettings,
     secondary_brain: object,
+    storage: object,
 ) -> tuple[AssistPromotionActivationMaterial | None, CapabilityBindingSnapshot | None]:
     """Load optional immutable activation inputs without accepting promotion."""
 
@@ -372,6 +378,28 @@ def _load_semantic_supervisor_activation_material(
         raw = raw_factory() if callable(raw_factory) else RawAssistPromotionActivationSettings()
         if not isinstance(raw, RawAssistPromotionActivationSettings):
             return None, None
+
+        def verify_representative_window(
+            issue: Mapping[str, object],
+        ) -> AcceptedRepresentativeWindowAttestation:
+            raw_target_mode = raw.requested_mode
+            if type(raw_target_mode) is not str:
+                raise ValueError("representative-window target mode is invalid")
+            target_mode = SupervisorMode(raw_target_mode)
+            if target_mode not in {SupervisorMode.ASSIST, SupervisorMode.CANARY}:
+                raise ValueError("representative-window target mode is not admitted")
+            current_identity = representative_window_target_server_identity_after_restart(
+                settings,
+                secondary_brain,
+                target_mode=target_mode,
+            )
+            return verify_persisted_consumed_representative_window_issue(
+                storage,
+                user_id=LEGACY_OWNER_USER_ID,
+                issue_value=issue,
+                current_server_identity=current_identity,
+            )
+
         bindings = operational_capability_snapshot()
         material = load_assist_promotion_activation(
             raw,
@@ -385,6 +413,7 @@ def _load_semantic_supervisor_activation_material(
                 "diagnostics_status",
             ),
             binding_snapshot=bindings,
+            representative_window_verifier=verify_representative_window,
         )
     except Exception as exc:
         LOGGER.warning(
@@ -2665,6 +2694,7 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
             ) = _load_semantic_supervisor_activation_material(
                 settings,
                 secondary_brain,
+                storage,
             )
             configured_router_mode = RouterMode.fail_closed(settings.router_mode)
             attempted_v12_runtime: AttestedV12ModelRuntime | None = None

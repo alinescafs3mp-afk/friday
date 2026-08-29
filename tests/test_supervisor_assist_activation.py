@@ -14,7 +14,7 @@ from typing import Any
 
 import pytest
 
-from friday import semantic_supervisor_policy
+from friday import __version__, semantic_supervisor_policy
 from friday.orchestration import supervisor_representative_window_attestation as window_module
 from friday.orchestration.capability_binding import (
     CapabilityBindingSnapshot,
@@ -69,10 +69,15 @@ from friday.orchestration.supervisor_promotion_evidence_producer import (
 from friday.orchestration.supervisor_representative_window_attestation import (
     REPRESENTATIVE_WINDOW_ATTESTATION_SCHEMA,
     REPRESENTATIVE_WINDOW_AUTHORITY,
+    REPRESENTATIVE_WINDOW_CONSUME_REQUEST_SCHEMA,
+    REPRESENTATIVE_WINDOW_ISSUE_REQUEST_SCHEMA,
     REPRESENTATIVE_WINDOW_ISSUE_RESPONSE_SCHEMA,
     AcceptedRepresentativeWindowAttestation,
+    consume_representative_window_attestation,
+    issue_representative_window_attestation,
     representative_window_sha256,
 )
+from friday.permissions import LEGACY_OWNER_USER_ID
 from friday.secondary_brain import (
     ModelWorkload,
     SecondaryMode,
@@ -642,6 +647,45 @@ def _promotion_baseline_raw() -> bytes:
     return canonical_json_file_bytes(report)
 
 
+def _assist_readiness_baseline_raw() -> bytes:
+    report = json.loads(_promotion_baseline_raw())
+    report["sample"].update(
+        {
+            "turn_traces": 20,
+            "promoted_product_events": 0,
+        }
+    )
+    report["primary_baseline"].update(
+        {
+            "intent_counts": {"mixed": 20},
+            "playbook_counts": {"compare_internal_and_external_sources": 20},
+            "completion_counts": {"complete": 8, "failed": 12},
+            "publication_counts": {"assistant_committed": 20},
+            "failure_counts": {
+                "capability:source_unavailable": 5,
+                "none:none": 15,
+            },
+            "authority_rechecked_count": 20,
+        }
+    )
+    empty_assist = dict(report["product_windows"]["promoted_execution"]["canary"])
+    empty_assist.update(
+        {
+            "mode": "assist",
+            "product_window_sha256": "f" * 64,
+            "promoted": {
+                **empty_assist["promoted"],
+                "stage": "assist",
+                "window_sha256": "e" * 64,
+            },
+        }
+    )
+    report["product_windows"]["promoted_execution"]["assist"] = empty_assist
+    report.pop("report_sha256")
+    report["report_sha256"] = canonical_sha256(report)
+    return canonical_json_file_bytes(report)
+
+
 def _promotion_bundle_file(
     tmp_path: Path,
     *,
@@ -650,8 +694,10 @@ def _promotion_bundle_file(
     registry_sha256: str,
     budget_path: Path,
     budget_sha256: str,
+    representative_window_issue: Mapping[str, object] | None = None,
+    baseline_raw_override: bytes | None = None,
 ) -> tuple[Path, str]:
-    baseline_raw = _promotion_baseline_raw()
+    baseline_raw = baseline_raw_override or _promotion_baseline_raw()
     baseline = load_accepted_supervisor_production_baseline(
         baseline_raw,
         expected_file_sha256=hashlib.sha256(baseline_raw).hexdigest(),
@@ -751,15 +797,16 @@ def _promotion_bundle_file(
         "expires_at": 1_500,
         "signature": "9" * 64,
     }
-    representative_window_issue: dict[str, object] = {
-        "schema": REPRESENTATIVE_WINDOW_ISSUE_RESPONSE_SCHEMA,
-        "status": "unused",
-        "server_attestation": server_attestation,
-        "server_attestation_sha256": representative_window_sha256(server_attestation),
-        "attestation_lookup_token": lookup_token,
-        "lookup_token_sha256": server_attestation["lookup_token_sha256"],
-        "state_version": 1,
-    }
+    if representative_window_issue is None:
+        representative_window_issue = {
+            "schema": REPRESENTATIVE_WINDOW_ISSUE_RESPONSE_SCHEMA,
+            "status": "unused",
+            "server_attestation": server_attestation,
+            "server_attestation_sha256": representative_window_sha256(server_attestation),
+            "attestation_lookup_token": lookup_token,
+            "lookup_token_sha256": server_attestation["lookup_token_sha256"],
+            "state_version": 1,
+        }
     raw = canonical_json_file_bytes(
         build_supervisor_promotion_bundle_payload(
             baseline_raw=baseline_raw,
@@ -817,6 +864,197 @@ def _activation_fixture(
         runtime_available=runtime_available,
     )
     return raw, root, public, diagnostics, binding
+
+
+def _representative_window_predecessor_identity(
+    *,
+    registry_sha256: str,
+) -> dict[str, object]:
+    policy = semantic_supervisor_policy.supervisor_product_policy_identity_for_mode(
+        SupervisorMode.SHADOW
+    )
+    return {
+        "primary_pid": 100,
+        "primary_process_epoch_sha256": "5" * 64,
+        "primary_backend_version": __version__,
+        "observed_release_commit": "4" * 40,
+        "observed_release_metadata_sha256": "3" * 64,
+        "observed_release_tree_sha256": "2" * 64,
+        "observed_registry_binding_sha256": registry_sha256,
+        "requested_mode": SupervisorMode.SHADOW.value,
+        "supervisor_policy_id": policy.policy_id,
+        "supervisor_policy_sha256": policy.policy_sha256,
+        "runtime_profile_id": semantic_supervisor_policy.SUPERVISOR_RUNTIME_PROFILE_ID,
+        "runtime_profile_manifest_sha256": (
+            semantic_supervisor_policy.SUPERVISOR_RUNTIME_PROFILE_MANIFEST_SHA256
+        ),
+    }
+
+
+def _representative_window_consume_request(
+    issue: Mapping[str, object],
+) -> dict[str, object]:
+    attestation = issue["server_attestation"]
+    assert isinstance(attestation, Mapping)
+    return {
+        "schema": REPRESENTATIVE_WINDOW_CONSUME_REQUEST_SCHEMA,
+        "attestation_lookup_token": issue["attestation_lookup_token"],
+        "server_attestation_sha256": issue["server_attestation_sha256"],
+        "target_mode": attestation["target_mode"],
+        "baseline_file_sha256": attestation["baseline_file_sha256"],
+        "baseline_report_sha256": attestation["baseline_report_sha256"],
+        "latency_budget_file_sha256": attestation["latency_budget_file_sha256"],
+        "latency_budget_document_sha256": attestation[
+            "latency_budget_document_sha256"
+        ],
+        "source_revision_sha256": attestation["source_revision_sha256"],
+        "registry_binding_sha256": attestation["registry_binding_sha256"],
+        "observer_runner_sha256": attestation["observer_runner_sha256"],
+        "precursor_assist_promotion_evidence_sha256": attestation[
+            "precursor_assist_promotion_evidence_sha256"
+        ],
+    }
+
+
+@pytest.mark.parametrize(
+    ("durable_state", "current_identity_matches", "configured", "reason"),
+    (
+        ("consumed", True, True, "material_loaded_not_accepted"),
+        ("unused", True, False, "representative_window_unavailable"),
+        ("missing", True, False, "representative_window_unavailable"),
+        ("consumed", False, False, "representative_window_unavailable"),
+    ),
+)
+def test_real_server_loader_requires_exact_consumed_representative_window(
+    tmp_path: Path,
+    settings: Any,
+    storage: Any,
+    monkeypatch: pytest.MonkeyPatch,
+    durable_state: str,
+    current_identity_matches: bool,
+    configured: bool,
+    reason: str,
+) -> None:
+    import friday.server as server
+
+    root, source = _release_root(tmp_path)
+    binding = operational_capability_snapshot()
+    registry = binding.digest_hex()
+    budget_path, budget_sha256 = _latency_budget_file(
+        tmp_path,
+        mode=SupervisorMode.ASSIST,
+        source_sha256=source,
+    )
+    baseline_raw = _assist_readiness_baseline_raw()
+    baseline = json.loads(baseline_raw)
+    budget = json.loads(budget_path.read_bytes())
+    predecessor_identity = _representative_window_predecessor_identity(
+        registry_sha256=registry,
+    )
+    storage.ensure_user(
+        LEGACY_OWNER_USER_ID,
+        source="api-token",
+        display_name="Owner",
+        preset_key="owner",
+    )
+    monkeypatch.setattr(
+        window_module,
+        "build_production_baseline",
+        lambda _conn, *, limit: baseline if limit == 100 else {},
+    )
+    issue = issue_representative_window_attestation(
+        storage,
+        user_id=LEGACY_OWNER_USER_ID,
+        request_value={
+            "schema": REPRESENTATIVE_WINDOW_ISSUE_REQUEST_SCHEMA,
+            "target_mode": SupervisorMode.ASSIST.value,
+            "baseline_file_sha256": hashlib.sha256(baseline_raw).hexdigest(),
+            "baseline": baseline,
+            "registry_binding_sha256": registry,
+            "latency_budget_file_sha256": budget_sha256,
+            "latency_budget": budget,
+            "precursor_assist_promotion_evidence_sha256": None,
+        },
+        current_server_identity=predecessor_identity,
+        now=1_000,
+    )
+    if durable_state == "consumed":
+        consume_representative_window_attestation(
+            storage,
+            user_id=LEGACY_OWNER_USER_ID,
+            request_value=_representative_window_consume_request(issue),
+            current_server_identity=predecessor_identity,
+            now=1_001,
+        )
+    elif durable_state == "missing":
+        attestation = issue["server_attestation"]
+        assert isinstance(attestation, Mapping)
+        with storage.transaction() as conn:
+            conn.execute(
+                "DELETE FROM request_idempotency WHERE user_id=? AND request_key=?",
+                (
+                    LEGACY_OWNER_USER_ID,
+                    window_module.REPRESENTATIVE_WINDOW_REQUEST_KEY_PREFIX
+                    + str(attestation["attestation_id"]),
+                ),
+            )
+
+    evidence_path, evidence_sha256 = _promotion_bundle_file(
+        tmp_path,
+        mode=SupervisorMode.ASSIST,
+        source_sha256=source,
+        registry_sha256=registry,
+        budget_path=budget_path,
+        budget_sha256=budget_sha256,
+        representative_window_issue=issue,
+        baseline_raw_override=baseline_raw,
+    )
+    configured_settings = replace(
+        settings,
+        semantic_supervisor_mode="assist",
+        semantic_supervisor_promotion_enabled=True,
+        semantic_supervisor_promotion_evidence_file=str(evidence_path),
+        semantic_supervisor_promotion_evidence_sha256=evidence_sha256,
+        semantic_supervisor_promotion_latency_budget_file=str(budget_path),
+        semantic_supervisor_promotion_latency_budget_sha256=budget_sha256,
+        semantic_supervisor_promotion_source_revision_sha256=source,
+        semantic_supervisor_promotion_registry_binding_sha256=registry,
+        semantic_supervisor_promotion_canary_actor_bindings=(),
+    )
+    public, diagnostics = _scheduler_status(
+        requested_mode="assist",
+        runtime_available=False,
+    )
+    secondary = SimpleNamespace(
+        public_status=lambda: public,
+        diagnostics_status=lambda: diagnostics,
+    )
+    fake_server = root / "friday/server.py"
+    fake_server.parent.mkdir()
+    fake_server.write_text("# installed test server\n", encoding="utf-8")
+    monkeypatch.setattr(server, "__file__", str(fake_server))
+    monkeypatch.setattr(
+        window_module,
+        "_live_release_identity",
+        lambda *, verify_tree: {
+            "predecessor_release_commit": "a" * 40,
+            "predecessor_release_metadata_sha256": "b" * 64,
+            "predecessor_release_tree_manifest_sha256": (
+                source if current_identity_matches else "e" * 64
+            ),
+        },
+    )
+
+    material, loaded_binding = server._load_semantic_supervisor_activation_material(  # noqa: SLF001
+        configured_settings,
+        secondary,
+        storage,
+    )
+
+    assert material is not None
+    assert material.configured is configured
+    assert material.reason.value == reason
+    assert loaded_binding == binding
 
 
 def test_release_tree_identity_is_the_exact_installed_manifest_bytes(tmp_path: Path) -> None:

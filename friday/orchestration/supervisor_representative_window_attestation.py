@@ -500,17 +500,17 @@ def _validate_server_identity(value: object) -> dict[str, Any]:
     return identity
 
 
-def representative_window_current_server_identity(
+def _representative_window_current_server_identity_for_mode(
     settings: object,
     secondary: object,
     *,
-    target_mode: SupervisorMode,
+    requested_mode: SupervisorMode,
+    require_healthy_runtime: bool,
 ) -> dict[str, Any]:
-    """Re-attest the sealed live release and target's healthy predecessor."""
+    """Re-attest one exact scheduler mode against the sealed live release."""
 
-    predecessor_mode = _predecessor_mode_for_target(target_mode)
-    predecessor_policy = semantic_supervisor_policy.supervisor_product_policy_identity_for_mode(
-        predecessor_mode
+    expected_policy = semantic_supervisor_policy.supervisor_product_policy_identity_for_mode(
+        requested_mode
     )
 
     public_method = getattr(secondary, "public_status", None)
@@ -526,7 +526,7 @@ def representative_window_current_server_identity(
         diagnostic_scheduler = diagnostics.get("semantic_supervisor")
         effect_shadow = public.get("effect_shadow")
         diagnostic_effect_shadow = diagnostics.get("effect_shadow")
-        requested_mode = scheduler.get("requested_mode") if type(scheduler) is dict else None
+        observed_mode = scheduler.get("requested_mode") if type(scheduler) is dict else None
         effect_requested_mode = effect_shadow.get("requested_mode") if type(effect_shadow) is dict else None
         effect_runtime_available = (
             effect_shadow.get("runtime_available") if type(effect_shadow) is dict else None
@@ -544,7 +544,8 @@ def representative_window_current_server_identity(
             and effect_requested_mode == "shadow"
             and effect_shadow.get("effective_mode") == "shadow"
             and effect_shadow.get("workload_available") is True
-            and effect_runtime_available is True
+            and type(effect_runtime_available) is bool
+            and effect_runtime_available is public.get("available")
             and effect_shadow.get("closed_reason") == "admitted"
         )
         if (
@@ -560,16 +561,17 @@ def representative_window_current_server_identity(
             or public.get("enabled") is not True
             or public.get("configured") is not True
             or public.get("mode") != "assist"
-            or public.get("state") != "healthy"
-            or public.get("available") is not True
+            or type(public.get("available")) is not bool
+            or public.get("state") not in {"probing", "healthy", "degraded", "cooldown"}
             or scheduler.get("workload") != "plan_candidate"
-            or requested_mode != predecessor_mode.value
-            or getattr(settings, "semantic_supervisor_mode", None) != predecessor_mode.value
+            or observed_mode != requested_mode.value
+            or getattr(settings, "semantic_supervisor_mode", None) != requested_mode.value
             or scheduler.get("effective_mode") != SupervisorMode.SHADOW.value
-            or scheduler.get("policy_id") != predecessor_policy.policy_id
-            or scheduler.get("policy_sha256") != predecessor_policy.policy_sha256
+            or scheduler.get("policy_id") != expected_policy.policy_id
+            or scheduler.get("policy_sha256") != expected_policy.policy_sha256
             or scheduler.get("workload_available") is not True
-            or scheduler.get("runtime_available") is not True
+            or type(scheduler.get("runtime_available")) is not bool
+            or scheduler.get("runtime_available") is not public.get("available")
             or scheduler.get("closed_reason") != "admitted"
             or effect_shadow.get("workload") != semantic_supervisor_policy.SUPERVISOR_EFFECT_WORKLOAD
             or effect_shadow.get("policy_id") != semantic_supervisor_policy.SUPERVISOR_EFFECT_SHADOW_POLICY_ID
@@ -578,8 +580,26 @@ def representative_window_current_server_identity(
             or not (effect_is_off or effect_is_admitted)
             or diagnostics.get("profile") != semantic_supervisor_policy.SUPERVISOR_RUNTIME_PROFILE_ID
             or diagnostics.get("profile_admission") != "accepted"
-            or diagnostics.get("profile_manifest_match") is not True
-            or diagnostics.get("served_model_match") is not True
+            or type(diagnostics.get("profile_manifest_match")) is not bool
+            or type(diagnostics.get("served_model_match")) is not bool
+            or (
+                require_healthy_runtime
+                and (
+                    public.get("state") != "healthy"
+                    or public.get("available") is not True
+                    or scheduler.get("runtime_available") is not True
+                    or diagnostics.get("profile_manifest_match") is not True
+                    or diagnostics.get("served_model_match") is not True
+                )
+            )
+            or (
+                scheduler.get("runtime_available") is True
+                and (
+                    public.get("state") != "healthy"
+                    or diagnostics.get("profile_manifest_match") is not True
+                    or diagnostics.get("served_model_match") is not True
+                )
+            )
         ):
             raise ValueError("scheduler identity is not admitted")
         live = _live_release_identity(verify_tree=True)
@@ -596,7 +616,7 @@ def representative_window_current_server_identity(
         "observed_release_metadata_sha256": live["predecessor_release_metadata_sha256"],
         "observed_release_tree_sha256": live["predecessor_release_tree_manifest_sha256"],
         "observed_registry_binding_sha256": registry,
-        "requested_mode": requested_mode,
+        "requested_mode": observed_mode,
         "supervisor_policy_id": scheduler["policy_id"],
         "supervisor_policy_sha256": scheduler["policy_sha256"],
         "runtime_profile_id": semantic_supervisor_policy.SUPERVISOR_RUNTIME_PROFILE_ID,
@@ -605,6 +625,40 @@ def representative_window_current_server_identity(
         ),
     }
     return _validate_server_identity(identity)
+
+
+def representative_window_current_server_identity(
+    settings: object,
+    secondary: object,
+    *,
+    target_mode: SupervisorMode,
+) -> dict[str, Any]:
+    """Re-attest the sealed live release and target's healthy predecessor."""
+
+    return _representative_window_current_server_identity_for_mode(
+        settings,
+        secondary,
+        requested_mode=_predecessor_mode_for_target(target_mode),
+        require_healthy_runtime=True,
+    )
+
+
+def representative_window_target_server_identity_after_restart(
+    settings: object,
+    secondary: object,
+    *,
+    target_mode: SupervisorMode,
+) -> dict[str, Any]:
+    """Re-attest the current target without making laptop health a boot gate."""
+
+    if target_mode not in {SupervisorMode.ASSIST, SupervisorMode.CANARY}:
+        raise RepresentativeWindowAttestationError("representative target mode is invalid")
+    return _representative_window_current_server_identity_for_mode(
+        settings,
+        secondary,
+        requested_mode=target_mode,
+        require_healthy_runtime=False,
+    )
 
 
 def _server_identity_matches(
@@ -1569,6 +1623,7 @@ __all__ = [
     "issue_representative_window_attestation",
     "representative_window_canonical",
     "representative_window_current_server_identity",
+    "representative_window_target_server_identity_after_restart",
     "representative_window_observer_runner_sha256",
     "representative_window_sha256",
     "validate_representative_window_attestation",

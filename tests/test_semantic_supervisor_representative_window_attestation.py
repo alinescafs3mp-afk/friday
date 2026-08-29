@@ -43,6 +43,7 @@ from friday.orchestration.supervisor_representative_window_attestation import (
     representative_window_current_server_identity,
     representative_window_observer_runner_sha256,
     representative_window_sha256,
+    representative_window_target_server_identity_after_restart,
     verify_persisted_consumed_representative_window_issue,
 )
 from friday.orchestration.supervisor_trace_join import (
@@ -101,6 +102,7 @@ def _real_admitted_scheduler(
     requested_mode: SupervisorMode,
     *,
     effect_mode: str,
+    epoch_admitted: bool = True,
 ) -> SecondaryBrainScheduler:
     supervisor_policy = semantic_supervisor_policy.supervisor_product_policy_identity_for_mode(requested_mode)
     supervisor_admission = semantic_supervisor_policy.evaluate_supervisor_policy_admission(
@@ -137,8 +139,9 @@ def _real_admitted_scheduler(
         supervisor_admission=supervisor_admission,
         effect_shadow_admission=effect_admission,
     )
-    scheduler._epoch_admitted = True  # noqa: SLF001 - model one accepted process epoch
-    scheduler._last_probe_success_monotonic = time.monotonic()  # noqa: SLF001
+    scheduler._epoch_admitted = epoch_admitted  # noqa: SLF001 - model one process epoch
+    if epoch_admitted:
+        scheduler._last_probe_success_monotonic = time.monotonic()  # noqa: SLF001
     return scheduler
 
 
@@ -416,6 +419,58 @@ def test_real_scheduler_remains_valid_for_representative_window_identity(
     assert identity["requested_mode"] == predecessor.value
     assert identity["supervisor_policy_id"] == expected_policy.policy_id
     assert identity["supervisor_policy_sha256"] == expected_policy.policy_sha256
+    assert identity["observed_registry_binding_sha256"] == REGISTRY
+
+
+@pytest.mark.parametrize("target", (SupervisorMode.ASSIST, SupervisorMode.CANARY))
+@pytest.mark.parametrize("epoch_admitted", (False, True))
+@pytest.mark.parametrize("effect_mode", ("off", "shadow"))
+def test_target_restart_identity_accepts_exact_optional_scheduler_state(
+    settings: Any,
+    monkeypatch: pytest.MonkeyPatch,
+    target: SupervisorMode,
+    epoch_admitted: bool,
+    effect_mode: str,
+) -> None:
+    scheduler = _real_admitted_scheduler(
+        target,
+        effect_mode=effect_mode,
+        epoch_admitted=epoch_admitted,
+    )
+    configured = replace(settings, semantic_supervisor_mode=target.value)
+    monkeypatch.setattr(
+        window_module,
+        "_live_release_identity",
+        lambda *, verify_tree: {
+            "predecessor_release_commit": "f" * 40,
+            "predecessor_release_metadata_sha256": "1" * 64,
+            "predecessor_release_tree_manifest_sha256": SOURCE,
+        },
+    )
+    monkeypatch.setattr(
+        window_module,
+        "operational_capability_snapshot",
+        lambda: SimpleNamespace(digest_hex=lambda: REGISTRY),
+    )
+    try:
+        identity = representative_window_target_server_identity_after_restart(
+            configured,
+            scheduler,
+            target_mode=target,
+        )
+        with pytest.raises(RepresentativeWindowAttestationError):
+            representative_window_target_server_identity_after_restart(
+                replace(configured, semantic_supervisor_mode=_predecessor_mode(target).value),
+                scheduler,
+                target_mode=target,
+            )
+    finally:
+        asyncio.run(scheduler.aclose())
+
+    expected_policy = semantic_supervisor_policy.supervisor_product_policy_identity_for_mode(target)
+    assert identity["requested_mode"] == target.value
+    assert identity["supervisor_policy_id"] == expected_policy.policy_id
+    assert identity["observed_release_tree_sha256"] == SOURCE
     assert identity["observed_registry_binding_sha256"] == REGISTRY
 
 
