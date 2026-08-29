@@ -702,6 +702,7 @@ def _promotion_bundle_file(
     )
     lookup_token = "7" * 64
     observed_mode = SupervisorMode.SHADOW if mode is SupervisorMode.ASSIST else SupervisorMode.ASSIST
+    observed_policy = semantic_supervisor_policy.supervisor_product_policy_identity_for_mode(observed_mode)
     server_attestation: dict[str, object] = {
         "schema": REPRESENTATIVE_WINDOW_ATTESTATION_SCHEMA,
         "attestation_id": "sswindow_" + "6" * 32,
@@ -721,13 +722,13 @@ def _promotion_bundle_file(
         "primary_pid": 100,
         "primary_process_epoch_sha256": "5" * 64,
         "primary_backend_version": "test",
-        "requested_mode": SupervisorMode.ASSIST.value,
+        "requested_mode": observed_mode.value,
         "observed_release_commit": "4" * 40,
         "observed_release_metadata_sha256": "3" * 64,
         "observed_release_tree_sha256": "2" * 64,
         "observed_registry_binding_sha256": registry_sha256,
-        "supervisor_policy_id": semantic_supervisor_policy.SUPERVISOR_ASSIST_PRODUCT_POLICY_ID,
-        "supervisor_policy_sha256": (semantic_supervisor_policy.SUPERVISOR_ASSIST_PRODUCT_POLICY_SHA256),
+        "supervisor_policy_id": observed_policy.policy_id,
+        "supervisor_policy_sha256": observed_policy.policy_sha256,
         "runtime_profile_id": semantic_supervisor_policy.SUPERVISOR_RUNTIME_PROFILE_ID,
         "runtime_profile_manifest_sha256": (
             semantic_supervisor_policy.SUPERVISOR_RUNTIME_PROFILE_MANIFEST_SHA256
