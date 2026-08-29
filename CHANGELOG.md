@@ -1,3 +1,17 @@
+## 0.207.75 — 2026-08-29
+
+### Durable scheduled work and Telegram ingress recovery
+
+- Fences mission attempts, compensation approvals and reminder delivery at
+  their exact durable side-effect boundary, including restart, cancellation,
+  clock-skew and uncertain-outcome recovery.
+- Makes Telegram update admission and poll acknowledgement one atomic boundary;
+  duplicate polling, SQLite ENOSPC/I/O failure and process restart cannot
+  silently drop an accepted update or blindly repeat an uncertain effect.
+- Resumes one cached answer through deterministic text, voice, notice and file
+  delivery ordinals. Ambiguous acceptance remains explicit and absorbing, while
+  proven pre-effect rejection stays safely retryable.
+
 ## 0.207.74 — 2026-08-29
 
 ### Bounded document-passage backfill
