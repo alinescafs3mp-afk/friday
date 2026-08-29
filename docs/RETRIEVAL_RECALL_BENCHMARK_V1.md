@@ -200,6 +200,39 @@ taxonomy, or corpus scope; loss of an available metric is itself a regression. I
 `release_threshold` is always `not_assessed`; this benchmark does not declare
 the S4 release target met.
 
+## R1 corpus recall gap closure
+
+The R0 baseline measured candidate recall@50/@100, MRR@10 and nDCG@10 at
+`14/20` (`700000` ppm), with false absence `0/20` and date-role accuracy
+`6/6`. Body-private diagnosis assigned every non-hit to one closed class; the
+report and this record retain only the opaque case identity:
+
+| Opaque case ID | Classification | R1 disposition |
+| --- | --- | --- |
+| `3abe53303c2f06b4cf0a7e3e7300669ed46bf0e00ed40ed6409a06e43c08c950` | budget cap | fixed by deterministic ranking inside the existing cap |
+| `82a4cf00058a0c8c7554253c96777ecd121048b65fadd06676721cc0e7345898` | accepted projection | intentionally remains pending/noncanonical |
+| `d906592d6ca4559b25ac055d299a985e91326787e90525f7bdc49ae8a6c76e37` | accepted projection | intentionally remains pending/noncanonical |
+| `2e7ff16ab3b3476ec547ef96a04755a0ccb8e8b90e0e987a606f6f5887cb0237` | intentionally unsupported | document upload time has no attested storage column |
+| `9e1ff2af99b314db94c4a5666e29c401f951a9ebe6a39834726d774870818c86` | intentionally unsupported | document upload time has no attested storage column |
+| `1ab469645a5041da1200ec9a1e5a296ee6669f7a3b10317076c9ea4cc06c2090` | intentionally unsupported | document upload time has no attested storage column |
+| `e131e3d818fb395177155a1faa1de2083e34ad8561f1517dc8b9a9b506a6a17b` | corpus incompleteness | expected no-hit remains `not_established` |
+
+The repaired document had lexical lane rank 26 among 26 body matches and was
+therefore lost before federation by the existing 20-result lane cap. R1 does
+not raise that cap or add a cursor. For the documents lexical lane only, a safe
+filename containing every existing nonempty canonical lexical term receives a
+deterministic ordering boost. Eligibility, matched count, exact body score and
+passage evidence remain body-derived; malformed metadata contributes no boost.
+The exact body score, time and source identity remain the subsequent ordering
+components. The measured lane remains honestly `CAPPED/PARTIAL`, with 26
+matches and 20 returned candidates.
+
+The resulting benchmark is `15/20` (`750000` ppm) for candidate recall@50 and
+@100, MRR@10 and nDCG@10. False absence remains `0/20`; date-role accuracy
+remains `6/6`. The two pending cases are not promoted to factual authority, the
+three unsupported upload-time cases remain unavailable rather than aliased to
+receipt time, and incomplete no-hit coverage remains uncertain.
+
 ## Known limits
 
 - The shipped accepted candidate projection deliberately excludes pending or

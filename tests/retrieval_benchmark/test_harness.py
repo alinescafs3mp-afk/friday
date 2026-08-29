@@ -6,7 +6,12 @@ import pytest
 
 import friday.retrieval_benchmark.harness as harness_module
 from friday.retrieval.archive_search_contract import ArchiveSearchCorpus
-from friday.retrieval.contracts import AbsenceDecision, PassageLocatorKind, TemporalRole
+from friday.retrieval.contracts import (
+    AbsenceDecision,
+    CoverageState,
+    PassageLocatorKind,
+    TemporalRole,
+)
 from friday.retrieval_benchmark.contracts import (
     RecallContractError,
     RecallEvidenceSourceV1,
@@ -94,6 +99,66 @@ def test_pending_noncanonical_candidates_remain_visible_as_recall_loss(
     outcomes = {item.case_id: item.outcome for item in ephemeral_run.case_results}
     pending = [case for case in ephemeral_run.cases if case.taxonomy is RecallTaxonomyV1.PENDING_FILE]
     assert {outcomes[case.opaque_case_id] for case in pending} == {RecallOutcomeV1.MISS}
+
+
+def test_r1_closes_only_the_capped_corpus_gap_and_preserves_safety_limits(
+    ephemeral_run: EphemeralRecallRunV1,
+) -> None:
+    cases_by_private_id = {case.case_id: case for case in ephemeral_run.cases}
+    results = {item.case_id: item for item in ephemeral_run.case_results}
+    observations = {item.case_id: item for item in ephemeral_run.observations}
+
+    capped_case = cases_by_private_id["case.0001"]
+    capped_result = results[capped_case.opaque_case_id]
+    assert capped_result.outcome is RecallOutcomeV1.HIT
+    assert capped_result.first_relevant_rank == 1
+
+    pending = {
+        case.opaque_case_id for case in ephemeral_run.cases if case.taxonomy is RecallTaxonomyV1.PENDING_FILE
+    }
+    uploaded_at = {
+        case.opaque_case_id
+        for case in ephemeral_run.cases
+        if case.request.temporal_constraints
+        and case.request.temporal_constraints[0].role is TemporalRole.UPLOADED_AT
+    }
+    misses = {item.case_id for item in ephemeral_run.case_results if item.outcome is RecallOutcomeV1.MISS}
+    assert misses == pending | uploaded_at
+    assert len(pending) == 2 and len(uploaded_at) == 3
+
+    for case_id in pending:
+        observation = observations[case_id]
+        assert observation.candidates == ()
+        assert observation.absence_decision is AbsenceDecision.NOT_ESTABLISHED
+    for case_id in uploaded_at:
+        observation = observations[case_id]
+        assert observation.candidates == ()
+        assert observation.absence_decision is AbsenceDecision.NOT_ESTABLISHED
+        assert any(CoverageState.UNAVAILABLE in item.states for item in observation.coverage)
+
+    metrics = dict(ephemeral_run.report.metrics)
+    for name in ("candidate_recall_at_50", "candidate_recall_at_100"):
+        assert (metrics[name].numerator, metrics[name].denominator, metrics[name].value_ppm) == (
+            15,
+            20,
+            750_000,
+        )
+    for name in ("mrr_at_10", "ndcg_at_10"):
+        assert (metrics[name].numerator, metrics[name].denominator, metrics[name].value_ppm) == (
+            15_000_000,
+            20_000_000,
+            750_000,
+        )
+    assert (
+        metrics["false_absence_rate"].numerator,
+        metrics["false_absence_rate"].denominator,
+        metrics["false_absence_rate"].value_ppm,
+    ) == (0, 20, 0)
+    assert (
+        metrics["date_role_accuracy"].numerator,
+        metrics["date_role_accuracy"].denominator,
+        metrics["date_role_accuracy"].value_ppm,
+    ) == (6, 6, 1_000_000)
 
 
 def test_unknown_corpus_runs_both_lanes_and_finds_the_positive_qrels(
