@@ -14,20 +14,18 @@ either merged here or discarded before that source is removed.
 ## Current production identity
 
 - Branch: `main`
-- Deployed implementation head: `353b0c73773de4e38dee125c5133f9ed15761d9c`
-- Live: Friday `0.207.76` / `353b0c73773de4e38dee125c5133f9ed15761d9c`;
-  tree `09bbcd41a9f6a65321508d520d968e3c1705682fa6bfb72618ec852d9b7c872e`;
-  wheel `0393a2c68494e3b144751239f2751bd149582b341d644e6a5f314431d76f057a`.
-- Immediate runtime predecessor: Friday `0.207.75` /
-  `dd4849e79dd06b29fdb013f2b11f4f41309e2930`; tree
-  `9a4acc74ac2b0c647c562edcbbc01d7b47a58a39a73781a9e9556d37137277ef`.
-- Schema-capable fallback: Friday `0.207.76rc0` /
-  `a70106ace45b4079b0bebac023cebcbf802f006a`;
-  tree `2e3867cf7806a78f23ecaa9dadcdc4896d244f74aa88c57db34e033876da29e9`.
+- Deployed implementation head: `827520f706f908f9d7b5c46f81b5e94f5e91a160`.
+- Live: Friday `0.207.77` / `827520f706f908f9d7b5c46f81b5e94f5e91a160`;
+  tree `29d715f307043d97c989ef7ddf2e986965b68e7c012b0bfef3a8681557f84880`;
+  wheel `866187884815577e9dcfd908301b2f85ebe09d62ff6a593d850e16e39f0ac588`.
+- Immediate runtime predecessor and schema-capable fallback: Friday `0.207.76` /
+  `353b0c73773de4e38dee125c5133f9ed15761d9c`; tree
+  `09bbcd41a9f6a65321508d520d968e3c1705682fa6bfb72618ec852d9b7c872e`.
 - Database schema: 48.
 - Production: immutable activation `clear`; backend and Telegram bridge active;
   trusted-CA health `200`; signed private-owner chat returned exact `OK`; V12
-  `canary_ready`; complete S2 authenticated turn
+  `canary_ready` with verified, installation and effective context all exactly
+  `40960`; complete S2 authenticated turn
   authority is active across scalar, file, attachment and V12 paths without
   changing current user-visible routing. The S3 bounded-advisor code and its
   storage-backed restart verifier are live.
@@ -47,13 +45,13 @@ either merged here or discarded before that source is removed.
 
 ## Active package
 
-S4 v3 passages and authenticated stored locators are live. Keep the released S3
-path in shadow until its genuine production witness exists; then promote only
-the current-file-plus-current-public-web journey through the already released
-fail-closed activation gate. SolGoodman's isolated S5 measured-lease/adoption
-package remains unreleased until its two publication freshness blockers and
-exact q38/SGLang live probe are closed. S6 mission, reminder and Telegram
-recovery is live; physical Android acceptance remains owner/device-bound.
+S4 v3 passages and authenticated stored locators are live; S4-R3 measured
+search-facade parity is in isolated implementation. Keep the released S3 path
+in shadow until its genuine production witness exists; then promote only the
+current-file-plus-current-public-web journey through the already released
+fail-closed activation gate. S5 measured cognition and exact 40k lease adoption
+are live. S6 mission, reminder and Telegram recovery is live; physical Android
+acceptance remains owner/device-bound.
 
 ## Operating rules
 
@@ -331,14 +329,14 @@ under stable and the distinct rc0 with integrity/FK clean; the schema-47
 predecessor rejected schema 48. Immutable activation produced verified
 SQLite/inbox/Obsidian/Engineer recovery receipts and ended `clear`. Production
 now has 1,720 current parents, 16,359 child passages and no pending v3 backfill;
-trusted-CA health reports `0.207.76`/`ok`, V12 is `canary_ready`, and the signed
+trusted-CA health reports `0.207.77`/`ok`, V12 is `canary_ready`, and the signed
 private-owner smoke returned exact `OK`.
 
 Estimate: 8–16 clean-work days across separately reversible releases.
 
 ### S5 — measured cognition and installation budgets
 
-Status: R0/R1 implementation is in isolated review; nothing is released yet.
+Status: R0/R1 deployed in `0.207.77`; schema remains 48.
 
 - Extend the existing attested `V12ModelProfileSpec`/lease instead of creating a
   competing environment-only model profile. Measured capabilities control
@@ -354,7 +352,14 @@ Status: R0/R1 implementation is in isolated review; nothing is released yet.
   40k; use `min(attested runtime, installation cap)` rather than a model-name
   guess.
 
-Estimate: 4–8 clean-work days after S2, released incrementally.
+Acceptance: the 1,347-node focused union and the complete native gate (23,926
+Python plus 31 UI tests, zero skips) passed. Exact live q38/SGLang attestation
+proved verified, installation and effective capacity of `40960` tokens with the
+leased capacity authoritative through planner, file, archive, document and
+current-file/public-web journeys. Two deterministic wheel builds were
+byte-identical. The operator-independent schema-48 backup verified, immutable
+activation ended `clear`, exact `0.207.76` remains the sealed fallback, and the
+signed private-owner smoke returned exact `OK`.
 
 ### S6 — journey proof and recovery, not new organs
 
@@ -430,8 +435,8 @@ schema 47 and clean integrity/FK checks. Trusted-CA health reported
    creates its exact production witness; do not fabricate activation evidence.
 4. Repair the two S4 v2 topology gaps in a new passage revision with a distinct
    schema-capable fallback, then move to measured search-facade parity.
-5. Review and release S5 measured leases only after the exact q38/SGLang live
-   probe proves the installation/runtime pairing and authoritative context use.
+5. Keep the released S5 measured-lease contract green; extend cognition only
+   through another measured, reversible journey release.
 6. Preserve the released exact-evidence verifier and reject mutable or
    self-declared proof while real joined Supervisor observations accumulate.
 
