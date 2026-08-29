@@ -7,6 +7,8 @@ signatures and bodies. Mixed back into that class, so ``self.execute`` and
 
 from __future__ import annotations
 
+from friday.permissions import LEGACY_OWNER_USER_ID
+from friday.reminder_schedule import reminder_due_state
 from friday.storage._base import (
     RUNTIME_EVENT_CAP,
     UTC,
@@ -26,7 +28,10 @@ from friday.storage._base import (
     utc_now,
     validate_user_id,
 )
-from friday.storage._privacy import _not_private_notification_dependency
+from friday.storage._privacy import (
+    _not_disallowed_private_material_for_person,
+    _not_private_notification_dependency,
+)
 
 
 class RuntimeMixin(StorageShared):
@@ -96,6 +101,146 @@ class RuntimeMixin(StorageShared):
             (user_id, max(1, min(int(limit), 100))),
         ).fetchall()
         return [dict(row) for row in rows]
+
+    def claim_reminder_notification(
+        self,
+        notification_id: str,
+        *,
+        expected_chat_id: str,
+        expected_dedup_key: str,
+        now: datetime,
+        lead_days: int,
+    ) -> dict[str, Any] | None:
+        """Fence one exact due reminder immediately before its Telegram send.
+
+        ``uncertain`` is deliberately written *before* the body leaves storage.
+        A second bridge, a process restart, or an ambiguous remote outcome can
+        therefore never obtain the possibly-sent body again.  A proven transport
+        rejection may explicitly return the row to ``pending`` through
+        :meth:`acknowledge_notifications`; ambiguity leaves the fence in place.
+
+        The queue pointer is not authority by itself.  Under the same writer
+        transaction this method rechecks the current event, exact person-owned
+        reminder provenance, private-owner marker, schedule and delayed-body
+        privacy predicate.  A stale early pointer releases its key so the normal
+        scanner may create a fresh row when it becomes due.  Expired, malformed
+        or no-longer-authorized pointers retain the key and cannot be resurrected
+        by a later scan.
+        """
+
+        if not all(
+            isinstance(value, str) for value in (notification_id, expected_chat_id, expected_dedup_key)
+        ):
+            return None
+        if (
+            not notification_id
+            or not expected_chat_id
+            or notification_id != notification_id.strip()
+            or expected_chat_id != expected_chat_id.strip()
+            or expected_dedup_key != expected_dedup_key.strip()
+            or not expected_dedup_key.startswith("reminder:")
+            or not isinstance(now, datetime)
+            or now.tzinfo is None
+            or now.utcoffset() is None
+        ):
+            return None
+        try:
+            bounded_lead_days = max(0, int(lead_days))
+        except (TypeError, ValueError, OverflowError):
+            return None
+
+        with self.transaction() as conn:
+            # Read only the opaque pointer before authorization.  In particular,
+            # do not materialize delayed body text on a mismatched/stale claim.
+            pointer = conn.execute(
+                """SELECT n.id, n.user_id, n.chat_id, n.kind, n.dedup_key
+                     FROM outbound_notifications AS n
+                    WHERE n.id=? AND n.chat_id=? AND n.kind='reminder'
+                      AND n.dedup_key=? AND n.status='pending'""",
+                (notification_id, expected_chat_id, expected_dedup_key),
+            ).fetchone()
+            if pointer is None:
+                return None
+
+            person_id = str(pointer["user_id"] or "")
+            tenant_id = LEGACY_OWNER_USER_ID if getattr(self.settings, "shared_archive", False) else person_id
+            event = conn.execute(
+                f"""SELECT substr(e.id,1,160) AS entity_id,
+                           substr(e.description,1,500) AS description,
+                           substr(t.occurred_at,1,64) AS occurred_at,
+                           substr(COALESCE(t.source,''),1,256) AS source
+                      FROM outbound_notifications AS n
+                      JOIN entity_time AS t
+                        ON n.dedup_key='reminder:' || t.entity_id || ':' || t.occurred_at
+                      JOIN entities AS e
+                        ON e.id=t.entity_id AND e.user_id=t.user_id
+                     WHERE n.id=? AND n.chat_id=? AND n.kind='reminder'
+                       AND n.dedup_key=? AND n.status='pending'
+                       AND e.entity_type='event' AND e.canonical=1
+                       AND e.deleted_at IS NULL AND e.merged_into_id IS NULL
+                       AND ((e.user_id=? AND n.user_id=?
+                             AND COALESCE(t.source,'') NOT LIKE 'reminder:%'
+                             AND NOT EXISTS (
+                                 SELECT 1 FROM private_entity_owners AS shared_private
+                                  WHERE shared_private.entity_id=e.id
+                             ))
+                            OR (e.user_id IN (n.user_id, ?)
+                                AND t.source='reminder:' || n.user_id
+                                AND EXISTS (
+                                    SELECT 1 FROM private_entity_owners AS exact_owner
+                                     WHERE exact_owner.entity_id=e.id
+                                       AND exact_owner.person_id=n.user_id
+                                       AND exact_owner.privacy_kind='reminder'
+                                )))
+                       AND {_not_disallowed_private_material_for_person("e", "n.user_id")}
+                       AND {_not_private_notification_dependency("n")}
+                     LIMIT 1""",  # nosec B608 - aliases and predicates are code-owned
+                (
+                    notification_id,
+                    expected_chat_id,
+                    expected_dedup_key,
+                    tenant_id,
+                    tenant_id,
+                    tenant_id,
+                ),
+            ).fetchone()
+
+            state = (
+                reminder_due_state(dict(event), now, lead_days=bounded_lead_days)
+                if event is not None
+                else "invalid"
+            )
+            if state != "due":
+                # ``failed`` is an existing terminal queue state.  An early row
+                # must not reserve the future dedup slot; every other rejection
+                # keeps the tombstone so stale/private material cannot reappear.
+                conn.execute(
+                    """UPDATE outbound_notifications
+                          SET status='failed',
+                              dedup_key=CASE WHEN ?='early' THEN '' ELSE dedup_key END
+                        WHERE id=? AND chat_id=? AND kind='reminder'
+                          AND dedup_key=? AND status='pending'""",
+                    (state, notification_id, expected_chat_id, expected_dedup_key),
+                )
+                return None
+
+            claimed = conn.execute(
+                """UPDATE outbound_notifications
+                      SET status='uncertain'
+                    WHERE id=? AND chat_id=? AND kind='reminder'
+                      AND dedup_key=? AND status='pending'""",
+                (notification_id, expected_chat_id, expected_dedup_key),
+            )
+            if claimed.rowcount != 1:
+                return None
+            authorized = conn.execute(
+                """SELECT id, chat_id, kind, dedup_key, body
+                     FROM outbound_notifications
+                    WHERE id=? AND chat_id=? AND kind='reminder'
+                      AND dedup_key=? AND status='uncertain'""",
+                (notification_id, expected_chat_id, expected_dedup_key),
+            ).fetchone()
+            return dict(authorized) if authorized is not None else None
 
     def silence_reminder(self, user_id: str, dedup_key: str, *, chat_id: str = "") -> bool:
         """«Не напоминай мне об этом» — независимо от того, отправлено уже или нет.
@@ -297,6 +442,7 @@ class RuntimeMixin(StorageShared):
                     f"""UPDATE outbound_notifications AS n SET status='sent', sent_at=?
                          WHERE id=?
                            AND (status='pending'
+                                OR (kind='reminder' AND status='uncertain')
                                 OR (kind IN (
                                         'engineer_command_terminal',
                                         'engineer_command_terminal_text',
@@ -310,6 +456,7 @@ class RuntimeMixin(StorageShared):
                                     'engineer_command_unknown',
                                     'engineer_command_progress'
                                 )
+                                OR (kind='reminder' AND status='uncertain')
                                 OR {_not_private_notification_dependency("n")})""",  # nosec B608
                     (utc_now(), notif_id, attempt_cap),
                 )
@@ -326,10 +473,13 @@ class RuntimeMixin(StorageShared):
                                     'engineer_command_terminal',
                                     'engineer_command_terminal_text',
                                     'engineer_command_unknown',
-                                    'engineer_command_progress'
+                                    'engineer_command_progress',
+                                    'reminder'
                                 )
                                THEN '' ELSE dedup_key END
-                       WHERE id=? AND status='pending'
+                       WHERE id=?
+                         AND (status='pending'
+                              OR (kind='reminder' AND status='uncertain'))
                          AND (kind IN (
                                   'engineer_command_terminal',
                                   'engineer_command_terminal_text',
@@ -340,18 +490,25 @@ class RuntimeMixin(StorageShared):
                     (attempt_cap, attempt_cap, notif_id),
                 )
             for notif_id in uncertain:
-                # Ambiguous strict delivery is terminal but not claimed sent.
-                # Retaining the dedup key prevents a possibly accepted document
+                # Ambiguous delivery is terminal but not claimed sent.  Strict
+                # Engineer rows retain their historical behavior; a reminder is
+                # already fenced before send, and this idempotent update also
+                # closes compatibility callers that report ambiguity directly.
+                # Retaining the dedup key prevents a possibly accepted effect
                 # from being re-enqueued under a fresh notification id.
                 conn.execute(
                     """UPDATE outbound_notifications AS n
                        SET status='uncertain', sent_at=?
-                       WHERE id=? AND kind IN (
-                           'engineer_command_terminal',
-                           'engineer_command_terminal_text',
-                           'engineer_command_unknown'
-                       )
-                         AND (status='pending' OR (status='failed' AND attempts < ?))
+                       WHERE id=?
+                         AND ((kind IN (
+                                  'engineer_command_terminal',
+                                  'engineer_command_terminal_text',
+                                  'engineer_command_unknown'
+                              )
+                               AND (status='pending'
+                                    OR (status='failed' AND attempts < ?)))
+                              OR (kind='reminder'
+                                  AND status IN ('pending', 'uncertain')))
                        """,
                     (utc_now(), notif_id, attempt_cap),
                 )
@@ -369,6 +526,7 @@ class RuntimeMixin(StorageShared):
                     "engineer_command_terminal_text",
                     "engineer_command_unknown",
                     "engineer_command_progress",
+                    "reminder",
                 }:
                     visible = conn.execute(
                         f"""SELECT 1 FROM outbound_notifications n

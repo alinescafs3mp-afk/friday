@@ -68,6 +68,7 @@ _ENGINEER_TERMINAL_NOTIFICATION_KIND = "engineer_command_terminal"
 _ENGINEER_TERMINAL_TEXT_NOTIFICATION_KIND = "engineer_command_terminal_text"
 _ENGINEER_UNKNOWN_NOTIFICATION_KIND = "engineer_command_unknown"
 _ENGINEER_PROGRESS_NOTIFICATION_KIND = "engineer_command_progress"
+_REMINDER_NOTIFICATION_KIND = "reminder"
 _ENGINEER_STATUS_SCHEMA = "friday.telegram-status.v1"
 _ENGINEER_TERMINAL_REVISION = (1 << 63) - 1
 _ENGINEER_PROGRESS_REVISIONS = frozenset({60, 300, 900, 1800})
@@ -458,6 +459,7 @@ async def _claim_engineer_notification(
             _ENGINEER_TERMINAL_TEXT_NOTIFICATION_KIND,
             _ENGINEER_UNKNOWN_NOTIFICATION_KIND,
             _ENGINEER_PROGRESS_NOTIFICATION_KIND,
+            _REMINDER_NOTIFICATION_KIND,
         }
         or not isinstance(pointer.get("chat_id"), str)
         or not isinstance(pointer.get("dedup_key"), str)
@@ -474,12 +476,45 @@ async def _claim_engineer_notification(
             signer_chat,
         )
     except Exception as exc:
-        LOGGER.warning("Engineer notification claim failed (%s)", type(exc).__name__)
+        LOGGER.warning("Strict notification claim failed (%s)", type(exc).__name__)
         return None
     item = response.get("item")
     if not isinstance(item, dict) or any(item.get(key) != value for key, value in pointer.items()):
         return None
     return item
+
+
+async def _deliver_reminder_text(
+    bridge: Any,
+    telegram: httpx.AsyncClient,
+    *,
+    chat_id: int,
+    body: str,
+) -> str:
+    """Deliver one bounded reminder as sent, proven-rejected, or uncertain."""
+
+    chunks = split_for_telegram(body)
+    if chunks != [body.strip()]:
+        # A reminder is deliberately one Telegram effect.  Legacy/corrupt
+        # oversized bodies are a proven local rejection, never a multipart send
+        # whose crash boundary could leave only an unknown prefix delivered.
+        return "failed"
+    chunk = chunks[0]
+    payload = {
+        "chat_id": chat_id,
+        "text": to_telegram_html(chunk) or chunk,
+        "parse_mode": "HTML",
+        "disable_web_page_preview": True,
+    }
+    try:
+        response = await bridge._post_message_chunk(telegram, payload, chunk)
+    except httpx.ConnectError:
+        # Connection establishment failed before Telegram accepted a write.
+        return "failed"
+    except Exception:
+        # Timeout/read/protocol failures may follow remote acceptance.
+        return "uncertain"
+    return _telegram_document_outcome(response)
 
 
 def _telegram_document_outcome(response: httpx.Response) -> str:
@@ -656,12 +691,12 @@ async def _deliver_engineer_terminal_text(
 
 
 def _persist_terminal_status_reconciled(bridge: Any, notification_id: str) -> bool:
-    """Close the body+status saga before this id may be ACKed off-page."""
+    """Close a strict outcome before this id may be ACKed off-page."""
 
     try:
         bridge._inbox.confirm_notification_status_reconciled(notification_id)
     except Exception as exc:
-        LOGGER.warning("Engineer terminal status proof failed (%s)", type(exc).__name__)
+        LOGGER.warning("Strict notification outcome proof failed (%s)", type(exc).__name__)
         return False
     return True
 
@@ -1388,6 +1423,7 @@ class TransportMixin(BridgeShared):
                 _ENGINEER_TERMINAL_TEXT_NOTIFICATION_KIND,
                 _ENGINEER_UNKNOWN_NOTIFICATION_KIND,
                 _ENGINEER_PROGRESS_NOTIFICATION_KIND,
+                _REMINDER_NOTIFICATION_KIND,
             }:
                 claimed = await _claim_engineer_notification(
                     self,
@@ -1537,6 +1573,26 @@ class TransportMixin(BridgeShared):
                     sent.append(notif_id)
                 except Exception as exc:
                     LOGGER.warning("Engineer progress status delivery failed (%s)", type(exc).__name__)
+                    failed.append(notif_id)
+                await asyncio.sleep(0.05)
+                continue
+            if kind == _REMINDER_NOTIFICATION_KIND:
+                outcome = await _deliver_reminder_text(
+                    self,
+                    telegram,
+                    chat_id=chat_id,
+                    body=body,
+                )
+                if outcome in {"sent", "uncertain"}:
+                    self._inbox.remember_notification_delivery_reconciled_outcome(
+                        notif_id,
+                        outcome,
+                    )
+                    if outcome == "sent":
+                        sent.append(notif_id)
+                    else:
+                        uncertain.append(notif_id)
+                else:
                     failed.append(notif_id)
                 await asyncio.sleep(0.05)
                 continue

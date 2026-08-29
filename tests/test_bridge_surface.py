@@ -467,6 +467,9 @@ EXPECTED_INBOX: dict[str, str] = {
     "take_edit_prompt": "(self, prompt_message_id: 'int') -> 'str'",
     "remember_delivered_notification": "(self, notification_id: 'str') -> 'None'",
     "remember_notification_delivery_outcome": "(self, notification_id: 'str', outcome: 'str') -> 'None'",
+    "remember_notification_delivery_reconciled_outcome": (
+        "(self, notification_id: 'str', outcome: 'str') -> 'None'"
+    ),
     "remember_outbound_reply_context": (
         "(self, chat_id: 'int', telegram_message_id: 'int', backend_message_id: 'str', *, "
         "ttl_sec: 'float' = 2592000.0, max_rows: 'int' = 20000) -> 'None'"

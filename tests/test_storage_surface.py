@@ -190,9 +190,9 @@ def test_no_method_is_defined_twice_across_the_class_hierarchy() -> None:
 # stopped-bridge restore implementation used by the public backup/restore API.
 # 425 → 427: restore recovery grants a thread-local SQLite-open exception only
 # to the stopped restore transaction; every ordinary thread remains marker-gated.
-# 427 → 430: scheduled-work recovery adds exact mission claim/cancel/skew seams;
-# no schema or second scheduler is introduced.
-EXPECTED_MEMBER_COUNT = 430
+# 427 → 431: scheduled-work recovery adds exact mission claim/cancel/skew seams
+# and one reminder send-edge claim; no schema or second scheduler is introduced.
+EXPECTED_MEMBER_COUNT = 431
 EXPECTED_SIGNATURES: dict[str, str] = {
     "_begin_database_restore_open": "(self) -> 'bool'",
     "_end_database_restore_open": "(self, previous: 'bool') -> 'None'",
@@ -254,6 +254,7 @@ EXPECTED_SIGNATURES: dict[str, str] = {
     "archive_conversation": "(self, conversation_id: 'str', user_id: 'str') -> 'bool'",
     "claim_bridge_nonce": "(self, nonce: 'str') -> 'bool'",
     "claim_mission_task": "(self, task_id: 'str', user_id: 'str', *, mission_id: 'str', expected_attempt: 'int') -> 'bool'",
+    "claim_reminder_notification": "(self, notification_id: 'str', *, expected_chat_id: 'str', expected_dedup_key: 'str', now: 'datetime', lead_days: 'int') -> 'dict[str, Any] | None'",
     "claim_inbox_promotion": "(self, inbox_id: 'str', user_id: 'str', knowledge_object_id: 'str') -> 'bool'",
     "clear_channel_conversation": "(self, user_id: 'str', channel: 'str', channel_id: 'str') -> 'bool'",
     "cancel_mission_and_tasks": "(self, mission_id: 'str', user_id: 'str') -> 'bool'",

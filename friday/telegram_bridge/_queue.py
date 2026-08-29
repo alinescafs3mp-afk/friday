@@ -868,6 +868,50 @@ class _UpdateInbox:
         if row is None or str(row["outcome"]) != expected:
             raise RuntimeError("notification delivery outcome changed")
 
+    def remember_notification_delivery_reconciled_outcome(
+        self,
+        notification_id: str,
+        outcome: str,
+    ) -> None:
+        """Atomically persist a terminal outcome that needs no status side effect.
+
+        Reminder delivery has no separate Telegram status carrier.  Writing its
+        outcome unreconciled and marking it reconciled in a second commit leaves
+        a process-death window whose local fence can never become ACK-eligible.
+        This single transaction either leaves no row or one complete proof.
+        """
+
+        notification_id = str(notification_id or "").strip()
+        outcome = str(outcome or "").strip()
+        if not notification_id or outcome not in {"sent", "uncertain"}:
+            raise ValueError("invalid notification delivery outcome")
+        self._conn.execute(
+            """INSERT INTO notification_delivery_outcomes(
+                   notification_id, outcome, status_reconciled, updated_at)
+               VALUES(?, ?, 1, ?)
+               ON CONFLICT(notification_id) DO UPDATE SET
+                   outcome=CASE
+                       WHEN notification_delivery_outcomes.outcome='uncertain'
+                            OR excluded.outcome='uncertain' THEN 'uncertain'
+                       ELSE 'sent'
+                   END,
+                   status_reconciled=1,
+                   updated_at=excluded.updated_at""",
+            (notification_id, outcome, time.time()),
+        )
+        self._conn.commit()
+        row = self._conn.execute(
+            """SELECT outcome, status_reconciled
+                 FROM notification_delivery_outcomes
+                WHERE notification_id=?""",
+            (notification_id,),
+        ).fetchone()
+        expected = "uncertain" if outcome == "uncertain" else outcome
+        if row is not None and str(row["outcome"]) == "uncertain":
+            expected = "uncertain"
+        if row is None or str(row["outcome"]) != expected or int(row["status_reconciled"]) != 1:
+            raise RuntimeError("reconciled notification delivery outcome changed")
+
     def confirm_notification_status_reconciled(self, notification_id: str) -> None:
         """Prove the visible carrier's terminal status completed before ACK."""
 

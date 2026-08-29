@@ -18,7 +18,7 @@ from starlette.concurrency import run_in_threadpool
 from friday.api.deps import _request_json, _require_bridge
 from friday.config import FridaySettings
 from friday.file_delivery import attachment_content_disposition
-from friday.organs import may_push_to, resolve_chat_id
+from friday.organs import local_now, may_push_to, resolve_chat_id
 from friday.organs.engineer.command.progress import (
     PROGRESS_ENVELOPE_SCHEMA,
     PROGRESS_NOTIFICATION_KIND,
@@ -96,6 +96,7 @@ def _unknown_status_update(row: Mapping[str, Any]) -> dict[str, Any]:
 
 _STRICT_CLAIM_KINDS = frozenset(
     {
+        "reminder",
         TERMINAL_TEXT_NOTIFICATION_KIND,
         UNKNOWN_NOTIFICATION_KIND,
         PROGRESS_NOTIFICATION_KIND,
@@ -110,6 +111,28 @@ def _strict_pointer(row: Mapping[str, Any]) -> dict[str, str]:
         "kind": str(row.get("kind") or ""),
         "dedup_key": str(row.get("dedup_key") or ""),
     }
+
+
+def _reminder_delivery_is_authorized(state: Any, row: Mapping[str, Any]) -> bool:
+    """Rebuild current person/chat authority for one reminder send edge."""
+
+    storage = state.storage
+    actor_id = str(row.get("user_id") or "")
+    chat_id = str(row.get("chat_id") or "")
+    user = storage.get_user(actor_id)
+    try:
+        linked_actor_id = storage.resolve_identity("telegram", chat_id)
+    except ValueError:
+        return False
+    return bool(
+        actor_id
+        and chat_id
+        and isinstance(user, Mapping)
+        and str(user.get("status") or "") == "active"
+        and linked_actor_id in {None, actor_id}
+        and resolve_chat_id(storage, actor_id) == chat_id
+        and may_push_to(state.settings, storage, actor_id, chat_id)
+    )
 
 
 def _terminal_delivery_actor(state: Any, row: Mapping[str, Any]) -> Any:
@@ -228,6 +251,8 @@ def _claim_strict_notification(
     """Reauthorize and project one exact pointer at the Telegram send edge."""
 
     storage = state.storage
+    reminder_item: dict[str, Any] | None = None
+    reminder_error = ""
     with storage.transaction() as conn:
         row = conn.execute(
             """SELECT n.id,n.user_id,n.chat_id,n.kind,n.dedup_key,n.body,n.status
@@ -245,7 +270,26 @@ def _claim_strict_notification(
             or any(str(expected.get(key) or "") != value for key, value in pointer.items())
         ):
             raise TerminalDeliveryError("terminal_claim_identity_changed")
-        if pointer["kind"] == PROGRESS_NOTIFICATION_KIND:
+        if pointer["kind"] == "reminder":
+            if not _reminder_delivery_is_authorized(state, current):
+                raise TerminalDeliveryError("terminal_authorization_changed")
+            claimed = storage.claim_reminder_notification(
+                notification_id,
+                expected_chat_id=pointer["chat_id"],
+                expected_dedup_key=pointer["dedup_key"],
+                now=local_now(state.settings),
+                lead_days=state.settings.reminders_lead_days,
+            )
+            if not isinstance(claimed, Mapping):
+                # The storage claim may have retired an expired or invalid
+                # reminder.  Leave the outer transaction normally so that
+                # retirement commits before the route reports it unavailable.
+                reminder_error = "terminal_notification_unavailable"
+            elif _strict_pointer(claimed) != pointer:
+                reminder_error = "terminal_claim_identity_changed"
+            else:
+                reminder_item = {**pointer, "body": str(claimed.get("body") or "")}
+        elif pointer["kind"] == PROGRESS_NOTIFICATION_KIND:
             try:
                 actor = _progress_delivery_actor(state, current)
                 projection = progress_notification_projection(
@@ -262,9 +306,20 @@ def _claim_strict_notification(
                 if status is not None:
                     item["status_update"] = status
             return item
-        actor = _terminal_delivery_actor(state, current)
-        if pointer["kind"] == TERMINAL_TEXT_NOTIFICATION_KIND:
-            projection = terminal_text_notification_projection(
+        else:
+            actor = _terminal_delivery_actor(state, current)
+            if pointer["kind"] == TERMINAL_TEXT_NOTIFICATION_KIND:
+                projection = terminal_text_notification_projection(
+                    storage,
+                    current,
+                    tenant_id=actor.user_id,
+                    actor_id=actor.own_id,
+                )
+                item = {**pointer, "body": projection["body"]}
+                if status_messages:
+                    item["status_update"] = _terminal_status_update(current, text_only=True)
+                return item
+            projection = unknown_notification_projection(
                 storage,
                 current,
                 tenant_id=actor.user_id,
@@ -272,18 +327,13 @@ def _claim_strict_notification(
             )
             item = {**pointer, "body": projection["body"]}
             if status_messages:
-                item["status_update"] = _terminal_status_update(current, text_only=True)
+                item["status_update"] = _unknown_status_update(current)
             return item
-        projection = unknown_notification_projection(
-            storage,
-            current,
-            tenant_id=actor.user_id,
-            actor_id=actor.own_id,
-        )
-        item = {**pointer, "body": projection["body"]}
-        if status_messages:
-            item["status_update"] = _unknown_status_update(current)
-        return item
+    if reminder_error:
+        raise TerminalDeliveryError(reminder_error)
+    if reminder_item is None:
+        raise TerminalDeliveryError("terminal_notification_unavailable")
+    return reminder_item
 
 
 @router.get("/pending", tags=["notifications"])
@@ -368,6 +418,13 @@ async def notifications_pending(
                 )
             except ProgressDeliveryError:
                 invalid_progress.append(str(row["id"]))
+                continue
+            item = _strict_pointer(row)
+        elif row.get("kind") == "reminder":
+            # The body is delayed until the exact send-edge claim revalidates
+            # current person/chat authority and the durable reminder schedule.
+            if not _reminder_delivery_is_authorized(request.app.state, row):
+                undeliverable.append(str(row["id"]))
                 continue
             item = _strict_pointer(row)
         else:
