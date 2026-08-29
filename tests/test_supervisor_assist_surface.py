@@ -13,12 +13,14 @@ from friday.file_evidence import (
     stamp_current_turn_file_reference_for_tenant,
 )
 from friday.orchestration.capability_binding import operational_capability_snapshot
+from friday.orchestration.contracts import RouterMode, TurnInput
 from friday.orchestration.policy_kernel import PolicyAdmissionContext, admit_supervisor_proposal
 from friday.orchestration.semantic_supervisor import build_supervisor_input
 from friday.orchestration.supervisor_assist_ingress import SupervisorAssistIngressBindingV1
 from friday.orchestration.supervisor_assist_surface import (
     CurrentFileWebAssistSurface,
     bind_assist_plan_to_surface,
+    prepare_authenticated_current_file_web_assist_surface,
     prepare_current_file_web_assist_surface,
 )
 from friday.orchestration.supervisor_contracts import (
@@ -30,8 +32,22 @@ from friday.orchestration.supervisor_plan_authority import (
     PlanSourceBinding,
     attest_plan_authority,
 )
+from friday.orchestration.turn_context import (
+    AuthenticatedTurnContext,
+    IngressKind,
+    TurnContextError,
+    TurnContextIssuer,
+    TurnMode,
+)
+from friday.orchestration.turn_context_call_scope import (
+    AuthenticatedChatCallScope,
+    require_authenticated_chat_call_scope,
+)
+from friday.orchestration.turn_context_ingress import issue_authenticated_turn_context
+from friday.orchestration.turn_context_runtime import bind_authenticated_turn_context
 from friday.pending_durable_turn import PendingDurableTurnAdmission
 from friday.permissions import ActorContext
+from friday.turn_intent_policy import TurnIntent, TurnPolicyDecision
 
 
 class _Carrier(dict[str, Any]):
@@ -137,6 +153,82 @@ def _surface(**overrides: Any) -> CurrentFileWebAssistSurface:
     return surface
 
 
+def _authenticated_call(
+    label: str,
+) -> tuple[
+    TurnContextIssuer,
+    AuthenticatedTurnContext,
+    ActorContext,
+    list[dict[str, Any]],
+    dict[str, Any],
+    SupervisorAssistIngressBindingV1,
+    float,
+]:
+    values = _surface_kwargs()
+    actor = values["actor"]
+    attachments = values["attachments"]
+    ingestion = values["ingestion_result"]
+    ingress = values["ingress_binding"]
+    assert isinstance(actor, ActorContext)
+    assert type(attachments) is list
+    assert type(ingestion) is dict
+    assert type(ingress) is SupervisorAssistIngressBindingV1
+    deadline_ns = time.monotonic_ns() + 5_000_000_000
+    deadline = deadline_ns / 1_000_000_000
+    deadline_ns = int(deadline * 1_000_000_000)
+    issuer = TurnContextIssuer(label.encode("ascii").ljust(32, b"0"))
+    context = issue_authenticated_turn_context(
+        issuer,
+        ingress_kind=IngressKind.SIGNED_HTTP,
+        ingress_issued_token=f"lease-{label}",
+        actor=actor,
+        conversation_id="conv_1234567890abcdef",
+        interaction_mode=TurnMode.DIALOGUE,
+        source_id=actor.source,
+        update_id=f"request-{label}",
+        request_effect_binding_sha256=ingress.canonical_sha256(),
+        message=_message(),
+        enable_tools=True,
+        decision=TurnPolicyDecision(intent=TurnIntent.PASSTHROUGH),
+        router_mode=RouterMode.LEGACY,
+        deadline_monotonic_ns=deadline_ns,
+        max_output_tokens=2_048,
+        attachments=attachments,
+    )
+    return issuer, context, actor, attachments, ingestion, ingress, deadline
+
+
+def _bind_authenticated_call_scope(
+    context: AuthenticatedTurnContext,
+    actor: ActorContext,
+    attachments: list[dict[str, Any]],
+    ingestion: dict[str, Any],
+    deadline: float,
+) -> AuthenticatedChatCallScope:
+    return require_authenticated_chat_call_scope(
+        context,
+        user_id=actor.user_id,
+        message=_message(),
+        actor=actor,
+        conversation_id="conv_1234567890abcdef",
+        attachments=attachments,
+        enable_tools=True,
+        synthetic_document_notice=False,
+        replay_source_message_id=None,
+        mode=None,
+        answer_with_voice=False,
+        reply_to=None,
+        quoted_attachment_reference=False,
+        reply_assistant_reference=False,
+        reply_assistant_message_id=None,
+        turn_policy=None,
+        telegram_update_id=None,
+        turn_deadline=deadline,
+        pending_durable_admission=None,
+        ingestion_result=ingestion,
+    )
+
+
 def _plan(surface: CurrentFileWebAssistSurface, *, query: str) -> Any:
     supervisor_input = build_supervisor_input(surface.turn, _settings())
     proposal = SupervisorProposal.parse(
@@ -224,6 +316,81 @@ def test_exact_surface_mints_only_process_owned_file_and_public_query_pins() -> 
     assert surface.attachment_content_sha256 == "2" * 64
     assert surface.web_plan.query_sha256
     assert "private body" not in repr(surface)
+
+
+def test_authenticated_surface_reuses_exact_turn_source_and_private_carrier(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    issuer, context, actor, attachments, ingestion, ingress, deadline = _authenticated_call("surface-exact")
+    with bind_authenticated_turn_context(issuer, context):
+        scope = _bind_authenticated_call_scope(
+            context,
+            actor,
+            attachments,
+            ingestion,
+            deadline,
+        )
+
+        def forbidden_from_chat(*_args: Any, **_kwargs: Any) -> TurnInput:
+            raise AssertionError("authenticated preparation must not rebuild TurnInput")
+
+        monkeypatch.setattr(TurnInput, "from_chat", forbidden_from_chat)
+        surface = prepare_authenticated_current_file_web_assist_surface(
+            _settings(),
+            authenticated_context=context,
+            authenticated_scope=scope,
+            explicit_mode_requested=False,
+            ingress_binding=ingress,
+            conversation_is_dialogue=lambda person_id, conversation_id: (
+                person_id == actor.own_id and conversation_id == "conv_1234567890abcdef"
+            ),
+        )
+
+        assert type(surface) is CurrentFileWebAssistSurface
+        assert surface.turn is context.model_input
+        assert surface.actor is context.authority.actor
+        assert surface.require_current_authenticated_call_scope() is scope
+        assert scope.attachment_sources[0].private_carrier is not attachments[0]
+        assert surface.attachment.raw_object_id == scope.attachment_sources[0].private_carrier.raw_id
+        assert "private body" not in repr(surface)
+
+
+def test_authenticated_surface_rejects_foreign_effect_binding_and_revalidates_carrier() -> None:
+    issuer, context, actor, attachments, ingestion, ingress, deadline = _authenticated_call("surface-drift")
+    with bind_authenticated_turn_context(issuer, context):
+        scope = _bind_authenticated_call_scope(
+            context,
+            actor,
+            attachments,
+            ingestion,
+            deadline,
+        )
+        foreign = SupervisorAssistIngressBindingV1.from_claimed_request(
+            source_ref="foreign-request",
+            request_fingerprint_sha256="e" * 64,
+        )
+        with pytest.raises(TurnContextError, match="request-effect binding drifted"):
+            prepare_authenticated_current_file_web_assist_surface(
+                _settings(),
+                authenticated_context=context,
+                authenticated_scope=scope,
+                explicit_mode_requested=False,
+                ingress_binding=foreign,
+                conversation_is_dialogue=lambda *_args: True,
+            )
+
+        surface = prepare_authenticated_current_file_web_assist_surface(
+            _settings(),
+            authenticated_context=context,
+            authenticated_scope=scope,
+            explicit_mode_requested=False,
+            ingress_binding=ingress,
+            conversation_is_dialogue=lambda *_args: True,
+        )
+        assert type(surface) is CurrentFileWebAssistSurface
+        attachments[0]["persisted"] = False
+        with pytest.raises(TurnContextError, match="chat call scope drifted"):
+            surface.require_current_authenticated_call_scope()
 
 
 @pytest.mark.parametrize(

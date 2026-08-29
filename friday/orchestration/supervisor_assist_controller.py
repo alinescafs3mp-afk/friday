@@ -1238,6 +1238,7 @@ class SupervisorAssistController:
             or self._closed
         ):
             return None
+        surface.require_current_authenticated_call_scope()
         requested_mode = SupervisorMode.fail_closed(
             getattr(self._settings, "semantic_supervisor_mode", SupervisorMode.OFF.value)
         )
@@ -1347,6 +1348,7 @@ class SupervisorAssistController:
             absolute_deadline=absolute_deadline,
             pre_dispatch_validator=planning_still_current,
         )
+        surface.require_current_authenticated_call_scope()
         if type(parsed) is not ParsedSupervisorProposal:
             return None
         proposal = cast(ParsedSupervisorProposal, parsed)
@@ -1377,6 +1379,7 @@ class SupervisorAssistController:
         primary_ready = await self._primary_model.prepare_primary_model(
             absolute_deadline=absolute_deadline,
         )
+        surface.require_current_authenticated_call_scope()
         if primary_ready is not True:
             return None
         fresh = self._fresh_snapshot()
@@ -1805,6 +1808,7 @@ class SupervisorAssistController:
         except Exception:
             record.metrics.accounting_complete = False
             return None
+        record.surface.require_current_authenticated_call_scope()
         if type(admitted) is not AdmittedSupervisorReview:
             record.metrics.accounting_complete = False
             return None
@@ -2461,6 +2465,7 @@ class SupervisorAssistController:
     ) -> bool:
         if record.stop.is_set():
             return False
+        record.surface.require_current_authenticated_call_scope()
         previous_revision = record.graph.revision
         try:
             graph = self._graph_adapter.admit_review_recovery(
@@ -2913,6 +2918,7 @@ class SupervisorAssistController:
                 return await self._legacy(legacy_primary, reason="promotion_not_admitted")
             if _exact_future_deadline(deadline) is None:
                 return await self._legacy(legacy_primary, reason="deadline_exhausted")
+            admitted_surface.require_current_authenticated_call_scope()
             attempt = self._admit_or_recover(prospective)
             if attempt.certainty is _AdmissionCertainty.NO_COMMIT:
                 return await self._legacy(legacy_primary, reason="ownership_not_committed")

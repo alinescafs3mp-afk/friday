@@ -34,6 +34,16 @@ from friday.orchestration.transient_web_comparison import (
     TransientWebComparisonError,
     seal_explicit_public_web_query,
 )
+from friday.orchestration.turn_context import (
+    AuthenticatedTurnContext,
+    AuthorizedSourceKind,
+    TurnContextError,
+    TurnMode,
+)
+from friday.orchestration.turn_context_call_scope import (
+    AuthenticatedChatCallScope,
+    require_current_authenticated_chat_call_scope,
+)
 from friday.pending_durable_turn import PendingDurableTurnAdmission
 from friday.permissions import ActorContext
 from friday.turn_intent_policy import TurnPolicyDecision
@@ -52,6 +62,16 @@ class CurrentFileWebAssistSurface:
     attachment_content_sha256: str
     web_plan: SealedPublicWebQuery = field(repr=False)
     ingress_binding: SupervisorAssistIngressBindingV1 = field(repr=False)
+    _authenticated_context: AuthenticatedTurnContext | None = field(
+        default=None,
+        repr=False,
+        compare=False,
+    )
+    _authenticated_scope: AuthenticatedChatCallScope | None = field(
+        default=None,
+        repr=False,
+        compare=False,
+    )
 
     def __post_init__(self) -> None:
         if (
@@ -64,6 +84,47 @@ class CurrentFileWebAssistSurface:
             or type(self.ingress_binding) is not SupervisorAssistIngressBindingV1
         ):
             raise ValueError("assist surface is invalid")
+        if (self._authenticated_context is None) is not (self._authenticated_scope is None):
+            raise ValueError("assist surface authenticated scope is incomplete")
+        if self._authenticated_context is not None:
+            context = self._authenticated_context
+            scope = self._authenticated_scope
+            if (
+                type(context) is not AuthenticatedTurnContext
+                or type(scope) is not AuthenticatedChatCallScope
+                or context.model_input is not self.turn
+                or scope.model_input is not self.turn
+                or context.authority.actor is not self.actor
+                or context.authority.conversation_id != self.conversation_id
+                or not hmac.compare_digest(
+                    context.effect_fence.request_effect_binding_sha256,
+                    self.ingress_binding.canonical_sha256(),
+                )
+            ):
+                raise ValueError("assist surface authenticated scope is invalid")
+
+    def require_current_authenticated_call_scope(self) -> AuthenticatedChatCallScope | None:
+        """Revalidate the exact transient call before a post-await mutation."""
+
+        context = self._authenticated_context
+        sealed = self._authenticated_scope
+        if context is None and sealed is None:
+            return None
+        if type(context) is not AuthenticatedTurnContext or type(sealed) is not AuthenticatedChatCallScope:
+            raise TurnContextError("assist surface authenticated scope is invalid")
+        current = require_current_authenticated_chat_call_scope(context)
+        if (
+            current is not sealed
+            or current.model_input is not self.turn
+            or context.authority.actor is not self.actor
+            or context.authority.conversation_id != self.conversation_id
+            or not hmac.compare_digest(
+                context.effect_fence.request_effect_binding_sha256,
+                self.ingress_binding.canonical_sha256(),
+            )
+        ):
+            raise TurnContextError("assist surface authenticated scope drifted")
+        return current
 
 
 def _transient_web_ingestion(value: object) -> bool:
@@ -84,6 +145,117 @@ def _transient_web_ingestion(value: object) -> bool:
         and value.get("category") == "web_request"
         and type(value.get("reason")) is str
         and bool(str(value.get("reason") or "").strip())
+    )
+
+
+def prepare_authenticated_current_file_web_assist_surface(
+    settings: object,
+    *,
+    authenticated_context: AuthenticatedTurnContext,
+    authenticated_scope: AuthenticatedChatCallScope,
+    explicit_mode_requested: bool,
+    ingress_binding: SupervisorAssistIngressBindingV1 | None,
+    conversation_is_dialogue: Callable[[str, str], bool],
+) -> CurrentFileWebAssistSurface | None:
+    """Derive the promoted surface only from one live authenticated call seal."""
+
+    if (
+        type(authenticated_context) is not AuthenticatedTurnContext
+        or type(authenticated_scope) is not AuthenticatedChatCallScope
+    ):
+        raise TurnContextError("assist surface requires an authenticated call scope")
+    current_scope = require_current_authenticated_chat_call_scope(authenticated_context)
+    if current_scope is not authenticated_scope:
+        raise TurnContextError("assist surface authenticated call scope identity drifted")
+
+    context = authenticated_context
+    scope = authenticated_scope
+    turn = context.model_input
+    actor = context.authority.actor
+    conversation_id = context.authority.conversation_id
+    if type(ingress_binding) is not SupervisorAssistIngressBindingV1:
+        raise TurnContextError("assist surface lost its authenticated ingress binding")
+    if not hmac.compare_digest(
+        ingress_binding.canonical_sha256(),
+        context.effect_fence.request_effect_binding_sha256,
+    ):
+        raise TurnContextError("assist surface request-effect binding drifted")
+    if (
+        scope.model_input is not turn
+        or turn.message_truncated
+        or turn.attachments_truncated
+        or turn.enable_tools is not True
+        or turn.synthetic_document_notice is not False
+        or turn.quoted_attachment_reference is not False
+        or turn.reply_assistant_reference is not False
+        or turn.reply_quote
+        or turn.reply_quote_truncated
+        or turn.conversation_mode != TurnMode.DIALOGUE.value
+        or context.turn_policy.decision.handled
+        or context.pending_work_admission is not None
+        or scope.pending_work_bound
+        or type(explicit_mode_requested) is not bool
+        or explicit_mode_requested
+        or actor.user_id != actor.own_id
+        or type(conversation_id) is not str
+        or _CONVERSATION_ID_RE.fullmatch(conversation_id) is None
+        or not _transient_web_ingestion(scope.ingestion_result)
+        or len(turn.attachments) != 1
+        or len(scope.attachment_carriers) != 1
+        or len(scope.attachment_sources) != 1
+    ):
+        return None
+    try:
+        if conversation_is_dialogue(actor.own_id, conversation_id) is not True:
+            return None
+    except Exception:
+        return None
+
+    descriptor = turn.attachments[0]
+    carrier = scope.attachment_carriers[0]
+    source = scope.attachment_sources[0]
+    token = source.private_carrier
+    if (
+        source.kind is not AuthorizedSourceKind.CURRENT_ATTACHMENT
+        or source.ordinal != 1
+        or source.model_descriptor is not descriptor
+        or type(token) is not CurrentTurnFileReferenceToken
+        or current_turn_file_reference_for_tenant(carrier, tenant_id=actor.user_id) is not token
+        or carrier.get("persisted") is not True
+        or carrier.get("current_turn_only") is not True
+    ):
+        raise TurnContextError("assist surface current source authority drifted")
+    attachment = ReadOnlyAttachmentReference(
+        ordinal=descriptor.ordinal,
+        raw_object_id=token.raw_id,
+        source_identity_sha256=token.source_identity_sha256,
+        name=descriptor.name,
+        media_type=descriptor.media_type,
+    )
+    eligibility = supervisor_eligibility(turn, settings)
+    if (
+        not eligibility.eligible
+        or eligibility.task_class is not TaskClass.COMPARE_CURRENT_FILE_WITH_CURRENT_WEB
+    ):
+        return None
+    try:
+        web_plan = seal_explicit_public_web_query(
+            current_user_message=turn.message,
+            actor=actor,
+            conversation_id=conversation_id,
+        )
+    except (TransientWebComparisonError, TypeError, ValueError, UnicodeError):
+        return None
+    return CurrentFileWebAssistSurface(
+        turn=turn,
+        actor=actor,
+        conversation_id=conversation_id,
+        attachment=attachment,
+        attachment_content_sha256=token.content_sha256,
+        web_plan=web_plan,
+        ingress_binding=ingress_binding,
+        _authenticated_context=context,
+        _authenticated_scope=scope,
     )
 
 
@@ -251,5 +423,6 @@ def bind_assist_plan_to_surface(
 __all__ = [
     "CurrentFileWebAssistSurface",
     "bind_assist_plan_to_surface",
+    "prepare_authenticated_current_file_web_assist_surface",
     "prepare_current_file_web_assist_surface",
 ]

@@ -33,6 +33,16 @@ from friday.orchestration.supervisor_review_transport import (
     build_supervisor_review_request,
     parse_and_admit_supervisor_review,
 )
+from friday.orchestration.turn_context import AuthenticatedTurnContext, TurnContextError
+from friday.orchestration.turn_context_advisory import suspend_authenticated_advisory_authority
+from friday.orchestration.turn_context_call_scope import (
+    AuthenticatedChatCallScope,
+    require_current_authenticated_chat_call_scope,
+)
+from friday.orchestration.turn_context_runtime import (
+    current_primary_authenticated_turn_context,
+    reserve_authenticated_advisory_call,
+)
 from friday.secondary_brain import ModelRequest, SecondaryAttempt, SecondaryResult
 
 
@@ -109,6 +119,30 @@ def _guarded(guard: Callable[[], bool] | None) -> Callable[[], bool] | None:
     return evaluate
 
 
+def _authenticated_advisory_scope(
+    absolute_deadline: float,
+) -> tuple[AuthenticatedTurnContext | None, AuthenticatedChatCallScope | None, float]:
+    """Bind one advisory call to the live root and its stricter deadline."""
+
+    context = current_primary_authenticated_turn_context()
+    if context is None:
+        return None, None, absolute_deadline
+    scope = require_current_authenticated_chat_call_scope(context)
+    return context, scope, min(absolute_deadline, scope.deadline_monotonic)
+
+
+def _revalidate_authenticated_advisory_scope(
+    context: AuthenticatedTurnContext | None,
+    scope: AuthenticatedChatCallScope | None,
+) -> None:
+    if context is None and scope is None:
+        return
+    if type(context) is not AuthenticatedTurnContext or type(scope) is not AuthenticatedChatCallScope:
+        raise TurnContextError("authenticated advisory call scope is invalid")
+    if require_current_authenticated_chat_call_scope(context) is not scope:
+        raise TurnContextError("authenticated advisory call scope drifted")
+
+
 @dataclass(frozen=True, slots=True)
 class AssistPromotionEvaluator:
     """Re-evaluate immutable evidence against fresh scheduler/registry facts."""
@@ -158,10 +192,13 @@ class SchedulerAssistPlanner:
         absolute_deadline: float,
         pre_dispatch_validator: Callable[[], bool] | None = None,
     ) -> ParsedSupervisorProposal | None:
+        authenticated_context, authenticated_scope, effective_deadline = _authenticated_advisory_scope(
+            absolute_deadline
+        )
         try:
             request = build_supervisor_request(
                 supervisor_input,
-                absolute_deadline_monotonic=absolute_deadline,
+                absolute_deadline_monotonic=effective_deadline,
             )
         except Exception:
             return None
@@ -178,17 +215,24 @@ class SchedulerAssistPlanner:
             accepted = parsed
             return True
 
+        if authenticated_context is not None:
+            try:
+                reserve_authenticated_advisory_call(authenticated_context)
+            except TurnContextError:
+                return None
         try:
-            attempt = await self.scheduler.evaluate_shadow(
-                request,
-                validator=validate,
-                invalidate_on_rejection=False,
-                pre_dispatch_validator=_guarded(pre_dispatch_validator),
-            )
+            with suspend_authenticated_advisory_authority():
+                attempt = await self.scheduler.evaluate_shadow(
+                    request,
+                    validator=validate,
+                    invalidate_on_rejection=False,
+                    pre_dispatch_validator=_guarded(pre_dispatch_validator),
+                )
         except asyncio.CancelledError:
             raise
         except Exception:
             return None
+        _revalidate_authenticated_advisory_scope(authenticated_context, authenticated_scope)
         if not isinstance(attempt, SecondaryAttempt) or not attempt.succeeded:
             return None
         return accepted
@@ -207,10 +251,13 @@ class SchedulerAssistReviewer:
         absolute_deadline: float,
         pre_dispatch_validator: Callable[[], bool] | None = None,
     ) -> AdmittedSupervisorReview | None:
+        authenticated_context, authenticated_scope, effective_deadline = _authenticated_advisory_scope(
+            absolute_deadline
+        )
         try:
             request = build_supervisor_review_request(
                 context,
-                absolute_deadline_monotonic=absolute_deadline,
+                absolute_deadline_monotonic=effective_deadline,
             )
         except Exception:
             return None
@@ -227,17 +274,24 @@ class SchedulerAssistReviewer:
             accepted = parsed
             return True
 
+        if authenticated_context is not None:
+            try:
+                reserve_authenticated_advisory_call(authenticated_context)
+            except TurnContextError:
+                return None
         try:
-            attempt = await self.scheduler.evaluate_shadow(
-                request,
-                validator=validate,
-                invalidate_on_rejection=False,
-                pre_dispatch_validator=_guarded(pre_dispatch_validator),
-            )
+            with suspend_authenticated_advisory_authority():
+                attempt = await self.scheduler.evaluate_shadow(
+                    request,
+                    validator=validate,
+                    invalidate_on_rejection=False,
+                    pre_dispatch_validator=_guarded(pre_dispatch_validator),
+                )
         except asyncio.CancelledError:
             raise
         except Exception:
             return None
+        _revalidate_authenticated_advisory_scope(authenticated_context, authenticated_scope)
         if not isinstance(attempt, SecondaryAttempt) or not attempt.succeeded:
             return None
         return accepted

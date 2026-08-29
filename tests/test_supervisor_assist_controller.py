@@ -114,6 +114,7 @@ from friday.orchestration.transient_web_comparison import (
     TransientWebComparisonEvidence,
     TransientWebEvidenceStatus,
 )
+from friday.orchestration.turn_context import TurnContextError
 from friday.pending_durable_turn import PendingDurableTurnAdmission
 from friday.permissions import ActorContext, AuthorizationError, AuthorizationService
 from friday.source_identity import (
@@ -953,6 +954,63 @@ async def test_plan_mint_authority_denial_falls_back_before_graph_admission() ->
     assert result.outcome is SupervisorAssistOutcome.LEGACY
     assert planner.calls == 1
     assert legacy_calls == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("fail_at", "propagates"),
+    [(2, False), (3, False), (4, True)],
+)
+async def test_authenticated_scope_is_revalidated_after_await_and_immediately_before_admission(
+    monkeypatch: pytest.MonkeyPatch,
+    fail_at: int,
+    propagates: bool,
+) -> None:
+    checks = 0
+
+    def revalidate(_surface: CurrentFileWebAssistSurface) -> None:
+        nonlocal checks
+        checks += 1
+        if checks == fail_at:
+            raise TurnContextError("injected authenticated scope drift")
+
+    monkeypatch.setattr(
+        CurrentFileWebAssistSurface,
+        "require_current_authenticated_call_scope",
+        revalidate,
+    )
+
+    class AdmissionSpy:
+        def __init__(self) -> None:
+            self.admit_calls = 0
+
+        def admit(self, *_args: Any, **_kwargs: Any) -> None:
+            self.admit_calls += 1
+
+    adapter = AdmissionSpy()
+    controller = _controller(graph_adapter=adapter)
+    legacy_calls = 0
+
+    async def legacy() -> dict[str, object]:
+        nonlocal legacy_calls
+        legacy_calls += 1
+        return {"message": "legacy"}
+
+    call = controller.execute(
+        _surface(),
+        legacy_primary=legacy,
+        absolute_deadline=time.monotonic() + 3,
+    )
+    if propagates:
+        with pytest.raises(TurnContextError, match="injected authenticated scope drift"):
+            await call
+    else:
+        result = await call
+        assert result.outcome is SupervisorAssistOutcome.LEGACY
+
+    assert checks == fail_at
+    assert adapter.admit_calls == 0
+    assert legacy_calls == (0 if propagates else 1)
 
 
 def test_production_plan_authority_gate_rechecks_principal_and_exact_raw_source(storage: Any) -> None:
