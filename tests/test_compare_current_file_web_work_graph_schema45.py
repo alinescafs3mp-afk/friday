@@ -123,6 +123,20 @@ def _copy_matching_columns(
 
 
 def _drop_document_passage_schema(conn: sqlite3.Connection) -> None:
+    conversation_triggers = tuple(
+        str(row[0])
+        for row in conn.execute(
+            """SELECT name FROM sqlite_master
+                WHERE type='trigger' AND name LIKE 'conversation_passage_%'
+                ORDER BY name"""
+        )
+    )
+    for name in conversation_triggers:
+        conn.execute(f'DROP TRIGGER "{name}"')  # nosec B608 - SQLite-owned names
+    conn.execute("DROP TABLE IF EXISTS conversation_passages_fts")
+    conn.execute("DROP VIEW IF EXISTS conversation_passage_search_content")
+    conn.execute("DROP TABLE IF EXISTS conversation_passages")
+    conn.execute("DROP TABLE IF EXISTS conversation_passage_projections")
     trigger_names = tuple(
         str(row[0])
         for row in conn.execute(
@@ -207,7 +221,7 @@ def _downgrade_graph_projection_to_released_schema44(database: Path) -> None:
 def test_schema45_exact_binding_is_durable_immutable_and_revision_cas(storage) -> None:
     graph = _seed_bound_graph(storage, "exact")
 
-    assert SCHEMA_VERSION == 48
+    assert SCHEMA_VERSION == 49
     assert COMPARE_CURRENT_FILE_WEB_WORK_GRAPH_SCHEMA.endswith(".v3")
     assert graph.has_exact_request_binding is True
     assert graph.payload()["anchor_request_binding_sha256"] == graph.anchor_request_binding_sha256
@@ -391,7 +405,7 @@ def test_released_schema44_graph_migrates_to_explicit_unbound_sentinel_and_reads
     migrated = FridayStorage(replace(configured, database_must_exist=True))
     try:
         assert (
-            migrated.execute("SELECT value FROM schema_meta WHERE key='schema_version'").fetchone()[0] == "48"
+            migrated.execute("SELECT value FROM schema_meta WHERE key='schema_version'").fetchone()[0] == "49"
         )
         with migrated.transaction() as conn:
             graph = get_compare_current_file_web_work_graph_in_transaction(

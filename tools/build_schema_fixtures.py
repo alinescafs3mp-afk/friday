@@ -159,6 +159,44 @@ if SCHEMA_VERSION >= 48:
     )
     if passage_report["passage_changed"] != 1:
         raise RuntimeError(f"schema {{SCHEMA_VERSION}} fixture did not publish one passage set")
+if SCHEMA_VERSION >= 49:
+    # Schema 49 is deliberately reader-first.  Exercise its historical/new-source
+    # admission shape without importing the later writer activation: ordinary
+    # rows are body-free and every anchor remains honestly backfill_pending.
+    conversation = storage.create_conversation(
+        {SEED_USER!r},
+        title="Synthetic migration conversation",
+    )
+    storage.store_message(
+        conversation["id"],
+        {SEED_USER!r},
+        "user",
+        "Synthetic schema fixture user message",
+    )
+    storage.store_message(
+        conversation["id"],
+        {SEED_USER!r},
+        "assistant",
+        "Synthetic schema fixture assistant message",
+    )
+    projection = storage.execute(
+        "SELECT projection_status,incomplete_reason,indexed_message_count,passage_count "
+        "FROM conversation_passage_projections WHERE conversation_id=?",
+        (conversation["id"],),
+    ).fetchone()
+    child_count = storage.execute(
+        "SELECT COUNT(*) FROM conversation_passages WHERE conversation_id=?",
+        (conversation["id"],),
+    ).fetchone()[0]
+    if projection is None or tuple(projection) != (
+        "incomplete",
+        "backfill_pending",
+        0,
+        0,
+    ) or child_count != 0:
+        raise RuntimeError(
+            f"schema {{SCHEMA_VERSION}} fixture activated conversation passages prematurely"
+        )
 if SCHEMA_VERSION >= 31:
     # Schema 31's defining authoritative data is relation history. Seed one
     # completely synthetic lineage so its committed fixture proves both the

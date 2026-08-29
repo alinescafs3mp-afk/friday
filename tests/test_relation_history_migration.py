@@ -53,6 +53,20 @@ RELATION_INSERT_OR_REPLACE_SQL = RELATION_INSERT_OR_IGNORE_SQL.replace(
 
 
 def _drop_document_passage_schema(conn: sqlite3.Connection) -> None:
+    conversation_triggers = tuple(
+        str(row[0])
+        for row in conn.execute(
+            """SELECT name FROM sqlite_master
+                WHERE type='trigger' AND name LIKE 'conversation_passage_%'
+                ORDER BY name"""
+        )
+    )
+    for name in conversation_triggers:
+        conn.execute(f'DROP TRIGGER "{name}"')  # nosec B608 - SQLite-owned names
+    conn.execute("DROP TABLE IF EXISTS conversation_passages_fts")
+    conn.execute("DROP VIEW IF EXISTS conversation_passage_search_content")
+    conn.execute("DROP TABLE IF EXISTS conversation_passages")
+    conn.execute("DROP TABLE IF EXISTS conversation_passage_projections")
     trigger_names = tuple(
         str(row[0])
         for row in conn.execute(
@@ -139,9 +153,9 @@ def test_known_at_normalization_requires_a_real_offset_aware_instant() -> None:
 
 
 def test_schema_32_installs_the_full_snapshot_context_indexes_and_guards(storage) -> None:
-    assert SCHEMA_VERSION == 48
+    assert SCHEMA_VERSION == 49
     marker = storage.execute("SELECT value FROM schema_meta WHERE key='schema_version'").fetchone()
-    assert marker and marker[0] == "48"
+    assert marker and marker[0] == "49"
 
     columns = {row[1]: row[2] for row in storage.execute("PRAGMA table_info(relation_revisions)").fetchall()}
     assert tuple(columns) == (

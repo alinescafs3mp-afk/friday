@@ -253,9 +253,9 @@ def test_schema_45_migrates_atomically_to_body_free_schema_46(settings, tmp_path
     database = _unpack_schema_45(tmp_path)
     migrated = FridayStorage(replace(settings, database_path=database, database_must_exist=True))
     try:
-        assert SCHEMA_VERSION == 48
+        assert SCHEMA_VERSION == 49
         assert (
-            migrated.execute("SELECT value FROM schema_meta WHERE key='schema_version'").fetchone()[0] == "48"
+            migrated.execute("SELECT value FROM schema_meta WHERE key='schema_version'").fetchone()[0] == "49"
         )
         validate_engineer_work_item_schema(migrated.conn)
         columns = {str(row[1]) for row in migrated.execute("PRAGMA table_info(engineer_work_items)")}
@@ -403,14 +403,14 @@ def test_newer_or_tampered_schema_fails_closed(settings, tmp_path) -> None:
     initial.ensure_user(OWNER)
     initial.close()
     with sqlite3.connect(database) as forged:
-        forged.execute("UPDATE schema_meta SET value='49' WHERE key='schema_version'")
+        forged.execute("UPDATE schema_meta SET value='50' WHERE key='schema_version'")
         forged.commit()
     future = FridayStorage(replace(settings, database_path=database, database_must_exist=False))
     with pytest.raises(UnsupportedSchemaVersionError):
         future.execute("SELECT 1").fetchone()
     future.close()
     with sqlite3.connect(database) as probe:
-        assert probe.execute("SELECT value FROM schema_meta WHERE key='schema_version'").fetchone() == ("49",)
+        assert probe.execute("SELECT value FROM schema_meta WHERE key='schema_version'").fetchone() == ("50",)
 
 
 def test_closed_source_binding_never_persists_raw_carrier_values(storage) -> None:
@@ -2008,7 +2008,7 @@ def test_backup_export_and_account_preflight_are_schema46_closed(storage, tmp_pa
             now=LATER,
         )
     backup = storage.create_backup(label="engineer-work-item")
-    assert backup["schema_version"] == 48
+    assert backup["schema_version"] == 49
     assert storage.verify_backup(str(backup["database"]))["ok"] is True
 
     exported = storage.export_user(OWNER)

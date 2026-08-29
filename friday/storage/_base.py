@@ -178,7 +178,11 @@ LOGGER = logging.getLogger("friday.storage")
 # Exact schema-47 v2 DDL/data are authenticated before only the rebuildable
 # passage tables advance; unchanged CURRENT topology is carried byte-for-byte,
 # while changed topology returns to explicit bounded-writer work.
-SCHEMA_VERSION = 48
+# 49 — reader-first body-free conversation-passage anchors.  Historical
+# conversations start explicitly backfill_pending; the released schema already
+# accepts future authenticated CURRENT rows so it can be sealed as the rollback
+# binary before the independently reversible writer/search activation.
+SCHEMA_VERSION = 49
 
 #: Определение таблицы внешних источников отдельной константой: миграция схемы 29
 #: пересоздаёт её, чтобы ключом стала ПАРА `(user_id, name)`, и должна брать ровно

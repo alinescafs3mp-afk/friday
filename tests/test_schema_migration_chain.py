@@ -35,6 +35,7 @@ FIXTURE_USER = "fixture-owner"
 # Rows every fixture carries, seeded by the builder.
 FIXTURE_RAW_IDS = {f"raw-fixture-{index}" for index in range(3)}
 FIXTURE_RELATION_ID = "relation-fixture-history"
+FIXTURE_CONVERSATION_TITLE = "Synthetic migration conversation"
 
 
 def _fixture_versions() -> list[int]:
@@ -88,6 +89,39 @@ def test_schema_31_fixture_carries_current_relation_and_captured_history(tmp_pat
         "captured",
     )
     assert str(revision[-1]).startswith("relation_batch_")
+
+
+def test_schema_49_fixture_carries_only_reader_first_conversation_passage_work(
+    tmp_path,
+) -> None:
+    """The schema-capable rollback fixture must predate writer activation."""
+
+    database = _unpack(49, tmp_path)
+    with sqlite3.connect(f"file:{database}?mode=ro", uri=True) as fixture:
+        conversation = fixture.execute(
+            "SELECT id,user_id FROM conversations WHERE title=?",
+            (FIXTURE_CONVERSATION_TITLE,),
+        ).fetchone()
+        assert conversation is not None and conversation[1] == FIXTURE_USER
+        messages = fixture.execute(
+            "SELECT role FROM messages WHERE conversation_id=? ORDER BY rowid",
+            (conversation[0],),
+        ).fetchall()
+        projection = fixture.execute(
+            """SELECT projection_status,incomplete_reason,
+                      indexed_message_count,passage_count
+                 FROM conversation_passage_projections
+                WHERE conversation_id=?""",
+            (conversation[0],),
+        ).fetchone()
+        child_count = fixture.execute(
+            "SELECT COUNT(*) FROM conversation_passages WHERE conversation_id=?",
+            (conversation[0],),
+        ).fetchone()[0]
+
+    assert messages == [("user",), ("assistant",)]
+    assert projection == ("incomplete", "backfill_pending", 0, 0)
+    assert child_count == 0
 
 
 @pytest.mark.parametrize("version", _fixture_versions())

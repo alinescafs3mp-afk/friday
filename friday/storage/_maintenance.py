@@ -14,6 +14,11 @@ import unicodedata
 import zlib
 from dataclasses import dataclass
 
+from friday.conversation_passages.schema import (
+    register_conversation_passage_connection_functions,
+    validate_conversation_passage_fts_schema,
+    validate_conversation_passage_schema,
+)
 from friday.diagnostics.runtime_lease import ProcessLease, RuntimeLeaseError
 from friday.document_catalog.passage_schema import (
     register_document_passage_connection_functions,
@@ -139,6 +144,27 @@ _RESTORE_INTENT_FIELDS = frozenset(
         "target_sha256",
     }
 )
+
+
+def _validate_conversation_passage_backup(conn: sqlite3.Connection) -> None:
+    """Authenticate schema 49 on both FTS5 and supported no-FTS5 hosts.
+
+    A host with FTS5 proves derivative rows as well as exact DDL.  A fallback
+    host cannot instantiate the sealed virtual table, so it instead authenticates
+    the frozen installed DDL manifest and all authoritative ordinary rows.  Only
+    the exact missing-module error earns that bounded downgrade.
+    """
+
+    try:
+        validate_conversation_passage_fts_schema(conn, required=False)
+    except sqlite3.OperationalError as exc:
+        if str(exc).strip().casefold() != "no such module: fts5":
+            raise
+        validate_conversation_passage_schema(
+            conn,
+            validate_fts_data=False,
+            _register_functions=False,
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -2122,6 +2148,7 @@ class MaintenanceMixin(StorageShared):
         """
         register_document_catalog_connection_functions(backup_conn)
         register_document_passage_connection_functions(backup_conn)
+        register_conversation_passage_connection_functions(backup_conn)
         integrity = backup_conn.execute("PRAGMA integrity_check").fetchone()[0]
         foreign_key_violations = backup_conn.execute("PRAGMA foreign_key_check").fetchall()
         schema_row = backup_conn.execute(
@@ -2139,6 +2166,14 @@ class MaintenanceMixin(StorageShared):
         validate_engineer_work_item_schema(backup_conn)
         validate_document_catalog_schema(backup_conn)
         validate_document_passage_schema(backup_conn)
+        backup_conn.execute("BEGIN")
+        try:
+            # FTS5's external-content integrity command is write-shaped but
+            # changes no durable rows. The rollback keeps backup verification
+            # byte-preserving while still detecting token-index corruption.
+            _validate_conversation_passage_backup(backup_conn)
+        finally:
+            backup_conn.rollback()
         if _contains_secondary_product_witness(backup_conn):
             raise RuntimeError("Backup snapshot contains a transient secondary product witness")
         if _engineer_command_backup_authority_required(
@@ -2451,6 +2486,7 @@ class MaintenanceMixin(StorageShared):
         try:
             register_document_catalog_connection_functions(conn)
             register_document_passage_connection_functions(conn)
+            register_conversation_passage_connection_functions(conn)
             conn.execute("PRAGMA query_only=ON")
             integrity = conn.execute("PRAGMA integrity_check").fetchone()[0]
             foreign_key_violations = len(conn.execute("PRAGMA foreign_key_check").fetchall())
@@ -2473,6 +2509,13 @@ class MaintenanceMixin(StorageShared):
                         validate_engineer_work_item_schema(conn)
                         validate_document_catalog_schema(conn)
                         validate_document_passage_schema(conn)
+                        conn.execute("PRAGMA query_only=OFF")
+                        conn.execute("BEGIN")
+                        try:
+                            _validate_conversation_passage_backup(conn)
+                        finally:
+                            conn.rollback()
+                            conn.execute("PRAGMA query_only=ON")
                 except (TypeError, ValueError):
                     database_error = "Database schema_version marker is invalid"
         except sqlite3.DatabaseError as exc:
@@ -3173,6 +3216,15 @@ class MaintenanceMixin(StorageShared):
                 raise ValueError("User not found")
             user = dict(user_row)
 
+            # The sidecar rows have no independent owner column.  Authenticate
+            # their complete source/child rollup inside this exact export
+            # snapshot before any owner-scoped identity is materialized.
+            validate_conversation_passage_schema(
+                conn,
+                require_fts=False,
+                validate_fts_data=False,
+            )
+
             reminder_source = f"reminder:{user_id}"
             visible_entity_ids = {
                 str(row["id"])
@@ -3371,6 +3423,39 @@ class MaintenanceMixin(StorageShared):
                 ),
                 "work_items": ("SELECT * FROM work_items WHERE user_id=?", (user_id,)),
                 "conversations": ("SELECT * FROM conversations WHERE user_id=?", (user_id,)),
+                "conversation_passage_projections": (
+                    """SELECT projection.conversation_id,
+                              projection.indexed_message_count,
+                              projection.indexed_through_message_id,
+                              projection.indexed_conversation_revision_sha256,
+                              projection.passage_set_sha256,
+                              projection.passage_index_revision,
+                              projection.projection_status,
+                              projection.incomplete_reason,
+                              projection.passage_count,
+                              projection.projected_at
+                         FROM conversation_passage_projections projection
+                         JOIN conversations source
+                           ON source.id=projection.conversation_id
+                        WHERE source.user_id=?
+                        ORDER BY projection.conversation_id""",
+                    (user_id,),
+                ),
+                "conversation_passages": (
+                    """SELECT passage.conversation_id,
+                              passage.anchor_message_id,
+                              passage.anchor_ordinal,
+                              passage.anchor_message_revision_sha256,
+                              passage.anchor_content_sha256,
+                              passage.anchor_locator_sha256,
+                              passage.conversation_prefix_sha256
+                         FROM conversation_passages passage
+                         JOIN conversations source
+                           ON source.id=passage.conversation_id
+                        WHERE source.user_id=?
+                        ORDER BY passage.conversation_id,passage.anchor_ordinal""",
+                    (user_id,),
+                ),
                 "messages": ("SELECT * FROM messages WHERE user_id=?", (user_id,)),
                 "channel_sessions": ("SELECT * FROM channel_sessions WHERE user_id=?", (user_id,)),
                 "monitors": ("SELECT * FROM monitors WHERE user_id=?", (user_id,)),
@@ -4166,6 +4251,16 @@ class MaintenanceMixin(StorageShared):
             visible_merge_ids = {str(row["id"]) for row in rows_by_table["entity_merge_history"]}
 
             conversation_ids = {str(row["id"]) for row in rows_by_table["conversations"]}
+            rows_by_table["conversation_passage_projections"] = [
+                row
+                for row in rows_by_table["conversation_passage_projections"]
+                if str(row.get("conversation_id") or "") in conversation_ids
+            ]
+            rows_by_table["conversation_passages"] = [
+                row
+                for row in rows_by_table["conversation_passages"]
+                if str(row.get("conversation_id") or "") in conversation_ids
+            ]
             rows_by_table["messages"] = [
                 row
                 for row in rows_by_table["messages"]

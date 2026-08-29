@@ -29,6 +29,14 @@ from friday.audit_privacy import (
     sanitize_audit_request_id,
     sanitize_audit_target,
 )
+from friday.conversation_passages.schema import (
+    CONVERSATION_PASSAGE_SCHEMA_VERSION,
+    install_conversation_passage_fts_schema,
+    install_conversation_passage_schema,
+    register_conversation_passage_connection_functions,
+    validate_conversation_passage_fts_schema,
+    validate_conversation_passage_schema,
+)
 from friday.document_catalog.passage_schema import (
     DOCUMENT_PASSAGE_SCHEMA_VERSION,
     install_document_passage_schema,
@@ -136,6 +144,7 @@ def _secondary_product_witness_raw(
 
 _ISO_DATE_RE = re.compile(r"^(\d{4})-(\d{2})-(\d{2})$")
 _DMY_DATE_RE = re.compile(r"^(\d{1,2})[./](\d{1,2})[./](\d{4})$")
+_CONVERSATION_PASSAGE_FTS_RECEIPT_KEY = "conversation_passage_fts_build"
 # Tests and clock adapters replace ``datetime`` to control wall time. Timestamp
 # parsing must remain the real stdlib implementation under that substitution.
 _TIMESTAMP_DATETIME = datetime
@@ -2414,6 +2423,7 @@ class CoreMixin(StorageShared):
             register_engineer_work_item_connection_functions(conn)
             register_document_catalog_connection_functions(conn)
             register_document_passage_connection_functions(conn)
+            register_conversation_passage_connection_functions(conn)
             # Даты из документов извлечены и лежат в метаданных СЫРЫМИ строками — так,
             # как они написаны в бумаге. Замерено на архиве владельца: 3180 значений у
             # 630 объектов, из них 2537 в форме дд.мм.гггг, 345 в ISO, 223 — вообще
@@ -2518,16 +2528,9 @@ class CoreMixin(StorageShared):
             )
             previous_schema_version: str | None = None
             parsed_version: int | None = None
-            # Separate from the schema marker ON PURPOSE. The core migration
-            # commits first, then the FTS phase runs and commits second. This
-            # marker is written only after that phase commits, so a crash between
-            # them reopens as "index not built by this version" and heals.
-            fts_build_marker: str | None = None
             if schema_meta_preexisting:
                 row = conn.execute("SELECT value FROM schema_meta WHERE key='schema_version'").fetchone()
                 previous_schema_version = str(row[0]).strip() if row else None
-                marker_row = conn.execute("SELECT value FROM schema_meta WHERE key='fts_build'").fetchone()
-                fts_build_marker = str(marker_row[0]).strip() if marker_row else None
                 # Fail closed before executing any DDL. A newer or malformed
                 # marker must never become a best-effort downgrade.
                 if previous_schema_version:
@@ -2540,26 +2543,6 @@ class CoreMixin(StorageShared):
                             f"Database schema version {parsed_version} is not supported by "
                             f"this Friday build (maximum {SCHEMA_VERSION})"
                         )
-
-            # Probe under the same lock and before this connection creates FTS
-            # DDL. Asking afterwards always answers "yes" and can skip the rebuild
-            # of an external-content index that started empty.
-            fts_preexisting = (
-                conn.execute(
-                    "SELECT 1 FROM sqlite_master WHERE type='table' AND name='knowledge_fts'"
-                ).fetchone()
-                is not None
-            )
-            raw_fts_preexisting = (
-                conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='raw_fts'").fetchone()
-                is not None
-            )
-            messages_fts_preexisting = (
-                conn.execute(
-                    "SELECT 1 FROM sqlite_master WHERE type='table' AND name='messages_fts'"
-                ).fetchone()
-                is not None
-            )
             already_current = previous_schema_version is not None and (
                 previous_schema_version.strip() == str(SCHEMA_VERSION)
             )
@@ -2636,6 +2619,21 @@ class CoreMixin(StorageShared):
                     conn,
                     required=parsed_version is not None and parsed_version >= 47,
                 )
+            if parsed_version is not None and parsed_version >= CONVERSATION_PASSAGE_SCHEMA_VERSION:
+                # The token index is optional and repaired only after the
+                # authoritative transaction commits. Authenticate any installed
+                # FTS DDL here while leaving derivative-data repair to that phase.
+                validate_conversation_passage_schema(conn, validate_fts_data=False)
+            else:
+                # Exact interrupted schema-49 artifacts may resume; partial or
+                # counterfeit DDL under an older marker is never concealed by
+                # the idempotent installer below.
+                validate_conversation_passage_schema(
+                    conn,
+                    required=False,
+                    validate_data=False,
+                    validate_fts_data=False,
+                )
             if parsed_version is not None and parsed_version >= HOST_CONTROL_SCHEMA_VERSION:
                 validate_host_control_job_schema(conn)
             else:
@@ -2655,6 +2653,8 @@ class CoreMixin(StorageShared):
                 self._retire_outdated_indexes(conn)
             install_document_catalog_schema(conn)
             install_document_passage_schema(conn)
+            if not already_current:
+                install_conversation_passage_schema(conn)
             _validate_private_material_cache_pre_schema(conn)
             # Current-schema databases can still contain a pre-owner reminder
             # imported by an older build.  Its tenant move updates entity history
@@ -2678,6 +2678,8 @@ class CoreMixin(StorageShared):
             validate_engineer_work_item_schema(conn)
             validate_document_catalog_schema(conn)
             validate_document_passage_schema(conn)
+            if not already_current:
+                validate_conversation_passage_schema(conn, validate_fts_data=False)
             validate_host_control_job_schema(conn)
             _validate_private_material_cache(
                 conn,
@@ -2734,19 +2736,50 @@ class CoreMixin(StorageShared):
                 conn.rollback()
             raise
 
-        # FTS is an optional, self-healing derivative index. Build it only after
-        # the authoritative core schema/data transaction has committed, so an
-        # unavailable FTS5 module can never roll back or partially expose personal
-        # knowledge migration.
-        # True whenever this build has not recorded a finished FTS build. Covers
-        # the crash window above and every database written before the marker
-        # existed. `integrity-check` cannot stand in for it: measured on SQLite,
-        # an external-content index that is entirely EMPTY passes integrity-check
-        # and matches nothing — the check verifies what the index claims against
-        # itself, not against the content table it shadows.
-        fts_unverified = fts_build_marker != str(SCHEMA_VERSION)
+        # Legacy FTS is an optional, self-healing derivative index. Build it only
+        # after the authoritative core schema/data transaction has committed, so
+        # an unavailable FTS5 module can never roll back or partially expose
+        # personal knowledge migration.  Its released ``fts_build`` receipt must
+        # remain independent of the newer conversation-passage derivative: a
+        # failure in that optional lane cannot withdraw MESSAGE_HISTORY.
+        legacy_fts_ready = False
         try:
-            conn.executescript(FTS_SCHEMA)
+            # The optional phase owns one cross-process lock from its first
+            # observation through DDL, every rebuild, and the completion marker.
+            # In particular, never use executescript() here: it commits an existing
+            # transaction implicitly and would reopen the current-marker/missing-
+            # artifact race between the probe and rebuild.
+            conn.execute("BEGIN IMMEDIATE")
+            marker_row = conn.execute("SELECT value FROM schema_meta WHERE key='fts_build'").fetchone()
+            locked_fts_build_marker = str(marker_row[0]).strip() if marker_row is not None else None
+            fts_unverified = locked_fts_build_marker != str(SCHEMA_VERSION)
+            # Probe before this connection creates any derivative DDL. Asking
+            # afterwards always answers "yes" and can skip the rebuild of an
+            # external-content index which was born empty over existing rows.
+            fts_preexisting = (
+                conn.execute(
+                    "SELECT 1 FROM sqlite_master WHERE type='table' AND name='knowledge_fts'"
+                ).fetchone()
+                is not None
+            )
+            raw_fts_preexisting = (
+                conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='raw_fts'").fetchone()
+                is not None
+            )
+            messages_fts_preexisting = (
+                conn.execute(
+                    "SELECT 1 FROM sqlite_master WHERE type='table' AND name='messages_fts'"
+                ).fetchone()
+                is not None
+            )
+            self._execute_statements(conn, FTS_SCHEMA)
+            try:
+                self._execute_statements(conn, FTS_VOCAB_SCHEMA)
+            except sqlite3.OperationalError as exc:
+                LOGGER.info(
+                    "fts5vocab is unavailable; spelling repair disabled (%s)",
+                    type(exc).__name__,
+                )
             knowledge_count = conn.execute("SELECT COUNT(*) FROM knowledge_objects").fetchone()[0]
             if knowledge_count and (not fts_preexisting or fts_unverified):
                 # An external-content FTS table created after rows already exist
@@ -2776,27 +2809,84 @@ class CoreMixin(StorageShared):
                 except sqlite3.DatabaseError:
                     LOGGER.warning("Rebuilding an inconsistent messages FTS index")
                     conn.execute("INSERT INTO messages_fts(messages_fts) VALUES('rebuild')")
-            # The vocabulary view, in its own try: losing spelling repair on an
-            # SQLite without `fts5vocab` is a degradation, losing full-text search
-            # with it would be an outage.
-            try:
-                conn.executescript(FTS_VOCAB_SCHEMA)
-            except sqlite3.OperationalError as exc:
-                LOGGER.info(
-                    "fts5vocab is unavailable; spelling repair disabled (%s)",
-                    type(exc).__name__,
-                )
             # Last, and inside the same commit as the rebuilds it certifies.
             conn.execute(
                 "INSERT OR REPLACE INTO schema_meta(key, value, updated_at) VALUES('fts_build', ?, ?)",
                 (str(SCHEMA_VERSION), utc_now()),
             )
         except sqlite3.OperationalError as exc:
+            if conn.in_transaction:
+                conn.rollback()
             if self._is_sqlite_busy(exc):
                 raise
             self._fts_available = False
             LOGGER.warning("SQLite FTS5 is unavailable; using LIKE search (%s)", type(exc).__name__)
-        conn.commit()
+        else:
+            conn.commit()
+            legacy_fts_ready = True
+
+        if legacy_fts_ready:
+            try:
+                # Conversation passages have their own receipt and transaction.
+                # A waiter observes/install/rebuilds under this one lock, while a
+                # lane-local OperationalError rolls back only this derivative.
+                conn.execute("BEGIN IMMEDIATE")
+                receipt_row = conn.execute(
+                    "SELECT value FROM schema_meta WHERE key=?",
+                    (_CONVERSATION_PASSAGE_FTS_RECEIPT_KEY,),
+                ).fetchone()
+                conversation_fts_unverified = receipt_row is None or str(receipt_row[0]).strip() != str(
+                    SCHEMA_VERSION
+                )
+                conversation_passages_fts_preexisting = (
+                    conn.execute(
+                        "SELECT 1 FROM sqlite_master WHERE type='table' AND name='conversation_passages_fts'"
+                    ).fetchone()
+                    is not None
+                )
+                if not conversation_passages_fts_preexisting or conversation_fts_unverified:
+                    install_conversation_passage_fts_schema(
+                        conn,
+                        _register_functions=False,
+                        _validate_authoritative_data=False,
+                    )
+                else:
+                    try:
+                        validate_conversation_passage_fts_schema(
+                            conn,
+                            _register_functions=False,
+                            _validate_authoritative_data=False,
+                        )
+                    except sqlite3.DatabaseError:
+                        LOGGER.warning("Rebuilding an inconsistent conversation passage FTS index")
+                        conn.execute(
+                            "INSERT INTO conversation_passages_fts(conversation_passages_fts) "
+                            "VALUES('rebuild')"
+                        )
+                        validate_conversation_passage_fts_schema(
+                            conn,
+                            _register_functions=False,
+                            _validate_authoritative_data=False,
+                        )
+                conn.execute(
+                    "INSERT OR REPLACE INTO schema_meta(key, value, updated_at) VALUES(?, ?, ?)",
+                    (
+                        _CONVERSATION_PASSAGE_FTS_RECEIPT_KEY,
+                        str(SCHEMA_VERSION),
+                        utc_now(),
+                    ),
+                )
+            except sqlite3.DatabaseError as exc:
+                if conn.in_transaction:
+                    conn.rollback()
+                if isinstance(exc, sqlite3.OperationalError) and self._is_sqlite_busy(exc):
+                    raise
+                LOGGER.warning(
+                    "Conversation passage FTS is unavailable; preserving legacy FTS (%s)",
+                    type(exc).__name__,
+                )
+            else:
+                conn.commit()
 
     @staticmethod
     def _validate_relation_history_schema(conn: sqlite3.Connection, schema_version: int) -> None:

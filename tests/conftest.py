@@ -28,12 +28,18 @@ def _drop_document_passage_schema(conn: sqlite3.Connection) -> None:
         str(row[0])
         for row in conn.execute(
             """SELECT name FROM sqlite_master
-                WHERE type='trigger' AND name LIKE 'document_passage_%'
+                WHERE type='trigger'
+                  AND (name LIKE 'document_passage_%'
+                       OR name LIKE 'conversation_passage_%')
                 ORDER BY name"""
         )
     )
     for trigger in triggers:
         conn.execute(f'DROP TRIGGER "{trigger}"')  # nosec B608 - SQLite-owned names
+    conn.execute("DROP TABLE IF EXISTS conversation_passages_fts")
+    conn.execute("DROP VIEW IF EXISTS conversation_passage_search_content")
+    conn.execute("DROP TABLE IF EXISTS conversation_passages")
+    conn.execute("DROP TABLE IF EXISTS conversation_passage_projections")
     conn.execute("DROP TABLE IF EXISTS document_passages")
     conn.execute("DROP TABLE IF EXISTS document_passage_projections")
 

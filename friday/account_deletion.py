@@ -248,6 +248,20 @@ _BLOCKING_GRAPH_SCOPES: tuple[_Scope, ...] = (
 )
 
 _BLOCKING_CHAT_SCOPES: tuple[_Scope, ...] = (
+    # Schema 49's rebuildable passage rows carry no duplicate owner.  They are
+    # exact derivatives of the owning conversation and remain inside the same
+    # retained chat cascade; classifying them here prevents the incoming-FK
+    # auditor from mistaking an owned projection for a foreign object.
+    _Scope(
+        "conversation_passages",
+        "conversation_passages",
+        "conversation_id IN (SELECT id FROM conversations WHERE user_id=?)",
+    ),
+    _Scope(
+        "conversation_passage_projections",
+        "conversation_passage_projections",
+        "conversation_id IN (SELECT id FROM conversations WHERE user_id=?)",
+    ),
     _Scope("messages", "messages", "user_id=?"),
     _Scope("conversations", "conversations", "user_id=?"),
 )
