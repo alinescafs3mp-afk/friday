@@ -1,3 +1,17 @@
+## 0.207.70 — 2026-08-29
+
+### Authenticated attachment turn authority
+
+- Activates the shared authenticated turn for exact current attachments on
+  signed HTTP and existing owner Telegram conversations while preserving the
+  legacy path for every unsupported surface.
+- Binds file references and evidence to the exact tenant, person, source bytes,
+  turn, deadline and primary publication owner across AgentRuntime, Engineer,
+  V12 and bounded Supervisor consumers.
+- Revalidates source, plan, model lease, conversation mode and request-effect
+  fence inside the atomic V12 publication boundary; any drift publishes
+  nothing and optional secondary work receives no current-file body.
+
 ## 0.207.69 — 2026-08-29
 
 ### Authenticated turn runtime propagation
