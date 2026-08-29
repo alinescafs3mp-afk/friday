@@ -14,13 +14,13 @@ either merged here or discarded before that source is removed.
 ## Current production identity
 
 - Branch: `main`
-- Deployed implementation head: `8f1dab58b75cd02c2594c6fc26d48e95370be44b`
-- Live: Friday `0.207.71` / `8f1dab58b75cd02c2594c6fc26d48e95370be44b`;
-  tree `71138c2c145050a6f22e2daaaec8e773cef33a87ec1de2aba391d73f3be4434b`;
-  wheel `981f65ba311bf24ce94be6f8190b219811470ea1b6705693befd734dabed96cf`.
-- Immediate runtime predecessor: Friday `0.207.70` /
-  `5ad0bcb4ee4b3fe3d5d33de6fd03cad6c888f2f2`; tree
-  `a2791bd27bfbe2b2beddaad33fe110a43db8e02e102eb6b32dc5536c97ff1144`.
+- Deployed implementation head: `160ee46c3cea823673fc4b7ffce0303a944d1c90`
+- Live: Friday `0.207.72` / `160ee46c3cea823673fc4b7ffce0303a944d1c90`;
+  tree `fd95b4a50a75c549c6b335303ee7ca401d60ea60efb6c9e18ebcf567ccbbb609`;
+  wheel `421df18c9c27bede1d9d18cbcfaa6165d3e53e4f13d17762b6e92d7f812ae2a3`.
+- Immediate runtime predecessor: Friday `0.207.71` /
+  `8f1dab58b75cd02c2594c6fc26d48e95370be44b`; tree
+  `71138c2c145050a6f22e2daaaec8e773cef33a87ec1de2aba391d73f3be4434b`.
 - Schema-capable fallback: Friday `0.207.67` /
   `f93c0fcfae9a906210cd0594c20320866d99ecb7`;
   tree `1973acc092a8eab53a03e4adad1e725f351d5917aca01b0d46d1393cf8060d51`.
@@ -42,10 +42,11 @@ either merged here or discarded before that source is removed.
 
 Keep the released S3 path in shadow until its genuine production witness exists;
 then promote only the current-file-plus-current-public-web journey through the
-already released fail-closed activation gate. Meanwhile integrate the accepted
-isolated `S4-R0` retrieval-recall benchmark and `S4-R1` corpus-backed lexical
-ranking repair as the next small reversible package. They do not change schema,
-runtime routing or the S2/S3 authority surfaces.
+already released fail-closed activation gate. Continue S4 with the reader-first
+`document_passages` storage/backfill slice; the measured R0 benchmark and R1
+corpus-backed lexical repair are already live. In parallel, SolGoodman owns the
+isolated S6 reminder/mission at-most-once recovery package and may not change
+schema, main or the S2/S3/S4 authority surfaces.
 
 ## Operating rules
 
@@ -260,6 +261,9 @@ Remaining promotion work is observation-bound, not implementation-bound.
 
 ### S4 — one search facade with passage memory
 
+Status: R0 measured recall and R1 corpus-backed lexical gap closure deployed in
+`0.207.72`; passage storage/backfill remains next.
+
 1. Add reader-first `document_passages` with a schema-capable fallback, bounded
    writer, restart-safe resumable backfill and honest `index_incomplete`.
 2. Make `archive_search` reach parity with document, promoted-knowledge,
@@ -272,6 +276,17 @@ Remaining promotion work is observation-bound, not implementation-bound.
 4. Reconstruct a current measurable recall set before changing ranking or
    embeddings. Close filename, alias, format, date and truncation holes only
    from corpus-backed failures; do not revive `raw_fts.metadata_json`.
+
+R0/R1 acceptance: the real-path benchmark has 21 closed cases across all ten
+classes, body-free deterministic reports and exact release/origin binding. The
+only accepted runtime change raised measured positive recall from 14/20 to
+15/20 by repairing one reproduced capped lexical miss without changing
+candidate membership, passage evidence, cursor or coverage truth. The focused
+archive/benchmark suite passed 1,026 tests; the native gate passed 23,512 Python
+plus 31 UI tests with zero skips; static checks, two-run benchmark identity and
+two byte-identical wheels cleared. Immutable activation retained schema 46 and
+the distinct fallback, produced a verified recovery set and ended `clear`;
+signed private-owner identity returned `200`.
 
 Estimate: 8–16 clean-work days across separately reversible releases.
 
@@ -347,8 +362,8 @@ Estimate: 4–8 clean-work days after S2, released incrementally.
 2. Keep released `EngineerWorkItem v1` stable; do not expand its scope.
 3. Keep the released bounded S3 advisor in shadow until a genuine eligible turn
    creates its exact production witness; do not fabricate activation evidence.
-4. Integrate the independently accepted S4-R0/R1 retrieval package as the next
-   small non-schema release.
+4. Build the reader-first S4 passage-storage/backfill slice after the deployed
+   measured R0/R1 baseline; keep each schema step separately reversible.
 5. Preserve the released exact-evidence verifier and reject mutable or
    self-declared proof while real joined Supervisor observations accumulate.
 
