@@ -238,6 +238,7 @@ def test_reader_contract_requires_exact_schema_fingerprint_and_policy(storage, m
     real_import = archive_documents.importlib.import_module
     schema = SimpleNamespace(
         DOCUMENT_PASSAGE_INDEX_REVISION=DOCUMENT_PASSAGE_INDEX_REVISION,
+        document_passage_rows_match_current_projection=lambda *_args: True,
         document_passage_set_sha256=document_passage_set_sha256,
         document_passage_schema_fingerprint=lambda _conn: "a" * 64,
     )
@@ -252,6 +253,9 @@ def test_reader_contract_requires_exact_schema_fingerprint_and_policy(storage, m
     assert archive_documents._document_passage_contract(storage.conn) is False  # noqa: SLF001
     schema.DOCUMENT_PASSAGE_INDEX_REVISION = DOCUMENT_PASSAGE_INDEX_REVISION
     schema.document_passage_schema_fingerprint = lambda _conn: "not-a-digest"
+    assert archive_documents._document_passage_contract(storage.conn) is False  # noqa: SLF001
+    schema.document_passage_schema_fingerprint = lambda _conn: "a" * 64
+    schema.document_passage_rows_match_current_projection = None
     assert archive_documents._document_passage_contract(storage.conn) is False  # noqa: SLF001
 
 
@@ -513,10 +517,32 @@ def test_tampered_child_set_keeps_legacy_hit_but_fails_readiness_closed(storage)
     assert coverage.states == (CoverageState.PARTIAL, CoverageState.UNAVAILABLE)
 
 
-def test_forged_consistent_child_set_cannot_mint_a_stored_locator(storage) -> None:
-    raw_id = _seed(storage, 62, body="Needle " + ("alpha beta gamma. " * 100))
+def test_alternate_valid_child_topology_cannot_mint_a_stored_locator(storage) -> None:
+    body = "Needle " + ("alpha beta gamma. " * 100)
+    raw_id = _seed(storage, 62, body=body)
     _project_current(storage, raw_id)
     with storage.transaction() as conn:
+        original_rows = tuple(
+            (int(row[0]), int(row[1]), int(row[2]), str(row[3]))
+            for row in conn.execute(
+                """SELECT chunk_index,start_char,end_char,content_sha256
+                     FROM document_passages
+                    WHERE raw_object_id=? ORDER BY chunk_index""",
+                (raw_id,),
+            )
+        )
+        assert len(original_rows) >= 2
+        first_index, first_start, first_end, _first_digest = original_rows[0]
+        forged_end = first_end - 1
+        assert first_start < forged_end
+        assert int(original_rows[1][1]) <= forged_end < int(original_rows[1][2])
+        forged_first = (
+            first_index,
+            first_start,
+            forged_end,
+            hashlib.sha256(body[first_start:forged_end].encode()).hexdigest(),
+        )
+        forged_rows = (forged_first, *original_rows[1:])
         conn.create_function(
             "friday_document_passage_span_valid",
             6,
@@ -529,13 +555,22 @@ def test_forged_consistent_child_set_cannot_mint_a_stored_locator(storage) -> No
             lambda *_args: 1,
             deterministic=True,
         )
-        conn.execute(
-            """UPDATE document_passages
-                  SET content_sha256=?
-                WHERE raw_object_id=? AND chunk_index=0""",
-            ("f" * 64, raw_id),
-        )
-        forged_rows = tuple(
+        try:
+            conn.execute(
+                """UPDATE document_passages
+                      SET end_char=?,content_sha256=?
+                    WHERE raw_object_id=? AND chunk_index=?""",
+                (forged_end, forged_first[3], raw_id, first_index),
+            )
+            conn.execute(
+                """UPDATE document_passage_projections
+                      SET passage_set_sha256=? WHERE raw_object_id=?""",
+                (document_passage_set_sha256(forged_rows), raw_id),
+            )
+        finally:
+            register_document_passage_connection_functions(conn)
+
+        persisted = tuple(
             (int(row[0]), int(row[1]), int(row[2]), str(row[3]))
             for row in conn.execute(
                 """SELECT chunk_index,start_char,end_char,content_sha256
@@ -544,12 +579,15 @@ def test_forged_consistent_child_set_cannot_mint_a_stored_locator(storage) -> No
                 (raw_id,),
             )
         )
-        conn.execute(
-            """UPDATE document_passage_projections
-                  SET passage_set_sha256=? WHERE raw_object_id=?""",
-            (document_passage_set_sha256(forged_rows), raw_id),
+        assert persisted == forged_rows
+        assert (
+            document_passage_set_sha256(persisted)
+            == conn.execute(
+                """SELECT passage_set_sha256 FROM document_passage_projections
+                WHERE raw_object_id=?""",
+                (raw_id,),
+            ).fetchone()[0]
         )
-        register_document_passage_connection_functions(conn)
 
     page, coverage = _search(storage, _request())
 

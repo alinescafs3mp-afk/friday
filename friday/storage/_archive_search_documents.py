@@ -130,6 +130,7 @@ _PassageRows = tuple[tuple[int, int, int, str], ...]
 class _DocumentPassageContract:
     index_revision: str
     set_sha256: Callable[[_PassageRows], str]
+    rows_match_current_projection: Callable[[object, object, object], bool]
 
 
 @dataclass(frozen=True, slots=True)
@@ -331,6 +332,7 @@ def _load_document_passage_contract(
         index_revision = schema.DOCUMENT_PASSAGE_INDEX_REVISION
         projection_revision = projection.DOCUMENT_PASSAGE_INDEX_REVISION
         set_sha256 = schema.document_passage_set_sha256
+        rows_match_current_projection = schema.document_passage_rows_match_current_projection
         fingerprint = fingerprint_reader(conn)
     except (ImportError, AttributeError, TypeError, RuntimeError, ValueError, sqlite3.Error):
         return None
@@ -339,11 +341,16 @@ def _load_document_passage_contract(
         or _PASSAGE_REVISION.fullmatch(index_revision) is None
         or index_revision != projection_revision
         or not callable(set_sha256)
+        or not callable(rows_match_current_projection)
         or type(fingerprint) is not str
         or _SHA256.fullmatch(fingerprint) is None
     ):
         return None
-    return _DocumentPassageContract(index_revision, set_sha256)
+    return _DocumentPassageContract(
+        index_revision,
+        set_sha256,
+        rows_match_current_projection,
+    )
 
 
 def _document_passage_contract(conn: sqlite3.Connection) -> bool:
@@ -1642,7 +1649,7 @@ def _select_current_document_passages(
     source: dict[str, Any],
     contract: _DocumentPassageContract,
 ) -> tuple[_StoredDocumentPassage, ...] | None:
-    """Read and authenticate one current child set without rechunking text."""
+    """Read and authenticate one exact code-owned current child set."""
 
     raw_object_id = source.get("raw_id")
     source_version = source.get("raw_version")
@@ -1763,8 +1770,9 @@ def _select_current_document_passages(
         previous = passage
     if passages[0].start_char != 0 or passages[-1].end_char != len(body):
         return None
+    canonical_rows = tuple(digest_rows)
     try:
-        set_digest = contract.set_sha256(tuple(digest_rows))
+        set_digest = contract.set_sha256(canonical_rows)
     except (TypeError, ValueError, UnicodeError, OverflowError):
         return None
     if (
@@ -1772,6 +1780,16 @@ def _select_current_document_passages(
         or _SHA256.fullmatch(set_digest) is None
         or not hmac.compare_digest(set_digest, str(parent["projection_passage_set_sha256"]))
     ):
+        return None
+    try:
+        exact_current_projection = contract.rows_match_current_projection(
+            body,
+            body_digest,
+            canonical_rows,
+        )
+    except Exception:
+        return None
+    if exact_current_projection is not True:
         return None
     return tuple(passages)
 

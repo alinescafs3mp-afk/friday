@@ -12,6 +12,10 @@ from typing import Any, cast
 
 import pytest
 
+from friday.document_catalog.passage_schema import (
+    document_passage_set_sha256,
+    register_document_passage_connection_functions,
+)
 from friday.orchestration.archive_recall_outcome import (
     ARCHIVE_EVIDENCE_REPLAY_UNAVAILABLE,
     ArchiveRecallLane,
@@ -114,6 +118,7 @@ def _seed_document_source(  # type: ignore[no-untyped-def]
     storage,
     *,
     passage_ready: bool = False,
+    document_body: str = DOCUMENT_BODY,
 ) -> tuple[str, str, str]:
     storage.ensure_user(TENANT)
     storage.ensure_user(PRINCIPAL)
@@ -132,7 +137,7 @@ def _seed_document_source(  # type: ignore[no-untyped-def]
             user_id=TENANT,
             source="upload",
             source_ref="telegram-file:replay",
-            raw_content=DOCUMENT_BODY,
+            raw_content=document_body,
             content_type="file",
             metadata_json={
                 "filename": "replay.pdf",
@@ -281,8 +286,21 @@ def test_document_and_knowledge_exact_replay_preserves_partial_grade_and_private
         conn.rollback()
 
 
-def test_document_v2_replay_requires_stored_child_while_legacy_survives_its_loss(storage) -> None:
-    raw_id, _knowledge_id, boundary_id = _seed_document_source(storage, passage_ready=True)
+@pytest.mark.parametrize("stored_child_drift", ("missing", "alternate_topology"))
+def test_document_v2_replay_requires_exact_stored_child_while_legacy_survives_drift(
+    storage,
+    stored_child_drift: str,
+) -> None:
+    body = (
+        DOCUMENT_BODY
+        if stored_child_drift == "missing"
+        else DOCUMENT_BODY + " " + ("alpha beta gamma. " * 100)
+    )
+    raw_id, _knowledge_id, boundary_id = _seed_document_source(
+        storage,
+        passage_ready=True,
+        document_body=body,
+    )
     backfill = storage.backfill_document_catalog(
         TENANT,
         after_raw_object_id=None,
@@ -345,7 +363,77 @@ def test_document_v2_replay_requires_stored_child_while_legacy_survives_its_loss
             (legacy_ref,),
             (excerpt,),
         )
-        conn.execute("DELETE FROM document_passages WHERE raw_object_id=?", (raw_id,))
+        if stored_child_drift == "missing":
+            conn.execute("DELETE FROM document_passages WHERE raw_object_id=?", (raw_id,))
+        else:
+            original_rows = tuple(
+                (int(row[0]), int(row[1]), int(row[2]), str(row[3]))
+                for row in conn.execute(
+                    """SELECT chunk_index,start_char,end_char,content_sha256
+                         FROM document_passages
+                        WHERE raw_object_id=? ORDER BY chunk_index""",
+                    (raw_id,),
+                )
+            )
+            assert len(original_rows) >= 2
+            first_index, first_start, first_end, _first_digest = original_rows[0]
+            forged_end = first_end - 1
+            assert int(original_rows[1][1]) <= forged_end < int(original_rows[1][2])
+            forged_first = (
+                first_index,
+                first_start,
+                forged_end,
+                hashlib.sha256(body[first_start:forged_end].encode()).hexdigest(),
+            )
+            forged_rows = (forged_first, *original_rows[1:])
+            conn.create_function(
+                "friday_document_passage_span_valid",
+                6,
+                lambda *_args: 1,
+                deterministic=True,
+            )
+            conn.create_function(
+                "friday_document_passage_projection_valid",
+                14,
+                lambda *_args: 1,
+                deterministic=True,
+            )
+            try:
+                conn.execute(
+                    """UPDATE document_passages
+                          SET end_char=?,content_sha256=?
+                        WHERE raw_object_id=? AND chunk_index=?""",
+                    (forged_end, forged_first[3], raw_id, first_index),
+                )
+                conn.execute(
+                    """UPDATE document_passage_projections
+                          SET passage_set_sha256=? WHERE raw_object_id=?""",
+                    (document_passage_set_sha256(forged_rows), raw_id),
+                )
+            finally:
+                register_document_passage_connection_functions(conn)
+            persisted_rows = tuple(
+                (int(row[0]), int(row[1]), int(row[2]), str(row[3]))
+                for row in conn.execute(
+                    """SELECT chunk_index,start_char,end_char,content_sha256
+                         FROM document_passages
+                        WHERE raw_object_id=? ORDER BY chunk_index""",
+                    (raw_id,),
+                )
+            )
+            assert persisted_rows == forged_rows
+            assert all(
+                hashlib.sha256(body[start:end].encode()).hexdigest() == digest
+                for _index, start, end, digest in persisted_rows
+            )
+            assert (
+                document_passage_set_sha256(persisted_rows)
+                == conn.execute(
+                    """SELECT passage_set_sha256 FROM document_passage_projections
+                    WHERE raw_object_id=?""",
+                    (raw_id,),
+                ).fetchone()[0]
+            )
 
         drifted = replay_archive_evidence_in_transaction(
             conn,
