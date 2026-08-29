@@ -27,6 +27,11 @@ from friday.retrieval_benchmark.io import (
     write_new_many,
 )
 from friday.retrieval_benchmark.metrics import compare_reports, score_recall
+from friday.retrieval_benchmark.parity import (
+    ParityHarnessError,
+    ParityReportV1,
+    run_parity_ephemeral,
+)
 
 EXIT_OK: Final = 0
 EXIT_INPUT: Final = 2
@@ -40,8 +45,16 @@ class _ClosedArgumentParser(argparse.ArgumentParser):
         raise RecallContractError("command-line contract rejected")
 
 
-def _emit(payload: dict[str, object] | RecallReportV1, *, error: bool = False) -> None:
-    text = payload.to_json() if isinstance(payload, RecallReportV1) else canonical_json(payload)
+def _emit(
+    payload: dict[str, object] | ParityReportV1 | RecallReportV1,
+    *,
+    error: bool = False,
+) -> None:
+    text = (
+        payload.to_json()
+        if isinstance(payload, (ParityReportV1, RecallReportV1))
+        else canonical_json(payload)
+    )
     stream = sys.stderr if error else sys.stdout
     stream.write(f"{text}\n")
 
@@ -100,6 +113,11 @@ def _run_ephemeral(args: argparse.Namespace) -> int:
     return EXIT_OK
 
 
+def _run_parity_ephemeral(_args: argparse.Namespace) -> int:
+    _emit(run_parity_ephemeral())
+    return EXIT_OK
+
+
 def _score(args: argparse.Namespace) -> int:
     report = score_recall(
         read_cases(Path(args.cases)),
@@ -135,6 +153,12 @@ def build_parser() -> argparse.ArgumentParser:
     ephemeral.add_argument("--observations-out")
     ephemeral.set_defaults(handler=_run_ephemeral)
 
+    parity = commands.add_parser(
+        "run-parity-ephemeral",
+        help="run the separate body-free archive/legacy parity matrix",
+    )
+    parity.set_defaults(handler=_run_parity_ephemeral)
+
     score = commands.add_parser("score", help="score canonical cases and body-free observations")
     score.add_argument("cases")
     score.add_argument("observations")
@@ -153,6 +177,15 @@ def main(argv: Sequence[str] | None = None) -> int:
         args = parser.parse_args(argv)
         handler = args.handler
         return int(handler(args))
+    except ParityHarnessError:
+        _emit(
+            {
+                "error": "ephemeral_parity_path_failed",
+                "schema": "friday.retrieval-recall-error.body-free.v1",
+            },
+            error=True,
+        )
+        return EXIT_HARNESS
     except RecallHarnessError:
         _emit(
             {
