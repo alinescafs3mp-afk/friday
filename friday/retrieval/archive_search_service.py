@@ -725,6 +725,37 @@ class PreparedArchiveSearch(_ProcessPrivate):
             raise _fail()
         return self._batch
 
+    def attests_origin(
+        self,
+        request: ArchiveSearchRequest,
+        snapshot_discriminator: str,
+    ) -> bool:
+        """Verify the body-free caller origin sealed into this prepared page."""
+
+        try:
+            if not self._is_valid() or type(request) is not ArchiveSearchRequest:
+                return False
+            request_value = ArchiveSearchRequest.parse_private(request.to_private_json())
+            storage_request = _storage_request(request_value)
+            snapshot = _accepted_turn_snapshot(
+                _identity(snapshot_discriminator),
+                storage_request,
+                current_conversation_id=self._recipe.current_conversation_id,
+                boundary_user_message_id=self._recipe.boundary_user_message_id,
+            )
+            return bool(
+                hmac.compare_digest(
+                    storage_request.to_identity_json().encode("ascii"),
+                    self._recipe.request.to_identity_json().encode("ascii"),
+                )
+                and hmac.compare_digest(
+                    snapshot.encode("utf-8"),
+                    self._recipe.snapshot_discriminator.encode("utf-8"),
+                )
+            )
+        except Exception:
+            return False
+
 
 def _new_prepared(
     run: ArchiveSearchRunBinding,
