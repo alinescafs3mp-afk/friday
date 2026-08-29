@@ -372,8 +372,10 @@ effect or answer. The final native gate passed 23,774 Python plus 31 UI tests
 with no skips; static checks were clear and two sealed wheels were byte-identical.
 Immutable activation retained schema 47 and the distinct schema-capable
 fallback, created verified SQLite/inbox/Obsidian/Engineer recovery receipts and
-ended `clear`; trusted-CA health reported `0.207.75`/`ok`, and the signed
-private-owner chat returned exact `OK`.
+ended `clear`. A copy-only rehearsal rehashed the complete recovery set and
+reopened its main/inbox stores twice under both candidate and fallback with
+schema 47 and clean integrity/FK checks. Trusted-CA health reported
+`0.207.75`/`ok`, and the signed private-owner chat returned exact `OK`.
 
 ### Removed from the active queue
 
