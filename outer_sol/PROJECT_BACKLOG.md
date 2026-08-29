@@ -31,9 +31,10 @@ either merged here or discarded before that source is removed.
   changing current user-visible routing.
 - Secondary: accepted/live GPT-OSS profile `gptoss20b-2335df…`; bounded
   document-map/current-document assist and `plan_candidate` Supervisor shadow
-  are installed. Supervisor promotion remains off with zero joined production
-  observations. The primary remains sole tool, effect and final-publication
-  owner; secondary absence preserves primary-only behavior.
+  are installed. Supervisor promotion remains off; the current body-free live
+  window has three joined observations but zero eligible comparison turns. The
+  primary remains sole tool, effect and final-publication owner; secondary
+  absence preserves primary-only behavior.
 
 ## Active package
 
