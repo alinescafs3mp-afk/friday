@@ -1,4 +1,4 @@
-"""Schema-47 reader-first document-passage storage invariants."""
+"""Schema-48 reader-first document-passage storage invariants."""
 
 from __future__ import annotations
 
@@ -12,6 +12,8 @@ from pathlib import Path
 
 import pytest
 
+import friday.document_catalog.passage_schema as passage_schema_module
+import friday.storage._core as storage_core
 from friday.account_deletion import (
     _DELETE_SCOPES,
     _mark_account_deletion_history_clean,
@@ -19,12 +21,25 @@ from friday.account_deletion import (
     preflight_account_deletion,
 )
 from friday.diagnostics.runtime_lease import ProcessLease
-from friday.document_catalog.passage_projection import DocumentPassageProjection
+from friday.document_catalog.passage_projection import (
+    DOCUMENT_PASSAGE_INDEX_REVISION as PROJECTION_PASSAGE_INDEX_REVISION,
+)
+from friday.document_catalog.passage_projection import (
+    DocumentPassageProjection,
+)
 from friday.document_catalog.passage_schema import (
     DOCUMENT_PASSAGE_INDEX_REVISION,
+    DOCUMENT_PASSAGE_SCHEMA,
     _canonical_document_passage_schema_objects,
+    _canonical_released_document_passage_schema_v2_objects,
+    _execute_schema,
+    _register_released_document_passage_v2_connection_functions,
+    _released_v2_projection,
+    _validate_released_document_passage_schema_v2,
     document_passage_schema_fingerprint,
     document_passage_set_sha256,
+    register_document_passage_connection_functions,
+    upgrade_document_passage_schema_47_to_48,
     validate_document_passage_schema,
 )
 from friday.document_catalog.schema import validate_document_catalog_schema
@@ -141,11 +156,91 @@ def _unpack_schema_46(tmp_path: Path, name: str) -> Path:
     return database
 
 
-def test_schema_47_is_exact_body_free_raw_bound_and_fingerprinted(
+def _unpack_schema_47(tmp_path: Path, name: str) -> Path:
+    database = tmp_path / name
+    with gzip.open(SCHEMA_FIXTURES / "schema-47.sqlite3.gz", "rb") as packed, database.open("wb") as raw:
+        shutil.copyfileobj(packed, raw)
+    return database
+
+
+def _unpack_schema_48(tmp_path: Path, name: str) -> Path:
+    database = tmp_path / name
+    with gzip.open(SCHEMA_FIXTURES / "schema-48.sqlite3.gz", "rb") as packed, database.open("wb") as raw:
+        shutil.copyfileobj(packed, raw)
+    return database
+
+
+def _publish_released_v2_fixture_current(database: Path) -> tuple[object, tuple[tuple[object, ...], ...]]:
+    with sqlite3.connect(database) as conn:
+        conn.row_factory = sqlite3.Row
+        _register_released_document_passage_v2_connection_functions(conn)
+        raw = conn.execute("SELECT * FROM raw_objects WHERE id='raw-fixture-0'").fetchone()
+        assert raw is not None
+        extracted_digest, source_char_count, rows = _released_v2_projection(
+            raw_object_id=str(raw["id"]),
+            source_version=int(raw["version"]),
+            source_content_sha256=str(raw["content_hash"]),
+            extracted_text=str(raw["raw_content"]),
+        )
+        conn.execute(
+            """UPDATE document_passage_projections
+                  SET extracted_text_sha256=?,source_char_count=?,passage_set_sha256=?,
+                      projection_status='current',incomplete_reason=NULL,passage_count=?,
+                      projected_at='2026-08-29T12:00:00Z'
+                WHERE raw_object_id=?""",
+            (
+                extracted_digest,
+                source_char_count,
+                document_passage_set_sha256(rows),
+                len(rows),
+                raw["id"],
+            ),
+        )
+        conn.executemany(
+            """INSERT INTO document_passages(
+                   raw_object_id,chunk_index,start_char,end_char,content_sha256
+               ) VALUES(?,?,?,?,?)""",
+            ((raw["id"], *row) for row in rows),
+        )
+        conn.commit()
+        parent = conn.execute(
+            "SELECT * FROM document_passage_projections WHERE raw_object_id='raw-fixture-0'"
+        ).fetchone()
+        assert parent is not None
+        return tuple(parent), tuple(
+            tuple(row)
+            for row in conn.execute(
+                """SELECT * FROM document_passages
+                    WHERE raw_object_id='raw-fixture-0' ORDER BY chunk_index"""
+            ).fetchall()
+        )
+
+
+def _released_passage_database_snapshot(database: Path) -> tuple[object, ...]:
+    with sqlite3.connect(database) as conn:
+        return (
+            conn.execute("SELECT value FROM schema_meta WHERE key='schema_version'").fetchone(),
+            tuple(conn.execute("SELECT * FROM document_passage_projections ORDER BY raw_object_id")),
+            tuple(conn.execute("SELECT * FROM document_passages ORDER BY raw_object_id,chunk_index")),
+            tuple(
+                conn.execute(
+                    """SELECT type,name,tbl_name,sql FROM sqlite_master
+                         WHERE sql IS NOT NULL
+                           AND (name LIKE 'document_passage%'
+                                OR tbl_name LIKE 'document_passage%'
+                                OR name LIKE 'idx_document_passage_%')
+                         ORDER BY type,name"""
+                )
+            ),
+        )
+
+
+def test_schema_48_is_exact_body_free_raw_bound_and_fingerprinted(
     storage: FridayStorage,
 ) -> None:
-    assert SCHEMA_VERSION == 47
-    assert storage.execute("SELECT value FROM schema_meta WHERE key='schema_version'").fetchone()[0] == "47"
+    assert SCHEMA_VERSION == 48
+    assert storage.execute("SELECT value FROM schema_meta WHERE key='schema_version'").fetchone()[0] == "48"
+    assert DOCUMENT_PASSAGE_INDEX_REVISION == PROJECTION_PASSAGE_INDEX_REVISION
     observed = {
         (str(row[0]), str(row[1])): "".join(str(row[2]).split())
         for row in storage.execute(
@@ -159,7 +254,7 @@ def test_schema_47_is_exact_body_free_raw_bound_and_fingerprinted(
     assert observed == _canonical_document_passage_schema_objects()
     assert len(document_passage_schema_fingerprint(storage.conn)) == 64
     validate_document_passage_schema(storage.conn)
-    # Schema 47 must not expand schema 41's broad SQL-object fingerprint.
+    # Schema 48 must not expand schema 41's broad SQL-object fingerprint.
     validate_document_catalog_schema(storage.conn)
 
     projection_columns = {
@@ -351,11 +446,210 @@ def test_current_spans_are_exact_and_data_tamper_fails_closed(storage: FridaySto
     storage.conn.rollback()
 
 
+def test_tracked_schema_47_fixture_matches_frozen_v2_ddl_and_data(tmp_path: Path) -> None:
+    database = _unpack_schema_47(tmp_path, "schema47-frozen-v2.sqlite3")
+    with sqlite3.connect(database) as released:
+        released.row_factory = sqlite3.Row
+        _validate_released_document_passage_schema_v2(released)
+        observed = {
+            (str(row[0]), str(row[1])): "".join(str(row[2]).split())
+            for row in released.execute(
+                """SELECT type,name,sql FROM sqlite_master
+                     WHERE sql IS NOT NULL
+                       AND (name LIKE 'document_passage%'
+                            OR tbl_name LIKE 'document_passage%'
+                            OR name LIKE 'idx_document_passage_%')"""
+            )
+        }
+    assert observed == _canonical_released_document_passage_schema_v2_objects()
+
+
+def test_tracked_schema_48_fixture_carries_one_real_v3_passage_set(tmp_path: Path) -> None:
+    database = _unpack_schema_48(tmp_path, "schema48-current-v3.sqlite3")
+    with sqlite3.connect(database) as current:
+        current.row_factory = sqlite3.Row
+        register_document_passage_connection_functions(current)
+        marker = current.execute("SELECT value FROM schema_meta WHERE key='schema_version'").fetchone()
+        parent = current.execute(
+            "SELECT * FROM document_passage_projections WHERE raw_object_id='raw-fixture-0'"
+        ).fetchone()
+        assert marker is not None and marker[0] == "48"
+        assert parent is not None
+        assert parent["passage_index_revision"] == DOCUMENT_PASSAGE_INDEX_REVISION
+        assert parent["projection_status"] == "current"
+        assert parent["passage_count"] == 1
+        assert (
+            current.execute(
+                "SELECT COUNT(*) FROM document_passages WHERE raw_object_id='raw-fixture-0'"
+            ).fetchone()[0]
+            == 1
+        )
+        assert current.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
+        assert current.execute("PRAGMA foreign_key_check").fetchall() == []
+        validate_document_passage_schema(current)
+
+
+def test_exact_47_to_48_migration_carries_only_exact_v3_current_identity(
+    settings,
+    tmp_path: Path,
+) -> None:
+    database = _unpack_schema_47(tmp_path, "schema47-current-to-48.sqlite3")
+    predecessor_parent, predecessor_children = _publish_released_v2_fixture_current(database)
+
+    migrated = FridayStorage(replace(settings, database_path=database, database_must_exist=True))
+    try:
+        marker = migrated.execute("SELECT value FROM schema_meta WHERE key='schema_version'").fetchone()
+        parent = migrated.execute(
+            "SELECT * FROM document_passage_projections WHERE raw_object_id='raw-fixture-0'"
+        ).fetchone()
+        children = tuple(
+            tuple(row)
+            for row in migrated.execute(
+                """SELECT * FROM document_passages
+                    WHERE raw_object_id='raw-fixture-0' ORDER BY chunk_index"""
+            ).fetchall()
+        )
+
+        assert marker is not None and tuple(marker) == ("48",)
+        assert parent is not None
+        assert tuple(parent[:6]) == predecessor_parent[:6]
+        assert parent["passage_index_revision"] == DOCUMENT_PASSAGE_INDEX_REVISION
+        assert tuple(parent[7:]) == predecessor_parent[7:]
+        assert children == predecessor_children
+        assert migrated.kv_get("fixture:marker") == "schema-47"
+        assert migrated.execute("PRAGMA foreign_key_check").fetchall() == []
+        validate_document_passage_schema(migrated.conn)
+    finally:
+        migrated.close(final=True)
+
+
+def test_changed_v3_identity_becomes_pending_then_bounded_writer_repairs(
+    settings,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    database = _unpack_schema_47(tmp_path, "schema47-changed-v3-identity.sqlite3")
+    _publish_released_v2_fixture_current(database)
+    monkeypatch.setattr(passage_schema_module, "_v3_identity_unchanged", lambda *_args: 0)
+
+    migrated = FridayStorage(replace(settings, database_path=database, database_must_exist=True))
+    try:
+        pending = migrated.execute(
+            "SELECT * FROM document_passage_projections WHERE raw_object_id='raw-fixture-0'"
+        ).fetchone()
+        assert pending is not None
+        assert pending["passage_index_revision"] == DOCUMENT_PASSAGE_INDEX_REVISION
+        assert pending["projection_status"] == "incomplete"
+        assert pending["incomplete_reason"] == "backfill_pending"
+        assert pending["extracted_text_sha256"] is None
+        assert pending["source_char_count"] is None
+        assert pending["passage_set_sha256"] is None
+        assert pending["passage_count"] == 0
+        assert (
+            migrated.execute(
+                "SELECT COUNT(*) FROM document_passages WHERE raw_object_id='raw-fixture-0'"
+            ).fetchone()[0]
+            == 0
+        )
+
+        report = migrated.backfill_document_catalog(
+            "fixture-owner",
+            after_raw_object_id=None,
+            limit=1,
+            include_document_passages=True,
+        )
+        assert report["examined"] == report["passage_processed"] == 1
+        assert report["passage_changed"] == 1
+        repaired = migrated.execute(
+            "SELECT * FROM document_passage_projections WHERE raw_object_id='raw-fixture-0'"
+        ).fetchone()
+        assert repaired is not None and repaired["projection_status"] == "current"
+        assert repaired["incomplete_reason"] is None
+        assert repaired["passage_count"] == 1
+        validate_document_passage_schema(migrated.conn)
+    finally:
+        migrated.close(final=True)
+
+
+def test_marker_47_with_mixed_v2_v3_ddl_fails_closed_without_mutation(
+    settings,
+    tmp_path: Path,
+) -> None:
+    database = _unpack_schema_47(tmp_path, "schema47-mixed-v2-v3.sqlite3")
+    with sqlite3.connect(database) as mixed:
+        mixed.execute("DROP TRIGGER document_passage_raw_ai_seed")
+        _execute_schema(mixed, DOCUMENT_PASSAGE_SCHEMA)
+        mixed.commit()
+    before = _released_passage_database_snapshot(database)
+
+    broken = FridayStorage(replace(settings, database_path=database, database_must_exist=True))
+    try:
+        with pytest.raises(sqlite3.DatabaseError, match="Schema 47 document passage DDL"):
+            broken.execute("SELECT 1").fetchone()
+    finally:
+        broken.close(final=True)
+    assert _released_passage_database_snapshot(database) == before
+
+
+def test_marker_47_with_exact_v3_is_rejected_as_marker_rollback(
+    settings,
+    tmp_path: Path,
+) -> None:
+    database = _unpack_schema_47(tmp_path, "schema47-marker-rollback-v3.sqlite3")
+    with sqlite3.connect(database) as forged:
+        forged.row_factory = sqlite3.Row
+        register_document_passage_connection_functions(forged)
+        forged.execute("BEGIN IMMEDIATE")
+        upgrade_document_passage_schema_47_to_48(forged)
+        forged.commit()
+        assert (
+            forged.execute("SELECT value FROM schema_meta WHERE key='schema_version'").fetchone()[0] == "47"
+        )
+        validate_document_passage_schema(forged)
+    before = _released_passage_database_snapshot(database)
+
+    broken = FridayStorage(replace(settings, database_path=database, database_must_exist=True))
+    try:
+        with pytest.raises(sqlite3.DatabaseError, match="Schema 47 document passage DDL"):
+            broken.execute("SELECT 1").fetchone()
+    finally:
+        broken.close(final=True)
+    assert _released_passage_database_snapshot(database) == before
+
+
+def test_47_to_48_failure_rolls_back_exact_predecessor_tables_and_rows(
+    settings,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    database = _unpack_schema_47(tmp_path, "schema47-rollback.sqlite3")
+    _publish_released_v2_fixture_current(database)
+    before = _released_passage_database_snapshot(database)
+    real_upgrade = upgrade_document_passage_schema_47_to_48
+
+    def migrate_then_fail(conn: sqlite3.Connection, *, required: bool = True) -> None:
+        real_upgrade(conn, required=required)
+        raise sqlite3.DatabaseError("forced_after_passage_rebuild")
+
+    monkeypatch.setattr(
+        storage_core,
+        "upgrade_document_passage_schema_47_to_48",
+        migrate_then_fail,
+    )
+    broken = FridayStorage(replace(settings, database_path=database, database_must_exist=True))
+    try:
+        with pytest.raises(sqlite3.DatabaseError, match="forced_after_passage_rebuild"):
+            broken.execute("SELECT 1").fetchone()
+    finally:
+        broken.close(final=True)
+    assert _released_passage_database_snapshot(database) == before
+
+
 def test_exact_46_migration_survives_and_reopen_is_idempotent(settings, tmp_path: Path) -> None:
-    database = _unpack_schema_46(tmp_path, "schema46-to-47.sqlite3")
+    database = _unpack_schema_46(tmp_path, "schema46-to-48.sqlite3")
     first = FridayStorage(replace(settings, database_path=database, database_must_exist=True))
     try:
-        assert first.execute("SELECT value FROM schema_meta WHERE key='schema_version'").fetchone()[0] == "47"
+        assert first.execute("SELECT value FROM schema_meta WHERE key='schema_version'").fetchone()[0] == "48"
         live_files = first.execute(
             """SELECT COUNT(*) FROM raw_objects
                  WHERE content_type='file' AND deleted_at IS NULL"""

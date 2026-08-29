@@ -31,7 +31,7 @@ DOCUMENT_PASSAGE_PROJECTION_SCHEMA = "friday.document-passage-projection.private
 # endpoint changes.  These are therefore code-owned projection constants, not
 # FridaySettings.  Any algorithm/parameter change requires a new revision and a
 # resumable rebuild; tests pin the current full-coverage behaviour.
-DOCUMENT_PASSAGE_INDEX_REVISION = "document-char-v1:chunk-spans-v2:1200:200:64"
+DOCUMENT_PASSAGE_INDEX_REVISION = "document-char-v1:chunk-spans-v3:1200:200:64"
 DOCUMENT_PASSAGE_MAX_CHARS = 1_200
 DOCUMENT_PASSAGE_OVERLAP_CHARS = 200
 DOCUMENT_PASSAGE_MAX_COUNT = 64
@@ -68,6 +68,33 @@ def _exact_text_sha256(value: str) -> str:
     except UnicodeEncodeError as exc:
         raise RetrievalContractError("document passage source text must be valid UTF-8") from exc
     return hashlib.sha256(material).hexdigest()
+
+
+def _document_passage_spans(extracted_text: str) -> tuple[tuple[int, int], ...]:
+    """Apply the v3 document-only topology repair to released v2 spans.
+
+    ``chunk_spans`` is also the embedding chunker and remains a frozen global
+    contract.  Its released v2 boundary folding can emit a span wholly
+    contained in the preceding span (or one whose start/end otherwise fails to
+    advance).  Such a row cannot be an ordered document locator.  Filter only
+    those non-progress rows here and retain every byte-identical v2 coordinate
+    for ordinary documents.
+    """
+
+    released = chunk_spans(
+        extracted_text,
+        max_chars=DOCUMENT_PASSAGE_MAX_CHARS,
+        overlap_chars=DOCUMENT_PASSAGE_OVERLAP_CHARS,
+        max_chunks=DOCUMENT_PASSAGE_MAX_COUNT,
+    )
+    filtered: list[tuple[int, int]] = []
+    for start, end in released:
+        if filtered:
+            previous_start, previous_end = filtered[-1]
+            if start <= previous_start or end <= previous_end:
+                continue
+        filtered.append((start, end))
+    return tuple(filtered)
 
 
 @dataclass(frozen=True, slots=True, repr=False)
@@ -246,12 +273,7 @@ class DocumentPassageProjection:
             source_content_sha256,
             label="document passage source content SHA-256",
         )
-        spans = chunk_spans(
-            extracted_text,
-            max_chars=DOCUMENT_PASSAGE_MAX_CHARS,
-            overlap_chars=DOCUMENT_PASSAGE_OVERLAP_CHARS,
-            max_chunks=DOCUMENT_PASSAGE_MAX_COUNT,
-        )
+        spans = _document_passage_spans(extracted_text)
         if not spans:
             raise RetrievalContractError("current document passage projection has no spans")
         passages = tuple(

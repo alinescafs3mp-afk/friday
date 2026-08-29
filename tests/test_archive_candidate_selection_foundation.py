@@ -1633,7 +1633,7 @@ def test_promoted_selected_evidence_reader_survives_schema45_restart(
         assert completed.question.selected_ordinal == 2
         assert sum(statement.lstrip().upper().startswith("SAVEPOINT") for statement in statements) == 1
         assert (
-            initial.execute("SELECT value FROM schema_meta WHERE key='schema_version'").fetchone()[0] == "47"
+            initial.execute("SELECT value FROM schema_meta WHERE key='schema_version'").fetchone()[0] == "48"
         )
         with initial.transaction() as conn:
             loaded = get_current_recall_selected_archive_evidence_work_item_in_transaction(
@@ -1677,7 +1677,7 @@ def test_promoted_selected_evidence_reader_survives_schema45_restart(
             )
         assert restored == loaded
         assert (
-            reopened.execute("SELECT value FROM schema_meta WHERE key='schema_version'").fetchone()[0] == "47"
+            reopened.execute("SELECT value FROM schema_meta WHERE key='schema_version'").fetchone()[0] == "48"
         )
     finally:
         reopened.close()
@@ -1990,7 +1990,7 @@ def test_schema45_startup_installs_selected_evidence_promotion_reader(
         ).fetchone()[0]
         assert installed != released
         assert (
-            reopened.execute("SELECT value FROM schema_meta WHERE key='schema_version'").fetchone()[0] == "47"
+            reopened.execute("SELECT value FROM schema_meta WHERE key='schema_version'").fetchone()[0] == "48"
         )
         validate_work_item_schema(reopened.conn)
     finally:

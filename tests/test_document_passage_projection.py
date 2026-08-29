@@ -17,6 +17,7 @@ from friday.document_catalog.passage_projection import (
     DocumentPassageProjectionStatus,
     DocumentPassageSpan,
 )
+from friday.retrieval import chunk_spans
 from friday.retrieval._contract_utils import RetrievalContractError
 
 _RAW_ID = "raw_0123456789abcdef"
@@ -225,7 +226,7 @@ def test_passage_policy_is_code_owned_and_embedding_independent() -> None:
         "source_content_sha256",
         "extracted_text",
     )
-    assert DOCUMENT_PASSAGE_INDEX_REVISION == "document-char-v1:chunk-spans-v2:1200:200:64"
+    assert DOCUMENT_PASSAGE_INDEX_REVISION == "document-char-v1:chunk-spans-v3:1200:200:64"
     assert not ({"settings", "model", "embedding", "endpoint"} & set(signature.parameters))
 
 
@@ -236,6 +237,22 @@ def test_passage_policy_revision_pins_the_exact_current_span_algorithm() -> None
 
     assert len(coordinates) == DOCUMENT_PASSAGE_MAX_COUNT
     assert fingerprint == "e11d972ced5bb01e749ddfd8f19b16446707441f54fc8bf9de6fda8ef2397ba3"
+
+
+def test_v3_filters_only_document_nonprogress_spans_without_changing_global_chunking() -> None:
+    body = "Prelude sentence. " + ("x" * 1_400)
+    released_v2 = chunk_spans(body, max_chars=1_200, overlap_chars=200, max_chunks=64)
+
+    projection = _projection(body)
+
+    assert released_v2 == [(0, 18), (8, 18), (18, 1_218), (1_018, len(body))]
+    assert [(item.start_char, item.end_char) for item in projection.passages] == [
+        (0, 18),
+        (18, 1_218),
+        (1_018, len(body)),
+    ]
+    assert [item.chunk_index for item in projection.passages] == [0, 1, 2]
+    assert chunk_spans(body, max_chars=1_200, overlap_chars=200, max_chunks=64) == released_v2
 
 
 def test_current_parser_requires_source_and_rejects_forged_policy_or_slice_digest() -> None:

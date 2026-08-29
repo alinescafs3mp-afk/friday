@@ -22,7 +22,7 @@ _RELATION_HISTORY_TRIGGERS = (
 
 
 def _drop_document_passage_schema(conn: sqlite3.Connection) -> None:
-    """Remove schema-47 artifacts before assigning an older synthetic marker."""
+    """Remove current passage artifacts before assigning an older synthetic marker."""
 
     triggers = tuple(
         str(row[0])

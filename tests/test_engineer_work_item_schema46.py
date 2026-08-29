@@ -253,9 +253,9 @@ def test_schema_45_migrates_atomically_to_body_free_schema_46(settings, tmp_path
     database = _unpack_schema_45(tmp_path)
     migrated = FridayStorage(replace(settings, database_path=database, database_must_exist=True))
     try:
-        assert SCHEMA_VERSION == 47
+        assert SCHEMA_VERSION == 48
         assert (
-            migrated.execute("SELECT value FROM schema_meta WHERE key='schema_version'").fetchone()[0] == "47"
+            migrated.execute("SELECT value FROM schema_meta WHERE key='schema_version'").fetchone()[0] == "48"
         )
         validate_engineer_work_item_schema(migrated.conn)
         columns = {str(row[1]) for row in migrated.execute("PRAGMA table_info(engineer_work_items)")}

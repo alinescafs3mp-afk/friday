@@ -33,6 +33,7 @@ from friday.document_catalog.passage_schema import (
     DOCUMENT_PASSAGE_SCHEMA_VERSION,
     install_document_passage_schema,
     register_document_passage_connection_functions,
+    upgrade_document_passage_schema_47_to_48,
     validate_document_passage_schema,
 )
 from friday.document_catalog.schema import (
@@ -2626,9 +2627,15 @@ class CoreMixin(StorageShared):
             if parsed_version is not None and parsed_version >= DOCUMENT_PASSAGE_SCHEMA_VERSION:
                 validate_document_passage_schema(conn)
             else:
-                # Schema 46 has no passage sidecar.  An interrupted schema-47
-                # attempt is accepted only when it is wholly absent or exact.
-                validate_document_passage_schema(conn, required=False, validate_data=False)
+                # Schema 47's exact released v2 DDL and data are authenticated
+                # before only the rebuildable passage tables advance to v3.
+                # Older schemas may have no sidecar; an interrupted v2 install
+                # is accepted only when it is complete and exact. Mixed or v3
+                # DDL under an old marker always fails closed.
+                upgrade_document_passage_schema_47_to_48(
+                    conn,
+                    required=parsed_version is not None and parsed_version >= 47,
+                )
             if parsed_version is not None and parsed_version >= HOST_CONTROL_SCHEMA_VERSION:
                 validate_host_control_job_schema(conn)
             else:

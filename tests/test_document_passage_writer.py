@@ -361,17 +361,27 @@ def test_supported_identity_projection_failure_is_visible_and_keeps_pending(
     assert _children(storage, raw.id) == ()
 
 
-def test_released_v2_nonprogress_topology_remains_explicit_incomplete(
+def test_v3_writer_repairs_released_nonprogress_topology_in_one_bounded_item(
     storage: FridayStorage,
 ) -> None:
     body = "Prelude sentence. " + ("x" * 1_400)
     raw = _file(storage, "raw_passage_v2_nonprogress", body=body)
+    expected = _expected_projection(raw)
 
     report = _backfill(storage, limit=1)
 
     assert report["examined"] == report["passage_processed"] == 1
-    assert report["passage_changed"] == 0
-    assert _parent(storage, raw.id)["projection_status"] == "incomplete"
-    assert _parent(storage, raw.id)["incomplete_reason"] == "backfill_pending"
-    assert _children(storage, raw.id) == ()
+    assert report["passage_changed"] == 1
+    parent = _parent(storage, raw.id)
+    assert parent["projection_status"] == "current"
+    assert parent["incomplete_reason"] is None
+    assert parent["passage_count"] == 3
+    assert _children(storage, raw.id) == tuple(
+        (item.chunk_index, item.start_char, item.end_char, item.content_sha256) for item in expected.passages
+    )
+    assert [(row[1], row[2]) for row in _children(storage, raw.id)] == [
+        (0, 18),
+        (18, 1_218),
+        (1_018, len(body)),
+    ]
     validate_document_passage_schema(storage.conn)

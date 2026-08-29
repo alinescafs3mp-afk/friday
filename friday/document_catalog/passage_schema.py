@@ -1,4 +1,4 @@
-"""Exact schema-47 contract for body-free Raw document passage projections.
+"""Exact schema-48 contract for body-free Raw document passage projections.
 
 Raw Object text remains the sole source of truth.  The projection table stores
 only its exact revision/digests and closed coverage state; child rows store only
@@ -12,14 +12,19 @@ import hashlib
 import re
 import sqlite3
 import threading
+import unicodedata
+import uuid
 from collections import OrderedDict
 from functools import lru_cache
 
 from friday.document_catalog.schema import deterministic_document_extraction_state
 
-DOCUMENT_PASSAGE_SCHEMA_VERSION = 47
-DOCUMENT_PASSAGE_INDEX_REVISION = "document-char-v1:chunk-spans-v2:1200:200:64"
+DOCUMENT_PASSAGE_SCHEMA_VERSION = 48
+DOCUMENT_PASSAGE_INDEX_REVISION = "document-char-v1:chunk-spans-v3:1200:200:64"
+DOCUMENT_PASSAGE_MAX_CHARS = 1_200
+DOCUMENT_PASSAGE_OVERLAP_CHARS = 200
 DOCUMENT_PASSAGE_MAX_COUNT = 64
+_RELEASED_DOCUMENT_PASSAGE_INDEX_REVISION_V2 = "document-char-v1:chunk-spans-v2:1200:200:64"
 
 _PassageRows = tuple[tuple[int, int, int, str], ...]
 _PASSAGE_ROWS_CACHE_LIMIT = 32
@@ -42,7 +47,7 @@ _REASONS = (
 _REASON_SQL = ", ".join(f"'{item}'" for item in _REASONS)
 
 
-DOCUMENT_PASSAGE_SCHEMA = f"""
+_RELEASED_DOCUMENT_PASSAGE_SCHEMA_V2 = f"""
 CREATE TABLE IF NOT EXISTS document_passage_projections (
     raw_object_id TEXT NOT NULL PRIMARY KEY
         REFERENCES raw_objects(id) ON DELETE CASCADE,
@@ -68,7 +73,7 @@ CREATE TABLE IF NOT EXISTS document_passage_projections (
                   AND length(passage_set_sha256)=64
                   AND passage_set_sha256 NOT GLOB '*[^0-9a-f]*')),
     passage_index_revision TEXT NOT NULL
-        CHECK(passage_index_revision='{DOCUMENT_PASSAGE_INDEX_REVISION}'),
+        CHECK(passage_index_revision='{_RELEASED_DOCUMENT_PASSAGE_INDEX_REVISION_V2}'),
     projection_status TEXT NOT NULL
         CHECK(projection_status IN ('current','incomplete')),
     incomplete_reason TEXT
@@ -219,7 +224,7 @@ BEGIN
         CASE WHEN typeof(NEW.content_hash)='text' AND length(NEW.content_hash)=64
                   AND NEW.content_hash NOT GLOB '*[^0-9a-f]*'
              THEN NEW.content_hash ELSE NULL END,
-        NULL,NULL,NULL,'{DOCUMENT_PASSAGE_INDEX_REVISION}','incomplete',
+        NULL,NULL,NULL,'{_RELEASED_DOCUMENT_PASSAGE_INDEX_REVISION_V2}','incomplete',
         friday_document_passage_seed_reason(
             NEW.version,NEW.content_hash,NEW.raw_content,NEW.metadata_json,0
         ),0,strftime('%Y-%m-%dT%H:%M:%SZ','now')
@@ -242,13 +247,23 @@ BEGIN
            CASE WHEN typeof(NEW.content_hash)='text' AND length(NEW.content_hash)=64
                      AND NEW.content_hash NOT GLOB '*[^0-9a-f]*'
                 THEN NEW.content_hash ELSE NULL END,
-           NULL,NULL,NULL,'{DOCUMENT_PASSAGE_INDEX_REVISION}','incomplete',
+           NULL,NULL,NULL,'{_RELEASED_DOCUMENT_PASSAGE_INDEX_REVISION_V2}','incomplete',
            friday_document_passage_seed_reason(
                NEW.version,NEW.content_hash,NEW.raw_content,NEW.metadata_json,1
            ),0,strftime('%Y-%m-%dT%H:%M:%SZ','now')
      WHERE NEW.content_type='file' AND NEW.deleted_at IS NULL;
 END;
 """
+
+_REVISION_LITERAL_COUNT = _RELEASED_DOCUMENT_PASSAGE_SCHEMA_V2.count(
+    _RELEASED_DOCUMENT_PASSAGE_INDEX_REVISION_V2
+)
+if _REVISION_LITERAL_COUNT != 3:  # pragma: no cover - source-code invariant
+    raise RuntimeError("released document passage revision anchor is ambiguous")
+DOCUMENT_PASSAGE_SCHEMA = _RELEASED_DOCUMENT_PASSAGE_SCHEMA_V2.replace(
+    _RELEASED_DOCUMENT_PASSAGE_INDEX_REVISION_V2,
+    DOCUMENT_PASSAGE_INDEX_REVISION,
+)
 
 
 def _valid_version(value: object) -> int | None:
@@ -259,6 +274,77 @@ def _valid_digest(value: object) -> str | None:
     if type(value) is not str or re.fullmatch(r"[0-9a-f]{64}", value) is None:
         return None
     return value
+
+
+def _exact_text_sha256(value: str) -> str:
+    return hashlib.sha256(value.encode("utf-8", errors="strict")).hexdigest()
+
+
+def _released_v2_projection(
+    *,
+    raw_object_id: str,
+    source_version: int,
+    source_content_sha256: str,
+    extracted_text: str,
+) -> tuple[str, int, _PassageRows]:
+    """Recompute the byte-exact released schema-47/v2 projection.
+
+    This intentionally does not call the current projection class.  Schema 47
+    must remain independently authenticatable after the document-only v3
+    topology repair ships.
+    """
+
+    if not extracted_text.strip():
+        raise ValueError("released document passage source text must be non-empty")
+    if len(extracted_text) > 1_000_000_000:
+        raise ValueError("released document passage source text exceeds the closed cap")
+    if (
+        not isinstance(raw_object_id, str)
+        or not raw_object_id
+        or raw_object_id != raw_object_id.strip()
+        or any(unicodedata.category(character).startswith("C") for character in raw_object_id)
+        or len(raw_object_id.encode("utf-8", errors="strict")) > 200
+    ):
+        raise ValueError("released document passage Raw Object ID is invalid")
+    if _valid_version(source_version) is None or _valid_digest(source_content_sha256) is None:
+        raise ValueError("released document passage source binding is invalid")
+    from friday.retrieval import chunk_spans
+
+    spans = tuple(
+        chunk_spans(
+            extracted_text,
+            max_chars=DOCUMENT_PASSAGE_MAX_CHARS,
+            overlap_chars=DOCUMENT_PASSAGE_OVERLAP_CHARS,
+            max_chunks=DOCUMENT_PASSAGE_MAX_COUNT,
+        )
+    )
+    if not 1 <= len(spans) <= DOCUMENT_PASSAGE_MAX_COUNT:
+        raise ValueError("released document passage projection has no spans")
+    if spans[0][0] != 0 or spans[-1][1] != len(extracted_text):
+        raise ValueError("released document passages do not cover source boundaries")
+    rows: list[tuple[int, int, int, str]] = []
+    previous: tuple[int, int] | None = None
+    for chunk_index, (start_char, end_char) in enumerate(spans):
+        if (
+            type(start_char) is not int
+            or type(end_char) is not int
+            or not 0 <= start_char < end_char <= 1_000_000_000
+            or (
+                previous is not None
+                and (start_char <= previous[0] or start_char > previous[1] or end_char <= previous[1])
+            )
+        ):
+            raise ValueError("released document passage topology is invalid")
+        rows.append(
+            (
+                chunk_index,
+                start_char,
+                end_char,
+                _exact_text_sha256(extracted_text[start_char:end_char]),
+            )
+        )
+        previous = (start_char, end_char)
+    return _exact_text_sha256(extracted_text), len(extracted_text), tuple(rows)
 
 
 def _seed_reason(
@@ -335,6 +421,7 @@ def _projection_valid(
             if expected_text_digest is None:
                 return 0
             _remember_passage_rows(
+                DOCUMENT_PASSAGE_INDEX_REVISION,
                 expected_text_digest,
                 expected_rows,
             )
@@ -367,46 +454,140 @@ def _projection_valid(
         return 0
 
 
-def _remember_passage_rows(digest: str, rows: _PassageRows) -> None:
+def _released_v2_projection_valid(
+    raw_object_id: object,
+    raw_version: object,
+    raw_digest: object,
+    raw_content: object,
+    metadata_json: object,
+    source_version: object,
+    source_digest: object,
+    extracted_digest: object,
+    source_char_count: object,
+    passage_set_digest: object,
+    index_revision: object,
+    status: object,
+    incomplete_reason: object,
+    passage_count: object,
+) -> int:
+    """Validate frozen schema-47 rows without consulting v3 code."""
+
+    try:
+        if (
+            type(raw_object_id) is not str
+            or index_revision != _RELEASED_DOCUMENT_PASSAGE_INDEX_REVISION_V2
+            or status not in {"current", "incomplete"}
+            or type(passage_count) is not int
+        ):
+            return 0
+        valid_version = _valid_version(raw_version)
+        valid_digest = _valid_digest(raw_digest)
+        if status == "current":
+            if (
+                valid_version is None
+                or valid_digest is None
+                or source_version != valid_version
+                or source_digest != valid_digest
+                or type(raw_content) is not str
+                or deterministic_document_extraction_state(raw_content, metadata_json) != "current"
+            ):
+                return 0
+            expected_text_digest, expected_char_count, expected_rows = _released_v2_projection(
+                raw_object_id=raw_object_id,
+                source_version=valid_version,
+                source_content_sha256=valid_digest,
+                extracted_text=raw_content,
+            )
+            _remember_passage_rows(
+                _RELEASED_DOCUMENT_PASSAGE_INDEX_REVISION_V2,
+                expected_text_digest,
+                expected_rows,
+            )
+            return int(
+                incomplete_reason is None
+                and extracted_digest == expected_text_digest
+                and source_char_count == expected_char_count
+                and passage_set_digest == document_passage_set_sha256(expected_rows)
+                and passage_count == len(expected_rows)
+            )
+        expected_reason = _seed_reason(
+            raw_version,
+            raw_digest,
+            raw_content,
+            metadata_json,
+            int(incomplete_reason == _SOURCE_CHANGED),
+        )
+        if incomplete_reason != expected_reason or passage_set_digest is not None:
+            return 0
+        if expected_reason == _SOURCE_UNAVAILABLE:
+            return int(
+                (source_version == valid_version if valid_version is not None else source_version is None)
+                and (source_digest == valid_digest if valid_digest is not None else source_digest is None)
+                and (valid_version is None or valid_digest is None)
+            )
+        return int(source_version == valid_version and source_digest == valid_digest)
+    except (TypeError, ValueError, UnicodeError):
+        return 0
+
+
+def _remember_passage_rows(revision: str, digest: str, rows: _PassageRows) -> None:
     with _PASSAGE_ROWS_CACHE_LOCK:
-        _PASSAGE_ROWS_CACHE[digest] = rows
-        _PASSAGE_ROWS_CACHE.move_to_end(digest)
+        cache_key = f"{revision}\0{digest}"
+        _PASSAGE_ROWS_CACHE[cache_key] = rows
+        _PASSAGE_ROWS_CACHE.move_to_end(cache_key)
         while len(_PASSAGE_ROWS_CACHE) > _PASSAGE_ROWS_CACHE_LIMIT:
             _PASSAGE_ROWS_CACHE.popitem(last=False)
 
 
-def _passage_rows(raw_content: object, extracted_digest: object) -> _PassageRows | None:
+def _passage_rows(
+    raw_content: object,
+    extracted_digest: object,
+    *,
+    revision: str = DOCUMENT_PASSAGE_INDEX_REVISION,
+) -> _PassageRows | None:
     if type(raw_content) is not str or _valid_digest(extracted_digest) is None:
         return None
     digest = str(extracted_digest)
+    cache_key = f"{revision}\0{digest}"
     with _PASSAGE_ROWS_CACHE_LOCK:
-        cached = _PASSAGE_ROWS_CACHE.get(digest)
+        cached = _PASSAGE_ROWS_CACHE.get(cache_key)
         if cached is not None:
-            _PASSAGE_ROWS_CACHE.move_to_end(digest)
+            _PASSAGE_ROWS_CACHE.move_to_end(cache_key)
             return cached
     try:
-        from friday.document_catalog.passage_projection import DocumentPassageProjection
+        if revision == DOCUMENT_PASSAGE_INDEX_REVISION:
+            from friday.document_catalog.passage_projection import DocumentPassageProjection
 
-        projection = DocumentPassageProjection.from_complete_text(
-            raw_object_id="raw_0000000000000000",
-            source_version=1,
-            source_content_sha256="0" * 64,
-            extracted_text=raw_content,
-        )
+            projection = DocumentPassageProjection.from_complete_text(
+                raw_object_id="raw_0000000000000000",
+                source_version=1,
+                source_content_sha256="0" * 64,
+                extracted_text=raw_content,
+            )
+            text_digest = projection.extracted_text_sha256
+            rows = tuple(
+                (
+                    passage.chunk_index,
+                    passage.start_char,
+                    passage.end_char,
+                    passage.content_sha256,
+                )
+                for passage in projection.passages
+            )
+        elif revision == _RELEASED_DOCUMENT_PASSAGE_INDEX_REVISION_V2:
+            text_digest, _source_char_count, rows = _released_v2_projection(
+                raw_object_id="raw_0000000000000000",
+                source_version=1,
+                source_content_sha256="0" * 64,
+                extracted_text=raw_content,
+            )
+        else:  # pragma: no cover - callers use closed revision constants
+            return None
     except (TypeError, ValueError, UnicodeError):
         return None
-    if projection.extracted_text_sha256 != digest:
+    if text_digest != digest:
         return None
-    rows = tuple(
-        (
-            passage.chunk_index,
-            passage.start_char,
-            passage.end_char,
-            passage.content_sha256,
-        )
-        for passage in projection.passages
-    )
-    _remember_passage_rows(digest, rows)
+    _remember_passage_rows(revision, digest, rows)
     return rows
 
 
@@ -422,6 +603,29 @@ def _span_valid(
         if type(chunk_index) is not int:
             return 0
         rows = _passage_rows(raw_content, extracted_digest)
+        if rows is None or not 0 <= chunk_index < len(rows):
+            return 0
+        return int((chunk_index, start_char, end_char, content_digest) == rows[chunk_index])
+    except (TypeError, ValueError, UnicodeError):
+        return 0
+
+
+def _released_v2_span_valid(
+    raw_content: object,
+    extracted_digest: object,
+    chunk_index: object,
+    start_char: object,
+    end_char: object,
+    content_digest: object,
+) -> int:
+    try:
+        if type(chunk_index) is not int:
+            return 0
+        rows = _passage_rows(
+            raw_content,
+            extracted_digest,
+            revision=_RELEASED_DOCUMENT_PASSAGE_INDEX_REVISION_V2,
+        )
         if rows is None or not 0 <= chunk_index < len(rows):
             return 0
         return int((chunk_index, start_char, end_char, content_digest) == rows[chunk_index])
@@ -519,6 +723,83 @@ def register_document_passage_connection_functions(conn: sqlite3.Connection) -> 
     )
 
 
+def _register_released_document_passage_v2_connection_functions(
+    conn: sqlite3.Connection,
+) -> None:
+    """Temporarily bind the exact functions referenced by released v2 DDL."""
+
+    conn.create_function(
+        "friday_document_passage_seed_reason",
+        5,
+        _seed_reason,
+        deterministic=True,
+    )
+    conn.create_function(
+        "friday_document_passage_projection_valid",
+        14,
+        _released_v2_projection_valid,
+        deterministic=True,
+    )
+    conn.create_function(
+        "friday_document_passage_span_valid",
+        6,
+        _released_v2_span_valid,
+        deterministic=True,
+    )
+    conn.create_aggregate(
+        "friday_document_passage_set_sha256",
+        4,
+        _PassageSetSha256,  # type: ignore[arg-type]  # typeshed cannot express fixed arity
+    )
+
+
+def _v3_identity_unchanged(
+    raw_object_id: object,
+    source_version: object,
+    source_digest: object,
+    raw_content: object,
+    extracted_digest: object,
+    source_char_count: object,
+    passage_set_digest: object,
+    passage_count: object,
+) -> int:
+    """Return one only when a released CURRENT row is exactly v3-identical."""
+
+    try:
+        if (
+            type(raw_object_id) is not str
+            or type(source_version) is not int
+            or type(source_digest) is not str
+            or type(raw_content) is not str
+        ):
+            return 0
+        from friday.document_catalog.passage_projection import DocumentPassageProjection
+
+        expected = DocumentPassageProjection.from_complete_text(
+            raw_object_id=raw_object_id,
+            source_version=source_version,
+            source_content_sha256=source_digest,
+            extracted_text=raw_content,
+        )
+        rows = tuple(
+            (
+                passage.chunk_index,
+                passage.start_char,
+                passage.end_char,
+                passage.content_sha256,
+            )
+            for passage in expected.passages
+        )
+        return int(
+            expected.extracted_text_sha256 == extracted_digest
+            and expected.source_char_count == source_char_count
+            and document_passage_set_sha256(rows) == passage_set_digest
+            and len(rows) == passage_count
+        )
+    except (TypeError, ValueError, UnicodeError):
+        return 0
+
+
 def _execute_schema(conn: sqlite3.Connection, script: str) -> None:
     statement = ""
     for line in script.splitlines(keepends=True):
@@ -542,9 +823,8 @@ def _schema_objects(conn: sqlite3.Connection) -> dict[tuple[str, str], str]:
         for row in conn.execute(
             """SELECT type,name,sql FROM sqlite_master
                  WHERE sql IS NOT NULL
-                   AND (name IN ('document_passage_projections','document_passages')
-                        OR tbl_name IN ('document_passage_projections','document_passages')
-                        OR name LIKE 'document_passage_%'
+                   AND (name LIKE 'document_passage%'
+                        OR tbl_name LIKE 'document_passage%'
                         OR name LIKE 'idx_document_passage_%')
                  ORDER BY type,name"""
         )
@@ -580,7 +860,37 @@ def _canonical_document_passage_schema_objects() -> dict[tuple[str, str], str]:
         conn.close()
 
 
-def _validate_document_passage_data(conn: sqlite3.Connection) -> None:
+@lru_cache(maxsize=1)
+def _canonical_released_document_passage_schema_v2_objects() -> dict[tuple[str, str], str]:
+    """Return the exact schema-47 sidecar shipped with the v2 revision."""
+
+    conn = sqlite3.connect(":memory:")
+    try:
+        _register_released_document_passage_v2_connection_functions(conn)
+        conn.executescript(
+            """
+            CREATE TABLE raw_objects(
+                id TEXT PRIMARY KEY,
+                raw_content TEXT NOT NULL DEFAULT '',
+                content_type TEXT NOT NULL DEFAULT 'text',
+                metadata_json TEXT NOT NULL DEFAULT '{}',
+                content_hash TEXT NOT NULL DEFAULT '',
+                version INTEGER NOT NULL DEFAULT 1,
+                deleted_at TEXT
+            );
+            """
+        )
+        _execute_schema(conn, _RELEASED_DOCUMENT_PASSAGE_SCHEMA_V2)
+        return _schema_objects(conn)
+    finally:
+        conn.close()
+
+
+def _validate_document_passage_data(
+    conn: sqlite3.Connection,
+    *,
+    schema_version: int,
+) -> None:
     mismatch = conn.execute(
         """SELECT 1
              FROM document_passage_projections projection
@@ -614,7 +924,7 @@ def _validate_document_passage_data(conn: sqlite3.Connection) -> None:
             LIMIT 1"""
     ).fetchone()
     if mismatch is not None:
-        raise sqlite3.DatabaseError("Schema 47 document passage data is invalid")
+        raise sqlite3.DatabaseError(f"Schema {schema_version} document passage data is invalid")
     orphan = conn.execute(
         """SELECT 1
              FROM document_passages passage
@@ -624,7 +934,7 @@ def _validate_document_passage_data(conn: sqlite3.Connection) -> None:
             LIMIT 1"""
     ).fetchone()
     if orphan is not None:
-        raise sqlite3.DatabaseError("Schema 47 document passage data is invalid")
+        raise sqlite3.DatabaseError(f"Schema {schema_version} document passage data is invalid")
     missing = conn.execute(
         """SELECT 1 FROM raw_objects source
             WHERE source.content_type='file' AND source.deleted_at IS NULL
@@ -635,26 +945,14 @@ def _validate_document_passage_data(conn: sqlite3.Connection) -> None:
             LIMIT 1"""
     ).fetchone()
     if missing is not None:
-        raise sqlite3.DatabaseError("Schema 47 document passage coverage is incomplete")
+        raise sqlite3.DatabaseError(f"Schema {schema_version} document passage coverage is incomplete")
 
 
-def validate_document_passage_schema(
+def _validate_document_passage_shape(
     conn: sqlite3.Connection,
     *,
-    required: bool = True,
-    validate_data: bool = True,
+    schema_version: int,
 ) -> None:
-    """Fail closed when the exact body-free passage sidecar is weakened."""
-
-    register_document_passage_connection_functions(conn)
-    installed = _schema_objects(conn)
-    if not installed:
-        if required:
-            raise sqlite3.DatabaseError("Schema 47 document passage projection is missing")
-        return
-    if installed != _canonical_document_passage_schema_objects():
-        raise sqlite3.DatabaseError("Schema 47 document passage DDL is incomplete or altered")
-
     projection_columns = {
         str(item[1]): (str(item[2]).upper(), int(item[3]), int(item[5]))
         for item in conn.execute("PRAGMA table_info(document_passage_projections)")
@@ -672,7 +970,7 @@ def validate_document_passage_schema(
         "passage_count": ("INTEGER", 1, 0),
         "projected_at": ("TEXT", 1, 0),
     }:
-        raise sqlite3.DatabaseError("Schema 47 document passage projection shape is invalid")
+        raise sqlite3.DatabaseError(f"Schema {schema_version} document passage projection shape is invalid")
     passage_columns = {
         str(item[1]): (str(item[2]).upper(), int(item[3]), int(item[5]))
         for item in conn.execute("PRAGMA table_info(document_passages)")
@@ -684,7 +982,7 @@ def validate_document_passage_schema(
         "end_char": ("INTEGER", 1, 0),
         "content_sha256": ("TEXT", 1, 0),
     }:
-        raise sqlite3.DatabaseError("Schema 47 document passage row shape is invalid")
+        raise sqlite3.DatabaseError(f"Schema {schema_version} document passage row shape is invalid")
     projection_fks = {
         (str(item[3]), str(item[2]), str(item[4]), str(item[6]))
         for item in conn.execute("PRAGMA foreign_key_list(document_passage_projections)")
@@ -696,9 +994,184 @@ def validate_document_passage_schema(
     if projection_fks != {("raw_object_id", "raw_objects", "id", "CASCADE")} or passage_fks != {
         ("raw_object_id", "document_passage_projections", "raw_object_id", "CASCADE")
     }:
-        raise sqlite3.DatabaseError("Schema 47 document passage ownership is invalid")
+        raise sqlite3.DatabaseError(f"Schema {schema_version} document passage ownership is invalid")
+
+
+def validate_document_passage_schema(
+    conn: sqlite3.Connection,
+    *,
+    required: bool = True,
+    validate_data: bool = True,
+) -> None:
+    """Fail closed when the exact body-free passage sidecar is weakened."""
+
+    register_document_passage_connection_functions(conn)
+    installed = _schema_objects(conn)
+    if not installed:
+        if required:
+            raise sqlite3.DatabaseError("Schema 48 document passage projection is missing")
+        return
+    if installed != _canonical_document_passage_schema_objects():
+        raise sqlite3.DatabaseError("Schema 48 document passage DDL is incomplete or altered")
+    _validate_document_passage_shape(conn, schema_version=48)
     if validate_data:
-        _validate_document_passage_data(conn)
+        _validate_document_passage_data(conn, schema_version=48)
+
+
+def _validate_released_document_passage_schema_v2(
+    conn: sqlite3.Connection,
+    *,
+    required: bool = True,
+    validate_data: bool = True,
+) -> None:
+    """Authenticate the exact released schema-47 DDL and v2 projection data."""
+
+    installed = _schema_objects(conn)
+    if not installed:
+        if required:
+            raise sqlite3.DatabaseError("Schema 47 document passage projection is missing")
+        return
+    if installed != _canonical_released_document_passage_schema_v2_objects():
+        raise sqlite3.DatabaseError("Schema 47 document passage DDL is incomplete or altered")
+    _validate_document_passage_shape(conn, schema_version=47)
+    if not validate_data:
+        return
+    _register_released_document_passage_v2_connection_functions(conn)
+    try:
+        _validate_document_passage_data(conn, schema_version=47)
+    finally:
+        register_document_passage_connection_functions(conn)
+
+
+def _drop_released_document_passage_runtime_objects(conn: sqlite3.Connection) -> None:
+    for (kind, name), _sql in _canonical_released_document_passage_schema_v2_objects().items():
+        if kind in {"index", "trigger"}:
+            conn.execute(f'DROP {kind.upper()} "{name}"')
+
+
+def upgrade_document_passage_schema_47_to_48(
+    conn: sqlite3.Connection,
+    *,
+    required: bool = True,
+) -> None:
+    """Authenticate and atomically rebuild only the released passage sidecar.
+
+    A released CURRENT projection is carried only when its exact source/text
+    identity, ordered coordinates and slice-digest set recompute identically
+    under v3.  Every other CURRENT row becomes body-free ``backfill_pending``;
+    the ordinary bounded writer owns its later repair.
+    """
+
+    if not conn.in_transaction:
+        raise RuntimeError("Document passage schema upgrade requires an existing transaction")
+    installed = _schema_objects(conn)
+    if not installed:
+        if required:
+            raise sqlite3.DatabaseError("Schema 47 document passage projection is missing")
+        return
+    # No current-schema shortcut is accepted under an old marker.  An exact v3
+    # sidecar with schema_version <=47 cannot be the product of this atomic
+    # migration; accepting it would let mixed/interrupted DDL bypass the frozen
+    # predecessor authentication below.
+    _validate_released_document_passage_schema_v2(conn)
+
+    suffix = uuid.uuid4().hex
+    carry_table = f"friday_document_passage_v3_carry_{suffix}"
+    savepoint = f"document_passage_47_to_48_{suffix}"
+    conn.create_function(
+        "friday_document_passage_v3_identity_unchanged",
+        8,
+        _v3_identity_unchanged,
+        deterministic=True,
+    )
+    conn.execute(f'SAVEPOINT "{savepoint}"')  # nosec B608 - generated hexadecimal identifier
+    try:
+        conn.execute(
+            f'''CREATE TEMP TABLE "{carry_table}"(
+                    raw_object_id TEXT NOT NULL PRIMARY KEY
+                ) WITHOUT ROWID'''  # nosec B608 - generated hexadecimal identifier
+        )
+        conn.execute(
+            f'''INSERT INTO "{carry_table}"(raw_object_id)
+                SELECT projection.raw_object_id
+                  FROM document_passage_projections projection
+                  JOIN raw_objects source ON source.id=projection.raw_object_id
+                 WHERE projection.projection_status='current'
+                   AND friday_document_passage_v3_identity_unchanged(
+                           source.id,source.version,source.content_hash,source.raw_content,
+                           projection.extracted_text_sha256,projection.source_char_count,
+                           projection.passage_set_sha256,projection.passage_count)=1'''  # nosec B608
+        )
+
+        _drop_released_document_passage_runtime_objects(conn)
+        conn.execute("ALTER TABLE document_passages RENAME TO document_passages_schema47")
+        conn.execute(
+            "ALTER TABLE document_passage_projections RENAME TO document_passage_projections_schema47"
+        )
+        _execute_schema(conn, DOCUMENT_PASSAGE_SCHEMA)
+        conn.execute(
+            f'''INSERT INTO document_passage_projections(
+                    raw_object_id,source_version,source_content_sha256,
+                    extracted_text_sha256,source_char_count,passage_set_sha256,
+                    passage_index_revision,projection_status,incomplete_reason,
+                    passage_count,projected_at
+                )
+                SELECT predecessor.raw_object_id,
+                       predecessor.source_version,
+                       predecessor.source_content_sha256,
+                       CASE WHEN carry.raw_object_id IS NOT NULL
+                            THEN predecessor.extracted_text_sha256 ELSE NULL END,
+                       CASE WHEN carry.raw_object_id IS NOT NULL
+                            THEN predecessor.source_char_count ELSE NULL END,
+                       CASE WHEN carry.raw_object_id IS NOT NULL
+                            THEN predecessor.passage_set_sha256 ELSE NULL END,
+                       '{DOCUMENT_PASSAGE_INDEX_REVISION}',
+                       CASE WHEN carry.raw_object_id IS NOT NULL
+                            THEN 'current' ELSE 'incomplete' END,
+                       CASE WHEN carry.raw_object_id IS NOT NULL THEN NULL
+                            WHEN predecessor.projection_status='current'
+                            THEN friday_document_passage_seed_reason(
+                                     source.version,source.content_hash,
+                                     source.raw_content,source.metadata_json,0)
+                            ELSE predecessor.incomplete_reason END,
+                       CASE WHEN carry.raw_object_id IS NOT NULL
+                            THEN predecessor.passage_count ELSE 0 END,
+                       CASE WHEN predecessor.projection_status='current'
+                                      AND carry.raw_object_id IS NULL
+                            THEN strftime('%Y-%m-%dT%H:%M:%SZ','now')
+                            ELSE predecessor.projected_at END
+                  FROM document_passage_projections_schema47 predecessor
+                  JOIN raw_objects source ON source.id=predecessor.raw_object_id
+                  LEFT JOIN "{carry_table}" carry
+                         ON carry.raw_object_id=predecessor.raw_object_id'''  # nosec B608
+        )
+        conn.execute(
+            f'''INSERT INTO document_passages(
+                    raw_object_id,chunk_index,start_char,end_char,content_sha256
+                )
+                SELECT predecessor.raw_object_id,predecessor.chunk_index,
+                       predecessor.start_char,predecessor.end_char,
+                       predecessor.content_sha256
+                  FROM document_passages_schema47 predecessor
+                  JOIN "{carry_table}" carry
+                    ON carry.raw_object_id=predecessor.raw_object_id
+                 ORDER BY predecessor.raw_object_id,predecessor.chunk_index'''  # nosec B608
+        )
+        conn.execute("DROP TABLE document_passages_schema47")
+        conn.execute("DROP TABLE document_passage_projections_schema47")
+        conn.execute(f'DROP TABLE "{carry_table}"')  # nosec B608 - generated identifier
+        validate_document_passage_schema(conn)
+    except BaseException:
+        conn.execute(f'ROLLBACK TO SAVEPOINT "{savepoint}"')  # nosec B608
+        conn.execute(f'RELEASE SAVEPOINT "{savepoint}"')  # nosec B608
+        raise
+    finally:
+        conn.create_function(
+            "friday_document_passage_v3_identity_unchanged",
+            8,
+            None,
+        )
+    conn.execute(f'RELEASE SAVEPOINT "{savepoint}"')  # nosec B608
 
 
 def document_passage_schema_fingerprint(conn: sqlite3.Connection) -> str:
@@ -706,7 +1179,7 @@ def document_passage_schema_fingerprint(conn: sqlite3.Connection) -> str:
     installed = _schema_objects(conn)
     canonical = _canonical_document_passage_schema_objects()
     if installed != canonical:
-        raise sqlite3.DatabaseError("Schema 47 document passage DDL is incomplete or altered")
+        raise sqlite3.DatabaseError("Schema 48 document passage DDL is incomplete or altered")
     return _schema_fingerprint(installed)
 
 
@@ -717,7 +1190,7 @@ def install_document_passage_schema(conn: sqlite3.Connection) -> None:
         raise RuntimeError("Document passage installation requires an existing transaction")
     installed = _schema_objects(conn)
     if installed and installed != _canonical_document_passage_schema_objects():
-        raise sqlite3.DatabaseError("Schema 47 document passage DDL is incomplete or altered")
+        raise sqlite3.DatabaseError("Schema 48 document passage DDL is incomplete or altered")
     if not installed:
         _execute_schema(conn, DOCUMENT_PASSAGE_SCHEMA)
     conn.execute(
@@ -754,5 +1227,6 @@ __all__ = [
     "document_passage_set_sha256",
     "install_document_passage_schema",
     "register_document_passage_connection_functions",
+    "upgrade_document_passage_schema_47_to_48",
     "validate_document_passage_schema",
 ]

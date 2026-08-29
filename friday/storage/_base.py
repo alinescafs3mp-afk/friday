@@ -174,7 +174,11 @@ LOGGER = logging.getLogger("friday.storage")
 # 47 — reader-first body-free document passage projections. Raw remains the
 # authority; this release seeds only explicit incomplete state so the same
 # schema-capable binary can safely serve as fallback for later bounded writers.
-SCHEMA_VERSION = 47
+# 48 — document-only passage v3 filters released contained/non-progress spans.
+# Exact schema-47 v2 DDL/data are authenticated before only the rebuildable
+# passage tables advance; unchanged CURRENT topology is carried byte-for-byte,
+# while changed topology returns to explicit bounded-writer work.
+SCHEMA_VERSION = 48
 
 #: Определение таблицы внешних источников отдельной константой: миграция схемы 29
 #: пересоздаёт её, чтобы ключом стала ПАРА `(user_id, name)`, и должна брать ровно

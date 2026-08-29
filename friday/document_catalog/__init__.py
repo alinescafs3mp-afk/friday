@@ -8,6 +8,7 @@ from friday.document_catalog.passage_schema import (
     document_passage_set_sha256,
     install_document_passage_schema,
     register_document_passage_connection_functions,
+    upgrade_document_passage_schema_47_to_48,
     validate_document_passage_schema,
 )
 from friday.document_catalog.schema import (
@@ -46,6 +47,7 @@ __all__ = [
     "install_document_passage_schema",
     "register_document_catalog_connection_functions",
     "register_document_passage_connection_functions",
+    "upgrade_document_passage_schema_47_to_48",
     "validate_document_catalog_schema",
     "validate_document_passage_schema",
 ]

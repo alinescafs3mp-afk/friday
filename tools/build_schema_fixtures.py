@@ -148,6 +148,17 @@ for index in range(3):
             received_at=now,
         )
     )
+if SCHEMA_VERSION >= 48:
+    # Exercise the released document-passage child-row contract, not only its
+    # explicit-incomplete seed.  The synthetic corpus has exactly one live file.
+    passage_report = storage.backfill_document_catalog(
+        {SEED_USER!r},
+        after_raw_object_id=None,
+        limit=64,
+        include_document_passages=True,
+    )
+    if passage_report["passage_changed"] != 1:
+        raise RuntimeError(f"schema {{SCHEMA_VERSION}} fixture did not publish one passage set")
 if SCHEMA_VERSION >= 31:
     # Schema 31's defining authoritative data is relation history. Seed one
     # completely synthetic lineage so its committed fixture proves both the

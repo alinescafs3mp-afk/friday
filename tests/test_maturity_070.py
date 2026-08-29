@@ -297,7 +297,7 @@ def test_conversation_modes_and_lifecycle_candidates_are_persistent_and_safe(sto
     # каждого, кто меняет схему, назвать номер вслух. Забытый номер стоил
     # 2026-08-04 пятиминутной поломки живого маршрута: столбец добавили, а
     # миграция без нового номера не запускается.
-    assert SCHEMA_VERSION == 47
+    assert SCHEMA_VERSION == 48
     conversation = storage.create_conversation("alice", "Research", mode="research")
     assert conversation["mode"] == "research"
     storage.set_channel_conversation(
