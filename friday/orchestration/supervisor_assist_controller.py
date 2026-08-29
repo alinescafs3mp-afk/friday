@@ -2872,6 +2872,16 @@ class SupervisorAssistController:
                 return await self._legacy(legacy_primary, reason="conversation_assist_active")
             retained = self._retained_by_scope.get(scope)
             if retained is not None:
+                if not hmac.compare_digest(
+                    retained.graph.anchor_request_binding_sha256,
+                    admitted_surface.ingress_binding.canonical_sha256(),
+                ):
+                    # A distinct successor cannot terminalize its predecessor.
+                    # The retained owner waits for the next pre-admission pass.
+                    return await self._legacy(
+                        legacy_primary,
+                        reason="conversation_assist_retained_predecessor",
+                    )
                 if not await self._reconcile_retained(retained):
                     self._ownership_uncertain_total += 1
                     return SupervisorAssistResult(

@@ -150,6 +150,7 @@ from friday.orchestration.supervisor_assist_activation import (
 from friday.orchestration.supervisor_assist_composition import (
     build_supervisor_assist_production_runtime,
 )
+from friday.orchestration.supervisor_assist_controller import AssistPendingGraphDisposition
 from friday.orchestration.supervisor_assist_graph_adapter import (
     AssistRestartBatch,
     SupervisorAssistGraphAdapter,
@@ -157,6 +158,7 @@ from friday.orchestration.supervisor_assist_graph_adapter import (
 from friday.orchestration.supervisor_assist_ingress import (
     SupervisorAssistIngressBindingV1,
     SupervisorAssistPendingDecision,
+    SupervisorAssistPendingRelation,
 )
 from friday.orchestration.supervisor_assist_production import (
     SupervisorAssistAuthorityGate,
@@ -1179,6 +1181,46 @@ def _supervisor_assist_pending_before_ingestion(
         person_id=person_id,
         conversation_id=conversation_id,
         current=ingress_binding,
+    )
+
+
+async def _reconcile_supervisor_assist_new_turn_before_admission(
+    agent: Any,
+    *,
+    person_id: str,
+    message: str,
+    actor: ActorContext,
+    conversation_id: str,
+    ingress_binding: SupervisorAssistIngressBindingV1,
+    decision: SupervisorAssistPendingDecision,
+    turn_deadline: float,
+) -> AssistPendingGraphDisposition:
+    """Reconcile a predecessor before the successor can bind turn authority."""
+
+    reconcile = getattr(agent, "reconcile_pending_before_turn_admission", None)
+    if not callable(reconcile):
+        return AssistPendingGraphDisposition.UNCERTAIN
+    try:
+        result = reconcile(
+            person_id,
+            message,
+            actor=actor,
+            conversation_id=conversation_id,
+            ingress_binding=ingress_binding,
+            decision=decision,
+            turn_deadline=turn_deadline,
+        )
+        if not inspect.isawaitable(result):
+            return AssistPendingGraphDisposition.UNCERTAIN
+        disposition = await result
+    except asyncio.CancelledError:
+        raise
+    except Exception:
+        return AssistPendingGraphDisposition.UNCERTAIN
+    return (
+        disposition
+        if type(disposition) is AssistPendingGraphDisposition
+        else AssistPendingGraphDisposition.UNCERTAIN
     )
 
 
@@ -5710,10 +5752,38 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
                     current_attachment_count=pending_comparison_attachment_count,
                 )
                 if type(assist_relation) is SupervisorAssistPendingDecision:
-                    supervisor_assist_pending_decision = assist_relation
-                    if type(assist_relation.pending) is PendingDurableTurnAdmission:
-                        supervisor_assist_pending_admission = assist_relation.pending
-                    pending_durable_intake_suppressed = assist_relation.suppresses_ingestion
+                    if assist_relation.relation is SupervisorAssistPendingRelation.NEW_TURN:
+                        if semantic_supervisor_ingress is None:
+                            disposition = AssistPendingGraphDisposition.UNCERTAIN
+                        else:
+                            disposition = await _reconcile_supervisor_assist_new_turn_before_admission(
+                                state.agent,
+                                person_id=actor.own_id,
+                                message=message,
+                                actor=actor,
+                                conversation_id=conversation_id,
+                                ingress_binding=semantic_supervisor_ingress,
+                                decision=assist_relation,
+                                turn_deadline=_turn_deadline,
+                            )
+                        if disposition is AssistPendingGraphDisposition.UNCERTAIN:
+                            raise RuntimeError("Durable assist predecessor reconciliation is uncertain")
+                        if disposition in {
+                            AssistPendingGraphDisposition.RETIRED,
+                            AssistPendingGraphDisposition.LIVE_IN_PROCESS,
+                        }:
+                            # A retired predecessor already published under its
+                            # own authority; a live predecessor still owns its
+                            # completion.  Neither graph binding belongs in the
+                            # independent successor's TurnContext/router leaf.
+                            assist_relation = False
+                        else:
+                            raise RuntimeError("Durable assist predecessor reconciliation is invalid")
+                    if type(assist_relation) is SupervisorAssistPendingDecision:
+                        supervisor_assist_pending_decision = assist_relation
+                        if type(assist_relation.pending) is PendingDurableTurnAdmission:
+                            supervisor_assist_pending_admission = assist_relation.pending
+                        pending_durable_intake_suppressed = assist_relation.suppresses_ingestion
                 else:
                     pending_durable_intake_admission = _pending_durable_turn_admission_before_ingestion(
                         state.agent,

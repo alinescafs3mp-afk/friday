@@ -400,6 +400,79 @@ class SemanticSupervisorAssistRuntime:
             if emitted is not False:
                 self._ordinary_event_success_total += 1
 
+    async def reconcile_pending_before_turn_admission(
+        self,
+        user_id: str,
+        message: str,
+        *,
+        actor: ActorContext,
+        conversation_id: str | None,
+        ingress_binding: SupervisorAssistIngressBindingV1 | None,
+        decision: SupervisorAssistPendingDecision,
+        turn_deadline: float | None,
+    ) -> AssistPendingGraphDisposition:
+        """Settle one retained predecessor before the successor owns authority."""
+
+        person_id = actor.own_id if isinstance(actor, ActorContext) else ""
+        pending = decision.pending if type(decision) is SupervisorAssistPendingDecision else None
+        current_binding_sha256 = (
+            ingress_binding.canonical_sha256()
+            if type(ingress_binding) is SupervisorAssistIngressBindingV1
+            else None
+        )
+        try:
+            authenticated_context = current_primary_authenticated_turn_context()
+        except Exception:
+            return AssistPendingGraphDisposition.UNCERTAIN
+        if (
+            self._closed
+            or authenticated_context is not None
+            or type(user_id) is not str
+            or user_id != person_id
+            or type(conversation_id) is not str
+            or type(decision) is not SupervisorAssistPendingDecision
+            or decision.relation is not SupervisorAssistPendingRelation.NEW_TURN
+            or decision.person_id != person_id
+            or decision.conversation_id != conversation_id
+            or decision.current_request_binding_sha256 != current_binding_sha256
+            or not decision.matches_message(message)
+            or type(pending) is not PendingDurableTurnAdmission
+            or not pending.is_owned
+            or pending.work_graph_id is None
+            or pending.work_item_id is not None
+            or not pending.matches_scope(
+                person_id=person_id,
+                conversation_id=conversation_id,
+            )
+        ):
+            return AssistPendingGraphDisposition.UNCERTAIN
+        scope = AssistConversationScope(
+            user_id=person_id,
+            conversation_id=conversation_id,
+        )
+        deadline = _future_deadline(self._settings, turn_deadline)
+        try:
+            # The HTTP idempotency witness is already live here.  It belongs to
+            # the successor and must not attest or fence predecessor cleanup.
+            from friday.execution_kernel import suspend_request_effect_authority_for_advisory
+
+            with suspend_request_effect_authority_for_advisory():
+                disposition = await self._controller.reconcile_pending_before_legacy(
+                    scope,
+                    decision,
+                    absolute_deadline=deadline,
+                )
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            return AssistPendingGraphDisposition.UNCERTAIN
+        if type(disposition) is not AssistPendingGraphDisposition or disposition not in {
+            AssistPendingGraphDisposition.LIVE_IN_PROCESS,
+            AssistPendingGraphDisposition.RETIRED,
+        }:
+            return AssistPendingGraphDisposition.UNCERTAIN
+        return disposition
+
     async def chat(
         self,
         user_id: str,
@@ -670,6 +743,13 @@ class SemanticSupervisorAssistRuntime:
             and active.relation is SupervisorAssistPendingRelation.NEW_TURN
             and scope is not None
         ):
+            if authenticated_context is not None:
+                # Retained predecessors were reconciled before this successor
+                # acquired turn/publication/effect authority.  A live run owns
+                # its own completion; never race it from inside the new turn.
+                response = await legacy_primary()
+                await self._observe_ordinary(response, actor)
+                return response
             try:
                 disposition = await self._controller.reconcile_pending_before_legacy(
                     scope,
@@ -680,12 +760,6 @@ class SemanticSupervisorAssistRuntime:
                 raise
             except Exception as exc:
                 raise SupervisorAssistRuntimeError("durable assist reconciliation is uncertain") from exc
-            if authenticated_context is not None:
-                current_scope = require_current_authenticated_chat_call_scope(authenticated_context)
-                if current_scope is not authenticated_scope:
-                    raise SupervisorAssistRuntimeError(
-                        "authenticated assist call scope changed across reconciliation await"
-                    )
             if disposition is AssistPendingGraphDisposition.UNCERTAIN:
                 raise SupervisorAssistRuntimeError("durable assist reconciliation is uncertain")
             if disposition not in {

@@ -3,20 +3,29 @@
 from __future__ import annotations
 
 import hashlib
+import json
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
 from fastapi.testclient import TestClient
 
+from friday import execution_kernel as execution_kernel_module
+from friday.orchestration.supervisor_assist_controller import AssistPendingGraphDisposition
 from friday.orchestration.supervisor_assist_ingress import (
     SupervisorAssistIngressBindingV1,
     SupervisorAssistPendingDecision,
     SupervisorAssistPendingRelation,
 )
+from friday.orchestration.supervisor_assist_runtime import SemanticSupervisorAssistRuntime
 from friday.orchestration.turn_context import AuthenticatedTurnContext
 from friday.orchestration.turn_context_call_scope import (
     require_current_authenticated_chat_call_scope,
 )
+from friday.orchestration.turn_context_publication import (
+    AUTHENTICATED_TURN_PUBLICATION_METADATA_KEY,
+)
+from friday.orchestration.turn_context_runtime import current_primary_authenticated_turn_context
 from friday.pending_durable_turn import PendingDurableTurnAdmission
 from friday.permissions import LEGACY_OWNER_USER_ID
 
@@ -62,7 +71,7 @@ def _result(conversation_id: str = _CONVERSATION_ID) -> dict[str, Any]:
     }
 
 
-def test_active_new_turn_ingests_once_and_exact_replay_never_reaches_agent(
+def test_live_predecessor_is_checked_once_then_successor_replays_exactly(
     settings: Any,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -72,6 +81,7 @@ def test_active_new_turn_ingests_once_and_exact_replay_never_reaches_agent(
     headers = {"Authorization": f"Bearer {settings.api_token}"}
     conversation_id = _CONVERSATION_ID
     classifier_calls: list[SupervisorAssistIngressBindingV1] = []
+    reconcile_calls: list[SupervisorAssistPendingDecision] = []
     ingest_calls: list[str] = []
     agent_calls: list[dict[str, Any]] = []
     pending_admission = _pending()
@@ -105,14 +115,23 @@ def test_active_new_turn_ingests_once_and_exact_replay_never_reaches_agent(
             "reason": "ordinary new turn",
         }
 
+    async def reconcile(
+        _person_id: str,
+        _message: str,
+        *,
+        decision: SupervisorAssistPendingDecision,
+        **_kwargs: Any,
+    ) -> AssistPendingGraphDisposition:
+        reconcile_calls.append(decision)
+        return AssistPendingGraphDisposition.LIVE_IN_PROCESS
+
     async def chat(_user_id: str, _message: str, **kwargs: Any) -> dict[str, Any]:
         context = kwargs["_authenticated_turn_context"]
         assert type(context) is AuthenticatedTurnContext
-        assert context.pending_work_admission is not None
-        assert context.pending_work_admission.admission is pending_admission
-        assert kwargs["_pending_durable_admission"] is pending_admission
+        assert context.pending_work_admission is None
+        assert kwargs["_pending_durable_admission"] is None
         scope = require_current_authenticated_chat_call_scope(context)
-        assert scope.pending_work_bound is True
+        assert scope.pending_work_bound is False
         agent_calls.append(kwargs)
         return _result(expected_conversation_id)
 
@@ -137,6 +156,12 @@ def test_active_new_turn_ingests_once_and_exact_replay_never_reaches_agent(
             classify,
             raising=False,
         )
+        monkeypatch.setattr(
+            app.state.agent,
+            "reconcile_pending_before_turn_admission",
+            reconcile,
+            raising=False,
+        )
         monkeypatch.setattr(app.state.agent, "chat", chat)
         monkeypatch.setattr(app.state.ingestion, "ingest_text", ingest_text)
         first = client.post("/api/chat", json=payload, headers=headers)
@@ -148,15 +173,268 @@ def test_active_new_turn_ingests_once_and_exact_replay_never_reaches_agent(
     assert ingest_calls == [payload["message"]]
     assert len(classifier_calls) == 1
     assert len(agent_calls) == 1
+    assert len(reconcile_calls) == 1
+    assert reconcile_calls[0].relation is SupervisorAssistPendingRelation.NEW_TURN
+    assert reconcile_calls[0].pending is pending_admission
     carried_binding = agent_calls[0]["_semantic_supervisor_ingress_binding"]
     carried_decision = agent_calls[0]["_semantic_supervisor_pending_decision"]
     assert type(carried_binding) is SupervisorAssistIngressBindingV1
     assert carried_binding is classifier_calls[0]
-    assert type(carried_decision) is SupervisorAssistPendingDecision
-    assert carried_decision.relation is SupervisorAssistPendingRelation.NEW_TURN
-    assert carried_decision.pending is pending_admission
-    assert carried_decision.current_request_binding_sha256 == carried_binding.canonical_sha256()
+    assert carried_decision is None
     assert agent_calls[0]["ingestion_result"]["action"] == "queued"
+
+
+def test_uncertain_pre_admission_reconciliation_fails_before_ingestion_or_context(
+    settings: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from friday.server import create_app
+
+    app = create_app(settings)
+    headers = {"Authorization": f"Bearer {settings.api_token}"}
+    calls: list[str] = []
+
+    with TestClient(app, raise_server_exceptions=False) as client:
+        conversation_id = str(
+            app.state.storage.create_conversation(
+                LEGACY_OWNER_USER_ID,
+                title="uncertain assist predecessor",
+            )["id"]
+        )
+        pending = _pending(conversation_id=conversation_id)
+
+        def classify(
+            _person_id: str,
+            _message: str,
+            *,
+            ingress_binding: SupervisorAssistIngressBindingV1,
+            **_kwargs: Any,
+        ) -> SupervisorAssistPendingDecision:
+            calls.append("classify")
+            return SupervisorAssistPendingDecision.for_graph(
+                relation=SupervisorAssistPendingRelation.NEW_TURN,
+                pending=pending,
+                root_request_binding_sha256=_binding("uncertain-root").canonical_sha256(),
+                current=ingress_binding,
+            )
+
+        async def reconcile(*_args: Any, **_kwargs: Any) -> AssistPendingGraphDisposition:
+            assert current_primary_authenticated_turn_context() is None
+            calls.append("reconcile")
+            return AssistPendingGraphDisposition.UNCERTAIN
+
+        async def forbidden(*_args: Any, **_kwargs: Any) -> dict[str, Any]:
+            calls.append("forbidden")
+            raise AssertionError("uncertain predecessor reached successor work")
+
+        monkeypatch.setattr(
+            app.state.agent,
+            "classify_supervisor_assist_pending",
+            classify,
+            raising=False,
+        )
+        monkeypatch.setattr(
+            app.state.agent,
+            "reconcile_pending_before_turn_admission",
+            reconcile,
+            raising=False,
+        )
+        monkeypatch.setattr(app.state.agent, "chat", forbidden)
+        monkeypatch.setattr(app.state.ingestion, "ingest_text", forbidden)
+        response = client.post(
+            "/api/chat",
+            json={
+                "message": "Независимый новый ход",
+                "conversation_id": conversation_id,
+                "source_ref": "api-assist:uncertain-pre-admission",
+            },
+            headers=headers,
+        )
+
+    assert response.status_code == 500
+    assert calls == ["classify", "reconcile"]
+
+
+@pytest.mark.parametrize(
+    "disposition",
+    (
+        AssistPendingGraphDisposition.RETIRED,
+        AssistPendingGraphDisposition.LIVE_IN_PROCESS,
+    ),
+)
+def test_new_turn_reconciles_before_successor_publication_and_only_once(
+    settings: Any,
+    monkeypatch: pytest.MonkeyPatch,
+    disposition: AssistPendingGraphDisposition,
+) -> None:
+    from friday.server import create_app
+
+    app = create_app(settings)
+    headers = {"Authorization": f"Bearer {settings.api_token}"}
+    ingest_calls: list[str] = []
+
+    async def ingest_text(_user_id: str, content: str, **_kwargs: Any) -> dict[str, Any]:
+        ingest_calls.append(content)
+        return {
+            "promoted": False,
+            "queued_for_review": True,
+            "action": "queued",
+            "category": "note",
+            "reason": "ordinary successor",
+        }
+
+    with TestClient(app) as client:
+        storage = app.state.storage
+        conversation_id = str(
+            storage.create_conversation(
+                LEGACY_OWNER_USER_ID,
+                title=f"assist predecessor {disposition.value}",
+            )["id"]
+        )
+        pending = _pending(conversation_id=conversation_id)
+        root_binding_sha256 = _binding(f"predecessor:{disposition.value}").canonical_sha256()
+
+        class Primary:
+            def __init__(self) -> None:
+                self.calls = 0
+                self.pending: list[PendingDurableTurnAdmission | None] = []
+
+            async def chat(self, _user_id: str, message: str, **kwargs: Any) -> dict[str, Any]:
+                context = kwargs.get("_authenticated_turn_context")
+                assert type(context) is AuthenticatedTurnContext
+                assert current_primary_authenticated_turn_context(context) is context
+                assert context.pending_work_admission is None
+                assert require_current_authenticated_chat_call_scope(context).pending_work_bound is False
+                self.calls += 1
+                self.pending.append(kwargs.get("_pending_durable_admission"))
+                storage.store_message(
+                    conversation_id,
+                    LEGACY_OWNER_USER_ID,
+                    "user",
+                    message,
+                    {"interaction_mode": "dialogue"},
+                )
+                assistant = storage.store_message(
+                    conversation_id,
+                    LEGACY_OWNER_USER_ID,
+                    "assistant",
+                    "successor primary response",
+                    {"interaction_mode": "dialogue"},
+                )
+                return {
+                    **_result(conversation_id),
+                    "message_id": assistant["id"],
+                    "message": "successor primary response",
+                }
+
+        class Controller:
+            def __init__(self) -> None:
+                self.classify_calls = 0
+                self.reconcile_calls = 0
+
+            def semantic_supervisor_status(self) -> dict[str, object]:
+                return {}
+
+            def pending_durable_turn_admission(self, *_args: Any, **_kwargs: Any) -> object:
+                return pending
+
+            def classify_supervisor_assist_pending(
+                self,
+                _person_id: str,
+                _message: str,
+                *,
+                ingress_binding: SupervisorAssistIngressBindingV1,
+                **_kwargs: Any,
+            ) -> SupervisorAssistPendingDecision:
+                self.classify_calls += 1
+                return SupervisorAssistPendingDecision.for_graph(
+                    relation=SupervisorAssistPendingRelation.NEW_TURN,
+                    pending=pending,
+                    root_request_binding_sha256=root_binding_sha256,
+                    current=ingress_binding,
+                )
+
+            async def reconcile_pending_before_legacy(
+                self,
+                *_args: Any,
+                **_kwargs: Any,
+            ) -> AssistPendingGraphDisposition:
+                assert current_primary_authenticated_turn_context() is None
+                assert execution_kernel_module._REQUEST_EFFECTS.get() is None
+                self.reconcile_calls += 1
+                if disposition is AssistPendingGraphDisposition.RETIRED:
+                    storage.store_message(
+                        conversation_id,
+                        LEGACY_OWNER_USER_ID,
+                        "assistant",
+                        "predecessor terminal publication",
+                        {"owner": "predecessor"},
+                    )
+                return disposition
+
+            async def execute(self, *_args: Any, **_kwargs: Any) -> None:
+                raise AssertionError("ordinary successor reached fresh assist execution")
+
+            async def cancel_active(self, *_args: Any, **_kwargs: Any) -> None:
+                raise AssertionError("ordinary successor reached cancellation")
+
+            async def close(self) -> None:
+                return None
+
+        primary = Primary()
+        controller = Controller()
+        runtime = SemanticSupervisorAssistRuntime(
+            settings=SimpleNamespace(
+                semantic_supervisor_mode="assist",
+                semantic_supervisor_timeout_sec=12.0,
+            ),
+            primary=primary,  # type: ignore[arg-type]
+            controller=controller,  # type: ignore[arg-type]
+            conversation_is_dialogue=lambda *_args: True,
+        )
+        app.state.agent = runtime
+        monkeypatch.setattr(app.state.ingestion, "ingest_text", ingest_text)
+        payload = {
+            "message": f"Точный новый ход {disposition.value}",
+            "conversation_id": conversation_id,
+            "source_ref": f"api-assist:pre-admission:{disposition.value}",
+        }
+        first = client.post("/api/chat", json=payload, headers=headers)
+        replay = client.post("/api/chat", json=payload, headers=headers)
+        messages = storage.get_conversation_messages(
+            conversation_id,
+            user_id=LEGACY_OWNER_USER_ID,
+        )
+
+    assert first.status_code == 200, first.text
+    assert replay.status_code == 200, replay.text
+    assert replay.json()["idempotent_replay"] is True
+    assert controller.classify_calls == controller.reconcile_calls == 1
+    assert primary.calls == 1
+    assert ingest_calls == [payload["message"]]
+    successor = [row for row in messages if row["content"] != "predecessor terminal publication"]
+    assert [(row["role"], row["content"]) for row in successor] == [
+        ("user", payload["message"]),
+        ("assistant", "successor primary response"),
+    ]
+    successor_metadata = [json.loads(str(row["metadata_json"])) for row in successor]
+    successor_publications = [
+        metadata[AUTHENTICATED_TURN_PUBLICATION_METADATA_KEY] for metadata in successor_metadata
+    ]
+    assert len({item["turn_id"] for item in successor_publications}) == 1
+    assert [item["publication_role"] for item in successor_publications] == [
+        "user",
+        "assistant",
+    ]
+    if disposition is AssistPendingGraphDisposition.RETIRED:
+        predecessor = [row for row in messages if row["content"] == "predecessor terminal publication"]
+        assert len(predecessor) == 1
+        predecessor_metadata = json.loads(str(predecessor[0]["metadata_json"]))
+        assert AUTHENTICATED_TURN_PUBLICATION_METADATA_KEY not in predecessor_metadata
+        assert primary.pending == [None]
+    else:
+        assert len(messages) == 2
+        assert primary.pending == [None]
 
 
 @pytest.mark.parametrize(

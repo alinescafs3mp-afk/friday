@@ -1769,6 +1769,71 @@ async def test_retained_owner_is_retired_before_an_overlapping_legacy_turn(stora
 
 
 @pytest.mark.asyncio
+async def test_distinct_successor_never_reconciles_retained_predecessor_in_execute(
+    storage: Any,
+) -> None:
+    surface, projection = _stored_surface(storage, "retained-successor-race")
+    adapter = _CountingAdapter(storage)
+    gate = asyncio.Event()
+    file_reader = _FileReader(_prepared_file(surface, projection), gate=gate)
+    web_reader = _WebReader(_web_evidence(surface), gate=gate)
+    observed: list[object] = []
+    controller = _controller(
+        graph_adapter=adapter,
+        file_reader=file_reader,
+        web_reader=web_reader,
+        observer=observed.append,
+    )
+
+    async def forbidden_legacy() -> dict[str, object]:
+        raise AssertionError("legacy cannot run after predecessor ownership")
+
+    predecessor = asyncio.create_task(
+        controller.execute(
+            surface,
+            legacy_primary=forbidden_legacy,
+            absolute_deadline=time.monotonic() + 5,
+        )
+    )
+    await asyncio.wait_for(
+        asyncio.gather(file_reader.started.wait(), web_reader.started.wait()),
+        timeout=2,
+    )
+    predecessor.cancel()
+    interrupted = await asyncio.wait_for(predecessor, timeout=2)
+    successor = replace(
+        surface,
+        ingress_binding=SupervisorAssistIngressBindingV1.from_claimed_request(
+            source_ref="assist-controller:retained-successor",
+            request_fingerprint_sha256="d" * 64,
+        ),
+    )
+    legacy_calls = 0
+    legacy_response = {"message": "independent successor"}
+
+    async def successor_legacy() -> dict[str, object]:
+        nonlocal legacy_calls
+        legacy_calls += 1
+        return legacy_response
+
+    result = await controller.execute(
+        successor,
+        legacy_primary=successor_legacy,
+        absolute_deadline=time.monotonic() + 3,
+    )
+    current = adapter.load_current(AssistConversationScope(surface.actor.user_id, surface.conversation_id))
+
+    assert interrupted.outcome is SupervisorAssistOutcome.INTERRUPTED
+    assert result.outcome is SupervisorAssistOutcome.LEGACY
+    assert result.response is legacy_response
+    assert legacy_calls == 1
+    assert adapter.restart_calls == 0
+    assert observed == []
+    assert current is not None and current.state is CompareCurrentFileWebGraphState.ACTIVE
+    assert controller.semantic_supervisor_status()["retained_active_graphs"] == 1
+
+
+@pytest.mark.asyncio
 async def test_health_rechecks_current_promotion_and_registry_without_authorizing(storage: Any) -> None:
     surface, projection = _stored_surface(storage, "health-fresh")
     adapter = _CountingAdapter(storage)

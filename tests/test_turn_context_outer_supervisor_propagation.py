@@ -508,6 +508,7 @@ class _AssistController:
     def __init__(self) -> None:
         self.classify_calls = 0
         self.execute_calls = 0
+        self.reconcile_calls = 0
 
     def semantic_supervisor_status(self) -> dict[str, object]:
         return {}
@@ -541,6 +542,7 @@ class _AssistController:
         *_args: Any,
         **_kwargs: Any,
     ) -> AssistPendingGraphDisposition:
+        self.reconcile_calls += 1
         return AssistPendingGraphDisposition.LIVE_IN_PROCESS
 
     async def close(self) -> None:
@@ -675,7 +677,7 @@ async def test_outer_effect_and_assist_omission_preserves_inner_exact_adjunct_bi
 
 
 @pytest.mark.asyncio
-async def test_authenticated_assist_revalidates_ingestion_after_await_before_primary() -> None:
+async def test_authenticated_assist_new_turn_never_reconciles_under_successor_authority() -> None:
     admission = PendingDurableTurnAdmission.owned(
         person_id="owner",
         conversation_id=_CONVERSATION,
@@ -683,20 +685,11 @@ async def test_authenticated_assist_revalidates_ingestion_after_await_before_pri
         revision=3,
     )
     issuer, context, actor, deadline = _turn("outer-assist-await-mutation", pending=admission)
-    ingestion = {"promoted": False, "reason": "original exact body"}
-    primary = _Primary({"conversation_id": _CONVERSATION, "message": "must not run"})
-
-    class MutatingController(_AssistController):
-        async def reconcile_pending_before_legacy(
-            self,
-            *_args: Any,
-            **_kwargs: Any,
-        ) -> AssistPendingGraphDisposition:
-            await asyncio.sleep(0)
-            ingestion["reason"] = "mutated during awaited reconciliation"
-            return AssistPendingGraphDisposition.LIVE_IN_PROCESS
-
-    runtime = _assist_runtime(primary, MutatingController())
+    ingestion = {"promoted": False, "reason": "exact successor input"}
+    primary = _Primary({"conversation_id": _CONVERSATION, "message": "primary"})
+    primary.expected_context = context
+    controller = _AssistController()
+    runtime = _assist_runtime(primary, controller)
     ingress = SupervisorAssistIngressBindingV1.from_claimed_request(
         source_ref="outer-assist-await-mutation:current",
         request_fingerprint_sha256="e" * 64,
@@ -708,11 +701,8 @@ async def test_authenticated_assist_revalidates_ingestion_after_await_before_pri
         current=ingress,
     )
 
-    with (
-        bind_authenticated_turn_context(issuer, context),
-        pytest.raises(TurnContextError, match="chat call scope drifted"),
-    ):
-        await runtime.chat(
+    with bind_authenticated_turn_context(issuer, context):
+        response = await runtime.chat(
             "owner",
             _MESSAGE,
             **_chat_kwargs(actor, deadline),
@@ -723,7 +713,11 @@ async def test_authenticated_assist_revalidates_ingestion_after_await_before_pri
             _authenticated_turn_context=context,
         )
 
-    assert primary.calls == 0
+    assert response is primary.response
+    assert primary.calls == 1
+    assert primary.kwargs["_pending_durable_admission"] is admission
+    assert primary.kwargs["ingestion_result"] is ingestion
+    assert controller.reconcile_calls == controller.execute_calls == 0
 
 
 @pytest.mark.asyncio
