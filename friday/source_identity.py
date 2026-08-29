@@ -216,11 +216,7 @@ def authorized_file_snapshot_token_is_process_owned(value: Any) -> bool:
     ):
         return False
     if value.tenant_id is None or value.storage_owner_id is None:
-        return (
-            value.tenant_id is None
-            and value.storage_owner_id is None
-            and value._binding_sha256 is None
-        )
+        return value.tenant_id is None and value.storage_owner_id is None and value._binding_sha256 is None
     expected_binding = _snapshot_token_binding_sha256(
         value.source,
         value.content_sha256,

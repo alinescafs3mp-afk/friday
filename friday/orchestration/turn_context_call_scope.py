@@ -193,7 +193,10 @@ def _chat_call_scope_binding_sha256(value: object) -> str | None:
         or any(not isinstance(item, Mapping) for item in value.attachment_carriers)
         or type(value.attachment_carrier_sha256) is not tuple
         or len(value.attachment_carriers) != len(value.attachment_carrier_sha256)
-        or any(type(item) is not str or _DIGEST_RE.fullmatch(item) is None for item in value.attachment_carrier_sha256)
+        or any(
+            type(item) is not str or _DIGEST_RE.fullmatch(item) is None
+            for item in value.attachment_carrier_sha256
+        )
         or type(value.attachment_sources) is not tuple
         or len(value.attachment_carriers) != len(value.attachment_sources)
         or any(type(item) is not AuthorizedSourceIdentity for item in value.attachment_sources)
@@ -592,17 +595,14 @@ def require_current_authenticated_chat_call_scope(
         scope.model_input is not context.model_input
         or len(carriers) != len(scope.attachment_carriers)
         or any(
-            current is not sealed
-            for current, sealed in zip(carriers, scope.attachment_carriers, strict=True)
+            current is not sealed for current, sealed in zip(carriers, scope.attachment_carriers, strict=True)
         )
         or carrier_sha256 != scope.attachment_carrier_sha256
         or len(sources) != len(scope.attachment_sources)
         or any(
-            current is not sealed
-            for current, sealed in zip(sources, scope.attachment_sources, strict=True)
+            current is not sealed for current, sealed in zip(sources, scope.attachment_sources, strict=True)
         )
-        or scope.deadline_monotonic_ns
-        != context.inherited_budget.safety_deadline.monotonic_ns
+        or scope.deadline_monotonic_ns != context.inherited_budget.safety_deadline.monotonic_ns
         or int(scope.deadline_monotonic * 1_000_000_000) != scope.deadline_monotonic_ns
         or scope.router_mode is not context.turn_policy.router_mode
         or scope.actor_binding_sha256 != context.authority.actor_binding_sha256

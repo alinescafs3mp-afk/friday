@@ -36951,7 +36951,9 @@ def _current_attachment_model_authority(
         return None
     return (
         admitted
-        if any(source.kind is AuthorizedSourceKind.CURRENT_ATTACHMENT for source in admitted.authorized_sources)
+        if any(
+            source.kind is AuthorizedSourceKind.CURRENT_ATTACHMENT for source in admitted.authorized_sources
+        )
         else None
     )
 

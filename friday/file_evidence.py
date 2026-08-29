@@ -176,10 +176,7 @@ def current_turn_file_reference_of(carrier: Any) -> CurrentTurnFileReferenceToke
         or str(carrier.get("raw_object_id") or "") != token.raw_id
         or re.fullmatch(r"[0-9a-f]{64}", token.content_sha256) is None
         or type(token.reinspect_current_upload) is not bool
-        or (
-            token.tenant_id is None
-            and token._binding_sha256 is not None
-        )
+        or (token.tenant_id is None and token._binding_sha256 is not None)
         or (
             token.tenant_id is not None
             and not current_turn_file_reference_token_authorizes_tenant(
@@ -227,8 +224,7 @@ def current_turn_file_reference_token_authorizes_tenant(
             tenant_id=value.tenant_id,
             reinspect_current_upload=value.reinspect_current_upload,
         )
-        if type(value) is CurrentTurnFileReferenceToken
-        and type(value.tenant_id) is str
+        if type(value) is CurrentTurnFileReferenceToken and type(value.tenant_id) is str
         else None
     )
     return bool(

@@ -255,10 +255,7 @@ def _require_live_binding(binding: _BoundTurn) -> AuthenticatedTurnContext:
     if (
         type(bound_component_identity_sha256) is not str
         or len(bound_component_identity_sha256) != 64
-        or any(
-            char not in "0123456789abcdef"
-            for char in bound_component_identity_sha256
-        )
+        or any(char not in "0123456789abcdef" for char in bound_component_identity_sha256)
         or not hmac.compare_digest(
             component_identity_sha256,
             bound_component_identity_sha256,
