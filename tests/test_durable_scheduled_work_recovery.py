@@ -14,6 +14,7 @@ from friday.ingestion import IngestionPipeline
 from friday.knowledge_graph import KnowledgeGraph
 from friday.permissions import AuthorizationService
 from friday.storage.models import Mission, MissionStatus, MissionTask, TaskKind, TaskStatus, new_id
+from friday.web_surfer import WebSurfer
 
 
 def _service(settings, storage) -> ExecutiveService:
@@ -389,6 +390,172 @@ def test_verified_absent_effect_reopens_with_a_clean_attempt_fence(settings, sto
         mission["user_id"],
         status=TaskStatus.COMPENSATED.value,
     ), "a stale human action closed work that had already been safely reopened"
+
+
+@pytest.mark.asyncio
+async def test_stale_compensation_approval_cannot_close_a_reopened_attempt(
+    settings,
+    storage,
+) -> None:
+    storage.ensure_user("alice", preset_key="owner")
+    mission, task = _mission_with_task(storage)
+    assert storage.claim_mission_task(
+        task["id"],
+        mission["user_id"],
+        mission_id=mission["id"],
+        expected_attempt=int(task["attempts"]),
+    )
+    first = storage.get_mission_tasks(mission["id"], mission["user_id"])[0]
+    first_checkpoint = '{"tool":"private_effect","arguments":{"secret":"attempt-one-private-body"}}'
+    assert storage.update_mission_task_fields(
+        task["id"],
+        mission["user_id"],
+        expected_statuses=(TaskStatus.RUNNING.value,),
+        expected_attempt=int(first["attempts"]),
+        side_effect=1,
+        checkpoint_json=first_checkpoint,
+        compensation="resolve attempt one manually",
+    )
+    assert storage.update_mission_task_fields(
+        task["id"],
+        mission["user_id"],
+        expected_statuses=(TaskStatus.RUNNING.value,),
+        expected_attempt=int(first["attempts"]),
+        status=TaskStatus.UNCERTAIN.value,
+    )
+    service = _service(settings, storage)
+    service._offer_compensation(mission, first)  # noqa: SLF001 - stale pre-checkpoint snapshot
+    old_approval = storage.list_action_approvals("alice", status="pending")[0]
+    old_payload = old_approval["payload"]
+    assert old_payload["expected_attempt"] == first["attempts"]
+    assert len(old_payload["expected_effect_checkpoint_sha256"]) == 64
+    assert "checkpoint" not in old_payload
+    assert "attempt-one-private-body" not in str(old_payload)
+
+    # A verifier proves A1 absent and reopens the task. A new owner then reaches
+    # a different uncertain effect under A2 while the old human action is still
+    # waiting in the approval queue.
+    assert storage.update_mission_task_fields(
+        task["id"],
+        mission["user_id"],
+        expected_statuses=(TaskStatus.UNCERTAIN.value,),
+        expected_attempt=int(first["attempts"]),
+        require_live_parent=True,
+        status=TaskStatus.PENDING.value,
+        error="verified absent",
+        started_at="",
+        side_effect=0,
+        checkpoint_json="{}",
+        compensation="",
+    )
+    reopened = storage.get_mission_tasks(mission["id"], mission["user_id"])[0]
+    assert storage.claim_mission_task(
+        task["id"],
+        mission["user_id"],
+        mission_id=mission["id"],
+        expected_attempt=int(reopened["attempts"]),
+    )
+    second = storage.get_mission_tasks(mission["id"], mission["user_id"])[0]
+    second_checkpoint = '{"tool":"private_effect","arguments":{"secret":"attempt-two-private-body"}}'
+    assert storage.update_mission_task_fields(
+        task["id"],
+        mission["user_id"],
+        expected_statuses=(TaskStatus.RUNNING.value,),
+        expected_attempt=int(second["attempts"]),
+        side_effect=1,
+        checkpoint_json=second_checkpoint,
+        compensation="resolve attempt two manually",
+    )
+    assert storage.update_mission_task_fields(
+        task["id"],
+        mission["user_id"],
+        expected_statuses=(TaskStatus.RUNNING.value,),
+        expected_attempt=int(second["attempts"]),
+        status=TaskStatus.UNCERTAIN.value,
+    )
+    service._offer_compensation(mission, second)  # noqa: SLF001 - stale pre-checkpoint snapshot
+    pending = storage.list_action_approvals("alice", status="pending")
+    current_approval = next(item for item in pending if item["id"] != old_approval["id"])
+    assert current_approval["payload"]["expected_attempt"] == second["attempts"]
+    assert (
+        current_approval["payload"]["expected_effect_checkpoint_sha256"]
+        != old_payload["expected_effect_checkpoint_sha256"]
+    )
+
+    auth = AuthorizationService(storage)
+    graph = KnowledgeGraph(storage)
+    kernel = ExecutionKernel(auth, settings)
+    kernel.bind_services(
+        storage,
+        graph,
+        WebSurfer(settings),
+        IngestionPipeline(settings, storage, graph),
+    )
+    actor = auth.actor_for_user("alice", source="test")
+
+    forged_payloads = (
+        {
+            **current_approval["payload"],
+            "expected_effect_checkpoint_sha256": "0" * 64,
+        },
+        {
+            **current_approval["payload"],
+            "expected_attempt": first["attempts"],
+        },
+    )
+    for ordinal, forged_payload in enumerate(forged_payloads, start=1):
+        assert forged_payload != current_approval["payload"]
+        forged = storage.create_action_approval(
+            "alice",
+            tool="mission_compensation",
+            payload=forged_payload,
+            summary=f"forged compensation witness {ordinal}",
+            requested_by="executive",
+            mission_id=mission["id"],
+        )
+        assert storage.decide_action_approval(
+            forged["id"],
+            "alice",
+            decision="approve",
+            decided_by="alice",
+        )
+        forged_result = await kernel.execute_approved(forged["id"], actor=actor)
+        assert forged_result.success is False
+        after_forgery = storage.get_mission_tasks(mission["id"], mission["user_id"])[0]
+        assert after_forgery["status"] == TaskStatus.UNCERTAIN.value
+        assert after_forgery["attempts"] == second["attempts"]
+        assert after_forgery["checkpoint_json"] == second_checkpoint
+
+    assert storage.decide_action_approval(
+        old_approval["id"],
+        "alice",
+        decision="approve",
+        decided_by="alice",
+    )
+    stale = await kernel.execute_approved(old_approval["id"], actor=actor)
+    assert stale.success is False
+    still_current = storage.get_mission_tasks(mission["id"], mission["user_id"])[0]
+    assert still_current["status"] == TaskStatus.UNCERTAIN.value
+    assert still_current["attempts"] == second["attempts"]
+    assert still_current["checkpoint_json"] == second_checkpoint
+
+    assert storage.decide_action_approval(
+        current_approval["id"],
+        "alice",
+        decision="approve",
+        decided_by="alice",
+    )
+    current = await kernel.execute_approved(current_approval["id"], actor=actor)
+    assert current.success is True
+    closed = storage.get_mission_tasks(mission["id"], mission["user_id"])[0]
+    assert closed["status"] == TaskStatus.COMPENSATED.value
+    assert closed["attempts"] == second["attempts"]
+    old_verified, _reason = POSTCONDITIONS["mission_compensation"](
+        storage,
+        mission["user_id"],
+        old_payload,
+    )
+    assert old_verified is False, "A2 compensation reconciled stale A1 approval as successful"
 
 
 @pytest.mark.parametrize(

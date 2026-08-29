@@ -6,6 +6,7 @@ import asyncio
 import base64
 import calendar
 import hashlib
+import hmac
 import inspect
 import io
 import json
@@ -1178,10 +1179,65 @@ def _compensation_postcondition(storage, user_id: str, arguments: dict[str, Any]
     task = next((item for item in tasks if str(item.get("id")) == task_id), None)
     if task is None:
         return False, "шаг миссии исчез"
+    expected_attempt = arguments.get("expected_attempt")
+    expected_effect_checkpoint_sha256 = arguments.get("expected_effect_checkpoint_sha256")
+    if (
+        isinstance(expected_attempt, bool)
+        or not isinstance(expected_attempt, int)
+        or expected_attempt < 0
+        or type(expected_effect_checkpoint_sha256) is not str
+        or re.fullmatch(r"[0-9a-f]{64}", expected_effect_checkpoint_sha256) is None
+    ):
+        return False, "идентичность попытки в заявке недействительна"
+    current_attempt = task.get("attempts")
+    current_side_effect = task.get("side_effect")
+    if type(current_side_effect) is not int or current_side_effect != 1:
+        return False, "у шага нет неизвестного побочного эффекта"
+    try:
+        current_effect_checkpoint_sha256 = _mission_compensation_effect_checkpoint_sha256(
+            side_effect=current_side_effect,
+            checkpoint_json=task.get("checkpoint_json"),
+        )
+    except ValueError:
+        return False, "идентичность текущего чекпойнта недействительна"
+    if (
+        isinstance(current_attempt, bool)
+        or not isinstance(current_attempt, int)
+        or current_attempt != expected_attempt
+        or not hmac.compare_digest(
+            current_effect_checkpoint_sha256,
+            expected_effect_checkpoint_sha256,
+        )
+    ):
+        return False, "заявка относится к другой попытке шага"
     status = str(task.get("status") or "")
     if status != "compensated":
         return False, f"шаг остался в состоянии {status!r}"
     return True, ""
+
+
+def _mission_compensation_effect_checkpoint_sha256(
+    *,
+    side_effect: object,
+    checkpoint_json: object,
+) -> str:
+    """Return one body-free identity for the exact durable effect checkpoint."""
+
+    if isinstance(side_effect, bool) or not isinstance(side_effect, int) or side_effect not in {0, 1}:
+        raise ValueError("mission side-effect witness is invalid")
+    if type(checkpoint_json) is not str:
+        raise ValueError("mission checkpoint witness is invalid")
+    canonical = json.dumps(
+        {
+            "checkpoint_json": checkpoint_json,
+            "side_effect": side_effect,
+        },
+        ensure_ascii=True,
+        sort_keys=True,
+        separators=(",", ":"),
+        allow_nan=False,
+    ).encode("ascii")
+    return hashlib.sha256(b"friday.mission-compensation-checkpoint.v1\0" + canonical).hexdigest()
 
 
 # Что должно стать правдой ПОСЛЕ действия, проверенное чтением хранилища заново.
@@ -5578,8 +5634,9 @@ class ExecutionKernel:
         actor: ActorContext,
         mission_id: str,
         task_id: str,
+        expected_attempt: int,
+        expected_effect_checkpoint_sha256: str,
         compensation: str = "",
-        checkpoint: str = "",  # noqa: ARG002 — едет в заявке для человека, не для нас
     ) -> dict[str, Any]:
         """Закрыть шаг, с побочным эффектом которого человек разобрался сам.
 
@@ -5616,11 +5673,45 @@ class ExecutionKernel:
         task = next((item for item in tasks if str(item.get("id")) == task_id), None)
         if task is None:
             raise ValueError("Шаг миссии не найден")
+        if (
+            isinstance(expected_attempt, bool)
+            or not isinstance(expected_attempt, int)
+            or expected_attempt < 0
+        ):
+            raise ValueError("Попытка шага в заявке недействительна")
+        if (
+            type(expected_effect_checkpoint_sha256) is not str
+            or re.fullmatch(r"[0-9a-f]{64}", expected_effect_checkpoint_sha256) is None
+        ):
+            raise ValueError("Идентичность чекпойнта в заявке недействительна")
+        current_attempt = task.get("attempts")
+        current_side_effect = task.get("side_effect")
+        if type(current_side_effect) is not int or current_side_effect != 1:
+            raise ValueError("У шага нет неизвестного побочного эффекта")
+        try:
+            current_effect_checkpoint_sha256 = _mission_compensation_effect_checkpoint_sha256(
+                side_effect=current_side_effect,
+                checkpoint_json=task.get("checkpoint_json"),
+            )
+        except ValueError as exc:
+            raise ValueError("Текущий чекпойнт шага недействителен") from exc
+        if (
+            isinstance(current_attempt, bool)
+            or not isinstance(current_attempt, int)
+            or current_attempt != expected_attempt
+            or not hmac.compare_digest(
+                current_effect_checkpoint_sha256,
+                expected_effect_checkpoint_sha256,
+            )
+        ):
+            raise ValueError("Заявка относится к другой попытке шага")
         note = (compensation or str(task.get("compensation") or "")).strip()
         updated = await run_blocking(
             storage.update_mission_task_fields,
             task_id,
             actor.user_id,
+            expected_statuses=(TaskStatus.UNCERTAIN.value,),
+            expected_attempt=expected_attempt,
             status=TaskStatus.COMPENSATED.value,
             error="",
             result=("человек разобрался с побочным эффектом: " + (note or "без описания"))[:2000],
@@ -10152,9 +10243,18 @@ class ExecutionKernel:
                 "mission_id": {"type": "string"},
                 "task_id": {"type": "string"},
                 "compensation": {"type": "string"},
-                "checkpoint": {"type": "string"},
+                "expected_attempt": {"type": "integer", "minimum": 0},
+                "expected_effect_checkpoint_sha256": {
+                    "type": "string",
+                    "pattern": "^[0-9a-f]{64}$",
+                },
             },
-            ["mission_id", "task_id"],
+            [
+                "mission_id",
+                "task_id",
+                "expected_attempt",
+                "expected_effect_checkpoint_sha256",
+            ],
             risk="high",
         )
 

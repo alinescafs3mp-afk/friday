@@ -27,6 +27,7 @@ from friday.execution_kernel import (
     MISSION_EXECUTION_TOOLS,
     POSTCONDITIONS,
     ExecutionKernel,
+    _mission_compensation_effect_checkpoint_sha256,
 )
 from friday.executive.planner import MissionPlanner, PlannedTask
 from friday.ingestion import IdempotencyConflictError, IngestionPipeline
@@ -594,17 +595,51 @@ class ExecutiveService:
         Без описания компенсации предлагать нечего — молчим: пустая заявка
         «сделайте что-нибудь» хуже её отсутствия.
         """
-        compensation = str(task.get("compensation") or "").strip()
-        if not compensation:
-            return
         try:
+            # Callers cross RUNNING -> UNCERTAIN with a fenced CAS and commonly
+            # still hold the pre-CAS snapshot. Re-read after that transition so
+            # the approval binds what is durable now, not what the runner saw
+            # before another checkpoint/status writer won.
+            current = next(
+                (
+                    item
+                    for item in self.storage.get_mission_tasks(
+                        str(mission["id"]),
+                        str(mission["user_id"]),
+                    )
+                    if str(item.get("id") or "") == str(task.get("id") or "")
+                ),
+                None,
+            )
+            if current is None or current.get("status") != TaskStatus.UNCERTAIN.value:
+                return
+            task = current
+            compensation = str(task.get("compensation") or "").strip()
+            if not compensation:
+                return
+            expected_attempt = task.get("attempts")
+            if (
+                isinstance(expected_attempt, bool)
+                or not isinstance(expected_attempt, int)
+                or expected_attempt < 0
+            ):
+                raise ValueError("mission attempt witness is invalid")
+            current_side_effect = task.get("side_effect")
+            if type(current_side_effect) is not int or current_side_effect != 1:
+                raise ValueError("mission side-effect witness is invalid")
             self.storage.create_action_approval(
                 mission["user_id"],
                 tool="mission_compensation",
                 payload={
                     "mission_id": mission["id"],
                     "task_id": task["id"],
-                    "checkpoint": str(task.get("checkpoint_json") or "{}"),
+                    "expected_attempt": expected_attempt,
+                    "expected_effect_checkpoint_sha256": (
+                        _mission_compensation_effect_checkpoint_sha256(
+                            side_effect=current_side_effect,
+                            checkpoint_json=task.get("checkpoint_json"),
+                        )
+                    ),
                     "compensation": compensation,
                 },
                 summary=(
