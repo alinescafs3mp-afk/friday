@@ -392,7 +392,7 @@ def _supervisor_settings() -> SimpleNamespace:
 
 
 @pytest.mark.asyncio
-async def test_exact_authenticated_current_file_web_turn_reaches_assist_controller_once(
+async def test_exact_authenticated_current_file_web_turn_reaches_assist_without_reclassification(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     import friday.orchestration.supervisor_assist_surface as assist_surface_module
@@ -442,7 +442,7 @@ async def test_exact_authenticated_current_file_web_turn_reaches_assist_controll
 
         def classify_supervisor_assist_pending(self, *_args: Any, **_kwargs: Any) -> bool:
             self.classify_calls += 1
-            return False
+            raise AssertionError("authenticated pending-free successor was reclassified")
 
         async def execute(
             self,
@@ -507,7 +507,7 @@ async def test_exact_authenticated_current_file_web_turn_reaches_assist_controll
 
     assert response["message"] == "promoted"
     assert constructor_calls == 1
-    assert controller.classify_calls == 1
+    assert controller.classify_calls == 0
     assert controller.execute_calls == 1
     assert primary.calls == 0
 

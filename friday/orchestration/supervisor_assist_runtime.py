@@ -677,6 +677,14 @@ class SemanticSupervisorAssistRuntime:
                 or not active.matches_message(message)
             ):
                 raise SupervisorAssistRuntimeError("carried assist ingress decision is invalid")
+        elif authenticated_context is not None:
+            # Server-side pre-admission classification already ran before this
+            # pending-free successor acquired turn/effect/publication authority.
+            # Reclassifying here can rediscover a still-live predecessor and
+            # incorrectly bind or reject the independent successor.  The
+            # controller itself still fences active/retained/durable races at
+            # its first execution seam.
+            active = False
         else:
             active = self.classify_supervisor_assist_pending(
                 user_id,
