@@ -76,7 +76,9 @@ RELEASE_BLOCKING_BATTERY_NODEIDS = (
     "tests/test_archive_search_runtime_publication.py::"
     "test_real_router_preserves_two_exact_archive_pages_through_final_answer",
     "tests/test_archive_search_runtime_publication.py::"
-    "test_selected_archive_explain_lease_drift_falls_back_before_publication",
+    "test_selected_archive_explain_lease_drift_falls_back_before_publication[1-1-2-unavailable]",
+    "tests/test_archive_search_runtime_publication.py::"
+    "test_selected_archive_explain_lease_drift_falls_back_before_publication[2-2-3-succeeded]",
     "tests/test_archive_search_runtime_publication.py::"
     "test_selected_archive_explain_preserves_two_passage_identities_and_nested_citations",
     "tests/test_archive_search_runtime_publication.py::"
