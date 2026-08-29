@@ -15,6 +15,10 @@ import zlib
 from dataclasses import dataclass
 
 from friday.diagnostics.runtime_lease import ProcessLease, RuntimeLeaseError
+from friday.document_catalog.passage_schema import (
+    register_document_passage_connection_functions,
+    validate_document_passage_schema,
+)
 from friday.document_catalog.schema import (
     register_document_catalog_connection_functions,
     validate_document_catalog_schema,
@@ -2088,6 +2092,8 @@ class MaintenanceMixin(StorageShared):
                             "raw_object_id=? AND user_id=?",
                             (raw_object_id, owner),
                         )
+                        _del("document_passages", "raw_object_id=?", (raw_object_id,))
+                        _del("document_passage_projections", "raw_object_id=?", (raw_object_id,))
                         _del("document_catalog", "raw_object_id=?", (raw_object_id,))
                         conn.execute(
                             "DELETE FROM raw_objects WHERE id=? AND user_id=?",
@@ -2115,6 +2121,7 @@ class MaintenanceMixin(StorageShared):
         requests during the full-DB scan.
         """
         register_document_catalog_connection_functions(backup_conn)
+        register_document_passage_connection_functions(backup_conn)
         integrity = backup_conn.execute("PRAGMA integrity_check").fetchone()[0]
         foreign_key_violations = backup_conn.execute("PRAGMA foreign_key_check").fetchall()
         schema_row = backup_conn.execute(
@@ -2131,6 +2138,7 @@ class MaintenanceMixin(StorageShared):
         validate_work_item_schema(backup_conn)
         validate_engineer_work_item_schema(backup_conn)
         validate_document_catalog_schema(backup_conn)
+        validate_document_passage_schema(backup_conn)
         if _contains_secondary_product_witness(backup_conn):
             raise RuntimeError("Backup snapshot contains a transient secondary product witness")
         if _engineer_command_backup_authority_required(
@@ -2442,6 +2450,7 @@ class MaintenanceMixin(StorageShared):
         conn = sqlite3.connect(str(path))
         try:
             register_document_catalog_connection_functions(conn)
+            register_document_passage_connection_functions(conn)
             conn.execute("PRAGMA query_only=ON")
             integrity = conn.execute("PRAGMA integrity_check").fetchone()[0]
             foreign_key_violations = len(conn.execute("PRAGMA foreign_key_check").fetchall())
@@ -2463,6 +2472,7 @@ class MaintenanceMixin(StorageShared):
                         validate_work_item_schema(conn)
                         validate_engineer_work_item_schema(conn)
                         validate_document_catalog_schema(conn)
+                        validate_document_passage_schema(conn)
                 except (TypeError, ValueError):
                     database_error = "Database schema_version marker is invalid"
         except sqlite3.DatabaseError as exc:
@@ -3269,6 +3279,18 @@ class MaintenanceMixin(StorageShared):
                 ),
                 "user_identities": ("SELECT * FROM user_identities WHERE user_id=?", (user_id,)),
                 "raw_objects": ("SELECT * FROM raw_objects WHERE user_id=?", (user_id,)),
+                "document_passage_projections": (
+                    """SELECT projection.* FROM document_passage_projections projection
+                         JOIN raw_objects source ON source.id=projection.raw_object_id
+                        WHERE source.user_id=?""",
+                    (user_id,),
+                ),
+                "document_passages": (
+                    """SELECT passage.* FROM document_passages passage
+                         JOIN raw_objects source ON source.id=passage.raw_object_id
+                        WHERE source.user_id=?""",
+                    (user_id,),
+                ),
                 "knowledge_objects": ("SELECT * FROM knowledge_objects WHERE user_id=?", (user_id,)),
                 "inbox": ("SELECT * FROM inbox WHERE user_id=?", (user_id,)),
                 "entities": ("SELECT * FROM entities WHERE user_id=?", (user_id,)),
@@ -3927,6 +3949,16 @@ class MaintenanceMixin(StorageShared):
             visible_raw_ids = all_raw_ids - hidden_raw_ids
             rows_by_table["raw_objects"] = [
                 row for row in rows_by_table["raw_objects"] if str(row["id"]) in visible_raw_ids
+            ]
+            rows_by_table["document_passage_projections"] = [
+                row
+                for row in rows_by_table["document_passage_projections"]
+                if str(row["raw_object_id"]) in visible_raw_ids
+            ]
+            rows_by_table["document_passages"] = [
+                row
+                for row in rows_by_table["document_passages"]
+                if str(row["raw_object_id"]) in visible_raw_ids
             ]
             rows_by_table["knowledge_objects"] = [
                 {

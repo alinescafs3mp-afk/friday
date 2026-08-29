@@ -1,5 +1,15 @@
 """Durable, body-free document catalog projection."""
 
+from friday.document_catalog.passage_schema import (
+    DOCUMENT_PASSAGE_INDEX_REVISION,
+    DOCUMENT_PASSAGE_SCHEMA,
+    DOCUMENT_PASSAGE_SCHEMA_VERSION,
+    document_passage_schema_fingerprint,
+    document_passage_set_sha256,
+    install_document_passage_schema,
+    register_document_passage_connection_functions,
+    validate_document_passage_schema,
+)
 from friday.document_catalog.schema import (
     DOCUMENT_CATALOG_ENRICHMENT_REVISION,
     DOCUMENT_CATALOG_INCOMPLETE_REASONS,
@@ -21,13 +31,21 @@ __all__ = [
     "DOCUMENT_CATALOG_INCOMPLETE_REASONS",
     "DOCUMENT_CATALOG_SCHEMA",
     "DOCUMENT_CATALOG_SCHEMA_VERSION",
+    "DOCUMENT_PASSAGE_INDEX_REVISION",
+    "DOCUMENT_PASSAGE_SCHEMA",
+    "DOCUMENT_PASSAGE_SCHEMA_VERSION",
     "DocumentCatalogIncompleteReason",
     "DocumentCatalogStatus",
     "deterministic_document_extraction_state",
     "deterministic_document_semantic_title",
     "document_catalog_schema_fingerprint",
     "document_catalog_source_binding_sql",
+    "document_passage_schema_fingerprint",
+    "document_passage_set_sha256",
     "install_document_catalog_schema",
+    "install_document_passage_schema",
     "register_document_catalog_connection_functions",
+    "register_document_passage_connection_functions",
     "validate_document_catalog_schema",
+    "validate_document_passage_schema",
 ]

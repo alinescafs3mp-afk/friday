@@ -102,9 +102,25 @@ _TITLE_CANARY = "PRIVATE-TITLE-CANARY"
 _EXCERPT_CANARY = "PRIVATE-EXCERPT-CANARY"
 
 
+def _drop_document_passage_schema(conn: sqlite3.Connection) -> None:
+    trigger_names = tuple(
+        str(row[0])
+        for row in conn.execute(
+            """SELECT name FROM sqlite_master
+                WHERE type='trigger' AND name LIKE 'document_passage_%'
+                ORDER BY name"""
+        )
+    )
+    for name in trigger_names:
+        conn.execute(f'DROP TRIGGER "{name}"')  # nosec B608 - SQLite-owned names
+    conn.execute("DROP TABLE IF EXISTS document_passages")
+    conn.execute("DROP TABLE IF EXISTS document_passage_projections")
+
+
 def _remove_post_schema40_engineer_work_items(conn: sqlite3.Connection) -> None:
     """Strip schema-46 cross-scope guards from a synthetic schema-40 image."""
 
+    _drop_document_passage_schema(conn)
     trigger_names = [
         str(row[0])
         for row in conn.execute(
@@ -1617,7 +1633,7 @@ def test_promoted_selected_evidence_reader_survives_schema45_restart(
         assert completed.question.selected_ordinal == 2
         assert sum(statement.lstrip().upper().startswith("SAVEPOINT") for statement in statements) == 1
         assert (
-            initial.execute("SELECT value FROM schema_meta WHERE key='schema_version'").fetchone()[0] == "46"
+            initial.execute("SELECT value FROM schema_meta WHERE key='schema_version'").fetchone()[0] == "47"
         )
         with initial.transaction() as conn:
             loaded = get_current_recall_selected_archive_evidence_work_item_in_transaction(
@@ -1661,7 +1677,7 @@ def test_promoted_selected_evidence_reader_survives_schema45_restart(
             )
         assert restored == loaded
         assert (
-            reopened.execute("SELECT value FROM schema_meta WHERE key='schema_version'").fetchone()[0] == "46"
+            reopened.execute("SELECT value FROM schema_meta WHERE key='schema_version'").fetchone()[0] == "47"
         )
     finally:
         reopened.close()
@@ -1974,7 +1990,7 @@ def test_schema45_startup_installs_selected_evidence_promotion_reader(
         ).fetchone()[0]
         assert installed != released
         assert (
-            reopened.execute("SELECT value FROM schema_meta WHERE key='schema_version'").fetchone()[0] == "46"
+            reopened.execute("SELECT value FROM schema_meta WHERE key='schema_version'").fetchone()[0] == "47"
         )
         validate_work_item_schema(reopened.conn)
     finally:

@@ -687,6 +687,14 @@ monitor; частичное исчезновение либо повторный
 mismatch mode/env/config или возвращённые строки не переходят автоматически и
 требуют review/remediation под исходной bound-config.
 
+Первый переход на новую schema требует двух отдельных sealed identities с
+одинаковым functional tree: `rc0` уже умеет открыть новую schema и служит только
+schema-capable fallback, а stable candidate отличается от него лишь version
+identity. `rc0` отдельно не активируется. Для 46→47 это
+`0.207.72/schema46` previous → `0.207.73/schema47` candidate с
+`0.207.73rc0/schema47` fallback; использовать schema-46 release как fallback
+оператор обязан отклонить до остановки writers.
+
 0.206.4 использует SQLite schema 34; Obsidian-релиз 0.207.2 поднимает её до
 schema 35. Новое поле имени загрузки принадлежит
 точному message-bound alias и не переписывает канонический Raw Object. Миграция
@@ -947,7 +955,7 @@ orchestration.model_gate.verified_context_tokens = 8192
 ```
 
 Во время probe `/api/health` ещё недоступен. Ждите до 420 секунд и дополнительно
-требуйте `status=ok` и `version=0.207.72`.
+требуйте `status=ok` и `version=0.207.73`.
 
 HTTP `status=ok` при `installed_mode=legacy` означает безопасную деградацию, но
 не успешный canary. В `canary`/`v12` Sentinel не реже раза в минуту

@@ -21,6 +21,23 @@ _RELATION_HISTORY_TRIGGERS = (
 )
 
 
+def _drop_document_passage_schema(conn: sqlite3.Connection) -> None:
+    """Remove schema-47 artifacts before assigning an older synthetic marker."""
+
+    triggers = tuple(
+        str(row[0])
+        for row in conn.execute(
+            """SELECT name FROM sqlite_master
+                WHERE type='trigger' AND name LIKE 'document_passage_%'
+                ORDER BY name"""
+        )
+    )
+    for trigger in triggers:
+        conn.execute(f'DROP TRIGGER "{trigger}"')  # nosec B608 - SQLite-owned names
+    conn.execute("DROP TABLE IF EXISTS document_passages")
+    conn.execute("DROP TABLE IF EXISTS document_passage_projections")
+
+
 @pytest.fixture
 def simulate_legacy_schema():
     """Remove schema-31 authority before a test rewinds an older schema marker.
@@ -32,6 +49,7 @@ def simulate_legacy_schema():
     """
 
     def downgrade(conn: sqlite3.Connection, version: int) -> None:
+        _drop_document_passage_schema(conn)
         for trigger in _RELATION_HISTORY_TRIGGERS:
             conn.execute(f'DROP TRIGGER IF EXISTS "{trigger}"')  # nosec B608 - fixed allowlist
         conn.execute("DROP TABLE IF EXISTS relation_revisions")

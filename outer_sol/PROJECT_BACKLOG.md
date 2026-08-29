@@ -24,7 +24,7 @@ either merged here or discarded before that source is removed.
 - Schema-capable fallback: Friday `0.207.67` /
   `f93c0fcfae9a906210cd0594c20320866d99ecb7`;
   tree `1973acc092a8eab53a03e4adad1e725f351d5917aca01b0d46d1393cf8060d51`.
-- Database schema: 46
+- Database schema: 47 (release candidate; production remains 46 until activation)
 - Production: immutable activation `clear`; backend and Telegram bridge active;
   trusted-CA health `200`; V12 `canary_ready`; complete S2 authenticated turn
   authority is active across scalar, file, attachment and V12 paths without

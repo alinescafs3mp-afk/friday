@@ -29,6 +29,12 @@ from friday.audit_privacy import (
     sanitize_audit_request_id,
     sanitize_audit_target,
 )
+from friday.document_catalog.passage_schema import (
+    DOCUMENT_PASSAGE_SCHEMA_VERSION,
+    install_document_passage_schema,
+    register_document_passage_connection_functions,
+    validate_document_passage_schema,
+)
 from friday.document_catalog.schema import (
     DOCUMENT_CATALOG_SCHEMA_VERSION,
     install_document_catalog_schema,
@@ -2406,6 +2412,7 @@ class CoreMixin(StorageShared):
             register_work_item_connection_functions(conn)
             register_engineer_work_item_connection_functions(conn)
             register_document_catalog_connection_functions(conn)
+            register_document_passage_connection_functions(conn)
             # Даты из документов извлечены и лежат в метаданных СЫРЫМИ строками — так,
             # как они написаны в бумаге. Замерено на архиве владельца: 3180 значений у
             # 630 объектов, из них 2537 в форме дд.мм.гггг, 345 в ISO, 223 — вообще
@@ -2616,6 +2623,12 @@ class CoreMixin(StorageShared):
                 # Authenticate an exact interrupted schema-41 attempt, while an
                 # ordinary schema <=40 database legitimately has no sidecar yet.
                 validate_document_catalog_schema(conn, required=False, validate_data=False)
+            if parsed_version is not None and parsed_version >= DOCUMENT_PASSAGE_SCHEMA_VERSION:
+                validate_document_passage_schema(conn)
+            else:
+                # Schema 46 has no passage sidecar.  An interrupted schema-47
+                # attempt is accepted only when it is wholly absent or exact.
+                validate_document_passage_schema(conn, required=False, validate_data=False)
             if parsed_version is not None and parsed_version >= HOST_CONTROL_SCHEMA_VERSION:
                 validate_host_control_job_schema(conn)
             else:
@@ -2634,6 +2647,7 @@ class CoreMixin(StorageShared):
                 self._migrate_legacy_schema(conn)
                 self._retire_outdated_indexes(conn)
             install_document_catalog_schema(conn)
+            install_document_passage_schema(conn)
             _validate_private_material_cache_pre_schema(conn)
             # Current-schema databases can still contain a pre-owner reminder
             # imported by an older build.  Its tenant move updates entity history
@@ -2656,6 +2670,7 @@ class CoreMixin(StorageShared):
             validate_work_item_schema(conn)
             validate_engineer_work_item_schema(conn)
             validate_document_catalog_schema(conn)
+            validate_document_passage_schema(conn)
             validate_host_control_job_schema(conn)
             _validate_private_material_cache(
                 conn,

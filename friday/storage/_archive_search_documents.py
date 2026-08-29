@@ -70,6 +70,12 @@ from friday.storage._privacy import (
 
 MAX_ARCHIVE_DOCUMENT_RESULTS: Final = 20
 PASSAGE_INDEX_VERSION: Final = "archive-storage-char-v1"
+# Keep this optional reader policy closed locally.  Importing the projection or
+# schema contract here would re-enter storage through ``friday.retrieval`` while
+# this module is still importing.  The late contract probe below authenticates
+# the schema and requires this exact revision before sidecar SQL is selected.
+_DOCUMENT_PASSAGE_INDEX_REVISION: Final = "document-char-v1:chunk-spans-v2:1200:200:64"
+_DOCUMENT_PASSAGE_MAX_COUNT: Final = 64
 _MAX_ACTOR_BYTES = 200
 _MAX_SNAPSHOT_BYTES = 256
 _MAX_EXCERPT_CHARS = 720
@@ -257,6 +263,28 @@ def _document_catalog_contract(conn: sqlite3.Connection) -> tuple[bool, int]:
     ):
         return False, 0
     return True, enrichment_revision
+
+
+def _document_passage_contract(conn: sqlite3.Connection) -> bool:
+    """Authenticate the optional reader-first passage sidecar.
+
+    A schema-46 database legitimately has no passage projection.  Missing,
+    partial, counterfeit, or policy-drifted schema therefore selects the
+    existing authorized whole-body fallback instead of being queried.
+    """
+
+    try:
+        schema = importlib.import_module("friday.document_catalog.passage_schema")
+        fingerprint_reader = schema.document_passage_schema_fingerprint
+        index_revision = schema.DOCUMENT_PASSAGE_INDEX_REVISION
+        fingerprint = fingerprint_reader(conn)
+    except (ImportError, AttributeError, TypeError, RuntimeError, ValueError, sqlite3.Error):
+        return False
+    return bool(
+        index_revision == _DOCUMENT_PASSAGE_INDEX_REVISION
+        and type(fingerprint) is str
+        and _SHA256.fullmatch(fingerprint) is not None
+    )
 
 
 def _ensure_archive_search_fold(conn: sqlite3.Connection) -> None:
@@ -1305,6 +1333,93 @@ def _document_catalog_current_expression(
     )"""
 
 
+def _document_passage_current_expression(
+    projection_alias: str = "dp",
+    *,
+    source_alias: str = "s",
+) -> str:
+    """Exact source-bound readiness predicate for the reader-first sidecar.
+
+    Passage rows grant no authority and are deliberately joined only after
+    ``authorized_sources``.  The reader does not consume their locators yet;
+    it merely proves that the complete code-owned projection exists before a
+    DOCUMENTS lexical lane may claim complete index coverage.
+    """
+
+    projection = projection_alias
+    source = source_alias
+    return f"""(
+        {projection}.raw_object_id IS {source}.raw_id
+        AND typeof({source}.raw_version)='integer'
+        AND {source}.raw_version>=1
+        AND {projection}.source_version IS {source}.raw_version
+        AND typeof({source}.content_hash)='text'
+        AND length({source}.content_hash)=64
+        AND {source}.content_hash NOT GLOB '*[^0-9a-f]*'
+        AND {projection}.source_content_sha256 IS {source}.content_hash
+        AND typeof({source}.passage_body)='text'
+        AND length({source}.passage_body)>0
+        AND typeof({projection}.extracted_text_sha256)='text'
+        AND length({projection}.extracted_text_sha256)=64
+        AND {projection}.extracted_text_sha256 NOT GLOB '*[^0-9a-f]*'
+        AND {projection}.extracted_text_sha256=friday_exact_text_sha256({source}.passage_body)
+        AND typeof({projection}.source_char_count)='integer'
+        AND {projection}.source_char_count=length({source}.passage_body)
+        AND typeof({projection}.passage_set_sha256)='text'
+        AND length({projection}.passage_set_sha256)=64
+        AND {projection}.passage_set_sha256 NOT GLOB '*[^0-9a-f]*'
+        AND {projection}.passage_index_revision='{_DOCUMENT_PASSAGE_INDEX_REVISION}'
+        AND {projection}.projection_status='current'
+        AND {projection}.incomplete_reason IS NULL
+        AND typeof({projection}.passage_count)='integer'
+        AND {projection}.passage_count BETWEEN 1 AND {_DOCUMENT_PASSAGE_MAX_COUNT}
+        AND (SELECT COUNT(*) FROM document_passages passage
+              WHERE passage.raw_object_id={projection}.raw_object_id)
+            ={projection}.passage_count
+        AND (SELECT MIN(passage.chunk_index) FROM document_passages passage
+              WHERE passage.raw_object_id={projection}.raw_object_id)=0
+        AND (SELECT MAX(passage.chunk_index) FROM document_passages passage
+              WHERE passage.raw_object_id={projection}.raw_object_id)
+            ={projection}.passage_count-1
+        AND (SELECT MIN(passage.start_char) FROM document_passages passage
+              WHERE passage.raw_object_id={projection}.raw_object_id)=0
+        AND (SELECT MAX(passage.end_char) FROM document_passages passage
+              WHERE passage.raw_object_id={projection}.raw_object_id)
+            ={projection}.source_char_count
+        AND COALESCE((
+            SELECT friday_document_passage_set_sha256(
+                       passage.chunk_index,passage.start_char,
+                       passage.end_char,passage.content_sha256)
+              FROM document_passages passage
+             WHERE passage.raw_object_id={projection}.raw_object_id
+        ),'')={projection}.passage_set_sha256
+    )"""
+
+
+def _passage_projection_cte(
+    corpus: ArchiveSearchCorpus,
+    *,
+    document_passage_available: bool,
+) -> str:
+    if corpus is not ArchiveSearchCorpus.DOCUMENTS:
+        return """passage_projection_sources AS MATERIALIZED (
+            SELECT s.*, 1 AS passage_projection_current
+              FROM authorized_sources s
+        )"""
+    if not document_passage_available:
+        return """passage_projection_sources AS MATERIALIZED (
+            SELECT s.*, 0 AS passage_projection_current
+              FROM authorized_sources s
+        )"""
+    current = _document_passage_current_expression("dp", source_alias="s")
+    return f"""passage_projection_sources AS MATERIALIZED (
+        SELECT s.*, CASE WHEN {current} THEN 1 ELSE 0 END AS passage_projection_current
+          FROM authorized_sources s
+          LEFT JOIN document_passage_projections dp
+            ON dp.raw_object_id=s.raw_id
+    )"""
+
+
 def _catalog_projection_cte(
     corpus: ArchiveSearchCorpus,
     *,
@@ -1429,13 +1544,19 @@ def _lexical_sql(
     derivative_available: bool,
 ) -> tuple[str, tuple[object, ...]]:
     source_cte, scope_parameters = _source_cte(corpus, request, include_body=True)
+    passage_projection_cte = _passage_projection_cte(
+        corpus,
+        document_passage_available=derivative_available,
+    )
     folded_fields: tuple[str, ...]
     if corpus is ArchiveSearchCorpus.DOCUMENTS:
         # The global raw-object index intentionally contains rejected rows and
         # therefore cannot be consulted by this archive facade.  The authorized
-        # body scan below remains authoritative; report derivative coverage as
-        # pending until a lifecycle-filtered archive derivative exists.
+        # body scan below remains authoritative.  The reader-first passage
+        # sidecar changes only coverage readiness; it does not change candidate
+        # membership or the released legacy PassageRef identity.
         derivative_expression = "0"
+        derivative_mismatch_expression = "passage_projection_current<>1"
         folded_fields = ("friday_archive_fold(s.passage_body)",)
         # Filename affinity only orders rows already admitted by the body-only
         # direct_match below.  Invalid metadata contributes the empty string,
@@ -1461,6 +1582,7 @@ def _lexical_sql(
             if derivative_available
             else "0"
         )
+        derivative_mismatch_expression = "direct_match<>derivative_match"
         folded_fields = (
             "friday_archive_fold(s.passage_body)",
             "friday_archive_fold(COALESCE(s.knowledge_title,''))",
@@ -1492,6 +1614,7 @@ def _lexical_sql(
         else ""
     )
     sql = f"""WITH {source_cte},
+        {passage_projection_cte},
         lexical_needles AS MATERIALIZED (
             SELECT value
               FROM json_each(?)
@@ -1503,7 +1626,7 @@ def _lexical_sql(
                    '' AS sort_text,
                    CASE WHEN {direct_match} THEN 1 ELSE 0 END AS direct_match,
                    CASE WHEN {derivative_expression} THEN 1 ELSE 0 END AS derivative_match
-              FROM authorized_sources s
+              FROM passage_projection_sources s
         ),
         indexed_sources AS MATERIALIZED (
             SELECT * FROM scanned_sources
@@ -1533,7 +1656,7 @@ def _lexical_sql(
         ),
         derivative_mismatches(value) AS MATERIALIZED (
             SELECT COUNT(*) FROM scanned_sources
-             WHERE direct_match<>derivative_match
+             WHERE {derivative_mismatch_expression}
         ),
         page AS MATERIALIZED (
             SELECT * FROM ranked
@@ -1558,7 +1681,7 @@ def _lexical_sql(
         *scope_parameters,
         json.dumps(direct_terms, ensure_ascii=False, separators=(",", ":")),
         *score_parameters,
-        *((match_query,) if derivative_available else ()),
+        *((match_query,) if derivative_available and corpus is ArchiveSearchCorpus.KNOWLEDGE else ()),
     )
     return sql, parameters
 
@@ -2262,7 +2385,9 @@ def search_archive_document_lane(
                 authority_rechecked=True,
             )
         derivative_available = (
-            False if corpus is ArchiveSearchCorpus.DOCUMENTS else _table_exists(conn, "knowledge_fts")
+            _document_passage_contract(conn)
+            if corpus is ArchiveSearchCorpus.DOCUMENTS
+            else _table_exists(conn, "knowledge_fts")
         )
         sql, lane_parameters = _lexical_sql(
             corpus,

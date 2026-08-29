@@ -171,7 +171,10 @@ LOGGER = logging.getLogger("friday.storage")
 # 46 — dormant journey-specific EngineerWorkItem v1.  Only exact owner/source
 # bindings, lifecycle state and opaque receipt digests persist; activation and
 # model-loop continuation remain a later, independently reversible package.
-SCHEMA_VERSION = 46
+# 47 — reader-first body-free document passage projections. Raw remains the
+# authority; this release seeds only explicit incomplete state so the same
+# schema-capable binary can safely serve as fallback for later bounded writers.
+SCHEMA_VERSION = 47
 
 #: Определение таблицы внешних источников отдельной константой: миграция схемы 29
 #: пересоздаёт её, чтобы ключом стала ПАРА `(user_id, name)`, и должна брать ровно

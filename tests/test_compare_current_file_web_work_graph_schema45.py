@@ -122,6 +122,21 @@ def _copy_matching_columns(
     )
 
 
+def _drop_document_passage_schema(conn: sqlite3.Connection) -> None:
+    trigger_names = tuple(
+        str(row[0])
+        for row in conn.execute(
+            """SELECT name FROM sqlite_master
+                WHERE type='trigger' AND name LIKE 'document_passage_%'
+                ORDER BY name"""
+        )
+    )
+    for name in trigger_names:
+        conn.execute(f'DROP TRIGGER "{name}"')  # nosec B608 - SQLite-owned names
+    conn.execute("DROP TABLE IF EXISTS document_passages")
+    conn.execute("DROP TABLE IF EXISTS document_passage_projections")
+
+
 def _downgrade_graph_projection_to_released_schema44(database: Path) -> None:
     """Test-only inverse rebuild whose result must equal the released DDL."""
 
@@ -130,6 +145,7 @@ def _downgrade_graph_projection_to_released_schema44(database: Path) -> None:
         register_work_item_connection_functions(conn)
         conn.execute("PRAGMA foreign_keys=OFF")
         conn.execute("BEGIN IMMEDIATE")
+        _drop_document_passage_schema(conn)
         # Build an actual released schema-44 image; the independent schema-46
         # EngineerWorkItem package must not leak through this test-only inverse.
         engineer_triggers = tuple(
@@ -191,7 +207,7 @@ def _downgrade_graph_projection_to_released_schema44(database: Path) -> None:
 def test_schema45_exact_binding_is_durable_immutable_and_revision_cas(storage) -> None:
     graph = _seed_bound_graph(storage, "exact")
 
-    assert SCHEMA_VERSION == 46
+    assert SCHEMA_VERSION == 47
     assert COMPARE_CURRENT_FILE_WEB_WORK_GRAPH_SCHEMA.endswith(".v3")
     assert graph.has_exact_request_binding is True
     assert graph.payload()["anchor_request_binding_sha256"] == graph.anchor_request_binding_sha256
@@ -375,7 +391,7 @@ def test_released_schema44_graph_migrates_to_explicit_unbound_sentinel_and_reads
     migrated = FridayStorage(replace(configured, database_must_exist=True))
     try:
         assert (
-            migrated.execute("SELECT value FROM schema_meta WHERE key='schema_version'").fetchone()[0] == "46"
+            migrated.execute("SELECT value FROM schema_meta WHERE key='schema_version'").fetchone()[0] == "47"
         )
         with migrated.transaction() as conn:
             graph = get_compare_current_file_web_work_graph_in_transaction(

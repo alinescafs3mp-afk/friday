@@ -21,6 +21,21 @@ from friday.storage import SCHEMA_VERSION, FridayStorage
 SCHEMA_FIXTURES = Path(__file__).parent / "fixtures" / "schemas"
 
 
+def _drop_document_passage_schema(conn: sqlite3.Connection) -> None:
+    trigger_names = tuple(
+        str(row[0])
+        for row in conn.execute(
+            """SELECT name FROM sqlite_master
+                WHERE type='trigger' AND name LIKE 'document_passage_%'
+                ORDER BY name"""
+        )
+    )
+    for name in trigger_names:
+        conn.execute(f'DROP TRIGGER "{name}"')  # nosec B608 - SQLite-owned names
+    conn.execute("DROP TABLE IF EXISTS document_passages")
+    conn.execute("DROP TABLE IF EXISTS document_passage_projections")
+
+
 def _schema_37_copy(tmp_path: Path) -> Path:
     database = tmp_path / "schema-37.sqlite3"
     with gzip.open(SCHEMA_FIXTURES / "schema-37.sqlite3.gz", "rb") as packed, database.open("wb") as raw:
@@ -50,6 +65,7 @@ def _install_released_work_item_schema_38(conn: sqlite3.Connection) -> None:
     # This helper builds a genuine released schema-38 projection from a current
     # test database.  Schema 46's independent EngineerWorkItem package did not
     # exist in that release and must not survive the test-only downgrade.
+    _drop_document_passage_schema(conn)
     _drop_engineer_work_item_projection(conn)
     conn.execute("DROP TABLE work_item_compare_current_file_web_restart_rebind_steps")
     conn.execute("DROP TABLE work_item_compare_current_file_web_restart_rebinds")
@@ -68,6 +84,7 @@ def _install_released_work_item_schema_38(conn: sqlite3.Connection) -> None:
 
 
 def _install_released_work_item_schema_39(conn: sqlite3.Connection) -> None:
+    _drop_document_passage_schema(conn)
     _drop_engineer_work_item_projection(conn)
     conn.execute("DROP TABLE work_item_compare_current_file_web_restart_rebind_steps")
     conn.execute("DROP TABLE work_item_compare_current_file_web_restart_rebinds")
@@ -86,8 +103,8 @@ def _install_released_work_item_schema_39(conn: sqlite3.Connection) -> None:
 
 
 def test_schema_42_installs_the_exact_work_item_projection(storage) -> None:
-    assert SCHEMA_VERSION == 46
-    assert storage.execute("SELECT value FROM schema_meta WHERE key='schema_version'").fetchone()[0] == "46"
+    assert SCHEMA_VERSION == 47
+    assert storage.execute("SELECT value FROM schema_meta WHERE key='schema_version'").fetchone()[0] == "47"
     objects = {
         (str(row[0]), str(row[1])): "".join(str(row[2]).split())
         for row in storage.execute(
@@ -118,7 +135,7 @@ def test_released_schema_37_migrates_to_40_without_losing_seed_data(settings, tm
     migrated = FridayStorage(replace(settings, database_path=database, database_must_exist=True))
     try:
         assert (
-            migrated.execute("SELECT value FROM schema_meta WHERE key='schema_version'").fetchone()[0] == "46"
+            migrated.execute("SELECT value FROM schema_meta WHERE key='schema_version'").fetchone()[0] == "47"
         )
         assert (
             migrated.execute("SELECT COUNT(*) FROM raw_objects WHERE user_id='fixture-owner'").fetchone()[0]
@@ -149,13 +166,14 @@ def test_exact_interrupted_37_to_40_attempt_is_recoverable(settings, tmp_path) -
     initial.execute("SELECT 1")
     initial.close()
     with sqlite3.connect(database) as conn:
+        _drop_document_passage_schema(conn)
         conn.execute("UPDATE schema_meta SET value='37' WHERE key='schema_version'")
 
     recovered = FridayStorage(replace(settings, database_path=database, database_must_exist=True))
     try:
         assert (
             recovered.execute("SELECT value FROM schema_meta WHERE key='schema_version'").fetchone()[0]
-            == "46"
+            == "47"
         )
         assert recovered.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
     finally:
@@ -214,7 +232,7 @@ def test_released_schema_38_rebuild_preserves_every_recall_row(settings, tmp_pat
     try:
         assert tuple(migrated.execute("SELECT * FROM work_items").fetchone()) == row
         assert (
-            migrated.execute("SELECT value FROM schema_meta WHERE key='schema_version'").fetchone()[0] == "46"
+            migrated.execute("SELECT value FROM schema_meta WHERE key='schema_version'").fetchone()[0] == "47"
         )
         assert migrated.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
         assert migrated.execute("PRAGMA foreign_key_check").fetchall() == []
@@ -250,6 +268,7 @@ def test_missing_partial_unique_index_is_rejected_before_if_not_exists_can_hide_
     initial.execute("SELECT 1")
     initial.close()
     with sqlite3.connect(database) as conn:
+        _drop_document_passage_schema(conn)
         conn.execute("DROP INDEX uq_work_items_open_conversation")
         conn.execute(
             "UPDATE schema_meta SET value=? WHERE key='schema_version'",

@@ -52,6 +52,21 @@ RELATION_INSERT_OR_REPLACE_SQL = RELATION_INSERT_OR_IGNORE_SQL.replace(
 )
 
 
+def _drop_document_passage_schema(conn: sqlite3.Connection) -> None:
+    trigger_names = tuple(
+        str(row[0])
+        for row in conn.execute(
+            """SELECT name FROM sqlite_master
+                WHERE type='trigger' AND name LIKE 'document_passage_%'
+                ORDER BY name"""
+        )
+    )
+    for name in trigger_names:
+        conn.execute(f'DROP TRIGGER "{name}"')  # nosec B608 - SQLite-owned names
+    conn.execute("DROP TABLE IF EXISTS document_passages")
+    conn.execute("DROP TABLE IF EXISTS document_passage_projections")
+
+
 def _seed_endpoints(storage: FridayStorage, user_id: str = "alice") -> tuple[str, str]:
     source_id = f"entity-{user_id}-source"
     target_id = f"entity-{user_id}-target"
@@ -85,6 +100,7 @@ def _age_current_database_to_schema_30(database) -> None:
     """Remove only schema-31 artefacts from a database built by current code."""
 
     with sqlite3.connect(database) as conn:
+        _drop_document_passage_schema(conn)
         for trigger in sorted(CAPTURE_TRIGGERS | PROTECTION_TRIGGERS):
             conn.execute(f"DROP TRIGGER IF EXISTS {trigger}")  # nosec B608 - fixed test allowlist
         conn.execute("DROP TABLE relation_revisions")
@@ -123,9 +139,9 @@ def test_known_at_normalization_requires_a_real_offset_aware_instant() -> None:
 
 
 def test_schema_32_installs_the_full_snapshot_context_indexes_and_guards(storage) -> None:
-    assert SCHEMA_VERSION == 46
+    assert SCHEMA_VERSION == 47
     marker = storage.execute("SELECT value FROM schema_meta WHERE key='schema_version'").fetchone()
-    assert marker and marker[0] == "46"
+    assert marker and marker[0] == "47"
 
     columns = {row[1]: row[2] for row in storage.execute("PRAGMA table_info(relation_revisions)").fetchall()}
     assert tuple(columns) == (

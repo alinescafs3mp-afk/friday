@@ -1,3 +1,17 @@
+## 0.207.73 — 2026-08-29
+
+### Reader-first document passages
+
+- Adds schema 47 with an exact body-free Raw-bound passage projection and
+  codepoint-span child rows; existing documents migrate only to explicit
+  `backfill_pending`, without inventing passage evidence.
+- Keeps the released whole-body document search, candidate identity, passage
+  references and replay contract unchanged while making missing, stale or
+  incomplete passage coverage report honestly as partial.
+- Extends deletion, purge, export, backup and restore lifecycle boundaries to
+  the rebuildable sidecar. A bounded resumable writer remains a separate
+  reversible release, for which this release is the schema-capable fallback.
+
 ## 0.207.72 — 2026-08-29
 
 ### Measured retrieval recall

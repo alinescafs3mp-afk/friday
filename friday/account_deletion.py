@@ -201,6 +201,16 @@ _DELETE_SCOPES: tuple[_Scope, ...] = (
     # derived through the authoritative Raw Object and it must be counted/deleted
     # before that Raw disappears.
     _Scope(
+        "document_passages",
+        "document_passages",
+        "raw_object_id IN (SELECT id FROM raw_objects WHERE user_id=?)",
+    ),
+    _Scope(
+        "document_passage_projections",
+        "document_passage_projections",
+        "raw_object_id IN (SELECT id FROM raw_objects WHERE user_id=?)",
+    ),
+    _Scope(
         "document_catalog",
         "document_catalog",
         "raw_object_id IN (SELECT id FROM raw_objects WHERE user_id=?)",

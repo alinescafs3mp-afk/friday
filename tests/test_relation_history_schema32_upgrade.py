@@ -70,6 +70,17 @@ def _make_schema_32(settings: Any, tmp_path: Path, name: str) -> Path:
     made.close(final=True)
     with sqlite3.connect(database) as predecessor:
         _remove_post_schema32_engineer_work_items(predecessor)
+        for name in (
+            "document_passage_raw_ai_seed",
+            "document_passage_raw_au_reset",
+            "document_passage_projection_bi_validate",
+            "document_passage_projection_bu_validate",
+            "document_passage_bi_validate",
+            "document_passage_bu_validate",
+        ):
+            predecessor.execute(f'DROP TRIGGER "{name}"')  # nosec B608 - fixed names
+        predecessor.execute("DROP TABLE document_passages")
+        predecessor.execute("DROP TABLE document_passage_projections")
         predecessor.execute("DROP TRIGGER document_catalog_raw_ai_seed")
         predecessor.execute("DROP TRIGGER document_catalog_raw_au_reconcile")
         predecessor.execute("DROP TRIGGER document_catalog_raw_au_extraction_state")
@@ -262,7 +273,7 @@ def test_schema_31_to_32_preserves_evidence_and_installs_the_exact_current_contr
         assert migrated.execute("SELECT value FROM schema_meta WHERE key='schema_version'").fetchone()[
             0
         ] == str(SCHEMA_VERSION)
-        assert SCHEMA_VERSION == 46
+        assert SCHEMA_VERSION == 47
         assert tuple(
             migrated.execute(
                 """SELECT singleton, batch_id, recorded_at, observed_at
