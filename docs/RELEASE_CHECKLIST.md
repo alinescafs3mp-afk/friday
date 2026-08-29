@@ -284,7 +284,7 @@ failed/error/skipped-тест в любой фазе делает гейт кр�
   и `FRIDAY_SECONDARY_LLM_ALLOW_PRIVATE_TEXT=1`; mismatch, public-text mode,
   disabled/misconfigured secondary и product-policy drift закрывают workload;
 - code-owned policy `gptoss20b-semantic-supervisor-v1` имеет SHA-256
-  `9f0c1e8132200a3a4416448cd2de03a4736da5e4968536d8c9e518fd5e88051a`,
+  `edea7fce6ae8d9bfcbe461a3f90d98bd9aab897ebe7712cdb23a2d77e8de780c`,
   не recertify-ит runtime и допускает ровно task classes
   `compare_current_file_with_current_web` и
   `compare_archive_with_current_web`; `plan_candidate` не добавляется в общий
@@ -320,6 +320,9 @@ failed/error/skipped-тест в любой фазе делает гейт кр�
   `shadow`, `promotion_admitted=false`; proposal только парсится/валидируется и
   никогда не выбирает route, не исполняется, не публикуется, не меняет primary
   prompt/Work Item и не создаёт tool/effect/knowledge-write operation;
+- admitted assist/canary policy `gptoss20b-semantic-supervisor-v2` имеет exact
+  SHA-256 `95dc4ae7e246e7104b1e1cd036ea9706fdb014de6889d69789fca66cec9fd98b`;
+  shadow evidence с иной policy identity не может выдать это право само по себе;
 - sidecar возвращает exact primary result и вызывает primary ровно один раз;
   secondary attempt стартует только после успешного primary, bounded четырьмя
   pending tasks и исходным deadline; каждый созданный request до adapter

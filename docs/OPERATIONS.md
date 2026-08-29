@@ -298,7 +298,7 @@ missing evidence or scheduler failure closes the supervisor. Не добавля
 code-owned overlay accepted secondary runtime.
 
 Shadow использует policy `gptoss20b-semantic-supervisor-v1`, SHA-256
-`9f0c1e8132200a3a4416448cd2de03a4736da5e4968536d8c9e518fd5e88051a`,
+`edea7fce6ae8d9bfcbe461a3f90d98bd9aab897ebe7712cdb23a2d77e8de780c`,
 `MAX_STEPS=6`, `MAX_REVIEW_ROUNDS=0` и одну либо обе task classes
 `compare_current_file_with_current_web`,
 `compare_archive_with_current_web`. Proposal вызывается после успешного primary
@@ -314,7 +314,7 @@ primary path. Для synthetic regression используйте:
 
 Assist/canary используют отдельный policy
 `gptoss20b-semantic-supervisor-v2`, SHA-256
-`534905cdaac794f485b43e25895761f1a3588ff8eabcc20527530d7f3bd4f96e`,
+`95dc4ae7e246e7104b1e1cd036ea9706fdb014de6889d69789fca66cec9fd98b`,
 ровно `MAX_STEPS=6`, `MAX_REVIEW_ROUNDS=1` и только
 `compare_current_file_with_current_web`. Обязательны:
 

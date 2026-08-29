@@ -122,6 +122,15 @@ def test_secondary_runbook_is_bound_to_the_only_accepted_finalist():
     assert "прямой ENV1→assist отклоняется" in section
 
 
+def test_semantic_supervisor_runbooks_bind_current_policy_identities():
+    """A changed policy digest must invalidate copy/paste rollout guidance too."""
+    from friday import semantic_supervisor_policy as policy
+
+    for document in (OPERATIONS, RELEASE_CHECKLIST):
+        assert policy.SUPERVISOR_PRODUCT_POLICY_SHA256 in document
+        assert policy.SUPERVISOR_ASSIST_PRODUCT_POLICY_SHA256 in document
+
+
 def test_canonical_backlog_states_the_schema_the_code_opens():
     """The only project status register must not pin a prehistoric schema."""
     from friday.storage._base import SCHEMA_VERSION
