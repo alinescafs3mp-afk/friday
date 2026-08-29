@@ -1,3 +1,18 @@
+## 0.207.72 — 2026-08-29
+
+### Measured retrieval recall
+
+- Adds a deterministic, body-free recall benchmark that exercises the shipped
+  archive prepare, command-ledger admission, reauthorization and publication
+  attestation path without a test retriever or a new runtime service.
+- Freezes closed corpus, metric, comparison and exact-release contracts so
+  ranking changes are measured before release and mutable/self-declared output
+  cannot become evidence.
+- Closes one reproduced 20-result lexical-cap miss: an already body-eligible
+  document receives a deterministic ordering boost only when every canonical
+  query term is present in its safe filename. Filename text never creates a
+  candidate, passage or factual result; coverage remains honestly capped.
+
 ## 0.207.71 — 2026-08-29
 
 ### Bounded Supervisor readiness
