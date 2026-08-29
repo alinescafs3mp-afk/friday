@@ -36,12 +36,10 @@ either merged here or discarded before that source is removed.
   release-bound witness; no traffic is fabricated to cross that gate. The
   primary remains sole tool, effect and final-publication owner; secondary
   absence preserves primary-only behavior.
-- The reader-first body-free passage writer/backfill is live and converging. Its
-  first coherent production audit accounted for all 1,882 eligible authorized
-  sources as 181 current plus 1,701 explicit-incomplete parents, with 1,686
-  body-free child rows and zero missing or stale parents. Two sparse-text sources
-  remain explicitly pending because their released v2 chunk topology is invalid;
-  no document body is duplicated in the sidecar.
+- The reader-first body-free document-passage contour is fully converged: 1,720
+  current parents and 16,359 child passages, with no pending v3 backfill. The two
+  formerly invalid sparse-text v2 sources were repaired by the released v3
+  topology; no document body is duplicated in the sidecar.
 
 ## Active package
 
