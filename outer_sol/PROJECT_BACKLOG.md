@@ -14,19 +14,20 @@ either merged here or discarded before that source is removed.
 ## Current production identity
 
 - Branch: `main`
-- Deployed implementation head: `89f65ef105d501a3d7a540edef829a159d062d42`
-- Live: Friday `0.207.74` / `89f65ef105d501a3d7a540edef829a159d062d42`;
-  tree `54e0b543f7818d4d845954f4d81d642a56ac744383242aa30ca6200598b3d982`;
-  wheel `2b04deab0296e23975206d43d9fcb9a6e7f779080d593118e94f9418cb67d7cb`.
-- Immediate runtime predecessor: Friday `0.207.73` /
-  `723c4cbbeff5648ca196d4a5b0a7654cfa3d164d`; tree
-  `e939b8adaed520f4baaabcae774bea018af489a07ecac7310c94c4a92112d8ad`.
+- Deployed implementation head: `dd4849e79dd06b29fdb013f2b11f4f41309e2930`
+- Live: Friday `0.207.75` / `dd4849e79dd06b29fdb013f2b11f4f41309e2930`;
+  tree `9a4acc74ac2b0c647c562edcbbc01d7b47a58a39a73781a9e9556d37137277ef`;
+  wheel `41f61f6d5d3c29e13d455672cde00078881c108f9c07dde8770a7652865a85db`.
+- Immediate runtime predecessor: Friday `0.207.74` /
+  `89f65ef105d501a3d7a540edef829a159d062d42`; tree
+  `54e0b543f7818d4d845954f4d81d642a56ac744383242aa30ca6200598b3d982`.
 - Schema-capable fallback: Friday `0.207.73rc0` /
   `0ff75de8fad68f623d089ec7bc79e1d85d585bca`;
   tree `fa18f7b2f57ad2a6d8cba3ebc745fb51ce7ca95ae49738cb643f83192ed17db0`.
 - Database schema: 47
 - Production: immutable activation `clear`; backend and Telegram bridge active;
-  trusted-CA health `200`; V12 `canary_ready`; complete S2 authenticated turn
+  trusted-CA health `200`; signed private-owner chat returned exact `OK`; V12
+  `canary_ready`; complete S2 authenticated turn
   authority is active across scalar, file, attachment and V12 paths without
   changing current user-visible routing. The S3 bounded-advisor code and its
   storage-backed restart verifier are live.
@@ -48,12 +49,12 @@ either merged here or discarded before that source is removed.
 
 Keep the released S3 path in shadow until its genuine production witness exists;
 then promote only the current-file-plus-current-public-web journey through the
-already released fail-closed activation gate. Let the released S4 writer finish
-its bounded convergence, then repair the two v2 topology gaps in a new passage
-revision with its own schema-capable fallback before search-facade parity work.
-In parallel, SolGoodman is correcting the rejected S6 R0 at-most-once review
-defects before his retracted R1 package may be reconsidered; he may not change
-schema, main or the S2/S3/S4 authority surfaces.
+already released fail-closed activation gate. Repair the two S4 v2 topology
+gaps in a new passage revision with its own schema-capable fallback before
+search-facade parity work. In parallel, SolGoodman is closing the isolated S5
+measured-lease/adoption package; it remains unreleased pending review and the
+exact q38/SGLang live probe. S6 mission, reminder and Telegram recovery is live;
+the remaining physical Android acceptance still requires the owner/device.
 
 ## Operating rules
 
@@ -324,6 +325,8 @@ Estimate: 8–16 clean-work days across separately reversible releases.
 
 ### S5 — measured cognition and installation budgets
 
+Status: R0/R1 implementation is in isolated review; nothing is released yet.
+
 - Extend the existing attested `V12ModelProfileSpec`/lease instead of creating a
   competing environment-only model profile. Measured capabilities control
   lexical routing aids, verifier policy, history, tool rounds/calls, prepared
@@ -342,6 +345,9 @@ Estimate: 4–8 clean-work days after S2, released incrementally.
 
 ### S6 — journey proof and recovery, not new organs
 
+Status: current mission/reminder and Telegram ingress/delivery recovery audit
+deployed in `0.207.75`; physical Android acceptance remains owner-bound.
+
 - Keep core Telegram, web, file/Office, Obsidian, Engineer and reminder paths
   release-blocking with named deterministic tests and exact-release evidence.
 - Audit scheduled work for at-most-once delivery, restart/cancel/expiry and
@@ -355,6 +361,19 @@ Estimate: 4–8 clean-work days after S2, released incrementally.
 - Perform Obsidian Android round-trip, reconnect and conflict acceptance only
   with the owner/device present; server-side work is otherwise complete and the
   companion remains excluded.
+
+R0/R1 acceptance: mission execution now has exact-attempt claims, completion
+fences and compensation CAS; reminder payloads cross only a reauthorized
+send-edge claim and ambiguous acceptance is never replayed; scans are bounded
+and clock skew cannot wedge recovery. Telegram poll admission, callbacks,
+commands, cached answers, chunks and terminal notices converge across commit
+faults, restart, duplicate pages and ENOSPC without duplicating an admitted
+effect or answer. The final native gate passed 23,774 Python plus 31 UI tests
+with no skips; static checks were clear and two sealed wheels were byte-identical.
+Immutable activation retained schema 47 and the distinct schema-capable
+fallback, created verified SQLite/inbox/Obsidian/Engineer recovery receipts and
+ended `clear`; trusted-CA health reported `0.207.75`/`ok`, and the signed
+private-owner chat returned exact `OK`.
 
 ### Removed from the active queue
 
@@ -394,10 +413,11 @@ Estimate: 4–8 clean-work days after S2, released incrementally.
 2. Keep released `EngineerWorkItem v1` stable; do not expand its scope.
 3. Keep the released bounded S3 advisor in shadow until a genuine eligible turn
    creates its exact production witness; do not fabricate activation evidence.
-4. Let the released bounded S4 writer converge; repair the two v2 topology gaps
-   in a new passage revision with a distinct schema-capable fallback, then move
-   to measured search-facade parity.
-5. Preserve the released exact-evidence verifier and reject mutable or
+4. Repair the two S4 v2 topology gaps in a new passage revision with a distinct
+   schema-capable fallback, then move to measured search-facade parity.
+5. Review and release S5 measured leases only after the exact q38/SGLang live
+   probe proves the installation/runtime pairing and authoritative context use.
+6. Preserve the released exact-evidence verifier and reject mutable or
    self-declared proof while real joined Supervisor observations accumulate.
 
 ## Canonical golden-journey/evidence registry
@@ -438,7 +458,7 @@ are no decisive or `READY` claims at this checkpoint.
 | `conversation_recall` | Conversation recall | `DEGRADED` | `AVAILABLE`<br>[friday/interaction_control_plane/work_item_contract.py](../friday/interaction_control_plane/work_item_contract.py)<br>[tests/test_message_window_runtime_integration.py::test_promoted_exact_window_is_deterministic_scoped_and_receipted](../tests/test_message_window_runtime_integration.py) | `AVAILABLE`<br>[friday/orchestration/message_window_outcome.py](../friday/orchestration/message_window_outcome.py)<br>[tests/test_message_window_runtime_integration.py::test_promoted_exact_window_is_deterministic_scoped_and_receipted](../tests/test_message_window_runtime_integration.py)<br>[tests/test_archive_search_runtime_publication.py::test_selected_message_archive_evidence_replays_after_restart_then_fails_closed](../tests/test_archive_search_runtime_publication.py) | `MISSING` | `MISSING` | `MISSING` | `NOT_APPLICABLE` | `AVAILABLE`<br>[tests/test_message_window_work_item_runtime.py::test_restart_temporal_followup_reuses_identity_role_and_zone_with_one_cas_update](../tests/test_message_window_work_item_runtime.py)<br>[tests/test_archive_search_runtime_publication.py::test_selected_message_archive_evidence_replays_after_restart_then_fails_closed](../tests/test_archive_search_runtime_publication.py) | `MISSING` | `MISSING` | `semantic_recall_missing`<br>`cross_lane_coverage_missing` |
 | `document_recall_answer` | Document recall and answer | `DEGRADED` | `AVAILABLE`<br>[friday/file_evidence_reader.py](../friday/file_evidence_reader.py)<br>[tests/test_v12_file_evidence_reader.py::test_current_turn_native_files_form_one_process_owned_bundle](../tests/test_v12_file_evidence_reader.py) | `AVAILABLE`<br>[friday/orchestration/file_read.py](../friday/orchestration/file_read.py)<br>[tests/test_v12_file_evidence_reader.py::test_reader_contract_matches_real_ingestion_projections](../tests/test_v12_file_evidence_reader.py)<br>[tests/test_archive_search_runtime_publication.py::test_selected_canonical_archive_evidence_replays_exactly_after_runtime_restart](../tests/test_archive_search_runtime_publication.py)<br>[tests/test_archive_search_runtime_publication.py::test_locate_select_and_explain_document_survives_both_runtime_restarts](../tests/test_archive_search_runtime_publication.py) | `MISSING` | `AVAILABLE`<br>[tools/document_contour_live_battery.py](../tools/document_contour_live_battery.py)<br>[tests/test_document_contour_live_battery.py::test_manifest_is_exactly_ten_unique_document_scenarios](../tests/test_document_contour_live_battery.py) | `MISSING` | `NOT_APPLICABLE` | `AVAILABLE`<br>[tests/test_archive_search_runtime_publication.py::test_selected_canonical_archive_evidence_replays_exactly_after_runtime_restart](../tests/test_archive_search_runtime_publication.py)<br>[tests/test_archive_search_runtime_publication.py::test_locate_select_and_explain_document_survives_both_runtime_restarts](../tests/test_archive_search_runtime_publication.py)<br>[tests/test_archive_search_runtime_publication.py::test_selected_archive_replay_failure_is_source_free_and_suspends](../tests/test_archive_search_runtime_publication.py) | `MISSING` | `MISSING` | `cross_lane_coverage_missing` |
 | `obsidian_write_sync` | Obsidian write and synchronization | `UNVERIFIED` | `AVAILABLE`<br>[friday/organs/obsidian/contracts.py](../friday/organs/obsidian/contracts.py)<br>[friday/orchestration/effect_outcome.py](../friday/orchestration/effect_outcome.py)<br>[tests/test_effect_outcome.py::test_effect_outcome_is_immutable_canonical_closed_and_round_trips](../tests/test_effect_outcome.py)<br>[tests/test_obsidian_structured_acceptance_core.py::test_conflict_preview_is_non_destructive_and_contains_both_versions](../tests/test_obsidian_structured_acceptance_core.py) | `AVAILABLE`<br>[friday/organs/obsidian/runtime.py](../friday/organs/obsidian/runtime.py)<br>[tests/test_agent_obsidian_acceptance_message_matrix.py::test_every_exact_tier_a_b_message_routes_through_full_chat_once](../tests/test_agent_obsidian_acceptance_message_matrix.py)<br>[tests/test_agent_obsidian_production_composition.py::test_note_create_append_and_daily_exact_messages_mutate_the_real_vault](../tests/test_agent_obsidian_production_composition.py) | `MISSING` | `AVAILABLE`<br>[tests/test_obsidian_syncthing_live.py::test_pinned_syncthing_generates_and_accepts_the_managed_rest_contract](../tests/test_obsidian_syncthing_live.py) | `MISSING` | `MISSING` | `AVAILABLE`<br>[tests/test_obsidian_runtime.py::test_resume_reuses_daily_operation_identity_without_duplicate_text](../tests/test_obsidian_runtime.py)<br>[tests/test_obsidian_operations.py::test_unproved_append_stays_uncertain_and_never_mutates_the_vault](../tests/test_obsidian_operations.py) | `MISSING` | `MISSING` | `physical_android_round_trip_missing`<br>`real_conflict_evidence_missing` |
-| `durable_scheduled_work` | Durable scheduled work | `UNVERIFIED` | `AVAILABLE`<br>[friday/reminder_schedule.py](../friday/reminder_schedule.py)<br>[tests/test_a_reminder_is_set_before_the_model_speaks.py::test_the_tool_is_removed_so_nobody_is_woken_twice](../tests/test_a_reminder_is_set_before_the_model_speaks.py) | `AVAILABLE`<br>[friday/storage/_missions.py](../friday/storage/_missions.py)<br>[tests/test_a_reminder_is_set_before_the_model_speaks.py::test_the_reminder_is_set_without_asking_the_model](../tests/test_a_reminder_is_set_before_the_model_speaks.py) | `MISSING` | `AVAILABLE`<br>[tools/synthetic_live_battery.py](../tools/synthetic_live_battery.py)<br>[tests/test_synthetic_live_battery.py::test_exact_reminder_oracle_owns_the_model_boundary](../tests/test_synthetic_live_battery.py) | `MISSING` | `NOT_APPLICABLE` | `AVAILABLE`<br>[tests/test_mission_budgets_and_recovery.py::test_spent_budget_survives_a_restart](../tests/test_mission_budgets_and_recovery.py)<br>[tests/test_mission_budgets_and_recovery.py::test_an_interrupted_side_effect_is_never_replayed_blindly](../tests/test_mission_budgets_and_recovery.py) | `MISSING` | `MISSING` | `current_code_journey_audit_missing`<br>`at_most_once_delivery_recovery_missing` |
+| `durable_scheduled_work` | Durable scheduled work | `UNVERIFIED` | `AVAILABLE`<br>[friday/reminder_schedule.py](../friday/reminder_schedule.py)<br>[tests/test_a_reminder_is_set_before_the_model_speaks.py::test_the_tool_is_removed_so_nobody_is_woken_twice](../tests/test_a_reminder_is_set_before_the_model_speaks.py) | `AVAILABLE`<br>[friday/storage/_missions.py](../friday/storage/_missions.py)<br>[tests/test_a_reminder_is_set_before_the_model_speaks.py::test_the_reminder_is_set_without_asking_the_model](../tests/test_a_reminder_is_set_before_the_model_speaks.py) | `MISSING` | `AVAILABLE`<br>[tools/synthetic_live_battery.py](../tools/synthetic_live_battery.py)<br>[tests/test_synthetic_live_battery.py::test_exact_reminder_oracle_owns_the_model_boundary](../tests/test_synthetic_live_battery.py) | `MISSING` | `NOT_APPLICABLE` | `AVAILABLE`<br>[tests/test_durable_scheduled_work_recovery.py::test_post_checkpoint_failure_is_uncertain_and_never_replayed](../tests/test_durable_scheduled_work_recovery.py)<br>[tests/test_reminder_delivery_fence.py::test_hard_process_death_after_possible_acceptance_never_replays](../tests/test_reminder_delivery_fence.py)<br>[tests/test_reminder_delivery_fence.py::test_lost_ack_reacks_off_page_after_restart_without_resend](../tests/test_reminder_delivery_fence.py) | `MISSING` | `MISSING` | `clean_release_artifact_missing`<br>`production_read_only_observation_missing` |
 | `honest_degradation` | Honest degradation | `DEGRADED` | `AVAILABLE`<br>[friday/orchestration/capability_outcome.py](../friday/orchestration/capability_outcome.py)<br>[tests/test_search_provider_refusal_is_not_emptiness.py::test_202_from_duckduckgo_is_a_refusal_not_an_empty_result](../tests/test_search_provider_refusal_is_not_emptiness.py) | `AVAILABLE`<br>[tests/test_search_provider_refusal_is_not_emptiness.py::test_the_chain_moves_on_when_the_first_provider_refuses](../tests/test_search_provider_refusal_is_not_emptiness.py)<br>[tests/test_message_window_runtime_integration.py::test_final_message_snapshot_drift_is_unavailable_source_free_and_not_retried](../tests/test_message_window_runtime_integration.py) | `MISSING` | `AVAILABLE`<br>[tools/synthetic_live_battery.py](../tools/synthetic_live_battery.py)<br>[tests/test_synthetic_live_battery.py::test_full_package_a_oracle_accepts_natural_honest_refusals](../tests/test_synthetic_live_battery.py) | `MISSING` | `NOT_APPLICABLE` | `AVAILABLE`<br>[tests/test_message_window_work_item_runtime.py::test_post_boundary_admission_race_returns_atomic_clarification_without_execution](../tests/test_message_window_work_item_runtime.py) | `MISSING` | `MISSING` | `product_multi_lane_coverage_missing`<br>`candidate_bound_fault_continuation_evidence_missing` |
 | `current_file_web_comparison` | Current file and web comparison | `UNVERIFIED` | `AVAILABLE`<br>[tests/test_compare_current_file_web_work_graph_schema45.py::test_schema45_exact_binding_is_durable_immutable_and_revision_cas](../tests/test_compare_current_file_web_work_graph_schema45.py) | `AVAILABLE`<br>[tests/test_supervisor_assist_controller.py::test_review_and_web_recovery_are_strictly_bounded](../tests/test_supervisor_assist_controller.py) | `MISSING` | `MISSING` | `MISSING` | `NOT_APPLICABLE` | `AVAILABLE`<br>[tests/test_supervisor_assist_graph_adapter.py::test_terminal_cancel_and_startup_reconcile_publish_closed_receipts](../tests/test_supervisor_assist_graph_adapter.py) | `MISSING` | `MISSING` | `assist_promotion_evidence_missing`<br>`clean_release_artifact_missing`<br>`activation_rollback_evidence_missing` |
 

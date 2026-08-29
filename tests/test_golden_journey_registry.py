@@ -53,7 +53,7 @@ CURRENT_JOURNEYS = {
     "durable_scheduled_work": (
         "Durable scheduled work",
         "UNVERIFIED",
-        ("current_code_journey_audit_missing", "at_most_once_delivery_recovery_missing"),
+        ("clean_release_artifact_missing", "production_read_only_observation_missing"),
     ),
     "honest_degradation": (
         "Honest degradation",
