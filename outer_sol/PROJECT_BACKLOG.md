@@ -51,8 +51,9 @@ either merged here or discarded before that source is removed.
 ## Active package
 
 S4-R3 measured search-facade parity and S4-R4a reader-first conversation
-passages are live; R4b remains the separate bounded writer/activation release.
-Keep the released S3 path in shadow
+passages are live; R4b is the separate schema-50 incremental-guard, bounded
+writer/backfill and lexical-activation release. Keep the released S3 path in
+shadow
 until its genuine production witness exists; then promote only the
 current-file-plus-current-public-web journey through the already released
 fail-closed activation gate. S5 measured cognition and exact 40k lease adoption
@@ -278,7 +279,7 @@ The bounded writer and restart-safe backfill are deployed in `0.207.74` and are
 converging in production. R2c v3 passage topology and authenticated stored
 locators are deployed in `0.207.76`. R3 measured search-facade parity is
 deployed in `0.207.78`; R4a reader-first conversation passages are deployed in
-`0.207.79`, and R4b is the active isolated writer/activation package.
+`0.207.79`, and R4b is the active isolated schema-50 writer/activation package.
 
 1. Add reader-first `document_passages` with a schema-capable fallback, bounded
    writer, restart-safe resumable backfill and honest `index_incomplete`.
@@ -364,6 +365,15 @@ it without changing bytes. Backup/restore preserved the exact sidecar and FTS
 receipt. Immutable activation produced verified SQLite/inbox/Obsidian/Engineer
 recovery receipts and ended `clear`; trusted-CA health reports
 `0.207.79`/`ok`, and the signed private-owner smoke returned exact `OK`.
+
+R4b schema decision: the released schema-49 insertion/update guards authenticate
+the complete prior prefix and therefore cannot provide a prefix-independent
+writer bound. R4b may migrate 49→50 only to replace those guards with exact
+incremental next-source/one-anchor CAS proofs and the supporting index. It may
+not add an authoritative store or change R4a's public/body-free contracts. The
+request path remains bounded and fails soft to complete legacy message history;
+schema 49 is the fail-closed predecessor and a distinct schema-50 rc is the
+fallback.
 
 Estimate: 6–12 clean-work days across the remaining separately reversible releases.
 
@@ -466,8 +476,9 @@ schema 47 and clean integrity/FK checks. Trusted-CA health reported
 2. Keep released `EngineerWorkItem v1` stable; do not expand its scope.
 3. Keep the released bounded S3 advisor in shadow until a genuine eligible turn
    creates its exact production witness; do not fabricate activation evidence.
-4. Keep released S4-R4a stable; integrate R4b as the separate bounded writer,
-   restart-safe backfill and lexical-lane activation release.
+4. Keep released S4-R4a stable; integrate R4b as the separate schema-50
+   incremental-guard, bounded writer, restart-safe backfill and lexical-lane
+   activation release.
 5. Keep the released S5 measured-lease contract green; extend cognition only
    through another measured, reversible journey release.
 6. Preserve the released exact-evidence verifier and reject mutable or
