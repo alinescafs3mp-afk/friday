@@ -35,7 +35,10 @@ from friday.orchestration.turn_context import (
     AuthenticatedTurnContext,
     PendingOwnerKind,
 )
-from friday.orchestration.turn_context_call_scope import require_authenticated_chat_call_scope
+from friday.orchestration.turn_context_call_scope import (
+    UNSPECIFIED_CHAT_ADJUNCT,
+    require_authenticated_chat_call_scope,
+)
 from friday.orchestration.turn_context_runtime import current_primary_authenticated_turn_context
 from friday.pending_durable_turn import PendingDurableTurnAdmission
 from friday.permissions import ActorContext
@@ -407,9 +410,9 @@ class SemanticSupervisorAssistRuntime:
         conversation_id: str | None = None,
         attachments: list[dict[str, Any]] | None = None,
         enable_tools: bool = True,
-        kg: Any = None,
-        hybrid_searcher: Any = None,
-        ingestion_result: dict[str, Any] | None = None,
+        kg: Any = UNSPECIFIED_CHAT_ADJUNCT,
+        hybrid_searcher: Any = UNSPECIFIED_CHAT_ADJUNCT,
+        ingestion_result: Any = UNSPECIFIED_CHAT_ADJUNCT,
         synthetic_document_notice: bool = False,
         replay_source_message_id: str | None = None,
         mode: str | None = None,
@@ -461,18 +464,16 @@ class SemanticSupervisorAssistRuntime:
         effective_turn_deadline = (
             authenticated_scope.deadline_monotonic if authenticated_scope is not None else turn_deadline
         )
+        effective_ingestion_result = (
+            authenticated_scope.ingestion_result
+            if authenticated_scope is not None
+            else (None if ingestion_result is UNSPECIFIED_CHAT_ADJUNCT else ingestion_result)
+        )
         legacy_kwargs: dict[str, Any] = {
             "actor": actor,
             "conversation_id": conversation_id,
             "attachments": attachments,
             "enable_tools": enable_tools,
-            "kg": (authenticated_scope.knowledge_graph if authenticated_scope is not None else kg),
-            "hybrid_searcher": (
-                authenticated_scope.hybrid_searcher if authenticated_scope is not None else hybrid_searcher
-            ),
-            "ingestion_result": (
-                authenticated_scope.ingestion_result if authenticated_scope is not None else ingestion_result
-            ),
             "synthetic_document_notice": synthetic_document_notice,
             "replay_source_message_id": replay_source_message_id,
             "mode": mode,
@@ -485,6 +486,14 @@ class SemanticSupervisorAssistRuntime:
             "turn_deadline": effective_turn_deadline,
             "_pending_durable_admission": _pending_durable_admission,
         }
+        if authenticated_scope is not None:
+            legacy_kwargs.update(authenticated_scope.exact_service_kwargs())
+        else:
+            legacy_kwargs.update(
+                kg=None if kg is UNSPECIFIED_CHAT_ADJUNCT else kg,
+                hybrid_searcher=(None if hybrid_searcher is UNSPECIFIED_CHAT_ADJUNCT else hybrid_searcher),
+                ingestion_result=effective_ingestion_result,
+            )
         if telegram_update_id is not None:
             legacy_kwargs["telegram_update_id"] = telegram_update_id
         if authenticated_context is not None:
@@ -496,6 +505,32 @@ class SemanticSupervisorAssistRuntime:
             legacy_calls += 1
             if legacy_calls != 1:
                 raise SupervisorAssistRuntimeError("legacy primary was requested more than once")
+            if authenticated_context is not None:
+                revalidated_scope = require_authenticated_chat_call_scope(
+                    authenticated_context,
+                    user_id=user_id,
+                    message=message,
+                    actor=actor,
+                    conversation_id=conversation_id,
+                    attachments=attachments,
+                    enable_tools=enable_tools,
+                    synthetic_document_notice=synthetic_document_notice,
+                    replay_source_message_id=replay_source_message_id,
+                    mode=mode,
+                    answer_with_voice=answer_with_voice,
+                    reply_to=reply_to,
+                    quoted_attachment_reference=quoted_attachment_reference,
+                    reply_assistant_reference=reply_assistant_reference,
+                    reply_assistant_message_id=reply_assistant_message_id,
+                    turn_policy=turn_policy,
+                    telegram_update_id=telegram_update_id,
+                    turn_deadline=effective_turn_deadline,
+                    pending_durable_admission=_pending_durable_admission,
+                    kg=kg,
+                    hybrid_searcher=hybrid_searcher,
+                    ingestion_result=ingestion_result,
+                )
+                legacy_kwargs.update(revalidated_scope.exact_service_kwargs())
             response = await self._primary.chat(user_id, message, **legacy_kwargs)
             if type(response) is not dict:
                 raise SupervisorAssistRuntimeError("legacy primary returned an invalid response")
@@ -630,9 +665,7 @@ class SemanticSupervisorAssistRuntime:
             conversation_id=conversation_id,
             attachments=attachments,
             enable_tools=enable_tools,
-            ingestion_result=(
-                authenticated_scope.ingestion_result if authenticated_scope is not None else ingestion_result
-            ),
+            ingestion_result=effective_ingestion_result,
             synthetic_document_notice=synthetic_document_notice,
             replay_source_message_id=replay_source_message_id,
             mode=mode,

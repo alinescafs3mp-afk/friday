@@ -51,6 +51,7 @@ from friday.orchestration.supervisor_trace_join import (
 from friday.orchestration.turn_context import AuthenticatedTurnContext, TurnContextError
 from friday.orchestration.turn_context_advisory import suspend_authenticated_advisory_authority
 from friday.orchestration.turn_context_call_scope import (
+    UNSPECIFIED_CHAT_ADJUNCT,
     AuthenticatedChatCallScope,
     require_authenticated_chat_call_scope,
 )
@@ -974,9 +975,9 @@ class SemanticSupervisorShadowRuntime:
         conversation_id: str | None = None,
         attachments: list[dict[str, Any]] | None = None,
         enable_tools: bool = True,
-        kg: Any = None,
-        hybrid_searcher: Any = None,
-        ingestion_result: dict[str, Any] | None = None,
+        kg: Any = UNSPECIFIED_CHAT_ADJUNCT,
+        hybrid_searcher: Any = UNSPECIFIED_CHAT_ADJUNCT,
+        ingestion_result: Any = UNSPECIFIED_CHAT_ADJUNCT,
         synthetic_document_notice: bool = False,
         replay_source_message_id: str | None = None,
         mode: str | None = None,
@@ -1024,6 +1025,11 @@ class SemanticSupervisorShadowRuntime:
         effective_turn_deadline = (
             authenticated_scope.deadline_monotonic if authenticated_scope is not None else turn_deadline
         )
+        effective_ingestion_result = (
+            authenticated_scope.ingestion_result
+            if authenticated_scope is not None
+            else (None if ingestion_result is UNSPECIFIED_CHAT_ADJUNCT else ingestion_result)
+        )
         dispatch_scope, dispatch_epoch = self._advance_dispatch_epoch(actor, conversation_id)
         if _semantic_supervisor_explicit_mode_requested is None:
             explicit_mode_requested = mode is not None
@@ -1039,7 +1045,7 @@ class SemanticSupervisorShadowRuntime:
                 conversation_id=conversation_id,
                 attachments=attachments,
                 enable_tools=enable_tools,
-                ingestion_result=ingestion_result,
+                ingestion_result=effective_ingestion_result,
                 synthetic_document_notice=synthetic_document_notice,
                 replay_source_message_id=replay_source_message_id,
                 mode=mode,
@@ -1065,13 +1071,6 @@ class SemanticSupervisorShadowRuntime:
             "conversation_id": conversation_id,
             "attachments": attachments,
             "enable_tools": enable_tools,
-            "kg": (authenticated_scope.knowledge_graph if authenticated_scope is not None else kg),
-            "hybrid_searcher": (
-                authenticated_scope.hybrid_searcher if authenticated_scope is not None else hybrid_searcher
-            ),
-            "ingestion_result": (
-                authenticated_scope.ingestion_result if authenticated_scope is not None else ingestion_result
-            ),
             "synthetic_document_notice": synthetic_document_notice,
             "replay_source_message_id": replay_source_message_id,
             "mode": mode,
@@ -1082,6 +1081,14 @@ class SemanticSupervisorShadowRuntime:
             "reply_assistant_message_id": reply_assistant_message_id,
             "turn_deadline": effective_turn_deadline,
         }
+        if authenticated_scope is not None:
+            primary_kwargs.update(authenticated_scope.exact_service_kwargs())
+        else:
+            primary_kwargs.update(
+                kg=None if kg is UNSPECIFIED_CHAT_ADJUNCT else kg,
+                hybrid_searcher=(None if hybrid_searcher is UNSPECIFIED_CHAT_ADJUNCT else hybrid_searcher),
+                ingestion_result=effective_ingestion_result,
+            )
         if turn_policy is not None:
             primary_kwargs["turn_policy"] = turn_policy
         if telegram_update_id is not None:
@@ -1093,7 +1100,7 @@ class SemanticSupervisorShadowRuntime:
             # Close mutation/replacement between initial preparation and the
             # nested primary boundary.  No body-bearing projection survives in
             # the detached semantic job.
-            require_authenticated_chat_call_scope(
+            revalidated_scope = require_authenticated_chat_call_scope(
                 authenticated_context,
                 user_id=user_id,
                 message=message,
@@ -1117,6 +1124,7 @@ class SemanticSupervisorShadowRuntime:
                 hybrid_searcher=hybrid_searcher,
                 ingestion_result=ingestion_result,
             )
+            primary_kwargs.update(revalidated_scope.exact_service_kwargs())
         primary_result = await self._primary.chat(user_id, message, **primary_kwargs)
         # The primary response object is sacrosanct even if task creation or
         # structural observation unexpectedly fails.

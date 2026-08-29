@@ -34,6 +34,7 @@ from friday.orchestration.planner import AttestedPlannerRuntime, PlannerModel, V
 from friday.orchestration.turn_context import AuthenticatedTurnContext, TurnContextError
 from friday.orchestration.turn_context_advisory import suspend_authenticated_advisory_authority
 from friday.orchestration.turn_context_call_scope import (
+    UNSPECIFIED_CHAT_ADJUNCT,
     AuthenticatedChatCallScope,
     require_authenticated_chat_call_scope,
 )
@@ -96,9 +97,9 @@ class ChatRuntime(Protocol):
         conversation_id: str | None = None,
         attachments: list[dict[str, Any]] | None = None,
         enable_tools: bool = True,
-        kg: Any = None,
-        hybrid_searcher: Any = None,
-        ingestion_result: dict[str, Any] | None = None,
+        kg: Any = UNSPECIFIED_CHAT_ADJUNCT,
+        hybrid_searcher: Any = UNSPECIFIED_CHAT_ADJUNCT,
+        ingestion_result: Any = UNSPECIFIED_CHAT_ADJUNCT,
         synthetic_document_notice: bool = False,
         replay_source_message_id: str | None = None,
         mode: str | None = None,
@@ -776,9 +777,9 @@ class OrchestrationRouter:
         conversation_id: str | None = None,
         attachments: list[dict[str, Any]] | None = None,
         enable_tools: bool = True,
-        kg: Any = None,
-        hybrid_searcher: Any = None,
-        ingestion_result: dict[str, Any] | None = None,
+        kg: Any = UNSPECIFIED_CHAT_ADJUNCT,
+        hybrid_searcher: Any = UNSPECIFIED_CHAT_ADJUNCT,
+        ingestion_result: Any = UNSPECIFIED_CHAT_ADJUNCT,
         synthetic_document_notice: bool = False,
         replay_source_message_id: str | None = None,
         mode: str | None = None,
@@ -828,18 +829,11 @@ class OrchestrationRouter:
         effective_turn_deadline = (
             authenticated_scope.deadline_monotonic if authenticated_scope is not None else turn_deadline
         )
-        legacy_kwargs = {
+        legacy_kwargs: dict[str, Any] = {
             "actor": actor,
             "conversation_id": conversation_id,
             "attachments": attachments,
             "enable_tools": enable_tools,
-            "kg": (authenticated_scope.knowledge_graph if authenticated_scope is not None else kg),
-            "hybrid_searcher": (
-                authenticated_scope.hybrid_searcher if authenticated_scope is not None else hybrid_searcher
-            ),
-            "ingestion_result": (
-                authenticated_scope.ingestion_result if authenticated_scope is not None else ingestion_result
-            ),
             "synthetic_document_notice": synthetic_document_notice,
             "replay_source_message_id": replay_source_message_id,
             "mode": mode,
@@ -851,6 +845,16 @@ class OrchestrationRouter:
             "telegram_update_id": telegram_update_id,
             "turn_deadline": effective_turn_deadline,
         }
+        if authenticated_scope is not None:
+            legacy_kwargs.update(authenticated_scope.exact_service_kwargs())
+            effective_ingestion_result = authenticated_scope.ingestion_result
+        else:
+            legacy_kwargs.update(
+                kg=None if kg is UNSPECIFIED_CHAT_ADJUNCT else kg,
+                hybrid_searcher=(None if hybrid_searcher is UNSPECIFIED_CHAT_ADJUNCT else hybrid_searcher),
+                ingestion_result=(None if ingestion_result is UNSPECIFIED_CHAT_ADJUNCT else ingestion_result),
+            )
+            effective_ingestion_result = legacy_kwargs["ingestion_result"]
         if authenticated_context is not None:
             legacy_kwargs["_authenticated_turn_context"] = authenticated_context
         if telegram_update_id is not None:
@@ -935,7 +939,7 @@ class OrchestrationRouter:
             plain_durable_surface = bool(
                 (not attachments or comparison_attachment_count == 1)
                 and enable_tools is True
-                and ingestion_result is None
+                and effective_ingestion_result is None
                 and synthetic_document_notice is False
                 and replay_source_message_id is None
                 and answer_with_voice is False

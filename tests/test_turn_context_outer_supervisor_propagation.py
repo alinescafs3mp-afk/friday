@@ -10,6 +10,12 @@ from typing import Any
 
 import pytest
 
+from friday import execution_kernel as execution_kernel_module
+from friday.execution_kernel import (
+    bind_authenticated_request_effect_authority,
+    track_request_effects,
+)
+from friday.orchestration import turn_context_publication as publication_module
 from friday.orchestration.contracts import RouterMode, TurnInput
 from friday.orchestration.effect_outcome import (
     EffectAction,
@@ -48,6 +54,7 @@ from friday.orchestration.supervisor_effect_intent_runtime import (
 )
 from friday.orchestration.turn_context import (
     AuthenticatedTurnContext,
+    FinalPublisher,
     IngressKind,
     InheritedTurnBudget,
     ModelAntiLoopBudget,
@@ -57,6 +64,8 @@ from friday.orchestration.turn_context import (
     TurnResourceBudget,
     TurnSafetyDeadline,
 )
+from friday.orchestration.turn_context_call_scope import require_authenticated_chat_call_scope
+from friday.orchestration.turn_context_publication import bind_authenticated_turn_publication
 from friday.orchestration.turn_context_runtime import (
     bind_authenticated_turn_context,
     current_authenticated_turn_context,
@@ -248,6 +257,15 @@ async def test_effect_shadow_uses_shared_slot_context_deadline_and_detached_auth
         assert current_authenticated_turn_context() is None
         with pytest.raises(TurnContextError, match="primary authority"):
             current_primary_authenticated_turn_context()
+        assert execution_kernel_module._REQUEST_EFFECTS.get() is None
+        assert execution_kernel_module._AUTHENTICATED_REQUEST_EFFECT_AUTHORITY.get() is None
+        assert (
+            execution_kernel_module._EXPECTED_EFFECT_BOUNDARY.get()
+            is execution_kernel_module._EFFECT_BOUNDARY_UNSET
+        )
+        assert execution_kernel_module._PHYSICAL_TOOL_START.get() is None
+        assert publication_module._PUBLICATION_LEASE.get() is None
+        assert publication_module._CARRIED_PREFLIGHT.get() is None
         selected_deadlines.append(kwargs["absolute_deadline_monotonic"])
         projection = kwargs["projection"]
         return EffectIntentSelectionV2(
@@ -273,31 +291,58 @@ async def test_effect_shadow_uses_shared_slot_context_deadline_and_detached_auth
     hybrid = object()
     ingestion = {"promoted": False, "category": "web_request"}
 
-    with bind_authenticated_turn_context(issuer, context):
-        with pytest.raises(TurnContextError, match="message drifted"):
-            await wrapper.chat(
+    marker = object()
+    expected_token = execution_kernel_module._EXPECTED_EFFECT_BOUNDARY.set(marker)
+    physical_token = execution_kernel_module._PHYSICAL_TOOL_START.set(marker)
+    preflight_token = publication_module._CARRIED_PREFLIGHT.set(marker)
+    try:
+        with (
+            track_request_effects(
+                lambda: True,
+                request_binding_sha256=context.effect_fence.request_effect_binding_sha256,
+            ) as effects,
+            bind_authenticated_turn_context(issuer, context),
+            bind_authenticated_request_effect_authority(effects),
+            bind_authenticated_turn_publication(
+                context,
+                conversation_id=_CONVERSATION,
+                person_id=actor.own_id,
+                final_publisher=FinalPublisher.PRIMARY,
+            ),
+        ):
+            with pytest.raises(TurnContextError, match="message drifted"):
+                await wrapper.chat(
+                    "owner",
+                    "подменённый запрос",
+                    **_chat_kwargs(actor, deadline),
+                    _authenticated_turn_context=context,
+                )
+            assert primary.calls == 0
+            response = await wrapper.chat(
                 "owner",
-                "подменённый запрос",
+                _MESSAGE,
                 **_chat_kwargs(actor, deadline),
+                kg=kg,
+                hybrid_searcher=hybrid,
+                ingestion_result=ingestion,
                 _authenticated_turn_context=context,
             )
-        assert primary.calls == 0
-        response = await wrapper.chat(
-            "owner",
-            _MESSAGE,
-            **_chat_kwargs(actor, deadline),
-            kg=kg,
-            hybrid_searcher=hybrid,
-            ingestion_result=ingestion,
-            _authenticated_turn_context=context,
-        )
-        for _ in range(20):
-            if selected_deadlines:
-                break
-            await asyncio.sleep(0)
-        assert selected_deadlines
-        with pytest.raises(TurnContextError, match="exhausted"):
-            reserve_authenticated_advisory_call(context)
+            for _ in range(20):
+                if selected_deadlines:
+                    break
+                await asyncio.sleep(0)
+            assert selected_deadlines
+            with pytest.raises(TurnContextError, match="exhausted"):
+                reserve_authenticated_advisory_call(context)
+            assert execution_kernel_module._REQUEST_EFFECTS.get() is effects
+            assert execution_kernel_module._EXPECTED_EFFECT_BOUNDARY.get() is marker
+            assert execution_kernel_module._PHYSICAL_TOOL_START.get() is marker
+            assert publication_module._PUBLICATION_LEASE.get() is not None
+            assert publication_module._CARRIED_PREFLIGHT.get() is marker
+    finally:
+        publication_module._CARRIED_PREFLIGHT.reset(preflight_token)
+        execution_kernel_module._PHYSICAL_TOOL_START.reset(physical_token)
+        execution_kernel_module._EXPECTED_EFFECT_BOUNDARY.reset(expected_token)
 
     assert response is primary.response
     assert primary.kwargs["_authenticated_turn_context"] is context
@@ -462,6 +507,143 @@ async def test_authenticated_ordinary_assist_turn_cannot_mint_pending_work() -> 
     assert primary.kwargs["hybrid_searcher"] is hybrid
     assert primary.kwargs["ingestion_result"] is ingestion
     assert controller.classify_calls == controller.execute_calls == 0
+
+
+@pytest.mark.asyncio
+async def test_outer_effect_and_assist_omission_preserves_inner_exact_adjunct_binding(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import friday.orchestration.supervisor_effect_intent_runtime as module
+
+    issuer, context, actor, deadline = _turn("outer-effect-assist-omission")
+    kg = object()
+    hybrid = object()
+    ingestion = {"promoted": False, "reason": "inner code-owned exact refs"}
+
+    class ExactPrimary(_Primary):
+        async def chat(self, user_id: str, message: str, **kwargs: Any) -> dict[str, Any]:
+            admitted = require_authenticated_chat_call_scope(
+                context,
+                user_id=user_id,
+                message=message,
+                actor=kwargs["actor"],
+                conversation_id=kwargs.get("conversation_id"),
+                attachments=kwargs.get("attachments"),
+                enable_tools=kwargs.get("enable_tools", True),
+                synthetic_document_notice=kwargs.get("synthetic_document_notice", False),
+                replay_source_message_id=kwargs.get("replay_source_message_id"),
+                mode=kwargs.get("mode"),
+                answer_with_voice=kwargs.get("answer_with_voice", False),
+                reply_to=kwargs.get("reply_to"),
+                quoted_attachment_reference=kwargs.get("quoted_attachment_reference", False),
+                reply_assistant_reference=kwargs.get("reply_assistant_reference", False),
+                reply_assistant_message_id=kwargs.get("reply_assistant_message_id"),
+                turn_policy=kwargs.get("turn_policy"),
+                telegram_update_id=kwargs.get("telegram_update_id"),
+                turn_deadline=kwargs.get("turn_deadline"),
+                pending_durable_admission=kwargs.get("_pending_durable_admission"),
+                kg=kg,
+                hybrid_searcher=hybrid,
+                ingestion_result=ingestion,
+            )
+            assert admitted.knowledge_graph is kg
+            assert admitted.hybrid_searcher is hybrid
+            assert admitted.ingestion_result is ingestion
+            assert not {"kg", "hybrid_searcher", "ingestion_result"}.intersection(kwargs)
+            return await super().chat(user_id, message, **kwargs)
+
+    primary = ExactPrimary(
+        {
+            "conversation_id": _CONVERSATION,
+            "message_id": "message-1",
+            "message": "primary",
+        }
+    )
+    assist = _assist_runtime(primary, _AssistController())
+    witness = SimpleNamespace(
+        artifact_file_sha256="1" * 64,
+        maturity_facts_sha256="2" * 64,
+        source_revision_sha256="3" * 64,
+        registry_binding_sha256="4" * 64,
+        effect_registry_binding_sha256="5" * 64,
+    )
+    monkeypatch.setattr(
+        module, "accepted_read_only_maturity_witness_is_current", lambda value: value is witness
+    )
+    effect = SupervisorEffectIntentShadowRuntime(
+        settings=SimpleNamespace(
+            semantic_supervisor_effect_mode="shadow",
+            semantic_supervisor_effect_evidence_sha256="1" * 64,
+        ),
+        primary=assist,
+        scheduler=_EffectScheduler(),  # type: ignore[arg-type]
+        storage=_EffectStorage(),
+        maturity_witness=witness,  # type: ignore[arg-type]
+    )
+
+    with bind_authenticated_turn_context(issuer, context):
+        response = await effect.chat(
+            "owner",
+            _MESSAGE,
+            **_chat_kwargs(actor, deadline),
+            _authenticated_turn_context=context,
+        )
+
+    assert response is primary.response
+    assert primary.calls == 1
+    await effect.close()
+
+
+@pytest.mark.asyncio
+async def test_authenticated_assist_revalidates_ingestion_after_await_before_primary() -> None:
+    admission = PendingDurableTurnAdmission.owned(
+        person_id="owner",
+        conversation_id=_CONVERSATION,
+        work_graph_id="graph_0123456789abcdef",
+        revision=3,
+    )
+    issuer, context, actor, deadline = _turn("outer-assist-await-mutation", pending=admission)
+    ingestion = {"promoted": False, "reason": "original exact body"}
+    primary = _Primary({"conversation_id": _CONVERSATION, "message": "must not run"})
+
+    class MutatingController(_AssistController):
+        async def reconcile_pending_before_legacy(
+            self,
+            *_args: Any,
+            **_kwargs: Any,
+        ) -> AssistPendingGraphDisposition:
+            await asyncio.sleep(0)
+            ingestion["reason"] = "mutated during awaited reconciliation"
+            return AssistPendingGraphDisposition.LIVE_IN_PROCESS
+
+    runtime = _assist_runtime(primary, MutatingController())
+    ingress = SupervisorAssistIngressBindingV1.from_claimed_request(
+        source_ref="outer-assist-await-mutation:current",
+        request_fingerprint_sha256="e" * 64,
+    )
+    decision = SupervisorAssistPendingDecision.for_graph(
+        relation=SupervisorAssistPendingRelation.NEW_TURN,
+        pending=admission,
+        root_request_binding_sha256="f" * 64,
+        current=ingress,
+    )
+
+    with (
+        bind_authenticated_turn_context(issuer, context),
+        pytest.raises(TurnContextError, match="chat call scope drifted"),
+    ):
+        await runtime.chat(
+            "owner",
+            _MESSAGE,
+            **_chat_kwargs(actor, deadline),
+            ingestion_result=ingestion,
+            _pending_durable_admission=admission,
+            _semantic_supervisor_ingress_binding=ingress,
+            _semantic_supervisor_pending_decision=decision,
+            _authenticated_turn_context=context,
+        )
+
+    assert primary.calls == 0
 
 
 @pytest.mark.asyncio

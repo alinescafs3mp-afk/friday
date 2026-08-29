@@ -675,6 +675,7 @@ def test_authenticated_attachment_seal_rejects_same_token_clone_and_body_mutatio
 
         clone = _AttachmentCarrier(carrier)
         object.__setattr__(clone, "_current_turn_file_reference", token)
+        clone["transient_text"] = "replaced body under the exact token"
         kwargs["attachments"] = [clone]
         with pytest.raises(TurnContextError, match="chat call scope drifted"):
             require_authenticated_chat_call_scope(context, **kwargs)
@@ -772,6 +773,16 @@ async def test_authenticated_service_and_ingestion_adjuncts_are_exact_and_immuta
                 _MESSAGE,
                 **_chat_kwargs(actor, context),
                 kg=kg,
+                hybrid_searcher=object(),
+                ingestion_result=ingestion,
+                _authenticated_turn_context=context,
+            )
+        with pytest.raises(TurnContextError, match="chat call scope drifted"):
+            await router.chat(
+                "owner",
+                _MESSAGE,
+                **_chat_kwargs(actor, context),
+                kg=kg,
                 hybrid_searcher=hybrid,
                 ingestion_result=dict(ingestion),
                 _authenticated_turn_context=context,
@@ -789,6 +800,66 @@ async def test_authenticated_service_and_ingestion_adjuncts_are_exact_and_immuta
             )
 
     assert primary.calls == 1
+
+
+@pytest.mark.asyncio
+async def test_outer_semantic_and_router_omission_preserves_inner_exact_adjunct_binding() -> None:
+    issuer, context, actor, _now = _authenticated_turn(router_mode=RouterMode.LEGACY)
+    kg = object()
+    hybrid = object()
+    ingestion = {"promoted": False, "reason": "inner code-owned exact refs"}
+
+    class ExactInner(_Primary):
+        async def chat(self, user_id: str, message: str, **kwargs: Any) -> dict[str, Any]:
+            admitted = require_authenticated_chat_call_scope(
+                context,
+                user_id=user_id,
+                message=message,
+                actor=kwargs["actor"],
+                conversation_id=kwargs.get("conversation_id"),
+                attachments=kwargs.get("attachments"),
+                enable_tools=kwargs.get("enable_tools", True),
+                synthetic_document_notice=kwargs.get("synthetic_document_notice", False),
+                replay_source_message_id=kwargs.get("replay_source_message_id"),
+                mode=kwargs.get("mode"),
+                answer_with_voice=kwargs.get("answer_with_voice", False),
+                reply_to=kwargs.get("reply_to"),
+                quoted_attachment_reference=kwargs.get("quoted_attachment_reference", False),
+                reply_assistant_reference=kwargs.get("reply_assistant_reference", False),
+                reply_assistant_message_id=kwargs.get("reply_assistant_message_id"),
+                turn_policy=kwargs.get("turn_policy"),
+                telegram_update_id=kwargs.get("telegram_update_id"),
+                turn_deadline=kwargs.get("turn_deadline"),
+                pending_durable_admission=kwargs.get("_pending_durable_admission"),
+                kg=kg,
+                hybrid_searcher=hybrid,
+                ingestion_result=ingestion,
+                runtime_router_mode=RouterMode.LEGACY,
+            )
+            assert admitted.knowledge_graph is kg
+            assert admitted.hybrid_searcher is hybrid
+            assert admitted.ingestion_result is ingestion
+            assert not {"kg", "hybrid_searcher", "ingestion_result"}.intersection(kwargs)
+            return await super().chat(user_id, message, **kwargs)
+
+    inner = ExactInner()
+    router = OrchestrationRouter(cast(Any, inner), cast(Any, _Planner()), mode=RouterMode.LEGACY)
+    wrapper = SemanticSupervisorShadowRuntime(
+        settings=_supervisor_settings(),
+        primary=cast(Any, router),
+        scheduler=cast(Any, _Scheduler()),
+    )
+    with bind_authenticated_turn_context(issuer, context):
+        response = await wrapper.chat(
+            "owner",
+            _MESSAGE,
+            **_chat_kwargs(actor, context),
+            _authenticated_turn_context=context,
+        )
+        await wrapper.drain_shadow()
+
+    assert response["message"] == "primary"
+    assert inner.calls == 1
 
 
 def test_outer_omission_does_not_bind_adjuncts_before_exact_inner_runtime() -> None:

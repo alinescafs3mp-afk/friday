@@ -32,7 +32,7 @@ from friday.pending_durable_turn import PendingDurableTurnAdmission
 from friday.permissions import ActorContext
 from friday.turn_intent_policy import TurnPolicyDecision
 
-_UNSPECIFIED_ADJUNCT = object()
+UNSPECIFIED_CHAT_ADJUNCT = object()
 _MAX_PROJECTION_NODES = 200_000
 _MAX_PROJECTION_DEPTH = 64
 
@@ -43,9 +43,9 @@ class _AuthenticatedCallAdjunctSeal:
     __slots__ = ("_hybrid", "_ingestion", "_ingestion_sha256", "_kg", "_lock")
 
     def __init__(self) -> None:
-        self._kg: object = _UNSPECIFIED_ADJUNCT
-        self._hybrid: object = _UNSPECIFIED_ADJUNCT
-        self._ingestion: object = _UNSPECIFIED_ADJUNCT
+        self._kg: object = UNSPECIFIED_CHAT_ADJUNCT
+        self._hybrid: object = UNSPECIFIED_CHAT_ADJUNCT
+        self._ingestion: object = UNSPECIFIED_CHAT_ADJUNCT
         self._ingestion_sha256 = ""
         self._lock = Lock()
 
@@ -57,31 +57,31 @@ class _AuthenticatedCallAdjunctSeal:
         ingestion_result: object,
     ) -> None:
         with self._lock:
-            if self._ingestion is not _UNSPECIFIED_ADJUNCT:
+            if self._ingestion is not UNSPECIFIED_CHAT_ADJUNCT:
                 current_sha256 = _process_local_projection_sha256(
                     self._ingestion,
                     label="ingestion result",
                 )
                 if current_sha256 != self._ingestion_sha256:
                     raise TurnContextError("authenticated turn chat call scope drifted")
-            if kg is not _UNSPECIFIED_ADJUNCT:
-                if self._kg is _UNSPECIFIED_ADJUNCT:
+            if kg is not UNSPECIFIED_CHAT_ADJUNCT:
+                if self._kg is UNSPECIFIED_CHAT_ADJUNCT:
                     self._kg = kg
                 elif self._kg is not kg:
                     raise TurnContextError("authenticated turn chat call scope drifted")
-            if hybrid_searcher is not _UNSPECIFIED_ADJUNCT:
-                if self._hybrid is _UNSPECIFIED_ADJUNCT:
+            if hybrid_searcher is not UNSPECIFIED_CHAT_ADJUNCT:
+                if self._hybrid is UNSPECIFIED_CHAT_ADJUNCT:
                     self._hybrid = hybrid_searcher
                 elif self._hybrid is not hybrid_searcher:
                     raise TurnContextError("authenticated turn chat call scope drifted")
-            if ingestion_result is not _UNSPECIFIED_ADJUNCT:
+            if ingestion_result is not UNSPECIFIED_CHAT_ADJUNCT:
                 if ingestion_result is not None and type(ingestion_result) is not dict:
                     raise TurnContextError("authenticated turn ingestion result is invalid")
                 ingestion_sha256 = _process_local_projection_sha256(
                     ingestion_result,
                     label="ingestion result",
                 )
-                if self._ingestion is _UNSPECIFIED_ADJUNCT:
+                if self._ingestion is UNSPECIFIED_CHAT_ADJUNCT:
                     self._ingestion = ingestion_result
                     self._ingestion_sha256 = ingestion_sha256
                 elif self._ingestion is not ingestion_result or self._ingestion_sha256 != ingestion_sha256:
@@ -90,17 +90,17 @@ class _AuthenticatedCallAdjunctSeal:
     @property
     def knowledge_graph(self) -> Any:
         with self._lock:
-            return None if self._kg is _UNSPECIFIED_ADJUNCT else self._kg
+            return None if self._kg is UNSPECIFIED_CHAT_ADJUNCT else self._kg
 
     @property
     def hybrid_searcher(self) -> Any:
         with self._lock:
-            return None if self._hybrid is _UNSPECIFIED_ADJUNCT else self._hybrid
+            return None if self._hybrid is UNSPECIFIED_CHAT_ADJUNCT else self._hybrid
 
     @property
     def ingestion_result(self) -> dict[str, Any] | None:
         with self._lock:
-            if self._ingestion is _UNSPECIFIED_ADJUNCT or self._ingestion is None:
+            if self._ingestion is UNSPECIFIED_CHAT_ADJUNCT or self._ingestion is None:
                 return None
             return cast(dict[str, Any], self._ingestion)
 
@@ -108,6 +108,26 @@ class _AuthenticatedCallAdjunctSeal:
     def ingestion_result_sha256(self) -> str:
         with self._lock:
             return self._ingestion_sha256
+
+    def exact_forwarding_kwargs(self) -> dict[str, Any]:
+        """Return only adjuncts that an exact wrapper actually supplied."""
+
+        with self._lock:
+            if self._ingestion is not UNSPECIFIED_CHAT_ADJUNCT:
+                current_sha256 = _process_local_projection_sha256(
+                    self._ingestion,
+                    label="ingestion result",
+                )
+                if current_sha256 != self._ingestion_sha256:
+                    raise TurnContextError("authenticated turn chat call scope drifted")
+            result: dict[str, Any] = {}
+            if self._kg is not UNSPECIFIED_CHAT_ADJUNCT:
+                result["kg"] = self._kg
+            if self._hybrid is not UNSPECIFIED_CHAT_ADJUNCT:
+                result["hybrid_searcher"] = self._hybrid
+            if self._ingestion is not UNSPECIFIED_CHAT_ADJUNCT:
+                result["ingestion_result"] = self._ingestion
+            return result
 
 
 @dataclass(frozen=True, slots=True)
@@ -141,6 +161,11 @@ class AuthenticatedChatCallScope:
     @property
     def ingestion_result_sha256(self) -> str:
         return self._adjuncts.ingestion_result_sha256
+
+    def exact_service_kwargs(self) -> dict[str, Any]:
+        """Project bound service adjuncts without turning omission into ``None``."""
+
+        return self._adjuncts.exact_forwarding_kwargs()
 
 
 def _process_local_projection_sha256(value: object, *, label: str) -> str:
@@ -317,9 +342,9 @@ def require_authenticated_chat_call_scope(
     telegram_update_id: str | None,
     turn_deadline: float | None,
     pending_durable_admission: PendingDurableTurnAdmission | None,
-    kg: Any = _UNSPECIFIED_ADJUNCT,
-    hybrid_searcher: Any = _UNSPECIFIED_ADJUNCT,
-    ingestion_result: dict[str, Any] | None | object = _UNSPECIFIED_ADJUNCT,
+    kg: Any = UNSPECIFIED_CHAT_ADJUNCT,
+    hybrid_searcher: Any = UNSPECIFIED_CHAT_ADJUNCT,
+    ingestion_result: dict[str, Any] | None | object = UNSPECIFIED_CHAT_ADJUNCT,
     runtime_router_mode: RouterMode | None = None,
 ) -> AuthenticatedChatCallScope:
     """Require every authority-relevant compatibility argument to be exact."""
@@ -454,4 +479,8 @@ def require_authenticated_chat_call_scope(
     return sealed
 
 
-__all__ = ["AuthenticatedChatCallScope", "require_authenticated_chat_call_scope"]
+__all__ = [
+    "AuthenticatedChatCallScope",
+    "UNSPECIFIED_CHAT_ADJUNCT",
+    "require_authenticated_chat_call_scope",
+]

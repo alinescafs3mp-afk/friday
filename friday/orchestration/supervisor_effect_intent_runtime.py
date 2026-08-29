@@ -58,11 +58,14 @@ from friday.orchestration.supervisor_effect_maturity import (
 )
 from friday.orchestration.supervisor_trace_join import load_primary_trace_projection
 from friday.orchestration.turn_context import AuthenticatedTurnContext
-from friday.orchestration.turn_context_call_scope import require_authenticated_chat_call_scope
+from friday.orchestration.turn_context_advisory import suspend_authenticated_advisory_authority
+from friday.orchestration.turn_context_call_scope import (
+    UNSPECIFIED_CHAT_ADJUNCT,
+    require_authenticated_chat_call_scope,
+)
 from friday.orchestration.turn_context_runtime import (
     current_primary_authenticated_turn_context,
     reserve_authenticated_advisory_call,
-    suspend_authenticated_turn_context,
 )
 from friday.permissions import ActorContext
 from friday.secondary_brain import ModelRequest, ModelWorkload, SecondaryAttempt, SecondaryResult
@@ -933,7 +936,7 @@ class SupervisorEffectIntentShadowRuntime:
         try:
             if authenticated_context is not None:
                 reserve_authenticated_advisory_call(authenticated_context)
-            with suspend_authenticated_turn_context():
+            with suspend_authenticated_advisory_authority():
                 task = asyncio.create_task(
                     observation,
                     name="semantic-supervisor-effect-shadow",
@@ -963,6 +966,9 @@ class SupervisorEffectIntentShadowRuntime:
         authenticated_context = current_primary_authenticated_turn_context(
             cast(AuthenticatedTurnContext | None, kwargs.get("_authenticated_turn_context"))
         )
+        kg = kwargs.get("kg", UNSPECIFIED_CHAT_ADJUNCT)
+        hybrid_searcher = kwargs.get("hybrid_searcher", UNSPECIFIED_CHAT_ADJUNCT)
+        ingestion_result = kwargs.get("ingestion_result", UNSPECIFIED_CHAT_ADJUNCT)
         authenticated_scope = (
             require_authenticated_chat_call_scope(
                 authenticated_context,
@@ -984,9 +990,9 @@ class SupervisorEffectIntentShadowRuntime:
                 telegram_update_id=kwargs.get("telegram_update_id"),
                 turn_deadline=kwargs.get("turn_deadline"),
                 pending_durable_admission=kwargs.get("_pending_durable_admission"),
-                kg=kwargs.get("kg"),
-                hybrid_searcher=kwargs.get("hybrid_searcher"),
-                ingestion_result=kwargs.get("ingestion_result"),
+                kg=kg,
+                hybrid_searcher=hybrid_searcher,
+                ingestion_result=ingestion_result,
             )
             if authenticated_context is not None
             else None
@@ -1004,9 +1010,32 @@ class SupervisorEffectIntentShadowRuntime:
             assert authenticated_scope is not None
             primary_kwargs = dict(kwargs)
             primary_kwargs["_authenticated_turn_context"] = authenticated_context
-            primary_kwargs["kg"] = authenticated_scope.knowledge_graph
-            primary_kwargs["hybrid_searcher"] = authenticated_scope.hybrid_searcher
-            primary_kwargs["ingestion_result"] = authenticated_scope.ingestion_result
+            primary_kwargs.update(authenticated_scope.exact_service_kwargs())
+            revalidated_scope = require_authenticated_chat_call_scope(
+                authenticated_context,
+                user_id=user_id,
+                message=message,
+                actor=cast(ActorContext, kwargs.get("actor")),
+                conversation_id=kwargs.get("conversation_id"),
+                attachments=kwargs.get("attachments"),
+                enable_tools=kwargs.get("enable_tools", True),
+                synthetic_document_notice=kwargs.get("synthetic_document_notice", False),
+                replay_source_message_id=kwargs.get("replay_source_message_id"),
+                mode=kwargs.get("mode"),
+                answer_with_voice=kwargs.get("answer_with_voice", False),
+                reply_to=kwargs.get("reply_to"),
+                quoted_attachment_reference=kwargs.get("quoted_attachment_reference", False),
+                reply_assistant_reference=kwargs.get("reply_assistant_reference", False),
+                reply_assistant_message_id=kwargs.get("reply_assistant_message_id"),
+                turn_policy=kwargs.get("turn_policy"),
+                telegram_update_id=kwargs.get("telegram_update_id"),
+                turn_deadline=kwargs.get("turn_deadline"),
+                pending_durable_admission=kwargs.get("_pending_durable_admission"),
+                kg=kg,
+                hybrid_searcher=hybrid_searcher,
+                ingestion_result=ingestion_result,
+            )
+            primary_kwargs.update(revalidated_scope.exact_service_kwargs())
         result = await self._primary.chat(user_id, message, **primary_kwargs)
         if type(result) is dict:
             self._schedule(
