@@ -14,18 +14,17 @@ either merged here or discarded before that source is removed.
 ## Current production identity
 
 - Branch: `main`
-- Deployed implementation head: `dd4849e79dd06b29fdb013f2b11f4f41309e2930`
-- Live: Friday `0.207.75` / `dd4849e79dd06b29fdb013f2b11f4f41309e2930`;
-  tree `9a4acc74ac2b0c647c562edcbbc01d7b47a58a39a73781a9e9556d37137277ef`;
-  wheel `41f61f6d5d3c29e13d455672cde00078881c108f9c07dde8770a7652865a85db`.
-- Immediate runtime predecessor: Friday `0.207.74` /
-  `89f65ef105d501a3d7a540edef829a159d062d42`; tree
-  `54e0b543f7818d4d845954f4d81d642a56ac744383242aa30ca6200598b3d982`.
-- Schema-capable fallback: Friday `0.207.73rc0` /
-  `0ff75de8fad68f623d089ec7bc79e1d85d585bca`;
-  tree `fa18f7b2f57ad2a6d8cba3ebc745fb51ce7ca95ae49738cb643f83192ed17db0`.
-- Database schema: 48 (candidate contract; live remains schema 47 until the
-  immutable 0.207.76 activation completes)
+- Deployed implementation head: `353b0c73773de4e38dee125c5133f9ed15761d9c`
+- Live: Friday `0.207.76` / `353b0c73773de4e38dee125c5133f9ed15761d9c`;
+  tree `09bbcd41a9f6a65321508d520d968e3c1705682fa6bfb72618ec852d9b7c872e`;
+  wheel `0393a2c68494e3b144751239f2751bd149582b341d644e6a5f314431d76f057a`.
+- Immediate runtime predecessor: Friday `0.207.75` /
+  `dd4849e79dd06b29fdb013f2b11f4f41309e2930`; tree
+  `9a4acc74ac2b0c647c562edcbbc01d7b47a58a39a73781a9e9556d37137277ef`.
+- Schema-capable fallback: Friday `0.207.76rc0` /
+  `a70106ace45b4079b0bebac023cebcbf802f006a`;
+  tree `2e3867cf7806a78f23ecaa9dadcdc4896d244f74aa88c57db34e033876da29e9`.
+- Database schema: 48.
 - Production: immutable activation `clear`; backend and Telegram bridge active;
   trusted-CA health `200`; signed private-owner chat returned exact `OK`; V12
   `canary_ready`; complete S2 authenticated turn
@@ -48,15 +47,13 @@ either merged here or discarded before that source is removed.
 
 ## Active package
 
-The S4 v3 passage/stored-locator candidate is sealed with a distinct
-schema-48-capable rc0 fallback and is in final release validation. Keep the
-released S3 path in shadow until its genuine production witness exists; then
-promote only the current-file-plus-current-public-web journey through the
-already released fail-closed activation gate. SolGoodman's isolated S5
-measured-lease/adoption package remains unreleased until its two publication
-freshness blockers and exact q38/SGLang live probe are closed. S6 mission,
-reminder and Telegram recovery is live; physical Android acceptance remains
-owner/device-bound.
+S4 v3 passages and authenticated stored locators are live. Keep the released S3
+path in shadow until its genuine production witness exists; then promote only
+the current-file-plus-current-public-web journey through the already released
+fail-closed activation gate. SolGoodman's isolated S5 measured-lease/adoption
+package remains unreleased until its two publication freshness blockers and
+exact q38/SGLang live probe are closed. S6 mission, reminder and Telegram
+recovery is live; physical Android acceptance remains owner/device-bound.
 
 ## Operating rules
 
@@ -274,7 +271,8 @@ Remaining promotion work is observation-bound, not implementation-bound.
 Status: R0 measured recall and R1 corpus-backed lexical gap closure deployed in
 `0.207.72`; the reader-first schema/coverage contract is deployed in `0.207.73`.
 The bounded writer and restart-safe backfill are deployed in `0.207.74` and are
-converging in production.
+converging in production. R2c v3 passage topology and authenticated stored
+locators are deployed in `0.207.76`.
 
 1. Add reader-first `document_passages` with a schema-capable fallback, bounded
    writer, restart-safe resumable backfill and honest `index_incomplete`.
@@ -322,6 +320,19 @@ SQLite/inbox/Obsidian/Engineer recovery receipts and ended `clear`; trusted-CA
 health reported `0.207.74`/`ok`, and the signed private-owner Telegram smoke
 returned exact `OK`. The two detected sparse-text topology failures remain
 explicitly incomplete rather than being falsely marked current.
+
+R2c acceptance: 323 combined focused tests and an independent 88-test audit
+passed; the six adversarial topology/dependency blockers were clean. The native
+gate passed 23,795 Python plus 31 UI tests with zero skips; static checks were
+clear. Both stable and rc0 were built twice byte-identically. A sealed-wheel
+production-copy migration carried 1,718 exact-current parents, retained two
+honest pending parents, repaired both through the bounded worker, and reopened
+under stable and the distinct rc0 with integrity/FK clean; the schema-47
+predecessor rejected schema 48. Immutable activation produced verified
+SQLite/inbox/Obsidian/Engineer recovery receipts and ended `clear`. Production
+now has 1,720 current parents, 16,359 child passages and no pending v3 backfill;
+trusted-CA health reports `0.207.76`/`ok`, V12 is `canary_ready`, and the signed
+private-owner smoke returned exact `OK`.
 
 Estimate: 8–16 clean-work days across separately reversible releases.
 
