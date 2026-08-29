@@ -621,8 +621,11 @@ def _server_identity_matches(
         return all(
             attestation.get(name) == identity.get(name) for name in REPRESENTATIVE_WINDOW_SERVER_IDENTITY_KEYS
         )
+    target_mode_value = attestation.get("target_mode")
+    if type(target_mode_value) is not str:
+        return False
     try:
-        target_mode = SupervisorMode(attestation.get("target_mode"))
+        target_mode = SupervisorMode(target_mode_value)
         predecessor_mode = _predecessor_mode_for_target(target_mode)
     except (TypeError, ValueError, RepresentativeWindowAttestationError):
         return False
