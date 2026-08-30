@@ -56,7 +56,8 @@ corpus-backed gap closure is active. Keep the released S3 path in shadow
 until its genuine production witness exists; then promote only the
 current-file-plus-current-public-web journey through the already released
 fail-closed activation gate. S5 measured cognition and exact 40k lease adoption
-are live. S6 mission, reminder and Telegram recovery is live; physical Android
+are live. S6 mission, reminder and Telegram recovery is live; the isolated
+Telegram browse-to-full-document closure is active, while physical Android
 acceptance remains owner/device-bound.
 
 ## Operating rules
@@ -422,7 +423,8 @@ signed private-owner smoke returned exact `OK`.
 ### S6 — journey proof and recovery, not new organs
 
 Status: current mission/reminder and Telegram ingress/delivery recovery audit
-deployed in `0.207.75`; physical Android acceptance remains owner-bound.
+deployed in `0.207.75`; the R2 Telegram browse-to-full-document closure is
+active, and physical Android acceptance remains owner-bound.
 
 - Keep core Telegram, web, file/Office, Obsidian, Engineer and reminder paths
   release-blocking with named deterministic tests and exact-release evidence.
@@ -434,6 +436,9 @@ deployed in `0.207.75`; physical Android acceptance remains owner-bound.
   operator evidence into every journey row.
 - Re-measure review queues before adding bounded aging/observability. Keep
   export-before-purge deferred until a real retention journey requires it.
+- Close the reproduced Telegram `/browse` and profile-document dead end by
+  reusing the existing tenant-gated `doc:show` callback path. Preserve empty or
+  malformed-result behavior and do not add another document API or store.
 - Perform Obsidian Android round-trip, reconnect and conflict acceptance only
   with the owner/device present; server-side work is otherwise complete and the
   companion remains excluded.
@@ -495,7 +500,9 @@ schema 47 and clean integrity/FK checks. Trusted-CA health reported
    R5 and close only reproduced corpus-backed gaps without changing authority.
 5. Keep the released S5 measured-lease contract green; extend cognition only
    through another measured, reversible journey release.
-6. Preserve the released exact-evidence verifier and reject mutable or
+6. Close the reproduced Telegram browse-to-full-document dead end through the
+   existing authorized callback path.
+7. Preserve the released exact-evidence verifier and reject mutable or
    self-declared proof while real joined Supervisor observations accumulate.
 
 ## Canonical golden-journey/evidence registry
