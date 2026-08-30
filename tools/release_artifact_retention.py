@@ -752,14 +752,13 @@ def _normalize_authority_bindings(
     actual_pins: tuple[DRGenerationPin, ...] = ()
     generation_index: dr_index.DurableDRGenerationIndex | None = None
     try:
-        observed_dr_index_sha256 = _stable_file_sha256(
-            dr_index_path,
-            private=True,
-            code="dr_index_invalid",
-        )
+        generation_index = dr_index.DurableDRGenerationIndex(canonical_state)
+        dr_snapshot = generation_index.authority_snapshot()
+        if dr_snapshot.index_path != dr_index_path:
+            raise RetentionPlanError("dr_index_invalid")
+        observed_dr_index_sha256 = dr_snapshot.index_sha256
         if observed_dr_index_sha256 != bindings.dr_index_sha256:
             error = error or "dr_index_invalid"
-        generation_index = dr_index.DurableDRGenerationIndex(canonical_state)
         actual_pins = tuple(
             DRGenerationPin(
                 role=pin.role,
@@ -769,24 +768,13 @@ def _normalize_authority_bindings(
                 receipt_sha256=pin.receipt_sha256,
                 restore_release_root=pin.restore_release_root,
                 restore_release_commit=pin.restore_release_commit,
-                restore_release_tree_manifest_sha256=(
-                    pin.restore_release_tree_manifest_sha256
-                ),
+                restore_release_tree_manifest_sha256=(pin.restore_release_tree_manifest_sha256),
                 restore_release_wheel_sha256=pin.restore_release_wheel_sha256,
                 restore_release_max_schema=pin.restore_release_max_schema,
                 restore_release_version=pin.restore_release_version,
             )
-            for pin in generation_index.pins()
+            for pin in dr_snapshot.pins
         )
-        if (
-            _stable_file_sha256(
-                dr_index_path,
-                private=True,
-                code="dr_index_invalid",
-            )
-            != observed_dr_index_sha256
-        ):
-            error = error or "dr_index_invalid"
     except (RetentionPlanError, dr_index.DRGenerationIndexError):
         error = error or "dr_index_invalid"
     if any(not isinstance(pin, DRGenerationPin) for pin in bindings.dr_pins):
@@ -795,6 +783,7 @@ def _normalize_authority_bindings(
         error = error or "dr_pins_invalid"
 
     role_paths: dict[str, Path] = {}
+    backup_restore_identities: dict[Path, Mapping[str, Any]] = {}
     restore_release_records: dict[Path, Mapping[str, Any]] = {}
     pin_records: list[dict[str, Any]] = []
     generation_ids: set[str] = set()
@@ -806,12 +795,10 @@ def _normalize_authority_bindings(
             raise RetentionPlanError("dr_pins_invalid")
         backup_directory = _absolute_lexical(pin.backup_directory, code="dr_pins_invalid")
         for existing in role_paths.values():
-            if (
-                backup_directory == existing
-                or backup_directory in existing.parents
-                or existing in backup_directory.parents
-            ):
-                raise RetentionPlanError("dr_pins_invalid")
+            if backup_directory == existing:
+                continue
+            if backup_directory in existing.parents or existing in backup_directory.parents:
+                error = error or "dr_pins_invalid"
         role_paths[pin.role] = backup_directory
 
         identity_values = (pin.generation_id, pin.receipt_path, pin.receipt_sha256)
@@ -857,6 +844,14 @@ def _normalize_authority_bindings(
             "tree_manifest_sha256": pin.restore_release_tree_manifest_sha256,
             "version": pin.restore_release_version,
         }
+        backup_restore_identity = {
+            **restore_record,
+            "wheel_sha256": pin.restore_release_wheel_sha256,
+        }
+        existing_backup_restore = backup_restore_identities.get(backup_directory)
+        if existing_backup_restore is not None and dict(existing_backup_restore) != backup_restore_identity:
+            error = error or "dr_pins_invalid"
+        backup_restore_identities[backup_directory] = backup_restore_identity
         existing_restore = restore_release_records.get(restore_root)
         if existing_restore is not None and dict(existing_restore) != restore_record:
             error = error or "dr_pins_invalid"
@@ -965,11 +960,7 @@ def _normalize_authority_bindings(
                 *role_paths.values(),
                 *restore_release_records,
                 *receipt_paths,
-                *(
-                    (generation_index.receipt_directory,)
-                    if generation_index is not None
-                    else ()
-                ),
+                *((generation_index.receipt_directory,) if generation_index is not None else ()),
                 *evidence_paths,
                 *evidence_authority_paths,
             }
@@ -1497,7 +1488,7 @@ def plan_release_artifact_retention(
     if isinstance(raw_dr_pins, list):
         for raw_pin in raw_dr_pins:
             if isinstance(raw_pin, Mapping) and isinstance(raw_pin.get("backup_directory"), str):
-                dr_pin_identities[Path(str(raw_pin["backup_directory"]))] = dict(raw_pin)
+                dr_pin_identities.setdefault(Path(str(raw_pin["backup_directory"])), dict(raw_pin))
     evidence_identities: dict[Path, dict[str, Any]] = {}
     raw_evidence = authority.receipt.get("canonical_evidence_roots")
     if isinstance(raw_evidence, list):

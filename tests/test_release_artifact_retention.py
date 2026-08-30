@@ -281,7 +281,7 @@ def synthetic_inventory(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict
             expected_journal_sha256=str(generation_state["journal_sha256"]),
         )
 
-    pins = tuple(retention.DRGenerationPin(**vars(pin)) for pin in generation_index.pins())
+    pins = tuple(retention.DRGenerationPin(**vars(pin)) for pin in generation_index.authority_snapshot().pins)
     dr_index = generation_index.path
 
     releases = {release.identity.root: release for release in (current, previous, fallback, old)}
@@ -328,15 +328,13 @@ def _bindings(
     dr_index_sha256: str | None = None,
     evidence_sha256: str | None = None,
 ) -> retention.RetentionAuthorityBindings:
-    current_pins = tuple(
-        retention.DRGenerationPin(**vars(pin))
-        for pin in fixture["dr_index_owner"].pins()
-    )
+    snapshot = fixture["dr_index_owner"].authority_snapshot()
+    current_pins = tuple(retention.DRGenerationPin(**vars(pin)) for pin in snapshot.pins)
     return retention.RetentionAuthorityBindings(
         activation_journal_sha256=_sha256_file(fixture["activation_journal"]),
         unit_install_journal_sha256=_sha256_file(fixture["unit_journal"]),
         dr_index_path=fixture["dr_index"],
-        dr_index_sha256=dr_index_sha256 or _sha256_file(fixture["dr_index"]),
+        dr_index_sha256=dr_index_sha256 or snapshot.index_sha256,
         dr_pins=current_pins if dr_pins is None else dr_pins,
         canonical_evidence_roots=(
             retention.CanonicalEvidenceRoot(
@@ -481,6 +479,116 @@ def test_pending_dr_generation_is_exact_and_retained(
     assert target["decision"] == "retain"
 
 
+def test_prepared_replay_coalesces_exact_current_backup_and_restore_identity(
+    synthetic_inventory: dict[str, Any],
+) -> None:
+    index = synthetic_inventory["dr_index_owner"]
+    state = index.load()
+    index.prepare(
+        intent="rotate_current",
+        candidate=synthetic_inventory["generation_candidate"](
+            synthetic_inventory["activation_backup"],
+            synthetic_inventory["current"],
+            1,
+        ),
+        expected_journal_sha256=str(state["journal_sha256"]),
+    )
+
+    plan = _plan(synthetic_inventory)
+
+    assert plan["classification_status"] == "eligible"
+    assert plan["block_reason"] == ""
+    matching = [
+        pin
+        for pin in plan["authority_bindings"]["dr_pins"]
+        if pin["backup_directory"] == str(synthetic_inventory["activation_backup"]["directory"])
+    ]
+    assert [pin["role"] for pin in matching] == ["current", "pending"]
+    backup = next(
+        item
+        for item in plan["backup_targets"]
+        if item["path"] == str(synthetic_inventory["activation_backup"]["directory"])
+    )
+    assert backup["decision"] == "retain"
+    assert backup["reason"] == "activation_backup"
+
+
+def test_same_backup_with_conflicting_restore_identity_fails_closed(
+    synthetic_inventory: dict[str, Any],
+) -> None:
+    index = synthetic_inventory["dr_index_owner"]
+    state = index.load()
+    index.prepare(
+        intent="rotate_current",
+        candidate=synthetic_inventory["generation_candidate"](
+            synthetic_inventory["activation_backup"],
+            synthetic_inventory["old"],
+            9,
+        ),
+        expected_journal_sha256=str(state["journal_sha256"]),
+    )
+
+    plan = _plan(synthetic_inventory)
+
+    assert plan["classification_status"] == "blocked"
+    assert plan["block_reason"] == "dr_pins_invalid"
+    assert not any(item["decision"] == "delete_candidate" for item in plan["targets"])
+
+
+def test_atomic_dr_snapshot_rejects_mixed_projection_across_index_a_b_a(
+    synthetic_inventory: dict[str, Any],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    index = synthetic_inventory["dr_index_owner"]
+    state_a = index.authority_snapshot()
+    bindings_a = _bindings(synthetic_inventory)
+    pending_backup = _exact_backup(synthetic_inventory["backup_root"] / "aba-pending", 11)
+    current = index.load()
+    index.prepare(
+        intent="rotate_current",
+        candidate=synthetic_inventory["generation_candidate"](
+            pending_backup,
+            synthetic_inventory["old"],
+            11,
+        ),
+        expected_journal_sha256=str(current["journal_sha256"]),
+    )
+    state_b = index.authority_snapshot()
+    assert state_b.index_sha256 != state_a.index_sha256
+    assert state_b.pins != state_a.pins
+
+    # Restore the exact A bytes after observing B: the old hash/pins/hash
+    # sequence could accept B pins between identical A digests.
+    index.path.write_bytes(state_a.index_raw)
+    index.path.chmod(0o600)
+    assert _sha256_file(index.path) == state_a.index_sha256
+    mixed_bindings = replace(
+        bindings_a,
+        dr_pins=tuple(retention.DRGenerationPin(**vars(pin)) for pin in state_b.pins),
+    )
+    legacy_pins_calls = 0
+
+    def forbidden_split_pins(
+        _index: retention.dr_index.DurableDRGenerationIndex,
+    ) -> tuple[retention.dr_index.GenerationPin, ...]:
+        nonlocal legacy_pins_calls
+        legacy_pins_calls += 1
+        return state_b.pins
+
+    monkeypatch.setattr(
+        retention.dr_index.DurableDRGenerationIndex,
+        "pins",
+        forbidden_split_pins,
+    )
+
+    plan = _plan(synthetic_inventory, authority_bindings=mixed_bindings)
+
+    assert legacy_pins_calls == 0
+    assert plan["classification_status"] == "blocked"
+    assert plan["block_reason"] == "dr_pins_invalid"
+    assert not any(item["decision"] == "delete_candidate" for item in plan["targets"])
+
+
 @pytest.mark.parametrize("forgery", ("dr_body", "dr_index", "dr_receipt", "evidence"))
 def test_forged_authority_digest_blocks_every_delete_candidate(
     synthetic_inventory: dict[str, Any],
@@ -488,9 +596,7 @@ def test_forged_authority_digest_blocks_every_delete_candidate(
 ) -> None:
     bindings = _bindings(synthetic_inventory)
     if forgery == "dr_body":
-        body = next(
-            synthetic_inventory["dr_index_owner"].receipt_directory.glob("authentication-*.json")
-        )
+        body = next(synthetic_inventory["dr_index_owner"].receipt_directory.glob("authentication-*.json"))
         body.chmod(0o600)
         body.write_bytes(body.read_bytes() + b" ")
         body.chmod(0o400)

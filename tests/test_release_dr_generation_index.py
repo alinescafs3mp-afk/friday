@@ -208,6 +208,21 @@ def test_explicit_older_and_rotation_use_only_exact_inputs_not_mtime_or_globs(tm
     assert adopted_ref not in (third["current"], third["older"])
 
 
+def test_authority_snapshot_binds_exact_index_bytes_digest_and_pins(tmp_path: Path) -> None:
+    index = _index(tmp_path)
+    candidate = _candidate(tmp_path, 41)
+    _advance(index, candidate, intent="bootstrap_current", ordinal=410)
+
+    snapshot = index.authority_snapshot()
+
+    assert snapshot.index_path == index.path
+    assert snapshot.index_raw == index.path.read_bytes()
+    assert snapshot.index_sha256 == hashlib.sha256(snapshot.index_raw).hexdigest()
+    assert [pin.role for pin in snapshot.pins] == ["current"]
+    assert snapshot.pins[0].backup_directory == Path(candidate["backup_directory"])
+    _assert_restore_release_pin(snapshot.pins[0], candidate)
+
+
 def test_unfinished_transaction_pins_current_older_and_pending(tmp_path: Path) -> None:
     index = _index(tmp_path)
     current = _candidate(tmp_path, 5)

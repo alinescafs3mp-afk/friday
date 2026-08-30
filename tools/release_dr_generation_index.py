@@ -77,6 +77,16 @@ class GenerationPin:
 
 
 @dataclass(frozen=True)
+class DRGenerationAuthoritySnapshot:
+    """One atomic, self-consistent observation of the durable DR authority."""
+
+    index_path: Path
+    index_raw: bytes
+    index_sha256: str
+    pins: tuple[GenerationPin, ...]
+
+
+@dataclass(frozen=True)
 class _PinnedDirectories:
     state_fd: int
     receipt_fd: int
@@ -1063,15 +1073,17 @@ class DurableDRGenerationIndex:
                 raise DRGenerationIndexError("dr_generation_duplicate_slot")
         return payload
 
-    def _load_unlocked(self, pins: _PinnedDirectories) -> dict[str, Any]:
-        raw = _stable_private_file_at(
+    def _load_raw_unlocked(self, pins: _PinnedDirectories) -> bytes:
+        return _stable_private_file_at(
             pins.state_fd,
             INDEX_NAME,
             mode=0o600,
             maximum_bytes=MAX_INDEX_BYTES,
             code="dr_generation_index_invalid",
         )
-        return self._decode_state(raw, pins.receipt_fd)
+
+    def _load_unlocked(self, pins: _PinnedDirectories) -> dict[str, Any]:
+        return self._decode_state(self._load_raw_unlocked(pins), pins.receipt_fd)
 
     def load(self) -> dict[str, Any]:
         """Authenticate the index and every committed receipt reference."""
@@ -1323,62 +1335,80 @@ class DurableDRGenerationIndex:
                 raise DRGenerationIndexError("dr_generation_recovery_receipt_required")
             return self._publish_locked(state, pins)
 
+    def _pins_from_state_unlocked(
+        self,
+        state: Mapping[str, Any],
+        directories: _PinnedDirectories,
+    ) -> tuple[GenerationPin, ...]:
+        pins: list[GenerationPin] = []
+
+        def restore_release_fields(candidate: Mapping[str, Any]) -> dict[str, Any]:
+            release = candidate["restore_release"]
+            return {
+                "restore_release_root": Path(release["root"]),
+                "restore_release_commit": str(release["commit"]),
+                "restore_release_tree_manifest_sha256": str(release["tree_manifest_sha256"]),
+                "restore_release_wheel_sha256": str(release["wheel_sha256"]),
+                "restore_release_max_schema": int(release["max_schema"]),
+                "restore_release_version": str(release["version"]),
+            }
+
+        for role in ("current", "older"):
+            reference = state[role]
+            if reference is None:
+                continue
+            receipt = self._load_receipt(reference, directories.receipt_fd)
+            candidate = receipt["generation"]["candidate"]
+            pins.append(
+                GenerationPin(
+                    role=role,
+                    backup_directory=Path(candidate["backup_directory"]),
+                    generation_id=str(reference["generation_id"]),
+                    receipt_path=self._receipt_path(str(reference["generation_id"])),
+                    receipt_sha256=str(reference["receipt_sha256"]),
+                    **restore_release_fields(candidate),
+                )
+            )
+        if state["phase"] != "clear":
+            pending = state["pending"]
+            reference = pending["generation"]
+            pins.append(
+                GenerationPin(
+                    role="pending",
+                    backup_directory=Path(pending["candidate"]["backup_directory"]),
+                    generation_id=(str(reference["generation_id"]) if reference is not None else None),
+                    receipt_path=(
+                        self._receipt_path(str(reference["generation_id"])) if reference is not None else None
+                    ),
+                    receipt_sha256=(str(reference["receipt_sha256"]) if reference is not None else None),
+                    **restore_release_fields(pending["candidate"]),
+                )
+            )
+        return tuple(pins)
+
+    def authority_snapshot(self) -> DRGenerationAuthoritySnapshot:
+        """Return index bytes, their file digest, and pins from one guard epoch."""
+
+        with self._guard() as directories:
+            raw = self._load_raw_unlocked(directories)
+            state = self._decode_state(raw, directories.receipt_fd)
+            authority_pins = self._pins_from_state_unlocked(state, directories)
+            return DRGenerationAuthoritySnapshot(
+                index_path=self.path,
+                index_raw=raw,
+                index_sha256=_sha256(raw),
+                pins=authority_pins,
+            )
+
     def pins(self) -> tuple[GenerationPin, ...]:
         """Return exact backup and restore-release pins from authenticated state."""
 
-        with self._guard() as directories:
-            state = self._load_unlocked(directories)
-            pins: list[GenerationPin] = []
-
-            def restore_release_fields(candidate: Mapping[str, Any]) -> dict[str, Any]:
-                release = candidate["restore_release"]
-                return {
-                    "restore_release_root": Path(release["root"]),
-                    "restore_release_commit": str(release["commit"]),
-                    "restore_release_tree_manifest_sha256": str(release["tree_manifest_sha256"]),
-                    "restore_release_wheel_sha256": str(release["wheel_sha256"]),
-                    "restore_release_max_schema": int(release["max_schema"]),
-                    "restore_release_version": str(release["version"]),
-                }
-
-            for role in ("current", "older"):
-                reference = state[role]
-                if reference is None:
-                    continue
-                receipt = self._load_receipt(reference, directories.receipt_fd)
-                candidate = receipt["generation"]["candidate"]
-                pins.append(
-                    GenerationPin(
-                        role=role,
-                        backup_directory=Path(candidate["backup_directory"]),
-                        generation_id=str(reference["generation_id"]),
-                        receipt_path=self._receipt_path(str(reference["generation_id"])),
-                        receipt_sha256=str(reference["receipt_sha256"]),
-                        **restore_release_fields(candidate),
-                    )
-                )
-            if state["phase"] != "clear":
-                pending = state["pending"]
-                reference = pending["generation"]
-                pins.append(
-                    GenerationPin(
-                        role="pending",
-                        backup_directory=Path(pending["candidate"]["backup_directory"]),
-                        generation_id=(str(reference["generation_id"]) if reference is not None else None),
-                        receipt_path=(
-                            self._receipt_path(str(reference["generation_id"]))
-                            if reference is not None
-                            else None
-                        ),
-                        receipt_sha256=(str(reference["receipt_sha256"]) if reference is not None else None),
-                        **restore_release_fields(pending["candidate"]),
-                    )
-                )
-            return tuple(pins)
+        return self.authority_snapshot().pins
 
 
 __all__ = [
     "AUTHENTICATION_RECEIPT_KIND",
+    "DRGenerationAuthoritySnapshot",
     "DRGenerationIndexError",
     "DurableDRGenerationIndex",
     "GENERATION_CANDIDATE_SCHEMA",
