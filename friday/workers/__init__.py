@@ -1040,7 +1040,7 @@ class WorkersManager:
                 raise outcome
             if isinstance(outcome, BaseException):
                 failures += 1
-                LOGGER.error("%s projection phase failed (%s)", label.title(), type(outcome).__name__)
+                LOGGER.error("%s projection phase failed (%s)", label.capitalize(), type(outcome).__name__)
         if failures:
             raise WorkerBatchError(f"{failures} retrieval projection phase(s) failed")
 
