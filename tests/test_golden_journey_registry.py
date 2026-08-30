@@ -15,6 +15,7 @@ from typing import Any
 import pytest
 
 from tools import exact_release_evidence as exact_evidence
+from tools import quality_gate
 
 ROOT = Path(__file__).resolve().parents[1]
 STATUS_PATH = ROOT / "outer_sol" / "PROJECT_BACKLOG.md"
@@ -205,7 +206,7 @@ _OBSERVATION_FIELDS = frozenset(
 )
 _MANIFEST_SCHEMA = "friday.golden-journey-evidence.v1"
 _LEGACY_SELF_DECLARED_RECEIPT_SCHEMA = "friday.golden-journey-sanitized-receipt.v1"
-_CLEAN_RELEASE_ROOT_ENV = "FRIDAY_GOLDEN_JOURNEY_RELEASE_ROOT"
+_CLEAN_RELEASE_ROOT_ENV = "GOLDEN_JOURNEY_RELEASE_ROOT"
 _SHA256 = re.compile(r"[0-9a-f]{64}")
 _CHECK_ID = re.compile(r"[a-z0-9][a-z0-9_.:-]{0,127}")
 _JOURNEY_ID = re.compile(r"[a-z][a-z0-9_]{1,63}")
@@ -1086,6 +1087,8 @@ def test_canonical_golden_journey_registry_is_closed_current_and_privacy_safe(
     future_release_root = tmp_path / "future-sealed-release"
     monkeypatch.setenv(_CLEAN_RELEASE_ROOT_ENV, str(future_release_root))
     assert _clean_release_root_for_registry((future_conversation,)) == future_release_root
+    with quality_gate._isolated_test_environment() as gate_environment:  # noqa: SLF001
+        assert gate_environment[_CLEAN_RELEASE_ROOT_ENV] == str(future_release_root)
     generic_operator = RepositoryLink(
         "tools/immutable_release_operator.py",
         "../tools/immutable_release_operator.py",

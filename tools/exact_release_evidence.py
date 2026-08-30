@@ -2092,6 +2092,52 @@ def _require_exact_existing_bundle_file(path: Path, raw: bytes) -> str:
     return hashlib.sha256(existing).hexdigest()
 
 
+def _recover_existing_observation_bundle(path: Path, fresh: EvidenceBundle) -> EvidenceBundle:
+    """Reuse only the first timestamp when every other canonical field is identical."""
+
+    try:
+        status = path.lstat()
+    except FileNotFoundError:
+        return fresh
+    except OSError as exc:
+        raise ExactReleaseEvidenceError("bundle_output_invalid") from exc
+    if (
+        not stat.S_ISREG(status.st_mode)
+        or stat.S_IMODE(status.st_mode) != 0o600
+        or status.st_nlink not in {1, 2}
+        or status.st_uid != os.geteuid()
+    ):
+        raise ExactReleaseEvidenceError("bundle_output_invalid")
+    try:
+        existing_raw = _stable_file(path, len(fresh.receipt))
+        existing = _load_canonical_receipt(existing_raw)
+        current = _load_canonical_receipt(fresh.receipt)
+        existing_projection = dict(existing)
+        current_projection = dict(current)
+        existing_projection.pop("observed_at_utc")
+        current_projection.pop("observed_at_utc")
+        if existing_projection != current_projection:
+            return fresh
+        release = current["release"]
+        identity = ReleaseIdentity(
+            source_commit=release["source_commit"],
+            tree_sha256=release["tree_sha256"],
+            wheel_sha256=release["wheel_sha256"],
+            database_schema=release["database_schema"],
+        )
+        recovered = _bundle_from_receipt(
+            existing_raw,
+            identity=identity,
+            journey_id=current["journey_id"],
+            evidence_class=current["evidence_class"],
+        )
+    except (KeyError, TypeError, ExactReleaseEvidenceError) as exc:
+        raise ExactReleaseEvidenceError("bundle_output_invalid") from exc
+    if recovered.receipt_ref != fresh.receipt_ref or recovered.manifest_ref != fresh.manifest_ref:
+        raise ExactReleaseEvidenceError("bundle_output_invalid")
+    return recovered
+
+
 @contextmanager
 def _exclusive_bundle_root(root: Path) -> Iterator[None]:
     """Serialize create-only publication; a process crash releases the directory lock."""
@@ -2122,6 +2168,7 @@ def write_evidence_bundle_exclusive(output_root: Path, bundle: EvidenceBundle) -
     root = _resolve_directory(output_root, "bundle_output_invalid")
     with _exclusive_bundle_root(root):
         receipt_path = _ensure_bundle_parent(root, exact.receipt_ref)
+        exact = _recover_existing_observation_bundle(receipt_path, exact)
         manifest_path = _ensure_bundle_parent(root, exact.manifest_ref)
         receipt_identity: tuple[int, int] | None = None
         try:

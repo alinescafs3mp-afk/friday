@@ -780,15 +780,6 @@ def test_bundle_publish_is_create_only_and_rolls_back_only_its_first_file(tmp_pa
     assert receipt_path.read_bytes() == bundle.receipt
     assert manifest_path.read_bytes() == bundle.manifest
 
-    recovered = tmp_path / "recovered"
-    recovered_receipt = recovered / bundle.receipt_ref
-    recovered_receipt.parent.mkdir(parents=True)
-    recovered_receipt.write_bytes(bundle.receipt)
-    recovered_receipt.chmod(0o600)
-    recovered_publish = evidence.write_evidence_bundle_exclusive(recovered, bundle)
-    assert recovered_publish == published
-    assert (recovered / bundle.manifest_ref).read_bytes() == bundle.manifest
-
     linked_recovery = tmp_path / "linked-recovery"
     linked_receipt = linked_recovery / bundle.receipt_ref
     linked_receipt.parent.mkdir(parents=True)
@@ -821,6 +812,76 @@ def test_bundle_publish_is_create_only_and_rolls_back_only_its_first_file(tmp_pa
         evidence.write_evidence_bundle_exclusive(collision, bundle)
     assert not (collision / bundle.receipt_ref).exists()
     assert collision_manifest.read_bytes() == b"pre-existing manifest"
+
+
+def test_bundle_retry_reuses_first_timestamp_after_receipt_only_crash(tmp_path: Path) -> None:
+    identity = _identity()
+    first = evidence._bundle_from_receipt(  # noqa: SLF001
+        _receipt(identity, "conversation_recall"),
+        identity=identity,
+        journey_id="conversation_recall",
+        evidence_class=CLEAN_CLASS,
+    )
+    output = tmp_path / "output"
+    receipt_path = output / first.receipt_ref
+    receipt_path.parent.mkdir(parents=True)
+    receipt_path.write_bytes(first.receipt)
+    receipt_path.chmod(0o600)
+
+    restarted_payload = json.loads(first.receipt)
+    restarted_payload["observed_at_utc"] = "2026-08-30T08:00:01Z"
+    restarted = evidence._bundle_from_receipt(  # noqa: SLF001
+        evidence.canonical_json_bytes(restarted_payload),
+        identity=identity,
+        journey_id="conversation_recall",
+        evidence_class=CLEAN_CLASS,
+    )
+    assert restarted.receipt_ref == first.receipt_ref
+    assert restarted.manifest_ref == first.manifest_ref
+    assert restarted.receipt != first.receipt
+    assert restarted.manifest != first.manifest
+
+    published = evidence.write_evidence_bundle_exclusive(output, restarted)
+
+    assert published == {
+        "manifest_ref": first.manifest_ref,
+        "manifest_sha256": first.manifest_sha256,
+        "receipt_ref": first.receipt_ref,
+        "receipt_sha256": first.receipt_sha256,
+        "result": first.result,
+    }
+    assert receipt_path.read_bytes() == first.receipt
+    assert (output / first.manifest_ref).read_bytes() == first.manifest
+
+
+def test_bundle_retry_rejects_non_timestamp_drift(tmp_path: Path) -> None:
+    identity = _identity()
+    first = evidence._bundle_from_receipt(  # noqa: SLF001
+        _receipt(identity, "conversation_recall"),
+        identity=identity,
+        journey_id="conversation_recall",
+        evidence_class=CLEAN_CLASS,
+    )
+    output = tmp_path / "output"
+    receipt_path = output / first.receipt_ref
+    receipt_path.parent.mkdir(parents=True)
+    receipt_path.write_bytes(first.receipt)
+    receipt_path.chmod(0o600)
+    drifted_payload = json.loads(first.receipt)
+    drifted_payload["observed_at_utc"] = "2026-08-30T08:00:01Z"
+    drifted_payload["execution"]["outcome_projection_sha256"] = "0" * 64
+    drifted = evidence._bundle_from_receipt(  # noqa: SLF001
+        evidence.canonical_json_bytes(drifted_payload),
+        identity=identity,
+        journey_id="conversation_recall",
+        evidence_class=CLEAN_CLASS,
+    )
+
+    with pytest.raises(evidence.ExactReleaseEvidenceError, match="^bundle_output_invalid$"):
+        evidence.write_evidence_bundle_exclusive(output, drifted)
+
+    assert receipt_path.read_bytes() == first.receipt
+    assert not (output / first.manifest_ref).exists()
 
 
 def test_bundle_final_names_appear_only_after_complete_staging_bytes(

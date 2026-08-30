@@ -749,9 +749,11 @@ journey, environment, machine-derived результата и SHA-256 полно
 identity: commit, tree, wheel и schema. Caller не передаёт result, timestamp,
 check IDs, hashes или artifact names. Оба JSON body-free, canonical и
 публикуются create-only через fsynced staging и atomic link. Manifest является
-commit marker: receipt без manifest не создаёт claim, а повторный запуск
-принимает только byte-identical artifact, чтобы завершить прерванную публикацию
-без overwrite. Output root находится вне exact checkout, иначе первый bundle
+commit marker: receipt без manifest не создаёт claim. При повторном запуске
+первый canonical timestamp переиспользуется только если все остальные
+canonical поля receipt идентичны; затем принимаются только byte-identical
+receipt/manifest, чтобы завершить прерванную публикацию без overwrite. Output root
+находится вне exact checkout, иначе первый bundle
 сделает checkout dirty и заблокирует следующие code-owned inventories; после
 выпуска всех bundle Mainline переносит только canonical receipt/manifest bytes.
 
@@ -768,7 +770,8 @@ journey failure. Единственный journey check ID —
 и wheel reproducibility не переименовываются в journey proof. Clean receipt
 нельзя публиковать отдельным receipt-only API — только canonical bundle.
 Canonical registry передаёт sealed root через
-`FRIDAY_GOLDEN_JOURNEY_RELEASE_ROOT`; путь не является authority и принимается
+`GOLDEN_JOURNEY_RELEASE_ROOT`; имя намеренно не использует очищаемые canonical
+gate префиксы `FRIDAY_`/`JERICHO_`. Путь не является authority и принимается
 только если verifier заново выводит из него те же commit/tree/wheel/schema.
 
 Нельзя выпускать decisive evidence задним числом для commit, в котором ещё нет
