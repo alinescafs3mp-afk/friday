@@ -9114,7 +9114,11 @@ class DurableActivationJournal:
 
         return identity("candidate"), identity("previous"), identity("fallback")
 
-    def database_backup(self) -> DatabaseBackup | None:
+    def database_backup(
+        self,
+        *,
+        verify_engineer_sqlite_integrity: bool = True,
+    ) -> DatabaseBackup | None:
         state = dict(self._state or self._read())
         raw = state.get("backup")
         if raw is None:
@@ -9291,7 +9295,11 @@ class DurableActivationJournal:
                 store_present=bool(store_present),
                 key_present=bool(key_present),
             )
-            _verify_engineer_backup(directory, engineer)
+            _verify_engineer_backup(
+                directory,
+                engineer,
+                verify_sqlite_integrity=verify_engineer_sqlite_integrity,
+            )
         expected_top_level = {name for name, _digest, _size in files} | {"manifest.json"}
         if obsidian is not None:
             expected_top_level.add("obsidian-manifest.json")
@@ -10777,6 +10785,8 @@ def _private_engineer_backup_file(path: Path) -> Path:
 def _verify_engineer_backup(
     directory: Path,
     descriptor: _ExactEngineerBackup,
+    *,
+    verify_sqlite_integrity: bool = True,
 ) -> dict[str, Any]:
     manifest_path = _private_regular_file(
         directory / "engineer-manifest.json",
@@ -10815,7 +10825,7 @@ def _verify_engineer_backup(
     if actual_files != expected_files or actual_directories != expected_directories:
         raise ReleaseFailure("engineer_store_backup_manifest_mismatch")
     by_path = {str(item["path"]): item for item in manifest["entries"]}
-    if "store/kernel.sqlite" in by_path:
+    if verify_sqlite_integrity and "store/kernel.sqlite" in by_path:
         scratch = Path(
             tempfile.mkdtemp(
                 prefix=".engineer-store-verify-",

@@ -1944,6 +1944,46 @@ def test_engineer_staging_cleanup_opens_fifo_nonblocking(
     assert inspected is True
 
 
+def test_engineer_backup_byte_reauthentication_does_not_mutate_backup_namespace(
+    tmp_path: Path,
+) -> None:
+    config = _engineer_recovery_config(tmp_path)
+    _provision_test_engineer_store(config)
+    backup = operator._exact_sqlite_backup(config)  # noqa: SLF001
+    payload = backup.opaque
+    assert isinstance(payload, operator._ExactBackupPayload)  # noqa: SLF001
+    assert payload.engineer is not None
+    before = config.backup_dir.stat()
+    before_identity = (
+        before.st_dev,
+        before.st_ino,
+        before.st_mode,
+        before.st_nlink,
+        before.st_uid,
+        before.st_mtime_ns,
+        before.st_ctime_ns,
+    )
+    before_names = {path.name for path in config.backup_dir.iterdir()}
+
+    operator._verify_engineer_backup(  # noqa: SLF001
+        payload.directory,
+        payload.engineer,
+        verify_sqlite_integrity=False,
+    )
+
+    after = config.backup_dir.stat()
+    assert (
+        after.st_dev,
+        after.st_ino,
+        after.st_mode,
+        after.st_nlink,
+        after.st_uid,
+        after.st_mtime_ns,
+        after.st_ctime_ns,
+    ) == before_identity
+    assert {path.name for path in config.backup_dir.iterdir()} == before_names
+
+
 @pytest.mark.parametrize("surface", ["key", "state", "nested_store"])
 def test_engineer_restore_publish_pins_every_parent_against_namespace_swap(
     tmp_path: Path,
