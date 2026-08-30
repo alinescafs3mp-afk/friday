@@ -1059,10 +1059,12 @@ class CallbacksMixin(BridgeShared):
                 name = str(entity.get("name") or "сущность")
                 await self._answer_callback(telegram, callback_id, "Показываю")
                 if knowledge:
+                    shown = knowledge[:8]
                     await self._send_message(
                         telegram,
                         chat_id,
-                        self._format_browse_results(f"Записи «{name}»", knowledge[:8]),
+                        self._format_browse_results(f"Записи «{name}»", shown),
+                        reply_markup=self._search_reply_markup(shown),
                     )
                 else:
                     await self._send_message(

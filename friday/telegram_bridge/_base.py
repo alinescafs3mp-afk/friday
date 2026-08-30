@@ -383,6 +383,7 @@ class BridgeShared:
     _offer_access_to_owner: Callable[..., Any]
     _signer_chat_id: Callable[..., Any]
     _format_browse_results: Callable[..., Any]
+    _search_reply_markup: Callable[..., Any]
     _format_status: Callable[..., Any]
     _format_timeline: Callable[..., Any]
     _timeline_reply_markup: Callable[..., Any]

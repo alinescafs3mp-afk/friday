@@ -866,13 +866,36 @@ async def test_browse_command_by_tag_then_entity_fallback_and_tree(tmp_path):
     telegram = _FakeTelegramClient()
     backend = _FakeBackendClient(
         {
+            "/api/knowledge?tag=ideas&limit=8": {
+                "items": [
+                    {
+                        "id": "ko_idea_1",
+                        "title": "Первая идея",
+                        "knowledge_kind": "note",
+                        "lifecycle_stage": "active",
+                    },
+                    {
+                        "id": "ko_idea_2",
+                        "title": "Вторая идея",
+                        "knowledge_kind": "note",
+                        "lifecycle_stage": "active",
+                    },
+                ]
+            },
             # Tag search finds nothing, entity search resolves the project.
             "/api/knowledge?tag=%D0%B4%D0%B0%D1%87%D0%B0&limit=8": {"items": []},
             "/api/kg/entities?q=%D0%B4%D0%B0%D1%87%D0%B0&limit=5": {
                 "items": [{"id": "ent_dacha", "name": "Дача", "entity_type": "project"}]
             },
             "/api/knowledge?entity_id=ent_dacha&limit=8": {
-                "items": [{"title": "Полить сад", "knowledge_kind": "task", "lifecycle_stage": "active"}]
+                "items": [
+                    {
+                        "id": "ko_garden_1",
+                        "title": "Полить сад",
+                        "knowledge_kind": "task",
+                        "lifecycle_stage": "active",
+                    }
+                ]
             },
             # Container tree for the no-argument form.
             "/api/kg/containers": {
@@ -902,19 +925,41 @@ async def test_browse_command_by_tag_then_entity_fallback_and_tree(tmp_path):
             backend,
             {
                 "update_id": 1,
-                "message": {"message_id": 10, "chat": {"id": 5001}, "from": user, "text": "/browse дача"},
+                "message": {"message_id": 10, "chat": {"id": 5001}, "from": user, "text": "/browse #ideas"},
             },
             cached_response=None,
         )
         sends = [payload for url, payload in telegram.calls if url.endswith("/sendMessage")]
-        text = str(sends[-1]["text"])
-        assert "Дача" in text and "Полить сад" in text and "task" in text
+        tagged = sends[-1]
+        assert "1. Первая идея" in tagged["text"] and "2. Вторая идея" in tagged["text"]
+        tagged_buttons = [
+            button["callback_data"] for row in tagged["reply_markup"]["inline_keyboard"] for button in row
+        ]
+        assert tagged_buttons == ["doc:show:ko_idea_1", "doc:show:ko_idea_2"]
 
         await bridge._process_update(
             telegram,
             backend,
             {
                 "update_id": 2,
+                "message": {"message_id": 10, "chat": {"id": 5001}, "from": user, "text": "/browse дача"},
+            },
+            cached_response=None,
+        )
+        sends = [payload for url, payload in telegram.calls if url.endswith("/sendMessage")]
+        linked = sends[-1]
+        text = str(linked["text"])
+        assert "Дача" in text and "Полить сад" in text and "task" in text
+        linked_buttons = [
+            button["callback_data"] for row in linked["reply_markup"]["inline_keyboard"] for button in row
+        ]
+        assert linked_buttons == ["doc:show:ko_garden_1"]
+
+        await bridge._process_update(
+            telegram,
+            backend,
+            {
+                "update_id": 3,
                 "message": {"message_id": 11, "chat": {"id": 5001}, "from": user, "text": "/browse"},
             },
             cached_response=None,
@@ -1716,6 +1761,13 @@ async def test_browse_with_namesakes_offers_a_choice(tmp_path):
                 "entity": {"id": "ent_b", "name": "Тарасов П.С."},
                 "knowledge": [{"id": "ko_1", "title": "Личное дело", "summary": "сводка"}],
             },
+            "/api/knowledge/ko_1": {
+                "item": {
+                    "id": "ko_1",
+                    "title": "Личное дело",
+                    "content": "Полный текст личного дела.",
+                }
+            },
         }
     )
     user = {"id": 1001, "first_name": "Alice"}
@@ -1750,8 +1802,31 @@ async def test_browse_with_namesakes_offers_a_choice(tmp_path):
             cached_response=None,
         )
         sends = [p for u, p in telegram.calls if u.endswith("/sendMessage")]
-        assert "Тарасов П.С." in sends[-1]["text"]
-        assert "Личное дело" in sends[-1]["text"]
+        selected = sends[-1]
+        assert "Тарасов П.С." in selected["text"]
+        assert "1. Личное дело" in selected["text"]
+        result_buttons = [
+            button["callback_data"] for row in selected["reply_markup"]["inline_keyboard"] for button in row
+        ]
+        assert result_buttons == ["doc:show:ko_1"]
+
+        await bridge._process_update(
+            telegram,
+            backend,
+            {
+                "update_id": 54,
+                "callback_query": {
+                    "id": "cb-3",
+                    "from": user,
+                    "data": result_buttons[0],
+                    "message": {"message_id": 82, "chat": {"id": 5001}},
+                },
+            },
+            cached_response=None,
+        )
+        sends = [p for u, p in telegram.calls if u.endswith("/sendMessage")]
+        assert "Полный текст личного дела." in sends[-1]["text"]
+        assert any(call["path"] == "/api/knowledge/ko_1" for call in backend.calls)
     finally:
         bridge._inbox.close()
 

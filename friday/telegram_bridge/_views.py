@@ -958,6 +958,7 @@ class ViewsMixin(BridgeShared):
                 telegram,
                 chat_id,
                 self._format_browse_results(f"Записи с тегом #{clean}", items),
+                reply_markup=self._search_reply_markup(items),
             )
             return
         found = await self._backend_json(
@@ -1023,19 +1024,23 @@ class ViewsMixin(BridgeShared):
             telegram,
             chat_id,
             self._format_browse_results(f"Записи «{name}»", knowledge),
+            reply_markup=self._search_reply_markup(knowledge),
         )
 
-    @staticmethod
-    def _format_browse_results(header: str, items: list[Any]) -> str:
+    @classmethod
+    def _format_browse_results(cls, header: str, items: list[Any]) -> str:
         lines = [f"{header}:"]
-        for item in items:
+        for position, item in enumerate(items, start=1):
             if not isinstance(item, dict):
                 continue
             title = str(item.get("title") or "Без названия")[:120]
             kind = str(item.get("knowledge_kind") or "note")
             stage = str(item.get("lifecycle_stage") or "active")
             marker = "" if stage == "active" else f", {stage}"
-            lines.append(f"• {title} ({kind}{marker})")
+            lines.append(f"{position}. {title} ({kind}{marker})")
+        if cls._search_reply_markup(items) is not None:
+            lines.append("")
+            lines.append("Кнопкой ниже — открыть документ целиком.")
         return "\n".join(lines)
 
     async def _send_history(
@@ -1444,8 +1449,13 @@ class ViewsMixin(BridgeShared):
             # Тот же формат, что у остальных обратных вызовов: три части через
             # двоеточие, цель — только допустимые символы. Идентификаторы здесь
             # `ko_<hex>`, то есть в 64 байта Telegram укладываются с запасом.
-            if knowledge_id and CALLBACK_TARGET_RE.fullmatch(knowledge_id):
-                buttons.append({"text": str(position), "callback_data": f"doc:show:{knowledge_id}"})
+            callback_data = f"doc:show:{knowledge_id}"
+            if (
+                knowledge_id
+                and CALLBACK_TARGET_RE.fullmatch(knowledge_id)
+                and len(callback_data.encode("utf-8")) <= 64
+            ):
+                buttons.append({"text": str(position), "callback_data": callback_data})
         if not buttons:
             return None
         rows = [buttons[index : index + 4] for index in range(0, len(buttons), 4)]

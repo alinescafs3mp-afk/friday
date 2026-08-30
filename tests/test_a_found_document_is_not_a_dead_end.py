@@ -35,6 +35,14 @@ def test_results_are_numbered_so_a_button_can_refer_to_them():
     assert "целиком" in text, "человеку не сказано, что кнопки вообще что-то делают"
 
 
+def test_browse_results_are_numbered_for_the_same_open_buttons():
+    text = TelegramBridge._format_browse_results("Записи с тегом #поверка", _results(3))
+
+    assert "1. Рапорт номер 0" in text
+    assert "3. Рапорт номер 2" in text
+    assert "целиком" in text, "человеку не сказано, что кнопки открывают документы"
+
+
 def test_every_result_gets_a_button_carrying_its_id():
     markup = TelegramBridge._search_reply_markup(_results(3))
 
@@ -62,9 +70,34 @@ def test_a_result_without_a_usable_id_gets_no_button():
     assert buttons[0]["callback_data"] == "doc:show:ko_abc"
 
 
+def test_a_result_callback_never_exceeds_telegrams_64_byte_limit():
+    prefix = "doc:show:"
+    safe_id = "k" * (64 - len(prefix))
+    too_long_id = safe_id + "k"
+
+    markup = TelegramBridge._search_reply_markup(
+        [{"id": safe_id, "title": "Открывается"}, {"id": too_long_id, "title": "Слишком длинный"}]
+    )
+
+    assert markup is not None
+    buttons = [button for row in markup["inline_keyboard"] for button in row]
+    assert [button["callback_data"] for button in buttons] == [f"{prefix}{safe_id}"]
+    assert len(buttons[0]["callback_data"].encode("utf-8")) == 64
+
+
 def test_no_results_means_no_keyboard():
     assert TelegramBridge._search_reply_markup([]) is None
     assert TelegramBridge._search_reply_markup([{"title": "без id"}]) is None
+
+
+def test_browse_without_a_usable_id_does_not_promise_an_open_button():
+    text = TelegramBridge._format_browse_results(
+        "Записи",
+        [{"id": "плохой id с пробелами", "title": "Без кнопки"}],
+    )
+
+    assert "1. Без кнопки" in text
+    assert "Кнопкой ниже" not in text
 
 
 def test_a_long_document_says_how_much_was_shown():
