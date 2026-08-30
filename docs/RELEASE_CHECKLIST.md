@@ -715,9 +715,13 @@ inbox копируются и проверяются как один recovery se
 только из wheel в новый sealed release root; backend проходит exact process и
 TLS `/api/health` gate до запуска bridge. Release anchor меняется атомарно.
 До любой попытки запуска candidate backend можно вернуть previous anchor и exact
-schema-33 DB/inbox snapshot. Начиная с `backend_start_attempted`, даже до health и
-запуска bridge, старый snapshot не восстанавливается и schema-33 binary не
-запускается; rollback идёт на заранее собранный sealed schema-34 fallback.
+проверенный pre-activation DB/inbox recovery set, если это разрешает конкретный
+schema-transition contract. Начиная с `backend_start_attempted`, даже до health и
+запуска bridge, pre-migration snapshot не восстанавливается, а rollback идёт на
+заранее собранный exact sealed schema-capable fallback. Для same-schema release
+`0.207.84/schema50` один exact `0.207.83/schema50` является одновременно previous
+и fallback; schema остаётся 50 и старый snapshot поверх начатого candidate не
+восстанавливается.
 Поштучная замена файлов внутри установленного venv запрещена.
 
 ## 6. Installed-package smoke
