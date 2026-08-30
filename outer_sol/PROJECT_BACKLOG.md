@@ -14,18 +14,17 @@ either merged here or discarded before that source is removed.
 ## Current production identity
 
 - Branch: `main`
-- Deployed implementation head: `117c56a37d798552d70fb25671aa9a4b407f3f87`.
-- Live: Friday `0.207.79` / `117c56a37d798552d70fb25671aa9a4b407f3f87`;
-  tree `85f14b507396b6b6d2841da901e8a9e7f0adce11299a2339dc0a62e19d17a610`;
-  wheel `bf4b30222955ee87aeb5edf4c38423e62ee70f0170cc61e9544c9f33578b61e5`.
-- Immediate runtime predecessor: Friday `0.207.78` /
-  `84828b31eb4b7b1ea7103c04d7ee9148fe379ce9`; tree
-  `fe30568b01fe39aea6ad24069b8fb9813fc889654faed2561ff83946cad5a621`.
-  Distinct schema-capable fallback: Friday `0.207.79rc0` /
-  `c49709352c811240fc3072079b2407a07161cc82`; tree
-  `c019830b2a04fc2c118f12fe2821701e800b9d30a96a9db49ef2a32304e32d73`.
-- Database schema: 50 in the current release candidate; deployed production
-  remains schema 49 until the R4b activation receipt is clear.
+- Deployed implementation head: `446dda2dab8069bfa05f95b6c29dc305b3c3565f`.
+- Live: Friday `0.207.80` / `446dda2dab8069bfa05f95b6c29dc305b3c3565f`;
+  tree `a3ba9edb4b5b7823a3ad62941e7d557a498b348894cf07be34687a2aa5a0ebe5`;
+  wheel `ef1c59606bca26129824b99b16f3edf561dee1d7831e76725c6bfac93652d187`.
+- Immediate runtime predecessor: Friday `0.207.79` /
+  `117c56a37d798552d70fb25671aa9a4b407f3f87`; tree
+  `85f14b507396b6b6d2841da901e8a9e7f0adce11299a2339dc0a62e19d17a610`.
+  Distinct schema-capable fallback: Friday `0.207.80rc0` /
+  `61f286dfaa15445b8a68b47807c106368636afb7`; tree
+  `9ae67f5aab0b8f3b78107d41f3fa084bb368ec65a37a29825cdc5c6a6dc9d265`.
+- Database schema: 50 in deployed production and the distinct fallback.
 - Production: immutable activation `clear`; backend and Telegram bridge active;
   trusted-CA health `200`; signed private-owner chat returned exact `OK`; V12
   `canary_ready` with verified, installation and effective context all exactly
@@ -44,17 +43,16 @@ either merged here or discarded before that source is removed.
   current parents and 16,359 child passages, with no pending v3 backfill. The two
   formerly invalid sparse-text v2 sources were repaired by the released v3
   topology; no document body is duplicated in the sidecar.
-- The reader-first body-free conversation-passage contour is live: all 1,407
-  conversations have one projection marked incomplete for `backfill_pending`,
-  with zero child passages and zero logical FTS rows until the separate R4b
-  writer activation.
+- The body-free conversation-passage writer and lexical lane are live. The
+  first two observed bounded worker ticks advanced 66 authenticated anchors;
+  restart-safe production backfill remains active and keeps every unfinished
+  projection explicitly `backfill_pending`.
 
 ## Active package
 
-S4-R3 measured search-facade parity and S4-R4a reader-first conversation
-passages are live; R4b is the separate schema-50 incremental-guard, bounded
-writer/backfill and lexical-activation release. Keep the released S3 path in
-shadow
+S4-R4b schema-50 incremental guards, bounded conversation writer/backfill and
+lexical activation are live. S4-R5 conversation-recall measurement and
+corpus-backed gap closure is active. Keep the released S3 path in shadow
 until its genuine production witness exists; then promote only the
 current-file-plus-current-public-web journey through the already released
 fail-closed activation gate. S5 measured cognition and exact 40k lease adoption
@@ -283,7 +281,8 @@ The bounded writer and restart-safe backfill are deployed in `0.207.74` and are
 converging in production. R2c v3 passage topology and authenticated stored
 locators are deployed in `0.207.76`. R3 measured search-facade parity is
 deployed in `0.207.78`; R4a reader-first conversation passages are deployed in
-`0.207.79`, and R4b is the active isolated schema-50 writer/activation package.
+`0.207.79`; R4b schema-50 writer/lexical activation is deployed in `0.207.80`,
+and R5 conversation-recall measurement is active.
 
 1. Add reader-first `document_passages` with a schema-capable fallback, bounded
    writer, restart-safe resumable backfill and honest `index_incomplete`.
@@ -378,6 +377,18 @@ not add an authoritative store or change R4a's public/body-free contracts. The
 request path remains bounded and fails soft to complete legacy message history;
 schema 49 is the fail-closed predecessor and a distinct schema-50 rc is the
 fallback.
+
+R4b acceptance: schema, writer, reader, provenance and privacy reviews were
+clean. The exact native gate passed 24,128 Python plus 31 UI tests with zero
+skips; static checks were clear, and stable/rc0 wheels were each reproduced
+byte-identically. Production-copy acceptance passed 35/35 checks across the
+49→50 migration, two reopens, all 85 authoritative tables, bounded writer and
+backup/restore. The 12/12 rollback rehearsal selected the never-activated
+schema-50 rc0 after an injected post-migration health failure and rejected stale
+tree/backup identities before mutation. Immutable activation produced verified
+SQLite/inbox/Obsidian/Engineer recovery receipts and ended `clear`; trusted-CA
+health reports `0.207.80`/`ok`, and signed private-owner chat returned exact
+`OK`. The bounded production backfill is active and remains honestly partial.
 
 Estimate: 6–12 clean-work days across the remaining separately reversible releases.
 
@@ -480,9 +491,8 @@ schema 47 and clean integrity/FK checks. Trusted-CA health reported
 2. Keep released `EngineerWorkItem v1` stable; do not expand its scope.
 3. Keep the released bounded S3 advisor in shadow until a genuine eligible turn
    creates its exact production witness; do not fabricate activation evidence.
-4. Keep released S4-R4a stable; integrate R4b as the separate schema-50
-   incremental-guard, bounded writer, restart-safe backfill and lexical-lane
-   activation release.
+4. Keep released S4-R4b stable; measure the real conversation-recall journey in
+   R5 and close only reproduced corpus-backed gaps without changing authority.
 5. Keep the released S5 measured-lease contract green; extend cognition only
    through another measured, reversible journey release.
 6. Preserve the released exact-evidence verifier and reject mutable or
