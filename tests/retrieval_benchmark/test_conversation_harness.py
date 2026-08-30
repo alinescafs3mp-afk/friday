@@ -61,35 +61,13 @@ def test_manifest_is_one_closed_six_by_four_conversation_matrix(
     assert reset_row.phase.value == "pre_backfill"
 
 
-def test_real_path_recall_and_two_foreign_saturation_gaps_are_reproduced(
+def test_real_path_recall_and_measurement_gaps_are_closed(
     conversation_run: EphemeralConversationRecallRunV1,
 ) -> None:
     assert conversation_run.writer_restart_resumed is True
-    assert conversation_run.gap_count == 2
+    assert conversation_run.gap_count == 0
     assert {item.outcome for item in conversation_run.case_results} == {RecallOutcomeV1.HIT}
-    assert {
-        (
-            item.matrix_cell,
-            item.projection_contour,
-            item.gap_codes,
-            item.match_channels,
-        )
-        for item in conversation_run.measurements
-        if item.gap_codes
-    } == {
-        (
-            "fallback",
-            "foreign_saturated",
-            ("channel_mismatch",),
-            (ArchiveMatchChannel.MESSAGE_HISTORY,),
-        ),
-        (
-            "diversity",
-            "foreign_saturated",
-            ("channel_mismatch",),
-            (ArchiveMatchChannel.MESSAGE_HISTORY,),
-        ),
-    }
+    assert all(not item.gap_codes for item in conversation_run.measurements)
     assert all(
         item.target_recalled
         and item.passage_window_exact
@@ -109,27 +87,29 @@ def test_real_path_recall_and_two_foreign_saturation_gaps_are_reproduced(
         24,
         1_000_000,
     )
-    assert replace(conversation_run, writer_restart_resumed=False).gap_count == 3
+    assert replace(conversation_run, writer_restart_resumed=False).gap_count == 1
 
 
-def test_fallback_and_foreign_saturation_remain_honest_history_only(
+def test_fallback_and_foreign_saturation_channels_remain_exact(
     conversation_run: EphemeralConversationRecallRunV1,
 ) -> None:
     history_only = [
         item
         for item in conversation_run.measurements
-        if item.projection_contour
-        in {"backfill_pending", "source_changed", "foreign_saturated", "accepted_boundary"}
+        if item.projection_contour in {"backfill_pending", "source_changed", "accepted_boundary"}
     ]
-    assert len(history_only) >= 7
+    assert len(history_only) >= 4
     assert {item.match_channels for item in history_only} == {(ArchiveMatchChannel.MESSAGE_HISTORY,)}
     foreign_saturated = [
-        item
-        for item in conversation_run.measurements
-        if item.projection_contour == "foreign_saturated"
+        item for item in conversation_run.measurements if item.projection_contour == "foreign_saturated"
     ]
     assert len(foreign_saturated) == 3
-    assert sum(item.gap_codes == ("channel_mismatch",) for item in foreign_saturated) == 2
+    assert {item.matrix_cell: item.match_channels for item in foreign_saturated} == {
+        "fallback": (ArchiveMatchChannel.LEXICAL, ArchiveMatchChannel.MESSAGE_HISTORY),
+        "diversity": (ArchiveMatchChannel.LEXICAL, ArchiveMatchChannel.MESSAGE_HISTORY),
+        "privacy": (ArchiveMatchChannel.LEXICAL, ArchiveMatchChannel.MESSAGE_HISTORY),
+    }
+    assert all(not item.gap_codes for item in foreign_saturated)
     assert all(item.target_recalled for item in foreign_saturated)
 
 

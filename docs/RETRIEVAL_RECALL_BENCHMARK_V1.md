@@ -308,6 +308,16 @@ lane. The baseline therefore keeps all 24 qrel hits, candidate recall@50 at
 exact, and the writer restart observation true. Lexical remains
 `PARTIAL`/`CAPPED`; `MESSAGE_HISTORY` remains the sole absence authority.
 
+R6 closes those two measured channel gaps with one conditional rowid-keyset
+refill. It runs only when the released first pool is sentinel-capped and its
+authorized results cannot fill the requested page. Each window retains at most
+800 FTS rows; the refill starts after the last retained first-window row, so
+the first sentinel becomes refill row one and the total remains at most 1,600
+retained rows plus one final sentinel. The union is owner-filtered and reranked
+once. No cursor, complete-coverage claim, or new absence authority is added.
+The fixed matrix returns to zero adjunct gaps with the baseline qrel, recall,
+false-absence, replay, privacy, determinism, and restart measurements unchanged.
+
 ## Known limits
 
 - The shipped accepted candidate projection deliberately excludes pending or
@@ -324,11 +334,11 @@ exact, and the writer restart observation true. Lexical remains
 - Canonical digests detect mutation and bind exact inputs; they are not a
   remote signature. Shipped-evidence provenance is intentionally process-local,
   because V1 adds no key service, durable store, or schema.
-- Conversation lexical selection still uses a fixed global candidate pool
-  before owner filtering. Foreign-first saturation can therefore remove the
-  owner's lexical channel. R5 records that lane as partial and requires the
-  independently authorized complete `MESSAGE_HISTORY` lane to preserve owner
-  recall; it does not promote lexical zero to durable absence.
+- Conversation lexical selection still uses bounded global candidate windows
+  before owner filtering. More than 1,600 earlier matching FTS rows can still
+  leave an owner target outside lexical work. The independently authorized
+  complete `MESSAGE_HISTORY` lane preserves recall and remains the only absence
+  authority; lexical zero is never promoted to durable absence.
 - The conversation matrix drives the shipped archive preparation/publication
   facade directly. It does not claim coverage of the outer model tool-parser or
   capability router, and it performs no production activation.

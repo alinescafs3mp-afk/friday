@@ -819,7 +819,7 @@ def _build_plan() -> _ConversationSyntheticPlan:
         _MatrixCell.PRIVACY,
         "ownerprivacyalpha",
         target,
-        channels=history,
+        channels=both,
         contour=_ProjectionContour.FOREIGN_SATURATED,
     )
 

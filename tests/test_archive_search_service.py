@@ -120,6 +120,21 @@ def _message_boundary(storage: Any) -> tuple[str, str]:
     return conversation["id"], message["id"]
 
 
+def _converge_conversation_passages(storage: Any, principal: str) -> None:
+    cursor: str | None = None
+    for _attempt in range(32):
+        report = storage.backfill_conversation_passages(
+            principal,
+            resume_at_conversation_id=cursor,
+            limit=256,
+        )
+        if report["has_more"] is False:
+            return
+        cursor = report["next_resume_conversation_id"]
+        assert isinstance(cursor, str)
+    raise AssertionError("conversation-passage setup did not converge")
+
+
 def _payload(prepared: Any) -> dict[str, Any]:
     return json.loads(prepared.authorized_batch.model_visible_canonical_bytes)
 
@@ -659,7 +674,7 @@ def test_missing_conversation_passage_fts_degrades_to_complete_legacy_fallback(
     assert _coverage(payload, SearchLane.MESSAGE_HISTORY)["states"] == [CoverageState.COMPLETE.value]
 
 
-def test_conversation_lexical_request_is_shape_only_and_rechecks_a_fixed_selected_pool(
+def test_conversation_lexical_request_is_shape_only_and_rechecks_bounded_selected_sources(
     storage: Any,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -745,7 +760,7 @@ def test_conversation_lexical_request_is_shape_only_and_rechecks_a_fixed_selecte
             principal_id=PRINCIPAL,
             request=request,
             snapshot_discriminator=SNAPSHOT,
-            run_discriminator="conversation-lexical-fixed-selected-pool",
+            run_discriminator="conversation-lexical-bounded-selected-sources",
             turn_ledger=_ledger(),
             current_conversation_id=str(boundary_conversation["id"]),
             boundary_user_message_id=str(boundary["id"]),
@@ -754,7 +769,7 @@ def test_conversation_lexical_request_is_shape_only_and_rechecks_a_fixed_selecte
     payload = _payload(prepared)
     assert validation_modes and set(validation_modes) == {(False, False)}
     assert reader_conversations
-    assert len(reader_conversations) <= 2 * len(validation_modes)
+    assert len(reader_conversations) <= 4 * len(validation_modes)
     assert all(reader_conversations.count(item) <= len(validation_modes) for item in reader_conversations)
     assert set(reader_conversations) <= selected_owner_conversations
     assert _coverage(payload, SearchLane.LEXICAL)["states"] == [
@@ -762,6 +777,184 @@ def test_conversation_lexical_request_is_shape_only_and_rechecks_a_fixed_selecte
         CoverageState.CAPPED.value,
         CoverageState.PARTIAL.value,
     ]
+    assert _coverage(payload, SearchLane.MESSAGE_HISTORY)["states"] == [CoverageState.COMPLETE.value]
+
+
+def test_conversation_lexical_refills_one_capped_foreign_window_by_rowid(
+    storage: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _seed_authority(storage)
+    foreign = "archive-service-refill-foreign"
+    storage.ensure_user(foreign)
+    foreign_source = storage.create_conversation(foreign, "Earlier foreign refill rows")
+    for index in range(3):
+        storage.store_message(
+            foreign_source["id"],
+            foreign,
+            "user",
+            f"refillwindowneedle foreign posting {index}",
+        )
+    _converge_conversation_passages(storage, foreign)
+
+    owner_source = storage.create_conversation(PRINCIPAL, "Owner refill target")
+    owner_target = storage.store_message(
+        owner_source["id"],
+        PRINCIPAL,
+        "user",
+        "refillwindowneedle exact authorized owner target",
+    )
+    boundary = _message_boundary(storage)
+    _converge_conversation_passages(storage, PRINCIPAL)
+    monkeypatch.setattr(message_storage_module, "_CONVERSATION_LEXICAL_POOL_CAP", 2)
+
+    with storage.transaction() as conn:
+        page = message_storage_module._materialize_authorized_archive_message_page_in_transaction(  # noqa: SLF001
+            conn,
+            principal_id=PRINCIPAL,
+            query="refillwindowneedle",
+            selection_lane=SearchLane.LEXICAL,
+            conversation_id=boundary[0],
+            boundary_user_message_id=boundary[1],
+            limit=1,
+        )
+
+    assert page is not None and page.has_more is True
+    assert tuple(hit.message.message_id for hit in page.hits) == (owner_target["id"],)
+    assert {hit.message.principal_id for hit in page.hits} == {PRINCIPAL}
+
+
+def test_conversation_lexical_skips_refill_when_first_window_fills_limit(
+    storage: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _seed_authority(storage)
+    early_source = storage.create_conversation(PRINCIPAL, "Early sufficient owner source")
+    early_target = storage.store_message(
+        early_source["id"],
+        PRINCIPAL,
+        "user",
+        "sufficientwindowneedle early authorized target",
+    )
+    _converge_conversation_passages(storage, PRINCIPAL)
+
+    foreign = "archive-service-sufficient-foreign"
+    storage.ensure_user(foreign)
+    foreign_source = storage.create_conversation(foreign, "Foreign sentinel rows")
+    for index in range(2):
+        storage.store_message(
+            foreign_source["id"],
+            foreign,
+            "user",
+            f"sufficientwindowneedle foreign posting {index}",
+        )
+    _converge_conversation_passages(storage, foreign)
+
+    later_source = storage.create_conversation(PRINCIPAL, "Later refill-only owner source")
+    later_target = storage.store_message(
+        later_source["id"],
+        PRINCIPAL,
+        "user",
+        "sufficientwindowneedle newer authorized target",
+    )
+    boundary = _message_boundary(storage)
+    _converge_conversation_passages(storage, PRINCIPAL)
+    monkeypatch.setattr(message_storage_module, "_CONVERSATION_LEXICAL_POOL_CAP", 2)
+
+    with storage.transaction() as conn:
+        page = message_storage_module._materialize_authorized_archive_message_page_in_transaction(  # noqa: SLF001
+            conn,
+            principal_id=PRINCIPAL,
+            query="sufficientwindowneedle",
+            selection_lane=SearchLane.LEXICAL,
+            conversation_id=boundary[0],
+            boundary_user_message_id=boundary[1],
+            limit=1,
+        )
+
+    assert page is not None and page.has_more is True
+    assert tuple(hit.message.message_id for hit in page.hits) == (early_target["id"],)
+    assert later_target["id"] not in {hit.message.message_id for hit in page.hits}
+
+
+def test_conversation_lexical_stops_after_one_refill_and_history_stays_complete(
+    storage: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    authorization = _seed_authority(storage)
+    foreign = "archive-service-overcap-foreign"
+    storage.ensure_user(foreign)
+    foreign_source = storage.create_conversation(foreign, "Two full foreign windows")
+    for index in range(4):
+        storage.store_message(
+            foreign_source["id"],
+            foreign,
+            "user",
+            f"overcapwindowneedle foreign posting {index}",
+        )
+    _converge_conversation_passages(storage, foreign)
+
+    owner_source = storage.create_conversation(PRINCIPAL, "Owner beyond one refill")
+    owner_target = storage.store_message(
+        owner_source["id"],
+        PRINCIPAL,
+        "user",
+        "overcapwindowneedle exact owner target beyond the hard cap",
+    )
+    boundary = _message_boundary(storage)
+    _converge_conversation_passages(storage, PRINCIPAL)
+    monkeypatch.setattr(message_storage_module, "_CONVERSATION_LEXICAL_POOL_CAP", 2)
+
+    with storage.transaction() as conn:
+        lexical = message_storage_module._materialize_authorized_archive_message_page_in_transaction(  # noqa: SLF001
+            conn,
+            principal_id=PRINCIPAL,
+            query="overcapwindowneedle",
+            selection_lane=SearchLane.LEXICAL,
+            conversation_id=boundary[0],
+            boundary_user_message_id=boundary[1],
+            limit=1,
+        )
+        history = message_storage_module._materialize_authorized_archive_message_page_in_transaction(  # noqa: SLF001
+            conn,
+            principal_id=PRINCIPAL,
+            query="overcapwindowneedle",
+            selection_lane=SearchLane.MESSAGE_HISTORY,
+            conversation_id=boundary[0],
+            boundary_user_message_id=boundary[1],
+            limit=1,
+        )
+        prepared = prepare_archive_search_in_transaction(
+            conn,
+            authorization=authorization,
+            actor=_actor(),
+            tenant_id=TENANT,
+            principal_id=PRINCIPAL,
+            request=ArchiveSearchRequest.create(
+                query="overcapwindowneedle",
+                corpora=(ArchiveSearchCorpus.MESSAGES,),
+                limit=1,
+            ),
+            snapshot_discriminator=SNAPSHOT,
+            run_discriminator="conversation-lexical-overcap-history",
+            turn_ledger=_ledger(),
+            current_conversation_id=boundary[0],
+            boundary_user_message_id=boundary[1],
+        )
+
+    assert lexical is not None and lexical.hits == () and lexical.has_more is True
+    assert history is not None
+    assert tuple(hit.message.message_id for hit in history.hits) == (owner_target["id"],)
+    payload = _payload(prepared)
+    assert payload["candidates"][0]["match_channels"] == [ArchiveMatchChannel.MESSAGE_HISTORY.value]
+    lexical_coverage = _coverage(payload, SearchLane.LEXICAL)
+    assert lexical_coverage["states"] == [
+        CoverageState.BACKFILL_PENDING.value,
+        CoverageState.CAPPED.value,
+        CoverageState.PARTIAL.value,
+    ]
+    assert lexical_coverage["eligible_authorized"] is None
+    assert lexical_coverage["next_cursor_available"] is False
     assert _coverage(payload, SearchLane.MESSAGE_HISTORY)["states"] == [CoverageState.COMPLETE.value]
 
 
@@ -787,7 +980,9 @@ def test_conversation_lexical_vm_work_is_flat_after_the_global_fts_pool_is_satur
         "small corpus boundary",
     )
     foreign_source = storage.create_conversation(foreign, "Foreign saturated postings")
-    for index in range(17):
+    # Fill both bounded windows plus the one final sentinel before comparing
+    # work against a much larger foreign corpus.
+    for index in range(33):
         storage.store_message(
             foreign_source["id"],
             foreign,
@@ -795,21 +990,8 @@ def test_conversation_lexical_vm_work_is_flat_after_the_global_fts_pool_is_satur
             f"flatpoolneedle initial foreign posting {index}",
         )
 
-    def converge(owner: str) -> None:
-        cursor: str | None = None
-        for _attempt in range(16):
-            report = storage.backfill_conversation_passages(
-                owner,
-                resume_at_conversation_id=cursor,
-                limit=256,
-            )
-            if report["has_more"] is False:
-                return
-            cursor = report["next_resume_conversation_id"]
-        raise AssertionError("conversation-passage setup did not converge")
-
-    converge(PRINCIPAL)
-    converge(foreign)
+    _converge_conversation_passages(storage, PRINCIPAL)
+    _converge_conversation_passages(storage, foreign)
     monkeypatch.setattr(message_storage_module, "_CONVERSATION_LEXICAL_POOL_CAP", 16)
 
     def optimize_fts() -> None:
@@ -827,11 +1009,11 @@ def test_conversation_lexical_vm_work_is_flat_after_the_global_fts_pool_is_satur
         def trace(sql: str) -> None:
             nonlocal statement
             normalized = " ".join(sql.split())
-            if "fts_pool_with_sentinel" in sql and not main_sql:
+            if "first_pool_with_sentinel" in sql and not main_sql:
                 main_sql.append(sql)
             statement = (
                 "main"
-                if "fts_pool_with_sentinel" in sql
+                if "first_pool_with_sentinel" in sql
                 else "ledger"
                 if "selected_owned AS MATERIALIZED" in sql
                 else "schema"
@@ -865,6 +1047,23 @@ def test_conversation_lexical_vm_work_is_flat_after_the_global_fts_pool_is_satur
             plan = tuple(str(row[3]) for row in conn.execute("EXPLAIN QUERY PLAN " + main_sql[0]).fetchall())
         return page, instruction_blocks, per_statement, plan
 
+    def owner_output(page: Any) -> tuple[object, ...]:
+        return (
+            page.returned,
+            page.total,
+            page.examined,
+            tuple(
+                (
+                    hit.match_rank,
+                    hit.source_rank,
+                    hit.lexical_score,
+                    hit.message.message_id,
+                    tuple((context.relative_position, context.row.message_id) for context in hit.context),
+                )
+                for hit in page.hits
+            ),
+        )
+
     optimize_fts()
     small_page, small_blocks, small_statements, small_plan = measured(str(small_boundary["id"]))
     assert small_page is not None and len(small_page.hits) == 1
@@ -877,11 +1076,12 @@ def test_conversation_lexical_vm_work_is_flat_after_the_global_fts_pool_is_satur
             "user",
             f"flatpoolneedle added foreign posting {index}",
         )
-    converge(foreign)
+    _converge_conversation_passages(storage, foreign)
     optimize_fts()
     foreign_page, foreign_blocks, foreign_statements, foreign_plan = measured(str(small_boundary["id"]))
     assert foreign_page is not None and len(foreign_page.hits) == 1
     assert foreign_page.hits[0].message.message_id == owner_hit["id"]
+    assert owner_output(foreign_page) == owner_output(small_page)
     owner_unrelated = storage.create_conversation(PRINCIPAL, "Owner nonmatching corpus")
     for _index in range(512):
         storage.store_message(
@@ -896,7 +1096,7 @@ def test_conversation_lexical_vm_work_is_flat_after_the_global_fts_pool_is_satur
         "user",
         "large corpus boundary",
     )
-    converge(PRINCIPAL)
+    _converge_conversation_passages(storage, PRINCIPAL)
 
     optimize_fts()
     large_page, large_blocks, large_statements, large_plan = measured(str(large_boundary["id"]))

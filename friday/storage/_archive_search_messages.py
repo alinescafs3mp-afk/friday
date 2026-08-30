@@ -1463,11 +1463,13 @@ def _select_bounded_conversation_lexical_page(
     after: int,
     lexical_index_build: str,
 ) -> ArchiveMessageSearchPage | None:
-    """Search one fixed global FTS pool, then authorize only its selected IDs.
+    """Search at most two fixed global FTS windows, then authorize selected IDs.
 
     Schema 49 has no owner-partitioned FTS key.  A foreign posting can therefore
-    consume the fixed pool; callers must keep this lane permanently partial and
-    capped.  The complete legacy MESSAGE_HISTORY lane remains the absence proof.
+    consume the first pool.  One rowid-keyset refill is earned only when that
+    pool is sentinel-capped and cannot fill the authorized page.  Callers keep
+    this lane permanently partial and capped; the complete legacy
+    MESSAGE_HISTORY lane remains the absence proof.
     """
 
     combined_match = " OR ".join(f"({item})" for item in match_queries)
@@ -1507,15 +1509,87 @@ def _select_bounded_conversation_lexical_page(
                     WHERE principal.id=? AND principal.status='active'
                       AND boundary.role='user'
                ),
-               fts_pool_with_sentinel AS MATERIALIZED (
+               first_pool_with_sentinel AS MATERIALIZED (
                    SELECT rowid AS passage_rowid
                      FROM conversation_passages_fts
                     WHERE conversation_passages_fts MATCH ?
+                    ORDER BY rowid ASC
                     LIMIT ?
                ),
-               fts_pool AS MATERIALIZED (
-                   SELECT passage_rowid FROM fts_pool_with_sentinel
+               first_pool AS MATERIALIZED (
+                   SELECT passage_rowid FROM first_pool_with_sentinel
                     ORDER BY passage_rowid ASC LIMIT ?
+               ),
+               first_pooled_owned AS MATERIALIZED (
+                   SELECT source.id,source.conversation_id,source.user_id,
+                          source.role,source.created_at,source.rowid AS message_rowid,
+                          conversation.is_archived AS conversation_archived
+                     FROM first_pool pool
+                     CROSS JOIN conversation_passages passage
+                     CROSS JOIN conversation_passage_projections projection
+                     CROSS JOIN messages source
+                     CROSS JOIN conversations conversation
+                     CROSS JOIN scope_gate gate
+                    WHERE passage.passage_rowid=pool.passage_rowid
+                      AND projection.conversation_id=passage.conversation_id
+                      AND projection.projection_status='current'
+                      AND projection.incomplete_reason IS NULL
+                      AND source.id=passage.anchor_message_id
+                      AND source.conversation_id=passage.conversation_id
+                      AND conversation.id=source.conversation_id
+                      AND conversation.user_id=source.user_id
+                      AND conversation.user_id=? AND source.user_id=?
+                      AND source.rowid<gate.boundary_rowid
+                      AND (?='all' OR source.conversation_id=gate.boundary_conversation_id)
+               ),
+               first_eligible AS MATERIALIZED (
+                   SELECT * FROM first_pooled_owned
+                    WHERE ((conversation_archived=0 AND ?=1)
+                           OR (conversation_archived=1 AND ?=1))
+                      AND (? IS NULL OR julianday(created_at)>=julianday(?))
+                      AND (? IS NULL OR julianday(created_at)<julianday(?))
+                      AND ((role='user' AND ?=1) OR (role='assistant' AND ?=1))
+               ),
+               first_scored AS MATERIALIZED (
+                   SELECT eligible.*,-CAST(({local_score}) AS REAL) AS lexical_score
+                     FROM first_eligible eligible
+               ),
+               first_lexical AS MATERIALIZED (
+                   SELECT * FROM first_scored WHERE {lexical_filter}
+               ),
+               first_source_capacity AS MATERIALIZED (
+                   SELECT COALESCE(SUM(
+                              CASE WHEN grouped.source_count<?
+                                   THEN grouped.source_count ELSE ? END
+                          ),0) AS result_capacity
+                     FROM (
+                         SELECT conversation_id,COUNT(*) AS source_count
+                           FROM first_lexical
+                          GROUP BY conversation_id
+                     ) grouped
+               ),
+               refill_gate AS MATERIALIZED (
+                   SELECT (SELECT MAX(passage_rowid) FROM first_pool) AS after_rowid
+                    WHERE (SELECT COUNT(*) FROM first_pool_with_sentinel)=?
+                      AND (SELECT result_capacity FROM first_source_capacity)<?
+               ),
+               refill_pool_with_sentinel AS MATERIALIZED (
+                   SELECT conversation_passages_fts.rowid AS passage_rowid
+                     FROM refill_gate gate
+                     CROSS JOIN conversation_passages_fts
+                    WHERE conversation_passages_fts MATCH ?
+                      AND conversation_passages_fts.rowid>gate.after_rowid
+                    ORDER BY conversation_passages_fts.rowid ASC
+                    LIMIT ?
+               ),
+               refill_pool AS MATERIALIZED (
+                   SELECT passage_rowid FROM refill_pool_with_sentinel
+                    ORDER BY passage_rowid ASC LIMIT ?
+               ),
+               fts_pool AS MATERIALIZED (
+                   SELECT passage_rowid FROM first_pool
+                   UNION ALL
+                   SELECT passage_rowid FROM refill_pool
                ),
                pooled_owned AS MATERIALIZED (
                    SELECT source.id,source.conversation_id,source.user_id,
@@ -1668,6 +1742,25 @@ def _select_bounded_conversation_lexical_page(
             current_conversation,
             boundary_id,
             principal,
+            combined_match,
+            _CONVERSATION_LEXICAL_POOL_CAP + 1,
+            _CONVERSATION_LEXICAL_POOL_CAP,
+            principal,
+            principal,
+            scope.value,
+            include_active,
+            include_archived,
+            start,
+            start,
+            end,
+            end,
+            include_user,
+            include_assistant,
+            *match_queries,
+            _MAX_MATCHES_PER_CONVERSATION,
+            _MAX_MATCHES_PER_CONVERSATION,
+            _CONVERSATION_LEXICAL_POOL_CAP + 1,
+            page_size,
             combined_match,
             _CONVERSATION_LEXICAL_POOL_CAP + 1,
             _CONVERSATION_LEXICAL_POOL_CAP,
