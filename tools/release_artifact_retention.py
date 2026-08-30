@@ -28,6 +28,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from tools import immutable_release_operator as release_operator  # noqa: E402
+from tools import release_dr_generation_index as dr_index  # noqa: E402
 
 PLAN_SCHEMA = "friday.release-artifact-retention-plan.v2"
 AUTHORITY_BINDINGS_SCHEMA = "friday.release-artifact-retention-authority-bindings.v1"
@@ -55,6 +56,7 @@ _REASONS = frozenset(
         "dr_pending_backup",
         "dr_pins_invalid",
         "dr_pins_unavailable",
+        "dr_restore_release",
         "fallback_release",
         "hardlinked_artifact",
         "inventory_root_raced",
@@ -104,13 +106,19 @@ INCOMPLETE_OPEN_INVENTORY = OpenInventorySnapshot(source="unavailable", complete
 
 @dataclass(frozen=True)
 class DRGenerationPin:
-    """One already-authenticated DR-index projection supplied by its owner."""
+    """One exact expected projection checked against the code-owned DR index."""
 
     role: str
     backup_directory: Path
     generation_id: str | None
     receipt_path: Path | None
     receipt_sha256: str | None
+    restore_release_root: Path
+    restore_release_commit: str
+    restore_release_tree_manifest_sha256: str
+    restore_release_wheel_sha256: str
+    restore_release_max_schema: int
+    restore_release_version: str
 
 
 @dataclass(frozen=True)
@@ -180,6 +188,7 @@ class _JournalResult:
 class _AuthorityResult:
     receipt: Mapping[str, Any]
     dr_role_paths: Mapping[str, Path]
+    dr_restore_release_records: Mapping[Path, Mapping[str, Any]]
     evidence_paths: frozenset[Path]
     reference_paths: frozenset[Path]
     error: str
@@ -695,6 +704,7 @@ def _normalize_authority_bindings(
     *,
     activation_sha256: str,
     unit_sha256: str,
+    state_directory: Path,
 ) -> _AuthorityResult:
     if bindings is None:
         unbound_core: dict[str, Any] = {
@@ -712,6 +722,7 @@ def _normalize_authority_bindings(
                 "bindings_sha256": hashlib.sha256(_canonical_json(unbound_core)).hexdigest(),
             },
             dr_role_paths={},
+            dr_restore_release_records={},
             evidence_paths=frozenset(),
             reference_paths=frozenset(),
             error="retention_authority_unbound",
@@ -731,10 +742,15 @@ def _normalize_authority_bindings(
     if unit_sha256 and bindings.unit_install_journal_sha256 != unit_sha256 and not error:
         error = "unit_install_journal_digest_mismatch"
 
+    canonical_state = _strict_private_directory(state_directory, code="dr_index_invalid")
     dr_index_path = _absolute_lexical(bindings.dr_index_path, code="dr_pins_invalid")
+    if dr_index_path != canonical_state / dr_index.INDEX_NAME:
+        raise RetentionPlanError("dr_pins_invalid")
     if not _is_hex64(bindings.dr_index_sha256):
         raise RetentionPlanError("dr_pins_invalid")
     observed_dr_index_sha256 = ""
+    actual_pins: tuple[DRGenerationPin, ...] = ()
+    generation_index: dr_index.DurableDRGenerationIndex | None = None
     try:
         observed_dr_index_sha256 = _stable_file_sha256(
             dr_index_path,
@@ -743,15 +759,48 @@ def _normalize_authority_bindings(
         )
         if observed_dr_index_sha256 != bindings.dr_index_sha256:
             error = error or "dr_index_invalid"
-    except RetentionPlanError:
+        generation_index = dr_index.DurableDRGenerationIndex(canonical_state)
+        actual_pins = tuple(
+            DRGenerationPin(
+                role=pin.role,
+                backup_directory=pin.backup_directory,
+                generation_id=pin.generation_id,
+                receipt_path=pin.receipt_path,
+                receipt_sha256=pin.receipt_sha256,
+                restore_release_root=pin.restore_release_root,
+                restore_release_commit=pin.restore_release_commit,
+                restore_release_tree_manifest_sha256=(
+                    pin.restore_release_tree_manifest_sha256
+                ),
+                restore_release_wheel_sha256=pin.restore_release_wheel_sha256,
+                restore_release_max_schema=pin.restore_release_max_schema,
+                restore_release_version=pin.restore_release_version,
+            )
+            for pin in generation_index.pins()
+        )
+        if (
+            _stable_file_sha256(
+                dr_index_path,
+                private=True,
+                code="dr_index_invalid",
+            )
+            != observed_dr_index_sha256
+        ):
+            error = error or "dr_index_invalid"
+    except (RetentionPlanError, dr_index.DRGenerationIndexError):
         error = error or "dr_index_invalid"
+    if any(not isinstance(pin, DRGenerationPin) for pin in bindings.dr_pins):
+        raise RetentionPlanError("dr_pins_invalid")
+    if bindings.dr_pins != actual_pins:
+        error = error or "dr_pins_invalid"
 
     role_paths: dict[str, Path] = {}
+    restore_release_records: dict[Path, Mapping[str, Any]] = {}
     pin_records: list[dict[str, Any]] = []
     generation_ids: set[str] = set()
     receipt_paths: set[Path] = set()
-    for pin in bindings.dr_pins:
-        if not isinstance(pin, DRGenerationPin) or pin.role not in {"current", "older", "pending"}:
+    for pin in actual_pins:
+        if pin.role not in {"current", "older", "pending"}:
             raise RetentionPlanError("dr_pins_invalid")
         if pin.role in role_paths:
             raise RetentionPlanError("dr_pins_invalid")
@@ -775,7 +824,7 @@ def _normalize_authority_bindings(
         ):
             raise RetentionPlanError("dr_pins_invalid")
         receipt_path: Path | None = None
-        observed_receipt_sha256 = ""
+        observed_receipt_file_sha256 = ""
         if pin.generation_id is not None:
             if (
                 pin.receipt_path is None
@@ -789,17 +838,33 @@ def _normalize_authority_bindings(
             generation_ids.add(pin.generation_id)
             receipt_paths.add(receipt_path)
             try:
-                observed_receipt_sha256 = _stable_file_sha256(
+                observed_receipt_file_sha256 = _stable_file_sha256(
                     receipt_path,
                     private=True,
                     code="dr_pins_invalid",
                 )
-                if observed_receipt_sha256 != pin.receipt_sha256:
-                    error = error or "dr_pins_invalid"
             except RetentionPlanError:
                 error = error or "dr_pins_invalid"
         try:
             _strict_private_directory(backup_directory, code="dr_pins_invalid")
+        except RetentionPlanError:
+            error = error or "dr_pins_invalid"
+        restore_root = _absolute_lexical(pin.restore_release_root, code="dr_pins_invalid")
+        restore_record: dict[str, Any] = {
+            "commit": pin.restore_release_commit,
+            "max_schema": pin.restore_release_max_schema,
+            "root": str(restore_root),
+            "tree_manifest_sha256": pin.restore_release_tree_manifest_sha256,
+            "version": pin.restore_release_version,
+        }
+        existing_restore = restore_release_records.get(restore_root)
+        if existing_restore is not None and dict(existing_restore) != restore_record:
+            error = error or "dr_pins_invalid"
+        restore_release_records[restore_root] = restore_record
+        try:
+            authenticated_restore = _authenticate_release(restore_record)
+            if authenticated_restore["wheel_sha256"] != pin.restore_release_wheel_sha256:
+                raise RetentionPlanError("protected_release_authentication_failed")
         except RetentionPlanError:
             error = error or "dr_pins_invalid"
         pin_records.append(
@@ -809,7 +874,11 @@ def _normalize_authority_bindings(
                 "generation_id": pin.generation_id,
                 "receipt_path": str(receipt_path) if receipt_path is not None else None,
                 "receipt_sha256": pin.receipt_sha256,
-                "observed_receipt_sha256": observed_receipt_sha256,
+                "observed_receipt_file_sha256": observed_receipt_file_sha256,
+                "restore_release": {
+                    **restore_record,
+                    "wheel_sha256": pin.restore_release_wheel_sha256,
+                },
             }
         )
     if not {"current", "older"}.issubset(role_paths):
@@ -888,12 +957,19 @@ def _normalize_authority_bindings(
     return _AuthorityResult(
         receipt={**core, "bindings_sha256": hashlib.sha256(_canonical_json(core)).hexdigest()},
         dr_role_paths=role_paths,
+        dr_restore_release_records=restore_release_records,
         evidence_paths=frozenset(evidence_paths),
         reference_paths=frozenset(
             {
                 dr_index_path,
                 *role_paths.values(),
+                *restore_release_records,
                 *receipt_paths,
+                *(
+                    (generation_index.receipt_directory,)
+                    if generation_index is not None
+                    else ()
+                ),
                 *evidence_paths,
                 *evidence_authority_paths,
             }
@@ -1163,6 +1239,7 @@ def plan_release_artifact_retention(
         authority_bindings,
         activation_sha256=activation.sha256,
         unit_sha256=unit.sha256,
+        state_directory=activation_path.parent,
     )
     blocker = blocker or authority.error
 
@@ -1170,6 +1247,7 @@ def plan_release_artifact_retention(
     role_paths: dict[str, Path] = {}
     protected_identities: list[dict[str, Any]] = []
     role_records: dict[str, Mapping[str, Any]] = {}
+    protected_records: dict[Path, Mapping[str, Any]] = {}
     if activation_state is not None:
         try:
             role_records = {
@@ -1204,16 +1282,29 @@ def plan_release_artifact_retention(
                     unit_state.get("candidate"), role_records["current"]
                 ) or not _same_identity(unit_state.get("previous"), role_records["previous"]):
                     raise RetentionPlanError("journal_identity_mismatch")
-            authenticated: dict[Path, dict[str, Any]] = {}
             for record in role_records.values():
                 record_path = _record_path(record)
-                if record_path not in authenticated:
-                    authenticated[record_path] = _authenticate_release(record)
-            for path in sorted(authenticated, key=str):
-                roles = sorted(role for role, role_path in role_paths.items() if role_path == path)
-                protected_identities.append({**authenticated[path], "roles": roles})
+                existing = protected_records.get(record_path)
+                if existing is not None and dict(existing) != dict(record):
+                    raise RetentionPlanError("journal_identity_mismatch")
+                protected_records[record_path] = record
         except RetentionPlanError as exc:
             blocker = blocker or str(exc)
+
+    try:
+        for path, record in authority.dr_restore_release_records.items():
+            existing = protected_records.get(path)
+            if existing is not None and dict(existing) != dict(record):
+                raise RetentionPlanError("dr_pins_invalid")
+            protected_records[path] = record
+        for path in sorted(protected_records, key=str):
+            authenticated = _authenticate_release(protected_records[path])
+            roles = sorted(role for role, role_path in role_paths.items() if role_path == path)
+            if path in authority.dr_restore_release_records:
+                roles = sorted((*roles, "dr_restore_release"))
+            protected_identities.append({**authenticated, "roles": roles})
+    except RetentionPlanError as exc:
+        blocker = blocker or str(exc)
 
     activation_backup_path: Path | None = None
     if activation.activation_backup is not None:
@@ -1298,6 +1389,7 @@ def plan_release_artifact_retention(
         authority_bindings,
         activation_sha256=activation.sha256,
         unit_sha256=unit.sha256,
+        state_directory=activation_path.parent,
     )
     if authority_after != authority:
         blocker = blocker or authority_after.error or "dr_pins_invalid"
@@ -1305,13 +1397,12 @@ def plan_release_artifact_retention(
     protected_raced: set[Path] = set()
     protected_failed: set[Path] = set()
     initial_observations = {observation.path: observation for observation, _root in observations}
-    for role_path in frozenset(role_paths.values()):
+    for role_path, record in protected_records.items():
         observation = initial_observations.get(role_path)
         if observation is None:
             protected_failed.add(role_path)
             blocker = blocker or "protected_release_authentication_failed"
             continue
-        record = next(record for role, record in role_records.items() if role_paths[role] == role_path)
         try:
             _authenticate_release(record)
             after_authentication = _observe_target(role_path)
@@ -1342,6 +1433,8 @@ def plan_release_artifact_retention(
             reason = "previous_release"
         elif observation.path == role_paths.get("fallback"):
             reason = "fallback_release"
+        elif observation.path in authority.dr_restore_release_records:
+            reason = "dr_restore_release"
         elif _path_intersects(observation.path, authority.evidence_paths):
             reason = "canonical_evidence"
         elif observation.kind == "symlink":
