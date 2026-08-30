@@ -6,6 +6,7 @@ import json
 import os
 import re
 import subprocess
+import sys
 from dataclasses import dataclass, replace
 from datetime import datetime
 from functools import cache
@@ -659,7 +660,7 @@ def _validate_sanitized_receipt(
     if hashlib.sha256(raw).hexdigest() != observation.get("artifact_sha256"):
         raise RegistryValidationError("sanitized receipt digest does not match its actual bytes")
     try:
-        receipt = exact_evidence.validate_receipt(
+        receipt = exact_evidence.validate_receipt_via_native_controller(
             raw,
             expected_release=exact_evidence.ReleaseIdentity(
                 source_commit=manifest_identity.source_commit,
@@ -1007,6 +1008,172 @@ def _machine_manifest(
     return manifest, bundle.manifest_ref
 
 
+def _clean_machine_manifest(
+    identity: ReleaseIdentity,
+    repo_root: Path,
+) -> tuple[dict[str, Any], str, bytes]:
+    journey_id = "conversation_recall"
+    evidence_class = "clean artifact path"
+    exact_identity = exact_evidence.ReleaseIdentity(
+        source_commit=identity.source_commit,
+        tree_sha256=identity.tree_sha256,
+        wheel_sha256=identity.wheel_sha256,
+        database_schema=identity.database_schema,
+    )
+    refs = exact_evidence.proof_refs(journey_id, evidence_class)
+    outcomes = ("PASSED",) * len(refs)
+    collection = exact_evidence.canonical_json_bytes({"nodeids": list(refs), "version": 1})
+    receipt = {
+        "$schema": exact_evidence.CLEAN_ARTIFACT_RECEIPT_SCHEMA,
+        "check_ids": _expected_check_ids(journey_id, evidence_class),
+        "environment": ENVIRONMENT_BY_CLASS[evidence_class],
+        "evidence_class": evidence_class,
+        "execution": {
+            "artifact_import": {
+                "interpreter_ref": "venv/bin/python",
+                "origin_report_sha256": "1" * 64,
+                "site_packages_ref": "venv/lib/python3.14/site-packages",
+                "subprocess_policy": exact_evidence._SUBPROCESS_POLICY,  # noqa: SLF001
+                "tooling_modules_sha256": "2" * 64,
+                "tooling_policy": exact_evidence._TEST_TOOLING_POLICY,  # noqa: SLF001
+                "tooling_snapshot_sha256": "3" * 64,
+            },
+            "collection_sha256": hashlib.sha256(collection).hexdigest(),
+            "exit_code": 0,
+            "outcome_projection_sha256": exact_evidence._outcome_projection_sha256(  # noqa: SLF001
+                refs,
+                outcomes,
+            ),
+            "producer_path": exact_evidence.PRODUCER_PATH,
+            "producer_source_sha256": hashlib.sha256(
+                _exact_git_blob(identity.source_commit, exact_evidence.PRODUCER_PATH)
+            ).hexdigest(),
+            "runner": "pytest",
+        },
+        "journey_id": journey_id,
+        "observed_at_utc": "2026-08-30T12:00:00Z",
+        "owner_smoke": None,
+        "proofs": [
+            {
+                "outcome": outcome,
+                "runner": "pytest",
+                "test_ref": ref,
+                "test_source_sha256": hashlib.sha256(
+                    _exact_git_test_source(ref, source_commit=identity.source_commit)
+                ).hexdigest(),
+            }
+            for ref, outcome in zip(refs, outcomes, strict=True)
+        ],
+        "release": _release_payload(identity),
+        "result": "VERIFIED",
+    }
+    raw = exact_evidence.canonical_json_bytes(receipt)
+    bundle = exact_evidence._bundle_from_receipt(  # noqa: SLF001 - exact test fixture projection
+        raw,
+        identity=exact_identity,
+        journey_id=journey_id,
+        evidence_class=evidence_class,
+    )
+    artifact = repo_root / bundle.receipt_ref
+    artifact.parent.mkdir(parents=True, exist_ok=True)
+    artifact.write_bytes(raw)
+    manifest = json.loads(bundle.manifest)
+    assert isinstance(manifest, dict)
+    return manifest, bundle.manifest_ref, raw
+
+
+def test_site_loaded_registry_reexecutes_the_exact_validation_controller(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    assert "site" in sys.modules
+    assert exact_evidence._INITIAL_PRODUCER_SITE_LOADED is True  # noqa: SLF001
+    with pytest.raises(
+        exact_evidence.ExactReleaseEvidenceError,
+        match="^producer_process_authority_invalid$",
+    ):
+        exact_evidence._require_producer_process_authority()  # noqa: SLF001
+
+    identity = ReleaseIdentity(
+        source_commit=_repository_head(),
+        tree_sha256="a" * 64,
+        wheel_sha256="b" * 64,
+        database_schema=50,
+    )
+    artifact_root = tmp_path / "native-controller"
+    original_runner = exact_evidence._run_closed_pytest  # noqa: SLF001
+    with monkeypatch.context() as mint_patch:
+        manifest, manifest_ref = _machine_manifest(identity, artifact_root, mint_patch)
+    assert exact_evidence._run_closed_pytest is original_runner  # noqa: SLF001
+
+    def reject_native_gate_use(*_args: object, **_kwargs: object) -> None:
+        raise AssertionError("site-loaded quality gate became validation authority")
+
+    monkeypatch.setattr(quality_gate, "_isolated_test_environment", reject_native_gate_use)
+    _validate_manifest_payload(
+        manifest,
+        manifest_ref=manifest_ref,
+        journey_id="conversation_recall",
+        evidence_class="deterministic contract",
+        current=identity,
+        require_current=True,
+        repo_root=artifact_root,
+    )
+
+
+def test_decisive_clean_registry_passes_one_exact_request_to_native_controller(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    identity = ReleaseIdentity(
+        source_commit=_repository_head(),
+        tree_sha256="a" * 64,
+        wheel_sha256="b" * 64,
+        database_schema=50,
+    )
+    artifact_root = tmp_path / "clean-artifacts"
+    manifest, manifest_ref, raw = _clean_machine_manifest(identity, artifact_root)
+    sealed_release_root = tmp_path / "sealed-release"
+    sealed_release_root.mkdir()
+    calls: list[dict[str, object]] = []
+
+    def validate_native(candidate: bytes, **kwargs: object) -> dict[str, Any]:
+        calls.append({"raw": candidate, **kwargs})
+        return json.loads(candidate)
+
+    monkeypatch.setattr(
+        exact_evidence,
+        "validate_receipt_via_native_controller",
+        validate_native,
+    )
+    _validate_manifest_payload(
+        manifest,
+        manifest_ref=manifest_ref,
+        journey_id="conversation_recall",
+        evidence_class="clean artifact path",
+        current=identity,
+        require_current=True,
+        repo_root=artifact_root,
+        release_root=sealed_release_root,
+    )
+
+    assert calls == [
+        {
+            "raw": raw,
+            "expected_release": exact_evidence.ReleaseIdentity(
+                source_commit=identity.source_commit,
+                tree_sha256=identity.tree_sha256,
+                wheel_sha256=identity.wheel_sha256,
+                database_schema=identity.database_schema,
+            ),
+            "expected_journey_id": "conversation_recall",
+            "expected_evidence_class": "clean artifact path",
+            "repo_root": ROOT,
+            "release_root": sealed_release_root,
+        }
+    ]
+
+
 def test_canonical_golden_journey_registry_is_closed_current_and_privacy_safe(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -1167,6 +1334,11 @@ def test_canonical_golden_journey_registry_is_closed_current_and_privacy_safe(
     )
     machine_root = tmp_path / "machine"
     machine_manifest, machine_manifest_ref = _machine_manifest(machine_identity, machine_root, monkeypatch)
+    monkeypatch.setattr(
+        exact_evidence,
+        "validate_receipt_via_native_controller",
+        exact_evidence.validate_receipt,
+    )
     _validate_manifest_payload(
         machine_manifest,
         manifest_ref=machine_manifest_ref,

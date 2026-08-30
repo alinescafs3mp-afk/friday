@@ -27,6 +27,7 @@ from typing import Any
 
 _INITIAL_PRODUCER_SYS_PATH = tuple(sys.path)
 _INITIAL_PRODUCER_SITE_LOADED = "site" in sys.modules
+_INITIAL_PRODUCER_EXECUTABLE = sys.executable
 
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
@@ -35,8 +36,10 @@ if str(ROOT) not in sys.path:
 RECEIPT_SCHEMA = "friday.golden-journey-sanitized-receipt.v2"
 CLEAN_ARTIFACT_RECEIPT_SCHEMA = "friday.golden-journey-sanitized-receipt.v4"
 MANIFEST_SCHEMA = "friday.golden-journey-evidence.v1"
+VALIDATION_ATTESTATION_SCHEMA = "friday.exact-release-receipt-validation.v1"
 PRODUCER_PATH = "tools/exact_release_evidence.py"
 PYTEST_TIMEOUT_SECONDS = 900
+VALIDATION_TIMEOUT_SECONDS = PYTEST_TIMEOUT_SECONDS + 60
 _EVIDENCE_ROOT = PurePosixPath("evidence/golden_journeys")
 _CLEAN_ARTIFACT_CLASS = "clean artifact path"
 _SUBPROCESS_POLICY = "cpython_audit_deny"
@@ -150,6 +153,11 @@ _PYTEST_BOOTSTRAP = (
     "import pathlib,sys; "
     "root=str(pathlib.Path(sys.argv.pop(1)).resolve(strict=True)); "
     "sys.path.insert(0,root); import pytest; raise SystemExit(pytest.main(sys.argv[1:]))"
+)
+_ISOLATED_VALIDATION_BOOTSTRAP = (
+    "import runpy,sys; "
+    "namespace=runpy.run_path(sys.argv[1]); "
+    "raise SystemExit(namespace['main'](sys.argv[2:]))"
 )
 _INSTALLED_PYTEST_BOOTSTRAP = r"""
 import hashlib,importlib.machinery,importlib.util,json,os,pathlib,posix,stat,sys,sysconfig,types
@@ -3204,6 +3212,281 @@ def validate_receipt(
         )
 
 
+def _validation_request(
+    raw: bytes,
+    *,
+    expected_release: ReleaseIdentity,
+    expected_journey_id: str,
+    expected_evidence_class: str,
+    release_root: Path | None,
+) -> dict[str, object]:
+    _load_canonical_receipt(raw)
+    proof_refs(expected_journey_id, expected_evidence_class)
+    clean_artifact = expected_evidence_class == _CLEAN_ARTIFACT_CLASS
+    if clean_artifact != (release_root is not None):
+        raise ExactReleaseEvidenceError(
+            "release_runtime_required" if clean_artifact else "release_runtime_unexpected"
+        )
+    return {
+        "evidence_class": expected_evidence_class,
+        "journey_id": expected_journey_id,
+        "receipt_sha256": hashlib.sha256(raw).hexdigest(),
+        "release": _release_payload(expected_release),
+        "release_root_required": clean_artifact,
+    }
+
+
+def _validation_attestation(
+    raw: bytes,
+    receipt: dict[str, Any],
+    *,
+    expected_release: ReleaseIdentity,
+    expected_journey_id: str,
+    expected_evidence_class: str,
+    release_root: Path | None,
+) -> dict[str, object]:
+    request = _validation_request(
+        raw,
+        expected_release=expected_release,
+        expected_journey_id=expected_journey_id,
+        expected_evidence_class=expected_evidence_class,
+        release_root=release_root,
+    )
+    result = receipt.get("result")
+    observed_at_utc = receipt.get("observed_at_utc")
+    if result not in {"VERIFIED", "FAILED"} or type(observed_at_utc) is not str:
+        raise ExactReleaseEvidenceError("validation_attestation_invalid")
+    return {
+        "$schema": VALIDATION_ATTESTATION_SCHEMA,
+        "evidence_class": expected_evidence_class,
+        "journey_id": expected_journey_id,
+        "observed_at_utc": observed_at_utc,
+        "receipt_sha256": request["receipt_sha256"],
+        "release": request["release"],
+        "request_sha256": hashlib.sha256(canonical_json_bytes(request)).hexdigest(),
+        "result": result,
+        "status": "VALIDATED",
+    }
+
+
+def _load_validation_attestation(raw: bytes) -> dict[str, Any]:
+    if type(raw) is not bytes or not raw.endswith(b"\n") or not 0 < len(raw) <= 4096:
+        raise ExactReleaseEvidenceError("validation_attestation_invalid")
+    payload_raw = raw[:-1]
+    try:
+        value = json.loads(
+            payload_raw.decode("utf-8", errors="strict"),
+            object_pairs_hook=_closed_object,
+            parse_constant=lambda _value: (_ for _ in ()).throw(
+                ExactReleaseEvidenceError("validation_attestation_invalid")
+            ),
+        )
+    except (UnicodeError, RuntimeError, ValueError, json.JSONDecodeError) as exc:
+        raise ExactReleaseEvidenceError("validation_attestation_invalid") from exc
+    if type(value) is not dict:
+        raise ExactReleaseEvidenceError("validation_attestation_invalid")
+    try:
+        canonical = canonical_json_bytes(value)
+    except (TypeError, ValueError, UnicodeError) as exc:
+        raise ExactReleaseEvidenceError("validation_attestation_invalid") from exc
+    if payload_raw != canonical:
+        raise ExactReleaseEvidenceError("validation_attestation_invalid")
+    return value
+
+
+def _isolated_validation_failure_code(raw: bytes) -> str | None:
+    try:
+        value = _load_validation_attestation(raw)
+    except ExactReleaseEvidenceError:
+        return None
+    if set(value) != {"failure_code", "status"} or value.get("status") != "failed_closed":
+        return None
+    failure_code = value.get("failure_code")
+    if type(failure_code) is not str or re.fullmatch(r"[a-z][a-z0-9_]{1,95}", failure_code) is None:
+        return None
+    return failure_code
+
+
+def _validation_controller_identity(repo_root: Path) -> tuple[Path, str]:
+    root = _resolve_directory(repo_root, "repo_root_invalid")
+    try:
+        head = _git(root, "rev-parse", "--verify", "HEAD^{commit}").decode("ascii").strip()
+    except UnicodeError as exc:
+        raise ExactReleaseEvidenceError("git_identity_unavailable") from exc
+    if _COMMIT.fullmatch(head) is None:
+        raise ExactReleaseEvidenceError("git_identity_unavailable")
+    _require_exact_checkout(root, head)
+    _require_running_producer(root, head)
+    return root, head
+
+
+def _isolated_validation_environment(scratch: Path) -> dict[str, str]:
+    try:
+        resolved = scratch.resolve(strict=True)
+        status = resolved.lstat()
+        home = resolved / "home"
+        home.mkdir(mode=0o700)
+        if (
+            resolved != scratch
+            or not stat.S_ISDIR(status.st_mode)
+            or status.st_uid != os.geteuid()
+            or stat.S_IMODE(status.st_mode) != 0o700
+            or home.resolve(strict=True) != home
+            or stat.S_IMODE(home.lstat().st_mode) != 0o700
+        ):
+            raise ExactReleaseEvidenceError("validation_scratch_invalid")
+    except (OSError, RuntimeError, TypeError, ValueError) as exc:
+        if isinstance(exc, ExactReleaseEvidenceError):
+            raise
+        raise ExactReleaseEvidenceError("validation_scratch_invalid") from exc
+    return {
+        "HOME": str(home),
+        "LANG": "C.UTF-8",
+        "LC_ALL": "C.UTF-8",
+        "PATH": os.defpath,
+        "TMPDIR": str(resolved),
+        "TZ": "UTC",
+    }
+
+
+def validate_receipt_via_native_controller(
+    raw: bytes,
+    *,
+    expected_release: ReleaseIdentity,
+    expected_journey_id: str,
+    expected_evidence_class: str,
+    repo_root: Path,
+    release_root: Path | None = None,
+) -> dict[str, Any]:
+    """Validate through one exact stdlib-only controller from a native gate."""
+
+    receipt = _load_canonical_receipt(raw)
+    request = _validation_request(
+        raw,
+        expected_release=expected_release,
+        expected_journey_id=expected_journey_id,
+        expected_evidence_class=expected_evidence_class,
+        release_root=release_root,
+    )
+    root, head = _validation_controller_identity(repo_root)
+    producer = root / PRODUCER_PATH
+    try:
+        executable = Path(_INITIAL_PRODUCER_EXECUTABLE)
+        executable_before = executable.lstat()
+        executable_target = executable.resolve(strict=True)
+        target_before = executable_target.lstat()
+        if (
+            sys.executable != _INITIAL_PRODUCER_EXECUTABLE
+            or not executable.is_absolute()
+            or not stat.S_ISREG(target_before.st_mode)
+            or not target_before.st_mode & 0o111
+        ):
+            raise ExactReleaseEvidenceError("validation_controller_invalid")
+    except (OSError, RuntimeError, TypeError, ValueError) as exc:
+        if isinstance(exc, ExactReleaseEvidenceError):
+            raise
+        raise ExactReleaseEvidenceError("validation_controller_invalid") from exc
+
+    command = [
+        str(executable),
+        "-I",
+        "-S",
+        "-B",
+        "-c",
+        _ISOLATED_VALIDATION_BOOTSTRAP,
+        str(producer),
+        "validate",
+        "--repo-root",
+        str(root),
+        "--expected-source-commit",
+        expected_release.source_commit,
+        "--expected-tree-sha256",
+        expected_release.tree_sha256,
+        "--expected-wheel-sha256",
+        expected_release.wheel_sha256,
+        "--expected-database-schema",
+        str(expected_release.database_schema),
+        "--journey-id",
+        expected_journey_id,
+        "--evidence-class",
+        expected_evidence_class,
+    ]
+    if release_root is not None:
+        command.extend(("--release-root", str(release_root)))
+
+    completed: subprocess.CompletedProcess[bytes] | None = None
+    run_error: BaseException | None = None
+    try:
+        with tempfile.TemporaryDirectory(
+            prefix="friday-native-validation-",
+            dir="/var/tmp",
+        ) as temporary:
+            scratch = Path(temporary).resolve(strict=True)
+            scratch.chmod(0o700)
+            environment = _isolated_validation_environment(scratch)
+            completed = subprocess.run(
+                tuple(command),
+                cwd=root,
+                env=environment,
+                input=raw,
+                capture_output=True,
+                check=False,
+                timeout=VALIDATION_TIMEOUT_SECONDS,
+            )
+    except (OSError, RuntimeError, subprocess.SubprocessError) as exc:
+        run_error = exc
+    finally:
+        _require_exact_checkout(root, head)
+        _require_running_producer(root, head)
+        try:
+            executable_after = executable.lstat()
+            target_after = executable_target.lstat()
+        except OSError as exc:
+            raise ExactReleaseEvidenceError("validation_controller_invalid") from exc
+        stable_fields = (
+            "st_dev",
+            "st_ino",
+            "st_mode",
+            "st_nlink",
+            "st_uid",
+            "st_gid",
+            "st_size",
+            "st_mtime_ns",
+            "st_ctime_ns",
+        )
+        if any(
+            getattr(before, field) != getattr(after, field)
+            for before, after in (
+                (executable_before, executable_after),
+                (target_before, target_after),
+            )
+            for field in stable_fields
+        ):
+            raise ExactReleaseEvidenceError("validation_controller_invalid")
+    if run_error is not None or completed is None:
+        raise ExactReleaseEvidenceError("isolated_receipt_validation_failed") from run_error
+    if completed.returncode != 0 or completed.stderr:
+        failure_code = _isolated_validation_failure_code(completed.stdout)
+        if completed.stderr or failure_code is None:
+            raise ExactReleaseEvidenceError("isolated_receipt_validation_failed")
+        raise ExactReleaseEvidenceError(failure_code)
+    attestation = _load_validation_attestation(completed.stdout)
+    expected_attestation = {
+        "$schema": VALIDATION_ATTESTATION_SCHEMA,
+        "evidence_class": expected_evidence_class,
+        "journey_id": expected_journey_id,
+        "observed_at_utc": receipt.get("observed_at_utc"),
+        "receipt_sha256": request["receipt_sha256"],
+        "release": request["release"],
+        "request_sha256": hashlib.sha256(canonical_json_bytes(request)).hexdigest(),
+        "result": receipt.get("result"),
+        "status": "VALIDATED",
+    }
+    if attestation != expected_attestation:
+        raise ExactReleaseEvidenceError("validation_attestation_invalid")
+    return receipt
+
+
 def _stable_file(path: Path, maximum_bytes: int) -> bytes:
     flags = os.O_RDONLY | os.O_CLOEXEC | getattr(os, "O_NOFOLLOW", 0)
     descriptor = -1
@@ -4432,6 +4715,23 @@ def _external_bundle_output_root(repo_root: Path, output_root: Path) -> Path:
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     commands = parser.add_subparsers(dest="command", required=True)
+    validate = commands.add_parser("validate")
+    validate.add_argument("--repo-root", required=True, type=Path)
+    validate.add_argument("--release-root", type=Path)
+    validate.add_argument("--expected-source-commit", required=True)
+    validate.add_argument("--expected-tree-sha256", required=True)
+    validate.add_argument("--expected-wheel-sha256", required=True)
+    validate.add_argument("--expected-database-schema", required=True, type=int)
+    validate.add_argument(
+        "--journey-id",
+        required=True,
+        choices=sorted({key[0] for key in _PROOF_REFS_BY_JOURNEY_CLASS}),
+    )
+    validate.add_argument(
+        "--evidence-class",
+        required=True,
+        choices=sorted({key[1] for key in _PROOF_REFS_BY_JOURNEY_CLASS}),
+    )
     run = commands.add_parser("run")
     run.add_argument("--release-root", required=True, type=Path)
     run.add_argument("--repo-root", required=True, type=Path)
@@ -4464,6 +4764,32 @@ def main(argv: list[str] | None = None) -> int:
     try:
         _require_producer_process_authority()
         args = build_parser().parse_args(argv)
+        if args.command == "validate":
+            raw = sys.stdin.buffer.read(65_537)
+            expected_release = ReleaseIdentity(
+                source_commit=args.expected_source_commit,
+                tree_sha256=args.expected_tree_sha256,
+                wheel_sha256=args.expected_wheel_sha256,
+                database_schema=args.expected_database_schema,
+            )
+            receipt = validate_receipt(
+                raw,
+                expected_release=expected_release,
+                expected_journey_id=args.journey_id,
+                expected_evidence_class=args.evidence_class,
+                repo_root=args.repo_root,
+                release_root=args.release_root,
+            )
+            attestation = _validation_attestation(
+                raw,
+                receipt,
+                expected_release=expected_release,
+                expected_journey_id=args.journey_id,
+                expected_evidence_class=args.evidence_class,
+                release_root=args.release_root,
+            )
+            print(canonical_json_bytes(attestation).decode())
+            return 0
         if args.command == "bundle":
             output_root = _external_bundle_output_root(args.repo_root, args.output_root)
             bundle = produce_evidence_bundle(
