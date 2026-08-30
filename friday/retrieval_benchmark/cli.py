@@ -14,6 +14,7 @@ from friday.retrieval_benchmark.contracts import (
     case_manifest_sha256,
     observation_manifest_sha256,
 )
+from friday.retrieval_benchmark.conversation_harness import run_conversation_ephemeral
 from friday.retrieval_benchmark.harness import (
     RecallHarnessError,
     cases_jsonl,
@@ -118,6 +119,17 @@ def _run_parity_ephemeral(_args: argparse.Namespace) -> int:
     return EXIT_OK
 
 
+def _run_conversation_ephemeral(_args: argparse.Namespace) -> int:
+    try:
+        result = run_conversation_ephemeral()
+    except RecallHarnessError:
+        raise
+    except Exception as exc:
+        raise RecallHarnessError("conversation archive path failed") from exc
+    _emit(result.report)
+    return EXIT_REGRESSION if result.gap_count else EXIT_OK
+
+
 def _score(args: argparse.Namespace) -> int:
     report = score_recall(
         read_cases(Path(args.cases)),
@@ -158,6 +170,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="run the separate body-free archive/legacy parity matrix",
     )
     parity.set_defaults(handler=_run_parity_ephemeral)
+
+    conversation = commands.add_parser(
+        "run-conversation-ephemeral",
+        help="run the closed body-free conversation recall journey matrix",
+    )
+    conversation.set_defaults(handler=_run_conversation_ephemeral)
 
     score = commands.add_parser("score", help="score canonical cases and body-free observations")
     score.add_argument("cases")
