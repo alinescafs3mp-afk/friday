@@ -246,6 +246,13 @@ class AssistComparisonSynthesizer(Protocol):
 
 
 class AssistPromotionDecisionProvider(Protocol):
+    def runtime_admission_refresh_is_eligible(
+        self,
+        *,
+        binding_snapshot: CapabilityBindingSnapshot,
+        actor_binding_sha256: str | None = None,
+    ) -> bool: ...
+
     async def refresh_runtime_admission(self, *, absolute_deadline: float) -> bool: ...
 
     def decide(
@@ -822,6 +829,10 @@ class SupervisorAssistController:
             raise ValueError("assist controller review rounds must be zero or one")
         for label, dependency in (
             (
+                "promotion admission refresh preflight",
+                getattr(promotion_evaluator, "runtime_admission_refresh_is_eligible", None),
+            ),
+            (
                 "promotion admission refresh",
                 getattr(promotion_evaluator, "refresh_runtime_admission", None),
             ),
@@ -1345,6 +1356,20 @@ class SupervisorAssistController:
                 return None
             if type(canary_binding) is not str or _DIGEST_RE.fullmatch(canary_binding) is None:
                 return None
+        snapshot = self._fresh_snapshot()
+        if snapshot is None:
+            return None
+        try:
+            refresh_is_eligible = self._promotion.runtime_admission_refresh_is_eligible(
+                binding_snapshot=snapshot,
+                actor_binding_sha256=canary_binding,
+            )
+        except Exception:
+            return None
+        if refresh_is_eligible is not True:
+            self._last_admitted_mode = SupervisorMode.OFF
+            self._last_admitted_actor_binding_sha256 = None
+            return None
         try:
             runtime_admitted = await self._promotion.refresh_runtime_admission(
                 absolute_deadline=deadline,
@@ -1358,9 +1383,14 @@ class SupervisorAssistController:
             self._last_admitted_mode = SupervisorMode.OFF
             self._last_admitted_actor_binding_sha256 = None
             return None
-        snapshot = self._fresh_snapshot()
-        if snapshot is None:
+        refreshed_snapshot = self._fresh_snapshot()
+        if refreshed_snapshot is None:
             return None
+        if refreshed_snapshot.digest_hex() != snapshot.digest_hex():
+            self._last_admitted_mode = SupervisorMode.OFF
+            self._last_admitted_actor_binding_sha256 = None
+            return None
+        snapshot = refreshed_snapshot
         self._promotion_attempt_total += 1
         decision = self._decide_promotion(
             snapshot,

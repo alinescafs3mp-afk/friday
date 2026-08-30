@@ -230,17 +230,33 @@ class _Promotion:
         self,
         *,
         admitted: bool = True,
+        refresh_eligible: bool = True,
         runtime_admitted: bool = True,
         mode: SupervisorMode = SupervisorMode.ASSIST,
     ) -> None:
         self.admitted = admitted
+        self.refresh_eligible = refresh_eligible
         self.runtime_admitted = runtime_admitted
         self.mode = mode
+        self.preflight_calls = 0
         self.refresh_calls = 0
         self.calls = 0
         self.events: list[str] = []
+        self.preflight_actor_bindings: list[str | None] = []
         self.actor_bindings: list[str | None] = []
         self.scheduler = SimpleNamespace()
+
+    def runtime_admission_refresh_is_eligible(
+        self,
+        *,
+        binding_snapshot: CapabilityBindingSnapshot,
+        actor_binding_sha256: str | None = None,
+    ) -> bool:
+        assert type(binding_snapshot) is CapabilityBindingSnapshot
+        self.preflight_calls += 1
+        self.events.append("preflight")
+        self.preflight_actor_bindings.append(actor_binding_sha256)
+        return self.refresh_eligible
 
     async def refresh_runtime_admission(self, *, absolute_deadline: float) -> bool:
         assert absolute_deadline > time.monotonic()
@@ -1128,7 +1144,7 @@ async def test_preownership_failure_calls_legacy_exactly_once() -> None:
     assert result.outcome is SupervisorAssistOutcome.LEGACY
     assert calls == 1
     assert planner.calls == 0
-    assert promotion.events == ["refresh", "decide"]
+    assert promotion.events == ["preflight", "refresh", "decide"]
 
 
 @pytest.mark.asyncio
@@ -1161,7 +1177,7 @@ async def test_demand_refresh_can_restore_promotion_before_planning() -> None:
     assert result.outcome is SupervisorAssistOutcome.LEGACY
     assert legacy_calls == 1
     assert planner.calls == 1
-    assert promotion.events == ["refresh", "decide"]
+    assert promotion.events == ["preflight", "refresh", "decide"]
 
 
 @pytest.mark.asyncio
@@ -1200,9 +1216,176 @@ async def test_runtime_admission_refresh_failure_has_no_ownership_or_effect_surf
 
     assert result.outcome is SupervisorAssistOutcome.LEGACY
     assert legacy_calls == 1
+    assert promotion.preflight_calls == 1
     assert promotion.refresh_calls == 1
     assert promotion.calls == planner.calls == 0
-    assert promotion.events == ["refresh"]
+    assert promotion.events == ["preflight", "refresh"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "mode",
+    [
+        pytest.param(SupervisorMode.CANARY, id="non_allowlisted_canary_actor"),
+        pytest.param(SupervisorMode.ASSIST, id="invalid_operator_or_evidence_gate"),
+    ],
+)
+async def test_static_promotion_ineligibility_has_zero_secondary_traffic(
+    mode: SupervisorMode,
+) -> None:
+    promotion = _Promotion(
+        refresh_eligible=False,
+        mode=mode,
+    )
+    planner = _Planner()
+    controller = _controller(
+        settings=_settings(mode),
+        promotion=promotion,
+        planner=planner,
+    )
+    legacy_calls = 0
+
+    async def legacy() -> dict[str, object]:
+        nonlocal legacy_calls
+        legacy_calls += 1
+        return {"message": "legacy"}
+
+    result = await controller.execute(
+        _surface(),
+        legacy_primary=legacy,
+        absolute_deadline=time.monotonic() + 3,
+    )
+
+    assert result.outcome is SupervisorAssistOutcome.LEGACY
+    assert legacy_calls == 1
+    assert promotion.preflight_calls == 1
+    assert promotion.preflight_actor_bindings == ["c" * 64 if mode is SupervisorMode.CANARY else None]
+    assert promotion.refresh_calls == promotion.calls == planner.calls == 0
+    assert promotion.events == ["preflight"]
+
+
+@pytest.mark.asyncio
+async def test_unavailable_capability_snapshot_has_zero_secondary_traffic() -> None:
+    promotion = _Promotion()
+    planner = _Planner()
+
+    def unavailable_snapshot() -> NoReturn:
+        raise RuntimeError("registry unavailable")
+
+    controller = _controller(
+        promotion=promotion,
+        planner=planner,
+        binding_snapshot_factory=unavailable_snapshot,
+    )
+    legacy_calls = 0
+
+    async def legacy() -> dict[str, object]:
+        nonlocal legacy_calls
+        legacy_calls += 1
+        return {"message": "legacy"}
+
+    result = await controller.execute(
+        _surface(),
+        legacy_primary=legacy,
+        absolute_deadline=time.monotonic() + 3,
+    )
+
+    assert result.outcome is SupervisorAssistOutcome.LEGACY
+    assert legacy_calls == 1
+    assert promotion.preflight_calls == promotion.refresh_calls == promotion.calls == 0
+    assert planner.calls == 0
+    assert promotion.events == []
+
+
+@pytest.mark.asyncio
+async def test_registry_drift_static_preflight_has_zero_secondary_traffic() -> None:
+    expected = operational_capability_snapshot()
+    drifted_bindings = list(expected.bindings)
+    drifted_bindings[0] = replace(drifted_bindings[0], adapter_registered=False)
+    drifted = CapabilityBindingSnapshot(bindings=tuple(drifted_bindings))
+
+    class RegistryBoundPromotion(_Promotion):
+        def runtime_admission_refresh_is_eligible(
+            self,
+            *,
+            binding_snapshot: CapabilityBindingSnapshot,
+            actor_binding_sha256: str | None = None,
+        ) -> bool:
+            recorded = super().runtime_admission_refresh_is_eligible(
+                binding_snapshot=binding_snapshot,
+                actor_binding_sha256=actor_binding_sha256,
+            )
+            return recorded and binding_snapshot.digest_hex() == expected.digest_hex()
+
+    promotion = RegistryBoundPromotion()
+    planner = _Planner()
+    controller = _controller(
+        promotion=promotion,
+        planner=planner,
+        binding_snapshot_factory=lambda: drifted,
+    )
+    legacy_calls = 0
+
+    async def legacy() -> dict[str, object]:
+        nonlocal legacy_calls
+        legacy_calls += 1
+        return {"message": "legacy"}
+
+    result = await controller.execute(
+        _surface(),
+        legacy_primary=legacy,
+        absolute_deadline=time.monotonic() + 3,
+    )
+
+    assert result.outcome is SupervisorAssistOutcome.LEGACY
+    assert legacy_calls == 1
+    assert promotion.preflight_calls == 1
+    assert promotion.refresh_calls == promotion.calls == planner.calls == 0
+    assert promotion.events == ["preflight"]
+
+
+@pytest.mark.asyncio
+async def test_capability_snapshot_is_reacquired_and_revalidated_after_refresh() -> None:
+    initial = operational_capability_snapshot()
+    drifted_bindings = list(initial.bindings)
+    drifted_bindings[0] = replace(drifted_bindings[0], adapter_registered=False)
+    drifted = CapabilityBindingSnapshot(bindings=tuple(drifted_bindings))
+
+    class SnapshotFactory:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def __call__(self) -> CapabilityBindingSnapshot:
+            self.calls += 1
+            return initial if self.calls == 1 else drifted
+
+    snapshots = SnapshotFactory()
+    promotion = _Promotion()
+    planner = _Planner()
+    controller = _controller(
+        promotion=promotion,
+        planner=planner,
+        binding_snapshot_factory=snapshots,
+    )
+    legacy_calls = 0
+
+    async def legacy() -> dict[str, object]:
+        nonlocal legacy_calls
+        legacy_calls += 1
+        return {"message": "legacy"}
+
+    result = await controller.execute(
+        _surface(),
+        legacy_primary=legacy,
+        absolute_deadline=time.monotonic() + 3,
+    )
+
+    assert result.outcome is SupervisorAssistOutcome.LEGACY
+    assert legacy_calls == 1
+    assert snapshots.calls == 2
+    assert promotion.preflight_calls == promotion.refresh_calls == 1
+    assert promotion.calls == planner.calls == 0
+    assert promotion.events == ["preflight", "refresh"]
 
 
 @pytest.mark.asyncio
@@ -1225,7 +1408,7 @@ async def test_non_assist_surface_never_refreshes_secondary_runtime() -> None:
 
     assert result.outcome is SupervisorAssistOutcome.LEGACY
     assert legacy_calls == 1
-    assert promotion.refresh_calls == promotion.calls == planner.calls == 0
+    assert promotion.preflight_calls == promotion.refresh_calls == promotion.calls == planner.calls == 0
 
 
 @pytest.mark.asyncio

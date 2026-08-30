@@ -28,6 +28,7 @@ from friday.orchestration.supervisor_assist_promotion import (
     AssistPromotionReason,
     SupervisorSchedulerAdmissionSnapshot,
     admit_supervisor_assist_promotion,
+    supervisor_assist_promotion_static_preflight,
 )
 from friday.orchestration.supervisor_contracts import SupervisorMode, TaskClass
 
@@ -632,6 +633,64 @@ def test_laptop_unavailable_rejects_without_erasing_source_or_live_readiness() -
     assert decision.source_ready is True
     assert decision.live_evidence_ready is True
     assert decision.readiness is AssistPromotionReadiness.LIVE_EVIDENCE_READY
+
+
+def test_static_preflight_ignores_only_stale_runtime_availability() -> None:
+    candidate = _candidate(scheduler=_scheduler(runtime_available=False))
+    evidence = _evidence(candidate)
+
+    assert supervisor_assist_promotion_static_preflight(
+        candidate,
+        evidence,
+        _gate(candidate, evidence),
+    )
+    assert (
+        admit_supervisor_assist_promotion(candidate, evidence, _gate(candidate, evidence)).reason
+        is AssistPromotionReason.LAPTOP_RUNTIME_UNAVAILABLE
+    )
+
+
+def test_static_preflight_rejects_canary_actor_operator_evidence_and_registry_drift() -> None:
+    canary = _candidate(
+        mode=SupervisorMode.CANARY,
+        scheduler=_scheduler(
+            requested_mode=SupervisorMode.CANARY.value,
+            runtime_available=False,
+        ),
+        actor_binding_sha256=OTHER_ACTOR,
+    )
+    canary_evidence = _evidence(canary)
+    assist = _candidate(scheduler=_scheduler(runtime_available=False))
+    assist_evidence = _evidence(assist)
+    registry_drift = _candidate(
+        scheduler=_scheduler(runtime_available=False),
+        expected_registry_binding_sha256=OTHER,
+    )
+    registry_evidence = _evidence(registry_drift)
+
+    assert not supervisor_assist_promotion_static_preflight(
+        canary,
+        canary_evidence,
+        _gate(canary, canary_evidence),
+    )
+    assert not supervisor_assist_promotion_static_preflight(
+        assist,
+        assist_evidence,
+        _gate(assist, assist_evidence, accepted_evidence_sha256=OTHER),
+    )
+    assert not supervisor_assist_promotion_static_preflight(
+        assist,
+        replace(
+            assist_evidence,
+            authority=AssistPromotionEvidenceAuthority.SYNTHETIC_OFFLINE,
+        ),
+        _gate(assist, assist_evidence),
+    )
+    assert not supervisor_assist_promotion_static_preflight(
+        registry_drift,
+        registry_evidence,
+        _gate(registry_drift, registry_evidence),
+    )
 
 
 @pytest.mark.parametrize(

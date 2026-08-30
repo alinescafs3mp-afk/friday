@@ -27,6 +27,7 @@ from friday.orchestration.supervisor_assist_activation import AssistPromotionAct
 from friday.orchestration.supervisor_assist_promotion import (
     AssistPromotionDecision,
     admit_supervisor_assist_promotion,
+    supervisor_assist_promotion_static_preflight,
 )
 from friday.orchestration.supervisor_contracts import SupervisorInput
 from friday.orchestration.supervisor_review_policy import SupervisorReviewContext
@@ -64,6 +65,10 @@ class AssistSecondaryScheduler(Protocol):
 
 class AssistRuntimeAdmissionScheduler(Protocol):
     """The content-free supervisor admission surface; no product request."""
+
+    def public_status(self) -> Mapping[str, object]: ...
+
+    def diagnostics_status(self) -> Mapping[str, object]: ...
 
     async def refresh_semantic_supervisor_runtime_admission(
         self,
@@ -212,6 +217,36 @@ class AssistPromotionEvaluator:
 
     material: AssistPromotionActivationMaterial
     scheduler: AssistRuntimeAdmissionScheduler
+
+    def runtime_admission_refresh_is_eligible(
+        self,
+        *,
+        binding_snapshot: CapabilityBindingSnapshot,
+        actor_binding_sha256: str | None = None,
+    ) -> bool:
+        """Prove every promotion gate that does not need fresh runtime state."""
+
+        if not isinstance(self.material, AssistPromotionActivationMaterial):
+            return False
+        try:
+            candidate = self.material.fresh_candidate(
+                _status(self.scheduler, "public_status"),
+                _status(self.scheduler, "diagnostics_status"),
+                binding_snapshot,
+                actor_binding_sha256=actor_binding_sha256,
+            )
+            evidence = self.material.loaded_evidence
+            return bool(
+                candidate is not None
+                and evidence is not None
+                and supervisor_assist_promotion_static_preflight(
+                    candidate,
+                    evidence.evidence,
+                    self.material.operator_gate,
+                )
+            )
+        except Exception:
+            return False
 
     async def refresh_runtime_admission(self, *, absolute_deadline: float) -> bool:
         """Refresh only content-free supervisor admission within the root deadline."""

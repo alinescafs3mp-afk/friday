@@ -1020,6 +1020,30 @@ def _gate_reason(
     return None, True
 
 
+def supervisor_assist_promotion_static_preflight(
+    candidate: AssistPromotionCandidate,
+    evidence: AssistPromotionLiveEvidence | None,
+    operator_gate: AssistPromotionOperatorGate,
+) -> bool:
+    """Check every promotion fact except live runtime availability.
+
+    This is a pure traffic preflight, not a promotion decision. It exists so an
+    unavailable laptop can be refreshed only for a candidate that would be
+    admitted if that single runtime fact became true.
+    """
+
+    if (
+        not isinstance(candidate, AssistPromotionCandidate)
+        or not isinstance(operator_gate, AssistPromotionOperatorGate)
+        or not isinstance(evidence, AssistPromotionLiveEvidence)
+        or _source_reason(candidate) is not None
+        or _live_evidence_reason(candidate, evidence) is not None
+    ):
+        return False
+    gate_reason, gate_bound = _gate_reason(candidate, evidence, operator_gate)
+    return gate_reason is None and gate_bound is True
+
+
 def admit_supervisor_assist_promotion(
     candidate: AssistPromotionCandidate,
     evidence: AssistPromotionLiveEvidence | None,
@@ -1117,4 +1141,5 @@ __all__ = [
     "SUPERVISOR_ASSIST_MAX_UNNECESSARY_CALL_RATE_BPS",
     "SupervisorSchedulerAdmissionSnapshot",
     "admit_supervisor_assist_promotion",
+    "supervisor_assist_promotion_static_preflight",
 ]

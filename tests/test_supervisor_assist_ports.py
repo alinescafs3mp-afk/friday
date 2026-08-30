@@ -920,6 +920,9 @@ def test_default_off_activation_never_creates_a_promoted_decision() -> None:
         operator_gate=AssistPromotionOperatorGate(),
     )
     evaluator = ports.AssistPromotionEvaluator(material, cast(Any, object()))
+    assert not evaluator.runtime_admission_refresh_is_eligible(
+        binding_snapshot=operational_capability_snapshot()
+    )
     assert evaluator.decide(binding_snapshot=operational_capability_snapshot()) is None
 
 
