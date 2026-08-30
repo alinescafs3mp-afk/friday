@@ -14,13 +14,13 @@ either merged here or discarded before that source is removed.
 ## Current production identity
 
 - Branch: `main`
-- Deployed implementation head: `25176dd284c2d882b607066a2c9ad24eedfb7ef3`.
-- Live: Friday `0.207.81` / `25176dd284c2d882b607066a2c9ad24eedfb7ef3`;
-  tree `8989721194fa2da9abf29f56560146dd9cc9ecf3ec6b669ed4e334049cdbb93f`;
-  wheel `6f418637f94846bb7e29588b3c18fe53ddac531474269a03319798d51fbfa0de`.
-- Immediate runtime predecessor and schema-capable fallback: Friday `0.207.80` /
-  `446dda2dab8069bfa05f95b6c29dc305b3c3565f`; tree
-  `a3ba9edb4b5b7823a3ad62941e7d557a498b348894cf07be34687a2aa5a0ebe5`.
+- Deployed implementation head: `24f174f9e9342fd7000d3a5ff69df5d337106937`.
+- Live: Friday `0.207.82` / `24f174f9e9342fd7000d3a5ff69df5d337106937`;
+  tree `57f410c206af5170c43a6b1b46f3f1c368e841d334e110db44f6a5ea35af6774`;
+  wheel `7ffd1a8e1a2c8c59b9a6ea46dbcaf2474895eb1d21f6208b09b53cf6b22c921d`.
+- Immediate runtime predecessor and schema-capable fallback: Friday `0.207.81` /
+  `25176dd284c2d882b607066a2c9ad24eedfb7ef3`; tree
+  `8989721194fa2da9abf29f56560146dd9cc9ecf3ec6b669ed4e334049cdbb93f`.
 - Database schema: 50 in deployed production and the fallback.
 - Production: immutable activation `clear`; backend and Telegram bridge active;
   trusted-CA health `200`; signed private-owner chat returned exact `OK`; V12
@@ -48,16 +48,18 @@ either merged here or discarded before that source is removed.
 ## Active package
 
 S4-R4b schema-50 incremental guards, bounded conversation writer/backfill and
-lexical activation are live. The clean S4-R5 conversation-recall package is
-queued for Mainline review; S6-R3 exact journey evidence is active in its own
-worktree. Keep the released S3 path in shadow
+lexical activation are live. The independently accepted S4-R5
+conversation-recall package is next for isolated Mainline integration; S6-R3
+exact journey evidence is active in its own worktree. Keep the released S3 path
+in shadow
 until its genuine production witness exists; then promote only the
 current-file-plus-current-public-web journey through the already released
-fail-closed activation gate. S5 measured cognition and exact 40k lease adoption
+fail-closed activation gate. The secondary runtime admission is now refreshed
+on genuine eligible assist demand, after every static/code-owned promotion gate
+and before model traffic. S5 measured cognition and exact 40k lease adoption
 are live. S6 mission, reminder and Telegram recovery plus Telegram
 browse-to-full-document closure are live; physical Android acceptance remains
-owner/device-bound. The reviewed secondary-assist demand-refresh correction is
-next for isolated integration.
+owner/device-bound.
 
 ## Operating rules
 
@@ -250,7 +252,8 @@ attachment traffic was inserted into the live owner conversation.
 ### S3 — bounded second hemisphere
 
 Status: readiness and authenticated bounded-advisor path deployed in `0.207.71`;
-promotion remains evidence-gated in shadow.
+on-demand runtime admission refresh deployed in `0.207.82`; promotion remains
+evidence-gated in shadow.
 
 - Keep the primary as sole tool caller, effect owner and publisher. Secondary
   and Semantic Supervisor receive the shared turn contract and return bounded
@@ -273,6 +276,18 @@ file, prompt claim or fabricated observation.
 
 Remaining promotion work is observation-bound, not implementation-bound.
 
+Demand-refresh acceptance: every static eligibility, evidence, actor and
+capability gate is evaluated before secondary traffic; only a genuine eligible
+assist turn may perform one bounded content-free runtime refresh, after which
+the capability snapshot, authenticated authority and root deadline are checked
+again. Ineligible turns and laptop absence retain the primary-only path. The
+focused union passed 393 tests; the exact native gate passed 24,154 Python plus
+31 UI tests with zero skips and static checks clear. Two clean wheels were
+byte-identical. Same-schema production-copy acceptance passed 35/35 checks and
+rollback passed 12/12. Immutable activation retained exact `0.207.81` as both
+predecessor and schema-capable fallback and ended `clear`; trusted-CA health
+reports `0.207.82`/`ok`, and signed private-owner chat returned exact `OK`.
+
 ### S4 — one search facade with passage memory
 
 Status: R0 measured recall and R1 corpus-backed lexical gap closure deployed in
@@ -282,7 +297,8 @@ converging in production. R2c v3 passage topology and authenticated stored
 locators are deployed in `0.207.76`. R3 measured search-facade parity is
 deployed in `0.207.78`; R4a reader-first conversation passages are deployed in
 `0.207.79`; R4b schema-50 writer/lexical activation is deployed in `0.207.80`,
-and the clean R5 conversation-recall package is queued for Mainline review.
+and the clean R5 conversation-recall package has passed independent Mainline
+review and is next for isolated integration.
 
 1. Add reader-first `document_passages` with a schema-capable fallback, bounded
    writer, restart-safe resumable backfill and honest `index_incomplete`.
@@ -509,8 +525,8 @@ returned exact `OK`.
 2. Keep released `EngineerWorkItem v1` stable; do not expand its scope.
 3. Keep the released bounded S3 advisor in shadow until a genuine eligible turn
    creates its exact production witness; do not fabricate activation evidence.
-4. Review and release the clean S4-R5 conversation-recall package; close only
-   reproduced corpus-backed gaps without changing authority.
+4. Integrate and release the independently accepted S4-R5 conversation-recall
+   package; close only reproduced corpus-backed gaps without changing authority.
 5. Keep the released S5 measured-lease contract green; extend cognition only
    through another measured, reversible journey release.
 6. Build S6-R3 exact release-bound evidence for the remaining non-device
