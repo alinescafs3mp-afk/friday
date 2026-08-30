@@ -29,7 +29,8 @@ if str(ROOT) not in sys.path:
 
 from tools import immutable_release_operator as release_operator  # noqa: E402
 
-PLAN_SCHEMA = "friday.release-artifact-retention-plan.v1"
+PLAN_SCHEMA = "friday.release-artifact-retention-plan.v2"
+AUTHORITY_BINDINGS_SCHEMA = "friday.release-artifact-retention-authority-bindings.v1"
 OPEN_INVENTORY_SCHEMA = "friday.release-artifact-open-inventory.v1"
 MAX_JOURNAL_BYTES = 1 << 20
 MAX_RELEASE_MANIFEST_BYTES = 64 << 20
@@ -40,14 +41,27 @@ _OPEN_SOURCES = frozenset({"unavailable", "code_owned_fd_inventory_v1", "synthet
 _REASONS = frozenset(
     {
         "activation_journal_invalid",
+        "activation_journal_digest_mismatch",
+        "activation_backup",
         "activation_not_clear",
+        "backup_inventory_root_raced",
+        "canonical_evidence",
+        "canonical_evidence_invalid",
+        "canonical_evidence_unavailable",
         "current_release",
+        "dr_current_backup",
+        "dr_index_invalid",
+        "dr_older_backup",
+        "dr_pending_backup",
+        "dr_pins_invalid",
+        "dr_pins_unavailable",
         "fallback_release",
         "hardlinked_artifact",
         "inventory_root_raced",
         "journal_identity_mismatch",
         "journal_referenced",
         "malformed_release",
+        "legacy_or_unknown_backup",
         "non_owned_artifact",
         "open_reference",
         "open_state_ambiguous",
@@ -58,7 +72,9 @@ _REASONS = frozenset(
         "special_artifact",
         "symlink_artifact",
         "unit_install_journal_invalid",
+        "unit_install_journal_digest_mismatch",
         "unit_install_not_complete",
+        "retention_authority_unbound",
         "unknown_artifact",
     }
 )
@@ -84,6 +100,43 @@ class OpenInventorySnapshot:
 
 
 INCOMPLETE_OPEN_INVENTORY = OpenInventorySnapshot(source="unavailable", complete=False)
+
+
+@dataclass(frozen=True)
+class DRGenerationPin:
+    """One already-authenticated DR-index projection supplied by its owner."""
+
+    role: str
+    backup_directory: Path
+    generation_id: str | None
+    receipt_path: Path | None
+    receipt_sha256: str | None
+
+
+@dataclass(frozen=True)
+class CanonicalEvidenceRoot:
+    """An exact evidence root bound to one code-owned authority file."""
+
+    path: Path
+    authority_path: Path
+    authority_sha256: str
+
+
+@dataclass(frozen=True)
+class RetentionAuthorityBindings:
+    """Caller-authenticated authority snapshot used only to add retention pins.
+
+    A binding can never grant mutation authority.  The planner re-observes every
+    file digest and directory identity so a stale or forged projection blocks
+    classification instead of weakening retention.
+    """
+
+    activation_journal_sha256: str
+    unit_install_journal_sha256: str
+    dr_index_path: Path
+    dr_index_sha256: str
+    dr_pins: tuple[DRGenerationPin, ...]
+    canonical_evidence_roots: tuple[CanonicalEvidenceRoot, ...]
 
 
 @dataclass(frozen=True)
@@ -119,6 +172,16 @@ class _TargetObservation:
 class _JournalResult:
     state: Mapping[str, Any] | None
     sha256: str
+    error: str
+    activation_backup: Mapping[str, Any] | None = None
+
+
+@dataclass(frozen=True)
+class _AuthorityResult:
+    receipt: Mapping[str, Any]
+    dr_role_paths: Mapping[str, Path]
+    evidence_paths: frozenset[Path]
+    reference_paths: frozenset[Path]
     error: str
 
 
@@ -181,9 +244,27 @@ def _stable_file_bytes(
     maximum_bytes: int = MAX_JOURNAL_BYTES,
 ) -> bytes:
     lexical = _absolute_lexical(path, code=code)
+    if not lexical.name or lexical.name in {".", ".."}:
+        raise RetentionPlanError(code)
+    parent_fd = -1
     try:
-        before = os.lstat(lexical)
-    except OSError as exc:
+        parent_fd, parent_parts, parent_identities = _open_absolute_directory_chain(
+            lexical.parent,
+            code=code,
+        )
+        _require_pinned_directory(
+            parent_fd,
+            parent_parts,
+            parent_identities,
+            code=code,
+            private=private,
+        )
+        before = os.stat(lexical.name, dir_fd=parent_fd, follow_symlinks=False)
+    except (OSError, RetentionPlanError) as exc:
+        if parent_fd >= 0:
+            os.close(parent_fd)
+        if isinstance(exc, RetentionPlanError):
+            raise
         raise RetentionPlanError(code) from exc
     if (
         not stat.S_ISREG(before.st_mode)
@@ -192,11 +273,12 @@ def _stable_file_bytes(
         or not 0 < before.st_size <= maximum_bytes
         or (private and stat.S_IMODE(before.st_mode) & 0o077)
     ):
+        os.close(parent_fd)
         raise RetentionPlanError(code)
     flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0)
     chunks: list[bytes] = []
     try:
-        descriptor = os.open(lexical, flags)
+        descriptor = os.open(lexical.name, flags, dir_fd=parent_fd)
         try:
             opened = os.fstat(descriptor)
             if (opened.st_dev, opened.st_ino) != (before.st_dev, before.st_ino):
@@ -213,9 +295,18 @@ def _stable_file_bytes(
             after_open = os.fstat(descriptor)
         finally:
             os.close(descriptor)
-        after = os.lstat(lexical)
+        after = os.stat(lexical.name, dir_fd=parent_fd, follow_symlinks=False)
+        _require_pinned_directory(
+            parent_fd,
+            parent_parts,
+            parent_identities,
+            code=code,
+            private=private,
+        )
     except OSError as exc:
         raise RetentionPlanError(code) from exc
+    finally:
+        os.close(parent_fd)
     identity = lambda item: (  # noqa: E731 - compact immutable comparison
         item.st_dev,
         item.st_ino,
@@ -261,6 +352,16 @@ def _unique_json(raw: bytes, *, code: str) -> dict[str, Any]:
     return value
 
 
+def _journal_core(raw: bytes, *, code: str) -> dict[str, Any]:
+    payload = _unique_json(raw, code=code)
+    if raw != _canonical_json(payload) + b"\n" or "journal_sha256" not in payload:
+        raise RetentionPlanError(code)
+    supplied = payload.pop("journal_sha256")
+    if not _is_hex64(supplied) or supplied != hashlib.sha256(_canonical_json(payload)).hexdigest():
+        raise RetentionPlanError(code)
+    return payload
+
+
 def _bound_release_metadata(root: Path, tree_sha256: str, *, code: str) -> dict[str, Any]:
     manifest = _stable_file_bytes(
         root / "artifacts/release-tree.sha256",
@@ -299,16 +400,46 @@ def _read_activation_journal(path: Path, backup_root: Path) -> _JournalResult:
     try:
         _strict_private_directory(path.parent, code="activation_journal_invalid")
         strict_backup = _strict_private_directory(backup_root, code="activation_journal_invalid")
-        before = _stable_file_sha256(path, private=True, code="activation_journal_invalid")
-        state = release_operator.DurableActivationJournal(
+        before_raw = _stable_file_bytes(path, private=True, code="activation_journal_invalid")
+        expected_state = _journal_core(before_raw, code="activation_journal_invalid")
+        journal = release_operator.DurableActivationJournal(
             path,
             backup_root=strict_backup,
             config_identity_sha256=None,
-        ).load()
-        after = _stable_file_sha256(path, private=True, code="activation_journal_invalid")
-        if before != after:
+        )
+        state = dict(journal.load())
+        if state != expected_state:
             raise RetentionPlanError("activation_journal_invalid")
-        return _JournalResult(state=dict(state), sha256=after, error="")
+        raw_backup = state.get("backup")
+        verified_backup = journal.database_backup()
+        activation_backup: dict[str, Any] | None = None
+        if raw_backup is None:
+            if verified_backup is not None:
+                raise RetentionPlanError("activation_journal_invalid")
+        else:
+            if not isinstance(raw_backup, Mapping) or verified_backup is None:
+                raise RetentionPlanError("activation_journal_invalid")
+            directory = _absolute_lexical(
+                Path(str(raw_backup.get("directory") or "")),
+                code="activation_journal_invalid",
+            )
+            activation_backup = {
+                "path": str(directory),
+                "schema_version": verified_backup.schema_version,
+                "database_receipt_sha256": verified_backup.receipt_sha256,
+                "inbox_receipt_sha256": verified_backup.inbox_receipt_sha256,
+                "obsidian_receipt_sha256": verified_backup.obsidian_receipt_sha256,
+                "engineer_receipt_sha256": verified_backup.engineer_receipt_sha256,
+            }
+        after_raw = _stable_file_bytes(path, private=True, code="activation_journal_invalid")
+        if before_raw != after_raw:
+            raise RetentionPlanError("activation_journal_invalid")
+        return _JournalResult(
+            state=state,
+            sha256=hashlib.sha256(after_raw).hexdigest(),
+            error="",
+            activation_backup=activation_backup,
+        )
     except (OSError, RetentionPlanError, release_operator.ReleaseFailure):
         return _JournalResult(state=None, sha256="", error="activation_journal_invalid")
 
@@ -316,12 +447,19 @@ def _read_activation_journal(path: Path, backup_root: Path) -> _JournalResult:
 def _read_unit_journal(path: Path) -> _JournalResult:
     try:
         _strict_private_directory(path.parent, code="unit_install_journal_invalid")
-        before = _stable_file_sha256(path, private=True, code="unit_install_journal_invalid")
-        state = release_operator.DurableUnitInstallJournal(path).load()
-        after = _stable_file_sha256(path, private=True, code="unit_install_journal_invalid")
-        if before != after:
+        before_raw = _stable_file_bytes(path, private=True, code="unit_install_journal_invalid")
+        expected_state = _journal_core(before_raw, code="unit_install_journal_invalid")
+        state = dict(release_operator.DurableUnitInstallJournal(path).load())
+        if state != expected_state:
             raise RetentionPlanError("unit_install_journal_invalid")
-        return _JournalResult(state=dict(state), sha256=after, error="")
+        after_raw = _stable_file_bytes(path, private=True, code="unit_install_journal_invalid")
+        if before_raw != after_raw:
+            raise RetentionPlanError("unit_install_journal_invalid")
+        return _JournalResult(
+            state=state,
+            sha256=hashlib.sha256(after_raw).hexdigest(),
+            error="",
+        )
     except (OSError, RetentionPlanError, release_operator.ReleaseFailure):
         return _JournalResult(state=None, sha256="", error="unit_install_journal_invalid")
 
@@ -549,6 +687,218 @@ def _normalize_open_inventory(
     )
 
 
+def _normalize_authority_bindings(
+    bindings: RetentionAuthorityBindings | None,
+    *,
+    activation_sha256: str,
+    unit_sha256: str,
+) -> _AuthorityResult:
+    if bindings is None:
+        unbound_core: dict[str, Any] = {
+            "schema": AUTHORITY_BINDINGS_SCHEMA,
+            "status": "unbound",
+            "activation_journal_sha256": "",
+            "unit_install_journal_sha256": "",
+            "dr_index": None,
+            "dr_pins": [],
+            "canonical_evidence_roots": [],
+        }
+        return _AuthorityResult(
+            receipt={
+                **unbound_core,
+                "bindings_sha256": hashlib.sha256(_canonical_json(unbound_core)).hexdigest(),
+            },
+            dr_role_paths={},
+            evidence_paths=frozenset(),
+            reference_paths=frozenset(),
+            error="retention_authority_unbound",
+        )
+    if not isinstance(bindings, RetentionAuthorityBindings):
+        raise RetentionPlanError("retention_authority_invalid")
+    if not _is_hex64(bindings.activation_journal_sha256) or not _is_hex64(
+        bindings.unit_install_journal_sha256
+    ):
+        raise RetentionPlanError("retention_authority_invalid")
+    if type(bindings.dr_pins) is not tuple or type(bindings.canonical_evidence_roots) is not tuple:
+        raise RetentionPlanError("retention_authority_invalid")
+
+    error = ""
+    if activation_sha256 and bindings.activation_journal_sha256 != activation_sha256:
+        error = "activation_journal_digest_mismatch"
+    if unit_sha256 and bindings.unit_install_journal_sha256 != unit_sha256 and not error:
+        error = "unit_install_journal_digest_mismatch"
+
+    dr_index_path = _absolute_lexical(bindings.dr_index_path, code="dr_pins_invalid")
+    if not _is_hex64(bindings.dr_index_sha256):
+        raise RetentionPlanError("dr_pins_invalid")
+    observed_dr_index_sha256 = ""
+    try:
+        observed_dr_index_sha256 = _stable_file_sha256(
+            dr_index_path,
+            private=True,
+            code="dr_index_invalid",
+        )
+        if observed_dr_index_sha256 != bindings.dr_index_sha256:
+            error = error or "dr_index_invalid"
+    except RetentionPlanError:
+        error = error or "dr_index_invalid"
+
+    role_paths: dict[str, Path] = {}
+    pin_records: list[dict[str, Any]] = []
+    generation_ids: set[str] = set()
+    receipt_paths: set[Path] = set()
+    for pin in bindings.dr_pins:
+        if not isinstance(pin, DRGenerationPin) or pin.role not in {"current", "older", "pending"}:
+            raise RetentionPlanError("dr_pins_invalid")
+        if pin.role in role_paths:
+            raise RetentionPlanError("dr_pins_invalid")
+        backup_directory = _absolute_lexical(pin.backup_directory, code="dr_pins_invalid")
+        for existing in role_paths.values():
+            if (
+                backup_directory == existing
+                or backup_directory in existing.parents
+                or existing in backup_directory.parents
+            ):
+                raise RetentionPlanError("dr_pins_invalid")
+        role_paths[pin.role] = backup_directory
+
+        identity_values = (pin.generation_id, pin.receipt_path, pin.receipt_sha256)
+        if pin.role in {"current", "older"} and any(value is None for value in identity_values):
+            raise RetentionPlanError("dr_pins_invalid")
+        if (
+            pin.role == "pending"
+            and any(value is None for value in identity_values)
+            and not all(value is None for value in identity_values)
+        ):
+            raise RetentionPlanError("dr_pins_invalid")
+        receipt_path: Path | None = None
+        observed_receipt_sha256 = ""
+        if pin.generation_id is not None:
+            if (
+                pin.receipt_path is None
+                or not _is_hex64(pin.generation_id)
+                or not _is_hex64(pin.receipt_sha256)
+            ):
+                raise RetentionPlanError("dr_pins_invalid")
+            receipt_path = _absolute_lexical(Path(pin.receipt_path), code="dr_pins_invalid")
+            if pin.generation_id in generation_ids or receipt_path in receipt_paths:
+                raise RetentionPlanError("dr_pins_invalid")
+            generation_ids.add(pin.generation_id)
+            receipt_paths.add(receipt_path)
+            try:
+                observed_receipt_sha256 = _stable_file_sha256(
+                    receipt_path,
+                    private=True,
+                    code="dr_pins_invalid",
+                )
+                if observed_receipt_sha256 != pin.receipt_sha256:
+                    error = error or "dr_pins_invalid"
+            except RetentionPlanError:
+                error = error or "dr_pins_invalid"
+        try:
+            _strict_private_directory(backup_directory, code="dr_pins_invalid")
+        except RetentionPlanError:
+            error = error or "dr_pins_invalid"
+        pin_records.append(
+            {
+                "role": pin.role,
+                "backup_directory": str(backup_directory),
+                "generation_id": pin.generation_id,
+                "receipt_path": str(receipt_path) if receipt_path is not None else None,
+                "receipt_sha256": pin.receipt_sha256,
+                "observed_receipt_sha256": observed_receipt_sha256,
+            }
+        )
+    if not {"current", "older"}.issubset(role_paths):
+        error = error or "dr_pins_unavailable"
+
+    evidence_paths: set[Path] = set()
+    evidence_authority_paths: set[Path] = set()
+    evidence_records: list[dict[str, Any]] = []
+    if len(bindings.canonical_evidence_roots) > 128:
+        raise RetentionPlanError("canonical_evidence_invalid")
+    for evidence in bindings.canonical_evidence_roots:
+        if not isinstance(evidence, CanonicalEvidenceRoot) or not _is_hex64(evidence.authority_sha256):
+            raise RetentionPlanError("canonical_evidence_invalid")
+        root = _absolute_lexical(evidence.path, code="canonical_evidence_invalid")
+        authority_path = _absolute_lexical(
+            evidence.authority_path,
+            code="canonical_evidence_invalid",
+        )
+        if root != authority_path and root not in authority_path.parents:
+            raise RetentionPlanError("canonical_evidence_invalid")
+        if authority_path in evidence_authority_paths:
+            raise RetentionPlanError("canonical_evidence_invalid")
+        for existing in evidence_paths:
+            if root == existing or root in existing.parents or existing in root.parents:
+                raise RetentionPlanError("canonical_evidence_invalid")
+        for dr_path in role_paths.values():
+            if root == dr_path or root in dr_path.parents or dr_path in root.parents:
+                raise RetentionPlanError("canonical_evidence_invalid")
+        evidence_paths.add(root)
+        evidence_authority_paths.add(authority_path)
+        observed_authority_sha256 = ""
+        device: int | None = None
+        inode: int | None = None
+        try:
+            _strict_root, root_status = _strict_inventory_root(root)
+            device = int(root_status.st_dev)
+            inode = int(root_status.st_ino)
+            observed_authority_sha256 = _stable_file_sha256(
+                authority_path,
+                private=False,
+                code="canonical_evidence_invalid",
+            )
+            if observed_authority_sha256 != evidence.authority_sha256:
+                error = error or "canonical_evidence_invalid"
+        except RetentionPlanError:
+            error = error or "canonical_evidence_invalid"
+        evidence_records.append(
+            {
+                "path": str(root),
+                "device": device,
+                "inode": inode,
+                "authority_path": str(authority_path),
+                "authority_sha256": evidence.authority_sha256,
+                "observed_authority_sha256": observed_authority_sha256,
+            }
+        )
+    if not evidence_paths:
+        error = error or "canonical_evidence_unavailable"
+
+    ordered_roles = {"current": 0, "older": 1, "pending": 2}
+    pin_records.sort(key=lambda value: ordered_roles[str(value["role"])])
+    evidence_records.sort(key=lambda value: str(value["path"]))
+    core: dict[str, Any] = {
+        "schema": AUTHORITY_BINDINGS_SCHEMA,
+        "status": "authenticated" if not error else "invalid",
+        "activation_journal_sha256": bindings.activation_journal_sha256,
+        "unit_install_journal_sha256": bindings.unit_install_journal_sha256,
+        "dr_index": {
+            "path": str(dr_index_path),
+            "sha256": bindings.dr_index_sha256,
+            "observed_sha256": observed_dr_index_sha256,
+        },
+        "dr_pins": pin_records,
+        "canonical_evidence_roots": evidence_records,
+    }
+    return _AuthorityResult(
+        receipt={**core, "bindings_sha256": hashlib.sha256(_canonical_json(core)).hexdigest()},
+        dr_role_paths=role_paths,
+        evidence_paths=frozenset(evidence_paths),
+        reference_paths=frozenset(
+            {
+                dr_index_path,
+                *role_paths.values(),
+                *receipt_paths,
+                *evidence_paths,
+                *evidence_authority_paths,
+            }
+        ),
+        error=error,
+    )
+
+
 def _record_path(record: Mapping[str, Any]) -> Path:
     raw = record.get("root")
     if not isinstance(raw, str):
@@ -678,10 +1028,12 @@ def _directory_open_flags() -> int:
 
 def _open_absolute_directory_chain(
     path: Path,
+    *,
+    code: str = "output_path_invalid",
 ) -> tuple[int, tuple[str, ...], tuple[tuple[int, int], ...]]:
     parts = tuple(path.parts[1:])
     if not path.is_absolute() or path.anchor != os.sep or any(part in {"", ".", ".."} for part in parts):
-        raise RetentionPlanError("output_path_invalid")
+        raise RetentionPlanError(code)
     current = -1
     identities: list[tuple[int, int]] = []
     try:
@@ -693,7 +1045,7 @@ def _open_absolute_directory_chain(
                 opened = os.fstat(child)
                 named = os.stat(part, dir_fd=current, follow_symlinks=False)
                 if not stat.S_ISDIR(opened.st_mode) or _inode_identity(opened) != _inode_identity(named):
-                    raise RetentionPlanError("output_path_invalid")
+                    raise RetentionPlanError(code)
                 identities.append(_inode_identity(opened))
             except BaseException:
                 os.close(child)
@@ -708,21 +1060,24 @@ def _open_absolute_directory_chain(
             raise
         if not isinstance(exc, (OSError, ValueError)):
             raise
-        raise RetentionPlanError("output_path_invalid") from exc
+        raise RetentionPlanError(code) from exc
 
 
 def _require_pinned_directory(
     descriptor: int,
     parts: tuple[str, ...],
     identities: tuple[tuple[int, int], ...],
+    *,
+    code: str = "output_path_invalid",
+    private: bool = True,
 ) -> os.stat_result:
     current = -1
     try:
         if len(identities) != len(parts) + 1:
-            raise RetentionPlanError("output_path_invalid")
+            raise RetentionPlanError(code)
         current = os.open(os.sep, _directory_open_flags())
         if _inode_identity(os.fstat(current)) != identities[0]:
-            raise RetentionPlanError("output_path_invalid")
+            raise RetentionPlanError(code)
         for part, expected in zip(parts, identities[1:], strict=True):
             child = os.open(part, _directory_open_flags(), dir_fd=current)
             try:
@@ -733,7 +1088,7 @@ def _require_pinned_directory(
                     or _inode_identity(opened) != expected
                     or _inode_identity(named) != expected
                 ):
-                    raise RetentionPlanError("output_path_invalid")
+                    raise RetentionPlanError(code)
             except BaseException:
                 os.close(child)
                 raise
@@ -743,12 +1098,13 @@ def _require_pinned_directory(
         if (
             _inode_identity(held) != identities[-1]
             or held.st_uid != os.geteuid()
-            or stat.S_IMODE(held.st_mode) & 0o077
+            or (private and stat.S_IMODE(held.st_mode) & 0o077)
+            or (not private and stat.S_IMODE(held.st_mode) & 0o022)
         ):
-            raise RetentionPlanError("output_path_invalid")
+            raise RetentionPlanError(code)
         return held
     except (OSError, ValueError) as exc:
-        raise RetentionPlanError("output_path_invalid") from exc
+        raise RetentionPlanError(code) from exc
     finally:
         if current >= 0:
             os.close(current)
@@ -760,9 +1116,11 @@ def plan_release_artifact_retention(
     unit_journal: Path,
     backup_root: Path,
     inventory_roots: Sequence[Path],
+    backup_inventory_roots: Sequence[Path] = (),
     open_inventory: OpenInventorySnapshot = INCOMPLETE_OPEN_INVENTORY,
+    authority_bindings: RetentionAuthorityBindings | None = None,
 ) -> dict[str, Any]:
-    """Return a canonicalizable, read-only v1 retention plan."""
+    """Return a canonicalizable, read-only v2 retention plan."""
 
     if not inventory_roots:
         raise RetentionPlanError("inventory_roots_required")
@@ -775,11 +1133,19 @@ def plan_release_artifact_retention(
     roots = tuple(sorted({path for path, _status in roots_with_status}, key=str))
     if len(roots) != len(inventory_roots):
         raise RetentionPlanError("inventory_roots_duplicate")
-    for index, root in enumerate(roots):
-        for other in roots[index + 1 :]:
+    backup_roots_with_status = [_strict_inventory_root(path) for path in backup_inventory_roots]
+    backup_roots = tuple(sorted({path for path, _status in backup_roots_with_status}, key=str))
+    if len(backup_roots) != len(backup_inventory_roots):
+        raise RetentionPlanError("inventory_roots_duplicate")
+    all_roots = tuple(sorted((*roots, *backup_roots), key=str))
+    if len(set(all_roots)) != len(all_roots):
+        raise RetentionPlanError("inventory_roots_duplicate")
+    for index, root in enumerate(all_roots):
+        for other in all_roots[index + 1 :]:
             if root in other.parents or other in root.parents:
                 raise RetentionPlanError("inventory_roots_overlap")
     root_statuses = {path: status for path, status in roots_with_status}
+    backup_root_statuses = {path: status for path, status in backup_roots_with_status}
 
     activation = _read_activation_journal(activation_path, backup_path)
     unit = _read_unit_journal(unit_path)
@@ -790,8 +1156,14 @@ def plan_release_artifact_retention(
         blocker = "activation_not_clear"
     if not blocker and unit_state is not None and unit_state.get("phase") != "complete":
         blocker = "unit_install_not_complete"
+    authority = _normalize_authority_bindings(
+        authority_bindings,
+        activation_sha256=activation.sha256,
+        unit_sha256=unit.sha256,
+    )
+    blocker = blocker or authority.error
 
-    references: set[Path] = {activation_path, unit_path}
+    references: set[Path] = {activation_path, unit_path, *authority.reference_paths}
     role_paths: dict[str, Path] = {}
     protected_identities: list[dict[str, Any]] = []
     role_records: dict[str, Mapping[str, Any]] = {}
@@ -839,6 +1211,17 @@ def plan_release_artifact_retention(
                 protected_identities.append({**authenticated[path], "roles": roles})
         except RetentionPlanError as exc:
             blocker = blocker or str(exc)
+
+    activation_backup_path: Path | None = None
+    if activation.activation_backup is not None:
+        try:
+            activation_backup_path = _absolute_lexical(
+                Path(str(activation.activation_backup["path"])),
+                code="activation_journal_invalid",
+            )
+            references.add(activation_backup_path)
+        except (KeyError, RetentionPlanError):
+            blocker = blocker or "activation_journal_invalid"
     if not open_inventory.complete:
         blocker = blocker or "open_state_ambiguous"
 
@@ -853,6 +1236,17 @@ def plan_release_artifact_retention(
         for name in names:
             observations.append((_observe_target(root / name), root))
 
+    backup_observations: list[tuple[_TargetObservation, Path]] = []
+    for root in backup_roots:
+        try:
+            with os.scandir(root) as iterator:
+                names = sorted(entry.name for entry in iterator)
+        except OSError:
+            names = []
+            blocker = blocker or "backup_inventory_root_raced"
+        for name in names:
+            backup_observations.append((_observe_target(root / name), root))
+
     root_raced: set[Path] = set()
     for root in roots:
         try:
@@ -862,6 +1256,48 @@ def plan_release_artifact_retention(
             root_raced.add(root)
     if root_raced:
         blocker = blocker or "inventory_root_raced"
+
+    backup_roots_raced: set[Path] = set()
+    for root in backup_roots:
+        try:
+            if _root_identity(os.lstat(root)) != _root_identity(backup_root_statuses[root]):
+                backup_roots_raced.add(root)
+        except OSError:
+            backup_roots_raced.add(root)
+    if backup_roots_raced:
+        blocker = blocker or "backup_inventory_root_raced"
+
+    backup_observations_by_path = {
+        observation.path: observation for observation, _root in backup_observations
+    }
+    for dr_path in authority.dr_role_paths.values():
+        if dr_path not in backup_observations_by_path:
+            blocker = blocker or "dr_pins_invalid"
+    if activation_backup_path is not None and activation_backup_path not in backup_observations_by_path:
+        blocker = blocker or "activation_journal_invalid"
+    all_observations = (*observations, *backup_observations)
+    for evidence_path in authority.evidence_paths:
+        matching_targets = [
+            observation
+            for observation, _root in all_observations
+            if _path_intersects(observation.path, frozenset({evidence_path}))
+        ]
+        if len(matching_targets) != 1 or matching_targets[0].raced:
+            blocker = blocker or "canonical_evidence_invalid"
+
+    activation_after = _read_activation_journal(activation_path, backup_path)
+    unit_after = _read_unit_journal(unit_path)
+    if activation_after != activation:
+        blocker = blocker or "activation_journal_invalid"
+    if unit_after != unit:
+        blocker = blocker or "unit_install_journal_invalid"
+    authority_after = _normalize_authority_bindings(
+        authority_bindings,
+        activation_sha256=activation.sha256,
+        unit_sha256=unit.sha256,
+    )
+    if authority_after != authority:
+        blocker = blocker or authority_after.error or "dr_pins_invalid"
 
     protected_raced: set[Path] = set()
     protected_failed: set[Path] = set()
@@ -887,7 +1323,7 @@ def plan_release_artifact_retention(
     entries: list[dict[str, Any]] = []
     frozen_references = frozenset(references)
     for observation, root in sorted(observations, key=lambda item: str(item[0].path)):
-        identity: dict[str, Any] | None = None
+        release_identity: dict[str, Any] | None = None
         reason = ""
         if observation.raced:
             reason = "raced_artifact"
@@ -903,6 +1339,8 @@ def plan_release_artifact_retention(
             reason = "previous_release"
         elif observation.path == role_paths.get("fallback"):
             reason = "fallback_release"
+        elif _path_intersects(observation.path, authority.evidence_paths):
+            reason = "canonical_evidence"
         elif observation.kind == "symlink":
             reason = "symlink_artifact"
         elif (
@@ -926,11 +1364,11 @@ def plan_release_artifact_retention(
         else:
             discovered = _discover_release(observation.path) if observation.kind == "directory" else None
             if discovered is not None and discovered.get("invalid") is not True:
-                identity = discovered
+                release_identity = discovered
                 after_discovery = _observe_target(observation.path)
                 if after_discovery.raced or after_discovery != observation:
                     reason = "raced_artifact"
-                    identity = None
+                    release_identity = None
                 else:
                     reason = "retirable_authenticated_release"
             elif discovered is not None:
@@ -952,8 +1390,91 @@ def plan_release_artifact_retention(
                 "recursive_bytes": observation.total_bytes,
                 "entry_count": observation.entry_count,
                 "inventory_sha256": observation.inventory_sha256,
-                "identity": identity,
+                "identity": release_identity,
                 "decision": decision,
+                "reason": reason,
+            }
+        )
+
+    dr_pin_identities: dict[Path, dict[str, Any]] = {}
+    raw_dr_pins = authority.receipt.get("dr_pins")
+    if isinstance(raw_dr_pins, list):
+        for raw_pin in raw_dr_pins:
+            if isinstance(raw_pin, Mapping) and isinstance(raw_pin.get("backup_directory"), str):
+                dr_pin_identities[Path(str(raw_pin["backup_directory"]))] = dict(raw_pin)
+    evidence_identities: dict[Path, dict[str, Any]] = {}
+    raw_evidence = authority.receipt.get("canonical_evidence_roots")
+    if isinstance(raw_evidence, list):
+        for raw_item in raw_evidence:
+            if isinstance(raw_item, Mapping) and isinstance(raw_item.get("path"), str):
+                evidence_identities[Path(str(raw_item["path"]))] = dict(raw_item)
+
+    backup_entries: list[dict[str, Any]] = []
+    for observation, root in sorted(backup_observations, key=lambda item: str(item[0].path)):
+        backup_identity: dict[str, Any] | None = None
+        reason = ""
+        if observation.raced:
+            reason = "raced_artifact"
+        elif root in backup_roots_raced:
+            reason = "backup_inventory_root_raced"
+        elif observation.path == activation_backup_path:
+            reason = "activation_backup"
+            backup_identity = dict(activation.activation_backup or {})
+        elif observation.path == authority.dr_role_paths.get("current"):
+            reason = "dr_current_backup"
+            backup_identity = dr_pin_identities.get(observation.path)
+        elif observation.path == authority.dr_role_paths.get("older"):
+            reason = "dr_older_backup"
+            backup_identity = dr_pin_identities.get(observation.path)
+        elif observation.path == authority.dr_role_paths.get("pending"):
+            reason = "dr_pending_backup"
+            backup_identity = dr_pin_identities.get(observation.path)
+        elif _path_intersects(observation.path, authority.evidence_paths):
+            reason = "canonical_evidence"
+            backup_identity = next(
+                (
+                    evidence_identity
+                    for evidence_path, evidence_identity in evidence_identities.items()
+                    if _path_intersects(observation.path, frozenset({evidence_path}))
+                ),
+                None,
+            )
+        elif observation.kind == "symlink":
+            reason = "symlink_artifact"
+        elif (
+            observation.kind not in {"directory", "regular"}
+            or observation.device != int(backup_root_statuses[root].st_dev)
+            or observation.has_special
+        ):
+            reason = "special_artifact"
+        elif not observation.owner_ok:
+            reason = "non_owned_artifact"
+        elif observation.has_hardlink:
+            reason = "hardlinked_artifact"
+        elif _path_intersects(observation.path, frozen_references):
+            reason = "journal_referenced"
+        elif blocker:
+            reason = blocker
+        elif _path_intersects(observation.path, open_paths) or not observation.object_identities.isdisjoint(
+            open_identities
+        ):
+            reason = "open_reference"
+        else:
+            reason = "legacy_or_unknown_backup"
+        if reason not in _REASONS:
+            reason = "legacy_or_unknown_backup"
+        backup_entries.append(
+            {
+                "path": str(observation.path),
+                "device": observation.device,
+                "inode": observation.inode,
+                "type": observation.kind,
+                "nlink": observation.nlink,
+                "recursive_bytes": observation.total_bytes,
+                "entry_count": observation.entry_count,
+                "inventory_sha256": observation.inventory_sha256,
+                "identity": backup_identity,
+                "decision": "retain",
                 "reason": reason,
             }
         )
@@ -961,7 +1482,7 @@ def plan_release_artifact_retention(
     core: dict[str, Any] = {
         "schema": PLAN_SCHEMA,
         "mode": "read_only_classification",
-        "scope": "wheel_release_inventory_only",
+        "scope": "release_and_backup_inventory",
         "apply_authority": False,
         "inventory_roots": [
             {
@@ -974,6 +1495,17 @@ def plan_release_artifact_retention(
             }
             for path in roots
         ],
+        "backup_inventory_roots": [
+            {
+                "path": str(path),
+                "device": int(backup_root_statuses[path].st_dev),
+                "inode": int(backup_root_statuses[path].st_ino),
+                "type": "directory",
+                "nlink": int(backup_root_statuses[path].st_nlink),
+                "uid": int(backup_root_statuses[path].st_uid),
+            }
+            for path in backup_roots
+        ],
         "activation_journal": {
             "path": str(activation_path),
             "sha256": activation.sha256,
@@ -984,11 +1516,14 @@ def plan_release_artifact_retention(
             "sha256": unit.sha256,
             "phase": unit_state.get("phase") if unit_state is not None else "invalid",
         },
+        "authority_bindings": authority.receipt,
+        "activation_backup": activation.activation_backup,
         "open_inventory": open_receipt,
         "classification_status": "eligible" if blocker == "" else "blocked",
         "block_reason": blocker,
         "protected_releases": protected_identities,
         "targets": entries,
+        "backup_targets": backup_entries,
     }
     return {**core, "plan_sha256": hashlib.sha256(_canonical_json(core)).hexdigest()}
 
@@ -1070,6 +1605,7 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--unit-journal", required=True, type=Path)
     parser.add_argument("--backup-root", required=True, type=Path)
     parser.add_argument("--inventory-root", required=True, action="append", type=Path)
+    parser.add_argument("--backup-inventory-root", action="append", default=[], type=Path)
     parser.add_argument("--output", type=Path)
     return parser
 
@@ -1082,6 +1618,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             unit_journal=args.unit_journal,
             backup_root=args.backup_root,
             inventory_roots=args.inventory_root,
+            backup_inventory_roots=args.backup_inventory_root,
         )
         payload = _canonical_json(plan) + b"\n"
         if args.output is None:
@@ -1102,11 +1639,15 @@ def main(argv: Sequence[str] | None = None) -> int:
 
 
 __all__ = [
+    "AUTHORITY_BINDINGS_SCHEMA",
+    "CanonicalEvidenceRoot",
+    "DRGenerationPin",
     "INCOMPLETE_OPEN_INVENTORY",
     "OPEN_INVENTORY_SCHEMA",
     "OpenInventorySnapshot",
     "PLAN_SCHEMA",
     "RetentionPlanError",
+    "RetentionAuthorityBindings",
     "plan_release_artifact_retention",
 ]
 

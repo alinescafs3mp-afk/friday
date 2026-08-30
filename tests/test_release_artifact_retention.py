@@ -29,6 +29,44 @@ def _write_journal(path: Path, core: dict[str, Any]) -> None:
     path.chmod(0o600)
 
 
+def _sha256_file(path: Path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def _exact_backup(root: Path, ordinal: int) -> dict[str, Any]:
+    _private_directory(root)
+    files: list[dict[str, Any]] = []
+    for name in ("database.sqlite3", "inbox.sqlite3"):
+        path = root / name
+        path.write_bytes(f"{name}-{ordinal}".encode("ascii"))
+        path.chmod(0o600)
+        files.append({"name": name, "sha256": _sha256_file(path), "size": path.stat().st_size})
+    files.sort(key=lambda item: str(item["name"]))
+    manifest = root / "manifest.json"
+    manifest.write_bytes(
+        _canonical(
+            {
+                "schema": "friday.immutable-cutover-exact-backup.v1",
+                "database_schema": 50,
+                "files": files,
+            }
+        )
+        + b"\n"
+    )
+    manifest.chmod(0o600)
+    return {
+        "directory": str(root),
+        "files": files,
+        "inbox_receipt_sha256": hashlib.sha256(
+            _canonical([item for item in files if str(item["name"]).startswith("inbox")])
+        ).hexdigest(),
+        "receipt_sha256": hashlib.sha256(
+            _canonical([item for item in files if str(item["name"]).startswith("database")])
+        ).hexdigest(),
+        "schema_version": 50,
+    }
+
+
 @dataclass(frozen=True)
 class _Release:
     identity: operator.ReleaseIdentity
@@ -88,6 +126,7 @@ def _activation_core(
     fallback: _Release,
     *,
     phase: str = "clear",
+    backup: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     return {
         "schema": operator.ACTIVATION_JOURNAL_SCHEMA,
@@ -97,7 +136,7 @@ def _activation_core(
         "candidate": current.record,
         "previous": previous.record,
         "fallback": fallback.record,
-        "backup": None,
+        "backup": backup,
         "database_mutation_possible": False,
         "network_writer_uncertain": False,
         "terminal_receipt_sha256": "3" * 64 if phase in {"clear", "rolled_back", "recovered"} else "",
@@ -160,10 +199,44 @@ def synthetic_inventory(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict
     source.write_bytes(b"hardlinked")
     os.link(source, hardlinked / "second.bin")
 
+    activation_backup = _exact_backup(backup_root / "immutable-cutover-current", 1)
+    older_backup = _exact_backup(backup_root / "immutable-cutover-older", 2)
+    _exact_backup(backup_root / "legacy-unpinned", 3)
+    evidence_root = _private_directory(backup_root / "canonical-evidence")
+    evidence_authority = evidence_root / "receipt.json"
+    evidence_authority.write_bytes(b'{"canonical":true}\n')
+    evidence_authority.chmod(0o600)
+
     activation_journal = state / "immutable-release-activation.v1.json"
     unit_journal = state / "immutable-release-unit-install.v1.json"
-    _write_journal(activation_journal, _activation_core(current, previous, fallback))
+    _write_journal(
+        activation_journal,
+        _activation_core(current, previous, fallback, backup=activation_backup),
+    )
     _write_journal(unit_journal, _unit_core(current, previous))
+
+    dr_index = state / "immutable-release-dr-generations.v1.json"
+    dr_index.write_bytes(b'{"authenticated":true}\n')
+    dr_index.chmod(0o600)
+    dr_receipts = _private_directory(state / "dr-receipts")
+    pins: list[retention.DRGenerationPin] = []
+    for role, directory, ordinal in (
+        ("current", Path(str(activation_backup["directory"])), 1),
+        ("older", Path(str(older_backup["directory"])), 2),
+    ):
+        generation_id = hashlib.sha256(f"generation-{ordinal}".encode()).hexdigest()
+        receipt = dr_receipts / f"{generation_id}.json"
+        receipt.write_bytes(_canonical({"generation_id": generation_id}) + b"\n")
+        receipt.chmod(0o400)
+        pins.append(
+            retention.DRGenerationPin(
+                role=role,
+                backup_directory=directory,
+                generation_id=generation_id,
+                receipt_path=receipt,
+                receipt_sha256=_sha256_file(receipt),
+            )
+        )
 
     releases = {release.identity.root: release for release in (current, previous, fallback, old)}
     calls: list[tuple[str, Path]] = []
@@ -185,6 +258,12 @@ def synthetic_inventory(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict
         "backup_root": backup_root,
         "activation_journal": activation_journal,
         "unit_journal": unit_journal,
+        "dr_index": dr_index,
+        "dr_pins": tuple(pins),
+        "evidence_root": evidence_root,
+        "evidence_authority": evidence_authority,
+        "activation_backup": activation_backup,
+        "older_backup": older_backup,
         "current": current,
         "previous": previous,
         "fallback": fallback,
@@ -193,23 +272,49 @@ def synthetic_inventory(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict
     }
 
 
+def _bindings(
+    fixture: dict[str, Any],
+    *,
+    dr_pins: tuple[retention.DRGenerationPin, ...] | None = None,
+    dr_index_sha256: str | None = None,
+    evidence_sha256: str | None = None,
+) -> retention.RetentionAuthorityBindings:
+    return retention.RetentionAuthorityBindings(
+        activation_journal_sha256=_sha256_file(fixture["activation_journal"]),
+        unit_install_journal_sha256=_sha256_file(fixture["unit_journal"]),
+        dr_index_path=fixture["dr_index"],
+        dr_index_sha256=dr_index_sha256 or _sha256_file(fixture["dr_index"]),
+        dr_pins=fixture["dr_pins"] if dr_pins is None else dr_pins,
+        canonical_evidence_roots=(
+            retention.CanonicalEvidenceRoot(
+                path=fixture["evidence_root"],
+                authority_path=fixture["evidence_authority"],
+                authority_sha256=evidence_sha256 or _sha256_file(fixture["evidence_authority"]),
+            ),
+        ),
+    )
+
+
 def _plan(
     fixture: dict[str, Any],
     *,
     open_paths: tuple[Path, ...] = (),
     open_identities: tuple[tuple[int, int], ...] = (),
+    authority_bindings: retention.RetentionAuthorityBindings | None = None,
 ) -> dict[str, Any]:
     return retention.plan_release_artifact_retention(
         activation_journal=fixture["activation_journal"],
         unit_journal=fixture["unit_journal"],
         backup_root=fixture["backup_root"],
         inventory_roots=(fixture["inventory"],),
+        backup_inventory_roots=(fixture["backup_root"],),
         open_inventory=retention.OpenInventorySnapshot(
             source="synthetic_test",
             complete=True,
             open_paths=open_paths,
             open_identities=open_identities,
         ),
+        authority_bindings=authority_bindings or _bindings(fixture),
     )
 
 
@@ -221,7 +326,7 @@ def test_complete_closed_inventory_classifies_only_authenticated_old_release_for
 
     assert plan["schema"] == retention.PLAN_SCHEMA
     assert plan["mode"] == "read_only_classification"
-    assert plan["scope"] == "wheel_release_inventory_only"
+    assert plan["scope"] == "release_and_backup_inventory"
     assert plan["apply_authority"] is False
     assert plan["classification_status"] == "eligible"
     assert plan["block_reason"] == ""
@@ -276,6 +381,240 @@ def test_complete_closed_inventory_classifies_only_authenticated_old_release_for
     assert {call[0] for call in synthetic_inventory["calls"]} == {"load", "verify"}
 
 
+def test_backup_inventory_binds_all_closed_retention_roles(
+    synthetic_inventory: dict[str, Any],
+) -> None:
+    plan = _plan(synthetic_inventory)
+    backups = {Path(item["path"]).name: item for item in plan["backup_targets"]}
+
+    assert plan["authority_bindings"]["status"] == "authenticated"
+    assert plan["authority_bindings"]["activation_journal_sha256"] == _sha256_file(
+        synthetic_inventory["activation_journal"]
+    )
+    assert plan["authority_bindings"]["unit_install_journal_sha256"] == _sha256_file(
+        synthetic_inventory["unit_journal"]
+    )
+    assert backups["immutable-cutover-current"]["reason"] == "activation_backup"
+    assert backups["immutable-cutover-current"]["identity"]["database_receipt_sha256"] == str(
+        synthetic_inventory["activation_backup"]["receipt_sha256"]
+    )
+    assert backups["immutable-cutover-older"]["reason"] == "dr_older_backup"
+    assert backups["canonical-evidence"]["reason"] == "canonical_evidence"
+    assert backups["legacy-unpinned"]["reason"] == "legacy_or_unknown_backup"
+    assert all(item["decision"] == "retain" for item in plan["backup_targets"])
+    assert plan["apply_authority"] is False
+
+
+def test_pending_dr_generation_is_exact_and_retained(
+    synthetic_inventory: dict[str, Any],
+) -> None:
+    pending_directory = _exact_backup(synthetic_inventory["backup_root"] / "pending", 4)["directory"]
+    generation_id = hashlib.sha256(b"pending-generation").hexdigest()
+    receipt = synthetic_inventory["dr_index"].parent / "dr-receipts" / f"{generation_id}.json"
+    receipt.write_bytes(_canonical({"generation_id": generation_id}) + b"\n")
+    receipt.chmod(0o400)
+    pending = retention.DRGenerationPin(
+        role="pending",
+        backup_directory=Path(str(pending_directory)),
+        generation_id=generation_id,
+        receipt_path=receipt,
+        receipt_sha256=_sha256_file(receipt),
+    )
+
+    plan = _plan(
+        synthetic_inventory,
+        authority_bindings=_bindings(
+            synthetic_inventory,
+            dr_pins=(*synthetic_inventory["dr_pins"], pending),
+        ),
+    )
+
+    target = next(item for item in plan["backup_targets"] if Path(item["path"]).name == "pending")
+    assert target["reason"] == "dr_pending_backup"
+    assert target["decision"] == "retain"
+
+
+@pytest.mark.parametrize("forgery", ("dr_index", "dr_receipt", "evidence"))
+def test_forged_authority_digest_blocks_every_delete_candidate(
+    synthetic_inventory: dict[str, Any],
+    forgery: str,
+) -> None:
+    bindings = _bindings(synthetic_inventory)
+    if forgery == "dr_index":
+        bindings = _bindings(synthetic_inventory, dr_index_sha256="f" * 64)
+        expected = "dr_index_invalid"
+    elif forgery == "evidence":
+        bindings = _bindings(synthetic_inventory, evidence_sha256="f" * 64)
+        expected = "canonical_evidence_invalid"
+    else:
+        current, older = synthetic_inventory["dr_pins"]
+        forged = retention.DRGenerationPin(
+            role=current.role,
+            backup_directory=current.backup_directory,
+            generation_id=current.generation_id,
+            receipt_path=current.receipt_path,
+            receipt_sha256="f" * 64,
+        )
+        bindings = _bindings(synthetic_inventory, dr_pins=(forged, older))
+        expected = "dr_pins_invalid"
+
+    plan = _plan(synthetic_inventory, authority_bindings=bindings)
+
+    assert plan["classification_status"] == "blocked"
+    assert plan["block_reason"] == expected
+    assert not any(item["decision"] == "delete_candidate" for item in plan["targets"])
+    assert all(item["decision"] == "retain" for item in plan["backup_targets"])
+
+
+def test_stale_exact_journal_binding_blocks_after_valid_journal_replacement(
+    synthetic_inventory: dict[str, Any],
+) -> None:
+    bindings = _bindings(synthetic_inventory)
+    core = _activation_core(
+        synthetic_inventory["current"],
+        synthetic_inventory["previous"],
+        synthetic_inventory["fallback"],
+        backup=synthetic_inventory["activation_backup"],
+    )
+    core["transaction_id"] = "9" * 64
+    _write_journal(synthetic_inventory["activation_journal"], core)
+
+    plan = _plan(synthetic_inventory, authority_bindings=bindings)
+
+    assert plan["block_reason"] == "activation_journal_digest_mismatch"
+    assert not any(item["decision"] == "delete_candidate" for item in plan["targets"])
+
+
+def test_distinct_current_dr_generation_has_its_own_closed_reason(
+    synthetic_inventory: dict[str, Any],
+) -> None:
+    current_directory = Path(
+        str(_exact_backup(synthetic_inventory["backup_root"] / "dr-current", 5)["directory"])
+    )
+    previous_current, older = synthetic_inventory["dr_pins"]
+    replacement = retention.DRGenerationPin(
+        role="current",
+        backup_directory=current_directory,
+        generation_id=previous_current.generation_id,
+        receipt_path=previous_current.receipt_path,
+        receipt_sha256=previous_current.receipt_sha256,
+    )
+
+    plan = _plan(
+        synthetic_inventory,
+        authority_bindings=_bindings(synthetic_inventory, dr_pins=(replacement, older)),
+    )
+
+    target = next(item for item in plan["backup_targets"] if Path(item["path"]).name == "dr-current")
+    assert target["reason"] == "dr_current_backup"
+    assert target["decision"] == "retain"
+
+
+def test_duplicate_and_overlapping_authority_inputs_are_rejected_exactly(
+    synthetic_inventory: dict[str, Any],
+) -> None:
+    current, older = synthetic_inventory["dr_pins"]
+    duplicate_role = retention.DRGenerationPin(
+        role="current",
+        backup_directory=older.backup_directory,
+        generation_id=older.generation_id,
+        receipt_path=older.receipt_path,
+        receipt_sha256=older.receipt_sha256,
+    )
+    with pytest.raises(retention.RetentionPlanError, match="dr_pins_invalid"):
+        _plan(
+            synthetic_inventory,
+            authority_bindings=_bindings(
+                synthetic_inventory,
+                dr_pins=(current, duplicate_role, older),
+            ),
+        )
+
+    with pytest.raises(retention.RetentionPlanError, match="inventory_roots_duplicate"):
+        retention.plan_release_artifact_retention(
+            activation_journal=synthetic_inventory["activation_journal"],
+            unit_journal=synthetic_inventory["unit_journal"],
+            backup_root=synthetic_inventory["backup_root"],
+            inventory_roots=(synthetic_inventory["inventory"],),
+            backup_inventory_roots=(
+                synthetic_inventory["backup_root"],
+                synthetic_inventory["backup_root"],
+            ),
+        )
+
+    nested = _private_directory(synthetic_inventory["evidence_root"] / "nested")
+    nested_authority = nested / "receipt.json"
+    nested_authority.write_bytes(b'{"nested":true}\n')
+    nested_authority.chmod(0o600)
+    bindings = _bindings(synthetic_inventory)
+    overlapping = retention.RetentionAuthorityBindings(
+        activation_journal_sha256=bindings.activation_journal_sha256,
+        unit_install_journal_sha256=bindings.unit_install_journal_sha256,
+        dr_index_path=bindings.dr_index_path,
+        dr_index_sha256=bindings.dr_index_sha256,
+        dr_pins=bindings.dr_pins,
+        canonical_evidence_roots=(
+            *bindings.canonical_evidence_roots,
+            retention.CanonicalEvidenceRoot(
+                path=nested,
+                authority_path=nested_authority,
+                authority_sha256=_sha256_file(nested_authority),
+            ),
+        ),
+    )
+    with pytest.raises(retention.RetentionPlanError, match="canonical_evidence_invalid"):
+        _plan(synthetic_inventory, authority_bindings=overlapping)
+
+
+def test_evidence_authority_parent_swap_is_detected_and_fails_closed(
+    synthetic_inventory: dict[str, Any],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    evidence_root = synthetic_inventory["evidence_root"]
+    authority_name = synthetic_inventory["evidence_authority"].name
+    displaced = evidence_root.with_name("canonical-evidence-displaced")
+    replacement_after = evidence_root.with_name("canonical-evidence-racer")
+    raw = synthetic_inventory["evidence_authority"].read_bytes()
+    real_require = retention._require_pinned_directory  # noqa: SLF001
+    swapped = False
+
+    def swap_after_pin(
+        descriptor: int,
+        parts: tuple[str, ...],
+        identities: tuple[tuple[int, int], ...],
+        *,
+        code: str = "output_path_invalid",
+        private: bool = True,
+    ) -> os.stat_result:
+        nonlocal swapped
+        status = real_require(
+            descriptor,
+            parts,
+            identities,
+            code=code,
+            private=private,
+        )
+        if code == "canonical_evidence_invalid" and not swapped:
+            evidence_root.rename(displaced)
+            _private_directory(evidence_root)
+            replacement_authority = evidence_root / authority_name
+            replacement_authority.write_bytes(raw)
+            replacement_authority.chmod(0o600)
+            swapped = True
+        return status
+
+    monkeypatch.setattr(retention, "_require_pinned_directory", swap_after_pin)
+    try:
+        plan = _plan(synthetic_inventory)
+    finally:
+        if swapped:
+            evidence_root.rename(replacement_after)
+            displaced.rename(evidence_root)
+
+    assert plan["block_reason"] == "canonical_evidence_invalid"
+    assert not any(item["decision"] == "delete_candidate" for item in plan["targets"])
+
+
 def test_plan_is_deterministic_and_never_mutates_inventory(synthetic_inventory: dict[str, Any]) -> None:
     before = sorted(
         str(path.relative_to(synthetic_inventory["inventory"]))
@@ -316,6 +655,8 @@ def test_open_reference_and_incomplete_default_both_fail_closed(synthetic_invent
         unit_journal=synthetic_inventory["unit_journal"],
         backup_root=synthetic_inventory["backup_root"],
         inventory_roots=(synthetic_inventory["inventory"],),
+        backup_inventory_roots=(synthetic_inventory["backup_root"],),
+        authority_bindings=_bindings(synthetic_inventory),
     )
     assert default_plan["classification_status"] == "blocked"
     assert default_plan["block_reason"] == "open_state_ambiguous"
@@ -432,10 +773,12 @@ def test_cli_stdout_is_read_only_and_explicit_output_is_atomic(
         str(synthetic_inventory["backup_root"]),
         "--inventory-root",
         str(synthetic_inventory["inventory"]),
+        "--backup-inventory-root",
+        str(synthetic_inventory["backup_root"]),
     ]
     assert retention.main(argv) == 0
     stdout = capsys.readouterr().out
-    assert json.loads(stdout)["block_reason"] == "open_state_ambiguous"
+    assert json.loads(stdout)["block_reason"] == "retention_authority_unbound"
 
     output_parent = _private_directory(tmp_path / "output")
     output = output_parent / "plan.json"
