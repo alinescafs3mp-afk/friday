@@ -5,12 +5,16 @@ import inspect
 import json
 import os
 import py_compile
+import signal
 import subprocess
 import sys
-from contextlib import contextmanager
+import sysconfig
+import time
+from contextlib import contextmanager, suppress
 from dataclasses import dataclass
 from html import escape
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -47,6 +51,7 @@ def exact_repository(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> ExactRe
     root = tmp_path / "repository"
     producer = root / evidence.PRODUCER_PATH
     test_source = root / TEST_SOURCE_PATH
+    ignore = root / ".gitignore"
     producer.parent.mkdir(parents=True)
     test_source.parent.mkdir(parents=True)
 
@@ -56,12 +61,19 @@ def exact_repository(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> ExactRe
         f"def {TEST_FUNCTION}():\n    pass\n",
         encoding="utf-8",
     )
+    ignore.write_text(".venv/\n", encoding="ascii")
 
     root.mkdir(exist_ok=True)
     _git(root, "init", "-q")
     _git(root, "config", "user.name", "Exact Evidence Test")
     _git(root, "config", "user.email", "exact-evidence@example.invalid")
-    _git(root, "add", evidence.PRODUCER_PATH, test_source.relative_to(root).as_posix())
+    _git(
+        root,
+        "add",
+        evidence.PRODUCER_PATH,
+        test_source.relative_to(root).as_posix(),
+        ignore.relative_to(root).as_posix(),
+    )
     _git(root, "commit", "-q", "-m", "exact evidence fixture")
     commit = _git(root, "rev-parse", "HEAD")
 
@@ -76,6 +88,417 @@ def exact_repository(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> ExactRe
         ),
         refs=evidence.proof_refs(JOURNEY_ID, EVIDENCE_CLASS),
     )
+
+
+def test_native_controller_clones_exact_source_without_ignored_tooling(
+    exact_repository: ExactRepository,
+    tmp_path: Path,
+) -> None:
+    ignored = exact_repository.root / ".venv/bin/python"
+    ignored.parent.mkdir(parents=True)
+    ignored.write_bytes(b"ignored mutable interpreter")
+    origin, head = evidence._validation_origin_identity(exact_repository.root)  # noqa: SLF001
+    scratch = tmp_path / "controller-scratch"
+    scratch.mkdir(mode=0o700)
+
+    controller = evidence._private_validation_checkout(origin, head, scratch)  # noqa: SLF001
+
+    assert ignored.is_file()
+    assert not (controller / ".venv").exists()
+    evidence._require_exact_checkout(controller, head)  # noqa: SLF001
+
+
+def _bootstrap_environment(root: Path) -> dict[str, str]:
+    home = root / "home"
+    temporary = root / "tmp"
+    home.mkdir()
+    temporary.mkdir()
+    return {
+        "HOME": str(home),
+        "LANG": "C.UTF-8",
+        "LC_ALL": "C.UTF-8",
+        "PATH": os.defpath,
+        "TMPDIR": str(temporary),
+        "TZ": "UTC",
+    }
+
+
+def _run_bootstrap_producer(
+    producer_path: Path,
+    arguments: tuple[str, ...],
+    *,
+    options: tuple[str, ...] = ("-I", "-S", "-B"),
+    wrong_interpreter_argument: bool = False,
+    wrong_producer_bytes: bool = False,
+) -> subprocess.CompletedProcess[bytes]:
+    target = Path(sys.executable).resolve(strict=True)
+    stdlib = Path(sysconfig.get_path("stdlib")).resolve(strict=True)
+    tooling = Path(sysconfig.get_path("purelib")).resolve(strict=True)
+    interpreter = os.open(target, os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW)
+    expected_sha256 = hashlib.sha256(producer_path.read_bytes()).hexdigest()
+    producer = os.open(producer_path, os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW)
+    if wrong_producer_bytes:
+        producer_path.write_bytes(producer_path.read_bytes() + b"\n# tampered\n")
+    environment_root = producer_path.parent / "bootstrap-environment"
+    environment_root.mkdir()
+    try:
+        command = (
+            str(target),
+            *options,
+            "-c",
+            evidence._ISOLATED_VALIDATION_BOOTSTRAP,  # noqa: SLF001
+            str(producer if wrong_interpreter_argument else interpreter),
+            str(producer),
+            str(producer_path),
+            expected_sha256,
+            str(target),
+            ".".join(str(part) for part in sys.version_info[:3]),
+            str(stdlib),
+            str(tooling),
+            str(os.getpid()),
+            *arguments,
+        )
+        return evidence._run_validation_controller(  # noqa: SLF001
+            command,
+            cwd=producer_path.parent,
+            environment=_bootstrap_environment(environment_root),
+            raw=b"",
+            interpreter_descriptor=interpreter,
+            producer_descriptor=producer,
+        )
+    finally:
+        os.close(producer)
+        os.close(interpreter)
+
+
+def _write_bootstrap_producer(path: Path, marker: Path) -> None:
+    path.write_text(
+        "from dataclasses import dataclass\n"
+        "from pathlib import Path\n"
+        "import sys\n"
+        "@dataclass(frozen=True)\n"
+        "class Bound:\n"
+        "    value: str\n"
+        "def main(argv):\n"
+        "    assert __name__ in sys.modules\n"
+        "    Path(argv[0]).write_text(Bound('registered').value, encoding='ascii')\n"
+        "    return 0\n",
+        encoding="ascii",
+    )
+    assert not marker.exists()
+
+
+def test_bootstrap_executes_registered_module_from_exact_producer_fd(tmp_path: Path) -> None:
+    marker = tmp_path / "registered"
+    producer = tmp_path / "producer.py"
+    _write_bootstrap_producer(producer, marker)
+
+    completed = _run_bootstrap_producer(producer, (str(marker),))
+
+    assert completed.returncode == 0, completed.stderr.decode(errors="replace")
+    assert marker.read_text(encoding="ascii") == "registered"
+
+
+@pytest.mark.parametrize("options", [("-S", "-B"), ("-I", "-B"), ("-I", "-S")])
+def test_bootstrap_rejects_non_isolated_startup_before_producer_exec(
+    tmp_path: Path,
+    options: tuple[str, ...],
+) -> None:
+    marker = tmp_path / "not-executed"
+    producer = tmp_path / "producer.py"
+    _write_bootstrap_producer(producer, marker)
+
+    completed = _run_bootstrap_producer(producer, (str(marker),), options=options)
+
+    assert completed.returncode != 0
+    assert completed.stderr
+    assert not marker.exists()
+
+
+@pytest.mark.parametrize("tamper", ["interpreter_fd", "producer_bytes"])
+def test_bootstrap_rejects_wrong_fd_or_producer_bytes_before_exec(
+    tmp_path: Path,
+    tamper: str,
+) -> None:
+    marker = tmp_path / "not-executed"
+    producer = tmp_path / "producer.py"
+    _write_bootstrap_producer(producer, marker)
+
+    completed = _run_bootstrap_producer(
+        producer,
+        (str(marker),),
+        wrong_interpreter_argument=tamper == "interpreter_fd",
+        wrong_producer_bytes=tamper == "producer_bytes",
+    )
+
+    assert completed.returncode != 0
+    assert completed.stderr
+    assert not marker.exists()
+
+
+def test_native_interpreter_binding_is_finite_physical_and_nofollow(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    opened: list[int] = []
+    original_open = evidence.os.open
+
+    def open_bound(*args: Any, **kwargs: Any) -> int:
+        opened.append(int(args[1]))
+        return original_open(*args, **kwargs)
+
+    monkeypatch.setattr(evidence.os, "open", open_bound)
+    monkeypatch.setattr(
+        evidence.os,
+        "scandir",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("recursive runtime scan")),
+    )
+    descriptor, target, opened_status, directories, stdlib, python_zip = (
+        evidence._open_validation_interpreter()  # noqa: SLF001
+    )
+    try:
+        assert evidence._same_validation_status(opened_status, os.fstat(descriptor))  # noqa: SLF001
+        assert stdlib in {path for path, _status in directories}
+        assert python_zip[0].name == f"python{sys.version_info.major}{sys.version_info.minor}.zip"
+        assert len(directories) < 16
+        assert opened and all(flags & os.O_NOFOLLOW for flags in opened)
+    finally:
+        os.close(descriptor)
+
+
+def test_runtime_anchor_allows_writable_toolcache_outer_but_not_runtime(
+    tmp_path: Path,
+) -> None:
+    toolcache = tmp_path / "hostedtoolcache"
+    anchor = toolcache / "Python/3.14.4/x64"
+    target = anchor / "bin/python"
+    stdlib = anchor / "lib/python3.14"
+    (stdlib / "lib-dynload").mkdir(parents=True)
+    target.parent.mkdir(parents=True)
+    target.write_bytes(b"physical interpreter placeholder")
+    for protected in (anchor, target.parent, anchor / "lib", stdlib, stdlib / "lib-dynload"):
+        protected.chmod(0o755)
+    toolcache.chmod(0o777)
+
+    bindings = evidence._validation_runtime_directories(target, stdlib)  # noqa: SLF001
+
+    assert toolcache in {path for path, _status in bindings}
+    anchor.chmod(0o775)
+    with pytest.raises(evidence.ExactReleaseEvidenceError, match="^validation_controller_invalid$"):
+        evidence._validation_runtime_directories(target, stdlib)  # noqa: SLF001
+
+
+def test_native_controller_rejects_non_clean_scope_before_spawn(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        evidence,
+        "_run_validation_controller",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("spawned")),
+    )
+    with pytest.raises(evidence.ExactReleaseEvidenceError, match="^native_validation_scope_invalid$"):
+        evidence.validate_receipt_via_native_controller(
+            b"",
+            expected_release=evidence.ReleaseIdentity("0" * 40, "1" * 64, "2" * 64, 50),
+            expected_journey_id=JOURNEY_ID,
+            expected_evidence_class=EVIDENCE_CLASS,
+            repo_root=tmp_path,
+        )
+
+
+@pytest.mark.parametrize("tamper", ["child_marker", "sigchld"])
+def test_native_controller_rejects_inherited_process_state_before_origin(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    tamper: str,
+) -> None:
+    if tamper == "child_marker":
+        monkeypatch.setattr(evidence, "_NATIVE_VALIDATION_TOOLING_SITE", tmp_path)
+    else:
+        monkeypatch.setattr(evidence.signal, "getsignal", lambda _signal: signal.SIG_IGN)
+    monkeypatch.setattr(
+        evidence,
+        "_validation_origin_identity",
+        lambda *_args: (_ for _ in ()).throw(AssertionError("origin inspected")),
+    )
+    with pytest.raises(evidence.ExactReleaseEvidenceError, match="^validation_controller_invalid$"):
+        evidence.validate_receipt_via_native_controller(
+            b"",
+            expected_release=evidence.ReleaseIdentity("0" * 40, "1" * 64, "2" * 64, 50),
+            expected_journey_id=JOURNEY_ID,
+            expected_evidence_class="clean artifact path",
+            repo_root=tmp_path,
+            release_root=tmp_path,
+        )
+
+
+def test_direct_runner_rejects_inherited_sigchld_ignore(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(evidence.signal, "getsignal", lambda _signal: signal.SIG_IGN)
+    with pytest.raises(evidence.ExactReleaseEvidenceError, match="^child_process_authority_invalid$"):
+        evidence._run_closed_pytest(  # noqa: SLF001
+            tmp_path,
+            evidence.ReleaseIdentity("0" * 40, "1" * 64, "2" * 64, 50),
+            JOURNEY_ID,
+            EVIDENCE_CLASS,
+        )
+
+
+def test_clean_direct_validator_requires_fd_bootstrap_marker(tmp_path: Path) -> None:
+    with pytest.raises(evidence.ExactReleaseEvidenceError, match="^native_validation_context_invalid$"):
+        evidence.validate_receipt(
+            b"",
+            expected_release=evidence.ReleaseIdentity("0" * 40, "1" * 64, "2" * 64, 50),
+            expected_journey_id=JOURNEY_ID,
+            expected_evidence_class="clean artifact path",
+            repo_root=tmp_path,
+            release_root=tmp_path,
+        )
+
+
+def _run_validation_process_fixture(code: str, marker: Path) -> subprocess.CompletedProcess[bytes]:
+    target = Path(sys.executable).resolve(strict=True)
+    interpreter = os.open(target, os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW)
+    producer = os.open(os.devnull, os.O_RDONLY | os.O_CLOEXEC)
+    try:
+        return evidence._run_validation_controller(  # noqa: SLF001
+            (str(target), "-I", "-S", "-B", "-c", code, str(marker)),
+            cwd=marker.parent,
+            environment={"LANG": "C.UTF-8", "PATH": os.defpath, "TMPDIR": str(marker.parent)},
+            raw=b"",
+            interpreter_descriptor=interpreter,
+            producer_descriptor=producer,
+        )
+    finally:
+        os.close(producer)
+        os.close(interpreter)
+
+
+def test_native_controller_retires_residual_process_group_after_success(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    marker = tmp_path / "descendant.pid"
+    monkeypatch.setattr(evidence, "VALIDATION_TERMINATION_GRACE_SECONDS", 0.1)
+    code = (
+        "import pathlib,subprocess,sys; "
+        "child=subprocess.Popen((sys.executable,'-I','-S','-B','-c',"
+        "'import os,signal,time; signal.signal(signal.SIGTERM,lambda *_:os.setsid()); time.sleep(60)'),"
+        "stdin=subprocess.DEVNULL,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL); "
+        "pathlib.Path(sys.argv[1]).write_text(str(child.pid),encoding='ascii')"
+    )
+
+    completed = _run_validation_process_fixture(code, marker)
+
+    assert completed.returncode == 0
+    descendant = Path(f"/proc/{int(marker.read_text(encoding='ascii'))}")
+    deadline = time.monotonic() + 5
+    while descendant.exists() and time.monotonic() < deadline:
+        time.sleep(0.02)
+    assert not descendant.exists()
+
+
+def test_native_controller_timeout_kills_and_reaps_its_process_group(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    marker = tmp_path / "controller.pid"
+    monkeypatch.setattr(evidence, "VALIDATION_TIMEOUT_SECONDS", 0.2)
+    monkeypatch.setattr(evidence, "VALIDATION_TERMINATION_GRACE_SECONDS", 0.1)
+    code = (
+        "import os,pathlib,signal,sys,time; "
+        "pathlib.Path(sys.argv[1]).write_text(str(os.getpid()),encoding='ascii'); "
+        "signal.signal(signal.SIGTERM,signal.SIG_IGN); time.sleep(60)"
+    )
+
+    with pytest.raises(subprocess.TimeoutExpired):
+        _run_validation_process_fixture(code, marker)
+
+    assert not Path(f"/proc/{int(marker.read_text(encoding='ascii'))}").exists()
+
+
+def test_native_controller_dies_with_a_sigkilled_gate_parent(tmp_path: Path) -> None:
+    marker = tmp_path / "controller.pid"
+    finalizer_marker = tmp_path / "controller.finalizer"
+    producer_path = tmp_path / "controller.py"
+    producer_path.write_text(
+        "import os,time\n"
+        "from pathlib import Path\n"
+        "class Linger:\n"
+        "    def __init__(self,path): self.path=path\n"
+        "    def __del__(self,Path=Path,sleep=time.sleep):\n"
+        "        Path(self.path).write_text('entered',encoding='ascii')\n"
+        "        sleep(60)\n"
+        "holder=None\n"
+        "def main(argv):\n"
+        "    global holder\n"
+        "    Path(argv[0]).write_text(str(os.getpid()),encoding='ascii')\n"
+        "    holder=Linger(argv[1])\n"
+        "    return 0\n",
+        encoding="ascii",
+    )
+    environment_root = tmp_path / "parent-environment"
+    (environment_root / "home").mkdir(parents=True)
+    (environment_root / "tmp").mkdir()
+    helper = (
+        "import hashlib,os,sys,sysconfig; "
+        "sys.path.insert(0,sys.argv[1]); from tools import exact_release_evidence as e; "
+        "producer_path=sys.argv[2]; marker=sys.argv[3]; finalizer_marker=sys.argv[4]; envroot=sys.argv[5]; "
+        "raw=open(producer_path,'rb').read(); target=os.path.realpath(sys.executable); "
+        "stdlib=os.path.realpath(sysconfig.get_path('stdlib')); "
+        "tooling=os.path.realpath(sysconfig.get_path('purelib')); "
+        "interpreter=os.open(target,os.O_RDONLY|os.O_CLOEXEC|os.O_NOFOLLOW); "
+        "producer=os.open(producer_path,os.O_RDONLY|os.O_CLOEXEC|os.O_NOFOLLOW); "
+        "command=(target,'-I','-S','-B','-c',e._ISOLATED_VALIDATION_BOOTSTRAP,"
+        "str(interpreter),str(producer),producer_path,hashlib.sha256(raw).hexdigest(),target,"
+        "'.'.join(str(part) for part in sys.version_info[:3]),stdlib,tooling,str(os.getpid()),marker,finalizer_marker); "
+        "environment={'HOME':envroot+'/home','LANG':'C.UTF-8','LC_ALL':'C.UTF-8',"
+        "'PATH':os.defpath,'TMPDIR':envroot+'/tmp','TZ':'UTC'}; "
+        "completed=e._run_validation_controller(command,cwd=os.path.dirname(producer_path),"
+        "environment=environment,raw=b'',interpreter_descriptor=interpreter,"
+        "producer_descriptor=producer); raise SystemExit(completed.returncode)"
+    )
+    parent = subprocess.Popen(  # noqa: S603 - exact local helper source
+        (
+            sys.executable,
+            "-I",
+            "-B",
+            "-c",
+            helper,
+            str(Path(__file__).resolve().parents[1]),
+            str(producer_path),
+            str(marker),
+            str(finalizer_marker),
+            str(environment_root),
+        ),
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.PIPE,
+    )
+    controller_pid: int | None = None
+    try:
+        deadline = time.monotonic() + 5
+        while not finalizer_marker.exists() and parent.poll() is None and time.monotonic() < deadline:
+            time.sleep(0.02)
+        if not finalizer_marker.exists():
+            _stdout, stderr = parent.communicate(timeout=5)
+            pytest.fail(stderr.decode(errors="replace"))
+        controller_pid = int(marker.read_text(encoding="ascii"))
+        os.kill(parent.pid, signal.SIGKILL)
+        parent.wait(timeout=5)
+        deadline = time.monotonic() + 5
+        while Path(f"/proc/{controller_pid}").exists() and time.monotonic() < deadline:
+            time.sleep(0.02)
+        assert not Path(f"/proc/{controller_pid}").exists()
+    finally:
+        if parent.poll() is None:
+            parent.kill()
+            parent.wait(timeout=5)
+        if controller_pid is not None and Path(f"/proc/{controller_pid}").exists():
+            with suppress(ProcessLookupError):
+                os.kill(controller_pid, signal.SIGKILL)
 
 
 def _collection_sha256(refs: tuple[str, ...]) -> str:
@@ -102,11 +525,13 @@ def _produce(
         evidence_class: str,
         *,
         require_running_producer: bool = True,
+        require_isolated_startup: bool = True,
     ) -> evidence._ExecutionWitness:  # noqa: SLF001 - exact internal producer witness
         assert repo_root == repository.root
         assert identity == repository.identity
         assert (journey_id, evidence_class) == (JOURNEY_ID, EVIDENCE_CLASS)
         assert require_running_producer is True
+        assert type(require_isolated_startup) is bool
         return evidence._execution_witness(  # noqa: SLF001 - code-owned test boundary
             outcomes,
             exit_code,
@@ -423,7 +848,7 @@ def test_closed_runner_uses_hermetic_plugins_and_exact_collection(
         environments.append(dict(env))
         return subprocess.CompletedProcess(command, 0)
 
-    monkeypatch.setattr(evidence, "_authenticated_quality_gate", lambda: quality_gate)
+    monkeypatch.setattr(evidence, "_authenticated_quality_gate", lambda **_kwargs: quality_gate)
     monkeypatch.setattr(quality_gate, "_isolated_test_environment", isolated_environment)
     monkeypatch.setattr(evidence.subprocess, "run", run_pytest)
     monkeypatch.setattr(evidence, "_require_exact_checkout", lambda *_arguments: None)
@@ -555,16 +980,18 @@ def test_producer_helper_executes_tracked_blob_only_after_stdlib_preflight(
     events: list[str] = []
     commit = "a" * 40
 
-    def preflight() -> tuple[Path, str]:
+    def preflight(*, require_isolated_startup: bool = True) -> tuple[Path, str]:
+        assert require_isolated_startup is True
         events.append("preflight")
         return tmp_path, commit
 
     monkeypatch.setattr(evidence, "_running_exact_checkout", preflight)
-    monkeypatch.setattr(
-        evidence,
-        "_exact_git_blob",
-        lambda *_args: events.append("tracked_blob") or tracked,
-    )
+
+    def tracked_blob(*_args: object) -> bytes:
+        events.append("tracked_blob")
+        return tracked
+
+    monkeypatch.setattr(evidence, "_exact_git_blob", tracked_blob)
     monkeypatch.setattr(
         evidence,
         "_require_exact_checkout",
@@ -670,9 +1097,7 @@ def test_git_authority_ignores_a_forged_ambient_path(
     marker = tmp_path / "forged-git-executed"
     forged_git = forged_bin / "git"
     forged_git.write_text(
-        "#!/bin/sh\n"
-        f"printf executed > '{marker}'\n"
-        "printf '/forged/repository\\n'\n",
+        f"#!/bin/sh\nprintf executed > '{marker}'\nprintf '/forged/repository\\n'\n",
         encoding="ascii",
     )
     forged_git.chmod(0o700)
@@ -801,10 +1226,12 @@ def test_validator_reruns_receipt_source_from_detached_checkout_after_later_head
         evidence_class: str,
         *,
         require_running_producer: bool = True,
+        require_isolated_startup: bool = True,
     ) -> evidence._ExecutionWitness:  # noqa: SLF001 - exact external witness
         assert source_root != exact_repository.root
         assert identity == exact_repository.identity
         assert (journey_id, evidence_class) == (JOURNEY_ID, EVIDENCE_CLASS)
+        assert require_isolated_startup is False
         detached_head = _git(source_root, "rev-parse", "HEAD")
         assert detached_head == exact_repository.identity.source_commit
         assert not (source_root / "docs/later-validator.txt").exists()

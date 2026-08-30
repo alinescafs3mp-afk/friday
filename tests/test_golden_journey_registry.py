@@ -660,7 +660,12 @@ def _validate_sanitized_receipt(
     if hashlib.sha256(raw).hexdigest() != observation.get("artifact_sha256"):
         raise RegistryValidationError("sanitized receipt digest does not match its actual bytes")
     try:
-        receipt = exact_evidence.validate_receipt_via_native_controller(
+        validator = (
+            exact_evidence.validate_receipt_via_native_controller
+            if evidence_class == "clean artifact path"
+            else exact_evidence.validate_receipt
+        )
+        receipt = validator(
             raw,
             expected_release=exact_evidence.ReleaseIdentity(
                 source_commit=manifest_identity.source_commit,
@@ -961,11 +966,13 @@ def _machine_manifest(
         selected_class: str,
         *,
         require_running_producer: bool = True,
+        require_isolated_startup: bool = True,
     ) -> exact_evidence._ExecutionWitness:  # noqa: SLF001 - exact internal witness
         assert source_root == ROOT
         assert release == exact_identity
         assert (selected_journey, selected_class) == (journey_id, evidence_class)
         assert require_running_producer is True
+        assert type(require_isolated_startup) is bool
         collection = exact_evidence.canonical_json_bytes({"nodeids": list(refs), "version": 1})
         exit_code = 0 if result == "VERIFIED" else 1
         return exact_evidence._execution_witness(  # noqa: SLF001 - code-owned test boundary
@@ -1082,7 +1089,7 @@ def _clean_machine_manifest(
     return manifest, bundle.manifest_ref, raw
 
 
-def test_site_loaded_registry_reexecutes_the_exact_validation_controller(
+def test_site_loaded_non_clean_registry_runs_the_real_direct_inventory(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -1106,10 +1113,14 @@ def test_site_loaded_registry_reexecutes_the_exact_validation_controller(
         manifest, manifest_ref = _machine_manifest(identity, artifact_root, mint_patch)
     assert exact_evidence._run_closed_pytest is original_runner  # noqa: SLF001
 
-    def reject_native_gate_use(*_args: object, **_kwargs: object) -> None:
-        raise AssertionError("site-loaded quality gate became validation authority")
+    def reject_native_controller(*_args: object, **_kwargs: object) -> None:
+        raise AssertionError("non-clean evidence reached the native controller")
 
-    monkeypatch.setattr(quality_gate, "_isolated_test_environment", reject_native_gate_use)
+    monkeypatch.setattr(
+        exact_evidence,
+        "validate_receipt_via_native_controller",
+        reject_native_controller,
+    )
     _validate_manifest_payload(
         manifest,
         manifest_ref=manifest_ref,
@@ -1172,6 +1183,141 @@ def test_decisive_clean_registry_passes_one_exact_request_to_native_controller(
             "release_root": sealed_release_root,
         }
     ]
+
+
+def test_site_loaded_clean_registry_crosses_the_real_native_controller(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    identity = ReleaseIdentity(
+        source_commit=_repository_head(),
+        tree_sha256="a" * 64,
+        wheel_sha256="b" * 64,
+        database_schema=50,
+    )
+    artifact_root = tmp_path / "native-clean"
+    manifest, manifest_ref, _raw = _clean_machine_manifest(identity, artifact_root)
+    release_root = tmp_path / "empty-release"
+    release_root.mkdir(mode=0o700)
+
+    def reject_direct_validator(*_args: object, **_kwargs: object) -> None:
+        raise AssertionError("clean evidence used the site-loaded direct validator")
+
+    monkeypatch.setattr(exact_evidence, "validate_receipt", reject_direct_validator)
+    with pytest.raises(
+        RegistryValidationError,
+        match="^sanitized receipt is not exact machine-produced evidence: release_identity_invalid$",
+    ):
+        _validate_manifest_payload(
+            manifest,
+            manifest_ref=manifest_ref,
+            journey_id="conversation_recall",
+            evidence_class="clean artifact path",
+            current=identity,
+            require_current=True,
+            repo_root=artifact_root,
+            release_root=release_root,
+        )
+
+
+def test_clean_registry_binds_one_fd_pinned_native_command(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    identity = ReleaseIdentity(
+        source_commit=_repository_head(),
+        tree_sha256="a" * 64,
+        wheel_sha256="b" * 64,
+        database_schema=50,
+    )
+    artifact_root = tmp_path / "clean-command"
+    manifest, manifest_ref, raw = _clean_machine_manifest(identity, artifact_root)
+    release_root = tmp_path / "release"
+    release_root.mkdir(mode=0o700)
+    calls: list[tuple[tuple[str, ...], dict[str, object]]] = []
+
+    def run_controller(
+        command: tuple[str, ...],
+        **options: object,
+    ) -> subprocess.CompletedProcess[bytes]:
+        calls.append((command, options))
+        receipt = json.loads(raw)
+        assert isinstance(receipt, dict)
+        attestation = exact_evidence._validation_attestation(  # noqa: SLF001
+            raw,
+            receipt,
+            expected_release=exact_evidence.ReleaseIdentity(
+                source_commit=identity.source_commit,
+                tree_sha256=identity.tree_sha256,
+                wheel_sha256=identity.wheel_sha256,
+                database_schema=identity.database_schema,
+            ),
+            expected_journey_id="conversation_recall",
+            expected_evidence_class="clean artifact path",
+            release_root=release_root,
+        )
+        return subprocess.CompletedProcess(
+            command,
+            0,
+            stdout=exact_evidence.canonical_json_bytes(attestation) + b"\n",
+            stderr=b"",
+        )
+
+    monkeypatch.setattr(exact_evidence, "_run_validation_controller", run_controller)
+    _validate_manifest_payload(
+        manifest,
+        manifest_ref=manifest_ref,
+        journey_id="conversation_recall",
+        evidence_class="clean artifact path",
+        current=identity,
+        require_current=True,
+        repo_root=artifact_root,
+        release_root=release_root,
+    )
+
+    assert len(calls) == 1
+    command, options = calls[0]
+    assert command[:5] == (str(Path(sys.executable).resolve(strict=True)), "-I", "-S", "-B", "-c")
+    assert command.count("--release-root") == 1
+    assert command[command.index("--release-root") + 1] == str(release_root)
+    assert options["raw"] == raw
+    assert Path(str(options["cwd"])).is_relative_to(Path("/var/tmp"))
+    assert options["interpreter_descriptor"] != options["producer_descriptor"]
+
+
+@pytest.mark.parametrize(
+    ("stderr", "failure"),
+    [(b"", "validation_attestation_invalid"), (b"unexpected", "isolated_receipt_validation_failed")],
+)
+def test_native_controller_rejects_malformed_attestation_and_stderr(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    stderr: bytes,
+    failure: str,
+) -> None:
+    identity = ReleaseIdentity(_repository_head(), "a" * 64, "b" * 64, 50)
+    _manifest, _manifest_ref, raw = _clean_machine_manifest(identity, tmp_path / "artifacts")
+    release_root = tmp_path / "release"
+    release_root.mkdir(mode=0o700)
+
+    def malformed(command: tuple[str, ...], **_options: object) -> subprocess.CompletedProcess[bytes]:
+        return subprocess.CompletedProcess(command, 0, stdout=b"{}\n", stderr=stderr)
+
+    monkeypatch.setattr(exact_evidence, "_run_validation_controller", malformed)
+    with pytest.raises(exact_evidence.ExactReleaseEvidenceError, match=f"^{failure}$"):
+        exact_evidence.validate_receipt_via_native_controller(
+            raw,
+            expected_release=exact_evidence.ReleaseIdentity(
+                identity.source_commit,
+                identity.tree_sha256,
+                identity.wheel_sha256,
+                identity.database_schema,
+            ),
+            expected_journey_id="conversation_recall",
+            expected_evidence_class="clean artifact path",
+            repo_root=ROOT,
+            release_root=release_root,
+        )
 
 
 def test_canonical_golden_journey_registry_is_closed_current_and_privacy_safe(

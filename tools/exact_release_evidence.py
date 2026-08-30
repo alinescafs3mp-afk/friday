@@ -12,6 +12,8 @@ import importlib.machinery
 import json
 import os
 import re
+import select
+import signal
 import stat
 import subprocess
 import sys
@@ -28,6 +30,9 @@ from typing import Any
 _INITIAL_PRODUCER_SYS_PATH = tuple(sys.path)
 _INITIAL_PRODUCER_SITE_LOADED = "site" in sys.modules
 _INITIAL_PRODUCER_EXECUTABLE = sys.executable
+_NATIVE_VALIDATION_TOOLING_SITE: Path | None = None
+_NATIVE_VALIDATION_INTERPRETER_FD = -1
+_NATIVE_VALIDATION_INTERPRETER_ARGV0 = ""
 
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
@@ -40,6 +45,7 @@ VALIDATION_ATTESTATION_SCHEMA = "friday.exact-release-receipt-validation.v1"
 PRODUCER_PATH = "tools/exact_release_evidence.py"
 PYTEST_TIMEOUT_SECONDS = 900
 VALIDATION_TIMEOUT_SECONDS = PYTEST_TIMEOUT_SECONDS + 60
+VALIDATION_TERMINATION_GRACE_SECONDS = 5.0
 _EVIDENCE_ROOT = PurePosixPath("evidence/golden_journeys")
 _CLEAN_ARTIFACT_CLASS = "clean artifact path"
 _SUBPROCESS_POLICY = "cpython_audit_deny"
@@ -154,11 +160,90 @@ _PYTEST_BOOTSTRAP = (
     "root=str(pathlib.Path(sys.argv.pop(1)).resolve(strict=True)); "
     "sys.path.insert(0,root); import pytest; raise SystemExit(pytest.main(sys.argv[1:]))"
 )
-_ISOLATED_VALIDATION_BOOTSTRAP = (
-    "import runpy,sys; "
-    "namespace=runpy.run_path(sys.argv[1]); "
-    "raise SystemExit(namespace['main'](sys.argv[2:]))"
-)
+_ISOLATED_VALIDATION_BOOTSTRAP = r"""
+import _sha2,os,select,signal,stat,sys,types
+interpreter_fd=int(sys.argv[1]); producer_fd=int(sys.argv[2])
+producer_path=sys.argv[3]; producer_sha256=sys.argv[4]
+interpreter_argv0=sys.argv[5]
+expected_version=tuple(int(part) for part in sys.argv[6].split("."))
+stdlib=os.path.realpath(sys.argv[7],strict=True)
+tooling_site=os.path.realpath(sys.argv[8],strict=True); parent_pid=int(sys.argv[9])
+fields=("st_dev","st_ino","st_mode","st_nlink","st_uid","st_gid","st_size","st_mtime_ns","st_ctime_ns")
+def same(left,right):
+    return all(getattr(left,name)==getattr(right,name) for name in fields)
+runtime_anchor=os.path.realpath(os.path.commonpath((os.path.dirname(interpreter_argv0),stdlib)),strict=True)
+def controlled_directory(path):
+    current=path
+    while True:
+        value=os.lstat(current)
+        protected=current==runtime_anchor or os.path.commonpath((runtime_anchor,current))==runtime_anchor
+        if os.path.realpath(current,strict=True)!=current or not stat.S_ISDIR(value.st_mode) or (protected and (value.st_uid not in (0,os.geteuid()) or value.st_mode&0o022)):
+            raise RuntimeError("validation_controller_invalid")
+        if current==os.sep:
+            return
+        current=os.path.dirname(current)
+expected_path=(os.path.realpath(os.path.join(os.path.dirname(stdlib),f"python{sys.version_info.major}{sys.version_info.minor}.zip"),strict=False),stdlib,os.path.realpath(os.path.join(stdlib,"lib-dynload"),strict=True))
+if (
+    len(expected_version)!=3 or tuple(sys.version_info[:3])!=expected_version
+    or sys.executable!=interpreter_argv0 or os.path.realpath(sys.executable,strict=True)!=interpreter_argv0
+    or sys.flags.isolated!=1 or sys.flags.no_site!=1 or sys.flags.no_user_site!=1
+    or sys.flags.ignore_environment!=1 or sys.flags.dont_write_bytecode!=1 or not sys.flags.safe_path
+    or "site" in sys.modules or tuple(os.path.realpath(value,strict=False) for value in sys.path)!=expected_path
+    or set(os.environ)!={"HOME","LANG","LC_ALL","PATH","TMPDIR","TZ"}
+    or signal.getsignal(signal.SIGCHLD)!=signal.SIG_DFL
+    or os.path.realpath(tooling_site,strict=True)!=tooling_site or not stat.S_ISDIR(os.lstat(tooling_site).st_mode)
+):
+    raise RuntimeError("validation_controller_invalid")
+controlled_directory(os.path.dirname(interpreter_argv0)); controlled_directory(stdlib); controlled_directory(expected_path[2])
+try:
+    python_zip_status=os.lstat(expected_path[0])
+except FileNotFoundError:
+    if os.path.lexists(expected_path[0]):
+        raise RuntimeError("validation_controller_invalid")
+else:
+    if os.path.realpath(expected_path[0],strict=True)!=expected_path[0] or not stat.S_ISREG(python_zip_status.st_mode) or python_zip_status.st_uid not in (0,os.geteuid()) or python_zip_status.st_mode&0o022:
+        raise RuntimeError("validation_controller_invalid")
+if os.getpgrp()!=os.getpid() or os.getppid()!=parent_pid or not hasattr(os,"pidfd_open"):
+    raise RuntimeError("validation_controller_invalid")
+parent_fd=os.pidfd_open(parent_pid,0)
+if os.getppid()!=parent_pid:
+    raise RuntimeError("validation_controller_invalid")
+controller_fd=os.pidfd_open(os.getpid(),0)
+monitor=os.fork()
+if monitor==0:
+    for descriptor in (0,1,2,interpreter_fd,producer_fd):
+        try: os.close(descriptor)
+        except OSError: pass
+    select.select((parent_fd,controller_fd),(),())
+    os.killpg(os.getpgrp(),signal.SIGKILL)
+    os._exit(1)
+os.close(parent_fd); os.close(controller_fd)
+running=os.stat("/proc/self/exe"); pinned=os.fstat(interpreter_fd)
+if not same(running,pinned) or not stat.S_ISREG(pinned.st_mode) or pinned.st_nlink!=1 or pinned.st_uid not in (0,os.geteuid()) or pinned.st_mode&0o022 or not pinned.st_mode&0o111:
+    raise RuntimeError("validation_controller_invalid")
+os.lseek(producer_fd,0,os.SEEK_SET); before=os.fstat(producer_fd); chunks=[]; remaining=1048577
+while remaining:
+    chunk=os.read(producer_fd,min(1048576,remaining))
+    if not chunk: break
+    chunks.append(chunk); remaining-=len(chunk)
+source=b"".join(chunks); after=os.fstat(producer_fd); named=os.lstat(producer_path)
+if len(source)>1048576 or not same(before,after) or not same(after,named) or _sha2.sha256(source).hexdigest()!=producer_sha256:
+    raise RuntimeError("validation_controller_invalid")
+module_name="exact_release_evidence_validation"
+if module_name in sys.modules:
+    raise RuntimeError("validation_controller_invalid")
+module=types.ModuleType(module_name); module.__file__=producer_path; module.__package__=""
+sys.modules[module_name]=module
+try:
+    exec(compile(source,producer_path,"exec",dont_inherit=True),module.__dict__)
+    module._NATIVE_VALIDATION_TOOLING_SITE=module.Path(tooling_site)
+    module._NATIVE_VALIDATION_INTERPRETER_FD=interpreter_fd
+    module._NATIVE_VALIDATION_INTERPRETER_ARGV0=interpreter_argv0
+    result=module.main(sys.argv[10:])
+finally:
+    sys.modules.pop(module_name,None)
+raise SystemExit(result)
+"""
 _INSTALLED_PYTEST_BOOTSTRAP = r"""
 import hashlib,importlib.machinery,importlib.util,json,os,pathlib,posix,stat,sys,sysconfig,types
 source_root=pathlib.Path(sys.argv.pop(1)).resolve(strict=True)
@@ -1771,10 +1856,7 @@ def _git(repo_root: Path, *args: str) -> bytes:
     if (
         completed.returncode != 0
         or completed.stderr
-        or any(
-            getattr(before, field) != getattr(after, field)
-            for field in _TRUSTED_GIT_STATUS_FIELDS
-        )
+        or any(getattr(before, field) != getattr(after, field) for field in _TRUSTED_GIT_STATUS_FIELDS)
     ):
         raise ExactReleaseEvidenceError("git_identity_unavailable")
     return completed.stdout
@@ -1954,12 +2036,7 @@ def _require_producer_process_authority() -> None:
     try:
         stdlib = Path(sysconfig.get_path("stdlib")).resolve(strict=True)
         expected_initial = (
-            str(
-                (
-                    stdlib.parent
-                    / f"python{sys.version_info.major}{sys.version_info.minor}.zip"
-                ).resolve()
-            ),
+            str((stdlib.parent / f"python{sys.version_info.major}{sys.version_info.minor}.zip").resolve()),
             str(stdlib),
             str((stdlib / "lib-dynload").resolve(strict=True)),
         )
@@ -1967,9 +2044,7 @@ def _require_producer_process_authority() -> None:
             str(Path(value).resolve(strict=False)) for value in _INITIAL_PRODUCER_SYS_PATH
         )
         tooling_site = Path(sysconfig.get_path("purelib")).resolve(strict=True)
-        initial_paths = tuple(
-            Path(value).resolve(strict=False) for value in _INITIAL_PRODUCER_SYS_PATH
-        )
+        initial_paths = tuple(Path(value).resolve(strict=False) for value in _INITIAL_PRODUCER_SYS_PATH)
         expected_current = (str(ROOT), *_INITIAL_PRODUCER_SYS_PATH)
         invalid = bool(
             sys.flags.isolated != 1
@@ -1984,10 +2059,7 @@ def _require_producer_process_authority() -> None:
             or tuple(sys.path) != expected_current
             or tooling_site in initial_paths
             or bool(_FORBIDDEN_PRODUCER_STARTUP_ENVIRONMENT.intersection(os.environ))
-            or any(
-                name.startswith(("PYTHON", "LD_", "DYLD_", "GLIBC_"))
-                for name in os.environ
-            )
+            or any(name.startswith(("PYTHON", "LD_", "DYLD_", "GLIBC_")) for name in os.environ)
         )
     except (OSError, RuntimeError, TypeError, ValueError) as exc:
         raise ExactReleaseEvidenceError("producer_process_authority_invalid") from exc
@@ -1995,8 +2067,9 @@ def _require_producer_process_authority() -> None:
         raise ExactReleaseEvidenceError("producer_process_authority_invalid")
 
 
-def _running_exact_checkout() -> tuple[Path, str]:
-    _require_producer_process_authority()
+def _running_exact_checkout(*, require_isolated_startup: bool = True) -> tuple[Path, str]:
+    if require_isolated_startup:
+        _require_producer_process_authority()
     root = _resolve_directory(ROOT, "repo_root_invalid")
     try:
         head = _git(root, "rev-parse", "--verify", "HEAD^{commit}").decode("ascii").strip()
@@ -2009,11 +2082,16 @@ def _running_exact_checkout() -> tuple[Path, str]:
     return root, head
 
 
-def _authenticated_producer_helper(module_name: str, relative_path: str) -> Any:
+def _authenticated_producer_helper(
+    module_name: str,
+    relative_path: str,
+    *,
+    require_isolated_startup: bool = True,
+) -> Any:
     """Execute one helper only from its authenticated tracked source bytes."""
 
     cached = _AUTHENTICATED_PRODUCER_HELPERS.get(module_name)
-    root, head = _running_exact_checkout()
+    root, head = _running_exact_checkout(require_isolated_startup=require_isolated_startup)
     source_path = root / relative_path
     expected = _exact_git_blob(root, head, relative_path)
     try:
@@ -2072,14 +2150,10 @@ def _authenticated_producer_helper(module_name: str, relative_path: str) -> Any:
         ):
             raise ExactReleaseEvidenceError("producer_helper_invalid")
         source_sha256 = hashlib.sha256(expected).hexdigest()
-        module.__authenticated_source_sha256__ = source_sha256
+        module.__dict__["__authenticated_source_sha256__"] = source_sha256
         callables = tuple(
             sorted(
-                (
-                    (name, value)
-                    for name, value in vars(module).items()
-                    if callable(value)
-                ),
+                ((name, value) for name, value in vars(module).items() if callable(value)),
                 key=lambda item: item[0],
             )
         )
@@ -2098,8 +2172,15 @@ def _authenticated_producer_helper(module_name: str, relative_path: str) -> Any:
         raise ExactReleaseEvidenceError("producer_helper_invalid") from exc
 
 
-def _authenticated_quality_gate() -> Any:
-    return _authenticated_producer_helper("tools.quality_gate", "tools/quality_gate.py")
+def _authenticated_quality_gate(*, require_isolated_startup: bool = True) -> Any:
+    module_name = (
+        "tools.quality_gate" if require_isolated_startup else "_friday_direct_validation_quality_gate"
+    )
+    return _authenticated_producer_helper(
+        module_name,
+        "tools/quality_gate.py",
+        require_isolated_startup=require_isolated_startup,
+    )
 
 
 def _authenticated_release_operator() -> Any:
@@ -2379,27 +2460,29 @@ def _artifact_origin_report_sha256(
     return hashlib.sha256(raw).hexdigest(), str(value["tooling_modules_sha256"])
 
 
-def _test_tooling_site(repo_root: Path, release_root: Path) -> Path:
+def _test_tooling_site(repo_root: Path, release_root: Path | None) -> Path:
     """Locate tooling explicitly in the producer venv without importing ``site``."""
 
     source = _resolve_directory(repo_root, "test_tooling_invalid")
-    release = _resolve_directory(release_root, "test_tooling_invalid")
+    release = None if release_root is None else _resolve_directory(release_root, "test_tooling_invalid")
     try:
-        root = Path(sysconfig.get_path("purelib"))
+        root = (
+            Path(sysconfig.get_path("purelib"))
+            if _NATIVE_VALIDATION_TOOLING_SITE is None
+            else _NATIVE_VALIDATION_TOOLING_SITE
+        )
         if root.resolve(strict=True) != root or not stat.S_ISDIR(root.lstat().st_mode):
             raise ExactReleaseEvidenceError("test_tooling_invalid")
         for name in _TEST_TOOLING_MODULES:
             spec = importlib.machinery.PathFinder.find_spec(name, [str(root)])
-            if spec is None or spec.origin in {None, "built-in", "frozen"}:
+            raw_origin = None if spec is None else spec.origin
+            if type(raw_origin) is not str or raw_origin in {"built-in", "frozen"}:
                 raise ExactReleaseEvidenceError("test_tooling_invalid")
-            origin = Path(spec.origin)
+            assert spec is not None
+            origin = Path(raw_origin)
             resolved_origin = origin.resolve(strict=True)
             locations = tuple(spec.submodule_search_locations or ())
-            if (
-                origin != resolved_origin
-                or not stat.S_ISREG(origin.lstat().st_mode)
-                or len(locations) != 1
-            ):
+            if origin != resolved_origin or not stat.S_ISREG(origin.lstat().st_mode) or len(locations) != 1:
                 raise ExactReleaseEvidenceError("test_tooling_invalid")
             package = Path(locations[0])
             resolved_package = package.resolve(strict=True)
@@ -2418,11 +2501,13 @@ def _test_tooling_site(repo_root: Path, release_root: Path) -> Path:
         raise ExactReleaseEvidenceError("test_tooling_invalid") from exc
     try:
         if (
-            root in (source, release)
+            root == source
             or root.is_relative_to(source)
             or source.is_relative_to(root)
-            or root.is_relative_to(release)
-            or release.is_relative_to(root)
+            or (
+                release is not None
+                and (root == release or root.is_relative_to(release) or release.is_relative_to(root))
+            )
         ):
             raise ExactReleaseEvidenceError("test_tooling_invalid")
     except (OSError, RuntimeError, ValueError) as exc:
@@ -2720,8 +2805,11 @@ def _run_closed_pytest(
     evidence_class: str,
     *,
     require_running_producer: bool = True,
+    require_isolated_startup: bool = True,
     release_runtime: _AuthenticatedReleaseRuntime | None = None,
 ) -> _ExecutionWitness:
+    if signal.getsignal(signal.SIGCHLD) != signal.SIG_DFL:
+        raise ExactReleaseEvidenceError("child_process_authority_invalid")
     nodeids = proof_refs(journey_id, evidence_class)
     clean_artifact = evidence_class == _CLEAN_ARTIFACT_CLASS
     if clean_artifact:
@@ -2730,6 +2818,8 @@ def _run_closed_pytest(
         raise ExactReleaseEvidenceError("release_runtime_unexpected")
     else:
         runtime = None
+    if clean_artifact and not require_isolated_startup:
+        raise ExactReleaseEvidenceError("producer_process_authority_invalid")
     source_tooling_site: Path | None = None
     _require_exact_checkout(repo_root, identity.source_commit)
     _source_proofs(
@@ -2739,11 +2829,13 @@ def _run_closed_pytest(
         evidence_class,
         require_running_producer=require_running_producer,
     )
-    gate = _authenticated_quality_gate()
+    gate = _authenticated_quality_gate(require_isolated_startup=require_isolated_startup)
     quality_gate_sha256 = getattr(gate, "__authenticated_source_sha256__", None)
+    authenticated_gate_sha256: str | None = None
     if runtime is not None:
         if type(quality_gate_sha256) is not str or _SHA256.fullmatch(quality_gate_sha256) is None:
             raise ExactReleaseEvidenceError("producer_helper_invalid")
+        authenticated_gate_sha256 = quality_gate_sha256
         source_tooling_site = _test_tooling_site(repo_root, runtime.root)
     run_error: BaseException | None = None
     result: subprocess.CompletedProcess[bytes] | None = None
@@ -2760,6 +2852,7 @@ def _run_closed_pytest(
             collection = scratch / "collection.json"
             python_cache = scratch / "python-cache"
             origin_report = scratch / "artifact-origin.json"
+            bootstrap: tuple[str, ...]
             if runtime is None:
                 bootstrap = (_PYTEST_BOOTSTRAP, str(repo_root))
                 artifact_options: tuple[str, ...] = ()
@@ -2767,6 +2860,7 @@ def _run_closed_pytest(
                 tooling_projection: tuple[dict[str, object], ...] = ()
             else:
                 assert source_tooling_site is not None
+                assert authenticated_gate_sha256 is not None
                 tooling_site, tooling_projection = _snapshot_test_tooling(
                     source_tooling_site,
                     scratch,
@@ -2780,7 +2874,7 @@ def _run_closed_pytest(
                     runtime.site_packages_ref,
                     runtime.interpreter_ref,
                     str(tooling_site),
-                    quality_gate_sha256,
+                    authenticated_gate_sha256,
                     str(origin_report),
                     identity.source_commit,
                     identity.wheel_sha256,
@@ -2788,7 +2882,7 @@ def _run_closed_pytest(
                 artifact_options = ("-o", "pythonpath=", "--import-mode=importlib")
             with gate._isolated_test_environment() as environment:  # noqa: SLF001
                 executable = sys.executable
-                interpreter_options = ("-I",)
+                interpreter_options: tuple[str, ...] = ("-I",)
                 if runtime is not None:
                     executable = str(runtime.interpreter)
                     interpreter_options = ("-I", "-S", "-B")
@@ -2853,6 +2947,7 @@ def _run_closed_pytest(
             collection_sha256 = hashlib.sha256(collection_raw).hexdigest()
             outcome_projection_sha256 = _outcome_projection_sha256(nodeids, outcomes)
             if runtime is not None:
+                assert tooling_site is not None
                 artifact_origin_sha256, tooling_modules_sha256 = _artifact_origin_report_sha256(
                     origin_report,
                     runtime,
@@ -2991,6 +3086,7 @@ def _validate_receipt(
     authenticated_owner_smoke: AuthenticatedOwnerSmokeBinding | None = None,
     execution_witness: _ExecutionWitness | None = None,
     require_running_producer: bool = True,
+    require_isolated_startup: bool = True,
     release_runtime: _AuthenticatedReleaseRuntime | None = None,
 ) -> dict[str, Any]:
     """Validate against external release and already-authenticated owner roots.
@@ -3122,6 +3218,7 @@ def _validate_receipt(
             expected_journey_id,
             expected_evidence_class,
             require_running_producer=require_running_producer,
+            require_isolated_startup=require_isolated_startup,
         )
     elif execution_witness is None:
         witness = _run_closed_pytest(
@@ -3130,10 +3227,12 @@ def _validate_receipt(
             expected_journey_id,
             expected_evidence_class,
             require_running_producer=require_running_producer,
+            require_isolated_startup=require_isolated_startup,
             release_runtime=runtime,
         )
     else:
         witness = execution_witness
+    artifact_binding = artifact_import if isinstance(artifact_import, dict) else {}
     witness = _require_execution_witness(witness)
     if (
         tuple(outcomes) != witness.outcomes
@@ -3144,13 +3243,13 @@ def _validate_receipt(
         or (
             clean_artifact
             and (
-                witness.artifact_origin_sha256 != artifact_import.get("origin_report_sha256")
-                or witness.interpreter_ref != artifact_import.get("interpreter_ref")
-                or witness.site_packages_ref != artifact_import.get("site_packages_ref")
-                or witness.subprocess_policy != artifact_import.get("subprocess_policy")
-                or witness.tooling_modules_sha256 != artifact_import.get("tooling_modules_sha256")
-                or witness.tooling_policy != artifact_import.get("tooling_policy")
-                or witness.tooling_snapshot_sha256 != artifact_import.get("tooling_snapshot_sha256")
+                witness.artifact_origin_sha256 != artifact_binding.get("origin_report_sha256")
+                or witness.interpreter_ref != artifact_binding.get("interpreter_ref")
+                or witness.site_packages_ref != artifact_binding.get("site_packages_ref")
+                or witness.subprocess_policy != artifact_binding.get("subprocess_policy")
+                or witness.tooling_modules_sha256 != artifact_binding.get("tooling_modules_sha256")
+                or witness.tooling_policy != artifact_binding.get("tooling_policy")
+                or witness.tooling_snapshot_sha256 != artifact_binding.get("tooling_snapshot_sha256")
             )
         )
         or (
@@ -3188,6 +3287,7 @@ def validate_receipt(
     if expected_evidence_class == _CLEAN_ARTIFACT_CLASS:
         if release_root is None:
             raise ExactReleaseEvidenceError("release_runtime_required")
+        _require_native_validation_context()
         runtime = _authenticate_release_runtime(release_root)
         if runtime.identity != expected_release:
             raise ExactReleaseEvidenceError("release_identity_mismatch")
@@ -3208,6 +3308,7 @@ def validate_receipt(
             repo_root=source_root,
             authenticated_owner_smoke=authenticated_owner_smoke,
             require_running_producer=require_running_producer,
+            require_isolated_startup=expected_evidence_class == _CLEAN_ARTIFACT_CLASS,
             release_runtime=runtime,
         )
 
@@ -3307,7 +3408,32 @@ def _isolated_validation_failure_code(raw: bytes) -> str | None:
     return failure_code
 
 
-def _validation_controller_identity(repo_root: Path) -> tuple[Path, str]:
+def _same_validation_status(left: os.stat_result, right: os.stat_result) -> bool:
+    return all(getattr(left, field) == getattr(right, field) for field in _TRUSTED_GIT_STATUS_FIELDS)
+
+
+def _require_native_validation_context() -> None:
+    try:
+        target = Path(_NATIVE_VALIDATION_INTERPRETER_ARGV0)
+        descriptor_status = os.fstat(_NATIVE_VALIDATION_INTERPRETER_FD)
+        if (
+            _NATIVE_VALIDATION_INTERPRETER_FD < 0
+            or not target.is_absolute()
+            or target.resolve(strict=True) != target
+            or sys.executable != str(target)
+            or not _same_validation_status(descriptor_status, target.lstat())
+            or not _same_validation_status(descriptor_status, os.stat("/proc/self/exe"))
+        ):
+            raise ExactReleaseEvidenceError("native_validation_context_invalid")
+    except (OSError, RuntimeError, TypeError, ValueError) as exc:
+        if isinstance(exc, ExactReleaseEvidenceError):
+            raise
+        raise ExactReleaseEvidenceError("native_validation_context_invalid") from exc
+
+
+def _validation_origin_identity(repo_root: Path) -> tuple[Path, str]:
+    """Bind tracked origin bytes; ignored tooling is excluded by the private clone."""
+
     root = _resolve_directory(repo_root, "repo_root_invalid")
     try:
         head = _git(root, "rev-parse", "--verify", "HEAD^{commit}").decode("ascii").strip()
@@ -3315,9 +3441,235 @@ def _validation_controller_identity(repo_root: Path) -> tuple[Path, str]:
         raise ExactReleaseEvidenceError("git_identity_unavailable") from exc
     if _COMMIT.fullmatch(head) is None:
         raise ExactReleaseEvidenceError("git_identity_unavailable")
-    _require_exact_checkout(root, head)
+    if _git(root, "status", "--porcelain=v1", "-z", "--untracked-files=all"):
+        raise ExactReleaseEvidenceError("checkout_not_exact_clean_commit")
     _require_running_producer(root, head)
     return root, head
+
+
+def _private_validation_checkout(origin: Path, head: str, scratch: Path) -> Path:
+    controller = scratch / "controller"
+    git_options = ("-c", "core.hooksPath=/dev/null")
+    clone_options = (*git_options, "clone", "--quiet", "--shared", "--no-checkout", "--")
+    _git(origin, *clone_options, str(origin), str(controller))
+    _git(controller, *git_options, "checkout", "--quiet", "--detach", head)
+    os.chmod(controller / PRODUCER_PATH, 0o400, follow_symlinks=False)
+    _require_exact_checkout(controller, head)
+    return controller
+
+
+def _canonical_validation_python_version(repo_root: Path, head: str) -> str:
+    raw = _exact_git_blob(repo_root, head, "tools/quality_toolchain_preflight.py")
+    matches = re.findall(
+        rb"(?m)^REQUIRED_PYTHON = \(([0-9]+), ([0-9]+), ([0-9]+)\)$",
+        raw,
+    )
+    version = tuple(int(part) for part in matches[0]) if len(matches) == 1 else ()
+    if len(version) != 3 or tuple(sys.version_info[:3]) != version:
+        raise ExactReleaseEvidenceError("validation_controller_invalid")
+    return ".".join(str(part) for part in version)
+
+
+def _validation_runtime_directories(target: Path, stdlib: Path) -> tuple[tuple[Path, os.stat_result], ...]:
+    lib_dynload = stdlib / "lib-dynload"
+    runtime_anchor = Path(os.path.commonpath((target.parent, stdlib))).resolve(strict=True)
+    paths = tuple(dict.fromkeys((*target.parents, stdlib, lib_dynload, *stdlib.parents)))
+    try:
+        values = tuple((path, path.lstat()) for path in paths)
+    except OSError as exc:
+        raise ExactReleaseEvidenceError("validation_controller_invalid") from exc
+    if any(
+        path.resolve(strict=True) != path
+        or not stat.S_ISDIR(value.st_mode)
+        or (
+            (path == runtime_anchor or path.is_relative_to(runtime_anchor))
+            and (value.st_uid not in {0, os.geteuid()} or value.st_mode & 0o022)
+        )
+        for path, value in values
+    ):
+        raise ExactReleaseEvidenceError("validation_controller_invalid")
+    return values
+
+
+def _validation_python_zip_status(stdlib: Path) -> tuple[Path, os.stat_result | None]:
+    path = stdlib.parent / f"python{sys.version_info.major}{sys.version_info.minor}.zip"
+    try:
+        value = path.lstat()
+    except FileNotFoundError:
+        if os.path.lexists(path):
+            raise ExactReleaseEvidenceError("validation_controller_invalid") from None
+        return path, None
+    if (
+        path.resolve(strict=True) != path
+        or not stat.S_ISREG(value.st_mode)
+        or value.st_uid not in {0, os.geteuid()}
+        or value.st_mode & 0o022
+    ):
+        raise ExactReleaseEvidenceError("validation_controller_invalid")
+    return path, value
+
+
+def _open_validation_interpreter() -> tuple[
+    int,
+    Path,
+    os.stat_result,
+    tuple[tuple[Path, os.stat_result], ...],
+    Path,
+    tuple[Path, os.stat_result | None],
+]:
+    descriptor = -1
+    try:
+        lexical = Path(_INITIAL_PRODUCER_EXECUTABLE)
+        target = lexical.resolve(strict=True)
+        target_before = target.lstat()
+        descriptor = os.open(
+            target,
+            os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW,
+        )
+        opened = os.fstat(descriptor)
+        stdlib = Path(sysconfig.get_path("stdlib")).resolve(strict=True)
+        directories = _validation_runtime_directories(target, stdlib)
+        python_zip = _validation_python_zip_status(stdlib)
+        if (
+            sys.executable != _INITIAL_PRODUCER_EXECUTABLE
+            or not lexical.is_absolute()
+            or target.resolve(strict=True) != target
+            or not stat.S_ISREG(target_before.st_mode)
+            or target_before.st_nlink != 1
+            or target_before.st_uid not in {0, os.geteuid()}
+            or target_before.st_mode & 0o022
+            or not target_before.st_mode & 0o111
+            or not _same_validation_status(target_before, opened)
+            or not _same_validation_status(opened, os.stat("/proc/self/exe"))
+        ):
+            raise ExactReleaseEvidenceError("validation_controller_invalid")
+        return descriptor, target, opened, directories, stdlib, python_zip
+    except (OSError, RuntimeError, TypeError, ValueError) as exc:
+        if descriptor >= 0:
+            with suppress(OSError):
+                os.close(descriptor)
+        if isinstance(exc, ExactReleaseEvidenceError):
+            raise
+        raise ExactReleaseEvidenceError("validation_controller_invalid") from exc
+
+
+def _open_validation_producer(controller: Path, head: str) -> tuple[int, os.stat_result, bytes, str]:
+    path = controller / PRODUCER_PATH
+    descriptor = -1
+    try:
+        expected = _exact_git_blob(controller, head, PRODUCER_PATH)
+        before = path.lstat()
+        descriptor = os.open(
+            path,
+            os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW,
+        )
+        opened = os.fstat(descriptor)
+        raw = _read_validation_descriptor(descriptor, 1 << 20)
+        after = os.fstat(descriptor)
+        if (
+            path.resolve(strict=True) != path
+            or not stat.S_ISREG(before.st_mode)
+            or before.st_nlink != 1
+            or before.st_uid != os.geteuid()
+            or before.st_mode & 0o022
+            or not _same_validation_status(before, opened)
+            or not _same_validation_status(opened, after)
+            or raw != expected
+        ):
+            raise ExactReleaseEvidenceError("validation_controller_invalid")
+        return descriptor, before, expected, hashlib.sha256(expected).hexdigest()
+    except (OSError, RuntimeError, TypeError, ValueError) as exc:
+        if descriptor >= 0:
+            with suppress(OSError):
+                os.close(descriptor)
+        if isinstance(exc, ExactReleaseEvidenceError):
+            raise
+        raise ExactReleaseEvidenceError("validation_controller_invalid") from exc
+
+
+def _read_validation_descriptor(descriptor: int, maximum_bytes: int) -> bytes:
+    os.lseek(descriptor, 0, os.SEEK_SET)
+    chunks: list[bytes] = []
+    remaining = maximum_bytes + 1
+    while remaining:
+        chunk = os.read(descriptor, min(1 << 20, remaining))
+        if not chunk:
+            break
+        chunks.append(chunk)
+        remaining -= len(chunk)
+    os.lseek(descriptor, 0, os.SEEK_SET)
+    return b"".join(chunks)
+
+
+def _kill_validation_process_group(process: subprocess.Popen[bytes]) -> None:
+    try:
+        os.killpg(process.pid, signal.SIGKILL)
+    except ProcessLookupError:
+        pass
+    except OSError as exc:
+        raise ExactReleaseEvidenceError("isolated_receipt_validation_failed") from exc
+    try:
+        process.wait(timeout=VALIDATION_TERMINATION_GRACE_SECONDS)
+    except subprocess.TimeoutExpired as exc:
+        raise ExactReleaseEvidenceError("isolated_receipt_validation_failed") from exc
+
+
+def _run_validation_controller(
+    command: tuple[str, ...],
+    *,
+    cwd: Path,
+    environment: dict[str, str],
+    raw: bytes,
+    interpreter_descriptor: int,
+    producer_descriptor: int,
+) -> subprocess.CompletedProcess[bytes]:
+    output_root = Path(environment["TMPDIR"])
+    try:
+        with (
+            tempfile.TemporaryFile(dir=output_root) as input_file,
+            tempfile.TemporaryFile(dir=output_root) as output_file,
+            tempfile.TemporaryFile(dir=output_root) as error_file,
+        ):
+            input_file.write(raw)
+            input_file.seek(0)
+            process = subprocess.Popen(  # noqa: S603 - exact O_NOFOLLOW interpreter descriptor
+                command,
+                executable=f"/proc/self/fd/{interpreter_descriptor}",
+                cwd=cwd,
+                env=environment,
+                stdin=input_file,
+                stdout=output_file,
+                stderr=error_file,
+                start_new_session=True,
+                pass_fds=(interpreter_descriptor, producer_descriptor),
+            )
+            pidfd = -1
+            try:
+                pidfd = os.pidfd_open(process.pid, 0)
+                finished, _writeable, _exceptional = select.select(
+                    (pidfd,),
+                    (),
+                    (),
+                    VALIDATION_TIMEOUT_SECONDS,
+                )
+            except BaseException:
+                with suppress(ExactReleaseEvidenceError):
+                    _kill_validation_process_group(process)
+                raise
+            finally:
+                if pidfd >= 0:
+                    os.close(pidfd)
+            if not finished:
+                _kill_validation_process_group(process)
+                raise subprocess.TimeoutExpired(command, VALIDATION_TIMEOUT_SECONDS)
+            _kill_validation_process_group(process)
+            output_file.seek(0)
+            error_file.seek(0)
+            stdout = output_file.read(4097)
+            stderr = error_file.read(4097)
+    except OSError as exc:
+        raise ExactReleaseEvidenceError("isolated_receipt_validation_failed") from exc
+    return subprocess.CompletedProcess(command, process.returncode, stdout=stdout, stderr=stderr)
 
 
 def _isolated_validation_environment(scratch: Path) -> dict[str, str]:
@@ -3360,111 +3712,156 @@ def validate_receipt_via_native_controller(
 ) -> dict[str, Any]:
     """Validate through one exact stdlib-only controller from a native gate."""
 
+    if expected_evidence_class != _CLEAN_ARTIFACT_CLASS or release_root is None:
+        raise ExactReleaseEvidenceError("native_validation_scope_invalid")
+    if (
+        _NATIVE_VALIDATION_TOOLING_SITE is not None
+        or _NATIVE_VALIDATION_INTERPRETER_FD != -1
+        or _NATIVE_VALIDATION_INTERPRETER_ARGV0
+        or signal.getsignal(signal.SIGCHLD) != signal.SIG_DFL
+    ):
+        raise ExactReleaseEvidenceError("validation_controller_invalid")
     receipt = _load_canonical_receipt(raw)
+    bound_release_root = _resolve_directory(release_root, "release_runtime_invalid")
     request = _validation_request(
         raw,
         expected_release=expected_release,
         expected_journey_id=expected_journey_id,
         expected_evidence_class=expected_evidence_class,
-        release_root=release_root,
+        release_root=bound_release_root,
     )
-    root, head = _validation_controller_identity(repo_root)
-    producer = root / PRODUCER_PATH
-    try:
-        executable = Path(_INITIAL_PRODUCER_EXECUTABLE)
-        executable_before = executable.lstat()
-        executable_target = executable.resolve(strict=True)
-        target_before = executable_target.lstat()
-        if (
-            sys.executable != _INITIAL_PRODUCER_EXECUTABLE
-            or not executable.is_absolute()
-            or not stat.S_ISREG(target_before.st_mode)
-            or not target_before.st_mode & 0o111
-        ):
-            raise ExactReleaseEvidenceError("validation_controller_invalid")
-    except (OSError, RuntimeError, TypeError, ValueError) as exc:
-        if isinstance(exc, ExactReleaseEvidenceError):
-            raise
-        raise ExactReleaseEvidenceError("validation_controller_invalid") from exc
-
-    command = [
-        str(executable),
-        "-I",
-        "-S",
-        "-B",
-        "-c",
-        _ISOLATED_VALIDATION_BOOTSTRAP,
-        str(producer),
-        "validate",
-        "--repo-root",
-        str(root),
-        "--expected-source-commit",
-        expected_release.source_commit,
-        "--expected-tree-sha256",
-        expected_release.tree_sha256,
-        "--expected-wheel-sha256",
-        expected_release.wheel_sha256,
-        "--expected-database-schema",
-        str(expected_release.database_schema),
-        "--journey-id",
-        expected_journey_id,
-        "--evidence-class",
-        expected_evidence_class,
-    ]
-    if release_root is not None:
-        command.extend(("--release-root", str(release_root)))
-
+    origin, head = _validation_origin_identity(repo_root)
+    interpreter_descriptor = -1
+    producer_descriptor = -1
     completed: subprocess.CompletedProcess[bytes] | None = None
     run_error: BaseException | None = None
     try:
-        with tempfile.TemporaryDirectory(
-            prefix="friday-native-validation-",
-            dir="/var/tmp",
-        ) as temporary:
+        (
+            interpreter_descriptor,
+            executable_target,
+            target_before,
+            runtime_directories,
+            validation_stdlib,
+            python_zip_before,
+        ) = _open_validation_interpreter()
+        with tempfile.TemporaryDirectory(prefix="friday-native-validation-", dir="/var/tmp") as temporary:
             scratch = Path(temporary).resolve(strict=True)
             scratch.chmod(0o700)
             environment = _isolated_validation_environment(scratch)
-            completed = subprocess.run(
-                tuple(command),
-                cwd=root,
-                env=environment,
-                input=raw,
-                capture_output=True,
-                check=False,
-                timeout=VALIDATION_TIMEOUT_SECONDS,
+            controller = _private_validation_checkout(origin, head, scratch)
+            python_version = _canonical_validation_python_version(controller, head)
+            tooling_site = _test_tooling_site(controller, bound_release_root)
+            (
+                producer_descriptor,
+                producer_before,
+                producer_expected,
+                producer_sha256,
+            ) = _open_validation_producer(controller, head)
+            producer = controller / PRODUCER_PATH
+            command = (
+                str(executable_target),
+                "-I",
+                "-S",
+                "-B",
+                "-c",
+                _ISOLATED_VALIDATION_BOOTSTRAP,
+                str(interpreter_descriptor),
+                str(producer_descriptor),
+                str(producer),
+                producer_sha256,
+                str(executable_target),
+                python_version,
+                str(validation_stdlib),
+                str(tooling_site),
+                str(os.getpid()),
+                "validate",
+                "--repo-root",
+                str(controller),
+                "--release-root",
+                str(bound_release_root),
+                "--expected-source-commit",
+                expected_release.source_commit,
+                "--expected-tree-sha256",
+                expected_release.tree_sha256,
+                "--expected-wheel-sha256",
+                expected_release.wheel_sha256,
+                "--expected-database-schema",
+                str(expected_release.database_schema),
+                "--journey-id",
+                expected_journey_id,
+                "--evidence-class",
+                expected_evidence_class,
             )
+            try:
+                completed = _run_validation_controller(
+                    command,
+                    cwd=controller,
+                    environment=environment,
+                    raw=raw,
+                    interpreter_descriptor=interpreter_descriptor,
+                    producer_descriptor=producer_descriptor,
+                )
+            finally:
+                _require_exact_checkout(controller, head)
+                producer_after = os.fstat(producer_descriptor)
+                producer_raw = _read_validation_descriptor(producer_descriptor, 1 << 20)
+                if (
+                    not _same_validation_status(producer_before, producer_after)
+                    or not _same_validation_status(producer_after, producer.lstat())
+                    or producer_raw != producer_expected
+                ):
+                    raise ExactReleaseEvidenceError("validation_controller_invalid")
     except (OSError, RuntimeError, subprocess.SubprocessError) as exc:
         run_error = exc
     finally:
-        _require_exact_checkout(root, head)
-        _require_running_producer(root, head)
-        try:
-            executable_after = executable.lstat()
-            target_after = executable_target.lstat()
-        except OSError as exc:
-            raise ExactReleaseEvidenceError("validation_controller_invalid") from exc
-        stable_fields = (
-            "st_dev",
-            "st_ino",
-            "st_mode",
-            "st_nlink",
-            "st_uid",
-            "st_gid",
-            "st_size",
-            "st_mtime_ns",
-            "st_ctime_ns",
-        )
-        if any(
-            getattr(before, field) != getattr(after, field)
-            for before, after in (
-                (executable_before, executable_after),
-                (target_before, target_after),
-            )
-            for field in stable_fields
-        ):
-            raise ExactReleaseEvidenceError("validation_controller_invalid")
-    if run_error is not None or completed is None:
+        if producer_descriptor >= 0:
+            with suppress(OSError):
+                os.close(producer_descriptor)
+        if interpreter_descriptor >= 0:
+            try:
+                current_directories = _validation_runtime_directories(
+                    executable_target,
+                    validation_stdlib,
+                )
+                python_zip_after = _validation_python_zip_status(validation_stdlib)
+                if (
+                    not _same_validation_status(target_before, executable_target.lstat())
+                    or not _same_validation_status(target_before, os.fstat(interpreter_descriptor))
+                    or not _same_validation_status(target_before, os.stat("/proc/self/exe"))
+                    or len(runtime_directories) != len(current_directories)
+                    or python_zip_before[0] != python_zip_after[0]
+                    or (
+                        (python_zip_before[1] is None) != (python_zip_after[1] is None)
+                        or (
+                            python_zip_before[1] is not None
+                            and python_zip_after[1] is not None
+                            and not _same_validation_status(
+                                python_zip_before[1],
+                                python_zip_after[1],
+                            )
+                        )
+                    )
+                    or any(
+                        before_path != after_path or not _same_validation_status(before, after)
+                        for (before_path, before), (after_path, after) in zip(
+                            runtime_directories,
+                            current_directories,
+                            strict=True,
+                        )
+                    )
+                ):
+                    raise ExactReleaseEvidenceError("validation_controller_invalid")
+            except (OSError, RuntimeError) as exc:
+                raise ExactReleaseEvidenceError("validation_controller_invalid") from exc
+            finally:
+                with suppress(OSError):
+                    os.close(interpreter_descriptor)
+    if run_error is not None:
+        if isinstance(run_error, ExactReleaseEvidenceError):
+            raise run_error
         raise ExactReleaseEvidenceError("isolated_receipt_validation_failed") from run_error
+    if completed is None:
+        raise ExactReleaseEvidenceError("isolated_receipt_validation_failed")
     if completed.returncode != 0 or completed.stderr:
         failure_code = _isolated_validation_failure_code(completed.stdout)
         if completed.stderr or failure_code is None:
@@ -3631,6 +4028,8 @@ def _authenticate_release_runtime(release_root: Path) -> _AuthenticatedReleaseRu
         site_packages_ref = site_packages.relative_to(root).as_posix()
     except (OSError, TypeError, ValueError, RuntimeError) as exc:
         if isinstance(exc, ExactReleaseEvidenceError):
+            if str(exc) == "release_artifact_invalid":
+                raise ExactReleaseEvidenceError("release_identity_invalid") from exc
             raise
         raise ExactReleaseEvidenceError("release_runtime_invalid") from exc
     return _AuthenticatedReleaseRuntime(
@@ -3980,9 +4379,7 @@ def _trusted_bundle_parent(value: os.stat_result) -> bool:
     mode = stat.S_IMODE(value.st_mode)
     trusted_private = value.st_uid == os.geteuid() and mode == 0o700
     trusted_sticky = (
-        bool(value.st_mode & stat.S_ISVTX)
-        and value.st_uid in {0, os.geteuid()}
-        and bool(mode & 0o002)
+        bool(value.st_mode & stat.S_ISVTX) and value.st_uid in {0, os.geteuid()} and bool(mode & 0o002)
     )
     return stat.S_ISDIR(value.st_mode) and (trusted_private or trusted_sticky)
 
@@ -3996,8 +4393,10 @@ def _open_absolute_directory_chain(
     current = -1
     identities: list[tuple[int, int]] = []
     try:
-        if not value.is_absolute() or value.anchor != os.sep or any(
-            part in {"", ".", ".."} for part in parts
+        if (
+            not value.is_absolute()
+            or value.anchor != os.sep
+            or any(part in {"", ".", ".."} for part in parts)
         ):
             raise ExactReleaseEvidenceError("bundle_output_invalid")
         current = os.open(os.sep, _directory_open_flags())
@@ -4010,10 +4409,7 @@ def _open_absolute_directory_chain(
             try:
                 opened = os.fstat(child)
                 named = os.stat(part, dir_fd=current, follow_symlinks=False)
-                if (
-                    not stat.S_ISDIR(opened.st_mode)
-                    or _status_identity(opened) != _status_identity(named)
-                ):
+                if not stat.S_ISDIR(opened.st_mode) or _status_identity(opened) != _status_identity(named):
                     raise ExactReleaseEvidenceError("bundle_output_invalid")
                 identities.append(_status_identity(opened))
             except BaseException:
@@ -4343,11 +4739,7 @@ def _durably_remove_owned_manifest_at(
     try:
         current = _leaf_status_at(parent_descriptor, name)
         if current is not None:
-            if (
-                identity is None
-                or not stat.S_ISREG(current.st_mode)
-                or _status_identity(current) != identity
-            ):
+            if identity is None or not stat.S_ISREG(current.st_mode) or _status_identity(current) != identity:
                 return False
             os.unlink(name, dir_fd=parent_descriptor)
         if _leaf_status_at(parent_descriptor, name) is not None:
@@ -4531,9 +4923,7 @@ def _require_exact_existing_bundle_file_at(parent_descriptor: int, name: str, ra
         named = os.stat(name, dir_fd=parent_descriptor, follow_symlinks=False)
         if (
             verified != raw
-            or any(
-                getattr(before_fsync, field) != getattr(after_verify, field) for field in stable
-            )
+            or any(getattr(before_fsync, field) != getattr(after_verify, field) for field in stable)
             or _status_identity(named) != validated_identity
         ):
             raise ExactReleaseEvidenceError("bundle_output_invalid")
@@ -4717,7 +5107,7 @@ def build_parser() -> argparse.ArgumentParser:
     commands = parser.add_subparsers(dest="command", required=True)
     validate = commands.add_parser("validate")
     validate.add_argument("--repo-root", required=True, type=Path)
-    validate.add_argument("--release-root", type=Path)
+    validate.add_argument("--release-root", required=True, type=Path)
     validate.add_argument("--expected-source-commit", required=True)
     validate.add_argument("--expected-tree-sha256", required=True)
     validate.add_argument("--expected-wheel-sha256", required=True)
@@ -4725,12 +5115,16 @@ def build_parser() -> argparse.ArgumentParser:
     validate.add_argument(
         "--journey-id",
         required=True,
-        choices=sorted({key[0] for key in _PROOF_REFS_BY_JOURNEY_CLASS}),
+        choices=sorted(
+            journey_id
+            for journey_id, evidence_class in _PROOF_REFS_BY_JOURNEY_CLASS
+            if evidence_class == _CLEAN_ARTIFACT_CLASS
+        ),
     )
     validate.add_argument(
         "--evidence-class",
         required=True,
-        choices=sorted({key[1] for key in _PROOF_REFS_BY_JOURNEY_CLASS}),
+        choices=(_CLEAN_ARTIFACT_CLASS,),
     )
     run = commands.add_parser("run")
     run.add_argument("--release-root", required=True, type=Path)
@@ -4765,6 +5159,9 @@ def main(argv: list[str] | None = None) -> int:
         _require_producer_process_authority()
         args = build_parser().parse_args(argv)
         if args.command == "validate":
+            if args.evidence_class != _CLEAN_ARTIFACT_CLASS or args.release_root is None:
+                raise ExactReleaseEvidenceError("native_validation_scope_invalid")
+            _require_native_validation_context()
             raw = sys.stdin.buffer.read(65_537)
             expected_release = ReleaseIdentity(
                 source_commit=args.expected_source_commit,

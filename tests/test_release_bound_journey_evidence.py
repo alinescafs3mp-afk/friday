@@ -1030,7 +1030,7 @@ def test_closed_clean_runner_binds_the_installed_bootstrap_and_origin_report(
         lambda *_args, **_kwargs: ("f" * 64, []),
     )
     monkeypatch.setattr(evidence, "_reauthenticate_release_runtime", lambda *_args: None)
-    monkeypatch.setattr(evidence, "_authenticated_quality_gate", lambda: quality_gate)
+    monkeypatch.setattr(evidence, "_authenticated_quality_gate", lambda **_kwargs: quality_gate)
     monkeypatch.setattr(
         quality_gate,
         "__authenticated_source_sha256__",
