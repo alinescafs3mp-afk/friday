@@ -635,6 +635,31 @@ def test_plan_is_deterministic_and_never_mutates_inventory(synthetic_inventory: 
     assert synthetic_inventory["unit_journal"].read_bytes() == unit_before
 
 
+def test_plan_reauthenticates_backup_without_engineer_scratch_mutation(
+    synthetic_inventory: dict[str, Any],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    original = operator.DurableActivationJournal.database_backup
+    integrity_modes: list[bool] = []
+
+    def observe(
+        journal: operator.DurableActivationJournal,
+        *,
+        verify_engineer_sqlite_integrity: bool = True,
+    ) -> operator.DatabaseBackup | None:
+        integrity_modes.append(verify_engineer_sqlite_integrity)
+        return original(
+            journal,
+            verify_engineer_sqlite_integrity=verify_engineer_sqlite_integrity,
+        )
+
+    monkeypatch.setattr(operator.DurableActivationJournal, "database_backup", observe)
+
+    _plan(synthetic_inventory)
+
+    assert integrity_modes == [False, False]
+
+
 def test_open_reference_and_incomplete_default_both_fail_closed(synthetic_inventory: dict[str, Any]) -> None:
     open_plan = _plan(synthetic_inventory, open_paths=(synthetic_inventory["old"].identity.root,))
     open_old = next(item for item in open_plan["targets"] if Path(item["path"]).name == "old")

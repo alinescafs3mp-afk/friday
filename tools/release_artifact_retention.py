@@ -411,7 +411,10 @@ def _read_activation_journal(path: Path, backup_root: Path) -> _JournalResult:
         if state != expected_state:
             raise RetentionPlanError("activation_journal_invalid")
         raw_backup = state.get("backup")
-        verified_backup = journal.database_backup()
+        # Classification is strictly observational.  Re-authenticate the exact
+        # durable receipts without creating the Engineer SQLite scratch copy
+        # used by activation-time integrity verification.
+        verified_backup = journal.database_backup(verify_engineer_sqlite_integrity=False)
         activation_backup: dict[str, Any] | None = None
         if raw_backup is None:
             if verified_backup is not None:
