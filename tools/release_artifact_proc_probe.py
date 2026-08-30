@@ -2,10 +2,11 @@
 """Fail-closed, target-scoped Linux proc reference observation.
 
 This module is deliberately read-only.  It does not publish receipts, rename
-artifacts, or delete anything.  A ``clear`` result means only that two bounded,
-identical observations found no reference to the supplied inode set in the
-namespace-visible Linux proc surfaces covered here.  It is not a universal
-kernel open-object proof.
+artifacts, adapt results into a retention ``OpenInventorySnapshot``, or delete
+anything.  A ``clear`` result means only that two bounded, identical diagnostic
+observations found no reference to the supplied inode set in the
+namespace-visible Linux proc surfaces covered here.  It is neither a universal
+kernel open-object proof nor deletion authority.
 """
 
 from __future__ import annotations
@@ -23,13 +24,19 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-TARGET_INDEX_SCHEMA = "friday.release-artifact-proc-target-index.v1"
-PROBE_RECEIPT_SCHEMA = "friday.release-artifact-proc-reference-receipt.v1"
+TARGET_INDEX_SCHEMA = "friday.release-artifact-proc-target-index.v2"
+PROBE_RECEIPT_SCHEMA = "friday.release-artifact-proc-reference-receipt.v2"
 PROBE_SCOPE = "namespace_visible_proc_references"
+PROBE_AUTHORITY = "diagnostic_only"
+_SHARED_MM_PROOF_KIND = "linux_tgid_membership_plus_exact_maps_and_exe.v1"
 
 MAX_TARGETS = 4_096
 MAX_TARGET_OBJECTS = 1_000_000
+MAX_TARGET_ROOTS = 65_536
+MAX_TARGET_ROOT_BYTES = 4_096
+MAX_TARGET_INDEX_BYTES = 64 << 20
 MAX_PIDS = 131_072
+MAX_TASKS = 262_144
 MAX_REFERENCES_PER_PROCESS = 262_144
 MAX_MATCHES = 256
 MAX_LINK_TARGET_BYTES = 4_096
@@ -43,23 +50,71 @@ _MAP_LINE = re.compile(
     rb"([r-][w-][x-][ps]) ([0-9a-f]+) ([0-9a-f]+):([0-9a-f]+) ([0-9]+)(?: +(.*))?\Z"
 )
 _HEX64 = re.compile(r"[0-9a-f]{64}\Z")
+_REFERENCE_SOURCES = frozenset({"cwd", "exe", "fd", "map_files", "root"})
+_ISSUE_SOURCES = frozenset(
+    {
+        "boot_id",
+        "cwd",
+        "exe",
+        "fd",
+        "fdinfo",
+        "map_files",
+        "maps",
+        "mountinfo",
+        "namespace",
+        "pid",
+        "proc",
+        "receipt",
+        "stat",
+        "task",
+    }
+)
+_ISSUE_CODES = frozenset(
+    {
+        "proc_body_limit_exceeded",
+        "proc_boot_id_invalid",
+        "proc_fd_inventory_invalid",
+        "proc_fdinfo_invalid",
+        "proc_fixed_point_changed",
+        "proc_link_target_invalid",
+        "proc_map_files_incomplete",
+        "proc_map_files_invalid",
+        "proc_maps_invalid",
+        "proc_match_limit_exceeded",
+        "proc_observation_failed",
+        "proc_observation_raced",
+        "proc_permission_denied",
+        "proc_pid_inventory_invalid",
+        "proc_reference_limit_exceeded",
+        "proc_shared_mm_unproven",
+        "proc_stat_invalid",
+        "proc_surface_unsupported",
+        "proc_task_inventory_invalid",
+        "receipt_body_limit_exceeded",
+    }
+)
 _RECEIPT_CORE_KEYS = frozenset(
     {
         "ambiguities",
-        "complete",
+        "authority",
+        "delete_authority",
+        "diagnostic_complete",
         "fixed_point_passes",
         "matches",
         "observation_sha256",
-        "pid_epoch_set_sha256",
-        "process_count",
+        "open_inventory_complete_authority",
         "reference_count",
         "schema",
         "scope",
         "scope_identity",
         "status",
+        "task_count",
+        "task_epoch_set_sha256",
         "target_count",
         "target_index_sha256",
         "target_object_count",
+        "target_root_count",
+        "tgid_count",
         "universal_absence_proof",
     }
 )
@@ -70,10 +125,11 @@ _MATCH_KEYS = frozenset(
         "link_target_sha256",
         "mount_id",
         "object",
-        "pid",
-        "pid_epoch_sha256",
         "source",
+        "task_epoch_sha256",
         "target_ids",
+        "tgid",
+        "tid",
     }
 )
 _ALLOWED_FILE_TYPES = frozenset(
@@ -136,6 +192,7 @@ class TargetIndex:
     targets: tuple[ProbeTarget, ...]
     sha256: str
     object_count: int
+    root_count: int
 
 
 @dataclass(frozen=True, order=True)
@@ -159,8 +216,9 @@ class _Reference:
 @dataclass(frozen=True, order=True)
 class _Match:
     target_ids: tuple[str, ...]
-    pid: int
-    pid_epoch_sha256: str
+    tgid: int
+    tid: int
+    task_epoch_sha256: str
     reference: _Reference
 
     def receipt_projection(self) -> dict[str, Any]:
@@ -171,28 +229,33 @@ class _Match:
             "link_target_sha256": hashlib.sha256(self.reference.link_target).hexdigest(),
             "mount_id": self.reference.mount_id,
             "object": self.reference.object_key.projection(),
-            "pid": self.pid,
-            "pid_epoch_sha256": self.pid_epoch_sha256,
             "source": self.reference.source,
+            "task_epoch_sha256": self.task_epoch_sha256,
             "target_ids": list(self.target_ids),
+            "tgid": self.tgid,
+            "tid": self.tid,
         }
 
 
 @dataclass(frozen=True, order=True)
-class _ProcessObservation:
-    pid: int
+class _TaskObservation:
+    tgid: int
+    tid: int
     epoch_sha256: str
     reference_count: int
     reference_sha256: str
+    shared_mm_proof_sha256: str
     matches: tuple[_Match, ...]
 
     def projection(self) -> dict[str, Any]:
         return {
             "epoch_sha256": self.epoch_sha256,
             "matches": [match.receipt_projection() for match in self.matches],
-            "pid": self.pid,
             "reference_count": self.reference_count,
             "reference_sha256": self.reference_sha256,
+            "shared_mm_proof_sha256": self.shared_mm_proof_sha256,
+            "tgid": self.tgid,
+            "tid": self.tid,
         }
 
 
@@ -215,23 +278,27 @@ class _ScopeIdentity:
 @dataclass(frozen=True)
 class _GlobalObservation:
     scope: _ScopeIdentity
-    processes: tuple[_ProcessObservation, ...]
+    tasks: tuple[_TaskObservation, ...]
 
     @property
-    def process_count(self) -> int:
-        return len(self.processes)
+    def tgid_count(self) -> int:
+        return len({task.tgid for task in self.tasks})
+
+    @property
+    def task_count(self) -> int:
+        return len(self.tasks)
 
     @property
     def reference_count(self) -> int:
-        return sum(process.reference_count for process in self.processes)
+        return sum(task.reference_count for task in self.tasks)
 
     @property
     def matches(self) -> tuple[_Match, ...]:
-        return tuple(sorted(match for process in self.processes for match in process.matches))
+        return tuple(sorted(match for task in self.tasks for match in task.matches))
 
     @property
-    def pid_epoch_set_sha256(self) -> str:
-        value = [[process.pid, process.epoch_sha256] for process in self.processes]
+    def task_epoch_set_sha256(self) -> str:
+        value = [[task.tgid, task.tid, task.epoch_sha256] for task in self.tasks]
         return hashlib.sha256(_canonical_json(value)).hexdigest()
 
     @property
@@ -239,19 +306,31 @@ class _GlobalObservation:
         return hashlib.sha256(
             _canonical_json(
                 {
-                    "processes": [process.projection() for process in self.processes],
                     "scope": self.scope.projection(),
+                    "tasks": [task.projection() for task in self.tasks],
                 }
             )
         ).hexdigest()
 
 
 class _ProbeIssue(RuntimeError):
-    def __init__(self, code: str, *, pid: int = 0, source: str = "proc") -> None:
+    def __init__(
+        self,
+        code: str,
+        *,
+        tgid: int = 0,
+        tid: int = 0,
+        pid: int | None = None,
+        source: str = "proc",
+    ) -> None:
         super().__init__(code)
-        self.code = code
-        self.pid = pid
-        self.source = source
+        if pid is not None:
+            tgid = tgid or pid
+            tid = tid or pid
+        self.code = code if code in _ISSUE_CODES else "proc_observation_failed"
+        self.tgid = tgid if type(tgid) is int and tgid >= 0 else 0
+        self.tid = tid if type(tid) is int and tid >= 0 else 0
+        self.source = source if source in _ISSUE_SOURCES else "proc"
 
 
 CapturePass = Callable[[TargetIndex], _GlobalObservation]
@@ -278,6 +357,7 @@ def build_target_index(targets: Sequence[ProbeTarget]) -> TargetIndex:
     normalized: list[ProbeTarget] = []
     identifiers: set[str] = set()
     total = 0
+    root_total = 0
     for target in targets:
         if not isinstance(target, ProbeTarget) or _TARGET_ID.fullmatch(target.target_id) is None:
             raise ProcProbeInputError("target_id_invalid")
@@ -292,13 +372,21 @@ def build_target_index(targets: Sequence[ProbeTarget]) -> TargetIndex:
         objects = tuple(sorted(set(target.objects)))
         if not roots or not objects:
             raise ProcProbeInputError("target_identity_empty")
+        if any(len(os.fsencode(root)) > MAX_TARGET_ROOT_BYTES for root in roots):
+            raise ProcProbeInputError("target_root_limit_exceeded")
+        root_total += len(roots)
         total += len(objects)
+        if root_total > MAX_TARGET_ROOTS:
+            raise ProcProbeInputError("target_root_limit_exceeded")
         if total > MAX_TARGET_OBJECTS:
             raise ProcProbeInputError("target_object_limit_exceeded")
         normalized.append(ProbeTarget(target.target_id, roots, objects))
     normalized.sort(key=lambda item: item.target_id)
     projection = {
+        "object_count": total,
+        "root_count": root_total,
         "schema": TARGET_INDEX_SCHEMA,
+        "target_count": len(normalized),
         "targets": [
             {
                 "objects": [value.projection() for value in target.objects],
@@ -308,10 +396,14 @@ def build_target_index(targets: Sequence[ProbeTarget]) -> TargetIndex:
             for target in normalized
         ],
     }
+    raw = _canonical_json(projection)
+    if len(raw) > MAX_TARGET_INDEX_BYTES:
+        raise ProcProbeInputError("target_index_limit_exceeded")
     return TargetIndex(
         targets=tuple(normalized),
-        sha256=hashlib.sha256(_canonical_json(projection)).hexdigest(),
+        sha256=hashlib.sha256(raw).hexdigest(),
         object_count=total,
+        root_count=root_total,
     )
 
 
@@ -323,16 +415,18 @@ def _target_lookup(index: TargetIndex) -> dict[ObjectKey, tuple[str, ...]]:
     return {key: tuple(sorted(values)) for key, values in lookup.items()}
 
 
-def _pid_epoch_sha256(
+def _task_epoch_sha256(
     boot_id_sha256: str,
-    pid: int,
+    tgid: int,
+    tid: int,
     starttime: int,
     proc_identity: tuple[int, int],
 ) -> str:
     if _HEX64.fullmatch(boot_id_sha256) is None:
-        raise _ProbeIssue("proc_boot_id_invalid", pid=pid, source="boot_id")
-    payload = b"friday-proc-epoch-v1\0" + boot_id_sha256.encode("ascii")
-    payload += b"\0" + str(pid).encode() + b"\0" + str(starttime).encode()
+        raise _ProbeIssue("proc_boot_id_invalid", tgid=tgid, tid=tid, source="boot_id")
+    payload = b"friday-proc-task-epoch-v2\0" + boot_id_sha256.encode("ascii")
+    payload += b"\0" + str(tgid).encode() + b"\0" + str(tid).encode()
+    payload += b"\0" + str(starttime).encode()
     payload += b"\0" + str(proc_identity[0]).encode() + b":" + str(proc_identity[1]).encode()
     return hashlib.sha256(payload).hexdigest()
 
@@ -561,23 +655,91 @@ class _LinuxProcScanner:
         self._owned_fds.discard(descriptor)
         os.close(descriptor)
 
-    def _epoch(self, pid: int, boot_id_sha256: str) -> tuple[str, int, tuple[int, int]]:
-        descriptor = self._open_pid(pid)
+    def _task_names(self, task_directory: int, tgid: int) -> tuple[int, ...]:
         try:
-            status = os.fstat(descriptor)
-            _state, starttime = _parse_starttime(
-                _read_bounded_at(descriptor, "stat", maximum=16 << 10, pid=pid, source="stat"),
-                pid=pid,
-            )
-        finally:
-            self._close_owned(descriptor)
-        identity = (int(status.st_dev), int(status.st_ino))
-        return _pid_epoch_sha256(boot_id_sha256, pid, starttime, identity), starttime, identity
+            names = os.listdir(task_directory)
+        except OSError as exc:
+            raise _issue_from_oserror(exc, pid=tgid, source="task") from exc
+        if any(not name.isdecimal() or str(int(name)) != name or int(name) <= 0 for name in names):
+            raise _ProbeIssue("proc_task_inventory_invalid", tgid=tgid, source="task")
+        tids = tuple(sorted(int(name) for name in names))
+        if not tids or tgid not in tids or len(tids) != len(set(tids)):
+            raise _ProbeIssue("proc_task_inventory_invalid", tgid=tgid, source="task")
+        return tids
 
-    def _enumerate_epochs(self, boot_id_sha256: str) -> dict[int, tuple[str, int, tuple[int, int]]]:
-        result: dict[int, tuple[str, int, tuple[int, int]]] = {}
-        for pid in self._pid_names():
-            result[pid] = self._epoch(pid, boot_id_sha256)
+    def _open_task(self, task_directory: int, tgid: int, tid: int) -> int:
+        try:
+            return self._open_directory_at(task_directory, str(tid), pid=tid, source="task")
+        except _ProbeIssue as issue:
+            raise _ProbeIssue(issue.code, tgid=tgid, tid=tid, source=issue.source) from issue
+
+    @staticmethod
+    def _task_epoch_from_fd(
+        task_fd: int,
+        *,
+        boot_id_sha256: str,
+        tgid: int,
+        tid: int,
+    ) -> tuple[str, int, tuple[int, int]]:
+        status = os.fstat(task_fd)
+        try:
+            _state, starttime = _parse_starttime(
+                _read_bounded_at(task_fd, "stat", maximum=16 << 10, pid=tid, source="stat"),
+                pid=tid,
+            )
+        except _ProbeIssue as issue:
+            raise _ProbeIssue(issue.code, tgid=tgid, tid=tid, source=issue.source) from issue
+        identity = (int(status.st_dev), int(status.st_ino))
+        return (
+            _task_epoch_sha256(boot_id_sha256, tgid, tid, starttime, identity),
+            starttime,
+            identity,
+        )
+
+    def _enumerate_task_epochs(
+        self, boot_id_sha256: str
+    ) -> dict[tuple[int, int], tuple[str, int, tuple[int, int]]]:
+        result: dict[tuple[int, int], tuple[str, int, tuple[int, int]]] = {}
+        seen_tids: set[int] = set()
+        for tgid in self._pid_names():
+            tgid_fd = self._open_pid(tgid)
+            try:
+                task_directory = self._open_directory_at(tgid_fd, "task", pid=tgid, source="task")
+                try:
+                    tids = self._task_names(task_directory, tgid)
+                    for tid in tids:
+                        if len(result) >= MAX_TASKS:
+                            raise _ProbeIssue("proc_task_inventory_invalid", source="task")
+                        if tid in seen_tids:
+                            raise _ProbeIssue(
+                                "proc_task_inventory_invalid",
+                                tgid=tgid,
+                                tid=tid,
+                                source="task",
+                            )
+                        task_fd = self._open_task(task_directory, tgid, tid)
+                        try:
+                            result[(tgid, tid)] = self._task_epoch_from_fd(
+                                task_fd,
+                                boot_id_sha256=boot_id_sha256,
+                                tgid=tgid,
+                                tid=tid,
+                            )
+                        finally:
+                            self._close_owned(task_fd)
+                        seen_tids.add(tid)
+                    if tids != self._task_names(task_directory, tgid):
+                        raise _ProbeIssue(
+                            "proc_observation_raced",
+                            tgid=tgid,
+                            source="task",
+                        )
+                finally:
+                    self._close_owned(task_directory)
+            finally:
+                self._close_owned(tgid_fd)
+        if len(result) > MAX_TASKS:
+            raise _ProbeIssue("proc_task_inventory_invalid", source="task")
         return result
 
     @staticmethod
@@ -625,12 +787,7 @@ class _LinuxProcScanner:
                 raise _issue_from_oserror(exc, pid=pid, source="fd") from exc
             if any(not name.isdecimal() or str(int(name)) != name for name in names_before):
                 raise _ProbeIssue("proc_fd_inventory_invalid", pid=pid, source="fd")
-            own_pid = pid == os.getpid()
-            names = sorted(
-                name
-                for name in names_before
-                if name.isdecimal() and (not own_pid or int(name) not in self._owned_fds)
-            )
+            names = sorted(names_before)
             if len(names) != len(set(names)) or len(names) > MAX_REFERENCES_PER_PROCESS:
                 raise _ProbeIssue("proc_reference_limit_exceeded", pid=pid, source="fd")
             references: list[_Reference] = []
@@ -657,12 +814,7 @@ class _LinuxProcScanner:
                 raise _issue_from_oserror(exc, pid=pid, source="fd") from exc
             if any(not name.isdecimal() or str(int(name)) != name for name in names_after):
                 raise _ProbeIssue("proc_fd_inventory_invalid", pid=pid, source="fd")
-            filtered_after = sorted(
-                name
-                for name in names_after
-                if name.isdecimal() and (not own_pid or int(name) not in self._owned_fds)
-            )
-            if names != filtered_after:
+            if names != sorted(names_after):
                 raise _ProbeIssue("proc_observation_raced", pid=pid, source="fd")
             return references
         finally:
@@ -681,7 +833,7 @@ class _LinuxProcScanner:
             raise _ProbeIssue("proc_observation_raced", pid=pid, source=name)
         return _Reference(name, name, ObjectKey.from_stat(before), None, raw)
 
-    def _map_references(self, pid_fd: int, pid: int) -> list[_Reference]:
+    def _map_references(self, pid_fd: int, pid: int) -> tuple[list[_Reference], tuple[_MapRecord, ...]]:
         maps_before = _parse_maps(
             _read_bounded_at(pid_fd, "maps", maximum=MAX_PROC_FILE_BYTES, pid=pid, source="maps"),
             pid=pid,
@@ -735,75 +887,230 @@ class _LinuxProcScanner:
                 raise _issue_from_oserror(exc, pid=pid, source="map_files") from exc
             if maps_before != maps_after or sorted(names_before) != sorted(names_after):
                 raise _ProbeIssue("proc_observation_raced", pid=pid, source="map_files")
-            return references
+            return references, maps_before
         finally:
             self._close_owned(map_directory)
 
-    def _scan_process(
+    def _scan_task_references(
         self,
-        pid: int,
+        task_fd: int,
+        *,
+        tgid: int,
+        tid: int,
         expected: tuple[str, int, tuple[int, int]],
-    ) -> _ProcessObservation:
-        pid_fd = self._open_pid(pid)
+        boot_id_sha256: str,
+    ) -> tuple[list[_Reference], tuple[str, ...], tuple[_MapRecord, ...], _Reference | None]:
         try:
-            status = os.fstat(pid_fd)
-            before_state, before_start = _parse_starttime(
-                _read_bounded_at(pid_fd, "stat", maximum=16 << 10, pid=pid, source="stat"),
-                pid=pid,
+            before = self._task_epoch_from_fd(
+                task_fd,
+                boot_id_sha256=boot_id_sha256,
+                tgid=tgid,
+                tid=tid,
             )
-            del before_state
-            if before_start != expected[1] or (int(status.st_dev), int(status.st_ino)) != expected[2]:
-                raise _ProbeIssue("proc_observation_raced", pid=pid, source="pid")
-            references = self._fd_references(pid_fd, pid)
+            if before != expected:
+                raise _ProbeIssue("proc_observation_raced", tgid=tgid, tid=tid, source="task")
+            maps_before = _parse_maps(
+                _read_bounded_at(
+                    task_fd,
+                    "maps",
+                    maximum=MAX_PROC_FILE_BYTES,
+                    pid=tid,
+                    source="maps",
+                ),
+                pid=tid,
+            )
+            exe_before = self._special_reference(task_fd, tid, "exe")
+            references = self._fd_references(task_fd, tid)
             absent: list[str] = []
-            for name in ("cwd", "root", "exe"):
-                reference = self._special_reference(pid_fd, pid, name)
+            for name in ("cwd", "root"):
+                reference = self._special_reference(task_fd, tid, name)
                 if reference is None:
                     absent.append(name)
                 else:
                     references.append(reference)
-            references.extend(self._map_references(pid_fd, pid))
-            _after_state, after_start = _parse_starttime(
-                _read_bounded_at(pid_fd, "stat", maximum=16 << 10, pid=pid, source="stat"),
-                pid=pid,
+            maps_after = _parse_maps(
+                _read_bounded_at(
+                    task_fd,
+                    "maps",
+                    maximum=MAX_PROC_FILE_BYTES,
+                    pid=tid,
+                    source="maps",
+                ),
+                pid=tid,
             )
-            if after_start != before_start or (int(status.st_dev), int(status.st_ino)) != expected[2]:
-                raise _ProbeIssue("proc_observation_raced", pid=pid, source="pid")
-        finally:
-            self._close_owned(pid_fd)
+            exe_after = self._special_reference(task_fd, tid, "exe")
+            after = self._task_epoch_from_fd(
+                task_fd,
+                boot_id_sha256=boot_id_sha256,
+                tgid=tgid,
+                tid=tid,
+            )
+        except _ProbeIssue as issue:
+            raise _ProbeIssue(issue.code, tgid=tgid, tid=tid, source=issue.source) from issue
+        if before != after or maps_before != maps_after or exe_before != exe_after:
+            raise _ProbeIssue("proc_observation_raced", tgid=tgid, tid=tid, source="task")
+        return references, tuple(sorted(absent)), maps_before, exe_before
+
+    def _task_observation(
+        self,
+        *,
+        tgid: int,
+        tid: int,
+        expected: tuple[str, int, tuple[int, int]],
+        references: list[_Reference],
+        absent: tuple[str, ...],
+        shared_mm_proof_sha256: str,
+    ) -> _TaskObservation:
         if len(references) > MAX_REFERENCES_PER_PROCESS:
-            raise _ProbeIssue("proc_reference_limit_exceeded", pid=pid)
+            raise _ProbeIssue(
+                "proc_reference_limit_exceeded",
+                tgid=tgid,
+                tid=tid,
+                source="task",
+            )
         references.sort()
         projection = {
-            "absent_special_links": sorted(absent),
+            "absent_special_links": list(absent),
             "references": [reference.fingerprint_projection() for reference in references],
         }
         matches: list[_Match] = []
         for reference in references:
             target_ids = self.lookup.get(reference.object_key)
             if target_ids is not None:
-                matches.append(_Match(target_ids, pid, expected[0], reference))
+                matches.append(_Match(target_ids, tgid, tid, expected[0], reference))
         if len(matches) > MAX_MATCHES:
-            raise _ProbeIssue("proc_match_limit_exceeded", pid=pid)
-        return _ProcessObservation(
-            pid=pid,
+            raise _ProbeIssue("proc_match_limit_exceeded", tgid=tgid, tid=tid, source="task")
+        return _TaskObservation(
+            tgid=tgid,
+            tid=tid,
             epoch_sha256=expected[0],
             reference_count=len(references),
             reference_sha256=hashlib.sha256(_canonical_json(projection)).hexdigest(),
+            shared_mm_proof_sha256=shared_mm_proof_sha256,
             matches=tuple(sorted(matches)),
         )
 
+    def _scan_tgid(
+        self,
+        tgid: int,
+        expected_tasks: Mapping[int, tuple[str, int, tuple[int, int]]],
+        *,
+        boot_id_sha256: str,
+    ) -> tuple[_TaskObservation, ...]:
+        tgid_fd = self._open_pid(tgid)
+        try:
+            task_directory = self._open_directory_at(tgid_fd, "task", pid=tgid, source="task")
+            try:
+                tids = self._task_names(task_directory, tgid)
+                if tids != tuple(sorted(expected_tasks)):
+                    raise _ProbeIssue("proc_observation_raced", tgid=tgid, source="task")
+                leader_exe_before = self._special_reference(tgid_fd, tgid, "exe")
+                map_references, leader_maps = self._map_references(tgid_fd, tgid)
+                leader_exe_after = self._special_reference(tgid_fd, tgid, "exe")
+                if leader_exe_before != leader_exe_after:
+                    raise _ProbeIssue("proc_observation_raced", tgid=tgid, source="exe")
+
+                captured: dict[
+                    int,
+                    tuple[list[_Reference], tuple[str, ...], tuple[_MapRecord, ...], _Reference | None],
+                ] = {}
+                mm_projection: list[dict[str, Any]] = []
+                for tid in tids:
+                    task_fd = self._open_task(task_directory, tgid, tid)
+                    try:
+                        task_capture = self._scan_task_references(
+                            task_fd,
+                            tgid=tgid,
+                            tid=tid,
+                            expected=expected_tasks[tid],
+                            boot_id_sha256=boot_id_sha256,
+                        )
+                    finally:
+                        self._close_owned(task_fd)
+                    references, absent, task_maps, task_exe = task_capture
+                    if task_maps != leader_maps or task_exe != leader_exe_before:
+                        raise _ProbeIssue(
+                            "proc_shared_mm_unproven",
+                            tgid=tgid,
+                            tid=tid,
+                            source="maps",
+                        )
+                    captured[tid] = task_capture
+                    mm_projection.append(
+                        {
+                            "exe": (None if task_exe is None else task_exe.fingerprint_projection()),
+                            "maps_sha256": hashlib.sha256(
+                                _canonical_json(
+                                    [
+                                        [record.start, record.end, record.device, record.inode]
+                                        for record in task_maps
+                                    ]
+                                )
+                            ).hexdigest(),
+                            "tid": tid,
+                        }
+                    )
+                if tids != self._task_names(task_directory, tgid):
+                    raise _ProbeIssue("proc_observation_raced", tgid=tgid, source="task")
+            finally:
+                self._close_owned(task_directory)
+        finally:
+            self._close_owned(tgid_fd)
+
+        # CLONE_THREAD requires CLONE_VM on Linux.  Do not rely on that kernel
+        # rule alone: every enumerated TID must also expose the same stable maps
+        # object projection and exe identity before map_files/exe are charged
+        # once to the TGID leader.
+        shared_mm_sha256 = hashlib.sha256(
+            _canonical_json(
+                {
+                    "proof": _SHARED_MM_PROOF_KIND,
+                    "tasks": mm_projection,
+                    "tgid": tgid,
+                }
+            )
+        ).hexdigest()
+        observations: list[_TaskObservation] = []
+        for tid in tids:
+            references, absent, _task_maps, _task_exe = captured[tid]
+            if tid == tgid:
+                references.extend(map_references)
+                if leader_exe_before is None:
+                    absent = tuple(sorted((*absent, "exe")))
+                else:
+                    references.append(leader_exe_before)
+            observations.append(
+                self._task_observation(
+                    tgid=tgid,
+                    tid=tid,
+                    expected=expected_tasks[tid],
+                    references=references,
+                    absent=absent,
+                    shared_mm_proof_sha256=shared_mm_sha256,
+                )
+            )
+        return tuple(observations)
+
     def capture(self) -> _GlobalObservation:
         scope_before = self._scope_identity()
-        epochs_before = self._enumerate_epochs(scope_before.boot_id_sha256)
-        processes = tuple(
-            self._scan_process(pid, expected) for pid, expected in sorted(epochs_before.items())
+        epochs_before = self._enumerate_task_epochs(scope_before.boot_id_sha256)
+        by_tgid: dict[int, dict[int, tuple[str, int, tuple[int, int]]]] = {}
+        for (tgid, tid), expected in epochs_before.items():
+            by_tgid.setdefault(tgid, {})[tid] = expected
+        tasks = tuple(
+            task
+            for tgid, expected_tasks in sorted(by_tgid.items())
+            for task in self._scan_tgid(
+                tgid,
+                expected_tasks,
+                boot_id_sha256=scope_before.boot_id_sha256,
+            )
         )
-        epochs_after = self._enumerate_epochs(scope_before.boot_id_sha256)
+        epochs_after = self._enumerate_task_epochs(scope_before.boot_id_sha256)
         scope_after = self._scope_identity()
         if scope_before != scope_after or epochs_before != epochs_after:
             raise _ProbeIssue("proc_observation_raced")
-        return _GlobalObservation(scope_before, processes)
+        return _GlobalObservation(scope_before, tuple(sorted(tasks)))
 
 
 def _empty_scope() -> dict[str, Any]:
@@ -828,33 +1135,45 @@ def _receipt(
         "ambiguities": (
             []
             if ambiguity is None
-            else [{"code": ambiguity.code, "pid": ambiguity.pid, "source": ambiguity.source}]
+            else [
+                {
+                    "code": ambiguity.code,
+                    "source": ambiguity.source,
+                    "tgid": ambiguity.tgid,
+                    "tid": ambiguity.tid,
+                }
+            ]
         ),
-        "complete": ambiguity is None,
+        "authority": PROBE_AUTHORITY,
+        "delete_authority": False,
+        "diagnostic_complete": ambiguity is None,
         "fixed_point_passes": fixed_point_passes,
         "matches": [match.receipt_projection() for match in matches],
         "observation_sha256": observation.observation_sha256 if observation is not None else "",
-        "pid_epoch_set_sha256": observation.pid_epoch_set_sha256 if observation is not None else "",
-        "process_count": observation.process_count if observation is not None else 0,
+        "open_inventory_complete_authority": False,
         "reference_count": observation.reference_count if observation is not None else 0,
         "schema": PROBE_RECEIPT_SCHEMA,
         "scope": PROBE_SCOPE,
         "scope_identity": observation.scope.projection() if observation is not None else _empty_scope(),
         "status": status,
+        "task_count": observation.task_count if observation is not None else 0,
+        "task_epoch_set_sha256": (observation.task_epoch_set_sha256 if observation is not None else ""),
         "target_count": len(index.targets),
         "target_index_sha256": index.sha256,
         "target_object_count": index.object_count,
+        "target_root_count": index.root_count,
+        "tgid_count": observation.tgid_count if observation is not None else 0,
         "universal_absence_proof": False,
     }
-    raw = _canonical_json(core)
-    if len(raw) > MAX_RECEIPT_BYTES:
+    receipt = {**core, "receipt_sha256": hashlib.sha256(_canonical_json(core)).hexdigest()}
+    if len(_canonical_json(receipt) + b"\n") > MAX_RECEIPT_BYTES:
         return _receipt(
             index,
             fixed_point_passes=fixed_point_passes,
             observation=None,
-            ambiguity=_ProbeIssue("receipt_body_limit_exceeded"),
+            ambiguity=_ProbeIssue("receipt_body_limit_exceeded", source="receipt"),
         )
-    return {**core, "receipt_sha256": hashlib.sha256(raw).hexdigest()}
+    return receipt
 
 
 def probe_namespace_visible_proc_references(
@@ -868,7 +1187,9 @@ def probe_namespace_visible_proc_references(
 
     if (
         not isinstance(target_index, TargetIndex)
+        or not isinstance(target_index.sha256, str)
         or _HEX64.fullmatch(target_index.sha256) is None
+        or type(fixed_point_passes) is not int
         or not 2 <= fixed_point_passes <= 4
     ):
         raise ProcProbeInputError("probe_input_invalid")
@@ -911,10 +1232,24 @@ def probe_namespace_visible_proc_references(
         )
 
 
-def canonical_probe_receipt_bytes(receipt: Mapping[str, Any]) -> bytes:
-    """Validate the self-digest and return the unique canonical receipt bytes."""
+def canonical_probe_receipt_bytes(
+    receipt: Mapping[str, Any],
+    *,
+    expected_target_index: TargetIndex,
+) -> bytes:
+    """Serialize one exact diagnostic receipt; this never grants effect authority."""
 
-    value = dict(receipt)
+    if (
+        not isinstance(expected_target_index, TargetIndex)
+        or build_target_index(expected_target_index.targets) != expected_target_index
+    ):
+        raise ProcProbeInputError("target_index_digest_invalid")
+    if not isinstance(receipt, Mapping):
+        raise ProcProbeInputError("probe_receipt_invalid")
+    try:
+        value = dict(receipt)
+    except (TypeError, ValueError) as exc:
+        raise ProcProbeInputError("probe_receipt_invalid") from exc
     if set(value) != _RECEIPT_CORE_KEYS | {"receipt_sha256"}:
         raise ProcProbeInputError("probe_receipt_invalid")
     digest = value.pop("receipt_sha256", None)
@@ -922,43 +1257,48 @@ def canonical_probe_receipt_bytes(receipt: Mapping[str, Any]) -> bytes:
         raise ProcProbeInputError("probe_receipt_invalid")
     try:
         raw = _canonical_json(value)
+        final = _canonical_json({**value, "receipt_sha256": digest}) + b"\n"
     except (TypeError, ValueError) as exc:
         raise ProcProbeInputError("probe_receipt_invalid") from exc
-    if len(raw) > MAX_RECEIPT_BYTES or hashlib.sha256(raw).hexdigest() != digest:
+    if len(final) > MAX_RECEIPT_BYTES or hashlib.sha256(raw).hexdigest() != digest:
         raise ProcProbeInputError("probe_receipt_invalid")
     status = value.get("status")
-    complete = value.get("complete")
+    diagnostic_complete = value.get("diagnostic_complete")
     matches = value.get("matches")
     ambiguities = value.get("ambiguities")
+    integer_names = (
+        "fixed_point_passes",
+        "reference_count",
+        "target_count",
+        "target_object_count",
+        "target_root_count",
+        "task_count",
+        "tgid_count",
+    )
     if (
         value.get("schema") != PROBE_RECEIPT_SCHEMA
         or value.get("scope") != PROBE_SCOPE
+        or value.get("authority") != PROBE_AUTHORITY
         or value.get("universal_absence_proof") is not False
+        or value.get("delete_authority") is not False
+        or value.get("open_inventory_complete_authority") is not False
         or status not in {"clear", "referenced", "ambiguous"}
-        or complete is not (status in {"clear", "referenced"})
+        or diagnostic_complete is not (status in {"clear", "referenced"})
         or not isinstance(matches, list)
         or not isinstance(ambiguities, list)
         or len(matches) > MAX_MATCHES
         or (status == "clear" and matches)
         or (status == "referenced" and not matches)
-        or (status == "ambiguous" and not ambiguities)
+        or (status == "ambiguous" and len(ambiguities) != 1)
         or (status != "ambiguous" and ambiguities)
-        or any(
-            type(value.get(name)) is not int or int(value[name]) < 0
-            for name in (
-                "fixed_point_passes",
-                "process_count",
-                "reference_count",
-                "target_count",
-                "target_object_count",
-            )
-        )
-        or not isinstance(value.get("target_index_sha256"), str)
-        or _HEX64.fullmatch(str(value["target_index_sha256"])) is None
-        or int(value["target_count"]) <= 0
-        or int(value["target_object_count"]) <= 0
+        or any(type(value.get(name)) is not int or int(value[name]) < 0 for name in integer_names)
+        or value.get("target_index_sha256") != expected_target_index.sha256
+        or value.get("target_count") != len(expected_target_index.targets)
+        or value.get("target_object_count") != expected_target_index.object_count
+        or value.get("target_root_count") != expected_target_index.root_count
         or not 2 <= int(value["fixed_point_passes"]) <= 4
         or len(matches) > int(value["reference_count"])
+        or int(value["tgid_count"]) > int(value["task_count"])
     ):
         raise ProcProbeInputError("probe_receipt_invalid")
     scope_identity = value.get("scope_identity")
@@ -980,70 +1320,119 @@ def canonical_probe_receipt_bytes(receipt: Mapping[str, Any]) -> bytes:
     boot_id_sha256 = scope_identity["boot_id_sha256"]
     if (
         not isinstance(boot_id_sha256, str)
-        or (complete and _HEX64.fullmatch(boot_id_sha256) is None)
-        or (not complete and boot_id_sha256 not in {""} and _HEX64.fullmatch(boot_id_sha256) is None)
+        or (diagnostic_complete and _HEX64.fullmatch(boot_id_sha256) is None)
+        or (
+            not diagnostic_complete
+            and boot_id_sha256 not in {""}
+            and _HEX64.fullmatch(boot_id_sha256) is None
+        )
         or any(
             not isinstance(value.get(name), str)
-            or (complete and _HEX64.fullmatch(str(value[name])) is None)
-            or (not complete and value[name] not in {""} and _HEX64.fullmatch(str(value[name])) is None)
-            for name in ("observation_sha256", "pid_epoch_set_sha256")
+            or (diagnostic_complete and _HEX64.fullmatch(str(value[name])) is None)
+            or (
+                not diagnostic_complete
+                and value[name] not in {""}
+                and _HEX64.fullmatch(str(value[name])) is None
+            )
+            for name in ("observation_sha256", "task_epoch_set_sha256")
         )
     ):
         raise ProcProbeInputError("probe_receipt_invalid")
+    if diagnostic_complete:
+        if int(value["tgid_count"]) <= 0 or int(value["task_count"]) < int(value["tgid_count"]):
+            raise ProcProbeInputError("probe_receipt_invalid")
+    elif any(
+        value[name] not in {0, ""}
+        for name in (
+            "observation_sha256",
+            "reference_count",
+            "task_count",
+            "task_epoch_set_sha256",
+            "tgid_count",
+        )
+    ):
+        raise ProcProbeInputError("probe_receipt_invalid")
+
     for ambiguity in ambiguities:
         if (
             not isinstance(ambiguity, dict)
-            or set(ambiguity) != {"code", "pid", "source"}
-            or not isinstance(ambiguity["code"], str)
-            or not ambiguity["code"]
-            or type(ambiguity["pid"]) is not int
-            or ambiguity["pid"] < 0
-            or not isinstance(ambiguity["source"], str)
-            or not ambiguity["source"]
+            or set(ambiguity) != {"code", "source", "tgid", "tid"}
+            or ambiguity["code"] not in _ISSUE_CODES
+            or ambiguity["source"] not in _ISSUE_SOURCES
+            or type(ambiguity["tgid"]) is not int
+            or type(ambiguity["tid"]) is not int
+            or ambiguity["tgid"] < 0
+            or ambiguity["tid"] < 0
+            or (ambiguity["tid"] > 0 and ambiguity["tgid"] <= 0)
         ):
             raise ProcProbeInputError("probe_receipt_invalid")
+
+    lookup = _target_lookup(expected_target_index)
+    parsed_matches: list[_Match] = []
     for match in matches:
         if not isinstance(match, dict) or set(match) != _MATCH_KEYS:
             raise ProcProbeInputError("probe_receipt_invalid")
         try:
             link_target = base64.b64decode(match["link_target_base64"], validate=True)
+            object_value = match["object"]
+            if not isinstance(object_value, list) or len(object_value) != 3:
+                raise ProcProbeInputError("probe_receipt_invalid")
+            object_key = ObjectKey(*object_value)
         except (TypeError, ValueError) as exc:
             raise ProcProbeInputError("probe_receipt_invalid") from exc
-        object_value = match["object"]
         target_ids = match["target_ids"]
+        source = match["source"]
+        entry = match["entry"]
+        mount_id = match["mount_id"]
+        tgid = match["tgid"]
+        tid = match["tid"]
+        epoch = match["task_epoch_sha256"]
         if (
             len(link_target) > MAX_LINK_TARGET_BYTES
             or base64.b64encode(link_target).decode("ascii") != match["link_target_base64"]
             or hashlib.sha256(link_target).hexdigest() != match["link_target_sha256"]
-            or not isinstance(object_value, list)
-            or len(object_value) != 3
-            or any(type(item) is not int for item in object_value)
             or not isinstance(target_ids, list)
-            or not target_ids
-            or any(
-                not isinstance(target_id, str) or _TARGET_ID.fullmatch(target_id) is None
-                for target_id in target_ids
-            )
-            or target_ids != sorted(set(target_ids))
-            or type(match["pid"]) is not int
-            or match["pid"] <= 0
-            or not isinstance(match["pid_epoch_sha256"], str)
-            or _HEX64.fullmatch(match["pid_epoch_sha256"]) is None
-            or not isinstance(match["source"], str)
-            or not match["source"]
-            or not isinstance(match["entry"], str)
-            or not match["entry"]
-            or (
-                match["mount_id"] is not None
-                and (type(match["mount_id"]) is not int or match["mount_id"] <= 0)
-            )
+            or tuple(target_ids) != lookup.get(object_key)
+            or source not in _REFERENCE_SOURCES
+            or not isinstance(entry, str)
+            or not entry
+            or type(tgid) is not int
+            or type(tid) is not int
+            or tgid <= 0
+            or tid <= 0
+            or not isinstance(epoch, str)
+            or _HEX64.fullmatch(epoch) is None
+            or (source == "fd" and (not entry.isdecimal() or str(int(entry)) != entry))
+            or (source == "fd" and (type(mount_id) is not int or mount_id <= 0))
+            or (source != "fd" and mount_id is not None)
+            or (source in {"cwd", "exe", "root"} and entry != source)
         ):
             raise ProcProbeInputError("probe_receipt_invalid")
-    return _canonical_json({**value, "receipt_sha256": digest}) + b"\n"
+        if source == "map_files":
+            try:
+                _parse_map_entry(entry, pid=tid)
+            except _ProbeIssue as exc:
+                raise ProcProbeInputError("probe_receipt_invalid") from exc
+        parsed_matches.append(
+            _Match(
+                tuple(target_ids),
+                tgid,
+                tid,
+                epoch,
+                _Reference(source, entry, object_key, mount_id, link_target),
+            )
+        )
+    if (
+        parsed_matches != sorted(set(parsed_matches))
+        or [match.receipt_projection() for match in parsed_matches] != matches
+    ):
+        raise ProcProbeInputError("probe_receipt_invalid")
+    return final
 
 
 __all__ = [
     "ObjectKey",
+    "PROBE_AUTHORITY",
     "PROBE_RECEIPT_SCHEMA",
     "PROBE_SCOPE",
     "ProbeTarget",

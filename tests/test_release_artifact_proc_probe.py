@@ -1,11 +1,16 @@
 from __future__ import annotations
 
 import base64
+import copy
 import errno
 import hashlib
 import os
+import select
 import stat
+import subprocess
+import sys
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -31,11 +36,13 @@ def _observation(
     return probe._GlobalObservation(
         scope or _scope(),
         (
-            probe._ProcessObservation(
-                pid=101,
+            probe._TaskObservation(
+                tgid=101,
+                tid=101,
                 epoch_sha256=hashlib.sha256(b"epoch").hexdigest(),
                 reference_count=len(matches),
                 reference_sha256=reference_sha256 or hashlib.sha256(b"references").hexdigest(),
+                shared_mm_proof_sha256=hashlib.sha256(b"shared-mm").hexdigest(),
                 matches=matches,
             ),
         ),
@@ -47,6 +54,21 @@ def _capture(value: probe._GlobalObservation):
         return value
 
     return capture
+
+
+def _resign(receipt: dict[str, Any]) -> None:
+    core = {name: value for name, value in receipt.items() if name != "receipt_sha256"}
+    receipt["receipt_sha256"] = hashlib.sha256(probe._canonical_json(core)).hexdigest()
+
+
+def _match(object_key: probe.ObjectKey, *, entry: str = "9") -> probe._Match:
+    return probe._Match(
+        ("retired-release",),
+        101,
+        101,
+        hashlib.sha256(b"epoch").hexdigest(),
+        probe._Reference("fd", entry, object_key, 77, f"/alias/{entry}".encode()),
+    )
 
 
 def test_target_index_is_exact_canonical_and_rejects_a_forged_digest(tmp_path: Path) -> None:
@@ -75,7 +97,10 @@ def test_target_index_is_exact_canonical_and_rejects_a_forged_digest(tmp_path: P
         == hashlib.sha256(
             probe._canonical_json(
                 {
+                    "object_count": 3,
+                    "root_count": 3,
                     "schema": probe.TARGET_INDEX_SCHEMA,
+                    "target_count": 2,
                     "targets": [
                         {
                             "objects": [second.projection()],
@@ -93,29 +118,61 @@ def test_target_index_is_exact_canonical_and_rejects_a_forged_digest(tmp_path: P
         ).hexdigest()
     )
 
-    forged = probe.TargetIndex(left.targets, "0" * 64, left.object_count)
+    forged = probe.TargetIndex(left.targets, "0" * 64, left.object_count, left.root_count)
     with pytest.raises(probe.ProcProbeInputError, match="target_index_digest_invalid"):
         probe.probe_namespace_visible_proc_references(forged, _capture_pass=_capture(_observation()))
 
 
-def test_clear_receipt_is_canonical_bounded_and_explicitly_not_universal(tmp_path: Path) -> None:
-    index = _index(tmp_path, probe.ObjectKey(8, 11, stat.S_IFDIR))
-    observation = _observation()
+def test_target_roots_are_count_and_byte_bounded(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    object_key = probe.ObjectKey(8, 11, stat.S_IFREG)
+    monkeypatch.setattr(probe, "MAX_TARGET_ROOTS", 1)
+    with pytest.raises(probe.ProcProbeInputError, match="target_root_limit_exceeded"):
+        probe.build_target_index(
+            [probe.ProbeTarget("release", (tmp_path / "a", tmp_path / "b"), (object_key,))]
+        )
 
+    monkeypatch.setattr(probe, "MAX_TARGET_ROOTS", 2)
+    monkeypatch.setattr(probe, "MAX_TARGET_ROOT_BYTES", len(os.fsencode(tmp_path)) + 2)
+    with pytest.raises(probe.ProcProbeInputError, match="target_root_limit_exceeded"):
+        probe.build_target_index([probe.ProbeTarget("release", (tmp_path / "long-name",), (object_key,))])
+
+
+def test_clear_receipt_is_diagnostic_only_canonical_and_bounded(tmp_path: Path) -> None:
+    index = _index(tmp_path, probe.ObjectKey(8, 11, stat.S_IFDIR))
     receipt = probe.probe_namespace_visible_proc_references(
         index,
-        _capture_pass=_capture(observation),
+        _capture_pass=_capture(_observation()),
     )
 
     assert receipt["status"] == "clear"
-    assert receipt["complete"] is True
-    assert receipt["scope"] == "namespace_visible_proc_references"
+    assert receipt["diagnostic_complete"] is True
+    assert "complete" not in receipt
+    assert receipt["authority"] == "diagnostic_only"
+    assert receipt["delete_authority"] is False
+    assert receipt["open_inventory_complete_authority"] is False
     assert receipt["universal_absence_proof"] is False
+    assert receipt["scope"] == "namespace_visible_proc_references"
     assert receipt["fixed_point_passes"] == 2
     assert receipt["target_index_sha256"] == index.sha256
-    canonical = probe.canonical_probe_receipt_bytes(receipt)
+    canonical = probe.canonical_probe_receipt_bytes(receipt, expected_target_index=index)
     assert canonical.endswith(b"\n")
-    assert len(canonical) < probe.MAX_RECEIPT_BYTES
+    assert len(canonical) <= probe.MAX_RECEIPT_BYTES
+
+
+def test_receipt_cap_includes_digest_and_trailing_newline(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    index = _index(tmp_path, probe.ObjectKey(8, 11, stat.S_IFDIR))
+    receipt = probe.probe_namespace_visible_proc_references(
+        index,
+        _capture_pass=_capture(_observation()),
+    )
+    canonical = probe.canonical_probe_receipt_bytes(receipt, expected_target_index=index)
+    monkeypatch.setattr(probe, "MAX_RECEIPT_BYTES", len(canonical) - 1)
+
+    with pytest.raises(probe.ProcProbeInputError, match="probe_receipt_invalid"):
+        probe.canonical_probe_receipt_bytes(receipt, expected_target_index=index)
 
 
 @pytest.mark.parametrize(
@@ -137,6 +194,7 @@ def test_inode_identity_detects_hardlink_and_bind_aliases_independent_of_path(
     match = probe._Match(
         ("retired-release",),
         101,
+        101,
         hashlib.sha256(b"epoch").hexdigest(),
         reference,
     )
@@ -147,9 +205,10 @@ def test_inode_identity_detects_hardlink_and_bind_aliases_independent_of_path(
     )
 
     assert receipt["status"] == "referenced"
-    assert receipt["complete"] is True
+    assert receipt["diagnostic_complete"] is True
     assert receipt["matches"][0]["object"] == object_key.projection()
     assert base64.b64decode(receipt["matches"][0]["link_target_base64"]) == link_target
+    probe.canonical_probe_receipt_bytes(receipt, expected_target_index=index)
 
 
 def test_linux_surface_readers_cover_fd_cwd_root_exe_and_complete_map_files(tmp_path: Path) -> None:
@@ -166,7 +225,10 @@ def test_linux_surface_readers_cover_fd_cwd_root_exe_and_complete_map_files(tmp_
     (process / "fdinfo").mkdir()
     (process / "map_files").mkdir()
     (process / "fd" / "7").symlink_to(target_file)
-    (process / "fdinfo" / "7").write_text("pos:\t0\nflags:\t0100000\nmnt_id:\t81\n", encoding="ascii")
+    (process / "fdinfo" / "7").write_text(
+        "pos:\t0\nflags:\t0100000\nmnt_id:\t81\n",
+        encoding="ascii",
+    )
     (process / "cwd").symlink_to(target_directory, target_is_directory=True)
     (process / "root").symlink_to(target_directory, target_is_directory=True)
     (process / "exe").symlink_to(target_file)
@@ -174,8 +236,8 @@ def test_linux_surface_readers_cover_fd_cwd_root_exe_and_complete_map_files(tmp_
     (process / "map_files" / address).symlink_to(target_file)
     status = target_file.stat()
     (process / "maps").write_text(
-        f"00001000-00002000 r--p 00000000 {os.major(status.st_dev):x}:{os.minor(status.st_dev):x} "
-        f"{status.st_ino} {target_file}\n",
+        f"00001000-00002000 r--p 00000000 {os.major(status.st_dev):x}:"
+        f"{os.minor(status.st_dev):x} {status.st_ino} {target_file}\n",
         encoding="ascii",
     )
 
@@ -188,7 +250,8 @@ def test_linux_surface_readers_cover_fd_cwd_root_exe_and_complete_map_files(tmp_
             for name in ("cwd", "root", "exe")
             if (reference := scanner._special_reference(process_fd, 123, name)) is not None
         )
-        references.extend(scanner._map_references(process_fd, 123))
+        map_references, _maps = scanner._map_references(process_fd, 123)
+        references.extend(map_references)
     finally:
         os.close(process_fd)
 
@@ -211,8 +274,8 @@ def test_maps_without_one_exact_map_files_object_fail_closed(tmp_path: Path) -> 
     (process / "map_files").mkdir(parents=True)
     status = target.stat()
     (process / "maps").write_text(
-        f"1000-2000 r--p 00000000 {os.major(status.st_dev):x}:{os.minor(status.st_dev):x} "
-        f"{status.st_ino} {target}\n",
+        f"1000-2000 r--p 00000000 {os.major(status.st_dev):x}:"
+        f"{os.minor(status.st_dev):x} {status.st_ino} {target}\n",
         encoding="ascii",
     )
     scanner = probe._LinuxProcScanner(Path("/proc"), index)
@@ -227,10 +290,10 @@ def test_maps_without_one_exact_map_files_object_fail_closed(tmp_path: Path) -> 
 @pytest.mark.parametrize(
     "issue",
     [
-        probe._ProbeIssue("proc_permission_denied", pid=7, source="map_files"),
-        probe._ProbeIssue("proc_maps_invalid", pid=7, source="maps"),
+        probe._ProbeIssue("proc_permission_denied", tgid=7, tid=8, source="map_files"),
+        probe._ProbeIssue("proc_maps_invalid", tgid=7, tid=8, source="maps"),
         probe._ProbeIssue("proc_surface_unsupported", source="proc"),
-        probe._ProbeIssue("proc_observation_raced", pid=7, source="fd"),
+        probe._ProbeIssue("proc_observation_raced", tgid=7, tid=8, source="fd"),
     ],
 )
 def test_permission_parse_unsupported_and_race_never_claim_completeness(
@@ -245,9 +308,13 @@ def test_permission_parse_unsupported_and_race_never_claim_completeness(
     receipt = probe.probe_namespace_visible_proc_references(index, _capture_pass=fail)
 
     assert receipt["status"] == "ambiguous"
-    assert receipt["complete"] is False
+    assert receipt["diagnostic_complete"] is False
+    assert receipt["delete_authority"] is False
     assert receipt["matches"] == []
-    assert receipt["ambiguities"] == [{"code": issue.code, "pid": issue.pid, "source": issue.source}]
+    assert receipt["ambiguities"] == [
+        {"code": issue.code, "source": issue.source, "tgid": issue.tgid, "tid": issue.tid}
+    ]
+    probe.canonical_probe_receipt_bytes(receipt, expected_target_index=index)
 
 
 def test_eacces_and_eperm_have_one_closed_permission_code() -> None:
@@ -257,16 +324,15 @@ def test_eacces_and_eperm_have_one_closed_permission_code() -> None:
             pid=42,
             source="map_files",
         )
-        assert (issue.code, issue.pid, issue.source) == (
+        assert (issue.code, issue.tgid, issue.tid, issue.source) == (
             "proc_permission_denied",
+            42,
             42,
             "map_files",
         )
 
 
-def test_fixed_point_change_is_ambiguous_even_when_both_passes_are_individually_valid(
-    tmp_path: Path,
-) -> None:
+def test_fixed_point_change_is_ambiguous_even_when_passes_are_valid(tmp_path: Path) -> None:
     index = _index(tmp_path, probe.ObjectKey(8, 11, stat.S_IFREG))
     observations = iter(
         (
@@ -281,26 +347,274 @@ def test_fixed_point_change_is_ambiguous_even_when_both_passes_are_individually_
     )
 
     assert receipt["status"] == "ambiguous"
-    assert receipt["complete"] is False
+    assert receipt["diagnostic_complete"] is False
     assert receipt["ambiguities"][0]["code"] == "proc_fixed_point_changed"
 
 
-def test_pid_epoch_binds_boot_pid_starttime_and_proc_inode() -> None:
+def test_task_epoch_binds_boot_tgid_tid_starttime_and_proc_inode() -> None:
     boot = hashlib.sha256(b"boot").hexdigest()
-    baseline = probe._pid_epoch_sha256(boot, 123, 456, (7, 8))
+    baseline = probe._task_epoch_sha256(boot, 123, 124, 456, (7, 8))
 
     assert (
         len(
             {
                 baseline,
-                probe._pid_epoch_sha256(hashlib.sha256(b"other-boot").hexdigest(), 123, 456, (7, 8)),
-                probe._pid_epoch_sha256(boot, 124, 456, (7, 8)),
-                probe._pid_epoch_sha256(boot, 123, 457, (7, 8)),
-                probe._pid_epoch_sha256(boot, 123, 456, (7, 9)),
+                probe._task_epoch_sha256(hashlib.sha256(b"other-boot").hexdigest(), 123, 124, 456, (7, 8)),
+                probe._task_epoch_sha256(boot, 125, 124, 456, (7, 8)),
+                probe._task_epoch_sha256(boot, 123, 125, 456, (7, 8)),
+                probe._task_epoch_sha256(boot, 123, 124, 457, (7, 8)),
+                probe._task_epoch_sha256(boot, 123, 124, 456, (7, 9)),
             }
         )
-        == 5
+        == 6
     )
+
+
+def test_validator_binds_expected_target_index_and_exact_counts(tmp_path: Path) -> None:
+    first = _index(tmp_path, probe.ObjectKey(8, 11, stat.S_IFREG))
+    second = probe.build_target_index(
+        [
+            probe.ProbeTarget(
+                "retired-release",
+                (tmp_path / "other",),
+                (probe.ObjectKey(8, 12, stat.S_IFREG),),
+            )
+        ]
+    )
+    receipt = probe.probe_namespace_visible_proc_references(
+        first,
+        _capture_pass=_capture(_observation()),
+    )
+
+    with pytest.raises(probe.ProcProbeInputError, match="probe_receipt_invalid"):
+        probe.canonical_probe_receipt_bytes(receipt, expected_target_index=second)
+
+    forged = copy.deepcopy(receipt)
+    forged["target_object_count"] += 1
+    _resign(forged)
+    with pytest.raises(probe.ProcProbeInputError, match="probe_receipt_invalid"):
+        probe.canonical_probe_receipt_bytes(forged, expected_target_index=first)
+
+
+@pytest.mark.parametrize(
+    ("path", "value"),
+    [
+        (("ambiguities", 0, "code"), "invented_issue"),
+        (("ambiguities", 0, "source"), "invented_source"),
+    ],
+)
+def test_validator_rejects_open_ended_issue_taxonomy(
+    tmp_path: Path,
+    path: tuple[str, int, str],
+    value: str,
+) -> None:
+    index = _index(tmp_path, probe.ObjectKey(8, 11, stat.S_IFREG))
+    receipt = probe.probe_namespace_visible_proc_references(
+        index,
+        _capture_pass=lambda _index: (_ for _ in ()).throw(
+            probe._ProbeIssue("proc_permission_denied", tgid=7, tid=8, source="fd")
+        ),
+    )
+    forged = copy.deepcopy(receipt)
+    forged[path[0]][path[1]][path[2]] = value
+    _resign(forged)
+
+    with pytest.raises(probe.ProcProbeInputError, match="probe_receipt_invalid"):
+        probe.canonical_probe_receipt_bytes(forged, expected_target_index=index)
+
+
+def test_validator_rejects_invalid_object_source_order_and_duplicates(tmp_path: Path) -> None:
+    object_key = probe.ObjectKey(8, 11, stat.S_IFREG)
+    index = _index(tmp_path, object_key)
+    matches = tuple(sorted((_match(object_key, entry="8"), _match(object_key, entry="9"))))
+    receipt = probe.probe_namespace_visible_proc_references(
+        index,
+        _capture_pass=_capture(_observation(matches=matches)),
+    )
+    probe.canonical_probe_receipt_bytes(receipt, expected_target_index=index)
+
+    mutations: list[dict[str, Any]] = []
+    invalid_object = copy.deepcopy(receipt)
+    invalid_object["matches"][0]["object"][1] = 0
+    mutations.append(invalid_object)
+    invalid_source = copy.deepcopy(receipt)
+    invalid_source["matches"][0]["source"] = "other"
+    mutations.append(invalid_source)
+    reversed_matches = copy.deepcopy(receipt)
+    reversed_matches["matches"].reverse()
+    mutations.append(reversed_matches)
+    duplicate = copy.deepcopy(receipt)
+    duplicate["matches"][1] = copy.deepcopy(duplicate["matches"][0])
+    mutations.append(duplicate)
+
+    for forged in mutations:
+        _resign(forged)
+        with pytest.raises(probe.ProcProbeInputError, match="probe_receipt_invalid"):
+            probe.canonical_probe_receipt_bytes(forged, expected_target_index=index)
+
+
+def test_self_authored_receipt_cannot_promote_itself_to_effect_authority(tmp_path: Path) -> None:
+    index = _index(tmp_path, probe.ObjectKey(8, 11, stat.S_IFREG))
+    receipt = probe.probe_namespace_visible_proc_references(
+        index,
+        _capture_pass=_capture(_observation()),
+    )
+    forged = copy.deepcopy(receipt)
+    forged["authority"] = "delete"
+    forged["delete_authority"] = True
+    forged["open_inventory_complete_authority"] = True
+    forged["universal_absence_proof"] = True
+    _resign(forged)
+
+    with pytest.raises(probe.ProcProbeInputError, match="probe_receipt_invalid"):
+        probe.canonical_probe_receipt_bytes(forged, expected_target_index=index)
+
+
+def test_unshared_worker_fd_and_cwd_are_seen_when_leader_holds_neither(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    target = tmp_path / "worker-only.bin"
+    target.write_bytes(b"worker-only")
+    worker_directory = tmp_path / "worker-cwd"
+    worker_directory.mkdir()
+    file_key = probe.ObjectKey.from_stat(target.stat())
+    directory_key = probe.ObjectKey.from_stat(worker_directory.stat())
+    index = _index(tmp_path, file_key, directory_key)
+    helper = r"""
+import ctypes
+import os
+import sys
+import threading
+
+ready = threading.Event()
+release = threading.Event()
+result = {}
+libc = ctypes.CDLL(None, use_errno=True)
+
+def worker():
+    if libc.unshare(0x00000200 | 0x00000400) != 0:
+        result["errno"] = ctypes.get_errno()
+        ready.set()
+        return
+    os.chdir(sys.argv[2])
+    descriptor = os.open(sys.argv[1], os.O_RDONLY)
+    try:
+        result["tid"] = threading.get_native_id()
+        ready.set()
+        release.wait()
+    finally:
+        os.close(descriptor)
+
+thread = threading.Thread(target=worker)
+thread.start()
+ready.wait()
+if "errno" in result:
+    print(f"ERR {result['errno']}", flush=True)
+else:
+    print(f"OK {os.getpid()} {result['tid']}", flush=True)
+sys.stdin.buffer.read(1)
+release.set()
+thread.join()
+"""
+    child = subprocess.Popen(
+        [sys.executable, "-c", helper, str(target), str(worker_directory)],
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=False,
+    )
+    try:
+        assert child.stdout is not None
+        readable, _, _ = select.select([child.stdout], [], [], 5)
+        assert readable, "unshare helper did not become ready"
+        fields = child.stdout.readline().decode("ascii").strip().split()
+        assert fields and fields[0] == "OK", (
+            os.strerror(int(fields[1])) if fields and fields[0] == "ERR" else fields
+        )
+        tgid, worker_tid = int(fields[1]), int(fields[2])
+        assert worker_tid != tgid
+        assert Path(os.readlink(f"/proc/{tgid}/task/{tgid}/cwd")) != worker_directory
+
+        scanner = probe._LinuxProcScanner(Path("/proc"), index)
+        with scanner:
+            scope = scanner._scope_identity()
+            tgid_fd = scanner._open_pid(tgid)
+            try:
+                task_directory = scanner._open_directory_at(
+                    tgid_fd,
+                    "task",
+                    pid=tgid,
+                    source="task",
+                )
+                try:
+                    tids = scanner._task_names(task_directory, tgid)
+                    expected = {}
+                    for tid in tids:
+                        task_fd = scanner._open_task(task_directory, tgid, tid)
+                        try:
+                            expected[tid] = scanner._task_epoch_from_fd(
+                                task_fd,
+                                boot_id_sha256=scope.boot_id_sha256,
+                                tgid=tgid,
+                                tid=tid,
+                            )
+                        finally:
+                            scanner._close_owned(task_fd)
+                finally:
+                    scanner._close_owned(task_directory)
+            finally:
+                scanner._close_owned(tgid_fd)
+            assert worker_tid in expected
+
+            # Some test hosts deny even self /proc/*/map_files. This regression
+            # isolates TGID/TID closure and preserves the exact maps projection
+            # used by the shared-mm proof while bypassing only that host policy.
+            def maps_without_privileged_links(
+                pid_fd: int,
+                pid: int,
+            ) -> tuple[list[probe._Reference], tuple[probe._MapRecord, ...]]:
+                raw = probe._read_bounded_at(
+                    pid_fd,
+                    "maps",
+                    maximum=probe.MAX_PROC_FILE_BYTES,
+                    pid=pid,
+                    source="maps",
+                )
+                return [], probe._parse_maps(raw, pid=pid)
+
+            monkeypatch.setattr(scanner, "_map_references", maps_without_privileged_links)
+            observations = scanner._scan_tgid(
+                tgid,
+                expected,
+                boot_id_sha256=scope.boot_id_sha256,
+            )
+
+        worker_matches = {
+            match.reference.source
+            for observation in observations
+            if observation.tid == worker_tid
+            for match in observation.matches
+        }
+        leader_objects = {
+            match.reference.object_key
+            for observation in observations
+            if observation.tid == tgid
+            for match in observation.matches
+        }
+        assert {"fd", "cwd"} <= worker_matches
+        assert file_key not in leader_objects
+        assert directory_key not in leader_objects
+    finally:
+        if child.stdin is not None:
+            child.stdin.write(b"x")
+            child.stdin.flush()
+        try:
+            _stdout, stderr = child.communicate(timeout=5)
+        except subprocess.TimeoutExpired:
+            child.terminate()
+            _stdout, stderr = child.communicate(timeout=5)
+        assert child.returncode == 0, stderr.decode(errors="replace")
 
 
 def test_canonical_receipt_rejects_tampering_and_non_linux_proc_roots(tmp_path: Path) -> None:
@@ -311,9 +625,10 @@ def test_canonical_receipt_rejects_tampering_and_non_linux_proc_roots(tmp_path: 
     )
     receipt["status"] = "referenced"
     with pytest.raises(probe.ProcProbeInputError, match="probe_receipt_invalid"):
-        probe.canonical_probe_receipt_bytes(receipt)
+        probe.canonical_probe_receipt_bytes(receipt, expected_target_index=index)
 
     unsupported = probe.probe_namespace_visible_proc_references(index, proc_root=tmp_path)
     assert unsupported["status"] == "ambiguous"
-    assert unsupported["complete"] is False
+    assert unsupported["diagnostic_complete"] is False
     assert unsupported["ambiguities"][0]["code"] == "proc_surface_unsupported"
+    probe.canonical_probe_receipt_bytes(unsupported, expected_target_index=index)
