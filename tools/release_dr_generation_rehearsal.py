@@ -13,6 +13,7 @@ import argparse
 import hashlib
 import json
 import os
+import resource
 import selectors
 import shutil
 import signal
@@ -20,9 +21,10 @@ import sqlite3
 import stat
 import subprocess
 import time
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from contextlib import suppress
 from dataclasses import dataclass
+from functools import partial
 from pathlib import Path
 from typing import Any
 
@@ -30,7 +32,7 @@ from tools import immutable_release_operator as release_operator
 from tools import release_dr_generation_authentication as dr_auth
 from tools import release_dr_generation_index as dr_index
 
-REHEARSAL_RECEIPT_SCHEMA = "friday.immutable-release-dr-rehearsal-receipt.v1"
+REHEARSAL_RECEIPT_SCHEMA = dr_index.REHEARSAL_RECEIPT_SCHEMA
 _SCRATCH_PARENT = Path("/var/tmp")
 _SCRATCH_PREFIX = "friday-dr-rehearsal-"
 _SCRATCH_REGISTRY = ".friday-dr-rehearsal-registry.v1"
@@ -40,62 +42,21 @@ _CHILD_TIMEOUT_SECONDS = 600
 _CHILD_KILL_GRACE_SECONDS = 5
 _CHILD_INPUT_LIMIT_BYTES = 16_384
 _CHILD_OUTPUT_LIMIT_BYTES = 32_768
+_CHILD_ADDRESS_SPACE_LIMIT_BYTES = 4 << 30
+_CHILD_FILE_LIMIT_BYTES = 4 << 30
+# RLIMIT_NPROC is UID-wide (including threads), not namespace-local.  Keep a
+# fixed ceiling above the normal multi-worker host baseline while still
+# preventing an unbounded fork tree inside the isolated run.
+_CHILD_PROCESS_LIMIT = 4_096
+_CHILD_ADDITIONAL_TASK_LIMIT = 32
+_CHILD_OPEN_FILE_LIMIT = 256
+_SCRATCH_MAX_BYTES = 16 << 30
+_SCRATCH_MAX_INODES = 500_000
+_SCRATCH_MAX_DEPTH = 128
+_SCRATCH_FREE_RESERVE_BYTES = 2 << 30
+_RESOURCE_CHECK_INTERVAL_SECONDS = 5.0
 _HEX64 = frozenset("0123456789abcdef")
-_CHECKS = (
-    "authenticated_pending_bound",
-    "activation_source_reauthenticated",
-    "retained_release_identities_verified",
-    "database_materialized",
-    "inbox_materialized",
-    "obsidian_materialized_exactly",
-    "engineer_materialized_with_fresh_identity",
-    "scratch_checkpoint_authenticated",
-    "fault_after_migration_before_provision",
-    "rollback_restore_attempted",
-    "activation_rolled_back",
-    "four_surface_restore_exact",
-    "database_reopened_twice",
-    "inbox_reopened_twice",
-    "zero_systemctl_or_network_calls",
-    "scratch_removed_before_admission",
-    "source_unchanged_before_cas",
-)
-_RECEIPT_KEYS = frozenset(
-    {
-        "authentication_receipt_sha256",
-        "candidate_sha256",
-        "check_count",
-        "checkset_sha256",
-        "database_foreign_keys_clear",
-        "database_integrity_clear",
-        "database_reopen_count",
-        "database_schema",
-        "engineer_authority_present",
-        "engineer_exact",
-        "fault_boundary",
-        "four_surface_exact",
-        "four_surface_sha256",
-        "index_journal_sha256",
-        "index_revision",
-        "index_transaction_id",
-        "inbox_foreign_keys_clear",
-        "inbox_integrity_clear",
-        "inbox_reopen_count",
-        "network_call_count",
-        "obsidian_exact",
-        "production_surface_write_count",
-        "receipt_sha256",
-        "restore_release",
-        "rollback_restore_observed",
-        "rollback_tree_sha256",
-        "rolled_back",
-        "schema",
-        "scratch_removed",
-        "source",
-        "status",
-        "systemctl_call_count",
-    }
-)
+_CHECKS = dr_index.DR_REHEARSAL_CHECKS
 
 
 class DRGenerationRehearsalError(RuntimeError):
@@ -249,6 +210,97 @@ def _scratch_identity(path: Path) -> tuple[int, int, int, int]:
     )
 
 
+def _tree_usage_fd(directory_fd: int, *, depth: int = 0) -> tuple[int, int]:
+    """Measure a pinned tree without following symlinks, failing at fixed bounds."""
+
+    if depth > _SCRATCH_MAX_DEPTH:
+        raise release_operator.ReleaseFailure("dr_rehearsal_resource_budget_exceeded")
+    root = os.fstat(directory_fd)
+    total_bytes = max(int(root.st_size), int(root.st_blocks) * 512)
+    total_inodes = 1
+    directory_flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0)
+    directory_flags |= getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0)
+    with os.scandir(directory_fd) as entries:
+        for entry in entries:
+            name = entry.name
+            if name in {"", ".", ".."}:
+                raise release_operator.ReleaseFailure("dr_rehearsal_resource_tree_invalid")
+            item = os.stat(name, dir_fd=directory_fd, follow_symlinks=False)
+            if item.st_uid != os.geteuid():
+                raise release_operator.ReleaseFailure("dr_rehearsal_resource_tree_invalid")
+            item_bytes = max(int(item.st_size), int(item.st_blocks) * 512)
+            total_bytes += item_bytes
+            total_inodes += 1
+            if total_bytes > _SCRATCH_MAX_BYTES or total_inodes > _SCRATCH_MAX_INODES:
+                raise release_operator.ReleaseFailure("dr_rehearsal_resource_budget_exceeded")
+            if stat.S_ISDIR(item.st_mode):
+                child_fd = os.open(name, directory_flags, dir_fd=directory_fd)
+                try:
+                    opened = os.fstat(child_fd)
+                    if (opened.st_dev, opened.st_ino) != (item.st_dev, item.st_ino):
+                        raise release_operator.ReleaseFailure("dr_rehearsal_resource_tree_invalid")
+                    child_bytes, child_inodes = _tree_usage_fd(child_fd, depth=depth + 1)
+                finally:
+                    os.close(child_fd)
+                # The recursive result includes the directory already counted here.
+                total_bytes += child_bytes - item_bytes
+                total_inodes += child_inodes - 1
+            elif not (stat.S_ISREG(item.st_mode) or stat.S_ISLNK(item.st_mode)):
+                raise release_operator.ReleaseFailure("dr_rehearsal_resource_tree_invalid")
+            if total_bytes > _SCRATCH_MAX_BYTES or total_inodes > _SCRATCH_MAX_INODES:
+                raise release_operator.ReleaseFailure("dr_rehearsal_resource_budget_exceeded")
+    return total_bytes, total_inodes
+
+
+def _assert_scratch_budget(directory_fd: int) -> tuple[int, int]:
+    try:
+        total_bytes, total_inodes = _tree_usage_fd(directory_fd)
+        filesystem = os.fstatvfs(directory_fd)
+    except release_operator.ReleaseFailure:
+        raise
+    except OSError as exc:
+        raise release_operator.ReleaseFailure("dr_rehearsal_resource_tree_invalid") from exc
+    if (
+        total_bytes > _SCRATCH_MAX_BYTES
+        or total_inodes > _SCRATCH_MAX_INODES
+        or int(filesystem.f_bavail) * int(filesystem.f_frsize) < _SCRATCH_FREE_RESERVE_BYTES
+    ):
+        raise release_operator.ReleaseFailure("dr_rehearsal_resource_budget_exceeded")
+    return total_bytes, total_inodes
+
+
+def _assert_projected_tree_budget(root: Path, source: Path, *, copies: int = 1) -> None:
+    if type(copies) is not int or copies <= 0:
+        raise release_operator.ReleaseFailure("dr_rehearsal_resource_budget_invalid")
+    flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_CLOEXEC", 0)
+    flags |= getattr(os, "O_NOFOLLOW", 0)
+    root_fd = source_fd = -1
+    try:
+        root_fd = os.open(root, flags)
+        source_fd = os.open(source, flags)
+        root_bytes, root_inodes = _assert_scratch_budget(root_fd)
+        source_bytes, source_inodes = _tree_usage_fd(source_fd)
+        filesystem = os.fstatvfs(root_fd)
+        projected_bytes = root_bytes + source_bytes * copies
+        projected_inodes = root_inodes + source_inodes * copies
+        if (
+            projected_bytes > _SCRATCH_MAX_BYTES
+            or projected_inodes > _SCRATCH_MAX_INODES
+            or int(filesystem.f_bavail) * int(filesystem.f_frsize) - source_bytes * copies
+            < _SCRATCH_FREE_RESERVE_BYTES
+        ):
+            raise release_operator.ReleaseFailure("dr_rehearsal_resource_budget_exceeded")
+    except release_operator.ReleaseFailure:
+        raise
+    except OSError as exc:
+        raise release_operator.ReleaseFailure("dr_rehearsal_resource_tree_invalid") from exc
+    finally:
+        if source_fd >= 0:
+            os.close(source_fd)
+        if root_fd >= 0:
+            os.close(root_fd)
+
+
 def _scratch_record(
     *,
     key: str,
@@ -268,6 +320,35 @@ def _scratch_record(
         "transaction_id": transaction_id,
     }
     return _canonical({**core, "record_sha256": _sha256(_canonical(core))}) + b"\n"
+
+
+def _prepared_scratch_identity(registry_fd: int, name: str) -> tuple[int, int, int, int]:
+    flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_CLOEXEC", 0)
+    flags |= getattr(os, "O_NOFOLLOW", 0)
+    descriptor = os.open(name, flags, dir_fd=registry_fd)
+    try:
+        opened = os.fstat(descriptor)
+        lexical = os.stat(name, dir_fd=registry_fd, follow_symlinks=False)
+        identity = (
+            int(opened.st_dev),
+            int(opened.st_ino),
+            int(opened.st_uid),
+            stat.S_IMODE(opened.st_mode),
+        )
+        if (
+            not stat.S_ISDIR(opened.st_mode)
+            or stat.S_ISLNK(lexical.st_mode)
+            or (opened.st_dev, opened.st_ino) != (lexical.st_dev, lexical.st_ino)
+            or opened.st_uid != os.geteuid()
+            or stat.S_IMODE(opened.st_mode) != 0o700
+        ):
+            raise DRGenerationRehearsalError("dr_rehearsal_scratch_cleanup_refused")
+        with os.scandir(descriptor) as entries:
+            if next(entries, None) is not None:
+                raise DRGenerationRehearsalError("dr_rehearsal_scratch_cleanup_refused")
+        return identity
+    finally:
+        os.close(descriptor)
 
 
 def _write_scratch_record(registry_fd: int, name: str, raw: bytes) -> None:
@@ -331,8 +412,7 @@ def _read_scratch_record(registry_fd: int, name: str) -> dict[str, Any] | None:
         lexical = os.stat(name, dir_fd=registry_fd, follow_symlinks=False)
         if (
             len(raw) > 4_096
-            or (before.st_dev, before.st_ino, before.st_size)
-            != (after.st_dev, after.st_ino, after.st_size)
+            or (before.st_dev, before.st_ino, before.st_size) != (after.st_dev, after.st_ino, after.st_size)
             or (before.st_dev, before.st_ino) != (lexical.st_dev, lexical.st_ino)
         ):
             raise DRGenerationRehearsalError("dr_rehearsal_scratch_record_invalid")
@@ -348,7 +428,7 @@ def _read_scratch_record(registry_fd: int, name: str) -> dict[str, Any] | None:
 
 
 def _remove_registered_tree(
-    registry: Path,
+    registry: Path | int,
     scratch_name: str,
     *,
     expected_identity: tuple[int, int, int, int] | None,
@@ -356,28 +436,57 @@ def _remove_registered_tree(
 ) -> bool:
     """Remove only the exact pinned scratch inode via an unexposed quarantine."""
 
-    if not {
-        os.open,
-        os.rename,
-        os.rmdir,
-        os.stat,
-        os.unlink,
-    }.issubset(os.supports_dir_fd) or os.stat not in os.supports_follow_symlinks:
+    if (
+        not {
+            os.open,
+            os.rename,
+            os.rmdir,
+            os.stat,
+            os.unlink,
+        }.issubset(os.supports_dir_fd)
+        or os.stat not in os.supports_follow_symlinks
+    ):
         raise DRGenerationRehearsalError("dr_rehearsal_safe_cleanup_unavailable")
-    registry_fd = os.open(
-        registry,
-        os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_CLOEXEC", 0),
-    )
-    scratch_fd = -1
+    registry_flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_CLOEXEC", 0)
+    registry_flags |= getattr(os, "O_NOFOLLOW", 0)
+    registry_fd = os.dup(registry) if isinstance(registry, int) else os.open(registry, registry_flags)
     quarantine = f".{scratch_name}.cleanup"
+    scratch_fd = -1
     try:
+        registry_status = os.fstat(registry_fd)
+        if (
+            not stat.S_ISDIR(registry_status.st_mode)
+            or registry_status.st_uid != os.geteuid()
+            or stat.S_IMODE(registry_status.st_mode) != 0o700
+        ):
+            raise DRGenerationRehearsalError("dr_rehearsal_scratch_cleanup_refused")
+        source_exists = False
+        quarantine_exists = False
         try:
-            lexical = os.stat(scratch_name, dir_fd=registry_fd, follow_symlinks=False)
+            os.stat(scratch_name, dir_fd=registry_fd, follow_symlinks=False)
         except FileNotFoundError:
+            pass
+        else:
+            source_exists = True
+        try:
+            os.stat(quarantine, dir_fd=registry_fd, follow_symlinks=False)
+        except FileNotFoundError:
+            pass
+        else:
+            quarantine_exists = True
+        if source_exists and quarantine_exists:
+            raise DRGenerationRehearsalError("dr_rehearsal_scratch_cleanup_refused")
+        if not source_exists and not quarantine_exists:
             return False
+        if quarantine_exists and expected_identity is None:
+            # A prepared record has not durably bound an inode, so it never
+            # authorises deletion of an already-quarantined pathname.
+            raise DRGenerationRehearsalError("dr_rehearsal_scratch_cleanup_refused")
+        target = scratch_name if source_exists else quarantine
+        lexical = os.stat(target, dir_fd=registry_fd, follow_symlinks=False)
         flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_CLOEXEC", 0)
         flags |= getattr(os, "O_NOFOLLOW", 0)
-        scratch_fd = os.open(scratch_name, flags, dir_fd=registry_fd)
+        scratch_fd = os.open(target, flags, dir_fd=registry_fd)
         opened = os.fstat(scratch_fd)
         observed = (
             int(opened.st_dev),
@@ -403,21 +512,19 @@ def _remove_registered_tree(
             and os.listdir(scratch_fd)
         ):
             raise DRGenerationRehearsalError("dr_rehearsal_scratch_cleanup_refused")
-        try:
-            os.stat(quarantine, dir_fd=registry_fd, follow_symlinks=False)
-        except FileNotFoundError:
-            pass
-        else:
-            raise DRGenerationRehearsalError("dr_rehearsal_scratch_cleanup_refused")
-        os.rename(
-            scratch_name,
-            quarantine,
-            src_dir_fd=registry_fd,
-            dst_dir_fd=registry_fd,
-        )
+        if source_exists:
+            os.rename(
+                scratch_name,
+                quarantine,
+                src_dir_fd=registry_fd,
+                dst_dir_fd=registry_fd,
+            )
+            os.fsync(registry_fd)
         quarantined = os.stat(quarantine, dir_fd=registry_fd, follow_symlinks=False)
         if (opened.st_dev, opened.st_ino) != (quarantined.st_dev, quarantined.st_ino):
             with suppress(OSError):
+                if not source_exists:
+                    raise OSError
                 os.rename(
                     quarantine,
                     scratch_name,
@@ -452,61 +559,84 @@ def _remove_registered_tree(
 def _empty_pinned_scratch_directory(directory_fd: int) -> None:
     """Empty one scratch directory without following a mutable root pathname."""
 
+    _empty_pinned_scratch_directory_bounded(directory_fd, depth=0, counter=[0])
+
+
+def _empty_pinned_scratch_directory_bounded(
+    directory_fd: int,
+    *,
+    depth: int,
+    counter: list[int],
+) -> None:
+    if depth > _SCRATCH_MAX_DEPTH:
+        raise DRGenerationRehearsalError("dr_rehearsal_scratch_cleanup_refused")
+
     flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_CLOEXEC", 0)
     flags |= getattr(os, "O_NOFOLLOW", 0)
-    for name in sorted(os.listdir(directory_fd)):
-        if name in {"", ".", ".."}:
-            raise DRGenerationRehearsalError("dr_rehearsal_scratch_cleanup_refused")
-        try:
-            lexical = os.stat(name, dir_fd=directory_fd, follow_symlinks=False)
-        except OSError as exc:
-            raise DRGenerationRehearsalError("dr_rehearsal_scratch_cleanup_refused") from exc
-        if lexical.st_uid != os.geteuid():
-            raise DRGenerationRehearsalError("dr_rehearsal_scratch_cleanup_refused")
-        if stat.S_ISDIR(lexical.st_mode):
-            child_fd = -1
+    with os.scandir(directory_fd) as entries:
+        names = (entry.name for entry in entries)
+        for name in names:
+            counter[0] += 1
+            if counter[0] > _SCRATCH_MAX_INODES:
+                raise DRGenerationRehearsalError("dr_rehearsal_scratch_cleanup_refused")
+            if name in {"", ".", ".."}:
+                raise DRGenerationRehearsalError("dr_rehearsal_scratch_cleanup_refused")
             try:
-                child_fd = os.open(name, flags, dir_fd=directory_fd)
-                opened = os.fstat(child_fd)
-                if (
-                    (opened.st_dev, opened.st_ino) != (lexical.st_dev, lexical.st_ino)
-                    or stat.S_IMODE(opened.st_mode) & 0o022
-                ):
-                    raise DRGenerationRehearsalError("dr_rehearsal_scratch_cleanup_refused")
-                _empty_pinned_scratch_directory(child_fd)
-                final = os.stat(name, dir_fd=directory_fd, follow_symlinks=False)
-                if (opened.st_dev, opened.st_ino) != (final.st_dev, final.st_ino):
-                    raise DRGenerationRehearsalError("dr_rehearsal_scratch_cleanup_refused")
-                os.rmdir(name, dir_fd=directory_fd)
-            finally:
-                if child_fd >= 0:
-                    os.close(child_fd)
-            continue
-        if stat.S_ISREG(lexical.st_mode):
-            file_flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0)
-            file_flags |= getattr(os, "O_NOFOLLOW", 0)
-            file_fd = -1
-            try:
-                file_fd = os.open(name, file_flags, dir_fd=directory_fd)
-                opened = os.fstat(file_fd)
-                if (
-                    (opened.st_dev, opened.st_ino) != (lexical.st_dev, lexical.st_ino)
-                    or opened.st_nlink != 1
-                    or stat.S_IMODE(opened.st_mode) & 0o022
-                ):
-                    raise DRGenerationRehearsalError("dr_rehearsal_scratch_cleanup_refused")
-                final = os.stat(name, dir_fd=directory_fd, follow_symlinks=False)
-                if (opened.st_dev, opened.st_ino) != (final.st_dev, final.st_ino):
-                    raise DRGenerationRehearsalError("dr_rehearsal_scratch_cleanup_refused")
+                lexical = os.stat(name, dir_fd=directory_fd, follow_symlinks=False)
+            except OSError as exc:
+                raise DRGenerationRehearsalError("dr_rehearsal_scratch_cleanup_refused") from exc
+            if lexical.st_uid != os.geteuid():
+                raise DRGenerationRehearsalError("dr_rehearsal_scratch_cleanup_refused")
+            if stat.S_ISDIR(lexical.st_mode):
+                child_fd = -1
+                try:
+                    child_fd = os.open(name, flags, dir_fd=directory_fd)
+                    opened = os.fstat(child_fd)
+                    if (opened.st_dev, opened.st_ino) != (
+                        lexical.st_dev,
+                        lexical.st_ino,
+                    ) or stat.S_IMODE(opened.st_mode) & 0o022:
+                        raise DRGenerationRehearsalError("dr_rehearsal_scratch_cleanup_refused")
+                    # Authenticated release copies are intentionally sealed 0500.
+                    os.fchmod(child_fd, 0o700)
+                    _empty_pinned_scratch_directory_bounded(
+                        child_fd,
+                        depth=depth + 1,
+                        counter=counter,
+                    )
+                    final = os.stat(name, dir_fd=directory_fd, follow_symlinks=False)
+                    if (opened.st_dev, opened.st_ino) != (final.st_dev, final.st_ino):
+                        raise DRGenerationRehearsalError("dr_rehearsal_scratch_cleanup_refused")
+                    os.rmdir(name, dir_fd=directory_fd)
+                finally:
+                    if child_fd >= 0:
+                        os.close(child_fd)
+                continue
+            if stat.S_ISREG(lexical.st_mode):
+                file_flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0)
+                file_flags |= getattr(os, "O_NOFOLLOW", 0)
+                file_fd = -1
+                try:
+                    file_fd = os.open(name, file_flags, dir_fd=directory_fd)
+                    opened = os.fstat(file_fd)
+                    if (
+                        (opened.st_dev, opened.st_ino) != (lexical.st_dev, lexical.st_ino)
+                        or opened.st_nlink != 1
+                        or stat.S_IMODE(opened.st_mode) & 0o022
+                    ):
+                        raise DRGenerationRehearsalError("dr_rehearsal_scratch_cleanup_refused")
+                    final = os.stat(name, dir_fd=directory_fd, follow_symlinks=False)
+                    if (opened.st_dev, opened.st_ino) != (final.st_dev, final.st_ino):
+                        raise DRGenerationRehearsalError("dr_rehearsal_scratch_cleanup_refused")
+                    os.unlink(name, dir_fd=directory_fd)
+                finally:
+                    if file_fd >= 0:
+                        os.close(file_fd)
+                continue
+            if stat.S_ISLNK(lexical.st_mode):
                 os.unlink(name, dir_fd=directory_fd)
-            finally:
-                if file_fd >= 0:
-                    os.close(file_fd)
-            continue
-        if stat.S_ISLNK(lexical.st_mode):
-            os.unlink(name, dir_fd=directory_fd)
-            continue
-        raise DRGenerationRehearsalError("dr_rehearsal_scratch_cleanup_refused")
+                continue
+            raise DRGenerationRehearsalError("dr_rehearsal_scratch_cleanup_refused")
     os.fsync(directory_fd)
 
 
@@ -567,11 +697,30 @@ def _new_scratch(*, transaction_id: str, candidate_sha256: str) -> _ScratchLease
                     or (existing.get("phase") == "prepared") != (identity is None)
                 ):
                     raise DRGenerationRehearsalError("dr_rehearsal_scratch_record_invalid")
+                if identity is None:
+                    # mkdir may have completed before the prepared->active
+                    # record CAS.  Bind that exact, still-empty inode durably
+                    # before any rename so a second crash remains recoverable.
+                    try:
+                        os.stat(scratch_name, dir_fd=registry_fd, follow_symlinks=False)
+                    except FileNotFoundError:
+                        pass
+                    else:
+                        identity = _prepared_scratch_identity(registry_fd, scratch_name)
+                        active = _scratch_record(
+                            key=key,
+                            transaction_id=transaction_id,
+                            candidate_sha256=candidate_sha256,
+                            scratch_name=scratch_name,
+                            phase="active",
+                            identity=identity,
+                        )
+                        _write_scratch_record(registry_fd, record_name, active)
                 _remove_registered_tree(
-                    registry,
+                    registry_fd,
                     scratch_name,
                     expected_identity=identity,
-                    require_empty=identity is None,
+                    require_empty=existing.get("phase") == "prepared",
                 )
                 os.unlink(record_name, dir_fd=registry_fd)
                 os.fsync(registry_fd)
@@ -639,7 +788,7 @@ def _remove_current_scratch(lease: _ScratchLease) -> None:
         if record is None or _canonical(record) + b"\n" != expected:
             raise DRGenerationRehearsalError("dr_rehearsal_scratch_record_invalid")
         _remove_registered_tree(
-            lease.registry,
+            registry_fd,
             lease.root.name,
             expected_identity=lease.identity,
         )
@@ -770,10 +919,17 @@ def _materialize_exact_releases(
     for index, release in enumerate(releases):
         if release in result:
             continue
+        _assert_projected_tree_budget(sealed_root.parent, release.root)
         result[release] = _materialize_exact_release_copy(
             release,
             sealed_root / f"release-{index}-{release.tree_manifest_sha256}",
         )
+        flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_CLOEXEC", 0)
+        scratch_fd = os.open(sealed_root.parent, flags | getattr(os, "O_NOFOLLOW", 0))
+        try:
+            _assert_scratch_budget(scratch_fd)
+        finally:
+            os.close(scratch_fd)
     return result
 
 
@@ -906,6 +1062,10 @@ def _bwrap_argv(
 
 
 def _kill_bwrap_process_group(process: subprocess.Popen[bytes]) -> None:
+    # A reaped PID may already name an unrelated process.  poll() also reaps a
+    # completed child, so never issue a numeric process-group signal afterward.
+    if process.poll() is not None:
+        return
     try:
         os.killpg(process.pid, signal.SIGKILL)
     except ProcessLookupError:
@@ -916,13 +1076,52 @@ def _kill_bwrap_process_group(process: subprocess.Popen[bytes]) -> None:
         process.wait(timeout=_CHILD_KILL_GRACE_SECONDS)
     except subprocess.TimeoutExpired as exc:
         raise release_operator.ReleaseFailure("dr_rehearsal_child_cleanup_failed") from exc
+
+
+def _bounded_child_process_limit() -> int:
+    """Return a UID-wide RLIMIT_NPROC ceiling allowing only a small delta."""
+
+    tasks = 0
     try:
-        os.killpg(process.pid, 0)
-    except ProcessLookupError:
-        return
+        for process in Path("/proc").iterdir():
+            if not process.name.isdigit():
+                continue
+            try:
+                if process.stat().st_uid == os.geteuid():
+                    with os.scandir(process / "task") as task_entries:
+                        for _entry in task_entries:
+                            tasks += 1
+                            if tasks + _CHILD_ADDITIONAL_TASK_LIMIT > _CHILD_PROCESS_LIMIT:
+                                raise release_operator.ReleaseFailure(
+                                    "dr_rehearsal_resource_budget_unavailable"
+                                )
+            except (FileNotFoundError, ProcessLookupError, PermissionError):
+                continue
+            except release_operator.ReleaseFailure:
+                raise
     except OSError as exc:
-        raise release_operator.ReleaseFailure("dr_rehearsal_child_cleanup_failed") from exc
-    raise release_operator.ReleaseFailure("dr_rehearsal_child_descendant_survived")
+        raise release_operator.ReleaseFailure("dr_rehearsal_resource_budget_unavailable") from exc
+    bounded = tasks + _CHILD_ADDITIONAL_TASK_LIMIT
+    if tasks <= 0 or bounded > _CHILD_PROCESS_LIMIT:
+        raise release_operator.ReleaseFailure("dr_rehearsal_resource_budget_unavailable")
+    return bounded
+
+
+def _limit_rehearsal_child(*, process_limit: int = _CHILD_PROCESS_LIMIT) -> None:
+    """Apply fixed inherited budgets before exec'ing the unprivileged sandbox."""
+
+    limits = (
+        (resource.RLIMIT_AS, _CHILD_ADDRESS_SPACE_LIMIT_BYTES),
+        (resource.RLIMIT_FSIZE, _CHILD_FILE_LIMIT_BYTES),
+        (resource.RLIMIT_NPROC, process_limit),
+        (resource.RLIMIT_NOFILE, _CHILD_OPEN_FILE_LIMIT),
+        (resource.RLIMIT_CORE, 0),
+        (resource.RLIMIT_CPU, _CHILD_TIMEOUT_SECONDS + _CHILD_KILL_GRACE_SECONDS),
+    )
+    for kind, requested in limits:
+        _soft, hard = resource.getrlimit(kind)
+        bounded = requested if hard == resource.RLIM_INFINITY else min(requested, hard)
+        resource.setrlimit(kind, (bounded, bounded))
 
 
 def _bounded_communicate(
@@ -930,6 +1129,7 @@ def _bounded_communicate(
     *,
     input_bytes: bytes,
     timeout: int,
+    resource_check: Callable[[], None] | None = None,
 ) -> tuple[bytes, bytes]:
     """Drain a sealed child without unbounded pipe buffering."""
 
@@ -958,6 +1158,8 @@ def _bounded_communicate(
             os.set_blocking(descriptor, False)
             selector.register(stream, selectors.EVENT_READ)
         while selector.get_map():
+            if resource_check is not None:
+                resource_check()
             remaining = deadline - time.monotonic()
             if remaining <= 0:
                 raise subprocess.TimeoutExpired(process.args, timeout)
@@ -971,10 +1173,18 @@ def _bounded_communicate(
                 buffers[name].extend(chunk)
                 if sum(len(value) for value in buffers.values()) > _CHILD_OUTPUT_LIMIT_BYTES:
                     raise release_operator.ReleaseFailure("dr_rehearsal_release_output_too_large")
-        remaining = deadline - time.monotonic()
-        if remaining <= 0:
-            raise subprocess.TimeoutExpired(process.args, timeout)
-        process.wait(timeout=remaining)
+        while process.poll() is None:
+            if resource_check is not None:
+                resource_check()
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise subprocess.TimeoutExpired(process.args, timeout)
+            try:
+                process.wait(timeout=min(remaining, 0.25))
+            except subprocess.TimeoutExpired:
+                continue
+        if resource_check is not None:
+            resource_check()
     finally:
         selector.close()
     return bytes(buffers["stdout"]), bytes(buffers["stderr"])
@@ -986,8 +1196,10 @@ def _execute_bwrap(
     input_bytes: bytes,
     timeout: int,
     pass_fds: Sequence[int] = (),
+    resource_check: Callable[[], None] | None = None,
 ) -> subprocess.CompletedProcess[bytes]:
     identity = _trusted_bwrap_identity()
+    process_limit = _bounded_child_process_limit()
     try:
         process = subprocess.Popen(  # noqa: S603
             list(command),
@@ -998,17 +1210,18 @@ def _execute_bwrap(
             env={"LANG": "C", "LC_ALL": "C"},
             start_new_session=True,
             pass_fds=tuple(pass_fds),
+            preexec_fn=partial(_limit_rehearsal_child, process_limit=process_limit),
         )
     except (OSError, subprocess.SubprocessError) as exc:
         raise release_operator.ReleaseFailure("dr_rehearsal_release_open_failed") from exc
-    if _trusted_bwrap_identity() != identity:
-        _kill_bwrap_process_group(process)
-        raise release_operator.ReleaseFailure("dr_rehearsal_bwrap_changed")
     try:
+        if _trusted_bwrap_identity() != identity:
+            raise release_operator.ReleaseFailure("dr_rehearsal_bwrap_changed")
         stdout, stderr = _bounded_communicate(
             process,
             input_bytes=input_bytes,
             timeout=timeout,
+            resource_check=resource_check,
         )
     except subprocess.TimeoutExpired as exc:
         _kill_bwrap_process_group(process)
@@ -1016,17 +1229,6 @@ def _execute_bwrap(
     except BaseException:
         _kill_bwrap_process_group(process)
         raise
-    # bwrap is PID 1 of the private process namespace and does not return until
-    # its descendants are gone.  A surviving outer process group is a failure.
-    try:
-        os.killpg(process.pid, 0)
-    except ProcessLookupError:
-        pass
-    except OSError as exc:
-        raise release_operator.ReleaseFailure("dr_rehearsal_child_cleanup_failed") from exc
-    else:
-        _kill_bwrap_process_group(process)
-        raise release_operator.ReleaseFailure("dr_rehearsal_child_descendant_survived")
     return subprocess.CompletedProcess(command, int(process.returncode or 0), stdout, stderr)
 
 
@@ -1041,21 +1243,32 @@ def _run_release_python(
 ) -> bytes:
     release_fd = -1
     workspace_fd = -1
+    resource_fd = -1
     flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_CLOEXEC", 0)
     flags |= getattr(os, "O_NOFOLLOW", 0)
     try:
         release_fd = os.open(sealed.root, flags)
-        workspace_fd = os.open(config.friday_home, flags)
+        resource_fd = os.open(config.friday_home.parent, flags)
+        workspace_fd = os.open(config.friday_home.name, flags, dir_fd=resource_fd)
         release_opened = os.fstat(release_fd)
         release_lexical = os.stat(sealed.root, follow_symlinks=False)
+        resource_opened = os.fstat(resource_fd)
+        resource_lexical = os.stat(config.friday_home.parent, follow_symlinks=False)
         workspace_opened = os.fstat(workspace_fd)
-        workspace_lexical = os.stat(config.friday_home, follow_symlinks=False)
+        workspace_lexical = os.stat(
+            config.friday_home.name,
+            dir_fd=resource_fd,
+            follow_symlinks=False,
+        )
         if (
-            (release_opened.st_dev, release_opened.st_ino)
-            != (release_lexical.st_dev, release_lexical.st_ino)
+            (release_opened.st_dev, release_opened.st_ino) != (release_lexical.st_dev, release_lexical.st_ino)
+            or (resource_opened.st_dev, resource_opened.st_ino)
+            != (resource_lexical.st_dev, resource_lexical.st_ino)
             or (workspace_opened.st_dev, workspace_opened.st_ino)
             != (workspace_lexical.st_dev, workspace_lexical.st_ino)
             or stat.S_IMODE(release_opened.st_mode) != 0o500
+            or resource_opened.st_uid != os.geteuid()
+            or stat.S_IMODE(resource_opened.st_mode) != 0o700
             or stat.S_IMODE(workspace_opened.st_mode) != 0o700
         ):
             raise release_operator.ReleaseFailure("dr_rehearsal_mount_identity_invalid")
@@ -1067,12 +1280,24 @@ def _run_release_python(
             script=script,
             arguments=arguments,
         )
+        _assert_scratch_budget(resource_fd)
+        next_resource_check = time.monotonic() + _RESOURCE_CHECK_INTERVAL_SECONDS
+
+        def check_resources() -> None:
+            nonlocal next_resource_check
+            now = time.monotonic()
+            if now >= next_resource_check:
+                _assert_scratch_budget(resource_fd)
+                next_resource_check = now + _RESOURCE_CHECK_INTERVAL_SECONDS
+
         completed = _execute_bwrap(
             command,
             input_bytes=input_bytes,
             timeout=_CHILD_TIMEOUT_SECONDS,
             pass_fds=(release_fd, workspace_fd),
+            resource_check=check_resources,
         )
+        _assert_scratch_budget(resource_fd)
         copied_after = release_operator.load_release_identity(
             sealed.root,
             expected_tree_sha256=sealed.source.tree_manifest_sha256,
@@ -1080,15 +1305,25 @@ def _run_release_python(
         if (
             _release_identity_projection(copied_after) != _release_identity_projection(sealed.source)
             or (os.fstat(release_fd).st_dev, os.fstat(release_fd).st_ino)
-            != (os.stat(sealed.root, follow_symlinks=False).st_dev, os.stat(sealed.root, follow_symlinks=False).st_ino)
+            != (
+                os.stat(sealed.root, follow_symlinks=False).st_dev,
+                os.stat(sealed.root, follow_symlinks=False).st_ino,
+            )
             or (os.fstat(workspace_fd).st_dev, os.fstat(workspace_fd).st_ino)
             != (
-                os.stat(config.friday_home, follow_symlinks=False).st_dev,
-                os.stat(config.friday_home, follow_symlinks=False).st_ino,
+                os.stat(config.friday_home.name, dir_fd=resource_fd, follow_symlinks=False).st_dev,
+                os.stat(config.friday_home.name, dir_fd=resource_fd, follow_symlinks=False).st_ino,
+            )
+            or (os.fstat(resource_fd).st_dev, os.fstat(resource_fd).st_ino)
+            != (
+                os.stat(config.friday_home.parent, follow_symlinks=False).st_dev,
+                os.stat(config.friday_home.parent, follow_symlinks=False).st_ino,
             )
         ):
             raise release_operator.ReleaseFailure("dr_rehearsal_mount_identity_changed")
     finally:
+        if resource_fd >= 0:
+            os.close(resource_fd)
         if workspace_fd >= 0:
             os.close(workspace_fd)
         if release_fd >= 0:
@@ -1174,11 +1409,7 @@ print(json.dumps(out,sort_keys=True,separators=(",",":")))
         "main_schema": release.max_schema,
         "version": release.version,
     }
-    if (
-        not isinstance(receipt, dict)
-        or receipt != expected
-        or stdout != _canonical(expected) + b"\n"
-    ):
+    if not isinstance(receipt, dict) or receipt != expected or stdout != _canonical(expected) + b"\n":
         raise release_operator.ReleaseFailure("dr_rehearsal_release_receipt_invalid")
     return receipt
 
@@ -1241,6 +1472,100 @@ print(json.dumps(result,sort_keys=True,separators=(',',':')))
     if set(parsed) != {"after", "before", "verified"} | ({"evidence"} if action == "attest" else set()):
         raise release_operator.ReleaseFailure("dr_rehearsal_engineer_authority_invalid")
     return parsed
+
+
+def _run_exact_fallback_restore(
+    sealed: _SealedReleaseCopy,
+    config: release_operator.SystemdConfig,
+    *,
+    activation_journal: Path,
+    backup: release_operator.DatabaseBackup,
+    expected_operator_sha256: str,
+) -> dict[str, Any]:
+    """Restore through the authenticated fallback's exact operator artifact."""
+
+    if not _is_hex64(expected_operator_sha256):
+        raise release_operator.ReleaseFailure("dr_rehearsal_restore_operator_invalid")
+    expected_backup = {
+        "database_receipt_sha256": backup.receipt_sha256,
+        "engineer_receipt_sha256": backup.engineer_receipt_sha256,
+        "inbox_receipt_sha256": backup.inbox_receipt_sha256,
+        "obsidian_receipt_sha256": backup.obsidian_receipt_sha256,
+        "schema_version": backup.schema_version,
+    }
+    script = r"""
+import hashlib,importlib.util,inspect,json,logging,pathlib,sys
+logging.disable(logging.CRITICAL)
+operator_path=pathlib.Path(sys.argv[1]); expected_operator=sys.argv[2]
+before=operator_path.stat(); raw=operator_path.read_bytes(); after=operator_path.stat()
+identity=lambda value:(value.st_dev,value.st_ino,value.st_size,value.st_mtime_ns,value.st_ctime_ns)
+assert identity(before)==identity(after) and hashlib.sha256(raw).hexdigest()==expected_operator
+spec=importlib.util.spec_from_file_location('_friday_exact_fallback_operator',operator_path)
+assert spec is not None and spec.loader is not None
+operator=importlib.util.module_from_spec(spec); sys.modules[spec.name]=operator; spec.loader.exec_module(operator)
+expected=json.loads(sys.stdin.buffer.read())
+config_values={
+ 'anchor':pathlib.Path(sys.argv[3]),'env_file':pathlib.Path(sys.argv[4]),'env_file_sha256':sys.argv[5],
+ 'friday_home':pathlib.Path(sys.argv[6]),'unit_dir':pathlib.Path(sys.argv[7]),
+ 'database':pathlib.Path(sys.argv[8]),'inbox_database':pathlib.Path(sys.argv[9]),
+ 'backup_dir':pathlib.Path(sys.argv[10]),'state_dir':pathlib.Path(sys.argv[11]),
+ 'health_ca':pathlib.Path(sys.argv[12]),'health_ca_sha256':sys.argv[13],
+ 'memory_vault_mode':'disabled','obsidian_mode':sys.argv[14],
+ 'obsidian_root':pathlib.Path(sys.argv[15]),
+}
+supported=inspect.signature(operator.SystemdConfig).parameters
+config=operator.SystemdConfig(**{key:value for key,value in config_values.items() if key in supported})
+journal=operator.DurableActivationJournal(pathlib.Path(sys.argv[16]),backup_root=config.backup_dir,config_identity_sha256=None)
+database_backup_parameters=inspect.signature(journal.database_backup).parameters
+database_backup_kwargs={'verify_engineer_sqlite_integrity':False} if 'verify_engineer_sqlite_integrity' in database_backup_parameters else {}
+checkpoint=journal.database_backup(**database_backup_kwargs); assert checkpoint is not None
+observed={'database_receipt_sha256':checkpoint.receipt_sha256,'engineer_receipt_sha256':checkpoint.engineer_receipt_sha256,'inbox_receipt_sha256':checkpoint.inbox_receipt_sha256,'obsidian_receipt_sha256':checkpoint.obsidian_receipt_sha256,'schema_version':checkpoint.schema_version}
+assert observed==expected
+from friday.config import load_local_env_file,load_settings
+from friday.organs.engineer.command_tools import open_engineer_command_backup_authority
+load_local_env_file(); settings=load_settings()
+assert pathlib.Path(settings.home).resolve(strict=True)==config.friday_home.resolve(strict=True)
+def verify(evidence,digest):
+ with open_engineer_command_backup_authority(settings,exclusive=False) as authority:
+  before_authority=authority.backup_authority_snapshot(); verified=authority.verify_main_database_backup_authority(evidence,digest); after_authority=authority.backup_authority_snapshot()
+ return {'before':before_authority,'verified':verified,'after':after_authority}
+operator._restore_exact_sqlite_backup(config,checkpoint,require_engineer_authority=True,engineer_authority_verify=verify)
+result={**observed,'operator_sha256':expected_operator,'status':'restored'}
+print(json.dumps(result,sort_keys=True,separators=(',',':')))
+"""
+    stdout = _run_release_python(
+        sealed,
+        config,
+        script=script,
+        arguments=(
+            str(sealed.source.root / "artifacts/immutable_release_operator.py"),
+            expected_operator_sha256,
+            str(config.anchor),
+            str(config.env_file),
+            config.env_file_sha256,
+            str(config.friday_home),
+            str(config.unit_dir),
+            str(config.database),
+            str(config.inbox_database),
+            str(config.backup_dir),
+            str(config.state_dir),
+            str(config.health_ca),
+            config.health_ca_sha256,
+            config.obsidian_mode,
+            str(release_operator._obsidian_root(config)),  # noqa: SLF001
+            str(activation_journal),
+        ),
+        input_bytes=_canonical(expected_backup),
+        maximum_output=4_096,
+    )
+    expected = {**expected_backup, "operator_sha256": expected_operator_sha256, "status": "restored"}
+    try:
+        receipt = json.loads(stdout.decode("ascii"))
+    except (UnicodeError, ValueError, json.JSONDecodeError) as exc:
+        raise release_operator.ReleaseFailure("dr_rehearsal_restore_receipt_invalid") from exc
+    if not isinstance(receipt, dict) or receipt != expected or stdout != _canonical(expected) + b"\n":
+        raise release_operator.ReleaseFailure("dr_rehearsal_restore_receipt_invalid")
+    return receipt
 
 
 def _surface_digest(
@@ -1366,12 +1691,18 @@ class _IsolatedActivationPort:
         *,
         releases: Sequence[release_operator.ReleaseIdentity],
         sealed_releases: Mapping[release_operator.ReleaseIdentity, _SealedReleaseCopy],
+        activation_journal: Path | None = None,
+        restore_operator_sha256: str = "",
     ) -> None:
         self.config = config
         self.releases = tuple(releases)
         self.sealed_releases = dict(sealed_releases)
         if set(self.sealed_releases) != set(self.releases):
             raise release_operator.ReleaseFailure("dr_rehearsal_release_copy_set_invalid")
+        self.activation_journal = activation_journal or (
+            config.state_dir / "immutable-release-activation.v1.json"
+        )
+        self.restore_operator_sha256 = restore_operator_sha256
         self.leases = False
         self.checkpoint: release_operator.DatabaseBackup | None = None
         self.checkpoint_digest = ""
@@ -1519,7 +1850,10 @@ class _IsolatedActivationPort:
         if release != self.releases[0] or backup != self.checkpoint or not self.leases:
             raise release_operator.ReleaseFailure("dr_rehearsal_migration_not_authorized")
         receipt = _run_release_store(self.sealed_releases[release], self.config)
-        if receipt.get("main_schema") != self.checkpoint.schema_version:
+        # Opening through the candidate performs the supported N -> N+1
+        # migration.  The rollback assertion later remains bound to the
+        # checkpoint's original schema.
+        if receipt.get("main_schema") != release.max_schema:
             raise release_operator.ReleaseFailure("dr_rehearsal_candidate_reopen_mismatch")
         self.release_open_trees.append(release.tree_manifest_sha256)
         self.database_reopen_count += 1
@@ -1580,18 +1914,13 @@ class _IsolatedActivationPort:
     ) -> None:
         if backup != self.checkpoint or release != self.releases[0] or not self.leases:
             raise release_operator.ReleaseFailure("dr_rehearsal_restore_not_authorized")
-        sealed = self.sealed_releases[release]
-        release_operator._restore_exact_sqlite_backup(  # noqa: SLF001
+        fallback = self.releases[2]
+        _run_exact_fallback_restore(
+            self.sealed_releases[fallback],
             self.config,
-            backup,
-            require_engineer_authority=True,
-            engineer_authority_verify=lambda evidence, digest: _run_release_engineer_authority(
-                sealed,
-                self.config,
-                action="verify",
-                database_sha256=digest,
-                evidence=evidence,
-            ),
+            activation_journal=self.activation_journal,
+            backup=backup,
+            expected_operator_sha256=self.restore_operator_sha256,
         )
         self.restored_digest = _surface_digest(self.config)
         if self.restored_digest != self.checkpoint_digest:
@@ -1618,6 +1947,9 @@ def _run_isolated_rehearsal(
         _private_directory(scratch / "work"),
         obsidian_present=obsidian.present,
     )
+    # Admission accounts for fresh materialization, activation checkpoint and
+    # a bounded transient verification copy before any large source is copied.
+    _assert_projected_tree_budget(scratch, payload.directory, copies=3)
     materialized = release_operator.materialize_exact_backup_into_fresh_contour(
         config,
         material.backup,
@@ -1634,14 +1966,20 @@ def _run_isolated_rehearsal(
     }.issubset(source_paths)
     if materialized.engineer_fresh_identity_assigned is not lifecycle_backed_kernel:
         raise DRGenerationRehearsalError("dr_rehearsal_engineer_fresh_identity_mismatch")
+    activation_journal = config.state_dir / "immutable-release-activation.v1.json"
+    restore_operator_sha256 = material.authenticated.authentication_receipt.get("restore_operator_sha256")
+    if not isinstance(restore_operator_sha256, str) or not _is_hex64(restore_operator_sha256):
+        raise DRGenerationRehearsalError("dr_rehearsal_restore_operator_invalid")
     port = _IsolatedActivationPort(
         config,
         releases=releases,
         sealed_releases=sealed_releases,
+        activation_journal=activation_journal,
+        restore_operator_sha256=restore_operator_sha256,
     )
     journal = _TrackingJournal(
         release_operator.DurableActivationJournal(
-            config.state_dir / "immutable-release-activation.v1.json",
+            activation_journal,
             backup_root=config.backup_dir,
             config_identity_sha256=_sha256(b"isolated-dr-rehearsal-config-v1"),
             memory_vault_mode="disabled",
@@ -1772,7 +2110,7 @@ def _receipt(
         "authentication_receipt_sha256": _authentication_reference(authentication),
         "candidate_sha256": pending.candidate_sha256,
         "check_count": len(_CHECKS),
-        "checkset_sha256": _sha256(_canonical(_CHECKS)),
+        "checkset_sha256": dr_index.DR_REHEARSAL_CHECKSET_SHA256,
         "database_foreign_keys_clear": True,
         "database_integrity_clear": True,
         "database_reopen_count": result.database_reopen_count,
@@ -1810,56 +2148,29 @@ def _validate_existing_receipt(
     pending: dr_index.PendingDRGenerationIdentity,
     material: dr_auth.AuthenticatedDRMaterial,
 ) -> dict[str, Any]:
-    supplied = receipt.get("receipt_sha256")
-    core = {key: value for key, value in receipt.items() if key != "receipt_sha256"}
-    candidate = material.authenticated.candidate
-    restore = candidate["restore_release"]
+    try:
+        _reference, _raw, payload = dr_index.validate_rehearsal_receipt(
+            receipt,
+            candidate=pending.candidate,
+            authentication_receipt=material.authenticated.authentication_receipt,
+            index_transaction_id=pending.index_transaction_id,
+            index_revision=pending.index_revision - 1,
+            index_journal_sha256=pending.authenticated_journal_sha256,
+        )
+    except dr_index.DRGenerationIndexError as exc:
+        raise DRGenerationRehearsalError("dr_rehearsal_existing_receipt_invalid") from exc
     allowed_rollbacks = {
         material.activation_previous.tree_manifest_sha256,
         material.restore_fallback.tree_manifest_sha256,
     }
     if (
-        set(receipt) != _RECEIPT_KEYS
-        or supplied != _sha256(_canonical(core))
-        or receipt.get("schema") != REHEARSAL_RECEIPT_SCHEMA
-        or receipt.get("status") != "rehearsed"
-        or receipt.get("candidate_sha256") != pending.candidate_sha256
-        or receipt.get("authentication_receipt_sha256")
-        != _authentication_reference(material.authenticated.authentication_receipt)
-        or receipt.get("index_transaction_id") != pending.index_transaction_id
-        or receipt.get("index_revision") != pending.index_revision - 1
-        or receipt.get("index_journal_sha256") != pending.authenticated_journal_sha256
-        or receipt.get("check_count") != len(_CHECKS)
-        or receipt.get("checkset_sha256") != _sha256(_canonical(_CHECKS))
-        or receipt.get("database_schema") != material.backup.schema_version
-        or receipt.get("database_reopen_count") != 2
-        or receipt.get("inbox_reopen_count") != 2
-        or receipt.get("database_integrity_clear") is not True
-        or receipt.get("database_foreign_keys_clear") is not True
-        or receipt.get("inbox_integrity_clear") is not True
-        or receipt.get("inbox_foreign_keys_clear") is not True
-        or receipt.get("fault_boundary") != "after_migration_before_provision_or_network"
-        or not _is_hex64(receipt.get("four_surface_sha256"))
-        or receipt.get("restore_release")
-        != {
-            key: restore[key]
-            for key in ("commit", "max_schema", "tree_manifest_sha256", "version", "wheel_sha256")
-        }
-        or receipt.get("source") != _source_projection(material.authenticated.authentication_receipt)
-        or receipt.get("rollback_tree_sha256") not in allowed_rollbacks
-        or receipt.get("rolled_back") is not True
-        or receipt.get("rollback_restore_observed") is not True
-        or receipt.get("four_surface_exact") is not True
-        or receipt.get("obsidian_exact") is not True
-        or receipt.get("engineer_exact") is not True
-        or receipt.get("scratch_removed") is not True
-        or receipt.get("systemctl_call_count") != 0
-        or receipt.get("network_call_count") != 0
-        or receipt.get("production_surface_write_count") != 0
-        or receipt.get("engineer_authority_present") != _engineer_authority_present(material.backup)
+        payload != dict(receipt)
+        or payload.get("database_schema") != material.backup.schema_version
+        or payload.get("rollback_tree_sha256") not in allowed_rollbacks
+        or payload.get("engineer_authority_present") != _engineer_authority_present(material.backup)
     ):
         raise DRGenerationRehearsalError("dr_rehearsal_existing_receipt_invalid")
-    return dict(receipt)
+    return payload
 
 
 def rehearse_authenticated_generation(*, activation_receipt: Path) -> dict[str, Any]:

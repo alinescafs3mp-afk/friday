@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import resource
 import shutil
 import signal
 import sqlite3
@@ -398,22 +399,32 @@ def _candidate(home: Path, ordinal: int = 1) -> dict[str, Any]:
     }
 
 
-def _auth_receipt(ordinal: int = 1) -> dict[str, Any]:
+def _auth_receipt(candidate: dict[str, Any], ordinal: int = 1) -> dict[str, Any]:
     digest = lambda offset: f"{ordinal * 32 + offset:064x}"  # noqa: E731
+    backup = Path(candidate["backup_directory"])
+    backup_status = backup.stat()
     core: dict[str, Any] = {
         "activation_journal_file_sha256": digest(1),
         "activation_journal_sha256": digest(2),
         "activation_receipt_file_sha256": digest(3),
-        "activation_receipt_sha256": digest(4),
+        "activation_receipt_sha256": candidate["source_receipt_sha256"],
+        "backup_directory": {
+            "device": backup_status.st_dev,
+            "inode": backup_status.st_ino,
+            "path": str(backup),
+        },
         "backup_manifest_sha256": digest(5),
+        "candidate_sha256": hashlib.sha256(
+            _canonical(dr_index.normalize_generation_candidate(candidate))
+        ).hexdigest(),
         "restore_operator_sha256": digest(6),
         "schema": dr_auth.AUTHENTICATION_RECEIPT_SCHEMA,
         "status": "authenticated",
         "surface_receipts": {
-            "database": digest(7),
-            "engineer": digest(8),
-            "inbox": digest(9),
-            "obsidian": digest(10),
+            "database": candidate["database_receipt_sha256"],
+            "engineer": candidate["engineer_receipt_sha256"],
+            "inbox": candidate["inbox_receipt_sha256"],
+            "obsidian": candidate["obsidian_receipt_sha256"],
         },
     }
     return {**core, "receipt_sha256": hashlib.sha256(_canonical(core)).hexdigest()}
@@ -442,7 +453,9 @@ def _capable_release(root: Path, character: str) -> release_operator.ReleaseIden
     )
 
 
-def _sealed(release: release_operator.ReleaseIdentity, root: Path | None = None) -> rehearsal._SealedReleaseCopy:
+def _sealed(
+    release: release_operator.ReleaseIdentity, root: Path | None = None
+) -> rehearsal._SealedReleaseCopy:
     copied = release_operator.ReleaseIdentity(
         **{**vars(release), "root": root or release.root},
     )
@@ -520,8 +533,35 @@ def test_isolated_rehearsal_runs_real_four_surface_rollback_without_systemctl(
         },
     )
     monkeypatch.setattr(rehearsal, "_run_release_engineer_authority", _local_engineer_authority)
+
+    def local_exact_restore(
+        _sealed_release: rehearsal._SealedReleaseCopy,
+        config: release_operator.SystemdConfig,
+        *,
+        activation_journal: Path,
+        backup: release_operator.DatabaseBackup,
+        expected_operator_sha256: str,
+    ) -> dict[str, Any]:
+        assert activation_journal.name == "immutable-release-activation.v1.json"
+        assert len(expected_operator_sha256) == 64
+        release_operator._restore_exact_sqlite_backup(  # noqa: SLF001
+            config,
+            backup,
+            require_engineer_authority=True,
+            engineer_authority_verify=lambda evidence, digest: _local_engineer_authority(
+                _sealed_release,
+                config,
+                action="verify",
+                database_sha256=digest,
+                evidence=evidence,
+            ),
+        )
+        return {"status": "restored"}
+
+    monkeypatch.setattr(rehearsal, "_run_exact_fallback_restore", local_exact_restore)
+    candidate = _candidate(source.friday_home)
     material = dr_auth.AuthenticatedDRMaterial(
-        authenticated=dr_auth.AuthenticatedDRCandidate(_candidate(source.friday_home), _auth_receipt()),
+        authenticated=dr_auth.AuthenticatedDRCandidate(candidate, _auth_receipt(candidate)),
         backup=backup,
         activation_candidate=releases[0],
         activation_previous=releases[1],
@@ -564,7 +604,9 @@ def test_exact_release_store_open_uses_closed_bounded_interpreter_invocation(
         input_bytes: bytes,
         timeout: int,
         pass_fds: tuple[int, ...],
+        resource_check: Any,
     ) -> subprocess.CompletedProcess[bytes]:
+        resource_check()
         calls.append((command, input_bytes, timeout, pass_fds))
         return subprocess.CompletedProcess(
             command,
@@ -593,16 +635,10 @@ def test_exact_release_store_open_uses_closed_bounded_interpreter_invocation(
     assert "/run/friday/no-executables" in command
     assert command[command.index("--chdir") + 1] == str(config.friday_home)
     assert [
-        command[index + 1 : index + 3]
-        for index, value in enumerate(command)
-        if value == "--bind-fd"
-    ] == [
-        [str(pass_fds[1]), str(config.friday_home)]
-    ]
+        command[index + 1 : index + 3] for index, value in enumerate(command) if value == "--bind-fd"
+    ] == [[str(pass_fds[1]), str(config.friday_home)]]
     assert [str(pass_fds[0]), str(release.root)] in [
-        command[index + 1 : index + 3]
-        for index, value in enumerate(command)
-        if value == "--ro-bind-fd"
+        command[index + 1 : index + 3] for index, value in enumerate(command) if value == "--ro-bind-fd"
     ]
     assert not any(
         command[index + 2] == "/tmp"
@@ -873,6 +909,10 @@ def test_bwrap_timeout_kills_the_entire_process_group(
         returncode = None
 
         @staticmethod
+        def poll() -> None:
+            return None
+
+        @staticmethod
         def wait(*, timeout: int) -> int:
             assert timeout == 5
             return -9
@@ -911,7 +951,8 @@ def test_bwrap_timeout_kills_the_entire_process_group(
             pass_fds=(11, 12),
         )
 
-    assert signals == [signal.SIGKILL, 0]
+    assert signals == [signal.SIGKILL]
+    assert callable(popen_kwargs[0].pop("preexec_fn"))
     assert popen_kwargs == [
         {
             "cwd": Path("/"),
@@ -925,20 +966,18 @@ def test_bwrap_timeout_kills_the_entire_process_group(
     ]
 
 
-def test_bwrap_refuses_a_surviving_descendant_process_group(
+def test_bwrap_never_signals_a_reaped_process_group_by_reused_pid(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    class SurvivingProcess:
+    class ReapedProcess:
         pid = 74124
         returncode = 0
 
         @staticmethod
-        def wait(*, timeout: int) -> int:
-            assert timeout == 5
-            return -9
+        def poll() -> int:
+            return 0
 
-    process = SurvivingProcess()
-    zero_probes = [True, False]
+    process = ReapedProcess()
     signals: list[int] = []
     monkeypatch.setattr(rehearsal, "_trusted_bwrap_identity", lambda: (1, 2, 3, 4))
     monkeypatch.setattr(subprocess, "Popen", lambda *_args, **_kwargs: process)
@@ -948,25 +987,19 @@ def test_bwrap_refuses_a_surviving_descendant_process_group(
         lambda *_args, **_kwargs: (b"ok\n", b""),
     )
 
-    def killpg(pid: int, sent: int) -> None:
-        assert pid == process.pid
+    def killpg(_pid: int, sent: int) -> None:
         signals.append(sent)
-        if sent == 0 and not zero_probes.pop(0):
-            raise ProcessLookupError
 
     monkeypatch.setattr(os, "killpg", killpg)
 
-    with pytest.raises(
-        release_operator.ReleaseFailure,
-        match="^dr_rehearsal_child_descendant_survived$",
-    ):
-        rehearsal._execute_bwrap(
-            ["/usr/bin/bwrap"],
-            input_bytes=b"",
-            timeout=1,
-        )
+    completed = rehearsal._execute_bwrap(
+        ["/usr/bin/bwrap"],
+        input_bytes=b"",
+        timeout=1,
+    )
 
-    assert signals == [0, signal.SIGKILL, 0]
+    assert completed.returncode == 0
+    assert signals == []
 
 
 def test_child_output_is_bounded_before_receipt_parsing(
@@ -1031,11 +1064,12 @@ def _authenticated_home(
     Path,
 ]:
     home = _private(tmp_path / "friday-home")
-    state = _private(home / "data/state")
-    _private(home / "data/backups")
+    data = _private(home / "data")
+    state = _private(data / "state")
+    _private(data / "backups")
     monkeypatch.setenv("FRIDAY_HOME", str(home))
     candidate = _candidate(home)
-    authentication = _auth_receipt()
+    authentication = _auth_receipt(candidate)
     index = dr_index.DurableDRGenerationIndex(state)
     initial = index.initialize()
     prepared = index.prepare(
@@ -1051,7 +1085,13 @@ def _authenticated_home(
     activation_receipt.write_text("{}\n", encoding="ascii")
     material = dr_auth.AuthenticatedDRMaterial(
         authenticated=dr_auth.AuthenticatedDRCandidate(candidate, authentication),
-        backup=release_operator.DatabaseBackup(46, "1" * 64, "2" * 64),
+        backup=release_operator.DatabaseBackup(
+            46,
+            candidate["database_receipt_sha256"],
+            candidate["inbox_receipt_sha256"],
+            obsidian_receipt_sha256=candidate["obsidian_receipt_sha256"],
+            engineer_receipt_sha256=candidate["engineer_receipt_sha256"],
+        ),
         activation_candidate=_release(tmp_path / "candidate", "c"),
         activation_previous=_release(tmp_path / "previous", "a"),
         restore_fallback=_release(tmp_path / "fallback", "f"),
@@ -1071,7 +1111,12 @@ def test_controller_records_only_rehearsal_and_retry_does_not_rerun(
 
     def run(_material: dr_auth.AuthenticatedDRMaterial, scratch: Path) -> rehearsal._RunResult:
         calls.append(scratch)
-        return rehearsal._RunResult(46, "a" * 64, "9" * 64, True)
+        return rehearsal._RunResult(
+            46,
+            "a" * 64,
+            rehearsal._four_surface_receipt_sha256(material.backup),
+            True,
+        )
 
     monkeypatch.setattr(rehearsal, "_run_isolated_rehearsal", run)
 
@@ -1111,7 +1156,12 @@ def test_controller_source_drift_after_run_never_records_rehearsal(
     monkeypatch.setattr(
         rehearsal,
         "_run_isolated_rehearsal",
-        lambda *_args: rehearsal._RunResult(46, "a" * 64, "9" * 64, False),
+        lambda *_args: rehearsal._RunResult(
+            46,
+            "a" * 64,
+            rehearsal._four_surface_receipt_sha256(material.backup),
+            False,
+        ),
     )
     before = index.load()
 
@@ -1156,7 +1206,12 @@ def test_controller_refuses_scratch_namespace_replacement_without_deleting_it(
         scratch.rename(scratch.with_name(f"{scratch.name}.displaced"))
         scratch.mkdir(mode=0o700)
         replacement.append(scratch)
-        return rehearsal._RunResult(46, "a" * 64, "9" * 64, False)
+        return rehearsal._RunResult(
+            46,
+            "a" * 64,
+            rehearsal._four_surface_receipt_sha256(material.backup),
+            False,
+        )
 
     monkeypatch.setattr(rehearsal, "_run_isolated_rehearsal", swap)
     before = index.load()
@@ -1297,7 +1352,12 @@ def test_unrelated_sigkill_leftover_is_never_discovered_or_deleted(
     monkeypatch.setattr(
         rehearsal,
         "_run_isolated_rehearsal",
-        lambda *_args: rehearsal._RunResult(46, "a" * 64, "9" * 64, False),
+        lambda *_args: rehearsal._RunResult(
+            46,
+            "a" * 64,
+            rehearsal._four_surface_receipt_sha256(material.backup),
+            False,
+        ),
     )
 
     rehearsal.rehearse_authenticated_generation(activation_receipt=activation_receipt)
@@ -1318,7 +1378,15 @@ def test_receipt_publication_before_cas_is_restart_safe(
     monkeypatch.setattr(
         rehearsal,
         "_run_isolated_rehearsal",
-        lambda *_args: run_calls.append(1) or rehearsal._RunResult(46, "a" * 64, "9" * 64, False),
+        lambda *_args: (
+            run_calls.append(1)
+            or rehearsal._RunResult(
+                46,
+                "a" * 64,
+                rehearsal._four_surface_receipt_sha256(material.backup),
+                False,
+            )
+        ),
     )
     original = dr_index.DurableDRGenerationIndex._cas_replace_locked  # noqa: SLF001
     fail_once = [True]
@@ -1363,10 +1431,11 @@ def test_pending_identity_returns_bodies_from_one_authenticated_cas_epoch(
 ) -> None:
     tmp_path.chmod(0o700)
     home = _private(tmp_path / "home")
-    state = _private(home / "data/state")
-    _private(home / "data/backups")
+    data = _private(home / "data")
+    state = _private(data / "state")
+    _private(data / "backups")
     candidate = _candidate(home)
-    authentication = _auth_receipt()
+    authentication = _auth_receipt(candidate)
     index = dr_index.DurableDRGenerationIndex(state)
     initial = index.initialize()
     prepared = index.prepare(
@@ -1393,3 +1462,393 @@ def test_pending_identity_returns_bodies_from_one_authenticated_cas_epoch(
     assert identity.candidate == candidate
     assert identity.authentication_receipt == authentication
     assert identity.rehearsal_receipt is None
+
+
+def test_restart_resumes_exact_quarantine_and_removes_sealed_0500_tree(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    tmp_path.chmod(0o700)
+    monkeypatch.setattr(rehearsal, "_SCRATCH_PARENT", tmp_path)
+    first = rehearsal._new_scratch(transaction_id="a" * 64, candidate_sha256="b" * 64)
+    sealed = first.root / "sealed"
+    nested = sealed / "release"
+    nested.mkdir(parents=True, mode=0o700)
+    payload = nested / "payload"
+    payload.write_bytes(b"exact")
+    payload.chmod(0o400)
+    nested.chmod(0o500)
+    sealed.chmod(0o500)
+    quarantine = first.registry / f".{first.root.name}.cleanup"
+    first.root.rename(quarantine)
+
+    second = rehearsal._new_scratch(transaction_id="a" * 64, candidate_sha256="b" * 64)
+
+    assert not quarantine.exists()
+    assert second.identity != first.identity
+    rehearsal._remove_current_scratch(second)
+
+
+def test_restart_after_quarantine_rmdir_removes_only_bound_record(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    tmp_path.chmod(0o700)
+    monkeypatch.setattr(rehearsal, "_SCRATCH_PARENT", tmp_path)
+    first = rehearsal._new_scratch(transaction_id="a" * 64, candidate_sha256="b" * 64)
+    assert rehearsal._remove_registered_tree(  # noqa: SLF001
+        first.registry,
+        first.root.name,
+        expected_identity=first.identity,
+    )
+    assert first.record.exists()
+
+    second = rehearsal._new_scratch(transaction_id="a" * 64, candidate_sha256="b" * 64)
+
+    assert second.identity != first.identity
+    rehearsal._remove_current_scratch(second)
+
+
+def test_bounded_partial_cleanup_is_restart_safe(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    tmp_path.chmod(0o700)
+    monkeypatch.setattr(rehearsal, "_SCRATCH_PARENT", tmp_path)
+    first = rehearsal._new_scratch(transaction_id="a" * 64, candidate_sha256="b" * 64)
+    for name in ("a", "b"):
+        payload = first.root / name
+        payload.write_bytes(b"exact")
+        payload.chmod(0o600)
+    monkeypatch.setattr(rehearsal, "_SCRATCH_MAX_INODES", 1)
+
+    with pytest.raises(
+        rehearsal.DRGenerationRehearsalError,
+        match="^dr_rehearsal_scratch_cleanup_refused$",
+    ):
+        rehearsal._remove_current_scratch(first)
+
+    quarantine = first.registry / f".{first.root.name}.cleanup"
+    assert quarantine.is_dir()
+    monkeypatch.setattr(rehearsal, "_SCRATCH_MAX_INODES", 500_000)
+    second = rehearsal._new_scratch(transaction_id="a" * 64, candidate_sha256="b" * 64)
+    assert not quarantine.exists()
+    rehearsal._remove_current_scratch(second)
+
+
+def test_prepared_record_binds_empty_inode_before_restart_cleanup(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    tmp_path.chmod(0o700)
+    monkeypatch.setattr(rehearsal, "_SCRATCH_PARENT", tmp_path)
+    first = rehearsal._new_scratch(transaction_id="a" * 64, candidate_sha256="b" * 64)
+    registry_fd = os.open(first.registry, os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        rehearsal._write_scratch_record(  # noqa: SLF001
+            registry_fd,
+            first.record.name,
+            rehearsal._scratch_record(  # noqa: SLF001
+                key=first.key,
+                transaction_id=first.transaction_id,
+                candidate_sha256=first.candidate_sha256,
+                scratch_name=first.root.name,
+                phase="prepared",
+                identity=None,
+            ),
+        )
+    finally:
+        os.close(registry_fd)
+
+    second = rehearsal._new_scratch(transaction_id="a" * 64, candidate_sha256="b" * 64)
+
+    assert second.identity != first.identity
+    rehearsal._remove_current_scratch(second)
+
+
+def test_post_popen_identity_probe_failure_kills_live_process_group(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class LiveProcess:
+        pid = 74125
+        returncode = None
+
+        @staticmethod
+        def poll() -> None:
+            return None
+
+        @staticmethod
+        def wait(*, timeout: int) -> int:
+            assert timeout == rehearsal._CHILD_KILL_GRACE_SECONDS
+            return -signal.SIGKILL
+
+    probes = [True, False]
+
+    def identity() -> tuple[int, int, int, int]:
+        if probes.pop(0):
+            return (1, 2, 3, 4)
+        raise release_operator.ReleaseFailure("identity_probe_failed")
+
+    signals: list[tuple[int, int]] = []
+    monkeypatch.setattr(rehearsal, "_trusted_bwrap_identity", identity)
+    monkeypatch.setattr(subprocess, "Popen", lambda *_args, **_kwargs: LiveProcess())
+    monkeypatch.setattr(os, "killpg", lambda pid, sent: signals.append((pid, sent)))
+
+    with pytest.raises(release_operator.ReleaseFailure, match="^identity_probe_failed$"):
+        rehearsal._execute_bwrap(["/usr/bin/bwrap"], input_bytes=b"", timeout=1)
+
+    assert signals == [(LiveProcess.pid, signal.SIGKILL)]
+
+
+def test_live_resource_budget_failure_kills_sandbox(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class LiveProcess:
+        pid = 74126
+        returncode = None
+
+        @staticmethod
+        def poll() -> None:
+            return None
+
+        @staticmethod
+        def wait(*, timeout: int) -> int:
+            assert timeout == rehearsal._CHILD_KILL_GRACE_SECONDS
+            return -signal.SIGKILL
+
+    def communicate(*_args: Any, resource_check: Any, **_kwargs: Any) -> tuple[bytes, bytes]:
+        resource_check()
+        raise AssertionError("unreachable")
+
+    signals: list[tuple[int, int]] = []
+    monkeypatch.setattr(rehearsal, "_trusted_bwrap_identity", lambda: (1, 2, 3, 4))
+    monkeypatch.setattr(rehearsal, "_bounded_communicate", communicate)
+    monkeypatch.setattr(subprocess, "Popen", lambda *_args, **_kwargs: LiveProcess())
+    monkeypatch.setattr(os, "killpg", lambda pid, sent: signals.append((pid, sent)))
+
+    def over_budget() -> None:
+        raise release_operator.ReleaseFailure("dr_rehearsal_resource_budget_exceeded")
+
+    with pytest.raises(
+        release_operator.ReleaseFailure,
+        match="^dr_rehearsal_resource_budget_exceeded$",
+    ):
+        rehearsal._execute_bwrap(
+            ["/usr/bin/bwrap"],
+            input_bytes=b"",
+            timeout=1,
+            resource_check=over_budget,
+        )
+
+    assert signals == [(LiveProcess.pid, signal.SIGKILL)]
+
+
+def test_child_rlimits_cover_memory_process_file_and_descriptor_budgets(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    applied: dict[int, tuple[int, int]] = {}
+    monkeypatch.setattr(resource, "getrlimit", lambda _kind: (resource.RLIM_INFINITY, resource.RLIM_INFINITY))
+    monkeypatch.setattr(resource, "setrlimit", lambda kind, value: applied.__setitem__(kind, value))
+
+    rehearsal._limit_rehearsal_child()
+
+    assert applied[resource.RLIMIT_AS] == (rehearsal._CHILD_ADDRESS_SPACE_LIMIT_BYTES,) * 2
+    assert applied[resource.RLIMIT_NPROC] == (rehearsal._CHILD_PROCESS_LIMIT,) * 2
+    assert applied[resource.RLIMIT_FSIZE] == (rehearsal._CHILD_FILE_LIMIT_BYTES,) * 2
+    assert applied[resource.RLIMIT_NOFILE] == (rehearsal._CHILD_OPEN_FILE_LIMIT,) * 2
+    assert applied[resource.RLIMIT_CORE] == (0, 0)
+
+
+@pytest.mark.parametrize("limit_name", ("_SCRATCH_MAX_BYTES", "_SCRATCH_MAX_INODES"))
+def test_descriptor_tree_meter_rejects_storage_and_inode_exhaustion(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    limit_name: str,
+) -> None:
+    root = _private(tmp_path / "metered")
+    for index in range(2):
+        path = root / f"payload-{index}"
+        path.write_bytes(b"bounded")
+        path.chmod(0o600)
+    monkeypatch.setattr(rehearsal, limit_name, 2)
+    descriptor = os.open(root, os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        with pytest.raises(
+            release_operator.ReleaseFailure,
+            match="^dr_rehearsal_resource_budget_exceeded$",
+        ):
+            rehearsal._tree_usage_fd(descriptor)  # noqa: SLF001
+    finally:
+        os.close(descriptor)
+
+
+def test_candidate_schema_upgrade_is_checked_against_candidate_not_checkpoint(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    tmp_path.chmod(0o700)
+    config = _source_config(_private(tmp_path / "work"))
+    checkpoint = release_operator._exact_sqlite_backup(config)  # noqa: SLF001
+    candidate = release_operator.ReleaseIdentity(
+        **{**vars(_capable_release(tmp_path / "candidate", "c")), "max_schema": 47}
+    )
+    previous = _capable_release(tmp_path / "previous", "a")
+    fallback = _capable_release(tmp_path / "fallback", "f")
+    releases = (candidate, previous, fallback)
+    port = rehearsal._IsolatedActivationPort(
+        config,
+        releases=releases,
+        sealed_releases={release: _sealed(release) for release in releases},
+    )
+    port.leases = True
+    port.checkpoint = checkpoint
+    monkeypatch.setattr(
+        rehearsal,
+        "_run_release_store",
+        lambda *_args: {"main_schema": candidate.max_schema},
+    )
+
+    port.offline_migrate(candidate, checkpoint)
+
+    assert port.database_reopen_count == 1
+
+
+def test_restore_uses_authenticated_fallback_operator_not_candidate_surrogate(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    tmp_path.chmod(0o700)
+    config = _source_config(_private(tmp_path / "work"))
+    checkpoint = release_operator._exact_sqlite_backup(config)  # noqa: SLF001
+    releases = (
+        _capable_release(tmp_path / "candidate", "c"),
+        _capable_release(tmp_path / "previous", "a"),
+        _capable_release(tmp_path / "fallback", "f"),
+    )
+    expected_operator = "d" * 64
+    port = rehearsal._IsolatedActivationPort(
+        config,
+        releases=releases,
+        sealed_releases={release: _sealed(release) for release in releases},
+        restore_operator_sha256=expected_operator,
+    )
+    port.leases = True
+    port.checkpoint = checkpoint
+    port.checkpoint_digest = "exact-checkpoint"
+    observed: list[tuple[rehearsal._SealedReleaseCopy, str]] = []
+
+    def restore(
+        sealed: rehearsal._SealedReleaseCopy,
+        _config: release_operator.SystemdConfig,
+        **kwargs: Any,
+    ) -> dict[str, Any]:
+        observed.append((sealed, kwargs["expected_operator_sha256"]))
+        return {"status": "restored"}
+
+    monkeypatch.setattr(rehearsal, "_run_exact_fallback_restore", restore)
+    monkeypatch.setattr(rehearsal, "_surface_digest", lambda *_args, **_kwargs: "exact-checkpoint")
+
+    port.restore_database(checkpoint, releases[0])
+
+    assert observed == [(port.sealed_releases[releases[2]], expected_operator)]
+
+
+def test_exact_fallback_restore_projects_only_authenticated_operator_and_checkpoint(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    tmp_path.chmod(0o700)
+    config = _fresh_config(tmp_path / "work")
+    release = _capable_release(tmp_path / "fallback-source", "f")
+    copied = tmp_path / "fallback-copy"
+    copied.mkdir(mode=0o500)
+    copied.chmod(0o500)
+    sealed = _sealed(release, copied)
+    backup = release_operator.DatabaseBackup(
+        46,
+        "1" * 64,
+        "2" * 64,
+        obsidian_receipt_sha256="3" * 64,
+        engineer_receipt_sha256="4" * 64,
+    )
+    operator_sha256 = "5" * 64
+    journal = config.state_dir / "immutable-release-activation.v1.json"
+    captured: dict[str, Any] = {}
+
+    def run(
+        selected: rehearsal._SealedReleaseCopy,
+        _config: release_operator.SystemdConfig,
+        *,
+        script: str,
+        arguments: tuple[str, ...],
+        input_bytes: bytes,
+        maximum_output: int,
+    ) -> bytes:
+        captured.update(
+            selected=selected,
+            script=script,
+            arguments=arguments,
+            input_bytes=input_bytes,
+            maximum_output=maximum_output,
+        )
+        expected = {
+            **json.loads(input_bytes),
+            "operator_sha256": operator_sha256,
+            "status": "restored",
+        }
+        return _canonical(expected) + b"\n"
+
+    monkeypatch.setattr(rehearsal, "_run_release_python", run)
+
+    receipt = rehearsal._run_exact_fallback_restore(  # noqa: SLF001
+        sealed,
+        config,
+        activation_journal=journal,
+        backup=backup,
+        expected_operator_sha256=operator_sha256,
+    )
+
+    assert captured["selected"] == sealed
+    assert captured["arguments"][0] == str(release.root / "artifacts/immutable_release_operator.py")
+    assert captured["arguments"][1] == operator_sha256
+    assert captured["arguments"][-1] == str(journal)
+    assert "spec_from_file_location" in captured["script"]
+    assert receipt["operator_sha256"] == operator_sha256
+
+
+def test_retry_rejects_forged_alternate_four_surface_digest(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _home, index, material, activation_receipt = _authenticated_home(tmp_path, monkeypatch)
+    monkeypatch.setattr(rehearsal, "_SCRATCH_PARENT", tmp_path)
+    monkeypatch.setattr(dr_auth, "_authenticate_material_locked", lambda **_kwargs: material)
+    monkeypatch.setattr(rehearsal, "_engineer_authority_present", lambda _backup: False)
+    monkeypatch.setattr(
+        rehearsal,
+        "_run_isolated_rehearsal",
+        lambda *_args: rehearsal._RunResult(
+            46,
+            "a" * 64,
+            rehearsal._four_surface_receipt_sha256(material.backup),
+            False,
+        ),
+    )
+    receipt = rehearsal.rehearse_authenticated_generation(activation_receipt=activation_receipt)
+    state = index.load()
+    pending = index.pending_generation_identity(
+        expected_journal_sha256=state["journal_sha256"],
+    )
+    forged = {**receipt, "four_surface_sha256": "f" * 64}
+    forged_core = {key: value for key, value in forged.items() if key != "receipt_sha256"}
+    forged["receipt_sha256"] = hashlib.sha256(_canonical(forged_core)).hexdigest()
+
+    with pytest.raises(
+        rehearsal.DRGenerationRehearsalError,
+        match="^dr_rehearsal_existing_receipt_invalid$",
+    ):
+        rehearsal._validate_existing_receipt(  # noqa: SLF001
+            forged,
+            pending=pending,
+            material=material,
+        )
