@@ -246,6 +246,8 @@ class AssistComparisonSynthesizer(Protocol):
 
 
 class AssistPromotionDecisionProvider(Protocol):
+    async def refresh_runtime_admission(self, *, absolute_deadline: float) -> bool: ...
+
     def decide(
         self,
         *,
@@ -819,6 +821,10 @@ class SupervisorAssistController:
         if type(max_review_rounds) is not int or max_review_rounds not in {0, 1}:
             raise ValueError("assist controller review rounds must be zero or one")
         for label, dependency in (
+            (
+                "promotion admission refresh",
+                getattr(promotion_evaluator, "refresh_runtime_admission", None),
+            ),
             ("promotion evaluator", getattr(promotion_evaluator, "decide", None)),
             ("planner", getattr(planner, "propose", None)),
             ("primary model", getattr(primary_model, "prepare_primary_model", None)),
@@ -1339,6 +1345,19 @@ class SupervisorAssistController:
                 return None
             if type(canary_binding) is not str or _DIGEST_RE.fullmatch(canary_binding) is None:
                 return None
+        try:
+            runtime_admitted = await self._promotion.refresh_runtime_admission(
+                absolute_deadline=deadline,
+            )
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            return None
+        surface.require_current_authenticated_call_scope()
+        if runtime_admitted is not True:
+            self._last_admitted_mode = SupervisorMode.OFF
+            self._last_admitted_actor_binding_sha256 = None
+            return None
         snapshot = self._fresh_snapshot()
         if snapshot is None:
             return None

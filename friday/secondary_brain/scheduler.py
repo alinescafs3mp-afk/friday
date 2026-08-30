@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import math
 import time
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import replace
@@ -154,8 +155,8 @@ class SecondaryBrainScheduler:
         # workload.  This gate makes registration/preemption atomic before the
         # shared single-concurrency endpoint is touched.
         self._plan_priority_lock = asyncio.Lock()
-        self._plan_candidate_attempts: set[asyncio.Task[SecondaryAttempt]] = set()
-        self._preempted_plan_attempts: set[asyncio.Task[SecondaryAttempt]] = set()
+        self._plan_candidate_attempts: set[asyncio.Task[SecondaryAttempt] | asyncio.Task[bool]] = set()
+        self._preempted_plan_attempts: set[asyncio.Task[SecondaryAttempt] | asyncio.Task[bool]] = set()
         self._non_plan_attempts_in_flight = 0
         self._epoch_admitted = False
         self._last_probe_success_monotonic: float | None = None
@@ -568,6 +569,108 @@ class SecondaryBrainScheduler:
             raise
         finally:
             self._probe_lock.release()
+
+    async def refresh_semantic_supervisor_runtime_admission(
+        self,
+        *,
+        absolute_deadline_monotonic: float,
+    ) -> bool:
+        """Refresh only the content-free plan admission at lowest priority."""
+
+        if (
+            isinstance(absolute_deadline_monotonic, bool)
+            or not isinstance(absolute_deadline_monotonic, int | float)
+            or not math.isfinite(float(absolute_deadline_monotonic))
+            or float(absolute_deadline_monotonic) <= time.monotonic()
+            or self._closed
+            or self._client is None
+            or ModelWorkload.PLAN_CANDIDATE not in self.allowed_workloads
+            or self.workload_mode(ModelWorkload.PLAN_CANDIDATE) is not SecondaryMode.SHADOW
+        ):
+            return False
+        deadline = float(absolute_deadline_monotonic)
+        try:
+            async with asyncio.timeout(deadline - time.monotonic()):
+                return await self._refresh_semantic_supervisor_runtime_admission_bounded(deadline)
+        except TimeoutError:
+            self._record_skip(ModelWorkload.PLAN_CANDIDATE, SecondaryFailure.DEADLINE, local=True)
+            return False
+
+    async def _refresh_semantic_supervisor_runtime_admission_bounded(
+        self,
+        absolute_deadline_monotonic: float,
+    ) -> bool:
+        outer = asyncio.current_task()
+        if outer is None:
+            self._record_skip(
+                ModelWorkload.PLAN_CANDIDATE,
+                SecondaryFailure.ADMISSION_BUSY,
+                local=True,
+            )
+            return False
+        async with self._plan_priority_lock:
+            if self._non_plan_attempts_in_flight:
+                self._record_skip(
+                    ModelWorkload.PLAN_CANDIDATE,
+                    SecondaryFailure.ADMISSION_BUSY,
+                    local=True,
+                )
+                return False
+            runner = asyncio.create_task(
+                self._refresh_semantic_supervisor_runtime_admission_observed(absolute_deadline_monotonic)
+            )
+            self._plan_candidate_attempts.add(runner)
+        try:
+            return await runner
+        except asyncio.CancelledError:
+            if outer.cancelling():
+                await asyncio.gather(runner, return_exceptions=True)
+                raise
+            self._record_skip(
+                ModelWorkload.PLAN_CANDIDATE,
+                SecondaryFailure.CANCELLED,
+                local=True,
+            )
+            return False
+        finally:
+            self._plan_candidate_attempts.discard(runner)
+            self._preempted_plan_attempts.discard(runner)
+
+    async def _refresh_semantic_supervisor_runtime_admission_observed(
+        self,
+        absolute_deadline_monotonic: float,
+    ) -> bool:
+        async with self._observation_condition:
+            if self._exclusive_observation:
+                self._record_skip(
+                    ModelWorkload.PLAN_CANDIDATE,
+                    SecondaryFailure.ADMISSION_BUSY,
+                    local=True,
+                )
+                return False
+            self._ordinary_attempts_in_flight += 1
+        try:
+            return await self._refresh_semantic_supervisor_runtime_admission_unobserved(
+                absolute_deadline_monotonic
+            )
+        finally:
+            async with self._observation_condition:
+                self._ordinary_attempts_in_flight -= 1
+                self._observation_condition.notify_all()
+
+    async def _refresh_semantic_supervisor_runtime_admission_unobserved(
+        self,
+        absolute_deadline_monotonic: float,
+    ) -> bool:
+        failure, queue_wait_sec = await self._ensure_epoch_admitted(
+            absolute_deadline_monotonic,
+            workload=ModelWorkload.PLAN_CANDIDATE,
+        )
+        self._record_queue_wait(ModelWorkload.PLAN_CANDIDATE, queue_wait_sec)
+        if failure is None:
+            return True
+        self._record_skip(ModelWorkload.PLAN_CANDIDATE, failure, local=True)
+        return False
 
     async def __aenter__(self) -> SecondaryBrainScheduler:
         return self

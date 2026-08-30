@@ -26,6 +26,7 @@ from friday.secondary_brain import (
     ModelPriority,
     ModelRequest,
     ModelWorkload,
+    SecondaryAttempt,
     SecondaryEndpointConfig,
     SecondaryFailure,
     SecondaryMode,
@@ -2137,6 +2138,221 @@ async def test_plan_triggered_shared_probe_failure_opens_global_cooldown(setting
         assert paths == ["/v1/friday-profile", "/v1/models"]
         assert scheduler.status().state is SecondaryState.COOLDOWN
     finally:
+        await scheduler.aclose()
+
+
+@pytest.mark.asyncio
+async def test_semantic_runtime_refresh_uses_only_content_free_stale_epoch_probe(
+    settings: Any,
+) -> None:
+    paths: list[str] = []
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        paths.append(request.url.path)
+        if request.url.path.endswith("/friday-profile"):
+            return _profile_response()
+        if request.url.path.endswith("/models"):
+            return _models_response()
+        raise AssertionError("stale admission refresh must not generate model content")
+
+    scheduler = build_secondary_brain(
+        _configured_settings(settings, private=True),
+        transport=httpx.MockTransport(handler),
+    )
+    scheduler._supervisor_mode = SecondaryMode.SHADOW  # noqa: SLF001 - isolate promoted port
+    scheduler.allowed_workloads = scheduler.allowed_workloads | {ModelWorkload.PLAN_CANDIDATE}
+    scheduler._epoch_admitted = True  # noqa: SLF001 - stale admitted process epoch
+    scheduler._last_probe_success_monotonic = (  # noqa: SLF001
+        time.monotonic() - settings.secondary_llm_health_interval_sec - 1.0
+    )
+    try:
+        assert scheduler.public_status()["available"] is False
+        assert await scheduler.refresh_semantic_supervisor_runtime_admission(
+            absolute_deadline_monotonic=time.monotonic() + 2.0,
+        )
+
+        assert paths == ["/v1/friday-profile", "/v1/models"]
+        assert scheduler.public_status()["available"] is True
+        diagnostics: Any = scheduler.diagnostics_status()
+        assert diagnostics["workloads"]["plan_candidate"]["selected_total"] == 0
+        assert diagnostics["shadow"] == {
+            "valid_total": 0,
+            "invalid_total": 0,
+            "skipped_total": 0,
+            "in_flight": 0,
+        }
+    finally:
+        await scheduler.aclose()
+
+
+@pytest.mark.asyncio
+async def test_cold_semantic_runtime_refresh_uses_only_fixed_canary_and_is_epoch_bounded(
+    settings: Any,
+) -> None:
+    paths: list[str] = []
+    generation_messages: list[object] = []
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        paths.append(request.url.path)
+        if request.url.path.endswith("/friday-profile"):
+            return _profile_response()
+        if request.url.path.endswith("/models"):
+            return _models_response()
+        payload = json.loads(request.content)
+        generation_messages.append(payload["messages"])
+        return _response(content="ready")
+
+    scheduler = build_secondary_brain(
+        _configured_settings(settings, private=True),
+        transport=httpx.MockTransport(handler),
+    )
+    scheduler._supervisor_mode = SecondaryMode.SHADOW  # noqa: SLF001 - isolate promoted port
+    scheduler.allowed_workloads = scheduler.allowed_workloads | {ModelWorkload.PLAN_CANDIDATE}
+    try:
+        deadline = time.monotonic() + 2.0
+        assert await scheduler.refresh_semantic_supervisor_runtime_admission(
+            absolute_deadline_monotonic=deadline,
+        )
+        assert paths == ["/v1/friday-profile", "/v1/models", "/v1/chat/completions"]
+        assert generation_messages == [
+            [
+                {"role": "system", "content": "Return final content only. Never use tools."},
+                {"role": "user", "content": "Reply with exactly: ready"},
+            ]
+        ]
+
+        assert await scheduler.refresh_semantic_supervisor_runtime_admission(
+            absolute_deadline_monotonic=deadline,
+        )
+        assert paths == ["/v1/friday-profile", "/v1/models", "/v1/chat/completions"]
+        assert scheduler.diagnostics_status()["workloads"]["plan_candidate"]["selected_total"] == 0
+    finally:
+        await scheduler.aclose()
+
+
+@pytest.mark.asyncio
+async def test_semantic_runtime_refresh_preserves_shared_cooldown_and_recovers_on_later_demand(
+    settings: Any,
+) -> None:
+    paths: list[str] = []
+    inventory_valid = False
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        paths.append(request.url.path)
+        if request.url.path.endswith("/friday-profile"):
+            return _profile_response()
+        if request.url.path.endswith("/models"):
+            return (
+                _models_response()
+                if inventory_valid
+                else httpx.Response(200, headers=_PROFILE_HEADERS, json={"data": "invalid"})
+            )
+        return _response(content="ready")
+
+    scheduler = build_secondary_brain(
+        replace(
+            _configured_settings(settings, private=True),
+            secondary_llm_cooldown_sec=0.001,
+        ),
+        transport=httpx.MockTransport(handler),
+    )
+    scheduler._supervisor_mode = SecondaryMode.SHADOW  # noqa: SLF001 - isolate promoted port
+    scheduler.allowed_workloads = scheduler.allowed_workloads | {ModelWorkload.PLAN_CANDIDATE}
+    try:
+        assert not await scheduler.refresh_semantic_supervisor_runtime_admission(
+            absolute_deadline_monotonic=time.monotonic() + 2.0,
+        )
+        assert scheduler.status().state is SecondaryState.COOLDOWN
+        assert not await scheduler.refresh_semantic_supervisor_runtime_admission(
+            absolute_deadline_monotonic=time.monotonic() + 2.0,
+        )
+
+        assert paths == ["/v1/friday-profile", "/v1/models"]
+        assert scheduler.status().state is SecondaryState.COOLDOWN
+        diagnostics: Any = scheduler.diagnostics_status()
+        assert diagnostics["probe_failure_reasons"] == {
+            "cooldown": 1,
+            "malformed_response": 1,
+        }
+
+        inventory_valid = True
+        await asyncio.sleep(0.01)
+        assert await scheduler.refresh_semantic_supervisor_runtime_admission(
+            absolute_deadline_monotonic=time.monotonic() + 2.0,
+        )
+        assert paths == [
+            "/v1/friday-profile",
+            "/v1/models",
+            "/v1/friday-profile",
+            "/v1/models",
+            "/v1/chat/completions",
+        ]
+        assert scheduler.status().state is SecondaryState.HEALTHY
+    finally:
+        await scheduler.aclose()
+
+
+@pytest.mark.asyncio
+async def test_foreground_work_preempts_semantic_runtime_refresh(
+    settings: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    scheduler = build_secondary_brain(
+        _configured_settings(settings, private=True),
+        transport=httpx.MockTransport(lambda _request: httpx.Response(503)),
+    )
+    scheduler._supervisor_mode = SecondaryMode.SHADOW  # noqa: SLF001 - isolate priority port
+    scheduler.allowed_workloads = scheduler.allowed_workloads | {ModelWorkload.PLAN_CANDIDATE}
+    entered = asyncio.Event()
+    refresh_attempts = 0
+
+    async def blocked_refresh(_deadline: float) -> bool:
+        nonlocal refresh_attempts
+        refresh_attempts += 1
+        entered.set()
+        await asyncio.Event().wait()
+        raise AssertionError("unreachable")
+
+    async def accepted_foreground(
+        request: ModelRequest,
+        *,
+        shadow: bool,
+        pre_dispatch_validator: Any,
+    ) -> SecondaryAttempt:
+        assert request.workload is ModelWorkload.CLASSIFY
+        assert shadow is False and pre_dispatch_validator is None
+        return SecondaryAttempt.success(SecondaryResult(visible_content="foreground"))
+
+    monkeypatch.setattr(
+        scheduler,
+        "_refresh_semantic_supervisor_runtime_admission_unobserved",
+        blocked_refresh,
+    )
+    monkeypatch.setattr(scheduler, "_attempt_observed", accepted_foreground)
+    refresh = asyncio.create_task(
+        scheduler.refresh_semantic_supervisor_runtime_admission(
+            absolute_deadline_monotonic=time.monotonic() + 2.0,
+        )
+    )
+    try:
+        await asyncio.wait_for(entered.wait(), timeout=0.5)
+        foreground = await scheduler.attempt(_request())
+
+        assert foreground.result is not None
+        assert foreground.result.visible_content == "foreground"
+        assert await refresh is False
+        assert scheduler._plan_candidate_attempts == set()  # noqa: SLF001
+        assert scheduler._preempted_plan_attempts == set()  # noqa: SLF001
+        assert scheduler.status().state is not SecondaryState.COOLDOWN
+
+        scheduler._exclusive_observation = True  # noqa: SLF001 - promotion witness is higher priority
+        assert not await scheduler.refresh_semantic_supervisor_runtime_admission(
+            absolute_deadline_monotonic=time.monotonic() + 2.0,
+        )
+        assert refresh_attempts == 1
+    finally:
+        refresh.cancel()
+        await asyncio.gather(refresh, return_exceptions=True)
         await scheduler.aclose()
 
 

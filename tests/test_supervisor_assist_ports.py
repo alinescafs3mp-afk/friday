@@ -245,6 +245,108 @@ class _AuthorityProbeScheduler(_Scheduler):
         )
 
 
+class _AdmissionRefreshScheduler:
+    def __init__(
+        self,
+        *,
+        ready: bool = True,
+        raises: BaseException | None = None,
+        hang: bool = False,
+    ) -> None:
+        self.ready = ready
+        self.raises = raises
+        self.hang = hang
+        self.calls = 0
+        self.deadlines: list[float] = []
+
+    async def refresh_semantic_supervisor_runtime_admission(
+        self,
+        *,
+        absolute_deadline_monotonic: float,
+    ) -> bool:
+        self.calls += 1
+        self.deadlines.append(absolute_deadline_monotonic)
+        assert current_authenticated_turn_context() is None
+        with pytest.raises(TurnContextError, match="primary authority"):
+            current_primary_authenticated_turn_context()
+        assert execution_kernel_module._REQUEST_EFFECTS.get() is None
+        assert execution_kernel_module._AUTHENTICATED_REQUEST_EFFECT_AUTHORITY.get() is None
+        assert publication_module._PUBLICATION_LEASE.get() is None
+        if self.raises is not None:
+            raise self.raises
+        if self.hang:
+            await asyncio.Event().wait()
+        return self.ready
+
+
+@pytest.mark.asyncio
+async def test_promotion_refresh_is_content_free_bounded_and_does_not_consume_advisory_slot() -> None:
+    issuer, context, actor, deadline, ingestion = _authenticated_call(
+        "assist-admission-refresh",
+        max_advisory_calls=1,
+    )
+    scheduler = _AdmissionRefreshScheduler()
+    evaluator = ports.AssistPromotionEvaluator(cast(Any, object()), scheduler)
+
+    with ExitStack() as stack:
+        effects = stack.enter_context(
+            track_request_effects(
+                lambda: True,
+                request_binding_sha256=context.effect_fence.request_effect_binding_sha256,
+            )
+        )
+        stack.enter_context(bind_authenticated_turn_context(issuer, context))
+        _bind_call_scope(context, actor, deadline, ingestion)
+        stack.enter_context(bind_authenticated_request_effect_authority(effects))
+        stack.enter_context(
+            bind_authenticated_turn_publication(
+                context,
+                conversation_id="conv_1234567890abcdef",
+                person_id=actor.own_id,
+                final_publisher=FinalPublisher.PRIMARY,
+            )
+        )
+
+        assert await evaluator.refresh_runtime_admission(absolute_deadline=deadline + 30)
+        conservative_deadline = math.nextafter(
+            context.inherited_budget.safety_deadline.monotonic_ns / 1_000_000_000,
+            -math.inf,
+        )
+        assert scheduler.deadlines == [conservative_deadline]
+        assert reserve_authenticated_advisory_call(context) == 1
+        assert current_primary_authenticated_turn_context(context) is context
+        assert execution_kernel_module._REQUEST_EFFECTS.get() is effects
+        assert publication_module._PUBLICATION_LEASE.get() is not None
+
+
+@pytest.mark.asyncio
+async def test_promotion_refresh_fails_closed_without_retry_and_preserves_cancellation() -> None:
+    failed = _AdmissionRefreshScheduler(ready=False)
+    evaluator = ports.AssistPromotionEvaluator(cast(Any, object()), failed)
+    assert not await evaluator.refresh_runtime_admission(absolute_deadline=time.monotonic() + 5)
+    assert failed.calls == 1
+
+    assert not await evaluator.refresh_runtime_admission(absolute_deadline=time.monotonic() - 1)
+    assert failed.calls == 1
+
+    hanging = _AdmissionRefreshScheduler(hang=True)
+    started = time.monotonic()
+    assert not await ports.AssistPromotionEvaluator(
+        cast(Any, object()),
+        hanging,
+    ).refresh_runtime_admission(absolute_deadline=started + 0.01)
+    assert hanging.calls == 1
+    assert time.monotonic() - started < 0.5
+
+    cancelled = _AdmissionRefreshScheduler(raises=asyncio.CancelledError())
+    with pytest.raises(asyncio.CancelledError):
+        await ports.AssistPromotionEvaluator(
+            cast(Any, object()),
+            cancelled,
+        ).refresh_runtime_admission(absolute_deadline=time.monotonic() + 5)
+    assert cancelled.calls == 1
+
+
 @pytest.mark.asyncio
 async def test_planner_returns_only_validator_retained_kernel_plan(monkeypatch: Any) -> None:
     scheduler = _Scheduler()
@@ -817,7 +919,7 @@ def test_default_off_activation_never_creates_a_promoted_decision() -> None:
         accepted_latency_budget=None,
         operator_gate=AssistPromotionOperatorGate(),
     )
-    evaluator = ports.AssistPromotionEvaluator(material, object())
+    evaluator = ports.AssistPromotionEvaluator(material, cast(Any, object()))
     assert evaluator.decide(binding_snapshot=operational_capability_snapshot()) is None
 
 

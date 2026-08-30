@@ -62,6 +62,16 @@ class AssistSecondaryScheduler(Protocol):
     ) -> SecondaryAttempt: ...
 
 
+class AssistRuntimeAdmissionScheduler(Protocol):
+    """The content-free supervisor admission surface; no product request."""
+
+    async def refresh_semantic_supervisor_runtime_admission(
+        self,
+        *,
+        absolute_deadline_monotonic: float,
+    ) -> bool: ...
+
+
 class PrimaryModelRuntime(Protocol):
     """Exact primary model surface required by the comparison executor."""
 
@@ -201,7 +211,30 @@ class AssistPromotionEvaluator:
     """Re-evaluate immutable evidence against fresh scheduler/registry facts."""
 
     material: AssistPromotionActivationMaterial
-    scheduler: object
+    scheduler: AssistRuntimeAdmissionScheduler
+
+    async def refresh_runtime_admission(self, *, absolute_deadline: float) -> bool:
+        """Refresh only content-free supervisor admission within the root deadline."""
+
+        deadline = _future_deadline(absolute_deadline)
+        refresh = getattr(self.scheduler, "refresh_semantic_supervisor_runtime_admission", None)
+        if deadline is None or not callable(refresh):
+            return False
+        authenticated_context, authenticated_scope, effective_deadline = _authenticated_advisory_scope(
+            deadline
+        )
+        try:
+            async with asyncio.timeout(_remaining(effective_deadline)):
+                with suspend_authenticated_advisory_authority():
+                    ready = await refresh(
+                        absolute_deadline_monotonic=effective_deadline,
+                    )
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            return False
+        _revalidate_authenticated_advisory_scope(authenticated_context, authenticated_scope)
+        return ready is True and _future_deadline(effective_deadline) is not None
 
     def decide(
         self,
@@ -475,6 +508,7 @@ class AttestedPrimaryModel:
 
 __all__ = [
     "AssistPromotionEvaluator",
+    "AssistRuntimeAdmissionScheduler",
     "AssistSecondaryScheduler",
     "AttestedPrimaryModel",
     "PrimaryModelRuntime",

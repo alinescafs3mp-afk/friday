@@ -230,13 +230,23 @@ class _Promotion:
         self,
         *,
         admitted: bool = True,
+        runtime_admitted: bool = True,
         mode: SupervisorMode = SupervisorMode.ASSIST,
     ) -> None:
         self.admitted = admitted
+        self.runtime_admitted = runtime_admitted
         self.mode = mode
+        self.refresh_calls = 0
         self.calls = 0
+        self.events: list[str] = []
         self.actor_bindings: list[str | None] = []
         self.scheduler = SimpleNamespace()
+
+    async def refresh_runtime_admission(self, *, absolute_deadline: float) -> bool:
+        assert absolute_deadline > time.monotonic()
+        self.refresh_calls += 1
+        self.events.append("refresh")
+        return self.runtime_admitted
 
     def decide(
         self,
@@ -246,6 +256,7 @@ class _Promotion:
     ) -> AssistPromotionDecision | None:
         assert type(binding_snapshot) is CapabilityBindingSnapshot
         self.calls += 1
+        self.events.append("decide")
         self.actor_bindings.append(actor_binding_sha256)
         return _promotion(self.mode) if self.admitted else None
 
@@ -1117,6 +1128,104 @@ async def test_preownership_failure_calls_legacy_exactly_once() -> None:
     assert result.outcome is SupervisorAssistOutcome.LEGACY
     assert calls == 1
     assert planner.calls == 0
+    assert promotion.events == ["refresh", "decide"]
+
+
+@pytest.mark.asyncio
+async def test_demand_refresh_can_restore_promotion_before_planning() -> None:
+    class DemandRecoveredPromotion(_Promotion):
+        def __init__(self) -> None:
+            super().__init__(admitted=False)
+
+        async def refresh_runtime_admission(self, *, absolute_deadline: float) -> bool:
+            ready = await super().refresh_runtime_admission(absolute_deadline=absolute_deadline)
+            self.admitted = ready
+            return ready
+
+    promotion = DemandRecoveredPromotion()
+    planner = _Planner(admit=False)
+    controller = _controller(promotion=promotion, planner=planner)
+    legacy_calls = 0
+
+    async def legacy() -> dict[str, object]:
+        nonlocal legacy_calls
+        legacy_calls += 1
+        return {"message": "legacy"}
+
+    result = await controller.execute(
+        _surface(),
+        legacy_primary=legacy,
+        absolute_deadline=time.monotonic() + 3,
+    )
+
+    assert result.outcome is SupervisorAssistOutcome.LEGACY
+    assert legacy_calls == 1
+    assert planner.calls == 1
+    assert promotion.events == ["refresh", "decide"]
+
+
+@pytest.mark.asyncio
+async def test_runtime_admission_refresh_failure_has_no_ownership_or_effect_surface() -> None:
+    promotion = _Promotion(runtime_admitted=False)
+    planner = _Planner()
+
+    def forbidden(*_args: Any, **_kwargs: Any) -> NoReturn:
+        raise AssertionError("failed runtime refresh crossed the pre-ownership boundary")
+
+    class ForbiddenGraphAdapter:
+        def __getattr__(self, _name: str) -> NoReturn:
+            raise AssertionError("failed runtime refresh reached the graph adapter")
+
+    controller = _controller(
+        promotion=promotion,
+        planner=planner,
+        graph_adapter=ForbiddenGraphAdapter(),
+        authority_check=forbidden,
+        plan_authority_check=forbidden,
+        effect_check=forbidden,
+        observer=forbidden,
+    )
+    legacy_calls = 0
+
+    async def legacy() -> dict[str, object]:
+        nonlocal legacy_calls
+        legacy_calls += 1
+        return {"message": "legacy"}
+
+    result = await controller.execute(
+        _surface(),
+        legacy_primary=legacy,
+        absolute_deadline=time.monotonic() + 3,
+    )
+
+    assert result.outcome is SupervisorAssistOutcome.LEGACY
+    assert legacy_calls == 1
+    assert promotion.refresh_calls == 1
+    assert promotion.calls == planner.calls == 0
+    assert promotion.events == ["refresh"]
+
+
+@pytest.mark.asyncio
+async def test_non_assist_surface_never_refreshes_secondary_runtime() -> None:
+    promotion = _Promotion()
+    planner = _Planner()
+    controller = _controller(promotion=promotion, planner=planner)
+    legacy_calls = 0
+
+    async def legacy() -> dict[str, object]:
+        nonlocal legacy_calls
+        legacy_calls += 1
+        return {"message": "ordinary"}
+
+    result = await controller.execute(
+        None,
+        legacy_primary=legacy,
+        absolute_deadline=time.monotonic() + 3,
+    )
+
+    assert result.outcome is SupervisorAssistOutcome.LEGACY
+    assert legacy_calls == 1
+    assert promotion.refresh_calls == promotion.calls == planner.calls == 0
 
 
 @pytest.mark.asyncio
@@ -1149,7 +1258,7 @@ async def test_plan_mint_authority_denial_falls_back_before_graph_admission() ->
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("fail_at", "propagates"),
-    [(2, False), (3, False), (4, True)],
+    [(2, False), (3, False), (4, False), (5, True)],
 )
 async def test_authenticated_scope_is_revalidated_after_await_and_immediately_before_admission(
     monkeypatch: pytest.MonkeyPatch,
