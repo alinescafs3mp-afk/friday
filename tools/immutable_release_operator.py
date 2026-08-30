@@ -18,6 +18,7 @@ from __future__ import annotations
 import argparse
 import base64
 import csv
+import errno
 import fcntl
 import hashlib
 import importlib
@@ -28,6 +29,7 @@ import os
 import re
 import shlex
 import shutil
+import socket
 import sqlite3
 import ssl
 import stat
@@ -61,6 +63,8 @@ OBSIDIAN_CUTOVER_CONTRACT = "exact-root-v1"
 VENV_RELOCATION_CONTRACT = "absolute-final-v1"
 ENGINEER_COMMAND_LIFECYCLE_CONTRACT = "authenticated-external-ledger-v1"
 ENGINEER_COMMAND_LIFECYCLE_MIN_SCHEMA = 46
+OPERATOR_TRANSACTION_LOCK_SCOPE_CONTRACT = "canonical-friday-home-state-v1"
+OPERATOR_TRANSACTION_LOCK_SCOPE_SCHEMA = "friday.immutable-release-operator-lock-scope.v1"
 RUNTIME_CONFIG_SCHEMA_V1 = "friday.immutable-release-runtime-config.v1"
 RUNTIME_CONFIG_SCHEMA_V2 = "friday.immutable-release-runtime-config.v2"
 RUNTIME_CONFIG_SCHEMA_V3 = "friday.immutable-release-runtime-config.v3"
@@ -1886,6 +1890,42 @@ def _closed_commit(value: str) -> str:
     if _HEX40.fullmatch(value) is None:
         raise ReleaseFailure("candidate_commit_invalid")
     return value
+
+
+def _lexical_operator_state_dir(state_dir: Path) -> Path:
+    lexical = Path(os.path.abspath(state_dir))
+    if (
+        not state_dir.is_absolute()
+        or state_dir != lexical
+        or any(character in str(lexical) for character in "\x00\r\n")
+    ):
+        raise ReleaseFailure("operator_transaction_state_scope_invalid")
+    return lexical
+
+
+def _canonical_operator_state_dir(friday_home: Path, state_dir: Path) -> Path:
+    lexical_home = Path(os.path.abspath(friday_home))
+    lexical_state = _lexical_operator_state_dir(state_dir)
+    if (
+        not friday_home.is_absolute()
+        or friday_home != lexical_home
+        or lexical_state != lexical_home / "data/state"
+        or any(character in str(lexical_home) for character in "\x00\r\n")
+    ):
+        raise ReleaseFailure("operator_transaction_state_scope_invalid")
+    return lexical_state
+
+
+def _operator_transaction_lock_scope_sha256(state_dir: Path) -> str:
+    lexical_state = _lexical_operator_state_dir(state_dir)
+    return _sha256_bytes(
+        _canonical_json(
+            {
+                "schema": OPERATOR_TRANSACTION_LOCK_SCOPE_SCHEMA,
+                "state_dir": str(lexical_state),
+            }
+        )
+    )
 
 
 def _private_directory(path: Path, *, create: bool = False) -> Path:
@@ -5851,6 +5891,8 @@ class ReleaseIdentity:
     obsidian_cutover_contract: str = ""
     secondary_product_runner_sha256: str = ""
     engineer_command_lifecycle_contract: str = ""
+    operator_transaction_lock_scope_contract: str = ""
+    operator_transaction_lock_scope_sha256: str = ""
 
 
 @dataclass(frozen=True)
@@ -6076,20 +6118,37 @@ class OperatorTransactionLock:
     """One owner-only nonblocking process lock for all release mutations."""
 
     def __init__(self, path: Path) -> None:
-        parent = _private_directory(path.parent)
         lexical = Path(os.path.abspath(path))
-        if lexical.parent != parent or lexical.name != "immutable-release-operator.v1.lock":
+        if lexical.name != "immutable-release-operator.v1.lock":
             raise ReleaseFailure("operator_transaction_lock_path_invalid")
         self.path = lexical
+        self.state_dir = lexical.parent
+        scope = hashlib.sha256(os.fsencode(str(self.state_dir))).hexdigest()
+        self._abstract_address = f"\x00friday-immutable-release-operator-v1.{os.geteuid()}.{scope[:40]}"
         self._descriptor = -1
+        self._abstract_socket: socket.socket | None = None
 
     def __enter__(self) -> OperatorTransactionLock:
-        flags = os.O_RDWR | os.O_CREAT | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0)
+        abstract_socket: socket.socket | None = None
         try:
-            descriptor = os.open(self.path, flags, 0o600)
+            abstract_socket = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM)
+            abstract_socket.set_inheritable(False)
+            abstract_socket.bind(self._abstract_address)
         except OSError as exc:
+            if abstract_socket is not None:
+                abstract_socket.close()
+            if exc.errno == errno.EADDRINUSE:
+                raise ReleaseFailure("operator_transaction_in_progress") from exc
             raise ReleaseFailure("operator_transaction_lock_invalid") from exc
+        assert abstract_socket is not None
+
+        flags = os.O_RDWR | os.O_CREAT | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0)
+        descriptor = -1
         try:
+            parent = _private_directory(self.state_dir)
+            if parent != self.state_dir:
+                raise ReleaseFailure("operator_transaction_lock_path_invalid")
+            descriptor = os.open(self.path, flags, 0o600)
             status = os.fstat(descriptor)
             lexical = os.stat(self.path, follow_symlinks=False)
             if (
@@ -6107,19 +6166,32 @@ class OperatorTransactionLock:
             after = os.stat(self.path, follow_symlinks=False)
             if (status.st_dev, status.st_ino) != (after.st_dev, after.st_ino):
                 raise ReleaseFailure("operator_transaction_lock_changed")
+        except OSError as exc:
+            if descriptor >= 0:
+                os.close(descriptor)
+            abstract_socket.close()
+            raise ReleaseFailure("operator_transaction_lock_invalid") from exc
         except BaseException:
-            os.close(descriptor)
+            if descriptor >= 0:
+                os.close(descriptor)
+            abstract_socket.close()
             raise
         self._descriptor = descriptor
+        self._abstract_socket = abstract_socket
         return self
 
     def __exit__(self, exc_type: Any, exc: Any, traceback: Any) -> None:
         del exc_type, exc, traceback
         descriptor, self._descriptor = self._descriptor, -1
-        if descriptor >= 0:
-            with suppress(OSError):
-                fcntl.flock(descriptor, fcntl.LOCK_UN)
-            os.close(descriptor)
+        abstract_socket, self._abstract_socket = self._abstract_socket, None
+        try:
+            if descriptor >= 0:
+                with suppress(OSError):
+                    fcntl.flock(descriptor, fcntl.LOCK_UN)
+                os.close(descriptor)
+        finally:
+            if abstract_socket is not None:
+                abstract_socket.close()
 
 
 def render_units(*, anchor: Path, env_file: Path, friday_home: Path) -> dict[str, str]:
@@ -7022,6 +7094,8 @@ def _cleanup_staging_tree(staging: Path) -> None:
 def _build_release_locked(spec: BuildSpec) -> ReleaseIdentity:
     """Build one previously absent sibling release from pinned offline wheels."""
 
+    state_dir = _canonical_operator_state_dir(spec.friday_home, spec.state_dir)
+    lock_scope_sha256 = _operator_transaction_lock_scope_sha256(state_dir)
     commit = _closed_commit(spec.commit)
     if _VERSION.fullmatch(spec.version) is None or type(spec.max_schema) is not int or spec.max_schema <= 0:
         raise ReleaseFailure("release_metadata_invalid")
@@ -7194,6 +7268,8 @@ def _build_release_locked(spec: BuildSpec) -> ReleaseIdentity:
             "obsidian_cutover_contract": OBSIDIAN_CUTOVER_CONTRACT,
             "venv_relocation_contract": VENV_RELOCATION_CONTRACT,
             "engineer_command_lifecycle_contract": ENGINEER_COMMAND_LIFECYCLE_CONTRACT,
+            "operator_transaction_lock_scope_contract": OPERATOR_TRANSACTION_LOCK_SCOPE_CONTRACT,
+            "operator_transaction_lock_scope_sha256": lock_scope_sha256,
         }
         (artifacts / "immutable-release.json").write_bytes(_canonical_json(metadata) + b"\n")
         provisional = ReleaseIdentity(
@@ -7207,6 +7283,8 @@ def _build_release_locked(spec: BuildSpec) -> ReleaseIdentity:
             OBSIDIAN_CUTOVER_CONTRACT,
             product_runner_sha256,
             ENGINEER_COMMAND_LIFECYCLE_CONTRACT,
+            OPERATOR_TRANSACTION_LOCK_SCOPE_CONTRACT,
+            lock_scope_sha256,
         )
         installed_surface_smoke(provisional)
         _relocate_venv_generated_paths(staging, target)
@@ -7256,6 +7334,8 @@ def _build_release_locked(spec: BuildSpec) -> ReleaseIdentity:
             OBSIDIAN_CUTOVER_CONTRACT,
             product_runner_sha256,
             ENGINEER_COMMAND_LIFECYCLE_CONTRACT,
+            OPERATOR_TRANSACTION_LOCK_SCOPE_CONTRACT,
+            lock_scope_sha256,
         )
         verify_release_tree(release)
         installed_surface_smoke(release)
@@ -7271,7 +7351,8 @@ def _build_release_locked(spec: BuildSpec) -> ReleaseIdentity:
 def build_release(spec: BuildSpec) -> ReleaseIdentity:
     """Build one release under the transaction lock shared by all release mutations."""
 
-    with OperatorTransactionLock(spec.state_dir / "immutable-release-operator.v1.lock"):
+    state_dir = _canonical_operator_state_dir(spec.friday_home, spec.state_dir)
+    with OperatorTransactionLock(state_dir / "immutable-release-operator.v1.lock"):
         return _build_release_locked(spec)
 
 
@@ -17068,6 +17149,8 @@ def load_release_identity(root: Path, *, expected_tree_sha256: str) -> ReleaseId
         "secondary_product_runner_sha256",
         "venv_relocation_contract",
         "engineer_command_lifecycle_contract",
+        "operator_transaction_lock_scope_contract",
+        "operator_transaction_lock_scope_sha256",
     }
     memory_vault_mode_contract = (
         str(metadata.get("memory_vault_mode_contract") or "") if isinstance(metadata, dict) else ""
@@ -17083,6 +17166,16 @@ def load_release_identity(root: Path, *, expected_tree_sha256: str) -> ReleaseId
     )
     engineer_command_lifecycle_contract = (
         str(metadata.get("engineer_command_lifecycle_contract") or "") if isinstance(metadata, dict) else ""
+    )
+    operator_transaction_lock_scope_contract = (
+        str(metadata.get("operator_transaction_lock_scope_contract") or "")
+        if isinstance(metadata, dict)
+        else ""
+    )
+    operator_transaction_lock_scope_sha256 = (
+        str(metadata.get("operator_transaction_lock_scope_sha256") or "")
+        if isinstance(metadata, dict)
+        else ""
     )
     if (
         not isinstance(metadata, dict)
@@ -17103,6 +17196,14 @@ def load_release_identity(root: Path, *, expected_tree_sha256: str) -> ReleaseId
         or (
             ("engineer_command_lifecycle_contract" in metadata_keys)
             != (engineer_command_lifecycle_contract == ENGINEER_COMMAND_LIFECYCLE_CONTRACT)
+        )
+        or (
+            ("operator_transaction_lock_scope_contract" in metadata_keys)
+            != (operator_transaction_lock_scope_contract == OPERATOR_TRANSACTION_LOCK_SCOPE_CONTRACT)
+        )
+        or (
+            ("operator_transaction_lock_scope_contract" in metadata_keys)
+            != ("operator_transaction_lock_scope_sha256" in metadata_keys)
         )
         or metadata.get("schema") != BUILD_RECEIPT_SCHEMA
         or _VERSION.fullmatch(str(metadata.get("version") or "")) is None
@@ -17129,6 +17230,11 @@ def load_release_identity(root: Path, *, expected_tree_sha256: str) -> ReleaseId
         _closed_hash(
             secondary_product_runner_sha256,
             "release_secondary_product_runner_digest_invalid",
+        )
+    if "operator_transaction_lock_scope_sha256" in metadata_keys:
+        _closed_hash(
+            operator_transaction_lock_scope_sha256,
+            "release_operator_transaction_lock_scope_digest_invalid",
         )
     for digest in metadata["bootstrap_wheel_sha256"].values():
         _closed_hash(str(digest), "release_metadata_digest_invalid")
@@ -17186,6 +17292,8 @@ def load_release_identity(root: Path, *, expected_tree_sha256: str) -> ReleaseId
         obsidian_cutover_contract=obsidian_cutover_contract,
         secondary_product_runner_sha256=secondary_product_runner_sha256,
         engineer_command_lifecycle_contract=engineer_command_lifecycle_contract,
+        operator_transaction_lock_scope_contract=operator_transaction_lock_scope_contract,
+        operator_transaction_lock_scope_sha256=operator_transaction_lock_scope_sha256,
     )
     verify_release_tree(release)
     return release
@@ -17223,7 +17331,23 @@ def _load_candidate_alias_tool(release: ReleaseIdentity) -> Any:
         importlib.invalidate_caches()
 
 
-def _require_candidate_bound_operator(release: ReleaseIdentity) -> None:
+def _require_release_operator_lock_scope(release: ReleaseIdentity, state_dir: Path) -> None:
+    expected_scope_sha256 = _operator_transaction_lock_scope_sha256(state_dir)
+    if (
+        release.operator_transaction_lock_scope_contract != OPERATOR_TRANSACTION_LOCK_SCOPE_CONTRACT
+        or not release.operator_transaction_lock_scope_sha256
+    ):
+        raise ReleaseFailure("operator_release_lock_scope_missing")
+    if release.operator_transaction_lock_scope_sha256 != expected_scope_sha256:
+        raise ReleaseFailure("operator_release_lock_scope_mismatch")
+
+
+def _require_candidate_bound_operator(
+    release: ReleaseIdentity,
+    *,
+    state_dir: Path | None = None,
+    require_lock_scope: bool = True,
+) -> None:
     _require_venv_relocation_contract(
         release,
         code="operator_release_venv_relocation_contract_missing",
@@ -17232,6 +17356,10 @@ def _require_candidate_bound_operator(release: ReleaseIdentity) -> None:
         release,
         code="operator_release_obsidian_cutover_contract_missing",
     )
+    if require_lock_scope:
+        if state_dir is None:
+            raise ReleaseFailure("operator_release_lock_scope_missing")
+        _require_release_operator_lock_scope(release, state_dir)
     expected_script = release.root / "artifacts/immutable_release_operator.py"
     try:
         script_bound = Path(__file__).resolve(strict=True).samefile(expected_script)
@@ -17702,18 +17830,18 @@ def _run_cli(args: argparse.Namespace) -> dict[str, Any]:
             "tree_manifest_sha256": release.tree_manifest_sha256,
         }
     elif args.command == "install-units":
-        release = load_release_identity(
-            args.release,
-            expected_tree_sha256=args.release_tree_sha256,
-        )
-        _require_candidate_bound_operator(release)
-        previous = load_release_identity(
-            args.previous,
-            expected_tree_sha256=args.previous_tree_sha256,
-        )
-        if release.root == previous.root or release.commit == previous.commit:
-            raise ReleaseFailure("candidate_previous_identity_not_distinct")
         with OperatorTransactionLock(args.state_dir / "immutable-release-operator.v1.lock"):
+            release = load_release_identity(
+                args.release,
+                expected_tree_sha256=args.release_tree_sha256,
+            )
+            _require_candidate_bound_operator(release, state_dir=args.state_dir)
+            previous = load_release_identity(
+                args.previous,
+                expected_tree_sha256=args.previous_tree_sha256,
+            )
+            if release.root == previous.root or release.commit == previous.commit:
+                raise ReleaseFailure("candidate_previous_identity_not_distinct")
             journal = DurableActivationJournal(
                 args.state_dir / "immutable-release-activation.v1.json",
                 backup_root=args.backup_dir,
@@ -17745,6 +17873,7 @@ def _run_cli(args: argparse.Namespace) -> dict[str, Any]:
         }
     elif args.command == "activate":
         config = _systemd_config(args)
+        _canonical_operator_state_dir(config.friday_home, config.state_dir)
         staged_config_transition = _requested_staged_config_transition(config)
         _secondary_rollout_receipt_stage(config)
         target_config = _activation_target_config(config)
@@ -17757,8 +17886,8 @@ def _run_cli(args: argparse.Namespace) -> dict[str, Any]:
             != config.env_file_sha256
         ):
             raise ReleaseFailure("staged_predecessor_env_digest_mismatch")
-        port = SystemdActivationPort(config)
         with OperatorTransactionLock(config.state_dir / "immutable-release-operator.v1.lock"):
+            port = SystemdActivationPort(config)
             journal = DurableActivationJournal(
                 config.state_dir / "immutable-release-activation.v1.json",
                 backup_root=config.backup_dir,
@@ -17798,7 +17927,7 @@ def _run_cli(args: argparse.Namespace) -> dict[str, Any]:
                 args.candidate,
                 expected_tree_sha256=args.candidate_tree_sha256,
             )
-            _require_candidate_bound_operator(candidate)
+            _require_candidate_bound_operator(candidate, state_dir=config.state_dir)
             _require_completed_unit_install(config.state_dir, candidate)
             receipt = activate_release(
                 port,
@@ -17815,6 +17944,7 @@ def _run_cli(args: argparse.Namespace) -> dict[str, Any]:
             )
     elif args.command == "recover-activation":
         config = _systemd_config(args)
+        _canonical_operator_state_dir(config.friday_home, config.state_dir)
         with OperatorTransactionLock(config.state_dir / "immutable-release-operator.v1.lock"):
             journal_path = config.state_dir / "immutable-release-activation.v1.json"
             journal_probe = DurableActivationJournal(
@@ -17841,25 +17971,31 @@ def _run_cli(args: argparse.Namespace) -> dict[str, Any]:
                 next_env_file_sha256=config.next_env_file_sha256 or None,
                 staged_config_transition=(config.staged_config_transition or None),
             )
+            candidate, _previous, fallback = journal.release_identities()
+            _require_release_operator_lock_scope(candidate, config.state_dir)
             executor = load_release_identity(
                 args.executor_release,
                 expected_tree_sha256=args.executor_tree_sha256,
             )
-            _require_candidate_bound_operator(executor)
-            candidate, _previous, fallback = journal.release_identities()
             if executor.root not in {candidate.root, fallback.root}:
                 raise ReleaseFailure("recovery_executor_not_schema_capable_release")
+            _require_candidate_bound_operator(
+                executor,
+                state_dir=config.state_dir,
+                require_lock_scope=executor.root == candidate.root,
+            )
             _require_completed_unit_install(config.state_dir, candidate)
             receipt = recover_interrupted_activation(port, journal)
     elif args.command == "recover-historical-album":
         config = _systemd_config(args)
-        port = SystemdActivationPort(config)
-        release = load_release_identity(
-            args.release,
-            expected_tree_sha256=args.release_tree_sha256,
-        )
-        _require_candidate_bound_operator(release)
+        _canonical_operator_state_dir(config.friday_home, config.state_dir)
         with OperatorTransactionLock(config.state_dir / "immutable-release-operator.v1.lock"):
+            port = SystemdActivationPort(config)
+            release = load_release_identity(
+                args.release,
+                expected_tree_sha256=args.release_tree_sha256,
+            )
+            _require_candidate_bound_operator(release, state_dir=config.state_dir)
             _require_completed_unit_install(config.state_dir, release)
             receipt = port.recover_historical_album_live(release)
     else:  # pragma: no cover - argparse owns the closed set
@@ -17916,6 +18052,8 @@ __all__ = [
     "HISTORICAL_ALBUM_PLAN_SHA256",
     "HISTORICAL_ALBUM_UPDATE_IDS",
     "OBSIDIAN_CUTOVER_CONTRACT",
+    "OPERATOR_TRANSACTION_LOCK_SCOPE_CONTRACT",
+    "OPERATOR_TRANSACTION_LOCK_SCOPE_SCHEMA",
     "ActivationPort",
     "DurableAlbumRecoveryJournal",
     "DurableActivationJournal",

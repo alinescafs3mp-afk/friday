@@ -9963,6 +9963,9 @@ def _remove_fixture_pycache(pycache: Path) -> None:
 def _synthetic_build_spec(tmp_path: Path) -> operator.BuildSpec:
     releases_root = tmp_path / "releases"
     releases_root.mkdir(mode=0o700)
+    friday_home = tmp_path / "friday-home"
+    state_dir = friday_home / "data/state"
+    state_dir.mkdir(parents=True, mode=0o700)
     wheelhouse, wheelhouse_manifest = _write_synthetic_wheelhouse(tmp_path)
     runtime_lock = tmp_path / "runtime.lock"
     runtime_lock.write_text("anyio==4.14.2\n", encoding="ascii")
@@ -9990,8 +9993,8 @@ def _synthetic_build_spec(tmp_path: Path) -> operator.BuildSpec:
         releases_root=releases_root,
         anchor=tmp_path / "current-release",
         env_file=tmp_path / ".env.local",
-        friday_home=tmp_path / "friday-home",
-        state_dir=tmp_path,
+        friday_home=friday_home,
+        state_dir=state_dir,
         base_python=base_python,
         base_python_sha256=hashlib.sha256(base_python.read_bytes()).hexdigest(),
         alias_tool=alias_tool,
@@ -10012,6 +10015,51 @@ def test_build_uses_the_shared_release_operator_transaction_lock(tmp_path: Path)
         pytest.raises(operator.ReleaseFailure, match="^operator_transaction_in_progress$"),
     ):
         operator.build_release(spec)
+
+
+def test_build_rejects_an_alternate_state_lock_scope_before_mutation(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    spec = _synthetic_build_spec(tmp_path)
+    alternate = tmp_path / "alternate-state"
+    alternate.mkdir(mode=0o700)
+    monkeypatch.setattr(
+        operator,
+        "_build_release_locked",
+        lambda _spec: (_ for _ in ()).throw(AssertionError("build mutation reached")),
+    )
+
+    with pytest.raises(
+        operator.ReleaseFailure,
+        match="^operator_transaction_state_scope_invalid$",
+    ):
+        operator.build_release(replace(spec, state_dir=alternate))
+
+    assert list(alternate.iterdir()) == []
+
+
+def test_candidate_lock_scope_rejects_a_different_canonical_state_dir(tmp_path: Path) -> None:
+    first = tmp_path / "first-home/data/state"
+    second = tmp_path / "second-home/data/state"
+    first.mkdir(parents=True, mode=0o700)
+    second.mkdir(parents=True, mode=0o700)
+    candidate = operator.ReleaseIdentity(
+        tmp_path / "candidate",
+        "c" * 40,
+        "0.207.85",
+        "d" * 64,
+        50,
+        venv_relocation_contract=operator.VENV_RELOCATION_CONTRACT,
+        obsidian_cutover_contract=operator.OBSIDIAN_CUTOVER_CONTRACT,
+        operator_transaction_lock_scope_contract=(operator.OPERATOR_TRANSACTION_LOCK_SCOPE_CONTRACT),
+        operator_transaction_lock_scope_sha256=(
+            operator._operator_transaction_lock_scope_sha256(first)  # noqa: SLF001
+        ),
+    )
+
+    with pytest.raises(operator.ReleaseFailure, match="^operator_release_lock_scope_mismatch$"):
+        operator._require_candidate_bound_operator(candidate, state_dir=second)  # noqa: SLF001
 
 
 def test_relocation_rebinds_discovered_entrypoints_and_metadata_across_atomic_publish(
@@ -10269,6 +10317,12 @@ def test_build_smoke_failure_cleans_only_prepublication_staging_and_quarantines_
     assert stat.S_IMODE(os.lstat(product_runner).st_mode) == 0o400
     loaded = operator.load_release_identity(target, expected_tree_sha256=digest)
     assert loaded.secondary_product_runner_sha256 == spec.secondary_product_runner_sha256
+    assert (
+        loaded.operator_transaction_lock_scope_contract == operator.OPERATOR_TRANSACTION_LOCK_SCOPE_CONTRACT
+    )
+    assert loaded.operator_transaction_lock_scope_sha256 == (
+        operator._operator_transaction_lock_scope_sha256(spec.state_dir)  # noqa: SLF001
+    )
     with pytest.raises(operator.ReleaseFailure, match="^release_target_exists$"):
         operator.build_release(spec)
     assert hashlib.sha256(manifest.read_bytes()).hexdigest() == digest
@@ -10764,6 +10818,9 @@ def test_missing_venv_fails_before_release_staging_or_target(
 ) -> None:
     releases_root = tmp_path / "releases"
     releases_root.mkdir(mode=0o700)
+    friday_home = tmp_path / "friday-home"
+    state_dir = friday_home / "data/state"
+    state_dir.mkdir(parents=True, mode=0o700)
     wheelhouse, wheelhouse_manifest = _write_synthetic_wheelhouse(tmp_path)
     runtime_lock = tmp_path / "runtime.lock"
     runtime_lock.write_text("anyio==4.14.2\n", encoding="ascii")
@@ -10801,8 +10858,8 @@ def test_missing_venv_fails_before_release_staging_or_target(
         releases_root=releases_root,
         anchor=tmp_path / "current-release",
         env_file=tmp_path / ".env.local",
-        friday_home=tmp_path / "friday-home",
-        state_dir=tmp_path,
+        friday_home=friday_home,
+        state_dir=state_dir,
         base_python=base_python,
         base_python_sha256=hashlib.sha256(base_python.read_bytes()).hexdigest(),
         alias_tool=alias_tool,
@@ -10825,6 +10882,9 @@ def test_post_seal_failure_removes_staging_and_preserves_original_failure(
 ) -> None:
     releases_root = tmp_path / "releases"
     releases_root.mkdir(mode=0o700)
+    friday_home = tmp_path / "friday-home"
+    state_dir = friday_home / "data/state"
+    state_dir.mkdir(parents=True, mode=0o700)
     wheelhouse, wheelhouse_manifest = _write_synthetic_wheelhouse(tmp_path)
     runtime_lock = tmp_path / "runtime.lock"
     runtime_lock.write_text("anyio==4.14.2\n", encoding="ascii")
@@ -10880,8 +10940,8 @@ def test_post_seal_failure_removes_staging_and_preserves_original_failure(
         releases_root=releases_root,
         anchor=tmp_path / "current-release",
         env_file=tmp_path / ".env.local",
-        friday_home=tmp_path / "friday-home",
-        state_dir=tmp_path,
+        friday_home=friday_home,
+        state_dir=state_dir,
         base_python=base_python,
         base_python_sha256=hashlib.sha256(base_python.read_bytes()).hexdigest(),
         alias_tool=alias_tool,
@@ -12699,6 +12759,102 @@ def test_operator_transaction_lock_is_process_wide_nonblocking(tmp_path: Path) -
         pytest.fail("a concurrent release controller acquired the same lock")
     with operator.OperatorTransactionLock(lock_path):
         assert lock_path.stat().st_mode & 0o077 == 0
+
+
+def test_operator_transaction_lock_survives_state_directory_replacement(tmp_path: Path) -> None:
+    tmp_path.chmod(0o700)
+    state = tmp_path / "state"
+    displaced = tmp_path / "displaced-state"
+    state.mkdir(mode=0o700)
+    lock_path = state / "immutable-release-operator.v1.lock"
+
+    with operator.OperatorTransactionLock(lock_path):
+        state.rename(displaced)
+        state.mkdir(mode=0o700)
+        with (
+            pytest.raises(operator.ReleaseFailure, match="^operator_transaction_in_progress$"),
+            operator.OperatorTransactionLock(lock_path),
+        ):
+            pytest.fail("replacement state directory escaped the lexical lock domain")
+
+
+def test_cli_never_constructs_a_mutating_activation_port_before_the_lock(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    tmp_path.chmod(0o700)
+    friday_home = tmp_path / "friday-home"
+    state_dir = friday_home / "data/state"
+    state_dir.mkdir(parents=True, mode=0o700)
+    backup_dir = tmp_path / "must-not-be-created"
+    constructor_calls: list[object] = []
+
+    def forbidden_constructor(config: object) -> object:
+        constructor_calls.append(config)
+        backup_dir.mkdir()
+        raise AssertionError("activation port constructed before lock")
+
+    monkeypatch.setattr(operator, "SystemdActivationPort", forbidden_constructor)
+    common = [
+        "--anchor",
+        str(tmp_path / "current"),
+        "--env-file",
+        str(tmp_path / ".env.local"),
+        "--env-file-sha256",
+        "1" * 64,
+        "--friday-home",
+        str(friday_home),
+        "--unit-dir",
+        str(tmp_path / "units"),
+        "--database",
+        str(state_dir / "friday.sqlite3"),
+        "--inbox-database",
+        str(state_dir / "telegram-inbox.sqlite3"),
+        "--backup-dir",
+        str(backup_dir),
+        "--state-dir",
+        str(state_dir),
+        "--health-ca",
+        str(tmp_path / "health-ca.pem"),
+        "--health-ca-sha256",
+        "2" * 64,
+    ]
+    commands = (
+        [
+            "activate",
+            "--candidate",
+            str(tmp_path / "candidate"),
+            "--candidate-tree-sha256",
+            "3" * 64,
+            "--previous",
+            str(tmp_path / "previous"),
+            "--previous-tree-sha256",
+            "4" * 64,
+            "--schema-capable-fallback",
+            str(tmp_path / "fallback"),
+            "--schema-capable-fallback-tree-sha256",
+            "5" * 64,
+            *common,
+        ],
+        [
+            "recover-historical-album",
+            "--release",
+            str(tmp_path / "candidate"),
+            "--release-tree-sha256",
+            "3" * 64,
+            *common,
+        ],
+    )
+
+    lock_path = state_dir / "immutable-release-operator.v1.lock"
+    with operator.OperatorTransactionLock(lock_path):
+        for command in commands:
+            arguments = operator.build_parser().parse_args(command)
+            with pytest.raises(operator.ReleaseFailure, match="^operator_transaction_in_progress$"):
+                operator._run_cli(arguments)  # noqa: SLF001
+
+    assert constructor_calls == []
+    assert not backup_dir.exists()
 
 
 def test_empty_two_field_v3_transition_shape_normalizes_to_no_transition(

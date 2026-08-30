@@ -704,6 +704,10 @@ Wheel, построенный из чисто распакованного ZIP, 
   <CANDIDATE>/artifacts/immutable_release_operator.py recover-historical-album ...
 ```
 
+`<STATE_DIR>` во всех командах означает один exact canonical
+`<FRIDAY_HOME>/data/state`. Его digest запечатан build metadata и обязан
+совпадать при install/activate/recovery; альтернативный путь fail-closed.
+
 Runner и digest берутся из чистого checkout exact candidate commit. Sealed
 release-копия mode `0400` является trust anchor, а product-stage запускается из
 чистого checkout активного predecessor; standalone запуск release-копии не

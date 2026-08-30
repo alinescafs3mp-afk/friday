@@ -641,6 +641,10 @@ Python строит sealed wheel-only siblings; все последующие к
   <CANDIDATE>/artifacts/immutable_release_operator.py recover-historical-album ...
 ```
 
+`<STATE_DIR>` во всех командах — один и тот же exact canonical
+`<FRIDAY_HOME>/data/state`. `build` связывает его digest с sealed release;
+другой, относительный или лексически неоднозначный state path отклоняется.
+
 Runner берётся только из чистого checkout exact candidate commit; переданный
 digest должен совпасть с его стабильными bytes. В release копия хранится mode
 `0400` как immutable trust anchor. Самостоятельно запускать эту копию нельзя:
