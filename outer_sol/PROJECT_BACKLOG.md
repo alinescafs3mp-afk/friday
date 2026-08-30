@@ -124,6 +124,37 @@ published; no hidden skip or permissive fallback is introduced. Target at
 least 30% lower mandatory wall time, with larger cuts accepted only when the
 invariant map proves equivalent coverage.
 
+### P0H — bounded release-artifact retention
+
+Status: queued after P0G and before further non-critical release work.
+
+Goal: replace the unbounded release polygon with a small recoverable set. The
+current inventory is roughly 54 GB of backup data, 29 GB of wheel-only releases
+and 14 GB of legacy releases; deletion is forbidden until every retained and
+retired object is classified by code-owned identity.
+
+1. Resolve current, previous, schema-capable fallback, active/staged activation
+   journals, canonical evidence roots and the newest independently verified
+   database/inbox/Engineer/Obsidian backup before proposing any deletion.
+2. Keep all identities needed for immediate rollback and one older verified
+   disaster-recovery generation. Keep an unfinished transaction and every
+   object it references regardless of age. Never infer authority from a glob,
+   directory mtime or a mutable symlink alone.
+3. Add a deterministic dry-run manifest with exact paths, commit/tree/wheel or
+   backup receipt hashes, byte counts and one closed retention reason per
+   object. Ambiguous, malformed, referenced or open objects fail closed into
+   `retain`, never `delete`.
+4. Delete only an exact reviewed manifest through descriptor-relative,
+   no-follow traversal, then prove retained releases still authenticate and a
+   production-copy restore plus immediate rollback remain possible.
+5. Apply the same bounded policy to obsolete gate/release scratch while keeping
+   canonical release receipts and measurements outside disposable roots.
+
+Acceptance: production is untouched during classification; dry-run and apply
+manifests agree exactly; current/previous/fallback and both retained backup
+generations reauthenticate; no open or journal-referenced path is removed; disk
+recovery is measured and the normal release path enforces retention thereafter.
+
 ### P0 — production message stability
 
 Status: deployed in `0.207.52`.
