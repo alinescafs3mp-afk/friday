@@ -54,12 +54,60 @@ def _exact_backup(root: Path, ordinal: int) -> dict[str, Any]:
         + b"\n"
     )
     manifest.chmod(0o600)
+    obsidian_manifest = root / "obsidian-manifest.json"
+    obsidian_manifest.write_bytes(
+        _canonical(
+            {
+                "directories": [],
+                "files": [],
+                "present": False,
+                "root": None,
+                "schema": "friday.immutable-cutover-obsidian-root.v1",
+            }
+        )
+        + b"\n"
+    )
+    obsidian_manifest.chmod(0o400)
+    engineer_manifest = root / "engineer-manifest.json"
+    engineer_manifest.write_bytes(
+        _canonical(
+            {
+                "engineer_command_ledger_authority": None,
+                "entries": [],
+                "entry_count": 0,
+                "key_present": False,
+                "schema": "friday.immutable-cutover-engineer-store.v1",
+                "store_present": False,
+                "total_bytes": 0,
+            }
+        )
+        + b"\n"
+    )
+    engineer_manifest.chmod(0o400)
+    _private_directory(root / "engineer-recovery")
+    obsidian_sha256 = _sha256_file(obsidian_manifest)
+    engineer_sha256 = _sha256_file(engineer_manifest)
     return {
         "directory": str(root),
+        "engineer": {
+            "entry_count": 0,
+            "key_present": False,
+            "manifest_sha256": engineer_sha256,
+            "store_present": False,
+            "total_bytes": 0,
+        },
+        "engineer_receipt_sha256": engineer_sha256,
         "files": files,
         "inbox_receipt_sha256": hashlib.sha256(
             _canonical([item for item in files if str(item["name"]).startswith("inbox")])
         ).hexdigest(),
+        "obsidian": {
+            "file_count": 0,
+            "manifest_sha256": obsidian_sha256,
+            "present": False,
+            "total_bytes": 0,
+        },
+        "obsidian_receipt_sha256": obsidian_sha256,
         "receipt_sha256": hashlib.sha256(
             _canonical([item for item in files if str(item["name"]).startswith("database")])
         ).hexdigest(),
@@ -101,6 +149,10 @@ def _release(root: Path, ordinal: int) -> _Release:
         )
         + b"\n"
     )
+    metadata.chmod(0o400)
+    release_operator = artifacts / "immutable_release_operator.py"
+    release_operator.write_bytes(f"# operator-{ordinal}\n".encode("ascii"))
+    release_operator.chmod(0o400)
     metadata_sha256 = hashlib.sha256(metadata.read_bytes()).hexdigest()
     manifest = artifacts / "release-tree.sha256"
     manifest.write_text(
@@ -227,9 +279,9 @@ def synthetic_inventory(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict
             "backup_directory": str(backup["directory"]),
             "backup_record_sha256": hashlib.sha256(_canonical(backup)).hexdigest(),
             "database_receipt_sha256": str(backup["receipt_sha256"]),
-            "engineer_receipt_sha256": digest("engineer"),
+            "engineer_receipt_sha256": str(backup["engineer_receipt_sha256"]),
             "inbox_receipt_sha256": str(backup["inbox_receipt_sha256"]),
-            "obsidian_receipt_sha256": digest("obsidian"),
+            "obsidian_receipt_sha256": str(backup["obsidian_receipt_sha256"]),
             "restore_release": {
                 **release.record,
                 "wheel_sha256": release.wheel_sha256,
@@ -240,11 +292,60 @@ def synthetic_inventory(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict
             "source_transaction_id": digest("transaction"),
         }
 
-    def external_receipt(kind: str, ordinal: int) -> dict[str, Any]:
+    def authentication_receipt(candidate: dict[str, Any], ordinal: int) -> dict[str, Any]:
+        digest = lambda label, value: hashlib.sha256(f"{label}-{value}".encode()).hexdigest()  # noqa: E731
+        directory = Path(candidate["backup_directory"])
+        status = directory.stat()
         core = {
-            "ordinal": ordinal,
-            "schema": f"friday.test-dr-{kind}.v1",
-            "status": "passed",
+            "activation_journal_file_sha256": digest("activation-journal-file", ordinal),
+            "activation_journal_sha256": digest("activation-journal", ordinal),
+            "activation_receipt_file_sha256": digest("activation-receipt-file", ordinal),
+            "activation_receipt_sha256": candidate["source_receipt_sha256"],
+            "backup_directory": {"device": status.st_dev, "inode": status.st_ino, "path": str(directory)},
+            "backup_manifest_sha256": _sha256_file(directory / "manifest.json"),
+            "candidate_sha256": hashlib.sha256(_canonical(candidate)).hexdigest(),
+            "restore_operator_sha256": _sha256_file(Path(candidate["restore_release"]["root"]) / "artifacts/immutable_release_operator.py"),
+            "schema": retention.dr_index.AUTHENTICATION_RECEIPT_SCHEMA,
+            "status": "authenticated",
+            "surface_receipts": {
+                "database": candidate["database_receipt_sha256"],
+                "engineer": candidate["engineer_receipt_sha256"],
+                "inbox": candidate["inbox_receipt_sha256"],
+                "obsidian": candidate["obsidian_receipt_sha256"],
+            },
+        }
+        return {**core, "receipt_sha256": hashlib.sha256(_canonical(core)).hexdigest()}
+
+    def rehearsal_receipt(candidate: dict[str, Any], authentication: dict[str, Any], state: dict[str, Any], _ordinal: int) -> dict[str, Any]:
+        restore = candidate["restore_release"]
+        source_keys = (
+            "activation_journal_file_sha256", "activation_journal_sha256",
+            "activation_receipt_file_sha256", "activation_receipt_sha256",
+            "backup_manifest_sha256", "restore_operator_sha256", "surface_receipts",
+        )
+        core = {
+            "authentication_receipt_sha256": authentication["receipt_sha256"],
+            "candidate_sha256": hashlib.sha256(_canonical(candidate)).hexdigest(),
+            "check_count": len(retention.dr_index.DR_REHEARSAL_CHECKS),
+            "checkset_sha256": retention.dr_index.DR_REHEARSAL_CHECKSET_SHA256,
+            "database_foreign_keys_clear": True, "database_integrity_clear": True,
+            "database_reopen_count": 2, "database_schema": 50,
+            "engineer_authority_present": True, "engineer_exact": True,
+            "fault_boundary": "after_migration_before_provision_or_network",
+            "four_surface_exact": True,
+            "four_surface_sha256": hashlib.sha256(
+                _canonical(authentication["surface_receipts"])
+            ).hexdigest(),
+            "index_journal_sha256": state["journal_sha256"], "index_revision": state["revision"],
+            "index_transaction_id": state["transaction_id"],
+            "inbox_foreign_keys_clear": True, "inbox_integrity_clear": True,
+            "inbox_reopen_count": 2, "network_call_count": 0, "obsidian_exact": True,
+            "production_surface_write_count": 0,
+            "restore_release": {key: restore[key] for key in ("commit", "max_schema", "tree_manifest_sha256", "version", "wheel_sha256")},
+            "rollback_restore_observed": True, "rollback_tree_sha256": restore["tree_manifest_sha256"],
+            "rolled_back": True, "schema": retention.dr_index.REHEARSAL_RECEIPT_SCHEMA,
+            "scratch_removed": True, "source": {key: authentication[key] for key in source_keys},
+            "status": "rehearsed", "systemctl_call_count": 0,
         }
         return {**core, "receipt_sha256": hashlib.sha256(_canonical(core)).hexdigest()}
 
@@ -269,12 +370,13 @@ def synthetic_inventory(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict
             candidate=candidate,
             expected_journal_sha256=str(generation_state["journal_sha256"]),
         )
+        authentication = authentication_receipt(candidate, ordinal)
         generation_state = generation_index.record_authenticated(
-            receipt=external_receipt("authentication", ordinal),
+            receipt=authentication,
             expected_journal_sha256=str(generation_state["journal_sha256"]),
         )
         generation_state = generation_index.record_rehearsed(
-            receipt=external_receipt("rehearsal", ordinal),
+            receipt=rehearsal_receipt(candidate, authentication, generation_state, ordinal),
             expected_journal_sha256=str(generation_state["journal_sha256"]),
         )
         generation_index.publish(
@@ -308,7 +410,8 @@ def synthetic_inventory(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict
         "dr_index_owner": generation_index,
         "dr_pins": pins,
         "generation_candidate": generation_candidate,
-        "external_receipt": external_receipt,
+        "authentication_receipt": authentication_receipt,
+        "rehearsal_receipt": rehearsal_receipt,
         "evidence_root": evidence_root,
         "evidence_authority": evidence_authority,
         "activation_backup": activation_backup,
@@ -456,6 +559,59 @@ def test_backup_inventory_binds_all_closed_retention_roles(
     assert plan["apply_authority"] is False
 
 
+def test_retention_reauthenticates_exact_backup_bytes_before_any_delete_authority(
+    synthetic_inventory: dict[str, Any],
+) -> None:
+    database = Path(synthetic_inventory["older_backup"]["directory"]) / "database.sqlite3"
+    database.write_bytes(database.read_bytes() + b"tamper")
+
+    plan = _plan(synthetic_inventory)
+
+    assert plan["classification_status"] == "blocked"
+    assert plan["block_reason"] == "dr_pins_invalid"
+    assert not any(item["decision"] == "delete_candidate" for item in plan["targets"])
+    assert not any(item["decision"] == "delete_candidate" for item in plan["backup_targets"])
+
+
+def test_receipt_swap_after_index_snapshot_cannot_grant_retention_authority(
+    synthetic_inventory: dict[str, Any],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    bindings = _bindings(synthetic_inventory)
+    older = next(pin for pin in bindings.dr_pins if pin.role == "older")
+    assert older.rehearsal_receipt_path is not None
+    receipt_path = older.rehearsal_receipt_path
+    original_snapshot = retention.dr_index.DurableDRGenerationIndex.authority_snapshot
+    swapped = False
+
+    def snapshot_then_swap(
+        index: retention.dr_index.DurableDRGenerationIndex,
+    ) -> retention.dr_index.DRGenerationAuthoritySnapshot:
+        nonlocal swapped
+        result = original_snapshot(index)
+        if not swapped:
+            swapped = True
+            replacement = json.loads(receipt_path.read_text(encoding="ascii"))
+            replacement["rollback_tree_sha256"] = "f" * 64
+            core = {key: value for key, value in replacement.items() if key != "receipt_sha256"}
+            replacement["receipt_sha256"] = hashlib.sha256(_canonical(core)).hexdigest()
+            receipt_path.chmod(0o600)
+            receipt_path.write_bytes(_canonical(replacement) + b"\n")
+            receipt_path.chmod(0o400)
+        return result
+
+    monkeypatch.setattr(
+        retention.dr_index.DurableDRGenerationIndex,
+        "authority_snapshot",
+        snapshot_then_swap,
+    )
+    plan = _plan(synthetic_inventory, authority_bindings=bindings)
+
+    assert plan["classification_status"] == "blocked"
+    assert plan["block_reason"] == "dr_pins_invalid"
+    assert not any(item["decision"] == "delete_candidate" for item in plan["targets"])
+
+
 def test_pending_dr_generation_is_exact_and_retained(
     synthetic_inventory: dict[str, Any],
 ) -> None:
@@ -585,7 +741,7 @@ def test_atomic_dr_snapshot_rejects_mixed_projection_across_index_a_b_a(
 
     assert legacy_pins_calls == 0
     assert plan["classification_status"] == "blocked"
-    assert plan["block_reason"] == "dr_pins_invalid"
+    assert plan["block_reason"] == "dr_index_invalid"
     assert not any(item["decision"] == "delete_candidate" for item in plan["targets"])
 
 
@@ -648,19 +804,20 @@ def test_distinct_current_dr_generation_has_its_own_closed_reason(
     state = index.load()
     state = index.prepare(
         intent="rotate_current",
-        candidate=synthetic_inventory["generation_candidate"](
+        candidate=(candidate := synthetic_inventory["generation_candidate"](
             current_backup,
             synthetic_inventory["old"],
             5,
-        ),
+        )),
         expected_journal_sha256=str(state["journal_sha256"]),
     )
+    authentication = synthetic_inventory["authentication_receipt"](candidate, 5)
     state = index.record_authenticated(
-        receipt=synthetic_inventory["external_receipt"]("authentication", 5),
+        receipt=authentication,
         expected_journal_sha256=str(state["journal_sha256"]),
     )
     state = index.record_rehearsed(
-        receipt=synthetic_inventory["external_receipt"]("rehearsal", 5),
+        receipt=synthetic_inventory["rehearsal_receipt"](candidate, authentication, state, 5),
         expected_journal_sha256=str(state["journal_sha256"]),
     )
     index.publish(expected_journal_sha256=str(state["journal_sha256"]))
@@ -928,6 +1085,7 @@ def test_tampered_metadata_and_authenticated_hardlinks_are_never_candidates(
     old_root = synthetic_inventory["old"].identity.root
     metadata = old_root / "artifacts/immutable-release.json"
     original = metadata.read_bytes()
+    metadata.chmod(0o600)
     metadata.write_bytes(original.replace(synthetic_inventory["old"].wheel_sha256.encode(), b"f" * 64))
     tampered = _plan(synthetic_inventory)
     tampered_old = next(item for item in tampered["targets"] if Path(item["path"]).name == "old")

@@ -16,6 +16,7 @@ import hashlib
 import json
 import os
 import stat
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -23,7 +24,7 @@ from typing import Any
 from tools import immutable_release_operator as release_operator
 from tools import release_dr_generation_index as dr_index
 
-AUTHENTICATION_RECEIPT_SCHEMA = "friday.immutable-release-dr-authentication-receipt.v1"
+AUTHENTICATION_RECEIPT_SCHEMA = dr_index.AUTHENTICATION_RECEIPT_SCHEMA
 MAX_ACTIVATION_RECEIPT_BYTES = 1 << 20
 
 _HEX64 = frozenset("0123456789abcdef")
@@ -81,6 +82,7 @@ def _stable_private_file(
     maximum: int,
     code: str,
     private: bool = True,
+    allow_empty: bool = False,
 ) -> tuple[bytes, os.stat_result]:
     lexical = Path(os.path.abspath(path))
     if not path.is_absolute() or lexical != path or any(char in str(path) for char in "\x00\r\n"):
@@ -96,7 +98,7 @@ def _stable_private_file(
                 or opened.st_uid != os.geteuid()
                 or opened.st_nlink != 1
                 or (private and stat.S_IMODE(opened.st_mode) & 0o077)
-                or not 0 < opened.st_size <= maximum
+                or not (0 <= opened.st_size <= maximum if allow_empty else 0 < opened.st_size <= maximum)
                 or (opened.st_dev, opened.st_ino) != (before.st_dev, before.st_ino)
             ):
                 raise DRGenerationAuthenticationError(code)
@@ -120,6 +122,58 @@ def _stable_private_file(
     if _file_identity(before) != _file_identity(after_open) or _file_identity(before) != _file_identity(after):
         raise DRGenerationAuthenticationError(code)
     return b"".join(chunks), opened
+
+
+def _stable_private_file_digest(
+    path: Path,
+    *,
+    maximum: int,
+    code: str,
+    allow_empty: bool = False,
+) -> tuple[str, int, os.stat_result]:
+    """Stream one stable owner-private file without materializing it in RAM."""
+
+    lexical = Path(os.path.abspath(path))
+    if not path.is_absolute() or lexical != path or any(char in str(path) for char in "\x00\r\n"):
+        raise DRGenerationAuthenticationError(code)
+    flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0)
+    try:
+        before = os.stat(path, follow_symlinks=False)
+        descriptor = os.open(path, flags)
+        try:
+            opened = os.fstat(descriptor)
+            if (
+                not stat.S_ISREG(opened.st_mode)
+                or opened.st_uid != os.geteuid()
+                or opened.st_nlink != 1
+                or stat.S_IMODE(opened.st_mode) & 0o077
+                or not (0 <= opened.st_size <= maximum if allow_empty else 0 < opened.st_size <= maximum)
+                or (opened.st_dev, opened.st_ino) != (before.st_dev, before.st_ino)
+            ):
+                raise DRGenerationAuthenticationError(code)
+            digest = hashlib.sha256()
+            size = 0
+            while True:
+                chunk = os.read(descriptor, 1 << 20)
+                if not chunk:
+                    break
+                size += len(chunk)
+                if size > maximum:
+                    raise DRGenerationAuthenticationError(code)
+                digest.update(chunk)
+            after_open = os.fstat(descriptor)
+        finally:
+            os.close(descriptor)
+        after = os.stat(path, follow_symlinks=False)
+    except OSError as exc:
+        raise DRGenerationAuthenticationError(code) from exc
+    if (
+        size != int(opened.st_size)
+        or _file_identity(before) != _file_identity(after_open)
+        or _file_identity(before) != _file_identity(after)
+    ):
+        raise DRGenerationAuthenticationError(code)
+    return digest.hexdigest(), size, opened
 
 
 def _json(raw: bytes, *, code: str) -> dict[str, Any]:
@@ -422,6 +476,259 @@ def _authenticate_locked(
     return AuthenticatedDRCandidate(candidate, authentication_receipt)
 
 
+def reauthenticate_generation_candidate(
+    *,
+    candidate: Mapping[str, Any],
+    authentication_receipt: Mapping[str, Any],
+) -> release_operator.DatabaseBackup:
+    """Reauthenticate every retained backup byte before granting retention authority."""
+
+    try:
+        normalized = dr_index.normalize_generation_candidate(candidate)
+        _reference, _raw, receipt = dr_index.validate_authentication_receipt(
+            authentication_receipt,
+            candidate=normalized,
+        )
+        directory = Path(normalized["backup_directory"])
+        directory_before = _directory_identity(directory)
+        expected_directory = receipt["backup_directory"]
+        if (
+            expected_directory["device"] != directory_before[0]
+            or expected_directory["inode"] != directory_before[1]
+        ):
+            raise DRGenerationAuthenticationError("dr_retained_backup_identity_mismatch")
+
+        manifest_raw, manifest_status = _stable_private_file(
+            directory / "manifest.json",
+            maximum=1 << 20,
+            code="dr_retained_backup_manifest_invalid",
+        )
+        if _sha256(manifest_raw) != receipt["backup_manifest_sha256"]:
+            raise DRGenerationAuthenticationError("dr_retained_backup_manifest_mismatch")
+        manifest = _json(manifest_raw, code="dr_retained_backup_manifest_invalid")
+        if set(manifest) != {"database_schema", "files", "schema"} or manifest.get(
+            "schema"
+        ) != "friday.immutable-cutover-exact-backup.v1":
+            raise DRGenerationAuthenticationError("dr_retained_backup_manifest_invalid")
+        schema_version = manifest.get("database_schema")
+        files_raw = manifest.get("files")
+        if type(schema_version) is not int or schema_version <= 0 or not isinstance(files_raw, list):
+            raise DRGenerationAuthenticationError("dr_retained_backup_manifest_invalid")
+        allowed = {
+            "database.sqlite3",
+            "database.sqlite3-wal",
+            "inbox.sqlite3",
+            "inbox.sqlite3-wal",
+        }
+        files: list[tuple[str, str, int]] = []
+        entries: list[dict[str, Any]] = []
+        seen: set[str] = set()
+        file_statuses: dict[str, tuple[int, ...]] = {}
+        for item in files_raw:
+            if not isinstance(item, dict) or set(item) != {"name", "sha256", "size"}:
+                raise DRGenerationAuthenticationError("dr_retained_backup_manifest_invalid")
+            name = item.get("name")
+            size = item.get("size")
+            digest = _hex64(item.get("sha256"), code="dr_retained_backup_manifest_invalid")
+            if (
+                not isinstance(name, str)
+                or name not in allowed
+                or name in seen
+                or type(size) is not int
+                or size < 0
+            ):
+                raise DRGenerationAuthenticationError("dr_retained_backup_manifest_invalid")
+            observed_digest, observed_size, file_status = _stable_private_file_digest(
+                directory / name,
+                maximum=1 << 40,
+                code="dr_retained_backup_file_invalid",
+                allow_empty=True,
+            )
+            if observed_size != size or observed_digest != digest:
+                raise DRGenerationAuthenticationError("dr_retained_backup_file_changed")
+            seen.add(name)
+            files.append((name, digest, size))
+            entries.append({"name": name, "sha256": digest, "size": size})
+            file_statuses[name] = _file_identity(file_status)
+        entries.sort(key=lambda item: str(item["name"]))
+        files.sort()
+        if manifest["files"] != entries or not {"database.sqlite3", "inbox.sqlite3"}.issubset(seen):
+            raise DRGenerationAuthenticationError("dr_retained_backup_manifest_invalid")
+        database_receipt = _sha256(
+            _canonical([item for item in entries if str(item["name"]).startswith("database")])
+        )
+        inbox_receipt = _sha256(
+            _canonical([item for item in entries if str(item["name"]).startswith("inbox")])
+        )
+        if (
+            database_receipt != normalized["database_receipt_sha256"]
+            or inbox_receipt != normalized["inbox_receipt_sha256"]
+        ):
+            raise DRGenerationAuthenticationError("dr_retained_backup_receipt_mismatch")
+
+        obsidian_raw, obsidian_status = _stable_private_file(
+            directory / "obsidian-manifest.json",
+            maximum=release_operator.MAX_EXACT_MANIFEST_BYTES,
+            code="dr_retained_obsidian_manifest_invalid",
+        )
+        if _sha256(obsidian_raw) != normalized["obsidian_receipt_sha256"]:
+            raise DRGenerationAuthenticationError("dr_retained_obsidian_receipt_mismatch")
+        obsidian_manifest = _json(obsidian_raw, code="dr_retained_obsidian_manifest_invalid")
+        present, _directories, obsidian_files = release_operator._validate_obsidian_manifest(  # noqa: SLF001
+            obsidian_manifest
+        )
+        obsidian = release_operator._ExactObsidianBackup(  # noqa: SLF001
+            present=present,
+            manifest_sha256=normalized["obsidian_receipt_sha256"],
+            file_count=len(obsidian_files),
+            total_bytes=sum(int(item["size"]) for item in obsidian_files.values()),
+        )
+        release_operator._verify_obsidian_backup(directory, obsidian)  # noqa: SLF001
+
+        engineer_raw, engineer_status = _stable_private_file(
+            directory / "engineer-manifest.json",
+            maximum=release_operator.MAX_EXACT_MANIFEST_BYTES,
+            code="dr_retained_engineer_manifest_invalid",
+        )
+        if _sha256(engineer_raw) != normalized["engineer_receipt_sha256"]:
+            raise DRGenerationAuthenticationError("dr_retained_engineer_receipt_mismatch")
+        engineer_manifest = _json(engineer_raw, code="dr_retained_engineer_manifest_invalid")
+        engineer = release_operator._ExactEngineerBackup(  # noqa: SLF001
+            manifest_sha256=normalized["engineer_receipt_sha256"],
+            entry_count=int(engineer_manifest.get("entry_count", -1)),
+            total_bytes=int(engineer_manifest.get("total_bytes", -1)),
+            store_present=bool(engineer_manifest.get("store_present")),
+            key_present=bool(engineer_manifest.get("key_present")),
+        )
+        release_operator._validated_engineer_manifest(engineer_raw, engineer)  # noqa: SLF001
+        release_operator._verify_engineer_backup(  # noqa: SLF001
+            directory,
+            engineer,
+            verify_sqlite_integrity=False,
+        )
+
+        backup_record = {
+            "directory": str(directory),
+            "engineer": {
+                "entry_count": engineer.entry_count,
+                "key_present": engineer.key_present,
+                "manifest_sha256": engineer.manifest_sha256,
+                "store_present": engineer.store_present,
+                "total_bytes": engineer.total_bytes,
+            },
+            "engineer_receipt_sha256": engineer.manifest_sha256,
+            "files": entries,
+            "inbox_receipt_sha256": inbox_receipt,
+            "obsidian": {
+                "file_count": obsidian.file_count,
+                "manifest_sha256": obsidian.manifest_sha256,
+                "present": obsidian.present,
+                "total_bytes": obsidian.total_bytes,
+            },
+            "obsidian_receipt_sha256": obsidian.manifest_sha256,
+            "receipt_sha256": database_receipt,
+            "schema_version": schema_version,
+        }
+        if _sha256(_canonical(backup_record)) != normalized["backup_record_sha256"]:
+            raise DRGenerationAuthenticationError("dr_retained_backup_record_mismatch")
+
+        expected_top_level = set(seen) | {
+            "engineer-manifest.json",
+            "engineer-recovery",
+            "manifest.json",
+            "obsidian-manifest.json",
+        }
+        if obsidian.present:
+            expected_top_level.add("obsidian-root")
+        if {path.name for path in directory.iterdir()} != expected_top_level:
+            raise DRGenerationAuthenticationError("dr_retained_backup_manifest_mismatch")
+
+        restore = normalized["restore_release"]
+        fallback = release_operator.load_release_identity(
+            Path(restore["root"]),
+            expected_tree_sha256=restore["tree_manifest_sha256"],
+        )
+        release_operator.verify_release_tree(fallback)
+        if _release_record(fallback) != restore:
+            raise DRGenerationAuthenticationError("dr_retained_restore_release_mismatch")
+        operator_raw, operator_status = _stable_private_file(
+            fallback.root / "artifacts/immutable_release_operator.py",
+            maximum=4 << 20,
+            code="dr_retained_restore_operator_invalid",
+        )
+        if _sha256(operator_raw) != receipt["restore_operator_sha256"]:
+            raise DRGenerationAuthenticationError("dr_retained_restore_operator_mismatch")
+
+        manifest_after, manifest_after_status = _stable_private_file(
+            directory / "manifest.json",
+            maximum=1 << 20,
+            code="dr_retained_backup_manifest_invalid",
+        )
+        obsidian_after, obsidian_after_status = _stable_private_file(
+            directory / "obsidian-manifest.json",
+            maximum=release_operator.MAX_EXACT_MANIFEST_BYTES,
+            code="dr_retained_obsidian_manifest_invalid",
+        )
+        engineer_after, engineer_after_status = _stable_private_file(
+            directory / "engineer-manifest.json",
+            maximum=release_operator.MAX_EXACT_MANIFEST_BYTES,
+            code="dr_retained_engineer_manifest_invalid",
+        )
+        if (
+            _directory_identity(directory) != directory_before
+            or manifest_after != manifest_raw
+            or _file_identity(manifest_after_status) != _file_identity(manifest_status)
+            or obsidian_after != obsidian_raw
+            or _file_identity(obsidian_after_status) != _file_identity(obsidian_status)
+            or engineer_after != engineer_raw
+            or _file_identity(engineer_after_status) != _file_identity(engineer_status)
+            or any(
+                _file_identity(
+                    _stable_private_file_digest(
+                        directory / name,
+                        maximum=1 << 40,
+                        code="dr_retained_backup_file_invalid",
+                        allow_empty=True,
+                    )[2]
+                )
+                != identity
+                for name, identity in file_statuses.items()
+            )
+            or _file_identity(
+                _stable_private_file(
+                    fallback.root / "artifacts/immutable_release_operator.py",
+                    maximum=4 << 20,
+                    code="dr_retained_restore_operator_invalid",
+                )[1]
+            )
+            != _file_identity(operator_status)
+        ):
+            raise DRGenerationAuthenticationError("dr_retained_backup_changed")
+        return release_operator.DatabaseBackup(
+            schema_version=schema_version,
+            receipt_sha256=database_receipt,
+            inbox_receipt_sha256=inbox_receipt,
+            obsidian_receipt_sha256=obsidian.manifest_sha256,
+            engineer_receipt_sha256=engineer.manifest_sha256,
+            opaque=release_operator._ExactBackupPayload(  # noqa: SLF001
+                directory=directory,
+                files=tuple(files),
+                obsidian=obsidian,
+                engineer=engineer,
+            ),
+        )
+    except DRGenerationAuthenticationError:
+        raise
+    except (
+        OSError,
+        TypeError,
+        ValueError,
+        release_operator.ReleaseFailure,
+        dr_index.DRGenerationIndexError,
+    ) as exc:
+        raise DRGenerationAuthenticationError("dr_retained_backup_invalid") from exc
+
+
 def authenticate_terminal_activation_backup(
     *,
     state_directory: Path,
@@ -444,4 +751,5 @@ __all__ = [
     "AuthenticatedDRCandidate",
     "DRGenerationAuthenticationError",
     "authenticate_terminal_activation_backup",
+    "reauthenticate_generation_candidate",
 ]

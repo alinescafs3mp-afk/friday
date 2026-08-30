@@ -60,11 +60,86 @@ def _candidate(
     }
 
 
-def _external_receipt(label: str, ordinal: int) -> dict[str, Any]:
+def _authentication_receipt(candidate: dict[str, Any], ordinal: int) -> dict[str, Any]:
+    status = Path(candidate["backup_directory"]).stat()
     core = {
-        "ordinal": ordinal,
-        "schema": f"friday.test-{label}.v1",
-        "status": label,
+        "activation_journal_file_sha256": f"{ordinal + 1:064x}",
+        "activation_journal_sha256": f"{ordinal + 2:064x}",
+        "activation_receipt_file_sha256": f"{ordinal + 3:064x}",
+        "activation_receipt_sha256": candidate["source_receipt_sha256"],
+        "backup_directory": {
+            "device": status.st_dev,
+            "inode": status.st_ino,
+            "path": candidate["backup_directory"],
+        },
+        "backup_manifest_sha256": f"{ordinal + 4:064x}",
+        "candidate_sha256": hashlib.sha256(_canonical(candidate)).hexdigest(),
+        "restore_operator_sha256": f"{ordinal + 5:064x}",
+        "schema": dr_index.AUTHENTICATION_RECEIPT_SCHEMA,
+        "status": "authenticated",
+        "surface_receipts": {
+            "database": candidate["database_receipt_sha256"],
+            "engineer": candidate["engineer_receipt_sha256"],
+            "inbox": candidate["inbox_receipt_sha256"],
+            "obsidian": candidate["obsidian_receipt_sha256"],
+        },
+    }
+    return {**core, "receipt_sha256": hashlib.sha256(_canonical(core)).hexdigest()}
+
+
+def _rehearsal_receipt(
+    candidate: dict[str, Any],
+    authentication: dict[str, Any],
+    authenticated: dict[str, Any],
+    _ordinal: int,
+) -> dict[str, Any]:
+    restore = candidate["restore_release"]
+    source_keys = (
+        "activation_journal_file_sha256",
+        "activation_journal_sha256",
+        "activation_receipt_file_sha256",
+        "activation_receipt_sha256",
+        "backup_manifest_sha256",
+        "restore_operator_sha256",
+        "surface_receipts",
+    )
+    core = {
+        "authentication_receipt_sha256": authentication["receipt_sha256"],
+        "candidate_sha256": hashlib.sha256(_canonical(candidate)).hexdigest(),
+        "check_count": len(dr_index.DR_REHEARSAL_CHECKS),
+        "checkset_sha256": dr_index.DR_REHEARSAL_CHECKSET_SHA256,
+        "database_foreign_keys_clear": True,
+        "database_integrity_clear": True,
+        "database_reopen_count": 2,
+        "database_schema": 46,
+        "engineer_authority_present": True,
+        "engineer_exact": True,
+        "fault_boundary": "after_migration_before_provision_or_network",
+        "four_surface_exact": True,
+        "four_surface_sha256": hashlib.sha256(
+            _canonical(authentication["surface_receipts"])
+        ).hexdigest(),
+        "index_journal_sha256": authenticated["journal_sha256"],
+        "index_revision": authenticated["revision"],
+        "index_transaction_id": authenticated["transaction_id"],
+        "inbox_foreign_keys_clear": True,
+        "inbox_integrity_clear": True,
+        "inbox_reopen_count": 2,
+        "network_call_count": 0,
+        "obsidian_exact": True,
+        "production_surface_write_count": 0,
+        "restore_release": {
+            key: restore[key]
+            for key in ("commit", "max_schema", "tree_manifest_sha256", "version", "wheel_sha256")
+        },
+        "rollback_restore_observed": True,
+        "rollback_tree_sha256": restore["tree_manifest_sha256"],
+        "rolled_back": True,
+        "schema": dr_index.REHEARSAL_RECEIPT_SCHEMA,
+        "scratch_removed": True,
+        "source": {key: authentication[key] for key in source_keys},
+        "status": "rehearsed",
+        "systemctl_call_count": 0,
     }
     return {**core, "receipt_sha256": hashlib.sha256(_canonical(core)).hexdigest()}
 
@@ -104,12 +179,13 @@ def _advance(
         candidate=candidate,
         expected_journal_sha256=state["journal_sha256"],
     )
+    authentication = _authentication_receipt(candidate, ordinal)
     state = index.record_authenticated(
-        receipt=_external_receipt("authentication", ordinal),
+        receipt=authentication,
         expected_journal_sha256=state["journal_sha256"],
     )
     state = index.record_rehearsed(
-        receipt=_external_receipt("rehearsal", ordinal + 1000),
+        receipt=_rehearsal_receipt(candidate, authentication, state, ordinal + 1000),
         expected_journal_sha256=state["journal_sha256"],
     )
     return index.publish(expected_journal_sha256=state["journal_sha256"])
@@ -140,12 +216,12 @@ def test_bootstrap_publishes_exact_immutable_receipt_then_clear_cas(tmp_path: Pa
     )
     assert prepared["phase"] == "prepared"
     assert prepared["base_clear_sha256"] == initial["journal_sha256"]
-    authentication_body = _external_receipt("authentication", 101)
+    authentication_body = _authentication_receipt(candidate, 101)
     authenticated = index.record_authenticated(
         receipt=authentication_body,
         expected_journal_sha256=prepared["journal_sha256"],
     )
-    rehearsal_body = _external_receipt("rehearsal", 102)
+    rehearsal_body = _rehearsal_receipt(candidate, authentication_body, authenticated, 102)
     rehearsed = index.record_rehearsed(
         receipt=rehearsal_body,
         expected_journal_sha256=authenticated["journal_sha256"],
@@ -185,18 +261,18 @@ def test_bootstrap_publishes_exact_immutable_receipt_then_clear_cas(tmp_path: Pa
 def test_current_generation_identity_is_exact_compact_and_detached(tmp_path: Path) -> None:
     index = _index(tmp_path)
     candidate = _candidate(tmp_path, 2)
-    authentication = _external_receipt("authentication", 201)
-    rehearsal = _external_receipt("rehearsal", 202)
     state = index.load()
     state = index.prepare(
         intent="bootstrap_current",
         candidate=candidate,
         expected_journal_sha256=state["journal_sha256"],
     )
+    authentication = _authentication_receipt(candidate, 201)
     state = index.record_authenticated(
         receipt=authentication,
         expected_journal_sha256=state["journal_sha256"],
     )
+    rehearsal = _rehearsal_receipt(candidate, authentication, state, 202)
     state = index.record_rehearsed(
         receipt=rehearsal,
         expected_journal_sha256=state["journal_sha256"],
@@ -351,15 +427,16 @@ def test_unfinished_transaction_pins_current_older_and_pending(tmp_path: Path) -
     for pin, candidate in zip(pins, (current, older, pending), strict=True):
         _assert_restore_release_pin(pin, candidate)
     assert pins[-1].generation_id is None
+    authentication = _authentication_receipt(pending, 70)
     authenticated = index.record_authenticated(
-        receipt=_external_receipt("authentication", 70),
+        receipt=authentication,
         expected_journal_sha256=prepared["journal_sha256"],
     )
     authenticated_pending_pin = index.pins()[-1]
     assert authenticated_pending_pin.generation_id is None
     _assert_restore_release_pin(authenticated_pending_pin, pending)
     rehearsed = index.record_rehearsed(
-        receipt=_external_receipt("rehearsal", 71),
+        receipt=_rehearsal_receipt(pending, authentication, authenticated, 71),
         expected_journal_sha256=authenticated["journal_sha256"],
     )
     pending_pin = index.pins()[-1]
@@ -372,20 +449,21 @@ def test_unfinished_transaction_pins_current_older_and_pending(tmp_path: Path) -
 def test_stale_cas_and_out_of_order_transitions_leave_state_unchanged(tmp_path: Path) -> None:
     index = _index(tmp_path)
     initial = index.load()
+    candidate = _candidate(tmp_path, 8)
     prepared = index.prepare(
         intent="bootstrap_current",
-        candidate=_candidate(tmp_path, 8),
+        candidate=candidate,
         expected_journal_sha256=initial["journal_sha256"],
     )
 
-    stale_authentication = _external_receipt("authentication", 80)
+    stale_authentication = _authentication_receipt(candidate, 80)
     with pytest.raises(dr_index.DRGenerationIndexError, match="dr_generation_cas_mismatch"):
         index.record_authenticated(
             receipt=stale_authentication,
             expected_journal_sha256=initial["journal_sha256"],
         )
     assert not _external_receipt_path(index, "authentication", stale_authentication).exists()
-    out_of_order_rehearsal = _external_receipt("rehearsal", 81)
+    out_of_order_rehearsal = _authentication_receipt(candidate, 81)
     with pytest.raises(dr_index.DRGenerationIndexError, match="dr_generation_transition_invalid"):
         index.record_rehearsed(
             receipt=out_of_order_rehearsal,
@@ -406,17 +484,19 @@ def test_crash_after_no_replace_receipt_before_state_cas_recovers_idempotently(
 ) -> None:
     index = _index(tmp_path)
     initial = index.load()
+    candidate = _candidate(tmp_path, 9)
     prepared = index.prepare(
         intent="bootstrap_current",
-        candidate=_candidate(tmp_path, 9),
+        candidate=candidate,
         expected_journal_sha256=initial["journal_sha256"],
     )
+    authentication = _authentication_receipt(candidate, 90)
     authenticated = index.record_authenticated(
-        receipt=_external_receipt("authentication", 90),
+        receipt=authentication,
         expected_journal_sha256=prepared["journal_sha256"],
     )
     rehearsed = index.record_rehearsed(
-        receipt=_external_receipt("rehearsal", 91),
+        receipt=_rehearsal_receipt(candidate, authentication, authenticated, 91),
         expected_journal_sha256=authenticated["journal_sha256"],
     )
     real_cas = index._cas_replace_locked  # noqa: SLF001
@@ -451,18 +531,24 @@ def test_crash_after_evidence_body_before_cas_replays_without_replacement(
 ) -> None:
     index = _index(tmp_path)
     initial = index.load()
+    candidate = _candidate(tmp_path, 25)
     prepared = index.prepare(
         intent="bootstrap_current",
-        candidate=_candidate(tmp_path, 25),
+        candidate=candidate,
         expected_journal_sha256=initial["journal_sha256"],
     )
     prior = prepared
+    authentication = _authentication_receipt(candidate, 250)
     if kind == "rehearsal":
         prior = index.record_authenticated(
-            receipt=_external_receipt("authentication", 250),
+            receipt=authentication,
             expected_journal_sha256=prepared["journal_sha256"],
         )
-    body = _external_receipt(kind, 251)
+    body = (
+        _authentication_receipt(candidate, 251)
+        if kind == "authentication"
+        else _rehearsal_receipt(candidate, authentication, prior, 251)
+    )
     before = index.path.read_bytes()
     real_cas = index._cas_replace_locked  # noqa: SLF001
 
@@ -496,17 +582,19 @@ def test_crash_after_evidence_body_before_cas_replays_without_replacement(
 def test_foreign_receipt_at_exact_generation_name_is_never_overwritten(tmp_path: Path) -> None:
     index = _index(tmp_path)
     initial = index.load()
+    candidate = _candidate(tmp_path, 10)
     prepared = index.prepare(
         intent="bootstrap_current",
-        candidate=_candidate(tmp_path, 10),
+        candidate=candidate,
         expected_journal_sha256=initial["journal_sha256"],
     )
+    authentication = _authentication_receipt(candidate, 100)
     authenticated = index.record_authenticated(
-        receipt=_external_receipt("authentication", 100),
+        receipt=authentication,
         expected_journal_sha256=prepared["journal_sha256"],
     )
     rehearsed = index.record_rehearsed(
-        receipt=_external_receipt("rehearsal", 101),
+        receipt=_rehearsal_receipt(candidate, authentication, authenticated, 101),
         expected_journal_sha256=authenticated["journal_sha256"],
     )
     generation_id = rehearsed["pending"]["generation"]["generation_id"]
@@ -531,18 +619,24 @@ def test_foreign_evidence_at_exact_digest_name_is_never_overwritten(
 ) -> None:
     index = _index(tmp_path)
     initial = index.load()
+    candidate = _candidate(tmp_path, 26)
     prepared = index.prepare(
         intent="bootstrap_current",
-        candidate=_candidate(tmp_path, 26),
+        candidate=candidate,
         expected_journal_sha256=initial["journal_sha256"],
     )
     prior = prepared
+    authentication = _authentication_receipt(candidate, 260)
     if kind == "rehearsal":
         prior = index.record_authenticated(
-            receipt=_external_receipt("authentication", 260),
+            receipt=authentication,
             expected_journal_sha256=prepared["journal_sha256"],
         )
-    body = _external_receipt(kind, 261)
+    body = (
+        _authentication_receipt(candidate, 261)
+        if kind == "authentication"
+        else _rehearsal_receipt(candidate, authentication, prior, 261)
+    )
     target = _external_receipt_path(index, kind, body)
     target.write_bytes(b'{"foreign":true}\n')
     target.chmod(0o400)
@@ -599,17 +693,18 @@ def test_missing_evidence_body_fails_every_referencing_state_load(
 ) -> None:
     index = _index(tmp_path)
     initial = index.load()
+    candidate = _candidate(tmp_path, 23)
     prepared = index.prepare(
         intent="bootstrap_current",
-        candidate=_candidate(tmp_path, 23),
+        candidate=candidate,
         expected_journal_sha256=initial["journal_sha256"],
     )
-    authentication_body = _external_receipt("authentication", 230)
+    authentication_body = _authentication_receipt(candidate, 230)
     authenticated = index.record_authenticated(
         receipt=authentication_body,
         expected_journal_sha256=prepared["journal_sha256"],
     )
-    rehearsal_body = _external_receipt("rehearsal", 231)
+    rehearsal_body = _rehearsal_receipt(candidate, authentication_body, authenticated, 231)
     state = authenticated
     if phase in {"rehearsed", "clear"}:
         state = index.record_rehearsed(
@@ -634,18 +729,19 @@ def test_evidence_body_mode_link_hash_schema_and_canonical_drift_fail_closed(
     kind: str,
 ) -> None:
     index = _index(tmp_path)
-    authentication_body = _external_receipt("authentication", 240)
-    rehearsal_body = _external_receipt("rehearsal", 241)
     initial = index.load()
+    candidate = _candidate(tmp_path, 24)
     prepared = index.prepare(
         intent="bootstrap_current",
-        candidate=_candidate(tmp_path, 24),
+        candidate=candidate,
         expected_journal_sha256=initial["journal_sha256"],
     )
+    authentication_body = _authentication_receipt(candidate, 240)
     authenticated = index.record_authenticated(
         receipt=authentication_body,
         expected_journal_sha256=prepared["journal_sha256"],
     )
+    rehearsal_body = _rehearsal_receipt(candidate, authentication_body, authenticated, 241)
     rehearsed = index.record_rehearsed(
         receipt=rehearsal_body,
         expected_journal_sha256=authenticated["journal_sha256"],
@@ -710,7 +806,7 @@ def test_index_symlink_hardlink_or_digest_drift_fails_closed(tmp_path: Path) -> 
     index.path.chmod(0o600)
     with pytest.raises(
         dr_index.DRGenerationIndexError,
-        match="dr_generation_index_digest_mismatch",
+        match="dr_generation_head_rollback_detected",
     ):
         index.load()
 
@@ -753,25 +849,161 @@ def test_closed_intents_and_exact_external_receipts_reject_implicit_adoption(tmp
     assert index.load() == prepared
 
 
+def test_code_owned_receipt_contract_rejects_self_hashed_foreign_and_cross_candidate(
+    tmp_path: Path,
+) -> None:
+    index = _index(tmp_path)
+    candidate = _candidate(tmp_path, 140)
+    initial = index.load()
+    prepared = index.prepare(
+        intent="bootstrap_current",
+        candidate=candidate,
+        expected_journal_sha256=initial["journal_sha256"],
+    )
+    foreign_core = {"schema": "friday.test-authentication.v1", "status": "passed"}
+    foreign = {
+        **foreign_core,
+        "receipt_sha256": hashlib.sha256(_canonical(foreign_core)).hexdigest(),
+    }
+    with pytest.raises(dr_index.DRGenerationIndexError, match="^authentication_receipt_invalid$"):
+        index.record_authenticated(
+            receipt=foreign,
+            expected_journal_sha256=prepared["journal_sha256"],
+        )
+    crossed = _authentication_receipt(_candidate(tmp_path, 141), 1400)
+    with pytest.raises(dr_index.DRGenerationIndexError, match="^authentication_receipt_invalid$"):
+        index.record_authenticated(
+            receipt=crossed,
+            expected_journal_sha256=prepared["journal_sha256"],
+        )
+    assert index.load() == prepared
+
+
+def test_rehearsal_contract_rejects_stale_index_epoch_and_noncanonical_checkset(
+    tmp_path: Path,
+) -> None:
+    index = _index(tmp_path)
+    candidate = _candidate(tmp_path, 142)
+    state = index.load()
+    state = index.prepare(
+        intent="bootstrap_current",
+        candidate=candidate,
+        expected_journal_sha256=state["journal_sha256"],
+    )
+    authentication = _authentication_receipt(candidate, 1420)
+    authenticated = index.record_authenticated(
+        receipt=authentication,
+        expected_journal_sha256=state["journal_sha256"],
+    )
+    for field, value in (
+        ("index_revision", authenticated["revision"] - 1),
+        ("checkset_sha256", "f" * 64),
+        ("four_surface_sha256", "f" * 64),
+    ):
+        receipt = _rehearsal_receipt(candidate, authentication, authenticated, 1421)
+        receipt[field] = value
+        core = {key: item for key, item in receipt.items() if key != "receipt_sha256"}
+        receipt["receipt_sha256"] = hashlib.sha256(_canonical(core)).hexdigest()
+        with pytest.raises(dr_index.DRGenerationIndexError, match="^rehearsal_receipt_invalid$"):
+            index.record_rehearsed(
+                receipt=receipt,
+                expected_journal_sha256=authenticated["journal_sha256"],
+            )
+    assert index.load() == authenticated
+
+
+def test_persistent_head_fence_blocks_a_b_a_and_explicitly_repairs_forward(
+    tmp_path: Path,
+) -> None:
+    index = _index(tmp_path)
+    state_a = index.load()
+    state_b = index.prepare(
+        intent="bootstrap_current",
+        candidate=_candidate(tmp_path, 143),
+        expected_journal_sha256=state_a["journal_sha256"],
+    )
+    index.path.write_bytes(_canonical(state_a) + b"\n")
+    index.path.chmod(0o600)
+    with pytest.raises(
+        dr_index.DRGenerationIndexError,
+        match="^dr_generation_head_rollback_detected$",
+    ):
+        index.authority_snapshot()
+    assert index.initialize() == state_b
+    assert index.load() == state_b
+
+
+def test_head_fence_backup_skew_never_accepts_newer_mutable_projection(tmp_path: Path) -> None:
+    index = _index(tmp_path)
+    head_path = index.head_directory / dr_index.HEAD_FENCE_NAME
+    older_head = head_path.read_bytes()
+    state = index.load()
+    index.prepare(
+        intent="bootstrap_current",
+        candidate=_candidate(tmp_path, 144),
+        expected_journal_sha256=state["journal_sha256"],
+    )
+    head_path.write_bytes(older_head)
+    head_path.chmod(0o600)
+    with pytest.raises(
+        dr_index.DRGenerationIndexError,
+        match="^dr_generation_head_rollback_detected$",
+    ):
+        index.load()
+    with pytest.raises(
+        dr_index.DRGenerationIndexError,
+        match="^dr_generation_head_backup_skew$",
+    ):
+        index.initialize()
+
+
+def test_authoritative_head_is_bounded_across_long_rotation(tmp_path: Path) -> None:
+    index = _index(tmp_path)
+    _advance(
+        index,
+        _candidate(tmp_path, 145),
+        intent="bootstrap_current",
+        ordinal=1450,
+    )
+    for ordinal in range(146, 178):
+        _advance(
+            index,
+            _candidate(tmp_path, ordinal),
+            intent="rotate_current",
+            ordinal=ordinal * 10,
+        )
+
+    entries = list(index.head_directory.iterdir())
+    assert [entry.name for entry in entries] == [dr_index.HEAD_FENCE_NAME]
+    assert entries[0].stat().st_size <= dr_index.MAX_HEAD_FENCE_BYTES
+    assert index.load()["revision"] == 33 * 4
+
+
 def test_same_backup_path_cannot_be_republished_as_a_distinct_generation(tmp_path: Path) -> None:
     index = _index(tmp_path)
     candidate = _candidate(tmp_path, 15)
     clear = _advance(index, candidate, intent="bootstrap_current", ordinal=150)
     forged_generation = _candidate(tmp_path, 16)
     forged_generation["backup_directory"] = candidate["backup_directory"]
+    forged_authentication = _authentication_receipt(forged_generation, 160)
     prepared = index.prepare(
         intent="rotate_current",
         candidate=forged_generation,
         expected_journal_sha256=clear["journal_sha256"],
     )
     authenticated = index.record_authenticated(
-        receipt=_external_receipt("authentication", 160),
+        receipt=forged_authentication,
         expected_journal_sha256=prepared["journal_sha256"],
     )
 
     with pytest.raises(dr_index.DRGenerationIndexError, match="dr_generation_duplicate_slot"):
         index.record_rehearsed(
-            receipt=_external_receipt("rehearsal", 161),
+            receipt=_rehearsal_receipt(
+                forged_generation,
+                forged_authentication,
+                authenticated,
+                161,
+            ),
             expected_journal_sha256=authenticated["journal_sha256"],
         )
     assert index.load() == authenticated
@@ -810,17 +1042,19 @@ def test_receipt_crash_after_atomic_noreplace_recovers_without_two_link_window(
 ) -> None:
     index = _index(tmp_path)
     initial = index.load()
+    candidate = _candidate(tmp_path, 17)
     prepared = index.prepare(
         intent="bootstrap_current",
-        candidate=_candidate(tmp_path, 17),
+        candidate=candidate,
         expected_journal_sha256=initial["journal_sha256"],
     )
+    authentication = _authentication_receipt(candidate, 170)
     authenticated = index.record_authenticated(
-        receipt=_external_receipt("authentication", 170),
+        receipt=authentication,
         expected_journal_sha256=prepared["journal_sha256"],
     )
     rehearsed = index.record_rehearsed(
-        receipt=_external_receipt("rehearsal", 171),
+        receipt=_rehearsal_receipt(candidate, authentication, authenticated, 171),
         expected_journal_sha256=authenticated["journal_sha256"],
     )
     reference = rehearsed["pending"]["generation"]
@@ -851,17 +1085,19 @@ def test_receipt_crash_after_atomic_noreplace_recovers_without_two_link_window(
 def test_authorized_partial_receipt_staging_is_recovered_without_scanning(tmp_path: Path) -> None:
     index = _index(tmp_path)
     initial = index.load()
+    candidate = _candidate(tmp_path, 20)
     prepared = index.prepare(
         intent="bootstrap_current",
-        candidate=_candidate(tmp_path, 20),
+        candidate=candidate,
         expected_journal_sha256=initial["journal_sha256"],
     )
+    authentication = _authentication_receipt(candidate, 200)
     authenticated = index.record_authenticated(
-        receipt=_external_receipt("authentication", 200),
+        receipt=authentication,
         expected_journal_sha256=prepared["journal_sha256"],
     )
     rehearsed = index.record_rehearsed(
-        receipt=_external_receipt("rehearsal", 201),
+        receipt=_rehearsal_receipt(candidate, authentication, authenticated, 201),
         expected_journal_sha256=authenticated["journal_sha256"],
     )
     pending = rehearsed["pending"]
@@ -934,9 +1170,10 @@ def test_state_directory_swap_during_cas_never_writes_replacement(
 ) -> None:
     index = _index(tmp_path)
     initial = index.load()
+    candidate = _candidate(tmp_path, 18)
     prepared = index.prepare(
         intent="bootstrap_current",
-        candidate=_candidate(tmp_path, 18),
+        candidate=candidate,
         expected_journal_sha256=initial["journal_sha256"],
     )
     original_state = index.state_directory
@@ -957,7 +1194,7 @@ def test_state_directory_swap_during_cas_never_writes_replacement(
     monkeypatch.setattr(dr_index, "_replace_private_durable_at", swap_then_replace)
     with pytest.raises(dr_index.DRGenerationIndexError, match="dr_generation_directory_changed"):
         index.record_authenticated(
-            receipt=_external_receipt("authentication", 180),
+            receipt=_authentication_receipt(candidate, 180),
             expected_journal_sha256=prepared["journal_sha256"],
         )
 
@@ -973,17 +1210,19 @@ def test_receipt_directory_swap_during_publish_never_writes_replacement(
 ) -> None:
     index = _index(tmp_path)
     initial = index.load()
+    candidate = _candidate(tmp_path, 19)
     prepared = index.prepare(
         intent="bootstrap_current",
-        candidate=_candidate(tmp_path, 19),
+        candidate=candidate,
         expected_journal_sha256=initial["journal_sha256"],
     )
+    authentication = _authentication_receipt(candidate, 190)
     authenticated = index.record_authenticated(
-        receipt=_external_receipt("authentication", 190),
+        receipt=authentication,
         expected_journal_sha256=prepared["journal_sha256"],
     )
     rehearsed = index.record_rehearsed(
-        receipt=_external_receipt("rehearsal", 191),
+        receipt=_rehearsal_receipt(candidate, authentication, authenticated, 191),
         expected_journal_sha256=authenticated["journal_sha256"],
     )
     state_raw = index.path.read_bytes()
@@ -1018,9 +1257,10 @@ def test_state_lock_serializes_two_writers_across_receipt_directory_replacement(
     index_a = _index(tmp_path)
     index_b = dr_index.DurableDRGenerationIndex(index_a.state_directory)
     initial = index_a.load()
+    candidate = _candidate(tmp_path, 21)
     prepared = index_a.prepare(
         intent="bootstrap_current",
-        candidate=_candidate(tmp_path, 21),
+        candidate=candidate,
         expected_journal_sha256=initial["journal_sha256"],
     )
     real_replace = dr_index._replace_private_durable_at  # noqa: SLF001
@@ -1029,6 +1269,8 @@ def test_state_lock_serializes_two_writers_across_receipt_directory_replacement(
     b_started = threading.Event()
     b_done = threading.Event()
     outcomes: dict[str, object] = {}
+    authentication_a = _authentication_receipt(candidate, 210)
+    authentication_b = _authentication_receipt(candidate, 211)
 
     def gated_replace(directory_fd: int, name: str, raw: bytes, *, code: str) -> None:
         if threading.current_thread().name == "dr-writer-a":
@@ -1042,7 +1284,7 @@ def test_state_lock_serializes_two_writers_across_receipt_directory_replacement(
     def writer_a() -> None:
         try:
             outcomes["a"] = index_a.record_authenticated(
-                receipt=_external_receipt("authentication-a", 210),
+                receipt=authentication_a,
                 expected_journal_sha256=prepared["journal_sha256"],
             )
         except BaseException as exc:  # noqa: BLE001 - exact concurrent outcome under test.
@@ -1052,7 +1294,7 @@ def test_state_lock_serializes_two_writers_across_receipt_directory_replacement(
         b_started.set()
         try:
             outcomes["b"] = index_b.record_authenticated(
-                receipt=_external_receipt("authentication-b", 211),
+                receipt=authentication_b,
                 expected_journal_sha256=prepared["journal_sha256"],
             )
         except BaseException as exc:  # noqa: BLE001 - exact concurrent outcome under test.
@@ -1084,7 +1326,6 @@ def test_state_lock_serializes_two_writers_across_receipt_directory_replacement(
     with pytest.raises(dr_index.DRGenerationIndexError, match="authentication_receipt_invalid"):
         index_b.load()
     durable = json.loads(index_b.path.read_text(encoding="ascii"))
-    authentication_a = _external_receipt("authentication-a", 210)
     assert durable["phase"] == "authenticated"
     assert durable["revision"] == prepared["revision"] + 1
     assert durable["pending"]["authentication_receipt"] == _external_receipt_ref(authentication_a)
@@ -1104,12 +1345,13 @@ def test_evidence_body_staging_crash_boundaries_replay_after_ordered_fsyncs(
 ) -> None:
     index = _index(tmp_path)
     initial = index.load()
+    candidate = _candidate(tmp_path, 27)
     prepared = index.prepare(
         intent="bootstrap_current",
-        candidate=_candidate(tmp_path, 27),
+        candidate=candidate,
         expected_journal_sha256=initial["journal_sha256"],
     )
-    body = _external_receipt("authentication", 270)
+    body = _authentication_receipt(candidate, 270)
     body_raw = _canonical(body) + b"\n"
     receipt_name = f"authentication-{body['receipt_sha256']}.json"
     staging = index.receipt_directory / f".{receipt_name}.{hashlib.sha256(body_raw).hexdigest()}.new"
@@ -1168,17 +1410,19 @@ def test_receipt_staging_crash_boundaries_recover_after_ordered_fsyncs(
 ) -> None:
     index = _index(tmp_path)
     initial = index.load()
+    candidate = _candidate(tmp_path, 22)
     prepared = index.prepare(
         intent="bootstrap_current",
-        candidate=_candidate(tmp_path, 22),
+        candidate=candidate,
         expected_journal_sha256=initial["journal_sha256"],
     )
+    authentication = _authentication_receipt(candidate, 220)
     authenticated = index.record_authenticated(
-        receipt=_external_receipt("authentication", 220),
+        receipt=authentication,
         expected_journal_sha256=prepared["journal_sha256"],
     )
     rehearsed = index.record_rehearsed(
-        receipt=_external_receipt("rehearsal", 221),
+        receipt=_rehearsal_receipt(candidate, authentication, authenticated, 221),
         expected_journal_sha256=authenticated["journal_sha256"],
     )
     pending = rehearsed["pending"]

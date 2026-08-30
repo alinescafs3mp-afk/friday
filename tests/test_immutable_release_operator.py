@@ -12948,6 +12948,50 @@ def test_operator_transaction_lock_survives_state_directory_replacement(tmp_path
             pytest.fail("replacement state directory escaped the lexical lock domain")
 
 
+def test_operator_transaction_guard_pins_named_state_inode_through_mutation(
+    tmp_path: Path,
+) -> None:
+    tmp_path.chmod(0o700)
+    state = tmp_path / "state"
+    displaced = tmp_path / "displaced"
+    state.mkdir(mode=0o700)
+    lock_path = state / "immutable-release-operator.v1.lock"
+
+    with operator.OperatorTransactionLock(lock_path) as transaction:
+        state.rename(displaced)
+        state.mkdir(mode=0o700)
+        with pytest.raises(operator.ReleaseFailure, match="^operator_transaction_lock_changed$"):
+            transaction.assert_held()
+
+
+def test_operator_transaction_unit_pair_uses_filesystem_not_abstract_socket_namespace(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    tmp_path.chmod(0o700)
+    state = tmp_path / "state"
+    units = tmp_path / "units"
+    state.mkdir(mode=0o700)
+    units.mkdir(mode=0o700)
+
+    def forbidden_socket(*_args: object, **_kwargs: object) -> None:
+        raise AssertionError("abstract AF_UNIX locking is network-namespace-local")
+
+    monkeypatch.setattr(
+        operator,
+        "socket",
+        SimpleNamespace(socket=forbidden_socket),
+        raising=False,
+    )
+    with operator.OperatorTransactionLock(
+        state / "immutable-release-operator.v1.lock",
+        unit_dir=units,
+    ) as transaction:
+        transaction.assert_held()
+        assert transaction._runtime_descriptors  # noqa: SLF001
+        assert all(Path(name).name == name for name, _descriptor, _identity in transaction._runtime_descriptors)  # noqa: SLF001
+
+
 def test_operator_transaction_lock_serializes_the_fixed_systemd_unit_pair_across_homes(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

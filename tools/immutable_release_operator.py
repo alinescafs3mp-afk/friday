@@ -18,7 +18,6 @@ from __future__ import annotations
 import argparse
 import base64
 import csv
-import errno
 import fcntl
 import hashlib
 import importlib
@@ -29,7 +28,6 @@ import os
 import re
 import shlex
 import shutil
-import socket
 import sqlite3
 import ssl
 import stat
@@ -6190,7 +6188,7 @@ def _journal_transition_allowed(current: str, following: str) -> bool:
 
 
 class OperatorTransactionLock:
-    """One owner-only nonblocking process lock for all release mutations."""
+    """One pinned filesystem lock domain shared across process/network namespaces."""
 
     def __init__(self, path: Path, *, unit_dir: Path | None = None) -> None:
         lexical = Path(os.path.abspath(path))
@@ -6199,8 +6197,8 @@ class OperatorTransactionLock:
         self.path = lexical
         self.state_dir = lexical.parent
         scope = hashlib.sha256(os.fsencode(str(self.state_dir))).hexdigest()
-        self._abstract_address = f"\x00friday-immutable-release-operator-v1.{os.geteuid()}.{scope[:40]}"
-        addresses = [self._abstract_address]
+        self._runtime_directory = Path(f"/run/user/{os.geteuid()}")
+        names = [f"friday-immutable-release-state-v1.{scope}.lock"]
         self.unit_dir: Path | None = None
         if unit_dir is not None:
             self.unit_dir = _lexical_operator_path(
@@ -6220,46 +6218,94 @@ class OperatorTransactionLock:
                     }
                 )
             )
-            addresses.append(
-                f"\x00friday-immutable-release-unit-pair-v1.{os.geteuid()}.{unit_scope[:40]}"
-            )
-        self._abstract_addresses = tuple(addresses)
+            names.append(f"friday-immutable-release-unit-pair-v1.{unit_scope}.lock")
+        self._runtime_lock_names = tuple(sorted(names))
         self._descriptor = -1
-        self._abstract_sockets: tuple[socket.socket, ...] = ()
+        self._state_directory_descriptor = -1
+        self._state_directory_identity: tuple[int, int] | None = None
+        self._local_lock_identity: tuple[int, int] | None = None
+        self._runtime_directory_descriptor = -1
+        self._runtime_directory_identity: tuple[int, int] | None = None
+        self._runtime_descriptors: tuple[tuple[str, int, tuple[int, int]], ...] = ()
+
+    @staticmethod
+    def _private_directory_status(value: os.stat_result) -> bool:
+        return (
+            stat.S_ISDIR(value.st_mode)
+            and value.st_uid == os.geteuid()
+            and not stat.S_IMODE(value.st_mode) & 0o077
+        )
+
+    @staticmethod
+    def _private_lock_status(value: os.stat_result) -> bool:
+        return (
+            stat.S_ISREG(value.st_mode)
+            and value.st_uid == os.geteuid()
+            and value.st_nlink == 1
+            and stat.S_IMODE(value.st_mode) == 0o600
+        )
 
     def __enter__(self) -> OperatorTransactionLock:
-        abstract_sockets: list[socket.socket] = []
-        abstract_socket: socket.socket | None = None
-        try:
-            for address in self._abstract_addresses:
-                abstract_socket = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM)
-                abstract_socket.set_inheritable(False)
-                abstract_socket.bind(address)
-                abstract_sockets.append(abstract_socket)
-                abstract_socket = None
-        except OSError as exc:
-            if abstract_socket is not None:
-                abstract_socket.close()
-            for acquired in reversed(abstract_sockets):
-                acquired.close()
-            if exc.errno == errno.EADDRINUSE:
-                raise ReleaseFailure("operator_transaction_in_progress") from exc
-            raise ReleaseFailure("operator_transaction_lock_invalid") from exc
-
-        flags = os.O_RDWR | os.O_CREAT | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0)
+        runtime_fd = -1
+        state_fd = -1
         descriptor = -1
+        runtime_descriptors: list[tuple[str, int, tuple[int, int]]] = []
         try:
+            directory_flags = (
+                os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_DIRECTORY", 0)
+            )
+            directory_flags |= getattr(os, "O_NOFOLLOW", 0)
+            runtime_fd = os.open(self._runtime_directory, directory_flags)
+            runtime_status = os.fstat(runtime_fd)
+            runtime_named = os.stat(self._runtime_directory, follow_symlinks=False)
+            if (
+                not self._private_directory_status(runtime_status)
+                or (runtime_status.st_dev, runtime_status.st_ino)
+                != (runtime_named.st_dev, runtime_named.st_ino)
+            ):
+                raise ReleaseFailure("operator_transaction_runtime_lock_invalid")
+            runtime_identity = (int(runtime_status.st_dev), int(runtime_status.st_ino))
+            lock_flags = (
+                os.O_RDWR
+                | os.O_CREAT
+                | getattr(os, "O_CLOEXEC", 0)
+                | getattr(os, "O_NOFOLLOW", 0)
+            )
+            for name in self._runtime_lock_names:
+                runtime_lock = os.open(name, lock_flags, 0o600, dir_fd=runtime_fd)
+                status = os.fstat(runtime_lock)
+                named = os.stat(name, dir_fd=runtime_fd, follow_symlinks=False)
+                if (
+                    not self._private_lock_status(status)
+                    or (status.st_dev, status.st_ino) != (named.st_dev, named.st_ino)
+                ):
+                    os.close(runtime_lock)
+                    raise ReleaseFailure("operator_transaction_runtime_lock_invalid")
+                try:
+                    fcntl.flock(runtime_lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                except BlockingIOError as exc:
+                    os.close(runtime_lock)
+                    raise ReleaseFailure("operator_transaction_in_progress") from exc
+                runtime_descriptors.append(
+                    (name, runtime_lock, (int(status.st_dev), int(status.st_ino)))
+                )
             parent = _private_directory(self.state_dir)
             if parent != self.state_dir:
                 raise ReleaseFailure("operator_transaction_lock_path_invalid")
-            descriptor = os.open(self.path, flags, 0o600)
-            status = os.fstat(descriptor)
-            lexical = os.stat(self.path, follow_symlinks=False)
+            state_fd = os.open(self.state_dir, directory_flags)
+            state_status = os.fstat(state_fd)
+            state_named = os.stat(self.state_dir, follow_symlinks=False)
             if (
-                not stat.S_ISREG(status.st_mode)
-                or status.st_nlink != 1
-                or status.st_uid != os.geteuid()
-                or stat.S_IMODE(status.st_mode) & 0o077
+                not self._private_directory_status(state_status)
+                or (state_status.st_dev, state_status.st_ino)
+                != (state_named.st_dev, state_named.st_ino)
+            ):
+                raise ReleaseFailure("operator_transaction_state_directory_changed")
+            descriptor = os.open(self.path.name, lock_flags, 0o600, dir_fd=state_fd)
+            status = os.fstat(descriptor)
+            lexical = os.stat(self.path.name, dir_fd=state_fd, follow_symlinks=False)
+            if (
+                not self._private_lock_status(status)
                 or (status.st_dev, status.st_ino) != (lexical.st_dev, lexical.st_ino)
             ):
                 raise ReleaseFailure("operator_transaction_lock_invalid")
@@ -6267,37 +6313,139 @@ class OperatorTransactionLock:
                 fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
             except BlockingIOError as exc:
                 raise ReleaseFailure("operator_transaction_in_progress") from exc
-            after = os.stat(self.path, follow_symlinks=False)
+            after = os.stat(self.path.name, dir_fd=state_fd, follow_symlinks=False)
             if (status.st_dev, status.st_ino) != (after.st_dev, after.st_ino):
                 raise ReleaseFailure("operator_transaction_lock_changed")
-        except OSError as exc:
+            self._descriptor = descriptor
+            self._state_directory_descriptor = state_fd
+            self._state_directory_identity = (int(state_status.st_dev), int(state_status.st_ino))
+            self._local_lock_identity = (int(status.st_dev), int(status.st_ino))
+            self._runtime_directory_descriptor = runtime_fd
+            self._runtime_directory_identity = runtime_identity
+            self._runtime_descriptors = tuple(runtime_descriptors)
+            self.assert_held()
+            return self
+        except BaseException as exc:
             if descriptor >= 0:
                 os.close(descriptor)
-            for acquired in reversed(abstract_sockets):
-                acquired.close()
-            raise ReleaseFailure("operator_transaction_lock_invalid") from exc
-        except BaseException:
-            if descriptor >= 0:
-                os.close(descriptor)
-            for acquired in reversed(abstract_sockets):
-                acquired.close()
+            if state_fd >= 0:
+                os.close(state_fd)
+            for _name, acquired, _identity in reversed(runtime_descriptors):
+                with suppress(OSError):
+                    fcntl.flock(acquired, fcntl.LOCK_UN)
+                os.close(acquired)
+            if runtime_fd >= 0:
+                os.close(runtime_fd)
+            if isinstance(exc, ReleaseFailure):
+                raise
+            if isinstance(exc, OSError):
+                raise ReleaseFailure("operator_transaction_lock_invalid") from exc
             raise
-        self._descriptor = descriptor
-        self._abstract_sockets = tuple(abstract_sockets)
-        return self
+
+    def assert_held(self) -> None:
+        """Revalidate every pinned name/inode before and after mutation steps."""
+
+        if (
+            self._descriptor < 0
+            or self._state_directory_descriptor < 0
+            or self._runtime_directory_descriptor < 0
+            or self._state_directory_identity is None
+            or self._local_lock_identity is None
+            or self._runtime_directory_identity is None
+        ):
+            raise ReleaseFailure("operator_transaction_lock_not_held")
+        try:
+            runtime_open = os.fstat(self._runtime_directory_descriptor)
+            runtime_named = os.stat(self._runtime_directory, follow_symlinks=False)
+            state_open = os.fstat(self._state_directory_descriptor)
+            state_named = os.stat(self.state_dir, follow_symlinks=False)
+            local_open = os.fstat(self._descriptor)
+            local_named = os.stat(
+                self.path.name,
+                dir_fd=self._state_directory_descriptor,
+                follow_symlinks=False,
+            )
+            if (
+                not self._private_directory_status(runtime_open)
+                or not self._private_directory_status(state_open)
+                or (int(runtime_open.st_dev), int(runtime_open.st_ino))
+                != self._runtime_directory_identity
+                or (int(runtime_named.st_dev), int(runtime_named.st_ino))
+                != self._runtime_directory_identity
+                or (int(state_open.st_dev), int(state_open.st_ino))
+                != self._state_directory_identity
+                or (int(state_named.st_dev), int(state_named.st_ino))
+                != self._state_directory_identity
+                or not self._private_lock_status(local_open)
+                or (int(local_open.st_dev), int(local_open.st_ino)) != self._local_lock_identity
+                or (int(local_named.st_dev), int(local_named.st_ino)) != self._local_lock_identity
+            ):
+                raise ReleaseFailure("operator_transaction_lock_changed")
+            for name, descriptor, identity in self._runtime_descriptors:
+                opened = os.fstat(descriptor)
+                named = os.stat(
+                    name,
+                    dir_fd=self._runtime_directory_descriptor,
+                    follow_symlinks=False,
+                )
+                if (
+                    not self._private_lock_status(opened)
+                    or (int(opened.st_dev), int(opened.st_ino)) != identity
+                    or (int(named.st_dev), int(named.st_ino)) != identity
+                ):
+                    raise ReleaseFailure("operator_transaction_lock_changed")
+        except OSError as exc:
+            raise ReleaseFailure("operator_transaction_lock_changed") from exc
 
     def __exit__(self, exc_type: Any, exc: Any, traceback: Any) -> None:
         del exc_type, exc, traceback
         descriptor, self._descriptor = self._descriptor, -1
-        abstract_sockets, self._abstract_sockets = self._abstract_sockets, ()
+        state_fd, self._state_directory_descriptor = self._state_directory_descriptor, -1
+        runtime_fd, self._runtime_directory_descriptor = self._runtime_directory_descriptor, -1
+        runtime_descriptors, self._runtime_descriptors = self._runtime_descriptors, ()
+        self._state_directory_identity = None
+        self._local_lock_identity = None
+        self._runtime_directory_identity = None
         try:
             if descriptor >= 0:
                 with suppress(OSError):
                     fcntl.flock(descriptor, fcntl.LOCK_UN)
                 os.close(descriptor)
         finally:
-            for abstract_socket in reversed(abstract_sockets):
-                abstract_socket.close()
+            if state_fd >= 0:
+                os.close(state_fd)
+            for _name, runtime_descriptor, _identity in reversed(runtime_descriptors):
+                with suppress(OSError):
+                    fcntl.flock(runtime_descriptor, fcntl.LOCK_UN)
+                os.close(runtime_descriptor)
+            if runtime_fd >= 0:
+                os.close(runtime_fd)
+
+
+class _NamespaceGuardedProxy:
+    """Apply an inode/name guard around every boundary method call."""
+
+    def __init__(self, target: Any, guard: Callable[[], None]) -> None:
+        self._target = target
+        self._guard = guard
+
+    def __getattr__(self, name: str) -> Any:
+        value = getattr(self._target, name)
+        if not callable(value):
+            self._guard()
+            return value
+
+        def guarded(*args: Any, **kwargs: Any) -> Any:
+            self._guard()
+            try:
+                result = value(*args, **kwargs)
+            except BaseException:
+                self._guard()
+                raise
+            self._guard()
+            return result
+
+        return guarded
 
 
 def render_units(*, anchor: Path, env_file: Path, friday_home: Path) -> dict[str, str]:
@@ -7197,7 +7345,11 @@ def _cleanup_staging_tree(staging: Path) -> None:
             os.rmdir(staging)
 
 
-def _build_release_locked(spec: BuildSpec) -> ReleaseIdentity:
+def _build_release_locked(
+    spec: BuildSpec,
+    *,
+    namespace_guard: Callable[[], None] | None = None,
+) -> ReleaseIdentity:
     """Build one previously absent sibling release from pinned offline wheels."""
 
     _require_operator_layout(
@@ -7263,7 +7415,10 @@ def _build_release_locked(spec: BuildSpec) -> ReleaseIdentity:
         "secondary_product_runner_digest_invalid",
     ):
         raise ReleaseFailure("secondary_product_runner_digest_mismatch")
+    guard = namespace_guard or (lambda: None)
+    guard()
     staging = Path(tempfile.mkdtemp(prefix=f".{commit}.", dir=root))
+    guard()
     try:
         _create_pipless_venv(base_python, staging / "venv")
         python = staging / "venv/bin/python"
@@ -7434,8 +7589,10 @@ def _build_release_locked(spec: BuildSpec) -> ReleaseIdentity:
         os.chmod(staging, 0o500)
         _fsync_tree(staging)
         manifest_sha = _sha256_file(manifest)
+        guard()
         os.replace(staging, target)
         _fsync_directory(root)
+        guard()
         release = ReleaseIdentity(
             target,
             commit,
@@ -7472,8 +7629,8 @@ def build_release(spec: BuildSpec) -> ReleaseIdentity:
         env_file=spec.env_file,
     )
     state_dir = _canonical_operator_state_dir(spec.friday_home, spec.state_dir)
-    with OperatorTransactionLock(state_dir / "immutable-release-operator.v1.lock"):
-        return _build_release_locked(spec)
+    with OperatorTransactionLock(state_dir / "immutable-release-operator.v1.lock") as transaction_lock:
+        return _build_release_locked(spec, namespace_guard=transaction_lock.assert_held)
 
 
 def _validated_alias_repair_receipt(value: Mapping[str, Any]) -> dict[str, Any]:
@@ -7569,6 +7726,7 @@ def activate_release(
     candidate: ReleaseIdentity,
     previous: ReleaseIdentity,
     schema_capable_fallback: ReleaseIdentity,
+    namespace_guard: Callable[[], None] | None = None,
 ) -> dict[str, Any]:
     """Backend-first activation with schema-aware exact rollback."""
 
@@ -7576,6 +7734,10 @@ def activate_release(
     backup: DatabaseBackup | None = None
     alias_repair: Mapping[str, Any] = {}
     provision_committed = False
+    if namespace_guard is not None:
+        namespace_guard()
+        port = _NamespaceGuardedProxy(port, namespace_guard)
+        journal = _NamespaceGuardedProxy(journal, namespace_guard)
     if candidate.root in {previous.root, schema_capable_fallback.root} or candidate.commit in {
         previous.commit,
         schema_capable_fallback.commit,
@@ -7929,9 +8091,15 @@ def activate_release(
 def recover_interrupted_activation(
     port: ActivationPort,
     journal: ActivationJournalPort,
+    *,
+    namespace_guard: Callable[[], None] | None = None,
 ) -> dict[str, Any]:
     """Resume one fsync'd cutover to a safe exact release after process or host death."""
 
+    if namespace_guard is not None:
+        namespace_guard()
+        port = _NamespaceGuardedProxy(port, namespace_guard)
+        journal = _NamespaceGuardedProxy(journal, namespace_guard)
     state = dict(journal.load())
     phase = str(state.get("phase") or "")
     if phase in _TERMINAL_JOURNAL_PHASES:
@@ -14251,9 +14419,14 @@ def install_units(
     transition_runtime_root: Path,
     transition_unit_hashes: Mapping[str, str],
     journal: DurableUnitInstallJournal,
+    namespace_guard: Callable[[], None] | None = None,
 ) -> dict[str, str]:
     """Converge the complete unit surface without mixed runtime roots."""
 
+    guard = namespace_guard or (lambda: None)
+    if namespace_guard is not None:
+        journal = _NamespaceGuardedProxy(journal, guard)
+    guard()
     _require_venv_relocation_contract(
         candidate,
         code="unit_candidate_venv_relocation_contract_missing",
@@ -14324,7 +14497,9 @@ def install_units(
                     raise ReleaseFailure("installed_transition_security_invalid")
             elif installed_content != predecessor_content or installed_content != expected_content[key]:
                 raise ReleaseFailure("installed_transition_dropin_digest_mismatch")
+        guard()
         _atomic_anchor_root(anchor, transition_root)
+        guard()
         if phase == "prepared":
             journal.record("transition_anchor_active")
             phase = "transition_anchor_active"
@@ -14350,11 +14525,15 @@ def install_units(
             ):
                 raise ReleaseFailure("systemd_transition_would_mix_runtime_roots")
         for key, content in expected_content.items():
+            guard()
             _replace_unit_file(_unit_surface_path(directory, key), content)
+            guard()
         _verify_converged_unit_surface(directory, expected_content)
         if phase == "transition_anchor_active":
             journal.record("units_converged")
+        guard()
         _run_systemctl("daemon-reload")
+        guard()
         for name in _RUNTIME_UNIT_NAMES:
             _verify_manager_unit_surface(directory, name, expected_argv[name])
         journal.record("manager_reloaded")
@@ -14363,7 +14542,9 @@ def install_units(
     _verify_converged_unit_surface(directory, expected_content)
     for name in _RUNTIME_UNIT_NAMES:
         _verify_manager_unit_surface(directory, name, expected_argv[name])
+    guard()
     _atomic_anchor(anchor, previous)
+    guard()
     if phase == "manager_reloaded":
         journal.record("previous_anchor_active")
     receipt_core = {
@@ -14373,6 +14554,7 @@ def install_units(
     }
     receipt_sha256 = _sha256_bytes(_canonical_json(receipt_core))
     journal.record("complete", receipt_sha256=receipt_sha256)
+    guard()
     return candidate_hashes
 
 
@@ -17991,7 +18173,7 @@ def _run_cli(args: argparse.Namespace) -> dict[str, Any]:
         with OperatorTransactionLock(
             args.state_dir / "immutable-release-operator.v1.lock",
             unit_dir=args.unit_dir,
-        ):
+        ) as transaction_lock:
             release = load_release_identity(
                 args.release,
                 expected_tree_sha256=args.release_tree_sha256,
@@ -18024,6 +18206,7 @@ def _run_cli(args: argparse.Namespace) -> dict[str, Any]:
                     "friday-bridge.service": args.transition_bridge_unit_sha256,
                 },
                 journal=DurableUnitInstallJournal(args.state_dir / "immutable-release-unit-install.v1.json"),
+                namespace_guard=transaction_lock.assert_held,
             )
         receipt = {
             "schema": OPERATOR_SCHEMA,
@@ -18051,7 +18234,7 @@ def _run_cli(args: argparse.Namespace) -> dict[str, Any]:
         with OperatorTransactionLock(
             config.state_dir / "immutable-release-operator.v1.lock",
             unit_dir=config.unit_dir,
-        ):
+        ) as transaction_lock:
             candidate = load_release_identity(
                 args.candidate,
                 expected_tree_sha256=args.candidate_tree_sha256,
@@ -18109,6 +18292,7 @@ def _run_cli(args: argparse.Namespace) -> dict[str, Any]:
                 candidate=candidate,
                 previous=previous,
                 schema_capable_fallback=schema_capable_fallback,
+                namespace_guard=transaction_lock.assert_held,
             )
     elif args.command == "recover-activation":
         config = _systemd_config(args)
@@ -18116,7 +18300,7 @@ def _run_cli(args: argparse.Namespace) -> dict[str, Any]:
         with OperatorTransactionLock(
             config.state_dir / "immutable-release-operator.v1.lock",
             unit_dir=config.unit_dir,
-        ):
+        ) as transaction_lock:
             journal_path = config.state_dir / "immutable-release-activation.v1.json"
             journal_probe = DurableActivationJournal(
                 journal_path,
@@ -18159,14 +18343,18 @@ def _run_cli(args: argparse.Namespace) -> dict[str, Any]:
             )
             _require_completed_unit_install(config.state_dir, candidate)
             port = SystemdActivationPort(config)
-            receipt = recover_interrupted_activation(port, journal)
+            receipt = recover_interrupted_activation(
+                port,
+                journal,
+                namespace_guard=transaction_lock.assert_held,
+            )
     elif args.command == "recover-historical-album":
         config = _systemd_config(args)
         _require_runtime_operator_layout(config)
         with OperatorTransactionLock(
             config.state_dir / "immutable-release-operator.v1.lock",
             unit_dir=config.unit_dir,
-        ):
+        ) as transaction_lock:
             release = load_release_identity(
                 args.release,
                 expected_tree_sha256=args.release_tree_sha256,
@@ -18175,7 +18363,8 @@ def _run_cli(args: argparse.Namespace) -> dict[str, Any]:
             _require_release_in_operator_layout(release, config.friday_home)
             _require_completed_unit_install(config.state_dir, release)
             port = SystemdActivationPort(config)
-            receipt = port.recover_historical_album_live(release)
+            guarded_port = _NamespaceGuardedProxy(port, transaction_lock.assert_held)
+            receipt = guarded_port.recover_historical_album_live(release)
     else:  # pragma: no cover - argparse owns the closed set
         raise ReleaseFailure("unknown_operation")
     return {**receipt, "operator_schema": OPERATOR_SCHEMA}

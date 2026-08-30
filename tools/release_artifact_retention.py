@@ -28,6 +28,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from tools import immutable_release_operator as release_operator  # noqa: E402
+from tools import release_dr_generation_authentication as dr_auth  # noqa: E402
 from tools import release_dr_generation_index as dr_index  # noqa: E402
 
 PLAN_SCHEMA = "friday.release-artifact-retention-plan.v2"
@@ -110,9 +111,14 @@ class DRGenerationPin:
 
     role: str
     backup_directory: Path
+    candidate: dict[str, Any]
     generation_id: str | None
     receipt_path: Path | None
     receipt_sha256: str | None
+    authentication_receipt_path: Path | None
+    authentication_receipt_sha256: str | None
+    rehearsal_receipt_path: Path | None
+    rehearsal_receipt_sha256: str | None
     restore_release_root: Path
     restore_release_commit: str
     restore_release_tree_manifest_sha256: str
@@ -763,9 +769,14 @@ def _normalize_authority_bindings(
             DRGenerationPin(
                 role=pin.role,
                 backup_directory=pin.backup_directory,
+                candidate=dict(pin.candidate),
                 generation_id=pin.generation_id,
                 receipt_path=pin.receipt_path,
                 receipt_sha256=pin.receipt_sha256,
+                authentication_receipt_path=pin.authentication_receipt_path,
+                authentication_receipt_sha256=pin.authentication_receipt_sha256,
+                rehearsal_receipt_path=pin.rehearsal_receipt_path,
+                rehearsal_receipt_sha256=pin.rehearsal_receipt_sha256,
                 restore_release_root=pin.restore_release_root,
                 restore_release_commit=pin.restore_release_commit,
                 restore_release_tree_manifest_sha256=(pin.restore_release_tree_manifest_sha256),
@@ -788,6 +799,8 @@ def _normalize_authority_bindings(
     pin_records: list[dict[str, Any]] = []
     generation_ids: set[str] = set()
     receipt_paths: set[Path] = set()
+    evidence_receipt_paths: set[Path] = set()
+    reauthenticated_candidate_sha256s: set[str] = set()
     for pin in actual_pins:
         if pin.role not in {"current", "older", "pending"}:
             raise RetentionPlanError("dr_pins_invalid")
@@ -800,6 +813,17 @@ def _normalize_authority_bindings(
             if backup_directory in existing.parents or existing in backup_directory.parents:
                 error = error or "dr_pins_invalid"
         role_paths[pin.role] = backup_directory
+
+        try:
+            candidate = dr_index.normalize_generation_candidate(pin.candidate)
+        except dr_index.DRGenerationIndexError:
+            error = error or "dr_pins_invalid"
+            candidate = {}
+        candidate_sha256 = (
+            hashlib.sha256(_canonical_json(candidate)).hexdigest() if candidate else ""
+        )
+        if candidate and candidate.get("backup_directory") != str(backup_directory):
+            error = error or "dr_pins_invalid"
 
         identity_values = (pin.generation_id, pin.receipt_path, pin.receipt_sha256)
         if pin.role in {"current", "older"} and any(value is None for value in identity_values):
@@ -832,6 +856,113 @@ def _normalize_authority_bindings(
                 )
             except RetentionPlanError:
                 error = error or "dr_pins_invalid"
+        authentication_path: Path | None = None
+        rehearsal_path: Path | None = None
+        authentication_body: dict[str, Any] | None = None
+        if pin.authentication_receipt_path is not None:
+            if (
+                not _is_hex64(pin.authentication_receipt_sha256)
+                or generation_index is None
+            ):
+                error = error or "dr_pins_invalid"
+            else:
+                authentication_path = _absolute_lexical(
+                    pin.authentication_receipt_path,
+                    code="dr_pins_invalid",
+                )
+                expected_authentication_path = generation_index.receipt_directory / (
+                    f"authentication-{pin.authentication_receipt_sha256}.json"
+                )
+                if (
+                    authentication_path != expected_authentication_path
+                    or authentication_path in evidence_receipt_paths
+                ):
+                    error = error or "dr_pins_invalid"
+                evidence_receipt_paths.add(authentication_path)
+                try:
+                    authentication_raw = _stable_file_bytes(
+                        authentication_path,
+                        private=True,
+                        code="dr_pins_invalid",
+                    )
+                    authentication_body = _unique_json(
+                        authentication_raw,
+                        code="dr_pins_invalid",
+                    )
+                    if authentication_raw != _canonical_json(authentication_body) + b"\n":
+                        raise RetentionPlanError("dr_pins_invalid")
+                    authentication_reference, _raw, _payload = (
+                        dr_index.validate_authentication_receipt(
+                            authentication_body,
+                            candidate=candidate,
+                        )
+                    )
+                    if authentication_reference["sha256"] != pin.authentication_receipt_sha256:
+                        raise RetentionPlanError("dr_pins_invalid")
+                    dr_auth.reauthenticate_generation_candidate(
+                        candidate=candidate,
+                        authentication_receipt=authentication_body,
+                    )
+                    reauthenticated_candidate_sha256s.add(candidate_sha256)
+                except (
+                    RetentionPlanError,
+                    dr_auth.DRGenerationAuthenticationError,
+                    dr_index.DRGenerationIndexError,
+                ):
+                    error = error or "dr_pins_invalid"
+        elif pin.authentication_receipt_sha256 is not None:
+            error = error or "dr_pins_invalid"
+        if pin.rehearsal_receipt_path is not None:
+            if not _is_hex64(pin.rehearsal_receipt_sha256) or generation_index is None:
+                error = error or "dr_pins_invalid"
+            else:
+                rehearsal_path = _absolute_lexical(
+                    pin.rehearsal_receipt_path,
+                    code="dr_pins_invalid",
+                )
+                expected_rehearsal_path = generation_index.receipt_directory / (
+                    f"rehearsal-{pin.rehearsal_receipt_sha256}.json"
+                )
+                if rehearsal_path != expected_rehearsal_path or rehearsal_path in evidence_receipt_paths:
+                    error = error or "dr_pins_invalid"
+                evidence_receipt_paths.add(rehearsal_path)
+                try:
+                    rehearsal_raw = _stable_file_bytes(
+                        rehearsal_path,
+                        private=True,
+                        code="dr_pins_invalid",
+                    )
+                    rehearsal_body = _unique_json(rehearsal_raw, code="dr_pins_invalid")
+                    if rehearsal_raw != _canonical_json(rehearsal_body) + b"\n":
+                        raise RetentionPlanError("dr_pins_invalid")
+                    if authentication_body is None:
+                        raise RetentionPlanError("dr_pins_invalid")
+                    rehearsal_reference, _raw, _payload = dr_index.validate_rehearsal_receipt(
+                        rehearsal_body,
+                        candidate=candidate,
+                        authentication_receipt=authentication_body,
+                        index_transaction_id=str(rehearsal_body.get("index_transaction_id") or ""),
+                        index_revision=rehearsal_body.get("index_revision"),
+                        index_journal_sha256=str(rehearsal_body.get("index_journal_sha256") or ""),
+                    )
+                    if rehearsal_reference["sha256"] != pin.rehearsal_receipt_sha256:
+                        raise RetentionPlanError("dr_pins_invalid")
+                except (RetentionPlanError, dr_index.DRGenerationIndexError):
+                    error = error or "dr_pins_invalid"
+        elif pin.rehearsal_receipt_sha256 is not None:
+            error = error or "dr_pins_invalid"
+        if pin.role in {"current", "older"} and (
+            authentication_path is None or rehearsal_path is None
+        ):
+            error = error or "dr_pins_invalid"
+        if (
+            pin.role == "pending"
+            and authentication_path is None
+            and candidate_sha256 not in reauthenticated_candidate_sha256s
+        ):
+            # A prepared-but-unauthenticated backup remains retained, but cannot
+            # grant any classification/deletion authority.
+            error = error or "dr_pins_invalid"
         try:
             _strict_private_directory(backup_directory, code="dr_pins_invalid")
         except RetentionPlanError:
@@ -870,6 +1001,13 @@ def _normalize_authority_bindings(
                 "receipt_path": str(receipt_path) if receipt_path is not None else None,
                 "receipt_sha256": pin.receipt_sha256,
                 "observed_receipt_file_sha256": observed_receipt_file_sha256,
+                "candidate_sha256": candidate_sha256,
+                "authentication_receipt_path": (
+                    str(authentication_path) if authentication_path is not None else None
+                ),
+                "authentication_receipt_sha256": pin.authentication_receipt_sha256,
+                "rehearsal_receipt_path": str(rehearsal_path) if rehearsal_path is not None else None,
+                "rehearsal_receipt_sha256": pin.rehearsal_receipt_sha256,
                 "restore_release": {
                     **restore_record,
                     "wheel_sha256": pin.restore_release_wheel_sha256,
@@ -960,6 +1098,7 @@ def _normalize_authority_bindings(
                 *role_paths.values(),
                 *restore_release_records,
                 *receipt_paths,
+                *evidence_receipt_paths,
                 *((generation_index.receipt_directory,) if generation_index is not None else ()),
                 *evidence_paths,
                 *evidence_authority_paths,

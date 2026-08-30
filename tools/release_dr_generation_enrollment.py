@@ -72,15 +72,21 @@ def _canonical_friday_home() -> Path:
     return home
 
 
-def _receipt_reference(receipt: Mapping[str, Any]) -> dict[str, str]:
-    schema = receipt.get("schema")
-    supplied = receipt.get("receipt_sha256")
-    if not isinstance(schema, str) or not schema or not isinstance(supplied, str):
-        raise DRGenerationEnrollmentError("dr_enrollment_authentication_receipt_invalid")
-    core = {key: value for key, value in receipt.items() if key != "receipt_sha256"}
-    if len(supplied) != 64 or supplied != _sha256(_canonical(core)):
-        raise DRGenerationEnrollmentError("dr_enrollment_authentication_receipt_invalid")
-    return {"schema": schema, "sha256": supplied}
+def _receipt_reference(
+    receipt: Mapping[str, Any],
+    *,
+    candidate: Mapping[str, Any],
+) -> dict[str, str]:
+    try:
+        reference, _raw, _payload = dr_index.validate_authentication_receipt(
+            receipt,
+            candidate=candidate,
+        )
+    except dr_index.DRGenerationIndexError as exc:
+        raise DRGenerationEnrollmentError(
+            "dr_enrollment_authentication_receipt_invalid"
+        ) from exc
+    return reference
 
 
 def _candidate_sha256(candidate: Mapping[str, Any]) -> str:
@@ -95,7 +101,10 @@ def _prepare_or_resume(
     authenticated: dr_auth.AuthenticatedDRCandidate,
 ) -> tuple[dict[str, Any], str, str]:
     candidate = dr_index.normalize_generation_candidate(authenticated.candidate)
-    expected_receipt = _receipt_reference(authenticated.authentication_receipt)
+    expected_receipt = _receipt_reference(
+        authenticated.authentication_receipt,
+        candidate=candidate,
+    )
     phase = state.get("phase")
 
     if phase == "clear":

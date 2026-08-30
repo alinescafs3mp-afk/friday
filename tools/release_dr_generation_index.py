@@ -13,6 +13,7 @@ immutable release operator lock; the state-directory lock is always inner.
 
 from __future__ import annotations
 
+import base64
 import ctypes
 import errno
 import fcntl
@@ -29,22 +30,49 @@ from pathlib import Path
 from typing import Any
 
 INDEX_SCHEMA = "friday.immutable-release-dr-generations.v1"
+HEAD_FENCE_SCHEMA = "friday.immutable-release-dr-generation-head-fence.v1"
+AUTHENTICATION_RECEIPT_SCHEMA = "friday.immutable-release-dr-authentication-receipt.v1"
+REHEARSAL_RECEIPT_SCHEMA = "friday.immutable-release-dr-rehearsal-receipt.v1"
 GENERATION_CANDIDATE_SCHEMA = "friday.immutable-release-dr-generation-candidate.v1"
 GENERATION_SCHEMA = "friday.immutable-release-dr-generation.v1"
 GENERATION_RECEIPT_SCHEMA = "friday.immutable-release-dr-generation-receipt.v1"
 
 INDEX_NAME = "immutable-release-dr-generations.v1.json"
 RECEIPT_DIRECTORY_NAME = "immutable-release-dr-generation-receipts"
+HEAD_FENCE_DIRECTORY_PREFIX = ".immutable-release-dr-generation-heads-v1"
+HEAD_FENCE_NAME = "current-head.json"
+HEAD_FENCE_STAGING_NAME = ".current-head.json.new"
 INDEX_PHASES = ("clear", "prepared", "authenticated", "rehearsed")
 INDEX_INTENTS = ("bootstrap_current", "fill_older", "rotate_current")
 
 MAX_INDEX_BYTES = 1 << 20
+MAX_HEAD_FENCE_BYTES = 2 << 20
 MAX_RECEIPT_BYTES = 1 << 20
 MAX_CANDIDATE_BYTES = 1 << 18
 ZERO_SHA256 = "0" * 64
 
 AUTHENTICATION_RECEIPT_KIND = "authentication"
 REHEARSAL_RECEIPT_KIND = "rehearsal"
+
+DR_REHEARSAL_CHECKS = (
+    "authenticated_pending_bound",
+    "activation_source_reauthenticated",
+    "retained_release_identities_verified",
+    "database_materialized",
+    "inbox_materialized",
+    "obsidian_materialized_exactly",
+    "engineer_materialized_with_fresh_identity",
+    "scratch_checkpoint_authenticated",
+    "fault_after_migration_before_provision",
+    "rollback_restore_attempted",
+    "activation_rolled_back",
+    "four_surface_restore_exact",
+    "database_reopened_twice",
+    "inbox_reopened_twice",
+    "zero_systemctl_or_network_calls",
+    "scratch_removed_before_admission",
+    "source_unchanged_before_cas",
+)
 
 _HEX40_RE = re.compile(r"[0-9a-f]{40}")
 _HEX64_RE = re.compile(r"[0-9a-f]{64}")
@@ -65,9 +93,14 @@ class GenerationPin:
 
     role: str
     backup_directory: Path
+    candidate: dict[str, Any]
     generation_id: str | None
     receipt_path: Path | None
     receipt_sha256: str | None
+    authentication_receipt_path: Path | None
+    authentication_receipt_sha256: str | None
+    rehearsal_receipt_path: Path | None
+    rehearsal_receipt_sha256: str | None
     restore_release_root: Path
     restore_release_commit: str
     restore_release_tree_manifest_sha256: str
@@ -108,10 +141,30 @@ class CurrentDRGenerationIdentity:
 
 
 @dataclass(frozen=True)
+class PendingDRGenerationIdentity:
+    """One exact authenticated pending identity from a single pinned epoch."""
+
+    index_journal_sha256: str
+    authenticated_journal_sha256: str
+    index_phase: str
+    index_revision: int
+    index_transaction_id: str
+    intent: str
+    candidate: dict[str, Any]
+    candidate_sha256: str
+    authentication_receipt: dict[str, Any]
+    rehearsal_receipt: dict[str, Any] | None
+
+
+@dataclass(frozen=True)
 class _PinnedDirectories:
+    parent_fd: int
     state_fd: int
     receipt_fd: int
+    head_fd: int
+    parent_identity: tuple[int, int]
     receipt_identity: tuple[int, int]
+    head_identity: tuple[int, int]
 
 
 def _sha256(value: bytes) -> str:
@@ -353,15 +406,40 @@ def _rename_noreplace(directory_fd: int, source: str, destination: str) -> None:
     raise OSError(error, os.strerror(error), destination)
 
 
-def _replace_private_durable_at(directory_fd: int, name: str, raw: bytes, *, code: str) -> None:
-    """Durably replace one state file within an already pinned directory."""
+def _replace_private_durable_at_limit(
+    directory_fd: int,
+    name: str,
+    raw: bytes,
+    *,
+    maximum_bytes: int,
+    code: str,
+    fixed_temporary_name: str | None = None,
+) -> None:
+    """Durably replace one bounded file within an already pinned directory."""
 
     name = _entry_name(name, code=code)
-    temporary = f".{name}.{os.getpid()}.{secrets.token_hex(12)}.new"
+    temporary = fixed_temporary_name or f".{name}.{os.getpid()}.{secrets.token_hex(12)}.new"
+    temporary = _entry_name(temporary, code=code)
     flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_CLOEXEC", 0)
     flags |= getattr(os, "O_NOFOLLOW", 0)
     descriptor = -1
     try:
+        if fixed_temporary_name is not None:
+            try:
+                stale = os.stat(temporary, dir_fd=directory_fd, follow_symlinks=False)
+            except FileNotFoundError:
+                stale = None
+            if stale is not None:
+                if (
+                    not stat.S_ISREG(stale.st_mode)
+                    or stale.st_uid != os.geteuid()
+                    or stale.st_nlink != 1
+                    or stat.S_IMODE(stale.st_mode) != 0o600
+                    or not 0 <= stale.st_size <= maximum_bytes
+                ):
+                    raise DRGenerationIndexError(code)
+                os.unlink(temporary, dir_fd=directory_fd)
+                os.fsync(directory_fd)
         descriptor = os.open(temporary, flags, 0o600, dir_fd=directory_fd)
         view = memoryview(raw)
         written = 0
@@ -378,7 +456,7 @@ def _replace_private_durable_at(directory_fd: int, name: str, raw: bytes, *, cod
             directory_fd,
             temporary,
             mode=0o600,
-            maximum_bytes=MAX_INDEX_BYTES,
+            maximum_bytes=maximum_bytes,
             code=code,
         )
         if staged != raw:
@@ -389,7 +467,7 @@ def _replace_private_durable_at(directory_fd: int, name: str, raw: bytes, *, cod
             directory_fd,
             name,
             mode=0o600,
-            maximum_bytes=MAX_INDEX_BYTES,
+            maximum_bytes=maximum_bytes,
             code=code,
         )
         if durable != raw:
@@ -403,6 +481,36 @@ def _replace_private_durable_at(directory_fd: int, name: str, raw: bytes, *, cod
             os.close(descriptor)
         with suppress(OSError):
             os.unlink(temporary, dir_fd=directory_fd)
+
+
+def _replace_private_durable_at(directory_fd: int, name: str, raw: bytes, *, code: str) -> None:
+    """Durably replace the bounded mutable index projection."""
+
+    _replace_private_durable_at_limit(
+        directory_fd,
+        name,
+        raw,
+        maximum_bytes=MAX_INDEX_BYTES,
+        code=code,
+    )
+
+
+def _replace_private_head_durable_at(
+    directory_fd: int,
+    raw: bytes,
+    *,
+    code: str,
+) -> None:
+    """Atomically replace the single bounded external authoritative head."""
+
+    _replace_private_durable_at_limit(
+        directory_fd,
+        HEAD_FENCE_NAME,
+        raw,
+        maximum_bytes=MAX_HEAD_FENCE_BYTES,
+        code=code,
+        fixed_temporary_name=HEAD_FENCE_STAGING_NAME,
+    )
 
 
 def _normalize_external_receipt(value: object, *, code: str) -> dict[str, str]:
@@ -443,6 +551,200 @@ def _external_receipt_body(
     if supplied != _sha256(_canonical_json(core)):
         raise DRGenerationIndexError(code)
     return {"schema": schema, "sha256": supplied}, canonical + b"\n"
+
+
+DR_REHEARSAL_CHECKSET_SHA256 = _sha256(_canonical_json(DR_REHEARSAL_CHECKS))
+
+
+def validate_authentication_receipt(
+    value: object,
+    *,
+    candidate: Mapping[str, Any],
+) -> tuple[dict[str, str], bytes, dict[str, Any]]:
+    """Authenticate the sole code-owned DR authentication receipt contract."""
+
+    normalized_candidate = normalize_generation_candidate(candidate)
+    expected = {
+        "activation_journal_file_sha256",
+        "activation_journal_sha256",
+        "activation_receipt_file_sha256",
+        "activation_receipt_sha256",
+        "backup_directory",
+        "backup_manifest_sha256",
+        "candidate_sha256",
+        "receipt_sha256",
+        "restore_operator_sha256",
+        "schema",
+        "status",
+        "surface_receipts",
+    }
+    if not isinstance(value, dict) or set(value) != expected:
+        raise DRGenerationIndexError("authentication_receipt_invalid")
+    reference, raw = _external_receipt_body(value, code="authentication_receipt_invalid")
+    payload = _unique_json(raw, code="authentication_receipt_invalid")
+    directory = payload.get("backup_directory")
+    surfaces = payload.get("surface_receipts")
+    if (
+        reference["schema"] != AUTHENTICATION_RECEIPT_SCHEMA
+        or payload.get("status") != "authenticated"
+        or payload.get("candidate_sha256")
+        != _sha256(_canonical_json(normalized_candidate))
+        or payload.get("activation_receipt_sha256")
+        != normalized_candidate["source_receipt_sha256"]
+        or not isinstance(directory, dict)
+        or set(directory) != {"device", "inode", "path"}
+        or type(directory.get("device")) is not int
+        or int(directory["device"]) < 0
+        or type(directory.get("inode")) is not int
+        or int(directory["inode"]) <= 0
+        or directory.get("path") != normalized_candidate["backup_directory"]
+        or not isinstance(surfaces, dict)
+        or set(surfaces) != {"database", "engineer", "inbox", "obsidian"}
+        or surfaces
+        != {
+            "database": normalized_candidate["database_receipt_sha256"],
+            "engineer": normalized_candidate["engineer_receipt_sha256"],
+            "inbox": normalized_candidate["inbox_receipt_sha256"],
+            "obsidian": normalized_candidate["obsidian_receipt_sha256"],
+        }
+    ):
+        raise DRGenerationIndexError("authentication_receipt_invalid")
+    for key in (
+        "activation_journal_file_sha256",
+        "activation_journal_sha256",
+        "activation_receipt_file_sha256",
+        "activation_receipt_sha256",
+        "backup_manifest_sha256",
+        "candidate_sha256",
+        "restore_operator_sha256",
+    ):
+        _hex64(payload.get(key), code="authentication_receipt_invalid")
+    return reference, raw, payload
+
+
+def validate_rehearsal_receipt(
+    value: object,
+    *,
+    candidate: Mapping[str, Any],
+    authentication_receipt: Mapping[str, Any],
+    index_transaction_id: str,
+    index_revision: int,
+    index_journal_sha256: str,
+) -> tuple[dict[str, str], bytes, dict[str, Any]]:
+    """Authenticate and bind the code-owned rehearsal result to one CAS epoch."""
+
+    if type(index_revision) is not int or index_revision < 0:
+        raise DRGenerationIndexError("rehearsal_receipt_invalid")
+    normalized_candidate = normalize_generation_candidate(candidate)
+    auth_ref, _auth_raw, auth = validate_authentication_receipt(
+        authentication_receipt,
+        candidate=normalized_candidate,
+    )
+    expected = {
+        "authentication_receipt_sha256",
+        "candidate_sha256",
+        "check_count",
+        "checkset_sha256",
+        "database_foreign_keys_clear",
+        "database_integrity_clear",
+        "database_reopen_count",
+        "database_schema",
+        "engineer_authority_present",
+        "engineer_exact",
+        "fault_boundary",
+        "four_surface_exact",
+        "four_surface_sha256",
+        "index_journal_sha256",
+        "index_revision",
+        "index_transaction_id",
+        "inbox_foreign_keys_clear",
+        "inbox_integrity_clear",
+        "inbox_reopen_count",
+        "network_call_count",
+        "obsidian_exact",
+        "production_surface_write_count",
+        "receipt_sha256",
+        "restore_release",
+        "rollback_restore_observed",
+        "rollback_tree_sha256",
+        "rolled_back",
+        "schema",
+        "scratch_removed",
+        "source",
+        "status",
+        "systemctl_call_count",
+    }
+    if not isinstance(value, dict) or set(value) != expected:
+        raise DRGenerationIndexError("rehearsal_receipt_invalid")
+    reference, raw = _external_receipt_body(value, code="rehearsal_receipt_invalid")
+    payload = _unique_json(raw, code="rehearsal_receipt_invalid")
+    restore = normalized_candidate["restore_release"]
+    restore_projection = {
+        key: restore[key]
+        for key in ("commit", "max_schema", "tree_manifest_sha256", "version", "wheel_sha256")
+    }
+    source_keys = (
+        "activation_journal_file_sha256",
+        "activation_journal_sha256",
+        "activation_receipt_file_sha256",
+        "activation_receipt_sha256",
+        "backup_manifest_sha256",
+        "restore_operator_sha256",
+        "surface_receipts",
+    )
+    source_projection = {key: auth[key] for key in source_keys}
+    four_surface_sha256 = _sha256(
+        _canonical_json(
+            {
+                "database": normalized_candidate["database_receipt_sha256"],
+                "engineer": normalized_candidate["engineer_receipt_sha256"],
+                "inbox": normalized_candidate["inbox_receipt_sha256"],
+                "obsidian": normalized_candidate["obsidian_receipt_sha256"],
+            }
+        )
+    )
+    boolean_keys = (
+        "database_foreign_keys_clear",
+        "database_integrity_clear",
+        "engineer_exact",
+        "four_surface_exact",
+        "inbox_foreign_keys_clear",
+        "inbox_integrity_clear",
+        "obsidian_exact",
+        "rollback_restore_observed",
+        "rolled_back",
+        "scratch_removed",
+    )
+    if (
+        reference["schema"] != REHEARSAL_RECEIPT_SCHEMA
+        or payload.get("status") != "rehearsed"
+        or payload.get("candidate_sha256")
+        != _sha256(_canonical_json(normalized_candidate))
+        or payload.get("authentication_receipt_sha256") != auth_ref["sha256"]
+        or payload.get("index_transaction_id")
+        != _hex64(index_transaction_id, code="rehearsal_receipt_invalid")
+        or payload.get("index_revision") != index_revision
+        or payload.get("index_journal_sha256")
+        != _hex64(index_journal_sha256, code="rehearsal_receipt_invalid")
+        or payload.get("check_count") != len(DR_REHEARSAL_CHECKS)
+        or payload.get("checkset_sha256") != DR_REHEARSAL_CHECKSET_SHA256
+        or payload.get("database_reopen_count") != 2
+        or payload.get("inbox_reopen_count") != 2
+        or type(payload.get("database_schema")) is not int
+        or not 0 < int(payload["database_schema"]) <= int(restore["max_schema"])
+        or payload.get("fault_boundary") != "after_migration_before_provision_or_network"
+        or payload.get("four_surface_sha256") != four_surface_sha256
+        or payload.get("restore_release") != restore_projection
+        or payload.get("source") != source_projection
+        or payload.get("systemctl_call_count") != 0
+        or payload.get("network_call_count") != 0
+        or payload.get("production_surface_write_count") != 0
+        or type(payload.get("engineer_authority_present")) is not bool
+        or any(payload.get(key) is not True for key in boolean_keys)
+    ):
+        raise DRGenerationIndexError("rehearsal_receipt_invalid")
+    _hex64(payload.get("rollback_tree_sha256"), code="rehearsal_receipt_invalid")
+    return reference, raw, payload
 
 
 def _external_receipt_name(kind: str, sha256: str) -> str:
@@ -608,6 +910,26 @@ def _encode_state(core: Mapping[str, Any]) -> tuple[dict[str, Any], bytes]:
     return payload, _canonical_json(payload) + b"\n"
 
 
+def _head_fence(value: bytes) -> bytes:
+    state = _unique_json(value, code="dr_generation_head_fence_invalid")
+    revision = state.get("revision")
+    journal_sha256 = _hex64(
+        state.get("journal_sha256"),
+        code="dr_generation_head_fence_invalid",
+    )
+    if type(revision) is not int or revision < 0:
+        raise DRGenerationIndexError("dr_generation_head_fence_invalid")
+    core = {
+        "index_raw_base64": base64.b64encode(value).decode("ascii"),
+        "index_sha256": _sha256(value),
+        "journal_sha256": journal_sha256,
+        "revision": revision,
+        "schema": HEAD_FENCE_SCHEMA,
+    }
+    payload = {**core, "receipt_sha256": _sha256(_canonical_json(core))}
+    return _canonical_json(payload) + b"\n"
+
+
 class DurableDRGenerationIndex:
     """A crash-safe fixed-slot current/older DR generation index."""
 
@@ -617,6 +939,28 @@ class DurableDRGenerationIndex:
             code="dr_generation_state_directory_invalid",
         )
         self._state_directory_identity = (int(status.st_dev), int(status.st_ino))
+        self.parent_directory = _absolute_lexical(
+            self.state_directory.parent,
+            code="dr_generation_state_parent_invalid",
+        )
+        try:
+            parent_status = os.stat(self.parent_directory, follow_symlinks=False)
+            parent_resolved = self.parent_directory.resolve(strict=True)
+        except OSError as exc:
+            raise DRGenerationIndexError("dr_generation_state_parent_invalid") from exc
+        if (
+            parent_resolved != self.parent_directory
+            or not stat.S_ISDIR(parent_status.st_mode)
+            or parent_status.st_uid != os.geteuid()
+            or stat.S_IMODE(parent_status.st_mode) & 0o022
+        ):
+            raise DRGenerationIndexError("dr_generation_state_parent_invalid")
+        self._parent_directory_identity = (
+            int(parent_status.st_dev),
+            int(parent_status.st_ino),
+        )
+        scope = _sha256(os.fsencode(str(self.state_directory)))[:32]
+        self.head_directory = self.parent_directory / f"{HEAD_FENCE_DIRECTORY_PREFIX}-{scope}"
         self.path = self.state_directory / INDEX_NAME
         self.receipt_directory = self.state_directory / RECEIPT_DIRECTORY_NAME
 
@@ -626,6 +970,14 @@ class DurableDRGenerationIndex:
             stat.S_ISDIR(status.st_mode)
             and status.st_uid == os.geteuid()
             and not stat.S_IMODE(status.st_mode) & 0o077
+        )
+
+    @staticmethod
+    def _directory_is_owned(status: os.stat_result) -> bool:
+        return (
+            stat.S_ISDIR(status.st_mode)
+            and status.st_uid == os.geteuid()
+            and not stat.S_IMODE(status.st_mode) & 0o022
         )
 
     def _open_state_directory(self) -> int:
@@ -638,7 +990,7 @@ class DurableDRGenerationIndex:
         try:
             opened = os.fstat(descriptor)
             if (
-                not self._directory_is_private(opened)
+                not self._directory_is_owned(opened)
                 or (int(opened.st_dev), int(opened.st_ino)) != self._state_directory_identity
             ):
                 raise DRGenerationIndexError("dr_generation_state_directory_changed")
@@ -647,11 +999,37 @@ class DurableDRGenerationIndex:
             os.close(descriptor)
             raise
 
+    def _open_parent_directory(self) -> int:
+        flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_DIRECTORY", 0)
+        flags |= getattr(os, "O_NOFOLLOW", 0)
+        descriptor = -1
+        try:
+            descriptor = os.open(self.parent_directory, flags)
+            opened = os.fstat(descriptor)
+            if (
+                not self._directory_is_private(opened)
+                or (int(opened.st_dev), int(opened.st_ino)) != self._parent_directory_identity
+            ):
+                raise DRGenerationIndexError("dr_generation_state_parent_changed")
+            return descriptor
+        except BaseException:
+            if descriptor >= 0:
+                os.close(descriptor)
+            raise
+
     def _require_pinned_namespace(self, pins: _PinnedDirectories) -> None:
         try:
+            parent_open = os.fstat(pins.parent_fd)
             state_open = os.fstat(pins.state_fd)
             receipt_open = os.fstat(pins.receipt_fd)
+            head_open = os.fstat(pins.head_fd)
+            parent_named = os.stat(self.parent_directory, follow_symlinks=False)
             state_named = os.stat(self.state_directory, follow_symlinks=False)
+            head_named = os.stat(
+                self.head_directory.name,
+                dir_fd=pins.parent_fd,
+                follow_symlinks=False,
+            )
             receipt_named = os.stat(
                 RECEIPT_DIRECTORY_NAME,
                 dir_fd=pins.state_fd,
@@ -660,20 +1038,60 @@ class DurableDRGenerationIndex:
         except OSError as exc:
             raise DRGenerationIndexError("dr_generation_directory_changed") from exc
         if (
-            not self._directory_is_private(state_open)
+            not self._directory_is_owned(parent_open)
+            or not self._directory_is_private(state_open)
             or not self._directory_is_private(receipt_open)
+            or not self._directory_is_private(head_open)
+            or (int(parent_open.st_dev), int(parent_open.st_ino)) != pins.parent_identity
+            or (int(parent_named.st_dev), int(parent_named.st_ino)) != pins.parent_identity
             or (int(state_open.st_dev), int(state_open.st_ino)) != self._state_directory_identity
             or (int(state_named.st_dev), int(state_named.st_ino)) != self._state_directory_identity
             or (int(receipt_open.st_dev), int(receipt_open.st_ino)) != pins.receipt_identity
             or (int(receipt_named.st_dev), int(receipt_named.st_ino)) != pins.receipt_identity
+            or (int(head_open.st_dev), int(head_open.st_ino)) != pins.head_identity
+            or (int(head_named.st_dev), int(head_named.st_ino)) != pins.head_identity
         ):
             raise DRGenerationIndexError("dr_generation_directory_changed")
 
     @contextmanager
     def _guard(self, *, create_receipt_directory: bool = False) -> Iterator[_PinnedDirectories]:
-        state_fd = self._open_state_directory()
+        parent_fd = self._open_parent_directory()
+        state_fd = -1
         receipt_fd = -1
+        head_fd = -1
         try:
+            if create_receipt_directory:
+                try:
+                    os.mkdir(self.head_directory.name, mode=0o700, dir_fd=parent_fd)
+                    os.fsync(parent_fd)
+                except FileExistsError:
+                    pass
+                except OSError as exc:
+                    raise DRGenerationIndexError("dr_generation_head_directory_invalid") from exc
+            try:
+                head_named = os.stat(
+                    self.head_directory.name,
+                    dir_fd=parent_fd,
+                    follow_symlinks=False,
+                )
+            except OSError as exc:
+                raise DRGenerationIndexError("dr_generation_head_directory_invalid") from exc
+            if not self._directory_is_private(head_named):
+                raise DRGenerationIndexError("dr_generation_head_directory_invalid")
+            directory_flags = (
+                os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_DIRECTORY", 0)
+            )
+            directory_flags |= getattr(os, "O_NOFOLLOW", 0)
+            head_fd = os.open(self.head_directory.name, directory_flags, dir_fd=parent_fd)
+            head_open = os.fstat(head_fd)
+            head_identity = (int(head_open.st_dev), int(head_open.st_ino))
+            if not self._directory_is_private(head_open) or head_identity != (
+                int(head_named.st_dev),
+                int(head_named.st_ino),
+            ):
+                raise DRGenerationIndexError("dr_generation_head_directory_changed")
+            fcntl.flock(head_fd, fcntl.LOCK_EX)
+            state_fd = self._open_state_directory()
             # The receipt directory is replaceable during adversarial recovery.
             # Lock the state-directory inode that owns both the CAS file and the
             # receipt entry, so a replacement receipt directory cannot create a
@@ -696,9 +1114,7 @@ class DurableDRGenerationIndex:
                 raise DRGenerationIndexError("dr_generation_receipt_directory_invalid") from exc
             if not self._directory_is_private(receipt_named):
                 raise DRGenerationIndexError("dr_generation_receipt_directory_invalid")
-            flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_DIRECTORY", 0)
-            flags |= getattr(os, "O_NOFOLLOW", 0)
-            receipt_fd = os.open(RECEIPT_DIRECTORY_NAME, flags, dir_fd=state_fd)
+            receipt_fd = os.open(RECEIPT_DIRECTORY_NAME, directory_flags, dir_fd=state_fd)
             receipt_open = os.fstat(receipt_fd)
             receipt_identity = (int(receipt_open.st_dev), int(receipt_open.st_ino))
             if not self._directory_is_private(receipt_open) or receipt_identity != (
@@ -707,9 +1123,13 @@ class DurableDRGenerationIndex:
             ):
                 raise DRGenerationIndexError("dr_generation_receipt_directory_changed")
             pins = _PinnedDirectories(
+                parent_fd=parent_fd,
                 state_fd=state_fd,
                 receipt_fd=receipt_fd,
+                head_fd=head_fd,
+                parent_identity=self._parent_directory_identity,
                 receipt_identity=receipt_identity,
+                head_identity=head_identity,
             )
             self._require_pinned_namespace(pins)
             yield pins
@@ -717,9 +1137,15 @@ class DurableDRGenerationIndex:
         finally:
             if receipt_fd >= 0:
                 os.close(receipt_fd)
-            with suppress(OSError):
-                fcntl.flock(state_fd, fcntl.LOCK_UN)
-            os.close(state_fd)
+            if state_fd >= 0:
+                with suppress(OSError):
+                    fcntl.flock(state_fd, fcntl.LOCK_UN)
+                os.close(state_fd)
+            if head_fd >= 0:
+                with suppress(OSError):
+                    fcntl.flock(head_fd, fcntl.LOCK_UN)
+                os.close(head_fd)
+            os.close(parent_fd)
 
     @staticmethod
     def _publish_no_replace(
@@ -803,12 +1229,136 @@ class DurableDRGenerationIndex:
             if descriptor >= 0:
                 os.close(descriptor)
 
+    def _head_record_unlocked(
+        self,
+        pins: _PinnedDirectories,
+    ) -> tuple[int, str, bytes]:
+        try:
+            names = set(os.listdir(pins.head_fd))
+        except OSError as exc:
+            raise DRGenerationIndexError("dr_generation_head_fence_invalid") from exc
+        if not names <= {HEAD_FENCE_NAME, HEAD_FENCE_STAGING_NAME}:
+            raise DRGenerationIndexError("dr_generation_head_fence_invalid")
+        if HEAD_FENCE_STAGING_NAME in names:
+            try:
+                staged = os.stat(
+                    HEAD_FENCE_STAGING_NAME,
+                    dir_fd=pins.head_fd,
+                    follow_symlinks=False,
+                )
+            except OSError as exc:
+                raise DRGenerationIndexError("dr_generation_head_fence_invalid") from exc
+            if (
+                not stat.S_ISREG(staged.st_mode)
+                or staged.st_uid != os.geteuid()
+                or staged.st_nlink != 1
+                or stat.S_IMODE(staged.st_mode) != 0o600
+                or not 0 <= staged.st_size <= MAX_HEAD_FENCE_BYTES
+            ):
+                raise DRGenerationIndexError("dr_generation_head_fence_invalid")
+        if HEAD_FENCE_NAME not in names:
+            raise DRGenerationIndexError("dr_generation_head_fence_missing")
+        raw = _stable_private_file_at(
+            pins.head_fd,
+            HEAD_FENCE_NAME,
+            mode=0o600,
+            maximum_bytes=MAX_HEAD_FENCE_BYTES,
+            code="dr_generation_head_fence_invalid",
+        )
+        payload = _unique_json(raw, code="dr_generation_head_fence_invalid")
+        if raw != _canonical_json(payload) + b"\n" or set(payload) != {
+            "index_raw_base64",
+            "index_sha256",
+            "journal_sha256",
+            "receipt_sha256",
+            "revision",
+            "schema",
+        }:
+            raise DRGenerationIndexError("dr_generation_head_fence_invalid")
+        core = {key: value for key, value in payload.items() if key != "receipt_sha256"}
+        revision = payload.get("revision")
+        journal = _hex64(payload.get("journal_sha256"), code="dr_generation_head_fence_invalid")
+        if (
+            payload.get("schema") != HEAD_FENCE_SCHEMA
+            or type(revision) is not int
+            or revision < 0
+            or payload.get("receipt_sha256") != _sha256(_canonical_json(core))
+        ):
+            raise DRGenerationIndexError("dr_generation_head_fence_invalid")
+        encoded = payload.get("index_raw_base64")
+        if not isinstance(encoded, str):
+            raise DRGenerationIndexError("dr_generation_head_fence_invalid")
+        try:
+            index_raw = base64.b64decode(encoded.encode("ascii"), validate=True)
+        except (UnicodeError, ValueError) as exc:
+            raise DRGenerationIndexError("dr_generation_head_fence_invalid") from exc
+        state = _unique_json(index_raw, code="dr_generation_head_fence_invalid")
+        state_core = {key: value for key, value in state.items() if key != "journal_sha256"}
+        if (
+            not index_raw
+            or len(index_raw) > MAX_INDEX_BYTES
+            or index_raw != _canonical_json(state) + b"\n"
+            or state.get("schema") != INDEX_SCHEMA
+            or state.get("revision") != revision
+            or state.get("journal_sha256") != journal
+            or journal != _sha256(_canonical_json(state_core))
+            or payload.get("index_sha256") != _sha256(index_raw)
+        ):
+            raise DRGenerationIndexError("dr_generation_head_fence_invalid")
+        return revision, journal, index_raw
+
+    def _require_head_matches(self, pins: _PinnedDirectories, raw: bytes) -> None:
+        _revision, _journal, authoritative_raw = self._head_record_unlocked(pins)
+        if raw != authoritative_raw:
+            raise DRGenerationIndexError("dr_generation_head_rollback_detected")
+
+    def _replace_head_unlocked(
+        self,
+        pins: _PinnedDirectories,
+        raw: bytes,
+    ) -> None:
+        _replace_private_head_durable_at(
+            pins.head_fd,
+            _head_fence(raw),
+            code="dr_generation_head_publication_failed",
+        )
+        if self._head_record_unlocked(pins)[2] != raw:
+            raise DRGenerationIndexError("dr_generation_head_publication_failed")
+
     def initialize(self) -> dict[str, Any]:
         """Create the empty authority exactly once, or authenticate the existing one."""
 
         with self._guard(create_receipt_directory=True) as pins:
             if _entry_exists_at(pins.state_fd, INDEX_NAME):
-                return self._load_unlocked(pins)
+                current_raw = _stable_private_file_at(
+                    pins.state_fd,
+                    INDEX_NAME,
+                    mode=0o600,
+                    maximum_bytes=MAX_INDEX_BYTES,
+                    code="dr_generation_index_invalid",
+                )
+                current = self._decode_state(current_raw, pins.receipt_fd)
+                head_revision, _head_journal, authoritative_raw = self._head_record_unlocked(pins)
+                authoritative = self._decode_state(authoritative_raw, pins.receipt_fd)
+                if current_raw != authoritative_raw:
+                    current_revision = int(current["revision"])
+                    if current_revision >= head_revision:
+                        code = (
+                            "dr_generation_head_backup_skew"
+                            if current_revision > head_revision
+                            else "dr_generation_head_rollback_detected"
+                        )
+                        raise DRGenerationIndexError(code)
+                    _replace_private_durable_at(
+                        pins.state_fd,
+                        INDEX_NAME,
+                        authoritative_raw,
+                        code="dr_generation_head_projection_recovery_failed",
+                    )
+                loaded = self._load_unlocked(pins)
+                if loaded != authoritative:
+                    raise DRGenerationIndexError("dr_generation_head_projection_recovery_failed")
+                return loaded
             core = {
                 "base_clear_sha256": ZERO_SHA256,
                 "current": None,
@@ -820,6 +1370,17 @@ class DurableDRGenerationIndex:
                 "transaction_id": ZERO_SHA256,
             }
             payload, raw = _encode_state(core)
+            try:
+                head_record = self._head_record_unlocked(pins)
+            except DRGenerationIndexError as exc:
+                if str(exc) != "dr_generation_head_fence_missing":
+                    raise
+                head_record = None
+            if head_record is not None:
+                if head_record[0] != 0 or head_record[2] != raw:
+                    raise DRGenerationIndexError("dr_generation_head_rollback_detected")
+            else:
+                self._replace_head_unlocked(pins, raw)
             self._publish_no_replace(
                 directory_fd=pins.state_fd,
                 name=INDEX_NAME,
@@ -835,6 +1396,9 @@ class DurableDRGenerationIndex:
 
     def _receipt_path(self, generation_id: str) -> Path:
         return self.receipt_directory / f"{_hex64(generation_id, code='generation_ref_invalid')}.json"
+
+    def _external_receipt_path(self, kind: str, sha256: str) -> Path:
+        return self.receipt_directory / _external_receipt_name(kind, sha256)
 
     def _load_external_receipt(
         self,
@@ -913,17 +1477,29 @@ class DurableDRGenerationIndex:
         generation_id = _sha256(_canonical_json(generation))
         if generation_id != payload.get("generation_id") or generation_id != normalized_ref["generation_id"]:
             raise DRGenerationIndexError("generation_receipt_invalid")
-        self._load_external_receipt(
+        authentication_body = self._load_external_receipt(
             generation["authentication_receipt"],
             receipt_fd,
             kind=AUTHENTICATION_RECEIPT_KIND,
             code="authentication_receipt_invalid",
         )
-        self._load_external_receipt(
+        validate_authentication_receipt(
+            authentication_body,
+            candidate=generation["candidate"],
+        )
+        rehearsal_body = self._load_external_receipt(
             generation["rehearsal_receipt"],
             receipt_fd,
             kind=REHEARSAL_RECEIPT_KIND,
             code="rehearsal_receipt_invalid",
+        )
+        validate_rehearsal_receipt(
+            rehearsal_body,
+            candidate=generation["candidate"],
+            authentication_receipt=authentication_body,
+            index_transaction_id=str(rehearsal_body.get("index_transaction_id") or ""),
+            index_revision=rehearsal_body.get("index_revision"),
+            index_journal_sha256=str(rehearsal_body.get("index_journal_sha256") or ""),
         )
         return payload
 
@@ -1027,22 +1603,43 @@ class DurableDRGenerationIndex:
                 authentication_ref = _normalize_external_receipt(
                     authentication, code="authentication_receipt_invalid"
                 )
-                self._load_external_receipt(
+                authentication_body = self._load_external_receipt(
                     authentication_ref,
                     receipt_fd,
                     kind=AUTHENTICATION_RECEIPT_KIND,
                     code="authentication_receipt_invalid",
+                )
+                validate_authentication_receipt(
+                    authentication_body,
+                    candidate=candidate,
                 )
                 if phase == "authenticated":
                     if rehearsal is not None or generation_ref is not None:
                         raise DRGenerationIndexError("dr_generation_index_invalid")
                 else:
                     rehearsal_ref = _normalize_external_receipt(rehearsal, code="rehearsal_receipt_invalid")
-                    self._load_external_receipt(
+                    rehearsal_body = self._load_external_receipt(
                         rehearsal_ref,
                         receipt_fd,
                         kind=REHEARSAL_RECEIPT_KIND,
                         code="rehearsal_receipt_invalid",
+                    )
+                    predecessor_pending = dict(pending)
+                    predecessor_pending["generation"] = None
+                    predecessor_pending["rehearsal_receipt"] = None
+                    predecessor_core = {
+                        **{key: item for key, item in payload.items() if key != "journal_sha256"},
+                        "pending": predecessor_pending,
+                        "phase": "authenticated",
+                        "revision": int(revision) - 1,
+                    }
+                    validate_rehearsal_receipt(
+                        rehearsal_body,
+                        candidate=candidate,
+                        authentication_receipt=authentication_body,
+                        index_transaction_id=transaction_id,
+                        index_revision=int(revision) - 1,
+                        index_journal_sha256=_sha256(_canonical_json(predecessor_core)),
                     )
                     normalized_generation_ref = _normalize_generation_ref(
                         generation_ref, code="generation_ref_invalid"
@@ -1095,13 +1692,15 @@ class DurableDRGenerationIndex:
         return payload
 
     def _load_raw_unlocked(self, pins: _PinnedDirectories) -> bytes:
-        return _stable_private_file_at(
+        raw = _stable_private_file_at(
             pins.state_fd,
             INDEX_NAME,
             mode=0o600,
             maximum_bytes=MAX_INDEX_BYTES,
             code="dr_generation_index_invalid",
         )
+        self._require_head_matches(pins, raw)
+        return raw
 
     def _load_unlocked(self, pins: _PinnedDirectories) -> dict[str, Any]:
         return self._decode_state(self._load_raw_unlocked(pins), pins.receipt_fd)
@@ -1156,6 +1755,64 @@ class DurableDRGenerationIndex:
                 rehearsal_receipt=rehearsal_ref,
             )
 
+    def pending_generation_identity(
+        self,
+        *,
+        expected_journal_sha256: str,
+    ) -> PendingDRGenerationIdentity:
+        """Return a candidate only after its complete authentication is durable."""
+
+        with self._guard() as pins:
+            state = self._load_unlocked(pins)
+            self._require_cas(state, expected_journal_sha256)
+            phase = str(state["phase"])
+            if phase not in {"authenticated", "rehearsed"}:
+                raise DRGenerationIndexError("dr_generation_pending_not_authenticated")
+            pending = state["pending"]
+            candidate = normalize_generation_candidate(pending["candidate"])
+            candidate_sha256 = _sha256(_canonical_json(candidate))
+            authentication = self._load_external_receipt(
+                pending["authentication_receipt"],
+                pins.receipt_fd,
+                kind=AUTHENTICATION_RECEIPT_KIND,
+                code="authentication_receipt_invalid",
+            )
+            rehearsal = (
+                self._load_external_receipt(
+                    pending["rehearsal_receipt"],
+                    pins.receipt_fd,
+                    kind=REHEARSAL_RECEIPT_KIND,
+                    code="rehearsal_receipt_invalid",
+                )
+                if phase == "rehearsed"
+                else None
+            )
+            authenticated_journal_sha256 = str(state["journal_sha256"])
+            if phase == "rehearsed":
+                predecessor_pending = dict(pending)
+                predecessor_pending["generation"] = None
+                predecessor_pending["rehearsal_receipt"] = None
+                predecessor_core = {
+                    **self._core_from_state(state),
+                    "pending": predecessor_pending,
+                    "phase": "authenticated",
+                    "revision": int(state["revision"]) - 1,
+                }
+                authenticated_journal_sha256 = _sha256(_canonical_json(predecessor_core))
+            self._require_pinned_namespace(pins)
+            return PendingDRGenerationIdentity(
+                index_journal_sha256=str(state["journal_sha256"]),
+                authenticated_journal_sha256=authenticated_journal_sha256,
+                index_phase=phase,
+                index_revision=int(state["revision"]),
+                index_transaction_id=str(state["transaction_id"]),
+                intent=str(pending["intent"]),
+                candidate=candidate,
+                candidate_sha256=candidate_sha256,
+                authentication_receipt=authentication,
+                rehearsal_receipt=rehearsal,
+            )
+
     @staticmethod
     def _core_from_state(state: Mapping[str, Any]) -> dict[str, Any]:
         return {key: value for key, value in state.items() if key != "journal_sha256"}
@@ -1177,6 +1834,7 @@ class DurableDRGenerationIndex:
         if observed.get("journal_sha256") != current.get("journal_sha256"):
             raise DRGenerationIndexError("dr_generation_cas_mismatch")
         expected_payload, raw = _encode_state(following_core)
+        self._replace_head_unlocked(pins, raw)
         _replace_private_durable_at(
             pins.state_fd,
             INDEX_NAME,
@@ -1250,15 +1908,15 @@ class DurableDRGenerationIndex:
     ) -> dict[str, Any]:
         """Retain a complete authentication body before binding its compact ref."""
 
-        normalized_receipt, receipt_raw = _external_receipt_body(
-            receipt,
-            code="authentication_receipt_invalid",
-        )
         with self._guard() as pins:
             state = self._load_unlocked(pins)
             self._require_cas(state, expected_journal_sha256)
             if state["phase"] != "prepared":
                 raise DRGenerationIndexError("dr_generation_transition_invalid")
+            normalized_receipt, receipt_raw, _payload = validate_authentication_receipt(
+                receipt,
+                candidate=state["pending"]["candidate"],
+            )
             self._publish_external_receipt(
                 reference=normalized_receipt,
                 raw=receipt_raw,
@@ -1284,16 +1942,26 @@ class DurableDRGenerationIndex:
     ) -> dict[str, Any]:
         """Retain a complete rehearsal body before binding its compact ref."""
 
-        normalized_receipt, receipt_raw = _external_receipt_body(
-            receipt,
-            code="rehearsal_receipt_invalid",
-        )
         with self._guard() as pins:
             state = self._load_unlocked(pins)
             self._require_cas(state, expected_journal_sha256)
             if state["phase"] != "authenticated":
                 raise DRGenerationIndexError("dr_generation_transition_invalid")
             pending = dict(state["pending"])
+            authentication_body = self._load_external_receipt(
+                pending["authentication_receipt"],
+                pins.receipt_fd,
+                kind=AUTHENTICATION_RECEIPT_KIND,
+                code="authentication_receipt_invalid",
+            )
+            normalized_receipt, receipt_raw, _payload = validate_rehearsal_receipt(
+                receipt,
+                candidate=pending["candidate"],
+                authentication_receipt=authentication_body,
+                index_transaction_id=str(state["transaction_id"]),
+                index_revision=int(state["revision"]),
+                index_journal_sha256=str(state["journal_sha256"]),
+            )
             pending["rehearsal_receipt"] = normalized_receipt
             generation = {
                 "authentication_receipt": pending["authentication_receipt"],
@@ -1424,28 +2092,68 @@ class DurableDRGenerationIndex:
                 continue
             receipt = self._load_receipt(reference, directories.receipt_fd)
             candidate = receipt["generation"]["candidate"]
+            authentication_ref = receipt["generation"]["authentication_receipt"]
+            rehearsal_ref = receipt["generation"]["rehearsal_receipt"]
             pins.append(
                 GenerationPin(
                     role=role,
                     backup_directory=Path(candidate["backup_directory"]),
+                    candidate=dict(candidate),
                     generation_id=str(reference["generation_id"]),
                     receipt_path=self._receipt_path(str(reference["generation_id"])),
                     receipt_sha256=str(reference["receipt_sha256"]),
+                    authentication_receipt_path=self._external_receipt_path(
+                        AUTHENTICATION_RECEIPT_KIND,
+                        str(authentication_ref["sha256"]),
+                    ),
+                    authentication_receipt_sha256=str(authentication_ref["sha256"]),
+                    rehearsal_receipt_path=self._external_receipt_path(
+                        REHEARSAL_RECEIPT_KIND,
+                        str(rehearsal_ref["sha256"]),
+                    ),
+                    rehearsal_receipt_sha256=str(rehearsal_ref["sha256"]),
                     **restore_release_fields(candidate),
                 )
             )
         if state["phase"] != "clear":
             pending = state["pending"]
             reference = pending["generation"]
+            authentication_ref = pending["authentication_receipt"]
+            rehearsal_ref = pending["rehearsal_receipt"]
             pins.append(
                 GenerationPin(
                     role="pending",
                     backup_directory=Path(pending["candidate"]["backup_directory"]),
+                    candidate=dict(pending["candidate"]),
                     generation_id=(str(reference["generation_id"]) if reference is not None else None),
                     receipt_path=(
                         self._receipt_path(str(reference["generation_id"])) if reference is not None else None
                     ),
                     receipt_sha256=(str(reference["receipt_sha256"]) if reference is not None else None),
+                    authentication_receipt_path=(
+                        self._external_receipt_path(
+                            AUTHENTICATION_RECEIPT_KIND,
+                            str(authentication_ref["sha256"]),
+                        )
+                        if authentication_ref is not None
+                        else None
+                    ),
+                    authentication_receipt_sha256=(
+                        str(authentication_ref["sha256"])
+                        if authentication_ref is not None
+                        else None
+                    ),
+                    rehearsal_receipt_path=(
+                        self._external_receipt_path(
+                            REHEARSAL_RECEIPT_KIND,
+                            str(rehearsal_ref["sha256"]),
+                        )
+                        if rehearsal_ref is not None
+                        else None
+                    ),
+                    rehearsal_receipt_sha256=(
+                        str(rehearsal_ref["sha256"]) if rehearsal_ref is not None else None
+                    ),
                     **restore_release_fields(pending["candidate"]),
                 )
             )
@@ -1472,8 +2180,11 @@ class DurableDRGenerationIndex:
 
 
 __all__ = [
+    "AUTHENTICATION_RECEIPT_SCHEMA",
     "AUTHENTICATION_RECEIPT_KIND",
     "CurrentDRGenerationIdentity",
+    "DR_REHEARSAL_CHECKS",
+    "DR_REHEARSAL_CHECKSET_SHA256",
     "DRGenerationAuthoritySnapshot",
     "DRGenerationIndexError",
     "DurableDRGenerationIndex",
@@ -1481,11 +2192,19 @@ __all__ = [
     "GENERATION_RECEIPT_SCHEMA",
     "GENERATION_SCHEMA",
     "GenerationPin",
+    "HEAD_FENCE_DIRECTORY_PREFIX",
+    "HEAD_FENCE_NAME",
+    "HEAD_FENCE_SCHEMA",
     "INDEX_INTENTS",
     "INDEX_NAME",
     "INDEX_PHASES",
     "INDEX_SCHEMA",
+    "MAX_HEAD_FENCE_BYTES",
+    "PendingDRGenerationIdentity",
     "RECEIPT_DIRECTORY_NAME",
+    "REHEARSAL_RECEIPT_SCHEMA",
     "REHEARSAL_RECEIPT_KIND",
     "normalize_generation_candidate",
+    "validate_authentication_receipt",
+    "validate_rehearsal_receipt",
 ]

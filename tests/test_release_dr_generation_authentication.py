@@ -258,3 +258,32 @@ def test_public_authentication_uses_shared_nonblocking_operator_lock(
             activation_receipt=receipt,
             backup_root=backup_root,
         )
+
+
+def test_large_sparse_backup_digest_is_streamed_with_bounded_reads(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    database = tmp_path / "large.sqlite3"
+    with database.open("wb") as stream:
+        stream.truncate(64 << 20)
+    database.chmod(0o600)
+    real_read = dr_auth.os.read
+    requested: list[int] = []
+
+    def bounded_read(descriptor: int, count: int) -> bytes:
+        requested.append(count)
+        return real_read(descriptor, count)
+
+    monkeypatch.setattr(dr_auth.os, "read", bounded_read)
+    digest, size, _status = dr_auth._stable_private_file_digest(  # noqa: SLF001
+        database,
+        maximum=64 << 20,
+        code="test_sparse_digest_invalid",
+        allow_empty=True,
+    )
+
+    assert size == 64 << 20
+    assert len(digest) == 64
+    assert requested
+    assert max(requested) <= 1 << 20

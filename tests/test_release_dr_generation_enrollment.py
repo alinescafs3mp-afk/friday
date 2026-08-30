@@ -33,6 +33,7 @@ def _private_directory(path: Path) -> Path:
 
 def _home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[Path, Path]:
     home = _private_directory(tmp_path / "friday-home")
+    _private_directory(home / "data")
     _private_directory(home / "data/state")
     _private_directory(home / "data/backups")
     receipt = tmp_path / "activation-receipt.json"
@@ -67,11 +68,75 @@ def _candidate(home: Path, ordinal: int) -> dict[str, Any]:
     }
 
 
-def _receipt(label: str, ordinal: int) -> dict[str, Any]:
+def _authentication_receipt(candidate: dict[str, Any], ordinal: int) -> dict[str, Any]:
+    status = Path(candidate["backup_directory"]).stat()
     core = {
-        "ordinal": ordinal,
-        "schema": f"friday.test-{label}.v1",
-        "status": label,
+        "activation_journal_file_sha256": f"{ordinal + 1:064x}",
+        "activation_journal_sha256": f"{ordinal + 2:064x}",
+        "activation_receipt_file_sha256": f"{ordinal + 3:064x}",
+        "activation_receipt_sha256": candidate["source_receipt_sha256"],
+        "backup_directory": {"device": status.st_dev, "inode": status.st_ino, "path": candidate["backup_directory"]},
+        "backup_manifest_sha256": f"{ordinal + 4:064x}",
+        "candidate_sha256": hashlib.sha256(_canonical(candidate)).hexdigest(),
+        "restore_operator_sha256": f"{ordinal + 5:064x}",
+        "schema": dr_index.AUTHENTICATION_RECEIPT_SCHEMA,
+        "status": "authenticated",
+        "surface_receipts": {
+            "database": candidate["database_receipt_sha256"],
+            "engineer": candidate["engineer_receipt_sha256"],
+            "inbox": candidate["inbox_receipt_sha256"],
+            "obsidian": candidate["obsidian_receipt_sha256"],
+        },
+    }
+    return {**core, "receipt_sha256": hashlib.sha256(_canonical(core)).hexdigest()}
+
+
+def _rehearsal_receipt(
+    candidate: dict[str, Any],
+    authentication: dict[str, Any],
+    state: dict[str, Any],
+    _ordinal: int,
+) -> dict[str, Any]:
+    restore = candidate["restore_release"]
+    source_keys = (
+        "activation_journal_file_sha256", "activation_journal_sha256",
+        "activation_receipt_file_sha256", "activation_receipt_sha256",
+        "backup_manifest_sha256", "restore_operator_sha256", "surface_receipts",
+    )
+    core = {
+        "authentication_receipt_sha256": authentication["receipt_sha256"],
+        "candidate_sha256": hashlib.sha256(_canonical(candidate)).hexdigest(),
+        "check_count": len(dr_index.DR_REHEARSAL_CHECKS),
+        "checkset_sha256": dr_index.DR_REHEARSAL_CHECKSET_SHA256,
+        "database_foreign_keys_clear": True,
+        "database_integrity_clear": True,
+        "database_reopen_count": 2,
+        "database_schema": 46,
+        "engineer_authority_present": True,
+        "engineer_exact": True,
+        "fault_boundary": "after_migration_before_provision_or_network",
+        "four_surface_exact": True,
+        "four_surface_sha256": hashlib.sha256(
+            _canonical(authentication["surface_receipts"])
+        ).hexdigest(),
+        "index_journal_sha256": state["journal_sha256"],
+        "index_revision": state["revision"],
+        "index_transaction_id": state["transaction_id"],
+        "inbox_foreign_keys_clear": True,
+        "inbox_integrity_clear": True,
+        "inbox_reopen_count": 2,
+        "network_call_count": 0,
+        "obsidian_exact": True,
+        "production_surface_write_count": 0,
+        "restore_release": {key: restore[key] for key in ("commit", "max_schema", "tree_manifest_sha256", "version", "wheel_sha256")},
+        "rollback_restore_observed": True,
+        "rollback_tree_sha256": restore["tree_manifest_sha256"],
+        "rolled_back": True,
+        "schema": dr_index.REHEARSAL_RECEIPT_SCHEMA,
+        "scratch_removed": True,
+        "source": {key: authentication[key] for key in source_keys},
+        "status": "rehearsed",
+        "systemctl_call_count": 0,
     }
     return {**core, "receipt_sha256": hashlib.sha256(_canonical(core)).hexdigest()}
 
@@ -83,7 +148,7 @@ def _authenticated(
 ) -> dr_auth.AuthenticatedDRCandidate:
     return dr_auth.AuthenticatedDRCandidate(
         candidate=candidate,
-        authentication_receipt=_receipt("authentication", ordinal),
+        authentication_receipt=_authentication_receipt(candidate, ordinal),
     )
 
 
@@ -131,12 +196,13 @@ def _publish(
         candidate=candidate,
         expected_journal_sha256=state["journal_sha256"],
     )
+    authentication = _authentication_receipt(candidate, ordinal)
     state = index.record_authenticated(
-        receipt=_receipt("authentication", ordinal),
+        receipt=authentication,
         expected_journal_sha256=state["journal_sha256"],
     )
     state = index.record_rehearsed(
-        receipt=_receipt("rehearsal", ordinal),
+        receipt=_rehearsal_receipt(candidate, authentication, state, ordinal),
         expected_journal_sha256=state["journal_sha256"],
     )
     return index.publish(expected_journal_sha256=state["journal_sha256"])
@@ -373,7 +439,7 @@ def test_rehearsed_retry_never_publishes_without_a_separate_controller(
         expected_journal_sha256=state["journal_sha256"],
     )
     rehearsed = index.record_rehearsed(
-        receipt=_receipt("rehearsal", 99),
+        receipt=_rehearsal_receipt(candidate, authenticated.authentication_receipt, state, 99),
         expected_journal_sha256=state["journal_sha256"],
     )
     _install_authenticator(monkeypatch, home, activation_receipt, [authenticated])
