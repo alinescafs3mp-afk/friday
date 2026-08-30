@@ -56,7 +56,7 @@ CURRENT_JOURNEYS = {
     "durable_scheduled_work": (
         "Durable scheduled work",
         "UNVERIFIED",
-        ("clean_release_artifact_missing", "production_read_only_observation_missing"),
+        ("production_read_only_observation_missing",),
     ),
     "honest_degradation": (
         "Honest degradation",
@@ -179,7 +179,6 @@ _LEGACY_SELF_DECLARED_PROOF_REFS_BY_JOURNEY_CLASS = {
     ),
 }
 _CURRENT_SNAPSHOT_MISSING_CLASSES = (
-    "clean artifact path",
     "rollback evidence",
     "backup and restore evidence",
 )
@@ -1333,7 +1332,7 @@ def test_canonical_golden_journey_registry_is_closed_current_and_privacy_safe(
     clean_release_root = _clean_release_root_for_registry(rows)
 
     assert len(rows) == len(CURRENT_JOURNEYS) == 6
-    assert clean_release_root is None
+    assert clean_release_root == Path(os.environ[_CLEAN_RELEASE_ROOT_ENV])
     assert tuple(row.journey_id for row in rows) == tuple(CURRENT_JOURNEYS)
     assert {row.journey_id: (row.journey, row.readiness, row.limitations) for row in rows} == CURRENT_JOURNEYS
     assert sum(row.readiness == "READY" for row in rows) == 0
@@ -1356,6 +1355,14 @@ def test_canonical_golden_journey_registry_is_closed_current_and_privacy_safe(
         for row in rows
         for evidence_class in _CURRENT_SNAPSHOT_MISSING_CLASSES
     )
+    assert {row.journey_id: row.evidence["clean artifact path"].state for row in rows} == {
+        "conversation_recall": "VERIFIED",
+        "document_recall_answer": "VERIFIED",
+        "obsidian_write_sync": "MISSING",
+        "durable_scheduled_work": "VERIFIED",
+        "honest_degradation": "VERIFIED",
+        "current_file_web_comparison": "MISSING",
+    }
     document = next(row for row in rows if row.journey_id == "document_recall_answer")
     assert document.evidence["restart and recovery evidence"].state == "AVAILABLE"
     restart_proof = (
