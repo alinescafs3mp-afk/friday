@@ -27,6 +27,12 @@ from tools.backfill_legacy_telegram_uploader_provenance import (
     build_plan,
 )
 
+_CONV_EXACT = "conv_1111111111111111"
+_CONV_JBL = "conv_2222222222222222"
+_CONV_AMBIGUOUS_A = "conv_3333333333333333"
+_CONV_AMBIGUOUS_B = "conv_4444444444444444"
+_CONV_ORPHAN = "conv_5555555555555555"
+
 
 def _register_bytes(settings, tenant: str, body: bytes) -> tuple[str, str, dict]:
     digest = hashlib.sha256(body).hexdigest()
@@ -118,11 +124,11 @@ def _seed_users_and_sessions(
                    id,user_id,title,created_at,updated_at,is_archived
                ) VALUES(?,?,?,?,?,0)""",
             [
-                ("conv-exact", "tg-exact", "exact", now, now),
-                ("conv-jbl", "tg-jbl", "jbl", now, now),
-                ("conv-a", "tg-ambiguous-a", "a", now, now),
-                ("conv-b", "tg-ambiguous-b", "b", now, now),
-                ("conv-orphan", "tg-exact", "orphan", now, now),
+                (_CONV_EXACT, "tg-exact", "exact", now, now),
+                (_CONV_JBL, "tg-jbl", "jbl", now, now),
+                (_CONV_AMBIGUOUS_A, "tg-ambiguous-a", "a", now, now),
+                (_CONV_AMBIGUOUS_B, "tg-ambiguous-b", "b", now, now),
+                (_CONV_ORPHAN, "tg-exact", "orphan", now, now),
             ],
         )
         db.executemany(
@@ -130,10 +136,10 @@ def _seed_users_and_sessions(
                    user_id,channel,channel_id,conversation_id,mode,updated_at
                ) VALUES(?,?,?,?,'dialogue',?)""",
             [
-                ("tg-exact", "telegram", "101", "conv-exact", now),
-                ("tg-jbl", "telegram", "202", "conv-jbl", now),
-                ("tg-ambiguous-a", "telegram", "303", "conv-a", now),
-                ("tg-ambiguous-b", "telegram", "303", "conv-b", now),
+                ("tg-exact", "telegram", "101", _CONV_EXACT, now),
+                ("tg-jbl", "telegram", "202", _CONV_JBL, now),
+                ("tg-ambiguous-a", "telegram", "303", _CONV_AMBIGUOUS_A, now),
+                ("tg-ambiguous-b", "telegram", "303", _CONV_AMBIGUOUS_B, now),
             ],
         )
         if with_identities:
@@ -213,7 +219,7 @@ def test_exact_owner_and_jbl_mapping_accepted(settings, storage) -> None:
     assert by_raw[jbl_id].mapped_uploader_id == "tg-jbl"
     assert by_raw[exact_id].mapping_evidence_class == EVIDENCE_IDENTITY_CURRENT
     assert by_raw[jbl_id].mapping_evidence_class == EVIDENCE_IDENTITY_CURRENT
-    assert by_raw[exact_id].conversation_id == "conv-exact"
+    assert by_raw[exact_id].conversation_id == _CONV_EXACT
     assert plan.counts["exact"] == 2
     assert plan.counts["exact_identity_current"] == 2
     assert plan.disk_verified is True
@@ -282,14 +288,14 @@ def test_session_conversation_owner_mismatch_and_archived_refused(settings, stor
         db.execute(
             """INSERT OR IGNORE INTO conversations(id,user_id,title,created_at,updated_at,is_archived)
                VALUES(?,?,?,?,?,0)""",
-            ("conv-wrong-owner", "tg-jbl", "wrong", now, now),
+            ("conv_6666666666666666", "tg-jbl", "wrong", now, now),
         )
         # Direct session with conversation_id belonging to another user — JOIN fails closed.
         db.execute(
             """INSERT OR IGNORE INTO channel_sessions(
                    user_id,channel,channel_id,conversation_id,mode,updated_at
                ) VALUES(?,?,?,?,'dialogue',?)""",
-            ("tg-exact", "telegram", "606", "conv-wrong-owner", now),
+            ("tg-exact", "telegram", "606", "conv_6666666666666666", now),
         )
 
         # Chat 707: identity + session OK shape but conversation is archived.
@@ -301,13 +307,13 @@ def test_session_conversation_owner_mismatch_and_archived_refused(settings, stor
         db.execute(
             """INSERT OR IGNORE INTO conversations(id,user_id,title,created_at,updated_at,is_archived)
                VALUES(?,?,?,?,?,1)""",
-            ("conv-archived", "tg-exact", "archived", now, now),
+            ("conv_7777777777777777", "tg-exact", "archived", now, now),
         )
         db.execute(
             """INSERT OR IGNORE INTO channel_sessions(
                    user_id,channel,channel_id,conversation_id,mode,updated_at
                ) VALUES(?,?,?,?,'dialogue',?)""",
-            ("tg-exact", "telegram", "707", "conv-archived", now),
+            ("tg-exact", "telegram", "707", "conv_7777777777777777", now),
         )
 
     _insert_tg_file(settings, storage, tenant=tenant, body=b"MISMATCH-SESS", chat_id=606)
@@ -360,8 +366,8 @@ def test_duplicate_identity_and_session_refused(settings, storage) -> None:
             """INSERT OR IGNORE INTO conversations(id,user_id,title,created_at,updated_at,is_archived)
                VALUES(?,?,?,?,?,0)""",
             [
-                ("conv-dup-a", "tg-dup-a", "a", now, now),
-                ("conv-dup-b", "tg-dup-b", "b", now, now),
+                ("conv_8888888888888888", "tg-dup-a", "a", now, now),
+                ("conv_9999999999999999", "tg-dup-b", "b", now, now),
             ],
         )
         db.executemany(
@@ -369,8 +375,8 @@ def test_duplicate_identity_and_session_refused(settings, storage) -> None:
                    user_id,channel,channel_id,conversation_id,mode,updated_at
                ) VALUES(?,?,?,?,'dialogue',?)""",
             [
-                ("tg-dup-a", "telegram", "808", "conv-dup-a", now),
-                ("tg-dup-b", "telegram", "808", "conv-dup-b", now),
+                ("tg-dup-a", "telegram", "808", "conv_8888888888888888", now),
+                ("tg-dup-b", "telegram", "808", "conv_9999999999999999", now),
             ],
         )
 
@@ -416,13 +422,13 @@ def test_plan_sha_changes_when_session_conversation_evidence_changes(settings, s
         db.execute(
             """INSERT OR IGNORE INTO conversations(id,user_id,title,created_at,updated_at,is_archived)
                VALUES(?,?,?,?,?,0)""",
-            ("conv-exact-2", "tg-exact", "exact-2", now, now),
+            ("conv_aaaaaaaaaaaaaaaa", "tg-exact", "exact-2", now, now),
         )
         db.execute(
             """UPDATE channel_sessions
                   SET conversation_id=?, updated_at=?
                 WHERE user_id=? AND channel='telegram' AND channel_id=?""",
-            ("conv-exact-2", now, "tg-exact", "101"),
+            ("conv_aaaaaaaaaaaaaaaa", now, "tg-exact", "101"),
         )
 
     conn = _connect(Path(settings.database_path), read_only=True)
@@ -437,12 +443,12 @@ def test_plan_sha_changes_when_session_conversation_evidence_changes(settings, s
         conn.close()
     assert plan_b.candidate_count == 1
     assert plan_b.plan_sha256 != sha_a
-    assert plan_b.candidates[0].conversation_id == "conv-exact-2"
+    assert plan_b.candidates[0].conversation_id == "conv_aaaaaaaaaaaaaaaa"
 
     public = plan_b.public_summary(mode="dry_run")
     public_text = json.dumps(public, ensure_ascii=True, sort_keys=True)
     assert "tg-exact" not in public_text
-    assert "conv-exact" not in public_text
+    assert _CONV_EXACT not in public_text
     assert "101" not in _json_scalar_tokens(public)
     # Opaque tags may contain the decimal sequence by chance; a real public
     # identifier key or value must still be inventoried as private.
@@ -519,7 +525,7 @@ def test_mismatched_ambiguous_unmapped_null_ignored_invalid_refused(settings, st
             """INSERT OR IGNORE INTO channel_sessions(
                    user_id,channel,channel_id,conversation_id,mode,updated_at
                ) VALUES(?,?,?,?,'dialogue',?)""",
-            ("tg-exact", "telegram", "505", "conv-orphan", now),
+            ("tg-exact", "telegram", "505", _CONV_ORPHAN, now),
         )
     _insert_tg_file(settings, storage, tenant=tenant, body=b"ORPHAN-SESSION", chat_id=505)
 
@@ -563,13 +569,13 @@ def test_legacy_external_fallback_when_identity_absent(settings, storage) -> Non
         db.execute(
             """INSERT OR IGNORE INTO conversations(id,user_id,title,created_at,updated_at,is_archived)
                VALUES(?,?,?,?,?,0)""",
-            ("conv-legacy", "tg-legacy", "legacy", now, now),
+            ("conv_bbbbbbbbbbbbbbbb", "tg-legacy", "legacy", now, now),
         )
         db.execute(
             """INSERT OR IGNORE INTO channel_sessions(
                    user_id,channel,channel_id,conversation_id,mode,updated_at
                ) VALUES(?,?,?,?,'dialogue',?)""",
-            ("tg-legacy", "telegram", "909", "conv-legacy", now),
+            ("tg-legacy", "telegram", "909", "conv_bbbbbbbbbbbbbbbb", now),
         )
         # Explicitly no user_identities row for 909.
 

@@ -84,8 +84,8 @@ def test_extended_lane_materialization_is_fair_shared_under_the_global_tail_budg
 
     lane_limit = _materialized_lane_limit(request)
 
-    assert lane_limit == 85
-    assert lane_limit * 3 <= 1 + ARCHIVE_AUTHORITY_MAX_CONTINUATION_TAIL
+    assert lane_limit == 64
+    assert lane_limit * 4 <= 1 + ARCHIVE_AUTHORITY_MAX_CONTINUATION_TAIL
 
     documents_only = ArchiveSearchRequest.create(
         query="bounded document materialization",
@@ -244,7 +244,8 @@ def test_mixed_document_and_message_tail_stays_reachable_under_one_global_budget
     assert len(pages) >= 2
     first_warnings = pages[0].authorized_batch.public_tool_result_payload["warnings"]
     assert isinstance(first_warnings, list)
-    assert "continuation_unavailable" not in first_warnings
+    assert "backfill_pending" in first_warnings
+    assert "continuation_unavailable" in first_warnings
     source_ids = {
         result.candidate.resolved_source.source_ref.canonical_object_id
         for page in pages

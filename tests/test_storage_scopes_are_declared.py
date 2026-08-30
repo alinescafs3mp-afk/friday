@@ -58,6 +58,7 @@ PERSON_SCOPED = {
     # Переписка человека личная даже при общем архиве: общими просьба владельца
     # делала документы и записи, а не чужие разговоры.
     "archive_conversation",
+    "backfill_conversation_passages",
     "clear_channel_conversation",
     "count_conversations",
     "count_messages",
@@ -213,7 +214,9 @@ APPROVAL_TENANT_WITH_A_SEPARATE_PERSON = {
 # 306 → 309: claim_mission_task, cancel_mission_and_tasks and
 # normalize_future_mission_task_start fence the existing shared-tenant mission
 # surface; the human proposer remains separately bound by created_by.
-EXPECTED_USER_ID_METHODS = 309
+# 309 → 310: backfill_conversation_passages advances one person's private
+# accepted conversation history; shared-tenant scope would mix private chats.
+EXPECTED_USER_ID_METHODS = 310
 
 
 def _methods_taking_user_id() -> set[str]:

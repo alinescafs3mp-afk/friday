@@ -648,6 +648,8 @@ def _message_database() -> Iterator[sqlite3.Connection]:
                    key TEXT PRIMARY KEY,
                    value TEXT NOT NULL
                );
+               CREATE INDEX idx_messages_conversation
+                   ON messages(user_id,conversation_id,created_at);
                CREATE VIRTUAL TABLE messages_fts USING fts5(
                    content, content=messages, content_rowid=rowid
                );

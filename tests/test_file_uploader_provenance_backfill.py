@@ -66,9 +66,9 @@ def _seed_database(settings: Any) -> tuple[Path, str, str]:
             """INSERT INTO conversations(id,user_id,created_at,updated_at)
                VALUES(?,?,?,?)""",
             [
-                ("conv-exact", "telegram-exact", now, now),
-                ("conv-ambiguous", "telegram-ambiguous", now, now),
-                ("conv-other", "telegram-other", now, now),
+                ("conv_1111111111111111", "telegram-exact", now, now),
+                ("conv_2222222222222222", "telegram-ambiguous", now, now),
+                ("conv_3333333333333333", "telegram-other", now, now),
             ],
         )
         db.executemany(
@@ -76,9 +76,9 @@ def _seed_database(settings: Any) -> tuple[Path, str, str]:
                    user_id,channel,channel_id,conversation_id,mode,updated_at
                ) VALUES(?,?,?,?,'dialogue',?)""",
             [
-                ("telegram-exact", "telegram", "101", "conv-exact", now),
-                ("telegram-ambiguous", "telegram", "202", "conv-ambiguous", now),
-                ("telegram-other", "telegram", "202", "conv-other", now),
+                ("telegram-exact", "telegram", "101", "conv_1111111111111111", now),
+                ("telegram-ambiguous", "telegram", "202", "conv_2222222222222222", now),
+                ("telegram-other", "telegram", "202", "conv_3333333333333333", now),
             ],
         )
         db.executemany(

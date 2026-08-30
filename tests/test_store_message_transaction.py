@@ -17,8 +17,8 @@ def test_create_conversation_delegates_once_and_preserves_the_stored_row(
 ) -> None:
     user_id = "alice"
     title = "Точный заголовок " + "я" * 220
-    created_at = "2026-08-18T09:10:11Z"
-    conversation_id = "conv_transaction_exact"
+    created_at = "2026-08-18T09:10:11+00:00"
+    conversation_id = "conv_0000000000000a01"
     original = create_conversation_in_transaction
     observed_connections: list[sqlite3.Connection] = []
     storage.ensure_user(user_id)
@@ -69,8 +69,8 @@ def test_store_message_delegates_once_and_preserves_the_stored_row(
     content = "Точная строка: 📦\n" + "x" * 210
     metadata = {"z": "Юникод", "a": {"n": 1}}
     parent = storage.store_message(conversation_id, user_id, "user", "parent")
-    created_at = "2026-08-18T10:20:30Z"
-    message_id = "msg_transaction_exact"
+    created_at = "2026-08-18T10:20:30+00:00"
+    message_id = "msg_0000000000000a02"
     original = store_message_in_transaction
     observed_connections: list[sqlite3.Connection] = []
 
@@ -147,8 +147,8 @@ def test_transaction_scoped_store_rolls_back_with_its_caller(
     before = storage.get_conversation(conversation_id, user_id)
     assert before is not None
 
-    monkeypatch.setattr(_conversations, "new_id", lambda prefix: "msg_rolled_back")
-    monkeypatch.setattr(_conversations, "utc_now", lambda: "2026-08-18T11:22:33Z")
+    monkeypatch.setattr(_conversations, "new_id", lambda prefix: "msg_0000000000000a03")
+    monkeypatch.setattr(_conversations, "utc_now", lambda: "2026-08-18T11:22:33+00:00")
 
     with pytest.raises(RuntimeError, match="abort caller transaction"), storage.transaction() as conn:
         stored = store_message_in_transaction(
@@ -159,7 +159,7 @@ def test_transaction_scoped_store_rolls_back_with_its_caller(
             "Это сообщение не должно пережить rollback",
             {"attempt": 1},
         )
-        assert stored["id"] == "msg_rolled_back"
+        assert stored["id"] == "msg_0000000000000a03"
         assert (
             conn.execute(
                 "SELECT COUNT(*) FROM messages WHERE conversation_id=? AND user_id=?",
@@ -186,15 +186,15 @@ def test_transaction_scoped_conversation_and_messages_roll_back_together(
     user_id = "alice"
     storage.ensure_user(user_id)
     generated = {
-        "conv": iter(["conv_atomic_rollback"]),
-        "msg": iter(["msg_user_rollback", "msg_assistant_rollback"]),
+        "conv": iter(["conv_0000000000000a04"]),
+        "msg": iter(["msg_0000000000000a05", "msg_0000000000000a06"]),
     }
 
     def deterministic_id(prefix: str) -> str:
         return next(generated[prefix])
 
     monkeypatch.setattr(_conversations, "new_id", deterministic_id)
-    monkeypatch.setattr(_conversations, "utc_now", lambda: "2026-08-18T12:34:56Z")
+    monkeypatch.setattr(_conversations, "utc_now", lambda: "2026-08-18T12:34:56+00:00")
 
     with pytest.raises(RuntimeError, match="abort atomic publication"), storage.transaction() as conn:
         conversation = create_conversation_in_transaction(conn, user_id, "Atomic publication")
@@ -210,8 +210,8 @@ def test_transaction_scoped_conversation_and_messages_roll_back_together(
         )
         raise RuntimeError("abort atomic publication")
 
-    assert storage.get_conversation("conv_atomic_rollback", user_id) is None
-    assert storage.count_messages("conv_atomic_rollback", user_id=user_id) == 0
+    assert storage.get_conversation("conv_0000000000000a04", user_id) is None
+    assert storage.count_messages("conv_0000000000000a04", user_id=user_id) == 0
 
 
 def test_transaction_scoped_store_keeps_the_conversation_owner_boundary(storage: Any) -> None:

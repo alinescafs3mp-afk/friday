@@ -8,8 +8,6 @@ from typing import Any
 import pytest
 
 from friday.conversation_passages.contract import (
-    CONVERSATION_PASSAGE_EMPTY_SET_SHA256,
-    CONVERSATION_PASSAGE_INDEX_REVISION,
     ConversationPassageProjectionRead,
 )
 from friday.conversation_passages.schema import (
@@ -17,7 +15,6 @@ from friday.conversation_passages.schema import (
     conversation_passage_content_sha256,
     conversation_passage_message_revision_sha256,
     conversation_passage_prefix_sha256,
-    conversation_passage_set_extend_sha256,
 )
 from friday.storage._conversation_passages import (
     ConversationPassageStorageError,
@@ -101,7 +98,6 @@ def _publish_conversation(storage: Any, conversation_id: str) -> tuple[str, ...]
             conn.execute("SELECT COALESCE(MAX(passage_rowid),0)+1 FROM conversation_passages").fetchone()[0]
         )
         prefix: str | None = None
-        passage_set = CONVERSATION_PASSAGE_EMPTY_SET_SHA256
         message_ids: list[str] = []
         for ordinal, source in enumerate(rows):
             message_id = str(source["id"])
@@ -122,18 +118,6 @@ def _publish_conversation(storage: Any, conversation_id: str) -> tuple[str, ...]
                 anchor_ordinal=ordinal,
             )
             prefix = conversation_passage_prefix_sha256(prefix, ordinal, revision)
-            passage_row = (
-                ordinal,
-                message_id,
-                revision,
-                content_digest,
-                locator,
-                prefix,
-            )
-            passage_set = conversation_passage_set_extend_sha256(
-                passage_set,
-                passage_row,
-            )
             conn.execute(
                 """INSERT INTO conversation_passages(
                        passage_rowid,conversation_id,anchor_message_id,
@@ -150,30 +134,6 @@ def _publish_conversation(storage: Any, conversation_id: str) -> tuple[str, ...]
                     content_digest,
                     locator,
                     prefix,
-                ),
-            )
-            final = ordinal + 1 == len(rows)
-            conn.execute(
-                """UPDATE conversation_passage_projections
-                      SET indexed_message_count=?,
-                          indexed_through_message_id=?,
-                          indexed_conversation_revision_sha256=?,
-                          passage_set_sha256=?,
-                          projection_status=?,
-                          incomplete_reason=?,
-                          passage_count=?,
-                          projected_at=?
-                    WHERE conversation_id=?""",
-                (
-                    ordinal + 1,
-                    message_id,
-                    prefix,
-                    passage_set,
-                    "current" if final else "incomplete",
-                    None if final else "source_changed",
-                    ordinal + 1,
-                    _PROJECTED_AT,
-                    conversation_id,
                 ),
             )
             message_ids.append(message_id)
@@ -766,7 +726,19 @@ def test_future_anchor_state_cannot_gate_an_accepted_prefix(
                 content="corrupt future body",
             )
         elif future_change == "absent":
-            conn.execute("DELETE FROM conversation_passages WHERE anchor_message_id=?", (future_id,))
+            trigger = conn.execute(
+                """SELECT sql FROM sqlite_master
+                    WHERE type='trigger' AND name='conversation_passage_bd_validate'"""
+            ).fetchone()
+            assert trigger is not None and isinstance(trigger["sql"], str)
+            conn.execute("DROP TRIGGER conversation_passage_bd_validate")
+            try:
+                conn.execute(
+                    "DELETE FROM conversation_passages WHERE anchor_message_id=?",
+                    (future_id,),
+                )
+            finally:
+                conn.execute(trigger["sql"])  # nosec B608 - exact SQLite-owned canonical DDL
         else:
             trigger = conn.execute(
                 """SELECT sql FROM sqlite_master
@@ -887,17 +859,17 @@ def test_backdated_future_full_rebuild_preserves_the_exact_accepted_proof(
             created_at="2026-08-29T12:00:00+00:00",
         )
         conn.execute(
-            "DELETE FROM conversation_passage_projections WHERE conversation_id=?",
-            (target,),
-        )
-        conn.execute(
-            """INSERT INTO conversation_passage_projections(
-                   conversation_id,indexed_message_count,indexed_through_message_id,
-                   indexed_conversation_revision_sha256,passage_set_sha256,
-                   passage_index_revision,projection_status,incomplete_reason,
-                   passage_count,projected_at
-               ) VALUES(?,0,NULL,NULL,NULL,?,'incomplete','source_changed',0,?)""",
-            (target, CONVERSATION_PASSAGE_INDEX_REVISION, _PROJECTED_AT),
+            """UPDATE conversation_passage_projections
+                  SET indexed_message_count=0,
+                      indexed_through_message_id=NULL,
+                      indexed_conversation_revision_sha256=NULL,
+                      passage_set_sha256=NULL,
+                      projection_status='incomplete',
+                      incomplete_reason='source_changed',
+                      passage_count=0,
+                      projected_at=?
+                WHERE conversation_id=?""",
+            (_PROJECTED_AT, target),
         )
     _publish_conversation(storage, target)
 
@@ -1095,12 +1067,19 @@ def test_full_boundary_rejects_an_extra_foreign_sidecar_child(storage: Any) -> N
     _publish_conversation(storage, target)
 
     with storage.transaction() as conn:
-        trigger = conn.execute(
-            """SELECT sql FROM sqlite_master
-                WHERE type='trigger' AND name='conversation_passage_bi_validate'"""
-        ).fetchone()
-        assert trigger is not None and isinstance(trigger["sql"], str)
-        conn.execute("DROP TRIGGER conversation_passage_bi_validate")
+        triggers = conn.execute(
+            """SELECT name,sql FROM sqlite_master
+                WHERE type='trigger'
+                  AND name IN (
+                      'conversation_passage_bi_validate',
+                      'conversation_passage_ai_parent_cas'
+                  )
+                ORDER BY name ASC"""
+        ).fetchall()
+        assert len(triggers) == 2
+        assert all(isinstance(trigger["sql"], str) for trigger in triggers)
+        for trigger in triggers:
+            conn.execute(f"DROP TRIGGER {trigger['name']}")  # nosec B608 - fixed names above
         try:
             next_rowid = int(
                 conn.execute("SELECT COALESCE(MAX(passage_rowid),0)+1 FROM conversation_passages").fetchone()[
@@ -1124,7 +1103,8 @@ def test_full_boundary_rejects_an_extra_foreign_sidecar_child(storage: Any) -> N
                 ),
             )
         finally:
-            conn.execute(trigger["sql"])  # nosec B608 - exact SQLite-owned canonical DDL
+            for trigger in triggers:
+                conn.execute(trigger["sql"])  # nosec B608 - exact SQLite-owned canonical DDL
 
         with pytest.raises(ConversationPassageStorageError):
             _read(

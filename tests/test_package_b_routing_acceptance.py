@@ -1529,7 +1529,7 @@ async def test_a_dense_single_source_timeline_includes_the_true_last_event_and_t
     start = datetime(2026, 8, 7, 12, 0, tzinfo=UTC)
     rows = [
         (
-            f"msg-dense-{index:04d}",
+            f"msg_{index + 1:016x}",
             conversation["id"],
             user_id,
             "user",

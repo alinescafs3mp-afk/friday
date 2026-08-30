@@ -791,12 +791,19 @@ def test_noncanonical_identity_surfaces_fail_closed(settings, storage, tamper: s
             sort_keys=True,
         )
         with storage.transaction() as conn:
+            trigger = conn.execute(
+                """SELECT sql FROM sqlite_master WHERE type='trigger'
+                     AND name='conversation_passage_message_bi_identity_immutable'"""
+            ).fetchone()
+            assert trigger is not None and isinstance(trigger[0], str)
+            conn.execute("DROP TRIGGER conversation_passage_message_bi_identity_immutable")
             conn.execute(
                 """INSERT INTO messages(
                        id,conversation_id,user_id,role,content,metadata_json,created_at
                    ) VALUES('message_not_canonical',?,'alice','user',?,?,?)""",
                 (conversation["id"], "Загружен документ: 666.odt", metadata, timestamp),
             )
+            conn.execute(str(trigger[0]))  # nosec B608 - exact authenticated SQLite DDL
             for source_ref in (
                 "telegram-file:FILE-1962",
                 "telegram-message:42:2962",
