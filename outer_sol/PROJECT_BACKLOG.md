@@ -1,6 +1,6 @@
 # Friday: canonical project backlog
 
-Updated: 2026-08-29
+Updated: 2026-08-30
 
 This is the project's only backlog and mutable status register. It owns the
 current production identity, execution order, acceptance gaps and owner actions.
@@ -24,7 +24,8 @@ either merged here or discarded before that source is removed.
   Distinct schema-capable fallback: Friday `0.207.79rc0` /
   `c49709352c811240fc3072079b2407a07161cc82`; tree
   `c019830b2a04fc2c118f12fe2821701e800b9d30a96a9db49ef2a32304e32d73`.
-- Database schema: 49.
+- Database schema: 50 in the current release candidate; deployed production
+  remains schema 49 until the R4b activation receipt is clear.
 - Production: immutable activation `clear`; backend and Telegram bridge active;
   trusted-CA health `200`; signed private-owner chat returned exact `OK`; V12
   `canary_ready` with verified, installation and effective context all exactly
@@ -85,6 +86,9 @@ acceptance remains owner/device-bound.
 - Never overlap our full native/UI gate with SolGoodman's full gate. Check the
   active gate processes first; while his gate owns the machine, continue useful
   implementation, review or focused tests and wait for the full-gate slot.
+- Run every full gate from a short private `mktemp` directory under disk-backed
+  `/var/tmp`, never quota-limited `/tmp`; remove that exact directory as soon as
+  its evidence is captured. Keep the path short enough for Unix sockets.
 
 ## Priority order
 
