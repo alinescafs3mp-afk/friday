@@ -179,6 +179,7 @@ python -m friday.retrieval_benchmark validate observations OBSERVATIONS.jsonl
 python -m friday.retrieval_benchmark validate report REPORT.json
 python -m friday.retrieval_benchmark run-ephemeral
 python -m friday.retrieval_benchmark run-ephemeral --cases-out CASES.jsonl --observations-out OBS.jsonl
+python -m friday.retrieval_benchmark run-conversation-ephemeral
 python -m friday.retrieval_benchmark score CASES.jsonl OBSERVATIONS.jsonl
 python -m friday.retrieval_benchmark compare BASELINE.json CANDIDATE.json
 ```
@@ -186,7 +187,8 @@ python -m friday.retrieval_benchmark compare BASELINE.json CANDIDATE.json
 Successful output is one canonical JSON record. `validate` checks canonical
 shape and integrity, not remote provenance. Exit 2 means a closed input or
 output contract was rejected, exit 3 means the genuine ephemeral archive path
-failed, and exit 4 means `compare` detected a metric regression. Sidecars use
+failed, and exit 4 means `compare` detected a metric regression or the
+conversation matrix retained a measured gap. Sidecars use
 exclusive creation and never overwrite an owner file. At most two sidecars may
 be requested by one invocation, each at most 16 MiB and together at most
 32 MiB.
@@ -233,6 +235,67 @@ remains `6/6`. The two pending cases are not promoted to factual authority, the
 three unsupported upload-time cases remain unavailable rather than aliased to
 receipt time, and incomplete no-hit coverage remains uncertain.
 
+## R5 conversation journey matrix
+
+R5 is a separate 24-case manifest and does not modify the frozen 21-case R0/R1
+corpus or its taxonomy. It reuses `RecallCaseV1`, `RecallObservationV1`, the
+existing scorer, and the existing body-free `RecallReportV1`. The matrix has
+four positive cases in each of six closed cells:
+
+1. archive search controls;
+2. lexical/`MESSAGE_HISTORY` fallback;
+3. exact adjacent-message windows;
+4. cross-lane and continuation diversity;
+5. clean-restart selected-evidence replay;
+6. owner, accepted-boundary, role, and lifecycle privacy.
+
+The corpus is seeded in explicit phases. Foreign lexical postings are
+converged first, then the owner writer commits one anchor, storage is closed and
+reopened, and the returned private cursor advances a different projection while
+an intentionally reset earlier prefix remains untouched; that proves the
+opaque cursor was honored before the owner projection converges. Only afterward
+are backfill-pending rows, an appended tail, an actual `created_at` source
+reset, the accepted boundary, and an excluded post-boundary row inserted. No
+writer runs after those late phases. This measures the shipped fallback semantics without
+fabricating a second index or treating the partial lexical derivative as
+absence authority.
+
+Each case uses the same preparation, model-byte admission, continuation,
+reauthorization, publication attestation, and body-free observation path as the
+main ephemeral benchmark. Four selected conversation sources are then reduced
+to canonical `ArchiveSearchSelectedEvidence`, serialized privately, reparsed
+after a second clean storage reopen, and replayed through
+`replay_archive_evidence_in_transaction`. Only exact status and a digest of the
+model-visible replay bytes remain in the measurement facts.
+The one long pre-R5 replay expectation is bound to frozen snapshot and
+model-byte digests captured from the released head/tail renderer; the benchmark
+does not derive its compatibility oracle from the renderer under test.
+
+Privacy measurements reject more than foreign ownership: fixed forbidden
+message/source identities make accepted-boundary, same-principal role, and
+lifecycle decoys observable as closed gaps even when the expected positive qrel
+is also present.
+
+The reproduced retrieval defect was a long adjacent window whose head/tail
+excerpt truncation removed the short matched row in the middle. The bounded
+renderer now retains a complete matched row whenever that row itself fits the
+1,900-character limit, while allocating remaining space to the nearest context
+on both sides. Replay uses the same renderer for new selections and retries the
+released V1 head/tail rendering only when its durable snapshot digest matches,
+so pre-R5 long-window selections do not become false drift after upgrade.
+
+`run-conversation-ephemeral` emits only the existing canonical body-free report.
+It returns exit 4 when any closed adjunct measurement reports a retrieval,
+window, authority, channel, or replay gap; no private diagnostic or sidecar is
+written by that command.
+
+The fixed corpus measures candidate recall@50 at `23/24` (`958333` ppm) and
+candidate recall@100 at `24/24` (`1000000` ppm), with false absence `0/24`.
+The sole rank beyond 50 is the deliberate 25-source continuation contour; its
+exact qrel is recovered at citation rank 64 through the real continuation and
+is not classified as a lost source. All 24 exact source/window qrels are hits,
+all four restart replays are exact, and the closed adjunct gap count is zero.
+
 ## Known limits
 
 - The shipped accepted candidate projection deliberately excludes pending or
@@ -249,3 +312,11 @@ receipt time, and incomplete no-hit coverage remains uncertain.
 - Canonical digests detect mutation and bind exact inputs; they are not a
   remote signature. Shipped-evidence provenance is intentionally process-local,
   because V1 adds no key service, durable store, or schema.
+- Conversation lexical selection still uses a fixed global candidate pool
+  before owner filtering. Foreign-first saturation can therefore remove the
+  owner's lexical channel. R5 records that lane as partial and requires the
+  independently authorized complete `MESSAGE_HISTORY` lane to preserve owner
+  recall; it does not promote lexical zero to durable absence.
+- The conversation matrix drives the shipped archive preparation/publication
+  facade directly. It does not claim coverage of the outer model tool-parser or
+  capability router, and it performs no production activation.
