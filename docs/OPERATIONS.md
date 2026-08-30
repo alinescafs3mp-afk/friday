@@ -641,9 +641,14 @@ Python строит sealed wheel-only siblings; все последующие к
   <CANDIDATE>/artifacts/immutable_release_operator.py recover-historical-album ...
 ```
 
-`<STATE_DIR>` во всех командах — один и тот же exact canonical
-`<FRIDAY_HOME>/data/state`. `build` связывает его digest с sealed release;
-другой, относительный или лексически неоднозначный state path отклоняется.
+Все пути release-controller образуют один portable layout от exact absolute
+`<FRIDAY_HOME>`: `data/state`, `wheel-only-releases`, `current-release` и
+`.env.local`. `build` проверяет весь layout до lock/staging и связывает state
+digest с sealed release; совместная подмена home+state не создаёт второй lock
+для прежнего release root. `install-units` выводит home из `data/state`, а
+runtime повторно связывает layout и sealed candidate units. Внешний `unit-dir`
+дополнительно сериализован общим semantic lock для exact backend/bridge unit
+pair, поэтому разные home или unit-dir не управляют этими units одновременно.
 
 Runner берётся только из чистого checkout exact candidate commit; переданный
 digest должен совпасть с его стабильными bytes. В release копия хранится mode

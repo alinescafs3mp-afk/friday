@@ -704,9 +704,13 @@ Wheel, построенный из чисто распакованного ZIP, 
   <CANDIDATE>/artifacts/immutable_release_operator.py recover-historical-album ...
 ```
 
-`<STATE_DIR>` во всех командах означает один exact canonical
-`<FRIDAY_HOME>/data/state`. Его digest запечатан build metadata и обязан
-совпадать при install/activate/recovery; альтернативный путь fail-closed.
+Все release-команды используют один portable exact layout от absolute
+`<FRIDAY_HOME>`: `data/state`, `wheel-only-releases`, `current-release` и
+`.env.local`. Build отклоняет любую разорванную комбинацию до lock/staging;
+install/runtime сверяют canonical candidate root и sealed unit paths. State
+digest остаётся в build metadata. Отдельный semantic lock exact
+backend/bridge unit pair сериализует install/activate/recovery даже между
+разными home и внешними `unit-dir`.
 
 Runner и digest берутся из чистого checkout exact candidate commit. Sealed
 release-копия mode `0400` является trust anchor, а product-stage запускается из
