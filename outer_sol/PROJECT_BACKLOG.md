@@ -14,17 +14,14 @@ either merged here or discarded before that source is removed.
 ## Current production identity
 
 - Branch: `main`
-- Deployed implementation head: `446dda2dab8069bfa05f95b6c29dc305b3c3565f`.
-- Live: Friday `0.207.80` / `446dda2dab8069bfa05f95b6c29dc305b3c3565f`;
-  tree `a3ba9edb4b5b7823a3ad62941e7d557a498b348894cf07be34687a2aa5a0ebe5`;
-  wheel `ef1c59606bca26129824b99b16f3edf561dee1d7831e76725c6bfac93652d187`.
-- Immediate runtime predecessor: Friday `0.207.79` /
-  `117c56a37d798552d70fb25671aa9a4b407f3f87`; tree
-  `85f14b507396b6b6d2841da901e8a9e7f0adce11299a2339dc0a62e19d17a610`.
-  Distinct schema-capable fallback: Friday `0.207.80rc0` /
-  `61f286dfaa15445b8a68b47807c106368636afb7`; tree
-  `9ae67f5aab0b8f3b78107d41f3fa084bb368ec65a37a29825cdc5c6a6dc9d265`.
-- Database schema: 50 in deployed production and the distinct fallback.
+- Deployed implementation head: `25176dd284c2d882b607066a2c9ad24eedfb7ef3`.
+- Live: Friday `0.207.81` / `25176dd284c2d882b607066a2c9ad24eedfb7ef3`;
+  tree `8989721194fa2da9abf29f56560146dd9cc9ecf3ec6b669ed4e334049cdbb93f`;
+  wheel `6f418637f94846bb7e29588b3c18fe53ddac531474269a03319798d51fbfa0de`.
+- Immediate runtime predecessor and schema-capable fallback: Friday `0.207.80` /
+  `446dda2dab8069bfa05f95b6c29dc305b3c3565f`; tree
+  `a3ba9edb4b5b7823a3ad62941e7d557a498b348894cf07be34687a2aa5a0ebe5`.
+- Database schema: 50 in deployed production and the fallback.
 - Production: immutable activation `clear`; backend and Telegram bridge active;
   trusted-CA health `200`; signed private-owner chat returned exact `OK`; V12
   `canary_ready` with verified, installation and effective context all exactly
@@ -51,14 +48,16 @@ either merged here or discarded before that source is removed.
 ## Active package
 
 S4-R4b schema-50 incremental guards, bounded conversation writer/backfill and
-lexical activation are live. S4-R5 conversation-recall measurement and
-corpus-backed gap closure is active. Keep the released S3 path in shadow
+lexical activation are live. The clean S4-R5 conversation-recall package is
+queued for Mainline review; S6-R3 exact journey evidence is active in its own
+worktree. Keep the released S3 path in shadow
 until its genuine production witness exists; then promote only the
 current-file-plus-current-public-web journey through the already released
 fail-closed activation gate. S5 measured cognition and exact 40k lease adoption
-are live. S6 mission, reminder and Telegram recovery is live; the isolated
-Telegram browse-to-full-document closure is active, while physical Android
-acceptance remains owner/device-bound.
+are live. S6 mission, reminder and Telegram recovery plus Telegram
+browse-to-full-document closure are live; physical Android acceptance remains
+owner/device-bound. The reviewed secondary-assist demand-refresh correction is
+next for isolated integration.
 
 ## Operating rules
 
@@ -283,7 +282,7 @@ converging in production. R2c v3 passage topology and authenticated stored
 locators are deployed in `0.207.76`. R3 measured search-facade parity is
 deployed in `0.207.78`; R4a reader-first conversation passages are deployed in
 `0.207.79`; R4b schema-50 writer/lexical activation is deployed in `0.207.80`,
-and R5 conversation-recall measurement is active.
+and the clean R5 conversation-recall package is queued for Mainline review.
 
 1. Add reader-first `document_passages` with a schema-capable fallback, bounded
    writer, restart-safe resumable backfill and honest `index_incomplete`.
@@ -423,8 +422,9 @@ signed private-owner smoke returned exact `OK`.
 ### S6 — journey proof and recovery, not new organs
 
 Status: current mission/reminder and Telegram ingress/delivery recovery audit
-deployed in `0.207.75`; the R2 Telegram browse-to-full-document closure is
-active, and physical Android acceptance remains owner-bound.
+deployed in `0.207.75`; R2 Telegram browse-to-full-document closure is deployed
+in `0.207.81`; R3 exact journey evidence is active, and physical Android
+acceptance remains owner-bound.
 
 - Keep core Telegram, web, file/Office, Obsidian, Engineer and reminder paths
   release-blocking with named deterministic tests and exact-release evidence.
@@ -457,6 +457,19 @@ ended `clear`. A copy-only rehearsal rehashed the complete recovery set and
 reopened its main/inbox stores twice under both candidate and fallback with
 schema 47 and clean integrity/FK checks. Trusted-CA health reported
 `0.207.75`/`ok`, and the signed private-owner chat returned exact `OK`.
+
+R2 acceptance: every eligible browse, tag, entity, namesake and profile-document
+result now reaches the existing tenant-gated full-document callback, and every
+derived callback remains within Telegram's 64-byte limit; malformed or
+overlong identities are omitted honestly. The focused suite passed 154 tests,
+and the exact native gate passed 24,137 Python plus 31 UI tests with zero skips;
+static checks were clear and the wheel build was deterministic. Same-schema
+production-copy acceptance passed 35/35 logical/schema checks, rollback passed
+12/12, and all private disk-backed temporary trees were removed. Immutable
+activation retained schema 50 and exact `0.207.80` as predecessor/fallback,
+ended `clear`, and produced verified SQLite/inbox/Obsidian/Engineer recovery
+receipts. Trusted-CA health reports `0.207.81`/`ok`; signed private-owner chat
+returned exact `OK`.
 
 ### Removed from the active queue
 
@@ -496,12 +509,12 @@ schema 47 and clean integrity/FK checks. Trusted-CA health reported
 2. Keep released `EngineerWorkItem v1` stable; do not expand its scope.
 3. Keep the released bounded S3 advisor in shadow until a genuine eligible turn
    creates its exact production witness; do not fabricate activation evidence.
-4. Keep released S4-R4b stable; measure the real conversation-recall journey in
-   R5 and close only reproduced corpus-backed gaps without changing authority.
+4. Review and release the clean S4-R5 conversation-recall package; close only
+   reproduced corpus-backed gaps without changing authority.
 5. Keep the released S5 measured-lease contract green; extend cognition only
    through another measured, reversible journey release.
-6. Close the reproduced Telegram browse-to-full-document dead end through the
-   existing authorized callback path.
+6. Build S6-R3 exact release-bound evidence for the remaining non-device
+   journeys without duplicating generic release proof.
 7. Preserve the released exact-evidence verifier and reject mutable or
    self-declared proof while real joined Supervisor observations accumulate.
 
