@@ -1,3 +1,22 @@
+## 0.207.80 — 2026-08-30
+
+### Bounded conversation passage activation
+
+- Advances the conversation sidecar to schema 50 with incremental next-source
+  and one-anchor CAS guards, a fixed owner-keyset scan and restart-safe worker
+  cursors. Message bodies remain authoritative and are never copied into the
+  durable passage projection.
+- Activates a bounded partial conversation-lexical lane behind `archive_search`.
+  Every selected body and accepted-turn boundary is reauthorized before
+  publication; complete `MESSAGE_HISTORY` remains the sole absence authority
+  and fail-soft fallback.
+- Makes malformed UTF-8, missing/corrupt projections and oversized sources
+  fail closed without unbounded writer work or starving healthy siblings.
+  Backfill resumes without blind replay and explicit incomplete coverage stays
+  honest across restart, cancellation and FTS recovery.
+- Uses never-activated `0.207.80rc0/schema50` as the schema-capable fallback;
+  exact `0.207.79/schema49` remains the pre-migration predecessor.
+
 ## 0.207.79 — 2026-08-29
 
 ### Reader-first conversation passages

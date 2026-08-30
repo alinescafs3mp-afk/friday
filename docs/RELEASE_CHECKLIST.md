@@ -181,7 +181,7 @@ failed/error/skipped-тест в любой фазе делает гейт кр�
 Для optional GPT-OSS secondary brain начиная с 0.207.11 дополнительно:
 
 - release принимается и первый раз запускается без `FRIDAY_SECONDARY_LLM_*`:
-  health имеет `status=ok`, `version=0.207.79`, `secondary.mode=disabled`,
+  health имеет `status=ok`, `version=0.207.80`, `secondary.mode=disabled`,
   `secondary.state=disabled` и `secondary.available=false`;
 - `ACCEPTED_SECONDARY_RUNTIME_PROFILES` содержит ровно finalist
   `gptoss20b-2335df123cac7fc0e13e347cde1e1ffa8562daafcaf0fc76ade1a851d2b0ff1f`
@@ -470,7 +470,7 @@ failed/error/skipped-тест в любой фазе делает гейт кр�
 - post-context load допускает bounded convergence не более 20 секунд с шагом
   50 мс только для valid same-epoch busy; invalid/epoch/deadline fail-closed, а
   initial idle и post-cancellation quiet остаются строгими;
-- final startup health имеет `status=ok`, `version=0.207.79`, configured/installed
+- final startup health имеет `status=ok`, `version=0.207.80`, configured/installed
   `canary`, routes `[archive_read, file_read]`, точный `profile_id`,
   `verified_context_tokens=40960` и непустой public `attestation_sha256`;
 - q38 выбирает только минимально достаточный closed tier из
@@ -508,7 +508,7 @@ failed/error/skipped-тест в любой фазе делает гейт кр�
 
 Проверить:
 
-- schema version = 49;
+- schema version = 50;
 - первый cutover 46→47 требует проверенный pre-migration recovery set и две
   distinct sealed schema-47 identities: stable `0.207.73` активируется с
   `0.207.72/schema46` как previous и неактивированным `0.207.73rc0/schema47`
@@ -525,6 +525,13 @@ failed/error/skipped-тест в любой фазе делает гейт кр�
 - cutover 48→49 требует exact `0.207.78/schema48` как previous и отдельный,
   никогда не активированный `0.207.79rc0/schema49` как fallback; stable
   `0.207.79/schema49` отличается от rc0 только version identity;
+- cutover 49→50 требует exact `0.207.79/schema49` как previous и отдельный,
+  никогда не активированный `0.207.80rc0/schema50` как fallback; stable
+  `0.207.80/schema50` отличается от rc0 только version identity;
+- schema 49 → 50 сохраняет body-free table/FTS layout, добавляет
+  incremental one-anchor CAS guards и bounded owner/source indexes; stable
+  runtime активирует bounded restart-safe writer и partial conversation-lexical
+  lane, сохраняя `MESSAGE_HISTORY` единственной authority отсутствия;
 - schema 48 → 49 создаёт ровно одну body-free projection на существующий
   conversation, помечает её `backfill_pending`, не создаёт child/FTS rows и не
   активирует writer или productive search lane;
