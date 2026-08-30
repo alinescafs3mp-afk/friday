@@ -1,3 +1,16 @@
+## 0.207.84 — 2026-08-30
+
+### Release-bound journey evidence
+
+- Runs four closed product journeys through the exact sealed release
+  interpreter while confining all first-party imports to the installed wheel.
+- Publishes body-free, release-bound receipt/manifest pairs through one
+  private descriptor-pinned output root with durable receipt-before-manifest
+  ordering and restart-safe create-only recovery.
+- Rejects mutable checkout/tooling/bytecode authority and independently binds
+  commit, tree, wheel, schema and exact executable node IDs. SQLite remains
+  schema 50; exact `0.207.83/schema50` is predecessor and immutable fallback.
+
 ## 0.207.83 — 2026-08-30
 
 ### Bounded conversation recall
