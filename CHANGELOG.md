@@ -1,3 +1,16 @@
+## 0.207.82 — 2026-08-30
+
+### Demand-aware secondary assist admission
+
+- Refreshes the optional secondary capability only after a request passes all
+  code-owned static assist gates, so an eligible document/comparison turn can
+  use a laptop that became available after the initial runtime snapshot.
+- Revalidates endpoint, profile, authority and digest after the bounded refresh;
+  timeout, drift or absence preserves the unchanged primary-only path.
+- Guarantees zero secondary traffic for statically ineligible work and retains
+  the primary as sole tool, effect and final-publication owner. SQLite remains
+  schema 50; exact `0.207.81/schema50` is predecessor and immutable fallback.
+
 ## 0.207.81 — 2026-08-30
 
 ### Telegram browse-to-document closure
