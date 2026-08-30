@@ -124,7 +124,7 @@ def _receipt(
                 "artifact_import": {
                     "origin_report_sha256": "1" * 64,
                     "site_packages_ref": "venv/lib/python3.14/site-packages",
-                    "subprocess_policy": "deny",
+                    "subprocess_policy": evidence._SUBPROCESS_POLICY,  # noqa: SLF001
                 },
                 "collection_sha256": "d" * 64,
                 "exit_code": 0 if result == "VERIFIED" else 1,
@@ -213,7 +213,7 @@ def test_clean_receipt_schema_origin_and_runtime_authority_fail_closed(
         evidence._outcome_projection_sha256(refs, ("PASSED",)),  # noqa: SLF001
         artifact_origin_sha256="1" * 64,
         site_packages_ref=runtime.site_packages_ref,
-        subprocess_policy="deny",
+        subprocess_policy=evidence._SUBPROCESS_POLICY,  # noqa: SLF001
     )
     monkeypatch.setattr(evidence, "proof_refs", lambda *_args: refs)
     monkeypatch.setattr(
@@ -430,7 +430,7 @@ def test_installed_bootstrap_imports_first_party_only_from_the_sealed_site(
     assert payload["site_packages_ref"] == "venv/lib/python3.14/site-packages"
     assert payload["source_commit"] == "a" * 40
     assert payload["wheel_sha256"] == "c" * 64
-    assert payload["subprocess_policy"] == "deny"
+    assert payload["subprocess_policy"] == evidence._SUBPROCESS_POLICY  # noqa: SLF001
     assert payload["module_count"] >= 2
 
 
@@ -470,6 +470,47 @@ def test_installed_bootstrap_treats_caught_source_import_as_infrastructure_failu
     assert completed.returncode != 0
     assert not report.exists()
     assert b"first_party_origin_escaped_release" in completed.stderr
+
+
+def test_installed_bootstrap_denies_python_alias_reads_from_checkout_product(
+    tmp_path: Path,
+) -> None:
+    source, release, site, probe = _write_bootstrap_fixture(
+        tmp_path,
+        "import runpy\nfrom pathlib import Path\n\ndef test_alias_read_is_caught():\n"
+        "    try:\n        runpy.run_path(Path(__file__).parent / 'friday' / 'escaped.py')\n"
+        "    except RuntimeError:\n        pass\n",
+    )
+    (source / "friday/escaped.py").write_text("SOURCE_BODY = 'private'\n", encoding="ascii")
+    report = tmp_path / "origin.json"
+
+    completed = _run_installed_bootstrap(source, release, site, probe, report)
+
+    assert completed.returncode != 0
+    assert not report.exists()
+    assert b"source_first_party_read_unattested" in completed.stderr
+
+
+def test_installed_bootstrap_denies_dir_fd_alias_reads_from_checkout_product(
+    tmp_path: Path,
+) -> None:
+    source, release, site, probe = _write_bootstrap_fixture(
+        tmp_path,
+        "import os\nfrom pathlib import Path\n\ndef test_dir_fd_read_is_caught():\n"
+        "    root_fd = os.open(Path(__file__).parent, os.O_RDONLY | os.O_DIRECTORY)\n"
+        "    try:\n"
+        "        try:\n            os.open('friday/escaped.py', os.O_RDONLY, dir_fd=root_fd)\n"
+        "        except RuntimeError:\n            pass\n"
+        "    finally:\n        os.close(root_fd)\n",
+    )
+    (source / "friday/escaped.py").write_text("SOURCE_BODY = 'private'\n", encoding="ascii")
+    report = tmp_path / "origin.json"
+
+    completed = _run_installed_bootstrap(source, release, site, probe, report)
+
+    assert completed.returncode != 0
+    assert not report.exists()
+    assert b"source_first_party_read_unattested" in completed.stderr
 
 
 def test_closed_clean_runner_binds_the_installed_bootstrap_and_origin_report(
@@ -513,7 +554,7 @@ def test_closed_clean_runner_binds_the_installed_bootstrap_and_origin_report(
                 "schema": "friday.clean-artifact-import-origin.v1",
                 "site_packages_ref": runtime.site_packages_ref,
                 "source_commit": identity.source_commit,
-                "subprocess_policy": "deny",
+                "subprocess_policy": evidence._SUBPROCESS_POLICY,  # noqa: SLF001
                 "wheel_sha256": identity.wheel_sha256,
             }
         )
@@ -556,7 +597,7 @@ def test_closed_clean_runner_binds_the_installed_bootstrap_and_origin_report(
     )
     assert witness.artifact_origin_sha256 == hashlib.sha256(origin_raw[0]).hexdigest()
     assert witness.site_packages_ref == runtime.site_packages_ref
-    assert witness.subprocess_policy == "deny"
+    assert witness.subprocess_policy == evidence._SUBPROCESS_POLICY  # noqa: SLF001
 
 
 @pytest.mark.parametrize(
@@ -735,10 +776,41 @@ def test_bundle_publish_is_create_only_and_rolls_back_only_its_first_file(tmp_pa
     assert stat.S_IMODE(manifest_path.stat().st_mode) == 0o600
     assert published["receipt_sha256"] == bundle.receipt_sha256
     assert published["manifest_sha256"] == bundle.manifest_sha256
-    with pytest.raises(evidence.ExactReleaseEvidenceError, match="^bundle_output_invalid$"):
-        evidence.write_evidence_bundle_exclusive(complete, bundle)
+    assert evidence.write_evidence_bundle_exclusive(complete, bundle) == published
     assert receipt_path.read_bytes() == bundle.receipt
     assert manifest_path.read_bytes() == bundle.manifest
+
+    recovered = tmp_path / "recovered"
+    recovered_receipt = recovered / bundle.receipt_ref
+    recovered_receipt.parent.mkdir(parents=True)
+    recovered_receipt.write_bytes(bundle.receipt)
+    recovered_receipt.chmod(0o600)
+    recovered_publish = evidence.write_evidence_bundle_exclusive(recovered, bundle)
+    assert recovered_publish == published
+    assert (recovered / bundle.manifest_ref).read_bytes() == bundle.manifest
+
+    linked_recovery = tmp_path / "linked-recovery"
+    linked_receipt = linked_recovery / bundle.receipt_ref
+    linked_receipt.parent.mkdir(parents=True)
+    interrupted_staging = linked_receipt.parent / f".{linked_receipt.name}.interrupted.tmp"
+    interrupted_staging.write_bytes(bundle.receipt)
+    interrupted_staging.chmod(0o600)
+    os.link(interrupted_staging, linked_receipt)
+    assert linked_receipt.stat().st_nlink == 2
+    assert evidence.write_evidence_bundle_exclusive(linked_recovery, bundle) == published
+    assert not interrupted_staging.exists()
+    assert linked_receipt.stat().st_nlink == 1
+    assert (linked_recovery / bundle.manifest_ref).read_bytes() == bundle.manifest
+
+    unsafe_orphan = tmp_path / "unsafe-orphan"
+    unsafe_receipt = unsafe_orphan / bundle.receipt_ref
+    unsafe_receipt.parent.mkdir(parents=True)
+    unsafe_receipt.write_bytes(bundle.receipt)
+    unsafe_receipt.chmod(0o644)
+    with pytest.raises(evidence.ExactReleaseEvidenceError, match="^bundle_output_invalid$"):
+        evidence.write_evidence_bundle_exclusive(unsafe_orphan, bundle)
+    assert unsafe_receipt.read_bytes() == bundle.receipt
+    assert not (unsafe_orphan / bundle.manifest_ref).exists()
 
     collision = tmp_path / "collision"
     collision.mkdir()
@@ -749,6 +821,40 @@ def test_bundle_publish_is_create_only_and_rolls_back_only_its_first_file(tmp_pa
         evidence.write_evidence_bundle_exclusive(collision, bundle)
     assert not (collision / bundle.receipt_ref).exists()
     assert collision_manifest.read_bytes() == b"pre-existing manifest"
+
+
+def test_bundle_final_names_appear_only_after_complete_staging_bytes(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    identity = _identity()
+    bundle = evidence._bundle_from_receipt(  # noqa: SLF001
+        _receipt(identity, "conversation_recall"),
+        identity=identity,
+        journey_id="conversation_recall",
+        evidence_class=CLEAN_CLASS,
+    )
+    output = tmp_path / "output"
+    output.mkdir()
+    real_link = evidence.os.link
+    linked: list[Path] = []
+
+    def atomic_link(source: Path, target: Path, *, follow_symlinks: bool) -> None:
+        source_path = Path(source)
+        target_path = Path(target)
+        expected = bundle.receipt if "receipts" in target_path.parts else bundle.manifest
+        assert source_path.name.startswith(f".{target_path.name}.")
+        assert source_path.name.endswith(".tmp")
+        assert source_path.read_bytes() == expected
+        assert not target_path.exists()
+        linked.append(target_path)
+        real_link(source_path, target_path, follow_symlinks=follow_symlinks)
+
+    monkeypatch.setattr(evidence.os, "link", atomic_link)
+
+    evidence.write_evidence_bundle_exclusive(output, bundle)
+
+    assert linked == [output / bundle.receipt_ref, output / bundle.manifest_ref]
 
 
 def test_bundle_authority_and_canonical_json_fail_closed(tmp_path: Path) -> None:
@@ -799,4 +905,41 @@ def test_clean_artifact_requires_deterministic_bundle_cli() -> None:
                 "--output",
                 "/arbitrary.json",
             ]
+        )
+
+
+def test_bundle_output_root_must_stay_outside_the_exact_checkout(tmp_path: Path) -> None:
+    repository = tmp_path / "repository"
+    nested = repository / "output"
+    external = tmp_path / "external"
+    nested.mkdir(parents=True)
+    external.mkdir()
+
+    assert evidence._external_bundle_output_root(repository, external) == external  # noqa: SLF001
+    for invalid in (repository, nested):
+        with pytest.raises(
+            evidence.ExactReleaseEvidenceError,
+            match="^bundle_output_must_be_external$",
+        ):
+            evidence._external_bundle_output_root(repository, invalid)  # noqa: SLF001
+
+
+def test_clean_artifact_cannot_escape_through_receipt_only_publication(
+    tmp_path: Path,
+) -> None:
+    raw = _receipt(_identity(), "conversation_recall")
+    with pytest.raises(
+        evidence.ExactReleaseEvidenceError,
+        match="^clean_artifact_bundle_required$",
+    ):
+        evidence.write_receipt_exclusive(tmp_path / "receipt.json", raw)
+    with pytest.raises(
+        evidence.ExactReleaseEvidenceError,
+        match="^clean_artifact_bundle_required$",
+    ):
+        evidence.produce_receipt(
+            repo_root=tmp_path,
+            release_root=tmp_path,
+            journey_id="conversation_recall",
+            evidence_class=CLEAN_CLASS,
         )

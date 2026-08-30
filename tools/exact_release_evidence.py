@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import ast
+import fcntl
 import hashlib
 import json
 import os
@@ -35,13 +36,14 @@ PRODUCER_PATH = "tools/exact_release_evidence.py"
 PYTEST_TIMEOUT_SECONDS = 900
 _EVIDENCE_ROOT = PurePosixPath("evidence/golden_journeys")
 _CLEAN_ARTIFACT_CLASS = "clean artifact path"
+_SUBPROCESS_POLICY = "cpython_audit_deny"
 _PYTEST_BOOTSTRAP = (
     "import pathlib,sys; "
     "root=str(pathlib.Path(sys.argv.pop(1)).resolve(strict=True)); "
     "sys.path.insert(0,root); import pytest; raise SystemExit(pytest.main(sys.argv[1:]))"
 )
 _INSTALLED_PYTEST_BOOTSTRAP = r"""
-import hashlib,importlib.machinery,json,os,pathlib,sys
+import hashlib,importlib.machinery,json,os,pathlib,posix,sys
 source_root=pathlib.Path(sys.argv.pop(1)).resolve(strict=True)
 release_root=pathlib.Path(sys.argv.pop(1)).resolve(strict=True)
 site=pathlib.Path(sys.argv.pop(1)).resolve(strict=True)
@@ -55,11 +57,39 @@ sys.path.insert(0,str(source_root))
 sys.path.insert(0,str(site))
 blocked={"os.exec","os.fork","os.forkpty","os.posix_spawn","os.posix_spawnp","os.system","pty.spawn","subprocess.Popen"}
 violations=set()
+source_product_roots=tuple((source_root/name).resolve(strict=False) for name in ("friday","friday_host_agent","friday_package_broker"))
+def resolves_to_source_product(raw_path,dir_fd=None):
+    candidate=pathlib.Path(os.fsdecode(raw_path))
+    if not candidate.is_absolute():
+        if dir_fd is None:
+            base=pathlib.Path.cwd()
+        else:
+            try:
+                base=pathlib.Path("/proc/self/fd")/str(dir_fd)
+                base=base.resolve(strict=True)
+            except (OSError,RuntimeError,ValueError) as exc:
+                violations.add("dir_fd_open_unattested")
+                raise RuntimeError("dir_fd_open_unattested") from exc
+        candidate=base/candidate
+    resolved=candidate.resolve(strict=False)
+    return any(resolved == root or root in resolved.parents for root in source_product_roots)
 def deny_child(event,args):
     if event in blocked:
         violations.add("child_execution_unattested")
         raise RuntimeError("child_execution_unattested")
+    if event == "open" and args and isinstance(args[0],(str,bytes,os.PathLike)):
+        if resolves_to_source_product(args[0]):
+            violations.add("source_first_party_read_unattested")
+            raise RuntimeError("source_first_party_read_unattested")
 sys.addaudithook(deny_child)
+raw_os_open=os.open
+def guarded_os_open(path,flags,mode=0o777,*,dir_fd=None):
+    if dir_fd is not None and isinstance(path,(str,bytes,os.PathLike)) and resolves_to_source_product(path,dir_fd):
+        violations.add("source_first_party_read_unattested")
+        raise RuntimeError("source_first_party_read_unattested")
+    return raw_os_open(path,flags,mode,dir_fd=dir_fd)
+os.open=guarded_os_open
+posix.open=guarded_os_open
 origins=set()
 def first_party(name):
     return name == "friday" or name.startswith("friday.") or name.startswith("friday_")
@@ -116,7 +146,7 @@ report={
     "schema":"friday.clean-artifact-import-origin.v1",
     "site_packages_ref":site_ref,
     "source_commit":source_commit,
-    "subprocess_policy":"deny",
+    "subprocess_policy":"cpython_audit_deny",
     "wheel_sha256":wheel_sha256,
 }
 raw=json.dumps(report,ensure_ascii=True,sort_keys=True,separators=(",",":"),allow_nan=False).encode()
@@ -1023,7 +1053,7 @@ def _execution_witness(
         and _SHA256.fullmatch(artifact_origin_sha256) is not None
         and type(site_packages_ref) is str
         and re.fullmatch(r"venv/lib/python[0-9]+\.[0-9]+/site-packages", site_packages_ref) is not None
-        and subprocess_policy == "deny"
+        and subprocess_policy == _SUBPROCESS_POLICY
     )
     if (
         type(outcomes) is not tuple
@@ -1113,7 +1143,7 @@ def _artifact_origin_report_sha256(
         or value.get("site_packages_ref") != runtime.site_packages_ref
         or value.get("source_commit") != runtime.identity.source_commit
         or value.get("wheel_sha256") != runtime.identity.wheel_sha256
-        or value.get("subprocess_policy") != "deny"
+        or value.get("subprocess_policy") != _SUBPROCESS_POLICY
     ):
         raise ExactReleaseEvidenceError("artifact_origin_report_invalid")
     return hashlib.sha256(raw).hexdigest()
@@ -1257,7 +1287,7 @@ def _run_closed_pytest(
         outcome_projection_sha256,
         artifact_origin_sha256=artifact_origin_sha256,
         site_packages_ref=(None if runtime is None else runtime.site_packages_ref),
-        subprocess_policy=(None if runtime is None else "deny"),
+        subprocess_policy=(None if runtime is None else _SUBPROCESS_POLICY),
     )
 
 
@@ -1415,7 +1445,7 @@ def _validate_receipt(
             or set(artifact_import) != _ARTIFACT_IMPORT_FIELDS
             or _SHA256.fullmatch(str(artifact_import.get("origin_report_sha256") or "")) is None
             or artifact_import.get("site_packages_ref") != runtime.site_packages_ref
-            or artifact_import.get("subprocess_policy") != "deny"
+            or artifact_import.get("subprocess_policy") != _SUBPROCESS_POLICY
         ):
             raise ExactReleaseEvidenceError("artifact_execution_binding_invalid")
     elif artifact_import is not None:
@@ -1749,33 +1779,17 @@ def produce_receipt(
     """
 
     if evidence_class == _CLEAN_ARTIFACT_CLASS:
-        runtime = _authenticate_release_runtime(release_root)
-        identity = runtime.identity
-    else:
-        runtime = None
-        identity = derive_release_identity(release_root)
-    if runtime is None:
-        raw = _produce_for_identity(
-            repo_root=repo_root,
-            identity=identity,
-            journey_id=journey_id,
-            evidence_class=evidence_class,
-            owner_smoke=authenticated_owner_smoke,
-        )
-    else:
-        raw = _produce_for_identity(
-            repo_root=repo_root,
-            identity=identity,
-            journey_id=journey_id,
-            evidence_class=evidence_class,
-            owner_smoke=authenticated_owner_smoke,
-            release_runtime=runtime,
-        )
-    if runtime is None:
-        if derive_release_identity(release_root) != identity:
-            raise ExactReleaseEvidenceError("release_identity_changed")
-    else:
-        _reauthenticate_release_runtime(runtime)
+        raise ExactReleaseEvidenceError("clean_artifact_bundle_required")
+    identity = derive_release_identity(release_root)
+    raw = _produce_for_identity(
+        repo_root=repo_root,
+        identity=identity,
+        journey_id=journey_id,
+        evidence_class=evidence_class,
+        owner_smoke=authenticated_owner_smoke,
+    )
+    if derive_release_identity(release_root) != identity:
+        raise ExactReleaseEvidenceError("release_identity_changed")
     return raw
 
 
@@ -1878,12 +1892,17 @@ def _write_canonical_exclusive(
         raise ExactReleaseEvidenceError(failure_code) from exc
     if parent != target.parent or target.name in {"", ".", ".."}:
         raise ExactReleaseEvidenceError(failure_code)
-    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_CLOEXEC | getattr(os, "O_NOFOLLOW", 0)
     descriptor = -1
+    staging: Path | None = None
     owned_identity: tuple[int, int] | None = None
-    failure: OSError | None = None
+    linked = False
     try:
-        descriptor = os.open(target, flags, 0o600)
+        descriptor, staging_text = tempfile.mkstemp(
+            prefix=f".{target.name}.",
+            suffix=".tmp",
+            dir=parent,
+        )
+        staging = Path(staging_text)
         opened = os.fstat(descriptor)
         owned_identity = (opened.st_dev, opened.st_ino)
         os.fchmod(descriptor, 0o600)
@@ -1899,29 +1918,55 @@ def _write_canonical_exclusive(
             not stat.S_ISREG(status.st_mode)
             or stat.S_IMODE(status.st_mode) != 0o600
             or status.st_nlink != 1
+            or status.st_uid != os.geteuid()
             or status.st_size != len(raw)
         ):
             raise OSError("receipt postcondition failed")
-    except OSError as exc:
-        failure = exc
-    finally:
+        os.close(descriptor)
+        descriptor = -1
+        os.link(staging, target, follow_symlinks=False)
+        linked = True
+        published = os.lstat(target)
+        if (
+            not stat.S_ISREG(published.st_mode)
+            or (published.st_dev, published.st_ino) != owned_identity
+            or stat.S_IMODE(published.st_mode) != 0o600
+            or published.st_nlink != 2
+            or published.st_uid != os.geteuid()
+            or published.st_size != len(raw)
+        ):
+            raise OSError("receipt publication postcondition failed")
+        os.unlink(staging)
+        staging = None
+        published = os.lstat(target)
+        if (published.st_dev, published.st_ino) != owned_identity or published.st_nlink != 1:
+            raise OSError("receipt publication link count invalid")
+        directory_flags = os.O_RDONLY | os.O_CLOEXEC | getattr(os, "O_DIRECTORY", 0)
+        directory_descriptor = os.open(parent, directory_flags)
+        try:
+            os.fsync(directory_descriptor)
+        finally:
+            os.close(directory_descriptor)
+        return hashlib.sha256(raw).hexdigest(), owned_identity
+    except BaseException as exc:
         if descriptor >= 0:
-            try:
+            with suppress(OSError):
                 os.close(descriptor)
-            except OSError as exc:
-                if failure is None:
-                    failure = exc
-    if failure is not None:
-        _cleanup_owned_target(target, owned_identity)
-        raise ExactReleaseEvidenceError(failure_code) from failure
-    assert owned_identity is not None
-    return hashlib.sha256(raw).hexdigest(), owned_identity
+        if staging is not None:
+            _cleanup_owned_target(staging, owned_identity)
+        if linked:
+            _cleanup_owned_target(target, owned_identity)
+        if isinstance(exc, (KeyboardInterrupt, SystemExit, GeneratorExit)):
+            raise
+        raise ExactReleaseEvidenceError(failure_code) from exc
 
 
 def write_receipt_exclusive(path: Path, raw: bytes) -> str:
     """Write one complete canonical receipt without replacing an existing name."""
 
-    _load_canonical_receipt(raw)
+    receipt = _load_canonical_receipt(raw)
+    if receipt.get("$schema") == CLEAN_ARTIFACT_RECEIPT_SCHEMA:
+        raise ExactReleaseEvidenceError("clean_artifact_bundle_required")
     digest, _identity = _write_canonical_exclusive(
         path,
         raw,
@@ -2012,35 +2057,108 @@ def _ensure_bundle_parent(root: Path, ref: str) -> Path:
     return root / ref
 
 
+def _require_exact_existing_bundle_file(path: Path, raw: bytes) -> str:
+    """Adopt only an already-complete byte-identical create-only artifact."""
+
+    try:
+        existing = _stable_file(path, len(raw))
+        status = path.lstat()
+        if status.st_nlink == 2:
+            prefix = f".{path.name}."
+            candidates = []
+            for candidate in path.parent.iterdir():
+                if candidate.name.startswith(prefix) and candidate.name.endswith(".tmp"):
+                    candidate_status = candidate.lstat()
+                    if (candidate_status.st_dev, candidate_status.st_ino) == (
+                        status.st_dev,
+                        status.st_ino,
+                    ):
+                        candidates.append(candidate)
+            if len(candidates) != 1:
+                raise ExactReleaseEvidenceError("bundle_output_invalid")
+            os.unlink(candidates[0])
+            status = path.lstat()
+    except (OSError, RuntimeError, ExactReleaseEvidenceError) as exc:
+        raise ExactReleaseEvidenceError("bundle_output_invalid") from exc
+    if (
+        existing != raw
+        or not stat.S_ISREG(status.st_mode)
+        or stat.S_IMODE(status.st_mode) != 0o600
+        or status.st_nlink != 1
+        or status.st_uid != os.geteuid()
+        or status.st_size != len(raw)
+    ):
+        raise ExactReleaseEvidenceError("bundle_output_invalid")
+    return hashlib.sha256(existing).hexdigest()
+
+
+@contextmanager
+def _exclusive_bundle_root(root: Path) -> Iterator[None]:
+    """Serialize create-only publication; a process crash releases the directory lock."""
+
+    flags = os.O_RDONLY | os.O_CLOEXEC | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0)
+    descriptor = -1
+    try:
+        descriptor = os.open(root, flags)
+        status = os.fstat(descriptor)
+        if not stat.S_ISDIR(status.st_mode) or status.st_uid != os.geteuid():
+            raise ExactReleaseEvidenceError("bundle_output_invalid")
+        fcntl.flock(descriptor, fcntl.LOCK_EX)
+        yield
+    except (OSError, RuntimeError) as exc:
+        raise ExactReleaseEvidenceError("bundle_output_invalid") from exc
+    finally:
+        if descriptor >= 0:
+            with suppress(OSError):
+                fcntl.flock(descriptor, fcntl.LOCK_UN)
+            with suppress(OSError):
+                os.close(descriptor)
+
+
 def write_evidence_bundle_exclusive(output_root: Path, bundle: EvidenceBundle) -> dict[str, str]:
-    """Publish both deterministic artifacts create-only, rolling back our first write."""
+    """Publish a manifest-committed bundle, healing only byte-identical prior writes."""
 
     exact = _require_evidence_bundle(bundle)
     root = _resolve_directory(output_root, "bundle_output_invalid")
-    receipt_path = _ensure_bundle_parent(root, exact.receipt_ref)
-    manifest_path = _ensure_bundle_parent(root, exact.manifest_ref)
-    receipt_identity: tuple[int, int] | None = None
-    try:
-        receipt_digest, receipt_identity = _write_canonical_exclusive(
-            receipt_path,
-            exact.receipt,
-            failure_code="bundle_output_invalid",
-        )
-        manifest_digest, _manifest_identity = _write_canonical_exclusive(
-            manifest_path,
-            exact.manifest,
-            failure_code="bundle_output_invalid",
-        )
-    except ExactReleaseEvidenceError:
-        _cleanup_owned_target(receipt_path, receipt_identity)
-        raise
-    return {
-        "manifest_ref": exact.manifest_ref,
-        "manifest_sha256": manifest_digest,
-        "receipt_ref": exact.receipt_ref,
-        "receipt_sha256": receipt_digest,
-        "result": exact.result,
-    }
+    with _exclusive_bundle_root(root):
+        receipt_path = _ensure_bundle_parent(root, exact.receipt_ref)
+        manifest_path = _ensure_bundle_parent(root, exact.manifest_ref)
+        receipt_identity: tuple[int, int] | None = None
+        try:
+            try:
+                receipt_digest, receipt_identity = _write_canonical_exclusive(
+                    receipt_path,
+                    exact.receipt,
+                    failure_code="bundle_output_invalid",
+                )
+            except ExactReleaseEvidenceError:
+                receipt_digest = _require_exact_existing_bundle_file(receipt_path, exact.receipt)
+            try:
+                manifest_digest, _manifest_identity = _write_canonical_exclusive(
+                    manifest_path,
+                    exact.manifest,
+                    failure_code="bundle_output_invalid",
+                )
+            except ExactReleaseEvidenceError:
+                manifest_digest = _require_exact_existing_bundle_file(manifest_path, exact.manifest)
+        except BaseException:
+            _cleanup_owned_target(receipt_path, receipt_identity)
+            raise
+        return {
+            "manifest_ref": exact.manifest_ref,
+            "manifest_sha256": manifest_digest,
+            "receipt_ref": exact.receipt_ref,
+            "receipt_sha256": receipt_digest,
+            "result": exact.result,
+        }
+
+
+def _external_bundle_output_root(repo_root: Path, output_root: Path) -> Path:
+    repository = _resolve_directory(repo_root, "repo_root_invalid")
+    output = _resolve_directory(output_root, "bundle_output_invalid")
+    if output == repository or output.is_relative_to(repository):
+        raise ExactReleaseEvidenceError("bundle_output_must_be_external")
+    return output
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -2078,13 +2196,14 @@ def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     try:
         if args.command == "bundle":
+            output_root = _external_bundle_output_root(args.repo_root, args.output_root)
             bundle = produce_evidence_bundle(
                 repo_root=args.repo_root,
                 release_root=args.release_root,
                 journey_id=args.journey_id,
                 evidence_class="clean artifact path",
             )
-            published = write_evidence_bundle_exclusive(args.output_root, bundle)
+            published = write_evidence_bundle_exclusive(output_root, bundle)
             print(canonical_json_bytes(published).decode())
             return 0 if published["result"] == "VERIFIED" else 1
         raw = produce_receipt(
