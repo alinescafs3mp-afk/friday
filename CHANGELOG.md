@@ -1,3 +1,17 @@
+## 0.207.83 — 2026-08-30
+
+### Bounded conversation recall
+
+- Keeps the complete matched message visible inside long adjacent conversation
+  excerpts whenever that row fits the existing 1,900-character bound.
+- Accepts the released head/tail replay form only when its exact historical
+  snapshot digest matches; drift and unavailable legacy bytes remain honest,
+  body-free measured gaps.
+- Adds a deterministic authenticated 24-case conversation-recall matrix:
+  recall is 23/24 at 50 candidates and 24/24 at 100, including continuation
+  rank 64 and clean storage reopen. SQLite remains schema 50; exact
+  `0.207.82/schema50` is predecessor and immutable fallback.
+
 ## 0.207.82 — 2026-08-30
 
 ### Demand-aware secondary assist admission

@@ -181,7 +181,7 @@ failed/error/skipped-тест в любой фазе делает гейт кр�
 Для optional GPT-OSS secondary brain начиная с 0.207.11 дополнительно:
 
 - release принимается и первый раз запускается без `FRIDAY_SECONDARY_LLM_*`:
-  health имеет `status=ok`, `version=0.207.82`, `secondary.mode=disabled`,
+  health имеет `status=ok`, `version=0.207.83`, `secondary.mode=disabled`,
   `secondary.state=disabled` и `secondary.available=false`;
 - `ACCEPTED_SECONDARY_RUNTIME_PROFILES` содержит ровно finalist
   `gptoss20b-2335df123cac7fc0e13e347cde1e1ffa8562daafcaf0fc76ade1a851d2b0ff1f`
@@ -470,7 +470,7 @@ failed/error/skipped-тест в любой фазе делает гейт кр�
 - post-context load допускает bounded convergence не более 20 секунд с шагом
   50 мс только для valid same-epoch busy; invalid/epoch/deadline fail-closed, а
   initial idle и post-cancellation quiet остаются строгими;
-- final startup health имеет `status=ok`, `version=0.207.82`, configured/installed
+- final startup health имеет `status=ok`, `version=0.207.83`, configured/installed
   `canary`, routes `[archive_read, file_read]`, точный `profile_id`,
   `verified_context_tokens=40960` и непустой public `attestation_sha256`;
 - q38 выбирает только минимально достаточный closed tier из
@@ -532,6 +532,8 @@ failed/error/skipped-тест в любой фазе делает гейт кр�
   `0.207.80/schema50` одновременно как previous и immutable fallback;
 - `0.207.82/schema50` не меняет DDL и принимает exact stable
   `0.207.81/schema50` одновременно как previous и immutable fallback;
+- `0.207.83/schema50` не меняет DDL и принимает exact stable
+  `0.207.82/schema50` одновременно как previous и immutable fallback;
 - schema 49 → 50 сохраняет body-free table/FTS layout, добавляет
   incremental one-anchor CAS guards и bounded owner/source indexes; stable
   runtime активирует bounded restart-safe writer и partial conversation-lexical
