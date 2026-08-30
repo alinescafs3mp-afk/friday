@@ -690,6 +690,7 @@ Wheel, построенный из чисто распакованного ZIP, 
 
 ```text
 <SOURCE_PYTHON> -I -B tools/immutable_release_operator.py build ... \
+  --state-dir <STATE_DIR> \
   --secondary-product-runner \
   <EXACT_CLEAN_CANDIDATE_CHECKOUT>/deploy/secondary-brain/windows-sglang/scripts/live_failure_battery.py \
   --secondary-product-runner-sha256 <RUNNER_SHA256>

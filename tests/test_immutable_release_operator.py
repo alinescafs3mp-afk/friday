@@ -9808,6 +9808,8 @@ def test_build_parser_binds_both_manifest_digests_into_build_spec(
             str(tmp_path / ".env.local"),
             "--friday-home",
             str(tmp_path / "home"),
+            "--state-dir",
+            str(tmp_path / "state"),
             "--base-python",
             str(tmp_path / "python"),
             "--base-python-sha256",
@@ -9833,6 +9835,7 @@ def test_build_parser_binds_both_manifest_digests_into_build_spec(
     assert len(captured) == 1
     assert captured[0].runtime_lock_sha256 == "2" * 64
     assert captured[0].wheelhouse_manifest_sha256 == "3" * 64
+    assert captured[0].state_dir == tmp_path / "state"
     assert captured[0].secondary_product_runner == product_runner
     assert (
         captured[0].secondary_product_runner_sha256 == hashlib.sha256(product_runner.read_bytes()).hexdigest()
@@ -9948,6 +9951,7 @@ def _synthetic_build_spec(tmp_path: Path) -> operator.BuildSpec:
         anchor=tmp_path / "current-release",
         env_file=tmp_path / ".env.local",
         friday_home=tmp_path / "friday-home",
+        state_dir=tmp_path,
         base_python=base_python,
         base_python_sha256=hashlib.sha256(base_python.read_bytes()).hexdigest(),
         alias_tool=alias_tool,
@@ -9958,6 +9962,16 @@ def _synthetic_build_spec(tmp_path: Path) -> operator.BuildSpec:
         secondary_product_runner_sha256=hashlib.sha256(product_runner.read_bytes()).hexdigest(),
         max_schema=34,
     )
+
+
+def test_build_uses_the_shared_release_operator_transaction_lock(tmp_path: Path) -> None:
+    spec = _synthetic_build_spec(tmp_path)
+
+    with (
+        operator.OperatorTransactionLock(spec.state_dir / "immutable-release-operator.v1.lock"),
+        pytest.raises(operator.ReleaseFailure, match="^operator_transaction_in_progress$"),
+    ):
+        operator.build_release(spec)
 
 
 def test_relocation_rebinds_discovered_entrypoints_and_metadata_across_atomic_publish(
@@ -10748,6 +10762,7 @@ def test_missing_venv_fails_before_release_staging_or_target(
         anchor=tmp_path / "current-release",
         env_file=tmp_path / ".env.local",
         friday_home=tmp_path / "friday-home",
+        state_dir=tmp_path,
         base_python=base_python,
         base_python_sha256=hashlib.sha256(base_python.read_bytes()).hexdigest(),
         alias_tool=alias_tool,
@@ -10826,6 +10841,7 @@ def test_post_seal_failure_removes_staging_and_preserves_original_failure(
         anchor=tmp_path / "current-release",
         env_file=tmp_path / ".env.local",
         friday_home=tmp_path / "friday-home",
+        state_dir=tmp_path,
         base_python=base_python,
         base_python_sha256=hashlib.sha256(base_python.read_bytes()).hexdigest(),
         alias_tool=alias_tool,

@@ -5827,6 +5827,7 @@ class BuildSpec:
     anchor: Path
     env_file: Path
     friday_home: Path
+    state_dir: Path
     base_python: Path
     base_python_sha256: str
     alias_tool: Path
@@ -7018,7 +7019,7 @@ def _cleanup_staging_tree(staging: Path) -> None:
             os.rmdir(staging)
 
 
-def build_release(spec: BuildSpec) -> ReleaseIdentity:
+def _build_release_locked(spec: BuildSpec) -> ReleaseIdentity:
     """Build one previously absent sibling release from pinned offline wheels."""
 
     commit = _closed_commit(spec.commit)
@@ -7265,6 +7266,13 @@ def build_release(spec: BuildSpec) -> ReleaseIdentity:
         raise ReleaseFailure("release_build_failed") from exc
     finally:
         _cleanup_staging_tree(staging)
+
+
+def build_release(spec: BuildSpec) -> ReleaseIdentity:
+    """Build one release under the transaction lock shared by all release mutations."""
+
+    with OperatorTransactionLock(spec.state_dir / "immutable-release-operator.v1.lock"):
+        return _build_release_locked(spec)
 
 
 def _validated_alias_repair_receipt(value: Mapping[str, Any]) -> dict[str, Any]:
@@ -17565,6 +17573,7 @@ def build_parser() -> argparse.ArgumentParser:
     build.add_argument("--anchor", required=True, type=Path)
     build.add_argument("--env-file", required=True, type=Path)
     build.add_argument("--friday-home", required=True, type=Path)
+    build.add_argument("--state-dir", required=True, type=Path)
     build.add_argument("--base-python", required=True, type=Path)
     build.add_argument("--base-python-sha256", required=True)
     build.add_argument("--alias-tool", required=True, type=Path)
@@ -17661,6 +17670,7 @@ def _run_cli(args: argparse.Namespace) -> dict[str, Any]:
                 anchor=args.anchor,
                 env_file=args.env_file,
                 friday_home=args.friday_home,
+                state_dir=args.state_dir,
                 base_python=args.base_python,
                 base_python_sha256=args.base_python_sha256,
                 alias_tool=args.alias_tool,
