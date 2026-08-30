@@ -90,6 +90,40 @@ owner/device-bound.
 
 ## Priority order
 
+### P0G — canonical Gate Diet
+
+Status: queued for SolGoodman immediately after S6-R3 release and before S4-R6.
+
+Goal: reduce mandatory gate time, disk churn and maintenance surface without
+removing any unique release-blocking invariant. Regression testing, exact
+release certification and live/physical observation must no longer run as one
+ever-growing ceremony.
+
+1. Record the current executable nodeid inventory, wall time, CPU/RSS, scratch
+   bytes and flaky/retry history; map every mandatory node to one named product
+   invariant and one authority tier.
+2. Keep a compact change gate for static, contract and unique deterministic
+   integration coverage. Move wheel/install, schema, backup/restore, rollback
+   and owner smoke to one exact-candidate release gate. Move physical devices,
+   live network/providers, large artifacts and long fault batteries to
+   nightly/on-demand gates.
+3. Delete or merge duplicate tests only when another authoritative node covers
+   the same failure boundary. Preserve unique adversarial, restart, privacy,
+   effect-fence and fail-closed coverage.
+4. Forbid permanent nested release factories, mutable-host self-attestation and
+   repeated execution of the same closed inventory in the normal gate. Expensive
+   one-off release rehearsals use private disk-backed scratch and are removed
+   immediately.
+5. Require every new gate node to declare its invariant, tier, maximum runtime
+   and scratch budget. A new duplicate must replace an older node or justify its
+   additional fault boundary.
+
+Acceptance: all current release-blocking invariants remain mapped and green;
+the exact-candidate release result is unchanged; before/after measurements are
+published; no hidden skip or permissive fallback is introduced. Target at
+least 30% lower mandatory wall time, with larger cuts accepted only when the
+invariant map proves equivalent coverage.
+
 ### P0 — production message stability
 
 Status: deployed in `0.207.52`.
