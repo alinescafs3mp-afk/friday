@@ -792,7 +792,9 @@ def _authenticate_material_locked(
         backup_root=backup_root,
         config_identity_sha256=None,
     )
-    backup = journal.database_backup(verify_engineer_sqlite_integrity=True)
+    # Material authentication is strictly read-only.  The copied Engineer
+    # database is integrity-checked later inside the rehearsal scratch contour.
+    backup = journal.database_backup(verify_engineer_sqlite_integrity=False)
     if backup is None:
         raise DRGenerationAuthenticationError("dr_activation_backup_missing")
     activation_candidate, activation_previous, fallback = journal.release_identities()
@@ -814,7 +816,7 @@ def _authenticate_material_locked(
         activation_receipt=activation_receipt,
         backup_root=backup_root,
     )
-    backup_after = journal.database_backup(verify_engineer_sqlite_integrity=True)
+    backup_after = journal.database_backup(verify_engineer_sqlite_integrity=False)
     releases_after = journal.release_identities()
     if (
         second != first

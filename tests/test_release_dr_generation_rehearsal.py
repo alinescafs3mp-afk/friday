@@ -4,9 +4,12 @@ import hashlib
 import json
 import os
 import shutil
+import signal
 import sqlite3
 import subprocess
+import sys
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -59,15 +62,21 @@ def _source_config(root: Path) -> release_operator.SystemdConfig:
     (obsidian / "note.md").write_text("private note\n", encoding="utf-8")
     (obsidian / "note.md").chmod(0o600)
     store = _private(data / "engineer-command")
-    _sqlite(store / "kernel.sqlite", schema=None, marker="engineer-before")
-    (store / "job.bin").write_bytes(b"private-result")
-    (store / "job.bin").chmod(0o600)
     key = data / "engineer-command.key"
     key.write_bytes(b"k" * 32)
     key.chmod(0o600)
-    anchor = state / "engineer-command-store.anchor.json"
-    anchor.write_text('{"test":true}\n', encoding="ascii")
-    anchor.chmod(0o600)
+    from friday.organs.engineer.command_tools import provision_engineer_command_store
+
+    provision_engineer_command_store(
+        SimpleNamespace(
+            engineer_command_enabled=True,
+            engineer_command_key_file=key,
+            engineer_command_store_dir=store,
+            state_dir=state,
+        )
+    )
+    (store / "job.bin").write_bytes(b"private-result")
+    (store / "job.bin").chmod(0o600)
     env = root / "env"
     ca = root / "ca"
     env.write_bytes(b"# test\n")
@@ -141,7 +150,7 @@ def test_fresh_materialization_assigns_new_engineer_identity_without_weakening_r
     try:
         assert main.execute("SELECT value FROM marker").fetchone() == ("main-before",)
         assert inbox.execute("SELECT value FROM marker").fetchone() == ("inbox-before",)
-        assert engineer.execute("SELECT value FROM marker").fetchone() == ("engineer-before",)
+        assert engineer.execute("PRAGMA integrity_check").fetchone() == ("ok",)
     finally:
         main.close()
         inbox.close()
@@ -277,6 +286,92 @@ def test_fresh_materialization_rejects_source_modify_copy_restore_window(
     assert injected == [True]
 
 
+def test_fresh_materialization_accepts_zero_byte_engineer_wal_without_mutating_source(
+    tmp_path: Path,
+) -> None:
+    tmp_path.chmod(0o700)
+    source = _source_config(_private(tmp_path / "source"))
+    source_wal = source.friday_home / "data/engineer-command/kernel.sqlite-wal"
+    source_wal.write_bytes(b"")
+    source_wal.chmod(0o600)
+    backup = release_operator._exact_sqlite_backup(source)  # noqa: SLF001
+    payload = backup.opaque
+    assert isinstance(payload, release_operator._ExactBackupPayload)  # noqa: SLF001
+    target = _fresh_config(tmp_path / "target")
+
+    result = release_operator.materialize_exact_backup_into_fresh_contour(target, backup)
+
+    target_wal = target.friday_home / "data/engineer-command/kernel.sqlite-wal"
+    assert result.engineer_fresh_identity_assigned is True
+    assert source_wal.read_bytes() == b""
+    assert target_wal.is_file() and target_wal.read_bytes() == b""
+
+
+def test_fresh_materialization_preserves_zero_byte_main_and_inbox_wals(
+    tmp_path: Path,
+) -> None:
+    tmp_path.chmod(0o700)
+    source = _source_config(_private(tmp_path / "source"))
+    for database in (source.database, source.inbox_database):
+        wal = Path(f"{database}-wal")
+        wal.write_bytes(b"")
+        wal.chmod(0o600)
+    backup = release_operator._exact_sqlite_backup(source)  # noqa: SLF001
+    target = _fresh_config(tmp_path / "target")
+
+    release_operator.materialize_exact_backup_into_fresh_contour(target, backup)
+
+    assert Path(f"{target.database}-wal").read_bytes() == b""
+    assert Path(f"{target.inbox_database}-wal").read_bytes() == b""
+
+
+def test_fresh_materialization_reports_no_identity_when_engineer_database_absent(
+    tmp_path: Path,
+) -> None:
+    tmp_path.chmod(0o700)
+    source = _source_config(_private(tmp_path / "source"))
+    shutil.rmtree(source.friday_home / "data/engineer-command")
+    (source.friday_home / "data/engineer-command.key").unlink()
+    for name in release_operator._ENGINEER_LIFECYCLE_FILENAMES:  # noqa: SLF001
+        (source.state_dir / name).unlink(missing_ok=True)
+    backup = release_operator._exact_sqlite_backup(source)  # noqa: SLF001
+
+    result = release_operator.materialize_exact_backup_into_fresh_contour(
+        _fresh_config(tmp_path / "target"),
+        backup,
+    )
+
+    assert result.engineer_fresh_identity_assigned is False
+
+
+def test_fresh_engineer_verification_scratch_is_never_created_by_source_backup(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    tmp_path.chmod(0o700)
+    source = _source_config(_private(tmp_path / "source"))
+    backup = release_operator._exact_sqlite_backup(source)  # noqa: SLF001
+    payload = backup.opaque
+    assert isinstance(payload, release_operator._ExactBackupPayload)  # noqa: SLF001
+    target = _fresh_config(tmp_path / "target")
+    original = release_operator.tempfile.mkdtemp
+    directories: list[Path] = []
+
+    def bounded_mkdtemp(*args: Any, **kwargs: Any) -> str:
+        directory = Path(kwargs["dir"])
+        directories.append(directory)
+        if directory == payload.directory.parent:
+            raise AssertionError("production backup root was used as verification scratch")
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(release_operator.tempfile, "mkdtemp", bounded_mkdtemp)
+
+    release_operator.materialize_exact_backup_into_fresh_contour(target, backup)
+
+    assert directories and payload.directory.parent not in directories
+    assert target.backup_dir in directories
+
+
 def _candidate(home: Path, ordinal: int = 1) -> dict[str, Any]:
     backup = _private(home / "data/backups" / f"backup-{ordinal}")
     release = _private(home / "releases" / f"{ordinal:040x}")
@@ -347,6 +442,44 @@ def _capable_release(root: Path, character: str) -> release_operator.ReleaseIden
     )
 
 
+def _sealed(release: release_operator.ReleaseIdentity, root: Path | None = None) -> rehearsal._SealedReleaseCopy:
+    copied = release_operator.ReleaseIdentity(
+        **{**vars(release), "root": root or release.root},
+    )
+    return rehearsal._SealedReleaseCopy(release, copied.root, copied)
+
+
+def _local_engineer_authority(
+    _sealed_release: rehearsal._SealedReleaseCopy,
+    config: release_operator.SystemdConfig,
+    *,
+    action: str,
+    database_sha256: str = "",
+    evidence: Any = None,
+) -> object:
+    from friday.organs.engineer.command_tools import open_engineer_command_backup_authority
+
+    store, key, state = release_operator._engineer_artifact_paths(config)  # noqa: SLF001
+    settings = SimpleNamespace(
+        engineer_command_enabled=True,
+        engineer_command_key_file=key,
+        engineer_command_store_dir=store,
+        state_dir=state,
+    )
+    with open_engineer_command_backup_authority(settings) as authority:
+        if action == "snapshot":
+            return authority.backup_authority_snapshot()
+        before = authority.backup_authority_snapshot()
+        if action == "attest":
+            proof = authority.attest_main_database_backup(database_sha256)
+            verified = authority.verify_main_database_backup_authority(proof, database_sha256)
+            after = authority.backup_authority_snapshot()
+            return {"before": before, "evidence": proof, "verified": verified, "after": after}
+        verified = authority.verify_main_database_backup_authority(evidence, database_sha256)
+        after = authority.backup_authority_snapshot()
+        return {"before": before, "verified": verified, "after": after}
+
+
 def test_isolated_rehearsal_runs_real_four_surface_rollback_without_systemctl(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -360,21 +493,33 @@ def test_isolated_rehearsal_runs_real_four_surface_rollback_without_systemctl(
         _capable_release(tmp_path / "fallback", "f"),
     )
     by_root = {release.root: release for release in releases}
+
+    def load_identity(root: Path, **_kwargs: Any) -> release_operator.ReleaseIdentity:
+        return by_root[root]
+
     monkeypatch.setattr(
         release_operator,
         "load_release_identity",
-        lambda root, **_kwargs: by_root[root],
+        load_identity,
+    )
+    monkeypatch.setattr(
+        rehearsal,
+        "_materialize_exact_releases",
+        lambda values, _root: {release: _sealed(release) for release in values},
     )
     monkeypatch.setattr(
         rehearsal,
         "_run_release_store",
-        lambda release, _config: {
-            "fk": 0,
-            "integrity": "ok",
-            "schema": release.max_schema,
-            "version": release.version,
+        lambda sealed, _config: {
+            "inbox_fk": 0,
+            "inbox_integrity": "ok",
+            "main_fk": 0,
+            "main_integrity": "ok",
+            "main_schema": sealed.source.max_schema,
+            "version": sealed.source.version,
         },
     )
+    monkeypatch.setattr(rehearsal, "_run_release_engineer_authority", _local_engineer_authority)
     material = dr_auth.AuthenticatedDRMaterial(
         authenticated=dr_auth.AuthenticatedDRCandidate(_candidate(source.friday_home), _auth_receipt()),
         backup=backup,
@@ -388,8 +533,8 @@ def test_isolated_rehearsal_runs_real_four_surface_rollback_without_systemctl(
 
     assert result.schema_version == 46
     assert result.rollback_tree_sha256 == releases[1].tree_manifest_sha256
-    assert len(result.four_surface_sha256) == 64
-    assert (scratch / "data/friday.sqlite3").exists()
+    assert result.four_surface_sha256 == rehearsal._four_surface_receipt_sha256(backup)
+    assert (scratch / "work/data/friday.sqlite3").exists()
 
 
 def test_exact_release_store_open_uses_closed_bounded_interpreter_invocation(
@@ -399,16 +544,28 @@ def test_exact_release_store_open_uses_closed_bounded_interpreter_invocation(
     tmp_path.chmod(0o700)
     config = _fresh_config(tmp_path / "scratch")
     release = _capable_release(tmp_path / "sealed-release", "c")
+    copied_root = tmp_path / "copied-release"
+    copied_root.mkdir(mode=0o500)
+    copied_root.chmod(0o500)
+    sealed = _sealed(release, copied_root)
     expected = {
-        "fk": 0,
-        "integrity": "ok",
-        "schema": release.max_schema,
+        "inbox_fk": 0,
+        "inbox_integrity": "ok",
+        "main_fk": 0,
+        "main_integrity": "ok",
+        "main_schema": release.max_schema,
         "version": release.version,
     }
-    calls: list[tuple[list[str], dict[str, Any]]] = []
+    calls: list[tuple[list[str], bytes, int, tuple[int, ...]]] = []
 
-    def run(command: list[str], **kwargs: Any) -> subprocess.CompletedProcess[bytes]:
-        calls.append((command, kwargs))
+    def run(
+        command: list[str],
+        *,
+        input_bytes: bytes,
+        timeout: int,
+        pass_fds: tuple[int, ...],
+    ) -> subprocess.CompletedProcess[bytes]:
+        calls.append((command, input_bytes, timeout, pass_fds))
         return subprocess.CompletedProcess(
             command,
             0,
@@ -416,16 +573,255 @@ def test_exact_release_store_open_uses_closed_bounded_interpreter_invocation(
             stderr=b"",
         )
 
-    monkeypatch.setattr(subprocess, "run", run)
+    monkeypatch.setattr(rehearsal, "_execute_bwrap", run)
+    monkeypatch.setattr(release_operator, "load_release_identity", lambda *_args, **_kwargs: sealed.identity)
     monkeypatch.setenv("MUST_NOT_REACH_REHEARSAL_CHILD", "secret")
 
-    assert rehearsal._run_release_store(release, config) == expected
-    command, kwargs = calls[0]
-    assert command[:4] == [str(release.root / "venv/bin/python"), "-I", "-B", "-c"]
-    assert kwargs["timeout"] == 600
-    assert kwargs["stdin"] is subprocess.DEVNULL
-    assert "MUST_NOT_REACH_REHEARSAL_CHILD" not in kwargs["env"]
-    assert kwargs["env"]["FRIDAY_HOME"] == str(config.friday_home)
+    assert rehearsal._run_release_store(sealed, config) == expected
+    command, input_bytes, timeout, pass_fds = calls[0]
+    assert command[0] == "/usr/bin/bwrap"
+    assert "--unshare-all" in command and "--unshare-net" in command
+    assert "--proc" in command and "--dev" in command and "--tmpfs" in command
+    assert "--clearenv" in command and "--chdir" in command
+    assert "--close-fd" not in command
+    assert "/usr/bin/systemctl" not in command
+    assert "/usr/bin" not in command
+    assert ["/usr", "/usr"] not in [
+        command[index + 1 : index + 3] for index, value in enumerate(command) if value == "--ro-bind"
+    ]
+    assert "/usr/bin:/bin" not in command
+    assert "/run/friday/no-executables" in command
+    assert command[command.index("--chdir") + 1] == str(config.friday_home)
+    assert [
+        command[index + 1 : index + 3]
+        for index, value in enumerate(command)
+        if value == "--bind-fd"
+    ] == [
+        [str(pass_fds[1]), str(config.friday_home)]
+    ]
+    assert [str(pass_fds[0]), str(release.root)] in [
+        command[index + 1 : index + 3]
+        for index, value in enumerate(command)
+        if value == "--ro-bind-fd"
+    ]
+    assert not any(
+        command[index + 2] == "/tmp"
+        for index, value in enumerate(command[:-2])
+        if value in {"--bind", "--bind-fd", "--ro-bind", "--ro-bind-fd"}
+    )
+    separator = command.index("--")
+    assert command[separator + 1 : separator + 4] == [
+        str(release.root / "venv/bin/python"),
+        "-I",
+        "-B",
+    ]
+    assert "MUST_NOT_REACH_REHEARSAL_CHILD" not in "\0".join(command)
+    assert "from friday.telegram_bridge import _UpdateInbox" in command[separator + 5]
+    assert input_bytes == b""
+    assert timeout == 600
+    assert len(pass_fds) == 2
+
+
+def test_installed_bwrap_accepts_pinned_fd_mounts_without_close_fd(
+    tmp_path: Path,
+) -> None:
+    source = _private(tmp_path / "source")
+    work = _private(tmp_path / "work")
+    marker = source / "marker"
+    marker.write_bytes(b"exact")
+    marker.chmod(0o600)
+    flags = os.O_RDONLY | os.O_DIRECTORY | getattr(os, "O_CLOEXEC", 0)
+    source_fd = os.open(source, flags)
+    work_fd = os.open(work, flags)
+    command = [
+        "/usr/bin/bwrap",
+        "--unshare-all",
+        "--unshare-net",
+        "--die-with-parent",
+        "--new-session",
+        "--cap-drop",
+        "ALL",
+        "--clearenv",
+        "--ro-bind",
+        "/usr",
+        "/usr",
+        "--ro-bind",
+        "/lib",
+        "/lib",
+        "--ro-bind",
+        "/lib64",
+        "/lib64",
+        "--proc",
+        "/proc",
+        "--dev",
+        "/dev",
+        "--tmpfs",
+        "/tmp",
+        "--ro-bind-fd",
+        str(source_fd),
+        "/sealed",
+        "--bind-fd",
+        str(work_fd),
+        "/work",
+        "--",
+        "/usr/bin/test",
+        "-f",
+        "/sealed/marker",
+    ]
+    try:
+        completed = subprocess.run(  # noqa: S603
+            command,
+            check=False,
+            capture_output=True,
+            cwd=Path("/"),
+            env={"LANG": "C", "LC_ALL": "C"},
+            pass_fds=(source_fd, work_fd),
+            timeout=10,
+        )
+    finally:
+        os.close(work_fd)
+        os.close(source_fd)
+
+    assert completed.returncode == 0
+    assert completed.stdout == completed.stderr == b""
+
+
+def test_real_bwrap_hides_host_tools_cwd_tmp_and_network(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    tmp_path.chmod(0o700)
+    config = _fresh_config(tmp_path / "work")
+    copied_root = tmp_path / "copied-release"
+    binary_directory = _private(copied_root / "venv/bin")
+    shutil.copy2("/usr/bin/python3", binary_directory / "python")
+    (binary_directory / "python").chmod(0o500)
+    pyvenv = copied_root / "venv/pyvenv.cfg"
+    pyvenv.write_text(
+        "home = /usr/bin\ninclude-system-site-packages = false\n"
+        f"version = {sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}\n",
+        encoding="ascii",
+    )
+    pyvenv.chmod(0o400)
+    binary_directory.chmod(0o500)
+    (copied_root / "venv").chmod(0o500)
+    copied_root.chmod(0o500)
+    release = _capable_release(Path("/run/friday-rehearsal-test/source"), "c")
+    sealed = _sealed(release, copied_root)
+    monkeypatch.setattr(
+        release_operator,
+        "load_release_identity",
+        lambda *_args, **_kwargs: sealed.identity,
+    )
+    host_tmp = Path("/tmp") / f"friday-host-marker-{os.getpid()}"
+    host_tmp.write_bytes(b"host-only")
+    host_tmp.chmod(0o600)
+    script = r"""
+import json,os,pathlib,socket
+network_visible=True
+probe=socket.socket(socket.AF_INET,socket.SOCK_DGRAM)
+try:
+ probe.connect(('203.0.113.1',9))
+except OSError:
+ network_visible=False
+finally:
+ probe.close()
+print(json.dumps({'cwd':os.getcwd(),'host_cwd':pathlib.Path('/home/jericho/jericho/pyproject.toml').exists(),'host_tmp':pathlib.Path(__import__('sys').argv[1]).exists(),'network':network_visible,'path':os.environ.get('PATH'),'systemctl':pathlib.Path('/usr/bin/systemctl').exists()},sort_keys=True,separators=(',',':')))
+"""
+    try:
+        output = rehearsal._run_release_python(
+            sealed,
+            config,
+            script=script,
+            arguments=(str(host_tmp),),
+        )
+    finally:
+        host_tmp.unlink(missing_ok=True)
+
+    assert json.loads(output) == {
+        "cwd": str(config.friday_home),
+        "host_cwd": False,
+        "host_tmp": False,
+        "network": False,
+        "path": "/run/friday/no-executables",
+        "systemctl": False,
+    }
+
+
+def test_exact_release_mount_rejects_post_launch_path_replacement(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    tmp_path.chmod(0o700)
+    config = _fresh_config(tmp_path / "scratch")
+    release = _capable_release(tmp_path / "source-release", "c")
+    copied_root = tmp_path / "copied-release"
+    copied_root.mkdir(mode=0o500)
+    copied_root.chmod(0o500)
+    sealed = _sealed(release, copied_root)
+    displaced = tmp_path / "displaced-release"
+
+    def swap(command: list[str], **_kwargs: Any) -> subprocess.CompletedProcess[bytes]:
+        copied_root.rename(displaced)
+        copied_root.mkdir(mode=0o500)
+        copied_root.chmod(0o500)
+        return subprocess.CompletedProcess(command, 0, stdout=b"{}\n", stderr=b"")
+
+    monkeypatch.setattr(rehearsal, "_execute_bwrap", swap)
+    monkeypatch.setattr(
+        release_operator,
+        "load_release_identity",
+        lambda *_args, **_kwargs: sealed.identity,
+    )
+
+    with pytest.raises(
+        release_operator.ReleaseFailure,
+        match="^dr_rehearsal_mount_identity_changed$",
+    ):
+        rehearsal._run_release_python(
+            sealed,
+            config,
+            script="print('{}')",
+            arguments=(),
+        )
+
+    assert copied_root.is_dir()
+    assert displaced.is_dir()
+
+
+def test_release_copy_reauthenticates_source_after_copy(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    tmp_path.chmod(0o700)
+    source_root = _private(tmp_path / "source-release")
+    source_file = source_root / "sealed"
+    source_file.write_bytes(b"exact")
+    source_file.chmod(0o400)
+    source_root.chmod(0o500)
+    destination_parent = _private(tmp_path / "copies")
+    destination = destination_parent / "copy"
+    release = _capable_release(source_root, "c")
+    copied = release_operator.ReleaseIdentity(**{**vars(release), "root": destination})
+    changed = release_operator.ReleaseIdentity(**{**vars(release), "version": "0.207.85"})
+    source_calls = 0
+
+    def load(root: Path, **_kwargs: Any) -> release_operator.ReleaseIdentity:
+        nonlocal source_calls
+        if root == destination:
+            return copied
+        source_calls += 1
+        return release if source_calls == 1 else changed
+
+    monkeypatch.setattr(release_operator, "load_release_identity", load)
+
+    with pytest.raises(
+        rehearsal.DRGenerationRehearsalError,
+        match="^dr_rehearsal_release_copy_changed$",
+    ):
+        rehearsal._materialize_exact_release_copy(release, destination)
+
+    assert source_calls == 2
 
 
 @pytest.mark.parametrize("failure", ("stderr", "timeout", "wrong_receipt"))
@@ -437,14 +833,20 @@ def test_exact_release_store_open_fails_closed_without_stderr_body(
     tmp_path.chmod(0o700)
     config = _fresh_config(tmp_path / "scratch")
     release = _capable_release(tmp_path / "sealed-release", "c")
+    copied_root = tmp_path / "copied-release"
+    copied_root.mkdir(mode=0o500)
+    copied_root.chmod(0o500)
+    sealed = _sealed(release, copied_root)
 
     def run(command: list[str], **_kwargs: Any) -> subprocess.CompletedProcess[bytes]:
         if failure == "timeout":
-            raise subprocess.TimeoutExpired(command, 600, stderr=b"private-timeout-body")
+            raise release_operator.ReleaseFailure("dr_rehearsal_release_open_timeout")
         receipt = {
-            "fk": 0,
-            "integrity": "ok",
-            "schema": release.max_schema,
+            "inbox_fk": 0,
+            "inbox_integrity": "ok",
+            "main_fk": 0,
+            "main_integrity": "ok",
+            "main_schema": release.max_schema,
             "version": "tampered" if failure == "wrong_receipt" else release.version,
         }
         return subprocess.CompletedProcess(
@@ -454,17 +856,145 @@ def test_exact_release_store_open_fails_closed_without_stderr_body(
             stderr=b"private-stderr-body" if failure == "stderr" else b"",
         )
 
-    monkeypatch.setattr(subprocess, "run", run)
+    monkeypatch.setattr(rehearsal, "_execute_bwrap", run)
+    monkeypatch.setattr(release_operator, "load_release_identity", lambda *_args, **_kwargs: sealed.identity)
 
     with pytest.raises(release_operator.ReleaseFailure) as raised:
-        rehearsal._run_release_store(release, config)
+        rehearsal._run_release_store(sealed, config)
 
     assert "private" not in str(raised.value)
 
 
-def test_isolated_port_rejects_tampered_sealed_release_identity_before_open(
+def test_bwrap_timeout_kills_the_entire_process_group(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class TimedOutProcess:
+        pid = 74123
+        returncode = None
+
+        @staticmethod
+        def wait(*, timeout: int) -> int:
+            assert timeout == 5
+            return -9
+
+    process = TimedOutProcess()
+    popen_kwargs: list[dict[str, Any]] = []
+    signals: list[int] = []
+    monkeypatch.setattr(rehearsal, "_trusted_bwrap_identity", lambda: (1, 2, 3, 4))
+
+    def popen(*_args: Any, **kwargs: Any) -> TimedOutProcess:
+        popen_kwargs.append(kwargs)
+        return process
+
+    def killpg(pid: int, sent: int) -> None:
+        assert pid == process.pid
+        signals.append(sent)
+        if sent == 0:
+            raise ProcessLookupError
+
+    monkeypatch.setattr(subprocess, "Popen", popen)
+    monkeypatch.setattr(os, "killpg", killpg)
+
+    def timeout(*_args: Any, **_kwargs: Any) -> tuple[bytes, bytes]:
+        raise subprocess.TimeoutExpired(["/usr/bin/bwrap"], 1)
+
+    monkeypatch.setattr(rehearsal, "_bounded_communicate", timeout)
+
+    with pytest.raises(
+        release_operator.ReleaseFailure,
+        match="^dr_rehearsal_release_open_timeout$",
+    ):
+        rehearsal._execute_bwrap(
+            ["/usr/bin/bwrap"],
+            input_bytes=b"",
+            timeout=1,
+            pass_fds=(11, 12),
+        )
+
+    assert signals == [signal.SIGKILL, 0]
+    assert popen_kwargs == [
+        {
+            "cwd": Path("/"),
+            "env": {"LANG": "C", "LC_ALL": "C"},
+            "pass_fds": (11, 12),
+            "start_new_session": True,
+            "stderr": subprocess.PIPE,
+            "stdin": subprocess.PIPE,
+            "stdout": subprocess.PIPE,
+        }
+    ]
+
+
+def test_bwrap_refuses_a_surviving_descendant_process_group(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class SurvivingProcess:
+        pid = 74124
+        returncode = 0
+
+        @staticmethod
+        def wait(*, timeout: int) -> int:
+            assert timeout == 5
+            return -9
+
+    process = SurvivingProcess()
+    zero_probes = [True, False]
+    signals: list[int] = []
+    monkeypatch.setattr(rehearsal, "_trusted_bwrap_identity", lambda: (1, 2, 3, 4))
+    monkeypatch.setattr(subprocess, "Popen", lambda *_args, **_kwargs: process)
+    monkeypatch.setattr(
+        rehearsal,
+        "_bounded_communicate",
+        lambda *_args, **_kwargs: (b"ok\n", b""),
+    )
+
+    def killpg(pid: int, sent: int) -> None:
+        assert pid == process.pid
+        signals.append(sent)
+        if sent == 0 and not zero_probes.pop(0):
+            raise ProcessLookupError
+
+    monkeypatch.setattr(os, "killpg", killpg)
+
+    with pytest.raises(
+        release_operator.ReleaseFailure,
+        match="^dr_rehearsal_child_descendant_survived$",
+    ):
+        rehearsal._execute_bwrap(
+            ["/usr/bin/bwrap"],
+            input_bytes=b"",
+            timeout=1,
+        )
+
+    assert signals == [0, signal.SIGKILL, 0]
+
+
+def test_child_output_is_bounded_before_receipt_parsing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(rehearsal, "_trusted_bwrap_identity", lambda: (1, 2, 3, 4))
+
+    with pytest.raises(
+        release_operator.ReleaseFailure,
+        match="^dr_rehearsal_release_output_too_large$",
+    ):
+        rehearsal._execute_bwrap(
+            [
+                "/usr/bin/python3",
+                "-I",
+                "-c",
+                "import os;os.write(2,b'x'*40000)",
+            ],
+            input_bytes=b"",
+            timeout=10,
+        )
+
+
+@pytest.mark.parametrize("tampered_index", (0, 1, 2))
+def test_isolated_port_rejects_each_tampered_sealed_release_identity_before_open(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
+    tampered_index: int,
 ) -> None:
     tmp_path.chmod(0o700)
     config = _fresh_config(tmp_path / "scratch")
@@ -473,18 +1003,22 @@ def test_isolated_port_rejects_tampered_sealed_release_identity_before_open(
         _capable_release(tmp_path / "previous", "a"),
         _capable_release(tmp_path / "fallback", "f"),
     )
-    port = rehearsal._IsolatedActivationPort(config, releases=releases)
+    port = rehearsal._IsolatedActivationPort(
+        config,
+        releases=releases,
+        sealed_releases={release: _sealed(release) for release in releases},
+    )
     monkeypatch.setattr(
         release_operator,
         "load_release_identity",
-        lambda *_args, **_kwargs: releases[1],
+        lambda *_args, **_kwargs: releases[(tampered_index + 1) % len(releases)],
     )
 
     with pytest.raises(
         release_operator.ReleaseFailure,
         match="^dr_rehearsal_release_identity_changed$",
     ):
-        port.verify_release(releases[0])
+        port.verify_release(releases[tampered_index])
 
 
 def _authenticated_home(
@@ -637,26 +1171,115 @@ def test_controller_refuses_scratch_namespace_replacement_without_deleting_it(
     assert replacement and replacement[0].is_dir()
 
 
-def test_scratch_cleanup_requires_descriptor_safe_rmtree(
+def test_scratch_cleanup_requires_descriptor_safe_operations(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     tmp_path.chmod(0o700)
     monkeypatch.setattr(rehearsal, "_SCRATCH_PARENT", tmp_path)
-    scratch = rehearsal._new_scratch()
-    identity = rehearsal._scratch_identity(scratch)
-    monkeypatch.setattr(shutil.rmtree, "avoids_symlink_attacks", False)
+    scratch = rehearsal._new_scratch(
+        transaction_id="a" * 64,
+        candidate_sha256="b" * 64,
+    )
+    supported = os.supports_dir_fd
+    monkeypatch.setattr(os, "supports_dir_fd", supported - {os.unlink})
 
     with pytest.raises(
         rehearsal.DRGenerationRehearsalError,
         match="^dr_rehearsal_safe_cleanup_unavailable$",
     ):
-        rehearsal._remove_current_scratch(scratch, expected_identity=identity)
+        rehearsal._remove_current_scratch(scratch)
 
-    assert scratch.is_dir()
-    monkeypatch.setattr(shutil.rmtree, "avoids_symlink_attacks", True)
-    rehearsal._remove_current_scratch(scratch, expected_identity=identity)
-    assert not scratch.exists()
+    assert scratch.root.is_dir()
+    monkeypatch.setattr(os, "supports_dir_fd", supported)
+    rehearsal._remove_current_scratch(scratch)
+    assert not scratch.root.exists()
+
+
+def test_private_registry_symlink_is_refused_without_chmodding_external_target(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    tmp_path.chmod(0o700)
+    monkeypatch.setattr(rehearsal, "_SCRATCH_PARENT", tmp_path)
+    external = tmp_path / "external"
+    external.mkdir(mode=0o755)
+    external.chmod(0o755)
+    (tmp_path / rehearsal._SCRATCH_REGISTRY).symlink_to(external, target_is_directory=True)
+
+    with pytest.raises(
+        rehearsal.DRGenerationRehearsalError,
+        match="^dr_rehearsal_scratch_invalid$",
+    ):
+        rehearsal._new_scratch(
+            transaction_id="a" * 64,
+            candidate_sha256="b" * 64,
+        )
+
+    assert external.stat().st_mode & 0o777 == 0o755
+
+
+def test_exact_transaction_reclaims_only_its_durable_sigkill_scratch(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    tmp_path.chmod(0o700)
+    monkeypatch.setattr(rehearsal, "_SCRATCH_PARENT", tmp_path)
+    first = rehearsal._new_scratch(
+        transaction_id="a" * 64,
+        candidate_sha256="b" * 64,
+    )
+    marker = first.root / "sigkill-leftover"
+    marker.write_bytes(b"bounded")
+    marker.chmod(0o600)
+
+    second = rehearsal._new_scratch(
+        transaction_id="a" * 64,
+        candidate_sha256="b" * 64,
+    )
+
+    assert second.identity != first.identity
+    assert not (second.root / marker.name).exists()
+    rehearsal._remove_current_scratch(second)
+
+
+def test_cleanup_never_deletes_a_quarantine_path_replacement(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    tmp_path.chmod(0o700)
+    monkeypatch.setattr(rehearsal, "_SCRATCH_PARENT", tmp_path)
+    scratch = rehearsal._new_scratch(
+        transaction_id="a" * 64,
+        candidate_sha256="b" * 64,
+    )
+    payload = scratch.root / "payload"
+    payload.write_bytes(b"private")
+    payload.chmod(0o600)
+    original = rehearsal._empty_pinned_scratch_directory
+    replacement_marker = scratch.registry / "replacement-marker"
+
+    def swap_after_quarantine(directory_fd: int) -> None:
+        quarantine = scratch.registry / f".{scratch.root.name}.cleanup"
+        displaced = scratch.registry / f".{scratch.root.name}.displaced"
+        quarantine.rename(displaced)
+        quarantine.mkdir(mode=0o700)
+        replacement_marker.write_bytes(b"do-not-delete")
+        replacement_marker.chmod(0o600)
+        (quarantine / replacement_marker.name).write_bytes(replacement_marker.read_bytes())
+        (quarantine / replacement_marker.name).chmod(0o600)
+        original(directory_fd)
+
+    monkeypatch.setattr(rehearsal, "_empty_pinned_scratch_directory", swap_after_quarantine)
+
+    with pytest.raises(
+        rehearsal.DRGenerationRehearsalError,
+        match="^dr_rehearsal_scratch_cleanup_refused$",
+    ):
+        rehearsal._remove_current_scratch(scratch)
+
+    quarantine = scratch.registry / f".{scratch.root.name}.cleanup"
+    assert (quarantine / replacement_marker.name).read_bytes() == b"do-not-delete"
 
 
 def test_unrelated_sigkill_leftover_is_never_discovered_or_deleted(

@@ -13865,10 +13865,87 @@ def _fresh_engineer_target(config: SystemdConfig, relative: PurePosixPath) -> Pa
     raise ReleaseFailure("engineer_fresh_materialization_manifest_invalid")
 
 
+def _rebind_fresh_engineer_anchor(
+    config: SystemdConfig,
+    *,
+    manifest: Mapping[str, Any],
+) -> tuple[str, int]:
+    """Authenticate the copied lifecycle, then bind it to its new scratch inode."""
+
+    from friday.organs.engineer.command.contracts import CommandError
+    from friday.organs.engineer.command.store_lifecycle import CommandStoreLifecycle
+    from friday.organs.engineer.command_tools import _derive
+
+    entries = {str(item["path"]): item for item in manifest["entries"]}
+    database_item = entries.get("store/kernel.sqlite")
+    anchor_item = entries.get("state/engineer-command-store.anchor.json")
+    if database_item is None and anchor_item is None:
+        return "", 0
+    if not isinstance(database_item, dict) or not isinstance(anchor_item, dict):
+        raise ReleaseFailure("engineer_fresh_materialization_authority_invalid")
+    store, key_path, state = _engineer_artifact_paths(config)
+    database = store / "kernel.sqlite"
+    key = _private_regular_file(
+        key_path,
+        maximum_bytes=32,
+        code="engineer_fresh_materialization_authority_invalid",
+    ).read_bytes()
+    if len(key) != 32:
+        raise ReleaseFailure("engineer_fresh_materialization_authority_invalid")
+    lifecycle = CommandStoreLifecycle(
+        database_path=database,
+        state_dir=state,
+        mode="runtime",
+        key=_derive(key, b"store-lifecycle"),
+    )
+    verification = Path(tempfile.mkdtemp(prefix=".engineer-fresh-verify-", dir=config.backup_dir))
+    os.chmod(verification, 0o700)
+    try:
+        verification_database = verification / "kernel.sqlite"
+        _copy_private(database, verification_database, allow_contained_mode=True)
+        if "store/kernel.sqlite-wal" in entries:
+            _copy_private(
+                Path(f"{database}-wal"),
+                Path(f"{verification_database}-wal"),
+                allow_contained_mode=True,
+            )
+        _sqlite_integrity(verification_database, require_schema=False)
+        # The verification copy consumes any valid WAL without mutating the
+        # exact materialized files whose identity is about to be rebound.
+        connection = sqlite3.connect(
+            f"{verification_database.resolve(strict=True).as_uri()}?mode=ro",
+            uri=True,
+        )
+        connection.row_factory = sqlite3.Row
+        try:
+            lifecycle._validate_meta_schema(connection)  # noqa: SLF001
+            store_id, sequence = lifecycle._validated_meta(lifecycle._meta_row(connection))  # noqa: SLF001
+        finally:
+            connection.close()
+        lifecycle._store_id = store_id  # noqa: SLF001
+        lifecycle._authority_sequence = sequence  # noqa: SLF001
+        lifecycle._database_device = int(database_item["device"])  # noqa: SLF001
+        lifecycle._database_inode = int(database_item["inode"])  # noqa: SLF001
+        lifecycle._validate_anchor(sequence)  # noqa: SLF001
+        status = os.stat(database, follow_symlinks=False)
+        lifecycle._database_device = int(status.st_dev)  # noqa: SLF001
+        lifecycle._database_inode = int(status.st_ino)  # noqa: SLF001
+        lifecycle._write_anchor(sequence)  # noqa: SLF001
+        lifecycle._validate_anchor(sequence)  # noqa: SLF001
+    except (CommandError, KeyError, OSError, sqlite3.Error, ValueError) as exc:
+        raise ReleaseFailure("engineer_fresh_materialization_authority_invalid") from exc
+    finally:
+        for child in verification.iterdir():
+            child.unlink(missing_ok=True)
+        verification.rmdir()
+    anchor = _private_engineer_backup_file(state / "engineer-command-store.anchor.json")
+    return _sha256_file(anchor), int(anchor.stat().st_size)
+
+
 def _materialize_exact_engineer_backup_fresh(
     config: SystemdConfig,
     payload: _ExactBackupPayload,
-) -> str:
+) -> bool:
     """Copy Engineer artifacts only into a provably absent private contour.
 
     The production restore path above preserves the manifest-bound identity of
@@ -13880,8 +13957,15 @@ def _materialize_exact_engineer_backup_fresh(
 
     descriptor = payload.engineer
     if descriptor is None:
-        return "0" * 64
-    manifest = _verify_engineer_backup(payload.directory, descriptor)
+        return False
+    # Authentication of a production backup is observation-only.  SQLite
+    # integrity is exercised after the exact files have been copied into the
+    # rehearsal contour; never create verification scratch beside the source.
+    manifest = _verify_engineer_backup(
+        payload.directory,
+        descriptor,
+        verify_sqlite_integrity=False,
+    )
     store, key, state = _engineer_artifact_paths(config)
     data = _private_directory(store.parent, create=True)
     state = _private_directory(state, create=True)
@@ -13940,6 +14024,10 @@ def _materialize_exact_engineer_backup_fresh(
         _fsync_tree(store)
     _fsync_directory(data)
     _fsync_directory(state)
+    rebound_anchor_sha256, rebound_anchor_size = _rebind_fresh_engineer_anchor(
+        config,
+        manifest=manifest,
+    )
     observed = _scan_engineer_artifacts(config, destination=None)
     expected = {key: value for key, value in manifest.items() if key != "engineer_command_ledger_authority"}
     expected_entries = [dict(item) for item in expected["entries"]]
@@ -13951,19 +14039,15 @@ def _materialize_exact_engineer_backup_fresh(
                 raise ReleaseFailure("engineer_fresh_materialization_mismatch")
             item["device"] = assigned.get("device")
             item["inode"] = assigned.get("inode")
+        elif item["path"] == "state/engineer-command-store.anchor.json" and rebound_anchor_sha256:
+            expected["total_bytes"] += rebound_anchor_size - int(item["size"])
+            item["sha256"] = rebound_anchor_sha256
+            item["size"] = rebound_anchor_size
     expected["entries"] = expected_entries
     if observed != expected:
         raise ReleaseFailure("engineer_fresh_materialization_mismatch")
     assigned_database = observed_by_path.get("store/kernel.sqlite")
-    assigned_identity = (
-        {
-            "device": assigned_database["device"],
-            "inode": assigned_database["inode"],
-        }
-        if isinstance(assigned_database, dict)
-        else {"absent": True}
-    )
-    return _sha256_bytes(_canonical_json(assigned_identity))
+    return isinstance(assigned_database, dict) and bool(rebound_anchor_sha256)
 
 
 def _verify_fresh_sqlite_materialization(
@@ -14063,15 +14147,27 @@ def materialize_exact_backup_into_fresh_contour(
     if not {"database.sqlite3", "inbox.sqlite3"}.issubset(declared):
         raise ReleaseFailure("fresh_materialization_backup_identity_invalid")
     for name, (digest, size) in declared.items():
-        source = _private_regular_file(
-            payload.directory / name,
-            maximum_bytes=1 << 40,
-            code="fresh_materialization_source_changed",
+        source = (
+            _private_regular_file_allow_empty(
+                payload.directory / name,
+                maximum_bytes=1 << 40,
+                code="fresh_materialization_source_changed",
+            )
+            if size == 0
+            else _private_regular_file(
+                payload.directory / name,
+                maximum_bytes=1 << 40,
+                code="fresh_materialization_source_changed",
+            )
         )
         if source.stat().st_size != size or _sha256_file(source) != digest:
             raise ReleaseFailure("fresh_materialization_source_changed")
     _verify_obsidian_backup(payload.directory, payload.obsidian)
-    _verify_engineer_backup(payload.directory, payload.engineer)
+    _verify_engineer_backup(
+        payload.directory,
+        payload.engineer,
+        verify_sqlite_integrity=False,
+    )
 
     for label, destination in (("database", config.database), ("inbox", config.inbox_database)):
         parent = _private_directory(destination.parent, create=True)
@@ -14093,7 +14189,11 @@ def materialize_exact_backup_into_fresh_contour(
     _restore_exact_obsidian_backup(config, payload)
     engineer_identity = _materialize_exact_engineer_backup_fresh(config, payload)
     _verify_obsidian_backup(payload.directory, payload.obsidian)
-    _verify_engineer_backup(payload.directory, payload.engineer)
+    _verify_engineer_backup(
+        payload.directory,
+        payload.engineer,
+        verify_sqlite_integrity=False,
+    )
     _verify_fresh_sqlite_materialization(
         config,
         declared,
@@ -14105,7 +14205,7 @@ def materialize_exact_backup_into_fresh_contour(
         inbox_receipt_sha256=backup.inbox_receipt_sha256,
         obsidian_receipt_sha256=backup.obsidian_receipt_sha256,
         engineer_receipt_sha256=backup.engineer_receipt_sha256,
-        engineer_fresh_identity_assigned=engineer_identity != "0" * 64,
+        engineer_fresh_identity_assigned=engineer_identity,
     )
 
 
@@ -14121,10 +14221,18 @@ def _restore_exact_sqlite_backup(
         raise ReleaseFailure("backup_restore_identity_invalid")
     declared = {name: (digest, size) for name, digest, size in payload.files}
     for name, (digest, size) in declared.items():
-        source = _private_regular_file(
-            payload.directory / name,
-            maximum_bytes=1 << 40,
-            code="backup_restore_source_changed",
+        source = (
+            _private_regular_file_allow_empty(
+                payload.directory / name,
+                maximum_bytes=1 << 40,
+                code="backup_restore_source_changed",
+            )
+            if size == 0
+            else _private_regular_file(
+                payload.directory / name,
+                maximum_bytes=1 << 40,
+                code="backup_restore_source_changed",
+            )
         )
         if source.stat().st_size != size or _sha256_file(source) != digest:
             raise ReleaseFailure("backup_restore_source_changed")
